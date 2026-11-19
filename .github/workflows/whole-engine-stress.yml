@@ -50,7 +50,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Syntax-check runner and tests
-        run: python3 -m py_compile tests/stress/run.py tests/stress/test_run.py tests/stress/diagnose.py tests/stress/test_diagnose.py tests/stress/scale_sweep.py tests/stress/test_scale_sweep.py tests/stress/test_registry.py
+        run: python3 -m py_compile tests/stress/run.py tests/stress/test_run.py tests/stress/diagnose.py tests/stress/test_diagnose.py tests/stress/scale_sweep.py tests/stress/test_scale_sweep.py tests/stress/sweep.py tests/stress/test_sweep.py tests/stress/test_registry.py
       - name: Run harness unit tests
         run: python3 -m unittest discover -s tests/stress -p 'test_*.py' -v
 
@@ -128,6 +128,18 @@ jobs:
           else
             python3 tests/stress/scale_sweep.py --godot "$BIN" --render-mode headless --case all --scales 1,2,4 --frames 30 --repeats 2 --output whole-engine-scale-sweep.json --summary-md whole-engine-scale-sweep.md
           fi
+      - name: Rank nonlinear CPU/RSS scaling, frame spikes and jitter
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.sweep)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          CASES=object_churn,script_vm,memory_churn,astar_3d,ui_layout,resource_io,physics_3d
+          if [[ "$RENDER_MODE" == "display" ]]; then
+            xvfb-run -a python3 tests/stress/sweep.py --godot "$BIN" --render-mode display --case "$CASES,render_2d,render_3d" --scales 1,2,4 --repeats 3 --frames 60 --output whole-engine-sweep.json
+          else
+            python3 tests/stress/sweep.py --godot "$BIN" --render-mode headless --case "$CASES" --scales 1,2,4 --repeats 3 --frames 60 --output whole-engine-sweep.json
+          fi
       - name: Archive per-scenario performance and failure reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -139,6 +151,9 @@ jobs:
             whole-engine-bottlenecks.md
             whole-engine-native-tests.log
             whole-engine-import.json
+            whole-engine-sweep.json
+            whole-engine-sweep.md
+            whole-engine-sweep-scale-*.json
             whole-engine-scale-sweep.json
             whole-engine-scale-sweep.md
           if-no-files-found: warn

@@ -10,7 +10,7 @@ const CASES := [
 	"containers", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream",
 	"file_io", "threads", "physics_2d", "physics_3d",
-	"memory_churn", "astar_grid", "astar_graph", "tweens", "audio_buffers",
+	"object_churn", "memory_churn", "astar_grid", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
 	"resource_load",
 	"input_map",
@@ -71,6 +71,8 @@ func _execute() -> void:
 
 func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Dictionary:
 	match test_case:
+		"object_churn":
+			return _object_churn(scale)
 		"containers":
 			var length := 20000 * scale
 			var array: Array[int] = []
@@ -953,3 +955,17 @@ func _astar_graph(scale: int) -> Dictionary:
 			return {"error": "AStar graph path mismatch"}
 		checksum += path.size()
 	return {"vertices": WIDTH * WIDTH, "searches": 40 * scale, "checksum": checksum}
+
+
+# Distinct from PackedByteArray memory_churn: stresses RefCounted lifecycle,
+# reference tracking and allocator reuse over many create/free cycles.
+func _object_churn(scale: int) -> Dictionary:
+	var checksum := 0
+	var cycles := 8
+	for cycle in range(cycles):
+		var objects: Array[RefCounted] = []
+		for i in range(3000 * scale):
+			objects.append(RefCounted.new())
+		checksum += objects.size()
+		objects.clear()
+	return {"objects_created": cycles * 3000 * scale, "checksum": checksum}

@@ -61,6 +61,27 @@ Run `--list-cases` for supported identifiers.
 | Input / scene groups | `input_dispatch`, `group_calls` | Dispatch input actions and bulk group method calls |
 | Image codec | `image_codec` | Repeated PNG encode/decode and size validation |
 
+## Advanced offline bottleneck ranking
+
+In addition to `scale_sweep.py`, `sweep.py` ranks nonlinear CPU/RSS growth,
+frame spikes, high inter-run variance and crashes. It produces per-stage raw
+JSON, aggregate JSON and a Markdown summary. Supports offline re-analysis:
+
+```bash
+python3 tests/stress/sweep.py --godot /path/to/godot --scales 1,2,4,8 \
+  --repeats 3 --output out/advanced-sweep.json
+python3 tests/stress/sweep.py --reports out/advanced-sweep-scale-1.json \
+  out/advanced-sweep-scale-2.json out/advanced-sweep-scale-4.json \
+  out/advanced-sweep-scale-8.json --output out/offline.json
+```
+
+`--case` accepts comma-separated scenario names; `--fail-on-bottleneck`
+makes heuristic findings fail CI. Comparisons reject differing build paths,
+host metadata, render modes and frame/seed settings. Investigate warnings
+with a profiler: process-frame timings are not GPU frame times and sampled
+RSS alone cannot prove a memory leak. `object_churn` specifically exercises
+RefCounted allocation and lifetime separate from byte-array churn.
+
 ## Presets and safety
 
 | Preset | Scale | Physics/render frames | Repeats per case | Per-process timeout | RSS cap |
