@@ -6,7 +6,28 @@ const Defs = preload("res://scripts/shared/defs.gd")
 var health: float = Defs.MAX_HEALTH
 var hunger: float = 100.0 # 100 is full.
 var thirst: float = 100.0
+var stamina: float = Defs.MAX_STAMINA
+var stamina_recovery_delay: float = 0.0
 var alive: bool = true
+
+
+## The same eligibility math runs on the server and client prediction.
+static func can_sprint_with(value: float, hunger_value: float, thirst_value: float, seconds: float) -> bool:
+	if not (is_finite(value) and is_finite(hunger_value) and is_finite(thirst_value) and is_finite(seconds)):
+		return false
+	if seconds <= 0.0 or seconds > 0.1:
+		return false
+	if hunger_value <= 5.0 or thirst_value <= 5.0:
+		return false
+	return value + 0.00001 >= Defs.SPRINT_STAMINA_PER_SECOND * seconds
+
+
+func try_sprint(seconds: float) -> bool:
+	if not alive or not can_sprint_with(stamina, hunger, thirst, seconds):
+		return false
+	stamina = maxf(0.0, stamina - Defs.SPRINT_STAMINA_PER_SECOND * seconds)
+	stamina_recovery_delay = Defs.STAMINA_RECOVERY_DELAY
+	return true
 
 
 ## Advances the clock. Returns the damage taken from hunger or thirst this step.
@@ -15,6 +36,11 @@ func tick(delta: float) -> float:
 		return 0.0
 	hunger = maxf(hunger - Defs.HUNGER_PER_SECOND * delta, 0.0)
 	thirst = maxf(thirst - Defs.THIRST_PER_SECOND * delta, 0.0)
+	var resting := maxf(delta - stamina_recovery_delay, 0.0)
+	stamina_recovery_delay = maxf(0.0, stamina_recovery_delay - delta)
+	if resting > 0.0:
+		var nourishment := 0.5 if hunger <= 20.0 or thirst <= 20.0 else 1.0
+		stamina = minf(Defs.MAX_STAMINA, stamina + Defs.STAMINA_REGEN_PER_SECOND * resting * nourishment)
 	var damage := 0.0
 	if hunger <= 0.0:
 		damage += Defs.STARVE_DAMAGE_PER_SECOND * delta
@@ -57,8 +83,10 @@ func reset() -> void:
 	health = Defs.MAX_HEALTH
 	hunger = 80.0
 	thirst = 80.0
+	stamina = Defs.MAX_STAMINA
+	stamina_recovery_delay = 0.0
 	alive = true
 
 
 func to_dict() -> Dictionary:
-	return {"health": health, "hunger": hunger, "thirst": thirst, "alive": alive}
+	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "alive": alive}

@@ -6,6 +6,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
+const Survival = preload("res://scripts/shared/survival.gd")
 
 signal snapshot_received
 signal event_received(event: Dictionary)
@@ -29,6 +30,7 @@ var last_results: Dictionary = {} # command kind -> last result
 
 # Client side prediction.
 var predicted: Vector3
+var predicted_stamina: float = Defs.MAX_STAMINA
 var _seq: int = 0
 var _pending: Array = [] # {seq, input, dt}
 var correction: Vector3 = Vector3.ZERO # Visual offset that decays, so corrections do not snap.
@@ -47,6 +49,7 @@ func on_welcome(world_seed: int, _tick_rate: int) -> void:
 	world = WorldGen.new(world_seed)
 	welcomed = true
 	peer_id = net.multiplayer.get_unique_id()
+	predicted_stamina = Defs.MAX_STAMINA
 
 
 func on_result(kind: String, data: Dictionary) -> void:
@@ -94,14 +97,26 @@ func _reconcile(snapshot: Dictionary) -> void:
 	var authoritative := Vector3(you["x"], you["y"], you["z"])
 	if _pending.is_empty() and _seq == 0:
 		predicted = authoritative
+		predicted_stamina = float(you.get("stamina", Defs.MAX_STAMINA))
 		return
 	var ack: int = int(snapshot["ack"])
 	while not _pending.is_empty() and int(_pending[0]["seq"]) <= ack:
 		_pending.pop_front()
-	# Start from the server's position and replay the inputs it has not seen yet.
+	# Replay pending inputs with the last acknowledged stamina value.
 	var replayed := authoritative
+	var energy := float(you.get("stamina", Defs.MAX_STAMINA))
 	for entry in _pending:
-		replayed = Movement.step(world, replayed, entry["input"], float(entry["dt"]))
+		var replay_input: Dictionary = entry["input"].duplicate()
+		var duration: float = float(entry["dt"])
+		var moving := Vector2(float(replay_input["x"]), float(replay_input["z"])).length_squared() > 0.00001
+		var running := bool(replay_input["sprint"]) and moving and float(replay_input["cargo_factor"]) >= 0.9999
+		running = running and Survival.can_sprint_with(energy, float(you.get("hunger", 100.0)),
+				float(you.get("thirst", 100.0)), duration)
+		replay_input["sprint"] = running
+		if running:
+			energy = maxf(0.0, energy - Defs.SPRINT_STAMINA_PER_SECOND * duration)
+		replayed = Movement.step(world, replayed, replay_input, duration)
+	predicted_stamina = energy
 	var error := replayed.distance_to(predicted)
 	worst_error = maxf(worst_error, error)
 	if error > 0.001:
@@ -120,11 +135,16 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float) -> v
 	_seq += 1
 	yaw = face_yaw
 	# Prediction uses the same weight calculation as the authoritative server.
-	var input := {
-		"x": move.x, "z": move.y, "sprint": sprint,
-		"cargo_factor": inventory.movement_factor(),
-	}
+	var factor: float = inventory.movement_factor()
+	var running := sprint and move.length_squared() > 0.00001 and factor >= 0.9999
+	running = running and Survival.can_sprint_with(predicted_stamina,
+			float(you.get("hunger", 100.0)), float(you.get("thirst", 100.0)), delta)
+	var input := {"x": move.x, "z": move.y, "sprint": running, "cargo_factor": factor}
 	predicted = Movement.step(world, predicted, input, delta)
+	if running:
+		predicted_stamina = maxf(0.0, predicted_stamina - Defs.SPRINT_STAMINA_PER_SECOND * delta)
+	# Pending replay needs the original request, not the previous prediction.
+	input["sprint"] = sprint
 	_pending.append({"seq": _seq, "input": input, "dt": delta})
 	if _pending.size() > 120:
 		_pending.pop_front()

@@ -97,6 +97,7 @@ func character_data(player: Player) -> Dictionary:
 	return {
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
+		"stamina": player.survival.stamina,
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
@@ -130,6 +131,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("thirst", 80.0), 0.0, 100.0):
 		return false
+	if not SaveValidation.finite_number(data.get("stamina", Defs.MAX_STAMINA), 0.0, Defs.MAX_STAMINA):
+		return false
 	if not SaveValidation.valid_counter(data.get("kills", 0)):
 		return false
 	if not SaveValidation.valid_counter(data.get("deaths", 0)):
@@ -141,6 +144,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	survival.health = clampf(float(data.get("health", 100.0)), 1.0, Defs.MAX_HEALTH)
 	survival.hunger = float(data.get("hunger", 80.0))
 	survival.thirst = float(data.get("thirst", 80.0))
+	# Legacy v1 characters without stamina are restored fully rested.
+	survival.stamina = float(data.get("stamina", Defs.MAX_STAMINA))
 	var x: Variant = data.get("x", 0.0)
 	var z: Variant = data.get("z", 0.0)
 	# Invalid old logout coordinates can still safely fall back to the hub.
@@ -229,13 +234,16 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 	player.input_budget -= allowed
 	player.yaw = yaw
 	if allowed > 0.0:
-		# No client-supplied cargo_factor or sound radius: the server owns both.
+		# No client-supplied cargo, stamina or sound radius: server owns all three.
 		var before_move: Vector3 = player.position
+		var factor: float = player.inventory.movement_factor()
+		var moving := move_x * move_x + move_z * move_z > 0.00001
+		var sprint_allowed := sprint and moving and factor >= 0.9999 and player.survival.try_sprint(allowed)
 		player.position = Movement.step(world, player.position, {
-			"x": move_x, "z": move_z, "sprint": sprint,
-			"cargo_factor": player.inventory.movement_factor(),
+			"x": move_x, "z": move_z, "sprint": sprint_allowed,
+			"cargo_factor": factor,
 		}, allowed)
-		if sprint and player.position.distance_to(before_move) > 0.01:
+		if sprint_allowed and player.position.distance_to(before_move) > 0.01:
 			player.noise_radius = maxf(player.noise_radius, Defs.SPRINT_NOISE_RADIUS)
 			player.noise_timer = maxf(player.noise_timer, Defs.SPRINT_NOISE_SECONDS)
 		# Walking away cancels gathering.
@@ -758,6 +766,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"you": {
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
+			"stamina": player.survival.stamina,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"action": player.action.duplicate(),
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,

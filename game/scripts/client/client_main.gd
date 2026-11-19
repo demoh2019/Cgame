@@ -368,8 +368,8 @@ func _update_hud() -> void:
 	for slot in survivor.inventory.slots:
 		if not slot.is_empty():
 			rows.append("%s:%d" % [str(slot["id"]), int(slot["count"])])
-	_stats.text = "ALBION AFTER | LOCAL SURVIVAL PREVIEW\nHP %d  HUNGER %d  THIRST %d  KILLS %d\nZONE %s (T%d)  POS %d,%d  ZOMBIES %d\nINVENTORY %s" % [
-		int(vitals.health), int(vitals.hunger), int(vitals.thirst), survivor.kills,
+	_stats.text = "ALBION AFTER | LOCAL SURVIVAL PREVIEW\nHP %d  HUNGER %d  THIRST %d  STAMINA %d  KILLS %d\nZONE %s (T%d)  POS %d,%d  ZOMBIES %d\nINVENTORY %s" % [
+		int(vitals.health), int(vitals.hunger), int(vitals.thirst), int(vitals.stamina), survivor.kills,
 		Defs.ZONE_NAMES[zone], WorldGen.tier_for_zone(zone), int(position.x), int(position.z),
 		sim.zombies.size(), ", ".join(rows)
 	]

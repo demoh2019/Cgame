@@ -22,6 +22,11 @@ const REACH := 2.6 # Gathering / looting distance.
 const MELEE_RANGE := 2.2
 const PISTOL_RANGE := 40.0
 const MAX_HEALTH := 100.0
+# Sprint exhaustion is a server-owned survival mechanic.
+const MAX_STAMINA := 100.0
+const SPRINT_STAMINA_PER_SECOND := 18.0
+const STAMINA_REGEN_PER_SECOND := 11.0
+const STAMINA_RECOVERY_DELAY := 0.8
 const HUNGER_PER_SECOND := 0.045
 const THIRST_PER_SECOND := 0.07
 const STARVE_DAMAGE_PER_SECOND := 1.2

@@ -30,6 +30,17 @@ Tab choose recipe, C craft, 1 food, 2 water, 3 bandage,
 The workbench is near world coordinates x=9, z=0. Leave the safe hub
 to collect resources; higher-tier nodes require higher-tier tools.
 
+## Sprint stamina
+
+Survivors have 100 stamina. Sprinting with a light-enough backpack consumes
+18 stamina per second. After 0.8 seconds of rest, stamina regenerates at
+11 points per second. Hunger or thirst at 20 or below halves recovery;
+critical hunger or thirst (5 or less) blocks sprint. The dedicated server
+deducts stamina only from accepted movement time and includes the result in
+snapshots; client prediction uses the same rule, then reconciles to the server.
+Stamina survives account logouts, defaults to full in legacy v1 saves and
+is restored on respawn. Existing Cgame script APIs suffice.
+
 ## Dedicated server and tests
 
 ```bash
