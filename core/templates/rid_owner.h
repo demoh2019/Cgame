@@ -376,10 +376,20 @@ public:
 		if constexpr (THREAD_SAFE) {
 			mutex.lock();
 		}
-		for (size_t i = 0; i < max_alloc; i++) {
-			uint64_t validator = chunks[i / elements_in_chunk][i % elements_in_chunk].validator;
-			if (validator != 0xFFFFFFFF) {
-				owned.push_back(_make_from_id((validator << 32) | i));
+		// The live RID count is known, so avoid repeated growth and over-allocation.
+		owned.reserve(alloc_count);
+		// Iterate contiguous chunks rather than dividing and taking the remainder
+		// for every slot (elements_in_chunk need not be a power of two).
+		const uint32_t chunk_count = max_alloc / elements_in_chunk;
+		for (uint32_t chunk_index = 0; chunk_index < chunk_count; chunk_index++) {
+			const Chunk *chunk = chunks[chunk_index];
+			const uint32_t base_index = chunk_index * elements_in_chunk;
+			for (uint32_t element_index = 0; element_index < elements_in_chunk; element_index++) {
+				const uint32_t validator = chunk[element_index].validator;
+				if (validator != 0xFFFFFFFF) {
+					const uint32_t index = base_index + element_index;
+					owned.push_back(_make_from_id((uint64_t(validator) << 32) | index));
+				}
 			}
 		}
 		if constexpr (THREAD_SAFE) {
@@ -393,12 +403,17 @@ public:
 		if constexpr (THREAD_SAFE) {
 			mutex.lock();
 		}
-		uint32_t idx = 0;
-		for (size_t i = 0; i < max_alloc; i++) {
-			uint64_t validator = chunks[i / elements_in_chunk][i % elements_in_chunk].validator;
-			if (validator != 0xFFFFFFFF) {
-				p_rid_buffer[idx] = _make_from_id((validator << 32) | i);
-				idx++;
+		uint32_t output_index = 0;
+		const uint32_t chunk_count = max_alloc / elements_in_chunk;
+		for (uint32_t chunk_index = 0; chunk_index < chunk_count; chunk_index++) {
+			const Chunk *chunk = chunks[chunk_index];
+			const uint32_t base_index = chunk_index * elements_in_chunk;
+			for (uint32_t element_index = 0; element_index < elements_in_chunk; element_index++) {
+				const uint32_t validator = chunk[element_index].validator;
+				if (validator != 0xFFFFFFFF) {
+					const uint32_t index = base_index + element_index;
+					p_rid_buffer[output_index++] = _make_from_id((uint64_t(validator) << 32) | index);
+				}
 			}
 		}
 
