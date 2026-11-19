@@ -6,7 +6,7 @@ extends RefCounted
 const PARALLEL_SETTING := "physics/2d/solver/parallel_large_islands"
 
 
-func run(tree: SceneTree, scale: int, frames: int, parallel: bool, large_islands: int = 1, small_island_bodies: int = 0) -> Dictionary:
+func run(tree: SceneTree, scale: int, frames: int, parallel: bool, large_islands: int = 1, small_island_bodies: int = 0, mutate_topology: bool = false) -> Dictionary:
 	var original_setting: Variant = ProjectSettings.get_setting(PARALLEL_SETTING, false)
 	ProjectSettings.set_setting(PARALLEL_SETTING, parallel)
 	# The setting is captured by GodotSpace2D at creation time.
@@ -69,7 +69,23 @@ func run(tree: SceneTree, scale: int, frames: int, parallel: bool, large_islands
 	var frame_intervals: Array[float] = []
 	var previous_tick: int = Time.get_ticks_usec()
 	var valid: bool = true
+	var topology_changes: int = 0
 	for frame in range(frames):
+		# Rebind an existing joint without replacing its RID. A new endpoint
+		# invalidates any cached color ownership; later restore the old edge.
+		# Both configurations remain one connected physical island.
+		if mutate_topology and frame == int(frames / 3):
+			var middle: int = int(large_chain_size / 2)
+			PhysicsServer2D.joint_make_pin(joints[middle - 1],
+					Vector2(float(middle - 1) * spacing, 0.0),
+					bodies[middle - 2], bodies[middle])
+			topology_changes += 1
+		elif mutate_topology and frame == int(frames * 2 / 3):
+			var middle: int = int(large_chain_size / 2)
+			PhysicsServer2D.joint_make_pin(joints[middle - 1],
+					Vector2((float(middle) - 0.5) * spacing, 0.0),
+					bodies[middle - 1], bodies[middle])
+			topology_changes += 1
 		await tree.physics_frame
 		var now: int = Time.get_ticks_usec()
 		frame_intervals.append(float(now - previous_tick) / 1000.0)
@@ -122,6 +138,7 @@ func run(tree: SceneTree, scale: int, frames: int, parallel: bool, large_islands
 		"large_islands": clampi(large_islands, 1, 4),
 		"small_island_bodies": clampi(small_island_bodies, 0, 128),
 		"parallel_large_islands": parallel,
+		"topology_changes": topology_changes,
 		"frames": frames,
 		"creation_ms": creation_ms,
 		"peak_physics_ms": peak_physics_ms,
