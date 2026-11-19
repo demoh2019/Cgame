@@ -6,6 +6,8 @@ on:
     paths:
       - 'tests/stress/**'
       - 'modules/godot_physics_2d/godot_step_2d.cpp'
+      - 'modules/godot_physics_3d/godot_step_3d.cpp'
+      - 'modules/godot_physics_3d/godot_step_3d.h'
       - 'modules/jolt_physics/spaces/jolt_space_3d.cpp'
       - 'modules/jolt_physics/spaces/jolt_space_3d.h'
       - 'modules/jolt_physics/jolt_project_settings.cpp'
@@ -16,6 +18,8 @@ on:
     paths:
       - 'tests/stress/**'
       - 'modules/godot_physics_2d/godot_step_2d.cpp'
+      - 'modules/godot_physics_3d/godot_step_3d.cpp'
+      - 'modules/godot_physics_3d/godot_step_3d.h'
       - 'modules/jolt_physics/spaces/jolt_space_3d.cpp'
       - 'modules/jolt_physics/spaces/jolt_space_3d.h'
       - 'modules/jolt_physics/jolt_project_settings.cpp'
@@ -100,6 +104,20 @@ jobs:
           set -euo pipefail
           timeout 180s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_pending_reuse_stress.gd | tee physics-pending-reuse.log
           grep -q '^PHYSICS_PENDING_REUSE_RESULT:' physics-pending-reuse.log
+      - name: Verify native GodotPhysics3D large-island coloring
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Explicit backend selection: Jolt is the fork's default backend.
+          PROJECT="$RUNNER_TEMP/cgame-godotphysics3d-test"
+          mkdir -p "$PROJECT"
+          cp -a tests/stress/. "$PROJECT/"
+          printf '\n[physics]\n3d/physics_engine="GodotPhysics3D"\n' >> "$PROJECT/project.godot"
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path "$PROJECT" \
+            --script res://physics_large_island_3d_regression.gd \
+            2>&1 | tee physics3d-colored-islands.log
+          grep -Fq '3D large island regression passed.' physics3d-colored-islands.log
       - name: Save physics smoke results
         if: always()
         uses: actions/upload-artifact@v4
@@ -109,6 +127,7 @@ jobs:
             physics-native-smoke.json
             physics-native-smoke.md
             physics-pending-reuse.log
+            physics3d-colored-islands.log
           if-no-files-found: warn
           retention-days: 30
 
