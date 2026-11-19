@@ -1482,6 +1482,14 @@ GodotSpace3D::GodotSpace3D() {
 	fluid_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_angular_drag"));
 	fluid_buoyancy = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_buoyancy"));
 	fluid_flow_velocity = GLOBAL_GET("physics/3d/solver/fluid_flow_velocity");
+	const real_t configured_box_pressure = GLOBAL_GET("physics/3d/solver/rigid_box_aero_pressure_coefficient");
+	rigid_box_aero_pressure_coefficient = Math::is_finite(configured_box_pressure) ? CLAMP(configured_box_pressure, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_box_skin = GLOBAL_GET("physics/3d/solver/rigid_box_aero_skin_coefficient");
+	rigid_box_aero_skin_coefficient = Math::is_finite(configured_box_skin) ? CLAMP(configured_box_skin, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_box_density = GLOBAL_GET("physics/3d/solver/rigid_box_aero_density");
+	rigid_box_aero_density = Math::is_finite(configured_box_density) ? CLAMP(configured_box_density, real_t(0.0), real_t(2000.0)) : real_t(1.225);
+	const Vector3 configured_box_wind = GLOBAL_GET("physics/3d/solver/rigid_box_aero_wind_velocity");
+	rigid_box_aero_wind_velocity = configured_box_wind.is_finite() ? configured_box_wind : Vector3();
 	fluid_plane_enabled = GLOBAL_GET("physics/3d/fluid_plane/enabled");
 	fluid_plane_surface_height = GLOBAL_GET("physics/3d/fluid_plane/surface_height");
 	fluid_plane_density = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/density"));
