@@ -599,23 +599,30 @@ GodotPhysicsDirectSpaceState3D::GodotPhysicsDirectSpaceState3D() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-int GodotSpace3D::_cull_aabb_for_body(GodotBody3D *p_body, const AABB &p_aabb) {
+int GodotSpace3D::_cull_aabb_for_body(GodotBody3D *p_body, const AABB &p_aabb, const PS3DT::MotionParameters &p_parameters) {
 	// Jolt-style early filtering: unrelated areas, soft bodies and collision
 	// exceptions must not consume the fixed-size motion candidate buffer.
 	// In dense worlds, filtering only AFTER cull_aabb() could discard the
 	// first 2048 results and miss a valid obstacle later in the BVH.
 	struct MotionCullData {
 		GodotBody3D *body;
+		const PS3DT::MotionParameters &params;
 		GodotCollisionObject3D **results;
 		int *subindices;
 		int capacity;
 		int count = 0;
 	};
-	MotionCullData data = { p_body, intersection_query_results, intersection_query_subindex_results, INTERSECTION_QUERY_MAX };
+	MotionCullData data = { p_body, p_parameters, intersection_query_results, intersection_query_subindex_results, INTERSECTION_QUERY_MAX };
 
 	auto visitor = [](GodotCollisionObject3D *p_object, int p_subindex, void *p_userdata) -> bool {
 		MotionCullData &query = *static_cast<MotionCullData *>(p_userdata);
 		if (p_object == query.body || p_object->get_type() != GodotCollisionObject3D::TYPE_BODY) {
+			return true;
+		}
+
+		// Exclude user-filtered bodies before they consume a result slot.
+		if (query.params.exclude_bodies.has(p_object->get_self()) ||
+				query.params.exclude_objects.has(p_object->get_instance_id())) {
 			return true;
 		}
 
@@ -682,8 +689,9 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 
 	real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
 
-	real_t motion_length = p_parameters.motion.length();
-	Vector3 motion_normal = p_parameters.motion / motion_length;
+	const real_t motion_length = p_parameters.motion.length();
+	// Stationary recovery queries must not divide by zero.
+	const Vector3 motion_normal = motion_length > 0.0 ? p_parameters.motion / motion_length : Vector3();
 
 	Transform3D body_transform = p_parameters.from;
 
@@ -709,7 +717,7 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 
 			bool collided = false;
 
-			int amount = _cull_aabb_for_body(p_body, body_aabb);
+			int amount = _cull_aabb_for_body(p_body, body_aabb, p_parameters);
 
 			for (int j = 0; j < p_body->get_shape_count(); j++) {
 				if (p_body->is_shape_disabled(j)) {
@@ -793,7 +801,7 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 		motion_aabb.position += p_parameters.motion;
 		motion_aabb = motion_aabb.merge(body_aabb);
 
-		int amount = _cull_aabb_for_body(p_body, motion_aabb);
+		int amount = _cull_aabb_for_body(p_body, motion_aabb, p_parameters);
 
 		for (int j = 0; j < p_body->get_shape_count(); j++) {
 			if (p_body->is_shape_disabled(j)) {
@@ -816,7 +824,8 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 			Transform3D body_shape_xform_inv = body_shape_xform.affine_inverse();
 			GodotMotionShape3D mshape;
 			mshape.shape = body_shape;
-			mshape.motion = body_shape_xform_inv.basis.xform(p_parameters.motion);
+			const Vector3 full_motion_local = body_shape_xform_inv.basis.xform(p_parameters.motion);
+			mshape.motion = full_motion_local;
 
 			bool stuck = false;
 
@@ -839,6 +848,9 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 				Vector3 sep_axis = motion_normal;
 
 				Transform3D col_obj_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
+				// The preceding candidate's binary search changes this sweep length.
+				// Restore the full displacement before testing the next obstacle.
+				mshape.motion = full_motion_local;
 				//test initial overlap, does it collide if going all the way?
 				if (GodotCollisionSolver3D::solve_distance(&mshape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, motion_aabb, &sep_axis)) {
 					continue;
@@ -933,7 +945,7 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 		rcd.min_allowed_depth = MIN(motion_length, min_contact_depth);
 
 		body_aabb.position += p_parameters.motion * unsafe;
-		int amount = _cull_aabb_for_body(p_body, body_aabb);
+		int amount = _cull_aabb_for_body(p_body, body_aabb, p_parameters);
 
 		int from_shape = best_shape != -1 ? best_shape : 0;
 		int to_shape = best_shape != -1 ? best_shape + 1 : p_body->get_shape_count();
