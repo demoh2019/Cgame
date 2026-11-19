@@ -115,7 +115,7 @@ class FuzzySearch : public RefCounted {
 	float filter_cutoff = 30.0f;
 
 	Vector<FuzzySearchToken> _get_tokens(const String &p_query) const;
-	void _sort_and_filter(Vector<Ref<FuzzySearchMatch>> &p_results) const;
+	void _sort_and_filter(Vector<Ref<FuzzySearchMatch>> &p_results, float p_avg_score, float p_max_score) const;
 	bool _search_tokens(const Vector<FuzzySearchToken> &p_tokens, const String &p_target, Ref<FuzzySearchMatch> &r_result) const;
 	TypedArray<FuzzySearchMatch> _search_all_bind(const String &p_query, const PackedStringArray &p_targets) const;
 
