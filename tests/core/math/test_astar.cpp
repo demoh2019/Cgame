@@ -272,6 +272,49 @@ TEST_CASE("[AStar3D] Known-size point IDs and connections preserve all entries")
 	CHECK_EQ(astar.get_point_connections(0).size(), 254);
 }
 
+TEST_CASE("[AStarGrid2D] Fixed-capacity neighbors preserve corner policies and paths") {
+	AStarGrid2D grid;
+	grid.set_region(Rect2i(0, 0, 3, 3));
+	grid.update();
+
+	// The center cell has all eight neighbors. Exercise all four policies
+	// through repeated searches, which also clear and refill the scratch list.
+	for (int mode = 0; mode < AStarGrid2D::DIAGONAL_MODE_MAX; ++mode) {
+		grid.set_diagonal_mode(static_cast<AStarGrid2D::DiagonalMode>(mode));
+		for (int attempt = 0; attempt < 3; ++attempt) {
+			const Vector<Vector2> path = grid.get_point_path(Vector2i(0, 0), Vector2i(2, 2));
+			REQUIRE_FALSE(path.is_empty());
+			CHECK(path[0] == grid.get_point_position(Vector2i(0, 0)));
+			CHECK(path[path.size() - 1] == grid.get_point_position(Vector2i(2, 2)));
+			CHECK(path.size() == (mode == AStarGrid2D::DIAGONAL_MODE_NEVER ? 5 : 3));
+		}
+	}
+
+	// Both orthogonal neighbors blocked: only unconditional diagonals can
+	// cross directly into (1, 1).
+	grid.set_point_solid(Vector2i(0, 1), true);
+	grid.set_point_solid(Vector2i(1, 0), true);
+	for (int mode = 0; mode < AStarGrid2D::DIAGONAL_MODE_MAX; ++mode) {
+		grid.set_diagonal_mode(static_cast<AStarGrid2D::DiagonalMode>(mode));
+		const Vector<Vector2> path = grid.get_point_path(Vector2i(0, 0), Vector2i(1, 1));
+		if (mode == AStarGrid2D::DIAGONAL_MODE_ALWAYS) {
+			REQUIRE(path.size() == 2);
+		} else {
+			CHECK(path.is_empty());
+		}
+	}
+
+	// With one side blocked, at-least-one-walkable still permits diagonal
+	// traversal, whereas no-obstacles requires an orthogonal detour.
+	grid.set_point_solid(Vector2i(0, 1), false);
+	for (int mode = 0; mode < AStarGrid2D::DIAGONAL_MODE_MAX; ++mode) {
+		grid.set_diagonal_mode(static_cast<AStarGrid2D::DiagonalMode>(mode));
+		const Vector<Vector2> path = grid.get_point_path(Vector2i(0, 0), Vector2i(1, 1));
+		const bool direct = mode == AStarGrid2D::DIAGONAL_MODE_ALWAYS || mode == AStarGrid2D::DIAGONAL_MODE_AT_LEAST_ONE_WALKABLE;
+		REQUIRE(path.size() == (direct ? 2 : 3));
+	}
+}
+
 TEST_CASE("[AStarGrid2D] Pre-sized region data respects grid intersections and order") {
 	AStarGrid2D grid;
 	grid.set_region(Rect2i(Vector2i(-12, -8), Vector2i(40, 32)));
