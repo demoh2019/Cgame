@@ -48,3 +48,5 @@ jobs:
       - run: |
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Resource] set_path*"
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Quoted strings*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Path functions*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Path extraction single-pass regressions*"
