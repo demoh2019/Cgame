@@ -380,7 +380,12 @@ public:
 	}
 
 	void ordered_insert(T p_val) {
-		U idx = span().bisect(p_val, false);
+		// Appending sorted or equal values avoids the binary search entirely.
+		if (count == 0 || !Comparator<T>()(p_val, data[count - 1])) {
+			push_back(std::move(p_val));
+			return;
+		}
+		const U idx = span().bisect(p_val, false);
 		insert(idx, std::move(p_val));
 	}
 

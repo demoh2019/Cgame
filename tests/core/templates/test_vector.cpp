@@ -34,6 +34,10 @@ TEST_FORCE_LINK(test_vector)
 
 #include "core/templates/vector.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <vector>
+
 namespace TestVector {
 
 TEST_CASE("[Vector] List initialization") {
@@ -799,6 +803,71 @@ TEST_CASE("[Vector] shared String vector comparisons respect copy-on-write") {
 	CHECK(first != copy);
 	CHECK_FALSE(first == copy);
 	CHECK_EQ(first[1], String("beta"));
+}
+
+
+struct OrderedInsertComparisonCount {
+	int value = 0;
+	static inline int comparisons = 0;
+
+	bool operator<(const OrderedInsertComparisonCount &p_other) const {
+		comparisons++;
+		return value < p_other.value;
+	}
+};
+
+TEST_CASE("[Vector] Ordered insert fast append skips binary search") {
+	Vector<OrderedInsertComparisonCount> values;
+	for (int i = 0; i < 256; i++) {
+		OrderedInsertComparisonCount::comparisons = 0;
+		values.ordered_insert({ i });
+		CHECK(OrderedInsertComparisonCount::comparisons == (i == 0 ? 0 : 1));
+	}
+	CHECK(values.size() == 256);
+	for (int i = 0; i < 256; i++) {
+		CHECK(values[i].value == i);
+	}
+
+	OrderedInsertComparisonCount::comparisons = 0;
+	values.ordered_insert({ 255 });
+	CHECK(OrderedInsertComparisonCount::comparisons == 1);
+	CHECK(values[256].value == 255);
+	values.ordered_insert({ -1 });
+	CHECK(values[0].value == -1);
+	CHECK(values.size() == 258);
+}
+
+TEST_CASE("[Vector] Ordered insert matches upper_bound with duplicates and random keys") {
+	Vector<int> values;
+	std::vector<int> reference;
+	uint32_t seed = 0x3f291ab7u;
+	for (int i = 0; i < 2048; i++) {
+		seed = seed * 1664525u + 1013904223u;
+		const int value = i < 500 ? i : (i < 1000 ? 1000 - i : int((seed >> 8) % 129u) - 64);
+		values.ordered_insert(value);
+		reference.insert(std::upper_bound(reference.begin(), reference.end(), value), value);
+	}
+	CHECK(values.size() == int(reference.size()));
+	for (int i = 0; i < values.size(); i++) {
+		CHECK(values[i] == reference[size_t(i)]);
+	}
+}
+
+TEST_CASE("[Vector] Ordered append preserves shared copy-on-write storage") {
+	Vector<int> source;
+	for (int i = 0; i < 128; i++) {
+		source.ordered_insert(i);
+	}
+	Vector<int> copy = source;
+	copy.ordered_insert(128);
+	CHECK(copy.size() == 129);
+	CHECK(source.size() == 128);
+	CHECK(copy[128] == 128);
+	CHECK(source[127] == 127);
+
+	source.ordered_insert(129);
+	CHECK(source[128] == 129);
+	CHECK(copy[128] == 128);
 }
 
 } // namespace TestVector
