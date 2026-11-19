@@ -4,12 +4,14 @@ extends CanvasLayer
 const Defs = preload("res://scripts/shared/defs.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
+const Contracts = preload("res://scripts/shared/contracts.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 
 var client
 var _bars: Dictionary = {}
 var _zone_label: Label
 var _info_label: Label
+var _contract_label: Label
 var _prompt: Label
 var _log: Label
 var _inventory_panel: PanelContainer
@@ -73,6 +75,9 @@ func _build() -> void:
 	_info_label = Label.new()
 	_info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	top_right.add_child(_info_label)
+	_contract_label = Label.new()
+	_contract_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	top_right.add_child(_contract_label)
 
 	_log = Label.new()
 	_log.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
@@ -138,6 +143,19 @@ func _build() -> void:
 	sell_refined.text = "Sell carried refined material"
 	sell_refined.pressed.connect(_sell_one_material)
 	vendor_buttons.add_child(sell_refined)
+	var contract_title := Label.new()
+	contract_title.text = "Camp contracts (hub only)"
+	inventory_box.add_child(contract_title)
+	var contract_actions := HBoxContainer.new()
+	inventory_box.add_child(contract_actions)
+	var accept_contract := Button.new()
+	accept_contract.text = "Accept next mission"
+	accept_contract.pressed.connect(func() -> void: client.contract("accept"))
+	contract_actions.add_child(accept_contract)
+	var claim_contract := Button.new()
+	claim_contract.text = "Turn in mission"
+	claim_contract.pressed.connect(func() -> void: client.contract("claim"))
+	contract_actions.add_child(claim_contract)
 
 	_craft_panel = PanelContainer.new()
 	_craft_panel.set_anchors_preset(Control.PRESET_CENTER_LEFT)
@@ -218,6 +236,12 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "contract":
+		if bool(data.get("ok", false)):
+			say("Camp mission: " + str(data.get("title", data.get("active", "updated"))))
+		else:
+			say("Camp mission: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "vendor":
 		if bool(data.get("ok", false)):
 			say("%s %d x %s (%d silver)" % [
@@ -266,6 +290,8 @@ func _process(_delta: float) -> void:
 		float(client.you.get("carry_kg", 0.0)), 100.0 * float(client.you.get("cargo_factor", 1.0)),
 		int(client.you.get("stamina", Defs.MAX_STAMINA))
 	]
+	var journal: Variant = client.you.get("contract", Contracts.empty_state())
+	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	var weapon: String = client.you.get("weapon", "")
 	var levels: Dictionary = client.you.get("gathering_levels", {})
 	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d" % [
