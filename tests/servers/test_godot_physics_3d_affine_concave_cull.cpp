@@ -107,9 +107,9 @@ TEST_CASE("[GodotPhysics3D] Sheared triangle mesh finds the overlapping sphere")
 	// triangle at y=0 could be rejected before reaching SAT/GJK.
 	GodotConcavePolygonShape3D mesh;
 	PackedVector3Array faces;
-	faces.push_back(Vector3(5, -2, -2));
-	faces.push_back(Vector3(5, 2, -2));
-	faces.push_back(Vector3(5, 0, 2));
+	faces.push_back(Vector3(5, -0.4, -0.4));
+	faces.push_back(Vector3(5, 0.4, -0.4));
+	faces.push_back(Vector3(5, 0, 0.4));
 	Dictionary data;
 	data["faces"] = faces;
 	data["backface_collision"] = true;
