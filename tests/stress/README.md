@@ -602,3 +602,23 @@ python3 tests/stress/scale_sweep.py \
 To check worst-case depth, increase the scale or use the brutal preset.
 The scenario must be run with the GodotPhysics backend, not a third-party
 physics implementation. Compare both runtime and peak resident memory.
+
+
+### AStarGrid2D JPS and bulk-fill scaling
+
+`astar_grid_jps` measures long horizontal and diagonal Jump Point Search
+scans with the four diagonal movement policies. `astar_grid_fill` measures
+contiguous obstacle-mask writes and weighted-point updates separately. These
+headless workloads report engine-side stage timings and checksums, while the
+shared stress runner records peak process RSS. Compare identical hardware,
+build options and workloads against a pre-change baseline.
+
+```bash
+python3 tests/stress/scale_sweep.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case astar_grid_jps,astar_grid_fill \
+  --scales 1,2,4,8,16 --repeats 5 --frames 90 \
+  --timeout 600 --rss-limit-mib 6144 \
+  --output out/astar-jps-bulk.json \
+  --summary-md out/astar-jps-bulk.md
+```
