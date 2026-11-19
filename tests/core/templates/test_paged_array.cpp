@@ -36,8 +36,75 @@ TEST_FORCE_LINK(test_paged_array)
 
 #include <algorithm>
 #include <vector>
+#include <thread>
+#include <unordered_set>
 
 namespace TestPagedArray {
+
+TEST_CASE("[PagedArray][Performance] New pages allocate concurrently without duplicate ownership") {
+	// Exercise simultaneous metadata growth and page payload allocation.
+	// Every thread owns only its local collection; the pool is the shared state.
+	constexpr int thread_count = 8;
+	constexpr int pages_per_thread = 96;
+	using Pool = PagedArrayPool<uint64_t>;
+	Pool pool(64);
+	std::vector<std::vector<Pool::PageInfo>> batches(thread_count);
+	std::vector<std::thread> workers;
+	workers.reserve(thread_count);
+
+	for (int thread_index = 0; thread_index < thread_count; thread_index++) {
+		workers.emplace_back([&pool, &batches, thread_index]() {
+			auto &pages = batches[thread_index];
+			pages.reserve(pages_per_thread);
+			for (int i = 0; i < pages_per_thread; i++) {
+				Pool::PageInfo page = pool.alloc_page();
+				page.page[0] = (uint64_t(thread_index) << 32) | uint32_t(i);
+				pages.push_back(page);
+			}
+		});
+	}
+	for (std::thread &worker : workers) {
+		worker.join();
+	}
+
+	std::unordered_set<uint32_t> allocated_ids;
+	std::unordered_set<uint64_t *> allocated_ptrs;
+	for (int thread_index = 0; thread_index < thread_count; thread_index++) {
+		const auto &pages = batches[thread_index];
+		REQUIRE(pages.size() == pages_per_thread);
+		for (int i = 0; i < pages_per_thread; i++) {
+			const auto &page = pages[i];
+			REQUIRE(page.page != nullptr);
+			CHECK(page.page[0] == ((uint64_t(thread_index) << 32) | uint32_t(i)));
+			CHECK(allocated_ids.insert(page.page_id).second);
+			CHECK(allocated_ptrs.insert(page.page).second);
+		}
+	}
+	CHECK(allocated_ids.size() == size_t(thread_count * pages_per_thread));
+
+	// Once all pages are returned, a second allocation wave must recycle
+	// precisely those pages instead of allocating new ones.
+	for (const auto &pages : batches) {
+		std::vector<uint32_t> ids;
+		ids.reserve(pages.size());
+		for (const auto &page : pages) {
+			ids.push_back(page.page_id);
+		}
+		pool.free_pages(ids.data(), uint32_t(ids.size()));
+	}
+
+	std::vector<uint32_t> recycled_ids;
+	recycled_ids.reserve(thread_count * pages_per_thread);
+	for (int i = 0; i < thread_count * pages_per_thread; i++) {
+		const Pool::PageInfo reused = pool.alloc_page();
+		REQUIRE(reused.page != nullptr);
+		CHECK(allocated_ids.erase(reused.page_id) == 1);
+		recycled_ids.push_back(reused.page_id);
+	}
+	CHECK(allocated_ids.empty());
+	pool.free_pages(recycled_ids.data(), uint32_t(recycled_ids.size()));
+	pool.reset();
+}
 
 TEST_CASE("[PagedArray] Simple fill and refill") {
 	PagedArrayPool<uint32_t> pool;
