@@ -40,6 +40,12 @@
 				Returns the mean SPH density measured in the latest PBF constraint pass. Zero before the first successful simulation step.
 			</description>
 		</method>
+		<method name="get_average_vorticity" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the mean magnitude of the SPH-estimated velocity curl, in inverse seconds, from the most recent enabled vorticity post-process. Returns zero if [member vorticity_confinement] is disabled or the particle set is cleared.
+			</description>
+		</method>
 		<method name="get_last_rigid_impulses" qualifiers="const">
 			<return type="int" />
 			<description>
@@ -50,12 +56,6 @@
 			<return type="int" />
 			<description>
 				Returns the bounded number of neighbor interactions in the most recent substep. Useful for performance profiling; a particle can visit at most 128 neighbors during each solver iteration.
-			</description>
-		</method>
-		<method name="get_average_vorticity" qualifiers="const">
-			<return type="float" />
-			<description>
-				Returns the mean magnitude of the SPH-estimated velocity curl, in inverse seconds, from the most recent enabled vorticity post-process. Returns zero if [member vorticity_confinement] is disabled or the particle set is cleared.
 			</description>
 		</method>
 		<method name="get_last_vorticity_neighbor_evaluations" qualifiers="const">
