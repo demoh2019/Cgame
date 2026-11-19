@@ -155,6 +155,7 @@ uint64_t FileAccessMemory::get_buffer(uint8_t *p_dst, uint64_t p_length) const {
 	}
 
 	if (read > 0) {
+		ERR_FAIL_NULL_V(data, -1);
 		memcpy(p_dst, data + pos, read);
 		pos += read;
 	}
