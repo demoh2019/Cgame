@@ -53,6 +53,7 @@
 #include "servers/physics_xpbd_compression_hardening.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
+#include "servers/physics_softbody_orthotropic_bending.h"
 #include "servers/physics_xpbd_shear.h"
 #include "servers/physics_xpbd_self_collision.h"
 #include "servers/physics_softbody_pair_contact.h"
@@ -740,6 +741,7 @@ bool GodotSoftBody3D::solve_volume_constraint(double p_alpha, double &r_lambda) 
 void GodotSoftBody3D::initialize_dihedral_constraints() {
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
+	xpbd_dihedral_anisotropy.reset();
 	if (!get_space() || get_space()->get_soft_body_xpbd_dihedral_compliance() <= 0.0 ||
 			faces.size() < 2 || nodes.size() < 4) {
 		return;
@@ -802,6 +804,21 @@ void GodotSoftBody3D::initialize_dihedral_constraints() {
 		hinge.d = edge.d;
 		hinge.rest_angle = rest_angle;
 		xpbd_dihedral_hinges.push_back(hinge);
+	}
+	// Each hinge gets a fixed factor from the original (undeformed)
+	// mesh-local geometry. Evaluating inside XPBD iterations would make
+	// the compliance depend on the changing constraint state and oscillate.
+	const real_t weft_ratio = get_space()->get_soft_body_xpbd_bend_weft_ratio();
+	if (weft_ratio != real_t(1.0) && !xpbd_dihedral_hinges.is_empty()) {
+		xpbd_dihedral_anisotropy.resize(xpbd_dihedral_hinges.size());
+		const Vector3 warp_axis = get_space()->get_soft_body_xpbd_bend_warp_axis();
+		for (uint32_t i = 0; i < xpbd_dihedral_hinges.size(); ++i) {
+			const DihedralHinge &h = xpbd_dihedral_hinges[i];
+			real_t bend_factor = real_t(1.0);
+			physics_softbody_orthotropic_bending_ratio(nodes[h.a].s, nodes[h.b].s,
+					nodes[h.c].s, nodes[h.d].s, warp_axis, weft_ratio, bend_factor);
+			xpbd_dihedral_anisotropy[i] = bend_factor;
+		}
 	}
 }
 
@@ -2785,6 +2802,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_dihedral_xpbd = dihedral_compliance > 0.0 && !xpbd_dihedral_hinges.is_empty() &&
 			Math::is_finite(dihedral_alpha_double) && dihedral_alpha_double > 0.0;
 	const real_t dihedral_alpha = use_dihedral_xpbd ? real_t(MIN(dihedral_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const bool use_orthotropic_bending = use_dihedral_xpbd && !xpbd_dihedral_anisotropy.is_empty() &&
+			xpbd_dihedral_anisotropy.size() == xpbd_dihedral_hinges.size();
 	const double fem_compliance = get_space() ? double(get_space()->get_soft_body_tetra_fem_compliance()) : 0.0;
 	const double fem_alpha = p_delta > 0.0 ? fem_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_fem = xpbd_fem_tetra_valid && fem_compliance > 0.0 && p_delta > 0.0 &&
@@ -3001,9 +3020,12 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Node &b = nodes[hinge.b];
 				Node &c = nodes[hinge.c];
 				Node &d = nodes[hinge.d];
+				const real_t hinge_alpha = use_orthotropic_bending ?
+						real_t(MIN(double(dihedral_alpha) * double(xpbd_dihedral_anisotropy[hinge_index]),
+								double(std::numeric_limits<real_t>::max()))) : dihedral_alpha;
 				physics_xpbd_solve_dihedral(a.x, b.x, c.x, d.x,
 						a.im, b.im, c.im, d.im, hinge.rest_angle,
-						dihedral_alpha, xpbd_dihedral_lambdas[hinge_index]);
+						hinge_alpha, xpbd_dihedral_lambdas[hinge_index]);
 			}
 		}
 		if (shape_matching_iteration_strength > 0.0) {
@@ -3265,6 +3287,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_membrane_lambdas.reset();
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
+	xpbd_dihedral_anisotropy.reset();
 	xpbd_shape_rest_offsets.reset();
 	xpbd_shape_clusters.reset();
 	xpbd_shape_cluster_members.reset();
