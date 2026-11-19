@@ -37,6 +37,9 @@
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_area.h"
+#include "servers/physics_xpbd_dihedral.h"
+
+#include "core/templates/hash_map.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <limits>
@@ -242,6 +245,10 @@ void GodotSoftBody3D::update_constants() {
 	reset_link_rest_lengths();
 	update_link_constants();
 	update_area();
+	// A mesh/rest-state reset invalidates the hinge schedule. Normal physics
+	// frames keep the already-built schedule and don't touch this storage.
+	xpbd_dihedral_bends.reset();
+	xpbd_dihedral_built = false;
 }
 
 void GodotSoftBody3D::update_area() {
@@ -684,6 +691,81 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 	update_bounds();
 
 	return true;
+}
+
+// Construct one dihedral constraint per manifold interior triangle edge.
+// The edge map is temporary; the long-lived schedule is a compact, stable
+// vector of 4 vertex indices and (rest-angle, lambda). Deterministic insertion
+// order follows the mesh's face/edge iteration order, not hash iteration.
+void GodotSoftBody3D::build_xpbd_dihedral_bends() {
+	xpbd_dihedral_built = true;
+	xpbd_dihedral_bends.clear();
+	if (faces.size() < 2 || nodes.size() < 4) {
+		return;
+	}
+	struct EdgeUse {
+		uint32_t a = 0;
+		uint32_t b = 0;
+		uint32_t c = 0;
+		uint32_t d = 0;
+		uint32_t occurrences = 0;
+		bool compatible = false;
+	};
+	HashMap<uint64_t, EdgeUse> edge_usage;
+	LocalVector<uint64_t> edge_order;
+	for (const Face &face : faces) {
+		for (int i = 0; i < 3; ++i) {
+			const uint32_t a = face.n[i]->index;
+			const uint32_t b = face.n[(i + 1) % 3]->index;
+			const uint32_t c = face.n[(i + 2) % 3]->index;
+			if (a == b || a == c || b == c) {
+				continue;
+			}
+			const uint64_t key = _soft_body_edge_key(a, b);
+			EdgeUse *usage = edge_usage.getptr(key);
+			if (usage == nullptr) {
+				EdgeUse first;
+				first.a = a;
+				first.b = b;
+				first.c = c;
+				first.occurrences = 1;
+				edge_usage.insert(key, first);
+				edge_order.push_back(key);
+			} else {
+				if (usage->occurrences == 1) {
+					usage->d = c;
+					usage->compatible = usage->a == b && usage->b == a &&
+							usage->c != c;
+				}
+				// Count at most 3: non-manifold edges may have arbitrarily
+				// many faces, but they must never generate bend constraints.
+				if (usage->occurrences < 3) {
+					++usage->occurrences;
+				}
+			}
+		}
+	}
+
+	for (const uint64_t key : edge_order) {
+		const EdgeUse *usage = edge_usage.getptr(key);
+		if (usage == nullptr || usage->occurrences != 2 || !usage->compatible) {
+			continue; // Boundary/non-manifold/inconsistent winding.
+		}
+		real_t angle;
+		Vector3 gradient[4];
+		if (!physics_xpbd_dihedral_angle_gradients(nodes[usage->a].s,
+					nodes[usage->b].s, nodes[usage->c].s, nodes[usage->d].s,
+					angle, gradient)) {
+			continue; // Degenerate rest triangles.
+		}
+		DihedralBend bend;
+		bend.vertex[0] = usage->a;
+		bend.vertex[1] = usage->b;
+		bend.vertex[2] = usage->c;
+		bend.vertex[3] = usage->d;
+		bend.rest_angle = angle;
+		xpbd_dihedral_bends.push_back(bend);
+	}
 }
 
 void GodotSoftBody3D::generate_bending_constraints(int p_distance) {
@@ -1458,6 +1540,8 @@ void GodotSoftBody3D::destroy() {
 
 	xpbd_link_lambdas.reset();
 	xpbd_area_lambdas.reset();
+	xpbd_dihedral_bends.reset();
+	xpbd_dihedral_built = false;
 	nodes.clear();
 	links.clear();
 	faces.clear();
