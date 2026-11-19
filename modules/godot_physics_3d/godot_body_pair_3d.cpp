@@ -36,6 +36,7 @@
 #include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_3d.h"
 #include "servers/physics_ccd_sphere_toi.h"
+#include "servers/physics_ccd_capsule_toi.h"
 #include "servers/physics_ccd_swept_bounds.h"
 
 #include <cfloat> // FLT_MAX
@@ -299,6 +300,39 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 					p_xform_A.xform(shape_A_ptr->get_aabb()),
 					p_xform_B.xform(shape_B_ptr->get_aabb()), relative_motion, real_t(0.1))) {
 		return false;
+	}
+
+	// Shape casting a sphere against a capsule is equivalent to ray
+	// casting its center against the capsule expanded by the sphere
+	// radius. This constant-cost path catches glancing hemisphere impacts.
+	if (shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE && shape_B_ptr->get_type() == PS3DE::SHAPE_CAPSULE &&
+			p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3()) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape3D *capsule = static_cast<GodotCapsuleShape3D *>(shape_B_ptr);
+			const double capsule_radius = double(capsule->get_radius());
+			const double half_segment = double(capsule->get_height()) * 0.5 - capsule_radius;
+			const double sphere_radius = double(static_cast<GodotSphereShape3D *>(shape_A_ptr)->get_radius()) * scale_A / scale_B;
+			if (capsule_radius > 0.0 && half_segment >= 0.0 && sphere_radius > 0.0) {
+				const Transform3D inverse_B = p_xform_B.affine_inverse();
+				const Vector3 local_start = inverse_B.xform(p_xform_A.origin);
+				const Vector3 local_motion = inverse_B.basis.xform(relative_motion);
+				double impact_fraction = 0.0;
+				if (!physics_ccd_capsule_toi(local_start, local_motion, capsule_radius + sphere_radius, half_segment, impact_fraction)) {
+					return false;
+				}
+
+				const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(motion_length)) + extent * real_t(0.01), real_t(0.0), motion_length);
+				const Vector3 desired_velocity = velocity_B + direction * (allowed_distance / p_step);
+				const real_t initial_speed = velocity_A.length();
+				const Vector3 travel_direction = velocity_A / initial_speed;
+				const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+				p_A->set_linear_velocity(travel_direction * clipped_speed);
+				return true;
+			}
+		}
+		// Ellipsoids and sheared capsules retain the general support cast.
 	}
 
 	// A leading face may have several support vertices. The target
