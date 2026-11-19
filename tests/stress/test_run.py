@@ -192,7 +192,7 @@ class ImportProjectTests(unittest.TestCase):
         import zlib
 
         png = importer.make_png(16, 12, 7)
-        self.assertEqual(png[:8], b"\x5cx89PNG\x5cr\x5cn\x5cx1a\x5cn")
+        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
         pos = 8
         chunks = {}
         while pos < len(png):
