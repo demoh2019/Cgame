@@ -152,59 +152,63 @@ TEST_CASE("[TranslationLoaderPO][Performance] Binary MO catalogs decode small an
 
 	const uint32_t original_table = 28;
 	const uint32_t translation_table = original_table + count * 8;
-	uint32_t data_offset = translation_table + count * 8;
-
 	const String path = TestUtils::get_temp_path("mo_stack_buffer_reuse_perf.mo");
-	Ref<FileAccess> writer = FileAccess::open(path, FileAccess::WRITE);
-	REQUIRE(writer.is_valid());
-	writer->store_32(0x950412de); // Little-endian MO signature.
-	writer->store_32(0); // Version 0.
-	writer->store_32(count);
-	writer->store_32(original_table);
-	writer->store_32(translation_table);
-	writer->store_32(0); // No hash table.
-	writer->store_32(0);
-	for (const std::string &value : originals) {
-		writer->store_32(uint32_t(value.size()));
-		writer->store_32(data_offset);
-		data_offset += uint32_t(value.size()) + 1;
-	}
-	for (const std::string &value : translated) {
-		writer->store_32(uint32_t(value.size()));
-		writer->store_32(data_offset);
-		data_offset += uint32_t(value.size()) + 1;
-	}
-	for (const std::string &value : originals) {
-		REQUIRE(writer->store_buffer(reinterpret_cast<const uint8_t *>(value.data()), value.size()));
-		writer->store_8(0);
-	}
-	for (const std::string &value : translated) {
-		REQUIRE(writer->store_buffer(reinterpret_cast<const uint8_t *>(value.data()), value.size()));
-		writer->store_8(0);
-	}
-	CHECK(writer->get_position() == data_offset);
-	writer->close();
+	// Exercise both native table decoding and FileAccess endian swapping.
+	for (bool big_endian : { false, true }) {
+		uint32_t data_offset = translation_table + count * 8;
+		Ref<FileAccess> writer = FileAccess::open(path, FileAccess::WRITE);
+		REQUIRE(writer.is_valid());
+		writer->set_big_endian(big_endian);
+		writer->store_32(0x950412de); // MO signature in the selected byte order.
+		writer->store_32(0); // Version 0.
+		writer->store_32(count);
+		writer->store_32(original_table);
+		writer->store_32(translation_table);
+		writer->store_32(0); // No hash table.
+		writer->store_32(0);
+		for (const std::string &value : originals) {
+			writer->store_32(uint32_t(value.size()));
+			writer->store_32(data_offset);
+			data_offset += uint32_t(value.size()) + 1;
+		}
+		for (const std::string &value : translated) {
+			writer->store_32(uint32_t(value.size()));
+			writer->store_32(data_offset);
+			data_offset += uint32_t(value.size()) + 1;
+		}
+		for (const std::string &value : originals) {
+			REQUIRE(writer->store_buffer(reinterpret_cast<const uint8_t *>(value.data()), value.size()));
+			writer->store_8(0);
+		}
+		for (const std::string &value : translated) {
+			REQUIRE(writer->store_buffer(reinterpret_cast<const uint8_t *>(value.data()), value.size()));
+			writer->store_8(0);
+		}
+		CHECK(writer->get_position() == data_offset);
+		writer->close();
 
-	Ref<FileAccess> input = FileAccess::open(path, FileAccess::READ);
-	REQUIRE(input.is_valid());
-	Error error = ERR_FILE_CORRUPT;
-	const Ref<Resource> loaded = TranslationLoaderPO::load_translation(input, &error);
-	REQUIRE(error == OK);
-	REQUIRE(loaded.is_valid());
-	const Translation *const catalog = Object::cast_to<Translation>(loaded.ptr());
-	REQUIRE(catalog != nullptr);
+		Ref<FileAccess> input = FileAccess::open(path, FileAccess::READ);
+		REQUIRE(input.is_valid());
+		input->set_big_endian(big_endian);
+		Error error = ERR_FILE_CORRUPT;
+		const Ref<Resource> loaded = TranslationLoaderPO::load_translation(input, &error);
+		REQUIRE(error == OK);
+		REQUIRE(loaded.is_valid());
+		const Translation *const catalog = Object::cast_to<Translation>(loaded.ptr());
+		REQUIRE(catalog != nullptr);
 
-	CHECK(catalog->get_locale() == "en");
-	CHECK(catalog->get_message_count() == count - 1);
-	for (uint32_t i = 1; i < count - 2; i += 19) {
-		const String key = String::utf8(originals[i].data(), originals[i].size());
-		const String expected = String::utf8(translated[i].data(), translated[i].size());
-		CHECK(String(catalog->get_message(StringName(key))) == expected);
+		CHECK(catalog->get_locale() == "en");
+		CHECK(catalog->get_message_count() == count - 1);
+		for (uint32_t i = 1; i < count - 2; i += 19) {
+			const String key = String::utf8(originals[i].data(), originals[i].size());
+			const String expected = String::utf8(translated[i].data(), translated[i].size());
+			CHECK(String(catalog->get_message(StringName(key))) == expected);
+		}
+		CHECK(String(catalog->get_message("menu", "ctx")) == "Open");
+		CHECK(String(catalog->get_plural_message("apple", "apples", 1)) == "pomme");
+		CHECK(String(catalog->get_plural_message("apple", "apples", 2)) == "pommes");
+		input->close();
 	}
-	CHECK(String(catalog->get_message("menu", "ctx")) == "Open");
-	CHECK(String(catalog->get_plural_message("apple", "apples", 1)) == "pomme");
-	CHECK(String(catalog->get_plural_message("apple", "apples", 2)) == "pommes");
-	input->close();
 	DirAccess::remove_file_or_error(path);
 }
 
