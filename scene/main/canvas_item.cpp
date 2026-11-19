@@ -1182,7 +1182,13 @@ void CanvasItem::_notify_transform(CanvasItem *p_node) {
 	 * notification anyway).
 	 */
 
-	_update_oversampling(false);
+	// Recursive calls keep 'this' as the originating item, but advance
+	// p_node through its descendants. Refreshing the same origin's
+	// oversampling for every descendant repeats identical transform work
+	// O(subtree size) times. Only the initial call needs this update.
+	if (p_node == this) {
+		_update_oversampling(false);
+	}
 
 	if (/*p_node->xform_change.in_list() &&*/ p_node->_is_global_invalid()) {
 		return; //nothing to do
