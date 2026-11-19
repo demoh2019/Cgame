@@ -128,14 +128,15 @@ class TestSoftbodyNonlinearMaterials(unittest.TestCase):
         space_h = (ROOT / "modules/godot_physics_3d/godot_space_3d.h").read_text()
         space_cpp = (ROOT / "modules/godot_physics_3d/godot_space_3d.cpp").read_text()
         soft = (ROOT / "modules/godot_physics_3d/godot_soft_body_3d.cpp").read_text()
-        for prop in (
-            "soft_body_xpbd_compression_hardening",
-            "soft_body_xpbd_compression_yield_strain",
-            "soft_body_strain_rate_damping",
-            "soft_body_strain_rate_yield",
-        ):
+        defaults = {
+            "soft_body_xpbd_compression_hardening": "0.0",
+            "soft_body_xpbd_compression_yield_strain": "0.1",
+            "soft_body_strain_rate_damping": "0.0",
+            "soft_body_strain_rate_yield": "0.0",
+        }
+        for prop, default in defaults.items():
             self.assertIn(f'"physics/3d/solver/{prop}"', server)
-            self.assertIn(f'{prop} = 0.0;', space_h)
+            self.assertIn(f'{prop} = {default};', space_h)
             self.assertIn(f'GLOBAL_GET("physics/3d/solver/{prop}")', space_cpp)
         self.assertIn("get_soft_body_strain_rate_damping()", soft)
         self.assertIn("get_soft_body_xpbd_compression_hardening()", soft)
