@@ -199,9 +199,20 @@ bool GodotStep3D::_solve_large_island(const LocalVector<GodotConstraint3D *> &p_
 		}
 	}
 
-	// Greedy graph coloring: no two constraints in the same color may touch
-	// the same body. Include static and kinematic bodies conservatively.
-	// Remaining constraints use a serial overflow batch.
+	// In a contact-only island static/kinematic bodies are read-only:
+	// ordinary rigid contact constraints never apply impulses to them.
+	// Do not share these bodies when even one joint is present; such
+	// constraints are not guaranteed to keep immovable bodies untouched.
+	bool contact_only_island = true;
+	for (uint32_t i = 0; i < constraint_count; ++i) {
+		if (!p_constraint_island[i]->permits_parallel_immovable_body_sharing()) {
+			contact_only_island = false;
+			break;
+		}
+	}
+
+	// Greedy coloring remains exclusive for every dynamic body and for
+	// ALL bodies in mixed joint/contact islands. Overflow stays serial.
 	HashMap<GodotBody3D *, uint32_t> occupied_colors;
 	LocalVector<uint8_t> constraint_colors;
 	constraint_colors.resize(constraint_count);
@@ -214,7 +225,7 @@ bool GodotStep3D::_solve_large_island(const LocalVector<GodotConstraint3D *> &p_
 		uint32_t forbidden = 0;
 		for (int body_idx = 0; body_idx < body_count; ++body_idx) {
 			GodotBody3D *body = bodies[body_idx];
-			if (body != nullptr) {
+			if (body != nullptr && (!contact_only_island || body->get_mode() > PS3DE::BODY_MODE_KINEMATIC)) {
 				const uint32_t *mask = occupied_colors.getptr(body);
 				if (mask != nullptr) {
 					forbidden |= *mask;
