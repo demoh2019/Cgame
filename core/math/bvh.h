@@ -329,8 +329,20 @@ public:
 	// call e.g. once per frame (this does a trickle optimize)
 	void update() {
 		BVH_LOCKED_FUNCTION
+		// Reclaim the oversized changed-proxy queue only after sustained idle
+		// frames. Repeated heavy spawn/move frames keep their reserved capacity
+		// and do not incur a realloc/free cycle on every physics tick.
+		const bool had_changes = !changed_items.is_empty();
 		tree.update();
 		_check_for_collisions();
+		if (had_changes) {
+			changed_queue_idle_updates = 0;
+		} else if (changed_items.get_capacity() > MAX_RETAINED_CHANGED_ITEMS) {
+			if (++changed_queue_idle_updates >= CHANGED_QUEUE_RECLAIM_IDLE_UPDATES) {
+				changed_items.reset();
+				changed_queue_idle_updates = 0;
+			}
+		}
 #ifdef BVH_INTEGRITY_CHECKS
 		tree._integrity_check_all();
 #endif
@@ -340,6 +352,13 @@ public:
 	void update_collisions() {
 		BVH_LOCKED_FUNCTION
 		_check_for_collisions();
+	}
+
+	// Lightweight diagnostic for tests/profilers. The queue retains modest
+	// capacity intentionally, but releases burst allocations after idle frames.
+	uint32_t get_changed_queue_capacity() const {
+		BVH_LOCKED_FUNCTION
+		return changed_items.get_capacity();
 	}
 
 	// prefer calling this directly as type safe
@@ -929,6 +948,11 @@ private:
 	// for collision pairing,
 	// maintain a list of all items moved etc on each frame / tick
 	LocalVector<BVHHandle> changed_items;
+	// Similar to bounded temporary buffers in Jolt: retain ordinary bursts
+	// and release large one-off buffers without churn during busy frames.
+	static constexpr uint32_t MAX_RETAINED_CHANGED_ITEMS = 4096;
+	static constexpr uint8_t CHANGED_QUEUE_RECLAIM_IDLE_UPDATES = 16;
+	uint8_t changed_queue_idle_updates = 0;
 	uint32_t _tick = 1; // Start from 1 so items with 0 indicate never updated.
 
 	class BVHLockedFunction {
