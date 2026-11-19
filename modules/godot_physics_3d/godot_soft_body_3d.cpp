@@ -43,6 +43,7 @@
 #include "servers/physics_xpbd_self_collision.h"
 #include "servers/physics_xpbd_self_friction.h"
 #include "servers/physics_xpbd_edge_collision.h"
+#include "servers/physics_xpbd_edge_friction.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <limits>
@@ -661,6 +662,26 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 			Node &d = nodes[second.b];
 			physics_xpbd_solve_edge_collision(a.x, b.x, c.x, d.x,
 					a.im, b.im, c.im, d.im, thickness, alpha, contact.normal, contact.lambda);
+		}
+	}
+	// The existing self-contact friction setting also covers structural
+	// edge/edge contacts. The pass only visits already-collected contacts
+	// and is skipped entirely at the default coefficient of zero.
+	const real_t friction = get_space()->get_soft_body_self_collision_friction();
+	if (friction > real_t(0.0)) {
+		for (const SelfEdgeContact &contact : xpbd_self_edge_contacts) {
+			if (!(contact.lambda > real_t(0.0))) {
+				continue;
+			}
+			const SelfCollisionEdge &first = xpbd_self_edges[contact.first];
+			const SelfCollisionEdge &second = xpbd_self_edges[contact.second];
+			Node &a = nodes[first.a];
+			Node &b = nodes[first.b];
+			Node &c = nodes[second.a];
+			Node &d = nodes[second.b];
+			physics_xpbd_solve_edge_friction(a.x, b.x, c.x, d.x,
+					a.q, b.q, c.q, d.q, a.im, b.im, c.im, d.im,
+					friction, contact.lambda, thickness, contact.normal);
 		}
 	}
 	return true;
