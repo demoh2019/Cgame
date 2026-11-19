@@ -1528,7 +1528,7 @@ bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_del
 	const Vector3 padding(p_thickness, p_thickness, p_thickness);
 
 	auto collect = [&](GodotSoftBody3D &p_vertices, GodotSoftBody3D &p_faces, bool p_first) {
-		for (uint32_t index = 0; index < p_vertices.nodes.size() && contact_count() < max_contacts; ++index) {
+		for (uint32_t index = 0; index < p_vertices.xpbd_surface_node_count && contact_count() < max_contacts; ++index) {
 			const Node &node = p_vertices.nodes[index];
 			if (!node.x.is_finite() ||
 					(swept_ccd && !p_vertices.pair_ccd_previous[index].is_finite())) {
@@ -1668,9 +1668,11 @@ bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_del
 	auto finalize = [](GodotSoftBody3D &p_body) {
 		for (Node &node : p_body.nodes) {
 			node.q = node.x;
-			AABB node_bounds(node.x, Vector3());
-			node_bounds.grow_by(p_body.collision_margin);
-			p_body.node_tree.update(node.leaf, node_bounds);
+			if (node.index < p_body.xpbd_surface_node_count) {
+				AABB node_bounds(node.x, Vector3());
+				node_bounds.grow_by(p_body.collision_margin);
+				p_body.node_tree.update(node.leaf, node_bounds);
+			}
 		}
 		p_body.update_normals_and_centroids();
 		p_body.update_bounds();
@@ -1723,7 +1725,7 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_delta) {
 		update_face_tree(real_t(0.0));
 	}
 	const Vector3 padding(thickness, thickness, thickness);
-	for (uint32_t node_id = 0; node_id < nodes.size() &&
+	for (uint32_t node_id = 0; node_id < xpbd_surface_node_count &&
 			(xpbd_self_contacts.size() + xpbd_self_ccd_contacts.size()) < global_limit; ++node_id) {
 		const Node &node = nodes[node_id];
 		if (!node.x.is_finite() || (swept_ccd && !node.q.is_finite())) {
@@ -1933,8 +1935,10 @@ void GodotSoftBody3D::apply_nodes_transform(const Transform3D &p_transform) {
 		node.v = Vector3();
 		node.bv = Vector3();
 
-		AABB node_aabb(node.x, leaf_size);
-		node_tree.update(node.leaf, node_aabb);
+		if (node_index < xpbd_surface_node_count) {
+			AABB node_aabb(node.x, leaf_size);
+			node_tree.update(node.leaf, node_aabb);
+		}
 	}
 
 	face_tree.clear();
@@ -3048,6 +3052,9 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 
 	// Node tree update.
 	for (const Node &node : nodes) {
+		if (node.index >= xpbd_surface_node_count) {
+			continue;
+		}
 		AABB node_aabb(node.x, Vector3());
 		node_aabb.expand_to(node.x + node.v * p_delta);
 		node_aabb.grow_by(collision_margin);
