@@ -572,7 +572,7 @@ TEST_CASE("[SceneTree][ImporterMesh] Imported ArrayMesh emits changed once after
 }
 
 #ifdef TOOLS_ENABLED
-TEST_CASE("[SceneTree][OBJ] MTL diffuse color is converted from linear to sRGB") {
+TEST_CASE("[SceneTree][OBJ] MTL diffuse color defaults to legacy and supports linear opt-in") {
 	const String obj_path = TestUtils::get_temp_path("upstream_obj_diffuse_color.obj");
 	const String mtl_path = TestUtils::get_temp_path("upstream_obj_diffuse_color.mtl");
 	Error err = OK;
@@ -580,32 +580,40 @@ TEST_CASE("[SceneTree][OBJ] MTL diffuse color is converted from linear to sRGB")
 		Ref<FileAccess> mtl = FileAccess::open(mtl_path, FileAccess::WRITE, &err);
 		REQUIRE(err == OK);
 		REQUIRE(mtl.is_valid());
-		mtl->store_string("newmtl ImportedMaterial\nKd 0.5 0.25 1.0\n");
+		mtl->store_string("newmtl ImportedMaterial\\nKd 0.5 0.25 1.0\\n");
 		mtl->close();
 	}
 	{
 		Ref<FileAccess> obj = FileAccess::open(obj_path, FileAccess::WRITE, &err);
 		REQUIRE(err == OK);
 		REQUIRE(obj.is_valid());
-		obj->store_string("mtllib upstream_obj_diffuse_color.mtl\no Triangle\nusemtl ImportedMaterial\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+		obj->store_string("mtllib upstream_obj_diffuse_color.mtl\\no Triangle\\nusemtl ImportedMaterial\\nv 0 0 0\\nv 1 0 0\\nv 0 1 0\\nf 1 2 3\\n");
 		obj->close();
 	}
 
 	EditorOBJImporter *importer = memnew(EditorOBJImporter);
-	Node *scene = importer->import_scene(obj_path, 0, HashMap<StringName, Variant>(), nullptr, &err);
-	REQUIRE(err == OK);
-	REQUIRE(scene != nullptr);
-	REQUIRE(scene->get_child_count() > 0);
-	ImporterMeshInstance3D *mesh_node = Object::cast_to<ImporterMeshInstance3D>(scene->get_child(0));
-	REQUIRE(mesh_node != nullptr);
-	Ref<ImporterMesh> imported_mesh = mesh_node->get_mesh();
-	REQUIRE(imported_mesh.is_valid());
-	REQUIRE(imported_mesh->get_surface_count() > 0);
-	Ref<StandardMaterial3D> material = imported_mesh->get_surface_material(0);
-	REQUIRE(material.is_valid());
-	const Color expected = Color(0.5f, 0.25f, 1.0f).linear_to_srgb();
-	CHECK(material->get_albedo().is_equal_approx(expected));
-	memdelete(scene);
+	const Color stored_color(0.5f, 0.25f, 1.0f);
+	for (int mode = 0; mode < 3; mode++) {
+		INFO("OBJ MTL mode: ", mode); // 0 = absent, 1 = explicit legacy, 2 = linear.
+		HashMap<StringName, Variant> options;
+		if (mode != 0) {
+			options[StringName("materials/mtl_diffuse_is_linear")] = (mode == 2);
+		}
+		Node *scene = importer->import_scene(obj_path, 0, options, nullptr, &err);
+		REQUIRE(err == OK);
+		REQUIRE(scene != nullptr);
+		REQUIRE(scene->get_child_count() > 0);
+		ImporterMeshInstance3D *mesh_node = Object::cast_to<ImporterMeshInstance3D>(scene->get_child(0));
+		REQUIRE(mesh_node != nullptr);
+		Ref<ImporterMesh> imported_mesh = mesh_node->get_mesh();
+		REQUIRE(imported_mesh.is_valid());
+		REQUIRE(imported_mesh->get_surface_count() > 0);
+		Ref<StandardMaterial3D> material = imported_mesh->get_surface_material(0);
+		REQUIRE(material.is_valid());
+		const Color expected = mode == 2 ? stored_color.linear_to_srgb() : stored_color;
+		CHECK(material->get_albedo().is_equal_approx(expected));
+		memdelete(scene);
+	}
 	memdelete(importer);
 }
 #endif // TOOLS_ENABLED
