@@ -96,8 +96,12 @@ class SoftSelfPositionProjectionTests(unittest.TestCase):
     def test_compliance_softens_correction(self):
         inv = [1., 1., 1., 1.]
         grad = [1., -.25, -.25, -.5]
-        hard = one_contact([0,1,2,3], grad, inv, (0,1,0), .06, compliance=0)
-        soft = one_contact([0,1,2,3], grad, inv, (0,1,0), .06, compliance=.0001)
+        # Keep the per-contact safety cap inactive in this test so
+        # compliance, rather than the clamp, controls the displacement.
+        hard = one_contact([0,1,2,3], grad, inv, (0,1,0), .06,
+                           compliance=0, max_correction=.1)
+        soft = one_contact([0,1,2,3], grad, inv, (0,1,0), .06,
+                           compliance=.0001, max_correction=.1)
         self.assertGreater(hard[0][1], soft[0][1])
         self.assertGreater(soft[0][1], 0)
 
