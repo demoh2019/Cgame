@@ -153,8 +153,23 @@ static void _generate_contacts_edge_edge(const Vector3 *p_points_A, int p_point_
 		//sort all 4 points in axis
 		real_t dvec[4] = { axis.dot(p_points_A[0]), axis.dot(p_points_A[1]), axis.dot(p_points_B[0]), axis.dot(p_points_B[1]) };
 
-		SortArray<real_t> sa;
-		sa.sort(dvec, 4);
+		// A five-comparator sorting network for exactly four values.
+		// Avoid the generic sorting machinery in this contact hot path.
+		if (dvec[1] < dvec[0]) {
+			SWAP(dvec[0], dvec[1]);
+		}
+		if (dvec[3] < dvec[2]) {
+			SWAP(dvec[2], dvec[3]);
+		}
+		if (dvec[2] < dvec[0]) {
+			SWAP(dvec[0], dvec[2]);
+		}
+		if (dvec[3] < dvec[1]) {
+			SWAP(dvec[1], dvec[3]);
+		}
+		if (dvec[2] < dvec[1]) {
+			SWAP(dvec[1], dvec[2]);
+		}
 
 		//use the middle ones as contacts
 		p_callback->call(base_A + axis * dvec[1], base_B + axis * dvec[1], p_callback->normal);
