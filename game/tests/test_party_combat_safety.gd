@@ -6,6 +6,7 @@ const Party = preload("res://scripts/shared/party.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
+const Net = preload("res://scripts/shared/net.gd")
 
 
 func _zombie(server, world, x: float, z: float, hp: float = 170.0):
@@ -132,3 +133,16 @@ func run(t) -> void:
 	var state: Dictionary = server.snapshot_for(11)["you"]["party"]
 	t.eq(state["members"].size(), 2, "snapshot exposes the current server roster")
 	t.check(target.is_alive(), "group combat did not corrupt nearby zombie state")
+
+	t.current = "private combat, infection, scavenging and evasion notifications"
+	var net := Net.new()
+	net.role = "server"
+	net.sim = server
+	for kind in ["mastery", "scavenging", "infection", "evaded"]:
+		t.check(net._event_visible_to({"type": kind, "peer": 11}, 11),
+			"owner receives private %s feedback" % kind)
+		t.check(not net._event_visible_to({"type": kind, "peer": 11}, 14),
+			"strangers cannot observe %s notifications" % kind)
+	t.check(not net._event_visible_to({"type": "unhandled", "peer": 11}, 11),
+		"unexpected event types are never broadcast")
+	net.free()
