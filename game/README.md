@@ -300,3 +300,8 @@ public structure snapshots. This does not yet make barricades durable across
 world-server restarts; server-side world persistence is a separate milestone.
 
 Tests: `game/tests/test_dismantle.gd` in the existing headless suite.
+
+## Chat and guilds (online client)
+
+Press Enter to talk in the world room. `/guild Name` founds a guild, `/guilds` lists them, `/join Name` joins,
+`/g text` talks to your guild only, `/leave` leaves. All of it is Nakama (rooms, groups, group channels).

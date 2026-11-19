@@ -13,6 +13,7 @@ const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const HubView = preload("res://scripts/client/hub_view.gd")
 const Audio = preload("res://scripts/client/audio.gd")
+const Social = preload("res://scripts/client/social.gd")
 
 const CAMERA_OFFSET := Vector3(0.0, 17.0, 12.5)
 const DAY_LENGTH := 900.0 # Seconds of server time per day.
@@ -32,6 +33,9 @@ var avatar: Node3D
 var avatar_model
 var audio
 var hub_view
+var social
+var chat_edit: LineEdit
+var account := {} # Result of the Nakama sign-in, empty when playing without accounts.
 var connect_panel: PanelContainer
 var address_edit: LineEdit
 var name_edit: LineEdit
@@ -155,10 +159,29 @@ func _build_connect_screen() -> void:
 	box.add_child(status_label)
 
 
+func _device_id() -> String:
+	var path := "user://device_id.txt"
+	if FileAccess.file_exists(path):
+		return FileAccess.get_file_as_string(path).strip_edges()
+	var id := "%d-%d" % [Time.get_unix_time_from_system(), randi()]
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file != null:
+		file.store_string(id)
+	return id
+
+
 func _connect() -> void:
 	var parts := address_edit.text.split(":")
 	var host := parts[0]
 	var port := int(parts[1]) if parts.size() > 1 else 24565
+	status_label.text = "Signing in..."
+	# Accounts come from Nakama on the same host. Without it we still join (servers can run offline).
+	social = Social.new()
+	add_child(social)
+	var nakama_port := int(OS.get_environment("NAKAMA_PORT")) if OS.get_environment("NAKAMA_PORT") != "" else 7350
+	account = await social.sign_in(host, nakama_port, _device_id() + ("-" + name_edit.text if OS.get_environment("MULTI_CLIENT") != "" else ""), name_edit.text)
+	if not account.get("ok", false):
+		account = {}
 	net = Net.new()
 	net.name = "Net"
 	net.role = "client"
@@ -172,12 +195,64 @@ func _connect() -> void:
 	status_label.text = "Connecting..."
 	multiplayer.connected_to_server.connect(func() -> void:
 		status_label.text = "Joining..."
-		client.join(name_edit.text))
+		client.join(name_edit.text, account.get("token", ""), account.get("refresh", "")))
 	multiplayer.connection_failed.connect(func() -> void: status_label.text = "Connection failed.")
 	multiplayer.server_disconnected.connect(func() -> void:
 		status_label.text = "Disconnected."
 		connect_panel.visible = true)
 	net.welcomed.connect(_on_welcomed)
+	net.join_refused.connect(func(reason: String) -> void: status_label.text = reason)
+
+
+func _setup_chat() -> void:
+	chat_edit = LineEdit.new()
+	chat_edit.placeholder_text = "Enter to chat. /g guild text, /guild name, /guilds, /join name, /leave"
+	chat_edit.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	chat_edit.position = Vector2(320, -44)
+	chat_edit.size = Vector2(640, 32)
+	chat_edit.visible = false
+	chat_edit.text_submitted.connect(_on_chat_submitted)
+	hud.add_child(chat_edit)
+	if not account.is_empty():
+		social.message_received.connect(func(channel: String, sender: String, text: String) -> void: hud.say("[%s] %s: %s" % [channel, sender, text]))
+		var started: bool = await social.start_chat("albion-world")
+		hud.say("Chat connected. Press Enter to talk." if started else "Chat is unavailable.")
+	else:
+		hud.say("Playing without an account: nothing is saved, no chat.")
+
+
+func _on_chat_submitted(text: String) -> void:
+	chat_edit.text = ""
+	chat_edit.visible = false
+	chat_edit.release_focus()
+	text = text.strip_edges()
+	if text == "" or account.is_empty():
+		return
+	if text.begins_with("/g "):
+		if not await social.say_guild(text.substr(3)):
+			hud.say("You are not in a guild.")
+	elif text.begins_with("/guilds"):
+		var names: Array[String] = []
+		for g in await social.list_guilds():
+			names.append("%s (%d)" % [g["name"], g["members"]])
+		hud.say("Guilds: " + (", ".join(names) if not names.is_empty() else "none yet"))
+	elif text.begins_with("/guild "):
+		var result: Dictionary = await social.create_guild(text.substr(7))
+		hud.say("Guild founded." if result["ok"] else "Could not found a guild: %s" % result["reason"])
+	elif text.begins_with("/join "):
+		var wanted := text.substr(6).strip_edges()
+		var found := false
+		for g in await social.list_guilds(wanted):
+			if g["name"] == wanted:
+				var result: Dictionary = await social.join_guild(g["id"])
+				hud.say("Joined %s." % wanted if result["ok"] else "Could not join: %s" % result.get("reason", "?"))
+				found = true
+		if not found:
+			hud.say("No guild named %s." % wanted)
+	elif text.begins_with("/leave"):
+		hud.say("You left the guild." if await social.leave_guild() else "You are not in a guild.")
+	else:
+		await social.say(text)
 
 
 func _on_welcomed() -> void:
@@ -185,6 +260,7 @@ func _on_welcomed() -> void:
 	hud = Hud.new()
 	add_child(hud)
 	hud.setup(client)
+	_setup_chat()
 	# Streaming: chunks are built from the seed as the player walks.
 	streamer = WorldStreamer.new()
 	streamer.cell_size = Defs.CHUNK_SIZE
@@ -349,6 +425,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventKey and event.pressed and not event.echo and not _typing():
 		match event.keycode:
+			KEY_ENTER, KEY_KP_ENTER:
+				if chat_edit != null:
+					chat_edit.visible = true
+					chat_edit.grab_focus()
 			KEY_E:
 				_interact()
 			KEY_F:
