@@ -34,11 +34,55 @@ TEST_FORCE_LINK(test_arraymesh)
 
 #ifndef _3D_DISABLED
 
+#include "modules/modules_enabled.gen.h" // IWYU pragma: keep. Needed for MODULE_XATLAS_UNWRAP_ENABLED.
+#include "scene/resources/3d/importer_mesh.h"
 #include "scene/resources/3d/primitive_meshes.h"
 #include "scene/resources/mesh.h"
 #include "servers/rendering/rendering_server.h"
 
 namespace TestArrayMesh {
+
+#ifdef MODULE_XATLAS_UNWRAP_ENABLED
+TEST_CASE("[SceneTree][ImporterMesh] Lightmap unwrap preserves attribute compression") {
+	for (bool compressed : { false, true }) {
+		INFO("Compressed: ", compressed);
+		Ref<ImporterMesh> imported;
+		imported.instantiate();
+
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		PackedVector3Array vertices;
+		vertices.push_back(Vector3(-1, -1, 0));
+		vertices.push_back(Vector3(1, -1, 0));
+		vertices.push_back(Vector3(1, 1, 0));
+		vertices.push_back(Vector3(-1, 1, 0));
+		PackedVector3Array normals;
+		for (int i = 0; i < vertices.size(); i++) {
+			normals.push_back(Vector3(0, 0, 1));
+		}
+		PackedInt32Array indices;
+		for (int index : { 0, 1, 2, 0, 2, 3 }) {
+			indices.push_back(index);
+		}
+		arrays[Mesh::ARRAY_VERTEX] = vertices;
+		arrays[Mesh::ARRAY_NORMAL] = normals;
+		arrays[Mesh::ARRAY_INDEX] = indices;
+
+		uint64_t flags = compressed ? Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES : 0;
+		imported->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays, TypedArray<Array>(), Dictionary(), Ref<Material>(), String(), flags);
+		REQUIRE_EQ(imported->get_surface_count(), 1);
+
+		for (int iteration = 0; iteration < 2; iteration++) {
+			INFO("Unwrap iteration: ", iteration);
+			Vector<uint8_t> input_cache;
+			Vector<uint8_t> output_cache;
+			REQUIRE_EQ(imported->lightmap_unwrap_cached(Transform3D(), 0.5f, input_cache, output_cache), OK);
+			REQUIRE_EQ(imported->get_surface_count(), 1);
+			CHECK_EQ(bool(imported->get_surface_format(0) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES), compressed);
+		}
+	}
+}
+#endif // MODULE_XATLAS_UNWRAP_ENABLED
 
 TEST_CASE("[SceneTree][ArrayMesh] Adding and modifying blendshapes.") {
 	Ref<ArrayMesh> mesh;
