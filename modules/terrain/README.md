@@ -43,8 +43,13 @@ and `set_height`; `sample_height` clamps to the grid edges.
 
 ## Physics collision synchronization
 
-To make the painted terrain solid, add a `StaticBody3D` and a
-`TerrainCollision3D` node. The collision node should be a direct child of
+To make the painted terrain solid, select the visual `MeshInstance3D` in the
+3D editor and click **Add Collider**. This undoable action creates a child
+`StaticBody3D` with a `TerrainCollision3D` and assigns the same heightfield
+resource. The generated physics body follows the mesh instance transform.
+
+Alternatively, add a `StaticBody3D` and a
+`TerrainCollision3D` node manually. The collision node should be a direct child of
 the static body, and its `terrain` property must reference **the very same**
 `TerrainMesh` resource used by the visual mesh:
 
@@ -55,7 +60,9 @@ Node3D
     └── TerrainCollision3D        terrain = terrain_resource
 ```
 
-Keep the `MeshInstance3D` and `StaticBody3D` transforms aligned. The
+For the manual sibling setup, keep the `MeshInstance3D` and `StaticBody3D`
+transforms aligned. If the terrain mesh uses a nonuniform ancestor scale,
+Godot physics limitations may require baking the scale into the mesh data. The
 generated collision triangles use the terrain's exact X, Y, Z vertex positions,
 including the cell spacing and the vertical height multiplier. The collision
 node subscribes to the resource's `changed` notification: sculpting, smoothing,
@@ -81,6 +88,8 @@ physics enabled.
 - Raise/lower brush with linear falloff; neighborhood smoothing with a
   snapshot (order-independent per brush application).
 - Deterministic, conservative thermal erosion with configurable talus.
+- Auto-updating `TerrainCollision3D` static collider and an undoable
+  **Add Collider** editor action.
 - 35 native automated test cases under `modules/terrain/tests`, including
   real save/load round-trips and ray picking.
 
