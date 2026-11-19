@@ -87,6 +87,11 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<Vector3> pair_ccd_previous;
 	AABB pair_ccd_swept_bounds;
 	LocalVector<Link> links;
+	// Thermal material histories are separate from viscoplastic rest length.
+	// Allocate only if heat transport, source, or expansion is enabled.
+	LocalVector<real_t> thermal_node_temperatures;
+	// One frozen XPBD rest length per link, only with nonzero expansion.
+	LocalVector<real_t> thermal_link_rest_lengths;
 	// Only allocated if tethers are enabled and at least one vertex is pinned.
 	LocalVector<PhysicsXPBDTether> xpbd_tethers;
 	bool xpbd_tethers_dirty = true;
@@ -386,6 +391,7 @@ private:
 	void append_link(uint32_t p_node1, uint32_t p_node2);
 	void append_face(uint32_t p_node1, uint32_t p_node2, uint32_t p_node3);
 
+	void advance_thermal_material(real_t p_delta, bool p_xpbd_enabled);
 	void solve_links(real_t kst, real_t ti);
 
 	void initialize_face_tree();
