@@ -1298,6 +1298,9 @@ TEST_CASE("[BVH] 2D point and box culls reject empty roots and preserve subtree 
 	CHECK(tree.cull_point(Vector2(20.5, 0.5), results, COUNT, nullptr) == 1);
 	CHECK(results[0] == &items[5]);
 	CHECK(tree.cull_segment(Vector2(-2, 0.5), Vector2(COUNT * 4, 0.5), results, COUNT, nullptr) == COUNT);
+	// A segment entirely inside a leaf/root must survive the new root rejection.
+	CHECK(tree.cull_segment(Vector2(20.2, 0.2), Vector2(20.8, 0.8), results, COUNT, nullptr) == 1);
+	CHECK(results[0] == &items[5]);
 	CountingCullTest::calls = 0;
 	CHECK(tree.cull_aabb(Rect2(-2, -2, COUNT * 4 + 4, 6), results, 3, nullptr) == 3);
 	CHECK(CountingCullTest::calls == 3);
@@ -1340,6 +1343,8 @@ TEST_CASE("[BVH] 3D point, segment and box culls preserve exact results") {
 	CHECK(tree.cull_point(Vector3(16.5, 0.5, 0.5), results, COUNT, nullptr) == 1);
 	CHECK(results[0] == &items[4]);
 	CHECK(tree.cull_segment(Vector3(-2, 0.5, 0.5), Vector3(COUNT * 4, 0.5, 0.5), results, COUNT, nullptr) == COUNT);
+	CHECK(tree.cull_segment(Vector3(20.2, 0.2, 0.2), Vector3(20.8, 0.8, 0.8), results, COUNT, nullptr) == 1);
+	CHECK(results[0] == &items[5]);
 	CountingCullTest::calls = 0;
 	CHECK(tree.cull_aabb(all, results, 1, nullptr) == 1);
 	CHECK(CountingCullTest::calls == 1);
