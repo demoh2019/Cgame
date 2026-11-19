@@ -51,11 +51,15 @@ class GodotStep2D {
 	// Reused only for the opt-in single-large-island graph coloring path.
 	LocalVector<GodotConstraint2D *> colored_constraints;
 	uint32_t color_batch_offset = 0;
+	// Read-only during worker dispatch. Used only when one large island is
+	// graph-colored while the remaining islands use normal island jobs.
+	uint32_t deferred_large_island_index = UINT32_MAX;
 
 	void _populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D *> &p_body_island, LocalVector<GodotConstraint2D *> &p_constraint_island);
 	void _setup_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr);
 	void _pre_solve_island(LocalVector<GodotConstraint2D *> &p_constraint_island) const;
 	void _solve_island(uint32_t p_island_index, void *p_userdata = nullptr) const;
+	void _solve_island_except_large(uint32_t p_island_index, void *p_userdata = nullptr) const;
 	void _solve_colored_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr) const;
 	void _solve_large_island(const LocalVector<GodotConstraint2D *> &p_constraint_island);
 	void _check_suspend(LocalVector<GodotBody2D *> &p_body_island) const;
