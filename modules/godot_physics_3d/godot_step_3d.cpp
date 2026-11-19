@@ -47,6 +47,8 @@ static constexpr uint32_t MIN_PARALLEL_SOLVE_ISLANDS = 16;
 // Parallel graph coloring only pays off for large connected rigid-body groups.
 static constexpr uint32_t MIN_PARALLEL_LARGE_ISLAND = 256;
 static constexpr uint32_t MIN_PARALLEL_COLOR_CONSTRAINTS = 64;
+// Fewer scheduler callbacks while preserving the per-color conflict barrier.
+static constexpr uint32_t PARALLEL_COLOR_BATCH_SIZE = 8;
 static constexpr uint32_t MAX_LARGE_ISLAND_COLORS = 16;
 
 void GodotStep3D::_populate_island_graph(GodotBody3D *p_body, GodotSoftBody3D *p_soft_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island) {
@@ -190,7 +192,11 @@ void GodotStep3D::_solve_island_except_large(uint32_t p_island_index, void *p_us
 }
 
 void GodotStep3D::_solve_colored_constraint(uint32_t p_constraint_index, void *p_userdata) const {
-	colored_constraints[color_batch_offset + p_constraint_index]->solve(delta);
+	const uint32_t first = p_constraint_index * PARALLEL_COLOR_BATCH_SIZE;
+	const uint32_t end = MIN(first + PARALLEL_COLOR_BATCH_SIZE, color_batch_count);
+	for (uint32_t i = first; i < end; ++i) {
+		colored_constraints[color_batch_offset + i]->solve(delta);
+	}
 }
 
 bool GodotStep3D::_solve_large_island(const LocalVector<GodotConstraint3D *> &p_constraint_island) {
@@ -223,8 +229,13 @@ bool GodotStep3D::_solve_large_island(const LocalVector<GodotConstraint3D *> &p_
 
 	// Greedy coloring remains exclusive for every dynamic body and for
 	// ALL bodies in mixed joint/contact islands. Overflow stays serial.
-	HashMap<GodotBody3D *, uint32_t> occupied_colors;
-	LocalVector<uint8_t> constraint_colors;
+	// Reuse the previous step's allocation for dense contact workloads.
+	// Release exceptionally oversized hash buffers when the island shrinks.
+	if (occupied_colors.get_capacity() > MAX(uint32_t(1024), constraint_count * uint32_t(4))) {
+		occupied_colors = HashMap<GodotBody3D *, uint32_t>();
+	} else {
+		occupied_colors.clear();
+	}
 	constraint_colors.resize(constraint_count);
 	uint32_t group_sizes[MAX_LARGE_ISLAND_COLORS + 1] = {};
 
@@ -305,8 +316,13 @@ bool GodotStep3D::_solve_large_island(const LocalVector<GodotConstraint3D *> &p_
 			const uint32_t start = starts[color];
 			if (color != MAX_LARGE_ISLAND_COLORS && count >= MIN_PARALLEL_COLOR_CONSTRAINTS) {
 				color_batch_offset = start;
+				color_batch_count = count;
+				// Each worker invocation handles a contiguous group of eight
+				// disjoint constraints, including a short final batch.
+				// This reduces callback/atomic scheduling costs per color.
+				const uint32_t task_count = (count + PARALLEL_COLOR_BATCH_SIZE - 1) / PARALLEL_COLOR_BATCH_SIZE;
 				WorkerThreadPool::GroupID group = WorkerThreadPool::get_singleton()->add_template_group_task(
-						this, &GodotStep3D::_solve_colored_constraint, nullptr, count, -1, true, SNAME("Physics3DLargeIslandColor"));
+						this, &GodotStep3D::_solve_colored_constraint, nullptr, task_count, -1, true, SNAME("Physics3DLargeIslandColor"));
 				// Barrier: a later color may touch the bodies updated here.
 				WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group);
 			} else {
@@ -580,6 +596,14 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 				}
 			}
 		}
+	}
+
+	if (large_island_count != 1 && (!colored_constraints.is_empty() || !constraint_colors.is_empty() || !occupied_colors.is_empty())) {
+		// No graph-colored island this frame. Release the previous giant
+		// island's scratch to keep peak memory from lingering in light scenes.
+		colored_constraints.reset();
+		constraint_colors.reset();
+		occupied_colors = HashMap<GodotBody3D *, uint32_t>();
 	}
 
 	if (large_island_count == 1) {
