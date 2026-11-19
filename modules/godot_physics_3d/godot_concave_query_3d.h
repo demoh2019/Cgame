@@ -33,9 +33,10 @@
 // shape's local space. For an affine (possibly sheared) concave transform,
 // projecting on its basis columns is NOT equivalent to local axis projection.
 //
-// If p_world_hint is given, it bounds a swept/kinematic query in world
-// coordinates. Otherwise the convex shape's exact support projections
-// give a generally tighter bound than transforming its local AABB.
+// If p_world_hint is given, it bounds a swept/kinematic query or a
+// soft-body node patch in world coordinates; p_convex_shape may be null.
+// Otherwise the convex shape's exact support projections give a generally
+// tighter bound than transforming its local AABB.
 //
 // Returns false for singular transforms; the caller must then visit all
 // triangles rather than risk rejecting valid collisions.
