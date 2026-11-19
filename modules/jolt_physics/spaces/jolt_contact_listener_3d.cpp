@@ -42,6 +42,28 @@
 #include <Jolt/Physics/Collision/EstimateCollisionResponse.h>
 #include <Jolt/Physics/SoftBody/SoftBodyManifold.h>
 
+namespace {
+
+// Retain allocations for a steady workload, but release huge transient buffers
+// after the scene becomes quiet. The 4x slack avoids allocator churn while the
+// number of contacts fluctuates moderately between physics frames.
+constexpr uint32_t MAX_CACHED_CONTACT_MANIFOLDS = 2048;
+constexpr uint32_t MAX_CACHED_CONTACT_PAIR_SLOTS = 4096;
+constexpr uint32_t MAX_CACHED_AREA_EVENTS = 2048;
+
+template <typename T>
+static void clear_contact_scratch(LocalVector<T> &r_buffer, uint32_t p_min_cached_capacity) {
+	const uint32_t used = r_buffer.size();
+	const uint32_t allowed_capacity = MAX(p_min_cached_capacity, used > UINT32_MAX / 4 ? UINT32_MAX : used * 4);
+	if (r_buffer.get_capacity() > allowed_capacity) {
+		r_buffer.reset();
+	} else {
+		r_buffer.clear();
+	}
+}
+
+} // namespace
+
 void JoltContactListener3D::OnContactAdded(const JPH::Body &p_body1, const JPH::Body &p_body2, const JPH::ContactManifold &p_manifold, JPH::ContactSettings &p_settings) {
 	_try_override_collision_response(p_body1, p_body2, p_settings);
 	_try_apply_surface_velocities(p_body1, p_body2, p_settings);
@@ -440,10 +462,19 @@ void JoltContactListener3D::_flush_contacts() {
 		}
 	}
 
-	deepest_manifolds.clear();
+	// A large contact burst should not permanently pin that much scratch RAM.
+	// Keep the cache for sustained dense scenes, trimming only after a drop.
+	const uint32_t used_manifold_pairs = deepest_manifolds.size();
+	const uint32_t allowed_pair_capacity = MAX(MAX_CACHED_CONTACT_PAIR_SLOTS,
+			used_manifold_pairs > UINT32_MAX / 4 ? UINT32_MAX : used_manifold_pairs * 4);
+	if (deepest_manifolds.get_capacity() > allowed_pair_capacity) {
+		deepest_manifolds.reset();
+	} else {
+		deepest_manifolds.clear();
+	}
 
 	for (ThreadLocals &tl : ThreadLocals::instances) {
-		tl.manifolds.clear();
+		clear_contact_scratch(tl.manifolds, MAX_CACHED_CONTACT_MANIFOLDS);
 	}
 }
 
@@ -462,7 +493,7 @@ void JoltContactListener3D::_flush_area_body_events() {
 			_dispatch_area_exit(shape_pair);
 		}
 
-		tl.area_exits.clear();
+		clear_contact_scratch(tl.area_exits, MAX_CACHED_AREA_EVENTS);
 	}
 
 	area_overlaps.reserve(new_overlap_count);
@@ -473,7 +504,7 @@ void JoltContactListener3D::_flush_area_body_events() {
 			_dispatch_area_enter(shape_pair);
 		}
 
-		tl.area_enters.clear();
+		clear_contact_scratch(tl.area_enters, MAX_CACHED_AREA_EVENTS);
 	}
 }
 
@@ -516,7 +547,7 @@ void JoltContactListener3D::_flush_area_soft_body_events() {
 	}
 
 	for (ThreadLocals &tl : ThreadLocals::instances) {
-		tl.area_soft_body_overlaps.clear();
+		clear_contact_scratch(tl.area_soft_body_overlaps, MAX_CACHED_AREA_EVENTS);
 	}
 }
 
