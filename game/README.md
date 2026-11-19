@@ -667,3 +667,17 @@ Run `godot --headless --path game --script res://tests/run_all.gd` to
 exercise `test_fishing.gd`, plus
 `godot --headless --path game --script res://tests/smoke_client_scene.gd`
 to check that local fishing is accessible via the actual playable scene.
+
+## Full semantic validation before world backup rotation
+
+A parseable JSON checkpoint is not necessarily a recoverable world. The
+server now checks a previous primary snapshot against fresh procedural
+terrain before copying it into `.bak`: account ownership, wall IDs,
+collision-free placement, durability, world seed and owner limits must all
+validate. Captured current-world state is checked the same way **before**
+writing it. Active in-memory walls are excluded from validation by using
+a fresh world generator, avoiding false overlap failures.
+
+Corrupt files still fail closed; the server does **not** silently load an
+older backup, which could resurrect structures already dismantled and
+refunded. Regression scenarios are in `game/tests/test_world_backup.gd`.

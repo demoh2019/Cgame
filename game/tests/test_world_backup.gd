@@ -24,6 +24,15 @@ func _cleanup() -> void:
 			DirAccess.remove_absolute(absolute)
 
 
+func _overwrite_primary(data: Dictionary) -> bool:
+	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if file == null:
+		return false
+	file.store_string(JSON.stringify(data))
+	file.close()
+	return true
+
+
 func _new_server():
 	return GameServer.new(WorldGen.new(214), 314)
 
@@ -95,4 +104,38 @@ func run(t) -> void:
 		var restored = _new_server()
 		t.check(Persist.load(restored, SAVE_PATH), "explicit backup recovery creates a valid world")
 		t.near(float(restored.barricades[id]["hp"]), 100.0, 0.001, "recovered checkpoint is previous state, not silently resurrected newer state")
+
+	t.current = "valid-looking but semantically corrupt primary"
+	var last_good_backup: String = _read(SAVE_PATH + ".bak")
+	var valid_checkpoint: Dictionary = Persist.capture(sim)
+	var invalid: Dictionary = valid_checkpoint.duplicate(true)
+	invalid["barricades"].append(invalid["barricades"][0].duplicate(true))
+	t.check(_overwrite_primary(invalid), "write duplicate-ID checkpoint fixture")
+	t.check(not Persist.save(sim, SAVE_PATH), "duplicate IDs refuse backup rotation")
+	t.eq(_read(SAVE_PATH + ".bak"), last_good_backup, "duplicate IDs preserve verified backup")
+
+	invalid = valid_checkpoint.duplicate(true)
+	invalid["barricades"][0]["owner_account"] = ""
+	t.check(_overwrite_primary(invalid), "write invalid owner checkpoint fixture")
+	t.check(not Persist.save(sim, SAVE_PATH), "invalid account refuses backup rotation")
+	t.eq(_read(SAVE_PATH + ".bak"), last_good_backup, "invalid owner preserves backup")
+
+	invalid = valid_checkpoint.duplicate(true)
+	invalid["barricades"][0]["x"] = 0.0
+	invalid["barricades"][0]["z"] = 0.0
+	t.check(_overwrite_primary(invalid), "write illegal hub checkpoint fixture")
+	t.check(not Persist.save(sim, SAVE_PATH), "protected hub wall refuses rotation")
+	t.eq(_read(SAVE_PATH + ".bak"), last_good_backup, "impossible wall preserves backup")
+
+	t.current = "invalid current world does not replace validated primary"
+	var baseline_hp: float = sim.barricades[id]["hp"]
+	t.check(_overwrite_primary(valid_checkpoint), "restore valid primary fixture")
+	var primary_before: String = _read(SAVE_PATH)
+	sim.barricades[id]["hp"] = INF
+	t.check(not Persist.save(sim, SAVE_PATH), "invalid live wall durability refuses save")
+	t.eq(_read(SAVE_PATH), primary_before, "corrupt live state leaves primary untouched")
+	t.eq(_read(SAVE_PATH + ".bak"), last_good_backup, "corrupt live state leaves backup untouched")
+	sim.barricades[id]["hp"] = baseline_hp
+	t.check(Persist.save(sim, SAVE_PATH), "valid world resumes saving")
+	t.check(Persist.load(_new_server(), SAVE_PATH), "restored good checkpoint is loadable")
 	_cleanup()
