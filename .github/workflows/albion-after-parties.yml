@@ -1,0 +1,52 @@
+name: Albion After cooperative parties and real combat assists
+
+on:
+  pull_request:
+    paths:
+      - 'game/scripts/**'
+      - 'game/tests/**'
+      - '.github/workflows/albion-after-parties.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'game/scripts/**'
+      - 'game/tests/**'
+      - '.github/workflows/albion-after-parties.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  party-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download SHA-256 verified Godot compatibility editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip \
+            https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum -c -
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Run authoritative world and party regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./godot --headless --path game --script res://tests/run_all.gd 2>&1 | tee party-tests.log
+          grep -Fq 'test_party.gd' party-tests.log
+          grep -Fq '0 failures' party-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Invalid call|FAIL ' party-tests.log; then
+            exit 1
+          fi
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: albion-after-party-regression-logs
+          if-no-files-found: ignore
+          path: party-tests.log
