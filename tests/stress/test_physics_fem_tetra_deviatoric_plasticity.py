@@ -27,6 +27,9 @@ def plastic_rate_factor(rate, delta, hardening):
 def one_step(log_principal, accumulated, yield_strain, hardening, factor, cap):
     dev, equivalent = deviatoric(log_principal)
     surplus = equivalent - yield_strain - hardening*accumulated
+    # Match the C++ 1e-12 guard for roundoff-only rigid/volumetric strain.
+    if surplus <= 1e-12:
+        return log_principal, accumulated
     plastic_step = max(0., min(equivalent, cap-accumulated, surplus*factor))
     if plastic_step <= 0:
         return log_principal, accumulated
