@@ -11,7 +11,7 @@ const BoxReflowStress := preload("res://box_reflow.gd")
 const BitMapMorphologyStress := preload("res://bitmap_morphology.gd")
 const PressureStress := preload("res://pressure_scenarios.gd")
 const CASES := [
-	"containers", "strings", "script_vm", "math", "signals",
+	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
 	"file_io", "threads", "physics_2d", "physics_3d", "physics_sparse_2d", "physics_sparse_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
@@ -81,6 +81,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 	match test_case:
 		"object_churn":
 			return _object_churn(scale)
+		"array_literals":
+			return _array_literals(scale)
+		"dictionary_snapshot":
+			return _dictionary_snapshot(scale)
 		"containers":
 			var length := 20000 * scale
 			var array: Array[int] = []
@@ -1777,3 +1781,48 @@ func _astar_grid_neighbors(scale: int) -> Dictionary:
 		"diagonal_no_obstacles_ms": timings[3],
 		"checksum": checksum,
 	}
+
+
+# Exercises OPCODE_CONSTRUCT_ARRAY with runtime-dependent values, not
+# compile-time constants or typed-array construction.
+func _array_literals(scale: int) -> Dictionary:
+	var iterations := mini(60000 * scale, 1200000)
+	var checksum := 0
+	var started := Time.get_ticks_usec()
+	for i in range(iterations):
+		var row: Array = [
+			i, i + 1, i + 2, i + 3,
+			i + 4, i + 5, i + 6, i + 7,
+			i + 8, i + 9, i + 10, i + 11,
+			i + 12, i + 13, i + 14, i + 15,
+		]
+		if row.size() != 16 or row[0] != i or row[15] != i + 15:
+			return {"error": "Array literal contents changed"}
+		checksum = (checksum + int(row[3]) + int(row[12])) & 0x7fffffff
+	var duration_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	return {"arrays": iterations, "elements": 16 * iterations,
+		"construction_ms": duration_ms, "checksum": checksum}
+
+
+# Checks that Dictionary.keys() and values() maintain the insertion-order
+# pairing and avoid repeated indexed destination writes.
+func _dictionary_snapshot(scale: int) -> Dictionary:
+	var count := mini(256 * scale, 8192)
+	var rounds := mini(100 * scale, 1500)
+	var values_by_key: Dictionary = {}
+	for i in range(count):
+		values_by_key[i] = i * 3 + 17
+	var checksum := 0
+	var started := Time.get_ticks_usec()
+	for i in range(rounds):
+		var keys := values_by_key.keys()
+		var values := values_by_key.values()
+		if keys.size() != count or values.size() != count:
+			return {"error": "Dictionary snapshot size mismatch"}
+		var index := i % count
+		if values_by_key[keys[index]] != values[index]:
+			return {"error": "Dictionary keys/values misaligned"}
+		checksum = (checksum + int(keys[index]) + int(values[index])) & 0x7fffffff
+	var duration_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	return {"entries": count, "snapshots": rounds,
+		"snapshot_ms": duration_ms, "checksum": checksum}

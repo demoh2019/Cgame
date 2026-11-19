@@ -510,3 +510,25 @@ python3 tests/stress/scale_sweep.py \
 Use identical hardware and build settings for old/new comparisons.
 The standalone zlib harness verifies finalization correctness, but is
 not a substitute for the native Godot round-trip or benchmark results.
+
+## GDScript array literal and Dictionary snapshot costs
+
+`array_literals` constructs nonconstant, 16-entry untyped array literals,
+targeting the GDScript VM's `OPCODE_CONSTRUCT_ARRAY`. The workload checks
+elements and reports `construction_ms` after setup.
+
+`dictionary_snapshot` builds a dictionary of integer keys and then
+repeatedly extracts aligned `keys()` and `values()` arrays, reporting
+`snapshot_ms` and validating key-value associations. Input size and
+repetitions are capped for larger stress presets.
+
+```bash
+python3 tests/stress/scale_sweep.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case array_literals,dictionary_snapshot \
+  --scales 1,2,4,8,16 --repeats 5 \
+  --output out/variant-hotpaths.json --summary-md out/variant-hotpaths.md
+```
+
+Use matching platforms and engine builds and compare case-specific latency
+and RSS. Workload microtimings include GDScript loop and validation overhead.
