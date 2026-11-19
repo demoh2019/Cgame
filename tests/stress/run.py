@@ -21,6 +21,8 @@ import tempfile
 import time
 from typing import Any
 
+from process_tree import sample as sample_process_tree, isolation_options, kill_group
+
 PREFIX = "STRESS_RESULT:"
 # A zero exit status is not enough: the engine can log script/runtime errors.
 ENGINE_ERROR = re.compile(r"(?m)^(?:SCRIPT ERROR:|ERROR:|E\s+\d+:)")
@@ -157,20 +159,22 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
     start = time.monotonic()
     maximum_rss: float | None = None
     latest_cpu: float | None = None
+    peak_processes = 0
     failure = None
     # A file, rather than a PIPE, avoids deadlock if the engine emits megabytes of errors.
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8", errors="replace") as output:
         try:
-            process = subprocess.Popen(cmd, stdout=output, stderr=subprocess.STDOUT)
+            process = subprocess.Popen(cmd, stdout=output, stderr=subprocess.STDOUT,
+                                       **isolation_options())
         except OSError as exc:
             return {"status": "failed", "failure": "launch: %s" % exc,
                     "wall_seconds": 0.0, "peak_rss_mib": None, "exit_code": None}
         while process.poll() is None:
             elapsed = time.monotonic() - start
-            current_rss = rss_mib(process.pid)
-            current_cpu = cpu_seconds(process.pid)
+            current_rss, current_cpu, process_count = sample_process_tree(process.pid)
+            peak_processes = max(peak_processes, process_count)
             if current_cpu is not None:
-                latest_cpu = current_cpu
+                latest_cpu = max(latest_cpu or 0.0, current_cpu)
             if current_rss is not None:
                 maximum_rss = max(maximum_rss or 0.0, current_rss)
                 if current_rss > rss_limit_mib:
@@ -181,7 +185,7 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
                 # Do not report an enforced RAM limit if monitoring is absent.
                 failure = "rss_monitor_unavailable"
             if failure is not None:
-                process.kill()
+                kill_group(process)
                 break
             time.sleep(0.05)
         process.wait()
@@ -196,6 +200,7 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
         "wall_seconds": round(elapsed, 6),
         "peak_rss_mib": round(maximum_rss, 3) if maximum_rss is not None else None,
         "cpu_seconds": round(latest_cpu, 6) if latest_cpu is not None else None,
+        "peak_processes": peak_processes,
         "exit_code": process.returncode,
     }
     if failure is None and process.returncode != 0:
@@ -228,6 +233,7 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "p95_wall_seconds": round(wall[math.ceil(0.95 * len(wall)) - 1], 6) if wall else None,
         "p99_wall_seconds": round(wall[math.ceil(0.99 * len(wall)) - 1], 6) if wall else None,
         "max_rss_mib": round(max(memories), 3) if memories else None,
+        "max_processes": max((r.get("peak_processes", 0) for r in runs), default=0),
         "median_cpu_seconds": round(statistics.median(cpu_times), 6) if cpu_times else None,
         "median_engine_ms": round(statistics.median(engine_times), 6) if engine_times else None,
         "p95_engine_ms": round(engine_times[math.ceil(0.95 * len(engine_times)) - 1], 6) if engine_times else None,
@@ -268,7 +274,7 @@ def check_absolute_limits(cases: dict[str, Any], max_frame_ms: float | None,
 def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
                      percent: float, memory_growth_limit_mib: float | None) -> list[str]:
     errors: list[str] = []
-    keys = ("preset", "scale", "frames", "render_mode", "seed")
+    keys = ("preset", "scale", "frames", "render_mode", "seed", "rss_scope")
     for key in keys:
         if current.get("configuration", {}).get(key) != baseline.get("configuration", {}).get(key):
             raise ValueError("Baseline configuration mismatch: %s" % key)
@@ -391,14 +397,15 @@ def main(argv: list[str] | None = None) -> int:
     if not (project / "project.godot").is_file() or not (project / "stress.gd").is_file():
         parser.error("Invalid stress project: %s" % project)
     report: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "host": {"platform": platform.platform(), "processor": platform.processor(),
                  "logical_cpus": os.cpu_count()},
         "godot_binary": binary,
         "configuration": {"preset": args.preset, "scale": config["scale"],
                           "frames": config["frames"], "repeats": config["repeats"],
-                          "render_mode": args.render_mode, "timeout_seconds": config["timeout"],
+                          "render_mode": args.render_mode, "rss_scope": "process_tree",
+                          "timeout_seconds": config["timeout"],
                           "rss_limit_mib": config["rss_mib"], "seed": args.seed},
         "cases": {},
         "failures": [],
