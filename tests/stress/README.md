@@ -2080,6 +2080,58 @@ by itself evidence of faster total frame time. C++ compilation, native
 headless regression and measured resource usage are required for
 production validation.
 
+### Cached clip-plane distances for 3D face manifolds (Box2D-style)
+
+GodotPhysics3D generates face/face contacts by clipping one convex
+face against the edge planes of the opposite face
+(Sutherland-Hodgman). The old inner loop evaluated the signed plane
+distance of **both ends of each edge**, so each polygon vertex was
+projected twice per clipping plane.
+
+The optimized loop caches the end-vertex distance to reuse as the
+next edge's start distance and reuses the first distance when closing
+the polygon. This reduces `2 * vertex_count` signed-distance
+evaluations to `vertex_count` for every nonempty clipping stage.
+It additionally exits immediately if a clipping stage produces zero
+vertices: subsequent half-plane intersections cannot make an empty
+convex polygon nonempty.
+
+This is only an evaluation-order optimization: the clipping planes,
+intersection equations, edge handling and contact callback are
+unchanged. The calculation uses the existing stack buffers, adds no
+heap allocations and requires no physics setting. Existing manifold
+generation and contact reduction are preserved.
+
+Python reference tests compare the old and cached signed-distance
+formulas on **10,000 randomized convex polygons** of 3–16 vertices
+against 1–8 random half-planes, including fully eliminated polygons.
+The headless regression creates a 12-gon convex prism and verifies
+overlap/near-miss queries and finite manifold points for parallel,
+relatively rotated and jointly rotated faces:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_3d_face_clip_distance_cache.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_face_clip_3d_regression.gd
+```
+
+The benchmark uses 16-sided convex prism pairs (256 static+dynamic
+pairs per scale), keeps their faces overlapping through small
+per-frame transform updates and collects physics-process/frame p95
+and RSS via the stress runner:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_face_clip_dense_3d,physics_face_clip_rotated_3d \
+  --scale 4 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/physics-face-clip-3d.json
+```
+
+For accurate performance attribution, compare each workload against
+its **identical pre-optimization scene on a previous Cgame binary**.
+The math references cannot replace C++ compilation, headless
+regressions or runtime CPU/RAM measurements.
+
 ### Optimized 3D sphere-box closest-point detection
 
 Cgame now specializes GodotPhysics3D's sphere-versus-box narrow phase
