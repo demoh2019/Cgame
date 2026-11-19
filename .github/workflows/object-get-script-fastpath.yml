@@ -1,0 +1,40 @@
+name: Object Script Getter Fast Path Tests
+on:
+  pull_request:
+    paths:
+      - "core/object/object.cpp"
+      - "core/io/json.cpp"
+      - "core/io/marshalls.cpp"
+      - "tests/core/object/test_placeholder_script_instance.cpp"
+      - ".github/workflows/object-get-script-fastpath.yml"
+  workflow_dispatch:
+
+jobs:
+  object-script-getter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Restore native editor SCons cache
+        uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-editor-native-script-fastpaths
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - name: Compile editor with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Save native editor SCons cache
+        uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-editor-native-script-fastpaths
+        continue-on-error: true
+      - name: Run object script fast-path regression tests
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[ObjectGetScript]*"
+      - name: Run script serialization fast-path regression tests
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[ScriptSerializationFastPath]*"

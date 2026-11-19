@@ -1,0 +1,32 @@
+name: SCons and SCU build hotpath regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "methods.py"
+      - "scu_builders.py"
+      - "misc/scripts/tests/test_build_source_hotpaths.py"
+      - ".github/workflows/build-source-hotpaths.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "methods.py"
+      - "scu_builders.py"
+      - "misc/scripts/tests/test_build_source_hotpaths.py"
+      - ".github/workflows/build-source-hotpaths.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-source-hotpaths:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Python build helpers
+        run: python3 -m py_compile methods.py scu_builders.py misc/scripts/tests/test_build_source_hotpaths.py
+      - name: Run behavior regressions
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_build_source_hotpaths.py' -v

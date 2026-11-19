@@ -1,0 +1,43 @@
+name: Upstream renderer compatibility regressions
+
+on:
+  pull_request:
+    paths:
+      - "servers/rendering/renderer_rd/forward_mobile/scene_shader_forward_mobile.cpp"
+      - "drivers/gles3/storage/material_storage.cpp"
+      - "servers/rendering/renderer_rd/storage_rd/material_storage.cpp"
+      - "drivers/vulkan/rendering_device_driver_vulkan.cpp"
+      - "misc/scripts/tests/test_upstream_renderer_compatibility.py"
+      - ".github/workflows/upstream-renderer-compatibility.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/renderer_rd/forward_mobile/scene_shader_forward_mobile.cpp"
+      - "drivers/gles3/storage/material_storage.cpp"
+      - "servers/rendering/renderer_rd/storage_rd/material_storage.cpp"
+      - "drivers/vulkan/rendering_device_driver_vulkan.cpp"
+      - "misc/scripts/tests/test_upstream_renderer_compatibility.py"
+      - ".github/workflows/upstream-renderer-compatibility.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            servers/rendering/renderer_rd/forward_mobile/scene_shader_forward_mobile.cpp
+            drivers/gles3/storage/material_storage.cpp
+            servers/rendering/renderer_rd/storage_rd/material_storage.cpp
+            drivers/vulkan/rendering_device_driver_vulkan.cpp
+            misc/scripts/tests/test_upstream_renderer_compatibility.py
+          sparse-checkout-cone-mode: false
+      - name: Validate Python test syntax
+        run: python3 -m py_compile misc/scripts/tests/test_upstream_renderer_compatibility.py
+      - name: Run 30 GLES3/mobile/Vulkan regressions
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_renderer_compatibility.py' -v

@@ -94,6 +94,9 @@ def build_context(project, max_files=128, max_file_bytes=65536, max_output_bytes
                 raise ContextError("Too many candidate files (limit: 20000)")
     candidates.sort(key=lambda pair: (pair[0].casefold(), pair[0]))
     result = {"schema": SCHEMA, "files": [], "truncated": False, "scanned_files": len(candidates), "skipped_files": 0}
+    # Account for encoded list entries incrementally. Re-encoding the whole
+    # accepted list at each step otherwise causes O(files^2) JSON work.
+    accepted_payload_bytes = 0
     for relative, path in candidates:
         if len(result["files"]) >= max_files:
             result["skipped_files"] += 1
@@ -108,11 +111,19 @@ def build_context(project, max_files=128, max_file_bytes=65536, max_output_bytes
             result["truncated"] = True
             continue
         item = _outline(relative, content)
-        result["files"].append(item)
-        if len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > max_output_bytes:
-            result["files"].pop()
+        encoded_item_bytes = len(json.dumps(item, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        # Only reserialize constant-size metadata so the current skip count
+        # and truncated flag retain the exact original JSON byte accounting.
+        envelope_bytes = len(json.dumps({**result, "files": []},
+                                        ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        separator_bytes = 1 if result["files"] else 0
+        added_bytes = separator_bytes + encoded_item_bytes
+        if envelope_bytes + accepted_payload_bytes + added_bytes > max_output_bytes:
             result["skipped_files"] += 1
             result["truncated"] = True
+            continue
+        result["files"].append(item)
+        accepted_payload_bytes += added_bytes
     return result
 
 

@@ -1,0 +1,65 @@
+name: Upstream scene-aware symbol rename regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'editor/script/find_in_files.cpp'
+      - 'misc/scripts/tests/test_upstream_scene_symbol_rename.py'
+      - '.github/workflows/upstream-scene-symbol-rename.yml'
+  pull_request:
+    paths:
+      - 'editor/script/find_in_files.cpp'
+      - 'misc/scripts/tests/test_upstream_scene_symbol_rename.py'
+      - '.github/workflows/upstream-scene-symbol-rename.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Python syntax
+        run: python -m py_compile misc/scripts/tests/test_upstream_scene_symbol_rename.py
+      - name: Run scene-aware rename safety contracts
+        run: python -m unittest discover -s misc/scripts/tests -p test_upstream_scene_symbol_rename.py -v
+
+  cgame-native-editor-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame editor (not stock Godot)
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Headless project import
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT="$(mktemp -d)"
+          trap 'rm -rf "$PROJECT"' EXIT
+          printf 'config_version=5\n[application]\nconfig/name="Symbol Rename Smoke"\n' > "$PROJECT/project.godot"
+          GODOT=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$GODOT" --version
+          timeout 45s "$GODOT" --headless --editor --path "$PROJECT" --import --quit 2>&1 | tee rename_editor_smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' rename_editor_smoke.log; then
+            exit 1
+          fi

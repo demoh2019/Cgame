@@ -467,6 +467,55 @@ TEST_CASE("[String] Find case insensitive") {
 	MULTICHECK_STRING_INT_EQ(s, rfindn, "WHA", -1, 13);
 }
 
+TEST_CASE("[String] Find case insensitive ASCII fast path") {
+	const String s = "xxaBcDyyABCDzz";
+	CHECK(s.findn(String("abcd")) == 2);
+	CHECK(s.findn("ABcd") == 2);
+	CHECK(s.findn(String("abCd"), 3) == 8);
+	CHECK(s.findn("aBcD", 3) == 8);
+	CHECK(s.rfindn(String("ABcD")) == 8);
+	CHECK(s.rfindn("aBcD") == 8);
+	CHECK(s.rfindn(String("aBcD"), 7) == 2);
+	CHECK(s.rfindn("abCd", 7) == 2);
+	CHECK(s.findn("abCe") == -1);
+	CHECK(s.findn(String("abCe")) == -1);
+	CHECK(s.findn("ABCDz", 9) == -1);
+
+	String repeated;
+	for (int i = 0; i < 128; ++i) {
+		repeated += "aBcD";
+	}
+	CHECK(repeated.findn("ABCD") == 0);
+	CHECK(repeated.rfindn("abcd") == 127 * 4);
+	CHECK(repeated.findn("abce") == -1);
+}
+
+TEST_CASE("[String] Find case insensitive ASCII exhaustive pairs") {
+	for (char32_t a = 32; a < 127; ++a) {
+		for (char32_t b = 32; b < 127; ++b) {
+			const char32_t folded_a = (a >= 'A' && a <= 'Z') ? a + ('a' - 'A') : a;
+			const char32_t folded_b = (b >= 'A' && b <= 'Z') ? b + ('a' - 'A') : b;
+			const int expected = folded_a == folded_b ? 0 : -1;
+			const String source = String::chr(a);
+			const String needle = String::chr(b);
+			CHECK(source.findn(needle) == expected);
+			CHECK(source.rfindn(needle) == expected);
+		}
+	}
+}
+
+TEST_CASE("[String] Find case insensitive Unicode fallback") {
+	const String s = U"xx\u212A\u03A3\u00C4yy\u0416\u0423\u041A";
+	CHECK(s.findn(String(U"k\u03C3\u00E4")) == 2);
+	CHECK(s.rfindn(String(U"k\u03C3\u00E4")) == 2);
+	CHECK(s.findn(String(U"\u0436\u0443\u043A")) == 7);
+	CHECK(s.rfindn(String(U"\u0436\u0443\u043A")) == 7);
+	CHECK(s.findn("k") == 2);
+	CHECK(s.rfindn("K") == 2);
+	CHECK(s.findn(String(U"k\u03C3\u00E5")) == -1);
+	CHECK(s.findn(String(U"\u0436\u0443\u043A"), 8) == -1);
+}
+
 TEST_CASE("[String] Find MK") {
 	Vector<String> keys;
 	keys.push_back("sty");
@@ -554,6 +603,65 @@ TEST_CASE("[String] remove_chars") {
 	CHECK(s.remove_chars(String()) == "Banana");
 	CHECK(s.remove_chars("xy") == "Banana");
 	CHECK(s.remove_chars(String("xy")) == "Banana");
+}
+
+TEST_CASE("[String] remove_chars long ASCII membership mask") {
+	String input;
+	String expected;
+	for (int i = 0; i < 256; ++i) {
+		input += "A\tB\nC D\rE-F_";
+		expected += "ABCDEF";
+	}
+	const String original = input;
+	CHECK(input.remove_chars(" \t\n\r-_") == expected);
+	CHECK(input.remove_chars(String(" \t\n\r-_")) == expected);
+	CHECK(input == original);
+	CHECK(input.remove_chars("xyz~") == original);
+
+	String only_removed;
+	for (int i = 0; i < 100; ++i) {
+		only_removed += "@_~ ";
+	}
+	CHECK(only_removed.remove_chars("@_~ ") == "");
+}
+
+TEST_CASE("[String] remove_chars ASCII bit boundary and exhaustive printable input") {
+	const String remove_set = String("@_~") + String::chr(127);
+	String input;
+	String expected;
+	for (int repeat = 0; repeat < 4; ++repeat) {
+		for (char32_t c = 32; c < 128; ++c) {
+			input += String::chr(c);
+			if (c != '@' && c != '_' && c != '~' && c != 127) {
+				expected += String::chr(c);
+			}
+		}
+	}
+	CHECK(input.remove_chars(remove_set) == expected);
+
+	String repeated;
+	String kept;
+	for (int i = 0; i < 128; ++i) {
+		repeated += "@a_b~c";
+		repeated += String::chr(127);
+		kept += "abc";
+	}
+	CHECK(repeated.remove_chars(remove_set) == kept);
+}
+
+TEST_CASE("[String] remove_chars preserves Unicode with ASCII set and Unicode fallback") {
+	String input;
+	String ascii_expected;
+	String unicode_expected;
+	for (int i = 0; i < 32; ++i) {
+		input += String(U"\u0416 \u03A3\t\u212A \u00C4");
+		ascii_expected += String(U"\u0416\u03A3\u212A\u00C4");
+		unicode_expected += String(U"\u212A\u00C4");
+	}
+	CHECK(input.remove_chars(" \t\r\n") == ascii_expected);
+	CHECK(input.remove_chars(String(" \t\r\n")) == ascii_expected);
+	CHECK(input.remove_chars(String(U" \u0416\u03A3\t")) == unicode_expected);
+	CHECK(String("A B").remove_chars(" \t-_") == "AB");
 }
 
 TEST_CASE("[String] Number to string") {

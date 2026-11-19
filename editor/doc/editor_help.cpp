@@ -3110,13 +3110,13 @@ void EditorHelp::_load_doc_thread(void *p_udata) {
 			doc->add_doc(DocData::ClassDoc::from_dict(classes[i]));
 		}
 		if (use_script_cache) {
-			callable_mp_static(&EditorHelp::load_script_doc_cache).call_deferred();
+			callable_mp(doc_owner, &EditorHelpDocOwner::load_script_doc_cache).call_deferred();
 		}
 		// Extensions' docs are not cached. Generate them now (on the main thread).
-		callable_mp_static(&EditorHelp::_gen_extensions_docs).call_deferred();
+		callable_mp(doc_owner, &EditorHelpDocOwner::_gen_extensions_docs).call_deferred();
 	} else {
 		// We have to go back to the main thread to start from scratch, bypassing any possibly existing cache.
-		callable_mp_static(&EditorHelp::generate_doc).call_deferred(false, use_script_cache);
+		callable_mp(doc_owner, &EditorHelpDocOwner::generate_doc).call_deferred(false, use_script_cache);
 	}
 
 	OS::get_singleton()->benchmark_end_measure("EditorHelp", vformat("Generate Documentation (Run %d)", doc_generation_count));
@@ -3149,13 +3149,17 @@ void EditorHelp::_gen_doc_thread(void *p_udata) {
 	// Load script docs after native ones are cached so native cache doesn't contain script docs.
 	bool use_script_cache = (bool)p_udata;
 	if (use_script_cache) {
-		callable_mp_static(&EditorHelp::load_script_doc_cache).call_deferred();
+		callable_mp(doc_owner, &EditorHelpDocOwner::load_script_doc_cache).call_deferred();
 	}
 
 	OS::get_singleton()->benchmark_end_measure("EditorHelp", vformat("Generate Documentation (Run %d)", doc_generation_count));
 }
 
 void EditorHelp::_gen_extensions_docs() {
+	if (_doc_torn_down.is_set()) {
+		return;
+	}
+
 	doc->generate((DocTools::GENERATE_FLAG_SKIP_BASIC_TYPES | DocTools::GENERATE_FLAG_EXTENSION_CLASSES_ONLY));
 
 	// Append extra doc data, as it gets overridden by the generation step.
@@ -3168,6 +3172,10 @@ static void _load_script_doc_cache(bool p_changes) {
 }
 
 void EditorHelp::load_script_doc_cache() {
+	if (_doc_torn_down.is_set()) {
+		return;
+	}
+
 	if (!ProjectSettings::get_singleton()->is_project_loaded()) {
 		print_verbose("Skipping loading script doc cache since no project is open.");
 		return;
@@ -3217,7 +3225,7 @@ void EditorHelp::_load_script_doc_cache_thread(void *p_udata) {
 	if (script_doc_cache_res.is_null()) {
 		print_verbose("Script doc cache is corrupted. Regenerating it instead.");
 		_delete_script_doc_cache();
-		callable_mp_static(EditorHelp::regenerate_script_doc_cache).call_deferred();
+		callable_mp(doc_owner, &EditorHelpDocOwner::regenerate_script_doc_cache).call_deferred();
 		return;
 	}
 
@@ -3242,6 +3250,10 @@ static void _regenerate_script_doc_cache(bool p_changes) {
 }
 
 void EditorHelp::regenerate_script_doc_cache() {
+	if (_doc_torn_down.is_set()) {
+		return;
+	}
+
 	if (EditorFileSystem::get_singleton()->is_scanning()) {
 		// Wait until EditorFileSystem scanning is complete to use updated filesystem structure.
 		EditorFileSystem::get_singleton()->connect(SNAME("sources_changed"), callable_mp_static(_regenerate_script_doc_cache), CONNECT_ONE_SHOT);
@@ -3327,6 +3339,10 @@ void EditorHelp::save_script_doc_cache() {
 }
 
 void EditorHelp::generate_doc(bool p_use_cache, bool p_use_script_cache) {
+	if (_doc_torn_down.is_set()) {
+		return;
+	}
+
 	doc_generation_count++;
 	OS::get_singleton()->benchmark_begin_measure("EditorHelp", vformat("Generate Documentation (Run %d)", doc_generation_count));
 
@@ -3335,6 +3351,9 @@ void EditorHelp::generate_doc(bool p_use_cache, bool p_use_script_cache) {
 
 	if (!doc) {
 		doc = memnew(DocTools);
+	}
+	if (!doc_owner) {
+		doc_owner = memnew(EditorHelpDocOwner);
 	}
 
 	if (doc_version_hash.is_empty()) {
@@ -3445,7 +3464,10 @@ Dictionary EditorHelp::get_state() {
 }
 
 void EditorHelp::cleanup_doc() {
+	_doc_torn_down.set();
 	_wait_for_thread();
+	memdelete(doc_owner);
+	doc_owner = nullptr;
 	memdelete(doc);
 	doc = nullptr;
 }

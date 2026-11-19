@@ -1,0 +1,37 @@
+name: Upstream glTF import regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gltf/structures/gltf_accessor.cpp'
+      - 'modules/gltf/extensions/gltf_light.cpp'
+      - 'tests/scene/test_gltf_document.cpp'
+      - 'misc/scripts/tests/test_upstream_gltf_backports_20261119.py'
+      - '.github/workflows/upstream-gltf-regressions.yml'
+  pull_request:
+    paths:
+      - 'modules/gltf/structures/gltf_accessor.cpp'
+      - 'modules/gltf/extensions/gltf_light.cpp'
+      - 'tests/scene/test_gltf_document.cpp'
+      - 'misc/scripts/tests/test_upstream_gltf_backports_20261119.py'
+      - '.github/workflows/upstream-gltf-regressions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-guards:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Check glTF importer source invariants
+        run: python -m unittest discover -s misc/scripts/tests -p test_upstream_gltf_backports_20261119.py -v

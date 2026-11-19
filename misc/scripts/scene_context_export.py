@@ -8,6 +8,7 @@ property values and source code are deliberately excluded from the output.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import json
 from pathlib import Path
 import posixpath
@@ -133,16 +134,15 @@ def export_context(root: Path, scene_uri: str, *, max_depth: int = 2,
         raise SceneContextError("Only .tscn text scenes are supported")
     safe_path(root, scene_uri)
 
-    queue = [(scene_uri, 0)]
-    seen: set[str] = set()
+    # Constant-time deque pops and one-time enqueue prevent quadratic
+    # traversal on projects with many shared/cyclic scene dependencies.
+    queue = deque([(scene_uri, 0)])
+    scheduled = {scene_uri}
     scenes: list[dict] = []
     warnings: list[dict] = []
     node_count = 0
     while queue:
-        uri, depth = queue.pop(0)
-        if uri in seen:
-            continue
-        seen.add(uri)
+        uri, depth = queue.popleft()
         if len(scenes) >= max_scenes:
             raise SceneContextError("Scene count exceeds limit")
         try:
@@ -164,7 +164,8 @@ def export_context(root: Path, scene_uri: str, *, max_depth: int = 2,
         if depth < max_depth:
             for resource in parsed["resources"]:
                 ref = resource["path"]
-                if ref and ref.endswith(".tscn") and ref not in seen:
+                if ref and ref.endswith(".tscn") and ref not in scheduled:
+                    scheduled.add(ref)
                     queue.append((ref, depth + 1))
 
     scenes.sort(key=lambda item: item["path"])

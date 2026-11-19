@@ -1,0 +1,37 @@
+name: Upstream X11 shortcut regression tests
+
+on:
+  pull_request:
+    paths:
+      - "platform/linuxbsd/x11/display_server_x11.cpp"
+      - "platform/linuxbsd/x11/display_server_x11.h"
+      - "misc/scripts/tests/test_upstream_x11_shortcuts.py"
+      - ".github/workflows/upstream-x11-shortcuts.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "platform/linuxbsd/x11/display_server_x11.cpp"
+      - "platform/linuxbsd/x11/display_server_x11.h"
+      - "misc/scripts/tests/test_upstream_x11_shortcuts.py"
+      - ".github/workflows/upstream-x11-shortcuts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  x11-shortcuts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            platform/linuxbsd/x11/display_server_x11.cpp
+            platform/linuxbsd/x11/display_server_x11.h
+            misc/scripts/tests/test_upstream_x11_shortcuts.py
+          sparse-checkout-cone-mode: false
+      - name: Check test syntax
+        run: python3 -m py_compile misc/scripts/tests/test_upstream_x11_shortcuts.py
+      - name: Run X11 shortcut regression contracts
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_x11_shortcuts.py' -v

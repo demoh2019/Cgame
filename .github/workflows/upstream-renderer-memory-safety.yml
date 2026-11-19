@@ -1,0 +1,65 @@
+name: Upstream renderer memory safety regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/raycast/raycast_occlusion_cull.cpp'
+      - 'modules/raycast/raycast_occlusion_cull.h'
+      - 'drivers/gles3/storage/material_storage.cpp'
+      - 'servers/rendering/renderer_rd/storage_rd/material_storage.cpp'
+      - 'misc/scripts/tests/test_upstream_renderer_memory_safety.py'
+      - '.github/workflows/upstream-renderer-memory-safety.yml'
+  pull_request:
+    paths:
+      - 'modules/raycast/raycast_occlusion_cull.cpp'
+      - 'modules/raycast/raycast_occlusion_cull.h'
+      - 'drivers/gles3/storage/material_storage.cpp'
+      - 'servers/rendering/renderer_rd/storage_rd/material_storage.cpp'
+      - 'misc/scripts/tests/test_upstream_renderer_memory_safety.py'
+      - '.github/workflows/upstream-renderer-memory-safety.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Test alignment, cleanup and uniform clearing contracts
+        run: |
+          python -m py_compile misc/scripts/tests/test_upstream_renderer_memory_safety.py
+          python -m unittest discover -s misc/scripts/tests -p 'test_upstream_renderer_memory_safety.py' -v
+
+  native-cgame-editor-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Compile native editor with tests enabled
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Basic native engine startup regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --version
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --help > /dev/null

@@ -90,4 +90,129 @@ TEST_CASE("[FuzzySearch] Test fuzzy search results") {
 	}
 }
 
+TEST_CASE("[FuzzySearch] Reuse failed candidates without leaking token scores or matches") {
+	FuzzySearch search;
+	search.set_use_exact_tokens(true);
+	search.set_filter_low_scores(false);
+
+	Vector<String> targets;
+	for (int i = 0; i < 256; i++) {
+		targets.append("unrelated_" + itos(i) + ".gd");
+	}
+	// The first token matches but the second fails; this must not contaminate
+	// the score, intervals or token matches of subsequent candidates.
+	targets.append("alpha_only.gd");
+	targets.append("beta_only.gd");
+	targets.append("prefix_alpha_beta.gd");
+	targets.append("alpha_without_second.gd");
+	targets.append("prefix_beta_alpha.tscn");
+	targets.append("alpha_beta_02.tscn");
+
+	for (int i = 0; i < 256; i++) {
+		targets.append("irrelevant_" + itos(i) + ".tscn");
+	}
+
+	Vector<Ref<FuzzySearchMatch>> results = search.search_all("alpha beta", targets);
+	REQUIRE(results.size() == 3);
+
+	bool seen[3] = { false, false, false };
+	const int expected_indices[3] = { 258, 260, 261 };
+	for (const Ref<FuzzySearchMatch> &result : results) {
+		const int index = result->get_original_index();
+		int expected_pos = -1;
+		for (int i = 0; i < 3; i++) {
+			if (expected_indices[i] == index) {
+				expected_pos = i;
+				break;
+			}
+		}
+		REQUIRE(expected_pos != -1);
+		CHECK_FALSE(seen[expected_pos]);
+		seen[expected_pos] = true;
+
+		Ref<FuzzySearchMatch> independent = search.search("alpha beta", targets[index]);
+		REQUIRE(independent.is_valid());
+		CHECK_EQ(result->get_target(), independent->get_target());
+		CHECK_EQ(result->get_score(), independent->get_score());
+		CHECK_EQ(result->get_matched_substrings().size(), independent->get_matched_substrings().size());
+	}
+	for (bool found : seen) {
+		CHECK(found);
+	}
+}
+
+TEST_CASE("[FuzzySearch] Length prefilter preserves miss budget and start offset semantics") {
+	FuzzySearch search;
+	search.set_filter_low_scores(false);
+	search.set_max_misses(2);
+	search.set_start_offset(1);
+
+	Vector<String> targets;
+	targets.append("_");
+	targets.append("_abc");
+	targets.append("_abf");
+	targets.append("_abef");
+	targets.append("_abcf");
+	targets.append("_abcdef");
+	targets.append("_abc_def");
+	targets.append("_ABEF");
+	targets.append("_xyzxyz");
+	targets.append("_abcdef_extra");
+
+	// Four matched characters are sufficient when two of six characters are missed.
+	REQUIRE(search.search("abc def", "_abef").is_valid());
+	CHECK(search.search("abc def", "_abf").is_null());
+
+	for (bool exact : { false, true }) {
+		search.set_use_exact_tokens(exact);
+		Vector<Ref<FuzzySearchMatch>> results = search.search_all("abc def", targets);
+
+		int expected_matches = 0;
+		for (int i = 0; i < targets.size(); i++) {
+			if (search.search("abc def", targets[i]).is_valid()) {
+				expected_matches++;
+			}
+		}
+		REQUIRE(results.size() == expected_matches);
+
+		for (const Ref<FuzzySearchMatch> &result : results) {
+			const int index = result->get_original_index();
+			REQUIRE(index >= 0);
+			REQUIRE(index < targets.size());
+			Ref<FuzzySearchMatch> independent = search.search("abc def", targets[index]);
+			REQUIRE(independent.is_valid());
+			CHECK_EQ(result->get_target(), independent->get_target());
+			CHECK_EQ(result->get_score(), independent->get_score());
+			CHECK_EQ(result->get_matched_substrings().size(), independent->get_matched_substrings().size());
+		}
+	}
+
+	CHECK_EQ(search.search_all("", targets).size(), 0);
+	CHECK_EQ(search.search_all("   ", targets).size(), 0);
+}
+
+TEST_CASE("[FuzzySearch] Boundary scoring retains all ASCII separators") {
+	FuzzySearch search;
+	search.set_use_exact_tokens(true);
+	search.set_case_sensitive(true);
+
+	Ref<FuzzySearchMatch> inside_word = search.search("a", "x?ay");
+	REQUIRE(inside_word.is_valid());
+
+	const char *targets[] = {
+		"x/ay",
+		"x\\ay",
+		"x-ay",
+		"x_ay",
+		"x.ay",
+		"x ay",
+	};
+
+	for (const char *target : targets) {
+		Ref<FuzzySearchMatch> at_boundary = search.search("a", target);
+		REQUIRE(at_boundary.is_valid());
+		CHECK_GT(at_boundary->get_score(), inside_word->get_score());
+	}
+}
+
 } // namespace TestFuzzySearch

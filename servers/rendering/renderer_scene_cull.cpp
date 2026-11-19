@@ -3264,19 +3264,25 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 				}
 			}
 
-			for (uint32_t j = 0; j < cull_data.cull->shadow_count; j++) {
-				for (uint32_t k = 0; k < cull_data.cull->shadows[j].cascade_count; k++) {
-					if (!light_culler->cull_directional_light(cull_data.scenario->instance_aabbs[i], j, k)) { // pass the cascade index
+			// Filter per-instance and per-light conditions before the expensive per-cascade culler.
+			const uint32_t shadow_base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
+			if (cull_data.cull->shadow_count > 0 && VIS_CHECK &&
+					((1 << shadow_base_type) & RSE::INSTANCE_GEOMETRY_MASK) &&
+					(idata.flags & InstanceData::FLAG_CAST_SHADOWS) &&
+					!(shadow_base_type == RSE::INSTANCE_PARTICLES && RSG::particles_storage->particles_is_inactive(idata.base_rid))) {
+				for (uint32_t j = 0; j < cull_data.cull->shadow_count; j++) {
+					if (!(LAYER_CHECK & cull_data.cull->shadows[j].caster_mask)) {
 						continue;
 					}
-					if (IN_FRUSTUM(cull_data.cull->shadows[j].cascades[k].frustum) && VIS_CHECK) {
-						uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
-
-						const bool is_inactive_particle = (base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(idata.base_rid);
-						if (((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) && idata.flags & InstanceData::FLAG_CAST_SHADOWS && (LAYER_CHECK & cull_data.cull->shadows[j].caster_mask) && !is_inactive_particle) {
-							cull_result.directional_shadows[j].cascade_geometry_instances[k].push_back(idata.instance_geometry);
-							mesh_visible = true;
+					for (uint32_t k = 0; k < cull_data.cull->shadows[j].cascade_count; k++) {
+						if (!IN_FRUSTUM(cull_data.cull->shadows[j].cascades[k].frustum)) {
+							continue;
 						}
+						if (!light_culler->cull_directional_light(cull_data.scenario->instance_aabbs[i], j, k)) {
+							continue;
+						}
+						cull_result.directional_shadows[j].cascade_geometry_instances[k].push_back(idata.instance_geometry);
+						mesh_visible = true;
 					}
 				}
 			}

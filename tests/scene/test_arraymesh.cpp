@@ -38,6 +38,15 @@ TEST_FORCE_LINK(test_arraymesh)
 #include "scene/resources/3d/importer_mesh.h"
 #include "scene/resources/3d/primitive_meshes.h"
 #include "scene/resources/mesh.h"
+#include "tests/signal_watcher.h"
+
+#ifdef TOOLS_ENABLED
+#include "core/io/file_access.h"
+#include "editor/import/3d/resource_importer_obj.h"
+#include "scene/3d/importer_mesh_instance_3d.h"
+#include "scene/resources/material.h"
+#include "tests/test_utils.h"
+#endif
 #include "servers/rendering/rendering_server.h"
 
 namespace TestArrayMesh {
@@ -532,6 +541,74 @@ TEST_CASE("[SceneTree][ArrayMesh] Get/Set mesh metadata and actions") {
 		CHECK(mesh->get_surface_count() == 2);
 	}
 }
+
+
+TEST_CASE("[SceneTree][ImporterMesh] Imported ArrayMesh emits changed once after all surfaces") {
+	for (int surface_count : { 1, 2, 4 }) {
+		INFO("Surfaces: ", surface_count);
+		Ref<ImporterMesh> imported;
+		imported.instantiate();
+		for (int surface = 0; surface < surface_count; surface++) {
+			Array arrays;
+			arrays.resize(Mesh::ARRAY_MAX);
+			PackedVector3Array vertices;
+			vertices.push_back(Vector3(surface * 3.0f, 0.0f, 0.0f));
+			vertices.push_back(Vector3(surface * 3.0f + 1.0f, 0.0f, 0.0f));
+			vertices.push_back(Vector3(surface * 3.0f, 1.0f, 0.0f));
+			arrays[Mesh::ARRAY_VERTEX] = vertices;
+			imported->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays);
+		}
+
+		Ref<ArrayMesh> base;
+		base.instantiate();
+		SIGNAL_WATCH(base.ptr(), "changed");
+		Ref<ArrayMesh> result = imported->get_mesh(base);
+		REQUIRE(result == base);
+		CHECK(result->get_surface_count() == surface_count);
+		const Array expected_signal_args = { {} };
+		SIGNAL_CHECK("changed", expected_signal_args);
+		SIGNAL_UNWATCH(base.ptr(), "changed");
+	}
+}
+
+#ifdef TOOLS_ENABLED
+TEST_CASE("[SceneTree][OBJ] MTL diffuse color is converted from linear to sRGB") {
+	const String obj_path = TestUtils::get_temp_path("upstream_obj_diffuse_color.obj");
+	const String mtl_path = TestUtils::get_temp_path("upstream_obj_diffuse_color.mtl");
+	Error err = OK;
+	{
+		Ref<FileAccess> mtl = FileAccess::open(mtl_path, FileAccess::WRITE, &err);
+		REQUIRE(err == OK);
+		REQUIRE(mtl.is_valid());
+		mtl->store_string("newmtl ImportedMaterial\nKd 0.5 0.25 1.0\n");
+		mtl->close();
+	}
+	{
+		Ref<FileAccess> obj = FileAccess::open(obj_path, FileAccess::WRITE, &err);
+		REQUIRE(err == OK);
+		REQUIRE(obj.is_valid());
+		obj->store_string("mtllib upstream_obj_diffuse_color.mtl\no Triangle\nusemtl ImportedMaterial\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+		obj->close();
+	}
+
+	EditorOBJImporter *importer = memnew(EditorOBJImporter);
+	Node *scene = importer->import_scene(obj_path, 0, HashMap<StringName, Variant>(), nullptr, &err);
+	REQUIRE(err == OK);
+	REQUIRE(scene != nullptr);
+	REQUIRE(scene->get_child_count() > 0);
+	ImporterMeshInstance3D *mesh_node = Object::cast_to<ImporterMeshInstance3D>(scene->get_child(0));
+	REQUIRE(mesh_node != nullptr);
+	Ref<ImporterMesh> imported_mesh = mesh_node->get_mesh();
+	REQUIRE(imported_mesh.is_valid());
+	REQUIRE(imported_mesh->get_surface_count() > 0);
+	Ref<StandardMaterial3D> material = imported_mesh->get_surface_material(0);
+	REQUIRE(material.is_valid());
+	const Color expected = Color(0.5f, 0.25f, 1.0f).linear_to_srgb();
+	CHECK(material->get_albedo().is_equal_approx(expected));
+	memdelete(scene);
+	memdelete(importer);
+}
+#endif // TOOLS_ENABLED
 
 } // namespace TestArrayMesh
 

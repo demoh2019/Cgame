@@ -136,6 +136,53 @@ class ProjectContextTests(unittest.TestCase):
         self.assertTrue(result["truncated"])
         self.assertLessEqual(len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode()), 600)
 
+    def test_budget_matches_full_json_accounting(self):
+        # Unicode UTF-8 bytes, rejected entries, and the skipped-count digit
+        # boundary must match the previous complete-serialization behavior.
+        for number in range(37):
+            self.write(f"{number:03}.tscn",
+                       '[gd_scene format=3]\n[node name="Игрок 🚀" type="Node2D"]\n')
+        paths = [f"{number:03}.tscn" for number in range(37)]
+        for limit in (512, 600, 900, 1600, 4096):
+            with self.subTest(limit=limit):
+                expected = {"schema": ctx.SCHEMA, "files": [], "truncated": False,
+                            "scanned_files": len(paths), "skipped_files": 0}
+                for relative in paths:
+                    if len(expected["files"]) >= 18:
+                        expected["skipped_files"] += 1
+                        expected["truncated"] = True
+                        continue
+                    item = ctx._outline(relative,
+                                        (self.root / relative).read_text(encoding="utf-8"))
+                    expected["files"].append(item)
+                    if len(json.dumps(expected, ensure_ascii=False,
+                                      separators=(",", ":")).encode("utf-8")) > limit:
+                        expected["files"].pop()
+                        expected["skipped_files"] += 1
+                        expected["truncated"] = True
+                self.assertEqual(ctx.build_context(self.root, max_files=18,
+                                                   max_output_bytes=limit), expected)
+
+    def test_budget_serialization_work_is_linear(self):
+        # Track encoded bytes, not elapsed wall time (which is noisy on CI).
+        from unittest import mock
+        for number in range(90):
+            self.write(f"{number:03}.gd", "func render(): pass\n")
+        original_dumps = json.dumps
+        total_serialized_bytes = 0
+
+        def measure_serialization(obj, *args, **kwargs):
+            nonlocal total_serialized_bytes
+            encoded = original_dumps(obj, *args, **kwargs)
+            total_serialized_bytes += len(encoded.encode("utf-8"))
+            return encoded
+
+        with mock.patch.object(ctx.json, "dumps", side_effect=measure_serialization):
+            result = ctx.build_context(self.root, max_files=100,
+                                       max_output_bytes=1048576)
+        self.assertEqual(len(result["files"]), 90)
+        self.assertLess(total_serialized_bytes, 100000)
+
     def test_references_deduplicated_and_sorted(self):
         self.write("main.tscn", '\n'.join(f'[ext_resource type="Script" path="res://{x}" id="1"]' for x in ["b.gd", "a.gd", "b.gd"]))
         self.assertEqual(ctx.build_context(self.root)["files"][0]["references"], ["res://a.gd", "res://b.gd"])

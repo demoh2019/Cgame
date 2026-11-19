@@ -33,8 +33,6 @@
 #include "core/object/class_db.h"
 #include "core/variant/typed_array.h"
 
-static const String boundary_chars = "/\\-_. ";
-
 static bool _is_valid_interval(const Vector2i &p_interval) {
 	// Empty intervals are represented as (-1, -1).
 	return p_interval.x >= 0 && p_interval.y >= p_interval.x;
@@ -54,7 +52,19 @@ static bool _is_word_boundary(const String &p_str, int p_index) {
 	if (p_index == -1 || p_index == p_str.length()) {
 		return true;
 	}
-	return boundary_chars.find_char(p_str[p_index]) != -1;
+	// Called repeatedly while scoring candidates. Avoid searching a
+	// String for these six ASCII word delimiters.
+	switch (p_str[p_index]) {
+		case '/':
+		case '\\':
+		case '-':
+		case '_':
+		case '.':
+		case ' ':
+			return true;
+		default:
+			return false;
+	}
 }
 
 bool FuzzySearchToken::try_exact_match(FuzzyTokenMatch &p_match, const String &p_target, int p_offset) const {
@@ -401,13 +411,38 @@ Ref<FuzzySearchMatch> FuzzySearch::search(const String &p_query, const String &p
 Vector<Ref<FuzzySearchMatch>> FuzzySearch::search_all(const String &p_query, const PackedStringArray &p_targets) const {
 	Vector<Ref<FuzzySearchMatch>> results;
 	const Vector<FuzzySearchToken> tokens = _get_tokens(p_query);
+	if (tokens.is_empty()) {
+		return results;
+	}
 
+	// Token ranges cannot overlap, and the global miss budget bounds the number of
+	// skipped query characters. Shorter targets cannot possibly match.
+	int min_matched_length = 0;
+	for (const FuzzySearchToken &token : tokens) {
+		min_matched_length += token.string.length();
+	}
+	min_matched_length = MAX(1, min_matched_length - (exact_token_matches ? 0 : max_misses));
+
+	// Most candidates do not match. Reuse the temporary match object instead of allocating
+	// a RefCounted object (and freeing it) for every rejected target.
+	Ref<FuzzySearchMatch> result;
 	for (int i = 0; i < p_targets.size(); i++) {
-		Ref<FuzzySearchMatch> result;
-		result.instantiate();
+		if (p_targets[i].length() - start_offset < min_matched_length) {
+			continue;
+		}
+		if (result.is_null()) {
+			result.instantiate();
+		} else {
+			// A failed search may have added partial token matches and a nonzero score.
+			result->score = 0;
+			result->match_interval = Vector2i(-1, -1);
+			result->token_matches.clear();
+		}
 		result->original_index = i;
 		if (_search_tokens(tokens, p_targets[i], result)) {
 			results.append(result);
+			// Successful results must never be mutated while processing later targets.
+			result.unref();
 		}
 	}
 
