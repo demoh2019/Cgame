@@ -191,4 +191,28 @@ TEST_CASE("[FuzzySearch] Length prefilter preserves miss budget and start offset
 	CHECK_EQ(search.search_all("   ", targets).size(), 0);
 }
 
+TEST_CASE("[FuzzySearch] Boundary scoring retains all ASCII separators") {
+	FuzzySearch search;
+	search.set_use_exact_tokens(true);
+	search.set_case_sensitive(true);
+
+	Ref<FuzzySearchMatch> inside_word = search.search("a", "x?ay");
+	REQUIRE(inside_word.is_valid());
+
+	const char *targets[] = {
+		"x/ay",
+		"x\\\\ay",
+		"x-ay",
+		"x_ay",
+		"x.ay",
+		"x ay",
+	};
+
+	for (const char *target : targets) {
+		Ref<FuzzySearchMatch> at_boundary = search.search("a", target);
+		REQUIRE(at_boundary.is_valid());
+		CHECK_GT(at_boundary->get_score(), inside_word->get_score());
+	}
+}
+
 } // namespace TestFuzzySearch
