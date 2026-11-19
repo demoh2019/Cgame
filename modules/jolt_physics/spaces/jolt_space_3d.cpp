@@ -195,6 +195,12 @@ JoltSpace3D::JoltSpace3D(JPH::JobSystem *p_job_system, JPH::TempAllocator *p_tem
 	physics_system->Init((JPH::uint)JoltProjectSettings::max_bodies, 0, (JPH::uint)JoltProjectSettings::max_body_pairs, (JPH::uint)JoltProjectSettings::max_contact_constraints, *layers, *layers, *layers);
 
 	JPH::PhysicsSettings settings;
+	// Memory/throughput trade-off: this is a temporary per-Update queue, not
+	// Jolt's maximum number of cached or persistent body pairs. The choice
+	// is made once per space so it cannot change while worker jobs are running.
+	settings.mMaxInFlightBodyPairs = JoltProjectSettings::max_in_flight_body_pairs;
+	settings.mUseLargeIslandSplitter = JoltProjectSettings::simulation_use_large_island_splitter;
+	settings.mUseManifoldReduction = JoltProjectSettings::simulation_use_manifold_reduction;
 	settings.mBaumgarte = JoltProjectSettings::baumgarte_stabilization_factor;
 	settings.mSpeculativeContactDistance = JoltProjectSettings::speculative_contact_distance;
 	settings.mPenetrationSlop = JoltProjectSettings::penetration_slop;
