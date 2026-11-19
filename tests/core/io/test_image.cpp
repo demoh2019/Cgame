@@ -983,4 +983,71 @@ TEST_CASE("[Image][BlendHotpath] Self-blend and destination-mask alias use scala
 	CHECK_MESSAGE(masked->get_data() == reference->get_data(), "Destination-mask alias must preserve the original scalar behavior.");
 }
 
+
+TEST_CASE("[Image][Performance] Roughness mipmaps keep flat normal and source intact") {
+	for (Image::Format normal_format : { Image::FORMAT_RGBA8, Image::FORMAT_RGBAF }) {
+		Ref<Image> normal_map = Image::create_empty(64, 32, false, normal_format);
+		REQUIRE(normal_map.is_valid());
+		Ref<Image> roughness = Image::create_empty(64, 32, false, Image::FORMAT_RGBAF);
+		REQUIRE(roughness.is_valid());
+		const Color source_normal(0.5, 0.5, 1.0, 1.0);
+		const Color base_roughness(0.35, 0.45, 0.55, 0.65);
+		for (int y = 0; y < 32; y++) {
+			for (int x = 0; x < 64; x++) {
+				normal_map->set_pixel(x, y, source_normal);
+				roughness->set_pixel(x, y, base_roughness);
+			}
+		}
+		const Vector<uint8_t> original_normals = normal_map->get_data();
+		REQUIRE(roughness->generate_mipmaps() == OK);
+		REQUIRE(roughness->generate_mipmap_roughness(Image::ROUGHNESS_CHANNEL_R, normal_map) == OK);
+		CHECK(normal_map->get_data() == original_normals);
+		CHECK_FALSE(normal_map->has_mipmaps());
+
+		for (int mip = 1; mip <= roughness->get_mipmap_count(); mip++) {
+			const Ref<Image> level = roughness->get_image_from_mipmap(mip);
+			REQUIRE(level.is_valid());
+			for (int y = 0; y < level->get_height(); y++) {
+				for (int x = 0; x < level->get_width(); x++) {
+					const Color color = level->get_pixel(x, y);
+					CHECK(Math::abs(color.r - base_roughness.r) < 0.01);
+					CHECK(Math::is_equal_approx(color.g, base_roughness.g));
+					CHECK(Math::is_equal_approx(color.b, base_roughness.b));
+					CHECK(Math::is_equal_approx(color.a, base_roughness.a));
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[Image][Performance] Roughness mipmaps process nonuniform normals by rows") {
+	Ref<Image> normal_map = Image::create_empty(64, 32, false, Image::FORMAT_RGBAF);
+	Ref<Image> roughness = Image::create_empty(64, 32, false, Image::FORMAT_RGBAF);
+	REQUIRE(normal_map.is_valid());
+	REQUIRE(roughness.is_valid());
+
+	for (int y = 0; y < 32; y++) {
+		for (int x = 0; x < 64; x++) {
+			const float nx = x % 2 == 0 ? 0.35f : 0.65f;
+			const float ny = y % 2 == 0 ? 0.4f : 0.6f;
+			normal_map->set_pixel(x, y, Color(nx, ny, 1, 1));
+			roughness->set_pixel(x, y, Color(0.1, 0.2, 0.3, 0.4));
+		}
+	}
+	REQUIRE(roughness->generate_mipmaps() == OK);
+	REQUIRE(roughness->generate_mipmap_roughness(Image::ROUGHNESS_CHANNEL_G, normal_map) == OK);
+	Ref<Image> mip = roughness->get_image_from_mipmap(1);
+	REQUIRE(mip.is_valid());
+	for (int y = 0; y < mip->get_height(); y++) {
+		for (int x = 0; x < mip->get_width(); x++) {
+			const Color c = mip->get_pixel(x, y);
+			CHECK(c.g >= 0.2f);
+			CHECK(Math::is_finite(c.g));
+			CHECK(Math::is_equal_approx(c.r, (real_t)0.1));
+			CHECK(Math::is_equal_approx(c.b, (real_t)0.3));
+			CHECK(Math::is_equal_approx(c.a, (real_t)0.4));
+		}
+	}
+}
+
 } // namespace TestImage
