@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+from xml.etree import ElementTree as ET
 
 SCENE_EXTENSIONS = {".tscn", ".scn"}
 SKIP_DIRS = {".git", ".godot", ".hg", ".svn", "__pycache__"}
@@ -94,6 +95,38 @@ def run_suite(root, executable, scenes, timeout=30, frames=2, import_first=False
     return {"ok": all(r["status"] == "pass" for r in results), "results": results}
 
 
+def _xml_safe(value):
+    """Replace characters prohibited by XML 1.0 while retaining diagnostics."""
+    return "".join(c if c in "\t\n\r" or 32 <= ord(c) <= 0xD7FF
+                   or 0xE000 <= ord(c) <= 0xFFFD
+                   or 0x10000 <= ord(c) <= 0x10FFFF else "\uFFFD"
+                   for c in str(value))
+
+
+def junit_report(report):
+    """Serialize scene and import outcomes as CI-compatible JUnit XML."""
+    cases = []
+    if "import" in report:
+        cases.append(("__import__", report["import"]))
+    cases.extend((item["scene"], item) for item in report["results"])
+    failures = sum(outcome["status"] != "pass" for _, outcome in cases)
+    suite = ET.Element("testsuite", {
+        "name": "GodotSceneSmoke", "tests": str(len(cases)),
+        "failures": str(failures), "errors": "0",
+    })
+    for name, outcome in cases:
+        case = ET.SubElement(suite, "testcase", {
+            "classname": "GodotSceneSmoke", "name": _xml_safe(name),
+        })
+        if outcome["status"] != "pass":
+            problem = ET.SubElement(case, "failure", {
+                "type": _xml_safe(outcome["status"]),
+                "message": "Godot smoke check failed",
+            })
+            problem.text = _xml_safe(outcome.get("log", ""))
+    return ET.tostring(suite, encoding="unicode")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("project", type=Path, help="Path to an existing Godot 4 project")
@@ -103,7 +136,7 @@ def main(argv=None):
     parser.add_argument("--frames", type=int, default=2, help="Headless iterations per scene")
     parser.add_argument("--max-scenes", type=int, default=1000, help="Limit scene count")
     parser.add_argument("--import-first", action="store_true", help="Import project assets first")
-    parser.add_argument("--format", choices=("text", "json"), default="text")
+    parser.add_argument("--format", choices=("text", "json", "junit"), default="text")
     opts = parser.parse_args(argv)
     try:
         if not 1 <= opts.timeout <= 3600 or not 1 <= opts.frames <= 10000 or not 1 <= opts.max_scenes <= 100000:
@@ -119,6 +152,8 @@ def main(argv=None):
         return 2
     if opts.format == "json":
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    elif opts.format == "junit":
+        print(junit_report(report))
     else:
         if "import" in report:
             print("IMPORT {}".format(report["import"]["status"].upper()))
