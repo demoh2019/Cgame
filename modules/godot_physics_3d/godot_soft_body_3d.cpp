@@ -36,6 +36,7 @@
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_softbody_bending_plasticity.h"
 #include "servers/physics_softbody_link_damping.h"
+#include "servers/physics_softbody_dihedral_damping.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
@@ -1894,6 +1895,26 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Node &a = *link.n[0];
 				Node &b = *link.n[1];
 				physics_softbody_damp_link(a.x, b.x, a.v, b.v, a.im, b.im, fraction);
+			}
+		}
+	}
+
+	// Angular dashpots remove relative hinge folding velocity (the mode that
+	// longitudinal link damping does not damp). This belongs before the
+	// velocity-to-position prediction below: after positional projections,
+	// velocities are reconstructed from x-q and would overwrite late damping.
+	// The rest-angle plasticity pass and XPBD bending stiffness are independent.
+	const real_t dihedral_damping = get_space()->get_soft_body_dihedral_damping();
+	if (dihedral_damping > real_t(0.0) && p_delta > real_t(0.0) && !xpbd_dihedral_hinges.is_empty()) {
+		const double fraction = 1.0 - Math::exp(-double(dihedral_damping) * double(p_delta));
+		if (Math::is_finite(fraction) && fraction > 0.0) {
+			for (const DihedralHinge &hinge : xpbd_dihedral_hinges) {
+				Node &a = nodes[hinge.a];
+				Node &b = nodes[hinge.b];
+				Node &c = nodes[hinge.c];
+				Node &d = nodes[hinge.d];
+				physics_softbody_damp_dihedral(a.x, b.x, c.x, d.x,
+						a.v, b.v, c.v, d.v, a.im, b.im, c.im, d.im, fraction);
 			}
 		}
 	}
