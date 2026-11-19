@@ -895,7 +895,7 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 
 		const bool cant_repeat = instance_data.flags & INSTANCE_DATA_FLAG_MULTIMESH || inst->mesh_instance.is_valid();
 
-		if (prev_surface != nullptr && !cant_repeat && prev_surface->sort.sort_key1 == surface->sort.sort_key1 && prev_surface->sort.sort_key2 == surface->sort.sort_key2 && prev_surface->uses_lightmap_specular == surface->uses_lightmap_specular && inst->mirror == prev_surface->owner->mirror && repeats < RenderElementInfo::MAX_REPEATS) {
+		if (prev_surface != nullptr && !cant_repeat && prev_surface->can_repeat_with(*surface) && inst->mirror == prev_surface->owner->mirror && repeats < RenderElementInfo::MAX_REPEATS) {
 			//this element is the same as the previous one, count repeats to draw it using instancing
 			repeats++;
 		} else {
@@ -1216,7 +1216,10 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 				}
 			}
 
-			surf->sort.depth_layer = depth_layer;
+			// Shadow draw order does not need depth bins; including them in the sort key
+			// prevents otherwise identical instances from sharing one draw call.
+			// Keep depth bins for camera/material passes and both modes' other behavior.
+			surf->sort.depth_layer = (p_pass_mode == PASS_MODE_SHADOW || p_pass_mode == PASS_MODE_SHADOW_DP) ? 0 : depth_layer;
 
 			surf = surf->next;
 		}
