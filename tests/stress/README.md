@@ -1103,6 +1103,10 @@ higher joint priorities, soft-body dependencies, null/empty body lists, or
 insufficient independent parallel work fall back to the existing sequential
 priority solver. The bounded coloring scratch buffer is reused across steps.
 
+3D setup batches smaller than 32 constraints and solve batches smaller
+than 16 independent islands now run inline rather than paying thread-pool
+dispatch and barrier costs. The large-island graph-color path remains opt-in.
+
 As with any iterative constraint solver, changing the order of constraints
 may change convergence and determinism. Keep the option disabled if strict
 frame-for-frame comparison with the legacy solver is required.
