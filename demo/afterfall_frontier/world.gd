@@ -197,6 +197,11 @@ func _update_bag_expiry(delta: float) -> void:
 			lost_bags.remove_at(i)
 
 
+func _is_night() -> bool:
+	var fraction: float = fposmod(survivor.elapsed_days, 1.0)
+	return fraction >= 0.75 or fraction < 0.20
+
+
 func _update_infected(delta: float) -> void:
 	for i in range(infected.size()):
 		var z: Dictionary = infected[i]
@@ -210,12 +215,14 @@ func _update_infected(delta: float) -> void:
 			continue
 		var pos: Vector2 = z["pos"]
 		var distance: float = pos.distance_to(player_position)
-		if survivor.zone > 0 and distance < 220.0:
+		if survivor.zone > 0 and distance < (280.0 if _is_night() else 220.0):
 			var direction := (player_position - pos).normalized()
-			z["pos"] = pos + direction * (105.0 if bool(z["high_risk"]) else 80.0) * delta
+			z["pos"] = pos + direction * (105.0 if bool(z["high_risk"]) else 80.0) *
+					(1.15 if _is_night() else 1.0) * delta
 			if distance < 33.0 and float(z["cooldown"]) <= 0.0:
 				z["cooldown"] = 1.35
-				var dead: bool = survivor.damage(16.0 if bool(z["high_risk"]) else 10.0)
+				var base_damage := 16.0 if bool(z["high_risk"]) else 10.0
+				var dead: bool = survivor.damage(base_damage * (1.2 if _is_night() else 1.0))
 				_notice("Infected hit! Armor reduces damage." if not dead else "You were overwhelmed.")
 				if dead:
 					_handle_death()
@@ -432,9 +439,10 @@ func _refresh_hud() -> void:
 	var danger: String = "FULL LOOT" if bool(zone_info["full_loot"]) else (
 			"PVP planned / partial loss" if bool(zone_info["pvp"]) else "SAFE / no loss")
 	hud_title.text = "AFTERFALL FRONTIER | %s" % str(zone_info["name"])
-	hud_stats.text = "HP %d  Food %d  Water %d  Energy %d | Coins %d | Day %d | %s" % [
+	hud_stats.text = "HP %d  Food %d  Water %d  Energy %d | Coins %d | Day %d %s | %s" % [
 		int(survivor.health), int(survivor.hunger), int(survivor.thirst),
-		int(survivor.stamina), survivor.coins, 1 + int(survivor.elapsed_days), danger
+		int(survivor.stamina), survivor.coins, 1 + int(survivor.elapsed_days),
+		"NIGHT" if _is_night() else "DAY", danger
 	]
 	var item_bits := PackedStringArray()
 	for item_id in survivor.inventory.keys():
@@ -509,6 +517,11 @@ func _draw() -> void:
 		draw_rect(Rect2(pos + Vector2(-17, -25), Vector2(34.0 * minf(1.0,
 				float(zombie["health"]) / (52.0 if bool(zombie["high_risk"]) else 36.0)), 3)),
 				Color(1, 0.3, 0.2), true)
+	# Night reduces visibility on the map without obscuring CanvasLayer UI.
+	# NPCs use the same phase for perception and attack difficulty.
+	if _is_night():
+		draw_rect(Rect2(Vector2.ZERO, Rules.WORLD_SIZE),
+				Color(0.02, 0.06, 0.13, 0.47), true)
 	draw_circle(player_position, 16, Color(0.20, 0.77, 1.0))
 	draw_circle(player_position + Vector2(-4, -3), 3, Color.WHITE)
 	draw_circle(player_position + Vector2(4, -3), 3, Color.WHITE)
