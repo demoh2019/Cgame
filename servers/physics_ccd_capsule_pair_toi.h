@@ -65,6 +65,14 @@ _FORCE_INLINE_ double dot(const Vec3 &p_a, const Vec3 &p_b) {
 	return p_a.x * p_b.x + p_a.y * p_b.y + p_a.z * p_b.z;
 }
 
+_FORCE_INLINE_ Vec3 cross(const Vec3 &p_a, const Vec3 &p_b) {
+	return {
+		p_a.y * p_b.z - p_a.z * p_b.y,
+		p_a.z * p_b.x - p_a.x * p_b.z,
+		p_a.x * p_b.y - p_a.y * p_b.x,
+	};
+}
+
 struct Distance {
 	double squared;
 	double derivative_half;
@@ -139,6 +147,26 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 	const Vec3 motion = { double(p_relative_motion.x), double(p_relative_motion.y), double(p_relative_motion.z) };
 	if (!(dot(motion, motion) > 0.0)) {
 		return PhysicsCCDCapsulePairTOIResult::MISS;
+	}
+
+	// A separating axis perpendicular to both capsule center segments
+	// is a cheap necessary condition for a 3D skew-axis hit. Their
+	// endpoint offsets have zero projection on this axis: if the entire
+	// relative sweep stays farther than the combined radius on one
+	// side of the plane, the expensive closest-distance iterations can
+	// be skipped. For planar 2D capsules this test cannot reject anything.
+	if (center.z != 0.0 || motion.z != 0.0 || axis_a.z != 0.0 || axis_b.z != 0.0) {
+		const Vec3 normal = cross(axis_a, axis_b);
+		const double normal_squared = dot(normal, normal);
+		if (normal_squared > 0.0) {
+			const double reach = p_combined_radius * Math::sqrt(normal_squared);
+			const double separation_begin = dot(normal, center);
+			const double separation_end = separation_begin + dot(normal, motion);
+			if ((separation_begin > reach && separation_end > reach) ||
+					(separation_begin < -reach && separation_end < -reach)) {
+				return PhysicsCCDCapsulePairTOIResult::MISS;
+			}
+		}
 	}
 
 	const Vec3 segment_a = axis_a * (2.0 * p_half_segment_a);
