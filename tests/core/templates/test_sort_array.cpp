@@ -509,4 +509,67 @@ TEST_CASE("[SortArray] Insertion sort preserves duplicates and sorted input") {
 	}
 }
 
+
+TEST_CASE("[SortArray] Heap and heapsort move values without copying") {
+	SortArray<MoveCountedSortValue> sorter;
+	for (int pattern = 0; pattern < 3; pattern++) {
+		MoveCountedSortValue data[96];
+		int before[17] = {};
+		int after[17] = {};
+		for (int i = 0; i < 96; i++) {
+			data[i].value = pattern == 0 ? 95 - i : (pattern == 1 ? i : (i * 19) % 17);
+			if (pattern == 2) {
+				before[data[i].value]++;
+			}
+		}
+		MoveCountedSortValue::reset_counters();
+		sorter.make_heap(0, 96, data);
+		sorter.sort_heap(0, 96, data);
+		CHECK(MoveCountedSortValue::copies == 0);
+		CHECK(MoveCountedSortValue::moves > 0);
+		for (int i = 0; i < 96; i++) {
+			if (i > 0) {
+				CHECK(data[i - 1].value <= data[i].value);
+			}
+			if (pattern == 2) {
+				after[data[i].value]++;
+			}
+		}
+		if (pattern == 2) {
+			for (int k = 0; k < 17; k++) {
+				CHECK(before[k] == after[k]);
+			}
+		}
+	}
+}
+
+TEST_CASE("[SortArray] Partial heap sort avoids copies and preserves all values") {
+	SortArray<MoveCountedSortValue> sorter;
+	MoveCountedSortValue data[96];
+	int before[17] = {};
+	int after[17] = {};
+	for (int i = 0; i < 96; i++) {
+		data[i].value = (i * 19 + 11) % 17;
+		before[data[i].value]++;
+	}
+	MoveCountedSortValue::reset_counters();
+	sorter.partial_sort(0, 96, 16, data);
+	CHECK(MoveCountedSortValue::copies == 0);
+	CHECK(MoveCountedSortValue::moves > 0);
+	for (int i = 0; i < 96; i++) {
+		CHECK(data[i].value >= 0);
+		CHECK(data[i].value < 17);
+		after[data[i].value]++;
+		if (i > 0 && i < 16) {
+			CHECK(data[i - 1].value <= data[i].value);
+		}
+		if (i >= 16) {
+			CHECK(data[i].value >= data[15].value);
+		}
+	}
+	for (int key = 0; key < 17; key++) {
+		CHECK(before[key] == after[key]);
+	}
+}
+
 } // namespace TestSortArray
