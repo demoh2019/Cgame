@@ -161,6 +161,10 @@ jobs:
             --script res://physics_ccd_rotating_capsule_segment_2d_regression.gd \
             2>&1 | tee physics2d-rotating-capsule-segment-ccd.log
           grep -Fq '2D rotating capsule-segment CCD regression passed.' physics2d-rotating-capsule-segment-ccd.log
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://physics_ccd_nonlinear_capsule_toi_regression.gd \
+            2>&1 | tee physics-mixed-capsule-ccd.log
+          grep -Fq '2D/3D mixed nonlinear capsule CCD regression passed.' physics-mixed-capsule-ccd.log
 
       - name: Regression-test analytic circle-segment TOI in native C++
         shell: bash
@@ -188,6 +192,15 @@ jobs:
             --headless --test --test-case="*RotatingCapsuleSegmentTOI*" \
             --success=true --no-colors 2>&1 | tee physics2d-rotating-capsule-segment-toi.log
           grep -Fq '[RotatingCapsuleSegmentTOI]' physics2d-rotating-capsule-segment-toi.log
+
+      - name: Regression-test nonlinear combined-velocity capsule CCD
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*MixedCapsuleTOI*" \
+            --success=true --no-colors 2>&1 | tee physics-mixed-capsule-toi.log
+          grep -Fq '[MixedCapsuleTOI]' physics-mixed-capsule-toi.log
 
       - name: Exercise repeated Jolt pending-body batch reuse
         shell: bash
@@ -222,6 +235,18 @@ jobs:
             --script res://physics_jolt_pending_broadphase_regression.gd \
             2>&1 | tee physics-jolt-pending-broadphase.log
           grep -Fq 'Jolt pending broadphase regression passed.' physics-jolt-pending-broadphase.log
+      - name: Regression-test Jolt soft-soft CPU particle contacts and layer masks
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_soft
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://soft_soft_particle_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://soft_soft_particle_regression.gd \
+            2>&1 | tee jolt-soft-soft-particle.log
+          grep -Fq 'PASS: Jolt bounded soft-soft particle contact response and layer masks' jolt-soft-soft-particle.log
       - name: Regression-test combined Jolt LRA volume and anisotropic elasticity
         shell: bash
         run: |
@@ -457,7 +482,7 @@ jobs:
               grep -Fq 'Jolt soft-body volumetric shrink regression passed.' "physics-jolt-volume-shrink-$RADIAL-$FOLLOW.log"
             done
           done
-      - name: Regression-test Jolt XPBD textile anisotropic fiber response
+      - name: Regression-test Jolt XPBD anisotropic woven textile
         shell: bash
         run: |
           set -euo pipefail
@@ -524,6 +549,8 @@ jobs:
             physics2d-capsule-segment-ccd.log
             physics2d-rotating-capsule-segment-toi.log
             physics2d-rotating-capsule-segment-ccd.log
+            physics-mixed-capsule-toi.log
+            physics-mixed-capsule-ccd.log
             physics3d-colored-islands.log
             physics3d-ccd-relative.log
             physics3d-capsule-rays.log
