@@ -7,9 +7,12 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 
-func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool) -> RID:
+func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, static_body: bool = false) -> RID:
 	var body: RID = PhysicsServer2D.body_create()
-	PhysicsServer2D.body_set_mode(body, PhysicsServer2D.BODY_MODE_RIGID)
+	if static_body:
+		PhysicsServer2D.body_set_mode(body, PhysicsServer2D.BODY_MODE_STATIC)
+	else:
+		PhysicsServer2D.body_set_mode(body, PhysicsServer2D.BODY_MODE_RIGID)
 	PhysicsServer2D.body_add_shape(body, shape)
 	PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, 0.0)
 	PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_LINEAR_DAMP, 0.0)
@@ -26,13 +29,13 @@ func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool) ->
 
 
 func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: float,
-		min_speed: float, max_speed: float) -> int:
+		min_speed: float, max_speed: float, static_target: bool = false) -> int:
 	var space: RID = PhysicsServer2D.space_create()
 	var circle: RID = PhysicsServer2D.circle_shape_create()
 	PhysicsServer2D.shape_set_data(circle, 0.5)
 
 	var a: RID = _make_body(space, circle, 0.0, velocity_a, true)
-	var b: RID = _make_body(space, circle, target_x, velocity_b, false)
+	var b: RID = _make_body(space, circle, target_x, velocity_b, false, static_target)
 	PhysicsServer2D.space_set_active(space, true)
 	await physics_frame
 	await physics_frame
@@ -44,6 +47,8 @@ func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: fl
 	var passed: bool = after_a.is_finite() and after_b.is_finite()
 	passed = passed and transform_a.origin.is_finite() and transform_b.origin.is_finite()
 	passed = passed and after_a.x >= min_speed and after_a.x <= max_speed
+	if static_target:
+		passed = passed and absf(transform_b.origin.x - target_x) < 0.01
 
 	if not passed:
 		printerr("FAIL %s: A velocity=%s, B velocity=%s; A=%s B=%s; allowed A speed=[%s, %s]" %
@@ -70,6 +75,11 @@ func _run() -> void:
 	# In contrast, a slower target directly ahead is approached by A.
 	# An entering ray should shorten A's speed, without reversing it.
 	failures += await _run_case("slower body ahead", 1.02, 600.0, 300.0, 0.0, 525.0)
+
+	# Static bodies can expose constant surface velocity without moving
+	# their collision geometry. The obstacle is stationary despite the
+	# nonzero velocity used for contact friction, so A must still brake.
+	failures += await _run_case("static conveyor surface", 1.02, 600.0, 600.0, 0.0, 525.0, true)
 
 	if failures:
 		printerr("2D relative-motion CCD regression failed: %d" % failures)
