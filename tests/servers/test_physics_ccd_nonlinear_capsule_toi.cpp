@@ -64,6 +64,19 @@ TEST_CASE("[Physics][MixedCapsuleTOI] 3D capsule hits sphere during combined mot
 	CHECK(fraction < 0.75);
 }
 
+TEST_CASE("[Physics][MixedCapsuleTOI] 3D capsule rotates about X while translating along Z") {
+	double fraction = -1.0;
+	// This is not a planar Z rotation: the capsule starts along Y and
+	// rotates into the Z axis, contacting a sphere during the step.
+	// The initial and final poses are both separated.
+	CHECK(physics_ccd_nonlinear_capsule_toi(
+			Vector3(), Vector3(0.0, 1.0, 0.0), Vector3(), Vector3(0.0, 0.0, 2.3),
+			Vector3(0.0, 0.0, 0.1), Vector3(real_t(Math::PI), 0.0, 0.0), real_t(1.0),
+			2.5, 0.5, fraction) == PhysicsCCDRotatingCapsuleTOIResult::HIT);
+	CHECK(fraction > 0.0);
+	CHECK(fraction < 0.75);
+}
+
 TEST_CASE("[Physics][MixedCapsuleTOI] Off-center pivots remain correct after world translation") {
 	const Vector2 offset_2d(2048.0, -4096.0);
 	double base_2d = -1.0;
