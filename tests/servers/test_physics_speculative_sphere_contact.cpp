@@ -106,4 +106,28 @@ TEST_CASE("[PhysicsSpeculative] 2D and 3D reject already-overlapping or invalid 
 			Vector3(100000, 0, 0), Vector3(), real_t(0.01), real_t(0.5), a3, b3, n3));
 }
 
+TEST_CASE("[PhysicsSpeculative] Tangential near-misses do not create ghost contacts") {
+	Vector2 point_a, point_b, normal;
+	// The normal component closes the gap in one step, but strong
+	// perpendicular motion moves the circle past the target.
+	CHECK_FALSE(physics_speculative_sphere_contact(
+			Vector2(-3, 0), real_t(1), Vector2(), real_t(1),
+			Vector2(5, 20), Vector2(), real_t(0.5), real_t(1.1), point_a, point_b, normal));
+
+	// A glancing hit inside the combined-radius tube must still be retained.
+	CHECK(physics_speculative_sphere_contact(
+			Vector2(-3, 0), real_t(1), Vector2(0, 1.8), real_t(1),
+			Vector2(10, 0), Vector2(), real_t(0.5), real_t(1.6), point_a, point_b, normal));
+	CHECK(normal.is_normalized());
+	CHECK((point_a - point_b).dot(normal) < 0.0);
+
+	Vector3 a3, b3, n3;
+	CHECK_FALSE(physics_speculative_sphere_contact(
+			Vector3(-3, 0, 0), real_t(1), Vector3(), real_t(1),
+			Vector3(5, 20, 0), Vector3(), real_t(0.5), real_t(1.1), a3, b3, n3));
+	CHECK(physics_speculative_sphere_contact(
+			Vector3(-3, 0, 0), real_t(1), Vector3(0, 0, 1.8), real_t(1),
+			Vector3(10, 0, 0), Vector3(), real_t(0.5), real_t(1.6), a3, b3, n3));
+}
+
 } // namespace TestPhysicsSpeculativeSphereContact
