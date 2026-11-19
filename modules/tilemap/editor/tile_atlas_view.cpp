@@ -48,8 +48,24 @@ void TileAtlasView::gui_input(const Ref<InputEvent> &p_event) {
 	}
 }
 
+Vector2 TileAtlasView::layout_pan_delta(const Vector2 &p_scroll, bool p_is_rtl) {
+	return p_is_rtl ? Vector2(-p_scroll.x, p_scroll.y) : p_scroll;
+}
+
+Vector2 TileAtlasView::layout_zoom_origin(const Vector2 &p_mouse_pos, const Vector2 &p_view_size, bool p_is_rtl) {
+	Vector2 relative = p_mouse_pos - p_view_size / 2.0;
+	if (p_is_rtl) {
+		relative.x = -relative.x;
+	}
+	return relative;
+}
+
+Vector2 TileAtlasView::layout_content_offsets(float p_content_width, float p_zoom, bool p_is_rtl) {
+	return p_is_rtl ? Vector2(p_content_width * (p_zoom - 1.0), p_content_width * p_zoom) : Vector2(0, p_content_width);
+}
+
 void TileAtlasView::_pan_callback(Vector2 p_scroll_vec, Ref<InputEvent> p_event) {
-	panning += p_scroll_vec;
+	panning += layout_pan_delta(p_scroll_vec, is_layout_rtl());
 	_update_zoom_and_panning(true);
 	emit_signal(SNAME("transform_changed"), zoom_widget->get_zoom(), panning);
 }
@@ -124,6 +140,16 @@ void TileAtlasView::_update_zoom_and_panning(bool p_zoom_on_mouse_pos, const Vec
 		alternative_tiles_drawing_root->set_scale(Vector2(1, 1));
 	}
 
+	// A right-to-left atlas must compensate for its scaled origin, while an
+	// LTR atlas keeps its unscaled-width offsets. Apply this to both tile roots.
+	const bool is_rtl = is_layout_rtl();
+	const Vector2 base_offsets = layout_content_offsets(base_tiles_control_size.x, zoom, is_rtl);
+	base_tiles_drawing_root->set_offset(SIDE_LEFT, base_offsets.x);
+	base_tiles_drawing_root->set_offset(SIDE_RIGHT, base_offsets.y);
+	const Vector2 alternative_offsets = layout_content_offsets(alternative_tiles_control_size.x, zoom, is_rtl);
+	alternative_tiles_drawing_root->set_offset(SIDE_LEFT, alternative_offsets.x);
+	alternative_tiles_drawing_root->set_offset(SIDE_RIGHT, alternative_offsets.y);
+
 	// Update the margin container's margins.
 	const char *constants[] = { "margin_left", "margin_top", "margin_right", "margin_bottom" };
 	for (int i = 0; i < 4; i++) {
@@ -136,7 +162,7 @@ void TileAtlasView::_update_zoom_and_panning(bool p_zoom_on_mouse_pos, const Vec
 
 	// Zoom on the position.
 	if (p_zoom_on_mouse_pos) {
-		Vector2 relative_mpos = p_mouse_pos - get_size() / 2;
+		const Vector2 relative_mpos = layout_zoom_origin(p_mouse_pos, get_size(), is_rtl);
 		panning = (panning - relative_mpos) * zoom / previous_zoom + relative_mpos;
 	} else {
 		// Center of panel.
