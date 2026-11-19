@@ -79,6 +79,9 @@ public:
 	// Rebuild a bounded local-space BVH of deformed edges when self EE is on.
 	// Disabled by default, preserving the original linear edge-pair scan.
 	inline static bool soft_body_self_edge_bvh = false;
+	// Opt-in persistent per-body adjacency and incremental edge-BVH refits.
+	// Requires self and self-edge collisions + the edge BVH. Default false.
+	inline static bool soft_body_self_persistent_bvh = false;
 	inline static int soft_body_self_contact_max_checks = 16384;
 	inline static float soft_body_soft_ccd_max_sweep = 1.0f;
 	inline static float soft_body_soft_ccd_max_correction_speed = 128.0f;

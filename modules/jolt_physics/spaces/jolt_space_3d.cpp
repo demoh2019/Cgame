@@ -56,6 +56,7 @@
 #include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 
 #include <algorithm>
+#include <unordered_map>
 
 namespace {
 
@@ -980,6 +981,15 @@ struct SoftSelfContactScratch {
 	SoftFaceBVHScratch bvh;
 	SoftFaceBVHScratch edge_bvh; // Reused across active soft bodies.
 	JPH::Array<uint64_t> one_ring_edges;
+
+	// Face-array address identifies an immutable Jolt SoftBodySharedSettings
+	// topology. A body rebuild gets a new BodyID, invalidating this cache.
+	const void *topology_faces = nullptr;
+	uint32_t topology_face_count = 0;
+	uint32_t topology_vertex_count = 0;
+	uint32_t edge_bvh_edge_count = 0;
+	uint32_t edge_bvh_refits = 0;
+	bool edge_bvh_ready = false;
 };
 
 static uint64_t soft_self_topology_edge_key(uint32_t p_a, uint32_t p_b) {
@@ -1020,6 +1030,42 @@ static bool prepare_soft_self_topology(const JPH::Array<JPH::SoftBodySharedSetti
 	return !r_edges.empty();
 }
 
+// Jolt's shared soft-body settings are immutable at runtime. The pointer
+// identity of the face array and the vertex/face counts are therefore a
+// safe topology generation key for the lifetime of one Jolt BodyID. When
+// the body is rebuilt, remove_object() destroys its per-body cache.
+static bool ensure_soft_self_topology(const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		uint32_t p_vertex_count, SoftSelfContactScratch &r_scratch,
+		uint32_t &r_budget, bool p_persistent) {
+	if (r_budget == 0) {
+		return false;
+	}
+	if (p_persistent && !r_scratch.one_ring_edges.empty() &&
+			r_scratch.topology_faces == &p_faces &&
+			r_scratch.topology_face_count == p_faces.size() &&
+			r_scratch.topology_vertex_count == p_vertex_count) {
+		--r_budget; // Account for constant-time topology validation.
+		return true;
+	}
+	if (!p_persistent && !r_scratch.one_ring_edges.empty()) {
+		return true; // Same-step reuse between VF and EE as before.
+	}
+
+	// A changed topology invalidates both the adjacency and the edge
+	// tree's leaf-index mapping before any query can access it.
+	r_scratch.edge_bvh_ready = false;
+	r_scratch.edge_bvh_edge_count = 0;
+	r_scratch.edge_bvh_refits = 0;
+	r_scratch.topology_faces = nullptr;
+	const bool valid = prepare_soft_self_topology(p_faces, p_vertex_count, r_scratch.one_ring_edges, r_budget);
+	if (valid && p_persistent) {
+		r_scratch.topology_faces = &p_faces;
+		r_scratch.topology_face_count = uint32_t(p_faces.size());
+		r_scratch.topology_vertex_count = p_vertex_count;
+	}
+	return valid;
+}
+
 static bool soft_self_is_neighbor(uint32_t p_point, const JPH::SoftBodySharedSettings::Face &p_face,
 		const JPH::Array<uint64_t> &p_topology_edges) {
 	// Reject points on the tested face, plus the direct one-ring of any
@@ -1045,7 +1091,8 @@ static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBod
 		return;
 	}
 
-	if (!prepare_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch.one_ring_edges, r_budget)) {
+	if (!ensure_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch, r_budget,
+			JoltProjectSettings::soft_body_self_persistent_bvh)) {
 		return;
 	}
 	r_scratch.bvh.clear();
@@ -1219,6 +1266,67 @@ static bool prepare_soft_self_edge_bvh(const JPH::Array<uint64_t> &p_edges,
 	return true;
 }
 
+// Refit in O(E + N) without modifying the median partitions or leaf
+// indices. Children always follow their parent in build_soft_face_bvh(),
+// so walking nodes backwards guarantees children have fresh bounds first.
+// This refits *exact* AABBs: no speculative motion margin is cached.
+static bool refit_soft_self_edge_bvh(const JPH::Array<uint64_t> &p_edges,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices,
+		SoftFaceBVHScratch &r_bvh, uint32_t &r_budget) {
+	const uint32_t entry_count = uint32_t(r_bvh.entries.size());
+	const uint32_t node_count = uint32_t(r_bvh.nodes.size());
+	if (entry_count == 0 || node_count == 0) {
+		return false;
+	}
+	// Each segment is read, its leaf is combined, and each internal node
+	// gets one union. Reserve enough work up front, or use linear fallback.
+	const uint32_t refit_cost = 2 * entry_count + node_count;
+	if (r_budget <= refit_cost) {
+		return false;
+	}
+	r_budget -= refit_cost;
+	for (SoftFaceBVHEntry &entry : r_bvh.entries) {
+		if (entry.face_index >= p_edges.size()) {
+			return false;
+		}
+		const uint64_t key = p_edges[entry.face_index];
+		const uint32_t a = uint32_t(key >> 32), b = uint32_t(key);
+		if (a == b || a >= p_vertices.size() || b >= p_vertices.size()) {
+			return false;
+		}
+		const JPH::Vec3 p0 = p_vertices[a].mPosition;
+		const JPH::Vec3 p1 = p_vertices[b].mPosition;
+		entry.min = JPH::Vec3::sMin(p0, p1);
+		entry.max = JPH::Vec3::sMax(p0, p1);
+		if (!Math::is_finite(entry.min.GetX()) || !Math::is_finite(entry.min.GetY()) || !Math::is_finite(entry.min.GetZ()) ||
+				!Math::is_finite(entry.max.GetX()) || !Math::is_finite(entry.max.GetY()) || !Math::is_finite(entry.max.GetZ())) {
+			return false;
+		}
+	}
+	for (uint32_t i = node_count; i > 0; --i) {
+		SoftFaceBVHNode &node = r_bvh.nodes[i - 1];
+		if (node.end <= node.begin || node.end > entry_count) {
+			return false;
+		}
+		if (node.end - node.begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+			node.min = r_bvh.entries[node.begin].min;
+			node.max = r_bvh.entries[node.begin].max;
+			for (uint32_t j = node.begin + 1; j < node.end; ++j) {
+				node.min = JPH::Vec3::sMin(node.min, r_bvh.entries[j].min);
+				node.max = JPH::Vec3::sMax(node.max, r_bvh.entries[j].max);
+			}
+		} else {
+			if (node.left <= i - 1 || node.right <= i - 1 ||
+					node.left >= node_count || node.right >= node_count) {
+				return false;
+			}
+			node.min = JPH::Vec3::sMin(r_bvh.nodes[node.left].min, r_bvh.nodes[node.right].min);
+			node.max = JPH::Vec3::sMax(r_bvh.nodes[node.left].max, r_bvh.nodes[node.right].max);
+		}
+	}
+	return true;
+}
+
 static bool soft_self_edge_bounds_overlap(JPH::Vec3Arg p_min_a, JPH::Vec3Arg p_max_a,
 		JPH::Vec3Arg p_min_b, JPH::Vec3Arg p_max_b, float p_radius) {
 	return p_max_a.GetX() + p_radius >= p_min_b.GetX() && p_max_b.GetX() + p_radius >= p_min_a.GetX() &&
@@ -1265,11 +1373,10 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 		return;
 	}
 
-	// If the preceding VF self-contact pass successfully prepared topology,
-	// reuse it at zero extra allocation/sort cost. Otherwise rebuild it
-	// using the *edge* portion of the same global work budget.
-	if (r_scratch.one_ring_edges.empty() &&
-			!prepare_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch.one_ring_edges, r_budget)) {
+	// Persistent mode reuses immutable mesh topology across physics frames;
+	// the default linear/BVH modes still share the list within this step.
+	if (!ensure_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch, r_budget,
+			JoltProjectSettings::soft_body_self_persistent_bvh)) {
 		return;
 	}
 	const JPH::Array<uint64_t> &edges = r_scratch.one_ring_edges;
@@ -1282,8 +1389,29 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 	const float radius_sq = radius * radius;
 	const float recovery = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
-	const bool use_edge_bvh = JoltProjectSettings::soft_body_self_edge_bvh &&
-			prepare_soft_self_edge_bvh(edges, vertices, r_scratch.edge_bvh, r_budget);
+	bool use_edge_bvh = false;
+	if (JoltProjectSettings::soft_body_self_edge_bvh) {
+		const bool persistent = JoltProjectSettings::soft_body_self_persistent_bvh;
+		// Refit stable leaf-to-edge mappings, but rebuild periodically to
+		// restore BVH quality after extensive folding/unfolding.
+		if (persistent && r_scratch.edge_bvh_ready &&
+				r_scratch.edge_bvh_edge_count == edge_count && r_scratch.edge_bvh_refits < 120) {
+			use_edge_bvh = refit_soft_self_edge_bvh(edges, vertices, r_scratch.edge_bvh, r_budget);
+			if (use_edge_bvh) {
+				++r_scratch.edge_bvh_refits;
+			}
+		}
+		if (!use_edge_bvh) {
+			use_edge_bvh = prepare_soft_self_edge_bvh(edges, vertices, r_scratch.edge_bvh, r_budget);
+			if (use_edge_bvh) {
+				r_scratch.edge_bvh_refits = 0;
+			}
+		}
+		if (persistent) {
+			r_scratch.edge_bvh_ready = use_edge_bvh;
+			r_scratch.edge_bvh_edge_count = use_edge_bvh ? edge_count : 0;
+		}
+	}
 
 	// Query each unordered pair once: avoids doubling impulses on the
 	// very same self-contact. Topological exclusion also skips edges
@@ -1414,6 +1542,15 @@ static void ensure_pending_index(const LocalVector<JPH::BodyID> &p_bodies, AHash
 
 } // namespace
 
+// A cache belongs to one Jolt physics space, not to global project state.
+// BodyID includes the generation sequence; destroyed/rebuilt bodies are
+// explicitly evicted in remove_object(). Cap retained meshes to avoid a
+// silently unbounded allocation for streaming or procedural scenes.
+struct JoltSelfCollisionCache {
+	static constexpr uint32_t MAX_RETAINED_BODIES = 64;
+	std::unordered_map<uint32_t, SoftSelfContactScratch> bodies;
+};
+
 void JoltSpace3D::_pending_add(LocalVector<JPH::BodyID> &p_bodies, AHashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
 	if (!r_indices.is_empty()) {
 		r_indices.insert(p_id.GetIndexAndSequenceNumber(), p_bodies.size());
@@ -1490,6 +1627,17 @@ void JoltSpace3D::_pre_step(float p_step) {
 		object->pre_step(p_step);
 	}
 
+	// Reclaim all cached geometry as soon as this opt-in mode is disabled.
+	// Cache is populated lazily, and never shared across physics spaces.
+	const bool persistent_self = JoltProjectSettings::soft_body_self_contacts &&
+			JoltProjectSettings::soft_body_self_edge_contacts &&
+			JoltProjectSettings::soft_body_self_edge_bvh &&
+			JoltProjectSettings::soft_body_self_persistent_bvh;
+	if (!persistent_self && self_collision_cache != nullptr) {
+		delete self_collision_cache;
+		self_collision_cache = nullptr;
+	}
+
 	// Optional cloth/soft-body self collision: one-ring topology exclusion
 	// prevents neighboring triangles from repelling their own mesh edges.
 	// This budget is separate from inter-body soft contacts and applies
@@ -1504,21 +1652,35 @@ void JoltSpace3D::_pre_step(float p_step) {
 		uint32_t self_edge_budget = self_edges ? self_budget / 2 : 0;
 		self_budget -= self_edge_budget;
 		SoftSelfContactScratch self_scratch;
+		if (persistent_self && self_collision_cache == nullptr) {
+			self_collision_cache = new JoltSelfCollisionCache;
+		}
 		for (JPH::uint32 i = 0; i < active_soft_body_count && (self_budget > 0 || self_edge_budget > 0); ++i) {
 			JPH::Body *jolt_body = lock_iface.TryGetBody(active_soft_bodies[i]);
 			if (jolt_body == nullptr) {
 				continue;
 			}
 			const JoltSoftBody3D *object = reinterpret_cast<JoltObject3D *>(jolt_body->GetUserData())->as_soft_body();
-			// Never reuse the previous body's adjacency. The VF pass fills
-			// this vector when it runs; the EE pass reuses it or rebuilds
-			// under its own quota if VF has no remaining budget.
-			self_scratch.one_ring_edges.clear();
+			SoftSelfContactScratch *scratch = &self_scratch;
+			if (persistent_self) {
+				const uint32_t id = active_soft_bodies[i].GetIndexAndSequenceNumber();
+				auto existing = self_collision_cache->bodies.find(id);
+				if (existing != self_collision_cache->bodies.end()) {
+					scratch = &existing->second;
+				} else if (self_collision_cache->bodies.size() < JoltSelfCollisionCache::MAX_RETAINED_BODIES) {
+					scratch = &self_collision_cache->bodies[id];
+				}
+			}
+			if (scratch == &self_scratch) {
+				// Default and cache-overflow paths preserve old per-step
+				// sharing, never reuse a different body's adjacency.
+				scratch->one_ring_edges.clear();
+			}
 			if (self_budget > 0) {
-				resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, self_scratch);
+				resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, *scratch);
 			}
 			if (self_edges && self_edge_budget > 0) {
-				resolve_soft_body_self_edge_contacts(*jolt_body, *object, p_step, self_edge_budget, self_scratch);
+				resolve_soft_body_self_edge_contacts(*jolt_body, *object, p_step, self_edge_budget, *scratch);
 			}
 		}
 	}
@@ -1682,6 +1844,9 @@ JoltSpace3D::JoltSpace3D(JPH::JobSystem *p_job_system, JPH::TempAllocator *p_tem
 }
 
 JoltSpace3D::~JoltSpace3D() {
+	delete self_collision_cache;
+	self_collision_cache = nullptr;
+
 	if (direct_state != nullptr) {
 		memdelete(direct_state);
 		direct_state = nullptr;
@@ -1963,6 +2128,10 @@ JPH::Body *JoltSpace3D::add_object(const JoltObject3D &p_object, const JPH::Soft
 }
 
 void JoltSpace3D::remove_object(const JPH::BodyID &p_jolt_id) {
+	// Invalidate the cached leaf-index map before body destruction/reuse.
+	if (self_collision_cache != nullptr) {
+		self_collision_cache->bodies.erase(p_jolt_id.GetIndexAndSequenceNumber());
+	}
 	JPH::BodyInterface &body_iface = get_body_iface();
 
 	// A body queued by CreateBody/CreateSoftBody has not been inserted in
