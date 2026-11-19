@@ -10,6 +10,65 @@ const SALVAGE_GOOD := {"wood_1": 2, "stone_1": 1}
 const SALVAGE_DAMAGED := {"wood_1": 1}
 const DISMANTLE_RANGE := 3.0
 const MAX_HEALTH := 120.0
+# T1-T4 defenses use original resources and crafted/refined materials.
+# Each upgrade consumes one transaction on the server, then raises max HP.
+const MAX_TIER := 4
+const MAX_HEALTH_BY_TIER := [0.0, 120.0, 240.0, 400.0, 600.0]
+const DAMAGE_FACTOR_BY_TIER := [0.0, 1.0, 0.82, 0.66, 0.5]
+const REPAIR_AMOUNT_BY_TIER := [0.0, 40.0, 60.0, 85.0, 110.0]
+const UPGRADE_COST_BY_TIER := {
+	2: {"plank_2": 4, "stone_2": 2},
+	3: {"plank_3": 4, "bar_3": 3},
+	4: {"plank_4": 6, "bar_4": 4},
+}
+const REPAIR_COST_BY_TIER := {
+	1: {"wood_1": 1},
+	2: {"plank_2": 1},
+	3: {"bar_3": 1},
+	4: {"bar_4": 1},
+}
+const UPGRADE_RANGE := 3.0
+
+
+static func tier_of(data: Dictionary) -> int:
+	# Old saved and session walls without a tier are T1 by definition.
+	return int(data.get("tier", 1))
+
+
+static func valid_tier(tier: int) -> bool:
+	return tier >= 1 and tier <= MAX_TIER
+
+
+static func max_health(tier: int) -> float:
+	return MAX_HEALTH_BY_TIER[tier] if valid_tier(tier) else 0.0
+
+
+static func color_for_tier(tier: int) -> Color:
+	match tier:
+		2:
+			return Color(0.63, 0.67, 0.69) # Salvaged stone plates.
+		3:
+			return Color(0.44, 0.55, 0.61) # Reinforced iron.
+		4:
+			return Color(0.36, 0.52, 0.7) # Hardened alloy.
+		_:
+			return Color(0.64, 0.48, 0.3) # Reclaimed timber.
+
+
+static func upgrade_cost(tier: int) -> Dictionary:
+	return UPGRADE_COST_BY_TIER.get(tier, {}).duplicate()
+
+
+static func repair_cost(tier: int) -> Dictionary:
+	return REPAIR_COST_BY_TIER.get(tier, {}).duplicate()
+
+
+static func repair_amount(tier: int) -> float:
+	return REPAIR_AMOUNT_BY_TIER[tier] if valid_tier(tier) else 0.0
+
+
+static func damage_factor(tier: int) -> float:
+	return DAMAGE_FACTOR_BY_TIER[tier] if valid_tier(tier) else 1.0
 const REPAIR_HEALTH := 40.0
 const RADIUS := 0.85
 const BUILD_RANGE := 4.0
@@ -31,10 +90,12 @@ static func can_manage(data: Dictionary, peer_id: int, user_id: String) -> bool:
 	return int(data.get("owner", -1)) == peer_id
 
 
-static func salvage_for_health(hp: float) -> Dictionary:
-	if not is_finite(hp) or hp <= 0.0:
+static func salvage_for_health(hp: float, tier: int = 1) -> Dictionary:
+	if not is_finite(hp) or hp <= 0.0 or not valid_tier(tier):
 		return {}
-	return SALVAGE_GOOD.duplicate() if hp >= MAX_HEALTH * 0.5 else SALVAGE_DAMAGED.duplicate()
+	# Only T1 base building materials are recovered; expensive upgraded
+	# materials are deliberately sunk, so dismantling cannot mint rare goods.
+	return SALVAGE_GOOD.duplicate() if hp >= max_health(tier) * 0.5 else SALVAGE_DAMAGED.duplicate()
 
 
 static func within_range(a: Vector2, b: Vector2, limit: float) -> bool:
@@ -49,5 +110,6 @@ static func public_state(data: Dictionary) -> Dictionary:
 		"y": float(data["y"]),
 		"z": float(data["z"]),
 		"hp": float(data["hp"]),
+		"tier": tier_of(data), "max_hp": max_health(tier_of(data)),
 		"owner": int(data["owner"]),
 	}
