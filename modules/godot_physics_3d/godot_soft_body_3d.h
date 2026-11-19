@@ -99,6 +99,9 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	real_t damping_coefficient = 0.01; // [0,1]
 	real_t drag_coefficient = 0.0; // [0,1]
 	LocalVector<int> pinned_vertices;
+	// Batch pin/unpin edits: update O(links) stiffness data just once before
+	// the next solver pass, rather than once for every edited visual vertex.
+	bool link_constants_dirty = false;
 
 	SelfList<GodotSoftBody3D> active_list;
 
