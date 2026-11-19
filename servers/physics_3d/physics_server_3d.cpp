@@ -592,6 +592,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Zero preserves legacy behavior; finite positive rates use exponential
 	// relaxation while conserving link momentum and keeping pins fixed.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_link_damping", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	// Optional Bullet-style aerodynamic lift for deformable surfaces.
+	// Computed from mean face velocity through still air; disabled by default.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_lift_coefficient", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
 	// Optional per-triangle surface-area preservation for deformable cloth.
 	// Zero disables all extra area constraints and associated lambda buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_area_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
