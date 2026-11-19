@@ -449,7 +449,8 @@ func _apply_water() -> void:
         if submerged <= 0.0:
             continue
         # Per-area buoyancy force and current. Density is mass per squared pixel.
-        body.apply_central_force(Vector2.UP * (980.0 * _fluid_density * properties.x * submerged))
+        var base_g := float(ProjectSettings.get_setting("physics/2d/default_gravity", 980.0))
+        body.apply_central_force(Vector2.UP * (base_g * body.gravity_scale * _fluid_density * properties.x * submerged))
         var relative := body.linear_velocity - Vector2(_flow, 0)
         body.apply_central_force((-relative * relative.length() * 0.09 * submerged).limit_length(body.mass * 4500.0))
         body.apply_torque(-body.angular_velocity * 120.0 * submerged)
