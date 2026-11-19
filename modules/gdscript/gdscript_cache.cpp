@@ -405,12 +405,12 @@ finish:
 Ref<GDScript> GDScriptCache::get_cached_script(const String &p_path) {
 	MutexLock lock(singleton->mutex);
 
-	if (singleton->full_gdscript_cache.has(p_path)) {
-		return singleton->full_gdscript_cache[p_path];
+	if (const Ref<GDScript> *cached = singleton->full_gdscript_cache.getptr(p_path)) {
+		return *cached;
 	}
 
-	if (singleton->shallow_gdscript_cache.has(p_path)) {
-		return singleton->shallow_gdscript_cache[p_path];
+	if (const Ref<GDScript> *cached = singleton->shallow_gdscript_cache.getptr(p_path)) {
+		return *cached;
 	}
 
 	return Ref<GDScript>();
