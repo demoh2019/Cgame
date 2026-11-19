@@ -541,7 +541,8 @@ private:
 		};
 
 		for (const BVHHandle &h : changed_items) {
-			const BOUNDS &expanded_aabb = tree._pairs[h.id()].expanded_aabb;
+			// Callbacks may grow pair adjacency storage: keep a stable AABB copy.
+			const BOUNDS expanded_aabb = tree._pairs[h.id()].expanded_aabb;
 			BVHABB_CLASS abb;
 			abb.from(expanded_aabb);
 
