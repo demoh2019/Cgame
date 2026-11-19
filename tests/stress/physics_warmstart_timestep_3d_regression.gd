@@ -11,7 +11,13 @@ func _run() -> void:
 	var original_ticks: int = Engine.physics_ticks_per_second
 	Engine.physics_ticks_per_second = 60
 
+	# Exercise a non-default warm-start coefficient on the new physics space.
+	# Restore the project-level setting immediately: the space caches its value.
+	var setting_path := "physics/3d/solver/warm_start_coefficient"
+	var previous_setting: Variant = ProjectSettings.get_setting(setting_path)
+	ProjectSettings.set_setting(setting_path, 0.75)
 	var space := PhysicsServer3D.space_create()
+	ProjectSettings.set_setting(setting_path, previous_setting)
 	var floor_shape := PhysicsServer3D.box_shape_create()
 	var ball_shape := PhysicsServer3D.sphere_shape_create()
 	PhysicsServer3D.shape_set_data(floor_shape, Vector3(35.0, 1.0, 35.0))
