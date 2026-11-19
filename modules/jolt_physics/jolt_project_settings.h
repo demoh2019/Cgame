@@ -57,7 +57,7 @@ public:
 	// Used when constructing a soft body; existing bodies retain their constraints.
 	inline static int soft_body_bend_mode = 0;
 	inline static float soft_body_bend_compliance = 0.001f;
-	// Optional anisotropic XPBD textile stiffness in rest-pose local axes.
+	// Optional direction-dependent XPBD compliance of cloth surface edges.
 	inline static int soft_body_fiber_axis = 0;
 	inline static float soft_body_fiber_compliance_multiplier = 1.0f;
 	// Opt-in long-range cloth attachments to pinned vertices; new meshes only.
@@ -66,11 +66,14 @@ public:
 	// Opt-in convex, closed-mesh tetrahedral volume constraints.
 	inline static bool soft_body_volume_preservation = false;
 	inline static float soft_body_volume_compliance = 0.00001f;
-	// Keep rest volume by default; opt into isotropic volumetric scaling.
+	// Keep the prior opt-in compressible volumetric shrink material.
 	inline static bool soft_body_volume_follow_shrinking_factor = false;
 	// Adds center-to-surface XPBD stretch springs to the convex tetra fan.
 	inline static bool soft_body_volume_radial_springs = false;
 	inline static float soft_body_volume_radial_compliance = 0.0001f;
+	// 0 = isotropic; 1/2/3 = local X/Y/Z directional radial compliance.
+	inline static int soft_body_radial_anisotropy_axis = 0;
+	inline static float soft_body_radial_anisotropy_ratio = 1.0f;
 	inline static float bounce_velocity_threshold;
 	inline static bool sleep_allowed;
 	inline static float sleep_velocity_threshold;
