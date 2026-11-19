@@ -271,7 +271,8 @@ func cmd_stash(peer_id: int, item_id: String, count: int, deposit: bool) -> Dict
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
-	if Vector2(player.position.x, player.position.z).distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+	var distance: float = Vector2(player.position.x, player.position.z).distance_to(WORKBENCH_POSITION)
+	if not is_finite(distance) or distance > WORKBENCH_RANGE:
 		return {"ok": false, "reason": "no_station"}
 	if not Defs.is_item(item_id) or count < 1 or count > Defs.stack_size(item_id):
 		return {"ok": false, "reason": "invalid_stack"}
