@@ -64,6 +64,9 @@ void JoltProjectSettings::register_settings() {
 	// Applies when creating/rebuilding a soft body, not retroactively.
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_bend_mode", PROPERTY_HINT_ENUM, "Disabled,Distance,Dihedral"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_bend_compliance", PROPERTY_HINT_RANGE, "0,1,0.000001,or_greater"), 0.001f);
+	// Ratio 1 keeps isotropic cloth; select local fiber axis for warp/weft.
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_fiber_axis", PROPERTY_HINT_ENUM, "X,Y,Z"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_fiber_compliance_multiplier", PROPERTY_HINT_RANGE, "0.1,10,0.05"), 1.0f);
 	// Long-range attachments reduce excessive cloth stretch from pinned points.
 	// Geodesic distances follow the mesh rather than cutting through folds.
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_lra_mode", PROPERTY_HINT_ENUM, "Disabled,Euclidean,Geodesic"), 0);
@@ -72,6 +75,7 @@ void JoltProjectSettings::register_settings() {
 	// small, closed, consistently wound convex soft-body surface meshes.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_volume_preservation"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_volume_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.00001f);
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor"), false);
 	// Optional volumetric edge springs resist interior-to-surface stretching
 	// and add shape support to the convex tetrahedral volume fan.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_volume_radial_springs"), false);
@@ -141,12 +145,16 @@ void JoltProjectSettings::read_settings() {
 	soft_body_bend_mode = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_bend_mode"), 0, 2);
 	const float bend_compliance = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_bend_compliance");
 	soft_body_bend_compliance = Math::is_finite(bend_compliance) ? MAX(bend_compliance, 0.0f) : 0.001f;
+	soft_body_fiber_axis = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_fiber_axis"), 0, 2);
+	const float fiber_multiplier = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_fiber_compliance_multiplier");
+	soft_body_fiber_compliance_multiplier = Math::is_finite(fiber_multiplier) ? CLAMP(fiber_multiplier, 0.1f, 10.0f) : 1.0f;
 	soft_body_lra_mode = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_lra_mode"), 0, 2);
 	const float lra_multiplier = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier");
 	soft_body_lra_max_distance_multiplier = Math::is_finite(lra_multiplier) ? CLAMP(lra_multiplier, 1.0f, 10.0f) : 1.05f;
 	soft_body_volume_preservation = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_preservation");
 	const float volume_compliance = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_compliance");
 	soft_body_volume_compliance = Math::is_finite(volume_compliance) ? MAX(volume_compliance, 0.0f) : 0.00001f;
+	soft_body_volume_follow_shrinking_factor = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor");
 	soft_body_volume_radial_springs = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_radial_springs");
 	const float radial_compliance = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_radial_compliance");
 	soft_body_volume_radial_compliance = Math::is_finite(radial_compliance) ? CLAMP(radial_compliance, 0.0f, 1.0f) : 0.0001f;

@@ -64,12 +64,17 @@ public:
 	// Used when constructing a soft body; existing bodies retain their constraints.
 	inline static int soft_body_bend_mode = 0;
 	inline static float soft_body_bend_compliance = 0.001f;
+	// Opt-in direction-dependent textile XPBD compliance at mesh creation.
+	inline static int soft_body_fiber_axis = 0;
+	inline static float soft_body_fiber_compliance_multiplier = 1.0f;
 	// Opt-in long-range cloth attachments to pinned vertices; new meshes only.
 	inline static int soft_body_lra_mode = 0;
 	inline static float soft_body_lra_max_distance_multiplier = 1.05f;
 	// Opt-in convex, closed-mesh tetrahedral volume constraints.
 	inline static bool soft_body_volume_preservation = false;
 	inline static float soft_body_volume_compliance = 0.00001f;
+	// Restore opt-in cubically scaling tetrahedral rest volume during shrink.
+	inline static bool soft_body_volume_follow_shrinking_factor = false;
 	// Adds center-to-surface XPBD stretch springs to the convex tetra fan.
 	inline static bool soft_body_volume_radial_springs = false;
 	inline static float soft_body_volume_radial_compliance = 0.0001f;
