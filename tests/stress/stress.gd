@@ -22,6 +22,7 @@ const CASES := [
 	"physics_raycast_3d", "render_multimesh_3d",
 	"object_lifecycle", "scene_churn",
 	"bitmap_rects", "bitmap_pipeline",
+	"curve_tessellation_2d", "curve_tessellation_3d",
 ]
 
 var signal_total: int = 0
@@ -266,6 +267,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _bitmap_rects(scale)
 		"bitmap_pipeline":
 			return _bitmap_pipeline(scale)
+		"curve_tessellation_2d":
+			return _curve_tessellation_2d(scale)
+		"curve_tessellation_3d":
+			return _curve_tessellation_3d(scale)
 	return {"error": "Unhandled case"}
 
 
@@ -1297,3 +1302,94 @@ func _stream_bulk(scale: int) -> Dictionary:
 		"read_write_ms": float(Time.get_ticks_usec() - started) / 1000.0,
 		"checksum": checksum,
 	}
+
+
+# Profile Curve2D creation, adaptive subdivision, even-length subdivision,
+# and full baked-cache regeneration separately (no rendering/GPU overhead).
+func _curve_tessellation_2d(scale: int) -> Dictionary:
+	var started := Time.get_ticks_usec()
+	var count := 48 * scale
+	var curve := Curve2D.new()
+	for i in range(count + 1):
+		curve.add_point(Vector2(float(i) * 1.2, sin(float(i) * 0.38) * 7.0),
+				Vector2(-0.45, -3.0), Vector2(0.45, 3.0))
+	var construction_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	var checksum := 0
+
+	started = Time.get_ticks_usec()
+	for repeat in range(6):
+		var samples := curve.tessellate(7, 3.0)
+		if samples.size() < count + 1:
+			return {"error": "Curve2D adaptive subdivision dropped control points"}
+		if not samples[0].is_equal_approx(curve.get_point_position(0)) or not samples[samples.size() - 1].is_equal_approx(curve.get_point_position(count)):
+			return {"error": "Curve2D adaptive endpoints changed"}
+		checksum += samples.size()
+	var adaptive_ms := float(Time.get_ticks_usec() - started) / 1000.0
+
+	started = Time.get_ticks_usec()
+	for repeat in range(6):
+		var samples := curve.tessellate_even_length(9, 0.75)
+		if samples.size() < count + 1:
+			return {"error": "Curve2D even-length subdivision dropped control points"}
+		checksum += samples.size()
+	var even_ms := float(Time.get_ticks_usec() - started) / 1000.0
+
+	started = Time.get_ticks_usec()
+	for repeat in range(6):
+		curve.set_bake_interval(0.75 + float(repeat) * 0.01)
+		var samples := curve.get_baked_points()
+		if samples.size() < count + 1:
+			return {"error": "Curve2D cached subdivision dropped control points"}
+		if not samples[0].is_equal_approx(curve.get_point_position(0)) or not samples[samples.size() - 1].is_equal_approx(curve.get_point_position(count)):
+			return {"error": "Curve2D baked endpoints changed"}
+		checksum += samples.size()
+	var bake_ms := float(Time.get_ticks_usec() - started) / 1000.0
+
+	return {"control_points": count + 1, "passes": 6,
+		"construction_ms": construction_ms, "adaptive_ms": adaptive_ms,
+		"even_ms": even_ms, "bake_ms": bake_ms, "checksum": checksum}
+
+
+# Closed Curve3D also benchmarks wrapping intervals and baked path frames.
+func _curve_tessellation_3d(scale: int) -> Dictionary:
+	var started := Time.get_ticks_usec()
+	var count := 48 * scale
+	var radius := float(count) * 0.5
+	var curve := Curve3D.new()
+	for i in range(count):
+		var angle := TAU * float(i) / float(count)
+		var position := Vector3(cos(angle) * radius, sin(angle) * radius, sin(angle * 3.0) * 4.0)
+		var tangent := Vector3(-sin(angle) * 2.0, cos(angle) * 2.0, cos(angle * 3.0))
+		curve.add_point(position, -tangent, tangent)
+	curve.set_closed(true)
+	var construction_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	var checksum := 0
+
+	started = Time.get_ticks_usec()
+	for repeat in range(6):
+		var samples := curve.tessellate(7, 3.0)
+		if samples.size() < count + 1 or not samples[0].is_equal_approx(samples[samples.size() - 1]):
+			return {"error": "Closed Curve3D adaptive subdivision invalid"}
+		checksum += samples.size()
+	var adaptive_ms := float(Time.get_ticks_usec() - started) / 1000.0
+
+	started = Time.get_ticks_usec()
+	for repeat in range(6):
+		var samples := curve.tessellate_even_length(9, 0.75)
+		if samples.size() < count + 1 or not samples[0].is_equal_approx(samples[samples.size() - 1]):
+			return {"error": "Closed Curve3D even-length subdivision invalid"}
+		checksum += samples.size()
+	var even_ms := float(Time.get_ticks_usec() - started) / 1000.0
+
+	started = Time.get_ticks_usec()
+	for repeat in range(6):
+		curve.set_bake_interval(0.75 + float(repeat) * 0.01)
+		var samples := curve.get_baked_points()
+		if samples.size() < count + 1 or not samples[0].is_equal_approx(samples[samples.size() - 1]):
+			return {"error": "Closed Curve3D baked-cache rebuild invalid"}
+		checksum += samples.size()
+	var bake_ms := float(Time.get_ticks_usec() - started) / 1000.0
+
+	return {"control_points": count, "closed": true, "passes": 6,
+		"construction_ms": construction_ms, "adaptive_ms": adaptive_ms,
+		"even_ms": even_ms, "bake_ms": bake_ms, "checksum": checksum}

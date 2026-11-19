@@ -41,6 +41,23 @@ python3 tests/stress/run.py --godot /path/to/godot --case memory_churn --max-ret
 
 Run `--list-cases` for supported identifiers.
 
+### Curve tessellation CPU/RAM scaling
+
+The headless `curve_tessellation_2d` and `curve_tessellation_3d` workloads measure
+`construction_ms`, `adaptive_ms`, `even_ms` and `bake_ms`
+separately, and validate control points and closed-path endpoints. Compare
+before/after runs on identical hardware to quantify the impact of the
+contiguous subdivision buffers and cached Bezier endpoints.
+
+```bash
+python3 tests/stress/scale_sweep.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case curve_tessellation_2d,curve_tessellation_3d \
+  --scales 1,2,4,8,16 --repeats 5 --frames 90 \
+  --output out/curve-scale.json --summary-md out/curve-scale.md
+```
+
+
 | Area | Case | Loads applied |
 | --- | --- | --- |
 | Containers | `containers` | Typed Array, Dictionary, random indexed reads, large allocations |

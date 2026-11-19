@@ -23,6 +23,11 @@ class CaseSelectionTests(unittest.TestCase):
         self.assertIn("physics_3d", selected)
         self.assertNotIn("render_2d", selected)
 
+    def test_curve_stress_cases_are_selectable_and_headless(self):
+        cases = ("curve_tessellation_2d", "curve_tessellation_3d")
+        self.assertEqual(stress.choose_cases([",".join(cases)], "headless"), list(cases))
+        self.assertTrue(set(cases).issubset(stress.choose_cases(["all"], "headless")))
+
     def test_lifecycle_scenarios_available(self):
         self.assertEqual(stress.choose_cases(["object_lifecycle,scene_churn"], "headless"),
                          ["object_lifecycle", "scene_churn"])
