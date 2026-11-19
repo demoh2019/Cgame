@@ -49,14 +49,18 @@ func remove_item(item_id: String, amount: int = 1) -> bool:
 
 
 func use_item(item_id: String) -> bool:
-    if item_id != "water" and item_id != "food":
+    if item_id != "water" and item_id != "food" and item_id != "bandage":
+        return false
+    if item_id == "bandage" and (health <= 0.0 or health >= MAX_STAT):
         return false
     if not remove_item(item_id):
         return false
     if item_id == "water":
         thirst = minf(MAX_STAT, thirst + 35.0)
-    else:
+    elif item_id == "food":
         hunger = minf(MAX_STAT, hunger + 30.0)
+    else:
+        health = minf(MAX_STAT, health + 25.0)
     changed.emit()
     return true
 

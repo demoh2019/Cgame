@@ -3,9 +3,11 @@ extends Node3D
 ## game rules and inventory remain here.
 
 const SURVIVAL = preload("res://survival_state.gd")
+const PROGRESSION = preload("res://progression.gd")
 const PLAYER = preload("res://player.gd")
 
 var _survival = SURVIVAL.new()
+var _progression
 var _player
 var _hud: Label
 var _prompt: Label
@@ -15,6 +17,7 @@ var _game_over := false
 
 
 func _ready() -> void:
+    _progression = PROGRESSION.new(_survival)
     _setup_input()
     _build_world()
     _player = PLAYER.new()
@@ -47,6 +50,10 @@ func _physics_process(_delta: float) -> void:
     var target = _player.get_look_target()
     if target != null and target.is_in_group("days_after_loot"):
         _prompt.text = "E — подобрать: %s" % String(target.get_meta("item_id", "предмет"))
+    elif target != null and target.is_in_group("days_after_resource"):
+        _prompt.text = "E — добыть: %s (уровень %d)" % [
+            String(target.get_meta("item_id", "ресурс")), int(target.get_meta("tier", 1))
+        ]
     else:
         _prompt.text = ""
 
@@ -60,17 +67,53 @@ func _unhandled_input(event: InputEvent) -> void:
     elif event.is_action_pressed("use_food"):
         _message.text = "Вы поели." if _survival.use_item("food") else "Еды в инвентаре нет."
         _refresh_hud()
+    elif event.is_action_pressed("use_bandage"):
+        _message.text = "Здоровье восстановлено." if _survival.use_item("bandage") else "Нет бинта или здоровье уже полное."
+        _refresh_hud()
+    elif event.is_action_pressed("craft_bandage"):
+        _message.text = String(_progression.craft("bandage")["message"])
+        _refresh_hud()
+    elif event.is_action_pressed("craft_pickaxe"):
+        _message.text = String(_progression.craft("pickaxe")["message"])
+        _refresh_hud()
+    elif event.is_action_pressed("craft_vest"):
+        _message.text = String(_progression.craft("reinforced_vest")["message"])
+        _refresh_hud()
 
 
 func _on_interaction_requested(target: CollisionObject3D) -> void:
-    if _game_over or not is_instance_valid(target) or not target.is_in_group("days_after_loot"):
+    if _game_over or not is_instance_valid(target):
         return
-    var item_id := String(target.get_meta("item_id", ""))
-    var amount := int(target.get_meta("amount", 0))
-    if _survival.add_item(item_id, amount):
-        _message.text = "Найдено: %s × %d" % [item_id, amount]
-        target.queue_free()
+    if target.is_in_group("days_after_resource"):
+        if bool(target.get_meta("depleted", false)):
+            return
+        var result: Dictionary = _progression.gather(
+            String(target.get_meta("item_id", "")), int(target.get_meta("tier", 1))
+        )
+        _message.text = String(result["message"])
+        if bool(result["ok"]):
+            target.set_meta("depleted", true)
+            target.visible = false
+            target.set_deferred("collision_layer", 0)
+            var timer := target.get_node("RespawnTimer") as Timer
+            timer.start()
         _refresh_hud()
+        return
+    if target.is_in_group("days_after_loot"):
+        var item_id := String(target.get_meta("item_id", ""))
+        var amount := int(target.get_meta("amount", 0))
+        if _survival.add_item(item_id, amount):
+            _message.text = "Найдено: %s × %d" % [item_id, amount]
+            target.queue_free()
+            _refresh_hud()
+
+
+func _restore_resource(node: StaticBody3D) -> void:
+    if not is_instance_valid(node):
+        return
+    node.set_meta("depleted", false)
+    node.visible = true
+    node.set_deferred("collision_layer", 1)
 
 
 func _setup_input() -> void:
@@ -83,6 +126,10 @@ func _setup_input() -> void:
     _bind_key("interact", KEY_E)
     _bind_key("use_water", KEY_1)
     _bind_key("use_food", KEY_2)
+    _bind_key("craft_bandage", KEY_3)
+    _bind_key("craft_pickaxe", KEY_4)
+    _bind_key("use_bandage", KEY_5)
+    _bind_key("craft_vest", KEY_6)
     _bind_key("toggle_mouse", KEY_ESCAPE)
 
 
@@ -126,6 +173,16 @@ func _build_world() -> void:
     _spawn_loot("water", Vector3(-3.4, 0.36, -6.3), Color(0.22, 0.52, 0.92), 1)
     _spawn_loot("food", Vector3(3.2, 0.36, -10.0), Color(0.78, 0.53, 0.18), 1)
 
+    # Gatherable natural/salvage deposits. Level 2 ore requires a crafted pickaxe.
+    _spawn_resource_node("wood", 1, Vector3(-4.0, 0.6, 4.0), Color(0.42, 0.26, 0.13))
+    _spawn_resource_node("wood", 1, Vector3(4.0, 0.6, 3.0), Color(0.42, 0.26, 0.13))
+    _spawn_resource_node("wood", 1, Vector3(-4.1, 0.6, -3.0), Color(0.42, 0.26, 0.13))
+    _spawn_resource_node("fiber", 1, Vector3(1.8, 0.5, 3.0), Color(0.17, 0.57, 0.19))
+    _spawn_resource_node("fiber", 1, Vector3(4.4, 0.5, -2.0), Color(0.17, 0.57, 0.19))
+    _spawn_resource_node("scrap", 1, Vector3(2.1, 0.5, -5.0), Color(0.51, 0.55, 0.60))
+    _spawn_resource_node("scrap", 1, Vector3(-3.5, 0.5, -8.5), Color(0.51, 0.55, 0.60))
+    _spawn_resource_node("ore", 2, Vector3(-5.3, 0.65, -8.0), Color(0.24, 0.39, 0.59))
+
 
 func _static_box(node_name: String, pos: Vector3, size: Vector3, color: Color) -> StaticBody3D:
     var body := StaticBody3D.new()
@@ -157,6 +214,21 @@ func _spawn_loot(item_id: String, pos: Vector3, color: Color, amount: int) -> vo
     loot.set_meta("amount", amount)
 
 
+func _spawn_resource_node(item_id: String, tier: int, pos: Vector3, color: Color) -> void:
+    var node := _static_box("Deposit_" + item_id, pos, Vector3(1.0, 1.0, 1.0), color)
+    node.add_to_group("days_after_resource")
+    node.set_meta("item_id", item_id)
+    node.set_meta("tier", tier)
+    node.set_meta("depleted", false)
+
+    var timer := Timer.new()
+    timer.name = "RespawnTimer"
+    timer.one_shot = true
+    timer.wait_time = 45.0
+    node.add_child(timer)
+    timer.timeout.connect(_restore_resource.bind(node))
+
+
 func _build_hud() -> void:
     var layer := CanvasLayer.new()
     add_child(layer)
@@ -167,12 +239,12 @@ func _build_hud() -> void:
     layer.add_child(_hud)
 
     _prompt = Label.new()
-    _prompt.position = Vector2(18.0, 156.0)
+    _prompt.position = Vector2(18.0, 200.0)
     _prompt.add_theme_font_size_override("font_size", 22)
     layer.add_child(_prompt)
 
     _message = Label.new()
-    _message.position = Vector2(18.0, 204.0)
+    _message.position = Vector2(18.0, 248.0)
     _message.add_theme_font_size_override("font_size", 19)
     _message.text = "Осмотрите заброшенный блокпост. Смотрите вниз на предметы."
     layer.add_child(_message)
@@ -181,7 +253,10 @@ func _build_hud() -> void:
 func _refresh_hud() -> void:
     if _hud == null:
         return
-    _hud.text = "DAYS AFTER | HP %d | Голод %d | Жажда %d\nВода: %d  Еда: %d  Металл: %d\nWASD — идти | Shift — бег | Space — прыжок\nE — подобрать | 1 — вода | 2 — еда | Esc — курсор" % [
+    _hud.text = "DAYS AFTER | HP %d | Голод %d | Жажда %d\nВода %d | Еда %d | Металл %d | Дерево %d | Волокно %d | Руда %d\nКирка %d | Бинты %d | Броня %d | Добыча L%d (%d XP) | Ремесло L%d\nWASD/Shift/Space — движение | E — добыча/подбор | 1/2 — еда/вода\n3 — создать бинт | 4 — создать кирку | 5 — лечиться | 6 — создать броню | Esc — курсор" % [
         roundi(_survival.health), roundi(_survival.hunger), roundi(_survival.thirst),
-        _survival.get_count("water"), _survival.get_count("food"), _survival.get_count("scrap")
+        _survival.get_count("water"), _survival.get_count("food"), _survival.get_count("scrap"),
+        _survival.get_count("wood"), _survival.get_count("fiber"), _survival.get_count("ore"),
+        _survival.get_count("pickaxe"), _survival.get_count("bandage"), _survival.get_count("reinforced_vest"),
+        _progression.skill_level("gathering"), _progression.gathering_xp, _progression.skill_level("crafting")
     ]

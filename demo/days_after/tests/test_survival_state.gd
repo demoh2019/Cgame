@@ -20,13 +20,20 @@ func _initialize() -> void:
     assert(state.use_item("food"))
     assert(state.get_count("food") == 0)
     assert(not state.use_item("food"))
+    assert(state.add_item("bandage"))
+    assert(not state.use_item("bandage")) # Cannot waste bandages at full HP.
+    assert(state.get_count("bandage") == 1)
+    state.health = 60.0
+    assert(state.use_item("bandage"))
+    assert(is_equal_approx(state.health, 85.0))
+    assert(state.get_count("bandage") == 0)
 
     var previous_hunger: float = state.hunger
     var previous_thirst: float = state.thirst
     state.tick(10.0)
     assert(state.hunger < previous_hunger)
     assert(state.thirst < previous_thirst)
-    assert(is_equal_approx(state.health, 100.0))
+    assert(is_equal_approx(state.health, 85.0))
     var before_invalid: float = state.hunger
     state.tick(-1.0)
     assert(is_equal_approx(before_invalid, state.hunger))
