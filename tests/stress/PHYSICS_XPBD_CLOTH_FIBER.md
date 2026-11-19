@@ -131,7 +131,14 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
   --test-case="[Physics] Orthotropic cloth handles zero and isotropic ratios"
 ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
   --test-case="[Physics] Orthotropic cloth rejects degenerate and nonfinite input without mutation"
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
+  --test-case="[Physics] Orthotropic cloth XPBD stretch actually resists warp more than weft"
 ```
+
+The native suite also runs the actual `physics_xpbd_solve_distance`
+constraint on identically stretched pinned warp/weft links, asserting
+less residual stretch along the stiffer warp orientation. This
+integration regression is not exercised by the standalone mock.
 
 The independent `physics-xpbd-cloth-fiber.yml` workflow compiles
 actual Cgame math with GCC/Clang on **float and double**, and compares
