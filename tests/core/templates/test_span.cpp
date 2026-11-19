@@ -316,6 +316,96 @@ TEST_CASE("[Span] Constexpr reverse byte search retains compile-time evaluation"
 	CHECK_EQ(hay.rfind(uint8_t(12)), 4);
 }
 
+TEST_CASE("[Span] Count bytes handles empty, unaligned, signed and dense input") {
+	const Span<uint8_t> empty;
+	CHECK_EQ(empty.count(uint8_t(0)), 0);
+
+	uint8_t data[265];
+	for (uint8_t &byte : data) {
+		byte = 0;
+	}
+	data[1] = 255;
+	data[64] = 255;
+	data[129] = 255;
+	data[256] = 255;
+
+	const Span<uint8_t> whole(data);
+	CHECK_EQ(whole.count(uint8_t(255)), 4);
+	CHECK_EQ(whole.count(uint8_t(0)), 261);
+	CHECK_EQ(whole.count(uint8_t(128)), 0);
+
+	const Span<uint8_t> unaligned(data + 1, 256);
+	CHECK_EQ(unaligned.count(uint8_t(255)), 4);
+	CHECK_EQ(unaligned.count(uint8_t(0)), 252);
+	CHECK_EQ(unaligned.count(uint8_t(128)), 0);
+
+	const uint8_t adjacent[] = { 0, 1, 0, 0, 1, 255, 0, 1 };
+	uint8_t repeated[128];
+	for (size_t i = 0; i < 128; i++) {
+		repeated[i] = adjacent[i % 8];
+	}
+	const Span<uint8_t> packed(repeated);
+	CHECK_EQ(packed.count(uint8_t(0)), 64);
+	CHECK_EQ(packed.count(uint8_t(1)), 48);
+	CHECK_EQ(packed.count(uint8_t(255)), 16);
+
+	int8_t signed_data[80];
+	for (int8_t &byte : signed_data) {
+		byte = -128;
+	}
+	signed_data[0] = -1;
+	signed_data[8] = -1;
+	signed_data[79] = 127;
+	const Span<int8_t> signed_span(signed_data);
+	CHECK_EQ(signed_span.count(int8_t(-128)), 77);
+	CHECK_EQ(signed_span.count(int8_t(-1)), 2);
+	CHECK_EQ(signed_span.count(int8_t(127)), 1);
+}
+
+TEST_CASE("[Span] Byte count matches scalar reference across lengths and offsets") {
+	uint32_t seed = 0xBADC0DEU;
+	uint8_t bytes[265];
+	for (int round = 0; round < 48; round++) {
+		for (uint8_t &byte : bytes) {
+			seed = seed * 1664525U + 1013904223U;
+			byte = uint8_t(seed >> 24);
+		}
+		for (int offset = 0; offset < 8; offset++) {
+			for (int length = 0; length <= 257; length++) {
+				const Span<uint8_t> hay(bytes + offset, length);
+				for (int key_index = 0; key_index < 4; key_index++) {
+					const uint8_t key = key_index == 0 ? uint8_t(0) : key_index == 1 ? uint8_t(255) : key_index == 2 ? uint8_t(128) : uint8_t(seed >> 16);
+					uint64_t expected = 0;
+					for (int i = 0; i < length; i++) {
+						expected += bytes[offset + i] == key;
+					}
+					CHECK_EQ(hay.count(key), expected);
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[Span] Count preserves constexpr and custom equality behavior") {
+	static constexpr uint8_t bytes[] = { 0, 1, 1, 255, 0, 255 };
+	static constexpr Span<uint8_t> span(bytes);
+	static_assert(span.count(uint8_t(0)) == 2);
+	static_assert(span.count(uint8_t(1)) == 2);
+	static_assert(span.count(uint8_t(255)) == 2);
+	static_assert(span.count(uint8_t(100)) == 0);
+
+	struct CaseInsensitiveAscii {
+		char value;
+		bool operator==(const CaseInsensitiveAscii &p_other) const {
+			return (value | 0x20) == (p_other.value | 0x20);
+		}
+	};
+	const CaseInsensitiveAscii chars[] = { { 'A' }, { 'b' }, { 'a' }, { 'Z' } };
+	const Span<CaseInsensitiveAscii> custom(chars);
+	CHECK_EQ(custom.count(CaseInsensitiveAscii{ 'a' }), 2);
+	CHECK_EQ(custom.count(CaseInsensitiveAscii{ 'B' }), 1);
+}
+
 TEST_CASE("[Span] Constexpr byte search retains compile-time evaluation") {
 	static constexpr uint8_t values[] = { 0, 1, 2, 3, 4, 5 };
 	static constexpr Span<uint8_t> span(values);
