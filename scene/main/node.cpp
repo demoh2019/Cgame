@@ -2037,35 +2037,75 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 	ERR_THREAD_GUARD_V(TypedArray<Node>());
 	TypedArray<Node> ret;
 	ERR_FAIL_COND_V(p_pattern.is_empty() && p_type.is_empty(), ret);
+
 	_update_children_cache();
-	Node *const *cptr = data.children_cache.ptr();
-	int ccount = data.children_cache.size();
-	for (int i = 0; i < ccount; i++) {
-		if (p_owned && !cptr[i]->data.owner) {
+	if (data.children_cache.is_empty()) {
+		return ret;
+	}
+
+	// Resolve the global script type once, rather than once for each matching child.
+	const bool is_global_type = !p_type.is_empty() && ScriptServer::is_global_class(p_type);
+	const String global_type_path = is_global_type ? ScriptServer::get_global_class_path(p_type) : String();
+
+	auto append_match = [&](Node *p_node) {
+		if (!p_pattern.is_empty() && !p_node->data.name.string().match(p_pattern)) {
+			return;
+		}
+		if (p_type.is_empty() || p_node->is_class(p_type)) {
+			ret.append(p_node);
+			return;
+		}
+		ScriptInstance *instance = p_node->get_script_instance();
+		if (!instance) {
+			return;
+		}
+		Ref<Script> script_ref = instance->get_script();
+		while (script_ref.is_valid()) {
+			const String script_path = script_ref->get_path();
+			if ((is_global_type && global_type_path == script_path) || p_type == script_path) {
+				ret.append(p_node);
+				return;
+			}
+			script_ref = script_ref->get_base_script();
+		}
+	};
+
+	if (!p_recursive) {
+		// Avoid allocating a traversal stack for a non-recursive query.
+		for (Node *child : data.children_cache) {
+			if (!p_owned || child->data.owner) {
+				append_match(child);
+			}
+		}
+		return ret;
+	}
+
+	// Store only the current DFS path, not all siblings, so temporary memory
+	// is O(tree depth) and we never create one TypedArray per descendant.
+	struct TraversalFrame {
+		const Node *parent;
+		uint32_t next_child;
+	};
+	LocalVector<TraversalFrame> frames;
+	frames.push_back({ this, 0 });
+	while (!frames.is_empty()) {
+		TraversalFrame &frame = frames[frames.size() - 1];
+		if (frame.next_child >= frame.parent->data.children_cache.size()) {
+			frames.resize(frames.size() - 1);
 			continue;
 		}
 
-		if (p_pattern.is_empty() || cptr[i]->data.name.string().match(p_pattern)) {
-			if (p_type.is_empty() || cptr[i]->is_class(p_type)) {
-				ret.append(cptr[i]);
-			} else if (cptr[i]->get_script_instance()) {
-				Ref<Script> scr = cptr[i]->get_script_instance()->get_script();
-				while (scr.is_valid()) {
-					if ((ScriptServer::is_global_class(p_type) && ScriptServer::get_global_class_path(p_type) == scr->get_path()) || p_type == scr->get_path()) {
-						ret.append(cptr[i]);
-						break;
-					}
-
-					scr = scr->get_base_script();
-				}
-			}
+		Node *child = frame.parent->data.children_cache[frame.next_child++];
+		if (p_owned && !child->data.owner) {
+			// Preserve the original behavior: an unowned branch is not traversed.
+			continue;
 		}
-
-		if (p_recursive) {
-			ret.append_array(cptr[i]->find_children(p_pattern, p_type, true, p_owned));
+		append_match(child);
+		child->_update_children_cache();
+		if (!child->data.children_cache.is_empty()) {
+			frames.push_back({ child, 0 });
 		}
 	}
-
 	return ret;
 }
 
