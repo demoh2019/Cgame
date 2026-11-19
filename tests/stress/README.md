@@ -1045,6 +1045,16 @@ into the rotated contact tangent to avoid stale friction when a manifold
 normal changes. The cached matrix is invalidated on every pre-solve pass,
 and ill-conditioned or incomplete manifolds still use scalar PGS.
 
+Pure-Python source-contract and 2x2 LCP reference tests exercise
+all four complementarity active sets and 500 deterministic positive-definite
+matrix scenarios. They check mathematical consistency and cache placement,
+but do not replace compiling Cgame or running its physics scene:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_2d_block_matrix_cache.py' -v
+```
+
 The standalone regression creates eight independent stacks of four boxes.
 It runs 240 physics frames each with block solving disabled/enabled,
 checking collision pairs, finite velocities, runaway motion and settling:
