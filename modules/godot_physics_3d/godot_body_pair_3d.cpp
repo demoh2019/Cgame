@@ -682,8 +682,18 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		Vector3 axis = global_A - global_B;
 		real_t depth = axis.dot(c.normal);
 
-		if (depth <= 0.0) {
+		const bool speculative = depth < 0.0 && !report_contacts_only &&
+				space->get_speculative_sphere_distance() >= -depth;
+		if (depth <= 0.0 && !speculative) {
 			continue;
+		}
+		if (speculative) {
+			// Separated predictive points must not warm-start penetration,
+			// friction or positional correction from previous frames.
+			c.acc_normal_impulse = 0.0;
+			c.acc_tangent_impulse = Vector3();
+			c.acc_bias_impulse = 0.0;
+			c.acc_bias_impulse_center_of_mass = 0.0;
 		}
 
 #ifdef DEBUG_ENABLED
@@ -706,7 +716,8 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 
 			// Cap deep-overlap recovery so embedded bodies cannot be violently
 			// pushed out in a single tick (Box2D-style contact tuning).
-			c.bias = space->limit_contact_bias(-bias * inv_dt * MIN(0.0f, -depth + max_penetration));
+			c.bias = speculative ? real_t(0.0) :
+					space->limit_contact_bias(-bias * inv_dt * MIN(0.0f, -depth + max_penetration));
 		}
 
 		c.depth = depth;
@@ -714,7 +725,7 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		// Keep previous-frame friction inside the CURRENT material's Coulomb
 		// cone. Otherwise lowering friction can still apply a too-large
 		// tangential impulse during the warm start.
-		if (has_friction) {
+		if (has_friction && !speculative) {
 			const real_t cached_tangent_limit = mixed_friction * space->get_static_friction_multiplier() * c.acc_normal_impulse;
 			if (cached_tangent_limit <= 0.0) {
 				// No normal impulse means no admissible tangent impulse.
@@ -734,9 +745,9 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 
 		c.acc_impulse -= j_vec;
 
-		// contact query reporting...
+		// Only touching or penetrating contacts produce collision reports.
 
-		if (A->can_report_contacts() || B->can_report_contacts()) {
+		if (!speculative && (A->can_report_contacts() || B->can_report_contacts())) {
 			Vector3 crB = B->get_angular_velocity().cross(c.rB) + B->get_linear_velocity();
 			Vector3 crA = A->get_angular_velocity().cross(c.rA) + A->get_linear_velocity();
 
@@ -757,15 +768,18 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		c.active = true;
 		do_process = true;
 
-		if (collide_A) {
-			A->apply_impulse(-j_vec, c.rA + A->get_center_of_mass());
-		}
-		if (collide_B) {
-			B->apply_impulse(j_vec, c.rB + B->get_center_of_mass());
+		if (j_vec != Vector3()) {
+			if (collide_A) {
+				A->apply_impulse(-j_vec, c.rA + A->get_center_of_mass());
+			}
+			if (collide_B) {
+				B->apply_impulse(j_vec, c.rB + B->get_center_of_mass());
+			}
 		}
 
-		c.bounce = mixed_restitution;
-		if (c.bounce) {
+		// In the speculative case, limit closure to the current gap per step.
+		c.bounce = speculative ? -depth * inv_dt : mixed_restitution;
+		if (!speculative && c.bounce) {
 			Vector3 crA = A->get_prev_angular_velocity().cross(c.rA);
 			Vector3 crB = B->get_prev_angular_velocity().cross(c.rB);
 			Vector3 dv = B->get_prev_linear_velocity() + crB - A->get_prev_linear_velocity() - crA;
@@ -886,6 +900,7 @@ void GodotBodyPair3D::solve(real_t p_step) {
 	bool block_normal_updated[2] = { false, false };
 	if (space->is_block_solver_enabled() && contact_count == 2 &&
 			contacts[0].active && contacts[1].active &&
+			contacts[0].depth > 0.0 && contacts[1].depth > 0.0 &&
 			contacts[0].normal.dot(contacts[1].normal) > real_t(0.9999)) {
 		Contact &c0 = contacts[0];
 		Contact &c1 = contacts[1];
@@ -983,6 +998,8 @@ void GodotBodyPair3D::solve(real_t p_step) {
 
 		c.active = false; //try to deactivate, will activate itself if still needed
 
+		// Speculative contacts never produce positional correction.
+		if (c.depth > 0.0) {
 		//bias impulse
 
 		Vector3 crbA = A->get_biased_angular_velocity().cross(c.rA);
@@ -1033,6 +1050,7 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			c.active = true;
 		}
 
+		}
 		Vector3 crA = A->get_angular_velocity().cross(c.rA);
 		Vector3 crB = B->get_angular_velocity().cross(c.rB);
 		Vector3 dv = B->get_linear_velocity() + crB - A->get_linear_velocity() - crA;
@@ -1066,7 +1084,7 @@ void GodotBodyPair3D::solve(real_t p_step) {
 
 		// Frictionless contacts need neither tangential velocities nor inertia
 		// calculations. Their cached tangent impulse was cleared in pre_solve().
-		if (friction == 0.0) {
+		if (friction == 0.0 || c.depth <= 0.0) {
 			continue;
 		}
 
