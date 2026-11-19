@@ -130,6 +130,8 @@ Neo-Hookean FEM-подсистема строит для него **шесть �
 
 - `physics/3d/solver/soft_body_tetra_fem_compliance = 0.00002`
 - `physics/3d/solver/soft_body_tetra_fem_poisson_ratio = 0.3`
+- `physics/3d/solver/soft_body_tetra_fem_viscosity = 0.8` — независимое
+  объёмное вязкоупругое демпфирование скоростей деформации тетраэдров.
 
 В обычном проекте FEM compliance = `0`, поэтому не выполняются
 ни подготовка тетраэдров, ни дополнительные проходы решателя.
