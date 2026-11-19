@@ -2033,13 +2033,13 @@ Node *Node::find_child(const String &p_pattern, bool p_recursive, bool p_owned) 
 // Finds child nodes based on their name using pattern matching, or class name,
 // or both (either pattern or type can be left empty).
 // Can be recursive or not, and limited to owned nodes.
-TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_type, bool p_recursive, bool p_owned) const {
-	ERR_THREAD_GUARD_V(TypedArray<Node>());
-	TypedArray<Node> ret;
-	ERR_FAIL_COND_V(p_pattern.is_empty() && p_type.is_empty(), ret);
+// Append recursively to one result array rather than allocating an Array for every
+// descendant and repeatedly copying partial results into parent arrays.
+void Node::_append_find_children(const String &p_pattern, const String &p_type, bool p_recursive, bool p_owned, TypedArray<Node> &r_result) const {
+	ERR_THREAD_GUARD;
 	_update_children_cache();
 	Node *const *cptr = data.children_cache.ptr();
-	int ccount = data.children_cache.size();
+	const int ccount = data.children_cache.size();
 	for (int i = 0; i < ccount; i++) {
 		if (p_owned && !cptr[i]->data.owner) {
 			continue;
@@ -2047,12 +2047,12 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 
 		if (p_pattern.is_empty() || cptr[i]->data.name.string().match(p_pattern)) {
 			if (p_type.is_empty() || cptr[i]->is_class(p_type)) {
-				ret.append(cptr[i]);
+				r_result.append(cptr[i]);
 			} else if (cptr[i]->get_script_instance()) {
 				Ref<Script> scr = cptr[i]->get_script_instance()->get_script();
 				while (scr.is_valid()) {
 					if ((ScriptServer::is_global_class(p_type) && ScriptServer::get_global_class_path(p_type) == scr->get_path()) || p_type == scr->get_path()) {
-						ret.append(cptr[i]);
+						r_result.append(cptr[i]);
 						break;
 					}
 
@@ -2062,10 +2062,16 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 		}
 
 		if (p_recursive) {
-			ret.append_array(cptr[i]->find_children(p_pattern, p_type, true, p_owned));
+			cptr[i]->_append_find_children(p_pattern, p_type, true, p_owned, r_result);
 		}
 	}
+}
 
+TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_type, bool p_recursive, bool p_owned) const {
+	ERR_THREAD_GUARD_V(TypedArray<Node>());
+	TypedArray<Node> ret;
+	ERR_FAIL_COND_V(p_pattern.is_empty() && p_type.is_empty(), ret);
+	_append_find_children(p_pattern, p_type, p_recursive, p_owned, ret);
 	return ret;
 }
 
