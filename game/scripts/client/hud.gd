@@ -12,6 +12,7 @@ const Contracts = preload("res://scripts/shared/contracts.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
+const Reputation = preload("res://scripts/shared/reputation.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const PartyFrames = preload("res://scripts/client/party_frames.gd")
 
@@ -19,6 +20,8 @@ var client
 var _bars: Dictionary = {}
 var _zone_label: Label
 var _info_label: Label
+var _vendor_water_button: Button
+var _vendor_food_button: Button
 var _radar
 var _contract_label: Label
 var _prompt: Label
@@ -218,10 +221,12 @@ func _build() -> void:
 	buy_water.text = "Buy water (%d silver)" % int(Vendor.BUY_PRICES["water_bottle"])
 	buy_water.pressed.connect(func() -> void: client.vendor("water_bottle", 1, true))
 	vendor_buttons.add_child(buy_water)
+	_vendor_water_button = buy_water
 	var buy_food := Button.new()
 	buy_food.text = "Buy food (%d silver)" % int(Vendor.BUY_PRICES["canned_food"])
 	buy_food.pressed.connect(func() -> void: client.vendor("canned_food", 1, true))
 	vendor_buttons.add_child(buy_food)
+	_vendor_food_button = buy_food
 	var sell_scrap := Button.new()
 	sell_scrap.text = "Sell scrap (+%d silver)" % int(Vendor.SELL_PRICES["scrap"])
 	sell_scrap.pressed.connect(func() -> void: client.vendor("scrap", 1, false))
@@ -841,9 +846,27 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		say(reasons.get(reason, "Stash: " + reason))
 
 
+## Shows the actual authoritative unit price formula; PvP infamy increases
+## the price AFTER earned renown discount, and the result may change live.
+func _refresh_vendor_price_labels() -> void:
+	if _vendor_water_button == null or _vendor_food_button == null:
+		return
+	var points: int = int(client.you.get("renown", 0))
+	var crime: float = float(client.you.get("pvp_infamy", 0.0))
+	var water: int = PvpInfamy.vendor_unit_price(
+		Reputation.buy_price(int(Vendor.BUY_PRICES["water_bottle"]), 1, points),
+		crime, true)
+	var food: int = PvpInfamy.vendor_unit_price(
+		Reputation.buy_price(int(Vendor.BUY_PRICES["canned_food"]), 1, points),
+		crime, true)
+	_vendor_water_button.text = "Buy water (%d silver)" % water
+	_vendor_food_button.text = "Buy food (%d silver)" % food
+
+
 func _process(_delta: float) -> void:
 	if client == null or not client.you.has("health"):
 		return
+	_refresh_vendor_price_labels()
 	_bars["health"].value = client.you["health"]
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
