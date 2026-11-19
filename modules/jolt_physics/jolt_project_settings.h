@@ -88,6 +88,9 @@ public:
 	// Opt-in persistent per-body adjacency and incremental edge-BVH refits.
 	// Requires self and self-edge collisions + the edge BVH. Default false.
 	inline static bool soft_body_self_persistent_bvh = false;
+	// Independently cache and refit the self vertex-face triangle BVH;
+	// works without enabling edge collision or persistent edge BVH.
+	inline static bool soft_body_self_face_bvh_refit = false;
 	inline static int soft_body_self_contact_max_checks = 16384;
 	// Opt-in Jacobi XPBD-style position projection of nonadjacent
 	// vertex-face and edge-edge self contacts. Velocity impulses remain.

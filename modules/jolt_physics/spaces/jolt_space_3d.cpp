@@ -980,6 +980,9 @@ constexpr uint32_t MAX_SOFT_SELF_CONTACT_FACES = 1024;
 struct SoftSelfContactScratch {
 	SoftFaceBVHScratch bvh;
 	SoftFaceBVHScratch edge_bvh; // Reused across active soft bodies.
+	uint32_t face_bvh_face_count = 0;
+	uint32_t face_bvh_refits = 0;
+	bool face_bvh_ready = false;
 	JPH::Array<uint64_t> one_ring_edges;
 	// Jacobi self-contact corrections are accumulated without moving BVH
 	// geometry during a candidate query, then uniformly capped and applied.
@@ -1176,8 +1179,11 @@ static bool ensure_soft_self_topology(const JPH::Array<JPH::SoftBodySharedSettin
 		return true; // Same-step reuse between VF and EE as before.
 	}
 
-	// A changed topology invalidates both the adjacency and the edge
-	// tree's leaf-index mapping before any query can access it.
+	// A changed topology invalidates the adjacency, face and edge trees:
+	// their persistent leaf mappings must never reference an old mesh.
+	r_scratch.face_bvh_ready = false;
+	r_scratch.face_bvh_face_count = 0;
+	r_scratch.face_bvh_refits = 0;
 	r_scratch.edge_bvh_ready = false;
 	r_scratch.edge_bvh_edge_count = 0;
 	r_scratch.edge_bvh_refits = 0;
@@ -1293,6 +1299,72 @@ static bool predict_soft_self_vertex_face_sweep(
 	return false; // Iteration cap and shared contact work budget.
 }
 
+// The median face hierarchy is built in parent-before-children order.
+// Once the topology and leaf face indices are cached, every physics step
+// can refit the CURRENT deformed triangle AABBs in reverse node order.
+// Unlike a rebuilt tree, median partitions are reused; periodically
+// rebuilding compensates for a cloth that folds far from its old layout.
+static bool refit_soft_self_face_bvh(
+		const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices,
+		SoftFaceBVHScratch &r_bvh, uint32_t &r_budget) {
+	const uint32_t entry_count = uint32_t(r_bvh.entries.size());
+	const uint32_t node_count = uint32_t(r_bvh.nodes.size());
+	if (entry_count == 0 || node_count == 0) {
+		return false;
+	}
+	// Three corner reads + bounds calculation per face, plus node unions.
+	// Charge before touching data so the global self VF quota stays bounded.
+	const uint32_t refit_cost = 4 * entry_count + node_count;
+	if (r_budget <= refit_cost) {
+		return false;
+	}
+	r_budget -= refit_cost;
+	for (SoftFaceBVHEntry &entry : r_bvh.entries) {
+		if (entry.face_index >= p_faces.size()) {
+			return false;
+		}
+		const JPH::SoftBodySharedSettings::Face &face = p_faces[entry.face_index];
+		const uint32_t a = face.mVertex[0], b = face.mVertex[1], c = face.mVertex[2];
+		if (face.IsDegenerate() || a >= p_vertices.size() ||
+				b >= p_vertices.size() || c >= p_vertices.size()) {
+			return false; // Rebuild, filtering any invalid source faces.
+		}
+		const JPH::Vec3 p0 = p_vertices[a].mPosition;
+		const JPH::Vec3 p1 = p_vertices[b].mPosition;
+		const JPH::Vec3 p2 = p_vertices[c].mPosition;
+		entry.min = JPH::Vec3::sMin(p0, JPH::Vec3::sMin(p1, p2));
+		entry.max = JPH::Vec3::sMax(p0, JPH::Vec3::sMax(p1, p2));
+		if (!Math::is_finite(entry.min.GetX()) || !Math::is_finite(entry.min.GetY()) ||
+				!Math::is_finite(entry.min.GetZ()) || !Math::is_finite(entry.max.GetX()) ||
+				!Math::is_finite(entry.max.GetY()) || !Math::is_finite(entry.max.GetZ())) {
+			return false; // Never query stale or nonfinite bounds.
+		}
+	}
+	for (uint32_t i = node_count; i > 0; --i) {
+		SoftFaceBVHNode &node = r_bvh.nodes[i - 1];
+		if (node.end <= node.begin || node.end > entry_count) {
+			return false;
+		}
+		if (node.end - node.begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+			node.min = r_bvh.entries[node.begin].min;
+			node.max = r_bvh.entries[node.begin].max;
+			for (uint32_t j = node.begin + 1; j < node.end; ++j) {
+				node.min = JPH::Vec3::sMin(node.min, r_bvh.entries[j].min);
+				node.max = JPH::Vec3::sMax(node.max, r_bvh.entries[j].max);
+			}
+		} else {
+			if (node.left <= i - 1 || node.right <= i - 1 ||
+					node.left >= node_count || node.right >= node_count) {
+				return false;
+			}
+			node.min = JPH::Vec3::sMin(r_bvh.nodes[node.left].min, r_bvh.nodes[node.right].min);
+			node.max = JPH::Vec3::sMax(r_bvh.nodes[node.left].max, r_bvh.nodes[node.right].max);
+		}
+	}
+	return true;
+}
+
 static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBody3D &p_object,
 		float p_step, uint32_t &r_budget, SoftSelfContactScratch &r_scratch) {
 	JPH::SoftBodyMotionProperties &props = static_cast<JPH::SoftBodyMotionProperties &>(*p_body.GetMotionPropertiesUnchecked());
@@ -1303,17 +1375,43 @@ static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBod
 		return;
 	}
 
+	const bool refit_faces = JoltProjectSettings::soft_body_self_face_bvh_refit;
+	// The existing persistent edge cache and the independent face-cache
+	// option both reuse immutable mesh adjacency for stable BodyID objects.
 	if (!ensure_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch, r_budget,
-			JoltProjectSettings::soft_body_self_persistent_bvh)) {
+			JoltProjectSettings::soft_body_self_persistent_bvh || refit_faces)) {
 		return;
 	}
-	r_scratch.bvh.clear();
-	// Use the existing bounding-volume hierarchy on the same body's
-	// *local* deforming triangles. For tiny cloths brute force is cheaper.
-	// Large bodies are skipped if the BVH would exhaust the work budget.
+	// Use the same triangle BVH whether we build or refit it, preserving
+	// topology exclusions and the existing discrete/speculative narrowphase.
+	// On small meshes, continue to use the old direct face scan.
 	const bool needs_bvh = faces.size() >= MIN_SOFT_FACE_BVH_FACES;
-	const bool use_bvh = needs_bvh && prepare_soft_face_bvh(faces, vertices, JPH::Quat::sIdentity(),
-			JPH::Vec3::sZero(), r_scratch.bvh.entries, r_scratch.bvh.nodes, r_budget);
+	bool use_bvh = false;
+	if (needs_bvh && refit_faces && r_scratch.face_bvh_ready &&
+			r_scratch.face_bvh_face_count == faces.size() && r_scratch.face_bvh_refits < 120) {
+		use_bvh = refit_soft_self_face_bvh(faces, vertices, r_scratch.bvh, r_budget);
+		if (use_bvh) {
+			++r_scratch.face_bvh_refits;
+		}
+	}
+	if (needs_bvh && !use_bvh) {
+		// May follow an aborted refit: always discard potentially partial
+		// AABBs/nodes before attempting a fresh, budgeted median build.
+		r_scratch.bvh.clear();
+		use_bvh = prepare_soft_face_bvh(faces, vertices, JPH::Quat::sIdentity(),
+				JPH::Vec3::sZero(), r_scratch.bvh.entries, r_scratch.bvh.nodes, r_budget);
+		if (use_bvh) {
+			r_scratch.face_bvh_refits = 0;
+		}
+	}
+	if (refit_faces) {
+		r_scratch.face_bvh_ready = use_bvh;
+		r_scratch.face_bvh_face_count = use_bvh ? uint32_t(faces.size()) : 0;
+	} else {
+		// An independently persistent edge cache may outlive this toggle.
+		// Never reuse a face tree from before refitting was switched off.
+		r_scratch.face_bvh_ready = false;
+	}
 	if (needs_bvh && !use_bvh) {
 		return;
 	}
@@ -1912,10 +2010,15 @@ void JoltSpace3D::_pre_step(float p_step) {
 
 	// Reclaim all cached geometry as soon as this opt-in mode is disabled.
 	// Cache is populated lazily, and never shared across physics spaces.
-	const bool persistent_self = JoltProjectSettings::soft_body_self_contacts &&
+	const bool persistent_edges = JoltProjectSettings::soft_body_self_contacts &&
 			JoltProjectSettings::soft_body_self_edge_contacts &&
 			JoltProjectSettings::soft_body_self_edge_bvh &&
 			JoltProjectSettings::soft_body_self_persistent_bvh;
+	// Allow persistent face BVH even when the edge solver is disabled.
+	// Both modes share the existing generation-aware 64-body cache cap.
+	const bool persistent_self = persistent_edges ||
+			(JoltProjectSettings::soft_body_self_contacts &&
+					JoltProjectSettings::soft_body_self_face_bvh_refit);
 	if (!persistent_self && self_collision_cache != nullptr) {
 		delete self_collision_cache;
 		self_collision_cache = nullptr;
