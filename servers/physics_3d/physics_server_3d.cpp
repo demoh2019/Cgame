@@ -202,6 +202,10 @@ void PhysicsServer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("body_get_solver_priority", "body"), &PhysicsServer3D::body_get_solver_priority);
 	ClassDB::bind_method(D_METHOD("body_set_max_depenetration_velocity", "body", "value"), &PhysicsServer3D::body_set_max_depenetration_velocity);
 	ClassDB::bind_method(D_METHOD("body_get_max_depenetration_velocity", "body"), &PhysicsServer3D::body_get_max_depenetration_velocity);
+	ClassDB::bind_method(D_METHOD("body_set_wind_area", "body", "value"), &PhysicsServer3D::body_set_wind_area);
+	ClassDB::bind_method(D_METHOD("body_get_wind_area", "body"), &PhysicsServer3D::body_get_wind_area);
+	ClassDB::bind_method(D_METHOD("body_set_wind_drag_coefficient", "body", "value"), &PhysicsServer3D::body_set_wind_drag_coefficient);
+	ClassDB::bind_method(D_METHOD("body_get_wind_drag_coefficient", "body"), &PhysicsServer3D::body_get_wind_drag_coefficient);
 	ClassDB::bind_method(D_METHOD("body_set_max_angular_velocity", "body", "value"), &PhysicsServer3D::body_set_max_angular_velocity);
 	ClassDB::bind_method(D_METHOD("body_get_max_angular_velocity", "body"), &PhysicsServer3D::body_get_max_angular_velocity);
 	ClassDB::bind_method(D_METHOD("body_set_max_linear_velocity", "body", "value"), &PhysicsServer3D::body_set_max_linear_velocity);
@@ -266,6 +270,8 @@ void PhysicsServer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("soft_body_set_mesh", "body", "mesh"), &PhysicsServer3D::soft_body_set_mesh);
 	ClassDB::bind_method(D_METHOD("soft_body_set_tetrahedral_indices", "body", "tetrahedral_indices"), &PhysicsServer3D::soft_body_set_tetrahedral_indices);
 	ClassDB::bind_method(D_METHOD("soft_body_set_tetrahedral_interior_positions", "body", "positions"), &PhysicsServer3D::soft_body_set_tetrahedral_interior_positions);
+	ClassDB::bind_method(D_METHOD("soft_body_get_tetrahedron_count", "body"), &PhysicsServer3D::soft_body_get_tetrahedron_count);
+	ClassDB::bind_method(D_METHOD("soft_body_get_tetrahedral_interior_node_count", "body"), &PhysicsServer3D::soft_body_get_tetrahedral_interior_node_count);
 
 	ClassDB::bind_method(D_METHOD("soft_body_get_bounds", "body"), &PhysicsServer3D::soft_body_get_bounds);
 
@@ -453,6 +459,11 @@ void PhysicsServer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("joint_set_break_force", "joint", "force"), &PhysicsServer3D::joint_set_break_force);
 	ClassDB::bind_method(D_METHOD("joint_get_break_force", "joint"), &PhysicsServer3D::joint_get_break_force);
 	ClassDB::bind_method(D_METHOD("joint_set_break_torque", "joint", "torque"), &PhysicsServer3D::joint_set_break_torque);
+	ClassDB::bind_method(D_METHOD("joint_set_fatigue_rate", "joint", "rate"), &PhysicsServer3D::joint_set_fatigue_rate);
+	ClassDB::bind_method(D_METHOD("joint_get_fatigue_rate", "joint"), &PhysicsServer3D::joint_get_fatigue_rate);
+	ClassDB::bind_method(D_METHOD("joint_set_fatigue_yield_ratio", "joint", "ratio"), &PhysicsServer3D::joint_set_fatigue_yield_ratio);
+	ClassDB::bind_method(D_METHOD("joint_get_fatigue_yield_ratio", "joint"), &PhysicsServer3D::joint_get_fatigue_yield_ratio);
+	ClassDB::bind_method(D_METHOD("joint_get_fatigue_damage", "joint"), &PhysicsServer3D::joint_get_fatigue_damage);
 	ClassDB::bind_method(D_METHOD("joint_get_break_torque", "joint"), &PhysicsServer3D::joint_get_break_torque);
 	ClassDB::bind_method(D_METHOD("joint_get_reaction_force", "joint"), &PhysicsServer3D::joint_get_reaction_force);
 	ClassDB::bind_method(D_METHOD("joint_get_reaction_torque", "joint"), &PhysicsServer3D::joint_get_reaction_torque);
@@ -626,6 +637,17 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Zero preserves legacy behavior; finite positive rates use exponential
 	// relaxation while conserving link momentum and keeping pins fixed.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_link_damping", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	// Optional thermal graph diffusion and reversible link expansion for XPBD
+	// soft bodies. All rates and expansion default to 0 (legacy physics).
+	// Mesh vertices have equal lumped heat capacity; ambient/source are baths.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_conduction_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_ambient_exchange_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_ambient_temperature", PROPERTY_HINT_RANGE, "-273,2000,1,or_greater"), 20.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_source_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_source_temperature", PROPERTY_HINT_RANGE, "-273,2000,1,or_greater"), 100.0);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/soft_body_thermal_source_center"), Vector3());
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_source_radius", PROPERTY_HINT_RANGE, "0,10000,0.1,or_greater,suffix:m"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_expansion_coefficient", PROPERTY_HINT_RANGE, "-0.01,0.01,0.00001,or_greater"), 0.0);
 	// Nonlinear viscous dashpot for fast link compression/stretching, which
 	// reacts to strain rate rather than applying the same damping at all speeds.
 	// 0 keeps the legacy simulation and avoids extra O(links) work.
@@ -683,14 +705,33 @@ PhysicsServer3D::PhysicsServer3D() {
 	// undeformed material frame. Independent of isotropic Neo-Hookean FEM.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/soft_body_tetra_fiber_axis"), Vector3(1, 0, 0));
+	// Independently oriented second family of tensile reinforcement.
+	// Useful for biaxial soft composites, woven elastomers and tissues.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_secondary_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/soft_body_tetra_fiber_secondary_axis"), Vector3(0, 1, 0));
 	// Experimental irreversible tensile creep of the FEM material fiber.
 	// Plastic rest stretch is allocated only while creep rate is positive.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_plastic_yield_ratio", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.15);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_plastic_creep_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_plastic_max_stretch", PROPERTY_HINT_RANGE, "1,16,0.1"), 3.0);
+	// Optional family-2 permanent tensile stretch history, independent
+	// of family 1. Both fiber strengths follow existing FEM damage.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_yield_ratio", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.15);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_creep_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_max_stretch", PROPERTY_HINT_RANGE, "1,16,0.1"), 3.0);
 	// Objective Kelvin-Voigt strain-rate stress for each tetrahedral FEM element.
 	// Independent from the global breathing-mode viscosity, off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_viscosity", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater"), 0.0);
+	// One-arm finite Green-strain Standard Linear Solid: exponential
+	// material memory and a transient Maxwell spring parallel to the base FEM.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_sls_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_sls_relaxation_time", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:s"), 0.25);
+	// Two extra independent Maxwell arms of a three-arm generalized Prony
+	// relaxation spectrum. The first arm remains the original SLS material.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_prony_fast_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_prony_fast_relaxation_time", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:s"), 0.04);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_prony_slow_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_prony_slow_relaxation_time", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:s"), 2.0);
 	// Optional local isotropic volume viscoplasticity for tetrahedral FEM.
 	// Modifies each element rest matrix (not mesh connectivity); disabled by
 	// default. Distinct from the global closed-shell volume creep setting.
@@ -701,6 +742,7 @@ PhysicsServer3D::PhysicsServer3D() {
 	// updates the FEM rest inverse matrix, but neither its volume nor mass.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_shear_plastic_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_shear_plastic_yield", PROPERTY_HINT_RANGE, "0,2,0.01"), 0.2);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_shear_plastic_hardening", PROPERTY_HINT_RANGE, "0,10,0.01"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_shear_plastic_max_strain", PROPERTY_HINT_RANGE, "0.01,4,0.01"), 2.0);
 	// Local XPBD-style volume projection recovers inverted FEM tetrahedra
 	// before the logarithmic Neo-Hookean energy solver (which rejects J<=0).
@@ -710,6 +752,14 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Scalar material damage is irreversible; it does not split topology.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_damage_yield_strain", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater"), 0.25);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_damage_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	// Experimental per-tetra cycle-dependent fatigue, independent of static
+	// overload rate. Counts principal-strain reversals, with Miner-style
+	// S-N accumulation, not full rainflow or dynamic fracture.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fatigue_endurance_amplitude", PROPERTY_HINT_RANGE, "0,2,0.005,or_greater"), 0.05);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fatigue_reference_amplitude", PROPERTY_HINT_RANGE, "0.01,5,0.01,or_greater"), 0.3);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fatigue_reference_cycles", PROPERTY_HINT_RANGE, "0,100000,1,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fatigue_exponent", PROPERTY_HINT_RANGE, "1,10,0.1"), 3.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fatigue_reversal_deadband", PROPERTY_HINT_RANGE, "0,1,0.0005,or_greater"), 0.002);
 	// Intrinsic membrane viscoelastic damping of normal and shear strain rates.
 	// Zero disables the extra face pass, all other projects remain unchanged.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_membrane_damping_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
@@ -719,6 +769,22 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Opt-in XPBD hinge dihedral bending for adjacent cloth triangles.
 	// Zero disables setup, solver work and all persistent hinge buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_dihedral_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// An independent 3-particle centerline angle XPBD constraint for thin
+	// flexible rods, cables and reinforcement embedded in triangle meshes.
+	// Candidate chains are selected from nearly collinear original mesh edges
+	// (not the synthesized two-hop bending links), at most two per center.
+	// This is not full Cosserat twist: no segment orientation DOFs yet.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_rod_bend_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Curved-centerline torsion: preserve the angle between the two local
+	// bend planes of a four-particle strand. Independent rotational material
+	// twist of a straight Cosserat rod requires additional orientation DOFs.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_rod_torsion_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_rod_straightness", PROPERTY_HINT_RANGE, "0,0.9999,0.001"), 0.9);
+	// Independent orthotropic fold compliance about the rest-mesh material
+	// fiber direction. Reuses soft_body_xpbd_material_axis (mesh-local).
+	// <1 makes creases aligned with the fiber harder to bend, >1 softer;
+	// 1 is the unchanged isotropic XPBD hinge model.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_bend_parallel_compliance_ratio", PROPERTY_HINT_RANGE, "0.01,100,0.01,or_greater"), 1.0);
 	// Meshless shape matching fits a proper rigid rotation to the entire soft
 	// mesh and pulls movable vertices toward the fitted rest shape. Unlike
 	// volumetric FEM, this is a global visual-elasticity constraint.
@@ -781,6 +847,7 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_volume_plastic_creep_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_recycle_radius", PROPERTY_HINT_RANGE, "0,0.1,0.001,or_greater,suffix:m"), 0.01);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,0.1,0.001,or_greater,suffix:m"), 0.05);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/air_density", PROPERTY_HINT_RANGE, U"0,10,0.001,or_greater,suffix:kg/m³"), 1.225);
 	// Experimental sphere-only speculative contacts for existing broadphase pairs.
 	// 0 preserves legacy behavior; wider gaps can produce ghost interactions.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/speculative_sphere_distance", PROPERTY_HINT_RANGE, "0,1,0.001,or_greater,suffix:m"), 0.0);
@@ -811,6 +878,19 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/fluid_angular_drag", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/fluid_buoyancy", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/fluid_flow_velocity"), Vector3());
+	// Rigid BoxShape3D: oriented six-face pressure + tangential drag, with
+	// inertia-aware impulses at each face center. 0+0 disables all work.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rigid_box_aero_pressure_coefficient", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rigid_box_aero_skin_coefficient", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rigid_box_aero_density", PROPERTY_HINT_RANGE, "0,2000,0.01,or_greater,suffix:kg/m³"), 1.225);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/rigid_box_aero_wind_velocity"), Vector3());
+	// Airflow on the actual oriented polygon faces of ConvexPolygonShape3D.
+	// Each panel creates force and torque with inertia-aware impulse caps.
+	// Both coefficients at zero (default) cost no additional shape traversal.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rigid_convex_aero_pressure_coefficient", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rigid_convex_aero_skin_coefficient", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rigid_convex_aero_density", PROPERTY_HINT_RANGE, "0,2000,0.01,or_greater,suffix:kg/m³"), 1.225);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/rigid_convex_aero_wind_velocity"), Vector3());
 	// Jolt-style per-shape buoyancy: approximate partial immersion below a
 	// horizontal liquid surface; opt-in and independent from legacy damping.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/fluid_plane/enabled"), false);

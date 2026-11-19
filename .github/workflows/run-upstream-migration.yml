@@ -1,0 +1,94 @@
+name: Import upstream Godot issues and PRs
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: 'Source type to import'
+        type: choice
+        options: [issues, prs]
+        required: true
+      apply:
+        description: 'Write to fork (false = dry-run)'
+        type: boolean
+        default: false
+        required: true
+      open_only:
+        description: 'Only currently open upstream records'
+        type: boolean
+        default: true
+        required: true
+      limit:
+        description: 'Maximum source items to scan in this run'
+        type: number
+        default: 20
+        required: true
+      start_page:
+        description: 'Upstream source API page, starting at 1'
+        type: number
+        default: 1
+        required: true
+      comments:
+        description: 'Copy issue comments (needs Issues enabled)'
+        type: boolean
+        default: false
+      code:
+        description: 'Attempt clean open PR patches as draft PRs'
+        type: boolean
+        default: false
+      archive_closed_prs:
+        description: 'Archive closed PRs as issues (needs Issues enabled)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: godot-upstream-migration
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Register upstream remote
+        run: git remote add upstream https://github.com/godotengine/godot.git
+      - name: Run offline migration tests
+        run: python3 -m unittest discover -v -s misc/upstream_migration -p 'test_migrate_upstream.py'
+      - name: Import selected batch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMPORT_KIND: ${{ inputs.kind }}
+          IMPORT_APPLY: ${{ inputs.apply }}
+          IMPORT_OPEN_ONLY: ${{ inputs.open_only }}
+          IMPORT_LIMIT: ${{ inputs.limit }}
+          IMPORT_START_PAGE: ${{ inputs.start_page }}
+          IMPORT_COMMENTS: ${{ inputs.comments }}
+          IMPORT_CODE: ${{ inputs.code }}
+          IMPORT_ARCHIVE_CLOSED: ${{ inputs.archive_closed_prs }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=("$IMPORT_KIND" --limit "$IMPORT_LIMIT" --start-page "$IMPORT_START_PAGE" --repo-path . --archive-path upstream_pr_history.jsonl)
+          [[ "$IMPORT_APPLY" == true ]] && args+=(--apply) || true
+          [[ "$IMPORT_OPEN_ONLY" == true ]] && args+=(--open-only) || true
+          [[ "$IMPORT_COMMENTS" == true ]] && args+=(--comments) || true
+          [[ "$IMPORT_CODE" == true ]] && args+=(--code) || true
+          [[ "$IMPORT_ARCHIVE_CLOSED" == true ]] && args+=(--archive-closed-prs) || true
+          python3 misc/upstream_migration/migrate_upstream.py "${args[@]}"
+      - name: Archive PR summaries
+        if: always() && inputs.kind == 'prs'
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-upstream-pr-history-${{ github.run_id }}
+          path: upstream_pr_history.jsonl
+          if-no-files-found: ignore

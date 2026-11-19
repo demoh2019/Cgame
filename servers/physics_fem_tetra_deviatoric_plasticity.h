@@ -48,9 +48,11 @@
 // volume-preserving and affects ONLY shape/shear, unlike volumetric creep.
 //
 // This is a phenomenological J2-LIKE strain-space radial return, not a
-// calibrated metal stress-return mapping or strain-hardening law. It is
-// frame-indifferent under rigid world rotation and has one scalar per-tet
-// cumulative-strain budget to cap extreme rest distortion. No allocations.
+// calibrated metal stress-return mapping. Optional isotropic hardening
+// increases the equivalent yield threshold by H * accumulated_strain;
+// the existing per-tet history is reused with no further allocations.
+// It is frame-indifferent under rigid world rotation with a bounded
+// cumulative-strain budget to cap extreme rest distortion.
 //
 // Compute the orthonormal principal frame of F^T F by Jacobi sweeps.
 // Outputs are atomic: malformed/inverted tetrahedra never change rest.
@@ -191,8 +193,10 @@ _FORCE_INLINE_ static bool physics_fem_tetra_creep_deviatoric_rest(
 		const Vector3 &p_a, const Vector3 &p_b, const Vector3 &p_c,
 		const Vector3 &p_d, real_t p_yield_equivalent, double p_fraction,
 		double p_max_accumulated_strain, PhysicsFEMTetraRest &r_rest,
-		double &r_accumulated_strain) {
-	if (!Math::is_finite(p_yield_equivalent) ||
+		double &r_accumulated_strain, double p_hardening = 0.0) {
+	if (!Math::is_finite(p_hardening) ||
+			!(p_hardening >= 0.0 && p_hardening <= 10.0) ||
+			!Math::is_finite(p_yield_equivalent) ||
 			!(p_yield_equivalent >= real_t(0.0) && p_yield_equivalent <= real_t(2.0)) ||
 			!Math::is_finite(p_fraction) || !(p_fraction > 0.0 && p_fraction <= 1.0) ||
 			!Math::is_finite(p_max_accumulated_strain) ||
@@ -207,7 +211,16 @@ _FORCE_INLINE_ static bool physics_fem_tetra_creep_deviatoric_rest(
 			!(equivalent > double(p_yield_equivalent))) {
 		return false;
 	}
-	const double requested = p_fraction * (equivalent - double(p_yield_equivalent));
+	// The yield surface expands as accumulated plastic strain grows.
+	// The caller may pass (1-exp(-rate*dt*(1+H)))/(1+H) as p_fraction,
+	// which is the exact relaxation factor for constant Hencky strain
+	// and isotropic hardening. H=0 preserves all legacy behavior.
+	const double yield_threshold = double(p_yield_equivalent) +
+			p_hardening * r_accumulated_strain;
+	if (!Math::is_finite(yield_threshold) || !(equivalent > yield_threshold)) {
+		return false;
+	}
+	const double requested = p_fraction * (equivalent - yield_threshold);
 	const double available = p_max_accumulated_strain - r_accumulated_strain;
 	const double step = std::min(requested, available);
 	if (!(step > 1e-14) || !Math::is_finite(step)) {
@@ -258,9 +271,42 @@ _FORCE_INLINE_ static bool physics_fem_tetra_creep_deviatoric_rest(
 			candidate.inv_dm[row][col] = value;
 		}
 	}
+	// Correct double-precision determinant drift in the inverse rest
+	// matrix rather than allowing tiny non-isochoric errors to accumulate
+	// over thousands of plastic steps. Keep physical rest volume/mass fixed.
+	const auto det3 = [](const double m[3][3]) -> double {
+		return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+				m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+				m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+	};
+	const double old_det = det3(r_rest.inv_dm);
+	const double new_det = det3(candidate.inv_dm);
+	const double determinant_ratio = new_det / old_det;
+	if (!(determinant_ratio > 0.0) || !Math::is_finite(determinant_ratio) ||
+			std::abs(determinant_ratio - 1.0) > 1e-5) {
+		return false;
+	}
+	const double correction = std::cbrt(determinant_ratio);
+	if (!(correction > 0.0) || !Math::is_finite(correction)) {
+		return false;
+	}
+	for (int row = 0; row < 3; ++row) {
+		for (int col = 0; col < 3; ++col) {
+			candidate.inv_dm[row][col] /= correction;
+			if (!Math::is_finite(candidate.inv_dm[row][col])) {
+				return false;
+			}
+		}
+	}
+	const double updated_strain = r_accumulated_strain + step;
+	if (!Math::is_finite(updated_strain) ||
+			updated_strain < r_accumulated_strain ||
+			updated_strain > p_max_accumulated_strain) {
+		return false;
+	}
 	// Neither rest.volume nor signed_det changes, unlike volumetric creep.
-	// A failed step never partially changes the reference geometry.
+	// A failed step never partially changes the reference geometry/history.
 	r_rest = candidate;
-	r_accumulated_strain += step;
+	r_accumulated_strain = updated_strain;
 	return true;
 }

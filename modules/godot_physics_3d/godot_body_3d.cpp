@@ -43,7 +43,10 @@
 #include "servers/physics_rotating_frame_3d.h"
 #include "servers/physics_fluid_buoyancy_3d.h"
 #include "servers/physics_fluid_convex_hull_3d.h"
+#include "servers/physics_rigid_convex_aero_facets_3d.h"
 #include "servers/physics_fluid_box_3d.h"
+#include "servers/physics_rigid_box_aero_panels_3d.h"
+#include "servers/physics_fluid_capsule_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
@@ -491,6 +494,80 @@ bool GodotBody3D::is_axis_locked(PS3DE::BodyAxis p_axis) const {
 	return locked_axis & p_axis;
 }
 
+// Aerodynamic drag from the wind of the areas the body is inside. Every wind area contributes an air
+// velocity (its pressure converted to the speed with the same dynamic pressure, v = sqrt(2 q / rho)),
+// and the body feels 0.5 * rho * Cd * A * |v_rel| * v_rel for the air velocity relative to it.
+Vector3 GodotBody3D::compute_wind_force() const {
+	if (wind_drag_coefficient <= 0.0 || areas.is_empty() || !get_space()) {
+		return Vector3();
+	}
+	const real_t density = get_space()->get_air_density();
+	if (density <= 0.0) {
+		return Vector3();
+	}
+	Vector3 air_velocity;
+	bool has_wind = false;
+	for (const AreaCMP &entry : areas) {
+		const real_t pressure = entry.area->get_wind_force_magnitude();
+		if (pressure <= CMP_EPSILON) {
+			continue;
+		}
+		real_t attenuation = 1.0;
+		const real_t falloff = entry.area->get_wind_attenuation_factor();
+		if (falloff != 0.0) {
+			const Vector3 distance = get_transform().origin - entry.area->get_wind_source();
+			// A minimum radius keeps the speed finite at the source.
+			attenuation = Math::pow(MAX(distance.length_squared(), real_t(1.0)), -falloff * real_t(0.5));
+		}
+		air_velocity += entry.area->get_wind_direction() * (Math::sqrt(real_t(2.0) * pressure / density) * attenuation);
+		has_wind = true;
+	}
+	if (!has_wind) {
+		return Vector3();
+	}
+	const Vector3 relative = air_velocity - linear_velocity;
+	const real_t speed = relative.length();
+	if (!(speed > CMP_EPSILON) || !Math::is_finite(speed)) {
+		return Vector3();
+	}
+	const Vector3 direction = relative / speed;
+
+	real_t area = wind_area;
+	if (area <= 0.0) {
+		// Projected area of the combined shape bounds onto the plane facing the wind.
+		AABB bounds;
+		bool first = true;
+		for (int i = 0; i < get_shape_count(); i++) {
+			if (is_shape_disabled(i)) {
+				continue;
+			}
+			const AABB shape_bounds = get_shape_aabb(i);
+			if (first) {
+				bounds = shape_bounds;
+				first = false;
+			} else {
+				bounds.merge_with(shape_bounds);
+			}
+		}
+		if (first) {
+			return Vector3();
+		}
+		const Vector3 extent = bounds.size;
+		area = extent.y * extent.z * Math::abs(direction.x) + extent.x * extent.z * Math::abs(direction.y) + extent.x * extent.y * Math::abs(direction.z);
+	}
+
+	Vector3 force = direction * (real_t(0.5) * density * wind_drag_coefficient * area * speed * speed);
+	// An explicit step must never accelerate the body past the air speed: that is where drag is zero.
+	if (mass > 0.0 && get_space()->get_last_step() > 0.0) {
+		const real_t max_force = speed * mass / get_space()->get_last_step();
+		const real_t force_length = force.length();
+		if (force_length > max_force) {
+			force *= max_force / force_length;
+		}
+	}
+	return force;
+}
+
 void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 	if (mode == PS3DE::BODY_MODE_STATIC) {
 		return;
@@ -661,6 +738,7 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			//overridden by direct state query
 
 			Vector3 force = gravity * mass + applied_force + constant_force;
+			force += compute_wind_force();
 			// Uniform fully submerged buoyancy: force = -buoyancy * mass * gravity.
 			// Gravity already includes the body's gravity scale and area
 			// overrides. With buoyancy 1, gravity and buoyancy cancel.
@@ -715,21 +793,25 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 							const GodotSphereShape3D *sphere = static_cast<const GodotSphereShape3D *>(shape);
 							sample = godot_physics_fluid_sphere_sample_3d(shape_world.origin,
 									sphere->get_radius() * uniform_scale, shape_volume, water_height);
-						} else if (godot_physics_fluid_capsule_vertical_3d(shape_world.basis, uniform_scale)) {
+						} else {
 							const GodotCapsuleShape3D *capsule = static_cast<const GodotCapsuleShape3D *>(shape);
-							// Raw PhysicsServer shapes can specify height < 2*radius,
-							// which is not a cylinder plus hemispheres. Keep the
-							// AABB behavior rather than returning zero displaced volume.
+							// Invalid PhysicsServer shapes retain the AABB fallback;
+							// otherwise integrate the true circular cross sections.
 							if (capsule->get_radius() > 0.0 && capsule->get_height() >= real_t(2.0) * capsule->get_radius()) {
-								sample = godot_physics_fluid_vertical_capsule_sample_3d(shape_world.origin,
-										capsule->get_radius() * uniform_scale,
-										capsule->get_height() * uniform_scale, shape_volume, water_height);
+								const real_t world_radius = capsule->get_radius() * uniform_scale;
+								const real_t world_height = capsule->get_height() * uniform_scale;
+								if (godot_physics_fluid_capsule_vertical_3d(shape_world.basis, uniform_scale)) {
+									sample = godot_physics_fluid_vertical_capsule_sample_3d(
+											shape_world.origin, world_radius, world_height, shape_volume, water_height);
+								} else if (!godot_physics_fluid_tilted_capsule_sample_3d(
+												   shape_world.origin, shape_world.basis.get_column(1) / uniform_scale,
+												   world_radius, world_height, shape_volume, water_height, sample)) {
+									// Safe fallback for nonfinite or degenerate geometry.
+									sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
+								}
 							} else {
 								sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 							}
-						} else {
-							// A tilted capsule has noncircular horizontal slices.
-							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 						}
 					} else if (shape_type == PS3DE::SHAPE_BOX) {
 						// The world AABB overstates the immersed volume of a tilted
@@ -841,6 +923,73 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 						get_space()->get_rotating_frame_origin(),
 						get_space()->get_rotating_frame_angular_velocity(),
 						get_space()->get_rotating_frame_angular_acceleration(), p_step);
+			}
+
+			// Optional six-face, orientation-sensitive aerodynamic impulses
+			// for rigid boxes. Pressure acts only on windward faces,
+			// tangential skin drag acts on both sides and damps rotation.
+			// The helper evaluates each panel at its actual world center
+			// and uses inverse mass/inertia to avoid reversing its slip.
+			// Disabled by default: no additional shape loops or buffers.
+			if (mode == PS3DE::BODY_MODE_RIGID && p_step > 0.0 &&
+					get_space()->get_rigid_box_aero_density() > 0.0 &&
+					(get_space()->get_rigid_box_aero_pressure_coefficient() > 0.0 ||
+							get_space()->get_rigid_box_aero_skin_coefficient() > 0.0)) {
+				const Vector3 world_com = get_transform().origin + center_of_mass;
+				for (int i = 0; i < get_shape_count(); ++i) {
+					if (is_shape_disabled(i)) {
+						continue;
+					}
+					const GodotShape3D *shape = get_shape(i);
+					if (shape->get_type() != PS3DE::SHAPE_BOX) {
+						continue;
+					}
+					const GodotBoxShape3D *box = static_cast<const GodotBoxShape3D *>(shape);
+					const Vector3 half = box->get_half_extents();
+					const Transform3D box_world = get_transform() * get_shape_transform(i);
+					const Vector3 world_half_axes[3] = {
+						box_world.basis.xform(Vector3(half.x, 0, 0)),
+						box_world.basis.xform(Vector3(0, half.y, 0)),
+						box_world.basis.xform(Vector3(0, 0, half.z))
+					};
+					godot_physics_rigid_box_aero_step_3d(linear_velocity, angular_velocity,
+							box_world.origin, world_half_axes, world_com,
+							get_space()->get_rigid_box_aero_wind_velocity(),
+							get_space()->get_rigid_box_aero_density(),
+							get_space()->get_rigid_box_aero_pressure_coefficient(),
+							get_space()->get_rigid_box_aero_skin_coefficient(),
+							_inv_mass, _inv_inertia_tensor, p_step);
+				}
+			}
+
+			// Apply point-impulse pressure and skin drag on the TRUE
+			// polygon faces of a transformed convex collision shape.
+			// Real face area/centroid and the body's world inertia make
+			// this sensitive to shape orientation, spinning and offset COM.
+			// Default coefficients zero: no hull traversal or scratch.
+			if (mode == PS3DE::BODY_MODE_RIGID && p_step > 0.0 &&
+					get_space()->get_rigid_convex_aero_density() > 0.0 &&
+					(get_space()->get_rigid_convex_aero_pressure_coefficient() > 0.0 ||
+							get_space()->get_rigid_convex_aero_skin_coefficient() > 0.0)) {
+				const Vector3 world_com = get_transform().origin + center_of_mass;
+				for (int i = 0; i < get_shape_count(); ++i) {
+					if (is_shape_disabled(i)) {
+						continue;
+					}
+					const GodotShape3D *shape = get_shape(i);
+					if (shape->get_type() != PS3DE::SHAPE_CONVEX_POLYGON) {
+						continue;
+					}
+					const GodotConvexPolygonShape3D *convex = static_cast<const GodotConvexPolygonShape3D *>(shape);
+					const Transform3D hull_world = get_transform() * get_shape_transform(i);
+					godot_physics_rigid_convex_aero_step_3d(linear_velocity, angular_velocity,
+							convex->get_mesh(), hull_world, world_com,
+							get_space()->get_rigid_convex_aero_wind_velocity(),
+							get_space()->get_rigid_convex_aero_density(),
+							get_space()->get_rigid_convex_aero_pressure_coefficient(),
+							get_space()->get_rigid_convex_aero_skin_coefficient(),
+							_inv_mass, _inv_inertia_tensor, p_step);
+				}
 			}
 		}
 

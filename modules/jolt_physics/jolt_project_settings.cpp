@@ -74,6 +74,9 @@ void JoltProjectSettings::register_settings() {
 	// Self-collision operates on non-adjacent vertex/face pairs only; the
 	// topology-aware CPU pass is separately budgeted and disabled by default.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_contacts"), false);
+	// Full moving-triangle closest-point conservative advancement for
+	// non-neighboring vertices, using the existing per-space self VF cap.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_speculative_vertex_face_ccd"), false);
 	// Capture narrow cloth folds where two nonadjacent edges cross even
 	// though no point comes close to an opposing triangle.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_edge_contacts"), false);
@@ -86,6 +89,9 @@ void JoltProjectSettings::register_settings() {
 	// Reuse immutable soft-mesh topology and refit deformed edge bounds
 	// without re-sorting the BVH every physics step; cache is bounded per space.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_persistent_bvh"), false);
+	// Face BVH is independent of the edge BVH; refit moving triangle bounds
+	// and periodically rebuild partitions to preserve query efficiency.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_face_bvh_refit"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_self_contact_max_checks", PROPERTY_HINT_RANGE, "1024,65536,1024"), 16384);
 	// Pre-step XPBD-style Jacobi projection supplements soft self-contact
 	// impulses without changing Jolt's native deformable constraint solver.
@@ -206,10 +212,12 @@ void JoltProjectSettings::read_settings() {
 	soft_body_soft_speculative_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_speculative_ccd");
 	soft_body_soft_speculative_edge_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_speculative_edge_ccd");
 	soft_body_self_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_contacts");
+	soft_body_self_speculative_vertex_face_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_speculative_vertex_face_ccd");
 	soft_body_self_edge_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_edge_contacts");
 	soft_body_self_speculative_edge_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_speculative_edge_ccd");
 	soft_body_self_edge_bvh = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_edge_bvh");
 	soft_body_self_persistent_bvh = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_persistent_bvh");
+	soft_body_self_face_bvh_refit = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_face_bvh_refit");
 	soft_body_self_contact_max_checks = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_contact_max_checks"), 1024, 65536);
 	soft_body_self_position_projection = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_position_projection");
 	const float position_compliance = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_position_compliance");

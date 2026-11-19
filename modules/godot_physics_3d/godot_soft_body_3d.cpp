@@ -36,6 +36,7 @@
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_softbody_bending_plasticity.h"
 #include "servers/physics_softbody_link_damping.h"
+#include "servers/physics_softbody_thermal_material.h"
 #include "servers/physics_softbody_strain_rate_damping.h"
 #include "servers/physics_softbody_membrane_damping.h"
 #include "servers/physics_softbody_dihedral_damping.h"
@@ -43,6 +44,8 @@
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_fem_tetra_neo_hookean.h"
+#include "servers/physics_fem_tetra_standard_linear_solid.h"
+#include "servers/physics_fem_tetra_prony.h"
 #include "servers/physics_fem_tetra_mooney_rivlin.h"
 #include "servers/physics_fem_tetra_ogden.h"
 #include "servers/physics_fem_tetra_principal_limits.h"
@@ -53,6 +56,7 @@
 #include "servers/physics_fem_tetra_volume_plasticity.h"
 #include "servers/physics_fem_tetra_deviatoric_plasticity.h"
 #include "servers/physics_fem_tetra_damage.h"
+#include "servers/physics_fem_tetra_cycle_fatigue.h"
 #include "servers/physics_fem_tetra_inversion_recovery.h"
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
@@ -69,6 +73,8 @@
 #include "servers/physics_softbody_fatigue_damage.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
+#include "servers/physics_xpbd_rod_bend.h"
+#include "servers/physics_xpbd_rod_torsion.h"
 #include "servers/physics_xpbd_shear.h"
 #include "servers/physics_xpbd_self_collision.h"
 #include "servers/physics_softbody_pair_contact.h"
@@ -178,6 +184,8 @@ void GodotSoftBody3D::set_space(GodotSpace3D *p_space) {
 	initialize_membrane_constraints();
 	initialize_shear_constraints();
 	initialize_dihedral_constraints();
+	initialize_rod_bend_constraints();
+	initialize_rod_torsion_constraints();
 	initialize_shape_matching();
 	initialize_self_collision_topology();
 
@@ -225,8 +233,17 @@ void GodotSoftBody3D::set_tetrahedral_indices(const PackedInt32Array &p_indices)
 	}
 	// Store visual indices, not welded particle indices: the mesh can be
 	// replaced or restored without making the binding point at stale nodes.
+	if (xpbd_explicit_tetra_visual_indices == p_indices) {
+		return;
+	}
 	xpbd_explicit_tetra_visual_indices = p_indices;
-	if (!nodes.is_empty() && get_space()) {
+	if (!soft_mesh.is_null() &&
+			!xpbd_explicit_tetra_interior_positions.is_empty()) {
+		// Switching from/to interior connectivity changes the number of
+		// physical nodes. Rebuild instead of reallocating Node* references.
+		const RID current_mesh = soft_mesh;
+		set_mesh(current_mesh);
+	} else if (!nodes.is_empty() && get_space()) {
 		initialize_fem_tetra();
 	}
 }
@@ -332,6 +349,8 @@ void GodotSoftBody3D::update_constants() {
 	initialize_membrane_constraints();
 	initialize_shear_constraints();
 	initialize_dihedral_constraints();
+	initialize_rod_bend_constraints();
+	initialize_rod_torsion_constraints();
 	initialize_shape_matching();
 	initialize_self_collision_topology();
 }
@@ -557,16 +576,22 @@ void GodotSoftBody3D::solve_shape_matching_clusters(real_t p_strength) {
 void GodotSoftBody3D::initialize_fem_tetra() {
 	const bool previously_lumped = !xpbd_fem_mass_fractions.is_empty();
 	xpbd_fem_tetrahedra.reset();
+	xpbd_fem_sls_states.reset();
+	xpbd_fem_prony_states.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_fiber_secondary_lambdas.reset();
 	xpbd_fem_principal_lambdas.reset();
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
+	xpbd_fem_fiber_secondary_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
+	xpbd_fem_cycle_fatigue_states.reset();
 	xpbd_fem_mass_fractions.reset();
 
 	if (get_space() &&
 			(get_space()->get_soft_body_tetra_fem_compliance() > 0.0 ||
 					get_space()->get_soft_body_tetra_fem_viscosity() > 0.0 ||
-					get_space()->get_soft_body_tetra_fiber_compliance() > 0.0) &&
+					get_space()->get_soft_body_tetra_fiber_compliance() > 0.0 ||
+					get_space()->get_soft_body_tetra_fiber_secondary_compliance() > 0.0) &&
 			xpbd_volume_closed && nodes.size() >= 4 && nodes.size() <= 2048 &&
 			faces.size() >= 4 && faces.size() <= 4096) {
 		LocalVector<Vector3> positions;
@@ -628,13 +653,59 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 			physics_fem_build_convex_star_tetrahedra(
 					positions, triangles, xpbd_volume_rest, xpbd_fem_tetrahedra);
 		}
-		// Element histories are allocated only if elastic FEM and damage are enabled.
+		// A disabled/previously invalid FEM state keeps internal particles
+		// kinematic. Restore them only after a validated volume material
+		// has cooked successfully; interior vertices cannot be user-pinned.
+		if (!xpbd_fem_tetrahedra.is_empty()) {
+			for (uint32_t i = xpbd_surface_node_count; i < nodes.size(); ++i) {
+				if (nodes[i].im == 0.0) {
+					nodes[i].im = real_t(nodes.size()) * inv_total_mass;
+					++dynamic_node_count;
+				}
+			}
+		}
+		// Element scalar damage is shared between instantaneous overload and
+		// cyclic fatigue. Enable it if EITHER degradation process is active.
+		const bool fatigue_enabled = get_space()->get_soft_body_tetra_fatigue_reference_cycles() > 0.0 &&
+				get_space()->get_soft_body_tetra_fatigue_reference_amplitude() >
+						get_space()->get_soft_body_tetra_fatigue_endurance_amplitude();
 		if (!xpbd_fem_tetrahedra.is_empty() &&
 				get_space()->get_soft_body_tetra_fem_compliance() > 0.0 &&
-				get_space()->get_soft_body_tetra_damage_rate() > 0.0) {
+				(get_space()->get_soft_body_tetra_damage_rate() > 0.0 || fatigue_enabled)) {
 			xpbd_fem_damage.resize(xpbd_fem_tetrahedra.size());
 			for (double &damage : xpbd_fem_damage) {
 				damage = 0.0;
+			}
+			if (fatigue_enabled) {
+				xpbd_fem_cycle_fatigue_states.resize(xpbd_fem_tetrahedra.size());
+				for (PhysicsFEMTetraCycleFatigueState &state : xpbd_fem_cycle_fatigue_states) {
+					state = PhysicsFEMTetraCycleFatigueState();
+				}
+			}
+		}
+
+		// An SLS element remembers its own material-frame viscous strain.
+		// The full state only exists when BOTH equilibrium FEM and the
+		// transient viscoelastic spring are explicitly enabled.
+		if (!xpbd_fem_tetrahedra.is_empty() &&
+				get_space()->get_soft_body_tetra_fem_compliance() > 0.0 &&
+				get_space()->get_soft_body_tetra_sls_compliance() > 0.0) {
+			xpbd_fem_sls_states.resize(xpbd_fem_tetrahedra.size());
+			for (PhysicsFEMTetraSLSState &state : xpbd_fem_sls_states) {
+				state = PhysicsFEMTetraSLSState();
+			}
+		}
+
+		// An optional pair of EXTRA Maxwell arms, with independent fast and
+		// slow relaxation constants. The first arm is the existing SLS
+		// history. Allocate nothing in scenes using only legacy SLS.
+		if (!xpbd_fem_tetrahedra.is_empty() &&
+				get_space()->get_soft_body_tetra_fem_compliance() > 0.0 &&
+				(get_space()->get_soft_body_tetra_prony_fast_compliance() > 0.0 ||
+						get_space()->get_soft_body_tetra_prony_slow_compliance() > 0.0)) {
+			xpbd_fem_prony_states.resize(xpbd_fem_tetrahedra.size());
+			for (PhysicsFEMTetraPronyState &state : xpbd_fem_prony_states) {
+				state = PhysicsFEMTetraPronyState();
 			}
 		}
 
@@ -659,7 +730,33 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 		}
 	}
 
-	// Disabling/rejecting FEM must not leave stale nonuniform masses behind.
+	// If the space has no active FEM material, keep the original surface
+	// physics exactly as before. Do NOT leave unbound invisible particles
+	// contributing mass or receiving impulses. Never change user pins.
+	if (xpbd_fem_tetrahedra.is_empty() &&
+			xpbd_surface_node_count < nodes.size()) {
+		const real_t surface_inverse = real_t(xpbd_surface_node_count) * inv_total_mass;
+		for (uint32_t i = 0; i < xpbd_surface_node_count; ++i) {
+			if (nodes[i].im > 0.0) {
+				nodes[i].im = surface_inverse;
+			}
+		}
+		for (uint32_t i = xpbd_surface_node_count; i < nodes.size(); ++i) {
+			Node &node = nodes[i];
+			if (node.im > 0.0) {
+				--dynamic_node_count;
+			}
+			node.im = 0.0;
+			node.v = Vector3();
+			node.bv = Vector3();
+			node.f = Vector3();
+		}
+		link_constants_dirty = true;
+		return;
+	}
+
+	// Disabling/rejecting lumped masses must not leave stale nonuniform
+	// masses on active FEM particles when reverting to uniform mode.
 	if (previously_lumped) {
 		const real_t uniform_inverse = real_t(nodes.size()) * inv_total_mass;
 		for (Node &node : nodes) {
@@ -680,7 +777,9 @@ real_t GodotSoftBody3D::get_unpinned_node_inverse_mass(uint32_t p_node_index) co
 			return result;
 		}
 	}
-	return real_t(nodes.size()) * inv_total_mass;
+	const uint32_t active_count = xpbd_fem_tetrahedra.is_empty() ?
+			xpbd_surface_node_count : nodes.size();
+	return real_t(active_count) * inv_total_mass;
 }
 
 // Cache undeformed triangle angles only for opt-in shear constraints.
@@ -1059,7 +1158,180 @@ void GodotSoftBody3D::initialize_dihedral_constraints() {
 		hinge.c = edge.c;
 		hinge.d = edge.d;
 		hinge.rest_angle = rest_angle;
+		// The crease edge is the bend axis. Determine its material response
+		// from the undeformed, mesh-local direction, not the world-space
+		// direction after the soft body moves or folds.
+		const real_t bend_ratio = get_space()->get_soft_body_xpbd_bend_parallel_compliance_ratio();
+		if (bend_ratio != real_t(1.0)) {
+			physics_xpbd_anisotropic_stretch_alpha(nodes[edge.a].s, nodes[edge.b].s,
+					get_space()->get_soft_body_xpbd_material_axis(), real_t(1.0),
+					bend_ratio, hinge.bend_compliance_ratio);
+		}
 		xpbd_dihedral_hinges.push_back(hinge);
+	}
+}
+
+// Build rod-like centerline chains from the ORIGINAL triangle-edge graph,
+// excluding the synthetic two-hop spring links. Each node contributes up to
+// two non-overlapping near-opposite edge pairs: this recognizes straight
+// fiber/strand directions inside a strip or a triangulated flexible shell.
+// Unlike a full Cosserat rod, the resulting constraints have only three
+// translational particles and no torsional/director DOFs.
+void GodotSoftBody3D::initialize_rod_bend_constraints() {
+	xpbd_rod_bends.reset();
+	if (!get_space() || (get_space()->get_soft_body_xpbd_rod_bend_compliance() <= 0.0 &&
+			get_space()->get_soft_body_xpbd_rod_torsion_compliance() <= 0.0) ||
+			faces.is_empty() || nodes.size() < 3) {
+		return;
+	}
+	LocalVector<LocalVector<uint32_t>> neighbors;
+	neighbors.resize(nodes.size());
+	HashSet<uint64_t> seen;
+	for (const Face &face : faces) {
+		const uint32_t ids[3] = { face.n[0]->index, face.n[1]->index, face.n[2]->index };
+		for (int side = 0; side < 3; ++side) {
+			const uint32_t a = ids[side];
+			const uint32_t b = ids[(side + 1) % 3];
+			if (a == b || a >= nodes.size() || b >= nodes.size()) {
+				continue;
+			}
+			const uint64_t edge = _soft_body_edge_key(a, b);
+			if (seen.has(edge)) {
+				continue;
+			}
+			seen.insert(edge);
+			neighbors[a].push_back(b);
+			neighbors[b].push_back(a);
+		}
+	}
+	const double straightness = double(get_space()->get_soft_body_xpbd_rod_straightness());
+	for (uint32_t middle = 0; middle < nodes.size(); ++middle) {
+		const LocalVector<uint32_t> &adjacent = neighbors[middle];
+		if (adjacent.size() < 2) {
+			continue;
+		}
+		uint32_t consumed[4] = {};
+		uint32_t consumed_count = 0;
+		for (int selection = 0; selection < 2; ++selection) {
+			int best_i = -1;
+			int best_j = -1;
+			double best_alignment = straightness;
+			double best_length_squared = std::numeric_limits<double>::infinity();
+			for (uint32_t i = 0; i < adjacent.size(); ++i) {
+				bool used_i = false;
+				for (uint32_t k = 0; k < consumed_count; ++k) {
+					used_i |= consumed[k] == adjacent[i];
+				}
+				if (used_i) {
+					continue;
+				}
+				for (uint32_t j = i + 1; j < adjacent.size(); ++j) {
+					bool used_j = false;
+					for (uint32_t k = 0; k < consumed_count; ++k) {
+						used_j |= consumed[k] == adjacent[j];
+					}
+					if (used_j) {
+						continue;
+					}
+					const Vector3 &center = nodes[middle].s;
+					const Vector3 &pa = nodes[adjacent[i]].s;
+					const Vector3 &pc = nodes[adjacent[j]].s;
+					const double u[3] = { double(pa.x) - double(center.x),
+							double(pa.y) - double(center.y), double(pa.z) - double(center.z) };
+					const double v[3] = { double(pc.x) - double(center.x),
+							double(pc.y) - double(center.y), double(pc.z) - double(center.z) };
+					const double lu_sq = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+					const double lv_sq = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+					if (!(lu_sq > 1e-24) || !(lv_sq > 1e-24) ||
+							!Math::is_finite(lu_sq) || !Math::is_finite(lv_sq)) {
+						continue;
+					}
+					const double alignment = -(u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) /
+							(Math::sqrt(lu_sq) * Math::sqrt(lv_sq));
+					// Prefer short structural (warp/weft) edges over longer
+					// triangle diagonals when candidates are equally straight.
+					// A long diagonal should not steal a strand direction from
+					// two shorter, collinear fiber segments.
+					const double length_squared = lu_sq + lv_sq;
+					if (Math::is_finite(alignment) && Math::is_finite(length_squared) &&
+							(alignment > best_alignment + 1e-9 ||
+								(alignment > straightness && alignment >= best_alignment - 1e-9 &&
+										length_squared < best_length_squared))) {
+						best_alignment = alignment;
+						best_length_squared = length_squared;
+						best_i = int(i);
+						best_j = int(j);
+					}
+				}
+			}
+			if (best_i < 0 || best_j < 0) {
+				break;
+			}
+			RodBendConstraint constraint;
+			constraint.a = adjacent[best_i];
+			constraint.middle = middle;
+			constraint.c = adjacent[best_j];
+			if (physics_xpbd_rod_bend_angle(nodes[constraint.a].s, nodes[middle].s,
+						nodes[constraint.c].s, constraint.rest_angle)) {
+				xpbd_rod_bends.push_back(constraint);
+			}
+			consumed[consumed_count++] = adjacent[best_i];
+			consumed[consumed_count++] = adjacent[best_j];
+		}
+	}
+}
+
+// Combine adjacent rod-bend triplets into four-particle centerline
+// torsion segments a--b--c--d. The signed dihedral is between the two
+// bending planes, around the shared segment (b,c). Each topology segment
+// is produced once (a<d) despite visiting both forward and reverse rod
+// directions. Exact collinearity has no bending-plane normal and is
+// intentionally skipped: positions cannot encode material-frame twist.
+void GodotSoftBody3D::initialize_rod_torsion_constraints() {
+	xpbd_rod_torsions.reset();
+	if (!get_space() || !(get_space()->get_soft_body_xpbd_rod_torsion_compliance() > 0.0) ||
+			xpbd_rod_bends.size() < 2 || nodes.size() < 4) {
+		return;
+	}
+	// Per-center indexing avoids scanning all rods for each candidate.
+	// It is transient topology setup memory, not per-frame scratch.
+	LocalVector<LocalVector<uint32_t>> rods_by_center;
+	rods_by_center.resize(nodes.size());
+	for (uint32_t i = 0; i < xpbd_rod_bends.size(); ++i) {
+		rods_by_center[xpbd_rod_bends[i].middle].push_back(i);
+	}
+	for (const RodBendConstraint &first : xpbd_rod_bends) {
+		for (int direction = 0; direction < 2; ++direction) {
+			const uint32_t a = direction == 0 ? first.a : first.c;
+			const uint32_t b = first.middle;
+			const uint32_t c = direction == 0 ? first.c : first.a;
+			for (uint32_t second_index : rods_by_center[c]) {
+				const RodBendConstraint &second = xpbd_rod_bends[second_index];
+				// The second centerline bend must continue the SAME edge
+				// b--c rather than jumping to a crossing warp/weft strand.
+				uint32_t d;
+				if (second.a == b) {
+					d = second.c;
+				} else if (second.c == b) {
+					d = second.a;
+				} else {
+					continue;
+				}
+				if (d == a || d == b || d == c || a >= d) {
+					continue;
+				}
+				RodTorsionConstraint torsion;
+				torsion.a = a;
+				torsion.b = b;
+				torsion.c = c;
+				torsion.d = d;
+				if (physics_xpbd_rod_geometric_torsion_angle(
+							nodes[a].s, nodes[b].s, nodes[c].s, nodes[d].s,
+							torsion.rest_angle)) {
+					xpbd_rod_torsions.push_back(torsion);
+				}
+			}
+		}
 	}
 }
 
@@ -2239,21 +2511,73 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 
 	++node_count;
 	xpbd_surface_node_count = node_count;
-	// Extra FEM vertices are integrated with the physical solver, but have
-	// no visual vertices, triangle faces or collision point BVH leaves.
-	// Importing them BEFORE append_face()/append_link() prevents vector
-	// reallocations from invalidating stored Node* references.
-	const uint32_t extra_count = uint32_t(xpbd_explicit_tetra_interior_positions.size());
-	if (extra_count > 0) {
-		ERR_FAIL_COND_V_MSG(xpbd_surface_node_count != vertices.size() ||
-					xpbd_surface_node_count > 2048 ||
-					extra_count > 2048 - xpbd_surface_node_count, false,
-				"FEM interior vertex count exceeds the supported node capacity.");
+	// Extra FEM particles are not surface point colliders or visible vertices.
+	// Before allocating ANY internal physical nodes, validate their entire
+	// authored tetra mesh, including its exact boundary and signed volume.
+	// On failure, keep the normal surface soft body, not orphan free masses.
+	// This also prevents pointer invalidation: append faces/links only AFTER
+	// the final physical node count is known.
+	const uint32_t extra_count = xpbd_explicit_tetra_visual_indices.is_empty() ? 0 :
+			uint32_t(xpbd_explicit_tetra_interior_positions.size());
+	if (extra_count > 0 && xpbd_surface_node_count == vertices.size() &&
+			xpbd_surface_node_count <= 2048 &&
+			extra_count <= 2048 - xpbd_surface_node_count) {
 		vertices.resize(xpbd_surface_node_count + extra_count);
 		for (uint32_t i = 0; i < extra_count; ++i) {
 			vertices[xpbd_surface_node_count + i] = xpbd_explicit_tetra_interior_positions[i];
 		}
-		node_count += extra_count;
+
+		LocalVector<PhysicsFEMConvexFace> shell;
+		shell.reserve(triangle_count);
+		double rest_signed_volume = 0.0;
+		bool valid_indices = true;
+		for (uint32_t i = 0; i < triangle_count; ++i) {
+			const int a = triangles[3 * i];
+			const int b = triangles[3 * i + 1];
+			const int c = triangles[3 * i + 2];
+			if (a < 0 || b < 0 || c < 0 ||
+					uint32_t(a) >= xpbd_surface_node_count ||
+					uint32_t(b) >= xpbd_surface_node_count ||
+					uint32_t(c) >= xpbd_surface_node_count) {
+				valid_indices = false;
+				break;
+			}
+			PhysicsFEMConvexFace face;
+			face.a = uint32_t(a);
+			face.b = uint32_t(b);
+			face.c = uint32_t(c);
+			shell.push_back(face);
+			rest_signed_volume += _soft_body_signed_face_volume(
+					vertices[face.a], vertices[face.b], vertices[face.c], vertices[0]);
+		}
+		LocalVector<uint32_t> mapped_indices;
+		if (valid_indices) {
+			const int index_count = xpbd_explicit_tetra_visual_indices.size();
+			valid_indices = index_count % 4 == 0 && index_count <= 16384;
+			mapped_indices.reserve(index_count);
+			for (int i = 0; valid_indices && i < index_count; ++i) {
+				const int authored = xpbd_explicit_tetra_visual_indices[i];
+				if (authored < 0) {
+					valid_indices = false;
+				} else if (authored < visual_vertex_count) {
+					mapped_indices.push_back(map_visual_to_physics[authored]);
+				} else if (authored - visual_vertex_count < int(extra_count)) {
+					mapped_indices.push_back(xpbd_surface_node_count +
+							uint32_t(authored - visual_vertex_count));
+				} else {
+					valid_indices = false;
+				}
+			}
+		}
+		LocalVector<PhysicsFEMConvexTetra> checked;
+		if (valid_indices && physics_fem_build_explicit_tetrahedra(
+					vertices, shell, mapped_indices, rest_signed_volume, checked)) {
+			node_count += extra_count;
+		} else {
+			// Invalid geometry must not change total mass, dynamics, point
+			// broadphase or ordinary surface mesh simulation.
+			vertices.resize(xpbd_surface_node_count);
+		}
 	}
 
 	// Create surface and internal simulation nodes in the same stable array.
@@ -3126,6 +3450,86 @@ void GodotSoftBody3D::rebuild_xpbd_tethers(real_t p_slack) {
 	}
 }
 
+// Experimental thermomechanical XPBD material: heat is transported on the
+// existing structural link graph, not on a separate thermal mesh. Equal
+// nodal heat capacities and fixed baths are intentional simplifications.
+// The entire update is ONCE per physics step; thermal rest lengths then
+// stay frozen across XPBD lambda iterations, including under nonlinear
+// hardening and strain limits. Never change Link::rl or Link::c1.
+void GodotSoftBody3D::advance_thermal_material(real_t p_delta, bool p_xpbd_enabled) {
+	if (!get_space() || !Math::is_finite(p_delta) || !(p_delta > 0.0) || nodes.is_empty()) {
+		return;
+	}
+	const real_t conduction = get_space()->get_soft_body_thermal_conduction_rate();
+	const real_t ambient_rate = get_space()->get_soft_body_thermal_ambient_exchange_rate();
+	const real_t ambient = get_space()->get_soft_body_thermal_ambient_temperature();
+	const real_t source_rate = get_space()->get_soft_body_thermal_source_rate();
+	const real_t source_temp = get_space()->get_soft_body_thermal_source_temperature();
+	const real_t source_radius = get_space()->get_soft_body_thermal_source_radius();
+	const Vector3 &source_center = get_space()->get_soft_body_thermal_source_center();
+	const real_t expansion = get_space()->get_soft_body_thermal_expansion_coefficient();
+	const bool use_source = source_rate > 0.0 && source_radius > 0.0;
+	const bool use_thermal = conduction > 0.0 || ambient_rate > 0.0 ||
+			use_source || expansion != 0.0;
+	if (!use_thermal) {
+		thermal_node_temperatures.reset();
+		thermal_link_rest_lengths.reset();
+		return;
+	}
+	if (thermal_node_temperatures.size() != nodes.size()) {
+		thermal_node_temperatures.resize(nodes.size());
+		for (real_t &temp : thermal_node_temperatures) {
+			temp = ambient;
+		}
+	}
+
+	// External sources can add/remove heat; conduction alone is locally
+	// conservative (equal heat capacity per node). Pinned nodes still
+	// conduct, because pinning changes mobility, not heat capacity.
+	if (ambient_rate > 0.0 || use_source) {
+		for (uint32_t i = 0; i < nodes.size(); ++i) {
+			real_t &temp = thermal_node_temperatures[i];
+			if (ambient_rate > 0.0) {
+				physics_softbody_thermal_relax(temp, ambient, ambient_rate, p_delta);
+			}
+			if (use_source && physics_softbody_thermal_in_source(
+						nodes[i].x, source_center, source_radius)) {
+				physics_softbody_thermal_relax(temp, source_temp, source_rate, p_delta);
+			}
+		}
+	}
+	if (conduction > 0.0) {
+		for (const Link &link : links) {
+			const uint32_t ia = link.n[0]->index;
+			const uint32_t ib = link.n[1]->index;
+			if (ia != ib && ia < thermal_node_temperatures.size() &&
+					ib < thermal_node_temperatures.size()) {
+				physics_softbody_thermal_exchange_pair(
+						thermal_node_temperatures[ia],
+						thermal_node_temperatures[ib], conduction, p_delta);
+			}
+		}
+	}
+
+	// Heating/cooling changes the elastic target, not permanent creep.
+	// Per-link effective rest lengths are computed ONCE per tick, after
+	// viscoplasticity and heat diffusion, and reused by all XPBD passes.
+	if (p_xpbd_enabled && expansion != 0.0 && !links.is_empty()) {
+		thermal_link_rest_lengths.resize(links.size());
+		for (uint32_t i = 0; i < links.size(); ++i) {
+			const Link &link = links[i];
+			real_t rest = link.rl;
+			physics_softbody_thermal_expanded_rest_length(
+					link.rl, thermal_node_temperatures[link.n[0]->index],
+					thermal_node_temperatures[link.n[1]->index],
+					ambient, expansion, rest);
+			thermal_link_rest_lengths[i] = rest;
+		}
+	} else if (!thermal_link_rest_lengths.is_empty()) {
+		thermal_link_rest_lengths.reset();
+	}
+}
+
 void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const real_t inv_delta = 1.0 / p_delta;
 
@@ -3263,7 +3667,12 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	if (fem_shear_plastic_rate > real_t(0.0) && p_delta > real_t(0.0) &&
 			get_space()->get_soft_body_tetra_fem_compliance() > real_t(0.0) &&
 			!xpbd_fem_tetrahedra.is_empty()) {
-		const double fraction = 1.0 - Math::exp(-double(fem_shear_plastic_rate) * double(p_delta));
+		const double hardening = double(get_space()->get_soft_body_tetra_shear_plastic_hardening());
+		// Exact hardening-aware relaxation at constant imposed Hencky strain.
+		// H=0 reduces to the legacy 1-exp(-rate*dt) plastic fraction.
+		const double fraction = (1.0 - Math::exp(
+				-double(fem_shear_plastic_rate) * double(p_delta) * (1.0 + hardening))) /
+				(1.0 + hardening);
 		if (Math::is_finite(fraction) && fraction > 0.0) {
 			for (PhysicsFEMConvexTetra &tetra : xpbd_fem_tetrahedra) {
 				physics_fem_tetra_creep_deviatoric_rest(
@@ -3271,7 +3680,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 						nodes[tetra.c].x, nodes[tetra.d].x,
 						get_space()->get_soft_body_tetra_shear_plastic_yield(),
 						fraction, double(get_space()->get_soft_body_tetra_shear_plastic_max_strain()),
-						tetra.rest, tetra.plastic_deviatoric_strain);
+						tetra.rest, tetra.plastic_deviatoric_strain, hardening);
 			}
 		}
 	}
@@ -3314,6 +3723,114 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	} else if (!xpbd_fem_fiber_plastic_rest_stretches.is_empty()) {
 		xpbd_fem_fiber_plastic_rest_stretches.reset();
+	}
+
+	// One-arm Standard Linear Solid: update the *material-frame internal
+	// strain* exactly once per physics tick. Only the XPBD multiplier may
+	// change during solver iterations; this history persists across ticks.
+	// A rejected/inverted element keeps its last valid internal strain.
+	if (!xpbd_fem_sls_states.is_empty() &&
+			xpbd_fem_sls_states.size() == xpbd_fem_tetrahedra.size() &&
+			get_space()->get_soft_body_tetra_fem_compliance() > 0.0 &&
+			get_space()->get_soft_body_tetra_sls_compliance() > 0.0 && p_delta > 0.0) {
+		const double tau = double(get_space()->get_soft_body_tetra_sls_relaxation_time());
+		for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+			const PhysicsFEMConvexTetra &tet = xpbd_fem_tetrahedra[i];
+			const Vector3 positions[4] = {
+				nodes[tet.a].x, nodes[tet.b].x,
+				nodes[tet.c].x, nodes[tet.d].x
+			};
+			physics_fem_tetra_sls_relax(positions, tet.rest, tau,
+					double(p_delta), xpbd_fem_sls_states[i]);
+		}
+	}
+
+	// The second material fiber family accumulates its own permanent
+	// reference elongation before projection. Each family can have a
+	// different oblique axis, creep rate, yield point and stretch cap.
+	// With zero secondary creep rate no extra positions are inspected.
+	const real_t secondary_fiber_creep = get_space()->get_soft_body_tetra_fiber_secondary_plastic_creep_rate();
+	const real_t secondary_fiber_max_stretch = get_space()->get_soft_body_tetra_fiber_secondary_plastic_max_stretch();
+	const bool use_secondary_fiber_plasticity = secondary_fiber_creep > real_t(0.0) &&
+			secondary_fiber_max_stretch > real_t(1.0) && p_delta > real_t(0.0) &&
+			get_space()->get_soft_body_tetra_fem_compliance() > real_t(0.0) &&
+			get_space()->get_soft_body_tetra_fiber_secondary_compliance() > real_t(0.0) &&
+			!xpbd_fem_tetrahedra.is_empty();
+	if (use_secondary_fiber_plasticity) {
+		if (xpbd_fem_fiber_secondary_plastic_rest_stretches.size() != xpbd_fem_tetrahedra.size()) {
+			xpbd_fem_fiber_secondary_plastic_rest_stretches.resize(xpbd_fem_tetrahedra.size());
+			for (real_t &rest_stretch : xpbd_fem_fiber_secondary_plastic_rest_stretches) {
+				rest_stretch = real_t(1.0);
+			}
+		}
+		const Vector3 material_axis = get_space()->get_soft_body_tetra_fiber_secondary_axis();
+		const double plastic_yield = double(get_space()->get_soft_body_tetra_fiber_secondary_plastic_yield_ratio());
+		for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+			const PhysicsFEMConvexTetra &tetra = xpbd_fem_tetrahedra[i];
+			const Vector3 points[4] = {
+				nodes[tetra.a].x, nodes[tetra.b].x,
+				nodes[tetra.c].x, nodes[tetra.d].x
+			};
+			double stretch = 0.0;
+			if (physics_fem_tetra_fiber_measure_stretch(
+						points, tetra.rest, material_axis, stretch)) {
+				physics_fem_tetra_fiber_creep_rest_stretch(
+						stretch, plastic_yield, double(secondary_fiber_creep),
+						double(p_delta), double(secondary_fiber_max_stretch),
+						xpbd_fem_fiber_secondary_plastic_rest_stretches[i]);
+			}
+		}
+	} else if (!xpbd_fem_fiber_secondary_plastic_rest_stretches.is_empty()) {
+		xpbd_fem_fiber_secondary_plastic_rest_stretches.reset();
+	}
+
+	// Generalized-Maxwell Prony spectrum: two extra material-frame strain
+	// memories with fast/slow exponential time constants. Update exactly
+	// ONCE per physics tick (not per XPBD iteration) and atomically per tet.
+	if (!xpbd_fem_prony_states.is_empty() &&
+			xpbd_fem_prony_states.size() == xpbd_fem_tetrahedra.size() &&
+			get_space()->get_soft_body_tetra_fem_compliance() > 0.0 && p_delta > 0.0) {
+		const bool fast_enabled = get_space()->get_soft_body_tetra_prony_fast_compliance() > 0.0;
+		const bool slow_enabled = get_space()->get_soft_body_tetra_prony_slow_compliance() > 0.0;
+		const double fast_tau = double(get_space()->get_soft_body_tetra_prony_fast_relaxation_time());
+		const double slow_tau = double(get_space()->get_soft_body_tetra_prony_slow_relaxation_time());
+		for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+			const PhysicsFEMConvexTetra &tet = xpbd_fem_tetrahedra[i];
+			const Vector3 positions[4] = {
+				nodes[tet.a].x, nodes[tet.b].x,
+				nodes[tet.c].x, nodes[tet.d].x
+			};
+			physics_fem_tetra_prony_relax(positions, tet.rest,
+					fast_enabled, fast_tau, slow_enabled, slow_tau,
+					double(p_delta), xpbd_fem_prony_states[i]);
+		}
+	}
+
+	// Tetrahedral cyclic fatigue: detect a peak-valley-peak strain cycle
+	// on PREDICTED positions once per tick, never per solver iteration.
+	// Unloaded or statically held elements do not accrue cycle damage.
+	// The same D state as overload damage softens FEM, fiber and SLS/Prony.
+	if (!xpbd_fem_cycle_fatigue_states.is_empty() &&
+			xpbd_fem_cycle_fatigue_states.size() == xpbd_fem_tetrahedra.size() &&
+			xpbd_fem_damage.size() == xpbd_fem_tetrahedra.size() && p_delta > 0.0) {
+		const double endurance = double(get_space()->get_soft_body_tetra_fatigue_endurance_amplitude());
+		const double reference = double(get_space()->get_soft_body_tetra_fatigue_reference_amplitude());
+		const double reference_cycles = double(get_space()->get_soft_body_tetra_fatigue_reference_cycles());
+		const double exponent = double(get_space()->get_soft_body_tetra_fatigue_exponent());
+		const double noise = double(get_space()->get_soft_body_tetra_fatigue_reversal_deadband());
+		for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+			const PhysicsFEMConvexTetra &tet = xpbd_fem_tetrahedra[i];
+			const Vector3 x[4] = {
+				nodes[tet.a].x, nodes[tet.b].x,
+				nodes[tet.c].x, nodes[tet.d].x
+			};
+			double signed_strain = 0.0;
+			if (PhysicsFEMTetraCycleFatigue::measure_strain(x, tet.rest, signed_strain)) {
+				PhysicsFEMTetraCycleFatigue::evolve(signed_strain,
+						endurance, reference, reference_cycles, exponent, noise,
+						xpbd_fem_cycle_fatigue_states[i], xpbd_fem_damage[i]);
+			}
+		}
 	}
 
 	// Local scalar continuum damage is evaluated on predicted positions
@@ -3437,6 +3954,11 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const double compliance = linear_stiffness > 0.0 ? double(configured_compliance) / double(linear_stiffness) : 0.0;
 	const double alpha_double = p_delta > 0.0 ? compliance / (double(p_delta) * p_delta) : 0.0;
 	const bool use_xpbd = compliance > 0.0 && Math::is_finite(alpha_double) && alpha_double > 0.0;
+	// Opt-in thermal conduction, heating/cooling and reversible edge rest
+	// lengths. Disable all thermal storage/work with the default settings.
+	advance_thermal_material(p_delta, use_xpbd);
+	const bool use_thermal_rest = use_xpbd && !thermal_link_rest_lengths.is_empty() &&
+			thermal_link_rest_lengths.size() == links.size();
 	const real_t tension_hardening = get_space() ? get_space()->get_soft_body_xpbd_tension_hardening() : real_t(0.0);
 	const bool use_tension_hardening = use_xpbd && tension_hardening > real_t(0.0);
 	const real_t compression_hardening = get_space() ? get_space()->get_soft_body_xpbd_compression_hardening() : real_t(0.0);
@@ -3478,10 +4000,38 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_dihedral_xpbd = dihedral_compliance > 0.0 && !xpbd_dihedral_hinges.is_empty() &&
 			Math::is_finite(dihedral_alpha_double) && dihedral_alpha_double > 0.0;
 	const real_t dihedral_alpha = use_dihedral_xpbd ? real_t(MIN(dihedral_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const double rod_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_rod_bend_compliance()) : 0.0;
+	const double rod_alpha_double = p_delta > 0.0 ? rod_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_rod_bend_xpbd = rod_compliance > 0.0 && !xpbd_rod_bends.is_empty() &&
+			Math::is_finite(rod_alpha_double) && rod_alpha_double > 0.0;
+	const real_t rod_alpha = use_rod_bend_xpbd ? real_t(MIN(rod_alpha_double,
+			double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const double rod_torsion_compliance = get_space() ?
+			double(get_space()->get_soft_body_xpbd_rod_torsion_compliance()) : 0.0;
+	const double rod_torsion_alpha_double = p_delta > 0.0 ?
+			rod_torsion_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_rod_torsion_xpbd = rod_torsion_compliance > 0.0 &&
+			!xpbd_rod_torsions.is_empty() && Math::is_finite(rod_torsion_alpha_double) &&
+			rod_torsion_alpha_double > 0.0;
+	const real_t rod_torsion_alpha = use_rod_torsion_xpbd ?
+			real_t(MIN(rod_torsion_alpha_double,
+					double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const double fem_compliance = get_space() ? double(get_space()->get_soft_body_tetra_fem_compliance()) : 0.0;
 	const double fem_alpha = p_delta > 0.0 ? fem_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_fem = !xpbd_fem_tetrahedra.is_empty() && fem_compliance > 0.0 && p_delta > 0.0 &&
 			Math::is_finite(fem_alpha) && fem_alpha > 0.0;
+	const double fem_sls_compliance = get_space() ? double(get_space()->get_soft_body_tetra_sls_compliance()) : 0.0;
+	const double fem_sls_alpha = p_delta > 0.0 ?
+			fem_sls_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_fem_sls = use_fem && fem_sls_compliance > 0.0 &&
+			Math::is_finite(fem_sls_alpha) && fem_sls_alpha > 0.0 &&
+			xpbd_fem_sls_states.size() == xpbd_fem_tetrahedra.size();
+	const double fem_prony_fast_compliance = get_space() ? double(get_space()->get_soft_body_tetra_prony_fast_compliance()) : 0.0;
+	const double fem_prony_slow_compliance = get_space() ? double(get_space()->get_soft_body_tetra_prony_slow_compliance()) : 0.0;
+	const bool use_fem_prony = use_fem &&
+			(fem_prony_fast_compliance > 0.0 || fem_prony_slow_compliance > 0.0) &&
+			xpbd_fem_prony_states.size() == xpbd_fem_tetrahedra.size() &&
+			Math::is_finite(1.0 / (double(p_delta) * double(p_delta)));
 	const double fem_principal_min = get_space() ? double(get_space()->get_soft_body_tetra_principal_min_stretch()) : 0.0;
 	const double fem_principal_max = get_space() ? double(get_space()->get_soft_body_tetra_principal_max_stretch()) : 0.0;
 	const double fem_principal_compliance = get_space() ? double(get_space()->get_soft_body_tetra_principal_limit_compliance()) : 0.0;
@@ -3498,6 +4048,15 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_fem_fiber = use_fem && fem_fiber_compliance > 0.0 &&
 			Math::is_finite(fem_fiber_alpha) && fem_fiber_alpha > 0.0;
 	const Vector3 fem_fiber_axis = get_space() ? get_space()->get_soft_body_tetra_fiber_axis() : Vector3(1, 0, 0);
+	// Family two is optional, independent of the primary fiber family.
+	const double fem_secondary_fiber_compliance = get_space() ?
+			double(get_space()->get_soft_body_tetra_fiber_secondary_compliance()) : 0.0;
+	const double fem_secondary_fiber_alpha = p_delta > 0.0 ?
+			fem_secondary_fiber_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_fem_secondary_fiber = use_fem && fem_secondary_fiber_compliance > 0.0 &&
+			Math::is_finite(fem_secondary_fiber_alpha) && fem_secondary_fiber_alpha > 0.0;
+	const Vector3 fem_secondary_fiber_axis = get_space() ?
+			get_space()->get_soft_body_tetra_fiber_secondary_axis() : Vector3(0, 1, 0);
 	const bool use_fem_inversion_recovery = use_fem && get_space()->is_soft_body_tetra_inversion_recovery_enabled();
 	const double fem_inversion_min_j = double(get_space()->get_soft_body_tetra_inversion_min_j());
 	const double volume_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_volume_compliance()) : 0.0;
@@ -3560,6 +4119,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		const real_t fatigue_yield = use_fatigue ? get_space()->get_soft_body_fatigue_yield_strain() : real_t(0.0);
 		for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
 			const Link &link = links[link_index];
+			const real_t link_rest = use_thermal_rest ? thermal_link_rest_lengths[link_index] : link.rl;
 			real_t link_alpha = alpha;
 			if (use_anisotropic_stretch) {
 				// Use undeformed mesh coordinates, not live world-space link
@@ -3569,20 +4129,20 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			}
 			if (use_tension_hardening) {
 				physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
-						link.rl, link_alpha, yield_strain, tension_hardening, link_alpha);
+						link_rest, link_alpha, yield_strain, tension_hardening, link_alpha);
 			}
 			if (use_compression_hardening) {
 				// Tension and compression are disjoint. Preserve the alpha set
 				// above if this link happens to be in tension.
 				physics_xpbd_compression_hardening_alpha(link.n[0]->x, link.n[1]->x,
-						link.rl, link_alpha, compression_yield, compression_hardening, link_alpha);
+						link_rest, link_alpha, compression_yield, compression_hardening, link_alpha);
 			}
 			if (use_fatigue) {
 				// Use predicted deformation, before distance projection.
 				// Damage evolves once per simulation step, never per iteration.
 				real_t &damage = xpbd_link_fatigue_damage[link_index];
 				physics_softbody_accumulate_fatigue_damage(link.n[0]->x, link.n[1]->x,
-						link.rl, fatigue_yield, fatigue_rate, fatigue_max, double(p_delta), damage);
+						link_rest, fatigue_yield, fatigue_rate, fatigue_max, double(p_delta), damage);
 				physics_softbody_fatigue_compliance_alpha(link_alpha, damage, link_alpha);
 			}
 			xpbd_link_hardening_alphas[link_index] = link_alpha;
@@ -3657,6 +4217,20 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_dihedral_lambdas.reset();
 	}
 
+	// One multiplier per centerline angle, reset at the beginning of each
+	// time step and retained across XPBD iterations.
+	if (use_rod_bend_xpbd) {
+		for (RodBendConstraint &rod : xpbd_rod_bends) {
+			rod.lambda = real_t(0.0);
+		}
+	}
+	// Signed geometric torsion has its own step-local XPBD multiplier:
+	// keep it across solver iterations, never across physics timesteps.
+	if (use_rod_torsion_xpbd) {
+		for (RodTorsionConstraint &torsion : xpbd_rod_torsions) {
+			torsion.lambda = real_t(0.0);
+		}
+	}
 	if (use_volume_xpbd) {
 		// Reuse scratch at every iteration; one volume scalar lambda per step.
 		xpbd_volume_gradients.resize(nodes.size());
@@ -3670,6 +4244,21 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	if (use_fem) {
 		for (PhysicsFEMConvexTetra &tetra : xpbd_fem_tetrahedra) {
 			tetra.lambda = 0.0;
+		}
+	}
+	// Each Maxwell spring has its own solver multiplier, distinct from
+	// the permanent tensor history. Reset only lambda each tick; leave
+	// relaxing_strain unchanged (and free no state while enabled).
+	if (use_fem_sls) {
+		for (PhysicsFEMTetraSLSState &state : xpbd_fem_sls_states) {
+			state.lambda = 0.0;
+		}
+	}
+	// The combined multi-arm XPBD multiplier resets each tick, while the
+	// two per-arm material histories remain unchanged across iterations.
+	if (use_fem_prony) {
+		for (PhysicsFEMTetraPronyState &state : xpbd_fem_prony_states) {
+			state.lambda = 0.0;
 		}
 	}
 	// The two unilateral singular-value constraints keep one pair of
@@ -3694,6 +4283,17 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_fem_fiber_lambdas.reset();
 	}
 
+	// Separate lambda per tetra for the second unilateral material axis.
+	// This family cannot inherit the first family's active tension.
+	if (use_fem_secondary_fiber) {
+		xpbd_fem_fiber_secondary_lambdas.resize(xpbd_fem_tetrahedra.size());
+		for (double &lambda : xpbd_fem_fiber_secondary_lambdas) {
+			lambda = 0.0;
+		}
+	} else if (!xpbd_fem_fiber_secondary_lambdas.is_empty()) {
+		xpbd_fem_fiber_secondary_lambdas.reset();
+	}
+
 	// Distribute frame-level shape stiffness over solver iterations. For a
 	// fixed total stiffness, increasing iteration_count should not multiply
 	// the corrective strength by that many times.
@@ -3711,7 +4311,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Link &link = links[link_index];
 				if (link.c0 > 0.0) {
 					physics_xpbd_solve_distance(link.n[0]->x, link.n[1]->x,
-							link.n[0]->im, link.n[1]->im, link.rl,
+							link.n[0]->im, link.n[1]->im,
+							use_thermal_rest ? thermal_link_rest_lengths[link_index] : link.rl,
 							(use_tension_hardening || use_compression_hardening || use_anisotropic_stretch || use_fatigue) ? xpbd_link_hardening_alphas[link_index] : alpha,
 							xpbd_link_lambdas[link_index]);
 				}
@@ -3725,7 +4326,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
 				Link &link = links[link_index];
 				physics_xpbd_solve_strain_limits(link.n[0]->x, link.n[1]->x,
-						link.n[0]->im, link.n[1]->im, link.rl,
+						link.n[0]->im, link.n[1]->im,
+						use_thermal_rest ? thermal_link_rest_lengths[link_index] : link.rl,
 						strain_min_ratio, strain_max_ratio, strain_alpha,
 						xpbd_strain_lambdas[link_index]);
 			}
@@ -3769,9 +4371,39 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Node &b = nodes[hinge.b];
 				Node &c = nodes[hinge.c];
 				Node &d = nodes[hinge.d];
+				// No change to legacy alpha for the default isotropic setting.
+				// For directional bending, clamp the double intermediate before
+				// converting to real_t to avoid overflowing large timesteps.
+				real_t hinge_alpha = dihedral_alpha;
+				if (hinge.bend_compliance_ratio != real_t(1.0)) {
+					const double scaled_alpha = double(dihedral_alpha) * double(hinge.bend_compliance_ratio);
+					hinge_alpha = real_t(Math::is_finite(scaled_alpha) ?
+							MIN(scaled_alpha, double(std::numeric_limits<real_t>::max())) :
+							double(std::numeric_limits<real_t>::max()));
+				}
 				physics_xpbd_solve_dihedral(a.x, b.x, c.x, d.x,
 						a.im, b.im, c.im, d.im, hinge.rest_angle,
-						dihedral_alpha, xpbd_dihedral_lambdas[hinge_index]);
+						hinge_alpha, xpbd_dihedral_lambdas[hinge_index]);
+			}
+		}
+		if (use_rod_bend_xpbd) {
+			for (RodBendConstraint &rod : xpbd_rod_bends) {
+				Node &a = nodes[rod.a];
+				Node &middle = nodes[rod.middle];
+				Node &c = nodes[rod.c];
+				physics_xpbd_solve_rod_bend(a.x, middle.x, c.x,
+						a.im, middle.im, c.im, rod.rest_angle, rod_alpha, rod.lambda);
+			}
+		}
+		if (use_rod_torsion_xpbd) {
+			for (RodTorsionConstraint &torsion : xpbd_rod_torsions) {
+				Node &a = nodes[torsion.a];
+				Node &b = nodes[torsion.b];
+				Node &c = nodes[torsion.c];
+				Node &d = nodes[torsion.d];
+				physics_xpbd_solve_rod_geometric_torsion(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im,
+							torsion.rest_angle, rod_torsion_alpha, torsion.lambda);
 			}
 		}
 		if (shape_matching_iteration_strength > 0.0) {
@@ -3812,6 +4444,39 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 							a.im, b.im, c.im, d.im,
 							tetra.rest, fem_poisson, local_alpha, tetra.lambda);
 				}
+				if (use_fem_prony) {
+					// The base SLS arm and two optional additional Maxwell arms
+					// are combined into ONE elastic-energy XPBD constraint.
+					// Spring weights are inverse compliances. Scalar damage
+					// reduces all transient branch stiffnesses consistently.
+					PhysicsFEMTetraPronyState &state = xpbd_fem_prony_states[i];
+					const PhysicsFEMTetraSLSState *arms[3] = {
+						use_fem_sls ? &xpbd_fem_sls_states[i] : nullptr,
+						fem_prony_fast_compliance > 0.0 ? &state.fast : nullptr,
+						fem_prony_slow_compliance > 0.0 ? &state.slow : nullptr
+					};
+					const double damage_factor = has_damage ?
+						1.0 / (1.0 - xpbd_fem_damage[i]) : 1.0;
+					const double compliances[3] = {
+						use_fem_sls ? fem_sls_compliance * damage_factor : 0.0,
+						fem_prony_fast_compliance > 0.0 ? fem_prony_fast_compliance * damage_factor : 0.0,
+						fem_prony_slow_compliance > 0.0 ? fem_prony_slow_compliance * damage_factor : 0.0
+					};
+					physics_fem_tetra_prony_solve(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im, tetra.rest,
+							arms, compliances, fem_poisson, double(p_delta), state.lambda);
+				} else if (use_fem_sls) {
+					// Strict compatibility with the existing one-arm SLS path.
+					PhysicsFEMTetraSLSState &state = xpbd_fem_sls_states[i];
+					double local_sls_alpha = fem_sls_alpha;
+					if (has_damage) {
+						PhysicsFEMTetraDamage::effective_compliance(
+								fem_sls_alpha, xpbd_fem_damage[i], local_sls_alpha);
+					}
+					physics_fem_tetra_sls_solve(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im, tetra.rest,
+							state, fem_poisson, local_sls_alpha, state.lambda);
+				}
 				if (use_fem_principal) {
 					PhysicsFEMTetraPrincipalLambdas &lambda = xpbd_fem_principal_lambdas[i];
 					if (fem_principal_max > 0.0) {
@@ -3827,7 +4492,9 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				}
 			}
 		}
-		if (use_fem_fiber) {
+		if (use_fem_fiber || use_fem_secondary_fiber) {
+			// Both fiber families share damage, but their axes, plastic
+			// rest stretches and unilateral XPBD multipliers are separate.
 			// A damaged tetrahedron must also lose reinforcement strength:
 			// leaving its fiber stiffness untouched makes the apparent
 			// fracture yield anisotropically inconsistent. The per-tetra
@@ -3840,18 +4507,34 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Node &b = nodes[tetra.b];
 				Node &c = nodes[tetra.c];
 				Node &d = nodes[tetra.d];
-				double local_fiber_alpha = fem_fiber_alpha;
-				if (fibers_have_damage) {
-					PhysicsFEMTetraDamage::effective_compliance(
-							fem_fiber_alpha, xpbd_fem_damage[tet_index], local_fiber_alpha);
+				if (use_fem_fiber) {
+					double local_fiber_alpha = fem_fiber_alpha;
+					if (fibers_have_damage) {
+						PhysicsFEMTetraDamage::effective_compliance(
+								fem_fiber_alpha, xpbd_fem_damage[tet_index], local_fiber_alpha);
+					}
+					const real_t plastic_rest_stretch =
+							xpbd_fem_fiber_plastic_rest_stretches.size() == xpbd_fem_tetrahedra.size() ?
+							xpbd_fem_fiber_plastic_rest_stretches[tet_index] : real_t(1.0);
+					physics_fem_tetra_solve_fiber(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im, tetra.rest,
+							fem_fiber_axis, local_fiber_alpha, xpbd_fem_fiber_lambdas[tet_index],
+							double(plastic_rest_stretch));
 				}
-				const real_t plastic_rest_stretch =
-						xpbd_fem_fiber_plastic_rest_stretches.size() == xpbd_fem_tetrahedra.size() ?
-						xpbd_fem_fiber_plastic_rest_stretches[tet_index] : real_t(1.0);
-				physics_fem_tetra_solve_fiber(a.x, b.x, c.x, d.x,
-						a.im, b.im, c.im, d.im, tetra.rest,
-						fem_fiber_axis, local_fiber_alpha, xpbd_fem_fiber_lambdas[tet_index],
-						double(plastic_rest_stretch));
+				if (use_fem_secondary_fiber) {
+					double secondary_alpha = fem_secondary_fiber_alpha;
+					if (fibers_have_damage) {
+						PhysicsFEMTetraDamage::effective_compliance(
+								fem_secondary_fiber_alpha, xpbd_fem_damage[tet_index], secondary_alpha);
+					}
+					const real_t secondary_rest_stretch =
+							xpbd_fem_fiber_secondary_plastic_rest_stretches.size() == xpbd_fem_tetrahedra.size() ?
+							xpbd_fem_fiber_secondary_plastic_rest_stretches[tet_index] : real_t(1.0);
+					physics_fem_tetra_solve_fiber(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im, tetra.rest,
+							fem_secondary_fiber_axis, secondary_alpha,
+							xpbd_fem_fiber_secondary_lambdas[tet_index], double(secondary_rest_stretch));
+				}
 			}
 		}
 		if (use_volume_xpbd) {
@@ -4098,6 +4781,8 @@ void GodotSoftBody3D::destroy() {
 	xpbd_link_lambdas.reset();
 	xpbd_link_hardening_alphas.reset();
 	xpbd_link_fatigue_damage.reset();
+	thermal_node_temperatures.reset();
+	thermal_link_rest_lengths.reset();
 	xpbd_strain_lambdas.reset();
 	xpbd_area_lambdas.reset();
 	xpbd_shear_rest_cosines.reset();
@@ -4106,6 +4791,8 @@ void GodotSoftBody3D::destroy() {
 	xpbd_membrane_lambdas.reset();
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
+	xpbd_rod_bends.reset();
+	xpbd_rod_torsions.reset();
 	xpbd_shape_rest_offsets.reset();
 	xpbd_shape_clusters.reset();
 	xpbd_shape_cluster_members.reset();
@@ -4125,10 +4812,15 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_rest = 0.0;
 	xpbd_volume_original_rest = 0.0;
 	xpbd_fem_tetrahedra.reset();
+	xpbd_fem_sls_states.reset();
+	xpbd_fem_prony_states.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_fiber_secondary_lambdas.reset();
 	xpbd_fem_principal_lambdas.reset();
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
+	xpbd_fem_fiber_secondary_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
+	xpbd_fem_cycle_fatigue_states.reset();
 	xpbd_fem_mass_fractions.reset();
 	xpbd_surface_node_count = 0;
 	nodes.clear();

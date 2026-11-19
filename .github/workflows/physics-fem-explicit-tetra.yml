@@ -1,4 +1,4 @@
-name: Imported explicit concave tetra FEM contracts
+name: Imported explicit and interior tetra FEM contracts
 
 on:
   push:
@@ -15,6 +15,9 @@ on:
       - "scene/3d/physics/soft_body_3d.cpp"
       - "scene/3d/physics/soft_body_3d.h"
       - "demo/physics_lab/lab_3d.gd"
+      - "demo/physics_lab/smoke_test.gd"
+      - "doc/classes/SoftBody3D.xml"
+      - "doc/classes/PhysicsServer3D.xml"
       - "tests/servers/test_physics_fem_explicit_tetra.cpp"
       - "tests/stress/test_physics_fem_explicit_tetra.py"
       - "tests/stress/test_physics_fem_explicit_tetra_compiler.cpp"
@@ -33,6 +36,9 @@ on:
       - "scene/3d/physics/soft_body_3d.cpp"
       - "scene/3d/physics/soft_body_3d.h"
       - "demo/physics_lab/lab_3d.gd"
+      - "demo/physics_lab/smoke_test.gd"
+      - "doc/classes/SoftBody3D.xml"
+      - "doc/classes/PhysicsServer3D.xml"
       - "tests/servers/test_physics_fem_explicit_tetra.cpp"
       - "tests/stress/test_physics_fem_explicit_tetra.py"
       - "tests/stress/test_physics_fem_explicit_tetra_compiler.cpp"
@@ -59,5 +65,5 @@ jobs:
               -o "/tmp/explicit_tetra_$precision"
             "/tmp/explicit_tetra_$precision"
           done
-      - name: Randomized 2500 mesh cooking and end-to-end wiring contracts
+      - name: Randomized concave/interior mesh cooking and end-to-end wiring contracts
         run: python3 -m unittest discover -s tests/stress -p 'test_physics_fem_explicit_tetra.py' -v

@@ -47,6 +47,9 @@ bool GodotAreaPair3D::setup(real_t p_step) {
 			has_space_override = true;
 		} else if ((int)area->get_param(PS3DE::AREA_PARAM_ANGULAR_DAMP_OVERRIDE_MODE) != PS3DE::AREA_SPACE_OVERRIDE_DISABLED) {
 			has_space_override = true;
+		} else if (area->get_wind_force_magnitude() > CMP_EPSILON) {
+			// Wind acts on rigid bodies that opted in with a wind drag coefficient.
+			has_space_override = true;
 		}
 		process_collision = has_space_override;
 

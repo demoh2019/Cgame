@@ -166,6 +166,9 @@ class GodotBody3D : public GodotCollisionObject3D {
 	real_t max_linear_velocity = 0.0;
 	real_t max_angular_velocity = 0.0;
 	real_t max_depenetration_velocity = 0.0;
+	// Wind: 0 drag coefficient means the body ignores wind. A zero area is estimated from the shapes.
+	real_t wind_drag_coefficient = 0.0;
+	real_t wind_area = 0.0;
 
 	void _update_transform_dependent();
 
@@ -222,6 +225,11 @@ public:
 	_FORCE_INLINE_ real_t get_max_angular_velocity() const { return max_angular_velocity; }
 	_FORCE_INLINE_ void set_max_depenetration_velocity(real_t p_value) { max_depenetration_velocity = MAX(p_value, real_t(0.0)); }
 	_FORCE_INLINE_ real_t get_max_depenetration_velocity() const { return max_depenetration_velocity; }
+	_FORCE_INLINE_ void set_wind_drag_coefficient(real_t p_value) { wind_drag_coefficient = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_wind_drag_coefficient() const { return wind_drag_coefficient; }
+	_FORCE_INLINE_ void set_wind_area(real_t p_value) { wind_area = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_wind_area() const { return wind_area; }
+	Vector3 compute_wind_force() const;
 	// Effective limits: the body value when set, otherwise the space default.
 	_FORCE_INLINE_ real_t get_effective_max_linear_velocity(real_t p_space_default) const { return max_linear_velocity > 0.0 ? max_linear_velocity : p_space_default; }
 	_FORCE_INLINE_ real_t get_effective_max_angular_velocity(real_t p_space_default) const { return max_angular_velocity > 0.0 ? max_angular_velocity : p_space_default; }

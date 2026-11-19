@@ -269,6 +269,7 @@
 #include "scene/3d/reflection_probe.h"
 #include "scene/3d/remote_transform_3d.h"
 #include "scene/3d/retarget_modifier_3d.h"
+#include "scene/3d/rope_3d.h"
 #include "scene/3d/skeleton_3d.h"
 #include "scene/3d/skeleton_modifier_3d.h"
 #include "scene/3d/spline_ik_3d.h"
@@ -352,6 +353,7 @@
 #include "scene/3d/physics/character_body_3d.h"
 #include "scene/3d/physics/collision_polygon_3d.h"
 #include "scene/3d/physics/collision_shape_3d.h"
+#include "scene/3d/physics/destructible_body_3d.h"
 #include "scene/3d/physics/joints/cone_twist_joint_3d.h"
 #include "scene/3d/physics/joints/generic_6dof_joint_3d.h"
 #include "scene/3d/physics/joints/hinge_joint_3d.h"
@@ -369,6 +371,7 @@
 #include "scene/3d/physics/spring_arm_3d.h"
 #include "scene/3d/physics/static_body_3d.h"
 #include "scene/3d/physics/vehicle_body_3d.h"
+#include "scene/3d/physics/vehicle_drivetrain_3d.h"
 #include "scene/resources/3d/box_shape_3d.h"
 #include "scene/resources/3d/capsule_shape_3d.h"
 #include "scene/resources/3d/concave_polygon_shape_3d.h"
@@ -655,6 +658,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(Camera3D);
 	GDREGISTER_CLASS(FloatingOrigin3D);
 	GDREGISTER_CLASS(HeightmapTerrain3D);
+	GDREGISTER_CLASS(Rope3D);
 	GDREGISTER_CLASS(AudioListener3D);
 	GDREGISTER_CLASS(MeshInstance3D);
 #ifndef DISABLE_DEPRECATED
@@ -745,6 +749,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(StaticBody3D);
 	GDREGISTER_CLASS(AnimatableBody3D);
 	GDREGISTER_CLASS(RigidBody3D);
+	GDREGISTER_CLASS(DestructibleBody3D);
 	GDREGISTER_CLASS(KinematicCollision3D);
 	GDREGISTER_CLASS(CharacterBody3D);
 	GDREGISTER_CLASS(SpringArm3D);
@@ -763,6 +768,7 @@ void register_scene_types() {
 
 #ifndef PHYSICS_3D_DISABLED
 	GDREGISTER_CLASS(VehicleBody3D);
+	GDREGISTER_CLASS(VehicleDrivetrain3D);
 	GDREGISTER_CLASS(VehicleWheel3D);
 	GDREGISTER_CLASS(Area3D);
 	GDREGISTER_CLASS(CollisionShape3D);

@@ -980,6 +980,9 @@ constexpr uint32_t MAX_SOFT_SELF_CONTACT_FACES = 1024;
 struct SoftSelfContactScratch {
 	SoftFaceBVHScratch bvh;
 	SoftFaceBVHScratch edge_bvh; // Reused across active soft bodies.
+	uint32_t face_bvh_face_count = 0;
+	uint32_t face_bvh_refits = 0;
+	bool face_bvh_ready = false;
 	JPH::Array<uint64_t> one_ring_edges;
 	// Jacobi self-contact corrections are accumulated without moving BVH
 	// geometry during a candidate query, then uniformly capped and applied.
@@ -1176,8 +1179,11 @@ static bool ensure_soft_self_topology(const JPH::Array<JPH::SoftBodySharedSettin
 		return true; // Same-step reuse between VF and EE as before.
 	}
 
-	// A changed topology invalidates both the adjacency and the edge
-	// tree's leaf-index mapping before any query can access it.
+	// A changed topology invalidates the adjacency, face and edge trees:
+	// their persistent leaf mappings must never reference an old mesh.
+	r_scratch.face_bvh_ready = false;
+	r_scratch.face_bvh_face_count = 0;
+	r_scratch.face_bvh_refits = 0;
 	r_scratch.edge_bvh_ready = false;
 	r_scratch.edge_bvh_edge_count = 0;
 	r_scratch.edge_bvh_refits = 0;
@@ -1206,6 +1212,159 @@ static bool soft_self_is_neighbor(uint32_t p_point, const JPH::SoftBodySharedSet
 	return false;
 }
 
+// Opt-in self vertex/face CCD for linearly moving, independently deforming
+// triangle corners. Unlike the cheap inter-body mean-plane predictor above,
+// this repeatedly measures the *actual distance to the moving triangle*
+// and bounds its closing speed by max(|v_point-v_a|,|v_point-v_b|,
+// |v_point-v_c|). The bound remains conservative under linear per-vertex
+// motion, even when the triangle rotates/shears or the nearest feature
+// switches between its face, edges and corners.
+// Actual Jolt XPBD motion can accelerate within a step: this does not
+// provide exact nonlinear deformable CCD or a TOI rewind.
+constexpr uint32_t MAX_SOFT_SELF_VERTEX_FACE_SWEEP_ITERATIONS = 16;
+constexpr float SOFT_SELF_VERTEX_FACE_SWEEP_TOLERANCE = 1.0e-4f;
+
+static bool predict_soft_self_vertex_face_sweep(
+		JPH::Vec3Arg p_point, JPH::Vec3Arg p_point_velocity,
+		JPH::Vec3Arg p_a, JPH::Vec3Arg p_b, JPH::Vec3Arg p_c,
+		JPH::Vec3Arg p_va, JPH::Vec3Arg p_vb, JPH::Vec3Arg p_vc,
+		float p_step, float p_radius, float p_max_sweep, uint32_t &r_budget,
+		float &r_u, float &r_v, float &r_w, JPH::Vec3 &r_normal) {
+	if (!Math::is_finite(p_step) || !Math::is_finite(p_radius) || !Math::is_finite(p_max_sweep) ||
+			p_step <= 0.0f || p_radius <= 0.0f || p_max_sweep <= 0.0f) {
+		return false;
+	}
+	const float max_relative_speed_sq = MAX(
+			(p_point_velocity - p_va).LengthSq(),
+			MAX((p_point_velocity - p_vb).LengthSq(), (p_point_velocity - p_vc).LengthSq()));
+	if (!Math::is_finite(max_relative_speed_sq) || max_relative_speed_sq <= 1.0e-12f) {
+		return false;
+	}
+	const float speed_bound = Math::sqrt(max_relative_speed_sq);
+	const float travel_bound = speed_bound * p_step;
+	if (!Math::is_finite(travel_bound) || travel_bound > p_max_sweep) {
+		return false;
+	}
+
+	float time = 0.0f;
+	for (uint32_t iteration = 0; iteration < MAX_SOFT_SELF_VERTEX_FACE_SWEEP_ITERATIONS && r_budget > 0; ++iteration) {
+		--r_budget; // One extra face distance evaluation per advancement.
+		const JPH::Vec3 point_at_time = p_point + p_point_velocity * time;
+		const JPH::Vec3 a_at_time = p_a + p_va * time;
+		const JPH::Vec3 b_at_time = p_b + p_vb * time;
+		const JPH::Vec3 c_at_time = p_c + p_vc * time;
+		JPH::Vec3 nearest = JPH::Vec3::sZero();
+		float u = 0.0f, v = 0.0f, w = 0.0f;
+		if (!closest_soft_triangle_point(point_at_time, a_at_time, b_at_time, c_at_time, nearest, u, v, w)) {
+			return false;
+		}
+		const JPH::Vec3 separation = point_at_time - nearest;
+		const float distance_sq = separation.LengthSq();
+		if (!Math::is_finite(distance_sq)) {
+			return false;
+		}
+		const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
+		if (time > 0.0f && distance <= p_radius + SOFT_SELF_VERTEX_FACE_SWEEP_TOLERANCE) {
+			const JPH::Vec3 face_velocity = u * p_va + v * p_vb + w * p_vc;
+			const JPH::Vec3 relative_velocity = p_point_velocity - face_velocity;
+			if (distance > 1.0e-6f) {
+				r_normal = separation / distance;
+			} else {
+				// Exact coincidence has no geometric orientation; choose
+				// the normal opposing velocity rather than face winding.
+				const float velocity_sq = relative_velocity.LengthSq();
+				if (!Math::is_finite(velocity_sq) || velocity_sq <= 1.0e-12f) {
+					return false;
+				}
+				r_normal = -relative_velocity / Math::sqrt(velocity_sq);
+			}
+			const float approach_speed = relative_velocity.Dot(r_normal);
+			if (!Math::is_finite(approach_speed) || approach_speed >= -1.0e-6f) {
+				return false; // Avoid speculative impulses on outgoing contacts.
+			}
+			r_u = u;
+			r_v = v;
+			r_w = w;
+			return true;
+		}
+		if (distance <= p_radius) {
+			return false; // Initial overlap belongs to the discrete solver.
+		}
+		const float advance = (distance - p_radius) / speed_bound;
+		if (!Math::is_finite(advance) || advance <= 1.0e-8f * p_step || time + advance > p_step) {
+			return false;
+		}
+		time += advance;
+	}
+	return false; // Iteration cap and shared contact work budget.
+}
+
+// The median face hierarchy is built in parent-before-children order.
+// Once the topology and leaf face indices are cached, every physics step
+// can refit the CURRENT deformed triangle AABBs in reverse node order.
+// Unlike a rebuilt tree, median partitions are reused; periodically
+// rebuilding compensates for a cloth that folds far from its old layout.
+static bool refit_soft_self_face_bvh(
+		const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices,
+		SoftFaceBVHScratch &r_bvh, uint32_t &r_budget) {
+	const uint32_t entry_count = uint32_t(r_bvh.entries.size());
+	const uint32_t node_count = uint32_t(r_bvh.nodes.size());
+	if (entry_count == 0 || node_count == 0) {
+		return false;
+	}
+	// Three corner reads + bounds calculation per face, plus node unions.
+	// Charge before touching data so the global self VF quota stays bounded.
+	const uint32_t refit_cost = 4 * entry_count + node_count;
+	if (r_budget <= refit_cost) {
+		return false;
+	}
+	r_budget -= refit_cost;
+	for (SoftFaceBVHEntry &entry : r_bvh.entries) {
+		if (entry.face_index >= p_faces.size()) {
+			return false;
+		}
+		const JPH::SoftBodySharedSettings::Face &face = p_faces[entry.face_index];
+		const uint32_t a = face.mVertex[0], b = face.mVertex[1], c = face.mVertex[2];
+		if (face.IsDegenerate() || a >= p_vertices.size() ||
+				b >= p_vertices.size() || c >= p_vertices.size()) {
+			return false; // Rebuild, filtering any invalid source faces.
+		}
+		const JPH::Vec3 p0 = p_vertices[a].mPosition;
+		const JPH::Vec3 p1 = p_vertices[b].mPosition;
+		const JPH::Vec3 p2 = p_vertices[c].mPosition;
+		entry.min = JPH::Vec3::sMin(p0, JPH::Vec3::sMin(p1, p2));
+		entry.max = JPH::Vec3::sMax(p0, JPH::Vec3::sMax(p1, p2));
+		if (!Math::is_finite(entry.min.GetX()) || !Math::is_finite(entry.min.GetY()) ||
+				!Math::is_finite(entry.min.GetZ()) || !Math::is_finite(entry.max.GetX()) ||
+				!Math::is_finite(entry.max.GetY()) || !Math::is_finite(entry.max.GetZ())) {
+			return false; // Never query stale or nonfinite bounds.
+		}
+	}
+	for (uint32_t i = node_count; i > 0; --i) {
+		SoftFaceBVHNode &node = r_bvh.nodes[i - 1];
+		if (node.end <= node.begin || node.end > entry_count) {
+			return false;
+		}
+		if (node.end - node.begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+			node.min = r_bvh.entries[node.begin].min;
+			node.max = r_bvh.entries[node.begin].max;
+			for (uint32_t j = node.begin + 1; j < node.end; ++j) {
+				node.min = JPH::Vec3::sMin(node.min, r_bvh.entries[j].min);
+				node.max = JPH::Vec3::sMax(node.max, r_bvh.entries[j].max);
+			}
+		} else {
+			if (node.left <= i - 1 || node.right <= i - 1 ||
+					node.left >= node_count || node.right >= node_count) {
+				return false;
+			}
+			node.min = JPH::Vec3::sMin(r_bvh.nodes[node.left].min, r_bvh.nodes[node.right].min);
+			node.max = JPH::Vec3::sMax(r_bvh.nodes[node.left].max, r_bvh.nodes[node.right].max);
+		}
+	}
+	return true;
+}
+
 static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBody3D &p_object,
 		float p_step, uint32_t &r_budget, SoftSelfContactScratch &r_scratch) {
 	JPH::SoftBodyMotionProperties &props = static_cast<JPH::SoftBodyMotionProperties &>(*p_body.GetMotionPropertiesUnchecked());
@@ -1216,17 +1375,43 @@ static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBod
 		return;
 	}
 
+	const bool refit_faces = JoltProjectSettings::soft_body_self_face_bvh_refit;
+	// The existing persistent edge cache and the independent face-cache
+	// option both reuse immutable mesh adjacency for stable BodyID objects.
 	if (!ensure_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch, r_budget,
-			JoltProjectSettings::soft_body_self_persistent_bvh)) {
+			JoltProjectSettings::soft_body_self_persistent_bvh || refit_faces)) {
 		return;
 	}
-	r_scratch.bvh.clear();
-	// Use the existing bounding-volume hierarchy on the same body's
-	// *local* deforming triangles. For tiny cloths brute force is cheaper.
-	// Large bodies are skipped if the BVH would exhaust the work budget.
+	// Use the same triangle BVH whether we build or refit it, preserving
+	// topology exclusions and the existing discrete/speculative narrowphase.
+	// On small meshes, continue to use the old direct face scan.
 	const bool needs_bvh = faces.size() >= MIN_SOFT_FACE_BVH_FACES;
-	const bool use_bvh = needs_bvh && prepare_soft_face_bvh(faces, vertices, JPH::Quat::sIdentity(),
-			JPH::Vec3::sZero(), r_scratch.bvh.entries, r_scratch.bvh.nodes, r_budget);
+	bool use_bvh = false;
+	if (needs_bvh && refit_faces && r_scratch.face_bvh_ready &&
+			r_scratch.face_bvh_face_count == faces.size() && r_scratch.face_bvh_refits < 120) {
+		use_bvh = refit_soft_self_face_bvh(faces, vertices, r_scratch.bvh, r_budget);
+		if (use_bvh) {
+			++r_scratch.face_bvh_refits;
+		}
+	}
+	if (needs_bvh && !use_bvh) {
+		// May follow an aborted refit: always discard potentially partial
+		// AABBs/nodes before attempting a fresh, budgeted median build.
+		r_scratch.bvh.clear();
+		use_bvh = prepare_soft_face_bvh(faces, vertices, JPH::Quat::sIdentity(),
+				JPH::Vec3::sZero(), r_scratch.bvh.entries, r_scratch.bvh.nodes, r_budget);
+		if (use_bvh) {
+			r_scratch.face_bvh_refits = 0;
+		}
+	}
+	if (refit_faces) {
+		r_scratch.face_bvh_ready = use_bvh;
+		r_scratch.face_bvh_face_count = use_bvh ? uint32_t(faces.size()) : 0;
+	} else {
+		// An independently persistent edge cache may outlive this toggle.
+		// Never reuse a face tree from before refitting was switched off.
+		r_scratch.face_bvh_ready = false;
+	}
 	if (needs_bvh && !use_bvh) {
 		return;
 	}
@@ -1239,12 +1424,20 @@ static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBod
 	const float radius_sq = radius * radius;
 	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+	// For every pair accepted by the predictor, relative point-to-face
+	// travel is <= max_sweep (bounded against each face vertex). Expanding
+	// static face BVH and point/AABB tests by that amount cannot cull an
+	// eligible swept contact, even if the triangle deforms during the step.
+	const bool swept_self_vertex_face_ccd = JoltProjectSettings::soft_body_self_speculative_vertex_face_ccd &&
+			JoltProjectSettings::soft_body_soft_ccd_max_sweep > 0.0f;
+	const float candidate_radius = radius +
+			(swept_self_vertex_face_ccd ? JoltProjectSettings::soft_body_soft_ccd_max_sweep : 0.0f);
 	for (uint32_t i = 0; i < particle_count && r_budget > 0; ++i) {
 		JPH::SoftBodyVertex &point = vertices[i];
 		const JPH::Vec3 point_position = point.mPosition;
 		if (use_bvh) {
 			query_soft_face_bvh(r_scratch.bvh.entries, r_scratch.bvh.nodes, point_position,
-					radius, r_budget, r_scratch.bvh.candidates, r_scratch.bvh.stack);
+					candidate_radius, r_budget, r_scratch.bvh.candidates, r_scratch.bvh.stack);
 		}
 		const uint32_t candidate_count = use_bvh ? uint32_t(r_scratch.bvh.candidates.size()) : uint32_t(faces.size());
 		for (uint32_t j = 0; j < candidate_count && r_budget > 0; ++j) {
@@ -1260,7 +1453,7 @@ static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBod
 			JPH::SoftBodyVertex &c = vertices[id2];
 			const JPH::Vec3 min_bound = JPH::Vec3::sMin(a.mPosition, JPH::Vec3::sMin(b.mPosition, c.mPosition));
 			const JPH::Vec3 max_bound = JPH::Vec3::sMax(a.mPosition, JPH::Vec3::sMax(b.mPosition, c.mPosition));
-			if (!soft_face_aabb_overlaps_point(min_bound, max_bound, point_position, radius)) {
+			if (!soft_face_aabb_overlaps_point(min_bound, max_bound, point_position, candidate_radius)) {
 				continue;
 			}
 			float u = 0.0f, v = 0.0f, w = 0.0f;
@@ -1270,8 +1463,20 @@ static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBod
 			}
 			const JPH::Vec3 diff = point_position - nearest;
 			const float distance_sq = diff.LengthSq();
-			if (!Math::is_finite(distance_sq) || distance_sq >= radius_sq) {
+			if (!Math::is_finite(distance_sq)) {
 				continue;
+			}
+			bool swept_contact = false;
+			JPH::Vec3 swept_normal = JPH::Vec3::sZero();
+			if (distance_sq >= radius_sq) {
+				if (!swept_self_vertex_face_ccd || !predict_soft_self_vertex_face_sweep(
+						point_position, point.mVelocity, a.mPosition, b.mPosition, c.mPosition,
+						a.mVelocity, b.mVelocity, c.mVelocity, p_step, radius,
+						JoltProjectSettings::soft_body_soft_ccd_max_sweep, r_budget,
+						u, v, w, swept_normal)) {
+					continue;
+				}
+				swept_contact = true;
 			}
 			const float inverse_mass_sum = point.mInvMass + u * u * a.mInvMass + v * v * b.mInvMass + w * w * c.mInvMass;
 			if (!Math::is_finite(inverse_mass_sum) || inverse_mass_sum <= 0.0f) {
@@ -1279,23 +1484,30 @@ static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBod
 			}
 			const JPH::Vec3 face_velocity = u * a.mVelocity + v * b.mVelocity + w * c.mVelocity;
 			const JPH::Vec3 relative_velocity = point.mVelocity - face_velocity;
-			const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
-			JPH::Vec3 normal = distance > 1.0e-6f ? diff / distance : (b.mPosition - a.mPosition).Cross(c.mPosition - a.mPosition).Normalized();
-			if (distance <= 1.0e-6f && relative_velocity.Dot(normal) > 0.0f) {
+			const float distance = swept_contact ? radius : Math::sqrt(MAX(distance_sq, 0.0f));
+			JPH::Vec3 normal = swept_contact ? swept_normal :
+					(distance > 1.0e-6f ? diff / distance :
+							(b.mPosition - a.mPosition).Cross(c.mPosition - a.mPosition).Normalized());
+			if (!swept_contact && distance <= 1.0e-6f && relative_velocity.Dot(normal) > 0.0f) {
 				normal = -normal;
 			}
 			const float normal_speed = relative_velocity.Dot(normal);
 			if (!Math::is_finite(normal_speed)) {
 				continue;
 			}
-			if (r_scratch.position_projection_ready) {
+			// Future contacts are predictive impulses ONLY; the existing
+			// Jacobi positional solver must not project a future overlap.
+			if (!swept_contact && r_scratch.position_projection_ready) {
 				const uint32_t indices[4] = { i, id0, id1, id2 };
 				const float gradients[4] = { 1.0f, -u, -v, -w };
 				accumulate_soft_self_position_projection(r_scratch, vertices, indices, gradients,
 						normal, radius - distance, p_step);
 			}
-			const float recovery_speed = MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
-			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
+			const float recovery_speed = swept_contact ? 0.0f :
+					MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float max_correction = swept_contact ? JoltProjectSettings::soft_body_soft_ccd_max_correction_speed :
+					MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION;
+			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), max_correction);
 			if (correction <= 0.0f) {
 				continue;
 			}
@@ -1798,10 +2010,15 @@ void JoltSpace3D::_pre_step(float p_step) {
 
 	// Reclaim all cached geometry as soon as this opt-in mode is disabled.
 	// Cache is populated lazily, and never shared across physics spaces.
-	const bool persistent_self = JoltProjectSettings::soft_body_self_contacts &&
+	const bool persistent_edges = JoltProjectSettings::soft_body_self_contacts &&
 			JoltProjectSettings::soft_body_self_edge_contacts &&
 			JoltProjectSettings::soft_body_self_edge_bvh &&
 			JoltProjectSettings::soft_body_self_persistent_bvh;
+	// Allow persistent face BVH even when the edge solver is disabled.
+	// Both modes share the existing generation-aware 64-body cache cap.
+	const bool persistent_self = persistent_edges ||
+			(JoltProjectSettings::soft_body_self_contacts &&
+					JoltProjectSettings::soft_body_self_face_bvh_refit);
 	if (!persistent_self && self_collision_cache != nullptr) {
 		delete self_collision_cache;
 		self_collision_cache = nullptr;

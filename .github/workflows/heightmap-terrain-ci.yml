@@ -1,0 +1,45 @@
+name: Heightmap Terrain C++ Tests
+
+on:
+  pull_request:
+    paths:
+      - "modules/heightmap_terrain/**"
+      - ".github/workflows/heightmap-terrain-ci.yml"
+  push:
+    paths:
+      - "modules/heightmap_terrain/**"
+      - ".github/workflows/heightmap-terrain-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heightmap-terrain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terrain-build-and-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install platform build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - name: Setup Python and SCons
+        uses: ./.github/actions/godot-deps
+      - name: Build Godot editor with module tests
+        shell: bash
+        run: |
+          scons platform=linuxbsd target=editor tests=yes module_mono_enabled=no \
+            module_text_server_fb_enabled=yes debug_symbols=no -j2
+      - name: Run terrain module unit tests
+        run: |
+          ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case='*[Terrain]*' --force-colors
+      - name: Run full core test suite
+        run: |
+          ./bin/godot.linuxbsd.editor.x86_64 --headless --test --force-colors

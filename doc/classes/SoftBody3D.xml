@@ -51,18 +51,6 @@
 				An impulse is time-independent! Applying an impulse every frame would result in a framerate-dependent force. For this reason, it should only be used when simulating one-time impacts (use the "_force" functions otherwise).
 			</description>
 		</method>
-		<method name="get_tetrahedral_interior_positions" qualifiers="const">
-			<return type="PackedVector3Array" />
-			<description>
-				Returns the additional FEM-only rest positions, which are not rendered or used as surface collision points.
-			</description>
-		</method>
-		<method name="get_tetrahedral_indices" qualifiers="const">
-			<return type="PackedInt32Array" />
-			<description>
-				Returns the experimental FEM tetrahedral connectivity. Every quadruplet references either a visual mesh vertex or an additional internal simulation vertex (the internal indices follow all visual vertex indices).
-			</description>
-		</method>
 		<method name="get_collision_exceptions">
 			<return type="PhysicsBody3D[]" />
 			<description>
@@ -96,6 +84,18 @@
 				Returns local translation of a vertex in the surface array.
 			</description>
 		</method>
+		<method name="get_tetrahedral_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns the experimental FEM tetrahedral connectivity. Every quadruplet references either a visual mesh vertex or an additional internal simulation vertex (the internal indices follow all visual vertex indices).
+			</description>
+		</method>
+		<method name="get_tetrahedral_interior_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns the additional FEM-only rest positions, which are not rendered or used as surface collision points.
+			</description>
+		</method>
 		<method name="is_point_pinned" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="point_index" type="int" />
@@ -126,11 +126,14 @@
 				Based on [param value], enables or disables the specified layer in the [member collision_mask], given a [param layer_number] between 1 and 32.
 			</description>
 		</method>
-		<method name="set_tetrahedral_interior_positions">
+		<method name="set_point_pinned">
 			<return type="void" />
-			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="0" name="point_index" type="int" />
+			<param index="1" name="pinned" type="bool" />
+			<param index="2" name="attachment_path" type="NodePath" default="NodePath(&quot;&quot;)" />
+			<param index="3" name="insert_at" type="int" default="-1" />
 			<description>
-				Sets extra internal FEM simulation vertices in local coordinates. Updating the array after assigning a mesh rebuilds the physical soft body so existing face pointers remain valid.
+				Sets the pinned state of a surface vertex. When set to [code]true[/code], the optional [param attachment_path] can define a [Node3D] the pinned vertex will be attached to.
 			</description>
 		</method>
 		<method name="set_tetrahedral_indices">
@@ -140,14 +143,11 @@
 				Sets experimental FEM tetrahedral connectivity. Each group of four indices refers to either the mesh's visual vertex array or to the interior vertices in [member tetrahedral_interior_positions], starting at the visual vertex count. Welded visual duplicates map to shared physical nodes.
 			</description>
 		</method>
-		<method name="set_point_pinned">
+		<method name="set_tetrahedral_interior_positions">
 			<return type="void" />
-			<param index="0" name="point_index" type="int" />
-			<param index="1" name="pinned" type="bool" />
-			<param index="2" name="attachment_path" type="NodePath" default="NodePath(&quot;&quot;)" />
-			<param index="3" name="insert_at" type="int" default="-1" />
+			<param index="0" name="positions" type="PackedVector3Array" />
 			<description>
-				Sets the pinned state of a surface vertex. When set to [code]true[/code], the optional [param attachment_path] can define a [Node3D] the pinned vertex will be attached to.
+				Sets extra internal FEM simulation vertices in local coordinates. Updating the array after assigning a mesh rebuilds the physical soft body so existing face pointers remain valid.
 			</description>
 		</method>
 	</methods>

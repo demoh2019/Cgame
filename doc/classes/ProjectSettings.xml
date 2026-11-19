@@ -2700,6 +2700,10 @@
 			Threshold linear velocity under which a 3D physics body will be considered inactive. See [constant PhysicsServer3D.SPACE_PARAM_BODY_LINEAR_VELOCITY_SLEEP_THRESHOLD].
 			[b]Note:[/b] This project setting is only effective when using GodotPhysics3D. It has no effect when using Jolt Physics.
 		</member>
+		<member name="physics/3d/solver/air_density" type="float" setter="" getter="" default="1.225">
+			Density of the air in [code]kg/m³[/code] for wind and air drag on [RigidBody3D] nodes with a [member RigidBody3D.wind_drag_coefficient]. The default is air at sea level. A larger value makes the same wind push harder (for example [code]1000[/code] for water).
+			[b]Note:[/b] This project setting is only effective when using GodotPhysics3D. It has no effect when using Jolt Physics.
+		</member>
 		<member name="physics/3d/solver/contact_max_allowed_penetration" type="float" setter="" getter="" default="0.01">
 			Maximum distance a shape can penetrate another shape before it is considered a collision. See [constant PhysicsServer3D.SPACE_PARAM_CONTACT_MAX_ALLOWED_PENETRATION].
 			[b]Note:[/b] This project setting is only effective when using GodotPhysics3D. It has no effect when using Jolt Physics.
