@@ -1,0 +1,38 @@
+name: GodotPhysics3D XPBD anisotropic fiber contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_xpbd_fiber.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_xpbd_fiber.cpp"
+      - "tests/stress/test_physics_xpbd_fiber.py"
+      - ".github/workflows/physics-xpbd-fiber.yml"
+  pull_request:
+    paths:
+      - "servers/physics_xpbd_fiber.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_xpbd_fiber.cpp"
+      - "tests/stress/test_physics_xpbd_fiber.py"
+      - ".github/workflows/physics-xpbd-fiber.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fiber-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check anisotropic stretch numerical properties and integration
+        run: python3 -m unittest discover -s tests/stress -p test_physics_xpbd_fiber.py -v
