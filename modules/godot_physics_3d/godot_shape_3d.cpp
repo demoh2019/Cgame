@@ -979,40 +979,98 @@ void GodotConvexPolygonShape3D::get_supports(const Vector3 &p_normal, int p_max,
 
 bool GodotConvexPolygonShape3D::intersect_segment(const Vector3 &p_begin, const Vector3 &p_end, Vector3 &r_result, Vector3 &r_normal, int &r_face_index, bool p_hit_back_faces) const {
 	const Geometry3D::MeshData::Face *faces = mesh.faces.ptr();
-	int fc = mesh.faces.size();
+	const int face_count = mesh.faces.size();
 
-	const Vector3 *vertices = mesh.vertices.ptr();
+	const double dx = double(p_end.x) - double(p_begin.x);
+	const double dy = double(p_end.y) - double(p_begin.y);
+	const double dz = double(p_end.z) - double(p_begin.z);
+	if (dx == 0.0 && dy == 0.0 && dz == 0.0) {
+		return false;
+	}
 
-	Vector3 n = p_end - p_begin;
-	real_t min = 1e20;
-	bool col = false;
+	if (face_count >= 4) {
+		// Cyrus-Beck clipping: a closed convex hull is the intersection of
+		// its face half-spaces. One test per face replaces triangulation and
+		// ray/triangle intersections for each face, without allocations.
+		// Double intermediates avoid cancellation in long ray casts.
+		double enter_fraction = 0.0;
+		double exit_fraction = 1.0;
+		int enter_face = -1;
 
-	for (int i = 0; i < fc; i++) {
-		if (faces[i].plane.normal.dot(n) > 0) {
-			continue; //opposing face
+		for (int i = 0; i < face_count; ++i) {
+			const Plane &plane = faces[i].plane;
+			const double nx = double(plane.normal.x);
+			const double ny = double(plane.normal.y);
+			const double nz = double(plane.normal.z);
+			const double start_distance = nx * double(p_begin.x) + ny * double(p_begin.y) + nz * double(p_begin.z) - double(plane.d);
+			const double velocity = nx * dx + ny * dy + nz * dz;
+
+			if (velocity == 0.0) {
+				if (start_distance > 0.0) {
+					return false;
+				}
+				continue;
+			}
+
+			const double fraction = -start_distance / velocity;
+			if (velocity < 0.0) {
+				if (fraction >= enter_fraction) {
+					enter_fraction = fraction;
+					enter_face = i;
+				}
+			} else if (fraction < exit_fraction) {
+				exit_fraction = fraction;
+			}
+			if (enter_fraction > exit_fraction) {
+				return false;
+			}
 		}
 
-		int ic = faces[i].indices.size();
-		const int *ind = faces[i].indices.ptr();
+		// Preserve entry-only behavior: rays starting inside a solid hull
+		// do not report their exit face as a front-facing hit.
+		if (enter_face < 0 || enter_fraction < 0.0 || enter_fraction > 1.0) {
+			return false;
+		}
+		r_result = Vector3(real_t(double(p_begin.x) + dx * enter_fraction),
+				real_t(double(p_begin.y) + dy * enter_fraction),
+				real_t(double(p_begin.z) + dz * enter_fraction));
+		r_normal = faces[enter_face].plane.normal;
+		return true;
+	}
 
-		for (int j = 1; j < ic - 1; j++) {
-			Face3 f(vertices[ind[0]], vertices[ind[j]], vertices[ind[j + 1]]);
+	// Degenerate/open hulls may not bound a 3D volume. Preserve their old
+	// triangle-intersection semantics, but rank hits relative to the ray
+	// origin rather than against a fixed 1e20 coordinate-space sentinel.
+	const Vector3 *vertices = mesh.vertices.ptr();
+	const Vector3 direction = p_end - p_begin;
+	double closest_fraction = double(Math::INF);
+	bool collided = false;
+	for (int i = 0; i < face_count; ++i) {
+		if (faces[i].plane.normal.dot(direction) > 0.0) {
+			continue;
+		}
+		const int index_count = faces[i].indices.size();
+		const int *indices = faces[i].indices.ptr();
+		for (int j = 1; j < index_count - 1; ++j) {
+			Face3 triangle(vertices[indices[0]], vertices[indices[j]], vertices[indices[j + 1]]);
 			Vector3 result;
-			if (f.intersects_segment(p_begin, p_end, &result)) {
-				real_t d = n.dot(result);
-				if (d < min) {
-					min = d;
+			if (triangle.intersects_segment(p_begin, p_end, &result)) {
+				const double rx = double(result.x) - double(p_begin.x);
+				const double ry = double(result.y) - double(p_begin.y);
+				const double rz = double(result.z) - double(p_begin.z);
+				const double length_squared = dx * dx + dy * dy + dz * dz;
+				const double fraction = (dx * rx + dy * ry + dz * rz) / length_squared;
+				if (fraction < closest_fraction) {
+					closest_fraction = fraction;
 					r_result = result;
 					r_normal = faces[i].plane.normal;
-					col = true;
+					collided = true;
 				}
-
 				break;
 			}
 		}
 	}
-
-	return col;
+	return collided;
 }
 
 bool GodotConvexPolygonShape3D::intersect_point(const Vector3 &p_point) const {
