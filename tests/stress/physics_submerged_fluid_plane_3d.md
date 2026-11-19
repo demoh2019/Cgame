@@ -38,9 +38,12 @@ the Jolt backend has its own body API and is not altered.
 
 For each non-disabled shape of a dynamic 3D body (only when enabled):
 
-1. Read its existing cached **world-space broadphase AABB** and
-   world-scaled `get_shape_area(index)` (which represents volume in 3D).
-2. Intersect the Y interval with the water half-space `y < surface_height`.
+1. Read the existing cached **world-space broadphase AABB** to skip
+   definitely dry shapes. For potential immersion, compute the **current**
+   world-space shape AABB from its transform, without broadphase padding
+   or the expanded CCD sweep. Obtain world-scaled `get_shape_area(index)`
+   (which represents volume in 3D).
+2. Intersect the exact-current AABB Y interval with the water half-space `y < surface_height`.
    Estimate displaced volume = actual shape volume × clipped AABB height ratio.
 3. Estimate the submerged shape's center at the center of the clipped
    AABB region. Apply Archimedes' lift
@@ -66,7 +69,7 @@ solving use their existing paths.
 
 **This is an approximate water-plane model, not an exact hydrostatic
 solver.** The submerged fraction and center are estimated from the
-world AABB of each shape, which is conservatively padded for broadphase.
+world AABB of each shape (without the BVH's padding or CCD sweep).
 Rotated objects, very thin concave objects, hollow geometry, and surfaces
 with holes will have approximate waterline and torque behavior. Compound
 shapes may also count overlapped volumes twice, as in simple additive
