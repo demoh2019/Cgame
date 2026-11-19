@@ -51,8 +51,16 @@ const char *JSON::tk_name[TK_MAX] = {
 };
 
 void JSON::_add_indent(StringBuilder &r_result, const String &p_indent, int p_size) {
-	for (int i = 0; i < p_size; i++) {
+	// Compact JSON is the hot path. Do not walk the current nesting depth
+	// when there is no indentation to emit.
+	if (p_size <= 0 || p_indent.is_empty()) {
+		return;
+	}
+	if (p_size == 1) {
 		r_result += p_indent;
+	} else {
+		// Store a single indentation fragment instead of p_size builder entries.
+		r_result += p_indent.repeat(p_size);
 	}
 }
 
