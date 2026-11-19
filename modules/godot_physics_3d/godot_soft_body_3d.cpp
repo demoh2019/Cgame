@@ -913,7 +913,10 @@ void GodotSoftBody3D::set_total_mass(real_t p_val) {
 		node.im *= mass_factor;
 	}
 
-	update_constants();
+	// Mass affects inverse masses and solver coefficients, but not rest
+	// lengths or surface areas. Do not silently redefine an already deformed
+	// mesh as its new rest shape on every mass change.
+	update_link_constants();
 }
 
 void GodotSoftBody3D::set_collision_margin(real_t p_val) {
@@ -922,6 +925,9 @@ void GodotSoftBody3D::set_collision_margin(real_t p_val) {
 
 void GodotSoftBody3D::set_linear_stiffness(real_t p_val) {
 	linear_stiffness = p_val;
+	// Make runtime changes observable immediately, without rebuilding
+	// positions, rest lengths or the mesh topology.
+	update_link_constants();
 }
 
 void GodotSoftBody3D::set_shrinking_factor(real_t p_val) {
