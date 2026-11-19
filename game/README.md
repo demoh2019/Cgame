@@ -324,3 +324,48 @@ no new Cgame engine APIs or network commands.
 The game tests include `test_zombie_pack.gd` and expanded
 `test_zombie_ai.gd` regression checks. Run them with
 `godot --headless --path game --script res://tests/run_all.gd`.
+
+## Server-authoritative camp contracts (scavenging + sandbox professions + PvE)
+
+The same multiplayer game in `game/` now includes three finite original
+survivor missions at the hub **workbench** (x=9, z=0). They connect the
+Days After scavenging / infected loop with Albion-like tiered gathering,
+classless crafting and in-world silver rewards.
+
+| Order | Mission | Objective | Reward |
+| --- | --- | --- | --- |
+| 1 | Supply the camp | Hand in 4 wood T1 and 3 fiber T1 | 12 silver and 1 bandage |
+| 2 | Arm the survivors | Own one crafted T1 club (not consumed) | 18 silver and 1 water bottle |
+| 3 | Clear the infected | Kill two infected **after** accepting the patrol | 35 silver and 2 canned foods |
+
+In the **local playable** client, press **M** to accept the next mission,
+**Shift+M** to turn it in, while near the hub. In the **online network
+client**, open the **I** inventory panel and use **Accept next mission**
+or **Turn in mission**. The current objective appears in the interface.
+
+The client never sends a reward amount, objective progress or completed
+mission ID. Every decision is made by the authoritative `GameServer`.
+The server confirms the character is alive and at the hub, validates
+inventory/kill conditions, and simulates every reward transfer on a copy
+before committing it. Missing resources or a full backpack cannot produce
+partial payment or free items. Completed missions cannot be claimed again.
+
+The journal (`active`, `progress`, `completed`) is included in the existing
+version-1 Nakama character save, synchronized in the owner's private
+snapshot and validated **before** loading a character. Older saves without
+the journal remain loadable with an empty one. A character's account
+progress survives ordinary combat death, while red/black-zone loot follows
+the existing PvP/full-loot rules.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+The `test_contracts.gd` suite checks server-only authority, fixed rewards,
+no item duplication, weapon crafting, unique infected kill counts,
+all-or-nothing inventory transfers and old / malformed saved characters.
+
+This is a **first NPC quest chain**, not a procedural quest generator,
+guild mission board, live events or multiplayer marketplace. No missing
+generic Cgame engine primitive was identified; reusable networking,
+inventory, movement and persistence APIs already provide the foundation.
