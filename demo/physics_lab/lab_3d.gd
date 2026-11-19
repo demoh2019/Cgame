@@ -275,7 +275,7 @@ func _make_vehicle() -> void:
             var wheel := VehicleWheel3D.new()
             wheel.position = Vector3(side * 1.05, -0.45, -1.22 if front else 1.22)
             wheel.wheel_radius = 0.47
-            wheel.suspension_rest_length = 0.34
+            wheel.wheel_rest_length = 0.34
             wheel.use_as_steering = front
             wheel.use_as_traction = not front
             _vehicle.add_child(wheel)
