@@ -996,6 +996,127 @@ struct SoftSelfContactScratch {
 	bool edge_bvh_ready = false;
 };
 
+// Optional one-pass XPBD-style projection for soft self-contacts.
+// A true iterative XPBD solver stores per-constraint lambda and recomputes
+// geometry each iteration; this is deliberately a one-shot compliant Jacobi
+// projection, supplementing (not replacing) existing velocity impulses.
+// Accumulate deltas first: moving vertices while querying a BVH built from
+// their old positions could otherwise incorrectly reject later contacts.
+constexpr uint32_t MAX_SOFT_SELF_POSITION_VERTICES = 4096;
+
+static bool prepare_soft_self_position_projection(
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices,
+		uint32_t &r_budget, SoftSelfContactScratch &r_scratch) {
+	r_scratch.position_projection_ready = false;
+	const uint32_t count = uint32_t(p_vertices.size());
+	if (!JoltProjectSettings::soft_body_self_position_projection ||
+			JoltProjectSettings::soft_body_self_position_max_correction <= 0.0f ||
+			count == 0 || count > MAX_SOFT_SELF_POSITION_VERTICES) {
+		return false;
+	}
+	// Clearing and applying the buffer are both O(vertex_count).
+	const uint32_t work = 2 * count;
+	if (r_budget <= work) {
+		return false;
+	}
+	r_budget -= work;
+	r_scratch.position_deltas.resize(count);
+	for (JPH::Vec3 &delta : r_scratch.position_deltas) {
+		delta = JPH::Vec3::sZero();
+	}
+	r_scratch.position_projection_ready = true;
+	return true;
+}
+
+static void accumulate_soft_self_position_projection(
+		SoftSelfContactScratch &r_scratch,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices,
+		const uint32_t p_indices[4], const float p_gradients[4],
+		JPH::Vec3Arg p_normal, float p_penetration, float p_step) {
+	if (!r_scratch.position_projection_ready || p_penetration <= 0.0f) {
+		return;
+	}
+	const float normal_length_sq = p_normal.LengthSq();
+	if (!Math::is_finite(normal_length_sq) || normal_length_sq <= 1.0e-12f) {
+		return;
+	}
+	float effective_mass = 0.0f;
+	float max_weighted_inverse_mass = 0.0f;
+	for (uint32_t i = 0; i < 4; ++i) {
+		if (p_indices[i] >= p_vertices.size()) {
+			return;
+		}
+		const float inverse_mass = p_vertices[p_indices[i]].mInvMass;
+		const float gradient = p_gradients[i];
+		if (!Math::is_finite(inverse_mass) || inverse_mass < 0.0f || !Math::is_finite(gradient)) {
+			return;
+		}
+		effective_mass += gradient * gradient * inverse_mass;
+		max_weighted_inverse_mass = MAX(max_weighted_inverse_mass, Math::abs(gradient) * inverse_mass);
+	}
+	if (!Math::is_finite(effective_mass) || effective_mass <= 0.0f ||
+			!Math::is_finite(max_weighted_inverse_mass) || max_weighted_inverse_mass <= 0.0f) {
+		return;
+	}
+	const float compliance = JoltProjectSettings::soft_body_self_position_compliance;
+	const float max_correction = JoltProjectSettings::soft_body_self_position_max_correction;
+	const float scaled_compliance = compliance / (p_step * p_step);
+	const float denominator = effective_mass + scaled_compliance;
+	if (!Math::is_finite(denominator) || denominator <= 0.0f) {
+		return;
+	}
+	// Delta lambda = -C / (sum(w_i |grad_i|^2) + alpha).
+	// All new constraints start at lambda=0. Cap this contribution as
+	// well as the final Jacobi sum to avoid extreme penetration recovery.
+	const float lambda = MIN(p_penetration / denominator, max_correction / max_weighted_inverse_mass);
+	if (!Math::is_finite(lambda) || lambda <= 0.0f) {
+		return;
+	}
+	const JPH::Vec3 normal = p_normal / Math::sqrt(normal_length_sq);
+	for (uint32_t i = 0; i < 4; ++i) {
+		const float scale = p_gradients[i] * p_vertices[p_indices[i]].mInvMass * lambda;
+		r_scratch.position_deltas[p_indices[i]] += normal * scale;
+	}
+}
+
+static void apply_soft_self_position_projection(JPH::Body &p_body, SoftSelfContactScratch &r_scratch) {
+	if (!r_scratch.position_projection_ready) {
+		return;
+	}
+	r_scratch.position_projection_ready = false;
+	JPH::SoftBodyMotionProperties &props = static_cast<JPH::SoftBodyMotionProperties &>(*p_body.GetMotionPropertiesUnchecked());
+	JPH::Array<JPH::SoftBodyVertex> &vertices = props.GetVertices();
+	if (vertices.size() != r_scratch.position_deltas.size()) {
+		return;
+	}
+	const float max_correction = JoltProjectSettings::soft_body_self_position_max_correction;
+	const float limit_sq = max_correction * max_correction;
+	float maximum_sq = 0.0f;
+	for (const JPH::Vec3 &delta : r_scratch.position_deltas) {
+		const float displacement_sq = delta.LengthSq();
+		if (!Math::is_finite(displacement_sq)) {
+			return; // Leave all vertices unchanged rather than partially moving.
+		}
+		maximum_sq = MAX(maximum_sq, displacement_sq);
+	}
+	// Apply ONE uniform scale to all Jacobi displacements: unlike
+	// per-vertex clipping, this preserves the inverse-mass-weighted
+	// internal center of mass of the accumulated constraints.
+	const float scale = maximum_sq > limit_sq ? max_correction / Math::sqrt(maximum_sq) : 1.0f;
+	if (scale <= 0.0f || !Math::is_finite(scale)) {
+		return;
+	}
+	for (uint32_t i = 0; i < vertices.size(); ++i) {
+		JPH::SoftBodyVertex &vertex = vertices[i];
+		if (vertex.mInvMass <= 0.0f) {
+			continue; // Pinned particle.
+		}
+		const JPH::Vec3 delta = r_scratch.position_deltas[i] * scale;
+		vertex.mPosition += delta;
+		vertex.mPreviousPosition += delta; // No artificial history/velocity jump.
+	}
+}
+
 static uint64_t soft_self_topology_edge_key(uint32_t p_a, uint32_t p_b) {
 	return (uint64_t(MIN(p_a, p_b)) << 32) | uint64_t(MAX(p_a, p_b));
 }
