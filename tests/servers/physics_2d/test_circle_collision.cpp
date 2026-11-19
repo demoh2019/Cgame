@@ -103,6 +103,35 @@ TEST_CASE("[Physics2D] Circle-circle overlap with margins") {
 	CHECK(contact.point_b.is_equal_approx(Vector2(1.0, 0)));
 }
 
+TEST_CASE("[Physics2D] Circle-circle non-uniform scale retains SAT") {
+	GodotCircleShape2D circle_a;
+	GodotCircleShape2D circle_b;
+	circle_a.set_data(1.0);
+	circle_b.set_data(1.0);
+
+	Transform2D transform_a;
+	transform_a.columns[0] = Vector2(2, 0);
+	Transform2D transform_b;
+	transform_b.set_origin(Vector2(2.5, 0));
+
+	Contact contact;
+	CHECK(GodotCollisionSolver2D::solve(&circle_a, transform_a, Vector2(), &circle_b, transform_b, Vector2(), capture_contact, &contact));
+	CHECK(contact.count == 1);
+}
+
+TEST_CASE("[Physics2D] Circle-circle swept collision retains SAT") {
+	GodotCircleShape2D circle_a;
+	GodotCircleShape2D circle_b;
+	circle_a.set_data(1.0);
+	circle_b.set_data(1.0);
+
+	Transform2D transform_a;
+	Transform2D transform_b;
+	transform_b.set_origin(Vector2(4, 0));
+
+	CHECK(GodotCollisionSolver2D::solve(&circle_a, transform_a, Vector2(3, 0), &circle_b, transform_b, Vector2(), nullptr, nullptr));
+}
+
 TEST_CASE("[Physics2D] Circle-circle coincident center fallback") {
 	GodotCircleShape2D circle_a;
 	GodotCircleShape2D circle_b;
