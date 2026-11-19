@@ -111,26 +111,40 @@ TEST_CASE("[WebSocketPeer] Interleaved control frames preserve fragmented messag
 				server_peer->get_ready_state() == WebSocketPeer::STATE_OPEN;
 	}));
 
-	// A control frame in the middle of a fragmented data message must not
-	// contribute bytes to the message, regardless of whether it is Ping or Pong.
+	// Ping and Pong must never leak into fragmented text or binary messages.
+	// Also cover empty and nonempty control payloads.
+	const uint8_t data_opcodes[] = { 0x01, 0x02 };
 	const uint8_t control_opcodes[] = { 0x89, 0x8A };
-	for (uint8_t control_opcode : control_opcodes) {
-		const uint8_t frames[] = {
-			0x01, 0x01, 'A', // Text fragment, FIN clear.
-			control_opcode, 0x01, '!', // Interleaved control payload.
-			0x80, 0x01, 'B', // Final continuation frame.
-		};
-		REQUIRE_EQ(connection->put_data(frames, sizeof(frames)), OK);
+	const uint8_t control_lengths[] = { 0, 1 };
+	for (uint8_t data_opcode : data_opcodes) {
+		for (uint8_t control_opcode : control_opcodes) {
+			for (uint8_t control_length : control_lengths) {
+				PackedByteArray frames;
+				frames.push_back(data_opcode); // Start of fragmented text/binary message, FIN clear.
+				frames.push_back(0x01);
+				frames.push_back('A');
+				frames.push_back(control_opcode);
+				frames.push_back(control_length);
+				if (control_length == 1) {
+					frames.push_back('!');
+				}
+				frames.push_back(0x80); // Final continuation frame.
+				frames.push_back(0x01);
+				frames.push_back('B');
+				REQUIRE_EQ(connection->put_data(frames.ptr(), frames.size()), OK);
 
-		REQUIRE(wait_for_condition([&]() {
-			client->poll();
-			return client->get_available_packet_count() > 0;
-		}));
+				REQUIRE(wait_for_condition([&]() {
+					client->poll();
+					return client->get_available_packet_count() > 0;
+				}));
 
-		Vector<uint8_t> packet;
-		REQUIRE_EQ(client->get_packet_buffer(packet), OK);
-		CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "AB");
-		CHECK_EQ(packet.size(), 2);
+				Vector<uint8_t> packet;
+				REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+				CHECK_EQ(packet.size(), 2);
+				CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "AB");
+				CHECK_EQ(client->get_available_packet_count(), 0);
+			}
+		}
 	}
 }
 
