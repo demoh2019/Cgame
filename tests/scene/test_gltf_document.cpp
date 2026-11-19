@@ -501,6 +501,56 @@ TEST_CASE("[GLTFDocument] In-memory import rejects invalid buffer view strides")
 	ERR_PRINT_ON
 }
 
+
+TEST_CASE("[GLTFDocument] In-memory import rejects camera dictionaries without a type") {
+	Dictionary root = make_minimal_gltf_json();
+	Array cameras;
+	cameras.push_back(Dictionary());
+	root["cameras"] = cameras;
+
+	ERR_PRINT_OFF
+	CHECK(parse_gltf_json(root) == ERR_PARSE_ERROR);
+	ERR_PRINT_ON
+
+	Dictionary perspective;
+	perspective["yfov"] = 0.9f;
+	perspective["znear"] = 0.1f;
+	Dictionary camera;
+	camera["type"] = "perspective";
+	camera["perspective"] = perspective;
+	cameras[0] = camera;
+	root["cameras"] = cameras;
+	CHECK(parse_gltf_json(root) == OK);
+}
+
+TEST_CASE("[GLTFDocument] In-memory import accepts a spotlight with no spot properties") {
+	Dictionary root = make_minimal_gltf_json();
+	Dictionary light;
+	light["type"] = "spot";
+	Array lights;
+	lights.push_back(light);
+	Dictionary punctual;
+	punctual["lights"] = lights;
+	Dictionary extensions;
+	extensions["KHR_lights_punctual"] = punctual;
+	root["extensions"] = extensions;
+	Array used_extensions;
+	used_extensions.push_back("KHR_lights_punctual");
+	root["extensionsUsed"] = used_extensions;
+
+	Ref<GLTFDocument> document;
+	document.instantiate();
+	Ref<GLTFState> state;
+	state.instantiate();
+	CHECK(document->append_from_buffer(JSON::stringify(root).to_utf8_buffer(), "res://valid_optional_spot.gltf", state) == OK);
+	REQUIRE(state->get_lights().size() == 1);
+	Ref<GLTFLight> parsed = state->get_lights()[0];
+	REQUIRE(parsed.is_valid());
+	CHECK(parsed->get_light_type() == "spot");
+	CHECK(parsed->get_inner_cone_angle() == 0.0f);
+	CHECK(parsed->get_outer_cone_angle() > 0.0f);
+}
+
 } // namespace TestGLTFDocument
 
 #endif // MODULE_GLTF_ENABLED
