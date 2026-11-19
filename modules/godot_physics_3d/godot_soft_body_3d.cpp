@@ -292,7 +292,16 @@ void GodotSoftBody3D::reset_link_rest_lengths() {
 }
 
 void GodotSoftBody3D::update_link_constants() {
-	real_t inv_linear_stiffness = 1.0 / linear_stiffness;
+	// Zero stiffness disables stretch constraints. Do not produce infinities
+	// (or NaNs for pairs of pinned vertices) by dividing by zero.
+	if (!(linear_stiffness > 0.0)) {
+		for (Link &link : links) {
+			link.c0 = 0.0;
+		}
+		return;
+	}
+
+	const real_t inv_linear_stiffness = 1.0 / linear_stiffness;
 	for (Link &link : links) {
 		link.c0 = (link.n[0]->im + link.n[1]->im) * inv_linear_stiffness;
 	}
@@ -890,7 +899,9 @@ void GodotSoftBody3D::set_iteration_count(int p_val) {
 }
 
 void GodotSoftBody3D::set_total_mass(real_t p_val) {
-	ERR_FAIL_COND(p_val < 0.0);
+	// A zero, negative, or non-finite mass would create invalid inverse masses
+	// and ultimately corrupt per-vertex velocities / positions.
+	ERR_FAIL_COND_MSG(!(p_val > 0.0) || !Math::is_finite(p_val), "Soft body mass must be positive and finite.");
 
 	inv_total_mass = 1.0 / p_val;
 	real_t mass_factor = total_mass * inv_total_mass;
@@ -988,15 +999,27 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 }
 
 Vector3 GodotSoftBody3D::_compute_area_windforce(const GodotArea3D *p_area, const Face *p_face) {
-	real_t wfm = p_area->get_wind_force_magnitude();
-	real_t waf = p_area->get_wind_attenuation_factor();
-	const Vector3 &wd = p_area->get_wind_direction();
-	const Vector3 &ws = p_area->get_wind_source();
-	real_t projection_on_tri_normal = vec3_dot(p_face->normal, wd);
-	real_t projection_toward_centroid = vec3_dot(p_face->centroid - ws, wd);
-	real_t attenuation_over_distance = std::pow(projection_toward_centroid, -waf);
-	real_t nodal_force_magnitude = wfm * 0.33333333333 * p_face->ra * projection_on_tri_normal * attenuation_over_distance;
-	return nodal_force_magnitude * p_face->normal;
+	const real_t magnitude = p_area->get_wind_force_magnitude();
+	const Vector3 &wind_direction = p_area->get_wind_direction();
+	const real_t projected_area = vec3_dot(p_face->normal, wind_direction) * p_face->ra;
+	if (magnitude == 0.0 || projected_area == 0.0) {
+		return Vector3();
+	}
+
+	// Zero attenuation is the default: avoid the transcendental pow() for
+	// each face. Distance must be unsigned, since negative projections along
+	// the wind direction yield NaNs for fractional attenuation exponents.
+	real_t attenuation = 1.0;
+	const real_t falloff = p_area->get_wind_attenuation_factor();
+	if (falloff != 0.0) {
+		const Vector3 distance = p_face->centroid - p_area->get_wind_source();
+		// A minimum radius prevents infinite forces at the wind source.
+		const real_t distance_squared = MAX(distance.length_squared(), real_t(1.0));
+		attenuation = std::pow(distance_squared, -falloff * real_t(0.5));
+	}
+
+	const real_t nodal_force = magnitude * real_t(1.0 / 3.0) * projected_area * attenuation;
+	return nodal_force * p_face->normal;
 }
 
 void GodotSoftBody3D::predict_motion(real_t p_delta) {
