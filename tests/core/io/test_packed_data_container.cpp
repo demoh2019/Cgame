@@ -97,14 +97,19 @@ TEST_CASE("[PackedDataContainer] Large dictionary and hash-based lookups") {
 	for (int i = 0; i < 256; i++) {
 		source[String("name_") + itos(i)] = i * 13;
 	}
+	source[-73] = "negative-integer-key";
 	CHECK(packed->pack(source) == OK);
-	CHECK(packed->size() == 256);
+	CHECK(packed->size() == 257);
 
 	bool valid = false;
 	for (int i = 255; i >= 0; i--) {
 		CHECK(packed->getvar(String("name_") + itos(i), &valid) == Variant(i * 13));
 		CHECK(valid);
 	}
+	CHECK(packed->getvar(-73, &valid) == Variant(String("negative-integer-key")));
+	CHECK(valid);
+	CHECK(packed->getvar(String("definitely-missing-key-987654"), &valid) == Variant());
+	CHECK_FALSE(valid);
 
 	Dictionary smaller;
 	smaller["single"] = "new-value";
