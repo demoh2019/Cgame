@@ -34,6 +34,28 @@ add_child(terrain)
 
 The image must be uncompressed and 2–513 pixels along each dimension. Single-channel grayscale/R images use the red channel as height; RGB images use luminance. Values are clamped to 0–1 before mapping into the requested height range.
 
+## Four-layer texture painting (follow-up PR)
+
+The native terrain now supports **four blended texture layers** through the `TerrainSplatmap` resource. Create/import four `Texture2D` resources and assign them to the **Terrain Textures → layer_0..layer_3** properties on `HeightmapTerrain3D`. The node creates an internal shader material and a GPU RGBA8 blend mask automatically. The texture's **texture_tiling** property controls UV repetition separately from the splatmap.
+
+Select the terrain in the 3D editor, then choose **Texture Layer 0**, **1**, **2**, or **3** in the brush selector to paint the chosen layer. Brush strength is clamped to 0–1; each click is undoable. The four channel weights always sum to one, and editing the mask updates its texture without rebuilding the terrain mesh.
+
+```gdscript
+var terrain := HeightmapTerrain3D.new()
+terrain.heightmap.set_dimensions(129, 129)
+terrain.layer_0 = preload("res://grass.png")
+terrain.layer_1 = preload("res://stone.png")
+terrain.layer_2 = preload("res://sand.png")
+terrain.layer_3 = preload("res://snow.png")
+terrain.texture_tiling = 16.0
+terrain.splatmap.paint_layer(1, Vector2(64, 64), 20.0, 1.0)
+add_child(terrain)
+```
+
+If `terrain_material` is explicitly assigned, the custom material **overrides** the built-in four-layer shader. Existing vertex-color painting remains available and tints the blended surface. Missing layers sample a white fallback.
+
+**Limitations:** One splatmap sample is stored per terrain vertex; masking is uploaded as RGBA8. There is no normal/roughness texture blending, height-based blends, density-mask filtering, or virtual texturing. High-frequency paint details require a sufficiently dense terrain grid. This PR depends on #63 and does not include the foliage system from #76.
+
 ## Design choices and limitations
 
 - Uses one continuous triangle mesh with **correct winding**, computed normals, UVs, and vertex colors.
