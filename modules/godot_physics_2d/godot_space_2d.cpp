@@ -37,6 +37,7 @@
 
 #include "core/config/project_settings.h"
 #include "core/templates/hash_set.h"
+#include "servers/physics_cast_motion_pruning.h"
 
 #define TEST_MOTION_MARGIN_MIN_VALUE 0.0001
 #define TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR 0.05
@@ -237,8 +238,8 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 	GodotShape2D *shape = GodotPhysicsServer2D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
-	Rect2 aabb = p_parameters.transform.xform(shape->get_aabb());
-	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size));
+	const Rect2 start_aabb = p_parameters.transform.xform(shape->get_aabb());
+	Rect2 aabb = start_aabb.merge(Rect2(start_aabb.position + p_parameters.motion, start_aabb.size));
 	aabb = aabb.grow(p_parameters.margin);
 
 	// Stream every overlapping broadphase proxy and reject nonmatching
@@ -248,14 +249,24 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 		const PS2DT::ShapeParameters &params;
 		GodotShape2D *shape;
 		Vector2 motion_normal;
+		const Rect2 &start_aabb;
+		Rect2 clipped_aabb;
 		real_t best_safe = 1.0;
 		real_t best_unsafe = 1.0;
 	};
-	CastQuery data = { p_parameters, shape, p_parameters.motion.normalized() };
+	CastQuery data = { p_parameters, shape, p_parameters.motion.normalized(), start_aabb, aabb };
 	auto visitor = [](GodotCollisionObject2D *p_object, int p_shape, void *p_userdata) -> bool {
 		CastQuery &data = *static_cast<CastQuery *>(p_userdata);
 		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
 				data.params.exclude.has(p_object->get_self())) {
+			return true;
+		}
+
+		// A previous exact hit clips the possible earlier collision region.
+		// Compare against the collision object's cached, conservatively
+		// expanded world AABB before running an expensive swept SAT test.
+		if (data.best_unsafe < 1.0 &&
+				!data.clipped_aabb.intersects(p_object->get_shape_aabb(p_shape), true)) {
 			return true;
 		}
 
@@ -309,6 +320,8 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 		if (low < data.best_safe) {
 			data.best_safe = low;
 			data.best_unsafe = hi;
+			data.clipped_aabb = godot_physics_cast_motion_clipped_aabb(data.start_aabb,
+					data.params.motion, data.best_unsafe, data.params.margin);
 		}
 		return true;
 	};
