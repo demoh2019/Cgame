@@ -50,7 +50,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Syntax-check runner and tests
-        run: python3 -m py_compile tests/stress/run.py tests/stress/test_run.py tests/stress/diagnose.py tests/stress/test_diagnose.py tests/stress/scale_sweep.py tests/stress/test_scale_sweep.py tests/stress/test_registry.py
+        run: python3 -m py_compile tests/stress/run.py tests/stress/test_run.py tests/stress/diagnose.py tests/stress/test_diagnose.py tests/stress/scale_sweep.py tests/stress/test_scale_sweep.py tests/stress/test_registry.py tests/stress/process_tree.py tests/stress/test_process_tree.py
       - name: Run harness unit tests
         run: python3 -m unittest discover -s tests/stress -p 'test_*.py' -v
 
