@@ -259,6 +259,49 @@ TEST_SUITE("[PlaceholderScriptInstance]") {
 			CHECK_EQ(obj->get("prop_a"), Variant(2));
 		}
 	}
+
+	TEST_CASE("[ObjectGetScript] No script instance returns NIL.") {
+		Ref<RefCounted> obj = memnew(RefCounted);
+		CHECK_EQ(obj->get_script().get_type(), Variant::NIL);
+	}
+
+	TEST_CASE("[ObjectGetScript] The getter returns the attached script.") {
+		Ref<_MockScript> scr = memnew(_MockScript);
+		MAKE_INSTANCE(scr);
+
+		Variant script_variant = obj->get_script();
+		CHECK_EQ(script_variant.get_type(), Variant::OBJECT);
+		CHECK_EQ(script_variant, Variant(scr.ptr()));
+	}
+
+	TEST_CASE("[ObjectGetScript] Repeated calls do not leak references.") {
+		Ref<_MockScript> scr = memnew(_MockScript);
+		MAKE_INSTANCE(scr);
+		const uint32_t original_refcount = scr->get_reference_count();
+
+		for (int i = 0; i < 256; i++) {
+			{
+				Variant script_variant = obj->get_script();
+				CHECK_EQ(script_variant.get_type(), Variant::OBJECT);
+				CHECK_EQ(script_variant, Variant(scr.ptr()));
+			}
+			CHECK_EQ(scr->get_reference_count(), original_refcount);
+		}
+	}
+
+	TEST_CASE("[ObjectGetScript] A retained Variant keeps the script alive.") {
+		Ref<_MockScript> scr = memnew(_MockScript);
+		MAKE_INSTANCE(scr);
+		Script *script_ptr = scr.ptr();
+
+		Variant retained = obj->get_script();
+		obj->set_script_instance(nullptr);
+		scr.unref();
+
+		CHECK_EQ(retained.get_type(), Variant::OBJECT);
+		Ref<Script> still_alive = retained;
+		CHECK_EQ(still_alive.ptr(), script_ptr);
+	}
 }
 
 #undef MAKE_INSTANCE
