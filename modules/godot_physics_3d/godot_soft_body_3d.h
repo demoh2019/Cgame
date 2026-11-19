@@ -32,6 +32,7 @@
 
 #include "godot_area_3d.h"
 #include "servers/physics_xpbd_tether.h"
+#include "servers/physics_xpbd_membrane.h"
 #include "servers/physics_xpbd_strain_limit.h"
 #include "godot_collision_object_3d.h"
 
@@ -97,6 +98,10 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Not allocated when shear compliance is disabled.
 	LocalVector<real_t> xpbd_shear_rest_cosines;
 	LocalVector<double> xpbd_shear_lambdas;
+	// Optional StVK surface membrane rest metrics and one XPBD lambda per face.
+	// Both are absent when the membrane compliance is zero (default).
+	LocalVector<PhysicsXPBDMembraneRest> xpbd_membrane_rest;
+	LocalVector<double> xpbd_membrane_lambdas;
 	// Hinge particles are indexed, not stored as Node pointers: rebuilding
 	// the mesh cannot leave a stale pointer in the optional topology cache.
 	struct DihedralHinge {
@@ -312,6 +317,7 @@ private:
 	void update_bounds();
 	void update_constants();
 	void update_area();
+	void initialize_membrane_constraints();
 	void initialize_shear_constraints();
 	void initialize_dihedral_constraints();
 	void initialize_shape_matching();
