@@ -4890,15 +4890,16 @@ static String _uri_decode_single_buffer(const String &p_source, bool p_decode_pl
 	// Percent decoding cannot increase the byte count; allocate its maximum once.
 	const CharString src = p_source.utf8();
 	const int length = src.length();
+	const char *read = src.ptr();
 	CharString decoded;
 	decoded.resize_uninitialized(int64_t(length) + 1);
 	char *dest = decoded.ptrw();
 	int written = 0;
 	for (int i = 0; i < length; i++) {
-		if (src[i] == '%' && i + 2 < length) {
-			const int hi = _uri_hex_nibble(src[i + 1]);
+		if (read[i] == '%' && i + 2 < length) {
+			const int hi = _uri_hex_nibble(read[i + 1]);
 			if (hi >= 0) {
-				const int lo = _uri_hex_nibble(src[i + 2]);
+				const int lo = _uri_hex_nibble(read[i + 2]);
 				if (lo >= 0) {
 					dest[written++] = char((hi << 4) | lo);
 					i += 2;
@@ -4908,10 +4909,10 @@ static String _uri_decode_single_buffer(const String &p_source, bool p_decode_pl
 			} else {
 				dest[written++] = '%';
 			}
-		} else if (p_decode_plus && src[i] == '+') {
+		} else if (p_decode_plus && read[i] == '+') {
 			dest[written++] = ' ';
 		} else {
-			dest[written++] = src[i];
+			dest[written++] = read[i];
 		}
 	}
 	dest[written] = 0;
