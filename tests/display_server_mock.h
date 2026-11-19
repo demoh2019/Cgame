@@ -48,6 +48,10 @@ private:
 	String clipboard_text;
 	String primary_clipboard_text;
 
+	bool native_dialog_extra_enabled = false;
+	TypedArray<Dictionary> captured_native_dialog_options;
+	Callable captured_native_dialog_callback;
+
 	static Vector<String> get_rendering_drivers_func();
 	static DisplayServer *create_func(const String &p_rendering_driver, DisplayServerEnums::WindowMode p_mode, DisplayServerEnums::VSyncMode p_vsync_mode, uint32_t p_flags, const Vector2i *p_position, const Vector2i &p_resolution, int p_screen, DisplayServerEnums::Context p_context, int64_t p_parent_window, Error &r_error);
 
@@ -57,6 +61,16 @@ private:
 
 public:
 	bool has_feature(DisplayServerEnums::Feature p_feature) const override;
+
+	// Opt-in native dialog simulation, for file dialog integration tests.
+	void set_native_dialog_extra_enabled(bool p_enabled) { native_dialog_extra_enabled = p_enabled; }
+	const TypedArray<Dictionary> &get_captured_native_dialog_options() const { return captured_native_dialog_options; }
+	const Callable &get_captured_native_dialog_callback() const { return captured_native_dialog_callback; }
+	Error file_dialog_with_options_show(const String &, const String &, const String &, const String &, bool, DisplayServerEnums::FileDialogMode, const Vector<String> &, const TypedArray<Dictionary> &p_options, const Callable &p_callback, DisplayServerEnums::WindowID) override {
+		captured_native_dialog_options = p_options;
+		captured_native_dialog_callback = p_callback;
+		return OK;
+	}
 
 	String get_name() const override { return "mock"; }
 
