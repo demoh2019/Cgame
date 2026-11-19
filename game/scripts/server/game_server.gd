@@ -13,6 +13,7 @@ const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
+const WorldState = preload("res://scripts/server/world_state.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
@@ -62,7 +63,8 @@ var zombies: Dictionary = {} # zombie id -> Zombie
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
-var barricades: Dictionary = {} # Session-only authoritative player structures.
+var barricades: Dictionary = {} # Server-authoritative structures, saved separately from characters.
+var world_dirty: bool = false # Disk persistence deferred to periodic autosave or graceful shutdown.
 var bags: Dictionary = {} # bag id -> {"id", "x","y","z", "items": {id: n}, "expires": t}
 var events: Array = [] # Things that happened this tick, for the network layer to announce.
 var _next_id: int = 5_000_000_000
@@ -385,7 +387,7 @@ func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 		return {"ok": false, "reason": "dead"}
 	var point := Vector2(x, z)
 	var from := Vector2(player.position.x, player.position.z)
-	if not point.is_finite() or not from.is_finite():
+	if not point.is_finite() or not from.is_finite() or absf(x) > WorldState.MAX_COORD or absf(z) > WorldState.MAX_COORD:
 		return {"ok": false, "reason": "invalid_position"}
 	var distance := point.distance_to(from)
 	if distance < Structures.MIN_BUILD_DISTANCE or distance > Structures.BUILD_RANGE:
@@ -397,8 +399,9 @@ func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 	if barricades.size() >= Structures.MAX_GLOBAL:
 		return {"ok": false, "reason": "world_limit"}
 	var owned := 0
+	var owner_key: String = WorldState.owner_key_for(player)
 	for item in barricades.values():
-		if int(item["owner"]) == peer_id:
+		if str(item.get("owner_key", "")) == owner_key:
 			owned += 1
 	if owned >= Structures.MAX_PER_OWNER:
 		return {"ok": false, "reason": "owner_limit"}
@@ -421,9 +424,10 @@ func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 		player.inventory.remove(item_id, int(Structures.COST[item_id]))
 	var id := new_id()
 	var item := {"id": id, "x": x, "y": world.height_at(x, z), "z": z,
-		"hp": Structures.MAX_HEALTH, "owner": peer_id}
+		"hp": Structures.MAX_HEALTH, "owner": peer_id, "owner_key": owner_key}
 	barricades[id] = item
 	world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
+	world_dirty = true
 	player.dirty_inventory = true
 	player.dirty_character = true
 	events.append({"type": "barricade_built", "id": id, "peer": peer_id})
@@ -437,7 +441,7 @@ func cmd_repair(peer_id: int, id: int) -> Dictionary:
 	var item: Dictionary = barricades.get(id, {})
 	if item.is_empty():
 		return {"ok": false, "reason": "no_structure"}
-	if int(item["owner"]) != peer_id:
+	if str(item.get("owner_key", "")) != WorldState.owner_key_for(player):
 		return {"ok": false, "reason": "not_owner"}
 	var origin := Vector2(player.position.x, player.position.z)
 	var target := Vector2(float(item["x"]), float(item["z"]))
@@ -451,6 +455,7 @@ func cmd_repair(peer_id: int, id: int) -> Dictionary:
 		player.inventory.remove(item_id, int(Structures.REPAIR_COST[item_id]))
 	item["hp"] = minf(Structures.MAX_HEALTH, float(item["hp"]) + Structures.REPAIR_HEALTH)
 	barricades[id] = item
+	world_dirty = true
 	player.dirty_inventory = true
 	player.dirty_character = true
 	return {"ok": true, "id": id, "hp": float(item["hp"])}
@@ -466,10 +471,33 @@ func damage_barricade(id: int, damage: float) -> bool:
 	if float(item["hp"]) <= 0.0:
 		barricades.erase(id)
 		world.remove_dynamic_blocker(id)
+		world_dirty = true
 		events.append({"type": "barricade_broken", "id": id})
 		return true
 	barricades[id] = item
+	world_dirty = true
 	return false
+
+
+
+func export_world_state() -> Dictionary:
+	return WorldState.export_state(self)
+
+
+## Only called on an empty new server, before networking starts. Validation
+## is all-or-nothing and reconstructs Y from the authoritative terrain.
+func restore_world_state(saved: Variant) -> Dictionary:
+	if not barricades.is_empty():
+		return {"ok": false, "reason": "world_not_empty"}
+	var result: Dictionary = WorldState.parse_state(world, saved)
+	if not result.get("ok", false):
+		return result
+	for wall in result["structures"]:
+		barricades[wall["id"]] = wall
+		world.add_dynamic_blocker(int(wall["id"]), float(wall["x"]), float(wall["z"]), Structures.RADIUS)
+	_next_id = maxi(_next_id, int(result["max_id"]))
+	world_dirty = false
+	return {"ok": true, "count": barricades.size()}
 
 
 func cmd_use(peer_id: int, item_id: String) -> Dictionary:
