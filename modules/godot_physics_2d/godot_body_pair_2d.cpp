@@ -36,6 +36,7 @@
 #include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_2d.h"
 #include "servers/physics_ccd_sphere_toi.h"
+#include "servers/physics_ccd_capsule_toi.h"
 #include "servers/physics_ccd_swept_bounds.h"
 
 #define ACCUMULATE_IMPULSES
@@ -309,6 +310,40 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 					p_xform_A.xform(shape_A_ptr->get_aabb()),
 					p_xform_B.xform(shape_B_ptr->get_aabb()), relative_motion, real_t(0.1))) {
 		return false;
+	}
+
+	// A circle's swept volume against a capsule is precisely a point
+	// swept against the capsule expanded by the circle's radius. This
+	// catches glancing cap impacts that the leading-support ray misses.
+	if (shape_A_ptr->get_type() == PS2DE::SHAPE_CIRCLE && shape_B_ptr->get_type() == PS2DE::SHAPE_CAPSULE &&
+			p_A->get_angular_velocity() == 0.0 && p_B->get_angular_velocity() == 0.0) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape2D *capsule = static_cast<GodotCapsuleShape2D *>(shape_B_ptr);
+			const double capsule_radius = double(capsule->get_radius());
+			const double half_segment = double(capsule->get_height()) * 0.5 - capsule_radius;
+			const double circle_radius = double(static_cast<GodotCircleShape2D *>(shape_A_ptr)->get_radius()) * scale_A / scale_B;
+			if (capsule_radius > 0.0 && half_segment >= 0.0 && circle_radius > 0.0) {
+				const Transform2D inverse_B = p_xform_B.affine_inverse();
+				const Vector2 local_start = inverse_B.xform(p_xform_A.get_origin());
+				const Vector2 local_motion = inverse_B.basis_xform(relative_motion);
+				double impact_fraction = 0.0;
+				if (!physics_ccd_capsule_toi(local_start, local_motion, capsule_radius + circle_radius, half_segment, impact_fraction)) {
+					return false;
+				}
+
+				const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(mlen)) + (max - min) * real_t(0.01), real_t(0.0), mlen);
+				const Vector2 desired_velocity = velocity_B + mnormal * (allowed_distance / p_step);
+				const Vector2 velocity_A = p_A->get_linear_velocity();
+				const real_t initial_speed = velocity_A.length();
+				const Vector2 travel_direction = velocity_A / initial_speed;
+				const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+				p_A->set_linear_velocity(travel_direction * clipped_speed);
+				return true;
+			}
+		}
+		// Arbitrary affine transforms require the general support-cast path.
 	}
 
 	Vector2 supports_A[2];
