@@ -42,6 +42,9 @@ func _run() -> void:
 			if int(result["islands"]) != expected_islands:
 				printerr("FAIL (%s): expected %d islands: %s" % [config["label"], expected_islands, result])
 				failures += 1
+			if int(result["peak_solver_islands"]) < expected_islands:
+				printerr("FAIL (%s): engine reported too few physical islands: %s" % [config["label"], result])
+				failures += 1
 			if float(result["max_joint_gap"]) > 9.2:
 				printerr("FAIL (%s): excessive joint separation: %s" % [config["label"], result])
 				failures += 1
