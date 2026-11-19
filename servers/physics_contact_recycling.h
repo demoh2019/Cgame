@@ -41,14 +41,23 @@ struct GodotPhysicsContactRecycling {
 	// Kept separately from the solver's collided flag, which can also be
 	// reset by contact-report-only and one-way filtering paths.
 	bool narrowphase_separated = false;
+	// Provenance of a predictive contact created by sphere TOI. Store in
+	// unused alignment padding beside narrowphase_separated, instead of
+	// enlarging every rigid-body pair by a standalone bool member.
+	bool speculative_contact = false;
 
 	inline bool matches_geometry(uint64_t p_current_a, uint64_t p_current_b) const {
 		return geometry_version_a != 0 && geometry_version_b != 0 &&
 				geometry_version_a == p_current_a && geometry_version_b == p_current_b;
 	}
 
-	inline bool can_reuse(uint64_t p_current_a, uint64_t p_current_b, bool p_collided, int p_contact_count, bool p_ccd) const {
-		return p_collided && p_contact_count > 0 && !p_ccd && !narrowphase_separated &&
+	// Speculative contacts depend on relative velocity, not just geometry.
+	// A positive or negative manifold may become invalid when velocity changes
+	// without a transform change (e.g. an impulse immediately before stepping).
+	// Keep all existing callers source-compatible; only eligible predictive
+	// pairs request the velocity-sensitive bypass.
+	inline bool can_reuse(uint64_t p_current_a, uint64_t p_current_b, bool p_collided, int p_contact_count, bool p_ccd, bool p_velocity_sensitive = false) const {
+		return p_collided && p_contact_count > 0 && !p_ccd && !p_velocity_sensitive && !narrowphase_separated &&
 				matches_geometry(p_current_a, p_current_b);
 	}
 
@@ -56,8 +65,8 @@ struct GodotPhysicsContactRecycling {
 	// body orientation/shape revisions, verified by the calling body pair.
 	// A coarse-phase overlap is not evidence of an actual shape collision:
 	// such persistent near-miss pairs would otherwise rerun SAT/GJK every step.
-	inline bool can_reuse_separation(uint64_t p_current_a, uint64_t p_current_b, bool p_ccd) const {
-		return narrowphase_separated && !p_ccd && matches_geometry(p_current_a, p_current_b);
+	inline bool can_reuse_separation(uint64_t p_current_a, uint64_t p_current_b, bool p_ccd, bool p_velocity_sensitive = false) const {
+		return narrowphase_separated && !p_ccd && !p_velocity_sensitive && matches_geometry(p_current_a, p_current_b);
 	}
 
 	inline void remember(uint64_t p_current_a, uint64_t p_current_b, bool p_narrowphase_collided = true) {

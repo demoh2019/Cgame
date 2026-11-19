@@ -1,0 +1,55 @@
+name: FEM volume-lumped nodal mass contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_fem_lumped_mass.h"
+      - "servers/physics_fem_convex_star.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_fem_lumped_mass.cpp"
+      - "tests/stress/test_physics_fem_lumped_mass.py"
+      - "tests/stress/test_physics_fem_lumped_mass_compiler.cpp"
+      - "tests/stress/physics_fem_convex_cpp_stubs/**"
+      - ".github/workflows/physics-fem-lumped-mass.yml"
+  pull_request:
+    paths:
+      - "servers/physics_fem_lumped_mass.h"
+      - "servers/physics_fem_convex_star.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_fem_lumped_mass.cpp"
+      - "tests/stress/test_physics_fem_lumped_mass.py"
+      - "tests/stress/test_physics_fem_lumped_mass_compiler.cpp"
+      - "tests/stress/physics_fem_convex_cpp_stubs/**"
+      - ".github/workflows/physics-fem-lumped-mass.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mass-cooking:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile real mass-lumping solver helper in float and double
+        run: |
+          for precision in float double; do
+            flags=""
+            if [ "$precision" = "double" ]; then flags="-DCGAME_USE_DOUBLE"; fi
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror $flags \
+              -Itests/stress/physics_fem_convex_cpp_stubs -I. \
+              tests/stress/test_physics_fem_lumped_mass_compiler.cpp \
+              -o "/tmp/fem_lumped_mass_$precision"
+            "/tmp/fem_lumped_mass_$precision"
+          done
+      - name: Validate 6000 randomized mass and source integration contracts
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_fem_lumped_mass.py' -v

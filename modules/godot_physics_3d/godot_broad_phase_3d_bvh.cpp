@@ -32,6 +32,8 @@
 
 #include "godot_collision_object_3d.h"
 
+#include "core/config/project_settings.h"
+
 GodotBroadPhase3DBVH::ID GodotBroadPhase3DBVH::create(GodotCollisionObject3D *p_object, int p_subindex, const AABB &p_aabb, bool p_static) {
 	uint32_t tree_id = p_static ? TREE_STATIC : TREE_DYNAMIC;
 	uint32_t tree_collision_mask = p_static ? TREE_FLAG_DYNAMIC : (TREE_FLAG_STATIC | TREE_FLAG_DYNAMIC);
@@ -65,7 +67,8 @@ void GodotBroadPhase3DBVH::end_batch() {
 
 void GodotBroadPhase3DBVH::force_collision_check(ID p_id) {
 	ERR_FAIL_COND(!p_id);
-	bvh.force_collision_check(p_id - 1);
+	// A compound object's filters are updated in a single BVH batch.
+	bvh.force_collision_check(p_id - 1, batch_depth > 0);
 }
 
 void GodotBroadPhase3DBVH::move(ID p_id, const AABB &p_aabb) {
@@ -166,4 +169,10 @@ GodotBroadPhase3D *GodotBroadPhase3DBVH::_create() {
 GodotBroadPhase3DBVH::GodotBroadPhase3DBVH() {
 	bvh.set_pair_callback(_pair_callback, this);
 	bvh.set_unpair_callback(_unpair_callback, this);
+	// Without an expanded broadphase, separated spheres would never reach
+	// the predictive-contact narrowphase. Zero preserves the legacy BVH.
+	const real_t speculative_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/speculative_sphere_distance"));
+	if (speculative_distance > 0.0) {
+		bvh.params_set_pairing_expansion(speculative_distance);
+	}
 }

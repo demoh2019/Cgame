@@ -35,6 +35,8 @@
 #include "core/object/worker_thread_pool.h"
 #include "core/templates/a_hash_map.h"
 #include "core/os/os.h"
+#include "servers/physics_constraint_color.h"
+#include "servers/physics_island_storage.h"
 
 #define BODY_ISLAND_COUNT_RESERVE 128
 #define ISLAND_COUNT_RESERVE 128
@@ -95,10 +97,10 @@ void GodotStep2D::_populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D 
 
 void GodotStep2D::_integrate_forces_block(uint32_t p_block_index, void *p_userdata) {
 	const uint32_t begin = p_block_index * PARALLEL_INTEGRATE_BLOCK_SIZE;
-	const uint32_t end = MIN(begin + PARALLEL_INTEGRATE_BLOCK_SIZE, active_bodies.size());
+	const uint32_t end = MIN(begin + PARALLEL_INTEGRATE_BLOCK_SIZE, integrate_bodies->size());
 	for (uint32_t body_index = begin; body_index < end; ++body_index) {
 		// Broadphase updates for swept shapes are deferred: the broadphase is not thread safe.
-		active_bodies[body_index]->integrate_forces(delta, true);
+		(*integrate_bodies)[body_index]->integrate_forces(delta, true);
 	}
 }
 
@@ -128,10 +130,52 @@ void GodotStep2D::_pre_solve_island(LocalVector<GodotConstraint2D *> &p_constrai
 	p_constraint_island.resize(valid_constraint_count);
 }
 
+bool GodotStep2D::_has_priority_constraints(const LocalVector<GodotConstraint2D *> &p_constraint_island) {
+	if (!GodotBody2D::has_high_priority_bodies()) {
+		return false;
+	}
+	for (GodotConstraint2D *constraint : p_constraint_island) {
+		if (constraint->get_priority() > 1) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void GodotStep2D::_solve_with_priorities(const LocalVector<GodotConstraint2D *> &p_constraint_island) const {
+	// Work on a copy: islands are shared with sleeping and area bookkeeping.
+	LocalVector<GodotConstraint2D *> active;
+	active.reserve(p_constraint_island.size());
+	for (GodotConstraint2D *constraint : p_constraint_island) {
+		active.push_back(constraint);
+	}
+	int current_priority = 1;
+	while (!active.is_empty()) {
+		for (int i = 0; i < iterations; i++) {
+			for (GodotConstraint2D *constraint : active) {
+				constraint->solve(delta);
+			}
+		}
+		++current_priority;
+		uint32_t kept = 0;
+		for (uint32_t i = 0; i < active.size(); ++i) {
+			if (active[i]->get_priority() >= current_priority) {
+				active[kept++] = active[i];
+			}
+		}
+		active.resize(kept);
+	}
+}
+
 void GodotStep2D::_solve_island(uint32_t p_island_index, void *p_userdata) const {
 	// Most frames have no pruned islands: the empty map retains direct indexing.
 	const uint32_t island_index = solve_island_indices.is_empty() ? p_island_index : solve_island_indices[p_island_index];
 	const LocalVector<GodotConstraint2D *> &constraint_island = constraint_islands[island_index];
+
+	if (_has_priority_constraints(constraint_island)) {
+		_solve_with_priorities(constraint_island);
+		return;
+	}
 
 	for (int i = 0; i < iterations; i++) {
 		uint32_t constraint_count = constraint_island.size();
@@ -229,6 +273,11 @@ void GodotStep2D::_run_colored_batches(const uint32_t *p_sizes, const uint32_t *
 
 void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_constraint_island) {
 	const uint32_t constraint_count = p_constraint_island.size();
+	if (_has_priority_constraints(p_constraint_island)) {
+		// Priority passes are inherently sequential; graph coloring would break them.
+		_solve_with_priorities(p_constraint_island);
+		return;
+	}
 	if (constraint_count < MIN_PARALLEL_LARGE_ISLAND) {
 		for (int iteration = 0; iteration < iterations; ++iteration) {
 			for (uint32_t i = 0; i < constraint_count; ++i) {
@@ -289,12 +338,9 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 				}
 			}
 
-			for (uint32_t candidate = 0; candidate < MAX_LARGE_ISLAND_COLORS; ++candidate) {
-				if ((forbidden & (uint32_t(1) << candidate)) == 0) {
-					color = candidate;
-					break;
-				}
-			}
+			// Bit-scan the first unoccupied color; preserve greedy order and
+			// the serial overflow group if all 16 colors are forbidden.
+			color = godot_physics_first_available_constraint_color<MAX_LARGE_ISLAND_COLORS>(forbidden);
 
 			if (color < MAX_LARGE_ISLAND_COLORS) {
 				const uint32_t bit = uint32_t(1) << color;
@@ -422,8 +468,6 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 	iterations = p_space->get_solver_iterations();
 	delta = p_delta;
 
-	const SelfList<GodotBody2D>::List *body_list = &p_space->get_active_body_list();
-
 	/* INTEGRATE FORCES */
 
 	uint64_t profile_begtime = OS::get_singleton()->get_ticks_usec();
@@ -431,24 +475,20 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 
 	int active_count = 0;
 
-	const SelfList<GodotBody2D> *b = body_list->first();
-	active_bodies.clear();
-	while (b) {
-		active_bodies.push_back(b->self());
-		b = b->next();
-		active_count++;
-	}
+	const LocalVector<GodotBody2D *> *active_bodies = &p_space->get_active_bodies();
+	active_count = (int)active_bodies->size();
 
-	if (active_bodies.size() < PARALLEL_INTEGRATE_MIN_BODIES) {
-		for (GodotBody2D *body : active_bodies) {
+	if (active_bodies->size() < PARALLEL_INTEGRATE_MIN_BODIES) {
+		for (GodotBody2D *body : *active_bodies) {
 			body->integrate_forces(p_delta);
 		}
 	} else {
-		const uint32_t block_count = (active_bodies.size() + PARALLEL_INTEGRATE_BLOCK_SIZE - 1) / PARALLEL_INTEGRATE_BLOCK_SIZE;
+		integrate_bodies = active_bodies;
+		const uint32_t block_count = (active_bodies->size() + PARALLEL_INTEGRATE_BLOCK_SIZE - 1) / PARALLEL_INTEGRATE_BLOCK_SIZE;
 		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep2D::_integrate_forces_block, nullptr, block_count, -1, true, SNAME("Physics2DIntegrateForces"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
-		for (GodotBody2D *body : active_bodies) {
-			body->apply_deferred_motion();
+		for (GodotBody2D *body : *active_bodies) {
+			body->apply_deferred_motion(p_delta);
 		}
 	}
 
@@ -493,12 +533,12 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 
 	/* GENERATE CONSTRAINT ISLANDS FOR ACTIVE RIGID BODIES */
 
-	b = body_list->first();
+	// Activations during the broadphase update (e.g. kinematic bodies entering areas) rebuild the snapshot.
+	active_bodies = &p_space->get_active_bodies();
 
 	uint32_t body_island_count = 0;
 
-	while (b) {
-		GodotBody2D *body = b->self();
+	for (GodotBody2D *body : *active_bodies) {
 
 		// Unconnected active bodies need no constraint islands.
 		// Avoid a heap allocation per body in large sparse simulations.
@@ -529,7 +569,6 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 				--island_count;
 			}
 		}
-		b = b->next();
 	}
 
 	p_space->set_island_count((int)island_count);
@@ -668,10 +707,8 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 
 	/* INTEGRATE VELOCITIES */
 
-	b = body_list->first();
-	while (b) {
-		const SelfList<GodotBody2D> *n = b->next();
-		GodotBody2D *body = b->self();
+	active_bodies = &p_space->get_active_bodies();
+	for (GodotBody2D *body : *active_bodies) {
 		body->integrate_velocities(p_delta);
 		// An unconnected rigid body is a one-body island. Evaluate its sleep
 		// state without keeping a separate island allocation for it.
@@ -682,7 +719,6 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 				body->set_active(!can_sleep);
 			}
 		}
-		b = n; // in case it shuts itself down
 	}
 
 	/* SLEEP / WAKE UP ISLANDS */
@@ -698,6 +734,12 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 	}
 
 	all_constraints.clear();
+
+	// All constraint/soft-body work and parallel workers have finished.
+	// Bounded reclamation releases old peak scratch memory only during
+	// sustained low-island workloads, never from active solver workers.
+	godot_physics_reclaim_idle_island_storage(body_islands, body_island_count, body_island_idle_steps);
+	godot_physics_reclaim_idle_island_storage(constraint_islands, island_count, constraint_island_idle_steps);
 
 	p_space->unlock();
 	_step++;

@@ -2580,6 +2580,10 @@ static double built_in_strtod(
 	int decPt;
 	/* Temporarily holds location of exponent in string. */
 	const C *pExp;
+	/* Track leading zeros without counting them among significant digits. */
+	bool skippedZeros = false;
+	/* Zero digits following the decimal point before the first nonzero digit. */
+	int fracZeros = 0;
 
 	// Treat the end of a split token exactly like the terminating NUL.
 	// The common unbounded path is resolved at compile time and remains
@@ -2610,11 +2614,28 @@ static double built_in_strtod(
 	}
 
 	/*
-	 * Count the number of digits in the mantissa (including the decimal
-	 * point), and also locate the decimal point.
+	 * Skip leading zeros to preserve the full 18 significant digit budget.
+	 * For a zero integer part, skip zeros after the decimal point as well.
+	 */
+	while (*p == '0') {
+		p += 1;
+		skippedZeros = true;
+	}
+	if (*p == '.' && *(p + 1) == '0') {
+		p += 1;
+		while (*p == '0') {
+			skippedZeros = true;
+			fracZeros += 1;
+			p += 1;
+		}
+	}
+
+	/*
+	 * Count mantissa digits and find the decimal point.
+	 * A skipped decimal point starts at index zero.
 	 */
 
-	decPt = -1;
+	decPt = fracZeros > 0 ? 0 : -1;
 	for (mantSize = 0;; mantSize += 1) {
 		c = get_char(p);
 		if (!is_digit(c)) {
@@ -2637,19 +2658,21 @@ static double built_in_strtod(
 	p -= mantSize;
 	if (decPt < 0) {
 		decPt = mantSize;
-	} else {
+	} else if (fracZeros == 0) {
 		mantSize -= 1; /* One of the digits was the point. */
 	}
 	if (mantSize > 18) {
-		fracExp = decPt - 18;
+		fracExp = decPt - 18 - fracZeros;
 		mantSize = 18;
 	} else {
-		fracExp = decPt - mantSize;
+		fracExp = decPt - mantSize - fracZeros;
 	}
 	if (mantSize == 0) {
 		fraction = 0.0;
-		p = p_string;
-		goto done;
+		if (!skippedZeros) {
+			p = p_string;
+			goto done;
+		}
 	} else {
 		int frac1, frac2;
 

@@ -202,6 +202,21 @@ public:
 	virtual void body_set_param(RID p_body, PS3DE::BodyParameter p_param, const Variant &p_value) = 0;
 	virtual Variant body_get_param(RID p_body, PS3DE::BodyParameter p_param) const = 0;
 
+	// Extra solver iterations for the contacts of one body (1 = default, up to 8). Optional: only
+	// GodotPhysics3D implements it; other backends ignore it.
+	virtual void body_set_solver_priority(RID p_body, int p_priority) {}
+	virtual int body_get_solver_priority(RID p_body) const { return 1; }
+	virtual void body_set_max_depenetration_velocity(RID p_body, real_t p_value) {}
+	virtual real_t body_get_max_depenetration_velocity(RID p_body) const { return 0.0; }
+	virtual void body_set_wind_area(RID p_body, real_t p_value) {}
+	virtual real_t body_get_wind_area(RID p_body) const { return 0.0; }
+	virtual void body_set_wind_drag_coefficient(RID p_body, real_t p_value) {}
+	virtual real_t body_get_wind_drag_coefficient(RID p_body) const { return 0.0; }
+	virtual void body_set_max_angular_velocity(RID p_body, real_t p_value) {}
+	virtual real_t body_get_max_angular_velocity(RID p_body) const { return 0.0; }
+	virtual void body_set_max_linear_velocity(RID p_body, real_t p_value) {}
+	virtual real_t body_get_max_linear_velocity(RID p_body) const { return 0.0; }
+
 	virtual void body_reset_mass_properties(RID p_body) = 0;
 
 	//state
@@ -268,6 +283,15 @@ public:
 
 	virtual void soft_body_set_mesh(RID p_body, RID p_mesh) = 0;
 
+	// Optional pre-cooked tetra FEM connectivity for the soft body's welded
+	// surface nodes. An unsupported physics backend may ignore the extension.
+	virtual void soft_body_set_tetrahedral_indices(RID, const PackedInt32Array &) {}
+	// Optional interior FEM rest nodes, following all visual-vertex indices.
+	virtual void soft_body_set_tetrahedral_interior_positions(RID, const PackedVector3Array &) {}
+	// Optional diagnostics: zero for backends without volumetric FEM.
+	virtual int soft_body_get_tetrahedron_count(RID) const { return 0; }
+	virtual int soft_body_get_tetrahedral_interior_node_count(RID) const { return 0; }
+
 	virtual AABB soft_body_get_bounds(RID p_body) const = 0;
 
 	virtual void soft_body_set_collision_layer(RID p_body, uint32_t p_layer) = 0;
@@ -333,6 +357,24 @@ public:
 
 	virtual void joint_disable_collisions_between_bodies(RID p_joint, bool p_disable) = 0;
 	virtual bool joint_is_disabled_collisions_between_bodies(RID p_joint) const = 0;
+
+	// Joint breaking and reaction forces. Optional: only GodotPhysics3D implements them, other
+	// backends keep these defaults (joints never break, zero reaction).
+	virtual void joint_set_break_force(RID p_joint, real_t p_force) {}
+	virtual real_t joint_get_break_force(RID p_joint) const { return 0.0; }
+	virtual void joint_set_break_torque(RID p_joint, real_t p_torque) {}
+	// Optional progressive fatigue fracture under sustained subcritical loads.
+	// Requires at least one nonzero instantaneous break-force/torque threshold.
+	virtual void joint_set_fatigue_rate(RID p_joint, real_t p_rate) {}
+	virtual real_t joint_get_fatigue_rate(RID p_joint) const { return 0.0; }
+	virtual void joint_set_fatigue_yield_ratio(RID p_joint, real_t p_ratio) {}
+	virtual real_t joint_get_fatigue_yield_ratio(RID p_joint) const { return 0.5; }
+	virtual real_t joint_get_fatigue_damage(RID p_joint) const { return 0.0; }
+	virtual real_t joint_get_break_torque(RID p_joint) const { return 0.0; }
+	virtual Vector3 joint_get_reaction_force(RID p_joint) const { return Vector3(); }
+	virtual Vector3 joint_get_reaction_torque(RID p_joint) const { return Vector3(); }
+	virtual bool joint_is_broken(RID p_joint) const { return false; }
+	virtual void joint_set_break_callback(RID p_joint, const Callable &p_callable) {}
 
 	virtual void joint_make_pin(RID p_joint, RID p_body_A, const Vector3 &p_local_A, RID p_body_B, const Vector3 &p_local_B) = 0;
 

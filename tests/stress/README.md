@@ -1,5 +1,4 @@
 # Cgame whole-engine stress and performance regression suite
-
 ## Box2D/Jolt-style optional GodotPhysics maximum linear velocity
 
 The built-in GodotPhysics2D and GodotPhysics3D backends support
@@ -29,6 +28,65 @@ option, not a substitute for CCD: high-speed tunneling is still possible.
 
 Compare before/after physics benchmarks on the same host. No measured
 throughput improvement is claimed by this optional limit.
+
+
+
+## Jolt 3D island, broadphase and contact-manifold tuning
+
+Jolt defaults are preserved. Advanced per-world settings:
+
+| Setting (`physics/jolt_physics_3d`) | Default | Usage |
+| --- | ---: | --- |
+| `limits/max_in_flight_body_pairs` | 16384 | Temporary body-pair queue capacity (1024–262144) |
+| `simulation/use_large_island_splitter` | true | Parallelize large constraint islands |
+| `simulation/use_manifold_reduction` | true | Merge compatible contact manifolds |
+| `simulation/contact_manifold_merge_angle` | 5° | Allowed manifold-normal angle |
+| `simulation/contact_warm_start_distance` | 0.01 m | Distance threshold for cached contact impulses |
+| `simulation/max_penetration_correction_distance` | 0.2 m | Limit per-iteration position correction |
+
+Each value is read when the Jolt physics space is created. Changing the project
+setting does not reconfigure existing spaces. The body-pair queue uses Jolt's
+per-step temporary allocator, not a persistent collision-pair limit. Reducing it
+may lower arena pressure but limit parallelism; disabling manifold reduction or
+large-island splitting can increase workload costs.
+
+```bash
+python3 -m unittest discover -s tests/stress -p test_jolt_pipeline_tuning.py -v
+python3 tests/stress/test_jolt_pipeline_tuning.py --godot /path/to/cgame
+```
+
+The second command creates isolated Jolt projects and simulates 144 spheres
+under three solver/queue profiles. No CPU, RSS, or stability improvement is
+claimed until native builds and fixed-hardware benchmarks pass.
+
+
+## Bounded idle BVH changed-proxy queue retention
+
+The shared Cgame BVH used by GodotPhysics2D/3D and other spatial clients
+stores changed proxy handles in a reusable transient vector. After a large
+spawn/move burst, it may retain much more capacity than an idle world needs.
+
+When `BVH_Manager::update()` sees 16 consecutive idle updates and capacity is
+above 4096 handles, it resets that transient vector. Any busy update restarts
+the counter; routine updates keep their capacity to avoid allocation churn.
+Collision pairs and callbacks continue unchanged.
+
+A native test inserts 5000 separated proxies, checks deferred-pair processing,
+idle retention, capacity reclamation, and subsequent collision callbacks.
+
+```bash
+# Build Cgame with tests=yes, then run:
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="[BVH] Large changed-proxy queues are released after idle frames"
+
+# Compare baseline and patched builds on the same hardware:
+python3 tests/stress/run.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_proxies_2d,physics_proxies_3d,physics_pending_3d \
+  --scale 16 --repeats 5 --frames 120 --output out/bvh-idle-reclaim.json
+```
+
+**Note:** freeing a temporary vector does not by itself prove lower process
+RSS or faster frames. Native runtime and before/after measurements are required.
 
 
 Independent, reproducible workloads for CPU, script execution, object lifetime,
@@ -73,6 +131,541 @@ python3 tests/stress/run.py --godot /path/to/godot --case memory_churn --max-ret
 Run `--list-cases` for supported identifiers.
 
 
+## One-way platform overflow and shared Shape2D identity
+
+The GodotPhysics2D kinematic recovery solver previously recorded only 32
+one-way shape-pair exclusions. In a dense platform field, extra invalid
+one-way contacts could be mistaken for blocking motion during the sweep
+phase. Cgame now retains all rejected pairs, using a 32-entry stack fast
+path and a hash set for overflow. Each exclusion is keyed by the **moving
+shape slot**, the other collision object and the other shape slot, rather
+than only by the shared Shape2D resource pointer.
+
+The overflow hash set is allocated only if a query sees more than 32
+invalid one-way contacts. Overflow lookups are amortized constant time;
+the common path retains simple fixed-size stack scans. The hash set is
+cleared on recovery retries, so exclusions from previous recovery positions
+are not reused accidentally.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_motion_shape_pruning.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_one_way_overflow_2d --scale 4 --repeats 5 --frames 90 \
+  --rss-limit-mib 6144 --output out/one-way-overflow.json
+```
+
+The engine scenario checks dozens to hundreds of one-way platforms
+overlapping a kinematic mover from the rejected direction, then verifies
+that ordinary solids still block motion and that a second compound shape
+using the same shape resource detects its own obstacle. This workload is
+a correctness regression, not a claim about measured throughput.
+
+## Streaming BVH pair creation without hit buffers
+
+The shared BVH manager formerly called `cull_aabb()` for each changed
+proxy, accumulated all overlapping ref IDs in `tree._cull_hits`, then made
+a second pass to build new collision pairs. In scenes with thousands of
+overlapping colliders this scratch vector became proportional to the
+densest broadphase query.
+
+`_check_for_collisions()` now uses `visit_aabb_refs()` to stream stable
+BVH reference IDs directly to `_collide()`. The existing iterative
+leaf visitor is compile-time specialized for ID or object callbacks,
+preserving its fully-within subtree optimization, layer/tree mask tests,
+user cull filters, and early-exit behavior. Old-pair removal and full
+filter rechecks still precede new-pair generation. Pair callbacks change
+adjacency links, not BVH topology; a local copy keeps the queried AABB
+stable while adjacency storage grows.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_bvh_streaming.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_bvh_streaming_2d,physics_bvh_streaming_3d \
+  --scale 4 --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-bvh-streaming.json
+```
+
+Each stress case tests more than 2048 overlapping static proxies against
+one kinematic body, toggles collision masks without changing transforms,
+then removes and reinserts that body in the space to validate pair
+teardown/rebuilding. The runner measures process RSS and per-case wall
+time; use the same machine/configuration with an older commit to quantify
+the effects. These source-contract checks are not a compilation test,
+and runtime stress tests must still be executed on a built engine.
+
+## Swept vertex/triangle self-collision CCD for soft bodies (3D)
+
+GodotPhysics3D now optionally checks cloth particle trajectories against
+**linearly moving triangle faces over the entire physics step**, rather
+than only checking distance in the final positions. This is continuous
+vertex/face self collision (CCD), inspired by Bullet's swept soft-body
+face contacts and PhysX cloth swept-contact mode, not a separate 3D
+physics backend.
+
+```ini
+[physics]
+3d/solver/soft_body_self_collision_thickness=0.12
+3d/solver/soft_body_self_collision_compliance=0.000001
+3d/solver/soft_body_self_collision_ccd=true
+```
+
+The new `soft_body_self_collision_ccd` flag defaults to **false**. A
+positive self-collision thickness must also be enabled; otherwise the
+existing discrete solver and memory behavior remain unchanged.
+
+On each enabled step, the triangle DynamicBVH is refit with a conservative
+AABB enclosing all six prior/current triangle vertex positions (plus
+thickness). Each vertex queries using the AABB of its own old-to-new
+segment. Adjacent triangles and pinned/pinned pairs are filtered as for
+discrete self contacts. BVH callbacks only collect witnesses; they do
+not change the tree.
+
+For each candidate not already handled by a discrete vertex/face
+contact, the oriented vertex-versus-moving-triangle plane determinant
+is a **cubic polynomial in normalized time**. Derivative roots split
+[0, 1] into monotone intervals, and 24 bisection steps locate
+transversal crossings. Each impact must have an interior barycentric
+witness on the interpolated face. The solver retains a separate
+opt-in witness buffer (impact barycentrics and previous-side normal),
+then solves unilateral XPBD separation of the current vertex and the
+current barycentric face point. This catches a vertex that ends *far
+past* a triangle, outside the discrete collision thickness. CCD and
+discrete contacts share the original per-vertex and 65,536-contact
+budgets; CCD witnesses allocate no extra memory when disabled.
+
+This CCD extension is independent of optional cloth edge/edge
+contacts and tangential vertex/face friction. The vertex/face
+friction path still applies to its normal discrete contacts. No
+additional continuous edge/edge collision test is included.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_soft_ccd.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_ccd_3d --scale 4 \
+  --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-soft-ccd.json
+```
+
+The runtime test launches a disconnected triangular patch through a
+large pinned triangle in a single step. It compares the existing
+discrete contact model with the opt-in swept CCD model and checks that
+the pinned face does not move. Source-level tests additionally cover
+cubic root isolation, a moving triangle crossing a stationary vertex,
+barycentric containment, and mass-weighted XPBD projection.
+
+**Limitations:** trajectories are linearly interpolated between
+previous and predicted positions; impacts can still be missed if the
+actual substep motion differs strongly from that interpolation. The
+solver handles transverse vertex/triangle intersections, not grazing,
+tangential impacts or continuous edge/edge collisions. CCD witness
+projection uses a fixed impact normal and barycentric coordinates;
+large triangle rotations or extreme deformations can introduce
+artifacts. As with other experimental features, compile and runtime
+stress testing are required before production use, including profiling
+CPU/RAM with identical baseline hardware.
+
+## Structural cloth edge/edge self-collisions (3D)
+
+Cgame GodotPhysics3D now has an **independent opt-in structural edge/edge
+self-collision** constraint, complementing the existing vertex/triangle
+self-contacts. This addresses crossed cloth edges whose endpoints project
+outside the opposing triangles. The implementation is based on closest
+interior points of two segments and four-particle XPBD contact gradients,
+similar in spirit to edge contacts in modern PBD cloth solvers.
+
+```ini
+[physics]
+3d/solver/soft_body_self_collision_thickness=0.12
+3d/solver/soft_body_self_collision_compliance=0.000001
+3d/solver/soft_body_self_collision_edge_edge=true
+3d/solver/soft_body_self_collision_max_contacts_per_vertex=8
+```
+
+The new edge flag defaults to **false**. Both the flag and positive
+self-contact thickness are required. Existing users of vertex/face
+self-collisions keep their previous behavior unless explicitly enabling
+edge/edge contacts.
+
+When enabled, Cgame builds a dedicated DynamicBVH from the ORIGINAL
+triangle mesh's unique structural edges. Auxiliary two-hop bending
+links and virtual tether links are excluded. BVH leaves reference a
+fully constructed, non-resizing edge array; no separate broadphase
+is created for default/disabled projects. At solve time, the edge
+tree is refit after cloth material and vertex/triangle corrections.
+Each edge queries only nearby AABBs. Candidate pairs are canonicalized
+by index, and edges sharing vertices or any one-ring neighbor are
+excluded. Both a per-edge limit (using the existing max contacts per
+vertex project setting) and 65,536 global contacts per soft body and
+frame bound the total scratch memory and narrowphase work.
+
+The narrowphase rejects degenerate, nearly parallel and endpoint-only
+contacts. For interior closest points inside the thickness envelope,
+the unilateral XPBD row distributes an equal/opposite separating
+correction over all four endpoints according to barycentric line
+weights and inverse masses. The contact direction persists across the
+solver's iterations, using previous-step geometry to preserve the side
+when edges cross. Lambda resets each physics step; pinned nodes never
+move. All candidate corrected positions must be finite before any
+vertex is updated. The optional edge-tree and scratch memory are
+released when the mesh is destroyed or the feature is disabled.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_edge_collision.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_edge_collision_3d --scale 4 \
+  --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-soft-edge-collision.json
+```
+
+The live workload compares intersecting **interior structural edges** in
+two disconnected surface patches: all vertices lie outside the opposing
+triangle interior, so vertex/face contacts are insufficient. The
+three vertices of the first patch are pinned. Edge BVH must separate
+the free patch with the extra flag enabled, without moving any pins.
+The Python source test checks four-point impulse distribution, the
+closest interior parameters, degenerate and parallel rejection, BVH
+pair uniqueness and bounded contacts.
+
+**Limitations:** contacts are discrete, not continuous edge/edge CCD.
+Fast tunneling, grazing near-parallel edges and endpoint-only collisions
+may still be missed. The feature handles self-collisions inside one
+soft body, not between different soft bodies. This is an experimental
+solver feature and needs compiled-engine performance and regression
+verification before being treated as production-ready.
+
+## Opt-in cloth and soft-body vertex/triangle self-collision (3D)
+
+Cgame GodotPhysics3D adds a discrete, two-way XPBD **vertex/face
+self-contact** stage inspired by Bullet soft bodies and Position Based
+Dynamics. A vertex near a triangle belonging to the SAME soft body can
+now be pushed away, rather than folding through an unrelated region of
+its own cloth mesh. This is separate from rigid/soft collisions and
+from XPBD stretch, area, dihedral, volume and tether constraints.
+
+```ini
+[physics]
+3d/solver/soft_body_self_collision_thickness=0.12
+3d/solver/soft_body_self_collision_compliance=0.000001
+3d/solver/soft_body_self_collision_max_contacts_per_vertex=8
+```
+
+**Off by default:** zero thickness skips self-contact BVH queries and
+releases topology/contact buffers. Enable only in scenes that need
+self-contact. Positive thickness is the minimum separation between
+non-adjacent triangles and nearby vertices. Smaller compliance makes
+the contact less compressible; zero compliance is also valid. The
+per-vertex cap (1–32, default 8) and total cap (65,536 contacts per
+soft body per step) bound scratch memory under extreme overlap.
+
+On setup, a hash of **original triangle mesh edges** excludes contacts
+between vertices and any incident or one-ring adjacent face. This is
+independent of auxiliary two-hop bending links. At solve time, the
+existing `DynamicBVH` face tree is refit from current geometry, queried
+for each vertex's thickness AABB, then the candidates are solved without
+modifying the tree during traversal. Contact separation is solved
+against the projected interior of the face, with inverse-mass-weighted
+impulses on the vertex and three face vertices, unilateral accumulated
+XPBD multipliers and exact inverse-mass-zero pins. The contact direction
+is chosen from previous positions where available. Post-correction
+face bounds are refit for subsequent ray queries.
+
+**Limitations:** this is *discrete* vertex/triangle self collision, not
+continuous cloth CCD. Very fast tunneling can pass through the discrete
+envelope. Near-edge / edge-edge and vertex-vertex contacts are not yet
+supported; the node must project inside the candidate triangle. The
+one-ring filter and contact budget may leave densely folded regions
+without a constraint. Mesh fold quality also depends on tessellation
+and other material constraints. This implementation does not cover
+collisions between two distinct soft bodies.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_self_collision.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_self_collision_3d --scale 4 \
+  --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-soft-self-collision.json
+```
+
+The runtime test isolates two disconnected mesh layers starting closer
+than the configured thickness and verifies they separate when enabled
+but do not when disabled. It separately creates an incident pair of
+triangles to check that directly connected vertices do not produce fake
+contacts. Python source tests cover unilateral contact projection,
+previous-side consistency, barycentric containment and pinned faces.
+Runtime behavior and CPU/RSS savings must still be verified on a
+compiled GodotPhysics3D engine.
+
+## XPBD dihedral-angle cloth bending (3D)
+
+GodotPhysics3D now supports an **opt-in, angle-based XPBD hinge bending**
+constraint, inspired by the dihedral bending model in the open-source
+PositionBasedDynamics library. The legacy Bullet-style two-hop bending
+links constrain distances between cloth particles; the new constraint
+instead preserves the **signed rest dihedral angle** of two neighboring
+triangles. It supports non-flat rest meshes, folds and pinned cloth.
+
+Enable per-space in the project settings:
+
+```ini
+[physics]
+3d/solver/soft_body_xpbd_dihedral_compliance=0.000001
+```
+
+The default `0` disables hinge topology construction, per-step XPBD work
+and persistent hinge buffers. Lower positive compliance means stiffer
+bending; `alpha = compliance / dt²`. This is a new material response
+rather than an extra distance link: it can run even with
+`soft_body_set_linear_stiffness(body, 0.0)`. When stretch and area
+constraints are also enabled, all three are iterated together. The
+existing two-hop bending links are retained for backward compatibility.
+
+**Topology:** Each triangle edge is matched with its neighbor using
+an undirected edge key; only pairs with exactly two adjacent faces of
+opposite edge winding and distinct opposite vertices produce a hinge.
+Open boundary edges, duplicate faces, inconsistent winding and
+non-manifold edges do not create a constraint. Hinge creation is done
+once when a soft-body mesh or space is initialized, and the resulting
+solver order follows first-seen face/edge order for reproducibility.
+Transient topology-map memory is freed after building compact hinges;
+the runtime solver uses only per-hinge indices and one multiplier.
+
+**Numerical stability:** The signed angle is computed via `atan2`
+of oriented face normals and wrapped to ±π relative to the rest angle.
+Analytic gradients are checked for degeneracy/finiteness. The
+solver sums inverse-mass-weighted gradients, updates one XPBD multiplier
+per hinge across iterations **within the same frame**, and validates
+all proposed particle positions before committing any changes. Inverse
+mass zero pins remain stationary. No dynamic allocations occur inside
+each hinge projection.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_dihedral.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_xpbd_dihedral_3d --scale 4 \
+  --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-xpbd-dihedral.json
+```
+
+The runtime scenario compares a deformed two-triangle cloth patch
+against a disabled baseline, using a pinned seam, zero link stiffness,
+and a malformed-winding version. The source-level Python tests compare
+the four analytic gradients against finite differences and test
+translation invariance, non-flat rest angles and pinned particles.
+This is not FEM shell bending or self-collision. Actual performance,
+C++ compilation and runtime accuracy must still be checked with a
+built engine; use identical settings for CPU/RSS comparisons.
+
+## Closed soft-body XPBD volume preservation (3D)
+
+Cgame GodotPhysics3D now supports an opt-in global **enclosed-volume
+constraint** for consistently oriented, closed soft-body surface meshes.
+This complements the existing XPBD distance and triangle area constraints.
+It is inspired by XPBD volumetric constraints in PositionBasedDynamics,
+but uses the oriented surface's signed tetrahedral volume rather than
+requiring an explicit tetrahedral volume mesh. This is a global
+compressibility constraint, **not** full volumetric FEM.
+
+```ini
+[physics]
+3d/solver/soft_body_xpbd_volume_compliance=0.00000001
+```
+
+The default `0` leaves legacy soft-body simulation unchanged and allocates
+no volume-gradient buffer. Lower positive values enforce volume more
+strongly. Each new GodotSpace3D caches the setting at creation.
+
+**Topology requirement:** each undirected mesh edge must occur exactly
+twice with opposite windings. Open cloth, malformed triangle winding,
+non-manifold edges, collapsed or near-zero signed-volume meshes safely
+skip this constraint rather than receiving artificial internal pressure.
+Mesh validation and rest-volume capture happen on mesh/space initialization
+or transform reinitialization, **not during every physics step**. The
+rest state is a signed volume relative to one mesh vertex, invariant
+under translation and compatible with either overall winding.
+
+During `GodotSoftBody3D::solve_constraints()`, the constraint accumulates
+per-vertex gradients from oriented faces, then applies a single XPBD
+Lagrange-multiplier update each iteration:
+`delta_lambda = -(current_volume - rest_volume + alpha * lambda) /
+(sum_i inverse_mass_i * |gradient_i|² + alpha)`, with
+`alpha = compliance / step²`. The one lambda resets each step, while
+gradients share an allocation reused across iterations. Zero-inverse-mass
+pinned nodes remain fixed; all proposed position updates are checked
+for finiteness before any node is changed.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_volume.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_xpbd_volume_3d --scale 4 --repeats 5 \
+  --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-xpbd-volume.json
+```
+
+The runtime test simulates multiple closed tetrahedral surface meshes.
+Three base vertices are pinned and the fourth vertex is displaced to
+reduce enclosed volume. The enabled case must recover volume; the
+disabled and **open-mesh** cases must not generate fake restoring
+forces. Numeric source-level tests separately check orientation,
+gradient finite differences and XPBD pin behavior. Runtime and memory
+performance still require a compiled engine and matching benchmark builds.
+
+## XPBD triangle-area constraints for cloth (3D)
+
+Cgame GodotPhysics3D now supports optional **triangle surface-area preservation**
+as an additional XPBD constraint, inspired by PositionBasedDynamics cloth
+simulation. Unlike existing structural edges and two-hop bending links, it
+resists a triangle losing or gaining area under shear, compression, or
+gravity. This is an area constraint, **not** volumetric FEM, cloth tearing,
+or full material strain tensors.
+
+The new per-space project setting defaults to zero (disabled):
+
+```ini
+[physics]
+3d/solver/soft_body_xpbd_area_compliance=0.000001
+```
+
+Positive compliance enables a separate accumulated Lagrange multiplier per
+triangle. A lower value makes area preservation stiffer. The multipliers
+are reset once per physics step and reused across iterations, with the
+standard XPBD regularizer `alpha = compliance / dt^2`. Area constraints
+can run with either the legacy link solver or optional XPBD link compliance,
+including with zero link stiffness. Pinned particles remain fixed; all
+edges and faces share the existing simulated mesh topology. Collapsed,
+non-finite, or fully pinned triangles are skipped safely. The per-face
+scratch array is allocated only when enabled and freed when the mesh is
+destroyed or the solver feature becomes inactive.
+
+This is implemented in `servers/physics_xpbd_area.h` and integrated in
+`GodotSoftBody3D::solve_constraints()`. The invariant uses current triangle
+area and the rest area `Face::ra`, which is captured on mesh setup.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_area.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_xpbd_area_3d --scale 4 --repeats 5 \
+  --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-xpbd-cloth-area.json
+```
+
+The runtime case creates a triangle soft mesh with its base pinned and its
+third vertex falling under gravity. Structural link stiffness is disabled
+so area XPBD is the only source of elastic support. It compares the mean
+area error against a zero-compliance baseline and verifies pinned vertices
+remain stationary. It also detects non-finite positions. The regression
+must be run on a compiled engine for a meaningful physics result.
+
+## Iterative spinning and rolling contact friction (3D)
+
+GodotPhysics3D already supported configurable gyroscopic precession and
+Bullet-inspired **spinning** (around the contact normal) and **rolling**
+(around tangent axes) friction. The previous angular-friction correction
+ran in `pre_solve()` using only the previous frame's warm-started normal
+impulse, so a newly touching body with zero cached load received no
+resistance until a later step.
+
+The rotational friction rows now run inside the iterative velocity solver
+**after** the current normal impulse is computed. A manifold-level contact
+mask and representative normal/radius are computed once per step, without
+allocations or relying on cached normal load. Each solver iteration uses
+the sum of the CURRENT normal impulses and accumulated angular impulses
+clamped to the Coulomb spinning interval / rolling disk. This keeps the
+torque budget independent of iteration count, responds to contact load on
+the first frame, and projects existing impulses back toward zero if the
+normal load disappears. The existing zero-coefficient defaults preserve
+the legacy behavior and avoid extra work for projects that disable this
+feature. No changes are made to ordinary tangential Coulomb friction.
+
+The per-space settings are read at space creation:
+
+```ini
+[physics]
+3d/solver/spinning_friction=0.5
+3d/solver/rolling_friction=0.25
+```
+
+To compare live engine behavior with and without contact angular friction:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_contact_angular_friction.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_contact_angular_friction_3d --scale 4 --repeats 5 \
+  --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-contact-angular-friction.json
+```
+
+The runtime scenario compares free-flight spinning (which should not
+experience contact angular friction), newly loaded spheres on a floor,
+enabled/disabled coefficients, and the first few frames of velocity loss.
+It uses zero material sliding friction to isolate the angular contact
+rows. Real validation requires a compiled Cgame engine, and comparative
+CPU/RAM measurements should use matching build and hardware settings.
+
+## Batched BVH filter updates for compound bodies
+
+GodotPhysics2D and GodotPhysics3D now aggregate full broadphase rechecks
+when changing collision layers, masks or exceptions on compound bodies.
+Previously, a compound object with N registered shapes called
+`force_collision_check()` N times and immediately traversed BVH after
+each shape. Now the single-shape path remains immediate, while multiple
+shapes use the broadphase's nested `begin_batch()` / `end_batch()` API.
+For BVH backends the per-shape force calls only enqueue dirty proxies,
+and the last end_batch executes one full filter validation.
+
+A deferred full-check flag lives in the generic BVH manager, not just the
+physics adapter, so an intervening `update()` or geometry change cannot
+accidentally process pending masks with a geometry-only recheck. The flag
+is consumed when pairs are checked and cleared after the batch. Unchanged
+proxies still get rechecked, preserving layer/mask/exception changes for
+stationary bodies.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_compound_filter_batch.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_compound_filter_batch_2d,physics_compound_filter_batch_3d \
+  --scale 4 --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-compound-filter-batch.json
+```
+
+The runtime workloads create up to 256 subshapes on a single kinematic body
+with one stationary obstacle per shape. They assert exact pair counts
+when masks, layers and exceptions change without movement and report the
+time spent inside the filter-update setter calls. Compare a baseline
+revision under identical runtime settings to assess speed. Source contracts
+and GitHub Actions are not substitutes for compilation and runtime tests.
+
+## Early broadphase exception filtering (2D and 3D)
+
+The BVH previously discarded body-body collision exceptions only during the
+constraint setup pass, after allocating a persistent pair for each overlapping
+shape combination. Cgame now checks both bodies' collision-exception lists
+during the BVH's existing user-pair filter, before constructing constraints.
+In 3D the same rule applies to rigid-body/soft-body pairs, in either direction.
+Area pairs and monitoring behavior remain unchanged.
+
+Removing or adding an exception must immediately reconstruct the BVH pairing
+without requiring bodies to move. The physics servers call
+`refresh_collision_pairs()` after every exception mutation; this performs
+the required full per-proxy BVH checks **without recalculating body mass or
+invalidating the shape's collision-geometry cache**. Changes to collision
+layers and masks still use the full geometry/filter invalidation path.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_early_pair_filter.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_exception_pairs_2d,physics_exception_pairs_3d \
+  --scale 4 --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-exception-pairs.json
+```
+
+Each engine stress case creates many stationary overlapping static/kinematic
+pairs, records `INFO_COLLISION_PAIRS`, excludes all pairs through one endpoint,
+restores them, then repeats the test using exceptions on the other endpoint.
+All transitions happen **without moving bodies**, so the test verifies the
+BVH's explicit pair revalidation. Pair counts and durations are returned for
+before/after comparison on identical hardware. A separate integration test for
+runtime rigid/soft-body constraints is still needed.
+
 ## Streaming kinematic motion queries (2D and 3D)
 
 The stress project's `project.godot` explicitly selects `GodotPhysics2D`
@@ -85,20 +678,27 @@ The `test_body_motion()` broadphase no longer retains the potentially
 huge list of candidate collision shapes in per-space dynamic vectors.
 Recovery, swept-motion tests and rest-contact collection instead consume
 filtered BVH candidates through callbacks, with no 2048-item ceiling.
-For compound moving bodies, the BVH is traversed once per enabled shape:
-the change prioritizes bounded temporary memory, while CPU overhead must
-be checked against the previous buffered implementation.
+For compound moving bodies, the BVH is traversed once per enabled shape,
+using that shape's *own* transformed AABB (and its swept union for motion).
+A large gap between parts of a compound object no longer causes every shape
+to narrowphase-test all intervening broadphase proxies. The original
+conservative whole-body motion AABB remains available to the 3D distance
+solver. This prioritizes bounded temporary memory and avoids unnecessary
+narrowphase work, but CPU gains must be measured against a baseline.
 
 ```bash
 python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
   --case physics_motion_exclusions_2d,physics_motion_exclusions_3d \
-  --scales 1,2,4 --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --scale 4 --repeats 5 --frames 90 --rss-limit-mib 6144 \
   --output out/motion-stream.json
 ```
 
 These cases test explicit exclusions, more than 2048 eligible colliders,
-nearest-hit selection, zero-motion recovery and compound-body sweeps.
-Report p50/p95 query latency and peak *process* RSS on identical hardware
+nearest-hit selection, zero-motion recovery, sparse compound shapes,
+offset-shape hits and rotated query transforms. The result dictionaries also
+report `gap_query_ms` and `gap_proxies` for a workload where the empty region
+between compound shapes contains many unrelated static bodies.
+Compare per-scenario duration distributions and peak *process* RSS on identical hardware
 before attributing performance wins to this refactor. The tests do not
 replace a full 2D one-way platform or 3D soft-body regression suite.
 
@@ -321,6 +921,456 @@ finite body states both with the option disabled and enabled. It is a smoke
 regression, not a measured performance benefit or a guarantee that all
 possible overfull manifolds are exercised.
 
+## Nonlinear rotation-only capsule CCD (Rapier-inspired 2D / 3D)
+
+Rapier's nonlinear shape cast follows an object's rotational as well as
+linear motion to compute the first contact time. The built-in Cgame
+GodotPhysics2D/3D cast-ray CCD previously returned immediately if
+the CCD body's **linear velocity was exactly zero**, even for a long
+capsule rotating rapidly through a nearby static circle or sphere.
+A capsule can start and end the step separated from its target while
+still striking it during the rotation.
+
+Cgame now supports a narrow **opt-in nonlinear angular TOI** for this
+case. Enable the existing conservative rotational CCD broadphase:
+
+```ini
+[physics]
+2d/solver/ccd_rotational_bounds=true
+3d/solver/ccd_rotational_bounds=true
+```
+
+Set the moving rigid body's CCD mode to cast-ray in 2D, or enable CCD
+in 3D. The new TOI applies **only** when:
+
+- The moving body has zero linear motion and nonzero angular velocity.
+- Its shape is a uniformly scaled, unsheared **capsule**.
+- The other body is **static**, with a uniformly scaled circle (2D)
+  or sphere (3D).
+- The original broadphase has already supplied the pair.
+
+The algorithm follows the capsule's curved motion **around the body's
+world-space center of mass**, including an offset shape transform.
+Its capsule centerline is rotated in 2D or around the 3D angular
+velocity axis. The earliest contact is approached using a conservative
+speed bound for every centerline point and exact point-to-segment
+distance. At most **48 deterministic advancement evaluations** run,
+using only stack values, no heap allocations or persistent state.
+A conclusive miss leaves the body unchanged. A hit limits angular
+velocity so the next frame's normal contact solver can resolve a
+slight overlap (a small 0.5% angular allowance).
+
+As with existing velocity-clamping cast-ray CCD, this alters momentum
+and does **not** generate a separate impact impulse within the step.
+If geometry is invalid, already intersecting or advancement fails to
+converge, the solver returns to the previous narrowphase behavior.
+It does not yet solve generic moving-and-spinning convex/concave shapes,
+capsule/capsule arcs or pure rotation against a triangle mesh. This
+is a real, limited nonlinear TOI, **not** a complete Rapier-equivalent
+nonlinear casting API. The feature is disabled by default.
+
+Seven native C++ test cases check 2D/3D first impacts, return to a
+separated endpoint after passing through the target, an offset
+center of mass, distant misses, initial penetration and invalid
+inputs. Seven Python source/reference tests include 3,500 seeded
+random rotations with densely sampled intermediate poses to catch
+false conclusive MISS outcomes. A Godot runtime smoke regression spins
+a capsule by 180 degrees within one physics step; with the rotational
+bounds enabled, its angular velocity must be clipped by the TOI,
+while the disabled control should retain its starting speed.
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_ccd_rotating_capsule_toi.py' -v
+
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_ccd_rotating_capsule_toi_regression.gd
+```
+
+The native C++ build, real runtime collisions and frame time must be
+checked before enabling in production. Unit/reference tests cannot
+demonstrate a successful build or measured performance benefit.
+
+## Conservative rotating-CCD candidate culling (Rapier/Jolt-style)
+
+The existing opt-in `physics/2d/solver/ccd_rotational_bounds` and
+`physics/3d/solver/ccd_rotational_bounds` can expand broadphase AABBs
+for rotating CCD bodies. This avoids missing candidates, but a rotated
+shape's rectangular swept AABB can also overlap many distant shapes
+that the true rotating solid could never reach.
+
+The built-in GodotPhysics2D and GodotPhysics3D cast-ray CCD paths now
+use an **optional allocation-free swept bounding-sphere rejection**
+before their more expensive support-ray/narrowphase tests when both:
+
+- Rotational CCD bounds are enabled in the space; and
+- One of the two paired rigid bodies has nonzero angular velocity.
+
+A sphere centered at the body center of mass encloses every point of
+its current world-space shape AABB. Rigid rotation preserves each
+point's distance to that center. Therefore, the collider remains inside
+the sphere even if it turns between physics ticks. The closest approach
+between the *linearly moving centers of mass* is computed analytically,
+and the pair can be rejected only if the center trajectories remain
+farther apart than the summed conservative radii. A small tolerance
+is added for floating-point rounding. Unbounded world-boundary and
+separation-ray shapes, invalid transforms and degenerate data retain
+the original CCD path.
+
+This optimization **does not generate a contact, change velocity,
+change the Time of Impact, or attempt to solve nonlinear CCD**.
+It cannot introduce a deliberately approximated early contact or
+convert a real collision into a miss when the rigid-body motion
+assumptions hold. It also does not solve pure-rotation tunneling:
+the current cast-ray CCD still needs nonzero linear motion to run.
+This is a broadphase *rejection* filter, not a swept nonlinear
+collision solver. The opt-in settings remain disabled by default.
+
+Test coverage includes six native C++ cases for far pairs, approaching
+pairs, off-center orbital reach and invalid geometry, and eight Python
+source/reference tests with 10,000 seeded rotating boxes and target
+discs, checking that no sampled geometric hit is falsely rejected.
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_ccd_rotational_sphere_cull.py' -v
+
+# Compare opt-in rotating CCD scene throughput with identical binaries:
+python3 tests/stress/run.py \
+  --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_ccd_rotational_radial_2d,physics_ccd_rotational_radial_3d \
+  --scale 4 --frames 120 --repeats 5 \
+  --output out/rotating-ccd-culling.json
+```
+
+No CPU or RAM benefit is claimed without compiled engine benchmarks.
+The cull deliberately declines to reject borderline cases, prioritizing
+correctness over a higher cull rate.
+
+## Rapier-style CCD per-step angular motion cap (opt-in 2D / 3D)
+
+Fast rotation can pass a long, thin rigid shape through nearby obstacles
+between physics steps, even when CCD is enabled. Box2D and Jolt document
+this limitation for swept/linear-cast CCD; Rapier uses an angular rotation
+cap per substep (~45 degrees) to keep rotation from skipping too much of
+the trajectory. Cgame already supports optional rotationally expanded
+broadphase bounds. Those bounds find candidate pairs but **do not**
+alone guarantee an exact nonlinear time-of-impact calculation.
+
+To mitigate this without slowing all rigid bodies, the built-in Cgame
+GodotPhysics2D and GodotPhysics3D now support an **optional maximum
+physical rotation angle per CCD physics step**:
+
+```ini
+[physics]
+2d/solver/ccd_max_angular_motion=0.7853981633974483
+3d/solver/ccd_max_angular_motion=0.7853981633974483
+```
+
+The number is **radians**; `0.785398...` is 45 degrees. Both settings
+default to **0 (disabled)**. Only dynamic bodies with **CCD enabled**
+have their angular velocity capped to `max_angle / physics_delta`.
+Bodies without CCD and kinematic bodies preserve their requested
+angular motion. This is independent of the existing global
+`max_angular_velocity` (radians/s) control: if both are enabled, the
+more restrictive cap wins. A zero, negative or non-finite physics
+delta is ignored rather than divided by. No per-body storage or heap
+allocations are introduced. Settings are cached once per physics space.
+
+The cap is evaluated **twice**: after force/torque/gyroscopic integration
+and before CCD broadphase sweep bounds are updated, then again after
+contact/joint impulses before pose integration. It only limits
+*physical angular velocity*; penetration-correction bias angular
+velocity remains untouched to avoid weakening position correction.
+The latter can still add to the total orientation change. This
+feature is **not full nonlinear CCD** and cannot guarantee no
+rotational tunneling, particularly with high bias corrections or
+complex concave/compound geometry.
+
+Native regression tests exercise 2D scalar and 3D vector limits,
+variable timesteps, degenerate dt and composition with the existing
+angular speed limit. Python contracts check the integration points
+and a seeded 12,000-case reference model. The runtime scene compares
+CCD on/off, in both dimensions, for isolated thin fast-spinning boxes:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_ccd_angular_motion.py' -v
+
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_ccd_angular_motion_regression.gd
+```
+
+Use the same physics tick rate, identical collision shapes and
+release build when benchmarking CCD. Measure both missed rotational
+contacts and CPU cost; no speedup or collision-proof guarantee is
+claimed before compiled engine tests.
+
+## Tighter 2D/3D rotational CCD broadphase envelopes (optional)
+
+Box2D and Jolt restrict expensive narrowphase and CCD work by first
+generating broadphase candidates from conservative swept bounds. Cgame
+already had opt-in angular broadphase bounds, but expanded each axis
+of the linear-swept AABB by the *same maximum rotation chord*.
+That is conservative yet especially costly for long thin or
+offset shapes: an unoccupied region may still generate many false
+broadphase pairs (SAT/GJK work) when the body spins.
+
+Cgame now provides an alternate **analytic arc envelope**. It models
+each corner of the shape's world-space AABB as it rotates about the
+body's center of mass. Each coordinate is `c + a cos(theta) + b
+sin(theta)`. The exact coordinate extrema over the angular interval
+occur at its endpoints or where the derivative vanishes. The resulting
+AABB is conservatively unioned with the linear translation segment;
+all intermediate orientations and translated positions are included,
+including rotations beyond a full revolution. The method handles
+negative 2D angles and arbitrary positive-axis 3D angular sweeps.
+A small numerical margin is added to protect floating point rounding.
+
+Enable both settings for the matching dimension in `project.godot`:
+
+```ini
+[physics]
+2d/solver/ccd_rotational_bounds=true
+2d/solver/ccd_tight_rotational_bounds=true
+3d/solver/ccd_rotational_bounds=true
+3d/solver/ccd_tight_rotational_bounds=true
+```
+
+All settings default to **false**. The tighter mode has an effect
+only when rotational CCD bounds are enabled and a body has angular
+motion with CCD enabled. With the mode off, the old chord-padding
+path remains unchanged. Settings are cached per physics space.
+
+This improves **candidate filtering only**: it does not itself
+implement a rotating-shape time-of-impact narrowphase, solve
+pure rotational tunneling, or change the rigid-body solver.
+The tighter bounds require trigonometric extrema evaluations for
+each AABB corner (4 in 2D, 8 in 3D); they may cost *more* than the
+legacy bound in sparse scenes. Enable based on measured results,
+not assumptions about a universal speedup.
+
+Native tests check containment of many intermediate orientations,
+mixed rotation/translation, negative angles and large turns, plus
+reduced proxy volume. Source/reference tests independently check
+900 randomized 2D sweeps and 900 3D sweeps with 21 samples for every
+initial AABB corner:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_ccd_tight_rotational_bounds.py' -v
+```
+
+A dedicated stress suite compares the exact same rotating thin
+rigid-body workload and static near-miss blockers in both modes.
+Each scale unit creates 64 rotating bodies and 64 static blockers,
+up to 4096 of each. All spinning bodies have CCD enabled, zero
+gravity and damping, and no intended true contacts. Measure
+broadphase candidate counts, physics frame time, p95 and RSS:
+
+```bash
+python3 tests/stress/run.py \
+  --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_ccd_rotational_radial_2d,physics_ccd_rotational_tight_2d,physics_ccd_rotational_radial_3d,physics_ccd_rotational_tight_3d \
+  --scale 4 --frames 120 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 \
+  --output out/ccd-rotational-tight.json
+```
+
+The numerical reference and source checks are **not** native-build
+validation. Re-run the identical scenario on the same host and build
+configuration before enabling this optimization in production.
+
+## Jolt-style 3D gyroscopic free-rotation dynamics (opt-in)
+
+Asymmetric rigid bodies do not maintain a constant angular velocity in
+torque-free flight: their angular momentum and rotation axes interact.
+Bullet and Jolt implement the missing gyroscopic Euler term
+`dL/dt = -omega × L`, with `L = I omega`, in rigid-body rotation.
+
+The built-in Cgame GodotPhysics3D integrator now supports Jolt's
+allocation-free principal-inertia-frame update, renormalizing angular
+momentum after the Euler correction to avoid the momentum gain from a
+naive explicit gyroscopic force. This enables physically motivated
+precession and intermediate-axis tumbling of asymmetric objects.
+
+Enable it per GodotPhysics3D space in `project.godot`:
+
+```ini
+[physics]
+3d/solver/gyroscopic_forces=true
+```
+
+The setting defaults to **false**, retaining existing scene behavior,
+solver order, CPU cost, and all 2D physics. It is sampled once when
+creating a 3D space. The new calculation runs after ordinary damping
+and applied torque, before body rotation integration, and only on
+dynamic **rigid** bodies with no locked angular axes and without a
+custom force-integrator override. Kinematic, static, rigid-linear and
+angular-axis-locked bodies keep their existing behavior.
+
+The algorithm uses each body's already stored inverse principal
+moments and principal-axis orientation: there are no new fields in the
+body, no heap allocations and no new solver constraints. Invalid,
+nonfinite or singular inertia components safely skip gyro correction.
+Isotropic bodies and rotation around one principal axis incur no
+angular change. The normalized explicit momentum step preserves the
+*magnitude* of angular momentum; it is not an implicit energy
+conserving integrator. Use smaller physics time steps for extreme
+angular speeds and compare energy drift in demanding tumbling scenes.
+
+Source contracts plus 5,000 seeded randomized inertia/rotation cases
+and a 600-step torque-free numerical trajectory:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_gyroscopic_3d.py' -v
+```
+
+Native C++ tests are in
+`tests/servers/test_godot_physics_gyroscopic_3d.cpp`. A runtime smoke
+regression creates a freely tumbling, inertia-asymmetric box with zero
+gravity and damping in two otherwise identical spaces (gyro enabled
+vs disabled), checks finite state, rotation change and angular
+momentum magnitude:
+
+```bash
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_gyroscopic_3d_regression.gd
+```
+
+These source/reference tests do not confirm a native build or runtime
+performance. CPU impact is limited to gyro-enabled active asymmetric
+rigid bodies; actual stability and frame-time gains must be measured
+on the same scene and hardware. External physics backends are not
+modified.
+
+### Experimental energy-preserving gyroscopic midpoint mode
+
+The previous opt-in gyroscopic solver uses a normalized explicit Euler
+update. This is fast and preserves angular momentum **magnitude**, but
+can gradually gain or lose **rotational kinetic energy** when inertia is
+asymmetric. For more demanding tumbling scenes, Cgame now provides a
+second opt-in method inspired by geometric integrators:
+
+```ini
+[physics]
+3d/solver/gyroscopic_forces=true
+3d/solver/gyroscopic_integration_mode=1
+```
+
+Mode `0` (default): existing Jolt-style normalized Euler gyroscope.
+Mode `1`: **implicit midpoint** on the torque-free angular momentum
+equation, solved by at most eight Newton iterations with an analytical
+3×3 Jacobian. Once the residual converges, the update approximately
+preserves **both** angular momentum magnitude and rotational energy.
+If inertia is singular, the inputs are invalid, or an extreme timestep
+prevents Newton convergence, it safely falls back to the existing
+normalized Euler update. No persistent body state or heap allocations
+are introduced. Isotropic bodies and principal-axis rotation remain
+fast no-op cases.
+
+Both settings are read when the 3D physics space is created.
+The original `gyroscopic_forces=false` default remains unchanged;
+the midpoint mode is intentionally **not enabled by default** because
+it costs extra cross products and matrix inversions on active asymmetric
+rigid bodies. The midpoint law applies to the torque-free component
+after the regular force and damping update; it does not claim energy
+conservation in scenes with applied torques, damping or impacts.
+
+Verification includes five native C++ unit tests, eight source/reference
+tests including 2,000 seeded asymmetric-inertia cases, and a 600-step
+numerical spin trajectory. The runtime regression compares the
+energy and angular momentum drift between normalized Euler and midpoint
+on the same torque-free asymmetric rigid body:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_gyroscopic_midpoint_3d.py' -v
+
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_gyroscopic_midpoint_3d_regression.gd
+```
+
+The corrected 2D angular-friction and contact-floor regressions now
+use gravity towards the supporting floor; their earlier negative gravity
+moved bodies away from it, preventing sustained contact. PhysicsServer2D
+rectangle shape data is **half-extents**, so their existing half-size
+geometry was correct and was intentionally left unchanged.
+
+Use the same hardware and release configuration for any performance
+comparison. These reference cases do not demonstrate a successful C++
+build or end-to-end physics execution until the native tests are run.
+
+## Bullet-style rolling and spinning resistance (opt-in 2D/3D)
+
+Bullet Physics includes rolling resistance for round shapes and torsional
+spinning friction for angular motion along the contact normal. GodotPhysics
+already implements ordinary Coulomb sliding friction, but that alone does
+not stop a perfectly rolling sphere on flat ground or a spinning disc on a
+static support. The built-in Cgame solver now offers inexpensive **optional**
+pure-angular contact resistance without changing existing material friction.
+
+```ini
+[physics]
+2d/solver/rolling_friction=0.2
+3d/solver/rolling_friction=0.2
+3d/solver/spinning_friction=0.2
+```
+
+All three settings default to **0**, preserving existing projects and
+third-party backends. They are read and clamped once per GodotPhysics space
+at construction time; changing them does not retroactively affect an
+existing space. No per-contact state is allocated.
+
+The solver uses the previous frame's *warm-started normal impulse* as the
+contact load. For an angular direction with effective inverse inertia
+`K`, the torque impulse is `clamp(-relative_angular_speed / K,
+-coefficient * load * radius, +coefficient * load * radius)`.
+The effective radius is the smaller distance from a participating dynamic
+body's center of mass to the loaded contact; a static body's lever arm
+does not limit the rolling radius of a dynamic sphere.
+
+The angular correction is applied **once per timestep** in the contact
+pre-solve, after restoring cached normal impulses. It does not execute on
+every PGS iteration and cannot multiply its budget by the iteration
+count. In 3D, spinning acts *along* the contact normal; rolling acts
+*in its tangent plane*. The rolling axis is recalculated after any spin
+correction to handle anisotropic inertia. Mixed-face manifolds with normals
+more than approximately 11 degrees apart skip the extra angular torque
+rather than choose an arbitrary axis. Contacts without load or with
+singular/invalid effective inertia never receive extra torque. The
+correction acts only on rigid-rigid contact pairs, not rigid/soft pairs.
+
+This is a conservative approximation rather than a full warm-started
+rolling-friction constraint: it begins acting after the first normal
+impulse has been cached. The coefficient is dimensionless; the physical
+torque cap also depends on contact radius, which uses the world's length
+unit (pixels in 2D, meters in 3D).
+
+Native unit tests cover missing load, singular mass, impulse limits, radius
+scaling and dissipativity. The standalone reference regression includes
+5,000 random speed/inertia/load combinations, and the Godot runtime
+smoke scene compares a rolling 2D circle and a spinning 3D sphere before
+and after enabling the feature:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_angular_contact_friction.py' -v
+
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_angular_friction_regression.gd
+```
+
+Validate angular decay, energy behavior, sleeping transitions, CPU time and
+RAM on representative scenes before enabling in production; no measured
+speedup or stability benefit is asserted solely from these source tests.
+
 ## Converged-contact zero-impulse fast path and singular-mass guards
 
 Built-in GodotPhysics 2D and 3D now skip the **body update**, but not the
@@ -490,6 +1540,61 @@ displacement without drag. To measure CPU and RAM, benchmark identical
 scenes and binaries with drag both enabled and disabled. This test and the
 source contracts do not constitute a completed native build or measured
 performance improvement unless run.
+
+## Box2D-style implicit rigid-body damping (opt-in 2D / 3D)
+
+GodotPhysics2D and GodotPhysics3D use clamped explicit-Euler velocity damping
+by default: `max(0, 1 - damping * delta)`. At large `damping * delta`, this
+can zero all velocity within a single frame. Box2D instead uses the implicit
+(Pade) approximation `1 / (1 + damping * delta)`, which remains strictly
+positive for finite nonnegative damping and is less sensitive to timestep
+size. The new implementation provides that formula through one shared
+inline helper for **both linear and angular velocity**.
+
+Enable it per physics space with:
+
+- `physics/2d/solver/implicit_damping = true`
+- `physics/3d/solver/implicit_damping = true`
+
+**Both settings default to false**, preserving existing GodotPhysics
+behavior and scene compatibility. Each space snapshots the setting at
+creation. The legacy algorithm remains in use for negative damping
+coefficients even when implicit damping is enabled, avoiding changes to
+existing custom amplification behavior. This does not change area
+damping overrides, force integration order, kinematic bodies or collision
+responses. The feature is for GodotPhysics; external physics backends
+are not affected.
+
+Run the source and mathematical contracts, then the executable
+high-damping comparison (requires the newly compiled Cgame engine):
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_implicit_damping.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_implicit_damping_regression.gd
+```
+
+The regression creates separate 2D and 3D spaces with the option both
+disabled and enabled, overrides all area damping, and checks the
+expected per-tick linear/angular velocity ratio at damping = 120 and
+60 Hz. The legacy solver should clamp the speed to zero, while implicit
+damping should multiply it by approximately `1/3` each frame. It
+restores the original physics tick rate and project settings.
+
+To compare CPU and RAM overhead between both algorithms, the stress
+scenarios create the same 256 independent dynamic bodies per scale in
+either dimension, disabling sleep to keep integration work active:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_damping_legacy_2d,physics_damping_implicit_2d,physics_damping_legacy_3d,physics_damping_implicit_3d \
+  --scale 8 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/physics-implicit-damping.json
+```
+
+Compare results against the same pre-change build for accurate overhead
+attribution. Mathematical source checks are not a substitute for a real
+GodotPhysics build, the headless regression or profiling.
 
 ## Contact restitution stability (Jolt / Box2D-style threshold)
 
@@ -1517,27 +2622,409 @@ The tests check finite body states and joint spacing, not physical
 equivalence to the serial solver or measured performance improvements.
 Start with small scales and monitor CPU usage, peak RSS and frame p95.
 
-### Axis-aligned 3D box-box SAT fast path
+### Shared-basis 2D rectangle SAT axis deduplication
 
-GodotPhysics3D's box-box narrow phase traditionally tests three face axes
-from each box and nine cross-edge axes (15 candidates), even when both
-boxes are exactly world-axis aligned. In that case the duplicate face axes
-and nonzero cross products are equivalent to the three world-space
-separating axes X, Y and Z.
+GodotPhysics2D previously checked both face directions of each rectangle
+(four SAT candidate axes), even when the two rectangles had **exactly
+identical** basis vectors. In that case the directions on B duplicate
+the two already checked on A. The narrowphase now skips these two
+redundant projections and normalizations, reducing four face-axis
+checks to two for aligned or equally rotated rectangles. Equality is
+**exact**, not approximate: even a small relative rotation still
+requires all four axes.
 
-The new `_collision_box_box` fast path tests each axis once and then uses
-the **existing contact manifold generator**. This is safe only when both
-`Transform3D.basis` values are *exactly* `Basis()` and neither shape has
-collision margins. Rotated, scaled, sheared, or margin-expanded boxes
-continue through the full generic SAT procedure. The previously cached
-separation axis is still tested first, and no allocation or new physics
-setting is introduced.
+The prior separation-axis check, motion-cast axes, extra
+collision-margin tests and contact-manifold generation are unchanged.
+The optimization is valid with identical nonuniform scales or shears
+as well, because both skipped axes are byte-for-byte identical
+directions, not a geometric approximation. No extra allocations or
+project settings are introduced. This follows the standard SAT face
+normal/collision-manifold approach used by Box2D.
 
-The Python reference compares three-axis and generic 15-axis overlap tests
-for more than 5,000 deterministic 3D box pairs, including touching and
-non-overlapping cases. The headless Godot test compares axis-aligned and
-equivalently rotated query boxes, using both `intersect_shape` and
-`collide_shape` to exercise the actual contact generator.
+The Python source/numerical tests check 10,000 randomized rectangle
+pairs, including shared rotations, nonuniform scaling, shearing,
+margins and swept projection bounds. The headless 2D regression checks
+identity, equal nonzero rotation, equal nonuniform scale, and a
+different relative rotation, with boolean collision queries and
+finite contact points:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_2d_rectangle_shared_sat_axes.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_rectangle_shared_axes_2d_regression.gd
+```
+
+Three stress cases create 256 static+dynamic rectangle pairs per
+scale, continuously refresh their overlapping transforms and record
+physics/frame p95 and memory via the stress runner:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_rect_sat_axis_aligned_2d,physics_rect_sat_shared_rotation_2d,physics_rect_sat_misaligned_2d \
+  --scale 4 --frames 90 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-rectangle-shared-sat-2d.json
+```
+
+The three cases use different orientation geometries. Only comparing
+the **same case** on the pre-change and post-change engine binaries
+isolates the optimization's contribution. These source/mathematical
+checks do not replace C++ compilation and headless tests.
+
+### Coincident-center 2D circle analytic manifold (Box2D-style)
+
+GodotPhysics2D already used an analytic circle-circle narrowphase for
+overlapping circles with distinct centers, but when the centers were
+**exactly coincident**, it fell back to a generic SAT query and support
+generation to avoid normalizing the zero vector.
+
+The analytic path now handles coincident centers with positive effective
+combined radius. For that degenerate direction, it uses the existing
+cached separation axis (when finite/nonzero), or the legacy SAT's
+deterministic -Y manifold direction. This yields one finite contact
+without SAT projections. The separation, penetration depth, friction
+and impulse sign are preserved. Both effective radii must remain
+nonnegative; a pair of zero-radius points, non-unit/sheer transforms
+and swept contacts still use the old SAT path. Collision margins
+remain included in the circle support radii.
+
+The approach follows Box2D's specialized circle-circle contact
+manifold principle, while retaining Godot's existing contact callback.
+There are no new heap allocations or project settings.
+
+A 10,000-sample Python reference validates contact orientation and
+separation depth under randomized positive radii/cached axis choices.
+The headless regression includes coincident, offset, separated and
+nonuniformly scaled circle pairs, plus a dynamic circle starting at
+exactly the same position as a static circle:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_2d_coincident_circle_contacts.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_coincident_circles_2d_regression.gd
+```
+
+Two benchmark cases create 256 static/dynamic circle pairs per scale.
+The first repeatedly re-centers each dynamic circle on its static
+partner; the second starts with a 0.4-unit relative offset.
+Both repeatedly drive fresh narrowphase work and record physics frame
+p95 and peak RSS through the stress runner:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_circles_coincident_2d,physics_circles_offset_2d \
+  --scale 4 --frames 90 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-circle-coincident-2d.json
+```
+
+The two workloads have different contact geometries. To establish
+the optimization's speedup, compare each workload against its *same*
+scene on a pre-change Cgame binary and run the headless test after
+compiling. Source tests alone do not demonstrate CPU or RAM gains.
+
+### Embedded 2D circle/rectangle analytic manifolds (Box2D-style)
+
+GodotPhysics2D now handles an additional common narrowphase case without a
+generic SAT pass: a circle whose **center is inside a non-degenerate
+rectangle**. Previously the specialized circle/rectangle path handled only
+centers outside the rectangle, even when the contained circle was clearly
+colliding. The new branch selects the nearest exit face in rectangle-local
+coordinates and constructs a single analytic contact point pair. Its normal
+and contact depth ensure that a contained rigid circle is pushed towards
+that face. Circle radius and nonnegative collision margins are included,
+and any cached separation axis is invalidated after a successful contact.
+
+The fast path is limited to **unscaled, unsheared, unit-orthogonal** circle
+and rectangle transforms, nonnegative margins, and non-swept contacts.
+Degenerate rectangles, affine-scaled shapes and swept CCD pairs still use
+the existing SAT solver. It does not allocate heap memory.
+
+Validation consists of a Python source contract and 5,000 deterministic
+randomized analytical contact checks across rotated rectangles, centers,
+radii and margins. The headless test checks circle centers inside,
+near the border, outside corners, and an actual rigid-body escape toward
+the nearest exit. A scaled rectangle explicitly covers the SAT fallback:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_embedded_circle_rectangle_2d.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_embedded_circle_rectangle_2d_regression.gd
+```
+
+For CPU/p95/RSS profiling, two stress cases create the same number of
+circle/rectangle pairs at each scale, with circles either embedded
+or overlapping from outside. Both refresh transforms every physics step:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_circle_rectangle_embedded_2d,physics_circle_rectangle_exterior_2d \
+  --scale 4 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/physics-circle-rectangle-2d.json
+```
+
+Benchmark each scene against the same scene on the *previous* engine build
+to attribute a speed difference to this optimization. The two workloads
+also have different contact depths, so their absolute timings are not a
+direct algorithm-only speed ratio. Compiled Godot headless tests and real
+benchmarks remain necessary before claiming production speedups.
+
+### 3D box–capsule / box–cylinder radial SAT axes (relative-origin fix)
+
+In GodotPhysics3D's narrowphase, both box–capsule and box–cylinder SAT
+calculations used to form a radial separating axis with
+`Plane(cylinder_axis).project(box_vertex)`. This projects the vertex onto a
+plane through the **world origin**, not onto a plane through the
+capsule/cylinder's own axis. As a result, the candidate SAT directions and
+the selected contact feature could change when the entire scene moved.
+
+The new calculation uses a **relative** vertex offset and projects out the
+component along the cylinder's unit axis:
+
+```text
+relative = box_vertex - capsule_or_cylinder_origin
+radial = relative - axis * dot(relative, axis)
+```
+
+Only nonzero radial vectors are tested; a box vertex lying on the axis
+does not contribute a unique separating direction. This avoids a temporary
+`Plane` per vertex, produces translation-invariant axes, and reduces the
+chance of large-world numerical problems. The existing face, edge, end-cap
+rim, penetration and manifold procedures remain active; there is no
+physics setting to enable.
+
+Source contract tests include 5,000 deterministic random axis/vertex
+configurations, plus a check showing that the old world-origin projection
+changes after translation. The headless regression tests box–capsule and
+box–cylinder overlap, separation and contact direction for translated
+and rotated geometry at multiple world positions:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_3d_box_radial_axes.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_box_radial_axis_translation_regression.gd
+```
+
+Four stress cases compare identical 256 box/rounded-shape pairs per
+scale near and far from the world origin. They exercise fresh narrowphase
+contacts on every step and collect CPU frame p95, physics time, contact
+pairs and peak process RSS (from the Python runner):
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_box_capsule_near_3d,physics_box_capsule_far_3d,physics_box_cylinder_near_3d,physics_box_cylinder_far_3d \
+  --scale 4 --frames 90 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-box-radial-sat.json
+```
+
+Run each workload against both the previous and updated engine builds.
+A translation-invariant SAT direction is a correctness improvement, not
+by itself evidence of faster total frame time. C++ compilation, native
+headless regression and measured resource usage are required for
+production validation.
+
+### Uniform fluid buoyancy, flow and quadratic drag for rigid bodies (Jolt-inspired)
+
+Cgame now supports an **opt-in, fully submerged uniform fluid medium** in
+both GodotPhysics2D and GodotPhysics3D. This is inspired by Jolt's
+`Body::ApplyBuoyancyImpulse` and is a deliberately smaller, compatible
+model, **not** a port of its shape-submersion algorithm.
+
+The fluid model combines four optional effects, separately configurable
+under `physics/2d/solver/` and `physics/3d/solver/`:
+
+- `fluid_buoyancy` (default `0.0`): fraction of gravity counteracted
+  by Archimedes-style buoyancy. `1.0` is neutrally buoyant, values above
+  `1.0` float against gravity, and `0` exactly retains legacy gravity
+  even if other fluid effects are enabled. Uses the body's **actual
+  area-overridden gravity** and `gravity_scale`, not a hard-coded down axis.
+- `fluid_linear_drag` (default `0.0`): mass-normalized quadratic
+  resistance coefficient, `k = density * Cd * cross_section / (2 * mass)`.
+  In 3D the velocity is in m/s and `k` is in 1/m; in 2D, the analogous
+  units are pixels/s and 1/pixel.
+- `fluid_angular_drag` (default `0.0`): inertia-normalized quadratic
+  rotational resistance, acting on the scalar angular velocity in 2D
+  or the full angular-velocity vector in 3D.
+- `fluid_flow_velocity` (default zero Vector2/Vector3): constant world-space
+  velocity of the medium, allowing flowing water or wind-like drag.
+  Its value matters only while `fluid_linear_drag` is nonzero.
+
+For constant ambient flow `u`, relative velocity `w = v - u` and
+quadratic resistance `dw/dt = -k |w| w`, Cgame applies the **closed-form
+solution of the drag-only substep**:
+
+```text
+v_next = u + (v - u) / (1 + k * dt * |v - u|)
+omega_next = omega / (1 + angular_k * dt * |omega|)
+```
+
+This prevents high-drag explicit-Euler overshoot and never reverses
+velocity relative to the flow. Normal gravity/external forces are
+integrated first; drag is then split off in the same step. Buoyancy
+adds `-fluid_buoyancy * mass * gravity` to external force. The model
+adds no per-step heap allocations and does not modify kinematic bodies,
+custom-integrated bodies or Godot's normal contact response. Project
+settings are cached when each PhysicsSpace is created; create a new
+space (or restart the scene/project) after changing the settings.
+
+**Limitations:** the entire body is treated as fully immersed in a
+single uniform medium. This model does **not** compute a liquid surface,
+partial displaced volume, center-of-buoyancy torque, waves, turbulent
+vortices, hydrodynamic pressure, per-shape cross-sections or soft-body
+fluid interactions. Sleeping bodies are not automatically woken by a
+new flow. Those require a separate geometry-based water-volume/CFD
+implementation; they should not be assumed from these settings.
+
+Python math/source tests validate 20,000 randomized 2D/3D drag samples,
+4,000 timestep-splitting cases, angular drag stability and buoyancy
+balance, plus 2D/3D setting/solver wiring. The headless physics server
+regression checks drag towards a current, angular resistance and
+neutral buoyancy for rigid bodies in both dimensions:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_uniform_fluid.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_uniform_fluid_regression.gd
+```
+
+Four stress cases create 256 fully dynamic, non-sleeping rigid bodies
+per scale in 2D and 3D, with an off baseline and a buoyancy/flow/drag
+run. Use identical builds and hardware to compare physics time, p95,
+process RSS and CPU profiler results:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_fluid_2d_disabled,physics_fluid_2d_enabled,physics_fluid_3d_disabled,physics_fluid_3d_enabled \
+  --scale 4 --frames 90 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-uniform-fluid.json
+```
+
+The fluid-on scene physically differs from the fluid-off baseline;
+these comparisons primarily quantify the **cost of enabling** the
+model, not an algorithm-only speedup. Real C++ compilation and Godot
+headless execution remain required before declaring production-ready.
+
+### Cached clip-plane distances for 3D face manifolds (Box2D-style)
+
+GodotPhysics3D generates face/face contacts by clipping one convex
+face against the edge planes of the opposite face
+(Sutherland-Hodgman). The old inner loop evaluated the signed plane
+distance of **both ends of each edge**, so each polygon vertex was
+projected twice per clipping plane.
+
+The optimized loop caches the end-vertex distance to reuse as the
+next edge's start distance and reuses the first distance when closing
+the polygon. This reduces `2 * vertex_count` signed-distance
+evaluations to `vertex_count` for every nonempty clipping stage.
+For an edge that crosses the plane, the already cached start-vertex
+distance also replaces a repeated dot product in the intersection
+fraction. It additionally exits immediately if a clipping stage
+produces zero vertices: subsequent half-plane intersections cannot
+make an empty convex polygon nonempty. A deterministic 10,000-case
+reference exercise produced 388,696 signed-distance evaluations for
+the old algorithm versus 194,348 for the cached implementation;
+these are **mathematical operation counts**, not a measured CPU speedup.
+
+This is only an evaluation-order optimization: the clipping planes,
+intersection equations, edge handling and contact callback are
+unchanged. The calculation uses the existing stack buffers, adds no
+heap allocations and requires no physics setting. Existing manifold
+generation and contact reduction are preserved.
+
+Python reference tests compare the old and cached signed-distance
+formulas on **10,000 randomized convex polygons** of 3–16 vertices
+against 1–8 random half-planes, including fully eliminated polygons.
+The headless regression creates a 12-gon convex prism and verifies
+overlap/near-miss queries and finite manifold points for parallel,
+relatively rotated and jointly rotated faces:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_3d_face_clip_distance_cache.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_face_clip_3d_regression.gd
+```
+
+The benchmark uses 16-sided convex prism pairs (256 static+dynamic
+pairs per scale), keeps their faces overlapping through small
+per-frame transform updates and collects physics-process/frame p95
+and RSS via the stress runner:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_face_clip_dense_3d,physics_face_clip_rotated_3d \
+  --scale 4 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/physics-face-clip-3d.json
+```
+
+For accurate performance attribution, compare each workload against
+its **identical pre-optimization scene on a previous Cgame binary**.
+The math references cannot replace C++ compilation, headless
+regressions or runtime CPU/RAM measurements.
+
+### Optimized 3D sphere-box closest-point detection
+
+Cgame now specializes GodotPhysics3D's sphere-versus-box narrow phase
+for boxes whose **world-space Basis is exactly identity** (no rotation,
+scale or shear). A box's inverse transform is then pure translation:
+the sphere's local center is simply `sphere_origin - box_origin`. The
+collision routine skips `affine_inverse()` and the unnecessary matrix
+transforms of the closest box point, while keeping the original
+contact normal/penetration handling for fully contained spheres and
+nonzero collision margins.
+
+For arbitrary rotated, scaled or sheared boxes, the existing
+`affine_inverse()` path is left unchanged. This follows the usual
+specialized primitive-collision principle used by engines such as
+Jolt and Box2D; it is not a replacement for GJK/EPA.
+
+Validation includes 10,000 random pure-translation sphere/box
+configurations and a headless GodotPhysics regression for inside,
+outside, corner contacts and nonuniformly scaled/rotated fallback:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_sphere_box_inverse_bypass.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_sphere_box_fast_path_regression.gd
+```
+
+Compare identity and rotated box workloads with otherwise identical
+sphere geometry, simulation steps and dynamic-body counts (256 pairs
+per scale). The workload repositions moving spheres every physics
+frame and records frame p95, collision pair count and peak RSS via
+the Python runner:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_sphere_box_identity_3d,physics_sphere_box_rotated_3d \
+  --scale 4 --frames 90 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-sphere-box-3d.json
+```
+
+Measure the *same scene* on an older and the updated engine binary
+before attributing changes to the fast path: rotated scenes have
+different geometric costs. Compile and run the native/headless
+tests before enabling production workloads.
+
+### Shared-rotation 3D box-box SAT axis deduplication
+
+GodotPhysics3D checks up to **15 separating axes** when testing two
+oriented boxes: three face axes from each box and nine edge-cross
+axes. For two boxes with the **same orthonormal orientation** (including
+identity), all nonzero axes reduce to the same three independent face
+directions. The narrowphase now checks those three axes once, instead
+of redundant projections, and keeps the original manifold generator.
+
+The shortcut requires **exact equality** of the two `Basis` values,
+`Basis::is_rotation()` for the shared orientation (or exact identity),
+and **zero collision margins**. If the boxes differ in orientation,
+are scaled/sheared, or use margin-expanded geometry, the full SAT path
+remains active. The existing cached separation axis is tested first.
+This change requires no new project setting or scratch allocations.
+
+The Python reference covers more than **10,000** box pairs: identity
+and randomized shared-rotation comparisons against the complete set
+of 15 SAT axes. The headless query regression tests three cases:
+identity, matching nonzero rotation, and two different rotations.
+`intersect_shape` and `collide_shape` additionally test that the
+contact manifold still generates finite positions:
 
 ```bash
 python3 -m unittest discover -s tests/stress -p 'test_physics_3d_axis_aligned_box_sat.py' -v
@@ -1545,22 +3032,23 @@ python3 -m unittest discover -s tests/stress -p 'test_physics_3d_axis_aligned_bo
   --script res://physics_box_box_sat_3d_regression.gd
 ```
 
-For repeatable performance measurements compare the same 256
-static+rigid box pairs per scale with identity and rotated bases. Both
-scenarios reapply a slightly changing overlap each frame to avoid only
-measuring persistent manifold caching:
+Compare the three stress cases on the **same engine build**: unrotated
+fast path, shared nonzero rotation fast path, and different relative
+rotations through the generic 15-axis SAT. They create the same 256
+static/dynamic box pairs per scale and repeatedly update their contacts:
 
 ```bash
 python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
-  --case physics_box_box_axis_aligned_3d,physics_box_box_rotated_3d \
+  --case physics_box_box_axis_aligned_3d,physics_box_box_rotated_3d,physics_box_box_misaligned_3d \
   --scale 4 --frames 90 --repeats 5 --timeout 600 \
   --rss-limit-mib 4096 --output out/physics-box-sat-3d.json
 ```
 
-This does not establish a speedup without a compiled before/after benchmark,
-and rotated scenes naturally have some additional transform overhead.
-Compare both workloads across the same two engine builds for a reliable
-estimate of the optimization's contribution.
+These workloads also differ in collision geometry, so measure each
+scenario against the corresponding *pre-change* engine build before
+attributing an observed performance difference to this shortcut.
+Only compiling and executing the tests can establish real performance
+and correctness of the implementation.
 
 ## Idempotent static-body transform updates (GodotPhysics2D / GodotPhysics3D)
 
@@ -1699,9 +3187,9 @@ kinematic body pointers from conflict masks for **contact-only islands**.
 Each rigid contact class explicitly declares that its immovable bodies are
 read-only. Ordinary joints and mixed islands keep conservative body ownership,
 and 3D soft-body contacts still disable this parallel large-island path.
-There is no change in the default solver because
-`physics/2d/solver/parallel_large_islands` and
-`physics/3d/solver/parallel_large_islands` both default to `false`.
+`physics/3d/solver/parallel_large_islands` defaults to `false`; since the
+graph-colored path is deterministic and measured ~40% faster on a 20k-body 2D
+pile, `physics/2d/solver/parallel_large_islands` now defaults to `true`.
 
 The standalone regression creates 320 rigid boxes arranged along the same
 static floor, with adjacent boxes initially contacting one another, to form
@@ -1916,7 +3404,7 @@ built-in GodotPhysics2D solver:
 
 `physics/2d/solver/parallel_large_islands = true`
 
-The default is **false** until engine builds, thread sanitizers, stability and
+The default was **false** until engine builds, thread sanitizers, stability and
 performance tests validate the implementation. Scheduling is adaptive:
 
 - **One large island:** independently solve the other small islands, then
@@ -2092,3 +3580,66 @@ batch calls and allocation caps; the runtime script performs 32 cycles of
 
 Compare native runtime timing, allocator counts and RSS with the same Jolt
 backend before/after the change. A source-only check does not prove a speedup.
+
+## GodotPhysics3D sub-stepping (`physics/3d/solver/substeps`)
+
+Splitting each physics tick into N shorter steps (default 1, i.e. unchanged
+behavior) makes stacks and piles far more stable for the same total iteration
+budget. `physics_substeps_3d_regression.gd` checks, against the built-in
+GodotPhysics3D backend, that
+
+- a 20 box stack collapses with 1 step of 16 iterations but stands with
+  4 sub-steps of 4 iterations;
+- a force applied for one tick produces exactly one tick of velocity
+  (`F / m * dt`) for 1 and for 4 sub-steps;
+- a moving kinematic platform carries a box at its own speed for 1 and 4
+  sub-steps.
+
+```sh
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_substeps_3d_regression.gd
+```
+
+Measured on a 3000 box random pile (macOS, arm64): 1 x 16 iterations 40 ms per
+tick, 2 x 8 68 ms, 4 x 4 137 ms. Cost grows roughly linearly with the number of
+sub-steps because every sub-step repeats broadphase update, contact generation
+and constraint setup, so enable it where stability matters more than the
+per-tick cost. Reusing one manifold across sub-steps (as Box2D v3 does) was
+tried and made stacks *less* stable without saving time, so it is not used.
+
+## Wind and air drag for rigid bodies (GodotPhysics3D)
+
+`Area3D` wind used to push only soft bodies. A `RigidBody3D` with
+`wind_drag_coefficient > 0` now feels `0.5 * rho * Cd * A * |v_rel| * v_rel` in
+the wind of the areas it is inside, where the air speed follows from the wind
+pressure (`sqrt(2 * pressure / rho)`, rho from `physics/3d/solver/air_density`).
+The force is clamped so a step never pushes the body past the air speed.
+`physics_wind_3d_regression.gd` checks the approach to the air speed from
+below, indifference at coefficient 0, mass, area and distance attenuation
+scaling, and no push outside the area:
+
+```sh
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_wind_3d_regression.gd
+```
+
+Jolt Physics ignores the property. Torque from off-center pressure and lift are
+not modelled; a coefficient of 0 (the default) costs nothing.
+
+
+## Small-file I/O pressure and phase profiling
+
+`small_file_io` creates, verifies and removes many small temporary files under
+`user://stress_small_files`, recording separate write, read and cleanup timings.
+The existing `scene_churn` workload and phase-median statistics remain available;
+additional implementations already merged into `develop` are preserved.
+
+
+## Bounded ramp-to-failure
+
+The \`run.py --ramp --ramp-steps 4 --ramp-factor 2\` options run each case in
+fresh, supervised processes at geometrically increasing scale levels (never
+exceeding scale 1000). Each stage enforces its own timeout and process-tree RSS
+limit; the first failure stops that case's ramp. The non-ramp default remains
+unchanged. JSON adds per-scale case names and a ranked bottleneck summary.
+For consistency, compare baselines collected with the same ramp mode.

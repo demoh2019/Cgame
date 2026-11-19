@@ -752,6 +752,54 @@ void GodotPhysicsServer2D::body_set_param(RID p_body, PS2DE::BodyParameter p_par
 	body->set_param(p_param, p_value);
 }
 
+void GodotPhysicsServer2D::body_set_solver_priority(RID p_body, int p_priority) {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(body);
+	body->set_solver_priority(p_priority);
+}
+
+int GodotPhysicsServer2D::body_get_solver_priority(RID p_body) const {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(body, 1);
+	return body->get_solver_priority();
+}
+
+void GodotPhysicsServer2D::body_set_max_depenetration_velocity(RID p_body, real_t p_value) {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(body);
+	body->set_max_depenetration_velocity(p_value);
+}
+
+real_t GodotPhysicsServer2D::body_get_max_depenetration_velocity(RID p_body) const {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(body, 0);
+	return body->get_max_depenetration_velocity();
+}
+
+void GodotPhysicsServer2D::body_set_max_angular_velocity(RID p_body, real_t p_value) {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(body);
+	body->set_max_angular_velocity(p_value);
+}
+
+real_t GodotPhysicsServer2D::body_get_max_angular_velocity(RID p_body) const {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(body, 0);
+	return body->get_max_angular_velocity();
+}
+
+void GodotPhysicsServer2D::body_set_max_linear_velocity(RID p_body, real_t p_value) {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(body);
+	body->set_max_linear_velocity(p_value);
+}
+
+real_t GodotPhysicsServer2D::body_get_max_linear_velocity(RID p_body) const {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(body, 0);
+	return body->get_max_linear_velocity();
+}
+
 Variant GodotPhysicsServer2D::body_get_param(RID p_body, PS2DE::BodyParameter p_param) const {
 	GodotBody2D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL_V(body, 0);
@@ -908,6 +956,9 @@ void GodotPhysicsServer2D::body_add_collision_exception(RID p_body, RID p_body_b
 	ERR_FAIL_NULL(body);
 
 	body->add_exception(p_body_b);
+	// Reconcile the broadphase immediately, even if both bodies remain still.
+	// Otherwise adding/removing an exception would leave stale or missing pairs.
+	body->refresh_collision_pairs();
 	body->wakeup();
 }
 
@@ -916,6 +967,9 @@ void GodotPhysicsServer2D::body_remove_collision_exception(RID p_body, RID p_bod
 	ERR_FAIL_NULL(body);
 
 	body->remove_exception(p_body_b);
+	// Reconcile the broadphase immediately, even if both bodies remain still.
+	// Otherwise adding/removing an exception would leave stale or missing pairs.
+	body->refresh_collision_pairs();
 	body->wakeup();
 }
 
@@ -1075,6 +1129,97 @@ real_t GodotPhysicsServer2D::joint_get_param(RID p_joint, PS2DE::JointParam p_pa
 	}
 
 	return 0;
+}
+
+void GodotPhysicsServer2D::_update_breakable(RID p_joint, GodotJoint2D *p_joint_ptr) {
+	if (p_joint_ptr->can_break()) {
+		breakable_joints.insert(p_joint);
+	} else {
+		breakable_joints.erase(p_joint);
+	}
+}
+
+void GodotPhysicsServer2D::joint_set_break_force(RID p_joint, real_t p_force) {
+	GodotJoint2D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL(joint);
+	joint->set_break_force(p_force);
+	_update_breakable(p_joint, joint);
+}
+
+real_t GodotPhysicsServer2D::joint_get_break_force(RID p_joint) const {
+	GodotJoint2D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, 0);
+	return joint->get_break_force();
+}
+
+void GodotPhysicsServer2D::joint_set_break_torque(RID p_joint, real_t p_torque) {
+	GodotJoint2D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL(joint);
+	joint->set_break_torque(p_torque);
+	_update_breakable(p_joint, joint);
+}
+
+real_t GodotPhysicsServer2D::joint_get_break_torque(RID p_joint) const {
+	GodotJoint2D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, 0);
+	return joint->get_break_torque();
+}
+
+Vector2 GodotPhysicsServer2D::joint_get_reaction_force(RID p_joint) const {
+	GodotJoint2D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, Vector2());
+	return joint->get_reaction_force();
+}
+
+real_t GodotPhysicsServer2D::joint_get_reaction_torque(RID p_joint) const {
+	GodotJoint2D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, 0);
+	return joint->get_reaction_torque();
+}
+
+bool GodotPhysicsServer2D::joint_is_broken(RID p_joint) const {
+	GodotJoint2D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, false);
+	return joint->is_broken();
+}
+
+void GodotPhysicsServer2D::joint_set_break_callback(RID p_joint, const Callable &p_callable) {
+	GodotJoint2D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL(joint);
+	joint->set_break_callback(p_callable);
+}
+
+// Runs after every step: a joint whose last-step reaction exceeded its threshold is detached.
+void GodotPhysicsServer2D::_process_joint_breaks() {
+	if (breakable_joints.is_empty()) {
+		return;
+	}
+	LocalVector<RID> to_break;
+	LocalVector<RID> stale;
+	for (const RID &rid : breakable_joints) {
+		GodotJoint2D *joint = joint_owner.get_or_null(rid);
+		if (!joint) {
+			stale.push_back(rid);
+		} else if (joint->exceeds_break_threshold()) {
+			to_break.push_back(rid);
+		}
+	}
+	for (const RID &rid : stale) {
+		breakable_joints.erase(rid);
+	}
+	for (const RID &rid : to_break) {
+		GodotJoint2D *joint = joint_owner.get_or_null(rid);
+		breakable_joints.erase(rid);
+		joint->break_joint();
+		if (joint->is_disabled_collisions_between_bodies() && joint->get_body_count() == 2) {
+			// The joint no longer holds the bodies together, so they may collide again.
+			GodotBody2D *body_a = joint->get_body_ptr()[0];
+			GodotBody2D *body_b = joint->get_body_ptr()[1];
+			body_remove_collision_exception(body_a->get_self(), body_b->get_self());
+			body_remove_collision_exception(body_b->get_self(), body_a->get_self());
+		}
+		broken_joint_queue.push_back(rid);
+	}
 }
 
 void GodotPhysicsServer2D::joint_disable_collisions_between_bodies(RID p_joint, const bool p_disable) {
@@ -1269,6 +1414,7 @@ void GodotPhysicsServer2D::free_rid(RID p_rid) {
 	} else if (joint_owner.owns(p_rid)) {
 		GodotJoint2D *joint = joint_owner.get_or_null(p_rid);
 
+		breakable_joints.erase(p_rid);
 		joint_owner.free(p_rid);
 		memdelete(joint);
 
@@ -1302,6 +1448,7 @@ void GodotPhysicsServer2D::step(real_t p_step) {
 		active_objects += E->get_active_objects();
 		collision_pairs += E->get_collision_pairs();
 	}
+	_process_joint_breaks();
 }
 
 void GodotPhysicsServer2D::sync() {
@@ -1316,6 +1463,25 @@ void GodotPhysicsServer2D::flush_queries() {
 	flushing_queries = true;
 
 	uint64_t time_beg = OS::get_singleton()->get_ticks_usec();
+
+	// Break notifications run here, on the same thread and at the same point as body callbacks.
+	if (!broken_joint_queue.is_empty()) {
+		LocalVector<RID> queue;
+		for (const RID &rid : broken_joint_queue) {
+			queue.push_back(rid);
+		}
+		broken_joint_queue.clear();
+		for (const RID &rid : queue) {
+			GodotJoint2D *joint = joint_owner.get_or_null(rid);
+			if (joint && joint->get_break_callback().is_valid()) {
+				Variant arg = rid;
+				const Variant *args[1] = { &arg };
+				Variant ret;
+				Callable::CallError ce;
+				joint->get_break_callback().callp(args, 1, ret, ce);
+			}
+		}
+	}
 
 	for (GodotSpace2D *E : active_spaces) {
 		E->call_queries();

@@ -320,6 +320,12 @@ static void _generate_contacts_face_face(const Vector3 *p_points_A, int p_point_
 
 	// go through all of B points
 	for (int i = 0; i < p_point_count_B; i++) {
+		// Sutherland-Hodgman clipping can never recover vertices once
+		// the source polygon is empty. Avoid constructing the remaining
+		// edge planes (and normalizing their normals) in this case.
+		if (clipbuf_len == 0) {
+			return;
+		}
 		int i_n = (i + 1) % p_point_count_B;
 
 		Vector3 edge0_B = p_points_B[i];
@@ -332,14 +338,18 @@ static void _generate_contacts_face_face(const Vector3 *p_points_A, int p_point_
 		// avoid double clip if A is edge
 		int dst_idx = 0;
 		bool edge = clipbuf_len == 2;
+		// An edge's end vertex is the next edge's start vertex. Cache its
+		// signed clip distance instead of evaluating the plane twice for
+		// every vertex. Reuse the first distance to close the polygon.
+		const real_t first_clip_distance = clip.distance_to(clipbuf_src[0]);
+		real_t dist0 = first_clip_distance;
 		for (int j = 0; j < clipbuf_len; j++) {
 			int j_n = (j + 1) % clipbuf_len;
 
 			Vector3 edge0_A = clipbuf_src[j];
 			Vector3 edge1_A = clipbuf_src[j_n];
 
-			real_t dist0 = clip.distance_to(edge0_A);
-			real_t dist1 = clip.distance_to(edge1_A);
+			const real_t dist1 = j_n == 0 ? first_clip_distance : clip.distance_to(edge1_A);
 
 			if (dist0 <= 0) { // behind plane
 
@@ -353,13 +363,17 @@ static void _generate_contacts_face_face(const Vector3 *p_points_A, int p_point_
 				// calculate intersection
 				Vector3 rel = edge1_A - edge0_A;
 				real_t den = clip.normal.dot(rel);
-				real_t dist = -(clip.normal.dot(edge0_A) - clip.d) / den;
+				// dist0 is exactly clip.normal.dot(edge0_A) - clip.d.
+				// Reuse it to avoid a third plane projection for crossing edges.
+				const real_t dist = -dist0 / den;
 				Vector3 inters = edge0_A + rel * dist;
 
 				ERR_FAIL_COND(dst_idx >= max_clip);
 				clipbuf_dst[dst_idx] = inters;
 				dst_idx++;
 			}
+			// The next edge begins at the current edge's end point.
+			dist0 = dist1;
 		}
 
 		clipbuf_len = dst_idx;
@@ -857,10 +871,15 @@ static void _collision_sphere_box(const GodotShape3D *p_a, const Transform3D &p_
 	const GodotSphereShape3D *sphere_A = static_cast<const GodotSphereShape3D *>(p_a);
 	const GodotBoxShape3D *box_B = static_cast<const GodotBoxShape3D *>(p_b);
 
-	// Find the point on the box nearest to the center of the sphere.
-
-	const Transform3D box_inverse = p_transform_b.affine_inverse();
-	Vector3 center = box_inverse.xform(p_transform_a.origin);
+	// Box3D-style specialized AABB closest-point path: for an exactly
+	// unrotated, unscaled box the inverse is a translation. Avoid an
+	// affine matrix inversion for the common sphere-versus-static-box case.
+	// Keep affine_inverse() unchanged for rotated, scaled or sheared boxes.
+	const bool unrotated_box = p_transform_b.basis == Basis();
+	const Transform3D box_inverse = unrotated_box ?
+			Transform3D(Basis(), -p_transform_b.origin) : p_transform_b.affine_inverse();
+	Vector3 center = unrotated_box ?
+			p_transform_a.origin - p_transform_b.origin : box_inverse.xform(p_transform_a.origin);
 	Vector3 extents = box_B->get_half_extents();
 	const bool center_inside = Math::abs(center.x) <= extents.x &&
 			Math::abs(center.y) <= extents.y &&
@@ -868,7 +887,7 @@ static void _collision_sphere_box(const GodotShape3D *p_a, const Transform3D &p_
 	Vector3 nearest(MIN(MAX(center.x, -extents.x), extents.x),
 			MIN(MAX(center.y, -extents.y), extents.y),
 			MIN(MAX(center.z, -extents.z), extents.z));
-	nearest = p_transform_b.xform(nearest);
+	nearest = unrotated_box ? p_transform_b.origin + nearest : p_transform_b.xform(nearest);
 
 	// See if it is inside the sphere.
 
@@ -1153,17 +1172,18 @@ static void _collision_box_box(const GodotShape3D *p_a, const Transform3D &p_tra
 		return;
 	}
 
-	// Both boxes are exactly axis-aligned and have no rounded margins:
-	// their face normals and all nonzero edge-cross axes reduce to the
-	// three world-space axes. Test each axis only once, avoiding six
-	// redundant face projections and all nine cross-product candidates.
-	// Do not use this path for rotated, scaled or sheared boxes, or for
-	// margin-expanded geometry where additional feature axes matter.
-	if (!p_with_margin && p_transform_a.basis == Basis() && p_transform_b.basis == Basis()) {
+	// Box2D/Box3D-style SAT axis deduplication. Two boxes with exactly
+	// the same rigid rotation (including identity) have only three unique
+	// face/edge-cross axes. Reject scaled or sheared transforms: for those,
+	// non-face edge directions can still separate the boxes. The rotation
+	// check also guards numerical validity of the orthonormal basis.
+	const Basis &basis_a = p_transform_a.basis;
+	const bool shared_orthonormal_basis = !p_with_margin &&
+			basis_a == p_transform_b.basis &&
+			(basis_a == Basis() || basis_a.is_rotation());
+	if (shared_orthonormal_basis) {
 		for (int i = 0; i < 3; ++i) {
-			Vector3 axis(0, 0, 0);
-			axis[i] = 1.0;
-			if (!separator.test_axis(axis)) {
+			if (!separator.test_axis(basis_a.get_column(i))) {
 				return;
 			}
 		}
@@ -1309,10 +1329,17 @@ static void _collision_box_capsule(const GodotShape3D *p_a, const Transform3D &p
 					point += p_transform_a.basis.get_column(l) * he[l];
 				}
 
-				//Vector3 axis = (point - cyl_axis * cyl_axis.dot(point)).normalized();
-				Vector3 axis = Plane(cyl_axis).project(point).normalized();
-
-				if (!separator.test_axis(axis)) {
+				// Use the capsule axis as the radial origin. Projecting the
+				// world-space vertex around (0, 0, 0) changes the candidate
+				// SAT axis when the whole scene is translated.
+				const Vector3 from_capsule = point - p_transform_b.origin;
+				Vector3 radial = from_capsule - cyl_axis * from_capsule.dot(cyl_axis);
+				if (Math::is_zero_approx(radial.length_squared())) {
+					// A vertex exactly on the capsule axis contributes no
+					// radial separating direction.
+					continue;
+				}
+				if (!separator.test_axis(radial.normalized())) {
 					return;
 				}
 			}
@@ -1418,9 +1445,14 @@ static void _collision_box_cylinder(const GodotShape3D *p_a, const Transform3D &
 	// Points of A, cylinder lateral surface.
 	for (int i = 0; i < 8; i++) {
 		const Vector3 &point = vertices_A[i];
-		Vector3 axis = Plane(cyl_axis).project(point).normalized();
-
-		if (!separator.test_axis(axis)) {
+		// A cylinder's radial axis runs through its own origin, not
+		// world zero. This also avoids a temporary Plane per vertex.
+		const Vector3 from_cylinder = point - p_transform_b.origin;
+		Vector3 radial = from_cylinder - cyl_axis * from_cylinder.dot(cyl_axis);
+		if (Math::is_zero_approx(radial.length_squared())) {
+			continue;
+		}
+		if (!separator.test_axis(radial.normalized())) {
 			return;
 		}
 	}

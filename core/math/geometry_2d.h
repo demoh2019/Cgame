@@ -207,7 +207,19 @@ public:
 		// Fail if segments are parallel or colinear.
 		// (when A x B == zero, i.e (C - D) x B == zero, i.e C x B == D x B)
 		if (Math::is_equal_approx(C.y, D.y)) {
-			return false;
+			// C.y and D.y are divided by |AB|^2, so for long segments both become tiny and the
+			// absolute comparison above mistakes a crossing segment for a parallel one. Treat the
+			// pair as parallel only if the directions are parallel relative to their lengths,
+			// and otherwise require C and D to lie strictly on opposite sides of line A-B.
+			const Vector2 E = p_to_b - p_from_b;
+			const real_t e_len_sq = E.length_squared();
+			const real_t cross = B.cross(E);
+			if (e_len_sq <= 0 || Math::abs(cross) <= (real_t)CMP_EPSILON * Math::sqrt(ABlen * e_len_sq)) {
+				return false;
+			}
+			if (!((C.y < 0 && D.y > 0) || (C.y > 0 && D.y < 0))) {
+				return false;
+			}
 		}
 
 		real_t ABpos = D.x + (C.x - D.x) * D.y / (D.y - C.y);

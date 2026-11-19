@@ -100,6 +100,14 @@ class GodotBodyPair3D : public GodotBodyContact3D {
 	int contact_count = 0;
 	GodotPhysicsContactRecycling contact_recycling;
 	real_t mixed_friction = 0.0; // Recomputed in pre_solve, reused across solver iterations.
+	// Iterative, load-dependent rotational friction for the contact manifold.
+	// Cached only across iterations of ONE step; not recycled across frames.
+	Vector3 angular_friction_normal;
+	Vector3 accumulated_rolling_impulse;
+	real_t angular_friction_radius = 0.0;
+	real_t accumulated_spinning_impulse = 0.0;
+	uint8_t angular_friction_contact_mask = 0;
+
 
 	static void _contact_added_callback(const Vector3 &p_point_A, int p_index_A, const Vector3 &p_point_B, int p_index_B, const Vector3 &normal, void *p_userdata);
 

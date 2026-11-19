@@ -37,9 +37,11 @@
 #include "godot_broad_phase_2d.h"
 #include "godot_collision_object_2d.h"
 
+#include "core/templates/hashfuncs.h"
 #include "core/templates/paged_allocator.h"
 #include "core/typedefs.h"
 #include "servers/physics_contact_push_speed.h"
+#include "servers/physics_friction_combine.h"
 #include "servers/physics_restitution_combine.h"
 #include "servers/physics_2d/direct_states/physics_direct_space_state_2d.h"
 
@@ -73,9 +75,22 @@ public:
 
 private:
 	struct ExcludedShapeSW {
-		GodotShape2D *local_shape = nullptr;
+		// A compound body may reuse the same Shape2D resource multiple times.
+		// Match the individual local shape slot, not the shared shape pointer.
+		int local_shape_index = 0;
 		const GodotCollisionObject2D *against_object = nullptr;
 		int against_shape_index = 0;
+
+		_FORCE_INLINE_ uint32_t hash() const {
+			uint32_t result = hash_murmur3_one_64(uint64_t(reinterpret_cast<uintptr_t>(against_object)));
+			result = hash_murmur3_one_32(uint32_t(local_shape_index), result);
+			return hash_fmix32(hash_murmur3_one_32(uint32_t(against_shape_index), result));
+		}
+		_FORCE_INLINE_ bool operator==(const ExcludedShapeSW &p_other) const {
+			return local_shape_index == p_other.local_shape_index &&
+					against_object == p_other.against_object &&
+					against_shape_index == p_other.against_shape_index;
+		}
 	};
 
 	uint64_t elapsed_time[ELAPSED_TIME_MAX] = {};
@@ -85,6 +100,12 @@ private:
 
 	GodotBroadPhase2D *broadphase = nullptr;
 	SelfList<GodotBody2D>::List active_list;
+	// Bumped whenever a body enters or leaves the active list, so the stepper can
+	// reuse one contiguous snapshot of the list instead of re-walking it.
+	uint32_t active_list_version = 0;
+	// Contiguous copy of the active list, rebuilt lazily when the version changes.
+	LocalVector<GodotBody2D *> active_snapshot;
+	uint32_t active_snapshot_version = UINT32_MAX;
 	SelfList<GodotBody2D>::List mass_properties_update_list;
 	SelfList<GodotBody2D>::List state_query_list;
 	SelfList<GodotArea2D>::List monitor_query_list;
@@ -111,16 +132,31 @@ private:
 	int solver_iterations = 0;
 	bool block_solver_enabled = false;
 	bool parallel_large_islands = false;
+	bool manifold_spread_reduction = false; // Opt-in stable two-contact patch selection.
 
 	real_t contact_recycle_radius = 0.0;
 	real_t contact_max_separation = 0.0;
+	real_t speculative_sphere_distance = 0.0; // Off unless explicitly enabled.
 	real_t contact_max_allowed_penetration = 0.0;
 	real_t contact_bias = 0.0;
 	real_t max_contact_push_speed = 0.0; // 0: unlimited (legacy behavior).
 	real_t max_linear_velocity = 0.0; // 0: unlimited, cached per space.
+	real_t max_linear_velocity = 0.0; // Opt-in rigid speed limit, 0 disables.
+	real_t max_angular_velocity = 0.0; // Opt-in angular speed limit, rad/s; 0 disables.
+	real_t ccd_max_angular_motion = 0.0; // Opt-in maximum CCD rotation per physics step, radians.
 	real_t warm_start_coefficient = 1.0;
+	bool ccd_rotational_bounds = false; // Optional conservative angular sweep broadphase.
+	bool ccd_tight_rotational_bounds = false; // Analytical swept arc AABB; opt-in.
+	bool implicit_damping = false; // Box2D-style time-step-stable damping; disabled by default.
+	real_t fluid_linear_drag = 0.0; // Uniform-medium quadratic drag per unit mass.
+	real_t fluid_angular_drag = 0.0; // Uniform-medium quadratic angular resistance.
+	real_t fluid_buoyancy = 0.0; // 0 = off; 1 = neutral in the fully submerged model.
+	Vector2 fluid_flow_velocity; // Constant ambient current or wind, in world space.
+	// Bullet-style angular rolling resistance; zero leaves the classic solver unchanged.
+	real_t rolling_friction = 0.0;
 	real_t constraint_bias = 0.0;
 	real_t restitution_velocity_threshold = 0.0;
+	real_t static_friction_multiplier = 1.0; // PhysX-style stiction; 1 = legacy friction.
 	int friction_combine_mode = 0; // 0: legacy, 1: geometric, 2: average, 3: maximum
 	int restitution_combine_mode = 0; // 0: legacy sum, 1: max, 2: average, 3: min, 4: multiply, 5: geometric
 
@@ -154,6 +190,10 @@ public:
 	GodotArea2D *get_default_area() const { return area; }
 
 	const SelfList<GodotBody2D>::List &get_active_body_list() const;
+	_FORCE_INLINE_ uint32_t get_active_list_version() const { return active_list_version; }
+	// Pointer snapshot of the active bodies; avoids walking the intrusive list (a serial
+	// chain of cache misses on huge scenes) when membership did not change.
+	const LocalVector<GodotBody2D *> &get_active_bodies();
 	void body_add_to_active_list(SelfList<GodotBody2D> *p_body);
 	void body_remove_from_active_list(SelfList<GodotBody2D> *p_body);
 	void body_add_to_mass_properties_update_list(SelfList<GodotBody2D> *p_body);
@@ -177,33 +217,42 @@ public:
 	_FORCE_INLINE_ int get_solver_iterations() const { return solver_iterations; }
 	_FORCE_INLINE_ bool is_block_solver_enabled() const { return block_solver_enabled; }
 	_FORCE_INLINE_ bool is_parallel_large_islands_enabled() const { return parallel_large_islands; }
+	_FORCE_INLINE_ bool is_manifold_spread_reduction_enabled() const { return manifold_spread_reduction; }
 	_FORCE_INLINE_ real_t get_contact_recycle_radius() const { return contact_recycle_radius; }
 	_FORCE_INLINE_ real_t get_contact_max_separation() const { return contact_max_separation; }
+	_FORCE_INLINE_ real_t get_speculative_sphere_distance() const { return speculative_sphere_distance; }
 	_FORCE_INLINE_ real_t get_contact_max_allowed_penetration() const { return contact_max_allowed_penetration; }
 	_FORCE_INLINE_ real_t get_contact_bias() const { return contact_bias; }
 	_FORCE_INLINE_ real_t limit_contact_bias(real_t p_bias) const { return godot_physics_limit_contact_bias(p_bias, max_contact_push_speed); }
-	_FORCE_INLINE_ real_t get_max_linear_velocity() const { return max_linear_velocity; }
+	// Pair override: the smaller of the bodies' own limits, else the space default.
+	_FORCE_INLINE_ real_t limit_contact_bias(real_t p_bias, real_t p_speed_a, real_t p_speed_b) const {
+		real_t limit = max_contact_push_speed;
+		if (p_speed_a > 0.0) {
+			limit = p_speed_b > 0.0 ? MIN(p_speed_a, p_speed_b) : p_speed_a;
+		} else if (p_speed_b > 0.0) {
+			limit = p_speed_b;
+		}
+		return godot_physics_limit_contact_bias(p_bias, limit);
+	}
 	_FORCE_INLINE_ real_t get_warm_start_coefficient() const { return warm_start_coefficient; }
+	_FORCE_INLINE_ real_t get_max_linear_velocity() const { return max_linear_velocity; }
+	_FORCE_INLINE_ real_t get_max_angular_velocity() const { return max_angular_velocity; }
+	_FORCE_INLINE_ real_t get_ccd_max_angular_motion() const { return ccd_max_angular_motion; }
+	_FORCE_INLINE_ bool is_ccd_rotational_bounds_enabled() const { return ccd_rotational_bounds; }
+	_FORCE_INLINE_ bool is_ccd_tight_rotational_bounds_enabled() const { return ccd_tight_rotational_bounds; }
+	_FORCE_INLINE_ bool is_implicit_damping_enabled() const { return implicit_damping; }
+	_FORCE_INLINE_ real_t get_fluid_linear_drag() const { return fluid_linear_drag; }
+	_FORCE_INLINE_ real_t get_fluid_angular_drag() const { return fluid_angular_drag; }
+	_FORCE_INLINE_ real_t get_fluid_buoyancy() const { return fluid_buoyancy; }
+	_FORCE_INLINE_ const Vector2 &get_fluid_flow_velocity() const { return fluid_flow_velocity; }
+	_FORCE_INLINE_ real_t get_rolling_friction() const { return rolling_friction; }
+	_FORCE_INLINE_ real_t get_static_friction_multiplier() const { return static_friction_multiplier; }
 	_FORCE_INLINE_ real_t get_restitution_velocity_threshold() const { return restitution_velocity_threshold; }
 	_FORCE_INLINE_ real_t mix_restitution(real_t p_a, real_t p_b) const { return godot_physics_combine_restitution(p_a, p_b, restitution_combine_mode); }
 	// Match Box2D's geometric mean when explicitly selected, while keeping
 	// the historical GodotPhysics material combination as the default.
 	_FORCE_INLINE_ real_t mix_friction(real_t p_a, real_t p_b) const {
-		if (friction_combine_mode == 0) {
-			return Math::abs(MIN(p_a, p_b));
-		}
-		const real_t a = Math::abs(p_a);
-		const real_t b = Math::abs(p_b);
-		switch (friction_combine_mode) {
-			case 1:
-				return Math::sqrt(a * b);
-			case 2:
-				return (a + b) * (real_t)0.5;
-			case 3:
-				return MAX(a, b);
-			default:
-				return Math::abs(MIN(p_a, p_b));
-		}
+		return godot_physics_combine_friction(p_a, p_b, friction_combine_mode);
 	}
 	_FORCE_INLINE_ real_t get_constraint_bias() const { return constraint_bias; }
 	_FORCE_INLINE_ real_t get_body_linear_velocity_sleep_threshold() const { return body_linear_velocity_sleep_threshold; }

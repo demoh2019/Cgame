@@ -1,0 +1,26 @@
+name: Afterfall Frontier prototype smoke
+
+on:
+  pull_request:
+    paths:
+      - "demo/afterfall_survival/**"
+      - ".github/workflows/afterfall-frontier-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  game-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: "4.5.2"
+          use-dotnet: false
+      - name: Parse project assets in headless editor
+        run: godot --headless --editor --path demo/afterfall_survival --import --quit
+      - name: Exercise generation, crafting, survival and combat
+        run: godot --headless --path demo/afterfall_survival --script res://tests/smoke.gd

@@ -1,0 +1,47 @@
+name: Jolt soft-body self-contact topology and momentum contracts
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/jolt_physics/spaces/jolt_space_3d.cpp"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_soft_self_contacts.py"
+      - "tests/stress/jolt_soft_self/**"
+      - ".github/workflows/jolt-soft-self-collision.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/jolt_physics/spaces/jolt_space_3d.cpp"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_soft_self_contacts.py"
+      - "tests/stress/jolt_soft_self/**"
+      - ".github/workflows/jolt-soft-self-collision.yml"
+  workflow_dispatch:
+
+jobs:
+  nonadjacent-geometry-and-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test topology exclusion, impulses and all prior soft collision contracts
+        run: |
+          python3 -m unittest \
+            tests/stress/test_jolt_soft_self_contacts.py \
+            tests/stress/test_jolt_soft_soft_edge_sweep.py \
+            tests/stress/test_jolt_soft_soft_speculative_ccd.py \
+            tests/stress/test_jolt_soft_soft_edge_edge.py \
+            tests/stress/test_jolt_soft_soft_vertex_face.py \
+            tests/stress/test_jolt_softsoft_face_bvh.py \
+            tests/stress/test_jolt_soft_soft_particle_contacts.py -v
+      - name: Check test script syntax and native scene
+        run: |
+          python3 -m py_compile tests/stress/test_jolt_soft_self_contacts.py
+          test -f tests/stress/jolt_soft_self/project.godot
+          test -f tests/stress/jolt_soft_self/self_collision_regression.gd

@@ -36,6 +36,8 @@
 #include "godot_physics_server_2d.h"
 
 #include "core/config/project_settings.h"
+#include "core/templates/hash_set.h"
+#include "servers/physics_cast_motion_pruning.h"
 
 #define TEST_MOTION_MARGIN_MIN_VALUE 0.0001
 #define TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR 0.05
@@ -61,9 +63,9 @@ int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters
 		return 0;
 	}
 
-	// Keep the existing tiny AABB for 2D broadphase point queries, but
-	// examine candidates until enough *actual* hits survive all filters.
-	const Rect2 query_aabb(p_parameters.position - Vector2(0.00001, 0.00001), Vector2(0.00002, 0.00002));
+	// Query the BVH with the exact point, just as GodotPhysics 3D does.
+	// A tiny synthetic AABB also visits nearby proxies that cannot contain
+	// the point. The shape callback still applies exact containment and filters.
 	struct PointQuery {
 		const PS2DT::PointParameters &params;
 		PS2DT::ShapeResult *results;
@@ -82,7 +84,10 @@ int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters
 		}
 
 		GodotShape2D *shape = p_object->get_shape(p_shape);
-		const Vector2 local_point = (p_object->get_transform() * p_object->get_shape_transform(p_shape)).affine_inverse().xform(data.params.position);
+		// Inverses are cached by the collision object and updated when the
+		// body/area or shape transform changes. Avoid an affine matrix inverse
+		// for every BVH candidate in this hot point-query path.
+		const Vector2 local_point = p_object->get_shape_inv_transform(p_shape).xform(p_object->get_inv_transform().xform(data.params.position));
 		if (!shape->contains_point(local_point)) {
 			return true;
 		}
@@ -94,7 +99,7 @@ int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters
 		return data.count < data.max_results;
 	};
 
-	space->broadphase->visit_aabb(query_aabb, visitor, &query);
+	space->broadphase->visit_point(p_parameters.position, visitor, &query);
 	return query.count;
 }
 
@@ -233,8 +238,8 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 	GodotShape2D *shape = GodotPhysicsServer2D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
-	Rect2 aabb = p_parameters.transform.xform(shape->get_aabb());
-	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size));
+	const Rect2 start_aabb = p_parameters.transform.xform(shape->get_aabb());
+	Rect2 aabb = start_aabb.merge(Rect2(start_aabb.position + p_parameters.motion, start_aabb.size));
 	aabb = aabb.grow(p_parameters.margin);
 
 	// Stream every overlapping broadphase proxy and reject nonmatching
@@ -244,14 +249,24 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 		const PS2DT::ShapeParameters &params;
 		GodotShape2D *shape;
 		Vector2 motion_normal;
+		const Rect2 &start_aabb;
+		Rect2 clipped_aabb;
 		real_t best_safe = 1.0;
 		real_t best_unsafe = 1.0;
 	};
-	CastQuery data = { p_parameters, shape, p_parameters.motion.normalized() };
+	CastQuery data = { p_parameters, shape, p_parameters.motion.normalized(), start_aabb, aabb };
 	auto visitor = [](GodotCollisionObject2D *p_object, int p_shape, void *p_userdata) -> bool {
 		CastQuery &data = *static_cast<CastQuery *>(p_userdata);
 		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
 				data.params.exclude.has(p_object->get_self())) {
+			return true;
+		}
+
+		// A previous exact hit clips the possible earlier collision region.
+		// Compare against the collision object's cached, conservatively
+		// expanded world AABB before running an expensive swept SAT test.
+		if (data.best_unsafe < 1.0 &&
+				!data.clipped_aabb.intersects(p_object->get_shape_aabb(p_shape), true)) {
 			return true;
 		}
 
@@ -305,6 +320,8 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 		if (low < data.best_safe) {
 			data.best_safe = low;
 			data.best_unsafe = hi;
+			data.clipped_aabb = godot_physics_cast_motion_clipped_aabb(data.start_aabb,
+					data.params.motion, data.best_unsafe, data.params.margin);
 		}
 		return true;
 	};
@@ -546,8 +563,12 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 	body_aabb = p_parameters.from.xform(p_body->get_inv_transform().xform(body_aabb));
 	body_aabb = body_aabb.grow(margin);
 
-	static const int max_excluded_shape_pairs = 32;
-	ExcludedShapeSW excluded_shape_pairs[max_excluded_shape_pairs];
+	// Keep ordinary one-way contacts entirely on the stack. Use a hash set
+	// only for exceptional dense platform fields, so overflow lookups remain
+	// amortized O(1) instead of becoming quadratic with the shape count.
+	static constexpr int INLINE_EXCLUDED_SHAPE_PAIRS = 32;
+	ExcludedShapeSW excluded_shape_pairs[INLINE_EXCLUDED_SHAPE_PAIRS];
+	HashSet<ExcludedShapeSW> excluded_shape_overflow;
 	int excluded_shape_pair_count = 0;
 
 	real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
@@ -575,7 +596,8 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 			cbk.passed = 0;
 			cbk.ptr = sr;
 			cbk.invalid_by_dir = 0;
-			excluded_shape_pair_count = 0; //last step is the one valid
+			excluded_shape_pair_count = 0; // The final recovery pass determines the one-way exclusions.
+			excluded_shape_overflow.clear();
 
 			GodotPhysicsServer2D::CollCbkData *cbkptr = &cbk;
 			GodotCollisionSolver2D::CallbackResult cbkres = GodotPhysicsServer2D::_shape_col_cbk;
@@ -590,8 +612,10 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 				GodotShape2D *body_shape = p_body->get_shape(j);
 				Transform2D body_shape_xform = body_transform * p_body->get_shape_transform(j);
+				// Avoid querying distant proxy groups for every shape in a compound body.
+				const Rect2 shape_query_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 
-				_visit_motion_candidates(p_body, body_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int shape_idx) -> bool {
+				_visit_motion_candidates(p_body, shape_query_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int shape_idx) -> bool {
 
 					Transform2D col_obj_shape_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
 
@@ -633,13 +657,14 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 					}
 
 					if (!did_collide && cbk.invalid_by_dir > 0) {
-						//this shape must be excluded
-						if (excluded_shape_pair_count < max_excluded_shape_pairs) {
-							ExcludedShapeSW esp;
-							esp.local_shape = body_shape;
-							esp.against_object = col_obj;
-							esp.against_shape_index = shape_idx;
+						ExcludedShapeSW esp;
+						esp.local_shape_index = j;
+						esp.against_object = col_obj;
+						esp.against_shape_index = shape_idx;
+						if (excluded_shape_pair_count < INLINE_EXCLUDED_SHAPE_PAIRS) {
 							excluded_shape_pairs[excluded_shape_pair_count++] = esp;
+						} else {
+							excluded_shape_overflow.insert(esp);
 						}
 					}
 
@@ -700,10 +725,6 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 	{
 		// STEP 2 ATTEMPT MOTION
 
-		Rect2 motion_aabb = body_aabb;
-		motion_aabb.position += p_parameters.motion;
-		motion_aabb = motion_aabb.merge(body_aabb);
-
 		for (int body_shape_idx = 0; body_shape_idx < p_body->get_shape_count(); body_shape_idx++) {
 			if (p_body->is_shape_disabled(body_shape_idx)) {
 				continue;
@@ -727,16 +748,31 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 			real_t best_safe = 1;
 			real_t best_unsafe = 1;
 
-			_visit_motion_candidates(p_body, motion_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int col_shape_idx) -> bool {
+			// Sweep only the current shape's AABB. Distant siblings in a
+			// compound body must not enlarge this BVH traversal.
+			Rect2 shape_motion_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
+			Rect2 shape_end_aabb = shape_motion_aabb;
+			shape_end_aabb.position += p_parameters.motion;
+			shape_motion_aabb = shape_motion_aabb.merge(shape_end_aabb);
+
+			_visit_motion_candidates(p_body, shape_motion_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int col_shape_idx) -> bool {
 				GodotShape2D *against_shape = col_obj->get_shape(col_shape_idx);
 
 				bool excluded = false;
 
 				for (int k = 0; k < excluded_shape_pair_count; k++) {
-					if (excluded_shape_pairs[k].local_shape == body_shape && excluded_shape_pairs[k].against_object == col_obj && excluded_shape_pairs[k].against_shape_index == col_shape_idx) {
+					const ExcludedShapeSW &pair = excluded_shape_pairs[k];
+					if (pair.local_shape_index == body_shape_idx && pair.against_object == col_obj && pair.against_shape_index == col_shape_idx) {
 						excluded = true;
 						break;
 					}
+				}
+				if (!excluded && !excluded_shape_overflow.is_empty()) {
+					ExcludedShapeSW key;
+					key.local_shape_index = body_shape_idx;
+					key.against_object = col_obj;
+					key.against_shape_index = col_shape_idx;
+					excluded = excluded_shape_overflow.has(key);
 				}
 
 				if (excluded) {
@@ -865,18 +901,27 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 			Transform2D body_shape_xform = ugt * p_body->get_shape_transform(j);
 			GodotShape2D *body_shape = p_body->get_shape(j);
+			const Rect2 shape_rest_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 
-			_visit_motion_candidates(p_body, body_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int shape_idx) -> bool {
+			_visit_motion_candidates(p_body, shape_rest_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int shape_idx) -> bool {
 
 				GodotShape2D *against_shape = col_obj->get_shape(shape_idx);
 
 				bool excluded = false;
 				for (int k = 0; k < excluded_shape_pair_count; k++) {
-					if (excluded_shape_pairs[k].local_shape == body_shape && excluded_shape_pairs[k].against_object == col_obj && excluded_shape_pairs[k].against_shape_index == shape_idx) {
+					const ExcludedShapeSW &pair = excluded_shape_pairs[k];
+					if (pair.local_shape_index == j && pair.against_object == col_obj && pair.against_shape_index == shape_idx) {
 						excluded = true;
 						break;
 					}
 				}
+			if (!excluded && !excluded_shape_overflow.is_empty()) {
+				ExcludedShapeSW key;
+				key.local_shape_index = j;
+				key.against_object = col_obj;
+				key.against_shape_index = shape_idx;
+				excluded = excluded_shape_overflow.has(key);
+			}
 				if (excluded) {
 					return true;
 				}
@@ -1004,12 +1049,25 @@ const SelfList<GodotBody2D>::List &GodotSpace2D::get_active_body_list() const {
 	return active_list;
 }
 
+const LocalVector<GodotBody2D *> &GodotSpace2D::get_active_bodies() {
+	if (active_snapshot_version != active_list_version) {
+		active_snapshot.clear();
+		for (const SelfList<GodotBody2D> *b = active_list.first(); b; b = b->next()) {
+			active_snapshot.push_back(b->self());
+		}
+		active_snapshot_version = active_list_version;
+	}
+	return active_snapshot;
+}
+
 void GodotSpace2D::body_add_to_active_list(SelfList<GodotBody2D> *p_body) {
 	active_list.add(p_body);
+	active_list_version++;
 }
 
 void GodotSpace2D::body_remove_from_active_list(SelfList<GodotBody2D> *p_body) {
 	active_list.remove(p_body);
+	active_list_version++;
 }
 
 void GodotSpace2D::body_add_to_mass_properties_update_list(SelfList<GodotBody2D> *p_body) {
@@ -1172,15 +1230,29 @@ GodotSpace2D::GodotSpace2D() {
 	solver_iterations = GLOBAL_GET("physics/2d/solver/solver_iterations");
 	block_solver_enabled = GLOBAL_GET("physics/2d/solver/block_solver_enabled");
 	parallel_large_islands = GLOBAL_GET("physics/2d/solver/parallel_large_islands");
+	manifold_spread_reduction = GLOBAL_GET("physics/2d/solver/manifold_spread_reduction");
 	contact_recycle_radius = GLOBAL_GET("physics/2d/solver/contact_recycle_radius");
 	contact_max_separation = GLOBAL_GET("physics/2d/solver/contact_max_separation");
+	speculative_sphere_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/speculative_sphere_distance"));
 	contact_max_allowed_penetration = GLOBAL_GET("physics/2d/solver/contact_max_allowed_penetration");
 	contact_bias = GLOBAL_GET("physics/2d/solver/default_contact_bias");
 	// Cache the per-space push speed limit; no project-setting lookup on contacts.
 	max_contact_push_speed = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_contact_push_speed"));
 	const real_t configured_max_linear_velocity = GLOBAL_GET("physics/2d/solver/max_linear_velocity");
 	max_linear_velocity = Math::is_finite(configured_max_linear_velocity) ? MAX(real_t(0.0), configured_max_linear_velocity) : real_t(0.0);
+	max_linear_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_linear_velocity"));
+	max_angular_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_angular_velocity"));
+	ccd_max_angular_motion = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/ccd_max_angular_motion"));
 	warm_start_coefficient = CLAMP((real_t)GLOBAL_GET("physics/2d/solver/warm_start_coefficient"), real_t(0.0), real_t(1.0));
+	ccd_rotational_bounds = GLOBAL_GET("physics/2d/solver/ccd_rotational_bounds");
+	ccd_tight_rotational_bounds = GLOBAL_GET("physics/2d/solver/ccd_tight_rotational_bounds");
+	implicit_damping = GLOBAL_GET("physics/2d/solver/implicit_damping");
+	fluid_linear_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/fluid_linear_drag"));
+	fluid_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/fluid_angular_drag"));
+	fluid_buoyancy = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/fluid_buoyancy"));
+	fluid_flow_velocity = GLOBAL_GET("physics/2d/solver/fluid_flow_velocity");
+	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/rolling_friction"));
+	static_friction_multiplier = MAX(real_t(1.0), (real_t)GLOBAL_GET("physics/2d/solver/static_friction_multiplier"));
 	friction_combine_mode = CLAMP((int)GLOBAL_GET("physics/2d/solver/friction_combine_mode"), 0, 3);
 	restitution_combine_mode = CLAMP((int)GLOBAL_GET("physics/2d/solver/restitution_combine_mode"), 0, 5);
 	// Read once at space creation, avoiding ProjectSettings lookups in the hot contact loop.

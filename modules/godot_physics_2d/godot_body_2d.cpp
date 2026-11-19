@@ -29,12 +29,17 @@
 /**************************************************************************/
 
 #include "godot_body_2d.h"
+#include "servers/physics_angular_velocity_cap.h"
+#include "servers/physics_linear_velocity_cap.h"
 
 #include "godot_area_2d.h"
 #include "godot_body_direct_state_2d.h"
 #include "godot_constraint_2d.h"
 #include "godot_space_2d.h"
 #include "godot_velocity_limit_2d.h"
+
+#include "servers/physics_damping.h"
+#include "servers/physics_uniform_fluid.h"
 
 void GodotBody2D::add_constraint(GodotConstraint2D *p_constraint, int p_pos) {
 	p_constraint->set_body_slot(p_pos, constraint_list.size());
@@ -602,32 +607,57 @@ void GodotBody2D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			//overridden by direct state query
 
 			Vector2 force = gravity * mass + applied_force + constant_force;
+			// Uniform fully submerged buoyancy: force = -buoyancy * mass * gravity.
+			// Gravity already includes the body's gravity scale and area
+			// overrides. With buoyancy 1, gravity and buoyancy cancel.
+			// Zero (the default) preserves the old force calculation.
+			if (get_space()->get_fluid_buoyancy() > real_t(0.0)) {
+				force -= gravity * (mass * get_space()->get_fluid_buoyancy());
+			}
 			real_t torque = applied_torque + constant_torque;
 
-			real_t damp = 1.0 - p_step * total_linear_damp;
-
-			if (damp < 0) { // reached zero in the given time
-				damp = 0;
-			}
-
-			real_t angular_damp_new = 1.0 - p_step * total_angular_damp;
-
-			if (angular_damp_new < 0) { // reached zero in the given time
-				angular_damp_new = 0;
-			}
+			// This per-space option uses Box2D's implicit (Pade) damping
+			// for nonnegative coefficients. The default retains the legacy
+			// clamped explicit-Euler result exactly.
+			const bool implicit_damping = get_space()->is_implicit_damping_enabled();
+			const real_t damp = godot_physics_damping_factor(p_step, total_linear_damp, implicit_damping);
+			const real_t angular_damp_new = godot_physics_damping_factor(p_step, total_angular_damp, implicit_damping);
 
 			linear_velocity *= damp;
 			angular_velocity *= angular_damp_new;
 
 			linear_velocity += _inv_mass * force * p_step;
 			angular_velocity += _inv_inertia * torque * p_step;
+			// Apply nonlinear drag after external forces. The stable exact
+			// solution slows motion relative to the fluid current and never
+			// reverses it, even for large physics timesteps.
+			linear_velocity = godot_physics_fluid_linear_drag(
+					linear_velocity, get_space()->get_fluid_flow_velocity(), get_space()->get_fluid_linear_drag(), p_step);
+			angular_velocity = godot_physics_fluid_angular_drag(
+					angular_velocity, get_space()->get_fluid_angular_drag(), p_step);
 		}
 
+		// Limit dynamic angular speed after damping, torque and optional gyro
+		// integration. Kinematic bodies retain their requested target rotation.
+		angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_effective_max_angular_velocity(get_space()->get_max_angular_velocity()));
+		// Rapier-style CCD safeguard: limit the *physical* rotation across
+		// one step, not the penetration-correction bias. A joint/contact may
+		// change angular velocity after force integration, so apply at both
+		// integration boundaries. Disabled by default and for non-CCD bodies.
 		// Limit the force-integrated speed before computing the swept CCD bounds.
 		const real_t velocity_limit = get_space()->get_max_linear_velocity();
 		if (velocity_limit > 0.0) {
 			linear_velocity = godot_physics_2d_limit_linear_velocity(linear_velocity, velocity_limit);
 		}
+		if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
+			angular_velocity = godot_physics_clamp_ccd_angular_velocity(
+					angular_velocity, get_space()->get_ccd_max_angular_motion(), p_step);
+		}
+
+		// Bound physical velocity before calculating the broadphase CCD sweep.
+		// This is skipped by static and kinematic bodies.
+		linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_effective_max_linear_velocity(get_space()->get_max_linear_velocity()));
+
 		if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
 			motion = linear_velocity * p_step;
 			do_motion = true;
@@ -645,7 +675,7 @@ void GodotBody2D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			deferred_motion = motion;
 			has_deferred_motion = true;
 		} else {
-			_update_shapes_with_motion(motion);
+			_update_shapes_with_motion(motion, angular_velocity * p_step, get_transform().get_origin() + center_of_mass);
 		}
 	}
 
@@ -672,6 +702,17 @@ void GodotBody2D::integrate_velocities(real_t p_step) {
 		return;
 	}
 
+	// Contact and joint impulses can add speed after force integration.
+	// Cap the physical component before position integration too.
+	linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_effective_max_linear_velocity(get_space()->get_max_linear_velocity()));
+	// Contacts and joints can increase angular velocity after force integration.
+	// Limit physical rotation, leaving penetration-correction bias untouched.
+	angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_effective_max_angular_velocity(get_space()->get_max_angular_velocity()));
+	// Reapply the CCD-only per-step cap after contact/joint impulses.
+	if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
+		angular_velocity = godot_physics_clamp_ccd_angular_velocity(
+				angular_velocity, get_space()->get_ccd_max_angular_motion(), p_step);
+	}
 	// Contact and joint impulses can accelerate the body after force integration.
 	// Clamp its physical velocity again, but never clamp bias recovery motion.
 	const real_t velocity_limit = get_space()->get_max_linear_velocity();
@@ -809,6 +850,9 @@ GodotBody2D::GodotBody2D() :
 }
 
 GodotBody2D::~GodotBody2D() {
+	if (solver_priority > 1) {
+		high_priority_body_count--;
+	}
 	memdelete(fi_callback_data);
 	memdelete(direct_state);
 }

@@ -1,0 +1,24 @@
+config_version=5
+
+[application]
+
+config/name="Cgame Jolt Combined Advanced Soft Body"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+jolt_physics_3d/simulation/soft_body_bend_mode=2
+jolt_physics_3d/simulation/soft_body_bend_compliance=0.001
+jolt_physics_3d/simulation/soft_body_lra_mode=2
+jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier=1.05
+jolt_physics_3d/simulation/soft_body_volume_preservation=true
+jolt_physics_3d/simulation/soft_body_volume_compliance=0.00001
+jolt_physics_3d/simulation/soft_body_volume_radial_springs=true
+jolt_physics_3d/simulation/soft_body_volume_radial_compliance=0.0001
+jolt_physics_3d/simulation/soft_body_radial_anisotropy_axis=2
+jolt_physics_3d/simulation/soft_body_radial_anisotropy_ratio=4.0
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

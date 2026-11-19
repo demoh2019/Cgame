@@ -33,8 +33,21 @@
 #include "godot_collision_solver_3d.h"
 #include "godot_contact_normal_3d.h"
 #include "godot_space_3d.h"
+#include "servers/physics_contact_static_friction.h"
+#include "servers/physics_contact_anisotropic_friction.h"
+#include "servers/physics_contact_velocity_friction.h"
+#include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_3d.h"
 #include "servers/physics_ccd_sphere_toi.h"
+#include "servers/physics_ccd_rotating_capsule_toi.h"
+#include "servers/physics_ccd_nonlinear_capsule_toi.h"
+#include "servers/physics_speculative_sphere_contact.h"
+#include "servers/physics_speculative_capsule_contact.h"
+#include "servers/physics_speculative_capsule_pair_contact.h"
+#include "servers/physics_ccd_capsule_toi.h"
+#include "servers/physics_ccd_capsule_pair_toi.h"
+#include "servers/physics_ccd_swept_bounds.h"
+#include "servers/physics_ccd_rotational_sphere_cull.h"
 
 #include <cfloat> // FLT_MAX
 
@@ -236,7 +249,72 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 
 	const Vector3 velocity_A = p_A->get_linear_velocity();
 	const Vector3 motion_A = velocity_A * p_step;
+	// The existing pure-rotation path does not cover simultaneous travel
+	// and spin. A support ray follows a straight line and can tunnel
+	// through a sphere struck by the capsule's turning end cap. Use a
+	// conservative nonlinear volume sweep before linear CCD early-outs.
+	if (motion_A.length_squared() > 0.0 &&
+			space->is_ccd_rotational_bounds_enabled() &&
+			p_A->get_angular_velocity() != Vector3() &&
+			p_B->get_mode() == PS3DE::BODY_MODE_STATIC &&
+			p_A->get_shape(p_shape_A)->get_type() == PS3DE::SHAPE_CAPSULE &&
+			p_B->get_shape(p_shape_B)->get_type() == PS3DE::SHAPE_SPHERE) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape3D *capsule = static_cast<GodotCapsuleShape3D *>(p_A->get_shape(p_shape_A));
+			const GodotSphereShape3D *sphere = static_cast<GodotSphereShape3D *>(p_B->get_shape(p_shape_B));
+			const double half_segment = double(capsule->get_height()) * 0.5 - double(capsule->get_radius());
+			const double radius = double(capsule->get_radius()) * scale_A + double(sphere->get_radius()) * scale_B;
+			double impact_fraction = 0.0;
+			const PhysicsCCDRotatingCapsuleTOIResult result = physics_ccd_nonlinear_capsule_toi(
+					p_xform_A.origin, p_xform_A.basis.get_column(1),
+					p_A->get_transform().origin + p_A->get_center_of_mass(), p_xform_B.origin,
+					motion_A, p_A->get_angular_velocity(), p_step,
+					half_segment * scale_A, radius, impact_fraction);
+			if (result == PhysicsCCDRotatingCapsuleTOIResult::MISS) {
+				return false;
+			}
+			if (result == PhysicsCCDRotatingCapsuleTOIResult::HIT) {
+				// This is a velocity clamp, not a contact impulse. Scaling
+				// both velocities preserves the nonlinear trajectory up to TOI,
+				// allowing the discrete solver to resolve the actual contact.
+				const real_t fraction = CLAMP(real_t(impact_fraction) + real_t(0.005), real_t(0.0), real_t(1.0));
+				p_A->set_linear_velocity(p_A->get_linear_velocity() * fraction);
+				p_A->set_angular_velocity(p_A->get_angular_velocity() * fraction);
+				return true;
+			}
+			// Nonconvergence or initial contact: retain the legacy CCD.
+		}
+	}
 	if (motion_A.length_squared() == 0.0) {
+		// Nonlinear CCD for a capsule rotating around its center of mass
+		// against a static sphere. Rotational CCD broadphase bounds must
+		// already have generated this pair; other shapes keep old behavior.
+		if (space->is_ccd_rotational_bounds_enabled() &&
+				p_A->get_angular_velocity() != Vector3() &&
+				p_B->get_mode() == PS3DE::BODY_MODE_STATIC &&
+				shape_A_ptr->get_type() == PS3DE::SHAPE_CAPSULE &&
+				shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE) {
+			const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+			const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+			if (scale_A > 0.0 && scale_B > 0.0) {
+				const GodotCapsuleShape3D *capsule = static_cast<GodotCapsuleShape3D *>(shape_A_ptr);
+				const GodotSphereShape3D *sphere = static_cast<GodotSphereShape3D *>(shape_B_ptr);
+				const double half_segment = double(capsule->get_height()) * 0.5 - double(capsule->get_radius());
+				const double radius = double(capsule->get_radius()) * scale_A + double(sphere->get_radius()) * scale_B;
+				double impact_fraction = 0.0;
+				const PhysicsCCDRotatingCapsuleTOIResult result = physics_ccd_rotating_capsule_toi(
+						p_xform_A.origin, p_xform_A.basis.get_column(1),
+						p_A->get_transform().origin + p_A->get_center_of_mass(), p_xform_B.origin,
+						p_A->get_angular_velocity(), p_step, half_segment * scale_A, radius, impact_fraction);
+				if (result == PhysicsCCDRotatingCapsuleTOIResult::HIT) {
+					const real_t fraction = CLAMP(real_t(impact_fraction) + real_t(0.005), real_t(0.0), real_t(1.0));
+					p_A->set_angular_velocity(p_A->get_angular_velocity() * fraction);
+					return true;
+				}
+			}
+		}
 		return false;
 	}
 
@@ -252,11 +330,30 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 	}
 	const Vector3 direction = relative_motion / motion_length;
 
+
 	real_t min_projection = 0.0;
 	real_t max_projection = 0.0;
 	shape_A_ptr->project_range(direction, p_xform_A, min_projection, max_projection);
 	const real_t extent = max_projection - min_projection;
 	if (motion_length <= extent * real_t(0.3)) {
+		return false;
+	}
+
+	// Rapier-style conservative nonlinear-motion broadphase:
+	// every point of a rotating rigid collider remains inside a sphere
+	// swept along its center of mass. When those swept spheres do not
+	// meet, even a fast rotation cannot create contact during this step.
+	// Only enable this cull with the existing opt-in rotational CCD bounds
+	// setting. Unbounded shapes retain the original narrowphase.
+	if (space->is_ccd_rotational_bounds_enabled() && (p_A->get_angular_velocity() != Vector3() || p_B->get_angular_velocity() != Vector3()) &&
+			shape_A_ptr->get_type() != PS3DE::SHAPE_WORLD_BOUNDARY &&
+			shape_B_ptr->get_type() != PS3DE::SHAPE_WORLD_BOUNDARY &&
+			shape_A_ptr->get_type() != PS3DE::SHAPE_SEPARATION_RAY &&
+			shape_B_ptr->get_type() != PS3DE::SHAPE_SEPARATION_RAY &&
+			!physics_ccd_rotational_sphere_bounds_may_overlap(
+				p_xform_A.xform(shape_A_ptr->get_aabb()), p_A->get_transform().origin + p_A->get_center_of_mass(),
+				p_xform_B.xform(shape_B_ptr->get_aabb()), p_B->get_transform().origin + p_B->get_center_of_mass(),
+				relative_motion)) {
 		return false;
 	}
 
@@ -286,6 +383,158 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 		}
 		// Affine shear/nonuniform scale yields an ellipsoid; retain the
 		// generic support cast rather than using an incorrect sphere TOI.
+	}
+
+	// A fast relative linear sweep cannot hit a shape outside its swept
+	// broadphase bounds. Skip this test for rotation or unbounded shapes.
+	if (p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3() &&
+			shape_A_ptr->get_type() != PS3DE::SHAPE_WORLD_BOUNDARY && shape_B_ptr->get_type() != PS3DE::SHAPE_WORLD_BOUNDARY &&
+			shape_A_ptr->get_type() != PS3DE::SHAPE_SEPARATION_RAY && shape_B_ptr->get_type() != PS3DE::SHAPE_SEPARATION_RAY &&
+			!physics_ccd_swept_bounds_may_overlap(
+					p_xform_A.xform(shape_A_ptr->get_aabb()),
+					p_xform_B.xform(shape_B_ptr->get_aabb()), relative_motion, real_t(0.1))) {
+		return false;
+	}
+
+	// Shape casting a sphere against a capsule is equivalent to ray
+	// casting its center against the capsule expanded by the sphere
+	// radius. This constant-cost path catches glancing hemisphere impacts.
+	if (shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE && shape_B_ptr->get_type() == PS3DE::SHAPE_CAPSULE &&
+			p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3()) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape3D *capsule = static_cast<GodotCapsuleShape3D *>(shape_B_ptr);
+			const double capsule_radius = double(capsule->get_radius());
+			const double half_segment = double(capsule->get_height()) * 0.5 - capsule_radius;
+			const double sphere_radius = double(static_cast<GodotSphereShape3D *>(shape_A_ptr)->get_radius()) * scale_A / scale_B;
+			if (capsule_radius > 0.0 && half_segment >= 0.0 && sphere_radius > 0.0) {
+				const Transform3D inverse_B = p_xform_B.affine_inverse();
+				const Vector3 local_start = inverse_B.xform(p_xform_A.origin);
+				const Vector3 local_motion = inverse_B.basis.xform(relative_motion);
+				double impact_fraction = 0.0;
+				if (!physics_ccd_capsule_toi(local_start, local_motion, capsule_radius + sphere_radius, half_segment, impact_fraction)) {
+					return false;
+				}
+
+				const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(motion_length)) + extent * real_t(0.01), real_t(0.0), motion_length);
+				const Vector3 desired_velocity = velocity_B + direction * (allowed_distance / p_step);
+				const real_t initial_speed = velocity_A.length();
+				const Vector3 travel_direction = velocity_A / initial_speed;
+				const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+				p_A->set_linear_velocity(travel_direction * clipped_speed);
+				return true;
+			}
+		}
+		// Ellipsoids and sheared capsules retain the general support cast.
+	}
+
+	// Also cover the reversed pair order: a moving capsule A sweeping
+	// past sphere B. In A's frame B traces the negative relative motion.
+	if (shape_A_ptr->get_type() == PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE &&
+			p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3()) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape3D *capsule = static_cast<GodotCapsuleShape3D *>(shape_A_ptr);
+			const double capsule_radius = double(capsule->get_radius());
+			const double half_segment = double(capsule->get_height()) * 0.5 - capsule_radius;
+			const double sphere_radius = double(static_cast<GodotSphereShape3D *>(shape_B_ptr)->get_radius()) * scale_B / scale_A;
+			if (capsule_radius > 0.0 && half_segment >= 0.0 && sphere_radius > 0.0) {
+				const Transform3D inverse_A = p_xform_A.affine_inverse();
+				const Vector3 local_start = inverse_A.xform(p_xform_B.origin);
+				const Vector3 local_motion = -inverse_A.basis.xform(relative_motion);
+				double impact_fraction = 0.0;
+				if (!physics_ccd_capsule_toi(local_start, local_motion, capsule_radius + sphere_radius, half_segment, impact_fraction)) {
+					return false;
+				}
+
+				const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(motion_length)) + extent * real_t(0.01), real_t(0.0), motion_length);
+				const Vector3 desired_velocity = velocity_B + direction * (allowed_distance / p_step);
+				const real_t initial_speed = velocity_A.length();
+				const Vector3 travel_direction = velocity_A / initial_speed;
+				const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+				p_A->set_linear_velocity(travel_direction * clipped_speed);
+				return true;
+			}
+		}
+	}
+
+	// For parallel capsules the Minkowski sum of their axial segments
+	// is a segment with the summed half lengths. Expanding by both radii
+	// leaves another capsule, so the first linear impact has an exact
+	// constant-time solution. Skew or spinning capsules use generic CCD.
+	if (shape_A_ptr->get_type() == PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_CAPSULE &&
+			p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3()) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const Vector3 axis_A = p_xform_A.basis.get_column(1);
+			const Vector3 axis_B = p_xform_B.basis.get_column(1);
+			if (double(axis_A.cross(axis_B).length()) <= 1e-7 * scale_A * scale_B) {
+				const GodotCapsuleShape3D *capsule_A = static_cast<GodotCapsuleShape3D *>(shape_A_ptr);
+				const GodotCapsuleShape3D *capsule_B = static_cast<GodotCapsuleShape3D *>(shape_B_ptr);
+				const double radius_A = double(capsule_A->get_radius());
+				const double radius_B = double(capsule_B->get_radius());
+				const double half_A = double(capsule_A->get_height()) * 0.5 - radius_A;
+				const double half_B = double(capsule_B->get_height()) * 0.5 - radius_B;
+				if (radius_A > 0.0 && radius_B > 0.0 && half_A >= 0.0 && half_B >= 0.0) {
+					const double ratio = scale_A / scale_B;
+					const Transform3D inverse_B = p_xform_B.affine_inverse();
+					const Vector3 local_start = inverse_B.xform(p_xform_A.origin);
+					const Vector3 local_motion = inverse_B.basis.xform(relative_motion);
+					double impact_fraction = 0.0;
+					if (!physics_ccd_capsule_toi(local_start, local_motion,
+							radius_B + radius_A * ratio, half_B + half_A * ratio, impact_fraction)) {
+						return false;
+					}
+					const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(motion_length)) + extent * real_t(0.01), real_t(0.0), motion_length);
+					const Vector3 desired_velocity = velocity_B + direction * (allowed_distance / p_step);
+					const real_t initial_speed = velocity_A.length();
+					const Vector3 travel_direction = velocity_A / initial_speed;
+					const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+					p_A->set_linear_velocity(travel_direction * clipped_speed);
+					return true;
+				}
+			}
+		}
+	}
+
+	// Nonparallel capsules have a convex squared center-segment distance
+	// over linear relative translation. Minimize that distance and bisect
+	// the first overlap of their combined radii. This catches oblique
+	// grazing impacts missed by support rays, without temporary allocations.
+	if (shape_A_ptr->get_type() == PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_CAPSULE &&
+			p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3()) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape3D *capsule_A = static_cast<GodotCapsuleShape3D *>(shape_A_ptr);
+			const GodotCapsuleShape3D *capsule_B = static_cast<GodotCapsuleShape3D *>(shape_B_ptr);
+			const double radius_A = double(capsule_A->get_radius());
+			const double radius_B = double(capsule_B->get_radius());
+			const double half_A = double(capsule_A->get_height()) * 0.5 - radius_A;
+			const double half_B = double(capsule_B->get_height()) * 0.5 - radius_B;
+			if (radius_A > 0.0 && radius_B > 0.0 && half_A >= 0.0 && half_B >= 0.0) {
+				double impact_fraction = 0.0;
+				const PhysicsCCDCapsulePairTOIResult result = physics_ccd_capsule_pair_toi(
+						p_xform_A.origin - p_xform_B.origin, relative_motion,
+						p_xform_A.basis.get_column(1), p_xform_B.basis.get_column(1),
+						half_A * scale_A, half_B * scale_B, radius_A * scale_A + radius_B * scale_B, impact_fraction);
+				if (result == PhysicsCCDCapsulePairTOIResult::MISS) {
+					return false;
+				}
+				if (result == PhysicsCCDCapsulePairTOIResult::HIT) {
+					const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(motion_length)) + extent * real_t(0.01), real_t(0.0), motion_length);
+					const Vector3 desired_velocity = velocity_B + direction * (allowed_distance / p_step);
+					const real_t initial_speed = velocity_A.length();
+					const Vector3 travel_direction = velocity_A / initial_speed;
+					const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+					p_A->set_linear_velocity(travel_direction * clipped_speed);
+					return true;
+				}
+			}
+		}
 	}
 
 	// A leading face may have several support vertices. The target
@@ -343,6 +592,11 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 
 bool GodotBodyPair3D::setup(real_t p_step) {
 	check_ccd = false;
+	// Preserve the previous manifold's provenance until its cache validity
+	// has been checked. Ordinary penetrating contacts do not depend on the
+	// velocities and should keep their fast positive cache path.
+	const bool previous_speculative = contact_recycling.speculative_contact;
+	contact_recycling.speculative_contact = false;
 
 	if (!A->interacts_with(B) || A->has_exception(B->get_self()) || B->has_exception(A->get_self())) {
 		collided = false;
@@ -372,16 +626,26 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 	// Geometry versions still change on local shape edits, rotation, scaling,
 	// shearing, filters and space changes. CCD always uses the narrow phase.
 	const bool ccd_enabled = A->is_continuous_collision_detection_enabled() || B->is_continuous_collision_detection_enabled();
+	// A previous separated result cannot be reused for sphere pairs when
+	// speculative contacts are enabled: a velocity change may cause impact.
+	// Positive, non-speculative manifolds remain geometry-dependent and can
+	// still be reused. Only a *previous speculative* positive result requires
+	// a fresh TOI check each frame.
+	const PS3DE::ShapeType type_A = A->get_shape(shape_A)->get_type();
+	const PS3DE::ShapeType type_B = B->get_shape(shape_B)->get_type();
+	const bool velocity_sensitive_pair = space->get_speculative_sphere_distance() > 0.0 &&
+			((type_A == PS3DE::SHAPE_SPHERE && (type_B == PS3DE::SHAPE_SPHERE || type_B == PS3DE::SHAPE_CAPSULE)) ||
+					(type_A == PS3DE::SHAPE_CAPSULE && (type_B == PS3DE::SHAPE_SPHERE || type_B == PS3DE::SHAPE_CAPSULE)));
 	const uint64_t geometry_version_a = A->get_collision_geometry_version();
 	const uint64_t geometry_version_b = B->get_collision_geometry_version();
 	// Reuse a separating narrowphase result for persistent broadphase
 	// pairs only if their *exact* relative shape pose is unchanged.
 	// Geometry revisions cover orientation and shape mutations; CCD bypasses.
-	if (relative_translation_unchanged && contact_recycling.can_reuse_separation(geometry_version_a, geometry_version_b, ccd_enabled)) {
+	if (relative_translation_unchanged && contact_recycling.can_reuse_separation(geometry_version_a, geometry_version_b, ccd_enabled, velocity_sensitive_pair)) {
 		collided = false;
 		return false;
 	}
-	if (relative_translation_unchanged && contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided, contact_count, ccd_enabled)) {
+	if (relative_translation_unchanged && contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided, contact_count, ccd_enabled, previous_speculative)) {
 		// SAT may have emitted a new manifold with fewer points, leaving
 		// old (unused) contacts to be pruned on the next frame. Never recycle
 		// such a mixed manifold indefinitely without validating the points.
@@ -412,6 +676,131 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 	GodotShape3D *shape_B_ptr = B->get_shape(shape_B);
 
 	collided = GodotCollisionSolver3D::solve_static(shape_A_ptr, xform_A, shape_B_ptr, xform_B, _contact_added_callback, this, &sep_axis);
+
+	// Predictive sphere contacts use real surface anchors and a negative
+	// penetration depth. A velocity constraint limits approaching motion to
+	// the available gap; no friction or penetration bias acts before touch.
+	// This path is optional and only runs for pairs present in the broadphase.
+	if (!collided && !report_contacts_only && space->get_speculative_sphere_distance() > 0.0 &&
+			A->get_angular_velocity() == Vector3() && B->get_angular_velocity() == Vector3() &&
+			// Skip conveyor-style static surface velocities, which the solver
+			// otherwise interprets as a fictitious approach velocity.
+			!(A->get_mode() == PS3DE::BODY_MODE_STATIC && A->get_linear_velocity() != Vector3()) &&
+			!(B->get_mode() == PS3DE::BODY_MODE_STATIC && B->get_linear_velocity() != Vector3()) &&
+			shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			Vector3 point_A, point_B, normal;
+			const real_t radius_A = real_t(double(static_cast<GodotSphereShape3D *>(shape_A_ptr)->get_radius()) * scale_A);
+			const real_t radius_B = real_t(double(static_cast<GodotSphereShape3D *>(shape_B_ptr)->get_radius()) * scale_B);
+			// Ignore static-body surface velocities when predicting geometry motion.
+			const Vector3 velocity_A = A->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : A->get_linear_velocity();
+			const Vector3 velocity_B = B->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : B->get_linear_velocity();
+			if (physics_speculative_sphere_contact(xform_A.origin, radius_A, xform_B.origin, radius_B,
+					velocity_A, velocity_B, p_step, space->get_speculative_sphere_distance(), point_A, point_B, normal)) {
+				Contact speculative;
+				speculative.local_A = A->get_inv_transform().basis.xform(point_A);
+				speculative.local_B = B->get_inv_transform().basis.xform(point_B - offset_B);
+				speculative.normal = normal;
+				speculative.used = true;
+				contacts[0] = speculative;
+				contact_count = 1;
+				collided = true;
+				contact_recycling.speculative_contact = true;
+			}
+		}
+	}
+
+	// Predictive sphere/capsule contacts reuse the exact CCD capsule TOI.
+	// The local anchors lie on the true surfaces; the solver recognizes
+	// negative depth and limits normal closure without friction or bias.
+	const bool sphere_capsule_pair =
+			(shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE && shape_B_ptr->get_type() == PS3DE::SHAPE_CAPSULE) ||
+			(shape_A_ptr->get_type() == PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE);
+	if (!collided && !report_contacts_only && sphere_capsule_pair &&
+			space->get_speculative_sphere_distance() > 0.0 &&
+			A->get_angular_velocity() == Vector3() && B->get_angular_velocity() == Vector3() &&
+			!(A->get_mode() == PS3DE::BODY_MODE_STATIC && A->get_linear_velocity() != Vector3()) &&
+			!(B->get_mode() == PS3DE::BODY_MODE_STATIC && B->get_linear_velocity() != Vector3())) {
+		const bool sphere_first = shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE;
+		const Transform3D &sphere_transform = sphere_first ? xform_A : xform_B;
+		const Transform3D &capsule_transform = sphere_first ? xform_B : xform_A;
+		const GodotSphereShape3D *sphere = static_cast<GodotSphereShape3D *>(sphere_first ? shape_A_ptr : shape_B_ptr);
+		const GodotCapsuleShape3D *capsule = static_cast<GodotCapsuleShape3D *>(sphere_first ? shape_B_ptr : shape_A_ptr);
+		const double sphere_scale = physics_ccd_uniform_sphere_scale(sphere_transform);
+		const double capsule_scale = physics_ccd_uniform_sphere_scale(capsule_transform);
+		if (sphere_scale > 0.0 && capsule_scale > 0.0) {
+			const real_t capsule_radius = capsule->get_radius();
+			const real_t half_segment = capsule->get_height() * real_t(0.5) - capsule_radius;
+			const real_t sphere_radius = real_t(double(sphere->get_radius()) * sphere_scale / capsule_scale);
+			const Vector3 velocity_A = A->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : A->get_linear_velocity();
+			const Vector3 velocity_B = B->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : B->get_linear_velocity();
+			const Vector3 relative_motion = (sphere_first ? velocity_A - velocity_B : velocity_B - velocity_A) * p_step;
+			const Transform3D inverse_capsule = capsule_transform.affine_inverse();
+			Vector3 point_sphere, point_capsule, normal;
+			if (physics_speculative_sphere_capsule_contact(
+					inverse_capsule.xform(sphere_transform.origin), sphere_radius,
+					capsule_radius, half_segment, inverse_capsule.basis.xform(relative_motion),
+					real_t(double(space->get_speculative_sphere_distance()) / capsule_scale),
+					point_sphere, point_capsule, normal)) {
+				const Vector3 global_sphere = capsule_transform.xform(point_sphere);
+				const Vector3 global_capsule = capsule_transform.xform(point_capsule);
+				const Vector3 global_normal = capsule_transform.basis.xform(normal).normalized();
+				if (global_sphere.is_finite() && global_capsule.is_finite() && global_normal.is_finite()) {
+					const Vector3 point_A = sphere_first ? global_sphere : global_capsule;
+					const Vector3 point_B = sphere_first ? global_capsule : global_sphere;
+					Contact speculative;
+					speculative.local_A = A->get_inv_transform().basis.xform(point_A);
+					speculative.local_B = B->get_inv_transform().basis.xform(point_B - offset_B);
+					speculative.normal = sphere_first ? global_normal : -global_normal;
+					speculative.used = true;
+					contacts[0] = speculative;
+					contact_count = 1;
+					collided = true;
+					contact_recycling.speculative_contact = true;
+				}
+			}
+		}
+	}
+
+	// Advanced predictive capsule/capsule contacts, including skew axes.
+	// Reuse the exact center-segment CCD TOI and surface witnesses. Rotating
+	// shapes and report-only pairs retain their legacy narrowphase behavior.
+	if (!collided && !report_contacts_only && space->get_speculative_sphere_distance() > 0.0 &&
+			shape_A_ptr->get_type() == PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_CAPSULE &&
+			A->get_angular_velocity() == Vector3() && B->get_angular_velocity() == Vector3() &&
+			!(A->get_mode() == PS3DE::BODY_MODE_STATIC && A->get_linear_velocity() != Vector3()) &&
+			!(B->get_mode() == PS3DE::BODY_MODE_STATIC && B->get_linear_velocity() != Vector3())) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape3D *capsule_A = static_cast<GodotCapsuleShape3D *>(shape_A_ptr);
+			const GodotCapsuleShape3D *capsule_B = static_cast<GodotCapsuleShape3D *>(shape_B_ptr);
+			const real_t radius_A = real_t(double(capsule_A->get_radius()) * scale_A);
+			const real_t radius_B = real_t(double(capsule_B->get_radius()) * scale_B);
+			const real_t half_A = real_t((double(capsule_A->get_height()) * 0.5 - double(capsule_A->get_radius())) * scale_A);
+			const real_t half_B = real_t((double(capsule_B->get_height()) * 0.5 - double(capsule_B->get_radius())) * scale_B);
+			const Vector3 velocity_A = A->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : A->get_linear_velocity();
+			const Vector3 velocity_B = B->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : B->get_linear_velocity();
+			Vector3 point_A, point_B, normal;
+			if (physics_speculative_capsule_pair_contact(
+					xform_A.origin, xform_B.origin, xform_A.basis.get_column(1), xform_B.basis.get_column(1),
+					half_A, half_B, radius_A, radius_B,
+					(velocity_A - velocity_B) * p_step, space->get_speculative_sphere_distance(),
+					point_A, point_B, normal)) {
+				Contact speculative;
+				speculative.local_A = A->get_inv_transform().basis.xform(point_A);
+				speculative.local_B = B->get_inv_transform().basis.xform(point_B - offset_B);
+				speculative.normal = normal;
+				speculative.used = true;
+				contacts[0] = speculative;
+				contact_count = 1;
+				collided = true;
+				contact_recycling.speculative_contact = true;
+			}
+		}
+	}
 	contact_recycling.remember(geometry_version_a, geometry_version_b, collided);
 
 	if (!collided) {
@@ -432,6 +821,8 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 }
 
 bool GodotBodyPair3D::pre_solve(real_t p_step) {
+	// Contacts of high-priority bodies get proportionally more solver iterations.
+	set_priority(MAX(A->get_solver_priority(), B->get_solver_priority()));
 	if (!collided) {
 		if (check_ccd) {
 			const Vector3 &offset_A = A->get_transform().get_origin();
@@ -456,7 +847,9 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 
 	real_t max_penetration = space->get_contact_max_allowed_penetration();
 
-	real_t bias = 0.8;
+	// Respect the space's configurable penetration-correction coefficient.
+	// Shape-specific custom bias below still takes precedence.
+	real_t bias = space->get_contact_bias();
 
 	GodotShape3D *shape_A_ptr = A->get_shape(shape_A);
 	GodotShape3D *shape_B_ptr = B->get_shape(shape_B);
@@ -532,8 +925,18 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		Vector3 axis = global_A - global_B;
 		real_t depth = axis.dot(c.normal);
 
-		if (depth <= 0.0) {
+		const bool speculative = contact_recycling.speculative_contact && depth < 0.0 && !report_contacts_only &&
+				space->get_speculative_sphere_distance() >= -depth;
+		if (depth <= 0.0 && !speculative) {
 			continue;
+		}
+		if (speculative) {
+			// Separated predictive points must not warm-start penetration,
+			// friction or positional correction from previous frames.
+			c.acc_normal_impulse = 0.0;
+			c.acc_tangent_impulse = Vector3();
+			c.acc_bias_impulse = 0.0;
+			c.acc_bias_impulse_center_of_mass = 0.0;
 		}
 
 #ifdef DEBUG_ENABLED
@@ -556,7 +959,8 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 
 			// Cap deep-overlap recovery so embedded bodies cannot be violently
 			// pushed out in a single tick (Box2D-style contact tuning).
-			c.bias = space->limit_contact_bias(-bias * inv_dt * MIN(0.0f, -depth + max_penetration));
+			c.bias = speculative ? real_t(0.0) :
+					space->limit_contact_bias(-bias * inv_dt * MIN(0.0f, -depth + max_penetration), A->get_max_depenetration_velocity(), B->get_max_depenetration_velocity());
 		}
 
 		c.depth = depth;
@@ -564,11 +968,18 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		// Keep previous-frame friction inside the CURRENT material's Coulomb
 		// cone. Otherwise lowering friction can still apply a too-large
 		// tangential impulse during the warm start.
-		if (has_friction) {
-			const real_t cached_tangent_limit = mixed_friction * c.acc_normal_impulse;
+		if (has_friction && !speculative) {
+			const real_t cached_tangent_limit = mixed_friction * space->get_static_friction_multiplier() * c.acc_normal_impulse;
 			if (cached_tangent_limit <= 0.0) {
 				// No normal impulse means no admissible tangent impulse.
 				c.acc_tangent_impulse = Vector3();
+			} else if (space->get_friction_anisotropy_ratio() < real_t(1.0)) {
+				// Shrink stale cached impulses into the CURRENT anisotropic
+				// static ellipse, before applying any warm-start forces.
+				c.acc_tangent_impulse = godot_physics_clamp_anisotropic_friction_3d(
+						c.acc_tangent_impulse, c.normal, space->get_friction_anisotropy_axis(),
+						mixed_friction * c.acc_normal_impulse, space->get_static_friction_multiplier(),
+						space->get_friction_anisotropy_ratio());
 			} else {
 				// Most warm-start contacts already lie inside the Coulomb cone.
 				// Avoid a square root unless a cached impulse must be clamped.
@@ -584,9 +995,9 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 
 		c.acc_impulse -= j_vec;
 
-		// contact query reporting...
+		// Only touching or penetrating contacts produce collision reports.
 
-		if (A->can_report_contacts() || B->can_report_contacts()) {
+		if (!speculative && (A->can_report_contacts() || B->can_report_contacts())) {
 			Vector3 crB = B->get_angular_velocity().cross(c.rB) + B->get_linear_velocity();
 			Vector3 crA = A->get_angular_velocity().cross(c.rA) + A->get_linear_velocity();
 
@@ -607,15 +1018,18 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		c.active = true;
 		do_process = true;
 
-		if (collide_A) {
-			A->apply_impulse(-j_vec, c.rA + A->get_center_of_mass());
-		}
-		if (collide_B) {
-			B->apply_impulse(j_vec, c.rB + B->get_center_of_mass());
+		if (j_vec != Vector3()) {
+			if (collide_A) {
+				A->apply_impulse(-j_vec, c.rA + A->get_center_of_mass());
+			}
+			if (collide_B) {
+				B->apply_impulse(j_vec, c.rB + B->get_center_of_mass());
+			}
 		}
 
-		c.bounce = mixed_restitution;
-		if (c.bounce) {
+		// In the speculative case, limit closure to the current gap per step.
+		c.bounce = speculative ? -depth * inv_dt : mixed_restitution;
+		if (!speculative && c.bounce) {
 			Vector3 crA = A->get_prev_angular_velocity().cross(c.rA);
 			Vector3 crB = B->get_prev_angular_velocity().cross(c.rB);
 			Vector3 dv = B->get_prev_linear_velocity() + crB - A->get_prev_linear_velocity() - crA;
@@ -623,6 +1037,42 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 			// Suppress low-speed restitution: resting stacks should not keep
 			// bouncing due to tiny solver corrections or contact jitter.
 			c.bounce = normal_velocity < -space->get_restitution_velocity_threshold() ? c.bounce * normal_velocity : 0.0;
+		}
+	}
+
+	// Build one valid contact patch for the iterative angular-friction solver.
+	// Do not require a warm-started normal impulse: a new contact only learns
+	// its supporting normal load during solve(), after normal impulses run.
+	angular_friction_contact_mask = 0;
+	angular_friction_radius = 0.0;
+	angular_friction_normal = Vector3();
+	accumulated_spinning_impulse = 0.0;
+	accumulated_rolling_impulse = Vector3();
+	if (do_process && (space->get_spinning_friction() > 0.0 || space->get_rolling_friction() > 0.0)) {
+		bool normal_found = false;
+		bool compatible_normals = true;
+		for (int i = 0; i < contact_count; i++) {
+			const Contact &c = contacts[i];
+			if (!c.active || c.depth <= 0.0 || c.mass_normal <= 0.0) {
+				continue;
+			}
+			if (!normal_found) {
+				angular_friction_normal = c.normal;
+				normal_found = true;
+			} else if (angular_friction_normal.dot(c.normal) < real_t(0.98)) {
+				// Contacts on different faces do not share a torque axis.
+				compatible_normals = false;
+				break;
+			}
+			const real_t radius = collide_A && collide_B ? MIN(c.rA.length(), c.rB.length()) :
+					(collide_A ? c.rA.length() : c.rB.length());
+			if (angular_friction_contact_mask == 0 || radius < angular_friction_radius) {
+				angular_friction_radius = radius;
+			}
+			angular_friction_contact_mask |= uint8_t(1) << i;
+		}
+		if (!compatible_normals || !normal_found || !(angular_friction_radius > 0.0)) {
+			angular_friction_contact_mask = 0;
 		}
 	}
 
@@ -646,6 +1096,10 @@ void GodotBodyPair3D::solve(real_t p_step) {
 	real_t inv_mass_B = collide_B ? B->get_inv_mass() : 0.0;
 	// Mixing is independent of contact point; compute once per solver pass.
 	const real_t friction = mixed_friction;
+	const real_t static_friction_multiplier = space->get_static_friction_multiplier();
+	const real_t stribeck_velocity = space->get_stribeck_transition_velocity();
+	const real_t friction_anisotropy_ratio = space->get_friction_anisotropy_ratio();
+	const Vector3 &friction_anisotropy_axis = space->get_friction_anisotropy_axis();
 
 	// Box2D's two-contact block LCP generalized to 3D tensor inertia.
 	// Only solve a well-conditioned pair with nearly parallel contact normals;
@@ -654,6 +1108,7 @@ void GodotBodyPair3D::solve(real_t p_step) {
 	bool block_normal_updated[2] = { false, false };
 	if (space->is_block_solver_enabled() && contact_count == 2 &&
 			contacts[0].active && contacts[1].active &&
+			contacts[0].depth > 0.0 && contacts[1].depth > 0.0 &&
 			contacts[0].normal.dot(contacts[1].normal) > real_t(0.9999)) {
 		Contact &c0 = contacts[0];
 		Contact &c1 = contacts[1];
@@ -751,56 +1206,59 @@ void GodotBodyPair3D::solve(real_t p_step) {
 
 		c.active = false; //try to deactivate, will activate itself if still needed
 
-		//bias impulse
+		// Speculative contacts never produce positional correction.
+		if (c.depth > 0.0) {
+			//bias impulse
 
-		Vector3 crbA = A->get_biased_angular_velocity().cross(c.rA);
-		Vector3 crbB = B->get_biased_angular_velocity().cross(c.rB);
-		Vector3 dbv = B->get_biased_linear_velocity() + crbB - A->get_biased_linear_velocity() - crbA;
+			Vector3 crbA = A->get_biased_angular_velocity().cross(c.rA);
+			Vector3 crbB = B->get_biased_angular_velocity().cross(c.rB);
+			Vector3 dbv = B->get_biased_linear_velocity() + crbB - A->get_biased_linear_velocity() - crbA;
 
-		real_t vbn = dbv.dot(c.normal);
+			real_t vbn = dbv.dot(c.normal);
 
-		if (Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
-			real_t jbn = (-vbn + c.bias) * c.mass_normal;
-			real_t jbnOld = c.acc_bias_impulse;
-			c.acc_bias_impulse = MAX(jbnOld + jbn, 0.0f);
+			if (Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
+				real_t jbn = (-vbn + c.bias) * c.mass_normal;
+				real_t jbnOld = c.acc_bias_impulse;
+				c.acc_bias_impulse = MAX(jbnOld + jbn, 0.0f);
 
-			// Most warm-started contacts have no further bias correction.
-			const real_t bias_delta = c.acc_bias_impulse - jbnOld;
-			if (bias_delta != 0.0) {
-				const Vector3 jb = c.normal * bias_delta;
-				if (collide_A) {
-					A->apply_bias_impulse(-jb, c.rA + A->get_center_of_mass(), max_bias_av);
-				}
-				if (collide_B) {
-					B->apply_bias_impulse(jb, c.rB + B->get_center_of_mass(), max_bias_av);
-				}
-				// Re-evaluate the bias velocity only when the impulse changed it.
-				crbA = A->get_biased_angular_velocity().cross(c.rA);
-				crbB = B->get_biased_angular_velocity().cross(c.rB);
-				dbv = B->get_biased_linear_velocity() + crbB - A->get_biased_linear_velocity() - crbA;
-				vbn = dbv.dot(c.normal);
-			}
-
-			const real_t total_inverse_mass = inv_mass_A + inv_mass_B;
-			if (total_inverse_mass > 0.0 && Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
-				real_t jbn_com = (-vbn + c.bias) / total_inverse_mass;
-				real_t jbnOld_com = c.acc_bias_impulse_center_of_mass;
-				c.acc_bias_impulse_center_of_mass = MAX(jbnOld_com + jbn_com, 0.0f);
-
-				const Vector3 jb_com = c.normal * (c.acc_bias_impulse_center_of_mass - jbnOld_com);
-				if (jb_com != Vector3()) {
+				// Most warm-started contacts have no further bias correction.
+				const real_t bias_delta = c.acc_bias_impulse - jbnOld;
+				if (bias_delta != 0.0) {
+					const Vector3 jb = c.normal * bias_delta;
 					if (collide_A) {
-						A->apply_bias_impulse(-jb_com, A->get_center_of_mass(), 0.0f);
+						A->apply_bias_impulse(-jb, c.rA + A->get_center_of_mass(), max_bias_av);
 					}
 					if (collide_B) {
-						B->apply_bias_impulse(jb_com, B->get_center_of_mass(), 0.0f);
+						B->apply_bias_impulse(jb, c.rB + B->get_center_of_mass(), max_bias_av);
+					}
+					// Re-evaluate the bias velocity only when the impulse changed it.
+					crbA = A->get_biased_angular_velocity().cross(c.rA);
+					crbB = B->get_biased_angular_velocity().cross(c.rB);
+					dbv = B->get_biased_linear_velocity() + crbB - A->get_biased_linear_velocity() - crbA;
+					vbn = dbv.dot(c.normal);
+				}
+
+				const real_t total_inverse_mass = inv_mass_A + inv_mass_B;
+				if (total_inverse_mass > 0.0 && Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
+					real_t jbn_com = (-vbn + c.bias) / total_inverse_mass;
+					real_t jbnOld_com = c.acc_bias_impulse_center_of_mass;
+					c.acc_bias_impulse_center_of_mass = MAX(jbnOld_com + jbn_com, 0.0f);
+
+					const Vector3 jb_com = c.normal * (c.acc_bias_impulse_center_of_mass - jbnOld_com);
+					if (jb_com != Vector3()) {
+						if (collide_A) {
+							A->apply_bias_impulse(-jb_com, A->get_center_of_mass(), 0.0f);
+						}
+						if (collide_B) {
+							B->apply_bias_impulse(jb_com, B->get_center_of_mass(), 0.0f);
+						}
 					}
 				}
+
+				c.active = true;
 			}
 
-			c.active = true;
 		}
-
 		Vector3 crA = A->get_angular_velocity().cross(c.rA);
 		Vector3 crB = B->get_angular_velocity().cross(c.rB);
 		Vector3 dv = B->get_linear_velocity() + crB - A->get_linear_velocity() - crA;
@@ -834,7 +1292,7 @@ void GodotBodyPair3D::solve(real_t p_step) {
 
 		// Frictionless contacts need neither tangential velocities nor inertia
 		// calculations. Their cached tangent impulse was cleared in pre_solve().
-		if (friction == 0.0) {
+		if (friction == 0.0 || c.depth <= 0.0) {
 			continue;
 		}
 
@@ -871,10 +1329,26 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			c.acc_tangent_impulse += jt;
 
 			const real_t fi_len_squared = c.acc_tangent_impulse.length_squared();
-			const real_t jtMax = c.acc_normal_impulse * friction;
+			const bool use_stribeck = stribeck_velocity > real_t(0.0) && static_friction_multiplier > real_t(1.0);
+			const real_t effective_friction = use_stribeck ? godot_physics_stribeck_friction_coefficient(
+					friction, static_friction_multiplier, tvl, stribeck_velocity) : friction;
+			const real_t jtMax = c.acc_normal_impulse * effective_friction;
 
-			// Only compute sqrt for impulses outside the friction cone.
-			if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && fi_len_squared > jtMax * jtMax) {
+			// Anisotropy applies the SAME ellipse to static, kinetic and
+			// Stribeck contact friction. Never count the static multiplier twice.
+			if (friction_anisotropy_ratio < real_t(1.0)) {
+				c.acc_tangent_impulse = godot_physics_clamp_anisotropic_friction_3d(
+						c.acc_tangent_impulse, c.normal, friction_anisotropy_axis, jtMax,
+						use_stribeck ? real_t(1.0) : static_friction_multiplier,
+						friction_anisotropy_ratio);
+			// Stribeck: one smooth speed-dependent cone; do not double-count
+			// its static friction multiplier.
+			} else if (use_stribeck) {
+				c.acc_tangent_impulse = godot_physics_clamp_static_friction_3d(c.acc_tangent_impulse, jtMax, real_t(1.0));
+			// Legacy: retain distinct static and kinetic cones unchanged.
+			} else if (static_friction_multiplier > real_t(1.0)) {
+				c.acc_tangent_impulse = godot_physics_clamp_static_friction_3d(c.acc_tangent_impulse, jtMax, static_friction_multiplier);
+			} else if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && fi_len_squared > jtMax * jtMax) {
 				c.acc_tangent_impulse *= jtMax / Math::sqrt(fi_len_squared);
 			}
 
@@ -892,6 +1366,83 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			c.active = true;
 		}
 	}
+	// Bullet-style torsional friction, now solved AFTER normal loads are
+	// calculated. The old pre_solve-only correction saw zero impulse on a
+	// freshly created contact and could not resist spin until a later frame.
+	// Clamp the ACCUMULATED angular impulse across iterations so increasing
+	// solver iteration count does not increase the Coulomb torque budget.
+	if (angular_friction_contact_mask != 0) {
+		const real_t rolling_coefficient = space->get_rolling_friction();
+		const real_t spinning_coefficient = space->get_spinning_friction();
+		real_t normal_load_impulse = 0.0;
+		for (int i = 0; i < contact_count; i++) {
+			if (angular_friction_contact_mask & (uint8_t(1) << i)) {
+				normal_load_impulse += contacts[i].acc_normal_impulse;
+			}
+		}
+		if (normal_load_impulse >= 0.0 && Math::is_finite(normal_load_impulse)) {
+			const Vector3 &normal = angular_friction_normal;
+			const Basis &inertia_A = inv_inertia_tensor_A;
+			const Basis &inertia_B = inv_inertia_tensor_B;
+			if (spinning_coefficient > 0.0) {
+				const real_t effective_inverse_inertia = normal.dot(inertia_A.xform(normal) + inertia_B.xform(normal));
+				const real_t relative_spin = (B->get_angular_velocity() - A->get_angular_velocity()).dot(normal);
+				const real_t unconstrained_delta = GodotPhysicsContactAngularFriction::clamped_impulse(
+						relative_spin, effective_inverse_inertia, normal_load_impulse, spinning_coefficient, angular_friction_radius);
+				const real_t limit = spinning_coefficient * normal_load_impulse * angular_friction_radius;
+				if (Math::is_finite(limit) && limit >= 0.0) {
+					const real_t next_impulse = CLAMP(accumulated_spinning_impulse + unconstrained_delta, -limit, limit);
+					const real_t delta = next_impulse - accumulated_spinning_impulse;
+					accumulated_spinning_impulse = next_impulse;
+					if (delta != 0.0) {
+						const Vector3 torque = normal * delta;
+						if (collide_A) {
+							A->apply_torque_impulse(-torque);
+						}
+						if (collide_B) {
+							B->apply_torque_impulse(torque);
+						}
+					}
+				}
+			}
+			if (rolling_coefficient > 0.0) {
+				// Re-evaluate angular speed after spinning friction. Project the
+				// accumulated torque back onto the NEW Coulomb disk even when
+				// load drops to zero or the tangent speed is already negligible.
+				const Vector3 relative_omega = B->get_angular_velocity() - A->get_angular_velocity();
+				const Vector3 tangent = relative_omega - normal * relative_omega.dot(normal);
+				const real_t tangent_length_squared = tangent.length_squared();
+				Vector3 candidate_impulse;
+				if (tangent_length_squared > CMP_EPSILON * CMP_EPSILON) {
+					const real_t tangent_speed = Math::sqrt(tangent_length_squared);
+					const Vector3 axis = tangent / tangent_speed;
+					const real_t inverse_inertia = axis.dot(inertia_A.xform(axis) + inertia_B.xform(axis));
+					const real_t candidate_delta = GodotPhysicsContactAngularFriction::clamped_impulse(
+							tangent_speed, inverse_inertia, normal_load_impulse, rolling_coefficient, angular_friction_radius);
+					candidate_impulse = axis * candidate_delta;
+				}
+				const real_t limit = rolling_coefficient * normal_load_impulse * angular_friction_radius;
+				if (Math::is_finite(limit) && limit >= 0.0) {
+					Vector3 next_impulse = accumulated_rolling_impulse + candidate_impulse;
+					const real_t length_squared = next_impulse.length_squared();
+					if (length_squared > limit * limit) {
+						next_impulse *= limit / Math::sqrt(length_squared);
+					}
+					const Vector3 delta = next_impulse - accumulated_rolling_impulse;
+					accumulated_rolling_impulse = next_impulse;
+					if (delta != Vector3()) {
+						if (collide_A) {
+							A->apply_torque_impulse(-delta);
+						}
+						if (collide_B) {
+							B->apply_torque_impulse(delta);
+						}
+					}
+				}
+			}
+		}
+	}
+
 }
 
 GodotBodyPair3D::GodotBodyPair3D(GodotBody3D *p_A, int p_shape_A, GodotBody3D *p_B, int p_shape_B) :
@@ -1133,7 +1684,7 @@ bool GodotBodySoftBodyPair3D::pre_solve(real_t p_step) {
 		c.mass_normal = kNormal > 0.0 ? 1.0f / kNormal : 0.0f;
 
 		// Soft-body node contacts use the same recovery-speed cap as rigid contacts.
-		c.bias = space->limit_contact_bias(-bias * inv_dt * MIN(0.0f, -depth + max_penetration));
+		c.bias = space->limit_contact_bias(-bias * inv_dt * MIN(0.0f, -depth + max_penetration), body->get_max_depenetration_velocity(), real_t(0.0));
 		c.depth = depth;
 
 		// The material can become frictionless after a contact was cached.
@@ -1143,10 +1694,17 @@ bool GodotBodySoftBodyPair3D::pre_solve(real_t p_step) {
 		} else if (friction > 0.0) {
 			// Material changes must shrink the cached friction impulse to the
 			// current Coulomb cone before it is applied to either body.
-			const real_t tangent_limit = friction * c.acc_normal_impulse;
-			const real_t tangent_length_squared = c.acc_tangent_impulse.length_squared();
-			if (tangent_length_squared > tangent_limit * tangent_limit) {
-				c.acc_tangent_impulse *= tangent_limit / Math::sqrt(tangent_length_squared);
+			const real_t tangent_limit = friction * space->get_static_friction_multiplier() * c.acc_normal_impulse;
+			if (space->get_friction_anisotropy_ratio() < real_t(1.0)) {
+				c.acc_tangent_impulse = godot_physics_clamp_anisotropic_friction_3d(
+						c.acc_tangent_impulse, c.normal, space->get_friction_anisotropy_axis(),
+						friction * c.acc_normal_impulse, space->get_static_friction_multiplier(),
+						space->get_friction_anisotropy_ratio());
+			} else {
+				const real_t tangent_length_squared = c.acc_tangent_impulse.length_squared();
+				if (tangent_length_squared > tangent_limit * tangent_limit) {
+					c.acc_tangent_impulse *= tangent_limit / Math::sqrt(tangent_length_squared);
+				}
 			}
 		}
 		Vector3 j_vec = c.normal * c.acc_normal_impulse + c.acc_tangent_impulse;
@@ -1198,6 +1756,10 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 	const real_t max_bias_av = MAX_BIAS_ROTATION / p_step;
 	// Material friction is constant during the constraint solve.
 	const real_t friction = body->get_friction();
+	const real_t static_friction_multiplier = space->get_static_friction_multiplier();
+	const real_t stribeck_velocity = space->get_stribeck_transition_velocity();
+	const real_t friction_anisotropy_ratio = space->get_friction_anisotropy_ratio();
+	const Vector3 &friction_anisotropy_axis = space->get_friction_anisotropy_axis();
 
 	Basis zero_basis;
 	zero_basis.set_zero();
@@ -1325,10 +1887,24 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 			c.acc_tangent_impulse += jt;
 
 			const real_t fi_len_squared = c.acc_tangent_impulse.length_squared();
-			const real_t jtMax = c.acc_normal_impulse * friction;
+			const bool use_stribeck = stribeck_velocity > real_t(0.0) && static_friction_multiplier > real_t(1.0);
+			const real_t effective_friction = use_stribeck ? godot_physics_stribeck_friction_coefficient(
+					friction, static_friction_multiplier, tvl, stribeck_velocity) : friction;
+			const real_t jtMax = c.acc_normal_impulse * effective_friction;
 
-			// Only compute sqrt for impulses outside the friction cone.
-			if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && (jtMax < 0.0 || fi_len_squared > jtMax * jtMax)) {
+			// Soft/rigid contacts share the same anisotropic ellipse and
+			// Stribeck transition as rigid/rigid contacts.
+			if (friction_anisotropy_ratio < real_t(1.0)) {
+				c.acc_tangent_impulse = godot_physics_clamp_anisotropic_friction_3d(
+						c.acc_tangent_impulse, c.normal, friction_anisotropy_axis, jtMax,
+						use_stribeck ? real_t(1.0) : static_friction_multiplier,
+						friction_anisotropy_ratio);
+		} else if (use_stribeck) {
+				c.acc_tangent_impulse = godot_physics_clamp_static_friction_3d(c.acc_tangent_impulse, jtMax, real_t(1.0));
+			// Preserve the original static/kinetic switch when disabled.
+			} else if (static_friction_multiplier > real_t(1.0) && jtMax > real_t(0.0)) {
+				c.acc_tangent_impulse = godot_physics_clamp_static_friction_3d(c.acc_tangent_impulse, jtMax, static_friction_multiplier);
+			} else if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && (jtMax < 0.0 || fi_len_squared > jtMax * jtMax)) {
 				c.acc_tangent_impulse *= jtMax / Math::sqrt(fi_len_squared);
 			}
 

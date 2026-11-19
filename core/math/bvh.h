@@ -55,7 +55,6 @@
 #include "core/os/mutex.h"
 #include "core/templates/hash_set.h"
 
-#include <climits> // INT_MAX
 
 #define BVHTREE_CLASS BVH_Tree<T, NUM_TREES, 2, MAX_ITEMS, USER_PAIR_TEST_FUNCTION, USER_CULL_TEST_FUNCTION, USE_PAIRS, BOUNDS, POINT>
 #define BVH_LOCKED_FUNCTION BVHLockedFunction _lock_guard(&_mutex, BVH_THREAD_SAFE &&_thread_safe);
@@ -127,6 +126,14 @@ public:
 			// force a collision check no matter the AABB
 			if (p_active) {
 				_add_changed_item(h, p_aabb, false);
+				// A new item's leaf is not padded (see item_add), so with BVH_EXPAND_LEAF_AABBS the
+				// pair search would use the exact bounds. Use the same padded bounds that later
+				// moves use, so speculative margins also pair neighbours at creation.
+				{
+					BOUNDS &padded = tree._pairs[h.id()].expanded_aabb;
+					padded = p_aabb;
+					padded.grow_by(tree._pairing_expansion);
+				}
 				if (!p_defer_pairing) {
 					_check_for_collisions(true);
 				}
@@ -136,10 +143,9 @@ public:
 		return h;
 	}
 
-	// Flush explicitly deferred insertions once all shapes in a batch are
-	// registered. Existing pairs need only geometric checks here: set_tree()
-	// and force_collision_check() already validate changed collision filters.
-	// New pairs are filtered by _collide() when they are created.
+	// Flush deferred insertions and filter changes after a batch. New pairs
+	// are always validated in _collide(); invalid existing pairs require the
+	// full recheck requested by deferred force_collision_check().
 	void flush_pending_pairs() {
 		BVH_LOCKED_FUNCTION
 		if (USE_PAIRS) {
@@ -168,10 +174,10 @@ public:
 		erase(h);
 	}
 
-	void force_collision_check(uint32_t p_handle) {
+	void force_collision_check(uint32_t p_handle, bool p_defer_pairing = false) {
 		BVHHandle h;
 		h.set(p_handle);
-		force_collision_check(h);
+		force_collision_check(h, p_defer_pairing);
 	}
 
 	bool activate(uint32_t p_handle, const BOUNDS &p_aabb, bool p_delay_collision_check = false) {
@@ -257,19 +263,21 @@ public:
 	// use in conjunction with activate if you have deferred the collision check, and
 	// set pairable has never been called.
 	// (deferred collision checks are a workaround for visual server for historical reasons)
-	void force_collision_check(BVHHandle p_handle) {
+	void force_collision_check(BVHHandle p_handle, bool p_defer_pairing = false) {
 		DEV_ASSERT(!p_handle.is_invalid());
 		BVH_LOCKED_FUNCTION
 		if (USE_PAIRS) {
-			// the aabb should already be up to date in the BVH
+			// Filter changes do not change the proxy bounds. Existing pairs must
+			// still be fully validated even when all AABBs are unchanged.
 			BOUNDS aabb;
 			item_get_AABB(p_handle, aabb);
-
-			// add it as changed even if aabb not different
 			_add_changed_item(p_handle, aabb, false);
 
-			// force an immediate full collision check, much like calls to set_pairable
-			_check_for_collisions(true);
+			if (p_defer_pairing) {
+				_pending_full_pair_check = true;
+			} else {
+				_check_for_collisions(true);
+			}
 		}
 	}
 
@@ -329,8 +337,20 @@ public:
 	// call e.g. once per frame (this does a trickle optimize)
 	void update() {
 		BVH_LOCKED_FUNCTION
+		// Reclaim the oversized changed-proxy queue only after sustained idle
+		// frames. Repeated heavy spawn/move frames keep their reserved capacity
+		// and do not incur a realloc/free cycle on every physics tick.
+		const bool had_changes = !changed_items.is_empty();
 		tree.update();
 		_check_for_collisions();
+		if (had_changes) {
+			changed_queue_idle_updates = 0;
+		} else if (changed_items.get_capacity() > MAX_RETAINED_CHANGED_ITEMS) {
+			if (++changed_queue_idle_updates >= CHANGED_QUEUE_RECLAIM_IDLE_UPDATES) {
+				changed_items.reset();
+				changed_queue_idle_updates = 0;
+			}
+		}
 #ifdef BVH_INTEGRITY_CHECKS
 		tree._integrity_check_all();
 #endif
@@ -340,6 +360,13 @@ public:
 	void update_collisions() {
 		BVH_LOCKED_FUNCTION
 		_check_for_collisions();
+	}
+
+	// Lightweight diagnostic for tests/profilers. The queue retains modest
+	// capacity intentionally, but releases burst allocations after idle frames.
+	uint32_t get_changed_queue_capacity() const {
+		BVH_LOCKED_FUNCTION
+		return changed_items.get_capacity();
 	}
 
 	// prefer calling this directly as type safe
@@ -517,52 +544,48 @@ private:
 		}
 	}
 
-	// do this after moving etc.
+	// Pairing traverses candidate leaves directly. The original cull_aabb
+	// filled _cull_hits for every changed proxy and then read the entire list
+	// a second time, retaining memory proportional to the densest scene.
 	void _check_for_collisions(bool p_full_check = false) {
-		if (!changed_items.size()) {
-			// noop
+		if (changed_items.is_empty()) {
+			_pending_full_pair_check = false;
 			return;
 		}
+		// A deferred layer/mask or exclusion change must survive unrelated
+		// move(), update() and flush calls until its full check is executed.
+		const bool full_check = p_full_check || _pending_full_pair_check;
+		_pending_full_pair_check = false;
 
-		typename BVHTREE_CLASS::CullParams params;
-
-		params.result_count_overall = 0;
-		params.result_max = INT_MAX;
-		params.result_array = nullptr;
-		params.subindex_array = nullptr;
+		struct PairVisit {
+			BVH_Manager *manager;
+			BVHHandle changed;
+		};
+		auto pair_visitor = [](uint32_t p_ref_id, void *p_userdata) -> bool {
+			PairVisit &query = *static_cast<PairVisit *>(p_userdata);
+			if (p_ref_id == query.changed.id()) {
+				return true;
+			}
+			BVHHandle candidate;
+			candidate.set_id(p_ref_id);
+			// The callback changes pair adjacency, not BVH node topology.
+			query.manager->_collide(query.changed, candidate);
+			return true;
+		};
 
 		for (const BVHHandle &h : changed_items) {
-			// use the expanded aabb for pairing
-			const BOUNDS &expanded_aabb = tree._pairs[h.id()].expanded_aabb;
+			// Callbacks may grow pair adjacency storage: keep a stable AABB copy.
+			const BOUNDS expanded_aabb = tree._pairs[h.id()].expanded_aabb;
 			BVHABB_CLASS abb;
 			abb.from(expanded_aabb);
 
-			tree.item_fill_cullparams(h, params);
+			// Remove obsolete pairs first, preserving the full filter recheck
+			// for static layer / collision exception changes.
+			_find_leavers(h, abb, full_check);
 
-			// find all the existing paired aabbs that are no longer
-			// paired, and send callbacks
-			_find_leavers(h, abb, p_full_check);
-
-			uint32_t changed_item_ref_id = h.id();
-
-			params.abb = abb;
-
-			params.result_count_overall = 0; // might not be needed
-			tree.cull_aabb(params, false);
-
-			for (const uint32_t ref_id : tree._cull_hits) {
-				// don't collide against ourself
-				if (ref_id == changed_item_ref_id) {
-					continue;
-				}
-
-				// checkmasks is already done in the cull routine.
-				BVHHandle h_collidee;
-				h_collidee.set_id(ref_id);
-
-				// find NEW enterers, and send callbacks for them only
-				_collide(h, h_collidee);
-			}
+			const typename BVHTREE_CLASS::ItemExtra &extra = _get_extra(h);
+			PairVisit query = { this, h };
+			tree.visit_aabb_refs(expanded_aabb, pair_visitor, &query, extra.tree_collision_mask, extra.userdata);
 		}
 		_reset();
 	}
@@ -929,6 +952,12 @@ private:
 	// for collision pairing,
 	// maintain a list of all items moved etc on each frame / tick
 	LocalVector<BVHHandle> changed_items;
+	// Retain common movement bursts; release exceptional queue capacity
+	// only after consecutive idle updates to prevent steady-state churn.
+	static constexpr uint32_t MAX_RETAINED_CHANGED_ITEMS = 4096;
+	static constexpr uint8_t CHANGED_QUEUE_RECLAIM_IDLE_UPDATES = 16;
+	uint8_t changed_queue_idle_updates = 0;
+	bool _pending_full_pair_check = false;
 	uint32_t _tick = 1; // Start from 1 so items with 0 indicate never updated.
 
 	class BVHLockedFunction {

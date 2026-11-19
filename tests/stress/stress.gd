@@ -6,28 +6,54 @@ signal sample_signal(value: int)
 
 const PREFIX := "STRESS_RESULT:"
 const ExtraStress := preload("res://extra_stress.gd")
+const ExtraCases := preload("res://extra_cases.gd")
 const GridReflowStress := preload("res://grid_reflow.gd")
 const BoxReflowStress := preload("res://box_reflow.gd")
 const FlowReflowStress := preload("res://flow_reflow.gd")
 const BitMapMorphologyStress := preload("res://bitmap_morphology.gd")
 const PressureStress := preload("res://pressure_scenarios.gd")
 const DensePhysicsStress := preload("res://physics_dense.gd")
+const ImplicitDampingStress := preload("res://physics_implicit_damping_stress.gd")
 const BoxSAT3DStress := preload("res://physics_box_box_sat_3d.gd")
+const FaceClip3DStress := preload("res://physics_face_clip_3d.gd")
+const SphereBox3DStress := preload("res://physics_sphere_box_3d.gd")
+const BoxRadial3DStress := preload("res://physics_box_radial_axis_3d.gd")
+const EmbeddedCircleRectangle2DStress := preload("res://physics_embedded_circle_rectangle_2d.gd")
+const CoincidentCircles2DStress := preload("res://physics_coincident_circles_2d.gd")
+const UniformFluidStress := preload("res://physics_uniform_fluid_stress.gd")
+const CylinderFluidStress := preload("res://physics_cylinder_fluid_stress.gd")
+const EllipsoidFluidStress := preload("res://physics_ellipsoid_fluid_stress.gd")
+const RectangleSAT2DStress := preload("res://physics_rectangle_shared_axes_2d.gd")
 const PhysicsBlockSolver3DStress := preload("res://physics_block_solver_3d_stress.gd")
 const LargeIsland3DStress := preload("res://physics_large_island_3d.gd")
 const PhysicsLargeIslandStress := preload("res://physics_large_island_stress.gd")
 const PhysicsFilterToggle := preload("res://physics_filter_toggle.gd")
 const PhysicsSeparatedPairsStress := preload("res://physics_separated_pairs.gd")
+const PhysicsCCDTightRotatingPairs := preload("res://physics_ccd_tight_rotating_pairs.gd")
 const MotionFilterOverflow2D := preload("res://physics_motion_filter_overflow_2d.gd")
 const MotionFilterOverflow3D := preload("res://physics_motion_filter_overflow_3d.gd")
 const MotionExclusions3D := preload("res://physics_motion_exclusions_3d.gd")
 const MotionExclusions2D := preload("res://physics_motion_exclusions_2d.gd")
+const ExceptionPairs2D := preload("res://physics_exception_pairs_2d.gd")
+const ExceptionPairs3D := preload("res://physics_exception_pairs_3d.gd")
+const BVHStreaming2D := preload("res://physics_bvh_streaming_2d.gd")
+const BVHStreaming3D := preload("res://physics_bvh_streaming_3d.gd")
+const CompoundBatch2D := preload("res://physics_compound_filter_batch_2d.gd")
+const CompoundBatch3D := preload("res://physics_compound_filter_batch_3d.gd")
+const SoftBodyXPBDArea3D := preload("res://physics_soft_body_xpbd_area_3d.gd")
+const SoftBodyXPBDVolume3D := preload("res://physics_soft_body_xpbd_volume_3d.gd")
+const SoftBodyXPBDDihedral3D := preload("res://physics_soft_body_xpbd_dihedral_3d.gd")
+const SoftBodySelfCollision3D := preload("res://physics_soft_body_self_collision_3d.gd")
+const SoftBodyEdgeCollision3D := preload("res://physics_soft_body_edge_collision_3d.gd")
+const SoftBodyCCD3D := preload("res://physics_soft_body_ccd_3d.gd")
+const ContactAngularFriction3D := preload("res://physics_contact_angular_friction_3d.gd")
+const OneWayOverflow2D := preload("res://physics_one_way_overflow_2d.gd")
 const CachedAABBStress := preload("res://physics_proxy_same_aabb.gd")
 const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_contact_block_solver_2d", "physics_3d", "physics_box_box_axis_aligned_3d", "physics_box_box_rotated_3d", "physics_block_solver_sequential_3d", "physics_block_solver_coupled_3d", "physics_frictionless_3d", "physics_soft_contacts_zero_friction_3d", "physics_soft_contacts_friction_3d", "physics_ccd_2d", "physics_separated_pairs_2d", "physics_separated_pairs_3d", "physics_dense_2d", "physics_dense_3d", "physics_pending_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_large_island_serial_2d", "physics_large_island_parallel_2d", "physics_multi_island_serial_2d", "physics_multi_island_parallel_2d", "physics_joint_chain_3d", "physics_large_island_3d_serial", "physics_large_island_3d_parallel", "physics_large_island_3d_priority", "physics_large_island_3d_topology_serial", "physics_large_island_3d_topology_parallel", "physics_multi_island_3d_serial", "physics_multi_island_3d_parallel", "physics_multi_island_3d_two_large", "physics_sparse_2d", "physics_sparse_3d", "physics_proxy_same_aabb_2d", "physics_proxy_same_aabb_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
+	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_contact_block_solver_2d", "physics_3d", "physics_damping_legacy_2d", "physics_damping_implicit_2d", "physics_damping_legacy_3d", "physics_damping_implicit_3d", "physics_box_box_axis_aligned_3d", "physics_box_box_rotated_3d", "physics_box_box_misaligned_3d", "physics_face_clip_dense_3d", "physics_face_clip_rotated_3d", "physics_sphere_box_identity_3d", "physics_sphere_box_rotated_3d", "physics_circle_rectangle_embedded_2d", "physics_circle_rectangle_exterior_2d", "physics_circles_coincident_2d", "physics_circles_offset_2d", "physics_fluid_2d_disabled", "physics_fluid_2d_enabled", "physics_fluid_3d_disabled", "physics_fluid_3d_enabled", "physics_cylinder_fluid_3d_disabled", "physics_cylinder_fluid_3d_enabled", "physics_ellipsoid_fluid_3d_disabled", "physics_ellipsoid_fluid_3d_enabled", "physics_rect_sat_axis_aligned_2d", "physics_rect_sat_shared_rotation_2d", "physics_rect_sat_misaligned_2d", "physics_box_capsule_near_3d", "physics_box_capsule_far_3d", "physics_box_cylinder_near_3d", "physics_box_cylinder_far_3d", "physics_block_solver_sequential_3d", "physics_block_solver_coupled_3d", "physics_frictionless_3d", "physics_soft_contacts_zero_friction_3d", "physics_soft_contacts_friction_3d", "physics_ccd_2d", "physics_ccd_rotational_radial_2d", "physics_ccd_rotational_tight_2d", "physics_ccd_rotational_radial_3d", "physics_ccd_rotational_tight_3d", "physics_separated_pairs_2d", "physics_separated_pairs_3d", "physics_dense_2d", "physics_dense_3d", "physics_pending_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_large_island_serial_2d", "physics_large_island_parallel_2d", "physics_multi_island_serial_2d", "physics_multi_island_parallel_2d", "physics_joint_chain_3d", "physics_large_island_3d_serial", "physics_large_island_3d_parallel", "physics_large_island_3d_priority", "physics_large_island_3d_topology_serial", "physics_large_island_3d_topology_parallel", "physics_multi_island_3d_serial", "physics_multi_island_3d_parallel", "physics_multi_island_3d_two_large", "physics_sparse_2d", "physics_sparse_3d", "physics_proxy_same_aabb_2d", "physics_proxy_same_aabb_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
@@ -43,7 +69,7 @@ const CASES := [
 	"bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
 	"curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
 	"canvas_transform_2d", "process_dispatch",
-	"physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d",
+	"physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_exception_pairs_2d", "physics_exception_pairs_3d", "physics_bvh_streaming_2d", "physics_bvh_streaming_3d", "physics_compound_filter_batch_2d", "physics_compound_filter_batch_3d", "physics_soft_body_xpbd_area_3d", "physics_soft_body_xpbd_volume_3d", "physics_soft_body_xpbd_dihedral_3d", "physics_soft_body_self_collision_3d", "physics_soft_body_edge_collision_3d", "physics_soft_body_ccd_3d", "physics_contact_angular_friction_3d", "physics_one_way_overflow_2d", "small_file_io",
 ]
 
 var signal_total: int = 0
@@ -280,10 +306,66 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_contact_manifolds_2d(scale, frames, true)
 		"physics_3d":
 			return await _physics_3d(scale, frames)
+		"physics_damping_legacy_2d":
+			return await ImplicitDampingStress.new().run_2d(self, scale, frames, false)
+		"physics_damping_implicit_2d":
+			return await ImplicitDampingStress.new().run_2d(self, scale, frames, true)
+		"physics_damping_legacy_3d":
+			return await ImplicitDampingStress.new().run_3d(self, scale, frames, false)
+		"physics_damping_implicit_3d":
+			return await ImplicitDampingStress.new().run_3d(self, scale, frames, true)
 		"physics_box_box_axis_aligned_3d":
 			return await BoxSAT3DStress.new().run(self, scale, frames, false)
 		"physics_box_box_rotated_3d":
 			return await BoxSAT3DStress.new().run(self, scale, frames, true)
+		"physics_box_box_misaligned_3d":
+			return await BoxSAT3DStress.new().run(self, scale, frames, true, true)
+		"physics_face_clip_dense_3d":
+			return await FaceClip3DStress.new().run(self, scale, frames, false)
+		"physics_face_clip_rotated_3d":
+			return await FaceClip3DStress.new().run(self, scale, frames, true)
+		"physics_sphere_box_identity_3d":
+			return await SphereBox3DStress.new().run(self, scale, frames, false)
+		"physics_sphere_box_rotated_3d":
+			return await SphereBox3DStress.new().run(self, scale, frames, true)
+		"physics_circle_rectangle_embedded_2d":
+			return await EmbeddedCircleRectangle2DStress.new().run(self, scale, frames, true)
+		"physics_circle_rectangle_exterior_2d":
+			return await EmbeddedCircleRectangle2DStress.new().run(self, scale, frames, false)
+		"physics_circles_coincident_2d":
+			return await CoincidentCircles2DStress.new().run(self, scale, frames, true)
+		"physics_circles_offset_2d":
+			return await CoincidentCircles2DStress.new().run(self, scale, frames, false)
+		"physics_fluid_2d_disabled":
+			return await UniformFluidStress.new().run(self, scale, frames, false, false)
+		"physics_fluid_2d_enabled":
+			return await UniformFluidStress.new().run(self, scale, frames, false, true)
+		"physics_fluid_3d_disabled":
+			return await UniformFluidStress.new().run(self, scale, frames, true, false)
+		"physics_fluid_3d_enabled":
+			return await UniformFluidStress.new().run(self, scale, frames, true, true)
+		"physics_cylinder_fluid_3d_disabled":
+			return await CylinderFluidStress.new().run(self, scale, frames, false)
+		"physics_cylinder_fluid_3d_enabled":
+			return await CylinderFluidStress.new().run(self, scale, frames, true)
+		"physics_ellipsoid_fluid_3d_disabled":
+			return await EllipsoidFluidStress.new().run(self, scale, frames, false)
+		"physics_ellipsoid_fluid_3d_enabled":
+			return await EllipsoidFluidStress.new().run(self, scale, frames, true)
+		"physics_rect_sat_axis_aligned_2d":
+			return await RectangleSAT2DStress.new().run(self, scale, frames, 0)
+		"physics_rect_sat_shared_rotation_2d":
+			return await RectangleSAT2DStress.new().run(self, scale, frames, 1)
+		"physics_rect_sat_misaligned_2d":
+			return await RectangleSAT2DStress.new().run(self, scale, frames, 2)
+		"physics_box_capsule_near_3d":
+			return await BoxRadial3DStress.new().run(self, scale, frames, true, false)
+		"physics_box_capsule_far_3d":
+			return await BoxRadial3DStress.new().run(self, scale, frames, true, true)
+		"physics_box_cylinder_near_3d":
+			return await BoxRadial3DStress.new().run(self, scale, frames, false, false)
+		"physics_box_cylinder_far_3d":
+			return await BoxRadial3DStress.new().run(self, scale, frames, false, true)
 		"physics_block_solver_sequential_3d":
 			return await PhysicsBlockSolver3DStress.new().run(self, scale, frames, false)
 		"physics_block_solver_coupled_3d":
@@ -296,6 +378,14 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_soft_contacts_3d(scale, frames, false)
 		"physics_ccd_2d":
 			return await _physics_ccd_2d(scale, frames)
+		"physics_ccd_rotational_radial_2d":
+			return await PhysicsCCDTightRotatingPairs.new().run(self, scale, frames, 2, false)
+		"physics_ccd_rotational_tight_2d":
+			return await PhysicsCCDTightRotatingPairs.new().run(self, scale, frames, 2, true)
+		"physics_ccd_rotational_radial_3d":
+			return await PhysicsCCDTightRotatingPairs.new().run(self, scale, frames, 3, false)
+		"physics_ccd_rotational_tight_3d":
+			return await PhysicsCCDTightRotatingPairs.new().run(self, scale, frames, 3, true)
 		"physics_separated_pairs_2d":
 			return await PhysicsSeparatedPairsStress.new().run(self, scale, frames, 2)
 		"physics_separated_pairs_3d":
@@ -406,6 +496,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_raycast_3d(scale)
 		"render_multimesh_3d":
 			return await _render_multimesh_3d(scale, frames)
+		"small_file_io":
+			return await ExtraCases.new().run_case(test_case, scale, frames, self)
 		"bitmap_rects":
 			return _bitmap_rects(scale)
 		"bitmap_pipeline":
@@ -436,6 +528,34 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await MotionExclusions3D.new().run(self, scale, frames)
 		"physics_motion_exclusions_2d":
 			return await MotionExclusions2D.new().run(self, scale, frames)
+		"physics_exception_pairs_2d":
+			return await ExceptionPairs2D.new().run(self, scale, frames)
+		"physics_exception_pairs_3d":
+			return await ExceptionPairs3D.new().run(self, scale, frames)
+		"physics_bvh_streaming_2d":
+			return await BVHStreaming2D.new().run(self, scale, frames)
+		"physics_bvh_streaming_3d":
+			return await BVHStreaming3D.new().run(self, scale, frames)
+		"physics_compound_filter_batch_2d":
+			return await CompoundBatch2D.new().run(self, scale, frames)
+		"physics_compound_filter_batch_3d":
+			return await CompoundBatch3D.new().run(self, scale, frames)
+		"physics_soft_body_xpbd_area_3d":
+			return await SoftBodyXPBDArea3D.new().run(self, scale, frames)
+		"physics_soft_body_xpbd_volume_3d":
+			return await SoftBodyXPBDVolume3D.new().run(self, scale, frames)
+		"physics_soft_body_xpbd_dihedral_3d":
+			return await SoftBodyXPBDDihedral3D.new().run(self, scale, frames)
+		"physics_soft_body_self_collision_3d":
+			return await SoftBodySelfCollision3D.new().run(self, scale, frames)
+		"physics_soft_body_edge_collision_3d":
+			return await SoftBodyEdgeCollision3D.new().run(self, scale, frames)
+		"physics_soft_body_ccd_3d":
+			return await SoftBodyCCD3D.new().run(self, scale, frames)
+		"physics_contact_angular_friction_3d":
+			return await ContactAngularFriction3D.new().run(self, scale, frames)
+		"physics_one_way_overflow_2d":
+			return await OneWayOverflow2D.new().run(self, scale, frames)
 	return {"error": "Unhandled case"}
 
 

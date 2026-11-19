@@ -1,0 +1,53 @@
+name: SoftBody StVK membrane viscoelastic damping
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_softbody_membrane_damping.h"
+      - "servers/physics_xpbd_membrane.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_softbody_membrane_damping.cpp"
+      - "tests/stress/test_physics_softbody_membrane_damping.py"
+      - "tests/stress/test_physics_softbody_membrane_damping_compiler.cpp"
+      - "tests/stress/physics_cpp_stubs/core/math/vector3.h"
+      - ".github/workflows/physics-softbody-membrane-viscosity.yml"
+  pull_request:
+    paths:
+      - "servers/physics_softbody_membrane_damping.h"
+      - "servers/physics_xpbd_membrane.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_softbody_membrane_damping.cpp"
+      - "tests/stress/test_physics_softbody_membrane_damping.py"
+      - "tests/stress/test_physics_softbody_membrane_damping_compiler.cpp"
+      - "tests/stress/physics_cpp_stubs/core/math/vector3.h"
+      - ".github/workflows/physics-softbody-membrane-viscosity.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  membrane-viscosity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile standalone native solver in float32 and float64
+        run: |
+          for precision in float double; do
+            flags=""
+            if [ "$precision" = "double" ]; then flags="-DCGAME_USE_DOUBLE"; fi
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror $flags \
+              -Itests/stress/physics_cpp_stubs -I. \
+              tests/stress/test_physics_softbody_membrane_damping_compiler.cpp \
+              -o "/tmp/softbody_membrane_damping_$precision"
+            "/tmp/softbody_membrane_damping_$precision"
+          done
+      - name: Verify 5000 random momentum, energy and scale contracts
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_membrane_damping.py' -v

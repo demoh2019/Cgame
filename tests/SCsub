@@ -2,13 +2,21 @@
 from misc.utility.scons_hints import *
 
 import glob
+import os
 
 import test_builders
 
 Import("env")
 
 # Sources with tests must be explicitly linked first.
-force_link_sources = glob.glob("*/**/*.cpp", recursive=True)
+# Only files that register tests with TEST_FORCE_LINK take part in the test binary. Standalone
+# microbenchmarks and smoke-compile checks (with their own main() or stub headers) are built by hand.
+def _has_force_link(p_path):
+    with open(p_path, encoding="utf-8", errors="ignore") as f:
+        return "TEST_FORCE_LINK" in f.read()
+
+
+force_link_sources = [f for f in glob.glob("*/**/*.cpp", recursive=True) if _has_force_link(f)]
 force_link_header = env.CommandNoCache(
     "force_link.gen.h", env.Value(force_link_sources), env.Run(test_builders.force_link_builder)
 )

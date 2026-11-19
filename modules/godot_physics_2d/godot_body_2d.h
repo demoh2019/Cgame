@@ -161,6 +161,15 @@ class GodotBody2D : public GodotCollisionObject2D {
 	GodotPhysicsDirectBodyState2D *direct_state = nullptr;
 
 	uint64_t island_step = 0;
+	// Contacts touching this body are solved `solver_priority` times as many iterations (Unity
+	// Rigidbody.solverIterations analogue). 1 is the normal cost.
+	int solver_priority = 1;
+	// Per-body limits; 0 falls back to the project-wide value (Unity maxLinearVelocity,
+	// maxAngularVelocity and maxDepenetrationVelocity).
+	real_t max_linear_velocity = 0.0;
+	real_t max_angular_velocity = 0.0;
+	real_t max_depenetration_velocity = 0.0;
+	inline static uint32_t high_priority_body_count = 0;
 
 	void _update_transform_dependent();
 
@@ -211,6 +220,28 @@ public:
 	_FORCE_INLINE_ const VSet<RID> &get_exceptions() const { return exceptions; }
 
 	_FORCE_INLINE_ uint64_t get_island_step() const { return island_step; }
+	_FORCE_INLINE_ int get_solver_priority() const { return solver_priority; }
+	_FORCE_INLINE_ void set_max_linear_velocity(real_t p_value) { max_linear_velocity = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_max_linear_velocity() const { return max_linear_velocity; }
+	_FORCE_INLINE_ void set_max_angular_velocity(real_t p_value) { max_angular_velocity = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_max_angular_velocity() const { return max_angular_velocity; }
+	_FORCE_INLINE_ void set_max_depenetration_velocity(real_t p_value) { max_depenetration_velocity = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_max_depenetration_velocity() const { return max_depenetration_velocity; }
+	// Effective limits: the body value when set, otherwise the space default.
+	_FORCE_INLINE_ real_t get_effective_max_linear_velocity(real_t p_space_default) const { return max_linear_velocity > 0.0 ? max_linear_velocity : p_space_default; }
+	_FORCE_INLINE_ real_t get_effective_max_angular_velocity(real_t p_space_default) const { return max_angular_velocity > 0.0 ? max_angular_velocity : p_space_default; }
+	void set_solver_priority(int p_priority) {
+		const int clamped = CLAMP(p_priority, 1, 8);
+		if (solver_priority <= 1 && clamped > 1) {
+			high_priority_body_count++;
+		} else if (solver_priority > 1 && clamped <= 1) {
+			high_priority_body_count--;
+		}
+		solver_priority = clamped;
+	}
+	// True while any body requests extra solver iterations; lets the stepper skip a scan of every
+	// constraint in the common case where none does.
+	static bool has_high_priority_bodies() { return high_priority_body_count > 0; }
 	_FORCE_INLINE_ void set_island_step(uint64_t p_step) { island_step = p_step; }
 
 	void add_constraint(GodotConstraint2D *p_constraint, int p_pos);
@@ -331,10 +362,10 @@ public:
 	// With `p_defer_motion`, the broadphase is not touched and the call is safe to
 	// run concurrently for different bodies; call `apply_deferred_motion` afterwards.
 	void integrate_forces(real_t p_step, bool p_defer_motion = false);
-	_FORCE_INLINE_ void apply_deferred_motion() {
+	_FORCE_INLINE_ void apply_deferred_motion(real_t p_step) {
 		if (has_deferred_motion) {
 			has_deferred_motion = false;
-			_update_shapes_with_motion(deferred_motion);
+			_update_shapes_with_motion(deferred_motion, angular_velocity * p_step, get_transform().get_origin() + center_of_mass);
 		}
 	}
 	void integrate_velocities(real_t p_step);

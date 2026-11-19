@@ -1209,4 +1209,290 @@ TEST_CASE("[BVH] Reciprocal pair indices fit into the 64-bit contact link") {
 	}
 }
 
+
+TEST_CASE("[BVH] Speculative 2D pairing margin includes close separated shapes") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	tree.params_set_pairing_expansion(real_t(0.5));
+	Item a, b, far;
+	int pairs = 0;
+	int unpairs = 0;
+	tree.set_pair_callback(count_pair, &pairs);
+	tree.set_unpair_callback(count_unpair, &unpairs);
+	const BVHHandle ha = tree.create(&a, true, 0, 3, Rect2(0, 0, 2, 2));
+	const BVHHandle hb = tree.create(&b, true, 1, 3, Rect2(real_t(2.3), 0, 2, 2));
+	const BVHHandle hc = tree.create(&far, true, 1, 3, Rect2(20, 0, 2, 2));
+	CHECK(pairs == 1);
+	CHECK(unpairs == 0);
+	tree.move(hb, Rect2(10, 0, 2, 2));
+	tree.update();
+	CHECK(unpairs == 1);
+	tree.erase(hc);
+	tree.erase(hb);
+	tree.erase(ha);
+	CHECK(unpairs == pairs);
+}
+
+TEST_CASE("[BVH] Speculative 3D pairing margin includes close separated shapes") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, AABB, Vector3, false>;
+	Tree tree;
+	tree.params_set_pairing_expansion(real_t(0.05));
+	Item a, b, far;
+	int pairs = 0;
+	int unpairs = 0;
+	tree.set_pair_callback(count_pair, &pairs);
+	tree.set_unpair_callback(count_unpair, &unpairs);
+	const BVHHandle ha = tree.create(&a, true, 0, 3,
+			AABB(Vector3(), Vector3(2, 2, 2)));
+	const BVHHandle hb = tree.create(&b, true, 1, 3,
+			AABB(Vector3(real_t(2.03), 0, 0), Vector3(2, 2, 2)));
+	const BVHHandle hc = tree.create(&far, true, 1, 3,
+			AABB(Vector3(20, 0, 0), Vector3(2, 2, 2)));
+	CHECK(pairs == 1);
+	CHECK(unpairs == 0);
+	tree.move(hb, AABB(Vector3(10, 0, 0), Vector3(2, 2, 2)));
+	tree.update();
+	CHECK(unpairs == 1);
+	tree.erase(hc);
+	tree.erase(hb);
+	tree.erase(ha);
+	CHECK(unpairs == pairs);
+}
+
+TEST_CASE("[BVH] 2D point and box culls reject empty roots and preserve subtree results") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CountingCullTest, Rect2, Vector2, false>;
+	Tree tree;
+	constexpr int COUNT = 96;
+	Item items[COUNT];
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		tree.create(&items[i], true, uint32_t(i & 1), 3, Rect2(i * 4, 0, 1, 1));
+	}
+	Item *results[COUNT] = {};
+
+	// Entirely absent queries must not yield false positives from a leaf.
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(Rect2(0, 1000, 1000, 4), results, COUNT, nullptr) == 0);
+	CHECK(tree.cull_point(Vector2(999, 999), results, COUNT, nullptr) == 0);
+	CHECK(tree.cull_point(Vector2(20.5, 2.5), results, COUNT, nullptr) == 0);
+	CHECK(tree.cull_segment(Vector2(-10, 1000), Vector2(500, 1000), results, COUNT, nullptr) == 0);
+	CHECK(CountingCullTest::calls == 0);
+
+	// Fully covering each root should still enumerate each proxy exactly once.
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(Rect2(-2, -2, COUNT * 4 + 4, 6), results, COUNT, nullptr) == COUNT);
+	CHECK(CountingCullTest::calls == COUNT);
+	bool seen[COUNT] = {};
+	for (int i = 0; i < COUNT; ++i) {
+		REQUIRE(results[i] != nullptr);
+		CHECK(results[i]->value >= 0);
+		CHECK(results[i]->value < COUNT);
+		seen[results[i]->value] = true;
+	}
+	for (bool found : seen) {
+		CHECK(found);
+	}
+
+	CHECK(tree.cull_aabb(Rect2(-2, -2, COUNT * 4 + 4, 6), results, COUNT, nullptr, 1) == COUNT / 2);
+	CHECK(tree.cull_aabb(Rect2(16.5, 0, 18, 1), results, COUNT, nullptr) == 5);
+	CHECK(tree.cull_point(Vector2(20.5, 0.5), results, COUNT, nullptr) == 1);
+	CHECK(results[0] == &items[5]);
+	CHECK(tree.cull_segment(Vector2(-2, 0.5), Vector2(COUNT * 4, 0.5), results, COUNT, nullptr) == COUNT);
+	// A segment entirely inside a leaf/root must survive the new root rejection.
+	CHECK(tree.cull_segment(Vector2(20.2, 0.2), Vector2(20.8, 0.8), results, COUNT, nullptr) == 1);
+	CHECK(results[0] == &items[5]);
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(Rect2(-2, -2, COUNT * 4 + 4, 6), results, 3, nullptr) == 3);
+	CHECK(CountingCullTest::calls == 3);
+}
+
+TEST_CASE("[BVH] 3D point, segment and box culls preserve exact results") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CountingCullTest, AABB, Vector3, false>;
+	Tree tree;
+	constexpr int COUNT = 96;
+	Item items[COUNT];
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		tree.create(&items[i], true, uint32_t(i & 1), 3,
+				AABB(Vector3(i * 4, 0, 0), Vector3(1, 1, 1)));
+	}
+	Item *results[COUNT] = {};
+
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(AABB(Vector3(0, 1000, 0), Vector3(1000, 1, 1)), results, COUNT, nullptr) == 0);
+	CHECK(tree.cull_point(Vector3(999, 999, 999), results, COUNT, nullptr) == 0);
+	CHECK(tree.cull_point(Vector3(20.5, 2.5, 0.5), results, COUNT, nullptr) == 0);
+	CHECK(tree.cull_segment(Vector3(-10, 1000, 0.5), Vector3(500, 1000, 0.5), results, COUNT, nullptr) == 0);
+	CHECK(CountingCullTest::calls == 0);
+
+	const AABB all(Vector3(-2, -2, -2), Vector3(COUNT * 4 + 4, 6, 6));
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(all, results, COUNT, nullptr) == COUNT);
+	CHECK(CountingCullTest::calls == COUNT);
+	bool seen[COUNT] = {};
+	for (int i = 0; i < COUNT; ++i) {
+		REQUIRE(results[i] != nullptr);
+		CHECK(results[i]->value >= 0);
+		CHECK(results[i]->value < COUNT);
+		seen[results[i]->value] = true;
+	}
+	for (bool found : seen) {
+		CHECK(found);
+	}
+	CHECK(tree.cull_aabb(all, results, COUNT, nullptr, 2) == COUNT / 2);
+	CHECK(tree.cull_point(Vector3(16.5, 0.5, 0.5), results, COUNT, nullptr) == 1);
+	CHECK(results[0] == &items[4]);
+	CHECK(tree.cull_segment(Vector3(-2, 0.5, 0.5), Vector3(COUNT * 4, 0.5, 0.5), results, COUNT, nullptr) == COUNT);
+	CHECK(tree.cull_segment(Vector3(20.2, 0.2, 0.2), Vector3(20.8, 0.8, 0.8), results, COUNT, nullptr) == 1);
+	CHECK(results[0] == &items[5]);
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(all, results, 1, nullptr) == 1);
+	CHECK(CountingCullTest::calls == 1);
+}
+
+TEST_CASE("[BVH] Large changed-proxy queues are released after idle frames") {
+	using Tree = BVH_Manager<Item, 1, true, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	constexpr int COUNT = 5000;
+	Item items[COUNT + 1];
+	BVHHandle handles[COUNT];
+	int created = 0;
+	int removed = 0;
+	tree.set_pair_callback(count_pair, &created);
+	tree.set_unpair_callback(count_unpair, &removed);
+
+	// Emulate a large streaming/spawn burst. Defer broadphase pair checking
+	// until all proxies are inserted; separated boxes must not form pairs.
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		handles[i] = tree.create(&items[i], true, 0, 1,
+				Rect2(i * 8.0, 0, 1, 1), 0, true);
+	}
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
+	tree.update();
+	CHECK(created == 0);
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
+
+	// Retain allocated queue storage during a short pause so workloads with
+	// intermittent bursts avoid frame-to-frame realloc/free churn.
+	for (int i = 0; i < 8; ++i) {
+		tree.update();
+	}
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
+
+	// Any busy update restarts the quiet-frame counter, even if the queue
+	// remains small and no collision pair is created.
+	tree.move(handles[COUNT - 1], Rect2(COUNT * 8.0 + 32.0, 0, 1, 1));
+	tree.update();
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
+	for (int i = 0; i < 15; ++i) {
+		tree.update();
+	}
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
+
+	// A sustained quiet period returns one-off queue memory to the allocator.
+	tree.update();
+	CHECK(tree.get_changed_queue_capacity() <= 4096);
+	CHECK(created == 0);
+	CHECK(removed == 0);
+
+	// After trimming, normal insertion, pair callbacks, and ref reuse
+	// must continue to work with an empty changed-proxy queue.
+	items[COUNT].value = COUNT;
+	BVHHandle overlapping = tree.create(&items[COUNT], true, 0, 1,
+			Rect2(0.5, 0, 1, 1));
+	CHECK(created == 1);
+	Item *result[2] = {};
+	CHECK(tree.cull_aabb(Rect2(0, 0, 2, 2), result, 2, nullptr) == 2);
+	tree.erase(overlapping);
+	CHECK(removed == 1);
+
+	tree.move(handles[0], Rect2(8.5, 0, 1, 1));
+	tree.update();
+	CHECK(created == 2);
+	CHECK(removed == 1);
+	CHECK(tree.get_changed_queue_capacity() <= 4096);
+}
+
+TEST_CASE("[BVH] 3D convex traversal prunes sparse subtrees without losing hits") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CountingCullTest, AABB, Vector3, false>;
+	Tree tree;
+	constexpr int COUNT = 96;
+	Item items[COUNT];
+	BVHHandle handles[COUNT];
+
+	// Split the bodies between two trees. Every box is far from its neighbors,
+	// exercising rejection of branches rather than just scanning a dense leaf.
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		handles[i] = tree.create(&items[i], true, uint32_t(i & 1), 3,
+				AABB(Vector3((i - 48) * 8, 0, 0), Vector3(1, 1, 1)));
+	}
+
+	const auto hull_between_x = [](real_t p_min_x, real_t p_max_x) {
+		Vector<Plane> hull;
+		hull.push_back(Plane(Vector3(1, 0, 0), p_max_x));
+		hull.push_back(Plane(Vector3(-1, 0, 0), -p_min_x));
+		hull.push_back(Plane(Vector3(0, 1, 0), 5));
+		hull.push_back(Plane(Vector3(0, -1, 0), 5));
+		hull.push_back(Plane(Vector3(0, 0, 1), 5));
+		hull.push_back(Plane(Vector3(0, 0, -1), 5));
+		return hull;
+	};
+
+	Item *results[COUNT] = {};
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(1000, 1100), results, COUNT, nullptr) == 0);
+	CHECK(CountingCullTest::calls == 0);
+
+	// The five bodies at x=-16,-8,0,8,16 intersect the partial hull.
+	CountingCullTest::calls = 0;
+	REQUIRE(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr) == 5);
+	CHECK(CountingCullTest::calls == 5);
+	uint32_t hit_mask = 0;
+	for (int i = 0; i < 5; ++i) {
+		REQUIRE(results[i] != nullptr);
+		const int hit_index = results[i]->value - 46;
+		REQUIRE(hit_index >= 0);
+		REQUIRE(hit_index < 5);
+		hit_mask |= uint32_t(1) << hit_index;
+	}
+	CHECK(hit_mask == 0x1F);
+
+	// A slanted clipping plane exercises partial nodes and cutting-plane
+	// optimization, not only axis-aligned box/frustum classification.
+	Vector<Plane> slanted_hull = hull_between_x(-20, 20);
+	slanted_hull.push_back(Plane(Vector3(1, 1, 0).normalized(), 6.0));
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(slanted_hull, results, COUNT, nullptr) == 4);
+	CHECK(CountingCullTest::calls == 4);
+
+	// Child pruning cannot change tree-mask filtering or output caps.
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr, 1) == 3);
+	CHECK(CountingCullTest::calls == 3);
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr, 2) == 2);
+	CHECK(CountingCullTest::calls == 2);
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, 1, nullptr) == 1);
+	CHECK(CountingCullTest::calls == 1);
+
+	// Fully covered roots should propagate the contained flag to every leaf.
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-600, 600), results, COUNT, nullptr) == COUNT);
+	CHECK(CountingCullTest::calls == COUNT);
+
+	// Updates and removals must still expose the correct leaf bounds.
+	tree.move(handles[0], AABB(Vector3(0.5, 0, 0), Vector3(1, 1, 1)));
+	tree.update();
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr) == 6);
+	CHECK(CountingCullTest::calls == 6);
+	tree.erase(handles[48]);
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr) == 5);
+	CHECK(CountingCullTest::calls == 5);
+}
+
 } // namespace TestBVH

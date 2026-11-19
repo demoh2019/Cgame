@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="FloatingOrigin3D" inherits="Node" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Keeps the player near the origin of a very large 3D world by shifting the world instead.
+	</brief_description>
+	<description>
+		Floating point numbers lose precision far from zero. With the default single precision build, a position 10 km from the origin can only be stored to about a millimeter, and 100 km to about a centimeter, which makes meshes, physics and cameras jitter. FloatingOrigin3D fixes this without a double precision engine build: as soon as [member focus] is farther than [member threshold] from the origin, every direct child of [member world_root] is moved back by a whole multiple of [member snap], so the focus is near zero again while everything keeps its position relative to everything else.
+		[codeblock]
+		var origin = FloatingOrigin3D.new()
+		origin.focus = ^"../Player"
+		origin.world_root = ^".."
+		origin.threshold = 2000.0
+		origin.origin_shifted.connect(func(offset): print("World moved by ", offset))
+		add_child(origin)
+		[/codeblock]
+		The shift is exactly a multiple of [member snap], and the total is tracked as integers in [method get_origin_cells], so the absolute position of anything can be reconstructed without accumulating error. Use [method to_absolute] for single precision, or compute [code]get_origin_cells() * snap + local[/code] in a larger type for save games and network messages.
+		Nodes in the group [code]floating_origin_ignore[/code] are not moved. Particles and trails that are not children of the world root must be moved manually when [signal origin_shifted] is emitted. Physics interpolation is reset on every moved node.
+		[b]Note:[/b] Only direct [Node3D] children of the world root are moved, and rigid bodies are teleported with their velocities unchanged. Place the player, the chunks and static geometry under the same root.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_origin_cells" qualifiers="const">
+			<return type="Vector3i" />
+			<description>
+				Returns how many [member snap] units the world has been moved in total, per axis. This is exact, unlike [method get_origin_offset].
+			</description>
+		</method>
+		<method name="get_origin_offset" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the total distance the world has been moved, as a [Vector3]. In a very large world this value is itself imprecise; prefer [method get_origin_cells].
+			</description>
+		</method>
+		<method name="get_shift_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many times the world has been shifted.
+			</description>
+		</method>
+		<method name="shift_origin">
+			<return type="void" />
+			<param index="0" name="offset" type="Vector3" />
+			<description>
+				Moves every shiftable child of [member world_root] by [code]-offset[/code] and emits [signal origin_shifted]. This is called automatically when the focus leaves the threshold, but can also be used for manual re-centering. [param offset] should be a multiple of [member snap] to keep [method get_origin_cells] exact.
+			</description>
+		</method>
+		<method name="to_absolute" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="local" type="Vector3" />
+			<description>
+				Converts a position in the current (shifted) world to the position it would have if the origin had never moved.
+			</description>
+		</method>
+		<method name="to_local" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="absolute" type="Vector3" />
+			<description>
+				Converts an absolute world position to the current (shifted) world.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="focus" type="NodePath" setter="set_focus" getter="get_focus" default="NodePath(&quot;&quot;)">
+			The node that is kept near the origin, normally the player or the camera. It must be a [Node3D].
+		</member>
+		<member name="process_callback" type="int" setter="set_process_callback" getter="get_process_callback" enum="FloatingOrigin3D.ProcessCallback" default="0">
+			When the focus is checked. Physics is the default, so that the shift happens right before a physics step and physics bodies never see a half-shifted world.
+		</member>
+		<member name="shift_vertical" type="bool" setter="set_shift_vertical" getter="is_shift_vertical" default="false">
+			If [code]true[/code], the world is also shifted along the vertical axis. Leave it [code]false[/code] for ground based games: climbing a mountain alone never needs a rebase.
+		</member>
+		<member name="snap" type="float" setter="set_snap" getter="get_snap" default="1000.0">
+			The world is only ever moved by multiples of this distance. A round value such as [code]1000[/code] keeps absolute positions easy to reason about and the shifted coordinates exactly representable.
+		</member>
+		<member name="threshold" type="float" setter="set_threshold" getter="get_threshold" default="2000.0">
+			Distance from the origin (on the shifted axes) beyond which the world is moved.
+		</member>
+		<member name="world_root" type="NodePath" setter="set_world_root" getter="get_world_root" default="NodePath(&quot;&quot;)">
+			Node whose direct [Node3D] children are moved. If empty, the parent of this node is used.
+		</member>
+	</members>
+	<signals>
+		<signal name="origin_shifted">
+			<param index="0" name="offset" type="Vector3" />
+			<description>
+				Emitted after the world was moved. [param offset] is the distance that was subtracted from the position of every moved node. Connect to it to move things that are not children of the world root, such as particle systems with global coordinates.
+			</description>
+		</signal>
+	</signals>
+	<constants>
+		<constant name="PROCESS_PHYSICS" value="0" enum="ProcessCallback">
+			Check the focus in the physics process.
+		</constant>
+		<constant name="PROCESS_IDLE" value="1" enum="ProcessCallback">
+			Check the focus in the idle (frame) process.
+		</constant>
+	</constants>
+</class>

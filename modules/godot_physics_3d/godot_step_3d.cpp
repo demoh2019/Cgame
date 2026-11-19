@@ -34,6 +34,8 @@
 
 #include "core/object/worker_thread_pool.h"
 #include "core/os/os.h"
+#include "servers/physics_constraint_color.h"
+#include "servers/physics_island_storage.h"
 
 #define BODY_ISLAND_COUNT_RESERVE 128
 #define ISLAND_COUNT_RESERVE 128
@@ -137,10 +139,10 @@ void GodotStep3D::_populate_island_soft_body(GodotSoftBody3D *p_soft_body, Local
 
 void GodotStep3D::_integrate_forces_block(uint32_t p_block_index, void *p_userdata) {
 	const uint32_t begin = p_block_index * PARALLEL_INTEGRATE_BLOCK_SIZE;
-	const uint32_t end = MIN(begin + PARALLEL_INTEGRATE_BLOCK_SIZE, active_bodies.size());
+	const uint32_t end = MIN(begin + PARALLEL_INTEGRATE_BLOCK_SIZE, integrate_bodies->size());
 	for (uint32_t body_index = begin; body_index < end; ++body_index) {
 		// Broadphase updates for swept shapes are deferred: the broadphase is not thread safe.
-		active_bodies[body_index]->integrate_forces(delta, true);
+		(*integrate_bodies)[body_index]->integrate_forces(delta, true);
 	}
 }
 
@@ -348,13 +350,9 @@ bool GodotStep3D::_solve_large_island(const LocalVector<GodotConstraint3D *> &p_
 			}
 		}
 
-		uint32_t color = MAX_LARGE_ISLAND_COLORS;
-		for (uint32_t candidate = 0; candidate < MAX_LARGE_ISLAND_COLORS; ++candidate) {
-			if ((forbidden & (uint32_t(1) << candidate)) == 0) {
-				color = candidate;
-				break;
-			}
-		}
+		// Match the previous greedy color ordering with one bit scan.
+		// The sentinel is unchanged when all 16 colors are occupied.
+		const uint32_t color = godot_physics_first_available_constraint_color<MAX_LARGE_ISLAND_COLORS>(forbidden);
 		if (color < MAX_LARGE_ISLAND_COLORS) {
 			const uint32_t bit = uint32_t(1) << color;
 			for (int body_idx = 0; body_idx < body_count; ++body_idx) {
@@ -474,8 +472,6 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 	iterations = p_space->get_solver_iterations();
 	delta = p_delta;
 
-	const SelfList<GodotBody3D>::List *body_list = &p_space->get_active_body_list();
-
 	const SelfList<GodotSoftBody3D>::List *soft_body_list = &p_space->get_active_soft_body_list();
 
 	/* INTEGRATE FORCES */
@@ -485,24 +481,20 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 
 	int active_count = 0;
 
-	const SelfList<GodotBody3D> *b = body_list->first();
-	active_bodies.clear();
-	while (b) {
-		active_bodies.push_back(b->self());
-		b = b->next();
-		active_count++;
-	}
+	const LocalVector<GodotBody3D *> *active_bodies = &p_space->get_active_bodies();
+	active_count = (int)active_bodies->size();
 
-	if (active_bodies.size() < PARALLEL_INTEGRATE_MIN_BODIES) {
-		for (GodotBody3D *body : active_bodies) {
+	if (active_bodies->size() < PARALLEL_INTEGRATE_MIN_BODIES) {
+		for (GodotBody3D *body : *active_bodies) {
 			body->integrate_forces(p_delta);
 		}
 	} else {
-		const uint32_t block_count = (active_bodies.size() + PARALLEL_INTEGRATE_BLOCK_SIZE - 1) / PARALLEL_INTEGRATE_BLOCK_SIZE;
+		integrate_bodies = active_bodies;
+		const uint32_t block_count = (active_bodies->size() + PARALLEL_INTEGRATE_BLOCK_SIZE - 1) / PARALLEL_INTEGRATE_BLOCK_SIZE;
 		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep3D::_integrate_forces_block, nullptr, block_count, -1, true, SNAME("Physics3DIntegrateForces"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
-		for (GodotBody3D *body : active_bodies) {
-			body->apply_deferred_motion();
+		for (GodotBody3D *body : *active_bodies) {
+			body->apply_deferred_motion(p_delta);
 		}
 	}
 
@@ -556,12 +548,12 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 
 	/* GENERATE CONSTRAINT ISLANDS FOR ACTIVE RIGID BODIES */
 
-	b = body_list->first();
+	// Activations during the broadphase update (e.g. kinematic bodies entering areas) rebuild the snapshot.
+	active_bodies = &p_space->get_active_bodies();
 
 	uint32_t body_island_count = 0;
 
-	while (b) {
-		GodotBody3D *body = b->self();
+	for (GodotBody3D *body : *active_bodies) {
 
 		// Unconnected rigid bodies need no solver island. Avoid keeping
 		// millions of tiny island vectors for sparse simulations.
@@ -592,7 +584,6 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 				--island_count;
 			}
 		}
-		b = b->next();
 	}
 
 	/* GENERATE CONSTRAINT ISLANDS FOR ACTIVE SOFT BODIES */
@@ -770,10 +761,8 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 
 	/* INTEGRATE VELOCITIES */
 
-	b = body_list->first();
-	while (b) {
-		const SelfList<GodotBody3D> *n = b->next();
-		GodotBody3D *body = b->self();
+	active_bodies = &p_space->get_active_bodies();
+	for (GodotBody3D *body : *active_bodies) {
 		body->integrate_velocities(p_delta);
 		// Unconnected rigid bodies can be suspended individually after
 		// integration. The connected islands still use _check_suspend().
@@ -783,7 +772,6 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 				body->set_active(!can_sleep);
 			}
 		}
-		b = n;
 	}
 
 	/* SLEEP / WAKE UP ISLANDS */
@@ -800,6 +788,53 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 		sb = sb->next();
 	}
 
+	// Experimental soft-body/soft-body vertex-face contacts. This runs only
+	// AFTER all body-local XPBD constraints, so both sides have finalized
+	// positions/velocities. Zero thickness skips the entire O(body^2) loop.
+	// Limit not only successful contacts but also AABB pair checks: many
+	// separated soft bodies must never cause unbounded quadratic CPU work.
+	const real_t pair_thickness = p_space->get_soft_body_pair_collision_thickness();
+	const bool pair_ccd = p_space->is_soft_body_pair_collision_ccd_enabled();
+	if (pair_thickness > real_t(0.0) && soft_body_list->first() != nullptr &&
+			soft_body_list->first()->next() != nullptr) {
+		const real_t pair_compliance = p_space->get_soft_body_pair_collision_compliance();
+		const real_t pair_friction = p_space->get_soft_body_pair_collision_friction();
+		const uint32_t max_contacts = uint32_t(p_space->get_soft_body_pair_max_contacts());
+		const uint32_t max_pairs = uint32_t(p_space->get_soft_body_pair_max_pairs());
+		const uint32_t max_pair_checks = 16384;
+		const uint32_t max_contacts_per_vertex = 8;
+		uint32_t checked_pairs = 0;
+		uint32_t candidate_pairs = 0;
+		bool budget_exhausted = false;
+		const SelfList<GodotSoftBody3D> *first = soft_body_list->first();
+		while (first && !budget_exhausted) {
+			const SelfList<GodotSoftBody3D> *second = first->next();
+			while (second) {
+				if (checked_pairs >= max_pair_checks || candidate_pairs >= max_pairs) {
+					budget_exhausted = true;
+					break;
+				}
+				++checked_pairs;
+				GodotSoftBody3D *a = first->self();
+				GodotSoftBody3D *b = second->self();
+				second = second->next();
+				if (!a->interacts_with(b) ||
+						a->has_exception(b->get_self()) || b->has_exception(a->get_self())) {
+					continue;
+				}
+				AABB expanded = pair_ccd ? a->get_pair_swept_bounds() : a->get_bounds();
+				expanded.grow_by(pair_thickness);
+				if (!expanded.intersects(pair_ccd ? b->get_pair_swept_bounds() : b->get_bounds())) {
+					continue;
+				}
+				++candidate_pairs;
+				a->solve_pair_contacts(*b, p_delta, pair_thickness,
+						pair_compliance, pair_friction, max_contacts, max_contacts_per_vertex);
+			}
+			first = first->next();
+		}
+	}
+
 	{ //profile
 		profile_endtime = OS::get_singleton()->get_ticks_usec();
 		p_space->set_elapsed_time(GodotSpace3D::ELAPSED_TIME_INTEGRATE_VELOCITIES, profile_endtime - profile_begtime);
@@ -807,6 +842,12 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 	}
 
 	all_constraints.clear();
+
+	// All constraint/soft-body work and parallel workers have finished.
+	// Bounded reclamation releases old peak scratch memory only during
+	// sustained low-island workloads, never from active solver workers.
+	godot_physics_reclaim_idle_island_storage(body_islands, body_island_count, body_island_idle_steps);
+	godot_physics_reclaim_idle_island_storage(constraint_islands, island_count, constraint_island_idle_steps);
 
 	p_space->unlock();
 	_step++;

@@ -724,9 +724,12 @@ static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D 
 		const Vector2 separation = p_transform_a.get_origin() - p_transform_b.get_origin();
 		const real_t distance_squared = separation.length_squared();
 
-		// Coincident centers are handled by SAT to retain its previous-axis
-		// behavior. Negative effective radii are not valid for this shortcut.
-		if (radius_A >= 0.0 && radius_B >= 0.0 && distance_squared > 0.0) {
+		// Box2D-style coincident-circle manifold. At exactly equal centers,
+		// select a deterministic axis (or preserve the cached separator)
+		// instead of invoking SAT for a zero-length center direction.
+		// Leave two zero-radius coincident points to the legacy SAT path.
+		if (radius_A >= 0.0 && radius_B >= 0.0 &&
+				(distance_squared > 0.0 || combined_radius > 0.0)) {
 			if (distance_squared > combined_radius * combined_radius) {
 				if (p_collector->sep_axis) {
 					*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
@@ -736,7 +739,22 @@ static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D 
 
 			p_collector->collided = true;
 			if (p_collector->callback) {
-				const Vector2 axis = separation / Math::sqrt(distance_squared);
+				Vector2 axis;
+				if (distance_squared > 0.0) {
+					axis = separation / Math::sqrt(distance_squared);
+				} else {
+					// SAT defaults to the Y axis for coincident points.
+					// Retain that contact orientation, or the cached axis
+					// when the pair previously had a valid separation.
+					axis = Vector2(0.0, -1.0);
+					if (p_collector->sep_axis && (*p_collector->sep_axis).is_finite()) {
+						const Vector2 cached_axis = *p_collector->sep_axis;
+						const real_t cached_length_squared = cached_axis.length_squared();
+						if (cached_length_squared > real_t(CMP_EPSILON) * real_t(CMP_EPSILON)) {
+							axis = -cached_axis / Math::sqrt(cached_length_squared);
+						}
+					}
+				}
 				p_collector->normal = axis;
 				p_collector->call(p_transform_a.get_origin() - axis * radius_A,
 						p_transform_b.get_origin() + axis * radius_B);
@@ -770,7 +788,7 @@ static void _collision_circle_rectangle(const GodotShape2D *p_a, const Transform
 	const GodotRectangleShape2D *rectangle_B = static_cast<const GodotRectangleShape2D *>(p_b);
 
 // Specialized circle/rectangle manifold for rigid transforms. The generic SAT
-	// path below handles embedded centers, scaling, shearing and swept shapes.
+	// path below handles degenerate rectangles, scaling, shearing and swept shapes.
 	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
 			circle_A->get_radius() >= 0.0 && _is_unit_orthogonal_transform(p_transform_a) &&
 			_is_unit_orthogonal_transform(p_transform_b)) {
@@ -784,8 +802,40 @@ static void _collision_circle_rectangle(const GodotShape2D *p_a, const Transform
 		const Vector2 separation = center - closest;
 		const real_t distance_squared = separation.length_squared();
 
-		// When the center is inside (or exactly on) a box, SAT chooses the
-		// appropriate minimum-penetration face and a stable contact normal.
+		// Box2D-style embedded circle/rectangle manifold: a fully contained
+		// center is not a closest-point separation test. Select the nearest
+		// *exit* face in the box's local space and use the opposite support
+		// point on the circle. This produces a positive penetration depth
+		// even for a circle that fits completely inside the rectangle.
+		// The basis is guaranteed unit-orthogonal by the guard above.
+		if (half_extents.x > real_t(0.0) && half_extents.y > real_t(0.0) &&
+				Math::abs(local_center.x) <= half_extents.x &&
+				Math::abs(local_center.y) <= half_extents.y) {
+			const real_t clearance_x = half_extents.x - Math::abs(local_center.x);
+			const real_t clearance_y = half_extents.y - Math::abs(local_center.y);
+			const bool nearest_x_face = clearance_x <= clearance_y;
+			const Vector2 local_exit_normal = nearest_x_face ?
+					Vector2(local_center.x < 0.0 ? -1.0 : 1.0, 0.0) :
+					Vector2(0.0, local_center.y < 0.0 ? -1.0 : 1.0);
+			const Vector2 exit_normal = p_transform_b.basis_xform(local_exit_normal);
+			const Vector2 normal = -exit_normal;
+			const real_t circle_radius = circle_A->get_radius() + p_margin_A;
+			const real_t nearest_face_distance = nearest_x_face ? clearance_x : clearance_y;
+
+			p_collector->collided = true;
+			if (p_collector->callback) {
+				p_collector->normal = normal;
+				p_collector->call(center + normal * circle_radius,
+						center + exit_normal * (nearest_face_distance + p_margin_B));
+				if (p_collector->sep_axis && *p_collector->sep_axis != Vector2()) {
+					*p_collector->sep_axis = Vector2();
+				}
+			}
+			return;
+		}
+
+		// The regular closest-point path only handles centers outside the
+		// rectangle. Leave all degenerate cases to the general SAT solver.
 		if (distance_squared > 0.0) {
 			const real_t circle_radius = circle_A->get_radius() + p_margin_A;
 			const real_t combined_radius = circle_radius + p_margin_B;
@@ -1067,13 +1117,23 @@ static void _collision_rectangle_rectangle(const GodotShape2D *p_a, const Transf
 		return;
 	}
 
-	//box faces B
-	if (!separator.test_axis(p_transform_b.columns[0].normalized())) {
-		return;
-	}
+	// Box2D-style SAT axis deduplication: rectangles with exactly equal
+	// basis vectors have identical face directions. The two axes of B
+	// would repeat the same support projections already tested for A.
+	// Exact comparison is important: even a small relative rotation can
+	// introduce new separating axes. The cast, margin and manifold paths
+	// remain unchanged for all configurations.
+	const bool identical_rectangle_axes = p_transform_a.columns[0] == p_transform_b.columns[0] &&
+			p_transform_a.columns[1] == p_transform_b.columns[1];
+	if (!identical_rectangle_axes) {
+		// box faces B
+		if (!separator.test_axis(p_transform_b.columns[0].normalized())) {
+			return;
+		}
 
-	if (!separator.test_axis(p_transform_b.columns[1].normalized())) {
-		return;
+		if (!separator.test_axis(p_transform_b.columns[1].normalized())) {
+			return;
+		}
 	}
 
 	if (p_with_margin) {

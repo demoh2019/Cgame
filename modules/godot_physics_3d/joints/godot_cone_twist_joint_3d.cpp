@@ -196,7 +196,7 @@ bool GodotConeTwistJoint3D::setup(real_t p_timestep) {
 	return true;
 }
 
-void GodotConeTwistJoint3D::solve(real_t p_timestep) {
+void GodotConeTwistJoint3D::_solve_joint(real_t p_timestep) {
 	Vector3 pivotAInW = A->get_transform().xform(m_rbAFrame.origin);
 	Vector3 pivotBInW = B->get_transform().xform(m_rbBFrame.origin);
 

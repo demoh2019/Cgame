@@ -83,7 +83,7 @@ private:
 	void _collision_filter_changed();
 
 protected:
-	void _update_shapes_with_motion(const Vector2 &p_motion);
+	void _update_shapes_with_motion(const Vector2 &p_motion, real_t p_angular_displacement, const Vector2 &p_rotation_pivot);
 	void _unregister_shapes();
 
 	_FORCE_INLINE_ void _set_transform(const Transform2D &p_transform, bool p_update_shapes = true) {
@@ -180,6 +180,10 @@ public:
 		collision_mask = p_mask;
 		_collision_filter_changed();
 	}
+	// Recheck broadphase eligibility after changing collision exceptions,
+	// without invalidating mass properties or contact geometry versions.
+	void refresh_collision_pairs();
+
 	_FORCE_INLINE_ uint32_t get_collision_mask() const { return collision_mask; }
 
 	void set_collision_layer(uint32_t p_layer) {

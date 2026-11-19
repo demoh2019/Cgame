@@ -81,7 +81,7 @@ bool GodotPinJoint3D::setup(real_t p_step) {
 	return true;
 }
 
-void GodotPinJoint3D::solve(real_t p_step) {
+void GodotPinJoint3D::_solve_joint(real_t p_step) {
 	Vector3 pivotAInW = A->get_transform().xform(m_pivotInA);
 	Vector3 pivotBInW = B->get_transform().xform(m_pivotInB);
 

@@ -89,11 +89,6 @@
 #endif
 
 #ifdef __linux__
-namespace GameMode {
-#include <thirdparty/misc/gamemode_client.h>
-}
-
-#include "core/config/project_settings.h"
 #include "platform/linuxbsd/cgroup_cpu_quota.h"
 
 #include <sched.h>
@@ -1016,23 +1011,7 @@ void OS_LinuxBSD::run() {
 	//int frames=0;
 	//uint64_t frame=0;
 
-#ifdef __linux__
-	Engine *e = Engine::get_singleton();
-	bool use_gamemode = GLOBAL_GET("application/run/use_game_mode");
-	int gamemode_status = -1;
-	if (!e->is_editor_hint() && !e->is_project_manager_hint()) {
-		if (use_gamemode) {
-			gamemode_status = GameMode::gamemode_request_start_for(OS::get_singleton()->get_process_id());
-			if (gamemode_status >= 0) {
-				print_verbose("GameMode: Enabled successfully.");
-			} else {
-				WARN_VERBOSE("GameMode: Failed to enable (check if the daemon is installed and running).");
-			}
-		} else {
-			print_verbose("GameMode: Not enabling, as the project has it disabled.");
-		}
-	}
-#endif
+
 
 	while (true) {
 		GodotProfileFrameMark;
@@ -1049,11 +1028,7 @@ void OS_LinuxBSD::run() {
 	}
 
 	main_loop->finalize();
-#ifdef __linux__
-	if (gamemode_status == 0) {
-		GameMode::gamemode_request_end_for(OS::get_singleton()->get_process_id());
-	}
-#endif
+
 }
 
 void OS_LinuxBSD::disable_crash_handler() {

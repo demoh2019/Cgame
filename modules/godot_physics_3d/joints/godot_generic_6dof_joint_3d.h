@@ -208,7 +208,7 @@ public:
 	virtual PS3DE::JointType get_type() const override { return PS3DE::JOINT_TYPE_6DOF; }
 
 	virtual bool setup(real_t p_step) override;
-	virtual void solve(real_t p_step) override;
+	virtual void _solve_joint(real_t p_step) override;
 
 	// Calcs the global transform for the joint offset for body A an B, and also calcs the angle differences between the bodies.
 	void calculateTransforms();

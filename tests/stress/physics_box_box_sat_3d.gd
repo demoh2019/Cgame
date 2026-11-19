@@ -3,11 +3,14 @@
 extends RefCounted
 
 
-func run(tree: SceneTree, scale: int, frames: int, rotated: bool) -> Dictionary:
+func run(tree: SceneTree, scale: int, frames: int, rotated: bool, different_orientation: bool = false) -> Dictionary:
 	var space := PhysicsServer3D.space_create()
 	var shape := PhysicsServer3D.box_shape_create()
 	PhysicsServer3D.shape_set_data(shape, Vector3(2.0, 2.0, 2.0))
 	var basis := Basis(Vector3.UP, 0.37) if rotated else Basis()
+	# The same rotation uses three SAT axes; a relative rotation must use the
+	# full 15-axis narrowphase and serves as the baseline comparison.
+	var dynamic_basis := basis * Basis(Vector3.UP, 0.17) if different_orientation else basis
 	var count := mini(256 * scale, 4096)
 	var static_bodies: Array[RID] = []
 	var dynamic_bodies: Array[RID] = []
@@ -33,7 +36,7 @@ func run(tree: SceneTree, scale: int, frames: int, rotated: bool) -> Dictionary:
 		PhysicsServer3D.body_add_shape(body, shape)
 		PhysicsServer3D.body_set_param(body, PhysicsServer3D.BODY_PARAM_GRAVITY_SCALE, 0.0)
 		PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_CAN_SLEEP, false)
-		var pose := Transform3D(basis, origin + basis * Vector3(1.5, 0.0, 0.0))
+		var pose := Transform3D(dynamic_basis, origin + basis * Vector3(1.5, 0.0, 0.0))
 		PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_TRANSFORM, pose)
 		PhysicsServer3D.body_set_space(body, space)
 		dynamic_bodies[i] = body
@@ -89,7 +92,8 @@ func run(tree: SceneTree, scale: int, frames: int, rotated: bool) -> Dictionary:
 	var stats: Dictionary = tree.call("_frame_statistics", frame_intervals)
 	return {
 		"box_pairs": count, "total_bodies": count * 2,
-		"rotated_fallback": rotated, "physics_frames": frames,
+		"shared_rotation": rotated and not different_orientation,
+		"different_orientation": different_orientation, "physics_frames": frames,
 		"creation_ms": creation_ms, "transform_update_ms": float(update_us) / 1000.0,
 		"peak_collision_pairs": peak_pairs, "peak_physics_ms": peak_physics_ms,
 		"frame_interval_ms": stats, "frame_p95_ms": stats["p95"],

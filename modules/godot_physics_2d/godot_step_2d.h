@@ -43,6 +43,9 @@ class GodotStep2D {
 
 	LocalVector<LocalVector<GodotBody2D *>> body_islands;
 	LocalVector<LocalVector<GodotConstraint2D *>> constraint_islands;
+	// Keep normal bursts cached; reclaim oversized idle tails gradually.
+	uint8_t body_island_idle_steps = 0;
+	uint8_t constraint_island_idle_steps = 0;
 	LocalVector<GodotConstraint2D *> all_constraints;
 	// Filled only when pre_solve removes constraints from some islands.
 	// Dense frames use direct island indices with no extra allocation.
@@ -84,7 +87,8 @@ class GodotStep2D {
 		PARALLEL_INTEGRATE_MIN_BODIES = 2048,
 		PARALLEL_INTEGRATE_BLOCK_SIZE = 128,
 	};
-	LocalVector<GodotBody2D *> active_bodies;
+	// Body snapshot being integrated by the parallel force-integration job.
+	const LocalVector<GodotBody2D *> *integrate_bodies = nullptr;
 
 	void _populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D *> &p_body_island, LocalVector<GodotConstraint2D *> &p_constraint_island);
 	void _setup_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr);
@@ -92,6 +96,9 @@ class GodotStep2D {
 	void _integrate_forces_block(uint32_t p_block_index, void *p_userdata = nullptr);
 	void _pre_solve_island(LocalVector<GodotConstraint2D *> &p_constraint_island) const;
 	void _solve_island(uint32_t p_island_index, void *p_userdata = nullptr) const;
+	// Runs priority passes: a constraint of priority N takes part in N * iterations solves.
+	void _solve_with_priorities(const LocalVector<GodotConstraint2D *> &p_constraint_island) const;
+	static bool _has_priority_constraints(const LocalVector<GodotConstraint2D *> &p_constraint_island);
 	void _solve_island_except_large(uint32_t p_island_index, void *p_userdata = nullptr) const;
 	void _solve_colored_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr) const;
 	bool _can_reuse_color_cache(const LocalVector<GodotConstraint2D *> &p_constraint_island, bool p_contact_only) const;

@@ -79,12 +79,15 @@ TEST_CASE("[GodotPhysics3D] Convex SAT projection matches transformed vertex enu
 
 		GodotConvexPolygonShape3D convex;
 		convex.set_data(points);
+		// The shape rebuilds its hull from planes, which moves near-degenerate vertices by up to
+		// ~1e-3 for dense point clouds. Compare against the hull the shape actually stores.
+		const LocalVector<Vector3> &hull = convex.get_mesh().vertices;
 		for (const Transform3D &transform : transforms) {
 			for (const Vector3 &axis : axes) {
 				real_t expected_min = 0.0;
 				real_t expected_max = 0.0;
-				for (int i = 0; i < points.size(); ++i) {
-					const real_t projected = axis.dot(transform.xform(points[i]));
+				for (int i = 0; i < hull.size(); ++i) {
+					const real_t projected = axis.dot(transform.xform(hull[i]));
 					if (i == 0) {
 						expected_min = projected;
 						expected_max = projected;

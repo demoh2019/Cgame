@@ -1,0 +1,29 @@
+name: SoftBody3D pressure-driven gas leak numerical contracts
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "servers/physics_softbody_gas_leak.h"
+      - "servers/physics_softbody_adiabatic_gas.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_softbody_gas_leak.cpp"
+      - "tests/stress/test_physics_softbody_gas_leak.py"
+      - "tests/stress/physics_softbody_gas_leak_3d_regression.gd"
+      - ".github/workflows/physics-softbody-gas-leak.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify analytical mass loss, no-leak parity and solver wiring
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_gas_leak.py' -v

@@ -598,59 +598,100 @@ void GodotCapsuleShape3D::get_supports(const Vector3 &p_normal, int p_max, Vecto
 }
 
 bool GodotCapsuleShape3D::intersect_segment(const Vector3 &p_begin, const Vector3 &p_end, Vector3 &r_result, Vector3 &r_normal, int &r_face_index, bool p_hit_back_faces) const {
-	Vector3 norm = (p_end - p_begin).normalized();
-	real_t min_d = 1e20;
+	// A capsule is a Y-axis cylinder bounded by two hemispheres. Cast in
+	// double precision and rank intersections by the segment fraction,
+	// independent of the ray's origin and the world's coordinate scale.
+	const double dx = double(p_end.x) - double(p_begin.x);
+	const double dy = double(p_end.y) - double(p_begin.y);
+	const double dz = double(p_end.z) - double(p_begin.z);
+	const double direction_squared = dx * dx + dy * dy + dz * dz;
+	if (direction_squared == 0.0 || radius <= 0.0 || height < radius * 2.0) {
+		return false;
+	}
 
-	Vector3 res, n;
-	bool collision = false;
+	const double bx = double(p_begin.x);
+	const double by = double(p_begin.y);
+	const double bz = double(p_begin.z);
+	const double r = double(radius);
+	const double r_squared = r * r;
+	const double cap_offset = double(height) * 0.5 - r;
 
-	Vector3 auxres, auxn;
-	bool collided;
+	// Raycasts report the first entry into a solid, not an exit from inside.
+	const double nearest_y = CLAMP(by, -cap_offset, cap_offset);
+	const double offset_y = by - nearest_y;
+	if (bx * bx + offset_y * offset_y + bz * bz < r_squared) {
+		return false;
+	}
 
-	// test against cylinder and spheres :-|
+	double best_fraction = double(Math::INF);
+	Vector3 best_point;
+	Vector3 best_normal;
 
-	collided = Geometry3D::segment_intersects_cylinder(p_begin, p_end, height - radius * 2.0, radius, &auxres, &auxn, 1);
-
-	if (collided) {
-		real_t d = norm.dot(auxres);
-		if (d < min_d) {
-			min_d = d;
-			res = auxres;
-			n = auxn;
-			collision = true;
+	// The cylinder side only depends on the ray's XZ projection. Find
+	// the closest approach first to avoid cancelling large discriminants.
+	const double lateral_squared = dx * dx + dz * dz;
+	if (lateral_squared > 0.0) {
+		const double projection = -(bx * dx + bz * dz) / lateral_squared;
+		if (projection >= 0.0) {
+			const double closest_x = bx + dx * projection;
+			const double closest_z = bz + dz * projection;
+			const double gap_squared = r_squared - (closest_x * closest_x + closest_z * closest_z);
+			if (gap_squared > 0.0) {
+				const double entry_offset = Math::sqrt(gap_squared / lateral_squared);
+				const double fraction = projection - entry_offset;
+				const double hit_y = by + dy * fraction;
+				if (fraction >= 0.0 && fraction <= 1.0 && hit_y >= -cap_offset && hit_y <= cap_offset) {
+					const double hit_x = closest_x - dx * entry_offset;
+					const double hit_z = closest_z - dz * entry_offset;
+					best_fraction = fraction;
+					best_point = Vector3(real_t(hit_x), real_t(hit_y), real_t(hit_z));
+					best_normal = Vector3(real_t(hit_x), 0.0, real_t(hit_z)).normalized();
+				}
+			}
 		}
 	}
 
-	collided = Geometry3D::segment_intersects_sphere(p_begin, p_end, Vector3(0, height * 0.5 - radius, 0), radius, &auxres, &auxn);
-
-	if (collided) {
-		real_t d = norm.dot(auxres);
-		if (d < min_d) {
-			min_d = d;
-			res = auxres;
-			n = auxn;
-			collision = true;
+	// The hemispheres are the outward halves of the two cap spheres.
+	// Reconstruct each hit relative to the closest point on the ray, so
+	// a unit-radius cap can still be hit by a 1e20-unit segment.
+	for (int i = 0; i < 2; ++i) {
+		const double cap_y = (i == 0) ? -cap_offset : cap_offset;
+		const double relative_y = by - cap_y;
+		const double projection = -(bx * dx + relative_y * dy + bz * dz) / direction_squared;
+		if (projection < 0.0) {
+			continue;
 		}
-	}
-
-	collided = Geometry3D::segment_intersects_sphere(p_begin, p_end, Vector3(0, height * -0.5 + radius, 0), radius, &auxres, &auxn);
-
-	if (collided) {
-		real_t d = norm.dot(auxres);
-
-		if (d < min_d) {
-			min_d = d;
-			res = auxres;
-			n = auxn;
-			collision = true;
+		const double closest_x = bx + dx * projection;
+		const double closest_y = relative_y + dy * projection;
+		const double closest_z = bz + dz * projection;
+		const double gap_squared = r_squared -
+				(closest_x * closest_x + closest_y * closest_y + closest_z * closest_z);
+		if (gap_squared <= 0.0) {
+			continue;
 		}
+		const double entry_offset = Math::sqrt(gap_squared / direction_squared);
+		const double fraction = projection - entry_offset;
+		if (fraction < 0.0 || fraction > 1.0 || fraction >= best_fraction) {
+			continue;
+		}
+		const double hit_x = closest_x - dx * entry_offset;
+		const double hit_y = closest_y - dy * entry_offset;
+		const double hit_z = closest_z - dz * entry_offset;
+		if ((i == 0 && hit_y > 0.0) || (i == 1 && hit_y < 0.0)) {
+			continue; // Inside the cylindrical section, not the cap surface.
+		}
+
+		best_fraction = fraction;
+		best_point = Vector3(real_t(hit_x), real_t(hit_y + cap_y), real_t(hit_z));
+		best_normal = Vector3(real_t(hit_x), real_t(hit_y), real_t(hit_z)).normalized();
 	}
 
-	if (collision) {
-		r_result = res;
-		r_normal = n;
+	if (best_fraction == double(Math::INF)) {
+		return false;
 	}
-	return collision;
+	r_result = best_point;
+	r_normal = best_normal;
+	return true;
 }
 
 bool GodotCapsuleShape3D::intersect_point(const Vector3 &p_point) const {

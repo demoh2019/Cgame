@@ -1,4 +1,4 @@
-# Axis-aligned box-box SAT: compare the 3-axis fast path with rotated fallback.
+# 3D box-box SAT: compare aligned/shared-rotation fast paths with misaligned fallback.
 # Run: godot --headless --path tests/stress --script res://physics_box_box_sat_3d_regression.gd
 extends SceneTree
 
@@ -34,8 +34,11 @@ func _run() -> void:
 		{"offset": Vector3(0.0, 0.0, 2.50), "hit": false},
 	]
 
-	for rotated in [false, true]:
-		var basis := Basis(Vector3.UP, 0.37) if rotated else Basis()
+	# Identity and shared rotations use the optimized 3-axis SAT.
+	# Different rotations must still use the full 15 candidate axes.
+	for orientation_mode in range(3):
+		var basis := Basis(Vector3.UP, 0.37) if orientation_mode > 0 else Basis()
+		var query_basis := basis * Basis(Vector3.UP, 0.17) if orientation_mode == 2 else basis
 		PhysicsServer3D.body_set_state(static_body, PhysicsServer3D.BODY_STATE_TRANSFORM,
 				Transform3D(basis, Vector3.ZERO))
 		await physics_frame
@@ -45,12 +48,12 @@ func _run() -> void:
 			printerr("FAIL: 3D direct physics space unavailable")
 			break
 		for test_case in cases:
-			query.transform = Transform3D(basis, basis * test_case["offset"])
+			query.transform = Transform3D(query_basis, basis * test_case["offset"])
 			var results: Array[Dictionary] = state.intersect_shape(query, 8)
 			var hit := not results.is_empty()
 			if hit != bool(test_case["hit"]):
-				printerr("FAIL: 3D box-box SAT rotated=%s offset=%s expected=%s got=%s" %
-						[rotated, test_case["offset"], test_case["hit"], hit])
+				printerr("FAIL: 3D box-box SAT orientation=%d offset=%s expected=%s got=%s" %
+						[orientation_mode, test_case["offset"], test_case["hit"], hit])
 				failures += 1
 			# The actual SAT manifold is also exercised, not just AABB
 			# broadphase overlap.
@@ -71,7 +74,7 @@ func _run() -> void:
 	PhysicsServer3D.free_rid(box)
 	PhysicsServer3D.free_rid(space)
 	if failures == 0:
-		print("Axis-aligned and rotated 3D box-box SAT regression passed.")
+		print("Axis-aligned, shared-rotation and misaligned 3D box SAT regression passed.")
 	else:
 		printerr("3D box-box SAT regression: %d failure(s)" % failures)
 	quit(1 if failures > 0 else 0)
