@@ -819,10 +819,6 @@ func _process(_delta: float) -> void:
 	if not rally.is_empty():
 		_info_label.text += "\nPARTY RALLY x%d z%d | %ds left" % [
 			int(rally["x"]), int(rally["z"]), int(ceil(float(rally["remaining"])))]
-	var rally: Dictionary = client.you.get("party", {}).get("rally", {})
-	if not rally.is_empty():
-		_info_label.text += "\nPARTY RALLY x%d z%d | %ds left" % [
-			int(rally["x"]), int(rally["z"]), int(ceil(float(rally["remaining"])))]
 	var fishing_status: String = FishingDisplay.progress(client.you.get("action", {}))
 	if not fishing_status.is_empty():
 		_info_label.text += "\n" + fishing_status
