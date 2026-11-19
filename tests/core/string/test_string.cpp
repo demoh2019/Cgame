@@ -2892,4 +2892,26 @@ TEST_CASE("[String] Quoted strings use zero-temporary fast path") {
 	CHECK(String("abba").is_enclosed_in('a', 'a'));
 	CHECK_FALSE(String("a").is_enclosed_in('a', 'a'));
 }
+
+TEST_CASE("[String] shared UTF32 buffer comparison fast paths") {
+	const String original = String("AbC unicode \u00e9").repeat(256);
+	String copy = original;
+	CHECK(original == copy);
+	CHECK_EQ(original.casecmp_to(copy), 0);
+	CHECK_EQ(original.nocasecmp_to(copy), 0);
+	CHECK_FALSE(original != copy);
+
+	const String separate = String("AbC unicode \u00e9").repeat(256);
+	CHECK(original == separate);
+	CHECK_EQ(original.casecmp_to(separate), 0);
+	CHECK_EQ(original.nocasecmp_to(separate), 0);
+
+	copy += "!";
+	CHECK_FALSE(original == copy);
+	CHECK(original != copy);
+	CHECK_EQ(original.casecmp_to(String("AbC unicode \u00e9").repeat(256)), 0);
+	CHECK(String().nocasecmp_to(String()) == 0);
+	CHECK(String().casecmp_to(String()) == 0);
+}
+
 } // namespace TestString

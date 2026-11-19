@@ -707,4 +707,54 @@ TEST_CASE("[Vector] Cyclic Reference") {
 }
 #endif
 
+
+TEST_CASE("[Vector] shared buffer equality and inequality fast paths") {
+	Vector<int> first;
+	first.resize(4096);
+	for (int i = 0; i < first.size(); i++) {
+		first.write[i] = i;
+	}
+	Vector<int> shared = first;
+	CHECK(first == shared);
+	CHECK_FALSE(first != shared);
+	CHECK(shared == first);
+	CHECK_FALSE(shared != first);
+
+	Vector<int> separate;
+	separate.resize(first.size());
+	for (int i = 0; i < separate.size(); i++) {
+		separate.write[i] = i;
+	}
+	CHECK(first == separate);
+	CHECK_FALSE(first != separate);
+	CHECK(separate == shared);
+	CHECK_FALSE(separate != shared);
+
+	shared.write[2048] = -1;
+	CHECK_FALSE(first == shared);
+	CHECK(first != shared);
+	CHECK_EQ(first[2048], 2048);
+	CHECK_EQ(shared[2048], -1);
+
+	Vector<int> empty;
+	Vector<int> empty_copy = empty;
+	CHECK(empty == empty_copy);
+	CHECK_FALSE(empty != empty_copy);
+	CHECK(empty != first);
+	CHECK_FALSE(empty == first);
+}
+
+TEST_CASE("[Vector] shared String vector comparisons respect copy-on-write") {
+	Vector<String> first;
+	first.push_back("alpha");
+	first.push_back("beta");
+	Vector<String> copy = first;
+	CHECK(first == copy);
+	CHECK_FALSE(first != copy);
+	copy.write[1] = "gamma";
+	CHECK(first != copy);
+	CHECK_FALSE(first == copy);
+	CHECK_EQ(first[1], String("beta"));
+}
+
 } // namespace TestVector
