@@ -1,0 +1,27 @@
+name: Physics XPBD closed-volume source contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_xpbd_volume.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "tests/servers/test_physics_xpbd_volume.cpp"
+      - "tests/stress/test_physics_xpbd_volume.py"
+      - ".github/workflows/physics-xpbd-volume.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  xpbd-volume-contracts:
+    name: XPBD closed-volume integration checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate volume formulation and 3D integration wiring
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_volume.py' -v
