@@ -36,6 +36,7 @@
 #include "godot_collision_object_3d.h"
 #include "godot_soft_body_3d.h"
 
+#include "core/math/math_funcs.h"
 #include "core/typedefs.h"
 #include "servers/physics_3d/direct_states/physics_direct_space_state_3d.h"
 
@@ -96,6 +97,7 @@ private:
 	real_t contact_max_allowed_penetration = 0.0;
 	real_t contact_bias = 0.0;
 	real_t restitution_velocity_threshold = 0.0;
+	int friction_combine_mode = 0; // 0: Godot legacy, 1: geometric, 2: average, 3: maximum
 
 	enum {
 		INTERSECTION_QUERY_MAX = 2048
@@ -163,6 +165,25 @@ public:
 	_FORCE_INLINE_ real_t get_contact_max_allowed_penetration() const { return contact_max_allowed_penetration; }
 	_FORCE_INLINE_ real_t get_contact_bias() const { return contact_bias; }
 	_FORCE_INLINE_ real_t get_restitution_velocity_threshold() const { return restitution_velocity_threshold; }
+	// Match Box2D's geometric mean when explicitly selected, while keeping
+	// the historical GodotPhysics material combination as the default.
+	_FORCE_INLINE_ real_t mix_friction(real_t p_a, real_t p_b) const {
+		if (friction_combine_mode == 0) {
+			return Math::abs(MIN(p_a, p_b));
+		}
+		const real_t a = Math::abs(p_a);
+		const real_t b = Math::abs(p_b);
+		switch (friction_combine_mode) {
+			case 1:
+				return Math::sqrt(a * b);
+			case 2:
+				return (a + b) * (real_t)0.5;
+			case 3:
+				return MAX(a, b);
+			default:
+				return Math::abs(MIN(p_a, p_b));
+		}
+	}
 	_FORCE_INLINE_ real_t get_body_linear_velocity_sleep_threshold() const { return body_linear_velocity_sleep_threshold; }
 	_FORCE_INLINE_ real_t get_body_angular_velocity_sleep_threshold() const { return body_angular_velocity_sleep_threshold; }
 	_FORCE_INLINE_ real_t get_body_time_to_sleep() const { return body_time_to_sleep; }
