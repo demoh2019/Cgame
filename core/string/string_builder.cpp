@@ -45,6 +45,10 @@ StringBuilder &StringBuilder::append(const String &p_string) {
 
 StringBuilder &StringBuilder::append(const char *p_cstring) {
 	int32_t len = strlen(p_cstring);
+	if (len == 0) {
+		// Like an empty String, an empty C string needs no fragment metadata.
+		return *this;
+	}
 
 	c_strings.push_back(p_cstring);
 	appended_strings.push_back(len);
