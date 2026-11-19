@@ -79,5 +79,65 @@ class TestGles3StrcpyCompatibility(unittest.TestCase):
                 self.assertFalse(self._strcpy_macro(*definitions))
 
 
+    def _expand_strcpy_call(self, *definitions: str) -> str:
+        """Check emitted tokens, not only whether the macro exists in -dM output."""
+        if self.compiler is None:
+            self.skipTest("C++ preprocessor not installed")
+        command = [self.compiler, "-x", "c++", "-E", "-P", "-"]
+        command += ["-D" + definition for definition in definitions]
+        result = subprocess.run(
+            command,
+            input=self.block + "strcpy(dst, src)\n",
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=15,
+        )
+        return result.stdout.strip()
+
+    def test_real_mingw_strcpy_call_stays_unmodified(self) -> None:
+        for backend in ("GLAD_ENABLED", "EGL_ENABLED", "ANDROID_ENABLED"):
+            for mingw in ("__MINGW32__", "__MINGW64__"):
+                with self.subTest(backend=backend, mingw=mingw):
+                    self.assertEqual(
+                        self._expand_strcpy_call("_WIN32", backend, mingw),
+                        "strcpy(dst, src)",
+                    )
+
+    def test_real_msvc_strcpy_call_maps_to_secure_variant(self) -> None:
+        for backend in ("GLAD_ENABLED", "EGL_ENABLED", "ANDROID_ENABLED"):
+            with self.subTest(backend=backend):
+                self.assertEqual(
+                    self._expand_strcpy_call("_WIN32", "_MSC_VER=1930", backend),
+                    "strcpy_s(dst, src)",
+                )
+
+    def test_real_other_compilers_keep_standard_strcpy_call(self) -> None:
+        for definitions in (
+            ("GLAD_ENABLED",),
+            ("EGL_ENABLED", "_WIN32", "__clang__"),
+            ("ANDROID_ENABLED", "__ANDROID__"),
+            ("GLAD_ENABLED", "_MSC_VER=1930"),
+        ):
+            with self.subTest(definitions=definitions):
+                expected = (
+                    "strcpy_s(dst, src)"
+                    if "_MSC_VER=1930" in definitions
+                    else "strcpy(dst, src)"
+                )
+                self.assertEqual(self._expand_strcpy_call(*definitions), expected)
+
+    def test_real_no_gl_backend_never_rewrites_strcpy(self) -> None:
+        for definitions in (
+            (),
+            ("_WIN32",),
+            ("_MSC_VER=1930",),
+            ("_WIN32", "_MSC_VER=1930"),
+        ):
+            with self.subTest(definitions=definitions):
+                self.assertEqual(self._expand_strcpy_call(*definitions), "strcpy(dst, src)")
+
+
+
 if __name__ == "__main__":
     unittest.main()
