@@ -570,4 +570,19 @@ TEST_CASE("[Marshalls] Truncated enormous declared array counts are rejected bef
 	ERR_PRINT_ON;
 }
 
+
+TEST_CASE("[Marshalls] Packed Unicode strings keep binary serialization roundtrip") {
+	PackedStringArray source;
+	for (int i = 0; i < 2048; i++) {
+		if (i % 11 == 0) {
+			source.push_back(String());
+		} else if (i % 7 == 0) {
+			source.push_back("é_日本");
+		} else {
+			source.push_back("value_" + itos(i % 293) + "_élève_日本");
+		}
+	}
+	check_bulk_variant_roundtrip(Variant(source));
+}
+
 } // namespace TestMarshalls

@@ -1970,7 +1970,8 @@ Error encode_variant(const Variant &p_variant, uint8_t *p_buffer, int &r_len, bo
 		} break;
 		case Variant::PACKED_STRING_ARRAY: {
 			Vector<String> data = p_variant;
-			int len = data.size();
+			const int len = data.size();
+			const String *const strings = data.ptr();
 
 			if (buf) {
 				encode_uint32(len, buf);
@@ -1980,7 +1981,9 @@ Error encode_variant(const Variant &p_variant, uint8_t *p_buffer, int &r_len, bo
 			r_len += 4;
 
 			for (int i = 0; i < len; i++) {
-				CharString utf8 = data.get(i).utf8();
+				// Non-const Vector::get(i) copies String and touches its refcount.
+				// Borrow from the immutable source array instead.
+				CharString utf8 = strings[i].utf8();
 
 				if (buf) {
 					encode_uint32(utf8.length() + 1, buf);
