@@ -3655,6 +3655,12 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_dihedral_xpbd = dihedral_compliance > 0.0 && !xpbd_dihedral_hinges.is_empty() &&
 			Math::is_finite(dihedral_alpha_double) && dihedral_alpha_double > 0.0;
 	const real_t dihedral_alpha = use_dihedral_xpbd ? real_t(MIN(dihedral_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const double rod_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_rod_bend_compliance()) : 0.0;
+	const double rod_alpha_double = p_delta > 0.0 ? rod_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_rod_bend_xpbd = rod_compliance > 0.0 && !xpbd_rod_bends.is_empty() &&
+			Math::is_finite(rod_alpha_double) && rod_alpha_double > 0.0;
+	const real_t rod_alpha = use_rod_bend_xpbd ? real_t(MIN(rod_alpha_double,
+			double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const double fem_compliance = get_space() ? double(get_space()->get_soft_body_tetra_fem_compliance()) : 0.0;
 	const double fem_alpha = p_delta > 0.0 ? fem_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_fem = !xpbd_fem_tetrahedra.is_empty() && fem_compliance > 0.0 && p_delta > 0.0 &&
@@ -3834,6 +3840,13 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_dihedral_lambdas.reset();
 	}
 
+	// One multiplier per centerline angle, reset at the beginning of each
+	// time step and retained across XPBD iterations.
+	if (use_rod_bend_xpbd) {
+		for (RodBendConstraint &rod : xpbd_rod_bends) {
+			rod.lambda = real_t(0.0);
+		}
+	}
 	if (use_volume_xpbd) {
 		// Reuse scratch at every iteration; one volume scalar lambda per step.
 		xpbd_volume_gradients.resize(nodes.size());
@@ -3959,6 +3972,15 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				physics_xpbd_solve_dihedral(a.x, b.x, c.x, d.x,
 						a.im, b.im, c.im, d.im, hinge.rest_angle,
 						hinge_alpha, xpbd_dihedral_lambdas[hinge_index]);
+			}
+		}
+		if (use_rod_bend_xpbd) {
+			for (RodBendConstraint &rod : xpbd_rod_bends) {
+				Node &a = nodes[rod.a];
+				Node &middle = nodes[rod.middle];
+				Node &c = nodes[rod.c];
+				physics_xpbd_solve_rod_bend(a.x, middle.x, c.x,
+						a.im, middle.im, c.im, rod.rest_angle, rod_alpha, rod.lambda);
 			}
 		}
 		if (shape_matching_iteration_strength > 0.0) {
@@ -4293,6 +4315,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_membrane_lambdas.reset();
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
+	xpbd_rod_bends.reset();
 	xpbd_shape_rest_offsets.reset();
 	xpbd_shape_clusters.reset();
 	xpbd_shape_cluster_members.reset();
