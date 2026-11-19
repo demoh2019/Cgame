@@ -347,9 +347,11 @@ prevents false hits just beyond the endpoint when the face BVH is expanded
 by the contact margin. It honors `hit_back_faces` with triangle-winding
 culling and correctly flips the surface normal for allowed back hits.
 The selected triangle's **face index** is reported to scene ray queries.
-Nearest-hit ordering uses a dominant-axis segment fraction rather than
-world-space squared distance, avoiding the float32 squared-distance
-overflow failure on large world raycasts. A zero-length segment returns
+Nearest-hit ordering uses the Moller-Trumbore segment fraction rather
+than world-space squared distance, avoiding the float32 squared-distance
+overflow failure on large world raycasts. The minimum accepted fraction
+is scaled to a fixed world-distance tolerance so a very long segment can
+still hit a face close to its origin. Degenerate near-zero segments return
 a miss without traversing the face BVH.
 
 These behaviors mirror Jolt's configurable triangle back-face mode and
@@ -365,7 +367,8 @@ python3 -m unittest discover -s tests/stress -p test_physics_soft_segment_raycas
 
 The runtime scene uses two fixed triangles at different heights. It checks
 the nearest face index, normal orientation on both sides, a segment that
-ends inside an inflated BVH leaf but short of the triangle, and a long ray.
+ends inside an inflated BVH leaf but short of the triangle, and long rays
+with hits both at the midpoint and very close to the origin.
 It requires a built Cgame editor using the built-in GodotPhysics3D backend.
 The source/reference checks do not establish a successful C++ build or
 native integration run by themselves.
