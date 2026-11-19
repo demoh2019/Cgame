@@ -86,8 +86,10 @@ TEST_CASE("[EnvironmentQuery3D] Duplicate candidates retain separate indices") {
 	Ref<EnvironmentQuery3D> q = make_query({ Vector3(1, 0, 0), Vector3(1, 0, 0) });
 	Array result = q->query();
 	REQUIRE(result.size() == 2);
-	CHECK(int(Dictionary(result[0])["index"]) == 0);
-	CHECK(int(Dictionary(result[1])["index"]) == 1);
+	const Dictionary first = result[0];
+	const Dictionary second = result[1];
+	CHECK(int(first["index"]) == 0);
+	CHECK(int(second["index"]) == 1);
 }
 
 TEST_CASE("[EnvironmentQuery3D] Minimum distance filtering") {
