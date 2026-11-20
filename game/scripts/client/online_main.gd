@@ -28,6 +28,7 @@ const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const AmbientBirds = preload("res://scripts/client/ambient_birds.gd")
 const SnowVfx = preload("res://scripts/client/snow_vfx.gd")
+const FishShoals = preload("res://scripts/client/fish_shoals.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -109,6 +110,7 @@ var _visual_biome := "plains"
 var atmosphere
 var _ambient_motes
 var _ambient_birds
+var _fish_shoals
 var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
@@ -1095,6 +1097,9 @@ func _on_welcomed() -> void:
 	# Circling bird flock overhead in daylight; one MultiMesh draw call.
 	_ambient_birds = AmbientBirds.new()
 	add_child(_ambient_birds)
+	# Native Flock3D fish shoal in nearby deep water (empty on engines without it).
+	_fish_shoals = FishShoals.new()
+	add_child(_fish_shoals)
 	audio = Audio.new()
 	add_child(audio)
 	# Thunder has its own bounded event queue and 3D emitter so storm
@@ -1407,6 +1412,9 @@ func _update_time_of_day(delta: float) -> void:
 		if _ambient_birds != null:
 			_ambient_birds.update_view(here, WorldCycle.daylight(clock), atmosphere.storm,
 				GraphicsQuality.level(), delta, underground)
+		if _fish_shoals != null:
+			_fish_shoals.update_view(client.world, here, GraphicsQuality.level(),
+				WorldCycle.daylight(clock), delta, underground)
 
 
 func _aim_direction() -> Vector2:
