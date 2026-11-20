@@ -134,8 +134,8 @@ func run(t) -> void:
 	for cx in range(-10, 11):
 		for cz in range(-10, 11):
 			var chunk_data := a.chunk(Vector2i(cx, cz))
-			if not chunk_data["ruin"]:
-				t.eq(chunk_data["structures"].size(), 0, "only ruins have structures")
+			if not chunk_data["ruin"] and a.poi.sites_near(float(cx) * 64.0 + 32.0, float(cz) * 64.0 + 32.0, 48.0).is_empty():
+				t.eq(chunk_data["structures"].size(), 0, "only ruins and sites have structures")
 			for s in chunk_data["structures"]:
 				ruin_structures += 1
 				ruin_walls += 1 if s["kind"] == "wall" else 0

@@ -4,6 +4,7 @@ extends RefCounted
 ## be sent over the network, only what changes in it.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 
 var world_seed: int
 var _continent: FastNoiseLite
@@ -14,11 +15,20 @@ var _moisture: FastNoiseLite
 var _cache: Dictionary = {}
 var dynamic_blockers: Dictionary = {} # Session structures shared with movement and prediction.
 var _hub_structures: Array = []
+var _level_rx: int = 1 << 30
+var _level_rz: int = 1 << 30
+var _levellers: Array = []
+var poi_building := false # While sites are being found, terrain is read without their levelling.
+var poi # Villages, camps, forts, ruined cities and the rest: see world_poi.gd.
 const CACHE_LIMIT := 256
 
 # Height range in meters. The hub is leveled to HUB_HEIGHT so the town can be built flat.
 const HUB_HEIGHT := 3.0
 const HUB_BLEND_END := 140.0
+# The world is one big island: land out to EDGE_START, then it sinks into the sea that ends at WORLD_RADIUS.
+const LAND_BIAS := 8.0 # Raises all land: with 0 only a tenth of the island could be walked to from the hub.
+const WORLD_RADIUS := 3200.0
+const EDGE_START := 2650.0
 
 
 func _init(p_seed: int = 1337) -> void:
@@ -28,6 +38,7 @@ func _init(p_seed: int = 1337) -> void:
 	_detail = _make_noise(p_seed + 202, 0.07, 2)
 	_temperature = _make_noise(p_seed + 303, 0.0021, 2)
 	_moisture = _make_noise(p_seed + 404, 0.0026, 2)
+	poi = WorldPoi.new(self)
 
 
 static func _make_noise(p_seed: int, frequency: float, octaves: int) -> FastNoiseLite:
@@ -50,16 +61,41 @@ static func mix(a: int, b: int, c: int, d: int = 0) -> int:
 
 # --- Terrain ------------------------------------------------------------------------------------------
 
+## Terrain height: the natural land, levelled under every site so buildings stand on flat ground.
 func height_at(x: float, z: float) -> float:
+	var raw: float = _raw_height(x, z)
+	if poi_building:
+		return raw
+	# Hot path: which sites can level ground in this region is remembered between calls.
+	var rx: int = floori(x * 0.00390625) # 1 / 256, the size of a region.
+	var rz: int = floori(z * 0.00390625)
+	if rx != _level_rx or rz != _level_rz:
+		_level_rx = rx
+		_level_rz = rz
+		_levellers = poi.levellers(rx, rz)
+	var result: float = raw
+	for site in _levellers:
+		var dx: float = site["x"] - x
+		var dz: float = site["z"] - z
+		var outer: float = site["outer"]
+		var d2: float = dx * dx + dz * dz
+		if d2 < outer * outer:
+			result = lerpf(result, site["y"], 1.0 - smoothstep(site["inner"], outer, sqrt(d2)))
+	return result
+
+
+func _raw_height(x: float, z: float) -> float:
 	var continent := _continent.get_noise_2d(x, z) # -1..1
 	var hills := _hills.get_noise_2d(x, z)
 	var detail := _detail.get_noise_2d(x, z)
 	# Broad landmasses with lakes, rolling hills on top, and mountains where the continent is high.
-	var base := continent * 26.0 + hills * 7.0 + detail * 0.8
+	var base := continent * 26.0 + hills * 7.0 + detail * 0.8 + LAND_BIAS
 	var mountain := maxf(continent - 0.28, 0.0)
 	base += mountain * mountain * 180.0
 	# Level the hub and blend smoothly into the wilderness.
 	var distance := Vector2(x, z).length()
+	# The edge of the world: the land sinks into the sea.
+	base -= smoothstep(EDGE_START, WORLD_RADIUS, distance) * 120.0
 	var blend := smoothstep(Defs.HUB_SAFE_RADIUS + 20.0, HUB_BLEND_END, distance)
 	return lerpf(HUB_HEIGHT, base, blend)
 
@@ -92,12 +128,34 @@ func biome_at(x: float, z: float) -> String:
 	return "forest" if temperature < 0.1 else "plains"
 
 
+# Names of the big areas: an adjective for every 640 m cell and a noun for the kind of land you stand on.
+const AREA_ADJECTIVES := ["Whispering", "Silent", "Broken", "Hollow", "Ashen", "Gilded", "Lonely", "Frozen", "Burning", "Forgotten", "Wailing", "Emerald", "Crimson", "Pale", "Iron", "Sunken"]
+const AREA_NOUNS := {
+	"forest": ["Pines", "Woods", "Thicket", "Timberland"], "plains": ["Fields", "Meadows", "Downs", "Steppe"],
+	"swamp": ["Marsh", "Fen", "Bog"], "mountain": ["Peaks", "Crags", "Heights"], "beach": ["Shore", "Sands", "Coast"],
+	"water": ["Bay", "Waters", "Deep"],
+}
+
+
+func area_name(x: float, z: float) -> String:
+	var cell_x: int = floori(x / 640.0)
+	var cell_z: int = floori(z / 640.0)
+	var hash_value: int = mix(cell_x, cell_z, world_seed, 91)
+	var nouns: Array = AREA_NOUNS[biome_at(x, z)]
+	return "%s %s" % [AREA_ADJECTIVES[hash_value % AREA_ADJECTIVES.size()], nouns[(hash_value / 17) % nouns.size()]]
+
+
 func zone_at(x: float, z: float) -> int:
 	return Defs.zone_index_for_distance(Vector2(x, z).length())
 
 
 static func tier_for_zone(zone: int) -> int:
 	return clampi(zone + 1, 1, Defs.MAX_TIER)
+
+
+## A workbench station of a settlement within reach (the hub's own workbench is separate, see GameServer).
+func settlement_station_near(x: float, z: float, reach: float = WorldPoi.STATION_RANGE) -> bool:
+	return poi.station_near(x, z, reach)
 
 
 func is_safe(x: float, z: float) -> bool:
@@ -142,8 +200,11 @@ static func cell_origin(cell: Vector2i) -> Vector2:
 
 
 # Stable id of a world entity that belongs to a chunk (resource node, crate, zombie spawn).
+## Built from the cell coordinates, so two chunks can never share an id (a hash would, now and then, and a depleted tree
+## would hide another one far away). Cells within +-1024 of the origin, 65 km, fit; ids stay under 4.3e9, clear of the
+## server's own running ids and the barricade ids.
 static func entity_id(cell: Vector2i, index: int) -> int:
-	return (mix(cell.x, cell.y, 7) % 1000003) * 1000 + index + 1
+	return ((cell.x + 1024) * 2048 + (cell.y + 1024)) * 1000 + index + 1
 
 
 ## Everything in a chunk, derived from the seed: gatherable nodes, ruins with loot crates and the
@@ -170,13 +231,22 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	var crates: Array = []
 	var spawns: Array = []
 	var structures: Array = []
+	var props: Array = []
+	var npcs: Array = []
+	var pois: Array = []
 	var ruin := false
+	# Settlements and other sites whose area touches this chunk.
+	var sites: Array = poi.sites_near(center.x, center.y, Defs.CHUNK_SIZE * 0.75)
 
 	# Ruins: scavenging sites, never inside the hub, rarer in the safe green zone.
 	var hub_distance := center.length()
 	if hub_distance > Defs.HUB_SAFE_RADIUS + 60.0 and not is_water(center.x, center.y):
 		var ruin_chance := 0.16 + 0.05 * zone
 		ruin = rng.randf() < ruin_chance
+		# A site already fills the area: no extra ruin on top of it.
+		for site in sites:
+			if center.distance_to(Vector2(float(site["x"]), float(site["z"]))) < float(site["radius"]) + 45.0:
+				ruin = false
 
 	var index := 0
 	var placed: Array[Vector2] = []
@@ -190,6 +260,8 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 			continue
 		var kind := _pick_node_kind(biome, rng)
 		if kind == "":
+			continue
+		if _in_site_clearing(p, sites):
 			continue
 		var info := Defs.node_info(kind)
 		var spacing: float = 2.6
@@ -258,7 +330,53 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 			spawns.append({"id": entity_id(cell, index), "x": p.x, "z": p.y, "type": _pick_zombie(zone, rng), "ruin": false})
 			index += 1
 
-	return {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures}
+	# Contents of the sites: each item lands in the chunk that holds its position and gets an id there.
+	var cell_rect := Rect2(origin, Vector2.ONE * Defs.CHUNK_SIZE)
+	for site in sites:
+		var site_zone: int = int(site["zone"])
+		var content: Dictionary = poi.contents(site)
+		if cell_rect.has_point(Vector2(float(site["x"]), float(site["z"]))):
+			pois.append({"id": site["id"], "kind": site["kind"], "name": site["name"], "display": site["display"], "x": site["x"], "z": site["z"], "radius": site["radius"], "zone": site_zone, "station": site["station"]})
+		for item in content["structures"]:
+			if cell_rect.has_point(Vector2(float(item["x"]), float(item["z"]))):
+				var copy: Dictionary = item.duplicate()
+				copy["id"] = entity_id(cell, index)
+				structures.append(copy)
+				index += 1
+		for item in content["crates"]:
+			if cell_rect.has_point(Vector2(float(item["x"]), float(item["z"]))):
+				var copy: Dictionary = item.duplicate()
+				copy["id"] = entity_id(cell, index)
+				copy["tier"] = tier_for_zone(site_zone)
+				crates.append(copy)
+				index += 1
+		for item in content["nodes"]:
+			if cell_rect.has_point(Vector2(float(item["x"]), float(item["z"]))):
+				var copy: Dictionary = item.duplicate()
+				copy["id"] = entity_id(cell, index)
+				nodes.append(copy)
+				index += 1
+		for item in content["spawns"]:
+			if cell_rect.has_point(Vector2(float(item["x"]), float(item["z"]))):
+				var copy: Dictionary = item.duplicate()
+				copy["id"] = entity_id(cell, index)
+				spawns.append(copy)
+				index += 1
+		for item in content["props"]:
+			if cell_rect.has_point(Vector2(float(item["x"]), float(item["z"]))):
+				props.append(item)
+		for item in content["npcs"]:
+			if cell_rect.has_point(Vector2(float(item["x"]), float(item["z"]))):
+				npcs.append(item)
+	return {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
+
+
+## Trees and rocks keep out of the inner part of a settlement, camp or city.
+func _in_site_clearing(p: Vector2, sites: Array) -> bool:
+	for site in sites:
+		if Vector2(float(site["x"]), float(site["z"])).distance_to(p) < float(site["clear"]):
+			return true
+	return false
 
 
 func _pick_node_kind(biome: String, rng: RandomNumberGenerator) -> String:
@@ -340,7 +458,7 @@ func blockers_near(x: float, z: float, radius: float) -> Array:
 	for cx in range(cell_a.x, cell_b.x + 1):
 		for cz in range(cell_a.y, cell_b.y + 1):
 			var data := chunk(Vector2i(cx, cz))
-			for group in ["nodes", "crates", "structures"]:
+			for group in ["nodes", "crates", "structures", "props"]:
 				for n in data[group]:
 					if n["blocks"] and absf(n["x"] - x) < radius + n["radius"] and absf(n["z"] - z) < radius + n["radius"]:
 						result.append(n)

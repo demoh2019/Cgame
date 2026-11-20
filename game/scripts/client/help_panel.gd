@@ -16,7 +16,7 @@ const ENTRIES := [
 		["9", "refuel fire"], ["-", "extinguish fire"], [",", "throw noise decoy"]]],
 	["TOWN", [
 		["N", "buy water"], ["V", "sell materials (Shift: fish)"], ["P", "accept contract (Shift: turn in, Ctrl: daily bounty)"],
-		["K", "skills and perks"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["F3", "full text readout"]]],
+		["K", "skills and perks"], ["J", "map of the island"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["F3", "full text readout"]]],
 ]
 
 var _built := false

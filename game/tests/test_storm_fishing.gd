@@ -33,8 +33,9 @@ func _times(world, where: Vector3) -> Dictionary:
 
 
 func _risky_shore(world) -> Vector3:
-	for x in range(680, 900, 4):
-		for z in range(-180, 181, 4):
+	# Any full-loot shore will do: the coast moves whenever the terrain is retuned, so search a wide band.
+	for x in range(680, 1400, 4):
+		for z in range(-700, 701, 4):
 			var px := float(x)
 			var pz := float(z)
 			if world.zone_at(px, pz) < 2 or world.is_water(px, pz):

@@ -64,6 +64,9 @@ const WALL_LENGTH := 3.8
 const TREE_FILES := ["CommonTree_1", "CommonTree_2", "CommonTree_3", "CommonTree_4", "CommonTree_5", "Pine_1", "Pine_2", "Pine_3", "Pine_4", "Pine_5"]
 const ROCK_FILES := ["Rock_Medium_1", "Rock_Medium_2", "Rock_Medium_3"]
 const CHARACTER_NAMES := ["Elf_Male", "Elf_Female", "Orc_Male", "Orc_Female"]
+const PROP_FILES := ["EA03_Prop_Container_Barrel_01d", "EA03_Prop_Container_Crate_01a", "EA03_Prop_Town_Bench_01a", "EA03_Prop_Tabble_02a", "EA03_Prop_Container_Basket_01a", "EA03_Prop_Stool_01a"]
+const TOWER_FILE := "EA03_Village_Tover_01a"
+const STATION_FILE := "EA03_Prop_Tabble_02a"
 
 
 static func pack_exists(relative: String) -> bool:

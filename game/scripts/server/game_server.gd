@@ -682,7 +682,7 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 	var recipe_tier: int = maxi(1, Defs.tier_of(String(recipe["output"])))
 	if not player.progression.can_craft_tier(recipe_tier):
 		return {"ok": false, "reason": "need_skill", "skill": "crafting", "tier": recipe_tier}
-	var at_bench: bool = Vector2(player.position.x, player.position.z).distance_to(WORKBENCH_POSITION) <= WORKBENCH_RANGE
+	var at_bench: bool = _at_workbench(Vector2(player.position.x, player.position.z))
 	var at_fire: bool = String(recipe["station"]) == "campfire" and FieldCampfire.has_warmth(
 			campfires, player.position, time)
 	var status: int = Crafting.craft(player.inventory, recipe_id, at_bench, times, at_fire)
@@ -1447,6 +1447,14 @@ func _tick_trades() -> void:
 # Posting a listing does NOT debit goods. A new durable backend journal is
 # required before adding offline listings or player escrow.
 
+## The hub's workbench or the one of a settlement (village, fort) out in the world. Crafting, the vendor and contracts work at
+## either; the bank, the market and camp rest stay in the hub's safe zone.
+func _at_workbench(spot: Vector2) -> bool:
+	if not spot.is_finite():
+		return false
+	return spot.distance_to(WORKBENCH_POSITION) <= WORKBENCH_RANGE or world.settlement_station_near(spot.x, spot.y, WORKBENCH_RANGE)
+
+
 func _market_at_hub(player: Player) -> bool:
 	if player == null or not _alive(player):
 		return false
@@ -1597,7 +1605,7 @@ func cmd_vendor(peer_id: int, item_id: String, quantity: int, buy: bool) -> Dict
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	var location := Vector2(player.position.x, player.position.z)
-	if not location.is_finite() or location.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+	if not location.is_finite() or not _at_workbench(location):
 		return {"ok": false, "reason": "no_station"}
 	var outcome: Dictionary = Vendor.transact(player.inventory, item_id, quantity, buy,
 		player.renown, player.pvp_infamy)
@@ -1693,7 +1701,7 @@ func cmd_contract(peer_id: int, action: String) -> Dictionary:
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	var at: Vector2 = Vector2(player.position.x, player.position.z)
-	if not at.is_finite() or at.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+	if not at.is_finite() or not _at_workbench(at):
 		return {"ok": false, "reason": "no_station"}
 	var result: Dictionary = {}
 	match action:

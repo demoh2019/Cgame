@@ -8,6 +8,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const Foliage = preload("res://scripts/client/foliage.gd")
+const CharacterModel = preload("res://scripts/client/character_model.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
 const HEIGHT_MIN := -45.0
@@ -159,6 +160,12 @@ func _mesh_for(kind: String) -> Mesh:
 		if kind == "berry":
 			return Foliage.swayed(Assets.nature_mesh("Bush_Common_Flowers"), "berry", 0.08)
 	if _use_village:
+		if kind == "tower":
+			return Assets.village_mesh(Assets.TOWER_FILE)
+		if kind == "workbench":
+			return Assets.village_mesh(Assets.STATION_FILE)
+		if kind.begins_with("prop:"):
+			return Assets.village_mesh(Assets.PROP_FILES[int(kind.get_slice(":", 1)) % Assets.PROP_FILES.size()])
 		if kind.begins_with("building:"):
 			return Assets.pack_building(int(kind.get_slice(":", 1)))["mesh"]
 		if kind == "wall":
@@ -167,6 +174,12 @@ func _mesh_for(kind: String) -> Mesh:
 			return Assets.village_mesh("EA03_Prop_Container_Crate_01a")
 	if kind.begins_with("tree:"):
 		return Assets.tree_meshes()[int(kind.get_slice(":", 1))]
+	if kind == "tower":
+		return Assets.building_mesh(4)
+	if kind == "workbench":
+		return Meshes.get_mesh("workbench")
+	if kind.begins_with("prop:"):
+		return Meshes.get_mesh("crate")
 	if kind.begins_with("building:"):
 		return Assets.building_mesh(int(kind.get_slice(":", 1)))
 	if kind == "wall":
@@ -184,8 +197,14 @@ func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> fl
 		return rng.randf_range(0.65, 1.0) * (1.0 if kind.begins_with("rock:") else 0.8)
 	if _use_nature and (kind == "bush" or kind == "berry"):
 		return rng.randf_range(0.8, 1.1)
+	if _use_village and kind == "tower":
+		return Assets.fit_scale(_mesh_for(kind), float(node["scale"]))
+	if _use_village and kind == "workbench":
+		return 2.2
+	if kind.begins_with("prop:"):
+		return float(node.get("scale", 1.5)) * (1.0 if _use_village else 0.5)
 	if _use_village and kind.begins_with("building:"):
-		return float(Assets.pack_building(int(kind.get_slice(":", 1)))["scale"])
+		return Assets.fit_scale(_mesh_for(kind), Assets.BUILDING_FOOTPRINT * float(node["scale"]) / 6.0)
 	if _use_village and kind == "wall":
 		return Assets.fit_scale(_mesh_for(kind), Assets.WALL_LENGTH)
 	if _use_village and kind == "crate":
@@ -194,7 +213,7 @@ func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> fl
 		return Assets.TREE_SCALE * rng.randf_range(0.85, 1.3)
 	if kind.begins_with("rock:") or kind.begins_with("ore:") or kind == "rock" or kind == "ore":
 		return rng.randf_range(0.8, 1.3)
-	if kind == "wall" or kind.begins_with("building:"):
+	if kind == "wall" or kind.begins_with("building:") or kind == "tower":
 		return float(node["scale"])
 	return 1.0
 
@@ -218,8 +237,12 @@ func _build_objects(data: Dictionary) -> void:
 	for crate in data["crates"]:
 		by_kind.get_or_add("crate", []).append(crate)
 	for structure in data["structures"]:
-		var key: String = "wall" if structure["kind"] == "wall" else "building:%d" % structure["variant"]
+		var key: String = "building:%d" % structure["variant"]
+		if structure["kind"] == "wall" or structure["kind"] == "tower" or structure["kind"] == "workbench":
+			key = structure["kind"]
 		by_kind.get_or_add(key, []).append(structure)
+	for prop in data.get("props", []):
+		by_kind.get_or_add("prop:%d" % int(prop["variant"]), []).append(prop)
 	for kind in by_kind:
 		var list: Array = by_kind[kind]
 		var multimesh := MultiMesh.new()
@@ -229,11 +252,11 @@ func _build_objects(data: Dictionary) -> void:
 		multimesh.instance_count = list.size()
 		var index: Dictionary = {}
 		var transforms: Array = []
-		var is_building: bool = kind == "wall" or kind.begins_with("building:")
+		var is_building: bool = kind == "wall" or kind.begins_with("building:") or kind == "tower" or kind == "workbench"
 		for i in list.size():
 			var node: Dictionary = list[i]
 			var size: float = _size_for(kind, node, rng)
-			var yaw: float = float(node["yaw"]) if is_building else rng.randf() * TAU
+			var yaw: float = float(node["yaw"]) if node.has("yaw") else rng.randf() * TAU
 			var basis := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * size)
 			var sink: float = 0.05 if (is_building or kind == "crate") else 0.0
 			var transform := Transform3D(basis, Vector3(node["x"] - origin.x, node["y"] - sink, node["z"] - origin.y))
@@ -244,17 +267,45 @@ func _build_objects(data: Dictionary) -> void:
 				multimesh.set_instance_color(i, Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2))
 			else:
 				multimesh.set_instance_color(i, Color.WHITE.darkened((tier - 1) * 0.07) if kind.begins_with("tree:") else Color.WHITE)
-			index[node["id"]] = i
+			if node.has("id"):
+				index[node["id"]] = i
 			transforms.append(transform)
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind == "wall") else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind == "wall" or kind == "tower") else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if _use_nature and kind.begins_with("ore:"):
 			instance.material_override = _ore_material(multimesh.mesh)
 		add_child(instance)
 		_groups[kind] = {"multimesh": multimesh, "index": index, "transforms": transforms}
 	if _use_nature:
 		_build_decor(origin, rng)
+	_build_npcs(data.get("npcs", []))
+
+
+## The people of the settlements: standing, sitting, working, each with a name and a role above their head.
+func _build_npcs(npcs: Array) -> void:
+	for npc in npcs:
+		var model := CharacterModel.new()
+		add_child(model)
+		model.setup(Color.WHITE, 2.0, 1.0, str(npc["model"]) if Assets.has_characters() else "", false)
+		model.position = Vector3(float(npc["x"]), float(npc["y"]), float(npc["z"])) - Vector3(_world_origin().x, 0.0, _world_origin().y)
+		model.rotation.y = float(npc["yaw"])
+		model.play_fixed(str(npc["animation"]))
+		var label := Label3D.new()
+		label.text = "%s\n%s" % [npc["name"], npc["title"]]
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.no_depth_test = true
+		label.font_size = 30
+		label.pixel_size = 0.0065
+		label.outline_size = 8
+		label.modulate = Color(1.0, 0.92, 0.65) if str(npc["role"]) == "trader" else Color(0.9, 0.95, 1.0)
+		label.position = Vector3(0, 2.7, 0)
+		label.visibility_range_end = 26.0
+		model.add_child(label)
+
+
+func _world_origin() -> Vector2:
+	return WorldGen.cell_origin(cell)
 
 
 ## Ore is the same rock tinted like copper, so it reads as something worth mining.

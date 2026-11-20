@@ -111,6 +111,19 @@ func _on_animation_finished(finished: StringName) -> void:
 		_oneshot = ""
 
 
+## For people who stand about (settlement survivors): loops one animation forever, whatever its name says.
+func play_fixed(animation_name: String) -> void:
+	if not pack_mode or animator == null:
+		return
+	var chosen: String = animation_name if animator.has_animation(animation_name) else "Idle_Loop"
+	if not animator.has_animation(chosen):
+		return
+	animator.get_animation(chosen).loop_mode = Animation.LOOP_LINEAR
+	animator.play(chosen)
+	# Not all standing about is in step: start each person somewhere else in the clip.
+	animator.seek(randf() * animator.get_animation(chosen).length, true)
+
+
 ## A single action (a swing, a shot) that plays over the movement and then hands control back.
 func play_action(animation_name: String, speed_scale: float = 1.0) -> void:
 	if not pack_mode or animator == null or _dead or not animator.has_animation(animation_name):

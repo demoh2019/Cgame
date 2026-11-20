@@ -275,7 +275,7 @@ func _build() -> void:
 	inventory_box.add_child(rest_button)
 
 	var vendor_title := Label.new()
-	vendor_title.text = "NPC vendor (hub workbench only)"
+	vendor_title.text = "NPC vendor (hub or village workbench)"
 	inventory_box.add_child(vendor_title)
 	var vendor_buttons := GridContainer.new()
 	vendor_buttons.columns = 2
@@ -670,7 +670,7 @@ func _build() -> void:
 	var craft_box := VBoxContainer.new()
 	_craft_panel.add_child(craft_box)
 	var craft_title := Label.new()
-	craft_title.text = "Crafting (workbench near the hub fountain: most recipes need it)"
+	craft_title.text = "Crafting (workbench in the hub or a village: most recipes need it)"
 	craft_box.add_child(craft_title)
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(380, 380)
@@ -750,6 +750,12 @@ func is_menu_open() -> bool:
 
 func set_prompt(text: String) -> void:
 	_prompt.text = text
+
+
+## A big announcement in the middle of the screen (level ups, places you enter).
+func banner(text: String, color: Color = Color(0.95, 0.78, 0.35)) -> void:
+	if _skin != null:
+		_skin.banner(text, color)
 
 
 func say(text: String) -> void:
@@ -1102,7 +1108,7 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				int(data.get("silver_delta", 0))])
 		else:
 			var messages := {
-				"no_station": "Vendor: return to hub workbench",
+				"no_station": "Vendor: find a workbench (hub or village)",
 				"dead": "Vendor: unavailable while dead",
 				"invalid_quantity": "Vendor: invalid quantity",
 				"not_traded": "Vendor: item is not traded here",

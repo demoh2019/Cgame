@@ -20,6 +20,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
+const WorldMap = preload("res://scripts/client/world_map.gd")
 const HelpPanel = preload("res://scripts/client/help_panel.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Effects = preload("res://scripts/client/effects.gd")
@@ -46,6 +47,10 @@ var avatar_model
 var audio
 var hub_view
 var outposts
+var world_map
+var _site_id := -1
+var _area_name := ""
+var _place_timer := 0.0
 var help_panel
 var demo_phase := -1.0
 var demo_storm := false
@@ -389,6 +394,9 @@ func _on_welcomed() -> void:
 	skills_panel.setup(client)
 	help_panel = HelpPanel.new()
 	hud.add_child(help_panel)
+	world_map = WorldMap.new()
+	hud.add_child(world_map)
+	world_map.setup(client)
 	outposts = OutpostView.new()
 	add_child(outposts)
 	hud.say("F2 shows every control.")
@@ -487,6 +495,7 @@ func _process(delta: float) -> void:
 	water.position.x = position.x
 	water.position.z = position.z
 	_update_time_of_day(delta)
+	_track_places(delta)
 	_update_prompt()
 	_run_demo()
 
@@ -499,6 +508,32 @@ func _apply_world_state() -> void:
 		var chunk := streamer.get_chunk(cell)
 		if chunk != null and chunk.has_method("apply_state"):
 			chunk.apply_state(hidden)
+
+
+## Announces the settlement or the region you walk into.
+func _track_places(delta: float) -> void:
+	_place_timer -= delta
+	if _place_timer > 0.0 or client == null or not client.you.has("x"):
+		return
+	_place_timer = 0.4
+	var spot: Vector3 = client.predicted
+	if Vector2(spot.x, spot.z).length() < Defs.HUB_SAFE_RADIUS:
+		_site_id = -1
+		return
+	var site: Dictionary = client.world.poi.site_at(spot.x, spot.z)
+	var site_id: int = int(site.get("id", -1))
+	if site_id != _site_id:
+		_site_id = site_id
+		if site_id != -1:
+			hud.banner(str(site["display"]), WorldMap.KIND_COLORS.get(site["kind"], Color.WHITE))
+			var detail := "a workbench and a trader here: crafting, vendor, contracts" if bool(site["station"]) else "loot and danger"
+			hud.say("%s - %s" % [str(site["display"]), detail])
+			return
+	if site_id == -1:
+		var area: String = client.world.area_name(spot.x, spot.z)
+		if area != _area_name:
+			_area_name = area
+			hud.banner(area, Color(0.8, 0.9, 1.0))
 
 
 func _update_time_of_day(delta: float) -> void:
@@ -579,6 +614,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				skills_panel.toggle()
 			KEY_F2:
 				help_panel.toggle()
+			KEY_J:
+				world_map.toggle()
 			KEY_Q:
 				_interact()
 			KEY_1:
@@ -747,8 +784,8 @@ func _interact() -> void:
 # --- Scripted demo for screenshots and videos --------------------------------------------------------------
 
 func _run_demo() -> void:
-	if _demo == "" or client == null:
-		return
+	if _demo == "" or client == null or not client.you.has("x"):
+		return # Wait for the server's welcome and first snapshot.
 	_demo_frames += 1
 	var net_ref = net
 	match _demo:
@@ -780,6 +817,18 @@ func _run_demo() -> void:
 			if _demo_frames == 120 and skills_panel != null:
 				skills_panel.toggle()
 				skills_panel._tabs.current_tab = 1
+		"village", "city", "farm", "camp", "outpost_site", "lighthouse", "dock", "bunker":
+			if _demo_frames == 40:
+				var wanted: String = "outpost" if _demo == "outpost_site" else _demo
+				var site := _nearest_site(wanted)
+				if not site.is_empty():
+					net_ref.c_debug.rpc_id(1, "teleport", {"x": float(site["x"]) - 3.0, "z": float(site["z"]) + 7.0})
+					_zoom = 1.8
+					_screenshot_frames = 480
+		"map":
+			if _demo_frames == 60:
+				world_map.toggle()
+				_screenshot_frames = 640
 		"outpost":
 			if _demo_frames == 40 and not client.outposts.is_empty():
 				var post: Dictionary = client.outposts[0]
@@ -795,9 +844,25 @@ func _run_demo() -> void:
 	if _screenshot_path != "":
 		_screenshot_frames += 1
 		if _screenshot_frames == 700:
+			# The window may be hidden behind others, in which case the last drawn frame would be stale: draw now.
+			RenderingServer.force_draw()
 			get_viewport().get_texture().get_image().save_png(_screenshot_path)
 			print("CLIENT screenshot saved: ", _screenshot_path)
 			get_tree().quit()
+
+
+## The site of a kind closest to the hub (demos and screenshots).
+func _nearest_site(kind: String) -> Dictionary:
+	var best := {}
+	var best_distance := INF
+	for rx in range(-14, 14):
+		for rz in range(-14, 14):
+			for site in client.world.poi.sites_in_region(rx, rz):
+				var distance: float = Vector2(float(site["x"]), float(site["z"])).length()
+				if site["kind"] == kind and distance < best_distance:
+					best = site
+					best_distance = distance
+	return best
 
 
 func _find_ruin() -> Vector2:
