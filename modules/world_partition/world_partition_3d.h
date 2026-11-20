@@ -69,6 +69,8 @@ class WorldPartition3D : public Node3D {
 	struct StreamingSource {
 		String name;
 		Vector2i center;
+		NodePath node_path; // Empty = fixed grid center, otherwise follow Node3D.
+		bool active = true; // Dynamic sources suspend while their node is missing.
 		int load_radius = 0;
 		int unload_radius = 1;
 		int priority = 0;
@@ -86,6 +88,7 @@ class WorldPartition3D : public Node3D {
 	bool _instantiate_cell(const Vector2i &p_cell, const Ref<PackedScene> &p_scene);
 	void _refresh_processing();
 	void _refresh_source_readiness();
+	void _update_streaming_source_positions();
 	void _notification(int p_what);
 
 protected:
@@ -142,6 +145,7 @@ public:
 	int get_pinned_cell_count() const;
 
 	bool set_streaming_source(const String &p_name, const Vector2i &p_center, int p_load_radius, int p_unload_radius, int p_priority);
+	bool set_streaming_source_node(const String &p_name, const NodePath &p_node_path, int p_load_radius, int p_unload_radius, int p_priority);
 	void remove_streaming_source(const String &p_name);
 	void clear_streaming_sources();
 	Dictionary get_streaming_source(const String &p_name) const;
