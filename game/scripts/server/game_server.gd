@@ -993,6 +993,11 @@ func cmd_party_ready_start(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	# Nobody should claim a raid is ready while a teammate is down.
+	for member_id in parties.members_of(peer_id):
+		var member: Player = players.get(int(member_id))
+		if member == null or not _alive(member):
+			return {"ok": false, "reason": "member_unavailable"}
 	return parties.start_ready_check(peer_id, time)
 
 
@@ -2998,6 +3003,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.dodge_immunity = 0.0
 	victim.guardian_brace = 0.0
 	parties.clear_standard_by(victim.id)
+	parties.cancel_ready_check_for(victim.id)
 	victim.meal_seconds = 0.0
 	victim.meal_tier = 0
 	victim.defense_target = -1
