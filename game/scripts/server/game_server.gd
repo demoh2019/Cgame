@@ -78,6 +78,7 @@ const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
+const RaidAggroView = preload("res://scripts/shared/raid_aggro_view.gd")
 const RaidRecovery = preload("res://scripts/shared/raid_recovery.gd")
 const RaidInterrupt = preload("res://scripts/shared/raid_interrupt.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
@@ -6237,11 +6238,18 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var used_crates: Array = []
 	for id in opened_crates:
 		used_crates.append(id)
+	# A player's private raid threat HUD never reveals unrelated hate tables.
+	# Compute it only for a visible, live boss and an eligible nearby party.
+	var raid_aggro_state: Dictionary = {}
+	if raid_boss_id > 0:
+		raid_aggro_state = RaidAggroView.for_viewer(
+			zombies.get(raid_boss_id), player, players, parties, world)
 	var snapshot := {
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
 		"outposts": siege_contracts.public_state(territory.public_state(time, players, parties), time),
 		"you": {
 			"party": _party_state_for(peer_id),
+			"raid_aggro": raid_aggro_state,
 			"caravan": player.caravan_view.duplicate(true),
 			"caravan_defended": player.caravan_defended,
 			"guild": {"id": player.guild_id, "name": player.guild_name, "rank": player.guild_rank},
