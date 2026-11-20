@@ -1024,6 +1024,10 @@ func _on_welcomed() -> void:
 	hub_view = HubView.new()
 	add_child(hub_view)
 	hub_view.build(client.world)
+	# Footprint projectors use the exact heightmap under each foot, not a
+	# fixed y value that can float above sloped terrain.
+	if _footprints != null:
+		_footprints.setup(client.world)
 	# One GPU MultiMesh for forest fireflies and floating pollen; placements
 	# follow terrain height, biome and the server-synchronised day cycle.
 	_ambient_motes = AmbientMotes.new()
