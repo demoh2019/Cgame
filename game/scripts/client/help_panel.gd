@@ -13,7 +13,7 @@ const ENTRIES := [
 		["F / R", "drink from a lake (filter prevents infection)"], [".", "frontier stim"], ["/", "scent salve (Shift: quiet sprint wraps)"], [";", "spore filter"], ["Z", "rest at the hub or a fire"]]],
 	["BUILD AND DEFEND", [
 		["U", "build barricade"], ["H", "repair"], ["Y", "upgrade"], ["X", "dismantle"], ["O", "light campfire"],
-		["9", "refuel fire"], ["-", "extinguish fire"], [",", "throw noise decoy"],
+		["9", "refuel fire (Shift: stormproof briquette)"], ["-", "extinguish fire"], [",", "throw noise decoy"],
 		["F5", "throw ember flask (PvE fire)"]]],
 	["TOWN", [
 		["N", "buy water"], ["V", "sell materials (Shift: fish)"], ["P", "accept contract (Shift: turn in, Ctrl: daily bounty)"],

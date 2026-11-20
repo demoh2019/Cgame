@@ -90,5 +90,6 @@ static func visible(campfires: Dictionary, position: Vector3, now: float, radius
 		if float(camp["expires"]) > now and at.distance_squared_to(target) <= radius * radius:
 			result.append({"id": int(camp["id"]), "x": target.x,
 				"y": float(camp["y"]), "z": target.y,
-				"remaining": maxf(0.0, float(camp["expires"]) - now)})
+				"remaining": maxf(0.0, float(camp["expires"]) - now),
+				"stormproof_seconds": maxf(0.0, float(camp.get("stormproof_until", 0.0)) - now)})
 	return result
