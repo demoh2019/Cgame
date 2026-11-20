@@ -317,6 +317,10 @@ func party_rally() -> void:
 	net.c_party_rally.rpc_id(1)
 
 
+func party_focus() -> void:
+	net.c_party_focus.rpc_id(1)
+
+
 var _outpost_provision_request_id: int = 0
 
 
