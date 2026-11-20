@@ -71,8 +71,18 @@ class WorldPartition3D : public Node3D {
 	HashSet<Vector2i> pinned_cells;
 	static constexpr int MAX_PINNED_CELLS = 128;
 
+	// Additional runtime loading sources: quest objectives, cameras, portals.
+	// Bounded in count and radius so misconfigured gameplay cannot fan out.
+	struct StreamingSource {
+		Vector3 global_position;
+		int radius = 0;
+	};
+	HashMap<String, StreamingSource> streaming_sources;
+	static constexpr int MAX_STREAMING_SOURCES = 8;
+
 	static bool _within_radius(const Vector2i &p_cell, const Vector2i &p_center, int p_radius);
 	String _get_scene_path(const Vector2i &p_cell) const;
+	bool _is_cell_required_by_source(const Vector2i &p_cell, int p_extra_radius) const;
 	void _unload_cell(const Vector2i &p_cell);
 	void _clear_active_cells();
 	void _poll_requests();
@@ -146,6 +156,13 @@ public:
 	bool is_cell_pinned(const Vector2i &p_cell) const;
 	Array get_pinned_cells() const;
 	int get_pinned_cell_count() const;
+
+	bool set_streaming_source(const String &p_name, const Vector3 &p_global_position, int p_radius = 0);
+	void remove_streaming_source(const String &p_name);
+	void clear_streaming_sources();
+	bool has_streaming_source(const String &p_name) const;
+	int get_streaming_source_count() const;
+	Vector2i get_streaming_source_cell(const String &p_name) const;
 
 	Vector2i local_position_to_cell(const Vector3 &p_local_position) const;
 	Vector3 cell_to_local_position(const Vector2i &p_cell) const;

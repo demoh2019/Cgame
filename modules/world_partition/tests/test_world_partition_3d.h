@@ -577,4 +577,41 @@ TEST_CASE("[WorldPartition3D] Optional detail distance and transition budgets va
 	memdelete(partition);
 }
 
+TEST_CASE("[WorldPartition3D] Additional streaming sources enforce caps and upsert semantics") {
+	WorldPartition3D *world = memnew(WorldPartition3D);
+	CHECK(world->get_streaming_source_count() == 0);
+	CHECK_FALSE(world->has_streaming_source("quest"));
+	CHECK(world->get_streaming_source_cell("missing") == Vector2i());
+	CHECK(world->set_streaming_source("quest", Vector3(256.0, 0.0, 0.0)));
+	CHECK(world->has_streaming_source("quest"));
+	CHECK(world->get_streaming_source_count() == 1);
+	CHECK(world->get_streaming_source_cell("quest") == Vector2i(2, 0));
+	CHECK(world->set_streaming_source("quest", Vector3(-256.0, 0.0, 0.0), 1));
+	CHECK(world->get_streaming_source_count() == 1);
+	CHECK(world->get_streaming_source_cell("quest") == Vector2i(-2, 0));
+
+	ERR_PRINT_OFF;
+	CHECK_FALSE(world->set_streaming_source("", Vector3()));
+	CHECK_FALSE(world->set_streaming_source("bad", Vector3(1, 0, 0), 2));
+	CHECK_FALSE(world->set_streaming_source("bad", Vector3(1, 0, 0), -1));
+	CHECK_FALSE(world->set_streaming_source("bad", Vector3(std::numeric_limits<real_t>::infinity(), 0, 0)));
+	ERR_PRINT_ON;
+	CHECK(world->get_streaming_source_count() == 1);
+	for (int i = 0; i < 7; i++) {
+		CHECK(world->set_streaming_source("mission_" + itos(i), Vector3(real_t(i), 0.0, 0.0)));
+	}
+	CHECK(world->get_streaming_source_count() == 8);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(world->set_streaming_source("overflow", Vector3()));
+	ERR_PRINT_ON;
+	CHECK(world->set_streaming_source("quest", Vector3(128.0, 0.0, 0.0)));
+	CHECK(world->get_streaming_source_count() == 8);
+	world->remove_streaming_source("quest");
+	CHECK_FALSE(world->has_streaming_source("quest"));
+	CHECK(world->get_streaming_source_count() == 7);
+	world->clear_streaming_sources();
+	CHECK(world->get_streaming_source_count() == 0);
+	memdelete(world);
+}
+
 } // namespace TestWorldPartition3D
