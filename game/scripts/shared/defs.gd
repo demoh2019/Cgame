@@ -407,6 +407,17 @@ static func _build_items() -> void:
 	_add_item("berries", {"name": "Berries", "kind": "food", "food": 12.0, "stack": 20, "value": 2})
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
+
+	# Unsafe lake water is a physical item, never a drink. Craft a pouch in the
+	# field, fill it at a real shore, then boil it at a live campfire or workbench.
+	_add_item("empty_water_pouch", {"name": "Empty Water Pouch", "kind": "water_pouch",
+		"tier": 1, "stack": 10, "weight": 0.15, "value": 4})
+	_add_recipe("empty_water_pouch", "empty_water_pouch", 1,
+		{"cloth_1": 1, "fiber_1": 1}, "", 2.0)
+	_add_item("murky_water", {"name": "Unboiled Lake Water", "kind": "raw_water",
+		"tier": 1, "stack": 10, "weight": 0.8, "value": 1})
+	_add_recipe("boiled_water", "water_bottle", 1,
+		{"murky_water": 1, "wood_1": 1}, "campfire", 4.0)
 	# Workbench-made storm shock lining: a paid alternative to dodging bolts.
 	_add_item("storm_insulator", {"name": "Copper Storm Insulation Kit",
 		"kind": "storm_insulator", "tier": 2, "stack": 5, "weight": 0.7, "value": 55})
