@@ -10,6 +10,7 @@ const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const WadingTravel = preload("res://scripts/shared/wading_travel.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
+const PartySupplyBeacon = preload("res://scripts/client/party_supply_beacon.gd")
 
 signal snapshot_received
 signal event_received(event: Dictionary)
@@ -46,6 +47,7 @@ var crates_used: Dictionary = {}
 var server_time: float = 0.0
 var snapshots_received: int = 0
 var events: Array = [] # Recent events, newest last (for the HUD log).
+var supply_beacon: Dictionary = {} # Latest active, private party aid location.
 var last_results: Dictionary = {} # command kind -> last result
 
 # Client side prediction.
@@ -70,14 +72,25 @@ func on_welcome(world_seed: int, _tick_rate: int) -> void:
 	welcomed = true
 	peer_id = net.multiplayer.get_unique_id()
 	predicted_stamina = Defs.MAX_STAMINA
+	supply_beacon = {} # A reconnect must not reveal previous party markers.
 
 
 func on_result(kind: String, data: Dictionary) -> void:
 	last_results[kind] = data
 
 
+func active_supply_beacon() -> Dictionary:
+	return PartySupplyBeacon.read(supply_beacon, peer_id, you.get("party", {}), server_time)
+
+
 func on_events(list: Array) -> void:
 	for event in list:
+		if str(event.get("type", "")) == "party_supply_request":
+			var seen: Dictionary = PartySupplyBeacon.read(
+				event, peer_id, you.get("party", {}), server_time)
+			if not seen.is_empty() and (supply_beacon.is_empty() or
+					float(seen["expires"]) >= float(supply_beacon.get("expires", -INF))):
+				supply_beacon = seen
 		events.append(event)
 		event_received.emit(event)
 	while events.size() > 40:
@@ -90,6 +103,8 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	snapshots_received += 1
 	server_time = float(snapshot["time"])
 	you = snapshot["you"]
+	supply_beacon = PartySupplyBeacon.read(
+		supply_beacon, peer_id, you.get("party", {}), server_time)
 	lightning_telegraph = snapshot.get("lightning_telegraph", {}).duplicate(true)
 	raid_telegraph = snapshot.get("raid_telegraph", {}).duplicate(true)
 	raid_interrupt = snapshot.get("raid_interrupt", {}).duplicate(true)

@@ -1721,7 +1721,8 @@ func cmd_party_supply_request(peer_id: int, need: String) -> Dictionary:
 	events.append({"type": "party_supply_request", "peer": peer_id,
 		"group": group_id, "name": requester.name, "need": need,
 		"level": roundi(level), "x": requester.position.x,
-		"z": requester.position.z})
+		"z": requester.position.z,
+		"expires": time + PartySupplyRequest.ALERT_SECONDS})
 	return {"ok": true, "need": need, "level": roundi(level),
 		"seconds": PartySupplyRequest.COOLDOWN}
 

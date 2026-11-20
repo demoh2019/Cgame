@@ -4,6 +4,7 @@ extends RefCounted
 
 const NEED_THRESHOLD := 60.0
 const COOLDOWN := 30.0
+const ALERT_SECONDS := 45.0 # Temporary aid location; no persistent tracking.
 
 
 static func valid_need(need: String) -> bool:

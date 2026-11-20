@@ -404,6 +404,20 @@ func _draw() -> void:
 
 ## The private waypoint with its line from you, the party ping, and this player's expedition goals.
 func _draw_navigation(objectives: Array[Dictionary], font: Font) -> void:
+	var requested: Dictionary = client.active_supply_beacon()
+	if not requested.is_empty():
+		var help_at: Vector2 = _to_screen(float(requested["x"]), float(requested["z"]))
+		if _frame.has_point(help_at):
+			# Amber circle for a temporary party-only aid request. Never a
+			# public waypoint, objective, or permanent discovered location.
+			draw_circle(help_at, 12.0, Color("#1e1a14"))
+			draw_arc(help_at, 8.0, 0.0, TAU, 24, Color("#e49530"), 3.0, true)
+			draw_circle(help_at, 3.0, Color("#e49530"))
+			_halo_text(font, help_at + Vector2(14, 4),
+				"Party needs %s (%ds)" % [
+					str(requested["need"]).capitalize(),
+					ceili(maxf(0.0, float(requested["expires"]) - client.server_time))],
+				12, Color("#7f4a0c"), PAPER)
 	if waypoint.is_finite():
 		var pin: Vector2 = _to_screen(waypoint.x, waypoint.y)
 		if client.you.has("x") and client.you.has("z"):

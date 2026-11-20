@@ -93,6 +93,7 @@ var _bobber: MeshInstance3D
 var _bobber_spot := Vector3.INF
 var _last_cast_spot := Vector3.INF # Kept after the cast ends, for the splash of the catch.
 var _party_rally_marker: Node3D
+var _party_supply_marker: Node3D
 var _raid_telegraph: Node3D
 var _lightning_visual: Node3D
 var _screenshot_path := ""
@@ -181,6 +182,44 @@ func _update_party_rally_marker() -> void:
 	label.text = "PARTY RALLY  %ds" % int(ceil(float(rally["remaining"])))
 
 
+## A short-lived help beacon is visible only to current group members.
+## All its coordinates come from a previously server-authorized event.
+func _make_party_supply_marker() -> void:
+	_party_supply_marker = Node3D.new()
+	_party_supply_marker.name = "PartySupplyHelp"
+	_party_supply_marker.visible = false
+	var beacon := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.4
+	sphere.height = 0.8
+	beacon.mesh = sphere
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(1.0, 0.68, 0.28)
+	beacon.material_override = material
+	_party_supply_marker.add_child(beacon)
+	var label := Label3D.new()
+	label.name = "Label"
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.position.y = 0.8
+	_party_supply_marker.add_child(label)
+	add_child(_party_supply_marker)
+
+
+func _update_party_supply_marker() -> void:
+	var signal_state: Dictionary = client.active_supply_beacon()
+	_party_supply_marker.visible = not signal_state.is_empty()
+	if signal_state.is_empty():
+		return
+	var x: float = float(signal_state["x"])
+	var z: float = float(signal_state["z"])
+	_party_supply_marker.position = Vector3(x, client.world.height_at(x, z) + 1.8, z)
+	var label := _party_supply_marker.get_node("Label") as Label3D
+	label.text = "PARTY NEEDS %s (%ds)" % [
+		str(signal_state["need"]).to_upper(),
+		ceili(maxf(0.0, float(signal_state["expires"]) - client.server_time))]
+
+
 func _build_environment() -> void:
 	atmosphere = Atmosphere.new()
 	add_child(atmosphere)
@@ -193,6 +232,7 @@ func _build_environment() -> void:
 	add_child(camera)
 	camera.look_at(Vector3.ZERO)
 	_make_party_rally_marker()
+	_make_party_supply_marker()
 	_raid_telegraph = RaidTelegraph.new()
 	_raid_telegraph.name = "RaidGroundSlamWarning"
 	add_child(_raid_telegraph)
@@ -956,6 +996,7 @@ func _process(delta: float) -> void:
 	_lightning_visual.set_warning(client.lightning_telegraph)
 	outposts.update_from(client)
 	_update_party_rally_marker()
+	_update_party_supply_marker()
 	# The camera glides after the player.
 	var target := position + CAMERA_OFFSET * _zoom
 	camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
