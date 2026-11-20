@@ -97,6 +97,39 @@ func collect_shard(index: int) -> bool:
 	return true
 
 
+## WorldInteractionRouter3D provider protocol. The legacy F pickup remains.
+func get_interaction_targets(eye: Vector3, search_radius: float) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var radius_sq: float = pow(minf(search_radius, pickup_distance), 2.0)
+	for index in range(positions.size()):
+		if collected_ids.has(index):
+			continue
+		var global_pos: Vector3 = to_global(positions[index])
+		if eye.distance_squared_to(global_pos) <= radius_sq:
+			result.append({"action_id": "shard_%d" % index, "position": global_pos,
+				"label": "Собрать световой осколок", "radius": pickup_distance})
+	return result
+
+
+func activate_interaction(action_id: String, actor: Node3D) -> bool:
+	if not action_id.begins_with("shard_") or not is_instance_valid(actor):
+		return false
+	var number: String = action_id.substr(6)
+	if not number.is_valid_int():
+		return false
+	var index: int = int(number)
+	if index < 0 or index >= positions.size() or collected_ids.has(index):
+		return false
+	var eye: Vector3 = actor.global_position + Vector3.UP * 1.2
+	if eye.distance_squared_to(to_global(positions[index])) > pickup_distance * pickup_distance:
+		return false
+	return collect_shard(index)
+
+
+func get_interaction_message(_action_id: String) -> String:
+	return "Световой осколок собран"
+
+
 func reset_quest() -> void:
 	collected_ids.clear()
 	_finished_emitted = false
