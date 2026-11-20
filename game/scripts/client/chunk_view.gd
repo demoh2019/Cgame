@@ -972,8 +972,22 @@ func _update_grass_lods() -> void:
 	# Compute one focal-length ratio for the whole chunk, not for each tuft.
 	# Changing Ultra/Performance now changes real distant detail, not just
 	# the shader's sink-to-ground fade range.
-	var screen_height: float = float(view_camera.get_viewport().get_visible_rect().size.y)
-	var screen_scale: float = GrassField.screen_lod_scale(screen_height, view_camera.fov)
+	var active_viewport: Viewport = view_camera.get_viewport()
+	var screen_size: Vector2i = active_viewport.get_visible_rect().size
+	var vertical_fov: float = view_camera.fov
+	if view_camera.keep_aspect == Camera3D.KEEP_WIDTH and screen_size.x > 0:
+		# KEEP_WIDTH expresses horizontal FOV. Convert it before computing
+		# projected blade size, otherwise ultrawide screens choose wrong LODs.
+		vertical_fov = rad_to_deg(2.0 * atan(
+			tan(deg_to_rad(view_camera.fov) * 0.5) * float(screen_size.y) / float(screen_size.x)))
+	var render_scale := 1.0
+	if str(RenderingServer.get_current_rendering_method()) != "gl_compatibility":
+		# FSR2 renders fewer 3D pixels than the window contains.
+		render_scale = clampf(active_viewport.scaling_3d_scale, 0.5, 1.0)
+	var screen_height: float = float(screen_size.y) * render_scale
+	# Avoid multiplying geometry cost on 4K screens: preserve additional
+	# detail only up to 15% beyond the active grass fade-range budget.
+	var screen_scale: float = minf(1.15, GrassField.screen_lod_scale(screen_height, vertical_fov))
 	var range_scale: float = maxf(grass_fade_end / GrassField.FADE_END, 0.1) * screen_scale
 	for tile in _grass_tiles:
 		var tile_center: Vector3 = to_global(tile.custom_aabb.position + tile.custom_aabb.size * 0.5)
