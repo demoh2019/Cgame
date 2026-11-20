@@ -283,6 +283,10 @@ func party_aid(target_id: int, item_id: String) -> void:
 	net.c_party_aid.rpc_id(1, target_id, item_id)
 
 
+func party_standard() -> void:
+	net.c_party_standard.rpc_id(1)
+
+
 func party_rally() -> void:
 	net.c_party_rally.rpc_id(1)
 
