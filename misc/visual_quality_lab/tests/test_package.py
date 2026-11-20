@@ -12,7 +12,7 @@ class VisualQualityPackageTests(unittest.TestCase):
         files += sorted((ROOT / 'addons').rglob('*.gd'))
         files += sorted((ROOT / 'tests').glob('*.gd'))
         for file in files:
-            for path in re.findall(r'res://([^"\\s]+)', file.read_text()):
+            for path in re.findall(r'res://([^"\s]+)', file.read_text()):
                 self.assertTrue((ROOT / path).is_file(), f'{file.name} -> {path}')
 
     def test_sky_shader_no_invalid_return(self):
