@@ -24,6 +24,7 @@ const UiAccess = preload("res://scripts/client/ui_access.gd")
 const UiSettings = preload("res://scripts/client/ui_settings.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
+const FirstPersonView = preload("res://scripts/client/first_person_view.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const AmbientBirds = preload("res://scripts/client/ambient_birds.gd")
@@ -168,6 +169,11 @@ var address_edit: LineEdit
 var name_edit: LineEdit
 var status_label: Label
 var _zoom := 1.0
+# First-person view: middle mouse toggles it; scrolling in past the closest zoom enters it, scrolling out leaves.
+var _first_person := false
+var _fp_yaw := PI
+var _fp_pitch := 0.0
+var _start_first_person := false # --first-person launch flag (also for screenshots).
 var _dof_elapsed := 0.35 # Coalesce cinematic focus updates to ~3 Hz.
 var _attack_cooldown := 0.0
 var _build_mode := false # U: a ghost wall follows the aim until it is placed or cancelled.
@@ -238,6 +244,8 @@ func _ready() -> void:
 				demo_phase = float(args[i]) # 0..1 around the day, for screenshots.
 			"--storm":
 				demo_storm = true
+			"--first-person":
+				_start_first_person = true
 			"--connect":
 				address_edit.text = address
 		i += 1
@@ -1082,6 +1090,8 @@ func _on_chat_submitted(text: String) -> void:
 
 func _on_welcomed() -> void:
 	connect_panel.visible = false
+	if _start_first_person:
+		_set_first_person.call_deferred(true)
 	hud = Hud.new()
 	add_child(hud)
 	hud.setup(client)
@@ -1226,8 +1236,10 @@ func _physics_process(delta: float) -> void:
 	else:
 		UiAccess.clear_latches()
 	move = move.limit_length(1.0)
+	if _first_person:
+		move = FirstPersonView.to_world_move(move, _fp_yaw)
 	_move_input = move
-	var aim := _aim_direction()
+	var aim: Vector2 = FirstPersonView.forward(_fp_yaw) if _first_person else _aim_direction()
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
 	client.send_input(move, sprint, yaw, delta, crouch)
 	if alive and not _build_mode and not hud.is_menu_open() and not _access.is_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
@@ -1278,6 +1290,8 @@ func _process(delta: float) -> void:
 			facing = avatar.rotation.y
 		avatar.rotation.y = lerp_angle(avatar.rotation.y, facing, 1.0 - exp(-12.0 * delta))
 		avatar.visible = bool(client.you.get("alive", true))
+		# Your own body would fill the screen from inside; other players still see it.
+		avatar_model.visible = not _first_person
 		avatar_model.set_stance(bool(client.you.get("crouching", false)), bool(client.you.get("mounted", false)) and avatar.visible,
 			float(client.you.get("wading_depth_m", 0.0)) > 1.05)
 		# Chopping shows the axe; otherwise the equipped weapon is in hand.
@@ -1330,9 +1344,13 @@ func _process(delta: float) -> void:
 	var target: Vector3 = position + CAMERA_OFFSET * _zoom * camera_fx.zoom_mul + camera_fx.look
 	if camera_fx.photo_active:
 		camera_fx.photo_camera(camera, position)
+	elif _first_person:
+		camera.global_transform = FirstPersonView.camera_transform(position, _fp_yaw, _fp_pitch,
+			FirstPersonView.eye_height(bool(client.you.get("crouching", false)), bool(client.you.get("mounted", false))))
 	else:
 		camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
 		camera.look_at(position + Vector3(0, 0.8, 0) + camera_fx.look)
+	_update_first_person_mouse()
 	if _demo == "sky":
 		# A low view toward the horizon to show the sky (screenshots only).
 		camera.position = position + Vector3(0.0, 14.0, 6.0)
@@ -1653,7 +1671,33 @@ func _set_auto_graphics(enabled: bool) -> void:
 		push_warning("Could not save auto graphics mode: %d" % error)
 
 
+func _set_first_person(enabled: bool) -> void:
+	if enabled == _first_person or client == null or not client.welcomed:
+		return
+	_first_person = enabled
+	if enabled:
+		# Start looking the way the survivor already faces.
+		_fp_yaw = avatar.rotation.y if avatar != null else float(client.yaw)
+		_fp_pitch = 0.0
+	_update_first_person_mouse()
+
+
+## The cursor is captured for mouse look, but freed whenever a menu, chat or settings needs it.
+func _update_first_person_mouse() -> void:
+	var want_capture: bool = _first_person and not _build_mode and not hud.is_menu_open() and not _typing() \
+		and not Input.is_key_pressed(KEY_ALT) and _screenshot_path.is_empty()
+	var mode: Input.MouseMode = Input.MOUSE_MODE_CAPTURED if want_capture else Input.MOUSE_MODE_VISIBLE
+	if Input.mouse_mode != mode:
+		Input.mouse_mode = mode
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if _first_person and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		var look: Vector2 = FirstPersonView.apply_look(_fp_yaw, _fp_pitch, event.relative)
+		_fp_yaw = look.x
+		_fp_pitch = look.y
+		get_viewport().set_input_as_handled()
+		return
 	# Ctrl+F11 cycles graphics quality without consuming the existing F11 medicine shortcut.
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
 		_set_auto_graphics(false)
@@ -1951,10 +1995,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+		if event.button_index == MOUSE_BUTTON_MIDDLE:
+			_set_first_person(not _first_person)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			if _zoom <= 0.55 + 0.001:
+				_set_first_person(true)
 			_zoom = clampf(_zoom - 0.1, 0.55, 1.8)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_zoom = clampf(_zoom + 0.1, 0.55, 1.8)
+			if _first_person:
+				_set_first_person(false)
+			else:
+				_zoom = clampf(_zoom + 0.1, 0.55, 1.8)
 
 
 ## Uses or equips an item you carry; the server decides whether it works.
