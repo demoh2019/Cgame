@@ -119,7 +119,8 @@ func _refresh(root: Node3D, site: Dictionary, group_id: int) -> void:
 	ring_material.albedo_color = Color(color.r, color.g, color.b, 0.6)
 	var label := root.get_node("Label") as Label3D
 	label.modulate = color.lightened(0.3)
+	var provision_text := "Supply +%ds" % int(site.get("provisioned_seconds", 0.0))
 	var field_bench: String = "Field bench LOCKED" if owner == 0 else (
 		"Field bench CONTESTED" if bool(site.get("contested", false)) else "Field bench: defending party/guild")
 	label.text = "OUTPOST #%d  Fort T%d\n%s\n%s" % [
-		int(site["id"]), int(site.get("fortification", 0)), status, field_bench]
+		int(site["id"]), int(site.get("fortification", 0)), status, field_bench + " | " + provision_text]

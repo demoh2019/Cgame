@@ -398,6 +398,12 @@ func _build() -> void:
 	claim_cache_button.text = "Collect nearest captured outpost supplies"
 	claim_cache_button.pressed.connect(_claim_nearest_outpost_cache)
 	inventory_box.add_child(claim_cache_button)
+	var delivery := Button.new()
+	delivery.name = "OutpostProvisions"
+	delivery.text = "Deliver supplies to outpost (+45s hold)"
+	delivery.tooltip_text = "Costs 2 canned food, 2 water bottles, 4 wood. Max 4 deliveries per capture, unavailable when contested."
+	delivery.pressed.connect(_deliver_nearest_outpost_provisions)
+	inventory_box.add_child(delivery)
 
 	var party_title := Label.new()
 	party_title.text = "Survivor party (nearby invites, up to 5 players)"
@@ -1014,7 +1020,31 @@ func _claim_nearest_outpost_cache() -> void:
 		client.outpost_supplies(nearest_id)
 
 
+func _deliver_nearest_outpost_provisions() -> void:
+	if client.you.is_empty():
+		return
+	var pos := Vector2(float(client.you.get("x", 0.0)), float(client.you.get("z", 0.0)))
+	var nearest := -1
+	var best := 4.01
+	for flag in client.outposts:
+		var distance := pos.distance_to(Vector2(float(flag["x"]), float(flag["z"])))
+		if distance < best:
+			best = distance
+			nearest = int(flag["id"])
+	if nearest < 0:
+		say("Supplies: move within 4 metres of your outpost.")
+	else:
+		client.outpost_provision(nearest)
+
+
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "outpost_provision":
+		if bool(data.get("ok", false)):
+			say("Outpost supplied: +%ds hold time, %d deliveries left." % [
+				int(data.get("extra_seconds", 0)), int(data.get("remaining_deliveries", 0))])
+		else:
+			say("Outpost supplies: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "use" and data.has("recall_cast"):
 		say("Return charm: casting for %d seconds." % int(data["recall_cast"]))
 		return

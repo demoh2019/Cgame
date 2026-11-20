@@ -313,6 +313,16 @@ func party_rally() -> void:
 	net.c_party_rally.rpc_id(1)
 
 
+var _outpost_provision_request_id: int = 0
+
+
+func outpost_provision(site_id: int) -> void:
+	if _outpost_provision_request_id >= 2_147_483_647:
+		return
+	_outpost_provision_request_id += 1
+	net.c_outpost_provision.rpc_id(1, site_id, _outpost_provision_request_id)
+
+
 var _outpost_fortify_request_id: int = 0
 
 

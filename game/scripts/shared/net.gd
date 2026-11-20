@@ -633,6 +633,14 @@ func c_party_kick(target_id: int) -> void:
 		s_result.rpc_id(peer, "party", sim.cmd_party_kick(peer, target_id))
 
 
+@rpc("any_peer", "reliable")
+func c_outpost_provision(site_id: int, request_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "outpost_provision",
+			sim.cmd_outpost_provision(peer, site_id, request_id))
+
+
 ## Only the sender's authoritative party and backpack can reinforce a flag.
 @rpc("any_peer", "reliable")
 func c_outpost_fortify(site_id: int, request_id: int) -> void:
@@ -896,7 +904,7 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"guardian_taunt":
 			return _is_nearby(event, peer)
-		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_breached", \
+		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_provisioned", "outpost_breached", \
 				"siege_contract_declared", "siege_contract_result":
 			return _is_nearby(event, peer)
 		"supply_drop":

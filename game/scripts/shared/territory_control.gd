@@ -8,6 +8,7 @@ const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
 const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const OutpostSupplies = preload("res://scripts/shared/outpost_supplies.gd")
+const OutpostProvisions = preload("res://scripts/shared/outpost_provisions.gd")
 const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 
 const MAX_SITES := 3
@@ -48,7 +49,7 @@ func _init(world) -> void:
 				"owner": 0, "until": 0.0, "challenger": 0,
 				"progress": 0.0, "contested": false, "fortification": 0,
 				"breach_ready_at": 0.0,
-				"supplies_left": 0, "supply_epoch": 0,
+				"supplies_left": 0, "supply_epoch": 0, "provisioned_seconds": 0.0,
 				"supply_claims": {},
 			})
 			break
@@ -68,6 +69,7 @@ func public_state(now: float, players: Dictionary = {}, parties = null) -> Array
 			"breach_cooldown": maxf(0.0, float(site.get("breach_ready_at", 0.0)) - now),
 			"expires_in": maxf(0.0, float(site["until"]) - now),
 			"supplies_left": int(site.get("supplies_left", 0)),
+			"provisioned_seconds": float(site.get("provisioned_seconds", 0.0)),
 		})
 	return result
 
@@ -117,6 +119,7 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 			site["owner"] = 0
 			site["until"] = 0.0
 			site["supplies_left"] = 0
+			site["provisioned_seconds"] = 0.0
 			site["fortification"] = 0
 			site["supply_claims"] = {}
 			site["breach_ready_at"] = 0.0
@@ -142,6 +145,7 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 			site["owner"] = group_id
 			site["until"] = now + HOLD_SECONDS
 			OutpostSupplies.initialize_capture(site)
+			site["provisioned_seconds"] = 0.0
 			site["fortification"] = 0 # Previous defenders lose their walls.
 			site["breach_ready_at"] = 0.0 # Siege timer belongs to former owner.
 			site["challenger"] = 0
@@ -171,6 +175,22 @@ func claim_supplies(site_id: int, player, players: Dictionary, parties,
 		return OutpostSupplies.claim(site, player, group_id,
 			world.zone_at(float(site["x"]), float(site["z"])), now, contested_now)
 	return {"ok": false, "reason": "no_such_site"}
+
+
+## Live server party, guild and rival presence checks at delivery time.
+func deliver_provisions(site_id: int, player, players: Dictionary, parties,
+		now: float) -> Dictionary:
+	var site: Dictionary = site_by_id(site_id)
+	if site.is_empty():
+		return {"ok": false, "reason": "no_such_site"}
+	var owner: int = int(site.get("owner", 0))
+	var group_id: int = parties.group_of(player.id)
+	var authorized: bool = owner > 0 and parties.groups.has(owner) and (
+		group_id == owner or GuildTerritory.same_owner_guild(site, player, players, parties))
+	var rival: bool = false
+	if authorized:
+		rival = contested_by_rivals(site, owner, players, parties)
+	return OutpostProvisions.deliver(site, player, authorized, now, rival)
 
 
 func has_rally_bonus(peer_id: int, position: Vector3, parties, now: float,

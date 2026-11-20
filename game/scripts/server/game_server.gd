@@ -26,6 +26,7 @@ const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
 const SiegeContracts = preload("res://scripts/shared/siege_contracts.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
+const OutpostProvisions = preload("res://scripts/shared/outpost_provisions.gd")
 const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
@@ -86,6 +87,7 @@ const TRADE_RANGE := 6.0
 const TRADE_TIMEOUT := 45.0
 const MARKET_MAX_REQUEST_ID := 2_147_483_647
 const FORTIFY_MAX_REQUEST_ID := 2_147_483_647
+const PROVISION_MAX_REQUEST_ID := 2_147_483_647
 const BREACH_MAX_REQUEST_ID := 2_147_483_647
 const SIEGE_DECLARE_MAX_REQUEST_ID := 2_147_483_647
 const ZOMBIE_ACTIVE_RADIUS := 130.0 # Zombies farther than this from every player are put to sleep.
@@ -213,6 +215,7 @@ var territory # Session outposts generated from this world seed.
 var siege_contracts = SiegeContracts.new() # Session-only declared siege windows and honor.
 var guild_siege_wins: Dictionary = {} # Historical Nakama totals cached for connected guilds.
 var outpost_fortify_requests: Dictionary = {} # Peer -> last request and cached result.
+var outpost_provision_requests: Dictionary = {} # Peer -> last provision receipt.
 var outpost_breach_requests: Dictionary = {} # Peer -> last command and cached result.
 var training_invites: Dictionary = {} # Target peer -> verified invitation.
 var training_matches: Dictionary = {} # Both peer IDs reference the same session.
@@ -515,6 +518,7 @@ func remove_player(peer_id: int) -> void:
 			survivor.defense_until = 0.0
 	market_buy_requests.erase(peer_id)
 	outpost_fortify_requests.erase(peer_id)
+	outpost_provision_requests.erase(peer_id)
 	outpost_breach_requests.erase(peer_id)
 	siege_declare_requests.erase(peer_id)
 	_cancel_market_seller(peer_id)
@@ -1312,6 +1316,42 @@ func _party_state_for(peer_id: int) -> Dictionary:
 # --- Outpost fortification: server-authoritative supplies for siege defense. ----------
 # Every client command includes a monotonic request ID so an ambiguous response
 # cannot cause the same upgrade to spend the player's resources twice.
+## Bounded resource convoys. Monotonic request IDs cache the result of every
+## command, so duplicated network packets cannot spend or extend twice.
+func cmd_outpost_provision(peer_id: int, site_id: int, request_id: int) -> Dictionary:
+	if not players.has(peer_id):
+		return {"ok": false, "reason": "unknown_player"}
+	if request_id < 1 or request_id > PROVISION_MAX_REQUEST_ID:
+		return {"ok": false, "reason": "invalid_request_id"}
+	var last: Dictionary = outpost_provision_requests.get(peer_id, {})
+	if not last.is_empty():
+		if request_id < int(last["id"]):
+			return {"ok": false, "reason": "stale_request"}
+		if request_id == int(last["id"]):
+			if site_id != int(last["site"]):
+				return {"ok": false, "reason": "request_conflict"}
+			return (last["result"] as Dictionary).duplicate(true)
+	var player: Player = players[peer_id]
+	var result: Dictionary
+	if not _alive(player):
+		result = {"ok": false, "reason": "dead"}
+	else:
+		result = territory.deliver_provisions(site_id, player, players, parties, time)
+	if bool(result.get("ok", false)):
+		player.dirty_inventory = true
+		player.dirty_character = true
+		var flag: Dictionary = territory.site_by_id(site_id)
+		events.append({"type": "outpost_provisioned", "id": site_id,
+			"owner": flag["owner"], "x": flag["x"], "z": flag["z"],
+			"extended": OutpostProvisions.EXTRA_SECONDS,
+			"total": flag["provisioned_seconds"]})
+	result["request_id"] = request_id
+	outpost_provision_requests[peer_id] = {
+		"id": request_id, "site": site_id, "result": result.duplicate(true),
+	}
+	return result
+
+
 func cmd_outpost_fortify(peer_id: int, site_id: int, request_id: int) -> Dictionary:
 	if not players.has(peer_id):
 		return {"ok": false, "reason": "unknown_player"}
