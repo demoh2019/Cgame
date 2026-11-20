@@ -49,3 +49,35 @@ func run(t) -> void:
 			"water shader exposes both quality-controlled detail distances")
 		t.check(water_shader.code.contains("if (edge > 0.001)"),
 			"deep-water pixels avoid needless shoreline foam sampling")
+
+	t.current = "depth-aware water optics"
+	t.eq(float(low["shore_glimmer_strength"]), 0.0, "Performance skips optional shallow-water glints")
+	t.eq(float(balanced["shore_glimmer_strength"]), 0.0, "Balanced skips optional shallow-water glints")
+	t.check(float(high["shore_glimmer_strength"]) > 0.0, "High adds shallow-water highlights")
+	t.check(float(ultra["shore_glimmer_strength"]) > float(high["shore_glimmer_strength"]), "Ultra renders stronger shallow highlights")
+	for profile in [low, balanced, high, ultra]:
+		t.check(float(profile["shore_glimmer_start"]) < float(profile["shore_glimmer_end"]),
+			"shallow glimmer fade range is valid")
+	t.check(float(ultra["shore_glimmer_end"]) > float(high["shore_glimmer_end"]),
+		"Ultra preserves highlights farther from the camera")
+	if water_shader != null:
+		var code: String = water_shader.code
+		t.check(code.contains("spectral_transmission") and code.contains("exp(-thickness"),
+			"water uses physically inspired depth absorption instead of linear color blend")
+		t.check(code.contains("float fresnel = 0.02 + 0.98 * pow("),
+			"water uses Schlick Fresnel at the water-air interface")
+		t.check(code.contains("shore_glimmer_strength > 0.001 && thickness < 3.2"),
+			"expensive shallow-water highlights are gated by preset and depth")
+		t.check(code.contains("if (near_fade > 0.001)"),
+			"far-away water does not calculate animated light filaments")
+		t.check(code.contains("vec3(0.07, 0.13, 0.12) * shore_glimmer"),
+			"high quality shoreline receives subtle emissive lighting")
+	var controller := load("res://scripts/client/graphics_quality.gd") as Script
+	t.check(controller != null, "graphics controller loads with new water parameters")
+	if controller != null:
+		t.check(controller.source_code.contains('set_shader_parameter("shore_glimmer_strength"'),
+			"graphics presets update the live water material")
+		t.check(controller.source_code.contains('set_shader_parameter("shore_glimmer_fade_start"')
+			and controller.source_code.contains('set_shader_parameter("shore_glimmer_fade_end"'),
+			"graphics presets update the water glimmer distance thresholds")
+
