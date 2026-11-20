@@ -396,6 +396,35 @@ Projection Camera3D::get_camera_projection() const {
 	return _get_camera_projection(_near);
 }
 
+// Pixel height of a one-meter surface feature at a world-space location.
+// Using the same projection as the renderer handles aspect-lock, frustum
+// offsets, zoom and orthographic cameras without approximating the FOV.
+// No GPU query or per-frame allocation is needed for streaming geometry LOD.
+real_t Camera3D::get_pixels_per_meter_at_position(const Vector3 &p_world_pos) const {
+	ERR_FAIL_COND_V_MSG(!is_inside_tree(), 0.0, "Camera is not inside the scene tree.");
+	if (!p_world_pos.is_finite()) {
+		return 0.0;
+	}
+	const Size2 viewport_size = get_viewport()->get_visible_rect().size;
+	if (viewport_size.y <= 0.0) {
+		return 0.0;
+	}
+	const Projection projection = get_camera_projection();
+	const real_t focal_y_pixels = Math::abs(projection.columns[1][1]) * viewport_size.y * 0.5;
+	if (!Math::is_finite(focal_y_pixels) || focal_y_pixels <= 0.0) {
+		return 0.0;
+	}
+	if (mode == PROJECTION_ORTHOGONAL) {
+		return focal_y_pixels;
+	}
+	const Vector3 camera_space = get_camera_transform().affine_inverse().xform(p_world_pos);
+	const real_t depth = -camera_space.z;
+	if (!Math::is_finite(depth) || depth <= CMP_EPSILON) {
+		return 0.0;
+	}
+	return focal_y_pixels / depth;
+}
+
 void Camera3D::set_perspective(real_t p_fovy_degrees, real_t p_z_near, real_t p_z_far) {
 	if (!force_change && fov == p_fovy_degrees && p_z_near == _near && p_z_far == _far && mode == PROJECTION_PERSPECTIVE) {
 		return;
@@ -791,6 +820,7 @@ void Camera3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_current"), &Camera3D::is_current);
 	ClassDB::bind_method(D_METHOD("get_camera_transform"), &Camera3D::get_camera_transform);
 	ClassDB::bind_method(D_METHOD("get_camera_projection"), &Camera3D::get_camera_projection);
+	ClassDB::bind_method(D_METHOD("get_pixels_per_meter_at_position", "world_point"), &Camera3D::get_pixels_per_meter_at_position);
 	ClassDB::bind_method(D_METHOD("get_fov"), &Camera3D::get_fov);
 	ClassDB::bind_method(D_METHOD("get_frustum_offset"), &Camera3D::get_frustum_offset);
 	ClassDB::bind_method(D_METHOD("get_size"), &Camera3D::get_size);
