@@ -32,7 +32,15 @@ const ZOMBIE_LOOK := {
 	"runner": {"tint": Color(0.9, 0.9, 0.45), "scale": 1.85, "walk": 1.8, "model": "Elf_Female"},
 	"brute": {"tint": Color(0.55, 0.5, 0.7), "scale": 3.0, "walk": 0.7, "model": "Orc_Female"},
 	"spitter": {"tint": Color(0.42, 0.87, 0.28), "scale": 2.1, "walk": 0.65, "model": "Orc_Male"},
+	"stalker": {"tint": Color(0.32, 0.3, 0.36), "scale": 1.95, "walk": 1.6, "model": "Elf_Male"},
+	"sentinel": {"tint": Color(0.5, 0.58, 0.72), "scale": 2.6, "walk": 0.9, "model": "Orc_Female"},
+	"howler": {"tint": Color(0.82, 0.7, 0.9), "scale": 2.0, "walk": 1.0, "model": "Elf_Female"},
+	"crawler": {"tint": Color(0.72, 0.62, 0.42), "scale": 1.35, "walk": 1.6, "model": "Orc_Male"},
 }
+
+
+static func zombie_look(zombie_type: String) -> Dictionary:
+	return ZOMBIE_LOOK.get(zombie_type, ZOMBIE_LOOK["walker"])
 const ALERT_TINT := Color(1.0, 0.45, 0.4)
 
 var _nodes: Dictionary = {} # "kind:id" -> Node3D
@@ -209,7 +217,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 	if kind == "zombie":
 		# A zombie that has locked on to someone flushes red.
 		var model: Node3D = _nodes[key].get_node("Model")
-		var base: Color = ZOMBIE_LOOK[entity["type"]]["tint"]
+		var base: Color = zombie_look(str(entity["type"]))["tint"]
 		if bool(entity.get("raid_enraged", false)):
 			base = Color(1.0, 0.12, 0.12)
 		elif bool(entity.get("raid_boss", false)):
@@ -500,7 +508,7 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 	model.name = "Model"
 	var height := 2.0
 	if kind == "zombie":
-		var look: Dictionary = ZOMBIE_LOOK[entity["type"]]
+		var look: Dictionary = zombie_look(str(entity["type"]))
 		var zombie_model: String = look["model"]
 		if entity["type"] == "walker" and int(entity["id"]) % 2 == 1:
 			zombie_model = "Orc_Female"

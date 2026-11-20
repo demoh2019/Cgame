@@ -2205,6 +2205,11 @@ func _on_event(event: Dictionary) -> void:
 			if involved:
 				banner("SIEGE %s" % str(event.get("result", "over")).to_upper().replace("_", " "), Color(0.95, 0.78, 0.35))
 		# Combat feedback that used to show only as numbers.
+		"howl":
+			var heard_from := Vector2(float(event.get("x", 0.0)), float(event.get("z", 0.0)))
+			var me := Vector2(client.predicted.x, client.predicted.z)
+			if me.distance_to(heard_from) <= float(event.get("radius", 40.0)) + 10.0:
+				banner("A HOWL ECHOES — %d INFECTED STIR" % int(event.get("woken", 0)), Color(0.85, 0.65, 1.0))
 		"eel_bite":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Something bit you in the dark water! (-%d)" % int(event.get("damage", 0.0)))

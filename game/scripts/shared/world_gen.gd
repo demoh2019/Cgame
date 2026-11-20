@@ -288,6 +288,56 @@ const SUNKEN_MIN_DEPTH := 2.2
 const SUNKEN_ID_BASE := 950
 
 
+## Extra infected that make the wilds teem: ruin guardians and screamers, crawler swarms,
+## lone stalkers that hunt you down, and stragglers even in the green zone. Own random
+## stream, so every other piece of the chunk is unchanged.
+const HOSTILE_ID_BASE := 900
+const HOSTILE_ID_MAX := 45
+
+
+func _add_hostiles(cell: Vector2i, origin: Vector2, zone: int, ruin: bool, spawns: Array) -> void:
+	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if center.length() < Defs.HUB_SAFE_RADIUS + 60.0 or Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
+		return
+	var hrng := RandomNumberGenerator.new()
+	hrng.seed = mix(cell.x, cell.y, world_seed, 83)
+	var picks: Array = [] # [type, position]
+	if ruin:
+		# Every ruin has a guardian; darker zones add a screamer and a bigger pack.
+		picks.append(["sentinel" if zone >= 1 else "brute", center + _jitter(hrng, 8.0)])
+		if zone >= 1 and hrng.randf() < 0.55:
+			picks.append(["howler", center + _jitter(hrng, 14.0)])
+		for i in hrng.randi_range(2, 4) + zone:
+			picks.append(["crawler" if hrng.randf() < 0.5 else "walker", center + _jitter(hrng, 22.0)])
+	elif zone == 0:
+		for i in hrng.randi_range(0, 2):
+			picks.append(["walker", origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
+	else:
+		if hrng.randf() < 0.3 + 0.1 * zone:
+			var nest := origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE
+			for i in hrng.randi_range(4, 6) + zone:
+				picks.append(["crawler", nest + _jitter(hrng, 6.0)])
+		if hrng.randf() < 0.15 + 0.1 * zone:
+			picks.append(["stalker", origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
+		if hrng.randf() < 0.1 + 0.05 * zone:
+			picks.append(["howler", origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
+		for i in hrng.randi_range(1, 2 + zone):
+			picks.append([_pick_zombie(zone, hrng), origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
+	var k := 0
+	for pick in picks:
+		if k >= HOSTILE_ID_MAX:
+			break
+		var p: Vector2 = pick[1]
+		if is_water(p.x, p.y) or is_safe(p.x, p.y):
+			continue
+		spawns.append({"id": entity_id(cell, HOSTILE_ID_BASE + k), "x": p.x, "z": p.y, "type": str(pick[0]), "ruin": ruin})
+		k += 1
+
+
+static func _jitter(rng: RandomNumberGenerator, radius: float) -> Vector2:
+	return Vector2(rng.randf_range(-radius, radius), rng.randf_range(-radius, radius))
+
+
 func _add_sunken_caches(cell: Vector2i, origin: Vector2, zone: int, crates: Array) -> void:
 	var sunken_rng := RandomNumberGenerator.new()
 	sunken_rng.seed = mix(cell.x, cell.y, world_seed, 71)
@@ -461,6 +511,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 			if cell_rect.has_point(Vector2(float(item["x"]), float(item["z"]))):
 				npcs.append(item)
 	_add_sunken_caches(cell, origin, zone, crates)
+	_add_hostiles(cell, origin, zone, ruin, spawns)
 	return {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
 
 

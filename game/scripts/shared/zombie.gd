@@ -50,6 +50,15 @@ var stagger_resolve_stacks: int = 0 # Number of effective successive server-side
 var stagger_resolve_seconds: float = 0.0 # Window before diminishing returns reset.
 var sunder_until: float = 0.0 # Server-time expiry of PvE armor weakness.
 var contributors: Dictionary = {} # Server: peer -> time + equipped weapon for PvE assist XP.
+# Temperament (Defs.ZOMBIES "behavior"): roamer, hunter or territorial.
+var behavior: String = "roamer"
+var unseen_seconds: float = 0.0 # Hunter: how long the target has been out of sight.
+var _sight_check: float = 0.0
+var _howl_pending: bool = false
+var _howled_at: int = -1 # Howlers scream once per target.
+const HUNTER_MEMORY_SECONDS := 6.0 # A hunter keeps coming this long after losing sight of you.
+const HUNTER_SEARCH_SECONDS := 10.0 # ...then searches where it last saw you.
+const TERRITORY_GRACE := 3.0
 var data: Dictionary
 var threat: Dictionary = {} # Bounded per-zombie server combat threat; not sent to clients.
 
@@ -64,6 +73,7 @@ func _init(p_id: int, p_type: String, p_position: Vector3, p_spawn_id: int = 0) 
 	wander_target = home
 	last_known_target = home
 	spawn_id = p_spawn_id
+	behavior = str(data.get("behavior", "roamer"))
 
 
 ## One-way transformation on server-created enemies. Never shared mutable stats.
@@ -73,6 +83,7 @@ func become_elite() -> void:
 	data = EliteInfected.empowered_stats(data)
 	health = float(data["health"])
 	elite = true
+	behavior = "hunter" # Champions never let go of their prey.
 
 
 func is_alive() -> bool:
@@ -154,8 +165,30 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 			if distance > float(data["lose"]):
 				target_id = -1
 				state = State.INVESTIGATE
-				investigate_time = INVESTIGATE_SECONDS
+				investigate_time = HUNTER_SEARCH_SECONDS if behavior == "hunter" else INVESTIGATE_SECONDS
 				return {}
+			if behavior == "territorial" and not _in_territory(target) and forced_target_seconds <= 0.0:
+				# Guardians drive you off their ground, then walk back to it.
+				target_id = -1
+				state = State.WANDER
+				wander_target = home
+				stuck_time = 0.0
+				return {}
+			if behavior == "hunter":
+				_sight_check -= delta
+				if _sight_check <= 0.0:
+					_sight_check = 0.3
+					if InfectedSight.clear_path(world, position, target_pos):
+						unseen_seconds = 0.0
+					else:
+						unseen_seconds += 0.3
+				if unseen_seconds > HUNTER_MEMORY_SECONDS:
+					# Lost you: search the last place you were seen.
+					target_id = -1
+					unseen_seconds = 0.0
+					state = State.INVESTIGATE
+					investigate_time = HUNTER_SEARCH_SECONDS
+					return {}
 			last_known_target = target
 			if type == "spitter" and AcidSpitter.can_launch(distance):
 				state = State.ATTACK
@@ -189,6 +222,24 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 	return result
 
 
+func _in_territory(point: Vector2) -> bool:
+	return point.distance_to(home) <= float(data.get("territory", 18.0)) + TERRITORY_GRACE
+
+
+## True once when a howler has just spotted someone; the server wakes the pack around it.
+func consume_howl() -> bool:
+	var pending := _howl_pending
+	_howl_pending = false
+	return pending
+
+
+func _note_target_acquired() -> void:
+	unseen_seconds = 0.0
+	if data.has("howl_radius") and target_id != -1 and target_id != _howled_at:
+		_howled_at = target_id
+		_howl_pending = true
+
+
 ## Only the authoritative server calls this after checking the guardian's party,
 ## weapon, distance, combat energy and cooldown.
 func force_taunt(peer_id: int, seconds: float) -> bool:
@@ -220,11 +271,16 @@ func _select_target(world, players: Dictionary, here: Vector2) -> void:
 	# Damage-earning attackers within the leash take priority over passive
 	# proximity targeting. Invalid, safe, disconnected or distant IDs expire.
 	var priority: int = Threat.pick(threat, players, here, float(data["lose"]), target_id)
+	if priority != -1 and behavior == "territorial":
+		var attacker: Vector3 = players[priority].get("position", Vector3.INF)
+		if not attacker.is_finite() or not _in_territory(Vector2(attacker.x, attacker.z)):
+			priority = -1 # Snipers outside the guarded ground are ignored.
 	if priority != -1:
 		target_id = priority
 		if state == State.IDLE or state == State.WANDER or state == State.INVESTIGATE:
 			state = State.CHASE
 			investigate_time = 0.0
+			_note_target_acquired()
 		return
 	var best := -1
 	var best_distance := INF
@@ -233,6 +289,8 @@ func _select_target(world, players: Dictionary, here: Vector2) -> void:
 		if not info["alive"] or info["safe"]:
 			continue
 		var p: Vector3 = info["position"]
+		if behavior == "territorial" and not _in_territory(Vector2(p.x, p.z)):
+			continue
 		var distance := here.distance_to(Vector2(p.x, p.z))
 		# Night makes infected more vigilant; cap new detection by pursuit leash.
 		# Hearing remains independent of night and is always authoritative.
@@ -287,6 +345,7 @@ func _select_target(world, players: Dictionary, here: Vector2) -> void:
 		if state == State.IDLE or state == State.WANDER or state == State.INVESTIGATE:
 			state = State.CHASE
 			investigate_time = 0.0
+			_note_target_acquired()
 
 
 ## Nearby infected share an already acquired target. Pack alerts never bypass
@@ -302,6 +361,8 @@ func receive_pack_alert(peer_id: int, players: Dictionary) -> bool:
 	var survivor: Vector3 = info["position"]
 	var target: Vector2 = Vector2(survivor.x, survivor.z)
 	if Vector2(position.x, position.z).distance_to(target) > float(data["lose"]):
+		return false
+	if behavior == "territorial" and not _in_territory(target):
 		return false
 	target_id = peer_id
 	last_known_target = target

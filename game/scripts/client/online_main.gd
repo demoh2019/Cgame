@@ -943,6 +943,9 @@ func _spawn_effects(event: Dictionary) -> void:
 			for step in 6:
 				effects.burst(bolt_from.lerp(bolt_end, (step + 1) / 6.0), Color(0.55, 0.45, 1.0), 4, 0.6, 0.35, 0.12, 0.0, 0.0)
 			effects.ring(bolt_end - Vector3(0, 1.0, 0), Color(0.6, 0.5, 1.0, 0.9), 1.4 if bool(event.get("hit", false)) else 0.7, 0.4)
+		"howl":
+			effects.ring(at - Vector3(0, 1.0, 0), Color(0.85, 0.7, 1.0, 0.7), minf(float(event.get("radius", 40.0)), 14.0), 1.1)
+			effects.ring(at - Vector3(0, 0.9, 0), Color(0.85, 0.7, 1.0, 0.5), 6.0, 0.7)
 		"eel_bite":
 			effects.burst(at - Vector3(0, 0.6, 0), Color(0.6, 0.1, 0.1), 14, 1.6, 0.6, 0.1, -0.5)
 			if int(event.get("peer", -1)) == client.peer_id:

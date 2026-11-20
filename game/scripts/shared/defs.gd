@@ -27,18 +27,20 @@ const INFECTION_MAX := 100.0
 const INFECTION_GROWTH_PER_SECOND := 0.065
 const INFECTION_DAMAGE_START := 30.0
 const INFECTION_DAMAGE_PER_SECOND := 1.4
-const ZOMBIE_INFECTION_PER_HIT := {"walker": 8.0, "runner": 12.0, "brute": 20.0, "spitter": 10.0}
+const ZOMBIE_INFECTION_PER_HIT := {"walker": 8.0, "runner": 12.0, "brute": 20.0, "spitter": 10.0,
+	"stalker": 12.0, "sentinel": 14.0, "howler": 6.0, "crawler": 5.0}
 # Persistent wounds: real attacks cause bleeding; untreated bleeding slowly clots but costs HP.
 const BLEEDING_MAX := 100.0
 const BLEEDING_DAMAGE_PER_SECOND := 1.2
 const BLEEDING_DECAY_PER_SECOND := 0.2
-const ZOMBIE_BLEEDING_PER_HIT := {"walker": 9.0, "runner": 13.0, "brute": 22.0, "spitter": 3.0}
+const ZOMBIE_BLEEDING_PER_HIT := {"walker": 9.0, "runner": 13.0, "brute": 22.0, "spitter": 3.0,
+	"stalker": 15.0, "sentinel": 16.0, "howler": 4.0, "crawler": 7.0}
 const PVP_MELEE_BLEEDING_PER_HIT := 12.0
 # Brute trauma is a persistent injury instead of extra raw damage.
 const FRACTURE_MAX := 100.0
 const FRACTURE_DECAY_PER_SECOND := 0.04
 const FRACTURE_SPEED_FACTOR := 0.65
-const ZOMBIE_FRACTURE_PER_HIT := {"brute": 35.0}
+const ZOMBIE_FRACTURE_PER_HIT := {"brute": 35.0, "sentinel": 18.0}
 const COMBAT_ENERGY_MAX := 100.0
 const COMBAT_ENERGY_REGEN := 9.0
 # Sprint exhaustion is a server-owned survival mechanic.
@@ -74,9 +76,25 @@ const THERMAL_WRAP_REDUCTION := 0.70
 
 # --- Zombies ---------------------------------------------------------------------------------------
 const ZOMBIES := {
+	# behavior: "roamer" (default) drifts and chases within its leash; "hunter" keeps chasing while it can see
+	# you and searches your last position before giving up; "territorial" defends `territory` metres around
+	# its home and never follows you out of it.
 	"walker": {"health": 45.0, "speed": 1.7, "damage": 9.0, "attack_range": 1.6, "attack_cooldown": 1.3, "notice": 16.0, "lose": 34.0, "xp": 5},
-	"runner": {"health": 28.0, "speed": 4.4, "damage": 7.0, "attack_range": 1.6, "attack_cooldown": 0.9, "notice": 24.0, "lose": 40.0, "xp": 8},
-	"brute": {"health": 170.0, "speed": 2.2, "damage": 26.0, "attack_range": 2.0, "attack_cooldown": 1.8, "notice": 14.0, "lose": 30.0, "xp": 25},
+	"runner": {"health": 28.0, "speed": 4.4, "damage": 7.0, "attack_range": 1.6, "attack_cooldown": 0.9, "notice": 24.0, "lose": 40.0, "xp": 8,
+		"behavior": "hunter"},
+	"brute": {"health": 170.0, "speed": 2.2, "damage": 26.0, "attack_range": 2.0, "attack_cooldown": 1.8, "notice": 14.0, "lose": 30.0, "xp": 25,
+		"behavior": "territorial", "territory": 16.0},
+	# Relentless tracker: follows a survivor it can see far beyond other infected.
+	"stalker": {"health": 62.0, "speed": 3.9, "damage": 13.0, "attack_range": 1.6, "attack_cooldown": 1.0, "notice": 28.0, "lose": 90.0, "xp": 16,
+		"behavior": "hunter"},
+	# Armoured guardian of ruins and camps: punishing inside its ground, harmless if you leave it.
+	"sentinel": {"health": 150.0, "speed": 3.0, "damage": 18.0, "attack_range": 1.8, "attack_cooldown": 1.4, "notice": 24.0, "lose": 32.0, "xp": 22,
+		"behavior": "territorial", "territory": 20.0},
+	# Weak screamer: its howl wakes every infected nearby.
+	"howler": {"health": 40.0, "speed": 2.4, "damage": 6.0, "attack_range": 1.6, "attack_cooldown": 1.2, "notice": 26.0, "lose": 36.0, "xp": 12,
+		"behavior": "territorial", "territory": 24.0, "howl_radius": 42.0},
+	# Small, fast swarm infected that come in packs.
+	"crawler": {"health": 18.0, "speed": 3.3, "damage": 5.0, "attack_range": 1.4, "attack_cooldown": 0.75, "notice": 13.0, "lose": 28.0, "xp": 3},
 	"spitter": {"health": 52.0, "speed": 2.0, "damage": 14.0, "attack_range": 1.6, "attack_cooldown": 2.0, "notice": 21.0, "lose": 36.0, "xp": 12},
 }
 

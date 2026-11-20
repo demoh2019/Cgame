@@ -7111,6 +7111,8 @@ func _tick_zombies(delta: float) -> void:
 						"zombie": zombie.id, "x": trap["x"], "z": trap["z"]})
 					break
 		var result: Dictionary = zombie.think(world, info, delta, rng)
+		if zombie.consume_howl():
+			_howl(zombie, info)
 		# Zombies chip away at obstacles only while actually stuck pursuing
 		# a survivor. No instantaneous destruction or client damage commands.
 		if zombie.stuck_time >= 0.12 and zombie.target_id != -1 and zombies.has(zombie.id):
@@ -7271,6 +7273,21 @@ func _alert_campfire_lights() -> void:
 		var fire: Dictionary = CampfireThreat.nearest_light(buckets, infected.position)
 		if not fire.is_empty():
 			infected.investigate_decoy(Vector2(float(fire["x"]), float(fire["z"])))
+
+
+## A howler's scream wakes every idle infected within its howl radius onto the same survivor.
+func _howl(howler, player_info: Dictionary) -> void:
+	var radius: float = float(howler.data.get("howl_radius", 40.0))
+	var woken := 0
+	for other in zombies.values():
+		if other.id == howler.id or not other.is_alive():
+			continue
+		var offset: Vector3 = other.position - howler.position
+		offset.y = 0.0
+		if offset.length_squared() <= radius * radius and other.receive_pack_alert(howler.target_id, player_info):
+			woken += 1
+	events.append({"type": "howl", "id": howler.id, "x": howler.position.x, "z": howler.position.z,
+		"radius": radius, "woken": woken})
 
 
 func _alert_infected_pack(player_info: Dictionary) -> void:
