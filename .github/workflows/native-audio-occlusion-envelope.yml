@@ -1,0 +1,75 @@
+name: Native 3D audio occlusion envelope
+
+on:
+  pull_request:
+    paths:
+      - 'scene/3d/audio_stream_player_3d.cpp'
+      - 'scene/3d/audio_stream_player_3d.h'
+      - 'doc/classes/AudioStreamPlayer3D.xml'
+      - 'tests/scene/test_audio_occlusion_smoothing.cpp'
+      - 'game/scripts/client/audio.gd'
+      - 'game/scripts/client/audio_spatial.gd'
+      - 'game/tests/test_audio_occlusion_envelope.gd'
+      - 'game/tests/test_audio_geometry_occlusion.gd'
+      - 'game/tests/run_audio.gd'
+      - '.github/workflows/native-audio-occlusion-envelope.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/3d/audio_stream_player_3d.cpp'
+      - 'scene/3d/audio_stream_player_3d.h'
+      - 'tests/scene/test_audio_occlusion_smoothing.cpp'
+      - 'game/scripts/client/audio.gd'
+      - 'game/scripts/client/audio_spatial.gd'
+      - '.github/workflows/native-audio-occlusion-envelope.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-audio-envelope:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-audio-obstruction-envelope
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-audio-obstruction-envelope
+        continue-on-error: true
+      - name: Native Cgame frame-rate-independent audio tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*Obstruction attack and release are time consistent*"
+      - name: Import and run Albion After audio on native Cgame
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee audio-envelope-import.log
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_audio.gd 2>&1 | tee audio-envelope-tests.log
+          grep -E '^AUDIO TOTAL: [0-9]+ checks, 0 failures$' audio-envelope-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' audio-envelope-tests.log; then exit 1; fi
+      - name: Archive native audio regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-occlusion-envelope-logs
+          if-no-files-found: ignore
+          path: |
+            audio-envelope-import.log
+            audio-envelope-tests.log
