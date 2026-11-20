@@ -99,6 +99,59 @@ void chunk_height_range(const HeightField &p_field, int p_x0, int p_z0, int p_qu
 	}
 }
 
+real_t geometric_lod_error(const HeightField &p_field, int p_x0, int p_z0,
+		int p_quads, int p_stride) {
+	if (!p_field.is_valid() || p_quads < 1 || p_stride < 1 ||
+			(p_quads % p_stride) != 0 || p_x0 < 0 || p_z0 < 0 ||
+			p_x0 >= p_field.width - 1 || p_z0 >= p_field.depth - 1) {
+		return 0.0;
+	}
+	if (p_stride == 1) {
+		return 0.0;
+	}
+	real_t max_error = 0.0;
+	const int cells = p_quads / p_stride;
+	for (int z = 0; z <= p_quads; z++) {
+		for (int x = 0; x <= p_quads; x++) {
+			const int ci = MIN(x / p_stride, cells - 1);
+			const int cj = MIN(z / p_stride, cells - 1);
+			const int sx = p_x0 + ci * p_stride;
+			const int sz = p_z0 + cj * p_stride;
+			const real_t fx = real_t(x - ci * p_stride) / real_t(p_stride);
+			const real_t fz = real_t(z - cj * p_stride) / real_t(p_stride);
+			const real_t h00 = p_field.get(sx, sz);
+			const real_t h10 = p_field.get(sx + p_stride, sz);
+			const real_t h01 = p_field.get(sx, sz + p_stride);
+			const real_t h11 = p_field.get(sx + p_stride, sz + p_stride);
+			// Reproduce the mesh's actual triangle diagonal, never bilinear.
+			const real_t coarse = fx + fz <= 1.0
+					? h00 + (h10 - h00) * fx + (h01 - h00) * fz
+					: h11 + (h01 - h11) * (1.0 - fx) + (h10 - h11) * (1.0 - fz);
+			max_error = MAX(max_error,
+					Math::abs(p_field.get(p_x0 + x, p_z0 + z) - coarse));
+		}
+	}
+	return max_error;
+}
+
+int constrain_lod_by_error(int p_desired, const real_t *p_errors,
+		int p_count, real_t p_pixels_per_meter, real_t p_max_pixels) {
+	const int desired = CLAMP(p_desired, 0, MAX(0, p_count - 1));
+	if (p_errors == nullptr || p_max_pixels <= 0.0 ||
+			!Math::is_finite(p_max_pixels) || p_pixels_per_meter <= 0.0 ||
+			!Math::is_finite(p_pixels_per_meter)) {
+		return desired;
+	}
+	for (int level = 1; level <= desired; level++) {
+		const real_t error = p_errors[level];
+		if (!Math::is_finite(error) || error < 0.0 ||
+				error * p_pixels_per_meter > p_max_pixels) {
+			return level - 1;
+		}
+	}
+	return desired;
+}
+
 int lod_stride(int p_lod, int p_quads) {
 	int stride = 1 << CLAMP(p_lod, 0, 16);
 	while (stride > 1 && (p_quads % stride) != 0) {

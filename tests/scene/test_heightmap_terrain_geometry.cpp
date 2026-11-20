@@ -311,4 +311,29 @@ TEST_CASE("[HeightmapTerrain] External normals follow LOD vertices and skirts") 
 	CHECK(sample_normal_bilinear(field, 0.0, 8.0, params).is_equal_approx(supplied[8 * 17]));
 }
 
+TEST_CASE("[HeightmapTerrain] Geometric LOD error preserves ridges but not planar ground") {
+	const Vector<real_t> plane = make_field(17, 17, [](int x, int z) { return real_t(0.2 * x + 0.125 * z); });
+	const HeightField smooth = view(plane, 17, 17);
+	CHECK(geometric_lod_error(smooth, 0, 0, 16, 2) == doctest::Approx(0.0).epsilon(1e-5));
+	CHECK(geometric_lod_error(smooth, 0, 0, 16, 4) == doctest::Approx(0.0).epsilon(1e-5));
+	const Vector<real_t> peak = make_field(17, 17, [](int x, int z) { return real_t(x == 7 && z == 7 ? 8 : 0); });
+	const HeightField rugged = view(peak, 17, 17);
+	CHECK(geometric_lod_error(rugged, 0, 0, 16, 1) == doctest::Approx(0.0));
+	CHECK(geometric_lod_error(rugged, 0, 0, 16, 2) == doctest::Approx(8.0));
+	CHECK(geometric_lod_error(rugged, 0, 0, 16, 4) == doctest::Approx(8.0));
+	CHECK(geometric_lod_error(rugged, 0, 0, 16, 3) == doctest::Approx(0.0));
+}
+
+TEST_CASE("[HeightmapTerrain] Screen-pixel error prevents excessive simplification") {
+	const real_t flat[4] = { 0, 0, 0, 0 };
+	const real_t cliff[4] = { 0, 0.1, 1.2, 5.0 };
+	CHECK(constrain_lod_by_error(3, flat, 4, 100, 2) == 3);
+	CHECK(constrain_lod_by_error(3, cliff, 4, 100, 2) == 0);
+	CHECK(constrain_lod_by_error(3, cliff, 4, 10, 2) == 1);
+	CHECK(constrain_lod_by_error(3, cliff, 4, 1, 2) == 2);
+	CHECK(constrain_lod_by_error(3, cliff, 4, 0.2, 2) == 3);
+	CHECK(constrain_lod_by_error(3, cliff, 4, 100, 0) == 3);
+	CHECK(constrain_lod_by_error(3, nullptr, 4, 100, 2) == 3);
+}
+
 } // namespace TestHeightmapTerrainGeometry
