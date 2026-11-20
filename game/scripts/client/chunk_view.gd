@@ -973,7 +973,7 @@ func _update_grass_lods() -> void:
 	# Changing Ultra/Performance now changes real distant detail, not just
 	# the shader's sink-to-ground fade range.
 	var active_viewport: Viewport = view_camera.get_viewport()
-	var screen_size: Vector2i = active_viewport.get_visible_rect().size
+	var screen_size: Vector2 = active_viewport.get_visible_rect().size
 	var vertical_fov: float = view_camera.fov
 	if view_camera.keep_aspect == Camera3D.KEEP_WIDTH and screen_size.x > 0:
 		# KEEP_WIDTH expresses horizontal FOV. Convert it before computing
