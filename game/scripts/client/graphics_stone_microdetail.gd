@@ -9,6 +9,11 @@ extends RefCounted
 const IMAGE_SIZE := 128
 const HIGH_AMOUNT := 0.22
 const ULTRA_AMOUNT := 0.40
+# Pixel-depth illusion only on Ultra. Four near-normal and at most eight
+# grazing-angle native POM layers, so geometry and shadow maps stay intact.
+const PARALLAX_MIN_LAYERS := 4
+const PARALLAX_MAX_LAYERS := 8
+const PARALLAX_SCALE := 0.85
 const MASONRY_PARTS := ["wall", "pillar", "column", "rubble", "stairs", "stone"]
 
 static var _quality := 1
@@ -16,6 +21,7 @@ static var _method := "gl_compatibility"
 static var _tracked: Array[WeakRef] = []
 static var _high_texture: ImageTexture
 static var _ultra_texture: ImageTexture
+static var _height_texture: ImageTexture
 
 
 ## Exclude beds, torches, barrels, wood, leather and other imported art.
@@ -33,7 +39,8 @@ static func is_masonry_path(path: String) -> bool:
 
 static func supported(material: BaseMaterial3D, has_tangents: bool) -> bool:
 	return material != null and has_tangents and not material.detail_enabled and \
-		material.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED and \
+		not material.heightmap_enabled and material.heightmap_texture == null and \
+		not material.uv1_triplanar and material.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED and \
 		material.shading_mode == BaseMaterial3D.SHADING_MODE_PER_PIXEL
 
 
@@ -89,7 +96,58 @@ static func texture_for(tier: int) -> Texture2D:
 	return _ultra_texture
 
 
+## Use the very same periodic height signal as the existing stone normals.
+## The 128x128 RGB map has a bounded 0..1 height response and mipmaps.
+## Both PBR effects remain registered and aligned under the source UV.
+static func parallax_height_at(uv: Vector2) -> float:
+	return clampf(0.5 + 0.44 * height_at(uv), 0.0, 1.0)
+
+
+static func _generate_height() -> ImageTexture:
+	var image := Image.create(IMAGE_SIZE, IMAGE_SIZE, false, Image.FORMAT_RGB8)
+	for y in IMAGE_SIZE:
+		for x in IMAGE_SIZE:
+			var uv := Vector2((float(x) + 0.5) / IMAGE_SIZE,
+				(float(y) + 0.5) / IMAGE_SIZE)
+			var elevation: float = parallax_height_at(uv)
+			image.set_pixel(x, y, Color(elevation, elevation, elevation, 1.0))
+	image.generate_mipmaps()
+	return ImageTexture.create_from_image(image)
+
+
+static func _height_for_ultra() -> Texture2D:
+	if _height_texture == null:
+		_height_texture = _generate_height()
+	return _height_texture
+
+
+static func _set_parallax(material: BaseMaterial3D, tier: int) -> void:
+	if tier < 3:
+		# Remove the height sampler on Auto downgrade; the common low-end
+		# shader variant then skips all POM sampling and the raymarch loop.
+		if material.heightmap_enabled:
+			material.heightmap_enabled = false
+		if material.heightmap_texture != null:
+			material.heightmap_texture = null
+		return
+	var height: Texture2D = _height_for_ultra()
+	if material.heightmap_texture != height:
+		material.heightmap_texture = height
+	if not is_equal_approx(material.heightmap_scale, PARALLAX_SCALE):
+		material.heightmap_scale = PARALLAX_SCALE
+	if material.heightmap_min_layers != PARALLAX_MIN_LAYERS:
+		material.heightmap_min_layers = PARALLAX_MIN_LAYERS
+	if material.heightmap_max_layers != PARALLAX_MAX_LAYERS:
+		material.heightmap_max_layers = PARALLAX_MAX_LAYERS
+	if not material.heightmap_deep_parallax:
+		material.heightmap_deep_parallax = true
+	if not material.heightmap_enabled:
+		material.heightmap_enabled = true
+
+
 static func _set_detail(material: BaseMaterial3D, tier: int) -> void:
+	# All cached instances and new streamed stone follow the same tier.
+	_set_parallax(material, tier)
 	var enabled: bool = tier >= 2
 	if not enabled:
 		if material.detail_enabled:
@@ -140,5 +198,6 @@ static func clear_cache() -> void:
 	_tracked.clear()
 	_high_texture = null
 	_ultra_texture = null
+	_height_texture = null
 	_quality = 1
 	_method = "gl_compatibility"
