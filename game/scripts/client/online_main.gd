@@ -26,6 +26,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const GraphicsColorGrade = preload("res://scripts/client/graphics_color_grade.gd")
 const RenderBenchmark = preload("res://scripts/client/render_benchmark.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
@@ -76,6 +77,7 @@ var _wind_sample_left := 0.0
 var _visual_weather_wind := Vector2.ZERO
 var atmosphere
 var _grade_material: ShaderMaterial
+var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
 var _auto_quality := GraphicsAutoQuality.new()
 var _adaptive_resolution := GraphicsDynamicResolution.new()
 var _auto_graphics := true
@@ -1164,6 +1166,13 @@ func _update_time_of_day(delta: float) -> void:
 		storming = false
 	else:
 		atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta, _visual_weather_wind)
+	# Time-of-day and storm grading shares the existing full-screen post material.
+	# Uniform updates are bounded and do not allocate GPU textures or new passes.
+	_grade_elapsed += maxf(delta, 0.0)
+	if _grade_material != null and _grade_elapsed >= 0.20:
+		_grade_elapsed = fmod(_grade_elapsed, 0.20)
+		GraphicsColorGrade.apply(_grade_material, WorldCycle.daylight(clock),
+			WorldCycle.sun_height(clock), atmosphere.storm, underground)
 	_set_carried_light(underground)
 	if audio != null:
 		audio.update_music(WorldCycle.daylight(clock), delta)

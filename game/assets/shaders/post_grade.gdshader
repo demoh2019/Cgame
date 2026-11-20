@@ -9,6 +9,9 @@ uniform float focus_width = 0.24;
 uniform float blur_radius = 2.6; // In pixels at the very edge.
 uniform float vignette = 0.28;
 uniform float grade = 1.0;
+// Two color-grade controls replace the previous fixed split tones at no extra GPU taps.
+uniform vec3 shadow_tone = vec3(-0.012, 0.0, 0.025);
+uniform vec3 highlight_tone = vec3(0.03, 0.015, -0.02);
 uniform int blur_quality = 1; // 0: no blur, 1: 4 extra samples, 2: 8 extra samples.
 uniform float sharpen_strength = 0.0; // High/Ultra only: local contrast enhancement of the sharp player band.
 
@@ -57,7 +60,7 @@ void fragment() {
 	}
 	// Split toning: shadows lean blue-teal, highlights lean warm gold.
 	float luma = dot(color, vec3(0.299, 0.587, 0.114));
-	vec3 toned = color + mix(vec3(-0.012, 0.0, 0.025), vec3(0.03, 0.015, -0.02), smoothstep(0.2, 0.8, luma));
+	vec3 toned = color + mix(shadow_tone, highlight_tone, smoothstep(0.2, 0.8, luma));
 	// A soft S-curve for a little more depth.
 	toned = mix(toned, toned * toned * (3.0 - 2.0 * toned), 0.18);
 	color = mix(color, toned, grade);

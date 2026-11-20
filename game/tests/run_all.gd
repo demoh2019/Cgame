@@ -18,6 +18,7 @@ const SUITES := [
 	"res://tests/test_graphics_quality.gd",
 	"res://tests/test_graphics_resolution.gd",
 	"res://tests/test_postprocess_sharpen.gd",
+	"res://tests/test_cinematic_color_grade.gd",
 	"res://tests/test_graphics_dynamic_resolution.gd",
 	"res://tests/test_cloud_shadow_lut.gd",
 	"res://tests/test_scenery_lod.gd",
