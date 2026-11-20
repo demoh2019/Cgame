@@ -76,6 +76,9 @@ func _run() -> void:
         return
     for i in range(3):
         await physics_frame
+    if not stream.is_cell_physics_ready(OUTPOST_CELL):
+        _fail("outpost scene loaded without completing physics activation")
+        return
 
     world.call("_fast_travel")
     if not bool(world.get("_fast_travel_in_progress")):
@@ -90,8 +93,8 @@ func _run() -> void:
     if stream.is_cell_pinned(OUTPOST_CELL):
         _fail("completed travel did not release the destination pin")
         return
-    if not stream.is_cell_loaded(OUTPOST_CELL):
-        _fail("outpost terrain unloaded during the teleport")
+    if not stream.is_cell_physics_ready(OUTPOST_CELL):
+        _fail("outpost terrain lost physics readiness during the teleport")
         return
 
     # The same control can prepare and travel home again without keeping a
@@ -105,6 +108,9 @@ func _run() -> void:
         return
     for i in range(3):
         await physics_frame
+    if not stream.is_cell_physics_ready(HOME_CELL):
+        _fail("home scene did not complete physics activation")
+        return
     world.call("_fast_travel")
     if not bool(world.get("_fast_travel_in_progress")):
         _fail("return journey skipped physics synchronization")
@@ -122,5 +128,5 @@ func _run() -> void:
         _fail("fast travel leaked destination residency pins")
         return
 
-    print("Fast-travel smoke PASSED: F6 pin/release, F7 safe remote destination staging, terrain residency and return")
+    print("Fast-travel smoke PASSED: native physics readiness, target collider verification, pin lifetimes and round trip")
     quit(0)
