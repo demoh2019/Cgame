@@ -2,8 +2,12 @@ extends Node3D
 
 const ResolutionController = preload("res://addons/visual_quality/adaptive_resolution.gd")
 const FilmicSky = preload("res://addons/visual_quality/filmic_sky.gdshader")
+const QualityManager = preload("res://addons/visual_quality/quality_manager.gd")
 
-var controller
+var controller: AdaptiveResolution3D
+var manager: VisualQualityManager
+var mode_label: Label
+var adaptive_button: Button
 var world_environment: Environment
 var status_label: Label
 var sky_material: ShaderMaterial
@@ -16,7 +20,14 @@ func _ready() -> void:
 	controller = ResolutionController.new()
 	controller.name = "AdaptiveResolution3D"
 	add_child(controller)
-	_apply_preset(1)
+	manager = QualityManager.new()
+	manager.name = "VisualQualityManager"
+	manager.adaptive_controller = controller
+	manager.target_environment = world_environment
+	manager.settings_changed.connect(_update_graphics_ui)
+	add_child(manager)
+	_build_graphics_ui()
+	_update_graphics_ui(manager.current_profile, manager.adaptive_enabled)
 
 
 func _process(delta: float) -> void:
@@ -36,31 +47,41 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_1:
-				_apply_preset(0)
+				manager.set_profile(0)
 			KEY_2:
-				_apply_preset(1)
+				manager.set_profile(1)
 			KEY_3:
-				_apply_preset(2)
+				manager.set_profile(2)
 
 
-func _apply_preset(level: int) -> void:
-	var advanced: bool = RenderingServer.get_current_rendering_method() == "forward_plus"
-	controller.target_fps = 60.0
-	match level:
-		0:
-			controller.minimum_scale = 0.60
-			controller.maximum_scale = 0.80
-		1:
-			controller.minimum_scale = 0.67
-			controller.maximum_scale = 1.0
-		2:
-			controller.minimum_scale = 0.80
-			controller.maximum_scale = 1.0
-	controller.reset_to_maximum()
-	world_environment.glow_enabled = level >= 1 and advanced
-	world_environment.ssao_enabled = level >= 1 and advanced
-	world_environment.ssil_enabled = level >= 2 and advanced
-	world_environment.ssr_enabled = level >= 2 and advanced
+func _build_graphics_ui() -> void:
+	var ui: CanvasLayer = get_node("VisualQualityUI") as CanvasLayer
+	var menu: HBoxContainer = HBoxContainer.new()
+	menu.position = Vector2(18, 86)
+	ui.add_child(menu)
+	for i in range(3):
+		var button: Button = Button.new()
+		button.text = ["Eco", "Balanced", "Cinematic"][i]
+		button.pressed.connect(manager.set_profile.bind(i))
+		menu.add_child(button)
+	adaptive_button = Button.new()
+	adaptive_button.pressed.connect(_toggle_adaptive)
+	menu.add_child(adaptive_button)
+	mode_label = Label.new()
+	mode_label.position = Vector2(18, 132)
+	ui.add_child(mode_label)
+
+
+func _toggle_adaptive() -> void:
+	manager.set_adaptive_enabled(not manager.adaptive_enabled)
+
+
+func _update_graphics_ui(profile: int, adaptive: bool) -> void:
+	if not is_instance_valid(mode_label) or not is_instance_valid(adaptive_button):
+		return
+	var names: PackedStringArray = PackedStringArray(["Eco", "Balanced", "Cinematic"])
+	mode_label.text = "Mode: %s | Adaptive: %s | settings persisted" % [names[profile], "ON" if adaptive else "OFF"]
+	adaptive_button.text = "Adaptive: %s" % ("ON" if adaptive else "OFF")
 
 
 func _build_world() -> void:
@@ -114,6 +135,7 @@ func _build_world() -> void:
 	camera.current = true
 
 	var ui: CanvasLayer = CanvasLayer.new()
+	ui.name = "VisualQualityUI"
 	add_child(ui)
 	status_label = Label.new()
 	status_label.add_theme_font_size_override("font_size", 18)
