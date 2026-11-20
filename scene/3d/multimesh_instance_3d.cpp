@@ -32,6 +32,7 @@
 
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "core/math/math_funcs.h"
 
 #ifndef NAVIGATION_3D_DISABLED
 #include "scene/resources/3d/navigation_mesh_source_geometry_data_3d.h"
@@ -57,6 +58,7 @@ void MultiMeshInstance3D::_physics_interpolated_changed() {
 void MultiMeshInstance3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_multimesh", "multimesh"), &MultiMeshInstance3D::set_multimesh);
 	ClassDB::bind_method(D_METHOD("get_multimesh"), &MultiMeshInstance3D::get_multimesh);
+	ClassDB::bind_method(D_METHOD("find_nearest_visible_instance", "world_position", "max_distance"), &MultiMeshInstance3D::find_nearest_visible_instance);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "multimesh", PROPERTY_HINT_RESOURCE_TYPE, MultiMesh::get_class_static(), PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_EDITOR_INSTANTIATE_OBJECT), "set_multimesh", "get_multimesh");
 }
 
@@ -78,6 +80,34 @@ void MultiMeshInstance3D::set_multimesh(const Ref<MultiMesh> &p_multimesh) {
 
 Ref<MultiMesh> MultiMeshInstance3D::get_multimesh() const {
 	return multimesh;
+}
+
+int MultiMeshInstance3D::find_nearest_visible_instance(const Vector3 &p_world_position, real_t p_max_distance) const {
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_max_distance) || p_max_distance < 0, -1, "Search radius must be finite and non-negative.");
+	if (!is_inside_tree() || multimesh.is_null() || multimesh->get_mesh().is_null() || multimesh->get_transform_format() != MultiMesh::TRANSFORM_3D) {
+		return -1;
+	}
+
+	int count = multimesh->get_visible_instance_count();
+	if (count == -1) {
+		count = multimesh->get_instance_count();
+	}
+	if (count <= 0) {
+		return -1;
+	}
+
+	const Transform3D world_transform = get_global_transform();
+	real_t best_distance_squared = p_max_distance * p_max_distance;
+	int nearest = -1;
+	for (int i = 0; i < count; i++) {
+		const Vector3 instance_world_position = world_transform * multimesh->get_instance_transform(i).origin;
+		const real_t distance_squared = instance_world_position.distance_squared_to(p_world_position);
+		if (distance_squared <= best_distance_squared && (nearest == -1 || distance_squared < best_distance_squared)) {
+			best_distance_squared = distance_squared;
+			nearest = i;
+		}
+	}
+	return nearest;
 }
 
 Array MultiMeshInstance3D::get_meshes() const {

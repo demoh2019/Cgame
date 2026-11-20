@@ -12,6 +12,18 @@
 		<link title="Optimization using MultiMeshes">$DOCS_URL/tutorials/performance/using_multimesh.html</link>
 		<link title="Animating thousands of fish with MultiMeshInstance">$DOCS_URL/tutorials/performance/vertex_animation/animating_thousands_of_fish.html</link>
 	</tutorials>
+	<methods>
+		<method name="find_nearest_visible_instance" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="world_position" type="Vector3" />
+			<param index="1" name="max_distance" type="float" />
+			<description>
+				Returns the index of the nearest 3D instance origin within [param max_distance] of [param world_position], or [code]-1[/code] if none was found. Coordinates are in global space. The distance includes the maximum radius, and ties select the lowest index.
+				The search checks only the first [member MultiMesh.visible_instance_count] instances, or all instances when the count is [code]-1[/code]. It requires a valid 3D [member multimesh] and a node inside the scene tree. The method does not perform camera frustum, physics collision, or occlusion tests.
+				[b]Note:[/b] This query is linear in the number of visible instances. Prefer many small [MultiMesh] chunks to one enormous [MultiMesh] when making repeated gameplay queries. Instance indices may change when game code reorders or swaps transforms; do not use them as persistent entity IDs.
+			</description>
+		</method>
+	</methods>
 	<members>
 		<member name="multimesh" type="MultiMesh" setter="set_multimesh" getter="get_multimesh">
 			The [MultiMesh] resource that will be used and shared among all instances of the [MultiMeshInstance3D].

@@ -54,6 +54,9 @@ public:
 	void set_multimesh(const Ref<MultiMesh> &p_multimesh);
 	Ref<MultiMesh> get_multimesh() const;
 
+	// O(N) query for interaction with visible 3D instance origins in world space.
+	int find_nearest_visible_instance(const Vector3 &p_world_position, real_t p_max_distance) const;
+
 	Array get_meshes() const;
 
 	virtual AABB get_aabb() const override;
