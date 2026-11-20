@@ -4,6 +4,7 @@ extends RefCounted
 ## Shares come from the original courier payout: never mint bonus silver.
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
+const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
 
 const START_RADIUS := 50.0
 const FOLLOW_RADIUS := 28.0
@@ -122,7 +123,7 @@ static func clear_peer(progress: Dictionary, peer_id: int) -> void:
 
 ## Stage all inventory changes before committing any. Escort money is
 ## subtracted from the original courier payout; total remains unchanged.
-static func settle(courier, escorts: Array, route: Dictionary) -> Dictionary:
+static func settle(courier, escorts: Array, route: Dictionary, defended: bool = false) -> Dictionary:
 	if escorts.size() > 4:
 		return {"ok": false, "reason": "too_many_escorts"}
 	var staged := Inventory.new(courier.inventory.slots.size())
@@ -131,6 +132,11 @@ static func settle(courier, escorts: Array, route: Dictionary) -> Dictionary:
 	if not bool(outcome.get("ok", false)):
 		return outcome
 	var payout: int = int(outcome["silver"])
+	# The NPC pays extra only on verified full-wave defense. Escort shares
+	# continue to come solely from the original fare, not the risk premium.
+	var bonus: int = CaravanAmbush.defense_bonus(payout) if defended else 0
+	if bonus > 0 and staged.add("silver", bonus) != 0:
+		return {"ok": false, "reason": "no_space"}
 	var each: int = floori(float(payout) * MAX_ESCORT_SHARE /
 		float(maxi(1, escorts.size()))) if not escorts.is_empty() else 0
 	var total: int = each * escorts.size()
@@ -152,6 +158,7 @@ static func settle(courier, escorts: Array, route: Dictionary) -> Dictionary:
 	for entry in waiting:
 		entry["player"].inventory.load_dict(entry["wallet"].to_dict())
 	outcome["gross_silver"] = payout
-	outcome["silver"] = payout - total
+	outcome["defense_bonus"] = bonus
+	outcome["silver"] = payout - total + bonus
 	outcome["escorts"] = paid
 	return outcome

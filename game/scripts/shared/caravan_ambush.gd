@@ -44,6 +44,25 @@ static func placement(world, origin: Vector3, survivors: Array[Vector3],
 		mini(capacity, 4), seed_angle)
 
 
+## Every summoned enemy ID must receive a real server kill callback. Despawned
+## or missing enemies do not count toward the courier's earned defense bonus.
+static func record_kill(wave: Dictionary, infected_id: int) -> bool:
+	var ids: Array = wave.get("ids", [])
+	var beaten: Array = wave.get("defeated", [])
+	if ids.size() < 2 or not ids.has(infected_id) or beaten.has(infected_id):
+		return false
+	beaten.append(infected_id)
+	wave["defeated"] = beaten
+	return beaten.size() == ids.size()
+
+
+## A modest NPC risk premium, earned only if the entire genuine wave is cleared.
+static func defense_bonus(fare: int) -> int:
+	if fare < 50 or fare > 140:
+		return 0
+	return clampi(roundi(float(fare) * 0.15), 0, 21)
+
+
 static func available(active_waves: Array, infected: Dictionary) -> int:
 	if active_waves.size() >= MAX_ACTIVE_WAVES:
 		return 0
