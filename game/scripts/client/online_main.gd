@@ -1056,10 +1056,14 @@ func _on_welcomed() -> void:
 	streamer.load_radius = 150.0
 	streamer.unload_radius = 220.0
 	streamer.update_interval = 0.15
-	# Prioritize content ahead of actual movement, while the engine retains
-	# the current focus radius, unload hysteresis and one-chunk frame budget.
+	# Prioritize content ahead of actual movement while keeping the same
+	# resident-world radius and unload hysteresis.
 	streamer.lookahead_seconds = 2.0
-	streamer.max_instantiations_per_frame = 1
+	# Time-sliced chunk creation: allow several cheap chunks on a fast frame,
+	# but stop after the first expensive one. Each chunk is indivisible.
+	# The engine ensures that both streaming update paths share one drain.
+	streamer.max_instantiations_per_frame = 3
+	streamer.max_chunk_work_usec = 2500
 	streamer.set_chunk_generator(_generate_chunk)
 	add_child(streamer)
 	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
