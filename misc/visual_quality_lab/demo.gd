@@ -6,6 +6,7 @@ const QualityManager = preload("res://addons/visual_quality/quality_manager.gd")
 const AtmosphereController = preload("res://addons/visual_quality/atmosphere_controller.gd")
 const WorldStreamer = preload("res://addons/visual_quality/world_streamer.gd")
 const WorldStateStore = preload("res://addons/visual_quality/world_state_store.gd")
+const AIInterest = preload("res://addons/visual_quality/ai_interest_manager.gd")
 const CharacterController = preload("res://addons/visual_quality/character_controller.gd")
 const ExplorationQuest = preload("res://addons/visual_quality/exploration_quest.gd")
 
@@ -16,6 +17,7 @@ var streamer: WorldStreamer3D
 var world_state: WorldStateStore3D
 var world_state_label: Label
 var ai_simulation_enabled: bool = true
+var ai_interest: WorldAIInterestManager3D
 var player_character: VisualLabCharacter3D
 var movement_label: Label
 var quest: ExplorationQuest3D
@@ -66,6 +68,12 @@ func _ready() -> void:
 	add_child(streamer)
 	streamer.streaming_enabled = true
 	streamer.set_quality_profile(manager.current_profile)
+	ai_interest = AIInterest.new()
+	ai_interest.name = "WorldAIInterestManager3D"
+	ai_interest.streamer = streamer
+	ai_interest.player = player_character
+	add_child(ai_interest)
+	ai_interest.set_quality_profile(manager.current_profile)
 	_build_graphics_ui()
 	_update_graphics_ui(manager.current_profile, manager.adaptive_enabled)
 	atmosphere = AtmosphereController.new()
@@ -98,6 +106,8 @@ func _update_foliage_quality(profile: int, _adaptive: bool) -> void:
 			if cell.has_method("set_quality"):
 				cell.call("set_quality", profile)
 		streamer.set_quality_profile(profile)
+	if is_instance_valid(ai_interest):
+		ai_interest.set_quality_profile(profile)
 
 
 func _on_streamed_cell_loaded(_coord: Vector2i, cell: Node3D) -> void:
@@ -110,12 +120,13 @@ func _on_streamed_cell_loaded(_coord: Vector2i, cell: Node3D) -> void:
 func _process(delta: float) -> void:
 	if status_label != null:
 		var npc_counts: Vector2i = _count_npc_behaviors()
-		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Space jump | Shift sprint | RMB look | V fly\nWorld cells: %d/%d | Pending assets: %d | 7 Streaming: %s\nNPCs: %d | Alerted: %d | 9 AI: %s" % [
+		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Space jump | Shift sprint | RMB look | V fly\nWorld cells: %d/%d | Pending assets: %d | 7 Streaming: %s\nNPCs: %d | Alerted: %d | Sleeping: %d | AI budget: %d us | 9 AI: %s" % [
 			Engine.get_frames_per_second(), get_viewport().scaling_3d_scale,
 			RenderingServer.get_current_rendering_method(),
 			streamer.active_cell_count(), streamer.registered_cell_count(),
 			streamer.pending_asset_count(), "ON" if streamer.streaming_enabled else "OFF",
-			npc_counts.x, npc_counts.y, "ON" if ai_simulation_enabled else "OFF"
+			npc_counts.x, npc_counts.y, ai_interest.sleeping_npc_count(),
+			ai_interest.last_update_micros, "ON" if ai_simulation_enabled else "OFF"
 		]
 
 
@@ -333,9 +344,7 @@ func _update_world_state_ui() -> void:
 
 func _toggle_ai_simulation() -> void:
 	ai_simulation_enabled = not ai_simulation_enabled
-	for cell in streamer.get_active_cells():
-		if cell.has_method("set_ai_enabled"):
-			cell.call("set_ai_enabled", ai_simulation_enabled)
+	ai_interest.set_global_enabled(ai_simulation_enabled)
 
 
 func _count_npc_behaviors() -> Vector2i:
