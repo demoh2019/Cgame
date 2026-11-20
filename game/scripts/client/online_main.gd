@@ -1079,10 +1079,9 @@ func _process(delta: float) -> void:
 		if rd and _adaptive_resolution.sample_frame(delta, gpu_ms):
 			GraphicsQuality.apply_resolution(get_viewport(), _adaptive_resolution.scale, true)
 			_auto_quality.set_mode("auto")
-		var quality_limit: bool = not rd or (
-			(_adaptive_resolution.at_floor() and delta >= GraphicsAutoQuality.SLOW_FRAME) or
-			(_adaptive_resolution.at_ceiling() and delta <= GraphicsAutoQuality.FAST_FRAME))
-		if quality_limit and _auto_quality.sample_frame(delta):
+		var quality_limit: bool = GraphicsAutoQuality.at_resolution_limit(
+			rd, _adaptive_resolution.at_floor(), _adaptive_resolution.at_ceiling(), delta, gpu_ms)
+		if quality_limit and _auto_quality.sample_frame(delta, gpu_ms):
 			GraphicsQuality.set_level(_auto_quality.level, false)
 			_adaptive_resolution.configure(GraphicsQuality.level())
 			GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,

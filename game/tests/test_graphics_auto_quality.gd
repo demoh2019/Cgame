@@ -35,3 +35,58 @@ func run(t) -> void:
 		changed = quality.sample_frame(1.0 / 60.0) or changed
 	t.check(changed, "sustained good FPS eventually recovers detail")
 	t.check(quality.level >= 1, "recovered settings are at least balanced")
+
+	t.current = "GPU-bound workload, not CPU script stalls, drives graphics fidelity"
+	var gpu_bound := GraphicsAutoQuality.new()
+	t.check(not GraphicsAutoQuality.at_resolution_limit(true, false, false, 0.04, 34.0),
+		"intermediate resolution always recovers pixel budget before changing objects")
+	t.check(GraphicsAutoQuality.at_resolution_limit(true, true, false, 1.0 / 120.0, 34.0),
+		"slow GPU at minimum resolution can lower scenery quality")
+	t.check(not GraphicsAutoQuality.at_resolution_limit(true, true, false, 0.04, 7.0),
+		"slow CPU with fast GPU never forces a graphics downgrade")
+	t.check(GraphicsAutoQuality.at_resolution_limit(true, false, true, 0.04, 7.0),
+		"GPU spare capacity can restore high detail even when CPU-bound")
+	t.check(not GraphicsAutoQuality.at_resolution_limit(true, false, true, 1.0 / 120.0, 33.0),
+		"GPU-heavy frame does not increase quality due to fast script timing")
+	t.check(GraphicsAutoQuality.at_resolution_limit(false, false, false, 0.04),
+		"Compatibility continues the original FPS-driven fallback")
+	var changed_gpu := false
+	for i in 510:
+		# GPU 35 ms at a 120 Hz CPU rate: would look fast if using delta.
+		changed_gpu = gpu_bound.sample_frame(1.0 / 120.0, 35.0) or changed_gpu
+	t.check(changed_gpu and gpu_bound.level == 0,
+		"sustained GPU load reduces world detail despite fast CPU updates")
+	gpu_bound = GraphicsAutoQuality.new()
+	changed_gpu = false
+	for i in 240:
+		# 25 FPS CPU-bound simulation and 7 ms GPU; preserve Balanced.
+		changed_gpu = gpu_bound.sample_frame(1.0 / 25.0, 7.0) or changed_gpu
+	t.check(not changed_gpu and gpu_bound.level == 1,
+		"slow gameplay threads cannot steal visually affordable GPU detail")
+	gpu_bound = GraphicsAutoQuality.new()
+	changed_gpu = false
+	for i in 260:
+		changed_gpu = gpu_bound.sample_frame(1.0 / 25.0, 7.0) or changed_gpu
+	t.check(changed_gpu and gpu_bound.level == 2,
+		"sustained GPU headroom may upgrade even with CPU-bound simulation")
+	gpu_bound = GraphicsAutoQuality.new()
+	for dt in [NAN, INF, -1.0, 0.0, 0.3]:
+		t.check(not gpu_bound.sample_frame(dt, 38.0),
+			"invalid/paused frame times cannot drive quality changes")
+	var after_bad := gpu_bound.level
+	for i in 100:
+		gpu_bound.sample_frame(1.0 / 30.0, NAN)
+	t.check(gpu_bound.level <= after_bad,
+		"unavailable GPU timers safely revert to the original frame-delta policy")
+	t.check(GraphicsAutoQuality.at_resolution_limit(true, true, false, 1.0 / 30.0, INF),
+		"missing GPU duration still permits legacy resolution-limit downgrade")
+	t.check(not GraphicsAutoQuality.at_resolution_limit(true, false, true, 1.0 / 30.0, INF),
+		"invalid GPU readings do not allow a premature quality upgrade")
+	var source: String = FileAccess.get_file_as_string(
+		"res://scripts/client/online_main.gd")
+	t.check(source.contains("GraphicsAutoQuality.at_resolution_limit("),
+		"online client uses GPU-aware outer quality boundary")
+	t.check(source.contains("_auto_quality.sample_frame(delta, gpu_ms)"),
+		"GPU timing is forwarded to the actual quality controller")
+	t.check(source.contains("_adaptive_resolution.sample_frame(delta, gpu_ms)"),
+		"pixel budget uses the same GPU timer as world detail quality")
