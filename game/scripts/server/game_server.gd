@@ -70,6 +70,7 @@ const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const GatheringNoise = preload("res://scripts/shared/gathering_noise.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
+const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
 const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
@@ -182,6 +183,7 @@ class Player:
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var discovered_sites: Dictionary = {} # Personal authenticated landmark journal.
 	var threat_scan: Dictionary = {} # Session-only, paid private tracking of one infected.
+	var prospect_mark: Dictionary = {} # One paid, session-only resource waypoint.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
@@ -3075,6 +3077,26 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"prospecting_chart":
+			if item_id != ProspectingChart.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "prospecting": true}
+			if not player.position.is_finite():
+				return {"ok": false, "reason": "invalid_position", "prospecting": true}
+			if _is_safe(player.position):
+				return {"ok": false, "reason": "safe_zone", "prospecting": true}
+			if ProspectingChart.active(player.prospect_mark, time, depleted):
+				return {"ok": false, "reason": "already_marked", "prospecting": true}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "prospecting": true}
+			var vein: Dictionary = ProspectingChart.nearest(world, player.position, depleted)
+			if vein.is_empty():
+				return {"ok": false, "reason": "no_rich_vein", "prospecting": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "prospecting": true}
+			player.prospect_mark = {"id": int(vein["id"]), "kind": str(vein["kind"]),
+				"tier": int(vein["tier"]), "x": float(vein["x"]),
+				"z": float(vein["z"]), "until": time + ProspectingChart.MARK_SECONDS}
 		"threat_scanner":
 			if item_id != ThreatScan.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3365,6 +3387,15 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
 	player.dirty_character = true
+	if item_id == ProspectingChart.ITEM_ID:
+		var detected: Dictionary = ProspectingChart.public_mark(
+			player.prospect_mark, time, depleted)
+		return {"ok": true, "prospecting": true,
+			"kind": str(detected.get("kind", "rock")),
+			"tier": int(detected.get("tier", 2)),
+			"x": float(detected.get("x", 0.0)),
+			"z": float(detected.get("z", 0.0)),
+			"seconds": ProspectingChart.MARK_SECONDS}
 	if item_id == ThreatScan.ITEM_ID:
 		var found: Dictionary = ThreatScan.public_mark(
 			player.threat_scan, zombies, player.position, time)
@@ -4594,6 +4625,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.plated_armor = ""
 	victim.plated_hits = 0
 	victim.ruin_survey = {} # Dead scouts cannot retain private map beacons.
+	victim.prospect_mark = {} # Death clears paid exploration marks.
 	victim.dodge_immunity = 0.0
 	ParryRiposte.clear(victim)
 	victim.guardian_brace = 0.0
@@ -4797,6 +4829,9 @@ func _tick_players(delta: float) -> void:
 	for player in players.values():
 		if not RuinSurvey.active(player.ruin_survey, time, opened_crates):
 			player.ruin_survey = {}
+		if not ProspectingChart.active(player.prospect_mark, time, depleted):
+			player.prospect_mark = {}
+	player.prospect_mark = {}
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.mount_cooldown = maxf(0.0, player.mount_cooldown - maxf(0.0, delta))
 		player.smoke_cooldown = maxf(0.0, player.smoke_cooldown - maxf(0.0, delta))
@@ -6192,6 +6227,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"arena_tier": ArenaRating.tier(player.arena_rating),
 			"action": player.action.duplicate(),
 			"ruin_survey": RuinSurvey.public_mark(player.ruin_survey, time, opened_crates),
+			"prospect_mark": ProspectingChart.public_mark(
+				player.prospect_mark, time, depleted) if _alive(player) else {},
 			"threat_scan": ThreatScan.public_mark(
 				player.threat_scan, zombies, player.position, time) if _alive(player) else {},
 			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
