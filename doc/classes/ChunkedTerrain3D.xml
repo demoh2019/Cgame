@@ -21,6 +21,7 @@
 		terrain.height_scale = 400.0
 		add_child(terrain)
 		[/codeblock]
+		For a large world split into multiple [ChunkedTerrain3D] nodes, optionally call [method set_normal_data] after [method set_height_data]. Sampling one height interval beyond each node's border makes adjacent normals agree across streamed nodes and different LOD levels without increasing pixel shader work.
 		Collision uses [HeightMapShape3D]-style shapes and exists only for chunks within [member collision_distance] of the viewer, so the physics engine never sees the whole landscape. The viewer is the node in [member focus], or the current [Camera3D] when no focus is set. Use [method get_height_at] to place objects on the ground without a physics query.
 		[b]Note:[/b] Scaling the node uniformly works, but non-uniform scale and rotation only affect rendering and the height queries approximately. For a world far from the origin combine the terrain with [FloatingOrigin3D].
 	</description>
@@ -83,6 +84,12 @@
 				Returns the number of height samples along x and z.
 			</description>
 		</method>
+		<method name="get_normal_data" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns the optional row-major custom vertex normal grid, or an empty array when the terrain computes normals from height data.
+			</description>
+		</method>
 		<method name="get_normal_at" qualifiers="const">
 			<return type="Vector3" />
 			<param index="0" name="world_position" type="Vector3" />
@@ -109,6 +116,13 @@
 			<param index="1" name="dimensions" type="Vector2i" />
 			<description>
 				Sets the heights directly, as [code]dimensions.x * dimensions.y[/code] values in rows along x (index [code]z * dimensions.x + x[/code]), normally between [code]0[/code] and [code]1[/code]. This replaces [member heightmap] until [method clear_height_data] is called. Refused if the array size does not match or a dimension is smaller than 2.
+			</description>
+		</method>
+		<method name="set_normal_data">
+			<return type="void" />
+			<param index="0" name="normals" type="PackedVector3Array" />
+			<description>
+				Supplies normalized source-grid vertex normals, in the same row-major order and dimensions as [method set_height_data]. Normals are validated and normalized on upload, then reused by all terrain mesh LODs, skirts, and [method get_normal_at]. This is useful for eliminating lighting seams between independently streamed terrains: compute border slopes using height samples just beyond each terrain's edge. Empty input restores the built-in finite-difference normals. Updating height data or switching back to a heightmap clears the custom normals; submit them again after [method set_height_data]. This changes lighting only and does not affect collision or height queries.
 			</description>
 		</method>
 		<method name="update_region">

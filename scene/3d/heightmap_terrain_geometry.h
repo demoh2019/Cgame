@@ -58,6 +58,9 @@ struct Params {
 	Vector2 spacing = Vector2(1, 1);
 	real_t height_scale = 1.0;
 	real_t height_offset = 0.0;
+	// Optional source-grid normals, shared across LODs and terrain node borders.
+	// Kept by ChunkedTerrain3D; nullptr preserves the original height differences.
+	const Vector3 *normal_override = nullptr;
 	// World position of sample (0, 0). Lets the terrain be centered on its node.
 	Vector2 origin;
 	// Depth of the vertical skirt that hides cracks between chunks of different detail.

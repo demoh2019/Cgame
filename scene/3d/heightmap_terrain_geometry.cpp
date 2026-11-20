@@ -55,6 +55,10 @@ real_t sample_height(const HeightField &p_field, real_t p_x, real_t p_z) {
 }
 
 Vector3 sample_normal(const HeightField &p_field, int p_x, int p_z, const Params &p_params) {
+	if (p_params.normal_override != nullptr && p_field.is_valid()) {
+		// Both low and high LODs use the same source-grid tangent frame.
+		return p_params.normal_override[p_z * p_field.width + p_x];
+	}
 	const real_t left = p_field.get(p_x - 1, p_z);
 	const real_t right = p_field.get(p_x + 1, p_z);
 	const real_t down = p_field.get(p_x, p_z - 1);

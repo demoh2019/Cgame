@@ -263,4 +263,29 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Terrains whose size is not a multiple o
 	memdelete(terrain);
 }
 
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Custom normals support seam continuity and invalidate on height change") {
+	ChunkedTerrain3D *terrain = make_terrain(33, 64.0, 10.0);
+	PackedVector3Array normals;
+	normals.resize(33 * 33);
+	for (int z = 0; z < 33; z++) {
+		for (int x = 0; x < 33; x++) {
+			normals.set(z * 33 + x, Vector3(-0.4, 1.0, -0.15));
+		}
+	}
+	terrain->set_normal_data(normals);
+	CHECK(terrain->get_normal_data().size() == 33 * 33);
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	terrain->force_update();
+	CHECK(terrain->get_normal_at(Vector3(0, 0, 0)).is_equal_approx(Vector3(-0.4, 1, -0.15).normalized()));
+	CHECK(terrain->get_normal_at(Vector3(-32, 0, 0)).is_equal_approx(Vector3(-0.4, 1, -0.15).normalized()));
+	terrain->set_height_data(make_ramp(33, 33), Vector2i(33, 33));
+	CHECK(terrain->get_normal_data().is_empty());
+	terrain->force_update();
+	CHECK_FALSE(terrain->get_normal_at(Vector3(0, 0, 0)).is_equal_approx(Vector3(-0.4, 1, -0.15).normalized()));
+	terrain->set_normal_data(normals);
+	terrain->clear_height_data();
+	CHECK(terrain->get_normal_data().is_empty());
+	memdelete(terrain);
+}
+
 } // namespace TestChunkedTerrain3D

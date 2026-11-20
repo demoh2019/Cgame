@@ -14,6 +14,7 @@ const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
 const GroundContactAO = preload("res://scripts/client/ground_contact_ao.gd")
+const TerrainSeamNormals = preload("res://scripts/client/terrain_seam_normals.gd")
 const TerrainAnisotropy = preload("res://scripts/client/terrain_anisotropy.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
@@ -588,6 +589,11 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.update_interval = 0.5
 	_terrain.material = _ground_with_roads(origin)
 	_terrain.set_height_data(heights, Vector2i(SAMPLES, SAMPLES))
+	# The forked ChunkedTerrain3D accepts normals sampled one grid step past
+	# the current chunk. Their shared world-space derivative removes bright
+	# vertical lighting seams without an extra shader pass or texture.
+	_terrain.set_normal_data(TerrainSeamNormals.build(_raw_heights, origin,
+		SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "height_at")))
 	add_child(_terrain)
 	if _textured_material != null:
 		_terrain.add_to_group(TERRAIN_GROUP)
