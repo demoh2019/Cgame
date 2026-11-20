@@ -63,3 +63,17 @@ bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Environmen
 ```
 
 Do not merge without a real C++ build, tests and review.
+
+## Bounded native top-K for large infected packs
+
+`query_top_positions(count)` chooses the best 1–64 candidate positions in
+O(N*K) time and O(K) memory with a stable source-index tiebreaker, sharing
+all filtering and scoring with `query()`. No per-candidate Dictionary and
+no full sort; `max_results` remains respected. Albion After now reuses one
+query Resource per infected and replans a flank only every 0.30 seconds or
+when either target moves over 1m or infected over 1.8m. Same best-three
+flank distribution; direct chase remains for bosses, brutes and stock Godot.
+
+Tests: `tests/scene/test_environment_query_3d.cpp`, numerical Python
+contracts `tests/scene/test_environment_query_topk.py`, and live zombie AI
+checks. Engine binary and server benchmark still required for measured gains.

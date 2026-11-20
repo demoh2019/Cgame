@@ -190,6 +190,58 @@ TEST_CASE("[EnvironmentQuery3D] Maximum result count truncates ranked results") 
 	CHECK(q->query_positions() == PackedVector3Array({ Vector3(1, 0, 0), Vector3(2, 0, 0) }));
 }
 
+TEST_CASE("[EnvironmentQuery3D] Bounded top-K matches full sorted positions") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(9, 0, 0), Vector3(1, 0, 0), Vector3(6, 0, 0),
+		Vector3(2, 0, 0), Vector3(7, 0, 0)
+	});
+	const PackedVector3Array full = q->query_positions();
+	for (int k = 1; k <= full.size(); k++) {
+		PackedVector3Array top = q->query_top_positions(k);
+		REQUIRE(top.size() == k);
+		for (int i = 0; i < k; i++) {
+			CHECK(top[i] == full[i]);
+		}
+	}
+}
+
+TEST_CASE("[EnvironmentQuery3D] Bounded top-K preserves deterministic ties") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(1, 0, 0), Vector3(0, 0, 1), Vector3(-1, 0, 0)
+	});
+	CHECK(q->query_top_positions(2) ==
+			PackedVector3Array({ Vector3(1, 0, 0), Vector3(0, 0, 1) }));
+}
+
+TEST_CASE("[EnvironmentQuery3D] Top-K honors max results and safety") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(1, 0, 0), Vector3(4, 0, 0), Vector3(8, 0, 0)
+	});
+	q->set_max_results(1);
+	CHECK(q->query_top_positions(3) ==
+			PackedVector3Array({ Vector3(1, 0, 0) }));
+	q->set_max_results(0);
+	q->set_use_threat(true);
+	q->set_threat_position(Vector3());
+	q->set_min_threat_distance(3.0);
+	CHECK(q->query_top_positions(3) ==
+			PackedVector3Array({ Vector3(4, 0, 0), Vector3(8, 0, 0) }));
+}
+
+TEST_CASE("[EnvironmentQuery3D] Bounded top-K rejects unsafe requests and malformed points") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(Math::NaN, 0, 0), Vector3(5, 0, 0)
+	});
+	ERR_PRINT_OFF
+	CHECK(q->query_top_positions(0).is_empty());
+	CHECK(q->query_top_positions(65).is_empty());
+	ERR_PRINT_ON
+	CHECK(q->query_top_positions(3) ==
+			PackedVector3Array({ Vector3(5, 0, 0) }));
+	q->set_min_distance(8.0);
+	CHECK(q->query_top_positions(3).is_empty());
+}
+
 TEST_CASE("[EnvironmentQuery3D] Zero result cap means unlimited") {
 	Ref<EnvironmentQuery3D> q = make_query({ Vector3(1, 0, 0), Vector3(2, 0, 0) });
 	CHECK(q->get_max_results() == 0);

@@ -85,6 +85,7 @@ func is_alive() -> bool:
 func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator) -> Dictionary:
 	if state == State.DEAD:
 		return {}
+	_flank_replan_remaining = maxf(0.0, _flank_replan_remaining - maxf(delta, 0.0))
 	melee_blocked = false
 	attack_timer = maxf(attack_timer - delta, 0.0)
 	snared_seconds = maxf(0.0, snared_seconds - maxf(0.0, delta))
@@ -330,6 +331,12 @@ func investigate_decoy(site: Vector2) -> bool:
 const FLANK_FROM := 3.5 # Closer than this, an infected goes straight for its target.
 const FLANK_RANGE := 14.0
 const FLANK_RING := 2.4
+const FLANK_REPLAN_SECONDS := 0.30
+var _flank_query: Resource
+var _flank_goal_cached := Vector2.ZERO
+var _flank_here_cached := Vector2.INF
+var _flank_target_cached := Vector2.INF
+var _flank_replan_remaining := 0.0
 
 
 ## Where a chasing infected heads: a pack surrounds its prey instead of queueing behind one another. The engine's
@@ -341,17 +348,28 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 	if raid_boss or type == "brute" or distance < FLANK_FROM or distance > FLANK_RANGE \
 			or not ClassDB.class_exists("EnvironmentQuery3D"):
 		return target
-	var query: Resource = ClassDB.instantiate("EnvironmentQuery3D")
-	query.set("origin", Vector3(here.x, 0.0, here.y))
-	query.set("candidates", EnvironmentQuery3D.sample_ring(Vector3(target.x, 0.0, target.y), FLANK_RING, 8, float(posmod(id, 8)) * 0.4))
-	query.set("horizontal_only", true)
-	query.set("max_results", 3)
-	var ranked: PackedVector3Array = query.call("query_positions")
+	# Tactical decisions cost more than movement; cache only while valid.
+	if _flank_replan_remaining > 0.0 and \
+			here.distance_squared_to(_flank_here_cached) <= 3.24 and \
+			target.distance_squared_to(_flank_target_cached) <= 1.0:
+		return _flank_goal_cached
+	if _flank_query == null:
+		_flank_query = ClassDB.instantiate("EnvironmentQuery3D")
+		_flank_query.set("horizontal_only", true)
+		_flank_query.set("max_results", 3)
+	_flank_query.set("origin", Vector3(here.x, 0.0, here.y))
+	_flank_query.set("candidates", EnvironmentQuery3D.sample_ring(
+		Vector3(target.x, 0.0, target.y), FLANK_RING, 8, float(posmod(id, 8)) * 0.4))
+	# No full sort or per-candidate dictionaries: the native bound is 3.
+	var ranked: PackedVector3Array = _flank_query.call("query_top_positions", 3)
 	if ranked.is_empty():
 		return target
 	var spot: Vector3 = ranked[posmod(id, ranked.size())]
-	return Vector2(spot.x, spot.z)
-
+	_flank_goal_cached = Vector2(spot.x, spot.z)
+	_flank_here_cached = here
+	_flank_target_cached = target
+	_flank_replan_remaining = FLANK_REPLAN_SECONDS
+	return _flank_goal_cached
 
 func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: float) -> void:
 	if snared_seconds > 0.0:

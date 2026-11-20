@@ -5,10 +5,16 @@ on:
     branches: [develop]
     paths:
       - 'game/**'
+      - 'modules/environment_query/**'
+      - 'tests/scene/test_environment_query_3d.cpp'
+      - 'tests/scene/test_environment_query_topk.py'
       - '.github/workflows/albion-after-pack-ai.yml'
   pull_request:
     paths:
       - 'game/**'
+      - 'modules/environment_query/**'
+      - 'tests/scene/test_environment_query_3d.cpp'
+      - 'tests/scene/test_environment_query_topk.py'
       - '.github/workflows/albion-after-pack-ai.yml'
   workflow_dispatch:
 
@@ -21,6 +27,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Check native EQS ranking and gameplay cache contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests/scene/test_environment_query_topk.py -v
       - name: Install verified Godot 4.7.2 editor
         shell: bash
         run: |
