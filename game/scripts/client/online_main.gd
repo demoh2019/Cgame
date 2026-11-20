@@ -266,6 +266,10 @@ func _build_environment() -> void:
 	_lightning_visual.name = "StormLightningWarning"
 	add_child(_lightning_visual)
 	camera.current = true
+	# The project supports occlusion, but the title screen and open world should
+	# never start with the extra software-culling pass enabled.
+	DungeonOcclusion.update_viewport(get_viewport(), GraphicsQuality.level(),
+		str(RenderingServer.get_current_rendering_method()), false)
 	# Only one light manager for every streamed underground room.
 	# Nearest torches glow and flicker; distant torches contribute no GPU light passes.
 	var dungeon_lights := DungeonLightBudget.new()
