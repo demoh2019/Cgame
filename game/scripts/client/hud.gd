@@ -2231,6 +2231,8 @@ func _on_event(event: Dictionary) -> void:
 					say("Teammate shared supplies: +%d hunger, +%d thirst." % [
 						roundi(float(event.get("food", 0.0))),
 						roundi(float(event.get("drink", 0.0)))])
+				elif float(event.get("food_poison_treated", 0.0)) > 0.0:
+					say("Teammate treated food poisoning: -%d severity." % roundi(float(event.get("food_poison_treated", 0.0))))
 				else:
 					say("Teammate treated you: +%d HP, -%d infection, -%d bleeding, -%d fracture." % [
 						roundi(float(event.get("heal", 0.0))),
@@ -2850,6 +2852,8 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				say("Supplies shared: +%d hunger, +%d thirst." % [
 					roundi(float(data.get("food", 0.0))),
 					roundi(float(data.get("drink", 0.0)))])
+			elif float(data.get("food_poison_treated", 0.0)) > 0.0:
+				say("Field aid: treated ally food poisoning (-%d severity)." % roundi(float(data.get("food_poison_treated", 0.0))))
 			else:
 				say("Field aid: +%d HP, -%d infection, -%d bleeding." % [
 					roundi(float(data.get("heal", 0.0))),
