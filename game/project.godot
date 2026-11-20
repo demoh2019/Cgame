@@ -54,3 +54,8 @@ aa_terrain_layer_budget={
 "type": "int",
 "value": 3
 }
+
+aa_leaf_transmission={
+"type": "float",
+"value": 0.28
+}

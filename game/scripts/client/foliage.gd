@@ -9,6 +9,8 @@ render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
 // Shared quality knob: Performance = matte rain, Ultra = full PBR wet highlights.
 global uniform float aa_vegetation_wet_gloss;
+// Screen-independent, inexpensive thin-leaf backlight. Performance turns it off.
+global uniform float aa_leaf_transmission;
 uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform vec4 albedo_color : source_color = vec4(1.0);
 // Preserve source glTF PBR data. Optional maps are sampled only if actually present.
@@ -84,6 +86,18 @@ void fragment() {
 	// Wet leaves and bark darken smoothly while preserving tint, texture and alpha.
 	float wet_foliage = clamp(aa_weather_wetness, 0.0, 1.0);
 	ALBEDO = apply_cloud_shadow(t.rgb * instance_tint * hue * (1.0 - wet_foliage * 0.17), cloud_xz, TIME);
+	// Approximate thin-leaf transmission (Unreal Two-Sided Foliage / Unity HDRP
+	// Transmission). Godot's built-in direct-light backlighting uses existing
+	// lighting: no extra shadow pass, screen texture, or translucency draw call.
+	// Only cut-out foliage receives it; trunks, bark and opaque plants stay PBR.
+	BACKLIGHT = vec3(0.0);
+	if (cut_out && aa_leaf_transmission > 0.001) {
+		// Bright green tissue transmits more light than dark veins. Reuse the
+		// existing albedo sample; no additional PBR texture lookups.
+		float leaf_mask = smoothstep(0.12, 0.78, dot(t.rgb, vec3(0.23, 0.68, 0.09)));
+		BACKLIGHT = t.rgb * instance_tint * hue * leaf_mask
+			* aa_leaf_transmission * (1.0 - wet_foliage * 0.18);
+	}
 	// Both sides of a blade are lit as if they faced the viewer: otherwise half the grass turns black.
 	if (!FRONT_FACING) {
 		NORMAL = -NORMAL;

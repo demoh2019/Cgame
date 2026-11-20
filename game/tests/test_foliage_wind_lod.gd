@@ -2,6 +2,8 @@ extends RefCounted
 ## Foliage wind LOD and material regression. Requires no downloaded nature pack.
 
 const Foliage = preload("res://scripts/client/foliage.gd")
+const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 
 
 func run(t) -> void:
@@ -92,3 +94,23 @@ func run(t) -> void:
 			t.eq(packed_material.get_shader_parameter("orm_tex"), map_texture, "single packed ORM texture reused")
 	t.check(Foliage.SHADER_CODE.contains("aa_terrain_detail_radius"), "normal map fade follows renderer quality preset")
 	t.check(Foliage.SHADER_CODE.contains("textureGrad(normal_tex"), "optional normal map uses explicit mip gradients")
+
+	t.current = "thin leaf transmission quality"
+	t.check(ProjectSettings.has_setting("shader_globals/aa_leaf_transmission"), "Godot registers the shared leaf light global")
+	t.check(shader.contains("global uniform float aa_leaf_transmission;"), "foliage shader receives leaf transmission strength")
+	t.check(shader.contains("BACKLIGHT = vec3(0.0);"), "non-leaf materials start with zero backlighting")
+	t.check(shader.contains("if (cut_out && aa_leaf_transmission > 0.001)"), "only transparent leaf material computes transmission")
+	t.check(shader.contains("float leaf_mask = smoothstep("), "thick dark veins stay less translucent")
+	t.check(shader.contains("BACKLIGHT = t.rgb * instance_tint * hue"), "transmitted light retains original source colors and per-instance tint")
+	t.check(shader.contains("ALPHA_SCISSOR_THRESHOLD = scissor"), "leaf alpha cutout remains intact")
+	var prior_strength := -1.0
+	for level in VisualProfiles.PRESETS.size():
+		var settings: Dictionary = VisualProfiles.settings(level)
+		var strength: float = float(settings.get("leaf_transmission", -1.0))
+		t.check(strength >= 0.0 and strength <= 0.7, "transmission is bounded on %s" % GraphicsQuality.NAMES[level])
+		t.check(strength > prior_strength, "higher quality increases translucency on %s" % GraphicsQuality.NAMES[level])
+		prior_strength = strength
+	t.eq(float(VisualProfiles.settings(0)["leaf_transmission"]), 0.0, "Performance skips leaf backlight computation")
+	var controller: GDScript = load("res://scripts/client/graphics_quality.gd") as GDScript
+	t.check(controller != null and controller.source_code.contains('global_shader_parameter_set(&"aa_leaf_transmission"'),
+		"graphics preset broadcasts shared leaf translucency to all foliage")
