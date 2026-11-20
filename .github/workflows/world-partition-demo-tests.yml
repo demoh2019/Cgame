@@ -35,6 +35,8 @@ jobs:
         run: godot --headless --path modules/world_partition/demo --script res://tests/cell_state_contract_test.gd
       - name: Verify streamed collision and navigation pathfinding contracts
         run: godot --headless --path modules/world_partition/demo --script res://tests/physics_navigation_lifecycle_test.gd
+      - name: Exercise AI patrol across adjacent nav regions and route ownership
+        run: godot --headless --path modules/world_partition/demo --script res://tests/route_patrol_test.gd
       - name: Verify world event progression logic
         run: godot --headless --path modules/world_partition/demo --script res://tests/world_event_rules_test.gd
       - name: Bake 3x3 deterministic HLOD proxy scenes
