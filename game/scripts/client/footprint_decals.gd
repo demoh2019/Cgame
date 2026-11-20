@@ -21,6 +21,7 @@ var _left := false
 var _seconds := 0.0
 var _fade_elapsed := 0.0
 var _enabled := false
+var _backend_enabled := false
 var _mud: Texture2D
 var _snow: Texture2D
 var _normal: Texture2D
@@ -174,13 +175,28 @@ func update_track(at: Vector3, walking: bool, delta: float, storm: float,
 		return
 	_seconds += delta
 	_fade_elapsed += delta
+	# Existing tracks dry and fade for their full lifetime even after a
+	# storm ends or the player walks onto dry terrain. A renderer downgrade
+	# still hides them immediately without leaving stale native projectors.
+	if _fade_elapsed >= FADE_INTERVAL:
+		_fade_elapsed = fmod(_fade_elapsed, FADE_INTERVAL)
+		_fade()
+	var backend_ok: bool = level >= 2 and renderer == "forward_plus" and not underground
+	if not backend_ok:
+		if _backend_enabled:
+			clear_marks()
+		_backend_enabled = false
+		_enabled = false
+		_previous = at
+		_stride = 0.0
+		return
+	_backend_enabled = true
 	var kind: String = surface_kind(level, renderer, storm, biome,
 		at.y, underground, flooded)
 	if kind == "":
-		if _enabled:
-			clear_marks()
 		_enabled = false
 		_previous = at
+		_stride = 0.0
 		return
 	_enabled = true
 	var budget: int = max_marks(level)
@@ -191,9 +207,6 @@ func update_track(at: Vector3, walking: bool, delta: float, storm: float,
 			_decals[i].visible = false
 		_reuse = 0
 		_last_budget = budget
-	if _fade_elapsed >= FADE_INTERVAL:
-		_fade_elapsed = fmod(_fade_elapsed, FADE_INTERVAL)
-		_fade()
 	if not valid_stride(_previous, at, walking):
 		_previous = at
 		_stride = 0.0
