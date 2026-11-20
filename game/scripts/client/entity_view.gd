@@ -547,6 +547,11 @@ func _register_anim_lod(model: Node) -> void:
 		_anim_lod.register(animator, model as Node3D)
 	else:
 		_anim_lod.register_mixer(animator) # Native: skips inactive/paused (ragdolled) animators itself.
+		# The upper-body attack layer is a separate AnimationPlayer: register it
+		# with the SAME scheduler, otherwise distant actors animate it at 60 Hz.
+		var upper_layer: AnimationPlayer = model.get("_layer")
+		if upper_layer != null:
+			_anim_lod.register_mixer(upper_layer)
 
 
 ## Sync the same priority hint to both native animation LOD and stock Godot's
@@ -563,6 +568,9 @@ func _apply_combat_animation_priority(model: Node, kind: String, entity: Diction
 		var animator: AnimationPlayer = model.get("animator")
 		if animator != null:
 			_anim_lod.call("set_mixer_high_priority", animator, priority)
+		var upper_layer: AnimationPlayer = model.get("_layer")
+		if upper_layer != null:
+			_anim_lod.call("set_mixer_high_priority", upper_layer, priority)
 
 
 func _unregister_anim_lod(node: Node) -> void:
@@ -576,6 +584,9 @@ func _unregister_anim_lod(node: Node) -> void:
 		_anim_lod.unregister(animator)
 	else:
 		_anim_lod.unregister_mixer(animator)
+		var upper_layer: AnimationPlayer = model.get("_layer")
+		if upper_layer != null:
+			_anim_lod.unregister_mixer(upper_layer)
 
 
 ## A zombie that just left the snapshot (killed) falls as a ragdoll instead of vanishing, within the tier budget.
