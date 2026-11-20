@@ -39,8 +39,8 @@ func run(t) -> void:
 	terrain.lod_reference_fov = 500.0
 	t.check(terrain.lod_reference_fov < 179.0,
 		"native engine clamps excessive reference angles")
-	t.check(not terrain.collision_enabled == false or terrain.collision_enabled,
-		"screen LOD does not require collision state changes")
+	t.eq(terrain.collision_enabled, true,
+		"screen LOD does not modify the native terrain collision flag")
 	terrain.free()
 	ChunkView.configure_terrain_screen_lod(1)
 
