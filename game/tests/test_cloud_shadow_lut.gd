@@ -69,6 +69,19 @@ func run(t) -> void:
 		"engine config declares cloud texture before shader compilation")
 	t.check(ProjectSettings.has_setting("shader_globals/aa_cloud_shadow_strength"),
 		"engine config declares shared strength")
+	var cloud_sampler_setting: Dictionary = ProjectSettings.get_setting(
+		"shader_globals/aa_cloud_shadow_map", {})
+	var cloud_fallback_path: String = str(cloud_sampler_setting.get("value", ""))
+	t.check(cloud_fallback_path.begins_with("res://"),
+		"cloud sampler has a real default path (Godot 4.0 converts null to res://<null>)")
+	if cloud_fallback_path.begins_with("res://"):
+		t.check(ResourceLoader.exists(cloud_fallback_path, "Texture2D"),
+			"cloud sampler startup fallback is a loadable 2D texture")
+		var fallback := load(cloud_fallback_path) as Texture2D
+		t.check(fallback != null, "cloud sampler has a usable texture before _ready")
+		if fallback != null:
+			t.check(fallback.get_width() <= 4 and fallback.get_height() <= 4,
+				"neutral startup fallback uses negligible texture memory")
 	var code: String = FileAccess.get_file_as_string(
 		"res://assets/shaders/cloud_shadow.gdshaderinc")
 	t.check(code.contains("global uniform sampler2D aa_cloud_shadow_map"),
