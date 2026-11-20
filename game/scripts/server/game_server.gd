@@ -3471,10 +3471,37 @@ func _tick_supply_drop() -> void:
 			return
 		bags[bag_id]["supply_drop"] = true
 		bags[bag_id]["expires"] = time + SupplyDrops.LIFETIME_SECONDS
+		# Spawn a bounded, collidable, one-time infected escort for this crate.
+		# The public bag stays lootable even if no safe guard site exists.
+		var guard_count: int = _spawn_supply_guards(site)
 		next_supply_drop_at = time + SupplyDrops.INTERVAL_SECONDS
 		events.append({"type": "supply_drop", "id": bag_id, "x": site["x"],
-			"z": site["z"], "tier": int(site["zone"]) + 1})
+			"z": site["z"], "tier": int(site["zone"]) + 1, "guards": guard_count})
 		return
+
+
+## Guards patrol toward the crate using the existing investigation state.
+## They neither fake a player target nor respawn from world spawn slots.
+func _spawn_supply_guards(site: Dictionary) -> int:
+	var capacity: int = SupplyDrops.MAX_ACTIVE_INFECTED - zombies.size()
+	if capacity <= 0:
+		return 0
+	var positions: Array[Vector3] = []
+	for player in players.values():
+		if _alive(player) and player.position.is_finite():
+			positions.append(player.position)
+	var sites: Array[Dictionary] = SupplyDrops.guard_sites(world, site, positions,
+		zombies, capacity, rng.randi_range(0, SupplyDrops.GUARD_ANGLES - 1))
+	var target := Vector2(float(site["x"]), float(site["z"]))
+	for spot in sites:
+		var x: float = float(spot["x"])
+		var z: float = float(spot["z"])
+		var enemy_id: int = new_id()
+		var guard = Zombie.new(enemy_id, str(spot["kind"]),
+			Vector3(x, world.height_at(x, z), z), -1)
+		guard.investigate_decoy(target)
+		zombies[enemy_id] = guard
+	return sites.size()
 
 
 func _tick_world(delta: float) -> void:

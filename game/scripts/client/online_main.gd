@@ -313,6 +313,11 @@ func _on_skill_event(event: Dictionary) -> void:
 			audio.play_ui("coin", -2.0)
 		"perk":
 			hud.say("Perk learned: %s" % Skills.PERKS[event["perk"]]["name"])
+		"supply_drop":
+			var guard_count: int = int(event.get("guards", 0))
+			hud.say("SUPPLY DROP (T%d) at %.0f, %.0f — %d infected guards!" % [
+				int(event.get("tier", 3)), float(event.get("x", 0)),
+				float(event.get("z", 0)), guard_count])
 
 
 func _setup_chat() -> void:
