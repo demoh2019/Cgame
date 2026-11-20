@@ -1142,6 +1142,8 @@ func _on_event(event: Dictionary) -> void:
 		"caravan_escort_paid":
 			say("Convoy escort complete: +%d silver, Explorer XP and renown earned." % [
 				int(event.get("silver", 0))])
+		"caravan_defended":
+			say("CARAVAN DEFENDED! All attackers defeated. Earn 15% extra silver on delivery.")
 		"caravan_ambushed":
 			if int(event.get("peer", 0)) == client.peer_id:
 				say("CARAVAN AMBUSH! %d infected are converging on your cargo. Defend or flee!" % [
@@ -1444,11 +1446,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 						roundi(float(route.get("dst_z", 0.0))), int(route.get("silver", 0))])
 				"deliver":
 					var shares: Array = data.get("escorts", [])
+					var bonus: int = int(data.get("defense_bonus", 0))
 					if shares.is_empty():
-						say("Caravan delivered: +%d silver and explorer experience." % int(data.get("silver", 0)))
+						say("Caravan delivered: +%d silver (defense bonus +%d), Explorer XP." % [
+							int(data.get("silver", 0)), bonus])
 					else:
-						say("Caravan delivered: +%d silver to courier, paid %d escort(s) from original fare." % [
-							int(data.get("silver", 0)), shares.size()])
+						say("Caravan delivered: +%d silver (defense +%d), paid %d escort(s) from base fare." % [
+							int(data.get("silver", 0)), bonus, shares.size()])
 				"abandon":
 					say("Caravan route cancelled; no goods taken.")
 		return
@@ -1877,6 +1881,8 @@ func _process(_delta: float) -> void:
 				int(job.get("quantity", 0)), str(job.get("cargo", "")),
 				str(job.get("destination", "")), direction_text,
 				int(job.get("silver", 0))]
+			if bool(client.you.get("caravan_defended", false)):
+				_caravan_status.text += " | DEFENDED +15% on delivery"
 	_bars["health"].value = client.you["health"]
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]

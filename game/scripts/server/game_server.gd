@@ -174,6 +174,7 @@ class Player:
 	var caravan_state: Dictionary = {} # Saved canonical source/destination IDs only.
 	var caravan_view: Dictionary = {} # Verified route details for this private client.
 	var caravan_ambushed: bool = false # One PvE ambush per active route, persisted.
+	var caravan_defended: bool = false # All summoned attackers killed before deadline.
 	var daily_bounty: Dictionary = {} # Account-persisted UTC daily bounty, never set by clients.
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var discovered_sites: Dictionary = {} # Personal authenticated landmark journal.
@@ -357,6 +358,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.caravan_state = {}
 	player.caravan_view = {}
 	player.caravan_ambushed = false
+	player.caravan_defended = false
 	player.daily_bounty = DailyBounties.empty_state()
 	player.renown = 0
 	players[peer_id] = player
@@ -400,6 +402,7 @@ func character_data(player: Player) -> Dictionary:
 		"contracts": player.contract_state.duplicate(true),
 		"caravan": player.caravan_state.duplicate(true),
 		"caravan_ambushed": player.caravan_ambushed,
+		"caravan_defended": player.caravan_defended,
 		"daily_bounty": player.daily_bounty.duplicate(true),
 		"renown": player.renown,
 		"discovered_sites": WorldDiscovery.to_saved(player.discovered_sites),
@@ -570,6 +573,10 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not (loaded_caravan_ambushed is bool) or \
 			(bool(loaded_caravan_ambushed) and caravan_view.is_empty()):
 		return false
+	var loaded_caravan_defended: Variant = data.get("caravan_defended", false)
+	if not (loaded_caravan_defended is bool) or (bool(loaded_caravan_defended) and
+			(not bool(loaded_caravan_ambushed) or caravan_view.is_empty())):
+		return false
 	var loaded_daily: Variant = data.get("daily_bounty", DailyBounties.empty_state())
 	if not DailyBounties.valid_state(loaded_daily) \
 			or int(loaded_daily["day"]) > DailyBounties.utc_day():
@@ -598,6 +605,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.caravan_state = (loaded_caravan as Dictionary).duplicate(true)
 	player.caravan_view = caravan_view.duplicate(true)
 	player.caravan_ambushed = bool(loaded_caravan_ambushed)
+	player.caravan_defended = bool(loaded_caravan_defended)
 	player.daily_bounty = (loaded_daily as Dictionary).duplicate(true)
 	player.renown = int(loaded_renown)
 	player.discovered_sites = loaded_discoveries["journal"]
@@ -689,6 +697,7 @@ func remove_player(peer_id: int) -> void:
 	_cancel_market_seller(peer_id)
 	_cancel_player_trade(peer_id, "disconnected")
 	CaravanEscortRewards.clear_peer(caravan_escort_progress, peer_id)
+	_clear_caravan_waves(peer_id)
 	parties.disconnect_peer(peer_id)
 	var player: Player = players.get(peer_id)
 	if player != null and not player.user_id.is_empty():
@@ -2348,6 +2357,18 @@ func _refresh_daily(player: Player) -> int:
 	return today
 
 
+## Cancel orphaned event mobs after route disposal or disconnect. They must
+## not become a reward for a new player who inherits the same network peer ID.
+func _clear_caravan_waves(peer_id: int) -> void:
+	for index in range(caravan_ambushes.size() - 1, -1, -1):
+		var wave: Dictionary = caravan_ambushes[index]
+		if int(wave.get("owner", -1)) != peer_id:
+			continue
+		for infected_id in wave["ids"]:
+			zombies.erase(int(infected_id))
+		caravan_ambushes.remove_at(index)
+
+
 ## Cross-settlement resource couriers: the server selects and validates
 ## both real NPC stations. Goods are gathered by the player, not spawned.
 func cmd_caravan(peer_id: int, action: String) -> Dictionary:
@@ -2357,9 +2378,11 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 	if action == "abandon":
 		if player.caravan_state.is_empty():
 			return {"ok": false, "reason": "no_active"}
+		_clear_caravan_waves(peer_id)
 		player.caravan_state = {}
 		player.caravan_view = {}
 		player.caravan_ambushed = false
+		player.caravan_defended = false
 		caravan_escort_progress.erase(peer_id)
 		player.dirty_character = true
 		return {"ok": true, "action": "abandon"}
@@ -2374,10 +2397,12 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 		var offer: Dictionary = CaravanRoutes.offer_for(world, station)
 		if offer.is_empty():
 			return {"ok": false, "reason": "no_route"}
+		_clear_caravan_waves(peer_id)
 		player.caravan_state = CaravanRoutes.saved_state(offer)
 		player.caravan_view = offer.duplicate(true)
 		caravan_escort_progress.erase(peer_id)
 		player.caravan_ambushed = false
+		player.caravan_defended = false
 		player.dirty_character = true
 		return {"ok": true, "action": "accept", "route": offer.duplicate(true)}
 	if player.caravan_state.is_empty() or player.caravan_view.is_empty():
@@ -2398,13 +2423,15 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 					player.position, member.position):
 				eligible_escorts.append(member)
 	var outcome: Dictionary = CaravanEscortRewards.settle(
-		player, eligible_escorts, player.caravan_view)
+		player, eligible_escorts, player.caravan_view, player.caravan_defended)
 	if not bool(outcome.get("ok", false)):
 		return outcome
 	caravan_escort_progress.erase(peer_id)
+	_clear_caravan_waves(peer_id)
 	player.caravan_state = {}
 	player.caravan_view = {}
 	player.caravan_ambushed = false
+	player.caravan_defended = false
 	player.dirty_inventory = true
 	player.dirty_character = true
 	for member in eligible_escorts:
@@ -4384,6 +4411,20 @@ func _party_award_assists(killer: Player, zombie) -> void:
 
 func _on_zombie_death(zombie, killer: Player) -> void:
 	parties.clear_focus_target(zombie.id)
+	# A caravan is defended only after every originally summoned infected
+	# is confirmed dead, not when the wave disappears or its timer expires.
+	for wave in caravan_ambushes:
+		if time >= float(wave["expires"]) or not CaravanAmbush.record_kill(wave, zombie.id):
+			continue
+		var courier: Player = players.get(int(wave.get("owner", -1)))
+		if courier != null and _alive(courier) and courier.caravan_ambushed and
+				not courier.caravan_defended and courier.deaths == int(wave.get("deaths", -1)) and
+				courier.caravan_state == wave.get("route", {}) and
+				courier.inventory.count(str(courier.caravan_view.get("cargo", ""))) > 0:
+			courier.caravan_defended = true
+			courier.dirty_character = true
+			events.append({"type": "caravan_defended", "peer": courier.id})
+		break
 	var zone: int = world.zone_at(zombie.position.x, zombie.position.z)
 	var loot_rng := RandomNumberGenerator.new()
 	loot_rng.seed = WorldGen.mix(zombie.id, int(time * 10.0), world.world_seed, 5)
@@ -4450,6 +4491,8 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	_cancel_market_seller(victim.id)
 	_cancel_player_trade(victim.id, "dead")
 	victim.deaths += 1
+	# A courier must survive their defense; a later respawn cannot reclaim it.
+	victim.caravan_defended = false
 	victim.dirty_character = true
 	victim.action = {}
 	victim.sharpened_weapon = ""
@@ -5808,7 +5851,8 @@ func _tick_caravan_ambush() -> void:
 			ids.append(enemy_id)
 		player.caravan_ambushed = true
 		player.dirty_character = true
-		caravan_ambushes.append({"ids": ids,
+		caravan_ambushes.append({"ids": ids, "defeated": [], "owner": player.id,
+			"route": player.caravan_state.duplicate(true), "deaths": player.deaths,
 			"expires": time + CaravanAmbush.LIFETIME_SECONDS})
 		events.append({"type": "caravan_ambushed", "peer": player.id,
 			"group": parties.group_of(player.id), "count": ids.size(), "zone": world.zone_at(player.position.x,
@@ -6003,6 +6047,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"you": {
 			"party": _party_state_for(peer_id),
 			"caravan": player.caravan_view.duplicate(true),
+			"caravan_defended": player.caravan_defended,
 			"guild": {"id": player.guild_id, "name": player.guild_name, "rank": player.guild_rank},
 			"guild_siege_wins": int(guild_siege_wins.get(player.guild_id, 0)),
 			"siege_wins": int(siege_contracts.victories.get(parties.group_of(peer_id), 0)),
