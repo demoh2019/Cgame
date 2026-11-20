@@ -240,6 +240,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# Low-end renderers retain their original imported texture allocations.
 	Foliage.configure_alpha_mipmaps(_level, str(method))
 	var native_vignette := false
+	var lens_env: Environment = null
 	if atmosphere != null:
 		# The atmosphere owns the persistent shadow enable flag used by its day/night update.
 		# Applying only to the sun node would let nighttime weather restore shadows on Performance.
@@ -287,13 +288,20 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		GraphicsTonemapping.apply(env, _level, str(method))
 		# Native HDR lens fringing + filmic grain inside the same tonemap pass.
 		native_vignette = GraphicsLens.apply(env, _level, str(method))
+		lens_env = env
 		# Hybrid sky + screen-space reflections on High/Ultra Forward+ only.
 		# Runtime changes (including Auto) also turn SSR off when required.
 		GraphicsReflections.apply(env, _level, method)
 	if post_material != null:
 		post_material.set_shader_parameter("blur_quality", p["blur_quality"])
 		post_material.set_shader_parameter("blur_radius", p["blur_radius"])
-		post_material.set_shader_parameter("sharpen_strength", post_sharpen_strength(_level, method, adaptive))
+		var sharpen: float = post_sharpen_strength(_level, method, adaptive)
+		# The engine fork sharpens natively (CAS in the tonemap pass, before tilt-shift),
+		# so the canvas pass skips its own and nothing is sharpened twice.
+		if lens_env != null and str(method) == "forward_plus" and "lens_sharpen" in lens_env:
+			lens_env.set("lens_sharpen", sharpen * 1.6)
+			sharpen = 0.0
+		post_material.set_shader_parameter("sharpen_strength", sharpen)
 		# Sub-LSB output dither is fused into the existing grade pass. Auto
 		# resolution and renderer switching cannot leave stale grain enabled.
 		post_material.set_shader_parameter("deband_strength", float(p["deband_strength"]))

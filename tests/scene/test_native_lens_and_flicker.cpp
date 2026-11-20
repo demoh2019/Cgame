@@ -56,6 +56,10 @@ TEST_CASE("[SceneTree][Environment] Lens vignette and white balance are clamped 
 	CHECK(environment->get_lens_white_tint() == doctest::Approx(-0.2f));
 	environment->set_lens_white_temperature(5.0f);
 	environment->set_lens_white_tint(-5.0f);
+	environment->set_lens_sharpen(0.3f);
+	CHECK(environment->get_lens_sharpen() == doctest::Approx(0.3f));
+	environment->set_lens_sharpen(9.0f);
+	CHECK(environment->get_lens_sharpen() == 1.0f);
 	CHECK(environment->get_lens_white_temperature() == 1.0f);
 	CHECK(environment->get_lens_white_tint() == -1.0f);
 }

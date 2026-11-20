@@ -125,7 +125,7 @@ private:
 		float tonemapper_params[4]; //  16 - 112
 
 		uint32_t lens_aberration_grain; //  4 - 116 (unorm4x8: aberration, grain, white temperature, white tint)
-		float motion_blur; //  4 - 120
+		uint32_t motion_blur_sharpen; //  4 - 120 (two packed half floats: motion blur, CAS sharpen)
 		float lens_time; //  4 - 124
 		uint32_t lens_flare_vignette; //  4 - 128 (two packed half floats: lens flare, vignette)
 	};
@@ -220,6 +220,7 @@ public:
 		float lens_vignette = 0.0;
 		float white_temperature = 0.0; // -1 (cool) .. 1 (warm)
 		float white_tint = 0.0; // -1 (green) .. 1 (magenta)
+		float sharpen = 0.0; // 0..1 contrast-adaptive sharpening
 		float lens_time = 0.0;
 		float lens_flare = 0.0;
 		float motion_blur = 0.0;

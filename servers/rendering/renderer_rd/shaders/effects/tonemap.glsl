@@ -88,7 +88,7 @@ layout(push_constant, std430) uniform Params {
 	vec4 tonemapper_params;
 
 	uint lens_aberration_grain; // unorm4x8: x chromatic aberration, y film grain, z white temperature, w white tint (z,w: -1..1 mapped to 0..1).
-	float motion_blur;
+	uint motion_blur_sharpen; // x: motion blur, y: CAS sharpen (packed halves).
 	float lens_time;
 	uint lens_flare_vignette; // x: lens flare, y: vignette (packed halves).
 }
@@ -893,8 +893,8 @@ void main() {
 	// gathered along the screen-space velocity of each pixel (camera and object motion).
 	// A per-pixel jitter hides sample stepping; long smears are clamped to stay readable.
 #ifndef USE_MULTIVIEW
-	if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && params.motion_blur > 0.0) {
-		vec2 velocity = textureLod(source_velocity, uv_interp, 0.0).xy * params.motion_blur;
+	if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && unpackHalf2x16(params.motion_blur_sharpen).x > 0.0) {
+		vec2 velocity = textureLod(source_velocity, uv_interp, 0.0).xy * unpackHalf2x16(params.motion_blur_sharpen).x;
 		float max_length = 48.0 * params.pixel_size.y;
 		float velocity_length = length(velocity);
 		if (velocity_length > max_length) {
@@ -929,6 +929,34 @@ void main() {
 		color.r = textureLod(source_color, uv_interp - shift, 0.0f).r;
 		color.b = textureLod(source_color, uv_interp + shift, 0.0f).b;
 #endif
+	}
+
+	// Contrast-adaptive sharpening, as in Unreal Engine "r.Tonemapper.Sharpen" and AMD
+	// FidelityFX CAS: a 5-tap cross whose negative lobe shrinks where local contrast is
+	// already high, so edges crisp up without halos. Weights use a Reinhard-compressed
+	// copy of the HDR values; the filter itself runs on the HDR color.
+	if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && !motion_blurred) {
+		float sharpen = unpackHalf2x16(params.motion_blur_sharpen).y;
+		if (sharpen > 0.0) {
+#ifdef USE_MULTIVIEW
+			vec3 n = textureLod(source_color, vec3(uv_interp + vec2(0.0, -params.pixel_size.y), ViewIndex), 0.0).rgb;
+			vec3 s = textureLod(source_color, vec3(uv_interp + vec2(0.0, params.pixel_size.y), ViewIndex), 0.0).rgb;
+			vec3 e = textureLod(source_color, vec3(uv_interp + vec2(params.pixel_size.x, 0.0), ViewIndex), 0.0).rgb;
+			vec3 w = textureLod(source_color, vec3(uv_interp + vec2(-params.pixel_size.x, 0.0), ViewIndex), 0.0).rgb;
+#else
+			vec3 n = textureLod(source_color, uv_interp + vec2(0.0, -params.pixel_size.y), 0.0).rgb;
+			vec3 s = textureLod(source_color, uv_interp + vec2(0.0, params.pixel_size.y), 0.0).rgb;
+			vec3 e = textureLod(source_color, uv_interp + vec2(params.pixel_size.x, 0.0), 0.0).rgb;
+			vec3 w = textureLod(source_color, uv_interp + vec2(-params.pixel_size.x, 0.0), 0.0).rgb;
+#endif
+			vec3 c = color.rgb;
+			vec3 cn = c / (1.0 + c);
+			vec3 mn = min(cn, min(min(n / (1.0 + n), s / (1.0 + s)), min(e / (1.0 + e), w / (1.0 + w))));
+			vec3 mx = max(cn, max(max(n / (1.0 + n), s / (1.0 + s)), max(e / (1.0 + e), w / (1.0 + w))));
+			vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0));
+			vec3 lobe = -amp / mix(8.0, 5.0, clamp(sharpen, 0.0, 1.0));
+			color.rgb = max((c + lobe * (n + s + e + w)) / (1.0 + 4.0 * lobe), vec3(0.0));
+		}
 	}
 
 	color.rgb *= params.luminance_multiplier;

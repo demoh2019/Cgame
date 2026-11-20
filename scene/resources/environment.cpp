@@ -1332,6 +1332,15 @@ float Environment::get_lens_white_tint() const {
 	return lens_white_tint;
 }
 
+void Environment::set_lens_sharpen(float p_amount) {
+	lens_sharpen = CLAMP(p_amount, 0.0f, 1.0f);
+	RS::get_singleton()->environment_set_lens_sharpen(environment, lens_sharpen);
+}
+
+float Environment::get_lens_sharpen() const {
+	return lens_sharpen;
+}
+
 void Environment::_update_white_balance() {
 	RS::get_singleton()->environment_set_white_balance(environment, lens_white_temperature, lens_white_tint);
 }
@@ -1871,6 +1880,8 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_lens_white_temperature"), &Environment::get_lens_white_temperature);
 	ClassDB::bind_method(D_METHOD("set_lens_white_tint", "tint"), &Environment::set_lens_white_tint);
 	ClassDB::bind_method(D_METHOD("get_lens_white_tint"), &Environment::get_lens_white_tint);
+	ClassDB::bind_method(D_METHOD("set_lens_sharpen", "amount"), &Environment::set_lens_sharpen);
+	ClassDB::bind_method(D_METHOD("get_lens_sharpen"), &Environment::get_lens_sharpen);
 	ClassDB::bind_method(D_METHOD("set_motion_blur_amount", "amount"), &Environment::set_motion_blur_amount);
 	ClassDB::bind_method(D_METHOD("get_motion_blur_amount"), &Environment::get_motion_blur_amount);
 
@@ -1881,6 +1892,7 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_vignette", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_lens_vignette", "get_lens_vignette");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_white_temperature", PROPERTY_HINT_RANGE, "-1.0,1.0,0.01"), "set_lens_white_temperature", "get_lens_white_temperature");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_white_tint", PROPERTY_HINT_RANGE, "-1.0,1.0,0.01"), "set_lens_white_tint", "get_lens_white_tint");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_sharpen", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_lens_sharpen", "get_lens_sharpen");
 
 	ADD_GROUP("Motion Blur", "motion_blur_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "motion_blur_amount", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_motion_blur_amount", "get_motion_blur_amount");

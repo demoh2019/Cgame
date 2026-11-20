@@ -245,6 +245,10 @@
 			Strength of the image-based lens flare: tinted mirrored ghosts and a ring halo built from the glow buffer, so only areas bright enough to glow produce flares. Requires [member glow_enabled]. [code]0.0[/code] disables the effect.
 			[b]Note:[/b] Only supported in the Forward+ rendering method.
 		</member>
+		<member name="lens_sharpen" type="float" setter="set_lens_sharpen" getter="get_lens_sharpen" default="0.0">
+			Contrast-adaptive sharpening strength, like Unreal Engine's [code]r.Tonemapper.Sharpen[/code] and AMD FidelityFX CAS. Restores detail softened by TAA or upscaling without halos, because the filter backs off where local contrast is already high. Skipped on motion-blurred pixels. [code]0.0[/code] disables it.
+			[b]Note:[/b] Only supported in the Forward+ rendering method.
+		</member>
 		<member name="lens_vignette" type="float" setter="set_lens_vignette" getter="get_lens_vignette" default="0.0">
 			Strength of the optical vignette: a smooth, aspect-correct cos⁴ falloff that darkens the frame edges, like Unreal Engine's "Vignette Intensity" and Unity HDRP's Vignette. Applied in the tonemap pass with no extra render target. [code]0.0[/code] disables the effect.
 			[b]Note:[/b] Only supported in the Forward+ rendering method.

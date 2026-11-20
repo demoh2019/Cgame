@@ -634,6 +634,14 @@ float RendererSceneRender::environment_get_white_tint(RID p_env) const {
 	return environment_storage.environment_get_white_tint(p_env);
 }
 
+void RendererSceneRender::environment_set_lens_sharpen(RID p_env, float p_amount) {
+	environment_storage.environment_set_lens_sharpen(p_env, p_amount);
+}
+
+float RendererSceneRender::environment_get_lens_sharpen(RID p_env) const {
+	return environment_storage.environment_get_lens_sharpen(p_env);
+}
+
 float RendererSceneRender::environment_get_adjustments_brightness(RID p_env) const {
 	return environment_storage.environment_get_adjustments_brightness(p_env);
 }

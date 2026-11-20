@@ -679,6 +679,7 @@ public:
 	virtual void environment_set_lens_effects(RID p_env, float p_chromatic_aberration, float p_film_grain, float p_lens_flare, float p_motion_blur) = 0;
 	virtual void environment_set_lens_vignette(RID p_env, float p_amount) = 0;
 	virtual void environment_set_white_balance(RID p_env, float p_temperature, float p_tint) = 0;
+	virtual void environment_set_lens_sharpen(RID p_env, float p_amount) = 0;
 
 	virtual void environment_set_ssr(RID p_env, bool p_enable, int p_max_steps, float p_fade_in, float p_fade_out, float p_depth_tolerance) = 0;
 

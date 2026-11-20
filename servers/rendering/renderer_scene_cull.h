@@ -1382,6 +1382,8 @@ public:
 	PASS3(environment_set_white_balance, RID, float, float)
 	PASS1RC(float, environment_get_white_temperature, RID)
 	PASS1RC(float, environment_get_white_tint, RID)
+	PASS2(environment_set_lens_sharpen, RID, float)
+	PASS1RC(float, environment_get_lens_sharpen, RID)
 	PASS1RC(float, environment_get_lens_chromatic_aberration, RID)
 	PASS1RC(float, environment_get_lens_film_grain, RID)
 

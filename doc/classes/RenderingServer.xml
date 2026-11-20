@@ -1419,21 +1419,20 @@
 				Sets the camera lens effects. See [member Environment.lens_chromatic_aberration], [member Environment.lens_film_grain], [member Environment.lens_flare] and [member Environment.motion_blur_amount] for more details.
 			</description>
 		</method>
+		<method name="environment_set_lens_sharpen">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="amount" type="float" />
+			<description>
+				Sets the contrast-adaptive sharpening strength. See [member Environment.lens_sharpen] for more details.
+			</description>
+		</method>
 		<method name="environment_set_lens_vignette">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />
 			<param index="1" name="amount" type="float" />
 			<description>
 				Sets the optical vignette strength. See [member Environment.lens_vignette] for more details.
-			</description>
-		</method>
-		<method name="environment_set_white_balance">
-			<return type="void" />
-			<param index="0" name="env" type="RID" />
-			<param index="1" name="temperature" type="float" />
-			<param index="2" name="tint" type="float" />
-			<description>
-				Sets the white balance. See [member Environment.lens_white_temperature] and [member Environment.lens_white_tint] for more details.
 			</description>
 		</method>
 		<method name="environment_set_sdfgi">
@@ -1614,6 +1613,15 @@
 			<param index="1" name="depth" type="int" />
 			<description>
 				Sets the resolution of the volumetric fog's froxel buffer. [param size] is modified by the screen's aspect ratio and then used to set the width and height of the buffer. While [param depth] is directly used to set the depth of the buffer.
+			</description>
+		</method>
+		<method name="environment_set_white_balance">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="temperature" type="float" />
+			<param index="2" name="tint" type="float" />
+			<description>
+				Sets the white balance. See [member Environment.lens_white_temperature] and [member Environment.lens_white_tint] for more details.
 			</description>
 		</method>
 		<method name="fog_volume_create">

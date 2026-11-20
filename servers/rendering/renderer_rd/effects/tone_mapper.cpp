@@ -125,12 +125,13 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	memset(&tonemap.push_constant, 0, sizeof(TonemapPushConstant));
 
 	const bool use_motion_blur = p_settings.motion_blur > 0.0001f && p_settings.velocity_texture.is_valid() && p_settings.view_count == 1;
-	if (p_settings.lens_chromatic_aberration > 0.0001f || p_settings.lens_film_grain > 0.0001f || p_settings.lens_vignette > 0.0001f || Math::abs(p_settings.white_temperature) > 0.004f || Math::abs(p_settings.white_tint) > 0.004f || (p_settings.use_glow && p_settings.lens_flare > 0.0001f) || use_motion_blur) {
+	if (p_settings.lens_chromatic_aberration > 0.0001f || p_settings.lens_film_grain > 0.0001f || p_settings.lens_vignette > 0.0001f || Math::abs(p_settings.white_temperature) > 0.004f || Math::abs(p_settings.white_tint) > 0.004f || p_settings.sharpen > 0.0001f || (p_settings.use_glow && p_settings.lens_flare > 0.0001f) || use_motion_blur) {
 		tonemap.push_constant.flags |= TONEMAP_FLAG_USE_LENS_EFFECTS;
 		// unorm4x8 (matches GLSL unpackUnorm4x8): x aberration, y grain, z/w white balance mapped from -1..1.
 		const auto to_unorm8 = [](float p_value) -> uint32_t { return uint32_t(Math::round(CLAMP(p_value, 0.0f, 1.0f) * 255.0f)); };
 		tonemap.push_constant.lens_aberration_grain = to_unorm8(p_settings.lens_chromatic_aberration) | (to_unorm8(p_settings.lens_film_grain) << 8) | (to_unorm8(p_settings.white_temperature * 0.5f + 0.5f) << 16) | (to_unorm8(p_settings.white_tint * 0.5f + 0.5f) << 24);
-		tonemap.push_constant.motion_blur = use_motion_blur ? p_settings.motion_blur : 0.0f;
+		const float motion_blur = use_motion_blur ? p_settings.motion_blur : 0.0f;
+		tonemap.push_constant.motion_blur_sharpen = uint32_t(Math::make_half_float(motion_blur)) | (uint32_t(Math::make_half_float(CLAMP(p_settings.sharpen, 0.0f, 1.0f))) << 16);
 		const float lens_flare = p_settings.use_glow ? p_settings.lens_flare : 0.0f;
 		tonemap.push_constant.lens_flare_vignette = uint32_t(Math::make_half_float(lens_flare)) | (uint32_t(Math::make_half_float(p_settings.lens_vignette)) << 16);
 		// Wrap to keep float precision in the shader's hash on long sessions.
