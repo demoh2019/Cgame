@@ -32,6 +32,7 @@ const PartySupplyRequest = preload("res://scripts/shared/party_supply_request.gd
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
 const HealingAggro = preload("res://scripts/shared/healing_aggro.gd")
+const MedicCover = preload("res://scripts/shared/medic_cover.gd")
 const Threat = preload("res://scripts/shared/threat.gd")
 const FinishingStrike = preload("res://scripts/shared/finishing_strike.gd")
 const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
@@ -223,6 +224,7 @@ class Player:
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
 	var party_aid_timer: float = 0.0 # Shared medical/provisions support cooldown.
+	var medic_cover_cooldown: float = 0.0 # Server-only healer aggro rescue cooldown.
 	var supply_request_last_at: float = -INF # Session-only anti-spam for supply distress signals.
 	var feast_timer: float = 0.0 # Session-only prepared group meal cooldown.
 	var combat_stress: float = 0.0 # Session-only PvE pressure; not a permanent condition.
@@ -1642,6 +1644,54 @@ func _record_party_healing_threat(medic: Player, patients: Array) -> void:
 		var generated: float = HealingAggro.threat_for(total_healed)
 		if generated > 0.0:
 			Threat.record(infected.threat, medic.id, generated)
+
+
+## Panic button for medics: ask the nearest real, armed guardian to cover them.
+## No client-controlled enemy IDs, guardian IDs, range, aggro, threat or damage.
+## Only currently engaged non-boss infected with genuine medic attention qualify.
+func cmd_medic_cover(peer_id: int) -> Dictionary:
+	var medic: Player = players.get(peer_id)
+	if medic == null or not _alive(medic):
+		return {"ok": false, "reason": "dead"}
+	if medic.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not medic.position.is_finite() or _is_safe(medic.position):
+		return {"ok": false, "reason": "safe_zone"}
+	if parties.members_of(peer_id).size() < 2:
+		return {"ok": false, "reason": "not_in_party"}
+	if not MedicCover.has_staff(medic):
+		return {"ok": false, "reason": "need_restoration_staff"}
+	if medic.medic_cover_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown",
+			"remaining": medic.medic_cover_cooldown}
+	if medic.combat_energy < MedicCover.ENERGY_COST:
+		return {"ok": false, "reason": "no_energy"}
+	var guardian = MedicCover.guardian_for(medic, players, parties, world)
+	if guardian == null:
+		return {"ok": false, "reason": "no_guardian"}
+	var candidates: Array = []
+	for infected in zombies.values():
+		if MedicCover.can_redirect(infected, medic, guardian, world):
+			candidates.append(infected)
+	if candidates.is_empty():
+		return {"ok": false, "reason": "no_engaged_infected"}
+	# Stable target selection avoids positional jitter in a crowded battle.
+	candidates.sort_custom(func(a, b): return a.id < b.id)
+	var redirected: int = 0
+	for i in range(mini(MedicCover.MAX_ENEMIES, candidates.size())):
+		var infected = candidates[i]
+		if infected.force_taunt(guardian.id, MedicCover.TAUNT_SECONDS):
+			MedicCover.fade_threat(infected, medic.id)
+			redirected += 1
+	if redirected <= 0:
+		return {"ok": false, "reason": "no_engaged_infected"}
+	medic.combat_energy -= MedicCover.ENERGY_COST
+	medic.medic_cover_cooldown = MedicCover.COOLDOWN
+	medic.action = {}
+	events.append({"type": "medic_cover", "peer": peer_id,
+		"by": guardian.id, "count": redirected})
+	return {"ok": true, "guardian": guardian.id, "count": redirected,
+		"cooldown": MedicCover.COOLDOWN, "energy": medic.combat_energy}
 
 
 ## A trusted survival check broadcasts only a genuine low-supply request
@@ -5744,6 +5794,7 @@ func _tick_players(delta: float) -> void:
 			player.dirty_character = true
 		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
 		player.party_aid_timer = maxf(0.0, player.party_aid_timer - maxf(0.0, delta))
+		player.medic_cover_cooldown = maxf(0.0, player.medic_cover_cooldown - maxf(0.0, delta))
 		player.feast_timer = maxf(0.0, player.feast_timer - maxf(0.0, delta))
 		player.guardian_timer = maxf(0.0, player.guardian_timer - maxf(0.0, delta))
 		player.guardian_brace = maxf(0.0, player.guardian_brace - maxf(0.0, delta))
@@ -7327,6 +7378,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"rest_cooldown": player.rest_cooldown,
 			"rested_xp_credit": player.rested_xp_credit,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
+			"medic_cover_cooldown": player.medic_cover_cooldown,
 			"stim_cooldown": player.stim_cooldown, "flare_seconds": player.flare_seconds,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 			"visual_signature": _visual_signature_for(player),
