@@ -1208,6 +1208,8 @@ func _update_hud() -> void:
 		_stats.text += "\nRESTED TRAINING: %d bonus XP left (Z to rest at camp)" % survivor.rested_xp_credit
 	if survivor.sharpened_hits > 0:
 		_stats.text += "\nSHARPENED: %d infected melee hits left (End)" % survivor.sharpened_hits
+	if survivor.wedge_charges > 0:
+		_stats.text += "\nMINING WEDGES: %d rich ore/stone harvests left (+2, loud)" % survivor.wedge_charges
 	if survivor.plated_hits > 0:
 		_stats.text += "\nARMOR PLATE: %d infected claw hits left (Insert)" % survivor.plated_hits
 	if not sim.lightning_pending.is_empty():
