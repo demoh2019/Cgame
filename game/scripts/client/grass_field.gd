@@ -31,11 +31,13 @@ shader_type spatial;
 render_mode cull_disabled, diffuse_lambert_wrap, specular_disabled, shadows_disabled;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/vegetation_wind_space.gdshaderinc"
+#include "res://assets/shaders/foliage_spectral_optics.gdshaderinc"
 global uniform float aa_weather_wetness;
 global uniform float aa_weather_rain;
 global uniform vec3 aa_vegetation_wind;
 // One renderer-wide intensity controls thin-blade backlighting for all grass tiles.
 global uniform float aa_grass_transmission;
+global uniform float aa_leaf_optics_quality;
 // Quality-gated geometric-normal tilt, computed at the vertex without textures.
 global uniform float aa_grass_normal_wind;
 uniform float fade_start = 44.0;
@@ -110,7 +112,15 @@ void fragment() {
 	BACKLIGHT = vec3(0.0);
 	if (aa_grass_transmission > 0.001 && grass_light_fade > 0.001) {
 		float leaf_tip_mask = smoothstep(0.18, 0.92, tipness);
-		BACKLIGHT = color * leaf_tip_mask * aa_grass_transmission
+		// Thin tips transmit more sun than opaque roots. No new blade meshes,
+		// textures, light passes or opaque/transparent pipeline changes.
+		vec3 spectral = vec3(1.0);
+		if (aa_leaf_optics_quality > 0.001) {
+			float thickness = mix(1.28, 0.58, leaf_tip_mask);
+			spectral = aa_foliage_spectral_filter(color, thickness,
+				aa_leaf_optics_quality);
+		}
+		BACKLIGHT = color * leaf_tip_mask * spectral * aa_grass_transmission
 			* grass_light_fade * (1.0 - wet_grass * 0.16);
 	}
 	ROUGHNESS = 0.85;
