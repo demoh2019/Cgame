@@ -144,7 +144,7 @@ void AnimationLODController::_update(double p_delta) {
 		// Raid and elite attack tells stay smooth even if distant crowd motion
 		// runs at half/quarter rate. Never animate invisible/far-away actors,
 		// and never exceed the per-frame priority budget.
-		const bool urgent = entry.high_priority && base_interval > 1 && urgent_slots > 0;
+		const bool urgent = entry.high_priority && base_interval > 1 && urgent_slots > 0 && mixer->is_active();
 		if (urgent) {
 			urgent_slots--;
 		}
