@@ -125,6 +125,11 @@ vec2 sample_blurred(vec3 p_pos, vec2 p_coord) {
 void main() {
 	// Pixel being shaded
 	ivec2 ssC = ivec2(gl_GlobalInvocationID.xy);
+	// Compute dispatch is rounded to 8x8 threadgroups. Never write
+	// outside the actual AO target, including odd internal resolutions.
+	if (any(greaterThanEqual(ssC, imageSize(dest_image)))) {
+		return;
+	}
 
 #ifdef MODE_NON_SMART
 

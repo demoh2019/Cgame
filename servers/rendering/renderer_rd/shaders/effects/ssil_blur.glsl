@@ -66,10 +66,14 @@ vec4 sample_blurred_wide(ivec2 p_pos, vec2 p_coord) {
 	vec4 ssil_valueB = textureLodOffset(source_ssil, vec2(p_coord), 0.0, ivec2(0, 2));
 
 	vec4 edgesLRTB = unpack_edges(imageLoad(source_edges, p_pos).r);
-	edgesLRTB.x *= unpack_edges(imageLoad(source_edges, p_pos + ivec2(-2, 0)).r).y;
-	edgesLRTB.z *= unpack_edges(imageLoad(source_edges, p_pos + ivec2(0, -2)).r).w;
-	edgesLRTB.y *= unpack_edges(imageLoad(source_edges, p_pos + ivec2(2, 0)).r).x;
-	edgesLRTB.w *= unpack_edges(imageLoad(source_edges, p_pos + ivec2(0, 2)).r).z;
+	// Edge metadata is an image2D, not a clamped texture sampler.
+	// Preserve the bilaterally weighted GI edge response while avoiding
+	// undefined imageLoad at corners of half-resolution surfaces.
+	ivec2 last_edge = imageSize(source_edges) - ivec2(1);
+	edgesLRTB.x *= unpack_edges(imageLoad(source_edges, clamp(p_pos + ivec2(-2, 0), ivec2(0), last_edge)).r).y;
+	edgesLRTB.z *= unpack_edges(imageLoad(source_edges, clamp(p_pos + ivec2(0, -2), ivec2(0), last_edge)).r).w;
+	edgesLRTB.y *= unpack_edges(imageLoad(source_edges, clamp(p_pos + ivec2(2, 0), ivec2(0), last_edge)).r).x;
+	edgesLRTB.w *= unpack_edges(imageLoad(source_edges, clamp(p_pos + ivec2(0, 2), ivec2(0), last_edge)).r).z;
 
 	float sum_weight = 0.8;
 	vec4 sum = ssil_value * sum_weight;
@@ -117,6 +121,11 @@ vec4 sample_blurred(ivec2 p_pos, vec2 p_coord) {
 void main() {
 	// Pixel being shaded
 	ivec2 ssC = ivec2(gl_GlobalInvocationID.xy);
+	// Compute dispatch is rounded to 8x8 threadgroups. Never write
+	// outside the actual AO target, including odd internal resolutions.
+	if (any(greaterThanEqual(ssC, imageSize(dest_image)))) {
+		return;
+	}
 
 #ifdef MODE_NON_SMART
 

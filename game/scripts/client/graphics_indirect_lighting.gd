@@ -1,4 +1,5 @@
 extends RefCounted
+const GraphicsOcclusionQuality = preload("res://scripts/client/graphics_occlusion_quality.gd")
 ## Scalable local illumination for Forward+ terrain, PBR structures and vegetation.
 ## Unlike a duplicate post shader this reuses Godot's internal half-resolution
 ## SSAO (horizon-based) and SSIL buffers. Compatibility and Mobile allocate none.
@@ -51,6 +52,9 @@ static func apply(environment: Environment, level: int, method: String) -> void:
 	if environment == null:
 		return
 	var p: Dictionary = settings(level, method)
+	# Native SSAO quality respects the active graphics/backend profile.
+	# No new AO buffer is allocated: reuse Godot's half-res pass.
+	GraphicsOcclusionQuality.apply(level, method)
 	environment.ssao_enabled = bool(p["ssao_enabled"])
 	# Never enable SDFGI while High's SSIL bounce is still active.
 	# In the reverse transition, release SDFGI before enabling SSIL.
