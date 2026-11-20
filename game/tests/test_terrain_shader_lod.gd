@@ -122,8 +122,12 @@ func run(t) -> void:
 			"landscape fragments skip the redundant cloud texture lookup")
 		t.check(fragment_code.contains("aa_vertex_cloud_shadow"),
 			"cloud color grading uses interpolated shadow strength")
-		t.check(fragment_code.contains("float mid = fbm(p * 0.07 + 3.0);"),
-			"mid-frequency soil detail remains pixel-accurate")
+		t.check(fragment_code.contains("float mid = aa_vertex_mid;") and
+			fragment_code.contains("mid = mix(aa_vertex_mid, fbm(p * 0.07 + 3.0), detail_fade);"),
+			"near soil detail remains pixel-accurate and distant terrain interpolates vertices")
+		t.check(fragment_code.find("float mid = aa_vertex_mid;") <
+			fragment_code.find("vec2 warp = vec2(mid - 0.44,"),
+			"domain warp never reads an uninitialized mid-frequency field")
 		t.check(fragment_code.contains("textureGrad(normal_layers"),
 			"high-frequency normal detail remains supported")
 
