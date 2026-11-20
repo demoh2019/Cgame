@@ -4,7 +4,25 @@ extends Node
 const Assets = preload("res://scripts/client/assets.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const ReverbZones = preload("res://scripts/client/reverb_zones.gd")
+const AudioMix = preload("res://scripts/client/audio_mix.gd")
+const AudioSurfaces = preload("res://scripts/client/audio_surfaces.gd")
+const AudioVoices = preload("res://scripts/client/audio_voices.gd")
+const AudioSpatial = preload("res://scripts/client/audio_spatial.gd")
+const AudioDucking = preload("res://scripts/client/audio_ducking.gd")
+const AudioAmbient = preload("res://scripts/client/audio_ambient.gd")
 var _sfx_bus := -1
+var _sfx_lowpass := -1
+var _rain: AudioStreamPlayer
+var _wind: AudioStreamPlayer
+var _voices: Array = [] # {"player", "name", "audibility", "born"} for the voice limiter.
+var _listener := Vector3.ZERO
+var _ground := Callable()
+var _humidity := 0.0
+var _duck_target := 0.0
+var _duck := 0.0
+var _duck_hold := 0.0
+var _surface := "grass"
+var _cutoff := AudioSpatial.OPEN_CUTOFF
 
 var _ambience: AudioStreamPlayer
 var _steps: AudioStreamPlayer
@@ -28,26 +46,45 @@ var _combat_left := 0.0
 
 
 func _ready() -> void:
+	AudioMix.ensure_buses()
 	_sfx_bus = ReverbZones.ensure_bus()
+	_sfx_lowpass = AudioMix.ensure_lowpass(ReverbZones.BUS)
+	AudioMix.load_all()
 	_ambience = AudioStreamPlayer.new()
+	_ambience.bus = "Ambience"
 	_ambience.stream = Assets.sound("ambience")
 	_ambience.volume_db = -22.0
 	add_child(_ambience)
 	_steps = AudioStreamPlayer.new()
 	_steps.stream = Assets.sound("walking")
 	_steps.volume_db = -14.0
+	_steps.bus = ReverbZones.BUS
 	add_child(_steps)
 	if _ambience.stream is AudioStreamOggVorbis:
 		(_ambience.stream as AudioStreamOggVorbis).loop = true
 	if _steps.stream is AudioStreamOggVorbis:
 		(_steps.stream as AudioStreamOggVorbis).loop = true
 	_ambience.play()
+	_rain = _noise_loop(0.0, 7)
+	_wind = _noise_loop(0.93, 11)
 	_music = AudioStreamPlayer.new()
+	_music.bus = "Music"
 	_music.volume_db = MUSIC_DB
 	add_child(_music)
 	var adaptive := _adaptive_music()
 	if adaptive != null:
 		_music.stream = adaptive
+
+
+## A silent looping generated-noise player on the Ambience bus (rain hiss / wind rumble).
+func _noise_loop(smooth: float, noise_seed: int) -> AudioStreamPlayer:
+	var player := AudioStreamPlayer.new()
+	player.stream = AudioAmbient.noise_stream(2.0, smooth, noise_seed)
+	player.bus = "Ambience"
+	player.volume_db = -80.0
+	add_child(player)
+	player.play()
+	return player
 
 
 ## The day, night and combat clips (one track each, picked at random), with a crossfade from any clip to any other:
@@ -116,6 +153,7 @@ func play_sting(track: String, volume_db: float = -9.0) -> void:
 	var player := AudioStreamPlayer.new()
 	player.stream = load(path)
 	player.volume_db = volume_db
+	player.bus = "Music"
 	add_child(player)
 	player.finished.connect(player.queue_free)
 	player.play()
@@ -147,9 +185,36 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	player.unit_size = 14.0
 	player.max_distance = 90.0
 	player.bus = ReverbZones.BUS
+	var distance := position.distance_to(_listener)
+	# Voice limiting: cull the quietest/oldest voice, or drop this one when it is the weakest.
+	var loudness := AudioVoices.audibility(volume_db, distance, player.unit_size)
+	var now := Time.get_ticks_msec() / 1000.0
+	var snapshot: Array = []
+	for v in _voices:
+		snapshot.append({"name": v["name"], "audibility": v["audibility"], "age": now - float(v["born"])})
+	var cull := AudioVoices.victim(snapshot, sound_name, loudness)
+	if cull == AudioVoices.DROP_NEW:
+		player.free()
+		return
+	if cull >= 0:
+		var old: Dictionary = _voices[cull]
+		_voices.remove_at(cull)
+		if is_instance_valid(old["player"]):
+			(old["player"] as Node).queue_free()
+	# Random pitch and volume per shot, then air absorption and terrain occlusion on the source itself.
+	var variation := AudioVoices.variation(randf(), randf())
+	player.pitch_scale = variation["pitch"]
+	player.volume_db = volume_db + float(variation["db"])
+	var occluded: bool = _ground.is_valid() and AudioSpatial.terrain_blocked(_listener + Vector3(0, 1.6, 0), position, _ground)
+	player.attenuation_filter_cutoff_hz = AudioSpatial.source_cutoff(distance, occluded, _humidity)
+	player.attenuation_filter_db = -18.0 if occluded else -24.0
 	add_child(player)
 	player.global_position = position
-	player.finished.connect(player.queue_free)
+	var record := {"player": player, "name": sound_name, "audibility": loudness, "born": now}
+	_voices.append(record)
+	player.finished.connect(func() -> void:
+		_voices.erase(record)
+		player.queue_free())
 	player.play()
 
 
@@ -159,6 +224,7 @@ func play_ui(sound_name: String, volume_db: float = -6.0) -> void:
 	var player := AudioStreamPlayer.new()
 	player.stream = Assets.sound(sound_name)
 	player.volume_db = volume_db
+	player.bus = "UI"
 	add_child(player)
 	player.finished.connect(player.queue_free)
 	player.play()
@@ -169,8 +235,82 @@ func update_reverb(underground: bool, biome: String, delta: float) -> void:
 	ReverbZones.blend(ReverbZones.reverb(_sfx_bus), ReverbZones.zone_for(underground, biome), 1.0 - exp(-2.0 * delta))
 
 
+## Per-frame environment audio: listener filtering, surface footsteps, weather loops, biome bed, music ducking.
+## `storm` 0..1, `wind` is the wind speed, `covered` = sheltered or underground.
+func update_environment(listener: Vector3, ground_height: Callable, underground: bool, biome: String,
+		daylight: float, storm: float, wind: float, covered: bool, speed: float, delta: float) -> void:
+	_listener = listener
+	_ground = ground_height
+	_humidity = clampf(storm, 0.0, 1.0)
+	# Listener low-pass on the SFX bus (underground / storm).
+	_cutoff = AudioSpatial.glide(_cutoff, AudioSpatial.listener_cutoff(underground, storm), delta)
+	var lowpass := AudioServer.get_bus_effect(_sfx_bus, _sfx_lowpass) as AudioEffectLowPassFilter if _sfx_lowpass >= 0 else null
+	if lowpass != null:
+		lowpass.cutoff_hz = _cutoff
+	# Surface footsteps retune the walking loop.
+	var h := float(ground_height.call(listener.x, listener.z)) if ground_height.is_valid() else 1.0
+	_surface = AudioSurfaces.surface_for(underground, biome, h, Defs.WATER_LEVEL)
+	var profile := AudioSurfaces.profile(_surface)
+	_steps.pitch_scale = AudioSurfaces.speed_pitch(float(profile["pitch"]), speed)
+	_steps.volume_db = float(profile["db"])
+	# Biome ambience bed, rain and wind loops.
+	var bed := AudioAmbient.bed(biome, daylight, underground)
+	_ambience.pitch_scale = lerpf(_ambience.pitch_scale, float(bed["pitch"]), 1.0 - exp(-1.5 * delta))
+	_ambience.volume_db = lerpf(_ambience.volume_db, float(bed["db"]), 1.0 - exp(-1.5 * delta))
+	_rain.volume_db = lerpf(_rain.volume_db, AudioAmbient.rain_db(storm, covered), 1.0 - exp(-2.0 * delta))
+	_wind.volume_db = lerpf(_wind.volume_db, AudioAmbient.wind_db(wind, storm, underground), 1.0 - exp(-2.0 * delta))
+	# Sidechain-style ducking of music and ambience.
+	_duck_hold = maxf(_duck_hold - delta, 0.0)
+	if _duck_hold <= 0.0:
+		_duck_target = 0.0
+	_duck = AudioDucking.step(_duck, _duck_target, delta)
+	var music_bus := AudioServer.get_bus_index("Music")
+	if music_bus != -1:
+		AudioServer.set_bus_volume_db(music_bus, AudioMix.linear_to_db(AudioMix.volumes["Music"]) + _duck if AudioMix.volumes["Music"] > 0.0001 else -80.0)
+	var amb_bus := AudioServer.get_bus_index("Ambience")
+	if amb_bus != -1:
+		AudioServer.set_bus_volume_db(amb_bus, AudioMix.linear_to_db(AudioMix.volumes["Ambience"]) + _duck * 0.4 if AudioMix.volumes["Ambience"] > 0.0001 else -80.0)
+
+
+## Dips music for a big event (kept for HOLD seconds, deepest dip wins).
+func duck(depth_db: float) -> void:
+	if depth_db < _duck_target:
+		_duck_target = depth_db
+	if depth_db < 0.0:
+		_duck_hold = AudioDucking.HOLD
+
+
+var _slider := 0
+
+
+## Ctrl+Home picks the next volume slider (Master/Music/SFX/UI/Ambience), Ctrl+PageUp/PageDown change it.
+## Returns the message to show, or "" when the key is not an audio shortcut.
+func handle_key(event: InputEventKey) -> String:
+	if not event.ctrl_pressed:
+		return ""
+	var bus: String = AudioMix.SLIDERS[_slider]
+	match event.keycode:
+		KEY_HOME:
+			_slider = (_slider + 1) % AudioMix.SLIDERS.size()
+			bus = AudioMix.SLIDERS[_slider]
+		KEY_PAGEUP:
+			AudioMix.nudge(bus, 0.1)
+		KEY_PAGEDOWN:
+			AudioMix.nudge(bus, -0.1)
+		_:
+			return ""
+	return "Volume %s: %d%% (Ctrl+Home bus, Ctrl+PgUp/PgDn)" % [bus, roundi(float(AudioMix.volumes[bus]) * 100.0)]
+
+
+func surface() -> String:
+	return _surface
+
+
 ## Reacts to one server event. `height` is the ground height used for positions without one.
 func on_event(event: Dictionary, local_peer: int, ground_height: Callable) -> void:
+	_ground = ground_height
+	if event.get("peer", local_peer) == local_peer or event["type"] in ["zombie_died", "knockback"]:
+		duck(AudioDucking.depth_for(str(event["type"])))
 	var position := Vector3.ZERO
 	if event.has("x") and event.has("z"):
 		position = Vector3(event["x"], float(ground_height.call(event["x"], event["z"])) + 1.0, event["z"])

@@ -1296,6 +1296,10 @@ func _update_time_of_day(delta: float) -> void:
 	if audio != null:
 		audio.update_music(WorldCycle.daylight(clock), delta)
 		audio.update_reverb(underground, _visual_biome, delta)
+		if client != null and client.you.has("x"):
+			audio.update_environment(client.display_position(), client.world.height_at, underground, _visual_biome,
+				WorldCycle.daylight(clock), atmosphere.storm, _visual_weather_wind.length(),
+				underground or bool(weather.get("sheltered", false)), avatar_model.speed if avatar_model != null else 0.0, delta)
 	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO, atmosphere.storm)
 	if client != null and client.you.has("x"):
 		var here: Vector3 = client.display_position()
@@ -1443,6 +1447,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if client == null or not client.welcomed or hud == null:
 		return
+	if audio != null and event is InputEventKey and event.pressed and event.ctrl_pressed and not _typing():
+		var volume_message: String = audio.handle_key(event)
+		if volume_message != "":
+			hud.say(volume_message)
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventKey and event.pressed and not event.echo and not _typing():
 		match event.keycode:
 			KEY_K:

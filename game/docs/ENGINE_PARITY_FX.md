@@ -30,6 +30,7 @@ quality; each settles 5 s then sinks into the ground and is freed. Rigs without
 mannequin bones and Low quality keep the old instant despawn.
 Tests: `tests/test_ragdoll.gd`.
 
+
 ## Combat and interaction VFX (Unity VFX Graph/Shuriken, Unreal Niagara)
 
 `scripts/client/combat_vfx.gd` (one node, wired from `online_main.gd` via
@@ -77,3 +78,25 @@ hidden entirely when no effect is active). Pure helpers are unit-tested in
 
 Already present and not duplicated: trauma camera shake, tilt-shift depth of
 field and vignette in `post_grade.gdshader`, mouse-wheel zoom with limits.
+
+## Audio parity
+
+All logic is in pure helpers under `scripts/client/audio_*.gd`, wired through
+`audio.gd` (`update_environment`, `play_at`, `on_event`, `handle_key`) and a few
+lines in `online_main.gd`. Tests: `tests/test_audio_parity.gd`.
+
+| Feature | Unity | Unreal | Cgame |
+| --- | --- | --- | --- |
+| Surface footsteps | Physic-material footsteps | Physical Surface + footstep notifies | `audio_surfaces.gd`: stone / water / sand / mud / leaves / grass from biome, height vs water level and dungeon; retunes pitch and loudness by surface and speed. |
+| Terrain occlusion | Low Pass + occlusion plugins | Attenuation occlusion | `audio_spatial.terrain_blocked`: height-field line test listener to source; occluded one-shots get a 1.4 kHz cutoff. |
+| Air absorption | Rolloff + low-pass curve | Attenuation air absorption | `attenuation_filter_cutoff_hz` per `AudioStreamPlayer3D`, falls with distance and rain. |
+| Listener low-pass | Mixer snapshots | Submix effects | `AudioEffectLowPassFilter` on the SFX bus, glides (log domain) underground or in a storm. |
+| Voice limiting | AudioSource priority, max voices | Sound Concurrency | `audio_voices.gd`: 24 voices, 5 per sound; quietest/oldest culled, weaker newcomer dropped. |
+| Pitch/volume variation | Random pitch scripts | Sound Cue Modulator | +-8 % pitch, +-1.5 dB per one-shot. |
+| Sidechain ducking | Mixer Duck Volume | Sound Mix / submix sidechain | `audio_ducking.gd`: death, outpost, skill-up, kills dip Music (Ambience 40 %); fast attack, slow release. |
+| Bus layout + sliders | AudioMixer groups | Sound Classes | Master / Music / SFX / UI / Ambience (`audio_mix.gd`), persisted in `user://albion_after_audio.cfg`; Ctrl+Home picks the bus, Ctrl+PgUp/PgDn changes it. |
+| Weather loops | Looping sources | Ambient Sound / MetaSounds noise | `audio_ambient.gd`: generated rain hiss and wind rumble loops scaled by storm and wind, quieter under cover. |
+| Biome ambience beds | Mixer snapshots | Ambient Sound actors | Ambience loop pitch/level glides per biome, quieter at night and underground. |
+
+Not done: doppler on projectiles (one-shots are static on the client), HRTF or
+convolution reverb.

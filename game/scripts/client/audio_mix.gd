@@ -1,0 +1,67 @@
+extends RefCounted
+## Bus layout and persisted volume sliders (Unity AudioMixer groups / Unreal Sound Classes).
+## Buses: Master, Music, SFX (reverb + low-pass, see reverb_zones.gd), UI, Ambience.
+
+const PATH := "user://albion_after_audio.cfg"
+const BUSES := ["Music", "UI", "Ambience"] # SFX is created by ReverbZones.
+const SLIDERS := ["Master", "Music", "SFX", "UI", "Ambience"]
+static var volumes := {"Master": 1.0, "Music": 1.0, "SFX": 1.0, "UI": 1.0, "Ambience": 1.0}
+
+
+static func linear_to_db(v: float) -> float:
+	return -80.0 if v <= 0.0001 else 20.0 * log(v) / log(10.0)
+
+
+static func ensure_buses() -> void:
+	for bus in BUSES:
+		if AudioServer.get_bus_index(bus) == -1:
+			AudioServer.add_bus()
+			var i := AudioServer.bus_count - 1
+			AudioServer.set_bus_name(i, bus)
+			AudioServer.set_bus_send(i, "Master")
+
+
+## Adds a low-pass filter as the last effect of `bus` once; returns its effect index (or -1).
+static func ensure_lowpass(bus: String) -> int:
+	var i := AudioServer.get_bus_index(bus)
+	if i == -1:
+		return -1
+	for e in AudioServer.get_bus_effect_count(i):
+		if AudioServer.get_bus_effect(i, e) is AudioEffectLowPassFilter:
+			return e
+	var lp := AudioEffectLowPassFilter.new()
+	lp.cutoff_hz = 20500.0
+	AudioServer.add_bus_effect(i, lp)
+	return AudioServer.get_bus_effect_count(i) - 1
+
+
+static func set_volume(bus: String, linear: float, persist: bool = true) -> void:
+	linear = clampf(linear, 0.0, 1.0)
+	volumes[bus] = linear
+	var i := AudioServer.get_bus_index(bus)
+	if i != -1:
+		AudioServer.set_bus_volume_db(i, linear_to_db(linear))
+	if persist:
+		save()
+
+
+static func save() -> void:
+	var config := ConfigFile.new()
+	config.load(PATH)
+	for bus in SLIDERS:
+		config.set_value("volume", bus, volumes[bus])
+	config.save(PATH)
+
+
+static func load_all() -> void:
+	var config := ConfigFile.new()
+	if config.load(PATH) != OK:
+		return
+	for bus in SLIDERS:
+		set_volume(bus, float(config.get_value("volume", bus, 1.0)), false)
+
+
+## Moves the slider by `step` (0..1), snapped to 5 %; returns the new value.
+static func nudge(bus: String, step: float) -> float:
+	set_volume(bus, snappedf(float(volumes.get(bus, 1.0)) + step, 0.05))
+	return float(volumes[bus])
