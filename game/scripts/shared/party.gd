@@ -86,12 +86,12 @@ func raise_standard(peer_id: int, position: Vector3, now: float) -> Dictionary:
 
 
 ## A party member can only benefit from its own current group marker.
-func standard_at(peer_id: int, position: Vector3, now: float) -> Dictionary:
+func standard_at(peer_id: int, position: Vector3, now: float, delta: float = 0.0) -> Dictionary:
 	var group_id: int = group_of(peer_id)
 	if group_id == 0 or not groups.has(group_id):
 		return {}
 	var marker: Dictionary = groups[group_id].get("standard", {})
-	if marker.is_empty() or float(marker["expires"]) <= now:
+	if marker.is_empty() or float(marker["expires"]) <= now - maxf(0.0, delta):
 		return {}
 	var source := Vector3(float(marker["x"]), float(marker["y"]), float(marker["z"]))
 	if not RallyStandard.within_range(source, position):
@@ -99,6 +99,16 @@ func standard_at(peer_id: int, position: Vector3, now: float) -> Dictionary:
 	if not groups[group_id]["members"].has(int(marker["by"])):
 		return {}
 	return marker
+
+
+## Remove a temporary standard if the owner dies or leaves the party.
+func clear_standard_by(peer_id: int) -> void:
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return
+	var group: Dictionary = groups[group_id]
+	if int(group.get("standard", {}).get("by", -1)) == peer_id:
+		group.erase("standard")
 
 
 func members_of(peer_id: int) -> Array:
