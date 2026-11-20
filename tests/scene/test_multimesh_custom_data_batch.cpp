@@ -44,8 +44,8 @@ TEST_CASE("[SceneTree][MultiMesh] Batch custom data supports unsorted and hidden
 	indices.push_back(3);
 	indices.push_back(0);
 	PackedColorArray colors;
-	colors.push_back(Color(0.1, 0.2, 0.3, 1));
-	colors.push_back(Color(0.8, 0.7, 0.6, 1));
+	colors.push_back(Color(0.25, 0.5, 0.75, 1));
+	colors.push_back(Color(0.75, 0.5, 0.25, 1));
 	CHECK(mm->set_instance_custom_data_batch(indices, colors));
 	CHECK(mm->get_instance_custom_data(3) == colors[0]);
 	CHECK(mm->get_instance_custom_data(0) == colors[1]);
