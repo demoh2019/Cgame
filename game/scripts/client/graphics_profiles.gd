@@ -3,7 +3,7 @@ extends RefCounted
 ## Gameplay simulation and the single persisted quality preference remain unchanged.
 
 const PRESETS := [
-	{"sky_radiance": 32, "sky_use_cached_radiance": true, "sky_refresh_interval": 1.40, "sky_scattering_strength": 0.0, "atmospheric_lut_strength": 0.0, "sun_transmittance_strength": 0.0, "sun_transmittance_strength": 0.0, "moon_detail_strength": 0.0, "volumetric_cloud_steps": 0, "cirrus_detail": 0, "cirrus_opacity": 0.00, "cloud_lighting_strength": 0.0, "grass_build_radius": 70.0, "grass_fade_start": 26.0,
+	{"sky_radiance": 32, "sky_use_cached_radiance": true, "sky_refresh_interval": 1.40, "sky_scattering_strength": 0.0, "atmospheric_lut_strength": 0.0, "sun_transmittance_strength": 0.0, "moon_detail_strength": 0.0, "volumetric_cloud_steps": 0, "cirrus_detail": 0, "cirrus_opacity": 0.00, "cloud_lighting_strength": 0.0, "grass_build_radius": 70.0, "grass_fade_start": 26.0,
 		"grass_fade_end": 40.0, "grass_budget_usec": 2000,
 		"water_ripples": 0.0, "shallow_scattering_strength": 0.0, "wind_wave_strength": 0.0, "water_anisotropy_strength": 0.0, "wind_foam_strength": 0.00, "sun_glitter_strength": 0.00, "water_refraction_strength": 0.00, "water_refraction_start": 12.0, "water_refraction_end": 22.0, "wet_leaf_gloss": 0.0, "leaf_transmission": 0.0, "leaf_optics_quality": 0.00, "grass_transmission": 0.0, "grass_normal_wind": 0.00, "canopy_occlusion": 0.42, "water_detail_start": 20.0, "water_detail_end": 45.0, "shore_glimmer_strength": 0.0, "shore_surf_strength": 0.0, "shore_glimmer_start": 12.0, "shore_glimmer_end": 22.0, "tree_shadow_radius": 0.0, "bush_shadow_radius": 0.0,
 		"structure_shadow_radius": 0.0, "chunk_radius": 125.0, "chunk_unload": 190.0},
