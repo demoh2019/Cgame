@@ -6,6 +6,8 @@ extends Node3D
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const SharedAssets = preload("res://scripts/forest_shared_assets.gd")
 const TerrainPatch = preload("res://scripts/streamed_terrain_patch.gd")
+const NavigationPatch = preload("res://scripts/streamed_navigation_patch.gd")
+const ForestPatrol = preload("res://scripts/streamed_patrol_agent.gd")
 const CELL_SIZE: float = 32.0
 const TREE_COUNT: int = 54
 const GRASS_COUNT: int = 225
@@ -28,6 +30,12 @@ func _ready() -> void:
     ground.name = "TerrainPatch"
     add_child(ground)
 
+    # Streamed NavigationRegion3D follows the exact tile transform/lifetime
+    # and exposes its synchronization state through native WorldPartition3D.
+    var navigation := NavigationPatch.new()
+    navigation.name = "GroundNavigation"
+    add_child(navigation)
+
     # A single static body groups primitive collision shapes for this cell.
     # The engine unloads these shapes together with the visual vegetation.
     obstacles = StaticBody3D.new()
@@ -38,6 +46,7 @@ func _ready() -> void:
     _spawn_trees()
     _spawn_grass()
     _spawn_rocks()
+    _spawn_patrol(cell_x, cell_z)
     set_high_quality(high_quality)
 
 
@@ -159,6 +168,21 @@ func _spawn_instances(label: String, mesh: Mesh,
         node.visibility_range_end = 145.0
     add_child(node)
     return node
+
+
+func _spawn_patrol(cell_x: int, cell_z: int) -> void:
+    # One lightweight navigator for about a third of loaded tiles, including
+    # the home clearing. Remote streaming sources also spawn their own AI,
+    # but the patrol remains inert until the NavigationServer has synchronized.
+    if (absi(cell_x) + absi(cell_z)) % 3 != 0:
+        return
+    var patrol := ForestPatrol.new()
+    patrol.name = "ForestPatrol"
+    patrol.set("owning_cell", Vector2i(cell_x, cell_z))
+    patrol.set("streaming_world", get_parent() as WorldPartition3D)
+    patrol.position = Vector3(
+        16.0, _world_height(16.0, 16.0) + 1.0, 16.0)
+    add_child(patrol)
 
 
 func set_high_quality(high: bool) -> void:
