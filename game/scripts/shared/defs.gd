@@ -197,6 +197,15 @@ static func _build_items() -> void:
 			"reach": 3.5, "weight": 3.6, "value": 54 * t})
 		_add_recipe("spear_%d" % t, "spear_%d" % t, 1,
 			spear_inputs, "workbench", 6.0)
+		# Salvaged steel and tiered metalwork create a short-range sweeper:
+		# unlike a spear's narrow pierce, its skill can strike a small melee arc.
+		_add_item("machete_%d" % t, {"name": "Ruin Machete T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 13.0 + 8.0 * (t - 1), "cooldown": 0.8,
+			"weight": 2.8 + 0.2 * t, "value": 50 * t})
+		_add_recipe("machete_%d" % t, "machete_%d" % t, 1,
+			{"plank_%d" % t: 2, "bar_%d" % t: 2, "scrap": 1},
+			"workbench", 6.0)
 		# Lightweight classless archery: affordable arrows, limited distance and noise.
 		_add_item("bow_%d" % t, {"name": "Survival Bow T%d" % t,
 			"kind": "weapon", "weapon": "ranged", "tier": t,

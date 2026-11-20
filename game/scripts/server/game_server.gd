@@ -2380,10 +2380,12 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		player.noise_timer = maxf(player.noise_timer, float(shot_noise["seconds"]))
 	var origin := Vector2(player.position.x, player.position.z)
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": ranged, "skill": skill["id"], "x": player.position.x, "z": player.position.z})
-	# Spear attacks can pierce a narrow forward line. The server selects
-	# distinct enemies and retains party / PvP protection for every hit.
-	var max_hits: int = clampi(int(skill.get("pierce_targets", 1)), 1, 3)
-	var use_line: bool = ranged or max_hits > 1
+	# Piercing thrust follows a thin line; machete cleave sweeps the
+	# existing melee cone. Each distinct target goes through the ordinary
+	# server-side zombie / party / guild / zone protection checks.
+	var max_hits: int = clampi(int(skill.get("cleave_targets",
+		skill.get("pierce_targets", 1))), 1, 3)
+	var use_line: bool = ranged or (max_hits > 1 and not skill.has("cleave_targets"))
 	var ignored: Dictionary = {}
 	var count := 0
 	var first_target: String = ""

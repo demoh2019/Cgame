@@ -24,6 +24,14 @@ The camera, environment, streaming terrain and entities use native Godot/Cgame
 rendering. This **local preview is not multiplayer**; remote networking and
 account persistence must be wired into this scene before claiming an MMO.
 
+New melee choice: **Ruin Machetes T1–T4** combine scavenged scrap with
+tier-matched planks and metal bars at the workbench. Equip one with **4**
+(which cycles owned weapons), then press **G** for Cleaving Arc: 28 combat
+energy, 7-second cooldown, up to three distinct enemies in a 3-metre
+forward melee cone. Spear thrusts keep their narrower piercing line.
+A miss still spends energy; safe-hub, party, and guild PvP protection
+remain authoritative. No native engine change is needed.
+
 Controls: WASD movement, Shift sprint, E gather, Q loot, F attack,
 Tab choose recipe, C craft, 1 food, 2 water, 3 bandage,
 4 equip club, 5 equip jacket, R drink from natural water.
