@@ -51,8 +51,8 @@ func on_event(event: Dictionary, at: Vector3) -> void:
 	var field := blast_for(event_type)
 	if field != Vector2.ZERO:
 		debris.blast(at - Vector3(0, 0.4, 0), field.x, field.y)
-	if event_type == "attack" and bool(event.get("ranged", false)):
-		debris.eject_casing(at + Vector3(0, 0.1, 0), float(event.get("yaw", 0.0)))
+	# Casings for ranged attacks come from combat_vfx.gd, which reads the server's `dir`
+	# (attack events carry no yaw); spawning here too would double every casing.
 
 
 func update(delta: float, player: Vector3) -> void:
