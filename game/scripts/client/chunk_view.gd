@@ -13,6 +13,7 @@ const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
+const TerrainAnisotropy = preload("res://scripts/client/terrain_anisotropy.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
@@ -165,6 +166,7 @@ void fragment() {
 static var _ground_material: ShaderMaterial
 static var _textured_material: ShaderMaterial
 static var _textured_checked := false
+static var terrain_filter_quality := 1
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
 const TERRAIN_DIR := "res://assets/textures/terrain/"
 # The colour each layer should average to: photos of real ground pulled toward the stylised palette of the models.
@@ -197,12 +199,30 @@ static var _grass_frame := -1
 static var _grass_spent_usec := 0
 ## Runtime tuning keeps the grass LOD system intact while bounding draw distance and generation spikes.
 const GRASS_GROUP := "aa_grass_tiles"
+const TERRAIN_GROUP := "aa_textured_terrain"
 const SCENERY_GROUP := "aa_scenery_multimeshes"
 static var scenery_quality := 1
 static var grass_budget_usec := 2500
 static var grass_range := 110.0
 static var grass_visibility_end := 82.0
 static var grass_fade_end := GrassField.FADE_END
+
+
+## Sampler quality follows the existing graphics preset without changing any
+## world or texture data. New chunks use the cached shader of the chosen tier.
+static func configure_terrain_filter(quality: int) -> void:
+	terrain_filter_quality = clampi(quality, 0, 3)
+	if _textured_material != null:
+		TerrainAnisotropy.apply(_textured_material, terrain_filter_quality)
+
+
+## Existing chunks keep their road/biome maps and material parameter overrides.
+static func apply_terrain_filter(terrain: Node) -> void:
+	if terrain == null or not terrain.is_in_group(TERRAIN_GROUP):
+		return
+	var shader_material: ShaderMaterial = terrain.get("material") as ShaderMaterial
+	if shader_material != null:
+		TerrainAnisotropy.apply(shader_material, terrain_filter_quality)
 
 
 static func configure_grass(build_radius: float, budget_usec: int, fade_start: float, fade_end: float) -> void:
@@ -284,7 +304,7 @@ static func textured_material() -> ShaderMaterial:
 	var normal_array := Texture2DArray.new()
 	if albedo_array.create_from_images(albedo) != OK or normal_array.create_from_images(normals) != OK:
 		return null
-	var shader := load("res://assets/shaders/ground.gdshader") as Shader
+	var shader: Shader = TerrainAnisotropy.shader_for_quality(terrain_filter_quality)
 	if shader == null:
 		return null
 	_textured_material = ShaderMaterial.new()
@@ -539,6 +559,8 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.material = _ground_with_roads(origin)
 	_terrain.set_height_data(heights, Vector2i(SAMPLES, SAMPLES))
 	add_child(_terrain)
+	if _textured_material != null:
+		_terrain.add_to_group(TERRAIN_GROUP)
 
 
 # Trees by biome (nature kit file names; "painted:N" is a tree of the hand-painted collection).
