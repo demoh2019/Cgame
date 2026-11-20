@@ -116,3 +116,11 @@ The defaults use the engine's normal **half-resolution SSR** setting to avoid a 
 This copies the *budgeting strategy*, not the renderer implementation, from HDRP-style screen-space reflections. Performance must be measured in the same scene at the same graphics scale with SSR off/High/Ultra, including wet ruined streets at sunset and indoor metallic equipment. Watch for screen-edge disappearance, ghost-like reflections and increased GPU frame time. SSR is a screen-space approximation and cannot reflect objects outside the camera view. The headless test suite checks profile limits, backend fallback and live property assignment; it cannot validate visual quality or actual GPU speed.
 
 Reference: [Godot environment SSR documentation](https://docs.godotengine.org/en/4.5/tutorials/3d/environment_and_post_processing.html).
+
+## MSAA leaf alpha-to-coverage (native resolution)
+
+Like Unity HDRP alpha clipping, the animated cutout foliage material now has a shared **Alpha-to-Coverage** shader variant. This smooths hard silhouettes on sunlit tree crowns and bushes without adding draw calls, material texture samples or transparency sorting. Godot's spatial `alpha_to_coverage` render mode and `ALPHA_ANTIALIASING_EDGE`/`ALPHA_TEXTURE_COORDINATE` outputs are used in the variant, retaining the original `ALPHA_SCISSOR_THRESHOLD`, wet-leaf PBR and translucency logic.
+
+**Important:** Coverage is enabled only when the actual viewport MSAA is active on a renderer that supports alpha-to-coverage (Forward+ or Vulkan Mobile). With the current graphics profiles, manually selected High/Ultra on Forward+ use 2x/4x MSAA, while Forward+ FSR2, dynamic resolution, and GL Compatibility continue to use the original efficient cutout shader. Runtime quality changes swap shared shader references on the already-cached meshes; imported materials, instances, collision and network state are untouched.
+
+Check moving foliage against bright sky and strong directional backlight at 720p and 1080p. Look for reduced stair-stepping/shimmering, preserved cutout density (no see-through thinning), stable distant mip levels and unchanged shadow rendering. Actual GPU cost must be measured; no FPS improvement is implied by the shader change.

@@ -160,7 +160,52 @@ void fragment() {
 const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
 
 static var _shader: Shader
+static var _msaa_cutout_shader: Shader
+static var _coverage_enabled := false
 static var _cache: Dictionary = {}
+
+
+## Alpha-to-coverage is supported only by the Vulkan renderers with actual MSAA.
+## FSR2 provides its own AA and disables MSAA, so that path uses the original shader.
+static func supports_alpha_coverage(method: String, msaa: int) -> bool:
+	return (method == "forward_plus" or method == "mobile") and msaa != Viewport.MSAA_DISABLED
+
+
+## Shared shaders: only thin alpha-cutout leaves use the MSAA variant.
+## Neither variant adds a texture fetch, a draw call, or a transparent sorting pass.
+static func _shader_for_surface(cutout: bool) -> Shader:
+	if _shader == null:
+		_shader = Shader.new()
+		_shader.code = SHADER_CODE
+	if not cutout or not _coverage_enabled:
+		return _shader
+	if _msaa_cutout_shader == null:
+		_msaa_cutout_shader = Shader.new()
+		_msaa_cutout_shader.code = SHADER_CODE.replace(
+			"render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;",
+			"render_mode cull_disabled, diffuse_burley, specular_schlick_ggx, alpha_to_coverage;").replace(
+			"ALPHA_SCISSOR_THRESHOLD = scissor;",
+			"ALPHA_SCISSOR_THRESHOLD = scissor;\n\t\tALPHA_ANTIALIASING_EDGE = 0.3;\n\t\tALPHA_TEXTURE_COORDINATE = UV;")
+	return _msaa_cutout_shader
+
+
+## Switching quality changes the shader of already cached instances in place:
+## no mesh regeneration, no texture duplication and no world-chunk rebuild.
+static func configure_antialiasing(enabled: bool) -> void:
+	if _coverage_enabled == enabled:
+		return
+	_coverage_enabled = enabled
+	for mesh in _cache.values():
+		if not mesh is ArrayMesh:
+			continue
+		var geometry := mesh as ArrayMesh
+		for surface in geometry.get_surface_count():
+			var material := geometry.surface_get_material(surface) as ShaderMaterial
+			if material != null and bool(material.get_shader_parameter("cut_out")):
+				material.shader = _shader_for_surface(true)
+
+
+
 
 
 ## StandardMaterial3D can pack roughness and metallic in arbitrary channels.
@@ -185,9 +230,6 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 		return null
 	if _cache.has(key):
 		return _cache[key]
-	if _shader == null:
-		_shader = Shader.new()
-		_shader.code = SHADER_CODE
 	var copy: ArrayMesh = ArrayMesh.new()
 	var height := maxf(source.get_aabb().size.y, 0.1)
 	for surface in source.get_surface_count():
@@ -196,8 +238,11 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 		var base := source.surface_get_material(surface)
 		if base is BaseMaterial3D:
 			var standard := base as BaseMaterial3D
+			var cut: bool = standard.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED
 			var material := ShaderMaterial.new()
-			material.shader = _shader
+			# Select the shader before setting imported PBR parameters so the
+			# material uniforms are initialized once for either quality variant.
+			material.shader = _shader_for_surface(cut)
 			material.set_shader_parameter("sway", sway)
 			material.set_shader_parameter("instance_tinted", tinted)
 			material.set_shader_parameter("height_ref", height)
@@ -235,7 +280,6 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 			material.set_shader_parameter("red_to_green", texture != null and texture.resource_path.ends_with("Leaves_TwistedTree_C.png"))
 			if texture != null:
 				material.set_shader_parameter("albedo_tex", texture)
-			var cut: bool = standard.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED
 			material.set_shader_parameter("cut_out", cut)
 			material.set_shader_parameter("scissor", standard.alpha_scissor_threshold if standard.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR else 0.5)
 			copy.surface_set_material(surface, material)

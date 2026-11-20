@@ -114,3 +114,39 @@ func run(t) -> void:
 	var controller: GDScript = load("res://scripts/client/graphics_quality.gd") as GDScript
 	t.check(controller != null and controller.source_code.contains('global_shader_parameter_set(&"aa_leaf_transmission"'),
 		"graphics preset broadcasts shared leaf translucency to all foliage")
+
+	t.current = "alpha-to-coverage leaf edges"
+	t.check(Foliage.supports_alpha_coverage("forward_plus", Viewport.MSAA_2X), "Forward+ 2x MSAA supports leaf edge coverage")
+	t.check(Foliage.supports_alpha_coverage("forward_plus", Viewport.MSAA_4X), "Forward+ 4x MSAA supports leaf edge coverage")
+	t.check(Foliage.supports_alpha_coverage("mobile", Viewport.MSAA_2X), "Vulkan Mobile may use coverage when MSAA is active")
+	t.check(not Foliage.supports_alpha_coverage("forward_plus", Viewport.MSAA_DISABLED), "FSR2 without MSAA stays on the cheaper cutout")
+	t.check(not Foliage.supports_alpha_coverage("gl_compatibility", Viewport.MSAA_4X), "OpenGL Compatibility never attempts coverage")
+	var cut_source := BoxMesh.new()
+	var source_material := StandardMaterial3D.new()
+	source_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	source_material.alpha_scissor_threshold = 0.46
+	source_material.albedo_color = Color(0.31, 0.44, 0.21)
+	cut_source.material = source_material
+	Foliage.configure_antialiasing(true)
+	var cut_mesh := Foliage.swayed(cut_source, "regression_foliage_msaa_edges", 0.15) as ArrayMesh
+	t.check(cut_mesh != null, "cutout foliage mesh can be generated with coverage")
+	if cut_mesh != null:
+		var mat := cut_mesh.surface_get_material(0) as ShaderMaterial
+		t.check(mat != null, "cutout material is still a shader material")
+		if mat != null:
+			var coverage_shader := mat.shader
+			t.check(coverage_shader.code.contains("alpha_to_coverage;"), "MSAA shader requests alpha to coverage")
+			t.check(coverage_shader.code.contains("ALPHA_ANTIALIASING_EDGE = 0.3;"), "MSAA edge threshold is specified")
+			t.check(coverage_shader.code.contains("ALPHA_TEXTURE_COORDINATE = UV;"), "alpha coverage receives source texture UVs")
+			t.near(float(mat.get_shader_parameter("scissor")), 0.46, 0.0001, "cutout threshold is retained")
+			Foliage.configure_antialiasing(false)
+			t.check(mat.shader != coverage_shader, "turning off MSAA restores original cutout variant")
+			t.eq(mat.get_shader_parameter("albedo_color"), source_material.albedo_color, "switch retains original artist tint")
+			t.eq(mat.get_shader_parameter("cut_out"), true, "switch does not disable alpha cutout")
+			Foliage.configure_antialiasing(true)
+			t.check(mat.shader == coverage_shader, "existing foliage material recovers coverage without rebuilding mesh")
+			t.check(Foliage.swayed(cut_source, "regression_foliage_msaa_edges", 0.15) == cut_mesh, "mesh remains in the cache on quality switches")
+	Foliage.configure_antialiasing(false)
+	var quality_source: GDScript = load("res://scripts/client/graphics_quality.gd") as GDScript
+	t.check(quality_source != null and quality_source.source_code.contains("Foliage.configure_antialiasing("),
+		"graphics quality applies antialiasing after resolution/MSAA selection")
