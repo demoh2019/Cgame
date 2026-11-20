@@ -1746,7 +1746,7 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 		selected_item_id = PartyAid.best_item(source.inventory,
 			recipient.survival.health, recipient.survival.infection,
 			recipient.survival.bleeding, recipient.survival.fracture,
-			recipient.survival.max_health)
+			recipient.survival.max_health, recipient.survival.food_poisoning)
 		if selected_item_id.is_empty():
 			return {"ok": false, "reason": "no_treatment"}
 	var data: Dictionary = Defs.item(selected_item_id)
@@ -1757,10 +1757,11 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	if not PartyAid.has_effect(data, recipient.survival.health, recipient.survival.infection,
 			recipient.survival.bleeding, recipient.survival.fracture,
 			recipient.survival.hunger, recipient.survival.thirst,
-			recipient.survival.max_health):
+			recipient.survival.max_health, recipient.survival.food_poisoning):
 		return {"ok": false, "reason": "no_effect"}
 	var hp_before: float = recipient.survival.health
 	var infection_before: float = recipient.survival.infection
+	var poison_before: float = recipient.survival.food_poisoning
 	var bleeding_before: float = recipient.survival.bleeding
 	var fracture_before: float = recipient.survival.fracture
 	var hunger_before: float = recipient.survival.hunger
@@ -1772,6 +1773,7 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	if bool(data.get("stop_bleeding", false)):
 		recipient.survival.stop_bleeding()
 	recipient.survival.treat_fracture(float(data.get("fracture_treatment", 0.0)))
+	recipient.survival.treat_food_poisoning(float(data.get("food_poison_treatment", 0.0)))
 	recipient.survival.eat(float(data.get("food", 0.0)))
 	recipient.survival.drink(float(data.get("drink", 0.0)))
 	source.party_aid_timer = PartyAid.COOLDOWN
@@ -1782,6 +1784,7 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var healed: float = recipient.survival.health - hp_before
 	_record_party_healing_threat(source, [{"recipient": recipient, "healed": healed}])
 	var cured: float = infection_before - recipient.survival.infection
+	var poison_treated: float = poison_before - recipient.survival.food_poisoning
 	var staunched: float = bleeding_before - recipient.survival.bleeding
 	var splinted: float = fracture_before - recipient.survival.fracture
 	var fed: float = recipient.survival.hunger - hunger_before
@@ -1789,10 +1792,11 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	events.append({"type": "party_aid", "peer": target_id, "by": peer_id,
 		"item": selected_item_id, "heal": healed, "cure": cured,
 		"bleeding_stopped": staunched, "fracture_treated": splinted,
-		"food": fed, "drink": hydrated})
+		"food_poison_treated": poison_treated, "food": fed, "drink": hydrated})
 	return {"ok": true, "peer": target_id, "item": selected_item_id,
 		"heal": healed, "cure": cured, "bleeding_stopped": staunched,
-		"fracture_treated": splinted, "food": fed, "drink": hydrated}
+		"fracture_treated": splinted, "food_poison_treated": poison_treated,
+		"food": fed, "drink": hydrated}
 
 
 ## One authenticated medic spends one crafted pack for up to three injured
