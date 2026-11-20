@@ -150,3 +150,33 @@ func run(t) -> void:
 	var quality_source: GDScript = load("res://scripts/client/graphics_quality.gd") as GDScript
 	t.check(quality_source != null and quality_source.source_code.contains("Foliage.configure_antialiasing("),
 		"graphics quality applies antialiasing after resolution/MSAA selection")
+
+	t.current = "crown self-occlusion"
+	t.check(ProjectSettings.has_setting("shader_globals/aa_canopy_occlusion"), "shared canopy AO global is registered")
+	t.check(shader.contains("global uniform float aa_canopy_occlusion;"), "foliage shader reads shared occlusion strength")
+	t.check(shader.contains("canopy_height = clamp((VERTEX.y - height_min)"), "crown depth uses source-mesh-relative height")
+	t.check(shader.contains("float open_sky = smoothstep("), "crown shading fades smoothly toward the tip")
+	t.check(shader.contains("if (cut_out && aa_canopy_occlusion > 0.001)"), "opaque bark does not spend GPU time on crown shading")
+	t.check(shader.contains("occlusion = mix(1.0, orm.r, pbr_detail);"), "source PBR ORM occlusion still fades with distance")
+	t.check(shader.contains("AO = clamp(occlusion * (1.0 - crown_shadow)"), "procedural occlusion multiplies rather than replaces imported AO")
+	t.check(shader.contains("ALBEDO *= 1.0 - crown_shadow * 0.12;"), "Compatibility receives subtle crown-depth shading")
+	var last_strength := 1.0
+	for level in VisualProfiles.PRESETS.size():
+		var strength: float = float(VisualProfiles.settings(level).get("canopy_occlusion", -1.0))
+		t.check(strength >= 0.0 and strength <= 0.5, "canopy strength remains bounded for %s" % GraphicsQuality.NAMES[level])
+		t.check(strength < last_strength, "shadow approximation decreases as native SSAO quality rises")
+		last_strength = strength
+	var aabb_mesh := BoxMesh.new()
+	aabb_mesh.size = Vector3(1.0, 5.0, 1.0)
+	aabb_mesh.material = StandardMaterial3D.new()
+	var transformed := Foliage.swayed(aabb_mesh, "regression_canopy_bounds", 0.1) as ArrayMesh
+	t.check(transformed != null, "mesh can be shaded with height-relative AO")
+	if transformed != null:
+		var material := transformed.surface_get_material(0) as ShaderMaterial
+		t.check(material != null, "source still has its PBR shader")
+		if material != null:
+			t.near(float(material.get_shader_parameter("height_min")), -2.5, 0.0001, "AABB base is passed to shader")
+			t.near(float(material.get_shader_parameter("height_ref")), 5.0, 0.0001, "AABB vertical size is passed to shader")
+	var control_script: GDScript = load("res://scripts/client/graphics_quality.gd") as GDScript
+	t.check(control_script != null and control_script.source_code.contains('global_shader_parameter_set(&"aa_canopy_occlusion"'),
+		"quality switch propagates new canopy ambient lighting")

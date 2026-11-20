@@ -82,3 +82,8 @@ aa_specular_aa_strength={
 "type": "float",
 "value": 0.0
 }
+
+aa_canopy_occlusion={
+"type": "float",
+"value": 0.32
+}

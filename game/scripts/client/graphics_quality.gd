@@ -112,6 +112,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# Thin leaf transmission is a single PBR backlight term; no new material copies.
 	RenderingServer.global_shader_parameter_set(&"aa_leaf_transmission",
 		float(world_profile["leaf_transmission"]))
+	# Material-side crown AO is cheaper than a second screen-space shadow pass.
+	RenderingServer.global_shader_parameter_set(&"aa_canopy_occlusion",
+		float(world_profile["canopy_occlusion"]))
 	# Shadow maps are budgeted independently from normal object visibility.
 	ShadowBudget.configure(world_profile)
 	# One global torch budget covers all streamed underground rooms.

@@ -147,3 +147,13 @@ Related: `game/tests/test_terrain_shader_lod.gd` checks the early rejection, cac
 The textured terrain now shades a subtle **moss-stained patina** on old asphalt, concrete, brick and timber (layers 9–12). It reuses existing layer weights and `mid` noise to shift albedo slightly toward green/brown aging and increase dry roughness. The treatment vanishes with the settlement paving weights and does not alter terrain geometry or gameplay.
 
 The effect adds **no texture fetches, no new fBM calls and no render passes**; it adds only a few fragment ALU instructions. Rain puddle gloss remains, and existing terrain LOD and layer-sampling budgets are unchanged. Visual-check road edges and ruins in rain/clear weather; benchmark GPU frame times rather than assuming FPS gains.
+
+## Canopy self-occlusion
+
+Inspired by Unreal Engine Distance Field AO and Unity HDRP Contact Shadows, Albion After now adds a **low-cost, material-local approximation** to shade the inner and lower portions of tree canopies. This does not implement distance fields, ray marching or ground contact shadows; the tree height is only a cheap predictor of foliage crowding.
+
+Foliage vertices encode canopy height normalized by the source mesh's AABB, so the same material works across different tree packs and altitudes. In fragment shading, only alpha-cutout foliage gets a small, smoothly varying ambient occlusion factor. Imported ORM occlusion and existing distance-dependent PBR texture LOD are preserved and multiplied by the new factor rather than replaced. A subtle 12% colour weighting keeps some canopy depth visible in GL Compatibility (which lacks native SSAO); bark and other opaque materials remain unchanged.
+
+The shared Godot shader global `aa_canopy_occlusion` is **0.42 / 0.32 / 0.24 / 0.18** on Performance / Balanced / High / Ultra, respectively. The approximation is deliberately reduced as real shadow maps and SSAO become available, avoiding overly dark crowns. No extra texture lookups, screen-space passes, new render targets or draw calls are added. It works with current MultiMesh batching, wind, backlight, alpha-to-coverage and rain.
+
+Validation: view tree trunks and deep crowns at midday, twilight and in storms, with camera motion and various tree packs; ensure there is no hard banding or excessive darkness. Compare forest p50/p95 GPU timings across presets on target hardware before claiming FPS gains.
