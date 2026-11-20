@@ -5,13 +5,15 @@ const FilmicSky = preload("res://addons/visual_quality/filmic_sky.gdshader")
 const QualityManager = preload("res://addons/visual_quality/quality_manager.gd")
 const AtmosphereController = preload("res://addons/visual_quality/atmosphere_controller.gd")
 const ChunkedFoliage = preload("res://addons/visual_quality/foliage_chunks.gd")
-const FlyCamera = preload("res://addons/visual_quality/fly_camera.gd")
+const CharacterController = preload("res://addons/visual_quality/character_controller.gd")
 const ExplorationQuest = preload("res://addons/visual_quality/exploration_quest.gd")
 
 var controller: AdaptiveResolution3D
 var manager: VisualQualityManager
 var atmosphere: AtmosphereController3D
 var foliage: ChunkedFoliage3D
+var player_character: VisualLabCharacter3D
+var movement_label: Label
 var quest: ExplorationQuest3D
 var quest_progress_label: Label
 var quest_hint_label: Label
@@ -58,12 +60,13 @@ func _ready() -> void:
 	_update_atmosphere_ui(atmosphere.hour, atmosphere.overcast)
 	quest = ExplorationQuest.new()
 	quest.name = "ExplorationQuest3D"
-	quest.player = get_viewport().get_camera_3d()
+	quest.player = player_character.get_view_camera()
 	quest.progress_changed.connect(_on_quest_progress)
 	quest.pickup_hint_changed.connect(_on_quest_hint)
 	quest.quest_finished.connect(_on_quest_finished)
 	add_child(quest)
 	_build_quest_ui()
+	_build_movement_ui()
 	_on_quest_progress(quest.collected_count(), quest.positions.size())
 	_on_quest_hint(quest.current_hint())
 
@@ -75,7 +78,7 @@ func _update_foliage_quality(profile: int, _adaptive: bool) -> void:
 
 func _process(delta: float) -> void:
 	if status_label != null:
-		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Q/E height | Shift sprint | hold RMB + drag to look" % [
+		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Space jump | Shift sprint | RMB look | V fly" % [
 			Engine.get_frames_per_second(), get_viewport().scaling_3d_scale,
 			RenderingServer.get_current_rendering_method()
 		]
@@ -213,6 +216,29 @@ func _on_quest_finished() -> void:
 	_on_quest_hint("Quest complete: you restored the forest light! Press R to replay.")
 
 
+func _build_movement_ui() -> void:
+	var ui: CanvasLayer = get_node("VisualQualityUI") as CanvasLayer
+	movement_label = Label.new()
+	movement_label.position = Vector2(18, 358)
+	ui.add_child(movement_label)
+	var toggle: Button = Button.new()
+	toggle.text = "V: Toggle walk / fly"
+	toggle.position = Vector2(18, 390)
+	toggle.pressed.connect(_toggle_player_mode)
+	ui.add_child(toggle)
+	player_character.movement_mode_changed.connect(_update_movement_mode)
+	_update_movement_mode(player_character.is_flying)
+
+
+func _toggle_player_mode() -> void:
+	player_character.set_fly_mode(not player_character.is_flying)
+
+
+func _update_movement_mode(is_flying: bool) -> void:
+	if is_instance_valid(movement_label):
+		movement_label.text = "Character mode: %s" % ("FLY  |  Q/E vertical" if is_flying else "WALK  |  Space jump")
+
+
 func _build_world() -> void:
 	sky_material = ShaderMaterial.new()
 	sky_material.shader = FilmicSky
@@ -232,6 +258,17 @@ func _build_world() -> void:
 	sun_light.light_energy = 1.4
 	sun_light.shadow_enabled = true
 	add_child(sun_light)
+
+	# Physics floor and visible surface are separate, so the player cannot fall through.
+	var static_ground: StaticBody3D = StaticBody3D.new()
+	static_ground.name = "GroundCollision"
+	var ground_collision: CollisionShape3D = CollisionShape3D.new()
+	var ground_box: BoxShape3D = BoxShape3D.new()
+	ground_box.size = Vector3(85.0, 0.4, 85.0)
+	ground_collision.shape = ground_box
+	static_ground.position.y = -0.2
+	static_ground.add_child(ground_collision)
+	add_child(static_ground)
 
 	var floor: MeshInstance3D = MeshInstance3D.new()
 	var plane: PlaneMesh = PlaneMesh.new()
@@ -256,13 +293,25 @@ func _build_world() -> void:
 		material.roughness = 0.12 + 0.10 * float(i)
 		object.material_override = material
 		add_child(object)
+		var obstacle: StaticBody3D = StaticBody3D.new()
+		obstacle.name = "Obstacle_%d" % i
+		var obstacle_shape: CollisionShape3D = CollisionShape3D.new()
+		if i % 2 == 0:
+			var sphere_shape: SphereShape3D = SphereShape3D.new()
+			sphere_shape.radius = 1.0
+			obstacle_shape.shape = sphere_shape
+		else:
+			var cube_shape: BoxShape3D = BoxShape3D.new()
+			cube_shape.size = Vector3.ONE * 2.0
+			obstacle_shape.shape = cube_shape
+		obstacle.add_child(obstacle_shape)
+		object.add_child(obstacle)
 
-	var camera: Camera3D = FlyCamera.new()
-	camera.position = Vector3(0.0, 6.5, 19.5)
-	camera.fov = 64.0
-	add_child(camera)
-	camera.look_at(Vector3(0, 1, 0))
-	camera.current = true
+	player_character = CharacterController.new()
+	player_character.name = "Player"
+	player_character.position = Vector3(0.0, 0.2, 6.0)
+	add_child(player_character)
+	player_character.get_view_camera().look_at(Vector3(0.0, 1.4, -12.0))
 
 	var ui: CanvasLayer = CanvasLayer.new()
 	ui.name = "VisualQualityUI"
