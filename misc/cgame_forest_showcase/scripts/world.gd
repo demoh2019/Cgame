@@ -3,6 +3,7 @@
 extends Node3D
 
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
+const TileCache = preload("res://scripts/terrain_tile_cache.gd")
 const GameSave = preload("res://scripts/game_save.gd")
 const WORLD_EXTENT: float = 64.0
 const CHUNK_EDGE: float = 32.0
@@ -234,7 +235,7 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 166)
+    hint.position = Vector2(22, 184)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
     hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
@@ -269,10 +270,12 @@ func _refresh_hud() -> void:
     var pending: int = world_partition.get_pending_cell_count() if world_partition != null else 0
     var inflight: int = world_partition.get_inflight_request_count() if world_partition != null else 0
     var failed: int = world_partition.get_failed_cell_count() if world_partition != null else 0
+    var cache: Dictionary = TileCache.get_stats()
     hud.text = "AURORA FOREST  |  Cgame / Godot 4.8\n" \
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
-        + "Ячейки: %d/%d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d" % [loaded, configured, pending, inflight, failed, current_region.x, current_region.y]
+        + "Ячейки: %d/%d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pending, inflight, failed, current_region.x, current_region.y] \
+        + "Кэш земли: %d/%d   попадания: %d   промахи: %d" % [cache["entries"], cache["capacity"], cache["hits"], cache["misses"]]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
