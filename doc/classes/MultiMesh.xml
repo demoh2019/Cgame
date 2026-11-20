@@ -119,6 +119,16 @@
 				For the color to take effect, ensure that [member use_colors] is [code]true[/code] on the [MultiMesh] and [member BaseMaterial3D.vertex_color_use_as_albedo] is [code]true[/code] on the material. If you intend to set an absolute color instead of tinting, make sure the material's albedo color is set to pure white ([code]Color(1, 1, 1)[/code]).
 			</description>
 		</method>
+		<method name="set_instance_custom_data_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="custom_data" type="PackedColorArray" />
+			<description>
+				Sets the per-instance custom shader payload for multiple MultiMesh slots, using matching entries in [param indices] and [param custom_data]. This can be used for instanced gameplay progress indicators, animation phases, health meters and other packed simulation values.
+				[member use_custom_data] must be enabled. Indices may be in any order but must be unique and within [member instance_count]; hidden instances may also be updated. Values must be finite and the two arrays must have equal lengths. Invalid input returns [code]false[/code] before modifying any instance. An empty pair is valid if custom data is enabled.
+				This only groups calls across the script-to-engine boundary. Internally, each custom data value still requires an individual RenderingServer update; it is not one GPU command or a new instancing renderer. The method does not change transforms, visibility, collision or instance count.
+			</description>
+		</method>
 		<method name="set_instance_custom_data">
 			<return type="void" />
 			<param index="0" name="instance" type="int" />
