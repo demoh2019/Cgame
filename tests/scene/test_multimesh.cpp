@@ -77,6 +77,69 @@ TEST_CASE("[SceneTree][MultiMeshInstance3D] Reassigning the same MultiMesh is sa
 	memdelete(instance);
 }
 
+
+TEST_CASE("[SceneTree][MultiMesh] Repeated visible instance counts preserve state") {
+	Ref<MultiMesh> multimesh;
+	multimesh.instantiate();
+	multimesh->set_transform_format(MultiMesh::TRANSFORM_3D);
+	multimesh->set_instance_count(4);
+	CHECK(multimesh->get_visible_instance_count() == -1);
+
+	multimesh->set_visible_instance_count(2);
+	CHECK(multimesh->get_visible_instance_count() == 2);
+	multimesh->set_visible_instance_count(2);
+	CHECK(multimesh->get_visible_instance_count() == 2);
+
+	multimesh->set_visible_instance_count(0);
+	multimesh->set_visible_instance_count(0);
+	CHECK(multimesh->get_visible_instance_count() == 0);
+	multimesh->set_visible_instance_count(-1);
+	multimesh->set_visible_instance_count(-1);
+	CHECK(multimesh->get_visible_instance_count() == -1);
+}
+
+TEST_CASE("[SceneTree][MultiMesh] Physics interpolation quality updates only when changed") {
+	Ref<MultiMesh> multimesh;
+	multimesh.instantiate();
+
+	CHECK(multimesh->get_physics_interpolation_quality() == MultiMesh::INTERP_QUALITY_FAST);
+	multimesh->set_physics_interpolation_quality(MultiMesh::INTERP_QUALITY_FAST);
+	CHECK(multimesh->get_physics_interpolation_quality() == MultiMesh::INTERP_QUALITY_FAST);
+	multimesh->set_physics_interpolation_quality(MultiMesh::INTERP_QUALITY_HIGH);
+	multimesh->set_physics_interpolation_quality(MultiMesh::INTERP_QUALITY_HIGH);
+	CHECK(multimesh->get_physics_interpolation_quality() == MultiMesh::INTERP_QUALITY_HIGH);
+	multimesh->set_physics_interpolation_quality(MultiMesh::INTERP_QUALITY_FAST);
+	CHECK(multimesh->get_physics_interpolation_quality() == MultiMesh::INTERP_QUALITY_FAST);
+}
+
+TEST_CASE("[SceneTree][MultiMeshInstance3D] Mesh gathering respects visible instance count") {
+	Ref<MultiMesh> multimesh;
+	multimesh.instantiate();
+	Ref<BoxMesh> mesh;
+	mesh.instantiate();
+	multimesh->set_transform_format(MultiMesh::TRANSFORM_3D);
+	multimesh->set_mesh(mesh);
+	multimesh->set_instance_count(3);
+	multimesh->set_instance_transform(0, Transform3D(Basis(), Vector3(1, 0, 0)));
+	multimesh->set_instance_transform(1, Transform3D(Basis(), Vector3(2, 0, 0)));
+	multimesh->set_instance_transform(2, Transform3D(Basis(), Vector3(3, 0, 0)));
+
+	MultiMeshInstance3D *instance = memnew(MultiMeshInstance3D);
+	instance->set_multimesh(multimesh);
+
+	CHECK(instance->get_meshes().size() == 6);
+	multimesh->set_visible_instance_count(2);
+	CHECK(instance->get_meshes().size() == 4);
+	multimesh->set_visible_instance_count(0);
+	CHECK(instance->get_meshes().is_empty());
+	multimesh->set_visible_instance_count(-1);
+	CHECK(instance->get_meshes().size() == 6);
+
+	instance->set_multimesh(Ref<MultiMesh>());
+	CHECK(instance->get_meshes().is_empty());
+	memdelete(instance);
+}
+
 } // namespace TestMultiMesh
 
 #endif // _3D_DISABLED

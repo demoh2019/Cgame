@@ -33,6 +33,8 @@
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 
+#include <climits>
+
 #ifndef NAVIGATION_3D_DISABLED
 #include "scene/resources/3d/navigation_mesh_source_geometry_data_3d.h"
 #include "scene/resources/navigation_mesh.h"
@@ -95,10 +97,14 @@ Array MultiMeshInstance3D::get_meshes() const {
 
 	Ref<Mesh> mesh = multimesh->get_mesh();
 
+	// Navigation and editor geometry gathering can collect thousands of instances.
+	// Allocate the result once instead of growing it for every transform/mesh pair.
+	ERR_FAIL_COND_V(count > INT_MAX / 2, Array());
 	Array results;
+	ERR_FAIL_COND_V(results.resize(count * 2) != OK, Array());
 	for (int i = 0; i < count; i++) {
-		results.push_back(multimesh->get_instance_transform(i));
-		results.push_back(mesh);
+		results[i * 2] = multimesh->get_instance_transform(i);
+		results[i * 2 + 1] = mesh;
 	}
 	return results;
 }
