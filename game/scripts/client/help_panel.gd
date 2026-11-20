@@ -4,7 +4,7 @@ extends PanelContainer
 const ENTRIES := [
 	["MOVE AND FIGHT", [
 		["WASD", "move"], ["Shift", "sprint"], ["F4", "ride / dismount crafted bike"], ["[", "toggle crafted bike dynamo lamp: night light or stealth"], ["PgUp", "service bike drive on foot"], ["PgDn", "repair damaged bike frame"], ["Space", "dodge"], ["Mouse", "aim; left click attacks"], ["G", "weapon skill"],
-		["F1", "guardian taunt"], ["4", "next weapon"], ["5", "equip armor"], ["Wheel", "zoom"]]],
+		["F1", "guardian taunt"], ["Delete", "prepare ranged sight kit"], ["End", "sharpen melee weapon"], ["4", "next weapon"], ["5", "equip armor"], ["Wheel", "zoom"]]],
 	["GATHER AND CRAFT", [
 		["E", "gather (trees and mining attract infected) / loot"], ["C", "crafting window"], ["0", "quick-cook best fish"],
 		["T", "cast fishing rod (Shift: baited)"], ["I / Tab", "inventory (click: use or equip; right click: stash)"], ["B", "stash (at the hub)"]]],

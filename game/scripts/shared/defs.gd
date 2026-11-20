@@ -360,6 +360,11 @@ static func _build_items() -> void:
 		"tier": 1, "stack": 5, "weight": 1.1, "value": 38})
 	_add_recipe("field_armor_plate", "field_armor_plate", 1,
 		{"bar_1": 1, "cloth_1": 2, "scrap": 2}, "workbench", 4.0)
+	# Classless ranged preparation, bound to one owned equipped weapon.
+	_add_item("field_sighting_kit", {"name": "Salvaged Sighting Kit", "kind": "sighting_kit",
+		"tier": 1, "stack": 5, "weight": 0.65, "value": 32})
+	_add_recipe("field_sighting_kit", "field_sighting_kit", 1,
+		{"bar_1": 1, "fiber_1": 2, "scrap": 2}, "workbench", 4.0)
 	_add_item("field_whetstone", {"name": "Salvaged Whetstone", "kind": "whetstone",
 		"tier": 1, "stack": 10, "weight": 0.35, "value": 18})
 	_add_recipe("field_whetstone", "field_whetstone", 1,

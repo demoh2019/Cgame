@@ -159,6 +159,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_bike_lamp", KEY_BRACKETLEFT)
 	_bind_key("survive_bike_service", KEY_PAGEUP)
 	_bind_key("survive_whetstone", KEY_END)
+	_bind_key("survive_sighting_kit", KEY_DELETE)
 	_bind_key("survive_armor_plate", KEY_INSERT)
 	_bind_key("survive_bike_repair", KEY_PAGEDOWN)
 	_bind_key("survive_survey", KEY_F3)
@@ -961,6 +962,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Drive service", sim.cmd_use(LOCAL_PLAYER_ID, "bike_service_kit"))
 	elif event.is_action_pressed("survive_whetstone"):
 		_result("Sharpen weapon", sim.cmd_use(LOCAL_PLAYER_ID, "field_whetstone"))
+	elif event.is_action_pressed("survive_sighting_kit"):
+		_result("Calibrate ranged weapon", sim.cmd_use(LOCAL_PLAYER_ID, "field_sighting_kit"))
 	elif event.is_action_pressed("survive_armor_plate"):
 		_result("Fit armor plate", sim.cmd_use(LOCAL_PLAYER_ID, "field_armor_plate"))
 	elif event.is_action_pressed("survive_bike_repair"):
@@ -1218,6 +1221,8 @@ func _update_hud() -> void:
 		_stats.text += "\nRESTED TRAINING: %d bonus XP left (Z to rest at camp)" % survivor.rested_xp_credit
 	if survivor.sharpened_hits > 0:
 		_stats.text += "\nSHARPENED: %d infected melee hits left (End)" % survivor.sharpened_hits
+	if survivor.sighted_hits > 0:
+		_stats.text += "\nSIGHTED: %d infected ranged hits left (Delete)" % survivor.sighted_hits
 	if survivor.wedge_charges > 0:
 		_stats.text += "\nMINING WEDGES: %d rich ore/stone harvests left (+2, loud)" % survivor.wedge_charges
 	if survivor.plated_hits > 0:

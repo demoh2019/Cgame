@@ -54,6 +54,7 @@ const Crafting = preload("res://scripts/shared/crafting.gd")
 const CraftFromStash = preload("res://scripts/shared/craft_from_stash.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
 const FieldWhetstone = preload("res://scripts/shared/field_whetstone.gd")
+const FieldSightingKit = preload("res://scripts/shared/field_sighting_kit.gd")
 const MiningWedges = preload("res://scripts/shared/mining_wedges.gd")
 const FieldArmorPlate = preload("res://scripts/shared/field_armor_plate.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
@@ -250,6 +251,8 @@ class Player:
 	var combat_energy: float = 100.0
 	var sharpened_weapon: String = "" # Prepared, owned melee weapon.
 	var sharpened_hits: int = 0 # Only confirmed ordinary infected contacts spend charges.
+	var sighted_weapon: String = "" # Prepared owned ranged weapon.
+	var sighted_hits: int = 0 # Only confirmed PvE ranged contacts spend charges.
 	var wedge_charges: int = 0 # Three server-confirmed loud T2+ mine yields; persisted.
 	var plated_armor: String = "" # Protected armor ID, tied to carried equipped item.
 	var plated_hits: int = 0 # Three paid ordinary infected-melee mitigations.
@@ -430,6 +433,8 @@ func character_data(player: Player) -> Dictionary:
 		player.sharpened_weapon, player.sharpened_hits, player.inventory)
 	var plate_valid: bool = FieldArmorPlate.valid_state(
 		player.plated_armor, player.plated_hits, player.inventory)
+	var sight_valid: bool = FieldSightingKit.valid_state(
+		player.sighted_weapon, player.sighted_hits, player.inventory)
 	return {
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
@@ -473,6 +478,8 @@ func character_data(player: Player) -> Dictionary:
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 		"sharpened_weapon": player.sharpened_weapon if sharp_valid else "",
 		"sharpened_hits": player.sharpened_hits if sharp_valid else 0,
+		"sighted_weapon": player.sighted_weapon if sight_valid else "",
+		"sighted_hits": player.sighted_hits if sight_valid else 0,
 		"wedge_charges": player.wedge_charges if MiningWedges.valid_state(player.wedge_charges) else 0,
 		"plated_armor": player.plated_armor if plate_valid else "",
 		"plated_hits": player.plated_hits if plate_valid else 0,
@@ -574,6 +581,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not FieldWhetstone.valid_state(data.get("sharpened_weapon", ""),
 			data.get("sharpened_hits", 0), parsed_bag["inventory"]):
+		return false
+	if not FieldSightingKit.valid_state(data.get("sighted_weapon", ""),
+			data.get("sighted_hits", 0), parsed_bag["inventory"]):
 		return false
 	if not FieldArmorPlate.valid_state(data.get("plated_armor", ""),
 			data.get("plated_hits", 0), parsed_bag["inventory"]):
@@ -699,6 +709,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.meal_tier = int(data.get("meal_tier", 0))
 	player.sharpened_weapon = str(data.get("sharpened_weapon", ""))
 	player.sharpened_hits = int(data.get("sharpened_hits", 0))
+	player.sighted_weapon = str(data.get("sighted_weapon", ""))
+	player.sighted_hits = int(data.get("sighted_hits", 0))
 	player.plated_armor = str(data.get("plated_armor", ""))
 	player.plated_hits = int(data.get("plated_hits", 0))
 	player.wedge_charges = int(data.get("wedge_charges", 0))
@@ -814,6 +826,8 @@ func _spawn_player(player: Player) -> void:
 	player.threat_scan = {} # Death cannot preserve a scouting advantage.
 	player.sharpened_weapon = ""
 	player.sharpened_hits = 0
+	player.sighted_weapon = ""
+	player.sighted_hits = 0
 	player.wedge_charges = 0
 	player.plated_armor = ""
 	player.plated_hits = 0
@@ -3585,6 +3599,21 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 				return {"ok": false, "reason": "not_carried"}
 			player.plated_armor = current_armor
 			player.plated_hits = FieldArmorPlate.HITS
+		"sighting_kit":
+			if item_id != FieldSightingKit.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var prepared_ranged: String = FieldSightingKit.ranged_weapon(player.inventory)
+			if prepared_ranged.is_empty():
+				return {"ok": false, "reason": "need_ranged"}
+			if player.attack_timer > 0.0 or player.skill_timer > 0.0 or (
+					player.combat_tag_until > time) or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			if player.sighted_hits > 0 and player.sighted_weapon == prepared_ranged:
+				return {"ok": false, "reason": "already_sighted"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.sighted_weapon = prepared_ranged
+			player.sighted_hits = FieldSightingKit.HITS
 		"whetstone":
 			if item_id != FieldWhetstone.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3715,6 +3744,8 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 				player.edge_coating_weapon = ""
 				player.sharpened_weapon = ""
 				player.sharpened_hits = 0
+				player.sighted_weapon = ""
+				player.sighted_hits = 0
 		_:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
@@ -3738,6 +3769,9 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if item_id == FieldWhetstone.ITEM_ID:
 		return {"ok": true, "weapon": player.sharpened_weapon,
 			"hits": player.sharpened_hits}
+	if item_id == FieldSightingKit.ITEM_ID:
+		return {"ok": true, "weapon": player.sighted_weapon,
+			"hits": player.sighted_hits}
 	if item_id == FieldArmorPlate.ITEM_ID:
 		return {"ok": true, "armor": player.plated_armor,
 			"hits": player.plated_hits}
@@ -3969,6 +4003,17 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		player.sharpened_hits -= 1
 		if player.sharpened_hits == 0:
 			player.sharpened_weapon = ""
+		player.dirty_character = true
+	# Apply a paid 12% bonus only after a confirmed infected ranged hit.
+	# Ammo exhaustion, misses, cover, PvP and skill attacks do not spend charges.
+	var sighted: bool = is_ranged and str(hit["kind"]) == "zombie" and (
+		FieldSightingKit.bonus_active(player.sighted_weapon,
+			player.sighted_hits, player.inventory, weapon))
+	if sighted:
+		damage *= FieldSightingKit.DAMAGE_FACTOR
+		player.sighted_hits -= 1
+		if player.sighted_hits == 0:
+			player.sighted_weapon = ""
 		player.dirty_character = true
 	if guard_counterstrike:
 		damage = GuardianRetribution.amplify(damage)
@@ -5050,6 +5095,8 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.action = {}
 	victim.sharpened_weapon = ""
 	victim.sharpened_hits = 0
+	victim.sighted_weapon = ""
+	victim.sighted_hits = 0
 	victim.wedge_charges = 0
 	victim.plated_armor = ""
 	victim.plated_hits = 0
@@ -5318,6 +5365,11 @@ func _tick_players(delta: float) -> void:
 				player.sharpened_hits, player.inventory):
 			player.sharpened_weapon = ""
 			player.sharpened_hits = 0
+			player.dirty_character = true
+		if not FieldSightingKit.valid_state(player.sighted_weapon,
+				player.sighted_hits, player.inventory):
+			player.sighted_weapon = ""
+			player.sighted_hits = 0
 			player.dirty_character = true
 		if not FieldArmorPlate.valid_state(player.plated_armor,
 				player.plated_hits, player.inventory):
@@ -6796,6 +6848,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"sharpened_hits": player.sharpened_hits if FieldWhetstone.valid_state(
 				player.sharpened_weapon, player.sharpened_hits, player.inventory) else 0,
+			"sighted_hits": player.sighted_hits if FieldSightingKit.valid_state(
+				player.sighted_weapon, player.sighted_hits, player.inventory) else 0,
 			"mining_wedge_charges": player.wedge_charges if MiningWedges.valid_state(player.wedge_charges) else 0,
 			"plated_hits": player.plated_hits if FieldArmorPlate.valid_state(
 				player.plated_armor, player.plated_hits, player.inventory) else 0,
