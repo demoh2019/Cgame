@@ -157,3 +157,16 @@ Foliage vertices encode canopy height normalized by the source mesh's AABB, so t
 The shared Godot shader global `aa_canopy_occlusion` is **0.42 / 0.32 / 0.24 / 0.18** on Performance / Balanced / High / Ultra, respectively. The approximation is deliberately reduced as real shadow maps and SSAO become available, avoiding overly dark crowns. No extra texture lookups, screen-space passes, new render targets or draw calls are added. It works with current MultiMesh batching, wind, backlight, alpha-to-coverage and rain.
 
 Validation: view tree trunks and deep crowns at midday, twilight and in storms, with camera motion and various tree packs; ensure there is no hard banding or excessive darkness. Compare forest p50/p95 GPU timings across presets on target hardware before claiming FPS gains.
+
+## Vertex-shaded macro terrain and cloud shadows
+
+Following the principle of **vertex interpolators** in real-time terrain materials, the textured terrain shader evaluates two slowly varying world-space fields in the vertex stage:
+
+- The existing broad three-octave biome-noise field (`fbm(world_xz * 0.012)`) is evaluated per terrain vertex and interpolated. All soil, beach, snow, cliff and moisture blending formulas use the same scalar; their underlying colors, weights and textures are unchanged.
+- The existing cloud-shadow LUT is sampled at terrain vertices and interpolated into the fragment-stage color. The cloud tint, time offset and globally managed night/Performance suppression remain identical to grass and foliage.
+
+This removes **one cloud-LUT sample and a three-octave noise evaluation per textured-terrain fragment**, replacing them with vertex work and two interpolated values. It does not remove the middle-frequency noise, PBR texture layers, normal maps, wet puddles, triplanar cliffs, urban moss, snow or cloud alignment with plants. It also does not increase texture or vertex-buffer memory or add draw passes.
+
+The noise field changes slowly in world space (~83 meters per base lattice cell); the shared cloud texture spans 1024 meters and 128 pixels (~8 meters per texel). Terrain vertices are normally spaced at 2 meters with existing geometric LOD farther from the camera. As with other interpolated vertex effects, compare the transition across terrain LOD levels and adjacent chunk borders; the approximation may be less exact on very coarse meshes.
+
+**Benchmark:** identical camera, weather and lighting at 720p/1080p, with forests, paved areas and shorelines. Inspect mean/p95 GPU frame time, moving cloud smoothness, color seams and transitions between terrain LOD rings. Shader operation counts are theoretical; no measured FPS gain is claimed until verified on target GPUs.

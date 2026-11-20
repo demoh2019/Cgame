@@ -36,6 +36,10 @@ uniform vec4 site_patches[4];
 
 varying vec3 world_position;
 varying vec3 world_normal;
+// Slowly changing fields are interpolated over terrain triangles instead of
+// evaluating multi-octave noise and cloud-map lookups for every screen pixel.
+varying float aa_macro_broad;
+varying float aa_vertex_cloud_shadow;
 
 float hash21(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
@@ -64,6 +68,14 @@ float fbm(vec2 p) {
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	// The broad biome color field has a ~83 m cell size. Sampling once per
+	// terrain vertex preserves stable world alignment while avoiding 3 fBM
+	// octaves per fragment on large stretches of visible terrain.
+	aa_macro_broad = fbm(world_position.xz * 0.012);
+	// Cloud-shadow LUT is 128 texels across 1024 m (~8 m/texel). Terrain
+	// vertices have ample resolution to interpolate these soft shadows.
+	// This shares the exact LUT/phase/strength with grass and tree leaves.
+	aa_vertex_cloud_shadow = cloud_shadow(world_position.xz, TIME);
 }
 
 // Distant terrain keeps the existing broad-scale tiling, but skips nearby microdetail samples.
@@ -93,7 +105,7 @@ void fragment() {
 	float h = world_position.y;
 	vec3 n = normalize(world_normal);
 	float slope = 1.0 - clamp(n.y, 0.0, 1.0);
-	float broad = fbm(p * 0.012);
+	float broad = aa_macro_broad;
 	float mid = fbm(p * 0.07 + 3.0);
 	float mixer = smoothstep(0.3, 0.7, value_noise(p * 0.05 + 11.0));
 	// View-dependent terrain shading LOD is continuous and independent of chunk boundaries.
@@ -342,7 +354,9 @@ void fragment() {
 	NORMAL = normalize((VIEW_MATRIX * vec4(bent, 0.0)).xyz);
 
 	color *= 1.0 - wetness * 0.18 - puddle * 0.12;
-	ALBEDO = apply_cloud_shadow(color, p, TIME);
+	// Same tint as apply_cloud_shadow(), now with one interpolated scalar per
+	// vertex instead of an additional cloud-map lookup for every fragment.
+	ALBEDO = color * mix(vec3(1.0), vec3(0.58, 0.63, 0.74), aa_vertex_cloud_shadow);
 	// A physically plausible microfacet roughness for each existing layer.
 	// This reuses the 13 biome weights (no extra textures or VRAM).
 	float dry_roughness = (
