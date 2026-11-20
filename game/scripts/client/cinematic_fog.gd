@@ -7,13 +7,13 @@ const MAX_HEIGHT_DENSITY := 0.0040
 const MAX_VOLUME_DENSITY := 0.0200
 const PROFILES := [
 	{"length": 0.0, "base_density": 0.0, "detail_spread": 2.0,
-		"reprojection": 0.0, "height_scale": 0.55},
+		"reprojection": 0.0, "height_scale": 0.55, "froxel_size": 0, "froxel_depth": 0},
 	{"length": 0.0, "base_density": 0.0, "detail_spread": 2.0,
-		"reprojection": 0.0, "height_scale": 0.85},
+		"reprojection": 0.0, "height_scale": 0.85, "froxel_size": 0, "froxel_depth": 0},
 	{"length": 48.0, "base_density": 0.0060, "detail_spread": 2.35,
-		"reprojection": 0.66, "height_scale": 0.85},
+		"reprojection": 0.66, "height_scale": 0.85, "froxel_size": 112, "froxel_depth": 96},
 	{"length": 72.0, "base_density": 0.0080, "detail_spread": 2.55,
-		"reprojection": 0.74, "height_scale": 1.0},
+		"reprojection": 0.74, "height_scale": 1.0, "froxel_size": 160, "froxel_depth": 128},
 ]
 
 
@@ -53,6 +53,12 @@ static func apply_profile(env: Environment, sun: DirectionalLight3D,
 	if env == null:
 		return
 	var enabled: bool = bool(settings.get("enabled", false))
+	if enabled:
+		# Match HDRP's scalable froxel grid: High is cheap while Ultra has
+		# finer screen-space shafts and fewer stair-steps near thin geometry.
+		# The native renderer clamps invalid sizes and skips unchanged values.
+		RenderingServer.environment_set_volumetric_fog_volume_size(
+			int(settings.get("froxel_size", 128)), int(settings.get("froxel_depth", 128)))
 	env.volumetric_fog_enabled = enabled
 	if enabled:
 		env.volumetric_fog_length = float(settings["length"])
