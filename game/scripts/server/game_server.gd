@@ -4090,13 +4090,15 @@ func _try_guardian_intercept(ally: Player, infected, raw_damage: float) -> bool:
 	damage = _infected_damage_for(chosen, damage)
 	var taken: float = _hurt_player(chosen, damage)
 	chosen.dirty_character = true
-	events.append({"type": "guardian_intercept", "peer": ally.id,
-		"by": chosen.id, "zombie": infected.id, "damage": taken})
-	# Only the confirmed, survived intercept can arm the response. The
-	# infected challenges its rescuer briefly, while the guardian earns one
-	# boosted BASIC melee swing against this exact infected within 4 seconds.
-	if _alive(chosen) and GuardianRetribution.arm(chosen, infected, parties, world):
+	# Only a guardian who survives the real interception can counter.
+	# Feed this confirmed result into the private combat notification.
+	var counter_ready: bool = _alive(chosen) and GuardianRetribution.arm(
+		chosen, infected, parties, world)
+	if counter_ready:
 		infected.force_taunt(chosen.id, GuardianRetribution.TAUNT_SECONDS)
+	events.append({"type": "guardian_intercept", "peer": ally.id,
+		"by": chosen.id, "zombie": infected.id, "damage": taken,
+		"counter_ready": counter_ready})
 	if not _alive(chosen):
 		_on_player_death(chosen, -infected.id)
 	return true
