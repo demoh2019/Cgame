@@ -104,6 +104,9 @@ func run(t) -> void:
 	t.eq(sim.cmd_pack_shelter(93, id).get("reason", ""), "no_shelter",
 		"stale entity ID is harmless")
 	owner.position = _at(world, origin)
+	# The other survivor must step away before pitching another full canopy:
+	# building on top of a standing player is intentionally forbidden.
+	neighbor.position = _at(world, spot + Vector2(15, 0))
 	t.check(sim.cmd_pitch_shelter(93, spot.x, spot.y).get("ok", false),
 		"new tent allowed after packing")
 	var second_id: int = int(sim.shelters.keys()[0])
