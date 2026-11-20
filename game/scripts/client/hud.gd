@@ -1217,8 +1217,10 @@ func _on_event(event: Dictionary) -> void:
 		"raid_cone_struck":
 			say("Raid frontal cleave struck. Watch the boss's facing for the next sweep.")
 		"raid_warning":
-			say("RAID SLAM in %.1f seconds! Evade the marked %dm circle." % [
+			say("RAID SLAM in %.1f seconds! Evade the %dm circle or coordinate attacks to interrupt." % [
 				float(event.get("seconds", 2.0)), int(event.get("radius", 5))])
+		"raid_interrupted":
+			say("RAID INTERRUPTED! Two allies broke the slam. Boss exposed for %.1fs: +15%% damage!" % float(event.get("exposed_seconds", 0.0)))
 		"raid_slam":
 			var exposed: float = float(event.get("exposed_seconds", 0.0))
 			if exposed > 0.0:

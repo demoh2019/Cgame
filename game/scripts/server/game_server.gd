@@ -67,6 +67,7 @@ const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
 const RaidRecovery = preload("res://scripts/shared/raid_recovery.gd")
+const RaidInterrupt = preload("res://scripts/shared/raid_interrupt.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const AcidNeutralizer = preload("res://scripts/shared/acid_neutralizer.gd")
@@ -3942,6 +3943,22 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 			if DailyBounties.record_kill(attacker.daily_bounty, _refresh_daily(attacker)):
 				attacker.dirty_character = true
 			_on_zombie_death(zombie, attacker)
+		elif zombie.id == raid_boss_id and not raid_pending_slam.is_empty() and \
+				physically_owned and _alive(attacker) and attacker.position.is_finite() and \
+				not _is_safe(attacker.position) and \
+				Vector2(attacker.position.x, attacker.position.z).distance_to(
+					Vector2(zombie.position.x, zombie.position.z)) <= RaidInterrupt.MAX_DISTANCE:
+			# Only server-applied, nonlethal hits with an owned, equipped weapon
+			# can count. The warning tracks distinct real party members.
+			if RaidInterrupt.record_hit(raid_pending_slam, zombie, attacker.id,
+					parties.group_of(attacker.id), damage, time):
+				var center := Vector2(float(raid_pending_slam["x"]),
+					float(raid_pending_slam["z"]))
+				raid_pending_slam = {}
+				var exposed: float = RaidRecovery.window_seconds(zombie)
+				raid_exposed_until = maxf(raid_exposed_until, time + exposed)
+				events.append({"type": "raid_interrupted", "id": zombie.id,
+					"x": center.x, "z": center.y, "exposed_seconds": exposed})
 	else:
 		var victim: Player = players.get(hit["id"])
 		if victim == null or not _alive(victim):
@@ -4669,7 +4686,8 @@ func _tick_raid_encounter() -> void:
 		if time >= raid_next_slam_at and boss.target_id != -1:
 			raid_pending_slam = {"id": raid_boss_id,
 				"x": at.x, "z": at.y,
-				"at": time + RaidEncounter.SLAM_WARNING}
+				"at": time + RaidEncounter.SLAM_WARNING,
+				"party": 0, "contributors": {}}
 			raid_next_slam_at = time + RaidEncounter.slam_cooldown(boss)
 			events.append({"type": "raid_warning", "id": raid_boss_id,
 				"x": at.x, "z": at.y,
