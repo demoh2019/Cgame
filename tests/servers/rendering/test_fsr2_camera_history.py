@@ -87,10 +87,9 @@ class Fsr2CameraHistoryTests(unittest.TestCase):
         self.assertEqual(source.count("const bool camera_teleported ="), 1)
         self.assertEqual(source.count("const bool camera_rotated ="), 1)
         self.assertEqual(source.count("const bool lens_cut ="), 1)
-        self.assertLess(source.index("const bool temporal_camera_cut ="),
-                        source.index("if (scale_type == SCALE_FSR2)"))
-        self.assertLess(source.index("const bool temporal_camera_cut ="),
-                        source.index("} else if (scale_type == SCALE_MFX)"))
+        cut_position = source.index("const bool temporal_camera_cut =")
+        self.assertLess(cut_position, source.index("if (scale_type == SCALE_FSR2)", cut_position))
+        self.assertLess(cut_position, source.index("} else if (scale_type == SCALE_MFX)", cut_position))
 
     def test_metalfx_stall_and_invalid_time_rejects_history(self):
         source = FORWARD.read_text(encoding="utf-8")
