@@ -266,6 +266,7 @@ class StreamedTerrainContracts(TestCase):
 
         native_methods = (
             "set_streaming_source",
+            "set_streaming_source_node",
             "remove_streaming_source",
             "clear_streaming_sources",
             "get_streaming_source",
@@ -286,6 +287,19 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn("is_source_cell(E.key, true)", cpp)
         self.assertIn("is_source_cell(E.key, false)", cpp)
         self.assertIn("Vector<StreamingSource> source_snapshot = streaming_sources", cpp)
+        self.assertIn("void WorldPartition3D::_update_streaming_source_positions()", cpp)
+        self.assertIn("source.node_path = p_node_path", cpp)
+        self.assertIn("target->get_global_position()", cpp)
+        self.assertIn("to_local(target->get_global_position())", cpp)
+        self.assertIn("if (source.active && _within_radius", cpp)
+        self.assertIn('result["node_path"] = source.node_path', cpp)
+        self.assertIn('result["active"] = source.active', cpp)
+        self.assertIn("source.active && are_cells_loaded", cpp)
+        self.assertIn("_update_streaming_source_positions();", cpp)
+        self.assertIn("get_subname_count() > 0", cpp)
+        self.assertIn("node_path;", header)
+        self.assertIn("bool active = true;", header)
+
         self.assertIn("source_snapshot[j - 1].priority < item.priority", cpp)
         self.assertIn("source_snapshot.write[j] = item", cpp)
         self.assertIn("if (still_current)", cpp)
@@ -309,6 +323,12 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn("WATCHTOWER_SOURCE: String = \"watchtower\"", world)
         self.assertIn("KEY_F8:", world)
         self.assertIn("KEY_F10:", world)
+        self.assertIn("KEY_F11:", world)
+        self.assertIn("survey_drone_paused", world)
+        self.assertIn("survey_drone.position = Vector3(drone_x", world)
+        self.assertIn("world_partition.get_path_to(survey_drone)", world)
+
+        self.assertIn("world_partition.set_streaming_source_node(", world)
         self.assertIn("world_partition.set_streaming_source(", world)
         self.assertIn("world_partition.get_streaming_source_progress(SURVEY_SOURCE)", world)
         self.assertIn("world_partition.get_streaming_source_progress(WATCHTOWER_SOURCE)", world)
@@ -323,6 +343,13 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn('world.call("_toggle_streaming_source", SURVEY_NAME)', integrated)
         self.assertIn('world.call("_toggle_streaming_source", TOWER_NAME)', integrated)
         self.assertIn('label.text.contains("Источники: 2/8")', integrated)
+        moving = (ROOT / "tests/smoke_moving_sources.gd").read_text(encoding="utf-8")
+        self.assertIn('stream.get_streaming_source(NAME).get("center")', moving)
+        self.assertIn("world.remove_child(actor)", moving)
+        self.assertIn("world.add_child(actor)", moving)
+        self.assertIn('missing.get("active", true)', moving)
+        self.assertIn('hud.text.contains("Дрон X=0 Z=4")', moving)
+
 
     def test_native_manual_pin_streaming_contract(self) -> None:
         """Engine pins, editor docs and playable fast travel stay in sync."""
