@@ -60,6 +60,8 @@ func _spawn_trees() -> void:
         var wz: float = global_position.z + pz
         if Vector2(wx, wz - 9.0).length() < 8.0:
             continue # Keep the player's first clearing open.
+        if Vector2(wx - 208.0, wz - 208.0).length() < 6.0:
+            continue # Leave room for the pinned fast-travel outpost.
         var scale: float = rng.randf_range(0.70, 1.5)
         var ground: float = _world_height(px, pz)
         var orientation := Basis(Vector3.UP, rng.randf_range(-PI, PI))
@@ -110,6 +112,11 @@ func _spawn_rocks() -> void:
     for i in range(ROCK_COUNT):
         var px: float = rng.randf_range(0.0, CELL_SIZE)
         var pz: float = rng.randf_range(0.0, CELL_SIZE)
+        var world_x: float = global_position.x + px
+        var world_z: float = global_position.z + pz
+        if Vector2(world_x, world_z - 9.0).length() < 4.0 \
+                or Vector2(world_x - 208.0, world_z - 208.0).length() < 6.0:
+            continue # Prevent physics obstacles at both fast-travel arrivals.
         var scale: float = rng.randf_range(0.45, 1.6)
         var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU))
         transforms.push_back(Transform3D(
