@@ -31,6 +31,7 @@ const Effects = preload("res://scripts/client/effects.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const TitleBanner = preload("res://scripts/client/title_banner.gd")
 const LocalServer = preload("res://scripts/client/local_server.gd")
+const SoloSlots = preload("res://scripts/client/solo_slots.gd")
 const SkillsPanel = preload("res://scripts/client/skills_panel.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 
@@ -71,6 +72,9 @@ var chat_edit: LineEdit
 var account := {} # Result of the Nakama sign-in, empty when playing without accounts.
 var connect_panel: PanelContainer
 var local_server := LocalServer.new()
+var solo_slot_picker: OptionButton
+var solo_slot_info: Label
+var _solo_offline_account: bool = false
 var _solo_attempts_left := 0
 var address_edit: LineEdit
 var name_edit: LineEdit
@@ -126,7 +130,7 @@ func _ready() -> void:
 	address_edit.text = address
 	name_edit.text = player_name
 	if "--connect" in args:
-		_connect()
+		_connect_remote()
 
 
 func _make_party_rally_marker() -> void:
@@ -302,14 +306,38 @@ func _build_connect_screen() -> void:
 		edit.add_theme_color_override("font_color", UiTheme.INK)
 		edit.add_theme_color_override("font_placeholder_color", UiTheme.INK_SOFT)
 		edit.add_theme_color_override("caret_color", UiTheme.INK)
-		edit.text_submitted.connect(func(_text: String) -> void: _connect())
+		edit.text_submitted.connect(func(_text: String) -> void: _connect_remote())
 		box.add_child(edit)
 		if name_edit == null:
 			name_edit = edit
 		else:
 			address_edit = edit
+	var slot_caption := Label.new()
+	slot_caption.text = "Solo survivor"
+	slot_caption.add_theme_font_size_override("font_size", 14)
+	slot_caption.add_theme_color_override("font_color", Color(0.95, 0.84, 0.66))
+	box.add_child(slot_caption)
+	solo_slot_picker = OptionButton.new()
+	solo_slot_picker.custom_minimum_size = Vector2(0, 40)
+	for state in ["normal", "hover", "pressed", "focus"]:
+		solo_slot_picker.add_theme_stylebox_override(state, field_style if state != "hover" else field_focus)
+	solo_slot_picker.add_theme_color_override("font_color", UiTheme.INK)
+	solo_slot_picker.add_theme_color_override("font_hover_color", UiTheme.INK)
+	solo_slot_picker.add_theme_color_override("font_pressed_color", UiTheme.INK)
+	solo_slot_picker.add_theme_color_override("font_focus_color", UiTheme.INK)
+	for slot in range(1, SoloSlots.SLOT_COUNT + 1):
+		solo_slot_picker.add_item("Survivor %d" % slot, slot)
+	solo_slot_picker.select(0)
+	solo_slot_picker.item_selected.connect(func(_index: int) -> void: _update_solo_slot_info())
+	box.add_child(solo_slot_picker)
+	solo_slot_info = Label.new()
+	solo_slot_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	solo_slot_info.add_theme_font_size_override("font_size", 12)
+	solo_slot_info.add_theme_color_override("font_color", UiTheme.GOLD)
+	box.add_child(solo_slot_info)
+	_update_solo_slot_info()
 	var gap2 := Control.new()
-	gap2.custom_minimum_size = Vector2(0, 10)
+	gap2.custom_minimum_size = Vector2(0, 8)
 	box.add_child(gap2)
 	var solo := Button.new()
 	solo.text = "PLAY SOLO"
@@ -328,7 +356,7 @@ func _build_connect_screen() -> void:
 	button.add_theme_stylebox_override("normal", _pill(Color(0.3, 0.2, 0.13)))
 	button.add_theme_stylebox_override("hover", _pill(Color(0.42, 0.29, 0.17)))
 	button.add_theme_stylebox_override("pressed", _pill(Color(0.22, 0.14, 0.08)))
-	button.pressed.connect(_connect)
+	button.pressed.connect(_connect_remote)
 	box.add_child(button)
 	status_label = Label.new()
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -367,19 +395,29 @@ func _device_id() -> String:
 	return id
 
 
+## Remote servers always use the ordinary Nakama sign-in path.
+func _connect_remote() -> void:
+	_solo_offline_account = false
+	_solo_attempts_left = 0
+	_connect()
+
+
 func _connect() -> void:
 	var parts := address_edit.text.split(":")
 	var host := parts[0]
 	var port := int(parts[1]) if parts.size() > 1 else 24565
 	if net == null:
-		status_label.text = "Signing in..."
-		# Accounts come from Nakama on the same host. Without it we still join (servers can run offline).
+		status_label.text = "Entering offline survivor..." if _solo_offline_account else "Signing in..."
+		# Additional solo slots are deliberately local even if Nakama is running.
+		# Do not sign in or open a live guild/chat session for these characters.
 		social = Social.new()
 		add_child(social)
-		var nakama_port := int(OS.get_environment("NAKAMA_PORT")) if OS.get_environment("NAKAMA_PORT") != "" else 7350
-		account = await social.sign_in(host, nakama_port, _device_id() + ("-" + name_edit.text if OS.get_environment("MULTI_CLIENT") != "" else ""), name_edit.text)
-		if not account.get("ok", false):
-			account = {}
+		account = {}
+		if not _solo_offline_account:
+			var nakama_port := int(OS.get_environment("NAKAMA_PORT")) if OS.get_environment("NAKAMA_PORT") != "" else 7350
+			account = await social.sign_in(host, nakama_port, _device_id() + ("-" + name_edit.text if OS.get_environment("MULTI_CLIENT") != "" else ""), name_edit.text)
+			if not account.get("ok", false):
+				account = {}
 		net = Net.new()
 		net.name = "Net"
 		net.role = "client"
@@ -417,15 +455,25 @@ func _on_connection_failed() -> void:
 	status_label.text = "Connection failed."
 
 
-## Play solo: this machine runs the world (the real server, with Nakama saves when available) and you join it.
+## The selection changes only which local world is launched, not gameplay rules.
+func _update_solo_slot_info() -> void:
+	if solo_slot_picker == null or solo_slot_info == null:
+		return
+	var slot: int = solo_slot_picker.get_selected_id()
+	solo_slot_info.text = SoloSlots.description(slot)
+
+
+## Start the selected local character on its private single-player ENet port.
 func _play_solo() -> void:
-	var address: String = local_server.start()
+	var selected_slot: int = solo_slot_picker.get_selected_id() if solo_slot_picker != null else 1
+	var address: String = local_server.start(selected_slot)
 	if address.is_empty():
 		status_label.text = "Could not start a local world."
 		return
 	address_edit.text = address
+	_solo_offline_account = selected_slot > 1
 	_solo_attempts_left = 12
-	status_label.text = "Starting your world..."
+	status_label.text = "Starting survivor %d..." % selected_slot
 	await get_tree().create_timer(3.0).timeout # Let the server import and open its port.
 	_connect()
 

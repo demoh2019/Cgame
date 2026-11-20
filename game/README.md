@@ -9,6 +9,32 @@ gathering, crafting/refining, equipment-based combat, full-loot risks outside
 the hub, and a server-authoritative simulation. Genre ideas are used without
 copying proprietary assets or content from other titles.
 
+## Three survivor slots in solo play
+
+The title screen offers three separate offline solo survivors, each with its
+own inventory/skills, persistent world barriers, local stop signal, and a
+loopback-only ENet server port. Slot 1 reuses all the old solo save files and,
+when local Nakama is available, still supports the account-backed character.
+Slots 2 and 3 always use independent local saves instead of sharing the
+Nakama account. **Join server** remains unchanged. See
+`game/docs/SOLO_CHARACTER_SLOTS.md`.
+
+## Start with Play solo or Join server
+
+The default `game/project.godot` scene is the unified online client
+(`scripts/client/online_main.tscn`). **Play solo** launches a loopback-only
+headless world, using the same multiplayer GameServer as online play. When a
+local Nakama service is available it uses authenticated character persistence.
+When Nakama is not running, the dedicated solo server instead saves one real
+survivor's inventory, stash, skills, and health into
+`user://albion_after_solo_character.json`, on a 20-second interval and logout.
+The solo launcher requests a **graceful stop** so the world and character are
+flushed before quitting (with a bounded emergency hard-kill fallback).
+Public offline guest servers still do not persist anonymous characters.
+
+The old `scripts/client/client_main.tscn` remains a separate local test/preview
+scene; it is **not** the default launch mode.
+
 ## Run playable local preview
 
 Open `game/project.godot` with a compiled Cgame editor or start:
