@@ -39,10 +39,15 @@ camera-relative distance threshold:
   preventing screen-size and morphing from disagreeing.
 
 No extra textures, GPU draws, shadow maps, render passes, per-frame
-heightmap scans, physics bodies or serialized height data are added. Error
+heightmap scans, physics bodies or serialized height data are added. When the native distance-based selector is active, height-deviation
 calculations happen lazily, once per visible chunk, and are invalidated
-only when its height data or LOD count changes. Quality updates change
-the weight without forcing a terrain rebuild.
+only when its height data or LOD count changes. When the newer
+`lod_pixel_error` selector is active, the controller **reuses the
+per-LOD error array already cached when the heightfield was built**:
+there is no second terrain scan. Ruggedness adjusts the permitted pixel
+error (inverse to the bounded detail factor), and both pixel LOD and
+geomorph thresholds use the same adjusted tolerance. Quality updates
+change the weight without forcing a terrain rebuild.
 
 ## Game integration
 
