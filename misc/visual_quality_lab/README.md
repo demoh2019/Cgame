@@ -588,3 +588,72 @@ References:
 - https://docs.godotengine.org/en/4.6/tutorials/io/background_loading.html
 - https://docs.godotengine.org/en/4.6/tutorials/performance/thread_safe_apis.html
 - https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine
+
+
+## Visual Quality Lab v14 — stream-safe contextual interaction system
+
+This update adds a reusable gameplay/engine service,
+`addons/visual_quality/world_interaction_router.gd` (`WorldInteractionRouter3D`),
+that connects streamed world objects to a single interaction command. It is
+immediately instantiated in `demo.gd` and works with existing systems rather
+than requiring a new scene architecture.
+
+### Provider API
+
+Any `Node3D` may expose the following optional protocol:
+
+```gdscript
+func get_interaction_targets(eye: Vector3, search_radius: float) -> Array[Dictionary]:
+    return [{"action_id": "activate", "position": global_position,
+             "label": "Activate", "radius": 2.8}]
+
+func activate_interaction(action_id: String, actor: Node3D) -> bool:
+    # Revalidate availability and distance here (never trust a cached prompt).
+    return false
+
+func get_interaction_message(action_id: String) -> String:
+    return ""
+```
+
+The router queries the existing global quest provider, then inspects only
+*nearby loaded* `WorldStreamer3D` cells through direct coordinate lookups.
+It selects the nearest relevant action in the camera's forward cone, with
+stable tie-breaking. There is an optional physics ray for line-of-sight; this
+is **off** by default to avoid unexpectedly blocking interactions with
+non-colliding example objects. Actions are re-selected and validated when
+executed; `cell_about_to_unload` clears focused scene references before the
+streamer frees the cell. This avoids calls into scenes that no longer exist.
+
+The same **H** key now interacts with three kinds of gameplay targets: collect
+blue light shards, activate orange forest beacons, or talk with patrolling NPC
+forest guards. The on-screen context prompt shows what H will do, and a feedback
+line reports the result. The old **F** pickup and **G** beacon controls remain
+available for compatibility. NPC conversations are counted per cell and are
+saved/restored through the existing `WorldStateStore3D` along with beacons and
+patrol progress. The saved count is bounded to 999; no live Node references are
+stored in save files.
+
+### Constraints and tests
+
+This is a local single-player gameplay service, not multiplayer-authoritative
+interaction, quest scripting, sophisticated object tagging, large-scale
+inventory, or a full Unreal Gameplay Ability System. The example uses a
+3.5m maximum query distance and updates focus at most approximately every
+0.12s. Provider activation always rechecks real player distance. If enabling
+occlusion, make sure interaction target colliders and the collision mask are
+configured correctly.
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -q
+godot --headless --path . --script res://tests/test_world_interaction.gd
+godot --headless --path . --script res://tests/test_world_interaction_runtime.gd
+```
+
+**33/33 local static/package tests pass.** The two new Godot suites exercise
+selection and out-of-range rejection, then an integrated streamed beacon,
+NPC conversation, unload-time focus invalidation and shard collection. Actual
+GDScript parsing, physics/world rendering and macOS Metal runtime behavior are
+**not yet verified** because no working Godot binary is available locally
+and the GitHub CI workflow remains pending/queued.
+
+References: [Godot scene-tree groups](https://docs.godotengine.org/en/stable/tutorials/scripting/groups.html), [Godot 3D ray-casting](https://docs.godotengine.org/en/stable/tutorials/physics/ray-casting.html), [Unreal Gameplay Framework](https://dev.epicgames.com/documentation/unreal-engine/gameplay-framework-in-unreal-engine).
