@@ -76,7 +76,7 @@ static func profile(value: int) -> Dictionary:
 				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "terrain_pixel_error": 3.5, "ground_contact_strength": 0.28, "curvature_strength": 0.30, "puddle_ripple_strength": 0.22, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3, "terrain_warp_strength": 0.0, "terrain_height_blend": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "micro_occlusion": 0.0, "normal_variance_strength": 0.0, "wet_clearcoat": 0.0, "sharpen_strength": 0.0, "deband_strength": 0.0}
 		2:
 			return {"shadows": true, "shadow_distance": 110.0, "msaa": Viewport.MSAA_2X, "anisotropy": Viewport.ANISOTROPY_8X,
-				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": true, "ssil": false, "sdfgi": false, "cloud_shadows": true,
+				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": true, "ssil": true, "sdfgi": false, "cloud_shadows": true,
 				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0, "terrain_detail_radius": 68.0, "terrain_pixel_error": 1.8, "ground_contact_strength": 0.48, "curvature_strength": 0.70, "puddle_ripple_strength": 0.65, "mesh_lod_threshold": 1.0, "terrain_layer_budget": 4, "terrain_warp_strength": 0.24, "terrain_height_blend": 0.48, "cliff_normal_quality": 0.7, "specular_aa_strength": 0.18, "micro_occlusion": 0.55, "normal_variance_strength": 0.55, "wet_clearcoat": 0.45, "sharpen_strength": 0.14, "deband_strength": 0.8}
 		_:
 			return {"shadows": true, "shadow_distance": 140.0, "msaa": Viewport.MSAA_4X, "anisotropy": Viewport.ANISOTROPY_16X,
