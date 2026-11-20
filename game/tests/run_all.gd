@@ -77,6 +77,7 @@ const SUITES := [
 	"res://tests/test_sun_shafts_quality.gd",
 	"res://tests/test_sun_shadow_atmosphere.gd",
 	"res://tests/test_graphics_reflections.gd",
+	"res://tests/test_pbr_reflection_occlusion.gd",
 	"res://tests/test_cinematic_fog.gd",
 	"res://tests/test_weather_fog_batch.gd",
 	"res://tests/test_biome_atmosphere.gd",
