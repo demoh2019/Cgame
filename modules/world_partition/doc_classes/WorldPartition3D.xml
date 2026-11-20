@@ -92,6 +92,13 @@
 				Returns the last observed cell in this node's local grid coordinates. Only meaningful when [method has_observer_cell] is [code]true[/code]. This result updates when the observer enters a new cell or its grid configuration changes.
 			</description>
 		</method>
+		<method name="get_cell_node" qualifiers="const">
+			<return type="Node3D" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the instantiated [Node3D] scene root for [param cell], or [code]null[/code] if it is not loaded. Unlike scanning child nodes, this lookup uses the streamer's direct cell mapping. Use it from [signal cell_loaded] callbacks to configure only the newly instantiated cell.
+			</description>
+		</method>
 		<method name="get_loaded_cells" qualifiers="const">
 			<return type="Array" />
 			<description>
