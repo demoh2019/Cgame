@@ -600,6 +600,13 @@ bool WorldPartition3D::register_navigation_agent(const String &p_name, Node3D *p
 	ERR_FAIL_NULL_V_MSG(p_agent, false, "Navigation agent must be a Node3D.");
 	ERR_FAIL_COND_V_MSG(p_priority < 0 || p_priority > 3, false, "Navigation priority must be 0 to 3.");
 	ERR_FAIL_COND_V_MSG(!navigation_agents.has(p_name) && navigation_agents.size() >= MAX_NAVIGATION_AGENTS, false, "WorldPartition3D has reached its 128-agent limit.");
+	// One live Node3D may have only one registered name, so aliases cannot
+	// claim multiple path/steering grants under different IDs.
+	for (const KeyValue<String, NavigationAgentEntry> &E : navigation_agents) {
+		if (E.key != p_name && E.value.node_id == p_agent->get_instance_id()) {
+			return false;
+		}
+	}
 	NavigationAgentEntry next;
 	next.node_id = p_agent->get_instance_id();
 	next.priority = p_priority;
