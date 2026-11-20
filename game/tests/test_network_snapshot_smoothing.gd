@@ -58,6 +58,12 @@ func run(t) -> void:
 		start, "extrapolation before the first snapshot is clamped")
 	t.eq(Smooth.hermite(start, finish, Vector3.ONE, Vector3.ONE, 0.1, 20.0),
 		finish, "missing future packets cannot extrapolate beyond server pose")
+	t.eq(Smooth.hermite(Vector3.INF, finish, Vector3.ONE,
+		Vector3.ONE, 0.1, 0.5), finish,
+		"invalid server position never propagates NaNs into render transforms")
+	t.eq(Smooth.hermite(start, Vector3.INF, Vector3.ONE,
+		Vector3.ONE, 0.1, 0.5), start,
+		"invalid target falls back to the last valid server position")
 
 	t.current = "native Godot engine and stock fallback agree"
 	var host := Node3D.new()
@@ -80,6 +86,8 @@ func run(t) -> void:
 	var code: String = (EntityView as Script).source_code
 	t.check(code.contains("SnapshotSmoothing.sample_position("),
 		"networked players and zombies use the new cubic smoother")
+	t.check(code.contains("if GraphicsQuality.level() == 0:"),
+		"Performance keeps cheap linear sampling without extra history reads")
 	t.check(code.contains("history[i - 2] if i >= 2 else []") and
 		code.contains("history[i + 1] if i + 1 < history.size() else []"),
 		"historical neighbor snapshots feed the endpoint velocities")
