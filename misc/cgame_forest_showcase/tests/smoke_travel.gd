@@ -87,6 +87,9 @@ func _run() -> void:
     if world.get_streaming_source_cell_count(Travel.SOURCE_NAME) != 1:
         _fail("travel source did not register its destination scene")
         return
+    if world.get_streaming_source_priority(Travel.SOURCE_NAME) != Travel.STREAMING_PRIORITY:
+        _fail("travel source did not request urgent streaming priority")
+        return
     if not await _wait_travel(travel):
         _fail("travel did not complete under streaming budgets")
         return
