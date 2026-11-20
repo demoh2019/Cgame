@@ -16,6 +16,8 @@ class_name AdaptiveResolution3D
 @export var enabled: bool = true
 @export var restore_on_exit: bool = true
 @export var use_spatial_fsr_if_bilinear: bool = true
+@export var skip_cpu_bound_drops: bool = true
+@export_range(0.50, 1.25, 0.05) var cpu_guard_budget_ratio: float = 0.90
 
 var _viewport: Viewport
 var _original_scale: float = 1.0
@@ -25,6 +27,7 @@ var _warmup_elapsed: float = 0.0
 var _cooldown_elapsed: float = 0.0
 var _fps_sum: float = 0.0
 var _samples: int = 0
+var _cpu_cost_seconds_sum: float = 0.0
 
 
 func _ready() -> void:
@@ -49,13 +52,19 @@ func _process(delta: float) -> void:
 	if fps > 0.0:
 		_fps_sum += fps
 		_samples += 1
+		_cpu_cost_seconds_sum += maxf(
+			float(Performance.get_monitor(Performance.TIME_PROCESS)),
+			float(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS))
+		)
 	if _elapsed < sampling_seconds:
 		return
 	_elapsed = 0.0
 	if _samples == 0:
 		return
 	var averaged_fps: float = _fps_sum / float(_samples)
+	var cpu_cost_seconds: float = _cpu_cost_seconds_sum / float(_samples)
 	_fps_sum = 0.0
+	_cpu_cost_seconds_sum = 0.0
 	_samples = 0
 	if _cooldown_elapsed < cooldown_seconds:
 		return
@@ -64,6 +73,9 @@ func _process(delta: float) -> void:
 		minimum_scale, maximum_scale, decrease_step, increase_step,
 		low_fps_ratio, high_fps_ratio
 	)
+	if next < _viewport.scaling_3d_scale and skip_cpu_bound_drops:
+		if is_cpu_bound(cpu_cost_seconds, target_fps, cpu_guard_budget_ratio):
+			return
 	if not is_equal_approx(next, _viewport.scaling_3d_scale):
 		_viewport.scaling_3d_scale = next
 		_cooldown_elapsed = 0.0
@@ -75,6 +87,7 @@ func reset_to_maximum() -> void:
 	_viewport.scaling_3d_scale = clampf(maximum_scale, 0.25, 2.0)
 	_elapsed = 0.0
 	_fps_sum = 0.0
+	_cpu_cost_seconds_sum = 0.0
 	_samples = 0
 	_cooldown_elapsed = 0.0
 
@@ -98,3 +111,12 @@ static func calculate_next_scale(current_scale: float, fps: float, target: float
 	if fps >= target * high_ratio:
 		return clampf(snappedf(current + maxf(up_step, 0.0), 0.005), low, high)
 	return current
+
+
+## TIME_PROCESS/TIME_PHYSICS_PROCESS are CPU hints, not GPU frame timings.
+## If scripting already exhausts the frame budget, reducing render pixels
+## is unlikely to help. Never mislabel this as actual GPU-bound detection.
+static func is_cpu_bound(cpu_cost_seconds: float, target: float, guard_ratio: float) -> bool:
+	if not is_finite(cpu_cost_seconds) or target <= 0.0:
+		return false
+	return cpu_cost_seconds > 0.0 and cpu_cost_seconds >= (1.0 / target) * maxf(guard_ratio, 0.0)
