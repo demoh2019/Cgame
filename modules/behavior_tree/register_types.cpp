@@ -32,6 +32,7 @@
 
 #include "behavior_tree.h"
 #include "ai_visual_sensor_2d.h"
+#include "ai_hearing_sensor_2d.h"
 
 #include "core/object/class_db.h"
 
@@ -41,6 +42,7 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	}
 	GDREGISTER_CLASS(BehaviorTree);
 	GDREGISTER_CLASS(AIVisualSensor2D);
+	GDREGISTER_CLASS(AIHearingSensor2D);
 }
 
 void uninitialize_behavior_tree_module(ModuleInitializationLevel p_level) {
