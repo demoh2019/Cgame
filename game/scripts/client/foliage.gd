@@ -62,13 +62,15 @@ void fragment() {
 		t.rgb = mix(vec3(0.09, 0.17, 0.06), vec3(0.44, 0.58, 0.21), lum);
 	}
 	vec3 hue = cut_out ? plant_hue : mix(vec3(1.0), plant_hue, 0.35);
-	ALBEDO = apply_cloud_shadow(t.rgb * instance_tint * hue, cloud_xz, TIME);
+	// Wet leaves and bark darken smoothly while preserving tint, texture and alpha.
+	float wet_foliage = clamp(aa_weather_wetness, 0.0, 1.0);
+	ALBEDO = apply_cloud_shadow(t.rgb * instance_tint * hue * (1.0 - wet_foliage * 0.17), cloud_xz, TIME);
 	// Both sides of a blade are lit as if they faced the viewer: otherwise half the grass turns black.
 	if (!FRONT_FACING) {
 		NORMAL = -NORMAL;
 	}
 	// Nonuniform micro-roughness breaks up overly identical highlights at no texture cost.
-	ROUGHNESS = cut_out ? plant_roughness : 0.93;
+	ROUGHNESS = mix(cut_out ? plant_roughness : 0.93, cut_out ? 0.58 : 0.68, wet_foliage);
 	if (cut_out) {
 		ALPHA = t.a;
 		ALPHA_SCISSOR_THRESHOLD = scissor;
