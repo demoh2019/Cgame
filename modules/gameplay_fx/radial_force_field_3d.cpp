@@ -219,7 +219,7 @@ int RadialForceField3D::_apply(float p_scale) {
 		if (shielding <= 0.0f) {
 			continue;
 		}
-		const float body_mass = rigid ? rigid->get_mass() : bone->get_mass();
+		const float body_mass = float(rigid ? rigid->get_mass() : bone->get_mass());
 		const float magnitude = impulse_magnitude(strength * p_scale, scale * shielding, body_mass, mass_independent);
 		const Vector3 impulse = impulse_direction(center, body_pos, upward_bias) * magnitude;
 		if (rigid) {
