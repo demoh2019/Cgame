@@ -217,8 +217,11 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	player.pitch_scale = variation["pitch"]
 	player.volume_db = volume_db + float(variation["db"])
 	var occluded: bool = _ground.is_valid() and AudioSpatial.terrain_blocked(_listener + Vector3(0, 1.6, 0), position, _ground)
-	player.attenuation_filter_cutoff_hz = AudioSpatial.source_cutoff(distance, occluded, _humidity)
-	player.attenuation_filter_db = -18.0 if occluded else -24.0
+	# Store the *unblocked* distance/air attenuation. The native obstruction
+	# curve (or the stock fallback) will apply cover exactly once, over time.
+	# Starting at an already blocked cutoff would double-apply muffling.
+	player.attenuation_filter_cutoff_hz = AudioSpatial.source_cutoff(distance, false, _humidity)
+	player.attenuation_filter_db = -24.0
 	_ensure_concurrency()
 	if _concurrency != null and not bool(_concurrency.call("request_play", StringName(sound_name), player, position, _listener)):
 		player.free()
@@ -227,7 +230,7 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	player.global_position = position
 	var record := {
 		"player": player, "name": sound_name, "audibility": loudness, "born": now,
-		"terrain_blocked": occluded,
+		"base_audibility": loudness, "terrain_blocked": occluded,
 		"obstruction": 0.0,
 		"target_obstruction": 1.0 if occluded else 0.0,
 		"next_obstruction_check": 0.0,
@@ -272,7 +275,13 @@ func _physics_process(delta: float) -> void:
 			var hit: Dictionary = state.intersect_ray(ray)
 			var blocked: bool = not hit.is_empty() and \
 				(hit.get("position", source_eye) as Vector3).distance_to(source_eye) > 0.75
-			target = 1.0 if blocked or bool(record["terrain_blocked"]) else 0.0
+			# Live occlusion rays keep terrain masking current as the listener
+			# moves around ridges. Reuse the SAME three-ray scheduler: no
+			# uncapped per-frame sound-source heightfield scans.
+			var terrain_blocked: bool = _ground.is_valid() and AudioSpatial.terrain_blocked(
+				listener_eye, source_eye, _ground)
+			record["terrain_blocked"] = terrain_blocked
+			target = 1.0 if blocked or terrain_blocked else 0.0
 			record["target_obstruction"] = target
 			record["next_obstruction_check"] = _obstruction_clock + OBSTRUCTION_RECHECK_SECONDS
 			rays += 1
@@ -281,6 +290,10 @@ func _physics_process(delta: float) -> void:
 		var amount: float = move_toward(old_amount, target, delta * 6.0)
 		if absf(amount - old_amount) > 0.0001:
 			record["obstruction"] = amount
+			# Muffled shots should lose voice-priority against clear,
+			# closer combat events instead of stealing a louder channel.
+			record["audibility"] = float(record.get("base_audibility", record["audibility"])) \
+				+ AudioSpatial.obstruction_db(amount)
 			if player.has_method("set_obstruction_amount"):
 				player.call("set_obstruction_amount", amount)
 			else:
