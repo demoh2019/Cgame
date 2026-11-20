@@ -307,6 +307,81 @@ TEST_CASE("[EnvironmentQuery3D] Reject invalid limits and weights") {
 	CHECK(q->get_max_results() == 0);
 }
 
+TEST_CASE("[EnvironmentQuery3D] Multi-threat contexts score against the nearest actor") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(1, 0, 0), Vector3(-1, 0, 0),
+		Vector3(0, 0, 10), Vector3(0, 0, -10)
+	});
+	q->set_use_threat(true);
+	q->set_horizontal_only(true);
+	q->set_max_distance(64.0);
+	q->set_distance_weight(0.0);
+	q->set_safety_weight(1.0);
+	q->set_threat_positions({ Vector3(0, 0, 0), Vector3(0, 0, 9) });
+	CHECK(q->get_threat_positions().size() == 2);
+	const PackedVector3Array full = q->query_positions();
+	REQUIRE(full.size() == 4);
+	CHECK(full[0] == Vector3(0, 0, -10));
+	CHECK(full[1] == Vector3(1, 0, 0));
+	CHECK(full[2] == Vector3(-1, 0, 0));
+	CHECK(full[3] == Vector3(0, 0, 10));
+	const Dictionary first = first_result(q);
+	CHECK(double(first["threat_distance"]) == doctest::Approx(10.0));
+	CHECK(double(first["score"]) == doctest::Approx(10.0 / 64.0));
+	const PackedVector3Array top = q->query_top_positions(2);
+	REQUIRE(top.size() == 2);
+	CHECK(top[0] == full[0]);
+	CHECK(top[1] == full[1]);
+
+	// The order of threat actors is irrelevant, not the order of candidate
+	// positions. The nearest one is always used for safety.
+	q->set_threat_positions({ Vector3(0, 0, 9), Vector3(0, 0, 0) });
+	CHECK(q->query_positions() == full);
+}
+
+TEST_CASE("[EnvironmentQuery3D] Multi-threat clearance applies to every actor") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(0, 0, 3), Vector3(0, 0, 7), Vector3(0, 0, -7)
+	});
+	q->set_use_threat(true);
+	q->set_horizontal_only(true);
+	q->set_max_distance(20);
+	q->set_min_threat_distance(3);
+	q->set_threat_positions({ Vector3(), Vector3(0, 100, 9) });
+	const PackedVector3Array result = q->query_positions();
+	CHECK(result == PackedVector3Array({ Vector3(0, 0, -7) }));
+	q->set_min_threat_distance(2);
+	CHECK(q->query_positions().size() == 3);
+	q->set_use_threat(false);
+	q->set_min_threat_distance(100);
+	CHECK(q->query_positions().size() == 3);
+}
+
+TEST_CASE("[EnvironmentQuery3D] Multi-threat limits, invalid actors, and legacy fallback") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(4, 0, 0), Vector3(-4, 0, 0), Vector3(8, 0, 0)
+	});
+	q->set_use_threat(true);
+	q->set_threat_position(Vector3(100, 0, 0));
+	q->set_threat_positions({ Vector3(0, 0, 0), Vector3(6, 0, 0) });
+	const PackedVector3Array baseline = q->query_positions();
+	CHECK(baseline.size() == 3);
+	PackedVector3Array too_many;
+	too_many.resize(33);
+	ERR_PRINT_OFF
+	q->set_threat_positions(too_many);
+	q->set_threat_positions({ Vector3(0, Math::NaN, 0) });
+	ERR_PRINT_ON
+	CHECK(q->get_threat_positions().size() == 2);
+	CHECK(q->query_positions() == baseline);
+	q->set_threat_positions(PackedVector3Array());
+	CHECK(q->get_threat_positions().is_empty());
+	const Array legacy = q->query();
+	REQUIRE(legacy.size() == 3);
+	const Dictionary nearest = legacy[0];
+	CHECK(double(nearest["threat_distance"]) == doctest::Approx(92.0));
+}
+
 TEST_CASE("[EnvironmentQuery3D] Four ring samples cover cardinal directions") {
 	PackedVector3Array p = EnvironmentQuery3D::sample_ring(Vector3(), 2, 4);
 	REQUIRE(p.size() == 4);
@@ -385,6 +460,7 @@ TEST_CASE("[EnvironmentQuery3D] Resource roundtrip preserves parameters") {
 	q->set_max_results(1);
 	q->set_use_threat(true);
 	q->set_threat_position(Vector3());
+	q->set_threat_positions({ Vector3(0, 0, 0), Vector3(1, 0, 0) });
 	q->set_safety_weight(2);
 	const String path = TestUtils::get_temp_path("environment_query_3d_roundtrip.tres");
 	REQUIRE(ResourceSaver::save(q, path) == OK);
@@ -393,6 +469,7 @@ TEST_CASE("[EnvironmentQuery3D] Resource roundtrip preserves parameters") {
 	CHECK(loaded->get_candidates().size() == 2);
 	CHECK(loaded->get_desired_distance() == 6);
 	CHECK(loaded->is_using_threat());
+	CHECK(loaded->get_threat_positions() == q->get_threat_positions());
 	CHECK(loaded->get_max_results() == 1);
 	CHECK(loaded->query_positions()[0] == Vector3(6, 0, 0));
 }
