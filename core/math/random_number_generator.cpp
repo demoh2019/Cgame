@@ -32,9 +32,43 @@
 
 #include "core/object/class_db.h"
 
+// Portable 32-bit word mixer used for named, reproducible PCG substreams.
+// All intermediate words wrap at 32 bits; the same arithmetic can be
+// implemented with 64-bit integers in stock GDScript without overflow.
+// FNV-1a over the eight 16-bit words is followed by a final avalanche.
+static uint32_t _rng_stream_word(uint64_t p_seed, uint64_t p_stream_id, uint32_t p_salt) {
+	uint32_t h = 2166136261U ^ p_salt;
+	for (int i = 0; i < 4; i++) {
+		h = (h ^ uint32_t((p_seed >> (i * 16)) & 0xffffU)) * 16777619U;
+	}
+	for (int i = 0; i < 4; i++) {
+		h = (h ^ uint32_t((p_stream_id >> (i * 16)) & 0xffffU)) * 16777619U;
+	}
+	h = (h ^ (h >> 16)) * 0x045d9f3bU;
+	h = (h ^ (h >> 16)) * 0x045d9f3bU;
+	return h ^ (h >> 16);
+}
+
+uint64_t RandomNumberGenerator::get_substream_seed(int64_t p_stream_id) {
+	const uint64_t parent_seed = get_seed();
+	const uint64_t tag = uint64_t(p_stream_id);
+	const uint64_t hi = _rng_stream_word(parent_seed, tag, 0x9e3779b9U);
+	const uint64_t lo = _rng_stream_word(parent_seed, tag, 0x85ebca6bU);
+	return (hi << 32) | lo;
+}
+
+Ref<RandomNumberGenerator> RandomNumberGenerator::fork(int64_t p_stream_id) {
+	Ref<RandomNumberGenerator> child;
+	child.instantiate();
+	child->set_seed(get_substream_seed(p_stream_id));
+	return child;
+}
+
 void RandomNumberGenerator::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_seed", "seed"), &RandomNumberGenerator::set_seed);
 	ClassDB::bind_method(D_METHOD("get_seed"), &RandomNumberGenerator::get_seed);
+	ClassDB::bind_method(D_METHOD("get_substream_seed", "stream_id"), &RandomNumberGenerator::get_substream_seed);
+	ClassDB::bind_method(D_METHOD("fork", "stream_id"), &RandomNumberGenerator::fork);
 
 	ClassDB::bind_method(D_METHOD("set_state", "state"), &RandomNumberGenerator::set_state);
 	ClassDB::bind_method(D_METHOD("get_state"), &RandomNumberGenerator::get_state);
