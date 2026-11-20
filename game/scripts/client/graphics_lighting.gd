@@ -19,6 +19,11 @@ static func settings(level: int, rendering_method: String) -> Dictionary:
 		"shadow_split_2": 0.29,
 		"shadow_split_3": 0.54,
 		"shadow_blur": 1.0 if tier <= 1 else (1.1 if tier == 2 else 1.25),
+		# Larger High/Ultra shadow atlases resolve more depth precision.
+		# Reduce light separation gently to tighten contact at feet, trunks
+		# and building foundations without altering cascade coverage.
+		"shadow_bias": 0.04 if tier <= 1 else (0.034 if tier == 2 else 0.028),
+		"shadow_normal_bias": 1.2 if tier <= 1 else (1.0 if tier == 2 else 0.82),
 		"volumetric_fog": bool(fog["enabled"]),
 		"volumetric_fog_length": float(fog["length"]),
 		"volumetric_fog_density": float(fog["base_density"]),
@@ -50,6 +55,8 @@ static func apply(sun: DirectionalLight3D, environment: Environment,
 		sun.directional_shadow_split_2 = float(profile["shadow_split_2"])
 		sun.directional_shadow_split_3 = float(profile["shadow_split_3"])
 		sun.shadow_blur = float(profile["shadow_blur"])
+		sun.shadow_bias = float(profile["shadow_bias"])
+		sun.shadow_normal_bias = float(profile["shadow_normal_bias"])
 	# The same atmospheric model is used by this quality selector and by
 	# the day/night weather rig. No second, conflicting fog controller.
 	CinematicFog.apply_profile(environment, sun,
