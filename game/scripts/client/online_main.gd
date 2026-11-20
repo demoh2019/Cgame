@@ -19,6 +19,7 @@ const Hud = preload("res://scripts/client/hud.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
+const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const HubView = preload("res://scripts/client/hub_view.gd")
@@ -80,6 +81,7 @@ var _wind_sample_left := 0.0
 var _visual_weather_wind := Vector2.ZERO
 var _visual_biome := "plains"
 var atmosphere
+var _ambient_motes
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
 var _auto_quality := GraphicsAutoQuality.new()
@@ -990,6 +992,11 @@ func _on_welcomed() -> void:
 	hub_view = HubView.new()
 	add_child(hub_view)
 	hub_view.build(client.world)
+	# One GPU MultiMesh for forest fireflies and floating pollen; placements
+	# follow terrain height, biome and the server-synchronised day cycle.
+	_ambient_motes = AmbientMotes.new()
+	_ambient_motes.setup(client.world)
+	add_child(_ambient_motes)
 	audio = Audio.new()
 	add_child(audio)
 	client.event_received.connect(func(event: Dictionary) -> void: audio.on_event(event, client.peer_id, client.world.height_at))
@@ -1204,6 +1211,10 @@ func _update_time_of_day(delta: float) -> void:
 	if client != null and client.you.has("x"):
 		var here: Vector3 = client.display_position()
 		effects.update_ambience(here, atmosphere.light_level, atmosphere.storm, client.world.biome_at(here.x, here.z))
+		if _ambient_motes != null:
+			_ambient_motes.update_view(here, "" if underground else _visual_biome,
+				atmosphere.light_level, atmosphere.storm, _visual_weather_wind,
+				GraphicsQuality.level(), delta)
 
 
 func _aim_direction() -> Vector2:
