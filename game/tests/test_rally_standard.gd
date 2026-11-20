@@ -28,7 +28,7 @@ func run(t) -> void:
 		Vector3(RallyStandard.RADIUS + 0.2, 0, 0)), "outside banner cannot benefit")
 	t.check(not RallyStandard.within_range(Vector3.ZERO, Vector3(0, 4, 0)),
 		"separated floors are excluded")
-	t.check(not RallyStandard.within_range(Vector3.INF, Vector3.ZERO),
+	t.check(not RallyStandard.within_range(Vector3(INF, 0.0, 0.0), Vector3.ZERO),
 		"nonfinite coordinates cannot earn regeneration")
 	t.near(RallyStandard.bonus_seconds(91.0, 2.0, 0.0, 90.0),
 		1.0, 0.001, "expiry in middle of a tick grants only active time")
