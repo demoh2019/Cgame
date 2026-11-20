@@ -46,11 +46,13 @@ func _physics_process(delta: float) -> void:
 	if _thought_elapsed >= think_interval_seconds:
 		_thought_elapsed = 0.0
 		_update_behavior()
+	# Poll path state every physics tick after assigning a target; otherwise
+	# NavigationAgent3D cannot advance its internal path cursor reliably.
+	var next_position: Vector3 = navigation_agent.get_next_path_position()
 	if navigation_agent.is_navigation_finished():
 		velocity = Vector3.ZERO
 		move_and_slide()
 		return
-	var next_position: Vector3 = navigation_agent.get_next_path_position()
 	var flat_delta: Vector3 = next_position - global_position
 	flat_delta.y = 0.0
 	var horizontal: Vector3 = flat_delta.normalized() * (alert_speed if behavior == Behavior.ALERT else walking_speed)
