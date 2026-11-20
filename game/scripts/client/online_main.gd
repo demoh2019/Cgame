@@ -26,6 +26,7 @@ const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const AmbientBirds = preload("res://scripts/client/ambient_birds.gd")
+const SnowVfx = preload("res://scripts/client/snow_vfx.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -1376,7 +1377,12 @@ func _update_time_of_day(delta: float) -> void:
 			audio.update_environment(client.display_position(), client.world.height_at, underground, _visual_biome,
 				WorldCycle.daylight(clock), atmosphere.storm, _visual_weather_wind.length(),
 				underground or bool(weather.get("sheltered", false)), avatar_model.speed if avatar_model != null else 0.0, delta)
-	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO, atmosphere.storm)
+	var snow_fraction := 0.0
+	if not underground and client != null and client.world != null and client.you.has("x"):
+		var ground_at: Vector3 = client.display_position()
+		snow_fraction = SnowVfx.snow_fraction(client.world.height_at(ground_at.x, ground_at.z))
+	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO,
+		atmosphere.storm, snow_fraction)
 	if client != null and client.you.has("x"):
 		var here: Vector3 = client.display_position()
 		effects.update_ambience(here, atmosphere.light_level, atmosphere.storm, client.world.biome_at(here.x, here.z))

@@ -1,12 +1,14 @@
 extends Node3D
 const RainVfx = preload("res://scripts/client/rain_vfx.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const SnowVfx = preload("res://scripts/client/snow_vfx.gd")
 
 ## Short-lived particle effects (hits, deaths, pickups, level ups, dust), the rain that follows the camera, and the life
 ## of the wilds around the player: pollen drifting in the sun, butterflies, leaves falling in the forest, fireflies at night.
 
 var _rain: Node3D
 var _rain_quality := -1
+var _snow # SnowVfx (GPUParticles3D)
 var _dust_timer := 0.0
 var _pollen: CPUParticles3D
 var _butterflies: CPUParticles3D
@@ -37,6 +39,8 @@ func _ready() -> void:
 	# follows the camera; GPU on modern renderers, bounded CPU on older GL.
 	_rain = RainVfx.create(str(RenderingServer.get_current_rendering_method()))
 	add_child(_rain)
+	_snow = SnowVfx.new()
+	add_child(_snow)
 	_build_ambience()
 
 ## A soft round dot, white with an alpha falloff, for pollen and fireflies.
@@ -193,7 +197,7 @@ func update_ambience(ground: Vector3, daylight: float, storm: float, biome: Stri
 
 
 ## Rain around `center` while `intensity` > 0.
-func update_rain(center: Vector3, intensity: float) -> void:
+func update_rain(center: Vector3, intensity: float, snow_fraction: float = 0.0) -> void:
 	# The quality tier is changed rarely; GPU amount_ratio varies smoothly
 	# with weather and does not restart an active storm emitter.
 	if _rain == null:
@@ -202,7 +206,11 @@ func update_rain(center: Vector3, intensity: float) -> void:
 	if tier != _rain_quality:
 		RainVfx.apply_quality(_rain, tier)
 		_rain_quality = tier
-	RainVfx.update(_rain, center, intensity)
+	# Above the snow line the same storm falls as snow instead of rain.
+	var snow: float = clampf(snow_fraction, 0.0, 1.0)
+	RainVfx.update(_rain, center, intensity * (1.0 - snow))
+	if _snow != null:
+		_snow.update_view(center, intensity * snow, tier)
 
 
 ## A flat ring on the ground that widens and fades: a pulse of healing, a shock wave, a flash.
