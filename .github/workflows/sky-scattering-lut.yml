@@ -46,4 +46,12 @@ jobs:
           assert "ClassDB.class_exists(\"SkyScatteringLUT\")" in atmosphere
           assert "solar_elevation" in atmosphere
           assert '"atmospheric_lut_strength"' in quality
+          assert '"sun_transmittance_strength"' in quality
+          assert '"sample_sun_transmittance"' in atmosphere
+          assert 'sun.light_color = SolarIrradiance.tint(' in atmosphere
+          assert 'SolarIrradiance.SAMPLE_INTERVAL' in atmosphere
+          solar = Path("game/scripts/client/solar_irradiance.gd").read_text()
+          assert 'static func valid(sample: Color)' in solar
+          test_runner = Path("game/tests/run_all.gd").read_text()
+          assert "test_sun_atmospheric_light.gd" in test_runner
           PY
