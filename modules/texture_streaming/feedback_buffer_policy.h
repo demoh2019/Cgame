@@ -76,6 +76,22 @@ constexpr uint8_t prefetch_mip(uint8_t p_requested, uint8_t p_detail_prefetch_mi
 	return p_detail_prefetch_mips >= p_requested ? 0 : uint8_t(p_requested - p_detail_prefetch_mips);
 }
 
+// Pick the next physical texture reload toward the memory-fitted target.
+// High/Ultra skip one intermediate blurry upload on detail recovery, but
+// under VRAM pressure sharpness still decays conservatively one mip at a time.
+// Uninitialized textures can directly upload the approved target level.
+constexpr uint8_t next_reload_mip(uint8_t p_current, uint8_t p_target, uint8_t p_detail_prefetch_mips) {
+	if (p_current == 255 || p_current == p_target) {
+		return p_target;
+	}
+	if (p_target > p_current) {
+		return uint8_t(p_current + 1);
+	}
+	const uint8_t step = p_detail_prefetch_mips > 0 ? 2 : 1;
+	const uint8_t distance = uint8_t(p_current - p_target);
+	return uint8_t(p_current - (distance < step ? distance : step));
+}
+
 // Do not repeatedly recreate a valid 4 KiB buffer when no materials exist.
 // Use 64-bit arithmetic so large material counts cannot wrap the comparison.
 constexpr bool needs_resize(uint32_t p_allocated_bytes, bool p_buffer_valid, uint32_t p_material_count) {

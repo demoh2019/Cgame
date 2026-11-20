@@ -4,7 +4,9 @@ extends RefCounted
 ## memory-budget fitter may drop the prefetch during VRAM pressure.
 ## Only streamed textures are affected; ordinary textures cost nothing extra.
 
-const PREFETCH_MIPS := [0, 0, 1, 1]
+# Ultra opts into one more sharp resident mip when the VRAM fitter permits.
+# All premium I/O uploads remain limited to a two-mip improvement step.
+const PREFETCH_MIPS := [0, 0, 1, 2]
 
 
 static func prefetch_mips(level: int, method: String) -> int:

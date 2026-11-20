@@ -844,15 +844,12 @@ void TextureStreaming::_do_texture_reload(RID p_state_rid) {
 		}
 	}
 
-	uint8_t next_mip;
-	if (is_flushing) {
-		// During flush, jump directly to target mip level.
-		next_mip = target_mip;
-	} else if (target_mip < current) {
-		next_mip = current - 1; // Improving quality.
-	} else {
-		next_mip = current + 1; // Reducing quality.
-	}
+	// Skip an intermediate low-resolution upload for premium streamed
+	// textures, but only toward the target approved by the memory fitter.
+	// Explicit flush still uploads the exact target in one operation.
+	const uint8_t next_mip = is_flushing ? target_mip :
+			TextureStreamingFeedbackPolicy::next_reload_mip(current, target_mip,
+					detail_prefetch_mips.load(std::memory_order_relaxed));
 
 	// Perform the actual texture reload at the new mip level.
 	state->reload_callable.call(next_mip);
