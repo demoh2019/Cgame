@@ -30,6 +30,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const RainGear = preload("res://scripts/client/character_rain_gear.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const GraphicsColorGrade = preload("res://scripts/client/graphics_color_grade.gd")
 const RenderBenchmark = preload("res://scripts/client/render_benchmark.gd")
@@ -1227,6 +1228,14 @@ func _update_time_of_day(delta: float) -> void:
 			WorldCycle.daylight(clock), WorldCycle.sun_height(clock),
 			atmosphere.storm, _visual_weather_wind, GraphicsQuality.level(),
 			delta, underground)
+	# Outfit and armor rain coating uses cached PBR variants. Weather smoothing
+	# and quality tiers change the step, but ordinary render frames are no-ops.
+	var gear_step: int = RainGear.step_for(atmosphere.storm, GraphicsQuality.level(),
+		str(RenderingServer.get_current_rendering_method()))
+	if avatar_model != null:
+		avatar_model.set_wetness_step(gear_step)
+	if entities != null:
+		entities.set_wetness_step(gear_step)
 	# Time-of-day and storm grading shares the existing full-screen post material.
 	# Uniform updates are bounded and do not allocate GPU textures or new passes.
 	_grade_elapsed += maxf(delta, 0.0)

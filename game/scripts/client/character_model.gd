@@ -4,12 +4,16 @@ extends Node3D
 ## without them it is the small Kenney robot with its idle and walk animations.
 
 const Assets = preload("res://scripts/client/assets.gd")
+const RainGear = preload("res://scripts/client/character_rain_gear.gd")
 
 static var _tinted: Dictionary = {}
 
 var animator: AnimationPlayer
 var pack_mode := false
 var _materials: Array[StandardMaterial3D] = []
+var _wet_surfaces: Array[Dictionary] = [] # Live outfit/gear surfaces and their original materials.
+var _wet_surface_keys: Dictionary = {}
+var _wet_step: int = 0
 var _moving := false
 var _walk_speed := 1.0
 var _last_position := Vector3.INF
@@ -134,6 +138,7 @@ static func clear_templates() -> void:
 	for template in _templates.values():
 		(template as Node).free()
 	_templates.clear()
+	RainGear.clear_cache() # No stale material variants after leaving a client world.
 
 
 func _setup_survivor(tint: Color, scale_factor: float, sex: String, look_seed: int) -> Node3D:
@@ -236,6 +241,7 @@ func _setup_pack(tint: Color, scale_factor: float, model_name: String, look_seed
 	animator.add_animation_library("", Assets.animation_library())
 	animator.animation_finished.connect(_on_animation_finished)
 	_play("Zombie_Idle_Loop" if _zombie else "Idle_Loop", 1.0)
+	_capture_wet_surfaces(model)
 
 
 func _setup_kenney(tint: Color, scale_factor: float) -> void:
@@ -257,6 +263,68 @@ func _setup_kenney(tint: Color, scale_factor: float) -> void:
 			if animator.has_animation(animation_name):
 				animator.get_animation(animation_name).loop_mode = Animation.LOOP_LINEAR
 		animator.play("idle")
+
+
+## Capture only opaque clothing and worn equipment. Imported skin, eyes and
+## hair remain exactly as authored. Store the DRY override so exiting rain
+## restores the original imported material, not a wet variant of a variant.
+## Newly attached gear is discovered after set_gear(), never in _process().
+func _capture_wet_surfaces(root: Node) -> void:
+	if root == null:
+		return
+	var still_live: Array[Dictionary] = []
+	for target in _wet_surfaces:
+		var old: MeshInstance3D = target["mesh"]
+		if is_instance_valid(old) and not old.is_queued_for_deletion():
+			still_live.append(target)
+		else:
+			_wet_surface_keys.erase(str(target["key"]))
+	_wet_surfaces = still_live
+	for node in root.find_children("*", "MeshInstance3D", true, false):
+		var mesh_instance := node as MeshInstance3D
+		if mesh_instance.mesh == null:
+			continue
+		var part_name: String = str(mesh_instance.name)
+		if not (part_name.begins_with("Outfit_") or part_name.begins_with("Gear_")):
+			continue
+		# Respect authors' full-mesh overrides, e.g. a custom special-effect.
+		if mesh_instance.material_override != null:
+			continue
+		for surface in mesh_instance.mesh.get_surface_count():
+			var key: String = "%d:%d" % [mesh_instance.get_instance_id(), surface]
+			if _wet_surface_keys.has(key):
+				continue
+			var original_override: Material = mesh_instance.get_surface_override_material(surface)
+			var original: Material = original_override if original_override != null else (
+				mesh_instance.mesh.surface_get_material(surface))
+			if not (original is StandardMaterial3D):
+				continue
+			var base := original as StandardMaterial3D
+			if not RainGear.supports(base):
+				continue
+			_wet_surface_keys[key] = true
+			_wet_surfaces.append({"mesh": mesh_instance, "surface": surface,
+				"base": base, "override": original_override, "key": key})
+			if _wet_step > 0:
+				mesh_instance.set_surface_override_material(surface,
+					RainGear.variant(base, _wet_step))
+
+
+## Called with a discrete weather level, never a continuously changing shader
+## parameter: 0 restores dry imported PBR, 1-4 use globally cached variants.
+## A no-op when the tier does not change (the common 60 FPS case).
+func set_wetness_step(step: int) -> void:
+	var target_step: int = clampi(step, 0, RainGear.STEPS)
+	if target_step == _wet_step:
+		return
+	_wet_step = target_step
+	for target in _wet_surfaces:
+		var instance: MeshInstance3D = target["mesh"]
+		if not is_instance_valid(instance) or instance.is_queued_for_deletion():
+			continue
+		var material: Material = target["override"] if _wet_step == 0 else (
+			RainGear.variant(target["base"], _wet_step))
+		instance.set_surface_override_material(int(target["surface"]), material)
 
 
 func set_tint(tint: Color) -> void:
@@ -366,11 +434,13 @@ func set_gear(gear: Dictionary) -> void:
 	var skeleton := _find_skeleton()
 	if skeleton == null:
 		return
+	var gear_changed := false
 	for slot in GEAR_PARTS:
 		var item_id: String = str(gear.get(slot, ""))
 		if str(_gear_shown.get(slot, "")) == item_id:
 			continue
 		_gear_shown[slot] = item_id
+		gear_changed = true
 		for old in skeleton.find_children("Gear_%s*" % slot, "MeshInstance3D", false, false):
 			old.queue_free()
 		if item_id != "":
@@ -395,6 +465,8 @@ func set_gear(gear: Dictionary) -> void:
 				instance.visible = item_id == ""
 			if slot == "feet" and name_text.begins_with("Outfit_") and name_text.contains("Feet"):
 				instance.visible = item_id == ""
+	if gear_changed:
+		_capture_wet_surfaces(self)
 
 
 ## The tip of the rod in hand, or INF when there is none.
