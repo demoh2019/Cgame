@@ -30,10 +30,12 @@
 
 #include "chunked_terrain_3d.h"
 #include "terrain_geomorph_policy.h"
+#include "terrain_streaming_budget_policy.h"
 
 #include "core/config/engine.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "core/os/time.h"
 #include "scene/main/viewport.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/resources/3d/world_3d.h"
@@ -44,6 +46,13 @@
 #endif
 
 using namespace HeightmapTerrainGeometry;
+
+// The ledger is shared by every ChunkedTerrain3D in the running SceneTree.
+// It is touched only on the main thread by native terrain process callbacks.
+uint64_t ChunkedTerrain3D::shared_mesh_budget_frame = uint64_t(-1);
+uint64_t ChunkedTerrain3D::shared_mesh_budget_start_usec = 0;
+uint32_t ChunkedTerrain3D::shared_mesh_builds_this_frame = 0;
+uint32_t ChunkedTerrain3D::shared_mesh_budget_usec = 0;
 
 HeightmapTerrainGeometry::Params ChunkedTerrain3D::_params() const {
 	Params params;
@@ -151,6 +160,7 @@ void ChunkedTerrain3D::_free_chunk_mesh_and_collision(Chunk &r_chunk) {
 }
 
 void ChunkedTerrain3D::_free_chunks() {
+	pending_mesh_build_count = 0;
 	for (Chunk &chunk : chunks) {
 		_free_chunk_mesh_and_collision(chunk);
 	}
@@ -342,10 +352,25 @@ bool ChunkedTerrain3D::_get_viewer_position(Vector3 &r_position) const {
 	return false;
 }
 
-void ChunkedTerrain3D::_update_chunks() {
+void ChunkedTerrain3D::_update_chunks(bool p_ignore_mesh_budget) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (!rs || !built || chunks.is_empty() || !is_inside_tree()) {
 		return;
+	}
+	pending_mesh_build_count = 0;
+	const bool time_sliced = mesh_build_budget_usec > 0 && !p_ignore_mesh_budget;
+	if (time_sliced) {
+		const uint64_t frame = Engine::get_singleton()->get_process_frames();
+		if (shared_mesh_budget_frame != frame) {
+			shared_mesh_budget_frame = frame;
+			shared_mesh_budget_start_usec = Time::get_singleton()->get_ticks_usec();
+			shared_mesh_builds_this_frame = 0;
+			shared_mesh_budget_usec = mesh_build_budget_usec;
+		} else {
+			// The tightest of active terrain budgets wins when different
+			// terrain nodes coexist; the game normally assigns one preset.
+			shared_mesh_budget_usec = MIN(shared_mesh_budget_usec, mesh_build_budget_usec);
+		}
 	}
 	Vector3 viewer_global;
 	const bool has_viewer = _get_viewer_position(viewer_global);
@@ -462,8 +487,24 @@ void ChunkedTerrain3D::_update_chunks() {
 						projection_scale, pixel_error_tolerance, chunk.lod);
 			}
 			if (lod != chunk.lod || !chunk.instance.is_valid()) {
-				_ensure_mesh(chunk, lod);
-				if (chunk.meshes[lod].is_valid()) {
+				const bool needs_mesh = !chunk.meshes[lod].is_valid();
+				bool may_build = true;
+				if (needs_mesh && time_sliced) {
+					const uint64_t elapsed = Time::get_singleton()->get_ticks_usec() -
+							shared_mesh_budget_start_usec;
+					may_build = TerrainStreamingBudgetPolicy::may_build(
+							elapsed, shared_mesh_budget_usec, shared_mesh_builds_this_frame);
+				}
+				if (!may_build) {
+					// Keep the existing visible LOD until its replacement
+					// can be generated. Newly streamed chunks retry next frame.
+					pending_mesh_build_count++;
+				} else {
+					_ensure_mesh(chunk, lod);
+					if (needs_mesh && time_sliced && chunk.meshes[lod].is_valid()) {
+						shared_mesh_builds_this_frame++;
+					}
+					if (chunk.meshes[lod].is_valid()) {
 					if (!chunk.instance.is_valid()) {
 						chunk.instance = rs->instance_create2(chunk.meshes[lod], scenario);
 						// Native terrains own RenderingServer instances directly,
@@ -476,6 +517,7 @@ void ChunkedTerrain3D::_update_chunks() {
 					}
 					chunk.lod = lod;
 					chunk.morph = -1.0f; // Mesh topology changed; update its own morph uniform.
+					}
 				}
 			}
 			if (chunk.instance.is_valid()) {
@@ -520,7 +562,9 @@ void ChunkedTerrain3D::force_update() {
 	if (!built) {
 		_rebuild();
 	}
-	_update_chunks();
+	// Explicit updates (editor, tests and manual teleports) preserve the old
+	// synchronous behavior. Normal scene streaming respects the time slice.
+	_update_chunks(true);
 	time_since_update = 0.0;
 }
 
@@ -556,11 +600,15 @@ void ChunkedTerrain3D::_notification(int p_what) {
 
 		case NOTIFICATION_INTERNAL_PROCESS: {
 			time_since_update += get_process_delta_time();
-			if (time_since_update >= update_interval) {
-				time_since_update = 0.0;
+			if (pending_mesh_build_count > 0 || time_since_update >= update_interval) {
+				if (time_since_update >= update_interval) {
+					time_since_update = 0.0;
+				}
 				if (!built) {
 					_rebuild();
 				}
+				// Continue any deferred mesh builds on the next process frame,
+				// without waiting for the regular 0.16-0.5 s LOD refresh.
 				_update_chunks();
 			}
 		} break;
@@ -729,6 +777,12 @@ void ChunkedTerrain3D::set_lod_pixel_error(real_t p_pixels) {
 	for (Chunk &chunk : chunks) {
 		chunk.lod = -1;
 	}
+}
+
+void ChunkedTerrain3D::set_mesh_build_budget_usec(int p_usec) {
+	// Engine property is deliberately opt-in and never rebuilds a heightfield.
+	// 20 ms is an upper bound for accidental extreme editor values.
+	mesh_build_budget_usec = uint32_t(CLAMP(p_usec, 0, 20000));
 }
 
 void ChunkedTerrain3D::set_lod_geomorph_enabled(bool p_enabled) {
@@ -977,6 +1031,9 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_lod_distance"), &ChunkedTerrain3D::get_lod_distance);
 	ClassDB::bind_method(D_METHOD("set_lod_pixel_error", "pixels"), &ChunkedTerrain3D::set_lod_pixel_error);
 	ClassDB::bind_method(D_METHOD("get_lod_pixel_error"), &ChunkedTerrain3D::get_lod_pixel_error);
+	ClassDB::bind_method(D_METHOD("set_mesh_build_budget_usec", "microseconds"), &ChunkedTerrain3D::set_mesh_build_budget_usec);
+	ClassDB::bind_method(D_METHOD("get_mesh_build_budget_usec"), &ChunkedTerrain3D::get_mesh_build_budget_usec);
+	ClassDB::bind_method(D_METHOD("get_pending_mesh_build_count"), &ChunkedTerrain3D::get_pending_mesh_build_count);
 	ClassDB::bind_method(D_METHOD("set_screen_space_lod_enabled", "enabled"), &ChunkedTerrain3D::set_screen_space_lod_enabled);
 	ClassDB::bind_method(D_METHOD("is_screen_space_lod_enabled"), &ChunkedTerrain3D::is_screen_space_lod_enabled);
 	ClassDB::bind_method(D_METHOD("set_lod_reference_fov", "degrees"), &ChunkedTerrain3D::set_lod_reference_fov);
@@ -1030,6 +1087,7 @@ void ChunkedTerrain3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "lod_count", PROPERTY_HINT_RANGE, "1,8,1"), "set_lod_count", "get_lod_count");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_distance", PROPERTY_HINT_RANGE, "1,100000,1,or_greater,suffix:m"), "set_lod_distance", "get_lod_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_pixel_error", PROPERTY_HINT_RANGE, "0,20,0.1,or_greater,suffix:px"), "set_lod_pixel_error", "get_lod_pixel_error");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "mesh_build_budget_usec", PROPERTY_HINT_RANGE, "0,20000,100,suffix:us"), "set_mesh_build_budget_usec", "get_mesh_build_budget_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "screen_space_lod_enabled"), "set_screen_space_lod_enabled", "is_screen_space_lod_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_reference_fov", PROPERTY_HINT_RANGE, "1.01,178.99,0.1,degrees"), "set_lod_reference_fov", "get_lod_reference_fov");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_geometric_error_strength", PROPERTY_HINT_RANGE, "0,1,0.05"), "set_lod_geometric_error_strength", "get_lod_geometric_error_strength");
