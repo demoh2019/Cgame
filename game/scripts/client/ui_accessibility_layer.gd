@@ -147,9 +147,10 @@ func _process(delta: float) -> void:
 			metrics += "\n3D: " + GraphicsResolution.diagnostic_label(
 				int(vp.scaling_3d_mode), float(vp.scaling_3d_scale))
 			if is_instance_valid(_world_streamer):
-				metrics += "\nWorld: %d chunks | %d queued" % [
+				metrics += "\nWorld: %d chunks | %d queued | %d visual" % [
 					_world_streamer.get_loaded_count(),
-					_world_streamer.get_queued_generation_count()]
+					_world_streamer.get_queued_generation_count(),
+					_world_streamer.get_pending_visual_details_count()]
 			fps_label.text = metrics
 
 
