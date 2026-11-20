@@ -49,6 +49,7 @@ var _craft_signature: String = ""
 var _inventory_signature: String = ""
 var _trade_state: Dictionary = {}
 var _party_status: Label
+var _raid_loot_mode_button: Button
 var _duel_status: Label
 var _arena_queue_status: Label
 var _party_target: OptionButton
@@ -619,6 +620,13 @@ func _build() -> void:
 	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
 	rally_button.pressed.connect(func() -> void: client.party_rally())
 	party_buttons.add_child(rally_button)
+	_raid_loot_mode_button = Button.new()
+	_raid_loot_mode_button.text = "Raid loot: Free"
+	_raid_loot_mode_button.tooltip_text = "Leader only: switch future boss reward bags between free pickup and fair round-robin turns. Existing bags never change."
+	_raid_loot_mode_button.pressed.connect(func() -> void:
+		var current: String = str(client.you.get("party", {}).get("loot_mode", "free"))
+		client.party_loot_mode("free" if current == "round_robin" else "round_robin"))
+	inventory_box.add_child(_raid_loot_mode_button)
 	var focus_button := Button.new()
 	focus_button.text = "Focus infected"
 	focus_button.tooltip_text = "Leader: mark the nearest living infected within 24m for 18s. Allies near that exact enemy deal +8% PvE damage; 28s cooldown."
@@ -1365,6 +1373,12 @@ func _on_result(kind: String, data: Dictionary) -> void:
 	if kind == "use" and str(data.get("reason", "")) == "no_acid_nearby":
 		say("Alkali kit: no active acid nearby. Your supplies were not spent.")
 		return
+	if kind == "party_loot_mode":
+		if bool(data.get("ok", false)):
+			say("Future raid loot: " + str(data.get("mode", "free")).replace("_", " "))
+		else:
+			say("Raid loot mode: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "party_focus":
 		if bool(data.get("ok", false)):
 			say("Party focus: infected #%d marked for %d seconds (+8%% PvE damage)." % [
@@ -1454,6 +1468,16 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "loot" and str(data.get("reason", "")) == "guards_alive":
 		say("Cache sealed: eliminate %d infected guards." % int(data.get("remaining", 0)))
+		return
+	if kind == "loot" and bool(data.get("round_robin", false)) and bool(data.get("ok", false)):
+		say("Raid share: claimed %dx %s. Next contributor's turn!" % [
+			int(data.get("quantity", 0)), Defs.item(str(data.get("item", ""))).get("name", str(data.get("item", "")))])
+		return
+	if kind == "loot" and str(data.get("reason", "")) == "not_your_turn":
+		say("Raid round-robin: wait your turn (up to %ds)." % ceili(float(data.get("remaining", 0.0))))
+		return
+	if kind == "loot" and str(data.get("reason", "")) == "inventory_full":
+		say("Raid loot: your inventory is full. Your turn was not spent.")
 		return
 	if kind == "loot" and str(data.get("reason", "")) == "raid_reserved":
 		say("Raid loot is reserved for its contributors (%ds remaining)." % [
@@ -1989,6 +2013,9 @@ func _refresh_party_controls() -> void:
 		_duel_status.text = "No duel pending. Select a nearby survivor above."
 	var state: Dictionary = client.you.get("party", {})
 	var group_id: int = int(state.get("id", 0))
+	var loot_mode: String = str(state.get("loot_mode", "free"))
+	_raid_loot_mode_button.disabled = group_id == 0 or int(state.get("leader", 0)) != client.peer_id
+	_raid_loot_mode_button.text = "Raid loot: " + ("Round robin" if loot_mode == "round_robin" else "Free")
 	var roster: Array = state.get("roster", [])
 	var remaining_aid: float = float(client.you.get("party_aid_cooldown", 0.0))
 	var remaining_feast: float = float(client.you.get("party_feast_cooldown", 0.0))
@@ -2000,6 +2027,16 @@ func _refresh_party_controls() -> void:
 			var prefix: String = "[Leader] " if int(member["id"]) == int(state.get("leader", 0)) else ""
 			names.append("%s%s (%d HP)" % [prefix, str(member["name"]), int(member["health"])])
 		_party_status.text = "Party %d (%d/5): %s" % [group_id, roster.size(), ", ".join(names)]
+	if group_id != 0:
+		_party_status.text += "\nRaid loot: %s (leader controls future boss drops)" % (
+			"Round robin" if loot_mode == "round_robin" else "Free pickup")
+	for reward in client.bags.values():
+		if bool(reward.get("raid_round_robin", false)):
+			_party_status.text += "\nRaid bag #%d: %s (%.0fs)" % [
+				int(reward.get("id", 0)),
+				"YOUR TURN" if bool(reward.get("raid_your_turn", false)) else "waiting",
+				float(reward.get("raid_turn_seconds", 0.0))]
+			break
 	var focus_state: Dictionary = state.get("focus", {})
 	if not focus_state.is_empty():
 		_party_status.text += "\nFocus infected #%d: %ds remaining (+8%% PvE damage)" % [
