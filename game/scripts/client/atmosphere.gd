@@ -8,6 +8,10 @@ var sky_material: ShaderMaterial
 var world_environment: WorldEnvironment
 var sky: Sky
 var _shadows_allowed := true
+## Slow-moving sky lighting is cached separately from per-frame directional light and fog.
+var _sky_refresh_interval := 0.4
+var _sky_refresh_elapsed := 2.0 # Force the first material upload.
+var _sky_seconds := 0.0
 var light_level := 1.0 # The daylight of the last update, 0 at night and 1 at noon.
 var storm := 0.0 # 0..1, eased toward the target so the weather fades in and out.
 
@@ -31,6 +35,8 @@ func _ready() -> void:
 		sky_material.set_shader_parameter("day_panorama", panorama)
 	sky = Sky.new()
 	sky.radiance_size = Sky.RADIANCE_SIZE_64
+	# Avoid realtime sky cubemap updates: uniforms are now refreshed at a lower cadence.
+	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
 	sky.sky_material = sky_material
 	environment.sky = sky
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
@@ -99,9 +105,20 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	horizon = horizon.lerp(DUSK_HORIZON, dusk * 0.7)
 	top = top.lerp(STORM_TOP.darkened(1.0 - maxf(daylight, 0.15)), storm * 0.85)
 	horizon = horizon.lerp(STORM_HORIZON.darkened(1.0 - maxf(daylight, 0.12)), storm * 0.8)
-	sky_material.set_shader_parameter("daylight", daylight)
-	sky_material.set_shader_parameter("dusk", dusk)
-	sky_material.set_shader_parameter("storm", storm)
+	# Sky illumination changes slowly relative to screen refresh. Only refresh its
+	# radiance map at an explicit cadence; actual light, shadows and fog still run every frame.
+	_sky_seconds += maxf(delta, 0.0)
+	_sky_refresh_elapsed += maxf(delta, 0.0)
+	if _sky_refresh_elapsed >= _sky_refresh_interval:
+		_sky_refresh_elapsed = fmod(_sky_refresh_elapsed, _sky_refresh_interval)
+		sky_material.set_shader_parameter("daylight", daylight)
+		sky_material.set_shader_parameter("dusk", dusk)
+		sky_material.set_shader_parameter("storm", storm)
+		sky_material.set_shader_parameter("sky_time", _sky_seconds)
+		# DirectionalLight3D emits along -Z. Cache exactly that direction for the disc.
+		sky_material.set_shader_parameter("sun_direction", -sun.global_transform.basis.z)
+		var light_color: Color = sun.light_color
+		sky_material.set_shader_parameter("sun_color", Vector3(light_color.r, light_color.g, light_color.b) * sun.light_energy)
 	# Moonlit nights: the black night sky gives no ambient light, so a cool blue fill takes over as the light goes, and the
 	# world stays readable in deep blue instead of turning to pitch black.
 	environment.ambient_light_color = Color(0.3, 0.38, 0.62)
@@ -115,6 +132,7 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 ## Render-only switches; weather and the shared day/night clock are unaffected.
 func apply_graphics_profile(settings: Dictionary) -> void:
 	_shadows_allowed = bool(settings["shadows"])
+	_sky_refresh_interval = clampf(float(settings.get("sky_refresh_interval", 0.4)), 0.12, 2.0)
 	sun.shadow_enabled = _shadows_allowed
 	sun.directional_shadow_max_distance = float(settings["shadow_distance"])
 	environment.glow_enabled = bool(settings["glow"])
