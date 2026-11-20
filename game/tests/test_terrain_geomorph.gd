@@ -25,9 +25,9 @@ func run(t) -> void:
 	if ground != null:
 		t.check(ground.code.contains("instance uniform float aa_lod_morph"),
 			"textured terrain has per-instance morph strength")
-		t.check(ground.code.contains("mix(VERTEX.y, UV2.x, aa_lod_morph * UV2.y)"),
+		t.check(ground.code.contains("mix(VERTEX.y, UV2.x, morph)"),
 			"textured terrain morphs GPU vertex height")
-	t.check(ChunkView.GROUND_SHADER.contains("mix(VERTEX.y, UV2.x, aa_lod_morph * UV2.y)"),
+	t.check(ChunkView.GROUND_SHADER.contains("mix(VERTEX.y, UV2.x, morph)"),
 		"fallback painted material renders identical geometry")
 	t.check((Quality as Script).source_code.contains("ChunkView.apply_terrain_geomorph"),
 		"graphics settings reconfigure live chunks without a scene reload")
