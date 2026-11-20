@@ -5,7 +5,7 @@ extends RefCounted
 ## Subdivide only busy meshes into 32 m tiles to keep draw-call costs bounded.
 
 const TILE_SIZE := 32.0
-const SPLIT_MIN_INSTANCES := 24
+const SPLIT_MIN_INSTANCES := 48
 const BOUNDS_MARGIN := 0.6 # Mesh movement in wind and imprecise imported bounds.
 
 
