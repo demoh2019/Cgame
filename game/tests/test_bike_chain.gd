@@ -7,8 +7,19 @@ const Mounts = preload("res://scripts/shared/mounts.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const Movement = preload("res://scripts/shared/movement.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
+
+
+func _open_trail(world) -> Vector3:
+	for x in range(180, 361, 24):
+		for z in range(180, 361, 24):
+			var spot := Vector3(float(x), world.height_at(float(x), float(z)), float(z))
+			if not world.is_safe(spot.x, spot.z) and Movement.step(world,
+					spot, {"x": 1.0, "mounted": true}, 0.05).distance_to(spot) > 0.1:
+				return spot
+	return Vector3.INF
 
 
 func run(t) -> void:
@@ -90,18 +101,38 @@ func run(t) -> void:
 	t.check(sim.apply_character(rejoined, legacy), "old save remains valid")
 	t.eq(rejoined.chain_wrap_seconds, 0.0, "legacy character has no free wrap")
 
+	t.current = "wrapped bike remains harder to hear in actual wilderness"
+	var trail: Vector3 = _open_trail(world)
+	t.check(trail.is_finite(), "find a traversable trail outside safe zones")
+	if not trail.is_finite():
+		return
+	rider.position = trail
+	rider.input_budget = 0.25
+	sim.submit_input(91, 3, 1.0, 0.0, false, 0.0, 0.05)
+	t.near(rider.noise_radius, BikeChain.WRAPPED_NOISE_RADIUS, 0.001,
+		"wrapped riding has smaller hearing radius")
+	var distant := Vector3(rider.position.x + 24.0,
+		world.height_at(rider.position.x + 24.0, rider.position.z), rider.position.z)
+	var quiet_walker = Zombie.new(sim.new_id(), "walker", distant)
+	sim.zombies[quiet_walker.id] = quiet_walker
+	sim._tick_zombies(0.05)
+	t.eq(quiet_walker.target_id, -1,
+		"wrapped bike does not draw a fresh infected from 24 metres")
+
 	t.current = "ordinary moving bike attracts nearby infected"
 	var loud := GameServer.new(world, 47)
 	var courier = loud.add_player(93, "Courier")
 	courier.inventory.add(Mounts.ITEM_ID, 1)
 	t.check(bool(loud.cmd_toggle_mount(93).get("ok", false)), "bike mounts normally")
-	courier.position = Vector3(310.0, world.height_at(310.0, 310.0), 310.0)
+	courier.position = trail
 	courier.input_budget = 0.25
 	loud.submit_input(93, 1, 1.0, 0.0, false, 0.0, 0.05)
 	t.near(courier.noise_radius, BikeChain.RIDING_NOISE_RADIUS, 0.001,
 		"moving bike is loud to nearby infected")
 	var infected = Zombie.new(loud.new_id(), "walker",
-		Vector3(335.0, world.height_at(335.0, 310.0), 310.0))
+		Vector3(courier.position.x + 24.0,
+			world.height_at(courier.position.x + 24.0, courier.position.z),
+			courier.position.z))
 	loud.zombies[infected.id] = infected
 	loud._tick_zombies(0.05)
 	t.eq(infected.target_id, 93, "infected hears bike beyond sight distance")
