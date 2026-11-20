@@ -94,6 +94,22 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Heights and normals follow the field") 
 	memdelete(terrain);
 }
 
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Screen-space terrain LOD is opt-in") {
+	ChunkedTerrain3D *terrain = make_terrain(33, 64.0, 10.0);
+	CHECK_FALSE(terrain->is_screen_space_lod_enabled());
+	CHECK(terrain->get_lod_reference_fov() == doctest::Approx(60.0));
+	terrain->set_screen_space_lod_enabled(true);
+	terrain->set_lod_reference_fov(38.0);
+	CHECK(terrain->is_screen_space_lod_enabled());
+	CHECK(terrain->get_lod_reference_fov() == doctest::Approx(38.0));
+	terrain->set_lod_reference_fov(500.0);
+	CHECK(terrain->get_lod_reference_fov() < real_t(179.0));
+	CHECK(terrain->is_collision_enabled());
+	terrain->set_screen_space_lod_enabled(false);
+	CHECK_FALSE(terrain->is_screen_space_lod_enabled());
+	memdelete(terrain);
+}
+
 TEST_CASE("[SceneTree][ChunkedTerrain3D] The node's transform moves the terrain") {
 	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
 	SceneTree::get_singleton()->get_root()->add_child(terrain);
