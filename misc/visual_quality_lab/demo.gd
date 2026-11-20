@@ -19,6 +19,7 @@ func _ready() -> void:
 	_build_world()
 	controller = ResolutionController.new()
 	controller.name = "AdaptiveResolution3D"
+	controller.enable_gpu_frame_measurement = true
 	add_child(controller)
 	manager = QualityManager.new()
 	manager.name = "VisualQualityManager"
