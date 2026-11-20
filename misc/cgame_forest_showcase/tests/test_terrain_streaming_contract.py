@@ -174,6 +174,37 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn("HLODTestManager", smoke)
         self.assertNotIn("StaticBody3D.new()", manager)
 
+    def test_distant_hlod_resource_cache_contract(self) -> None:
+        """Resource-only LRU remains bounded and integrates into HLOD rebuild."""
+        cache = (ROOT / "scripts/distant_hlod_cache.gd").read_text(encoding="utf-8")
+        manager = (ROOT / "scripts/distant_terrain_hlod.gd").read_text(encoding="utf-8")
+        canopies = (ROOT / "scripts/distant_forest_canopies.gd").read_text(encoding="utf-8")
+        world = (ROOT / "scripts/world.gd").read_text(encoding="utf-8")
+        smoke = (ROOT / "tests/smoke_hlod_cache.gd").read_text(encoding="utf-8")
+        runtime_smoke = (ROOT / "tests/smoke_distant_hlod.gd").read_text(encoding="utf-8")
+
+        self.assertIn("MAX_CACHED_TILES: int = 96", cache)
+        self.assertIn("_order.erase(cell)", cache)
+        self.assertIn("_order.push_back(cell)", cache)
+        self.assertIn("_tiles.erase(oldest)", cache)
+        self.assertIn('"terrain": terrain_mesh', cache)
+        self.assertIn('"canopies": canopy_batch', cache)
+        self.assertNotIn("Node3D.new()", cache)
+        self.assertNotIn("StaticBody3D.new()", cache)
+        self.assertIn("HLODCache.lookup(cell)", manager)
+        self.assertIn("HLODCache.insert(cell, mesh, canopies.multimesh)", manager)
+        self.assertIn('mesh = resources["terrain"]', manager)
+        self.assertIn('canopies.configure(cell, resources["canopies"])', manager)
+        self.assertIn('"cache": HLODCache.get_stats()', manager)
+        self.assertIn("if cached_batch != null:", canopies)
+        self.assertIn("multimesh = cached_batch", canopies)
+        self.assertIn('far.get("cache",', world)
+        self.assertIn('far_cache["hits"]', world)
+        self.assertIn("HLODCache.clear()", smoke)
+        self.assertIn('int(stats["entries"]) != capacity', smoke)
+        self.assertIn('revisited.mesh != old_terrain_mesh', runtime_smoke)
+        self.assertIn('new_canopies.multimesh != old_canopy_batch', runtime_smoke)
+
     def test_distant_canopy_placement_contract(self) -> None:
         """Keep far/near deterministic forest generation locked together."""
         near = (ROOT / "scripts/streamed_forest_cell.gd").read_text(encoding="utf-8")
