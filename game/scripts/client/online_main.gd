@@ -42,6 +42,7 @@ const WetDrips = preload("res://scripts/client/wet_drips.gd")
 const ZombieFlies = preload("res://scripts/client/zombie_flies.gd")
 const Dragonflies = preload("res://scripts/client/dragonflies.gd")
 const ShootingStars = preload("res://scripts/client/shooting_stars.gd")
+const DustDevils = preload("res://scripts/client/dust_devils.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -130,6 +131,7 @@ var _wet_drips
 var _zombie_flies
 var _dragonflies
 var _shooting_stars
+var _dust_devils
 var _tumbleweeds
 var _damage_numbers
 var _damage_direction
@@ -1155,6 +1157,8 @@ func _on_welcomed() -> void:
 	_shooting_stars = ShootingStars.new()
 	_shooting_stars.camera = camera
 	add_child(_shooting_stars)
+	_dust_devils = DustDevils.new()
+	add_child(_dust_devils)
 	_damage_numbers = DamageNumbers.new()
 	add_child(_damage_numbers)
 	_blood_decals = BloodDecals.new()
@@ -1501,6 +1505,9 @@ func _update_time_of_day(delta: float) -> void:
 		if _damage_direction != null:
 			_damage_direction.update_view(here, delta)
 		_update_hover_outline(delta)
+		if _dust_devils != null:
+			_dust_devils.update_view(client.world, here, _visual_biome, _visual_weather_wind, atmosphere.storm,
+				WorldCycle.daylight(clock), 0 if underground else GraphicsQuality.level(), delta)
 		if _shooting_stars != null:
 			_shooting_stars.update_view(WorldCycle.daylight(clock), atmosphere.storm,
 				0 if underground else GraphicsQuality.level(), delta)
