@@ -51,6 +51,7 @@ class AnimationLODController : public Node {
 		uint32_t phase = 0; // Stagger offset so mixers do not all tick on the same frame.
 		bool modifiers_culled = false;
 		bool high_priority = false; // Preserve key combat telegraphs on a bounded visible subset.
+		bool manage_modifiers = true; // Only the base mixer owns shared skeleton IK culling.
 		Vector<ObjectID> disabled_modifiers;
 	};
 
@@ -78,7 +79,7 @@ public:
 	// 1 = every frame, 2 = every 2nd, 4 = every 4th, 0 = paused (offscreen or beyond far_distance).
 	static int update_interval(real_t p_distance, bool p_visible, real_t p_near, real_t p_mid, real_t p_far);
 
-	void register_mixer(AnimationMixer *p_mixer);
+	void register_mixer(AnimationMixer *p_mixer, bool p_manage_modifiers = true);
 	void unregister_mixer(AnimationMixer *p_mixer);
 	void clear_mixers();
 	void set_mixer_high_priority(AnimationMixer *p_mixer, bool p_priority);
