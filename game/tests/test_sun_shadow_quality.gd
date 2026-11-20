@@ -86,3 +86,26 @@ func run(t) -> void:
 		"shadow opacity changes on a 5 Hz budget instead of every frame")
 	t.check(atmosphere_code.contains("sun.light_angular_distance = 0.0"),
 		"startup never enables expensive PCSS before applying the preset")
+
+
+	t.current = "world-locked directional PCSS preserves low-end profile budget"
+	var stable_sun := DirectionalLight3D.new()
+	SunShadows.apply(stable_sun, 3, "forward_plus", 0.9, 0.6, 0.0)
+	var angular: float = stable_sun.light_angular_distance
+	var opacity_before: float = stable_sun.shadow_opacity
+	SunShadows.apply(stable_sun, 3, "forward_plus", 0.9, 0.6, 0.0)
+	t.near(stable_sun.light_angular_distance, angular, 0.0001,
+		"reapplying Ultra keeps the same physically sized soft sun")
+	t.near(stable_sun.shadow_opacity, opacity_before, 0.0001,
+		"reapplying preset does not disturb shadow contrast")
+	SunShadows.apply(stable_sun, 0, "forward_plus", 0.9, 0.6, 0.0)
+	t.near(stable_sun.light_angular_distance, 0.0, 0.0001,
+		"Performance reverts to inexpensive non-PCSS shadow filtering")
+	SunShadows.apply(stable_sun, 3, "mobile", 0.9, 0.6, 0.0)
+	t.near(stable_sun.light_angular_distance, 0.0, 0.0001,
+		"Mobile backend never turns on GPU-heavy PCSS")
+	var shadow_code: String = (SunShadows as Script).source_code
+	t.check(shadow_code.contains(
+		"if not is_equal_approx(sun.light_angular_distance, angular_size):"),
+		"sun profile leaves unchanged native shadow-light parameters alone")
+	stable_sun.free()

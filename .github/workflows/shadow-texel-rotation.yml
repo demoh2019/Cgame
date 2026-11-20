@@ -1,0 +1,37 @@
+name: Stable directional shadow penumbra
+
+on:
+  pull_request:
+    paths:
+      - servers/rendering/renderer_rd/shaders/scene_forward_lights_inc.glsl
+      - tests/rendering/test_shadow_texel_rotation.cpp
+      - game/scripts/client/sun_shadow_quality.gd
+  push:
+    branches: [develop]
+    paths:
+      - servers/rendering/renderer_rd/shaders/scene_forward_lights_inc.glsl
+      - tests/rendering/test_shadow_texel_rotation.cpp
+      - game/scripts/client/sun_shadow_quality.gd
+
+jobs:
+  stable-shadow-kernel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Numerical texture-space shadow rotation regression
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror tests/rendering/test_shadow_texel_rotation.cpp -o /tmp/shadow_rotation_test
+          /tmp/shadow_rotation_test
+      - name: Check native directional PCSS and PCF use world-stable seeds
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path("servers/rendering/renderer_rd/shaders/scene_forward_lights_inc.glsl").read_text()
+          pcf = s.split("half sample_directional_pcf_shadow(",1)[1].split("half sample_pcf_shadow(",1)[0]
+          pcss = s.split("half sample_directional_soft_shadow(",1)[1].split("#endif // SHADOWS_DISABLED",1)[0]
+          assert "mat2 directional_shadow_rotation(" in s
+          assert "floor(shadow_uv * texels * 0.5)" in s
+          assert "directional_shadow_rotation(shadow, pos, taa_frame_count)" in pcf
+          assert "directional_shadow_rotation(shadow, pssm_coord.xy, taa_frame_count)" in pcss
+          assert "quick_hash(gl_FragCoord" not in pcf + pcss
+          PY

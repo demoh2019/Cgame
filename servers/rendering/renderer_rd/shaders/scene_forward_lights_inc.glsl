@@ -321,6 +321,19 @@ float quick_hash(vec2 pos) {
 	return fract(magic.z * fract(dot(pos, magic.xy)));
 }
 
+// Lock directional shadow Poisson rotation to shadow-map texels rather
+// than gl_FragCoord. Camera panning no longer shifts the penumbra noise
+// across world surfaces; TAA still advances a temporal phase when active.
+// The quantized 2x2-texel tile avoids the noisy zero-area hash derivative.
+mat2 directional_shadow_rotation(texture2D shadow, vec2 shadow_uv, float taa_frame_count) {
+	vec2 texels = vec2(textureSize(shadow, 0));
+	vec2 stable_cell = floor(shadow_uv * texels * 0.5);
+	float angle = quick_hash(stable_cell + vec2(taa_frame_count * 5.588238)) * (2.0 * M_PI);
+	float sn = sin(angle);
+	float cs = cos(angle);
+	return mat2(vec2(cs, -sn), vec2(sn, cs));
+}
+
 half sample_directional_pcf_shadow(texture2D shadow, vec2 shadow_pixel_size, vec4 coord, float taa_frame_count) {
 	vec2 pos = coord.xy;
 	float depth = coord.z;
@@ -330,13 +343,8 @@ half sample_directional_pcf_shadow(texture2D shadow, vec2 shadow_pixel_size, vec
 		return half(textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(pos, depth, 1.0)));
 	}
 
-	mat2 disk_rotation;
-	{
-		float r = quick_hash(gl_FragCoord.xy + vec2(taa_frame_count * 5.588238)) * 2.0 * M_PI;
-		float sr = sin(r);
-		float cr = cos(r);
-		disk_rotation = mat2(vec2(cr, -sr), vec2(sr, cr));
-	}
+	// Noise is anchored to shadow geometry, not a camera-relative pixel.
+	mat2 disk_rotation = directional_shadow_rotation(shadow, pos, taa_frame_count);
 
 	float avg = 0.0;
 
@@ -424,13 +432,9 @@ half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 tex_
 	float blocker_count = 0.0;
 	float blocker_average = 0.0;
 
-	mat2 disk_rotation;
-	{
-		float r = quick_hash(gl_FragCoord.xy + vec2(taa_frame_count * 5.588238)) * 2.0 * M_PI;
-		float sr = sin(r);
-		float cr = cos(r);
-		disk_rotation = mat2(vec2(cr, -sr), vec2(sr, cr));
-	}
+	// Share the texel-locked orientation with directional PCF. Both blocker
+	// search and penumbra filtering reuse this same stable rotation.
+	mat2 disk_rotation = directional_shadow_rotation(shadow, pssm_coord.xy, taa_frame_count);
 
 	SPEC_CONSTANT_LOOP_ANNOTATION
 	for (uint i = 0; i < sc_directional_penumbra_shadow_samples(); i++) {
