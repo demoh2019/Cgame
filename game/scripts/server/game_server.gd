@@ -5150,6 +5150,11 @@ func _trigger_ruin_ambush(player: Player, crate: Dictionary, lockpicked: bool) -
 			time < next_ruin_ambush_at or raid_boss_id >= 0 or not night_horde.is_empty():
 		return
 	var zone: int = int(crate.get("zone", -1))
+	# Reject a survivor reaching across a protected boundary into a dangerous
+	# crate: every awakened enemy must have a legal, non-safe pursuit target.
+	if world.is_safe(player.position.x, player.position.z) or \
+			world.zone_at(player.position.x, player.position.z) != zone:
+		return
 	if not RuinAmbush.awakens(zone, int(crate.get("id", -1)),
 			int(world.world_seed), lockpicked):
 		return
