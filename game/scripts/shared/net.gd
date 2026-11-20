@@ -358,6 +358,13 @@ func c_build(x: float, z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_place_infected_snare(x: float, z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "infected_snare", sim.cmd_place_infected_snare(peer, x, z))
+
+
+@rpc("any_peer", "reliable")
 func c_throw_decoy(direction_x: float, direction_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

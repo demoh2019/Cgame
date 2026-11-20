@@ -58,6 +58,7 @@ const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
+const InfectedSnare = preload("res://scripts/shared/infected_snare.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const FishingBait = preload("res://scripts/shared/fishing_bait.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
@@ -174,6 +175,7 @@ var raid_wave: int = 0 # Number of completed reinforcement phases.
 var raid_minions: Array[int] = [] # Raid-only infected are cleared with boss.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
 var decoys: Dictionary = {} # Temporary physical sound lures; server-owned, never persisted.
+var infected_snares: Dictionary = {} # Temporary PvE tripwires, never checkpointed.
 var acid_pools: Dictionary = {} # Temporary nonpersistent corrosive terrain.
 var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stacking.
 var _acid_wall_last_hit: Dictionary = {} # Wall id -> last corrosion time; no overlap stacking.
@@ -1693,6 +1695,43 @@ func cmd_stash(peer_id: int, item_id: String, count: int, deposit: bool) -> Dict
 ## fire. All placement and inventory costs are validated by the server.
 ## The client supplies a direction, not the position, price or affected NPCs.
 ## Cost and flight-path validation happen atomically on this simulation.
+## Deploy only by spending a real crafted kit at a verified outdoor site.
+## Account-bound owner caps prevent relogging to bypass the three-trap limit.
+func cmd_place_infected_snare(peer_id: int, x: float, z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if infected_snares.size() >= InfectedSnare.MAX_GLOBAL:
+		return {"ok": false, "reason": "world_limit"}
+	var owner_key: String = "account:" + player.user_id if player.user_id != "" else "guest:" + str(peer_id)
+	var owned: int = 0
+	for trap in infected_snares.values():
+		if str(trap["owner_key"]) == owner_key and float(trap["expires"]) > time:
+			owned += 1
+	if owned >= InfectedSnare.MAX_PER_OWNER:
+		return {"ok": false, "reason": "owner_limit"}
+	var site := Vector2(x, z)
+	var origin := Vector2(player.position.x, player.position.z)
+	var reason: String = InfectedSnare.valid_site(world, site, origin, infected_snares)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	# No immediate telefragging or trapping players under their own feet.
+	for other in players.values():
+		if _alive(other) and site.distance_to(Vector2(other.position.x, other.position.z)) <= InfectedSnare.TRIGGER_RADIUS:
+			return {"ok": false, "reason": "blocked"}
+	for infected in zombies.values():
+		if infected.is_alive() and site.distance_to(Vector2(infected.position.x, infected.position.z)) <= InfectedSnare.TRIGGER_RADIUS:
+			return {"ok": false, "reason": "blocked"}
+	if player.inventory.count(InfectedSnare.ITEM_ID) < 1 or not player.inventory.remove(InfectedSnare.ITEM_ID, 1):
+		return {"ok": false, "reason": "not_carried"}
+	var id: int = new_id()
+	infected_snares[id] = {"id": id, "x": x, "y": world.height_at(x, z), "z": z,
+		"owner_key": owner_key, "expires": time + InfectedSnare.DURATION}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "id": id, "seconds": InfectedSnare.DURATION}
+
+
 func cmd_throw_decoy(peer_id: int, direction_x: float, direction_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -3264,6 +3303,16 @@ func _tick_zombies(delta: float) -> void:
 	if tick_count % 5 == 0 and not decoys.is_empty():
 		_alert_noise_decoys()
 	for zombie in zombies.values():
+		# One-shot root triggered by a living non-boss infected. All hit checks
+		# use authoritative zombie positions; players cannot submit target IDs.
+		for trap_id in infected_snares.keys():
+			var trap: Dictionary = infected_snares[trap_id]
+			if InfectedSnare.catches(trap, zombie, time):
+				if zombie.apply_snare(InfectedSnare.root_duration(zombie)):
+					infected_snares.erase(trap_id)
+					events.append({"type": "snare_triggered", "id": trap_id,
+						"zombie": zombie.id, "x": trap["x"], "z": trap["z"]})
+					break
 		var result: Dictionary = zombie.think(world, info, delta, rng)
 		# Zombies chip away at obstacles only while actually stuck pursuing
 		# a survivor. No instantaneous destruction or client damage commands.
@@ -3505,6 +3554,9 @@ func _spawn_supply_guards(site: Dictionary) -> int:
 
 
 func _tick_world(delta: float) -> void:
+	for id in infected_snares.keys():
+		if time >= float(infected_snares[id]["expires"]):
+			infected_snares.erase(id)
 	_tick_supply_drop()
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):
@@ -3572,7 +3624,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			nearby_zombies.append({"id": zombie.id, "type": zombie.type, "x": p.x, "y": p.y, "z": p.z, "yaw": zombie.yaw, "hp": zombie.health, "state": zombie.state,
 					"elite": zombie.elite, "raid_boss": zombie.raid_boss,
 					"raid_enraged": zombie.raid_enraged,
-					"max_hp": float(zombie.data.get("health", zombie.health))})
+					"max_hp": float(zombie.data.get("health", zombie.health)),
+					"snared_seconds": zombie.snared_seconds})
 	# Replicate only pending, living spit warnings within sight of this
 	# survivor. Client visual effects never authorize an actual hit.
 	var spit_zones: Array = []
@@ -3601,6 +3654,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			nearby_barricades.append(Structures.public_state(wall))
 	var nearby_campfires: Array = FieldCampfire.visible(campfires,
 			player.position, time, Defs.INTEREST_RADIUS)
+	var nearby_snares: Array = InfectedSnare.visible(
+		infected_snares, player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_decoys: Array = []
 	for lure in decoys.values():
 		if NoiseDecoy.is_audible(lure, player.position, time) or (
@@ -3699,7 +3754,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
 		"spit_zones": spit_zones, "acid_pools": nearby_acid_pools,
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
-		"decoys": nearby_decoys,
+		"decoys": nearby_decoys, "infected_snares": nearby_snares,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}
 	# Send a ground telegraph only to survivors close enough to see it.

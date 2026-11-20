@@ -106,6 +106,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_build", KEY_U)
 	_bind_key("survive_campfire", KEY_O)
 	_bind_key("survive_decoy", KEY_COMMA)
+	_bind_key("survive_snare", KEY_BACKSLASH)
 	_bind_key("survive_stim", KEY_PERIOD)
 	_bind_key("survive_scent_mask", KEY_SLASH)
 	_bind_key("survive_refuel", KEY_9)
@@ -816,6 +817,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_result("Refuel campfire", sim.cmd_refuel_campfire(LOCAL_PLAYER_ID, fire_id))
 	elif event.is_action_pressed("survive_decoy"):
 		_result("Throw noise decoy", sim.cmd_throw_decoy(LOCAL_PLAYER_ID, _facing.x, _facing.y))
+	elif event.is_action_pressed("survive_snare"):
+		var site := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
+		_result("Place infected snare", sim.cmd_place_infected_snare(LOCAL_PLAYER_ID, site.x, site.y))
 	elif event.is_action_pressed("survive_campfire"):
 		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
 		var fire_result: Dictionary = sim.cmd_light_campfire(LOCAL_PLAYER_ID, point.x, point.y)
@@ -957,7 +961,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | . stimulant | / scent salve | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback
@@ -966,6 +970,7 @@ func _update_hud() -> void:
 	if not fishing_status.is_empty():
 		_instructions.text += "\n" + fishing_status
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
+	_instructions.text += "\nField snares active: %d | roots first non-boss infected for 3s" % sim.infected_snares.size()
 	var scent_radius: float = BloodScent.detection_radius(survivor.survival.bleeding,
 		survivor.survival.alive, world.is_safe(survivor.position.x, survivor.position.z),
 		survivor.survival.scent_mask_seconds > 0.0)
