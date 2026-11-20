@@ -4,11 +4,12 @@ This directory is a **standalone playable reference project**, not a replacement
 
 ## Features integrated into this demo
 
-- Deterministic rolling terrain with vertex normals derived from an analytic heightfield and vertex-colored PBR material.
+- **Streamed terrain:** every WorldPartition3D forest cell now creates its own 32 m × 32 m heightfield mesh and matching static `HeightMapShape3D` collider, with analytic vertex normals and vertex-colored PBR ground material. The old world-wide terrain mesh and trimesh collider have been removed.
+- **Seam-preserving geometry LOD:** each patch has 33 × 33 vertices and automatic 2×/4×/8× coarse indexed LODs. Every outer 1 m border vertex remains represented at every LOD, preventing T-junction gaps when adjacent patches use different detail levels. High-detail surfaces use 2,048 triangles per patch; mathematical model LODs contain 1,088, 352, and 176 triangles respectively. Test these render thresholds on actual hardware.
 - **WorldPartition3D streaming:** 16 registered 32 m × 32 m cells reference the **same** packed forest scene; the engine shares the threaded resource request, instantiates around the camera (one cell/frame) and unloads distant cells with hysteresis. The fork also exposes an `observer_cell_changed` event for region-aware gameplay; the demo displays the current cell without polling player coordinates.
 - **Chunked GPU instancing:** each loaded cell generates up to 54 trees, 225 animated grass tufts, and 9 rocks using five or fewer MultiMesh draw groups, instead of one Node3D per instance. At most 3,600 grass tufts exist if all 16 cells are loaded.
 - Atmospheric procedural sky with the DirectionalLight3D sun, stable ambient sky radiance, cinematic AgX tone mapping, optional SSAO, SSIL, volumetric fog, and glowing collectible crystals.
-- **First-person physics:** a capsule `CharacterBody3D` controller with frame-rate-independent gravity, grounded and air acceleration, sprinting, jumping, slope snapping and mouse look; collision from the terrain's generated triangle mesh plus dynamically streamed tree-trunk and boulder primitives.
+- **First-person physics:** a capsule `CharacterBody3D` controller with frame-rate-independent gravity, grounded and air acceleration, sprinting, jumping, slope snapping and mouse look; collision from cell-local `HeightMapShape3D` physics resources plus dynamically streamed tree-trunk and boulder primitives. The explorer freezes until the spawn/destination tile is physically ready and cannot advance into an unloaded neighboring tile.
 - Exploration, eight collectible forest relics, HUD with loaded cell count, and interactive high/performance profiles.
 - **Versioned local saves** under `user://` storing collected relics, camera and quality settings. `F5` saves, `F9` loads, collecting a relic automatically saves; invalid JSON or incompatible versions are rejected.
 - Live 3D resolution scaling to a 60 FPS target using the fork's native GPU-time adaptation. When valid GPU timings are unavailable, the adaptive node deliberately does not change resolution.
@@ -23,9 +24,9 @@ This directory is a **standalone playable reference project**, not a replacement
 
 ## Technical constraints
 
-The demo is deliberately small and asset-free. Its spheres, cylinders, quad blades and procedural sky are placeholders for real authored assets; it does **not** reimplement Unreal Nanite/Lumen. A full game should replace these with authored PBR meshes, materials, impostors/HLOD and a complete tile-based terrain + texture streaming solution. The effect budgets should be tuned with GPU measurements on actual target devices.
+The demo is deliberately small and asset-free. Its spheres, cylinders, quad blades and procedural sky are placeholders for real authored assets; it does **not** reimplement Unreal Nanite/Lumen. A full game should replace these with authored PBR meshes, materials, impostors/HLOD and authored PBR textures, asynchronous mesh generation/caching, a complete terrain authoring workflow and a larger-world asset/texture streaming solution. The effect budgets should be tuned with GPU measurements on actual target devices.
 
-A `MultiMesh` is culled as one unit; therefore trees and grass are split into 16 **streamed local cell scenes** instead of one massive draw group. This sample still retains a single terrain/collision mesh, shared materials and all eight collectibles when distant; a production open world needs terrain and gameplay entity streaming, true HLOD/impostors, collision/navmesh warmup and origin management. Primitive colliders are re-created with each streamed cell; their counts should be profiled as world density increases. `WorldPartition3D` does not provide these automatically. The native `AdaptiveResolution3D` class is opt-in and should be used only once per viewport.
+A `MultiMesh` is culled as one unit; therefore trees and grass are split into 16 **streamed local cell scenes** instead of one massive draw group. This sample **streams both terrain rendering and collision per cell**, but still keeps the eight collectible scene nodes persistent and creates procedural tile resources on the main thread. A production open world needs background tile generation, terrain caches/asset streaming, true HLOD/impostors, per-cell navigation meshes, collision warmup and origin management. Primitive colliders are re-created with each streamed cell; their counts should be profiled as world density increases. `WorldPartition3D` does not provide these automatically. The native `AdaptiveResolution3D` class is opt-in and should be used only once per viewport.
 
 ## Headless regression checks
 
@@ -37,7 +38,13 @@ With a **compiled Cgame binary** (the generic upstream editor lacks the fork's n
 /path/to/cgame --headless --path misc/cgame_forest_showcase --script res://tests/smoke_physics.gd
 ```
 
-`smoke_streaming.gd` checks async shared-cell load/unload/reload, deterministic per-cell instance transforms, negative grid coordinates, streaming obstacle collision and performance density. `smoke_saves.gd` uses a separate throwaway save path, checking round-trip, deduplication, invalid JSON and version rejection. `smoke_physics.gd` instantiates the real scene, queries static terrain collision and checks that a spawned character falls onto the terrain; it also checks that obstacles are constructed in streamed cells. These tests are **added, not claimed to have been executed**.
+`smoke_streaming.gd` checks async shared-cell load/unload/reload, deterministic per-cell instance transforms, negative grid coordinates, streaming obstacle collision and performance density. `smoke_saves.gd` uses a separate throwaway save path, checking round-trip, deduplication, invalid JSON and version rejection. `smoke_physics.gd` instantiates the real scene, queries static terrain collision and checks that a spawned character falls onto the terrain; it also checks that obstacles are constructed in streamed cells. `smoke_streaming.gd` also checks seam heights/normals, heightmap dimensions and offset, and LOD index boundaries. **These GDScript smoke tests are added, not claimed to have been executed.**
+
+The independent mathematical terrain contract can run without Godot and is included in the new `.github/workflows/cgame-forest-contracts.yml` CI job:
+
+```sh
+python3 -m unittest discover -s misc/cgame_forest_showcase/tests -p 'test_terrain_*.py' -v
+```
 
 ## Verification checklist
 
@@ -46,6 +53,9 @@ With a **compiled Cgame binary** (the generic upstream editor lacks the fork's n
 - [ ] Sky shader compiles on Vulkan and Metal (note: `sky()` has no early `return`).
 - [ ] Wind, grass instancing and sky render correctly on Apple M1.
 - [ ] Walking through cell boundaries updates the loaded-cell HUD, preserves terrain/foliage alignment, and unloads/reloads cells without flicker.
+- [ ] Check HeightMapShape3D collision at tile borders and on slopes, including mixed terrain LOD transitions.
+- [ ] Confirm the character does not fall during initial tile streaming or during savegame teleport while destination physics loads.
+- [ ] Inspect the three terrain LOD transition distances and measure GPU triangle savings on target hardware.
 - [ ] Verify capsule grounding, jumping, collision against trunks/rocks, world bounds, camera position and save/load after teleporting.
 - [ ] Run all three added headless smoke scripts on the compiled fork.
 - [ ] Picking up eight crystals updates the HUD, the savegame persists after reopening, and profile switching changes measured GPU time.
@@ -62,6 +72,9 @@ These checks are not claimed complete until running the project on a compiled bu
 - [Unreal Engine World Partition / HLOD](https://dev.epicgames.com/documentation/en-us/unreal-engine/hierarchical-level-of-detail-in-unreal-engine)
 - [Godot CharacterBody3D physics and floor snapping](https://docs.godotengine.org/en/stable/classes/class_characterbody3d.html)
 - [Unreal Engine Character Movement Component](https://dev.epicgames.com/documentation/en-us/unreal-engine/movement-components-in-unreal-engine)
+- [Godot heightfield collision shape](https://docs.godotengine.org/en/stable/classes/class_heightmapshape3d.html)
+- [Godot procedural ArrayMesh LOD index arrays](https://docs.godotengine.org/en/stable/classes/class_arraymesh.html)
+- [Unreal Engine World Partition](https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine)
 - [Godot MultiMesh optimization](https://docs.godotengine.org/en/stable/tutorials/performance/using_multimesh.html)
 - [Godot visibility ranges (HLOD)](https://docs.godotengine.org/en/stable/tutorials/3d/visibility_ranges.html)
 - [Godot sky shaders](https://docs.godotengine.org/en/stable/tutorials/shaders/shader_reference/sky_shader.html)
