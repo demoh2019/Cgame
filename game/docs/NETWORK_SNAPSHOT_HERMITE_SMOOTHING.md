@@ -62,6 +62,12 @@ the same monotone cubic coefficients and safeguards run in the game's
 GDScript helper. This allows testing the scene on standard builds,
 while the compiled fork evaluates the hot geometry calculation in C++.
 
+On **Performance**, EntityView bypasses cubic sampling entirely and keeps
+its previous two-point linear interpolation to avoid extra script work.
+Balanced, High and Ultra use the new velocity-sensitive path. Both
+native and fallback helpers reject malformed nonfinite position samples
+rather than allowing invalid numbers into visual transforms.
+
 The local player's authoritative camera/control path, server physics,
 collisions, damage, NPC AI and bandwidth remain unchanged.
 The result is strictly *visual motion smoothing*.
