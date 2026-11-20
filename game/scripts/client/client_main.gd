@@ -25,6 +25,7 @@ const Structures = preload("res://scripts/shared/structures.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
+const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
@@ -1188,7 +1189,8 @@ func _update_hud() -> void:
 			rows.append("%s:%d" % [str(slot["id"]), int(slot["count"])])
 	var levels: Dictionary = survivor.progression.levels()
 	var weight: float = survivor.inventory.total_weight()
-	var speed_pct: int = int(round(survivor.inventory.movement_factor() * 100.0))
+	var speed_pct: int = int(round(BikeCargo.movement_factor(survivor.inventory,
+		survivor.skills.bonus("carry_capacity"), survivor.mounted) * 100.0))
 	var risk: String = "SAFE HUB" if world.is_safe(position.x, position.z) else ZoneRisk.description(zone)
 	var weather: Dictionary = Weather.conditions(world, position.x, position.z, sim.time)
 	var rain_grip: float = StormMud.factor(world, position, sim.time, survivor.mounted)
@@ -1250,6 +1252,8 @@ func _update_hud() -> void:
 	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
 		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		survivor.mount_cooldown]
+	if not survivor.mounted and survivor.inventory.count("trail_backpack_2") > 0:
+		_stats.text += "\nTRAIL PACK: +14 kg on foot, still full-loot"
 	if survivor.mounted:
 		if survivor.inventory.count("bike_panniers") > 0:
 			_stats.text += "\nBIKE PANNIERS: 28 kg supported; dismount = full load"

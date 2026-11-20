@@ -2182,6 +2182,8 @@ func _process(_delta: float) -> void:
 	if protected_for > 0.0:
 		_info_label.text += "\nPROTECTED by guardian #%d for %.1fs" % [
 			int(client.you.get("guardian_guarded_by", -1)), protected_for]
+	if float(client.you.get("trail_pack_kg", 0.0)) > 0.0:
+		_info_label.text += "\nTRAIL PACK: 14 kg on-foot support (full-loot; no extra slots)"
 	if float(client.you.get("cargo_factor", 1.0)) < 0.9999 and \
 			not bool(client.you.get("mounted", false)):
 		_info_label.text += "\nHEAVY CARGO: footsteps draw infected attention; crouch to stay quieter."
