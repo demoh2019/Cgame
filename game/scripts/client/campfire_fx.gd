@@ -59,6 +59,8 @@ func build(level: int, rendering_method: String) -> void:
 		if "light_flicker_color_shift" in light:
 			light.set("light_flicker_color_shift", 0.6)
 	add_child(light)
+	if level >= 1:
+		_add_smoke(level)
 	if not rich:
 		return
 	var embers := GPUParticles3D.new()
@@ -165,3 +167,81 @@ static func add_torch_flame(torch: Node3D, flame_height: float = 0.45) -> Node3D
 	torch.get_parent().add_child(flame)
 	flame.position = top
 	return flame
+
+
+## Soft rising smoke column (RDR2-style campfire smoke): lit, soft-edged
+## billboards that grow and thin out while drifting downwind. Proximity fade
+## avoids hard intersections with the ground; ~16-28 particles in total.
+func _add_smoke(level: int) -> void:
+	var smoke := GPUParticles3D.new()
+	smoke.amount = 28 if level >= 3 else (20 if level == 2 else 14)
+	smoke.lifetime = 6.0
+	smoke.preprocess = 4.0
+	smoke.position.y = 1.2
+	smoke.visibility_aabb = AABB(Vector3(-4, -1, -4), Vector3(8, 10, 8))
+	smoke.draw_order = GPUParticles3D.DRAW_ORDER_VIEW_DEPTH
+	var pm := ParticleProcessMaterial.new()
+	pm.direction = Vector3.UP
+	pm.spread = 8.0
+	pm.initial_velocity_min = 0.5
+	pm.initial_velocity_max = 0.8
+	pm.gravity = Vector3(0.25, 0.12, 0.1) # Gentle drift: plumes lean downwind.
+	pm.damping_min = 0.05
+	pm.damping_max = 0.15
+	pm.angle_min = -180.0
+	pm.angle_max = 180.0
+	pm.angular_velocity_min = -12.0
+	pm.angular_velocity_max = 12.0
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm.emission_sphere_radius = 0.15
+	var grow := Curve.new()
+	grow.add_point(Vector2(0.0, 0.35))
+	grow.add_point(Vector2(1.0, 1.6))
+	var grow_tex := CurveTexture.new()
+	grow_tex.curve = grow
+	pm.scale_curve = grow_tex
+	var fade := Gradient.new()
+	fade.set_color(0, Color(0.32, 0.3, 0.29, 0.0))
+	fade.add_point(0.12, Color(0.36, 0.34, 0.33, 0.42))
+	fade.set_color(fade.get_point_count() - 1, Color(0.55, 0.55, 0.56, 0.0))
+	var ramp := GradientTexture1D.new()
+	ramp.gradient = fade
+	pm.color_ramp = ramp
+	smoke.process_material = pm
+	var puff := QuadMesh.new()
+	puff.size = Vector2(1.1, 1.1)
+	var sm := StandardMaterial3D.new()
+	sm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	sm.billboard_keep_scale = true
+	sm.vertex_color_use_as_albedo = true
+	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	sm.albedo_texture = _smoke_texture()
+	sm.roughness = 1.0
+	sm.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	sm.proximity_fade_enabled = true
+	sm.proximity_fade_distance = 0.6
+	sm.disable_receive_shadows = true
+	puff.material = sm
+	smoke.draw_pass_1 = puff
+	smoke.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(smoke)
+
+
+static var _smoke_tex: Texture2D # Built once, shared by every campfire.
+
+
+static func _smoke_texture() -> Texture2D:
+	if _smoke_tex != null:
+		return _smoke_tex
+	# Soft lumpy puff: radial falloff modulated by low-frequency noise.
+	var noise := FastNoiseLite.new()
+	noise.frequency = 0.08
+	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	for y in 64:
+		for x in 64:
+			var d: float = Vector2(x - 31.5, y - 31.5).length() / 32.0
+			var a: float = clampf(1.0 - d, 0.0, 1.0)
+			a = a * a * (0.6 + 0.4 * (noise.get_noise_2d(x, y) * 0.5 + 0.5))
+			img.set_pixel(x, y, Color(1, 1, 1, a))
+	_smoke_tex = ImageTexture.create_from_image(img)
+	return _smoke_tex
