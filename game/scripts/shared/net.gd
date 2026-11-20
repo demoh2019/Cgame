@@ -657,6 +657,13 @@ func c_party_standard() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_raid_vote(bag_id: int, choice: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "raid_vote", sim.cmd_raid_vote(peer, bag_id, choice))
+
+
+@rpc("any_peer", "reliable")
 func c_party_loot_mode(mode: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
