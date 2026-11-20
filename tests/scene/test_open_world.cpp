@@ -440,6 +440,54 @@ public:
 	}
 };
 
+// Test the request list at generator callback time, before the streamer
+// removes processed cells. A teleport must never retain obsolete work.
+class QueueProbeGenerator : public Object {
+public:
+	WorldStreamer *streamer = nullptr;
+	int calls = 0;
+	int max_queued_on_call = 0;
+	Vector3i last_cell;
+	Node *generate(const Vector3i &p_cell) {
+		calls++;
+		last_cell = p_cell;
+		max_queued_on_call = MAX(max_queued_on_call, streamer->get_queued_generation_count());
+		return memnew(Node3D);
+	}
+};
+
+TEST_CASE("[SceneTree][WorldStreamer] Reconcile stale procedural requests after teleport") {
+	QueueProbeGenerator generator;
+	WorldStreamer *streamer = memnew(WorldStreamer);
+	generator.streamer = streamer;
+	streamer->set_cell_size(100.0);
+	streamer->set_load_radius(120.0);
+	streamer->set_unload_radius(180.0);
+	streamer->set_update_interval(0.0);
+	streamer->set_max_instantiations_per_frame(1);
+	streamer->set_chunk_generator(callable_mp(&generator, &QueueProbeGenerator::generate));
+	streamer->set_focus_position(Vector3(50, 0, 50));
+	SceneTree::get_singleton()->get_root()->add_child(streamer);
+
+	SceneTree::get_singleton()->process(0.016);
+	CHECK(generator.calls == 1);
+	CHECK(generator.last_cell == Vector3i(0, 0, 0));
+	CHECK(generator.max_queued_on_call == 9); // The current 3 x 3 neighbourhood.
+
+	// Without reconciliation the old eight pending chunks plus nine new
+	// candidates are all scanned/sorted, even though only the latter are useful.
+	streamer->set_focus_position(Vector3(3050, 0, 50));
+	SceneTree::get_singleton()->process(0.016);
+	CHECK(generator.calls == 2);
+	CHECK(generator.last_cell == Vector3i(30, 0, 0));
+	CHECK(generator.max_queued_on_call == 9);
+	CHECK(streamer->get_queued_generation_count() <= 8);
+	CHECK_FALSE(streamer->is_cell_loaded(Vector3i(0, 0, 0)));
+	CHECK(streamer->is_cell_loaded(Vector3i(30, 0, 0)));
+
+	memdelete(streamer);
+}
+
 TEST_CASE("[SceneTree][WorldStreamer] Generator obeys one drain and soft CPU budget") {
 	BudgetedGenerator generator;
 	WorldStreamer *streamer = memnew(WorldStreamer);
