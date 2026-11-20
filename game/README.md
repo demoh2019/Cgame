@@ -2589,3 +2589,32 @@ New `game/tests/test_field_canteen.gd`, registered in
 freshwater access, the persisted shared cooldown, legacy saves
 and replay-safe filter consumption. Existing Cgame engine APIs
 are sufficient: no native modifications are needed.
+
+
+## Raid party ready check (Lineage-style cooperation)
+
+The multiplayer party panel now has **Start ready check**, **I'm ready** and
+**Not ready** buttons. Only the group leader may start a 30-second check,
+and **every current party member** (including the leader) must explicitly
+confirm before the party is marked **all_ready**. One "Not ready" response
+ends the check immediately; a finished result remains visible for 10 seconds.
+The leader can start another check after an 8-second anti-spam cooldown.
+
+The dedicated server owns the clock, group roster and response identities.
+Clients cannot vote on behalf of another peer, reset an active deadline or
+expose votes to unrelated players. Changes in membership (including kick,
+leave, disconnection and accepting a new member) cancel old votes. These
+session-only confirmations do not move characters, grant items or launch
+combat; they are a coordination tool for voluntary raid starts.
+
+Implementation: `scripts/shared/party.gd`, `scripts/server/game_server.gd`,
+`scripts/shared/net.gd`, and the existing online client/HUD.
+Headless regressions in `tests/test_party_ready.gd` cover authentication,
+deadline behavior, privacy, anti-spam and roster changes. Run:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+Godot's existing RPC, timer and UI APIs are sufficient. No engine patch is
+needed for this feature.
