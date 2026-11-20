@@ -30,3 +30,6 @@ the server to drop the connection, so it is not the default.
   time in forests and meadows before claiming an FPS increase.
 * Feedback: banners for captured outposts and sieges, rings and bursts for restoration pulses, flashes, pinning bolts, knockback
   and smashed barricades; music stings on death, level-ups and victories.
+
+* Cloud-shadow LUT: `scripts/client/cloud_shadow_lut.gd` bakes one seamless grayscale texture for coherent moving sun shadows on terrain, grass and trees. `atmosphere.gd` suppresses expensive cloud shading at night and in Performance mode.
+* Scenery draw-range/mesh LOD: `scripts/client/scenery_lod.gd` and `chunk_view.gd` adjust visual culling and imported mesh LOD bias by graphics quality without hiding settlement landmarks or changing server gameplay. See `docs/CLOUD_HLOD_2026_11.md`.
