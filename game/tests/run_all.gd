@@ -19,6 +19,7 @@ const SUITES := [
 	"res://tests/test_water_scattering.gd",
 	"res://tests/test_water_caustics.gd",
 	"res://tests/test_wind_driven_water.gd",
+	"res://tests/test_water_anisotropic_ggx.gd",
 	"res://tests/test_rain_vfx.gd",
 	"res://tests/test_footprint_decals.gd",
 	"res://tests/test_engine_parity_fx.gd",

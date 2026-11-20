@@ -1,0 +1,52 @@
+name: Water anisotropic GGX robustness
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/renderer_rd/shaders/scene_forward_lights_inc.glsl"
+      - "game/assets/shaders/water.gdshader"
+      - "game/scripts/client/water_refraction.gd"
+      - "game/scripts/client/graphics_profiles.gd"
+      - "game/tests/test_water_anisotropic_ggx.gd"
+      - "tests/rendering/test_anisotropic_ggx_math.cpp"
+      - ".github/workflows/water-anisotropy-ggx.yml"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "servers/rendering/renderer_rd/shaders/scene_forward_lights_inc.glsl"
+      - "game/assets/shaders/water.gdshader"
+      - "game/scripts/client/water_refraction.gd"
+      - "game/scripts/client/graphics_profiles.gd"
+      - "game/tests/test_water_anisotropic_ggx.gd"
+      - "tests/rendering/test_anisotropic_ggx_math.cpp"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  anisotropy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate numerical stability at grazing angles and near-zero roughness
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            tests/rendering/test_anisotropic_ggx_math.cpp -o /tmp/test-anisotropic-ggx
+          /tmp/test-anisotropic-ggx
+      - name: Verify premium shader variant integration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          engine = Path("servers/rendering/renderer_rd/shaders/scene_forward_lights_inc.glsl").read_text()
+          water = Path("game/assets/shaders/water.gdshader").read_text()
+          helper = Path("game/scripts/client/water_refraction.gd").read_text()
+          assert "float v2 = max(dot(v, v), 1e-10)" in engine
+          assert "max(lambda_v + lambda_l, 1e-4)" in engine
+          assert water.count("ANISOTROPY_FLOW = normalize(wind_flow)") == 1
+          assert "#ifdef WATER_REFRACTION" in water
+          assert 'set_shader_parameter("wind_anisotropy_strength"' in helper
+          PY

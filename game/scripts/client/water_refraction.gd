@@ -29,6 +29,11 @@ static func apply(material: ShaderMaterial, profile: Dictionary,
 	if material.shader != target:
 		material.shader = target
 	if enabled(level, method):
+		# Uses the same premium Forward+ shader/variant as scene refraction;
+		# both the explicit anisotropic BRDF and its tangent frame are absent
+		# from the Performance/Balanced/Compatibility source after preprocessing.
+		material.set_shader_parameter("wind_anisotropy_strength",
+			clampf(float(profile.get("water_anisotropy_strength", 0.0)), 0.0, 0.45))
 		material.set_shader_parameter("refraction_strength",
 			clampf(float(profile.get("water_refraction_strength", 0.0)), 0.0, 1.0))
 		material.set_shader_parameter("refraction_fade_start",

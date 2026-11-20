@@ -58,19 +58,27 @@ half V_GGX(half NdotL, half NdotV, half alpha) {
 	return saturateHalf(v);
 }
 
+// Stable high-precision anisotropic GGX for thin-film/water and metallic PBR.
+// Run the shape/visibility denominators in float even on FP16 renderers:
+// near-mirror waves and grazing angles may otherwise overflow to NaN.
 half D_GGX_anisotropic(half cos_theta_m, half alpha_x, half alpha_y, half cos_phi, half sin_phi) {
-	half alpha2 = alpha_x * alpha_y;
-	vec3 v = vec3(alpha_y * cos_phi, alpha_x * sin_phi, alpha2 * cos_theta_m);
-	float v2 = dot(v, v);
-	half w2 = half(float(alpha2) / v2);
-	return alpha2 * w2 * w2 * half(1.0 / M_PI);
+	float ax = max(float(alpha_x), 0.004);
+	float ay = max(float(alpha_y), 0.004);
+	float alpha2 = ax * ay;
+	vec3 v = vec3(ay * float(cos_phi), ax * float(sin_phi), alpha2 * float(cos_theta_m));
+	float v2 = max(dot(v, v), 1e-10);
+	float w2 = alpha2 / v2;
+	float d = alpha2 * w2 * w2 * (1.0 / M_PI);
+	return half(min(d, 65504.0)); // Half's largest finite value.
 }
 
 half V_GGX_anisotropic(half alpha_x, half alpha_y, half TdotV, half TdotL, half BdotV, half BdotL, half NdotV, half NdotL) {
-	half Lambda_V = NdotL * length(hvec3(alpha_x * TdotV, alpha_y * BdotV, NdotV));
-	half Lambda_L = NdotV * length(hvec3(alpha_x * TdotL, alpha_y * BdotL, NdotL));
-	half v = half(0.5) / (Lambda_V + Lambda_L);
-	return saturateHalf(v);
+	float ax = max(float(alpha_x), 0.004);
+	float ay = max(float(alpha_y), 0.004);
+	float lambda_v = float(NdotL) * length(vec3(ax * float(TdotV), ay * float(BdotV), float(NdotV)));
+	float lambda_l = float(NdotV) * length(vec3(ax * float(TdotL), ay * float(BdotL), float(NdotL)));
+	float v = 0.5 / max(lambda_v + lambda_l, 1e-4);
+	return half(min(v, 65504.0));
 }
 
 half SchlickFresnel(half u) {

@@ -29,6 +29,12 @@ uniform float shallow_scattering_strength = 0.0;
 uniform float ripple_strength = 0.35;
 // Optional near-camera wind-aligned wave response. Zero on low-end tiers.
 uniform float wind_wave_strength = 0.0;
+#ifdef WATER_REFRACTION
+// Forward+ high-end only: stretch GGX highlights along the real wind fetch.
+// Godot's built-in anisotropic BRDF handles direct lights and IBL without
+// another reflection pass or any new texture sample.
+uniform float wind_anisotropy_strength = 0.0;
+#endif
 uniform float detail_fade_start = 65.0;
 uniform float detail_fade_end = 125.0;
 // Near-shore light filaments are enabled only on high-end presets and only in shallow water.
@@ -60,6 +66,12 @@ float value_noise(vec2 p) {
 
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+#ifdef WATER_REFRACTION
+	// Horizontal water plane: provide a stable world-aligned tangent frame.
+	// Imported meshes need no tangent data and low-end variants skip it.
+	TANGENT = vec3(1.0, 0.0, 0.0);
+	BINORMAL = vec3(0.0, 0.0, 1.0);
+#endif
 }
 
 void fragment() {
@@ -271,6 +283,22 @@ void fragment() {
 	// Preserve the base physical water opacity and sky/foam lighting.
 	// Only the background contribution should bend through refraction.
 	ROUGHNESS = mix(0.06 + storm * 0.05, 0.4 + storm * 0.05, foam);
+#ifdef WATER_REFRACTION
+	// Anisotropic specular lobes align with the existing weather wind, not
+	// with camera motion. Only premium near-field, visible wavelets contribute.
+	ANISOTROPY = 0.0;
+	ANISOTROPY_FLOW = vec2(1.0, 0.0);
+	if (wind_anisotropy_strength > 0.001 && detail_fade > 0.001
+			&& aa_vegetation_wind.z > 0.03 && foam < 0.95) {
+		vec2 wind_flow = aa_vegetation_wind.xy;
+		if (dot(wind_flow, wind_flow) > 0.0001) {
+			ANISOTROPY_FLOW = normalize(wind_flow);
+			ANISOTROPY = clamp(wind_anisotropy_strength
+				* clamp(aa_vegetation_wind.z, 0.0, 1.0)
+				* detail_fade * (1.0 - foam), 0.0, 0.45);
+		}
+	}
+#endif
 	SPECULAR = 0.7;
 	METALLIC = 0.0;
 	EMISSION = vec3(0.01, 0.04, 0.05) * (1.0 - depth_mix)
