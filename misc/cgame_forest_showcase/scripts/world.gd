@@ -181,12 +181,12 @@ func _on_observer_cell_changed(cell: Vector2i) -> void:
     _refresh_hud()
 
 
-func _on_stream_cell_loaded(_cell: Vector2i) -> void:
-    # Only loaded patches have heightfield physics; enable player when ready.
-    # Quality profiles are kept consistent through reloads.
-    for node in world_partition.get_children():
-        if node.has_method("set_high_quality"):
-            node.call("set_high_quality", high_quality)
+func _on_stream_cell_loaded(cell: Vector2i) -> void:
+    # Direct indexed cell lookup avoids scanning/reconfiguring every loaded
+    # region each time a new region finishes its async resource load.
+    var node: Node3D = world_partition.get_cell_node(cell)
+    if node != null and node.has_method("set_high_quality"):
+        node.call("set_high_quality", high_quality)
     _refresh_player_stream_safety()
     _refresh_hud()
 
