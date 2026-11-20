@@ -213,6 +213,7 @@ func _draw() -> void:
 	var incoming_cone: Dictionary = {}
 	if sim != null and not sim.raid_pending_cone.is_empty():
 		incoming_cone = sim.raid_pending_cone.duplicate(true)
+		incoming_cone["until"] = float(sim.raid_pending_cone.get("at", 0.0))
 		incoming_cone["reach"] = RaidCone.REACH
 		incoming_cone["half_angle"] = RaidCone.HALF_ANGLE_DEGREES
 	elif client != null:
