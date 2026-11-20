@@ -325,12 +325,16 @@ void WorldPartition3D::_update_navigation_readiness() {
 		}
 	}
 	Vector<Vector2i> available;
+	Vector<Vector2i> stale;
 	for (const KeyValue<Vector2i, ObjectID> &E : navigation_pending_regions) {
-		if (!is_cell_physics_ready(E.key)) {
+		NavigationRegion3D *region = Object::cast_to<NavigationRegion3D>(ObjectDB::get_instance(E.value));
+		if (region == nullptr || region->is_queued_for_deletion() || !is_cell_loaded(E.key)) {
+			// A script may free a region without unloading its parent cell.
+			// Do not keep the physics processor running forever on its ObjectID.
+			stale.push_back(E.key);
 			continue;
 		}
-		NavigationRegion3D *region = Object::cast_to<NavigationRegion3D>(ObjectDB::get_instance(E.value));
-		if (region == nullptr || !region->is_inside_tree() || region->is_queued_for_deletion() || !region->is_enabled()) {
+		if (!is_cell_physics_ready(E.key) || !region->is_inside_tree() || !region->is_enabled()) {
 			continue;
 		}
 		const Ref<NavigationMesh> mesh = region->get_navigation_mesh();
@@ -349,6 +353,9 @@ void WorldPartition3D::_update_navigation_readiness() {
 				navigation->region_get_iteration_id(region_rid) > 0) {
 			available.push_back(E.key);
 		}
+	}
+	for (const Vector2i &cell : stale) {
+		navigation_pending_regions.erase(cell);
 	}
 	for (const Vector2i &cell : available) {
 		const ObjectID *id = navigation_pending_regions.getptr(cell);
