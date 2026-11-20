@@ -320,6 +320,48 @@ TEST_CASE("[SceneTree][Environment] Volumetric fog history is finite and bounded
 	CHECK(!scene_environment->is_volumetric_fog_temporal_reprojection_enabled());
 }
 
+TEST_CASE("[SceneTree][Environment] Dungeon SDFGI visibility is atomic and reversible") {
+	if (RenderingServer::get_singleton() == nullptr) {
+		return;
+	}
+	Ref<Environment> env;
+	env.instantiate();
+
+	// Outdoor profile avoids occlusion artifacts and reads the sky.
+	env->configure_sdfgi_visibility(false, true, 1.1f, 1.1f);
+	CHECK(!env->is_sdfgi_using_occlusion());
+	CHECK(env->is_sdfgi_reading_sky_light());
+	CHECK(env->get_sdfgi_normal_bias() == 1.1f);
+	CHECK(env->get_sdfgi_probe_bias() == 1.1f);
+
+	// In an enclosed dungeon, occlusion rays reject leaks through walls.
+	// Disable the sky contribution at the same time, without rendering
+	// four intermediate incomplete states.
+	env->configure_sdfgi_visibility(true, false, 0.95f, 0.95f);
+	CHECK(env->is_sdfgi_using_occlusion());
+	CHECK(!env->is_sdfgi_reading_sky_light());
+	CHECK(env->get_sdfgi_normal_bias() == 0.95f);
+	CHECK(env->get_sdfgi_probe_bias() == 0.95f);
+	env->configure_sdfgi_visibility(true, false, 0.95f, 0.95f);
+
+	// Bad samples do not mutate a subset of the renderer's GI settings.
+	ERR_PRINT_OFF;
+	env->configure_sdfgi_visibility(false, true, -0.1f, 1.1f);
+	env->configure_sdfgi_visibility(false, true, 1.1f, -0.1f);
+	env->configure_sdfgi_visibility(false, true, 4.1f, 1.1f);
+	env->configure_sdfgi_visibility(false, true, 1.1f, 4.1f);
+	ERR_PRINT_ON;
+	CHECK(env->is_sdfgi_using_occlusion());
+	CHECK(!env->is_sdfgi_reading_sky_light());
+	CHECK(env->get_sdfgi_normal_bias() == 0.95f);
+	CHECK(env->get_sdfgi_probe_bias() == 0.95f);
+
+	// Exiting to the open world immediately releases the extra rays.
+	env->configure_sdfgi_visibility(false, true, 1.1f, 1.1f);
+	CHECK(!env->is_sdfgi_using_occlusion());
+	CHECK(env->is_sdfgi_reading_sky_light());
+}
+
 TEST_CASE("[SceneTree][Environment] SDFGI quality profile is atomic and validated") {
 	if (RenderingServer::get_singleton() == nullptr) {
 		return;
