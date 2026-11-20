@@ -571,6 +571,20 @@ func c_party_leave() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_ready_start() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_ready", sim.cmd_party_ready_start(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_party_ready_answer(ready: bool) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_ready", sim.cmd_party_ready_answer(peer, ready))
+
+
+@rpc("any_peer", "reliable")
 func c_party_standard() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
