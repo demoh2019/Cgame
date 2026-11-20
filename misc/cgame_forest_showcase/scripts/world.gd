@@ -223,8 +223,9 @@ func _fast_travel() -> void:
         return
 
     # F7 alternates between the distant 208m outpost and the home clearing.
-    # The first press can request a pinned target; a later press travels only
-    # once its FULL scene is instantiated, never into an HLOD-only proxy.
+    # The first press can pin a missing target. A later press stages travel
+    # only after its native physics activation barrier completes. A targeted
+    # collider raycast runs from _physics_process, never from input callbacks.
     var position := Vector2(player.global_position.x, player.global_position.z)
     var going_home: bool = position.distance_to(OUTPOST_POSITION) < 48.0
     var target_cell: Vector2i = Vector2i.ZERO if going_home else OUTPOST_CELL
