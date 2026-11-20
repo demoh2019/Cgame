@@ -5,6 +5,7 @@ on:
     paths:
       - "modules/gameplay_fx/**"
       - "game/scripts/shared/infected_hearing.gd"
+      - "game/scripts/shared/ranged_cover.gd"
       - "game/scripts/shared/zombie.gd"
       - "game/tests/test_infected_acoustic_cover.gd"
       - "game/tests/run_all.gd"
@@ -14,6 +15,7 @@ on:
     paths:
       - "modules/gameplay_fx/**"
       - "game/scripts/shared/infected_hearing.gd"
+      - "game/scripts/shared/ranged_cover.gd"
       - "game/scripts/shared/zombie.gd"
       - "game/tests/test_infected_acoustic_cover.gd"
   workflow_dispatch:
@@ -49,6 +51,9 @@ jobs:
           assert "GDREGISTER_CLASS(SoundPropagation)" in register
           assert 'ClassDB.class_exists("SoundPropagation")' in policy
           assert "RangedCover.first_blocker_distance" in policy
+          assert "ACOUSTIC_MIN_RADIUS" in policy
+          ranged = Path("game/scripts/shared/ranged_cover.gd").read_text()
+          assert "min_radius: float = 0.0" in ranged
           assert "InfectedHearing.audible(" in ai
           assert "distance > scent and peer_id != target_id" in ai
           assert "real destructible barricade changes authoritative AI hearing" in test
