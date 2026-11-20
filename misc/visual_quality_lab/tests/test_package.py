@@ -318,8 +318,52 @@ class VisualQualityPackageTests(unittest.TestCase):
                     'KEY_K', 'KEY_L', 'export_hotspot_csv()'):
             self.assertIn(key, demo)
 
+    def test_world_interaction_router_is_spatial_and_stream_safe(self):
+        router = (ROOT / 'addons/visual_quality/world_interaction_router.gd').read_text()
+        for feature in ('class_name WorldInteractionRouter3D', 'select_best',
+                        'last_candidate_count', 'last_scanned_cells',
+                        'get_active_cell(Vector2i(x, z))', 'max_query_distance',
+                        'camera.global_basis.z', 'interaction_enabled',
+                        'get_interaction_targets', 'activate_interaction',
+                        'PhysicsRayQueryParameters3D.create',
+                        'cell_about_to_unload.connect', '_set_focus({})',
+                        'is_instance_valid(provider)', 'KEY_H',
+                        'focused_action_changed.emit', 'interaction_completed.emit'):
+            self.assertIn(feature, router)
+        # A focused node is re-discovered before invoking it, avoiding stale
+        # references after WorldStreamer3D removes a scene cell.
+        action = router.split('func try_interact() -> bool:', 1)[1]
+        self.assertLess(action.index('find_best_action()'), action.index('provider.call("activate_interaction"'))
+
+    def test_interaction_providers_revalidate_range_and_persist_npc_dialogue(self):
+        quest = (ROOT / 'addons/visual_quality/exploration_quest.gd').read_text()
+        forest = (ROOT / 'world/forest_cell.gd').read_text()
+        for feature in ('get_interaction_targets', 'activate_interaction',
+                        'get_interaction_message', 'pickup_distance * pickup_distance',
+                        'collected_ids.has(index)'):
+            self.assertIn(feature, quest)
+        for feature in ('get_interaction_targets', 'activate_interaction',
+                        'get_interaction_message', 'npc_talk_count',
+                        'npc_talk_count + 1', 'stream_state_changed.emit()',
+                        'state["npc_talk_count"]', 'state.get("npc_talk_count", 0)',
+                        'try_activate_beacon(actor_eye, 2.8)'):
+            self.assertIn(feature, forest)
+
+    def test_interaction_router_is_live_in_playable_demo(self):
+        demo = (ROOT / 'demo.gd').read_text()
+        for feature in ('InteractionRouter.new()', 'interaction_router.streamer = streamer',
+                        'interaction_router.quest = quest',
+                        'interaction_router.player = player_character',
+                        'interaction_router.camera = player_character.get_view_camera()',
+                        'interaction_router.focused_action_changed.connect',
+                        'interaction_router.interaction_completed.connect',
+                        '_build_interaction_ui()', 'WorldInteractionPrompt',
+                        'WorldInteractionFeedback'):
+            self.assertIn(feature, demo)
+        self.assertLess(demo.index('add_child(quest)'), demo.index('add_child(interaction_router)'))
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd', 'test_streaming_planner.gd', 'test_streaming_cell_profiler.gd', 'test_predictive_streaming_runtime.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd', 'test_streaming_planner.gd', 'test_streaming_cell_profiler.gd', 'test_predictive_streaming_runtime.gd', 'test_world_interaction.gd', 'test_world_interaction_runtime.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
