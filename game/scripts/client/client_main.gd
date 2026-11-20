@@ -153,7 +153,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_radar", KEY_M)
 	_bind_key("survive_mount", KEY_F4)
 	_bind_key("survive_bike_service", KEY_PAGEUP)
-	_bind_key("survive_whetstone", KEY_PAGEDOWN)
+	_bind_key("survive_whetstone", KEY_END)
 	_bind_key("survive_bike_repair", KEY_PAGEDOWN)
 	_bind_key("survive_survey", KEY_F3)
 	_bind_key("survive_bank", KEY_B)
@@ -1196,7 +1196,7 @@ func _update_hud() -> void:
 	if survivor.rested_xp_credit > 0:
 		_stats.text += "\nRESTED TRAINING: %d bonus XP left (Z to rest at camp)" % survivor.rested_xp_credit
 	if survivor.sharpened_hits > 0:
-		_stats.text += "\nSHARPENED: %d infected melee hits left (PgDn)" % survivor.sharpened_hits
+		_stats.text += "\nSHARPENED: %d infected melee hits left (End)" % survivor.sharpened_hits
 	if not sim.lightning_pending.is_empty():
 		var strike: Dictionary = sim.lightning_pending
 		var danger_at := Vector2(float(strike["x"]), float(strike["z"]))

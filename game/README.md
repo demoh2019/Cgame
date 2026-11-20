@@ -2947,7 +2947,7 @@ inventory implementation; no native engine modifications are necessary.
 ## Salvaged Whetstone: classless melee preparation
 
 At the workbench craft a **Salvaged Whetstone** from **2 Stone T1 + 1 Scrap**.
-Equip any carried melee weapon and press **Page Down** in the offline or
+Equip any carried melee weapon and press **End** in the offline or
 online client, outside combat. The next three **confirmed ordinary melee hits
 against infected** deal 15% more damage. Misses and player-versus-player
 attacks never receive or spend infected-only charges. Equipment active skills
