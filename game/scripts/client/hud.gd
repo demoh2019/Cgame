@@ -45,6 +45,7 @@ var _inventory_signature: String = ""
 var _trade_state: Dictionary = {}
 var _party_status: Label
 var _duel_status: Label
+var _arena_queue_status: Label
 var _party_target: OptionButton
 var _party_peer_signature: String = ""
 var _trade_target: OptionButton
@@ -103,7 +104,7 @@ func _build() -> void:
 	card_gap.custom_minimum_size = Vector2(1, 178)
 	card_gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_left.add_child(card_gap)
-	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["bleeding", Color(0.73, 0.21, 0.27)], ["exposure", Color(0.38, 0.7, 0.88)]]:
+	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["bleeding", Color(0.73, 0.21, 0.27)], ["fracture", Color(0.75, 0.48, 0.2)], ["exposure", Color(0.38, 0.7, 0.88)]]:
 		var bar := ProgressBar.new()
 		bar.custom_minimum_size = Vector2(240, 18)
 		bar.max_value = 100.0
@@ -395,6 +396,20 @@ func _build() -> void:
 		else:
 			say("Ranked: choose a nearby survivor first"))
 	duel_buttons.add_child(ranked_button)
+	var queue_buttons := HBoxContainer.new()
+	inventory_box.add_child(queue_buttons)
+	var queue_join := Button.new()
+	queue_join.text = "Find rated opponent"
+	queue_join.tooltip_text = "Opt into automatic matching with nearby authenticated hub players."
+	queue_join.pressed.connect(func() -> void: client.arena_queue_join())
+	queue_buttons.add_child(queue_join)
+	var queue_leave := Button.new()
+	queue_leave.text = "Leave arena queue"
+	queue_leave.pressed.connect(func() -> void: client.arena_queue_leave())
+	queue_buttons.add_child(queue_leave)
+	_arena_queue_status = Label.new()
+	_arena_queue_status.text = "Ranked queue: not searching"
+	inventory_box.add_child(_arena_queue_status)
 	var duel_accept := Button.new()
 	duel_accept.text = "Accept"
 	duel_accept.pressed.connect(func() -> void: client.duel_accept())
@@ -727,6 +742,9 @@ func _on_event(event: Dictionary) -> void:
 			if int(event.get("peer", -1)) == client.peer_id and int(event.get("by", -1)) != client.peer_id:
 				say("A teammate shared a T%d cooked meal. Recovery boosted for %ds." % [
 					int(event.get("tier", 1)), int(event.get("seconds", 0))])
+		"arena_queue":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Arena matchmaking: " + str(event.get("status", "unknown")))
 		"duel":
 			match str(event.get("phase", "")):
 				"invited":
@@ -752,12 +770,15 @@ func _on_event(event: Dictionary) -> void:
 				say("Lawful PvP victory (%s). No criminal infamy added." % str(event.get("reason", "defense")))
 		"party_aid":
 			if int(event.get("peer", -1)) == client.peer_id:
-				say("Teammate treated you: +%d HP, -%d infection, -%d bleeding." % [
+				say("Teammate treated you: +%d HP, -%d infection, -%d bleeding, -%d fracture." % [
 					roundi(float(event.get("heal", 0.0))),
 					roundi(float(event.get("cure", 0.0))),
-					roundi(float(event.get("bleeding_stopped", 0.0)))])
+					roundi(float(event.get("bleeding_stopped", 0.0))),
+					roundi(float(event.get("fracture_treated", 0.0)))])
 		"gathered":
 			say("+%d %s" % [event["amount"], Defs.item(event["item"]).get("name", event["item"])])
+		"campfire_doused":
+			say("Storm exhausted a nearby campfire. Find shelter or refuel sooner.")
 		"campfire_refueled":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("You added wood to the shared campfire.")
@@ -783,6 +804,9 @@ func _on_event(event: Dictionary) -> void:
 		"bleeding":
 			if event.get("peer", -1) == client.peer_id:
 				say("Bleeding wound: %d/100. Use a bandage or antiseptic." % int(event.get("severity", 0)))
+		"fracture":
+			if event.get("peer", -1) == client.peer_id:
+				say("Broken limb: sprint disabled, walking slowed. Craft a Field Splint.")
 		"renown":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("+%d renown from %s | %s (%d total)" % [
@@ -803,6 +827,10 @@ func _on_event(event: Dictionary) -> void:
 			say("ACID SPIT! Leave the green circle before it lands.")
 		"spit_impact":
 			say("Corrosive spit landed — the acid remains dangerous for 5 seconds!")
+		"supply_drop":
+			say("SUPPLY DROP T%d at X:%d Z:%d! Public loot in a full-loot PvP zone." % [
+				int(event.get("tier", 3)), roundi(float(event.get("x", 0.0))),
+				roundi(float(event.get("z", 0.0)))])
 		"raid_started":
 			say("RAID BOSS nearby! A mutant warlord entered the dangerous zone.")
 		"raid_enraged":
@@ -866,6 +894,9 @@ func _claim_nearest_outpost_cache() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "arena_queue":
+		say("Arena queue: " + (str(data.get("status", "queued")) if bool(data.get("ok", false)) else str(data.get("reason", "denied"))))
+		return
 	if kind == "party_feast":
 		if bool(data.get("ok", false)):
 			say("Camp feast: shared T%d cooked fish with %d survivors." % [
@@ -1066,6 +1097,7 @@ func _process(_delta: float) -> void:
 	_bars["thirst"].value = client.you["thirst"]
 	_bars["infection"].value = float(client.you.get("infection", 0.0))
 	_bars["bleeding"].value = float(client.you.get("bleeding", 0.0))
+	_bars["fracture"].value = float(client.you.get("fracture", 0.0))
 	_bars["exposure"].value = float(client.you.get("exposure", 0.0))
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone (T%d)\n%s" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1, ZoneRisk.description(zone)]
@@ -1094,6 +1126,7 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nGuild: %s | allies nearby: %d" % [
 			str(guild.get("name", "")), nearby_mates
 		]
+		_info_label.text += " | Historic clan siege wins: %d" % int(client.you.get("guild_siege_wins", 0))
 	if bool(client.you.get("warden_ward", false)):
 		_info_label.text += "\nWARDEN'S WARD: -15% infected wounds (nearby relic ally)"
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
@@ -1256,6 +1289,12 @@ func _refresh_market_options() -> void:
 
 
 func _refresh_party_controls() -> void:
+	var queue: Dictionary = client.you.get("arena_queue", {})
+	if bool(queue.get("queued", false)):
+		_arena_queue_status.text = "Finding rated match: %ds · ±%d Elo" % [
+			ceili(float(queue.get("seconds", 0.0))), int(queue.get("search_gap", 125))]
+	else:
+		_arena_queue_status.text = "Ranked queue: not searching"
 	var training: Dictionary = client.you.get("duel", {})
 	if bool(training.get("active", false)):
 		_duel_status.text = "%s with #%d — %ds" % [

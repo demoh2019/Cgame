@@ -147,7 +147,9 @@ func _reconcile(snapshot: Dictionary) -> void:
 		var running := bool(replay_input["sprint"]) and moving and float(replay_input["cargo_factor"]) >= 0.9999
 		running = running and Survival.can_sprint_with(energy, float(you.get("hunger", 100.0)),
 				float(you.get("thirst", 100.0)), duration)
+		running = running and float(you.get("fracture", 0.0)) <= 0.0
 		replay_input["sprint"] = running
+		replay_input["injury_factor"] = Survival.fracture_speed_factor(float(you.get("fracture", 0.0)))
 		if running:
 			energy = maxf(0.0, energy - Defs.SPRINT_STAMINA_PER_SECOND * duration)
 		replayed = Movement.step(world, replayed, replay_input, duration)
@@ -174,7 +176,10 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float) -> v
 	var running := sprint and move.length_squared() > 0.00001 and factor >= 0.9999
 	running = running and Survival.can_sprint_with(predicted_stamina,
 			float(you.get("hunger", 100.0)), float(you.get("thirst", 100.0)), delta)
-	var input := {"x": move.x, "z": move.y, "sprint": running, "cargo_factor": factor, "speed_bonus": float(you.get("speed_bonus", 0.0))}
+	running = running and float(you.get("fracture", 0.0)) <= 0.0
+	var input := {"x": move.x, "z": move.y, "sprint": running,
+		"cargo_factor": factor, "speed_bonus": float(you.get("speed_bonus", 0.0)),
+		"injury_factor": Survival.fracture_speed_factor(float(you.get("fracture", 0.0)))}
 	predicted = Movement.step(world, predicted, input, delta)
 	if running:
 		predicted_stamina = maxf(0.0, predicted_stamina - Defs.SPRINT_STAMINA_PER_SECOND * delta)
@@ -226,6 +231,14 @@ func move_stash(item_id: String, count: int, deposit: bool) -> void:
 
 
 ## Trade ids and revisions originate from server events. No client-side inventory mutation.
+func arena_queue_join() -> void:
+	net.c_arena_queue_join.rpc_id(1)
+
+
+func arena_queue_leave() -> void:
+	net.c_arena_queue_leave.rpc_id(1)
+
+
 func duel_invite(target_id: int, ranked: bool = false) -> void:
 	net.c_duel_invite.rpc_id(1, target_id, ranked)
 

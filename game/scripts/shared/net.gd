@@ -4,6 +4,7 @@ extends Node
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
+const GuildSiegeLedger = preload("res://scripts/shared/guild_siege_ledger.gd")
 
 signal welcomed
 signal join_refused(reason: String)
@@ -31,6 +32,11 @@ const SAVE_INTERVAL := 30.0
 const GUILD_REFRESH_SECONDS := 45.0
 var _guild_refresh_clock: float = 0.0
 var _guild_refresh_running: bool = false
+var _siege_ledger_pending: Array[Dictionary] = [] # Pending same-ID retries, RAM only.
+var _siege_ledger_running: bool = false
+var _siege_ledger_retry_clock: float = 0.0
+var _guild_score_loading: Dictionary = {}
+const SIEGE_LEDGER_RETRY_SECONDS := 15.0
 
 
 func _process(delta: float) -> void:
@@ -43,6 +49,11 @@ func _process(delta: float) -> void:
 		if _guild_refresh_clock >= GUILD_REFRESH_SECONDS and not _guild_refresh_running:
 			_guild_refresh_clock = 0.0
 			_refresh_verified_guilds()
+		_siege_ledger_retry_clock += maxf(0.0, delta)
+		if _siege_ledger_retry_clock >= SIEGE_LEDGER_RETRY_SECONDS \
+				and not _siege_ledger_running and not _siege_ledger_pending.is_empty():
+			_siege_ledger_retry_clock = 0.0
+			_flush_siege_ledger()
 
 
 ## Memberships can change while a character is online. Only freshly
@@ -68,7 +79,59 @@ func _refresh_verified_guilds() -> void:
 			})
 		else:
 			sim.set_verified_guild(peer_id, verified)
+			_load_guild_siege_score(str(verified.get("guild_id", "")))
 	_guild_refresh_running = false
+
+
+## Guild wins are historical, server-authoritative scores. The actual
+## siege result comes from sim.tick(), never from client RPC input.
+func _queue_guild_siege_victories(events: Array) -> void:
+	if gateway == null or not gateway.enabled:
+		return
+	for event in events:
+		var record: Dictionary = GuildSiegeLedger.eligible_victory(event, sim)
+		if record.is_empty():
+			continue
+		record["event_id"] = Crypto.new().generate_random_bytes(16).hex_encode()
+		_siege_ledger_pending.append(record)
+	if not _siege_ledger_pending.is_empty() and not _siege_ledger_running:
+		_siege_ledger_retry_clock = 0.0
+		_flush_siege_ledger()
+
+
+## Retry the *same* event ID after ambiguous RPC failures. A new event ID
+## would turn one win into two persisted wins after a network timeout.
+func _flush_siege_ledger() -> void:
+	if _siege_ledger_running or gateway == null or not gateway.enabled:
+		return
+	_siege_ledger_running = true
+	while not _siege_ledger_pending.is_empty():
+		var item: Dictionary = _siege_ledger_pending.front()
+		var result: Dictionary = await gateway.record_guild_siege_win(
+			str(item["guild_id"]), str(item["event_id"]),
+			int(item["site"]), int(item["world_seed"]))
+		if not bool(result.get("ok", false)):
+			push_warning("Nakama guild siege ledger write failed: " + str(result.get("reason", "unknown")))
+			break
+		var guild_id: String = str(item["guild_id"])
+		sim.guild_siege_wins[guild_id] = maxi(
+			int(sim.guild_siege_wins.get(guild_id, 0)), int(result.get("wins", 0)))
+		_siege_ledger_pending.pop_front()
+	_siege_ledger_running = false
+
+
+## Load the historical score when a verified guild member signs in or
+## during a periodic membership refresh. Concurrent loads are coalesced.
+func _load_guild_siege_score(guild_id: String) -> void:
+	if guild_id.is_empty() or gateway == null or not gateway.enabled \
+			or _guild_score_loading.has(guild_id):
+		return
+	_guild_score_loading[guild_id] = true
+	var result: Dictionary = await gateway.load_guild_siege_score(guild_id)
+	_guild_score_loading.erase(guild_id)
+	if bool(result.get("ok", false)):
+		sim.guild_siege_wins[guild_id] = maxi(
+			int(sim.guild_siege_wins.get(guild_id, 0)), int(result.get("wins", 0)))
 
 
 ## False if this peer is sending too many commands (a basic flood guard).
@@ -157,6 +220,7 @@ func c_join(player_name: String, token: String = "", refresh: String = "") -> vo
 	user_to_peer[user_id] = peer
 	sim.add_player(peer, str(identity["username"]), user_id, saved)
 	sim.set_verified_guild(peer, verified_guild)
+	_load_guild_siege_score(str(verified_guild.get("guild_id", "")))
 	_joining_users.erase(user_id)
 	_joining.erase(peer)
 	s_welcome.rpc_id(peer, sim.world.world_seed, Defs.TICK_RATE)
@@ -375,6 +439,20 @@ func c_contract(action: String) -> void:
 
 ## Party identities are always the RPC sender; the client can only nominate
 ## a nearby target to invite/kick, never the leader or group identifier.
+@rpc("any_peer", "reliable")
+func c_arena_queue_join() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "arena_queue", sim.cmd_arena_queue_join(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_arena_queue_leave() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "arena_queue", sim.cmd_arena_queue_leave(peer))
+
+
 @rpc("any_peer", "reliable")
 func c_duel_invite(target_id: int, ranked: bool = false) -> void:
 	var peer := multiplayer.get_remote_sender_id()
@@ -666,6 +744,7 @@ func server_tick(delta: float) -> void:
 		_save_clock = 0.0
 		_save_all()
 	var all_events: Array = sim.drain_events()
+	_queue_guild_siege_victories(all_events)
 	for peer in sim.players:
 		var personal: Array = []
 		for event in all_events:
@@ -692,7 +771,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "duel", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast":
+		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "duel", "arena_queue", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast":
 			return event.get("peer", -1) == peer
 		"party_aid":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
@@ -703,10 +782,12 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_breached", \
 				"siege_contract_declared", "siege_contract_result":
 			return _is_nearby(event, peer)
+		"supply_drop":
+			return true # Public server-generated announcement.
 		"death":
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
 			return event.get("id", -1) == peer or event.get("by", 0) == peer or _is_nearby(event, peer)
-		"attack", "zombie_died", "decoy_thrown", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
+		"attack", "zombie_died", "decoy_thrown", "campfire_doused", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
 			return _is_nearby(event, peer)
 	return false

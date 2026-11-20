@@ -818,7 +818,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Throw noise decoy", sim.cmd_throw_decoy(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_campfire"):
 		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
-		_result("Light campfire", sim.cmd_light_campfire(LOCAL_PLAYER_ID, point.x, point.y))
+		var fire_result: Dictionary = sim.cmd_light_campfire(LOCAL_PLAYER_ID, point.x, point.y)
+		_result("Light campfire", fire_result)
+		if bool(fire_result.get("ok", false)):
+			_feedback = "Campfire lit. At night its light attracts infected. Press - to extinguish."
+			_update_hud()
 	elif event.is_action_pressed("survive_build"):
 		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
 		_result("Build barricade", sim.cmd_build(LOCAL_PLAYER_ID, point.x, point.y))

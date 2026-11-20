@@ -299,6 +299,9 @@ func _draw_vitals(you: Dictionary) -> void:
 		statuses.append(["INFECTION %d%%" % int(infection), Color(0.75, 0.4, 0.95), "virus"])
 	if bleeding > 0.5:
 		statuses.append(["BLEEDING %d%%" % int(bleeding), Color(0.95, 0.3, 0.35), "drop"])
+	var fracture: float = float(you.get("fracture", 0.0))
+	if fracture > 0.5:
+		statuses.append(["FRACTURE %d%%" % int(fracture), Color(0.95, 0.65, 0.3), "bolt"])
 	if exposure > 0.5:
 		statuses.append(["COLD %d%%" % int(exposure), Color(0.5, 0.82, 0.98), "flake"])
 	var rows := 1 if statuses.is_empty() else 2

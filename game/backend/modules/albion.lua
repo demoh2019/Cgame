@@ -184,6 +184,101 @@ local function guild_affiliation(context, payload)
   return nk.json_encode({ ok = true, guild_id = "", guild_name = "", rank = -1 })
 end
 
+-- Immutable siege receipts and CAS-based guild score increments. Both the
+-- receipt and score update are one Nakama storage transaction, not two writes.
+-- This is the durable victory history, NOT persistent outpost ownership.
+local SIEGE_SCORES = "guild_siege_scores"
+local SIEGE_RECEIPTS = "guild_siege_receipts"
+local MAX_SIEGE_WINS = 1000000
+
+local function require_guild_id(value)
+  -- UUID shape: 8-4-4-4-12 hexadecimal digits. A character class [] would
+  -- match only one character; keep the anchored five-part pattern explicit.
+  local uuid_pattern = "^" .. string.rep("%x", 8) .. "%-"
+    .. string.rep("%x", 4) .. "%-" .. string.rep("%x", 4) .. "%-"
+    .. string.rep("%x", 4) .. "%-" .. string.rep("%x", 12) .. "$"
+  if type(value) ~= "string" or #value ~= 36
+    or not value:match(uuid_pattern) then
+    error({ "invalid guild id", 3 })
+  end
+end
+
+local function siege_score_read(guild_id)
+  local records = nk.storage_read({ { collection = SIEGE_SCORES, key = guild_id } })
+  if #records == 0 then return 0, "*" end
+  local value = records[1].value
+  local wins = value and value.wins
+  if type(wins) ~= "number" or wins < 0 or wins > MAX_SIEGE_WINS
+    or wins ~= math.floor(wins) then
+    error({ "invalid guild siege score", 13 })
+  end
+  return wins, records[1].version
+end
+
+local function guild_siege_score(context, payload)
+  require_server(context)
+  local request = decode(payload)
+  require_guild_id(request.guild_id)
+  local count = siege_score_read(request.guild_id)
+  return nk.json_encode({ ok = true, wins = count })
+end
+
+local function guild_siege_commit(context, payload)
+  require_server(context)
+  local request = decode(payload)
+  require_guild_id(request.guild_id)
+  local tx_id = request.event_id
+  if type(tx_id) ~= "string" or not tx_id:match("^[0-9a-f]+$") or #tx_id ~= 32 then
+    error({ "invalid siege event id", 3 })
+  end
+  local site = request.site
+  local seed = request.world_seed
+  if type(site) ~= "number" or site ~= math.floor(site) or site < 1 or site > 25
+    or type(seed) ~= "number" or seed ~= math.floor(seed)
+    or seed < -2147483648 or seed > 2147483647 then
+    error({ "invalid siege event metadata", 3 })
+  end
+
+  local receipt_key = { collection = SIEGE_RECEIPTS, key = tx_id }
+  local function read_receipt()
+    local receipts = nk.storage_read({ receipt_key })
+    if #receipts == 0 then return nil end
+    local receipt = receipts[1].value
+    if receipt.guild_id ~= request.guild_id or receipt.site ~= site
+      or receipt.world_seed ~= seed then
+      return nk.json_encode({ ok = false, reason = "event_id_conflict" })
+    end
+    local current = siege_score_read(request.guild_id)
+    return nk.json_encode({ ok = true, replayed = true, wins = current })
+  end
+
+  for _ = 1, 5 do
+    local existing = read_receipt()
+    if existing then return existing end
+    local wins, version = siege_score_read(request.guild_id)
+    if wins >= MAX_SIEGE_WINS then
+      return nk.json_encode({ ok = false, reason = "score_limit" })
+    end
+    local writes = {
+      { collection = SIEGE_SCORES, key = request.guild_id, version = version,
+        value = { wins = wins + 1 }, permission_read = 0, permission_write = 0 },
+      { collection = SIEGE_RECEIPTS, key = tx_id, version = "*",
+        value = { guild_id = request.guild_id, site = site, world_seed = seed },
+        permission_read = 0, permission_write = 0 },
+    }
+    local ok, ack = pcall(nk.storage_write, writes)
+    if ok and type(ack) == "table" and #ack == 2 then
+      return nk.json_encode({ ok = true, replayed = false, wins = wins + 1 })
+    end
+    -- Either an optimistic-version collision or an ambiguous committed
+    -- response. Always probe the receipt before attempting another write.
+    local retry = read_receipt()
+    if retry then return retry end
+  end
+  return nk.json_encode({ ok = false, reason = "retry_later" })
+end
+
+
 -- Records a player's lifetime kills on the leaderboard (the score is a "set" so it always reflects the total).
 local function leaderboard_submit(context, payload)
   require_server(context)
@@ -204,4 +299,6 @@ nk.register_rpc(character_load, "character_load")
 nk.register_rpc(character_save, "character_save")
 nk.register_rpc(character_pair_save, "character_pair_save")
 nk.register_rpc(guild_affiliation, "guild_affiliation")
+nk.register_rpc(guild_siege_score, "guild_siege_score")
+nk.register_rpc(guild_siege_commit, "guild_siege_commit")
 nk.register_rpc(leaderboard_submit, "leaderboard_submit")

@@ -33,6 +33,11 @@ const BLEEDING_DAMAGE_PER_SECOND := 1.2
 const BLEEDING_DECAY_PER_SECOND := 0.2
 const ZOMBIE_BLEEDING_PER_HIT := {"walker": 9.0, "runner": 13.0, "brute": 22.0, "spitter": 3.0}
 const PVP_MELEE_BLEEDING_PER_HIT := 12.0
+# Brute trauma is a persistent injury instead of extra raw damage.
+const FRACTURE_MAX := 100.0
+const FRACTURE_DECAY_PER_SECOND := 0.04
+const FRACTURE_SPEED_FACTOR := 0.65
+const ZOMBIE_FRACTURE_PER_HIT := {"brute": 35.0}
 const COMBAT_ENERGY_MAX := 100.0
 const COMBAT_ENERGY_REGEN := 9.0
 # Sprint exhaustion is a server-owned survival mechanic.
@@ -286,6 +291,10 @@ static func _build_items() -> void:
 		"stack": 5, "weight": 0.2, "value": 18})
 	_add_recipe("herbal_scent_mask", "herbal_scent_mask", 1,
 		{"fiber_1": 2, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	_add_item("field_splint", {"name": "Field Splint", "kind": "medical",
+		"fracture_treatment": 100.0, "stack": 5, "value": 24, "weight": 0.6})
+	_add_recipe("field_splint", "field_splint", 1,
+		{"plank_1": 1, "fiber_1": 2, "cloth_1": 1}, "", 3.0)
 	_add_item("bandage", {"name": "Bandage", "kind": "medical", "heal": 28.0, "stop_bleeding": true, "stack": 10, "value": 10})
 	_add_recipe("bandage", "bandage", 2, {"cloth_1": 2}, "", 2.0)
 	# Common crafted wound care and scarce medical loot from infected ruins.

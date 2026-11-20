@@ -2324,3 +2324,58 @@ Code: `scripts/shared/party_feast.gd`, `scripts/server/game_server.gd`,
 `godot --headless --path game --script res://tests/run_all.gd` runner.
 The Cgame engine already supplies the necessary multiplayer and world
 simulation APIs; no native engine changes were needed.
+
+## Durable Nakama guild siege honor (server-only journal)
+
+Victory history now survives a dedicated server restart in **Nakama**.
+When a real `siege_contract_result` with `result = won` comes from
+the authoritative territory simulation, the game checks that its attacker
+still owns the outpost and has a homogeneous party of **verified Nakama
+guild members**. Only then does it enqueue a guild victory. Guest players
+and mixed-party victories remain valid gameplay wins, but do not increment
+a persistent guild score.
+
+The backend `guild_siege_commit` RPC requires the server runtime key and
+writes both a private guild score and an **immutable 128-bit event receipt**
+in a single version-checked storage batch. Retries reuse the same event ID,
+so a timeout after a committed write cannot create a second win. Competing
+writes retry on optimistic-version conflicts. Reusing an ID with changed
+guild, world seed or site is rejected. The `guild_siege_score` RPC reads
+the persisted total; connecting guild members retrieve it and the server
+refreshes the cache periodically. The HUD shows **Historic clan siege wins**
+in addition to session-specific party siege wins.
+
+**Scope and recovery:** Guild scores and already committed receipts are
+durable. The world server's queue of unsent events is still RAM-only;
+an abrupt crash *before* Nakama confirms a write can lose that pending
+achievement. This is not yet an exactly-once **end-to-end** event pipeline,
+an offline guild treasury, or persistent castle ownership. Reliable
+survival of pre-commit events will need a local durable outbox and recovery
+at boot. Guild tags, outpost occupancy and siege authority remain
+server-owned; clients never submit score events or guild IDs.
+
+Tests: `tests/test_guild_siege_ledger.gd` checks event eligibility and
+membership revocation. The Nakama integration suite
+`tests/test_nakama_backend.gd` covers original writes, identical
+replays, event collisions, independent victories, reload and server-key
+permissions. No Cgame engine modifications were necessary.
+
+## Corrosive infected can damage player-built barricades
+
+Lingering acid from a dangerous-zone spitter now **corrodes nearby
+player-built defenses** at 8 raw durability damage per second while the
+pool persists. This links ranged infected PvE with base defense and the
+existing tiered construction/repair economy. T2–T4 reinforced walls use
+their existing damage-reduction factors, so T4 only loses 4 HP per
+corrosion tick. Corrosion never attacks procedural hub or decoration
+objects and cannot create new resources or repair a damaged wall.
+
+All pools share a **single hit cooldown per wall**, preventing multiple
+overlapping puddles from multiplying siege damage. The same server
+`damage_barricade` flow handles checkpoint revisions, destruction,
+removal from collision and client snapshots. The corrosion tick does
+not trust client-originated damage, coordinates or ownership; owner-only
+repair and dismantling work as before. Destroyed/dismantled walls clear
+their short-lived cooldown entries and any active pool expires within
+5 seconds. Testing: `game/tests/test_acid_wall_corrosion.gd` in the
+existing headless test suite.

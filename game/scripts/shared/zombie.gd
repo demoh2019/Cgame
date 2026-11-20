@@ -65,7 +65,7 @@ func is_alive() -> bool:
 
 
 ## Advances the brain. `players` maps peer id to {position: Vector3, alive: bool,
-## safe: bool, noise: float, scent: float}. Sound and blood scent are
+## safe: bool, noise: float, scent: float, firelight: float}. Sound, scent and light are
 ## server-owned sensory channels revealing noisy or wounded survivors.
 ## Returns {"hit": peer_id, "damage": float} when the zombie lands a blow, else {}.
 func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator) -> Dictionary:
@@ -212,7 +212,13 @@ func _select_target(players: Dictionary, here: Vector2) -> void:
 		var scent: float = 0.0
 		if is_finite(scent_raw):
 			scent = clampf(scent_raw, 0.0, float(data["lose"]) - 1.0)
-		var detect_range := maxf(maxf(notice, hearing), scent)
+		# Firelight reveals campers independently of camouflage, but not beyond
+		# this infected type's pursuit leash or the server's safe-zone rules.
+		var firelight_raw: float = float(info.get("firelight", 0.0))
+		var firelight: float = 0.0
+		if is_finite(firelight_raw):
+			firelight = clampf(firelight_raw, 0.0, float(data["lose"]) - 1.0)
+		var detect_range := maxf(maxf(notice, hearing), maxf(scent, firelight))
 		if distance < best_distance and (distance <= detect_range or peer_id == target_id):
 			best = peer_id
 			best_distance = distance

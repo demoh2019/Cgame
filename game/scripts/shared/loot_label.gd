@@ -4,6 +4,8 @@ extends RefCounted
 
 
 static func for_bag(bag: Dictionary) -> String:
+	if bool(bag.get("supply_drop", false)):
+		return "SUPPLY DROP - public"
 	var raid: bool = bool(bag.get("raid", false))
 	var reserved: bool = bool(bag.get("reserved", false))
 	var seconds: float = float(bag.get("reserved_seconds", 0.0))

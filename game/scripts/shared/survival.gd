@@ -14,6 +14,7 @@ var hunger: float = 100.0 # 100 is full.
 var thirst: float = 100.0
 var infection: float = 0.0
 var bleeding: float = 0.0 # Wound severity 0..100, independent of infection.
+var fracture: float = 0.0 # Persistent blunt injury, prevents sprint.
 var exposure: float = 0.0 # 0..100 cumulative weather stress.
 var warmth_seconds: float = 0.0 # Remaining protection from a carried heat pack.
 var scent_mask_seconds: float = 0.0 # Temporary herb camouflage, server-owned.
@@ -34,7 +35,7 @@ static func can_sprint_with(value: float, hunger_value: float, thirst_value: flo
 
 
 func try_sprint(seconds: float) -> bool:
-	if not alive or not can_sprint_with(stamina, hunger, thirst, seconds):
+	if not alive or fracture > 0.0 or not can_sprint_with(stamina, hunger, thirst, seconds):
 		return false
 	stamina = maxf(0.0, stamina - Defs.SPRINT_STAMINA_PER_SECOND * stamina_drain_mult * seconds)
 	stamina_recovery_delay = Defs.STAMINA_RECOVERY_DELAY
@@ -54,6 +55,7 @@ func tick(delta: float) -> float:
 	if resting > 0.0:
 		var nourishment := 0.5 if hunger <= 20.0 or thirst <= 20.0 else 1.0
 		stamina = minf(Defs.MAX_STAMINA, stamina + Defs.STAMINA_REGEN_PER_SECOND * stamina_regen_mult * resting * nourishment)
+	fracture = maxf(0.0, fracture - Defs.FRACTURE_DECAY_PER_SECOND * maxf(0.0, delta))
 	if infection > 0.0:
 		infection = minf(Defs.INFECTION_MAX,
 			infection + Defs.INFECTION_GROWTH_PER_SECOND * maxf(0.0, delta))
@@ -160,6 +162,26 @@ func stop_bleeding() -> bool:
 
 
 ## The server consumes an actual heat pack only if there is no current buff.
+## Only a real damaging hit can call this on the authoritative server.
+func add_fracture(amount: float) -> bool:
+	if not alive or not is_finite(amount) or amount <= 0.0:
+		return false
+	var previous: float = fracture
+	fracture = minf(Defs.FRACTURE_MAX, fracture + amount)
+	return fracture > previous
+
+
+func treat_fracture(amount: float) -> bool:
+	if not alive or not is_finite(amount) or amount <= 0.0 or fracture <= 0.0:
+		return false
+	fracture = maxf(0.0, fracture - amount)
+	return true
+
+
+static func fracture_speed_factor(severity: float) -> float:
+	return Defs.FRACTURE_SPEED_FACTOR if is_finite(severity) and severity > 0.0 else 1.0
+
+
 func apply_thermal_wrap() -> bool:
 	if not alive or warmth_seconds > 0.0:
 		return false
@@ -175,6 +197,7 @@ func reset() -> void:
 	stamina_recovery_delay = 0.0
 	infection = 0.0
 	bleeding = 0.0
+	fracture = 0.0
 	exposure = 0.0
 	warmth_seconds = 0.0
 	scent_mask_seconds = 0.0
@@ -182,4 +205,4 @@ func reset() -> void:
 
 
 func to_dict() -> Dictionary:
-	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "bleeding": bleeding, "exposure": exposure, "warmth_seconds": warmth_seconds, "scent_mask_seconds": scent_mask_seconds, "alive": alive}
+	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "bleeding": bleeding, "fracture": fracture, "exposure": exposure, "warmth_seconds": warmth_seconds, "scent_mask_seconds": scent_mask_seconds, "alive": alive}
