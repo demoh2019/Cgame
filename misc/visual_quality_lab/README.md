@@ -117,3 +117,29 @@ Design references:
 - [Godot Sky process modes and radiance sizes](https://docs.godotengine.org/en/4.6/classes/class_sky.html)
 - [Godot environment and fog](https://docs.godotengine.org/en/4.6/classes/class_environment.html)
 - [Unreal Engine dynamic resolution](https://dev.epicgames.com/documentation/en-us/unreal-engine/dynamic-resolution-in-unreal-engine)
+
+
+## Visual Quality Lab v5 — chunked GPU-instanced forest and flythrough
+
+`addons/visual_quality/foliage_chunks.gd` builds reproducible tree layouts
+from independent seeded cells. Trunks and crowns are rendered with two
+MultiMeshes per nonempty cell rather than hundreds of individual MeshInstance3D
+nodes. Per-cell AABBs and `visibility_range_end` permit frustum/distance
+culling; one giant MultiMesh would always be visible as a unit.
+
+Quality profile changes immediately change tree density (`visible_instance_count`)
+and visibility range without regenerating geometry: Eco (35%, 28 m),
+Balanced (65%, 48 m), Cinematic (100%, 78 m).
+
+The demo also has a fly-through controller:
+WASD movement, Q/E vertical movement, Shift sprint, right-mouse drag to look.
+The center 12-meter radius is kept clear for the material comparison stage.
+
+`tests/test_foliage.gd` verifies deterministic generation, per-cell seed
+separation, bounded attempt loops, and excluded regions. This is low-poly
+procedural world dressing, **not** Unreal Nanite/HLOD or biome streaming.
+It does not implement tree collision, wind, seasons, or a playable quest system.
+
+Godot reference: https://docs.godotengine.org/en/4.6/tutorials/performance/using_multimesh.html
+Visibility ranges: https://docs.godotengine.org/en/4.6/tutorials/3d/visibility_ranges.html
+Unreal HLOD: https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-hierarchical-level-of-detail-in-unreal-engine
