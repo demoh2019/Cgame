@@ -1319,6 +1319,11 @@ func _process(delta: float) -> void:
 		streamer.velocity_hint = _stream_velocity
 		# Longer forward streaming on the bike; idle/teleport uses exact nearby cells.
 		WorldStreamingPolicy.apply(streamer, bool(client.you.get("mounted", false)), _stream_velocity)
+		# The private map marker only prefetches when near the player; the
+		# native engine keeps extra cells bounded and never streams distant
+		# objectives. No network RPC or simulation change is involved.
+		WorldStreamingPolicy.apply_waypoint(streamer, world_map.waypoint, position,
+			bool(client.you.get("mounted", false)))
 		_apply_world_state()
 	entities.update_from(client)
 	_lightning_visual.set_warning(client.lightning_telegraph)
