@@ -54,18 +54,21 @@ func run(t) -> void:
 	t.current = "actual Godot DirectionalLight3D and shared live client"
 	var sun := DirectionalLight3D.new()
 	Lighting.apply(sun, null, 3, "forward_plus")
+	# A separate 5 Hz system owns weather shadow contrast. Changing the
+	# 4 Hz penumbra must never overwrite its most recent opacity value.
+	sun.shadow_opacity = 0.62
 	Shadow.apply(sun, 3, 1.0, 0.8, 0.0)
-	t.near(sun.shadow_opacity, 1.0, 0.001,
-		"actual Godot light has clear-sun shadows")
+	t.near(sun.shadow_opacity, 0.62, 0.001,
+		"penumbra update preserves the existing cloud-shadow contrast")
 	var old_blur: float = sun.shadow_blur
 	Shadow.apply(sun, 3, 0.6, 0.1, 1.0)
 	t.check(sun.shadow_blur > old_blur,
 		"real Godot sun shadow filter softens at overcast dusk")
-	t.check(sun.shadow_opacity < 0.8,
-		"real Godot sun shadow opacity follows cloud cover")
+	t.near(sun.shadow_opacity, 0.62, 0.001,
+		"changing weather penumbra does not fight the opacity controller")
 	Shadow.apply(sun, 1, 0.6, 0.1, 1.0)
-	t.near(sun.shadow_opacity, 1.0, 0.001,
-		"downgrading restores original fixed shadow opacity")
+	t.near(sun.shadow_opacity, 0.62, 0.001,
+		"downgrading penumbra keeps independently configured light contrast")
 	t.near(sun.shadow_blur, 1.0, 0.001,
 		"downgrading restores original fixed shadow blur")
 	Shadow.apply(null, 3, 0.5, 0.1, 0.5)
@@ -74,6 +77,10 @@ func run(t) -> void:
 	var atmosphere: String = (Atmosphere as Script).source_code
 	t.check(atmosphere.contains("SunShadowAtmosphere.apply(sun,"),
 		"online and solo use the integrated shared atmosphere")
+	t.check(atmosphere.contains("SunShadowQuality.update_opacity(sun,"),
+		"weather shadow contrast still follows the existing 5 Hz path")
+	t.check(not (Shadow as Script).source_code.contains("sun.shadow_opacity ="),
+		"penumbra module never overwrites weather opacity")
 	t.check(atmosphere.contains("SHADOW_FILTER_INTERVAL := 0.25"),
 		"native light parameters update only four times per second")
 	t.check(atmosphere.contains("_shadow_filter_level = clampi("),
