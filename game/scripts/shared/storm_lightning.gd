@@ -9,6 +9,11 @@ const RETRY_INTERVAL := 10.0
 const RADIUS := 4.0
 const DAMAGE := 16.0
 const MAX_OFFSET := 1.8
+# Public atmospheric rumble reaches farther than combat VFX but must NOT
+# reveal another survivor's exact strike position beyond nearby interest.
+# The native SoundPropagation policy uses the same 2400 m audio cap.
+const THUNDER_MAX_DISTANCE := 2400.0
+const THUNDER_COARSE_GRID := 256.0
 
 
 static func create_warning(world, position: Vector3, now: float) -> Dictionary:
