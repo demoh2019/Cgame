@@ -37,6 +37,8 @@ uniform float wind_anisotropy_strength = 0.0;
 // Premium water only: wind-advected foam ribbons share the existing wave
 // slope, depth, and weather fields. Disabled in low-end compiled variants.
 uniform float wind_foam_strength = 0.0;
+// Sun-aligned small wave glints are exclusive to the premium Forward+ shader.
+uniform float sun_glitter_strength = 0.0;
 #endif
 uniform float detail_fade_start = 65.0;
 uniform float detail_fade_end = 125.0;
@@ -87,6 +89,7 @@ void fragment() {
 	// High/Ultra add fine noise only where their visual budget allows it.
 	float crest = 0.0;
 #ifdef WATER_REFRACTION
+	vec3 wave_world_normal = vec3(0.0, 1.0, 0.0);
 	vec2 refract_slope = vec2(0.0);
 #endif
 	// Only high-quality fine noise needs camera distance. Balanced/Performance
@@ -130,6 +133,10 @@ void fragment() {
 		vec3 world_normal = normalize(vec3(-slope.x * ripple_strength * 2.5, 1.0,
 			-slope.y * ripple_strength * 2.5));
 		NORMAL = normalize((VIEW_MATRIX * vec4(world_normal, 0.0)).xyz);
+#ifdef WATER_REFRACTION
+		// Reuse the exact normal driving lit waves and refraction.
+		wave_world_normal = world_normal;
+#endif
 		crest = smoothstep(0.04, 0.11, length(slope));
 	}
 
@@ -334,6 +341,23 @@ void fragment() {
 		+ vec3(0.08, 0.12, 0.16) * fresnel
 		+ vec3(0.015, 0.025, 0.028) * crest * (1.0 - foam)
 		+ vec3(0.07, 0.13, 0.12) * shore_glimmer;
+#ifdef WATER_REFRACTION
+	// Sun glitter reuses the *same* animated waves and cached sky lighting.
+	// One bounded microfacet-inspired view/sun lobe represents subpixel
+	// sparkling wavelets. It is not a second sun, SSR pass or texture.
+	if (sun_glitter_strength > 0.001 && detail_fade > 0.001 &&
+			aa_sun_radiance.y > 0.001 && foam < 0.95 && aa_sun_to_light.y > 0.04) {
+		vec3 to_view = normalize(CAMERA_POSITION_WORLD - world_position);
+		vec3 reflected_sun = reflect(-normalize(aa_sun_to_light), wave_world_normal);
+		float alignment = max(dot(reflected_sun, to_view), 0.0);
+		float lobe = pow(alignment, 48.0);
+		float daylight_visible = smoothstep(0.04, 0.20, aa_sun_to_light.y);
+		float sparkle = 0.40 + 0.60 * crest;
+		float glint = min(0.16, lobe * sparkle * sun_glitter_strength
+			* detail_fade * daylight_visible * (1.0 - foam) * 0.12);
+		EMISSION += aa_sun_radiance * glint;
+	}
+#endif
 #ifdef WATER_REFRACTION
 	// Source alpha blending is: lit_water * ALPHA + scene * (1 - ALPHA).
 	// Add only the changed, already-lit transmitted background. Dividing by
