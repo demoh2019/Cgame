@@ -259,7 +259,7 @@ func character_data(player: Player) -> Dictionary:
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 		"stamina": player.survival.stamina, "infection": player.survival.infection,
-		"bleeding": player.survival.bleeding,
+		"bleeding": player.survival.bleeding, "fracture": player.survival.fracture,
 		"exposure": player.survival.exposure, "warmth_seconds": player.survival.warmth_seconds,
 		"scent_mask_seconds": player.survival.scent_mask_seconds,
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
@@ -312,6 +312,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("bleeding", 0.0), 0.0, Defs.BLEEDING_MAX):
 		return false
+	if not SaveValidation.finite_number(data.get("fracture", 0.0), 0.0, Defs.FRACTURE_MAX):
+		return false
 	if not SaveValidation.finite_number(data.get("exposure", 0.0), 0.0, 100.0):
 		return false
 	if not SaveValidation.finite_number(data.get("warmth_seconds", 0.0), 0.0, Defs.THERMAL_WRAP_SECONDS):
@@ -353,6 +355,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	survival.infection = float(data.get("infection", 0.0))
 	# Legacy version-1 accounts predate the persistent wound mechanic.
 	survival.bleeding = float(data.get("bleeding", 0.0))
+	survival.fracture = float(data.get("fracture", 0.0)) # Legacy v1 defaults to healthy.
 	# Legacy survivors predating regional climate start with no exposure.
 	survival.exposure = float(data.get("exposure", 0.0))
 	survival.warmth_seconds = float(data.get("warmth_seconds", 0.0))
@@ -555,6 +558,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		player.position = Movement.step(world, player.position, {
 			"x": move_x, "z": move_z, "sprint": sprint_allowed,
 			"cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed"),
+			"injury_factor": Survival.fracture_speed_factor(player.survival.fracture),
 		}, allowed)
 		var moved: float = Vector2(player.position.x - before_move.x, player.position.z - before_move.z).length()
 		# Distance on foot trains athletics (running) and explorer (any travel); never more than the
@@ -887,17 +891,20 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 		return {"ok": false, "reason": "not_medical"}
 	if source.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
-	if not PartyAid.has_effect(data, recipient.survival.health, recipient.survival.infection, recipient.survival.bleeding):
+	if not PartyAid.has_effect(data, recipient.survival.health, recipient.survival.infection,
+			recipient.survival.bleeding, recipient.survival.fracture):
 		return {"ok": false, "reason": "no_effect"}
 	var hp_before: float = recipient.survival.health
 	var infection_before: float = recipient.survival.infection
 	var bleeding_before: float = recipient.survival.bleeding
+	var fracture_before: float = recipient.survival.fracture
 	if not source.inventory.remove(item_id, 1):
 		return {"ok": false, "reason": "not_carried"}
 	recipient.survival.heal(float(data.get("heal", 0.0)))
 	recipient.survival.treat_infection(float(data.get("cure", 0.0)))
 	if bool(data.get("stop_bleeding", false)):
 		recipient.survival.stop_bleeding()
+	recipient.survival.treat_fracture(float(data.get("fracture_treatment", 0.0)))
 	source.party_aid_timer = PartyAid.COOLDOWN
 	source.action = {}
 	source.dirty_inventory = true
@@ -906,11 +913,13 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var healed: float = recipient.survival.health - hp_before
 	var cured: float = infection_before - recipient.survival.infection
 	var staunched: float = bleeding_before - recipient.survival.bleeding
+	var splinted: float = fracture_before - recipient.survival.fracture
 	events.append({"type": "party_aid", "peer": target_id, "by": peer_id,
 		"item": item_id, "heal": healed, "cure": cured,
-		"bleeding_stopped": staunched})
+		"bleeding_stopped": staunched, "fracture_treated": splinted})
 	return {"ok": true, "peer": target_id, "item": item_id,
-		"heal": healed, "cure": cured, "bleeding_stopped": staunched}
+		"heal": healed, "cure": cured, "bleeding_stopped": staunched,
+		"fracture_treated": splinted}
 
 
 ## Expedition support: one real cooked fish per eligible party member.
@@ -1952,15 +1961,18 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			var healing: float = float(data.get("heal", 0.0))
 			var curing: float = float(data.get("cure", 0.0))
 			var staunch: bool = bool(data.get("stop_bleeding", false))
+			var splint: float = float(data.get("fracture_treatment", 0.0))
 			if (healing <= 0.0 or player.survival.health >= player.survival.max_health) and (
 					curing <= 0.0 or player.survival.infection <= 0.0) and (
-					not staunch or player.survival.bleeding <= 0.0):
+					not staunch or player.survival.bleeding <= 0.0) and (
+					splint <= 0.0 or player.survival.fracture <= 0.0):
 				return {"ok": false, "reason": "no_effect"}
 			player.inventory.remove(item_id, 1)
 			player.survival.heal(healing * (1.0 + player.skills.bonus("heal_power")))
 			player.survival.treat_infection(curing)
 			if staunch:
 				player.survival.stop_bleeding()
+			player.survival.treat_fracture(splint)
 			_award(player, "medic", 6.0)
 		"weapon", "armor":
 			player.inventory.equip(item_id)
@@ -2741,6 +2753,7 @@ func _tick_players(delta: float) -> void:
 		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX,
 			player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta + energy_bonus)
 		var had_bleeding: bool = player.survival.bleeding > 0.0
+		var had_fracture: bool = player.survival.fracture > 0.0
 		var had_scent_mask: bool = player.survival.scent_mask_seconds > 0.0
 		var damage: float = player.survival.tick(delta)
 		if had_scent_mask:
@@ -2767,7 +2780,7 @@ func _tick_players(delta: float) -> void:
 		damage += player.survival.weather_tick(delta, weather_severity)
 		if player.survival.exposure > 0.0 or player.survival.warmth_seconds > 0.0:
 			player.dirty_character = true
-		if player.survival.infection > 0.0 or had_bleeding or damage > 0.0:
+		if player.survival.infection > 0.0 or had_bleeding or had_fracture or damage > 0.0:
 			# Persist the last clotting tick and its health loss, not only active wounds.
 			player.dirty_character = true
 		if damage > 0.0 and not _alive(player):
@@ -3214,6 +3227,11 @@ func _tick_zombies(delta: float) -> void:
 					victim.dirty_character = true
 					events.append({"type": "bleeding", "peer": victim.id,
 						"severity": victim.survival.bleeding, "source": zombie.type})
+				var trauma: float = float(Defs.ZOMBIE_FRACTURE_PER_HIT.get(zombie.type, 0.0))
+				if applied > 0.0 and _alive(victim) and victim.survival.add_fracture(trauma):
+					victim.dirty_character = true
+					events.append({"type": "fracture", "peer": victim.id,
+						"severity": victim.survival.fracture, "source": zombie.type})
 				if victim.survival.add_infection(wound_infection):
 					victim.dirty_character = true
 					events.append({"type": "infection", "peer": victim.id,
@@ -3466,6 +3484,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"arena_tier": ArenaRating.tier(player.arena_rating),
 			"action": player.action.duplicate(),
 			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
+			"fracture": player.survival.fracture,
 			"blood_scent_radius": BloodScent.detection_radius(player.survival.bleeding,
 				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival)),
 			"scent_mask_seconds": player.survival.scent_mask_seconds,

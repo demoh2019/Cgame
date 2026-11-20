@@ -94,7 +94,7 @@ func _build() -> void:
 	top_left.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	top_left.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	margin.add_child(top_left)
-	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["bleeding", Color(0.73, 0.21, 0.27)], ["exposure", Color(0.38, 0.7, 0.88)]]:
+	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["bleeding", Color(0.73, 0.21, 0.27)], ["fracture", Color(0.75, 0.48, 0.2)], ["exposure", Color(0.38, 0.7, 0.88)]]:
 		var bar := ProgressBar.new()
 		bar.custom_minimum_size = Vector2(240, 18)
 		bar.max_value = 100.0
@@ -690,10 +690,11 @@ func _on_event(event: Dictionary) -> void:
 				say("Lawful PvP victory (%s). No criminal infamy added." % str(event.get("reason", "defense")))
 		"party_aid":
 			if int(event.get("peer", -1)) == client.peer_id:
-				say("Teammate treated you: +%d HP, -%d infection, -%d bleeding." % [
+				say("Teammate treated you: +%d HP, -%d infection, -%d bleeding, -%d fracture." % [
 					roundi(float(event.get("heal", 0.0))),
 					roundi(float(event.get("cure", 0.0))),
-					roundi(float(event.get("bleeding_stopped", 0.0)))])
+					roundi(float(event.get("bleeding_stopped", 0.0))),
+					roundi(float(event.get("fracture_treated", 0.0)))])
 		"gathered":
 			say("+%d %s" % [event["amount"], Defs.item(event["item"]).get("name", event["item"])])
 		"campfire_doused":
@@ -723,6 +724,9 @@ func _on_event(event: Dictionary) -> void:
 		"bleeding":
 			if event.get("peer", -1) == client.peer_id:
 				say("Bleeding wound: %d/100. Use a bandage or antiseptic." % int(event.get("severity", 0)))
+		"fracture":
+			if event.get("peer", -1) == client.peer_id:
+				say("Broken limb: sprint disabled, walking slowed. Craft a Field Splint.")
 		"renown":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("+%d renown from %s | %s (%d total)" % [
@@ -999,6 +1003,7 @@ func _process(_delta: float) -> void:
 	_bars["thirst"].value = client.you["thirst"]
 	_bars["infection"].value = float(client.you.get("infection", 0.0))
 	_bars["bleeding"].value = float(client.you.get("bleeding", 0.0))
+	_bars["fracture"].value = float(client.you.get("fracture", 0.0))
 	_bars["exposure"].value = float(client.you.get("exposure", 0.0))
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone (T%d)\n%s" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1, ZoneRisk.description(zone)]

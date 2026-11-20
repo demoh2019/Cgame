@@ -21,11 +21,12 @@ static func step(world, position: Vector3, input: Dictionary, delta: float) -> V
 	# The server supplies this from its authoritative inventory, never from a network value.
 	# With no factor (legacy/test inputs), movement stays unchanged.
 	var factor := clampf(float(input.get("cargo_factor", 1.0)), Defs.CARRY_MIN_SPEED_FACTOR, 1.0)
-	var sprint := bool(input.get("sprint", false)) and factor >= 0.9999
+	var injury_factor := clampf(float(input.get("injury_factor", 1.0)), Defs.FRACTURE_SPEED_FACTOR, 1.0)
+	var sprint := bool(input.get("sprint", false)) and factor >= 0.9999 and injury_factor >= 0.9999
 	# Skill bonus to movement speed: the server supplies it from the character's skills, the client
 	# from the snapshot, so prediction matches. Capped so a forged input cannot run away.
 	var bonus := clampf(float(input.get("speed_bonus", 0.0)), 0.0, 0.5)
-	var speed := (Defs.SPRINT_SPEED if sprint else Defs.WALK_SPEED) * factor * (1.0 + bonus)
+	var speed := (Defs.SPRINT_SPEED if sprint else Defs.WALK_SPEED) * factor * injury_factor * (1.0 + bonus)
 	return move(world, position, direction, speed, delta)
 
 
