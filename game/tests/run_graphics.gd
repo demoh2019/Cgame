@@ -32,6 +32,7 @@ const SUITES := [
 	"res://tests/test_terrain_sdfgi.gd",
 	"res://tests/test_cinematic_bloom.gd",
 	"res://tests/test_foliage_spectral_optics.gd",
+	"res://tests/test_scenery_pigment_instancing.gd",
 	"res://tests/test_graphics_auto_quality.gd",
 	"res://tests/test_graphics_texture_streaming.gd",
 	"res://tests/test_terrain_antitiling.gd",

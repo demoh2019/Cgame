@@ -242,6 +242,12 @@ int MultiMesh::get_instance_count() const {
 void MultiMesh::set_visible_instance_count(int p_count) {
 	ERR_FAIL_COND(p_count < -1);
 	ERR_FAIL_COND(p_count > instance_count);
+	// Streaming LOD often resubmits the same visible prefix on consecutive
+	// frames. Avoid a no-op RenderingServer dispatch (and backend dirty
+	// checks) without suppressing any real draw-range changes.
+	if (visible_instance_count == p_count) {
+		return;
+	}
 	RenderingServer::get_singleton()->multimesh_set_visible_instances(multimesh, p_count);
 	visible_instance_count = p_count;
 }
