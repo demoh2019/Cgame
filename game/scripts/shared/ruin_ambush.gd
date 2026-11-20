@@ -32,6 +32,25 @@ static func available(active: Array, infected: Dictionary) -> int:
 	return maxi(0, MAX_ACTIVE_INFECTED - infected.size())
 
 
+## A genuine server-confirmed zombie death is counted at most once. A
+## despawn, missing ID, duplicate callback or forged kill never wins a wave.
+static func record_kill(wave: Dictionary, infected_id: int) -> bool:
+	if bool(wave.get("cleared", false)):
+		return false
+	var ids: Array = wave.get("ids", [])
+	if ids.is_empty() or not ids.has(infected_id):
+		return false
+	var defeated: Array = wave.get("defeated", [])
+	if defeated.has(infected_id):
+		return false
+	defeated.append(infected_id)
+	wave["defeated"] = defeated
+	if defeated.size() == ids.size():
+		wave["cleared"] = true
+		return true
+	return false
+
+
 ## Reuses the same safe, collision-checked ring as guarded supply drops.
 ## The given crate zone MUST match real terrain; no target coordinates or
 ## enemy type are supplied by a player or network request.
