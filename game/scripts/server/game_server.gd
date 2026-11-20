@@ -54,6 +54,7 @@ const BikeService = preload("res://scripts/shared/bike_service.gd")
 const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
+const StaggerFinisher = preload("res://scripts/shared/stagger_finisher.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
@@ -181,6 +182,7 @@ class Player:
 	var dodge_immunity: float = 0.0
 	var parry_cooldown: float = 0.0 # Server-owned timed melee defense.
 	var parry_window: float = 0.0 # First valid infected melee consumes it.
+	var finisher_cooldown: float = 0.0 # Server-owned, nonpersistent PvE execution timer.
 	var combat_energy: float = 100.0
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
@@ -680,6 +682,7 @@ func _spawn_player(player: Player) -> void:
 	player.dodge_immunity = 0.0
 	player.parry_cooldown = 0.0
 	player.parry_window = 0.0
+	player.finisher_cooldown = 0.0
 	player.party_aid_timer = 0.0
 	player.feast_timer = 0.0
 	player.guardian_timer = 0.0
@@ -3391,6 +3394,47 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 ## Reuse swept-in-small-steps world collision and restrict zombie immunity to 0.30 s.
 ## Timed, one-hit melee parry. Facing, ownership and the actual enemy strike
 ## are evaluated on the authoritative server; no client target is accepted.
+## The caller chooses no enemy: server selects the nearest visible and
+## genuinely stunned infected. Bosses, players and barriers are excluded.
+func cmd_stagger_finisher(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if player.finisher_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown", "remaining": player.finisher_cooldown}
+	if player.attack_timer > 0.0 or player.skill_timer > 0.0:
+		return {"ok": false, "reason": "attack_lock"}
+	if not MeleeParry.equipped(player.inventory):
+		return {"ok": false, "reason": "need_melee"}
+	if not player.position.is_finite() or _is_safe(player.position):
+		return {"ok": false, "reason": "safe_zone"}
+	if player.combat_energy < StaggerFinisher.ENERGY_COST:
+		return {"ok": false, "reason": "no_energy"}
+	var target = StaggerFinisher.nearest(world, player, zombies)
+	if target == null:
+		return {"ok": false, "reason": "no_staggered_target"}
+	var damage: float = StaggerFinisher.damage(
+		player.inventory.weapon, player.progression, player.skills)
+	player.combat_energy -= StaggerFinisher.ENERGY_COST
+	player.finisher_cooldown = StaggerFinisher.COOLDOWN_SECONDS
+	player.attack_timer = StaggerFinisher.ATTACK_LOCK
+	player.skill_timer = maxf(player.skill_timer, StaggerFinisher.ATTACK_LOCK)
+	player.parry_window = 0.0
+	player.action = {}
+	player.dirty_character = true
+	# A finishing blow consumes the once-only stagger even if the target lives.
+	target.stagger_seconds = 0.0
+	target.attack_timer = maxf(target.attack_timer, StaggerFinisher.RECOVERY_SECONDS)
+	_damage_target(player, {"kind": "zombie", "id": target.id}, damage, "melee")
+	events.append({"type": "stagger_finisher", "peer": peer_id,
+		"zombie": target.id, "killed": not target.is_alive()})
+	return {"ok": true, "target": target.id, "damage": damage,
+		"killed": not target.is_alive(), "cooldown": player.finisher_cooldown,
+		"energy": player.combat_energy}
+
+
 func cmd_parry(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -4180,6 +4224,8 @@ func _tick_players(delta: float) -> void:
 		player.dodge_timer = maxf(player.dodge_timer - delta, 0.0)
 		player.dodge_immunity = maxf(player.dodge_immunity - delta, 0.0)
 		player.parry_cooldown = maxf(0.0, player.parry_cooldown - maxf(0.0, delta))
+		player.finisher_cooldown = maxf(0.0,
+			player.finisher_cooldown - maxf(0.0, delta))
 		player.parry_window = maxf(0.0, player.parry_window - maxf(0.0, delta))
 		player.noise_timer = maxf(player.noise_timer - delta, 0.0)
 		if player.noise_timer <= 0.0:
@@ -5490,6 +5536,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"guardian_brace": player.guardian_brace,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"parry_cooldown": player.parry_cooldown, "parry_window": player.parry_window,
+			"finisher_cooldown": player.finisher_cooldown,
 			"rest_cooldown": player.rest_cooldown,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
 			"stim_cooldown": player.stim_cooldown, "flare_seconds": player.flare_seconds,
