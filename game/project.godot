@@ -130,6 +130,11 @@ aa_terrain_warp_strength={
 "value": 0.0
 }
 
+aa_terrain_height_blend={
+"type": "float",
+"value": 0.0
+}
+
 aa_leaf_transmission={
 "type": "float",
 "value": 0.28
