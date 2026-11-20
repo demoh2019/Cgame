@@ -141,6 +141,13 @@
 				Registers up to 16 extra [NodePath] observer references. Empty, duplicate, and non-[NodePath] entries are discarded. The observer paths are resolved relative to this node, and must point to living [Node3D] instances to affect streaming.
 			</description>
 		</method>
+		<method name="set_pinned_cells">
+			<return type="void" />
+			<param index="0" name="cells" type="Array" />
+			<description>
+				Replaces the pinned cell coordinates, preserving the first occurrence of each [Vector2i]. Unsupported array entries are skipped. Arrays with more than 128 entries are rejected without changing existing pins. The normalized result is returned by [method get_pinned_cells].
+			</description>
+		</method>
 		<method name="set_cell_scene">
 			<return type="void" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -187,6 +194,9 @@
 		</member>
 		<member name="max_new_requests_per_frame" type="int" setter="set_max_new_requests_per_frame" getter="get_max_new_requests_per_frame" default="2">
 			Maximum number of new resource-load requests per frame.
+		</member>
+		<member name="pinned_cells" type="Array" setter="set_pinned_cells" getter="get_pinned_cells" default="[]">
+			List of up to 128 pinned [Vector2i] cell coordinates, editable in the inspector and stored in the scene. Invalid non-[Vector2i] values and duplicates are omitted. Pinned registered scenes are kept loaded independently of observer distance, using the normal async request and scene instantiation budgets. Use [method pin_cell], [method unpin_cell] and [method clear_pinned_cells] to modify them at runtime.
 		</member>
 		<member name="observer_path" type="NodePath" setter="set_observer_path" getter="get_observer_path" default="NodePath(&quot;&quot;)">
 			Path relative to this node pointing to a [Node3D] observer, such as a player or camera.

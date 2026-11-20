@@ -7,7 +7,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Register a sparse mapping from `Vector2i` cell coordinates to local `PackedScene` resource paths (saved with your `.tscn` scene).
 - Choose a `Node3D` observer, cell size, and square loading/unloading radii; negative coordinates are handled with floor division.
 - Add up to 16 extra observer paths for co-op, split-screen, cutscene cameras, portals and predictive prefetch (attach a Node3D in front of a moving character). All source locations share streaming budgets. Streaming scans nearest grid rings across sources, so another observer's central cell is considered before the primary observer's outer rings.
-- Keep up to 128 specific gameplay-critical cells resident with `pin_cell`, `unpin_cell` and `clear_pinned_cells`. Pins are prioritized before camera neighborhoods, but respect the same request and instance budgets. Use this for arenas, quest scenes, safe towns and checkpoints; runtime pins do not require an observer and do not create scene mappings.
+- Keep up to 128 specific gameplay-critical cells resident with `pin_cell`, `unpin_cell` and `clear_pinned_cells`. The `pinned_cells` property also appears in the inspector and is serialized with the node for design-time always-loaded areas. Pins are prioritized before camera neighborhoods, but respect the same request and instance budgets. Use this for arenas, quest scenes, safe towns and checkpoints; runtime pins do not require an observer and do not create scene mappings.
 - Load scene resources asynchronously using Godot's `ResourceLoader.load_threaded_request` backend and poll without blocking while still in progress.
 - Share a resource-load request between cells using the same scene path.
 - Instantiate `Node3D` cell roots on the main thread, preserving their authored transform and applying the cell origin.
@@ -89,7 +89,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 72 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (51), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 73 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (52), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"

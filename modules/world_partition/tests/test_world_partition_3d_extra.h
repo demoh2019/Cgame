@@ -45,6 +45,31 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Inspector pinned cell array filters duplicates and invalid values") {
+	WorldPartition3D world;
+	Array cells;
+	cells.push_back(Vector2i(3, -1));
+	cells.push_back(Vector2i(3, -1));
+	cells.push_back(String("not a cell"));
+	cells.push_back(Vector2i(0, 0));
+	world.set_pinned_cells(cells);
+	CHECK(world.get_pinned_cell_count() == 2);
+	const Array normalized = world.get_pinned_cells();
+	REQUIRE(normalized.size() == 2);
+	CHECK(normalized[0] == Vector2i(3, -1));
+	CHECK(normalized[1] == Vector2i(0, 0));
+	Array oversized;
+	for (int i = 0; i < 129; i++) {
+		oversized.push_back(Vector2i(i, 0));
+	}
+	ERR_PRINT_OFF;
+	world.set_pinned_cells(oversized);
+	ERR_PRINT_ON;
+	CHECK(world.get_pinned_cell_count() == 2);
+	world.set_pinned_cells(Array());
+	CHECK(world.get_pinned_cell_count() == 0);
+}
+
 TEST_CASE("[WorldPartition3D] Pinned cells are unique, ordered and capped") {
 	WorldPartition3D world;
 	CHECK(world.get_pinned_cell_count() == 0);

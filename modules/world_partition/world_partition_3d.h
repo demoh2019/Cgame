@@ -108,6 +108,7 @@ public:
 	void set_additional_observer_paths(const Array &p_paths);
 	Array get_additional_observer_paths() const;
 
+	void set_pinned_cells(const Array &p_cells);
 	void pin_cell(const Vector2i &p_cell);
 	void unpin_cell(const Vector2i &p_cell);
 	void clear_pinned_cells();

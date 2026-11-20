@@ -316,6 +316,27 @@ Array WorldPartition3D::get_additional_observer_paths() const {
 	return additional_observer_paths.duplicate();
 }
 
+void WorldPartition3D::set_pinned_cells(const Array &p_cells) {
+	ERR_FAIL_COND_MSG(p_cells.size() > 128, "WorldPartition3D supports at most 128 pinned cells.");
+	Vector<Vector2i> clean;
+	for (int i = 0; i < p_cells.size(); i++) {
+		if (p_cells[i].get_type() != Variant::VECTOR2I) {
+			continue;
+		}
+		const Vector2i cell = p_cells[i];
+		if (!clean.has(cell)) {
+			clean.push_back(cell);
+		}
+	}
+	const bool had_pins = !pinned_cells.is_empty();
+	pinned_cells = clean;
+	if (pinned_cells.is_empty() && had_pins) {
+		unload_after_last_pin_removed = true;
+	} else if (!pinned_cells.is_empty()) {
+		unload_after_last_pin_removed = false;
+	}
+}
+
 void WorldPartition3D::pin_cell(const Vector2i &p_cell) {
 	if (pinned_cells.has(p_cell)) {
 		return;
@@ -627,6 +648,7 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_observer_path"), &WorldPartition3D::get_observer_path);
 	ClassDB::bind_method(D_METHOD("set_additional_observer_paths", "paths"), &WorldPartition3D::set_additional_observer_paths);
 	ClassDB::bind_method(D_METHOD("get_additional_observer_paths"), &WorldPartition3D::get_additional_observer_paths);
+	ClassDB::bind_method(D_METHOD("set_pinned_cells", "cells"), &WorldPartition3D::set_pinned_cells);
 	ClassDB::bind_method(D_METHOD("pin_cell", "cell"), &WorldPartition3D::pin_cell);
 	ClassDB::bind_method(D_METHOD("unpin_cell", "cell"), &WorldPartition3D::unpin_cell);
 	ClassDB::bind_method(D_METHOD("clear_pinned_cells"), &WorldPartition3D::clear_pinned_cells);
@@ -656,6 +678,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "streaming_enabled"), "set_streaming_enabled", "is_streaming_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "observer_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Node3D"), "set_observer_path", "get_observer_path");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "additional_observer_paths"), "set_additional_observer_paths", "get_additional_observer_paths");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "pinned_cells", PROPERTY_HINT_ARRAY_TYPE, "Vector2i"), "set_pinned_cells", "get_pinned_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "load_radius", PROPERTY_HINT_RANGE, "0,32,1"), "set_load_radius", "get_load_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "unload_radius", PROPERTY_HINT_RANGE, "0,64,1"), "set_unload_radius", "get_unload_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_new_requests_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_new_requests_per_frame", "get_max_new_requests_per_frame");
