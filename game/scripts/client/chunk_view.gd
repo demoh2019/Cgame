@@ -192,6 +192,7 @@ static var _textured_material: ShaderMaterial
 static var _textured_checked := false
 static var terrain_filter_quality := 1
 static var terrain_geomorph_enabled := false
+static var terrain_screen_lod_quality := 1
 const TERRAIN_LOD_GROUP := "aa_chunked_terrain_lod"
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
 const TERRAIN_DIR := "res://assets/textures/terrain/"
@@ -254,6 +255,24 @@ static func apply_terrain_geomorph(node: Node) -> void:
 		# A slightly faster update preserves smooth movement while the native
 		# engine changes only one per-instance uniform, never reuploads meshes.
 		terrain.update_interval = 0.16 if terrain_geomorph_enabled else 0.5
+
+
+## Screen-relative geometry thresholds for the forked ChunkedTerrain3D.
+## Existing and new terrain chunks use the same quality-selected budget.
+static func terrain_lod_distance_for_quality(quality: int) -> float:
+	return [55.0, 70.0, 90.0, 112.0][clampi(quality, 0, 3)]
+
+
+static func configure_terrain_screen_lod(quality: int) -> void:
+	terrain_screen_lod_quality = clampi(quality, 0, 3)
+
+
+static func apply_terrain_screen_lod(node: Node) -> void:
+	if node is ChunkedTerrain3D:
+		var terrain := node as ChunkedTerrain3D
+		terrain.screen_space_lod_enabled = true
+		terrain.lod_reference_fov = 38.0 # Matches the 720p gameplay camera.
+		terrain.lod_distance = terrain_lod_distance_for_quality(terrain_screen_lod_quality)
 
 
 static func configure_terrain_filter(quality: int) -> void:
@@ -601,6 +620,7 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.chunk_quads = 16
 	_terrain.lod_count = 3
 	_terrain.lod_distance = 70.0
+	apply_terrain_screen_lod(_terrain)
 	_terrain.lod_geomorph_enabled = terrain_geomorph_enabled
 	_terrain.skirt_depth = 3.0
 	_terrain.collision_enabled = false # The server decides where players can stand.
