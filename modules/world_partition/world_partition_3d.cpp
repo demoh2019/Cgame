@@ -284,10 +284,6 @@ Array WorldPartition3D::get_navigation_route_cells(const Vector3 &p_from_global,
 	}
 	Vector2i cell(int(Math::floor(ax)), int(Math::floor(az)));
 	const Vector2i last(int(Math::floor(bx)), int(Math::floor(bz)));
-	result.push_back(cell);
-	if (cell == last) {
-		return result;
-	}
 
 	const real_t dx = bx - ax;
 	const real_t dz = bz - az;
@@ -302,13 +298,33 @@ Array WorldPartition3D::get_navigation_route_cells(const Vector3 &p_from_global,
 	real_t t_max_z = step_z == 0 ? inf : (step_z > 0 ? (Math::floor(az) + 1.0 - az) : (az - Math::floor(az))) / abs_dz;
 	const real_t t_delta_x = step_x == 0 ? inf : 1.0 / abs_dx;
 	const real_t t_delta_z = step_z == 0 ? inf : 1.0 / abs_dz;
+	// A segment lying *on* an entire grid edge touches BOTH adjacent tiles
+	// on every step. Exactly one point on a corner touches up to four tiles.
+	const bool boundary_x = step_x == 0 && Math::is_equal_approx(ax, Math::floor(ax));
+	const bool boundary_z = step_z == 0 && Math::is_equal_approx(az, Math::floor(az));
+	const int per_step = 1 + int(boundary_x) + int(boundary_z) + int(boundary_x && boundary_z);
 	const auto append_cell = [&](const Vector2i &p_cell) -> bool {
-		if (result.size() >= p_max_cells) {
+		if (result.size() > p_max_cells - per_step) {
 			return false;
 		}
 		result.push_back(p_cell);
+		if (boundary_x) {
+			result.push_back(Vector2i(p_cell.x - 1, p_cell.y));
+		}
+		if (boundary_z) {
+			result.push_back(Vector2i(p_cell.x, p_cell.y - 1));
+		}
+		if (boundary_x && boundary_z) {
+			result.push_back(Vector2i(p_cell.x - 1, p_cell.y - 1));
+		}
 		return true;
 	};
+	if (!append_cell(cell)) {
+		return Array();
+	}
+	if (cell == last) {
+		return result;
+	}
 	// A hard work cap also protects against malformed huge input ranges.
 	while (cell != last) {
 		if (step_x != 0 && step_z != 0 && Math::is_equal_approx(t_max_x, t_max_z)) {
