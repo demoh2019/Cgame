@@ -661,7 +661,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_SEMICOLON:
 				_quick_use("spore_filter")
 			KEY_R:
-				client.drink()
+				if Input.is_key_pressed(KEY_CTRL):
+					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+						client.refill_canteen()
+				elif Input.is_key_pressed(KEY_SHIFT):
+					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+						_quick_use("field_alkali_kit")
+				else:
+					client.drink()
 			KEY_T:
 				client.fish(Input.is_key_pressed(KEY_SHIFT))
 			KEY_Z:
@@ -686,9 +693,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				_interact()
 			KEY_F:
 				client.drink()
-			KEY_R:
-				if Input.is_key_pressed(KEY_CTRL) and not hud.is_menu_open() and bool(client.you.get("alive", false)):
-					client.refill_canteen()
 			KEY_F1:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.guardian_taunt()
