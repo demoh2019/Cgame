@@ -1,0 +1,67 @@
+name: Lightning speed-of-sound and procedural thunder
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "modules/gameplay_fx/sound_propagation*"
+      - "modules/gameplay_fx/tests/test_sound_propagation_policy.cpp"
+      - "modules/gameplay_fx/doc_classes/SoundPropagation.xml"
+      - "game/scripts/client/storm_thunder.gd"
+      - "game/scripts/client/online_main.gd"
+      - "game/scripts/client/client_main.gd"
+      - "game/tests/test_storm_thunder.gd"
+      - "game/tests/run_all.gd"
+      - ".github/workflows/lightning-thunder-acoustics.yml"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/gameplay_fx/sound_propagation*"
+      - "game/scripts/client/storm_thunder.gd"
+      - "game/scripts/client/online_main.gd"
+      - "game/scripts/client/client_main.gd"
+      - "game/tests/test_storm_thunder.gd"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sound-time-of-flight:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run pure native sound propagation math regression
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            modules/gameplay_fx/tests/test_sound_propagation_policy.cpp \
+            -o /tmp/test_sound_propagation_policy
+          /tmp/test_sound_propagation_policy
+      - name: Verify real native engine and both playable client integrations
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          engine = Path("modules/gameplay_fx/sound_propagation.cpp").read_text()
+          header = Path("modules/gameplay_fx/sound_propagation.h").read_text()
+          policy = Path("modules/gameplay_fx/sound_propagation_policy.h").read_text()
+          spatial = Path("game/scripts/client/storm_thunder.gd").read_text()
+          solo = Path("game/scripts/client/client_main.gd").read_text()
+          online = Path("game/scripts/client/online_main.gd").read_text()
+          tests = Path("game/tests/run_all.gd").read_text()
+          assert 'D_METHOD("travel_delay_seconds"' in engine
+          assert "SoundPropagationPolicy::sound_delay_seconds" in engine
+          assert "float travel_delay_seconds" in header
+          assert "331.3f + 0.606f * p_temperature_c" in policy
+          assert 'ClassDB.class_exists("SoundPropagation")' in spatial
+          assert "AudioStreamWAV.LOOP_DISABLED" in spatial
+          assert "MAX_PENDING := 4" in spatial
+          assert "MAX_VOICES := 2" in spatial
+          assert "_storm_thunder.on_strike(event, here," in online
+          assert "_storm_thunder.on_strike(game_event, survivor.position," in solo
+          assert "test_storm_thunder.gd" in tests
+          PY
