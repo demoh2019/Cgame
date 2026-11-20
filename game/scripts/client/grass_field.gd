@@ -208,11 +208,31 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 
 ## Choose one of three blade counts using distance from a tile to the camera.
 ## A 3 m dead zone avoids oscillating between mesh variants when the view moves.
-static func lod_for_distance(distance: float, previous: int = 0) -> int:
+## Approximate on-screen tuft size using the camera's vertical focal length.
+## 720p at 38 degrees is the original art-tuned reference. Clamp extreme
+## resolutions to avoid making 4K rendering multiply grass cost without bound.
+## Compatible with GL Compatibility and Forward+; no GPU query is needed.
+static func screen_lod_scale(view_height: float, vertical_fov_degrees: float) -> float:
+	if not is_finite(view_height) or not is_finite(vertical_fov_degrees):
+		return 1.0
+	if view_height <= 0.0 or vertical_fov_degrees <= 0.0 or vertical_fov_degrees >= 170.0:
+		return 1.0
+	var reference_focal: float = 720.0 / tan(deg_to_rad(38.0) * 0.5)
+	var focal: float = view_height / tan(deg_to_rad(vertical_fov_degrees) * 0.5)
+	return clampf(focal / reference_focal, 0.65, 1.6)
+
+
+## Scaling distances is equivalent to selecting LOD by projected screen
+## coverage for the fixed-size grass blades. Preset fade range controls how
+## long foliage should stay dense; screen resolution/FOV controls sharpness.
+static func lod_for_distance(distance: float, previous: int = 0, range_scale: float = 1.0) -> int:
 	var tier: int = clampi(previous, 0, LOD_BLADES.size() - 1)
-	while tier < LOD_BLADES.size() - 1 and distance >= LOD_SWITCH_DISTANCE[tier] + LOD_HYSTERESIS:
+	if not is_finite(distance) or distance < 0.0:
+		return tier
+	var scale: float = range_scale if is_finite(range_scale) and range_scale > 0.0 else 1.0
+	while tier < LOD_BLADES.size() - 1 and distance >= (LOD_SWITCH_DISTANCE[tier] + LOD_HYSTERESIS) * scale:
 		tier += 1
-	while tier > 0 and distance <= LOD_SWITCH_DISTANCE[tier - 1] - LOD_HYSTERESIS:
+	while tier > 0 and distance <= (LOD_SWITCH_DISTANCE[tier - 1] - LOD_HYSTERESIS) * scale:
 		tier -= 1
 	return tier
 
@@ -220,16 +240,18 @@ static func lod_for_distance(distance: float, previous: int = 0) -> int:
 ## The MultiMesh renderer draws only a prefix of each tuft buffer.
 ## Smooth ranges let distant grass thin gradually without any mesh rebuild.
 ## It never changes the number of gameplay entities or collision objects.
-static func visible_count_for_distance(total: int, distance: float) -> int:
+static func visible_count_for_distance(total: int, distance: float, range_scale: float = 1.0) -> int:
 	if total <= 0:
 		return 0
 	if not is_finite(distance) or distance < 0.0:
 		return total
+	var scale: float = range_scale if is_finite(range_scale) and range_scale > 0.0 else 1.0
+	var reference_distance: float = distance / scale
 	var fraction: float = 1.0
 	fraction -= DENSITY_FIRST_DROP * smoothstep(
-		DENSITY_FIRST_START, DENSITY_FIRST_END, distance)
+		DENSITY_FIRST_START, DENSITY_FIRST_END, reference_distance)
 	fraction -= DENSITY_SECOND_DROP * smoothstep(
-		DENSITY_SECOND_START, DENSITY_SECOND_END, distance)
+		DENSITY_SECOND_START, DENSITY_SECOND_END, reference_distance)
 	return clampi(ceili(float(total) * fraction), 1, total)
 
 
