@@ -122,6 +122,43 @@ TEST_CASE("[AnimationLODController] update_interval") {
 	CHECK(AnimationLODController::update_interval(1, false, 15, 35, 70) == 0);
 }
 
+TEST_CASE("[AnimationLODController] nearest visible mixer priority selection") {
+	// Registration order must never decide which critical attack gets the
+	// scarce full-rate slot. Results are input indices, nearest first.
+	Vector<real_t> distances;
+	distances.push_back(55.0);
+	distances.push_back(20.0);
+	distances.push_back(40.0);
+	Vector<int> chosen = AnimationLODController::select_nearest_priority_indices(distances, 2);
+	REQUIRE(chosen.size() == 2);
+	CHECK(chosen[0] == 1); // Second registered actor is nearest.
+	CHECK(chosen[1] == 2);
+	CHECK(AnimationLODController::select_nearest_priority_indices(distances, 0).is_empty());
+	CHECK(AnimationLODController::select_nearest_priority_indices(distances, -5).is_empty());
+
+	// Equal distance ties are deterministic: earlier index wins.
+	distances.clear();
+	distances.push_back(30.0);
+	distances.push_back(30.0);
+	distances.push_back(30.0);
+	chosen = AnimationLODController::select_nearest_priority_indices(distances, 2);
+	REQUIRE(chosen.size() == 2);
+	CHECK(chosen[0] == 0);
+	CHECK(chosen[1] == 1);
+
+	// Corrupt transforms cannot consume scarce animation slots.
+	distances.clear();
+	distances.push_back(Math::INF);
+	distances.push_back(45.0);
+	distances.push_back(Math::NaN);
+	distances.push_back(-12.0);
+	distances.push_back(15.0);
+	chosen = AnimationLODController::select_nearest_priority_indices(distances, 20);
+	REQUIRE(chosen.size() == 2);
+	CHECK(chosen[0] == 4);
+	CHECK(chosen[1] == 1);
+}
+
 TEST_CASE("[AnimationLODController] priority budget and reversible urgent mixers") {
 	AnimationLODController *lod = memnew(AnimationLODController);
 	AnimationPlayer *mixer = memnew(AnimationPlayer);
