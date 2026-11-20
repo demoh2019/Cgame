@@ -35,6 +35,10 @@
 #include "servers/rendering/rendering_server.h"
 
 void ReflectionProbe::set_intensity(float p_intensity) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_intensity) || p_intensity < 0.0f, "ReflectionProbe intensity must be finite and nonnegative.");
+	if (intensity == p_intensity) {
+		return; // Repeated quality updates must not invalidate the cubemap.
+	}
 	intensity = p_intensity;
 	RS::get_singleton()->reflection_probe_set_intensity(get_base(), p_intensity);
 }
@@ -44,6 +48,10 @@ float ReflectionProbe::get_intensity() const {
 }
 
 void ReflectionProbe::set_blend_distance(float p_blend_distance) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_blend_distance) || p_blend_distance < 0.0f, "ReflectionProbe blend distance must be finite and nonnegative.");
+	if (blend_distance == p_blend_distance) {
+		return;
+	}
 	blend_distance = p_blend_distance;
 	RS::get_singleton()->reflection_probe_set_blend_distance(get_base(), p_blend_distance);
 	update_gizmos();
@@ -82,7 +90,12 @@ Color ReflectionProbe::get_ambient_color() const {
 }
 
 void ReflectionProbe::set_max_distance(float p_distance) {
-	max_distance = CLAMP(p_distance, 0.0, 262'144.0);
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_distance), "ReflectionProbe capture range must be finite.");
+	const float distance = CLAMP(p_distance, 0.0f, 262'144.0f);
+	if (max_distance == distance) {
+		return;
+	}
+	max_distance = distance;
 	// Reflection rendering breaks if distance exceeds 262,144 units (due to floating-point precision with the near plane being 0.01).
 	RS::get_singleton()->reflection_probe_set_max_distance(get_base(), max_distance);
 }
@@ -92,6 +105,10 @@ float ReflectionProbe::get_max_distance() const {
 }
 
 void ReflectionProbe::set_mesh_lod_threshold(float p_pixels) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_pixels) || p_pixels < 0.0f, "ReflectionProbe mesh LOD threshold must be finite and nonnegative.");
+	if (mesh_lod_threshold == p_pixels) {
+		return;
+	}
 	mesh_lod_threshold = p_pixels;
 	RS::get_singleton()->reflection_probe_set_mesh_lod_threshold(get_base(), p_pixels);
 }
@@ -101,6 +118,11 @@ float ReflectionProbe::get_mesh_lod_threshold() const {
 }
 
 void ReflectionProbe::set_size(const Vector3 &p_size) {
+	ERR_FAIL_COND_MSG(!p_size.is_finite() || p_size.x <= 0.0 || p_size.y <= 0.0 || p_size.z <= 0.0,
+			"ReflectionProbe size must be finite and positive.");
+	if (size == p_size) {
+		return;
+	}
 	size = p_size;
 
 	for (int i = 0; i < 3; i++) {
