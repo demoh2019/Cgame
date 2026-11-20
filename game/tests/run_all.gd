@@ -65,6 +65,7 @@ const SUITES := [
 	"res://tests/test_vegetation_wind.gd",
 	"res://tests/test_rain_wet_foliage.gd",
 	"res://tests/test_sky_lighting_budget.gd",
+	"res://tests/test_sky_ibl_fidelity.gd",
 	"res://tests/test_sky_moon_lighting.gd",
 	"res://tests/test_sky_aerosol_scattering.gd",
 	"res://tests/test_sky_atmospheric_lut.gd",
