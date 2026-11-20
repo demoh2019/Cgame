@@ -7,6 +7,12 @@ extends Node
 const GROUP := "aa_outdoor_reflection_anchor"
 const CHECK_INTERVAL := 0.45
 const CAPTURE_COOLDOWN := 1.6
+# Similar to HDRP On Demand captures: avoid live six-face redraws on every
+# frame when day/night or rain alters the environment. At most one shared
+# cubemap is invalidated every 18 seconds, only on a meaningful change.
+const WEATHER_RECAPTURE_INTERVAL := 18.0
+const DAYLIGHT_RECAPTURE_DELTA := 0.17
+const STORM_RECAPTURE_DELTA := 0.26
 const SWITCH_HYSTERESIS := 5.0
 const SITE_KINDS := {
 	"village": true, "farm": true, "depot": true, "outpost": true,
@@ -20,6 +26,11 @@ const PRESETS := [
 ]
 
 static var _quality := 1
+## Set by online_main when creating the one global reflection manager.
+## Use the same smoothed atmospheric daylight/storm as the sky and PBR.
+var atmosphere: Node3D
+var _weather_at_capture: Array[Vector2] = []
+var _weather_refresh_elapsed := WEATHER_RECAPTURE_INTERVAL
 var _elapsed := 0.0
 var _capture_elapsed := CAPTURE_COOLDOWN
 var _probes: Array[ReflectionProbe] = []
@@ -82,6 +93,22 @@ static func choose(candidates: Array, count: int, radius: float,
 	return chosen
 
 
+## Pure scheduler: invalid or unavailable weather never forces cubemaps.
+static func weather_signature(daylight: float, storm: float) -> Vector2:
+	if not is_finite(daylight) or not is_finite(storm):
+		return Vector2(-1.0, -1.0)
+	return Vector2(clampf(daylight, 0.0, 1.0), clampf(storm, 0.0, 1.0))
+
+
+static func weather_changed(captured: Vector2, current: Vector2) -> bool:
+	if not captured.is_finite() or not current.is_finite():
+		return false
+	if minf(captured.x, captured.y) < 0.0 or minf(current.x, current.y) < 0.0:
+		return false
+	return absf(captured.x - current.x) >= DAYLIGHT_RECAPTURE_DELTA or \
+		absf(captured.y - current.y) >= STORM_RECAPTURE_DELTA
+
+
 static func make_probe(profile: Dictionary) -> ReflectionProbe:
 	var probe := ReflectionProbe.new()
 	probe.name = "OutdoorArchitectureReflection"
@@ -103,6 +130,7 @@ static func make_probe(profile: Dictionary) -> ReflectionProbe:
 func _process(delta: float) -> void:
 	_elapsed += maxf(delta, 0.0)
 	_capture_elapsed += maxf(delta, 0.0)
+	_weather_refresh_elapsed += maxf(delta, 0.0)
 	if _elapsed < CHECK_INTERVAL:
 		return
 	_elapsed = fmod(_elapsed, CHECK_INTERVAL)
@@ -130,6 +158,10 @@ func _process(delta: float) -> void:
 			candidates.append({"node": anchor, "id": anchor.get_instance_id(),
 				"distance_sq": d2})
 	var selected: Array = choose(candidates, count, radius, _assigned)
+	var lighting := Vector2(-1.0, -1.0)
+	if is_instance_valid(atmosphere):
+		lighting = weather_signature(
+			float(atmosphere.get("light_level")), float(atmosphere.get("storm")))
 	for i in _probes.size():
 		if i >= selected.size() or i >= count:
 			_probes[i].visible = false
@@ -139,6 +171,18 @@ func _process(delta: float) -> void:
 		var id: int = int(item["id"])
 		if i < _probes.size() and _assigned[i] == id:
 			_probes[i].visible = true
+			# Godot UPDATE_ONCE never re-renders a stationary cubemap.
+			# A changed storm or sunset needs a native *on-demand* request.
+			# One refresh maximum across the global pool each 18 seconds.
+			if _weather_refresh_elapsed >= WEATHER_RECAPTURE_INTERVAL \
+					and _capture_elapsed >= CAPTURE_COOLDOWN \
+					and i < _weather_at_capture.size() \
+					and weather_changed(_weather_at_capture[i], lighting) \
+					and _probes[i].has_method("request_update"):
+				_probes[i].call("request_update")
+				_weather_at_capture[i] = lighting
+				_weather_refresh_elapsed = 0.0
+				_capture_elapsed = 0.0
 			continue
 		if _capture_elapsed < CAPTURE_COOLDOWN:
 			if i < _probes.size():
@@ -149,6 +193,7 @@ func _process(delta: float) -> void:
 			add_child(new_probe)
 			_probes.append(new_probe)
 			_assigned.append(-1)
+			_weather_at_capture.append(Vector2(-1.0, -1.0))
 		var active: ReflectionProbe = _probes[i]
 		active.visible = false
 		active.mesh_lod_threshold = float(profile["mesh_lod"])
@@ -156,7 +201,9 @@ func _process(delta: float) -> void:
 		active.global_position = (item["node"] as Node3D).global_position
 		active.visible = true
 		_assigned[i] = id
+		_weather_at_capture[i] = lighting
 		_capture_elapsed = 0.0
+		_weather_refresh_elapsed = 0.0
 
 
 func _hide_all() -> void:
@@ -170,3 +217,5 @@ func _release_all() -> void:
 		probe.queue_free()
 	_probes.clear()
 	_assigned.clear()
+	_weather_at_capture.clear()
+	_weather_refresh_elapsed = WEATHER_RECAPTURE_INTERVAL

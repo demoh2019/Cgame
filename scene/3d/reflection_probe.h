@@ -121,6 +121,8 @@ public:
 
 	void set_update_mode(UpdateMode p_mode);
 	UpdateMode get_update_mode() const;
+	// Manually re-capture an UPDATE_ONCE probe without a realtime atlas.
+	void request_update();
 
 	virtual AABB get_aabb() const override;
 

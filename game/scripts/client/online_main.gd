@@ -328,6 +328,7 @@ func _build_environment() -> void:
 	# Only one pool of high-end architectural reflection captures in the world.
 	var outdoor_reflections := OutdoorReflectionBudget.new()
 	outdoor_reflections.name = "OutdoorReflectionBudget"
+	outdoor_reflections.atmosphere = atmosphere
 	add_child(outdoor_reflections)
 	if camera.has_method("set_shake_max_offset"):
 		# Trauma shake (engine feature of this fork): small offsets for a top-down view, quick decay.
