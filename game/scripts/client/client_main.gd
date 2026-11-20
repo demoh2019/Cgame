@@ -19,6 +19,8 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
+const Atmosphere = preload("res://scripts/client/atmosphere.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
@@ -56,6 +58,9 @@ var _recipes: Array[String] = []
 var _camera: Camera3D
 var _sun: DirectionalLight3D
 var _world_environment: Environment
+var _atmosphere: Node3D
+var _weather_next_update: float = -1.0
+var _weather_storming := false
 var _avatar: MeshInstance3D
 var _bike_visual
 var _flare_visual
@@ -90,6 +95,7 @@ var _hud_clock: float = 0.0
 
 func _ready() -> void:
 	_setup_actions()
+	GraphicsQuality.load_preference()
 	world = WorldGen.new(1337)
 	sim = GameServer.new(world, 1337)
 	survivor = sim.add_player(LOCAL_PLAYER_ID, "Survivor")
@@ -98,6 +104,7 @@ func _ready() -> void:
 	for recipe_id in recipe_ids:
 		_recipes.append(str(recipe_id))
 	_make_light_and_camera()
+	GraphicsQuality.apply(get_viewport(), _atmosphere, null)
 	_lightning_visual = LightningVisual.new()
 	_lightning_visual.name = "StormLightningWarning"
 	add_child(_lightning_visual)
@@ -185,20 +192,13 @@ func _bind_key(action: StringName, key: Key) -> void:
 
 
 func _make_light_and_camera() -> void:
-	var env_node := WorldEnvironment.new()
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.16, 0.19, 0.24)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.62, 0.68, 0.73)
-	env.ambient_light_energy = 0.7
-	env_node.environment = env
-	_world_environment = env
-	add_child(env_node)
-	_sun = DirectionalLight3D.new()
-	_sun.rotation_degrees = Vector3(-52.0, -32.0, 0.0)
-	_sun.light_energy = 1.3
-	add_child(_sun)
+	# The same atmosphere as multiplayer: panoramic sky, changing sunlight,
+	# cloud shadows and weather-aware PBR fog, with graphics presets applied
+	# according to the actual renderer.
+	_atmosphere = Atmosphere.new()
+	add_child(_atmosphere)
+	_world_environment = _atmosphere.environment
+	_sun = _atmosphere.sun
 	_update_world_light()
 	_camera = Camera3D.new()
 	_camera.name = "Camera3D"
@@ -207,17 +207,19 @@ func _make_light_and_camera() -> void:
 	add_child(_camera)
 
 
-## Keep the offline world consistent with the networked server clock.
-func _update_world_light() -> void:
-	if _sun == null or _world_environment == null or sim == null:
+## Keep the offline world consistent with the dedicated world's day/night
+## and regional weather. Sample weather at 4 Hz, not on every render frame.
+func _update_world_light(delta: float = 0.0) -> void:
+	if _atmosphere == null or sim == null or world == null:
 		return
-	var brightness: float = WorldCycle.daylight(sim.time)
-	var height: float = WorldCycle.sun_height(sim.time)
-	_sun.rotation_degrees = Vector3(-lerpf(8.0, 70.0, clampf(height, 0.0, 1.0)), 35.0 + WorldCycle.phase(sim.time) * 90.0, 0.0)
-	_sun.light_energy = lerpf(0.08, 1.15, brightness)
-	_sun.light_color = Color(1.0, 0.85, 0.65).lerp(Color(1.0, 0.98, 0.94), clampf(height * 1.5, 0.0, 1.0))
-	_world_environment.ambient_light_energy = lerpf(0.25, 0.85, brightness)
-	_world_environment.background_color = Color(0.025, 0.036, 0.07).lerp(Color(0.16, 0.19, 0.24), brightness)
+	var seconds: float = sim.time
+	if seconds >= _weather_next_update:
+		var at: Vector3 = survivor.position if survivor != null else Vector3.ZERO
+		var weather: Dictionary = Weather.conditions(world, at.x, at.z, seconds)
+		_weather_storming = str(weather.get("condition", "")) == "storm"
+		_weather_next_update = seconds + 0.25
+	_atmosphere.update(WorldCycle.daylight(seconds), WorldCycle.sun_height(seconds),
+		WorldCycle.phase(seconds), _weather_storming, delta)
 
 
 func _mesh(box_size: Vector3, color: Color) -> MeshInstance3D:
@@ -770,7 +772,7 @@ func _physics_process(delta: float) -> void:
 	if sim.siege_waves_started > _last_siege_notification:
 		_last_siege_notification = sim.siege_waves_started
 		_feedback = "Night siege! Infected are approaching a nearby barricade."
-	_update_world_light()
+	_update_world_light(delta)
 	_lightning_visual.set_warning(sim.lightning_pending)
 	var movement := Input.get_vector("survive_left", "survive_right", "survive_up", "survive_down")
 	if movement.length_squared() > 0.001:
@@ -963,6 +965,15 @@ func _update_bank_hud() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Modifier-aware quality switch; plain F11 keeps its medical-item binding.
+	if event is InputEventKey and event.pressed and not event.echo and \
+			event.keycode == KEY_F11 and event.ctrl_pressed:
+		GraphicsQuality.cycle()
+		GraphicsQuality.apply(get_viewport(), _atmosphere, null)
+		_feedback = "Graphics: %s (Ctrl+F11 to change)." % GraphicsQuality.get_name()
+		_update_hud()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("survive_bank"):
 		_toggle_bank()
 	elif event.is_action_pressed("survive_bank_next"):
