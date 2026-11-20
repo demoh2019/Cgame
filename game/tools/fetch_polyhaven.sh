@@ -11,7 +11,8 @@ wooden_crate_01 horse_statue_01 wooden_bucket_01 namaqualand_boulder_02 wine_bar
 Barrel_01 barrel_03 barrel_stove metal_jerrycan metal_jerrycan_green old_military_crate wooden_military_crate ammo_box
 old_tyre rusted_wheel_rim_01 concrete_road_barrier metal_trash_can trashbag propane_tank portable_generator street_lamp_01
 fire_hydrant wooden_picnic_table plastic_crate_01 cardboard_box_01 wooden_crate_02 worn_metal_rack tool_cart
-painted_wooden_bench rock_07 rock_09 namaqualand_boulder_04 tree_stump_02 dead_tree_trunk"
+painted_wooden_bench rock_07 rock_09 namaqualand_boulder_04 tree_stump_02 dead_tree_trunk
+dry_branches_medium_01 bark_debris_01 dead_quiver_branch_01 dead_quiver_branch_02 dead_quiver_trunk root_cluster_01 pine_roots single_root namaqualand_boulders_01 namaqualand_rocks_01 namaqualand_stones_01 namaqualand_boulder_05 coast_rocks_01"
 [ $# -gt 0 ] && MODELS="$*"
 for id in $MODELS; do
   folder="$HERE/assets/models/polyhaven/$id"

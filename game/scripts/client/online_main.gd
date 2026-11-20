@@ -76,6 +76,7 @@ var _party_rally_marker: Node3D
 var _raid_telegraph: Node3D
 var _screenshot_path := ""
 var _screenshot_frames := 0
+var _frame_ms: Array[float] = [] # Frame times before a demo screenshot, for the median printed with it.
 var _demo := ""
 var _frames := 0
 var _demo_frames := 0 # Frames since the first snapshot arrived.
@@ -1003,10 +1004,17 @@ func _run_demo() -> void:
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": 14.0, "z": 6.0})
 	if _screenshot_path != "":
 		_screenshot_frames += 1
+		if _screenshot_frames > 540:
+			_frame_ms.append(get_process_delta_time() * 1000.0)
 		if _screenshot_frames == 700:
 			# The window may be hidden behind others, in which case the last drawn frame would be stale: draw now.
 			RenderingServer.force_draw()
 			get_viewport().get_texture().get_image().save_png(_screenshot_path)
+			_frame_ms.sort()
+			print("CLIENT median frame %.1f ms over %d frames" % [_frame_ms[_frame_ms.size() / 2] if not _frame_ms.is_empty() else 0.0, _frame_ms.size()])
+			print("CLIENT frame: %d fps, %d draw calls, %d primitives, %d objects" % [Engine.get_frames_per_second(),
+				Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
+				Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)])
 			print("CLIENT screenshot saved: ", _screenshot_path)
 			get_tree().quit()
 

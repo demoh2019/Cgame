@@ -94,7 +94,8 @@ void fragment() {
 	w[0] += biome.r - w[2];
 	w[3] = biome.g;
 	// Bare earth on rough patches and moderate slopes.
-	float bare = smoothstep(0.66, 0.84, mid + slope * 0.8) * 0.75;
+	// A thousand years without people: bare earth only in small patches and on the steeper slopes.
+	float bare = smoothstep(0.74, 0.9, mid + slope * 0.8) * 0.45;
 	for (int i = 0; i < 4; i++) {
 		w[i] *= 1.0 - bare;
 	}
@@ -129,7 +130,9 @@ void fragment() {
 		}
 		float d = length(p - patch.xy) / patch.z;
 		float paved = 1.0 - smoothstep(0.7, 1.0, d + (mid - 0.5) * 0.35);
-		paved *= 1.0 - 0.75 * smoothstep(0.58, 0.78, fbm(p * 0.11 + 5.0)) * (1.0 - cliff);
+		// Grass has taken back much of it: whole drifts of green, and moss everywhere else.
+		paved *= 1.0 - 0.9 * smoothstep(0.42, 0.68, fbm(p * 0.11 + 5.0)) * (1.0 - cliff);
+		paved *= 0.85;
 		paved *= 1.0 - cliff;
 		for (int i = 0; i < 11; i++) {
 			w[i] *= 1.0 - paved;

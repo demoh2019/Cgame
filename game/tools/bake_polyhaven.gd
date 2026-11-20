@@ -57,6 +57,20 @@ const JOBS := {
 	"boulder_04": ["namaqualand_boulder_04", "", 1400],
 	"stump_2": ["tree_stump_02", "", 1200],
 	"fallen_trunk": ["dead_tree_trunk", "", 1600],
+	# Third batch: what a thousand years leave on the ground: branches, bark, roots, logs, and stones in groups.
+	"branches": ["dry_branches_medium_01", "", 900],
+	"bark_debris": ["bark_debris_01", "", 600],
+	"stick_1": ["dead_quiver_branch_01", "", 600],
+	"stick_2": ["dead_quiver_branch_02", "", 700],
+	"old_log": ["dead_quiver_trunk", "", 1500],
+	"roots": ["root_cluster_01", "", 1400],
+	"pine_roots": ["pine_roots", "", 1200],
+	"single_root": ["single_root", "", 600],
+	"boulder_group": ["namaqualand_boulders_01", "", 2400],
+	"rock_group": ["namaqualand_rocks_01", "", 1600],
+	"stone_scatter": ["namaqualand_stones_01", "", 1200],
+	"boulder_05": ["namaqualand_boulder_05", "", 1400],
+	"shore_rocks": ["coast_rocks_01", "", 2000],
 }
 
 

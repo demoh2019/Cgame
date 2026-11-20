@@ -11,6 +11,7 @@ const Foliage = preload("res://scripts/client/foliage.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
+const GrassField = preload("res://scripts/client/grass_field.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
 const HEIGHT_MIN := -45.0
@@ -112,14 +113,24 @@ static var _textured_checked := false
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete"]
 const TERRAIN_DIR := "res://assets/textures/terrain/"
 # The colour each layer should average to: photos of real ground pulled toward the stylised palette of the models.
-const TERRAIN_TARGETS := [Color(0.25, 0.37, 0.15), Color(0.41, 0.42, 0.22), Color(0.32, 0.33, 0.16), Color(0.27, 0.29, 0.17),
-	Color(0.46, 0.37, 0.25), Color(0.46, 0.43, 0.4), Color(0.43, 0.41, 0.37), Color(0.68, 0.6, 0.44), Color(0.92, 0.94, 0.98),
-	Color(0.3, 0.3, 0.29), Color(0.34, 0.33, 0.31)]
+const TERRAIN_TARGETS := [Color(0.24, 0.38, 0.14), Color(0.37, 0.41, 0.19), Color(0.28, 0.32, 0.15), Color(0.27, 0.29, 0.17),
+	Color(0.4, 0.38, 0.26), Color(0.36, 0.39, 0.29), Color(0.37, 0.41, 0.28), Color(0.66, 0.59, 0.44), Color(0.92, 0.94, 0.98),
+	Color(0.3, 0.3, 0.29), Color(0.35, 0.37, 0.3)]
 # Paved ground under sites (see ground.gdshader): kind -> [terrain layer, share of the site radius].
 const SITE_PAVING := {"city": [9, 0.8], "bunker": [10, 0.75], "depot": [10, 0.6], "dock": [10, 0.5]}
 const BIOME_TEXELS := 17 # Biome samples per chunk side (every 4 m), shared on the borders with the neighbours.
 
 var cell: Vector2i
+# Kept from building the terrain for the grass: raw heights, biome names, the road mask and the paved sites.
+var _raw_heights := PackedFloat32Array()
+var _biome_names := PackedStringArray()
+var _road_data := PackedByteArray()
+var _patches := PackedVector4Array()
+# Grass grows tile by tile once the chunk is near the camera: one tile per frame across all chunks.
+var _grass_source
+var _grass_next_tile := 0
+static var _grass_frame := -1
+const GRASS_RANGE := 110.0
 var _world
 var _terrain
 var _groups: Dictionary = {} # kind -> {"multimesh": MultiMesh, "index": {node_id: i}, "transforms": [...]}
@@ -215,6 +226,7 @@ func _biome_texture(origin: Vector2) -> ImageTexture:
 	for j in BIOME_TEXELS:
 		for i in BIOME_TEXELS:
 			var biome: String = _world.biome_at(origin.x + float(i) * step, origin.y + float(j) * step)
+			_biome_names.append(biome)
 			var index: int = (j * BIOME_TEXELS + i) * 3
 			data[index] = 255 if biome == "forest" else 0
 			data[index + 1] = 255 if biome == "swamp" else 0
@@ -234,7 +246,8 @@ func _ground_with_roads(origin: Vector2) -> Material:
 			own.set_shader_parameter("road_mask", road_texture)
 		own.set_shader_parameter("chunk_origin", origin)
 		own.set_shader_parameter("chunk_size", Defs.CHUNK_SIZE)
-		own.set_shader_parameter("site_patches", _site_patches(origin))
+		_patches = _site_patches(origin)
+		own.set_shader_parameter("site_patches", _patches)
 		return own
 	if road_texture == null:
 		return ground_material()
@@ -278,6 +291,7 @@ func _road_texture(origin: Vector2) -> ImageTexture:
 				var index: int = py * size + px
 				if value > data[index]:
 					data[index] = value
+	_road_data = data
 	return ImageTexture.create_from_image(Image.create_from_data(size, size, false, Image.FORMAT_L8, data))
 
 
@@ -300,6 +314,7 @@ func _build_terrain(origin: Vector2) -> void:
 		for i in SAMPLES:
 			var h: float = _world.height_at(origin.x + i * step, origin.y + j * step)
 			heights[j * SAMPLES + i] = clampf((h - HEIGHT_MIN) / HEIGHT_RANGE, 0.0, 1.0)
+			_raw_heights.append(h)
 	_terrain = ChunkedTerrain3D.new()
 	_terrain.centered = false
 	_terrain.size = Vector2(Defs.CHUNK_SIZE, Defs.CHUNK_SIZE)
@@ -651,8 +666,28 @@ func _build_windmills(windmills: Array, origin: Vector2) -> void:
 
 
 func _process(delta: float) -> void:
+	_grow_grass()
 	for sail in _sails:
 		(sail["node"] as Node3D).rotate_object_local(sail["axis"], sail["speed"] * delta)
+
+
+func _grow_grass() -> void:
+	if _grass_source == null or _grass_next_tile >= GrassField.tile_count():
+		return
+	var frame: int = Engine.get_process_frames()
+	if _grass_frame == frame:
+		return # Another chunk grew a tile this frame.
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var center := global_position + Vector3(Defs.CHUNK_SIZE * 0.5, 0.0, Defs.CHUNK_SIZE * 0.5)
+	if Vector2(camera.global_position.x - center.x, camera.global_position.z - center.z).length() > GRASS_RANGE:
+		return
+	_grass_frame = frame
+	var tile: MultiMeshInstance3D = GrassField.build_tile(_grass_source, _grass_next_tile)
+	_grass_next_tile += 1
+	if tile != null:
+		add_child(tile)
 
 
 ## The people of the settlements: standing, sitting, working, each with a name and a role above their head.
@@ -693,70 +728,130 @@ static func _ore_material(mesh: Mesh) -> Material:
 
 
 # Decoration that exists only on the client: it never blocks anyone, so the server knows nothing about it.
+# `count` is tries per chunk; `cluster` how strongly the lushness noise gathers it into meadows and thickets (0: even);
+# `range` how far away it is still drawn. Grass and flowers grow in drifts, bushes at forest edges, mushrooms in the shade.
 const DECOR := [
-	{"file": "Grass_Common_Tall", "count": 70, "scale": [0.9, 1.4], "biomes": ["forest", "plains", "swamp"]},
-	{"file": "Grass_Wispy_Short", "count": 70, "scale": [0.9, 1.5], "biomes": ["forest", "plains", "beach"]},
-	{"file": "Fern_1", "count": 14, "scale": [0.8, 1.3], "biomes": ["forest", "swamp"]},
-	{"file": "Flower_3_Group", "count": 12, "scale": [0.8, 1.2], "biomes": ["plains", "forest"]},
-	{"file": "Flower_4_Group", "count": 10, "scale": [0.8, 1.2], "biomes": ["plains"]},
-	{"file": "Mushroom_Common", "count": 6, "scale": [0.9, 1.6], "biomes": ["forest", "swamp"]},
-	{"file": "Pebble_Round_1", "count": 18, "scale": [0.8, 1.8], "biomes": ["forest", "plains", "beach", "mountain"]},
-	{"file": "Pebble_Square_2", "count": 12, "scale": [0.8, 1.8], "biomes": ["plains", "beach", "mountain"]},
+	{"file": "Grass_Common_Tall", "count": 28, "scale": [0.6, 2.1], "biomes": ["forest", "plains", "swamp"], "cluster": 0.8, "range": 95.0},
+	{"file": "Grass_Wispy_Tall", "count": 24, "scale": [0.7, 2.3], "biomes": ["plains", "swamp", "beach"], "cluster": 0.9, "range": 95.0},
+	{"file": "Clover_1", "count": 40, "scale": [0.9, 1.5], "biomes": ["forest", "plains"], "cluster": 0.7, "range": 60.0},
+	{"file": "Clover_2", "count": 30, "scale": [0.9, 1.5], "biomes": ["forest", "plains"], "cluster": 0.7, "range": 60.0},
+	{"file": "Fern_1", "count": 32, "scale": [0.5, 1.9], "biomes": ["forest", "swamp"], "cluster": 0.8, "range": 110.0},
+	{"file": "Plant_1", "count": 18, "scale": [0.8, 1.3], "biomes": ["forest", "swamp"], "cluster": 0.6, "range": 100.0},
+	{"file": "Plant_1_Big", "count": 10, "scale": [0.8, 1.2], "biomes": ["forest", "swamp"], "cluster": 0.6, "range": 130.0},
+	{"file": "Bush_Common", "count": 34, "scale": [0.8, 1.5], "biomes": ["forest", "plains", "swamp"], "cluster": 1.0, "range": 170.0},
+	{"file": "Bush_Common_Flowers", "count": 16, "scale": [0.8, 1.4], "biomes": ["forest", "plains"], "cluster": 1.0, "range": 170.0},
+	{"file": "Flower_3_Group", "count": 40, "scale": [0.8, 1.3], "biomes": ["plains", "forest"], "cluster": 1.2, "range": 90.0},
+	{"file": "Flower_4_Group", "count": 36, "scale": [0.8, 1.3], "biomes": ["plains"], "cluster": 1.2, "range": 90.0},
+	{"file": "Flower_3_Single", "count": 25, "scale": [0.8, 1.4], "biomes": ["plains", "forest", "beach"], "cluster": 1.0, "range": 60.0},
+	{"file": "Flower_4_Single", "count": 25, "scale": [0.8, 1.4], "biomes": ["plains"], "cluster": 1.0, "range": 60.0},
+	{"file": "Petal_1", "count": 14, "scale": [0.8, 1.6], "biomes": ["plains", "forest"], "cluster": 1.2, "range": 50.0},
+	{"file": "Mushroom_Common", "count": 16, "scale": [0.9, 1.7], "biomes": ["forest", "swamp"], "cluster": 0.9, "range": 70.0},
+	{"file": "Mushroom_Laetiporus", "count": 6, "scale": [0.9, 1.5], "biomes": ["forest", "swamp"], "cluster": 0.9, "range": 70.0},
+	{"file": "Pebble_Round_1", "count": 40, "scale": [0.4, 2.6], "biomes": ["forest", "plains", "beach", "mountain", "swamp"], "cluster": 0.0, "range": 80.0},
+	{"file": "Pebble_Round_3", "count": 30, "scale": [0.8, 1.8], "biomes": ["forest", "plains", "beach", "mountain"], "cluster": 0.0, "range": 80.0},
+	{"file": "Pebble_Round_5", "count": 20, "scale": [0.4, 3.0], "biomes": ["forest", "plains", "mountain"], "cluster": 0.0, "range": 80.0},
+	{"file": "Pebble_Square_4", "count": 16, "scale": [0.8, 2.0], "biomes": ["plains", "mountain", "swamp"], "cluster": 0.0, "range": 80.0},
+	{"file": "Pebble_Square_2", "count": 24, "scale": [0.8, 1.8], "biomes": ["plains", "beach", "mountain"], "cluster": 0.0, "range": 80.0},
 ]
+# Grass is never quite one colour: each blade group is tinted between these.
+const GRASS_TINTS := [Color(1.2, 1.2, 1.15), Color(1.05, 1.15, 0.95), Color(1.25, 1.2, 0.95), Color(1.1, 1.08, 0.88)]
+
+
+static func _on_road(pieces: Array, point: Vector2, clearance: float) -> bool:
+	for piece in pieces:
+		var a: Vector2 = piece[0]
+		var ab: Vector2 = piece[1] - a
+		var t: float = clampf((point - a).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
+		if point.distance_to(a + ab * t) < clearance:
+			return true
+	return false
 
 
 func _build_decor(origin: Vector2, rng: RandomNumberGenerator) -> void:
+	if _raw_heights.size() == SAMPLES * SAMPLES and _biome_names.size() == BIOME_TEXELS * BIOME_TEXELS:
+		_grass_source = GrassField.Source.new(origin, _raw_heights, SAMPLES, _biome_names, BIOME_TEXELS, _road_data, _patches)
+		set_process(true)
 	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
 	if center.length() < Defs.HUB_SAFE_RADIUS + 30.0:
 		return # The hub is paved.
+	# Nothing grows on the roads (they are 1 m wider here than the drawn dirt, so blades never lean onto it).
+	var road_pieces: Array = _world.roads.pieces_in_cell(cell) if _world.roads != null else []
+	var road_clear: float = WorldRoads.HALF_WIDTH + 1.0
 	for entry in DECOR:
-		var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(entry["file"]), "decor:" + String(entry["file"]), 0.0 if String(entry["file"]).begins_with("Pebble") else 0.12)
+		var file := String(entry["file"])
+		var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(file), "decor:" + file, 0.0 if file.begins_with("Pebble") or file.begins_with("Petal") else (0.2 if file.begins_with("Grass") else 0.12), true)
 		if mesh == null:
 			continue
+		var cluster: float = float(entry["cluster"])
 		var spots: Array = []
 		for i in int(entry["count"]):
 			var x := origin.x + rng.randf() * Defs.CHUNK_SIZE
 			var z := origin.y + rng.randf() * Defs.CHUNK_SIZE
-			if _world.is_water(x, z) or not (_world.biome_at(x, z) in entry["biomes"]):
+			# Lush spots keep almost every try, bare ones few: drifts and clearings instead of an even carpet.
+			var keep: float = clampf(1.0 - cluster + cluster * 1.6 * GrassField.lushness(x, z), 0.05, 1.0)
+			if rng.randf() > keep:
+				continue
+			if _world.is_water(x, z) or not (_world.biome_at(x, z) in entry["biomes"]) or _on_road(road_pieces, Vector2(x, z), road_clear):
 				continue
 			spots.append(Vector3(x, _world.height_at(x, z), z))
 		if spots.is_empty():
 			continue
 		var multimesh := MultiMesh.new()
 		multimesh.transform_format = MultiMesh.TRANSFORM_3D
+		multimesh.use_colors = true
 		multimesh.mesh = mesh
 		multimesh.instance_count = spots.size()
+		var tinted := file.begins_with("Grass") or file.begins_with("Clover") or file.begins_with("Fern") or file.begins_with("Bush")
 		for i in spots.size():
 			var size := rng.randf_range(float(entry["scale"][0]), float(entry["scale"][1]))
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
-			multimesh.set_instance_transform(i, Transform3D(basis, Vector3(spots[i].x - origin.x, spots[i].y, spots[i].z - origin.y)))
+			multimesh.set_instance_transform(i, Transform3D(basis, Vector3(spots[i].x - origin.x, spots[i].y - 0.02, spots[i].z - origin.y)))
+			var tint: Color = GRASS_TINTS[rng.randi() % GRASS_TINTS.size()] if tinted else Color.WHITE
+			multimesh.set_instance_color(i, tint)
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		instance.visibility_range_end = 110.0 # Small things are not worth drawing far away.
+		# Bushes are big enough to cast a shadow; the rest would only cost time.
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if file.begins_with("Bush") else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		instance.visibility_range_end = float(entry["range"])
+		instance.visibility_range_end_margin = 8.0
 		add_child(instance)
 	# Logs, stumps, painted flowers and the odd standing stone from the loose collections.
 	for entry in ModelCatalog.available("decor", ModelCatalog.DECOR_EXTRA):
 		var extra_mesh: Mesh = ModelCatalog.entry_mesh(entry)
 		if extra_mesh == null:
 			continue
-		var places: Array = []
+		var size_range: Array = entry.get("scale", [0.8, 1.3])
+		var group: int = int(entry.get("group", 0))
+		var placed: Array = [] # [position, scale]
 		for i in int(entry["count"]):
 			var x := origin.x + rng.randf() * Defs.CHUNK_SIZE
 			var z := origin.y + rng.randf() * Defs.CHUNK_SIZE
-			if _world.is_water(x, z) or not (_world.biome_at(x, z) in entry["biomes"]):
+			if _world.is_water(x, z) or not (_world.biome_at(x, z) in entry["biomes"]) or _on_road(road_pieces, Vector2(x, z), road_clear):
 				continue
-			places.append(Vector3(x, _world.height_at(x, z), z))
-		if places.is_empty():
+			# Sizes lean small: many little ones, now and then a big one.
+			var t: float = rng.randf()
+			var main_scale: float = lerpf(float(size_range[0]), float(size_range[1]), t * t)
+			placed.append([Vector3(x, _world.height_at(x, z), z), main_scale])
+			# A few smaller ones lying around it, as stones and sticks really do.
+			for k in group:
+				var around := Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(0.8, 2.6) * main_scale
+				var sx: float = x + around.x
+				var sz: float = z + around.y
+				if sx < origin.x or sz < origin.y or sx >= origin.x + Defs.CHUNK_SIZE or sz >= origin.y + Defs.CHUNK_SIZE or _world.is_water(sx, sz):
+					continue
+				placed.append([Vector3(sx, _world.height_at(sx, sz), sz), main_scale * rng.randf_range(0.25, 0.6)])
+		if placed.is_empty():
 			continue
 		var extra := MultiMesh.new()
 		extra.transform_format = MultiMesh.TRANSFORM_3D
 		extra.mesh = extra_mesh
-		extra.instance_count = places.size()
-		for i in places.size():
-			var scale_factor := rng.randf_range(0.8, 1.3)
-			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * scale_factor)
-			extra.set_instance_transform(i, Transform3D(basis, Vector3(places[i].x - origin.x, places[i].y, places[i].z - origin.y)))
+		extra.instance_count = placed.size()
+		for i in placed.size():
+			var where: Vector3 = placed[i][0]
+			# Tilted a little, sunk a little: lying in the ground for ages, not placed on it.
+			var basis := Basis(Vector3.UP, rng.randf() * TAU).rotated(Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)).normalized(), rng.randf_range(0.0, 0.12))
+			basis = basis.scaled(Vector3.ONE * float(placed[i][1]))
+			extra.set_instance_transform(i, Transform3D(basis, Vector3(where.x - origin.x, where.y - 0.06 * float(placed[i][1]), where.z - origin.y)))
 		var extra_instance := MultiMeshInstance3D.new()
 		extra_instance.multimesh = extra
 		extra_instance.visibility_range_end = 140.0

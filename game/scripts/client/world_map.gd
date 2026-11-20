@@ -1,189 +1,594 @@
 extends Control
-## The whole island on one screen (J): terrain painted from the seed, the danger rings, every settlement, camp, fort and ruin,
-## the siege outposts and you. Hover a place to read its name. The picture is made a few rows per frame the first time.
+## The whole island on one screen (J), drawn like an old surveyor's chart: muted parchment colours, hillshade lit from the
+## north-west, contour lines, an inked coast with shallow water and ripple lines, paper grain and a vignette. Settlements and
+## sites are badges with a silhouette glyph; names are placed greedily so they never overlap, with a paper-coloured halo.
+## Dashed danger rings, cased roads, a compass rose, a scale bar and a pulsing player arrow. The wheel zooms toward the
+## cursor, dragging pans, Space centres on you. The picture is charted a few rows per frame the first time it opens.
+## Techniques: ArcGIS hillshade (zenith 45°, azimuth 315°), cartographic label hierarchy (Axis Maps, Ordnance Survey),
+## greedy candidate-position label placement.
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
+const GrassField = preload("res://scripts/client/grass_field.gd")
 
-const PIXELS := 256
+const PIXELS := 384
 const SPAN := WorldGen.WORLD_RADIUS * 2.0 + 200.0
+const ZOOMS := [1.0, 1.6, 2.6, 4.0]
+const SAMPLE_ROWS_PER_FRAME := 8
+const PAINT_ROWS_PER_FRAME := 48
+
+# Parchment palette.
+const PAPER := Color("#eadcc0")
+const PAPER_DARK := Color("#d9cba8")
+const INK := Color("#2b2418")
+const INK_SOFT := Color("#3b3428")
+const BIOME_COLORS := [Color("#d8c9a0"), Color("#6e7f4e"), Color("#9ca36b"), Color("#7d8459"), Color("#8e8576")]
+const STEPPE := Color("#c2b07a")
+const SNOW := Color("#e8e4d8")
+const WATER_DEEP := Color("#3f5e6e")
+const WATER_SHALLOW := Color("#6e909a")
+const RIPPLE := Color("#dce6e0")
+const ROAD_FILL := Color("#e3d3ae")
+const BIOME_IDS := {"beach": 0, "forest": 1, "plains": 2, "swamp": 3, "mountain": 4}
+const CONTOUR_STEP := 20.0
 const KIND_COLORS := {
-	"village": Color(1.0, 0.85, 0.3), "farm": Color(0.8, 0.9, 0.35), "camp": Color(0.95, 0.65, 0.35), "depot": Color(0.7, 0.75, 0.85),
-	"outpost": Color(0.4, 0.8, 1.0), "tower": Color(0.85, 0.85, 0.9), "mine": Color(0.75, 0.55, 0.4), "city": Color(0.95, 0.4, 0.4),
-	"bunker": Color(0.75, 0.4, 0.95), "lighthouse": Color(1.0, 1.0, 0.7), "dock": Color(0.5, 0.75, 0.95),
-	"landmark": Color(0.5, 1.0, 0.85),
+	"village": Color("#e2b54c"), "farm": Color("#b9c46a"), "camp": Color("#d98f4e"), "depot": Color("#a8b0bd"),
+	"outpost": Color("#6fa8c8"), "tower": Color("#c9c4b4"), "mine": Color("#a8805e"), "city": Color("#c4584a"),
+	"bunker": Color("#9a6ab8"), "lighthouse": Color("#efe3a0"), "dock": Color("#7fa3c4"), "landmark": Color("#7cc4a8"),
 }
-const ZONE_COLORS := [Color(0.35, 0.85, 0.45, 0.5), Color(0.95, 0.82, 0.3, 0.5), Color(0.95, 0.45, 0.3, 0.5)]
+const RING_COLORS := [Color("#d9b44a"), Color("#d98a3a"), Color("#c0503a")]
+const RING_NAMES := ["SAFE LANDS", "BORDERLANDS", "WILDS"]
 
 var client
 var _image: Image
 var _texture: ImageTexture
-var _next_row := 0
+var _heights := PackedFloat32Array()
+var _biomes := PackedByteArray()
+var _lush := PackedFloat32Array()
+var _sampled_rows := 0
+var _painted_rows := 0
 var _sites: Array = []
 var _hover := {}
-var _panel_rect := Rect2()
+var _frame := Rect2()
+var _zoom_index := 0
+var _zoom := 1.0
+var _center := Vector2.ZERO
+var _dragging := false
+var _pulse := 0.0
+var _place_font: Font
+var _title_font: Font
 
 
 func setup(p_client) -> void:
 	client = p_client
 	visible = false
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_image = Image.create(PIXELS, PIXELS, false, Image.FORMAT_RGB8)
-	_image.fill(Color(0.05, 0.1, 0.2))
+	_image.fill(PAPER_DARK)
 	_texture = ImageTexture.create_from_image(_image)
+	_heights.resize(PIXELS * PIXELS)
+	_biomes.resize(PIXELS * PIXELS)
+	_lush.resize(PIXELS * PIXELS)
+	var serif := SystemFont.new()
+	serif.font_names = PackedStringArray(["Georgia", "Palatino", "Book Antiqua", "Times New Roman", "Liberation Serif", "serif"])
+	serif.font_weight = 600
+	_place_font = serif
+	var title := SystemFont.new()
+	title.font_names = serif.font_names
+	title.font_weight = 700
+	_title_font = title
 
 
 func toggle() -> void:
 	visible = not visible
-	if visible and _sites.is_empty():
-		for rx in range(-14, 14):
-			for rz in range(-14, 14):
-				_sites.append_array(client.world.poi.sites_in_region(rx, rz))
+	if visible:
+		if _sites.is_empty():
+			for rx in range(-14, 14):
+				for rz in range(-14, 14):
+					_sites.append_array(client.world.poi.sites_in_region(rx, rz))
+		_zoom_index = 0
+		_zoom = 1.0
+		_center = Vector2.ZERO
+		grab_focus()
 
 
-func _process(_delta: float) -> void:
+# --- Charting the island --------------------------------------------------------------------------------------------
+
+func _process(delta: float) -> void:
 	if not visible:
 		return
-	# Paint the terrain a few rows per frame.
-	var rows := 12
-	while rows > 0 and _next_row < PIXELS:
-		_paint_row(_next_row)
-		_next_row += 1
+	_pulse = fmod(_pulse + delta / 1.2, 1.0)
+	_zoom = lerpf(_zoom, float(ZOOMS[_zoom_index]), 1.0 - exp(-12.0 * delta))
+	_clamp_center()
+	var world = client.world
+	var step: float = SPAN / float(PIXELS)
+	var rows := SAMPLE_ROWS_PER_FRAME
+	while rows > 0 and _sampled_rows < PIXELS:
+		var row := _sampled_rows
+		for column in PIXELS:
+			var x: float = -SPAN * 0.5 + (float(column) + 0.5) * step
+			var z: float = -SPAN * 0.5 + (float(row) + 0.5) * step
+			var index := row * PIXELS + column
+			_heights[index] = world.height_at(x, z)
+			_biomes[index] = int(BIOME_IDS.get(world.biome_at(x, z), 2))
+			_lush[index] = GrassField.lushness(x, z)
+		_sampled_rows += 1
 		rows -= 1
-		if _next_row % 12 == 0 or _next_row == PIXELS:
-			_texture.update(_image)
+	if _sampled_rows == PIXELS and _painted_rows < PIXELS:
+		var painted := 0
+		while painted < PAINT_ROWS_PER_FRAME and _painted_rows < PIXELS:
+			_paint_row(_painted_rows)
+			_painted_rows += 1
+			painted += 1
+		_texture.update(_image)
 	queue_redraw()
 
 
+func _h(x: int, y: int) -> float:
+	return _heights[clampi(y, 0, PIXELS - 1) * PIXELS + clampi(x, 0, PIXELS - 1)]
+
+
+func _is_water(x: int, y: int) -> bool:
+	return _h(x, y) < Defs.WATER_LEVEL - 0.4
+
+
+## Pixels from this water pixel to the nearest land (up to 7), sampled along eight directions.
+func _shore_distance(x: int, y: int) -> int:
+	for radius in range(1, 8):
+		for direction in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 1), Vector2i(-1, 1), Vector2i(1, -1), Vector2i(-1, -1)]:
+			if not _is_water(x + direction.x * radius, y + direction.y * radius):
+				return radius
+	return 99
+
+
 func _paint_row(row: int) -> void:
-	var world = client.world
-	var step: float = SPAN / float(PIXELS)
+	var cell: float = SPAN / float(PIXELS)
+	var zenith := deg_to_rad(45.0)
+	var azimuth := deg_to_rad(135.0) # 315° compass (north-west) in maths angles.
 	for column in PIXELS:
-		var x: float = -SPAN * 0.5 + (float(column) + 0.5) * step
-		var z: float = -SPAN * 0.5 + (float(row) + 0.5) * step
-		var height: float = world.height_at(x, z)
+		var h: float = _h(column, row)
 		var color: Color
-		if height < Defs.WATER_LEVEL - 0.4:
-			color = Color(0.06, 0.2, 0.38).lerp(Color(0.12, 0.42, 0.6), clampf((height + 20.0) / 20.0, 0.0, 1.0))
+		if h < Defs.WATER_LEVEL - 0.4:
+			var shore: int = _shore_distance(column, row)
+			var depth: float = clampf(-h / 40.0, 0.0, 1.0)
+			color = WATER_SHALLOW.lerp(WATER_DEEP, clampf(maxf(depth, float(shore) / 7.0), 0.0, 1.0))
+			if shore == 3:
+				color = color.lerp(RIPPLE, 0.35)
+			elif shore == 6:
+				color = color.lerp(RIPPLE, 0.2)
 		else:
-			match world.biome_at(x, z):
-				"beach": color = Color(0.8, 0.74, 0.52)
-				"forest": color = Color(0.14, 0.38, 0.17)
-				"plains": color = Color(0.4, 0.55, 0.22)
-				"swamp": color = Color(0.3, 0.38, 0.2)
-				"mountain": color = Color(0.5, 0.48, 0.46).lerp(Color(0.95, 0.96, 1.0), clampf((height - 60.0) / 60.0, 0.0, 1.0))
-				_: color = Color(0.4, 0.5, 0.25)
-			# Light from the north-west: slopes facing it are brighter.
-			var shade: float = (world.height_at(x - step, z - step) - world.height_at(x + step, z + step)) * 0.012
-			color = color.lightened(clampf(shade, -0.3, 0.3)) if shade > 0.0 else color.darkened(clampf(-shade, 0.0, 0.4))
+			var biome: int = _biomes[row * PIXELS + column]
+			color = BIOME_COLORS[biome]
+			if biome == 2:
+				color = color.lerp(STEPPE, clampf(0.75 - _lush[row * PIXELS + column] * 1.1, 0.0, 0.8))
+			if h > 90.0:
+				color = color.lerp(SNOW, clampf((h - 90.0) / 30.0, 0.0, 1.0))
+			# Hillshade (Horn-style central differences), exaggerated ×3 so hills read on a small map.
+			var dzdx: float = (_h(column + 1, row) - _h(column - 1, row)) / (2.0 * cell)
+			var dzdy: float = (_h(column, row + 1) - _h(column, row - 1)) / (2.0 * cell)
+			var slope: float = atan(3.0 * sqrt(dzdx * dzdx + dzdy * dzdy))
+			var aspect: float = atan2(dzdy, -dzdx)
+			var shade: float = maxf(cos(zenith) * cos(slope) + sin(zenith) * sin(slope) * cos(azimuth - aspect), 0.0)
+			color = color.lerp(color * lerpf(0.55, 1.15, shade), 0.65)
+			# Contour lines every 20 m, a stronger index contour every 100 m.
+			var band: int = floori(h / CONTOUR_STEP)
+			if band != floori(_h(column + 1, row) / CONTOUR_STEP) or band != floori(_h(column, row + 1) / CONTOUR_STEP):
+				color = color.lerp(INK_SOFT, 0.3 if posmod(band, 5) == 0 else 0.15)
+			# Inked coastline.
+			if _is_water(column + 1, row) or _is_water(column - 1, row) or _is_water(column, row + 1) or _is_water(column, row - 1):
+				color = color.lerp(INK_SOFT, 0.8)
+		# Paper: a little desaturated, toned toward parchment, with grain.
+		var grey: float = color.get_luminance()
+		color = Color(grey, grey, grey).lerp(color, 0.82)
+		color = color.lerp(color * PAPER, 0.25)
+		var grain: float = float(WorldGen.mix(column, row, 5, 9) % 1000) / 1000.0
+		color = color * (0.96 + grain * 0.08)
 		_image.set_pixel(column, row, color)
 
 
-func _to_screen(x: float, z: float) -> Vector2:
-	return _panel_rect.position + Vector2((x + SPAN * 0.5) / SPAN, (z + SPAN * 0.5) / SPAN) * _panel_rect.size
+# --- View -----------------------------------------------------------------------------------------------------------
 
+func _scale() -> float:
+	return _frame.size.x / (SPAN / _zoom)
+
+
+func _to_screen(x: float, z: float) -> Vector2:
+	return _frame.get_center() + (Vector2(x, z) - _center) * _scale()
+
+
+func _to_world(point: Vector2) -> Vector2:
+	return _center + (point - _frame.get_center()) / _scale()
+
+
+func _clamp_center() -> void:
+	var half: float = SPAN / _zoom * 0.5
+	_center.x = clampf(_center.x, -SPAN * 0.5 + half, SPAN * 0.5 - half)
+	_center.y = clampf(_center.y, -SPAN * 0.5 + half, SPAN * 0.5 - half)
+
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var button := event as InputEventMouseButton
+		if button.pressed and (button.button_index == MOUSE_BUTTON_WHEEL_UP or button.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+			var anchor: Vector2 = _to_world(button.position)
+			_zoom_index = clampi(_zoom_index + (1 if button.button_index == MOUSE_BUTTON_WHEEL_UP else -1), 0, ZOOMS.size() - 1)
+			_zoom = float(ZOOMS[_zoom_index])
+			# Zoom toward the cursor: keep the point under it in place.
+			_center = anchor - (button.position - _frame.get_center()) / _scale()
+			_clamp_center()
+			accept_event()
+		elif button.button_index == MOUSE_BUTTON_LEFT:
+			_dragging = button.pressed
+			accept_event()
+	elif event is InputEventMouseMotion and _dragging:
+		_center -= (event as InputEventMouseMotion).relative / _scale()
+		_clamp_center()
+		accept_event()
+	elif event is InputEventKey and (event as InputEventKey).pressed and (event as InputEventKey).keycode == KEY_SPACE:
+		if client.you.has("x"):
+			_center = Vector2(float(client.you["x"]), float(client.you["z"]))
+			_zoom_index = maxi(_zoom_index, 2)
+			_zoom = float(ZOOMS[_zoom_index])
+			_clamp_center()
+		accept_event()
+
+
+# --- Drawing --------------------------------------------------------------------------------------------------------
 
 func _draw() -> void:
 	var view := get_viewport_rect().size
-	draw_rect(Rect2(Vector2.ZERO, view), Color(0.02, 0.03, 0.05, 0.88))
-	var side: float = minf(view.x - 60.0, view.y - 90.0)
-	_panel_rect = Rect2(Vector2((view.x - side) * 0.5, 62.0), Vector2(side, side))
-	draw_texture_rect(_texture, _panel_rect, false)
-	draw_rect(_panel_rect, Color(0.95, 0.78, 0.35, 0.8), false, 2.0)
+	draw_rect(Rect2(Vector2.ZERO, view), Color(0.07, 0.06, 0.05, 0.94))
+	var side: float = minf(view.x - 300.0, view.y - 110.0)
+	_frame = Rect2(Vector2(maxf(250.0, (view.x - side) * 0.5 + 60.0), 70.0), Vector2(side, side))
 	var font: Font = ThemeDB.fallback_font
-	# Danger rings.
-	for i in Defs.ZONE_RADII.size():
-		var radius: float = float(Defs.ZONE_RADII[i]) / SPAN * _panel_rect.size.x
-		draw_arc(_to_screen(0.0, 0.0), radius, 0.0, TAU, 96, ZONE_COLORS[i], 1.5)
-	# Roads.
-	if client.world.roads != null:
-		for road in client.world.roads.all_roads():
-			var points: PackedVector2Array = road["points"]
-			var line := PackedVector2Array()
-			for i in range(0, points.size(), 2):
-				line.append(_to_screen(points[i].x, points[i].y))
-			line.append(_to_screen(points[points.size() - 1].x, points[points.size() - 1].y))
-			draw_polyline(line, Color(0.85, 0.72, 0.5, 0.55), 1.2, true)
-	var edge: float = WorldGen.WORLD_RADIUS / SPAN * _panel_rect.size.x
-	draw_arc(_to_screen(0.0, 0.0), edge, 0.0, TAU, 128, Color(1, 1, 1, 0.25), 1.0)
-	# Seeded site positions are public; personal visited marks are not.
+	# The visible part of the chart.
+	var world_half: float = SPAN / _zoom * 0.5
+	var pixel_rect := Rect2((_center - Vector2.ONE * world_half + Vector2.ONE * SPAN * 0.5) / SPAN * float(PIXELS), Vector2.ONE * world_half * 2.0 / SPAN * float(PIXELS))
+	draw_texture_rect_region(_texture, _frame, pixel_rect)
+	_draw_rings(font)
+	_draw_roads()
 	var visited: Dictionary = {}
 	for discovered_id in client.you.get("discovered_site_ids", []):
 		visited[int(discovered_id)] = true
-	# Sites.
+	_draw_sites_and_labels(visited, font)
+	_draw_player()
+	# Mask everything that spilled over the edge of the chart, then the frame, vignette and furniture.
+	var dark := Color(0.07, 0.06, 0.05, 1.0)
+	draw_rect(Rect2(0, 0, view.x, _frame.position.y), dark)
+	draw_rect(Rect2(0, _frame.end.y, view.x, view.y - _frame.end.y), dark)
+	draw_rect(Rect2(0, _frame.position.y, _frame.position.x, _frame.size.y), dark)
+	draw_rect(Rect2(_frame.end.x, _frame.position.y, view.x - _frame.end.x, _frame.size.y), dark)
+	_draw_vignette()
+	draw_rect(_frame.grow(6.0), Color(0.79, 0.64, 0.36, 0.9), false, 2.0)
+	draw_rect(_frame.grow(2.0), Color(0.16, 0.13, 0.09, 0.9), false, 1.0)
+	_draw_compass(_frame.position + Vector2(_frame.size.x - 52.0, 52.0))
+	_draw_scale_bar(Vector2(_frame.position.x + 18.0, _frame.end.y - 22.0), font)
+	_draw_legend(visited, font)
+	if _painted_rows < PIXELS:
+		var progress: float = (float(_sampled_rows) + float(_painted_rows)) / float(PIXELS * 2)
+		_halo_text(font, _frame.get_center() + Vector2(-90, 0), "Charting the island... %d%%" % int(progress * 100.0), 16, INK, PAPER)
+	if not _hover.is_empty():
+		_draw_tooltip(visited, font)
+
+
+func _draw_vignette() -> void:
+	var steps := 10
+	for i in steps:
+		var inset: float = float(i) * 3.0
+		draw_rect(_frame.grow(-inset), Color(0.1, 0.07, 0.03, 0.05 * (1.0 - float(i) / float(steps))), false, 3.0)
+
+
+func _halo_text(font: Font, position: Vector2, text: String, size: int, color: Color, halo: Color, halo_size: int = 4) -> void:
+	draw_string_outline(font, position, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, halo_size, Color(halo.r, halo.g, halo.b, 0.85))
+	draw_string(font, position, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+
+
+func _draw_rings(font: Font) -> void:
+	var center: Vector2 = _to_screen(0.0, 0.0)
+	for i in Defs.ZONE_RADII.size():
+		var radius: float = float(Defs.ZONE_RADII[i]) * _scale()
+		var color: Color = RING_COLORS[i]
+		# Dashed: 8 px dashes, 6 px gaps.
+		var circumference: float = TAU * radius
+		var dashes: int = maxi(12, int(circumference / 14.0))
+		for d in dashes:
+			var a0: float = float(d) / float(dashes) * TAU
+			var a1: float = a0 + TAU / float(dashes) * (8.0 / 14.0)
+			draw_arc(center, radius, a0, a1, 4, Color(color.r, color.g, color.b, 0.85), 2.0, true)
+		var label_at: Vector2 = center + Vector2(0, -radius - 6.0)
+		var width: float = font.get_string_size(RING_NAMES[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+		_halo_text(font, label_at - Vector2(width * 0.5, 0), RING_NAMES[i], 11, color.darkened(0.45), PAPER, 3)
+
+
+func _draw_roads() -> void:
+	if client.world.roads == null:
+		return
+	for road in client.world.roads.all_roads():
+		var points: PackedVector2Array = road["points"]
+		var line := PackedVector2Array()
+		for i in range(0, points.size(), 2):
+			line.append(_to_screen(points[i].x, points[i].y))
+		line.append(_to_screen(points[points.size() - 1].x, points[points.size() - 1].y))
+		var width: float = clampf(1.2 * _zoom, 1.2, 3.0)
+		draw_polyline(line, Color(INK_SOFT.r, INK_SOFT.g, INK_SOFT.b, 0.55), width + 1.6, true)
+		draw_polyline(line, ROAD_FILL, width, true)
+
+
+## Badges first (they reserve their space), then names in priority order, each at the first free spot around its badge.
+func _draw_sites_and_labels(visited: Dictionary, font: Font) -> void:
 	var mouse: Vector2 = get_local_mouse_position()
 	_hover = {}
-	var best := 14.0
+	var best := 16.0
+	var taken: Array[Rect2] = []
+	var labels: Array = [] # [priority, site, spot, radius]
+	var inside := _frame.grow(-4.0)
 	for site in _sites:
 		var spot: Vector2 = _to_screen(float(site["x"]), float(site["z"]))
-		var color: Color = KIND_COLORS.get(site["kind"], Color.WHITE)
-		var size := 5.0 if bool(site["station"]) else 3.2
-		if site["kind"] == "landmark":
-			size = 3.6
-			draw_colored_polygon(PackedVector2Array([spot + Vector2(0, -size - 1.5), spot + Vector2(size + 1.5, 0), spot + Vector2(0, size + 1.5), spot + Vector2(-size - 1.5, 0)]), Color(0, 0, 0, 0.7))
-			draw_colored_polygon(PackedVector2Array([spot + Vector2(0, -size), spot + Vector2(size, 0), spot + Vector2(0, size), spot + Vector2(-size, 0)]), color)
-			var landmark_gap: float = spot.distance_to(mouse)
-			if landmark_gap < best:
-				best = landmark_gap
-				_hover = site
+		if not inside.has_point(spot):
 			continue
-		if site["kind"] == "city":
-			size = 4.2
-		if bool(site["station"]):
-			draw_rect(Rect2(spot - Vector2.ONE * (size + 1.5), Vector2.ONE * (size + 1.5) * 2.0), Color(0, 0, 0, 0.7))
-		draw_rect(Rect2(spot - Vector2.ONE * size, Vector2.ONE * size * 2.0), color)
-		if visited.has(int(site["id"])):
-			draw_arc(spot, size + 3.0, 0.0, TAU, 16, Color(0.98, 0.92, 0.40), 1.8)
-		if bool(site["station"]) and (site["kind"] == "village" or site["kind"] == "outpost"):
-			draw_string_outline(font, spot + Vector2(8, 4), str(site["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, 4, Color(0, 0, 0, 0.9))
-			draw_string(font, spot + Vector2(8, 4), str(site["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.95))
+		var kind: String = site["kind"]
+		var major: bool = bool(site["station"]) or kind == "city"
+		# Detail grows with zoom: from afar only settlements, forts and ruined cities are badges, the rest small dots.
+		var radius: float = 9.5 if major else (3.2 if _zoom < 1.5 else (6.5 if _zoom < 2.5 else 8.0))
+		var seen: bool = visited.has(int(site["id"]))
+		if not major and _zoom < 1.5:
+			var dot: Color = KIND_COLORS.get(kind, Color.WHITE)
+			draw_circle(spot, radius + 1.0, Color("#1e1a14", 0.8))
+			draw_circle(spot, radius, dot.lerp(PAPER_DARK, 0.0 if seen else 0.25))
+		else:
+			_draw_badge(spot, radius, kind, seen, major or _zoom >= 2.5)
+		if major or _zoom >= 1.5:
+			taken.append(Rect2(spot - Vector2.ONE * radius, Vector2.ONE * radius * 2.0)) # Names may cover the small dots.
 		var gap: float = spot.distance_to(mouse)
 		if gap < best:
 			best = gap
 			_hover = site
-	# The hub, the siege outposts and the player.
+		if major or _zoom >= 2.6:
+			var distance_to_you: float = Vector2(float(site["x"]) - float(client.you.get("x", 0.0)), float(site["z"]) - float(client.you.get("z", 0.0))).length()
+			labels.append([(0 if major else 1) * 100000.0 + (0.0 if seen else 50000.0) + distance_to_you, site, spot, radius])
+	# The hub and the player keep their space too.
 	var hub: Vector2 = _to_screen(0.0, 0.0)
-	draw_circle(hub, 7.0, Color(0, 0, 0, 0.8))
-	draw_circle(hub, 5.0, Color(1.0, 0.9, 0.4))
-	draw_string_outline(font, hub + Vector2(9, 4), "HUB", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 4, Color(0, 0, 0, 0.9))
-	draw_string(font, hub + Vector2(9, 4), "HUB", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 0.95, 0.6))
-	for post in client.outposts:
-		var flag: Vector2 = _to_screen(float(post["x"]), float(post["z"]))
-		draw_colored_polygon(PackedVector2Array([flag + Vector2(0, -9), flag + Vector2(8, -5), flag + Vector2(0, -1)]), Color(1.0, 0.45, 0.35))
-		draw_line(flag, flag + Vector2(0, -9), Color.WHITE, 1.5)
+	_draw_hub(hub)
+	taken.append(Rect2(hub - Vector2.ONE * 12.0, Vector2.ONE * 24.0))
+	labels.append([-1.0, {"name": "Haven", "kind": "hub"}, hub, 12.0])
 	if client.you.has("x"):
 		var me: Vector2 = _to_screen(float(client.you["x"]), float(client.you["z"]))
-		var heading: Vector2 = Vector2(sin(client.yaw), cos(client.yaw))
-		var side_vec := Vector2(-heading.y, heading.x)
-		draw_colored_polygon(PackedVector2Array([me + heading * 9.0, me - heading * 6.0 + side_vec * 5.5, me - heading * 3.0, me - heading * 6.0 - side_vec * 5.5]), Color(0.3, 0.8, 1.0))
-	# Title, legend and the hovered place.
-	draw_string_outline(font, Vector2(30, 36), "THE ISLAND   %d places · %d visited   (J closes)" % [_sites.size(), int(client.you.get("discovered_count", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 6, Color(0, 0, 0, 0.9))
-	draw_string(font, Vector2(30, 36), "THE ISLAND   %d places · %d visited   (J closes)" % [_sites.size(), int(client.you.get("discovered_count", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.98, 0.85, 0.45))
-	var legend_y := 90.0
+		taken.append(Rect2(me - Vector2.ONE * 12.0, Vector2.ONE * 24.0))
+	labels.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) < float(b[0]))
+	for entry in labels:
+		var site: Dictionary = entry[1]
+		var spot: Vector2 = entry[2]
+		var radius: float = entry[3]
+		var tier: int = 0 if site["kind"] == "hub" else (1 if (site.has("station") and (bool(site["station"]) or site["kind"] == "city")) else 2)
+		var size: int = [18, 13 if _zoom < 1.5 else 15, 12][tier]
+		var text: String = str(site["name"])
+		if tier == 0:
+			text = text.to_upper()
+		var text_size: Vector2 = _place_font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size)
+		var pad: float = radius + 4.0
+		# East first, then the other seven directions.
+		var candidates := [
+			Vector2(pad, text_size.y * 0.3), Vector2(pad * 0.8, -pad * 0.6), Vector2(pad * 0.8, pad + text_size.y * 0.5),
+			Vector2(-pad - text_size.x, text_size.y * 0.3), Vector2(-text_size.x * 0.5, -pad - 2.0),
+			Vector2(-text_size.x * 0.5, pad + text_size.y * 0.8), Vector2(-pad * 0.8 - text_size.x, -pad * 0.6),
+			Vector2(-pad * 0.8 - text_size.x, pad + text_size.y * 0.5)]
+		for offset in candidates:
+			var baseline: Vector2 = spot + offset
+			var box := Rect2(baseline - Vector2(0, text_size.y * 0.78), text_size).grow(2.0)
+			if not inside.encloses(box):
+				continue
+			var free := true
+			for other in taken:
+				if other.intersects(box):
+					free = false
+					break
+			if free:
+				taken.append(box)
+				var ink: Color = INK if tier > 0 else Color("#5a3d12")
+				draw_string_outline(_place_font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, 4, Color(PAPER.r, PAPER.g, PAPER.b, 0.85))
+				draw_string(_place_font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, ink)
+				break
+	# Siege outposts.
+	for post in client.outposts:
+		var flag: Vector2 = _to_screen(float(post["x"]), float(post["z"]))
+		draw_line(flag, flag + Vector2(0, -12), INK, 2.0)
+		draw_colored_polygon(PackedVector2Array([flag + Vector2(0, -12), flag + Vector2(10, -8), flag + Vector2(0, -4)]), Color("#c0503a"))
+
+
+func _draw_badge(spot: Vector2, radius: float, kind: String, seen: bool, with_glyph: bool) -> void:
+	var color: Color = KIND_COLORS.get(kind, Color.WHITE)
+	if not seen:
+		color = color.lerp(PAPER_DARK, 0.35)
+	draw_circle(spot + Vector2(1.0, 1.5), radius + 1.5, Color(0, 0, 0, 0.4))
+	draw_circle(spot, radius + 1.5, Color("#1e1a14"))
+	draw_circle(spot, radius, color)
+	if seen:
+		draw_arc(spot, radius + 3.5, 0.0, TAU, 20, Color("#f4d77a"), 1.6, true)
+	if with_glyph:
+		_glyph(kind, spot, radius * 0.62, Color("#1e1a14"))
+
+
+## One silhouette per kind, so places tell apart by shape as well as colour.
+func _glyph(kind: String, c: Vector2, s: float, ink: Color) -> void:
+	match kind:
+		"village":
+			draw_colored_polygon(PackedVector2Array([c + Vector2(-s, 0), c + Vector2(0, -s), c + Vector2(s, 0)]), ink)
+			draw_rect(Rect2(c + Vector2(-s * 0.7, 0), Vector2(s * 1.4, s * 0.85)), ink)
+		"farm":
+			for i in 3:
+				var y: float = -s * 0.6 + float(i) * s * 0.6
+				draw_line(c + Vector2(-s * 0.85, y), c + Vector2(s * 0.85, y), ink, 1.6)
+		"camp":
+			draw_colored_polygon(PackedVector2Array([c + Vector2(-s, s * 0.8), c + Vector2(0, -s), c + Vector2(s, s * 0.8)]), ink)
+		"depot":
+			draw_rect(Rect2(c - Vector2.ONE * s * 0.8, Vector2.ONE * s * 1.6), ink, false, 1.6)
+			draw_line(c - Vector2.ONE * s * 0.8, c + Vector2.ONE * s * 0.8, ink, 1.4)
+		"outpost":
+			draw_rect(Rect2(c + Vector2(-s * 0.9, -s * 0.3), Vector2(s * 1.8, s * 1.1)), ink)
+			for i in 3:
+				draw_rect(Rect2(c + Vector2(-s * 0.9 + float(i) * s * 0.7, -s * 0.8), Vector2(s * 0.4, s * 0.5)), ink)
+		"tower":
+			draw_rect(Rect2(c + Vector2(-s * 0.3, -s * 0.5), Vector2(s * 0.6, s * 1.4)), ink)
+			draw_rect(Rect2(c + Vector2(-s * 0.6, -s), Vector2(s * 1.2, s * 0.5)), ink)
+		"mine":
+			draw_line(c + Vector2(-s * 0.8, s * 0.8), c + Vector2(s * 0.5, -s * 0.5), ink, 2.0)
+			draw_arc(c + Vector2(s * 0.2, -s * 0.2), s * 0.8, -PI * 0.95, -PI * 0.05, 8, ink, 1.8)
+		"city":
+			draw_rect(Rect2(c + Vector2(-s * 0.85, -s * 0.2), Vector2(s * 0.5, s * 1.1)), ink)
+			draw_rect(Rect2(c + Vector2(s * 0.25, -s * 0.85), Vector2(s * 0.5, s * 1.75)), ink)
+			draw_line(c + Vector2(-s, s * 0.9), c + Vector2(s, s * 0.9), ink, 1.6)
+		"bunker":
+			draw_arc(c + Vector2(0, s * 0.5), s * 0.9, PI, TAU, 10, ink, 2.0)
+			draw_line(c + Vector2(-s, s * 0.5), c + Vector2(s, s * 0.5), ink, 2.0)
+			draw_line(c + Vector2(-s * 0.35, 0), c + Vector2(s * 0.35, 0), ink, 1.6)
+		"lighthouse":
+			draw_colored_polygon(PackedVector2Array([c + Vector2(-s * 0.5, s), c + Vector2(-s * 0.25, -s * 0.5), c + Vector2(s * 0.25, -s * 0.5), c + Vector2(s * 0.5, s)]), ink)
+			draw_circle(c + Vector2(0, -s * 0.8), s * 0.3, ink)
+		"dock":
+			draw_line(c + Vector2(0, -s), c + Vector2(0, s * 0.8), ink, 1.8)
+			draw_line(c + Vector2(-s * 0.5, -s * 0.45), c + Vector2(s * 0.5, -s * 0.45), ink, 1.6)
+			draw_arc(c + Vector2(0, s * 0.1), s * 0.75, 0.15, PI - 0.15, 8, ink, 1.8)
+		"landmark":
+			var points := PackedVector2Array()
+			for i in 8:
+				var r: float = s if i % 2 == 0 else s * 0.4
+				points.append(c + Vector2.from_angle(float(i) * PI / 4.0 - PI * 0.5) * r)
+			draw_colored_polygon(points, ink)
+		_:
+			draw_circle(c, s * 0.4, ink)
+
+
+func _draw_hub(spot: Vector2) -> void:
+	draw_circle(spot + Vector2(1.0, 1.5), 13.0, Color(0, 0, 0, 0.4))
+	draw_circle(spot, 13.0, Color("#1e1a14"))
+	draw_circle(spot, 11.0, Color("#f0c55a"))
+	var points := PackedVector2Array()
+	for i in 10:
+		var r: float = 7.5 if i % 2 == 0 else 3.2
+		points.append(spot + Vector2.from_angle(float(i) * PI / 5.0 - PI * 0.5) * r)
+	draw_colored_polygon(points, Color("#1e1a14"))
+
+
+func _draw_player() -> void:
+	if not client.you.has("x"):
+		return
+	var me: Vector2 = _to_screen(float(client.you["x"]), float(client.you["z"]))
+	if not _frame.has_point(me):
+		return
+	# A slow pulse so you find yourself at a glance.
+	draw_arc(me, lerpf(10.0, 22.0, _pulse), 0.0, TAU, 28, Color(1, 1, 1, 0.55 * (1.0 - _pulse)), 2.0, true)
+	var heading: Vector2 = Vector2(sin(client.yaw), cos(client.yaw))
+	var side_vec := Vector2(-heading.y, heading.x)
+	var arrow := PackedVector2Array([me + heading * 11.0, me - heading * 7.0 + side_vec * 7.0, me - heading * 3.5, me - heading * 7.0 - side_vec * 7.0])
+	var outline := PackedVector2Array()
+	for point in arrow:
+		outline.append(me + (point - me) * 1.3)
+	draw_colored_polygon(outline, Color("#1e1a14"))
+	draw_colored_polygon(arrow, Color.WHITE)
+
+
+func _draw_compass(center: Vector2) -> void:
+	draw_circle(center, 30.0, Color(PAPER.r, PAPER.g, PAPER.b, 0.55))
+	draw_arc(center, 30.0, 0.0, TAU, 36, Color(INK.r, INK.g, INK.b, 0.6), 1.2, true)
+	for i in 4:
+		var direction := Vector2.from_angle(float(i) * PI * 0.5 - PI * 0.5)
+		var side := Vector2(-direction.y, direction.x)
+		var length: float = 24.0 if i == 0 else 17.0
+		var fill: Color = Color("#8a3a2a") if i == 0 else Color(INK.r, INK.g, INK.b, 0.75)
+		draw_colored_polygon(PackedVector2Array([center + direction * length, center + side * 4.0, center - side * 4.0]), fill)
+	draw_circle(center, 2.5, INK)
+	_halo_text(_title_font, center + Vector2(-6, -34), "N", 15, Color("#8a3a2a"), PAPER, 3)
+
+
+func _draw_scale_bar(origin: Vector2, font: Font) -> void:
+	# A round number of metres about 120 px long.
+	var metres_per_px: float = 1.0 / _scale()
+	var target: float = 120.0 * metres_per_px
+	var nice := 50.0
+	for candidate in [50.0, 100.0, 200.0, 250.0, 500.0, 1000.0, 2000.0]:
+		if candidate <= target:
+			nice = candidate
+	var length: float = nice / metres_per_px
+	draw_rect(Rect2(origin + Vector2(-6, -18), Vector2(length + 12, 30)), Color(PAPER.r, PAPER.g, PAPER.b, 0.6))
+	for i in 4:
+		var segment := Rect2(origin + Vector2(length * float(i) / 4.0, 0), Vector2(length / 4.0, 5))
+		draw_rect(segment, INK if i % 2 == 0 else PAPER)
+	draw_rect(Rect2(origin, Vector2(length, 5)), INK, false, 1.0)
+	var caption: String = ("%d km" % int(nice / 1000.0)) if nice >= 1000.0 else ("%d m" % int(nice))
+	draw_string(font, origin + Vector2(0, -5), "0", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, INK)
+	draw_string(font, origin + Vector2(length - 16.0, -5), caption, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, INK)
+
+
+func _draw_legend(visited: Dictionary, font: Font) -> void:
+	var panel := Rect2(Vector2(24, 76), Vector2(200, 46 + KIND_COLORS.size() * 24 + 92))
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color("#15130f", 0.9)
+	style.set_corner_radius_all(6)
+	style.set_border_width_all(1)
+	style.border_color = Color("#6b5a3a")
+	style.shadow_color = Color(0, 0, 0, 0.45)
+	style.shadow_size = 8
+	draw_style_box(style, panel)
+	draw_string(_title_font, Vector2(24, 44), "THE ISLAND", HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color("#c9a45c"))
+	draw_string(font, Vector2(26, 62), "%d places  ·  %d visited" % [_sites.size(), visited.size()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.8, 0.78, 0.72))
+	var y: float = panel.position.y + 28.0
+	draw_string(font, Vector2(panel.position.x + 14, y - 6), "LEGEND", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c9a45c"))
+	y += 12.0
 	for kind in KIND_COLORS:
-		draw_rect(Rect2(Vector2(30, legend_y - 9.0), Vector2(10, 10)), KIND_COLORS[kind])
-		draw_string(font, Vector2(46, legend_y), str(WorldPoi.KINDS[kind]["title"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.9, 0.93, 1.0))
-		legend_y += 20.0
-	if _next_row < PIXELS:
-		draw_string(font, Vector2(30, legend_y + 10.0), "drawing the map %d%%" % int(100.0 * float(_next_row) / float(PIXELS)), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.6))
-	if not _hover.is_empty():
-		var distance: float = Vector2(float(_hover["x"]) - float(client.you.get("x", 0.0)), float(_hover["z"]) - float(client.you.get("z", 0.0))).length()
-		var lines: Array = [str(_hover["display"]), "%s zone   %s%s   %s" % [
-			str(Defs.ZONE_NAMES[int(_hover["zone"])]).capitalize(),
-			"workbench and trader   " if bool(_hover["station"]) else "",
-			"%d m away" % int(distance),
-			"VISITED" if visited.has(int(_hover["id"])) else "UNEXPLORED"]]
-		var market: Dictionary = RegionalTrade.offer_for_site(_hover)
-		var box := Rect2(mouse + Vector2(16, 12), Vector2(295, 64 if not market.is_empty() else 46))
-		draw_rect(box, Color(0.04, 0.05, 0.08, 0.95))
-		draw_rect(box, Color(0.95, 0.78, 0.35, 0.8), false, 1.5)
-		draw_string(font, box.position + Vector2(10, 19), lines[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
-		draw_string(font, box.position + Vector2(10, 38), lines[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.8, 0.85, 0.95))
-		if not market.is_empty():
-			draw_string(font, box.position + Vector2(10, 55),
-				"Trade demand: %s +%d%%" % [str(market["category"]).capitalize(),
-					int(market["premium_percent"])], HORIZONTAL_ALIGNMENT_LEFT, -1, 12,
-				Color(1.0, 0.9, 0.5))
+		_draw_badge(Vector2(panel.position.x + 24, y), 8.0, kind, true, true)
+		draw_string(font, Vector2(panel.position.x + 42, y + 5), str(WorldPoi.KINDS[kind]["title"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.9, 0.88, 0.82))
+		y += 24.0
+	y += 8.0
+	for line in ["Wheel  zoom", "Drag  pan", "Space  find yourself", "J  close"]:
+		var parts: PackedStringArray = line.split("  ")
+		draw_string(font, Vector2(panel.position.x + 14, y), parts[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c9a45c"))
+		draw_string(font, Vector2(panel.position.x + 70, y), parts[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.78, 0.76, 0.7))
+		y += 19.0
+
+
+func _draw_tooltip(visited: Dictionary, font: Font) -> void:
+	var mouse: Vector2 = get_local_mouse_position()
+	var distance: float = Vector2(float(_hover["x"]) - float(client.you.get("x", 0.0)), float(_hover["z"]) - float(client.you.get("z", 0.0))).length()
+	var zone: int = int(_hover["zone"])
+	var zone_colors := [Color("#5fbf6a"), Color("#d9b44a"), Color("#d9603a"), Color("#9a5ab8")]
+	var market: Dictionary = RegionalTrade.offer_for_site(_hover)
+	var height: float = 82.0 + (18.0 if not market.is_empty() else 0.0) + (18.0 if bool(_hover["station"]) else 0.0)
+	var box := Rect2(mouse + Vector2(14, 12), Vector2(250, height))
+	var view := get_viewport_rect().size
+	if box.end.x > view.x - 8.0:
+		box.position.x = mouse.x - 14.0 - box.size.x
+	if box.end.y > view.y - 8.0:
+		box.position.y = mouse.y - 12.0 - box.size.y
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color("#15130f", 0.95)
+	style.set_corner_radius_all(6)
+	style.set_border_width_all(1)
+	style.border_color = Color("#c9a45c", 0.8)
+	style.shadow_color = Color(0, 0, 0, 0.5)
+	style.shadow_size = 8
+	draw_style_box(style, box)
+	var x: float = box.position.x + 12.0
+	var y: float = box.position.y + 24.0
+	draw_string(_title_font, Vector2(x, y), str(_hover["display"]), HORIZONTAL_ALIGNMENT_LEFT, box.size.x - 24.0, 16, Color.WHITE)
+	y += 22.0
+	var chip_text: String = str(Defs.ZONE_NAMES[zone]).to_upper() + " ZONE"
+	var chip_width: float = font.get_string_size(chip_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 14.0
+	var chip := StyleBoxFlat.new()
+	chip.bg_color = Color(zone_colors[zone], 0.25)
+	chip.border_color = zone_colors[zone]
+	chip.set_border_width_all(1)
+	chip.set_corner_radius_all(8)
+	draw_style_box(chip, Rect2(Vector2(x, y - 12.0), Vector2(chip_width, 17.0)))
+	draw_string(font, Vector2(x + 7.0, y + 1.0), chip_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, zone_colors[zone].lightened(0.3))
+	var status: String = "visited" if visited.has(int(_hover["id"])) else "unexplored"
+	draw_string(font, Vector2(x + chip_width + 8.0, y + 1.0), "%d m  ·  %s" % [int(distance), status], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.8, 0.8, 0.76))
+	y += 22.0
+	if bool(_hover["station"]):
+		draw_string(font, Vector2(x, y), "Workbench and trader", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c9a45c"))
+		y += 18.0
+	if not market.is_empty():
+		draw_string(font, Vector2(x, y), "Trade demand: %s +%d%%" % [str(market["category"]).capitalize(), int(market["premium_percent"])], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.9, 0.5))

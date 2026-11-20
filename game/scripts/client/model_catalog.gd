@@ -138,13 +138,28 @@ const CRYSTALS := [
 	{"path": "loose/toon_style_-_crystal.glb", "node": "Crystal_002_Crystal_0", "kind": "height", "size": 1.6},
 ]
 const DECOR_EXTRA := [
-	{"path": "res://assets/models/polyhaven/baked/fallen_trunk.res", "kind": "length", "size": 5.0, "biomes": ["forest", "swamp"], "count": 1},
+	# What a thousand years leave on the ground: branches, sticks, bark, roots and old logs; stones in groups of every size.
+	# "scale": random size range; "group": how many smaller copies lie around the first one.
+	{"path": "res://assets/models/polyhaven/baked/branches.res", "kind": "length", "size": 1.6, "biomes": ["forest", "swamp", "plains"], "count": 10, "scale": [0.5, 1.5]},
+	{"path": "res://assets/models/polyhaven/baked/stick_1.res", "kind": "length", "size": 1.2, "biomes": ["forest", "plains", "swamp"], "count": 12, "scale": [0.4, 1.4], "group": 2},
+	{"path": "res://assets/models/polyhaven/baked/stick_2.res", "kind": "length", "size": 1.5, "biomes": ["forest", "swamp", "plains"], "count": 10, "scale": [0.5, 1.5]},
+	{"path": "res://assets/models/polyhaven/baked/bark_debris.res", "kind": "length", "size": 0.9, "biomes": ["forest", "swamp"], "count": 8, "scale": [0.6, 1.4]},
+	{"path": "res://assets/models/polyhaven/baked/old_log.res", "kind": "length", "size": 4.5, "biomes": ["forest", "swamp", "plains"], "count": 2, "scale": [0.7, 1.4]},
+	{"path": "res://assets/models/polyhaven/baked/roots.res", "kind": "length", "size": 2.0, "biomes": ["forest", "swamp"], "count": 3, "scale": [0.6, 1.4]},
+	{"path": "res://assets/models/polyhaven/baked/pine_roots.res", "kind": "length", "size": 1.6, "biomes": ["forest", "mountain"], "count": 3, "scale": [0.6, 1.4]},
+	{"path": "res://assets/models/polyhaven/baked/single_root.res", "kind": "length", "size": 1.2, "biomes": ["forest", "plains"], "count": 4, "scale": [0.6, 1.4]},
+	{"path": "res://assets/models/polyhaven/baked/boulder_group.res", "kind": "length", "size": 4.0, "biomes": ["plains", "mountain", "forest", "beach"], "count": 1, "scale": [0.6, 1.4]},
+	{"path": "res://assets/models/polyhaven/baked/rock_group.res", "kind": "length", "size": 2.2, "biomes": ["plains", "mountain", "forest", "beach", "swamp"], "count": 2, "scale": [0.5, 1.5]},
+	{"path": "res://assets/models/polyhaven/baked/stone_scatter.res", "kind": "length", "size": 1.5, "biomes": ["plains", "mountain", "forest", "beach", "swamp"], "count": 4, "scale": [0.6, 1.6]},
+	{"path": "res://assets/models/polyhaven/baked/boulder_05.res", "kind": "length", "size": 1.8, "biomes": ["plains", "mountain", "forest"], "count": 2, "scale": [0.5, 1.8], "group": 3},
+	{"path": "res://assets/models/polyhaven/baked/shore_rocks.res", "kind": "length", "size": 3.0, "biomes": ["beach"], "count": 3, "scale": [0.6, 1.5]},
+	{"path": "res://assets/models/polyhaven/baked/fallen_trunk.res", "kind": "length", "size": 5.0, "biomes": ["forest", "swamp", "plains"], "count": 2, "scale": [0.7, 1.3]},
 	{"path": "res://assets/models/polyhaven/baked/stump_2.res", "kind": "length", "size": 1.3, "biomes": ["forest", "plains"], "count": 2},
-	{"path": "res://assets/models/polyhaven/baked/rock_7.res", "kind": "length", "size": 1.2, "biomes": ["plains", "mountain", "beach"], "count": 3},
-	{"path": "res://assets/models/polyhaven/baked/rock_9.res", "kind": "length", "size": 0.9, "biomes": ["forest", "plains", "mountain"], "count": 3},
+	{"path": "res://assets/models/polyhaven/baked/rock_7.res", "kind": "length", "size": 1.1, "biomes": ["plains", "forest", "mountain", "beach"], "count": 7, "scale": [0.35, 1.9], "group": 2},
+	{"path": "res://assets/models/polyhaven/baked/rock_9.res", "kind": "length", "size": 0.8, "biomes": ["forest", "plains", "mountain", "swamp"], "count": 9, "scale": [0.3, 1.7], "group": 3},
 	{"path": "res://assets/models/polyhaven/baked/dead_trunk.res", "kind": "length", "size": 4.0, "biomes": ["forest", "swamp"], "count": 2},
 	{"path": "res://assets/models/polyhaven/baked/tree_stump.res", "kind": "length", "size": 1.5, "biomes": ["forest", "plains", "swamp"], "count": 3},
-	{"path": "res://assets/models/polyhaven/baked/mossy_rock_5.res", "kind": "length", "size": 1.6, "biomes": ["forest", "plains", "mountain", "beach"], "count": 4},
+	{"path": "res://assets/models/polyhaven/baked/mossy_rock_5.res", "kind": "length", "size": 1.4, "biomes": ["forest", "plains", "mountain", "beach"], "count": 6, "scale": [0.4, 1.8], "group": 2},
 	{"path": "loose/low_poly_tree_log_and_stump.glb", "node": "Object_7", "kind": "length", "size": 1.6, "biomes": ["forest", "swamp"], "count": 3},
 	{"path": "loose/low_poly_tree_log_and_stump.glb", "node": "Object_11", "kind": "length", "size": 1.6, "biomes": ["forest", "plains"], "count": 3},
 	{"path": "loose/the_ancient_mystic_stone.glb", "node": "LP_Stone_Main_0", "kind": "height", "size": 2.4, "biomes": ["forest", "plains", "mountain"], "count": 1},
@@ -288,7 +303,7 @@ static func _fit_mesh(source: Mesh, kind: String, size: float) -> Mesh:
 
 
 # Scanned rocks from Poly Haven, used before the stylised ones when present.
-const SCANNED_ROCKS := ["boulder_01", "boulder_02", "boulder_04", "rock_7", "rock_9", "mossy_rock_1", "mossy_rock_2", "mossy_rock_3", "mossy_rock_4", "mossy_rock_5", "mossy_rock_6"]
+const SCANNED_ROCKS := ["boulder_01", "boulder_02", "boulder_04", "mossy_rock_1", "mossy_rock_2", "mossy_rock_3", "mossy_rock_4", "mossy_rock_5", "mossy_rock_6"]
 
 
 static func scanned_rock(variant: int) -> Mesh:

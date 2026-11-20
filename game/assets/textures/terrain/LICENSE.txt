@@ -1,5 +1,4 @@
 Terrain textures from Poly Haven (https://polyhaven.com), CC0 1.0 Universal (public domain).
-lush = leafy_grass, dry = sparse_grass, forest = forest_leaves_02, swamp = brown_mud_leaves_01, road = brown_mud_dry,
-cliff = rock_face_03, mountain = aerial_rocks_02, sand = coast_sand_01, snow = snow_02.
-Diffuse maps at 1024 px, normal maps (OpenGL) shrunk to 512 px.
-asphalt = asphalt_04, concrete = damaged_concrete_floor (1k diffuse, normal maps shrunk to 512 px).
+lush = leafy_grass, dry = sparse_grass, forest = forest_leaves_02, swamp = brown_mud_leaves_01, road = grass_path_2,
+cliff = mossy_rock, mountain = aerial_grass_rock, sand = coast_sand_01, snow = snow_02, asphalt = asphalt_04,
+concrete = concrete_moss. Diffuse maps at 1024 px, normal maps (OpenGL) shrunk to 512 px.

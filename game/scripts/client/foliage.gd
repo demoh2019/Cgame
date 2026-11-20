@@ -11,7 +11,10 @@ uniform float sway = 0.12;
 uniform float height_ref = 4.0;
 uniform float scissor = 0.5;
 uniform bool cut_out = false;
+uniform bool instance_tinted = false; // Decor MultiMeshes carry a per-instance colour; other meshes may have dark vertex colours.
+varying vec3 instance_tint;
 void vertex() {
+	instance_tint = instance_tinted ? COLOR.rgb : vec3(1.0);
 	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	float k = clamp(VERTEX.y / height_ref, 0.0, 1.0);
 	k *= k;
@@ -21,7 +24,11 @@ void vertex() {
 }
 void fragment() {
 	vec4 t = texture(albedo_tex, UV) * albedo_color;
-	ALBEDO = t.rgb;
+	ALBEDO = t.rgb * instance_tint;
+	// Both sides of a blade are lit as if they faced the viewer: otherwise half the grass turns black.
+	if (!FRONT_FACING) {
+		NORMAL = -NORMAL;
+	}
 	ROUGHNESS = 0.9;
 	if (cut_out) {
 		ALPHA = t.a;
@@ -34,8 +41,9 @@ static var _shader: Shader
 static var _cache: Dictionary = {}
 
 
-## A swaying copy of `source` (cached by key). `sway` is the tip displacement in meters.
-static func swayed(source: Mesh, key: String, sway: float) -> Mesh:
+## A swaying copy of `source` (cached by key). `sway` is the tip displacement in meters. `tinted`: multiply by the
+## MultiMesh instance colour.
+static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false) -> Mesh:
 	if source == null:
 		return null
 	if _cache.has(key):
@@ -54,6 +62,7 @@ static func swayed(source: Mesh, key: String, sway: float) -> Mesh:
 			var material := ShaderMaterial.new()
 			material.shader = _shader
 			material.set_shader_parameter("sway", sway)
+			material.set_shader_parameter("instance_tinted", tinted)
 			material.set_shader_parameter("height_ref", height)
 			material.set_shader_parameter("albedo_color", standard.albedo_color)
 			if standard.albedo_texture != null:
