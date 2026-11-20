@@ -6,6 +6,7 @@ class_name WorldStreamer3D
 
 signal cell_loaded(coord: Vector2i, instance: Node3D)
 signal cell_unloaded(coord: Vector2i)
+signal cell_about_to_unload(coord: Vector2i, instance: Node3D)
 signal asset_load_failed(path: String, error: int)
 
 @export_range(4.0, 256.0, 1.0) var cell_size: float = 14.0
@@ -141,6 +142,8 @@ func _unload_cell(coord: Vector2i) -> void:
 	if not _active.has(coord):
 		return
 	var instance: Node3D = _active[coord]
+	# Let persistence and gameplay systems snapshot the live instance first.
+	cell_about_to_unload.emit(coord, instance)
 	_active.erase(coord)
 	if is_instance_valid(instance):
 		remove_child(instance)
