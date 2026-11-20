@@ -35,6 +35,12 @@ def normal(x: float, z: float) -> tuple[float, float, float]:
     return (-dx / length, 1.0 / length, -dz / length)
 
 
+def tile_sample(tile_x: int, tile_z: int, x: int, z: int) -> tuple[float, tuple[float, float, float]]:
+    world_x = float(tile_x * CELLS + x)
+    world_z = float(tile_z * CELLS + z)
+    return height(world_x, world_z), normal(world_x, world_z)
+
+
 def _index(x: int, z: int) -> int:
     return z * SAMPLES + x
 
@@ -69,14 +75,15 @@ class StreamedTerrainContracts(TestCase):
     def test_adjacent_tile_seam_heights_and_normals(self) -> None:
         # Left and right sides of adjacent tiles refer to identical global
         # coordinates. This covers negative origins and every shared vertex.
-        for x_origin in (-64, -32, 0, 32):
-            for z_origin in (-32, 0, 32):
-                for dz in range(SAMPLES):
-                    wz = float(z_origin + dz)
-                    left_height = height(float(x_origin + 32), wz)
-                    right_height = height(float(x_origin + 32), wz)
-                    self.assertEqual(left_height, right_height)
-                    self.assertEqual(normal(x_origin + 32, wz), normal(x_origin + 32, wz))
+        for cell_x in (-2, -1, 0, 1):
+            for cell_z in (-1, 0, 1):
+                for offset in range(SAMPLES):
+                    east_edge = tile_sample(cell_x, cell_z, CELLS, offset)
+                    west_edge = tile_sample(cell_x + 1, cell_z, 0, offset)
+                    self.assertEqual(east_edge, west_edge)
+                    south_edge = tile_sample(cell_x, cell_z, offset, CELLS)
+                    north_edge = tile_sample(cell_x, cell_z + 1, offset, 0)
+                    self.assertEqual(south_edge, north_edge)
 
     def test_lods_have_same_complete_outer_border(self) -> None:
         border = {
