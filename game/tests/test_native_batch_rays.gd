@@ -85,7 +85,11 @@ func run(t) -> void:
 	t.check(not source.contains("AudioServer.set_bus_volume_db(_sfx_bus,"),
 		"query batching cannot mute the global game sound bus")
 
-	t.current = "native API does not alter regular Godot physics semantics"
-	var supports_batch: bool = ClassDB.class_has_method("PhysicsDirectSpaceState3D", "intersect_rays")
-	t.check(supports_batch or not supports_batch,
-		"both native Cgame and ordinary Godot run the same portable audio test")
+	t.current = "portable probing keeps a working serial fallback"
+	var helper_source: String = (Spatial as Script).source_code
+	t.check(helper_source.contains('space.has_method("intersect_rays")'),
+		"native batch is selected through runtime API detection")
+	t.check(helper_source.contains('space.call("intersect_ray", ray)'),
+		"the original independent single-ray method remains the fallback")
+	t.check(helper_source.contains("queries.size() <= 32"),
+		"script-side batches respect the native hard limit before dispatch")
