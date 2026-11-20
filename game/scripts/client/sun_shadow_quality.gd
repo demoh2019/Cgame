@@ -40,7 +40,11 @@ static func apply(sun: DirectionalLight3D, level: int, rendering_method: String,
 	if sun == null:
 		return
 	var profile: Dictionary = settings(level, rendering_method)
-	sun.light_angular_distance = float(profile["angular_distance"])
+	var angular_size: float = float(profile["angular_distance"])
+	# The native PCSS filter now has shadow-texel-locked sample rotation.
+	# Re-applying the same quality should not reconfigure the sun RID.
+	if not is_equal_approx(sun.light_angular_distance, angular_size):
+		sun.light_angular_distance = angular_size
 	update_opacity(sun, daylight, sun_height, storm)
 
 
