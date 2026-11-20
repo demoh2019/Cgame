@@ -2240,22 +2240,29 @@ void MeshStorage::_multimesh_set_visible_instances(RID p_multimesh, int p_visibl
 		return;
 	}
 
+	// -1 means every allocated instance is visible. Resolve it before
+	// marking newly revealed regions: iterating to -1 would skip the loop,
+	// leaving edits made to previously hidden instances off the GPU.
+	const int previous_count = multimesh->visible_instances < 0 ? multimesh->instances : multimesh->visible_instances;
+	const int new_count = p_visible < 0 ? multimesh->instances : p_visible;
 	if (multimesh->data_cache.size()) {
-		// There is a data cache, but we may need to update some sections.
+		// Rebuild the bounds once and upload only regions newly entering view.
 		_multimesh_mark_all_dirty(multimesh, false, true);
-		int start = multimesh->visible_instances >= 0 ? multimesh->visible_instances : multimesh->instances;
-		for (int i = start; i < p_visible; i++) {
+		for (int i = previous_count; i < new_count; i++) {
 			_multimesh_mark_dirty(multimesh, i, true);
 		}
 	}
 
 	multimesh->visible_instances = p_visible;
 
-	if (multimesh->indirect) { //we have to update the command buffer for the instance counts, in each stride this will be the second integer.
+	if (multimesh->indirect) { // The second uint32 in each draw command stores the visible instance count.
 		Mesh *mesh = mesh_owner.get_or_null(multimesh->mesh);
 		if (mesh != nullptr) {
+			// An indirect draw must never receive -1 (UINT32_MAX). Like regular
+			// MultiMesh rendering, -1 draws the complete allocated buffer.
+			const uint32_t draw_count = uint32_t(new_count);
 			for (uint32_t i = 0; i < mesh->surface_count; i++) {
-				RD::get_singleton()->buffer_update(multimesh->command_buffer, (i * sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE) + sizeof(uint32_t), sizeof(uint32_t), &p_visible);
+				RD::get_singleton()->buffer_update(multimesh->command_buffer, (i * sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE) + sizeof(uint32_t), sizeof(uint32_t), &draw_count);
 			}
 		}
 	}
