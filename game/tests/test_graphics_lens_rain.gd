@@ -61,6 +61,11 @@ func run(t) -> void:
 		"refraction is pixel-bounded and preserves the player's focus")
 	t.check(src.contains("blur_quality > 0") and src.contains("sharpen_strength >"),
 		"previous tilt-shift and contrast adaptive sharpening are intact")
+	t.check(src.find("if (lens_rain_strength > 0.001)") >
+		src.find("if (sharpen_strength > 0.001") and
+		src.find("if (lens_rain_strength > 0.001)") <
+		src.find("// Split toning:"),
+		"rain droplets composite after peripheral blur, before cinematic color")
 	t.check(src.contains("deband_strength > 0.001"),
 		"existing filmic sky debanding remains")
 	Lens.apply(material, 1.0, 3, "forward_plus", Vector2(3.0, 4.0))
