@@ -73,3 +73,10 @@ func run(t) -> void:
 	t.check((Quality as Script).source_code.contains(
 		'Atmosphere') and world.contains("func update("),
 		"the existing graphics quality and atmosphere services remain wired")
+
+
+func test_milky_way(t) -> void:
+	t.current = "milky way on dark clear High/Ultra nights"
+	t.check(SkyAurora.milky_way_strength(3, 0.0, 0.0, 0.0) > 0.99, "new moon: full band")
+	t.check(SkyAurora.milky_way_strength(3, 0.0, 0.0, 0.5) < 0.5, "full moon washes it out")
+	t.eq(SkyAurora.milky_way_strength(1, 0.0, 0.0, 0.0), 0.0, "Balanced pays nothing")

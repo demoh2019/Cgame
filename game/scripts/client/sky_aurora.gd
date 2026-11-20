@@ -16,3 +16,11 @@ static func strength(level: int, daylight: float, storm: float,
 	var night: float = 1.0 - smoothstep(0.04, 0.24, clampf(daylight, 0.0, 1.0))
 	var clear: float = 1.0 - smoothstep(0.15, 0.80, clampf(storm, 0.0, 1.0))
 	return maximum * night * clear
+
+
+## Milky Way strength: dark clear nights on High/Ultra only (dimmed while the moon is full).
+static func milky_way_strength(level: int, daylight: float, storm: float, moon_phase: float) -> float:
+	if level < 2:
+		return 0.0
+	var moon_glare: float = 1.0 - 0.6 * clampf(1.0 - absf(moon_phase - 0.5) * 2.0, 0.0, 1.0)
+	return strength(level, daylight, storm) * moon_glare

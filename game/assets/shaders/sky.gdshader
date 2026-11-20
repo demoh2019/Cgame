@@ -54,6 +54,8 @@ uniform float volumetric_cloud_coverage = 0.45;
 uniform float rainbow_strength = 0.0;
 // Night aurora curtains, 0 = off (decided by sky_aurora.gd).
 uniform float aurora_strength = 0.0;
+// Milky Way band, 0 = off (decided by sky_aurora.gd).
+uniform float milky_way_strength = 0.0;
 
 float hash(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -171,6 +173,25 @@ void sky() {
 					vec3(1.0, 0.88, 0.73), hash(vec3(star_cell, 61.0)));
 				night += tint * strength * 1.4;
 			}
+		}
+
+		if (milky_way_strength > 0.001 && up > 0.02) {
+			// Galactic band on a tilted great circle (Ghost of Tsushima / RDR2 night skies):
+			// a soft glow with a brighter core, dark dust lanes and a dense faint-star field.
+			vec3 galactic_pole = normalize(vec3(0.42, 0.55, -0.72));
+			float b = dot(dir, galactic_pole); // 0 on the band plane
+			float band = exp(-b * b * 22.0);
+			float core = exp(-b * b * 90.0);
+			float along = atan(dot(dir, normalize(cross(galactic_pole, vec3(0.0, 1.0, 0.0)))), dot(dir, vec3(0.0, 1.0, 0.0)));
+			vec3 q = dir * 6.0;
+			float clouds = vnoise(q) * 0.6 + vnoise(q * 2.3 + 4.1) * 0.4;
+			float dust = smoothstep(0.45, 0.75, vnoise(q * 3.1 + vec3(along, 0.0, 1.7)) * 0.7 + vnoise(q * 7.0) * 0.3);
+			float glow = band * (0.45 + 0.55 * clouds) * (1.0 - dust * core * 0.85);
+			// Faint unresolved star field concentrated along the band.
+			float speck = step(0.985, hash(floor(dir * 900.0))) * band;
+			vec3 milky = vec3(0.55, 0.6, 0.78) * glow * 0.07 + vec3(0.95, 0.85, 0.7) * core * clouds * 0.04 + vec3(0.8, 0.85, 1.0) * speck * 0.35;
+			float dark_sky = (1.0 - smoothstep(0.04, 0.4, daylight)) * smoothstep(0.02, 0.3, up) * (1.0 - storm);
+			night += milky * milky_way_strength * dark_sky;
 		}
 
 		vec3 color = mix(night, day, daylight);
