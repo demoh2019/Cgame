@@ -2592,6 +2592,22 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	}
 
 	if (rb_data.is_valid() && (using_upscaling || using_taa)) {
+		// Both AMD FSR2 and Apple MetalFX Temporal use the same camera
+		// transforms. A cut invalidates either upscaler's previous-frame
+		// radiance; compute the decision once before selecting a backend.
+		const Projection &prev_proj = p_render_data->scene_data->prev_cam_projection;
+		const Projection &cur_proj = p_render_data->scene_data->cam_projection;
+		const Transform3D &prev_transform = p_render_data->scene_data->prev_cam_transform;
+		const Transform3D &cur_transform = p_render_data->scene_data->cam_transform;
+		const bool camera_teleported = (cur_transform.origin - prev_transform.origin).length_squared() > 64.0f;
+		const bool camera_rotated = prev_transform.basis.get_column(2).normalized().dot(cur_transform.basis.get_column(2).normalized()) < 0.5f ||
+				prev_transform.basis.get_column(1).normalized().dot(cur_transform.basis.get_column(1).normalized()) < 0.5f;
+		const bool lens_cut = Math::abs(prev_proj.get_fov() - cur_proj.get_fov()) > 20.0f;
+		const bool temporal_camera_cut = camera_teleported || camera_rotated || lens_cut;
+		// Rendering time_step is expressed in seconds. MetalFX also needs
+		// explicit reset after long loading stalls or invalid timings.
+		const bool temporal_time_cut = !Math::is_finite(time_step) || time_step <= 0.0 || time_step > 0.2;
+
 		if (scale_type == SCALE_FSR2) {
 			rb_data->ensure_fsr2(fsr2_effect);
 
@@ -2629,19 +2645,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				Projection correction;
 				correction.set_depth_correction(true, true, false);
 
-				const Projection &prev_proj = p_render_data->scene_data->prev_cam_projection;
-				const Projection &cur_proj = p_render_data->scene_data->cam_projection;
-				const Transform3D &prev_transform = p_render_data->scene_data->prev_cam_transform;
-				const Transform3D &cur_transform = p_render_data->scene_data->cam_transform;
-				// A discontinuous camera jump must not blend the old world's
-				// temporal FSR2 history into the new scene (teleport, respawn,
-				// switching spectator cameras or major lens changes). Ordinary
-				// running and small FOV kicks preserve stable accumulation.
-				const bool camera_teleported = (cur_transform.origin - prev_transform.origin).length_squared() > 64.0f;
-				const bool camera_rotated = prev_transform.basis.get_column(2).normalized().dot(cur_transform.basis.get_column(2).normalized()) < 0.5f ||
-						prev_transform.basis.get_column(1).normalized().dot(cur_transform.basis.get_column(1).normalized()) < 0.5f;
-				const bool lens_cut = Math::abs(prev_proj.get_fov() - cur_proj.get_fov()) > 20.0f;
-				params.reset_accumulation = camera_teleported || camera_rotated || lens_cut;
+				// Invalidate AMD history on the same cuts as native MetalFX.
+				// FSR2's dispatch also independently rejects invalid timers.
+				params.reset_accumulation = temporal_camera_cut;
 				params.reprojection = (correction * prev_proj) * prev_transform.affine_inverse() * cur_transform * (correction * cur_proj).inverse();
 
 				fsr2_effect->upscale(params);
@@ -2670,7 +2676,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				params.exposure = exposure;
 				params.dst = rb->get_upscaled_texture(v);
 				params.jitter_offset = jitter;
-				params.reset = reset;
+				// Apple recommends reset on every scene cut, not only when
+				// creating the scaler. Retain that one-time reset too.
+				// No new GPU pass, reactive mask or history allocation.
+				params.reset = reset || temporal_camera_cut || temporal_time_cut;
 
 				mfx_temporal_effect->process(rb_data->get_mfx_temporal_context(), params);
 			}
