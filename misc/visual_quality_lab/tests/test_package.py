@@ -94,8 +94,26 @@ class VisualQualityPackageTests(unittest.TestCase):
         self.assertIn('direction.normalized()', camera)
         self.assertIn('var camera: Camera3D = FlyCamera.new()', (ROOT / 'demo.gd').read_text())
 
+    def test_gameplay_quest_is_deterministic_and_persistent(self):
+        source = (ROOT / 'addons/visual_quality/exploration_quest.gd').read_text()
+        for feature in ('class_name ExplorationQuest3D', 'generate_positions',
+                        'nearest_pickup_id', 'ConfigFile.new()', 'save_progress()',
+                        'load_progress()', 'user://visual_quality_quest_v1.cfg',
+                        'get_viewport().set_input_as_handled()',
+                        'collect_shard', 'collected_ids.has(index)',
+                        'quest_finished.emit()', 'reset_quest'):
+            self.assertIn(feature, source)
+
+    def test_gameplay_integrated_into_scene_and_atmosphere(self):
+        demo = (ROOT / 'demo.gd').read_text()
+        for feature in ('ExplorationQuest.new()', 'quest.player =',
+                        'quest.quest_finished.connect', '_on_quest_finished',
+                        'atmosphere.set_hour(12.0)', '_build_quest_ui()',
+                        'reset_button.pressed.connect', 'KEY_R'):
+            self.assertIn(feature, demo)
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
