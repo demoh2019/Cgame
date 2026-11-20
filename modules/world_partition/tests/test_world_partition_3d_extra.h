@@ -580,6 +580,34 @@ TEST_CASE("[SceneTree][WorldPartition3D] Two observers stream and retain distant
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
+TEST_CASE("[SceneTree][WorldPartition3D] Streaming sources share a single request budget") {
+	const String primary_path = make_cell_scene("source_budget_primary");
+	const String secondary_path = make_cell_scene("source_budget_secondary");
+	{
+		WorldFixture fixture;
+		fixture.world->set_max_new_requests_per_frame(1);
+		Node3D *secondary = memnew(Node3D);
+		secondary->set_name("BudgetStreamingObserver");
+		SceneTree::get_singleton()->get_root()->add_child(secondary);
+		secondary->set_position(Vector3(64, 0, 0));
+		Array additional;
+		additional.push_back(fixture.world->get_path_to(secondary));
+		fixture.world->set_additional_observer_paths(additional);
+		fixture.world->set_cell_scene(Vector2i(0, 0), primary_path);
+		fixture.world->set_cell_scene(Vector2i(4, 0), secondary_path);
+		fixture.world->update_streaming();
+		// A single update may start only one resource request across all sources.
+		CHECK(ResourceLoader::load_threaded_get_status(primary_path) != ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		CHECK(ResourceLoader::load_threaded_get_status(secondary_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(4, 0)));
+		SceneTree::get_singleton()->get_root()->remove_child(secondary);
+		memdelete(secondary);
+	}
+	CHECK(DirAccess::remove_absolute(primary_path) == OK);
+	CHECK(DirAccess::remove_absolute(secondary_path) == OK);
+}
+
 TEST_CASE("[SceneTree][WorldPartition3D] Additional observer works without primary observer") {
 	const String path = make_cell_scene("secondary_only");
 	{
