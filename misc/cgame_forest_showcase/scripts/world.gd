@@ -43,6 +43,7 @@ var source_unready_events: int = 0
 var last_source_event: String = "нет"
 var survey_drone: Node3D
 var survey_drone_paused: bool = false
+var survey_flight_time: float = 0.0
 
 
 func _ready() -> void:
@@ -524,9 +525,9 @@ func _process(delta: float) -> void:
     # Its global position moves continuously; the native streamer turns it
     # into grid coordinates and tracks new cells without user code polling.
     if survey_drone != null and not survey_drone_paused:
-        var flight_time: float = elapsed * 0.23
-        var drone_x: float = SURVEY_POSITION.x + sin(flight_time) * 56.0
-        var drone_z: float = SURVEY_POSITION.y + (1.0 - cos(flight_time)) * 20.0
+        survey_flight_time += delta * 0.23
+        var drone_x: float = SURVEY_POSITION.x + sin(survey_flight_time) * 56.0
+        var drone_z: float = SURVEY_POSITION.y + (1.0 - cos(survey_flight_time)) * 20.0
         survey_drone.position = Vector3(drone_x,
             height_at(drone_x, drone_z) + 8.0, drone_z)
     if hud_elapsed >= 0.25:
