@@ -851,9 +851,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_result("Dismantle barricade", sim.cmd_dismantle(LOCAL_PLAYER_ID, wall_id))
 
 	elif event.is_action_pressed("survive_fish"):
-		var wants_bait: bool = Input.is_key_pressed(KEY_SHIFT)
-		_result("Baited cast" if wants_bait else "Cast fishing rod",
-			sim.cmd_fish(LOCAL_PLAYER_ID, wants_bait))
+		var storm_mode: bool = Input.is_key_pressed(KEY_ALT)
+		var wants_bait: bool = Input.is_key_pressed(KEY_SHIFT) and not storm_mode
+		_result("Storm cast" if storm_mode else (
+			"Baited cast" if wants_bait else "Cast fishing rod"),
+			sim.cmd_fish(LOCAL_PLAYER_ID, wants_bait, storm_mode))
 	elif event.is_action_pressed("survive_contract"):
 		var action := "daily_claim" if Input.is_key_pressed(KEY_CTRL) else ("claim" if Input.is_key_pressed(KEY_SHIFT) else "accept")
 		var response: Dictionary = sim.cmd_contract(LOCAL_PLAYER_ID, action)

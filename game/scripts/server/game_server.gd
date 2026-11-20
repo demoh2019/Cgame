@@ -62,6 +62,7 @@ const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const InfectedSnare = preload("res://scripts/shared/infected_snare.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const FishingBait = preload("res://scripts/shared/fishing_bait.gd")
+const StormFishing = preload("res://scripts/shared/storm_fishing.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
 const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
@@ -600,7 +601,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 
 ## Fishing is a delayed, cancelable server action; no catch count is supplied
 ## by clients. Distinct from lake drinking and free berry scavenging.
-func cmd_fish(peer_id: int, baited: bool = false) -> Dictionary:
+func cmd_fish(peer_id: int, baited: bool = false, storm_cast: bool = false) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
@@ -608,17 +609,25 @@ func cmd_fish(peer_id: int, baited: bool = false) -> Dictionary:
 		return {"ok": false, "reason": "busy"}
 	if time < player.fish_next_at:
 		return {"ok": false, "reason": "cooldown"}
+	if storm_cast and baited:
+		return {"ok": false, "reason": "incompatible_modes"}
 	var eligibility: Dictionary = Fishing.validate_start(world, player.position,
 		player.inventory, player.progression.gathering_level("fishing"), baited)
 	if not bool(eligibility.get("ok", false)):
 		return eligibility
+	if storm_cast and not StormFishing.qualifies(world, player.position, time):
+		return {"ok": false, "reason": "not_storm_coast"}
+	if storm_cast and player.inventory.free_space_for(str(eligibility["item"])) < StormFishing.MIN_FREE_FISH:
+		return {"ok": false, "reason": "no_space"}
+	var cast_seconds: float = StormFishing.CAST_SECONDS if storm_cast else Fishing.CAST_SECONDS
 	player.action = {"fish": true, "cast_x": player.position.x, "cast_z": player.position.z,
 		"tier": int(eligibility["tier"]), "catch_id": str(eligibility["item"]),
-		"baited": baited,
-		"remaining": Fishing.CAST_SECONDS, "total": Fishing.CAST_SECONDS}
-	player.fish_next_at = time + Fishing.CAST_SECONDS + Fishing.COOLDOWN_SECONDS
-	return {"ok": true, "seconds": Fishing.CAST_SECONDS,
-		"tier": int(eligibility["tier"]), "item": str(eligibility["item"]), "baited": baited}
+		"baited": baited, "storm_cast": storm_cast,
+		"remaining": cast_seconds, "total": cast_seconds}
+	player.fish_next_at = time + cast_seconds + Fishing.COOLDOWN_SECONDS
+	return {"ok": true, "seconds": cast_seconds,
+		"tier": int(eligibility["tier"]), "item": str(eligibility["item"]),
+		"baited": baited, "storm_cast": storm_cast}
 
 
 func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
@@ -2983,6 +2992,11 @@ func _tick_players(delta: float) -> void:
 		if not player.action.is_empty():
 			if player.action.has("fish"):
 				var cast_at := Vector2(float(player.action["cast_x"]), float(player.action["cast_z"]))
+				if bool(player.action.get("storm_cast", false)) and not StormFishing.qualifies(
+						world, player.position, time):
+					player.action = {}
+					events.append({"type": "storm_cast_lost", "peer": player.id})
+					continue
 				var current_catch: Dictionary = Fishing.validate_start(world, player.position,
 					player.inventory, player.progression.gathering_level("fishing"))
 				if not bool(current_catch.get("ok", false)) \
@@ -3007,22 +3021,29 @@ func _finish_fishing(player: Player) -> void:
 	var item_id: String = str(player.action.get("catch_id", Fishing.CATCH_ID))
 	var tier: int = int(player.action.get("tier", 1))
 	var requested_bait: bool = bool(player.action.get("baited", false))
+	var storm_cast: bool = bool(player.action.get("storm_cast", false))
 	player.action = {}
 	if item_id != Fishing.catch_item(tier):
 		return # Never trust an inconsistent pending action.
+	if storm_cast and (requested_bait or not StormFishing.qualifies(world, player.position, time)):
+		return # Never reward a forged or expired storm action.
 	var amount: int = 1 + (1 if rng.randf() < 0.35 else 0)
-	# Spend the bait only when the complete bonus can actually be received.
+	# Risk rewards and consumable bait cannot stack.
+	var storm_bonus: int = StormFishing.bonus_for(
+		player.inventory, item_id, amount) if storm_cast else 0
 	var bait_used: bool = FishingBait.spend_for_bonus(
 		player.inventory, item_id, amount, requested_bait)
 	if bait_used:
 		amount += FishingBait.BONUS_FISH
+	amount += storm_bonus
 	var added: int = amount - player.inventory.add(item_id, amount)
 	if added > 0:
 		player.progression.award_gather("fishing", tier, added)
 		player.dirty_inventory = true
 		player.dirty_character = true
 	events.append({"type": "fished", "peer": player.id, "item": item_id,
-		"amount": added, "tier": tier, "bait_used": bait_used})
+		"amount": added, "tier": tier, "bait_used": bait_used,
+		"storm_cast": storm_cast, "storm_bonus": storm_bonus})
 
 
 func _finish_gather(player: Player, node: Dictionary) -> void:

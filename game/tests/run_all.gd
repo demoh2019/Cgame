@@ -16,6 +16,7 @@ const SUITES := [
 	"res://tests/test_fishing_display.gd",
 	"res://tests/test_fishing_tiers.gd",
 	"res://tests/test_fishing_bait.gd",
+	"res://tests/test_storm_fishing.gd",
 	"res://tests/test_survival_combat.gd",
 	"res://tests/test_infection.gd",
 	"res://tests/test_warden_jacket.gd",

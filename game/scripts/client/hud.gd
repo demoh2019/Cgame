@@ -321,6 +321,12 @@ func _build() -> void:
 	bait_button.tooltip_text = "Craft from berries and fiber; no charge if the bonus cannot fit."
 	bait_button.pressed.connect(func() -> void: client.fish(true))
 	inventory_box.add_child(bait_button)
+	var storm_button := Button.new()
+	storm_button.name = "StormCast"
+	storm_button.text = "Storm cast (red/black coast; 8s, +2 fish)"
+	storm_button.tooltip_text = "During real storms in full-loot regions; canceled if weather changes. No bait used."
+	storm_button.pressed.connect(func() -> void: client.fish(false, true))
+	inventory_box.add_child(storm_button)
 	var cook_button := Button.new()
 	cook_button.text = "0: Quick-cook best carried fish (fire or hub)"
 	cook_button.pressed.connect(quick_cook)
@@ -796,11 +802,17 @@ func _on_event(event: Dictionary) -> void:
 		"campfire_refueled":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("You added wood to the shared campfire.")
+		"storm_cast_lost":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Storm fishing interrupted: storm ended or you left the risky coast.")
 		"fished":
 			if int(event.get("peer", -1)) == client.peer_id:
 				var catch_id: String = str(event.get("item", "raw_fish"))
 				var display: String = str(Defs.item(catch_id).get("name", catch_id))
-				say("Fishing: caught %d %s. Cook at the camp." % [int(event.get("amount", 0)), display])
+				say("Fishing: caught %d %s%s. Cook at the camp." % [
+					int(event.get("amount", 0)), display,
+					" (storm bonus +%d)" % int(event.get("storm_bonus", 0)) if
+						int(event.get("storm_bonus", 0)) > 0 else ""])
 		"zone":
 			var zone: int = clampi(int(event["zone"]), 0, 3)
 			say("Entering %s: %s" % [Defs.ZONE_NAMES[zone], ZoneRisk.description(zone)])
@@ -1026,7 +1038,8 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		if bool(data.get("ok", false)):
 			var fish_id: String = str(data.get("item", "raw_fish"))
 			say("Fishing: %scasting for %s (%d s)..." % [
-				"baited " if bool(data.get("baited", false)) else "",
+				"storm " if bool(data.get("storm_cast", false)) else (
+					"baited " if bool(data.get("baited", false)) else ""),
 				str(Defs.item(fish_id).get("name", fish_id)), int(data.get("seconds", 5))])
 		else:
 			say("Fishing: %s" % str(data.get("reason", "denied")))

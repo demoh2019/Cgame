@@ -383,10 +383,10 @@ func c_input(seq: int, move_x: float, move_z: float, sprint: bool, yaw: float, d
 
 
 @rpc("any_peer", "reliable")
-func c_fish(baited: bool = false) -> void:
+func c_fish(baited: bool = false, storm_cast: bool = false) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
-		s_result.rpc_id(peer, "fish", sim.cmd_fish(peer, baited))
+		s_result.rpc_id(peer, "fish", sim.cmd_fish(peer, baited, storm_cast))
 
 
 @rpc("any_peer", "reliable")
@@ -839,7 +839,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "duel", "arena_queue", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
+		"spawn", "zone", "gathered", "fished", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "duel", "arena_queue", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
 		"party_aid":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer

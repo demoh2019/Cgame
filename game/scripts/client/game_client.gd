@@ -214,8 +214,8 @@ func gather(node_id: int) -> void:
 	net.c_gather.rpc_id(1, node_id)
 
 
-func fish(baited: bool = false) -> void:
-	net.c_fish.rpc_id(1, baited)
+func fish(baited: bool = false, storm_cast: bool = false) -> void:
+	net.c_fish.rpc_id(1, baited, storm_cast)
 
 
 func craft(recipe: String, times: int = 1) -> void:
