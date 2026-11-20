@@ -61,6 +61,24 @@
 				Returns the number of tracked instantiated cells.
 			</description>
 		</method>
+		<method name="get_pending_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many registered cells are waiting for their scene resource to finish loading or to be instantiated. This is a runtime streaming diagnostic, not the total number of configured cells.
+			</description>
+		</method>
+		<method name="get_inflight_request_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of distinct asynchronous resource paths whose background loads have not completed. Several cells using the same scene path share one request.
+			</description>
+		</method>
+		<method name="get_failed_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cells that failed to load or instantiate. Failed cells are not retried until their configuration changes.
+			</description>
+		</method>
 		<method name="get_loaded_cells" qualifiers="const">
 			<return type="Array" />
 			<description>
