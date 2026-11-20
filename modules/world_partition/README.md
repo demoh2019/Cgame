@@ -12,6 +12,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Instantiate `Node3D` cell roots on the main thread, preserving their authored transform and applying the cell origin.
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
+- Query currently instantiated cell scene roots with `get_cell_instance(cell)` for safe per-cell visual proxy control. The method returns `null` after unload instead of a stale pointer.
 - Avoid running streaming implicitly in the editor.
 
 ## Using the node
@@ -45,7 +46,7 @@ Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to 
 
 ## Tests
 
-The module includes 61 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (40), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 63 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (42), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"

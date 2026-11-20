@@ -41,6 +41,13 @@
 				Returns a copy of the additional observer paths; modifying this array does not change the streamer configuration.
 			</description>
 		</method>
+		<method name="get_cell_instance" qualifiers="const">
+			<return type="Node3D" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the currently instantiated [Node3D] scene root for [param cell], or [code]null[/code] if it is not loaded. The returned node is owned by the streamer and can be unloaded at any time; do not retain the reference across streaming updates without checking [method is_instance_valid]. Useful for controlling proxy visibility when layering detail and distant scene streamers.
+			</description>
+		</method>
 		<method name="get_cell_scene" qualifiers="const">
 			<return type="String" />
 			<param index="0" name="cell" type="Vector2i" />
