@@ -63,12 +63,25 @@ Each procedural dungeon room has an atmospheric warm torch, but loading many roo
 
 Reference: [Godot 3D lights and shadows](https://docs.godotengine.org/en/stable/tutorials/3d/lights_and_shadows.html); [Unity URP Forward+ additional lights](https://docs.unity3d.com/Packages/com.unity.render-pipelines.universal@15.0/manual/rendering/forward-plus-rendering-path.html).
 
+## Procedural occlusion culling in streamed dungeons
+
+Following **Unreal visibility/occlusion culling** and **Unity static occluders**, `dungeon_occlusion.gd` now generates one conservative `BoxOccluder3D` inside each suitable **solid** wall mesh of the underground kit. Doors and columns never generate an occluder. The largest eligible individual mesh is used rather than the whole wall's merged bounding box to avoid accidentally closing gaps. Every box is shrunk on all axes (especially vertically, because the camera looks over low walls).
+
+`game/project.godot` enables the built-in software occlusion infrastructure, and `online_main.gd` switches `Viewport.use_occlusion_culling` **only underground** on the Forward+ or Mobile rendering methods and graphics levels Balanced/High/Ultra. On Performance, Compatibility and everywhere above ground, the viewport keeps occlusion **off** to avoid unnecessary CPU rasterization. A graphics-preset change or leaving the dungeon automatically reevaluates the flag. Occluders are static after their streamed chunk is built; no runtime BVH rebuilds for moving props.
+
+This system does not replace frustum culling, mesh LOD or streaming. It also does not promise improvement in a cave where the top-down camera sees over every wall; screen-space effectiveness depends on how much geometry is actually hidden. To validate, compare the same underground view with Performance and High/Ultra, then toggle `use_occlusion_culling` on the root viewport while recording CPU P95 and GPU draw calls. Visual regressions to check: open doorways, low walls, loot visibility and the player model.
+
+References:
+- [Godot occlusion culling setup and limitations](https://docs.godotengine.org/en/stable/tutorials/3d/occlusion_culling.html)
+- [Unreal Engine visibility and occlusion culling](https://dev.epicgames.com/documentation/en-us/unreal-engine/visibility-and-occlusion-culling-in-unreal-engine)
+- [Unity static occluders and dynamic occludees](https://docs.unity.com/en-us/engine/6000.3/manual/cameras/occlusion-culling/getting-started)
+
 ## Performance acceptance before shipping
 
 1. On the **same machine, same resolution, same weather and position** (settlement, dense forest, ruined city, storm), capture P50/P95/P99 frame time and peak memory, not just average FPS.
 2. Compare preset switches on Compatibility and Forward+, checking sunset sun-disc alignment, shadow stability, water, grass culling and HUD sharpness. Profile GPU and CPU separately.
 3. Verify that a low-end preset changes GPU work enough to improve **measured** latency, not merely estimated vertex counts.
 4. Ensure asset licensing before importing additional meshes/textures. The game already has graceful fallbacks for absent packs.
-5. Run `godot --headless --path game --script res://tests/run_all.gd` with the custom engine fork. The suite includes `test_graphics_quality.gd`, `test_graphics_detail.gd`, `test_object_batch_grid.gd`, `test_dungeon_light_budget.gd` and `test_sky_lighting_budget.gd`.
+5. Run `godot --headless --path game --script res://tests/run_all.gd` with the custom engine fork. The suite includes `test_graphics_quality.gd`, `test_graphics_detail.gd`, `test_object_batch_grid.gd`, `test_dungeon_light_budget.gd`, `test_dungeon_occlusion.gd` and `test_sky_lighting_budget.gd`.
 
 **Status:** code-level integration and source invariants are checked. GPU frame time and appearance **must be validated** with an actual build of the custom engine; do not treat profile targets as measured benchmarks.
