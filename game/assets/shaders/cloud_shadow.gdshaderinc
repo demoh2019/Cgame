@@ -5,12 +5,16 @@
 // Performance mode and nighttime skip the lookup altogether.
 global uniform sampler2D aa_cloud_shadow_map : filter_linear, repeat_enable;
 global uniform float aa_cloud_shadow_strength;
+// Camera-independent regional wind offset, advanced at 10 Hz on the CPU.
+global uniform vec2 aa_cloud_shadow_offset;
 
 float cloud_shadow(vec2 world_xz, float time) {
 	if (aa_cloud_shadow_strength <= 0.001) {
 		return 0.0;
 	}
-	vec2 uv = world_xz / 1024.0 + vec2(time * 0.0005, time * 0.0003);
+	// World-aligned cloud motion follows the same regional wind as foliage.
+	// No per-fragment time or hash: one precomputed L8 texture fetch remains.
+	vec2 uv = (world_xz + aa_cloud_shadow_offset) / 1024.0;
 	return texture(aa_cloud_shadow_map, uv).r * aa_cloud_shadow_strength;
 }
 
