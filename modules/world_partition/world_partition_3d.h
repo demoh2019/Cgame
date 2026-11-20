@@ -193,6 +193,7 @@ public:
 	int get_max_navigation_updates_per_physics_frame() const;
 	bool register_navigation_agent(const String &p_name, Node3D *p_agent, int p_priority = 1);
 	void unregister_navigation_agent(const String &p_name);
+	bool unregister_navigation_agent_if_owner(const String &p_name, Node3D *p_agent);
 	bool has_navigation_agent(const String &p_name) const;
 	int get_navigation_agent_count() const;
 	bool set_navigation_agent_priority(const String &p_name, int p_priority);
