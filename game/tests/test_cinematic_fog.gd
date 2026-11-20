@@ -19,6 +19,14 @@ func run(t) -> void:
 		"High computes fog in a shorter GPU volume")
 	t.check(float(high["base_density"]) < float(ultra["base_density"]),
 		"Ultra retains richer near-camera atmosphere")
+	t.check(int(high["froxel_size"]) == 112 and int(high["froxel_depth"]) == 96,
+		"High saves froxel bandwidth compared with the default 128-cube")
+	t.check(int(ultra["froxel_size"]) == 160 and int(ultra["froxel_depth"]) == 128,
+		"Ultra improves screen-space volumetric detail without enlarging depth")
+	t.check(int(ultra["froxel_size"]) > int(high["froxel_size"]),
+		"quality tiers scale the expensive lighting grid")
+	t.check(int(lowest["froxel_size"]) == 0 and int(balanced["froxel_size"]) == 0,
+		"low-end profiles do not reserve a volumetric grid")
 	for renderer in ["gl_compatibility", "mobile", "", "vulkan_compatibility"]:
 		for quality in 4:
 			t.check(not bool(CinematicFog.profile(quality, renderer)["enabled"]),
@@ -108,5 +116,10 @@ func run(t) -> void:
 		"live weather rig updates GPU budget when quality changes")
 	t.check(atmosphere.contains("CinematicFog.apply_weather"),
 		"day/night and rain update actual fog resources")
+	var fog_script: String = FileAccess.get_file_as_string("res://scripts/client/cinematic_fog.gd")
+	t.check(fog_script.contains("RenderingServer.environment_set_volumetric_fog_volume_size("),
+		"quality presets control native engine froxel allocation on Forward+")
+	t.check(fog_script.contains('if enabled:\n\t\t# Match HDRP'),
+		"Compatibility and low-end tiers never allocate the high-end fog grid")
 	t.check(not bool(GraphicsQuality.profile(0)["ssao"]),
 		"low-end graphics retains other existing low-cost postprocessing choices")
