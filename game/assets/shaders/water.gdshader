@@ -32,6 +32,9 @@ uniform float detail_fade_start = 65.0;
 uniform float detail_fade_end = 125.0;
 // Near-shore light filaments are enabled only on high-end presets and only in shallow water.
 uniform float shore_glimmer_strength = 0.0;
+// Animated depth-following swash; disabled on Performance/Balanced without
+// extra samplers, draw passes or a mesh simulation.
+uniform float shore_surf_strength = 0.0;
 uniform float shore_glimmer_fade_start = 28.0;
 uniform float shore_glimmer_fade_end = 62.0;
 
@@ -133,6 +136,12 @@ void fragment() {
 	// Most ocean pixels have no shoreline. Avoid even coarse foam noise when
 	// the depth difference says foam cannot contribute to the final color.
 	float edge = 1.0 - smoothstep(0.0, 0.9, thickness);
+	// Evaluate derivatives in uniform control flow before shoreline branching.
+	// Only high-end presets pay for the filtered surf footprint.
+	float surf_footprint = 0.0;
+	if (shore_surf_strength > 0.001) {
+		surf_footprint = clamp(fwidth(thickness) * 0.42, 0.025, 0.16);
+	}
 	float foam = 0.0;
 	if (edge > 0.001) {
 		float foam_noise = 0.6;
@@ -144,6 +153,21 @@ void fragment() {
 			}
 		}
 		foam = smoothstep(0.35, 0.75, foam_noise + edge * 0.9 - 0.55) * edge;
+		// Travelling surf follows the scene-depth coastline instead of a
+		// screen-space stripe. Reuse foam noise for organic breakup.
+		if (shore_surf_strength > 0.001 && detail_fade > 0.001) {
+			float surge_phase = t * (0.95 + storm * 0.30)
+				+ dot(p, vec2(0.37, -0.25) + aa_vegetation_wind.xy * 0.04);
+			float surge_depth = 0.34 + 0.18 * sin(surge_phase)
+				+ (foam_noise - 0.5) * 0.18;
+			float surf_distance = abs(thickness - surge_depth);
+			float surf_band = 1.0 - smoothstep(0.055,
+				0.055 + surf_footprint, surf_distance);
+			float breakup = 0.55 + 0.45 * smoothstep(0.15, 0.85, foam_noise);
+			float surf_foam = surf_band * breakup * shore_surf_strength
+				* detail_fade * (0.75 + 0.25 * storm);
+			foam = max(foam, surf_foam * edge);
+		}
 	}
 	// Small storm whitecaps extend over deep water, with zero extra texture reads.
 	float storm_whitecaps = crest * storm * min(ripple_strength * 1.2, 0.55)
