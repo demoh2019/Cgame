@@ -6,6 +6,7 @@ const SHADER_CODE := """
 shader_type spatial;
 render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
+global uniform float aa_weather_wetness;
 uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform vec4 albedo_color : source_color = vec4(1.0);
 uniform float sway = 0.12;
@@ -25,8 +26,11 @@ void vertex() {
 	instance_tint = instance_tinted ? COLOR.rgb : vec3(1.0);
 	// World-space plant roots give every MultiMesh instance stable colour and gust phase.
 	vec2 root = MODEL_MATRIX[3].xz;
-	float h1 = fract(sin(dot(root, vec2(12.9898, 78.233))) * 43758.5453);
-	float h2 = fract(h1 * 31.37 + 0.173); // One hash/trig per vertex, not two.
+	// Two cheap arithmetic hashes replace a per-vertex sine while retaining stable per-tree colour.
+	vec2 hash_uv = fract(root * vec2(0.1031, 0.11369));
+	hash_uv += vec2(dot(hash_uv, hash_uv.yx + vec2(19.19)));
+	float h1 = fract(hash_uv.x * hash_uv.y);
+	float h2 = fract(h1 * 31.37 + 0.173); // A decorrelated shade and roughness without texture fetches.
 	plant_hue = mix(vec3(0.86, 0.94, 0.86), vec3(1.1, 1.06, 0.84), h1) * mix(0.84, 1.08, h2);
 	plant_roughness = mix(0.83, 0.93, h2);
 	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -42,7 +46,9 @@ void vertex() {
 		k *= k; // Keep trunks steady; move light tips.
 		float gust = 0.78 + 0.22 * sin(TIME * 0.46 + dot(root, vec2(0.047, 0.034)));
 		float phase = TIME * 1.45 + dot(root, vec2(0.23, 0.19));
-		float amount = sway * k * gust * wind_lod;
+		// Existing weather blending supplies a smooth storm strength with no per-plant CPU updates.
+		float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.65;
+		float amount = sway * k * gust * wind_lod * storm_wind;
 		VERTEX.x += sin(phase) * amount;
 		VERTEX.z += cos(phase * 0.84) * amount * 0.7;
 	}
