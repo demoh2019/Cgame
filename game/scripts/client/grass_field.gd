@@ -15,17 +15,20 @@ const FADE_END := 60.0
 const SHADER_CODE := """
 shader_type spatial;
 render_mode cull_disabled, diffuse_lambert_wrap, specular_disabled, shadows_disabled;
+#include "res://assets/shaders/cloud_shadow.gdshaderinc"
 uniform float fade_start = 44.0;
 uniform float fade_end = 60.0;
 varying float tipness;
 varying float shade;
 varying float sheen;
 varying vec3 tint;
+varying vec2 ground_xz;
 void vertex() {
 	tipness = UV.y;
 	shade = UV.x; // Each blade has its own brightness.
 	tint = COLOR.rgb; // The MultiMesh instance colour (the Compatibility renderer does not pass custom data here).
 	vec3 root = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	ground_xz = root.xz;
 	float shrink = 1.0 - smoothstep(fade_start, fade_end, length(root.xz - CAMERA_POSITION_WORLD.xz));
 	VERTEX.y *= shrink;
 	// Wind: a steady ripple plus broad gusts rolling across the meadow. A gust bends the tips and makes them catch the
@@ -47,7 +50,7 @@ void fragment() {
 	color *= mix(0.86, 1.1, shade);
 	color *= mix(0.85, 1.0, smoothstep(0.0, 0.25, tipness)); // A little contact shade at the very bottom.
 	color += vec3(0.04, 0.05, 0.015) * sheen * tipness;
-	ALBEDO = color;
+	ALBEDO = apply_cloud_shadow(color, ground_xz, TIME);
 	ROUGHNESS = 0.85;
 	// Always lit from above, whichever side of the blade we see: with two-sided blades the engine would otherwise flip
 	// the normal of every back face downward and half the meadow would turn black.

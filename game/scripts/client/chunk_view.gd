@@ -126,10 +126,12 @@ var _raw_heights := PackedFloat32Array()
 var _biome_names := PackedStringArray()
 var _road_data := PackedByteArray()
 var _patches := PackedVector4Array()
-# Grass grows tile by tile once the chunk is near the camera: one tile per frame across all chunks.
+# Grass grows tile by tile once the chunk is near the camera, within a time budget per frame across all chunks.
 var _grass_source
 var _grass_next_tile := 0
 static var _grass_frame := -1
+static var _grass_spent_usec := 0
+const GRASS_BUDGET_USEC := 10000 # At most about 10 ms of grass growing per frame, across all chunks.
 const GRASS_RANGE := 110.0
 var _world
 var _terrain
@@ -675,19 +677,24 @@ func _grow_grass() -> void:
 	if _grass_source == null or _grass_next_tile >= GrassField.tile_count():
 		return
 	var frame: int = Engine.get_process_frames()
-	if _grass_frame == frame:
-		return # Another chunk grew a tile this frame.
+	if _grass_frame != frame:
+		_grass_frame = frame
+		_grass_spent_usec = 0
+	if _grass_spent_usec > GRASS_BUDGET_USEC:
+		return # This frame's share of grass growing is used up; the rest comes next frame.
 	var camera := get_viewport().get_camera_3d()
 	if camera == null:
 		return
 	var center := global_position + Vector3(Defs.CHUNK_SIZE * 0.5, 0.0, Defs.CHUNK_SIZE * 0.5)
 	if Vector2(camera.global_position.x - center.x, camera.global_position.z - center.z).length() > GRASS_RANGE:
 		return
-	_grass_frame = frame
-	var tile: MultiMeshInstance3D = GrassField.build_tile(_grass_source, _grass_next_tile)
-	_grass_next_tile += 1
-	if tile != null:
-		add_child(tile)
+	while _grass_next_tile < GrassField.tile_count() and _grass_spent_usec <= GRASS_BUDGET_USEC:
+		var started := Time.get_ticks_usec()
+		var tile: MultiMeshInstance3D = GrassField.build_tile(_grass_source, _grass_next_tile)
+		_grass_next_tile += 1
+		if tile != null:
+			add_child(tile)
+		_grass_spent_usec += Time.get_ticks_usec() - started
 
 
 ## The people of the settlements: standing, sitting, working, each with a name and a role above their head.
@@ -779,7 +786,7 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator) -> void:
 	var road_clear: float = WorldRoads.HALF_WIDTH + 1.0
 	for entry in DECOR:
 		var file := String(entry["file"])
-		var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(file), "decor:" + file, 0.0 if file.begins_with("Pebble") or file.begins_with("Petal") else (0.2 if file.begins_with("Grass") else 0.12), true)
+		var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(file), "decor:" + file, 0.0 if file.begins_with("Pebble") or file.begins_with("Petal") else (0.2 if file.begins_with("Grass") else 0.12))
 		if mesh == null:
 			continue
 		var cluster: float = float(entry["cluster"])
@@ -801,7 +808,8 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator) -> void:
 		multimesh.use_colors = true
 		multimesh.mesh = mesh
 		multimesh.instance_count = spots.size()
-		var tinted := file.begins_with("Grass") or file.begins_with("Clover") or file.begins_with("Fern") or file.begins_with("Bush")
+		# No per-instance tint: the kit keeps its wind weights in the vertex colours, which the instance colour would multiply.
+		var tinted := false
 		for i in spots.size():
 			var size := rng.randf_range(float(entry["scale"][0]), float(entry["scale"][1]))
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)

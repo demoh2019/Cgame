@@ -5,17 +5,21 @@ extends RefCounted
 const SHADER_CODE := """
 shader_type spatial;
 render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
+#include "res://assets/shaders/cloud_shadow.gdshaderinc"
 uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform vec4 albedo_color : source_color = vec4(1.0);
 uniform float sway = 0.12;
 uniform float height_ref = 4.0;
 uniform float scissor = 0.5;
 uniform bool cut_out = false;
+uniform bool red_to_green = false;
 uniform bool instance_tinted = false; // Decor MultiMeshes carry a per-instance colour; other meshes may have dark vertex colours.
 varying vec3 instance_tint;
+varying vec2 cloud_xz;
 void vertex() {
 	instance_tint = instance_tinted ? COLOR.rgb : vec3(1.0);
 	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	cloud_xz = w.xz;
 	float k = clamp(VERTEX.y / height_ref, 0.0, 1.0);
 	k *= k;
 	float phase = TIME * 1.5 + w.x * 0.33 + w.z * 0.27;
@@ -24,7 +28,10 @@ void vertex() {
 }
 void fragment() {
 	vec4 t = texture(albedo_tex, UV) * albedo_color;
-	ALBEDO = t.rgb * instance_tint;
+	if (red_to_green) {
+		t.rgb = vec3(t.g * 0.8, t.r * 0.92, t.b * 0.7);
+	}
+	ALBEDO = apply_cloud_shadow(t.rgb * instance_tint, cloud_xz, TIME);
 	// Both sides of a blade are lit as if they faced the viewer: otherwise half the grass turns black.
 	if (!FRONT_FACING) {
 		NORMAL = -NORMAL;
@@ -65,8 +72,12 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 			material.set_shader_parameter("instance_tinted", tinted)
 			material.set_shader_parameter("height_ref", height)
 			material.set_shader_parameter("albedo_color", standard.albedo_color)
-			if standard.albedo_texture != null:
-				material.set_shader_parameter("albedo_tex", standard.albedo_texture)
+			var texture: Texture2D = standard.albedo_texture
+			# The kit's twisted-tree leaves (also on Bush_Common) are autumn red; this world is green, so the shader turns
+			# them green (red and green swapped keeps the shape and shading of the leaves).
+			material.set_shader_parameter("red_to_green", texture != null and texture.resource_path.ends_with("Leaves_TwistedTree_C.png"))
+			if texture != null:
+				material.set_shader_parameter("albedo_tex", texture)
 			var cut: bool = standard.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED
 			material.set_shader_parameter("cut_out", cut)
 			material.set_shader_parameter("scissor", standard.alpha_scissor_threshold if standard.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR else 0.5)

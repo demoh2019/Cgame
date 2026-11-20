@@ -1,5 +1,6 @@
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
+#include "res://assets/shaders/cloud_shadow.gdshaderinc"
 
 // Textured ground. Eleven CC0 materials (Poly Haven) in two texture arrays:
 //   0 lush grass, 1 dry grass, 2 forest floor, 3 swamp mud, 4 road dirt, 5 cliff rock, 6 mountain rock, 7 sand, 8 snow,
@@ -190,7 +191,7 @@ void fragment() {
 	vec3 bent = normalize(tangent * detail.x + bitangent * detail.y + n * detail.z);
 	NORMAL = normalize((VIEW_MATRIX * vec4(bent, 0.0)).xyz);
 
-	ALBEDO = color;
+	ALBEDO = apply_cloud_shadow(color, p, TIME);
 	ROUGHNESS = mix(0.92, 0.6, w[8]) - 0.15 * shore;
 	SPECULAR = 0.2;
 }

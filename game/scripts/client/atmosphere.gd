@@ -6,6 +6,7 @@ var environment: Environment
 var sun: DirectionalLight3D
 var sky_material: ShaderMaterial
 var world_environment: WorldEnvironment
+var light_level := 1.0 # The daylight of the last update, 0 at night and 1 at noon.
 var storm := 0.0 # 0..1, eased toward the target so the weather fades in and out.
 
 const NIGHT_TOP := Color(0.01, 0.015, 0.05)
@@ -73,15 +74,16 @@ func _ready() -> void:
 
 ## `daylight` 0..1 (0 night), `sun_height` -1..1, `phase` 0..1 around the day, `storming` whether it is stormy here.
 func update(daylight: float, sun_height: float, phase: float, storming: bool, delta: float) -> void:
+	light_level = daylight
 	storm = move_toward(storm, 1.0 if storming else 0.0, delta * 0.25)
 	sun.rotation = Vector3(-deg_to_rad(lerpf(6.0, 62.0, clampf(sun_height, 0.0, 1.0))), deg_to_rad(35.0 + phase * 90.0), 0.0)
 	# Low sun is orange, high sun is white; the moon is a weak blue light from the opposite direction.
 	var low_sun := 1.0 - clampf(sun_height * 2.2, 0.0, 1.0)
 	var warm := Color(1.0, 0.7, 0.45).lerp(Color(1.0, 0.97, 0.9), 1.0 - low_sun)
 	if sun_height < 0.0:
-		sun.light_color = Color(0.45, 0.55, 0.9)
+		sun.light_color = Color(0.55, 0.66, 1.0)
 		sun.rotation = Vector3(-deg_to_rad(lerpf(8.0, 50.0, clampf(-sun_height, 0.0, 1.0))), deg_to_rad(215.0 + phase * 90.0), 0.0)
-		sun.light_energy = lerpf(0.0, 0.28, clampf(-sun_height * 2.0, 0.0, 1.0)) * (1.0 - storm * 0.6)
+		sun.light_energy = lerpf(0.12, 0.5, clampf(-sun_height * 2.0, 0.0, 1.0)) * (1.0 - storm * 0.6)
 		sun.shadow_enabled = true
 	else:
 		sun.light_color = warm
@@ -96,7 +98,11 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	sky_material.set_shader_parameter("daylight", daylight)
 	sky_material.set_shader_parameter("dusk", dusk)
 	sky_material.set_shader_parameter("storm", storm)
-	environment.ambient_light_energy = lerpf(0.35, 0.8, daylight) * (1.0 - storm * 0.25)
+	# Moonlit nights: the black night sky gives no ambient light, so a cool blue fill takes over as the light goes, and the
+	# world stays readable in deep blue instead of turning to pitch black.
+	environment.ambient_light_color = Color(0.3, 0.38, 0.62)
+	environment.ambient_light_sky_contribution = lerpf(0.1, 1.0, smoothstep(0.0, 0.45, daylight))
+	environment.ambient_light_energy = lerpf(0.75, 0.8, daylight) * (1.0 - storm * 0.25)
 	environment.fog_light_color = horizon.lerp(Color(0.5, 0.52, 0.56), storm * 0.5)
 	environment.fog_density = lerpf(0.0016, 0.0042, storm)
 	environment.adjustment_saturation = lerpf(1.0, 0.85, storm)

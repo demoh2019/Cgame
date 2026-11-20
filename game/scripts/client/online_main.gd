@@ -190,6 +190,17 @@ func _build_environment() -> void:
 	add_child(water)
 	effects = Effects.new()
 	add_child(effects)
+	# The finishing pass over the 3D view (tilt-shift, grading, vignette), drawn under every interface layer.
+	var post := CanvasLayer.new()
+	post.layer = -10
+	add_child(post)
+	var grade := ColorRect.new()
+	grade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	grade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var grade_material := ShaderMaterial.new()
+	grade_material.shader = load("res://assets/shaders/post_grade.gdshader")
+	grade.material = grade_material
+	post.add_child(grade)
 
 
 func _build_connect_screen() -> void:
@@ -649,6 +660,9 @@ func _update_time_of_day(delta: float) -> void:
 	if audio != null:
 		audio.update_music(WorldCycle.daylight(clock), delta)
 	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO, atmosphere.storm)
+	if client != null and client.you.has("x"):
+		var here: Vector3 = client.display_position()
+		effects.update_ambience(here, atmosphere.light_level, atmosphere.storm, client.world.biome_at(here.x, here.z))
 
 
 func _aim_direction() -> Vector2:
@@ -935,6 +949,12 @@ func _run_demo() -> void:
 			if _demo_frames == 90:
 				client.use_item("club_2")
 				client.use_item("jacket_2")
+		"vista":
+			if _demo_frames == 40:
+				# A wide view over open country (screenshots of the landscape: grass, cloud shadows, light).
+				var spot := _find_forest()
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": spot.x + 40.0, "z": spot.y + 30.0})
+				_zoom = 2.2
 		"forest":
 			if _demo_frames == 40:
 				var spot := _find_forest()
