@@ -98,7 +98,7 @@ func _position_has_terrain(world_position: Vector3) -> bool:
         return true
     var local: Vector3 = streaming_world.to_local(world_position)
     var cell: Vector2i = streaming_world.local_position_to_cell(local)
-    return streaming_world.is_cell_loaded(cell)
+    return streaming_world.are_cells_loaded(cell, 0)
 
 
 func teleport_to_ground(world_x: float, world_z: float, ground_y: float) -> void:
