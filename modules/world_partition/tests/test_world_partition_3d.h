@@ -55,6 +55,8 @@ TEST_CASE("[WorldPartition3D] Defaults") {
 	CHECK(partition->is_streaming_enabled());
 	CHECK(partition->get_configured_cell_count() == 0);
 	CHECK(partition->get_loaded_cell_count() == 0);
+	CHECK_FALSE(partition->are_cells_loaded(Vector2i(0, 0)));
+	CHECK_FALSE(partition->are_cells_loaded(Vector2i(0, 0), 1));
 	CHECK(partition->get_pending_cell_count() == 0);
 	CHECK(partition->get_inflight_request_count() == 0);
 	CHECK(partition->get_failed_cell_count() == 0);
@@ -341,6 +343,8 @@ TEST_CASE("[SceneTree][WorldPartition3D] Stream one authored PackedScene and unl
 		OS::get_singleton()->delay_usec(1000);
 	}
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
+	CHECK(partition->are_cells_loaded(Vector2i(0, 0)));
+	CHECK_FALSE(partition->are_cells_loaded(Vector2i(0, 0), 1));
 	CHECK(partition->get_loaded_cell_count() == 1);
 	CHECK(partition->get_child_count() == 2);
 	Node *streamed_child = partition->get_child(1);
