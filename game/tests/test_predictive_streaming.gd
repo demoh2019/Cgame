@@ -9,6 +9,8 @@ func run(t) -> void:
 		"existing games retain nearest-first scheduling by default")
 	t.eq(streamer.velocity_hint, Vector3.ZERO,
 		"default hint does not pull queued world cells")
+	t.eq(streamer.get_queued_generation_count(), 0,
+		"new streamers start with no stale procedural requests")
 	streamer.lookahead_seconds = 2.0
 	streamer.velocity_hint = Vector3(8.0, 0.0, -3.0)
 	t.near(streamer.lookahead_seconds, 2.0, 0.0001,
@@ -54,3 +56,6 @@ func run(t) -> void:
 		"live generation uses a 2.5 ms soft CPU time slice")
 	t.check(online.contains("streamer.unload_radius = 220.0"),
 		"moving forward does not change resident world memory hysteresis")
+	t.check(online.contains("CLIENT streaming: loaded=%d queued=%d threaded=%d")
+		and online.contains("streamer.get_queued_generation_count()"),
+		"benchmark reports procedural backlog separately from GPU frame pacing")
