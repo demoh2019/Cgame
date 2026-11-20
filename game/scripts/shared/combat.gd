@@ -111,6 +111,13 @@ static func active_skill(weapon_id: String) -> Dictionary:
 			"attack_lock": 1.2, "range": ranged_range(weapon_id) + 5.0,
 			"damage": weapon_damage(weapon_id) * 1.6,
 			"ranged": true, "ammo": str(info.get("ammo", ""))}
+	# The covert pistol trades raw DPS and firing range for less infected aggro.
+	# Its charged shot uses the same one-cartridge, line-of-fire server path.
+	if weapon_id == "suppressed_pistol" and str(info.get("weapon", "")) == "ranged":
+		return {"id": "careful_shot", "energy_cost": 32.0, "cooldown": 6.5,
+			"attack_lock": 0.95, "range": ranged_range(weapon_id) + 2.0,
+			"damage": weapon_damage(weapon_id) * 1.55,
+			"ranged": true, "ammo": str(info.get("ammo", ""))}
 	if weapon_id == "pistol" and str(info.get("weapon", "")) == "ranged":
 		return {"id": "focused_shot", "energy_cost": 40.0, "cooldown": 8.0,
 			"attack_lock": 0.55, "range": Defs.PISTOL_RANGE + 4.0,
