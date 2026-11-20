@@ -513,7 +513,7 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 	# fallback uses the exact same seeded PCG sequence on stock Godot.
 	var shuffle_seed: int = WorldGen.mix(int(origin.x), int(origin.y), 981, tile)
 	if multimesh.has_method("shuffled_instance_buffer"):
-		buffer = multimesh.shuffled_instance_buffer(buffer, shuffle_seed)
+		buffer = multimesh.call("shuffled_instance_buffer", buffer, shuffle_seed)
 	else:
 		shuffle_instances(buffer, count, shuffle_seed)
 	multimesh.buffer = buffer
