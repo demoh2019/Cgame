@@ -153,6 +153,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_radar", KEY_M)
 	_bind_key("survive_mount", KEY_F4)
 	_bind_key("survive_bike_service", KEY_PAGEUP)
+	_bind_key("survive_bike_repair", KEY_PAGEDOWN)
 	_bind_key("survive_survey", KEY_F3)
 	_bind_key("survive_bank", KEY_B)
 	_bind_key("survive_bank_next", KEY_J)
@@ -946,6 +947,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Trail bike", sim.cmd_toggle_mount(LOCAL_PLAYER_ID))
 	elif event.is_action_pressed("survive_bike_service"):
 		_result("Drive service", sim.cmd_use(LOCAL_PLAYER_ID, "bike_service_kit"))
+	elif event.is_action_pressed("survive_bike_repair"):
+		_result("Frame repair", sim.cmd_use(LOCAL_PLAYER_ID, "bike_frame_patch"))
 	elif event.is_action_pressed("survive_survey"):
 		var result: Dictionary = sim.cmd_survey_ruins(LOCAL_PLAYER_ID)
 		_result("Survey ruins", result)
@@ -1208,6 +1211,7 @@ func _update_hud() -> void:
 		_stats.text += "\nDIRT ROAD: +8%% foot pace; stable bicycle grip"
 	if survivor.inventory.count("salvage_bike") > 0:
 		_stats.text += "\nBIKE SERVICE: %.0f m (PgUp applies kit on foot)" % survivor.bike_service_meters
+		_stats.text += "\nBIKE FRAME: %.0f%% (PgDn to patch on foot)" % survivor.bike_integrity
 	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
 		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		survivor.mount_cooldown]

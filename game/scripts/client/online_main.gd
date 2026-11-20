@@ -675,6 +675,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_PAGEUP:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.use_item("bike_service_kit")
+			KEY_PAGEDOWN:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.use_item("bike_frame_patch")
 			KEY_F5:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var direction: Vector2 = _aim_direction()
