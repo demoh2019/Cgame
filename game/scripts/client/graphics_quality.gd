@@ -8,6 +8,7 @@ const NAMES := ["Performance", "Balanced", "High", "Ultra"]
 const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
 const GraphicsReflections = preload("res://scripts/client/graphics_reflections.gd")
+const GraphicsIndirectLighting = preload("res://scripts/client/graphics_indirect_lighting.gd")
 const WaterRefraction = preload("res://scripts/client/water_refraction.gd")
 const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
@@ -172,8 +173,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		var env := atmosphere.get("environment") as Environment
 		if env != null:
 			env.glow_enabled = p["glow"]
-			env.ssao_enabled = bool(p["ssao"]) and method == "forward_plus"
-			env.ssil_enabled = bool(p["ssil"]) and method == "forward_plus"
+			# Fixed quality tiers trade contact AO and indirect bounce against GPU cost.
+			# This overwrites Atmosphere's startup defaults on every preset change.
+			GraphicsIndirectLighting.apply(env, _level, str(method))
 		# Keep the cinematic shadow/fog budget tied to the active renderer,
 		# not merely to the requested quality preset.
 		GraphicsLighting.apply(sun, env, _level, method)
