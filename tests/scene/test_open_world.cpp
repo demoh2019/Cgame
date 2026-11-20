@@ -184,6 +184,84 @@ TEST_CASE("[WorldStreaming] WorldStreamer motion hint is validated and bounded")
 	memdelete(streamer);
 }
 
+TEST_CASE("[WorldStreaming] Camera-aware priority favors visible chunks without extra residency") {
+	const Vector3 focus(5, 0, 5);
+	LocalVector<Vector3i> cells;
+	cells_in_radius(focus, 25.0, 10.0, AXES_XZ, cells);
+	REQUIRE(cells.size() > 4);
+	const uint32_t count = cells.size();
+	LocalVector<Vector3i> original;
+	for (const Vector3i &cell : cells) {
+		original.push_back(cell);
+	}
+	prioritize_cells_for_motion_and_view(cells, focus, Vector3(), 0.0, 10.0,
+			Vector3(1, 0, 0), 0.8, 10.0, AXES_XZ);
+	CHECK(cells.size() == count);
+	CHECK(cells[0] == Vector3i(0, 0, 0));
+	int east = -1;
+	int west = -1;
+	for (uint32_t i = 0; i < count; i++) {
+		if (cells[i] == Vector3i(1, 0, 0)) {
+			east = int(i);
+		} else if (cells[i] == Vector3i(-1, 0, 0)) {
+			west = int(i);
+		}
+	}
+	REQUIRE(east >= 0);
+	REQUIRE(west >= 0);
+	CHECK(east < west);
+	// Rotate the camera: pending chunks follow the view, not stale motion.
+	prioritize_cells_for_motion_and_view(cells, focus, Vector3(), 0.0, 10.0,
+			Vector3(-1, 0, 0), 0.8, 10.0, AXES_XZ);
+	east = -1;
+	west = -1;
+	for (uint32_t i = 0; i < count; i++) {
+		if (cells[i] == Vector3i(1, 0, 0)) {
+			east = int(i);
+		} else if (cells[i] == Vector3i(-1, 0, 0)) {
+			west = int(i);
+		}
+	}
+	CHECK(west < east);
+	for (const Vector3i &cell : original) {
+		int appearances = 0;
+		for (const Vector3i &next : cells) {
+			appearances += int(cell == next);
+		}
+		CHECK(appearances == 1); // Camera never adds or removes cells.
+	}
+	LocalVector<Vector3i> legacy;
+	for (const Vector3i &cell : original) {
+		legacy.push_back(cell);
+	}
+	prioritize_cells_for_motion(legacy, focus, Vector3(15, 0, 0), 2.0, 10.0, 10.0, AXES_XZ);
+	prioritize_cells_for_motion_and_view(cells, focus, Vector3(15, 0, 0), 2.0, 10.0,
+			Vector3(), 0.8, 10.0, AXES_XZ);
+	for (uint32_t i = 0; i < count; i++) {
+		CHECK(cells[i] == legacy[i]);
+	}
+}
+
+TEST_CASE("[WorldStreaming] Camera priority hint validates and clamps") {
+	WorldStreamer *streamer = memnew(WorldStreamer);
+	CHECK(streamer->get_view_priority() == doctest::Approx(0.0));
+	CHECK(streamer->get_view_direction() == Vector3());
+	streamer->set_view_direction(Vector3(20, 0, -10));
+	CHECK(streamer->get_view_direction().length() == doctest::Approx(1.0));
+	const Vector3 direction = streamer->get_view_direction();
+	streamer->set_view_direction(Vector3(Math::INF, 0, 0));
+	CHECK(streamer->get_view_direction() == direction);
+	streamer->set_view_priority(0.8);
+	CHECK(streamer->get_view_priority() == doctest::Approx(0.8));
+	streamer->set_view_priority(Math::INF);
+	CHECK(streamer->get_view_priority() == doctest::Approx(0.8));
+	streamer->set_view_priority(5.0);
+	CHECK(streamer->get_view_priority() == doctest::Approx(1.0));
+	streamer->set_view_priority(-20.0);
+	CHECK(streamer->get_view_priority() == doctest::Approx(0.0));
+	memdelete(streamer);
+}
+
 TEST_CASE("[WorldStreaming] Cell count is capped for huge radii") {
 	LocalVector<Vector3i> cells;
 	bool truncated = false;

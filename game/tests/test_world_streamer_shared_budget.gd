@@ -95,9 +95,43 @@ func run(t) -> void:
 		"stopping clears stale forward priority, restoring nearest-first queue order")
 	stopped.free()
 
+	t.current = "camera gaze makes visible world chunks stream first"
+	t.near(StreamingPolicy.view_weight(0), 0.35, 0.0001,
+			"Performance uses small camera bias, preserving near cells")
+	t.near(StreamingPolicy.view_weight(3), 0.80, 0.0001,
+			"Ultra favors visible architecture and world scenery")
+	t.check(StreamingPolicy.view_weight(1) < StreamingPolicy.view_weight(2),
+			"view priority increases across quality presets")
+	var viewing_camera := Camera3D.new()
+	viewing_camera.rotation = Vector3(0.0, -PI * 0.5, 0.0)
+	var forward: Vector3 = StreamingPolicy.ground_view(viewing_camera)
+	t.check(forward.x > 0.99 and absf(forward.y) < 0.0001,
+			"camera's forward is projected onto streamed XZ grid")
+	StreamingPolicy.apply_view(streamer, viewing_camera, 3)
+	t.near(streamer.view_priority, 0.80, 0.0001,
+			"Ultra view quality reaches the native engine")
+	t.check(streamer.view_direction.is_equal_approx(forward),
+			"native streamer uses the actual camera direction")
+	var old_direction: Vector3 = streamer.view_direction
+	StreamingPolicy.apply_view(streamer, viewing_camera, 3)
+	t.check(streamer.view_direction.is_equal_approx(old_direction),
+			"repeated camera hints are idempotent")
+	viewing_camera.rotation = Vector3(0.0, PI * 0.5, 0.0)
+	StreamingPolicy.apply_view(streamer, viewing_camera, 2)
+	t.check(streamer.view_direction.x < -0.99,
+			"standing player can turn camera to reprioritize scenery")
+	t.near(streamer.view_priority, 0.66, 0.0001,
+			"High quality selects bounded camera bias")
+	StreamingPolicy.apply_view(streamer, null, 0)
+	t.check(streamer.view_direction.is_zero_approx(),
+			"removing camera falls back to original motion lookahead")
+	viewing_camera.free()
+
 	t.current = "actual UI and network game consume the native scene queue"
 	var online := FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
 	var ui := FileAccess.get_file_as_string("res://scripts/client/ui_accessibility_layer.gd")
+	t.check(online.contains("WorldStreamingPolicy.apply_view(streamer, camera, GraphicsQuality.level())"),
+			"camera orientation drives live streamed-world scheduling")
 	t.check(online.contains("WorldStreamingPolicy.apply(streamer"),
 		"networked world forwards actual mounted state to streaming scheduling")
 	t.check(online.contains("_access.set_world_streamer(streamer)"),
