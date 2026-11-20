@@ -31,6 +31,7 @@ mannequin bones and Low quality keep the old instant despawn.
 Tests: `tests/test_ragdoll.gd`.
 
 
+
 ## Combat and interaction VFX (Unity VFX Graph/Shuriken, Unreal Niagara)
 
 `scripts/client/combat_vfx.gd` (one node, wired from `online_main.gd` via
@@ -123,3 +124,27 @@ its own changes each pass), wiring in `character_model.gd` and one crowd call in
 
 Tests: `tests/test_animation_parity.gd`. The live-skeleton and `CharacterModel` checks need a running scene tree and
 are skipped under `run_all.gd`'s `_initialize`; run the suite after a `process_frame` to include them.
+## UI, input, accessibility and localization
+
+All settings live in `user://albion_after_graphics.cfg` (sections `interface`, `bindings`) next to the graphics
+quality, are client-only, and are edited in the Esc / gamepad-Menu settings window. One node,
+`scripts/client/ui_accessibility_layer.gd`, is added by `online_main.gd`; the logic is in static `ui_*.gd` helpers.
+
+| Feature | Files | Unity / Unreal equivalent |
+|---|---|---|
+| Esc / Menu settings window (Gameplay, Controls, Accessibility tabs) | `ui_pause_menu.gd` | Unity settings UI / UE pause + options menu (CommonUI) |
+| Key rebinding with conflict swap, reset, persistence (move, sprint, crouch, pause, FPS) | `ui_input_rebind.gd` | Input System `PerformInteractiveRebinding` / Enhanced Input player mappable keys |
+| Gamepad: pad buttons drive the existing hotkeys (A interact, X attack, Y inventory ...), stick clicks sprint/crouch, Menu pauses | `ui_gamepad.gd` | Input System gamepad control scheme / UE gamepad bindings |
+| On-screen prompts that switch by last-used device, Xbox or PlayStation glyphs | `ui_gamepad.gd`, layer | CommonUI input-type-aware action widgets / Input System control-scheme glyphs |
+| UI scale slider 0.75-1.75 (window `content_scale_factor`) | `ui_access.gd`, `ui_settings.gd` | Canvas Scaler / UE DPI scale |
+| Colour-blind filters: protanopia, deuteranopia, tritanopia (Machado matrices, full-screen shader) | `ui_colorblind.gd` | UE "Color Blind Mode"; Unity post-processing colour matrix |
+| Closed captions with direction and distance, e.g. `[Gunshot, left, 24 m]`, three sizes | `ui_captions.gd` | UE closed captions / sound-class subtitles |
+| Russian/English `Translation` built in code, English text as key so existing Labels/Buttons/tooltips translate automatically, language picker, OS-locale default | `ui_localization.gd` | Unity Localization package string tables / UE FText string tables |
+| Toggle (instead of hold) sprint and crouch, mutually exclusive latches | `ui_settings.gd` (`resolve_hold`), `ui_access.gd` | UE Enhanced Input "hold vs toggle" triggers |
+| Reduce screen shake (camera trauma scale) | `online_main.gd` `_shake` | UE camera-shake scale / Cinemachine impulse gain |
+| Reduce flashes (no lightning flash, no hit flash or low-health pulse) | `online_main.gd`, `hud_skin.gd` | UE/Unity photosensitivity options |
+| High-contrast interface (white outlined text, black ink on parchment) | `ui_access.gd` | OS/UE high-contrast mode |
+| FPS / frame time / draw call overlay (default backslash) | layer | `stat fps` / Unity Rendering Debugger |
+
+Limits: only the polled movement actions are rebindable; one-shot hotkeys stay keycode-matched (see F2). The gamepad
+has no aim stick yet. In-world strings from `hud.say` stay English. Tests: `tests/test_ui_parity.gd`.

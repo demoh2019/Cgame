@@ -4,6 +4,7 @@ extends Control
 ## pulse, damage flash). It only draws what `client.you` already says; nothing here can change the game.
 ## The old text labels of hud.gd stay alive (hidden) and F3 shows them as a details panel.
 
+const UiSettings = preload("res://scripts/client/ui_settings.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
@@ -306,9 +307,10 @@ func _draw() -> void:
 func _draw_edge_feedback(you: Dictionary, view: Vector2) -> void:
 	var maximum: float = maxf(float(you.get("max_health", Defs.MAX_HEALTH)), 1.0)
 	var fraction: float = float(you["health"]) / maximum
-	var intensity: float = _flash * 0.55
+	var steady: bool = UiSettings.flash_scale() == 0.0 # "Reduce flashes": no hit flash, no low-health pulsing.
+	var intensity: float = 0.0 if steady else _flash * 0.55
 	if fraction < 0.3 and bool(you.get("alive", true)):
-		intensity = maxf(intensity, (0.3 - fraction) / 0.3 * (0.28 + 0.14 * sin(_time * 5.0)))
+		intensity = maxf(intensity, (0.3 - fraction) / 0.3 * (0.28 if steady else 0.28 + 0.14 * sin(_time * 5.0)))
 	if intensity <= 0.01:
 		return
 	var steps := 7

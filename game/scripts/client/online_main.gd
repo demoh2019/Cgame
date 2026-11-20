@@ -17,6 +17,9 @@ const EntityView = preload("res://scripts/client/entity_view.gd")
 const RaidTelegraph = preload("res://scripts/client/raid_telegraph.gd")
 const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
 const Hud = preload("res://scripts/client/hud.gd")
+const UiAccessibilityLayer = preload("res://scripts/client/ui_accessibility_layer.gd")
+const UiAccess = preload("res://scripts/client/ui_access.gd")
+const UiSettings = preload("res://scripts/client/ui_settings.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
@@ -97,6 +100,7 @@ var _auto_quality := GraphicsAutoQuality.new()
 var _adaptive_resolution := GraphicsDynamicResolution.new()
 var _auto_graphics := true
 var _quality_picker: OptionButton
+var _access # UiAccessibilityLayer: Esc settings menu, captions, colour-blind filter, FPS overlay.
 var effects
 var combat_vfx
 var _footprints: Node3D
@@ -150,6 +154,8 @@ func _exit_tree() -> void:
 func _ready() -> void:
 	Engine.physics_ticks_per_second = 30
 	GraphicsQuality.load_preference()
+	_access = UiAccessibilityLayer.new() # Loads settings, language and key bindings; must precede the menus below.
+	add_child(_access)
 	var graphics_config := ConfigFile.new()
 	if graphics_config.load(GraphicsQuality.SETTINGS_PATH) == OK:
 		_auto_graphics = bool(graphics_config.get_value("rendering", "auto", false))
@@ -788,7 +794,7 @@ func _end_build_mode() -> void:
 ## Camera shake through the fork's built-in Camera3D trauma, which decays by itself.
 func _shake(amount: float) -> void:
 	if camera != null and camera.has_method("add_trauma"):
-		camera.add_trauma(amount)
+		camera.add_trauma(amount * UiSettings.shake_scale()) # "Reduce screen shake" accessibility option.
 
 
 ## Particles for what just happened, at the place it happened.
@@ -796,7 +802,7 @@ func _spawn_effects(event: Dictionary) -> void:
 	var here: Vector3 = client.display_position() + Vector3(0, 1.0, 0)
 	# The real server emits this once at impact; never flash on mere warning,
 	# ordinary rain, or while underground. No new dynamic light is allocated.
-	if str(event.get("type", "")) == "lightning_struck" and atmosphere != null and \
+	if str(event.get("type", "")) == "lightning_struck" and atmosphere != null and UiSettings.flash_scale() > 0.0 and \
 			event.has("x") and event.has("z") and \
 			not Dungeon.is_underground(float(client.you.get("x", 0.0))):
 		var strike_xz := Vector2(float(event["x"]), float(event["z"]))
@@ -1001,6 +1007,7 @@ func _on_welcomed() -> void:
 	add_child(hud)
 	hud.setup(client)
 	camera_fx.hud = hud
+	_access.setup(client, camera, func() -> bool: return _build_mode or hud.is_menu_open() or _typing())
 	hud.social = social
 	skills_panel = SkillsPanel.new()
 	hud.add_child(skills_panel)
@@ -1082,16 +1089,18 @@ func _physics_process(delta: float) -> void:
 	var sprint := false
 	var crouch := false
 	if alive and not _typing():
-		move.x = Input.get_axis("ui_left", "ui_right") + float(Input.is_key_pressed(KEY_D)) - float(Input.is_key_pressed(KEY_A))
-		move.y = Input.get_axis("ui_up", "ui_down") + float(Input.is_key_pressed(KEY_S)) - float(Input.is_key_pressed(KEY_W))
-		sprint = Input.is_key_pressed(KEY_SHIFT)
-		crouch = Input.is_key_pressed(KEY_CTRL)
+		var polled := UiAccess.read_move() # Rebindable keys, gamepad stick, hold-or-toggle sprint/crouch.
+		move = polled["move"]
+		sprint = polled["sprint"]
+		crouch = polled["crouch"]
+	else:
+		UiAccess.clear_latches()
 	move = move.limit_length(1.0)
 	_move_input = move
 	var aim := _aim_direction()
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
 	client.send_input(move, sprint, yaw, delta, crouch)
-	if alive and not _build_mode and not hud.is_menu_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
+	if alive and not _build_mode and not hud.is_menu_open() and not _access.is_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
 		client.attack(aim)
 		_attack_cooldown = 0.18
 		_last_attack_msec = Time.get_ticks_msec()
@@ -1327,7 +1336,7 @@ func _aim_direction() -> Vector2:
 
 func _typing() -> bool:
 	var focus := get_viewport().gui_get_focus_owner()
-	return focus is LineEdit
+	return focus is LineEdit or (_access != null and _access.is_open()) # The settings menu swallows game hotkeys too.
 
 
 func _update_prompt() -> void:
