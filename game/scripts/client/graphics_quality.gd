@@ -10,6 +10,7 @@ const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
 const GraphicsReflections = preload("res://scripts/client/graphics_reflections.gd")
 const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
+const Foliage = preload("res://scripts/client/foliage.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
@@ -118,6 +119,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Higher thresholds choose cheaper geometry sooner, without hiding gameplay resources.
 		viewport.mesh_lod_threshold = float(p["mesh_lod_threshold"])
 		apply_resolution(viewport, render_scale, adaptive)
+	# MSAA edge coverage smooths leaf silhouettes on native High/Ultra.
+	# FSR2 or Compatibility automatically reuses the ordinary alpha-cutout shader.
+	Foliage.configure_antialiasing(
+		Foliage.supports_alpha_coverage(str(method), viewport.msaa_3d) if viewport != null else false)
 	if atmosphere != null:
 		# The atmosphere owns the persistent shadow enable flag used by its day/night update.
 		# Applying only to the sun node would let nighttime weather restore shadows on Performance.
