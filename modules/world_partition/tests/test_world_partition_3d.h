@@ -61,6 +61,39 @@ TEST_CASE("[WorldPartition3D] Defaults") {
 	memdelete(partition);
 }
 
+TEST_CASE("[SceneTree][WorldPartition3D] Observer cell follows motion and grid changes") {
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	Node3D *observer = memnew(Node3D);
+	observer->set_name("Observer");
+	SceneTree::get_singleton()->get_root()->add_child(partition);
+	SceneTree::get_singleton()->get_root()->add_child(observer);
+
+	partition->set_cell_size(16.0);
+	CHECK_FALSE(partition->has_observer_cell());
+	partition->set_observer_path(partition->get_path_to(observer));
+	partition->update_streaming();
+	CHECK(partition->has_observer_cell());
+	CHECK(partition->get_observer_cell() == Vector2i(0, 0));
+	CHECK(partition->has_signal(SNAME("observer_cell_changed")));
+
+	observer->set_position(Vector3(-17, 20, 33));
+	partition->update_streaming();
+	CHECK(partition->get_observer_cell() == Vector2i(-2, 2));
+
+	partition->set_cell_size(32.0);
+	CHECK_FALSE(partition->has_observer_cell());
+	partition->update_streaming();
+	CHECK(partition->get_observer_cell() == Vector2i(-1, 1));
+
+	partition->set_observer_path(NodePath());
+	CHECK_FALSE(partition->has_observer_cell());
+
+	SceneTree::get_singleton()->get_root()->remove_child(partition);
+	SceneTree::get_singleton()->get_root()->remove_child(observer);
+	memdelete(partition);
+	memdelete(observer);
+}
+
 TEST_CASE("[WorldPartition3D] Exact positive and negative cell boundaries") {
 	WorldPartition3D *partition = memnew(WorldPartition3D);
 	partition->set_cell_size(16.0);
