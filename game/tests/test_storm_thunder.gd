@@ -4,6 +4,10 @@ extends RefCounted
 const Thunder = preload("res://scripts/client/storm_thunder.gd")
 const Online = preload("res://scripts/client/online_main.gd")
 const Solo = preload("res://scripts/client/client_main.gd")
+const Net = preload("res://scripts/shared/net.gd")
+const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const GameServer = preload("res://scripts/server/game_server.gd")
+const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 
 
 func _height(_x: float, _z: float) -> float:
@@ -97,11 +101,58 @@ func run(t) -> void:
 		"nearest sound replaces an existing queued entry")
 	sound.free()
 
+	t.current = "server broadcasts distant thunder without accurate hazard coordinates"
+	var simulation := GameServer.new(WorldGen.new(944), 944)
+	var near = simulation.add_player(71, "Near Listener")
+	var distant = simulation.add_player(72, "Far Listener")
+	var out_of_range = simulation.add_player(73, "Out Of Range")
+	near.position = Vector3(24.0, 0.0, 0.0)
+	distant.position = Vector3(720.0, 0.0, 0.0)
+	out_of_range.position = Vector3(4200.0, 0.0, 0.0)
+	var network := Net.new()
+	network.role = "server"
+	network.sim = simulation
+	var bolt := {"type": "lightning_struck", "x": 17.0, "z": 29.0,
+		"radius": StormLightning.RADIUS}
+	var near_packet: Dictionary = network._lightning_for_peer(bolt, near.id)
+	t.eq(near_packet, bolt,
+		"near players see exact coordinates needed for flashes and dodges")
+	var far_packet: Dictionary = network._lightning_for_peer(bolt, distant.id)
+	t.eq(str(far_packet.get("type", "")), "distant_thunder",
+		"far listeners receive only the atmospheric sound event")
+	t.check(far_packet.size() == 3 and far_packet.has("x") and far_packet.has("z"),
+		"coarse thunder reveals no exact radius, survivor, hit or hazard metadata")
+	t.check(Vector2(float(far_packet["x"]), float(far_packet["z"])) !=
+			Vector2(float(bolt["x"]), float(bolt["z"])),
+		"exact storm target cannot be inferred from the distant audio payload")
+	t.near(fmod(float(far_packet["x"]), StormLightning.THUNDER_COARSE_GRID),
+		0.0, 0.001, "thunder direction is quantized to a 256-meter weather cell")
+	t.eq(network._lightning_for_peer(bolt, out_of_range.id), {},
+		"out-of-range listeners do not receive remote atmospheric events")
+	t.check(network._event_visible_to(bolt, near.id) and
+			network._event_visible_to(bolt, distant.id) and
+			not network._event_visible_to(bolt, out_of_range.id),
+		"server delivers exactly the relevant impact or distant sound")
+	t.check(not network._event_visible_to(
+		{"type": "lightning_warning", "x": 17.0, "z": 29.0}, distant.id),
+		"remote thunder listeners never receive a warning or private hazard location")
+	t.check(not network._event_visible_to(far_packet, near.id),
+		"a client cannot forge and rebroadcast a synthetic distant-thunder event")
+	var distant_sound := Thunder.new()
+	t.check(distant_sound.on_strike(far_packet, distant.position, _height, false),
+		"network-received weather-cell packet triggers delayed spatial thunder")
+	t.eq(distant_sound.queued_count(), 1,
+		"coarse packet schedules one sound but no combat gameplay")
+	distant_sound.free()
+	network.free()
+
 	t.current = "both client modes consume the actual server strike event"
 	var online_source: String = (Online as Script).source_code
 	var solo_source: String = (Solo as Script).source_code
 	t.check(online_source.contains("_storm_thunder.on_strike(event, here,"),
 		"network events schedule real sound without a second gameplay event")
+	t.check(online_source.contains('in ["lightning_struck", "distant_thunder"]'),
+		"online game plays both near thunder and privacy-rounded distant rumble")
 	t.check(solo_source.contains("_storm_thunder.on_strike(game_event, survivor.position,"),
 		"local authoritative simulation uses the same delayed thunder")
 	t.check(online_source.contains('str(event.get("type", "")) == "lightning_struck"'),
