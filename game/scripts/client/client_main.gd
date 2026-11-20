@@ -48,6 +48,7 @@ const WadingWetness = preload("res://scripts/shared/wading_wetness.gd")
 const StormMud = preload("res://scripts/shared/storm_mud.gd")
 const WindChill = preload("res://scripts/shared/wind_chill.gd")
 const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
+const StormThunder = preload("res://scripts/client/storm_thunder.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
@@ -78,6 +79,7 @@ var _avatar: MeshInstance3D
 var _bike_visual
 var _flare_visual
 var _lightning_visual
+var _storm_thunder: Node3D
 var _last_bike_position: Vector3 = Vector3.INF
 var _stats: Label
 var _instructions: Label
@@ -140,6 +142,9 @@ func _ready() -> void:
 	_lightning_visual = LightningVisual.new()
 	_lightning_visual.name = "StormLightningWarning"
 	add_child(_lightning_visual)
+	_storm_thunder = StormThunder.new()
+	_storm_thunder.name = "PhysicalLightningThunder"
+	add_child(_storm_thunder)
 	_make_avatar()
 	_make_workbench()
 	_make_bank_landmark()
@@ -817,6 +822,12 @@ func _physics_process(delta: float) -> void:
 				var distance_m: float = Vector2(survivor.position.x,
 					survivor.position.z).distance_to(strike_xz)
 				_atmosphere.trigger_lightning(distance_m)
+		# The flash is immediate; thunder is queued by distance / speed of
+		# sound. It depends on the same server-confirmed strike event, not
+		# the early warning and not the player's local attack input.
+		if str(game_event.get("type", "")) == "lightning_struck" and _storm_thunder != null:
+			_storm_thunder.on_strike(game_event, survivor.position, world.height_at,
+				Dungeon.is_underground(survivor.position.x))
 		if str(game_event.get("type", "")) == "camp_alarm" and (
 				int(game_event.get("peer", -1)) == LOCAL_PLAYER_ID):
 			_feedback = "CAMP ALERT: %d infected near your fire! Prepare defenses." % int(game_event.get("count", 0))
