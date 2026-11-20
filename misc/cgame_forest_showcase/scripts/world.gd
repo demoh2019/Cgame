@@ -4,6 +4,7 @@ extends Node3D
 
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const GameSave = preload("res://scripts/game_save.gd")
+const AtmosphereCycle = preload("res://scripts/atmosphere_cycle.gd")
 const WORLD_EXTENT: float = 64.0
 const GRID_SEGMENTS: int = 112
 const CHUNK_EDGE: float = 32.0
@@ -13,6 +14,9 @@ var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var camera: Camera3D
 var player: CharacterBody3D
 var world_environment: Environment
+var sky_material: ShaderMaterial
+var sun_light: DirectionalLight3D
+var atmosphere_clock: Node
 var hud: Label
 var hint: Label
 var world_partition: WorldPartition3D
@@ -33,6 +37,7 @@ func _ready() -> void:
     rng.seed = 913481
     _create_environment()
     _create_sun()
+    _create_atmosphere_clock()
     _create_terrain()
     _create_world_boundaries()
     _create_crystals()
@@ -53,7 +58,7 @@ func _normal_at(x: float, z: float) -> Vector3:
 
 
 func _create_environment() -> void:
-    var sky_material := ShaderMaterial.new()
+    sky_material = ShaderMaterial.new()
     sky_material.shader = preload("res://shaders/atmosphere.gdshader")
 
     var sky := Sky.new()
@@ -82,13 +87,20 @@ func _create_environment() -> void:
 
 
 func _create_sun() -> void:
-    var sun := DirectionalLight3D.new()
-    sun.name = "GoldenHourSun"
-    sun.rotation_degrees = Vector3(-38.0, -43.0, 0.0)
-    sun.light_color = Color(1.0, 0.78, 0.58)
-    sun.light_energy = 1.35
-    sun.shadow_enabled = true
-    add_child(sun)
+    sun_light = DirectionalLight3D.new()
+    sun_light.name = "DynamicSun"
+    sun_light.rotation_degrees = Vector3(-38.0, -43.0, 0.0)
+    sun_light.light_color = Color(1.0, 0.78, 0.58)
+    sun_light.light_energy = 1.35
+    sun_light.shadow_enabled = true
+    add_child(sun_light)
+
+
+func _create_atmosphere_clock() -> void:
+    atmosphere_clock = AtmosphereCycle.new()
+    atmosphere_clock.name = "AtmosphereClock"
+    add_child(atmosphere_clock)
+    atmosphere_clock.configure(sun_light, world_environment, sky_material)
 
 
 func _create_terrain() -> void:
@@ -194,6 +206,7 @@ func _create_streaming_world() -> void:
     world_partition.load_radius = 2
     world_partition.unload_radius = 3
     world_partition.detail_radius = 1
+    world_partition.detail_hysteresis_cells = 1
     world_partition.max_detail_transitions_per_frame = 2
     world_partition.max_new_requests_per_frame = 2
     world_partition.max_instances_per_frame = 1
@@ -301,10 +314,11 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 166)
+    hint.position = Vector2(22, 198)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: упреждение  •  F4: LOD  •  F5/F9: сохранение  •  Esc: курсор"
+    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1/F2: графика  •  F3: упреждение  •  F4: LOD  •  F5/F9: сохранение
+F6: погода  •  F7: пауза дня  •  F8: +3 часа  •  Esc: курсор"
     canvas.add_child(hint)
 
 
@@ -346,7 +360,8 @@ func _refresh_hud() -> void:
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   закреплено: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pinned, pending, inflight, failed, current_region.x, current_region.y] \
-        + "Упреждающая загрузка: %s   LOD дальних: %d   F3/F4: сравнение" % [predicted_text, distant]
+        + "Упреждающая загрузка: %s   LOD дальних: %d   F3/F4: сравнение\\n" % [predicted_text, distant] \\
+        + "Атмосфера: %02d:%02d  %s  %s (F6/F7/F8)" % [int(atmosphere_clock.day_hours), int(fmod(atmosphere_clock.day_hours, 1.0) * 60.0), atmosphere_clock.get_weather_name(), "ПАУЗА" if atmosphere_clock.paused else "цикл"]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
@@ -402,6 +417,15 @@ func _unhandled_input(event: InputEvent) -> void:
                 _refresh_hud()
             KEY_F5:
                 _save_game()
+            KEY_F6:
+                atmosphere_clock.cycle_weather()
+                _refresh_hud()
+            KEY_F7:
+                atmosphere_clock.paused = not atmosphere_clock.paused
+                _refresh_hud()
+            KEY_F8:
+                atmosphere_clock.skip_hours(3.0)
+                _refresh_hud()
             KEY_F9:
                 _load_game()
                 _apply_quality(high_quality)
@@ -414,7 +438,9 @@ func _save_game() -> void:
         "relics": collected_ids,
         "position_xz": [player.position.x, player.position.z],
         "look": [camera.rotation.x, player.rotation.y],
-        "quality": high_quality
+        "quality": high_quality,
+        "time_of_day": atmosphere_clock.day_hours,
+        "weather": atmosphere_clock.weather_mode
     })
     if saved and collected < CRYSTAL_TOTAL:
         hint.text = "Прогресс сохранён локально. F9: загрузить. W/A/S/D: ходьба, E: реликвии."
@@ -438,6 +464,8 @@ func _load_game() -> void:
     camera.rotation.x = look.x
     player.rotation.y = look.y
     high_quality = state["quality"]
+    atmosphere_clock.set_weather(state.get("weather", 0))
+    atmosphere_clock.set_clock(state.get("time_of_day", 17.25))
     _refresh_hud()
 
 
