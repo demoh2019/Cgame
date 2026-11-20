@@ -7,6 +7,7 @@ const SETTINGS_PATH := "user://albion_after_graphics.cfg"
 const NAMES := ["Performance", "Balanced", "High", "Ultra"]
 const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
+const GraphicsReflections = preload("res://scripts/client/graphics_reflections.gd")
 const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
@@ -141,6 +142,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Keep the cinematic shadow/fog budget tied to the active renderer,
 		# not merely to the requested quality preset.
 		GraphicsLighting.apply(sun, env, _level, method)
+		# Hybrid sky + screen-space reflections on High/Ultra Forward+ only.
+		# Runtime changes (including Auto) also turn SSR off when required.
+		GraphicsReflections.apply(env, _level, method)
 	if post_material != null:
 		post_material.set_shader_parameter("blur_quality", p["blur_quality"])
 		post_material.set_shader_parameter("blur_radius", p["blur_radius"])
