@@ -4,6 +4,7 @@ extends Node3D
 ## Per-cell deterministic seeds keep the same foliage layout on reload.
 
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
+const SharedAssets = preload("res://scripts/forest_shared_assets.gd")
 const TerrainPatch = preload("res://scripts/streamed_terrain_patch.gd")
 const CELL_SIZE: float = 32.0
 const TREE_COUNT: int = 54
@@ -46,24 +47,8 @@ func _world_height(local_x: float, local_z: float) -> float:
 
 
 func _spawn_trees() -> void:
-    var trunk_mesh := CylinderMesh.new()
-    trunk_mesh.top_radius = 0.25
-    trunk_mesh.bottom_radius = 0.40
-    trunk_mesh.height = 3.8
-    trunk_mesh.radial_segments = 7
-    var bark := StandardMaterial3D.new()
-    bark.albedo_color = Color(0.22, 0.12, 0.078)
-    bark.roughness = 0.96
-    trunk_mesh.material = bark
-
-    var foliage_mesh := SphereMesh.new()
-    foliage_mesh.radius = 1.0
-    foliage_mesh.height = 2.0
-    foliage_mesh.radial_segments = 11
-    foliage_mesh.rings = 6
-    var wind := ShaderMaterial.new()
-    wind.shader = preload("res://shaders/foliage_wind.gdshader")
-    foliage_mesh.material = wind
+    var trunk_mesh := SharedAssets.tree_trunk()
+    var foliage_mesh := SharedAssets.tree_canopy()
 
     var trunks: Array[Transform3D] = []
     var crowns: Array[Transform3D] = []
@@ -101,11 +86,7 @@ func _spawn_trees() -> void:
 
 
 func _spawn_grass() -> void:
-    var blade := QuadMesh.new()
-    blade.size = Vector2(0.34, 0.75)
-    var grass_material := ShaderMaterial.new()
-    grass_material.shader = preload("res://shaders/grass_wind.gdshader")
-    blade.material = grass_material
+    var blade := SharedAssets.grass_blade()
 
     var transforms: Array[Transform3D] = []
     var custom: Array[Color] = []
@@ -122,15 +103,8 @@ func _spawn_grass() -> void:
 
 
 func _spawn_rocks() -> void:
-    var rock := SphereMesh.new()
-    rock.radius = 1.0
-    rock.height = 2.0
-    rock.radial_segments = 8
-    rock.rings = 4
-    var stone := StandardMaterial3D.new()
-    stone.albedo_color = Color(0.28, 0.31, 0.29)
-    stone.roughness = 0.92
-    rock.material = stone
+    var rock := SharedAssets.rock_mesh()
+
     var transforms: Array[Transform3D] = []
     var custom: Array[Color] = []
     for i in range(ROCK_COUNT):
