@@ -63,6 +63,11 @@ aa_weather_wetness={
 "value": 0.0
 }
 
+aa_weather_rain={
+"type": "float",
+"value": 0.0
+}
+
 aa_water_caustics_strength={
 "type": "float",
 "value": 0.0

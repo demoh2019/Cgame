@@ -9,6 +9,7 @@ render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 #include "res://assets/shaders/specular_aa.gdshaderinc"
 #include "res://assets/shaders/vegetation_wind_space.gdshaderinc"
 global uniform float aa_weather_wetness;
+global uniform float aa_weather_rain;
 global uniform vec3 aa_vegetation_wind;
 // Shared quality knob: Performance = matte rain, Ultra = full PBR wet highlights.
 global uniform float aa_vegetation_wet_gloss;
@@ -111,7 +112,7 @@ void vertex() {
 				+ dot(root, wind_dir * 0.047 + crosswind * 0.012));
 			float phase = TIME * (0.95 + wind_power * 0.5)
 				+ dot(root, wind_dir * 0.23 + crosswind * 0.07);
-			float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.25;
+			float storm_wind = 1.0 + clamp(aa_weather_rain, 0.0, 1.0) * 0.25;
 			float amount = sway * k * gust * wind_lod * storm_wind * wind_power;
 			vec2 motion = wind_dir * sin(phase) + crosswind * cos(phase * 0.84) * 0.25;
 			// The material's vertices are in LOCAL coordinates. Every imported
