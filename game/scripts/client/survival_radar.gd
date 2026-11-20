@@ -5,6 +5,7 @@ extends Control
 
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
+const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
 const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
@@ -102,6 +103,21 @@ func current_escort_caravan() -> Dictionary:
 
 
 ## A scanner pin exists only in the current player's private snapshot.
+## A consumed chart only reveals the owner's current server-confirmed vein.
+func current_prospect_mark() -> Dictionary:
+	if sim != null:
+		if not sim.players.has(actor_id):
+			return {}
+		var actor = sim.players[actor_id]
+		if not actor.survival.alive:
+			return {}
+		return ProspectingChart.public_mark(actor.prospect_mark,
+			sim.time, sim.depleted)
+	if client != null:
+		return client.you.get("prospect_mark", {}).duplicate(true)
+	return {}
+
+
 func current_threat_scan() -> Dictionary:
 	if sim != null:
 		if not sim.players.has(actor_id):
@@ -349,6 +365,9 @@ func _draw() -> void:
 	# A spent scanner grants one short-lived private moving target pin.
 	_draw_waypoint(origin, current_threat_scan(), "x", "z",
 		Color(1.0, 0.32, 0.45))
+	# Copper = a private, paid high-tier ore/stone prospect; offscreen arrow included.
+	_draw_waypoint(origin, current_prospect_mark(), "x", "z",
+		Color(0.95, 0.62, 0.21))
 
 	# Local survivor always stays in the center of a player-following radar.
 	var yaw_value: float = current_yaw()
