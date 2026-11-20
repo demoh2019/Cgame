@@ -22,6 +22,38 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="clear_auxiliary_source">
+			<return type="void" />
+			<description>
+				Disables the optional secondary streaming source. Chunks no longer wanted by the primary focus or the auxiliary source are released on the next update according to the primary unload radius. Repeated calls are harmless. Does not immediately destroy unrelated primary chunks.
+			</description>
+		</method>
+		<method name="get_auxiliary_source_position" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the last secondary streaming source position in the chunk parent's coordinate space. It does not imply the source is active; check [method has_auxiliary_source].
+			</description>
+		</method>
+		<method name="get_auxiliary_source_radius" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the active auxiliary source's effective radius, capped to twice [member cell_size]. Returns [code]0.0[/code] when disabled.
+			</description>
+		</method>
+		<method name="has_auxiliary_source" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns whether a secondary source is configured. A source whose position is more than [member load_radius] plus one cell width from the primary focus is considered dormant and does not allocate or retain remote scene chunks.
+			</description>
+		</method>
+		<method name="set_auxiliary_source">
+			<return type="void" />
+			<param index="0" name="position" type="Vector3" />
+			<param index="1" name="radius" type="float" />
+			<description>
+				Cgame extension: registers one extra bounded streaming source for nearby waypoints, portal previews and cinematic targets, inspired by Unreal Engine World Partition streaming sources. Its requested [param radius] is capped at two cell widths, and its [param position] only contributes cells once within [member load_radius] plus one cell width of the active focus. Distant pins never create an independent loaded world. Auxiliary cells are interleaved with primary cells and share the existing main-thread, async loading, and per-frame instantiation budgets. The primary focus cell is always first; the source never affects authoritative game state or network replication. Inputs must be finite, and [param radius] positive. After calling this method, the queue is updated in the following internal process step; call [method refresh] if immediate synchronous scheduling is required.
+			</description>
+		</method>
 		<method name="cell_to_world" qualifiers="const">
 			<return type="Vector3" />
 			<param index="0" name="cell" type="Vector3i" />
