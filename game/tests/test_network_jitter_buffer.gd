@@ -30,6 +30,7 @@ func run(t) -> void:
 		"even severe jitter cannot cause unbounded presentation latency")
 	var stretched: float = buffer.delay
 	buffer.observe(1.1, 10.30)
+	buffer.observe(1.1, 15.30) # Same server sample during a long outage.
 	t.near(buffer.delay, stretched, 0.0001,
 		"repeated render frames do not inflate or shrink the buffer")
 	for i in 300:
