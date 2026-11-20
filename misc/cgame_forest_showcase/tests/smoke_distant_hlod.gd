@@ -193,6 +193,10 @@ func _run() -> void:
     if stats["radius"] != 4 or stats["allocated"] > 81:
         _fail("performance profile failed to shrink the distant horizon")
         return
+    if float(stats["last_rebuild_cpu_ms"]) < 0.0 \
+            or float(stats["soft_cpu_budget_ms"]) != 2.0:
+        _fail("distant HLOD CPU build telemetry or soft budget is invalid")
+        return
     if manager.call("get_proxy_for_cell", Vector2i(6, 0)) != null:
         _fail("performance profile retained an out-of-radius proxy")
         return
