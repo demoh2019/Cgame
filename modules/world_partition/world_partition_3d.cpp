@@ -260,6 +260,48 @@ int WorldPartition3D::get_navigation_ready_cell_count() const {
 	return result;
 }
 
+int WorldPartition3D::get_navigation_pending_cell_count() const {
+	return streaming_enabled && is_inside_tree() ? navigation_pending_regions.size() : 0;
+}
+
+bool WorldPartition3D::is_streaming_source_navigation_ready(const String &p_name) const {
+	if (!streaming_enabled || !is_inside_tree()) {
+		return false;
+	}
+	for (const StreamingSource &source : streaming_sources) {
+		if (source.name == p_name) {
+			return source.active && are_cells_navigation_ready(source.center, source.load_radius);
+		}
+	}
+	return false;
+}
+
+real_t WorldPartition3D::get_streaming_source_navigation_progress(const String &p_name) const {
+	if (!streaming_enabled || !is_inside_tree()) {
+		return 0.0;
+	}
+	for (const StreamingSource &source : streaming_sources) {
+		if (source.name != p_name) {
+			continue;
+		}
+		if (!source.active) {
+			return 0.0;
+		}
+		const int width = source.load_radius * 2 + 1;
+		int navigation_ready = 0;
+		for (int dz = -source.load_radius; dz <= source.load_radius; dz++) {
+			for (int dx = -source.load_radius; dx <= source.load_radius; dx++) {
+				const Vector2i cell(source.center.x + dx, source.center.y + dz);
+				if (is_cell_navigation_ready(cell)) {
+					navigation_ready++;
+				}
+			}
+		}
+		return real_t(navigation_ready) / real_t(width * width);
+	}
+	return 0.0;
+}
+
 void WorldPartition3D::_update_navigation_readiness() {
 	// NavigationServer applies region map changes asynchronously. A scene
 	// root's _ready() and our physics activation barrier cannot replace its
@@ -1264,6 +1306,9 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_cell_navigation_ready", "cell"), &WorldPartition3D::is_cell_navigation_ready);
 	ClassDB::bind_method(D_METHOD("are_cells_navigation_ready", "center", "radius"), &WorldPartition3D::are_cells_navigation_ready, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_navigation_ready_cell_count"), &WorldPartition3D::get_navigation_ready_cell_count);
+	ClassDB::bind_method(D_METHOD("get_navigation_pending_cell_count"), &WorldPartition3D::get_navigation_pending_cell_count);
+	ClassDB::bind_method(D_METHOD("is_streaming_source_navigation_ready", "name"), &WorldPartition3D::is_streaming_source_navigation_ready);
+	ClassDB::bind_method(D_METHOD("get_streaming_source_navigation_progress", "name"), &WorldPartition3D::get_streaming_source_navigation_progress);
 	ClassDB::bind_method(D_METHOD("get_cell_node", "cell"), &WorldPartition3D::get_cell_node);
 	ClassDB::bind_method(D_METHOD("are_cells_loaded", "center", "radius"), &WorldPartition3D::are_cells_loaded, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_loaded_cell_count"), &WorldPartition3D::get_loaded_cell_count);
