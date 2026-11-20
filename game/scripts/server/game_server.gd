@@ -27,6 +27,7 @@ const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const DeathRecovery = preload("res://scripts/shared/death_recovery.gd")
 const PartyCorpseRescue = preload("res://scripts/shared/party_corpse_rescue.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
+const QuickMedicine = preload("res://scripts/shared/quick_medicine.gd")
 const PartySupplyRequest = preload("res://scripts/shared/party_supply_request.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
@@ -3414,6 +3415,24 @@ func _damage_ranged_cover(attacker: Player, origin: Vector2,
 	events.append({"type": "barricade_shot", "peer": attacker.id, "id": id,
 		"hp": new_hp, "damage": old_hp - new_hp, "tier": tier})
 	return true
+
+
+## Smart field treatment, selected from the player's server-owned wounds and items.
+func cmd_quick_medicine(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead", "quick_medicine": true}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted", "quick_medicine": true}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling", "quick_medicine": true}
+	var item_id: String = QuickMedicine.pick(player.inventory, player.survival)
+	if item_id.is_empty():
+		return {"ok": false, "reason": "no_treatment", "quick_medicine": true}
+	var result: Dictionary = cmd_use(peer_id, item_id)
+	result["quick_medicine"] = true
+	result["item"] = item_id
+	return result
 
 
 func cmd_use(peer_id: int, item_id: String) -> Dictionary:
