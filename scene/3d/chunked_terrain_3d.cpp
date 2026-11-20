@@ -505,18 +505,17 @@ void ChunkedTerrain3D::_update_chunks(bool p_ignore_mesh_budget) {
 						shared_mesh_builds_this_frame++;
 					}
 					if (chunk.meshes[lod].is_valid()) {
-					if (!chunk.instance.is_valid()) {
-						chunk.instance = rs->instance_create2(chunk.meshes[lod], scenario);
-						// Native terrains own RenderingServer instances directly,
-						// so GeometryInstance3D's GI_MODE_STATIC flag is not inherited.
-						rs->instance_geometry_set_flag(chunk.instance, RSE::INSTANCE_FLAG_USE_BAKED_LIGHT, contribute_to_gi);
-						rs->instance_set_transform(chunk.instance, global);
-						rs->instance_geometry_set_cast_shadows_setting(chunk.instance, cast_shadows ? RSE::SHADOW_CASTING_SETTING_ON : RSE::SHADOW_CASTING_SETTING_OFF);
-					} else {
-						rs->instance_set_base(chunk.instance, chunk.meshes[lod]);
-					}
-					chunk.lod = lod;
-					chunk.morph = -1.0f; // Mesh topology changed; update its own morph uniform.
+						if (!chunk.instance.is_valid()) {
+							chunk.instance = rs->instance_create2(chunk.meshes[lod], scenario);
+							// Raw RenderingServer terrains need explicit static GI flags.
+							rs->instance_geometry_set_flag(chunk.instance, RSE::INSTANCE_FLAG_USE_BAKED_LIGHT, contribute_to_gi);
+							rs->instance_set_transform(chunk.instance, global);
+							rs->instance_geometry_set_cast_shadows_setting(chunk.instance, cast_shadows ? RSE::SHADOW_CASTING_SETTING_ON : RSE::SHADOW_CASTING_SETTING_OFF);
+						} else {
+							rs->instance_set_base(chunk.instance, chunk.meshes[lod]);
+						}
+						chunk.lod = lod;
+						chunk.morph = -1.0f; // Mesh topology changed; update its own morph uniform.
 					}
 				}
 			}
