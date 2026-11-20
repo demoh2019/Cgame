@@ -27,4 +27,12 @@ int main() {
 	assert(std::abs(coarse_sample(1, 1, 0, 0, 2, sample) - 8.0f) < 0.0001f);
 	assert(std::abs(coarse_sample(2, 2, 0, 0, 2, sample) - 16.0f) < 0.0001f);
 	assert(std::abs(coarse_sample(0, 2, 0, 0, 2, sample) - 12.0f) < 0.0001f);
+	// Non-planar heightfield: the diagonal must match the actual mesh triangles.
+	const float twisted[3][3] = {{0, 2, 3}, {1, 10, 2}, {4, 5, 12}};
+	auto irregular = [&](int x, int z) -> float {
+		return twisted[std::min(z, 2)][std::min(x, 2)];
+	};
+	assert(std::abs(coarse_sample(1, 1, 0, 0, 2, irregular) - 3.5f) < 0.0001f);
+	assert(std::abs(coarse_sample(1, 2, 0, 0, 2, irregular) - 8.0f) < 0.0001f);
+	assert(std::abs(coarse_sample(2, 1, 0, 0, 2, irregular) - 7.5f) < 0.0001f);
 }

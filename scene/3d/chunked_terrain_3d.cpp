@@ -549,9 +549,20 @@ void ChunkedTerrain3D::set_size(const Vector2 &p_size) {
 }
 
 void ChunkedTerrain3D::set_lod_count(int p_count) {
-	lod_count = CLAMP(p_count, 1, MAX_LOD);
+	const int next = CLAMP(p_count, 1, MAX_LOD);
+	if (lod_count == next) {
+		return;
+	}
+	lod_count = next;
+	if (lod_geomorph_enabled) {
+		// The last cached LOD may need a new coarser target in UV2.
+		// Rebuild once when the LOD count itself changes.
+		built = false;
+		_queue_rebuild();
+		return;
+	}
 	for (Chunk &chunk : chunks) {
-		chunk.lod = -1; // Re-evaluate; the existing meshes stay cached.
+		chunk.lod = -1; // No morph data: the cached surfaces remain valid.
 	}
 }
 
