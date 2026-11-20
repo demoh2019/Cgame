@@ -22,6 +22,7 @@ const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
+const RaidWard = preload("res://scripts/shared/raid_ward.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
@@ -1360,6 +1361,15 @@ func _update_hud() -> void:
 			_stats.text += "\nBIKE PANNIERS: 28 kg supported; dismount = full load"
 		_stats.text += "\nBIKE GROUND: %s | uphill slows pedaling" % world.biome_at(
 			position.x, position.z).to_upper()
+	if sim.raid_boss_id > 0:
+		var raid_boss = sim.zombies.get(sim.raid_boss_id)
+		if raid_boss != null and raid_boss.is_alive() and \
+				raid_boss.position.distance_to(survivor.position) <= 72.0:
+			var live_guards: int = RaidWard.living_count(raid_boss,
+				sim.raid_boss_id, sim.raid_minions, sim.zombies)
+			if live_guards > 0:
+				_stats.text += "\nRAID WARD: %d guards alive (-%d%% boss damage)" % [
+					live_guards, RaidWard.reduction_percent(live_guards)]
 	if not sim.night_horde.is_empty():
 		var remain: int = 0
 		for enemy_id in sim.night_horde.get("ids", []):
