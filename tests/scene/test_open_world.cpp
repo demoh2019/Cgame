@@ -262,6 +262,29 @@ TEST_CASE("[WorldStreaming] Camera priority hint validates and clamps") {
 	memdelete(streamer);
 }
 
+
+TEST_CASE("[WorldStreaming] Fast camera-turn decision is deterministic and safe") {
+	CHECK_FALSE(should_refresh_for_view_turn(Vector3(1, 0, 0), Vector3(1, 0, 0), 35.0));
+	CHECK_FALSE(should_refresh_for_view_turn(Vector3(1, 0, 0), Vector3(0.9, 0, 0.1), 35.0));
+	CHECK(should_refresh_for_view_turn(Vector3(1, 0, 0), Vector3(-1, 0, 0), 35.0));
+	CHECK(should_refresh_for_view_turn(Vector3(1, 0, 0), Vector3(0, 0, 1), 45.0));
+	CHECK_FALSE(should_refresh_for_view_turn(Vector3(1, 0, 0), Vector3(-1, 0, 0), 0.0));
+	CHECK_FALSE(should_refresh_for_view_turn(Vector3(), Vector3(1, 0, 0), 35.0));
+	CHECK_FALSE(should_refresh_for_view_turn(Vector3(Math::INF, 0, 0), Vector3(1, 0, 0), 35.0));
+
+	WorldStreamer *streamer = memnew(WorldStreamer);
+	CHECK(streamer->get_fast_view_refresh_degrees() == doctest::Approx(0.0));
+	streamer->set_fast_view_refresh_degrees(40.0);
+	CHECK(streamer->get_fast_view_refresh_degrees() == doctest::Approx(40.0));
+	streamer->set_fast_view_refresh_degrees(-12.0);
+	CHECK(streamer->get_fast_view_refresh_degrees() == doctest::Approx(0.0));
+	streamer->set_fast_view_refresh_degrees(500.0);
+	CHECK(streamer->get_fast_view_refresh_degrees() == doctest::Approx(180.0));
+	streamer->set_fast_view_refresh_degrees(Math::INF);
+	CHECK(streamer->get_fast_view_refresh_degrees() == doctest::Approx(180.0));
+	memdelete(streamer);
+}
+
 TEST_CASE("[WorldStreaming] Cell count is capped for huge radii") {
 	LocalVector<Vector3i> cells;
 	bool truncated = false;
@@ -596,6 +619,35 @@ TEST_CASE("[SceneTree][WorldStreamer] Generator obeys one drain and soft CPU bud
 	SceneTree::get_singleton()->process(0.016);
 	CHECK(generator.calls == 5); // Count-only mode can build three chunks.
 	CHECK(streamer->get_loaded_count() == 5);
+	memdelete(streamer);
+}
+
+
+TEST_CASE("[SceneTree][WorldStreamer] A fast 180-degree turn reprioritizes procedural cells") {
+	Generator generator;
+	WorldStreamer *streamer = memnew(WorldStreamer);
+	streamer->set_cell_size(10.0);
+	streamer->set_load_radius(25.0);
+	streamer->set_unload_radius(35.0);
+	streamer->set_focus_position(Vector3(5.0, 0.0, 5.0));
+	streamer->set_update_interval(8.0); // Original rate deliberately very slow.
+	streamer->set_max_instantiations_per_frame(1);
+	streamer->set_view_priority(0.8);
+	streamer->set_view_direction(Vector3(1, 0, 0)); // Looking east.
+	streamer->set_fast_view_refresh_degrees(35.0);
+	streamer->set_chunk_generator(callable_mp(&generator, &Generator::generate));
+	SceneTree::get_singleton()->get_root()->add_child(streamer);
+
+	SceneTree::get_singleton()->process(0.1);
+	REQUIRE(generator.order.size() == 1);
+	CHECK(generator.order[0] == Vector3i(0, 0, 0)); // The focus cell always wins.
+	streamer->set_view_direction(Vector3(-1, 0, 0)); // Turn west.
+	SceneTree::get_singleton()->process(0.1);
+	REQUIRE(generator.order.size() == 2);
+	CHECK(generator.order[1] == Vector3i(-1, 0, 0)); // New view, not stale east.
+	CHECK_FALSE(streamer->is_cell_loaded(Vector3i(1, 0, 0)));
+	CHECK(streamer->get_queued_generation_count() > 0);
+	CHECK(streamer->get_loaded_count() == 2); // No extra instantiations.
 	memdelete(streamer);
 }
 
