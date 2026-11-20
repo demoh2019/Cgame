@@ -206,6 +206,15 @@ static func _build_items() -> void:
 		_add_recipe("machete_%d" % t, "machete_%d" % t, 1,
 			{"plank_%d" % t: 2, "bar_%d" % t: 2, "scrap": 1},
 			"workbench", 6.0)
+		# Weighted metal head: slower than a club, but its equipment-granted
+		# blow can briefly stagger living infected (never raid bosses).
+		_add_item("sledgehammer_%d" % t, {"name": "Salvage Sledgehammer T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 16.0 + 10.0 * (t - 1), "cooldown": 1.1,
+			"weight": 5.0 + 0.35 * t, "value": 67 * t})
+		_add_recipe("sledgehammer_%d" % t, "sledgehammer_%d" % t, 1,
+			{"plank_%d" % t: 1, "bar_%d" % t: 3, "scrap": 2},
+			"workbench", 7.0)
 		# Lightweight classless archery: affordable arrows, limited distance and noise.
 		_add_item("bow_%d" % t, {"name": "Survival Bow T%d" % t,
 			"kind": "weapon", "weapon": "ranged", "tier": t,

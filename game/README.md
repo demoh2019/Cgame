@@ -32,6 +32,14 @@ forward melee cone. Spear thrusts keep their narrower piercing line.
 A miss still spends energy; safe-hub, party, and guild PvP protection
 remain authoritative. No native engine change is needed.
 
+A new **Salvage Sledgehammer T1–T4** can be crafted at the workbench from
+tiered planks, metal bars and scavenged scrap. Its equipped **G** skill,
+Concussive Blow, costs 35 combat energy with a 9-second cooldown. A real melee
+hit staggers ordinary infected for 1.3 seconds and elites for 0.65 seconds;
+a raid boss is immune. Stagger interrupts an active acid-spit windup, never
+affects a player or creates free damage, and appears as a blue enemy highlight
+in both clients. All hit, energy, timing and immunities are server-owned.
+
 Controls: WASD movement, Shift sprint, E gather, Q loot, F attack,
 Tab choose recipe, C craft, 1 food, 2 water, 3 bandage,
 4 equip club, 5 equip jacket, R drink from natural water.

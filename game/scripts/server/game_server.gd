@@ -2732,6 +2732,14 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		if count == 0:
 			first_target = str(hit["kind"])
 		_damage_target(player, hit, skilled_damage, "ranged" if ranged else "melee")
+		# PvE-only crowd control follows a real resolved hit. Never stun players,
+		# corpses or raid bosses, and never trust client-provided stun duration.
+		if hit["kind"] == "zombie" and skill.has("stagger_seconds"):
+			var infected = zombies.get(hit["id"])
+			if infected != null and infected.apply_stagger(float(skill["stagger_seconds"])):
+				events.append({"type": "stagger", "id": infected.id,
+					"seconds": infected.stagger_seconds,
+					"x": infected.position.x, "z": infected.position.z})
 		count += 1
 	if count == 0:
 		return {"ok": true, "hit": false, "hits": 0, "energy": player.combat_energy}
@@ -4319,7 +4327,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					"elite": zombie.elite, "raid_boss": zombie.raid_boss,
 					"raid_enraged": zombie.raid_enraged,
 					"max_hp": float(zombie.data.get("health", zombie.health)),
-					"snared_seconds": zombie.snared_seconds})
+					"snared_seconds": zombie.snared_seconds,
+					"stagger_seconds": zombie.stagger_seconds})
 	# Replicate only pending, living spit warnings within sight of this
 	# survivor. Client visual effects never authorize an actual hit.
 	var spit_zones: Array = []
