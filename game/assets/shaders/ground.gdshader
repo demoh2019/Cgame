@@ -1,6 +1,7 @@
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
+global uniform float aa_puddle_ripple_strength;
 // Radius of full two-scale albedo and normal mapping; shared by all streamed chunks.
 global uniform float aa_terrain_detail_radius;
 // Maximum number of PBR layers sampled per pixel (Ultra = all layers).
@@ -8,6 +9,7 @@ global uniform int aa_terrain_layer_budget;
 global uniform float aa_cliff_normal_quality; // 0 on low-end, 0.7 High, 1 Ultra
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/specular_aa.gdshaderinc"
+#include "res://assets/shaders/puddle_ripples.gdshaderinc"
 
 // Textured ground. Thirteen CC0 materials (Poly Haven) in two texture arrays:
 //   0 lush grass, 1 dry grass, 2 forest floor, 3 swamp mud, 4 road dirt, 5 cliff rock, 6 mountain rock, 7 sand, 8 snow,
@@ -326,6 +328,17 @@ void fragment() {
 	float puddle = wetness * clamp(w[3] + w[4] + w[9] + w[10], 0.0, 1.0)
 		* smoothstep(0.52, 0.78, mid) * (1.0 - smoothstep(0.08, 0.25, slope));
 	bent = normalize(mix(bent, n, puddle * 0.75));
+	// Near, wet, flat ground only: animated impact rings disturb existing
+	// PBR puddle reflections without any extra texture samples or meshes.
+	if (aa_puddle_ripple_strength > 0.001 && puddle > 0.05
+			&& camera_distance < aa_terrain_detail_radius) {
+		float ripple_fade = 1.0 - smoothstep(
+			aa_terrain_detail_radius * 0.58, aa_terrain_detail_radius,
+			camera_distance);
+		vec2 ripple_tilt = aa_puddle_ripple_tilt(p, TIME);
+		bent = normalize(bent + vec3(ripple_tilt.x, 0.0, ripple_tilt.y)
+			* (aa_puddle_ripple_strength * sqrt(puddle) * ripple_fade));
+	}
 	NORMAL = normalize((VIEW_MATRIX * vec4(bent, 0.0)).xyz);
 
 	color *= 1.0 - wetness * 0.18 - puddle * 0.12;
