@@ -38,7 +38,7 @@ class CombatAnimationBudgetContracts(unittest.TestCase):
         self.assertIn("is_mixer_high_priority", self.cpp)
         self.assertIn("int urgent_slots = max_priority_mixers;", self.cpp)
         self.assertIn(
-            "entry.high_priority && base_interval > 1 && urgent_slots > 0",
+            "entry.high_priority && base_interval > 1 && urgent_slots > 0 && mixer->is_active()",
             self.cpp,
         )
         self.assertIn("urgent_slots--;", self.cpp)
