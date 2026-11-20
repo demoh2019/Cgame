@@ -39,6 +39,16 @@
 				[b]Note:[/b] The result uses the viewport's logical pixel height. Multiply by [member Viewport.scaling_3d_scale] for dynamic internal 3D resolution when supported by the active renderer.
 			</description>
 		</method>
+		<method name="get_world_size_for_pixel_diameter_at_position" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="world_point" type="Vector3" />
+			<param index="1" name="pixel_diameter" type="float" />
+			<description>
+				Returns the world-space diameter required for a camera-facing feature at [param world_point] to cover [param pixel_diameter] vertical viewport pixels. Inverse of [method get_pixels_per_meter_at_position], this is useful for fixed-pixel pollen, fireflies, distant billboards, editor gizmos and world markers. The result scales with depth for perspective or frustum projection and is constant for orthogonal projection.
+				Returns [code]0.0[/code] if the camera is not in a scene tree, the target is behind a perspective camera, the viewport is invalid, or the requested pixel diameter is non-positive/non-finite. It is a lightweight CPU projection estimate, with no GPU readback or scene geometry query.
+				[b]Note:[/b] Uses logical viewport pixels. For dynamic-resolution rendering, choose the desired output pixel size with the internal render resolution in mind.
+			</description>
+		</method>
 		<method name="get_camera_rid" qualifiers="const">
 			<return type="RID" />
 			<description>
