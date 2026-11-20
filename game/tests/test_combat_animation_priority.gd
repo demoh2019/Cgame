@@ -49,6 +49,12 @@ func run(t) -> void:
 		"native full-rate quota is updated on tier changes")
 	t.check(entity_code.contains('aa_combat_animation_priority'),
 		"priority is cached on the model instead of dispatched every frame")
+	t.check(entity_code.contains("_anim_lod.register_mixer(upper_layer)"),
+		"upper-body weapon mixer shares native crowd LOD with locomotion")
+	t.check(entity_code.contains("_anim_lod.unregister_mixer(upper_layer)"),
+		"despawning a zombie restores both animation layers")
+	t.check(entity_code.contains('"set_mixer_high_priority", upper_layer, priority'),
+		"boss telegraphs prioritize both body and weapon attack tracks")
 	var anim_code: String = (CharacterAnim as Script).source_code
 	t.check(anim_code.contains("var preferred: Array[int] = []"),
 		"stock Godot uses the existing LOD driver without a second animator owner")
