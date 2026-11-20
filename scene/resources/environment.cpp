@@ -1254,6 +1254,28 @@ Ref<Texture> Environment::get_adjustment_color_correction() const {
 	return adjustment_color_correction;
 }
 
+void Environment::set_lens_chromatic_aberration(float p_amount) {
+	lens_chromatic_aberration = CLAMP(p_amount, 0.0f, 1.0f);
+	_update_lens_effects();
+}
+
+float Environment::get_lens_chromatic_aberration() const {
+	return lens_chromatic_aberration;
+}
+
+void Environment::set_lens_film_grain(float p_amount) {
+	lens_film_grain = CLAMP(p_amount, 0.0f, 1.0f);
+	_update_lens_effects();
+}
+
+float Environment::get_lens_film_grain() const {
+	return lens_film_grain;
+}
+
+void Environment::_update_lens_effects() {
+	RS::get_singleton()->environment_set_lens_effects(environment, lens_chromatic_aberration, lens_film_grain);
+}
+
 void Environment::_update_adjustment() {
 	RID color_correction = adjustment_color_correction.is_valid() ? adjustment_color_correction->get_rid() : RID();
 
@@ -1763,6 +1785,15 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "adjustment_saturation", PROPERTY_HINT_RANGE, "0.0,2.0,0.01,or_less,or_greater"), "set_adjustment_saturation", "get_adjustment_saturation");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "adjustment_color_correction", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D,Texture3D"), "set_adjustment_color_correction", "get_adjustment_color_correction");
 
+	ClassDB::bind_method(D_METHOD("set_lens_chromatic_aberration", "amount"), &Environment::set_lens_chromatic_aberration);
+	ClassDB::bind_method(D_METHOD("get_lens_chromatic_aberration"), &Environment::get_lens_chromatic_aberration);
+	ClassDB::bind_method(D_METHOD("set_lens_film_grain", "amount"), &Environment::set_lens_film_grain);
+	ClassDB::bind_method(D_METHOD("get_lens_film_grain"), &Environment::get_lens_film_grain);
+
+	ADD_GROUP("Lens", "lens_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_chromatic_aberration", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_lens_chromatic_aberration", "get_lens_chromatic_aberration");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_film_grain", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_lens_film_grain", "get_lens_film_grain");
+
 	// Constants
 
 	BIND_ENUM_CONSTANT(BG_CLEAR_COLOR);
@@ -1825,6 +1856,7 @@ Environment::Environment() {
 	_update_glow();
 	_update_fog();
 	_update_adjustment();
+	_update_lens_effects();
 	_update_volumetric_fog();
 	_update_bg_energy();
 	notify_property_list_changed();

@@ -224,6 +224,11 @@ private:
 	Ref<Texture> adjustment_color_correction;
 	void _update_adjustment();
 
+	// Lens effects
+	float lens_chromatic_aberration = 0.0;
+	float lens_film_grain = 0.0;
+	void _update_lens_effects();
+
 protected:
 	static void _bind_methods();
 	void _validate_property(PropertyInfo &p_property) const;
@@ -457,6 +462,12 @@ public:
 	float get_adjustment_saturation() const;
 	void set_adjustment_color_correction(Ref<Texture> p_color_correction);
 	Ref<Texture> get_adjustment_color_correction() const;
+
+	// Lens effects
+	void set_lens_chromatic_aberration(float p_amount);
+	float get_lens_chromatic_aberration() const;
+	void set_lens_film_grain(float p_amount);
+	float get_lens_film_grain() const;
 
 	Environment();
 	~Environment();

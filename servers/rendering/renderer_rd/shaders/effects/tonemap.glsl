@@ -62,6 +62,7 @@ layout(set = 3, binding = 0) uniform sampler3D source_color_correction;
 #define FLAG_USE_FXAA (1 << 4)
 #define FLAG_USE_8_BIT_DEBANDING (1 << 5)
 #define FLAG_CONVERT_TO_SRGB (1 << 6)
+#define FLAG_USE_LENS_EFFECTS (1 << 7)
 
 layout(push_constant, std430) uniform Params {
 	vec3 bcs;
@@ -84,6 +85,11 @@ layout(push_constant, std430) uniform Params {
 	float luminance_multiplier;
 
 	vec4 tonemapper_params;
+
+	float lens_chromatic_aberration;
+	float lens_film_grain;
+	float lens_time;
+	float lens_pad;
 }
 params;
 
@@ -857,6 +863,22 @@ void main() {
 #else
 	vec4 color = textureLod(source_color, uv_interp, 0.0f);
 #endif
+	// Lateral chromatic aberration (lens "fringing"), as in Unreal Engine and Unity HDRP:
+	// the red and blue channels are magnified differently towards the frame edges.
+	// Done on the HDR scene color before exposure so bright fringes stay physically energetic.
+	if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && params.lens_chromatic_aberration > 0.0) {
+		vec2 from_center = uv_interp - 0.5;
+		// Quadratic falloff: perfectly sharp in the middle, strongest in the corners.
+		vec2 shift = from_center * dot(from_center, from_center) * params.lens_chromatic_aberration * 0.06;
+#ifdef USE_MULTIVIEW
+		color.r = textureLod(source_color, vec3(uv_interp - shift, ViewIndex), 0.0f).r;
+		color.b = textureLod(source_color, vec3(uv_interp + shift, ViewIndex), 0.0f).b;
+#else
+		color.r = textureLod(source_color, uv_interp - shift, 0.0f).r;
+		color.b = textureLod(source_color, uv_interp + shift, 0.0f).b;
+#endif
+	}
+
 	color.rgb *= params.luminance_multiplier;
 
 	// Exposure
@@ -941,6 +963,18 @@ void main() {
 		}
 	} else if (bool(params.flags & FLAG_CONVERT_TO_SRGB)) {
 		color.rgb = linear_to_srgb(color.rgb);
+	}
+
+	// Film grain, as in Unreal Engine 5's filmic grain: animated, luminance-weighted noise
+	// that is strongest in mid-tones and fades in deep shadows and highlights like real film.
+	// It also masks residual banding in skies and fog.
+	if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && params.lens_film_grain > 0.0) {
+		vec3 p3 = fract(vec3(gl_FragCoord.xy, params.lens_time * 60.0) * vec3(0.1031, 0.1030, 0.0973));
+		p3 += dot(p3, p3.yxz + 33.33);
+		float grain = fract((p3.x + p3.y) * p3.z) - 0.5;
+		float luma = clamp(dot(color.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+		float response = 4.0 * luma * (1.0 - luma); // Peaks in mid-tones.
+		color.rgb = max(color.rgb + grain * params.lens_film_grain * 0.12 * (0.25 + 0.75 * response), vec3(0.0));
 	}
 
 	// Debanding should be done at the end of tonemapping, but before writing to the LDR buffer.

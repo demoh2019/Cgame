@@ -123,6 +123,14 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 
 	memset(&tonemap.push_constant, 0, sizeof(TonemapPushConstant));
 
+	if (p_settings.lens_chromatic_aberration > 0.0001f || p_settings.lens_film_grain > 0.0001f) {
+		tonemap.push_constant.flags |= TONEMAP_FLAG_USE_LENS_EFFECTS;
+		tonemap.push_constant.lens_chromatic_aberration = p_settings.lens_chromatic_aberration;
+		tonemap.push_constant.lens_film_grain = p_settings.lens_film_grain;
+		// Wrap to keep float precision in the shader's hash on long sessions.
+		tonemap.push_constant.lens_time = Math::fmod(p_settings.lens_time, 1000.0f);
+	}
+
 	tonemap.push_constant.flags |= p_settings.use_bcs ? TONEMAP_FLAG_USE_BCS : 0;
 	tonemap.push_constant.bcs[0] = p_settings.brightness;
 	tonemap.push_constant.bcs[1] = p_settings.contrast;

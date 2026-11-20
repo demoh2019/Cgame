@@ -1374,6 +1374,10 @@ public:
 	// Adjustment
 	PASS7(environment_set_adjustment, RID, bool, float, float, float, bool, RID)
 
+	PASS3(environment_set_lens_effects, RID, float, float)
+	PASS1RC(float, environment_get_lens_chromatic_aberration, RID)
+	PASS1RC(float, environment_get_lens_film_grain, RID)
+
 	PASS1RC(bool, environment_get_adjustments_enabled, RID)
 	PASS1RC(float, environment_get_adjustments_brightness, RID)
 	PASS1RC(float, environment_get_adjustments_contrast, RID)

@@ -75,6 +75,7 @@ private:
 		TONEMAP_FLAG_USE_FXAA = (1 << 4),
 		TONEMAP_FLAG_USE_8_BIT_DEBANDING = (1 << 5),
 		TONEMAP_FLAG_CONVERT_TO_SRGB = (1 << 6),
+		TONEMAP_FLAG_USE_LENS_EFFECTS = (1 << 7),
 	};
 
 	enum FlagsMobile {
@@ -122,6 +123,11 @@ private:
 		float luminance_multiplier; //  4 - 96
 
 		float tonemapper_params[4]; //  16 - 112
+
+		float lens_chromatic_aberration; //  4 - 116
+		float lens_film_grain; //  4 - 120
+		float lens_time; //  4 - 124
+		float lens_pad; //  4 - 128
 	};
 
 	struct TonemapPushConstantMobile {
@@ -207,6 +213,11 @@ public:
 		bool bilinear_filtering = true;
 
 		bool convert_to_srgb = false;
+
+		// Physically motivated camera lens effects (Forward+ only).
+		float lens_chromatic_aberration = 0.0;
+		float lens_film_grain = 0.0;
+		float lens_time = 0.0;
 	};
 
 	void tonemapper(RID p_source_color, RID p_dst_framebuffer, const TonemapSettings &p_settings);

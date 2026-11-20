@@ -8,6 +8,7 @@ const NAMES := ["Performance", "Balanced", "High", "Ultra"]
 const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
 const GraphicsTonemapping = preload("res://scripts/client/graphics_tonemapping.gd")
+const GraphicsLens = preload("res://scripts/client/graphics_lens.gd")
 const GraphicsShadowAtlas = preload("res://scripts/client/graphics_shadow_atlas.gd")
 const GraphicsContactShadows = preload("res://scripts/client/graphics_contact_shadows.gd")
 const GraphicsReflections = preload("res://scripts/client/graphics_reflections.gd")
@@ -247,6 +248,8 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Native AgX preserves sunrise/cloud highlight hues on supported
 		# Forward+ High/Ultra. Low-end remains on the established ACES curve.
 		GraphicsTonemapping.apply(env, _level, str(method))
+		# Native HDR lens fringing + filmic grain inside the same tonemap pass.
+		GraphicsLens.apply(env, _level, str(method))
 		# Hybrid sky + screen-space reflections on High/Ultra Forward+ only.
 		# Runtime changes (including Auto) also turn SSR off when required.
 		GraphicsReflections.apply(env, _level, method)

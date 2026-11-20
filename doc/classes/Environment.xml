@@ -212,6 +212,14 @@
 			The strength that is used when blurring across the screen to generate the glow effect. This affects the distance and intensity of the blur. When using the Mobile rendering method, this should be increased to compensate for the lower dynamic range.
 			[b]Note:[/b] [member glow_strength] has no effect when using the Compatibility rendering method, due to this rendering method using a simpler glow implementation optimized for low-end devices.
 		</member>
+		<member name="lens_chromatic_aberration" type="float" setter="set_lens_chromatic_aberration" getter="get_lens_chromatic_aberration" default="0.0">
+			Strength of lateral chromatic aberration (color fringing towards the frame edges), applied to the HDR image before tonemapping. The center of the screen stays sharp. [code]0.0[/code] disables the effect.
+			[b]Note:[/b] Only supported in the Forward+ rendering method.
+		</member>
+		<member name="lens_film_grain" type="float" setter="set_lens_film_grain" getter="get_lens_film_grain" default="0.0">
+			Strength of animated film grain, applied after tonemapping. The grain is strongest in mid-tones and fades in deep shadows and highlights, and also hides banding in smooth gradients. [code]0.0[/code] disables the effect.
+			[b]Note:[/b] Only supported in the Forward+ rendering method.
+		</member>
 		<member name="reflected_light_source" type="int" setter="set_reflection_source" getter="get_reflection_source" enum="Environment.ReflectionSource" default="0">
 			The reflected (specular) light source.
 		</member>

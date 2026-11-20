@@ -253,6 +253,11 @@ public:
 	virtual void environment_set_sdfgi_frames_to_converge(RSE::EnvironmentSDFGIFramesToConverge p_frames) = 0;
 	virtual void environment_set_sdfgi_frames_to_update_light(RSE::EnvironmentSDFGIFramesToUpdateLight p_update) = 0;
 
+	// Lens effects
+	void environment_set_lens_effects(RID p_env, float p_chromatic_aberration, float p_film_grain);
+	float environment_get_lens_chromatic_aberration(RID p_env) const;
+	float environment_get_lens_film_grain(RID p_env) const;
+
 	// Adjustment
 	void environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction);
 	bool environment_get_adjustments_enabled(RID p_env) const;
