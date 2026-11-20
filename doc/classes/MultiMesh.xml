@@ -166,6 +166,16 @@
 				Sets the [Transform2D] for a specific instance.
 			</description>
 		</method>
+		<method name="activate_hidden_instances">
+			<return type="int" />
+			<param index="0" name="hidden_instances" type="PackedInt32Array" />
+			<description>
+				Activates multiple hidden instances in an existing MultiMesh buffer without changing [member instance_count]. Indices refer to the [b]original hidden slots[/b] at the start of the call; their order in [param hidden_instances] does not matter. The method validates all indices, rejects duplicates and already-visible or out-of-bounds indices, sorts the copy, then activates each in ascending order so the intended complete payloads are preserved.
+				Returns the number activated, [code]0[/code] for an empty array, or [code]-1[/code] for invalid input without changing any instances. Works with a partial visible prefix (including [code]0[/code]); when [member visible_instance_count] is [code]-1[/code], all instances are visible, so any nonempty request fails.
+				This method preserves paired transforms, optional colors and shader custom data through [method activate_hidden_instance]. It never changes memory allocation, physics collision, navigation or entity IDs. After activation the ordering of hidden slots may change; game code is responsible for persistent entity IDs and restoring original payloads if needed.
+				[b]Performance:[/b] Validation and sorting cost [code]O(K log K)[/code] and activation uses [code]K[/code] individual rendering server operations. It reduces scripting API crossings but is not a single GPU command.
+			</description>
+		</method>
 		<method name="activate_hidden_instance">
 			<return type="bool" />
 			<param index="0" name="hidden_instance" type="int" />
