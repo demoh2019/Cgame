@@ -263,11 +263,14 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	if _atmospheric_lut != null and _atmospheric_lut_strength > 0.001:
 		fog_horizon = SkyFogHarmony.blend(horizon, _sky_horizon_optical,
 			_atmospheric_lut_strength, daylight, storm)
-	environment.fog_light_color = fog_horizon.lerp(Color(0.5, 0.52, 0.56), storm * 0.5)
-	environment.fog_density = lerpf(0.0016, 0.0042, storm)
+	# One sky-derived weather color + distance density feed the native atomic
+	# fog transaction. No intermediate, expensive renderer state submissions.
+	var base_fog_color: Color = fog_horizon.lerp(Color(0.5, 0.52, 0.56), storm * 0.5)
+	var base_fog_density: float = lerpf(0.0016, 0.0042, storm)
 	_visual_biome_settings = BiomeAtmosphere.advance(_visual_biome_settings, biome, delta)
 	CinematicFog.apply_weather(environment, daylight, sun_height, storm,
-		_fog_profile, fog_horizon, _visual_biome_settings)
+		_fog_profile, fog_horizon, _visual_biome_settings,
+		{"color": base_fog_color, "density": base_fog_density})
 	# Run the ACES-grade after atmospheric weather/fog, without replacing fog state.
 	CinematicColorGrade.apply(environment, daylight, sun_height, storm)
 	_bloom_elapsed += maxf(delta, 0.0)
