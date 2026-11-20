@@ -91,7 +91,7 @@ func _run() -> void:
     if world.is_streaming_source_activation_ready(Travel.SOURCE_NAME):
         _fail("staged travel was activation ready before remote scene loaded")
         return
-    if not travel.get_status_text().contains("физика"):
+    if not travel.get_status_text().contains("активация"):
         _fail("travel HUD did not expose activation progress")
         return
     if world.get_streaming_source_priority(Travel.SOURCE_NAME) != Travel.STREAMING_PRIORITY:
