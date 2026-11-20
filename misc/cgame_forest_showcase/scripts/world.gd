@@ -265,10 +265,13 @@ func _refresh_hud() -> void:
     var gpu_text: String = "%.2f ms" % gpu_ms if gpu_ms > 0.0 else "N/A"
     var loaded: int = world_partition.get_loaded_cell_count() if world_partition != null else 0
     var configured: int = world_partition.get_configured_cell_count() if world_partition != null else 0
+    var pending: int = world_partition.get_pending_cell_count() if world_partition != null else 0
+    var inflight: int = world_partition.get_inflight_request_count() if world_partition != null else 0
+    var failed: int = world_partition.get_failed_cell_count() if world_partition != null else 0
     hud.text = "AURORA FOREST  |  Cgame / Godot 4.8\n" \
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
-        + "Загружено участков мира: %d / %d" % [loaded, configured]
+        + "Ячейки: %d/%d   очередь: %d   запросы: %d   ошибки: %d" % [loaded, configured, pending, inflight, failed]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
