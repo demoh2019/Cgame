@@ -1,6 +1,5 @@
 extends RefCounted
 
-const ChunkView = preload("res://scripts/client/chunk_view.gd")
 ## User-selectable visual fidelity. Both the Compatibility and Forward+ renderers remain supported.
 ## Keep the choice local to the client; it must never affect authoritative simulation.
 
@@ -49,24 +48,24 @@ static func cycle() -> void:
 static func profile(value: int) -> Dictionary:
 	match clampi(value, 0, NAMES.size() - 1):
 		0:
-			return {"shadows": false, "shadow_distance": 45.0, "msaa": Viewport.MSAA_3D_DISABLED,
+			return {"shadows": false, "shadow_distance": 45.0, "msaa": Viewport.MSAA_DISABLED,
 				"blur_quality": 0, "blur_radius": 0.0, "glow": false, "ssao": false, "ssil": false,
 				"scale": 0.59, "grass_radius": 66.0, "grass_budget": 1500, "grass_fade_start": 25.0, "grass_fade_end": 40.0}
 		1:
-			return {"shadows": true, "shadow_distance": 70.0, "msaa": Viewport.MSAA_3D_DISABLED,
+			return {"shadows": true, "shadow_distance": 70.0, "msaa": Viewport.MSAA_DISABLED,
 				"blur_quality": 1, "blur_radius": 1.6, "glow": false, "ssao": false, "ssil": false,
 				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0}
 		2:
-			return {"shadows": true, "shadow_distance": 110.0, "msaa": Viewport.MSAA_3D_2X,
+			return {"shadows": true, "shadow_distance": 110.0, "msaa": Viewport.MSAA_2X,
 				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": false, "ssil": false,
 				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0}
 		_:
-			return {"shadows": true, "shadow_distance": 140.0, "msaa": Viewport.MSAA_3D_4X,
+			return {"shadows": true, "shadow_distance": 140.0, "msaa": Viewport.MSAA_4X,
 				"blur_quality": 2, "blur_radius": 3.0, "glow": true, "ssao": true, "ssil": true,
 				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0}
 
 
-static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderMaterial) -> void:
+static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderMaterial, water: MeshInstance3D = null, streamer: Node = null) -> void:
 	var p := profile(_level)
 	# The active backend can differ from ProjectSettings after a driver fallback.
 	var method := RenderingServer.get_current_rendering_method()
@@ -76,13 +75,13 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 			viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR2
 			viewport.scaling_3d_scale = float(p["scale"])
 			viewport.use_taa = false
-			viewport.msaa_3d = Viewport.MSAA_3D_DISABLED
+			viewport.msaa_3d = Viewport.MSAA_DISABLED
 			viewport.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
 		elif method == "mobile" and _level <= 1:
 			viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
 			viewport.scaling_3d_scale = float(p["scale"])
 			viewport.use_taa = false
-			viewport.msaa_3d = Viewport.MSAA_3D_DISABLED
+			viewport.msaa_3d = Viewport.MSAA_DISABLED
 			viewport.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
 		else:
 			# Native resolution on High/Ultra and on Compatibility (which lacks FSR2).
@@ -112,3 +111,11 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 		for tile in viewport.get_tree().get_nodes_in_group(ChunkView.GRASS_GROUP):
 			if tile is MultiMeshInstance3D:
 				tile.visibility_range_end = ChunkView.grass_visibility_end
+
+	# The graphics profiles also control water detail and how many terrain chunks are streamed.
+	var world_profile: Dictionary = VisualProfiles.settings(_level)
+	if water != null and water.material_override is ShaderMaterial:
+		(water.material_override as ShaderMaterial).set_shader_parameter("ripple_strength", float(world_profile["water_ripples"]))
+	if streamer != null:
+		streamer.set("load_radius", float(world_profile["chunk_radius"]))
+		streamer.set("unload_radius", float(world_profile["chunk_unload"]))
