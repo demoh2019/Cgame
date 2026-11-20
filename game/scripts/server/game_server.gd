@@ -2979,6 +2979,17 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 				events.append({"type": "stagger", "id": infected.id,
 					"seconds": infected.stagger_seconds,
 					"x": infected.position.x, "z": infected.position.z})
+		# A hammer physically shoves living PvE targets away using collision
+		# sweeps. Dead enemies, rooted enemies and raid bosses cannot move.
+		if hit["kind"] == "zombie" and skill.has("knockback_meters"):
+			var pushed = zombies.get(hit["id"])
+			if pushed != null:
+				var moved: float = pushed.apply_knockback(world, player.position,
+					float(skill["knockback_meters"]))
+				if moved > 0.001:
+					events.append({"type": "knockback", "id": pushed.id,
+						"x": pushed.position.x, "z": pushed.position.z,
+						"distance": moved})
 		# Pinning bolts only root a living infected hit by a real projectile.
 		# Existing snare rules protect raid bosses and exclude PvP players.
 		if hit["kind"] == "zombie" and skill.has("snare_seconds"):

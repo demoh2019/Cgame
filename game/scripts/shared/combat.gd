@@ -105,7 +105,8 @@ static func active_skill(weapon_id: String) -> Dictionary:
 	if weapon_id.begins_with("sledgehammer_") and str(info.get("weapon", "")) == "melee":
 		return {"id": "concussive_blow", "energy_cost": 35.0, "cooldown": 9.0,
 			"attack_lock": 1.2, "range": Defs.MELEE_RANGE + 0.5,
-			"stagger_seconds": 1.3, "damage": weapon_damage(weapon_id) * 1.25,
+			"stagger_seconds": 1.3, "knockback_meters": 2.0,
+			"damage": weapon_damage(weapon_id) * 1.25,
 			"ranged": false}
 	if weapon_id.begins_with("restoration_staff_") and str(info.get("weapon", "")) == "melee":
 		return {"id": "restoration_pulse", "energy_cost": 40.0,

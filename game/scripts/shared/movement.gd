@@ -67,6 +67,36 @@ static func move(world, position: Vector3, direction: Vector2, speed: float, del
 	return Vector3(position.x, world.height_at(position.x, position.z), position.z)
 
 
+## Short, server-authored physical impulses use many collision-checked
+## substeps. A single large move() call could leap across a narrow blocker.
+## Reuse the same water, solid-obstacle and wall-slide rules as locomotion.
+## This primitive does not apply any damage or authorize PvP displacement.
+static func sweep_displacement(world, position: Vector3, displacement: Vector2,
+		max_meters: float = 3.0) -> Vector3:
+	if not position.is_finite() or not displacement.is_finite() or not is_finite(max_meters):
+		return position
+	if max_meters <= 0.0 or not is_finite(displacement.length_squared()):
+		return position
+	var meters: float = minf(displacement.length(), minf(max_meters, 3.0))
+	if meters < 0.001:
+		return position
+	var direction: Vector2 = displacement.normalized()
+	var result: Vector3 = position
+	var remaining: float = meters
+	# 0.2 m segments prevent tunnelling through world blockers or shores.
+	for i in ceili(meters / 0.2):
+		var step_meters: float = minf(0.2, remaining)
+		if step_meters <= 0.0001:
+			break
+		var next: Vector3 = move(world, result, direction,
+			step_meters / MAX_DELTA, MAX_DELTA)
+		if Vector2(next.x - result.x, next.z - result.z).length_squared() < 0.000001:
+			break
+		result = next
+		remaining -= step_meters
+	return result
+
+
 static func _is_free(world, point: Vector2) -> bool:
 	# Wading is allowed until the water is deeper than a meter.
 	if world.height_at(point.x, point.y) < Defs.WATER_LEVEL - 1.0:
