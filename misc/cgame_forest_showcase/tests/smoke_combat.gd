@@ -56,6 +56,8 @@ func _run() -> void:
         return
 
     enemy.call("set_encounter_active", true)
+    # Old standalone encounter path has no WorldPartition3D; local avoidance
+    # still works without a native scheduler (e.g. level-editor test scenes).
     var origin: Vector3 = enemy.global_position
     var attacked: bool = false
     for i in range(MAX_FRAMES):
@@ -68,6 +70,9 @@ func _run() -> void:
         return
     if enemy.global_position.distance_to(origin) < 1.0:
         _fail("stalker was not moved by physics steering")
+        return
+    if int(enemy.get("steering_updates")) < 1:
+        _fail("standalone stalker did not run unscheduled local obstacle steering")
         return
     if damage_total != Stalker.ATTACK_DAMAGE:
         _fail("expected a single rate-limited first strike")
