@@ -6,6 +6,7 @@
 	<description>
 		Equivalent of Unity's [code]Rigidbody.AddExplosionForce[/code] and Unreal Chaos radial force fields. On [method fire], every [RigidBody3D] and [PhysicalBone3D] overlapping a sphere of [member radius] (filtered by [member collision_mask]) receives an impulse pointing away from the field's origin. Its magnitude is [member strength] scaled by [method falloff_scale].
 		The physics space can only be queried during the physics frame. If [method fire] is called elsewhere, the impulse is applied at the next physics frame instead.
+		Cgame additionally provides opt-in [member mass_independent] (velocity change rather than a fixed momentum impulse) and line-of-sight [member occlusion_mask] with [member occlusion_attenuation] to simulate shockwaves shielding against world obstacles. These default to disabled, preserving older scenes. Extra ray tests are bounded by [member max_occlusion_rays] per activation.
 	</description>
 	<methods>
 		<method name="falloff_scale" qualifiers="static">
@@ -31,6 +32,20 @@
 			<param index="2" name="upward_bias" type="float" />
 			<description>Returns the normalized impulse direction from [param center] to [param body_position], tilted upward by [param upward_bias].</description>
 		</method>
+		<method name="occlusion_scale" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="blocked" type="bool" />
+			<param index="1" name="attenuation" type="float" />
+			<description>Returns [code]1.0[/code] for a visible body, or [param attenuation] clamped to [code]0.0[/code] through [code]1.0[/code] for a shielded body. Useful for matching native fields in portable GDScript.</description>
+		</method>
+		<method name="impulse_magnitude" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="strength" type="float" />
+			<param index="1" name="falloff" type="float" />
+			<param index="2" name="mass" type="float" />
+			<param index="3" name="mass_independent" type="bool" />
+			<description>Returns the impulse magnitude, scaling by [param mass] only in velocity-change mode. Physics bodies with different positive masses therefore receive the same [i]velocity change[/i] for the same shockwave, while ordinary mode preserves the original fixed-momentum behavior.</description>
+		</method>
 		<method name="set_collision_mask_value">
 			<return type="void" />
 			<param index="0" name="layer_number" type="int" />
@@ -43,6 +58,10 @@
 		<member name="affect_rigid_bodies" type="bool" setter="set_affect_rigid_bodies" getter="is_affecting_rigid_bodies" default="true">If [code]true[/code], [RigidBody3D] nodes are pushed.</member>
 		<member name="collision_mask" type="int" setter="set_collision_mask" getter="get_collision_mask" default="1">Physics layers that are searched for bodies.</member>
 		<member name="continuous" type="bool" setter="set_continuous" getter="is_continuous" default="false">If [code]true[/code], [member strength] is applied every physics frame as impulse per second.</member>
+		<member name="mass_independent" type="bool" setter="set_mass_independent" getter="is_mass_independent" default="false">If enabled, multiply the impulse by each body's mass to approximate a fixed change in linear velocity (similar to Unreal's Velocity Change and Unity's ForceMode.VelocityChange). Applies to both [RigidBody3D] and [PhysicalBone3D]. Disabled by default, preserving existing physical impulse behavior.</member>
+		<member name="occlusion_mask" type="int" setter="set_occlusion_mask" getter="get_occlusion_mask" default="0">Optional physics collision layers that can block a radial shockwave between the field origin and a target body. Different from [member collision_mask], which selects objects to push. [code]0[/code] disables all extra raycasts and maintains legacy behavior. Only collision bodies, not areas, block shockwaves. The receiving body is excluded from its own raycast.</member>
+		<member name="occlusion_attenuation" type="float" setter="set_occlusion_attenuation" getter="get_occlusion_attenuation" default="0.25">Fraction of the shockwave transmitted to a body behind an obstacle. [code]0[/code] blocks all impulse, [code]0.25[/code] transmits one quarter, and [code]1[/code] ignores shielding. Finite inputs are clamped to 0–1.</member>
+		<member name="max_occlusion_rays" type="int" setter="set_max_occlusion_rays" getter="get_max_occlusion_rays" default="24">Maximum extra synchronous ray queries during one [method fire] or continuous simulation step. Clamped to 1–64. When this budget is exhausted, additional bodies are conservatively treated as shielded (by [member occlusion_attenuation]), never as automatically visible. Set [member occlusion_mask] to [code]0[/code] to disable these ray checks entirely.</member>
 		<member name="falloff" type="int" setter="set_falloff" getter="get_falloff" enum="RadialForceField3D.Falloff" default="1">How the impulse fades with distance.</member>
 		<member name="free_after_fire" type="bool" setter="set_free_after_fire" getter="is_free_after_fire" default="false">If [code]true[/code], the node calls [method Node.queue_free] after firing.</member>
 		<member name="max_bodies" type="int" setter="set_max_bodies" getter="get_max_bodies" default="64">Maximum number of physics query results.</member>
