@@ -91,7 +91,7 @@ func _spawn_position(cell: Vector2i) -> Vector3:
     # Stable coordinates: no RNG state, independent of stream order or reload.
     var px: float = float(cell.x) * streamer.cell_size + 16.0
     var pz: float = float(cell.y) * streamer.cell_size + 16.0
-    var y: float = height_fn.call(px, pz) if height_fn.is_valid() else 0.0
+    var y: float = float(height_fn.call(px, pz)) if height_fn.is_valid() else 0.0
     return Vector3(px, y + 1.0, pz)
 
 
@@ -188,7 +188,9 @@ func attack_from_camera(camera: Camera3D) -> bool:
     var endpoint: Vector3 = origin - camera.global_basis.z * ATTACK_RANGE
     var query := PhysicsRayQueryParameters3D.create(origin, endpoint)
     query.collision_mask = 1 | 4 # Terrain/trees occlude hits on enemy layer 4.
-    query.exclude = [player.get_rid()] if player is CollisionObject3D else []
+    var player_body := player as CollisionObject3D
+    if player_body != null:
+        query.exclude = [player_body.get_rid()]
     var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
     var collider: Object = hit.get("collider")
     if collider != null and collider.has_method("take_damage"):
