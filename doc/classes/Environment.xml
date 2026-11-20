@@ -30,6 +30,16 @@
 				Configures the expensive SDFGI renderer settings in one operation, avoiding intermediate renderer updates while switching graphics tiers. Identical configurations are skipped, and invalid cascades, cell sizes, feedback or energy leave the previous configuration untouched. Unlike individual setters, this method is designed for real-time preset switches. Provided by the Cgame engine fork.
 			</description>
 		</method>
+		<method name="configure_sdfgi_visibility">
+			<return type="void" />
+			<param index="0" name="use_occlusion" type="bool" />
+			<param index="1" name="read_sky_light" type="bool" />
+			<param index="2" name="normal_bias" type="float" />
+			<param index="3" name="probe_bias" type="float" />
+			<description>
+				Configures SDFGI ray occlusion, sky contribution, and probe sampling biases in a single RenderingServer update. Intended for scene-aware transitions from exterior environments to enclosed interiors. Passing identical values skips the renderer update; non-finite biases or biases outside [code]0.0[/code] to [code]4.0[/code] are rejected without changing any setting. Occlusion is GPU-expensive and can cause dark blotches outdoors, so enable it only when the scene needs additional light-leak protection. Provided by the Cgame engine fork.
+			</description>
+		</method>
 		<method name="get_glow_level" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="idx" type="int" />
