@@ -93,3 +93,51 @@ static func apply_sdfgi(environment: Environment, p: Dictionary) -> void:
 		environment.sdfgi_energy = float(p["sdfgi_energy"])
 	if not environment.sdfgi_enabled:
 		environment.sdfgi_enabled = true
+
+
+## SDFGI occlusion is deliberately INDOOR-ONLY. Godot's extra visibility
+## rays eliminate leaks through thick dungeon walls, but introduce dark
+## blotches outdoors and cost GPU time. Normal/probe bias is lowered a little
+## indoors to reduce leaks; the native engine applies all four fields at once.
+## No new GI volumes, SDF cascades, or ray tracing system are created.
+static func visibility_settings(level: int, method: String, underground: bool) -> Dictionary:
+	var premium: bool = clampi(level, 0, 3) == 3 and method == "forward_plus"
+	var interior: bool = premium and underground
+	return {
+		"use_occlusion": interior,
+		"read_sky_light": not interior,
+		"normal_bias": 0.95 if interior else 1.1,
+		"probe_bias": 0.95 if interior else 1.1,
+	}
+
+
+## Called in the same existing environment/weather tick as the dungeon
+## visibility culler. Purely static player-region policy; never re-voxelizes
+## the terrain or changes these settings if the player stays put.
+static func update_visibility(environment: Environment, level: int,
+		method: String, underground: bool) -> void:
+	if environment == null:
+		return
+	var profile: Dictionary = visibility_settings(level, method, underground)
+	var occlusion: bool = bool(profile["use_occlusion"])
+	var sky: bool = bool(profile["read_sky_light"])
+	var normal_bias: float = float(profile["normal_bias"])
+	var probe_bias: float = float(profile["probe_bias"])
+	# Native and fallback share an idempotent client-side fast path.
+	if environment.sdfgi_use_occlusion == occlusion and environment.sdfgi_read_sky_light == sky and \
+			is_equal_approx(environment.sdfgi_normal_bias, normal_bias) and \
+			is_equal_approx(environment.sdfgi_probe_bias, probe_bias):
+		return
+	if environment.has_method("configure_sdfgi_visibility"):
+		environment.call("configure_sdfgi_visibility", occlusion, sky,
+			normal_bias, probe_bias)
+		return
+	# Stock Godot fallback. Avoid redundant individual RenderingServer updates.
+	if environment.sdfgi_use_occlusion != occlusion:
+		environment.sdfgi_use_occlusion = occlusion
+	if environment.sdfgi_read_sky_light != sky:
+		environment.sdfgi_read_sky_light = sky
+	if not is_equal_approx(environment.sdfgi_normal_bias, normal_bias):
+		environment.sdfgi_normal_bias = normal_bias
+	if not is_equal_approx(environment.sdfgi_probe_bias, probe_bias):
+		environment.sdfgi_probe_bias = probe_bias
