@@ -13,6 +13,7 @@ const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
+const GroundContactAO = preload("res://scripts/client/ground_contact_ao.gd")
 const TerrainAnisotropy = preload("res://scripts/client/terrain_anisotropy.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
@@ -30,6 +31,7 @@ shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
 global uniform float aa_puddle_ripple_strength;
+global uniform float aa_ground_contact_strength;
 global uniform float aa_terrain_detail_radius;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/puddle_ripples.gdshaderinc"
@@ -41,6 +43,7 @@ varying vec3 world_normal;
 varying float vertex_cloud_shade;
 // Roads of this chunk: a 1 m per pixel mask of the chunk (white = road). Chunks without roads keep the black default.
 uniform sampler2D road_mask : hint_default_black, filter_linear, repeat_disable;
+uniform sampler2D contact_map : hint_default_white, filter_linear, repeat_disable;
 uniform vec2 chunk_origin = vec2(0.0);
 uniform float chunk_size = 64.0;
 
@@ -140,7 +143,17 @@ void fragment() {
 		* (1.0 - smoothstep(0.08, 0.25, slope));
 	color *= 1.0 - wetness * 0.12 - puddle * 0.13;
 	// Shared moving cloud cover, interpolated across terrain vertices for low GPU cost.
-	ALBEDO = color * mix(vec3(1.0), vec3(0.58, 0.63, 0.74), vertex_cloud_shade);
+	// Contact AO remains visible without downloaded terrain textures or SSAO.
+	float ground_contact = 1.0;
+	if (aa_ground_contact_strength > 0.001 && detail_fade > 0.001) {
+		float contact_sample = texture(contact_map,
+			clamp((p - chunk_origin) / chunk_size, vec2(0.0), vec2(1.0))).r;
+		ground_contact = 1.0 - (1.0 - contact_sample)
+			* aa_ground_contact_strength * detail_fade;
+	}
+	AO = ground_contact;
+	ALBEDO = color * mix(1.0, ground_contact, 0.12)
+		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), vertex_cloud_shade);
 	float dry_roughness = mix(0.95, 0.75, shore);
 	// Reuse the near-camera fine noise for subtle dry soil roughness variation;
 	// no extra texture samples, and wet puddles stay glossy.
@@ -263,6 +276,9 @@ var _world
 var _terrain
 var _groups: Dictionary = {} # kind -> {"multimesh": MultiMesh, "index": {node_id: i}, "transforms": [...]}
 var _hidden: Dictionary = {} # node id -> true, currently hidden
+var _contact_nodes: Array = []
+var _contact_structures: Array = []
+var _contact_material_private := false
 var _use_nature := false
 var _use_village := false
 
@@ -742,6 +758,12 @@ func _is_baked(base: String, variant: int) -> bool:
 
 func _build_objects(data: Dictionary) -> void:
 	var origin := WorldGen.cell_origin(cell)
+	# The procedural contact mask is baked once from existing world objects.
+	# It lives on the terrain material; no new mesh or shadow caster is spawned.
+	if _terrain != null:
+		_contact_nodes = data.get("nodes", [])
+		_contact_structures = data.get("structures", [])
+		_refresh_ground_contact()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = WorldGen.mix(cell.x, cell.y, 99)
 	var tree_variants: int = Assets.tree_meshes().size() + ModelCatalog.BUILTIN_TREES.size()
@@ -1254,14 +1276,36 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 			register_scenery(extra_batch, "decor:extra", 140.0)
 
 
+## Rebuild the tiny 64x64 L8 mask only when a world object disappears.
+## The fallback ground material may be shared by many chunks, so duplicate it
+## before binding the chunk's contact texture and UV origin.
+func _refresh_ground_contact() -> void:
+	if _terrain == null:
+		return
+	var material: ShaderMaterial = _terrain.material as ShaderMaterial
+	if material == null:
+		return
+	if not _contact_material_private:
+		material = material.duplicate() as ShaderMaterial
+		_terrain.material = material
+		_contact_material_private = true
+	material.set_shader_parameter("contact_map", GroundContactAO.create_texture(
+		WorldGen.cell_origin(cell), Defs.CHUNK_SIZE,
+		_contact_nodes, _contact_structures, _hidden))
+	material.set_shader_parameter("chunk_origin", WorldGen.cell_origin(cell))
+	material.set_shader_parameter("chunk_size", Defs.CHUNK_SIZE)
+
+
 ## Hides depleted nodes and opened crates. `hidden_ids` is the set of ids the server says are gone.
 func apply_state(hidden_ids: Dictionary) -> void:
+	var changed := false
 	for kind in _groups:
 		var group: Dictionary = _groups[kind]
 		for id in group["index"]:
 			var should_hide: bool = hidden_ids.has(id)
 			if should_hide == _hidden.has(id):
 				continue
+			changed = true
 			var i: int = group["index"][id]
 			if should_hide:
 				_hidden[id] = true
@@ -1269,3 +1313,5 @@ func apply_state(hidden_ids: Dictionary) -> void:
 			else:
 				_hidden.erase(id)
 				group["multimesh"].set_instance_transform(i, group["transforms"][i])
+	if changed and _terrain != null:
+		_refresh_ground_contact()

@@ -2,6 +2,8 @@ extends RefCounted
 ## Terrain material complexity must scale with distance while remaining compatible with the game's renderer.
 
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const GroundContactAO = preload("res://scripts/client/ground_contact_ao.gd")
+const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
 
 func run(t) -> void:
@@ -164,3 +166,36 @@ func run(t) -> void:
 			"transition keeps rock albedo in the original material color range")
 		t.check(result.g >= 0.39 and result.g <= 0.47,
 			"triplanar rock blends without an overshooting color band")
+
+	t.current = "baked terrain ground contact"
+	t.check(ProjectSettings.has_setting("shader_globals/aa_ground_contact_strength"), "one common shader global controls contact AO")
+	var low_contact: float = float(GraphicsQuality.profile(0)["ground_contact_strength"])
+	var high_contact: float = float(GraphicsQuality.profile(3)["ground_contact_strength"])
+	t.eq(low_contact, 0.0, "Performance skips the contact-mask texture read")
+	t.check(high_contact > float(GraphicsQuality.profile(1)["ground_contact_strength"]), "higher presets preserve nearby ground contact")
+	var empty: PackedByteArray = GroundContactAO.mask_bytes(Vector2.ZERO, 64.0, [], [])
+	t.eq(empty.size(), GroundContactAO.SIZE * GroundContactAO.SIZE, "mask fits a single 64px L8 surface")
+	t.eq(empty[32 * GroundContactAO.SIZE + 32], 255, "no objects means no dark contact spots")
+	var tree_node := {"kind": "tree", "id": 712, "x": 32.0, "z": 32.0}
+	var tree_nodes: Array = [tree_node]
+	var stamped: PackedByteArray = GroundContactAO.mask_bytes(Vector2.ZERO, 64.0, tree_nodes, [])
+	t.check(stamped[31 * GroundContactAO.SIZE + 31] < 255, "tree trunk creates a local soft dark contact")
+	t.eq(stamped[0], 255, "contact stamp does not shade unrelated terrain")
+	var depleted: PackedByteArray = GroundContactAO.mask_bytes(Vector2.ZERO, 64.0, tree_nodes, [], {712: true})
+	t.eq(depleted[31 * GroundContactAO.SIZE + 31], 255, "depleted tree no longer leaves a static contact stain")
+	var border_tree: Array = [{"kind": "tree", "x": 0.5, "z": 32.0}]
+	var border_mask: PackedByteArray = GroundContactAO.mask_bytes(Vector2.ZERO, 64.0, border_tree, [])
+	t.check(border_mask[32 * GroundContactAO.SIZE] > stamped[31 * GroundContactAO.SIZE + 31],
+		"imprints fade at chunk borders to avoid visible seams")
+	var terrain_shader := load("res://assets/shaders/ground.gdshader") as Shader
+	t.check(terrain_shader != null and terrain_shader.code.contains("uniform sampler2D contact_map"),
+		"textured landscape receives baked ground contact map")
+	t.check(terrain_shader != null and terrain_shader.code.contains("AO = ground_contact;"),
+		"landscape PBR ambient light respects local contacts")
+	t.check(ChunkView.GROUND_SHADER.contains("uniform sampler2D contact_map"),
+		"fallback procedural landscape uses the same contact shading")
+	t.check(ChunkView.GROUND_SHADER.contains("AO = ground_contact;"),
+		"Compatibility fallback receives the contact occlusion")
+	var controller := load("res://scripts/client/graphics_quality.gd") as GDScript
+	t.check(controller != null and controller.source_code.contains('global_shader_parameter_set(&"aa_ground_contact_strength"'),
+		"graphics quality updates one contact shadow budget for all chunks")
