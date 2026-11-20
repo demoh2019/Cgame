@@ -102,7 +102,13 @@ Craft the tradeable Trail Bike Dynamo Lantern at a T2 workbench from one
 T2 bar, three scrap and one T2 cloth. Carry it with your Salvaged Trail Bike
 to illuminate a 13 m forward cone during night travel while mounted.
 It switches off automatically at dawn, on dismount, on death or when lost.
-No new hotkeys or engine modules are required: the same 3D model displays
+A rider may also deliberately extinguish or re-arm the lamp with **[**,
+or the toggle in the online inventory. The preference is session-only,
+defaults to armed when joining, and can be selected while dismounted for
+the next night ride. Repeated toggles within 0.8 seconds are rejected
+by the server without consuming an item. This gives couriers a choice
+between seeing the trail and avoiding infected detection.
+No engine modules are required: the same 3D model displays
 the headlight and emissive lens for the rider and nearby players.
 
 Illumination has a cost: idle infected can notice the lit survivor at up to
@@ -111,7 +117,9 @@ infected pursuit leash. Safe hubs and dead characters are protected by
 existing zombie-target rules. Server inventory ownership, mount state,
 survival and the shared world clock decide both AI light-reveal range and
 public/private light replication; clients never send a light claim.
-Night/day and inventory changes are reflected immediately in next snapshots.
+Night/day, manual toggles and inventory changes are reflected immediately in next snapshots.
+Only the real lamp's existing authenticated item-use RPC can toggle it, even while
+mounted; all other item uses remain forbidden on the bicycle.
 Owning the lamp does not increase speed or modify normal walking physics.
 
 ## Presentation
