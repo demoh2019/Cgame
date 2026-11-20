@@ -15,6 +15,7 @@ const MoonVisuals = preload("res://scripts/client/moon_visuals.gd")
 const LightningFlash = preload("res://scripts/client/graphics_lightning_flash.gd")
 const GraphicsEyeAdaptation = preload("res://scripts/client/graphics_eye_adaptation.gd")
 const GraphicsCinematicDof = preload("res://scripts/client/graphics_cinematic_dof.gd")
+const SolarIrradiance = preload("res://scripts/client/solar_irradiance.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
 ## Everything degrades gracefully on the compatibility renderer (SSAO and the like are simply ignored).
 
@@ -28,6 +29,12 @@ var _cloud_lighting_lut: Texture2D
 var _sky_scattering_generator: Object
 var _sky_horizon_optical := Color(0.0, 0.0, 0.0, 1.0)
 var _atmospheric_lut_strength := 0.0
+# Native spectral sun transmittance is sampled at 5Hz and smoothly
+# interpolated so the real directional light never steps during sunset.
+var _sun_transmittance_strength := 0.0
+var _sun_optical_elapsed := SolarIrradiance.SAMPLE_INTERVAL
+var _sun_optical_tint := Color.WHITE
+var _sun_optical_target := Color.WHITE
 var _shadows_allowed := true
 var _cloud_shadows_allowed := true
 var _shadow_elapsed := 0.20 # At most five shadow-opacity updates per second.
@@ -211,6 +218,27 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	else:
 		sun.light_color = warm
 		sun.light_energy = lerpf(0.05, 1.05, clampf(sun_height * 2.0, 0.0, 1.0)) * (1.0 - storm * 0.55)
+		# The sun and sky now see the same Rayleigh/Mie-inspired optical path.
+		# Only native High/Ultra Forward+ runs this CPU calculation (5Hz);
+		# the real scene sunlight interpolates smoothly every frame. Moon
+		# energy, sun shadows and authored midday white point are preserved.
+		if _sun_transmittance_strength > 0.001 \
+				and _sky_scattering_generator != null \
+				and _sky_scattering_generator.has_method("sample_sun_transmittance"):
+			var optical_dt: float = clampf(delta, 0.0, 0.1) if is_finite(delta) else 0.0
+			_sun_optical_elapsed += optical_dt
+			if _sun_optical_elapsed >= SolarIrradiance.SAMPLE_INTERVAL:
+				_sun_optical_elapsed = fmod(_sun_optical_elapsed, SolarIrradiance.SAMPLE_INTERVAL)
+				var native_sample: Variant = _sky_scattering_generator.call(
+					"sample_sun_transmittance", clampf(sun_height, 0.0, 1.0), 2.0)
+				if native_sample is Color:
+					var optical: Color = native_sample
+					if SolarIrradiance.valid(optical):
+						_sun_optical_target = optical
+			_sun_optical_tint = _sun_optical_tint.lerp(_sun_optical_target,
+				clampf(optical_dt * 9.0, 0.0, 1.0))
+			sun.light_color = SolarIrradiance.tint(
+				warm, _sun_optical_tint, _sun_transmittance_strength)
 	# Sky colors: night -> day, a band of dusk orange near the horizon when the sun is low, grey in a storm.
 	var top := NIGHT_TOP.lerp(DAY_TOP, daylight)
 	var horizon := NIGHT_HORIZON.lerp(DAY_HORIZON, daylight)
@@ -347,6 +375,19 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 				sky_material.set_shader_parameter("atmospheric_lut", _atmospheric_lut)
 	sky_material.set_shader_parameter("has_atmospheric_lut", _atmospheric_lut != null and lut_strength > 0.001)
 	sky_material.set_shader_parameter("atmospheric_lut_strength", lut_strength)
+	# Reuse native sky extinction for the actual directional light, not just
+	# pixels of the sky panorama. No new GPU pass, LUT texture or shadow map.
+	var solar_strength: float = clampf(
+		float(settings.get("sun_transmittance_strength", 0.0)), 0.0, 1.0)
+	if str(settings.get("rendering_method", "")) != "forward_plus":
+		solar_strength = 0.0
+	_sun_transmittance_strength = solar_strength
+	if solar_strength > 0.001 and _sky_scattering_generator == null \
+			and ClassDB.class_exists("SkyScatteringLUT"):
+		_sky_scattering_generator = ClassDB.instantiate("SkyScatteringLUT")
+	# Force a fresh native sample at the next daytime update after a preset
+	# switch, then retain the 5Hz interpolation until quality changes again.
+	_sun_optical_elapsed = SolarIrradiance.SAMPLE_INTERVAL
 	# Tiny lunar surface shading only for the high-end graphics profiles.
 	sky_material.set_shader_parameter("moon_detail_strength",
 		clampf(float(settings.get("moon_detail_strength", 0.0)), 0.0, 1.0))
