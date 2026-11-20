@@ -48,6 +48,9 @@ environment/screen_space_reflection/half_size=true
 environment/ssao/half_size=true
 environment/ssil/half_size=true
 
+; Optional Ultra SDFGI is heavy on integrated GPUs: compute GI at half resolution.
+global_illumination/gi/use_half_resolution=true
+
 ; Native sky IBL prefilter reduces high-roughness reflection aliasing.
 reflections/sky_reflections/ggx_samples=48
 reflections/sky_reflections/ggx_samples.mobile=16
