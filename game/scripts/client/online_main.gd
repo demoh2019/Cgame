@@ -22,6 +22,7 @@ const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
+const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const HubView = preload("res://scripts/client/hub_view.gd")
@@ -86,6 +87,7 @@ var _visual_biome := "plains"
 var atmosphere
 var _ambient_motes
 var _ground_mist
+var _footprints
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
 var _auto_quality := GraphicsAutoQuality.new()
@@ -1017,6 +1019,10 @@ func _on_welcomed() -> void:
 	_ambient_motes = AmbientMotes.new()
 	_ambient_motes.setup(client.world)
 	add_child(_ambient_motes)
+	# Reuse native clustered decals for transient wet footprints on terrain.
+	_footprints = FootprintDecals.new()
+	_footprints.setup(client.world)
+	add_child(_footprints)
 	audio = Audio.new()
 	add_child(audio)
 	client.event_received.connect(func(event: Dictionary) -> void: audio.on_event(event, client.peer_id, client.world.height_at))
@@ -1130,6 +1136,12 @@ func _process(delta: float) -> void:
 		audio.set_footsteps(avatar_model._moving and avatar.visible and not riding)
 		if not riding:
 			effects.footsteps(position, avatar_model.speed, delta)
+		if _footprints != null:
+			_footprints.update_view(position, avatar_model._moving and avatar.visible,
+				avatar.visible and not riding and
+				float(client.you.get("wading_depth_m", 0.0)) < 0.22 and
+				not Dungeon.is_underground(position.x), atmosphere.storm,
+				GraphicsQuality.level(), str(RenderingServer.get_current_rendering_method()), delta)
 	if streamer != null:
 		streamer.focus_position = position
 		_apply_world_state()
