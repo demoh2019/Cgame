@@ -4,6 +4,8 @@ class_name StreamedForestCell3D
 ## PackedScene, a biome, or a level chunk without changing the streamer.
 
 const Foliage = preload("res://addons/visual_quality/foliage_chunks.gd")
+const NavigationTile = preload("res://addons/visual_quality/navigation_tile.gd")
+const NPC = preload("res://addons/visual_quality/streamed_patrol_npc.gd")
 
 signal stream_state_changed()
 
@@ -13,6 +15,9 @@ signal stream_state_changed()
 var cell_coord: Vector2i = Vector2i.ZERO
 var _quality_profile: int = 1
 var _foliage: ChunkedFoliage3D
+var _navigation_tile: StreamedNavigationTile3D
+var _npc: StreamedPatrolNPC3D
+var ai_enabled: bool = true
 var beacon_activated: bool = false
 var _beacon: MeshInstance3D
 
@@ -32,12 +37,42 @@ func _ready() -> void:
 	add_child(_foliage)
 	_foliage.set_quality(_quality_profile)
 	_create_beacon()
+	_create_navigation_and_npc()
 
 
 func set_quality(profile: int) -> void:
 	_quality_profile = clampi(profile, 0, 2)
 	if is_instance_valid(_foliage):
 		_foliage.set_quality(_quality_profile)
+	if is_instance_valid(_npc):
+		_npc.think_interval_seconds = [0.9, 0.55, 0.35][_quality_profile]
+
+
+func set_ai_enabled(value: bool) -> void:
+	ai_enabled = value
+	if is_instance_valid(_npc):
+		_npc.set_physics_process(ai_enabled)
+
+
+func get_active_npc() -> StreamedPatrolNPC3D:
+	return _npc
+
+
+func _create_navigation_and_npc() -> void:
+	_navigation_tile = NavigationTile.new()
+	_navigation_tile.name = "NavigationTile"
+	_navigation_tile.tile_size = local_chunk_size
+	add_child(_navigation_tile)
+	_npc = NPC.new()
+	_npc.name = "PatrolNPC"
+	_npc.cell_seed = Foliage.cell_seed(world_seed, cell_coord.x, cell_coord.y)
+	_npc.position = Vector3(-2.0, 0.0, 2.0)
+	var owner_streamer: WorldStreamer3D = get_parent() as WorldStreamer3D
+	if owner_streamer != null:
+		_npc.player = owner_streamer.source
+	add_child(_npc)
+	set_quality(_quality_profile)
+	set_ai_enabled(ai_enabled)
 
 
 func get_stream_cell_coord() -> Vector2i:
@@ -95,11 +130,22 @@ func _update_beacon_visual() -> void:
 
 ## Store only modified state; empty dict means default/unmodified.
 func save_stream_state() -> Dictionary:
+	var state: Dictionary = {}
 	if beacon_activated:
-		return {"activated": true}
-	return {}
+		state["activated"] = true
+	if is_instance_valid(_npc):
+		# Unmodified NPCs do not inflate the persistent save.
+		var npc_data: Dictionary = _npc.export_npc_state()
+		if _npc.position.distance_squared_to(Vector3(-2.0, 0.0, 2.0)) > 0.05 or _npc.patrol_index != 0:
+			state.merge(npc_data)
+	return state
 
 
 func load_stream_state(state: Dictionary) -> void:
 	beacon_activated = state.get("activated", false) == true
 	_update_beacon_visual()
+	if is_instance_valid(_npc):
+		if state.has("npc_position") or state.has("npc_patrol"):
+			_npc.import_npc_state(state)
+		else:
+			_npc.reset_state()
