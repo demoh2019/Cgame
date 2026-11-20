@@ -80,6 +80,8 @@ func run(t) -> void:
 	t.check(code.contains("spectral_transmission") and
 		code.contains("storm_whitecaps") and code.contains("shore_glimmer"),
 		"old physical absorption, storm wave foam and caustics preserved")
+	t.check(code.contains("surge_depth") and code.contains("shore_surf_strength"),
+		"both shader variants retain the scalable animated coastline")
 	var material := ShaderMaterial.new()
 	WaterRefraction.apply(material, VisualProfiles.settings(3), 3, "forward_plus")
 	t.check(material.shader == high, "ultra assigns high-quality shader")

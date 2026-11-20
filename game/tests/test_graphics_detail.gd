@@ -50,6 +50,31 @@ func run(t) -> void:
 		t.check(water_shader.code.contains("if (edge > 0.001)"),
 			"deep-water pixels avoid needless shoreline foam sampling")
 
+	t.current = "depth-following, quality-budgeted shoreline surf"
+	t.eq(float(low["shore_surf_strength"]), 0.0,
+		"Performance avoids extra wavefront and derivative math")
+	t.eq(float(balanced["shore_surf_strength"]), 0.0,
+		"Balanced avoids extra wavefront and derivative math")
+	t.check(float(high["shore_surf_strength"]) > 0.0,
+		"High adds naturally advancing surf along the shoreline")
+	t.check(float(ultra["shore_surf_strength"]) > float(high["shore_surf_strength"]),
+		"Ultra shows more pronounced wavefronts")
+	t.check(float(ultra["shore_surf_strength"]) <= 1.0,
+		"surf strength is a bounded color/foam blend")
+	if water_shader != null:
+		var swash_code: String = water_shader.code
+		t.check(swash_code.contains("shore_surf_strength > 0.001 && detail_fade > 0.001"),
+			"shore surf skips distant water and low-end presets")
+		t.check(swash_code.contains("fwidth(thickness)")
+			and swash_code.contains("surf_footprint"),
+			"shallow-water foam is softened by screen-space derivatives")
+		t.check(swash_code.contains("foam_noise - 0.5")
+			and swash_code.contains("surge_depth"),
+			"surf moves in world space while reusing existing foam breakup")
+		t.check(swash_code.contains("foam = max(foam, surf_foam * edge)"),
+			"swash remains confined to depth-measured shoreline")
+		t.check(not swash_code.contains("shore_surf_texture"),
+			"swash does not require an extra texture or bandwidth")
 	t.current = "depth-aware water optics"
 	t.eq(float(low["shore_glimmer_strength"]), 0.0, "Performance skips optional shallow-water glints")
 	t.eq(float(balanced["shore_glimmer_strength"]), 0.0, "Balanced skips optional shallow-water glints")
@@ -77,6 +102,8 @@ func run(t) -> void:
 	if controller != null:
 		t.check(controller.source_code.contains('set_shader_parameter("shore_glimmer_strength"'),
 			"graphics presets update the live water material")
+		t.check(controller.source_code.contains('set_shader_parameter("shore_surf_strength"'),
+			"quality changes wire animated swash into the live water")
 		t.check(controller.source_code.contains('set_shader_parameter("shore_glimmer_fade_start"')
 			and controller.source_code.contains('set_shader_parameter("shore_glimmer_fade_end"'),
 			"graphics presets update the water glimmer distance thresholds")
