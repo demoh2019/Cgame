@@ -5,6 +5,7 @@ extends Node3D
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const GameSave = preload("res://scripts/game_save.gd")
 const QuestNavigation = preload("res://scripts/quest_navigation.gd")
+const ForestEncounters = preload("res://scripts/forest_encounters.gd")
 const AtmosphereCycle = preload("res://scripts/atmosphere_cycle.gd")
 const WORLD_EXTENT: float = 64.0
 const GRID_SEGMENTS: int = 112
@@ -21,6 +22,10 @@ var atmosphere_clock # Script-backed Node; keep dynamic type for controller-spec
 var hud: Label
 var hint: Label
 var world_partition: WorldPartition3D
+var encounters: Node3D
+var defeated_mobs: Array[String] = []
+var player_health: int = 100
+var player_hit_grace: float = 0.0
 var current_region: Vector2i = Vector2i.ZERO
 var crystals: Array[Node3D] = []
 var collected_ids: Array[int] = []
@@ -51,6 +56,7 @@ func _ready() -> void:
     _load_game()
     _create_quest_marker()
     _refresh_quest_target(true)
+    _create_encounter_director()
     _apply_quality(high_quality)
     _refresh_hud()
 
@@ -342,6 +348,47 @@ func _quest_hud_text() -> String:
         world_partition.get_streaming_source_count() if is_instance_valid(world_partition) else 0]
 
 
+func _create_encounter_director() -> void:
+    encounters = Node3D.new()
+    encounters.name = "ForestEncounterDirector"
+    encounters.set_script(ForestEncounters)
+    add_child(encounters)
+    encounters.connect("player_damaged", _on_player_damaged)
+    encounters.connect("enemy_defeated", _on_enemy_defeated)
+    encounters.call("restore_defeated", defeated_mobs)
+    encounters.call("configure", world_partition, player, Callable(self, "height_at"))
+
+
+func _on_player_damaged(amount: int) -> void:
+    if player_hit_grace > 0.0 or amount <= 0:
+        return
+    player_health = maxi(player_health - amount, 0)
+    player_hit_grace = 0.55
+    if player_health == 0:
+        # A safe, deterministic camp respawn instead of losing quest progress.
+        player.call("teleport_to_ground", 0.0, 9.0, height_at(0.0, 9.0))
+        player_health = 100
+        player_hit_grace = 2.0
+        hint.text = "Вы потеряли здоровье! Возрождение у лагеря. Реликвии и победы сохранены."
+    _refresh_hud()
+
+
+func _on_enemy_defeated(_id: String) -> void:
+    defeated_mobs = encounters.call("get_defeated_ids")
+    _save_game()
+    _refresh_hud()
+
+
+func _swing_weapon() -> void:
+    if encounters == null or camera == null:
+        return
+    var struck: bool = encounters.call("attack_from_camera", camera)
+    if struck:
+        hint.text = "Попадание! Продолжайте атаковать, чтобы победить лесного охотника."
+    else:
+        hint.text = "Удар: подойдите ближе и наведите прицел на противника (F или ЛКМ)."
+
+
 func _create_camera() -> void:
     # Physics body owns yaw and collision, camera owns only pitch.
     # This follows the standard first-person controller hierarchy.
@@ -373,10 +420,10 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 240)
+    hint.position = Vector2(22, 277)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1/F2: графика  •  F3: упреждение  •  F4: LOD  •  F5/F9: сохранение\nF6: погода  •  F7: пауза дня  •  F8: +3 часа  •  Esc: курсор"
+    hint.text = "WASD/стрелки: ходьба  •  Shift: бег  •  Space: прыжок  •  E: реликвия\nF/ЛКМ: удар  •  F1/F2: графика  •  F3: упреждение  •  F4: LOD  •  F5/F9: сохранение\nF6: погода  •  F7: пауза дня  •  F8: +3 часа  •  Esc: курсор"
     canvas.add_child(hint)
 
 
@@ -411,6 +458,7 @@ func _refresh_hud() -> void:
     var pinned: int = world_partition.get_pinned_cell_count() if world_partition != null else 0
     var distant: int = world_partition.get_distant_cell_count() if world_partition != null else 0
     var quest_text: String = _quest_hud_text()
+    var enemy_count: int = encounters.call("get_alive_count") if encounters != null else 0
     var predicted_text: String = "OFF" if not predictive_streaming else "—"
     if world_partition != null and world_partition.has_predicted_cell():
         var next_cell: Vector2i = world_partition.get_predicted_cell()
@@ -421,12 +469,14 @@ func _refresh_hud() -> void:
         + "Ячейки: %d/%d   закреплено: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pinned, pending, inflight, failed, current_region.x, current_region.y] \
         + "Упреждающая загрузка: %s   LOD дальних: %d   F3/F4: сравнение\n" % [predicted_text, distant] \
         + "Атмосфера: %02d:%02d  %s  %s (F6/F7/F8)\n" % [int(atmosphere_clock.day_hours), int(fmod(atmosphere_clock.day_hours, 1.0) * 60.0), atmosphere_clock.get_weather_name(), "ПАУЗА" if atmosphere_clock.paused else "цикл"] \
-        + quest_text
+        + quest_text + "\n" \
+        + "Здоровье: %d/100   Противники: %d   побеждено: %d   F/ЛКМ: удар" % [player_health, enemy_count, defeated_mobs.size()]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
+    player_hit_grace = maxf(0.0, player_hit_grace - delta)
     # Player movement is calculated by CharacterBody3D in the physics step.
     # The streamer receives the world-space velocity from the preceding step.
     # For non-physics observers, the same API can be driven by gameplay code.
@@ -450,7 +500,10 @@ func _process(delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
     if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-        Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+        if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+            _swing_weapon()
+        else:
+            Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
         get_viewport().set_input_as_handled()
     elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
         player.rotation.y -= event.relative.x * mouse_sensitivity
@@ -491,6 +544,8 @@ func _unhandled_input(event: InputEvent) -> void:
                 _apply_quality(high_quality)
             KEY_E:
                 _collect_nearest()
+            KEY_F:
+                _swing_weapon()
 
 
 func _save_game() -> void:
@@ -500,7 +555,8 @@ func _save_game() -> void:
         "look": [camera.rotation.x, player.rotation.y],
         "quality": high_quality,
         "time_of_day": atmosphere_clock.day_hours,
-        "weather": atmosphere_clock.weather_mode
+        "weather": atmosphere_clock.weather_mode,
+        "defeated_enemies": encounters.call("get_defeated_ids") if encounters != null else defeated_mobs
     })
     if saved and collected < CRYSTAL_TOTAL:
         hint.text = "Прогресс сохранён локально. F9: загрузить. W/A/S/D: ходьба, E: реликвии."
@@ -512,6 +568,9 @@ func _load_game() -> void:
         return
     collected_ids = state["relics"]
     collected = collected_ids.size()
+    defeated_mobs = state.get("defeated_enemies", [])
+    if encounters != null:
+        encounters.call("restore_defeated", defeated_mobs)
     for crystal in crystals:
         crystal.queue_free()
     crystals.clear()
