@@ -353,7 +353,11 @@ TEST_CASE("[SceneTree][WorldPartition3D] Stream one authored PackedScene and unl
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->get_loaded_cell_count() == 1);
 
+	CHECK(partition->pin_cell(Vector2i(0, 0)));
 	observer->set_position(Vector3(64, 0, 0));
+	partition->update_streaming();
+	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
+	partition->unpin_cell(Vector2i(0, 0));
 	partition->update_streaming();
 	CHECK_FALSE(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->get_loaded_cell_count() == 0);
@@ -416,6 +420,57 @@ TEST_CASE("[SceneTree][WorldPartition3D] Automatic streaming respects transforms
 	SceneTree::get_singleton()->get_root()->remove_child(parent);
 	memdelete(parent);
 	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+
+TEST_CASE("[WorldPartition3D] Pins are bounded, idempotent, and removed with registrations") {
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(partition->pin_cell(Vector2i(0, 0)));
+	ERR_PRINT_ON;
+	partition->set_cell_scene(Vector2i(0, 0), "res://home.tscn");
+	CHECK(partition->pin_cell(Vector2i(0, 0)));
+	CHECK_FALSE(partition->pin_cell(Vector2i(0, 0)));
+	CHECK(partition->is_cell_pinned(Vector2i(0, 0)));
+	CHECK(partition->get_pinned_cell_count() == 1);
+	Array pinned_copy = partition->get_pinned_cells();
+	pinned_copy.clear();
+	CHECK(partition->get_pinned_cell_count() == 1);
+	partition->unpin_cell(Vector2i(0, 0));
+	CHECK_FALSE(partition->is_cell_pinned(Vector2i(0, 0)));
+	CHECK(partition->pin_cell(Vector2i(0, 0)));
+	partition->remove_cell_scene(Vector2i(0, 0));
+	CHECK(partition->get_pinned_cell_count() == 0);
+
+	partition->set_cell_scene(Vector2i(0, 0), "res://home.tscn");
+	partition->set_cell_scene(Vector2i(1, 0), "res://second.tscn");
+	CHECK(partition->pin_cell(Vector2i(0, 0)));
+	CHECK(partition->pin_cell(Vector2i(1, 0)));
+	Dictionary replacement;
+	replacement[Vector2i(1, 0)] = "res://second.tscn";
+	partition->set_cell_scenes(replacement);
+	CHECK_FALSE(partition->is_cell_pinned(Vector2i(0, 0)));
+	CHECK(partition->is_cell_pinned(Vector2i(1, 0)));
+	partition->clear_cell_scenes();
+	CHECK(partition->get_pinned_cell_count() == 0);
+	memdelete(partition);
+}
+
+TEST_CASE("[WorldPartition3D] Pins obey a bounded 128-cell memory budget") {
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	for (int i = 0; i < 129; i++) {
+		const Vector2i cell(i, -1);
+		partition->set_cell_scene(cell, "res://shared.tscn");
+		if (i < 128) {
+			CHECK(partition->pin_cell(cell));
+		}
+	}
+	CHECK(partition->get_pinned_cell_count() == 128);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(partition->pin_cell(Vector2i(128, -1)));
+	ERR_PRINT_ON;
+	CHECK(partition->get_pinned_cell_count() == 128);
+	memdelete(partition);
 }
 
 } // namespace TestWorldPartition3D

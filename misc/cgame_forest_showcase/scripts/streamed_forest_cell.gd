@@ -30,6 +30,8 @@ func _ready() -> void:
     _spawn_trees()
     _spawn_grass()
     _spawn_rocks()
+    if cell_x == 0 and cell_z == 0:
+        _spawn_home_beacon()
     set_high_quality(high_quality)
 
 
@@ -171,6 +173,54 @@ func _spawn_instances(label: String, mesh: Mesh,
         node.visibility_range_end = 145.0
     add_child(node)
     return node
+
+
+func _spawn_home_beacon() -> void:
+    # This light marks the permanent hub as a real streamed scene object.
+    # It remains loaded while the player explores, without adding a shadow map.
+    var marker := Node3D.new()
+    marker.name = "PinnedHomeBeacon"
+    marker.position = Vector3(3.0, _world_height(3.0, 9.0), 9.0)
+    add_child(marker)
+
+    var base := CylinderMesh.new()
+    base.top_radius = 0.55
+    base.bottom_radius = 0.80
+    base.height = 0.28
+    var stone := StandardMaterial3D.new()
+    stone.albedo_color = Color(0.19, 0.22, 0.25)
+    stone.roughness = 0.9
+    base.material = stone
+    var pedestal := MeshInstance3D.new()
+    pedestal.name = "Pedestal"
+    pedestal.mesh = base
+    pedestal.position.y = 0.14
+    marker.add_child(pedestal)
+
+    var lantern := SphereMesh.new()
+    lantern.radius = 0.32
+    lantern.height = 0.64
+    var glow := StandardMaterial3D.new()
+    glow.albedo_color = Color(0.25, 0.75, 0.94)
+    glow.roughness = 0.2
+    glow.emission_enabled = true
+    glow.emission = Color(0.12, 0.60, 1.0)
+    glow.emission_energy_multiplier = 5.0
+    lantern.material = glow
+    var orb := MeshInstance3D.new()
+    orb.name = "HubLantern"
+    orb.mesh = lantern
+    orb.position.y = 1.55
+    marker.add_child(orb)
+
+    var lamp := OmniLight3D.new()
+    lamp.name = "HubLight"
+    lamp.position.y = 1.55
+    lamp.light_color = Color(0.38, 0.78, 1.0)
+    lamp.light_energy = 0.45
+    lamp.omni_range = 7.0
+    lamp.shadow_enabled = false
+    marker.add_child(lamp)
 
 
 func set_high_quality(high: bool) -> void:

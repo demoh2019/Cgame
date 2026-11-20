@@ -57,12 +57,16 @@ class WorldPartition3D : public Node3D {
 	HashSet<String> requested_paths;
 	HashMap<String, Ref<PackedScene>> ready_scenes;
 	HashSet<Vector2i> failed_cells;
+	// Explicitly retained gameplay cells (camps, quest hubs), independent of camera distance.
+	HashSet<Vector2i> pinned_cells;
+	static constexpr int MAX_PINNED_CELLS = 128;
 
 	static bool _within_radius(const Vector2i &p_cell, const Vector2i &p_center, int p_radius);
 	String _get_scene_path(const Vector2i &p_cell) const;
 	void _unload_cell(const Vector2i &p_cell);
 	void _clear_active_cells();
 	void _poll_requests();
+	void _request_cell(const Vector2i &p_cell, int &r_new_requests, int &r_instances);
 	void _purge_unused_ready_scenes();
 	bool _instantiate_cell(const Vector2i &p_cell, const Ref<PackedScene> &p_scene);
 	void _refresh_processing();
@@ -105,6 +109,12 @@ public:
 	void remove_cell_scene(const Vector2i &p_cell);
 	void clear_cell_scenes();
 	int get_configured_cell_count() const;
+
+	bool pin_cell(const Vector2i &p_cell);
+	void unpin_cell(const Vector2i &p_cell);
+	bool is_cell_pinned(const Vector2i &p_cell) const;
+	Array get_pinned_cells() const;
+	int get_pinned_cell_count() const;
 
 	Vector2i local_position_to_cell(const Vector3 &p_local_position) const;
 	Vector3 cell_to_local_position(const Vector2i &p_cell) const;

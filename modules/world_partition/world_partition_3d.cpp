@@ -295,6 +295,17 @@ void WorldPartition3D::set_cell_scenes(const Dictionary &p_cells) {
 	pending_cells.clear();
 	failed_cells.clear();
 	cell_scenes = clean;
+	// Keep pins for retained registrations; prevent stale pins from keeping
+	// a future replacement scene loaded under the same grid coordinate.
+	Vector<Vector2i> stale_pins;
+	for (const Vector2i &cell : pinned_cells) {
+		if (!cell_scenes.has(cell)) {
+			stale_pins.push_back(cell);
+		}
+	}
+	for (const Vector2i &cell : stale_pins) {
+		pinned_cells.erase(cell);
+	}
 	_purge_unused_ready_scenes();
 }
 
@@ -326,6 +337,7 @@ void WorldPartition3D::remove_cell_scene(const Vector2i &p_cell) {
 	pending_cells.erase(p_cell);
 	failed_cells.erase(p_cell);
 	cell_scenes.erase(p_cell);
+	pinned_cells.erase(p_cell);
 	_purge_unused_ready_scenes();
 }
 
@@ -334,7 +346,38 @@ void WorldPartition3D::clear_cell_scenes() {
 	pending_cells.clear();
 	failed_cells.clear();
 	cell_scenes.clear();
+	pinned_cells.clear();
 	_purge_unused_ready_scenes();
+}
+
+bool WorldPartition3D::pin_cell(const Vector2i &p_cell) {
+	ERR_FAIL_COND_V_MSG(_get_scene_path(p_cell).is_empty(), false, "WorldPartition3D cannot pin an unregistered cell.");
+	if (pinned_cells.has(p_cell)) {
+		return false;
+	}
+	ERR_FAIL_COND_V_MSG(pinned_cells.size() >= MAX_PINNED_CELLS, false, "WorldPartition3D supports at most 128 pinned cells.");
+	pinned_cells.insert(p_cell);
+	return true;
+}
+
+void WorldPartition3D::unpin_cell(const Vector2i &p_cell) {
+	pinned_cells.erase(p_cell);
+}
+
+bool WorldPartition3D::is_cell_pinned(const Vector2i &p_cell) const {
+	return pinned_cells.has(p_cell);
+}
+
+Array WorldPartition3D::get_pinned_cells() const {
+	Array result;
+	for (const Vector2i &cell : pinned_cells) {
+		result.push_back(cell);
+	}
+	return result;
+}
+
+int WorldPartition3D::get_pinned_cell_count() const {
+	return pinned_cells.size();
 }
 
 int WorldPartition3D::get_configured_cell_count() const {
@@ -370,6 +413,55 @@ Array WorldPartition3D::get_cells_in_radius(const Vector2i &p_center, int p_radi
 	return result;
 }
 
+void WorldPartition3D::_request_cell(const Vector2i &p_cell, int &r_new_requests, int &r_instances) {
+	if (active_cells.has(p_cell) || failed_cells.has(p_cell)) {
+		return;
+	}
+	const String path = _get_scene_path(p_cell);
+	if (path.is_empty()) {
+		return;
+	}
+	if (pending_cells.has(p_cell)) {
+		const Ref<PackedScene> *scene = ready_scenes.getptr(path);
+		if (scene != nullptr && r_instances > 0) {
+			if (!_instantiate_cell(p_cell, *scene)) {
+				failed_cells.insert(p_cell);
+			}
+			pending_cells.erase(p_cell);
+			r_instances--;
+		}
+		return;
+	}
+	if (ready_scenes.has(path)) {
+		pending_cells.insert(p_cell, path);
+		const Ref<PackedScene> *scene = ready_scenes.getptr(path);
+		if (r_instances > 0 && scene != nullptr) {
+			if (!_instantiate_cell(p_cell, *scene)) {
+				failed_cells.insert(p_cell);
+			}
+			pending_cells.erase(p_cell);
+			r_instances--;
+		}
+		return;
+	}
+	if (requested_paths.has(path)) {
+		pending_cells.insert(p_cell, path);
+		return;
+	}
+	if (r_new_requests <= 0 || requested_paths.size() >= max_concurrent_requests) {
+		return;
+	}
+	const Error err = ResourceLoader::load_threaded_request(path, "PackedScene");
+	if (err == OK) {
+		requested_paths.insert(path);
+		pending_cells.insert(p_cell, path);
+		r_new_requests--;
+	} else {
+		ERR_PRINT(vformat("WorldPartition3D: unable to request %s (%d).", path, int(err)));
+		failed_cells.insert(p_cell);
+	}
+}
+
 void WorldPartition3D::update_streaming() {
 	_poll_requests();
 	if (!streaming_enabled || !is_inside_tree() || observer_path.is_empty()) {
@@ -391,7 +483,7 @@ void WorldPartition3D::update_streaming() {
 
 	Vector<Vector2i> unload;
 	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
-		if (!_within_radius(E.key, center, unload_radius) || ObjectDB::get_instance(E.value) == nullptr) {
+		if ((!pinned_cells.has(E.key) && !_within_radius(E.key, center, unload_radius)) || ObjectDB::get_instance(E.value) == nullptr) {
 			unload.push_back(E.key);
 		}
 	}
@@ -401,7 +493,7 @@ void WorldPartition3D::update_streaming() {
 
 	Vector<Vector2i> cancel;
 	for (const KeyValue<Vector2i, String> &E : pending_cells) {
-		if (!_within_radius(E.key, center, load_radius)) {
+		if (!pinned_cells.has(E.key) && !_within_radius(E.key, center, load_radius)) {
 			cancel.push_back(E.key);
 		}
 	}
@@ -419,53 +511,15 @@ void WorldPartition3D::update_streaming() {
 					continue;
 				}
 				const Vector2i cell = center + Vector2i(dx, dz);
-				if (active_cells.has(cell) || failed_cells.has(cell)) {
-					continue;
-				}
-				const String path = _get_scene_path(cell);
-				if (path.is_empty()) {
-					continue;
-				}
-				if (pending_cells.has(cell)) {
-					const Ref<PackedScene> *scene = ready_scenes.getptr(path);
-					if (scene != nullptr && instances > 0) {
-						if (!_instantiate_cell(cell, *scene)) {
-							failed_cells.insert(cell);
-						}
-						pending_cells.erase(cell);
-						instances--;
-					}
-					continue;
-				}
-				if (ready_scenes.has(path)) {
-					pending_cells.insert(cell, path);
-					const Ref<PackedScene> *scene = ready_scenes.getptr(path);
-					if (instances > 0 && scene != nullptr) {
-						if (!_instantiate_cell(cell, *scene)) {
-							failed_cells.insert(cell);
-						}
-						pending_cells.erase(cell);
-						instances--;
-					}
-					continue;
-				}
-				if (requested_paths.has(path)) {
-					pending_cells.insert(cell, path);
-					continue;
-				}
-				if (new_requests <= 0 || requested_paths.size() >= max_concurrent_requests) {
-					continue;
-				}
-				const Error err = ResourceLoader::load_threaded_request(path, "PackedScene");
-				if (err == OK) {
-					requested_paths.insert(path);
-					pending_cells.insert(cell, path);
-					new_requests--;
-				} else {
-					ERR_PRINT(vformat("WorldPartition3D: unable to request %s (%d).", path, int(err)));
-					failed_cells.insert(cell);
-				}
+				_request_cell(cell, new_requests, instances);
 			}
+		}
+	}
+	// Explicitly pinned hubs are kept alive outside the observer radius.
+	// They share the same per-frame budgets and threaded path cache.
+	for (const Vector2i &cell : pinned_cells) {
+		if (!_within_radius(cell, center, load_radius)) {
+			_request_cell(cell, new_requests, instances);
 		}
 	}
 	_purge_unused_ready_scenes();
@@ -531,6 +585,11 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_cell_scene", "cell"), &WorldPartition3D::remove_cell_scene);
 	ClassDB::bind_method(D_METHOD("clear_cell_scenes"), &WorldPartition3D::clear_cell_scenes);
 	ClassDB::bind_method(D_METHOD("get_configured_cell_count"), &WorldPartition3D::get_configured_cell_count);
+	ClassDB::bind_method(D_METHOD("pin_cell", "cell"), &WorldPartition3D::pin_cell);
+	ClassDB::bind_method(D_METHOD("unpin_cell", "cell"), &WorldPartition3D::unpin_cell);
+	ClassDB::bind_method(D_METHOD("is_cell_pinned", "cell"), &WorldPartition3D::is_cell_pinned);
+	ClassDB::bind_method(D_METHOD("get_pinned_cells"), &WorldPartition3D::get_pinned_cells);
+	ClassDB::bind_method(D_METHOD("get_pinned_cell_count"), &WorldPartition3D::get_pinned_cell_count);
 	ClassDB::bind_method(D_METHOD("local_position_to_cell", "local_position"), &WorldPartition3D::local_position_to_cell);
 	ClassDB::bind_method(D_METHOD("cell_to_local_position", "cell"), &WorldPartition3D::cell_to_local_position);
 	ClassDB::bind_method(D_METHOD("get_cells_in_radius", "center", "radius"), &WorldPartition3D::get_cells_in_radius);
@@ -570,4 +629,5 @@ WorldPartition3D::~WorldPartition3D() {
 	active_cells.clear();
 	pending_cells.clear();
 	ready_scenes.clear();
+	pinned_cells.clear();
 }
