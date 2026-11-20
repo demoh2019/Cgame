@@ -3,6 +3,7 @@ extends RefCounted
 
 const AnimLod = preload("res://scripts/client/anim_lod.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
+const CharacterModel = preload("res://scripts/client/character_model.gd")
 
 
 func run(t) -> void:
@@ -53,6 +54,37 @@ func run(t) -> void:
 	t.eq(animator.callback_mode_process, AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_IDLE, "mode restored")
 	lod.free()
 	model.free()
+
+	t.current = "native budgeted animation and in-game character loop"
+	var code: String = (CharacterModel as Script).source_code
+	t.check(code.contains('animator.has_method("advance_budgeted")'),
+		"existing character LOD opts into native per-mixer update budgets")
+	t.check(code.contains('animator.call("advance_budgeted", delta, interval, 0.5)'),
+		"native mixer accumulates skipped time instead of script allocations")
+	t.check(code.contains('_layer.call("advance_budgeted", delta, interval, 0.5)'),
+		"layered upper-body attack animation follows the same update budget")
+	t.check(code.contains('animator.has_method("reset_advance_budget")') and
+		code.contains('animator.call("reset_advance_budget")'),
+		"LOD transitions clear native animation time carryover")
+	t.check(code.contains('_lod_accum = minf(_lod_accum + maxf(delta, 0.0), 0.5)'),
+		"stock Godot fallback caps time after loading stalls")
+	var player := AnimationPlayer.new()
+	if player.has_method("advance_budgeted"):
+		player.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
+		var early: bool = bool(player.call("advance_budgeted", 0.02, 0.10))
+		t.check(not early, "native scheduler does not tick before interval")
+		t.near(float(player.call("get_advance_budget_accumulated")), 0.02,
+			0.0001, "native C++ accumulator stores skipped frame delta")
+		player.call("reset_advance_budget")
+		t.near(float(player.call("get_advance_budget_accumulated")), 0.0,
+			0.0001, "native reset releases accumulated time")
+		player.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_IDLE
+		t.check(not bool(player.call("advance_budgeted", 0.12, 0.10)),
+			"automatic animation processing cannot be double-ticked")
+	else:
+		t.check(code.contains("else:\n\t\t\t# Stock Godot fallback"),
+			"non-forked Godot uses the same existing manual animation behavior")
+	player.free()
 
 	t.current = "engine features"
 	t.check(not EngineFeatures.has("NoSuchEngineClassXyz"), "unknown class absent")
