@@ -32,6 +32,23 @@ static func _source() -> ArrayMesh:
 
 func run(t) -> void:
 	t.current = "native mesh LOD retention"
+	# Synthetic encoded streams exercise both index widths independently of importer assets.
+	var packed16 := PackedByteArray()
+	packed16.resize(6)
+	packed16.encode_u16(0, 0)
+	packed16.encode_u16(2, 2)
+	packed16.encode_u16(4, 1)
+	t.eq(MeshLOD.decode_indices(packed16, 2, 4), PackedInt32Array([0, 2, 1]),
+			"16-bit LOD indices decode exactly")
+	var packed32 := PackedByteArray()
+	packed32.resize(12)
+	packed32.encode_u32(0, 0)
+	packed32.encode_u32(4, 70000)
+	packed32.encode_u32(8, 1)
+	t.eq(MeshLOD.decode_indices(packed32, 4, 80000), PackedInt32Array([0, 70000, 1]),
+			"32-bit LOD indices decode exactly")
+	t.eq(MeshLOD.decode_indices(packed32, 4, 10).size(), 0,
+			"out-of-range LOD vertex indices are rejected")
 	var mesh: ArrayMesh = _source()
 	var lods: Dictionary = MeshLOD.copy_lods(mesh, 0)
 	t.eq(lods.size(), 1, "source has one simplified LOD")
