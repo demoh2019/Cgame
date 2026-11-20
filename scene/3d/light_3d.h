@@ -71,6 +71,7 @@ public:
 private:
 	Color color;
 	real_t param[PARAM_MAX] = {};
+	bool param_initialized[PARAM_MAX] = {};
 	bool shadow = false;
 	bool negative = false;
 	bool reverse_cull = false;
