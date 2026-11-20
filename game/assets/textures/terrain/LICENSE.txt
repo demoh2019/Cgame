@@ -2,3 +2,10 @@ Terrain textures from Poly Haven (https://polyhaven.com), CC0 1.0 Universal (pub
 lush = leafy_grass, dry = sparse_grass, forest = forest_leaves_02, swamp = brown_mud_leaves_01, road = grass_path_2,
 cliff = mossy_rock, mountain = aerial_grass_rock, sand = coast_sand_01, snow = snow_02, asphalt = asphalt_04,
 concrete = concrete_moss. Diffuse maps at 1024 px, normal maps (OpenGL) shrunk to 512 px.
+
+Additional site materials, original Poly Haven CC0 1.0:
+brick = brick_wall_001 (https://polyhaven.com/a/brick_wall_001), old brick paving in ruins and cities.
+plank = weathered_plank_siding (https://polyhaven.com/a/weathered_plank_siding), weathered dock boards.
+These diffuse / OpenGL normal JPEGs were shared in resized form at
+https://github.com/roszhan2684/california-drive/tree/main/public/media/tex
+(the project's ASSET_LICENSES.md documents Poly Haven provenance and CC0).

@@ -3,9 +3,9 @@ render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 
-// Textured ground. Eleven CC0 materials (Poly Haven) in two texture arrays:
+// Textured ground. Thirteen CC0 materials (Poly Haven) in two texture arrays:
 //   0 lush grass, 1 dry grass, 2 forest floor, 3 swamp mud, 4 road dirt, 5 cliff rock, 6 mountain rock, 7 sand, 8 snow,
-//   9 cracked asphalt (ruined cities), 10 broken concrete (bunkers and depots).
+//   9 cracked asphalt (ruined cities), 10 broken concrete (bunkers and depots), 11 weathered brick (cities), 12 old planks (docks).
 // Which material lies where comes from the chunk's biome map (forest, swamp, plains: baked on the CPU from the same noise
 // the server uses), from height (shore, mountains, snow), from slope (cliffs) and from the road mask. Each material is read
 // at two scales and the two are blended by noise, so the tiling never shows as a grid; cliffs use a triplanar projection.
@@ -20,7 +20,7 @@ uniform float biome_texels = 17.0;
 uniform float tile_meters = 6.0;
 uniform float normal_strength = 0.8;
 // Per-layer multiplier that moves the photo's average colour to the game's palette (computed on load).
-uniform vec3 layer_tint[11];
+uniform vec3 layer_tint[13];
 // Paved ground of the sites near this chunk: x, z, radius, layer (radius 0: unused). Weeds take back the cracks.
 uniform vec4 site_patches[4];
 
@@ -82,8 +82,8 @@ void fragment() {
 	vec2 biome_uv = local * ((biome_texels - 1.0) / biome_texels) + 0.5 / biome_texels;
 	vec3 biome = textureLod(biome_map, biome_uv, 0.0).rgb;
 
-	float w[11];
-	for (int i = 0; i < 11; i++) {
+	float w[13];
+	for (int i = 0; i < 13; i++) {
 		w[i] = 0.0;
 	}
 	// Grassland: lush and dry patches; plains lean dry.
@@ -136,14 +136,14 @@ void fragment() {
 		paved *= 1.0 - 0.9 * smoothstep(0.42, 0.68, fbm(p * 0.11 + 5.0)) * (1.0 - cliff);
 		paved *= 0.85;
 		paved *= 1.0 - cliff;
-		for (int i = 0; i < 11; i++) {
+		for (int i = 0; i < 13; i++) {
 			w[i] *= 1.0 - paved;
 		}
 		w[int(patch.w)] += paved;
 	}
 	// Roads.
 	float road = smoothstep(0.08, 0.55, textureLod(road_mask, local, 0.0).r);
-	for (int i = 0; i < 11; i++) {
+	for (int i = 0; i < 13; i++) {
 		w[i] *= 1.0 - road;
 	}
 	w[4] += road;
@@ -151,7 +151,7 @@ void fragment() {
 	vec3 color = vec3(0.0);
 	vec3 bump = vec3(0.0, 0.0, 0.0);
 	float total = 0.0;
-	for (int i = 0; i < 11; i++) {
+	for (int i = 0; i < 13; i++) {
 		if (w[i] < 0.02) {
 			continue;
 		}
