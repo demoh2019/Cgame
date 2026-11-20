@@ -129,6 +129,9 @@ var _patches := PackedVector4Array()
 # Grass grows tile by tile once the chunk is near the camera, within a time budget per frame across all chunks.
 var _grass_source
 var _grass_next_tile := 0
+var _grass_tiles: Array[MultiMeshInstance3D] = []
+var _grass_lod_elapsed := 0.0
+const GRASS_LOD_INTERVAL := 0.35 # Update a few times a second, not every render frame.
 static var _grass_frame := -1
 static var _grass_spent_usec := 0
 const GRASS_BUDGET_USEC := 10000 # At most about 10 ms of grass growing per frame, across all chunks.
@@ -677,6 +680,10 @@ func _build_windmills(windmills: Array, origin: Vector2) -> void:
 
 func _process(delta: float) -> void:
 	_grow_grass()
+	_grass_lod_elapsed += delta
+	if _grass_lod_elapsed >= GRASS_LOD_INTERVAL:
+		_grass_lod_elapsed = 0.0
+		_update_grass_lods()
 	for sail in _sails:
 		(sail["node"] as Node3D).rotate_object_local(sail["axis"], sail["speed"] * delta)
 
@@ -702,7 +709,28 @@ func _grow_grass() -> void:
 		_grass_next_tile += 1
 		if tile != null:
 			add_child(tile)
+			_grass_tiles.append(tile)
 		_grass_spent_usec += Time.get_ticks_usec() - started
+
+
+## Three cached grass meshes (18 / 9 / 4 blades) keep dense nearby grass while cutting geometry in the distance.
+## Only geometry changes; tile transforms, material, wind and color stay untouched.
+func _update_grass_lods() -> void:
+	if _grass_tiles.is_empty():
+		return
+	var view_camera := get_viewport().get_camera_3d()
+	if view_camera == null:
+		return
+	var camera_xz := Vector2(view_camera.global_position.x, view_camera.global_position.z)
+	for tile in _grass_tiles:
+		var tile_center: Vector3 = to_global(tile.custom_aabb.position + tile.custom_aabb.size * 0.5)
+		var distance: float = camera_xz.distance_to(Vector2(tile_center.x, tile_center.z))
+		var previous: int = int(tile.get_meta("blade_lod", 0))
+		var tier: int = GrassField.lod_for_distance(distance, previous)
+		if tier == previous:
+			continue
+		tile.multimesh.mesh = GrassField.clump_mesh(GrassField.LOD_BLADES[tier])
+		tile.set_meta("blade_lod", tier)
 
 
 ## The people of the settlements: standing, sitting, working, each with a name and a role above their head.
