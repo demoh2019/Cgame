@@ -81,7 +81,8 @@ func _set_scene_opacity(root: Node3D, opacity: float) -> void:
     while not queue.is_empty():
         var item: Node = queue.pop_back()
         if item is GeometryInstance3D:
-            (item as GeometryInstance3D).transparency = transparency
+            var geometry := item as GeometryInstance3D
+            geometry.transparency = transparency
         for child in item.get_children():
             queue.push_back(child)
 
