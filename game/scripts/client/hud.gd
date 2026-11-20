@@ -268,6 +268,12 @@ func _build() -> void:
 	fish_button.text = "Cast fishing rod (near shoreline; 5 seconds)"
 	fish_button.pressed.connect(func() -> void: client.fish())
 	inventory_box.add_child(fish_button)
+	var bait_button := Button.new()
+	bait_button.name = "BaitedCast"
+	bait_button.text = "Baited cast (+1 fish on completion; 1 bait)"
+	bait_button.tooltip_text = "Craft from berries and fiber; no charge if the bonus cannot fit."
+	bait_button.pressed.connect(func() -> void: client.fish(true))
+	inventory_box.add_child(bait_button)
 	var cook_button := Button.new()
 	cook_button.text = "0: Quick-cook best carried fish (fire or hub)"
 	cook_button.pressed.connect(quick_cook)
@@ -894,7 +900,8 @@ func _on_result(kind: String, data: Dictionary) -> void:
 	if kind == "fish":
 		if bool(data.get("ok", false)):
 			var fish_id: String = str(data.get("item", "raw_fish"))
-			say("Fishing: casting for %s (%d s)..." % [
+			say("Fishing: %scasting for %s (%d s)..." % [
+				"baited " if bool(data.get("baited", false)) else "",
 				str(Defs.item(fish_id).get("name", fish_id)), int(data.get("seconds", 5))])
 		else:
 			say("Fishing: %s" % str(data.get("reason", "denied")))

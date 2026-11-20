@@ -234,6 +234,11 @@ static func _build_items() -> void:
 		"tier": 1, "value": 24, "weight": 1.2})
 	_add_recipe("fishing_rod", "fishing_rod", 1, {"plank_1": 2, "fiber_1": 3},
 		"workbench", 4.0)
+	# Optional bait increases fish count, never the region/rod/skill tier.
+	_add_item("shore_bait", {"name": "Shore Fishing Bait", "kind": "material",
+		"stack": 20, "weight": 0.1, "value": 4})
+	_add_recipe("shore_bait", "shore_bait", 2,
+		{"berries": 2, "fiber_1": 1}, "", 1.5)
 	_add_item("raw_fish", {"name": "Raw Fish", "kind": "resource", "tier": 1,
 		"stack": 20, "value": 5, "weight": 0.7})
 	_add_item("cooked_fish", {"name": "Cooked Fish", "kind": "food", "food": 35.0,

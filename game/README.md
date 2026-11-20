@@ -2258,3 +2258,36 @@ regressions in `tests/test_acid_pools.gd` cover initial splash, delayed
 damage, immunity, overlapping pools, out-of-area movement, safe hubs,
 expiry, network privacy and disconnect cleanup. Existing Cgame API
 capabilities are sufficient.
+
+
+## Shore fishing bait: resource-paid, server-owned extra catch
+
+The playable `game/` now supports **optional baited fishing**. A survival
+artisan can craft **2 Shore Fishing Bait** anywhere from **2 berries and 1
+T1 fiber**. Normal shoreline fishing is unchanged. For an explicit baited
+cast, the server verifies a real carried fishing rod, accessible coastal
+water, sufficient inventory room, actual fishing profession and current
+zone tier, plus at least one unit of bait.
+
+A completed baited cast yields **one extra fish** above the ordinary
+server-determined 1–2 fish catch (**2–3 total**) without ever increasing
+fish tier. One real bait is charged **at catch completion** and only if
+the inventory has space to deliver the entire base catch plus the extra
+fish. Moving away, losing the shore, missing bait or a cramped backpack
+never charges for a bonus not delivered. Only actually credited fish earn
+fishing profession experience. Cast duration and the normal cooldown
+stay unchanged. The client supplies only the optional bait-choice flag,
+never a catch quantity or tier.
+
+Offline preview: **T** casts normally, **Shift+T** requests baited fishing.
+Online inventory: separate **Cast fishing rod** and **Baited cast**
+buttons. Multiplayer routes the choice through authenticated `c_fish`
+to `GameServer.cmd_fish`; clients cannot forge fish counts or skip
+the existing rod, coastal access and profession limits.
+
+Code: `scripts/shared/fishing_bait.gd`, `scripts/shared/fishing.gd`,
+item/recipe definitions, canonical game server and online/local clients.
+Tests: `game/tests/test_fishing_bait.gd`, included in `run_all.gd`,
+for crafting, tier caps, inventory capacity, paid rewards, experience
+and interrupted casts. No C++ engine change is needed for this
+server-authoritative feature.

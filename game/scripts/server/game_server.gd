@@ -56,6 +56,7 @@ const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
+const FishingBait = preload("res://scripts/shared/fishing_bait.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
 const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
@@ -584,7 +585,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 
 ## Fishing is a delayed, cancelable server action; no catch count is supplied
 ## by clients. Distinct from lake drinking and free berry scavenging.
-func cmd_fish(peer_id: int) -> Dictionary:
+func cmd_fish(peer_id: int, baited: bool = false) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
@@ -593,15 +594,16 @@ func cmd_fish(peer_id: int) -> Dictionary:
 	if time < player.fish_next_at:
 		return {"ok": false, "reason": "cooldown"}
 	var eligibility: Dictionary = Fishing.validate_start(world, player.position,
-		player.inventory, player.progression.gathering_level("fishing"))
+		player.inventory, player.progression.gathering_level("fishing"), baited)
 	if not bool(eligibility.get("ok", false)):
 		return eligibility
 	player.action = {"fish": true, "cast_x": player.position.x, "cast_z": player.position.z,
 		"tier": int(eligibility["tier"]), "catch_id": str(eligibility["item"]),
+		"baited": baited,
 		"remaining": Fishing.CAST_SECONDS, "total": Fishing.CAST_SECONDS}
 	player.fish_next_at = time + Fishing.CAST_SECONDS + Fishing.COOLDOWN_SECONDS
 	return {"ok": true, "seconds": Fishing.CAST_SECONDS,
-		"tier": int(eligibility["tier"]), "item": str(eligibility["item"])}
+		"tier": int(eligibility["tier"]), "item": str(eligibility["item"]), "baited": baited}
 
 
 func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
@@ -2808,17 +2810,23 @@ func _tick_players(delta: float) -> void:
 func _finish_fishing(player: Player) -> void:
 	var item_id: String = str(player.action.get("catch_id", Fishing.CATCH_ID))
 	var tier: int = int(player.action.get("tier", 1))
+	var requested_bait: bool = bool(player.action.get("baited", false))
 	player.action = {}
 	if item_id != Fishing.catch_item(tier):
 		return # Never trust an inconsistent pending action.
 	var amount: int = 1 + (1 if rng.randf() < 0.35 else 0)
+	# Spend the bait only when the complete bonus can actually be received.
+	var bait_used: bool = FishingBait.spend_for_bonus(
+		player.inventory, item_id, amount, requested_bait)
+	if bait_used:
+		amount += FishingBait.BONUS_FISH
 	var added: int = amount - player.inventory.add(item_id, amount)
 	if added > 0:
 		player.progression.award_gather("fishing", tier, added)
 		player.dirty_inventory = true
 		player.dirty_character = true
 	events.append({"type": "fished", "peer": player.id, "item": item_id,
-		"amount": added, "tier": tier})
+		"amount": added, "tier": tier, "bait_used": bait_used})
 
 
 func _finish_gather(player: Player, node: Dictionary) -> void:
