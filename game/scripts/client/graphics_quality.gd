@@ -103,11 +103,20 @@ static func post_sharpen_strength(value: int, method: String, adaptive: bool) ->
 
 ## Fast path for frame-rate adjustment; no scene-node, texture, LOD or
 ## streamer changes are performed here.
+## The same driver-aware policy is used for initial, manual and adaptive
+## resolution changes, without relaunching or rebuilding world resources.
+static func metalfx_resolution_floor() -> float:
+	return GraphicsResolution.runtime_metalfx_min_scale()
+
+
 static func apply_resolution(viewport: Viewport,
 		render_scale: float = -1.0, adaptive: bool = false) -> void:
 	var renderer: String = str(RenderingServer.get_current_rendering_method())
+	var driver: String = str(RenderingServer.get_current_rendering_driver_name())
+	var minimum: float = metalfx_resolution_floor()
 	GraphicsResolution.apply(viewport,
-		GraphicsResolution.plan(renderer, profile(_level), render_scale, adaptive))
+		GraphicsResolution.plan(renderer, profile(_level), render_scale,
+			adaptive, driver, minimum))
 
 
 static func apply(viewport: Viewport, atmosphere: Node3D,

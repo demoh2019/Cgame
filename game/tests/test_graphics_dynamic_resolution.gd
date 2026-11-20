@@ -59,3 +59,25 @@ func run(t) -> void:
 	c.configure(500)
 	t.eq(c.level, 3, "high clamp")
 	t.near(c.scale, 1.0, 0.0001, "Ultra ceiling")
+
+
+	t.current = "MetalFX hardware floor keeps dynamic resolution in a supported range"
+	c.configure(1, 0.71)
+	t.near(c.floor_scale, 0.71, 0.00001,
+		"device minimum overrides the ordinary Balanced low-resolution floor")
+	var touched_hardware_floor := false
+	for i in 1500:
+		touched_hardware_floor = c.sample_frame(1.0 / 30.0, 36.0) or touched_hardware_floor
+	t.check(touched_hardware_floor and c.at_floor(),
+		"GPU-limited Metal rendering settles at its supported scale")
+	t.near(c.scale, 0.71, 0.00001,
+		"adaptive scaler never requests an illegal MetalFX input size")
+	c.configure(1, NAN)
+	t.near(c.floor_scale, 0.65, 0.00001,
+		"invalid hardware limit restores the original FSR2 floor")
+	c.configure(0, 0.95)
+	t.near(c.floor_scale, 0.59, 0.00001,
+		"hardware minimum cannot push Performance above its cost ceiling")
+	c.configure(3, 0.91)
+	t.near(c.floor_scale, 0.91, 0.00001,
+		"Ultra retains full native detail above the GPU's minimum scale")

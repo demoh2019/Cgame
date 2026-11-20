@@ -87,3 +87,44 @@ func run(t) -> void:
 		"gl_compatibility", "mobile compatibility")
 	t.eq(ProjectSettings.get_setting("rendering/renderer/rendering_method.web"),
 		"gl_compatibility", "web compatibility")
+
+
+	t.current = "native Apple MetalFX temporal and portable FSR2 fallback"
+	var native: Dictionary = Resolution.plan("forward_plus", Quality.profile(1),
+		0.65, true, "metal", 0.70)
+	t.eq(native["mode"], Viewport.SCALING_3D_MODE_METALFX_TEMPORAL,
+		"native Metal backend selects Apple's temporal upscale path")
+	t.near(float(native["scale"]), 0.70, 0.00001,
+		"native scaler never goes below this GPU's minimum input fraction")
+	t.eq(native["msaa"], Viewport.MSAA_DISABLED,
+		"MetalFX temporal handles AA without duplicate MSAA")
+	t.eq(native["screen_space_aa"], Viewport.SCREEN_SPACE_AA_DISABLED,
+		"MetalFX temporal owns antialiasing, not FXAA")
+	var native_ultra: Dictionary = Resolution.plan("forward_plus", Quality.profile(3),
+		1.0, true, "metal", 0.65)
+	t.eq(native_ultra["mode"], Viewport.SCALING_3D_MODE_METALFX_TEMPORAL,
+		"native MetalFX can temporally antialias at full resolution")
+	for backend in ["vulkan", "d3d12", "opengl3", ""]:
+		var portable: Dictionary = Resolution.plan("forward_plus", Quality.profile(1),
+			0.65, true, backend, 0.65)
+		t.eq(portable["mode"], Viewport.SCALING_3D_MODE_FSR2,
+			"non-Metal renderer retains its fully supported FSR2 path")
+	for invalid in [NAN, INF, -1.0, 0.0, 1.5]:
+		var safe: Dictionary = Resolution.plan("forward_plus", Quality.profile(1),
+			0.65, true, "metal", invalid)
+		t.eq(safe["mode"], Viewport.SCALING_3D_MODE_FSR2,
+			"invalid/unavailable hardware limits cannot select MetalFX")
+	var native_manual: Dictionary = Resolution.plan("forward_plus", Quality.profile(3),
+		1.0, false, "metal", 0.65)
+	t.eq(native_manual["mode"], Viewport.SCALING_3D_MODE_BILINEAR,
+		"manual native Ultra keeps its existing four-sample MSAA path")
+	t.eq(native_manual["msaa"], Viewport.MSAA_4X,
+		"manual Ultra is unchanged on Metal when not upscaling")
+	var graphics_controller: String = (Quality as Script).source_code
+	t.check(graphics_controller.contains("GraphicsResolution.runtime_metalfx_min_scale()")
+		and graphics_controller.contains("adaptive, driver, minimum"),
+		"real quality controller queries backend and native hardware before choosing")
+	var multiplayer: String = FileAccess.get_file_as_string(
+		"res://scripts/client/online_main.gd")
+	t.check(multiplayer.contains("GraphicsQuality.metalfx_resolution_floor()"),
+		"online adaptive quality cannot repeatedly ask for unsupported MetalFX scales")

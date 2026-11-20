@@ -5107,6 +5107,18 @@ bool Viewport::is_using_xr() const {
 
 void Viewport::set_scaling_3d_mode(Scaling3DMode p_scaling_3d_mode) {
 	ERR_MAIN_THREAD_GUARD;
+	// MetalFX requires Apple's native Metal renderer. A saved project or
+	// imported viewport can request it on Vulkan/D3D/GL: never forward that
+	// unsupported mode into the GPU backend. Use the equivalent temporal
+	// FSR2 path on RenderingDevice, bilinear on GL Compatibility.
+	if (p_scaling_3d_mode == SCALING_3D_MODE_METALFX_TEMPORAL ||
+			p_scaling_3d_mode == SCALING_3D_MODE_METALFX_SPATIAL) {
+		const String driver = RS::get_singleton()->get_current_rendering_driver_name().to_lower();
+		if (driver != "metal") {
+			p_scaling_3d_mode = RS::get_singleton()->get_rendering_device() != nullptr
+					? SCALING_3D_MODE_FSR2 : SCALING_3D_MODE_BILINEAR;
+		}
+	}
 	if (scaling_3d_mode == p_scaling_3d_mode) {
 		return;
 	}
