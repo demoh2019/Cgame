@@ -1,0 +1,46 @@
+name: WorldStreamer shared frame budget
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/main/world_streamer.cpp'
+      - 'scene/main/world_streamer.h'
+      - 'scene/main/world_streaming_grid.cpp'
+      - 'game/scripts/client/world_streaming_policy.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/scripts/client/ui_accessibility_layer.gd'
+      - 'game/tests/test_world_streamer_shared_budget.gd'
+      - 'tests/scene/test_world_streamer_frame_budget.py'
+      - '.github/workflows/world-streamer-frame-budget.yml'
+  pull_request:
+    paths:
+      - 'scene/main/world_streamer.cpp'
+      - 'scene/main/world_streamer.h'
+      - 'scene/main/world_streaming_grid.cpp'
+      - 'game/scripts/client/world_streaming_policy.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/scripts/client/ui_accessibility_layer.gd'
+      - 'game/tests/test_world_streamer_shared_budget.gd'
+      - 'tests/scene/test_world_streamer_frame_budget.py'
+      - '.github/workflows/world-streamer-frame-budget.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scene/main
+            game/scripts/client
+            game/tests
+            tests/scene
+          sparse-checkout-cone-mode: true
+      - name: Check single C++ count and wall-clock budget across chunk loads
+        run: python3 -m unittest tests/scene/test_world_streamer_frame_budget.py -v
