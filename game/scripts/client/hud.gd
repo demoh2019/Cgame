@@ -719,7 +719,7 @@ func _build() -> void:
 	var craft_box := VBoxContainer.new()
 	_craft_panel.add_child(craft_box)
 	var craft_title := Label.new()
-	craft_title.text = "Crafting (workbench near the hub fountain: most recipes need it)"
+	craft_title.text = "Crafting (hub workbench or a held, uncontested PvP outpost field bench)"
 	craft_box.add_child(craft_title)
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(380, 380)

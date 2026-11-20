@@ -60,6 +60,26 @@ func _make(site: Dictionary, ground: float) -> Node3D:
 	ring_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	ring.material_override = ring_material
 	root.add_child(ring)
+	# A visible rough timber field workbench, positioned inside the flag's 6.5m
+	# authoritative crafting radius. It is not an independent client station.
+	var bench_material := StandardMaterial3D.new()
+	bench_material.albedo_color = Color(0.33, 0.21, 0.12)
+	var bench_top := MeshInstance3D.new()
+	bench_top.name = "FieldWorkbench"
+	var top_mesh := BoxMesh.new()
+	top_mesh.size = Vector3(2.3, 0.25, 1.25)
+	bench_top.mesh = top_mesh
+	bench_top.position = Vector3(3.0, 1.05, -2.5)
+	bench_top.material_override = bench_material
+	root.add_child(bench_top)
+	for support_x in [-0.85, 0.85]:
+		var support := MeshInstance3D.new()
+		var leg_mesh := BoxMesh.new()
+		leg_mesh.size = Vector3(0.23, 0.9, 0.9)
+		support.mesh = leg_mesh
+		support.position = Vector3(3.0 + support_x, 0.5, -2.5)
+		support.material_override = bench_material
+		root.add_child(support)
 	var label := Label3D.new()
 	label.name = "Label"
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -99,4 +119,7 @@ func _refresh(root: Node3D, site: Dictionary, group_id: int) -> void:
 	ring_material.albedo_color = Color(color.r, color.g, color.b, 0.6)
 	var label := root.get_node("Label") as Label3D
 	label.modulate = color.lightened(0.3)
-	label.text = "OUTPOST #%d  Fort T%d\n%s" % [int(site["id"]), int(site.get("fortification", 0)), status]
+	var field_bench: String = "Field bench LOCKED" if owner == 0 else (
+		"Field bench CONTESTED" if bool(site.get("contested", false)) else "Field bench: defending party/guild")
+	label.text = "OUTPOST #%d  Fort T%d\n%s\n%s" % [
+		int(site["id"]), int(site.get("fortification", 0)), status, field_bench]

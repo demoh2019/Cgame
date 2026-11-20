@@ -14,6 +14,7 @@ const MAX_SITES := 3
 const CAPTURE_RADIUS := 12.0
 const RALLY_RADIUS := 18.0
 const HARVEST_RADIUS := 100.0 # Economic benefit is local to a captured outpost.
+const FIELD_BENCH_RADIUS := 6.5 # Owner-only portable bench at the central flag.
 const CAPTURE_SECONDS := 30.0
 const HOLD_SECONDS := 900.0
 const MIN_CAPTURERS := 2
@@ -231,3 +232,33 @@ func harvest_bonus(peer_id: int, node: Dictionary, players: Dictionary,
 		if not blocked:
 			return 1
 	return 0
+
+## Captured outposts act as local workbenches for their occupying party or a
+## fully verified owning guild. The authoritative server checks current world
+## position, expiry and *live* rival occupancy immediately before crafting.
+## An old client snapshot or stale contested flag never opens a station.
+func has_field_workbench(peer_id: int, players: Dictionary, parties, now: float) -> bool:
+	if not is_finite(now):
+		return false
+	var player = players.get(peer_id)
+	if player == null or not player.survival.alive or not player.position.is_finite():
+		return false
+	var here := Vector2(player.position.x, player.position.z)
+	var group_id: int = parties.group_of(peer_id)
+	for site in sites:
+		var owner: int = int(site["owner"])
+		if owner <= 0 or not parties.groups.has(owner) or now >= float(site["until"]):
+			continue
+		if here.distance_squared_to(Vector2(float(site["x"]), float(site["z"]))) > \
+				FIELD_BENCH_RADIUS * FIELD_BENCH_RADIUS:
+			continue
+		if group_id != owner and not GuildTerritory.same_owner_guild(site, player, players, parties):
+			continue
+		var contested_now := false
+		for occupants_id in _occupied_groups(site, players, parties):
+			if int(occupants_id) != owner:
+				contested_now = true
+				break
+		if not contested_now:
+			return true
+	return false
