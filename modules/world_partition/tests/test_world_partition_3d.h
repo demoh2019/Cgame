@@ -408,6 +408,64 @@ TEST_CASE("[SceneTree][WorldPartition3D] Actor-driven streaming follows Node3D m
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
+TEST_CASE("[SceneTree][WorldPartition3D] Instantiated cells without navigation remain nav-unready") {
+	// A physics-ready PackedScene is NOT sufficient for NavigationServer3D
+	// readiness. Every navigation-ready cell must have a real region RID with
+	// synced polygon data; unregistered geometry must not be reported ready.
+	Node3D *template_root = memnew(Node3D);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	REQUIRE(packed->pack(template_root) == OK);
+	memdelete(template_root);
+	const String path = "user://world_partition_nav_negative_doctest_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	REQUIRE(ResourceSaver::save(packed, path) == OK);
+
+	Node3D *observer = memnew(Node3D);
+	observer->set_name("NavObserver");
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	SceneTree::get_singleton()->get_root()->add_child(observer);
+	SceneTree::get_singleton()->get_root()->add_child(partition);
+	partition->set_load_radius(0);
+	partition->set_unload_radius(0);
+	partition->set_cell_size(16.0);
+	partition->set_observer_path(partition->get_path_to(observer));
+	partition->set_cell_scene(Vector2i(), path);
+	CHECK(partition->set_streaming_source("nav_test", Vector2i(), 0, 0, 80));
+	CHECK(partition->has_signal(SNAME("cell_navigation_ready")));
+	CHECK(partition->has_signal(SNAME("cell_navigation_unready")));
+	CHECK(partition->get_navigation_pending_cell_count() == 0);
+	CHECK_FALSE(partition->is_cell_navigation_ready(Vector2i()));
+	CHECK_FALSE(partition->is_streaming_source_navigation_ready("nav_test"));
+	CHECK(partition->get_streaming_source_navigation_progress("nav_test") == 0.0);
+
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i()); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(Vector2i()));
+	SceneTree::get_singleton()->physics_process(1.0 / 60.0);
+	SceneTree::get_singleton()->physics_process(1.0 / 60.0);
+	CHECK(partition->is_cell_physics_ready(Vector2i()));
+	CHECK(partition->get_navigation_ready_cell_count() == 0);
+	CHECK(partition->get_navigation_pending_cell_count() == 0);
+	CHECK_FALSE(partition->is_cell_navigation_ready(Vector2i()));
+	CHECK_FALSE(partition->are_cells_navigation_ready(Vector2i()));
+	CHECK_FALSE(partition->is_streaming_source_navigation_ready("nav_test"));
+	CHECK(partition->get_streaming_source_navigation_progress("nav_test") == 0.0);
+
+	observer->set_position(Vector3(256.0, 0.0, 0.0));
+	partition->remove_streaming_source("nav_test");
+	partition->update_streaming();
+	CHECK_FALSE(partition->is_cell_navigation_ready(Vector2i()));
+	CHECK(partition->get_navigation_ready_cell_count() == 0);
+
+	SceneTree::get_singleton()->get_root()->remove_child(partition);
+	SceneTree::get_singleton()->get_root()->remove_child(observer);
+	memdelete(partition);
+	memdelete(observer);
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
 TEST_CASE("[SceneTree][WorldPartition3D] Physics activation barrier resets on unload and re-stream") {
 	Node3D *template_root = memnew(Node3D);
 	Ref<PackedScene> packed;
