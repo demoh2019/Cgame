@@ -21,6 +21,7 @@ const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
+const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const HubView = preload("res://scripts/client/hub_view.gd")
@@ -83,6 +84,7 @@ var _visual_weather_wind := Vector2.ZERO
 var _visual_biome := "plains"
 var atmosphere
 var _ambient_motes
+var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
 var _auto_quality := GraphicsAutoQuality.new()
@@ -257,6 +259,9 @@ func _update_party_supply_marker() -> void:
 func _build_environment() -> void:
 	atmosphere = Atmosphere.new()
 	add_child(atmosphere)
+	_ground_mist = GroundMist.new()
+	_ground_mist.name = "RegionalGroundMist"
+	add_child(_ground_mist)
 	environment = atmosphere.environment
 	sun = atmosphere.sun
 	camera = Camera3D.new()
@@ -1215,6 +1220,13 @@ func _update_time_of_day(delta: float) -> void:
 		storming = false
 	else:
 		atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta, _visual_weather_wind, _visual_biome, MoonVisuals.phase_at(clock))
+	# One native lit froxel mist volume follows the player near the ground.
+	# No extra fullscreen pass or extra nodes per chunk.
+	if _ground_mist != null:
+		_ground_mist.update_view(client.display_position(), _visual_biome,
+			WorldCycle.daylight(clock), WorldCycle.sun_height(clock),
+			atmosphere.storm, _visual_weather_wind, GraphicsQuality.level(),
+			delta, underground)
 	# Time-of-day and storm grading shares the existing full-screen post material.
 	# Uniform updates are bounded and do not allocate GPU textures or new passes.
 	_grade_elapsed += maxf(delta, 0.0)
