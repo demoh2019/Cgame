@@ -30,6 +30,15 @@
 				Returns the projection matrix that this camera uses to render to its associated viewport. The camera must be part of the scene tree to function.
 			</description>
 		</method>
+		<method name="get_pixels_per_meter_at_position" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="world_point" type="Vector3" />
+			<description>
+				Returns the number of vertical viewport pixels occupied by a one-meter world-space feature at [param world_point]. Uses the camera's rendered projection matrix and transform, accounting for field of view, aspect ratio, frustum offsets, camera shake and distance. With an orthogonal camera the result is independent of distance.
+				The result is [code]0.0[/code] for invalid points or points behind a perspective/frustum camera. The camera must be inside the scene tree. This is useful for screen-space mesh and vegetation level of detail (LOD) and is computed without any GPU readback.
+				[b]Note:[/b] The result uses the viewport's logical pixel height. Multiply by [member Viewport.scaling_3d_scale] for dynamic internal 3D resolution when supported by the active renderer.
+			</description>
+		</method>
 		<method name="get_camera_rid" qualifiers="const">
 			<return type="RID" />
 			<description>
