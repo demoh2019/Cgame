@@ -80,7 +80,7 @@ func update_view(world, player: Vector3, biome: String, wind: Vector2, storm: fl
 		_swirl.global_position += _drift * delta
 		var p := _swirl.global_position
 		_swirl.global_position.y = float(world.height_at(p.x, p.z)) + 0.3
-		_swirl.amount_ratio = strength(_age)
+		_swirl.color = Color(1, 1, 1, strength(_age)) # CPUParticles3D has no amount_ratio: fade via alpha.
 		if _age >= LIFE or not allowed(level, biome, wind, storm, daylight):
 			_swirl.emitting = false
 			_age = LIFE

@@ -43,7 +43,7 @@ func _ready() -> void:
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.albedo_color = Color(0.8, 0.88, 1.0, 0.55)
+	m.vertex_color_use_as_albedo = true
 	quad.material = m
 	_drops.mesh = quad
 	_drops.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -55,4 +55,4 @@ func update_view(storm: float, sheltered: bool, level: int, delta: float) -> voi
 	var rate: float = drip_rate(_soak, storm, sheltered) if level >= 1 else 0.0
 	_drops.emitting = rate > 0.02
 	if _drops.emitting:
-		_drops.amount_ratio = rate
+		_drops.color = Color(0.8, 0.88, 1.0, 0.55 * rate) # CPUParticles3D has no amount_ratio.
