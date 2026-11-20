@@ -40,6 +40,23 @@ namespace TestDecalCachedSetters {
 
 TEST_CASE("[SceneTree][Decal] Repeated pooled fade values preserve state") {
 	Decal *decal = memnew(Decal);
+	// Opaque pooled decals should not resubmit identical render properties.
+	decal->set_albedo_mix(1.0);
+	CHECK(decal->get_albedo_mix() == 1.0);
+	decal->set_albedo_mix(0.63);
+	decal->set_albedo_mix(0.63);
+	CHECK(decal->get_albedo_mix() == 0.63);
+	decal->set_albedo_mix(1.0);
+	CHECK(decal->get_albedo_mix() == 1.0);
+	// Bound updates must remain unchanged for repeat and clamped input.
+	decal->set_size(Vector3(3.0, 1.5, 3.0));
+	const AABB before_size = decal->get_aabb();
+	decal->set_size(Vector3(3.0, 1.5, 3.0));
+	CHECK(decal->get_aabb() == before_size);
+	decal->set_size(Vector3(-4.0, 1.5, 3.0));
+	const AABB before_clamp = decal->get_aabb();
+	decal->set_size(Vector3(-4.0, 1.5, 3.0));
+	CHECK(decal->get_aabb() == before_clamp);
 	const Color damp(0.34, 0.24, 0.17, 0.50);
 
 	decal->set_modulate(damp);
