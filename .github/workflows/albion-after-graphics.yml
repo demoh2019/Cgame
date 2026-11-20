@@ -8,6 +8,9 @@ on:
       - 'game/assets/shaders/**'
       - 'game/tests/**'
       - 'game/project.godot'
+      - 'servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.cpp'
+      - 'servers/rendering/renderer_rd/effects/fsr2.cpp'
+      - 'tests/servers/rendering/test_fsr2_camera_history.py'
       - 'servers/rendering/renderer_rd/shaders/effects/ssao_blur.glsl'
       - 'servers/rendering/renderer_rd/shaders/effects/ssil_blur.glsl'
       - 'tests/servers/rendering/test_ao_blur_bounds.py'
@@ -22,6 +25,9 @@ on:
       - 'game/assets/shaders/**'
       - 'game/tests/**'
       - 'game/project.godot'
+      - 'servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.cpp'
+      - 'servers/rendering/renderer_rd/effects/fsr2.cpp'
+      - 'tests/servers/rendering/test_fsr2_camera_history.py'
       - 'servers/rendering/renderer_rd/shaders/effects/ssao_blur.glsl'
       - 'servers/rendering/renderer_rd/shaders/effects/ssil_blur.glsl'
       - 'tests/servers/rendering/test_ao_blur_bounds.py'
@@ -51,6 +57,9 @@ jobs:
             game
             servers/rendering/renderer_rd/shaders/effects
             servers/rendering/renderer_rd/shaders/forward_clustered
+            servers/rendering/renderer_rd/forward_clustered
+            servers/rendering/renderer_rd/effects
+            thirdparty/amd-fsr2
             tests/servers/rendering
           sparse-checkout-cone-mode: true
 
@@ -66,6 +75,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest tests/servers/rendering/test_pbr_reflection_occlusion.py -v 2>&1 | tee pbr-reflection-tests.log
+
+      - name: Validate FSR2 camera-cut temporal history and millisecond timing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests/servers/rendering/test_fsr2_camera_history.py -v 2>&1 | tee fsr2-history-tests.log
 
       - name: Install verified official Godot 4.7.2 editor
         shell: bash
@@ -103,5 +118,6 @@ jobs:
             graphics-import.log
             graphics-tests.log
             ssr-engine-tests.log
+            fsr2-history-tests.log
             pbr-reflection-tests.log
             ao-engine-tests.log

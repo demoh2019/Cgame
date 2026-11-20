@@ -33,9 +33,17 @@ static func plan(method: String, profile: Dictionary,
 static func apply(viewport: Viewport, settings: Dictionary) -> void:
 	if viewport == null:
 		return
-	viewport.msaa_3d = settings["msaa"]
-	viewport.use_taa = false
-	viewport.screen_space_aa = settings["screen_space_aa"]
-	viewport.scaling_3d_mode = settings["mode"]
-	viewport.scaling_3d_scale = float(settings["scale"])
-	viewport.fsr_sharpness = float(settings.get("fsr_sharpness", 0.2))
+	# The engine owns FSR2 camera-cut resets. Reapplying the same graphics
+	# profile must not needlessly perturb the viewport's temporal pipeline.
+	if viewport.msaa_3d != int(settings["msaa"]):
+		viewport.msaa_3d = settings["msaa"]
+	if viewport.use_taa:
+		viewport.use_taa = false
+	if viewport.screen_space_aa != int(settings["screen_space_aa"]):
+		viewport.screen_space_aa = settings["screen_space_aa"]
+	if viewport.scaling_3d_mode != int(settings["mode"]):
+		viewport.scaling_3d_mode = settings["mode"]
+	if not is_equal_approx(viewport.scaling_3d_scale, float(settings["scale"])):
+		viewport.scaling_3d_scale = float(settings["scale"])
+	if not is_equal_approx(viewport.fsr_sharpness, float(settings.get("fsr_sharpness", 0.2))):
+		viewport.fsr_sharpness = float(settings.get("fsr_sharpness", 0.2))

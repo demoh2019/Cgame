@@ -53,8 +53,33 @@ func run(t) -> void:
 	t.near(float(p["scale"]), 0.77, 0.0001, "NaN falls back to preset")
 	p = Resolution.plan("forward_plus", Quality.profile(1), 99.0, true)
 	t.near(float(p["scale"]), 1.0, 0.0001, "scale bounded to native")
-	t.check(bool(Quality.profile(2)["ssao"]) and not bool(Quality.profile(2)["ssil"]),
-		"High has contact shadows without Ultra indirect light")
+	t.check(bool(Quality.profile(2)["ssao"]) and bool(Quality.profile(2)["ssil"]) and not bool(Quality.profile(2)["sdfgi"]),
+		"High has bounded screen-space GI without Ultra's distance-field GI")
+	t.current = "native FSR2 temporal reset is safe on live quality reapplication"
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(640, 360)
+	var adaptive_plan: Dictionary = Resolution.plan("forward_plus", Quality.profile(3), 0.86, true)
+	Resolution.apply(viewport, adaptive_plan)
+	t.eq(viewport.scaling_3d_mode, Viewport.SCALING_3D_MODE_FSR2,
+		"playable adaptive Ultra uses native FSR2 camera temporal reconstruction")
+	t.near(viewport.scaling_3d_scale, 0.86, 0.0001,
+		"adaptive FSR2 preserves game graphics pixel budget")
+	t.check(not viewport.use_taa,
+		"FSR2 is not mixed with a second temporal anti-aliasing history")
+	Resolution.apply(viewport, adaptive_plan)
+	t.eq(viewport.scaling_3d_mode, Viewport.SCALING_3D_MODE_FSR2,
+		"repeat quality apply preserves the active native temporal mode")
+	t.near(viewport.fsr_sharpness, float(adaptive_plan["fsr_sharpness"]), 0.0001,
+		"repeat quality apply keeps the existing RCAS sharpening budget")
+	Resolution.apply(viewport, Resolution.plan("gl_compatibility", Quality.profile(1)))
+	t.eq(viewport.scaling_3d_mode, Viewport.SCALING_3D_MODE_BILINEAR,
+		"Compatibility fallback never attempts unsupported FSR2 history")
+	viewport.free()
+	var native_source := (Resolution as Script).source_code
+	t.check(native_source.contains("if viewport.scaling_3d_mode != int(settings"),
+		"live game does not reassign unchanged native scaling settings")
+	t.check(native_source.contains("if not is_equal_approx(viewport.scaling_3d_scale"),
+		"dynamic render scale only updates when the pixel budget changes")
 	t.current = "desktop modern, legacy devices supported"
 	t.eq(ProjectSettings.get_setting("rendering/renderer/rendering_method"),
 		"forward_plus", "modern desktop default")
