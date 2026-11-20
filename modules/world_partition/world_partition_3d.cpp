@@ -175,6 +175,9 @@ void WorldPartition3D::_notification(int p_what) {
 		_refresh_processing();
 	} else if (p_what == NOTIFICATION_PROCESS) {
 		update_streaming();
+	} else if (p_what == NOTIFICATION_EXIT_TREE) {
+		// A future re-entry should report the first resolved observer cell.
+		observer_cell_valid = false;
 	}
 }
 
