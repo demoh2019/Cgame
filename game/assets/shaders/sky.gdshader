@@ -19,6 +19,9 @@ uniform float drift = 0.004;
 uniform float sky_time = 0.0;
 uniform vec3 sun_direction = vec3(0.0, 0.4, 0.9165);
 uniform vec3 sun_color : source_color = vec3(1.0, 0.95, 0.82);
+// Performance/Balanced reuse the radiance cubemap as the background.
+// Cubemap rendering always evaluates the full sky to avoid feedback loops.
+uniform bool use_cached_radiance = false;
 
 float hash(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -28,11 +31,19 @@ float hash(vec3 p) {
 
 void sky() {
 	vec3 dir = EYEDIR;
+	// Godot's documented sky background fast path: reuse cached sky lighting.
+	// Preserve high-resolution panorama and pinpoint stars on High/Ultra.
+	if (use_cached_radiance && !AT_CUBEMAP_PASS) {
+		COLOR = texture(RADIANCE, dir).rgb;
+		return;
+	}
 	float up = dir.y;
 	// Below the horizon: a dark ground haze (the camera rarely sees it, the reflections do).
 	vec3 gradient = mix(day_horizon, day_top, clamp(up * 1.6, 0.0, 1.0));
 	vec3 day = gradient;
-	if (has_panorama) {
+	// Full-screen night pixels never sample the daytime panorama or evaluate
+	// spherical UV atan/acos; the discarded contribution is below 0.5%.
+	if (has_panorama && daylight > 0.005) {
 		float u = atan(dir.x, -dir.z) / (2.0 * PI) + 0.5 + sky_time * drift * 0.01;
 		float v = acos(clamp(dir.y, -1.0, 1.0)) / PI;
 		day = texture(day_panorama, vec2(u, min(v, 0.499))).rgb * 1.08;
@@ -43,10 +54,32 @@ void sky() {
 	day *= 1.0 - storm * 0.35;
 
 	vec3 night = mix(night_horizon, night_top, clamp(up * 1.4, 0.0, 1.0));
-	// Stars: sparse bright cells above the horizon.
-	vec3 cell = floor(dir * 220.0);
-	float star = step(0.9965, hash(cell)) * smoothstep(0.02, 0.25, up);
-	night += vec3(star) * (0.6 + 0.4 * sin(sky_time * 2.0 + hash(cell + 3.0) * 30.0)) * (1.0 - storm);
+	// A few hundred tiny point stars, distributed on stable spherical UVs.
+	// Evaluate hash/twinkle ONLY in darkness; use derivatives to anti-alias
+	// the circular core instead of flashing entire pixel-sized square cells.
+	if (daylight < 0.95 && up > 0.02 && storm < 0.98) {
+		vec2 star_uv = SKY_COORDS * vec2(480.0, 240.0);
+		vec2 star_cell = floor(star_uv);
+		float pick = hash(vec3(star_cell, 7.0));
+		// Evaluate derivatives before the non-uniform star selection branch.
+		float footprint = clamp(length(fwidth(star_uv)) * 0.38, 0.02, 0.50);
+		if (pick > 0.9975) {
+			vec2 shift = vec2(hash(vec3(star_cell, 13.0)),
+				hash(vec3(star_cell, 29.0))) * 0.5 - 0.25;
+			vec2 within_cell = fract(star_uv) - 0.5 - shift;
+			float radius = mix(0.065, 0.18, hash(vec3(star_cell, 41.0)));
+			float point_star = 1.0 - smoothstep(radius,
+				radius + footprint, length(within_cell));
+			float twinkle = 0.85 + 0.15 * sin(
+				sky_time * 0.6 + hash(vec3(star_cell, 53.0)) * 23.0);
+			float strength = point_star * twinkle *
+				(1.0 - smoothstep(0.04, 0.58, daylight)) *
+				smoothstep(0.02, 0.25, up) * (1.0 - storm);
+			vec3 tint = mix(vec3(0.74, 0.83, 1.0),
+				vec3(1.0, 0.88, 0.73), hash(vec3(star_cell, 61.0)));
+			night += tint * strength * 1.4;
+		}
+	}
 
 	vec3 color = mix(night, day, daylight);
 	if (up < 0.0) {
