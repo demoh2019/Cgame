@@ -73,8 +73,8 @@ static func load_state(max_relics: int, path: String = SAVE_PATH) -> Dictionary:
 
     var weather: int = 0
     var raw_weather: Variant = raw.get("weather", 0)
-    if typeof(raw_weather) == TYPE_INT:
-        weather = clampi(int(raw_weather), 0, 2)
+    if typeof(raw_weather) == TYPE_INT and int(raw_weather) >= 0 and int(raw_weather) <= 2:
+        weather = int(raw_weather)
 
     return {
         "relics": ids,
