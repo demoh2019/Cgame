@@ -322,6 +322,7 @@ void WorldPartition3D::set_cell_scenes(const Dictionary &p_cells) {
 	_clear_active_cells();
 	pending_cells.clear();
 	failed_cells.clear();
+	pinned_cells.clear();
 	cell_scenes = clean;
 	_purge_unused_ready_scenes();
 }
@@ -353,6 +354,7 @@ void WorldPartition3D::remove_cell_scene(const Vector2i &p_cell) {
 	_unload_cell(p_cell);
 	pending_cells.erase(p_cell);
 	failed_cells.erase(p_cell);
+	pinned_cells.erase(p_cell);
 	cell_scenes.erase(p_cell);
 	_purge_unused_ready_scenes();
 }
@@ -361,12 +363,40 @@ void WorldPartition3D::clear_cell_scenes() {
 	_clear_active_cells();
 	pending_cells.clear();
 	failed_cells.clear();
+	pinned_cells.clear();
 	cell_scenes.clear();
 	_purge_unused_ready_scenes();
 }
 
 int WorldPartition3D::get_configured_cell_count() const {
 	return cell_scenes.size();
+}
+
+bool WorldPartition3D::pin_cell(const Vector2i &p_cell) {
+	// A duplicate pin is an idempotent operation, not another reservation.
+	if (pinned_cells.has(p_cell)) {
+		return true;
+	}
+	ERR_FAIL_COND_V_MSG(_get_scene_path(p_cell).is_empty(), false, "WorldPartition3D cannot pin an unregistered cell.");
+	ERR_FAIL_COND_V_MSG(pinned_cells.size() >= MAX_PINNED_CELLS, false, "WorldPartition3D pinned-cell limit (16) reached.");
+	pinned_cells.insert(p_cell);
+	return true;
+}
+
+void WorldPartition3D::unpin_cell(const Vector2i &p_cell) {
+	pinned_cells.erase(p_cell);
+}
+
+void WorldPartition3D::clear_pinned_cells() {
+	pinned_cells.clear();
+}
+
+bool WorldPartition3D::is_cell_pinned(const Vector2i &p_cell) const {
+	return pinned_cells.has(p_cell);
+}
+
+int WorldPartition3D::get_pinned_cell_count() const {
+	return pinned_cells.size();
 }
 
 Vector2i WorldPartition3D::local_position_to_cell(const Vector3 &p_local_position) const {
@@ -447,7 +477,7 @@ void WorldPartition3D::update_streaming() {
 
 	Vector<Vector2i> unload;
 	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
-		if ((!_within_radius(E.key, center, unload_radius) && !is_prefetch_cell(E.key)) || ObjectDB::get_instance(E.value) == nullptr) {
+		if ((!_within_radius(E.key, center, unload_radius) && !is_prefetch_cell(E.key) && !pinned_cells.has(E.key)) || ObjectDB::get_instance(E.value) == nullptr) {
 			unload.push_back(E.key);
 		}
 	}
@@ -457,7 +487,7 @@ void WorldPartition3D::update_streaming() {
 
 	Vector<Vector2i> cancel;
 	for (const KeyValue<Vector2i, String> &E : pending_cells) {
-		if (!_within_radius(E.key, center, load_radius) && !is_prefetch_cell(E.key)) {
+		if (!_within_radius(E.key, center, load_radius) && !is_prefetch_cell(E.key) && !pinned_cells.has(E.key)) {
 			cancel.push_back(E.key);
 		}
 	}
@@ -545,6 +575,14 @@ void WorldPartition3D::update_streaming() {
 				visit_cell(Vector2i(int32_t(x), int32_t(z)));
 			}
 		}
+	}
+
+	// Explicitly pinned regions are an independent, bounded streaming source.
+	// They retain unloaded/loaded cells beyond the observer's radius and are
+	// processed after nearby physics cells but before speculative prefetch.
+	// Pins share the same request deduplication and per-frame budgets.
+	for (const Vector2i &cell : pinned_cells) {
+		visit_cell(cell);
 	}
 
 	// Optional direction-aware corridor, including cells beyond load_radius.
@@ -674,6 +712,11 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_cell_scene", "cell"), &WorldPartition3D::remove_cell_scene);
 	ClassDB::bind_method(D_METHOD("clear_cell_scenes"), &WorldPartition3D::clear_cell_scenes);
 	ClassDB::bind_method(D_METHOD("get_configured_cell_count"), &WorldPartition3D::get_configured_cell_count);
+	ClassDB::bind_method(D_METHOD("pin_cell", "cell"), &WorldPartition3D::pin_cell);
+	ClassDB::bind_method(D_METHOD("unpin_cell", "cell"), &WorldPartition3D::unpin_cell);
+	ClassDB::bind_method(D_METHOD("clear_pinned_cells"), &WorldPartition3D::clear_pinned_cells);
+	ClassDB::bind_method(D_METHOD("is_cell_pinned", "cell"), &WorldPartition3D::is_cell_pinned);
+	ClassDB::bind_method(D_METHOD("get_pinned_cell_count"), &WorldPartition3D::get_pinned_cell_count);
 	ClassDB::bind_method(D_METHOD("local_position_to_cell", "local_position"), &WorldPartition3D::local_position_to_cell);
 	ClassDB::bind_method(D_METHOD("cell_to_local_position", "cell"), &WorldPartition3D::cell_to_local_position);
 	ClassDB::bind_method(D_METHOD("get_cells_in_radius", "center", "radius"), &WorldPartition3D::get_cells_in_radius);
