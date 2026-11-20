@@ -13,6 +13,12 @@ const CRYSTAL_TOTAL: int = 8
 const OUTPOST_CELL: Vector2i = Vector2i(6, 6)
 const OUTPOST_POSITION: Vector2 = Vector2(208.0, 208.0)
 const HOME_POSITION: Vector2 = Vector2(0.0, 9.0)
+const SURVEY_SOURCE: String = "survey_drone"
+const SURVEY_CELL: Vector2i = Vector2i(-5, 4)
+const SURVEY_POSITION: Vector2 = Vector2(-144.0, 144.0)
+const WATCHTOWER_SOURCE: String = "watchtower"
+const WATCHTOWER_CELL: Vector2i = Vector2i(3, -7)
+const WATCHTOWER_POSITION: Vector2 = Vector2(112.0, -208.0)
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var camera: Camera3D
@@ -32,6 +38,9 @@ var collected: int = 0
 var high_quality: bool = true
 var mouse_sensitivity: float = 0.0018
 var _fast_travel_in_progress: bool = false
+var source_ready_events: int = 0
+var source_unready_events: int = 0
+var last_source_event: String = "нет"
 
 
 func _ready() -> void:
@@ -41,6 +50,7 @@ func _ready() -> void:
     _create_world_boundaries()
     _create_crystals()
     _create_outpost_beacon()
+    _create_streaming_source_markers()
     _create_camera()
     _create_hud()
     _create_streaming_world()
@@ -142,6 +152,8 @@ func _create_streaming_world() -> void:
     world_partition.cell_loaded.connect(_on_stream_cell_loaded)
     world_partition.cell_unloaded.connect(_on_stream_cell_unloaded)
     world_partition.observer_cell_changed.connect(_on_observer_cell_changed)
+    world_partition.streaming_source_ready.connect(_on_streaming_source_ready)
+    world_partition.streaming_source_unready.connect(_on_streaming_source_unready)
 
     var half_cells: int = WORLD_CELLS_PER_SIDE >> 1
     for cz in range(-half_cells, half_cells):
@@ -239,6 +251,41 @@ func _fast_travel() -> void:
     _refresh_hud()
 
 
+func _toggle_streaming_source(name: String) -> void:
+    if world_partition == null:
+        return
+
+    if not world_partition.get_streaming_source(name).is_empty():
+        world_partition.remove_streaming_source(name)
+    elif name == SURVEY_SOURCE:
+        # This background camera covers a 3x3 remote region, with 5x5
+        # hysteresis and higher priority than the watchtower's single cell.
+        if not world_partition.set_streaming_source(
+                SURVEY_SOURCE, SURVEY_CELL, 1, 2, 80):
+            push_warning("The survey streaming source could not be registered.")
+            return
+    elif name == WATCHTOWER_SOURCE:
+        if not world_partition.set_streaming_source(
+                WATCHTOWER_SOURCE, WATCHTOWER_CELL, 0, 1, 25):
+            push_warning("The watchtower streaming source could not be registered.")
+            return
+    else:
+        return
+
+    world_partition.update_streaming()
+    _refresh_hud()
+
+
+func _on_streaming_source_ready(name: String) -> void:
+    source_ready_events += 1
+    last_source_event = name + " готов"
+
+
+func _on_streaming_source_unready(name: String) -> void:
+    source_unready_events += 1
+    last_source_event = name + " не готов"
+
+
 func _on_observer_cell_changed(cell: Vector2i) -> void:
     current_region = cell
     _refresh_player_stream_safety()
@@ -326,6 +373,32 @@ func _create_outpost_beacon() -> void:
     add_child(marker)
 
 
+func _create_streaming_source_markers() -> void:
+    _add_source_marker("SurveyDroneBeacon", SURVEY_POSITION, Color(0.24, 0.90, 0.78))
+    _add_source_marker("WatchtowerBeacon", WATCHTOWER_POSITION, Color(1.0, 0.60, 0.20))
+
+
+func _add_source_marker(label: String, location: Vector2, color: Color) -> void:
+    var marker := MeshInstance3D.new()
+    marker.name = label
+    var mesh := SphereMesh.new()
+    mesh.radius = 0.9
+    mesh.height = 1.8
+    mesh.radial_segments = 8
+    mesh.rings = 4
+    var material := StandardMaterial3D.new()
+    material.albedo_color = color
+    material.roughness = 0.34
+    material.emission_enabled = true
+    material.emission = color
+    material.emission_energy_multiplier = 2.0
+    mesh.material = material
+    marker.mesh = mesh
+    marker.position = Vector3(location.x,
+        height_at(location.x, location.y) + 2.0, location.y)
+    add_child(marker)
+
+
 func _create_camera() -> void:
     # Physics body owns yaw and collision, camera owns only pitch.
     # This follows the standard first-person controller hierarchy.
@@ -359,10 +432,10 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 333)
+    hint.position = Vector2(22, 382)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: сброс кэшей  •  F4: повтор загрузки  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор\nF6: закрепить маяк  •  F7: подготовить и переместиться к маяку/домой"
+    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: сброс кэшей  •  F4: повтор загрузки  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор\nF6: закрепить маяк  •  F7: подготовить и переместиться к маяку/домой\nF8: источник разведки  •  F10: источник башни"
     canvas.add_child(hint)
 
 
@@ -397,6 +470,11 @@ func _refresh_hud() -> void:
     var inflight: int = world_partition.get_inflight_request_count() if world_partition != null else 0
     var failed: int = world_partition.get_failed_cell_count() if world_partition != null else 0
     var pinned: int = world_partition.get_pinned_cell_count() if world_partition != null else 0
+    var named_sources: int = world_partition.get_streaming_source_count() if world_partition != null else 0
+    var survey_info: Dictionary = world_partition.get_streaming_source(SURVEY_SOURCE) if world_partition != null else {}
+    var watch_info: Dictionary = world_partition.get_streaming_source(WATCHTOWER_SOURCE) if world_partition != null else {}
+    var survey_status: String = ("ГОТОВ" if world_partition.is_streaming_source_ready(SURVEY_SOURCE) else "ЗАГРУЗКА") if not survey_info.is_empty() else "ВЫКЛ"
+    var watch_status: String = ("ГОТОВ" if world_partition.is_streaming_source_ready(WATCHTOWER_SOURCE) else "ЗАГРУЗКА") if not watch_info.is_empty() else "ВЫКЛ"
     var outpost_ready: bool = world_partition.is_cell_loaded(OUTPOST_CELL) if world_partition != null else false
     var outpost_status: String = "ГОТОВ" if outpost_ready else (
         "ЗАГРУЖАЕТСЯ" if world_partition != null and world_partition.is_cell_pinned(OUTPOST_CELL)
@@ -419,7 +497,9 @@ func _refresh_hud() -> void:
         + "Стриминг CPU: %.2f ms   попыток создания: %d\n" % [stream_ms, created_this_frame] \
         + "Кэш HLOD: %d/%d   попадания: %d   промахи: %d\n" % [far_cache["entries"], far_cache["capacity"], far_cache["hits"], far_cache["misses"]] \
         + "Генерация HLOD CPU: %.2f ms   мягкий бюджет: 2.0 ms\n" % hlod_cpu_ms \
-        + "Закреплено: %d/16   маяк: %s   дом: %s" % [pinned, outpost_status, "ГОТОВ" if home_ready else "НЕТ"]
+        + "Закреплено: %d/16   маяк: %s   дом: %s\n" % [pinned, outpost_status, "ГОТОВ" if home_ready else "НЕТ"] \
+        + "Источники: %d/8   разведка: %s   башня: %s\n" % [named_sources, survey_status, watch_status] \
+        + "События источников: готово %d / потеряно %d   %s" % [source_ready_events, source_unready_events, last_source_event]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
@@ -474,9 +554,13 @@ func _unhandled_input(event: InputEvent) -> void:
                 _toggle_outpost_pin()
             KEY_F7:
                 _fast_travel()
+            KEY_F8:
+                _toggle_streaming_source(SURVEY_SOURCE)
             KEY_F9:
                 _load_game()
                 _apply_quality(high_quality)
+            KEY_F10:
+                _toggle_streaming_source(WATCHTOWER_SOURCE)
             KEY_E:
                 _collect_nearest()
 
