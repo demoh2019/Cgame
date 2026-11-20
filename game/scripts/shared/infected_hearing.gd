@@ -9,6 +9,9 @@ const LOUD_REFERENCE := 32.0
 const QUIET_TRANSMISSION := 0.62
 const LOUD_TRANSMISSION := 0.80
 const END_TOLERANCE := 0.08
+# A narrow workbench, grass clump or thin sapling should not act as an
+# acoustic brick wall. Bullet/sight collision still respects every blocker.
+const ACOUSTIC_MIN_RADIUS := 1.1
 
 static var _native_checked: bool = false
 static var _native: Object = null
@@ -57,5 +60,5 @@ static func audible(world, source: Vector3, listener: Vector3,
 		return true
 	# The same rounded 2D solids that stop bullets and first visual contact,
 	# including destructible barricades and static procedural cover.
-	return RangedCover.first_blocker_distance(world, from, vector, distance) \
-		>= distance - END_TOLERANCE
+	return RangedCover.first_blocker_distance(world, from, vector, distance,
+		ACOUSTIC_MIN_RADIUS) >= distance - END_TOLERANCE
