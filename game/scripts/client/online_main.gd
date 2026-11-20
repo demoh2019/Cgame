@@ -125,6 +125,9 @@ var _demo_frames := 0 # Frames since the first snapshot arrived.
 
 
 func _exit_tree() -> void:
+	# GPU timestamp queries belong to the active online viewport only.
+	if get_viewport() != null:
+		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), false)
 	CharacterModel.clear_templates() # Cached survivor models live outside the tree.
 	local_server.stop() # A solo world ends with the game.
 
@@ -138,6 +141,7 @@ func _ready() -> void:
 	if _auto_graphics:
 		GraphicsQuality.set_level(_auto_quality.level, false)
 	_adaptive_resolution.configure(GraphicsQuality.level())
+	_update_gpu_measurements()
 	_build_environment()
 	_build_connect_screen()
 	var args := OS.get_cmdline_user_args()
@@ -453,7 +457,7 @@ func _build_connect_screen() -> void:
 	quality_picker.add_theme_color_override("font_pressed_color", UiTheme.INK)
 	for quality_level in GraphicsQuality.NAMES.size():
 		quality_picker.add_item(GraphicsQuality.NAMES[quality_level], quality_level)
-	quality_picker.add_item("Auto (adaptive 3D + details)", GraphicsQuality.NAMES.size())
+	quality_picker.add_item("Auto (GPU-aware 3D + details)", GraphicsQuality.NAMES.size())
 	quality_picker.select(GraphicsQuality.NAMES.size() if _auto_graphics else GraphicsQuality.level())
 	quality_picker.item_selected.connect(func(index: int) -> void:
 		var selected: int = quality_picker.get_item_id(index)
@@ -1045,7 +1049,11 @@ func _process(delta: float) -> void:
 	# Resize only the Forward+ 3D target before changing costly world LOD.
 	if _auto_graphics and client != null and client.welcomed:
 		var rd: bool = RenderingServer.get_current_rendering_method() == "forward_plus"
-		if rd and _adaptive_resolution.sample_frame(delta):
+		# Godot returns GPU duration in milliseconds from the previous rendered
+		# frame. It excludes CPU scripting/physics stalls and V-Sync waiting.
+		var gpu_ms: float = RenderingServer.viewport_get_measured_render_time_gpu(
+			get_viewport().get_viewport_rid()) if rd else 0.0
+		if rd and _adaptive_resolution.sample_frame(delta, gpu_ms):
 			GraphicsQuality.apply_resolution(get_viewport(), _adaptive_resolution.scale, true)
 			_auto_quality.set_mode("auto")
 		var quality_limit: bool = not rd or (
@@ -1303,8 +1311,18 @@ func _near_water(p: Vector3) -> bool:
 	return false
 
 
+## Timestamp queries cost resources, so use them only during automatic
+## Forward+ scaling; manual presets and Compatibility allocate none.
+func _update_gpu_measurements() -> void:
+	if get_viewport() == null:
+		return
+	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(),
+		_auto_graphics and RenderingServer.get_current_rendering_method() == "forward_plus")
+
+
 func _set_auto_graphics(enabled: bool) -> void:
 	_auto_graphics = enabled
+	_update_gpu_measurements()
 	# Preserve the other rendering preferences in the same config file.
 	var config := ConfigFile.new()
 	config.load(GraphicsQuality.SETTINGS_PATH)

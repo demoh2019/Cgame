@@ -31,6 +31,11 @@ occlusion_culling/use_occlusion_culling=true
 ; control bandwidth and preserve budget for world geometry and vegetation.
 rendering/environment/screen_space_reflection/half_size=true
 
+; SSAO / SSIL add contact depth and diffuse bounce only for Forward+ High/Ultra.
+; Half-resolution ray buffers are reconstructed by Godot, avoiding full-res cost.
+rendering/environment/ssao/half_size=true
+rendering/environment/ssil/half_size=true
+
 renderer/rendering_method="forward_plus"
 renderer/rendering_method.mobile="gl_compatibility"
 renderer/rendering_method.web="gl_compatibility"
