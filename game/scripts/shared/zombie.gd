@@ -9,6 +9,7 @@ const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const WindHearing = preload("res://scripts/shared/wind_hearing.gd")
+const InfectedHearing = preload("res://scripts/shared/infected_hearing.gd")
 const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
 const InfectedResolve = preload("res://scripts/shared/infected_resolve.gd")
@@ -267,12 +268,15 @@ func _select_target(world, players: Dictionary, here: Vector2) -> void:
 		var firelight: float = 0.0
 		if is_finite(firelight_raw):
 			firelight = clampf(firelight_raw, 0.0, float(data["lose"]) - 1.0)
-		# Sound and smell bend around cover; visual detection (including
-		# campfire/flare light) is stopped by real ruins, trees and barricades.
-		# Resolve one short ray only for a candidate that cannot already be
-		# heard or smelled. Current aggro, confirmed damage and taunt do not
-		# magically disappear when a survivor steps behind a wall.
-		var nonvisual: bool = distance <= maxf(hearing, scent)
+		# Quiet sound no longer crosses a solid barricade at its full range.
+		# Only marginal sound candidates need one existing world-blocker ray.
+		# Loud gunshots penetrate farther; combat threat, scent, sight and
+		# existing aggro keep their independent authoritative priorities.
+		var heard: bool = false
+		if distance <= hearing and distance > scent and peer_id != target_id:
+			heard = InfectedHearing.audible(
+				world, p, position, float(info.get("noise", 0.0)), hearing)
+		var nonvisual: bool = heard or distance <= scent
 		var potentially_visible: bool = distance <= maxf(notice, firelight)
 		if distance < best_distance and (peer_id == target_id or nonvisual or
 				(potentially_visible and InfectedSight.clear_path(world, position, p))):
