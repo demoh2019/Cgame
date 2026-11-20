@@ -124,7 +124,12 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		var staggered: bool = float(entity.get("stagger_seconds", 0.0)) > 0.0
 		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
 		var exposed: bool = float(entity.get("sunder_seconds", 0.0)) > 0.0
+		var wound_phase: String = str(entity.get("wound_phase", ""))
 		var tint: Color = base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base
+		if wound_phase == "limping":
+			tint = base.lerp(Color(0.54, 0.52, 0.66), 0.65)
+		elif wound_phase == "frenzied":
+			tint = base.lerp(Color(1.0, 0.19, 0.1), 0.78)
 		if exposed:
 			tint = base.lerp(Color(0.96, 0.42, 0.14), 0.65)
 		if pinned:

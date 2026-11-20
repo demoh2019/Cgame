@@ -15,6 +15,7 @@ const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
@@ -409,13 +410,25 @@ func _sync_zombies() -> void:
 		if not zombie.is_alive() or zombie.position.distance_to(survivor.position) > 72.0:
 			continue
 		active[zombie.id] = true
+		var base_tint := Color(0.98, 0.65, 0.18) if zombie.elite else (
+			Color(0.4, 0.9, 0.23) if zombie.type == "spitter" else Color(0.66, 0.37, 0.35))
 		if not _zombie_meshes.has(zombie.id):
 			var mesh := _mesh(
 				Vector3(1.05, 1.95, 1.05) if zombie.elite else Vector3(0.85, 1.6, 0.85),
-				Color(0.98, 0.65, 0.18) if zombie.elite else (
-					Color(0.4, 0.9, 0.23) if zombie.type == "spitter" else Color(0.66, 0.37, 0.35)))
+				base_tint)
+			# _mesh caches materials by color. Give each wounded infected its
+			# own material so an individual change cannot recolor its pack.
+			mesh.material_override = mesh.material_override.duplicate() as StandardMaterial3D
 			add_child(mesh)
 			_zombie_meshes[zombie.id] = mesh
+		var phase: String = InfectedWounds.phase(zombie)
+		var tint: Color = base_tint
+		if phase == "limping":
+			tint = base_tint.lerp(Color(0.54, 0.52, 0.66), 0.65)
+		elif phase == "frenzied":
+			tint = base_tint.lerp(Color(1.0, 0.19, 0.1), 0.78)
+		var material: StandardMaterial3D = _zombie_meshes[zombie.id].material_override
+		material.albedo_color = tint
 		_zombie_meshes[zombie.id].position = zombie.position + Vector3(0.0, 0.975 if zombie.elite else 0.8, 0.0)
 	for zombie_id in _zombie_meshes.keys():
 		if not active.has(zombie_id):

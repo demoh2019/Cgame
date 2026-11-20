@@ -107,6 +107,7 @@ const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
 const RaidRoundRobin = preload("res://scripts/shared/raid_round_robin.gd")
 const RaidNeedGreed = preload("res://scripts/shared/raid_need_greed.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
+const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
@@ -6792,6 +6793,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					"raid_enraged": zombie.raid_enraged,
 					"raid_exposed_seconds": RaidRecovery.remaining(zombie, raid_exposed_until, time) if zombie.id == raid_boss_id else 0.0,
 					"max_hp": float(zombie.data.get("health", zombie.health)),
+					"wound_phase": InfectedWounds.phase(zombie),
 					"snared_seconds": zombie.snared_seconds,
 					"stagger_seconds": zombie.stagger_seconds,
 					"sunder_seconds": SunderMark.remaining(zombie, time)})
