@@ -33,6 +33,7 @@ var baked_proxy_cell_count := 0
 var baked_validation_ms := 0
 var baked_manifest: Dictionary = {}
 var last_gameplay_event := "Claim the hub reward with C to unlock combat."
+var last_nav_query := "N: test local nav path after physics sync"
 var quest_arena_lease := 0
 var manual_arena_lease := 0
 var quality_controller = QUALITY_SCRIPT.new()
@@ -67,6 +68,9 @@ func _ready() -> void:
         return
     if not detail.has_method("acquire_cell_lease") or not detail.has_method("release_cell_lease"):
         push_error("Cgame WorldPartition3D independent cell lease API required.")
+        return
+    if not detail.has_method("get_cell_simulation_stats"):
+        push_error("Cgame WorldPartition3D collision/navigation diagnostics required.")
         return
     # The Combat Event is initially inactive even if a pinned gameplay cell
     # or an observer overlaps its region. The quest hub stays available.
@@ -251,6 +255,35 @@ func _gameplay_cell_root(cell: Vector2i) -> Node3D:
         return null
     return detail.call("get_cell_instance", cell) as Node3D
 
+func _test_navigation_path() -> void:
+    if detail == null:
+        return
+    # Prefer the hub, which is pinned when the demo starts.
+    var root := _gameplay_cell_root(HUB_CELL)
+    if root == null:
+        root = _gameplay_cell_root(ARENA_CELL)
+    if root == null:
+        last_nav_query = "No nearby detailed gameplay cell for navigation test"
+        return
+    var region := root.get_node_or_null("WalkableRegion") as NavigationRegion3D
+    if region == null:
+        last_nav_query = "Navigation region has not streamed in"
+        return
+    # Godot's NavigationServer3D synchronizes region registration on the
+    # next physics frame, not when the scene is first added to the tree.
+    await get_tree().physics_frame
+    await get_tree().physics_frame
+    if not is_instance_valid(root) or not is_instance_valid(region) or not region.enabled:
+        last_nav_query = "Region unloaded before navigation query"
+        return
+    var start := root.to_global(Vector3(12, 0, 12))
+    var destination := root.to_global(Vector3(CELL_SIZE - 12, 0, CELL_SIZE - 12))
+    var path: PackedVector3Array = NavigationServer3D.map_get_path(
+        region.get_navigation_map(), start, destination, true
+    )
+    last_nav_query = "Navigation path: %d points" % path.size()
+    print(last_nav_query)
+
 func _claim_hub_reward() -> void:
     var root := _gameplay_cell_root(HUB_CELL)
     if root != null and root.has_method("claim_hub_reward"):
@@ -370,6 +403,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
             _toggle_gameplay_pin(ARENA_CELL)
         KEY_M:
             _toggle_manual_arena_lease()
+        KEY_N:
+            _test_navigation_path()
         KEY_T:
             _toggle_combat_event()
         KEY_C:
@@ -431,7 +466,14 @@ func _update_hud() -> void:
     var reward_claimed := bool(_stateful_progress(HUB_CELL, "reward_claimed", false))
     var arena_wins: int = int(_stateful_progress(ARENA_CELL, "arena_wins", 0))
     var state_count: int = int(detail.call("get_cell_state_count")) if detail != null else 0
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nCell leases: %d  Arena owners: %d | Quest: %s  M Manual: %s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    var collision_count := 0
+    var navigation_count := 0
+    if detail != null:
+        for cell in [HUB_CELL, ARENA_CELL, CHAMPION_CELL]:
+            var stats: Dictionary = detail.call("get_cell_simulation_stats", cell)
+            collision_count += int(stats.get("collision_objects", 0))
+            navigation_count += int(stats.get("navigation_regions", 0))
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nCell leases: %d  Arena owners: %d | Quest: %s  M Manual: %s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nSimulation near landmarks: %d collision bodies, %d nav regions\n%s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
@@ -450,6 +492,9 @@ func _update_hud() -> void:
         "ON" if champion_active else "OFF",
         "CLAIMED" if champion_claimed else "READY",
         last_gameplay_event,
+        collision_count,
+        navigation_count,
+        last_nav_query,
         "CLAIMED" if reward_claimed else "READY",
         arena_wins,
         state_count,
