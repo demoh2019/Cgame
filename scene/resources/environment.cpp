@@ -492,6 +492,29 @@ void Environment::_update_ssil() {
 
 // SDFGI
 
+// Applies all runtime SDFGI parameters at once to avoid six consecutive
+// RenderingServer uploads and intermediate cascade reallocations on tier changes.
+// The input is validated atomically: failed configurations preserve the old GI.
+void Environment::configure_sdfgi(bool p_enabled, int p_cascades, float p_min_cell_size, bool p_read_sky_light, float p_bounce_feedback, float p_energy) {
+	ERR_FAIL_COND_MSG(p_cascades < 1 || p_cascades > 8, "SDFGI cascades must be between 1 and 8.");
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_min_cell_size) || p_min_cell_size <= 0.0f, "SDFGI cell size must be positive and finite.");
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_bounce_feedback) || p_bounce_feedback < 0.0f || p_bounce_feedback > 1.0f, "SDFGI bounce feedback must be in [0, 1].");
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_energy) || p_energy < 0.0f, "SDFGI energy must be finite and nonnegative.");
+
+	if (sdfgi_enabled == p_enabled && sdfgi_cascades == p_cascades &&
+			sdfgi_min_cell_size == p_min_cell_size && sdfgi_read_sky_light == p_read_sky_light &&
+			sdfgi_bounce_feedback == p_bounce_feedback && sdfgi_energy == p_energy) {
+		return; // No redundant renderer upload during repeated Auto preset applications.
+	}
+	sdfgi_enabled = p_enabled;
+	sdfgi_cascades = p_cascades;
+	sdfgi_min_cell_size = p_min_cell_size;
+	sdfgi_read_sky_light = p_read_sky_light;
+	sdfgi_bounce_feedback = p_bounce_feedback;
+	sdfgi_energy = p_energy;
+	_update_sdfgi();
+}
+
 void Environment::set_sdfgi_enabled(bool p_enabled) {
 	sdfgi_enabled = p_enabled;
 	_update_sdfgi();
@@ -1443,6 +1466,7 @@ void Environment::_bind_methods() {
 
 	// SDFGI
 
+	ClassDB::bind_method(D_METHOD("configure_sdfgi", "enabled", "cascades", "min_cell_size", "read_sky_light", "bounce_feedback", "energy"), &Environment::configure_sdfgi);
 	ClassDB::bind_method(D_METHOD("set_sdfgi_enabled", "enabled"), &Environment::set_sdfgi_enabled);
 	ClassDB::bind_method(D_METHOD("is_sdfgi_enabled"), &Environment::is_sdfgi_enabled);
 	ClassDB::bind_method(D_METHOD("set_sdfgi_cascades", "amount"), &Environment::set_sdfgi_cascades);
