@@ -345,10 +345,24 @@
 				Emitted after a [PackedScene] is instantiated as a child of this node.
 			</description>
 		</signal>
+		<signal name="cell_state_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="state" type="Dictionary" />
+			<description>
+				Emitted when [method set_cell_state] changes a cached per-cell state or when a loaded scene returns new data from [code]capture_streaming_state()[/code] on unloading or snapshot. The signal carries an independent [Dictionary] copy, including an empty dictionary when a state is erased. Reassigning identical state data does not emit. [method load_cell_states] is a bulk import and does not emit this signal for each cell.
+			</description>
+		</signal>
 		<signal name="cell_unloaded">
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Emitted when a previously instantiated cell is queued for deletion.
+			</description>
+		</signal>
+		<signal name="layer_state_changed">
+			<param index="0" name="layer" type="String" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				Emitted when [method set_layer_enabled] or [method set_layer_states] changes a layer's effective enabled state. Unspecified layers default to enabled, so explicitly setting such a layer to [code]true[/code] does not emit. Bulk state replacement reports affected layers individually, including layers which become enabled again by removal of an explicit disabled entry.
 			</description>
 		</signal>
 	</signals>
