@@ -571,6 +571,13 @@ func c_light_campfire(x: float, z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_arm_camp_alarm(fire_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "camp_alarm_arm", sim.cmd_arm_camp_alarm(peer, fire_id))
+
+
+@rpc("any_peer", "reliable")
 func c_refuel_campfire(fire_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -1181,6 +1188,28 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
 		"site_discovered", "caravan_escort_paid", "caravan_defended", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "party_flank", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "barricade_shot", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "stagger_finisher", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
+		"camp_alarm":
+			# A former ally, distant player, enemy, or recycled peer ID
+			# cannot receive camp locations or approximate infected counts.
+			if sim == null:
+				return false
+			var owner_id: int = int(event.get("peer", -1))
+			var owner = sim.players.get(owner_id)
+			var recipient = sim.players.get(peer)
+			if owner == null or recipient == null or not sim._alive(owner) or not sim._alive(recipient):
+				return false
+			if not recipient.position.is_finite():
+				return false
+			if Vector2(recipient.position.x - float(event.get("x", INF)),
+					recipient.position.z - float(event.get("z", INF))).length_squared() > (
+					Defs.INTEREST_RADIUS * Defs.INTEREST_RADIUS):
+				return false
+			if owner_id == peer:
+				return true
+			var group: int = int(event.get("group", 0))
+			return group > 0 and sim.parties.group_of(owner_id) == group and (
+				sim.parties.group_of(peer) == group) and (
+				sim.parties.members_of(owner_id).has(peer))
 		"caravan_ambushed":
 			return sim != null and CaravanEscort.can_receive_alert(
 				event, peer, sim.players, sim.parties)

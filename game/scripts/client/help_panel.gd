@@ -13,7 +13,7 @@ const ENTRIES := [
 		["R", "drink from lake (untreated water risks infection)"], ["Ctrl+R", "fill canteen (charcoal filter)"],
 		["Ctrl+Shift+R", "boil water at lake and live fire (2 wood)"], [".", "frontier stim"], ["/", "scent salve (Shift: quiet sprint wraps)"], [";", "spore filter"], ["Z", "rest at the hub or a fire"]]],
 	["BUILD AND DEFEND", [
-		["U", "build barricade"], ["H", "repair"], ["Y", "upgrade"], ["X", "dismantle"], ["O", "light campfire"],
+		["U", "build barricade"], ["H", "repair"], ["Y", "upgrade"], ["X", "dismantle"], ["O", "light campfire"], ["Shift+O", "arm crafted infected camp alarm (3 min)"],
 		["9", "refuel fire (Shift: stormproof briquette)"], ["-", "extinguish fire"], [",", "throw noise decoy"],
 		["F5", "throw ember flask (PvE fire)"], ["F6 / F7", "pitch / pack field tarp"], ["Home", "return charm"], ["Alt+T", "storm cast"]]],
 	["TOWN", [

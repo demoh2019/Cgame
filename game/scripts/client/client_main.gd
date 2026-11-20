@@ -753,6 +753,10 @@ func _physics_process(delta: float) -> void:
 	if sim == null:
 		return
 	sim.tick(delta)
+	for game_event in sim.drain_events():
+		if str(game_event.get("type", "")) == "camp_alarm" and (
+				int(game_event.get("peer", -1)) == LOCAL_PLAYER_ID):
+			_feedback = "CAMP ALERT: %d infected near your fire! Prepare defenses." % int(game_event.get("count", 0))
 	if sim.siege_waves_started > _last_siege_notification:
 		_last_siege_notification = sim.siege_waves_started
 		_feedback = "Night siege! Infected are approaching a nearby barricade."
@@ -1158,12 +1162,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_result("Pack tarp", sim.cmd_pack_shelter(LOCAL_PLAYER_ID, nearest))
 	elif event.is_action_pressed("survive_campfire"):
-		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
-		var fire_result: Dictionary = sim.cmd_light_campfire(LOCAL_PLAYER_ID, point.x, point.y)
-		_result("Light campfire", fire_result)
-		if bool(fire_result.get("ok", false)):
-			_feedback = "Campfire lit. At night its light attracts infected. Press - to extinguish."
-			_update_hud()
+		if Input.is_key_pressed(KEY_SHIFT):
+			var fire_id: int = _nearest_campfire()
+			_result("Arm camp alarm",
+				sim.cmd_arm_camp_alarm(LOCAL_PLAYER_ID, fire_id))
+		else:
+			var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
+			var fire_result: Dictionary = sim.cmd_light_campfire(LOCAL_PLAYER_ID, point.x, point.y)
+			_result("Light campfire", fire_result)
+			if bool(fire_result.get("ok", false)):
+				_feedback = "Campfire lit. At night its light attracts infected. Press - to extinguish."
+				_update_hud()
 	elif event.is_action_pressed("survive_build"):
 		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
 		_result("Build barricade", sim.cmd_build(LOCAL_PLAYER_ID, point.x, point.y))

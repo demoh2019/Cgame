@@ -152,6 +152,7 @@ const StormproofBriquette = preload("res://scripts/shared/stormproof_briquette.g
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
 const StormTarpAnchors = preload("res://scripts/shared/storm_tarp_anchors.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
+const CampAlarm = preload("res://scripts/shared/camp_alarm.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HandFlare = preload("res://scripts/shared/hand_flare.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
@@ -843,6 +844,10 @@ func remove_player(peer_id: int) -> void:
 	CaravanEscortRewards.clear_peer(caravan_escort_progress, peer_id)
 	_clear_caravan_waves(peer_id)
 	parties.disconnect_peer(peer_id)
+	# A recycled network peer ID must never inherit the previous camp alarm.
+	for fire in campfires.values():
+		if int(fire.get("alarm_owner", -1)) == peer_id:
+			fire["alarm_until"] = time
 	var player: Player = players.get(peer_id)
 	if player != null and not player.user_id.is_empty():
 		for wall in barricades.values():
@@ -3357,6 +3362,33 @@ func cmd_extinguish_campfire(peer_id: int, id: int) -> Dictionary:
 	campfires.erase(id)
 	events.append({"type": "campfire_extinguished", "id": id, "peer": peer_id})
 	return {"ok": true, "id": id}
+
+
+## Attach a crafted 3-minute infected warning kit to a burning campfire.
+## Only a real nearby survivor can pay; server chooses who hears the signal.
+func cmd_arm_camp_alarm(peer_id: int, fire_id: int) -> Dictionary:
+	var survivor: Player = players.get(peer_id)
+	if survivor == null or not _alive(survivor):
+		return {"ok": false, "reason": "dead"}
+	if survivor.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not survivor.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	if survivor.combat_tag_until > time or survivor.attack_timer > 0.0 or (
+			survivor.skill_timer > 0.0 or not survivor.action.is_empty()):
+		return {"ok": false, "reason": "in_combat"}
+	var fire: Dictionary = campfires.get(fire_id, {})
+	var reason: String = CampAlarm.arm_reason(fire, survivor.position, time)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	if not survivor.inventory.remove(CampAlarm.ITEM_ID, 1):
+		return {"ok": false, "reason": "missing_kit"}
+	CampAlarm.install(fire, peer_id, parties.group_of(peer_id), time)
+	campfires[fire_id] = fire
+	survivor.dirty_inventory = true
+	survivor.dirty_character = true
+	return {"ok": true, "id": fire_id, "seconds": CampAlarm.seconds_left(fire, time),
+		"radius": CampAlarm.DETECTION_RADIUS}
 
 
 func cmd_refuel_campfire(peer_id: int, id: int) -> Dictionary:
@@ -7306,13 +7338,24 @@ func _tick_world(delta: float) -> void:
 			float(fire["x"]), float(fire["z"]), time)
 		var storm_exposed: float = StormproofBriquette.exposed_seconds(delta, time, fire)
 		var extra: float = FieldCampfire.storm_extra_fuel(storm_exposed, local_weather)
-		if extra <= 0.0:
+		if extra > 0.0:
+			fire["expires"] = maxf(time, float(fire["expires"]) - extra)
+			if float(fire["expires"]) <= time:
+				campfires.erase(id)
+				events.append({"type": "campfire_doused", "id": id,
+					"x": fire["x"], "z": fire["z"]})
+				continue
+		# Sampling every two seconds bounds CPU work even with many camps.
+		var alarm_owner: int = int(fire.get("alarm_owner", -1))
+		var observer: Player = players.get(alarm_owner)
+		if observer == null or not _alive(observer):
 			continue
-		fire["expires"] = maxf(time, float(fire["expires"]) - extra)
-		if float(fire["expires"]) <= time:
-			campfires.erase(id)
-			events.append({"type": "campfire_doused", "id": id,
-				"x": fire["x"], "z": fire["z"]})
+		var detected: int = CampAlarm.scan(fire, zombies, time)
+		if detected > 0:
+			events.append({"type": "camp_alarm", "peer": alarm_owner,
+				"group": int(fire.get("alarm_group", 0)),
+				"x": float(fire["x"]), "z": float(fire["z"]),
+				"count": detected})
 	for id in depleted.keys():
 		if time >= float(depleted[id]):
 			depleted.erase(id)

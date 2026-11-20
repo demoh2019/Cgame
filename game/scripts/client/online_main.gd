@@ -1392,12 +1392,19 @@ func _unhandled_input(event: InputEvent) -> void:
 					client.throw_decoy(decoy_direction)
 			KEY_O:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
-					var direction: Vector2 = _aim_direction()
-					if direction == Vector2.ZERO:
-						direction = Vector2(sin(client.yaw), cos(client.yaw))
-					var target := Vector2(client.predicted.x, client.predicted.z) + direction * 2.8
-					client.light_campfire(target)
-					hud.say("At night, campfire light attracts infected. Press - to extinguish.")
+					if Input.is_key_pressed(KEY_SHIFT):
+						var fire_id: int = client.nearest_campfire(client.display_position())
+						if fire_id < 0:
+							hud.say("Camp alarm: stand within 3m of an active campfire.")
+						else:
+							client.arm_camp_alarm(fire_id)
+					else:
+						var direction: Vector2 = _aim_direction()
+						if direction == Vector2.ZERO:
+							direction = Vector2(sin(client.yaw), cos(client.yaw))
+						var target := Vector2(client.predicted.x, client.predicted.z) + direction * 2.8
+						client.light_campfire(target)
+						hud.say("At night, campfire light attracts infected. Press - to extinguish.")
 			KEY_U:
 				if _build_mode:
 					_place_wall()
