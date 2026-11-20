@@ -380,7 +380,7 @@ void Light3D::_notification(int p_what) {
 			}
 			flicker_time += get_process_delta_time() * flicker_speed;
 			// Per-light phase from the instance ID so neighbouring torches never pulse in sync.
-			const float phase = float(get_instance_id() % 1024) * 0.618f;
+			const float phase = float(uint64_t(get_instance_id()) % 1024) * 0.618f;
 			const float factor = flicker_factor(flicker_time, flicker, phase);
 			RS::get_singleton()->light_set_param(light, RSE::LIGHT_PARAM_ENERGY, param[PARAM_ENERGY] * factor);
 			if (flicker_color_shift > 0.0f) {
