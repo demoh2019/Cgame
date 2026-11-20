@@ -865,6 +865,9 @@ func _on_event(event: Dictionary) -> void:
 					int(event.get("xp", 0)), int(event.get("level", 1))])
 		"crate":
 			say("You search the crate...")
+		"lockpick":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Lockpick consumed: sealed T%d compartment salvaged!" % int(event.get("tier", 3)))
 		"trade":
 			var phase: String = str(event.get("phase", ""))
 			if phase == "completed" or phase == "cancelled":
