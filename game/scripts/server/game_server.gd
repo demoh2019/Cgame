@@ -71,6 +71,7 @@ const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
 const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
 const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
+const RaidRoundRobin = preload("res://scripts/shared/raid_round_robin.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
@@ -1561,6 +1562,14 @@ func cmd_party_focus(peer_id: int) -> Dictionary:
 	if best_id < 0:
 		return {"ok": false, "reason": "no_infected_nearby"}
 	return parties.start_focus(peer_id, best_id, time)
+
+
+## Only the authenticated party leader configures FUTURE raid loot bags.
+func cmd_party_loot_mode(peer_id: int, mode: String) -> Dictionary:
+	var leader: Player = players.get(peer_id)
+	if leader == null or not _alive(leader):
+		return {"ok": false, "reason": "dead"}
+	return parties.set_loot_mode(peer_id, mode)
 
 
 func _party_state_for(peer_id: int) -> Dictionary:
@@ -3521,6 +3530,31 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 				"remaining": RaidLoot.remaining(bag, time)}
 		if not LootRights.can_loot(bag, player, time):
 			return {"ok": false, "reason": "reserved"}
+		# Optional MMORPG raid mode: each eligible survivor claims one
+		# bounded share at a time. The physical bag is never cloned.
+		if RaidRoundRobin.active(bag, time):
+			var claim: Dictionary = RaidRoundRobin.offer(bag, player, time)
+			if not bool(claim.get("ok", false)):
+				return {"ok": false, "reason": claim.get("reason", "not_your_turn"),
+					"remaining": float(claim.get("remaining", 0.0))}
+			var item_id: String = str(claim["item"])
+			var desired: int = int(claim["quantity"])
+			var leftover: Dictionary = _give_items(player, {item_id: desired})
+			var received: int = desired - int(leftover.get(item_id, 0))
+			if received <= 0:
+				return {"ok": false, "reason": "inventory_full"}
+			var unclaimed: int = int(bag["items"].get(item_id, 0)) - received
+			if unclaimed > 0:
+				bag["items"][item_id] = unclaimed
+			else:
+				bag["items"].erase(item_id)
+			RaidRoundRobin.complete(bag, int(claim["index"]), time)
+			_award(player, "scavenging", 3.0)
+			var complete: bool = bag["items"].is_empty()
+			if complete:
+				bags.erase(entity_id)
+			return {"ok": true, "complete": complete, "item": item_id,
+				"quantity": received, "round_robin": true}
 		var taken_before: int = _item_total(bag["items"])
 		var left := _give_items(player, bag["items"])
 		if _item_total(left) < taken_before:
@@ -3994,6 +4028,8 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		# identity, accounts survive reconnect. No client-authored loot rights.
 		var eligible: Array = RaidLoot.eligible(killer, zombie, players, parties, world, time)
 		RaidLoot.reserve(bags[loot_bag_id], eligible, time)
+		if parties.loot_mode_for(killer.id) == "round_robin" and eligible.size() > 1:
+			RaidRoundRobin.activate(bags[loot_bag_id], eligible, zombie.id, time)
 	if spawn_state.has(zombie.spawn_id):
 		spawn_state[zombie.spawn_id] = {"zombie": -1, "next": time + (240.0 if zone < 2 else 360.0)}
 	# The client must learn when ALL original guards are down. A per-cache
@@ -5458,6 +5494,12 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				bag_view["reserved_seconds"] = RaidLoot.remaining(bag, time)
 				bag_view["reserved"] = float(bag_view["reserved_seconds"]) > 0.0
 				bag_view["can_loot"] = RaidLoot.can_open(bag, player, time)
+				if RaidRoundRobin.active(bag, time):
+					var turn: Dictionary = RaidRoundRobin.visible(bag, player, time)
+					bag_view["raid_round_robin"] = true
+					bag_view["raid_your_turn"] = bool(turn["your_turn"])
+					bag_view["raid_turn_seconds"] = float(turn["seconds"])
+					bag_view["can_loot"] = bool(bag_view["can_loot"]) and bool(turn["your_turn"])
 			bag_view["horde_cache"] = bool(bag.get("horde_cache", false))
 			bag_view["supply_drop"] = bool(bag.get("supply_drop", false))
 			bag_view["corpse_scent"] = CorpseScent.active(bag, time)
