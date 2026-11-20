@@ -33,9 +33,10 @@ static func make(engine_class: String, props: Dictionary = {}) -> Object:
 ## Bodies on the ragdoll layer (1 << 19) are pushed by default.
 static func radial_push(parent: Node, at: Vector3, radius: float, strength: float,
 		upward: float = 0.4, mask: int = 1 << 19, wall_mask: int = 0,
-		wall_attenuation: float = 0.25, velocity_change: bool = false) -> bool:
+		wall_attenuation: float = 0.25, velocity_change: bool = false,
+		falloff_mode: int = 1) -> bool:
 	var field := make("RadialForceField3D", {
-		"radius": radius, "strength": strength, "falloff": 2, "upward_bias": upward,
+		"radius": radius, "strength": strength, "falloff": falloff_mode, "upward_bias": upward,
 		"collision_mask": mask, "free_after_fire": true}) as Node3D
 	if field == null:
 		return false
