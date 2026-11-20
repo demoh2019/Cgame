@@ -20,9 +20,12 @@ static func wants_priority(kind: String, entity: Dictionary) -> bool:
 	if bool(entity.get("raid_boss", false)) or bool(entity.get("raid_enraged", false)):
 		return true
 	var state: int = int(entity.get("state", 0))
-	# Elite attacks and spitter warning poses communicate real danger.
-	if state == ZOMBIE_CHASE or state == ZOMBIE_ATTACK:
-		return bool(entity.get("elite", false)) or (
-			str(entity.get("type", "")) == "spitter" and state == ZOMBIE_ATTACK)
+	# Every on-screen attack tell competes for the SAME bounded native
+	# priority pool: a nearby runner's bite is more urgent than an older,
+	# farther elite's idle pose. The engine chooses nearest visible actors.
+	if state == ZOMBIE_ATTACK:
+		return true
+	if state == ZOMBIE_CHASE and bool(entity.get("elite", false)):
+		return true
 	# A brief stagger is a gameplay-critical hit reaction.
 	return float(entity.get("stagger_seconds", 0.0)) > 0.0
