@@ -3187,11 +3187,8 @@ func _tick_zombies(delta: float) -> void:
 		_manage_zombie_population()
 	# Every fourth of a second alert only idle, non-raid infected within
 	# hearing range. Active chases and combat threat always take priority.
-	if tick_count % 5 == 0:
-		if not decoys.is_empty():
-			_alert_noise_decoys()
-		if not campfires.is_empty() and WorldCycle.is_night(time):
-			_alert_campfire_lights()
+	if tick_count % 5 == 0 and not decoys.is_empty():
+		_alert_noise_decoys()
 	for zombie in zombies.values():
 		var result: Dictionary = zombie.think(world, info, delta, rng)
 		# Zombies chip away at obstacles only while actually stuck pursuing
@@ -3259,6 +3256,10 @@ func _tick_zombies(delta: float) -> void:
 				events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": damage, "by": -zombie.id})
 				if not _alive(victim):
 					_on_player_death(victim, -zombie.id)
+	# Evaluate real survivors before luring unattended infected toward light.
+	# This prevents a campfire from delaying direct player detection.
+	if tick_count % 5 == 0 and not campfires.is_empty() and WorldCycle.is_night(time):
+		_alert_campfire_lights()
 	# Pack communication is authoritative and runs at most four times per second.
 	if tick_count % 5 == 0:
 		_alert_infected_pack(info)
