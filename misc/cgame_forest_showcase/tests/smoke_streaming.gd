@@ -117,7 +117,8 @@ func _run() -> void:
 
     observer.position.x = -39.0
     # Cell -2 has no registered scene. Grid tracking must still report -2.
-    await process_frame
+    # Explicitly advance streaming: process_frame fires before the Node process callback.
+    stream.update_streaming()
     if stream.get_observer_cell() != Vector2i(-2, 0) or last_observed_cell != Vector2i(-2, 0):
         _fail("observer transition into an unregistered cell was not reported")
         return
