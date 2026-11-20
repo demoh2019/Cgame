@@ -140,3 +140,10 @@ The cutoff is mathematically safe: the three-octave `fbm` weight sum limits `mid
 **Visual and performance QA:** compare identical camera paths through ruined towns and alongside remote bunkers on each quality preset. Watch for discontinuities around the 1.175-radius bound, especially where settlement circles overlap. Measure p50/p95/p99 GPU time and shader instructions on a representative urban world chunk; this change reduces redundant work but does not establish any particular measured FPS gain.
 
 Related: `game/tests/test_terrain_shader_lod.gd` checks the early rejection, cached noise, and conservative geometric bounds.
+
+
+### Ruined settlement patina
+
+The textured terrain now shades a subtle **moss-stained patina** on old asphalt, concrete, brick and timber (layers 9–12). It reuses existing layer weights and `mid` noise to shift albedo slightly toward green/brown aging and increase dry roughness. The treatment vanishes with the settlement paving weights and does not alter terrain geometry or gameplay.
+
+The effect adds **no texture fetches, no new fBM calls and no render passes**; it adds only a few fragment ALU instructions. Rain puddle gloss remains, and existing terrain LOD and layer-sampling budgets are unchanged. Visual-check road edges and ruins in rain/clear weather; benchmark GPU frame times rather than assuming FPS gains.
