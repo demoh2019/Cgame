@@ -360,6 +360,11 @@ static func _build_items() -> void:
 		"tier": 1, "stack": 5, "weight": 1.1, "value": 38})
 	_add_recipe("field_armor_plate", "field_armor_plate", 1,
 		{"bar_1": 1, "cloth_1": 2, "scrap": 2}, "workbench", 4.0)
+	# Classless ranged preparation, bound to one owned equipped weapon.
+	_add_item("field_sighting_kit", {"name": "Salvaged Sighting Kit", "kind": "sighting_kit",
+		"tier": 1, "stack": 5, "weight": 0.65, "value": 32})
+	_add_recipe("field_sighting_kit", "field_sighting_kit", 1,
+		{"bar_1": 1, "fiber_1": 2, "scrap": 2}, "workbench", 4.0)
 	_add_item("field_whetstone", {"name": "Salvaged Whetstone", "kind": "whetstone",
 		"tier": 1, "stack": 10, "weight": 0.35, "value": 18})
 	_add_recipe("field_whetstone", "field_whetstone", 1,
@@ -609,6 +614,13 @@ static func _build_items() -> void:
 	_add_recipe("siege_defusal_kit", "siege_defusal_kit", 1,
 		{"bar_2": 1, "scrap": 4, "cloth_2": 1, "fiber_2": 1},
 		"workbench", 5.0)
+	# One paid pre-siege brace absorbs a single hostile explosion.
+	_add_item("siege_blast_brace", {"name": "Siege Blast Brace T2",
+		"kind": "siege_brace", "tier": 2, "stack": 5,
+		"weight": 1.8, "value": 90})
+	_add_recipe("siege_blast_brace", "siege_blast_brace", 1,
+		{"bar_2": 2, "plank_2": 3, "scrap": 5, "cloth_2": 1},
+		"workbench", 7.0)
 	# Defensive disposable wire snare; only the PvE server can trigger it.
 	_add_item("infected_snare", {"name": "Infected Tripwire Snare",
 		"kind": "deployable", "tier": 1, "stack": 10, "weight": 0.9, "value": 28})

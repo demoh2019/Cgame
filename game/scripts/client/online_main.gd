@@ -844,6 +844,8 @@ func _update_prompt() -> void:
 		text += " | F4 ride bike"
 	if int(client.you.get("sharpened_hits", 0)) > 0:
 		text += " | SHARPENED: %d infected melee hits (End)" % int(client.you["sharpened_hits"])
+	if int(client.you.get("sighted_hits", 0)) > 0:
+		text += " | SIGHTED: %d infected ranged hits (Delete)" % int(client.you["sighted_hits"])
 	if int(client.you.get("plated_hits", 0)) > 0:
 		text += " | ARMOR PLATE: %d claw hits (Ins)" % int(client.you["plated_hits"])
 	if float(client.you.get("soft_sole_seconds", 0.0)) > 0.0:
@@ -887,6 +889,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_END:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					_quick_use("field_whetstone")
+			KEY_DELETE:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					_quick_use("field_sighting_kit")
 			KEY_INSERT:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					_quick_use("field_armor_plate")

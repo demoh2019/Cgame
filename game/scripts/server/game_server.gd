@@ -43,6 +43,7 @@ const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
 const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
 const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
 const CaravanEscortRewards = preload("res://scripts/shared/caravan_escort_rewards.gd")
+const NightCaravan = preload("res://scripts/shared/night_caravan.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
@@ -54,6 +55,7 @@ const Crafting = preload("res://scripts/shared/crafting.gd")
 const CraftFromStash = preload("res://scripts/shared/craft_from_stash.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
 const FieldWhetstone = preload("res://scripts/shared/field_whetstone.gd")
+const FieldSightingKit = preload("res://scripts/shared/field_sighting_kit.gd")
 const MiningWedges = preload("res://scripts/shared/mining_wedges.gd")
 const FieldArmorPlate = preload("res://scripts/shared/field_armor_plate.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
@@ -62,6 +64,7 @@ const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
 const BarricadeBallistics = preload("res://scripts/shared/barricade_ballistics.gd")
 const SiegeCharge = preload("res://scripts/shared/siege_charge.gd")
 const SiegeDefusal = preload("res://scripts/shared/siege_defusal.gd")
+const SiegeBlastBrace = preload("res://scripts/shared/siege_blast_brace.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const TrailBackpack = preload("res://scripts/shared/trail_backpack.gd")
@@ -114,6 +117,7 @@ const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const StormInsulator = preload("res://scripts/shared/storm_insulator.gd")
 const WetClothing = preload("res://scripts/shared/wet_clothing.gd")
 const WadingWetness = preload("res://scripts/shared/wading_wetness.gd")
+const WadingTravel = preload("res://scripts/shared/wading_travel.gd")
 const WindChill = preload("res://scripts/shared/wind_chill.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const SporeSampling = preload("res://scripts/shared/spore_sampling.gd")
@@ -202,6 +206,7 @@ class Player:
 	var caravan_view: Dictionary = {} # Verified route details for this private client.
 	var caravan_ambushed: bool = false # One PvE ambush per active route, persisted.
 	var caravan_defended: bool = false # All summoned attackers killed before deadline.
+	var caravan_night: Dictionary = {} # Saved server-verified night delivery progress.
 	var daily_bounty: Dictionary = {} # Account-persisted UTC daily bounty, never set by clients.
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var discovered_sites: Dictionary = {} # Personal authenticated landmark journal.
@@ -249,6 +254,8 @@ class Player:
 	var combat_energy: float = 100.0
 	var sharpened_weapon: String = "" # Prepared, owned melee weapon.
 	var sharpened_hits: int = 0 # Only confirmed ordinary infected contacts spend charges.
+	var sighted_weapon: String = "" # Prepared owned ranged weapon.
+	var sighted_hits: int = 0 # Only confirmed PvE ranged contacts spend charges.
 	var wedge_charges: int = 0 # Three server-confirmed loud T2+ mine yields; persisted.
 	var plated_armor: String = "" # Protected armor ID, tied to carried equipped item.
 	var plated_hits: int = 0 # Three paid ordinary infected-melee mitigations.
@@ -308,6 +315,7 @@ var caravan_escort_progress: Dictionary = {} # Session-only verified co-travel f
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
 var siege_charges: Dictionary = {} # Armed, paid PvP devices: transient world state only.
+var siege_braces: Dictionary = {} # Temporary one-hit barricade shields; never saved.
 var siege_last_by_wall: Dictionary = {} # Session timers only; no character persistence.
 var last_siege_time: float = -1000000.0
 var siege_waves_started: int = 0 # Server-owned structures; authenticated walls may persist.
@@ -412,6 +420,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.caravan_view = {}
 	player.caravan_ambushed = false
 	player.caravan_defended = false
+	player.caravan_night = {}
 	player.daily_bounty = DailyBounties.empty_state()
 	player.renown = 0
 	players[peer_id] = player
@@ -436,6 +445,8 @@ func character_data(player: Player) -> Dictionary:
 		player.sharpened_weapon, player.sharpened_hits, player.inventory)
 	var plate_valid: bool = FieldArmorPlate.valid_state(
 		player.plated_armor, player.plated_hits, player.inventory)
+	var sight_valid: bool = FieldSightingKit.valid_state(
+		player.sighted_weapon, player.sighted_hits, player.inventory)
 	return {
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
@@ -459,6 +470,7 @@ func character_data(player: Player) -> Dictionary:
 		"caravan": player.caravan_state.duplicate(true),
 		"caravan_ambushed": player.caravan_ambushed,
 		"caravan_defended": player.caravan_defended,
+		"caravan_night": player.caravan_night.duplicate(true),
 		"daily_bounty": player.daily_bounty.duplicate(true),
 		"renown": player.renown,
 		"discovered_sites": WorldDiscovery.to_saved(player.discovered_sites),
@@ -479,6 +491,8 @@ func character_data(player: Player) -> Dictionary:
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 		"sharpened_weapon": player.sharpened_weapon if sharp_valid else "",
 		"sharpened_hits": player.sharpened_hits if sharp_valid else 0,
+		"sighted_weapon": player.sighted_weapon if sight_valid else "",
+		"sighted_hits": player.sighted_hits if sight_valid else 0,
 		"wedge_charges": player.wedge_charges if MiningWedges.valid_state(player.wedge_charges) else 0,
 		"plated_armor": player.plated_armor if plate_valid else "",
 		"plated_hits": player.plated_hits if plate_valid else 0,
@@ -581,6 +595,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not FieldWhetstone.valid_state(data.get("sharpened_weapon", ""),
 			data.get("sharpened_hits", 0), parsed_bag["inventory"]):
 		return false
+	if not FieldSightingKit.valid_state(data.get("sighted_weapon", ""),
+			data.get("sighted_hits", 0), parsed_bag["inventory"]):
+		return false
 	if not FieldArmorPlate.valid_state(data.get("plated_armor", ""),
 			data.get("plated_hits", 0), parsed_bag["inventory"]):
 		return false
@@ -647,6 +664,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not (loaded_caravan_defended is bool) or (bool(loaded_caravan_defended) and
 			(not bool(loaded_caravan_ambushed) or caravan_view.is_empty())):
 		return false
+	var loaded_caravan_night: Variant = data.get("caravan_night", {})
+	if not NightCaravan.valid_state(loaded_caravan_night, caravan_view):
+		return false
 	var loaded_daily: Variant = data.get("daily_bounty", DailyBounties.empty_state())
 	if not DailyBounties.valid_state(loaded_daily) \
 			or int(loaded_daily["day"]) > DailyBounties.utc_day():
@@ -677,6 +697,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.caravan_view = caravan_view.duplicate(true)
 	player.caravan_ambushed = bool(loaded_caravan_ambushed)
 	player.caravan_defended = bool(loaded_caravan_defended)
+	player.caravan_night = (loaded_caravan_night as Dictionary).duplicate(true)
+	if player.caravan_night.is_empty() and not caravan_view.is_empty():
+		player.caravan_night = NightCaravan.initial(caravan_view)
 	player.daily_bounty = (loaded_daily as Dictionary).duplicate(true)
 	player.renown = int(loaded_renown)
 	player.discovered_sites = loaded_discoveries["journal"]
@@ -705,6 +728,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.meal_tier = int(data.get("meal_tier", 0))
 	player.sharpened_weapon = str(data.get("sharpened_weapon", ""))
 	player.sharpened_hits = int(data.get("sharpened_hits", 0))
+	player.sighted_weapon = str(data.get("sighted_weapon", ""))
+	player.sighted_hits = int(data.get("sighted_hits", 0))
 	player.plated_armor = str(data.get("plated_armor", ""))
 	player.plated_hits = int(data.get("plated_hits", 0))
 	player.wedge_charges = int(data.get("wedge_charges", 0))
@@ -820,6 +845,8 @@ func _spawn_player(player: Player) -> void:
 	player.threat_scan = {} # Death cannot preserve a scouting advantage.
 	player.sharpened_weapon = ""
 	player.sharpened_hits = 0
+	player.sighted_weapon = ""
+	player.sighted_hits = 0
 	player.wedge_charges = 0
 	player.plated_armor = ""
 	player.plated_hits = 0
@@ -952,7 +979,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 			# Supported weight vanishes immediately after dismount.
 			factor = BikeCargo.movement_factor(player.inventory,
 				player.skills.bonus("carry_capacity"), false)
-		var sprint_allowed: bool = sprint and not player.mounted and not player.crouching and moving and factor >= 0.9999 and player.survival.try_sprint(allowed)
+		var sprint_allowed: bool = sprint and not player.mounted and not player.crouching and moving and factor >= 0.9999 and WadingTravel.can_sprint(world, player.position) and player.survival.try_sprint(allowed)
 		player.position = Movement.step(world, player.position, {
 			"x": move_x, "z": move_z, "sprint": sprint_allowed, "mounted": player.mounted,
 			"crouch": player.crouching, "cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed"),
@@ -964,6 +991,13 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		var moved: float = Vector2(player.position.x - before_move.x, player.position.z - before_move.z).length()
 		if moved > 0.0:
 			_record_caravan_escort_move(player, moved)
+			if not player.caravan_night.is_empty() and NightCaravan.record(
+					player.caravan_night, player.caravan_view,
+					before_move, player.position, WorldCycle.is_night(time),
+					world.zone_at(player.position.x, player.position.z),
+					player.inventory.count(str(player.caravan_view.get("cargo", ""))),
+					_is_safe(player.position)):
+				player.dirty_character = true
 		if not player.recall.is_empty():
 			var origin: Vector3 = player.recall["origin"]
 			if Vector2(player.position.x, player.position.z).distance_to(
@@ -2581,6 +2615,7 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 		player.caravan_view = {}
 		player.caravan_ambushed = false
 		player.caravan_defended = false
+		player.caravan_night = {}
 		caravan_escort_progress.erase(peer_id)
 		player.dirty_character = true
 		return {"ok": true, "action": "abandon"}
@@ -2598,6 +2633,7 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 		_clear_caravan_waves(peer_id)
 		player.caravan_state = CaravanRoutes.saved_state(offer)
 		player.caravan_view = offer.duplicate(true)
+		player.caravan_night = NightCaravan.initial(player.caravan_view)
 		caravan_escort_progress.erase(peer_id)
 		player.caravan_ambushed = false
 		player.caravan_defended = false
@@ -2621,7 +2657,8 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 					player.position, member.position):
 				eligible_escorts.append(member)
 	var outcome: Dictionary = CaravanEscortRewards.settle(
-		player, eligible_escorts, player.caravan_view, player.caravan_defended)
+		player, eligible_escorts, player.caravan_view, player.caravan_defended,
+		player.caravan_night)
 	if not bool(outcome.get("ok", false)):
 		return outcome
 	caravan_escort_progress.erase(peer_id)
@@ -2630,6 +2667,7 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 	player.caravan_view = {}
 	player.caravan_ambushed = false
 	player.caravan_defended = false
+	player.caravan_night = {}
 	player.dirty_inventory = true
 	player.dirty_character = true
 	for member in eligible_escorts:
@@ -3245,6 +3283,7 @@ func cmd_dismantle(peer_id: int, id: int) -> Dictionary:
 	barricades.erase(id)
 	_acid_wall_last_hit.erase(id)
 	siege_last_by_wall.erase(id)
+	siege_braces.erase(id)
 	world_structure_revision += 1
 	world.remove_dynamic_blocker(id)
 	player.dirty_inventory = true
@@ -3265,6 +3304,7 @@ func damage_barricade(id: int, damage: float) -> bool:
 		barricades.erase(id)
 		_acid_wall_last_hit.erase(id)
 		siege_last_by_wall.erase(id)
+		siege_braces.erase(id)
 		world.remove_dynamic_blocker(id)
 		events.append({"type": "barricade_broken", "id": id})
 		return true
@@ -3467,6 +3507,27 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			player.edge_coating_weapon = player.inventory.weapon
 			player.edge_coating_seconds = AntisepticEdge.SECONDS
 			player.action = {}
+		"siege_brace":
+			if item_id != SiegeBlastBrace.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "siege_brace": true}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or 					player.skill_timer > 0.0 or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat", "siege_brace": true}
+			var preparation: Dictionary = SiegeBlastBrace.nearest(world, player,
+				barricades, siege_braces, siege_charges, time)
+			if not bool(preparation.get("ok", false)):
+				preparation["siege_brace"] = true
+				return preparation
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "siege_brace": true}
+			var wall_id: int = int(preparation["wall"])
+			siege_braces[wall_id] = time + SiegeBlastBrace.DURATION
+			player.dirty_inventory = true
+			player.dirty_character = true
+			world_structure_revision += 1
+			events.append({"type": "siege_brace_placed",
+				"x": float(preparation["x"]), "z": float(preparation["z"])})
+			return {"ok": true, "siege_brace": true, "wall": wall_id,
+				"seconds": SiegeBlastBrace.DURATION}
 		"siege_defusal":
 			if item_id != SiegeDefusal.ITEM_ID:
 				return {"ok": false, "reason": "not_usable", "defusal": true}
@@ -3626,6 +3687,21 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 				return {"ok": false, "reason": "not_carried"}
 			player.plated_armor = current_armor
 			player.plated_hits = FieldArmorPlate.HITS
+		"sighting_kit":
+			if item_id != FieldSightingKit.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var prepared_ranged: String = FieldSightingKit.ranged_weapon(player.inventory)
+			if prepared_ranged.is_empty():
+				return {"ok": false, "reason": "need_ranged"}
+			if player.attack_timer > 0.0 or player.skill_timer > 0.0 or (
+					player.combat_tag_until > time) or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			if player.sighted_hits > 0 and player.sighted_weapon == prepared_ranged:
+				return {"ok": false, "reason": "already_sighted"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.sighted_weapon = prepared_ranged
+			player.sighted_hits = FieldSightingKit.HITS
 		"whetstone":
 			if item_id != FieldWhetstone.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3756,6 +3832,8 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 				player.edge_coating_weapon = ""
 				player.sharpened_weapon = ""
 				player.sharpened_hits = 0
+				player.sighted_weapon = ""
+				player.sighted_hits = 0
 		_:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
@@ -3779,6 +3857,9 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if item_id == FieldWhetstone.ITEM_ID:
 		return {"ok": true, "weapon": player.sharpened_weapon,
 			"hits": player.sharpened_hits}
+	if item_id == FieldSightingKit.ITEM_ID:
+		return {"ok": true, "weapon": player.sighted_weapon,
+			"hits": player.sighted_hits}
 	if item_id == FieldArmorPlate.ITEM_ID:
 		return {"ok": true, "armor": player.plated_armor,
 			"hits": player.plated_hits}
@@ -4011,6 +4092,17 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		if player.sharpened_hits == 0:
 			player.sharpened_weapon = ""
 		player.dirty_character = true
+	# Apply a paid 12% bonus only after a confirmed infected ranged hit.
+	# Ammo exhaustion, misses, cover, PvP and skill attacks do not spend charges.
+	var sighted: bool = is_ranged and str(hit["kind"]) == "zombie" and (
+		FieldSightingKit.bonus_active(player.sighted_weapon,
+			player.sighted_hits, player.inventory, weapon))
+	if sighted:
+		damage *= FieldSightingKit.DAMAGE_FACTOR
+		player.sighted_hits -= 1
+		if player.sighted_hits == 0:
+			player.sighted_weapon = ""
+		player.dirty_character = true
 	if guard_counterstrike:
 		damage = GuardianRetribution.amplify(damage)
 		events.append({"type": "guardian_retribution", "peer": peer_id,
@@ -4131,13 +4223,15 @@ func _try_guardian_intercept(ally: Player, infected, raw_damage: float) -> bool:
 	damage = _infected_damage_for(chosen, damage)
 	var taken: float = _hurt_player(chosen, damage)
 	chosen.dirty_character = true
-	events.append({"type": "guardian_intercept", "peer": ally.id,
-		"by": chosen.id, "zombie": infected.id, "damage": taken})
-	# Only the confirmed, survived intercept can arm the response. The
-	# infected challenges its rescuer briefly, while the guardian earns one
-	# boosted BASIC melee swing against this exact infected within 4 seconds.
-	if _alive(chosen) and GuardianRetribution.arm(chosen, infected, parties, world):
+	# Only a guardian who survives the real interception can counter.
+	# Feed this confirmed result into the private combat notification.
+	var counter_ready: bool = _alive(chosen) and GuardianRetribution.arm(
+		chosen, infected, parties, world)
+	if counter_ready:
 		infected.force_taunt(chosen.id, GuardianRetribution.TAUNT_SECONDS)
+	events.append({"type": "guardian_intercept", "peer": ally.id,
+		"by": chosen.id, "zombie": infected.id, "damage": taken,
+		"counter_ready": counter_ready})
 	if not _alive(chosen):
 		_on_player_death(chosen, -infected.id)
 	return true
@@ -5085,10 +5179,13 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.stress_scan_seconds = 0.0
 	# A courier must survive their defense; a later respawn cannot reclaim it.
 	victim.caravan_defended = false
+	victim.caravan_night = NightCaravan.initial(victim.caravan_view)
 	victim.dirty_character = true
 	victim.action = {}
 	victim.sharpened_weapon = ""
 	victim.sharpened_hits = 0
+	victim.sighted_weapon = ""
+	victim.sighted_hits = 0
 	victim.wedge_charges = 0
 	victim.plated_armor = ""
 	victim.plated_hits = 0
@@ -5235,7 +5332,12 @@ func _tick_siege_charges() -> void:
 			continue
 		var wall_id: int = int(charge["wall"])
 		var prior_hp: float = float(barricades[wall_id]["hp"])
-		var broken: bool = damage_barricade(wall_id, SiegeCharge.DAMAGE)
+		var protection: Dictionary = SiegeBlastBrace.absorb(siege_braces,
+			wall_id, SiegeCharge.DAMAGE, time)
+		var broken: bool = damage_barricade(wall_id, float(protection["damage"]))
+		if float(protection["absorbed"]) > 0.0:
+			events.append({"type": "siege_brace_absorbed",
+				"x": x, "z": z, "raw_absorbed": float(protection["absorbed"])})
 		var hp: float = 0.0 if broken else float(barricades[wall_id]["hp"])
 		events.append({"type": "siege_charge_detonated", "id": charge_id,
 			"x": x, "z": z, "wall": wall_id, "hp": hp,
@@ -5357,6 +5459,11 @@ func _tick_players(delta: float) -> void:
 				player.sharpened_hits, player.inventory):
 			player.sharpened_weapon = ""
 			player.sharpened_hits = 0
+			player.dirty_character = true
+		if not FieldSightingKit.valid_state(player.sighted_weapon,
+				player.sighted_hits, player.inventory):
+			player.sighted_weapon = ""
+			player.sighted_hits = 0
 			player.dirty_character = true
 		if not FieldArmorPlate.valid_state(player.plated_armor,
 				player.plated_hits, player.inventory):
@@ -6605,6 +6712,7 @@ func _tick_world(delta: float) -> void:
 	for id in bags.keys():
 		if time >= float(bags[id]["expires"]):
 			bags.erase(id)
+	SiegeBlastBrace.sweep(siege_braces, barricades, time)
 
 
 ## Returns the events since the last call and forgets them.
@@ -6683,7 +6791,10 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var nearby_barricades: Array = []
 	for wall in barricades.values():
 		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
-			nearby_barricades.append(Structures.public_state(wall))
+			var public_wall: Dictionary = Structures.public_state(wall)
+			public_wall["blast_brace_seconds"] = maxf(0.0,
+				float(siege_braces.get(int(wall["id"]), time)) - time)
+			nearby_barricades.append(public_wall)
 	var nearby_campfires: Array = FieldCampfire.visible(campfires,
 			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_shelters: Array = PortableShelter.visible(shelters,
@@ -6758,6 +6869,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"party": _party_state_for(peer_id),
 			"raid_aggro": raid_aggro_state,
 			"caravan": player.caravan_view.duplicate(true),
+			"caravan_night": NightCaravan.public_state(player.caravan_view, player.caravan_night),
 			"equipment_presets": player.equipment_presets.duplicate(true),
 			"death_recovery": DeathRecovery.public_mark(bags, player, time),
 			"caravan_defended": player.caravan_defended,
@@ -6835,6 +6947,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"sharpened_hits": player.sharpened_hits if FieldWhetstone.valid_state(
 				player.sharpened_weapon, player.sharpened_hits, player.inventory) else 0,
+			"sighted_hits": player.sighted_hits if FieldSightingKit.valid_state(
+				player.sighted_weapon, player.sighted_hits, player.inventory) else 0,
 			"mining_wedge_charges": player.wedge_charges if MiningWedges.valid_state(player.wedge_charges) else 0,
 			"plated_hits": player.plated_hits if FieldArmorPlate.valid_state(
 				player.plated_armor, player.plated_hits, player.inventory) else 0,

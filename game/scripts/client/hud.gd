@@ -330,6 +330,12 @@ func _build() -> void:
 	smoke_button.tooltip_text = "Consumes 1 crafted charge. Quiet survivors are less visible; no PvP or damage protection."
 	smoke_button.pressed.connect(func() -> void: client.use_item("smoke_charge"))
 	inventory_box.add_child(smoke_button)
+	var brace_button := Button.new()
+	brace_button.name = "PrepareSiegeBlastBrace"
+	brace_button.text = "Brace nearby owned wall (one siege blast)"
+	brace_button.tooltip_text = "T2 crafted workbench kit: absorb 55% of one charge before the raid, 3m range, 180s."
+	brace_button.pressed.connect(func() -> void: client.use_item("siege_blast_brace"))
+	inventory_box.add_child(brace_button)
 	var defusal_button := Button.new()
 	defusal_button.name = "DisarmSiegeCharge"
 	defusal_button.text = "Disarm siege charge (T2 defusal kit)"
@@ -1445,6 +1451,11 @@ func _on_event(event: Dictionary) -> void:
 				float(event.get("seconds", 4.0))])
 		"siege_charge_disarmed":
 			say("SIEGE DEFUSED! A defending survivor removed the live charge.")
+		"siege_brace_placed":
+			say("SIEGE BRACE: wall prepared for one blast (180 seconds).")
+		"siege_brace_absorbed":
+			say("SIEGE BRACE BROKE! %.0f raw blast damage absorbed." % float(
+				event.get("raw_absorbed", 0.0)))
 		"siege_charge_detonated":
 			if bool(event.get("broken", false)):
 				say("SIEGE BREACH! Enemy barricade destroyed.")
@@ -1463,8 +1474,12 @@ func _on_event(event: Dictionary) -> void:
 				say("GUARDIAN COUNTERSTRIKE! +25% melee damage against the intercepted infected.")
 		"guardian_intercept":
 			if int(event.get("by", -1)) == client.peer_id:
-				say("GUARDIAN INTERCEPT: blocked infected melee for ally #%d; took %.1f damage." % [
-					int(event.get("peer", -1)), float(event.get("damage", 0.0))])
+				if bool(event.get("counter_ready", false)):
+					say("GUARDIAN INTERCEPT: saved ally #%d (%.1f damage). Counter ready for 4s: strike the same infected!" % [
+						int(event.get("peer", -1)), float(event.get("damage", 0.0))])
+				else:
+					say("GUARDIAN INTERCEPT: shielded ally #%d (%.1f damage). No counter available." % [
+						int(event.get("peer", -1)), float(event.get("damage", 0.0))])
 			elif int(event.get("peer", -1)) == client.peer_id:
 				say("GUARDIAN INTERCEPT: ally #%d took the infected hit for you!" % int(event.get("by", -1)))
 		"spit_warning":
@@ -1597,6 +1612,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Tarp anchors: " + str(data.get("reason", "rejected")) + " (kit not spent)")
 		return
+	if kind == "use" and bool(data.get("siege_brace", false)):
+		if bool(data.get("ok", false)):
+			say("Siege brace fitted: 55%% of next blast absorbed for up to %ds." % int(
+				data.get("seconds", 0)))
+		else:
+			say("Siege brace: %s (no kit spent)." % str(data.get("reason", "rejected")))
+		return
 	if kind == "use" and bool(data.get("defusal", false)):
 		if bool(data.get("ok", false)):
 			say("Siege defusal successful; one toolkit spent, wall safe.")
@@ -1699,19 +1721,20 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			match str(data.get("action", "")):
 				"accept":
 					var route: Dictionary = data.get("route", {})
-					say("NEW CARAVAN: deliver %dx %s to %s (X:%d Z:%d) for %d silver." % [
+					say("NEW CARAVAN: deliver %dx %s to %s (X:%d Z:%d) for %d silver; +20%% for verified night travel." % [
 						int(route.get("quantity", 0)), str(route.get("cargo", "")),
 						str(route.get("destination", "")), roundi(float(route.get("dst_x", 0.0))),
 						roundi(float(route.get("dst_z", 0.0))), int(route.get("silver", 0))])
 				"deliver":
 					var shares: Array = data.get("escorts", [])
 					var bonus: int = int(data.get("defense_bonus", 0))
+					var night_bonus: int = int(data.get("night_bonus", 0))
 					if shares.is_empty():
-						say("Caravan delivered: +%d silver (defense bonus +%d), Explorer XP." % [
-							int(data.get("silver", 0)), bonus])
+						say("Caravan delivered: +%d silver (defense +%d, night +%d), Explorer XP." % [
+							int(data.get("silver", 0)), bonus, night_bonus])
 					else:
-						say("Caravan delivered: +%d silver (defense +%d), paid %d escort(s) from base fare." % [
-							int(data.get("silver", 0)), bonus, shares.size()])
+						say("Caravan delivered: +%d silver (defense +%d, night +%d), paid %d escort(s) from base fare." % [
+							int(data.get("silver", 0)), bonus, night_bonus, shares.size()])
 				"abandon":
 					say("Caravan route cancelled; no goods taken.")
 		return
@@ -2189,6 +2212,14 @@ func _process(_delta: float) -> void:
 				int(job.get("silver", 0))]
 			if bool(client.you.get("caravan_defended", false)):
 				_caravan_status.text += " | DEFENDED +15% on delivery"
+			var night: Dictionary = client.you.get("caravan_night", {})
+			if not night.is_empty():
+				_caravan_status.text += " | NIGHT %d/%dm" % [
+					int(night.get("night_meters", 0)), int(night.get("required_meters", 0))]
+				if bool(night.get("qualified", false)):
+					_caravan_status.text += " (+%d silver earned)" % int(night.get("bonus_silver", 0))
+				else:
+					_caravan_status.text += " (+%d silver if completed)" % int(night.get("potential_bonus", 0))
 	_bars["health"].value = client.you["health"]
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
@@ -2460,7 +2491,7 @@ func _process(_delta: float) -> void:
 			float(wind_chill.get("speed", 0.0)), 100.0 * float(wind_chill["extra"])]
 	var wade: float = float(client.you.get("wading_depth_m", 0.0))
 	if wade > 0.0:
-		_info_label.text += "\nWADING: %.1f m deep | water soaks clothing even without rain" % wade
+		_info_label.text += "\nWADING: %.1f m deep | slowed travel; water above 0.25 m blocks sprint" % wade
 	var wet: float = float(client.you.get("wetness", 0.0))
 	if wet > 0.0:
 		_info_label.text += "\nWET CLOTHING: %d%% | cold increases exposure; dry at a campfire" % roundi(wet)

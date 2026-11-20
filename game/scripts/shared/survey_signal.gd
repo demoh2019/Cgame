@@ -17,10 +17,10 @@ static func candidate(player, parties, depleted: Dictionary, now: float) -> Dict
 		return {"ok": false, "reason": "invalid_state"}
 	if not Prospecting.active(player.prospect_mark, now, depleted):
 		return {"ok": false, "reason": "no_active_survey"}
-	var public: Dictionary = Prospecting.public_mark(player.prospect_mark, now, depleted)
-	if public.is_empty():
+	var mark_view: Dictionary = Prospecting.public_mark(player.prospect_mark, now, depleted)
+	if mark_view.is_empty():
 		return {"ok": false, "reason": "invalid_survey"}
-	var target := Vector2(float(public["x"]), float(public["z"]))
+	var target := Vector2(float(mark_view["x"]), float(mark_view["z"]))
 	if not TravelNavigation.valid_destination(target, WorldGen.WORLD_RADIUS):
 		return {"ok": false, "reason": "invalid_survey"}
 	var group_id: int = parties.group_of(player.id)
@@ -34,7 +34,7 @@ static func candidate(player, parties, depleted: Dictionary, now: float) -> Dict
 	return {"ok": true, "x": target.x, "z": target.y,
 		"node_id": int(player.prospect_mark["id"]),
 		"until": float(player.prospect_mark["until"]),
-		"material": str(public["kind"]), "tier": int(public["tier"])}
+		"material": str(mark_view["kind"]), "tier": int(mark_view["tier"])}
 
 
 ## Must be called immediately after preflight and inventory debit on the

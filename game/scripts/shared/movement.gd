@@ -10,6 +10,7 @@ const BikeTerrain = preload("res://scripts/shared/bike_terrain.gd")
 const BikeIntegrity = preload("res://scripts/shared/bike_integrity.gd")
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const StormMud = preload("res://scripts/shared/storm_mud.gd")
+const WadingTravel = preload("res://scripts/shared/wading_travel.gd")
 
 const MAX_DELTA := 0.1 # A longer step is clamped, so a lag spike cannot teleport a player.
 
@@ -42,7 +43,7 @@ static func step(world, position: Vector3, input: Dictionary, delta: float) -> V
 	# This flag is constructed on the server from a physically owned bike.
 	var bike_condition: float = float(input.get("bike_integrity", BikeIntegrity.MAX_INTEGRITY))
 	var mounted := bool(input.get("mounted", false)) and not crouching and factor >= 0.9999 and injury_factor >= 0.9999 and BikeIntegrity.can_ride(bike_condition)
-	var sprint := bool(input.get("sprint", false)) and not mounted and not crouching and factor >= 0.9999 and injury_factor >= 0.9999
+	var sprint := bool(input.get("sprint", false)) and not mounted and not crouching and factor >= 0.9999 and injury_factor >= 0.9999 and WadingTravel.can_sprint(world, position)
 	# Skill bonus to movement speed: the server supplies it from the character's skills, the client
 	# from the snapshot, so prediction matches. Capped so a forged input cannot run away.
 	var raw_bonus := float(input.get("speed_bonus", 0.0))
@@ -63,6 +64,7 @@ static func step(world, position: Vector3, input: Dictionary, delta: float) -> V
 	var weather_time: float = float(input.get("weather_time", NAN))
 	if is_finite(weather_time):
 		speed *= StormMud.factor(world, position, weather_time, mounted)
+	speed *= WadingTravel.factor(world, position, mounted)
 	speed *= StealthStance.speed_factor(crouching)
 	return move(world, position, direction, speed, delta)
 
