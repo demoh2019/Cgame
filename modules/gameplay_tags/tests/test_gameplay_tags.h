@@ -148,6 +148,16 @@ TEST_CASE("[AnimationLODController] priority budget and reversible urgent mixers
 	lod->unregister_mixer(mixer);
 	CHECK(lod->get_mixer_count() == 0);
 	CHECK_FALSE(lod->is_mixer_high_priority(mixer));
+	// A character's upper-body AnimationPlayer is a separate mixer, but
+	// only the main locomotion mixer should own skeleton modifier culling.
+	AnimationPlayer *overlay = memnew(AnimationPlayer);
+	lod->register_mixer(overlay, false);
+	CHECK(lod->get_mixer_count() == 1);
+	lod->set_mixer_high_priority(overlay, true);
+	CHECK(lod->is_mixer_high_priority(overlay));
+	lod->unregister_mixer(overlay);
+	CHECK(lod->get_mixer_count() == 0);
+	memdelete(overlay); // secondary overlay has a separate mixer but never duplicates IK ownership
 
 	memdelete(mixer);
 	memdelete(lod);
