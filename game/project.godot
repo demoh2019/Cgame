@@ -28,3 +28,8 @@ aa_weather_wetness={
 "type": "float",
 "value": 0.0
 }
+
+aa_terrain_detail_radius={
+"type": "float",
+"value": 42.0
+}
