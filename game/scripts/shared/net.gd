@@ -862,6 +862,13 @@ func c_attack(dir_x: float, dir_z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_guardian_intercept(target_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "guardian_intercept", sim.cmd_guardian_intercept(peer, target_id))
+
+
+@rpc("any_peer", "reliable")
 func c_guardian_taunt() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -1051,6 +1058,9 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"guardian_taunt":
 			return _is_nearby(event, peer)
+		"guardian_intercept":
+			# Share only with the protected ally and the real guardian.
+			return event.get("peer", -1) == peer or event.get("by", -1) == peer
 		"outpost_watch":
 			# Private outpost distress signal: no remote enemy or third-party feed.
 			return sim != null and sim.territory.watch_recipient(peer,
