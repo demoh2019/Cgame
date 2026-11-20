@@ -96,6 +96,10 @@ void chunk_height_range(const HeightField &p_field, int p_x0, int p_z0, int p_qu
 // the distance stays within 10% of its range, so chunks at a boundary do not flip every frame.
 int select_lod(real_t p_distance, real_t p_base_distance, int p_lod_count, int p_current = -1);
 
+// Resolution- and FOV-aware LOD scaling, calibrated to 720 viewport pixels.
+// The bounded factor avoids excessive distant geometry on large monitors.
+real_t screen_lod_multiplier(real_t p_view_height, real_t p_vertical_fov, real_t p_reference_fov);
+
 // Largest stride that divides the chunk and does not exceed 2^(lod_count - 1).
 int lod_stride(int p_lod, int p_quads);
 
