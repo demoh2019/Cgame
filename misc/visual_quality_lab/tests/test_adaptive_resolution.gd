@@ -20,5 +20,9 @@ func _initialize() -> void:
 	assert(is_equal_approx(scale, 1.0), "Must never exceed maximum scale")
 	scale = Adaptive.calculate_next_scale(0.80, 0.0, 60.0, 0.67, 1.0, 0.05, 0.025, 0.90, 0.985)
 	assert(is_equal_approx(scale, 0.80), "Invalid samples should not change scale")
-	print("AdaptiveResolution3D: 6 checks passed")
+	# Conservative CPU guard: do not sacrifice pixels for game-logic bottlenecks.
+	assert(Adaptive.is_cpu_bound(0.018, 60.0, 0.90), "18ms CPU frame is CPU-limited")
+	assert(not Adaptive.is_cpu_bound(0.003, 60.0, 0.90), "3ms CPU frame can be GPU-limited")
+	assert(not Adaptive.is_cpu_bound(0.0, 60.0, 0.90), "Unmeasured CPU time must not block scaling")
+	print("AdaptiveResolution3D: 9 checks passed")
 	quit(0)
