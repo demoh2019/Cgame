@@ -65,8 +65,14 @@ void fragment() {
 	// Split toning: shadows lean blue-teal, highlights lean warm gold.
 	float luma = dot(color, vec3(0.299, 0.587, 0.114));
 	vec3 toned = color + mix(shadow_tone, highlight_tone, smoothstep(0.2, 0.8, luma));
-	// A soft S-curve for a little more depth.
-	toned = mix(toned, toned * toned * (3.0 - 2.0 * toned), 0.18);
+	// Luminance-preserving filmic S-curve. Applying a separate curve to
+	// R/G/B shifts warm sunsets and foliage hues as contrast increases.
+	// Grade scene luminance once and scale RGB together: the artist's
+	// chroma stays stable, with no extra sampling or fullscreen pass.
+	float toned_luma = clamp(dot(toned, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+	float mapped_luma = toned_luma * toned_luma * (3.0 - 2.0 * toned_luma);
+	float luma_scale = mix(1.0, mapped_luma / max(toned_luma, 0.0001), 0.18);
+	toned *= luma_scale;
 	color = mix(color, toned, grade);
 	// Vignette.
 	vec2 centered = uv - vec2(0.5, focus_center);
