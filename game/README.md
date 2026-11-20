@@ -3038,3 +3038,61 @@ relogging, and clears on death/respawn. Legacy saves remain compatible.
 
 Test suite: `game/tests/test_soft_sole_wraps.gd`.
 No Godot/Cgame engine changes are required.
+
+
+## Guardian Intercept: protect a party ally from a melee strike
+
+Frontline guardians now have a second cooperative ability alongside
+infected Taunt/Brace. From the survivor party HUD, select a **real
+nearby party ally** and press **Guard ally (one PvE hit)**. The server
+verifies that the guardian is alive, not riding, in a dangerous zone,
+wearing an **owned equipped melee weapon**, and within **4.5 metres**
+and **3 metres vertically** of the living target in the same party.
+
+- A successful cast spends **20 combat energy** and arms a **9-second
+  defensive link** on the selected teammate, with a **28-second
+  cooldown**. Failed requests spend no energy and do not start a
+  cooldown. Only one active link can be held per guardian.
+- On the **next genuine infected melee hit** that would land on the
+  teammate, the server consumes one link, prevents that hit's health
+  damage and its bleeding/infection/fracture injuries on the warded
+  ally, and redirects **65% of the original hit's base damage**
+  to the guardian. The guardian's real equipped armor, combat toughness
+  and any active valid brace still reduce that redirected damage.
+  The guardian can die saving their teammate: the full normal death,
+  loot and respawn rules still apply.
+- Normal dodge immunity takes priority, so an already-dodged hit
+  does not consume a link. Ordinary melee parries proceed only if
+  the hit was not intercepted. Acid pools, spitter projectiles,
+  raid slam/cleave AoE, hunger, weather, and **player versus player**
+  damage are deliberately **not** intercepted.
+- At hit time the server **rechecks** that the guardian is still
+  living, equipped, in the same actual party and within range.
+  Switching weapons, mounting, leaving the group, death, timer
+  expiry, or disconnection invalidates the link, including across
+  peer ID reuse. Links are session-only and never persisted or
+  copied into character saves.
+- Private snapshots show remaining duration, cooldown, and the
+  local player's protected/protecting status. A successful intercept
+  emits a private event **only** to the guardian and warded ally;
+  strangers do not receive this information.
+- All hit positions and damage are computed by the real zombie
+  simulation. Clients send only their requested ally ID, not a
+  damage value, enemy ID, victim status or intercept outcome.
+
+Implementation: `scripts/shared/guardian_intercept.gd`,
+`scripts/server/game_server.gd`, `scripts/shared/net.gd`,
+`scripts/client/game_client.gd`, and `scripts/client/hud.gd`.
+`tests/test_guardian_intercept.gd` is registered in the canonical
+`tests/run_all.gd` and tests actual zombie melee simulation,
+replay protection, energy, safe-zone/range/height/weapon validation,
+one-hit settlement, authoritative countdowns, private event routing,
+party changes, death and respawn.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+This mechanic uses existing GDScript, scene UI, multiplayer RPCs and
+the server's current combat pipeline; no native engine extension
+is needed.
