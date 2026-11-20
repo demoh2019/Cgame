@@ -81,6 +81,16 @@ func current_caravan() -> Dictionary:
 	return {}
 
 
+func current_escort_caravan() -> Dictionary:
+	if sim != null:
+		if sim.players.has(actor_id):
+			return sim._party_state_for(actor_id).get("escort_caravan", {}).duplicate(true)
+		return {}
+	if client != null:
+		return client.you.get("party", {}).get("escort_caravan", {}).duplicate(true)
+	return {}
+
+
 func current_rally() -> Dictionary:
 	if sim != null:
 		return sim.parties.state_for(actor_id, sim.time).get("rally", {}).duplicate(true)
@@ -263,6 +273,9 @@ func _draw() -> void:
 	# A remote target stays visible as an edge arrow until it is reached.
 	_draw_waypoint(origin, current_caravan(), "dst_x", "dst_z",
 		Color(0.28, 0.92, 0.92))
+	# Violet points to the current party courier's verified destination.
+	_draw_waypoint(origin, current_escort_caravan(), "dst_x", "dst_z",
+		Color(0.71, 0.51, 1.0))
 	_draw_waypoint(origin, current_rally(), "x", "z",
 		Color(1.0, 0.60, 0.22))
 

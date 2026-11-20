@@ -36,6 +36,7 @@ const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
 const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
+const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
@@ -1582,6 +1583,7 @@ func _party_state_for(peer_id: int) -> Dictionary:
 			roster.append({"id": int(id), "name": member.name,
 				"alive": _alive(member), "health": member.survival.health})
 	state["roster"] = roster
+	state["escort_caravan"] = CaravanEscort.shared_route(peer_id, players, parties)
 	var invite_from: int = int(state["invite_from"])
 	var sender: Player = players.get(invite_from)
 	state["invite_name"] = sender.name if sender != null else ""
@@ -5360,7 +5362,7 @@ func _tick_caravan_ambush() -> void:
 		caravan_ambushes.append({"ids": ids,
 			"expires": time + CaravanAmbush.LIFETIME_SECONDS})
 		events.append({"type": "caravan_ambushed", "peer": player.id,
-			"count": ids.size(), "zone": world.zone_at(player.position.x,
+			"group": parties.group_of(player.id), "count": ids.size(), "zone": world.zone_at(player.position.x,
 				player.position.z)})
 		return # One encounter per check interval, not an unbounded global burst.
 

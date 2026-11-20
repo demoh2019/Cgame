@@ -1034,8 +1034,12 @@ func say(text: String) -> void:
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
 		"caravan_ambushed":
-			say("CARAVAN AMBUSH! %d infected are converging on your cargo in a full-loot zone. Defend or flee!" % [
-				int(event.get("count", 0))])
+			if int(event.get("peer", 0)) == client.peer_id:
+				say("CARAVAN AMBUSH! %d infected are converging on your cargo. Defend or flee!" % [
+					int(event.get("count", 0))])
+			else:
+				say("ESCORT ALERT! Party courier attacked by %d infected. Regroup!" % [
+					int(event.get("count", 0))])
 		"site_discovered":
 			say("DISCOVERED: %s · %d island landmarks visited! Explorer XP and renown earned." % [
 				str(event.get("name", "Unknown")), int(event.get("count", 0))])
@@ -2088,6 +2092,16 @@ func _refresh_party_controls() -> void:
 		var standard_cooldown: float = float(standard.get("cooldown", 0.0))
 		if standard_cooldown > 0.0:
 			_party_status.text += " | next in %ds" % int(ceil(standard_cooldown))
+	var escort: Dictionary = state.get("escort_caravan", {})
+	if not escort.is_empty():
+		var origin := TravelNavigation.target(client.you, "x", "z")
+		var destination := TravelNavigation.target(escort, "dst_x", "dst_z")
+		var remaining: int = TravelNavigation.distance_meters(origin, destination)
+		var compass: String = TravelNavigation.compass(origin, destination)
+		var guide := "%dm %s" % [remaining, compass] if remaining >= 0 else "unknown"
+		_party_status.text += "\nEscort %s: %dx %s to %s | %s" % [
+			str(escort.get("name", "Courier")), int(escort.get("quantity", 0)),
+			str(escort.get("cargo", "")), str(escort.get("destination", "")), guide]
 	var rally: Dictionary = state.get("rally", {})
 	if not rally.is_empty():
 		var from_position := TravelNavigation.target(client.you, "x", "z")
