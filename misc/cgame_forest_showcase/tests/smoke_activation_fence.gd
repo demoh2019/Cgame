@@ -28,14 +28,6 @@ func _wait_cell(world: WorldPartition3D, cell: Vector2i) -> Node3D:
     return null
 
 
-func _wait_activation(world: WorldPartition3D, expected: bool) -> bool:
-    for i in range(TEST_FRAMES):
-        if world.is_streaming_source_activation_ready(SOURCE) == expected:
-            return true
-        await process_frame
-    return false
-
-
 func _run() -> void:
     if not ResourceLoader.exists(PROBE_SCENE):
         _fail("activation PackedScene missing")
@@ -57,7 +49,8 @@ func _run() -> void:
     world.set_cell_scene(Vector2i(3, 0), PROBE_SCENE)
     world.set_cell_scene(Vector2i(-3, 0), PROBE_SCENE)
 
-    if await _wait_cell(world, Vector2i.ZERO) == null:
+    var home: Node3D = await _wait_cell(world, Vector2i.ZERO)
+    if home == null:
         _fail("observer cell did not load")
         return
     if world.is_cell_activation_ready(Vector2i(999, 999)):
@@ -92,7 +85,8 @@ func _run() -> void:
     if not world.is_cell_activation_ready(Vector2i(3, 0)):
         _fail("physics-frame stabilization did not complete")
         return
-    if world.get_streaming_source_activated_cell_count(SOURCE) != 1             or not is_equal_approx(world.get_streaming_source_activation_progress(SOURCE), 1.0):
+    if (world.get_streaming_source_activated_cell_count(SOURCE) != 1
+            or not is_equal_approx(world.get_streaming_source_activation_progress(SOURCE), 1.0)):
         _fail("activation progress and count were not updated")
         return
 
@@ -130,7 +124,8 @@ func _run() -> void:
         return
 
     world.remove_streaming_source(SOURCE)
-    if world.is_streaming_source_activation_ready(SOURCE)             or world.get_streaming_source_activation_progress(SOURCE) != 0.0:
+    if (world.is_streaming_source_activation_ready(SOURCE)
+            or world.get_streaming_source_activation_progress(SOURCE) != 0.0):
         _fail("removed source retained activation state")
         return
 
