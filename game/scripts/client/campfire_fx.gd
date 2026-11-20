@@ -10,6 +10,8 @@ const BASE_ENERGY := 1.6
 var light: OmniLight3D
 var _t := 0.0
 var _seed := 0.0
+var _smoke_pm: ParticleProcessMaterial
+var _wind_left := 0.0
 
 
 ## Layered-sine flicker in ~[0.75, 1.15]: cheap, smooth, never strobes.
@@ -116,9 +118,9 @@ func build(level: int, rendering_method: String) -> void:
 func _process(delta: float) -> void:
 	if light == null:
 		return
+	_update_smoke_wind(delta)
 	if "light_flicker" in light:
-		set_process(false) # The engine flickers the light natively.
-		return
+		return # The engine flickers the light natively.
 	_t += delta
 	var k := flicker(_t, _seed)
 	light.light_energy = BASE_ENERGY * k
@@ -208,6 +210,7 @@ func _add_smoke(level: int) -> void:
 	ramp.gradient = fade
 	pm.color_ramp = ramp
 	smoke.process_material = pm
+	_smoke_pm = pm
 	var puff := QuadMesh.new()
 	puff.size = Vector2(1.1, 1.1)
 	var sm := StandardMaterial3D.new()
@@ -245,3 +248,25 @@ static func _smoke_texture() -> Texture2D:
 			img.set_pixel(x, y, Color(1, 1, 1, a))
 	_smoke_tex = ImageTexture.create_from_image(img)
 	return _smoke_tex
+
+
+## Smoke drift from the shared weather wind (aa_vegetation_wind: xy direction,
+## z strength), refreshed twice a second; plumes lean further in a gale.
+static func smoke_drift(wind: Vector3) -> Vector3:
+	var dir := Vector2(wind.x, wind.y)
+	if dir.length_squared() < 1e-6:
+		return Vector3(0.0, 0.12, 0.0)
+	dir = dir.normalized() * clampf(0.15 + wind.z * 0.6, 0.15, 1.2)
+	return Vector3(dir.x, 0.12, dir.y)
+
+
+func _update_smoke_wind(delta: float) -> void:
+	if _smoke_pm == null:
+		return
+	_wind_left -= delta
+	if _wind_left > 0.0:
+		return
+	_wind_left = 0.5
+	var wind: Variant = RenderingServer.global_shader_parameter_get(&"aa_vegetation_wind")
+	if wind is Vector3:
+		_smoke_pm.gravity = _smoke_pm.gravity.lerp(smoke_drift(wind), 0.35)
