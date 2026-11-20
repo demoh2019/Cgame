@@ -304,6 +304,131 @@ Color MultiMesh::get_instance_custom_data(int p_instance) const {
 	return RenderingServer::get_singleton()->multimesh_instance_get_custom_data(multimesh, p_instance);
 }
 
+bool MultiMesh::swap_instance_data(int p_first, int p_second) {
+	ERR_FAIL_INDEX_V_MSG(p_first, instance_count, false, "First instance index is out of bounds.");
+	ERR_FAIL_INDEX_V_MSG(p_second, instance_count, false, "Second instance index is out of bounds.");
+	if (p_first == p_second) {
+		return true;
+	}
+
+	if (transform_format == TRANSFORM_3D) {
+		const Transform3D first = get_instance_transform(p_first);
+		const Transform3D second = get_instance_transform(p_second);
+		set_instance_transform(p_first, second);
+		set_instance_transform(p_second, first);
+	} else {
+		const Transform2D first = get_instance_transform_2d(p_first);
+		const Transform2D second = get_instance_transform_2d(p_second);
+		set_instance_transform_2d(p_first, second);
+		set_instance_transform_2d(p_second, first);
+	}
+
+	if (use_colors) {
+		const Color first_color = get_instance_color(p_first);
+		const Color second_color = get_instance_color(p_second);
+		set_instance_color(p_first, second_color);
+		set_instance_color(p_second, first_color);
+	}
+
+	if (use_custom_data) {
+		const Color first_data = get_instance_custom_data(p_first);
+		const Color second_data = get_instance_custom_data(p_second);
+		set_instance_custom_data(p_first, second_data);
+		set_instance_custom_data(p_second, first_data);
+	}
+
+	// Swap-removal is a teleport for both slots, not a movement to interpolate.
+	reset_instance_physics_interpolation(p_first);
+	reset_instance_physics_interpolation(p_second);
+	return true;
+}
+
+bool MultiMesh::remove_visible_instance(int p_instance) {
+	const int active_count = visible_instance_count == -1 ? instance_count : visible_instance_count;
+	ERR_FAIL_INDEX_V_MSG(p_instance, active_count, false, "Only a visible instance index can be removed.");
+
+	const int last_visible_index = active_count - 1;
+	if (p_instance != last_visible_index && !swap_instance_data(p_instance, last_visible_index)) {
+		return false;
+	}
+	// Keeps the allocated instance_count unchanged and hides the last active slot.
+	set_visible_instance_count(last_visible_index);
+	return true;
+}
+
+int MultiMesh::remove_visible_instances(const PackedInt32Array &p_instances) {
+	const int active_count = visible_instance_count == -1 ? instance_count : visible_instance_count;
+	ERR_FAIL_COND_V_MSG(p_instances.size() > active_count, -1, "Cannot remove more instances than are visible.");
+	if (p_instances.is_empty()) {
+		return 0;
+	}
+
+	// Validate the complete input BEFORE changing rendering state.
+	// Process in descending index order so every index still refers to its
+	// original visible slot at the moment it is removed.
+	PackedInt32Array sorted = p_instances;
+	sorted.sort();
+	for (int i = 0; i < sorted.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted[i], active_count, -1, "Only visible instance indices may be removed.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted[i] == sorted[i - 1], -1, "Duplicate instance indices are not allowed.");
+		}
+	}
+	for (int i = sorted.size() - 1; i >= 0; i--) {
+		if (!remove_visible_instance(sorted[i])) {
+			return -1;
+		}
+	}
+	return sorted.size();
+}
+
+int MultiMesh::activate_hidden_instances(const PackedInt32Array &p_hidden_instances) {
+	const int active_count = visible_instance_count == -1 ? instance_count : visible_instance_count;
+	ERR_FAIL_COND_V_MSG(p_hidden_instances.size() > instance_count - active_count, -1, "Cannot activate more instances than are hidden.");
+	if (p_hidden_instances.is_empty()) {
+		return 0;
+	}
+
+	// Every index refers to the ORIGINAL hidden buffer. Preflight everything
+	// before changing visibility, then activate in ascending order: each next
+	// source is still hidden after preceding activations and swaps.
+	PackedInt32Array sorted = p_hidden_instances;
+	sorted.sort();
+	for (int i = 0; i < sorted.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted[i], instance_count, -1, "Hidden instance index is out of bounds.");
+		ERR_FAIL_COND_V_MSG(sorted[i] < active_count, -1, "Already-visible instances cannot be activated.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted[i] == sorted[i - 1], -1, "Duplicate hidden instance indices are not allowed.");
+		}
+	}
+
+	for (int i = 0; i < sorted.size(); i++) {
+		if (!activate_hidden_instance(sorted[i])) {
+			return -1;
+		}
+	}
+	return sorted.size();
+}
+
+bool MultiMesh::activate_hidden_instance(int p_hidden_instance) {
+	const int active_count = visible_instance_count == -1 ? instance_count : visible_instance_count;
+	ERR_FAIL_INDEX_V_MSG(p_hidden_instance, instance_count, false, "Instance index is out of bounds.");
+	ERR_FAIL_COND_V_MSG(p_hidden_instance < active_count, false, "Only hidden instances can be activated.");
+
+	if (p_hidden_instance != active_count) {
+		if (!swap_instance_data(p_hidden_instance, active_count)) {
+			return false;
+		}
+	} else {
+		// Newly visible instances should not interpolate from a stale transform.
+		reset_instance_physics_interpolation(active_count);
+	}
+	// The allocated buffer remains unchanged. A fully visible buffer has no
+	// hidden instance to activate; this is caught by the visible-prefix guard.
+	set_visible_instance_count(active_count + 1);
+	return true;
+}
+
 void MultiMesh::reset_instance_physics_interpolation(int p_instance) {
 	ERR_FAIL_INDEX_MSG(p_instance, instance_count, "Instance index out of bounds. Instance index must be less than `instance_count` and greater than or equal to zero.");
 	RenderingServer::get_singleton()->multimesh_instance_reset_physics_interpolation(multimesh, p_instance);
@@ -386,6 +511,11 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_instance_color", "instance"), &MultiMesh::get_instance_color);
 	ClassDB::bind_method(D_METHOD("set_instance_custom_data", "instance", "custom_data"), &MultiMesh::set_instance_custom_data);
 	ClassDB::bind_method(D_METHOD("get_instance_custom_data", "instance"), &MultiMesh::get_instance_custom_data);
+	ClassDB::bind_method(D_METHOD("swap_instance_data", "first", "second"), &MultiMesh::swap_instance_data);
+	ClassDB::bind_method(D_METHOD("remove_visible_instance", "instance"), &MultiMesh::remove_visible_instance);
+	ClassDB::bind_method(D_METHOD("remove_visible_instances", "instances"), &MultiMesh::remove_visible_instances);
+	ClassDB::bind_method(D_METHOD("activate_hidden_instance", "hidden_instance"), &MultiMesh::activate_hidden_instance);
+	ClassDB::bind_method(D_METHOD("activate_hidden_instances", "hidden_instances"), &MultiMesh::activate_hidden_instances);
 	ClassDB::bind_method(D_METHOD("reset_instance_physics_interpolation", "instance"), &MultiMesh::reset_instance_physics_interpolation);
 	ClassDB::bind_method(D_METHOD("reset_instances_physics_interpolation"), &MultiMesh::reset_instances_physics_interpolation);
 	ClassDB::bind_method(D_METHOD("set_custom_aabb", "aabb"), &MultiMesh::set_custom_aabb);

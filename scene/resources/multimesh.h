@@ -115,6 +115,17 @@ public:
 	void set_instance_custom_data(int p_instance, const Color &p_custom_data);
 	Color get_instance_custom_data(int p_instance) const;
 
+	// Swap transforms, colors and custom shader data without changing instance count.
+	bool swap_instance_data(int p_first, int p_second);
+	// Swap-remove from visible prefix while preserving full per-instance payload.
+	bool remove_visible_instance(int p_instance);
+	// Atomically validate a set of visible indices, then swap-remove in descending order.
+	int remove_visible_instances(const PackedInt32Array &p_instances);
+	// Swap a hidden slot into the end of the visible prefix and reveal it.
+	bool activate_hidden_instance(int p_hidden_instance);
+	// Validate and activate original hidden indices in ascending order, preserving payloads.
+	int activate_hidden_instances(const PackedInt32Array &p_hidden_instances);
+
 	void reset_instance_physics_interpolation(int p_instance);
 	void reset_instances_physics_interpolation();
 
