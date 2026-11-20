@@ -91,13 +91,15 @@ func run(t) -> void:
 	t.eq(sim.cmd_craft(p.id, "boiled_water").get("reason", ""), "no_station",
 		"remote wilderness crafting cannot boil water at a cold spot")
 	t.eq(p.inventory.count("murky_water"), 1, "cold crafting does not waste water")
+	var clean_before: int = p.inventory.count("water_bottle")
 	sim.campfires[991] = {"id": 991, "x": shore.x, "y": shore.y, "z": shore.z,
 		"expires": sim.time + 60.0}
 	t.check(sim.cmd_craft(p.id, "boiled_water").get("ok", false),
 		"server accepts the recipe while an active fire is actually nearby")
 	t.eq(p.inventory.count("murky_water"), 0, "boiling consumes unboiled water")
 	t.eq(p.inventory.count("wood_1"), 0, "boiling consumes one fuel wood")
-	t.eq(p.inventory.count("water_bottle"), 1, "one standard safe water bottle produced")
+	t.eq(p.inventory.count("water_bottle"), clean_before + 1,
+		"one additional standard water bottle is produced")
 	p.survival.infection = 0.0
 	t.check(sim.cmd_use(p.id, "water_bottle").get("ok", false),
 		"boiled water can be used through the existing drink action")
