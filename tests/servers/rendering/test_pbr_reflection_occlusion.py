@@ -81,6 +81,8 @@ class NativePBRReflectionsTests(unittest.TestCase):
         end = source.index("#endif // BENT_NORMAL_MAP_USED", start)
         no_bent_normal = source[start:end]
         self.assertIn("if (ao < 0.999)", no_bent_normal)
+        self.assertIn("float specular_occlusion = visibility;", no_bent_normal)
+        self.assertIn("if (roughness < 0.55)", no_bent_normal)
         self.assertIn("float NoV = clamp(dot(normal, view), 0.0, 1.0);", no_bent_normal)
         self.assertIn("float visibility = clamp(ao, 0.0, 1.0);", no_bent_normal)
         self.assertIn("exp2(-16.0 * clamp(roughness, 0.0, 1.0) - 1.0)", no_bent_normal)
@@ -107,6 +109,20 @@ class NativePBRReflectionsTests(unittest.TestCase):
                 grazing = lagarde_specular_ao(0.02, ao, roughness)
                 head_on = lagarde_specular_ao(0.95, ao, roughness)
                 self.assertLessEqual(grazing, head_on)
+
+    def test_rough_surface_fast_path_matches_lagarde_within_visual_tolerance(self):
+        # The exponent is <= 0.00112 for roughness >= .55. This shortcut
+        # avoids pow/exp2 on dry terrain and foliage without losing
+        # visually meaningful specular reflection visibility.
+        max_error = 0.0
+        for roughness in (0.55, 0.6, 0.75, 0.9, 1.0):
+            for ao_int in range(1000):
+                ao = ao_int / 1000.0
+                for no_v in (0.0, 0.02, 0.1, 0.4, 0.7, 1.0):
+                    exact = lagarde_specular_ao(no_v, ao, roughness)
+                    approx = ao if ao < 0.999 else 1.0
+                    max_error = max(max_error, abs(exact - approx))
+        self.assertLessEqual(max_error, 0.0065)
 
     def test_native_shader_keeps_specular_ao_after_reflection_probe_blending(self):
         source = self.source
