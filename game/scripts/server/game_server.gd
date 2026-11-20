@@ -5214,7 +5214,9 @@ func _trigger_ruin_ambush(player: Player, crate: Dictionary, lockpicked: bool) -
 		enemy.receive_pack_alert(player.id, targets)
 		zombies[enemy_id] = enemy
 		ids.append(enemy_id)
-	ruin_ambushes.append({"ids": ids, "expires": time + RuinAmbush.LIFETIME_SECONDS})
+	ruin_ambushes.append({"ids": ids, "defeated": [], "cleared": false,
+		"owner": player.id, "group": parties.group_of(player.id),
+		"expires": time + RuinAmbush.LIFETIME_SECONDS})
 	next_ruin_ambush_at = time + RuinAmbush.COOLDOWN_SECONDS
 	events.append({"type": "ruin_ambush", "peer": player.id,
 		"group": parties.group_of(player.id), "count": ids.size(), "tier": zone + 1})
@@ -5679,6 +5681,16 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 			courier.caravan_defended = true
 			courier.dirty_character = true
 			events.append({"type": "caravan_defended", "peer": courier.id})
+		break
+	# Completion is awarded only for real zombie deaths, never for expiry or
+	# missing mobs. No free crate rewards or separate repeatable loot.
+	for wave in ruin_ambushes:
+		if time >= float(wave["expires"]) or not RuinAmbush.record_kill(wave, zombie.id):
+			continue
+		events.append({"type": "ruin_ambush_cleared",
+			"peer": int(wave.get("owner", -1)),
+			"group": int(wave.get("group", 0)),
+			"count": wave["ids"].size()})
 		break
 	var zone: int = world.zone_at(zombie.position.x, zombie.position.z)
 	var loot_rng := RandomNumberGenerator.new()
