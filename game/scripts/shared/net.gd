@@ -745,6 +745,13 @@ func c_loot(entity_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_refill_canteen() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "refill_canteen", sim.cmd_refill_canteen(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_drink() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

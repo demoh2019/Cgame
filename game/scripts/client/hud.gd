@@ -257,6 +257,12 @@ func _build() -> void:
 	alkali_button.tooltip_text = "Clears lingering spitter acid within 5.5 m, not the initial splash."
 	alkali_button.pressed.connect(func() -> void: client.use_item("field_alkali_kit"))
 	inventory_box.add_child(alkali_button)
+	var canteen_button := Button.new()
+	canteen_button.name = "RefillFieldCanteen"
+	canteen_button.text = "Refill canteen at shore (1 filter -> 1 clean water)"
+	canteen_button.tooltip_text = "Requires a crafted canteen, one carbon filter and the shared lake cooldown."
+	canteen_button.pressed.connect(func() -> void: client.refill_canteen())
+	inventory_box.add_child(canteen_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -1070,6 +1076,12 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Campfire lit: shared warmth for 5 minutes.")
 		else:
 			say("Campfire: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "refill_canteen":
+		if bool(data.get("ok", false)):
+			say("Canteen filled: +1 clean water bottle, -1 filter (12s shore cooldown).")
+		else:
+			say("Canteen: " + str(data.get("reason", "denied")))
 		return
 	if kind == "drink":
 		if bool(data.get("ok", false)):

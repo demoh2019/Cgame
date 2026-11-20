@@ -411,6 +411,10 @@ func repair(id: int) -> void:
 	net.c_repair.rpc_id(1, id)
 
 
+func refill_canteen() -> void:
+	net.c_refill_canteen.rpc_id(1)
+
+
 func place_infected_snare(point: Vector2) -> void:
 	if point.is_finite():
 		net.c_place_infected_snare.rpc_id(1, point.x, point.y)

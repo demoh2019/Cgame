@@ -69,6 +69,7 @@ const Fishing = preload("res://scripts/shared/fishing.gd")
 const FishingBait = preload("res://scripts/shared/fishing_bait.gd")
 const StormFishing = preload("res://scripts/shared/storm_fishing.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
+const FieldCanteen = preload("res://scripts/shared/field_canteen.gd")
 const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const PartyFeast = preload("res://scripts/shared/party_feast.gd")
@@ -2195,7 +2196,29 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 
 
 ## Lake water hydrates but can infect: clean bottles remain a risk-free alternative.
-## Filtration is item-paid, never a free client flag; no refill or cure is forged.
+## Filtration is item-paid, never a free client flag or cure.
+## Bottle clean water at an actual shore; the canteen stays in inventory,
+## while a real filter is spent only after an atomic slot-capacity check.
+## Shares the persisted lake-water cooldown to prevent alternating/refill spam
+## and reconnect bypass. Clients cannot choose bottles, count or freshness.
+func cmd_refill_canteen(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.lake_drink_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown", "remaining": player.lake_drink_cooldown}
+	if not FieldWater.can_access_lake(world, player.position):
+		return {"ok": false, "reason": "no_water"}
+	var result: String = FieldCanteen.fill(player.inventory)
+	if result != "":
+		return {"ok": false, "reason": result}
+	player.lake_drink_cooldown = FieldWater.COOLDOWN_SECONDS
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "item": FieldCanteen.OUTPUT_ITEM, "count": 1,
+		"cooldown": player.lake_drink_cooldown}
+
+
 func cmd_drink_water(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
