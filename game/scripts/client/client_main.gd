@@ -20,6 +20,7 @@ const GameServer = preload("res://scripts/server/game_server.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
+const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
@@ -1059,6 +1060,11 @@ func _update_hud() -> void:
 		_stats.text += "\nNIGHT HORDE: %d infected remaining; %ds left to clear" % [
 			remain, ceili(maxf(0.0, float(sim.night_horde["expires"]) - sim.time))]
 	_stats.text += "\nCARTOGRAPHY: %d island landmarks visited" % survivor.discovered_sites.size()
+	var nearby_offer: Dictionary = RegionalTrade.public_offer(world, position)
+	if not nearby_offer.is_empty():
+		_stats.text += "\nREGIONAL TRADE: %s buys %s +%d%%" % [
+			str(nearby_offer["name"]), str(nearby_offer["category"]),
+			int(nearby_offer["premium_percent"])]
 	var equipped_ammo: String = str(Defs.item(survivor.inventory.weapon).get("ammo", ""))
 	if not equipped_ammo.is_empty():
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [

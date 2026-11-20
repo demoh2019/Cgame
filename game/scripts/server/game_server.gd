@@ -8,6 +8,7 @@ const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
+const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const CombatLogout = preload("res://scripts/shared/combat_logout.gd")
 const TrainingDuel = preload("res://scripts/shared/training_duel.gd")
@@ -1919,11 +1920,19 @@ func cmd_vendor(peer_id: int, item_id: String, quantity: int, buy: bool) -> Dict
 	var location := Vector2(player.position.x, player.position.z)
 	if not location.is_finite() or not _at_workbench(location):
 		return {"ok": false, "reason": "no_station"}
+	# The quote depends only on the real server player position and
+	# deterministic settlement identity. A client cannot name a town or rate.
+	var offer: Dictionary = RegionalTrade.local_offer(world, player.position)
+	var quoted_unit: int = RegionalTrade.sell_price(item_id, offer) if not buy else 0
 	var outcome: Dictionary = Vendor.transact(player.inventory, item_id, quantity, buy,
-		player.renown, player.pvp_infamy)
+		player.renown, player.pvp_infamy, quoted_unit if not buy else 0)
 	if outcome.get("ok", false):
 		player.dirty_inventory = true
 		player.dirty_character = true
+		if not buy and not offer.is_empty() and \
+				str(offer["category"]) == RegionalTrade.category(item_id):
+			outcome["regional_bonus"] = int(outcome["unit_price"]) - int(Vendor.SELL_PRICES[item_id])
+			outcome["settlement"] = str(offer["name"])
 	return outcome
 
 
@@ -4779,6 +4788,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 
 			"renown_rank": Reputation.title(player.renown),
 			"vendor_discount": Reputation.discount_percent(player.renown),
+			"regional_trade": RegionalTrade.public_offer(world, player.position),
 			"renown_next": Reputation.next_threshold(player.renown),
 			"carry_kg": player.inventory.total_weight(),
 			"cargo_factor": player.inventory.movement_factor(player.skills.bonus("carry_capacity")),

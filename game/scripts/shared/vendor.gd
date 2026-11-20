@@ -73,13 +73,21 @@ static func first_sellable(carried) -> String:
 
 
 static func transact(carried, item_id: String, quantity: int, buy: bool,
-		renown: int = 0, infamy: float = 0.0) -> Dictionary:
+		renown: int = 0, infamy: float = 0.0, sell_quote: int = 0) -> Dictionary:
 	if quantity < 1 or quantity > MAX_QUANTITY:
 		return {"ok": false, "reason": "invalid_quantity"}
 	var prices: Dictionary = BUY_PRICES if buy else SELL_PRICES
 	var unit_price: int = int(prices.get(item_id, 0))
 	if unit_price < 1:
 		return {"ok": false, "reason": "not_traded"}
+	# Settlement demand is server-calculated and can only raise the payout
+	# for existing sellable resources by at most 75 percent.
+	if buy and sell_quote != 0:
+		return {"ok": false, "reason": "invalid_quote"}
+	if not buy and sell_quote != 0:
+		if sell_quote < unit_price or sell_quote > ceili(float(unit_price) * 1.75):
+			return {"ok": false, "reason": "invalid_quote"}
+		unit_price = sell_quote
 	# Apply server-owned renown discount before outlaw penalty. Prices are
 	# per-unit, independent of order splitting, and trades stay atomic.
 	if not PvpInfamy.valid(infamy):

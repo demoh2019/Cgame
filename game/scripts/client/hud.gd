@@ -1372,6 +1372,9 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				"Bought" if data.get("buy", false) else "Sold",
 				int(data.get("quantity", 0)), str(data.get("item", "")),
 				int(data.get("silver_delta", 0))])
+			if int(data.get("regional_bonus", 0)) > 0:
+				say("Regional demand at %s: +%d silver per resource!" % [
+					str(data.get("settlement", "trader")), int(data["regional_bonus"])])
 		else:
 			var messages := {
 				"no_station": "Vendor: find a workbench (hub or village)",
@@ -1518,6 +1521,11 @@ func _process(_delta: float) -> void:
 		str(client.you.get("renown_rank", "Newcomer")),
 		int(client.you.get("renown", 0)), int(client.you.get("renown_next", 40)),
 		int(client.you.get("vendor_discount", 0))]
+	var regional_offer: Dictionary = client.you.get("regional_trade", {})
+	if not regional_offer.is_empty():
+		_info_label.text += "\nLOCAL TRADE: %s buys %s for +%d%% (raw resource sales)" % [
+			str(regional_offer["name"]), str(regional_offer["category"]).capitalize(),
+			int(regional_offer["premium_percent"])]
 	var mask_seconds: float = float(client.you.get("scent_mask_seconds", 0.0))
 	if mask_seconds > 0.0:
 		_info_label.text += "\nSCENT MASK: %.0fs remaining (vision and hearing unchanged)" % mask_seconds

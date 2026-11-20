@@ -5,6 +5,7 @@ extends Control
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
+const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
 
 const PIXELS := 256
 const SPAN := WorldGen.WORLD_RADIUS * 2.0 + 200.0
@@ -156,8 +157,14 @@ func _draw() -> void:
 			"workbench and trader   " if bool(_hover["station"]) else "",
 			"%d m away" % int(distance),
 			"VISITED" if visited.has(int(_hover["id"])) else "UNEXPLORED"]]
-		var box := Rect2(mouse + Vector2(16, 12), Vector2(260, 46))
+		var market: Dictionary = RegionalTrade.offer_for_site(_hover)
+		var box := Rect2(mouse + Vector2(16, 12), Vector2(295, 64 if not market.is_empty() else 46))
 		draw_rect(box, Color(0.04, 0.05, 0.08, 0.95))
 		draw_rect(box, Color(0.95, 0.78, 0.35, 0.8), false, 1.5)
 		draw_string(font, box.position + Vector2(10, 19), lines[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
 		draw_string(font, box.position + Vector2(10, 38), lines[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.8, 0.85, 0.95))
+		if not market.is_empty():
+			draw_string(font, box.position + Vector2(10, 55),
+				"Trade demand: %s +%d%%" % [str(market["category"]).capitalize(),
+					int(market["premium_percent"])], HORIZONTAL_ALIGNMENT_LEFT, -1, 12,
+				Color(1.0, 0.9, 0.5))
