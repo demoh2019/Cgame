@@ -67,8 +67,16 @@ func run(t) -> void:
 		"screen edge distortion is safely bounded")
 	t.check(code.contains("textureLod(scene_color_tex"),
 		"screen color is actually refracted")
-	t.check(code.contains("EMISSION += refracted_rgb * refraction_mix"),
-		"already-lit scene color is not lit twice")
+	t.check(code.contains("refraction_delta = refracted_scene - straight_scene")
+		and code.contains("transmission_weight"),
+		"refracted and straight scene samples form only a transmission difference")
+	t.check(code.contains("EMISSION += refraction_delta * transmission_weight"),
+		"the already-lit background delta is composed without double lighting")
+	t.check(not code.contains("EMISSION += refracted_rgb * refraction_mix")
+		and not code.contains("ALBEDO *= 1.0 - 0.66 * refraction_mix"),
+		"absolute scene emission and fake surface dimming are removed")
+	t.check(not code.contains("ALPHA = clamp(ALPHA + refraction_mix"),
+		"refraction preserves water opacity and Fresnel")
 	t.check(code.contains("spectral_transmission") and
 		code.contains("storm_whitecaps") and code.contains("shore_glimmer"),
 		"old physical absorption, storm wave foam and caustics preserved")

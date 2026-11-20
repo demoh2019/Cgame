@@ -144,7 +144,10 @@ void fragment() {
 	// clipped geometry, depth discontinuities and screen edges fade to base
 	// water instead of creating the halos typical of naïve refraction.
 	float refraction_mix = 0.0;
-	vec3 refracted_rgb = vec3(0.0);
+	// Difference between warped and straight opaque scene color. Never add
+	// the absolute scene color: that would double-count transmission and
+	// make shorelines look unnaturally emissive.
+	vec3 refraction_delta = vec3(0.0);
 	if (refraction_strength > 0.001 && thickness > 0.08 && thickness < 3.8) {
 		float near_fade = 1.0 - smoothstep(refraction_fade_start,
 			refraction_fade_end, distance(p, CAMERA_POSITION_WORLD.xz));
@@ -180,8 +183,11 @@ void fragment() {
 					* edge_guard * depth_guard * shallow_guard
 					* sqrt(transmission);
 				if (refraction_mix > 0.001) {
-					refracted_rgb = textureLod(scene_color_tex,
+					vec3 refracted_scene = textureLod(scene_color_tex,
 						refracted_uv, 0.0).rgb;
+					vec3 straight_scene = textureLod(scene_color_tex,
+						SCREEN_UV, 0.0).rgb;
+					refraction_delta = refracted_scene - straight_scene;
 				}
 			}
 		}
@@ -194,12 +200,8 @@ void fragment() {
 	float fresnel = 0.02 + 0.98 * pow(1.0 - ndotv, 5.0);
 	ALBEDO = color;
 	ALPHA = clamp(mix(0.28, 0.93, smoothstep(0.0, 2.5, thickness)) + foam * 0.5 + fresnel * 0.25, 0.0, 1.0);
-#ifdef WATER_REFRACTION
-	// The captured scene has already been lit. Refract it as transmission
-	// through EMISSION, rather than applying a second light calculation.
-	ALBEDO *= 1.0 - 0.66 * refraction_mix;
-	ALPHA = clamp(ALPHA + refraction_mix * 0.20, 0.0, 1.0);
-#endif
+	// Preserve the base physical water opacity and sky/foam lighting.
+	// Only the background contribution should bend through refraction.
 	ROUGHNESS = mix(0.06 + storm * 0.05, 0.4 + storm * 0.05, foam);
 	SPECULAR = 0.7;
 	METALLIC = 0.0;
@@ -208,6 +210,11 @@ void fragment() {
 		+ vec3(0.015, 0.025, 0.028) * crest * (1.0 - foam)
 		+ vec3(0.07, 0.13, 0.12) * shore_glimmer;
 #ifdef WATER_REFRACTION
-	EMISSION += refracted_rgb * refraction_mix * 0.75;
+	// Source alpha blending is: lit_water * ALPHA + scene * (1 - ALPHA).
+	// Add only the changed, already-lit transmitted background. Dividing by
+	// alpha compensates for how Godot blends the water fragment, ensuring
+	// the original scene is not counted twice and the surface does not glow.
+	float transmission_weight = refraction_mix * (1.0 - ALPHA) / max(ALPHA, 0.20);
+	EMISSION += refraction_delta * transmission_weight;
 #endif
 }
