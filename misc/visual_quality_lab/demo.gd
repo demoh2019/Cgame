@@ -4,14 +4,14 @@ const ResolutionController = preload("res://addons/visual_quality/adaptive_resol
 const FilmicSky = preload("res://addons/visual_quality/filmic_sky.gdshader")
 const QualityManager = preload("res://addons/visual_quality/quality_manager.gd")
 const AtmosphereController = preload("res://addons/visual_quality/atmosphere_controller.gd")
-const ChunkedFoliage = preload("res://addons/visual_quality/foliage_chunks.gd")
+const WorldStreamer = preload("res://addons/visual_quality/world_streamer.gd")
 const CharacterController = preload("res://addons/visual_quality/character_controller.gd")
 const ExplorationQuest = preload("res://addons/visual_quality/exploration_quest.gd")
 
 var controller: AdaptiveResolution3D
 var manager: VisualQualityManager
 var atmosphere: AtmosphereController3D
-var foliage: ChunkedFoliage3D
+var streamer: WorldStreamer3D
 var player_character: VisualLabCharacter3D
 var movement_label: Label
 var quest: ExplorationQuest3D
@@ -42,10 +42,19 @@ func _ready() -> void:
 	manager.settings_changed.connect(_update_graphics_ui)
 	manager.settings_changed.connect(_update_foliage_quality)
 	add_child(manager)
-	foliage = ChunkedFoliage.new()
-	foliage.name = "ChunkedFoliage3D"
-	add_child(foliage)
-	foliage.set_quality(manager.current_profile)
+	streamer = WorldStreamer.new()
+	streamer.name = "WorldStreamer3D"
+	streamer.cell_size = 14.0
+	streamer.source = player_character
+	streamer.streaming_enabled = false
+	streamer.cell_loaded.connect(_on_streamed_cell_loaded)
+	# Each forest section is a reusable PackedScene, not a permanent world node.
+	for z in range(-3, 4):
+		for x in range(-3, 4):
+			streamer.register_scene_cell(Vector2i(x, z), "res://world/forest_cell.tscn")
+	add_child(streamer)
+	streamer.streaming_enabled = true
+	streamer.set_quality_profile(manager.current_profile)
 	_build_graphics_ui()
 	_update_graphics_ui(manager.current_profile, manager.adaptive_enabled)
 	atmosphere = AtmosphereController.new()
@@ -72,15 +81,25 @@ func _ready() -> void:
 
 
 func _update_foliage_quality(profile: int, _adaptive: bool) -> void:
-	if is_instance_valid(foliage):
-		foliage.set_quality(profile)
+	if is_instance_valid(streamer):
+		for cell in streamer.get_active_cells():
+			if cell.has_method("set_quality"):
+				cell.call("set_quality", profile)
+		streamer.set_quality_profile(profile)
+
+
+func _on_streamed_cell_loaded(_coord: Vector2i, cell: Node3D) -> void:
+	if cell.has_method("set_quality"):
+		cell.call("set_quality", manager.current_profile)
 
 
 func _process(delta: float) -> void:
 	if status_label != null:
-		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Space jump | Shift sprint | RMB look | V fly" % [
+		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Space jump | Shift sprint | RMB look | V fly\nWorld cells: %d/%d | Pending assets: %d | 7 Streaming: %s" % [
 			Engine.get_frames_per_second(), get_viewport().scaling_3d_scale,
-			RenderingServer.get_current_rendering_method()
+			RenderingServer.get_current_rendering_method(),
+			streamer.active_cell_count(), streamer.registered_cell_count(),
+			streamer.pending_asset_count(), "ON" if streamer.streaming_enabled else "OFF"
 		]
 
 
@@ -101,6 +120,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_toggle_cycle()
 			KEY_R:
 				_reset_quest()
+			KEY_7:
+				streamer.streaming_enabled = not streamer.streaming_enabled
 
 
 func _build_graphics_ui() -> void:
@@ -264,7 +285,7 @@ func _build_world() -> void:
 	static_ground.name = "GroundCollision"
 	var ground_collision: CollisionShape3D = CollisionShape3D.new()
 	var ground_box: BoxShape3D = BoxShape3D.new()
-	ground_box.size = Vector3(85.0, 0.4, 85.0)
+	ground_box.size = Vector3(112.0, 0.4, 112.0)
 	ground_collision.shape = ground_box
 	static_ground.position.y = -0.2
 	static_ground.add_child(ground_collision)
@@ -272,7 +293,7 @@ func _build_world() -> void:
 
 	var floor: MeshInstance3D = MeshInstance3D.new()
 	var plane: PlaneMesh = PlaneMesh.new()
-	plane.size = Vector2(85, 85)
+	plane.size = Vector2(112, 112)
 	floor.mesh = plane
 	var floor_material: StandardMaterial3D = StandardMaterial3D.new()
 	floor_material.albedo_color = Color(0.15, 0.22, 0.24)
