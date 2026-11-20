@@ -34,6 +34,10 @@ static func apply(material: ShaderMaterial, profile: Dictionary,
 		# from the Performance/Balanced/Compatibility source after preprocessing.
 		material.set_shader_parameter("wind_anisotropy_strength",
 			clampf(float(profile.get("water_anisotropy_strength", 0.0)), 0.0, 0.45))
+		# Foam cost is entirely inside the premium Forward+ shader and
+		# close to the camera. Low renderer variants do not declare it.
+		material.set_shader_parameter("wind_foam_strength",
+			clampf(float(profile.get("wind_foam_strength", 0.0)), 0.0, 0.5))
 		material.set_shader_parameter("refraction_strength",
 			clampf(float(profile.get("water_refraction_strength", 0.0)), 0.0, 1.0))
 		material.set_shader_parameter("refraction_fade_start",
