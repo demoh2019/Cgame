@@ -31,3 +31,17 @@ func run(t) -> void:
 		"fallback painted material renders identical geometry")
 	t.check((Quality as Script).source_code.contains("ChunkView.apply_terrain_geomorph"),
 		"graphics settings reconfigure live chunks without a scene reload")
+
+
+	t.current = "projected terrain shape-error controls per quality preset"
+	var source: String = (ChunkView as Script).source_code
+	t.check(source.contains("terrain.max_lod_pixel_error = terrain_max_lod_pixel_error"),
+		"already-streamed terrain receives native error limit")
+	t.check(source.contains("_terrain.max_lod_pixel_error = terrain_max_lod_pixel_error"),
+		"newly streamed terrain receives native error limit")
+	for tier in 4:
+		ChunkView.configure_terrain_geomorph(tier)
+		t.eq(ChunkView.terrain_max_lod_pixel_error,
+			[0.0, 0.0, 3.0, 1.5][tier],
+			"Performance/Balanced keep legacy LOD while High/Ultra protect rocky silhouettes")
+	ChunkView.configure_terrain_geomorph(1)
