@@ -797,6 +797,17 @@ func _build() -> void:
 	guardian_button.tooltip_text = "Melee weapon, party, 25 combat energy, 20s cooldown; defend nearby allies"
 	guardian_button.pressed.connect(func() -> void: client.guardian_taunt())
 	inventory_box.add_child(guardian_button)
+	var intercept_button := Button.new()
+	intercept_button.name = "GuardianIntercept"
+	intercept_button.text = "Guard ally (one PvE hit)"
+	intercept_button.tooltip_text = "Melee guardian: choose a party ally above (within 4.5m). Spend 20 energy to block their next infected melee hit for up to 9s; 28s cooldown. Not PvP/AoE/acid."
+	intercept_button.pressed.connect(func() -> void:
+		var target_id: int = _party_target.get_selected_id()
+		if target_id < 0:
+			say("Guardian: choose a nearby party ally first.")
+		else:
+			client.guardian_intercept(target_id))
+	inventory_box.add_child(intercept_button)
 	var parry_button := Button.new()
 	parry_button.name = "MeleeParry"
 	parry_button.text = "Parry incoming infected (F8)"
@@ -1373,6 +1384,12 @@ func _on_event(event: Dictionary) -> void:
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
 		"guardian_taunt":
 			say("Frontline guardian draws %d infected away from teammates!" % int(event.get("count", 0)))
+		"guardian_intercept":
+			if int(event.get("by", -1)) == client.peer_id:
+				say("GUARDIAN INTERCEPT: blocked infected melee for ally #%d; took %.1f damage." % [
+					int(event.get("peer", -1)), float(event.get("damage", 0.0))])
+			elif int(event.get("peer", -1)) == client.peer_id:
+				say("GUARDIAN INTERCEPT: ally #%d took the infected hit for you!" % int(event.get("by", -1)))
 		"spit_warning":
 			say("ACID SPIT! Leave the green circle before it lands.")
 		"spit_impact":
@@ -1726,6 +1743,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		say("Decoy deployed: nearby idle infected investigate the sound." if bool(data.get("ok", false)) else
 				"Decoy denied: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "guardian_intercept":
+		if bool(data.get("ok", false)):
+			say("GUARD LINK: ally #%d guarded for %.0fs, next melee hit only." % [
+				int(data.get("target", 0)), float(data.get("seconds", 0.0))])
+		else:
+			say("Guardian intercept: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "guardian_taunt":
 		if bool(data.get("ok", false)):
 			say("Guardian: drew %d infected; defensive brace for 3 seconds (-30%% infected damage)." % int(data.get("count", 0)))
@@ -2062,6 +2086,17 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	var intercept_active: float = float(client.you.get("guardian_intercept_seconds", 0.0))
+	var intercept_cooldown: float = float(client.you.get("guardian_intercept_cooldown", 0.0))
+	if intercept_active > 0.0:
+		_info_label.text += "\nGUARD LINK to ally #%d: %.1fs (next infected melee hit)" % [
+			int(client.you.get("guardian_intercept_target", -1)), intercept_active]
+	elif intercept_cooldown > 0.0:
+		_info_label.text += "\nGuard link ready in %.0fs" % intercept_cooldown
+	var protected_for: float = float(client.you.get("guardian_guarded_seconds", 0.0))
+	if protected_for > 0.0:
+		_info_label.text += "\nPROTECTED by guardian #%d for %.1fs" % [
+			int(client.you.get("guardian_guarded_by", -1)), protected_for]
 	if float(client.you.get("cargo_factor", 1.0)) < 0.9999 and \
 			not bool(client.you.get("mounted", false)):
 		_info_label.text += "\nHEAVY CARGO: footsteps draw infected attention; crouch to stay quieter."
