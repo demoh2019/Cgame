@@ -4,6 +4,7 @@ extends CanvasLayer
 const Defs = preload("res://scripts/shared/defs.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
+const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
@@ -1686,6 +1687,14 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	for bag in client.bags.values():
+		if not bool(bag.get("corpse_scent", false)):
+			continue
+		var offset := Vector2(float(bag["x"]) - float(client.you.get("x", 0.0)),
+			float(bag["z"]) - float(client.you.get("z", 0.0)))
+		if offset.length_squared() <= CorpseScent.RADIUS * CorpseScent.RADIUS:
+			_info_label.text += "\nFRESH CORPSE: investigating infected may approach within 22 m"
+			break
 	# An exact server-derived recovery timer (not inferred from visual FX).
 	for enemy in client.zombies.values():
 		if bool(enemy.get("raid_boss", false)):

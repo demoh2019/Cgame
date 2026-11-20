@@ -33,6 +33,7 @@ const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
+const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const LOCAL_PLAYER_ID := 2
 const TERRAIN_STEP := 8.0
 
@@ -1214,6 +1215,14 @@ func _update_hud() -> void:
 	if survivor.flare_seconds > 0.0:
 		_stats.text += "\nFLARE: %ds (F10) | infected notice up to 28m" % ceili(survivor.flare_seconds)
 	_stats.text += "\nWET CLOTHING: %d%% | dry under shelter or beside a lit campfire" % roundi(survivor.survival.wetness)
+	for bag in sim.bags.values():
+		if not CorpseScent.active(bag, sim.time):
+			continue
+		var offset := Vector2(float(bag["x"]) - position.x,
+			float(bag["z"]) - position.z)
+		if offset.length_squared() <= CorpseScent.RADIUS * CorpseScent.RADIUS:
+			_stats.text += "\nFRESH CORPSE: blood attracts infected within 22 m"
+			break
 	var equipped_ammo: String = str(Defs.item(survivor.inventory.weapon).get("ammo", ""))
 	if not equipped_ammo.is_empty():
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [

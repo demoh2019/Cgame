@@ -93,6 +93,7 @@ const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
+const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HandFlare = preload("res://scripts/shared/hand_flare.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const FlashCharge = preload("res://scripts/shared/flash_charge.gd")
@@ -3942,6 +3943,8 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		events.append({"type": "raid_defeated", "id": zombie.id,
 			"x": zombie.position.x, "z": zombie.position.z})
 	var loot_bag_id: int = _make_bag(zombie.position, loot, -1 if zombie.raid_boss else killer.id)
+	if loot_bag_id >= 0 and not _is_safe(zombie.position):
+		CorpseScent.mark(bags[loot_bag_id], time)
 	if zombie.raid_boss and loot_bag_id >= 0:
 		# Entitlements are frozen at the confirmed kill; guests use object
 		# identity, accounts survive reconnect. No client-authored loot rights.
@@ -4001,7 +4004,9 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.keep_inventory_on_respawn = not drops_gear
 	if drops_gear:
 		var everything: Dictionary = victim.inventory.take_everything()
-		_make_bag(victim.position, everything)
+		var death_bag_id: int = _make_bag(victim.position, everything)
+		if death_bag_id >= 0 and not _is_safe(victim.position):
+			CorpseScent.mark(bags[death_bag_id], time)
 	victim.respawn_timer = Defs.RESPAWN_SECONDS
 	victim.dirty_inventory = true
 	events.append({"type": "death", "peer": victim.id, "killer": killer, "full_loot": drops_gear, "zone": zone})
@@ -4948,6 +4953,10 @@ func _tick_zombies(delta: float) -> void:
 				events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": damage, "by": -zombie.id})
 				if not _alive(victim):
 					_on_player_death(victim, -zombie.id)
+	# Real survivors are considered before idle infected investigate remains.
+	# Reuse existing investigate_decoy: never replace combat targets or spawn mobs.
+	if tick_count % 5 == 0 and not bags.is_empty():
+		_alert_corpse_scents()
 	# Evaluate real survivors before luring unattended infected toward light.
 	# This prevents a campfire from delaying direct player detection.
 	if tick_count % 5 == 0 and not campfires.is_empty() and WorldCycle.is_night(time):
@@ -4971,6 +4980,19 @@ func _alert_noise_decoys() -> void:
 		var lure: Dictionary = NoiseDecoy.closest_audible(buckets, infected.position, time)
 		if not lure.is_empty():
 			infected.investigate_decoy(Vector2(float(lure["x"]), float(lure["z"])))
+
+
+## Spatial-indexed investigation of confirmed, unlooted fresh corpses.
+func _alert_corpse_scents() -> void:
+	var scent_index: Dictionary = CorpseScent.buckets(bags, time)
+	if scent_index.is_empty():
+		return
+	for infected in zombies.values():
+		if not infected.is_alive() or infected.raid_boss:
+			continue
+		var corpse: Dictionary = CorpseScent.closest(scent_index, infected.position, time)
+		if not corpse.is_empty():
+			infected.investigate_decoy(Vector2(float(corpse["x"]), float(corpse["z"])))
 
 
 ## Night campfires lure idle infected, but never steal active combat aggro.
@@ -5392,6 +5414,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				bag_view["can_loot"] = RaidLoot.can_open(bag, player, time)
 			bag_view["horde_cache"] = bool(bag.get("horde_cache", false))
 			bag_view["supply_drop"] = bool(bag.get("supply_drop", false))
+			bag_view["corpse_scent"] = CorpseScent.active(bag, time)
 			bag_view["guards_remaining"] = SupplyDrops.living_guards(bag, zombies)
 			if int(bag_view["guards_remaining"]) > 0:
 				bag_view["can_loot"] = false
