@@ -32,6 +32,7 @@ const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
+const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
@@ -698,6 +699,23 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 		player.dirty_character = true
 		return {"ok": true}
 	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status]}
+
+
+## Recycle unused equipment at the settlement workbench.
+## No client-provided refund amounts: recipe and inventory are server-owned.
+func cmd_salvage_gear(peer_id: int, item_id: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var at := Vector2(player.position.x, player.position.z)
+	if not player.position.is_finite() or not _is_safe(player.position) or (
+			at.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE):
+		return {"ok": false, "reason": "no_station"}
+	var outcome: Dictionary = GearSalvage.transact(player.inventory, item_id)
+	if bool(outcome.get("ok", false)):
+		player.dirty_inventory = true
+		player.dirty_character = true
+	return outcome
 
 
 # --- Cooperative survivor parties (classic MMO-style group play) -----------------------

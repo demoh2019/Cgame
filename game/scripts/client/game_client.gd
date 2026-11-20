@@ -222,6 +222,10 @@ func craft(recipe: String, times: int = 1) -> void:
 	net.c_craft.rpc_id(1, recipe, times)
 
 
+func salvage_gear(item_id: String) -> void:
+	net.c_salvage_gear.rpc_id(1, item_id)
+
+
 func buy_perk(perk_id: String) -> void:
 	net.c_perk.rpc_id(1, perk_id)
 

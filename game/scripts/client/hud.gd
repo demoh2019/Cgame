@@ -33,6 +33,7 @@ var _inventory_grid: GridContainer
 var _stash_grid: GridContainer
 var _craft_panel: PanelContainer
 var _craft_list: VBoxContainer
+var _salvage_item: OptionButton
 var _death: Label
 var _equipped: Label
 var _party_frames: Label
@@ -204,6 +205,27 @@ func _build() -> void:
 		else:
 			client.dismantle(id))
 	inventory_box.add_child(dismantle_button)
+	var salvage_row := HBoxContainer.new()
+	inventory_box.add_child(salvage_row)
+	_salvage_item = OptionButton.new()
+	_salvage_item.custom_minimum_size.x = 200.0
+	_salvage_item.add_item("Select spare gear")
+	_salvage_item.set_item_metadata(0, "")
+	salvage_row.add_child(_salvage_item)
+	var salvage_button := Button.new()
+	salvage_button.text = "Recycle gear"
+	salvage_button.tooltip_text = "Workbench only. Converts one unequipped weapon, armor or tool into materials."
+	salvage_button.pressed.connect(func() -> void:
+		var index: int = _salvage_item.selected
+		if index < 0:
+			say("Recycling: choose an unequipped item first.")
+			return
+		var item_id: String = str(_salvage_item.get_item_metadata(index))
+		if item_id == "":
+			say("Recycling: choose an unequipped item first.")
+		else:
+			client.salvage_gear(item_id))
+	salvage_row.add_child(salvage_button)
 	var campfire_button := Button.new()
 	campfire_button.text = "Light field campfire (3 wood T1, 1 stone T1)"
 	campfire_button.tooltip_text = "Shared warmth for 5 minutes, outside the safe settlement"
@@ -1082,6 +1104,14 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		if not bool(data.get("ok", false)):
 			say("Trade rejected: " + str(data.get("reason", "unknown")))
 		return
+	if kind == "salvage_gear":
+		if bool(data.get("ok", false)):
+			say("Recycled %s: recovered %s" % [
+				str(Defs.item(str(data.get("item", ""))).get("name", data.get("item", ""))),
+				str(data.get("materials", {}))])
+		else:
+			say("Gear recycling: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "dismantle":
 		if bool(data.get("ok", false)):
 			say("Barricade dismantled; recovered %s" % str(data.get("salvage", {})))
@@ -1475,6 +1505,29 @@ func _refresh_inventory() -> void:
 	if signature == _inventory_signature:
 		return
 	_inventory_signature = signature
+	var previous: String = ""
+	if _salvage_item.selected >= 0:
+		previous = str(_salvage_item.get_item_metadata(_salvage_item.selected))
+	_salvage_item.clear()
+	_salvage_item.add_item("Select spare gear")
+	_salvage_item.set_item_metadata(0, "")
+	_salvage_item.select(0)
+	var shown_ids: Array[String] = []
+	for slot in client.inventory.slots:
+		if slot.is_empty():
+			continue
+		var item_id: String = str(slot["id"])
+		var kind: String = str(Defs.item(item_id).get("kind", ""))
+		if kind not in ["weapon", "armor", "tool"] or shown_ids.has(item_id):
+			continue
+		shown_ids.append(item_id)
+	shown_ids.sort()
+	for item_id in shown_ids:
+		_salvage_item.add_item(str(Defs.item(item_id).get("name", item_id)))
+		var index: int = _salvage_item.item_count - 1
+		_salvage_item.set_item_metadata(index, item_id)
+		if item_id == previous:
+			_salvage_item.select(index)
 	for child in _inventory_grid.get_children():
 		child.queue_free()
 	for slot in client.inventory.slots:
