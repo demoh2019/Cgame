@@ -1,6 +1,4 @@
 extends RefCounted
-
-const ChunkView = preload("res://scripts/client/chunk_view.gd")
 ## User-selectable visual fidelity. Both the Compatibility and Forward+ renderers remain supported.
 ## Keep the choice local to the client; it must never affect authoritative simulation.
 
@@ -66,8 +64,9 @@ static func profile(value: int) -> Dictionary:
 				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0}
 
 
-static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderMaterial) -> void:
+static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderMaterial, water: MeshInstance3D = null, streamer: Node = null) -> void:
 	var p := profile(_level)
+	var visuals: Dictionary = VisualProfiles.settings(_level)
 	# The active backend can differ from ProjectSettings after a driver fallback.
 	var method := RenderingServer.get_current_rendering_method()
 	if viewport != null:
@@ -93,6 +92,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 			viewport.msaa_3d = p["msaa"]
 			viewport.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if _level <= 1 else Viewport.SCREEN_SPACE_AA_DISABLED
 	if atmosphere != null:
+		if atmosphere.has_method("apply_graphics_profile"):
+			var settings: Dictionary = p.duplicate()
+			settings["sky_radiance"] = visuals["sky_radiance"]
+			atmosphere.call("apply_graphics_profile", settings)
 		var sun := atmosphere.get("sun") as DirectionalLight3D
 		if sun != null:
 			sun.shadow_enabled = p["shadows"]
@@ -105,9 +108,16 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 	if post_material != null:
 		post_material.set_shader_parameter("blur_quality", p["blur_quality"])
 		post_material.set_shader_parameter("blur_radius", p["blur_radius"])
-	# Reuse the game's existing 3-tier grass LOD; never rebuild world geometry on a preset switch.
-	ChunkView.configure_grass(float(p["grass_radius"]), int(p["grass_budget"]),
-			float(p["grass_fade_start"]), float(p["grass_fade_end"]))
+	# Reuse the existing LOD and streaming system rather than rebuilding terrain.
+	ChunkView.configure_grass(float(visuals["grass_build_radius"]), int(visuals["grass_budget_usec"]),
+			float(visuals["grass_fade_start"]), float(visuals["grass_fade_end"]))
+	if water != null:
+		var water_shader := water.material_override as ShaderMaterial
+		if water_shader != null:
+			water_shader.set_shader_parameter("ripple_strength", float(visuals["water_ripples"]))
+	if streamer != null:
+		streamer.set("load_radius", float(visuals["chunk_radius"]))
+		streamer.set("unload_radius", float(visuals["chunk_unload"]))
 	if viewport != null:
 		for tile in viewport.get_tree().get_nodes_in_group(ChunkView.GRASS_GROUP):
 			if tile is MultiMeshInstance3D:
