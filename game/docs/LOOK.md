@@ -46,6 +46,19 @@ the server to drop the connection, so it is not the default.
   and smashed barricades; music stings on death, level-ups and victories.
 
 * Cloud-shadow LUT: `scripts/client/cloud_shadow_lut.gd` bakes one seamless grayscale texture for coherent moving sun shadows on terrain, grass and trees. `atmosphere.gd` suppresses expensive cloud shading at night and in Performance mode.
+* Directional sun shadow atlas: `scripts/client/graphics_shadow_atlas.gd` reuses
+  Godot's single native directional shadow texture. Performance reserves 1024
+  (sun shadows remain disabled); Balanced uses 2048/16-bit; High Forward+ uses
+  4096/16-bit; Ultra Forward+ keeps 4096 but requests higher depth precision
+  (32-bit) to reduce long-distance shadow acne. Compatibility/Mobile cap the
+  atlas at 2048/16-bit. Texture and memory costs remain bounded and the atlas
+  is changed only when the resolved preset/backend budget changes, not per frame.
+  This complements existing PSSM splits, shadow-caster LOD, weather penumbrae
+  and contact shadows without additional lights or full-screen passes.
+  `project.godot` defaults to the Balanced 2048/16-bit atlas for startup.
+  Regression: `tests/test_graphics_shadow_atlas.gd`. Validate actual GPU
+  shadow aliasing and frame time on target GPUs before claiming a measured FPS
+  improvement; Ultra necessarily uses more shadow depth memory.
 * Terrain texture anisotropy: `scripts/client/terrain_anisotropy.gd` creates and caches sampler variants of
   the exact same 13-layer PBR ground shader. Performance/Balanced keep the original trilinear
   color and normal sampling; High switches only ground albedo to up to 8x anisotropic sampling
