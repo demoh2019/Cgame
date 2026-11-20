@@ -3451,6 +3451,8 @@ func _tick_zombies(delta: float) -> void:
 		info[player.id] = {"position": player.position, "alive": _alive(player),
 			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
 			"notice_multiplier": WorldCycle.notice_multiplier(time),
+			"weather_sight": Weather.sight_multiplier(
+				Weather.conditions(world, player.position.x, player.position.z, time)),
 			"firelight": CampfireThreat.reveal_radius(campfires, player.position,
 				time, WorldCycle.is_night(time)),
 			"visual_signature": StealthStance.visual_signature(
@@ -3891,6 +3893,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
+			"weather_sight": Weather.sight_multiplier(
+				Weather.conditions(world, player.position.x, player.position.z, time)),
 			"spore": SporeHazard.status(world, player.position, time,
 				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else ""),
 			"weather_insulation": Weather.protection(

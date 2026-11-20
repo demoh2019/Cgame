@@ -8,6 +8,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WEATHER_CELL_METERS := 256.0
 const CHANGE_SECONDS := 240.0
 const COLD_START_C := 8.0
+const STORM_SIGHT_MULTIPLIER := 0.70 # Outdoors, rain makes visual tracking harder.
 
 const BIOME_TEMP_C := {
 	"mountain": 3.0,
@@ -56,3 +57,11 @@ static func effective_severity(weather: Dictionary, armor_id: String) -> float:
 	if weather.is_empty():
 		return 0.0
 	return clampf(float(weather.get("severity", 0.0)) * (1.0 - protection(armor_id)), 0.0, 1.0)
+
+
+
+## Server-owned storm data reduces sight only; non-visual senses stay unchanged.
+static func sight_multiplier(current: Dictionary) -> float:
+	if current.is_empty() or bool(current.get("sheltered", false)):
+		return 1.0
+	return STORM_SIGHT_MULTIPLIER if str(current.get("condition", "")) == "storm" else 1.0

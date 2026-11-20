@@ -1257,6 +1257,10 @@ func _process(_delta: float) -> void:
 			"CAMPFIRE WARMTH" if bool(client.you.get("campfire_warm", false)) else ("SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED"),
 			int(client.you.get("exposure", 0.0)), int(ceil(float(client.you.get("warmth_seconds", 0.0))))
 		]
+	var storm_cover: float = float(client.you.get("weather_sight", 1.0))
+	if is_finite(storm_cover) and storm_cover < 1.0:
+		_info_label.text += "\nSTORM COVER: infected sight -%d%% (sound, scent & fire still reveal)" % [
+			int(round(100.0 * (1.0 - clampf(storm_cover, 0.0, 1.0))))]
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	_contract_label.text += "\n" + str(client.you.get("daily_description", "Daily bounty pending server"))

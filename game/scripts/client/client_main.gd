@@ -922,7 +922,7 @@ func _update_hud() -> void:
 	var speed_pct: int = int(round(survivor.inventory.movement_factor() * 100.0))
 	var risk: String = "SAFE HUB" if world.is_safe(position.x, position.z) else ZoneRisk.description(zone)
 	var weather: Dictionary = Weather.conditions(world, position.x, position.z, sim.time)
-	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\n%s | World clock %.0fs\nHP %d HUNGER %d THIRST %d STAMINA %d INFECTION %d BLEEDING %d EXPOSURE %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs DODGE CD %.1fs WEAPON %s\nWEATHER %s %.0fC %s | HEAT PACK %ds\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Fish T%d Craft T%d Scavenge T%d\nWEAPON MASTERY Melee L%d Ranged L%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nCONTRACT %s\nINVENTORY %s" % [
+	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\n%s | World clock %.0fs\nHP %d HUNGER %d THIRST %d STAMINA %d INFECTION %d BLEEDING %d EXPOSURE %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs DODGE CD %.1fs WEAPON %s\nWEATHER %s %.0fC %s | HEAT PACK %ds%s\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Fish T%d Craft T%d Scavenge T%d\nWEAPON MASTERY Melee L%d Ranged L%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nCONTRACT %s\nINVENTORY %s" % [
 		"NIGHT - infected notice farther" if WorldCycle.is_night(sim.time) else "DAY", sim.time,
 		int(vitals.health), int(vitals.hunger), int(vitals.thirst), int(vitals.stamina),
 		int(vitals.infection), int(vitals.bleeding), int(vitals.exposure), survivor.kills,
@@ -931,6 +931,7 @@ func _update_hud() -> void:
 		str(weather.get("condition", "unknown")).capitalize(), float(weather.get("temperature_c", 0.0)),
 		"CAMPFIRE WARMTH" if sim.campfires.size() > 0 and FieldCampfire.has_warmth(sim.campfires, position, sim.time) else ("SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED"),
 		int(ceil(vitals.warmth_seconds)),
+		" | STORM COVER: infected sight -30%" if Weather.sight_multiplier(weather) < 1.0 else "",
 		Defs.ZONE_NAMES[zone], WorldGen.tier_for_zone(zone), risk, int(position.x), int(position.z), sim.zombies.size(),
 		int(levels["wood"]), int(levels["stone"]), int(levels["ore"]), int(levels["fiber"]),
 		int(levels.get("fishing", 1)),
