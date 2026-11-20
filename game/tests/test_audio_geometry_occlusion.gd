@@ -70,3 +70,22 @@ func run(t) -> void:
 		"crossing a doorway changes occlusion smoothly without audio clicks")
 	t.check(not source.contains("AudioServer.set_bus_volume_db(_sfx_bus,"),
 		"world obstruction never mutes the entire SFX bus")
+	t.current = "stable first buffer, fresh terrain LOS and voice priority"
+	t.check(source.contains("AudioSpatial.source_cutoff(distance, false, _humidity)"),
+		"initial air absorption is unblocked so occlusion is applied exactly once")
+	t.check(source.contains('"original_cutoff": player.attenuation_filter_cutoff_hz'),
+		"stock fallback stores the same unblocked source cutoff")
+	t.check(source.contains("record[\"terrain_blocked\"] = terrain_blocked"),
+		"moving listener terrain occlusion recomputes within ray budget")
+	t.check(source.contains("listener_eye, source_eye, _ground"),
+		"wall and terrain obstruction share the same listener/source line")
+	t.check(source.contains("OBSTRUCTION_RAYS_PER_TICK := 3") and
+		source.contains("rays += 1"),
+		"terrain rechecks reuse existing capped physics ray budget")
+	t.check(source.contains('"base_audibility": loudness') and
+		source.contains('record["audibility"] = float(record.get("base_audibility"'),
+		"blocked sounds lose voice priority instead of taking clear combat voices")
+	t.near(Spatial.obstruction_db(1.0), Spatial.OCCLUDED_GAIN_DB, 0.0001,
+		"native and stock fallback share one gain constant")
+	t.near(Spatial.obstruction_db(0.5), Spatial.OCCLUDED_GAIN_DB * 0.5, 0.0001,
+		"partial obstruction adjusts priority and volume consistently")
