@@ -41,6 +41,14 @@ func set_streaming_simulation_active(active: bool) -> void:
         _update_simulation_processing()
 
 
+func is_streaming_activation_ready() -> bool:
+    # An opt-in scene activation check supplements the engine's minimum
+    # completed physics frames. Near LOD builds colliders during _ready();
+    # far LOD has no authored obstacle physics and remains graphics-only.
+    return is_node_ready() and (streaming_lod == 1 or
+        (is_instance_valid(obstacles) and obstacles.get_child_count() > 0))
+
+
 func _update_simulation_processing() -> void:
     # An optional near-field ambient effect; static foliage remains visible
     # while this cell's simulation callback is paused.

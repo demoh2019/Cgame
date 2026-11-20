@@ -1,7 +1,8 @@
 extends Node
 ## Nonblocking travel gate: keep the player in the current safe world until
-## the native WorldPartition3D has actually instantiated the target cell.
-## This checks scene roots, not collision/navmesh bake or GPU residency.
+## the native WorldPartition3D has instantiated its target scene and passed
+## its bounded physics-frame delay plus optional scene activation check.
+## It is not a complete collision/navmesh/GPU residency guarantee.
 signal travel_completed(destination: Vector3)
 signal travel_failed(reason: String)
 
@@ -57,7 +58,7 @@ func request_travel(place: Vector3, label: String = "точка") -> bool:
 func get_progress() -> float:
     if not active or not is_instance_valid(streamer):
         return 0.0
-    return streamer.get_streaming_source_progress(SOURCE_NAME)
+    return streamer.get_streaming_source_activation_progress(SOURCE_NAME)
 
 
 func get_status_text() -> String:
@@ -65,8 +66,9 @@ func get_status_text() -> String:
         return last_message
     var completed: int = streamer.get_streaming_source_loaded_cell_count(SOURCE_NAME)
     var total: int = streamer.get_streaming_source_cell_count(SOURCE_NAME)
-    return "Переход в %s: %d/%d сцен (%.0f%%) — F12: отмена" % [
-        destination_name, completed, total, get_progress() * 100.0]
+    var activated: int = streamer.get_streaming_source_activated_cell_count(SOURCE_NAME)
+    return "Переход в %s: сцены %d/%d, активация %d/%d (%.0f%%) — F12: отмена" % [
+        destination_name, completed, total, activated, total, get_progress() * 100.0]
 
 
 func cancel_travel() -> void:
@@ -81,7 +83,7 @@ func _process(delta: float) -> void:
         _finish(false, "Переход прерван: мир или игрок удалён")
         return
 
-    if streamer.is_streaming_source_ready(SOURCE_NAME):
+    if streamer.is_streaming_source_activation_ready(SOURCE_NAME):
         # Revalidate the destination and player on the same frame as travel.
         # The demo terrain is one persistent collision mesh (not a streamed
         # terrain system), so this places the pawn above guaranteed ground.

@@ -228,6 +228,7 @@ func _create_streaming_world() -> void:
     world_partition.simulation_radius = 1
     world_partition.simulation_hysteresis_cells = 1
     world_partition.max_simulation_transitions_per_frame = 2
+    world_partition.min_physics_frames_after_load = 2 # Allow a physics tick barrier before F10/F11 travel.
     world_partition.max_new_requests_per_frame = 2
     world_partition.max_instances_per_frame = 1
     world_partition.max_concurrent_requests = 4

@@ -30,6 +30,14 @@ func _wait_for_cell(stream: WorldPartition3D, present: bool) -> bool:
     return false
 
 
+func _wait_for_activation(stream: WorldPartition3D) -> bool:
+    for i in range(MAX_FRAMES):
+        if stream.is_cell_activation_ready(CELL):
+            return true
+        await process_frame
+    return false
+
+
 func _run() -> void:
     if not ResourceLoader.exists(FOREST):
         _fail("forest cell resource missing")
@@ -42,6 +50,7 @@ func _run() -> void:
     stream.cell_size = 32.0
     stream.load_radius = 0
     stream.unload_radius = 0
+    stream.min_physics_frames_after_load = 2
     root.add_child(stream)
     stream.observer_path = stream.get_path_to(player)
     stream.set_cell_scene(CELL, FOREST)
@@ -55,6 +64,9 @@ func _run() -> void:
         return
     if stream.get_cell_instance(Vector2i(19, 19)) != null:
         _fail("native get_cell_instance returned an unregistered scene")
+        return
+    if not await _wait_for_activation(stream):
+        _fail("loaded forest scene did not pass physics activation fence")
         return
 
     var director := Node3D.new()
@@ -77,6 +89,9 @@ func _run() -> void:
     player.global_position.x = -16.0
     if not await _wait_for_cell(stream, true):
         _fail("returning to the cell did not reload it")
+        return
+    if not await _wait_for_activation(stream):
+        _fail("reloaded forest scene did not pass a fresh activation fence")
         return
     director.call("refresh_encounters")
     if director.call("get_alive_count") != 1:
