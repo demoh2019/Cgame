@@ -26,6 +26,12 @@ uniform vec3 sun_color : source_color = vec3(1.0, 0.95, 0.82);
 uniform bool use_cached_radiance = false;
 // Natural sunlight scattering in thin atmospheric dust; no extra textures.
 uniform float aerosol_scattering_strength = 0.0;
+// Reuse the existing 128x128 R8 wind-cloud LUT as a wispy upper sky layer.
+// High/Ultra sample at most two texels; Performance never samples it.
+uniform sampler2D cirrus_lut : filter_linear, repeat_enable;
+uniform vec2 cirrus_wind_offset = vec2(0.0);
+uniform int cirrus_detail = 0;
+uniform float cirrus_opacity = 0.0;
 
 float hash(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -117,6 +123,35 @@ void sky() {
 			float atmospheric_visibility = daylight * (1.0 - storm * 0.88);
 			color += aerosol_color * sunward * horizon_air * 0.42
 				* atmospheric_visibility * aerosol_scattering_strength;
+		}
+		// The same cached cloud field shades distant terrain and the upper sky.
+		// Do not use the camera position or built-in TIME: Godot would refresh
+		// sky radiance on every camera move/frame instead of the chosen cadence.
+		if (cirrus_detail > 0 && cirrus_opacity > 0.001 && up > 0.08) {
+			// Project directions onto a fixed-height cloud plane. Avoid its
+			// horizon singularity and fade the layer out before the clamp.
+			vec2 cloud_uv = dir.xz * (0.18 / max(up, 0.16))
+				+ cirrus_wind_offset / 1024.0;
+			float cloud_shape = texture(cirrus_lut, cloud_uv).r;
+			if (cirrus_detail > 1) {
+				// Ultra adds a second scale to break up broad cloud patches.
+				float filaments = texture(cirrus_lut,
+					cloud_uv * 2.4 + vec2(0.17, 0.43)).r;
+				cloud_shape *= mix(0.68, 1.08, filaments);
+			}
+			float cloud_alpha = clamp(cloud_shape * cirrus_opacity
+				* smoothstep(0.08, 0.32, up), 0.0, 0.65);
+			// Broad skylight and a directional warm edge from the existing sun.
+			vec3 lit_cloud = mix(vec3(0.76, 0.83, 0.92),
+				vec3(1.0, 0.61, 0.38), dusk * 0.82);
+			float forward_light = pow(max(facing, 0.0), 12.0);
+			lit_cloud += sun_color * (0.16 * forward_light * daylight);
+			lit_cloud = mix(lit_cloud, storm_color, storm * 0.9);
+			// Nighttime cloud cover dims stars instead of glowing white.
+			vec3 dark_cloud = mix(night_horizon * 0.55, night_top * 0.8,
+				clamp(up, 0.0, 1.0));
+			vec3 cloud_color = mix(dark_cloud, lit_cloud, daylight);
+			color = mix(color, cloud_color, cloud_alpha * (1.0 - storm * 0.2));
 		}
 		COLOR = color;
 	}

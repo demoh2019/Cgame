@@ -59,6 +59,8 @@ func _ready() -> void:
 	environment.background_mode = Environment.BG_SKY
 	sky_material = ShaderMaterial.new()
 	sky_material.shader = load("res://assets/shaders/sky.gdshader")
+	# Reuse the same R8 LUT already bound to terrain and vegetation shadows.
+	sky_material.set_shader_parameter("cirrus_lut", CloudShadowLut.texture())
 	var panorama := load("res://assets/textures/sky/day_sky.jpg") as Texture2D
 	sky_material.set_shader_parameter("has_panorama", panorama != null)
 	if panorama != null:
@@ -184,6 +186,8 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		# Each wrapped 1024 m axis equals a full repeat of the panorama U.
 		sky_material.set_shader_parameter("cloud_wind_rotation",
 			(_cloud_offset.x + _cloud_offset.y) / CloudShadowLut.TILE_METERS)
+		# Sky cloud detail and terrain clouds share the same integrated wind.
+		sky_material.set_shader_parameter("cirrus_wind_offset", _cloud_offset)
 		# DirectionalLight3D emits along -Z. Cache exactly that direction for the disc.
 		sky_material.set_shader_parameter("sun_direction", sun.global_transform.basis.z.normalized())
 		var light_color: Color = sun.light_color
@@ -242,6 +246,12 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	# Sky haze is cached with the radiance map; no per-frame shader updates.
 	sky_material.set_shader_parameter("aerosol_scattering_strength",
 		clampf(float(settings.get("sky_scattering_strength", 0.0)), 0.0, 1.0))
+	# Optional cloud layer is completely skipped on Performance. Ultra uses
+	# two filtered LUT taps; others use at most one, at sky refresh cadence.
+	sky_material.set_shader_parameter("cirrus_detail",
+		clampi(int(settings.get("cirrus_detail", 0)), 0, 2))
+	sky_material.set_shader_parameter("cirrus_opacity",
+		clampf(float(settings.get("cirrus_opacity", 0.0)), 0.0, 0.65))
 	sun.shadow_enabled = _shadows_allowed
 	sun.directional_shadow_max_distance = float(settings["shadow_distance"])
 	# Renderer-aware PCSS is configured once per quality switch. Balanced and
