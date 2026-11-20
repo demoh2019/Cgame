@@ -123,7 +123,8 @@ func _create_streaming_world() -> void:
     world_partition.load_radius = 1
     world_partition.unload_radius = 2
     world_partition.max_new_requests_per_frame = 2
-    world_partition.max_instances_per_frame = 1
+    world_partition.max_instances_per_frame = 2
+    world_partition.max_instantiation_time_ms = 2.0
     world_partition.max_concurrent_requests = 4
     add_child(world_partition)
     world_partition.observer_path = world_partition.get_path_to(player)
