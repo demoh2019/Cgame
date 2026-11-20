@@ -7,6 +7,7 @@
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
+		Manual cell residency pins can independently keep a small number of registered areas available for fast travel, cinematics or an off-screen quest. Use [method pin_cell], [method is_cell_loaded] and [method unpin_cell] to manage the lifecycle, without increasing the main player streaming radius.
 		Optional directional prefetch can warm additional cells in front of a moving observer. The forward corridor is separate from normal loading, and it uses the same asynchronous resource loading and per-frame instantiation budgets. Use [member prefetch_direction] (grid X/Z components) and [member prefetch_distance].
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
@@ -33,6 +34,39 @@
 			<return type="void" />
 			<description>
 				Removes all registered cells and unloads instantiated cells.
+			</description>
+		</method>
+		<method name="get_pinned_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many registered cells have been explicitly pinned for streaming, up to 16. Pinning is separate from [member load_radius] and [member prefetch_distance].
+			</description>
+		</method>
+		<method name="is_cell_pinned" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns whether [param cell] is explicitly pinned. A pin requests asynchronous loading but does not itself guarantee the scene is ready; use [method is_cell_loaded] before entering it.
+			</description>
+		</method>
+		<method name="pin_cell">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Pins a registered cell outside the observer's streaming radius so it can be loaded and retained independently of player movement. Returns [code]false[/code] if the cell is not registered or the limit of 16 distinct pinned cells has been reached. Repeating an existing pin succeeds without increasing its count. Nearby observer cells are prioritized over pins; pins are processed before speculative directional prefetch and use the same request/instantiation budgets. Call [method update_streaming] to start loading immediately; pinning never blocks until ready. Pins remain configured if [member streaming_enabled] is temporarily disabled, but their nodes unload until streaming resumes.
+			</description>
+		</method>
+		<method name="unpin_cell">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Releases a cell residency pin. On the next streaming update, the cell may unload if it is outside both the normal unload radius and the predictive prefetch corridor. Unpinning does not unregister the scene.
+			</description>
+		</method>
+		<method name="clear_pinned_cells">
+			<return type="void" />
+			<description>
+				Releases all manual residency pins without removing scene registrations. Replacing all cell registrations with [method set_cell_scenes] or clearing registrations also removes the old pins.
 			</description>
 		</method>
 		<method name="get_cell_scene" qualifiers="const">
