@@ -6,6 +6,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 
 - Register a sparse mapping from `Vector2i` cell coordinates to local `PackedScene` resource paths (saved with your `.tscn` scene).
 - Choose a `Node3D` observer, cell size, and square loading/unloading radii; negative coordinates are handled with floor division.
+- Optionally prefetch a short directional corridor with `prefetch_direction` (each axis -1, 0 or 1) and `prefetch_distance` (0–4 cells, off by default). Cells within the observer's normal radius always have priority. When direction changes, obsolete ahead cells unload if outside hysteresis; resource requests remain shared and budgets are enforced across both passes.
 - Load scene resources asynchronously using Godot's `ResourceLoader.load_threaded_request` backend and poll without blocking while still in progress.
 - Share a resource-load request between cells using the same scene path.
 - Instantiate `Node3D` cell roots on the main thread, preserving their authored transform and applying the cell origin.
@@ -28,6 +29,8 @@ func _ready() -> void:
     world.cell_size = 128.0
     world.load_radius = 1
     world.unload_radius = 2
+    world.prefetch_direction = Vector2i(1, 0)
+    world.prefetch_distance = 2 # preload up to 2 cells ahead
     world.max_new_requests_per_frame = 2
     world.max_instances_per_frame = 2
     world.observer_path = world.get_path_to($Player)
@@ -47,7 +50,7 @@ var requests := world.get_inflight_request_count()
 var failed := world.get_failed_cell_count()
 ```
 
-These counters describe the current state, not a prediction of future memory or throughput. One background resource request may serve multiple pending cells with the same PackedScene path. See `misc/cgame_forest_showcase` for a playable, deterministic 16-cell demonstration and headless reload test.
+These counters describe the current state, not a prediction of future memory or throughput. One background resource request may serve multiple pending cells with the same PackedScene path. See `misc/cgame_forest_showcase` for a 1,024-cell registered world with a short distance-based active radius, directional predictive prefetch, reusable terrain resources and headless streaming regressions.
 
 ## Tests
 
