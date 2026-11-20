@@ -73,6 +73,7 @@ var connect_panel: PanelContainer
 var local_server := LocalServer.new()
 var solo_slot_picker: OptionButton
 var solo_slot_info: Label
+var _solo_offline_account: bool = false
 var _solo_attempts_left := 0
 var address_edit: LineEdit
 var name_edit: LineEdit
@@ -128,7 +129,7 @@ func _ready() -> void:
 	address_edit.text = address
 	name_edit.text = player_name
 	if "--connect" in args:
-		_connect()
+		_connect_remote()
 
 
 func _make_party_rally_marker() -> void:
@@ -287,7 +288,7 @@ func _build_connect_screen() -> void:
 		var edit := LineEdit.new()
 		edit.placeholder_text = field[1]
 		edit.custom_minimum_size = Vector2(0, 38)
-		edit.text_submitted.connect(func(_text: String) -> void: _connect())
+		edit.text_submitted.connect(func(_text: String) -> void: _connect_remote())
 		box.add_child(edit)
 		if name_edit == null:
 			name_edit = edit
@@ -323,7 +324,7 @@ func _build_connect_screen() -> void:
 	var button := Button.new()
 	button.text = "Join server"
 	button.custom_minimum_size = Vector2(0, 40)
-	button.pressed.connect(_connect)
+	button.pressed.connect(_connect_remote)
 	box.add_child(button)
 	status_label = Label.new()
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -353,19 +354,29 @@ func _device_id() -> String:
 	return id
 
 
+## Remote servers always use the ordinary Nakama sign-in path.
+func _connect_remote() -> void:
+	_solo_offline_account = false
+	_solo_attempts_left = 0
+	_connect()
+
+
 func _connect() -> void:
 	var parts := address_edit.text.split(":")
 	var host := parts[0]
 	var port := int(parts[1]) if parts.size() > 1 else 24565
 	if net == null:
-		status_label.text = "Signing in..."
-		# Accounts come from Nakama on the same host. Without it we still join (servers can run offline).
+		status_label.text = "Entering offline survivor..." if _solo_offline_account else "Signing in..."
+		# Additional solo slots are deliberately local even if Nakama is running.
+		# Do not sign in or open a live guild/chat session for these characters.
 		social = Social.new()
 		add_child(social)
-		var nakama_port := int(OS.get_environment("NAKAMA_PORT")) if OS.get_environment("NAKAMA_PORT") != "" else 7350
-		account = await social.sign_in(host, nakama_port, _device_id() + ("-" + name_edit.text if OS.get_environment("MULTI_CLIENT") != "" else ""), name_edit.text)
-		if not account.get("ok", false):
-			account = {}
+		account = {}
+		if not _solo_offline_account:
+			var nakama_port := int(OS.get_environment("NAKAMA_PORT")) if OS.get_environment("NAKAMA_PORT") != "" else 7350
+			account = await social.sign_in(host, nakama_port, _device_id() + ("-" + name_edit.text if OS.get_environment("MULTI_CLIENT") != "" else ""), name_edit.text)
+			if not account.get("ok", false):
+				account = {}
 		net = Net.new()
 		net.name = "Net"
 		net.role = "client"
@@ -419,6 +430,7 @@ func _play_solo() -> void:
 		status_label.text = "Could not start a local world."
 		return
 	address_edit.text = address
+	_solo_offline_account = selected_slot > 1
 	_solo_attempts_left = 12
 	status_label.text = "Starting survivor %d..." % selected_slot
 	await get_tree().create_timer(3.0).timeout # Let the server import and open its port.
