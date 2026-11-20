@@ -16,6 +16,7 @@ const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const PartyFrames = preload("res://scripts/client/party_frames.gd")
+const HudSkin = preload("res://scripts/client/hud_skin.gd")
 
 var client
 var _bars: Dictionary = {}
@@ -36,6 +37,9 @@ var _death: Label
 var _equipped: Label
 var _party_frames: Label
 var _log_lines: Array[String] = []
+var _log_times: Array[float] = []
+var _skin
+var _details: Array = [] # The old text widgets, kept alive for F3.
 var _craft_signature: String = ""
 var _inventory_signature: String = ""
 var _trade_state: Dictionary = {}
@@ -94,6 +98,11 @@ func _build() -> void:
 	top_left.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	top_left.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	margin.add_child(top_left)
+	# The drawn vitals card (hud_skin.gd) covers this area; the plain bars below stay as hidden data holders.
+	var card_gap := Control.new()
+	card_gap.custom_minimum_size = Vector2(1, 178)
+	card_gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top_left.add_child(card_gap)
 	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["bleeding", Color(0.73, 0.21, 0.27)], ["exposure", Color(0.38, 0.7, 0.88)]]:
 		var bar := ProgressBar.new()
 		bar.custom_minimum_size = Vector2(240, 18)
@@ -108,8 +117,11 @@ func _build() -> void:
 		top_left.add_child(label)
 		top_left.add_child(bar)
 		_bars[entry[0]] = bar
+		_details.append(label)
+		_details.append(bar)
 	_equipped = Label.new()
 	top_left.add_child(_equipped)
+	_details.append(_equipped)
 	_party_frames = Label.new()
 	_party_frames.name = "PartyFrames"
 	_party_frames.add_theme_font_size_override("font_size", 14)
@@ -136,11 +148,19 @@ func _build() -> void:
 	_contract_label = Label.new()
 	_contract_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	top_right.add_child(_contract_label)
+	_details.append_array([_zone_label, _info_label, _contract_label])
 
 	_log = Label.new()
 	_log.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_log.size_flags_vertical = Control.SIZE_SHRINK_END
 	_log.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var log_style := StyleBoxFlat.new()
+	log_style.bg_color = Color(0.04, 0.05, 0.08, 0.62)
+	log_style.set_corner_radius_all(10)
+	log_style.set_content_margin_all(9)
+	_log.add_theme_stylebox_override("normal", log_style)
+	_log.add_theme_font_size_override("font_size", 14)
+	_log.visible = false
 	margin.add_child(_log)
 
 	_prompt = Label.new()
@@ -150,6 +170,18 @@ func _build() -> void:
 	_prompt.size = Vector2(400, 30)
 	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_prompt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var prompt_style := StyleBoxFlat.new()
+	prompt_style.bg_color = Color(0.05, 0.06, 0.09, 0.78)
+	prompt_style.border_color = Color(0.95, 0.78, 0.35, 0.7)
+	prompt_style.set_border_width_all(1)
+	prompt_style.set_corner_radius_all(14)
+	prompt_style.content_margin_left = 16
+	prompt_style.content_margin_right = 16
+	prompt_style.content_margin_top = 4
+	prompt_style.content_margin_bottom = 4
+	_prompt.add_theme_stylebox_override("normal", prompt_style)
+	_prompt.position = Vector2(-260, -176)
+	_prompt.size = Vector2(520, 30)
 	add_child(_prompt)
 
 	_inventory_panel = PanelContainer.new()
@@ -614,12 +646,39 @@ func _build() -> void:
 	_death.position = Vector2(-300, -60)
 	_death.size = Vector2(600, 120)
 	_death.visible = false
+	var death_style := StyleBoxFlat.new()
+	death_style.bg_color = Color(0.1, 0.0, 0.0, 0.72)
+	death_style.border_color = Color(0.95, 0.25, 0.2, 0.8)
+	death_style.set_border_width_all(2)
+	death_style.set_corner_radius_all(16)
+	death_style.set_content_margin_all(18)
+	_death.add_theme_stylebox_override("normal", death_style)
+	_death.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(_death)
 
+	# The drawn interface on top of everything else: vitals card, clock, quests, action bar.
+	_skin = HudSkin.new()
+	_skin.name = "HudSkin"
+	add_child(_skin)
+	move_child(_skin, 0)
+	_skin.setup(client)
+	_skin.client_info_label = _info_label
+	set_details_visible(false)
+
+
+
+## F3: the full text readout (every number and timer) instead of the drawn interface.
+func set_details_visible(shown: bool) -> void:
+	for node in _details:
+		node.visible = shown
+	if _skin != null:
+		_skin.details_visible = shown
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
+		if event.physical_keycode == KEY_F3 and _skin != null:
+			set_details_visible(not _skin.details_visible)
 		if event.physical_keycode == KEY_M and _radar != null:
 			_radar.visible = not _radar.visible
 
@@ -654,9 +713,12 @@ func set_prompt(text: String) -> void:
 
 func say(text: String) -> void:
 	_log_lines.append(text)
+	_log_times.append(Time.get_ticks_msec() / 1000.0)
 	while _log_lines.size() > 7:
 		_log_lines.pop_front()
+		_log_times.pop_front()
 	_log.text = "\n".join(_log_lines)
+	_log.visible = true
 
 
 func _on_event(event: Dictionary) -> void:
@@ -989,6 +1051,13 @@ func _refresh_vendor_price_labels() -> void:
 
 
 func _process(_delta: float) -> void:
+	# Messages fade from the log after a while.
+	var now: float = Time.get_ticks_msec() / 1000.0
+	if not _log_lines.is_empty() and now - _log_times[0] > 14.0:
+		_log_lines.pop_front()
+		_log_times.pop_front()
+		_log.text = "\n".join(_log_lines)
+		_log.visible = not _log_lines.is_empty()
 	if client == null or not client.you.has("health"):
 		return
 	_refresh_vendor_price_labels()

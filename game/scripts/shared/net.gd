@@ -707,8 +707,6 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
 			return event.get("id", -1) == peer or event.get("by", 0) == peer or _is_nearby(event, peer)
-		"attack", "zombie_died", "decoy_thrown", "spit_warning", "spit_impact",
-				"siege_started", "raid_started", \
-				"raid_warning", "raid_slam", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
+		"attack", "zombie_died", "decoy_thrown", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
 			return _is_nearby(event, peer)
 	return false
