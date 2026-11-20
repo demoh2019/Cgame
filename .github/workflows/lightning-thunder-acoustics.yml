@@ -8,6 +8,8 @@ on:
       - "modules/gameplay_fx/tests/test_sound_propagation_policy.cpp"
       - "modules/gameplay_fx/doc_classes/SoundPropagation.xml"
       - "game/scripts/client/storm_thunder.gd"
+      - "game/scripts/shared/net.gd"
+      - "game/scripts/shared/storm_lightning.gd"
       - "game/scripts/client/online_main.gd"
       - "game/scripts/client/client_main.gd"
       - "game/tests/test_storm_thunder.gd"
@@ -18,6 +20,8 @@ on:
     paths:
       - "modules/gameplay_fx/sound_propagation*"
       - "game/scripts/client/storm_thunder.gd"
+      - "game/scripts/shared/net.gd"
+      - "game/scripts/shared/storm_lightning.gd"
       - "game/scripts/client/online_main.gd"
       - "game/scripts/client/client_main.gd"
       - "game/tests/test_storm_thunder.gd"
@@ -53,6 +57,8 @@ jobs:
           solo = Path("game/scripts/client/client_main.gd").read_text()
           online = Path("game/scripts/client/online_main.gd").read_text()
           tests = Path("game/tests/run_all.gd").read_text()
+          net = Path("game/scripts/shared/net.gd").read_text()
+          storm = Path("game/scripts/shared/storm_lightning.gd").read_text()
           assert 'D_METHOD("travel_delay_seconds"' in engine
           assert "SoundPropagationPolicy::sound_delay_seconds" in engine
           assert "float travel_delay_seconds" in header
@@ -64,4 +70,9 @@ jobs:
           assert "_storm_thunder.on_strike(event, here," in online
           assert "_storm_thunder.on_strike(game_event, survivor.position," in solo
           assert "test_storm_thunder.gd" in tests
+          assert 'distant_thunder' in spatial and 'distant_thunder' in online
+          assert 'func _lightning_for_peer(' in net
+          assert 'THUNDER_COARSE_GRID' in net and 'THUNDER_COARSE_GRID' in storm
+          assert 'delivered = _lightning_for_peer(event, peer)' in net
+          assert 'test_storm_thunder.gd' in tests
           PY
