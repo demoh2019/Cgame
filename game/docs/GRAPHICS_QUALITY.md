@@ -55,3 +55,9 @@ Nature-kit tree/bush meshes now keep their canopy motion spatially coherent: eac
 The vertex shader smoothly reduces wind between **48 m and 120 m** from the camera and skips costly wind-wave trigonometry beyond that range. Each plant's colour variation now derives its second hash from the first rather than evaluating a second sine. This follows the broad practice of distance-aware detail and instanced variation in large-world terrain pipelines; it is deliberately implemented in Godot's existing ShaderMaterial/MultiMesh path rather than attempting to transplant Unreal Nanite.
 
 The LOD is client-only and needs no changes to combat, collisions or server state. The regression suite checks the wind shader's budget gates and the conversion/caching of material-bearing meshes. Measure a dense nature scene on actual graphics hardware and watch for animation freezing near the 120 m threshold; the shader change itself does not establish a measured FPS improvement.
+
+## Shared cloud occlusion and scenic LOD (November 2026)
+
+The cloud shader now uses a **one-time 128×128 L8 tileable GPU texture** shared by terrain, grass and foliage, instead of computing three sine/hash fBM octaves for each fragment. Cloud contrast fades with nighttime and heavy storm cover; Performance disables the texture lookup altogether. No new CPU work occurs during normal frame rendering.
+
+Quality levels also adjust the draw distance and imported mesh `lod_bias` for streamed **tree / rock / bush / decorative** MultiMeshes. Settlement structures remain uncapped. Existing batches update on the active preset change, without rebuilding world data. Dense decorative meshes already use the existing 32 m spatial partitions. See [CLOUD_HLOD_2026_11.md](CLOUD_HLOD_2026_11.md) for implementation, test commands, and the GPU benchmarking plan.
