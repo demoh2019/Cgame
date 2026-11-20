@@ -78,7 +78,7 @@ func run(t) -> void:
 		return
 	player.position = shore
 	player.inventory.add(FieldCanteen.CANTEEN_ITEM, 1)
-	player.inventory.add("wood_1", 4)
+	player.inventory.add("wood_1", 3)
 	before = player.inventory.to_dict()
 	t.eq(sim.cmd_refill_canteen(923, true).get("reason", ""), "no_fire",
 		"lake alone is not enough for boiling without a real campfire")
