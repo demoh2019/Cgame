@@ -31,6 +31,8 @@ jobs:
         run: godot --headless --path modules/world_partition/demo --script res://tests/quality_controller_test.gd
       - name: Check HLOD blend transitions
         run: godot --headless --path modules/world_partition/demo --script res://tests/hlod_blend_test.gd
+      - name: Verify gameplay cell capture and restore callbacks
+        run: godot --headless --path modules/world_partition/demo --script res://tests/cell_state_contract_test.gd
       - name: Bake 3x3 deterministic HLOD proxy scenes
         run: godot --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=1 --stride=8
       - name: Verify incremental baker skips unchanged proxy assets
