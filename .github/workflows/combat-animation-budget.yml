@@ -1,0 +1,46 @@
+name: Albion After combat animation LOD budget
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_tags/animation_lod_controller.cpp'
+      - 'modules/gameplay_tags/animation_lod_controller.h'
+      - 'modules/gameplay_tags/tests/test_gameplay_tags.h'
+      - 'game/scripts/client/combat_animation_priority.gd'
+      - 'game/scripts/client/character_anim.gd'
+      - 'game/scripts/client/entity_view.gd'
+      - 'game/tests/test_combat_animation_priority.gd'
+      - 'tests/modules/test_combat_animation_budget.py'
+      - '.github/workflows/combat-animation-budget.yml'
+  pull_request:
+    paths:
+      - 'modules/gameplay_tags/animation_lod_controller.cpp'
+      - 'modules/gameplay_tags/animation_lod_controller.h'
+      - 'modules/gameplay_tags/tests/test_gameplay_tags.h'
+      - 'game/scripts/client/combat_animation_priority.gd'
+      - 'game/scripts/client/character_anim.gd'
+      - 'game/scripts/client/entity_view.gd'
+      - 'game/tests/test_combat_animation_priority.gd'
+      - 'tests/modules/test_combat_animation_budget.py'
+      - '.github/workflows/combat-animation-budget.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  code-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            modules/gameplay_tags
+            game/scripts/client
+            game/tests
+            tests/modules
+          sparse-checkout-cone-mode: true
+      - name: Verify native animation slots, culling and stock fallback
+        run: python3 -m unittest tests/modules/test_combat_animation_budget.py -v
