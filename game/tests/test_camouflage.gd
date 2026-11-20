@@ -87,6 +87,9 @@ func run(t) -> void:
 		0.001, "online HUD receives authoritative stealth effectiveness")
 	player.noise_radius = Defs.SPRINT_NOISE_RADIUS
 	player.noise_timer = Defs.SPRINT_NOISE_SECONDS
+	# An infected reevaluates targets on a quarter-second thinking clock.
+	# Trigger the next decision explicitly instead of depending on frame order.
+	walker.think_timer = 0.0
 	server._tick_zombies(0.1)
 	t.eq(walker.target_id, 918, "real server-owned sprint noise breaks concealment")
 	t.eq(server.snapshot_for(918)["you"]["visual_signature"], 1.0,
