@@ -10,6 +10,18 @@
 		<link title="Third Person Shooter (TPS) Demo">https://godotengine.org/asset-library/asset/2710</link>
 	</tutorials>
 	<methods>
+		<method name="add_spatial_trauma">
+			<return type="void" />
+			<param index="0" name="source" type="Vector3" />
+			<param index="1" name="listener" type="Vector3" />
+			<param index="2" name="amount" type="float" />
+			<param index="3" name="inner_radius" type="float" />
+			<param index="4" name="outer_radius" type="float" />
+			<description>
+				Adds location-aware, cosmetic trauma to the camera. The impact has its full intensity within [param inner_radius] metres of [param listener], falls smoothly to zero at [param outer_radius], and is silent beyond that distance. The [param listener] is explicitly provided so elevated or third-person cameras can use the character's position instead of the camera's optical center. The camera's world transform and gameplay position are not altered; only the rendered view shakes.
+				Requires finite positions, a positive [param amount], a nonnegative inner radius and an outer radius larger than the inner radius. Invalid inputs are ignored, and extremely large finite impulse amounts are clamped before accumulation. Useful for explosions, impacts and destructible world feedback without hard distance cutoffs. The game should apply its accessibility shake-scale setting before invoking this method. Provided by the Cgame engine fork.
+			</description>
+		</method>
 		<method name="add_trauma">
 			<return type="void" />
 			<param index="0" name="amount" type="float" />
