@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  register_types.cpp                                                    */
+/*  register_types.cpp                                                   */                                                     */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -35,9 +35,9 @@
 #include "core/object/class_db.h"
 
 void initialize_gameplay_abilities_module(ModuleInitializationLevel p_level) {
-    if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
-        GDREGISTER_CLASS(GameplayAbilitySystem);
-    }
+	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
+		GDREGISTER_CLASS(GameplayAbilitySystem);
+	}
 }
 
 void uninitialize_gameplay_abilities_module(ModuleInitializationLevel p_level) {

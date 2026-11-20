@@ -24,22 +24,22 @@ var instructions: Label
 
 func _ready() -> void:
     abilities = GameplayAbilitySystem.new()
-    assert(abilities.register_ability("fireball", {
+    abilities.register_ability("fireball", {
         "cost": 18.0,
         "cooldown": 0.75,
         "required_tags": PackedStringArray(["role.hero"]),
         "blocked_tags": PackedStringArray(["status.stunned"]),
-    }))
-    assert(abilities.register_ability("dash", {
+    })
+    abilities.register_ability("dash", {
         "cost": 14.0,
         "cooldown": 2.25,
         "blocked_tags": PackedStringArray(["status.stunned"]),
-    }))
-    assert(abilities.register_ability("heal", {
+    })
+    abilities.register_ability("heal", {
         "cost": 35.0,
         "cooldown": 6.0,
         "blocked_tags": PackedStringArray(["status.stunned"]),
-    }))
+    })
     abilities.add_tag("role.hero")
     abilities.ability_activated.connect(_on_ability_activated)
     abilities.cooldown_finished.connect(_on_cooldown_finished)
