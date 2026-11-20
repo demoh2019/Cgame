@@ -84,6 +84,13 @@ Capture a fixed scene/camera and compare:
 - Compatibility at Performance, Balanced and Ultra.
 - Forward+ at Balanced, High and Ultra (with warm shader caches).
 
+The existing `--demo` + `--screenshot` client capture logs now include
+**CPU frame pacing p50/p95/p99**, 1% low FPS and the actual draw call/
+primitive counters. Those frame samples exclude initial scene warmup and
+shader compilation stalls. They are useful to detect frame-time spikes,
+**not a substitute for a GPU profiler**. The pure `render_benchmark.gd`
+implementation has its own `test_render_benchmark.gd` regression suite.
+
 For comparable benchmarks, measure GPU frame-time median/p95,
 draw calls, VRAM, shadows and the cost of volumetric fog in the same
 hardware and location. **No FPS improvement is claimed until real GPU
