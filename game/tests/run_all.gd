@@ -84,6 +84,7 @@ const SUITES := [
 	"res://tests/test_sun_shafts_quality.gd",
 	"res://tests/test_sky_rainbow.gd",
 	"res://tests/test_sky_aurora.gd",
+	"res://tests/test_ambient_birds.gd",
 	"res://tests/test_sun_shadow_atmosphere.gd",
 	"res://tests/test_graphics_reflections.gd",
 	"res://tests/test_pbr_reflection_occlusion.gd",

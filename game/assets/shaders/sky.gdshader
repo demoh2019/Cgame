@@ -256,6 +256,25 @@ void sky() {
 		// The same cached cloud field shades distant terrain and the upper sky.
 		// Do not use the camera position or built-in TIME: Godot would refresh
 		// sky radiance on every camera move/frame instead of the chosen cadence.
+		if (aurora_strength > 0.001 && up > 0.04) {
+			// Curtains hang on a high plane; ray-march a few layers for vertical streaks.
+			vec3 acc = vec3(0.0);
+			for (int i = 0; i < 6; i++) {
+				float hgt = 1.0 + float(i) * 0.09;
+				vec2 q = dir.xz * (hgt / up) * 0.35;
+				float t = sky_time * 0.02;
+				// Folded ribbon: a wavy line in the plane, thickened by noise.
+				float wave = q.y + sin(q.x * 1.3 + t * 3.0) * 0.35 + vnoise(vec3(q * 1.7, t)) * 0.6;
+				float band = exp(-pow(fract(wave * 0.5) - 0.5, 2.0) * 60.0);
+				float rays = 0.55 + 0.45 * vnoise(vec3(q.x * 14.0, 0.0, t * 4.0));
+				float layer = float(i) / 5.0;
+				vec3 tint = mix(vec3(0.1, 1.0, 0.45), vec3(0.55, 0.2, 0.9), layer * layer);
+				acc += tint * band * rays * (1.0 - layer * 0.7);
+			}
+			float altitude_fade = smoothstep(0.04, 0.2, up) * (1.0 - smoothstep(0.55, 0.9, up));
+			float pulse = 0.75 + 0.25 * sin(sky_time * 0.05);
+			color += acc * 0.12 * aurora_strength * altitude_fade * pulse;
+		}
 		if (cirrus_detail > 0 && cirrus_opacity > 0.001 && up > 0.08) {
 			// Project directions onto a fixed-height cloud plane. Avoid its
 			// horizon singularity and fade the layer out before the clamp.
@@ -358,25 +377,6 @@ void sky() {
 			float horizon_fade = smoothstep(0.03, 0.18, up);
 			trans = mix(1.0, trans, horizon_fade);
 			color = color * trans + scat * horizon_fade;
-		}
-		if (aurora_strength > 0.001 && up > 0.04) {
-			// Curtains hang on a high plane; ray-march a few layers for vertical streaks.
-			vec3 acc = vec3(0.0);
-			for (int i = 0; i < 6; i++) {
-				float hgt = 1.0 + float(i) * 0.09;
-				vec2 q = dir.xz * (hgt / up) * 0.35;
-				float t = sky_time * 0.02;
-				// Folded ribbon: a wavy line in the plane, thickened by noise.
-				float wave = q.y + sin(q.x * 1.3 + t * 3.0) * 0.35 + vnoise(vec3(q * 1.7, t)) * 0.6;
-				float band = exp(-pow(fract(wave * 0.5) - 0.5, 2.0) * 60.0);
-				float rays = 0.55 + 0.45 * vnoise(vec3(q.x * 14.0, 0.0, t * 4.0));
-				float layer = float(i) / 5.0;
-				vec3 tint = mix(vec3(0.1, 1.0, 0.45), vec3(0.55, 0.2, 0.9), layer * layer);
-				acc += tint * band * rays * (1.0 - layer * 0.7);
-			}
-			float altitude_fade = smoothstep(0.04, 0.2, up) * (1.0 - smoothstep(0.55, 0.9, up));
-			float pulse = 0.75 + 0.25 * sin(sky_time * 0.05);
-			color += acc * 0.12 * aurora_strength * altitude_fade * pulse;
 		}
 		if (rainbow_strength > 0.001 && up > 0.0) {
 			// Angle from the antisolar point in degrees (Descartes' rainbow geometry).

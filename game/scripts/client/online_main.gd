@@ -25,6 +25,7 @@ const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
+const AmbientBirds = preload("res://scripts/client/ambient_birds.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -103,6 +104,7 @@ var _visual_weather_wind := Vector2.ZERO
 var _visual_biome := "plains"
 var atmosphere
 var _ambient_motes
+var _ambient_birds
 var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
@@ -1084,6 +1086,9 @@ func _on_welcomed() -> void:
 	_ambient_motes = AmbientMotes.new()
 	_ambient_motes.setup(client.world)
 	add_child(_ambient_motes)
+	# Circling bird flock overhead in daylight; one MultiMesh draw call.
+	_ambient_birds = AmbientBirds.new()
+	add_child(_ambient_birds)
 	audio = Audio.new()
 	add_child(audio)
 	client.event_received.connect(func(event: Dictionary) -> void: audio.on_event(event, client.peer_id, client.world.height_at))
@@ -1379,6 +1384,9 @@ func _update_time_of_day(delta: float) -> void:
 			_ambient_motes.update_view(here, "" if underground else _visual_biome,
 				atmosphere.light_level, atmosphere.storm, _visual_weather_wind,
 				GraphicsQuality.level(), delta)
+		if _ambient_birds != null:
+			_ambient_birds.update_view(here, WorldCycle.daylight(clock), atmosphere.storm,
+				GraphicsQuality.level(), delta, underground)
 
 
 func _aim_direction() -> Vector2:
