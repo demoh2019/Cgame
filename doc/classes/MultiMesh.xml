@@ -113,6 +113,16 @@
 				Sets the [Transform2D] for a specific instance.
 			</description>
 		</method>
+		<method name="remove_visible_instance">
+			<return type="bool" />
+			<param index="0" name="instance" type="int" />
+			<description>
+				Removes one currently visible instance from the active prefix without resizing the [MultiMesh] buffer. This is a constant-time swap-removal: the last visible instance's complete payload (transform, optional color and custom data) replaces the removed slot, then [member visible_instance_count] decreases by one. The actual [member instance_count] remains unchanged.
+				If [member visible_instance_count] is [code]-1[/code], all allocated instances are initially considered visible. Removing the final visible instance sets the visible count to [code]0[/code], not [code]-1[/code]. Returns [code]false[/code] for a negative index, an index outside the currently visible prefix, or when no instances remain, without changing the buffer or its visibility.
+				[b]Important:[/b] This method does not preserve the order or stable IDs of visible instances. Maintain a separate mapping between game entity IDs and buffer indices if they must survive removal or serialization. Physics interpolation is reset for swapped slots via [method swap_instance_data].
+				[b]Note:[/b] This operation does not affect collision objects, navigation data or higher-level game entities. It removes the instance only from rendering.
+			</description>
+		</method>
 		<method name="swap_instance_data">
 			<return type="bool" />
 			<param index="0" name="first" type="int" />

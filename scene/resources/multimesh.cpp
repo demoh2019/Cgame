@@ -343,6 +343,19 @@ bool MultiMesh::swap_instance_data(int p_first, int p_second) {
 	return true;
 }
 
+bool MultiMesh::remove_visible_instance(int p_instance) {
+	const int active_count = visible_instance_count == -1 ? instance_count : visible_instance_count;
+	ERR_FAIL_INDEX_V_MSG(p_instance, active_count, false, "Only a visible instance index can be removed.");
+
+	const int last_visible_index = active_count - 1;
+	if (p_instance != last_visible_index && !swap_instance_data(p_instance, last_visible_index)) {
+		return false;
+	}
+	// Keeps the allocated instance_count unchanged and hides the last active slot.
+	set_visible_instance_count(last_visible_index);
+	return true;
+}
+
 void MultiMesh::reset_instance_physics_interpolation(int p_instance) {
 	ERR_FAIL_INDEX_MSG(p_instance, instance_count, "Instance index out of bounds. Instance index must be less than `instance_count` and greater than or equal to zero.");
 	RenderingServer::get_singleton()->multimesh_instance_reset_physics_interpolation(multimesh, p_instance);
@@ -426,6 +439,7 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_instance_custom_data", "instance", "custom_data"), &MultiMesh::set_instance_custom_data);
 	ClassDB::bind_method(D_METHOD("get_instance_custom_data", "instance"), &MultiMesh::get_instance_custom_data);
 	ClassDB::bind_method(D_METHOD("swap_instance_data", "first", "second"), &MultiMesh::swap_instance_data);
+	ClassDB::bind_method(D_METHOD("remove_visible_instance", "instance"), &MultiMesh::remove_visible_instance);
 	ClassDB::bind_method(D_METHOD("reset_instance_physics_interpolation", "instance"), &MultiMesh::reset_instance_physics_interpolation);
 	ClassDB::bind_method(D_METHOD("reset_instances_physics_interpolation"), &MultiMesh::reset_instances_physics_interpolation);
 	ClassDB::bind_method(D_METHOD("set_custom_aabb", "aabb"), &MultiMesh::set_custom_aabb);

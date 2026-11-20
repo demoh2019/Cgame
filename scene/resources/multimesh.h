@@ -117,6 +117,8 @@ public:
 
 	// Swap transforms, colors and custom shader data without changing instance count.
 	bool swap_instance_data(int p_first, int p_second);
+	// Swap-remove from visible prefix while preserving full per-instance payload.
+	bool remove_visible_instance(int p_instance);
 
 	void reset_instance_physics_interpolation(int p_instance);
 	void reset_instances_physics_interpolation();
