@@ -13,6 +13,7 @@ const SUITES := [
 	"res://tests/test_graphics_quality.gd",
 	"res://tests/test_graphics_auto_quality.gd",
 	"res://tests/test_graphics_detail.gd",
+	"res://tests/test_sky_lighting_budget.gd",
 	"res://tests/test_grass_lod.gd",
 	"res://tests/test_world_roads.gd",
 	"res://tests/test_road_travel.gd",
