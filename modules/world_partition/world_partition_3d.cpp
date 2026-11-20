@@ -79,6 +79,11 @@ String WorldPartition3D::_get_scene_path(const Vector2i &p_cell) const {
 	return value;
 }
 
+bool WorldPartition3D::_is_cell_layer_enabled(const Vector2i &p_cell) const {
+	const String layer = get_cell_layer(p_cell);
+	return layer.is_empty() || is_layer_enabled(layer);
+}
+
 void WorldPartition3D::_capture_cell_state(const Vector2i &p_cell, Node *p_instance) {
 	if (p_instance == nullptr || !p_instance->has_method(SNAME("capture_streaming_state"))) {
 		return;
@@ -404,6 +409,88 @@ int WorldPartition3D::get_pinned_cell_count() const {
 	return pinned_cells.size();
 }
 
+void WorldPartition3D::set_cell_layers(const Dictionary &p_layers) {
+	Dictionary clean;
+	const Array keys = p_layers.keys();
+	for (int i = 0; i < keys.size(); i++) {
+		const Variant key = keys[i];
+		const Variant value = p_layers[key];
+		if (key.get_type() == Variant::VECTOR2I && value.get_type() == Variant::STRING && !String(value).is_empty()) {
+			clean[key] = value;
+		}
+	}
+	cell_layers = clean;
+	layer_update_needed = true;
+}
+
+Dictionary WorldPartition3D::get_cell_layers() const {
+	return cell_layers.duplicate();
+}
+
+void WorldPartition3D::set_cell_layer(const Vector2i &p_cell, const String &p_layer) {
+	if (p_layer.is_empty()) {
+		clear_cell_layer(p_cell);
+		return;
+	}
+	if (get_cell_layer(p_cell) == p_layer) {
+		return;
+	}
+	cell_layers[p_cell] = p_layer;
+	layer_update_needed = true;
+}
+
+String WorldPartition3D::get_cell_layer(const Vector2i &p_cell) const {
+	if (!cell_layers.has(p_cell)) {
+		return String();
+	}
+	return cell_layers[p_cell];
+}
+
+void WorldPartition3D::clear_cell_layer(const Vector2i &p_cell) {
+	if (cell_layers.has(p_cell)) {
+		cell_layers.erase(p_cell);
+		layer_update_needed = true;
+	}
+}
+
+void WorldPartition3D::set_layer_states(const Dictionary &p_states) {
+	Dictionary clean;
+	const Array keys = p_states.keys();
+	for (int i = 0; i < keys.size(); i++) {
+		const Variant key = keys[i];
+		const Variant value = p_states[key];
+		if (key.get_type() == Variant::STRING && !String(key).is_empty() && value.get_type() == Variant::BOOL) {
+			clean[key] = value;
+		}
+	}
+	layer_states = clean;
+	layer_update_needed = true;
+}
+
+Dictionary WorldPartition3D::get_layer_states() const {
+	return layer_states.duplicate();
+}
+
+void WorldPartition3D::set_layer_enabled(const String &p_layer, bool p_enabled) {
+	ERR_FAIL_COND_MSG(p_layer.is_empty(), "WorldPartition3D layer name must be nonempty.");
+	if (is_layer_enabled(p_layer) == p_enabled) {
+		return;
+	}
+	layer_states[p_layer] = p_enabled;
+	layer_update_needed = true;
+}
+
+bool WorldPartition3D::is_layer_enabled(const String &p_layer) const {
+	if (p_layer.is_empty() || !layer_states.has(p_layer)) {
+		return true;
+	}
+	return layer_states[p_layer];
+}
+
+bool WorldPartition3D::is_cell_layer_enabled(const Vector2i &p_cell) const {
+	return _is_cell_layer_enabled(p_cell);
+}
+
 void WorldPartition3D::set_cell_scenes(const Dictionary &p_cells) {
 	Dictionary clean;
 	const Array keys = p_cells.keys();
@@ -495,7 +582,7 @@ Array WorldPartition3D::get_cells_in_radius(const Vector2i &p_center, int p_radi
 
 void WorldPartition3D::_stream_candidate_cell(const Vector2i &p_cell, int &r_new_requests, int &r_instances) {
 	// Shared request and instance budgets for pinned and observer cells.
-	if (active_cells.has(p_cell) || failed_cells.has(p_cell)) {
+	if (!_is_cell_layer_enabled(p_cell) || active_cells.has(p_cell) || failed_cells.has(p_cell)) {
 		return;
 	}
 	const String path = _get_scene_path(p_cell);
@@ -636,7 +723,7 @@ void WorldPartition3D::update_streaming() {
 		// With a valid observer, ordinary distance-based eviction runs normally.
 		unload_after_last_pin_removed = false;
 	}
-	if (centers.is_empty() && pinned_cells.is_empty() && !unload_after_last_pin_removed) {
+	if (centers.is_empty() && pinned_cells.is_empty() && !unload_after_last_pin_removed && !layer_update_needed) {
 		// Preserve cells if all observer nodes disappear temporarily without
 		// an explicit pin release (e.g., a brief scene-tree reparenting).
 		_purge_unused_ready_scenes();
@@ -646,9 +733,12 @@ void WorldPartition3D::update_streaming() {
 		return;
 	}
 
+	// If no observer remains, preserve unrelated cells unless the last pin was
+	// explicitly released. A layer deactivation still removes its own cells.
+	const bool distance_eviction = !centers.is_empty() || !pinned_cells.is_empty() || unload_after_last_pin_removed;
 	Vector<Vector2i> unload;
 	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
-		if ((!pinned_cells.has(E.key) && !_within_any_radius(E.key, centers, unload_radius)) || ObjectDB::get_instance(E.value) == nullptr) {
+		if (!_is_cell_layer_enabled(E.key) || (distance_eviction && !pinned_cells.has(E.key) && !_within_any_radius(E.key, centers, unload_radius)) || ObjectDB::get_instance(E.value) == nullptr) {
 			unload.push_back(E.key);
 		}
 	}
@@ -665,7 +755,7 @@ void WorldPartition3D::update_streaming() {
 
 	Vector<Vector2i> cancel;
 	for (const KeyValue<Vector2i, String> &E : pending_cells) {
-		if (!pinned_cells.has(E.key) && !_within_any_radius(E.key, centers, load_radius)) {
+		if (!_is_cell_layer_enabled(E.key) || (distance_eviction && !pinned_cells.has(E.key) && !_within_any_radius(E.key, centers, load_radius))) {
 			cancel.push_back(E.key);
 		}
 	}
@@ -695,6 +785,16 @@ void WorldPartition3D::update_streaming() {
 		}
 	}
 	_purge_unused_ready_scenes();
+	bool disabled_active = false;
+	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
+		if (!_is_cell_layer_enabled(E.key)) {
+			disabled_active = true;
+			break;
+		}
+	}
+	if (!disabled_active) {
+		layer_update_needed = false;
+	}
 	if (centers.is_empty() && pinned_cells.is_empty() && active_cells.is_empty() && pending_cells.is_empty()) {
 		unload_after_last_pin_removed = false;
 	}
@@ -756,6 +856,16 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_cell_pinned", "cell"), &WorldPartition3D::is_cell_pinned);
 	ClassDB::bind_method(D_METHOD("get_pinned_cells"), &WorldPartition3D::get_pinned_cells);
 	ClassDB::bind_method(D_METHOD("get_pinned_cell_count"), &WorldPartition3D::get_pinned_cell_count);
+	ClassDB::bind_method(D_METHOD("set_cell_layers", "layers"), &WorldPartition3D::set_cell_layers);
+	ClassDB::bind_method(D_METHOD("get_cell_layers"), &WorldPartition3D::get_cell_layers);
+	ClassDB::bind_method(D_METHOD("set_cell_layer", "cell", "layer"), &WorldPartition3D::set_cell_layer);
+	ClassDB::bind_method(D_METHOD("get_cell_layer", "cell"), &WorldPartition3D::get_cell_layer);
+	ClassDB::bind_method(D_METHOD("clear_cell_layer", "cell"), &WorldPartition3D::clear_cell_layer);
+	ClassDB::bind_method(D_METHOD("set_layer_states", "states"), &WorldPartition3D::set_layer_states);
+	ClassDB::bind_method(D_METHOD("get_layer_states"), &WorldPartition3D::get_layer_states);
+	ClassDB::bind_method(D_METHOD("set_layer_enabled", "layer", "enabled"), &WorldPartition3D::set_layer_enabled);
+	ClassDB::bind_method(D_METHOD("is_layer_enabled", "layer"), &WorldPartition3D::is_layer_enabled);
+	ClassDB::bind_method(D_METHOD("is_cell_layer_enabled", "cell"), &WorldPartition3D::is_cell_layer_enabled);
 	ClassDB::bind_method(D_METHOD("set_cell_state", "cell", "state"), &WorldPartition3D::set_cell_state);
 	ClassDB::bind_method(D_METHOD("get_cell_state", "cell"), &WorldPartition3D::get_cell_state);
 	ClassDB::bind_method(D_METHOD("has_cell_state", "cell"), &WorldPartition3D::has_cell_state);
@@ -783,6 +893,8 @@ void WorldPartition3D::_bind_methods() {
 	ADD_GROUP("World Grid", "");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "1,4096,1,or_greater,suffix:m"), "set_cell_size", "get_cell_size");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "cell_scenes"), "set_cell_scenes", "get_cell_scenes");
+	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "cell_layers"), "set_cell_layers", "get_cell_layers");
+	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "layer_states"), "set_layer_states", "get_layer_states");
 	ADD_GROUP("Streaming", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "streaming_enabled"), "set_streaming_enabled", "is_streaming_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "observer_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Node3D"), "set_observer_path", "get_observer_path");

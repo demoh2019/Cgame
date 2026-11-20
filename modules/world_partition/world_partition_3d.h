@@ -42,6 +42,9 @@ class WorldPartition3D : public Node3D {
 	GDCLASS(WorldPartition3D, Node3D);
 
 	Dictionary cell_scenes;
+	Dictionary cell_layers;
+	Dictionary layer_states;
+	bool layer_update_needed = false;
 	NodePath observer_path;
 	Array additional_observer_paths;
 	Vector<Vector2i> pinned_cells;
@@ -66,6 +69,7 @@ class WorldPartition3D : public Node3D {
 	void _append_source_center(const NodePath &p_path, Vector<Vector2i> &r_centers) const;
 	bool _within_any_radius(const Vector2i &p_cell, const Vector<Vector2i> &p_centers, int p_radius) const;
 	String _get_scene_path(const Vector2i &p_cell) const;
+	bool _is_cell_layer_enabled(const Vector2i &p_cell) const;
 	void _capture_cell_state(const Vector2i &p_cell, Node *p_instance);
 	void _restore_cell_state(const Vector2i &p_cell, Node *p_instance);
 	void _unload_cell(const Vector2i &p_cell);
@@ -118,6 +122,17 @@ public:
 	bool is_cell_pinned(const Vector2i &p_cell) const;
 	Array get_pinned_cells() const;
 	int get_pinned_cell_count() const;
+
+	void set_cell_layers(const Dictionary &p_layers);
+	Dictionary get_cell_layers() const;
+	void set_cell_layer(const Vector2i &p_cell, const String &p_layer);
+	String get_cell_layer(const Vector2i &p_cell) const;
+	void clear_cell_layer(const Vector2i &p_cell);
+	void set_layer_states(const Dictionary &p_states);
+	Dictionary get_layer_states() const;
+	void set_layer_enabled(const String &p_layer, bool p_enabled);
+	bool is_layer_enabled(const String &p_layer) const;
+	bool is_cell_layer_enabled(const Vector2i &p_cell) const;
 
 	void set_cell_state(const Vector2i &p_cell, const Dictionary &p_state);
 	Dictionary get_cell_state(const Vector2i &p_cell) const;
