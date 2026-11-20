@@ -6,6 +6,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Threat = preload("res://scripts/shared/threat.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
+const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -29,6 +30,9 @@ var investigate_time: float = 0.0
 const INVESTIGATE_SECONDS := 4.0
 var think_timer: float = 0.0
 var attack_timer: float = 0.0
+var spit_pending: bool = false # Delayed ground attack, only for "spitter".
+var spit_seconds: float = 0.0
+var spit_center: Vector2 = Vector2.ZERO
 var stuck_time: float = 0.0
 var contributors: Dictionary = {} # Server: peer -> time + equipped weapon for PvE assist XP.
 var data: Dictionary
@@ -74,6 +78,14 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 		forced_target_id = -1
 	think_timer -= delta
 	var here := Vector2(position.x, position.z)
+	# Resolve a fixed warned location ONCE, even if the chosen target moved
+	# away. Actual player damage is decided later by GameServer.
+	if type == "spitter" and spit_pending:
+		spit_seconds = maxf(0.0, spit_seconds - delta)
+		if spit_seconds <= 0.0:
+			spit_pending = false
+			return {"spit_impact": true, "x": spit_center.x, "z": spit_center.y}
+		return {}
 
 	# Pick or drop a target a few times a second, not every tick.
 	if think_timer <= 0.0:
@@ -117,6 +129,16 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				investigate_time = INVESTIGATE_SECONDS
 				return {}
 			last_known_target = target
+			if type == "spitter" and AcidSpitter.can_launch(distance):
+				state = State.ATTACK
+				yaw = atan2(target.x - here.x, target.y - here.y)
+				if attack_timer <= 0.0:
+					attack_timer = AcidSpitter.COOLDOWN
+					spit_pending = true
+					spit_seconds = AcidSpitter.WINDUP_SECONDS
+					spit_center = target
+					return {"spit_warning": true, "x": target.x, "z": target.y}
+				return {}
 			if distance <= float(data["attack_range"]):
 				state = State.ATTACK
 				yaw = atan2(target.x - here.x, target.y - here.y)
@@ -177,7 +199,12 @@ func _select_target(players: Dictionary, here: Vector2) -> void:
 		# Night makes infected more vigilant; cap new detection by pursuit leash.
 		# Hearing remains independent of night and is always authoritative.
 		var sight_multiplier := clampf(float(info.get("notice_multiplier", 1.0)), 1.0, 1.35)
-		var notice := minf(float(data["notice"]) * sight_multiplier, float(data["lose"]) - 1.0)
+		# Camouflage applies to sight only; noise and blood scent keep their
+		# original independent detection ranges and active targets stay locked.
+		var visual_raw: float = float(info.get("visual_signature", 1.0))
+		var visual: float = 1.0 if not is_finite(visual_raw) else clampf(visual_raw, 0.35, 1.0)
+		var notice := minf(float(data["notice"]) * sight_multiplier * visual,
+			float(data["lose"]) - 1.0)
 		var hearing := clampf(float(info.get("noise", 0.0)), 0.0, float(data["lose"]) - 1.0)
 		# Scent can improve discovery but never expands the pursuit leash,
 		# overrides combat threat or bypasses safe/dead player protections.
@@ -263,6 +290,8 @@ func take_damage(amount: float, attacker_id: int = -1) -> bool:
 	health = maxf(0.0, health - amount)
 	if health <= 0.0:
 		state = State.DEAD
+		spit_pending = false
+		spit_seconds = 0.0
 		threat.clear()
 		return true
 	if state == State.IDLE or state == State.WANDER:

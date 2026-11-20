@@ -2073,3 +2073,188 @@ definitions, `scripts/server/game_server.gd`, and both clients.
 Headless regression suite `game/tests/test_frontier_stim.gd` is
 registered in `game/tests/run_all.gd`. Native engine changes are not
 required for a fully server-owned, inventory-paid consumable.
+
+## Ghillie cloaks T2-T4: classless stealth against infected
+
+Craft **Ghillie Cloak T2–T4** at the workbench from tier-matched
+cloth (4), fiber (6) and one plank. The cloaks use the existing armor slot,
+crafting mastery, trading and full-loot system. They provide deliberately
+less damage reduction than combat jackets or stormcoats. No native engine
+API extension is required.
+
+**While quiet**, a T2/T3/T4 cloak reduces *visual* acquisition range of
+idle infected by 38%/45%/52%, before normal day/night adjustments.
+Running or firing a noisy weapon interrupts concealment until its audible
+effect expires. Blood scent from untreated wounds and pack/combat aggro
+are not negated; an already engaged enemy keeps chasing. The server
+derives the modifier strictly from still-carried equipped armor and its
+own sound timer, never from client requests. Both the online HUD and
+local 3D preview display concealment status; nearby enemies still use
+normal safe-zone and sight/hearing rules.
+
+Regressions: `game/tests/test_camouflage.gd` in the canonical suite.
+
+
+## Hearty cooked meals — classless expedition recovery
+
+Cooked coastal fish are now a meaningful **temporary combat provision** as
+well as normal hunger-restoring food. This connects Days After cooking and
+survival with Albion/Lineage-style preparation for expeditions, without
+adding a fixed class or any client-authoritative stat changes.
+
+- Eating a carried **cooked fish T1–T4** grants a single, non-stacking meal
+  buff lasting **120 / 150 / 180 / 210 seconds**, respectively.
+- During the buff, a nourished and hydrated survivor gains **+2.0 / +2.5 /
+  +3.0 / +3.5 stamina per second** after the normal sprint/dodge recovery delay,
+  and **+0.75 / +1.0 / +1.25 / +1.5 combat energy per second**. Existing
+  stamina/energy maxima still apply. Starving or dehydrated characters
+  get no additional recovery.
+- Eating another cooked fish **replaces** the current tier and duration;
+  it cannot stack the timers or inflate recovery. Berries and canned
+  food remain food only, with no temporary combat bonus.
+- The authoritative `GameServer.cmd_use` consumes one real cooked item.
+  All recovery and expiry occur on the server tick, including partial
+  final frames. The buff is **persisted with strict validation** through
+  logouts and reconnects, and cleared on death/respawn. Older version-1
+  characters with no buff fields load with an inactive effect.
+- The multiplayer and local survivor HUDs display the meal tier, seconds
+  remaining and recovery rates. No new networking endpoint is required;
+  the owner snapshot contains `meal_tier` and `meal_seconds`.
+
+Implementation: `scripts/shared/hearty_meal.gd` and
+`scripts/server/game_server.gd`. Headless tests:
+`tests/test_hearty_meal.gd`, registered by `tests/run_all.gd`.
+
+Run `godot --headless --path game --script res://tests/run_all.gd` to
+verify game food, stamina, combat energy, save safety and respawn regressions.
+This uses existing Cgame server simulation and HUD primitives; no native
+engine extension was needed.
+
+## Acid spitters: telegraphed red/black-zone infected PvE
+
+A new **spitter** enemy appears rarely among red-zone ruins and more
+frequently in black zones, but never spawns in the protected green/yellow
+wilderness. A spitter takes position 3–12 metres from its target and
+winds up a corrosive area attack for **1.4 seconds**. A bright green
+**2.4-metre-radius** ground marker shows the exact landing zone; players
+can leave it or time a dodge. The server freezes the target point at
+warning time, never follows a moving player, and resolves one impact
+against nearby survivors only once. The infected's volley has a
+**6-second cooldown**, deals 14 base damage and can add an infected wound.
+
+The existing armor, dodge, guardian group protection, PvE wound ward and
+safe-zone checks are respected. PvP attacks and ordinary zombie melee
+remain unchanged; a dead spitter cannot land a pending projectile. The
+online interest-filtered snapshots expose warning positions but do not
+expose internal AI target IDs. Both the local playable scene and online
+clients render the ground warning, and the multiplayer HUD announces
+incoming acid. Normal spitter defeats award ordinary combat mastery and
+renown; no client can spawn or control this enemy.
+
+Regression checks are in `game/tests/test_acid_spitter.gd`, registered
+in the canonical headless runner. This uses Cgame's current AI, materials
+and networking APIs without requiring new C++-engine primitives.
+
+
+## Herbal scent salve — craftable survival stealth versus bleeding detection
+
+In the canonical `game/`, survivors can craft a **Herbal Scent Salve**
+from **2× T1 fiber + 1× T1 cloth + 1× clean water bottle**, anywhere in
+the field (no workbench required). A real carried salve can be applied
+for **120 seconds** of temporary camouflage.
+
+While active, the server suppresses *only the extra blood scent* that
+otherwise lets infected locate a badly bleeding survivor from farther
+away. Normal zombie visual range, gunshot/sprint hearing, existing
+combat aggro and pursuit leashes all remain in effect. The paste does
+not heal bleeding, stop infection, restore health or remove an existing
+zombie chase; bandages and medical aid remain important.
+
+The effect is strictly server-owned and inventory-paid. Repeated use
+while active returns `already_masked` without deducting a second
+salve. Its remaining duration is stored as `scent_mask_seconds` in the
+existing version-1 survivor save and validated as a finite number in
+the range 0–120 before any state mutation. Older character saves
+default to zero. Timer decreases only with game simulation and is
+cleared on character death and respawn.
+
+Local preview: **/** applies a carried salve; HUD shows active time and
+the actual post-mask blood detection radius. Online multiplayer:
+click the carried salve in inventory (existing authenticated
+`c_use` path); the owner's snapshot shows the remaining time and
+adjusted blood-scent risk without broadcasting private wounds or
+stealth duration to nearby clients.
+
+Implementation: `scripts/shared/field_scent_mask.gd`,
+`scripts/shared/blood_scent.gd`, `scripts/shared/survival.gd`,
+`scripts/server/game_server.gd`, item definitions and both clients.
+`game/tests/test_scent_mask.gd` is registered in the headless
+regression suite and covers field crafting, scent-versus-sight,
+paid-use replay, expiry, older saves, invalid durations and respawn.
+No engine-native extensions are necessary; the existing Cgame AI,
+crafting, character persistence and network primitives suffice.
+
+
+## Verified guild banners for contested outposts
+
+Outposts are now marked with a **live Nakama-verified guild banner** when
+their current owning party contains at least two online members and **every
+member** belongs to the *same* verified guild. Mixed parties, guests,
+unverified memberships, missing party rosters and neutral flags never show
+a guild banner. Guild IDs and names are derived on the server from trusted
+player sessions; they cannot be set by an ENet request or loaded from an
+untrusted character save. The outpost snapshot exposes only the public
+guild name and ID, never a player's account ID or guild administration
+rank. The closest-outpost HUD displays the clan name and shows *CLAN ALLY*
+for fellow guild members who are in another temporary party.
+
+During ownership, nearby guild members are counted on the owning party's
+defensive side, so allied parties no longer falsely **contest** the flag.
+Verified guildmates can also receive the existing small, 18-metre stamina
+rally bonus even when not in the owner's temporary group. Guild members
+cannot spend siege declaration materials to declare war on their clan's
+outpost, or expend breaching materials against its fortifications.
+Hostile parties and unaffiliated guests retain all existing PvP rules.
+
+No guild advantages are permanently cached in world state: banners and
+permissions are recomputed from the **current** online party roster on
+each server update. Changing/leaving a guild, disbanding a party or
+losing the point removes its banner and allied privileges. Since group
+memberships are refreshed by the existing Nakama server integration,
+changes are reflected after refresh (up to 45 seconds) or reconnect.
+Capture and siege windows otherwise continue to use the established
+party mechanics.
+
+This is the integration layer toward **persistent guild-based ownership**,
+not a claim that outposts or victories survive a server restart. Durable
+Nakama ownership, distributed locks, guild treasury and crash-safe
+siege results must be added before claiming persistent castle wars.
+Implementation: `scripts/shared/guild_territory.gd` and
+`territory_control.gd`; regression checks in
+`tests/test_guild_territory.gd` through `tests/run_all.gd`.
+No native Cgame engine change was needed.
+
+## Lingering acid pools after spitter attacks
+
+The **acid spitter** now leaves a shallow corrosive patch for **5 seconds**
+after its original telegraphed impact. The initial hit remains the same;
+survivors standing in the patch take **3 base damage each second** plus a
+small infected wound. This forces parties to reposition instead of camping
+on a fixed raid position. Armor, dodge immunity, guardian mitigation,
+wound resistance and safe-zone rules still apply.
+
+An authoritative server maximum of **64 active patches** prevents
+unbounded world entities; two overlapping pools are globally limited
+to **one periodic hit per survivor per second**, not multiplicative burst
+damage. Skipped server frames never cause a backlog of damage, and expired
+pools cannot apply damage later. Only the patch center, radius and
+remaining lifetime are interest-filtered to clients; actor identifiers and
+hit cooldowns stay private on the server.
+
+Both playable clients render yellow-green shallow pools in-world and remove
+them when they expire. These hazards are temporary gameplay state, not
+persistent map edits, craftable resources or new PvP interactions. Headless
+regressions in `tests/test_acid_pools.gd` cover initial splash, delayed
+damage, immunity, overlapping pools, out-of-area movement, safe hubs,
+expiry, network privacy and disconnect cleanup. Existing Cgame API
+capabilities are sufficient.

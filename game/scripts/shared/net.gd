@@ -197,6 +197,8 @@ func leave(peer: int) -> bool:
 	# the final Nakama character. Otherwise a disconnect could save gear
 	# from before the drop, creating both a public bag and a retained copy.
 	sim.prepare_disconnect(peer)
+	# Ranked duel forfeits must be reflected in the final account save.
+	sim._abort_training(peer, "disconnected")
 	var data: Dictionary = sim.character_data(player)
 	if user_id != "":
 		_departing_accounts[user_id] = true
@@ -374,6 +376,27 @@ func c_contract(action: String) -> void:
 ## Party identities are always the RPC sender; the client can only nominate
 ## a nearby target to invite/kick, never the leader or group identifier.
 @rpc("any_peer", "reliable")
+func c_duel_invite(target_id: int, ranked: bool = false) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "duel", sim.cmd_duel_invite(peer, target_id, ranked))
+
+
+@rpc("any_peer", "reliable")
+func c_duel_accept() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "duel", sim.cmd_duel_accept(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_duel_cancel() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "duel", sim.cmd_duel_cancel(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_party_invite(target_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -406,6 +429,13 @@ func c_party_rally() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "rally", sim.cmd_party_rally(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_party_feast(item_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_feast", sim.cmd_party_feast(peer, item_id))
 
 
 @rpc("any_peer", "reliable")
@@ -662,7 +692,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk":
+		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "duel", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast":
 			return event.get("peer", -1) == peer
 		"party_aid":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
@@ -677,7 +707,8 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
 			return event.get("id", -1) == peer or event.get("by", 0) == peer or _is_nearby(event, peer)
-		"attack", "zombie_died", "decoy_thrown", "siege_started", "raid_started", \
+		"attack", "zombie_died", "decoy_thrown", "spit_warning", "spit_impact",
+				"siege_started", "raid_started", \
 				"raid_warning", "raid_slam", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
 			return _is_nearby(event, peer)
 	return false

@@ -4,6 +4,9 @@ extends Node3D
 ## call GameServer. Multiplayer transport will be wired to this presentation separately.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
+const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
+const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
@@ -48,6 +51,8 @@ var _chunks: Dictionary = {}
 var _resource_meshes: Dictionary = {}
 var _crate_meshes: Dictionary = {}
 var _zombie_meshes: Dictionary = {}
+var _spit_warning_meshes: Dictionary = {}
+var _acid_pool_meshes: Dictionary = {}
 var _barricade_bodies: Dictionary = {}
 var _campfire_visuals: Dictionary = {}
 var _decoy_visuals: Dictionary = {}
@@ -102,6 +107,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_campfire", KEY_O)
 	_bind_key("survive_decoy", KEY_COMMA)
 	_bind_key("survive_stim", KEY_PERIOD)
+	_bind_key("survive_scent_mask", KEY_SLASH)
 	_bind_key("survive_refuel", KEY_9)
 	_bind_key("survive_extinguish", KEY_MINUS)
 	_bind_key("survive_repair", KEY_H)
@@ -351,7 +357,8 @@ func _sync_zombies() -> void:
 		if not _zombie_meshes.has(zombie.id):
 			var mesh := _mesh(
 				Vector3(1.05, 1.95, 1.05) if zombie.elite else Vector3(0.85, 1.6, 0.85),
-				Color(0.98, 0.65, 0.18) if zombie.elite else Color(0.66, 0.37, 0.35))
+				Color(0.98, 0.65, 0.18) if zombie.elite else (
+					Color(0.4, 0.9, 0.23) if zombie.type == "spitter" else Color(0.66, 0.37, 0.35)))
 			add_child(mesh)
 			_zombie_meshes[zombie.id] = mesh
 		_zombie_meshes[zombie.id].position = zombie.position + Vector3(0.0, 0.975 if zombie.elite else 0.8, 0.0)
@@ -359,6 +366,71 @@ func _sync_zombies() -> void:
 		if not active.has(zombie_id):
 			_zombie_meshes[zombie_id].queue_free()
 			_zombie_meshes.erase(zombie_id)
+
+
+## Local preview uses the same server-authored telegraphs as online play.
+func _sync_spit_warnings() -> void:
+	var visible: Dictionary = {}
+	for zombie in sim.zombies.values():
+		if zombie.type != "spitter" or not zombie.is_alive() or not zombie.spit_pending:
+			continue
+		if Vector2(survivor.position.x, survivor.position.z).distance_to(
+				zombie.spit_center) > 75.0:
+			continue
+		visible[zombie.id] = true
+		if not _spit_warning_meshes.has(zombie.id):
+			var marker := MeshInstance3D.new()
+			var disk := CylinderMesh.new()
+			disk.top_radius = AcidSpitter.RADIUS
+			disk.bottom_radius = AcidSpitter.RADIUS
+			disk.height = 0.06
+			marker.mesh = disk
+			var chemical := StandardMaterial3D.new()
+			chemical.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			chemical.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			chemical.albedo_color = Color(0.5, 1.0, 0.16, 0.42)
+			marker.material_override = chemical
+			add_child(marker)
+			_spit_warning_meshes[zombie.id] = marker
+		var at: Vector2 = zombie.spit_center
+		_spit_warning_meshes[zombie.id].position = Vector3(
+			at.x, world.height_at(at.x, at.y) + 0.08, at.y)
+	for id in _spit_warning_meshes.keys():
+		if not visible.has(id):
+			_spit_warning_meshes[id].queue_free()
+			_spit_warning_meshes.erase(id)
+
+
+## Render the same temporary server hazards during offline preview.
+func _sync_acid_pools() -> void:
+	var visible: Dictionary = {}
+	for pool in sim.acid_pools.values():
+		if AcidSpitter.pool_remaining(pool, sim.time) <= 0.0:
+			continue
+		var at := Vector2(float(pool["x"]), float(pool["z"]))
+		if at.distance_to(Vector2(survivor.position.x, survivor.position.z)) > 75.0:
+			continue
+		var id: int = int(pool["id"])
+		visible[id] = true
+		if not _acid_pool_meshes.has(id):
+			var puddle := MeshInstance3D.new()
+			var disk := CylinderMesh.new()
+			disk.top_radius = AcidSpitter.RADIUS
+			disk.bottom_radius = AcidSpitter.RADIUS
+			disk.height = 0.04
+			puddle.mesh = disk
+			var mat := StandardMaterial3D.new()
+			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			mat.albedo_color = Color(0.55, 0.45, 0.08, 0.55)
+			puddle.material_override = mat
+			add_child(puddle)
+			_acid_pool_meshes[id] = puddle
+		_acid_pool_meshes[id].position = Vector3(at.x, float(pool["y"]) + 0.07, at.y)
+	for id in _acid_pool_meshes.keys():
+		if not visible.has(id):
+			_acid_pool_meshes[id].queue_free()
+			_acid_pool_meshes.erase(id)
 
 
 func _sync_barricades() -> void:
@@ -511,6 +583,8 @@ func _physics_process(delta: float) -> void:
 	for item_id in _crate_meshes:
 		_crate_meshes[item_id].visible = not sim.opened_crates.has(item_id)
 	_sync_zombies()
+	_sync_spit_warnings()
+	_sync_acid_pools()
 	_sync_barricades()
 	_sync_campfires()
 	_sync_decoys()
@@ -723,6 +797,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Heat pack", sim.cmd_use(LOCAL_PLAYER_ID, "thermal_wrap"))
 	elif event.is_action_pressed("survive_stim"):
 		_result("Frontier stim", sim.cmd_use(LOCAL_PLAYER_ID, "frontier_stim"))
+	elif event.is_action_pressed("survive_scent_mask"):
+		_result("Apply herbal scent salve", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_scent_mask"))
 	elif event.is_action_pressed("survive_lake"):
 		var drink_result: Dictionary = sim.cmd_drink_water(LOCAL_PLAYER_ID)
 		_result("Filtered lake water" if bool(drink_result.get("filtered", false)) else "Lake water (infection risk)", drink_result)
@@ -845,12 +921,24 @@ func _update_hud() -> void:
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [
 			str(Defs.item(equipped_ammo).get("name", equipped_ammo)),
 			survivor.inventory.count(equipped_ammo)]
+	if survivor.meal_seconds > 0.0:
+		_stats.text += "\nPREPARED MEAL T%d: %.0fs | +%.1f stamina/s, +%.2f energy/s" % [
+			survivor.meal_tier, survivor.meal_seconds,
+			HeartyMeal.stamina_per_second(survivor.meal_tier),
+			HeartyMeal.energy_per_second(survivor.meal_tier)]
 	var local_armor: String = survivor.inventory.armor
 	if local_armor != "" and survivor.inventory.count(local_armor) <= 0:
 		local_armor = ""
 	_stats.text += "\nSTORM INSULATION %d%% | %s" % [
 		int(round(100.0 * Weather.protection(local_armor))),
 		str(Defs.item(local_armor).get("name", "No armor"))]
+	var visual: float = Camouflage.visual_signature(local_armor, not local_armor.is_empty(),
+		survivor.noise_timer, vitals.alive)
+	if visual < 0.999:
+		_stats.text += "\nCAMOUFLAGE: infected vision -%d%% (noise/blood still reveal you)" % [
+			int(round(100.0 * (1.0 - visual)))]
+	elif float(Defs.item(local_armor).get("visual_signature", 1.0)) < 1.0 and survivor.noise_timer > 0.0:
+		_stats.text += "\nCAMOUFLAGE BROKEN: your noise is attracting infected"
 	_stats.text += "\nUTC DAILY BOUNTY: " + DailyBounties.description(survivor.daily_bounty, DailyBounties.utc_day())
 	_stats.text += "\nSURVIVOR RENOWN %s %d / %d | Hub supply discount %d%%" % [
 		Reputation.title(survivor.renown), survivor.renown,
@@ -863,7 +951,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | . stimulant | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | . stimulant | / scent salve | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback
@@ -873,7 +961,10 @@ func _update_hud() -> void:
 		_instructions.text += "\n" + fishing_status
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
 	var scent_radius: float = BloodScent.detection_radius(survivor.survival.bleeding,
-		survivor.survival.alive, world.is_safe(survivor.position.x, survivor.position.z))
+		survivor.survival.alive, world.is_safe(survivor.position.x, survivor.position.z),
+		survivor.survival.scent_mask_seconds > 0.0)
+	if survivor.survival.scent_mask_seconds > 0.0:
+		_instructions.text += "\nHERBAL SCENT MASK: %.0fs remaining; infected still see and hear you" % survivor.survival.scent_mask_seconds
 	if scent_radius > 0.0:
 		_instructions.text += "\nBLOOD SCENT: infected may track you from %d m; use first aid" % ceili(scent_radius)
 	_instructions.text += "\nZ rest at hub (2 wood + canned food + water), or by a lit field fire (cooked fish/ration + water; no nearby enemies); 90s cooldown, remaining %.0fs" % survivor.rest_cooldown

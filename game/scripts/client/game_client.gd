@@ -27,6 +27,8 @@ var barricades: Dictionary = {} # Nearby defenses from the server.
 var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
 var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
+var spit_zones: Dictionary = {} # Only the latest server-issued acid telegraphs.
+var acid_pools: Dictionary = {} # Replicated lingering ground hazards.
 var outposts: Array = [] # Public server-controlled PvP objectives.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
@@ -79,6 +81,12 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	server_time = float(snapshot["time"])
 	you = snapshot["you"]
 	raid_telegraph = snapshot.get("raid_telegraph", {}).duplicate(true)
+	spit_zones.clear()
+	for zone in snapshot.get("spit_zones", []):
+		spit_zones[int(zone["id"])] = zone
+	acid_pools.clear()
+	for pool in snapshot.get("acid_pools", []):
+		acid_pools[int(pool["id"])] = pool
 	outposts = snapshot.get("outposts", [])
 	if snapshot.has("inventory"):
 		inventory.load_dict(snapshot["inventory"])
@@ -218,6 +226,18 @@ func move_stash(item_id: String, count: int, deposit: bool) -> void:
 
 
 ## Trade ids and revisions originate from server events. No client-side inventory mutation.
+func duel_invite(target_id: int, ranked: bool = false) -> void:
+	net.c_duel_invite.rpc_id(1, target_id, ranked)
+
+
+func duel_accept() -> void:
+	net.c_duel_accept.rpc_id(1)
+
+
+func duel_cancel() -> void:
+	net.c_duel_cancel.rpc_id(1)
+
+
 func party_invite(target_id: int) -> void:
 	net.c_party_invite.rpc_id(1, target_id)
 
@@ -236,6 +256,10 @@ func party_leave() -> void:
 
 func party_kick(target_id: int) -> void:
 	net.c_party_kick.rpc_id(1, target_id)
+
+
+func party_feast(item_id: String) -> void:
+	net.c_party_feast.rpc_id(1, item_id)
 
 
 func party_aid(target_id: int, item_id: String) -> void:

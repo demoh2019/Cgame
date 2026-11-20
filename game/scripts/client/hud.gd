@@ -3,6 +3,7 @@ extends CanvasLayer
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
+const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
@@ -39,6 +40,7 @@ var _craft_signature: String = ""
 var _inventory_signature: String = ""
 var _trade_state: Dictionary = {}
 var _party_status: Label
+var _duel_status: Label
 var _party_target: OptionButton
 var _party_peer_signature: String = ""
 var _trade_target: OptionButton
@@ -328,6 +330,41 @@ func _build() -> void:
 	leave_party.text = "Leave"
 	leave_party.pressed.connect(func() -> void: client.party_leave())
 	party_buttons.add_child(leave_party)
+	var duel_heading := Label.new()
+	duel_heading.text = "Training duel (green hub only, no gear loss)"
+	inventory_box.add_child(duel_heading)
+	_duel_status = Label.new()
+	_duel_status.text = "No duel pending."
+	inventory_box.add_child(_duel_status)
+	var duel_buttons := HBoxContainer.new()
+	inventory_box.add_child(duel_buttons)
+	var duel_invite := Button.new()
+	duel_invite.text = "Challenge selected"
+	duel_invite.pressed.connect(func() -> void:
+		var target: int = _party_target.get_selected_id()
+		if target >= 0:
+			client.duel_invite(target)
+		else:
+			say("Select a visible survivor above"))
+	duel_buttons.add_child(duel_invite)
+	var ranked_button := Button.new()
+	ranked_button.text = "Ranked challenge"
+	ranked_button.tooltip_text = "Authenticated accounts only; Elo after knockout/forfeit. 20-minute same-opponent cooldown."
+	ranked_button.pressed.connect(func() -> void:
+		var target: int = _party_target.get_selected_id()
+		if target >= 0:
+			client.duel_invite(target, true)
+		else:
+			say("Ranked: choose a nearby survivor first"))
+	duel_buttons.add_child(ranked_button)
+	var duel_accept := Button.new()
+	duel_accept.text = "Accept"
+	duel_accept.pressed.connect(func() -> void: client.duel_accept())
+	duel_buttons.add_child(duel_accept)
+	var duel_cancel := Button.new()
+	duel_cancel.text = "Decline / end"
+	duel_cancel.pressed.connect(func() -> void: client.duel_cancel())
+	duel_buttons.add_child(duel_cancel)
 	var rally_button := Button.new()
 	rally_button.text = "Set rally"
 	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
@@ -427,6 +464,24 @@ func _build() -> void:
 		else:
 			client.party_aid(target, str(aid_items.get_selected_metadata())))
 	aid_row.add_child(aid_button)
+	# A cook supplies one real dish per present, eligible group member.
+	var feast_row := HBoxContainer.new()
+	inventory_box.add_child(feast_row)
+	var feast_item := OptionButton.new()
+	for tier in range(1, Defs.MAX_TIER + 1):
+		var meal_id: String = "cooked_fish" if tier == 1 else "cooked_fish_%d" % tier
+		feast_item.add_item(str(Defs.item(meal_id).get("name", meal_id)))
+		feast_item.set_item_metadata(feast_item.item_count - 1, meal_id)
+	feast_row.add_child(feast_item)
+	var feast_button := Button.new()
+	feast_button.text = "Share cooked meal"
+	feast_button.tooltip_text = "At a lit campfire, share one cooked fish per nearby party member (20s cooldown)."
+	feast_button.pressed.connect(func() -> void:
+		if feast_item.selected < 0:
+			say("Select the prepared fish tier to share.")
+		else:
+			client.party_feast(str(feast_item.get_selected_metadata())))
+	feast_row.add_child(feast_button)
 
 	var trade_title := Label.new()
 	trade_title.text = "Player barter (safe hub, within 6 metres)"
@@ -600,6 +655,27 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"party_feast":
+			if int(event.get("peer", -1)) == client.peer_id and int(event.get("by", -1)) != client.peer_id:
+				say("A teammate shared a T%d cooked meal. Recovery boosted for %ds." % [
+					int(event.get("tier", 1)), int(event.get("seconds", 0))])
+		"duel":
+			match str(event.get("phase", "")):
+				"invited":
+					say("%s challenge from %s. Open inventory to accept." % [
+						"RANKED" if bool(event.get("ranked", false)) else "Training duel",
+						str(event.get("name", "Survivor"))])
+				"started":
+					say("%s duel started vs %s. No loot loss." % [
+						"Ranked" if bool(event.get("ranked", false)) else "Training",
+						str(event.get("opponent", "Survivor"))])
+				"finished":
+					var winner: int = int(event.get("winner", -1))
+					say("Duel %s (%s)." % ["won" if winner == client.peer_id else ("lost" if winner > 0 else "ended"),
+						str(event.get("reason", "finished"))])
+					if bool(event.get("ranked", false)):
+						say("Arena rating: %d (%+d)" % [int(event.get("rating", 1200)),
+							int(event.get("rating_change", 0))])
 		"self_defense":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("ATTACKED! You may retaliate for 30 seconds without infamy.")
@@ -655,6 +731,10 @@ func _on_event(event: Dictionary) -> void:
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
 		"guardian_taunt":
 			say("Frontline guardian draws %d infected away from teammates!" % int(event.get("count", 0)))
+		"spit_warning":
+			say("ACID SPIT! Leave the green circle before it lands.")
+		"spit_impact":
+			say("Corrosive spit landed — the acid remains dangerous for 5 seconds!")
 		"raid_started":
 			say("RAID BOSS nearby! A mutant warlord entered the dangerous zone.")
 		"raid_enraged":
@@ -718,6 +798,13 @@ func _claim_nearest_outpost_cache() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "party_feast":
+		if bool(data.get("ok", false)):
+			say("Camp feast: shared T%d cooked fish with %d survivors." % [
+				int(data.get("tier", 1)), int(data.get("served", 0))])
+		else:
+			say("Camp feast denied: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "throw_decoy":
 		say("Decoy deployed: nearby idle infected investigate the sound." if bool(data.get("ok", false)) else
 				"Decoy denied: " + str(data.get("reason", "rejected")))
@@ -935,10 +1022,17 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nWARDEN'S WARD: -15% infected wounds (nearby relic ally)"
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
 		round(100.0 * float(client.you.get("weather_insulation", 0.0))))
+	var visual: float = float(client.you.get("visual_signature", 1.0))
+	if visual < 0.999:
+		_info_label.text += "\nGHILLIE CAMOUFLAGE: infected visual range -%d%%" % [
+			int(round(100.0 * (1.0 - visual)))]
 	_info_label.text += "\nCAMP RENOWN %s: %d / %d | NPC buy discount %d%%" % [
 		str(client.you.get("renown_rank", "Newcomer")),
 		int(client.you.get("renown", 0)), int(client.you.get("renown_next", 40)),
 		int(client.you.get("vendor_discount", 0))]
+	var mask_seconds: float = float(client.you.get("scent_mask_seconds", 0.0))
+	if mask_seconds > 0.0:
+		_info_label.text += "\nSCENT MASK: %.0fs remaining (vision and hearing unchanged)" % mask_seconds
 	var blood_range: float = float(client.you.get("blood_scent_radius", 0.0))
 	if blood_range > 0.0:
 		_info_label.text += "\nBLOOD SCENT: infected can sense the wound from %d m" % ceili(blood_range)
@@ -964,6 +1058,9 @@ func _process(_delta: float) -> void:
 		int(client.you.get("pvp_kills", 0)), int(client.you.get("pvp_honor", 0)),
 		str(client.you.get("pvp_rank", "Wanderer"))
 	]
+	_info_label.text += " | Arena %d %s (%dW / %dL)" % [
+		int(client.you.get("arena_rating", 1200)), str(client.you.get("arena_tier", "Silver")),
+		int(client.you.get("arena_wins", 0)), int(client.you.get("arena_losses", 0))]
 	# A lightweight compass for siege outposts; all coordinates, owners and
 	# progress originate in the authoritative snapshot, not client commands.
 	var closest: Dictionary = {}
@@ -978,6 +1075,12 @@ func _process(_delta: float) -> void:
 		var group_id: int = int(client.you.get("party", {}).get("id", 0))
 		var owner: int = int(closest["owner"])
 		var status: String = "Neutral" if owner == 0 else ("YOURS" if owner == group_id and group_id != 0 else "Party %d" % owner)
+		var owning_clan: Dictionary = closest.get("guild", {})
+		if not owning_clan.is_empty():
+			var my_clan: Dictionary = client.you.get("guild", {})
+			if str(my_clan.get("id", "")) != "" and str(my_clan.get("id", "")) == str(owning_clan["id"]):
+				status = "CLAN ALLY" if group_id != owner else "CLAN DEFENDERS"
+			status += " | Clan: %s" % str(owning_clan["name"])
 		if bool(closest["contested"]):
 			status += " | CONTESTED"
 		elif int(closest["challenger"]) != 0:
@@ -1038,6 +1141,12 @@ func _process(_delta: float) -> void:
 		_equipped.text += "\nAmmo: %s ×%d" % [
 			str(Defs.item(ranged_ammo).get("name", ranged_ammo)),
 			client.inventory.count(ranged_ammo)]
+	var meal_left: float = float(client.you.get("meal_seconds", 0.0))
+	var meal_tier: int = int(client.you.get("meal_tier", 0))
+	if meal_left > 0.0 and meal_tier > 0:
+		_equipped.text += "\nPrepared meal T%d: %.0fs | +%.1f stamina/s, +%.2f energy/s" % [
+			meal_tier, meal_left, HeartyMeal.stamina_per_second(meal_tier),
+			HeartyMeal.energy_per_second(meal_tier)]
 	_party_frames.text = PartyFrames.describe(client.you.get("party", {}), client.peer_id)
 	_party_frames.visible = not _party_frames.text.is_empty()
 	_death.visible = not bool(client.you.get("alive", true))
@@ -1071,10 +1180,22 @@ func _refresh_market_options() -> void:
 
 
 func _refresh_party_controls() -> void:
+	var training: Dictionary = client.you.get("duel", {})
+	if bool(training.get("active", false)):
+		_duel_status.text = "%s with #%d — %ds" % [
+			"Ranked" if bool(training.get("ranked", false)) else "Sparring",
+			int(training.get("opponent", -1)), ceili(float(training.get("seconds", 0.0)))]
+	elif int(training.get("invite_from", -1)) > 0:
+		_duel_status.text = "%s challenge from #%d — %ds to accept" % [
+			"Ranked" if bool(training.get("ranked", false)) else "Training",
+			int(training.get("invite_from", -1)), ceili(float(training.get("seconds", 0.0)))]
+	else:
+		_duel_status.text = "No duel pending. Select a nearby survivor above."
 	var state: Dictionary = client.you.get("party", {})
 	var group_id: int = int(state.get("id", 0))
 	var roster: Array = state.get("roster", [])
 	var remaining_aid: float = float(client.you.get("party_aid_cooldown", 0.0))
+	var remaining_feast: float = float(client.you.get("party_feast_cooldown", 0.0))
 	if group_id == 0:
 		_party_status.text = "No party. Invite someone nearby to start one."
 	else:
@@ -1085,6 +1206,8 @@ func _refresh_party_controls() -> void:
 		_party_status.text = "Party %d (%d/5): %s" % [group_id, roster.size(), ", ".join(names)]
 	if remaining_aid > 0.0:
 		_party_status.text += "\nMedical aid ready in %.1f s" % remaining_aid
+	if remaining_feast > 0.0:
+		_party_status.text += "\nCamp feast ready in %.1f s" % remaining_feast
 	if int(state.get("invite_from", 0)) > 0:
 		_party_status.text += "\nInvitation from " + str(state.get("invite_name", "Survivor"))
 	var rally: Dictionary = state.get("rally", {})

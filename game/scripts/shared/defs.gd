@@ -26,12 +26,12 @@ const INFECTION_MAX := 100.0
 const INFECTION_GROWTH_PER_SECOND := 0.065
 const INFECTION_DAMAGE_START := 30.0
 const INFECTION_DAMAGE_PER_SECOND := 1.4
-const ZOMBIE_INFECTION_PER_HIT := {"walker": 8.0, "runner": 12.0, "brute": 20.0}
+const ZOMBIE_INFECTION_PER_HIT := {"walker": 8.0, "runner": 12.0, "brute": 20.0, "spitter": 10.0}
 # Persistent wounds: real attacks cause bleeding; untreated bleeding slowly clots but costs HP.
 const BLEEDING_MAX := 100.0
 const BLEEDING_DAMAGE_PER_SECOND := 1.2
 const BLEEDING_DECAY_PER_SECOND := 0.2
-const ZOMBIE_BLEEDING_PER_HIT := {"walker": 9.0, "runner": 13.0, "brute": 22.0}
+const ZOMBIE_BLEEDING_PER_HIT := {"walker": 9.0, "runner": 13.0, "brute": 22.0, "spitter": 3.0}
 const PVP_MELEE_BLEEDING_PER_HIT := 12.0
 const COMBAT_ENERGY_MAX := 100.0
 const COMBAT_ENERGY_REGEN := 9.0
@@ -70,6 +70,7 @@ const ZOMBIES := {
 	"walker": {"health": 45.0, "speed": 1.7, "damage": 9.0, "attack_range": 1.6, "attack_cooldown": 1.3, "notice": 16.0, "lose": 34.0, "xp": 5},
 	"runner": {"health": 28.0, "speed": 4.4, "damage": 7.0, "attack_range": 1.6, "attack_cooldown": 0.9, "notice": 24.0, "lose": 40.0, "xp": 8},
 	"brute": {"health": 170.0, "speed": 2.2, "damage": 26.0, "attack_range": 2.0, "attack_cooldown": 1.8, "notice": 14.0, "lose": 30.0, "xp": 25},
+	"spitter": {"health": 52.0, "speed": 2.0, "damage": 14.0, "attack_range": 1.6, "attack_cooldown": 2.0, "notice": 21.0, "lose": 36.0, "xp": 12},
 }
 
 # --- Items -------------------------------------------------------------------------------------------
@@ -216,6 +217,17 @@ static func _build_items() -> void:
 			_add_recipe(storm_id, storm_id, 1,
 				{"cloth_%d" % t: 6, "fiber_%d" % t: 4},
 				"workbench", 6.0 + float(t))
+			# Lightweight stealth clothing: weak in combat but breaks visual
+			# acquisition by idle infected. Noise and blood scent are unchanged.
+			var ghillie_id: String = "ghillie_cloak_%d" % t
+			var sight_factor: float = 0.62 if t == 2 else (0.55 if t == 3 else 0.48)
+			_add_item(ghillie_id, {"name": "Ghillie Cloak T%d" % t,
+				"kind": "armor", "tier": t, "armor": 0.045 + 0.025 * float(t - 2),
+				"visual_signature": sight_factor, "weight": 2.2 + 0.15 * float(t),
+				"value": 65 * t})
+			_add_recipe(ghillie_id, ghillie_id, 1,
+				{"cloth_%d" % t: 4, "fiber_%d" % t: 6,
+				"plank_%d" % t: 1}, "workbench", 6.0 + float(t))
 	# Consumables.
 	# Shore fishing: scavenging food supports the classless artisan loop.
 	_add_item("fishing_rod", {"name": "Fishing Rod", "kind": "tool", "tool": "fishing",
@@ -264,6 +276,11 @@ static func _build_items() -> void:
 		"stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("charcoal_filter", "charcoal_filter", 1,
 		{"cloth_1": 1, "wood_1": 1, "stone_1": 1}, "", 2.5)
+	# Field-craftable salve hides only blood scent; no visual invisibility.
+	_add_item("herbal_scent_mask", {"name": "Herbal Scent Salve", "kind": "scent_mask",
+		"stack": 5, "weight": 0.2, "value": 18})
+	_add_recipe("herbal_scent_mask", "herbal_scent_mask", 1,
+		{"fiber_1": 2, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
 	_add_item("bandage", {"name": "Bandage", "kind": "medical", "heal": 28.0, "stop_bleeding": true, "stack": 10, "value": 10})
 	_add_recipe("bandage", "bandage", 2, {"cloth_1": 2}, "", 2.0)
 	# Common crafted wound care and scarce medical loot from infected ruins.
