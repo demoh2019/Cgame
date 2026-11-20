@@ -13,6 +13,7 @@ const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
@@ -125,6 +126,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_vendor_sell", KEY_V)
 	_bind_key("survive_radar", KEY_M)
 	_bind_key("survive_mount", KEY_F4)
+	_bind_key("survive_survey", KEY_F3)
 	_bind_key("survive_bank", KEY_B)
 	_bind_key("survive_bank_next", KEY_J)
 	_bind_key("survive_bank_deposit", KEY_K)
@@ -803,6 +805,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
 	elif event.is_action_pressed("survive_mount"):
 		_result("Trail bike", sim.cmd_toggle_mount(LOCAL_PLAYER_ID))
+	elif event.is_action_pressed("survive_survey"):
+		var result: Dictionary = sim.cmd_survey_ruins(LOCAL_PLAYER_ID)
+		_result("Survey ruins", result)
+		if bool(result.get("ok", false)):
+			_feedback = "Ruin cache at X:%d Z:%d. Check radar (75s)." % [
+				roundi(float(result["x"])), roundi(float(result["z"]))]
+			_update_hud()
 	elif event.is_action_pressed("survive_attack"):
 		var attack_result: Dictionary = sim.cmd_attack(
 			LOCAL_PLAYER_ID, _facing.x, _facing.y)
@@ -1011,6 +1020,13 @@ func _update_hud() -> void:
 			0.0, float(survivor.recall["until"]) - sim.time)
 	elif survivor.recall_ready_at > sim.time:
 		_stats.text += "\nRETURN CHARM COOLDOWN: %.0fs" % (survivor.recall_ready_at - sim.time)
+	var map_point: Dictionary = RuinSurvey.public_mark(
+		survivor.ruin_survey, sim.time, sim.opened_crates)
+	if not map_point.is_empty():
+		var dest := Vector2(float(map_point["x"]), float(map_point["z"]))
+		_stats.text += "\nRUIN CHART: X:%d Z:%d | %dm | %ds (F3)" % [
+			roundi(dest.x), roundi(dest.y), roundi(Vector2(position.x, position.z).distance_to(dest)),
+			ceili(float(map_point["remaining"]))]
 	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
 		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		survivor.mount_cooldown]

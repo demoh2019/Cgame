@@ -282,6 +282,12 @@ func _build() -> void:
 	canteen_button.tooltip_text = "Requires a crafted canteen, one carbon filter and the shared lake cooldown."
 	canteen_button.pressed.connect(func() -> void: client.refill_canteen())
 	inventory_box.add_child(canteen_button)
+	var survey_button := Button.new()
+	survey_button.name = "RuinSurveyChart"
+	survey_button.text = "Survey dangerous ruins (F3; 1 crafted chart)"
+	survey_button.tooltip_text = "Mark nearest unopened red/black ruin within 190 m for 75s."
+	survey_button.pressed.connect(func() -> void: client.survey_ruins())
+	inventory_box.add_child(survey_button)
 	var chain_button := Button.new()
 	chain_button.name = "UseBikeChainWrap"
 	chain_button.text = "Quiet bike chain (180s; workbench craft)"
@@ -1069,6 +1075,14 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "survey_ruins":
+		if bool(data.get("ok", false)):
+			say("Ruin survey: T%d cache at X:%d Z:%d — private marker for 75s." % [
+				int(data.get("zone", 2)) + 1,
+				roundi(float(data.get("x", 0.0))), roundi(float(data.get("z", 0.0)))])
+		else:
+			say("Ruin survey: " + str(data.get("reason", "denied")) + " (chart not spent).")
+		return
 	if kind == "use" and data.has("chain_wrap_seconds"):
 		say("Quiet bike chain fitted: %.0fs quieter riding." % float(data["chain_wrap_seconds"]))
 		return
@@ -1413,6 +1427,13 @@ func _process(_delta: float) -> void:
 	var spore_filter_left: float = float(client.you.get("spore_filter_seconds", 0.0))
 	if spore_filter_left > 0.0:
 		_info_label.text += "\nSPORE FILTER: %.0fs remaining (airborne spores only)" % spore_filter_left
+	var survey: Dictionary = client.you.get("ruin_survey", {})
+	if not survey.is_empty():
+		var destination := Vector2(float(survey["x"]), float(survey["z"]))
+		var from := Vector2(float(client.you.get("x", 0.0)), float(client.you.get("z", 0.0)))
+		_info_label.text += "\nRUIN CHART: X:%d Z:%d | %dm | %ds (F3)" % [
+			roundi(destination.x), roundi(destination.y),
+			roundi(from.distance_to(destination)), ceili(float(survey["remaining"]))]
 	var quiet_left: float = float(client.you.get("chain_wrap_seconds", 0.0))
 	if quiet_left > 0.0:
 		_info_label.text += "\nQUIET CHAIN: %.0fs | Bike noise 9m" % quiet_left
