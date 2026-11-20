@@ -111,9 +111,9 @@ TEST_CASE("[SceneTree][Sky] Coalesced cloud radiance budget") {
 	sky->configure_render_budget(Sky::RADIANCE_SIZE_256, Sky::PROCESS_MODE_INCREMENTAL);
 	CHECK(sky->get_radiance_size() == Sky::RADIANCE_SIZE_256);
 	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_INCREMENTAL);
-	sky->configure_render_budget(Sky::RADIANCE_SIZE_32, Sky::PROCESS_MODE_REALTIME);
+	sky->configure_render_budget(Sky::RADIANCE_SIZE_32, Sky::PROCESS_MODE_QUALITY);
 	CHECK(sky->get_radiance_size() == Sky::RADIANCE_SIZE_32);
-	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_REALTIME);
+	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_QUALITY);
 
 	// Invalid two-property profile must not apply either half of the state.
 	ERR_PRINT_OFF;
@@ -121,7 +121,7 @@ TEST_CASE("[SceneTree][Sky] Coalesced cloud radiance budget") {
 	sky->configure_render_budget(Sky::RADIANCE_SIZE_128, Sky::ProcessMode(-1));
 	ERR_PRINT_ON;
 	CHECK(sky->get_radiance_size() == Sky::RADIANCE_SIZE_32);
-	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_REALTIME);
+	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_QUALITY);
 }
 
 TEST_CASE("[SceneTree][Sky] Material setter and getter") {
