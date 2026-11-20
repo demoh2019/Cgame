@@ -56,7 +56,7 @@ func run(t) -> void:
 			"camera-local rain remains inside a correctly sized GPU culling bound")
 		t.check(not gpu.local_coords, "drops do not follow the camera after spawning")
 		t.eq(gpu.fixed_fps, 30, "GPU rain uses a bounded simulation rate")
-		t.check(not gpu.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+		t.check(gpu.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
 			"thin rain does not rasterize shadow maps")
 		RainVfx.apply_quality(gpu, 3)
 		t.eq(gpu.amount, int(RainVfx.budget(3, "forward_plus")["amount"]),
