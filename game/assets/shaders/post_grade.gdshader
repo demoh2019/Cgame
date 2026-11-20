@@ -14,6 +14,10 @@ uniform vec3 shadow_tone = vec3(-0.012, 0.0, 0.025);
 uniform vec3 highlight_tone = vec3(0.03, 0.015, -0.02);
 uniform int blur_quality = 1; // 0: no blur, 1: 4 extra samples, 2: 8 extra samples.
 uniform float sharpen_strength = 0.0; // High/Ultra only: local contrast enhancement of the sharp player band.
+// Interleaved-gradient noise suppresses 8-bit bands in ACES sky/fog gradients.
+// Runs in the existing composite, with no extra screen texture sample or pass.
+uniform float deband_strength = 0.0; // Disabled on Performance/Balanced.
+
 
 void fragment() {
 	vec2 uv = SCREEN_UV;
@@ -68,5 +72,17 @@ void fragment() {
 	vec2 centered = uv - vec2(0.5, focus_center);
 	float edge = smoothstep(0.45, 0.95, length(centered * vec2(1.0, 1.25)));
 	color *= 1.0 - edge * vignette;
+	// Last: one sub-LSB interleaved-gradient dither avoids correlated sky,
+	// fog and night-color bands after the filmic grade. The pattern stays
+	// fixed to screen pixels, avoiding moving-camera speckle and TAA history.
+	// Edges are attenuated so UI/world silhouettes remain crisp.
+	if (deband_strength > 0.001) {
+		vec2 pixel = floor(FRAGCOORD.xy);
+		float noise = fract(52.9829189 * fract(dot(pixel,
+			vec2(0.06711056, 0.00583715))));
+		float flatness = 1.0 - smoothstep(0.018, 0.09, fwidth(luma));
+		float jitter = (noise - 0.5) * deband_strength * flatness / 255.0;
+		color = clamp(color + vec3(jitter), vec3(0.0), vec3(1.0));
+	}
 	COLOR = vec4(color, 1.0);
 }
