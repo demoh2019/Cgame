@@ -180,6 +180,9 @@ public:
 	bool is_cell_navigation_ready(const Vector2i &p_cell) const;
 	bool are_cells_navigation_ready(const Vector2i &p_center, int p_radius = 0) const;
 	int get_navigation_ready_cell_count() const;
+	int get_navigation_pending_cell_count() const;
+	bool is_streaming_source_navigation_ready(const String &p_name) const;
+	real_t get_streaming_source_navigation_progress(const String &p_name) const;
 	Node3D *get_cell_node(const Vector2i &p_cell) const;
 	bool are_cells_loaded(const Vector2i &p_center, int p_radius = 0) const;
 	int get_loaded_cell_count() const;
