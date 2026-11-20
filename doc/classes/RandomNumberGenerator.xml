@@ -17,6 +17,21 @@
 		<link title="Random number generation">$DOCS_URL/tutorials/math/random_number_generation.html</link>
 	</tutorials>
 	<methods>
+		<method name="fork">
+			<return type="RandomNumberGenerator" />
+			<param index="0" name="stream_id" type="int" />
+			<description>
+				Cgame extension: creates a new, independent [RandomNumberGenerator] using a deterministic seed derived from this generator's [member seed] and the signed 64-bit [param stream_id]. Repeating the call with the same original seed and stream ID returns a new generator producing the same sequence. Different stream identifiers yield differently mixed seeds. Neither this method nor [method get_substream_seed] consumes random values or changes the parent's [member state], so generation is unaffected by stream creation order or by previous draws on the parent.
+				This enables independent procedural terrain, vegetation, animation, effects, and parallel generation tasks. It does not guarantee non-overlapping subsequences of PCG and is not cryptographically secure. The 32-bit-word seed mixing is deterministic across Cgame platforms but may change only with an explicitly documented seed-mixer version change.
+			</description>
+		</method>
+		<method name="get_substream_seed">
+			<return type="int" />
+			<param index="0" name="stream_id" type="int" />
+			<description>
+				Cgame extension: returns the deterministic 64-bit PCG seed assigned to [method fork] for this [param stream_id]. Uses all 64 bits of [member seed] and [param stream_id], independent of the current [member state]. No random values are consumed. The seed is exposed as a signed integer, with the same 64-bit bit pattern used by [method set_seed]; store that pattern unchanged to reproduce the stream. This method does not modify the parent.
+			</description>
+		</method>
 		<method name="rand_color_hsv">
 			<return type="Color" />
 			<param index="0" name="hue_min" type="float" default="0.0" />
