@@ -19,6 +19,7 @@ const OutlawBounty = preload("res://scripts/shared/outlaw_bounty.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
 const PartyFocus = preload("res://scripts/shared/party_focus.gd")
+const PartyFlank = preload("res://scripts/shared/party_flank.gd")
 const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
@@ -4124,8 +4125,12 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		damage = GuardianRetribution.amplify(damage)
 		events.append({"type": "guardian_retribution", "peer": peer_id,
 			"zombie": int(hit["id"])})
-	_damage_target(player, hit, damage, "ranged" if is_ranged else "melee")
-	return {"ok": true, "hit": true, "target": hit["kind"],
+	# Only this ordinary, server-selected melee collision can earn the
+	# cooperative flank; skills, ranged fire and direct damage paths cannot.
+	var flanked: bool = not is_ranged and str(hit["kind"]) == "zombie" and \
+		PartyFlank.qualifies(player, zombies.get(int(hit["id"])), players, parties, world)
+	_damage_target(player, hit, damage, "ranged" if is_ranged else "melee", not is_ranged)
+	return {"ok": true, "hit": true, "target": hit["kind"], "party_flank": flanked,
 		"crit": crit, "ambush": ambush, "riposte": riposte,
 		"sharpened": sharpened, "guardian_retribution": guard_counterstrike}
 
@@ -4908,7 +4913,7 @@ func _hit_distance(origin: Vector2, direction: Vector2, target: Vector2, reach: 
 	return distance if to_target.normalized().dot(direction) >= 0.34 else -1.0
 
 
-func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: String = "melee") -> void:
+func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: String = "melee", basic_melee: bool = false) -> void:
 	attacker.dirty_character = true
 	if hit["kind"] == "zombie":
 		var zombie = zombies.get(hit["id"])
@@ -4922,6 +4927,14 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		damage = AntisepticEdge.damage(damage, attacker.inventory,
 			attacker.edge_coating_weapon, attacker.edge_coating_seconds, zombie)
 		damage *= 1.0 + attacker.skills.bonus("zombie_damage")
+		# True group flanking uses the infected's current LIVE target and
+		# both real server positions. No damage or targets from the client.
+		var flanking: bool = basic_melee and source == "melee" and \
+			PartyFlank.qualifies(attacker, zombie, players, parties, world)
+		if flanking and damage > 0.0:
+			damage = PartyFlank.damage(damage, zombie.raid_boss)
+			events.append({"type": "party_flank", "peer": attacker.id,
+				"zombie": zombie.id, "bonus": 10 if zombie.raid_boss else 18})
 		# A modest PvE-only team bonus: exact marked infected and living
 		# party member in range. Never applied to player-vs-player attacks.
 		damage = PartyFocus.damage(damage, zombie.is_alive() and _alive(attacker) and
@@ -6764,9 +6777,16 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"pvp_rank": PvPHonor.rank(other.pvp_honor),
 				"arena_tier": ArenaRating.tier(other.arena_rating)})
 	var nearby_zombies: Array = []
+	var party_flank_hint: Dictionary = {}
 	for zombie in zombies.values():
 		var p: Vector3 = zombie.position
 		if zombie.is_alive() and here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
+			# Only one per-viewer hint. Enemy aggro and party membership are
+			# never copied into the public infected entity list.
+			if party_flank_hint.is_empty() and PartyFlank.qualifies(
+					player, zombie, players, parties, world):
+				party_flank_hint = {"zombie": zombie.id,
+					"bonus": 10 if zombie.raid_boss else 18}
 			nearby_zombies.append({"id": zombie.id, "type": zombie.type, "x": p.x, "y": p.y, "z": p.z, "yaw": zombie.yaw, "hp": zombie.health, "state": zombie.state,
 					"elite": zombie.elite, "raid_boss": zombie.raid_boss,
 					"raid_enraged": zombie.raid_enraged,
@@ -6883,6 +6903,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"you": {
 			"party": _party_state_for(peer_id),
 			"raid_aggro": raid_aggro_state,
+			"party_flank_hint": party_flank_hint,
 			"caravan": player.caravan_view.duplicate(true),
 			"caravan_night": NightCaravan.public_state(player.caravan_view, player.caravan_night),
 			"equipment_presets": player.equipment_presets.duplicate(true),
