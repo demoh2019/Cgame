@@ -4,6 +4,15 @@ extends RefCounted
 
 const OPEN_CUTOFF := 20500.0
 const MUFFLED_CUTOFF := 1400.0
+# Matches the native AudioOcclusionPolicy gain for a fully blocked source.
+# Stock Godot applies it on the source volume; the fork applies it during
+# spatial mixing. Never apply both, or the signal will be attenuated twice.
+const OCCLUDED_GAIN_DB := -8.0
+
+
+static func occlusion_gain_db(blocked: bool) -> float:
+	return OCCLUDED_GAIN_DB if blocked else 0.0
+
 
 
 ## True when the straight line from listener to source dips below the terrain somewhere between them.
