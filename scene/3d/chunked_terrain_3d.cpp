@@ -369,6 +369,9 @@ void ChunkedTerrain3D::_update_chunks() {
 				if (chunk.meshes[lod].is_valid()) {
 					if (!chunk.instance.is_valid()) {
 						chunk.instance = rs->instance_create2(chunk.meshes[lod], scenario);
+						// Native terrains own RenderingServer instances directly,
+						// so GeometryInstance3D's GI_MODE_STATIC flag is not inherited.
+						rs->instance_geometry_set_flag(chunk.instance, RSE::INSTANCE_FLAG_USE_BAKED_LIGHT, contribute_to_gi);
 						rs->instance_set_transform(chunk.instance, global);
 						rs->instance_geometry_set_cast_shadows_setting(chunk.instance, cast_shadows ? RSE::SHADOW_CASTING_SETTING_ON : RSE::SHADOW_CASTING_SETTING_OFF);
 					} else {
@@ -630,6 +633,24 @@ void ChunkedTerrain3D::set_cast_shadows(bool p_enabled) {
 	}
 }
 
+void ChunkedTerrain3D::set_contribute_to_gi(bool p_enabled) {
+	if (contribute_to_gi == p_enabled) {
+		return;
+	}
+	contribute_to_gi = p_enabled;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (!rs) {
+		return;
+	}
+	// Reuse existing instances. Switching GI participation never
+	// regenerates terrain meshes, collision or streamed LODs.
+	for (Chunk &chunk : chunks) {
+		if (chunk.instance.is_valid()) {
+			rs->instance_geometry_set_flag(chunk.instance, RSE::INSTANCE_FLAG_USE_BAKED_LIGHT, contribute_to_gi);
+		}
+	}
+}
+
 void ChunkedTerrain3D::set_collision_enabled(bool p_enabled) {
 	collision_enabled = p_enabled;
 	if (!collision_enabled) {
@@ -810,6 +831,8 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_material"), &ChunkedTerrain3D::get_material);
 	ClassDB::bind_method(D_METHOD("set_cast_shadows", "enabled"), &ChunkedTerrain3D::set_cast_shadows);
 	ClassDB::bind_method(D_METHOD("get_cast_shadows"), &ChunkedTerrain3D::get_cast_shadows);
+	ClassDB::bind_method(D_METHOD("set_contribute_to_gi", "enabled"), &ChunkedTerrain3D::set_contribute_to_gi);
+	ClassDB::bind_method(D_METHOD("is_contributing_to_gi"), &ChunkedTerrain3D::is_contributing_to_gi);
 	ClassDB::bind_method(D_METHOD("set_collision_enabled", "enabled"), &ChunkedTerrain3D::set_collision_enabled);
 	ClassDB::bind_method(D_METHOD("is_collision_enabled"), &ChunkedTerrain3D::is_collision_enabled);
 	ClassDB::bind_method(D_METHOD("set_collision_distance", "distance"), &ChunkedTerrain3D::set_collision_distance);
@@ -841,6 +864,7 @@ void ChunkedTerrain3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "centered"), "set_centered", "is_centered");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "BaseMaterial3D,ShaderMaterial"), "set_material", "get_material");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cast_shadows"), "set_cast_shadows", "get_cast_shadows");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "contribute_to_gi"), "set_contribute_to_gi", "is_contributing_to_gi");
 	ADD_GROUP("Detail", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "chunk_quads", PROPERTY_HINT_RANGE, "2,256,1"), "set_chunk_quads", "get_chunk_quads");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "lod_count", PROPERTY_HINT_RANGE, "1,8,1"), "set_lod_count", "get_lod_count");
