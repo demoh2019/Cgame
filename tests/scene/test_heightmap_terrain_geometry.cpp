@@ -311,4 +311,34 @@ TEST_CASE("[HeightmapTerrain] External normals follow LOD vertices and skirts") 
 	CHECK(sample_normal_bilinear(field, 0.0, 8.0, params).is_equal_approx(supplied[8 * 17]));
 }
 
+TEST_CASE("[HeightmapTerrain] Optional curvature colors survive every mesh LOD and skirt") {
+	const Vector<real_t> data = make_field(17, 17, [](int x, int z) { return real_t(x + z); });
+	const HeightField field = view(data, 17, 17);
+	PackedColorArray paint;
+	paint.resize(17 * 17);
+	for (int z = 0; z < 17; z++) {
+		for (int x = 0; x < 17; x++) {
+			paint.set(z * 17 + x, Color(real_t(x) / 16.0, real_t(z) / 16.0, 0.0, 1.0));
+		}
+	}
+	Params params;
+	ChunkMesh legacy;
+	REQUIRE(build_chunk(field, 0, 0, 16, 1, params, legacy));
+	CHECK(legacy.colors.is_empty()); // Old terrains do not allocate a GPU color stream.
+	params.color_override = paint.ptr();
+	ChunkMesh near_mesh;
+	ChunkMesh far_mesh;
+	REQUIRE(build_chunk(field, 0, 0, 16, 1, params, near_mesh));
+	REQUIRE(build_chunk(field, 0, 0, 16, 4, params, far_mesh));
+	CHECK(near_mesh.colors.size() == near_mesh.vertices.size());
+	CHECK(far_mesh.colors.size() == far_mesh.vertices.size());
+	for (int z = 0; z < 5; z++) {
+		for (int x = 0; x < 5; x++) {
+			CHECK(far_mesh.colors[z * 5 + x].is_equal_approx(paint[(z * 4) * 17 + x * 4]));
+		}
+	}
+	CHECK(far_mesh.colors[25].is_equal_approx(far_mesh.colors[0]));
+	CHECK(far_mesh.colors[25 + 5].is_equal_approx(far_mesh.colors[20]));
+}
+
 } // namespace TestHeightmapTerrainGeometry

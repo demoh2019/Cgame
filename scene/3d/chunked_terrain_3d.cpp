@@ -53,6 +53,7 @@ HeightmapTerrainGeometry::Params ChunkedTerrain3D::_params() const {
 	params.height_scale = height_scale;
 	params.height_offset = height_offset;
 	params.normal_override = normal_data.size() == width * depth ? normal_data.ptr() : nullptr;
+	params.color_override = color_data.size() == width * depth ? color_data.ptr() : nullptr;
 	params.origin = centered ? -size * real_t(0.5) : Vector2();
 	params.skirt_depth = skirt_depth;
 	return params;
@@ -72,6 +73,7 @@ void ChunkedTerrain3D::_load_from_texture() {
 	}
 	// Texture-backed height maps retain their original generated normals.
 	normal_data.clear();
+	color_data.clear();
 	height_data.clear();
 	data_width = 0;
 	data_depth = 0;
@@ -208,6 +210,9 @@ void ChunkedTerrain3D::_ensure_mesh(Chunk &r_chunk, int p_lod) {
 	arrays.resize(RSE::ARRAY_MAX);
 	arrays[RSE::ARRAY_VERTEX] = mesh.vertices;
 	arrays[RSE::ARRAY_NORMAL] = mesh.normals;
+	if (!mesh.colors.is_empty()) {
+		arrays[RSE::ARRAY_COLOR] = mesh.colors;
+	}
 	arrays[RSE::ARRAY_TEX_UV] = mesh.uvs;
 	if (!mesh.morph_uv2.is_empty()) {
 		arrays[RSE::ARRAY_TEX_UV2] = mesh.morph_uv2;
@@ -471,8 +476,9 @@ void ChunkedTerrain3D::set_height_data(const PackedFloat32Array &p_heights, cons
 	ERR_FAIL_COND_MSG(p_dimensions.x < 2 || p_dimensions.y < 2, "ChunkedTerrain3D needs at least 2 x 2 height samples.");
 	ERR_FAIL_COND_MSG(p_heights.size() != p_dimensions.x * p_dimensions.y, "ChunkedTerrain3D height data size does not match the dimensions.");
 	data_from_script = true;
-	// Any new height samples invalidate externally supplied slopes.
+	// Any new height samples invalidate externally supplied slopes and colors.
 	normal_data.clear();
+	color_data.clear();
 	data_width = p_dimensions.x;
 	data_depth = p_dimensions.y;
 	height_data.resize(p_heights.size());
@@ -504,6 +510,22 @@ void ChunkedTerrain3D::set_normal_data(const PackedVector3Array &p_normals) {
 	_queue_rebuild();
 }
 
+void ChunkedTerrain3D::set_color_data(const PackedColorArray &p_colors) {
+	ERR_FAIL_COND_MSG(!p_colors.is_empty() && (data_width < 2 || data_depth < 2 ||
+			p_colors.size() != data_width * data_depth),
+			"ChunkedTerrain3D vertex colors must match the active height-data dimensions.");
+	for (const Color &color : p_colors) {
+		ERR_FAIL_COND_MSG(!Math::is_finite(color.r) || !Math::is_finite(color.g) ||
+				!Math::is_finite(color.b) || !Math::is_finite(color.a),
+				"ChunkedTerrain3D vertex colors must be finite.");
+	}
+	// COW packed array: a single copy of the authored colors, shared by cached
+	// LOD mesh builds. Empty colors keep legacy memory and vertex formats.
+	color_data = p_colors;
+	built = false;
+	_queue_rebuild();
+}
+
 PackedFloat32Array ChunkedTerrain3D::get_height_data() const {
 	PackedFloat32Array result;
 	result.resize(height_data.size());
@@ -517,6 +539,7 @@ PackedFloat32Array ChunkedTerrain3D::get_height_data() const {
 void ChunkedTerrain3D::clear_height_data() {
 	data_from_script = false;
 	normal_data.clear();
+	color_data.clear();
 	built = false;
 	_queue_rebuild();
 }
@@ -549,20 +572,9 @@ void ChunkedTerrain3D::set_size(const Vector2 &p_size) {
 }
 
 void ChunkedTerrain3D::set_lod_count(int p_count) {
-	const int next = CLAMP(p_count, 1, MAX_LOD);
-	if (lod_count == next) {
-		return;
-	}
-	lod_count = next;
-	if (lod_geomorph_enabled) {
-		// The last cached LOD may need a new coarser target in UV2.
-		// Rebuild once when the LOD count itself changes.
-		built = false;
-		_queue_rebuild();
-		return;
-	}
+	lod_count = CLAMP(p_count, 1, MAX_LOD);
 	for (Chunk &chunk : chunks) {
-		chunk.lod = -1; // No morph data: the cached surfaces remain valid.
+		chunk.lod = -1; // Re-evaluate; the existing meshes stay cached.
 	}
 }
 
@@ -766,6 +778,8 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_height_data"), &ChunkedTerrain3D::get_height_data);
 	ClassDB::bind_method(D_METHOD("set_normal_data", "normals"), &ChunkedTerrain3D::set_normal_data);
 	ClassDB::bind_method(D_METHOD("get_normal_data"), &ChunkedTerrain3D::get_normal_data);
+	ClassDB::bind_method(D_METHOD("set_color_data", "colors"), &ChunkedTerrain3D::set_color_data);
+	ClassDB::bind_method(D_METHOD("get_color_data"), &ChunkedTerrain3D::get_color_data);
 	ClassDB::bind_method(D_METHOD("get_height_dimensions"), &ChunkedTerrain3D::get_height_dimensions);
 	ClassDB::bind_method(D_METHOD("clear_height_data"), &ChunkedTerrain3D::clear_height_data);
 	ClassDB::bind_method(D_METHOD("set_size", "size"), &ChunkedTerrain3D::set_size);

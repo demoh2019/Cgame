@@ -15,6 +15,7 @@ const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
 const GroundContactAO = preload("res://scripts/client/ground_contact_ao.gd")
 const TerrainSeamNormals = preload("res://scripts/client/terrain_seam_normals.gd")
+const TerrainCurvature = preload("res://scripts/client/terrain_curvature.gd")
 const TerrainAnisotropy = preload("res://scripts/client/terrain_anisotropy.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
@@ -34,6 +35,7 @@ global uniform float aa_weather_wetness;
 global uniform float aa_weather_rain;
 global uniform float aa_puddle_ripple_strength;
 global uniform float aa_ground_contact_strength;
+global uniform float aa_terrain_curvature_strength;
 global uniform float aa_terrain_detail_radius;
 instance uniform float aa_lod_morph = 0.0;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
@@ -156,8 +158,13 @@ void fragment() {
 		ground_contact = 1.0 - (1.0 - contact_sample)
 			* aa_ground_contact_strength * detail_fade;
 	}
-	AO = ground_contact;
-	ALBEDO = color * mix(1.0, ground_contact, 0.12)
+	float cavity = clamp(COLOR.r, 0.0, 1.0)
+		* aa_terrain_curvature_strength * detail_fade;
+	float ridge = clamp(COLOR.g, 0.0, 1.0)
+		* aa_terrain_curvature_strength * detail_fade;
+	AO = ground_contact * (1.0 - cavity * 0.24);
+	ALBEDO = color * (1.0 - cavity * 0.095 + ridge * 0.035)
+		* mix(1.0, ground_contact, 0.12)
 		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), vertex_cloud_shade);
 	// Match the same water caustic field even if 13-layer PBR assets are absent.
 	// Low-end graphics uniformly skip the shader math on Compatibility.
@@ -633,6 +640,8 @@ func _build_terrain(origin: Vector2) -> void:
 	# vertical lighting seams without an extra shader pass or texture.
 	_terrain.set_normal_data(TerrainSeamNormals.build(_raw_heights, origin,
 		SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "height_at")))
+	_terrain.set_color_data(TerrainCurvature.build(
+		_raw_heights, origin, SAMPLES, step, Callable(_world, "height_at")))
 	add_child(_terrain)
 	_terrain.add_to_group(TERRAIN_LOD_GROUP)
 	if _textured_material != null:
