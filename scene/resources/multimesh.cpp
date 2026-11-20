@@ -552,6 +552,25 @@ bool MultiMesh::remove_visible_instance(int p_instance) {
 	return true;
 }
 
+bool MultiMesh::activate_hidden_instance(int p_hidden_instance) {
+	const int active_count = visible_instance_count == -1 ? instance_count : visible_instance_count;
+	ERR_FAIL_INDEX_V_MSG(p_hidden_instance, instance_count, false, "Instance index is out of bounds.");
+	ERR_FAIL_COND_V_MSG(p_hidden_instance < active_count, false, "Only hidden instances can be activated.");
+
+	if (p_hidden_instance != active_count) {
+		if (!swap_instance_data(p_hidden_instance, active_count)) {
+			return false;
+		}
+	} else {
+		// Newly visible instances should not interpolate from a stale transform.
+		reset_instance_physics_interpolation(active_count);
+	}
+	// The allocated buffer remains unchanged. A fully visible buffer has no
+	// hidden instance to activate; this is caught by the visible-prefix guard.
+	set_visible_instance_count(active_count + 1);
+	return true;
+}
+
 void MultiMesh::reset_instance_physics_interpolation(int p_instance) {
 	ERR_FAIL_INDEX_MSG(p_instance, instance_count, "Instance index out of bounds. Instance index must be less than `instance_count` and greater than or equal to zero.");
 	RenderingServer::get_singleton()->multimesh_instance_reset_physics_interpolation(multimesh, p_instance);
@@ -639,6 +658,7 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_instance_custom_data", "instance"), &MultiMesh::get_instance_custom_data);
 	ClassDB::bind_method(D_METHOD("swap_instance_data", "first", "second"), &MultiMesh::swap_instance_data);
 	ClassDB::bind_method(D_METHOD("remove_visible_instance", "instance"), &MultiMesh::remove_visible_instance);
+	ClassDB::bind_method(D_METHOD("activate_hidden_instance", "hidden_instance"), &MultiMesh::activate_hidden_instance);
 	ClassDB::bind_method(D_METHOD("reset_instance_physics_interpolation", "instance"), &MultiMesh::reset_instance_physics_interpolation);
 	ClassDB::bind_method(D_METHOD("reset_instances_physics_interpolation"), &MultiMesh::reset_instances_physics_interpolation);
 	ClassDB::bind_method(D_METHOD("set_custom_aabb", "aabb"), &MultiMesh::set_custom_aabb);
