@@ -9,6 +9,7 @@ const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
 const GraphicsTonemapping = preload("res://scripts/client/graphics_tonemapping.gd")
 const GraphicsShadowAtlas = preload("res://scripts/client/graphics_shadow_atlas.gd")
+const GraphicsContactShadows = preload("res://scripts/client/graphics_contact_shadows.gd")
 const GraphicsReflections = preload("res://scripts/client/graphics_reflections.gd")
 const GraphicsIndirectLighting = preload("res://scripts/client/graphics_indirect_lighting.gd")
 const WaterRefraction = preload("res://scripts/client/water_refraction.gd")
@@ -221,6 +222,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		if sun != null:
 			sun.shadow_enabled = p["shadows"]
 			sun.directional_shadow_max_distance = p["shadow_distance"]
+			# Screen-space contact detail is restricted to High/Ultra Forward+.
+			# The engine skips its forced depth prepass when no light opts in.
+			GraphicsContactShadows.apply(sun, _level, str(method))
 		var env := atmosphere.get("environment") as Environment
 		if env != null:
 			env.glow_enabled = p["glow"]
