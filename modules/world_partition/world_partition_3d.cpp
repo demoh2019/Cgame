@@ -67,6 +67,7 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 		node->queue_free();
 	}
 	active_cells.erase(p_cell);
+	active_detail_levels.erase(p_cell);
 	emit_signal(SNAME("cell_unloaded"), p_cell);
 }
 
@@ -158,6 +159,13 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	// Set the final transform before _enter_tree()/ _ready() callbacks run.
 	// The root's authored local offset is preserved within its grid cell.
 	instance->set_position(instance->get_position() + cell_to_local_position(p_cell));
+	// Set the streaming LOD before _ready(): scripts can build far cells
+	// cheaply instead of generating full foliage then immediately deleting it.
+	if (instance->has_method(SNAME("set_streaming_lod"))) {
+		const int level = observer_cell_valid ? _cell_detail_level(p_cell, observer_cell) : 0;
+		instance->call(SNAME("set_streaming_lod"), level);
+		active_detail_levels.insert(p_cell, level);
+	}
 	add_child(instance);
 	active_cells.insert(p_cell, instance->get_instance_id());
 	emit_signal(SNAME("cell_loaded"), p_cell);
@@ -261,6 +269,69 @@ void WorldPartition3D::set_streaming_enabled(bool p_enabled) {
 
 bool WorldPartition3D::is_streaming_enabled() const {
 	return streaming_enabled;
+}
+
+void WorldPartition3D::set_detail_radius(int p_radius) {
+	ERR_FAIL_COND_MSG(p_radius < -1 || p_radius > 32, "WorldPartition3D detail_radius must be -1 (disabled) or 0 to 32.");
+	detail_radius = p_radius;
+}
+
+int WorldPartition3D::get_detail_radius() const {
+	return detail_radius;
+}
+
+void WorldPartition3D::set_max_detail_transitions_per_frame(int p_budget) {
+	ERR_FAIL_COND_MSG(p_budget < 1 || p_budget > 128, "WorldPartition3D detail transition budget must be 1 to 128.");
+	max_detail_transitions_per_frame = p_budget;
+}
+
+int WorldPartition3D::get_max_detail_transitions_per_frame() const {
+	return max_detail_transitions_per_frame;
+}
+
+int WorldPartition3D::get_cell_detail_level(const Vector2i &p_cell) const {
+	const int *level = active_detail_levels.getptr(p_cell);
+	return level != nullptr && is_cell_loaded(p_cell) ? *level : -1;
+}
+
+int WorldPartition3D::get_distant_cell_count() const {
+	int count = 0;
+	for (const KeyValue<Vector2i, int> &E : active_detail_levels) {
+		if (E.value == 1 && is_cell_loaded(E.key)) {
+			count++;
+		}
+	}
+	return count;
+}
+
+int WorldPartition3D::_cell_detail_level(const Vector2i &p_cell, const Vector2i &p_center) const {
+	// Pinned gameplay locations retain full quality, even when far away.
+	return detail_radius < 0 || pinned_cells.has(p_cell) || _within_radius(p_cell, p_center, detail_radius) ? 0 : 1;
+}
+
+void WorldPartition3D::_refresh_cell_detail(const Vector2i &p_center) {
+	int budget = max_detail_transitions_per_frame;
+	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
+		if (budget <= 0) {
+			break;
+		}
+		int *previous = active_detail_levels.getptr(E.key);
+		if (previous == nullptr) {
+			continue;
+		}
+		const int next_level = _cell_detail_level(E.key, p_center);
+		if (*previous == next_level) {
+			continue;
+		}
+		Node *node = Object::cast_to<Node>(ObjectDB::get_instance(E.value));
+		if (node == nullptr || !node->has_method(SNAME("set_streaming_lod"))) {
+			continue;
+		}
+		*previous = next_level;
+		node->call(SNAME("set_streaming_lod"), next_level);
+		emit_signal(SNAME("cell_detail_changed"), E.key, next_level);
+		budget--;
+	}
 }
 
 void WorldPartition3D::set_observer_path(const NodePath &p_path) {
@@ -594,6 +665,7 @@ void WorldPartition3D::update_streaming() {
 	if (predicted_cell_valid && !_within_radius(predicted_cell, center, load_radius)) {
 		_request_cell(predicted_cell, new_requests, instances);
 	}
+	_refresh_cell_detail(center);
 	_purge_unused_ready_scenes();
 	if (observer_cell_changed) {
 		emit_signal(SNAME("observer_cell_changed"), observer_cell);
@@ -646,6 +718,12 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_concurrent_requests"), &WorldPartition3D::get_max_concurrent_requests);
 	ClassDB::bind_method(D_METHOD("set_streaming_enabled", "enabled"), &WorldPartition3D::set_streaming_enabled);
 	ClassDB::bind_method(D_METHOD("is_streaming_enabled"), &WorldPartition3D::is_streaming_enabled);
+	ClassDB::bind_method(D_METHOD("set_detail_radius", "radius"), &WorldPartition3D::set_detail_radius);
+	ClassDB::bind_method(D_METHOD("get_detail_radius"), &WorldPartition3D::get_detail_radius);
+	ClassDB::bind_method(D_METHOD("set_max_detail_transitions_per_frame", "count"), &WorldPartition3D::set_max_detail_transitions_per_frame);
+	ClassDB::bind_method(D_METHOD("get_max_detail_transitions_per_frame"), &WorldPartition3D::get_max_detail_transitions_per_frame);
+	ClassDB::bind_method(D_METHOD("get_cell_detail_level", "cell"), &WorldPartition3D::get_cell_detail_level);
+	ClassDB::bind_method(D_METHOD("get_distant_cell_count"), &WorldPartition3D::get_distant_cell_count);
 	ClassDB::bind_method(D_METHOD("set_observer_path", "path"), &WorldPartition3D::set_observer_path);
 	ClassDB::bind_method(D_METHOD("get_observer_path"), &WorldPartition3D::get_observer_path);
 	ClassDB::bind_method(D_METHOD("set_predictive_velocity", "velocity"), &WorldPartition3D::set_predictive_velocity);
@@ -696,10 +774,14 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_new_requests_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_new_requests_per_frame", "get_max_new_requests_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instances_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_instances_per_frame", "get_max_instances_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_requests", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_concurrent_requests", "get_max_concurrent_requests");
+	ADD_GROUP("Cell Detail Levels", "");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "detail_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_detail_radius", "get_detail_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_detail_transitions_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_detail_transitions_per_frame", "get_max_detail_transitions_per_frame");
 
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_unloaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("observer_cell_changed", PropertyInfo(Variant::VECTOR2I, "cell")));
+	ADD_SIGNAL(MethodInfo("cell_detail_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::INT, "detail_level")));
 }
 
 WorldPartition3D::~WorldPartition3D() {
@@ -711,6 +793,7 @@ WorldPartition3D::~WorldPartition3D() {
 	requested_paths.clear();
 	// Child nodes belong to Node; drop references without touching queued deletions.
 	active_cells.clear();
+	active_detail_levels.clear();
 	pending_cells.clear();
 	ready_scenes.clear();
 	pinned_cells.clear();
