@@ -32,6 +32,45 @@ func run(t) -> void:
 	t.eq(GrassField.lod_for_distance(0.0, 2), 0, "camera teleport restores detail")
 
 
+	t.current = "screen-space grass LOD respects resolution and FOV"
+	t.near(GrassField.screen_lod_scale(720.0, 38.0), 1.0, 0.0001,
+		"reference 720p camera matches original LOD authoring")
+	t.check(GrassField.screen_lod_scale(1080.0, 38.0) > 1.0,
+		"1080p camera retains high-detail blades farther away")
+	t.check(GrassField.screen_lod_scale(360.0, 38.0) < 1.0,
+		"low resolution reduces subpixel grass geometry")
+	t.check(GrassField.screen_lod_scale(720.0, 55.0) < 1.0,
+		"a wider field of view chooses distant detail earlier")
+	t.check(GrassField.screen_lod_scale(720.0, 24.0) > 1.0,
+		"narrow focal length preserves close-detail silhouette")
+	t.eq(GrassField.screen_lod_scale(720.0, NAN), 1.0,
+		"invalid camera FOV does not break grass quality")
+	t.eq(GrassField.screen_lod_scale(0.0, 38.0), 1.0,
+		"minimized window keeps a safe fallback")
+	t.check(GrassField.screen_lod_scale(100000.0, 10.0) <= 1.6,
+		"high-resolution GPU cost remains bounded")
+	t.eq(GrassField.lod_for_distance(30.0, 0, 1.5), 0,
+		"Ultra preserves close blades at the same viewing distance")
+	t.eq(GrassField.lod_for_distance(60.0, 0, 1.5), 1,
+		"larger pixel budget keeps the middle mesh")
+	t.eq(GrassField.lod_for_distance(60.0, 0, 0.65), 2,
+		"Performance reaches low triangle budget earlier")
+	t.eq(GrassField.lod_for_distance(-1.0, 2), 2,
+		"invalid distance conservatively preserves the previous LOD")
+
+	t.current = "quality-relative density"
+	t.check(GrassField.visible_count_for_distance(1000, 34.0, 1.5)
+		> GrassField.visible_count_for_distance(1000, 34.0),
+		"high-resolution grass retains coverage longer")
+	t.check(GrassField.visible_count_for_distance(1000, 34.0, 0.65)
+		< GrassField.visible_count_for_distance(1000, 34.0),
+		"lower-res grass shades fewer distant blades")
+	t.eq(GrassField.visible_count_for_distance(1000, 34.0, NAN),
+		GrassField.visible_count_for_distance(1000, 34.0),
+		"invalid scale is treated as the original balanced budget")
+	t.eq(GrassField.visible_count_for_distance(1000, 0.0, 0.65), 1000,
+		"even Performance retains all grass right under the camera")
+
 	t.current = "distance-aware grass density keeps nearby detail and limits far GPU instances"
 	t.eq(GrassField.visible_count_for_distance(1000, 0.0), 1000, "close grass is fully populated")
 	t.eq(GrassField.visible_count_for_distance(1000, 18.0), 1000, "density starts at the designed distance")
