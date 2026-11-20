@@ -8,10 +8,10 @@ const UPDATE_INTERVAL := 0.13
 const FADE_DISTANCE := 7.0
 
 const PRESETS := [
-	{"max_lights": 3, "radius": 28.0, "flicker": 0.035},
-	{"max_lights": 6, "radius": 44.0, "flicker": 0.060},
-	{"max_lights": 10, "radius": 62.0, "flicker": 0.085},
-	{"max_lights": 16, "radius": 84.0, "flicker": 0.110},
+	{"max_lights": 3, "radius": 28.0, "flicker": 0.035, "shadow_lights": 0},
+	{"max_lights": 6, "radius": 44.0, "flicker": 0.060, "shadow_lights": 0},
+	{"max_lights": 10, "radius": 62.0, "flicker": 0.085, "shadow_lights": 1},
+	{"max_lights": 16, "radius": 84.0, "flicker": 0.110, "shadow_lights": 2},
 ]
 
 static var _quality := 1
@@ -85,6 +85,7 @@ func _process(delta: float) -> void:
 	var keep: Dictionary = {}
 	var seconds: float = float(Time.get_ticks_msec()) * 0.001
 	var updated: Array[OmniLight3D] = []
+	var allow_shadows: bool = RenderingServer.get_current_rendering_method() == "forward_plus"
 	for entry in selected:
 		var light: OmniLight3D = entry["node"]
 		keep[light.get_instance_id()] = true
@@ -92,6 +93,11 @@ func _process(delta: float) -> void:
 		var power: float = intensity(distance, radius, seconds,
 			float(light.get_meta("aa_flame_seed", 0.0)), float(profile["flicker"]))
 		light.light_energy = 2.2 * power
+		# Only the closest one/two torches cast expensive realtime shadows,
+		# and only on Forward+. Compatibility remains shadowless for local lights.
+		var cast: bool = allow_shadows and updated.size() < int(profile["shadow_lights"]) and power > 0.25
+		if light.shadow_enabled != cast:
+			light.shadow_enabled = cast
 		# Use engine-side distance fade so border lights also disappear gradually.
 		light.distance_fade_enabled = true
 		light.distance_fade_begin = maxf(0.0, radius - FADE_DISTANCE)
@@ -101,4 +107,5 @@ func _process(delta: float) -> void:
 	for light in _active:
 		if is_instance_valid(light) and not keep.has(light.get_instance_id()):
 			light.visible = false
+			light.shadow_enabled = false
 	_active = updated
