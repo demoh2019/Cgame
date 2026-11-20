@@ -15,6 +15,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Instantiate `Node3D` cell roots on the main thread, preserving their authored transform and applying the cell origin.
 - Cap new requests, simultaneous outstanding requests, instantiation work and out-of-range scene unloads per frame. `max_unloads_per_frame` (default 32) smooths out mass cleanup after teleports; manual clear/remove or disabling streaming always unloads immediately.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
+- Dispatch optional streamed-scene lifecycle hooks `streaming_activated(cell)` and `streaming_deactivating(cell)` before the existing load/unload signals. These run after gameplay state restoration and before `queue_free()` respectively. New native signals `cell_activated` and `cell_deactivating` let AI, physics and navigation systems prepare or detach. On-demand `get_cell_simulation_stats(cell)` reports PhysicsServer3D collision objects/shapes and NavigationServer3D regions in the instantiated scene hierarchy.
 - Preserve per-cell gameplay progress with optional scene-root callbacks `capture_streaming_state() -> Dictionary` and `restore_streaming_state(state: Dictionary)`. The native streamer captures state when a cell unloads and restores it when the scene re-enters, after `_ready()`.
 - Export and import **deep-copied** runtime state with `snapshot_cell_states()` / `load_cell_states(Dictionary)`; read or edit single cells with `get_cell_state`, `set_cell_state`, `has_cell_state`, `erase_cell_state`, `clear_cell_states` and `get_cell_state_count`. State remains cached when scene registrations are removed, until explicitly erased, and is not automatically written to disk.
 - Query currently instantiated cell scene roots with `get_cell_instance(cell)` for safe per-cell visual proxy control. The method returns `null` after unload instead of a stale pointer.
@@ -67,6 +68,49 @@ re-enabling streaming restores them. If you remove a cell mapping, pinning does
 not re-register the scene.
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Physics and navigation lifecycle for streamed cells
+
+Detailed cell scenes may contain `StaticBody3D`, `CollisionShape3D`,
+`NavigationRegion3D`, agents and other physics/navigation scene nodes.
+Only the registered near-detail cells are instantiated, so Godot's servers
+receive no distant cell physics/nav resources unless you explicitly put
+such resources inside a proxy scene.
+
+Add optional callbacks to the root `Node3D` of any streamed `PackedScene`:
+
+```gdscript
+func streaming_activated(cell: Vector2i) -> void:
+    # Runs after _ready() and restore_streaming_state(), but the server will
+    # not expose the new navigation region until a later physics frame.
+    $WalkableRegion.enabled = true
+    $TerrainPhysics/GroundShape.disabled = false
+
+func streaming_deactivating(cell: Vector2i) -> void:
+    # Runs before capture_streaming_state() and before queue_free() is deferred.
+    $WalkableRegion.enabled = false
+    $TerrainPhysics/GroundShape.disabled = true
+```
+
+A scene need not implement either callback. The engine also broadcasts
+`cell_activated(cell)` and `cell_deactivating(cell)` in that same order,
+in addition to the established `cell_loaded` and `cell_unloaded` signals.
+Use them for cross-scene services such as detaching an AI director,
+removing external physics references, or deferring path queries. A
+navigation-server query must await a physics frame after the region enters
+the scene tree; the example demo waits for two physics frames.
+
+`get_cell_simulation_stats(cell)` returns a dictionary with
+`collision_objects`, `collision_shapes` and `navigation_regions`
+counts. Unloaded cells return zeros. The query recursively traverses one
+loaded cell's nodes **on demand** rather than adding work to every
+`WorldPartition3D` streaming tick. It counts nodes, not simulated
+contacts, server processing time or finalized navmesh quality.
+
+This implementation does not automatically pause every arbitrary
+`RigidBody3D` or save its physics velocity; author custom root callbacks
+for your game's simulation lifecycle. It also does not build a tiled
+navigation graph; navigation mesh content is provided by the scene author.
 
 ## Reference-counted runtime cell leases
 
@@ -242,7 +286,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 88 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (67), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 91 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (70), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
