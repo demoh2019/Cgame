@@ -1068,6 +1068,9 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"caravan_escort_paid":
+			say("Convoy escort complete: +%d silver, Explorer XP and renown earned." % [
+				int(event.get("silver", 0))])
 		"caravan_ambushed":
 			if int(event.get("peer", 0)) == client.peer_id:
 				say("CARAVAN AMBUSH! %d infected are converging on your cargo. Defend or flee!" % [
@@ -1363,7 +1366,12 @@ func _on_result(kind: String, data: Dictionary) -> void:
 						str(route.get("destination", "")), roundi(float(route.get("dst_x", 0.0))),
 						roundi(float(route.get("dst_z", 0.0))), int(route.get("silver", 0))])
 				"deliver":
-					say("Caravan delivered: +%d silver and explorer experience." % int(data.get("silver", 0)))
+					var shares: Array = data.get("escorts", [])
+					if shares.is_empty():
+						say("Caravan delivered: +%d silver and explorer experience." % int(data.get("silver", 0)))
+					else:
+						say("Caravan delivered: +%d silver to courier, paid %d escort(s) from original fare." % [
+							int(data.get("silver", 0)), shares.size()])
 				"abandon":
 					say("Caravan route cancelled; no goods taken.")
 		return
@@ -2220,6 +2228,10 @@ func _refresh_party_controls() -> void:
 		_party_status.text += "\nEscort %s: %dx %s to %s | %s" % [
 			str(escort.get("name", "Courier")), int(escort.get("quantity", 0)),
 			str(escort.get("cargo", "")), str(escort.get("destination", "")), guide]
+		if int(escort.get("owner", 0)) != client.peer_id:
+			var contributed: Dictionary = state.get("escort_progress", {})
+			_party_status.text += "\nEscort milestones %d/4 | travelled %dm (min 80m); up to 20%% of courier fare split with guards" % [
+				int(contributed.get("stage", 0)), int(contributed.get("meters", 0))]
 	var rally: Dictionary = state.get("rally", {})
 	if not rally.is_empty():
 		var from_position := TravelNavigation.target(client.you, "x", "z")

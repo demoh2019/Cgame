@@ -38,6 +38,7 @@ const Contracts = preload("res://scripts/shared/contracts.gd")
 const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
 const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
 const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
+const CaravanEscortRewards = preload("res://scripts/shared/caravan_escort_rewards.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
@@ -247,6 +248,7 @@ var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned ses
 var next_horde_at: float = NightHorde.START_DELAY # Separate night event schedule.
 var night_horde: Dictionary = {} # Active IDs, expiry, tier, public event coordinates.
 var caravan_ambushes: Array[Dictionary] = [] # Bounded server waves with expiry.
+var caravan_escort_progress: Dictionary = {} # Session-only verified co-travel for live parties.
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
 var siege_charges: Dictionary = {} # Armed, paid PvP devices: transient world state only.
@@ -653,6 +655,7 @@ func remove_player(peer_id: int) -> void:
 	siege_declare_requests.erase(peer_id)
 	_cancel_market_seller(peer_id)
 	_cancel_player_trade(peer_id, "disconnected")
+	CaravanEscortRewards.clear_peer(caravan_escort_progress, peer_id)
 	parties.disconnect_peer(peer_id)
 	var player: Player = players.get(peer_id)
 	if player != null and not player.user_id.is_empty():
@@ -816,6 +819,8 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 			"tire_grip_seconds": player.tire_grip_seconds,
 		}, allowed)
 		var moved: float = Vector2(player.position.x - before_move.x, player.position.z - before_move.z).length()
+		if moved > 0.0:
+			_record_caravan_escort_move(player, moved)
 		if not player.recall.is_empty():
 			var origin: Vector3 = player.recall["origin"]
 			if Vector2(player.position.x, player.position.z).distance_to(
@@ -858,6 +863,26 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 				var node := _find_node(int(player.action["node"]))
 				if node.is_empty() or _distance_xz(player.position, node) > Defs.REACH + 0.8:
 					player.action = {}
+
+
+## Only an actual server-resolved movement update can record escort travel.
+## Late party joins never qualify without traversing all checkpoints.
+func _record_caravan_escort_move(escort: Player, moved: float) -> void:
+	var group_id: int = parties.group_of(escort.id)
+	if group_id <= 0 or not _alive(escort):
+		return
+	for member_id in parties.members_of(escort.id):
+		if int(member_id) == escort.id:
+			continue
+		var courier: Player = players.get(int(member_id))
+		if courier == null or not _alive(courier) or \
+				courier.caravan_state.is_empty() or courier.caravan_view.is_empty():
+			continue
+		if courier.inventory.count(str(courier.caravan_view.get("cargo", ""))) < 1:
+			continue
+		CaravanEscortRewards.record(caravan_escort_progress,
+			courier.id, escort.id, group_id, courier.caravan_view,
+			courier.position, escort.position, moved)
 
 
 ## Fishing is a delayed, cancelable server action; no catch count is supplied
@@ -1313,11 +1338,17 @@ func cmd_party_decline(peer_id: int) -> Dictionary:
 
 
 func cmd_party_leave(peer_id: int) -> Dictionary:
-	return parties.leave(peer_id)
+	var outcome: Dictionary = parties.leave(peer_id)
+	if bool(outcome.get("ok", false)):
+		CaravanEscortRewards.clear_peer(caravan_escort_progress, peer_id)
+	return outcome
 
 
 func cmd_party_kick(peer_id: int, target_id: int) -> Dictionary:
-	return parties.kick(peer_id, target_id)
+	var outcome: Dictionary = parties.kick(peer_id, target_id)
+	if bool(outcome.get("ok", false)):
+		CaravanEscortRewards.clear_peer(caravan_escort_progress, target_id)
+	return outcome
 
 
 ## The server determines the caller's identity and current simulation time.
@@ -1622,6 +1653,14 @@ func _party_state_for(peer_id: int) -> Dictionary:
 				"alive": _alive(member), "health": member.survival.health})
 	state["roster"] = roster
 	state["escort_caravan"] = CaravanEscort.shared_route(peer_id, players, parties)
+	var shared: Dictionary = state["escort_caravan"]
+	state["escort_progress"] = {}
+	if not shared.is_empty() and int(shared["owner"]) != peer_id:
+		var courier: Player = players.get(int(shared["owner"]))
+		if courier != null:
+			state["escort_progress"] = CaravanEscortRewards.status(
+				caravan_escort_progress, courier.id, peer_id,
+				parties.group_of(peer_id), courier.caravan_view)
 	var invite_from: int = int(state["invite_from"])
 	var sender: Player = players.get(invite_from)
 	state["invite_name"] = sender.name if sender != null else ""
@@ -2249,6 +2288,7 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 		player.caravan_state = {}
 		player.caravan_view = {}
 		player.caravan_ambushed = false
+		caravan_escort_progress.erase(peer_id)
 		player.dirty_character = true
 		return {"ok": true, "action": "abandon"}
 	if action != "accept" and action != "deliver":
@@ -2264,6 +2304,7 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 			return {"ok": false, "reason": "no_route"}
 		player.caravan_state = CaravanRoutes.saved_state(offer)
 		player.caravan_view = offer.duplicate(true)
+		caravan_escort_progress.erase(peer_id)
 		player.caravan_ambushed = false
 		player.dirty_character = true
 		return {"ok": true, "action": "accept", "route": offer.duplicate(true)}
@@ -2271,14 +2312,41 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 		return {"ok": false, "reason": "no_active"}
 	if int(station["id"]) != int(player.caravan_view["dst_id"]):
 		return {"ok": false, "reason": "wrong_destination"}
-	var outcome: Dictionary = CaravanRoutes.deliver(player.inventory, player.caravan_view)
+	var eligible_escorts: Array = []
+	var group_id: int = parties.group_of(peer_id)
+	if group_id > 0:
+		for member_id in parties.members_of(peer_id):
+			if int(member_id) == peer_id:
+				continue
+			var member: Player = players.get(int(member_id))
+			if member == null or not _alive(member):
+				continue
+			if CaravanEscortRewards.qualifies(caravan_escort_progress,
+					peer_id, member.id, group_id, player.caravan_view,
+					player.position, member.position):
+				eligible_escorts.append(member)
+	var outcome: Dictionary = CaravanEscortRewards.settle(
+		player, eligible_escorts, player.caravan_view)
 	if not bool(outcome.get("ok", false)):
 		return outcome
+	caravan_escort_progress.erase(peer_id)
 	player.caravan_state = {}
 	player.caravan_view = {}
 	player.caravan_ambushed = false
 	player.dirty_inventory = true
 	player.dirty_character = true
+	for member in eligible_escorts:
+		member.dirty_inventory = true
+		member.dirty_character = true
+		_award(member, "explorer", 10.0)
+		_earn_renown(member, 2, "caravan_escort")
+		var payout: int = 0
+		for receipt in outcome.get("escorts", []):
+			if int(receipt["peer"]) == member.id:
+				payout = int(receipt["silver"])
+				break
+		events.append({"type": "caravan_escort_paid", "peer": member.id,
+			"silver": payout})
 	_award(player, "explorer", 20.0)
 	_earn_renown(player, 4, "caravan")
 	outcome["action"] = "deliver"
