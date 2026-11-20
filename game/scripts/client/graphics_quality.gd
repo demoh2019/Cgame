@@ -151,6 +151,11 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Applying only to the sun node would let nighttime weather restore shadows on Performance.
 		var atmosphere_profile: Dictionary = p.duplicate()
 		atmosphere_profile["sky_radiance"] = world_profile["sky_radiance"]
+		# Sync both the cubemap fast path and physically inspired haze.
+		# This corrects an existing omission: the low-end cache switch had a
+		# profile value but was never passed into the live Atmosphere.
+		atmosphere_profile["sky_use_cached_radiance"] = world_profile["sky_use_cached_radiance"]
+		atmosphere_profile["sky_scattering_strength"] = world_profile["sky_scattering_strength"]
 		# Only desktop Forward+ gets froxel volumetrics. Compatibility/Mobile use
 		# one lightweight weather-driven height-fog layer instead.
 		atmosphere_profile["quality_level"] = _level
