@@ -540,6 +540,11 @@ static func _build_items() -> void:
 		"tier": 2, "stack": 5, "weight": 0.65, "value": 54})
 	_add_recipe("trail_tire_grips", "trail_tire_grips", 1,
 		{"cloth_2": 2, "fiber_2": 2, "scrap": 2}, "workbench", 5.0)
+	# Paid chain service lasts for an actual travelled distance.
+	_add_item("bike_service_kit", {"name": "Bicycle Drive Service Kit",
+		"kind": "bike_service", "tier": 1, "stack": 5, "weight": 0.8, "value": 35})
+	_add_recipe("bike_service_kit", "bike_service_kit", 1,
+		{"bar_1": 1, "scrap": 2, "cloth_1": 1}, "workbench", 4.0)
 	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
 	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
 		"tier": 2, "weight": 12.0, "value": 180})

@@ -336,6 +336,12 @@ func _build() -> void:
 	tires_button.tooltip_text = "Fit 1 crafted kit to owned bike while dismounted; improves grip in mud, sand, forests, mountains."
 	tires_button.pressed.connect(func() -> void: client.use_item("trail_tire_grips"))
 	inventory_box.add_child(tires_button)
+	var service_button := Button.new()
+	service_button.name = "ServiceBikeDrive"
+	service_button.text = "Service bicycle drive (800 m; PgUp)"
+	service_button.tooltip_text = "Use a crafted drive service kit while dismounted; quiet riding for 800m, less off-road."
+	service_button.pressed.connect(func() -> void: client.use_item("bike_service_kit"))
+	inventory_box.add_child(service_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -1758,6 +1764,8 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nBIKE PANNIERS: %.0f kg supported (on foot: full load)" % supported_kg
 	if bool(client.you.get("on_road", false)):
 		_info_label.text += "\nDIRT ROAD: +8% foot pace, stronger bicycle grip"
+	if client.inventory.count("salvage_bike") > 0:
+		_info_label.text += "\nBIKE SERVICE: %.0f m | PgUp service on foot" % float(client.you.get("bike_service_meters", 0.0))
 	_info_label.text += "\nTRAIL BIKE: %s | F4 mount/dismount | remount %.0fs" % [
 		"RIDING" if bool(client.you.get("mounted", false)) else ("CARRIED" if client.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		float(client.you.get("mount_cooldown", 0.0))]

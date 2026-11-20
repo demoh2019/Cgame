@@ -54,6 +54,24 @@ stash, market, trading and saved character inventory still use actual items
 and actual weight. The client runs the exact same cargo calculation for
 movement prediction. A mounted HUD indication shows effective support.
 
+## Drive wear and paid servicing
+
+One Bicycle Drive Service Kit is crafted at a workbench from 1 T1 metal bar,
+2 scrap and 1 T1 cloth. Use the kit **off the bike** to service a physically
+owned Salvaged Trail Bike. A paid service lasts for 800 m of actual server-
+confirmed cycling on firm terrain, less in woods, mountain rocks, sand or
+swamp mud. No wear occurs while idle, blocked, walking or dismounted. A
+serviced drive reduces ordinary moving-bike noise from 27 m to 17 m; the
+existing Quiet Chain Wrap remains the stronger temporary 9 m protection.
+Once service wears out, the bicycle remains usable but becomes noisy again.
+Using a second kit before service expires is refused without spending it.
+
+Service distance is saved with the survivor, not represented as per-item
+durability. Losing the bike clears the owner's remaining service distance;
+trading or storing the bike does not transfer the paid service credit. Legacy
+characters have zero service distance. Network packets cannot request wear
+or noise radii; the authoritative server consumes only observed travel.
+
 ## Presentation
 
 The bicycle has a procedural low-poly 3D model: orange metal frame,

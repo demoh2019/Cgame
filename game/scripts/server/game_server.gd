@@ -50,6 +50,7 @@ const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
+const BikeService = preload("res://scripts/shared/bike_service.gd")
 const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
@@ -190,6 +191,7 @@ class Player:
 	var mounted: bool = false # Session-only; never saved.
 	var mount_cooldown: float = 0.0
 	var chain_wrap_seconds: float = 0.0 # Validated, persisted noise protection.
+	var bike_service_meters: float = 0.0 # Chain service measured from actual cycling.
 	var tire_grip_seconds: float = 0.0 # Paid, validated off-road tire duration.
 	var decoy_timer: float = 0.0 # Anti-spam timer; no persistent character data.
 	var flash_cooldown: float = 0.0 # Persistent item-paid tactical cooldown.
@@ -374,6 +376,7 @@ func character_data(player: Player) -> Dictionary:
 		"flare_seconds": player.flare_seconds,
 		"spore_sample_cooldown": player.spore_sample_cooldown,
 		"chain_wrap_seconds": player.chain_wrap_seconds,
+		"bike_service_meters": player.bike_service_meters,
 		"tire_grip_seconds": player.tire_grip_seconds,
 		"flash_cooldown": player.flash_cooldown,
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
@@ -454,6 +457,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("chain_wrap_seconds", 0.0),
 			0.0, BikeChain.DURATION_SECONDS):
+		return false
+	if not BikeService.valid_remaining(data.get("bike_service_meters", 0.0)):
 		return false
 	if not SaveValidation.finite_number(data.get("tire_grip_seconds", 0.0),
 			0.0, BikeGrip.DURATION_SECONDS):
@@ -561,6 +566,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.flare_seconds = float(data.get("flare_seconds", 0.0))
 	player.spore_sample_cooldown = float(data.get("spore_sample_cooldown", 0.0))
 	player.chain_wrap_seconds = float(data.get("chain_wrap_seconds", 0.0))
+	player.bike_service_meters = float(data.get("bike_service_meters", 0.0))
 	player.tire_grip_seconds = float(data.get("tire_grip_seconds", 0.0))
 	player.flash_cooldown = float(data.get("flash_cooldown", 0.0))
 	player.meal_seconds = float(data.get("meal_seconds", 0.0))
@@ -665,6 +671,7 @@ func _spawn_player(player: Player) -> void:
 	player.mounted = false
 	player.mount_cooldown = 0.0
 	player.chain_wrap_seconds = 0.0
+	player.bike_service_meters = 0.0
 	player.tire_grip_seconds = 0.0
 	player.attack_timer = 0.0
 	player.skill_timer = 0.0
@@ -808,10 +815,15 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 			player.noise_timer = maxf(player.noise_timer, Defs.SPRINT_NOISE_SECONDS)
 		# Never trust movement or noise from a client. The server measures
 		# actual travel after collision, and only an owned mount creates rattle.
+		if player.mounted and moved > 0.0 and player.bike_service_meters > 0.0:
+			player.bike_service_meters = BikeService.remaining_after_move(
+				player.bike_service_meters, world.biome_at(before_move.x, before_move.z), moved)
+			player.dirty_character = true
 		var bike_noise: float = Mounts.noise_for_distance(moved) if player.mounted else 0.0
 		if bike_noise > 0.0:
 			player.noise_radius = maxf(player.noise_radius,
-				BikeChain.riding_radius(player.chain_wrap_seconds))
+				BikeService.riding_noise_radius(player.bike_service_meters,
+					BikeChain.riding_radius(player.chain_wrap_seconds)))
 			player.noise_timer = maxf(player.noise_timer, Mounts.NOISE_SECONDS)
 		# Walking away cancels gathering and shoreline fishing.
 		if not player.action.is_empty():
@@ -2906,6 +2918,17 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if not player.inventory.remove(item_id, 1):
 				return {"ok": false, "reason": "not_carried", "tire_grips": true}
 			player.tire_grip_seconds = BikeGrip.DURATION_SECONDS
+		"bike_service":
+			if item_id != BikeService.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			var service_reason: String = BikeService.repair_reason(player.inventory, player.bike_service_meters)
+			if service_reason != "":
+				return {"ok": false, "reason": service_reason}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.bike_service_meters = BikeService.MAX_METERS
 		"bike_wrap":
 			if item_id != BikeChain.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -2985,6 +3008,8 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 		return {"ok": true, "tire_grip_seconds": player.tire_grip_seconds}
 	if item_id == BikeChain.ITEM_ID:
 		return {"ok": true, "chain_wrap_seconds": player.chain_wrap_seconds}
+	if item_id == BikeService.ITEM_ID:
+		return {"ok": true, "bike_service_meters": player.bike_service_meters}
 	if item_id == HandFlare.ITEM_ID:
 		return {"ok": true, "flare_seconds": player.flare_seconds}
 	if item_id == FieldSmoke.ITEM_ID:
@@ -4116,6 +4141,9 @@ func _tick_players(delta: float) -> void:
 		if player.tire_grip_seconds > 0.0:
 			player.tire_grip_seconds = maxf(0.0,
 				player.tire_grip_seconds - maxf(0.0, delta))
+			player.dirty_character = true
+		if player.inventory.count(Mounts.ITEM_ID) < 1 and player.bike_service_meters > 0.0:
+			player.bike_service_meters = 0.0
 			player.dirty_character = true
 		if player.mounted and (not _alive(player) or
 				player.inventory.count(Mounts.ITEM_ID) < 1 or
@@ -5469,6 +5497,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"cargo_factor": BikeCargo.movement_factor(player.inventory,
 				player.skills.bonus("carry_capacity"), player.mounted),
 			"bike_cargo_kg": BikeCargo.SUPPORTED_KG if player.mounted and BikeCargo.installed(player.inventory) else 0.0,
+			"bike_service_meters": player.bike_service_meters,
 			"max_health": player.survival.max_health,
 			"speed_bonus": player.skills.bonus("move_speed"), "carry_bonus": player.skills.bonus("carry_capacity"),
 		},

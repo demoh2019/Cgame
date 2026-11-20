@@ -3,7 +3,7 @@ extends PanelContainer
 
 const ENTRIES := [
 	["MOVE AND FIGHT", [
-		["WASD", "move"], ["Shift", "sprint"], ["F4", "ride / dismount crafted bike"], ["Space", "dodge"], ["Mouse", "aim; left click attacks"], ["G", "weapon skill"],
+		["WASD", "move"], ["Shift", "sprint"], ["F4", "ride / dismount crafted bike"], ["PgUp", "service bike drive on foot"], ["Space", "dodge"], ["Mouse", "aim; left click attacks"], ["G", "weapon skill"],
 		["F1", "guardian taunt"], ["4", "next weapon"], ["5", "equip armor"], ["Wheel", "zoom"]]],
 	["GATHER AND CRAFT", [
 		["E", "gather (trees and mining attract infected) / loot"], ["C", "crafting window"], ["0", "quick-cook best fish"],
