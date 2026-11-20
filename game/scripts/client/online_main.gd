@@ -26,6 +26,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const RenderBenchmark = preload("res://scripts/client/render_benchmark.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
@@ -1800,8 +1801,10 @@ func _run_demo() -> void:
 			# The window may be hidden behind others, in which case the last drawn frame would be stale: draw now.
 			RenderingServer.force_draw()
 			get_viewport().get_texture().get_image().save_png(_screenshot_path)
-			_frame_ms.sort()
-			print("CLIENT median frame %.1f ms over %d frames" % [_frame_ms[_frame_ms.size() / 2] if not _frame_ms.is_empty() else 0.0, _frame_ms.size()])
+			# Report tail-frame stutters instead of hiding them behind one median.
+			# These are CPU process deltas, NOT real GPU timer measurements.
+			var pace: Dictionary = RenderBenchmark.summarize(_frame_ms)
+			print(RenderBenchmark.describe(pace))
 			print("CLIENT frame: %d fps, %d draw calls, %d primitives, %d objects" % [Engine.get_frames_per_second(),
 				Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
 				Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)])
