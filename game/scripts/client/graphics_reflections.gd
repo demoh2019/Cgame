@@ -18,7 +18,10 @@ static func settings(level: int, rendering_method: String) -> Dictionary:
 		"max_steps": 28 if tier == 2 else (48 if tier == 3 else 16),
 		"fade_in": 0.12,
 		"fade_out": 2.0 if tier == 2 else 2.5,
-		"depth_tolerance": 0.25 if tier == 2 else 0.22,
+		# Tighten intersection depth confidence now that half-resolution
+		# reprojection is pixel-centered and no longer smears into neighbors.
+		# No extra steps or render targets are required for this improvement.
+		"depth_tolerance": 0.24 if tier == 2 else (0.20 if tier == 3 else 0.25),
 	}
 
 

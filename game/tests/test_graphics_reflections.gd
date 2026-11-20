@@ -26,6 +26,12 @@ func run(t) -> void:
 		"Balanced avoids all SSR roughness-filter GPU work")
 	t.check(int(high["max_steps"]) <= 32 and int(ultra["max_steps"]) <= 48,
 		"reflection rays have an explicit performance ceiling")
+	t.check(float(ultra["depth_tolerance"]) < float(high["depth_tolerance"]),
+		"Ultra rejects less precise glossy ray hits than High")
+	t.check(float(ultra["depth_tolerance"]) > 0.0,
+		"reflection depth tolerance cannot collapse to zero")
+	t.eq(float(high["depth_tolerance"]), 0.24,
+		"High retains forgiving but bounded hit depth near geometry borders")
 	for method in ["gl_compatibility", "mobile"]:
 		for tier in 4:
 			t.check(not bool(GraphicsReflections.settings(tier, method)["enabled"]),
@@ -44,9 +50,12 @@ func run(t) -> void:
 	t.eq(GraphicsReflections._last_roughness_quality, RenderingServer.ENV_SSR_ROUGHNESS_QUALITY_HIGH,
 		"real renderer is configured for Ultra rough-surface reconstruction")
 	t.eq(env.ssr_max_steps, 48, "Ultra caps the real Godot SSR ray steps")
-	t.near(env.ssr_depth_tolerance, 0.22, 0.001, "depth tolerance avoids oversized reflection artifacts")
+	t.near(env.ssr_depth_tolerance, 0.20, 0.001,
+		"Ultra uses tighter hit depth confidence after subpixel-centred SSR resolve")
 	GraphicsReflections.apply(env, 2, "forward_plus")
 	t.eq(env.ssr_max_steps, 28, "High reduces SSR GPU cost without replacing the Environment")
+	t.near(env.ssr_depth_tolerance, 0.24, 0.001,
+		"High updates native depth confidence without changing trace cost")
 	t.eq(GraphicsReflections._last_roughness_quality, RenderingServer.ENV_SSR_ROUGHNESS_QUALITY_MEDIUM,
 		"native reflection mip quality follows live High profile")
 	GraphicsReflections.apply(env, 0, "forward_plus")
@@ -63,6 +72,8 @@ func run(t) -> void:
 	t.current = "reflection integration and fallback"
 	t.check(ProjectSettings.get_setting("rendering/environment/screen_space_reflection/half_size", false),
 		"SSR renders at half resolution instead of adding a full-size ray pass")
+	t.check(int(high["max_steps"]) == 28 and int(ultra["max_steps"]) == 48,
+		"higher-quality edge reconstruction never adds expensive ray steps")
 	var graphics_script: Script = GraphicsQuality as Script
 	t.check(RenderingServer.has_method("environment_set_ssr_roughness_quality"),
 		"engine exposes native SSR roughness filtering to GDScript")
