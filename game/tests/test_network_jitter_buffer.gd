@@ -13,10 +13,10 @@ func run(t) -> void:
 	t.near(buffer.delay, Jitter.BASE_DELAY, 0.0001,
 		"stable arrivals do not add artificial network delay")
 	var before: float = buffer.delay
-	buffer.observe(7.0, 17.0) # A large local idle gap resets, not accumulates.
+	buffer.observe(7.1, 19.5) # A large local idle gap resets, not accumulates.
 	t.near(buffer.delay, before, 0.0001,
 		"return from a background pause keeps the minimal buffer")
-	buffer.observe(7.0, 17.1)
+	buffer.observe(7.1, 19.6)
 	t.near(buffer.delay, before, 0.0001,
 		"duplicated snapshot timestamps cannot simulate new packet jitter")
 
@@ -83,7 +83,7 @@ func run(t) -> void:
 			t.near(native, local, 0.00001,
 				"native Cgame and stock Godot fallback agree on the clock")
 	else:
-		t.check(Jitter.advance_clock(0.8, 1.0, 0.12, 0.016).is_finite(),
+		t.check(is_finite(Jitter.advance_clock(0.8, 1.0, 0.12, 0.016)),
 			"stock Godot supports the same safe fallback without a custom engine")
 	host.free()
 	var code: String = (EntityView as Script).source_code
