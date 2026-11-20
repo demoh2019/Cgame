@@ -17,6 +17,7 @@ global uniform float aa_terrain_warp_strength;
 global uniform float aa_cliff_normal_quality; // 0 on low-end, 0.7 High, 1 Ultra
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/specular_aa.gdshaderinc"
+#include "res://assets/shaders/terrain_height_blend.gdshaderinc"
 #include "res://assets/shaders/puddle_ripples.gdshaderinc"
 #include "res://assets/shaders/water_caustics.gdshaderinc"
 
@@ -249,6 +250,38 @@ void fragment() {
 		w[i] *= 1.0 - road;
 	}
 	w[4] += road;
+
+	// Optional height-aware terrain layering: where two natural materials meet,
+	// raised stone/snow protrudes over softer mud, forest soil and sand.
+	// Reuses the ALREADY computed mid/broad fields, with no new texture taps.
+	// Roads and authored ruined-site masks retain their exact original weight.
+	if (aa_terrain_height_blend > 0.001 && detail_fade > 0.001
+			&& road < 0.85 && (w[9] + w[10] + w[11] + w[12]) < 0.40) {
+		float natural_sum = 0.0;
+		float sculpted_sum = 0.0;
+		for (int i = 0; i < 9; i++) {
+			if (i == 4) {
+				continue; // Preserve the dirt road layer, even on steep terrain.
+			}
+			float original = w[i];
+			natural_sum += original;
+			if (original > 0.001) {
+				w[i] = original * aa_terrain_relief_gain(
+					i, original, mid, broad, aa_terrain_height_blend * detail_fade);
+			}
+			sculpted_sum += w[i];
+		}
+		// Conserve the total natural contribution: existing biome, road,
+		// shoreline and site masks still sum to exactly the former coverage.
+		if (sculpted_sum > 0.00001) {
+			float conserve = natural_sum / sculpted_sum;
+			for (int i = 0; i < 9; i++) {
+				if (i != 4) {
+					w[i] *= conserve;
+				}
+			}
+		}
+	}
 
 	// Four ranked slots are enough for Performance/Balanced/High. Ultra bypasses ranking
 	// and keeps all 13 materials, including tiny biome transitions.
