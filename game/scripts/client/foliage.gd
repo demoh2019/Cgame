@@ -13,6 +13,8 @@ global uniform vec3 aa_vegetation_wind;
 global uniform float aa_vegetation_wet_gloss;
 // Screen-independent, inexpensive thin-leaf backlight. Performance turns it off.
 global uniform float aa_leaf_transmission;
+// Shared ambient self-occlusion budget for dense tree crowns.
+global uniform float aa_canopy_occlusion;
 uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform vec4 albedo_color : source_color = vec4(1.0);
 // Preserve source glTF PBR data. Optional maps are sampled only if actually present.
@@ -34,6 +36,7 @@ uniform float material_specular = 0.5;
 uniform float normal_strength = 1.0;
 uniform float sway = 0.12;
 uniform float height_ref = 4.0;
+uniform float height_min = 0.0;
 // Small movements disappear below a pixel at this range; avoid distant trigonometry.
 uniform float wind_fade_start = 48.0;
 uniform float wind_fade_end = 120.0;
@@ -45,6 +48,7 @@ varying vec3 instance_tint;
 varying vec3 plant_hue;
 varying vec2 cloud_xz;
 varying float plant_roughness;
+varying float canopy_height;
 void vertex() {
 	instance_tint = (instance_tinted || use_vertex_colors) ? COLOR.rgb : vec3(1.0);
 	// World-space plant roots give every MultiMesh instance stable colour and gust phase.
@@ -56,6 +60,9 @@ void vertex() {
 	float h2 = fract(h1 * 31.37 + 0.173); // A decorrelated shade and roughness without texture fetches.
 	plant_hue = mix(vec3(0.86, 0.94, 0.86), vec3(1.1, 1.06, 0.84), h1) * mix(0.84, 1.08, h2);
 	plant_roughness = mix(0.83, 0.93, h2);
+	// Source AABB-relative height avoids changing the look between mountain and
+	// valley trees, or between nature-pack and procedural fallback meshes.
+	canopy_height = clamp((VERTEX.y - height_min) / max(height_ref, 0.1), 0.0, 1.0);
 	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	cloud_xz = w.xz;
 
@@ -115,6 +122,7 @@ void fragment() {
 	vec2 uv_dy = dFdy(UV);
 	float roughness = material_roughness;
 	float metallic = material_metallic;
+	float occlusion = 1.0;
 	// Used only by the optional roughness filter; tangent-space normal maps
 	// contribute to pixel variance without a second normal-map sample.
 	vec3 aa_filter_normal = normalize(NORMAL);
@@ -126,7 +134,7 @@ void fragment() {
 		if (use_orm_map) {
 			// Godot ORM convention: occlusion R, roughness G, metalness B.
 			vec3 orm = textureGrad(orm_tex, UV, uv_dx, uv_dy).rgb;
-			AO = mix(1.0, orm.r, pbr_detail);
+			occlusion = mix(1.0, orm.r, pbr_detail);
 			roughness *= mix(1.0, orm.g, pbr_detail);
 			metallic *= mix(1.0, orm.b, pbr_detail);
 		} else {
@@ -150,6 +158,18 @@ void fragment() {
 			aa_filter_normal = normalize(mix(vec3(0.0, 0.0, 1.0),
 				tangent_normal, aa_normal_scale));
 		}
+	}
+	// Approximate ambient light lost inside the crown without an extra
+	// depth/SSAO pass. Preserve the imported ORM AO and its distance fade.
+	float crown_shadow = 0.0;
+	if (cut_out && aa_canopy_occlusion > 0.001) {
+		float open_sky = smoothstep(0.12, 0.9, canopy_height);
+		crown_shadow = clamp(aa_canopy_occlusion, 0.0, 0.5) * (1.0 - open_sky);
+	}
+	AO = clamp(occlusion * (1.0 - crown_shadow), 0.0, 1.0);
+	// Keep the canopy readable on Compatibility where screen-space AO is absent.
+	if (cut_out) {
+		ALBEDO *= 1.0 - crown_shadow * 0.12;
 	}
 	float foliage_variation = cut_out ? plant_roughness : 1.0;
 	// Only inexpensive PBR parameters change in rain; optional PBR normal/
@@ -242,6 +262,7 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 		return _cache[key]
 	var copy: ArrayMesh = ArrayMesh.new()
 	var height := maxf(source.get_aabb().size.y, 0.1)
+	var min_height: float = source.get_aabb().position.y
 	for surface in source.get_surface_count():
 		var arrays := source.surface_get_arrays(surface)
 		copy.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], MeshLOD.copy_lods(source, surface))
@@ -256,6 +277,7 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 			material.set_shader_parameter("sway", sway)
 			material.set_shader_parameter("instance_tinted", tinted)
 			material.set_shader_parameter("height_ref", height)
+			material.set_shader_parameter("height_min", min_height)
 			material.set_shader_parameter("albedo_color", standard.albedo_color)
 			material.set_shader_parameter("use_vertex_colors", standard.vertex_color_use_as_albedo)
 			material.set_shader_parameter("material_roughness", standard.roughness)
