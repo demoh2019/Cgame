@@ -56,9 +56,16 @@ indirect_specular_light *= specular_occlusion;
 - The existing bent-normal path remains unchanged.
 - The math is an **empirical visual approximation**, not ray-traced visibility.
 
-This uses ALU only in occluded pixels; it adds no textures, render targets,
-additional AO passes or per-material ShaderMaterial instances. Exact GPU cost
-should be measured on Apple M1, especially dense foliage and ruins.
+The native renderer also applies a **rough-material fast path**: when
+`roughness >= 0.55`, the Lagarde exponent is below 0.0012, so indirect
+specular visibility is approximated by the existing AO value without invoking
+`pow()` or `exp2()`. A 30,000-sample numerical sweep gave maximum absolute
+deviation **0.00573** at the threshold. Glossy metal and wet puddles keep the
+full roughness/view-dependent model; unoccluded surfaces skip it entirely.
+
+This adds no textures, render targets, additional AO passes or per-material
+ShaderMaterial instances. Exact GPU cost should be measured on Apple M1,
+especially dense foliage and ruins.
 
 ## Game integration: wet-stone cavity visibility
 
