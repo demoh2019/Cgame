@@ -161,6 +161,9 @@ func _run() -> void:
         _fail("streamed cell has no obstacle colliders")
         return
     var grass := cell.get_node("WindGrass") as MultiMeshInstance3D
+    var original_tree_mesh: Mesh = (cell.get_node("TreeTrunks") as MultiMeshInstance3D).multimesh.mesh
+    var original_grass_mesh: Mesh = grass.multimesh.mesh
+    var original_rock_mesh: Mesh = (cell.get_node("Stones") as MultiMeshInstance3D).multimesh.mesh
     if grass.multimesh.instance_count != 225:
         _fail("incorrect grass instance count")
         return
@@ -212,6 +215,11 @@ func _run() -> void:
     var negative_root := _get_active_cell_node(stream, negative)
     if negative_root == null:
         _fail("neighbor tile was not instantiated")
+        return
+    if (negative_root.get_node("TreeTrunks") as MultiMeshInstance3D).multimesh.mesh != original_tree_mesh \
+            or (negative_root.get_node("WindGrass") as MultiMeshInstance3D).multimesh.mesh != original_grass_mesh \
+            or (negative_root.get_node("Stones") as MultiMeshInstance3D).multimesh.mesh != original_rock_mesh:
+        _fail("streamed forest cells did not share immutable mesh templates")
         return
     var other_ground := negative_root.get_node_or_null("TerrainPatch/GroundMesh") as MeshInstance3D
     if other_ground == null:
