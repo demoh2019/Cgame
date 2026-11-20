@@ -43,6 +43,7 @@ const ZombieFlies = preload("res://scripts/client/zombie_flies.gd")
 const Dragonflies = preload("res://scripts/client/dragonflies.gd")
 const ShootingStars = preload("res://scripts/client/shooting_stars.gd")
 const DustDevils = preload("res://scripts/client/dust_devils.gd")
+const RainSplashes = preload("res://scripts/client/rain_splashes.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -132,6 +133,7 @@ var _zombie_flies
 var _dragonflies
 var _shooting_stars
 var _dust_devils
+var _rain_splashes
 var _tumbleweeds
 var _damage_numbers
 var _damage_direction
@@ -1159,6 +1161,8 @@ func _on_welcomed() -> void:
 	add_child(_shooting_stars)
 	_dust_devils = DustDevils.new()
 	add_child(_dust_devils)
+	_rain_splashes = RainSplashes.new()
+	add_child(_rain_splashes)
 	_damage_numbers = DamageNumbers.new()
 	add_child(_damage_numbers)
 	_blood_decals = BloodDecals.new()
@@ -1477,6 +1481,12 @@ func _update_time_of_day(delta: float) -> void:
 		snow_fraction = SnowVfx.snow_fraction(client.world.height_at(ground_at.x, ground_at.z))
 	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO,
 		atmosphere.storm, snow_fraction)
+	if _rain_splashes != null and client != null and client.world != null and client.you.has("x"):
+		var splash_at: Vector3 = client.display_position()
+		splash_at.y = client.world.height_at(splash_at.x, splash_at.z)
+		# Snow above the snow line does not splash.
+		_rain_splashes.update_view(splash_at, 0.0 if underground else atmosphere.storm * (1.0 - snow_fraction),
+			bool(weather.get("sheltered", false)), GraphicsQuality.level())
 	if _wet_drips != null:
 		_wet_drips.update_view(0.0 if underground else atmosphere.storm,
 			underground or bool(weather.get("sheltered", false)), GraphicsQuality.level(), delta)

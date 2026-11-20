@@ -112,6 +112,7 @@ const SUITES := [
 	"res://tests/test_shooting_stars.gd",
 	"res://tests/test_dust_devils.gd",
 	"res://tests/test_lens_dirt.gd",
+	"res://tests/test_rain_splashes.gd",
 	"res://tests/test_sun_shadow_atmosphere.gd",
 	"res://tests/test_graphics_reflections.gd",
 	"res://tests/test_pbr_reflection_occlusion.gd",
