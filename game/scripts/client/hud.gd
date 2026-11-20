@@ -413,6 +413,12 @@ func _build() -> void:
 	alkali_button.tooltip_text = "Clears lingering spitter acid within 5.5 m, not the initial splash."
 	alkali_button.pressed.connect(func() -> void: client.use_item("field_alkali_kit"))
 	inventory_box.add_child(alkali_button)
+	var seal_button := Button.new()
+	seal_button.name = "UseWoundSealant"
+	seal_button.text = "Apply antiseptic bite seal (90s)"
+	seal_button.tooltip_text = "Craft from wild herbs, antiseptic and cloth. 45% less infected bite infection for 90s; no acid, spore or PvP immunity."
+	seal_button.pressed.connect(func() -> void: client.use_item("wound_sealant"))
+	inventory_box.add_child(seal_button)
 	var canteen_button := Button.new()
 	canteen_button.name = "RefillFieldCanteen"
 	canteen_button.text = "Refill canteen at shore (1 filter -> 1 clean water)"
@@ -2402,6 +2408,12 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and bool(data.get("wound_seal", false)):
+		if bool(data.get("ok", false)):
+			say("Wound seal active: -45% infected bite infection for 90s (not acid or spores).")
+		else:
+			say("Wound seal: " + str(data.get("reason", "rejected")) + " (dose not spent)")
+		return
 	if kind == "use" and bool(data.get("ok", false)) and str(data.get("item", "")) == "murky_water":
 		say("Collected unboiled lake water. Boil with 1 wood at a lit campfire or the hub workbench.")
 		return
@@ -3250,6 +3262,9 @@ func _process(_delta: float) -> void:
 	var spore_filter_left: float = float(client.you.get("spore_filter_seconds", 0.0))
 	if spore_filter_left > 0.0:
 		_info_label.text += "\nSPORE FILTER: %.0fs remaining (airborne spores only)" % spore_filter_left
+	var seal_left: float = float(client.you.get("wound_seal_seconds", 0.0))
+	if seal_left > 0.0:
+		_info_label.text += "\nWOUND SEAL: %.0fs remaining (-45%% bite infection only)" % seal_left
 	var survey: Dictionary = client.you.get("ruin_survey", {})
 	if not survey.is_empty():
 		var destination := Vector2(float(survey["x"]), float(survey["z"]))

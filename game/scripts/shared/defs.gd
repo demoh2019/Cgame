@@ -474,6 +474,11 @@ static func _build_items() -> void:
 		"stop_bleeding": true, "stack": 5, "weight": 0.30, "value": 30})
 	_add_recipe("herbal_poultice", "herbal_poultice", 1,
 		{"wild_herbs": 2, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# Preparatory dressing against physical infected bites, not acid or spores.
+	_add_item("wound_sealant", {"name": "Antiseptic Wound Sealant",
+		"kind": "wound_seal", "tier": 1, "stack": 5, "weight": 0.25, "value": 38})
+	_add_recipe("wound_sealant", "wound_sealant", 1,
+		{"wild_herbs": 2, "field_antiseptic": 1, "cloth_1": 1}, "", 4.0)
 	_add_item("field_splint", {"name": "Field Splint", "kind": "medical",
 		"fracture_treatment": 100.0, "stack": 5, "value": 24, "weight": 0.6})
 	_add_recipe("field_splint", "field_splint", 1,

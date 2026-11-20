@@ -85,6 +85,7 @@ const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
+const WoundSealant = preload("res://scripts/shared/wound_sealant.gd")
 const GatheringNoise = preload("res://scripts/shared/gathering_noise.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
@@ -239,6 +240,7 @@ class Player:
 	var rain_cooldown: float = 0.0 # Persisted storm water collection cooldown.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
 	var spore_filter_seconds: float = 0.0 # Paid temporary swamp respirator, persisted.
+	var wound_seal_seconds: float = 0.0 # Paid bite-wound prevention, persisted.
 	var soft_sole_seconds: float = 0.0 # Paid, persisted reduced sprint footstep hearing.
 	var storm_insulator_seconds: float = 0.0 # Persisted paid shock resistance.
 	var spore_sample_cooldown: float = 0.0 # Persistent harvest cooldown.
@@ -486,6 +488,7 @@ func character_data(player: Player) -> Dictionary:
 		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
 		"spore_filter_seconds": player.spore_filter_seconds,
+		"wound_seal_seconds": player.wound_seal_seconds,
 		"soft_sole_seconds": player.soft_sole_seconds,
 		"storm_insulator_seconds": player.storm_insulator_seconds,
 		"flare_seconds": player.flare_seconds,
@@ -573,6 +576,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("spore_filter_seconds", 0.0),
 			0.0, SporeHazard.FILTER_DURATION_SECONDS):
+		return false
+	if not SaveValidation.finite_number(data.get("wound_seal_seconds", 0.0),
+			0.0, WoundSealant.DURATION_SECONDS):
 		return false
 	if not SoftSoleWraps.valid_remaining(data.get("soft_sole_seconds", 0.0)):
 		return false
@@ -722,6 +728,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.rain_cooldown = float(data.get("rain_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
 	player.spore_filter_seconds = float(data.get("spore_filter_seconds", 0.0))
+	player.wound_seal_seconds = float(data.get("wound_seal_seconds", 0.0))
 	player.soft_sole_seconds = float(data.get("soft_sole_seconds", 0.0))
 	player.storm_insulator_seconds = float(data.get("storm_insulator_seconds", 0.0))
 	player.flare_seconds = float(data.get("flare_seconds", 0.0))
@@ -3856,6 +3863,21 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if not player.inventory.remove(item_id, 1):
 				return {"ok": false, "reason": "not_carried"}
 			player.spore_filter_seconds = SporeHazard.FILTER_DURATION_SECONDS
+		"wound_seal":
+			if item_id != WoundSealant.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "wound_seal": true}
+			if not SaveValidation.finite_number(player.wound_seal_seconds,
+					0.0, WoundSealant.DURATION_SECONDS):
+				return {"ok": false, "reason": "invalid_state", "wound_seal": true}
+			if player.wound_seal_seconds > 0.0:
+				return {"ok": false, "reason": "already_sealed",
+					"wound_seal": true, "remaining": player.wound_seal_seconds}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					player.skill_timer > 0.0 or not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "wound_seal": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "wound_seal": true}
+			player.wound_seal_seconds = WoundSealant.DURATION_SECONDS
 		"footstep_wrap":
 			if item_id != SoftSoleWraps.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3970,6 +3992,9 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 		return {"ok": true, "bike_service_meters": player.bike_service_meters}
 	if item_id == StormInsulator.ITEM_ID:
 		return {"ok": true, "storm_insulator_seconds": player.storm_insulator_seconds}
+	if item_id == WoundSealant.ITEM_ID:
+		return {"ok": true, "wound_seal": true,
+			"wound_seal_seconds": player.wound_seal_seconds}
 	if item_id == BikeIntegrity.KIT_ID:
 		return {"ok": true, "bike_integrity": player.bike_integrity}
 	if item_id == HandFlare.ITEM_ID:
@@ -5352,6 +5377,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 			teammate.guard_link_target = -1
 			teammate.guard_link_seconds = 0.0
 	victim.spore_filter_seconds = 0.0
+	victim.wound_seal_seconds = 0.0
 	victim.soft_sole_seconds = 0.0
 	victim.chain_wrap_seconds = 0.0
 	victim.tire_grip_seconds = 0.0
@@ -5683,6 +5709,10 @@ func _tick_players(delta: float) -> void:
 		player.lake_drink_cooldown = maxf(0.0, player.lake_drink_cooldown - maxf(0.0, delta))
 		player.rain_cooldown = maxf(0.0, player.rain_cooldown - maxf(0.0, delta))
 		player.spore_sample_cooldown = maxf(0.0, player.spore_sample_cooldown - maxf(0.0, delta))
+		var previous_seal: float = player.wound_seal_seconds
+		player.wound_seal_seconds = maxf(0.0, previous_seal - maxf(0.0, delta))
+		if player.wound_seal_seconds != previous_seal:
+			player.dirty_character = true
 		player.stim_cooldown = maxf(0.0, player.stim_cooldown - maxf(0.0, delta))
 		player.decoy_timer = maxf(0.0, player.decoy_timer - maxf(0.0, delta))
 		player.flash_cooldown = maxf(0.0, player.flash_cooldown - maxf(0.0, delta))
@@ -6524,6 +6554,9 @@ func _tick_zombies(delta: float) -> void:
 				var warded: bool = WardenAura.active_for(victim, players, parties, world)
 				wound_bleeding = WardenAura.mitigate_wound(wound_bleeding, warded)
 				wound_infection = WardenAura.mitigate_wound(wound_infection, warded)
+				# Apply only to infected melee; not environmental poison or PvP.
+				wound_infection = WoundSealant.mitigate(wound_infection,
+					victim.wound_seal_seconds)
 				if applied > 0.0 and _alive(victim) and victim.survival.add_bleeding(wound_bleeding):
 					victim.dirty_character = true
 					events.append({"type": "bleeding", "peer": victim.id,
@@ -7185,6 +7218,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else "",
 				player.spore_filter_seconds),
 			"spore_filter_seconds": player.spore_filter_seconds,
+			"wound_seal_seconds": player.wound_seal_seconds,
 			"weather_insulation": Weather.protection(
 				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else ""),
 			"lake_drink_cooldown": player.lake_drink_cooldown,
