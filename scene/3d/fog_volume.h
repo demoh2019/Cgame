@@ -62,6 +62,12 @@ public:
 	void set_material(const Ref<Material> &p_material);
 	Ref<Material> get_material() const;
 
+	// Cheap, world-anchored fog transform update. XZ snapping avoids TAA
+	// swimming from per-frame subpixel movement; unchanged anchors skip
+	// RenderingServer instance transform uploads.
+	static Vector3 snap_world_anchor(const Vector3 &p_world_position, real_t p_grid_step);
+	bool set_snapped_world_anchor(const Vector3 &p_world_position, real_t p_grid_step, real_t p_distance_epsilon = 0.10);
+
 	virtual AABB get_aabb() const override;
 	PackedStringArray get_configuration_warnings() const override;
 
