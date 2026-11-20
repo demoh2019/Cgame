@@ -192,6 +192,7 @@ static var _textured_material: ShaderMaterial
 static var _textured_checked := false
 static var terrain_filter_quality := 1
 static var terrain_geomorph_enabled := false
+static var terrain_max_lod_pixel_error := 0.0
 static var terrain_screen_lod_quality := 1
 const TERRAIN_LOD_GROUP := "aa_chunked_terrain_lod"
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
@@ -245,13 +246,16 @@ static var grass_fade_end := GrassField.FADE_END
 ## Sampler quality follows the existing graphics preset without changing any
 ## world or texture data. New chunks use the cached shader of the chosen tier.
 static func configure_terrain_geomorph(quality: int) -> void:
-	terrain_geomorph_enabled = clampi(quality, 0, 3) >= 2
+	var tier: int = clampi(quality, 0, 3)
+	terrain_geomorph_enabled = tier >= 2
+	terrain_max_lod_pixel_error = [0.0, 0.0, 3.0, 1.5][tier]
 
 
 static func apply_terrain_geomorph(node: Node) -> void:
 	if node is ChunkedTerrain3D:
 		var terrain := node as ChunkedTerrain3D
 		terrain.lod_geomorph_enabled = terrain_geomorph_enabled
+		terrain.max_lod_pixel_error = terrain_max_lod_pixel_error
 		# A slightly faster update preserves smooth movement while the native
 		# engine changes only one per-instance uniform, never reuploads meshes.
 		terrain.update_interval = 0.16 if terrain_geomorph_enabled else 0.5
@@ -622,6 +626,7 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.lod_distance = 70.0
 	apply_terrain_screen_lod(_terrain)
 	_terrain.lod_geomorph_enabled = terrain_geomorph_enabled
+	_terrain.max_lod_pixel_error = terrain_max_lod_pixel_error
 	_terrain.skirt_depth = 3.0
 	_terrain.collision_enabled = false # The server decides where players can stand.
 	_terrain.cast_shadows = false
