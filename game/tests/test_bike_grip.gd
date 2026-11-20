@@ -15,12 +15,16 @@ const GameServer = preload("res://scripts/server/game_server.gd")
 class FlatWorld:
 	var biome := "plains"
 	var hill := 0.0
+	var coverage := 0.0
 
 	func height_at(x: float, _z: float) -> float:
 		return 3.0 + hill * x
 
 	func biome_at(_x: float, _z: float) -> String:
 		return biome
+
+	func road_coverage_at(_x: float, _z: float) -> float:
+		return coverage
 
 	func blockers_near(_x: float, _z: float, _radius: float) -> Array:
 		return []
@@ -85,6 +89,14 @@ func run(t) -> void:
 			"tire_grip_seconds": 60.0}, 0.1)
 		t.near(on_foot.x, Defs.WALK_SPEED * 0.1, 0.0001,
 			"on-foot survivors never get offroad tire speed")
+	map.biome = "swamp"
+	map.coverage = 1.0
+	var road_bike: float = BikeTerrain.speed_factor(map, start, Vector2.RIGHT)
+	var road_tires: float = BikeTerrain.speed_factor(map, start, Vector2.RIGHT, 60.0)
+	t.near(road_bike, road_tires, 0.0001,
+		"seeded road benefit supersedes rather than stacks with off-road tires")
+	t.check(road_bike > 1.0, "road retains its previously implemented bike speed bonus")
+	map.coverage = 0.0
 	map.biome = "plains"
 	t.eq(BikeTerrain.speed_factor(map, start, Vector2.RIGHT, 60.0),
 		BikeTerrain.speed_factor(map, start, Vector2.RIGHT),
