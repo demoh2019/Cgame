@@ -242,7 +242,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 87 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (66), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 88 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (67), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"

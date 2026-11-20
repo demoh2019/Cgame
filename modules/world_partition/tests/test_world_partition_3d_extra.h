@@ -122,6 +122,28 @@ TEST_CASE("[SceneTree][WorldPartition3D] Two leases retain distant cell until bo
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
+TEST_CASE("[SceneTree][WorldPartition3D] Releasing manual pin does not override independent lease") {
+	const String path = make_cell_scene("lease_survives_pin_release");
+	{
+		WorldFixture fixture;
+		const Vector2i cell(7, -3);
+		fixture.world->set_cell_scene(cell, path);
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->pin_cell(cell);
+		const int lease = fixture.world->acquire_cell_lease(cell);
+		REQUIRE(lease > 0);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		fixture.world->unpin_cell(cell);
+		fixture.world->update_streaming();
+		CHECK(fixture.world->is_cell_loaded(cell));
+		CHECK(fixture.world->get_cell_lease_count(cell) == 1);
+		CHECK(fixture.world->release_cell_lease(lease));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
 TEST_CASE("[SceneTree][WorldPartition3D] Data Layer deactivation overrides leased cells") {
 	const String path = make_cell_scene("lease_layer_gate");
 	{
