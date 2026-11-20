@@ -536,6 +536,10 @@ func _process(delta: float) -> void:
 	var target := position + CAMERA_OFFSET * _zoom
 	camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
 	camera.look_at(position + Vector3(0, 0.8, 0))
+	if _demo == "sky":
+		# A low view toward the horizon to show the sky (screenshots only).
+		camera.position = position + Vector3(0.0, 14.0, 6.0)
+		camera.look_at(position + Vector3(0.0, 20.0, -60.0))
 	water.position.x = position.x
 	water.position.z = position.z
 	_update_time_of_day(delta)
@@ -941,6 +945,10 @@ func _run_demo() -> void:
 				client.use_item("jacket_2")
 			if _demo_frames == 110:
 				hud.toggle_inventory()
+		"sky":
+			if _demo_frames == 40:
+				var vista := _open_shore()
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": vista.x, "z": vista.y})
 		"map":
 			if _demo_frames == 60:
 				world_map.toggle()
@@ -968,6 +976,24 @@ func _run_demo() -> void:
 
 
 ## The site of a kind closest to the hub (demos and screenshots).
+## A beach facing open sea toward -z, for a clear view of the sky (demo).
+func _open_shore() -> Vector2:
+	var world = client.world
+	for radius in range(200, 2400, 40):
+		for step in 24:
+			var spot := Vector2.from_angle(float(step) * TAU / 24.0) * float(radius)
+			if world.is_water(spot.x, spot.y) or world.biome_at(spot.x, spot.y) != "beach":
+				continue
+			var open := true
+			for ahead in range(10, 140, 10):
+				if not world.is_water(spot.x, spot.y - float(ahead)):
+					open = false
+					break
+			if open:
+				return spot
+	return Vector2(0.0, 40.0)
+
+
 func _nearest_signpost() -> Vector2:
 	var best := Vector2(60.0, 60.0)
 	var best_distance := INF

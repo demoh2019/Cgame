@@ -61,6 +61,12 @@ const PROPS := [
 	{"path": "dungeon/torch_lit.gltf", "kind": "height", "size": 1.6, "radius": 0.2},
 	{"path": "dungeon/bed_decorated.gltf", "kind": "length", "size": 2.2, "radius": 1.0},
 	{"path": "dungeon/shelf_large.gltf", "kind": "length", "size": 2.0, "radius": 0.9},
+	{"path": "res://assets/models/polyhaven/baked/fire_pit.res", "kind": "length", "size": 1.6, "radius": 0.8},
+	{"path": "res://assets/models/polyhaven/baked/wine_barrel.res", "kind": "height", "size": 1.0, "radius": 0.45},
+	{"path": "res://assets/models/polyhaven/baked/barrel_pile.res", "kind": "length", "size": 3.6, "radius": 1.5},
+	{"path": "res://assets/models/polyhaven/baked/bucket.res", "kind": "height", "size": 0.45, "radius": 0.25},
+	{"path": "res://assets/models/polyhaven/baked/lantern.res", "kind": "height", "size": 0.6, "radius": 0.25},
+	{"path": "res://assets/models/polyhaven/baked/horse_statue.res", "kind": "height", "size": 3.2, "radius": 1.3},
 ]
 
 # Bits of ruin for cities and bunkers: broken walls, pillars, rubble. Blocking, big.
@@ -92,6 +98,7 @@ const CRATES := [
 	{"path": "loose/low_poly_treasure_chest.glb", "kind": "length", "size": 1.1},
 	{"path": "dungeon/chest.gltf", "kind": "length", "size": 1.2},
 	{"path": "dungeon/box_large.gltf", "kind": "height", "size": 0.9},
+	{"path": "res://assets/models/polyhaven/baked/crate.res", "kind": "length", "size": 1.2},
 ]
 
 # Trees from the hand-painted collection (an addition to the nature kit) and the rocks and crystals.
@@ -106,6 +113,9 @@ const CRYSTALS := [
 	{"path": "loose/toon_style_-_crystal.glb", "node": "Crystal_002_Crystal_0", "kind": "height", "size": 1.6},
 ]
 const DECOR_EXTRA := [
+	{"path": "res://assets/models/polyhaven/baked/dead_trunk.res", "kind": "length", "size": 4.0, "biomes": ["forest", "swamp"], "count": 2},
+	{"path": "res://assets/models/polyhaven/baked/tree_stump.res", "kind": "length", "size": 1.5, "biomes": ["forest", "plains", "swamp"], "count": 3},
+	{"path": "res://assets/models/polyhaven/baked/mossy_rock_5.res", "kind": "length", "size": 1.6, "biomes": ["forest", "plains", "mountain", "beach"], "count": 4},
 	{"path": "loose/low_poly_tree_log_and_stump.glb", "node": "Object_7", "kind": "length", "size": 1.6, "biomes": ["forest", "swamp"], "count": 3},
 	{"path": "loose/low_poly_tree_log_and_stump.glb", "node": "Object_11", "kind": "length", "size": 1.6, "biomes": ["forest", "plains"], "count": 3},
 	{"path": "loose/the_ancient_mystic_stone.glb", "node": "LP_Stone_Main_0", "kind": "height", "size": 2.4, "biomes": ["forest", "plains", "mountain"], "count": 1},
@@ -118,8 +128,13 @@ static var _cache: Dictionary = {}
 static var _available: Dictionary = {}
 
 
+## Paths are relative to the downloaded packs unless they start with res:// (the Poly Haven models in the repository).
+static func full_path(path: String) -> String:
+	return path if path.begins_with("res://") else PACKS + path
+
+
 static func exists(relative: String) -> bool:
-	return ResourceLoader.exists(PACKS + relative)
+	return ResourceLoader.exists(full_path(relative))
 
 
 ## The entries of a list whose files are installed, in list order.
@@ -152,7 +167,10 @@ static func entry_mesh(entry: Dictionary) -> Mesh:
 
 ## One object of a model file, transformed, scaled and recentred. `node` empty takes the first mesh that is not a collision hull.
 static func bake(path: String, node_name: String, kind: String, size: float, texture_path: String = "", yaw: float = 0.0) -> Mesh:
-	var scene := load(PACKS + path) as PackedScene
+	var loaded: Resource = load(full_path(path))
+	if loaded is Mesh:
+		return _fit_mesh(loaded as Mesh, kind, size)
+	var scene := loaded as PackedScene
 	if scene == null:
 		return null
 	var root: Node = scene.instantiate()
@@ -216,6 +234,41 @@ static func bake(path: String, node_name: String, kind: String, size: float, tex
 		baked.surface_set_material(surface, material)
 	root.free()
 	return baked
+
+
+## A ready mesh (already baked, materials kept) scaled to its size and stood on the origin. Keeps tangents, so normal maps work.
+static func _fit_mesh(source: Mesh, kind: String, size: float) -> Mesh:
+	var box: AABB = source.get_aabb()
+	var longest: float = maxf(maxf(box.size.x, box.size.z), 0.0001)
+	var factor: float = (size / maxf(box.size.y, 0.0001)) if kind == "height" else (size / longest)
+	var offset := Vector3(-(box.position.x + box.size.x * 0.5), -box.position.y, -(box.position.z + box.size.z * 0.5))
+	var fitted := ArrayMesh.new()
+	for surface in source.get_surface_count():
+		var arrays: Array = source.surface_get_arrays(surface)
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		for i in vertices.size():
+			vertices[i] = (vertices[i] + offset) * factor
+		arrays[Mesh.ARRAY_VERTEX] = vertices
+		fitted.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		fitted.surface_set_material(surface, source.surface_get_material(surface))
+	return fitted
+
+
+# Scanned rocks from Poly Haven, used before the stylised ones when present.
+const SCANNED_ROCKS := ["boulder_01", "boulder_02", "mossy_rock_1", "mossy_rock_2", "mossy_rock_3", "mossy_rock_4", "mossy_rock_5", "mossy_rock_6"]
+
+
+static func scanned_rock(variant: int) -> Mesh:
+	var name: String = SCANNED_ROCKS[posmod(variant, SCANNED_ROCKS.size())]
+	var key := "scanned_rock|" + name
+	if not _cache.has(key):
+		var path: String = "res://assets/models/polyhaven/baked/%s.res" % name
+		_cache[key] = bake(path, "", "length", 3.2 if name.begins_with("boulder") else 2.6) if ResourceLoader.exists(path) else null
+	return _cache[key]
+
+
+static func has_scanned_rocks() -> bool:
+	return ResourceLoader.exists("res://assets/models/polyhaven/baked/boulder_01.res")
 
 
 # --- Direct lookups for the special cases ---------------------------------------------------------------------------------
