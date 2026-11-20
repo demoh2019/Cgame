@@ -41,7 +41,8 @@ near/far proxy handoff is implemented without renderer-specific effects.
 
 WASD to fly, Space/Ctrl for up/down, Shift for speed, P to toggle forward prefetch,
 L to toggle distant proxy scenes, F to toggle near/far crossfade, R to retry
-failed resource loads.
+failed resource loads when the telemetry/retry API from PR #916 is present.
+Without that engine API, R displays a warning instead of silently doing nothing.
 HUD displays FPS, detail/proxy cell counts, the active quality preset and auto mode.
 
 The optional adaptive quality controller monitors a 3-second time-weighted FPS
