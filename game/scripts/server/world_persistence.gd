@@ -37,6 +37,7 @@ static func capture(sim) -> Dictionary:
 			"id": int(id),
 			"x": float(item["x"]), "z": float(item["z"]),
 			"hp": float(item["hp"]), "tier": Structures.tier_of(item), "owner_account": account,
+			"owner_guild": str(item.get("owner_guild", "")),
 		})
 	walls.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return int(a["id"]) < int(b["id"]))
@@ -62,10 +63,12 @@ static func validate(data: Variant, sim) -> Dictionary:
 	var ids: Dictionary = {}
 	var owner_counts: Dictionary = {}
 	for value in source:
-		if typeof(value) != TYPE_DICTIONARY or (value.size() != 5 and value.size() != 6):
+		if typeof(value) != TYPE_DICTIONARY or value.size() not in [5, 6, 7]:
 			return {}
-		# Old world checkpoints have exactly 5 fields and imply T1.
+		# Old checkpoints have five or six fields, before guild identity existed.
 		if value.size() == 6 and not value.has("tier"):
+			return {}
+		if value.size() == 7 and (not value.has("tier") or not value.has("owner_guild")):
 			return {}
 		if not _bounded_int(value.get("id"), MIN_ID, MAX_ID):
 			return {}
@@ -87,6 +90,11 @@ static func validate(data: Variant, sim) -> Dictionary:
 		var uid: String = value["owner_account"]
 		if uid.is_empty() or uid.length() > MAX_OWNER_LENGTH or uid != uid.strip_edges():
 			return {}
+		if typeof(value.get("owner_guild", "")) != TYPE_STRING:
+			return {}
+		var guild: String = str(value.get("owner_guild", ""))
+		if guild.length() > MAX_OWNER_LENGTH or guild != guild.strip_edges():
+			return {}
 		var x: float = float(value["x"])
 		var z: float = float(value["z"])
 		var at := Vector2(x, z)
@@ -105,7 +113,8 @@ static func validate(data: Variant, sim) -> Dictionary:
 		if next_count > Structures.MAX_PER_OWNER:
 			return {}
 		owner_counts[uid] = next_count
-		walls.append({"id": id, "x": x, "z": z, "hp": float(value["hp"]), "tier": tier, "owner_account": uid})
+		walls.append({"id": id, "x": x, "z": z, "hp": float(value["hp"]),
+			"tier": tier, "owner_account": uid, "owner_guild": guild})
 	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls}
 
 
@@ -122,7 +131,8 @@ static func restore(sim, data: Variant) -> bool:
 		var z: float = float(wall["z"])
 		sim.barricades[id] = {
 			"id": id, "x": x, "y": sim.world.height_at(x, z), "z": z,
-			"hp": float(wall["hp"]), "tier": int(wall.get("tier", 1)), "owner": -1, "owner_account": wall["owner_account"],
+			"hp": float(wall["hp"]), "tier": int(wall.get("tier", 1)), "owner": -1,
+			"owner_account": wall["owner_account"], "owner_guild": str(wall.get("owner_guild", "")),
 		}
 		sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 		sim._next_id = maxi(sim._next_id, id)
