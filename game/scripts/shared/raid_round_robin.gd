@@ -89,6 +89,21 @@ static func complete(bag: Dictionary, current_index: int, now: float) -> void:
 	rule["until"] = now + TURN_SECONDS
 
 
+## The actual turn holder may yield without claiming anything. This does not
+## mutate the bag inventory and cannot be requested for another identity.
+static func skip_turn(bag: Dictionary, player, now: float) -> Dictionary:
+	var status: Dictionary = turn(bag, player, now)
+	if not bool(status.get("active", false)):
+		return {"ok": false, "reason": "not_active"}
+	if not bool(status.get("ok", false)):
+		return {"ok": false, "reason": str(status.get("reason", "not_your_turn"))}
+	var rule: Dictionary = bag["raid_round_robin"]
+	if (rule["order"] as Array).size() < 2 or (bag.get("items", {}) as Dictionary).is_empty():
+		return {"ok": false, "reason": "empty"}
+	complete(bag, int(status["index"]), now)
+	return {"ok": true}
+
+
 static func visible(bag: Dictionary, player, now: float) -> Dictionary:
 	var info: Dictionary = turn(bag, player, now)
 	if not bool(info.get("active", false)):

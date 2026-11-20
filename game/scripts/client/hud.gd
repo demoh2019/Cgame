@@ -51,6 +51,8 @@ var _inventory_signature: String = ""
 var _trade_state: Dictionary = {}
 var _party_status: Label
 var _raid_loot_mode_button: Button
+var _raid_skip_button: Button
+var _raid_skip_bag_id: int = -1
 var _duel_status: Label
 var _arena_queue_status: Label
 var _party_target: OptionButton
@@ -628,6 +630,14 @@ func _build() -> void:
 		var current: String = str(client.you.get("party", {}).get("loot_mode", "free"))
 		client.party_loot_mode("free" if current == "round_robin" else "round_robin"))
 	inventory_box.add_child(_raid_loot_mode_button)
+	_raid_skip_button = Button.new()
+	_raid_skip_button.text = "Pass raid turn"
+	_raid_skip_button.tooltip_text = "If it is your round-robin turn and you are beside the raid bag, give the next contributor a turn without taking loot."
+	_raid_skip_button.disabled = true
+	_raid_skip_button.pressed.connect(func() -> void:
+		if _raid_skip_bag_id > 0:
+			client.raid_skip_turn(_raid_skip_bag_id))
+	inventory_box.add_child(_raid_skip_button)
 	var focus_button := Button.new()
 	focus_button.text = "Focus infected"
 	focus_button.tooltip_text = "Leader: mark the nearest living infected within 24m for 18s. Allies near that exact enemy deal +8% PvE damage; 28s cooldown."
@@ -1406,6 +1416,12 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Raid loot mode: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "raid_skip_turn":
+		if bool(data.get("ok", false)):
+			say("Raid turn passed. The next contributor can claim their share.")
+		else:
+			say("Cannot pass raid turn: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "party_focus":
 		if bool(data.get("ok", false)):
 			say("Party focus: infected #%d marked for %d seconds (+8%% PvE damage)." % [
@@ -2059,6 +2075,18 @@ func _refresh_party_controls() -> void:
 	var loot_mode: String = str(state.get("loot_mode", "free"))
 	_raid_loot_mode_button.disabled = group_id == 0 or int(state.get("leader", 0)) != client.peer_id
 	_raid_loot_mode_button.text = "Raid loot: " + ("Round robin" if loot_mode == "round_robin" else "Free")
+	_raid_skip_bag_id = -1
+	var nearest_raid_distance: float = INF
+	for reward in client.bags.values():
+		if not bool(reward.get("raid_round_robin", false)) or not bool(reward.get("raid_your_turn", false)) or not bool(reward.get("can_loot", false)):
+			continue
+		var dx: float = float(reward.get("x", 0.0)) - float(client.you.get("x", 0.0))
+		var dz: float = float(reward.get("z", 0.0)) - float(client.you.get("z", 0.0))
+		var distance_sq: float = dx * dx + dz * dz
+		if distance_sq <= (Defs.REACH + 0.5) * (Defs.REACH + 0.5) and distance_sq < nearest_raid_distance:
+			nearest_raid_distance = distance_sq
+			_raid_skip_bag_id = int(reward.get("id", -1))
+	_raid_skip_button.disabled = _raid_skip_bag_id <= 0
 	var roster: Array = state.get("roster", [])
 	var remaining_aid: float = float(client.you.get("party_aid_cooldown", 0.0))
 	var remaining_feast: float = float(client.you.get("party_feast_cooldown", 0.0))

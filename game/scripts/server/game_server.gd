@@ -3555,6 +3555,31 @@ func cmd_dodge(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		"z": new_position.z, "stamina": player.survival.stamina}
 
 
+## A contributor may voluntarily pass only their OWN active raid turn.
+## The server owns identities, world distance, timers and the bag contents.
+func cmd_raid_skip_turn(peer_id: int, entity_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not bags.has(entity_id):
+		return {"ok": false, "reason": "nothing_there"}
+	var bag: Dictionary = bags[entity_id]
+	if _distance_xz(player.position, bag) > Defs.REACH + 0.5:
+		return {"ok": false, "reason": "too_far"}
+	var guards: int = SupplyDrops.living_guards(bag, zombies)
+	if guards > 0:
+		return {"ok": false, "reason": "guards_alive", "remaining": guards}
+	if not RaidRoundRobin.active(bag, time):
+		return {"ok": false, "reason": "not_active"}
+	if not RaidLoot.can_open(bag, player, time):
+		return {"ok": false, "reason": "raid_reserved", "remaining": RaidLoot.remaining(bag, time)}
+	if not LootRights.can_loot(bag, player, time):
+		return {"ok": false, "reason": "reserved"}
+	return RaidRoundRobin.skip_turn(bag, player, time)
+
+
 func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):

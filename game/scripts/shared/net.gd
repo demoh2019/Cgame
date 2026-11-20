@@ -867,6 +867,13 @@ func c_loot(entity_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_raid_skip_turn(entity_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "raid_skip_turn", sim.cmd_raid_skip_turn(peer, entity_id))
+
+
+@rpc("any_peer", "reliable")
 func c_refill_canteen() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

@@ -369,6 +369,10 @@ func party_loot_mode(mode: String) -> void:
 	net.c_party_loot_mode.rpc_id(1, mode)
 
 
+func raid_skip_turn(entity_id: int) -> void:
+	net.c_raid_skip_turn.rpc_id(1, entity_id)
+
+
 var _outpost_provision_request_id: int = 0
 
 
