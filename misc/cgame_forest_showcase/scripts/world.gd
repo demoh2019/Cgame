@@ -4,6 +4,7 @@ extends Node3D
 
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const TileCache = preload("res://scripts/terrain_tile_cache.gd")
+const HLODCache = preload("res://scripts/distant_hlod_cache.gd")
 const GameSave = preload("res://scripts/game_save.gd")
 const WORLD_EXTENT: float = 512.0
 const WORLD_CELLS_PER_SIDE: int = 32
@@ -274,7 +275,7 @@ func _create_hud() -> void:
     hint.position = Vector2(22, 306)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
+    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: сброс кэшей  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
     canvas.add_child(hint)
 
 
@@ -360,6 +361,12 @@ func _unhandled_input(event: InputEvent) -> void:
                 _apply_quality(true)
             KEY_F2:
                 _apply_quality(false)
+            KEY_F3:
+                # Dev comparison: next streamed/HLOD revisit is a cold miss.
+                # Active nodes retain their own resource references.
+                TileCache.clear()
+                HLODCache.clear()
+                _refresh_hud()
             KEY_F5:
                 _save_game()
             KEY_F9:
