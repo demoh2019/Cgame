@@ -2,6 +2,7 @@
 # Uses only stock Godot runtime APIs plus the native AdaptiveResolution3D node in world.tscn.
 extends Node3D
 
+const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const WORLD_EXTENT: float = 64.0
 const GRID_SEGMENTS: int = 112
 const CHUNK_EDGE: float = 32.0
@@ -12,7 +13,7 @@ var camera: Camera3D
 var world_environment: Environment
 var hud: Label
 var hint: Label
-var grass_chunks: Array[MultiMeshInstance3D] = []
+var world_partition: WorldPartition3D
 var crystals: Array[Node3D] = []
 
 var elapsed: float = 0.0
@@ -27,28 +28,20 @@ func _ready() -> void:
     _create_environment()
     _create_sun()
     _create_terrain()
-    _create_forest()
-    _create_grass()
-    _create_rocks()
     _create_crystals()
     _create_camera()
     _create_hud()
+    _create_streaming_world()
     _apply_quality(true)
     _refresh_hud()
 
 
 func height_at(x: float, z: float) -> float:
-    # Spatially continuous analytic height: normals and instance positions agree.
-    return 1.7 * sin(x * 0.058) * cos(z * 0.063) \
-        + 0.85 * sin((x + z) * 0.135) \
-        + 0.25 * sin(x * 0.47) * cos(z * 0.39)
+    return TerrainHeight.height_at(x, z)
 
 
 func _normal_at(x: float, z: float) -> Vector3:
-    var e: float = 0.3
-    var dx: float = (height_at(x + e, z) - height_at(x - e, z)) / (2.0 * e)
-    var dz: float = (height_at(x, z + e) - height_at(x, z - e)) / (2.0 * e)
-    return Vector3(-dx, 1.0, -dz).normalized()
+    return TerrainHeight.normal_at(x, z)
 
 
 func _create_environment() -> void:
@@ -147,126 +140,35 @@ func _create_terrain() -> void:
     add_child(terrain)
 
 
-func _create_forest() -> void:
-    var trunk := CylinderMesh.new()
-    trunk.top_radius = 0.25
-    trunk.bottom_radius = 0.40
-    trunk.height = 3.8
-    trunk.radial_segments = 7
-    var bark := StandardMaterial3D.new()
-    bark.albedo_color = Color(0.22, 0.12, 0.078)
-    bark.roughness = 0.96
-    trunk.material = bark
-
-    var canopy := SphereMesh.new()
-    canopy.radius = 1.0
-    canopy.height = 2.0
-    canopy.radial_segments = 11
-    canopy.rings = 6
-    var foliage_material := ShaderMaterial.new()
-    foliage_material.shader = preload("res://shaders/foliage_wind.gdshader")
-    canopy.material = foliage_material
-
-    # Per-chunk MultiMesh resources enable frustum culling of entire distant clusters.
-    # A single monolithic forest MultiMesh would be culled only as one oversized object.
-    for cz in range(-2, 2):
-        for cx in range(-2, 2):
-            var trunks: Array[Transform3D] = []
-            var crowns: Array[Transform3D] = []
-            var custom: Array[Color] = []
-            for j in range(54):
-                var px: float = float(cx) * CHUNK_EDGE + rng.randf_range(1.0, CHUNK_EDGE - 1.0)
-                var pz: float = float(cz) * CHUNK_EDGE + rng.randf_range(1.0, CHUNK_EDGE - 1.0)
-                if Vector2(px, pz - 9.0).length() < 8.0:
-                    continue
-                var scale: float = rng.randf_range(0.70, 1.5)
-                var base: float = height_at(px, pz)
-                var yaw: float = rng.randf_range(-PI, PI)
-                var orientation := Basis(Vector3.UP, yaw)
-                trunks.append(Transform3D(orientation.scaled(Vector3(scale * 0.75, scale, scale * 0.75)),
-                    Vector3(px, base + scale * 1.90, pz)))
-                crowns.append(Transform3D(orientation.scaled(Vector3(scale * 2.0, scale * 1.75, scale * 2.0)),
-                    Vector3(px, base + scale * 4.15, pz)))
-                custom.append(Color(rng.randf(), rng.randf(), rng.randf(), 1.0))
-            _spawn_instances("Trunks_%s_%s" % [cx, cz], trunk, trunks, custom, true)
-            _spawn_instances("Canopies_%s_%s" % [cx, cz], canopy, crowns, custom, true)
-
-
-func _create_grass() -> void:
-    var blade := QuadMesh.new()
-    blade.size = Vector2(0.34, 0.75)
-    var grass_material := ShaderMaterial.new()
-    grass_material.shader = preload("res://shaders/grass_wind.gdshader")
-    blade.material = grass_material
+func _create_streaming_world() -> void:
+    # Stream each 32m patch around the camera using the fork's native C++ module.
+    # The same PackedScene path serves every cell; WorldPartition3D shares the
+    # threaded resource request, sets the root offset, then triggers _ready().
+    world_partition = WorldPartition3D.new()
+    world_partition.name = "WorldPartition_32m"
+    world_partition.cell_size = CHUNK_EDGE
+    world_partition.load_radius = 1
+    world_partition.unload_radius = 2
+    world_partition.max_new_requests_per_frame = 2
+    world_partition.max_instances_per_frame = 1
+    world_partition.max_concurrent_requests = 4
+    add_child(world_partition)
+    world_partition.observer_path = world_partition.get_path_to(camera)
+    world_partition.cell_loaded.connect(_on_stream_cell_loaded)
 
     for cz in range(-2, 2):
         for cx in range(-2, 2):
-            var transforms: Array[Transform3D] = []
-            var colors: Array[Color] = []
-            for j in range(225):
-                var px: float = float(cx) * CHUNK_EDGE + rng.randf_range(0.0, CHUNK_EDGE)
-                var pz: float = float(cz) * CHUNK_EDGE + rng.randf_range(0.0, CHUNK_EDGE)
-                var s: float = rng.randf_range(0.6, 1.6)
-                var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU))
-                transforms.append(Transform3D(basis.scaled(Vector3(s, s, s)),
-                    Vector3(px, height_at(px, pz) + s * 0.36, pz)))
-                colors.append(Color(rng.randf(), rng.randf(), 0.0, 1.0))
-            var instance := _spawn_instances("Grass_%s_%s" % [cx, cz], blade, transforms, colors, false)
-            grass_chunks.append(instance)
+            world_partition.set_cell_scene(
+                Vector2i(cx, cz), "res://cells/forest_cell.tscn")
+    world_partition.update_streaming()
 
 
-func _create_rocks() -> void:
-    var rock := SphereMesh.new()
-    rock.radius = 1.0
-    rock.height = 2.0
-    rock.radial_segments = 8
-    rock.rings = 4
-    var stone := StandardMaterial3D.new()
-    stone.albedo_color = Color(0.28, 0.31, 0.29)
-    stone.roughness = 0.92
-    rock.material = stone
-
-    for cz in range(-2, 2):
-        for cx in range(-2, 2):
-            var transforms: Array[Transform3D] = []
-            var colors: Array[Color] = []
-            for j in range(9):
-                var px: float = float(cx) * CHUNK_EDGE + rng.randf_range(0.0, CHUNK_EDGE)
-                var pz: float = float(cz) * CHUNK_EDGE + rng.randf_range(0.0, CHUNK_EDGE)
-                var s: float = rng.randf_range(0.45, 1.6)
-                var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU))
-                transforms.append(Transform3D(basis.scaled(Vector3(s * 1.4, s * 0.45, s)),
-                    Vector3(px, height_at(px, pz) + s * 0.15, pz)))
-                colors.append(Color(1.0, 1.0, 1.0, 1.0))
-            _spawn_instances("Stones_%s_%s" % [cx, cz], rock, transforms, colors, true)
-
-
-func _spawn_instances(label: String, mesh: Mesh,
-        transforms: Array[Transform3D], custom: Array[Color],
-        cast_shadows: bool) -> MultiMeshInstance3D:
-    var multi := MultiMesh.new()
-    multi.transform_format = MultiMesh.TRANSFORM_3D
-    multi.use_custom_data = true  # Must be set before instance_count.
-    multi.mesh = mesh
-    multi.instance_count = transforms.size()
-    for i in range(transforms.size()):
-        multi.set_instance_transform(i, transforms[i])
-        multi.set_instance_custom_data(i, custom[i])
-
-    var node := MultiMeshInstance3D.new()
-    node.name = label
-    node.multimesh = multi
-    node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-    # Fine grass has a shorter visibility range and a soft camera-distance fade.
-    # Tree and rock clusters remain visible much farther away.
-    if label.begins_with("Grass_"):
-        node.visibility_range_end = 64.0
-        node.visibility_range_end_margin = 11.0
-        node.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
-    else:
-        node.visibility_range_end = 145.0
-    add_child(node)
-    return node
+func _on_stream_cell_loaded(_cell: Vector2i) -> void:
+    # Apply the active graphics profile to newly instantiated streaming cells.
+    for node in world_partition.get_children():
+        if node.has_method("set_high_quality"):
+            node.call("set_high_quality", high_quality)
+    _refresh_hud()
 
 
 func _create_crystals() -> void:
@@ -326,7 +228,7 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 145)
+    hint.position = Vector2(22, 166)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
     hint.text = "WASD / стрелки: движение  •  мышь: обзор (щелчок)  •  E: сбор\nF1: кинематографично  •  F2: производительность  •  Esc: курсор"
@@ -338,8 +240,10 @@ func _apply_quality(high: bool) -> void:
     world_environment.ssao_enabled = high
     world_environment.ssil_enabled = high
     world_environment.volumetric_fog_enabled = high
-    for chunk in grass_chunks:
-        chunk.multimesh.visible_instance_count = -1 if high else int(chunk.multimesh.instance_count * 0.50)
+    if world_partition != null:
+        for node in world_partition.get_children():
+            if node.has_method("set_high_quality"):
+                node.call("set_high_quality", high)
     var controller := get_node_or_null("AdaptiveResolution3D")
     if controller:
         controller.set("min_scale", 0.70 if high else 0.62)
@@ -354,9 +258,12 @@ func _refresh_hud() -> void:
     var scale: float = get_viewport().scaling_3d_scale
     var gpu_ms: float = RenderingServer.viewport_get_measured_render_time_gpu(get_viewport().get_viewport_rid())
     var gpu_text: String = "%.2f ms" % gpu_ms if gpu_ms > 0.0 else "N/A"
+    var loaded: int = world_partition.get_loaded_cell_count() if world_partition != null else 0
+    var configured: int = world_partition.get_configured_cell_count() if world_partition != null else 0
     hud.text = "AURORA FOREST  |  Cgame / Godot 4.8\n" \
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
-        + "3D scale: %.2f    FPS: %d    GPU: %s" % [scale, Engine.get_frames_per_second(), gpu_text]
+        + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
+        + "Загружено участков мира: %d / %d" % [loaded, configured]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
