@@ -9,6 +9,7 @@ const ATTACK_DISTANCE: float = 1.55
 const ATTACK_INTERVAL: float = 1.5
 
 var target: CharacterBody3D
+var max_health: float = 55.0
 var health: float = 55.0
 var attack_timer: float = 0.0
 
@@ -45,4 +46,13 @@ func take_damage(amount: float) -> void:
         return
     health = maxf(0.0, health - amount)
     if health <= 0.0:
-        queue_free()
+        visible = false
+        collision_layer = 0
+        velocity = Vector3.ZERO
+
+
+func restore_health(value: float) -> void:
+    health = clampf(value, 0.0, max_health)
+    visible = health > 0.0
+    collision_layer = 1 if health > 0.0 else 0
+    attack_timer = 0.0
