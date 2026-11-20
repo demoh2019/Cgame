@@ -2302,12 +2302,20 @@ void fragment_shader(in SceneData scene_data, uint instance_index) {
 		// The unoccluded fast path is exact (visibility = 1) and saves pow()
 		// across most outdoor pixels. Direct-light specular is never modified.
 		if (ao < 0.999) {
-			float NoV = clamp(dot(normal, view), 0.0, 1.0);
 			float visibility = clamp(ao, 0.0, 1.0);
-			float specular_occlusion = clamp(
-					pow(max(NoV + visibility, 0.0001),
-							exp2(-16.0 * clamp(roughness, 0.0, 1.0) - 1.0))
-							- 1.0 + visibility, 0.0, 1.0);
+			// For roughness >= 0.55 the Lagarde exponent is below 0.0012:
+			// plain AO differs by at most about 0.006 over [0,1] inputs.
+			// Most soil, stone and foliage pixels take this cheap path instead
+			// of evaluating pow() and exp2(). Keep the precise model on wet
+			// paving, glossy stone and low-roughness metallic materials.
+			float specular_occlusion = visibility;
+			if (roughness < 0.55) {
+				float NoV = clamp(dot(normal, view), 0.0, 1.0);
+				specular_occlusion = clamp(
+						pow(max(NoV + visibility, 0.0001),
+								exp2(-16.0 * clamp(roughness, 0.0, 1.0) - 1.0))
+								- 1.0 + visibility, 0.0, 1.0);
+			}
 			indirect_specular_light *= specular_occlusion;
 		}
 #endif // BENT_NORMAL_MAP_USED
