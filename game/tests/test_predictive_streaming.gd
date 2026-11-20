@@ -24,6 +24,17 @@ func run(t) -> void:
 	streamer.lookahead_seconds = -2.0
 	t.near(streamer.lookahead_seconds, 0.0, 0.0001,
 		"zero lookahead restores the original queue order")
+	t.eq(streamer.max_chunk_work_usec, 0,
+		"native streamer defaults to legacy count-only budget")
+	streamer.max_chunk_work_usec = 2500
+	t.eq(streamer.max_chunk_work_usec, 2500,
+		"per-frame time slicing can be configured from GDScript")
+	streamer.max_chunk_work_usec = -99
+	t.eq(streamer.max_chunk_work_usec, 0,
+		"negative CPU time budget cannot bypass the main-thread guard")
+	streamer.max_chunk_work_usec = 1500000
+	t.eq(streamer.max_chunk_work_usec, 1000000,
+		"extreme CPU time budget is capped to one second")
 	streamer.free()
 
 	t.current = "actual online game integration and teleport safety"
@@ -37,7 +48,9 @@ func run(t) -> void:
 		"teleports and large server corrections reset motion prediction")
 	t.check(online.contains("_stream_velocity = Vector3.ZERO"),
 		"teleported or newly joined players do not predict obsolete directions")
-	t.check(online.contains("streamer.max_instantiations_per_frame = 1"),
-		"movement hints never remove the one-chunk-per-frame hitch budget")
+	t.check(online.contains("streamer.max_instantiations_per_frame = 3"),
+		"live generation can integrate up to three inexpensive chunks")
+	t.check(online.contains("streamer.max_chunk_work_usec = 2500"),
+		"live generation uses a 2.5 ms soft CPU time slice")
 	t.check(online.contains("streamer.unload_radius = 220.0"),
 		"moving forward does not change resident world memory hysteresis")
