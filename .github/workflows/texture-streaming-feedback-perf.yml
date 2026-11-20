@@ -7,6 +7,7 @@ on:
       - "modules/texture_streaming/texture_streaming.cpp"
       - "modules/texture_streaming/texture_streaming.h"
       - "modules/texture_streaming/feedback_buffer_policy.h"
+      - "modules/texture_streaming/tests/test_feedback_prefetch.cpp"
       - "tests/core/io/test_texture_streaming_feedback_policy.cpp"
       - "misc/scripts/tests/test_texture_streaming_feedback.py"
       - ".github/workflows/texture-streaming-feedback-perf.yml"
@@ -16,6 +17,7 @@ on:
       - "modules/texture_streaming/texture_streaming.cpp"
       - "modules/texture_streaming/texture_streaming.h"
       - "modules/texture_streaming/feedback_buffer_policy.h"
+      - "modules/texture_streaming/tests/test_feedback_prefetch.cpp"
       - "tests/core/io/test_texture_streaming_feedback_policy.cpp"
       - "misc/scripts/tests/test_texture_streaming_feedback.py"
       - ".github/workflows/texture-streaming-feedback-perf.yml"
@@ -41,3 +43,11 @@ jobs:
         env:
           CXX: ${{ matrix.compiler }}
         run: python3 -m unittest discover -s misc/scripts/tests -p 'test_texture_streaming_feedback.py' -v
+      - name: Verify predictive mip residency prefetch (portable C++)
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -Wall -Wextra -Werror -pedantic \
+            modules/texture_streaming/tests/test_feedback_prefetch.cpp \
+            -o /tmp/test_texture_streaming_prefetch
+          /tmp/test_texture_streaming_prefetch
