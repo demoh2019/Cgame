@@ -1,5 +1,7 @@
 extends Node3D
 class_name WorldStreamer3D
+
+const StreamingPlanner = preload("res://addons/visual_quality/world_streaming_planner.gd")
 ## Reusable, scene-based world streaming for Godot 4. Loads PackedScene assets
 ## asynchronously; instantiates scene-tree nodes only on the main thread.
 ## This is spatial scene streaming, not Unreal's editor World Partition/HLOD.
@@ -17,6 +19,11 @@ signal asset_load_failed(path: String, error: int)
 @export_range(100, 10000, 100) var max_spawn_time_usec_per_update: int = 2500
 @export_range(1, 16, 1) var max_unloads_per_update: int = 4
 @export_range(1, 8, 1) var max_concurrent_loads: int = 2
+@export_range(0.0, 3.0, 0.05) var lookahead_seconds: float = 0.8
+@export_range(0, 4, 1) var max_lookahead_cells: int = 2
+@export_range(0, 3, 1) var prefetch_radius_cells: int = 1
+@export_range(0, 16, 1) var max_prefetch_cells: int = 4
+@export_range(8, 512, 1) var max_profiled_cells: int = 96
 @export var streaming_enabled: bool = true
 
 var source: Node3D
@@ -32,6 +39,10 @@ var last_spawned_count: int = 0
 var last_unloaded_count: int = 0
 var total_spawned_count: int = 0
 var total_unloaded_count: int = 0
+var last_prefetched_count: int = 0
+var total_prefetched_count: int = 0
+var last_predicted_cell: Vector2i = Vector2i.ZERO
+var _cell_profiles: Dictionary = {}  # Vector2i -> bounded timing + operation counts
 
 
 func _process(delta: float) -> void:
@@ -66,7 +77,16 @@ func refresh_now() -> void:
 	last_spawned_count = 0
 	last_unloaded_count = 0
 	_poll_background_loads()
-	var center: Vector2i = cell_at_local_position(to_local(source.global_position), cell_size)
+	var local_source: Vector3 = to_local(source.global_position)
+	var center: Vector2i = cell_at_local_position(local_source, cell_size)
+	var velocity_local: Vector3 = Vector3.ZERO
+	if source is CharacterBody3D:
+		# CharacterBody3D.velocity is in world coordinates; convert to the
+		# streamer's local axes so rotated worlds prefetch correctly.
+		velocity_local = global_basis.inverse() * (source as CharacterBody3D).velocity
+	last_predicted_cell = StreamingPlanner.predict_cell(local_source, velocity_local,
+		cell_size, lookahead_seconds, max_lookahead_cells)
+	last_prefetched_count = 0
 	# Unload outside a larger radius to avoid jitter at load boundaries.
 	var unload_budget: int = max_unloads_per_update
 	for coord in _active.keys():
@@ -74,22 +94,11 @@ func refresh_now() -> void:
 			break
 		if not _definitions.has(coord) or not within_cell_radius(coord, center, unload_radius_cells):
 			_unload_cell(coord)
-			last_unloaded_count += 1
-			total_unloaded_count += 1
 			unload_budget -= 1
-	var wanted: Array[Vector2i] = []
-	for coord in _definitions.keys():
-		if within_cell_radius(coord, center, load_radius_cells) and not _active.has(coord):
-			wanted.append(coord)
-	wanted.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
-		var ad: int = (a - center).length_squared()
-		var bd: int = (b - center).length_squared()
-		if ad == bd:
-			if a.x != b.x:
-				return a.x < b.x
-			return a.y < b.y
-		return ad < bd
-	)
+	var wanted: Array[Vector2i] = StreamingPlanner.build_load_queue(
+		_definitions, _active, center, last_predicted_cell,
+		load_radius_cells, unload_radius_cells, prefetch_radius_cells,
+		max_prefetch_cells)
 	var spawn_budget: int = max_spawns_per_update
 	var spawn_started_usec: int = Time.get_ticks_usec()
 	for coord in wanted:
@@ -103,6 +112,9 @@ func refresh_now() -> void:
 				spawn_budget -= 1
 				last_spawned_count += 1
 				total_spawned_count += 1
+				if StreamingPlanner.is_speculative(coord, center, load_radius_cells):
+					last_prefetched_count += 1
+					total_prefetched_count += 1
 		elif not _pending_paths.has(path) and not _failed_paths.has(path):
 			if _pending_paths.size() < max_concurrent_loads:
 				_request_asset(path)
@@ -140,6 +152,7 @@ func _poll_background_loads() -> void:
 
 
 func _spawn_cell(coord: Vector2i, packed: PackedScene) -> bool:
+	var started_usec: int = Time.get_ticks_usec()
 	var instance: Node = packed.instantiate()
 	if not instance is Node3D:
 		if instance != null:
@@ -154,12 +167,14 @@ func _spawn_cell(coord: Vector2i, packed: PackedScene) -> bool:
 	add_child(node)
 	_active[coord] = node
 	cell_loaded.emit(coord, node)
+	_record_cell_timing(coord, true, Time.get_ticks_usec() - started_usec)
 	return true
 
 
 func _unload_cell(coord: Vector2i) -> void:
 	if not _active.has(coord):
 		return
+	var started_usec: int = Time.get_ticks_usec()
 	var instance: Node3D = _active[coord]
 	# Let persistence and gameplay systems snapshot the live instance first.
 	cell_about_to_unload.emit(coord, instance)
@@ -168,6 +183,58 @@ func _unload_cell(coord: Vector2i) -> void:
 		remove_child(instance)
 		instance.queue_free()
 	cell_unloaded.emit(coord)
+	last_unloaded_count += 1
+	total_unloaded_count += 1
+	_record_cell_timing(coord, false, Time.get_ticks_usec() - started_usec)
+
+
+func _record_cell_timing(coord: Vector2i, spawned: bool, microseconds: int) -> void:
+	if not _cell_profiles.has(coord) and _cell_profiles.size() >= max_profiled_cells:
+		# Bounded diagnostic cache: preserve the currently observed cells and
+		# evict the oldest *record*, never the actual streamed scene.
+		_cell_profiles.erase(_cell_profiles.keys()[0])
+	var entry: Dictionary = _cell_profiles.get(coord, {
+		"spawn_count": 0, "unload_count": 0, "last_spawn_us": 0,
+		"peak_spawn_us": 0, "last_unload_us": 0
+	})
+	if spawned:
+		entry["spawn_count"] = int(entry["spawn_count"]) + 1
+		entry["last_spawn_us"] = microseconds
+		entry["peak_spawn_us"] = maxi(int(entry["peak_spawn_us"]), microseconds)
+	else:
+		entry["unload_count"] = int(entry["unload_count"]) + 1
+		entry["last_unload_us"] = microseconds
+	# Reinsert to provide oldest-first bounded eviction.
+	_cell_profiles.erase(coord)
+	_cell_profiles[coord] = entry
+
+
+func get_cell_profile(coord: Vector2i) -> Dictionary:
+	return _cell_profiles.get(coord, {}).duplicate(true)
+
+
+func profiled_cell_count() -> int:
+	return _cell_profiles.size()
+
+
+func get_slowest_cells(limit: int = 5) -> Array[Dictionary]:
+	var entries: Array[Dictionary] = []
+	for coord in _cell_profiles.keys():
+		var entry: Dictionary = _cell_profiles[coord].duplicate(true)
+		entry["coord"] = coord
+		if int(entry.get("spawn_count", 0)) > 0:
+			entries.append(entry)
+	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var at: int = int(a.get("peak_spawn_us", 0))
+		var bt: int = int(b.get("peak_spawn_us", 0))
+		if at != bt:
+			return at > bt
+		return StreamingPlanner.less_coord(a["coord"], b["coord"])
+	)
+	var result: Array[Dictionary] = []
+	for i in range(mini(maxi(limit, 0), entries.size())):
+		result.append(entries[i])
+	return result
 
 
 func _record_failure(path: String, code: int) -> void:
@@ -186,6 +253,10 @@ func registered_cell_count() -> int:
 
 func pending_asset_count() -> int:
 	return _pending_paths.size()
+
+
+func is_cell_registered(coord: Vector2i) -> bool:
+	return _definitions.has(coord)
 
 
 func get_active_cell(coord: Vector2i) -> Node3D:
