@@ -252,6 +252,27 @@ static func screen_lod_scale(view_height: float, vertical_fov_degrees: float) ->
 	return clampf(focal / reference_focal, 0.65, 1.6)
 
 
+## Convert native Camera3D pixels-per-meter into a stable grass LOD
+## distance. A 60% projection / 40% horizontal blend preserves the original
+## ground-carpet placement while fixing over-detail on zoomed-out cliffs and
+## under-detail on elevated terrain. Only values within the 720p reference
+## range may extend quality; extra resolution is capped to avoid GPU spikes.
+## This pure helper also works with a future orthographic camera.
+static func projected_lod_distance(horizontal_distance: float,
+		pixels_per_meter: float, focal_ratio: float) -> float:
+	if not is_finite(horizontal_distance) or horizontal_distance < 0.0:
+		return horizontal_distance
+	if not is_finite(pixels_per_meter) or pixels_per_meter <= 0.0:
+		return horizontal_distance
+	if not is_finite(focal_ratio) or focal_ratio <= 0.0:
+		return horizontal_distance
+	var capped_ratio: float = clampf(focal_ratio, 0.65, 1.15)
+	var effective_density: float = pixels_per_meter * capped_ratio / focal_ratio
+	var reference_focal: float = 360.0 / tan(deg_to_rad(38.0) * 0.5)
+	var projected_distance: float = reference_focal / maxf(effective_density, 0.001)
+	return lerpf(horizontal_distance, projected_distance, 0.6)
+
+
 ## Scaling distances is equivalent to selecting LOD by projected screen
 ## coverage for the fixed-size grass blades. Preset fade range controls how
 ## long foliage should stay dense; screen resolution/FOV controls sharpness.
