@@ -4,6 +4,7 @@ extends RefCounted
 ## The rod is a carried tool, not an equippable weapon.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const FishingBait = preload("res://scripts/shared/fishing_bait.gd")
 
 const CAST_SECONDS := 5.0
 const COOLDOWN_SECONDS := 2.0
@@ -37,7 +38,8 @@ static func catch_item(tier: int) -> String:
 	return CATCH_ID if tier == 1 else "raw_fish_%d" % tier
 
 
-static func validate_start(world, player_position: Vector3, backpack, skill_tier: int = 1) -> Dictionary:
+static func validate_start(world, player_position: Vector3, backpack, skill_tier: int = 1,
+		baited: bool = false) -> Dictionary:
 	var rod_id: String = backpack.best_tool("fishing")
 	if rod_id == "":
 		return {"ok": false, "reason": "need_rod"}
@@ -49,5 +51,8 @@ static func validate_start(world, player_position: Vector3, backpack, skill_tier
 	var item_id: String = catch_item(tier)
 	if backpack.free_space_for(item_id) <= 0:
 		return {"ok": false, "reason": "no_space"}
+	if baited and not FishingBait.can_request(backpack):
+		return {"ok": false, "reason": "need_bait"}
 	return {"ok": true, "water_x": water.x, "water_z": water.y,
-		"seconds": CAST_SECONDS, "tier": tier, "item": item_id}
+		"seconds": CAST_SECONDS, "tier": tier, "item": item_id,
+		"baited": baited}
