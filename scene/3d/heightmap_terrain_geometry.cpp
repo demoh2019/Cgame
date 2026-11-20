@@ -277,18 +277,25 @@ static Vector3 sample_coarse_morph_normal(const HeightField &p_field, const Para
 	const int top = (p_local_z / p_coarse_stride) * p_coarse_stride;
 	const real_t fx = real_t(p_local_x - left) / real_t(p_coarse_stride);
 	const real_t fz = real_t(p_local_z - top) / real_t(p_coarse_stride);
-	const Vector3 n00 = sample_normal(p_field, p_x0 + left, p_z0 + top, p_params);
+	// Edge chunks can contain vertices beyond the height array. Clamp
+	// source-grid normals just as HeightField::get clamps height lookups,
+	// including the case where the caller supplied a raw normal_override.
+	auto normal_at = [&](int local_x, int local_z) -> Vector3 {
+		const int sx = MIN(p_x0 + local_x, p_field.width - 1);
+		const int sz = MIN(p_z0 + local_z, p_field.depth - 1);
+		return sample_normal(p_field, sx, sz, p_params);
+	};
+	const Vector3 n00 = normal_at(left, top);
 	if (fx == 0.0 && fz == 0.0) {
 		// Coarse-grid vertices already use the exact same normal at both LODs.
 		return n00;
 	}
-	const Vector3 n10 = sample_normal(p_field, p_x0 + left + p_coarse_stride, p_z0 + top, p_params);
-	const Vector3 n01 = sample_normal(p_field, p_x0 + left, p_z0 + top + p_coarse_stride, p_params);
+	const Vector3 n10 = normal_at(left + p_coarse_stride, top);
+	const Vector3 n01 = normal_at(left, top + p_coarse_stride);
 	if (fx + fz <= real_t(1.0)) {
 		return (n00 + (n10 - n00) * fx + (n01 - n00) * fz).normalized();
 	}
-	const Vector3 n11 = sample_normal(p_field,
-			p_x0 + left + p_coarse_stride, p_z0 + top + p_coarse_stride, p_params);
+	const Vector3 n11 = normal_at(left + p_coarse_stride, top + p_coarse_stride);
 	return (n11 + (n01 - n11) * (real_t(1.0) - fx) +
 			(n10 - n11) * (real_t(1.0) - fz)).normalized();
 }
