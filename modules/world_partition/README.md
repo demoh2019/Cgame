@@ -12,6 +12,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
+- **Bounded motion prefetch:** optional world-space velocity input projects the observer up to 5 seconds / 128 world units ahead and attempts to load one future cell, after immediate-radius cells and pinned hubs. It uses the same async resource cache and per-frame budgets and releases no-longer-relevant speculative scenes.
 - **Persistent hub pins:** `pin_cell(cell)`/`unpin_cell(cell)` keep registered camps and quest hubs resident outside the observer's unload radius. At most 128 cells may be pinned to bound intentional scene retention; pinned cells still use normal async load and instantiation budgets.
 - **Observer grid events:** `has_observer_cell()`, `get_observer_cell()` and `observer_cell_changed(cell)` help gameplay react to crossing streaming cell boundaries without polling player coordinates. The first successful observer lookup emits this signal, as does a subsequent cell-size or observer-path change.
 - Avoid running streaming implicitly in the editor.
@@ -33,6 +34,12 @@ func _ready() -> void:
     world.set_cell_scene(Vector2i(0, 0), "res://world/0_0.tscn")
     world.set_cell_scene(Vector2i(-1, 0), "res://world/-1_0.tscn")
     world.pin_cell(Vector2i(0, 0)) # Home base persists while exploring
+    world.predictive_lookahead_seconds = 2.0
+    world.predictive_max_distance = 32.0
+
+func _physics_process(_delta: float) -> void:
+    # Supply world-space movement velocity, in world units per second.
+    world.predictive_velocity = $Player.velocity
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
@@ -47,13 +54,15 @@ var requests := world.get_inflight_request_count()
 var failed := world.get_failed_cell_count()
 ```
 
+Use `world.has_predicted_cell()` and `world.get_predicted_cell()` to display the next potential grid coordinate (whether or not a scene is registered). Setting `predictive_lookahead_seconds` to zero disables prefetch. The supplied velocity is finite-checked and capped to 512 units/second; prediction is off by default, never supersedes normal loading priority and does not automatically query a physics node.
+
 For persistent hubs use `world.get_pinned_cell_count()` and `world.get_pinned_cells()`; call `world.unpin_cell(cell)` before leaving a hub permanently. Pins are runtime state, must be re-established after loading a save, and are cleared when their scene registration is removed. Disabling streaming unloads even pinned scenes, but keeps their pin registrations for re-enabling.
 
 These counters describe the current state, not a prediction of future memory or throughput. One background resource request may serve multiple pending cells with the same PackedScene path. See `misc/cgame_forest_showcase` for a playable, deterministic 16-cell demonstration and headless reload test.
 
 ## Tests
 
-The module includes 59 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 61 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -64,6 +73,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Prediction is opportunistic, not a guaranteed load.** At most one additional grid cell is preloaded. Moving abruptly, changing direction or teleporting can invalidate a forecast; normal observer-radius loading handles these cases. No prefetch cones, priority queues or automatic navmesh/collision warmup are provided.
 - **No automatic editor bake/partition yet.** Split source scenes and save each cell manually. Automated authoring and terrain/HLOD export are future integrations.
 - **No terrain sculpting, painting or foliage authoring in this module.** They can output regular cell `PackedScene` resources.
 - **No cancellation primitive for a running ResourceLoader request.** Moving the observer drops obsolete pending instances; the running resource request finishes and is then discarded.
