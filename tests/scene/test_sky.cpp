@@ -299,6 +299,42 @@ TEST_CASE("[SceneTree][Environment] Volumetric fog history is finite and bounded
 	CHECK(!scene_environment->is_volumetric_fog_temporal_reprojection_enabled());
 }
 
+TEST_CASE("[SceneTree][Environment] SDFGI quality profile is atomic and validated") {
+	if (RenderingServer::get_singleton() == nullptr) {
+		return;
+	}
+	Ref<Environment> env;
+	env.instantiate();
+
+	// One native call enables two local cascades. Repeated Auto quality
+	// applications must not re-upload unchanged settings to the renderer.
+	env->configure_sdfgi(true, 2, 0.5f, true, 0.32f, 0.72f);
+	CHECK(env->is_sdfgi_enabled());
+	CHECK(env->get_sdfgi_cascades() == 2);
+	CHECK(env->get_sdfgi_min_cell_size() == 0.5f);
+	CHECK(env->is_sdfgi_reading_sky_light());
+	CHECK(env->get_sdfgi_bounce_feedback() == 0.32f);
+	CHECK(env->get_sdfgi_energy() == 0.72f);
+	env->configure_sdfgi(true, 2, 0.5f, true, 0.32f, 0.72f);
+
+	// Invalid input fails as a transaction: no halfway-enabled GI or
+	// cascades changed by an invalid graphics preset.
+	ERR_PRINT_OFF;
+	env->configure_sdfgi(false, 0, 0.5f, false, 0.1f, 0.1f);
+	env->configure_sdfgi(false, 2, -1.0f, false, 0.1f, 0.1f);
+	env->configure_sdfgi(false, 2, 0.5f, false, 1.2f, 0.1f);
+	env->configure_sdfgi(false, 2, 0.5f, false, 0.1f, -0.1f);
+	ERR_PRINT_ON;
+	CHECK(env->is_sdfgi_enabled());
+	CHECK(env->get_sdfgi_cascades() == 2);
+	CHECK(env->get_sdfgi_energy() == 0.72f);
+
+	// On a renderer switch, one operation clears SDFGI while keeping a
+	// valid profile ready for a later return to Ultra.
+	env->configure_sdfgi(false, 2, 0.5f, true, 0.32f, 0.72f);
+	CHECK(!env->is_sdfgi_enabled());
+}
+
 } // namespace TestSky
 
 #endif // _3D_DISABLED
