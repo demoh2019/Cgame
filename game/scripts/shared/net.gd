@@ -941,6 +941,13 @@ func c_attack(dir_x: float, dir_z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_shield_wall() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_shield_wall", sim.cmd_party_shield_wall(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_guardian_intercept(target_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -1140,6 +1147,9 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 		"guardian_retribution":
 			# The earned counterstrike and enemy ID are private to its guardian.
 			return event.get("peer", -1) == peer
+		"party_shield_wall_block":
+			# Only the guardian and the directly shielded victim can see the hit.
+			return event.get("peer", -1) == peer or event.get("by", -1) == peer
 		"guardian_intercept":
 			# Share only with the protected ally and the real guardian.
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
