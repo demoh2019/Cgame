@@ -4,6 +4,7 @@ extends Node3D
 
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const GameSave = preload("res://scripts/game_save.gd")
+const QuestNavigation = preload("res://scripts/quest_navigation.gd")
 const AtmosphereCycle = preload("res://scripts/atmosphere_cycle.gd")
 const WORLD_EXTENT: float = 64.0
 const GRID_SEGMENTS: int = 112
@@ -23,6 +24,9 @@ var world_partition: WorldPartition3D
 var current_region: Vector2i = Vector2i.ZERO
 var crystals: Array[Node3D] = []
 var collected_ids: Array[int] = []
+var quest_target: Node3D
+var quest_marker: MeshInstance3D
+var quest_target_id: int = -1
 
 var elapsed: float = 0.0
 var hud_elapsed: float = 0.0
@@ -45,6 +49,8 @@ func _ready() -> void:
     _create_hud()
     _create_streaming_world()
     _load_game()
+    _create_quest_marker()
+    _refresh_quest_target(true)
     _apply_quality(high_quality)
     _refresh_hud()
 
@@ -227,6 +233,8 @@ func _create_streaming_world() -> void:
     # The home-clearing cell is a persistent hub and survives camera travel.
     # One pinned cell shares the existing request/instantiation frame budgets.
     world_partition.pin_cell(Vector2i.ZERO)
+    # The active objective adds one bounded remote streaming source at runtime.
+    # The marker and source are initialized after the savegame is restored.
     world_partition.update_streaming()
 
 
@@ -283,6 +291,57 @@ func _create_crystals() -> void:
         crystals.append(holder)
 
 
+func _create_quest_marker() -> void:
+    quest_marker = MeshInstance3D.new()
+    quest_marker.name = "RelicObjectiveBeacon"
+    var mesh := CylinderMesh.new()
+    mesh.top_radius = 0.06
+    mesh.bottom_radius = 0.18
+    mesh.height = 5.0
+    mesh.radial_segments = 8
+    var material := StandardMaterial3D.new()
+    material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+    material.albedo_color = Color(0.20, 0.82, 1.0)
+    material.emission_enabled = true
+    material.emission = Color(0.13, 0.58, 1.0)
+    material.emission_energy_multiplier = 2.2
+    mesh.material = material
+    quest_marker.mesh = mesh
+    quest_marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    quest_marker.visible = false
+    add_child(quest_marker)
+
+
+func _refresh_quest_target(force: bool = false) -> void:
+    if not force and is_instance_valid(quest_target) and not quest_target.is_queued_for_deletion() and crystals.has(quest_target):
+        return
+
+    quest_target = QuestNavigation.closest_relic(crystals, player.global_position)
+    quest_target_id = -1
+    if is_instance_valid(quest_target):
+        quest_target_id = quest_target.name.trim_prefix("Crystal_").to_int()
+        if is_instance_valid(quest_marker):
+            quest_marker.visible = true
+            var pos: Vector3 = quest_target.global_position
+            quest_marker.global_position = Vector3(pos.x, pos.y + 2.2, pos.z)
+    elif is_instance_valid(quest_marker):
+        quest_marker.visible = false
+
+    if is_instance_valid(world_partition):
+        QuestNavigation.sync_streaming_source(world_partition, quest_target)
+    _refresh_hud()
+
+
+func _quest_hud_text() -> String:
+    if not is_instance_valid(quest_target) or not is_instance_valid(player):
+        return "Задание: все реликвии собраны"
+    var distance: float = QuestNavigation.horizontal_distance(player.global_position, quest_target.global_position)
+    var direction: String = QuestNavigation.heading(player, quest_target.global_position)
+    return "Задание: реликвия %d   %.1f м   %s   доп. источники: %d" % [
+        quest_target_id + 1, distance, direction,
+        world_partition.get_streaming_source_count() if is_instance_valid(world_partition) else 0]
+
+
 func _create_camera() -> void:
     # Physics body owns yaw and collision, camera owns only pitch.
     # This follows the standard first-person controller hierarchy.
@@ -314,11 +373,10 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 198)
+    hint.position = Vector2(22, 240)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1/F2: графика  •  F3: упреждение  •  F4: LOD  •  F5/F9: сохранение
-F6: погода  •  F7: пауза дня  •  F8: +3 часа  •  Esc: курсор"
+    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1/F2: графика  •  F3: упреждение  •  F4: LOD  •  F5/F9: сохранение\nF6: погода  •  F7: пауза дня  •  F8: +3 часа  •  Esc: курсор"
     canvas.add_child(hint)
 
 
@@ -352,6 +410,7 @@ func _refresh_hud() -> void:
     var failed: int = world_partition.get_failed_cell_count() if world_partition != null else 0
     var pinned: int = world_partition.get_pinned_cell_count() if world_partition != null else 0
     var distant: int = world_partition.get_distant_cell_count() if world_partition != null else 0
+    var quest_text: String = _quest_hud_text()
     var predicted_text: String = "OFF" if not predictive_streaming else "—"
     if world_partition != null and world_partition.has_predicted_cell():
         var next_cell: Vector2i = world_partition.get_predicted_cell()
@@ -361,7 +420,8 @@ func _refresh_hud() -> void:
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   закреплено: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pinned, pending, inflight, failed, current_region.x, current_region.y] \
         + "Упреждающая загрузка: %s   LOD дальних: %d   F3/F4: сравнение\n" % [predicted_text, distant] \
-        + "Атмосфера: %02d:%02d  %s  %s (F6/F7/F8)" % [int(atmosphere_clock.day_hours), int(fmod(atmosphere_clock.day_hours, 1.0) * 60.0), atmosphere_clock.get_weather_name(), "ПАУЗА" if atmosphere_clock.paused else "цикл"]
+        + "Атмосфера: %02d:%02d  %s  %s (F6/F7/F8)\n" % [int(atmosphere_clock.day_hours), int(fmod(atmosphere_clock.day_hours, 1.0) * 60.0), atmosphere_clock.get_weather_name(), "ПАУЗА" if atmosphere_clock.paused else "цикл"] \
+        + quest_text
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
@@ -455,6 +515,8 @@ func _load_game() -> void:
     for crystal in crystals:
         crystal.queue_free()
     crystals.clear()
+    quest_target = null
+    quest_target_id = -1
     _create_crystals()
 
     var position: Vector2 = state["position_xz"]
@@ -466,6 +528,8 @@ func _load_game() -> void:
     high_quality = state["quality"]
     atmosphere_clock.set_weather(state.get("weather", 0))
     atmosphere_clock.set_clock(state.get("time_of_day", 17.25))
+    if is_instance_valid(quest_marker):
+        _refresh_quest_target(true)
     _refresh_hud()
 
 
@@ -488,4 +552,5 @@ func _collect_nearest() -> void:
         nearest.queue_free()
         collected = collected_ids.size()
         _save_game()
+        _refresh_quest_target(true)
         _refresh_hud()
