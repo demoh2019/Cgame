@@ -15,8 +15,8 @@ const Radar = preload("res://scripts/client/survival_radar.gd")
 
 
 func _vein(world) -> Dictionary:
-	for cx in range(8, 18):
-		for cz in range(0, 15):
+	for cx in range(8, 20):
+		for cz in range(0, 16):
 			var nodes: Array = world.chunk(Vector2i(cx, cz))["nodes"]
 			for node in nodes:
 				if str(node["kind"]) in ["ore", "rock"] and int(node["tier"]) >= 2:
