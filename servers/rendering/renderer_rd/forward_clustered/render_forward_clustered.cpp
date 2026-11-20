@@ -2622,8 +2622,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				params.z_far = p_render_data->scene_data->z_far;
 				params.fovy = fovy;
 				params.jitter = jitter;
+				// Delta is in seconds here; the native FSR2 backend converts
+				// it to the milliseconds expected by AMD's SDK.
 				params.delta_time = float(time_step);
-				params.reset_accumulation = false; // FIXME: The engine does not provide a way to reset the accumulation.
 
 				Projection correction;
 				correction.set_depth_correction(true, true, false);
@@ -2632,6 +2633,15 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				const Projection &cur_proj = p_render_data->scene_data->cam_projection;
 				const Transform3D &prev_transform = p_render_data->scene_data->prev_cam_transform;
 				const Transform3D &cur_transform = p_render_data->scene_data->cam_transform;
+				// A discontinuous camera jump must not blend the old world's
+				// temporal FSR2 history into the new scene (teleport, respawn,
+				// switching spectator cameras or major lens changes). Ordinary
+				// running and small FOV kicks preserve stable accumulation.
+				const bool camera_teleported = (cur_transform.origin - prev_transform.origin).length_squared() > 64.0f;
+				const bool camera_rotated = prev_transform.basis.get_column(2).normalized().dot(cur_transform.basis.get_column(2).normalized()) < 0.5f ||
+						prev_transform.basis.get_column(1).normalized().dot(cur_transform.basis.get_column(1).normalized()) < 0.5f;
+				const bool lens_cut = Math::abs(prev_proj.get_fov() - cur_proj.get_fov()) > 20.0f;
+				params.reset_accumulation = camera_teleported || camera_rotated || lens_cut;
 				params.reprojection = (correction * prev_proj) * prev_transform.affine_inverse() * cur_transform * (correction * cur_proj).inverse();
 
 				fsr2_effect->upscale(params);

@@ -856,12 +856,20 @@ void FSR2Effect::upscale(const Parameters &p_params) {
 	dispatch_desc.jitterOffset.y = p_params.jitter.y;
 	dispatch_desc.motionVectorScale.x = float(p_params.internal_size.width);
 	dispatch_desc.motionVectorScale.y = float(p_params.internal_size.height);
-	dispatch_desc.reset = p_params.reset_accumulation;
 	dispatch_desc.renderSize.width = p_params.internal_size.width;
 	dispatch_desc.renderSize.height = p_params.internal_size.height;
 	dispatch_desc.enableSharpening = (p_params.sharpness > 1e-6f);
 	dispatch_desc.sharpness = p_params.sharpness;
-	dispatch_desc.frameTimeDelta = p_params.delta_time;
+	// The game/render thread supplies elapsed SECONDS. FSR2 expects
+	// MILLISECONDS. Passing 0.016 for a 60 FPS frame instead of 16.67
+	// undermined its temporal lock and reactive history calculation.
+	const bool valid_frame_delta = Math::is_finite(p_params.delta_time) && p_params.delta_time > 0.0f;
+	const float safe_frame_ms = valid_frame_delta ?
+			CLAMP(p_params.delta_time, 0.001f, 0.100f) * 1000.0f : 16.67f;
+	dispatch_desc.frameTimeDelta = safe_frame_ms;
+	// Reset on camera cuts and exceptional stalls, not only on resizes.
+	// An invalid timestamp cannot poison the temporal accumulation.
+	dispatch_desc.reset = p_params.reset_accumulation || !valid_frame_delta || p_params.delta_time > 0.2f;
 	dispatch_desc.preExposure = 1.0f;
 	dispatch_desc.cameraNear = p_params.z_near;
 	dispatch_desc.cameraFar = p_params.z_far;
