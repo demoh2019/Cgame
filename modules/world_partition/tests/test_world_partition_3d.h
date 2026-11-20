@@ -183,6 +183,126 @@ TEST_CASE("[SceneTree][WorldPartition3D] Pinned remote cells load and unload ind
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
+TEST_CASE("[WorldPartition3D] Named streaming sources validate radii priority and bounded count") {
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	CHECK(partition->get_streaming_source_count() == 0);
+	CHECK(partition->get_streaming_source("unknown").is_empty());
+	CHECK(partition->get_streaming_source_names().is_empty());
+	CHECK_FALSE(partition->is_streaming_source_ready("unknown"));
+	CHECK(partition->has_signal(SNAME("streaming_source_ready")));
+	CHECK(partition->has_signal(SNAME("streaming_source_unready")));
+
+	CHECK(partition->set_streaming_source("survey", Vector2i(10, -4), 1, 2, 75));
+	CHECK(partition->get_streaming_source_count() == 1);
+	Dictionary survey = partition->get_streaming_source("survey");
+	CHECK(survey["center"] == Vector2i(10, -4));
+	CHECK(survey["load_radius"] == 1);
+	CHECK(survey["unload_radius"] == 2);
+	CHECK(survey["priority"] == 75);
+	CHECK_FALSE(partition->is_streaming_source_ready("survey"));
+	CHECK(partition->set_streaming_source("survey", Vector2i(11, -4), 0, 0, 99));
+	CHECK(partition->get_streaming_source_count() == 1);
+	CHECK(partition->get_streaming_source("survey")["center"] == Vector2i(11, -4));
+
+	ERR_PRINT_OFF;
+	CHECK_FALSE(partition->set_streaming_source("", Vector2i(), 0, 0, 1));
+	CHECK_FALSE(partition->set_streaming_source("invalid_radius", Vector2i(), -1, 0, 1));
+	CHECK_FALSE(partition->set_streaming_source("invalid_hysteresis", Vector2i(), 2, 1, 1));
+	CHECK_FALSE(partition->set_streaming_source("invalid_large", Vector2i(), 5, 5, 1));
+	CHECK_FALSE(partition->set_streaming_source("invalid_priority", Vector2i(), 0, 0, 101));
+	CHECK_FALSE(partition->set_streaming_source("invalid_overflow", Vector2i(INT32_MAX, 0), 0, 1, 1));
+	ERR_PRINT_ON;
+	CHECK(partition->get_streaming_source_count() == 1);
+	for (int i = 1; i < 8; i++) {
+		CHECK(partition->set_streaming_source("extra_" + itos(i), Vector2i(i, 0), 0, 0, 0));
+	}
+	CHECK(partition->get_streaming_source_count() == 8);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(partition->set_streaming_source("ninth", Vector2i(), 0, 0, 0));
+	ERR_PRINT_ON;
+	CHECK(partition->get_streaming_source_count() == 8);
+	CHECK(partition->set_streaming_source("survey", Vector2i(12, 0), 0, 1, 100));
+	CHECK(partition->get_streaming_source_count() == 8);
+	Array names = partition->get_streaming_source_names();
+	CHECK(names.size() == 8);
+	partition->remove_streaming_source("survey");
+	CHECK(partition->get_streaming_source_count() == 7);
+	partition->remove_streaming_source("survey");
+	partition->clear_streaming_sources();
+	CHECK(partition->get_streaming_source_count() == 0);
+	memdelete(partition);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Named source priority and readiness survive remote streaming") {
+	Node3D *template_root = memnew(Node3D);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	REQUIRE(packed->pack(template_root) == OK);
+	memdelete(template_root);
+	const String path = "user://world_partition_multisource_doctest_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	REQUIRE(ResourceSaver::save(packed, path) == OK);
+
+	Node3D *observer = memnew(Node3D);
+	observer->set_name("MultiSourceObserver");
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	SceneTree::get_singleton()->get_root()->add_child(observer);
+	SceneTree::get_singleton()->get_root()->add_child(partition);
+	partition->set_cell_size(16);
+	partition->set_load_radius(0);
+	partition->set_unload_radius(0);
+	partition->set_max_instances_per_frame(1);
+	partition->set_observer_path(partition->get_path_to(observer));
+	partition->set_cell_scene(Vector2i(), path);
+	partition->set_cell_scene(Vector2i(-5, 0), path);
+	partition->set_cell_scene(Vector2i(5, 0), path);
+	partition->set_cell_scene(Vector2i(7, 0), path);
+	CHECK(partition->set_streaming_source("low", Vector2i(-5, 0), 0, 1, 5));
+	CHECK(partition->set_streaming_source("high", Vector2i(5, 0), 0, 1, 95));
+
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i()); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(Vector2i()));
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(5, 0)));
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(5, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(Vector2i(5, 0)));
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(-5, 0)));
+	CHECK(partition->is_streaming_source_ready("high"));
+	CHECK_FALSE(partition->is_streaming_source_ready("low"));
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(-5, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(Vector2i(-5, 0)));
+	CHECK(partition->is_streaming_source_ready("low"));
+	CHECK(partition->get_loaded_cell_count() == 3);
+
+	CHECK(partition->set_streaming_source("high", Vector2i(7, 0), 0, 1, 95));
+	partition->update_streaming();
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(5, 0)));
+	CHECK_FALSE(partition->is_streaming_source_ready("high"));
+	for (int i = 0; i < 2000 && !partition->is_streaming_source_ready("high"); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	CHECK(partition->is_cell_loaded(Vector2i(7, 0)));
+	partition->remove_streaming_source("high");
+	partition->remove_streaming_source("low");
+	partition->update_streaming();
+	CHECK(partition->get_streaming_source_count() == 0);
+	CHECK(partition->get_loaded_cell_count() == 1);
+
+	SceneTree::get_singleton()->get_root()->remove_child(partition);
+	SceneTree::get_singleton()->get_root()->remove_child(observer);
+	memdelete(partition);
+	memdelete(observer);
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
 TEST_CASE("[SceneTree][WorldPartition3D] Observer cell follows motion and grid changes") {
 	WorldPartition3D *partition = memnew(WorldPartition3D);
 	Node3D *observer = memnew(Node3D);
