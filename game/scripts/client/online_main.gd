@@ -1261,7 +1261,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				else:
 					_interact()
 			KEY_1:
-				if Input.is_key_pressed(KEY_CTRL):
+				if Input.is_key_pressed(KEY_ALT) and Input.is_key_pressed(KEY_SHIFT):
+					hud.eat_smoked()
+				elif Input.is_key_pressed(KEY_CTRL):
 					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 						client.smart_provision("food")
 				elif Input.is_key_pressed(KEY_ALT):
