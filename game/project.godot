@@ -25,6 +25,12 @@ anti_aliasing/screen_space_roughness_limiter/enabled=true
 anti_aliasing/screen_space_roughness_limiter/amount=0.25
 anti_aliasing/screen_space_roughness_limiter/limit=0.18
 
+
+; The renderer’s short-range screen-space contact-shadow pass is globally
+; compiled in, but individual lights opt in only on Forward+ High/Ultra.
+; The custom engine skips the depth prepass when none opt in.
+lights_and_shadows/contact_shadow/enabled=true
+
 ; The default Balanced quality uses 2048/16-bit directional shadows.
 ; The runtime graphics preset changes atlas size/precision only when needed.
 ; This avoids first-frame 4096->2048 GPU reallocation on standard settings.
