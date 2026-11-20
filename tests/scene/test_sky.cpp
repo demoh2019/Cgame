@@ -218,6 +218,36 @@ TEST_CASE("[SceneTree][Sky] RID generation") {
 	CHECK(!test_sky->get_rid().is_valid());
 }
 
+TEST_CASE("[SceneTree][Sky] Reassigning unchanged sky state preserves values") {
+	Ref<Sky> sky;
+	sky.instantiate();
+
+	// Repeated size/mode writes should not enqueue unnecessary renderer updates.
+	sky->set_radiance_size(Sky::RADIANCE_SIZE_128);
+	sky->set_radiance_size(Sky::RADIANCE_SIZE_128);
+	CHECK(sky->get_radiance_size() == Sky::RADIANCE_SIZE_128);
+	sky->set_radiance_size(Sky::RADIANCE_SIZE_512);
+	CHECK(sky->get_radiance_size() == Sky::RADIANCE_SIZE_512);
+
+	sky->set_process_mode(Sky::PROCESS_MODE_INCREMENTAL);
+	sky->set_process_mode(Sky::PROCESS_MODE_INCREMENTAL);
+	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_INCREMENTAL);
+	sky->set_process_mode(Sky::PROCESS_MODE_QUALITY);
+	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_QUALITY);
+
+	Ref<Material> material_a;
+	material_a.instantiate();
+	Ref<Material> material_b;
+	material_b.instantiate();
+	sky->set_material(material_a);
+	sky->set_material(material_a);
+	CHECK(sky->get_material() == material_a);
+	sky->set_material(material_b);
+	CHECK(sky->get_material() == material_b);
+	sky->set_material(Ref<Material>());
+	CHECK(sky->get_material().is_null());
+}
+
 } // namespace TestSky
 
 #endif // _3D_DISABLED
