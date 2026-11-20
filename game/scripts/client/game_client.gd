@@ -31,6 +31,7 @@ var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
 var smoke_clouds: Dictionary = {} # Interest-limited, temporary visual smoke.
 var infected_snares: Dictionary = {} # Server-replicated temporary PvE traps.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
+var raid_cone_telegraph: Dictionary = {} # Interest-limited server-authored cleave sector.
 var spit_zones: Dictionary = {} # Only the latest server-issued acid telegraphs.
 var acid_pools: Dictionary = {} # Replicated lingering ground hazards.
 var outposts: Array = [] # Public server-controlled PvP objectives.
@@ -85,6 +86,7 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	server_time = float(snapshot["time"])
 	you = snapshot["you"]
 	raid_telegraph = snapshot.get("raid_telegraph", {}).duplicate(true)
+	raid_cone_telegraph = snapshot.get("raid_cone_telegraph", {}).duplicate(true)
 	spit_zones.clear()
 	for zone in snapshot.get("spit_zones", []):
 		spit_zones[int(zone["id"])] = zone
