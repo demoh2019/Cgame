@@ -4294,7 +4294,7 @@ func _tick_raid_encounter() -> void:
 				"radius": RaidEncounter.SLAM_RADIUS,
 				"seconds": RaidEncounter.SLAM_WARNING})
 			return
-		if time >= raid_next_cone_at:
+		if raid_next_cone_at > 0.0 and time >= raid_next_cone_at:
 			var target: Player = players.get(boss.target_id)
 			if target != null and _alive(target) and not _is_safe(target.position) and \
 					world.zone_at(target.position.x, target.position.z) >= RaidEncounter.MIN_ZONE and \
