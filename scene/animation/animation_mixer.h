@@ -134,6 +134,9 @@ protected:
 
 	bool processing = false;
 	bool active = true;
+	// Opt-in native update-rate optimization for distant character visuals.
+	// Not serialized; no impact on animation graphs that use normal ticks.
+	double budgeted_advance_accumulated = 0.0;
 
 	void _set_process(bool p_process, bool p_force = false);
 
@@ -458,6 +461,11 @@ public:
 	void make_animation_instance(const StringName &p_name, const PlaybackInfo &p_playback_info);
 	void clear_animation_instances();
 	virtual void advance(double p_time);
+	// Gathers skipped frame time in C++ instead of script allocations and
+	// invokes the virtual advance() only when a manual animator is due.
+	bool advance_budgeted(double p_delta, double p_update_interval, double p_max_catchup = 0.5);
+	void reset_advance_budget();
+	double get_advance_budget_accumulated() const;
 	virtual void clear_caches(); // Must be called by hand if an animation was modified after added.
 
 	/* ---- Capture feature ---- */
