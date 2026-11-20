@@ -58,6 +58,12 @@ func run(t) -> void:
 	sim._tick_zombies(0.05)
 	t.near(ally.survival.health, before_ally, 0.001,
 		"one real infected strike was intercepted")
+	var saved_events: Array = sim.events.filter(
+		func(event): return event.get("type", "") == "guardian_intercept")
+	t.eq(saved_events.size(), 1, "one genuine rescue generates one server event")
+	if saved_events.size() == 1:
+		t.check(bool(saved_events[0].get("counter_ready", false)),
+			"guardian receives a counter prompt only when they survived the block")
 	t.eq(guardian.guard_counter_target, enemy.id,
 		"only actual enemy that struck is marked for retaliation")
 	t.eq(guardian.guard_counter_weapon, "club_1",
