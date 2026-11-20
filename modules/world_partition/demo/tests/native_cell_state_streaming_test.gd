@@ -118,6 +118,18 @@ func _run() -> void:
     var returned := world.call("get_cell_instance", CELL) as Node3D
     assert(returned.call("capture_streaming_state")["reward_claimed"] == true)
 
+    # A bulk import emits only effective transitions. Removing a disabled
+    # entry returns that layer to its implicit enabled default.
+    var notifications_before: int = layer_notifications.size()
+    world.call("set_layer_states", {"quest_event": false})
+    assert(layer_notifications.size() == notifications_before + 1)
+    assert(layer_notifications.back()["enabled"] == false)
+    world.call("set_layer_states", {"quest_event": false})
+    assert(layer_notifications.size() == notifications_before + 1)
+    world.call("set_layer_states", {})
+    assert(layer_notifications.size() == notifications_before + 2)
+    assert(layer_notifications.back()["enabled"] == true)
+
     world.set("streaming_enabled", false)
     world.queue_free()
     observer.queue_free()
