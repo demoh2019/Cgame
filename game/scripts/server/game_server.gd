@@ -42,6 +42,7 @@ const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
+const BarricadeBallistics = preload("res://scripts/shared/barricade_ballistics.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
@@ -2396,7 +2397,7 @@ func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 	var id := new_id()
 	var item := {"id": id, "x": x, "y": world.height_at(x, z), "z": z,
 		"hp": Structures.MAX_HEALTH, "tier": 1, "owner": peer_id,
-		"owner_account": player.user_id}
+		"owner_account": player.user_id, "owner_guild": player.guild_id}
 	barricades[id] = item
 	world_structure_revision += 1
 	world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
@@ -2527,6 +2528,32 @@ func damage_barricade(id: int, damage: float) -> bool:
 		return true
 	barricades[id] = item
 	return false
+
+
+## Called only after a server-confirmed ranged shot found no living target
+## in front of its first solid obstacle. No client can supply a wall ID or HP.
+func _damage_ranged_cover(attacker: Player, origin: Vector2,
+		direction: Vector2, reach: float, damage: float) -> bool:
+	var surface: Dictionary = RangedCover.first_blocker(world, origin, direction, reach)
+	var id: int = int(surface.get("id", -1))
+	if not barricades.has(id):
+		return false # Terrain and structures without server-owned HP stay indestructible.
+	var wall: Dictionary = barricades[id]
+	if not BarricadeBallistics.can_damage(attacker, wall,
+			world.zone_at(attacker.position.x, attacker.position.z),
+			world.zone_at(float(wall["x"]), float(wall["z"]))):
+		return false
+	# A reconstructed wall never inherits a forged client damage amount.
+	var actual: float = BarricadeBallistics.raw_damage(damage)
+	if actual <= 0.0:
+		return false
+	var old_hp: float = float(wall["hp"])
+	var tier: int = Structures.tier_of(wall)
+	var destroyed: bool = damage_barricade(id, actual)
+	var new_hp: float = 0.0 if destroyed else float(barricades[id]["hp"])
+	events.append({"type": "barricade_shot", "peer": attacker.id, "id": id,
+		"hp": new_hp, "damage": old_hp - new_hp, "tier": tier})
+	return true
 
 
 func cmd_use(peer_id: int, item_id: String) -> Dictionary:
@@ -2847,7 +2874,9 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var hit := _find_hit(player, origin, direction, reach, kind == "ranged")
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": kind == "ranged", "x": player.position.x, "z": player.position.z})
 	if hit.is_empty():
-		return {"ok": true, "hit": false}
+		var cover_hit: bool = is_ranged and _damage_ranged_cover(player,
+			origin, direction, reach, damage)
+		return {"ok": true, "hit": false, "cover_hit": cover_hit}
 	# Only server-confirmed ordinary melee PvE attacks may ambush.
 	var ambush: bool = false
 	if not is_ranged and str(hit["kind"]) == "zombie":
@@ -3047,7 +3076,10 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 					"x": pinned.position.x, "z": pinned.position.z})
 		count += 1
 	if count == 0:
-		return {"ok": true, "hit": false, "hits": 0, "energy": player.combat_energy}
+		var cover_hit: bool = ranged and _damage_ranged_cover(player,
+			origin, direction, float(skill["range"]), skilled_damage)
+		return {"ok": true, "hit": false, "hits": 0,
+			"cover_hit": cover_hit, "energy": player.combat_energy}
 	return {"ok": true, "hit": true, "target": first_target,
 		"hits": count, "energy": player.combat_energy}
 

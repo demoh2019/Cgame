@@ -936,6 +936,11 @@ func _on_event(event: Dictionary) -> void:
 		"justice":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Lawful PvP victory (%s). No criminal infamy added." % str(event.get("reason", "defense")))
+		"barricade_shot":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("BARRICADE HIT: -%d HP (remaining %d)." % [
+					roundi(float(event.get("damage", 0.0))),
+					roundi(float(event.get("hp", 0.0)))])
 		"outlaw_bounty":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("OUTLAW BOUNTY: +%d silver for a wanted survivor." % int(event.get("silver", 0)))
