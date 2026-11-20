@@ -81,3 +81,21 @@ func run(t) -> void:
 		var border: float = radius * 1.175
 		t.check(border > radius and border / radius <= 1.175001,
 			"outer paving bound remains proportional for every valid site radius")
+
+	t.current = "ruin moss reuses existing shading"
+	if ground != null:
+		var code: String = ground.code
+		t.check(code.contains("float ruin_share = clamp((w[9] + w[10] + w[11] + w[12])"),
+			"ruin moss is limited to paved urban materials, not forests or sandy beaches")
+		t.check(code.contains("smoothstep(0.34, 0.72, mid)"),
+			"ruin moss uses existing mid-frequency detail without another noise evaluation")
+		t.check(code.contains("color *= mix(vec3(1.0), vec3(0.75, 0.92, 0.73), ruin_moss)"),
+			"aging shifts the albedo gently without extra texture samples")
+		t.check(code.contains("dry_roughness = mix(dry_roughness, 0.92, ruin_moss * 0.45)"),
+			"moss makes urban ground more matte, without removing rain puddle highlights")
+		t.check(code.contains("puddle * 0.9"), "existing puddle response remains after moss shading")
+	for paved_share in [0.0, 0.3, 0.6, 1.0]:
+		var old_mid := 0.6
+		var moss: float = paved_share * smoothstep(0.34, 0.72, old_mid) * 0.5
+		t.check(moss >= 0.0 and moss <= 0.5,
+			"urban moss tint is bounded and vanishes on unpaved ground")
