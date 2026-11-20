@@ -22,3 +22,24 @@ the buyer receipt and bounded server audit record gross, tax and seller net.
 Regression coverage: `game/tests/test_market_board.gd`.
 
 Run: `godot --headless --path game --script res://tests/run_all.gd`
+
+## Multiple listings and stock budgets
+
+Sellers may publish several adverts for the same item, but the **combined
+remaining quantities** must not exceed the items actually carried. Posting
+still does not debit, hold or escrow the goods. The hub reports how many
+unlisted units remain if an additional advert would oversubscribe stock.
+
+The server revalidates every listing on market ticks, while also pruning
+stale adverts on list and create operations. When the seller spends or moves
+goods outside a sale, **older listings take priority**; newer unsupported
+ones are withdrawn. A partial market fill reduces both carried goods and
+the listed remainder, so it does not double-promise inventory.
+
+The browse results are grouped by item ID, then sorted by cheapest unit
+price, with listing ID as a stable tie-breaker. A sale still settles against
+the selected immutable listing ID, not the sorted row number.
+
+This is a non-escrow online prototype, not an offline auction house. Seller
+disconnect, death, expiration and successful purchases keep their existing
+behavior. Regression coverage lives in `test_market_board.gd`.

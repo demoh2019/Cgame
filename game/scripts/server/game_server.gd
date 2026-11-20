@@ -2067,18 +2067,33 @@ func _cancel_market_seller(peer_id: int) -> void:
 
 
 func _tick_market() -> void:
-	for listing_id in market_orders.keys():
+	# Keep oldest adverts first when the seller consumes or moves listed goods.
+	# Revalidate the combined promised stock, not each order in isolation.
+	var claimed: Dictionary = {}
+	var ids: Array = market_orders.keys()
+	ids.sort()
+	for listing_id in ids:
 		var listing: Dictionary = market_orders[listing_id]
-		var seller: Player = players.get(int(listing["seller"]))
-		if seller == null or not _market_at_hub(seller) \
-				or time >= float(listing["expires"]) \
-				or seller.inventory.count(str(listing["item"])) < int(listing["remaining"]):
+		var seller_id: int = int(listing["seller"])
+		var seller: Player = players.get(seller_id)
+		if seller == null or not _market_at_hub(seller) or time >= float(listing["expires"]):
 			market_orders.erase(listing_id)
+			continue
+		var item_id: String = str(listing["item"])
+		var amount: int = int(listing["remaining"])
+		var key: String = "%d:%s" % [seller_id, item_id]
+		var already: int = int(claimed.get(key, 0))
+		if amount < 1 or already + amount > seller.inventory.count(item_id):
+			market_orders.erase(listing_id)
+			continue
+		claimed[key] = already + amount
 
 
 func cmd_market_list(peer_id: int) -> Dictionary:
 	if not players.has(peer_id):
 		return {"ok": false, "reason": "unknown_player"}
+	# Never show offers no longer backed by the seller's current inventory.
+	_tick_market()
 	var public_orders: Array = []
 	var sorted_ids: Array = market_orders.keys()
 	sorted_ids.sort()
@@ -2092,6 +2107,8 @@ func cmd_market_list(peer_id: int) -> Dictionary:
 			"price": order["price"], "seller_name": seller.name,
 			"own": seller.id == peer_id,
 		})
+	public_orders.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return MarketBoard.cheaper_first(a, b))
 	return {"ok": true, "action": "list", "orders": public_orders}
 
 
@@ -2099,6 +2116,7 @@ func cmd_market_create(peer_id: int, item_id: String, quantity: int, unit_price:
 	var seller: Player = players.get(peer_id)
 	if not _market_at_hub(seller):
 		return {"ok": false, "reason": "no_station"}
+	_tick_market()
 	var validation: String = MarketBoard.validate_listing(seller.inventory, item_id, quantity, unit_price)
 	if validation != "":
 		return {"ok": false, "reason": validation}
@@ -2110,6 +2128,9 @@ func cmd_market_create(peer_id: int, item_id: String, quantity: int, unit_price:
 			count += 1
 	if count >= MarketBoard.MAX_PER_SELLER:
 		return {"ok": false, "reason": "too_many_listings"}
+	var available: int = MarketBoard.unlisted_stock(seller.inventory, market_orders, peer_id, item_id)
+	if quantity > available:
+		return {"ok": false, "reason": "already_listed", "available": available}
 	var listing_id: int = new_id()
 	market_orders[listing_id] = {
 		"seller": peer_id, "item": item_id, "remaining": quantity,

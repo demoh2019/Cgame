@@ -25,6 +25,35 @@ static func sale_tax(total: int) -> int:
 	return mini(ceili(float(total) * float(SALE_TAX_PERCENT) / 100.0), total - 1)
 
 
+## Listings promise real carried stock without removing it. Multiple adverts
+## from the same seller cannot collectively promise more than their backpack
+## contains, while separate sellers and items remain independent.
+static func listed_quantity(orders: Dictionary, seller_id: int, item_id: String) -> int:
+	var claimed := 0
+	for order in orders.values():
+		if int(order.get("seller", -1)) == seller_id and str(order.get("item", "")) == item_id:
+			claimed += maxi(0, int(order.get("remaining", 0)))
+	return claimed
+
+
+static func unlisted_stock(carried, orders: Dictionary, seller_id: int, item_id: String) -> int:
+	return maxi(0, carried.count(item_id) - listed_quantity(orders, seller_id, item_id))
+
+
+## Browse by item then cheapest unit price, with stable older-listing precedence.
+## Sorting is purely presentational; purchase still uses the original listing ID.
+static func cheaper_first(a: Dictionary, b: Dictionary) -> bool:
+	var left: String = str(a.get("item", ""))
+	var right: String = str(b.get("item", ""))
+	if left != right:
+		return left.casecmp_to(right) < 0
+	var a_price: int = int(a.get("price", 0))
+	var b_price: int = int(b.get("price", 0))
+	if a_price != b_price:
+		return a_price < b_price
+	return int(a.get("id", 0)) < int(b.get("id", 0))
+
+
 static func validate_listing(carried, item_id: String, quantity: int, unit_price: int) -> String:
 	if not Defs.is_item(item_id) or item_id == "silver":
 		return "invalid_item"

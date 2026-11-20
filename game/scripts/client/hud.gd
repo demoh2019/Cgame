@@ -1734,7 +1734,10 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "market":
 		if not bool(data.get("ok", false)):
-			say("Market: " + str(data.get("reason", "rejected")))
+			if str(data.get("reason", "")) == "already_listed":
+				say("Market: only %d unlisted units remain in your backpack." % int(data.get("available", 0)))
+			else:
+				say("Market: " + str(data.get("reason", "rejected")))
 		elif str(data.get("action", "")) == "list":
 			_market_listings = data.get("orders", [])
 			_refresh_market_options()
@@ -2178,7 +2181,8 @@ func _refresh_market_options() -> void:
 		_market_select.set_item_metadata(index, int(order["id"]))
 		if int(order["id"]) == selected_id:
 			_market_select.select(index)
-	_market_status.text = "%d listings | quantity & price inputs below | inventory item from barter selector" % _market_listings.size()
+	_market_status.text = "%d listings | item then lowest price | %d%% seller tax" % [
+		_market_listings.size(), MarketBoard.SALE_TAX_PERCENT]
 
 
 func _refresh_party_controls() -> void:

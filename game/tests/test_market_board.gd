@@ -186,3 +186,83 @@ func run(t) -> void:
 	safe_seller.survival.hurt(10000.0)
 	server._on_player_death(safe_seller, 200)
 	t.check(not server.market_orders.has(int(dying["id"])), "death cancels advertised stock")
+
+	t.current = "non-escrow listing budgets and lowest-price-first browsing"
+	var order_book: Dictionary = {
+		10: {"seller": 1, "item": "wood_1", "remaining": 7},
+		11: {"seller": 1, "item": "wood_1", "remaining": 3},
+		12: {"seller": 2, "item": "wood_1", "remaining": 4},
+		13: {"seller": 1, "item": "stone_1", "remaining": 2},
+	}
+	var sample_pack := Inventory.new()
+	sample_pack.add("wood_1", 11)
+	t.eq(MarketBoard.listed_quantity(order_book, 1, "wood_1"), 10,
+		"same seller's live order quantities are added across listings")
+	t.eq(MarketBoard.unlisted_stock(sample_pack, order_book, 1, "wood_1"), 1,
+		"only remaining carried goods are available for a new listing")
+	t.eq(MarketBoard.listed_quantity(order_book, 2, "wood_1"), 4,
+		"another seller's advertised stock stays independent")
+	t.eq(MarketBoard.listed_quantity(order_book, 1, "stone_1"), 2,
+		"different resources do not compete for listing capacity")
+	t.eq(MarketBoard.unlisted_stock(sample_pack, order_book, 1, "stone_1"), 0,
+		"advertised quantity never yields negative available inventory")
+	t.check(MarketBoard.cheaper_first(
+		{"item": "wood_1", "price": 5, "id": 2},
+		{"item": "wood_1", "price": 7, "id": 3}), "cheaper wood comes first")
+	t.check(MarketBoard.cheaper_first(
+		{"item": "wood_1", "price": 5, "id": 2},
+		{"item": "wood_1", "price": 5, "id": 3}), "same-price orders keep older ID first")
+	t.check(MarketBoard.cheaper_first(
+		{"item": "stone_1", "price": 99, "id": 7},
+		{"item": "wood_1", "price": 1, "id": 1}), "market groups by item before price")
+
+	t.current = "authoritative double-listing protection, partial fills and stale stock"
+	var depth := GameServer.new(WorldGen.new(39), 39)
+	var maker = depth.add_player(701, "Maker")
+	var rival = depth.add_player(702, "Rival")
+	var taker = depth.add_player(703, "Taker")
+	_hub(depth, maker)
+	_hub(depth, rival)
+	_hub(depth, taker)
+	maker.inventory.add("wood_1", 10)
+	rival.inventory.add("wood_1", 3)
+	taker.inventory.add("silver", 1000)
+	var expensive: Dictionary = depth.cmd_market_create(701, "wood_1", 7, 20)
+	t.check(bool(expensive.get("ok", false)), "first seven-unit advert is posted")
+	var old_id: int = int(expensive.get("id", -1))
+	var rejected: Dictionary = depth.cmd_market_create(701, "wood_1", 4, 15)
+	t.eq(rejected.get("reason", ""), "already_listed",
+		"seller cannot advertise eleven items while carrying ten")
+	t.eq(rejected.get("available", -1), 3, "server reports exactly three unlisted units")
+	t.eq(depth.market_orders.size(), 1, "rejected advert is never published")
+	var cheap: Dictionary = depth.cmd_market_create(701, "wood_1", 3, 15)
+	var bargain: Dictionary = depth.cmd_market_create(702, "wood_1", 3, 5)
+	t.check(cheap.get("ok", false) and bargain.get("ok", false),
+		"remaining stock and another seller may both be listed")
+	t.eq(maker.inventory.count("wood_1"), 10, "posting does not remove actual items")
+	var browsing: Array = depth.cmd_market_list(703)["orders"]
+	t.eq(browsing.size(), 3, "all three backed listings are visible")
+	if browsing.size() == 3:
+		t.eq([browsing[0]["id"], browsing[1]["id"], browsing[2]["id"]],
+			[bargain["id"], cheap["id"], expensive["id"]],
+			"same-item offers sort by lowest price, not by creation order")
+	var sale: Dictionary = depth.cmd_market_buy(703, old_id, 4, 1)
+	t.check(sale.get("ok", false), "real partial fill settles normally")
+	t.eq(maker.inventory.count("wood_1"), 6, "four listed items are transferred")
+	t.eq(MarketBoard.listed_quantity(depth.market_orders, 701, "wood_1"), 6,
+		"remaining advertised quantities decrease with actual stock")
+	t.eq(depth.cmd_market_create(701, "wood_1", 1, 10).get("reason", ""), "already_listed",
+		"a partial fill does not reopen budget that was actually sold")
+	t.eq(depth.cmd_market_buy(703, old_id, 4, 1), sale,
+		"replayed purchase cannot release extra listing budget")
+	maker.inventory.remove("wood_1", 1)
+	var after_spending: Array = depth.cmd_market_list(703)["orders"]
+	t.eq(after_spending.size(), 2, "refresh automatically removes now-unbacked advert")
+	t.check(depth.market_orders.has(old_id), "oldest listing remains active first")
+	t.check(not depth.market_orders.has(int(cheap["id"])),
+		"newer competing listing is removed when merchant spends promised stock")
+	t.eq(depth.cmd_market_create(701, "wood_1", 2, 8).get("ok", false), true,
+		"seller can re-advertise stock left after deterministic pruning")
+	t.eq(depth.cmd_market_create(701, "wood_1", 1, 8).get("reason", ""), "already_listed",
+		"remaining stock cannot be promised a third time")
+	t.eq(rival.inventory.count("wood_1"), 3, "another seller's items remain untouched")
