@@ -770,7 +770,11 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 			ss_flags |= environment_get_ssao_enabled(p_render_data->environment) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO : 0;
 			ss_flags |= environment_get_ssil_enabled(p_render_data->environment) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL : 0;
 			ss_flags |= environment_get_ssr_enabled(p_render_data->environment) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR : 0;
-			ss_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/contact_shadow/enabled")) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS : 0;
+			// Only expose the contact-shadow screen buffer to the lit shader
+			// when the prepass actually found an eligible directional light.
+			// This prevents a stale SSCS mask on lower graphics presets.
+			ss_flags |= (bool(GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/contact_shadow/enabled")) &&
+					!p_render_data->contact_shadows.is_empty()) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS : 0;
 
 			if (rd.is_valid()) {
 				Ref<RenderBufferDataForwardClustered> rb_data;
@@ -1970,7 +1974,22 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		}
 
 		if (GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/contact_shadow/enabled")) {
-			using_sscs = true;
+			// Don't force a full 3D depth prepass when none of the shadowed
+			// directional lights requested contact shadows. The game uses
+			// this to switch the effect off on Performance/Balanced without
+			// a costly renderer/project-settings reconfiguration.
+			for (int i = 0; i < p_render_data->render_shadow_count; i++) {
+				const RenderShadowData &shadow = p_render_data->render_shadows[i];
+				if (shadow.pass != 0) {
+					continue;
+				}
+				const RID base = light_storage->light_instance_get_base_light(shadow.light);
+				if (light_storage->light_get_type(base) == RSE::LIGHT_DIRECTIONAL &&
+						light_storage->light_get_allow_contact_shadows(base)) {
+					using_sscs = true;
+					break;
+				}
+			}
 		}
 
 		if (p_render_data->scene_data->view_count > 1) {
