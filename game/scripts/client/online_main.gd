@@ -1362,7 +1362,10 @@ func _unhandled_input(event: InputEvent) -> void:
 						client.extinguish_campfire(fire_id)
 			KEY_0:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
-					hud.quick_cook(Input.is_key_pressed(KEY_SHIFT))
+					if Input.is_key_pressed(KEY_ALT):
+						hud.quick_smoke()
+					else:
+						hud.quick_cook(Input.is_key_pressed(KEY_SHIFT))
 			KEY_9:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					if Input.is_key_pressed(KEY_SHIFT):
