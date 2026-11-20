@@ -37,11 +37,11 @@ func _ready() -> void:
     world.prefetch_distance = 2 # preload up to 2 cells ahead
     world.max_new_requests_per_frame = 2
     world.max_instances_per_frame = 2
-    world.pin_cell(Vector2i(10, -4)) # after registering that cell
     world.observer_path = world.get_path_to($Player)
     world.set_cell_scene(Vector2i(0, 0), "res://world/0_0.tscn")
     world.set_cell_scene(Vector2i(-1, 0), "res://world/-1_0.tscn")
     world.set_cell_scene(Vector2i(10, -4), "res://world/distant_outpost.tscn")
+    world.pin_cell(Vector2i(10, -4)) # now registered, load in background
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
@@ -56,13 +56,13 @@ var requests := world.get_inflight_request_count()
 var failed := world.get_failed_cell_count()
 ```
 
-You can also inspect `world.get_pinned_cell_count()` to track manual residency requests. 
+You can also inspect `world.get_pinned_cell_count()` to track manual residency requests.
 
 These counters describe the current state, not a prediction of future memory or throughput. One background resource request may serve multiple pending cells with the same PackedScene path. See `misc/cgame_forest_showcase` for a 1,024-cell registered world with a short distance-based active radius, directional predictive prefetch, reusable terrain resources and headless streaming regressions.
 
 ## Tests
 
-The module includes 57 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 59 Doctest cases across `test_world_partition_3d.h` (23) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
