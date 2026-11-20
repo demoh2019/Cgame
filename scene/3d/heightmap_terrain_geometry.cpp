@@ -145,6 +145,17 @@ void chunk_height_range(const HeightField &p_field, int p_x0, int p_z0, int p_qu
 	}
 }
 
+real_t orthographic_lod_pixel_scale(real_t p_width, real_t p_height,
+		real_t p_render_scale, real_t p_camera_size, bool p_keep_width) {
+	if (!Math::is_finite(p_width) || !Math::is_finite(p_height) ||
+			!Math::is_finite(p_render_scale) || !Math::is_finite(p_camera_size) ||
+			p_width <= 0.0 || p_height <= 0.0 ||
+			p_render_scale <= 0.0 || p_camera_size <= 0.0) {
+		return 0.0; // Safe fallback to the original distance-based LOD.
+	}
+	return (p_keep_width ? p_width : p_height) * p_render_scale / p_camera_size;
+}
+
 int lod_stride(int p_lod, int p_quads) {
 	int stride = 1 << CLAMP(p_lod, 0, 16);
 	while (stride > 1 && (p_quads % stride) != 0) {

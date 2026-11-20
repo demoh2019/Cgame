@@ -130,6 +130,11 @@ int select_lod(real_t p_distance, real_t p_base_distance, int p_lod_count, int p
 // The bounded factor avoids excessive distant geometry on large monitors.
 real_t screen_lod_multiplier(real_t p_view_height, real_t p_vertical_fov, real_t p_reference_fov);
 
+// For orthographic Camera3D, size is the viewport width under KEEP_WIDTH
+// and height under KEEP_HEIGHT. FSR scales the chosen pixel dimension.
+real_t orthographic_lod_pixel_scale(real_t p_width, real_t p_height,
+		real_t p_render_scale, real_t p_camera_size, bool p_keep_width);
+
 // Largest stride that divides the chunk and does not exceed 2^(lod_count - 1).
 int lod_stride(int p_lod, int p_quads);
 

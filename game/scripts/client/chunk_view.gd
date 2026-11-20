@@ -305,7 +305,11 @@ static func apply_terrain_error_lod(node: Node) -> void:
 ## Per-chunk geometric simplification budget in screen pixels.
 ## The same group includes PBR and procedural fallback terrain.
 static func configure_terrain_pixel_error(pixels: float) -> void:
-	terrain_lod_pixel_error = maxf(pixels, 0.0)
+	# UI / autoscaler values must not leak NaN, infinity or an unbounded
+	# error threshold into the native screen-space LOD selector.
+	if not is_finite(pixels):
+		return
+	terrain_lod_pixel_error = clampf(pixels, 0.0, 20.0)
 
 
 static func apply_terrain_pixel_error(terrain: Node) -> void:

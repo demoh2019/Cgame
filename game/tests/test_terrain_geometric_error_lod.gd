@@ -62,3 +62,27 @@ func run(t) -> void:
 		"already-streamed terrain changes quality in place")
 	t.check(chunk_source.contains("_terrain.collision_enabled = false"),
 		"the server remains the authority on player collision")
+
+
+	t.current = "LOD budget stays finite across viewport and UI changes"
+	var old_error: float = ChunkView.terrain_lod_pixel_error
+	ChunkView.configure_terrain_pixel_error(2.5)
+	t.near(ChunkView.terrain_lod_pixel_error, 2.5, 0.0001,
+		"valid camera pixel error remains configurable")
+	ChunkView.configure_terrain_pixel_error(NAN)
+	t.near(ChunkView.terrain_lod_pixel_error, 2.5, 0.0001,
+		"bad scale cannot pass NaN into the native terrain selector")
+	ChunkView.configure_terrain_pixel_error(INF)
+	t.near(ChunkView.terrain_lod_pixel_error, 2.5, 0.0001,
+		"nonfinite auto-quality values cannot disable the terrain budget")
+	ChunkView.configure_terrain_pixel_error(-15.0)
+	t.eq(ChunkView.terrain_lod_pixel_error, 0.0,
+		"negative error falls back to distance-based terrain LOD")
+	ChunkView.configure_terrain_pixel_error(10000.0)
+	t.eq(ChunkView.terrain_lod_pixel_error, 20.0,
+		"budget ceiling prevents uncontrolled terrain simplification")
+	ChunkView.configure_terrain_pixel_error(old_error)
+	var engine_source: String = (load("res://scripts/client/chunk_view.gd") as Script).source_code
+	t.check(engine_source.contains("if not is_finite(pixels):") and
+		engine_source.contains("clampf(pixels, 0.0, 20.0)"),
+		"quality changes validate every requested geometry-error budget")

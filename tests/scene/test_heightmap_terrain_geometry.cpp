@@ -407,4 +407,16 @@ TEST_CASE("[HeightmapTerrain] Screen-pixel LOD protects relief and simplifies fl
 	CHECK(select_lod_by_pixel_error(ridge, 4, 100, 0.0, 2.0) == 0);
 }
 
+TEST_CASE("[HeightmapTerrain] Orthographic pixel LOD respects aspect and rendering scale") {
+	CHECK(orthographic_lod_pixel_scale(1920, 1080, 1, 16, true) == doctest::Approx(120));
+	CHECK(orthographic_lod_pixel_scale(1920, 1080, 1, 16, false) == doctest::Approx(67.5));
+	CHECK(orthographic_lod_pixel_scale(1920, 1080, 0.5, 16, true) == doctest::Approx(60));
+	CHECK(orthographic_lod_pixel_scale(1920, 1080, 0.5, 16, false) == doctest::Approx(33.75));
+	CHECK(orthographic_lod_pixel_scale(1080, 1920, 1, 16, true) == doctest::Approx(67.5));
+	CHECK(orthographic_lod_pixel_scale(1080, 1920, 1, 16, false) == doctest::Approx(120));
+	CHECK(orthographic_lod_pixel_scale(1920, 1080, 1, 0, true) == doctest::Approx(0));
+	CHECK(orthographic_lod_pixel_scale(0, 1080, 1, 16, true) == doctest::Approx(0));
+	CHECK(orthographic_lod_pixel_scale(1920, 1080, -1, 16, true) == doctest::Approx(0));
+}
+
 } // namespace TestHeightmapTerrainGeometry
