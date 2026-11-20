@@ -1023,7 +1023,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_food"):
 		_result("Eat", sim.cmd_use(LOCAL_PLAYER_ID, "canned_food"))
 	elif event.is_action_pressed("survive_water"):
-		_result("Drink", sim.cmd_use(LOCAL_PLAYER_ID, "water_bottle"))
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Collect unboiled water", sim.cmd_use(LOCAL_PLAYER_ID, "empty_water_pouch"))
+		else:
+			_result("Drink", sim.cmd_use(LOCAL_PLAYER_ID, "water_bottle"))
 	elif event.is_action_pressed("survive_bandage"):
 		_result("Heal", sim.cmd_use(LOCAL_PLAYER_ID, "bandage"))
 	elif event.is_action_pressed("survive_weapon"):
