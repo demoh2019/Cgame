@@ -517,16 +517,33 @@ int WorldPartition3D::get_pinned_cell_count() const {
 	return pinned_cells.size();
 }
 
-bool WorldPartition3D::set_streaming_source(const String &p_name, const Vector3 &p_global_position, int p_radius) {
+bool WorldPartition3D::set_streaming_source(const String &p_name, const Vector3 &p_global_position, int p_radius, int p_priority) {
 	ERR_FAIL_COND_V_MSG(p_name.is_empty() || p_name.length() > 64, false, "WorldPartition3D source name must contain 1 to 64 characters.");
 	ERR_FAIL_COND_V_MSG(!p_global_position.is_finite(), false, "WorldPartition3D source position must be finite.");
 	ERR_FAIL_COND_V_MSG(p_radius < 0 || p_radius > 1, false, "WorldPartition3D source radius must be 0 or 1 cell.");
+	ERR_FAIL_COND_V_MSG(p_priority < 0 || p_priority > 3, false, "WorldPartition3D source priority must be between 0 and 3.");
 	ERR_FAIL_COND_V_MSG(!streaming_sources.has(p_name) && streaming_sources.size() >= MAX_STREAMING_SOURCES, false, "WorldPartition3D supports at most 8 additional sources.");
 	StreamingSource source;
 	source.global_position = p_global_position;
 	source.radius = p_radius;
+	source.priority = p_priority;
 	streaming_sources.insert(p_name, source);
 	return true;
+}
+
+bool WorldPartition3D::set_streaming_source_priority(const String &p_name, int p_priority) {
+	ERR_FAIL_COND_V_MSG(p_priority < 0 || p_priority > 3, false, "WorldPartition3D source priority must be between 0 and 3.");
+	StreamingSource *source = streaming_sources.getptr(p_name);
+	if (source == nullptr) {
+		return false;
+	}
+	source->priority = p_priority;
+	return true;
+}
+
+int WorldPartition3D::get_streaming_source_priority(const String &p_name) const {
+	const StreamingSource *source = streaming_sources.getptr(p_name);
+	return source != nullptr ? source->priority : -1;
 }
 
 void WorldPartition3D::remove_streaming_source(const String &p_name) {
@@ -779,25 +796,28 @@ void WorldPartition3D::update_streaming() {
 			_request_cell(cell, new_requests, instances);
 		}
 	}
-	// Mission/cinematic streaming sources share the same asynchronous request
-	// and instantiation budgets, after the observer and pinned hubs. Sort
-	// names for deterministic processing instead of hash-table iteration.
+	// Registered source priorities (3 urgent .. 0 background) are evaluated
+	// only after observer and pinned cells. The budget is shared across all
+	// sources. Stable name ordering within each tier avoids HashMap iteration
+	// nondeterminism, including when multiple sources target the same scene.
 	Vector<String> source_names;
 	for (const KeyValue<String, StreamingSource> &E : streaming_sources) {
 		source_names.push_back(E.key);
 	}
 	source_names.sort();
-	for (const String &name : source_names) {
-		const StreamingSource *source = streaming_sources.getptr(name);
-		if (source == nullptr) {
-			continue;
-		}
-		const Vector2i source_center = local_position_to_cell(to_local(source->global_position));
-		for (int radius = 0; radius <= source->radius; radius++) {
-			for (int dz = -radius; dz <= radius; dz++) {
-				for (int dx = -radius; dx <= radius; dx++) {
-					if (MAX(ABS(dx), ABS(dz)) == radius) {
-						_request_cell(source_center + Vector2i(dx, dz), new_requests, instances);
+	for (int priority = 3; priority >= 0; priority--) {
+		for (const String &name : source_names) {
+			const StreamingSource *source = streaming_sources.getptr(name);
+			if (source == nullptr || source->priority != priority) {
+				continue;
+			}
+			const Vector2i source_center = local_position_to_cell(to_local(source->global_position));
+			for (int radius = 0; radius <= source->radius; radius++) {
+				for (int dz = -radius; dz <= radius; dz++) {
+					for (int dx = -radius; dx <= radius; dx++) {
+						if (MAX(ABS(dx), ABS(dz)) == radius) {
+							_request_cell(source_center + Vector2i(dx, dz), new_requests, instances);
+						}
 					}
 				}
 			}
@@ -902,7 +922,9 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_cell_pinned", "cell"), &WorldPartition3D::is_cell_pinned);
 	ClassDB::bind_method(D_METHOD("get_pinned_cells"), &WorldPartition3D::get_pinned_cells);
 	ClassDB::bind_method(D_METHOD("get_pinned_cell_count"), &WorldPartition3D::get_pinned_cell_count);
-	ClassDB::bind_method(D_METHOD("set_streaming_source", "name", "global_position", "radius"), &WorldPartition3D::set_streaming_source, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("set_streaming_source", "name", "global_position", "radius", "priority"), &WorldPartition3D::set_streaming_source, DEFVAL(0), DEFVAL(1));
+	ClassDB::bind_method(D_METHOD("set_streaming_source_priority", "name", "priority"), &WorldPartition3D::set_streaming_source_priority);
+	ClassDB::bind_method(D_METHOD("get_streaming_source_priority", "name"), &WorldPartition3D::get_streaming_source_priority);
 	ClassDB::bind_method(D_METHOD("remove_streaming_source", "name"), &WorldPartition3D::remove_streaming_source);
 	ClassDB::bind_method(D_METHOD("clear_streaming_sources"), &WorldPartition3D::clear_streaming_sources);
 	ClassDB::bind_method(D_METHOD("has_streaming_source", "name"), &WorldPartition3D::has_streaming_source);
