@@ -50,6 +50,7 @@ class AnimationLODController : public Node {
 		double accumulated = 0.0;
 		uint32_t phase = 0; // Stagger offset so mixers do not all tick on the same frame.
 		bool modifiers_culled = false;
+		bool high_priority = false; // Preserve key combat telegraphs on a bounded visible subset.
 		Vector<ObjectID> disabled_modifiers;
 	};
 
@@ -63,6 +64,7 @@ class AnimationLODController : public Node {
 	double max_accumulated_delta = 0.5;
 	uint32_t frame_counter = 0;
 	uint32_t next_phase = 0;
+	int max_priority_mixers = 8; // Extra full-rate animation slots, never unlimited.
 
 	void _update(double p_delta);
 	void _restore_entry(Entry &r_entry);
@@ -79,6 +81,10 @@ public:
 	void register_mixer(AnimationMixer *p_mixer);
 	void unregister_mixer(AnimationMixer *p_mixer);
 	void clear_mixers();
+	void set_mixer_high_priority(AnimationMixer *p_mixer, bool p_priority);
+	bool is_mixer_high_priority(AnimationMixer *p_mixer) const;
+	void set_max_priority_mixers(int p_count) { max_priority_mixers = CLAMP(p_count, 0, 32); }
+	int get_max_priority_mixers() const { return max_priority_mixers; }
 	int get_mixer_count() const { return entries.size(); }
 
 	void set_enabled(bool p_enabled);
