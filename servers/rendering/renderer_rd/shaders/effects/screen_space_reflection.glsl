@@ -256,17 +256,20 @@ void main() {
 		// request one, even if the hit is going to be rejected afterwards.
 		bool hit_in_bounds = all(greaterThanEqual(cur_screen_pos.xy, vec2(0.0))) &&
 				all(lessThan(cur_screen_pos.xy, vec2(1.0)));
-		ivec2 cur_pixel_pos = clamp(ivec2(cur_screen_pos.xy * params.screen_size),
-				ivec2(0), params.screen_size - ivec2(1));
+		// Convert UV to integer texel coordinates only for valid on-screen
+		// hits. Large/NaN off-screen rays must not overflow ivec2 on Metal.
+		ivec2 cur_pixel_pos = ivec2(0);
 		float hit_depth = 0.0;
 		if (hit_in_bounds) {
+			cur_pixel_pos = ivec2(cur_screen_pos.xy * vec2(params.screen_size));
 			hit_depth = texelFetch(source_hiz, cur_pixel_pos, 0).x;
 		}
 		if (!hit_in_bounds || t >= t_max || hit_depth == 0.0) {
 			validity = 0.0;
 		}
 
-		if (all(lessThan(abs(screen_ray_dir.xy * t), 2.0 / params.screen_size))) {
+		if (hit_in_bounds && all(lessThan(abs(screen_ray_dir.xy * t),
+				2.0 / vec2(params.screen_size)))) {
 			vec3 hit_normal = texelFetch(source_normal_roughness, cur_pixel_pos, 0).xyz * 2.0 - 1.0;
 			if (dot(ray_dir, hit_normal) >= 0.0) {
 				validity = 0.0;

@@ -39,3 +39,7 @@ focused graphics suites) checks native quality, renderer fallback and
 per-tier GPU budget. Full shader compilation and side-by-side
 captures on Apple Metal and Vulkan are still required to confirm
 the intended visual improvement.
+
+Safety follow-up: GPU hit UVs are converted to integer texels and
+secondary hit normals sampled only after in-bounds validation, avoiding
+integer overflow and undefined fetches for rays that escape the screen.
