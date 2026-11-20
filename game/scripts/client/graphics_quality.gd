@@ -8,6 +8,7 @@ const NAMES := ["Performance", "Balanced", "High", "Ultra"]
 const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
 const GraphicsReflections = preload("res://scripts/client/graphics_reflections.gd")
+const WaterRefraction = preload("res://scripts/client/graphics_water_refraction.gd")
 const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const Foliage = preload("res://scripts/client/foliage.gd")
@@ -173,6 +174,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# The graphics profiles also control water detail and how many terrain chunks are streamed.
 	if water != null and water.material_override is ShaderMaterial:
 		var water_shader := water.material_override as ShaderMaterial
+		# Keep screen-reading water OFF on low-end and unsupported renderers.
+		# Switch only when a quality preset changes, before reapplying waves.
+		WaterRefraction.apply(water_shader, _level, str(method))
 		water_shader.set_shader_parameter("ripple_strength", float(world_profile["water_ripples"]))
 		# Only high-frequency ocean detail is faded, not the large waves,
 		# shoreline transparency, Fresnel or the physically lit reflections.
