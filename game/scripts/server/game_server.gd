@@ -2415,7 +2415,20 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 		# real reachable unopened world crate can grant XP or extra materials.
 		var loot: Dictionary = Scavenging.enriched_loot(zone,
 			player.progression.scavenging_level(), Combat.crate_loot(zone, local_rng))
+		# The kit is consumed only after a real, reachable, unopened crate has
+		# passed server checks. The client cannot request bonus contents or zone.
+		var unlocked: bool = false
+		if Scavenging.can_unlock(zone, player.inventory.count(Scavenging.LOCKPICK_ITEM)):
+			if player.inventory.remove(Scavenging.LOCKPICK_ITEM, 1):
+				unlocked = true
+				player.dirty_inventory = true
+				player.dirty_character = true
+				var sealed: Dictionary = Scavenging.sealed_compartment_loot(zone, local_rng)
+				for item_id in sealed:
+					loot[item_id] = int(loot.get(item_id, 0)) + int(sealed[item_id])
 		_apply_loot_skills(player, loot, local_rng)
+		if unlocked:
+			events.append({"type": "lockpick", "peer": peer_id, "tier": zone + 1})
 		_award(player, "scavenging", 12.0 + 4.0 * float(zone))
 		var left: Dictionary = _give_items(player, loot)
 		if not left.is_empty():
