@@ -55,6 +55,9 @@ TEST_CASE("[WorldPartition3D] Defaults") {
 	CHECK(partition->is_streaming_enabled());
 	CHECK(partition->get_configured_cell_count() == 0);
 	CHECK(partition->get_loaded_cell_count() == 0);
+	CHECK(partition->get_pending_cell_count() == 0);
+	CHECK(partition->get_inflight_request_count() == 0);
+	CHECK(partition->get_failed_cell_count() == 0);
 	memdelete(partition);
 }
 
