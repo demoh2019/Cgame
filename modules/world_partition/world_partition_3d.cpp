@@ -549,7 +549,13 @@ void WorldPartition3D::set_cell_state(const Vector2i &p_cell, const Dictionary &
 	} else {
 		saved_cell_states.insert(p_cell, p_state.duplicate(true));
 	}
-	_restore_cell_state(p_cell, get_cell_instance(p_cell));
+	Node3D *instance = get_cell_instance(p_cell);
+	if (p_state.is_empty() && instance != nullptr && instance->has_method(SNAME("restore_streaming_state"))) {
+		// Loading a save without a cell record resets its active gameplay scene.
+		instance->call(SNAME("restore_streaming_state"), Dictionary());
+	} else {
+		_restore_cell_state(p_cell, instance);
+	}
 }
 
 Dictionary WorldPartition3D::get_cell_state(const Vector2i &p_cell) const {
@@ -598,7 +604,11 @@ void WorldPartition3D::load_cell_states(const Dictionary &p_states) {
 	saved_cell_states = accepted;
 	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
 		Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(E.value));
-		_restore_cell_state(E.key, instance);
+		if (instance != nullptr && instance->has_method(SNAME("restore_streaming_state"))) {
+			// A missing save record means default state, not the previous session.
+			const Dictionary *state = saved_cell_states.getptr(E.key);
+			instance->call(SNAME("restore_streaming_state"), state != nullptr ? state->duplicate(true) : Dictionary());
+		}
 	}
 }
 
