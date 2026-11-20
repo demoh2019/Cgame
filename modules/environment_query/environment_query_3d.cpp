@@ -86,8 +86,8 @@ static bool score_candidate(const Vector3 &p_point, int p_index,
 		} else {
 			// Multi-context queries use the nearest threat, never the average.
 			// This guarantees a safe score against *every* relevant player.
-			threat_distance = Math_INF;
-			for (int threat = 0; threat < p_threat_positions.size(); threat++) {
+			threat_distance = point_distance(p_threat_positions[0], p_point, p_horizontal_only);
+			for (int threat = 1; threat < p_threat_positions.size(); threat++) {
 				const double d = point_distance(p_threat_positions[threat], p_point, p_horizontal_only);
 				if (!Math::is_finite(d)) {
 					return false;
