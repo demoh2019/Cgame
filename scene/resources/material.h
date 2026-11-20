@@ -758,6 +758,9 @@ public:
 	void set_heightmap_deep_parallax_flip_binormal(bool p_flip);
 	bool get_heightmap_deep_parallax_flip_binormal() const;
 
+	// Set SSS and the skin shader variant as one validated transaction. This
+	// is used for imported character skins; avoids two material-shader updates.
+	void configure_skin_subsurface(bool p_enabled, float p_strength);
 	void set_subsurface_scattering_strength(float p_subsurface_scattering_strength);
 	float get_subsurface_scattering_strength() const;
 

@@ -5,6 +5,7 @@ extends Node3D
 
 const Assets = preload("res://scripts/client/assets.gd")
 const RainGear = preload("res://scripts/client/character_rain_gear.gd")
+const SkinSSS = preload("res://scripts/client/graphics_skin_scattering.gd")
 const Ragdoll = preload("res://scripts/client/ragdoll.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 const Anim = preload("res://scripts/client/character_anim.gd")
@@ -20,6 +21,9 @@ var _materials: Array[StandardMaterial3D] = []
 var _wet_surfaces: Array[Dictionary] = [] # Live outfit/gear surfaces and their original materials.
 var _wet_surface_keys: Dictionary = {}
 var _wet_step: int = 0
+var _skin_surfaces: Array[Dictionary] = [] # Authored opaque skin only, never clothing/eyes/hair.
+var _skin_quality := -1
+var _skin_renderer := ""
 var _moving := false
 var _walk_speed := 1.0
 var _last_position := Vector3.INF
@@ -156,6 +160,7 @@ static func clear_templates() -> void:
 		(template as Node).free()
 	_templates.clear()
 	RainGear.clear_cache() # No stale material variants after leaving a client world.
+	SkinSSS.clear_cache()
 
 
 func _setup_survivor(tint: Color, scale_factor: float, sex: String, look_seed: int) -> Node3D:
@@ -259,6 +264,8 @@ func _setup_pack(tint: Color, scale_factor: float, model_name: String, look_seed
 	animator.animation_finished.connect(_on_animation_finished)
 	_play("Zombie_Idle_Loop" if _zombie else "Idle_Loop", 1.0)
 	_setup_procedural(model)
+	_capture_skin_surfaces(model)
+	apply_skin_quality(SkinSSS.current_level, SkinSSS.current_method)
 	_capture_wet_surfaces(model)
 
 
@@ -281,6 +288,54 @@ func _setup_kenney(tint: Color, scale_factor: float) -> void:
 			if animator.has_animation(animation_name):
 				animator.get_animation(animation_name).loop_mode = Animation.LOOP_LINEAR
 		animator.play("idle")
+
+
+## Register only imported skin, not a whole outfit. Keep the exact previous
+## full-mesh / surface override: Performance/Balanced restore it, with no
+## extra GPU skin shader pass. Called once as each actor is assembled.
+func _capture_skin_surfaces(root: Node) -> void:
+	if root == null:
+		return
+	for child in root.find_children("*", "MeshInstance3D", true, false):
+		var instance := child as MeshInstance3D
+		if not SkinSSS.is_skin_mesh(instance):
+			continue
+		if instance.material_override is StandardMaterial3D:
+			var full := instance.material_override as StandardMaterial3D
+			if SkinSSS.supports(full):
+				_skin_surfaces.append({"mesh": instance, "surface": -1,
+					"base": full, "override": full})
+			continue
+		for surface in instance.mesh.get_surface_count():
+			var original_override: Material = instance.get_surface_override_material(surface)
+			var original: Material = original_override if original_override != null else (
+				instance.mesh.surface_get_material(surface))
+			if original is StandardMaterial3D and SkinSSS.supports(original as StandardMaterial3D):
+				_skin_surfaces.append({"mesh": instance, "surface": surface,
+					"base": original, "override": original_override})
+
+
+## Preset switch only; no traversal or duplicate materials inside _process().
+## Works for new characters already spawned after a previous preset switch.
+func apply_skin_quality(level: int, method: String) -> void:
+	if not pack_mode:
+		return
+	var tier: int = clampi(level, 0, 3)
+	if _skin_quality == tier and _skin_renderer == method:
+		return
+	_skin_quality = tier
+	_skin_renderer = method
+	for entry in _skin_surfaces:
+		var mesh_instance: MeshInstance3D = entry["mesh"]
+		if not is_instance_valid(mesh_instance) or mesh_instance.is_queued_for_deletion():
+			continue
+		var base := entry["base"] as StandardMaterial3D
+		var material: Material = SkinSSS.variant(base, tier, method) if (
+				bool(SkinSSS.settings(tier, method)["enabled"])) else entry["override"]
+		if int(entry["surface"]) < 0:
+			mesh_instance.material_override = material
+		else:
+			mesh_instance.set_surface_override_material(int(entry["surface"]), material)
 
 
 ## Capture only opaque clothing and worn equipment. Imported skin, eyes and
@@ -348,6 +403,15 @@ func set_wetness_step(step: int) -> void:
 func set_tint(tint: Color) -> void:
 	for material in _materials:
 		material.albedo_color = tint
+	# SSS variants are lightweight duplicates: keep a tinted actor's visible
+	# skin in sync without touching source textures or other players' skins.
+	for entry in _skin_surfaces:
+		var base: StandardMaterial3D = entry["base"]
+		if base in _materials and _skin_quality >= 0:
+			var visible_skin: StandardMaterial3D = SkinSSS.variant(
+				base, _skin_quality, _skin_renderer)
+			if visible_skin != null and visible_skin != base:
+				visible_skin.albedo_color = tint
 
 
 # --- Kenney robot -------------------------------------------------------------------------------------------------

@@ -2397,6 +2397,34 @@ float BaseMaterial3D::get_heightmap_scale() const {
 	return heightmap_scale;
 }
 
+// A single native update for the imported-skin quality tier. The material
+// shader key is invalidated once, after both feature/skin flags change;
+// the strength uniform is uploaded only when different. Never modify
+// imported source materials: GDScript calls this on a duplicate variant.
+void BaseMaterial3D::configure_skin_subsurface(bool p_enabled, float p_strength) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_strength) || p_strength < 0.0f || p_strength > 1.0f,
+			"Skin subsurface strength must be finite and between 0 and 1.");
+	const bool enabled = p_enabled && p_strength > 0.0f;
+	const float strength = enabled ? p_strength : 0.0f;
+	bool shader_changed = false;
+	if (features[FEATURE_SUBSURFACE_SCATTERING] != enabled) {
+		features[FEATURE_SUBSURFACE_SCATTERING] = enabled;
+		shader_changed = true;
+	}
+	if (flags[FLAG_SUBSURFACE_MODE_SKIN] != enabled) {
+		flags[FLAG_SUBSURFACE_MODE_SKIN] = enabled;
+		shader_changed = true;
+		notify_property_list_changed();
+	}
+	if (subsurface_scattering_strength != strength) {
+		subsurface_scattering_strength = strength;
+		_material_set_param(shader_names->subsurface_scattering_strength, strength);
+	}
+	if (shader_changed) {
+		_queue_shader_change();
+	}
+}
+
 void BaseMaterial3D::set_subsurface_scattering_strength(float p_subsurface_scattering_strength) {
 	subsurface_scattering_strength = p_subsurface_scattering_strength;
 	_material_set_param(shader_names->subsurface_scattering_strength, subsurface_scattering_strength);
@@ -3527,6 +3555,7 @@ void BaseMaterial3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_subsurface_scattering_strength", "strength"), &BaseMaterial3D::set_subsurface_scattering_strength);
 	ClassDB::bind_method(D_METHOD("get_subsurface_scattering_strength"), &BaseMaterial3D::get_subsurface_scattering_strength);
+	ClassDB::bind_method(D_METHOD("configure_skin_subsurface", "enabled", "strength"), &BaseMaterial3D::configure_skin_subsurface);
 
 	ClassDB::bind_method(D_METHOD("set_transmittance_color", "color"), &BaseMaterial3D::set_transmittance_color);
 	ClassDB::bind_method(D_METHOD("get_transmittance_color"), &BaseMaterial3D::get_transmittance_color);
