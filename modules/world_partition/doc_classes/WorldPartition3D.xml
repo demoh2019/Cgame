@@ -147,6 +147,12 @@
 				Unregisters [param cell] and unloads its existing instance.
 			</description>
 		</method>
+		<method name="retry_failed_cells">
+			<return type="void" />
+			<description>
+				Clears failed-cell suppression so that registered cells still relevant to the current observer can be retried during a subsequent [method update_streaming] call. Useful after a transient asset, filesystem or delivery error has been fixed. This method does not replace registrations, cancel in-progress resource requests, or retry continuously. If the resource remains unavailable, the cell can fail again.
+			</description>
+		</method>
 		<method name="set_cell_scene">
 			<return type="void" />
 			<param index="0" name="cell" type="Vector2i" />
