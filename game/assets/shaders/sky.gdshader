@@ -50,6 +50,8 @@ uniform float cloud_lighting_strength = 0.0;
 // Raymarched cumulus layer (Unreal Volumetric Clouds / Nubis-style). 0 steps = off.
 uniform int volumetric_cloud_steps = 0;
 uniform float volumetric_cloud_coverage = 0.45;
+// Post-rain rainbow, 0 = off (decided by sky_rainbow.gd).
+uniform float rainbow_strength = 0.0;
 
 float hash(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -354,6 +356,24 @@ void sky() {
 			float horizon_fade = smoothstep(0.03, 0.18, up);
 			trans = mix(1.0, trans, horizon_fade);
 			color = color * trans + scat * horizon_fade;
+		}
+		if (rainbow_strength > 0.001 && up > 0.0) {
+			// Angle from the antisolar point in degrees (Descartes' rainbow geometry).
+			float ang = degrees(acos(clamp(dot(dir, -normalize(sun_direction)), -1.0, 1.0)));
+			// Primary 40-42.5 deg: violet inside, red outside. Secondary 50.5-53.5 reversed.
+			float p = (ang - 40.0) / 2.5;
+			float s = (53.5 - ang) / 3.0;
+			vec3 spectrum_p = clamp(vec3(1.5 - abs(p - 0.9) * 3.0, 1.5 - abs(p - 0.5) * 3.0, 1.5 - abs(p - 0.1) * 3.0), 0.0, 1.0);
+			vec3 spectrum_s = clamp(vec3(1.5 - abs(s - 0.9) * 3.0, 1.5 - abs(s - 0.5) * 3.0, 1.5 - abs(s - 0.1) * 3.0), 0.0, 1.0);
+			float in_p = step(0.0, p) * step(p, 1.0);
+			float in_s = step(0.0, s) * step(s, 1.0);
+			float ground_fade = smoothstep(0.0, 0.12, up);
+			vec3 bow = spectrum_p * in_p * 0.32 + spectrum_s * in_s * 0.11;
+			// Sky is brighter inside the primary bow and darker in Alexander's band.
+			float inner = (1.0 - smoothstep(30.0, 40.0, ang)) * step(ang, 40.0) * 0.06;
+			float alexander = step(42.5, ang) * step(ang, 50.5) * 0.08;
+			float k = rainbow_strength * ground_fade;
+			color = color * (1.0 + (inner - alexander) * k) + bow * k * max(sun_color, vec3(0.6));
 		}
 		COLOR = color;
 	}

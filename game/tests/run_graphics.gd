@@ -29,6 +29,7 @@ const SUITES := [
 	"res://tests/test_sun_shadow_atmosphere.gd",
 	"res://tests/test_sun_shadow_quality.gd",
 	"res://tests/test_sun_shafts_quality.gd",
+	"res://tests/test_sky_rainbow.gd",
 	"res://tests/test_terrain_sdfgi.gd",
 	"res://tests/test_cinematic_bloom.gd",
 	"res://tests/test_foliage_spectral_optics.gd",
