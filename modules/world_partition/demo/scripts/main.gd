@@ -61,9 +61,8 @@ func _apply_quality_profile() -> void:
     detail.set("unload_radius", int(profile["detail_unload"]))
     distant.set("load_radius", int(profile["proxy_load"]))
     distant.set("unload_radius", int(profile["proxy_unload"]))
-    for streamer in [detail]:
-        streamer.set("max_new_requests_per_frame", int(profile["detail_budget"]))
-        streamer.set("max_instances_per_frame", int(profile["detail_budget"]))
+    detail.set("max_new_requests_per_frame", int(profile["detail_budget"]))
+    detail.set("max_instances_per_frame", int(profile["detail_budget"]))
     distant.set("max_new_requests_per_frame", int(profile["proxy_budget"]))
     distant.set("max_instances_per_frame", int(profile["proxy_budget"]))
 
