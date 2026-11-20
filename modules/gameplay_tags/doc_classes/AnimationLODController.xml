@@ -25,7 +25,10 @@
 		<method name="register_mixer">
 			<return type="void" />
 			<param index="0" name="mixer" type="AnimationMixer" />
-			<description>Starts managing [param mixer] (an [AnimationPlayer] or [AnimationTree]).</description>
+			<param index="1" name="manage_modifiers" type="bool" default="true" />
+			<description>
+				Starts managing [param mixer] (an [AnimationPlayer] or [AnimationTree]). Use [param manage_modifiers] = [code]false[/code] for an additional upper-body overlay mixer that shares the same skeleton as another registered mixer. Only the primary mixer should disable and restore [SkeletonModifier3D] nodes, to avoid two controllers fighting over one skeleton's IK.
+			</description>
 		</method>
 		<method name="set_mixer_high_priority">
 			<return type="void" />
