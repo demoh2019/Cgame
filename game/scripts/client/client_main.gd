@@ -26,7 +26,6 @@ const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
-const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const RainVfx = preload("res://scripts/client/rain_vfx.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
@@ -71,7 +70,6 @@ var _rain_vfx: Node3D
 var _footprints: Node3D
 var _ambient_motes
 var _ground_mist
-var _footprints
 var _weather_next_update: float = -1.0
 var _weather_storming := false
 var _visual_weather_wind := Vector2.ZERO
@@ -126,10 +124,6 @@ func _ready() -> void:
 	_ambient_motes = AmbientMotes.new()
 	_ambient_motes.setup(world)
 	add_child(_ambient_motes)
-	# Native clustered PBR marks on damp terrain, with a Compatibility fallback.
-	_footprints = FootprintDecals.new()
-	_footprints.setup(world)
-	add_child(_footprints)
 	# The solo scene shares the same single-draw soft grounding shadows.
 	var ground_shadows := ContactShadowBatch.new()
 	ground_shadows.name = "GroundContactShadows"
@@ -844,11 +838,6 @@ func _physics_process(delta: float) -> void:
 	sim.submit_input(LOCAL_PLAYER_ID, _sequence, movement.x, movement.y,
 			Input.is_action_pressed("survive_sprint"), atan2(_facing.x, _facing.y), delta,
 			Input.is_action_pressed("survive_crouch"))
-	_footprints.update_view(survivor.position, movement.length_squared() > 0.01,
-		survivor.survival.alive and not survivor.mounted and
-		WadingWetness.depth_at(world, survivor.position) < 0.22 and
-		not Dungeon.is_underground(survivor.position.x), _atmosphere.storm,
-		GraphicsQuality.level(), str(RenderingServer.get_current_rendering_method()), delta)
 	if _footprints != null:
 		_footprints.update_track(survivor.position,
 			survivor.survival.alive and not survivor.mounted and
