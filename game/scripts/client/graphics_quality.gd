@@ -18,6 +18,7 @@ const WaterCaustics = preload("res://scripts/client/water_caustics.gd")
 const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
 const GraphicsTextureStreaming = preload("res://scripts/client/graphics_texture_streaming.gd")
 const GraphicsNativeSpecularAA = preload("res://scripts/client/graphics_native_specular_aa.gd")
+const StoneMicrodetail = preload("res://scripts/client/graphics_stone_microdetail.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const Foliage = preload("res://scripts/client/foliage.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
@@ -198,6 +199,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# Native screen-space roughness AA stabilizes all imported glTF PBR meshes,
 	# not only our custom terrain/foliage shaders. No new screen pass.
 	GraphicsNativeSpecularAA.apply(_level, str(method))
+	# Detail-normal assets are shared by every cached dungeon masonry mesh.
+	# High/Ultra enable native PBR detail; low-end presets spend zero taps.
+	StoneMicrodetail.configure(_level, str(method))
 	if viewport != null:
 		# Texture-group anisotropic shader variants are already cached per tier.
 		# This viewport cap makes imported glTF PBR texture detail just as sharp.
