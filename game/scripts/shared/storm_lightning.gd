@@ -2,6 +2,7 @@ extends RefCounted
 ## Server-generated, telegraphed environmental lightning during real storms.
 ## Hit checks use the actual survivor position at impact, never RPC coordinates.
 const Weather = preload("res://scripts/shared/weather.gd")
+const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WARNING_SECONDS := 2.8
 const CHECK_INTERVAL := 55.0
 const RETRY_INTERVAL := 10.0
@@ -22,7 +23,7 @@ static func create_warning(world, position: Vector3, now: float) -> Dictionary:
 	var cell_x: int = floori(position.x / 32.0)
 	var cell_z: int = floori(position.z / 32.0)
 	var epoch: int = floori(now / CHECK_INTERVAL)
-	var seed: int = world.mix(cell_x, cell_z, epoch, world.world_seed)
+	var seed: int = WorldGen.mix(cell_x, cell_z, int(world.world_seed), epoch + 9141)
 	var angle: float = TAU * float(seed % 360) / 360.0
 	var at: Vector2 = Vector2(position.x, position.z) + \
 		Vector2.from_angle(angle) * MAX_OFFSET

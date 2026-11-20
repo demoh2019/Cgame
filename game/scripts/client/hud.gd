@@ -7,6 +7,7 @@ const Combat = preload("res://scripts/shared/combat.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const Party = preload("res://scripts/shared/party.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
+const Weather = preload("res://scripts/shared/weather.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
@@ -1964,6 +1965,11 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nFLASH CHARGE: ready in %ds" % ceili(flash_wait)
 	if bool(client.you.get("smoke_concealed", false)):
 		_info_label.text += "\nSMOKE: quiet sight cover, no PvP immunity"
+	if not client.smoke_clouds.is_empty() and client.world != null:
+		var smoke_wind: Vector2 = Weather.wind_at(client.world,
+			float(client.you.get("x", 0.0)), float(client.you.get("z", 0.0)),
+			client.server_time)
+		_info_label.text += "\nSMOKE DRIFT: %.1f m/s | cover moves with regional wind" % smoke_wind.length()
 	var smoke_left: float = float(client.you.get("smoke_cooldown", 0.0))
 	if smoke_left > 0.0:
 		_info_label.text += "\nSMOKE: %ds recharge (F9)" % ceili(smoke_left)
