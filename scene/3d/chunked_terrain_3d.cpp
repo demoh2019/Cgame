@@ -236,7 +236,7 @@ void ChunkedTerrain3D::_ensure_mesh(Chunk &r_chunk, int p_lod) {
 	}
 	// The normal target is streamed only on geomorph-enabled high-quality
 	// meshes. Custom0 RGB_FLOAT avoids quantizing steep-cliff normals.
-	BitField<RSE::ArrayFormat> custom_format;
+	BitField<RSE::ArrayFormat> custom_format = static_cast<RSE::ArrayFormat>(0);
 	if (!mesh.morph_normal_xyz.is_empty()) {
 		arrays[RSE::ARRAY_CUSTOM0] = mesh.morph_normal_xyz;
 		custom_format = static_cast<RSE::ArrayFormat>(
