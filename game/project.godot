@@ -19,8 +19,9 @@ common/physics_ticks_per_second=30
 
 [rendering]
 
-renderer/rendering_method="gl_compatibility"
+renderer/rendering_method="forward_plus"
 renderer/rendering_method.mobile="gl_compatibility"
+renderer/rendering_method.web="gl_compatibility"
 
 [shader_globals]
 

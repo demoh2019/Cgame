@@ -7,6 +7,7 @@ const SETTINGS_PATH := "user://albion_after_graphics.cfg"
 const NAMES := ["Performance", "Balanced", "High", "Ultra"]
 const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
+const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
@@ -36,6 +37,7 @@ static func set_level(value: int, persist: bool = true) -> void:
 	_loaded = true
 	if persist:
 		var config := ConfigFile.new()
+		config.load(SETTINGS_PATH) # Keep other preferences, notably Auto.
 		config.set_value("rendering", "quality", _level)
 		var error := config.save(SETTINGS_PATH)
 		if error != OK:
@@ -59,7 +61,7 @@ static func profile(value: int) -> Dictionary:
 				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3}
 		2:
 			return {"shadows": true, "shadow_distance": 110.0, "msaa": Viewport.MSAA_2X,
-				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": false, "ssil": false, "cloud_shadows": true,
+				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": true, "ssil": false, "cloud_shadows": true,
 				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0, "terrain_detail_radius": 68.0, "mesh_lod_threshold": 1.0, "terrain_layer_budget": 4}
 		_:
 			return {"shadows": true, "shadow_distance": 140.0, "msaa": Viewport.MSAA_4X,
@@ -67,7 +69,19 @@ static func profile(value: int) -> Dictionary:
 				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0, "terrain_detail_radius": 96.0, "mesh_lod_threshold": 0.75, "terrain_layer_budget": 13}
 
 
-static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderMaterial, water: MeshInstance3D = null, streamer: Node = null) -> void:
+## Fast path for frame-rate adjustment; no scene-node, texture, LOD or
+## streamer changes are performed here.
+static func apply_resolution(viewport: Viewport,
+		render_scale: float = -1.0, adaptive: bool = false) -> void:
+	var renderer: String = str(RenderingServer.get_current_rendering_method())
+	GraphicsResolution.apply(viewport,
+		GraphicsResolution.plan(renderer, profile(_level), render_scale, adaptive))
+
+
+static func apply(viewport: Viewport, atmosphere: Node3D,
+		post_material: ShaderMaterial, water: MeshInstance3D = null,
+		streamer: Node = null, render_scale: float = -1.0,
+		adaptive: bool = false) -> void:
 	var p := profile(_level)
 	# One global uniform adjusts every streamed terrain chunk; no resource reimport or per-chunk updates.
 	RenderingServer.global_shader_parameter_set(&"aa_terrain_detail_radius", float(p["terrain_detail_radius"]))
@@ -85,27 +99,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 		# Screen-space mesh decimation applies to imported GLTF models inside MultiMeshes.
 		# Higher thresholds choose cheaper geometry sooner, without hiding gameplay resources.
 		viewport.mesh_lod_threshold = float(p["mesh_lod_threshold"])
-		if method == "forward_plus" and _level <= 1:
-			# FSR2 provides temporal antialiasing. Combining it with MSAA/TAA wastes GPU time.
-			viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR2
-			viewport.scaling_3d_scale = float(p["scale"])
-			viewport.use_taa = false
-			viewport.msaa_3d = Viewport.MSAA_DISABLED
-			viewport.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
-		elif method == "mobile" and _level <= 1:
-			viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
-			viewport.scaling_3d_scale = float(p["scale"])
-			viewport.use_taa = false
-			viewport.msaa_3d = Viewport.MSAA_DISABLED
-			viewport.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
-		else:
-			# Native resolution on High/Ultra and on Compatibility (which lacks FSR2).
-			if method == "forward_plus" or method == "mobile":
-				viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
-				viewport.scaling_3d_scale = 1.0
-				viewport.use_taa = false
-			viewport.msaa_3d = p["msaa"]
-			viewport.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if _level <= 1 else Viewport.SCREEN_SPACE_AA_DISABLED
+		apply_resolution(viewport, render_scale, adaptive)
 	if atmosphere != null:
 		# The atmosphere owns the persistent shadow enable flag used by its day/night update.
 		# Applying only to the sun node would let nighttime weather restore shadows on Performance.
