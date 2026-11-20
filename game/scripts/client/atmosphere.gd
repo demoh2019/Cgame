@@ -78,6 +78,8 @@ func _ready() -> void:
 func update(daylight: float, sun_height: float, phase: float, storming: bool, delta: float) -> void:
 	light_level = daylight
 	storm = move_toward(storm, 1.0 if storming else 0.0, delta * 0.25)
+	# One GPU global updates every terrain material, without iterating streamed chunks.
+	RenderingServer.global_shader_parameter_set(&"aa_weather_wetness", storm)
 	sun.rotation = Vector3(-deg_to_rad(lerpf(6.0, 62.0, clampf(sun_height, 0.0, 1.0))), deg_to_rad(35.0 + phase * 90.0), 0.0)
 	# Low sun is orange, high sun is white; the moon is a weak blue light from the opposite direction.
 	var low_sun := 1.0 - clampf(sun_height * 2.2, 0.0, 1.0)
