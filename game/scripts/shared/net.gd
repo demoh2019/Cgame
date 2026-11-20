@@ -534,6 +534,13 @@ func c_outpost_supplies(site_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_caravan(action: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "caravan", sim.cmd_caravan(peer, str(action)))
+
+
+@rpc("any_peer", "reliable")
 func c_contract(action: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

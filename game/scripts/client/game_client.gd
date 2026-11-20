@@ -416,6 +416,10 @@ func rest() -> void:
 	net.c_rest.rpc_id(1)
 
 
+func caravan(action: String) -> void:
+	net.c_caravan.rpc_id(1, action)
+
+
 func contract(action: String) -> void:
 	net.c_contract.rpc_id(1, action)
 

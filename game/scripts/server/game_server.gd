@@ -33,6 +33,7 @@ const OutpostProvisions = preload("res://scripts/shared/outpost_provisions.gd")
 const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
+const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
@@ -142,6 +143,8 @@ class Player:
 	var inventory_sent_at: float = -100.0
 	var stash_sent_at: float = -100.0
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
+	var caravan_state: Dictionary = {} # Saved canonical source/destination IDs only.
+	var caravan_view: Dictionary = {} # Verified route details for this private client.
 	var daily_bounty: Dictionary = {} # Account-persisted UTC daily bounty, never set by clients.
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var discovered_sites: Dictionary = {} # Personal authenticated landmark journal.
@@ -298,6 +301,8 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.progression = Progression.new()
 	player.skills = Skills.new()
 	player.contract_state = Contracts.empty_state()
+	player.caravan_state = {}
+	player.caravan_view = {}
 	player.daily_bounty = DailyBounties.empty_state()
 	player.renown = 0
 	players[peer_id] = player
@@ -335,6 +340,7 @@ func character_data(player: Player) -> Dictionary:
 		"progression": player.progression.to_dict(),
 		"skills": player.skills.to_dict(),
 		"contracts": player.contract_state.duplicate(true),
+		"caravan": player.caravan_state.duplicate(true),
 		"daily_bounty": player.daily_bounty.duplicate(true),
 		"renown": player.renown,
 		"discovered_sites": WorldDiscovery.to_saved(player.discovered_sites),
@@ -464,6 +470,12 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	var loaded_contracts: Variant = data.get("contracts", Contracts.empty_state())
 	if not Contracts.valid_state(loaded_contracts):
 		return false
+	var loaded_caravan: Variant = data.get("caravan", {})
+	if not CaravanRoutes.valid_state(world, loaded_caravan):
+		return false
+	var caravan_view: Dictionary = CaravanRoutes.from_saved(world, loaded_caravan)
+	if (loaded_caravan as Dictionary).is_empty():
+		caravan_view = {}
 	var loaded_daily: Variant = data.get("daily_bounty", DailyBounties.empty_state())
 	if not DailyBounties.valid_state(loaded_daily) \
 			or int(loaded_daily["day"]) > DailyBounties.utc_day():
@@ -489,6 +501,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.skills = loaded_skills
 	player.dirty_skills = true
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
+	player.caravan_state = (loaded_caravan as Dictionary).duplicate(true)
+	player.caravan_view = caravan_view.duplicate(true)
 	player.daily_bounty = (loaded_daily as Dictionary).duplicate(true)
 	player.renown = int(loaded_renown)
 	player.discovered_sites = loaded_discoveries["journal"]
@@ -2032,6 +2046,51 @@ func _refresh_daily(player: Player) -> int:
 	if DailyBounties.refresh(player.daily_bounty, today):
 		player.dirty_character = true
 	return today
+
+
+## Cross-settlement resource couriers: the server selects and validates
+## both real NPC stations. Goods are gathered by the player, not spawned.
+func cmd_caravan(peer_id: int, action: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if action == "abandon":
+		if player.caravan_state.is_empty():
+			return {"ok": false, "reason": "no_active"}
+		player.caravan_state = {}
+		player.caravan_view = {}
+		player.dirty_character = true
+		return {"ok": true, "action": "abandon"}
+	if action != "accept" and action != "deliver":
+		return {"ok": false, "reason": "unknown_action"}
+	var station: Dictionary = CaravanRoutes.station_at(world, player.position)
+	if station.is_empty():
+		return {"ok": false, "reason": "no_station"}
+	if action == "accept":
+		if not player.caravan_state.is_empty():
+			return {"ok": false, "reason": "already_active"}
+		var offer: Dictionary = CaravanRoutes.offer_for(world, station)
+		if offer.is_empty():
+			return {"ok": false, "reason": "no_route"}
+		player.caravan_state = CaravanRoutes.saved_state(offer)
+		player.caravan_view = offer.duplicate(true)
+		player.dirty_character = true
+		return {"ok": true, "action": "accept", "route": offer.duplicate(true)}
+	if player.caravan_state.is_empty() or player.caravan_view.is_empty():
+		return {"ok": false, "reason": "no_active"}
+	if int(station["id"]) != int(player.caravan_view["dst_id"]):
+		return {"ok": false, "reason": "wrong_destination"}
+	var outcome: Dictionary = CaravanRoutes.deliver(player.inventory, player.caravan_view)
+	if not bool(outcome.get("ok", false)):
+		return outcome
+	player.caravan_state = {}
+	player.caravan_view = {}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	_award(player, "explorer", 20.0)
+	_earn_renown(player, 4, "caravan")
+	outcome["action"] = "deliver"
+	return outcome
 
 
 func cmd_contract(peer_id: int, action: String) -> Dictionary:
@@ -4860,6 +4919,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"outposts": siege_contracts.public_state(territory.public_state(time, players, parties), time),
 		"you": {
 			"party": _party_state_for(peer_id),
+			"caravan": player.caravan_view.duplicate(true),
 			"guild": {"id": player.guild_id, "name": player.guild_name, "rank": player.guild_rank},
 			"guild_siege_wins": int(guild_siege_wins.get(player.guild_id, 0)),
 			"siege_wins": int(siege_contracts.victories.get(parties.group_of(peer_id), 0)),

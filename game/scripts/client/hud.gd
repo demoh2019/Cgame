@@ -26,6 +26,7 @@ var _vendor_water_button: Button
 var _vendor_food_button: Button
 var _radar
 var _contract_label: Label
+var _caravan_status: Label
 var _prompt: Label
 var _log: Label
 var _inventory_panel: PanelContainer
@@ -389,6 +390,28 @@ func _build() -> void:
 		else:
 			client.vendor(fish_id, 1, false))
 	vendor_buttons.add_child(sell_fish)
+
+	var caravan_heading := Label.new()
+	caravan_heading.text = "Caravan routes (village-to-village trading)"
+	inventory_box.add_child(caravan_heading)
+	_caravan_status = Label.new()
+	_caravan_status.text = "No active route. Find an NPC trader in a wilderness village or fort."
+	_caravan_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inventory_box.add_child(_caravan_status)
+	var caravan_buttons := HBoxContainer.new()
+	inventory_box.add_child(caravan_buttons)
+	var accept_caravan := Button.new()
+	accept_caravan.text = "Take route"
+	accept_caravan.pressed.connect(func() -> void: client.caravan("accept"))
+	caravan_buttons.add_child(accept_caravan)
+	var deliver_caravan := Button.new()
+	deliver_caravan.text = "Deliver cargo"
+	deliver_caravan.pressed.connect(func() -> void: client.caravan("deliver"))
+	caravan_buttons.add_child(deliver_caravan)
+	var abandon_caravan := Button.new()
+	abandon_caravan.text = "Cancel route"
+	abandon_caravan.pressed.connect(func() -> void: client.caravan("abandon"))
+	caravan_buttons.add_child(abandon_caravan)
 
 	var contract_title := Label.new()
 	contract_title.text = "Camp contracts (hub only)"
@@ -1124,6 +1147,22 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "caravan":
+		if not bool(data.get("ok", false)):
+			say("Caravan: " + str(data.get("reason", "unavailable")))
+		else:
+			match str(data.get("action", "")):
+				"accept":
+					var route: Dictionary = data.get("route", {})
+					say("NEW CARAVAN: deliver %dx %s to %s (X:%d Z:%d) for %d silver." % [
+						int(route.get("quantity", 0)), str(route.get("cargo", "")),
+						str(route.get("destination", "")), roundi(float(route.get("dst_x", 0.0))),
+						roundi(float(route.get("dst_z", 0.0))), int(route.get("silver", 0))])
+				"deliver":
+					say("Caravan delivered: +%d silver and explorer experience." % int(data.get("silver", 0)))
+				"abandon":
+					say("Caravan route cancelled; no goods taken.")
+		return
 	if kind == "throw_flash":
 		if bool(data.get("ok", false)):
 			say("Flash charge interrupted %d infected; blast attracts attention." % int(data.get("hits", 0)))
@@ -1464,6 +1503,15 @@ func _process(_delta: float) -> void:
 	if client == null or not client.you.has("health"):
 		return
 	_refresh_vendor_price_labels()
+	if _caravan_status != null:
+		var job: Dictionary = client.you.get("caravan", {})
+		if job.is_empty():
+			_caravan_status.text = "No route. Take one at a village or fort merchant."
+		else:
+			_caravan_status.text = "Carry %dx %s to %s (X:%d, Z:%d) | %d silver" % [
+				int(job.get("quantity", 0)), str(job.get("cargo", "")),
+				str(job.get("destination", "")), roundi(float(job.get("dst_x", 0.0))),
+				roundi(float(job.get("dst_z", 0.0))), int(job.get("silver", 0))]
 	_bars["health"].value = client.you["health"]
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
