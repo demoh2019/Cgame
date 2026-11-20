@@ -15,6 +15,7 @@ HEADER = ROOT / "scene/main/world_streamer.h"
 GAME = ROOT / "game/scripts/client/online_main.gd"
 POLICY = ROOT / "game/scripts/client/world_streaming_policy.gd"
 HUD = ROOT / "game/scripts/client/ui_accessibility_layer.gd"
+GRID = ROOT / "scene/main/world_streaming_grid.cpp"
 
 
 class StreamingBudgetContractTests(unittest.TestCase):
@@ -25,6 +26,7 @@ class StreamingBudgetContractTests(unittest.TestCase):
         cls.game = GAME.read_text(encoding="utf-8")
         cls.policy = POLICY.read_text(encoding="utf-8")
         cls.hud = HUD.read_text(encoding="utf-8")
+        cls.grid = GRID.read_text(encoding="utf-8")
 
     def test_one_count_and_clock_across_both_internal_process_phases(self):
         body = self.cpp.split("case NOTIFICATION_INTERNAL_PROCESS:", 1)[1]
@@ -76,6 +78,19 @@ class StreamingBudgetContractTests(unittest.TestCase):
             self.cpp,
         )
         self.assertIn("_world_streamer.get_queued_generation_count()", self.hud)
+
+    def test_stopping_reprioritizes_existing_queue(self):
+        # A moving bike prefetch queue may still contain cells after the bike
+        # stops. Zero lookahead must resort the existing cells nearest-first,
+        # not return before the queued-work sorting algorithm.
+        motion = self.grid.split("void prioritize_cells_for_motion(", 1)[1]
+        motion = motion.split("void cells_to_unload(", 1)[0]
+        self.assertIn("const Vector3 future = p_focus + prediction;", motion)
+        self.assertIn("const Vector3i focus_cell = world_to_cell(", motion)
+        self.assertIn("prediction = Vector3();", motion)
+        self.assertIn("if (p_velocity.is_finite() && Math::is_finite(p_lookahead_seconds)", motion)
+        self.assertIn("sorter.sort(sorted.ptr(), sorted.size());", motion)
+        self.assertNotIn("!(p_lookahead_seconds > 0.0)", motion)
 
     def test_bike_prediction_only_changes_priority(self):
         self.assertIn("const RIDING_LOOKAHEAD := 3.0", self.policy)
