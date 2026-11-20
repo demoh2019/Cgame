@@ -30,6 +30,8 @@
 
 #include "multimesh.h"
 
+#include "core/math/math_funcs.h"
+
 #include "core/object/class_db.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -298,6 +300,34 @@ void MultiMesh::set_instance_custom_data(int p_instance, const Color &p_custom_d
 	RenderingServer::get_singleton()->multimesh_instance_set_custom_data(multimesh, p_instance, p_custom_data);
 }
 
+bool MultiMesh::set_instance_custom_data_batch(const PackedInt32Array &p_indices, const PackedColorArray &p_custom_data) {
+	ERR_FAIL_COND_V_MSG(!use_custom_data, false, "Enable use_custom_data before updating per-instance custom values.");
+	ERR_FAIL_COND_V_MSG(p_indices.size() != p_custom_data.size(), false, "Instance indices and custom data arrays must have the same length.");
+	if (p_indices.is_empty()) {
+		return true;
+	}
+
+	// Check every index and reject duplicates BEFORE dispatching any updates.
+	PackedInt32Array sorted_indices = p_indices;
+	sorted_indices.sort();
+	for (int i = 0; i < sorted_indices.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted_indices[i], instance_count, false, "Batch custom data index out of bounds.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted_indices[i] == sorted_indices[i - 1], false, "Batch custom data indices must be unique.");
+		}
+	}
+	for (int i = 0; i < p_custom_data.size(); i++) {
+		const Color &value = p_custom_data[i];
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(value.r) || !Math::is_finite(value.g) || !Math::is_finite(value.b) || !Math::is_finite(value.a), false, "Batch custom data values must be finite.");
+	}
+	// Each update still reaches RenderingServer individually; only the script
+	// boundary and repeated validation are grouped into one API call.
+	for (int i = 0; i < p_indices.size(); i++) {
+		RenderingServer::get_singleton()->multimesh_instance_set_custom_data(multimesh, p_indices[i], p_custom_data[i]);
+	}
+	return true;
+}
+
 Color MultiMesh::get_instance_custom_data(int p_instance) const {
 	ERR_FAIL_INDEX_V_MSG(p_instance, instance_count, Color(), "Instance index out of bounds. Instance index must be less than `instance_count` and greater than or equal to zero.");
 	ERR_FAIL_COND_V_MSG(!use_custom_data, Color(), "Can't get instance custom data on a Multimesh that isn't using custom data. Ensure that you have `use_custom_data` property of this Multimesh set to `true`.");
@@ -385,6 +415,7 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_instance_color", "instance", "color"), &MultiMesh::set_instance_color);
 	ClassDB::bind_method(D_METHOD("get_instance_color", "instance"), &MultiMesh::get_instance_color);
 	ClassDB::bind_method(D_METHOD("set_instance_custom_data", "instance", "custom_data"), &MultiMesh::set_instance_custom_data);
+	ClassDB::bind_method(D_METHOD("set_instance_custom_data_batch", "indices", "custom_data"), &MultiMesh::set_instance_custom_data_batch);
 	ClassDB::bind_method(D_METHOD("get_instance_custom_data", "instance"), &MultiMesh::get_instance_custom_data);
 	ClassDB::bind_method(D_METHOD("reset_instance_physics_interpolation", "instance"), &MultiMesh::reset_instance_physics_interpolation);
 	ClassDB::bind_method(D_METHOD("reset_instances_physics_interpolation"), &MultiMesh::reset_instances_physics_interpolation);
