@@ -75,6 +75,9 @@ func _run() -> void:
     if stream.get_loaded_cell_count() != 1:
         _fail("unexpected initial loaded count")
         return
+    if not stream.are_cells_loaded(origin) or stream.are_cells_loaded(origin, 1):
+        _fail("native region readiness did not reflect loaded vs missing tiles")
+        return
     if not stream.has_observer_cell() or stream.get_observer_cell() != origin:
         _fail("native observer cell did not initialize")
         return
