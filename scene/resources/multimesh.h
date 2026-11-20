@@ -80,6 +80,9 @@ protected:
 public:
 	void set_buffer(const Vector<float> &p_buffer);
 	Vector<float> get_buffer() const;
+	// Pure CPU Fisher-Yates shuffle of complete instance records. No GPU upload,
+	// no transform/color mixing, and no mutation of the input buffer.
+	Vector<float> shuffled_instance_buffer(const Vector<float> &p_buffer, uint64_t p_seed) const;
 
 	void set_buffer_interpolated(const Vector<float> &p_buffer_curr, const Vector<float> &p_buffer_prev);
 
