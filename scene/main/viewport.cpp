@@ -3909,6 +3909,15 @@ bool Viewport::is_using_debanding() const {
 
 void Viewport::set_mesh_lod_threshold(float p_pixels) {
 	ERR_MAIN_THREAD_GUARD;
+	// GPU LOD selection must never receive an invalid or negative screen
+	// threshold. Zero is supported explicitly to disable automatic mesh LOD.
+	if (!Math::is_finite(p_pixels)) {
+		return;
+	}
+	p_pixels = MAX(p_pixels, 0.0f);
+	if (mesh_lod_threshold == p_pixels) {
+		return;
+	}
 	mesh_lod_threshold = p_pixels;
 	RS::get_singleton()->viewport_set_mesh_lod_threshold(viewport, mesh_lod_threshold);
 }
