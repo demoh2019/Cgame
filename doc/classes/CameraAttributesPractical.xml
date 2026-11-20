@@ -11,6 +11,18 @@
 	</description>
 	<tutorials>
 	</tutorials>
+	<methods>
+		<method name="configure_cinematic_dof">
+			<return type="void" />
+			<param index="0" name="enabled" type="bool" />
+			<param index="1" name="far_distance" type="float" />
+			<param index="2" name="far_transition" type="float" />
+			<param index="3" name="amount" type="float" />
+			<description>
+				Configures a cinematic far depth-of-field region in a single RenderingServer update rather than changing four properties independently. Near blur is disabled, so only the background beyond [param far_distance] receives depth blur. The method clamps [param far_distance] and [param far_transition] to positive values, and [param amount] to [code]0.0[/code]–[code]1.0[/code]. It ignores unchanged settings and leaves all exposure and auto-exposure settings untouched. Useful for quality-driven camera focus changes and photo modes. The effect renders only on Forward+ and Mobile; the method itself does not select the rendering backend.
+			</description>
+		</method>
+	</methods>
 	<members>
 		<member name="auto_exposure_max_sensitivity" type="float" setter="set_auto_exposure_max_sensitivity" getter="get_auto_exposure_max_sensitivity" default="800.0">
 			The maximum sensitivity (in ISO) used when calculating auto exposure. When calculating scene average luminance, color values will be clamped to at least this value. This limits the auto-exposure from exposing below a certain brightness, resulting in a cut off point where the scene will remain bright.
