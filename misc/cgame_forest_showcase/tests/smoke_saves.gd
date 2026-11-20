@@ -52,7 +52,8 @@ func _run() -> void:
         _fail("could not write boundary test save")
         return
     var clamped: Dictionary = GameSave.load_state(8, TEMP_PATH)
-    if (clamped.get("position_xz", Vector2.ZERO) as Vector2).distance_to(Vector2(510.0, -510.0)) > 0.001:
+    var clamped_position: Vector2 = clamped.get("position_xz", Vector2.ZERO)
+    if clamped_position.distance_to(Vector2(510.0, -510.0)) > 0.001:
         _fail("1km world save positions were not clamped correctly")
         return
 
