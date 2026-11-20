@@ -536,6 +536,11 @@ func _build() -> void:
 	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
 	rally_button.pressed.connect(func() -> void: client.party_rally())
 	party_buttons.add_child(rally_button)
+	var focus_button := Button.new()
+	focus_button.text = "Focus infected"
+	focus_button.tooltip_text = "Leader: mark the nearest living infected within 24m for 18s. Allies near that exact enemy deal +8% PvE damage; 28s cooldown."
+	focus_button.pressed.connect(func() -> void: client.party_focus())
+	inventory_box.add_child(focus_button)
 	var standard_button := Button.new()
 	standard_button.text = "Raise standard"
 	standard_button.tooltip_text = "Party leader: use one crafted expedition standard outside town, with an ally nearby (+stamina/energy for 90s)."
@@ -1128,6 +1133,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 	if kind == "use" and str(data.get("reason", "")) == "no_acid_nearby":
 		say("Alkali kit: no active acid nearby. Your supplies were not spent.")
 		return
+	if kind == "party_focus":
+		if bool(data.get("ok", false)):
+			say("Party focus: infected #%d marked for %d seconds (+8%% PvE damage)." % [
+				int(data.get("target", 0)), int(data.get("seconds", 18))])
+		else:
+			say("Party focus: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "party_ready":
 		if not bool(data.get("ok", false)):
 			say("Ready check: " + str(data.get("reason", "denied")))
@@ -1657,6 +1669,11 @@ func _refresh_party_controls() -> void:
 			var prefix: String = "[Leader] " if int(member["id"]) == int(state.get("leader", 0)) else ""
 			names.append("%s%s (%d HP)" % [prefix, str(member["name"]), int(member["health"])])
 		_party_status.text = "Party %d (%d/5): %s" % [group_id, roster.size(), ", ".join(names)]
+	var focus_state: Dictionary = state.get("focus", {})
+	if not focus_state.is_empty():
+		_party_status.text += "\nFocus infected #%d: %ds remaining (+8%% PvE damage)" % [
+			int(focus_state.get("target", -1)),
+			int(ceil(float(focus_state.get("remaining", 0.0))))]
 	var ready_state: Dictionary = state.get("ready_check", {})
 	if not ready_state.is_empty():
 		var votes: PackedStringArray = []
