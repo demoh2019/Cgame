@@ -1415,6 +1415,9 @@ func _on_event(event: Dictionary) -> void:
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
 		"guardian_taunt":
 			say("Frontline guardian draws %d infected away from teammates!" % int(event.get("count", 0)))
+		"guardian_retribution":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("GUARDIAN COUNTERSTRIKE! +25% melee damage against the intercepted infected.")
 		"guardian_intercept":
 			if int(event.get("by", -1)) == client.peer_id:
 				say("GUARDIAN INTERCEPT: blocked infected melee for ally #%d; took %.1f damage." % [
@@ -2171,6 +2174,10 @@ func _process(_delta: float) -> void:
 			int(client.you.get("guardian_intercept_target", -1)), intercept_active]
 	elif intercept_cooldown > 0.0:
 		_info_label.text += "\nGuard link ready in %.0fs" % intercept_cooldown
+	var counter_window: float = float(client.you.get("guardian_counter_seconds", 0.0))
+	if counter_window > 0.0:
+		_info_label.text += "\nGUARD COUNTER READY: %.1fs — melee strike enemy #%d (+25%%)" % [
+			counter_window, int(client.you.get("guardian_counter_target", -1))]
 	var protected_for: float = float(client.you.get("guardian_guarded_seconds", 0.0))
 	if protected_for > 0.0:
 		_info_label.text += "\nPROTECTED by guardian #%d for %.1fs" % [
