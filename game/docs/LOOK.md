@@ -46,6 +46,18 @@ the server to drop the connection, so it is not the default.
   and smashed barricades; music stings on death, level-ups and victories.
 
 * Cloud-shadow LUT: `scripts/client/cloud_shadow_lut.gd` bakes one seamless grayscale texture for coherent moving sun shadows on terrain, grass and trees. `atmosphere.gd` suppresses expensive cloud shading at night and in Performance mode.
+* Terrain texture anisotropy: `scripts/client/terrain_anisotropy.gd` creates and caches sampler variants of
+  the exact same 13-layer PBR ground shader. Performance/Balanced keep the original trilinear
+  color and normal sampling; High switches only ground albedo to up to 8x anisotropic sampling
+  (clearer roads and soil at an oblique isometric angle); Ultra also enables anisotropic
+  ground normal maps. The expensive sampler budget is configured once at application startup
+  by `project.godot`, but is active only in the selected shader variants. Existing streamed
+  chunks swap shaders on quality changes while retaining their biome/road textures,
+  patch layout, shared texture arrays and calibrated layer colors. No new geometry,
+  additional passes, texture loading or VRAM texture copies are required. Variant
+  compilation may occur on the first High/Ultra transition, so warm it up for
+  benchmarks and compare GPU time before/after at oblique terrain viewpoints.
+  Regression coverage: `tests/test_terrain_anisotropy.gd`.
 * Scenery draw-range/mesh LOD: `scripts/client/scenery_lod.gd` and `chunk_view.gd` adjust visual culling and imported mesh LOD bias by graphics quality without hiding settlement landmarks or changing server gameplay. See `docs/CLOUD_HLOD_2026_11.md`.
 
 * Camera-scale atmospheric fog: `scripts/client/cinematic_fog.gd` adds an inexpensive sea-level height haze to all supported renderers, and bounded physically based Forward+ volumetric shafts on High/Ultra. The same engine-native `Atmosphere` and `GraphicsLighting` now share one time-of-day, storm and quality budget; see `docs/CINEMATIC_FOG_RENDERING.md`.
