@@ -24,6 +24,7 @@ const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
+const LootSweep = preload("res://scripts/shared/loot_sweep.gd")
 const DeathRecovery = preload("res://scripts/shared/death_recovery.gd")
 const PartyCorpseRescue = preload("res://scripts/shared/party_corpse_rescue.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
@@ -367,6 +368,7 @@ var pair_persistence := false
 var pair_commits: Array = [] # [{a: peer, b: peer, tx: String}], drained by Net.
 var pair_locks: Dictionary = {} # peer -> transaction ID awaiting confirmation.
 var market_buy_requests: Dictionary = {} # Peer -> last request ID, arguments and result.
+var loot_sweep_next: Dictionary = {} # Session-only authenticated pickup throttle.
 var trade_by_player: Dictionary = {} # peer -> active trade
 var parties = Party.new() # Server-only session groups and short-lived invitations.
 var territory # Session outposts generated from this world seed.
@@ -816,6 +818,7 @@ func remove_player(peer_id: int) -> void:
 			survivor.guard_link_target = -1
 			survivor.guard_link_seconds = 0.0
 	market_buy_requests.erase(peer_id)
+	loot_sweep_next.erase(peer_id)
 	outpost_fortify_requests.erase(peer_id)
 	outpost_provision_requests.erase(peer_id)
 	outpost_breach_requests.erase(peer_id)
@@ -4833,6 +4836,48 @@ func cmd_raid_claim_selected(peer_id: int, entity_id: int, item_id: String) -> D
 	if not RaidRoundRobin.active(bags[entity_id], time):
 		return {"ok": false, "reason": "not_active"}
 	return cmd_loot(peer_id, entity_id, item_id)
+
+
+## Authorized, reach-limited pickup from at most five existing PvE bags.
+## Raid, PvP death, supply and crate loot are always manual.
+func cmd_loot_sweep(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not player.position.is_finite():
+		return {"ok": false, "reason": "invalid_position"}
+	if time < float(loot_sweep_next.get(peer_id, -1000000.0)):
+		return {"ok": false, "reason": "cooldown",
+			"remaining": maxf(0.0, float(loot_sweep_next[peer_id]) - time)}
+	loot_sweep_next[peer_id] = time + LootSweep.COOLDOWN
+	var ids: Array[int] = LootSweep.candidates(bags, player.position, player, time)
+	if ids.is_empty():
+		return {"ok": false, "reason": "nothing_to_sweep"}
+	var moved: int = 0
+	var collected: int = 0
+	var emptied: int = 0
+	for bag_id in ids:
+		if not bags.has(bag_id):
+			continue
+		var original: Dictionary = (bags[bag_id]["items"] as Dictionary).duplicate()
+		# Recheck ownership, proximity, guards and inventory at transaction time.
+		var claimed: Dictionary = cmd_loot(peer_id, bag_id)
+		if not bool(claimed.get("ok", false)):
+			continue
+		var remaining: Dictionary = bags[bag_id]["items"] if bags.has(bag_id) else {}
+		var count: int = 0
+		for item_id in original.keys():
+			count += maxi(0, int(original[item_id]) - int(remaining.get(item_id, 0)))
+		if count > 0:
+			moved += count
+			collected += 1
+			if not bags.has(bag_id):
+				emptied += 1
+	if moved == 0:
+		return {"ok": false, "reason": "inventory_full"}
+	return {"ok": true, "items": moved, "bags": collected, "emptied": emptied}
 
 
 func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dictionary:

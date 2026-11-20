@@ -569,6 +569,11 @@ func loot(entity_id: int) -> void:
 	net.c_loot.rpc_id(1, entity_id)
 
 
+func loot_sweep() -> void:
+	# No client-specified target IDs, positions or quantities.
+	net.c_loot_sweep.rpc_id(1)
+
+
 func build(point: Vector2, yaw: float = 0.0) -> void:
 	if point.is_finite():
 		net.c_build.rpc_id(1, point.x, point.y, yaw)

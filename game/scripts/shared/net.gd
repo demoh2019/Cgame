@@ -1013,6 +1013,13 @@ func c_dodge(dir_x: float, dir_z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_loot_sweep() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "loot_sweep", sim.cmd_loot_sweep(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_loot(entity_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
