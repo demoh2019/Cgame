@@ -45,6 +45,11 @@ func run(t) -> void:
 		"radiance sampling is never performed during cubemap generation")
 	t.check(sky_source.contains("texture(RADIANCE, dir).rgb"),
 		"sky cache uses Godot's supported built-in cubemap sampler")
+	var sky_fragment: String = sky_source.get_slice("void sky() {", 1)
+	t.check(not sky_fragment.contains("return;"),
+		"Godot sky() processor cannot use return, even for the cached-radiance fast path")
+	t.check(sky_source.contains("} else {\n\t\tfloat up = dir.y;"),
+		"expensive procedural sky only evaluates on the uncached path")
 	t.check(sky_source.contains("if (has_panorama && daylight > 0.005)"),
 		"night skips expensive daytime spherical panorama lookup")
 	t.check(sky_source.contains("SKY_COORDS * vec2(480.0, 240.0)"),
