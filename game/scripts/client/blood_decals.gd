@@ -18,9 +18,9 @@ static func enabled(level: int, rendering_method: String) -> bool:
 	return level >= 1 and rendering_method != "gl_compatibility"
 
 
-## Zombie ichor is darker and browner than red player blood.
+## Zombie ichor is dark olive (matching its spray), player blood is red.
 static func tint(zombie: bool) -> Color:
-	return Color(0.22, 0.12, 0.05) if zombie else Color(0.42, 0.02, 0.02)
+	return Color(0.16, 0.2, 0.06) if zombie else Color(0.42, 0.02, 0.02)
 
 
 static func splat_texture() -> Texture2D:
@@ -87,3 +87,19 @@ func _process(delta: float) -> void:
 			d.visible = false
 		elif _age[i] > LIFETIME - FADE:
 			d.albedo_mix = 0.9 * (LIFETIME - _age[i]) / FADE
+
+
+## Scorch mark (lightning strikes, explosions): a large sooty splat from the same pool.
+func scorch(world, x: float, z: float, radius: float) -> void:
+	if world == null:
+		return
+	var d := _pool[_next]
+	_age[_next] = 0.0
+	_next = (_next + 1) % POOL_SIZE
+	var s: float = clampf(radius, 1.0, 6.0)
+	d.size = Vector3(s * 1.6, 2.0, s * 1.6)
+	d.modulate = Color(0.05, 0.045, 0.04)
+	d.albedo_mix = 0.9
+	d.position = Vector3(x, float(world.height_at(x, z)) + 0.4, z)
+	d.rotation.y = randf() * TAU
+	d.visible = true
