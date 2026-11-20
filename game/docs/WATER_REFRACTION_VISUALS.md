@@ -11,12 +11,18 @@ A second depth sample checks that the refracted pixel is genuinely behind
 the water; abrupt shoreline depth changes and foreground geometry fade out
 the effect. Screen edges and camera distances also receive smooth fades.
 Water retains its original material lighting, weather-driven ripples and
-storm whitecaps. The sampled scene is already lit, so the contribution goes
-to emission and is not lit a second time.
+storm whitecaps. The renderer computes the **difference** between refracted
+and straight opaque pixels. That already-lit delta is applied through emission
+with inverse alpha compensation, which only changes background transmission
+instead of adding an entire second copy of the scene. The authored water
+opacity, foam lighting, Fresnel and shoreline palette are unchanged.
 
 ### Cost containment
 - Extra screen-color and depth reads occur only for **shallow water up to
   3.8 m** close to the camera; distant ocean uses the old path.
+- The transmission-corrected High/Ultra shader reads two scene-color pixels
+  (straight and refracted) in those pixels instead of one, but removes the
+  previous artificial scene brightening and alpha changes.
 - High uses a 0.52 maximum mix and a 25–74m distance fade; Ultra 0.86
   and 42–110m. Low presets request **no screen texture** at all.
 - Both variants are cached, selected by the existing graphics controller,
@@ -40,3 +46,13 @@ Test:
 `godot --headless --path game --script res://tests/run_all.gd`.
 New `test_water_refraction.gd` suite verifies quality, shader source, cached
 variants and renderer fallback. GPU screenshots/tests are still required.
+
+### Visual acceptance
+
+At the same time of day, compare beaches, docks and submerged rocks with
+refraction on/off. Look for natural distorted underwater silhouettes **without**
+extra glow or unexpected changes in water opacity. Test against dark rocks and
+white painted surfaces, where double-counted scene light is easiest to see.
+Measure p50/p95 GPU frame time and texture bandwidth on High/Ultra Forward+:
+the physically better transmission adds one extra color fetch in the already
+bounded shallow-water branch. Performance/Balanced shader and cost do not change.
