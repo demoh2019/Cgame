@@ -65,6 +65,10 @@ private:
 	// These hints reorder eligible work, never grow the resident set.
 	Vector3 view_direction;
 	real_t view_priority = 0.0;
+	// 0 = legacy update cadence. A large camera turn may rebuild the
+	// scheduling queue sooner, subject to a 50 ms minimum CPU interval.
+	real_t fast_view_refresh_degrees = 0.0;
+	Vector3 last_queued_view_direction;
 	int max_concurrent_loads = 4;
 	int max_instantiations_per_frame = 1;
 	// Soft main-thread time slice for procedural generation or scene
@@ -127,6 +131,8 @@ public:
 	void set_view_direction(const Vector3 &p_direction);
 	Vector3 get_view_direction() const { return view_direction; }
 	void set_view_priority(real_t p_weight);
+	void set_fast_view_refresh_degrees(real_t p_degrees);
+	real_t get_fast_view_refresh_degrees() const { return fast_view_refresh_degrees; }
 	real_t get_view_priority() const { return view_priority; }
 	void set_max_concurrent_loads(int p_count);
 	int get_max_concurrent_loads() const { return max_concurrent_loads; }
