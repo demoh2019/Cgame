@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class VisualQualityPackageTests(unittest.TestCase):
     def test_all_script_references_exist(self):
         files = [ROOT / 'demo.tscn', ROOT / 'demo.gd']
+        files += sorted((ROOT / 'world').rglob('*.tscn'))
+        files += sorted((ROOT / 'world').rglob('*.gd'))
         files += sorted((ROOT / 'addons').rglob('*.gd'))
         files += sorted((ROOT / 'tests').glob('*.gd'))
         for file in files:
@@ -82,10 +84,11 @@ class VisualQualityPackageTests(unittest.TestCase):
         for feature in ('MultiMesh.new()', 'MultiMeshInstance3D.new()',
                         'custom_aabb', 'visibility_range_end', 'visible_instance_count',
                         'sample_cell_positions', 'cell_seed', 'set_quality',
-                        'safe_count * 5', 'RandomNumberGenerator.new()'):
+                        'safe_count * 5', 'RandomNumberGenerator.new()',
+                        'get_shared_trunk_mesh', 'get_shared_leaf_mesh'):
             self.assertIn(feature, foliage)
-        self.assertIn('ChunkedFoliage.new()', (ROOT / 'demo.gd').read_text())
-        self.assertIn('foliage.set_quality(profile)', (ROOT / 'demo.gd').read_text())
+        self.assertIn('Foliage.new()', (ROOT / 'world/forest_cell.gd').read_text())
+        self.assertIn('_foliage.set_quality(_quality_profile)', (ROOT / 'world/forest_cell.gd').read_text())
 
     def test_walkable_player_character_and_controls(self):
         player = (ROOT / 'addons/visual_quality/character_controller.gd').read_text()
@@ -126,8 +129,38 @@ class VisualQualityPackageTests(unittest.TestCase):
                         'reset_button.pressed.connect', 'KEY_R'):
             self.assertIn(feature, demo)
 
+    def test_world_streamer_engine_service(self):
+        source = (ROOT / 'addons/visual_quality/world_streamer.gd').read_text()
+        for feature in ('class_name WorldStreamer3D', 'register_scene_cell',
+                        'unregister_scene_cell', 'ResourceLoader.load_threaded_request',
+                        'ResourceLoader.load_threaded_get_status',
+                        'ResourceLoader.THREAD_LOAD_LOADED',
+                        'ResourceLoader.load_threaded_get(path)',
+                        'max_spawns_per_update', 'max_concurrent_loads',
+                        'max_unloads_per_update', 'within_cell_radius',
+                        'cell_at_local_position', 'get_active_cells',
+                        'cell_loaded.emit', 'cell_unloaded.emit',
+                        'set_quality_profile', '_scene_cache'):
+            self.assertIn(feature, source)
+        self.assertIn('if resource is PackedScene:', source)
+        self.assertIn('queue_free()', source)
+
+    def test_world_streamer_immediately_integrated_in_game(self):
+        demo = (ROOT / 'demo.gd').read_text()
+        for feature in ('WorldStreamer.new()', 'streamer.source = player_character',
+                        'streamer.register_scene_cell',
+                        'streamer.cell_loaded.connect', 'streamer.set_quality_profile',
+                        'streamer.active_cell_count()', 'KEY_7'):
+            self.assertIn(feature, demo)
+        scene = (ROOT / 'world/forest_cell.tscn').read_text()
+        self.assertIn('res://world/forest_cell.gd', scene)
+        world = (ROOT / 'world/forest_cell.gd').read_text()
+        self.assertIn('configure_stream_cell', world)
+        self.assertIn('Foliage.new()', world)
+        self.assertNotIn('foliage = ChunkedFoliage.new()', demo)
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
