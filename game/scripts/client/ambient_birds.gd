@@ -5,6 +5,11 @@ extends MultiMeshInstance3D
 ## wing flaps run in the vertex shader. Client-only, no gameplay effect.
 
 const FLAP_SHADER := preload("res://assets/shaders/bird_flap.gdshader")
+const SeededSubstreams = preload("res://scripts/client/seeded_substreams.gd")
+# Namespaced streams keep changes to wing colors from reshuffling bird positions.
+const STREAM_POSITION := 1
+const STREAM_VELOCITY := 2
+const STREAM_WING_PHASE := 3
 const MAX_BIRDS := 18
 const ALTITUDE := 22.0
 const SPEED := 6.5
@@ -54,7 +59,14 @@ static func steer(i: int, pos: PackedVector3Array, vel: PackedVector3Array, coun
 	return force
 
 
-func _init() -> void:
+func _init(p_world_seed: int = 0) -> void:
+	# A separate RNG per cosmetic concern makes flock initialization
+	# reproducible for a world seed and independent from global game RNG.
+	var root := RandomNumberGenerator.new()
+	root.seed = p_world_seed
+	var positions := SeededSubstreams.fork(root, STREAM_POSITION)
+	var velocities := SeededSubstreams.fork(root, STREAM_VELOCITY)
+	var wings := SeededSubstreams.fork(root, STREAM_WING_PHASE)
 	var m := MultiMesh.new()
 	m.transform_format = MultiMesh.TRANSFORM_3D
 	m.use_custom_data = true
@@ -70,9 +82,11 @@ func _init() -> void:
 	_pos.resize(MAX_BIRDS)
 	_vel.resize(MAX_BIRDS)
 	for i in MAX_BIRDS:
-		_pos[i] = Vector3(randf_range(-6, 6), randf_range(-2, 2), randf_range(-6, 6))
-		_vel[i] = Vector3(randf_range(-1, 1), 0.0, randf_range(-1, 1)).normalized() * SPEED
-		m.set_instance_custom_data(i, Color(randf(), randf(), 0.0, 0.0))
+		_pos[i] = Vector3(positions.randf_range(-6, 6), positions.randf_range(-2, 2),
+			positions.randf_range(-6, 6))
+		_vel[i] = Vector3(velocities.randf_range(-1, 1), 0.0,
+			velocities.randf_range(-1, 1)).normalized() * SPEED
+		m.set_instance_custom_data(i, Color(wings.randf(), wings.randf(), 0.0, 0.0))
 	if ClassDB.class_exists("Flock3D"):
 		_native = ClassDB.instantiate("Flock3D") as Node3D
 		_native.set("multimesh", m)
