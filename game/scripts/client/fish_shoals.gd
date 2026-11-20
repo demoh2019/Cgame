@@ -99,6 +99,9 @@ func update_view(world, player: Vector3, level: int, daylight: float, delta: flo
 	var has_water: bool = _anchor != Vector3.INF
 	_flock.visible = has_water
 	_flock.set("active", has_water)
+	# Fish dart away from a wading player (engine Flock3D.scatter_from).
+	if has_water and _flock.has_method("scatter_from") and Vector2(_anchor.x - player.x, _anchor.z - player.z).length() < SHOAL_RADIUS + 2.0:
+		_flock.call("scatter_from", Vector3(player.x, _anchor.y, player.z), 5.0 * delta * 10.0, 4.0)
 	# Fish go deeper and quieter at night.
 	if has_water:
 		_flock.set("speed", lerpf(0.8, 1.6, clampf(daylight, 0.0, 1.0)))

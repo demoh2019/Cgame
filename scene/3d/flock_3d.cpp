@@ -195,6 +195,23 @@ Vector3 Flock3D::get_home_offset() const {
 	return home_offset;
 }
 
+void Flock3D::scatter_from(const Vector3 &p_global_point, float p_strength, float p_radius) {
+	// Startle response: agents within the radius dart directly away, harder the closer they were.
+	const Vector3 local = is_inside_tree() ? to_local(p_global_point) : p_global_point;
+	const float radius = MAX(p_radius, 0.001f);
+	for (uint32_t i = 0; i < positions.size(); i++) {
+		Vector3 away = positions[i] - local;
+		const float dist = away.length();
+		if (dist >= radius) {
+			continue;
+		}
+		if (dist < 1e-4f) {
+			away = Vector3(1, 0, 0);
+		}
+		velocities[i] += away.normalized() * p_strength * (1.0f - dist / radius);
+	}
+}
+
 Vector3 Flock3D::get_agent_position(int p_index) const {
 	ERR_FAIL_INDEX_V(p_index, (int)positions.size(), Vector3());
 	return positions[p_index];
@@ -203,6 +220,7 @@ Vector3 Flock3D::get_agent_position(int p_index) const {
 void Flock3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("step", "delta"), &Flock3D::step);
 	ClassDB::bind_method(D_METHOD("get_agent_position", "index"), &Flock3D::get_agent_position);
+	ClassDB::bind_method(D_METHOD("scatter_from", "global_point", "strength", "radius"), &Flock3D::scatter_from);
 	ClassDB::bind_method(D_METHOD("set_agent_count", "count"), &Flock3D::set_agent_count);
 	ClassDB::bind_method(D_METHOD("get_agent_count"), &Flock3D::get_agent_count);
 	ClassDB::bind_method(D_METHOD("set_active", "active"), &Flock3D::set_active);

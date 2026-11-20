@@ -68,6 +68,11 @@ TEST_CASE("[SceneTree][Flock3D] Strays are pulled home and the flock stays bound
 		CHECK(p.length() < 40.0f);
 	}
 	CHECK(mm->get_visible_instance_count() == 12);
+	// Scatter kicks agents away from the threat.
+	const Vector3 before = flock->get_agent_position(0);
+	flock->scatter_from(before + Vector3(0.1, 0, 0), 20.0f, 5.0f);
+	flock->step(1.0 / 30.0);
+	CHECK(flock->get_agent_position(0).x < before.x);
 	flock->set_agent_count(5000);
 	CHECK(flock->get_agent_count() == 1024);
 	memdelete(flock);

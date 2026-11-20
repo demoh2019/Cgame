@@ -17,6 +17,15 @@
 				Returns the local position of the agent at [param index].
 			</description>
 		</method>
+		<method name="scatter_from">
+			<return type="void" />
+			<param index="0" name="global_point" type="Vector3" />
+			<param index="1" name="strength" type="float" />
+			<param index="2" name="radius" type="float" />
+			<description>
+				Startles the flock: agents within [param radius] of [param global_point] get a velocity kick of up to [param strength] directly away from it, strongest for the closest ones. Steering then pulls them back together, like birds or fish scattering from a threat.
+			</description>
+		</method>
 		<method name="step">
 			<return type="void" />
 			<param index="0" name="delta" type="float" />

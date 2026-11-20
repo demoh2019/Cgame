@@ -100,6 +100,7 @@ public:
 	Vector3 get_home_offset() const;
 
 	Vector3 get_agent_position(int p_index) const;
+	void scatter_from(const Vector3 &p_global_point, float p_strength, float p_radius);
 
 	Flock3D();
 };
