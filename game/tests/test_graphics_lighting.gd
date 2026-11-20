@@ -23,8 +23,8 @@ func run(t) -> void:
 		"High uses two stable cascades, reducing shadow draw cost")
 	t.eq(int(GraphicsLighting.settings(3, "forward_plus")["shadow_cascades"]), 4,
 		"Ultra sharpens close shadows with four cascades")
-	t.check(not bool(GraphicsLighting.settings(2, "forward_plus")["volumetric_fog"]),
-		"High avoids expensive 3D fog")
+	t.check(bool(GraphicsLighting.settings(2, "forward_plus")["volumetric_fog"]),
+		"High uses a short, budgeted Forward+ froxel volume")
 	t.check(bool(GraphicsLighting.settings(3, "forward_plus")["volumetric_fog"]),
 		"Ultra uses supported Forward+ 3D fog")
 	t.check(not bool(GraphicsLighting.settings(3, "gl_compatibility")["volumetric_fog"]),
@@ -44,8 +44,11 @@ func run(t) -> void:
 		"High-quality cascades blend to reduce transition seams")
 	t.check(env.volumetric_fog_enabled,
 		"Ultra Forward+ activates actual environment fog")
-	t.near(env.volumetric_fog_length, 78.0, 0.01,
+	t.near(env.volumetric_fog_length, 72.0, 0.01,
 		"volumetric fog stops within bounded camera range")
+	GraphicsLighting.apply(sun, env, 2, "forward_plus")
+	t.check(env.volumetric_fog_enabled and env.volumetric_fog_length < 72.0,
+		"High trades volume range for fog precision and bounded cost")
 	GraphicsLighting.apply(sun, env, 1, "gl_compatibility")
 	t.eq(sun.directional_shadow_mode, DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS,
 		"Compatibility Balanced retains efficient two-split shadows")
