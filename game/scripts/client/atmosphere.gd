@@ -1,4 +1,6 @@
 extends Node3D
+
+const CloudShadowLut = preload("res://scripts/client/cloud_shadow_lut.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
 ## Everything degrades gracefully on the compatibility renderer (SSAO and the like are simply ignored).
 
@@ -8,6 +10,7 @@ var sky_material: ShaderMaterial
 var world_environment: WorldEnvironment
 var sky: Sky
 var _shadows_allowed := true
+var _cloud_shadows_allowed := true
 ## Slow-moving sky lighting is cached separately from per-frame directional light and fog.
 var _sky_refresh_interval := 0.4
 var _sky_refresh_elapsed := 2.0 # Force the first material upload.
@@ -25,6 +28,10 @@ const STORM_HORIZON := Color(0.45, 0.48, 0.52)
 
 
 func _ready() -> void:
+	# One cached 128x128 R8 texture drives ALL tree/grass/terrain shadow fields.
+	# Initialize before the first streamed chunk compiles its materials.
+	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_map", CloudShadowLut.texture())
+	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_strength", 0.0)
 	environment = Environment.new()
 	environment.background_mode = Environment.BG_SKY
 	sky_material = ShaderMaterial.new()
@@ -84,6 +91,8 @@ func _ready() -> void:
 func update(daylight: float, sun_height: float, phase: float, storming: bool, delta: float) -> void:
 	light_level = daylight
 	storm = move_toward(storm, 1.0 if storming else 0.0, delta * 0.25)
+	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_strength",
+		CloudShadowLut.shadow_strength(daylight, storm, _cloud_shadows_allowed))
 	# One GPU global updates every terrain material, without iterating streamed chunks.
 	RenderingServer.global_shader_parameter_set(&"aa_weather_wetness", storm)
 	sun.rotation = Vector3(-deg_to_rad(lerpf(6.0, 62.0, clampf(sun_height, 0.0, 1.0))), deg_to_rad(35.0 + phase * 90.0), 0.0)
@@ -132,6 +141,9 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 ## Render-only switches; weather and the shared day/night clock are unaffected.
 func apply_graphics_profile(settings: Dictionary) -> void:
 	_shadows_allowed = bool(settings["shadows"])
+	_cloud_shadows_allowed = bool(settings.get("cloud_shadows", true))
+	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_strength",
+		CloudShadowLut.shadow_strength(light_level, storm, _cloud_shadows_allowed))
 	_sky_refresh_interval = clampf(float(settings.get("sky_refresh_interval", 0.4)), 0.12, 2.0)
 	sun.shadow_enabled = _shadows_allowed
 	sun.directional_shadow_max_distance = float(settings["shadow_distance"])
