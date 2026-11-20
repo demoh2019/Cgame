@@ -140,6 +140,28 @@ TEST_CASE("[SceneTree][MultiMeshInstance3D] Mesh gathering respects visible inst
 	memdelete(instance);
 }
 
+
+TEST_CASE("[SceneTree][MultiMesh] Reject invalid enum configuration without updating state") {
+	Ref<MultiMesh> multimesh;
+	multimesh.instantiate();
+
+	const MultiMesh::TransformFormat initial_format = multimesh->get_transform_format();
+	const MultiMesh::PhysicsInterpolationQuality initial_quality = multimesh->get_physics_interpolation_quality();
+
+	ERR_PRINT_OFF;
+	multimesh->set_transform_format(static_cast<MultiMesh::TransformFormat>(123));
+	multimesh->set_physics_interpolation_quality(static_cast<MultiMesh::PhysicsInterpolationQuality>(123));
+	ERR_PRINT_ON;
+
+	CHECK(multimesh->get_transform_format() == initial_format);
+	CHECK(multimesh->get_physics_interpolation_quality() == initial_quality);
+
+	multimesh->set_transform_format(MultiMesh::TRANSFORM_3D);
+	CHECK(multimesh->get_transform_format() == MultiMesh::TRANSFORM_3D);
+	multimesh->set_physics_interpolation_quality(MultiMesh::INTERP_QUALITY_HIGH);
+	CHECK(multimesh->get_physics_interpolation_quality() == MultiMesh::INTERP_QUALITY_HIGH);
+}
+
 } // namespace TestMultiMesh
 
 #endif // _3D_DISABLED
