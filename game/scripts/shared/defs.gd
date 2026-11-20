@@ -296,6 +296,13 @@ static func _build_items() -> void:
 		"stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("charcoal_filter", "charcoal_filter", 1,
 		{"cloth_1": 1, "wood_1": 1, "stone_1": 1}, "", 2.5)
+	# Permanent T1 expedition tool; each bottled-water refill still consumes
+	# one carbon filter and a real timed stop at a natural shoreline.
+	_add_item("field_canteen", {"name": "Reusable Field Canteen",
+		"kind": "tool", "tool": "canteen", "tier": 1,
+		"stack": 1, "weight": 0.75, "value": 26})
+	_add_recipe("field_canteen", "field_canteen", 1,
+		{"cloth_1": 2, "fiber_1": 3, "wood_1": 1}, "", 4.0)
 	# Field-craftable salve hides only blood scent; no visual invisibility.
 	_add_item("herbal_scent_mask", {"name": "Herbal Scent Salve", "kind": "scent_mask",
 		"stack": 5, "weight": 0.2, "value": 18})

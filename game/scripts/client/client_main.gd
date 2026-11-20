@@ -807,7 +807,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_scent_mask"):
 		_result("Apply herbal scent salve", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_scent_mask"))
 	elif event.is_action_pressed("survive_lake"):
-		if Input.is_key_pressed(KEY_SHIFT):
+		if Input.is_key_pressed(KEY_CTRL):
+			_result("Fill canteen", sim.cmd_refill_canteen(LOCAL_PLAYER_ID))
+		elif Input.is_key_pressed(KEY_SHIFT):
 			var result: Dictionary = sim.cmd_use(LOCAL_PLAYER_ID, "field_alkali_kit")
 			_result("Neutralize acid (%d pools)" % int(result.get("neutralized", 0)),
 				result)
@@ -977,7 +979,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer (3 pools)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback
