@@ -34,7 +34,9 @@ func run(t) -> void:
 	t.check(float(low["scale"]) < float(balanced["scale"]) and float(balanced["scale"]) < float(high["scale"]), "RD upscaler quality steps are ordered")
 	t.check(float(low["grass_radius"]) < float(balanced["grass_radius"]) and float(balanced["grass_radius"]) < float(high["grass_radius"]) and float(high["grass_radius"]) < float(ultra["grass_radius"]), "grass distances increase with quality")
 	t.check(int(low["grass_budget"]) < int(ultra["grass_budget"]), "grass generation is cheaper on Performance")
-	t.check(not bool(low["ssil"]) and bool(ultra["ssil"]), "indirect light is exclusive to Ultra")
+	t.check(not bool(low["sdfgi"]) and not bool(high["sdfgi"]) and bool(ultra["sdfgi"]),
+		"optional SDFGI bounced light is exclusive to Ultra")
+	t.check(not bool(ultra["ssil"]), "Ultra avoids double screen-space GI")
 	GraphicsQuality.set_level(1, false)
 
 	t.current = "fallback terrain shader quality"
