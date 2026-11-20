@@ -245,15 +245,18 @@ func _draw_lightning(origin: Vector2, strike: Dictionary) -> void:
 
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0.055, 0.077, 0.09, 0.91), true)
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0.38, 0.48, 0.50, 0.9), false, 1.4)
+	# A round map plaque: a dark wooden rim with a bronze ring, a moss-dark face, faint compass lines.
 	var center: Vector2 = size * 0.5
+	var face: float = minf(size.x, size.y) * 0.5 - 4.0
+	draw_circle(center + Vector2(0, 3), face + 4.0, Color(0, 0, 0, 0.35))
+	draw_circle(center, face + 4.0, Color(0.24, 0.16, 0.1))
+	draw_circle(center, face - 1.0, Color(0.1, 0.12, 0.09, 0.93))
+	draw_arc(center, face + 1.0, 0.0, TAU, 64, Color(0.72, 0.55, 0.3), 2.5, true)
 	var circle_radius: float = minf(size.x, size.y) * MAP_INSET
-	draw_arc(center, circle_radius, 0.0, TAU, 48, Color(0.30, 0.47, 0.53, 0.5), 1.0)
-	draw_line(Vector2(center.x, 0), Vector2(center.x, size.y),
-		Color(0.25, 0.36, 0.40, 0.32), 1.0)
-	draw_line(Vector2(0, center.y), Vector2(size.x, center.y),
-		Color(0.25, 0.36, 0.40, 0.32), 1.0)
+	draw_arc(center, circle_radius, 0.0, TAU, 48, Color(0.72, 0.62, 0.42, 0.35), 1.0, true)
+	draw_line(center - Vector2(0, face), center + Vector2(0, face), Color(0.72, 0.62, 0.42, 0.18), 1.0)
+	draw_line(center - Vector2(face, 0), center + Vector2(face, 0), Color(0.72, 0.62, 0.42, 0.18), 1.0)
+	draw_string(ThemeDB.fallback_font, center + Vector2(-5, -face + 14), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.95, 0.85, 0.6))
 
 	if world == null:
 		return

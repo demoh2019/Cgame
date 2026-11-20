@@ -78,6 +78,14 @@ guards; the axe shows while chopping. `HELD_MODELS` maps weapon families to mode
 sledgehammer, restoration staff, bow, crossbow, purifier maul, axe; the pistols use the Kenney blaster) and `HELD_SCALES` sizes
 them, since the kit is about twice life size. Melee swings leave a short streak (the engine's `Trail3D`).
 
+## Interface icons (in the repository, CC BY 3.0)
+
+`assets/icons/items/` (one silhouette per item, shared by its tiers) and `assets/icons/ui/` (menu buttons, action bar,
+portrait, food and water) come from **game-icons.net** by Lorc, Delapouite, Skoll, Sbed, Carl Olsen, Darkzaitzev,
+Faithtoken and John Colburn, licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/). The dark background square
+of each SVG was removed so the interface can tint the white shape; nothing else was changed. `item_icons.gd` picks the icon
+for an item and its tint by item kind.
+
 ## Engine features the game uses
 
 * **Camera3D trauma shake** (this fork): hits on you, your blows, nearby deaths, flashes and smashed barricades.

@@ -17,12 +17,7 @@ func setup(p_client) -> void:
 	client = p_client
 	client.snapshot_received.connect(func() -> void: _dirty = true)
 	custom_minimum_size = Vector2(820, 560)
-	var background := StyleBoxFlat.new()
-	background.bg_color = Color(0.08, 0.09, 0.12, 0.97)
-	background.set_border_width_all(2)
-	background.border_color = Color(0.9, 0.75, 0.3)
-	background.set_content_margin_all(10)
-	add_theme_stylebox_override("panel", background)
+	# The parchment window frame comes from the interface theme (ui_theme.gd).
 	visible = false
 	var box := VBoxContainer.new()
 	add_child(box)

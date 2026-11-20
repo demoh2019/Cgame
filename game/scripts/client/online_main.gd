@@ -29,6 +29,7 @@ const HelpPanel = preload("res://scripts/client/help_panel.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Effects = preload("res://scripts/client/effects.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
+const TitleBanner = preload("res://scripts/client/title_banner.gd")
 const LocalServer = preload("res://scripts/client/local_server.gd")
 const SkillsPanel = preload("res://scripts/client/skills_panel.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
@@ -233,7 +234,7 @@ func _build_connect_screen() -> void:
 		sky.set_anchors_preset(Control.PRESET_FULL_RECT)
 		sky.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		sky.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-		sky.modulate = Color(0.62, 0.58, 0.55)
+		sky.modulate = Color(0.85, 0.8, 0.74)
 		backdrop.add_child(sky)
 	var shade := TextureRect.new()
 	var gradient := Gradient.new()
@@ -255,53 +256,78 @@ func _build_connect_screen() -> void:
 	column.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.add_theme_constant_override("separation", 18)
 	backdrop.add_child(column)
-	var title := Label.new()
-	title.text = "ALBION AFTER"
-	title.add_theme_font_size_override("font_size", 64)
-	title.add_theme_color_override("font_color", UiTheme.GOLD)
-	title.add_theme_constant_override("outline_size", 10)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	column.add_child(title)
-	var subtitle := Label.new()
-	subtitle.text = "Gather. Craft. Survive. Lose everything."
-	subtitle.add_theme_font_size_override("font_size", 20)
-	subtitle.add_theme_color_override("font_color", Color(0.86, 0.84, 0.78))
-	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	column.add_child(subtitle)
+	# The sign-in card is a hanging banner with the title woven in (title_banner.gd).
 	connect_panel = PanelContainer.new()
-	connect_panel.custom_minimum_size = Vector2(400, 0)
+	connect_panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	connect_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	column.add_child(connect_panel)
+	var banner := TitleBanner.new()
+	banner.custom_minimum_size = Vector2(460, 0)
+	connect_panel.add_child(banner)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 8)
-	connect_panel.add_child(box)
+	box.add_theme_constant_override("separation", 10)
+	banner.add_child(box)
+	var title := Label.new()
+	title.text = "ALBION AFTER"
+	title.add_theme_font_size_override("font_size", 46)
+	title.add_theme_color_override("font_color", Color(0.98, 0.9, 0.74))
+	title.add_theme_color_override("font_outline_color", Color(0.18, 0.03, 0.03))
+	title.add_theme_constant_override("outline_size", 10)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+	var subtitle := Label.new()
+	subtitle.text = "Gather. Craft. Survive. Lose everything."
+	subtitle.add_theme_font_size_override("font_size", 15)
+	subtitle.add_theme_color_override("font_color", UiTheme.GOLD)
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(subtitle)
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0, 14)
+	box.add_child(gap)
+	var field_style := UiTheme._box(UiTheme.PAPER, 18, 2.0, Color(0.55, 0.4, 0.2), 10)
+	field_style.shadow_size = 0
+	var field_focus := UiTheme._box(UiTheme.CREAM, 18, 2.0, UiTheme.GOLD, 10)
+	field_focus.shadow_size = 0
 	for field in [["Survivor name", "Name"], ["Server", "host:port"]]:
 		var caption := Label.new()
 		caption.text = field[0]
-		caption.add_theme_font_size_override("font_size", 13)
-		caption.add_theme_color_override("font_color", Color(0.75, 0.74, 0.7))
+		caption.add_theme_font_size_override("font_size", 14)
+		caption.add_theme_color_override("font_color", Color(0.95, 0.84, 0.66))
 		box.add_child(caption)
 		var edit := LineEdit.new()
 		edit.placeholder_text = field[1]
-		edit.custom_minimum_size = Vector2(0, 38)
+		edit.custom_minimum_size = Vector2(0, 40)
+		edit.add_theme_stylebox_override("normal", field_style)
+		edit.add_theme_stylebox_override("focus", field_focus)
+		edit.add_theme_color_override("font_color", UiTheme.INK)
+		edit.add_theme_color_override("font_placeholder_color", UiTheme.INK_SOFT)
+		edit.add_theme_color_override("caret_color", UiTheme.INK)
 		edit.text_submitted.connect(func(_text: String) -> void: _connect())
 		box.add_child(edit)
 		if name_edit == null:
 			name_edit = edit
 		else:
 			address_edit = edit
+	var gap2 := Control.new()
+	gap2.custom_minimum_size = Vector2(0, 10)
+	box.add_child(gap2)
 	var solo := Button.new()
-	solo.text = "Play solo"
+	solo.text = "PLAY SOLO"
 	solo.tooltip_text = "Runs the world on this computer (every system, saved between sessions) and joins it."
-	solo.custom_minimum_size = Vector2(0, 46)
-	solo.add_theme_font_size_override("font_size", 18)
-	solo.add_theme_stylebox_override("normal", UiTheme._box(Color(0.42, 0.33, 0.13, 0.95), 8, 1.5, UiTheme.GOLD, 6))
-	solo.add_theme_stylebox_override("hover", UiTheme._box(Color(0.55, 0.43, 0.17, 1.0), 8, 2.0, UiTheme.GOLD, 6))
+	solo.custom_minimum_size = Vector2(0, 50)
+	solo.add_theme_font_size_override("font_size", 20)
+	solo.add_theme_stylebox_override("normal", _pill(Color(0.72, 0.13, 0.1)))
+	solo.add_theme_stylebox_override("hover", _pill(Color(0.84, 0.2, 0.14)))
+	solo.add_theme_stylebox_override("pressed", _pill(Color(0.55, 0.08, 0.06)))
 	solo.pressed.connect(_play_solo)
 	box.add_child(solo)
 	var button := Button.new()
 	button.text = "Join server"
-	button.custom_minimum_size = Vector2(0, 40)
+	button.custom_minimum_size = Vector2(0, 42)
+	button.add_theme_font_size_override("font_size", 16)
+	button.add_theme_stylebox_override("normal", _pill(Color(0.3, 0.2, 0.13)))
+	button.add_theme_stylebox_override("hover", _pill(Color(0.42, 0.29, 0.17)))
+	button.add_theme_stylebox_override("pressed", _pill(Color(0.22, 0.14, 0.08)))
 	button.pressed.connect(_connect)
 	box.add_child(button)
 	status_label = Label.new()
@@ -319,6 +345,15 @@ func _build_connect_screen() -> void:
 	backdrop.add_child(credits)
 	# The whole title screen comes and goes with the sign-in card.
 	connect_panel.visibility_changed.connect(func() -> void: backdrop.visible = connect_panel.visible)
+
+
+## A rounded pill button with a gold rim, the main action of the title screen.
+static func _pill(color: Color) -> StyleBoxFlat:
+	var style := UiTheme._box(color, 24, 3.0, UiTheme.GOLD, 8)
+	style.shadow_color = Color(0, 0, 0, 0.45)
+	style.shadow_size = 5
+	style.shadow_offset = Vector2(0, 3)
+	return style
 
 
 func _device_id() -> String:
@@ -649,15 +684,7 @@ func _on_welcomed() -> void:
 	flare_visual = HandFlareVisual.new()
 	flare_visual.name = "HandFlare"
 	avatar.add_child(flare_visual)
-	var label := Label3D.new()
-	label.text = name_edit.text
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.no_depth_test = true
-	label.pixel_size = 0.009
-	label.font_size = 28
-	label.outline_size = 8
-	label.position = Vector3(0, 2.5, 0)
-	avatar.add_child(label)
+	# No name over your own head: your name is on the portrait plate; other players keep theirs.
 	add_child(avatar)
 
 
@@ -691,6 +718,10 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_frames += 1
+	if _demo == "title" and _screenshot_path != "" and _frames == 90: # The title screen alone (screenshots).
+		RenderingServer.force_draw()
+		get_viewport().get_texture().get_image().save_png(_screenshot_path)
+		get_tree().quit()
 	if client == null or not client.welcomed or not client.you.has("x"):
 		return
 	client.decay_correction(delta)
@@ -1197,6 +1228,11 @@ func _run_demo() -> void:
 				client.use_item("jacket_2")
 			if _demo_frames == 110:
 				hud.toggle_inventory()
+				# CGAME_DEMO_TAB=n opens another tab of the window for its screenshot.
+				if OS.get_environment("CGAME_DEMO_TAB").is_valid_int() and hud._inventory_tabs != null:
+					hud._inventory_tabs.current_tab = int(OS.get_environment("CGAME_DEMO_TAB"))
+				if OS.get_environment("CGAME_DEMO_CRAFT") == "1":
+					hud.toggle_crafting()
 		"sky":
 			if _demo_frames == 40:
 				var vista := _open_shore()

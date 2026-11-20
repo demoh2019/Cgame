@@ -10,6 +10,7 @@ const Contracts = preload("res://scripts/shared/contracts.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
+const ItemIcons = preload("res://scripts/client/item_icons.gd")
 
 const INK := Color(0.96, 0.97, 1.0)
 const DIM := Color(0.72, 0.76, 0.84)
@@ -33,6 +34,13 @@ var _last_skill := ""
 var _last_skill_time := -100.0
 var _time := 0.0
 var _font: Font
+var _textures: Dictionary = {}
+var _vitals_bottom := 150.0 # Where the vitals block ends, so the quest card can sit under it.
+
+const WOOD := Color(0.24, 0.16, 0.1)
+const BRONZE := Color(0.72, 0.55, 0.3)
+const PARCHMENT := Color(0.93, 0.86, 0.72)
+const INK_DARK := Color(0.24, 0.15, 0.08)
 
 
 func setup(p_client) -> void:
@@ -41,6 +49,33 @@ func setup(p_client) -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_font = ThemeDB.fallback_font
 	client.event_received.connect(_on_event)
+
+
+## An interface silhouette (assets/icons/ui) or item icon, loaded once.
+func _texture(path: String) -> Texture2D:
+	if not _textures.has(path):
+		_textures[path] = load(path) if ResourceLoader.exists(path) else null
+	return _textures[path]
+
+
+## A white silhouette drawn centred in a square of side `size`, with a soft dark copy under it.
+func _glyph(path: String, center: Vector2, size: float, color: Color) -> void:
+	var texture: Texture2D = _texture(path)
+	if texture == null:
+		return
+	var rect := Rect2(center - Vector2(size, size) * 0.5, Vector2(size, size))
+	draw_texture_rect(texture, Rect2(rect.position + Vector2(1.5, 2.0), rect.size), false, Color(0, 0, 0, 0.55))
+	draw_texture_rect(texture, rect, false, color)
+
+
+## A round medallion: a dark wooden rim, a bronze ring and a coloured face lit from above.
+func _medallion(center: Vector2, radius: float, face: Color, ring: Color) -> void:
+	draw_circle(center + Vector2(0, 3), radius + 2.0, Color(0, 0, 0, 0.35))
+	draw_circle(center, radius + 1.0, WOOD)
+	draw_arc(center, radius - 1.5, 0, TAU, 48, ring, 3.0, true)
+	draw_circle(center, radius - 4.0, face.darkened(0.35))
+	draw_circle(center + Vector2(0, -(radius - 4.0) * 0.18), (radius - 4.0) * 0.82, face)
+	draw_arc(center, radius - 4.5, PI * 1.15, PI * 1.85, 24, Color(1, 1, 1, 0.22), 2.0, true)
 
 
 func _on_event(event: Dictionary) -> void:
@@ -288,7 +323,6 @@ func _draw_edge_feedback(you: Dictionary, view: Vector2) -> void:
 
 
 func _draw_vitals(you: Dictionary) -> void:
-	var origin := Vector2(16, 16)
 	var maximum: float = maxf(float(you.get("max_health", Defs.MAX_HEALTH)), 1.0)
 	var health: float = float(you["health"])
 	var statuses: Array = []
@@ -304,49 +338,74 @@ func _draw_vitals(you: Dictionary) -> void:
 		statuses.append(["FRACTURE %d%%" % int(fracture), Color(0.95, 0.65, 0.3), "bolt"])
 	if exposure > 0.5:
 		statuses.append(["COLD %d%%" % int(exposure), Color(0.5, 0.82, 0.98), "flake"])
-	var rows := 1 if statuses.is_empty() else 2
-	var card := Rect2(origin, Vector2(318, 134 + rows * 30 - 30))
-	_card(card)
-	# Level badge: the sum of all skill levels.
-	var badge := origin + Vector2(34, 34)
-	draw_circle(badge, 22, Color(0, 0, 0, 0.5))
-	draw_arc(badge, 21, -PI * 0.5, -PI * 0.5 + TAU * clampf(_skill_progress_total(), 0.0, 1.0), 40, GOLD, 3.0, true)
-	draw_arc(badge, 21, 0, TAU, 40, Color(1, 1, 1, 0.12), 1.0)
-	_text(badge + Vector2(-20, 6), str(_total_level()), 18, GOLD, HORIZONTAL_ALIGNMENT_CENTER, 40)
+	# The portrait medallion with the skill progress around it and the level on a small badge.
+	var portrait := Vector2(66, 64)
+	var fraction: float = clampf(health / maximum, 0.0, 1.0)
+	var pulse: float = 0.5 + 0.5 * sin(_time * 7.0) if fraction < 0.3 else 0.0
+	_medallion(portrait, 50.0, Color(0.36, 0.3, 0.26).lerp(Color(0.55, 0.16, 0.14), pulse * 0.6), BRONZE)
+	draw_arc(portrait, 48.5, -PI * 0.5, -PI * 0.5 + TAU * clampf(_skill_progress_total(), 0.0, 1.0), 64, Color(1.0, 0.82, 0.4), 4.0, true)
+	_glyph("res://assets/icons/ui/portrait.svg", portrait + Vector2(0, 2), 62.0, Color(0.95, 0.88, 0.74))
+	var badge := portrait + Vector2(-36, 34)
+	draw_circle(badge, 17.0, WOOD)
+	draw_circle(badge, 14.5, Color(0.16, 0.11, 0.07))
+	draw_arc(badge, 15.5, 0, TAU, 32, BRONZE, 2.0, true)
+	_text(badge + Vector2(-17, 6), str(_total_level()), 16, GOLD, HORIZONTAL_ALIGNMENT_CENTER, 34)
+	# Name plate on parchment, then the bars.
+	var left := 122.0
+	var plate := Rect2(Vector2(left - 14.0, 18), Vector2(232, 26))
+	_box("nameplate", PARCHMENT, 6, 2.0, WOOD, 0).draw(get_canvas_item(), plate)
 	var title: String = "Survivor"
 	if "player_name" in client:
 		title = str(client.player_name)
-	_text(origin + Vector2(66, 28), title, 17, INK)
+	draw_string(_font, plate.position + Vector2(0, 19), title, HORIZONTAL_ALIGNMENT_CENTER, plate.size.x, 15, INK_DARK)
+	var shown: float = _ease("health", fraction, 9.0)
+	_trail_health = move_toward(_trail_health, fraction, get_process_delta_time() * 0.18) if fraction < _trail_health else fraction
+	var health_color := Color(0.78, 0.16, 0.14).lerp(Color(0.86, 0.24, 0.18), clampf(fraction, 0.0, 1.0))
+	_framed_bar(Rect2(Vector2(left - 14.0, 48), Vector2(232, 20)), shown, health_color, _trail_health,
+		"%d / %d" % [mini(roundi(health), roundi(maximum)), roundi(maximum)])
+	var stamina: float = clampf(float(you.get("stamina", Defs.MAX_STAMINA)) / Defs.MAX_STAMINA, 0.0, 1.0)
+	var energy: float = clampf(float(you.get("combat_energy", Defs.COMBAT_ENERGY_MAX)) / Defs.COMBAT_ENERGY_MAX, 0.0, 1.0)
+	_framed_bar(Rect2(Vector2(left - 14.0, 71), Vector2(232, 12)), _ease("energy", energy, 12.0), Color(0.24, 0.5, 0.92), -1.0,
+		"%d / %d" % [roundi(energy * Defs.COMBAT_ENERGY_MAX), roundi(Defs.COMBAT_ENERGY_MAX)], 10)
+	_framed_bar(Rect2(Vector2(left - 14.0, 86), Vector2(232, 7)), _ease("stamina", stamina, 12.0), Color(0.5, 0.82, 0.32), -1.0, "", 0)
+	# Food and water as big numbers with their icons, as in survival games; red when running out.
+	var hunger: float = clampf(float(you["hunger"]) / 100.0, 0.0, 1.0)
+	var thirst: float = clampf(float(you["thirst"]) / 100.0, 0.0, 1.0)
+	var food_color := Color(0.98, 0.72, 0.36) if hunger > 0.2 else Color(1.0, 0.35, 0.28)
+	var water_color := Color(0.5, 0.75, 1.0) if thirst > 0.2 else Color(1.0, 0.35, 0.28)
+	_glyph("res://assets/icons/ui/stat_food.svg", Vector2(left, 112), 22.0, food_color)
+	_text(Vector2(left + 14.0, 120), str(roundi(hunger * 100.0)), 19, food_color)
+	_glyph("res://assets/icons/ui/stat_water.svg", Vector2(left + 66.0, 112), 20.0, water_color)
+	_text(Vector2(left + 79.0, 120), str(roundi(thirst * 100.0)), 19, water_color)
 	var weapon_name: String = "Fists"
 	if str(you.get("weapon", "")) != "":
 		weapon_name = str(Defs.item(str(you["weapon"])).get("name", you["weapon"]))
-	_text(origin + Vector2(66, 47), "%s   |   %d kills" % [weapon_name, int(you.get("kills", 0))], 12, DIM)
-	# Health with a trailing "recent damage" bar.
-	var fraction: float = clampf(health / maximum, 0.0, 1.0)
-	var shown: float = _ease("health", fraction, 9.0)
-	_trail_health = move_toward(_trail_health, fraction, get_process_delta_time() * 0.18) if fraction < _trail_health else fraction
-	var heart_center := origin + Vector2(26, 76)
-	var pulse: float = 1.0 + (0.1 * sin(_time * 7.0) if fraction < 0.3 else 0.0)
-	_icon_heart(heart_center, 26.0 * pulse, Color(0.95, 0.25, 0.3))
-	var health_color := Color(0.85, 0.2, 0.25).lerp(Color(0.35, 0.8, 0.3), clampf((fraction - 0.25) / 0.5, 0.0, 1.0))
-	_bar(Rect2(origin + Vector2(48, 62), Vector2(258, 26)), shown, health_color, _trail_health, "%d / %d" % [mini(roundi(health), roundi(maximum)), roundi(maximum)], 9)
-	# Stamina and combat energy, thin.
-	var stamina: float = clampf(float(you.get("stamina", Defs.MAX_STAMINA)) / Defs.MAX_STAMINA, 0.0, 1.0)
-	var energy: float = clampf(float(you.get("combat_energy", Defs.COMBAT_ENERGY_MAX)) / Defs.COMBAT_ENERGY_MAX, 0.0, 1.0)
-	_icon_bolt(origin + Vector2(26, 100), 18.0, Color(0.5, 0.9, 0.4))
-	_bar(Rect2(origin + Vector2(48, 95), Vector2(124, 11)), _ease("stamina", stamina, 12.0), Color(0.45, 0.85, 0.35), -1.0, "", 5)
-	_icon_star(origin + Vector2(184, 100), 14.0, Color(1.0, 0.7, 0.25))
-	_bar(Rect2(origin + Vector2(196, 95), Vector2(110, 11)), _ease("energy", energy, 12.0), Color(1.0, 0.65, 0.2), -1.0, "", 5)
-	# Hunger and thirst.
-	var hunger: float = clampf(float(you["hunger"]) / 100.0, 0.0, 1.0)
-	var thirst: float = clampf(float(you["thirst"]) / 100.0, 0.0, 1.0)
-	_icon_apple(origin + Vector2(26, 122), 20.0, Color(0.95, 0.65, 0.2) if hunger > 0.2 else Color(1.0, 0.3, 0.2))
-	_bar(Rect2(origin + Vector2(48, 116), Vector2(124, 13)), _ease("hunger", hunger), Color(0.93, 0.66, 0.2) if hunger > 0.2 else Color(0.95, 0.3, 0.2), -1.0, "", 6)
-	_icon_drop(origin + Vector2(184, 122), 20.0, Color(0.35, 0.65, 1.0) if thirst > 0.2 else Color(1.0, 0.35, 0.3))
-	_bar(Rect2(origin + Vector2(196, 116), Vector2(110, 13)), _ease("thirst", thirst), Color(0.3, 0.6, 0.98) if thirst > 0.2 else Color(0.95, 0.3, 0.3), -1.0, "", 6)
-	var x := origin.x + 12.0
+	_text(Vector2(left + 128.0, 109), weapon_name, 11, DIM)
+	_text(Vector2(left + 128.0, 123), "%d kills" % int(you.get("kills", 0)), 11, DIM)
+	var x := 16.0
+	_vitals_bottom = 140.0
 	for status in statuses:
-		x += _chip(Vector2(x, origin.y + 138.0), status[0], status[1], status[2])
+		x += _chip(Vector2(x, 132.0), status[0], status[1], status[2])
+		_vitals_bottom = 166.0
+
+
+## A bar in a dark wooden frame with a light trail of recent damage and its numbers on it.
+func _framed_bar(rect: Rect2, value: float, color: Color, trail: float = -1.0, caption: String = "", caption_size: int = 12) -> void:
+	value = clampf(value, 0.0, 1.0)
+	var radius: int = int(minf(rect.size.y * 0.5, 6.0))
+	_box("fbar%d" % radius, Color(0.08, 0.05, 0.03, 0.85), radius, 2.0, WOOD).draw(get_canvas_item(), rect)
+	var inner := rect.grow(-2.0)
+	if trail > value:
+		_box("ftrail%d" % radius, Color(1.0, 0.9, 0.75, 0.6), maxi(radius - 1, 0)).draw(get_canvas_item(),
+			Rect2(inner.position, Vector2(inner.size.x * trail, inner.size.y)))
+	if value > 0.004:
+		var fill := Rect2(inner.position, Vector2(maxf(inner.size.x * value, 2.0), inner.size.y))
+		_box("ffill" + color.to_html() + str(radius), color, maxi(radius - 1, 0)).draw(get_canvas_item(), fill)
+		_box("fgloss%d" % radius, Color(1, 1, 1, 0.2), maxi(radius - 2, 0)).draw(get_canvas_item(),
+			Rect2(fill.position + Vector2(1, 1), Vector2(maxf(fill.size.x - 2.0, 0.0), fill.size.y * 0.4)))
+	if caption != "" and caption_size > 0:
+		_text(Vector2(rect.position.x, rect.position.y + rect.size.y * 0.5 + caption_size * 0.36), caption, caption_size, INK,
+			HORIZONTAL_ALIGNMENT_CENTER, rect.size.x)
 
 
 func _draw_top_strip(you: Dictionary, view: Vector2) -> void:
@@ -384,8 +443,9 @@ func _draw_top_strip(you: Dictionary, view: Vector2) -> void:
 			int(round(100.0 * float(spore_state.get("protection", 0.0))))]
 		_text(Vector2(view.x * 0.5 - 180.0, 107.0), warning, 13,
 			Color(1.0, 0.55, 0.32), HORIZONTAL_ALIGNMENT_CENTER, 360.0)
-	var fps_text := "%d fps" % Engine.get_frames_per_second()
-	_text(Vector2(view.x * 0.5 - 40.0, 86.0), fps_text, 10, Color(1, 1, 1, 0.35), HORIZONTAL_ALIGNMENT_CENTER, 80.0)
+	if details_visible: # The frame counter is a debugging aid; it shows with the F9 readout only.
+		var fps_text := "%d fps" % Engine.get_frames_per_second()
+		_text(Vector2(view.x * 0.5 - 40.0, 86.0), fps_text, 10, Color(1, 1, 1, 0.35), HORIZONTAL_ALIGNMENT_CENTER, 80.0)
 
 
 func _draw_quest_card(you: Dictionary, view: Vector2) -> void:
@@ -400,9 +460,9 @@ func _draw_quest_card(you: Dictionary, view: Vector2) -> void:
 	var alerts: Array = _alerts()
 	if lines.is_empty() and alerts.is_empty():
 		return
-	var width := 240.0
-	var x := view.x - width - 16.0
-	var y := 234.0
+	var width := 300.0
+	var x := 16.0
+	var y := _vitals_bottom + 8.0
 	var wrapped: Array = []
 	var height := 14.0
 	for entry in lines:
@@ -463,64 +523,71 @@ func _wrap(text: String, width: float, size: int) -> Array:
 func _draw_action_bar(you: Dictionary, view: Vector2) -> void:
 	var weapon: String = str(you.get("weapon", ""))
 	var active: Dictionary = Combat.active_skill(weapon)
-	var slot := 62.0
-	var gap := 10.0
-	var slots := 5
-	var total := slot * slots + gap * (slots - 1)
-	var x := view.x * 0.5 - total * 0.5
-	var y := view.y - slot - 22.0
-	_card(Rect2(x - 12, y - 10, total + 24, slot + 20), 14)
+	var radius := 31.0
+	var step := 76.0
+	var count := 5
+	var x0 := view.x * 0.5 - step * float(count - 1) * 0.5
+	var y := view.y - radius - 26.0
 	var weapon_info: Dictionary = Defs.item(weapon)
 	var ammo_id: String = str(weapon_info.get("ammo", ""))
-	var ammo_text: String = ""
-	if ammo_id != "":
-		ammo_text = str(client.inventory.count(ammo_id))
-	# 0 weapon
-	var weapon_rect := Rect2(x, y, slot, slot)
-	_slot_box(weapon_rect, GOLD if weapon != "" else Color(1, 1, 1, 0.2))
-	var center := weapon_rect.position + weapon_rect.size * 0.5 + Vector2(0, -3)
+	# 0 weapon: the icon of the item in hand, the ammo left as a badge.
+	var center := Vector2(x0, y)
+	_medallion(center, radius, Color(0.55, 0.2, 0.15), BRONZE if weapon != "" else Color(0.45, 0.4, 0.35))
 	if weapon == "":
-		_icon_fist(center, 34, DIM)
-	elif str(weapon_info.get("weapon", "melee")) == "ranged":
-		_icon_gun(center, 38, Color(0.8, 0.85, 0.95))
+		_glyph("res://assets/icons/ui/act_fist.svg", center, 34.0, Color(0.98, 0.93, 0.85))
 	else:
-		_icon_sword(center, 38, Color(0.85, 0.88, 0.95))
-	_text(weapon_rect.position + Vector2(0, slot - 6), ammo_text if ammo_text != "" else "MELEE", 11, Color(1.0, 0.85, 0.4) if ammo_text != "" else DIM, HORIZONTAL_ALIGNMENT_CENTER, slot)
-	_keycap(weapon_rect, "LMB")
-	# 1 active skill (G) with a cooldown sweep
-	var skill_rect := Rect2(x + (slot + gap), y, slot, slot)
+		_glyph(ItemIcons.icon(weapon).resource_path if ItemIcons.icon(weapon) != null else "", center, 36.0, Color(0.98, 0.93, 0.85))
+	if ammo_id != "":
+		_count_badge(center + Vector2(radius * 0.72, -radius * 0.72), str(client.inventory.count(ammo_id)), Color(1.0, 0.85, 0.4))
+	_key_badge(center, radius, "LMB")
+	# 1 active skill (G) with its energy cost and a cooldown sweep.
+	center = Vector2(x0 + step, y)
 	var skill_cooldown: float = float(you.get("skill_cooldown", 0.0))
 	var skill_total: float = float(active.get("cooldown", 1.0)) if not active.is_empty() else 1.0
 	var cost: float = float(active.get("energy_cost", 0.0))
 	var affordable: bool = float(you.get("combat_energy", 0.0)) >= cost
-	_slot_box(skill_rect, Color(1.0, 0.7, 0.25) if (not active.is_empty() and affordable) else Color(1, 1, 1, 0.2))
-	_icon_star(skill_rect.position + skill_rect.size * 0.5 + Vector2(0, -3), 36, Color(1.0, 0.75, 0.3) if not active.is_empty() else Color(1, 1, 1, 0.25))
+	var skill_ready: bool = not active.is_empty() and affordable
+	_medallion(center, radius, Color(0.42, 0.22, 0.58) if not active.is_empty() else Color(0.3, 0.27, 0.32), Color(1.0, 0.75, 0.3) if skill_ready else Color(0.45, 0.4, 0.35))
+	_glyph("res://assets/icons/ui/act_skill.svg", center, 34.0, Color(0.98, 0.93, 0.85, 1.0 if not active.is_empty() else 0.35))
 	if not active.is_empty():
-		_text(skill_rect.position + Vector2(0, slot - 6), "%d" % int(cost), 11, Color(1.0, 0.8, 0.4) if affordable else Color(1.0, 0.4, 0.35), HORIZONTAL_ALIGNMENT_CENTER, slot)
-	else:
-		_text(skill_rect.position + Vector2(0, slot - 6), "NONE", 11, DIM, HORIZONTAL_ALIGNMENT_CENTER, slot)
-	_sweep(skill_rect, skill_cooldown / maxf(skill_total, 0.1))
-	_keycap(skill_rect, "G")
+		_count_badge(center + Vector2(radius * 0.72, -radius * 0.72), "%d" % int(cost), Color(0.55, 0.75, 1.0) if affordable else Color(1.0, 0.4, 0.35))
+	_sweep(center, radius - 4.0, skill_cooldown / maxf(skill_total, 0.1))
+	_key_badge(center, radius, "G")
 	# 2 dodge (Space)
-	var dodge_rect := Rect2(x + (slot + gap) * 2.0, y, slot, slot)
+	center = Vector2(x0 + step * 2.0, y)
 	var dodge_cooldown: float = float(you.get("dodge_cooldown", 0.0))
-	_slot_box(dodge_rect, Color(0.5, 0.85, 1.0) if dodge_cooldown <= 0.0 else Color(1, 1, 1, 0.2))
-	_icon_dodge(dodge_rect.position + dodge_rect.size * 0.5 + Vector2(0, -3), 36, Color(0.6, 0.88, 1.0))
-	_text(dodge_rect.position + Vector2(0, slot - 6), "DODGE", 11, DIM, HORIZONTAL_ALIGNMENT_CENTER, slot)
-	_sweep(dodge_rect, dodge_cooldown / Evasion.COOLDOWN)
-	_keycap(dodge_rect, "SPACE")
-	# 3 drink (F)
-	var drink_rect := Rect2(x + (slot + gap) * 3.0, y, slot, slot)
-	_slot_box(drink_rect, Color(0.4, 0.7, 1.0) if _near_water() else Color(1, 1, 1, 0.2))
-	_icon_drop(drink_rect.position + drink_rect.size * 0.5 + Vector2(0, -3), 36, Color(0.4, 0.7, 1.0) if _near_water() else Color(0.5, 0.6, 0.75))
-	_text(drink_rect.position + Vector2(0, slot - 6), "DRINK", 11, DIM, HORIZONTAL_ALIGNMENT_CENTER, slot)
-	_keycap(drink_rect, "F")
+	_medallion(center, radius, Color(0.16, 0.42, 0.5), Color(0.5, 0.85, 1.0) if dodge_cooldown <= 0.0 else Color(0.45, 0.4, 0.35))
+	_glyph("res://assets/icons/ui/act_dodge.svg", center, 34.0, Color(0.98, 0.93, 0.85))
+	_sweep(center, radius - 4.0, dodge_cooldown / Evasion.COOLDOWN)
+	_key_badge(center, radius, "SPACE")
+	# 3 drink (F), bright only next to water.
+	center = Vector2(x0 + step * 3.0, y)
+	var water: bool = _near_water()
+	_medallion(center, radius, Color(0.16, 0.3, 0.58) if water else Color(0.25, 0.28, 0.34), Color(0.45, 0.75, 1.0) if water else Color(0.45, 0.4, 0.35))
+	_glyph("res://assets/icons/ui/act_drink.svg", center, 30.0, Color(0.98, 0.93, 0.85, 1.0 if water else 0.45))
+	_key_badge(center, radius, "F")
 	# 4 interact (E)
-	var use_rect := Rect2(x + (slot + gap) * 4.0, y, slot, slot)
-	_slot_box(use_rect, Color(1, 1, 1, 0.3))
-	_icon_hand(use_rect.position + use_rect.size * 0.5 + Vector2(0, -3), 36, Color(0.9, 0.92, 1.0))
-	_text(use_rect.position + Vector2(0, slot - 6), "USE", 11, DIM, HORIZONTAL_ALIGNMENT_CENTER, slot)
-	_keycap(use_rect, "E")
+	center = Vector2(x0 + step * 4.0, y)
+	_medallion(center, radius, Color(0.24, 0.42, 0.2), BRONZE)
+	_glyph("res://assets/icons/ui/act_use.svg", center, 32.0, Color(0.98, 0.93, 0.85))
+	_key_badge(center, radius, "E")
+
+
+## The key of a round button, on a small cream disc at its lower right.
+func _key_badge(center: Vector2, radius: float, label: String) -> void:
+	var size: int = 10 if label.length() <= 1 else 8
+	var width: float = maxf(_font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x + 8.0, 17.0)
+	var at := center + Vector2(radius * 0.62, radius * 0.66)
+	var rect := Rect2(at - Vector2(width * 0.5, 8.5), Vector2(width, 17.0))
+	_box("keybadge", PARCHMENT, 8, 1.5, WOOD).draw(get_canvas_item(), rect)
+	draw_string(_font, rect.position + Vector2(0, 12.5), label, HORIZONTAL_ALIGNMENT_CENTER, width, size, INK_DARK)
+
+
+func _count_badge(center: Vector2, text: String, color: Color) -> void:
+	var width: float = maxf(_font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 10.0, 20.0)
+	var rect := Rect2(center - Vector2(width * 0.5, 10.0), Vector2(width, 20.0))
+	_box("countbadge", Color(0.1, 0.07, 0.04, 0.92), 10, 1.5, BRONZE).draw(get_canvas_item(), rect)
+	draw_string(_font, rect.position + Vector2(0, 14.5), text, HORIZONTAL_ALIGNMENT_CENTER, width, 11, color)
 
 
 func _near_water() -> bool:
@@ -534,32 +601,17 @@ func _near_water() -> bool:
 	return false
 
 
-func _slot_box(rect: Rect2, edge: Color) -> void:
-	_box("slot" + edge.to_html(), Color(0.02, 0.03, 0.05, 0.78), 10, 2.0, edge).draw(get_canvas_item(), rect)
-
-
-func _keycap(rect: Rect2, label: String) -> void:
-	var width: float = _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x + 10.0
-	var cap := Rect2(Vector2(rect.position.x + rect.size.x * 0.5 - width * 0.5, rect.position.y - 8.0), Vector2(width, 16.0))
-	_box("cap", Color(0.12, 0.13, 0.18, 0.96), 5, 1.0, Color(1, 1, 1, 0.35)).draw(get_canvas_item(), cap)
-	draw_string(_font, cap.position + Vector2(0, 12.0), label, HORIZONTAL_ALIGNMENT_CENTER, width, 10, INK)
-
-
-## A clockwise pie of darkness that shrinks as the cooldown ends, with the seconds left in the middle.
-func _sweep(rect: Rect2, remaining: float) -> void:
+## A clockwise pie of darkness over a round button that shrinks as the cooldown ends.
+func _sweep(center: Vector2, radius: float, remaining: float) -> void:
 	remaining = clampf(remaining, 0.0, 1.0)
 	if remaining <= 0.002:
 		return
-	var center := rect.position + rect.size * 0.5
 	var points := PackedVector2Array([center])
-	var steps := 28
-	var start := -PI * 0.5
+	var steps := 32
 	for i in steps + 1:
-		var angle: float = start + TAU * remaining * float(i) / float(steps)
-		var direction := Vector2(cos(angle), sin(angle))
-		var scale: float = minf(rect.size.x * 0.5 / maxf(absf(direction.x), 0.001), rect.size.y * 0.5 / maxf(absf(direction.y), 0.001))
-		points.append(center + direction * scale * 0.96)
-	draw_colored_polygon(points, Color(0, 0, 0, 0.62))
+		var angle: float = -PI * 0.5 + TAU * remaining * float(i) / float(steps)
+		points.append(center + Vector2(cos(angle), sin(angle)) * radius)
+	draw_colored_polygon(points, Color(0, 0, 0, 0.6))
 
 
 func _draw_xp_strip(view: Vector2) -> void:

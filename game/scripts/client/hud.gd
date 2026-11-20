@@ -27,6 +27,8 @@ const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const PartyFrames = preload("res://scripts/client/party_frames.gd")
 const HudSkin = preload("res://scripts/client/hud_skin.gd")
+const UiTheme = preload("res://scripts/client/ui_theme.gd")
+const ItemIcons = preload("res://scripts/client/item_icons.gd")
 const EquipmentPresets = preload("res://scripts/shared/equipment_presets.gd")
 
 var client
@@ -43,6 +45,12 @@ var _log: Label
 var _inventory_panel: PanelContainer
 var _inventory_grid: GridContainer
 var _preset_labels: Array[Label] = []
+# Where each tab of the inventory window starts in the action list: [child index, tab name], in build order.
+var _action_sections: Array = [[0, "Gear"]]
+var _inventory_summary: Label
+var _inventory_tabs: TabContainer
+var _actions_panel: PanelContainer
+var _equip_row: HBoxContainer
 var _stash_grid: GridContainer
 var _craft_panel: PanelContainer
 var _craft_list: VBoxContainer
@@ -116,12 +124,14 @@ func _build() -> void:
 	radar.client = client
 	radar.world = client.world
 	add_child(radar)
-	radar.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	radar.offset_left = -222.0
-	radar.offset_top = 16.0
+	# The minimap sits in the lower right corner, as in most online RPGs; the menu buttons take the top right.
+	radar.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	radar.offset_left = -206.0
+	radar.offset_top = -206.0
 	radar.offset_right = -16.0
-	radar.offset_bottom = 222.0
+	radar.offset_bottom = -16.0
 	_radar = radar
+	_build_menu_bar()
 
 	var top_left := VBoxContainer.new()
 	top_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -276,6 +286,7 @@ func _build() -> void:
 		else:
 			client.salvage_gear(item_id))
 	salvage_row.add_child(salvage_button)
+	_action_sections.append([inventory_box.get_child_count(), "Field"])
 	var campfire_button := Button.new()
 	campfire_button.text = "Light field campfire (3 wood T1, 1 stone T1)"
 	campfire_button.tooltip_text = "Shared warmth for 5 minutes, outside the safe settlement"
@@ -525,6 +536,7 @@ func _build() -> void:
 	rest_button.pressed.connect(Callable(client, "rest"))
 	inventory_box.add_child(rest_button)
 
+	_action_sections.append([inventory_box.get_child_count(), "Trade"])
 	var vendor_title := Label.new()
 	vendor_title.text = "NPC vendor (hub or village workbench)"
 	inventory_box.add_child(vendor_title)
@@ -590,6 +602,7 @@ func _build() -> void:
 	inventory_box.add_child(contract_title)
 	var contract_actions := HBoxContainer.new()
 	inventory_box.add_child(contract_actions)
+	_action_sections.append([inventory_box.get_child_count(), "Field"])
 	var fish_button := Button.new()
 	fish_button.text = "Cast fishing rod (near shoreline; 5 seconds)"
 	fish_button.pressed.connect(func() -> void: client.fish())
@@ -650,6 +663,7 @@ func _build() -> void:
 	delivery.pressed.connect(_deliver_nearest_outpost_provisions)
 	inventory_box.add_child(delivery)
 
+	_action_sections.append([inventory_box.get_child_count(), "Party"])
 	var party_title := Label.new()
 	party_title.text = "Survivor party (nearby invites, up to 5 players)"
 	inventory_box.add_child(party_title)
@@ -696,6 +710,7 @@ func _build() -> void:
 	vote_not_ready.text = "Not ready"
 	vote_not_ready.pressed.connect(func() -> void: client.party_ready_answer(false))
 	ready_buttons.add_child(vote_not_ready)
+	_action_sections.append([inventory_box.get_child_count(), "Combat"])
 	var duel_heading := Label.new()
 	duel_heading.text = "Training duel (green hub only, no gear loss)"
 	inventory_box.add_child(duel_heading)
@@ -922,6 +937,7 @@ func _build() -> void:
 			say("Party: select the member to remove"))
 	party_buttons.add_child(kick_member)
 	# Equipment-free support role, paid for with real carried medical items.
+	_action_sections.append([inventory_box.get_child_count(), "Party"])
 	var aid_row := HBoxContainer.new()
 	inventory_box.add_child(aid_row)
 	var aid_items := OptionButton.new()
@@ -965,6 +981,7 @@ func _build() -> void:
 			client.party_feast(str(feast_item.get_selected_metadata())))
 	feast_row.add_child(feast_button)
 
+	_action_sections.append([inventory_box.get_child_count(), "Trade"])
 	var trade_title := Label.new()
 	trade_title.text = "Player barter (safe hub, within 6 metres)"
 	inventory_box.add_child(trade_title)
@@ -1148,7 +1165,7 @@ func set_details_visible(shown: bool) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.physical_keycode == KEY_F9 and _skin != null: # F3 is Survey ruins.
+		if event.physical_keycode == KEY_QUOTELEFT and _skin != null: # Every F key is a game action; ` is the usual debug key.
 			set_details_visible(not _skin.details_visible)
 		if event.physical_keycode == KEY_M and _radar != null:
 			_radar.visible = not _radar.visible
@@ -1166,74 +1183,262 @@ func quick_cook() -> void:
 
 func toggle_inventory() -> void:
 	_inventory_panel.visible = not _inventory_panel.visible
+	_actions_panel.visible = _inventory_panel.visible and not _craft_panel.visible
 	if _inventory_panel.visible:
-		_inventory_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+		_dock(_inventory_panel, false)
+		_dock(_actions_panel, true)
 		client.market_list()
 
 
-## The inventory window holds the backpack, the stash and dozens of actions added over time. Lay it out as two columns:
-## the backpack and stash on the left, every action in a scrolling list on the right, centred and always on screen.
+## Windows sit against a side of the screen, under the menu buttons and above the action bar, like the bag and the
+## workshop windows of an online RPG, so the character in the middle stays in view.
+func _dock(panel: Control, left: bool) -> void:
+	var view: Vector2 = get_viewport().get_visible_rect().size
+	var width: float = maxf(panel.get_combined_minimum_size().x, 300.0)
+	panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	panel.position = Vector2(16.0 if left else view.x - width - 16.0, 84.0)
+	panel.size = Vector2(width, minf(view.y - 84.0 - 112.0, maxf(panel.get_combined_minimum_size().y, 300.0)))
+
+
+## The inventory window holds the backpack, the stash and dozens of actions added over time. Laid out like the bag of an
+## online RPG: the bag docked on the right (what you wear on top, then icon slots for the backpack and the protected
+## stash), the actions docked on the left and sorted into tabs (gear, field, trade, party, combat), so each tab is one
+## short list instead of a hundred buttons in a row.
 func _arrange_inventory_window() -> void:
 	var box: VBoxContainer = _inventory_panel.get_child(0)
-	var columns := HBoxContainer.new()
-	columns.add_theme_constant_override("separation", 14)
-	var left := VBoxContainer.new()
-	left.custom_minimum_size = Vector2(390, 0)
-	var header := Label.new()
-	header.text = "BACKPACK"
-	header.add_theme_font_size_override("font_size", 18)
-	header.add_theme_color_override("font_color", Color(0.95, 0.78, 0.35))
-	left.add_child(header)
-	var hint := Label.new()
-	hint.text = "Click: use or equip.  Right click: stash one (at a workbench)."
-	hint.add_theme_font_size_override("font_size", 11)
-	hint.add_theme_color_override("font_color", Color(0.75, 0.8, 0.9))
-	left.add_child(hint)
+	_inventory_panel.remove_child(box)
+	var window := VBoxContainer.new()
+	window.add_theme_constant_override("separation", 8)
+	window.add_child(_window_header("Inventory", "Your bag", toggle_inventory))
+	_inventory_summary = Label.new()
+	_inventory_summary.add_theme_font_size_override("font_size", 12)
+	_inventory_summary.add_theme_color_override("font_color", UiTheme.INK_SOFT)
+	window.add_child(_inventory_summary)
+	window.add_child(_section_label("EQUIPPED", ""))
+	_equip_row = HBoxContainer.new()
+	_equip_row.add_theme_constant_override("separation", 8)
+	window.add_child(_equip_row)
+	window.add_child(_rule())
+	window.add_child(_section_label("BACKPACK", "Click: use or equip.  Right click: stash one at a workbench."))
 	var stash_scroll: Control = _stash_grid.get_parent()
 	var stash_title: Control = box.get_child(stash_scroll.get_index() - 1)
-	for moved in [_inventory_grid, stash_title, stash_scroll,
-			box.get_node("DepositAllMaterials"),
-			box.get_node("ExpeditionRestock")]:
+	_inventory_grid.get_parent().remove_child(_inventory_grid)
+	_inventory_grid.columns = 6
+	_inventory_grid.add_theme_constant_override("h_separation", 6)
+	_inventory_grid.add_theme_constant_override("v_separation", 6)
+	window.add_child(_inventory_grid)
+	stash_title.get_parent().remove_child(stash_title)
+	stash_title.queue_free()
+	window.add_child(_section_label("PROTECTED STASH", "Survives death. Click to take one out at a workbench."))
+	stash_scroll.get_parent().remove_child(stash_scroll)
+	stash_scroll.custom_minimum_size = Vector2(6 * 70, 60)
+	_stash_grid.columns = 7
+	_stash_grid.add_theme_constant_override("h_separation", 5)
+	_stash_grid.add_theme_constant_override("v_separation", 5)
+	window.add_child(stash_scroll)
+	for moved in [box.get_node("DepositAllMaterials"), box.get_node("ExpeditionRestock")]:
 		moved.get_parent().remove_child(moved)
-		left.add_child(moved)
-	(stash_title as Label).text = "PROTECTED STASH  (survives death; click to take one at a workbench)"
-	(stash_title as Label).add_theme_font_size_override("font_size", 12)
-	(stash_title as Label).add_theme_color_override("font_color", Color(0.55, 0.85, 1.0))
-	stash_scroll.custom_minimum_size = Vector2(380, 150)
-	var right := VBoxContainer.new()
-	var actions_title := Label.new()
-	actions_title.text = "ACTIONS"
-	actions_title.add_theme_font_size_override("font_size", 18)
-	actions_title.add_theme_color_override("font_color", Color(0.95, 0.78, 0.35))
-	right.add_child(actions_title)
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(430, 520)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	right.add_child(scroll)
-	_inventory_panel.remove_child(box)
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(box)
-	# The old one-line title is replaced by the column headers.
-	if box.get_child_count() > 0 and box.get_child(0) is Label:
-		box.get_child(0).queue_free()
-	# Long action labels wrap instead of widening the window.
-	for button in box.find_children("*", "Button", true, false):
-		if button is OptionButton:
+		window.add_child(moved)
+		for inner in moved.get_children():
+			(inner as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_inventory_panel.add_child(window)
+
+	# The actions, in build order, split at the section marks into tabs, in their own window on the left.
+	_actions_panel = PanelContainer.new()
+	_actions_panel.name = "ActionsWindow"
+	_actions_panel.visible = false
+	add_child(_actions_panel)
+	var actions := VBoxContainer.new()
+	actions.add_theme_constant_override("separation", 8)
+	_actions_panel.add_child(actions)
+	actions.add_child(_window_header("Actions", "Survivor's", func() -> void: _actions_panel.visible = false))
+	var tabs := TabContainer.new()
+	tabs.custom_minimum_size = Vector2(430, 560)
+	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_inventory_tabs = tabs
+	actions.add_child(tabs)
+	var pages: Dictionary = {}
+	var children: Array = box.get_children()
+	var section := 0
+	for index in children.size():
+		while section + 1 < _action_sections.size() and index >= int(_action_sections[section + 1][0]):
+			section += 1
+		var child: Node = children[index]
+		if child.is_queued_for_deletion() or child.get_parent() != box:
 			continue
-		(button as Button).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		(button as Button).alignment = HORIZONTAL_ALIGNMENT_LEFT
-		(button as Button).add_theme_font_size_override("font_size", 12)
-	columns.add_child(left)
-	columns.add_child(right)
-	_inventory_panel.add_child(columns)
+		if index == 0 and child is Label:
+			child.queue_free() # The old one-line title; the window header replaces it.
+			continue
+		var tab_name: String = str(_action_sections[section][1])
+		if not pages.has(tab_name):
+			var scroll := ScrollContainer.new()
+			scroll.name = tab_name
+			scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+			var page := VBoxContainer.new()
+			page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			page.add_theme_constant_override("separation", 6)
+			scroll.add_child(page)
+			tabs.add_child(scroll)
+			pages[tab_name] = page
+		box.remove_child(child)
+		(pages[tab_name] as VBoxContainer).add_child(child)
+	box.queue_free()
+	for page in pages.values():
+		_style_action_page(page)
+	tabs.current_tab = 0
+	# The workshop gets the same window header; its old one-line title becomes the hint under it.
+	var craft_box: VBoxContainer = _craft_panel.get_child(0)
+	var craft_hint: Label = craft_box.get_child(0)
+	craft_hint.text = "At a workbench in the hub or a village, or the field bench of a held outpost."
+	craft_hint.add_theme_font_size_override("font_size", 12)
+	craft_hint.add_theme_color_override("font_color", UiTheme.INK_SOFT)
+	var craft_header := _window_header("Workshop", "Survivor's", toggle_crafting)
+	craft_box.add_child(craft_header)
+	craft_box.move_child(craft_header, 0)
+
+
+## A window title: small owner line over a large name, a close button on the right.
+func _window_header(title: String, owner: String, close_action: Callable) -> Control:
+	var row := HBoxContainer.new()
+	var names := VBoxContainer.new()
+	names.add_theme_constant_override("separation", -4)
+	var small := Label.new()
+	small.text = owner
+	small.add_theme_font_size_override("font_size", 12)
+	small.add_theme_color_override("font_color", UiTheme.INK_SOFT)
+	names.add_child(small)
+	var big := Label.new()
+	big.text = title
+	big.add_theme_font_size_override("font_size", 26)
+	big.add_theme_color_override("font_color", UiTheme.INK)
+	names.add_child(big)
+	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(names)
+	var close := Button.new()
+	close.text = "X"
+	close.tooltip_text = "Close"
+	close.custom_minimum_size = Vector2(30, 30)
+	close.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	var round := UiTheme._box(UiTheme.WOOD, 15, 2.0, UiTheme.CREAM, 0)
+	for state in ["normal", "hover", "pressed"]:
+		close.add_theme_stylebox_override(state, round if state != "hover" else UiTheme._box(UiTheme.ACCENT, 15, 2.0, UiTheme.CREAM, 0))
+	close.pressed.connect(close_action)
+	row.add_child(close)
+	return row
+
+
+## Round buttons in the top right corner for every window: each presses the window's own hotkey, so the mouse and the
+## keyboard always do exactly the same thing.
+func _build_menu_bar() -> void:
+	var bar := HBoxContainer.new()
+	bar.name = "MenuBar"
+	bar.add_theme_constant_override("separation", 6)
+	bar.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	bar.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	bar.offset_right = -16.0
+	bar.offset_top = 14.0
+	add_child(bar)
+	for entry in [["menu_inventory", "Inventory (I)", KEY_I], ["menu_crafting", "Crafting (C)", KEY_C], ["menu_skills", "Skills and perks (K)", KEY_K],
+			["menu_map", "World map (J)", KEY_J], ["menu_help", "Controls (F2)", KEY_F2]]:
+		var button := Button.new()
+		button.custom_minimum_size = Vector2(46, 46)
+		button.tooltip_text = str(entry[1])
+		button.focus_mode = Control.FOCUS_NONE
+		button.icon = load("res://assets/icons/ui/%s.svg" % entry[0]) if ResourceLoader.exists("res://assets/icons/ui/%s.svg" % entry[0]) else null
+		button.expand_icon = true
+		button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		for state in ["normal", "hover", "pressed"]:
+			var round := StyleBoxFlat.new()
+			round.anti_aliasing = true
+			round.bg_color = Color(0.3, 0.2, 0.12) if state == "normal" else (Color(0.42, 0.29, 0.17) if state == "hover" else UiTheme.ACCENT)
+			round.set_corner_radius_all(23)
+			round.set_border_width_all(3)
+			round.border_color = Color(0.72, 0.55, 0.3) if state != "hover" else UiTheme.GOLD
+			round.set_content_margin_all(10)
+			round.shadow_color = Color(0, 0, 0, 0.4)
+			round.shadow_size = 4
+			round.shadow_offset = Vector2(0, 2)
+			button.add_theme_stylebox_override(state, round)
+		for state in ["icon_normal_color", "icon_hover_color", "icon_pressed_color", "icon_focus_color"]:
+			button.add_theme_color_override(state, Color(0.98, 0.92, 0.8))
+		var key: int = entry[2]
+		button.pressed.connect(func() -> void: _press_key(key))
+		bar.add_child(button)
+
+
+func _press_key(key: int) -> void:
+	for pressed in [true, false]:
+		var event := InputEventKey.new()
+		event.keycode = key
+		event.physical_keycode = key
+		event.pressed = pressed
+		Input.parse_input_event(event)
+
+
+## A heading with a small hint under it.
+func _section_label(text: String, hint: String) -> Control:
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 0)
+	var header := Label.new()
+	header.text = text
+	header.add_theme_font_size_override("font_size", 14)
+	header.add_theme_color_override("font_color", UiTheme.HEADING)
+	column.add_child(header)
+	if hint != "":
+		var small := Label.new()
+		small.text = hint
+		small.add_theme_font_size_override("font_size", 11)
+		small.add_theme_color_override("font_color", UiTheme.INK_SOFT)
+		column.add_child(small)
+	return column
+
+
+func _rule() -> Control:
+	var line := ColorRect.new()
+	line.color = Color(UiTheme.WOOD.r, UiTheme.WOOD.g, UiTheme.WOOD.b, 0.3)
+	line.custom_minimum_size = Vector2(0, 1)
+	return line
+
+
+func _style_action_page(page: VBoxContainer) -> void:
+	for child in page.get_children():
+		if child is Label:
+			var label := child as Label
+			label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			label.add_theme_font_size_override("font_size", 13)
+			if label.text.length() < 70 and not label.text.contains("\n"):
+				label.add_theme_color_override("font_color", UiTheme.HEADING)
+		elif child is Button and not child is OptionButton:
+			var button := child as Button
+			button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			button.add_theme_font_size_override("font_size", 13)
+			button.custom_minimum_size.y = 34
+		elif child is Container:
+			for inner in child.find_children("*", "Control", true, false):
+				if inner is Button:
+					(inner as Button).add_theme_font_size_override("font_size", 12)
+					(inner as Button).clip_text = true
+					(inner as Button).custom_minimum_size.y = 30
+				if inner.get_parent() == child and (inner is Button or inner is OptionButton):
+					(inner as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				if inner is Label and inner.get_parent() == child:
+					(inner as Label).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+					(inner as Label).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+					(inner as Label).custom_minimum_size.x = 120
 
 
 func toggle_crafting() -> void:
 	_craft_panel.visible = not _craft_panel.visible
+	if _craft_panel.visible:
+		_actions_panel.visible = false # The workshop takes the left side.
+		_dock(_craft_panel, true)
+	elif _inventory_panel.visible:
+		_actions_panel.visible = true
 
 
 func is_menu_open() -> bool:
-	return _inventory_panel.visible or _craft_panel.visible
+	return _inventory_panel.visible or _craft_panel.visible or (_actions_panel != null and _actions_panel.visible)
 
 
 func set_prompt(text: String) -> void:
@@ -2886,24 +3091,50 @@ static func _kind_glyph(kind: String) -> String:
 	return "[%s]" % kind.substr(0, 4).to_upper() if kind != "" else ""
 
 
-## An inventory slot card: dark, with a border in the colour of the item tier, gold when equipped.
+## An inventory slot card: a tile coloured by what the item is for (weapons red, armor blue, food green, ...) with a frame in
+## the tier colour, gold when equipped; an empty slot is a pale socket in the parchment.
 func _style_slot(button: Button, item_id: String, equipped: bool) -> void:
 	var tier: int = clampi(Defs.tier_of(item_id), 0, TIER_COLORS.size() - 1) if item_id != "" else 0
-	var edge: Color = Color(0.95, 0.78, 0.35) if equipped else (TIER_COLORS[tier] if item_id != "" else Color(1, 1, 1, 0.08))
+	var kind: String = str(Defs.item(item_id).get("kind", "")) if item_id != "" else ""
+	var tile: Color = _kind_tile(kind)
+	var edge: Color = UiTheme.GOLD if equipped else (TIER_COLORS[tier].darkened(0.15) if item_id != "" else Color(0.62, 0.52, 0.38))
 	for state in ["normal", "hover", "pressed", "disabled"]:
 		var style := StyleBoxFlat.new()
-		style.bg_color = Color(0.05, 0.06, 0.09, 0.92) if item_id != "" else Color(0.03, 0.035, 0.05, 0.6)
+		style.anti_aliasing = true
+		style.bg_color = tile if item_id != "" else Color(0.82, 0.74, 0.6)
 		if state == "hover":
-			style.bg_color = Color(0.12, 0.13, 0.18, 0.96)
+			style.bg_color = tile.lightened(0.15)
 		elif state == "pressed":
-			style.bg_color = Color(0.22, 0.18, 0.08, 0.98)
-		style.set_corner_radius_all(8)
-		style.set_border_width_all(2 if (equipped or state == "hover") else 1)
-		style.border_width_bottom = 4 if item_id != "" else 1
-		style.border_color = edge
-		style.set_content_margin_all(4)
+			style.bg_color = tile.darkened(0.2)
+		style.set_corner_radius_all(9)
+		style.set_border_width_all(3 if (equipped or state == "hover") else 2)
+		style.border_color = edge if state != "hover" else edge.lightened(0.25)
+		style.set_content_margin_all(2)
+		if item_id != "":
+			style.shadow_color = Color(0.2, 0.12, 0.05, 0.35)
+			style.shadow_size = 3
+			style.shadow_offset = Vector2(0, 2)
 		button.add_theme_stylebox_override(state, style)
-	button.add_theme_color_override("font_color", Color(1, 1, 1) if item_id != "" else Color(1, 1, 1, 0.3))
+
+
+## The tile colour of an item slot.
+static func _kind_tile(kind: String) -> Color:
+	match kind:
+		"weapon", "ammo":
+			return Color(0.56, 0.2, 0.16)
+		"armor", "armor_plate", "carry_pack", "siege_brace":
+			return Color(0.22, 0.32, 0.5)
+		"medical", "party_medical", "stimulant":
+			return Color(0.6, 0.26, 0.32)
+		"food", "drink":
+			return Color(0.3, 0.46, 0.22)
+		"resource", "material":
+			return Color(0.5, 0.38, 0.24)
+		"currency":
+			return Color(0.42, 0.42, 0.46)
+		"tool":
+			return Color(0.36, 0.38, 0.32)
+	return Color(0.38, 0.3, 0.46)
 
 
 func _refresh_presets() -> void:
@@ -2955,41 +3186,137 @@ func _refresh_inventory() -> void:
 			_salvage_item.select(index)
 	for child in _inventory_grid.get_children():
 		child.queue_free()
+	var used := 0
 	for slot in client.inventory.slots:
-		var button := Button.new()
-		button.custom_minimum_size = Vector2(88, 60)
-		button.add_theme_font_size_override("font_size", 11)
 		if slot.is_empty():
-			button.disabled = true
-			button.text = ""
-			_style_slot(button, "", false)
-		else:
-			var item_id: String = slot["id"]
-			var equipped: bool = item_id == client.inventory.weapon or item_id == client.inventory.armor
-			var info: Dictionary = Defs.item(item_id)
-			button.text = "%s\n%s  x%d" % [str(info.get("name", item_id)), _kind_glyph(str(info.get("kind", ""))), int(slot["count"])]
-			button.tooltip_text = "%s\n%s  Tier %d%s\nClick: use or equip   Right click: put one in the stash" % [
-				str(info.get("name", item_id)), str(info.get("kind", "item")).capitalize(), maxi(1, Defs.tier_of(item_id)),
-				"\nEQUIPPED" if equipped else ""]
-			_style_slot(button, item_id, equipped)
-			button.pressed.connect(func() -> void: client.use_item(item_id))
-			button.gui_input.connect(func(event: InputEvent) -> void:
-				if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
-					client.move_stash(item_id, 1, true))
-		_inventory_grid.add_child(button)
+			_inventory_grid.add_child(_item_card("", 0, false, Vector2(64, 64)))
+			continue
+		used += 1
+		var item_id: String = slot["id"]
+		var equipped: bool = item_id == client.inventory.weapon or item_id == client.inventory.armor
+		var info: Dictionary = Defs.item(item_id)
+		var card := _item_card(item_id, int(slot["count"]), equipped, Vector2(64, 64))
+		card.tooltip_text = "%s\n%s  ·  Tier %d%s\n\nClick: use or equip\nRight click: put one in the stash" % [
+			str(info.get("name", item_id)), str(info.get("kind", "item")).capitalize().replace("_", " "), maxi(1, Defs.tier_of(item_id)),
+			"\nEQUIPPED" if equipped else ""]
+		card.pressed.connect(func() -> void: client.use_item(item_id))
+		card.gui_input.connect(func(event: InputEvent) -> void:
+			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+				client.move_stash(item_id, 1, true))
+		_inventory_grid.add_child(card)
 	for child in _stash_grid.get_children():
 		child.queue_free()
+	var stashed := 0
 	for slot in client.stash.slots:
 		if slot.is_empty():
 			continue
+		stashed += 1
 		var item_id: String = slot["id"]
-		var button := Button.new()
-		button.custom_minimum_size = Vector2(90, 44)
-		button.add_theme_font_size_override("font_size", 11)
-		button.text = "%s\nx%d" % [Defs.item(item_id).get("name", item_id), slot["count"]]
-		button.tooltip_text = "Withdraw one item (at hub workbench)"
-		button.pressed.connect(func() -> void: client.move_stash(item_id, 1, false))
-		_stash_grid.add_child(button)
+		var card := _item_card(item_id, int(slot["count"]), false, Vector2(54, 54))
+		card.tooltip_text = "%s  x%d\nClick: take one out (at a workbench)" % [Defs.item(item_id).get("name", item_id), int(slot["count"])]
+		card.pressed.connect(func() -> void: client.move_stash(item_id, 1, false))
+		_stash_grid.add_child(card)
+	if stashed == 0:
+		var empty := Label.new()
+		empty.text = "Empty. Bank resources here at a workbench."
+		empty.add_theme_font_size_override("font_size", 12)
+		empty.add_theme_color_override("font_color", UiTheme.INK_SOFT)
+		_stash_grid.add_child(empty)
+	_refresh_equipment()
+	if _inventory_summary != null:
+		_inventory_summary.text = "%d / %d slots   ·   stash %d / %d   ·   %d silver" % [
+			used, client.inventory.slots.size(), stashed, client.stash.slots.size(), client.inventory.count("silver")]
+
+
+## A square item card: the item's silhouette tinted by its use, the tier as a small badge, the count in the corner and a
+## frame in the tier colour (gold when equipped). An empty card is a dim socket.
+func _item_card(item_id: String, count: int, equipped: bool, size: Vector2) -> Button:
+	var card := Button.new()
+	card.custom_minimum_size = size
+	card.focus_mode = Control.FOCUS_NONE
+	_style_slot(card, item_id, equipped)
+	if item_id.is_empty():
+		card.disabled = true
+		return card
+	var inset: float = size.x * 0.14
+	for layer in 2: # A soft dark copy under the white silhouette lifts it off the coloured tile.
+		var art := TextureRect.new()
+		art.texture = ItemIcons.icon(item_id)
+		art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		art.modulate = Color(0.08, 0.04, 0.02, 0.55) if layer == 0 else Color(1.0, 0.98, 0.94)
+		art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		art.set_anchors_preset(Control.PRESET_FULL_RECT)
+		var shift: float = 2.0 if layer == 0 else 0.0
+		art.offset_left = inset + shift
+		art.offset_top = inset + shift
+		art.offset_right = -inset + shift
+		art.offset_bottom = -inset + shift
+		card.add_child(art)
+	var tier: int = Defs.tier_of(item_id)
+	if tier >= 1 and item_id.rfind("_") > 0 and item_id.substr(item_id.rfind("_") + 1).is_valid_int():
+		card.add_child(_card_badge(["", "I", "II", "III", "IV", "V"][clampi(tier, 0, 5)], TIER_COLORS[clampi(tier, 0, TIER_COLORS.size() - 1)], Control.PRESET_TOP_LEFT))
+	if count > 1:
+		card.add_child(_card_badge(_short_count(count), Color(1, 1, 1), Control.PRESET_BOTTOM_RIGHT))
+	if equipped:
+		card.add_child(_card_badge("E", UiTheme.GOLD, Control.PRESET_TOP_RIGHT))
+	return card
+
+
+func _card_badge(text: String, color: Color, corner: int) -> Label:
+	var badge := Label.new()
+	badge.text = text
+	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	badge.add_theme_font_size_override("font_size", 10)
+	badge.add_theme_color_override("font_color", color)
+	badge.add_theme_constant_override("outline_size", 0)
+	var pill := StyleBoxFlat.new()
+	pill.bg_color = Color(0.12, 0.08, 0.05, 0.85)
+	pill.set_corner_radius_all(8)
+	pill.content_margin_left = 4
+	pill.content_margin_right = 4
+	pill.content_margin_top = 0
+	pill.content_margin_bottom = 0
+	badge.add_theme_stylebox_override("normal", pill)
+	badge.custom_minimum_size = Vector2(16, 15)
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.set_anchors_and_offsets_preset(corner, Control.PRESET_MODE_MINSIZE, 3)
+	return badge
+
+
+## What you carry in hand and wear: two big slots with their names, like the paper doll of a character sheet.
+func _refresh_equipment() -> void:
+	if _equip_row == null:
+		return
+	for child in _equip_row.get_children():
+		child.queue_free()
+	for entry in [[client.inventory.weapon, "Weapon", "Fists"], [client.inventory.armor, "Armor", "No armor"]]:
+		var item_id: String = str(entry[0])
+		var card := _item_card(item_id, 0, false, Vector2(64, 64))
+		if item_id != "":
+			card.tooltip_text = str(Defs.item(item_id).get("name", item_id))
+			card.pressed.connect(func() -> void: client.use_item(item_id))
+		_equip_row.add_child(card)
+		var names := VBoxContainer.new()
+		names.alignment = BoxContainer.ALIGNMENT_CENTER
+		names.custom_minimum_size.x = 140
+		var slot_name := Label.new()
+		slot_name.text = str(entry[1]).to_upper()
+		slot_name.add_theme_font_size_override("font_size", 11)
+		slot_name.add_theme_color_override("font_color", UiTheme.INK_SOFT)
+		names.add_child(slot_name)
+		var item_name := Label.new()
+		item_name.text = str(Defs.item(item_id).get("name", item_id)) if item_id != "" else str(entry[2])
+		item_name.add_theme_font_size_override("font_size", 13)
+		item_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		names.add_child(item_name)
+		_equip_row.add_child(names)
+
+
+static func _short_count(count: int) -> String:
+	if count >= 10000:
+		return "%dk" % (count / 1000)
+	return str(count)
 
 
 func _refresh_crafting() -> void:
@@ -3031,7 +3358,13 @@ func _refresh_crafting() -> void:
 			", ".join(needs), station_note]
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.custom_minimum_size = Vector2(465, 0)
+		button.custom_minimum_size = Vector2(465, 34)
+		button.icon = ItemIcons.icon(str(recipe["output"]))
+		button.add_theme_constant_override("icon_max_width", 26)
+		var output_kind: String = str(Defs.item(str(recipe["output"])).get("kind", ""))
+		for state in ["icon_normal_color", "icon_hover_color", "icon_pressed_color"]:
+			button.add_theme_color_override(state, ItemIcons.kind_color(output_kind))
+		button.add_theme_color_override("icon_disabled_color", Color(0.5, 0.52, 0.56, 0.6))
 		var ready: bool = bool(entry["ready"])
 		button.disabled = not ready
 		if not ready:

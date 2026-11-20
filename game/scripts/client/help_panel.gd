@@ -17,7 +17,7 @@ const ENTRIES := [
 		["F5", "throw ember flask (PvE fire)"], ["F6 / F7", "pitch / pack field tarp"], ["Home", "return charm"], ["Alt+T", "storm cast"]]],
 	["TOWN", [
 		["N", "buy water"], ["V", "sell materials (Shift: fish)"], ["P", "accept contract (Shift: turn in, Ctrl: daily bounty)"],
-		["K", "skills and perks"], ["J", "map: drag pans, wheel zooms, click waypoint, Shift+click party ping, right clears"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["F9", "full text readout"], ["F3", "survey ruins"]]],
+		["K", "skills and perks"], ["J", "map: drag pans, wheel zooms, click waypoint, Shift+click party ping, right clears"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["`", "full text readout"], ["F3", "survey ruins"]]],
 ]
 
 var _built := false
@@ -61,7 +61,7 @@ func _build() -> void:
 		var header := Label.new()
 		header.text = group[0]
 		header.add_theme_font_size_override("font_size", 14)
-		header.add_theme_color_override("font_color", Color(0.95, 0.78, 0.35))
+		header.add_theme_color_override("font_color", Color(0.45, 0.22, 0.1))
 		column.add_child(header)
 		for pair in group[1]:
 			var row := HBoxContainer.new()
@@ -69,7 +69,7 @@ func _build() -> void:
 			key.text = pair[0]
 			key.custom_minimum_size = Vector2(62, 0)
 			key.add_theme_font_size_override("font_size", 13)
-			key.add_theme_color_override("font_color", Color(0.6, 0.85, 1.0))
+			key.add_theme_color_override("font_color", Color(0.18, 0.32, 0.5))
 			var what := Label.new()
 			what.text = pair[1]
 			what.add_theme_font_size_override("font_size", 13)

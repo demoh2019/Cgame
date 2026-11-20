@@ -11,9 +11,23 @@
 * **XP strip**: the skill you trained last, its level and progress, fading after a few seconds.
 * **Banner** for level ups and learned perks; the screen edges pulse red at low health and flash when you are hit.
 * **Log**: translucent card, messages fade after 14 s. Interaction prompt as a pill above the action bar.
-* **F9** switches to the old full text readout (every number and timer) for debugging and for the many small status lines.
+* **`** (backtick) switches to the old full text readout (every number and timer) for debugging and for the many small status lines.
 
-`ui_theme.gd` styles the remaining windows (inventory, crafting, skills, chat).
+`ui_theme.gd` gives every window a parchment look (paper card in a dark wooden frame, dark ink, brown buttons, red for the
+main action) and keeps text over the world light. Item icons: `item_icons.gd` (game-icons.net, CC BY 3.0).
+
+## Layout (in the manner of classic online RPGs)
+
+* **Portrait** (top left): a round medallion with the skill progress around it and the level badge, the name plate, red
+  health and blue energy bars with numbers, a thin stamina bar, food and water as big numbers. The quest card sits below.
+* **Menu buttons** (top right): inventory, workshop, skills, map, controls; each presses the window's own hotkey.
+* **Ability buttons** (bottom centre): round buttons with the held weapon's icon, the skill, dodge, drink and use; the key on
+  a small disc, the ammo or energy cost on a badge, cooldowns as a dark sweep.
+* **Minimap** (bottom right): a round plaque.
+* **Windows dock to the sides**: the bag on the right (equipped weapon and armor, the backpack grid, the stash), the actions
+  (tabs Gear, Field, Trade, Party, Combat) or the workshop on the left. Item slots are tiles coloured by kind (weapons red,
+  armor blue, medicine rose, food green, materials brown) with the tier as a Roman numeral and the count in a corner.
+* **Title screen**: the sign-in card is a hanging red banner with the title, the fields and a red PLAY SOLO button.
 
 ## Controls
 
