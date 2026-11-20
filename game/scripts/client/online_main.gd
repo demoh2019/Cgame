@@ -30,6 +30,7 @@ const AmbientBirds = preload("res://scripts/client/ambient_birds.gd")
 const SnowVfx = preload("res://scripts/client/snow_vfx.gd")
 const FishShoals = preload("res://scripts/client/fish_shoals.gd")
 const DuskBats = preload("res://scripts/client/dusk_bats.gd")
+const BreathVapor = preload("res://scripts/client/breath_vapor.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -113,6 +114,7 @@ var _ambient_motes
 var _ambient_birds
 var _fish_shoals
 var _dusk_bats
+var _breath
 var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
@@ -1127,6 +1129,10 @@ func _on_welcomed() -> void:
 	avatar.add_child(flare_visual)
 	# No name over your own head: your name is on the portrait plate; other players keep theirs.
 	add_child(avatar)
+	# RDR2-style visible breath in cold air for the local character.
+	_breath = BreathVapor.new()
+	_breath.model = avatar_model
+	add_child(_breath)
 
 
 func _generate_chunk(cell: Vector3i) -> Node:
@@ -1406,6 +1412,11 @@ func _update_time_of_day(delta: float) -> void:
 		snow_fraction = SnowVfx.snow_fraction(client.world.height_at(ground_at.x, ground_at.z))
 	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO,
 		atmosphere.storm, snow_fraction)
+	if _breath != null and not underground and client != null and client.world != null and client.you.has("x"):
+		var breath_at: Vector3 = client.display_position()
+		_breath.update_view(BreathVapor.coldness(client.world.height_at(breath_at.x, breath_at.z),
+			WorldCycle.daylight(clock), _visual_biome, atmosphere.storm * snow_fraction),
+			avatar_model.speed if avatar_model != null else 0.0, GraphicsQuality.level(), delta)
 	if client != null and client.you.has("x"):
 		var here: Vector3 = client.display_position()
 		effects.update_ambience(here, atmosphere.light_level, atmosphere.storm, client.world.biome_at(here.x, here.z))
