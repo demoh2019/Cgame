@@ -20,6 +20,7 @@ var _npc: StreamedPatrolNPC3D
 var ai_enabled: bool = true
 var _rock: StaticBody3D
 var beacon_activated: bool = false
+var npc_talk_count: int = 0
 var _beacon: MeshInstance3D
 
 
@@ -156,10 +157,55 @@ func _update_beacon_visual() -> void:
 
 
 ## Store only modified state; empty dict means default/unmodified.
+## Generic streamed-cell interaction provider. No remote caller can activate
+## a target outside its range: activation revalidates the actor position.
+func get_interaction_targets(eye: Vector3, search_radius: float) -> Array[Dictionary]:
+	var entries: Array[Dictionary] = []
+	if not beacon_activated and eye.distance_squared_to(get_beacon_world_position()) <= pow(minf(search_radius, 2.8), 2.0):
+		entries.append({"action_id": "beacon", "position": get_beacon_world_position(),
+			"label": "Зажечь лесной маяк", "radius": 2.8})
+	if is_instance_valid(_npc):
+		var npc_eye: Vector3 = _npc.global_position + Vector3.UP * 1.0
+		if eye.distance_squared_to(npc_eye) <= pow(minf(search_radius, 2.6), 2.0):
+			entries.append({"action_id": "npc", "position": npc_eye,
+				"label": "Поговорить со стражем", "radius": 2.6,
+				"target_collider": _npc})
+	return entries
+
+
+func activate_interaction(action_id: String, actor: Node3D) -> bool:
+	if not is_instance_valid(actor):
+		return false
+	var actor_eye: Vector3 = actor.global_position + Vector3.UP * 1.2
+	match action_id:
+		"beacon":
+			return try_activate_beacon(actor_eye, 2.8)
+		"npc":
+			if not is_instance_valid(_npc):
+				return false
+			if actor_eye.distance_squared_to(_npc.global_position + Vector3.UP) > 2.6 * 2.6:
+				return false
+			npc_talk_count = mini(npc_talk_count + 1, 999)
+			stream_state_changed.emit()
+			return true
+	return false
+
+
+func get_interaction_message(action_id: String) -> String:
+	if action_id == "beacon":
+		return "Маяк зажжён — это изменение сохранено в мире"
+	if action_id == "npc":
+		return "Страж леса: патрулирую сектор %d,%d. Встреч: %d" % [
+			cell_coord.x, cell_coord.y, npc_talk_count]
+	return ""
+
+
 func save_stream_state() -> Dictionary:
 	var state: Dictionary = {}
 	if beacon_activated:
 		state["activated"] = true
+	if npc_talk_count > 0:
+		state["npc_talk_count"] = npc_talk_count
 	if is_instance_valid(_npc):
 		# Unmodified NPCs do not inflate the persistent save.
 		var npc_data: Dictionary = _npc.export_npc_state()
@@ -170,6 +216,7 @@ func save_stream_state() -> Dictionary:
 
 func load_stream_state(state: Dictionary) -> void:
 	beacon_activated = state.get("activated", false) == true
+	npc_talk_count = clampi(int(state.get("npc_talk_count", 0)), 0, 999)
 	_update_beacon_visual()
 	if is_instance_valid(_npc):
 		if state.has("npc_position") or state.has("npc_patrol"):
