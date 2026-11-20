@@ -158,6 +158,9 @@
 		<member name="max_instances_per_frame" type="int" setter="set_max_instances_per_frame" getter="get_max_instances_per_frame" default="2">
 			Maximum number of loaded cell scenes instantiated per frame.
 		</member>
+		<member name="max_instantiation_time_ms" type="float" setter="set_max_instantiation_time_ms" getter="get_max_instantiation_time_ms" default="0.0">
+			Optional soft wall-time budget, in milliseconds, for cell scene instantiation within one streaming update. A value of [code]0.0[/code] disables the time budget. The first ready cell can always instantiate to avoid starvation. Subsequent cells may be postponed once the limit is exceeded; at most [member max_instances_per_frame] cells instantiate per update. A single expensive scene may exceed the budget, so this setting reduces consecutive stalls but cannot interrupt an individual scene's [code]_ready()[/code] work. Valid range: [code]0.0[/code] to [code]100.0[/code].
+		</member>
 		<member name="max_new_requests_per_frame" type="int" setter="set_max_new_requests_per_frame" getter="get_max_new_requests_per_frame" default="2">
 			Maximum number of new resource-load requests per frame.
 		</member>
