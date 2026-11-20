@@ -59,6 +59,7 @@ jobs:
             servers/rendering/renderer_rd/shaders/forward_clustered
             servers/rendering/renderer_rd/forward_clustered
             servers/rendering/renderer_rd/effects
+            thirdparty/amd-fsr2
             tests/servers/rendering
           sparse-checkout-cone-mode: true
 
