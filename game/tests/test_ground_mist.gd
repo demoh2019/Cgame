@@ -47,6 +47,41 @@ func run(t) -> void:
 			t.check((p["extent"] as Vector3).x <= 88.0,
 				"froxel box never fills the entire 700m world")
 
+	t.current = "quality-gated 3D vapor layers"
+	for renderer in ["mobile", "gl_compatibility", "unknown"]:
+		for tier in 4:
+			var p: Dictionary = GroundMist.settings("swamp", 0.5, 0.1, 1.0, tier, renderer)
+			t.near(float(p["vapor_3d_detail"]), 0.0, 0.0001,
+				"unsupported renderer skips all 3D fog noise")
+	for tier in [0, 1, 2]:
+		var p: Dictionary = GroundMist.settings("swamp", 0.5, 0.1, 1.0,
+			tier, "forward_plus")
+		t.near(float(p["vapor_3d_detail"]), 0.0, 0.0001,
+			"only Ultra evaluates the new 3D vapor noise")
+	var ultra_vapor: Dictionary = GroundMist.settings(
+		"swamp", 0.5, 0.1, 1.0, 3, "forward_plus")
+	t.near(float(ultra_vapor["vapor_3d_detail"]), 0.55, 0.0001,
+		"Ultra adds thin layered vapor turbulence")
+	var dungeon_vapor: Dictionary = GroundMist.settings(
+		"swamp", 0.5, 0.1, 1.0, 3, "forward_plus", true)
+	t.near(float(dungeon_vapor["vapor_3d_detail"]), 0.0, 0.0001,
+		"underground avoids extra fog work")
+	for biome in ["beach", "swamp", "forest", "plains", "mountain"]:
+		var p: Dictionary = GroundMist.settings(
+			biome, 0.5, 0.2, 0.9, 3, "forward_plus")
+		t.check(float(p["vapor_3d_detail"]) >= 0.0 and
+			float(p["vapor_3d_detail"]) <= 0.55,
+			"vapor complexity is always bounded across biomes")
+	t.check((GroundMist as Script).source_code.contains(
+		'_material.set_shader_parameter("vapor_3d_detail"'),
+		"quality changes update the shared fog material")
+	t.check((GroundMist as Script).source_code.contains(
+		'_volume.has_method("set_snapped_world_anchor")'),
+		"native world-grid position snapping is used when available")
+	t.check((GroundMist as Script).source_code.contains(
+		"_volume.global_position = anchor"),
+		"stock Godot retains the existing stable anchor fallback")
+
 	t.current = "shader and scene wiring"
 	var shader := load(ShaderPath) as Shader
 	t.check(shader != null, "one real Godot fog shader exists")
@@ -57,6 +92,17 @@ func run(t) -> void:
 			"world-anchored froxel noise fades smoothly at volume bounds")
 		t.check(shader.code.contains("DENSITY =") and shader.code.contains("ALBEDO ="),
 			"volumetric density and physically illuminated scattering are authored")
+		t.check(shader.code.contains("if (vapor_3d_detail > 0.001)"),
+			"3D noise is skipped in the High and lower GPU presets")
+		t.check(shader.code.contains("float mist_noise3(vec3 p)"),
+			"Ultra calculates genuine 3D value noise in world coordinates")
+		t.check(shader.code.contains("height * 0.24") and
+			shader.code.contains("WORLD_POSITION.xz + noise_offset"),
+			"air layers vary vertically but retain wind-driven world anchoring")
+		t.check(shader.code.contains("outskirts = 1.0 - smoothstep("),
+			"original finite-volume fade still prevents hard box edges")
+		t.check(not shader.code.contains("sampler3D"),
+			"3D vapor detail requires no new texture allocation")
 	var mist := GroundMist.new()
 	mist.setup()
 	var volume: FogVolume = mist.get_node_or_null("CinematicGroundMist") as FogVolume
