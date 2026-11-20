@@ -114,9 +114,9 @@ TEST_CASE("[SceneTree][Node3D] Network render clock handles jitter without specu
 	// Stale frames, NaN and a reconnect are explicitly guarded.
 	CHECK(actor->advance_network_render_time(0.8, 1.0, 0.12, Math::INF) == real_t(0.8));
 	CHECK(actor->advance_network_render_time(0.8, 1.0, 0.12, -0.5) == real_t(0.8));
-	CHECK(actor->advance_network_render_time(Math::INF, 5.0, 0.12, 0.016) == real_t(4.88));
+	CHECK(Math::abs(actor->advance_network_render_time(Math::INF, 5.0, 0.12, 0.016) - real_t(4.88)) < real_t(0.00001));
 	CHECK(actor->advance_network_render_time(0.8, Math::INF, 0.12, 0.016) == real_t(0.8));
-	CHECK(actor->advance_network_render_time(0.8, 0.2, 0.12, 0.016) == real_t(0.08));
+	CHECK(Math::abs(actor->advance_network_render_time(0.8, 0.2, 0.12, 0.016) - real_t(0.08)) < real_t(0.00001));
 	CHECK(actor->get_position() == Vector3());
 	memdelete(actor);
 }
