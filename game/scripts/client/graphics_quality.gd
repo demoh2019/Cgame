@@ -67,6 +67,7 @@ static func profile(value: int) -> Dictionary:
 
 static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderMaterial, water: MeshInstance3D = null, streamer: Node = null) -> void:
 	var p := profile(_level)
+	var world_profile: Dictionary = VisualProfiles.settings(_level)
 	# The active backend can differ from ProjectSettings after a driver fallback.
 	var method := RenderingServer.get_current_rendering_method()
 	if viewport != null:
@@ -92,6 +93,12 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 			viewport.msaa_3d = p["msaa"]
 			viewport.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if _level <= 1 else Viewport.SCREEN_SPACE_AA_DISABLED
 	if atmosphere != null:
+		# The atmosphere owns the persistent shadow enable flag used by its day/night update.
+		# Applying only to the sun node would let nighttime weather restore shadows on Performance.
+		var atmosphere_profile: Dictionary = p.duplicate()
+		atmosphere_profile["sky_radiance"] = world_profile["sky_radiance"]
+		if atmosphere.has_method("apply_graphics_profile"):
+			atmosphere.call("apply_graphics_profile", atmosphere_profile)
 		var sun := atmosphere.get("sun") as DirectionalLight3D
 		if sun != null:
 			sun.shadow_enabled = p["shadows"]
@@ -105,15 +112,14 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 		post_material.set_shader_parameter("blur_quality", p["blur_quality"])
 		post_material.set_shader_parameter("blur_radius", p["blur_radius"])
 	# Reuse the game's existing 3-tier grass LOD; never rebuild world geometry on a preset switch.
-	ChunkView.configure_grass(float(p["grass_radius"]), int(p["grass_budget"]),
-			float(p["grass_fade_start"]), float(p["grass_fade_end"]))
+	ChunkView.configure_grass(float(world_profile["grass_build_radius"]), int(world_profile["grass_budget_usec"]),
+			float(world_profile["grass_fade_start"]), float(world_profile["grass_fade_end"]))
 	if viewport != null:
 		for tile in viewport.get_tree().get_nodes_in_group(ChunkView.GRASS_GROUP):
 			if tile is MultiMeshInstance3D:
 				tile.visibility_range_end = ChunkView.grass_visibility_end
 
 	# The graphics profiles also control water detail and how many terrain chunks are streamed.
-	var world_profile: Dictionary = VisualProfiles.settings(_level)
 	if water != null and water.material_override is ShaderMaterial:
 		(water.material_override as ShaderMaterial).set_shader_parameter("ripple_strength", float(world_profile["water_ripples"]))
 	if streamer != null:
