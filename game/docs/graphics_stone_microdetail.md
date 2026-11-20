@@ -17,8 +17,8 @@ Bed, barrel, torch, cloth, foliage and character materials are excluded.
 
 - Performance, Balanced, GL Compatibility and Mobile: **no detail normal
   sampler**. The original material pipeline remains.
-- Forward+ High: one shared procedural 128x128 high-strength? No:
-  mild normal detail texture sampled by the existing native detail stage.
+- Forward+ High: one shared 128x128 mild normal detail texture sampled
+  by the existing native detail stage.
 - Forward+ Ultra: one shared 128x128 more pronounced normal detail.
 - Two mipmapped, tileable normal textures are generated on the CPU
   lazily, at most once each, and shared by every eligible masonry surface.
