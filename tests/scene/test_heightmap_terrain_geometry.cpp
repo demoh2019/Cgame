@@ -252,6 +252,20 @@ TEST_CASE("[HeightmapTerrain] Level of detail selection with hysteresis") {
 	CHECK(lod_stride(3, 12) == 4); // 8 does not divide 12, so back off to 4.
 }
 
+TEST_CASE("[HeightmapTerrain] Screen-relative terrain LOD preserves pixels and FOV") {
+	// At the authored reference projection nothing changes.
+	CHECK(screen_lod_multiplier(720, 38, 38) == doctest::Approx(1.0));
+	CHECK(screen_lod_multiplier(1080, 38, 38) == doctest::Approx(1.5));
+	CHECK(screen_lod_multiplier(360, 38, 38) == doctest::Approx(0.6));
+	CHECK(screen_lod_multiplier(1440, 38, 38) == doctest::Approx(1.65)); // GPU cap.
+	CHECK(screen_lod_multiplier(720, 24, 38) > 1.0); // Narrower view.
+	CHECK(screen_lod_multiplier(720, 70, 38) < 1.0); // Wider view.
+	CHECK(screen_lod_multiplier(0, 38, 38) == doctest::Approx(1.0));
+	CHECK(screen_lod_multiplier(Math::INF, 38, 38) == doctest::Approx(1.0));
+	CHECK(screen_lod_multiplier(720, 0, 38) == doctest::Approx(1.0));
+	CHECK(screen_lod_multiplier(720, 38, 179) == doctest::Approx(1.0));
+}
+
 TEST_CASE("[HeightmapTerrain] Chunk height range includes the far border samples") {
 	const Vector<real_t> data = make_field(9, 9, [](int x, int z) { return real_t(x == 4 && z == 4 ? 7 : (x == 0 ? -3 : 1)); });
 	const HeightField field = view(data, 9, 9);
