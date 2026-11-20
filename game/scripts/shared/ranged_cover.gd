@@ -6,7 +6,7 @@ extends RefCounted
 ## scenery may have an id too; the game server separately checks barricades.
 ## Empty means the ray is clear. Invalid rays fail closed at distance zero.
 static func first_blocker(world, origin: Vector2,
-		direction: Vector2, reach: float) -> Dictionary:
+		direction: Vector2, reach: float, min_radius: float = 0.0) -> Dictionary:
 	if not origin.is_finite() or not direction.is_finite() or not is_finite(reach) \
 			or reach <= 0.0 or direction.length_squared() < 0.000001:
 		return {"distance": 0.0, "id": -1}
@@ -25,7 +25,8 @@ static func first_blocker(world, origin: Vector2,
 		var x: float = float(blocker.get("x", NAN))
 		var z: float = float(blocker.get("z", NAN))
 		var radius: float = float(blocker.get("radius", 0.0))
-		if not is_finite(x) or not is_finite(z) or not is_finite(radius) or radius <= 0.0:
+		if not is_finite(x) or not is_finite(z) or not is_finite(radius) \
+				or radius <= 0.0 or radius < min_radius:
 			continue
 		var relative: Vector2 = Vector2(x, z) - origin
 		var along: float = relative.dot(ray)
@@ -44,5 +45,5 @@ static func first_blocker(world, origin: Vector2,
 
 ## Original cover API stays available for every existing caller.
 static func first_blocker_distance(world, origin: Vector2,
-		direction: Vector2, reach: float) -> float:
-	return float(first_blocker(world, origin, direction, reach).get("distance", INF))
+		direction: Vector2, reach: float, min_radius: float = 0.0) -> float:
+	return float(first_blocker(world, origin, direction, reach, min_radius).get("distance", INF))
