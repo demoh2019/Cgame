@@ -139,8 +139,11 @@
 		<member name="max_concurrent_loads" type="int" setter="set_max_concurrent_loads" getter="get_max_concurrent_loads" default="4">
 			Maximum number of chunks loading in the background at the same time.
 		</member>
+		<member name="max_chunk_work_usec" type="int" setter="set_max_chunk_work_usec" getter="get_max_chunk_work_usec" default="0">
+			Soft CPU-time budget, in microseconds, for chunk generation or finished-scene activation during one frame. Once at least one chunk has been processed, no more chunks are integrated after the budget expires. A single chunk cannot be interrupted and may take longer than the budget. The value is clamped to [code]0[/code] through [code]1000000[/code]; [code]0[/code] disables time slicing while keeping [member max_instantiations_per_frame] active. Also works with [method refresh].
+		</member>
 		<member name="max_instantiations_per_frame" type="int" setter="set_max_instantiations_per_frame" getter="get_max_instantiations_per_frame" default="1">
-			Maximum number of loaded chunks added to the scene in one frame. Instantiating a large scene takes time on the main thread, so a small value keeps the frame rate steady while moving.
+			Maximum number of loaded chunks added to the scene in one frame. This limit now applies exactly once per streaming update even when the procedural generator is active. Combine with [member max_chunk_work_usec] to load several cheap chunks without scheduling more work after a costly chunk.
 		</member>
 		<member name="position_chunks" type="bool" setter="set_position_chunks" getter="get_position_chunks" default="true">
 			If [code]true[/code], the root of every chunk is moved to the corner of its cell. Turn it off if the chunk scenes are already authored at their world position.
