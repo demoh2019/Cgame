@@ -18,6 +18,8 @@ var grass: MultiMeshInstance3D
 var obstacles: StaticBody3D
 var high_quality: bool = true
 var streaming_lod: int = 0
+var streaming_simulation_active: bool = true
+var beacon_time: float = 0.0
 var cell_seed: int = 0
 var cell_x: int = 0
 var cell_z: int = 0
@@ -28,6 +30,28 @@ func _ready() -> void:
     cell_z = int(round(global_position.z / CELL_SIZE))
     cell_seed = 913481 + cell_x * 73856093 + cell_z * 19349663
     _rebuild_lod()
+    _update_simulation_processing()
+
+
+func set_streaming_simulation_active(active: bool) -> void:
+    # Native WorldPartition3D invokes this before _ready() on first load and
+    # again under a bounded per-frame budget as the observer moves.
+    streaming_simulation_active = active
+    if is_node_ready():
+        _update_simulation_processing()
+
+
+func _update_simulation_processing() -> void:
+    # An optional near-field ambient effect; static foliage remains visible
+    # while this cell's simulation callback is paused.
+    set_process(streaming_simulation_active and cell_x == 0 and cell_z == 0)
+
+
+func _process(delta: float) -> void:
+    beacon_time += delta
+    var lamp := get_node_or_null("PinnedHomeBeacon/HubLight") as OmniLight3D
+    if lamp != null:
+        lamp.light_energy = 0.45 + 0.06 * sin(beacon_time * 2.2)
 
 
 func set_streaming_lod(level: int) -> void:
