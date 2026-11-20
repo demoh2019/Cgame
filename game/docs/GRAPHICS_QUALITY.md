@@ -84,3 +84,13 @@ Optional PBR texture sampling (normal, roughness, metallic and packed ORM) fades
 This applies the same principle as layered HDRP materials: retain authored PBR response without paying full microdetail cost at a distance. It is **not** a clone of Unreal's Nanite or Unity HDRP. Validate dense trees and bushes, scanned nature meshes and fallback assets in daylight, wet weather and at night, and compare GPU frame-time percentiles on actual hardware. The source tests check texture bindings and channel masks but cannot replace a rendered screenshot or GPU benchmark.
 
 Tests: `godot --headless --path game --script res://tests/run_all.gd`, including `test_foliage_wind_lod.gd`.
+
+## Thin-leaf light transmission
+
+Inspired by Unreal Engine's **Two Sided Foliage** and Unity HDRP's **Transmission**, the game's animated leaf material now writes Godot's native `BACKLIGHT` channel. Sunlight can pass gently through thin leaves instead of making the whole crown look opaque.
+
+This shader-level approximation uses the existing leaf albedo, tint, alpha-cutout and direct lighting; **no screen-space blur, depth texture, ray tracing or additional texture sampling** is required. Leaf brightness creates a low-cost transmission mask, leaving dark veins less translucent. Only alpha-cutout nature surfaces enable the effect; bark, tree trunks and opaque geometry preserve their PBR shading. Existing wind, cloud shadows, wetness, normal/ORM maps and MultiMesh instancing remain unchanged.
+
+A shared float `aa_leaf_transmission` is set by the existing quality profiles: **0.0 (Performance), 0.28 (Balanced), 0.48 (High), 0.68 (Ultra)**. The zero-strength Performance branch skips the leaf-mask calculation. The approximation uses Godot's built-in backlighting rather than full volumetric/subsurface scattering; it must be checked at dawn/dusk, in dense forests and in storms, on Forward+ and Compatibility backends.
+
+For actual performance validation, compare GPU median/p95 frame time on representative forest views at identical time-of-day and leaf density. Counts of texture samples alone do not establish FPS gains.

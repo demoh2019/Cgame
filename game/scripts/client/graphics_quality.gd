@@ -91,6 +91,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# Performance skips specular detail without rebuilding any meshes.
 	RenderingServer.global_shader_parameter_set(&"aa_vegetation_wet_gloss",
 		float(world_profile["wet_leaf_gloss"]))
+	# Thin leaf transmission is a single PBR backlight term; no new material copies.
+	RenderingServer.global_shader_parameter_set(&"aa_leaf_transmission",
+		float(world_profile["leaf_transmission"]))
 	# Shadow maps are budgeted independently from normal object visibility.
 	ShadowBudget.configure(world_profile)
 	# The active backend can differ from ProjectSettings after a driver fallback.
