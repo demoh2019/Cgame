@@ -5,6 +5,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
+const Party = preload("res://scripts/shared/party.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
@@ -52,6 +53,11 @@ var _inventory_signature: String = ""
 var _trade_state: Dictionary = {}
 var _party_status: Label
 var _raid_loot_mode_button: Button
+var _raid_vote_bag_id: int = -1
+var _raid_vote_label: Label
+var _raid_vote_need: Button
+var _raid_vote_greed: Button
+var _raid_vote_pass: Button
 var _raid_skip_button: Button
 var _raid_item_select: OptionButton
 var _raid_claim_button: Button
@@ -635,11 +641,40 @@ func _build() -> void:
 	party_buttons.add_child(rally_button)
 	_raid_loot_mode_button = Button.new()
 	_raid_loot_mode_button.text = "Raid loot: Free"
-	_raid_loot_mode_button.tooltip_text = "Leader only: switch future boss reward bags between free pickup and fair round-robin turns. Existing bags never change."
+	_raid_loot_mode_button.tooltip_text = "Leader: cycle future raid loot Free, Round robin, and Need/Greed (cores). Existing bags never change."
 	_raid_loot_mode_button.pressed.connect(func() -> void:
 		var current: String = str(client.you.get("party", {}).get("loot_mode", "free"))
-		client.party_loot_mode("free" if current == "round_robin" else "round_robin"))
+		var next: String = "round_robin" if current == "free" else (
+			"need_greed" if current == "round_robin" else "free")
+		client.party_loot_mode(next))
 	inventory_box.add_child(_raid_loot_mode_button)
+	_raid_vote_label = Label.new()
+	_raid_vote_label.text = "No active Need/Greed raid trophy ballot nearby."
+	_raid_vote_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inventory_box.add_child(_raid_vote_label)
+	var vote_row := HBoxContainer.new()
+	inventory_box.add_child(vote_row)
+	_raid_vote_need = Button.new()
+	_raid_vote_need.text = "Need"
+	_raid_vote_need.tooltip_text = "Priority roll for raid infected cores; one vote per eligible contributor."
+	_raid_vote_greed = Button.new()
+	_raid_vote_greed.text = "Greed"
+	_raid_vote_greed.tooltip_text = "Roll only if no contributor votes Need."
+	_raid_vote_pass = Button.new()
+	_raid_vote_pass.text = "Pass trophy"
+	_raid_vote_pass.tooltip_text = "Decline the infected core roll. Vote cannot be changed."
+	for option in [_raid_vote_need, _raid_vote_greed, _raid_vote_pass]:
+		option.disabled = true
+		vote_row.add_child(option)
+	_raid_vote_need.pressed.connect(func() -> void:
+		if _raid_vote_bag_id > 0:
+			client.raid_vote(_raid_vote_bag_id, "need"))
+	_raid_vote_greed.pressed.connect(func() -> void:
+		if _raid_vote_bag_id > 0:
+			client.raid_vote(_raid_vote_bag_id, "greed"))
+	_raid_vote_pass.pressed.connect(func() -> void:
+		if _raid_vote_bag_id > 0:
+			client.raid_vote(_raid_vote_bag_id, "pass"))
 	_raid_skip_button = Button.new()
 	_raid_skip_button.text = "Pass raid turn"
 	_raid_skip_button.tooltip_text = "If it is your round-robin turn and you are beside the raid bag, give the next contributor a turn without taking loot."
@@ -1453,6 +1488,14 @@ func _on_result(kind: String, data: Dictionary) -> void:
 	if kind == "use" and str(data.get("reason", "")) == "no_acid_nearby":
 		say("Alkali kit: no active acid nearby. Your supplies were not spent.")
 		return
+	if kind == "raid_vote":
+		if bool(data.get("ok", false)):
+			say("Raid trophy vote: %s recorded%s." % [
+				str(data.get("choice", "")),
+				"; winner decided" if bool(data.get("resolved", false)) else ""])
+		else:
+			say("Raid trophy vote: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "party_loot_mode":
 		if bool(data.get("ok", false)):
 			say("Future raid loot: " + str(data.get("mode", "free")).replace("_", " "))
@@ -1567,6 +1610,15 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "loot" and str(data.get("reason", "")) == "inventory_full":
 		say("Raid loot: your inventory is full. Your turn was not spent.")
+		return
+	if kind == "loot" and str(data.get("reason", "")) == "raid_vote_pending":
+		say("Raid infected cores: vote in progress (%.0fs left). Other supplies can still be looted." % float(data.get("remaining", 0.0)))
+		return
+	if kind == "loot" and str(data.get("reason", "")) == "raid_winner_reserved":
+		say("Infected cores belong to the Need/Greed winner until raid reservation expires.")
+		return
+	if kind == "loot" and bool(data.get("core_locked", false)):
+		say("Raid supplies collected. Infected cores remain protected for the trophy roll.")
 		return
 	if kind == "loot" and str(data.get("reason", "")) == "raid_reserved":
 		say("Raid loot is reserved for its contributors (%ds remaining)." % [
@@ -2129,7 +2181,7 @@ func _refresh_party_controls() -> void:
 	var group_id: int = int(state.get("id", 0))
 	var loot_mode: String = str(state.get("loot_mode", "free"))
 	_raid_loot_mode_button.disabled = group_id == 0 or int(state.get("leader", 0)) != client.peer_id
-	_raid_loot_mode_button.text = "Raid loot: " + ("Round robin" if loot_mode == "round_robin" else "Free")
+	_raid_loot_mode_button.text = "Raid loot: " + ("Round robin" if loot_mode == "round_robin" else ("Need/Greed" if loot_mode == "need_greed" else "Free"))
 	_raid_skip_bag_id = -1
 	var nearest_raid_distance: float = INF
 	for reward in client.bags.values():
@@ -2142,6 +2194,39 @@ func _refresh_party_controls() -> void:
 			nearest_raid_distance = distance_sq
 			_raid_skip_bag_id = int(reward.get("id", -1))
 	_raid_skip_button.disabled = _raid_skip_bag_id <= 0
+	_raid_vote_bag_id = -1
+	var nearest_vote_distance: float = INF
+	var nearest_ballot: Dictionary = {}
+	for bag in client.bags.values():
+		var ballot: Dictionary = bag.get("raid_need_greed", {})
+		if ballot.is_empty():
+			continue
+		var dx_vote: float = float(bag.get("x", 0.0)) - float(client.you.get("x", 0.0))
+		var dz_vote: float = float(bag.get("z", 0.0)) - float(client.you.get("z", 0.0))
+		var distance: float = dx_vote * dx_vote + dz_vote * dz_vote
+		if distance <= Party.ASSIST_RANGE * Party.ASSIST_RANGE and distance < nearest_vote_distance:
+			nearest_vote_distance = distance
+			_raid_vote_bag_id = int(bag.get("id", -1))
+			nearest_ballot = ballot
+	var may_vote: bool = _raid_vote_bag_id > 0 and str(nearest_ballot.get("status", "")) == "voting" and str(nearest_ballot.get("your_vote", "")).is_empty()
+	_raid_vote_need.disabled = not may_vote
+	_raid_vote_greed.disabled = not may_vote
+	_raid_vote_pass.disabled = not may_vote
+	_raid_vote_label.text = "No active Need/Greed raid trophy ballot nearby."
+	if _raid_vote_bag_id > 0:
+		var ballot_status: String = str(nearest_ballot.get("status", ""))
+		if ballot_status == "voting":
+			_raid_vote_label.text = "Raid bag #%d: %d Infected Core. %d/%d votes, %.0fs. %s" % [
+				_raid_vote_bag_id, int(nearest_ballot.get("amount", 0)),
+				int(nearest_ballot.get("votes_cast", 0)),
+				int(nearest_ballot.get("participants", 0)),
+				float(nearest_ballot.get("remaining", 0.0)),
+				"Choose Need, Greed or Pass" if may_vote else "Your vote: " + str(nearest_ballot.get("your_vote", ""))]
+		elif ballot_status == "awarded":
+			_raid_vote_label.text = "Raid bag #%d: %s" % [_raid_vote_bag_id,
+				"YOU WON infected cores! Loot the bag." if bool(nearest_ballot.get("your_win", false)) else "Another contributor won the infected cores."]
+		elif ballot_status == "free":
+			_raid_vote_label.text = "Raid bag #%d: all passed. Infected cores open to eligible contributors." % _raid_vote_bag_id
 	var chosen_bag: Dictionary = client.bags.get(_raid_skip_bag_id, {})
 	var choices: Array = chosen_bag.get("raid_item_choices", [])
 	var choices_signature: String = "%d:%s" % [_raid_skip_bag_id, JSON.stringify(choices)]
