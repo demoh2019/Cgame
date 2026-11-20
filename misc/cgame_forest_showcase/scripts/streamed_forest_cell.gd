@@ -12,6 +12,8 @@ const CELL_SIZE: float = 32.0
 const TREE_COUNT: int = 54
 const GRASS_COUNT: int = 225
 const ROCK_COUNT: int = 9
+const MAX_TREE_AVOIDANCE_OBSTACLES: int = 8
+const MAX_ROCK_AVOIDANCE_OBSTACLES: int = 3
 
 var rng := RandomNumberGenerator.new()
 var grass: MultiMeshInstance3D
@@ -85,6 +87,23 @@ func _spawn_trees() -> void:
     _spawn_instances("WindCanopies", foliage_mesh, crowns, custom, true, false)
     # MultiMesh is draw-only; collision shapes must be authored separately.
     # Keep capsule-based player collision cheap with primitive cylinders.
+    # Bounded local NavigationServer avoidance bodies: they deflect nearby
+    # NPCs but do not pretend to carve these obstacles from pathfinding.
+    for i in range(0, trunks.size(), 7):
+        if i / 7 >= MAX_TREE_AVOIDANCE_OBSTACLES:
+            break
+        var placement: Transform3D = trunks[i]
+        var tree_scale: float = placement.basis.y.length()
+        var avoidance := NavigationObstacle3D.new()
+        avoidance.name = "TreeAvoidance_%d" % i
+        avoidance.radius = 0.48 * tree_scale
+        avoidance.height = 3.8 * tree_scale
+        avoidance.avoidance_enabled = true
+        avoidance.avoidance_layers = 1
+        avoidance.affect_navigation_mesh = false
+        avoidance.position = placement.origin - Vector3.UP * tree_scale * 1.9
+        add_child(avoidance)
+
     for trunk_transform in trunks:
         var scale: float = trunk_transform.basis.y.length()
         var cylinder := CylinderShape3D.new()
@@ -133,6 +152,19 @@ func _spawn_rocks() -> void:
             Vector3(px, _world_height(px, pz) + scale * 0.15, pz)))
         custom.push_back(Color.WHITE)
     _spawn_instances("Stones", rock, transforms, custom, true, false)
+    for i in range(mini(transforms.size(), MAX_ROCK_AVOIDANCE_OBSTACLES)):
+        var rock_transform: Transform3D = transforms[i]
+        var rock_scale: float = rock_transform.basis.z.length()
+        var nav_rock := NavigationObstacle3D.new()
+        nav_rock.name = "RockAvoidance_%d" % i
+        nav_rock.radius = 0.78 * rock_scale
+        nav_rock.height = 0.65 * rock_scale
+        nav_rock.avoidance_enabled = true
+        nav_rock.avoidance_layers = 1
+        nav_rock.affect_navigation_mesh = false
+        nav_rock.position = rock_transform.origin - Vector3.UP * rock_scale * 0.15
+        add_child(nav_rock)
+
     for rock_transform in transforms:
         var scale: float = rock_transform.basis.z.length()
         var stone_shape := BoxShape3D.new()
