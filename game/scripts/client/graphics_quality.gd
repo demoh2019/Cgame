@@ -11,6 +11,7 @@ const GraphicsShadowAtlas = preload("res://scripts/client/graphics_shadow_atlas.
 const GraphicsReflections = preload("res://scripts/client/graphics_reflections.gd")
 const GraphicsIndirectLighting = preload("res://scripts/client/graphics_indirect_lighting.gd")
 const WaterRefraction = preload("res://scripts/client/water_refraction.gd")
+const WaterCaustics = preload("res://scripts/client/water_caustics.gd")
 const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
 const GraphicsTextureStreaming = preload("res://scripts/client/graphics_texture_streaming.gd")
 const GraphicsNativeSpecularAA = preload("res://scripts/client/graphics_native_specular_aa.gd")
@@ -153,6 +154,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	DungeonReflectionBudget.configure(_level)
 	# The active backend can differ from ProjectSettings after a driver fallback.
 	var method := RenderingServer.get_current_rendering_method()
+	# Opaque submerged PBR terrain and procedural terrain share a single
+	# quality uniform. Only High/Ultra Forward+ pay for animated caustics.
+	RenderingServer.global_shader_parameter_set(&"aa_water_caustics_strength",
+		WaterCaustics.quality_strength(_level, str(method)))
 	# One shared sun atlas across the process. Only change its allocation when
 	# the resolved quality/backend budget differs; Auto may apply repeatedly.
 	GraphicsShadowAtlas.apply(_level, str(method))
