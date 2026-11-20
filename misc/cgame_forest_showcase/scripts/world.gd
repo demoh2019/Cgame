@@ -275,7 +275,7 @@ func _create_hud() -> void:
     hint.position = Vector2(22, 306)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: сброс кэшей  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
+    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: сброс кэшей  •  F4: повтор загрузки  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
     canvas.add_child(hint)
 
 
@@ -367,6 +367,13 @@ func _unhandled_input(event: InputEvent) -> void:
                 TileCache.clear()
                 HLODCache.clear()
                 _refresh_hud()
+            KEY_F4:
+                # Explicitly retry transient errors; permanent failures stay
+                # suppressed until this action is used again.
+                if world_partition != null:
+                    world_partition.retry_failed_cells()
+                    world_partition.update_streaming()
+                    _refresh_hud()
             KEY_F5:
                 _save_game()
             KEY_F9:
