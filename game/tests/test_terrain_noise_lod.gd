@@ -33,6 +33,9 @@ func run(t) -> void:
 	if asset == null:
 		return
 	var code: String = asset.code
+	# The include also declares helper functions before fragment(); compare
+	# the ordering only inside the actual per-pixel shader stage.
+	var fragment_code: String = code.substr(code.find("void fragment() {"))
 	t.check(code.contains("varying float aa_vertex_mid;"),
 		"medium-scale noise is passed from vertex to fragment")
 	t.check(code.contains("aa_vertex_mid = fbm(world_position.xz * 0.07 + 3.0);"),
@@ -47,8 +50,8 @@ func run(t) -> void:
 		"subpixel texture mixer has deterministic inexpensive fallback")
 	t.check(code.contains("mixer = smoothstep(0.3, 0.7, value_noise(p * 0.05 + 11.0));"),
 		"near texture tiling preserves original noise function")
-	t.check(code.find("vec2 lod_dx = dFdx(p / tile_meters);") <
-		code.find("if (detail_fade > 0.001) {"),
+	t.check(fragment_code.find("vec2 lod_dx = dFdx(p / tile_meters);") <
+		fragment_code.find("if (detail_fade > 0.001) {"),
 		"texture gradients are calculated before conditional fragment work")
 	t.check(code.contains("w[int(patch.w)] += paved") and code.contains("textureGrad(albedo_layers"),
 		"ruins, roads and imported PBR texture sampling remain intact")
