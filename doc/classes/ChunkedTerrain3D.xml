@@ -107,6 +107,12 @@
 				Returns the unit surface normal at the x and z of [param world_position].
 			</description>
 		</method>
+		<method name="get_mesh_streaming_priority" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the uncached mesh streaming priority mode. Zero preserves the original row-major chunk iteration, one schedules new visible meshes near the viewer first, and two also gives a bounded priority bonus to meshes in front of the camera. This mode is used only when [member mesh_build_budget_usec] is positive.
+			</description>
+		</method>
 		<method name="get_mesh_build_budget_usec" qualifiers="const">
 			<return type="int" />
 			<description>
@@ -136,6 +142,13 @@
 			<param index="0" name="world_position" type="Vector3" />
 			<description>
 				Returns [code]true[/code] if the x and z of [param world_position] lie over the terrain.
+			</description>
+		</method>
+		<method name="set_mesh_streaming_priority">
+			<return type="void" />
+			<param index="0" name="mode" type="int" />
+			<description>
+				Changes the ordering of uncached terrain LOD mesh creation within this terrain node. Mode 0 keeps the legacy array order, mode 1 prioritizes the nearest visible chunks that do not yet have a mesh before cached LOD upgrades, and mode 2 adds a modest camera-facing preference (up to 35 percent distance scaling) when a current viewport camera exists. Ties use stable source-grid indices. The actual LOD selection, collision, world generation and materials are unchanged. The property takes effect without rebuilding the terrain.
 			</description>
 		</method>
 		<method name="set_mesh_build_budget_usec">
@@ -214,6 +227,9 @@
 		</member>
 		<member name="lod_count" type="int" setter="set_lod_count" getter="get_lod_count" default="4">
 			Number of levels of detail. Level 0 is full detail and each further level has half the resolution.
+		</member>
+		<member name="mesh_streaming_priority" type="int" setter="set_mesh_streaming_priority" getter="get_mesh_streaming_priority" default="0">
+			Controls priority within a budgeted terrain node: [code]0[/code] is the original row-major order, [code]1[/code] fills missing visible geometry nearest to the focus before spending time on LOD upgrades, and [code]2[/code] additionally favors chunks in the current camera direction. This is bounded priority, not frustum culling: offscreen chunks will still be generated as time allows. Requires [member mesh_build_budget_usec] greater than zero. A value of zero keeps existing Godot scenes backward-compatible.
 		</member>
 		<member name="mesh_build_budget_usec" type="int" setter="set_mesh_build_budget_usec" getter="get_mesh_build_budget_usec" default="0">
 			Main-thread CPU budget, in microseconds, for newly generated heightfield LOD meshes. When positive, generation is time-sliced over multiple process frames; the current visible LOD remains in use while a new one is built. This is a soft budget, not a hard deadline, because one mesh cannot be interrupted halfway through building. Nodes share the same per-frame clock, so the limit applies to the terrain streamer rather than separately multiplying for every loaded world chunk. The default of zero retains existing Godot scene behavior.
