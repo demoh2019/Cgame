@@ -22,6 +22,7 @@ const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
+const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
 const SiegeContracts = preload("res://scripts/shared/siege_contracts.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
@@ -1125,6 +1126,67 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	return {"ok": true, "peer": target_id, "item": item_id,
 		"heal": healed, "cure": cured, "bleeding_stopped": staunched,
 		"fracture_treated": splinted}
+
+
+## One authenticated medic spends one crafted pack for up to three injured
+## current teammates. Target selection is never client-authored.
+func cmd_party_triage(peer_id: int) -> Dictionary:
+	var medic: Player = players.get(peer_id)
+	if medic == null or not _alive(medic):
+		return {"ok": false, "reason": "dead"}
+	var group: Array = parties.members_of(peer_id)
+	if group.size() < 2:
+		return {"ok": false, "reason": "not_in_party"}
+	if medic.party_aid_timer > 0.0:
+		return {"ok": false, "reason": "cooldown"}
+	if medic.inventory.count(PartyTriage.ITEM_ID) < 1:
+		return {"ok": false, "reason": "not_carried"}
+	var candidates: Array = []
+	for member_id in group:
+		var member_peer: int = int(member_id)
+		if member_peer == peer_id:
+			continue # The pack treats allies, not its bearer.
+		var ally: Player = players.get(member_peer)
+		if ally == null or not _alive(ally):
+			continue
+		if not PartyTriage.can_reach(medic.position, ally.position):
+			continue
+		var score: float = PartyTriage.urgency(ally.survival.health,
+			ally.survival.max_health, ally.survival.bleeding)
+		if score <= 0.0:
+			continue
+		candidates.append({"peer": member_peer, "score": score, "player": ally})
+	if candidates.is_empty():
+		return {"ok": false, "reason": "no_wounded_allies"}
+	# Prioritize urgent treatment and resolve equal wounds by peer ID.
+	candidates.sort_custom(func(a, b):
+		return float(a["score"]) > float(b["score"]) if float(a["score"]) != float(b["score"]) else int(a["peer"]) < int(b["peer"]))
+	# Spend only after all checks and the complete eligible roster are resolved.
+	if not medic.inventory.remove(PartyTriage.ITEM_ID, 1):
+		return {"ok": false, "reason": "not_carried"}
+	var treated: int = mini(candidates.size(), PartyTriage.MAX_RECIPIENTS)
+	var healed: float = 0.0
+	var bleeding_stopped: float = 0.0
+	for i in range(treated):
+		var recipient: Player = candidates[i]["player"]
+		var old_health: float = recipient.survival.health
+		var old_bleeding: float = recipient.survival.bleeding
+		recipient.survival.heal(PartyTriage.HEAL)
+		recipient.survival.bleeding = maxf(0.0,
+			recipient.survival.bleeding - PartyTriage.BLEEDING_TREATMENT)
+		var hp_gain: float = recipient.survival.health - old_health
+		var wound_care: float = old_bleeding - recipient.survival.bleeding
+		healed += hp_gain
+		bleeding_stopped += wound_care
+		recipient.dirty_character = true
+		events.append({"type": "party_triage", "peer": recipient.id, "by": peer_id,
+			"heal": hp_gain, "bleeding_stopped": wound_care})
+	medic.party_aid_timer = PartyTriage.COOLDOWN
+	medic.action = {}
+	medic.dirty_inventory = true
+	medic.dirty_character = true
+	return {"ok": true, "treated": treated, "heal": healed,
+		"bleeding_stopped": bleeding_stopped, "cooldown": PartyTriage.COOLDOWN}
 
 
 ## Expedition support: one real cooked fish per eligible party member.
