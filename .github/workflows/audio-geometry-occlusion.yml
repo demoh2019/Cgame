@@ -1,0 +1,67 @@
+name: Geometry-aware 3D audio occlusion
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "scene/3d/audio_occlusion_policy.h"
+      - "scene/3d/audio_stream_player_3d.cpp"
+      - "scene/3d/audio_stream_player_3d.h"
+      - "doc/classes/AudioStreamPlayer3D.xml"
+      - "tests/scene/test_audio_occlusion_policy.cpp"
+      - "game/scripts/client/audio_spatial.gd"
+      - "game/scripts/client/audio.gd"
+      - "game/tests/test_audio_geometry_occlusion.gd"
+      - ".github/workflows/audio-geometry-occlusion.yml"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "scene/3d/audio_occlusion_policy.h"
+      - "scene/3d/audio_stream_player_3d.cpp"
+      - "scene/3d/audio_stream_player_3d.h"
+      - "game/scripts/client/audio_spatial.gd"
+      - "game/scripts/client/audio.gd"
+      - "game/tests/test_audio_geometry_occlusion.gd"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audio-obstruction:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run portable obstruction acoustics tests
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            tests/scene/test_audio_occlusion_policy.cpp \
+            -o /tmp/test_audio_occlusion_policy
+          /tmp/test_audio_occlusion_policy
+      - name: Check native mixer, renderer-safe physics and game fallback
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          cpp = Path("scene/3d/audio_stream_player_3d.cpp").read_text()
+          header = Path("scene/3d/audio_stream_player_3d.h").read_text()
+          game = Path("game/scripts/client/audio.gd").read_text()
+          spatial = Path("game/scripts/client/audio_spatial.gd").read_text()
+          runner = Path("game/tests/run_all.gd").read_text()
+          docs = Path("doc/classes/AudioStreamPlayer3D.xml").read_text()
+          assert "AudioOcclusionPolicy::evaluate(" in cpp
+          assert "obstruction.highshelf_gain" in cpp
+          assert 'D_METHOD("set_obstruction_amount"' in cpp
+          assert "float obstruction_amount = 0.0f;" in header
+          assert "OBSTRUCTION_RAYS_PER_TICK := 3" in game
+          assert "state.intersect_ray(ray)" in game
+          assert "player.has_method(\"set_obstruction_amount\")" in game
+          assert "AudioSpatial.obstruction_cutoff" in game
+          assert "static func obstruction_db" in spatial
+          assert "test_audio_geometry_occlusion.gd" in runner
+          assert "obstruction_amount" in docs
+          PY
