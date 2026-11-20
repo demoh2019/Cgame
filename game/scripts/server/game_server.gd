@@ -46,6 +46,7 @@ const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
+const FieldScentMask = preload("res://scripts/shared/field_scent_mask.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
@@ -248,6 +249,7 @@ func character_data(player: Player) -> Dictionary:
 		"stamina": player.survival.stamina, "infection": player.survival.infection,
 		"bleeding": player.survival.bleeding,
 		"exposure": player.survival.exposure, "warmth_seconds": player.survival.warmth_seconds,
+		"scent_mask_seconds": player.survival.scent_mask_seconds,
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"pvp_infamy": player.pvp_infamy,
 		"pvp_kills": player.pvp_kills, "pvp_honor": player.pvp_honor,
@@ -300,6 +302,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("warmth_seconds", 0.0), 0.0, Defs.THERMAL_WRAP_SECONDS):
 		return false
+	if not SaveValidation.finite_number(data.get("scent_mask_seconds", 0.0), 0.0, FieldScentMask.DURATION_SECONDS):
+		return false
 	if not SaveValidation.valid_counter(data.get("kills", 0)):
 		return false
 	if not SaveValidation.valid_counter(data.get("deaths", 0)):
@@ -334,6 +338,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	# Legacy survivors predating regional climate start with no exposure.
 	survival.exposure = float(data.get("exposure", 0.0))
 	survival.warmth_seconds = float(data.get("warmth_seconds", 0.0))
+	survival.scent_mask_seconds = float(data.get("scent_mask_seconds", 0.0))
 	var x: Variant = data.get("x", 0.0)
 	var z: Variant = data.get("z", 0.0)
 	# Invalid old logout coordinates can still safely fall back to the hub.
@@ -1807,6 +1812,14 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 				return {"ok": false, "reason": "not_carried"}
 			player.combat_energy = FrontierStim.apply(player.survival, player.combat_energy)
 			player.stim_cooldown = FrontierStim.COOLDOWN
+		"scent_mask":
+			if item_id != FieldScentMask.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if not FieldScentMask.can_apply(player.survival):
+				return {"ok": false, "reason": "already_masked"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			FieldScentMask.apply(player.survival)
 		"thermal":
 			if not player.survival.apply_thermal_wrap():
 				return {"ok": false, "reason": "already_warm"}
@@ -2620,7 +2633,10 @@ func _tick_players(delta: float) -> void:
 		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX,
 			player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta + energy_bonus)
 		var had_bleeding: bool = player.survival.bleeding > 0.0
+		var had_scent_mask: bool = player.survival.scent_mask_seconds > 0.0
 		var damage: float = player.survival.tick(delta)
+		if had_scent_mask:
+			player.dirty_character = true
 		if nourished and stamina_meal_seconds > 0.0:
 			player.survival.stamina = minf(Defs.MAX_STAMINA,
 				player.survival.stamina +
@@ -2967,7 +2983,7 @@ func _tick_zombies(delta: float) -> void:
 				player.noise_timer, _alive(player)),
 			# Only actual server wounds contribute; never trust client input.
 			"scent": BloodScent.detection_radius(player.survival.bleeding,
-				_alive(player), _is_safe(player.position))}
+				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival))}
 	# Activate spawns near players and put far-away zombies to sleep.
 	if tick_count % 20 == 1:
 		_manage_zombie_population()
@@ -3253,7 +3269,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"action": player.action.duplicate(),
 			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
 			"blood_scent_radius": BloodScent.detection_radius(player.survival.bleeding,
-				_alive(player), _is_safe(player.position)),
+				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival)),
+			"scent_mask_seconds": player.survival.scent_mask_seconds,
 			"exposure": player.survival.exposure,
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),

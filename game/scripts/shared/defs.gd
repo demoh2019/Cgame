@@ -276,6 +276,11 @@ static func _build_items() -> void:
 		"stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("charcoal_filter", "charcoal_filter", 1,
 		{"cloth_1": 1, "wood_1": 1, "stone_1": 1}, "", 2.5)
+	# Field-craftable salve hides only blood scent; no visual invisibility.
+	_add_item("herbal_scent_mask", {"name": "Herbal Scent Salve", "kind": "scent_mask",
+		"stack": 5, "weight": 0.2, "value": 18})
+	_add_recipe("herbal_scent_mask", "herbal_scent_mask", 1,
+		{"fiber_1": 2, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
 	_add_item("bandage", {"name": "Bandage", "kind": "medical", "heal": 28.0, "stop_bleeding": true, "stack": 10, "value": 10})
 	_add_recipe("bandage", "bandage", 2, {"cloth_1": 2}, "", 2.0)
 	# Common crafted wound care and scarce medical loot from infected ruins.

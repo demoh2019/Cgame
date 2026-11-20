@@ -979,6 +979,9 @@ func _process(_delta: float) -> void:
 		str(client.you.get("renown_rank", "Newcomer")),
 		int(client.you.get("renown", 0)), int(client.you.get("renown_next", 40)),
 		int(client.you.get("vendor_discount", 0))]
+	var mask_seconds: float = float(client.you.get("scent_mask_seconds", 0.0))
+	if mask_seconds > 0.0:
+		_info_label.text += "\nSCENT MASK: %.0fs remaining (vision and hearing unchanged)" % mask_seconds
 	var blood_range: float = float(client.you.get("blood_scent_radius", 0.0))
 	if blood_range > 0.0:
 		_info_label.text += "\nBLOOD SCENT: infected can sense the wound from %d m" % ceili(blood_range)

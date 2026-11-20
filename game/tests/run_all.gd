@@ -21,6 +21,7 @@ const SUITES := [
 	"res://tests/test_warden_aura.gd",
 	"res://tests/test_bleeding.gd",
 	"res://tests/test_blood_scent.gd",
+	"res://tests/test_scent_mask.gd",
 	"res://tests/test_camouflage.gd",
 	"res://tests/test_weather.gd",
 	"res://tests/test_stormcoats.gd",
