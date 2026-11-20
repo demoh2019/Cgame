@@ -9,6 +9,16 @@ gathering, crafting/refining, equipment-based combat, full-loot risks outside
 the hub, and a server-authoritative simulation. Genre ideas are used without
 copying proprietary assets or content from other titles.
 
+## Three survivor slots in solo play
+
+The title screen offers three separate offline solo survivors, each with its
+own inventory/skills, persistent world barriers, local stop signal, and a
+loopback-only ENet server port. Slot 1 reuses all the old solo save files and,
+when local Nakama is available, still supports the account-backed character.
+Slots 2 and 3 always use independent local saves instead of sharing the
+Nakama account. **Join server** remains unchanged. See
+`game/docs/SOLO_CHARACTER_SLOTS.md`.
+
 ## Start with Play solo or Join server
 
 The default `game/project.godot` scene is the unified online client

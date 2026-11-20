@@ -30,6 +30,7 @@ const Vendor = preload("res://scripts/shared/vendor.gd")
 const Effects = preload("res://scripts/client/effects.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const LocalServer = preload("res://scripts/client/local_server.gd")
+const SoloSlots = preload("res://scripts/client/solo_slots.gd")
 const SkillsPanel = preload("res://scripts/client/skills_panel.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 
@@ -70,6 +71,8 @@ var chat_edit: LineEdit
 var account := {} # Result of the Nakama sign-in, empty when playing without accounts.
 var connect_panel: PanelContainer
 var local_server := LocalServer.new()
+var solo_slot_picker: OptionButton
+var solo_slot_info: Label
 var _solo_attempts_left := 0
 var address_edit: LineEdit
 var name_edit: LineEdit
@@ -290,6 +293,24 @@ func _build_connect_screen() -> void:
 			name_edit = edit
 		else:
 			address_edit = edit
+	var slot_caption := Label.new()
+	slot_caption.text = "Solo survivor"
+	slot_caption.add_theme_font_size_override("font_size", 13)
+	slot_caption.add_theme_color_override("font_color", Color(0.75, 0.74, 0.7))
+	box.add_child(slot_caption)
+	solo_slot_picker = OptionButton.new()
+	solo_slot_picker.custom_minimum_size = Vector2(0, 38)
+	for slot in range(1, SoloSlots.SLOT_COUNT + 1):
+		solo_slot_picker.add_item("Survivor %d" % slot, slot)
+	solo_slot_picker.select(0)
+	solo_slot_picker.item_selected.connect(func(_index: int) -> void: _update_solo_slot_info())
+	box.add_child(solo_slot_picker)
+	solo_slot_info = Label.new()
+	solo_slot_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	solo_slot_info.add_theme_font_size_override("font_size", 12)
+	solo_slot_info.add_theme_color_override("font_color", Color(0.7, 0.83, 0.72))
+	box.add_child(solo_slot_info)
+	_update_solo_slot_info()
 	var solo := Button.new()
 	solo.text = "Play solo"
 	solo.tooltip_text = "Runs the world on this computer (every system, saved between sessions) and joins it."
@@ -382,15 +403,24 @@ func _on_connection_failed() -> void:
 	status_label.text = "Connection failed."
 
 
-## Play solo: this machine runs the world (the real server, with Nakama saves when available) and you join it.
+## The selection changes only which local world is launched, not gameplay rules.
+func _update_solo_slot_info() -> void:
+	if solo_slot_picker == null or solo_slot_info == null:
+		return
+	var slot: int = solo_slot_picker.get_selected_id()
+	solo_slot_info.text = SoloSlots.description(slot)
+
+
+## Start the selected local character on its private single-player ENet port.
 func _play_solo() -> void:
-	var address: String = local_server.start()
+	var selected_slot: int = solo_slot_picker.get_selected_id() if solo_slot_picker != null else 1
+	var address: String = local_server.start(selected_slot)
 	if address.is_empty():
 		status_label.text = "Could not start a local world."
 		return
 	address_edit.text = address
 	_solo_attempts_left = 12
-	status_label.text = "Starting your world..."
+	status_label.text = "Starting survivor %d..." % selected_slot
 	await get_tree().create_timer(3.0).timeout # Let the server import and open its port.
 	_connect()
 
