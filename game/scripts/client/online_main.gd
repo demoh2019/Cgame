@@ -31,6 +31,7 @@ const SnowVfx = preload("res://scripts/client/snow_vfx.gd")
 const FishShoals = preload("res://scripts/client/fish_shoals.gd")
 const DuskBats = preload("res://scripts/client/dusk_bats.gd")
 const BreathVapor = preload("res://scripts/client/breath_vapor.gd")
+const Tumbleweeds = preload("res://scripts/client/tumbleweeds.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -115,6 +116,7 @@ var _ambient_birds
 var _fish_shoals
 var _dusk_bats
 var _breath
+var _tumbleweeds
 var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
@@ -1106,6 +1108,8 @@ func _on_welcomed() -> void:
 	add_child(_fish_shoals)
 	_dusk_bats = DuskBats.new()
 	add_child(_dusk_bats)
+	_tumbleweeds = Tumbleweeds.new()
+	add_child(_tumbleweeds)
 	audio = Audio.new()
 	add_child(audio)
 	# Thunder has its own bounded event queue and 3D emitter so storm
@@ -1430,6 +1434,9 @@ func _update_time_of_day(delta: float) -> void:
 		if _fish_shoals != null:
 			_fish_shoals.update_view(client.world, here, GraphicsQuality.level(),
 				WorldCycle.daylight(clock), delta, underground)
+		if _tumbleweeds != null:
+			_tumbleweeds.update_view(client.world, here, _visual_biome, _visual_weather_wind,
+				GraphicsQuality.level(), delta, underground)
 		if _dusk_bats != null:
 			_dusk_bats.update_view(here, WorldCycle.daylight(clock), atmosphere.storm,
 				GraphicsQuality.level(), delta, underground)

@@ -43,6 +43,7 @@ const SUITES := [
 	"res://tests/test_fish_shoals.gd",
 	"res://tests/test_dusk_bats.gd",
 	"res://tests/test_breath_vapor.gd",
+	"res://tests/test_tumbleweeds.gd",
 	"res://tests/test_terrain_sdfgi.gd",
 	"res://tests/test_cinematic_bloom.gd",
 	"res://tests/test_foliage_spectral_optics.gd",
