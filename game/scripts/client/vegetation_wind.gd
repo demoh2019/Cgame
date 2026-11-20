@@ -3,6 +3,9 @@ extends RefCounted
 ## xy = direction, z = strength 0..1. No changes to authoritative simulation.
 const MAX_SPEED := 1.5
 const RESPONSE := 4.0
+## Latest published wind for CPU-side effects (lanterns, smoke). Reading the shader
+## global back is editor-only and returns null in exported or running games.
+static var current := Vector3.ZERO
 
 static func target(wind: Vector2) -> Vector3:
 	if not wind.is_finite():

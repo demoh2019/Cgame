@@ -3,6 +3,7 @@ extends Node3D
 ## same idea as Unity's chain of HingeJoints or an Unreal Physics Constraint chain, but integrated analytically
 ## (no physics bodies, no collision) so dozens of them cost nothing. Pure cosmetics, client only.
 ## Also: `rope_points` / `build_rope_mesh` give a sagging cable (catenary-like parabola) between two anchors.
+const VegetationWind = preload("res://scripts/client/vegetation_wind.gd")
 
 const LINKS := [0, 3, 5, 8] # Chain links per quality tier; Low shows none.
 const LINK_LENGTH := 0.18
@@ -138,7 +139,7 @@ func setup(level: int, glow: Color) -> void:
 func _process(delta: float) -> void:
 	if _points.size() < 2:
 		return
-	var wind: Vector3 = RenderingServer.global_shader_parameter_get(&"aa_vegetation_wind")
+	var wind: Vector3 = VegetationWind.current
 	# World wind to local space of the lantern's parent so it swings the right way on a rotated mount.
 	var local := global_transform.basis.inverse() * Vector3(wind.x, 0, wind.y)
 	var gust := 0.7 + 0.3 * sin(Time.get_ticks_msec() * 0.001 * 0.8 + _phase)

@@ -205,6 +205,7 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	if _wind_publish_seconds >= 0.1:
 		_wind_publish_seconds = fmod(_wind_publish_seconds, 0.1)
 		RenderingServer.global_shader_parameter_set(&"aa_vegetation_wind", _vegetation_wind)
+		VegetationWind.current = _vegetation_wind
 		# One extra global at 10 Hz; every forest/field/road still shares
 		# a single cached R8 cloud shadow texture and one shader tap.
 		RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_offset", _cloud_offset)
