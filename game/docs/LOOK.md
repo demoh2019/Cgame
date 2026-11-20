@@ -39,7 +39,9 @@ the server to drop the connection, so it is not the default.
   switches retain hysteresis. Nothing touches server gameplay, chunk placement
   or VRAM texture allocations. `tests/test_grass_lod.gd` checks screen-space
   behavior and density bounds. GPU/visual benchmark still required before
-  quantifying frame-rate improvements.
+  quantifying frame-rate improvements. Tile LOD recalculation is also skipped
+  for stationary cameras until they move at least 25 cm, a new tile appears,
+  or the quality/FOV/pixel budget changes; wind remains GPU-animated.
 * Feedback: banners for captured outposts and sieges, rings and bursts for restoration pulses, flashes, pinning bolts, knockback
   and smashed barricades; music stings on death, level-ups and victories.
 
