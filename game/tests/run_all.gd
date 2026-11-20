@@ -128,6 +128,7 @@ const SUITES := [
 	"res://tests/test_zombie_ai.gd",
 	"res://tests/test_infected_wounds.gd",
 	"res://tests/test_infected_resolve.gd",
+	"res://tests/test_infected_sight.gd",
 	"res://tests/test_acid_spitter.gd",
 	"res://tests/test_acid_pools.gd",
 	"res://tests/test_acid_neutralizer.gd",

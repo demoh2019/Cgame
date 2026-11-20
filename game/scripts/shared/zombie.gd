@@ -12,6 +12,7 @@ const WindHearing = preload("res://scripts/shared/wind_hearing.gd")
 const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
 const InfectedResolve = preload("res://scripts/shared/infected_resolve.gd")
+const InfectedSight = preload("res://scripts/shared/infected_sight.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -112,7 +113,7 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 	# Pick or drop a target a few times a second, not every tick.
 	if think_timer <= 0.0:
 		think_timer = 0.25
-		_select_target(players, here)
+		_select_target(world, players, here)
 
 	var result: Dictionary = {}
 	match state:
@@ -188,7 +189,7 @@ func force_taunt(peer_id: int, seconds: float) -> bool:
 	return true
 
 
-func _select_target(players: Dictionary, here: Vector2) -> void:
+func _select_target(world, players: Dictionary, here: Vector2) -> void:
 	# Threat is subordinate only during the short guardian focus.
 	# Safe, dead, distant and disconnected taunts are cleared immediately.
 	if forced_target_seconds > 0.0 and players.has(forced_target_id):
@@ -247,12 +248,20 @@ func _select_target(players: Dictionary, here: Vector2) -> void:
 			scent = clampf(scent_raw, 0.0, float(data["lose"]) - 1.0)
 		# Firelight reveals campers independently of camouflage, but not beyond
 		# this infected type's pursuit leash or the server's safe-zone rules.
+		# Like ordinary sight, its first acquisition needs unobstructed cover.
 		var firelight_raw: float = float(info.get("firelight", 0.0))
 		var firelight: float = 0.0
 		if is_finite(firelight_raw):
 			firelight = clampf(firelight_raw, 0.0, float(data["lose"]) - 1.0)
-		var detect_range := maxf(maxf(notice, hearing), maxf(scent, firelight))
-		if distance < best_distance and (distance <= detect_range or peer_id == target_id):
+		# Sound and smell bend around cover; visual detection (including
+		# campfire/flare light) is stopped by real ruins, trees and barricades.
+		# Resolve one short ray only for a candidate that cannot already be
+		# heard or smelled. Current aggro, confirmed damage and taunt do not
+		# magically disappear when a survivor steps behind a wall.
+		var nonvisual: bool = distance <= maxf(hearing, scent)
+		var potentially_visible: bool = distance <= maxf(notice, firelight)
+		if distance < best_distance and (peer_id == target_id or nonvisual or
+				(potentially_visible and InfectedSight.clear_path(world, position, p))):
 			best = peer_id
 			best_distance = distance
 	if best != -1:
