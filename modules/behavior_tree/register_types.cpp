@@ -31,6 +31,7 @@
 #include "register_types.h"
 
 #include "behavior_tree.h"
+#include "ai_visual_sensor_2d.h"
 
 #include "core/object/class_db.h"
 
@@ -39,6 +40,7 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 	GDREGISTER_CLASS(BehaviorTree);
+	GDREGISTER_CLASS(AIVisualSensor2D);
 }
 
 void uninitialize_behavior_tree_module(ModuleInitializationLevel p_level) {
