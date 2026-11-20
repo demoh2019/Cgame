@@ -435,6 +435,30 @@ void Environment::_update_ssao() {
 
 // SSIL
 
+// Apply the High-tier diffuse-bounce budget in a single render-thread update.
+// This avoids intermediate expensive SSIL state changes on Auto preset switches
+// and rejects invalid parameters without partially modifying the environment.
+void Environment::configure_ssil(bool p_enabled, float p_radius, float p_intensity, float p_sharpness, float p_normal_rejection) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_radius) || p_radius <= 0.0f || p_radius > 16.0f,
+			"SSIL radius must be finite and in (0, 16].");
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_intensity) || p_intensity < 0.0f || p_intensity > 16.0f,
+			"SSIL intensity must be finite and in [0, 16].");
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_sharpness) || p_sharpness < 0.0f || p_sharpness > 1.0f,
+			"SSIL sharpness must be finite and in [0, 1].");
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_normal_rejection) || p_normal_rejection < 0.0f || p_normal_rejection > 1.0f,
+			"SSIL normal rejection must be finite and in [0, 1].");
+	if (ssil_enabled == p_enabled && ssil_radius == p_radius && ssil_intensity == p_intensity &&
+			ssil_sharpness == p_sharpness && ssil_normal_rejection == p_normal_rejection) {
+		return;
+	}
+	ssil_enabled = p_enabled;
+	ssil_radius = p_radius;
+	ssil_intensity = p_intensity;
+	ssil_sharpness = p_sharpness;
+	ssil_normal_rejection = p_normal_rejection;
+	_update_ssil();
+}
+
 void Environment::set_ssil_enabled(bool p_enabled) {
 	ssil_enabled = p_enabled;
 	_update_ssil();
@@ -1556,6 +1580,7 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ssao_ao_channel_affect", PROPERTY_HINT_RANGE, "0.00,1,0.01"), "set_ssao_ao_channel_affect", "get_ssao_ao_channel_affect");
 
 	// SSIL
+	ClassDB::bind_method(D_METHOD("configure_ssil", "enabled", "radius", "intensity", "sharpness", "normal_rejection"), &Environment::configure_ssil);
 	ClassDB::bind_method(D_METHOD("set_ssil_enabled", "enabled"), &Environment::set_ssil_enabled);
 	ClassDB::bind_method(D_METHOD("is_ssil_enabled"), &Environment::is_ssil_enabled);
 	ClassDB::bind_method(D_METHOD("set_ssil_radius", "radius"), &Environment::set_ssil_radius);
