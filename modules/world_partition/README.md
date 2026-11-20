@@ -12,6 +12,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
+- **Physics-frame scene activation fence:** every instantiated cell records its creation physics frame. `min_physics_frames_after_load` (0–8, default 2) delays an additional **activation** state. An optional root method `is_streaming_activation_ready() -> bool` can veto activation until game-specific collision/navmesh/terrain setup is complete. Query `is_cell_activation_ready(cell)`, `is_streaming_source_activation_ready(name)`, source activated-cell counts, and activation progress separately from loaded scene roots; unloading/reloading always resets the fence.
 - **Independent bounded simulation activation:** loaded cells can retain visuals but pause script/AI simulation independently of LOD. Configure `simulation_radius` (-1 disables), `simulation_hysteresis_cells` (0–8) and `max_simulation_transitions_per_frame` (1–64). The native engine tracks per-cell activation, exposes `is_cell_simulation_active()` and `get_simulation_active_cell_count()`, emits `cell_simulation_changed`, and calls an optional scene-root `set_streaming_simulation_active(active)` **before** `_ready()` for initial state.
 - **Prioritized streaming sources:** runtime names carry priorities 0–3 (background, normal, important, urgent); after player and persistent hubs the native scheduler works high to low and alphabetical within each tier, all under existing instance/new-request budgets. Fast-travel scenes can finish before background quest preloads without competing for observer priority. Update a source via `set_streaming_source_priority()`.
 - **Nonblocking streaming-source completion:** `get_streaming_source_cell_count`, `get_streaming_source_loaded_cell_count`, `get_streaming_source_failed_cell_count`, `get_streaming_source_progress` and `is_streaming_source_ready` expose bounded readiness for already-registered destination cells. Unregistered/missing source centers fail closed, and ready requires a valid active observer and all relevant `Node3D` roots to be live.
@@ -83,6 +84,35 @@ func set_streaming_simulation_active(active: bool) -> void:
 ```
 
 Game code **must actually stop its own processes, animation updates, AI controllers or costly gameplay tasks**. `WorldPartition3D` publishes the state and calls the opt-in callback, but does **not** automatically disable collision shapes or `Node.process_mode` for arbitrary scene hierarchies, to avoid breaking rendering, static terrain or input. Visual LOD toggles do not activate distant AI. Call `get_simulation_active_cell_count()` for diagnostics, `is_cell_simulation_active(cell)` to gate NPC creation. The playable integration lives in `forest_encounters.gd` and `streamed_forest_cell.gd` with `smoke_simulation.gd` verifying near activation, retained geometry, hysteresis, pinned cells and budgeted transitions.
+
+## Physics-frame and scene-defined activation fences
+
+Scene instantiation only means the root is alive, **not** that every physics or navigation system is safe to use. `WorldPartition3D` now tracks each cell's creation frame using Godot `Engine.get_physics_frames()`. With `min_physics_frames_after_load=2` (default), the engine waits until at least two physics ticks have elapsed since a cell was added to the scene tree. This count is reset after unloading and reinstantiating a cell.
+
+To permit scene-specific gameplay readiness, a scene root may implement a **side-effect-free** function:
+
+```gdscript
+func is_streaming_activation_ready() -> bool:
+    # Example only: replace with actual collision/navmesh/actor-init conditions.
+    return is_node_ready() and custom_collision_initialized
+```
+
+The scene root is ready only when both its physics-tick delay and optional predicate succeed. Invalid predicate return types fail closed; scenes without this method use the frame barrier alone. All checks are on the main thread and don't call blocking resource loading:
+
+```gdscript
+world.min_physics_frames_after_load = 2
+if world.set_streaming_source("portal", destination_global, 0, 3):
+    # In _process(), after verifying the destination cell is registered:
+    if world.get_streaming_source_failed_cell_count("portal") > 0:
+        cancel_portal()
+    elif world.is_streaming_source_activation_ready("portal"):
+        perform_travel_to_known_safe_spawn()
+    else:
+        print(world.get_streaming_source_activated_cell_count("portal"))
+        print(world.get_streaming_source_activation_progress("portal"))
+```
+
+These methods complement the older `is_streaming_source_ready`, which only checks instantiated scene roots. **They are not physics-server synchronization, collision-shape bake, navigation bake or GPU-residency guarantees.** The game must validate its spawn position and its own content dependencies. Do not put expensive work in `is_streaming_activation_ready()`: it is polled repeatedly for every relevant cell until ready. Up to eight source names, each at radius 0 or 1, ensure bounded iteration. `smoke_activation_fence.gd` tests real threaded scene loading, the physics delay, manual predicate gating, retargeting and cleanup.
 
 ## Asynchronous source readiness and safe fast travel
 
@@ -173,7 +203,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 65 Doctest cases across `test_world_partition_3d.h` (29) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 66 Doctest cases across `test_world_partition_3d.h` (30) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -184,6 +214,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Scene activation is a gameplay fence, not an engine-wide physics promise.** The physics frame counter establishes a minimum age. Only a scene author's opt-in predicate can verify domain-specific readiness; a bug or omission in it cannot be detected by the engine. Streaming and physics activation remain decoupled from any GPU upload/texture residency.
 - **Simulation activation is opt-in per scene or game manager.** It never unloads geometry, removes physics bodies, or pauses arbitrary descendant scripts automatically. Callback scripts must tolerate calls before `_ready()` and execute their own activation logic. Hysteresis can intentionally keep some neighboring cells active even when outside the inner radius.
 - **Readiness is not an all-systems fence.** A `true` completion result means the relevant PackedScene roots exist in the live scene tree, not that they finished deferred physics initialization, navigation baking or GPU uploads. Games that stream collision/terrain separately must add their own activation checks.
 - **External source fanout is bounded:** at most 8 sources and radius 1; no custom shapes, priorities, source replication or automatic quest area generation. Additional source load requests can be delayed by high-priority camera/player work.
