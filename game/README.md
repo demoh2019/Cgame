@@ -2359,3 +2359,23 @@ membership revocation. The Nakama integration suite
 `tests/test_nakama_backend.gd` covers original writes, identical
 replays, event collisions, independent victories, reload and server-key
 permissions. No Cgame engine modifications were necessary.
+
+## Corrosive infected can damage player-built barricades
+
+Lingering acid from a dangerous-zone spitter now **corrodes nearby
+player-built defenses** at 8 raw durability damage per second while the
+pool persists. This links ranged infected PvE with base defense and the
+existing tiered construction/repair economy. T2–T4 reinforced walls use
+their existing damage-reduction factors, so T4 only loses 4 HP per
+corrosion tick. Corrosion never attacks procedural hub or decoration
+objects and cannot create new resources or repair a damaged wall.
+
+All pools share a **single hit cooldown per wall**, preventing multiple
+overlapping puddles from multiplying siege damage. The same server
+`damage_barricade` flow handles checkpoint revisions, destruction,
+removal from collision and client snapshots. The corrosion tick does
+not trust client-originated damage, coordinates or ownership; owner-only
+repair and dismantling work as before. Destroyed/dismantled walls clear
+their short-lived cooldown entries and any active pool expires within
+5 seconds. Testing: `game/tests/test_acid_wall_corrosion.gd` in the
+existing headless test suite.

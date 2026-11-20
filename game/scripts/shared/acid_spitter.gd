@@ -17,6 +17,16 @@ const POOL_DAMAGE := 3.0
 const POOL_INFECTION := 1.0
 const POOL_TICK_SECONDS := 1.0
 const MAX_ACTIVE_POOLS := 64
+# Temporary acid puddles can corrode walls during sieges. The existing
+# tier-dependent structure damage factor is applied by the server.
+const STRUCTURE_CORROSION_DAMAGE := 8.0
+
+
+static func corrodes_wall(center: Vector2, wall_position: Vector2, wall_radius: float) -> bool:
+	if not center.is_finite() or not wall_position.is_finite() 			or not is_finite(wall_radius) or wall_radius <= 0.0:
+		return false
+	var radius: float = RADIUS + wall_radius
+	return center.distance_squared_to(wall_position) <= radius * radius
 
 
 static func make_pool(id: int, center: Vector2, ground_y: float,

@@ -173,6 +173,7 @@ var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
 var decoys: Dictionary = {} # Temporary physical sound lures; server-owned, never persisted.
 var acid_pools: Dictionary = {} # Temporary nonpersistent corrosive terrain.
 var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stacking.
+var _acid_wall_last_hit: Dictionary = {} # Wall id -> last corrosion time; no overlap stacking.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
@@ -1881,6 +1882,7 @@ func cmd_dismantle(peer_id: int, id: int) -> Dictionary:
 	# Atomic gameplay commit: a failed attempt cannot erase a barricade or mint loot.
 	player.inventory.load_dict(trial.to_dict())
 	barricades.erase(id)
+	_acid_wall_last_hit.erase(id)
 	siege_last_by_wall.erase(id)
 	world_structure_revision += 1
 	world.remove_dynamic_blocker(id)
@@ -1900,6 +1902,7 @@ func damage_barricade(id: int, damage: float) -> bool:
 	world_structure_revision += 1
 	if float(item["hp"]) <= 0.0:
 		barricades.erase(id)
+		_acid_wall_last_hit.erase(id)
 		siege_last_by_wall.erase(id)
 		world.remove_dynamic_blocker(id)
 		events.append({"type": "barricade_broken", "id": id})
@@ -3126,6 +3129,17 @@ func _tick_acid_pools() -> void:
 		# damage after a frame stall.
 		pool["next_tick"] = time + AcidSpitter.POOL_TICK_SECONDS
 		var center := Vector2(float(pool["x"]), float(pool["z"]))
+		# Acid pools corrode player-built defenses, not natural scenery.
+		# A global per-wall cooldown prevents overlapping terrain damage.
+		for wall_id in barricades.keys():
+			var wall: Dictionary = barricades[wall_id]
+			var at := Vector2(float(wall["x"]), float(wall["z"]))
+			if not AcidSpitter.corrodes_wall(center, at, Structures.RADIUS):
+				continue
+			if time - float(_acid_wall_last_hit.get(wall_id, -INF)) < AcidSpitter.POOL_TICK_SECONDS:
+				continue
+			_acid_wall_last_hit[wall_id] = time
+			damage_barricade(int(wall_id), AcidSpitter.STRUCTURE_CORROSION_DAMAGE)
 		for survivor in players.values():
 			if not _alive(survivor) or _is_safe(survivor.position) 					or world.zone_at(survivor.position.x, survivor.position.z) < AcidSpitter.MIN_ZONE 					or not AcidSpitter.hits(center, survivor.position) 					or survivor.dodge_immunity > 0.0:
 				continue
