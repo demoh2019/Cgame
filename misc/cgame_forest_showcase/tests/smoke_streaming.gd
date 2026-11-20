@@ -6,6 +6,7 @@ extends SceneTree
 ## placement and per-cell graphic quality settings using a real SceneTree.
 
 const CELL_SCENE_PATH: String = "res://cells/forest_cell.tscn"
+const TileCache = preload("res://scripts/terrain_tile_cache.gd")
 const MAX_FRAMES: int = 360
 
 var observed_cell_events: int = 0
@@ -46,6 +47,7 @@ func _get_active_cell_node(stream: WorldPartition3D, grid_cell: Vector2i) -> Nod
 
 
 func _run() -> void:
+    TileCache.clear()
     if not ResourceLoader.exists(CELL_SCENE_PATH):
         _fail("cell scene is missing")
         return
@@ -106,6 +108,8 @@ func _run() -> void:
     if shape_node.position.distance_to(Vector3(16, 0, 16)) > 0.001:
         _fail("terrain heightmap collision is not centered within its 32m tile")
         return
+    var original_ground_mesh: Mesh = ground.mesh
+    var original_ground_shape: Shape3D = shape_node.shape
     var origin_arrays: Array = ground.mesh.surface_get_arrays(0)
     var origin_vertices: PackedVector3Array = origin_arrays[Mesh.ARRAY_VERTEX]
     var origin_normals: PackedVector3Array = origin_arrays[Mesh.ARRAY_NORMAL]
@@ -178,6 +182,17 @@ func _run() -> void:
     var reloaded := _get_active_cell_node(stream, origin)
     if reloaded == null or not reloaded.has_node("WindGrass"):
         _fail("reloaded cell root was not instantiated")
+        return
+    var reloaded_ground := reloaded.get_node_or_null("TerrainPatch/GroundMesh") as MeshInstance3D
+    var reloaded_collision := reloaded.get_node_or_null("TerrainPatch/GroundCollision/HeightmapCollision") as CollisionShape3D
+    if reloaded_ground == null or reloaded_collision == null:
+        _fail("reloaded tile lost its ground mesh or collider")
+        return
+    if reloaded_ground.mesh != original_ground_mesh or reloaded_collision.shape != original_ground_shape:
+        _fail("terrain resource cache did not reuse the mesh and heightmap shape")
+        return
+    if int(TileCache.get_stats()["hits"]) < 1:
+        _fail("cache did not register a terrain resource hit on tile reload")
         return
     var next_grass := reloaded.get_node("WindGrass") as MultiMeshInstance3D
     if next_grass.multimesh.get_instance_transform(0) != before:
