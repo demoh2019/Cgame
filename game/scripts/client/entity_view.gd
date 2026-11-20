@@ -774,3 +774,23 @@ func nearest_hoverable(point: Vector3, radius: float) -> Dictionary:
 			best_d = d
 			best = {"node": node, "kind": kind}
 	return best
+
+
+## Up to `count` nearest visible nodes of one kind ("zombie", "player", "bag") to a point.
+func nearest_of_kind(point: Vector3, kind: String, count: int, radius: float) -> Array[Node3D]:
+	var found: Array = []
+	var prefix := kind + ":"
+	for key in _nodes:
+		if not str(key).begins_with(prefix):
+			continue
+		var node := _nodes[key] as Node3D
+		if node == null or not node.visible:
+			continue
+		var d: float = node.global_position.distance_to(point)
+		if d <= radius:
+			found.append([d, node])
+	found.sort_custom(func(a, b): return a[0] < b[0])
+	var result: Array[Node3D] = []
+	for i in mini(count, found.size()):
+		result.append(found[i][1])
+	return result
