@@ -37,6 +37,8 @@ func configure(cell: Vector2i, cached_batch: MultiMesh = null) -> void:
         var wz: float = float(cell.y) * CELL_SIZE + pz
         if Vector2(wx, wz - 9.0).length() < 8.0:
             continue
+        if Vector2(wx - 208.0, wz - 208.0).length() < 6.0:
+            continue
 
         var scale: float = rng.randf_range(0.70, 1.5)
         var ground: float = TerrainHeight.height_at(wx, wz)
