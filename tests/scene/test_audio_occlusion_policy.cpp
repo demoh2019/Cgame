@@ -30,7 +30,8 @@ int main() {
 		assert(std::isfinite(sample.gain) && sample.gain > 0.0f && sample.gain <= 1.0f);
 		assert(std::isfinite(sample.cutoff_hz));
 		assert(std::isfinite(sample.highshelf_gain) && sample.highshelf_gain > 0.0f && sample.highshelf_gain <= 1.0f);
-		assert(sample.cutoff_hz >= 1400.0f && sample.cutoff_hz <= 8500.0f);
+		// Log/exp interpolation may round by a few thousandths of a Hz.
+		assert(sample.cutoff_hz >= 1399.98f && sample.cutoff_hz <= 8500.02f);
 	}
 	const Response nan = evaluate(std::numeric_limits<float>::quiet_NaN(), 5000.0f);
 	const Response bad_cutoff = evaluate(0.7f, std::numeric_limits<float>::infinity());
