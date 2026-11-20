@@ -31,9 +31,11 @@ rate, preventing abrupt level jumps at doorway thresholds.
 `AudioStreamPlayer3D.obstruction_amount`. The engine applies a -8 dB
 direct-path multiplier for full obstruction, a logarithmic spectral
 cutoff toward 1.4 kHz, and reduces high-shelf energy even for nearby
-sources. The initial playback buffer receives the *same* spectral
-cutoff as later physics/audio updates: no brief unfiltered transient
-when a blocked shot starts playing.
+sources. The native mixer uses a **separate -15 dB high-frequency shelf**
+at full obstruction, not the -8 dB full-band factor a second time.
+The initial playback buffer receives both the *same* spectral cutoff
+and the shelf factor as later physics/audio updates: no brief unfiltered
+transient when a terrain-blocked shot starts playing.
 
 **On stock Godot** the client applies the matching attenuation and
 cutoff directly to that one `AudioStreamPlayer3D`. The original source
