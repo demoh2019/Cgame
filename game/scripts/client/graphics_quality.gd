@@ -99,6 +99,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 		# Applying only to the sun node would let nighttime weather restore shadows on Performance.
 		var atmosphere_profile: Dictionary = p.duplicate()
 		atmosphere_profile["sky_radiance"] = world_profile["sky_radiance"]
+		atmosphere_profile["sky_refresh_interval"] = world_profile["sky_refresh_interval"]
 		if atmosphere.has_method("apply_graphics_profile"):
 			atmosphere.call("apply_graphics_profile", atmosphere_profile)
 		var sun := atmosphere.get("sun") as DirectionalLight3D
