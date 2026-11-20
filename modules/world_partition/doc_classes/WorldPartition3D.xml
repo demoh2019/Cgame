@@ -7,6 +7,7 @@
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
+		Multiple runtime streaming sources can load independent remote regions with per-source radii and priorities, and report completion using [signal streaming_source_ready] and [method is_streaming_source_ready]. They share the request and instantiation budgets with the primary player observer.
 		Manual cell residency pins can independently keep a small number of registered areas available for fast travel, cinematics or an off-screen quest. Use [method pin_cell], [method is_cell_loaded] and [method unpin_cell] to manage the lifecycle, without increasing the main player streaming radius.
 		Optional directional prefetch can warm additional cells in front of a moving observer. The forward corridor is separate from normal loading, and it uses the same asynchronous resource loading and per-frame instantiation budgets. Use [member prefetch_direction] (grid X/Z components) and [member prefetch_distance].
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
@@ -67,6 +68,56 @@
 			<return type="void" />
 			<description>
 				Releases all manual residency pins without removing scene registrations. Replacing all cell registrations with [method set_cell_scenes] or clearing registrations also removes the old pins.
+			</description>
+		</method>
+		<method name="set_streaming_source">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="center" type="Vector2i" />
+			<param index="2" name="load_radius" type="int" />
+			<param index="3" name="unload_radius" type="int" />
+			<param index="4" name="priority" type="int" />
+			<description>
+				Creates or updates a named runtime streaming source centered on [param center] in grid-cell coordinates. Valid load radius is 0–4, unload radius must be at least load radius and at most 8, and priority must be 0–100 (larger is serviced first). Names must contain 1–64 characters. A maximum of 8 sources may exist at once; updating one does not consume a new slot. A source loads registered [PackedScene] cells in its square load radius and retains already loaded cells through its unload radius. Streaming occurs asynchronously within the same request and instantiation budgets used for the player. Processing precedence: player, manual pins, named sources in descending priority order, then directional prefetch. Call [method update_streaming] for an immediate update. Returns [code]false[/code] for an invalid source.
+			</description>
+		</method>
+		<method name="remove_streaming_source">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Removes one named streaming source. Its cells may unload on the next update unless requested by the player, another source or an explicit pin.
+			</description>
+		</method>
+		<method name="clear_streaming_sources">
+			<return type="void" />
+			<description>
+				Removes all named streaming sources without removing registered cell scenes or manually pinned cells.
+			</description>
+		</method>
+		<method name="get_streaming_source" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns a Dictionary with [code]center[/code], [code]load_radius[/code], [code]unload_radius[/code], [code]priority[/code], and [code]ready[/code], or an empty Dictionary for an unknown name. The returned Dictionary is a snapshot.
+			</description>
+		</method>
+		<method name="get_streaming_source_names" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the names of all registered named streaming sources in alphabetical order.
+			</description>
+		</method>
+		<method name="get_streaming_source_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of currently configured named streaming sources (0–8).
+			</description>
+		</method>
+		<method name="is_streaming_source_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns true only when every registered cell covered by the source's load radius has an instantiated scene root, and streaming is enabled. Missing or failed cells make it false. This does not guarantee later physics-server synchronization or resource uploads.
 			</description>
 		</method>
 		<method name="get_cell_scene" qualifiers="const">
@@ -241,6 +292,18 @@
 		</member>
 	</members>
 	<signals>
+		<signal name="streaming_source_ready">
+			<param index="0" name="name" type="String" />
+			<description>
+				Emitted when a named source transitions to fully instantiated scene-tree readiness across its load radius. Signals are emitted after the streamer's main-thread loading update.
+			</description>
+		</signal>
+		<signal name="streaming_source_unready">
+			<param index="0" name="name" type="String" />
+			<description>
+				Emitted when a previously ready named source becomes incomplete or is removed or disabled. Callers should not treat this as a physics-server readiness signal.
+			</description>
+		</signal>
 		<signal name="cell_loaded">
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
