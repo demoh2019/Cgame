@@ -27,7 +27,7 @@ by 18, and stops bleeding. The recipe costs real materials and produces
 one stackable, tradeable item. It is weaker than rare antidotes, so danger
 and high-level crafting remain valuable.
 
-Use it via inventory in multiplayer or press **F9** in local and online
+Use it via inventory in multiplayer or press **F11** in local and online
 play. Healing, server ownership, save validation and inventory consumption
 use the same logic as existing medical items.
 

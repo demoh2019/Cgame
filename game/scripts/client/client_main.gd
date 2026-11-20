@@ -106,7 +106,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_skill", KEY_G)
 	_bind_key("survive_dodge", KEY_SPACE)
 	_bind_key("survive_parry", KEY_F8)
-	_bind_key("survive_poultice", KEY_F9)
+	_bind_key("survive_poultice", KEY_F11)
 	_bind_key("survive_flare", KEY_F10)
 	_bind_key("survive_craft", KEY_C)
 	_bind_key("survive_quick_cook", KEY_0)
@@ -1170,7 +1170,8 @@ func _update_hud() -> void:
 	if not fishing_status.is_empty():
 		_instructions.text += "\n" + fishing_status
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
-	_instructions.text += "\nF9 herbal poultice: treat wounds and mild infection; forage wild herbs from forest/swamp plants"
+	_instructions.text += "\nF11 herbal poultice: treat wounds and mild infection; herbs grow in forest/swamp"
+	_instructions.text += "\nHarvest sound: trees 25m, stone 24m, ore 28m; crouched bushes/berries are quiet"
 	_instructions.text += "\nF4 ride / dismount crafted Trail Bike (workbench T2; no combat or gathering while riding)"
 	_instructions.text += "\nField snares active: %d | roots first non-boss infected for 3s" % sim.infected_snares.size()
 	var scent_radius: float = BloodScent.detection_radius(survivor.survival.bleeding,

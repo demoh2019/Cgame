@@ -53,6 +53,7 @@ const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
+const GatheringNoise = preload("res://scripts/shared/gathering_noise.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
@@ -4114,13 +4115,22 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 		_award(player, gather_skill, (3.0 + 2.0 * float(amount - left)) * float(int(node["tier"])))
 	# No XP for items that did not fit, nor for repeat attempts on depleted nodes.
 	player.progression.award_gather(String(node["kind"]), int(node["tier"]), amount - left)
+	# Finishing a genuine resource harvest generates sound exactly once. This
+	# uses the same short-lived channel as footsteps and gunfire; existing
+	# infected hearing, chase leashes, safe zones and camouflage rules apply.
+	var harvest_noise: float = GatheringNoise.radius(String(node["kind"]),
+		player.crouching, amount - left)
+	if harvest_noise > 0.0:
+		player.noise_radius = maxf(player.noise_radius, harvest_noise)
+		player.noise_timer = maxf(player.noise_timer, GatheringNoise.SOUND_SECONDS)
 	player.dirty_inventory = true
 	player.dirty_character = true
 	player.action = {}
 	depleted[int(node["id"])] = time + float(info["respawn"])
 	events.append({"type": "gathered", "peer": player.id, "item": item_id,
 		"amount": amount - left, "node": node["id"],
-		"herbs": herbs_added, "outpost_bonus": paid_outpost_bonus})
+		"herbs": herbs_added, "harvest_noise": harvest_noise,
+		"outpost_bonus": paid_outpost_bonus})
 
 
 ## Rare dangerous-zone group boss. One live boss per simulation and a 10-minute
