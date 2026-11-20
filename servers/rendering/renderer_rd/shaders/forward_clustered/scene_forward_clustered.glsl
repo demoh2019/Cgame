@@ -2293,14 +2293,23 @@ void fragment_shader(in SceneData scene_data, uint instance_index) {
 		float specular_occlusion = area / (M_TAU * (1.0 - cos_a_s));
 		indirect_specular_light *= specular_occlusion;
 #else // BENT_NORMAL_MAP_USED
-		float specular_occlusion = (ambient_light.r * 0.3 + ambient_light.g * 0.59 + ambient_light.b * 0.11) * 2.0; // Luminance of ambient light.
-		specular_occlusion = min(specular_occlusion * 4.0, 1.0); // This multiplication preserves speculars on bright areas.
-
-		float reflective_f = (1.0 - roughness) * metallic;
-		// 10.0 is a magic number, it gives the intended effect in most scenarios.
-		// Low enough for occlusion, high enough for reaction to lights and shadows.
-		specular_occlusion = max(min(reflective_f * specular_occlusion * 10.0, 1.0), specular_occlusion);
-		indirect_specular_light *= specular_occlusion;
+		// Approximate visibility of the GGX reflection lobe using material AO
+		// combined with the existing screen-space AO. The previous luminance-
+		// based heuristic could darken fully unoccluded sky reflections or let
+		// shiny metals glow inside occluded crevices.
+		// Lagarde/de Rousiers (Frostbite), also used by Google Filament:
+		// https://google.github.io/filament/Filament.html#lighting/occlusion/specularocclusion
+		// The unoccluded fast path is exact (visibility = 1) and saves pow()
+		// across most outdoor pixels. Direct-light specular is never modified.
+		if (ao < 0.999) {
+			float NoV = clamp(dot(normal, view), 0.0, 1.0);
+			float visibility = clamp(ao, 0.0, 1.0);
+			float specular_occlusion = clamp(
+					pow(max(NoV + visibility, 0.0001),
+							exp2(-16.0 * clamp(roughness, 0.0, 1.0) - 1.0))
+							- 1.0 + visibility, 0.0, 1.0);
+			indirect_specular_light *= specular_occlusion;
+		}
 #endif // BENT_NORMAL_MAP_USED
 #endif // SPECULAR_OCCLUSION_DISABLED
 		ambient_light *= albedo.rgb;
