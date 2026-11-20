@@ -91,6 +91,12 @@ bool Light3D::is_negative() const {
 }
 
 void Light3D::set_enable_distance_fade(bool p_enable) {
+	// Streaming worlds can reapply the same profile every frame. Avoid an
+	// identical RenderingServer message and an editor property-list refresh.
+	// Renderer light defaults match the values initialized in Light3D.
+	if (distance_fade_enabled == p_enable) {
+		return;
+	}
 	distance_fade_enabled = p_enable;
 	RS::get_singleton()->light_set_distance_fade(light, distance_fade_enabled, distance_fade_begin, distance_fade_shadow, distance_fade_length);
 	notify_property_list_changed();
@@ -101,6 +107,10 @@ bool Light3D::is_distance_fade_enabled() const {
 }
 
 void Light3D::set_distance_fade_begin(real_t p_distance) {
+	// Exact comparison intentionally preserves arbitrarily small valid edits.
+	if (distance_fade_begin == p_distance) {
+		return;
+	}
 	distance_fade_begin = p_distance;
 	RS::get_singleton()->light_set_distance_fade(light, distance_fade_enabled, distance_fade_begin, distance_fade_shadow, distance_fade_length);
 }
@@ -110,6 +120,9 @@ real_t Light3D::get_distance_fade_begin() const {
 }
 
 void Light3D::set_distance_fade_shadow(real_t p_distance) {
+	if (distance_fade_shadow == p_distance) {
+		return;
+	}
 	distance_fade_shadow = p_distance;
 	RS::get_singleton()->light_set_distance_fade(light, distance_fade_enabled, distance_fade_begin, distance_fade_shadow, distance_fade_length);
 }
@@ -119,6 +132,9 @@ real_t Light3D::get_distance_fade_shadow() const {
 }
 
 void Light3D::set_distance_fade_length(real_t p_length) {
+	if (distance_fade_length == p_length) {
+		return;
+	}
 	distance_fade_length = p_length;
 	RS::get_singleton()->light_set_distance_fade(light, distance_fade_enabled, distance_fade_begin, distance_fade_shadow, distance_fade_length);
 }
@@ -232,6 +248,11 @@ Light3D::BakeMode Light3D::get_bake_mode() const {
 }
 
 void Light3D::set_projector(const Ref<Texture2D> &p_texture) {
+	// Reusing a cached dungeon/spot cookie must not enqueue a redundant
+	// projector update or resource warning for the same texture object.
+	if (projector == p_texture) {
+		return;
+	}
 	projector = p_texture;
 	RID tex_id = projector.is_valid() ? projector->get_rid() : RID();
 
