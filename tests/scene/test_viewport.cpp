@@ -53,6 +53,26 @@ TEST_FORCE_LINK(test_viewport)
 
 namespace TestViewport {
 
+TEST_CASE("[SceneTree][Viewport] mesh LOD rejects invalid screen thresholds") {
+	Window *root = SceneTree::get_singleton()->get_root();
+	const float original = root->get_mesh_lod_threshold();
+
+	root->set_mesh_lod_threshold(0.75f);
+	CHECK(root->get_mesh_lod_threshold() == 0.75f);
+	root->set_mesh_lod_threshold(std::numeric_limits<float>::quiet_NaN());
+	CHECK(root->get_mesh_lod_threshold() == 0.75f);
+	root->set_mesh_lod_threshold(std::numeric_limits<float>::infinity());
+	CHECK(root->get_mesh_lod_threshold() == 0.75f);
+	root->set_mesh_lod_threshold(-8.0f);
+	CHECK(root->get_mesh_lod_threshold() == 0.0f);
+	root->set_mesh_lod_threshold(0.0f);
+	CHECK(root->get_mesh_lod_threshold() == 0.0f);
+	root->set_mesh_lod_threshold(2.0f);
+	CHECK(root->get_mesh_lod_threshold() == 2.0f);
+
+	root->set_mesh_lod_threshold(original);
+}
+
 TEST_CASE("[SceneTree][Viewport] mipmap bias rejects invalid and extreme inputs") {
 	Window *root = SceneTree::get_singleton()->get_root();
 	const float original = root->get_texture_mipmap_bias();
