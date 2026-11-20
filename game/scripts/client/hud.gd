@@ -2423,6 +2423,15 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "quick_medicine":
+		if bool(data.get("ok", false)):
+			var id: String = str(data.get("item", ""))
+			say("Field treatment: used %s." % str(Defs.item(id).get("name", id)))
+		elif str(data.get("reason", "")) == "no_treatment":
+			say("Field treatment: no useful medicine carried for current wounds.")
+		else:
+			say("Field treatment: %s (nothing spent)." % str(data.get("reason", "rejected")))
+		return
 	if kind == "use" and bool(data.get("wound_seal", false)):
 		if bool(data.get("ok", false)):
 			say("Wound seal active: -45% infected bite infection for 90s (not acid or spores).")

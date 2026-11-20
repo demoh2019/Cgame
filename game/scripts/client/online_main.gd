@@ -1185,7 +1185,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_2:
 				_quick_use("empty_water_pouch" if Input.is_key_pressed(KEY_SHIFT) else "water_bottle")
 			KEY_3:
-				_quick_use("expedition_trauma_kit" if Input.is_key_pressed(KEY_SHIFT) else "bandage")
+				if Input.is_key_pressed(KEY_CTRL):
+					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+						client.quick_medicine()
+				else:
+					_quick_use("expedition_trauma_kit" if Input.is_key_pressed(KEY_SHIFT) else "bandage")
 			KEY_4:
 				_cycle_weapon()
 			KEY_5:

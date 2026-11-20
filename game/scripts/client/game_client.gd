@@ -300,6 +300,10 @@ func use_item(item_id: String) -> void:
 	net.c_use.rpc_id(1, item_id)
 
 
+func quick_medicine() -> void:
+	net.c_quick_medicine.rpc_id(1)
+
+
 func expedition_restock(preset_id: String) -> void:
 	net.c_expedition_restock.rpc_id(1, preset_id)
 

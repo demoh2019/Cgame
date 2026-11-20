@@ -941,6 +941,14 @@ func c_use(item_id: String) -> void:
 		s_result.rpc_id(peer, "use", sim.cmd_use(peer, str(item_id)))
 
 
+## Authenticated sender only; no client-supplied medicine or target.
+@rpc("any_peer", "reliable")
+func c_quick_medicine() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "quick_medicine", sim.cmd_quick_medicine(peer))
+
+
 @rpc("any_peer", "reliable")
 func c_attack(dir_x: float, dir_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
