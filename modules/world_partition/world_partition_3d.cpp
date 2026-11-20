@@ -209,6 +209,9 @@ void WorldPartition3D::_notification(int p_what) {
 		// A future re-entry should report the first resolved observer cell.
 		observer_cell_valid = false;
 		predicted_cell_valid = false;
+		navigation_schedule_valid = false;
+		navigation_selected.clear();
+		navigation_consumed.clear();
 	}
 }
 
@@ -597,7 +600,7 @@ int WorldPartition3D::get_max_navigation_updates_per_physics_frame() const {
 
 bool WorldPartition3D::register_navigation_agent(const String &p_name, Node3D *p_agent, int p_priority) {
 	ERR_FAIL_COND_V_MSG(p_name.is_empty() || p_name.length() > 64, false, "Navigation agent name must contain 1 to 64 characters.");
-	ERR_FAIL_NULL_V_MSG(p_agent, false, "Navigation agent must be a Node3D.");
+	ERR_FAIL_COND_V_MSG(p_agent == nullptr, false, "Navigation agent must be a Node3D.");
 	ERR_FAIL_COND_V_MSG(p_priority < 0 || p_priority > 3, false, "Navigation priority must be 0 to 3.");
 	ERR_FAIL_COND_V_MSG(!navigation_agents.has(p_name) && navigation_agents.size() >= MAX_NAVIGATION_AGENTS, false, "WorldPartition3D has reached its 128-agent limit.");
 	// One live Node3D may have only one registered name, so aliases cannot
