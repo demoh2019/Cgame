@@ -2,6 +2,7 @@ extends RefCounted
 ## Curvature shading is built once from shared-world height, reused by all
 ## LOD meshes and quality presets without another terrain texture sample.
 const Curvature = preload("res://scripts/client/terrain_curvature.gd")
+const Horizon = preload("res://scripts/client/terrain_horizon_ao.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 const Quality = preload("res://scripts/client/graphics_quality.gd")
 
@@ -105,3 +106,58 @@ func run(t) -> void:
 	t.check(ProjectSettings.has_setting(
 			"shader_globals/aa_terrain_curvature_strength"),
 			"global uniform is registered in real project settings")
+
+	t.current = "native terrain horizon lighting"
+	var flat_sky: PackedFloat32Array = Horizon.build(
+		_grid(Vector2(-8.0, -8.0), 17, flat_sampler), Vector2(-8.0, -8.0),
+		17, 1.0, flat_sampler, -100.0, 100.0)
+	t.eq(flat_sky.size(), 17 * 17, "native C++ AO returns one sample per terrain vertex")
+	t.near(flat_sky[8 * 17 + 8], 1.0, 0.00001,
+		"flat terrain receives full sky with no fake darkening")
+	var west_origin := Vector2(-16.0, -8.0)
+	var east_origin := Vector2(0.0, -8.0)
+	var west_sky: PackedFloat32Array = Horizon.build(
+		_grid(west_origin, 17, valley_sampler), west_origin, 17, 1.0,
+		valley_sampler, -100.0, 100.0)
+	var east_sky: PackedFloat32Array = Horizon.build(
+		_grid(east_origin, 17, valley_sampler), east_origin, 17, 1.0,
+		valley_sampler, -100.0, 100.0)
+	t.eq(west_sky.size(), 17 * 17, "valley sky field is complete")
+	t.eq(east_sky.size(), 17 * 17, "neighbour's sky field is complete")
+	t.check(west_sky[8 * 17 + 16] < 0.97,
+		"terrain valley sees less ambient sky than a flat plain")
+	for row in 17:
+		t.near(west_sky[row * 17 + 16], east_sky[row * 17],
+			0.00001, "adjacent terrain chunks agree at shared horizon row %d" % row)
+	t.eq(Horizon.build(PackedFloat32Array(), Vector2.ZERO, 17, 1.0,
+		valley_sampler, -100.0, 100.0).size(), 0,
+		"missing heightfield cannot produce misaligned vertex colors")
+	t.check(colors[4].b > 0.99,
+		"old curvature-only data defaults to unobstructed sky")
+	var pbr := load("res://assets/shaders/ground.gdshader") as Shader
+	t.check(pbr != null and pbr.code.contains("aa_terrain_horizon_ao_strength")
+		and pbr.code.contains("clamp(COLOR.b, 0.0, 1.0)"),
+		"textured PBR terrain uses baked sky from the native vertex color channel")
+	t.check(ChunkView.GROUND_SHADER.contains("aa_terrain_horizon_ao_strength")
+		and ChunkView.GROUND_SHADER.contains("clamp(COLOR.b, 0.0, 1.0)"),
+		"Compatibility fallback receives the same low-cost terrain shading")
+	t.check(ProjectSettings.has_setting("shader_globals/aa_terrain_horizon_ao_strength"),
+		"native sky visibility has an explicitly registered renderer global")
+	t.eq(float(Quality.profile(0)["horizon_ao_strength"]), 0.0,
+		"Performance disables native CPU halo sampling and pixel shading")
+	t.eq(float(Quality.profile(1)["horizon_ao_strength"]), 0.0,
+		"Balanced disables native CPU halo sampling and pixel shading")
+	t.check(float(Quality.profile(3)["horizon_ao_strength"])
+		> float(Quality.profile(2)["horizon_ao_strength"]),
+		"Ultra keeps more sky-depth shading than High")
+	ChunkView.configure_terrain_horizon(0)
+	t.check(not ChunkView.terrain_horizon_enabled,
+		"low-quality terrain skips the native sky integration")
+	ChunkView.configure_terrain_horizon(3)
+	t.check(ChunkView.terrain_horizon_enabled,
+		"Ultra enables native horizon sky visibility on streamed chunks")
+	ChunkView.configure_terrain_horizon(1)
+	var quality_code := load("res://scripts/client/graphics_quality.gd") as GDScript
+	t.check(quality_code != null and quality_code.source_code.contains(
+		"ChunkView.apply_terrain_horizon(lod_terrain)"),
+		"runtime quality changes update already loaded terrain vertex colors")
