@@ -62,7 +62,9 @@ jobs:
             res://tests/test_streamed_navigation_runtime.gd \
             res://tests/test_navigation_obstacles.gd \
             res://tests/test_ai_interest.gd \
-            res://tests/test_navigation_obstacles_runtime.gd; do
+            res://tests/test_navigation_obstacles_runtime.gd \
+            res://tests/test_world_telemetry.gd \
+            res://tests/test_world_budget_governor.gd; do
             /tmp/godot-bin/Godot_v4.6.3-stable_linux.x86_64 --headless --path . --script "$script"
           done
 
