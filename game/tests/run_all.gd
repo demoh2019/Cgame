@@ -221,6 +221,7 @@ const SUITES := [
 	"res://tests/test_party_ready.gd",
 	"res://tests/test_party_focus.gd",
 	"res://tests/test_party_aid.gd",
+	"res://tests/test_party_medic_mastery.gd",
 	"res://tests/test_camp_provisions.gd",
 	"res://tests/test_party_wound_seal.gd",
 	"res://tests/test_party_supply_request.gd",

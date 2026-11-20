@@ -84,7 +84,7 @@ const PERKS := {
 	"iron_stomach": {"skill": "survivalist", "name": "Iron Stomach", "desc": "Hunger grows slower", "bonus": "hunger_rate", "per_rank": 0.06, "max_rank": 5, "level": 5, "level_step": 5, "cost": 1},
 	"camel": {"skill": "survivalist", "name": "Camel", "desc": "Thirst grows slower", "bonus": "thirst_rate", "per_rank": 0.06, "max_rank": 5, "level": 5, "level_step": 5, "cost": 1},
 	"nutrition": {"skill": "survivalist", "name": "Nutrition", "desc": "Food and drink restore more", "bonus": "food_power", "per_rank": 0.1, "max_rank": 4, "level": 12, "level_step": 8, "cost": 2},
-	"field_medic": {"skill": "medic", "name": "Field Medic", "desc": "Healing heals more", "bonus": "heal_power", "per_rank": 0.08, "max_rank": 5, "level": 5, "level_step": 5, "cost": 1},
+	"field_medic": {"skill": "medic", "name": "Field Medic", "desc": "Stronger self and allied healing", "bonus": "heal_power", "per_rank": 0.08, "max_rank": 5, "level": 5, "level_step": 5, "cost": 1},
 	"triage": {"skill": "medic", "name": "Triage", "desc": "Masterful healing", "bonus": "heal_power", "per_rank": 0.4, "max_rank": 1, "level": 40, "level_step": 0, "cost": 5, "requires": "field_medic", "requires_rank": 3},
 	"thrifty_maker": {"skill": "crafting", "name": "Thrifty Maker", "desc": "Chance to save materials", "bonus": "craft_refund", "per_rank": 0.04, "max_rank": 5, "level": 5, "level_step": 5, "cost": 1},
 	"master_hand": {"skill": "crafting", "name": "Master Hand", "desc": "Waste almost nothing", "bonus": "craft_refund", "per_rank": 0.1, "max_rank": 1, "level": 40, "level_step": 0, "cost": 5, "requires": "thrifty_maker", "requires_rank": 3},

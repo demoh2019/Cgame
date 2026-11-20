@@ -28,6 +28,7 @@ const LootSweep = preload("res://scripts/shared/loot_sweep.gd")
 const DeathRecovery = preload("res://scripts/shared/death_recovery.gd")
 const PartyCorpseRescue = preload("res://scripts/shared/party_corpse_rescue.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
+const PartyMedicMastery = preload("res://scripts/shared/party_medic_mastery.gd")
 const CampProvisions = preload("res://scripts/shared/camp_provisions.gd")
 const QuickMedicine = preload("res://scripts/shared/quick_medicine.gd")
 const PartySupplyRequest = preload("res://scripts/shared/party_supply_request.gd")
@@ -1800,7 +1801,8 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var thirst_before: float = recipient.survival.thirst
 	if not source.inventory.remove(selected_item_id, 1):
 		return {"ok": false, "reason": "not_carried"}
-	recipient.survival.heal(float(data.get("heal", 0.0)))
+	recipient.survival.heal(PartyMedicMastery.heal_amount(
+		float(data.get("heal", 0.0)), source.skills.bonus("heal_power")))
 	recipient.survival.treat_infection(float(data.get("cure", 0.0)))
 	if bool(data.get("stop_bleeding", false)):
 		recipient.survival.stop_bleeding()
@@ -1821,6 +1823,10 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var splinted: float = fracture_before - recipient.survival.fracture
 	var fed: float = recipient.survival.hunger - hunger_before
 	var hydrated: float = recipient.survival.thirst - thirst_before
+	var mastery_xp: float = PartyMedicMastery.training_xp(healed, staunched,
+		cured, splinted, poison_treated)
+	if mastery_xp > 0.0:
+		_award(source, "medic", mastery_xp)
 	events.append({"type": "party_aid", "peer": target_id, "by": peer_id,
 		"item": selected_item_id, "heal": healed, "cure": cured,
 		"bleeding_stopped": staunched, "fracture_treated": splinted,
@@ -1914,13 +1920,15 @@ func cmd_party_triage(peer_id: int) -> Dictionary:
 		return {"ok": false, "reason": "not_carried"}
 	var treated: int = mini(candidates.size(), PartyTriage.MAX_RECIPIENTS)
 	var healed: float = 0.0
+	var heal_each: float = PartyMedicMastery.heal_amount(
+		PartyTriage.HEAL, medic.skills.bonus("heal_power"))
 	var bleeding_stopped: float = 0.0
 	var healing_events: Array = []
 	for i in range(treated):
 		var recipient: Player = candidates[i]["player"]
 		var old_health: float = recipient.survival.health
 		var old_bleeding: float = recipient.survival.bleeding
-		recipient.survival.heal(PartyTriage.HEAL)
+		recipient.survival.heal(heal_each)
 		recipient.survival.bleeding = maxf(0.0,
 			recipient.survival.bleeding - PartyTriage.BLEEDING_TREATMENT)
 		var hp_gain: float = recipient.survival.health - old_health
@@ -1932,6 +1940,10 @@ func cmd_party_triage(peer_id: int) -> Dictionary:
 		events.append({"type": "party_triage", "peer": recipient.id, "by": peer_id,
 			"heal": hp_gain, "bleeding_stopped": wound_care})
 	_record_party_healing_threat(medic, healing_events)
+	var mastery_xp: float = PartyMedicMastery.training_xp(healed, bleeding_stopped,
+		0.0, 0.0, 0.0)
+	if mastery_xp > 0.0:
+		_award(medic, "medic", mastery_xp)
 	medic.party_aid_timer = PartyTriage.COOLDOWN
 	medic.action = {}
 	medic.dirty_inventory = true
