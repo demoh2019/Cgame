@@ -184,6 +184,7 @@ void WorldPartition3D::set_cell_size(real_t p_size) {
 		return;
 	}
 	cell_size = p_size;
+	observer_cell_valid = false;
 	_clear_active_cells();
 	pending_cells.clear();
 	failed_cells.clear();
@@ -258,11 +259,23 @@ bool WorldPartition3D::is_streaming_enabled() const {
 }
 
 void WorldPartition3D::set_observer_path(const NodePath &p_path) {
+	if (observer_path == p_path) {
+		return;
+	}
 	observer_path = p_path;
+	observer_cell_valid = false;
 }
 
 NodePath WorldPartition3D::get_observer_path() const {
 	return observer_path;
+}
+
+bool WorldPartition3D::has_observer_cell() const {
+	return observer_cell_valid;
+}
+
+Vector2i WorldPartition3D::get_observer_cell() const {
+	return observer_cell_valid ? observer_cell : Vector2i();
 }
 
 void WorldPartition3D::set_cell_scenes(const Dictionary &p_cells) {
@@ -369,6 +382,9 @@ void WorldPartition3D::update_streaming() {
 	}
 
 	const Vector2i center = local_position_to_cell(to_local(observer->get_global_position()));
+	const bool observer_cell_changed = !observer_cell_valid || observer_cell != center;
+	observer_cell = center;
+	observer_cell_valid = true;
 
 	Vector<Vector2i> unload;
 	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
@@ -450,6 +466,9 @@ void WorldPartition3D::update_streaming() {
 		}
 	}
 	_purge_unused_ready_scenes();
+	if (observer_cell_changed) {
+		emit_signal(SNAME("observer_cell_changed"), observer_cell);
+	}
 }
 
 bool WorldPartition3D::is_cell_loaded(const Vector2i &p_cell) const {
@@ -500,6 +519,8 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_streaming_enabled"), &WorldPartition3D::is_streaming_enabled);
 	ClassDB::bind_method(D_METHOD("set_observer_path", "path"), &WorldPartition3D::set_observer_path);
 	ClassDB::bind_method(D_METHOD("get_observer_path"), &WorldPartition3D::get_observer_path);
+	ClassDB::bind_method(D_METHOD("has_observer_cell"), &WorldPartition3D::has_observer_cell);
+	ClassDB::bind_method(D_METHOD("get_observer_cell"), &WorldPartition3D::get_observer_cell);
 	ClassDB::bind_method(D_METHOD("set_cell_scenes", "scenes"), &WorldPartition3D::set_cell_scenes);
 	ClassDB::bind_method(D_METHOD("get_cell_scenes"), &WorldPartition3D::get_cell_scenes);
 	ClassDB::bind_method(D_METHOD("set_cell_scene", "cell", "scene_path"), &WorldPartition3D::set_cell_scene);
@@ -532,6 +553,7 @@ void WorldPartition3D::_bind_methods() {
 
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_unloaded", PropertyInfo(Variant::VECTOR2I, "cell")));
+	ADD_SIGNAL(MethodInfo("observer_cell_changed", PropertyInfo(Variant::VECTOR2I, "cell")));
 }
 
 WorldPartition3D::~WorldPartition3D() {
