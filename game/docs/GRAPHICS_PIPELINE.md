@@ -49,7 +49,7 @@ Each procedural dungeon room has an atmospheric warm torch, but loading many roo
 
 - Streamed `OmniLight3D` torches enter the `aa_dungeon_torches` group **invisible**. The manager checks candidate distance every 0.13 seconds, selects the nearest lights globally, and turns only the selected ones on. Unselected or unloaded lights contribute no GPU work.
 - The light's energy fades smoothly as it approaches the visibility radius. Two low-frequency sine waves create subtle fire flicker without per-frame CPU randomization. Light distance fade is enabled as an additional GPU-side transition.
-- On **Forward+** only, High may have one dynamic-shadow torch and Ultra two; lower-quality presets and Compatibility have no local shadow maps. The main directional light and gameplay lighting remain separate.
+- On **Forward+** only, High may have one dynamic-shadow torch and Ultra two; lower-quality presets and Compatibility have no local shadow maps. On Compatibility, the global active-light count is capped at eight even when Ultra is selected. The main directional light and gameplay lighting remain separate.
 - No world-generation IDs, server packets, dungeon layout or hitboxes are altered. In contrast to baked lightmaps this works with the procedurally streamed world.
 
 | Profile | Active torch lights (global cap) | Range around camera | Local shadow casters |
