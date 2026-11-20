@@ -35,6 +35,11 @@ var _gear_shown: Dictionary = {} # Gear slot -> item id currently drawn on the b
 func setup(tint: Color, scale_factor: float, walk_speed: float = 1.0, model_name: String = "", zombie: bool = false, look_seed: int = 0) -> void:
 	_walk_speed = walk_speed
 	_zombie = zombie
+	# One GPU batch provides soft floor contact where real shadows are disabled.
+	# Register the actual live actor model, never model-template resources.
+	add_to_group("aa_grounded_characters")
+	set_meta("aa_contact_shadow_radius", (1.04 if zombie else 0.82) *
+		clampf(scale_factor / 2.0, 0.7, 1.7))
 	if model_name != "" and Assets.has_characters():
 		_setup_pack(tint, scale_factor, model_name, look_seed)
 	else:
