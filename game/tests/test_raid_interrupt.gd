@@ -44,6 +44,21 @@ func run(t) -> void:
 	t.check(not RaidInterrupt.record_hit({"id": boss.id, "at": 102.0},
 		boss, 3, 5, 30.0, 100.0), "dead boss casts are not interruptable")
 
+	t.current = "safe anonymous snapshots are bounded and party-only"
+	var public_warning := {"id": 125, "at": 120.0, "party": 5,
+		"contributors": {100: 16.0, 101: 10.0}}
+	t.eq(RaidInterrupt.public_progress(public_warning, 110.0, 0), {},
+		"solo observer never receives raid coordination telemetry")
+	t.eq(RaidInterrupt.public_progress(public_warning, 110.0, 6), {},
+		"another group never sees a private tally")
+	t.eq(int(RaidInterrupt.public_progress(public_warning, 110.0, 5)["damage"]), 26,
+		"only owner group receives verified progress")
+	t.eq(RaidInterrupt.public_progress(public_warning, 120.0, 5), {},
+		"deadline suppresses stale coordination data")
+	var unclaimed := {"id": 125, "at": 120.0, "party": 0, "contributors": {}}
+	t.eq(int(RaidInterrupt.public_progress(unclaimed, 110.0, 6)["damage"]), 0,
+		"other party may see an unclaimed objective before first hit")
+
 	t.current = "real server attacks break only an active warning"
 	var world := WorldGen.new(67)
 	var server := GameServer.new(world, 67)
@@ -80,7 +95,23 @@ func run(t) -> void:
 	server._damage_target(stranger, {"kind": "zombie", "id": raid.id}, 50.0)
 	t.eq(server.raid_pending_slam.get("contributors", {}).size(), 0,
 		"ungrouped attacker cannot contribute despite damaging boss")
+	var initial: Dictionary = server.snapshot_for(first.id).get("raid_interrupt", {})
+	t.eq(int(initial.get("damage", -1)), 0,
+		"nearby party sees the empty, server-owned interrupt objective")
 	server._damage_target(first, {"kind": "zombie", "id": raid.id}, 20.0)
+	var live: Dictionary = server.snapshot_for(first.id).get("raid_interrupt", {})
+	t.eq(int(live.get("damage", -1)), 16,
+		"snapshot publishes clamped authoritative damage, not requested damage")
+	t.eq(int(live.get("required", -1)), int(RaidInterrupt.REQUIRED_DAMAGE),
+		"client knows the coordinated target")
+	t.eq(int(live.get("attackers", -1)), 1, "client sees real distinct contributors")
+	t.check(not live.has("contributors") and not live.has("party") and
+		not live.has("until"),
+		"private snapshot reveals no member IDs, group ID or absolute deadline")
+	t.eq(server.snapshot_for(second.id).get("raid_interrupt", {}), live,
+		"both members see the same authoritative party progress")
+	t.eq(server.snapshot_for(stranger.id).get("raid_interrupt", {}), {},
+		"nearby outsider cannot spy on another party's progress")
 	t.eq(server.raid_pending_slam.get("contributors", {}).size(), 1,
 		"real fighter counts once during the warning")
 	server._damage_target(first, {"kind": "zombie", "id": raid.id}, 20.0)
@@ -88,6 +119,8 @@ func run(t) -> void:
 		"repeated solo hits cannot complete a coordinated interrupt")
 	server._damage_target(second, {"kind": "zombie", "id": raid.id}, 10.0)
 	t.eq(server.raid_pending_slam, {}, "second member stops the scheduled slam")
+	t.eq(server.snapshot_for(first.id).get("raid_interrupt", {}), {},
+		"completed interrupt no longer replicates stale objective")
 	t.near(server.raid_exposed_until - server.time,
 		RaidRecovery.NORMAL_SECONDS, 0.001,
 		"successful teamwork opens the real post-slam damage window")
