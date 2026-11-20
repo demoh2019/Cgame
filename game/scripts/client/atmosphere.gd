@@ -1,6 +1,7 @@
 extends Node3D
 
 const CloudShadowLut = preload("res://scripts/client/cloud_shadow_lut.gd")
+const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
 ## Everything degrades gracefully on the compatibility renderer (SSAO and the like are simply ignored).
 
@@ -11,6 +12,7 @@ var world_environment: WorldEnvironment
 var sky: Sky
 var _shadows_allowed := true
 var _cloud_shadows_allowed := true
+var _fog_profile: Dictionary = CinematicFog.profile(1, "gl_compatibility")
 ## Slow-moving sky lighting is cached separately from per-frame directional light and fog.
 var _sky_refresh_interval := 0.4
 var _sky_refresh_elapsed := 2.0 # Force the first material upload.
@@ -71,6 +73,7 @@ func _ready() -> void:
 	environment.fog_aerial_perspective = 0.35
 	environment.fog_sky_affect = 0.5
 	environment.fog_height_density = 0.0
+	environment.volumetric_fog_enabled = false
 	world_environment = WorldEnvironment.new()
 	world_environment.environment = environment
 	add_child(world_environment)
@@ -84,6 +87,7 @@ func _ready() -> void:
 	sun.shadow_blur = 1.4
 	sun.light_angular_distance = 0.6
 	sun.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_AND_SKY
+	sun.light_volumetric_fog_energy = 0.0
 	add_child(sun)
 
 
@@ -135,6 +139,8 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	environment.ambient_light_energy = lerpf(0.75, 0.8, daylight) * (1.0 - storm * 0.25)
 	environment.fog_light_color = horizon.lerp(Color(0.5, 0.52, 0.56), storm * 0.5)
 	environment.fog_density = lerpf(0.0016, 0.0042, storm)
+	CinematicFog.apply_weather(environment, daylight, sun_height, storm,
+		_fog_profile, horizon)
 	environment.adjustment_saturation = lerpf(1.0, 0.85, storm)
 
 
@@ -142,6 +148,9 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 func apply_graphics_profile(settings: Dictionary) -> void:
 	_shadows_allowed = bool(settings["shadows"])
 	_cloud_shadows_allowed = bool(settings.get("cloud_shadows", true))
+	_fog_profile = CinematicFog.profile(
+		int(settings.get("quality_level", 1)), str(settings.get("rendering_method", "gl_compatibility")))
+	CinematicFog.apply_profile(environment, sun, _fog_profile)
 	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_strength",
 		CloudShadowLut.shadow_strength(light_level, storm, _cloud_shadows_allowed))
 	_sky_refresh_interval = clampf(float(settings.get("sky_refresh_interval", 0.4)), 0.12, 2.0)
