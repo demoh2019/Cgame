@@ -280,6 +280,15 @@ int WorldPartition3D::get_detail_radius() const {
 	return detail_radius;
 }
 
+void WorldPartition3D::set_detail_hysteresis_cells(int p_hysteresis) {
+	ERR_FAIL_COND_MSG(p_hysteresis < 0 || p_hysteresis > 8, "WorldPartition3D detail_hysteresis_cells must be between 0 and 8.");
+	detail_hysteresis_cells = p_hysteresis;
+}
+
+int WorldPartition3D::get_detail_hysteresis_cells() const {
+	return detail_hysteresis_cells;
+}
+
 void WorldPartition3D::set_max_detail_transitions_per_frame(int p_budget) {
 	ERR_FAIL_COND_MSG(p_budget < 1 || p_budget > 128, "WorldPartition3D detail transition budget must be 1 to 128.");
 	max_detail_transitions_per_frame = p_budget;
@@ -304,9 +313,19 @@ int WorldPartition3D::get_distant_cell_count() const {
 	return count;
 }
 
-int WorldPartition3D::_cell_detail_level(const Vector2i &p_cell, const Vector2i &p_center) const {
-	// Pinned gameplay locations retain full quality, even when far away.
-	return detail_radius < 0 || pinned_cells.has(p_cell) || _within_radius(p_cell, p_center, detail_radius) ? 0 : 1;
+int WorldPartition3D::_cell_detail_level(const Vector2i &p_cell, const Vector2i &p_center, int p_previous_level) const {
+	// Pinned gameplay locations always retain full detail. New cells have no
+	// previous state and are classified using the unexpanded inner radius.
+	if (detail_radius < 0 || pinned_cells.has(p_cell) || _within_radius(p_cell, p_center, detail_radius)) {
+		return 0;
+	}
+	// Only an already-near cell enjoys the wider demotion threshold.
+	// A distant cell must cross the original inner radius to promote, giving
+	// us two different boundaries and preventing back-and-forth LOD thrash.
+	if (p_previous_level == 0 && _within_radius(p_cell, p_center, detail_radius + detail_hysteresis_cells)) {
+		return 0;
+	}
+	return 1;
 }
 
 void WorldPartition3D::_refresh_cell_detail(const Vector2i &p_center) {
@@ -319,7 +338,7 @@ void WorldPartition3D::_refresh_cell_detail(const Vector2i &p_center) {
 		if (previous == nullptr) {
 			continue;
 		}
-		const int next_level = _cell_detail_level(E.key, p_center);
+		const int next_level = _cell_detail_level(E.key, p_center, *previous);
 		if (*previous == next_level) {
 			continue;
 		}
@@ -720,6 +739,8 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_streaming_enabled"), &WorldPartition3D::is_streaming_enabled);
 	ClassDB::bind_method(D_METHOD("set_detail_radius", "radius"), &WorldPartition3D::set_detail_radius);
 	ClassDB::bind_method(D_METHOD("get_detail_radius"), &WorldPartition3D::get_detail_radius);
+	ClassDB::bind_method(D_METHOD("set_detail_hysteresis_cells", "cells"), &WorldPartition3D::set_detail_hysteresis_cells);
+	ClassDB::bind_method(D_METHOD("get_detail_hysteresis_cells"), &WorldPartition3D::get_detail_hysteresis_cells);
 	ClassDB::bind_method(D_METHOD("set_max_detail_transitions_per_frame", "count"), &WorldPartition3D::set_max_detail_transitions_per_frame);
 	ClassDB::bind_method(D_METHOD("get_max_detail_transitions_per_frame"), &WorldPartition3D::get_max_detail_transitions_per_frame);
 	ClassDB::bind_method(D_METHOD("get_cell_detail_level", "cell"), &WorldPartition3D::get_cell_detail_level);
@@ -776,6 +797,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_requests", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_concurrent_requests", "get_max_concurrent_requests");
 	ADD_GROUP("Cell Detail Levels", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "detail_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_detail_radius", "get_detail_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "detail_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_detail_hysteresis_cells", "get_detail_hysteresis_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_detail_transitions_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_detail_transitions_per_frame", "get_max_detail_transitions_per_frame");
 
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
