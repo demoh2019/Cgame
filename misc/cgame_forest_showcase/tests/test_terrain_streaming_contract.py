@@ -10,7 +10,7 @@ tests, a Godot import/compile, or actual renderer/physics verification.
 from __future__ import annotations
 
 from collections import Counter
-from math import cos, sin, sqrt
+from math import cos, sin, sqrt, floor, isclose
 from pathlib import Path
 from unittest import TestCase
 
@@ -39,6 +39,43 @@ def tile_sample(tile_x: int, tile_z: int, x: int, z: int) -> tuple[float, tuple[
     world_x = float(tile_x * CELLS + x)
     world_z = float(tile_z * CELLS + z)
     return height(world_x, world_z), normal(world_x, world_z)
+
+
+def route_supercover(ax: float, az: float, bx: float, bz: float,
+                     max_cells: int = 64, size: int = 32) -> list[tuple[int, int]]:
+    """Independent 2D supercover model with a hard nontruncating cell cap."""
+    x, z = floor(ax / size), floor(az / size)
+    last_x, last_z = floor(bx / size), floor(bz / size)
+    result = [(x, z)]
+    if (x, z) == (last_x, last_z):
+        return result if max_cells >= 1 else []
+    dx, dz = (bx - ax) / size, (bz - az) / size
+    sx, sz = (1 if dx > 0 else -1 if dx < 0 else 0,
+              1 if dz > 0 else -1 if dz < 0 else 0)
+    abs_dx, abs_dz = abs(dx), abs(dz)
+    tx = float("inf") if sx == 0 else (
+        (floor(ax / size) + 1 - ax / size) if sx > 0
+        else (ax / size - floor(ax / size))) / abs_dx
+    tz = float("inf") if sz == 0 else (
+        (floor(az / size) + 1 - az / size) if sz > 0
+        else (az / size - floor(az / size))) / abs_dz
+    dtx = float("inf") if sx == 0 else 1 / abs_dx
+    dtz = float("inf") if sz == 0 else 1 / abs_dz
+    while (x, z) != (last_x, last_z):
+        if sx and sz and isclose(tx, tz, rel_tol=1e-8, abs_tol=1e-8):
+            result.extend(((x + sx, z), (x, z + sz)))
+            x, z = x + sx, z + sz
+            tx, tz = tx + dtx, tz + dtz
+        elif tx < tz:
+            x += sx
+            tx += dtx
+        else:
+            z += sz
+            tz += dtz
+        result.append((x, z))
+        if len(result) > max_cells:
+            return []
+    return result
 
 
 def _index(x: int, z: int) -> int:
@@ -350,6 +387,76 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn('missing.get("active", true)', moving)
         self.assertIn('hud.text.contains("Дрон X=0 Z=4")', moving)
 
+
+    def test_streamed_navigation_corridor_and_avoidance_contract(self) -> None:
+        """Native safe-path API is used by real patrols and obstacle sources."""
+        repository = ROOT.parents[1]
+        header = (repository / "modules/world_partition/world_partition_3d.h").read_text(encoding="utf-8")
+        cpp = (repository / "modules/world_partition/world_partition_3d.cpp").read_text(encoding="utf-8")
+        xml = (repository / "modules/world_partition/doc_classes/WorldPartition3D.xml").read_text(encoding="utf-8")
+        native_tests = (repository / "modules/world_partition/tests/test_world_partition_3d.h").read_text(encoding="utf-8")
+        npc = (ROOT / "scripts/streamed_patrol_agent.gd").read_text(encoding="utf-8")
+        forest = (ROOT / "scripts/streamed_forest_cell.gd").read_text(encoding="utf-8")
+        smoke = (ROOT / "tests/smoke_navigation_routes.gd").read_text(encoding="utf-8")
+
+        for name in ("get_navigation_route_cells", "is_navigation_route_ready",
+                     "get_streamed_navigation_path"):
+            self.assertIn(name + "(", header)
+            self.assertIn("WorldPartition3D::" + name + "(", cpp)
+            self.assertIn('D_METHOD("' + name + '"', cpp)
+            self.assertIn('method name="' + name + '"', xml)
+
+        self.assertIn("p_max_cells < 1 || p_max_cells > 256", cpp)
+        self.assertIn("Math::is_equal_approx(t_max_x, t_max_z)", cpp)
+        self.assertIn("append_cell(Vector2i(cell.x + step_x, cell.y))", cpp)
+        self.assertIn("append_cell(Vector2i(cell.x, cell.y + step_z))", cpp)
+        self.assertIn("return Array(); // Never report a silently truncated corridor.", cpp)
+        self.assertIn("is_cell_navigation_ready(cells[i])", cpp)
+        self.assertIn("navigation->map_get_path(", cpp)
+        self.assertIn("get_world_3d()", cpp)
+        self.assertIn("route[route.size() - 1].distance_to(p_to_global)", cpp)
+        self.assertIn("is_navigation_route_ready(route[i - 1], route[i], p_max_cells)", cpp)
+        self.assertIn("Supercover navigation corridor respects streaming", native_tests)
+
+        self.assertIn("navigator.velocity_computed.connect(_on_safe_velocity)", npc)
+        self.assertIn("navigator.velocity = desired", npc)
+        self.assertIn("navigator.avoidance_enabled = true", npc)
+        self.assertIn("streaming_world.is_navigation_route_ready(global_position, target, 16)", npc)
+        self.assertIn("streaming_world.get_streamed_navigation_path(", npc)
+        self.assertIn("intercell_route_count += 1", npc)
+        self.assertIn("NavigationObstacle3D.new()", forest)
+        self.assertIn("MAX_TREE_AVOIDANCE_OBSTACLES: int = 8", forest)
+        self.assertIn("MAX_ROCK_AVOIDANCE_OBSTACLES: int = 3", forest)
+        self.assertIn("avoidance.affect_navigation_mesh = false", forest)
+        self.assertIn("stream.get_navigation_route_cells(from, to)", smoke)
+        self.assertIn("stream.get_streamed_navigation_path(", smoke)
+        self.assertIn("stream.is_navigation_route_ready(from, to)", smoke)
+        self.assertIn('guard.get("intercell_route_count")', smoke)
+        self.assertIn("stream.unpin_cell(EAST)", smoke)
+
+    def test_navigation_supercover_route_geometry(self) -> None:
+        """Conservative corridor catches corners, reverse paths and limits."""
+        self.assertEqual(
+            route_supercover(2, 9, 70, 9),
+            [(0, 0), (1, 0), (2, 0)],
+        )
+        self.assertEqual(
+            route_supercover(70, 9, 2, 9),
+            [(2, 0), (1, 0), (0, 0)],
+        )
+        self.assertEqual(
+            route_supercover(1, 1, 65, 65),
+            [(0, 0), (1, 0), (0, 1), (1, 1),
+             (2, 1), (1, 2), (2, 2)],
+        )
+        self.assertEqual(
+            route_supercover(-1, -1, -65, -1),
+            [(-1, -1), (-2, -1), (-3, -1)],
+        )
+        self.assertEqual(route_supercover(2, 9, 20, 20, 1), [(0, 0)])
+        self.assertEqual(route_supercover(2, 9, 70, 9, 2), [])
+        self.assertEqual(route_supercover(1, 1, 65, 65, 6), [])
+        self.assertEqual(route_supercover(1, 1, 65, 65, 7)[-1], (2, 2))
 
     def test_streamed_navigation_and_agent_contract(self) -> None:
         """Native NavServer readiness must match the actual procedural game."""
