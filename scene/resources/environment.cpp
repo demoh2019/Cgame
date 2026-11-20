@@ -955,6 +955,9 @@ void Environment::_update_volumetric_fog() {
 }
 
 void Environment::set_volumetric_fog_enabled(bool p_enable) {
+	if (volumetric_fog_enabled == p_enable) {
+			return;
+		}
 	volumetric_fog_enabled = p_enable;
 	_update_volumetric_fog();
 }
@@ -963,6 +966,9 @@ bool Environment::is_volumetric_fog_enabled() const {
 	return volumetric_fog_enabled;
 }
 void Environment::set_volumetric_fog_density(float p_density) {
+	if (!Math::is_finite(p_density) || p_density < 0.0f || volumetric_fog_density == p_density) {
+			return;
+		}
 	volumetric_fog_density = p_density;
 	_update_volumetric_fog();
 }
@@ -970,6 +976,9 @@ float Environment::get_volumetric_fog_density() const {
 	return volumetric_fog_density;
 }
 void Environment::set_volumetric_fog_albedo(Color p_color) {
+	if (volumetric_fog_albedo == p_color) {
+			return;
+		}
 	volumetric_fog_albedo = p_color;
 	_update_volumetric_fog();
 }
@@ -991,6 +1000,9 @@ float Environment::get_volumetric_fog_emission_energy() const {
 	return volumetric_fog_emission_energy;
 }
 void Environment::set_volumetric_fog_anisotropy(float p_anisotropy) {
+	if (!Math::is_finite(p_anisotropy) || volumetric_fog_anisotropy == p_anisotropy) {
+			return;
+		}
 	volumetric_fog_anisotropy = p_anisotropy;
 	_update_volumetric_fog();
 }
@@ -998,6 +1010,9 @@ float Environment::get_volumetric_fog_anisotropy() const {
 	return volumetric_fog_anisotropy;
 }
 void Environment::set_volumetric_fog_length(float p_length) {
+	if (!Math::is_finite(p_length) || p_length < 0.0f || volumetric_fog_length == p_length) {
+			return;
+		}
 	volumetric_fog_length = p_length;
 	_update_volumetric_fog();
 }
@@ -1005,7 +1020,13 @@ float Environment::get_volumetric_fog_length() const {
 	return volumetric_fog_length;
 }
 void Environment::set_volumetric_fog_detail_spread(float p_detail_spread) {
-	p_detail_spread = CLAMP(p_detail_spread, 0.5, 6.0);
+	if (!Math::is_finite(p_detail_spread)) {
+		return;
+	}
+	p_detail_spread = CLAMP(p_detail_spread, 0.5f, 6.0f);
+	if (volumetric_fog_detail_spread == p_detail_spread) {
+		return;
+	}
 	volumetric_fog_detail_spread = p_detail_spread;
 	_update_volumetric_fog();
 }
@@ -1038,6 +1059,9 @@ float Environment::get_volumetric_fog_sky_affect() const {
 }
 
 void Environment::set_volumetric_fog_temporal_reprojection_enabled(bool p_enable) {
+	if (volumetric_fog_temporal_reproject == p_enable) {
+			return;
+		}
 	volumetric_fog_temporal_reproject = p_enable;
 	_update_volumetric_fog();
 }
@@ -1045,6 +1069,15 @@ bool Environment::is_volumetric_fog_temporal_reprojection_enabled() const {
 	return volumetric_fog_temporal_reproject;
 }
 void Environment::set_volumetric_fog_temporal_reprojection_amount(float p_amount) {
+	// Temporal accumulation is always a blend in [0, 1]. Reject invalid
+	// values rather than contaminating the native froxel history.
+	if (!Math::is_finite(p_amount)) {
+		return;
+	}
+	p_amount = CLAMP(p_amount, 0.0f, 1.0f);
+	if (volumetric_fog_temporal_reproject_amount == p_amount) {
+		return;
+	}
 	volumetric_fog_temporal_reproject_amount = p_amount;
 	_update_volumetric_fog();
 }

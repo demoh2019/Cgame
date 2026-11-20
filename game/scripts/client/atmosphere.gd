@@ -235,6 +235,9 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	var amount: float = LightningFlash.sample(_lightning_elapsed,
 		_lightning_weight * LightningFlash.strength(_lightning_quality))
 	LightningFlash.apply(environment, sun, amount)
+	# Temporarily favor current volumetric lighting over old-frame fog
+	# during lightning. Avoid luminous trails that survive the flash.
+	CinematicFog.apply_lightning_history(environment, _fog_profile, amount)
 	_lightning_elapsed = minf(LightningFlash.DURATION,
 		_lightning_elapsed + maxf(0.0, delta))
 

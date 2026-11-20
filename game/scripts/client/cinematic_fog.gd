@@ -110,3 +110,29 @@ static func apply_weather(env: Environment, daylight: float, sun_height: float,
 		env.volumetric_fog_density = minf(
 			float(frame["volume_density"]) * volume_scale, MAX_VOLUME_DENSITY)
 		env.volumetric_fog_albedo = horizon.lerp(Color(0.66, 0.7, 0.73), 0.18).lerp(tint, tint_amount)
+
+
+## A lightning pulse must not be averaged into ~3/4 of the previous fog frame.
+## Reduce history contribution only during the confirmed strike; retain a
+## stable low-noise froxel grid for the rest of the weather simulation.
+const LIGHTNING_HISTORY_FLOOR := 0.12
+
+
+static func history_for_lightning(settings: Dictionary, flash: float) -> float:
+	var baseline: float = clampf(float(settings.get("reprojection", 0.0)), 0.0, 0.90)
+	if not is_finite(flash):
+		return baseline
+	var transient: float = smoothstep(0.03, 0.65, clampf(flash, 0.0, 1.0))
+	return lerpf(baseline, minf(baseline, LIGHTNING_HISTORY_FLOOR), transient)
+
+
+## The original Environment is reused: no second volume, post pass or light.
+## A tiny delta threshold prevents uploads on the long, inactive tail.
+static func apply_lightning_history(env: Environment, settings: Dictionary,
+		flash: float) -> void:
+	if env == null or not env.volumetric_fog_enabled:
+		return
+	var desired: float = history_for_lightning(settings, flash)
+	var current: float = env.volumetric_fog_temporal_reprojection_amount
+	if absf(current - desired) >= 0.01 or (flash <= 0.001 and current != desired):
+		env.volumetric_fog_temporal_reprojection_amount = desired
