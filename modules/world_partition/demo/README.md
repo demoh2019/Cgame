@@ -72,7 +72,8 @@ only the covered cells; other proxy scenes remain on disk but are excluded
 until the full bake is run again. At runtime the demo checks the manifest
 and each proxy's checksum before registering it; invalid or absent files use
 the old procedural scene instead. The HUD reports the number of verified
-proxy scenes at startup. Restart the game after rebaking content.
+proxy scenes and the measured checksum-scan time (milliseconds) at startup.
+Restart the game after rebaking content.
 
 The project uses Compatibility renderer so it can be inspected on low-end GPUs;
 near/far proxy handoff is implemented without renderer-specific effects.
