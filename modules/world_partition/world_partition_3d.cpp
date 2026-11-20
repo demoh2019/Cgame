@@ -38,6 +38,7 @@
 #include "core/os/time.h"
 #include "scene/main/node.h"
 #include "scene/3d/navigation/navigation_region_3d.h"
+#include "scene/resources/3d/world_3d.h"
 #include "servers/navigation_3d/navigation_server_3d.h"
 
 #include <cstdint>
@@ -256,6 +257,133 @@ int WorldPartition3D::get_navigation_ready_cell_count() const {
 		if (is_cell_navigation_ready(E.key)) {
 			result++;
 		}
+	}
+	return result;
+}
+
+Array WorldPartition3D::get_navigation_route_cells(const Vector3 &p_from_global, const Vector3 &p_to_global, int p_max_cells) const {
+	Array result;
+	ERR_FAIL_COND_V_MSG(p_max_cells < 1 || p_max_cells > 256, result, "WorldPartition3D route cell limit must be between 1 and 256.");
+	if (!is_inside_tree() || !p_from_global.is_finite() || !p_to_global.is_finite()) {
+		return result;
+	}
+	const Vector3 from = to_local(p_from_global);
+	const Vector3 to = to_local(p_to_global);
+	if (!from.is_finite() || !to.is_finite() || !Math::is_finite(cell_size) || cell_size <= 0.0) {
+		return result;
+	}
+	const real_t ax = from.x / cell_size;
+	const real_t az = from.z / cell_size;
+	const real_t bx = to.x / cell_size;
+	const real_t bz = to.z / cell_size;
+	// Reject out-of-range coordinates instead of silently taking the clamped
+	// local_position_to_cell value and declaring an unrelated cell ready.
+	if (Math::abs(ax) > 1000000000.0 || Math::abs(az) > 1000000000.0 ||
+			Math::abs(bx) > 1000000000.0 || Math::abs(bz) > 1000000000.0) {
+		return result;
+	}
+	Vector2i cell(int(Math::floor(ax)), int(Math::floor(az)));
+	const Vector2i last(int(Math::floor(bx)), int(Math::floor(bz)));
+	result.push_back(cell);
+	if (cell == last) {
+		return result;
+	}
+
+	const real_t dx = bx - ax;
+	const real_t dz = bz - az;
+	const int step_x = (dx > 0.0) ? 1 : ((dx < 0.0) ? -1 : 0);
+	const int step_z = (dz > 0.0) ? 1 : ((dz < 0.0) ? -1 : 0);
+	const real_t abs_dx = Math::abs(dx);
+	const real_t abs_dz = Math::abs(dz);
+	// 2D supercover DDA: a diagonal grid-corner crossing conservatively
+	// includes BOTH side-adjacent cells before the diagonal destination.
+	const real_t inf = real_t(1e30);
+	real_t t_max_x = step_x == 0 ? inf : (step_x > 0 ? (Math::floor(ax) + 1.0 - ax) : (ax - Math::floor(ax))) / abs_dx;
+	real_t t_max_z = step_z == 0 ? inf : (step_z > 0 ? (Math::floor(az) + 1.0 - az) : (az - Math::floor(az))) / abs_dz;
+	const real_t t_delta_x = step_x == 0 ? inf : 1.0 / abs_dx;
+	const real_t t_delta_z = step_z == 0 ? inf : 1.0 / abs_dz;
+	const auto append_cell = [&](const Vector2i &p_cell) -> bool {
+		if (result.size() >= p_max_cells) {
+			return false;
+		}
+		result.push_back(p_cell);
+		return true;
+	};
+	// A hard work cap also protects against malformed huge input ranges.
+	while (cell != last) {
+		if (step_x != 0 && step_z != 0 && Math::is_equal_approx(t_max_x, t_max_z)) {
+			if (!append_cell(Vector2i(cell.x + step_x, cell.y)) ||
+					!append_cell(Vector2i(cell.x, cell.y + step_z))) {
+				return Array(); // Never report a silently truncated corridor.
+			}
+			cell += Vector2i(step_x, step_z);
+			t_max_x += t_delta_x;
+			t_max_z += t_delta_z;
+		} else if (t_max_x < t_max_z) {
+			cell.x += step_x;
+			t_max_x += t_delta_x;
+		} else {
+			cell.y += step_z;
+			t_max_z += t_delta_z;
+		}
+		if (!append_cell(cell)) {
+			return Array();
+		}
+	}
+	return result;
+}
+
+bool WorldPartition3D::is_navigation_route_ready(const Vector3 &p_from_global, const Vector3 &p_to_global, int p_max_cells) const {
+	if (!streaming_enabled || !is_inside_tree()) {
+		return false;
+	}
+	const Array cells = get_navigation_route_cells(p_from_global, p_to_global, p_max_cells);
+	if (cells.is_empty()) {
+		return false;
+	}
+	for (int i = 0; i < cells.size(); i++) {
+		if (!is_cell_navigation_ready(cells[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+PackedVector3Array WorldPartition3D::get_streamed_navigation_path(const Vector3 &p_from_global, const Vector3 &p_to_global, bool p_optimize, int p_navigation_layers, int p_max_cells) const {
+	PackedVector3Array result;
+	ERR_FAIL_COND_V_MSG(p_navigation_layers < 1, result, "WorldPartition3D navigation path layers must be a positive bitmask.");
+	if (!is_navigation_route_ready(p_from_global, p_to_global, p_max_cells)) {
+		return result;
+	}
+	NavigationServer3D *navigation = NavigationServer3D::get_singleton();
+	const Ref<World3D> world = get_world_3d();
+	if (navigation == nullptr || world.is_null()) {
+		return result;
+	}
+	const RID map = world->get_navigation_map();
+	if (!map.is_valid() || navigation->map_get_iteration_id(map) == 0) {
+		return result;
+	}
+	const Vector<Vector3> route = navigation->map_get_path(map, p_from_global, p_to_global, p_optimize, uint32_t(p_navigation_layers));
+	if (route.is_empty()) {
+		return result;
+	}
+	// NavigationServer may return a partial path toward a disconnected point.
+	// Never claim destination readiness for a path ending far from the goal.
+	const real_t endpoint_tolerance = MAX(real_t(2.0), cell_size * real_t(0.125));
+	if (route[0].distance_to(p_from_global) > endpoint_tolerance ||
+			route[route.size() - 1].distance_to(p_to_global) > endpoint_tolerance) {
+		return result;
+	}
+	// The returned path may detour outside the straight-line corridor. Verify
+	// EVERY actual segment against the streamed regions before exposing it.
+	for (int i = 1; i < route.size(); i++) {
+		if (!is_navigation_route_ready(route[i - 1], route[i], p_max_cells)) {
+			return PackedVector3Array();
+		}
+	}
+	for (const Vector3 &point : route) {
+		result.push_back(point);
 	}
 	return result;
 }
@@ -1314,6 +1442,9 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("are_cells_navigation_ready", "center", "radius"), &WorldPartition3D::are_cells_navigation_ready, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_navigation_ready_cell_count"), &WorldPartition3D::get_navigation_ready_cell_count);
 	ClassDB::bind_method(D_METHOD("get_navigation_pending_cell_count"), &WorldPartition3D::get_navigation_pending_cell_count);
+	ClassDB::bind_method(D_METHOD("get_navigation_route_cells", "from_global", "to_global", "max_cells"), &WorldPartition3D::get_navigation_route_cells, DEFVAL(64));
+	ClassDB::bind_method(D_METHOD("is_navigation_route_ready", "from_global", "to_global", "max_cells"), &WorldPartition3D::is_navigation_route_ready, DEFVAL(64));
+	ClassDB::bind_method(D_METHOD("get_streamed_navigation_path", "from_global", "to_global", "optimize", "navigation_layers", "max_cells"), &WorldPartition3D::get_streamed_navigation_path, DEFVAL(true), DEFVAL(1), DEFVAL(64));
 	ClassDB::bind_method(D_METHOD("is_streaming_source_navigation_ready", "name"), &WorldPartition3D::is_streaming_source_navigation_ready);
 	ClassDB::bind_method(D_METHOD("get_streaming_source_navigation_progress", "name"), &WorldPartition3D::get_streaming_source_navigation_progress);
 	ClassDB::bind_method(D_METHOD("get_cell_node", "cell"), &WorldPartition3D::get_cell_node);
