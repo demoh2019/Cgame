@@ -428,6 +428,51 @@ public:
 	}
 };
 
+// Intentionally expensive generator: prove that scheduling stops after the
+// first indivisible chunk when the frame's CPU time slice is exhausted.
+class BudgetedGenerator : public Object {
+public:
+	int calls = 0;
+	Node *generate(const Vector3i &) {
+		calls++;
+		OS::get_singleton()->delay_usec(3000);
+		return memnew(Node3D);
+	}
+};
+
+TEST_CASE("[SceneTree][WorldStreamer] Generator obeys one drain and soft CPU budget") {
+	BudgetedGenerator generator;
+	WorldStreamer *streamer = memnew(WorldStreamer);
+	streamer->set_cell_size(10.0);
+	streamer->set_load_radius(15.0);
+	streamer->set_unload_radius(24.0);
+	streamer->set_focus_position(Vector3(5.0, 0.0, 5.0));
+	streamer->set_update_interval(0.0); // Trigger streaming every frame.
+	streamer->set_max_instantiations_per_frame(3);
+	streamer->set_max_chunk_work_usec(500);
+	CHECK(streamer->get_max_chunk_work_usec() == 500);
+	streamer->set_chunk_generator(callable_mp(&generator, &BudgetedGenerator::generate));
+	SceneTree::get_singleton()->get_root()->add_child(streamer);
+
+	SceneTree::get_singleton()->process(0.016);
+	CHECK(generator.calls == 1);
+	CHECK(streamer->get_loaded_count() == 1);
+	// The prior engine drained the same generator twice during update frames.
+	SceneTree::get_singleton()->process(0.016);
+	CHECK(generator.calls == 2);
+	CHECK(streamer->get_loaded_count() == 2);
+
+	streamer->set_max_chunk_work_usec(-100);
+	CHECK(streamer->get_max_chunk_work_usec() == 0);
+	streamer->set_max_chunk_work_usec(2000000);
+	CHECK(streamer->get_max_chunk_work_usec() == 1000000);
+	streamer->set_max_chunk_work_usec(0);
+	SceneTree::get_singleton()->process(0.016);
+	CHECK(generator.calls == 5); // Count-only mode can build three chunks.
+	CHECK(streamer->get_loaded_count() == 5);
+	memdelete(streamer);
+}
+
 TEST_CASE("[SceneTree][WorldStreamer] Procedural generator builds nearest chunks first and unloads far ones") {
 	Generator generator;
 	WorldStreamer *streamer = memnew(WorldStreamer);
