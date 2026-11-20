@@ -25,6 +25,16 @@ func run(t) -> void:
 	t.check(positions.seed != velocities.seed and positions.seed != wings.seed and velocities.seed != wings.seed,
 		"separate cosmetic concerns cannot accidentally share the same random sequence")
 
+	t.current = "versioned mixer golden vectors"
+	t.eq(Streams.seed_for(0, 0), -8991371085989781972,
+		"version one seed vector: zero world and zero tag")
+	t.eq(Streams.seed_for(1337, 1), -8119305880941845874,
+		"version one seed vector: named position stream")
+	t.eq(Streams.seed_for(1337, 2), 3750391151841051190,
+		"version one seed vector: independent flight stream")
+	t.eq(Streams.seed_for(-1, -1), -5240767868243073691,
+		"version one seed vector: negative world and negative tag")
+
 	t.current = "stream identity is invariant to draw order and parent state"
 	var again := Streams.fork(parent, Birds.STREAM_POSITION)
 	for i in 16:
