@@ -2839,3 +2839,53 @@ godot --headless --path game --script res://tests/run_all.gd
 
 The engine's existing scene drawing, RPC, and physics coordinate APIs
 support this feature. No native engine changes were needed.
+
+
+## Optional raid loot round robin — MMORPG group reward fairness
+
+The party leader may toggle **Raid loot: Free / Round robin** in the
+multiplayer party controls. **Free** is the default and preserves the
+original single-bag, first-pickup raid flow. The setting affects only
+**future** boss kills and is shared in the party's private state.
+
+When the server confirms a raid boss death, it first freezes the real
+eligible combat contributors using the existing 75-second loot
+reservation. If at least two contributors belong to a party with
+Round robin enabled, the server initializes a single rotation on the
+**one actual shared loot bag**. Switching the leader's mode afterward
+never rewrites an already-dropped bag.
+
+- The initial turn rotates deterministically by boss identity instead
+  of always granting the killing player first pick. Only contributors
+  can collect while the 75-second boss reservation is active.
+- A successful click grants **one item type**, with a quantity capped
+  to **ceil(original stack size / number of contributors)**. Every
+  awarded unit is subtracted from the original bag inventory;
+  no parallel personal reward inventories or duplicate copies exist.
+- A successful claim advances to the next contributor. If the
+  inventory cannot hold any of the offered items, nothing is taken
+  and the turn is **not** consumed. Unused turns expire after
+  **12 seconds**, allowing active survivors to keep collecting.
+- A private per-viewer snapshot shows whether it is your turn and
+  how many seconds remain, without revealing participant account
+  identifiers to strangers or other clients. The network RPC
+  authorizes only the leader's future loot-mode choice.
+- After the existing **75-second reservation expires**, any survivor
+  can collect the remaining bag normally. Regular infected,
+  ordinary containers, PvP full-loot bags, nonparticipating groups
+  and solo boss kills retain their previous behavior.
+
+Implementation: `scripts/shared/raid_round_robin.gd`,
+`scripts/shared/party.gd`, `scripts/server/game_server.gd`,
+`scripts/shared/net.gd`, `scripts/client/game_client.gd`,
+`scripts/client/hud.gd`. The new
+`tests/test_raid_round_robin.gd` covers leader permissions,
+free-mode compatibility, shared bag deductions, turn switching,
+replay protection, private visibility and public loot unlock.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+The current Godot networking, inventory and UI APIs support the
+mechanic without changes to the native engine.
