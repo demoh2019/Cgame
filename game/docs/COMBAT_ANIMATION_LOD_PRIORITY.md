@@ -28,6 +28,8 @@ small **gameplay-significance override**.
   full-rate `advance()` cadence when their normal LOD would be 1/2 or 1/4.
 - Outside the active frustum, beyond `far_distance`, and on tiers with zero
   budget, actors retain their original cheap/paused animation LOD.
+- Inactive or ragdolled animation mixers never spend a priority slot even when
+  the network snapshot still carries a boss/elite flag.
 - Skeletal modifiers are retained only for eligible high-priority visible
   mixers; ordinary distant IK remains culled.
 - Existing mixer phase staggering, max accumulated delta and callback mode
