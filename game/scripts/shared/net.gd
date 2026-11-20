@@ -564,6 +564,13 @@ func c_party_leave() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_standard() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_standard", sim.cmd_party_standard(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_party_rally() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -832,7 +839,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "duel", "arena_queue", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast":
+		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "duel", "arena_queue", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
 		"party_aid":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
