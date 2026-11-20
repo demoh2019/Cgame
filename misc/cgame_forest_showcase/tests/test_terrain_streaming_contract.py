@@ -207,6 +207,8 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn("KEY_F3:", world)
         self.assertIn("HLODCache.clear()", world)
         self.assertIn("TileCache.clear()", world)
+        self.assertIn("KEY_F4:", world)
+        self.assertIn("world_partition.retry_failed_cells()", world)
 
         self.assertIn("HLODCache.clear()", smoke)
         self.assertIn('int(stats["entries"]) != capacity', smoke)
@@ -273,6 +275,12 @@ class StreamedTerrainContracts(TestCase):
                         cpp.index("prefetch_coordinate(step, ahead)"))
         self.assertIn("int64_t(center.x) + int64_t(prefetch_direction.x) * p_step", cpp)
         self.assertIn("can_instantiate()", cpp)
+        self.assertIn("WorldPartition3D::retry_failed_cells()", cpp)
+        self.assertIn("void retry_failed_cells();", header)
+        self.assertIn('method name="retry_failed_cells"', xml)
+        native_retry = (repository / "modules/world_partition/tests/test_world_partition_3d_extra.h").read_text(encoding="utf-8")
+        self.assertIn("fixture.world->retry_failed_cells();", native_retry)
+
 
     def test_source_contracts_are_still_wired(self) -> None:
         patch = (ROOT / "scripts/streamed_terrain_patch.gd").read_text(encoding="utf-8")
