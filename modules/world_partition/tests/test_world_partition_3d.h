@@ -408,6 +408,54 @@ TEST_CASE("[SceneTree][WorldPartition3D] Actor-driven streaming follows Node3D m
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
+TEST_CASE("[SceneTree][WorldPartition3D] Supercover navigation corridor respects streaming and transformed grids") {
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	SceneTree::get_singleton()->get_root()->add_child(partition);
+	partition->set_cell_size(32.0);
+	partition->set_position(Vector3(140.0, 0.0, -50.0));
+	partition->set_rotation(Vector3(0.0, Math::PI / 2.0, 0.0));
+	const auto global_at = [&](real_t p_x, real_t p_z) {
+		return partition->to_global(Vector3(p_x, 0.0, p_z));
+	};
+
+	const Array flat = partition->get_navigation_route_cells(global_at(2, 9), global_at(70, 9));
+	REQUIRE(flat.size() == 3);
+	CHECK(flat[0] == Vector2i(0, 0));
+	CHECK(flat[1] == Vector2i(1, 0));
+	CHECK(flat[2] == Vector2i(2, 0));
+	const Array reverse = partition->get_navigation_route_cells(global_at(70, 9), global_at(2, 9));
+	REQUIRE(reverse.size() == 3);
+	CHECK(reverse[0] == Vector2i(2, 0));
+	CHECK(reverse[2] == Vector2i(0, 0));
+
+	const Array diagonal = partition->get_navigation_route_cells(global_at(1, 1), global_at(65, 65));
+	REQUIRE(diagonal.size() == 7);
+	CHECK(diagonal[0] == Vector2i(0, 0));
+	CHECK(diagonal[1] == Vector2i(1, 0)); // Corner-crossing side tile.
+	CHECK(diagonal[2] == Vector2i(0, 1)); // Both neighbors included.
+	CHECK(diagonal[3] == Vector2i(1, 1));
+	CHECK(diagonal[6] == Vector2i(2, 2));
+
+	const Array same_cell = partition->get_navigation_route_cells(global_at(3, 4), global_at(20, 20), 1);
+	REQUIRE(same_cell.size() == 1);
+	CHECK(same_cell[0] == Vector2i(0, 0));
+	CHECK(partition->get_navigation_route_cells(global_at(1, 1), global_at(65, 65), 6).is_empty());
+	CHECK(partition->get_navigation_route_cells(global_at(2, 9), global_at(70, 9), 2).is_empty());
+	CHECK(partition->get_navigation_route_cells(global_at(-1, -1), global_at(-65, -1)).size() == 3);
+
+	ERR_PRINT_OFF;
+	CHECK(partition->get_navigation_route_cells(global_at(1, 1), global_at(2, 2), 0).is_empty());
+	CHECK(partition->get_navigation_route_cells(global_at(1, 1), global_at(2, 2), 257).is_empty());
+	ERR_PRINT_ON;
+	CHECK(partition->get_navigation_route_cells(Vector3(NAN, 0, 0), global_at(2, 2)).is_empty());
+	CHECK(partition->get_navigation_route_cells(global_at(2, 2), Vector3(INFINITY, 0, 0)).is_empty());
+	CHECK_FALSE(partition->is_navigation_route_ready(global_at(2, 9), global_at(70, 9)));
+	CHECK(partition->get_streamed_navigation_path(global_at(2, 9), global_at(70, 9)).is_empty());
+
+	SceneTree::get_singleton()->get_root()->remove_child(partition);
+	memdelete(partition);
+}
+
 TEST_CASE("[SceneTree][WorldPartition3D] Instantiated cells without navigation remain nav-unready") {
 	// A physics-ready PackedScene is NOT sufficient for NavigationServer3D
 	// readiness. Every navigation-ready cell must have a real region RID with
