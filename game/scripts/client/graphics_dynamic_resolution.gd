@@ -25,6 +25,11 @@ func configure(value: int, device_min_scale: float = 0.0) -> void:
 	# scale. Its hardware floor is authoritative, but quality ceilings
 	# and ordinary FSR2 behavior remain unchanged.
 	var native_min: float = device_min_scale if is_finite(device_min_scale) else 0.0
+	# If the device's temporal floor is higher than the entire profile,
+	# use FSR2 and retain the old lower floor. Clamping it to the ceiling
+	# would otherwise prevent any GPU-bound resolution reduction.
+	if native_min > float(CEILINGS[level]):
+		native_min = 0.0
 	floor_scale = clampf(maxf(float(FLOORS[level]), native_min),
 		float(FLOORS[level]), float(CEILINGS[level]))
 	scale = float(CEILINGS[level])

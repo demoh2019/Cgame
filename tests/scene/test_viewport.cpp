@@ -43,6 +43,8 @@ TEST_FORCE_LINK(test_viewport)
 #include "scene/gui/subviewport_container.h"
 #include "scene/main/canvas_layer.h"
 #include "scene/main/scene_tree.h"
+#include "servers/rendering/rendering_device.h"
+#include "servers/rendering/rendering_server.h"
 #include "scene/main/window.h"
 #include "tests/display_server_mock.h"
 #include "tests/signal_watcher.h"
@@ -169,23 +171,30 @@ TEST_CASE("[SceneTree][Viewport] mipmap bias rejects invalid and extreme inputs"
 	root->set_texture_mipmap_bias(original);
 }
 
-TEST_CASE("[SceneTree][Viewport] MetalFX modes require the native Metal driver") {
+TEST_CASE("[SceneTree][Viewport] MetalFX modes require matching Metal GPU features") {
 	Window *root = SceneTree::get_singleton()->get_root();
 	const Viewport::Scaling3DMode original = root->get_scaling_3d_mode();
-	const String driver = RenderingServer::get_singleton()->get_current_rendering_driver_name().to_lower();
-	// Native MetalFX's minimum device scale is checked by the game policy.
-	// This protects saved scenes opened with a different rendering backend.
+	RenderingServer *rs = RenderingServer::get_singleton();
+	const String driver = rs->get_current_rendering_driver_name().to_lower();
+	RenderingDevice *rd = rs->get_rendering_device();
+	const bool temporal_supported = driver == "metal" && rd != nullptr &&
+			rd->has_feature(RenderingDevice::SUPPORTS_METALFX_TEMPORAL);
+	const bool spatial_supported = driver == "metal" && rd != nullptr &&
+			rd->has_feature(RenderingDevice::SUPPORTS_METALFX_SPATIAL);
+
 	root->set_scaling_3d_mode(Viewport::SCALING_3D_MODE_METALFX_TEMPORAL);
-	if (driver != "metal") {
-		CHECK(root->get_scaling_3d_mode() != Viewport::SCALING_3D_MODE_METALFX_TEMPORAL);
-	} else {
+	if (temporal_supported) {
 		CHECK(root->get_scaling_3d_mode() == Viewport::SCALING_3D_MODE_METALFX_TEMPORAL);
+	} else {
+		CHECK(root->get_scaling_3d_mode() ==
+				(rd != nullptr ? Viewport::SCALING_3D_MODE_FSR2 : Viewport::SCALING_3D_MODE_BILINEAR));
 	}
 	root->set_scaling_3d_mode(Viewport::SCALING_3D_MODE_METALFX_SPATIAL);
-	if (driver != "metal") {
-		CHECK(root->get_scaling_3d_mode() != Viewport::SCALING_3D_MODE_METALFX_SPATIAL);
-	} else {
+	if (spatial_supported) {
 		CHECK(root->get_scaling_3d_mode() == Viewport::SCALING_3D_MODE_METALFX_SPATIAL);
+	} else {
+		CHECK(root->get_scaling_3d_mode() ==
+				(rd != nullptr ? Viewport::SCALING_3D_MODE_FSR : Viewport::SCALING_3D_MODE_BILINEAR));
 	}
 	root->set_scaling_3d_mode(original);
 }
