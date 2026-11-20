@@ -28,8 +28,10 @@ const GROUND_SHADER := """
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
+global uniform float aa_puddle_ripple_strength;
 global uniform float aa_terrain_detail_radius;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
+#include "res://assets/shaders/puddle_ripples.gdshaderinc"
 
 // A painted-looking ground: smooth patches of lush and dry grass, dirt, sand at the shore, strata on slopes and
 // snow on the peaks, all from layered value noise so nothing repeats in a visible grid.
@@ -144,6 +146,19 @@ void fragment() {
 	ROUGHNESS = clamp(mix(mix(dry_roughness + (fine - 0.5) * 0.12 * detail_fade, 0.24, wetness * 0.35),
 			0.08, puddle * 0.65), 0.08, 1.0);
 	SPECULAR = min(0.9, 0.15 + wetness * 0.12 + puddle * 0.3);
+	// Even without downloaded terrain textures, puddles have the same
+	// coherent near-field rain rings. NORMAL is view-space in fragment().
+	if (aa_puddle_ripple_strength > 0.001 && puddle > 0.05
+			&& distance_to_camera < aa_terrain_detail_radius) {
+		float ripple_fade = 1.0 - smoothstep(
+			aa_terrain_detail_radius * 0.58, aa_terrain_detail_radius,
+			distance_to_camera);
+		vec2 ripple_tilt = aa_puddle_ripple_tilt(p, TIME);
+		vec3 view_tilt = (VIEW_MATRIX *
+			vec4(ripple_tilt.x, 0.0, ripple_tilt.y, 0.0)).xyz;
+		NORMAL = normalize(NORMAL + view_tilt
+			* (aa_puddle_ripple_strength * sqrt(puddle) * ripple_fade));
+	}
 }
 """
 
