@@ -376,6 +376,9 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	sky_material.set_shader_parameter("has_cloud_lighting_lut",
 		_cloud_lighting_lut != null and cloud_strength > 0.001)
 	sky_material.set_shader_parameter("cloud_lighting_strength", cloud_strength)
+	# Raymarched cumulus: High 24 / Ultra 40 steps, off below (halved in the radiance cubemap).
+	sky_material.set_shader_parameter("volumetric_cloud_steps",
+		clampi(int(settings.get("volumetric_cloud_steps", 0)), 0, 64))
 	sun.shadow_enabled = _shadows_allowed
 	sun.directional_shadow_max_distance = float(settings["shadow_distance"])
 	# Renderer-aware PCSS is configured once per quality switch. Balanced and

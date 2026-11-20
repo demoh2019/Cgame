@@ -234,6 +234,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		atmosphere_profile["atmospheric_lut_strength"] = world_profile["atmospheric_lut_strength"]
 		atmosphere_profile["moon_detail_strength"] = world_profile["moon_detail_strength"]
 		atmosphere_profile["cirrus_detail"] = world_profile["cirrus_detail"]
+		atmosphere_profile["volumetric_cloud_steps"] = world_profile["volumetric_cloud_steps"]
 		atmosphere_profile["cirrus_opacity"] = world_profile["cirrus_opacity"]
 		atmosphere_profile["cloud_lighting_strength"] = world_profile["cloud_lighting_strength"]
 		# Only desktop Forward+ gets froxel volumetrics. Compatibility/Mobile use

@@ -47,11 +47,39 @@ uniform float cirrus_opacity = 0.0;
 uniform sampler2D cloud_lighting_lut : filter_linear, repeat_enable;
 uniform bool has_cloud_lighting_lut = false;
 uniform float cloud_lighting_strength = 0.0;
+// Raymarched cumulus layer (Unreal Volumetric Clouds / Nubis-style). 0 steps = off.
+uniform int volumetric_cloud_steps = 0;
+uniform float volumetric_cloud_coverage = 0.45;
 
 float hash(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
 	p *= 17.0;
 	return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+float vnoise(vec3 p) {
+	vec3 i = floor(p);
+	vec3 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x),
+			mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+		mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x),
+			mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+
+// Cumulus density in a unit slab (h: 0 bottom .. 1 top). Rounded bottoms, wispy tops.
+float cloud_density(vec3 p, float h, float coverage) {
+	float base = vnoise(p) * 0.55 + vnoise(p * 2.03 + 3.1) * 0.28 + vnoise(p * 4.1 + 7.7) * 0.17;
+	float profile = smoothstep(0.0, 0.18, h) * (1.0 - smoothstep(0.45, 1.0, h));
+	float d = clamp((base - (1.0 - coverage)) / max(coverage, 0.05), 0.0, 1.0) * profile;
+	// Erode edges with high-frequency detail (HZD "detail noise").
+	d -= vnoise(p * 9.0 + 1.3) * 0.18 * (1.0 - d);
+	return max(d, 0.0);
+}
+
+float hg_phase(float c, float g) {
+	float g2 = g * g;
+	return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * c, 1.5));
 }
 
 void sky() {
@@ -247,6 +275,54 @@ void sky() {
 				clamp(up, 0.0, 1.0));
 			vec3 cloud_color = mix(dark_cloud, lit_cloud, daylight);
 			color = mix(color, cloud_color, cloud_alpha * (1.0 - storm * 0.2));
+		}
+		if (volumetric_cloud_steps > 0 && up > 0.03) {
+			// March a flat slab (scaled units). Fixed-height projection keeps the result
+			// independent of camera position so sky radiance stays cached.
+			int steps = AT_CUBEMAP_PASS ? max(volumetric_cloud_steps / 2, 8) : volumetric_cloud_steps;
+			float coverage = clamp(volumetric_cloud_coverage + storm * 0.4, 0.0, 1.0);
+			float t0 = 1.0 / up;
+			float t1 = 1.6 / up;
+			float dt = (t1 - t0) / float(steps);
+			vec3 wind = vec3(cirrus_wind_offset.x, 0.0, cirrus_wind_offset.y) / 256.0
+				+ vec3(sky_time * 0.004, 0.0, sky_time * 0.0025);
+			vec3 sun_dir = normalize(sun_direction);
+			float cos_theta = dot(dir, sun_dir);
+			// Dual-lobe phase: forward silver lining + soft back scatter.
+			float phase = mix(hg_phase(cos_theta, 0.6), hg_phase(cos_theta, -0.25), 0.3) * 4.0 * PI;
+			vec3 sky_amb = mix(day_horizon, day_top, 0.5) * mix(1.0, 0.45, storm);
+			vec3 amb = mix(night_horizon * 0.6, sky_amb, daylight);
+			vec3 sun_l = sun_color * daylight * (1.0 - storm * 0.7);
+			sun_l = mix(sun_l, sun_l * dusk_color * 1.4, dusk * 0.6);
+			float trans = 1.0;
+			vec3 scat = vec3(0.0);
+			float jitter = hash(dir * 431.0 + sky_time);
+			for (int i = 0; i < steps; i++) {
+				float t = t0 + (float(i) + jitter) * dt;
+				vec3 pos = dir * t;
+				float h = (pos.y - 1.0) / 0.6;
+				float d = cloud_density(pos * vec3(0.9, 1.6, 0.9) + wind, h, coverage);
+				if (d > 0.01) {
+					// Three short taps towards the sun for self-shadowing.
+					float ls = 0.0;
+					for (int k = 1; k <= 3; k++) {
+						vec3 lp = pos + sun_dir * (0.08 * float(k));
+						ls += cloud_density(lp * vec3(0.9, 1.6, 0.9) + wind, (lp.y - 1.0) / 0.6, coverage);
+					}
+					float beer = exp(-ls * 1.6);
+					float powder = 1.0 - exp(-d * 4.0); // Beer-Powder (Schneider 2015)
+					vec3 lum = sun_l * beer * mix(1.0, powder, 0.5) * phase + amb * (0.35 + 0.5 * h);
+					float st = exp(-d * dt * 9.0);
+					scat += trans * lum * (1.0 - st);
+					trans *= st;
+					if (trans < 0.02) {
+						break;
+					}
+				}
+			}
+			float horizon_fade = smoothstep(0.03, 0.18, up);
+			trans = mix(1.0, trans, horizon_fade);
+			color = color * trans + scat * horizon_fade;
 		}
 		COLOR = color;
 	}
