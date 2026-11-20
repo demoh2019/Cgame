@@ -73,6 +73,28 @@ func run(t) -> void:
 	t.eq(streamer.lookahead_seconds, 0.0,
 		"stop/teleport resets prediction without clearing cached world chunks")
 
+	t.current = "stopped motion reprioritizes old forward-biased queue"
+	var stopped := WorldStreamer.new()
+	stopped.axes = WorldStreamer.AXES_XZ
+	stopped.cell_size = 16.0
+	stopped.load_radius = 32.0
+	stopped.unload_radius = 44.0
+	stopped.focus_position = Vector3(8.0, 0.0, 8.0)
+	stopped.max_instantiations_per_frame = 1
+	stopped.update_interval = 100.0
+	stopped.set_chunk_generator(Callable(self, "_make_chunk"))
+	stopped.velocity_hint = Vector3(16.0, 0.0, 0.0)
+	stopped.lookahead_seconds = 3.0
+	stopped.refresh()
+	t.check(stopped.is_cell_loaded(Vector3i(0, 0, 0)),
+		"current player cell always loads before movement speculation")
+	stopped.velocity_hint = Vector3.ZERO
+	stopped.lookahead_seconds = 0.0
+	stopped.refresh()
+	t.check(stopped.is_cell_loaded(Vector3i(-1, 0, 0)),
+		"stopping clears stale forward priority, restoring nearest-first queue order")
+	stopped.free()
+
 	t.current = "actual UI and network game consume the native scene queue"
 	var online := FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
 	var ui := FileAccess.get_file_as_string("res://scripts/client/ui_accessibility_layer.gd")
