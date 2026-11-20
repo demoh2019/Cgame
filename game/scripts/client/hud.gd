@@ -26,6 +26,7 @@ const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const PartyFrames = preload("res://scripts/client/party_frames.gd")
 const HudSkin = preload("res://scripts/client/hud_skin.gd")
+const EquipmentPresets = preload("res://scripts/shared/equipment_presets.gd")
 
 var client
 var _bars: Dictionary = {}
@@ -40,6 +41,7 @@ var _prompt: Label
 var _log: Label
 var _inventory_panel: PanelContainer
 var _inventory_grid: GridContainer
+var _preset_labels: Array[Label] = []
 var _stash_grid: GridContainer
 var _craft_panel: PanelContainer
 var _craft_list: VBoxContainer
@@ -224,6 +226,24 @@ func _build() -> void:
 	var inventory_title := Label.new()
 	inventory_title.text = "Inventory: click = use/equip, right-click = bank one (at hub workbench)"
 	inventory_box.add_child(inventory_title)
+	var preset_title := Label.new()
+	preset_title.text = "Gear presets: save / equip / clear at safe hub workbench"
+	inventory_box.add_child(preset_title)
+	for slot in EquipmentPresets.SLOT_COUNT:
+		var index: int = slot
+		var row := HBoxContainer.new()
+		inventory_box.add_child(row)
+		var name_label := Label.new()
+		name_label.custom_minimum_size.x = 220.0
+		name_label.text = "Set %d: empty" % (index + 1)
+		_preset_labels.append(name_label)
+		row.add_child(name_label)
+		for action in ["save", "equip", "clear"]:
+			var button := Button.new()
+			button.text = action.capitalize()
+			button.tooltip_text = "Only next to the safe hub workbench, outside combat."
+			button.pressed.connect(func() -> void: client.equipment_preset(action, index))
+			row.add_child(button)
 	var dismantle_button := Button.new()
 	dismantle_button.text = "Dismantle nearby barricade (partial salvage)"
 	dismantle_button.pressed.connect(func() -> void:
@@ -1437,6 +1457,13 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "equipment_preset":
+		if bool(data.get("ok", false)):
+			say("Gear set %d: %s." % [
+				int(data.get("slot", 0)) + 1, str(data.get("action", "updated"))])
+		else:
+			say("Gear set: " + str(data.get("reason", "unavailable")))
+		return
 	if kind == "use" and bool(data.get("prospecting", false)):
 		if bool(data.get("ok", false)):
 			say("Prospecting: T%d %s at X:%d Z:%d — private 80s marker." % [
@@ -2617,7 +2644,26 @@ func _style_slot(button: Button, item_id: String, equipped: bool) -> void:
 	button.add_theme_color_override("font_color", Color(1, 1, 1) if item_id != "" else Color(1, 1, 1, 0.3))
 
 
+func _refresh_presets() -> void:
+	var presets: Array = client.you.get("equipment_presets", [])
+	for slot in _preset_labels.size():
+		var name_label: Label = _preset_labels[slot]
+		if slot >= presets.size() or not (presets[slot] is Dictionary) or \
+				(presets[slot] as Dictionary).is_empty():
+			name_label.text = "Set %d: empty" % (slot + 1)
+			continue
+		var record: Dictionary = presets[slot]
+		var weapon: String = str(record.get("weapon", ""))
+		var armor: String = str(record.get("armor", ""))
+		var weapon_name: String = str(Defs.item(weapon).get("name", "Unarmed"))
+		var armor_name: String = str(Defs.item(armor).get("name", "No armor"))
+		var active: bool = weapon == client.inventory.weapon and armor == client.inventory.armor
+		name_label.text = "Set %d: %s / %s%s" % [
+			slot + 1, weapon_name, armor_name, " [ACTIVE]" if active else ""]
+
+
 func _refresh_inventory() -> void:
+	_refresh_presets()
 	var signature := str(client.inventory.to_dict()) + "|" + str(client.stash.to_dict())
 	if signature == _inventory_signature:
 		return
