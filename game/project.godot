@@ -48,10 +48,6 @@ environment/screen_space_reflection/half_size=true
 environment/ssao/half_size=true
 environment/ssil/half_size=true
 
-; Ultra uses two SDFGI cascades; half-res bounced lighting keeps the
-; optional compute workload within a realistic unified-memory GPU budget.
-global_illumination/gi/use_half_resolution=true
-
 ; Native sky IBL prefilter reduces high-roughness reflection aliasing.
 reflections/sky_reflections/ggx_samples=48
 reflections/sky_reflections/ggx_samples.mobile=16
@@ -207,8 +203,7 @@ aa_terrain_micro_occlusion={
 "value": 0.0
 }
 
-; Only high quality terrain variants evaluate the thin wet-film PBR layer.
-aa_terrain_wet_clearcoat={
+aa_terrain_curvature_strength={
 "type": "float",
 "value": 0.0
 }

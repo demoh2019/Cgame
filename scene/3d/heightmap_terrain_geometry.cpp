@@ -167,6 +167,9 @@ bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, in
 	const int skirt_vertices = 4 * side;
 	r_mesh.vertices.resize(body_vertices + skirt_vertices);
 	r_mesh.normals.resize(body_vertices + skirt_vertices);
+	if (p_params.color_override != nullptr) {
+		r_mesh.colors.resize(body_vertices + skirt_vertices);
+	}
 	r_mesh.uvs.resize(body_vertices + skirt_vertices);
 	const bool geomorph = p_params.geomorph_coarse_stride > p_stride &&
 			p_params.geomorph_coarse_stride <= p_quads;
@@ -176,6 +179,7 @@ bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, in
 	Vector2 *morph_uv = geomorph ? r_mesh.morph_uv2.ptrw() : nullptr;
 	Vector3 *vertex = r_mesh.vertices.ptrw();
 	Vector3 *normal = r_mesh.normals.ptrw();
+	Color *colors = p_params.color_override != nullptr ? r_mesh.colors.ptrw() : nullptr;
 	Vector2 *uv = r_mesh.uvs.ptrw();
 
 	real_t min_y = Math::INF;
@@ -189,6 +193,9 @@ bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, in
 			const int index = j * side + i;
 			vertex[index] = Vector3(p_params.origin.x + real_t(sx) * p_params.spacing.x, y, p_params.origin.y + real_t(sz) * p_params.spacing.y);
 			normal[index] = sample_normal(p_field, sx, sz, p_params);
+			if (colors != nullptr) {
+				colors[index] = p_params.color_override[sz * p_field.width + sx];
+			}
 			uv[index] = Vector2(real_t(sx) * u_scale, real_t(sz) * v_scale);
 			if (geomorph) {
 				const float target = TerrainGeomorphPolicy::coarse_sample(
@@ -225,6 +232,9 @@ bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, in
 			}
 			vertex[skirt_start[e] + k] = vertex[source] - Vector3(0, p_params.skirt_depth, 0);
 			normal[skirt_start[e] + k] = normal[source];
+			if (colors != nullptr) {
+				colors[skirt_start[e] + k] = colors[source];
+			}
 			uv[skirt_start[e] + k] = uv[source];
 			if (geomorph) {
 				morph_uv[skirt_start[e] + k] = Vector2(vertex[skirt_start[e] + k].y, 0.0);
