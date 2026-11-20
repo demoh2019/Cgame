@@ -43,6 +43,7 @@ const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
 const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
 const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
 const CaravanEscortRewards = preload("res://scripts/shared/caravan_escort_rewards.gd")
+const NightCaravan = preload("res://scripts/shared/night_caravan.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
@@ -202,6 +203,7 @@ class Player:
 	var caravan_view: Dictionary = {} # Verified route details for this private client.
 	var caravan_ambushed: bool = false # One PvE ambush per active route, persisted.
 	var caravan_defended: bool = false # All summoned attackers killed before deadline.
+	var caravan_night: Dictionary = {} # Saved server-verified night delivery progress.
 	var daily_bounty: Dictionary = {} # Account-persisted UTC daily bounty, never set by clients.
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var discovered_sites: Dictionary = {} # Personal authenticated landmark journal.
@@ -405,6 +407,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.caravan_view = {}
 	player.caravan_ambushed = false
 	player.caravan_defended = false
+	player.caravan_night = {}
 	player.daily_bounty = DailyBounties.empty_state()
 	player.renown = 0
 	players[peer_id] = player
@@ -452,6 +455,7 @@ func character_data(player: Player) -> Dictionary:
 		"caravan": player.caravan_state.duplicate(true),
 		"caravan_ambushed": player.caravan_ambushed,
 		"caravan_defended": player.caravan_defended,
+		"caravan_night": player.caravan_night.duplicate(true),
 		"daily_bounty": player.daily_bounty.duplicate(true),
 		"renown": player.renown,
 		"discovered_sites": WorldDiscovery.to_saved(player.discovered_sites),
@@ -640,6 +644,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not (loaded_caravan_defended is bool) or (bool(loaded_caravan_defended) and
 			(not bool(loaded_caravan_ambushed) or caravan_view.is_empty())):
 		return false
+	var loaded_caravan_night: Variant = data.get("caravan_night", {})
+	if not NightCaravan.valid_state(loaded_caravan_night, caravan_view):
+		return false
 	var loaded_daily: Variant = data.get("daily_bounty", DailyBounties.empty_state())
 	if not DailyBounties.valid_state(loaded_daily) \
 			or int(loaded_daily["day"]) > DailyBounties.utc_day():
@@ -670,6 +677,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.caravan_view = caravan_view.duplicate(true)
 	player.caravan_ambushed = bool(loaded_caravan_ambushed)
 	player.caravan_defended = bool(loaded_caravan_defended)
+	player.caravan_night = (loaded_caravan_night as Dictionary).duplicate(true)
+	if player.caravan_night.is_empty() and not caravan_view.is_empty():
+		player.caravan_night = NightCaravan.initial(caravan_view)
 	player.daily_bounty = (loaded_daily as Dictionary).duplicate(true)
 	player.renown = int(loaded_renown)
 	player.discovered_sites = loaded_discoveries["journal"]
@@ -957,6 +967,13 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		var moved: float = Vector2(player.position.x - before_move.x, player.position.z - before_move.z).length()
 		if moved > 0.0:
 			_record_caravan_escort_move(player, moved)
+			if not player.caravan_night.is_empty() and NightCaravan.record(
+					player.caravan_night, player.caravan_view,
+					before_move, player.position, WorldCycle.is_night(time),
+					world.zone_at(player.position.x, player.position.z),
+					player.inventory.count(str(player.caravan_view.get("cargo", ""))),
+					_is_safe(player.position)):
+				player.dirty_character = true
 		if not player.recall.is_empty():
 			var origin: Vector3 = player.recall["origin"]
 			if Vector2(player.position.x, player.position.z).distance_to(
@@ -2539,6 +2556,7 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 		player.caravan_view = {}
 		player.caravan_ambushed = false
 		player.caravan_defended = false
+		player.caravan_night = {}
 		caravan_escort_progress.erase(peer_id)
 		player.dirty_character = true
 		return {"ok": true, "action": "abandon"}
@@ -2556,6 +2574,7 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 		_clear_caravan_waves(peer_id)
 		player.caravan_state = CaravanRoutes.saved_state(offer)
 		player.caravan_view = offer.duplicate(true)
+		player.caravan_night = NightCaravan.initial(player.caravan_view)
 		caravan_escort_progress.erase(peer_id)
 		player.caravan_ambushed = false
 		player.caravan_defended = false
@@ -2579,7 +2598,8 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 					player.position, member.position):
 				eligible_escorts.append(member)
 	var outcome: Dictionary = CaravanEscortRewards.settle(
-		player, eligible_escorts, player.caravan_view, player.caravan_defended)
+		player, eligible_escorts, player.caravan_view, player.caravan_defended,
+		player.caravan_night)
 	if not bool(outcome.get("ok", false)):
 		return outcome
 	caravan_escort_progress.erase(peer_id)
@@ -2588,6 +2608,7 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 	player.caravan_view = {}
 	player.caravan_ambushed = false
 	player.caravan_defended = false
+	player.caravan_night = {}
 	player.dirty_inventory = true
 	player.dirty_character = true
 	for member in eligible_escorts:
@@ -5043,6 +5064,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.stress_scan_seconds = 0.0
 	# A courier must survive their defense; a later respawn cannot reclaim it.
 	victim.caravan_defended = false
+	victim.caravan_night = NightCaravan.initial(victim.caravan_view)
 	victim.dirty_character = true
 	victim.action = {}
 	victim.sharpened_weapon = ""
@@ -6716,6 +6738,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"party": _party_state_for(peer_id),
 			"raid_aggro": raid_aggro_state,
 			"caravan": player.caravan_view.duplicate(true),
+			"caravan_night": NightCaravan.public_state(player.caravan_view, player.caravan_night),
 			"equipment_presets": player.equipment_presets.duplicate(true),
 			"death_recovery": DeathRecovery.public_mark(bags, player, time),
 			"caravan_defended": player.caravan_defended,
