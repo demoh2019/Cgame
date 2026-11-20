@@ -308,6 +308,12 @@ func _build() -> void:
 			client.salvage_gear(item_id))
 	salvage_row.add_child(salvage_button)
 	_action_sections.append([inventory_box.get_child_count(), "Field"])
+	var trauma_button := Button.new()
+	trauma_button.name = "UseExpeditionTraumaKit"
+	trauma_button.text = "Expedition trauma kit (Shift+3): treat mixed injuries"
+	trauma_button.tooltip_text = "Spend one crafted T2 kit: +38 HP, -15 infection, stop bleeding, -45 fracture. No treatment means no item consumed."
+	trauma_button.pressed.connect(func() -> void: client.use_item("expedition_trauma_kit"))
+	inventory_box.add_child(trauma_button)
 	var campfire_button := Button.new()
 	campfire_button.text = "Light field campfire (3 wood T1, 1 stone T1)"
 	campfire_button.tooltip_text = "Shared warmth for 5 minutes, outside the safe settlement"
@@ -968,7 +974,7 @@ func _build() -> void:
 	var aid_row := HBoxContainer.new()
 	inventory_box.add_child(aid_row)
 	var aid_items := OptionButton.new()
-	for item_id in ["bandage", "field_antiseptic", "antibiotics", "purified_serum",
+	for item_id in ["bandage", "field_antiseptic", "expedition_trauma_kit", "antibiotics", "purified_serum",
 			"berries", "canned_food", "water_bottle"]:
 		if Defs.is_item(item_id):
 			var index: int = aid_items.item_count
