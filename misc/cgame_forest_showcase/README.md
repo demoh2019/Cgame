@@ -23,7 +23,7 @@ This directory is a **standalone playable reference project**, not a replacement
 
 ## Run
 
-1. Build Cgame from branch `feature/adaptive-resolution-gpu-budget` (or after PR #907 is merged). This is necessary for `AdaptiveResolution3D` and the built-in `world_partition` module (`WorldPartition3D`).
+1. Build Cgame from branch `feature/cgame-source-readiness-safe-travel-20261120-gpt6` (or after PR #907 and all dependent engine/game PRs are merged). This showcase uses the newer native `WorldPartition3D` source-readiness API alongside `AdaptiveResolution3D`; the original #907 branch alone is insufficient.
 2. Open this **folder**, `misc/cgame_forest_showcase`, as a separate Godot project with that Cgame editor executable.
 3. Use the Forward+ rendering backend and click Play. The project uses FSR2 and expects the selected rendering backend to support it.
 4. Press **F10** to stage a fast-travel to the currently marked relic, **F11** to return to the camp, or **F12** to cancel while streaming. The progress line in the HUD shows ready/total destination scenes; you can keep moving during staging. A missing scene never causes an immediate jump.
