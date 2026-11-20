@@ -28,6 +28,7 @@ const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const RainVfx = preload("res://scripts/client/rain_vfx.gd")
+const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
@@ -67,6 +68,7 @@ var _sun: DirectionalLight3D
 var _world_environment: Environment
 var _atmosphere # Script-backed Atmosphere instance; custom fields are not members of Node3D.
 var _rain_vfx: Node3D
+var _footprints: Node3D
 var _ambient_motes
 var _ground_mist
 var _footprints
@@ -134,6 +136,9 @@ func _ready() -> void:
 	ground_shadows.setup(_atmosphere)
 	add_child(ground_shadows)
 	GraphicsQuality.apply(get_viewport(), _atmosphere, null)
+	_footprints = FootprintDecals.new()
+	_footprints.name = "TerrainFootprints"
+	add_child(_footprints)
 	_rain_vfx = RainVfx.create(str(RenderingServer.get_current_rendering_method()))
 	add_child(_rain_vfx)
 	RainVfx.apply_quality(_rain_vfx, GraphicsQuality.level())
@@ -844,6 +849,14 @@ func _physics_process(delta: float) -> void:
 		WadingWetness.depth_at(world, survivor.position) < 0.22 and
 		not Dungeon.is_underground(survivor.position.x), _atmosphere.storm,
 		GraphicsQuality.level(), str(RenderingServer.get_current_rendering_method()), delta)
+	if _footprints != null:
+		_footprints.update_track(survivor.position,
+			survivor.survival.alive and not survivor.mounted and
+			movement.length_squared() > 0.01, delta, _atmosphere.storm,
+			_visual_biome, GraphicsQuality.level(),
+			str(RenderingServer.get_current_rendering_method()),
+			Dungeon.is_underground(survivor.position.x),
+			world.is_water(survivor.position.x, survivor.position.z))
 	_avatar.position = survivor.position + Vector3(0, 0.85, 0)
 	_avatar.rotation.y = atan2(_facing.x, _facing.y)
 	_avatar.scale = Vector3(1.0, 0.72 if survivor.crouching else 1.0, 1.0)
