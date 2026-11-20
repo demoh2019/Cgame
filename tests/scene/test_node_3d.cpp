@@ -94,6 +94,33 @@ TEST_CASE("[SceneTree][Node3D] Network snapshots use bounded Hermite interpolati
 	memdelete(actor);
 }
 
+TEST_CASE("[SceneTree][Node3D] Network render clock handles jitter without speculative movement") {
+	Node3D *actor = memnew(Node3D);
+	const real_t first = actor->advance_network_render_time(-1.0, 1.0, 0.12, 0.016);
+	CHECK(Math::abs(first - real_t(0.88)) < 0.00001);
+	CHECK(actor->get_position() == Vector3());
+
+	// When the jitter buffer expands, animation time only slows down.
+	const real_t slow = actor->advance_network_render_time(0.88, 1.04, 0.3, 0.016);
+	CHECK(slow >= 0.88);
+	CHECK(slow <= 1.04);
+	const real_t fast = actor->advance_network_render_time(0.88, 1.2, 0.12, 0.016);
+	CHECK(fast > slow);
+	CHECK(fast <= 1.2);
+
+	// Missing packet: render time is pinned to the most recent server pose.
+	CHECK(actor->advance_network_render_time(0.99, 1.0, 0.12, 0.1) == real_t(1.0));
+	CHECK(actor->advance_network_render_time(1.0, 1.0, 0.12, 0.1) == real_t(1.0));
+	// Stale frames, NaN and a reconnect are explicitly guarded.
+	CHECK(actor->advance_network_render_time(0.8, 1.0, 0.12, Math::INF) == real_t(0.8));
+	CHECK(actor->advance_network_render_time(0.8, 1.0, 0.12, -0.5) == real_t(0.8));
+	CHECK(actor->advance_network_render_time(Math::INF, 5.0, 0.12, 0.016) == real_t(4.88));
+	CHECK(actor->advance_network_render_time(0.8, Math::INF, 0.12, 0.016) == real_t(0.8));
+	CHECK(actor->advance_network_render_time(0.8, 0.2, 0.12, 0.016) == real_t(0.08));
+	CHECK(actor->get_position() == Vector3());
+	memdelete(actor);
+}
+
 TEST_CASE("[SceneTree][Node3D] Detached node does not report visible in tree") {
 	Node3D *node = memnew(Node3D);
 	CHECK(node->is_visible());
