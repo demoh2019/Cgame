@@ -65,6 +65,7 @@ const SUITES := [
 	"res://tests/test_procedural_moon.gd",
 	"res://tests/test_sky_cirrus_lut.gd",
 	"res://tests/test_grass_lod.gd",
+	"res://tests/test_camera_pixel_density.gd",
 	"res://tests/test_grass_transmission.gd",
 	"res://tests/test_scenery_batches.gd",
 	"res://tests/test_world_roads.gd",
