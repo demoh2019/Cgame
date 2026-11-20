@@ -163,7 +163,7 @@ func _refresh_player_stream_safety() -> void:
         return
     var local: Vector3 = world_partition.to_local(player.global_position)
     var cell: Vector2i = world_partition.local_position_to_cell(local)
-    player.set("movement_enabled", world_partition.is_cell_loaded(cell))
+    player.set("movement_enabled", world_partition.are_cells_loaded(cell, 0))
 
 
 func _create_crystals() -> void:
