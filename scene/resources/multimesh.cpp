@@ -217,6 +217,9 @@ void MultiMesh::set_buffer_interpolated(const Vector<float> &p_buffer_curr, cons
 }
 
 void MultiMesh::set_mesh(const Ref<Mesh> &p_mesh) {
+	if (mesh == p_mesh) {
+		return; // Avoid redundant RenderingServer rebinds for unchanged mesh resources.
+	}
 	mesh = p_mesh;
 	if (mesh.is_valid()) {
 		RenderingServer::get_singleton()->multimesh_set_mesh(multimesh, mesh->get_rid());
