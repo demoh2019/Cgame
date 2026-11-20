@@ -7,6 +7,7 @@ const SETTINGS_PATH := "user://albion_after_graphics.cfg"
 const NAMES := ["Performance", "Balanced", "High", "Ultra"]
 const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
+const GraphicsShadowAtlas = preload("res://scripts/client/graphics_shadow_atlas.gd")
 const GraphicsReflections = preload("res://scripts/client/graphics_reflections.gd")
 const GraphicsIndirectLighting = preload("res://scripts/client/graphics_indirect_lighting.gd")
 const WaterRefraction = preload("res://scripts/client/water_refraction.gd")
@@ -142,6 +143,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	DungeonReflectionBudget.configure(_level)
 	# The active backend can differ from ProjectSettings after a driver fallback.
 	var method := RenderingServer.get_current_rendering_method()
+	# One shared sun atlas across the process. Only change its allocation when
+	# the resolved quality/backend budget differs; Auto may apply repeatedly.
+	GraphicsShadowAtlas.apply(_level, str(method))
 	if viewport != null:
 		# Screen-space mesh decimation applies to imported GLTF models inside MultiMeshes.
 		# Higher thresholds choose cheaper geometry sooner, without hiding gameplay resources.
