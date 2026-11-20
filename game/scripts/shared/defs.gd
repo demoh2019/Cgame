@@ -385,6 +385,11 @@ static func _build_items() -> void:
 		"kind": "storm_insulator", "tier": 2, "stack": 5, "weight": 0.7, "value": 55})
 	_add_recipe("storm_insulator", "storm_insulator", 1,
 		{"bar_2": 1, "cloth_2": 2, "scrap": 2}, "workbench", 5.0)
+	# Durable camp craft: owners may anchor one live field tarp once, never a permanent base.
+	_add_item("storm_tarp_anchors", {"name": "Storm Tarp Anchor Kit",
+		"kind": "tarp_anchor", "tier": 2, "stack": 5, "weight": 1.2, "value": 65})
+	_add_recipe("storm_tarp_anchors", "storm_tarp_anchors", 1,
+		{"bar_2": 1, "fiber_2": 2, "cloth_2": 2}, "workbench", 5.0)
 	# Automatically consumes one filter when drinking directly from a lake.
 	_add_item("rain_tarp", {"name": "Expedition Rain Catcher", "kind": "rain_catcher",
 		"stack": 5, "weight": 1.1, "value": 24})

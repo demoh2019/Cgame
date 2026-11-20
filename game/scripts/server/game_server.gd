@@ -121,6 +121,7 @@ const RestedTraining = preload("res://scripts/shared/rested_training.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
+const StormTarpAnchors = preload("res://scripts/shared/storm_tarp_anchors.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HandFlare = preload("res://scripts/shared/hand_flare.gd")
@@ -2888,7 +2889,7 @@ func cmd_pitch_shelter(peer_id: int, x: float, z: float) -> Dictionary:
 	var id := new_id()
 	shelters[id] = {"id": id, "x": point.x, "y": world.height_at(x, z),
 		"z": point.y, "owner": peer_id, "owner_account": player.user_id,
-		"expires": time + PortableShelter.DURATION}
+		"expires": time + PortableShelter.DURATION, "anchored": false}
 	player.dirty_inventory = true
 	player.dirty_character = true
 	return {"ok": true, "id": id, "seconds": PortableShelter.DURATION}
@@ -3206,6 +3207,31 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"tarp_anchor":
+			if item_id != StormTarpAnchors.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "tarp_anchor": true}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					player.skill_timer > 0.0 or not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "tarp_anchor": true}
+			var selected: Dictionary = StormTarpAnchors.nearest(shelters, player, time)
+			if not bool(selected.get("ok", false)):
+				selected["tarp_anchor"] = true
+				return selected
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "tarp_anchor": true}
+			var anchor_id: int = int(selected["id"])
+			var strengthened: Dictionary = shelters[anchor_id]
+			# Compute expiration BEFORE marking the one-shot upgrade consumed.
+			strengthened["expires"] = StormTarpAnchors.new_expiry(strengthened, time)
+			strengthened["anchored"] = true
+			shelters[anchor_id] = strengthened
+			player.dirty_inventory = true
+			player.dirty_character = true
+			events.append({"type": "tarp_anchored", "id": anchor_id,
+				"x": float(strengthened["x"]), "z": float(strengthened["z"])})
+			return {"ok": true, "tarp_anchor": true,
+				"anchored": true, "id": anchor_id,
+				"remaining": float(strengthened["expires"]) - time}
 		"prospecting_chart":
 			if item_id != ProspectingChart.ITEM_ID:
 				return {"ok": false, "reason": "not_usable", "prospecting": true}
@@ -5162,7 +5188,8 @@ func _tick_players(delta: float) -> void:
 			WindChill.penalty(conditions, wind, average_wet, worn_armor), 0.0, 1.0)
 		if at_warm_fire:
 			weather_severity = 0.0
-		weather_severity = PortableShelter.exposure_severity(weather_severity, under_tarp)
+		weather_severity = PortableShelter.exposure_severity(weather_severity,
+			under_tarp, StormTarpAnchors.anchored_covers(shelters, player.position, time))
 		damage += player.survival.weather_tick(delta, weather_severity)
 		# The filter only protects for the portion of a tick it actually covers.
 		# An oversized server tick cannot extend the buff past its remaining time.
@@ -6425,6 +6452,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 			"tent_sheltered": PortableShelter.covers(shelters, player.position, time),
+			"tent_anchored": StormTarpAnchors.anchored_covers(shelters, player.position, time),
 			"tent_camouflaged": PortableShelter.camouflaged(shelters, player.position,
 				time, player.crouching, player.noise_timer, _alive(player)),
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),

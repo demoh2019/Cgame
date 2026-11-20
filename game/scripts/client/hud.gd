@@ -291,6 +291,12 @@ func _build() -> void:
 		var heading := Vector2(sin(client.yaw), cos(client.yaw))
 		client.pitch_shelter(Vector2(position.x, position.z) + heading * 2.8))
 	inventory_box.add_child(pitch_button)
+	var anchor_button := Button.new()
+	anchor_button.name = "AnchorFieldTarp"
+	anchor_button.text = "Anchor my field tarp (+180s, 90% storm cover)"
+	anchor_button.tooltip_text = "Use one workbench-crafted Storm Tarp Anchor Kit at your nearby active tarp. One upgrade per tarp; no PvP protection."
+	anchor_button.pressed.connect(func() -> void: client.use_item("storm_tarp_anchors"))
+	inventory_box.add_child(anchor_button)
 	var pack_button := Button.new()
 	pack_button.name = "PackTarp"
 	pack_button.text = "Pack nearest tarp (owner only; no refund)"
@@ -1468,6 +1474,12 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and bool(data.get("tarp_anchor", false)):
+		if bool(data.get("ok", false)):
+			say("Storm tarp anchored: %.0fs of shelter remain; exposure reduction 90%%." % float(data.get("remaining", 0.0)))
+		else:
+			say("Tarp anchors: " + str(data.get("reason", "rejected")) + " (kit not spent)")
+		return
 	if kind == "use" and bool(data.get("defusal", false)):
 		if bool(data.get("ok", false)):
 			say("Siege defusal successful; one toolkit spent, wall safe.")
@@ -2209,6 +2221,8 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nBIKE GROUND: %s | slope changes riding speed" % bike_biome.to_upper()
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
 		round(100.0 * float(client.you.get("weather_insulation", 0.0))))
+	if bool(client.you.get("tent_anchored", false)):
+		_info_label.text += "\nANCHORED TARP: -90% weather exposure, shared camp cover"
 	if bool(client.you.get("tent_camouflaged", false)):
 		_info_label.text += "\nCANOPY CAMOUFLAGE: infected see 25% less; sound, scent and fire still reveal"
 	var visual: float = float(client.you.get("visual_signature", 1.0))
