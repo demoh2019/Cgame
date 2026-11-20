@@ -38,18 +38,79 @@ static func bounds_for(mesh: Mesh, transforms: Array) -> AABB:
 	return bounds.grow(BOUNDS_MARGIN)
 
 
+## GPU-instanced colour: same PBR material, no per-object nodes or variants.
+## A coordinate-only hash is stable across chunk streaming and in any
+## partition order; world_origin converts local MultiMesh transforms to world.
+static func tint_at(world_xz: Vector2) -> Color:
+	var cell: Vector2 = (world_xz * 4.0).floor()
+	var h0: float = _hash(cell, 0.0)
+	var h1: float = _hash(cell, 31.7)
+	# Keep plant pigments recognizable while breaking the repeated tint.
+	# Combined with Foliage's existing world-space leaf hue variation.
+	return Color(lerpf(0.88, 1.05, h0), lerpf(0.91, 1.06, h1),
+		lerpf(0.84, 1.02, h0 * 0.37 + h1 * 0.63), 1.0)
+
+
+static func _hash(cell: Vector2, salt: float) -> float:
+	return fposmod(sin(cell.dot(Vector2(127.1, 311.7)) + salt) *
+		43758.5453, 1.0)
+
+
+## Native RD MultiMesh data: 3x4 row-major transform (12 floats), followed
+## by RGBA colour (four floats) only on opted-in foliage. One GPU upload
+## replaces O(n) separate instance transform/colour RenderingServer calls.
+static func packed_group(transforms: Array, tinted: bool = false,
+		world_origin: Vector2 = Vector2.ZERO) -> PackedFloat32Array:
+	var stride: int = 16 if tinted else 12
+	var floats := PackedFloat32Array()
+	floats.resize(transforms.size() * stride)
+	for i in transforms.size():
+		var t: Transform3D = transforms[i]
+		var o: int = i * stride
+		floats[o + 0] = t.basis.x.x
+		floats[o + 1] = t.basis.y.x
+		floats[o + 2] = t.basis.z.x
+		floats[o + 3] = t.origin.x
+		floats[o + 4] = t.basis.x.y
+		floats[o + 5] = t.basis.y.y
+		floats[o + 6] = t.basis.z.y
+		floats[o + 7] = t.origin.y
+		floats[o + 8] = t.basis.x.z
+		floats[o + 9] = t.basis.y.z
+		floats[o + 10] = t.basis.z.z
+		floats[o + 11] = t.origin.z
+		if tinted:
+			var pigment: Color = tint_at(
+				world_origin + Vector2(t.origin.x, t.origin.z))
+			floats[o + 12] = pigment.r
+			floats[o + 13] = pigment.g
+			floats[o + 14] = pigment.b
+			floats[o + 15] = pigment.a
+	return floats
+
+
+## The mesh shader must opt in to using the instance COLOR attribute.
+## Only leaves/flowers/grass/ferns/green plants have this enabled in
+## ChunkView. Rocks, buildings, mushrooms and original PBR art are unchanged.
+static func colorful_plant(name: String) -> bool:
+	return name.begins_with("Fern") or name.begins_with("Bush") or \
+		name.begins_with("Plant") or name.begins_with("Flower") or \
+		name.begins_with("Grass")
+
+
 ## Visual-only props: instancing stays on the GPU and no physics/server nodes are made.
-static func add(parent: Node3D, mesh: Mesh, transforms: Array[Transform3D], draw_distance: float, cast_shadows: bool = false, fade_margin: float = 8.0) -> Array[MultiMeshInstance3D]:
+static func add(parent: Node3D, mesh: Mesh, transforms: Array[Transform3D], draw_distance: float, cast_shadows: bool = false, fade_margin: float = 8.0,
+		tint_variation: bool = false, world_origin: Vector2 = Vector2.ZERO) -> Array[MultiMeshInstance3D]:
 	var result: Array[MultiMeshInstance3D] = []
 	if mesh == null or transforms.is_empty():
 		return result
 	for group in partition(transforms):
 		var multimesh := MultiMesh.new()
 		multimesh.transform_format = MultiMesh.TRANSFORM_3D
+		multimesh.use_colors = tint_variation
 		multimesh.mesh = mesh
 		multimesh.instance_count = group.size()
-		for i in group.size():
-			multimesh.set_instance_transform(i, group[i])
+		multimesh.buffer = packed_group(group, tint_variation, world_origin)
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
 		instance.custom_aabb = bounds_for(mesh, group)

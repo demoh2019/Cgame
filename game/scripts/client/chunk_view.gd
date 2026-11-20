@@ -1454,7 +1454,11 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 	if _use_nature:
 		for entry in DECOR:
 			var file := String(entry["file"])
-			var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(file), "decor:" + file, 0.0 if file.begins_with("Pebble") or file.begins_with("Petal") else (0.2 if file.begins_with("Grass") else 0.12))
+			var tint_plant: bool = SceneryBatches.colorful_plant(file)
+			var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(file), "decor:" + file,
+				0.0 if file.begins_with("Pebble") or file.begins_with("Petal")
+				else (0.2 if file.begins_with("Grass") else 0.12),
+				tint_plant)
 			if mesh == null:
 				continue
 			var places: Array = _anchored_spots(entry, anchors[str(entry["anchor"])], origin, rng, road_pieces, road_clear)
@@ -1467,7 +1471,9 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 				var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
 				transforms.append(Transform3D(basis, Vector3(at.x - origin.x, _world.height_at(at.x, at.y) - 0.02, at.y - origin.y)))
 			# Dense vegetation is split into camera-cullable cells, sparse props remain one draw call.
-			for decor_batch in SceneryBatches.add(self, mesh, transforms, float(entry["range"]), file.begins_with("Bush")):
+			for decor_batch in SceneryBatches.add(self, mesh, transforms,
+					float(entry["range"]), file.begins_with("Bush"), 8.0,
+					tint_plant, origin):
 				register_scenery(decor_batch, "decor:" + file, float(entry["range"]))
 				if file.begins_with("Bush"):
 					_shadow_casters.append({"node": decor_batch, "role": "bush", "bounds": decor_batch.custom_aabb})
