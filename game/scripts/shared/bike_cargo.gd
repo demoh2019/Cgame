@@ -3,6 +3,7 @@ extends RefCounted
 ## They do NOT create inventory slots, reduce loot/drop weight or improve on-foot speed.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const TrailBackpack = preload("res://scripts/shared/trail_backpack.gd")
 
 const ITEM_ID := "bike_panniers"
 const BIKE_ID := "salvage_bike"
@@ -15,9 +16,10 @@ static func installed(inventory) -> bool:
 
 static func effective_weight(inventory, riding: bool) -> float:
 	var weight: float = inventory.total_weight()
-	if riding and installed(inventory):
-		return maxf(0.0, weight - SUPPORTED_KG)
-	return weight
+	if riding:
+		return maxf(0.0, weight - SUPPORTED_KG) if installed(inventory) else weight
+	# Bicycle support and foot support are intentionally mutually exclusive.
+	return TrailBackpack.effective_weight(inventory)
 
 
 static func movement_factor(inventory, skill_bonus: float, riding: bool) -> float:

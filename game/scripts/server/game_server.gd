@@ -64,6 +64,7 @@ const SiegeCharge = preload("res://scripts/shared/siege_charge.gd")
 const SiegeDefusal = preload("res://scripts/shared/siege_defusal.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
+const TrailBackpack = preload("res://scripts/shared/trail_backpack.gd")
 const CargoRattle = preload("res://scripts/shared/cargo_rattle.gd")
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
@@ -6838,6 +6839,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"on_road": RoadTravel.on_road(world, player.position),
 			"storm_mud_factor": StormMud.factor(world, player.position, time, player.mounted),
 			"carry_kg": player.inventory.total_weight(),
+			"trail_pack_kg": TrailBackpack.support_kg(player.inventory, player.mounted),
 			"cargo_factor": BikeCargo.movement_factor(player.inventory,
 				player.skills.bonus("carry_capacity"), player.mounted),
 			"bike_cargo_kg": BikeCargo.SUPPORTED_KG if player.mounted and BikeCargo.installed(player.inventory) else 0.0,

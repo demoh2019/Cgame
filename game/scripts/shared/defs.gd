@@ -619,6 +619,13 @@ static func _build_items() -> void:
 		"tier": 1, "stack": 5, "weight": 0.3, "value": 24})
 	_add_recipe("bike_chain_wrap", "bike_chain_wrap", 1,
 		{"cloth_1": 2, "fiber_1": 2, "scrap": 2}, "workbench", 4.0)
+	# Physical T2 hiking pack distributes 14 kg on foot; full loot, no slots.
+	_add_item("trail_backpack_2", {"name": "Woven Trail Backpack T2",
+		"kind": "carry_pack", "tier": 2, "stack": 1,
+		"weight": 2.5, "value": 85})
+	_add_recipe("trail_backpack_2", "trail_backpack_2", 1,
+		{"cloth_2": 4, "fiber_2": 4, "plank_2": 1, "scrap": 2},
+		"workbench", 6.0)
 	# Tradeable, crafted saddle panniers support limited load only while mounted.
 	_add_item("bike_panniers", {"name": "Expedition Bike Panniers", "kind": "bike_cargo",
 		"tier": 2, "weight": 3.0, "value": 95})
