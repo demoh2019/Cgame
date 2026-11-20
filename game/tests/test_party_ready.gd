@@ -67,6 +67,9 @@ func run(t) -> void:
 	t.eq(parties.answer_ready_check(2, true, 69.0)["reason"], "no_check",
 		"expired check cannot accept late votes")
 	t.check(parties.start_ready_check(1, 70.0)["ok"], "leader can retry after timeout")
+	parties.cancel_ready_check_for(2)
+	t.eq(parties.state_for(1, 70.0)["ready_check"], {},
+		"server cancels readiness if a party member dies")
 	t.check(parties.leave(2)["ok"], "last teammate can leave")
 	t.eq(parties.state_for(1, 70.0)["ready_check"], {},
 		"disbanded party cannot leak ready status")
@@ -97,6 +100,13 @@ func run(t) -> void:
 		"first server-authenticated response is not unanimous")
 	t.eq(server.cmd_party_ready_answer(11, true)["result"], "all_ready",
 		"server confirms all authenticated participants")
+	ally.survival.hurt(999.0)
+	server._on_player_death(ally, -1)
+	t.eq(server.snapshot_for(11)["you"]["party"]["ready_check"], {},
+		"dead teammate invalidates raid votes")
+	server.time = Party.READY_COOLDOWN + 1.0
+	t.eq(server.cmd_party_ready_start(11)["reason"], "member_unavailable",
+		"leader cannot declare a party ready with an unconscious teammate")
 	leader.survival.hurt(999.0)
 	t.eq(server.cmd_party_ready_start(11)["reason"], "dead",
 		"dead leader cannot launch checks")
