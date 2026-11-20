@@ -9,7 +9,7 @@ const ENTRIES := [
 		["E", "gather (trees and mining attract infected) / loot"], ["Shift+E / Shift+Q", "collect up to five nearby PvE bags"], ["C", "crafting window"], ["0", "quick-cook best fish"], ["Shift+0", "craft fish stew from fish, clean water and wood at a fire"],
 		["T", "cast fishing rod (Shift: baited)"], ["I / Tab", "inventory (click: use or equip; right click: stash)"], ["B", "stash (at the hub)"]]],
 	["SURVIVE", [
-		["1", "eat"], ["Shift+1", "eat fish stew: restores hunger and thirst"], ["2", "drink bottle"], ["3", "bandage"], ["Shift+3", "trauma kit"], ["Ctrl+3", "smart medicine"], ["6", "antiseptic"], ["7", "antibiotics"], ["8", "heat pack"], ["F11", "herbal poultice"],
+		["1", "eat"], ["Ctrl+1", "smart safe food"], ["Shift+1", "eat fish stew: restores hunger and thirst"], ["2", "drink bottle"], ["Ctrl+2", "smart safe drink"], ["3", "bandage"], ["Shift+3", "trauma kit"], ["Ctrl+3", "smart medicine"], ["6", "antiseptic"], ["7", "antibiotics"], ["8", "heat pack"], ["F11", "herbal poultice"],
 		["R", "drink from lake (untreated water risks infection)"], ["Ctrl+R", "fill canteen (charcoal filter)"],
 		["Ctrl+Shift+R", "boil water at lake and live fire (2 wood)"], [".", "frontier stim"], ["/", "scent salve (Shift: quiet sprint wraps)"], [";", "spore filter"], ["Z", "rest at the hub or a fire"]]],
 	["BUILD AND DEFEND", [

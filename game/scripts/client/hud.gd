@@ -2482,6 +2482,15 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "smart_provision":
+		if bool(data.get("ok", false)):
+			var item_id: String = str(data.get("item", ""))
+			say("Survival supplies: used %s." % str(Defs.item(item_id).get("name", item_id)))
+		elif str(data.get("reason", "")) == "no_provision":
+			say("Survival supplies: no suitable safe ration or drink, or not needed yet.")
+		else:
+			say("Survival supplies: %s (no items spent)." % str(data.get("reason", "rejected")))
+		return
 	if kind == "use" and bool(data.get("ate_raw_fish", false)):
 		say("Raw fish eaten! Food poisoning %d/100. Cook catches for safety; use a herbal stomach remedy." % int(data.get("severity", 0)))
 		return

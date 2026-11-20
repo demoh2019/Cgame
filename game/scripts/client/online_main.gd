@@ -1225,7 +1225,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				else:
 					_interact()
 			KEY_1:
-				if Input.is_key_pressed(KEY_ALT):
+				if Input.is_key_pressed(KEY_CTRL):
+					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+						client.smart_provision("food")
+				elif Input.is_key_pressed(KEY_ALT):
 					var raw_item := ""
 					for tier in range(1, 5):
 						var candidate: String = "raw_fish" if tier == 1 else "raw_fish_%d" % tier
@@ -1239,7 +1242,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				else:
 					_quick_use(Defs.CAMP_FISH_STEW if Input.is_key_pressed(KEY_SHIFT) else "canned_food")
 			KEY_2:
-				_quick_use("empty_water_pouch" if Input.is_key_pressed(KEY_SHIFT) else "water_bottle")
+				if Input.is_key_pressed(KEY_CTRL):
+					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+						client.smart_provision("drink")
+				else:
+					_quick_use("empty_water_pouch" if Input.is_key_pressed(KEY_SHIFT) else "water_bottle")
 			KEY_3:
 				if Input.is_key_pressed(KEY_CTRL):
 					if not hud.is_menu_open() and bool(client.you.get("alive", false)):

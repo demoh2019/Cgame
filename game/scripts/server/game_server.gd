@@ -31,6 +31,7 @@ const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const PartyMedicMastery = preload("res://scripts/shared/party_medic_mastery.gd")
 const CampProvisions = preload("res://scripts/shared/camp_provisions.gd")
 const QuickMedicine = preload("res://scripts/shared/quick_medicine.gd")
+const SmartProvisions = preload("res://scripts/shared/smart_provisions.gd")
 const PartySupplyRequest = preload("res://scripts/shared/party_supply_request.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
@@ -3570,6 +3571,27 @@ func _damage_ranged_cover(attacker: Player, origin: Vector2,
 
 
 ## Smart field treatment, selected from the player's server-owned wounds and items.
+## Server verifies food/drink intent and selects one carried, safe ration.
+func cmd_smart_provision(peer_id: int, intent: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead", "smart_provision": true}
+	if intent != "food" and intent != "drink":
+		return {"ok": false, "reason": "invalid_intent", "smart_provision": true}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted", "smart_provision": true}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling", "smart_provision": true}
+	var item_id: String = SmartProvisions.pick(player.inventory, player.survival, intent)
+	if item_id.is_empty():
+		return {"ok": false, "reason": "no_provision", "smart_provision": true}
+	var result: Dictionary = cmd_use(peer_id, item_id)
+	result["smart_provision"] = true
+	result["item"] = item_id
+	result["intent"] = intent
+	return result
+
+
 func cmd_quick_medicine(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
