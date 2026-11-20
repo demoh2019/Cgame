@@ -84,6 +84,9 @@ private:
 	// Soft *shared per-process frame* CPU time slice for lazy LOD mesh builds.
 	// Zero retains eager mesh generation for old scenes and tools.
 	uint32_t mesh_build_budget_usec = 0;
+	// 0 = original row-major order, 1 = nearest first,
+	// 2 = nearest with a bounded camera-facing priority bonus.
+	int mesh_streaming_priority = 0;
 	int pending_mesh_build_count = 0;
 	static uint64_t shared_mesh_budget_frame;
 	static uint64_t shared_mesh_budget_start_usec;
@@ -166,6 +169,8 @@ public:
 	void set_lod_distance(real_t p_distance);
 	void set_lod_pixel_error(real_t p_pixels);
 	void set_mesh_build_budget_usec(int p_usec);
+	void set_mesh_streaming_priority(int p_mode);
+	int get_mesh_streaming_priority() const { return mesh_streaming_priority; }
 	int get_mesh_build_budget_usec() const { return int(mesh_build_budget_usec); }
 	int get_pending_mesh_build_count() const { return pending_mesh_build_count; }
 	real_t get_lod_pixel_error() const { return lod_pixel_error; }
