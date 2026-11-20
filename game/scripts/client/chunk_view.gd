@@ -1541,6 +1541,7 @@ func _anchored_spots(entry: Dictionary, anchors: Array, origin: Vector2, rng: Ra
 func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary) -> void:
 	if _raw_heights.size() == SAMPLES * SAMPLES and _biome_names.size() == BIOME_TEXELS * BIOME_TEXELS:
 		_grass_source = GrassField.Source.new(origin, _raw_heights, SAMPLES, _biome_names, BIOME_TEXELS, _road_data, _patches)
+		_grass_source.clear = GrassField.footprints(data)
 		set_process(true)
 	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
 	if center.length() < Defs.HUB_SAFE_RADIUS + 30.0:

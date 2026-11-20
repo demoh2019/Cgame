@@ -32,3 +32,12 @@ func run(t) -> void:
 			has_fire = true
 	t.check(has_fire, "the campfire beside you flattens its grass")
 	t.eq(PlantInteraction.pick_crushers(Vector2.ZERO, []).size(), 0, "nothing nearby, nothing flattened")
+
+	t.current = "no grass grows out of static world objects"
+	var chunk := {"crates": [{"x": 5.0, "z": 5.0, "radius": 0.6}], "props": [{"x": 20.0, "z": 3.0, "radius": 1.2}],
+		"structures": [{"x": 40.0, "z": 40.0, "radius": 6.0}], "nodes": [{"x": 1.0, "z": 1.0}]}
+	var prints: PackedVector3Array = GrassField.footprints(chunk)
+	t.eq(prints.size(), 3, "objects with a radius leave a footprint")
+	t.check(GrassField.under_object(5.1, 5.0, prints), "no tuft inside a crate")
+	t.check(GrassField.under_object(41.0, 42.0, prints), "no tuft inside a ruin")
+	t.check(not GrassField.under_object(8.0, 8.0, prints), "grass still grows around objects")

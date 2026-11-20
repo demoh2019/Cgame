@@ -386,6 +386,7 @@ class Source:
 	var road: PackedByteArray
 	var patches: PackedVector4Array
 	var clumps: Clumps
+	var clear := PackedVector3Array() # (x, z, radius) of world objects nothing grows through.
 
 	func _init(p_origin: Vector2, p_heights: PackedFloat32Array, p_samples: int, p_biomes: PackedStringArray, p_texels: int,
 			p_road: PackedByteArray, p_patches: PackedVector4Array) -> void:
@@ -397,6 +398,30 @@ class Source:
 		road = p_road
 		patches = p_patches
 		clumps = Clumps.new(origin, Defs.CHUNK_SIZE)
+
+
+## Ground footprints (x, z, radius) of the chunk's static objects: crates, props, ruins and resource nodes.
+static func footprints(chunk_data: Dictionary) -> PackedVector3Array:
+	var result := PackedVector3Array()
+	for key in ["crates", "props", "structures", "nodes", "npcs"]:
+		for entity in chunk_data.get(key, []):
+			if not (entity is Dictionary) or not entity.has("x") or not entity.has("z"):
+				continue
+			var radius: float = float(entity.get("radius", 0.0))
+			if radius > 0.05 and is_finite(radius):
+				result.append(Vector3(float(entity["x"]), float(entity["z"]), minf(radius, 12.0)))
+	return result
+
+
+## True when a tuft at (x, z) would grow out of one of the footprints.
+static func under_object(x: float, z: float, footprints_in_tile: PackedVector3Array) -> bool:
+	for f in footprints_in_tile:
+		var dx: float = x - f.x
+		var dz: float = z - f.y
+		var r: float = f.z * 0.9
+		if dx * dx + dz * dz < r * r:
+			return true
+	return false
 
 
 static func tile_count() -> int:
@@ -424,6 +449,12 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 	var count := 0
 	var low := INF
 	var high := -INF
+	# Only objects overlapping this tile need testing per tuft.
+	var tile_clear := PackedVector3Array()
+	var tile_rect := Rect2(origin.x + tile_x, origin.y + tile_z, TILE, TILE)
+	for f in source.clear:
+		if tile_rect.grow(f.z).has_point(Vector2(f.x, f.y)):
+			tile_clear.append(f)
 	for j in steps:
 		for i in steps:
 			var lx: float = tile_x + (float(i) + rng.randf()) * SPACING
@@ -435,6 +466,9 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 			# Old tracks are overgrown too, only thinner, so they still read as a way through.
 			var on_road: bool = not source.road.is_empty() and source.road[mini(int(lz), int(size) - 1) * int(size) + mini(int(lx), int(size) - 1)] > 40
 			if on_road and rng.randf() > 0.12:
+				continue
+			# Nothing grows out of a crate, log pile, ruin wall or rock.
+			if not tile_clear.is_empty() and under_object(wx, wz, tile_clear):
 				continue
 			# Height: bilinear between the chunk's samples.
 			var hx: float = lx / height_step
