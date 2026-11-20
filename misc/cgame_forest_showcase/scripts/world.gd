@@ -473,8 +473,10 @@ func _refresh_hud() -> void:
     var named_sources: int = world_partition.get_streaming_source_count() if world_partition != null else 0
     var survey_info: Dictionary = world_partition.get_streaming_source(SURVEY_SOURCE) if world_partition != null else {}
     var watch_info: Dictionary = world_partition.get_streaming_source(WATCHTOWER_SOURCE) if world_partition != null else {}
-    var survey_status: String = ("ГОТОВ" if world_partition.is_streaming_source_ready(SURVEY_SOURCE) else "ЗАГРУЗКА") if not survey_info.is_empty() else "ВЫКЛ"
-    var watch_status: String = ("ГОТОВ" if world_partition.is_streaming_source_ready(WATCHTOWER_SOURCE) else "ЗАГРУЗКА") if not watch_info.is_empty() else "ВЫКЛ"
+    var survey_progress: float = world_partition.get_streaming_source_progress(SURVEY_SOURCE) if world_partition != null else 0.0
+    var watch_progress: float = world_partition.get_streaming_source_progress(WATCHTOWER_SOURCE) if world_partition != null else 0.0
+    var survey_status: String = ("ГОТОВ" if world_partition.is_streaming_source_ready(SURVEY_SOURCE) else "ЗАГРУЗКА %d%%" % roundi(survey_progress * 100.0)) if not survey_info.is_empty() else "ВЫКЛ"
+    var watch_status: String = ("ГОТОВ" if world_partition.is_streaming_source_ready(WATCHTOWER_SOURCE) else "ЗАГРУЗКА %d%%" % roundi(watch_progress * 100.0)) if not watch_info.is_empty() else "ВЫКЛ"
     var outpost_ready: bool = world_partition.is_cell_loaded(OUTPOST_CELL) if world_partition != null else false
     var outpost_status: String = "ГОТОВ" if outpost_ready else (
         "ЗАГРУЖАЕТСЯ" if world_partition != null and world_partition.is_cell_pinned(OUTPOST_CELL)
