@@ -26,7 +26,7 @@ This directory is a **standalone playable reference project**, not a replacement
 2. Open this **folder**, `misc/cgame_forest_showcase`, as a separate Godot project with that Cgame editor executable.
 3. Use the Forward+ rendering backend and click Play. The project uses FSR2 and expects the selected rendering backend to support it.
 4. Click inside the window to capture the mouse. **WASD / arrow keys** move, **mouse** looks around, **Shift** sprints, **Space** jumps, **E** picks up nearby crystals, **F5/F9** save/load, **Esc** releases the mouse.
-5. Press **F1** for the cinematic profile (SSAO, SSIL, volumetric fog and all grass), **F2** for the performance profile (less grass, no SSAO/SSIL/volumetric fog). Press **F3** to clear both resource caches and reset their hit/miss counters for reproducible streaming benchmarks. GPU-budget scaling runs in both.
+5. Press **F1** for the cinematic profile (SSAO, SSIL, volumetric fog and all grass), **F2** for the performance profile (less grass, no SSAO/SSIL/volumetric fog). Press **F3** to clear both resource caches and reset their hit/miss counters for reproducible streaming benchmarks. Press **F4** to explicitly retry failed WorldPartition3D scene loads after repairing missing/corrupt assets; it does not loop on permanent errors. GPU-budget scaling runs in both.
 
 ## Technical constraints
 
@@ -73,6 +73,7 @@ python3 -m unittest discover -s misc/cgame_forest_showcase/tests -p 'test_terrai
 - [ ] Walk multiple kilometers of test routes and verify near-terrain cache entries never exceed 12 and HLOD resource cache entries never exceed 96; compare HLOD rebuild time on cold miss versus cache hit and check VRAM retention. Soft CPU budgets do not interrupt one expensive tile creation; profile the worst individual cold miss separately.
 - [ ] Walk multiple kilometers of test routes and verify LRU cache entries never exceed 12, GPU memory remains bounded, revisit cache hits increase, and instantiation time budget limits repeated stalls.
 - [ ] Verify capsule grounding, jumping, collision against trunks/rocks, world bounds, camera position and save/load after teleporting.
+- [ ] Test F3 cache reset with active tiles, F4 manual recovery from a transient scene load failure, and verify the failure counter does not produce continuous retries.
 - [ ] Run all seven added headless smoke scripts on the compiled fork.
 - [ ] Picking up eight crystals updates the HUD, the savegame persists after reopening, and profile switching changes measured GPU time.
 - [ ] Confirm that GPU timings are available and adaptive resolution reacts to sustained load.
