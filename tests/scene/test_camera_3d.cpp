@@ -215,6 +215,46 @@ TEST_CASE("[SceneTree][Camera3D] Position queries") {
 	memdelete(mock_viewport);
 }
 
+TEST_CASE("[SceneTree][Camera3D] Fixed pixel-size billboard projection") {
+	Camera3D *test_camera = memnew(Camera3D);
+	SubViewport *mock_viewport = memnew(SubViewport);
+	mock_viewport->set_size(Vector2(400, 200));
+	SceneTree::get_singleton()->get_root()->add_child(mock_viewport);
+	mock_viewport->add_child(test_camera);
+	test_camera->set_global_position(Vector3());
+	test_camera->set_global_rotation(Vector3());
+	test_camera->set_keep_aspect_mode(Camera3D::KEEP_HEIGHT);
+	test_camera->set_perspective(90.0f, 0.1f, 500.0f);
+
+	// 200px high at 90 degrees gives 100px focal length. A feature at 10m
+	// has 10px/m, so a five-pixel mote must occupy half a meter.
+	CHECK(Math::is_equal_approx(test_camera->get_world_size_for_pixel_diameter_at_position(
+			Vector3(0, 0, -10), 5.0f), 0.5f));
+	CHECK(Math::is_equal_approx(test_camera->get_world_size_for_pixel_diameter_at_position(
+			Vector3(0, 0, -20), 5.0f), 1.0f));
+	test_camera->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
+	CHECK(Math::is_equal_approx(test_camera->get_world_size_for_pixel_diameter_at_position(
+			Vector3(0, 0, -10), 5.0f), 0.25f));
+	CHECK(test_camera->get_world_size_for_pixel_diameter_at_position(Vector3(0, 0, 10), 5.0f) == 0.0f);
+	CHECK(test_camera->get_world_size_for_pixel_diameter_at_position(Vector3(0, 0, -10), -1.0f) == 0.0f);
+	CHECK(test_camera->get_world_size_for_pixel_diameter_at_position(Vector3(0, 0, -10), 0.0f) == 0.0f);
+
+	// Orthographic pixels per meter are independent of depth, but keep-aspect
+	// still determines whether the camera's size is a width or a height.
+	test_camera->set_keep_aspect_mode(Camera3D::KEEP_HEIGHT);
+	test_camera->set_orthogonal(20.0f, 0.1f, 500.0f);
+	CHECK(Math::is_equal_approx(test_camera->get_world_size_for_pixel_diameter_at_position(
+			Vector3(0, 0, -10), 5.0f), 0.5f));
+	CHECK(Math::is_equal_approx(test_camera->get_world_size_for_pixel_diameter_at_position(
+			Vector3(0, 0, -50), 5.0f), 0.5f));
+	test_camera->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
+	CHECK(Math::is_equal_approx(test_camera->get_world_size_for_pixel_diameter_at_position(
+			Vector3(0, 0, -10), 5.0f), 0.25f));
+
+	memdelete(test_camera);
+	memdelete(mock_viewport);
+}
+
 TEST_CASE("[SceneTree][Camera3D] Project/Unproject position") {
 	// Cameras need a viewport to know how to compute their frustums, so we make a fake one here.
 	Camera3D *test_camera = memnew(Camera3D);
