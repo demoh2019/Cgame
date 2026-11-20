@@ -422,6 +422,12 @@ static func _build_items() -> void:
 		"tier": 2, "stack": 10, "value": 24, "weight": 0.25})
 	_add_recipe("lockpick_kit", "lockpick_kit", 1,
 		{"scrap": 2, "bar_1": 1, "fiber_1": 2}, "workbench", 4.0)
+	# Consumable wilderness survey: reveals one still-unlooted high-risk
+	# ruin; actual loot and opponents stay server-owned and unchanged.
+	_add_item("ruin_survey_chart", {"name": "Ruin Survey Chart",
+		"kind": "material", "tier": 1, "stack": 10, "weight": 0.2, "value": 18})
+	_add_recipe("ruin_survey_chart", "ruin_survey_chart", 1,
+		{"cloth_1": 1, "fiber_1": 2, "scrap": 1}, "", 3.0)
 	# T2 non-full-loot expedition return. PvP full-loot zones always deny it.
 	_add_item("return_charm", {"name": "Settler's Return Charm", "kind": "recall",
 		"tier": 2, "stack": 5, "value": 90, "weight": 0.15})

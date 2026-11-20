@@ -633,6 +633,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F4:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.toggle_mount()
+			KEY_F3:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.survey_ruins()
 			KEY_Q:
 				_interact()
 			KEY_1:

@@ -43,6 +43,7 @@ const BikeChain = preload("res://scripts/shared/bike_chain.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
+const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
@@ -157,6 +158,7 @@ class Player:
 	var mount_cooldown: float = 0.0
 	var chain_wrap_seconds: float = 0.0 # Validated, persisted noise protection.
 	var decoy_timer: float = 0.0 # Anti-spam timer; no persistent character data.
+	var ruin_survey: Dictionary = {} # One owner-only temporary expedition waypoint.
 	var action: Dictionary = {} # Current gathering or fishing: {"remaining": s, "total": s, ...}
 	var fish_next_at: float = 0.0
 	var respawn_timer: float = 0.0
@@ -600,6 +602,33 @@ func _is_safe(position: Vector3) -> bool:
 ## A movement input measured by the client. `dt` is how long the client says it moved. The server
 ## accepts at most as much movement time as real time has passed, so a modified client cannot speed up.
 ## Bike ownership and eligibility are validated exclusively on the server.
+## Use one real chart to map the nearest unopened dangerous ruin crate.
+## Clients choose neither the crate nor coordinates; no guaranteed loot.
+func cmd_survey_ruins(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if RuinSurvey.active(player.ruin_survey, time, opened_crates):
+		return {"ok": false, "reason": "already_marked"}
+	if player.inventory.count(RuinSurvey.ITEM_ID) < 1:
+		return {"ok": false, "reason": "not_carried"}
+	var found: Dictionary = RuinSurvey.nearest(world, player.position, opened_crates)
+	if found.is_empty():
+		return {"ok": false, "reason": "no_untouched_ruins"}
+	if not player.inventory.remove(RuinSurvey.ITEM_ID, 1):
+		return {"ok": false, "reason": "not_carried"}
+	player.ruin_survey = {"id": int(found["id"]), "x": float(found["x"]),
+		"z": float(found["z"]), "zone": int(found["zone"]),
+		"until": time + RuinSurvey.MARK_SECONDS}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	# Target is sent privately in the command result and owner snapshot.
+	return {"ok": true, "x": float(found["x"]), "z": float(found["z"]),
+		"zone": int(found["zone"]), "seconds": RuinSurvey.MARK_SECONDS}
+
+
 func cmd_toggle_mount(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -3330,6 +3359,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.deaths += 1
 	victim.dirty_character = true
 	victim.action = {}
+	victim.ruin_survey = {} # Dead scouts cannot retain private map beacons.
 	victim.dodge_immunity = 0.0
 	victim.guardian_brace = 0.0
 	victim.spore_filter_seconds = 0.0
@@ -3416,6 +3446,8 @@ func _tick_recalls() -> void:
 
 func _tick_players(delta: float) -> void:
 	for player in players.values():
+		if not RuinSurvey.active(player.ruin_survey, time, opened_crates):
+			player.ruin_survey = {}
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.mount_cooldown = maxf(0.0, player.mount_cooldown - maxf(0.0, delta))
 		if player.chain_wrap_seconds > 0.0:
@@ -4458,6 +4490,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"arena_losses": player.arena_losses,
 			"arena_tier": ArenaRating.tier(player.arena_rating),
 			"action": player.action.duplicate(),
+			"ruin_survey": RuinSurvey.public_mark(player.ruin_survey, time, opened_crates),
 			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
 			"fracture": player.survival.fracture,
 			"blood_scent_radius": BloodScent.detection_radius(player.survival.bleeding,

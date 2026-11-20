@@ -53,6 +53,7 @@ const SUITES := [
 	"res://tests/test_purifier_maul.gd",
 	"res://tests/test_combat_mastery.gd",
 	"res://tests/test_scavenging.gd",
+	"res://tests/test_ruin_survey.gd",
 	"res://tests/test_stamina.gd",
 	"res://tests/test_evasion.gd",
 	"res://tests/test_movement.gd",

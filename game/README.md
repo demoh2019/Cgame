@@ -2628,6 +2628,47 @@ Godot's existing RPC, timer and UI APIs are sufficient. No engine patch is
 needed for this feature.
 
 
+## Ruin survey charts — crafted cartography for hostile expeditions
+
+The canonical `game/` includes **Ruin Survey Charts**, a field-crafted
+consumable made from **1 T1 cloth, 2 T1 fiber, and 1 scrap**.
+Use a chart while alive, on foot, in the wilderness to discover the
+**nearest still-unlooted red/black-zone ruin crate within 190 metres**.
+The server searches only a bounded 7×7 neighborhood of actual
+seed-generated world chunks and checks authoritative opened-crate
+state. A successful search consumes **one real chart** and places a
+**private 75-second waypoint**. Failed searches (no chart, safe
+settlement, no eligible ruin, or an active waypoint) cost nothing.
+
+The chart is **not a teleport, loot grant, threat detector, shared party
+map or an automatic reward**: players must travel, survive the infected,
+and actually open the found crate under the usual scavenging/loot
+rules. Loot quality, rewards, PvP exposure and crate cooldowns are
+unchanged. Repeated survey requests cannot farm charts or markers.
+The waypoint disappears on expiration, crate opening or survivor
+death. It is session-only, does not enter character saves and is never
+replicated into other survivors' `you` snapshots—even if they stand
+beside the chart owner. Owner packets expose only the marker
+coordinates, zone and remaining time; internal crate IDs and
+absolute expiry clocks stay server-only.
+
+**Controls:** F3 surveys in both local preview and connected play,
+with a dedicated **Survey dangerous ruins** button in the online
+inventory. The online HUD shows waypoint coordinates, distance and
+remaining lifetime. The tactical radar renders a violet destination
+pin within 72 m or a violet edge arrow for distant targets, using
+the owner-only marker in both single-player and multiplayer.
+
+Implementation: `scripts/shared/ruin_survey.gd`, `defs.gd`,
+`scripts/server/game_server.gd`, authenticated
+`scripts/shared/net.gd`, both clients, HUD and radar.
+`game/tests/test_ruin_survey.gd` is registered in
+`tests/run_all.gd` for crafting cost, deterministic real crate
+discovery, open-crate filtering, privacy, anti-replay, death and expiry.
+Existing Godot world generation, RPC and UI APIs are sufficient;
+no C++ engine changes are required for this mechanic.
+
+
 ## Expedition triage packs — item-paid group field medicine
 
 A survivor group can now craft an **Expedition Triage Pack** at the

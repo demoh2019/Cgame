@@ -411,6 +411,13 @@ func c_craft(recipe: String, times: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_survey_ruins() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "survey_ruins", sim.cmd_survey_ruins(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_salvage_gear(item_id: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
