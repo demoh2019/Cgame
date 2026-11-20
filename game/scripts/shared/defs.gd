@@ -337,6 +337,12 @@ static func _build_items() -> void:
 		"stack": 10, "value": 13, "weight": 0.5})
 	_add_recipe("cooked_fish", "cooked_fish", 1, {"raw_fish": 1, "wood_1": 1},
 		"campfire", 3.0)
+	# Smoked trail rations cost more fuel plus fiber wrapping. Real campfires
+	# and the hub workbench use the existing atomic crafting transaction.
+	_add_item("smoked_fish", {"name": "Smoked Trail Fish T1", "kind": "food",
+		"tier": 1, "food": 26.0, "stack": 10, "value": 22, "weight": 0.45})
+	_add_recipe("smoked_fish", "smoked_fish", 1,
+		{"raw_fish": 1, "wood_1": 2, "fiber_1": 1}, "campfire", 5.0)
 	# T2-T4 coastal professions: stronger rods and valuable fish require
 	# matching crafting/gathering mastery and higher-risk shorelines.
 	for tier in range(2, MAX_TIER + 1):
@@ -360,6 +366,14 @@ static func _build_items() -> void:
 		_add_recipe("cooked_fish_%d" % tier, "cooked_fish_%d" % tier, 1,
 			{"raw_fish_%d" % tier: 1, "wood_%d" % tier: 1},
 			"campfire", 2.0 + float(tier))
+		_add_item("smoked_fish_%d" % tier, {
+			"name": "Smoked Trail Fish T%d" % tier, "kind": "food",
+			"tier": tier, "food": 18.0 + 8.0 * float(tier), "stack": 10,
+			"value": 22 * tier, "weight": 0.45 + 0.05 * float(tier),
+		})
+		_add_recipe("smoked_fish_%d" % tier, "smoked_fish_%d" % tier, 1,
+			{"raw_fish_%d" % tier: 1, "wood_%d" % tier: 2, "fiber_1": 1},
+			"campfire", 4.0 + float(tier))
 
 	# No permanent class or spell: craft and carry insulation for expeditions.
 	_add_item("thermal_wrap", {"name": "Emergency Heat Pack", "kind": "thermal",
