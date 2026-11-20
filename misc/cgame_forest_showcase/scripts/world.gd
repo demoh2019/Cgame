@@ -6,6 +6,7 @@ const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const GameSave = preload("res://scripts/game_save.gd")
 const QuestNavigation = preload("res://scripts/quest_navigation.gd")
 const ForestEncounters = preload("res://scripts/forest_encounters.gd")
+const StreamingTravel = preload("res://scripts/streaming_travel.gd")
 const AtmosphereCycle = preload("res://scripts/atmosphere_cycle.gd")
 const WORLD_EXTENT: float = 64.0
 const GRID_SEGMENTS: int = 112
@@ -23,6 +24,7 @@ var hud: Label
 var hint: Label
 var world_partition: WorldPartition3D
 var encounters: Node3D
+var travel_controller # Script-backed travel node with progress/status API.
 var defeated_mobs: Array[String] = []
 var player_health: int = 100
 var player_hit_grace: float = 0.0
@@ -57,6 +59,7 @@ func _ready() -> void:
     _create_quest_marker()
     _refresh_quest_target(true)
     _create_encounter_director()
+    _create_travel_controller()
     _apply_quality(high_quality)
     _refresh_hud()
 
@@ -389,6 +392,45 @@ func _swing_weapon() -> void:
         hint.text = "Удар: подойдите ближе и наведите прицел на противника (F или ЛКМ)."
 
 
+func _create_travel_controller() -> void:
+    travel_controller = StreamingTravel.new()
+    travel_controller.name = "DestinationTravel"
+    add_child(travel_controller)
+    travel_controller.configure(world_partition, player, Callable(self, "height_at"))
+    travel_controller.travel_completed.connect(_on_travel_completed)
+    travel_controller.travel_failed.connect(_on_travel_failed)
+
+
+func _request_travel(to_quest: bool) -> void:
+    if travel_controller == null or world_partition == null:
+        return
+    var arrival: Vector3 = Vector3(0.0, 0.0, 9.0)
+    var label: String = "лагерь"
+    if to_quest:
+        if not is_instance_valid(quest_target):
+            hint.text = "Нет активной реликвии для перехода."
+            return
+        arrival = quest_target.global_position
+        label = "реликвия %d" % (quest_target_id + 1)
+    # This showcase has a finite static collision terrain spanning +/-64m.
+    # Do not stage travel beyond the authored heightfield.
+    arrival.x = clampf(arrival.x, -60.0, 60.0)
+    arrival.z = clampf(arrival.z, -60.0, 60.0)
+    if not travel_controller.request_travel(arrival, label):
+        hint.text = travel_controller.last_message
+    _refresh_hud()
+
+
+func _on_travel_completed(_destination: Vector3) -> void:
+    hint.text = "Переход выполнен после готовности сцены. F10: реликвия, F11: лагерь."
+    _refresh_hud()
+
+
+func _on_travel_failed(reason: String) -> void:
+    hint.text = reason
+    _refresh_hud()
+
+
 func _create_camera() -> void:
     # Physics body owns yaw and collision, camera owns only pitch.
     # This follows the standard first-person controller hierarchy.
@@ -420,10 +462,10 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 277)
+    hint.position = Vector2(22, 310)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: ходьба  •  Shift: бег  •  Space: прыжок  •  E: реликвия\nF/ЛКМ: удар  •  F1/F2: графика  •  F3: упреждение  •  F4: LOD  •  F5/F9: сохранение\nF6: погода  •  F7: пауза дня  •  F8: +3 часа  •  Esc: курсор"
+    hint.text = "WASD/стрелки: ходьба  •  Shift: бег  •  Space: прыжок  •  E: реликвия\nF/ЛКМ: удар  •  F1/F2: графика  •  F3: упреждение  •  F4: LOD  •  F5/F9: сохранение\nF6: погода  •  F7: пауза дня  •  F8: +3 часа\nF10: к реликвии  •  F11: в лагерь  •  F12: отмена перехода  •  Esc: курсор"
     canvas.add_child(hint)
 
 
@@ -459,6 +501,7 @@ func _refresh_hud() -> void:
     var distant: int = world_partition.get_distant_cell_count() if world_partition != null else 0
     var quest_text: String = _quest_hud_text()
     var enemy_count: int = encounters.call("get_alive_count") if encounters != null else 0
+    var travel_text: String = travel_controller.get_status_text() if travel_controller != null and travel_controller.active else "F10: к реликвии  F11: в лагерь"
     var predicted_text: String = "OFF" if not predictive_streaming else "—"
     if world_partition != null and world_partition.has_predicted_cell():
         var next_cell: Vector2i = world_partition.get_predicted_cell()
@@ -470,7 +513,8 @@ func _refresh_hud() -> void:
         + "Упреждающая загрузка: %s   LOD дальних: %d   F3/F4: сравнение\n" % [predicted_text, distant] \
         + "Атмосфера: %02d:%02d  %s  %s (F6/F7/F8)\n" % [int(atmosphere_clock.day_hours), int(fmod(atmosphere_clock.day_hours, 1.0) * 60.0), atmosphere_clock.get_weather_name(), "ПАУЗА" if atmosphere_clock.paused else "цикл"] \
         + quest_text + "\n" \
-        + "Здоровье: %d/100   Противники: %d   побеждено: %d   F/ЛКМ: удар" % [player_health, enemy_count, defeated_mobs.size()]
+        + "Здоровье: %d/100   Противники: %d   побеждено: %d   F/ЛКМ: удар\n" % [player_health, enemy_count, defeated_mobs.size()] \
+        + travel_text
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
@@ -542,6 +586,13 @@ func _unhandled_input(event: InputEvent) -> void:
             KEY_F9:
                 _load_game()
                 _apply_quality(high_quality)
+            KEY_F10:
+                _request_travel(true)
+            KEY_F11:
+                _request_travel(false)
+            KEY_F12:
+                if travel_controller != null:
+                    travel_controller.cancel_travel()
             KEY_E:
                 _collect_nearest()
             KEY_F:
@@ -563,6 +614,8 @@ func _save_game() -> void:
 
 
 func _load_game() -> void:
+    if travel_controller != null:
+        travel_controller.cancel_travel()
     var state: Dictionary = GameSave.load_state(CRYSTAL_TOTAL)
     if state.is_empty():
         return
