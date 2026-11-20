@@ -60,6 +60,23 @@ void RadialForceField3D::set_collision_mask(uint32_t p_mask) {
 	collision_mask = p_mask;
 }
 
+void RadialForceField3D::set_occlusion_attenuation(float p_value) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_value), "Occlusion attenuation must be finite.");
+	occlusion_attenuation = CLAMP(p_value, 0.0f, 1.0f);
+}
+
+void RadialForceField3D::set_max_occlusion_rays(int p_count) {
+	max_occlusion_rays = CLAMP(p_count, 1, 64);
+}
+
+float RadialForceField3D::occlusion_scale(bool p_blocked, float p_attenuation) {
+	return p_blocked ? CLAMP(p_attenuation, 0.0f, 1.0f) : 1.0f;
+}
+
+float RadialForceField3D::impulse_magnitude(float p_strength, float p_falloff, float p_mass, bool p_mass_independent) {
+	return p_strength * p_falloff * (p_mass_independent ? p_mass : 1.0f);
+}
+
 void RadialForceField3D::set_collision_mask_value(int p_layer_number, bool p_value) {
 	ERR_FAIL_COND_MSG(p_layer_number < 1, "Collision layer number must be between 1 and 32 inclusive.");
 	ERR_FAIL_COND_MSG(p_layer_number > 32, "Collision layer number must be between 1 and 32 inclusive.");
@@ -151,6 +168,7 @@ int RadialForceField3D::_apply(float p_scale) {
 
 	HashSet<ObjectID> seen;
 	int affected = 0;
+	int occlusion_rays = 0;
 	for (int i = 0; i < hits; i++) {
 		const ObjectID id = results[i].collider_id;
 		if (!id.is_valid() || seen.has(id)) {
@@ -176,7 +194,34 @@ int RadialForceField3D::_apply(float p_scale) {
 		if (scale <= 0.0f) {
 			continue;
 		}
-		const Vector3 impulse = impulse_direction(center, body_pos, upward_bias) * (strength * scale * p_scale);
+		float shielding = 1.0f;
+		if (occlusion_mask != 0 && body_pos.distance_squared_to(center) > CMP_EPSILON2) {
+			// At most max_occlusion_rays additional synchronous physics queries
+			// per field activation, regardless of the number of overlapping
+			// shapes. Untested overflow targets are conservatively shielded.
+			bool blocked = true;
+			if (occlusion_rays < max_occlusion_rays) {
+				PS3DT::RayParameters ray;
+				ray.from = center;
+				ray.to = body_pos;
+				ray.collision_mask = occlusion_mask;
+				ray.collide_with_bodies = true;
+				ray.collide_with_areas = false;
+				// A body may belong to both the push and occlusion masks.
+				// It must never block its own shockwave ray.
+				ray.exclude.insert(rigid ? rigid->get_rid() : bone->get_rid());
+				PS3DT::RayResult hit;
+				blocked = space->intersect_ray(ray, hit);
+				occlusion_rays++;
+			}
+			shielding = occlusion_scale(blocked, occlusion_attenuation);
+		}
+		if (shielding <= 0.0f) {
+			continue;
+		}
+		const float body_mass = rigid ? rigid->get_mass() : bone->get_mass();
+		const float magnitude = impulse_magnitude(strength * p_scale, scale * shielding, body_mass, mass_independent);
+		const Vector3 impulse = impulse_direction(center, body_pos, upward_bias) * magnitude;
 		if (rigid) {
 			rigid->apply_central_impulse(impulse);
 		} else {
@@ -238,6 +283,14 @@ void RadialForceField3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_upward_bias"), &RadialForceField3D::get_upward_bias);
 	ClassDB::bind_method(D_METHOD("set_collision_mask", "mask"), &RadialForceField3D::set_collision_mask);
 	ClassDB::bind_method(D_METHOD("get_collision_mask"), &RadialForceField3D::get_collision_mask);
+	ClassDB::bind_method(D_METHOD("set_occlusion_mask", "mask"), &RadialForceField3D::set_occlusion_mask);
+	ClassDB::bind_method(D_METHOD("get_occlusion_mask"), &RadialForceField3D::get_occlusion_mask);
+	ClassDB::bind_method(D_METHOD("set_occlusion_attenuation", "value"), &RadialForceField3D::set_occlusion_attenuation);
+	ClassDB::bind_method(D_METHOD("get_occlusion_attenuation"), &RadialForceField3D::get_occlusion_attenuation);
+	ClassDB::bind_method(D_METHOD("set_max_occlusion_rays", "count"), &RadialForceField3D::set_max_occlusion_rays);
+	ClassDB::bind_method(D_METHOD("get_max_occlusion_rays"), &RadialForceField3D::get_max_occlusion_rays);
+	ClassDB::bind_method(D_METHOD("set_mass_independent", "enabled"), &RadialForceField3D::set_mass_independent);
+	ClassDB::bind_method(D_METHOD("is_mass_independent"), &RadialForceField3D::is_mass_independent);
 	ClassDB::bind_method(D_METHOD("set_collision_mask_value", "layer_number", "value"), &RadialForceField3D::set_collision_mask_value);
 	ClassDB::bind_method(D_METHOD("get_collision_mask_value", "layer_number"), &RadialForceField3D::get_collision_mask_value);
 	ClassDB::bind_method(D_METHOD("set_continuous", "continuous"), &RadialForceField3D::set_continuous);
@@ -255,6 +308,8 @@ void RadialForceField3D::_bind_methods() {
 
 	ClassDB::bind_static_method("RadialForceField3D", D_METHOD("falloff_scale", "distance", "radius", "mode"), &RadialForceField3D::falloff_scale);
 	ClassDB::bind_static_method("RadialForceField3D", D_METHOD("impulse_direction", "center", "body_position", "upward_bias"), &RadialForceField3D::impulse_direction);
+	ClassDB::bind_static_method("RadialForceField3D", D_METHOD("occlusion_scale", "blocked", "attenuation"), &RadialForceField3D::occlusion_scale);
+	ClassDB::bind_static_method("RadialForceField3D", D_METHOD("impulse_magnitude", "strength", "falloff", "mass", "mass_independent"), &RadialForceField3D::impulse_magnitude);
 
 	ADD_SIGNAL(MethodInfo("fired", PropertyInfo(Variant::INT, "affected_count")));
 
@@ -263,6 +318,12 @@ void RadialForceField3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "falloff", PROPERTY_HINT_ENUM, "None,Linear,Quadratic"), "set_falloff", "get_falloff");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "upward_bias", PROPERTY_HINT_RANGE, "-2,2,0.01,or_less,or_greater"), "set_upward_bias", "get_upward_bias");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
+	ADD_GROUP("Blast Shielding", "");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "occlusion_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_occlusion_mask", "get_occlusion_mask");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "occlusion_attenuation", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_occlusion_attenuation", "get_occlusion_attenuation");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_occlusion_rays", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_occlusion_rays", "get_max_occlusion_rays");
+	ADD_GROUP("Impulse", "");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mass_independent"), "set_mass_independent", "is_mass_independent");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "continuous"), "set_continuous", "is_continuous");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "affect_rigid_bodies"), "set_affect_rigid_bodies", "is_affecting_rigid_bodies");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "affect_physical_bones"), "set_affect_physical_bones", "is_affecting_physical_bones");
