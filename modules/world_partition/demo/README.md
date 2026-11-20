@@ -1,8 +1,9 @@
 # HLOD Proxy Streaming (Cgame / Godot 4)
 
 Runnable self-contained demo project for the Cgame fork's native WorldPartition3D.
-This is a **scene-level HLOD prototype**, not a Nanite implementation or an
-automatic HLOD asset baker. It demonstrates the runtime handoff between nearby
+This is a **scene-level HLOD prototype** with an offline, deterministic
+MultiMesh proxy baker. It does not yet merge arbitrary meshes and materials
+like the advanced Unreal HLOD builder, nor implement Nanite. It demonstrates the runtime handoff between nearby
 detailed cells and lightweight distant proxies with no additional engine renderer.
 
 ## Architecture
@@ -10,7 +11,13 @@ detailed cells and lightweight distant proxies with no additional engine rendere
 - Two *existing* WorldPartition3D nodes share one camera as an observer.
 - Detailed forest scenes stream at load radius 1, unload radius 2.
 - Proxy forest scenes stream at load radius 4, unload radius 5.
-- Each scene cell generates its ground and deterministic trees using MultiMesh.
+- Detailed scenes generate deterministic trees through MultiMesh. Distant
+  scenes use prebaked proxy files when available, falling back to the
+  procedurally generated proxy scene for unbaked cells.
+- The offline baker imports the detailed forest scene, subsamples instance
+  transforms, substitutes a low-poly canopy mesh, and serializes each cell
+  as a PackedScene with no runtime generation script. It does not merge
+  different meshes into a single static draw call.
 - The full detail layer uses 160 trees per cell; the proxy layer uses 20 and a
   simpler canopy mesh. This reduces scene and geometry complexity away from the camera.
 - Both layers remain independently budgeted, to limit new instances per frame.
@@ -36,6 +43,26 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 ./bin/godot.linuxbsd.editor.x86_64 --editor --path modules/world_partition/demo
 ```
 
+## Bake distant proxy assets
+
+Run the baker with **any stock Godot 4 editor executable** (no native Cgame
+extension is required for content generation). The default covers the full
+13x13 configured demo grid and keeps one of every eight instances:
+
+```sh
+godot --headless --path modules/world_partition/demo --import --quit
+godot --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=6 --stride=8
+godot --headless --path modules/world_partition/demo --script res://tests/hlod_bake_test.gd
+```
+
+For a quick validation without generating all 169 cells, use `--radius=1`.
+Output is written to `res://generated/forest_proxy_X_Z.tscn` and kept out of
+Git by the local `.gitignore`. The demo automatically registers existing baked
+scenes; missing files use the old procedural scene instead. The HUD reports the
+number of baked proxies selected at startup. A rebuild is needed after changing
+the detail scene or baker stride, and the game must be restarted to refresh
+its registered scene paths.
+
 The project uses Compatibility renderer so it can be inspected on low-end GPUs;
 near/far proxy handoff is implemented without renderer-specific effects.
 
@@ -57,6 +84,8 @@ Quality controller assertions (after importing the project):
 ```sh
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/world_partition/demo --script res://tests/quality_controller_test.gd
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/world_partition/demo --script res://tests/hlod_blend_test.gd
+./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=1 --stride=8
+./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/world_partition/demo --script res://tests/hlod_bake_test.gd
 ```
 
 ## Limitations / validation
@@ -64,6 +93,10 @@ Quality controller assertions (after importing the project):
 - Native `get_cell_instance()` is required for proxy handoff; this branch includes it.
 - This is not the user's actual game project. The example lives in the engine
   source repository so it can be copied into a real Godot game once its source is available.
+- The proxy baker supports this demo's MeshInstance3D/MultiMeshInstance3D
+  scene shape. It preserves source mesh materials and transforms but does
+  not yet combine disparate materials, bake textures, or generate atlas
+  impostors. Art direction and in-game profiling remain necessary.
 - Repeated procedural forest art is illustrative and does not include physics,
   navigation, terrain painting, atmospheric scattering, automated proxy generation,
   impostor atlas, or object-level persistence.
