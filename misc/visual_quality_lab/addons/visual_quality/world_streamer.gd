@@ -72,7 +72,9 @@ func refresh_now() -> void:
 		var ad: int = (a - center).length_squared()
 		var bd: int = (b - center).length_squared()
 		if ad == bd:
-			return a.x < b.x if a.x != b.x else a.y < b.y
+			if a.x != b.x:
+				return a.x < b.x
+			return a.y < b.y
 		return ad < bd
 	)
 	var spawn_budget: int = max_spawns_per_update
@@ -101,7 +103,7 @@ func _request_asset(path: String) -> void:
 
 func _poll_background_loads() -> void:
 	for path in _pending_paths.keys():
-		var status: ResourceLoader.ThreadLoadStatus = ResourceLoader.load_threaded_get_status(path)
+		var status: int = ResourceLoader.load_threaded_get_status(path)
 		match status:
 			ResourceLoader.THREAD_LOAD_LOADED:
 				# load_threaded_get() is only invoked once status reports LOADED;
