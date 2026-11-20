@@ -242,6 +242,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# angles; Ultra also filters normal detail. Existing chunk road/biome
 	# maps are kept in place when a preset is switched.
 	ChunkView.configure_terrain_filter(_level)
+	ChunkView.configure_terrain_geomorph(_level)
+	if viewport != null:
+		for lod_terrain in viewport.get_tree().get_nodes_in_group(ChunkView.TERRAIN_LOD_GROUP):
+			ChunkView.apply_terrain_geomorph(lod_terrain)
 	if viewport != null:
 		for terrain in viewport.get_tree().get_nodes_in_group(ChunkView.TERRAIN_GROUP):
 			ChunkView.apply_terrain_filter(terrain)

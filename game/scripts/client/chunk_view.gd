@@ -35,6 +35,7 @@ global uniform float aa_weather_rain;
 global uniform float aa_puddle_ripple_strength;
 global uniform float aa_ground_contact_strength;
 global uniform float aa_terrain_detail_radius;
+instance uniform float aa_lod_morph = 0.0;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/puddle_ripples.gdshaderinc"
 #include "res://assets/shaders/water_caustics.gdshaderinc"
@@ -75,6 +76,7 @@ float fbm(vec2 p) {
 }
 
 void vertex() {
+	VERTEX.y = mix(VERTEX.y, UV2.x, aa_lod_morph * UV2.y);
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	// Macro shadows change slowly in world space: evaluating them per vertex avoids
@@ -189,6 +191,8 @@ static var _ground_material: ShaderMaterial
 static var _textured_material: ShaderMaterial
 static var _textured_checked := false
 static var terrain_filter_quality := 1
+static var terrain_geomorph_enabled := false
+const TERRAIN_LOD_GROUP := "aa_chunked_terrain_lod"
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
 const TERRAIN_DIR := "res://assets/textures/terrain/"
 # The colour each layer should average to: photos of real ground pulled toward the stylised palette of the models.
@@ -239,6 +243,19 @@ static var grass_fade_end := GrassField.FADE_END
 
 ## Sampler quality follows the existing graphics preset without changing any
 ## world or texture data. New chunks use the cached shader of the chosen tier.
+static func configure_terrain_geomorph(quality: int) -> void:
+	terrain_geomorph_enabled = clampi(quality, 0, 3) >= 2
+
+
+static func apply_terrain_geomorph(node: Node) -> void:
+	if node is ChunkedTerrain3D:
+		var terrain := node as ChunkedTerrain3D
+		terrain.lod_geomorph_enabled = terrain_geomorph_enabled
+		# A slightly faster update preserves smooth movement while the native
+		# engine changes only one per-instance uniform, never reuploads meshes.
+		terrain.update_interval = 0.16 if terrain_geomorph_enabled else 0.5
+
+
 static func configure_terrain_filter(quality: int) -> void:
 	terrain_filter_quality = clampi(quality, 0, 3)
 	if _textured_material != null:
@@ -584,10 +601,11 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.chunk_quads = 16
 	_terrain.lod_count = 3
 	_terrain.lod_distance = 70.0
+	_terrain.lod_geomorph_enabled = terrain_geomorph_enabled
 	_terrain.skirt_depth = 3.0
 	_terrain.collision_enabled = false # The server decides where players can stand.
 	_terrain.cast_shadows = false
-	_terrain.update_interval = 0.5
+	_terrain.update_interval = 0.16 if terrain_geomorph_enabled else 0.5
 	_terrain.material = _ground_with_roads(origin)
 	_terrain.set_height_data(heights, Vector2i(SAMPLES, SAMPLES))
 	# The forked ChunkedTerrain3D accepts normals sampled one grid step past
@@ -596,6 +614,7 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.set_normal_data(TerrainSeamNormals.build(_raw_heights, origin,
 		SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "height_at")))
 	add_child(_terrain)
+	_terrain.add_to_group(TERRAIN_LOD_GROUP)
 	if _textured_material != null:
 		_terrain.add_to_group(TERRAIN_GROUP)
 

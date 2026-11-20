@@ -54,6 +54,7 @@ private:
 		RID instance;
 		RID meshes[MAX_LOD];
 		int lod = -1;
+		float morph = -1.0f; // Cache the last instance uniform; avoid redundant RD writes.
 		bool visible = false;
 #ifndef PHYSICS_3D_DISABLED
 		RID body;
@@ -76,6 +77,7 @@ private:
 	int chunk_quads = 32;
 	int lod_count = 4;
 	real_t lod_distance = 128.0;
+	bool lod_geomorph_enabled = false;
 	bool screen_space_lod_enabled = false;
 	real_t lod_reference_fov = 60.0;
 	real_t view_distance = 0.0;
@@ -140,6 +142,8 @@ public:
 	void set_lod_count(int p_count);
 	int get_lod_count() const { return lod_count; }
 	void set_lod_distance(real_t p_distance);
+	void set_lod_geomorph_enabled(bool p_enabled);
+	bool is_lod_geomorph_enabled() const { return lod_geomorph_enabled; }
 	real_t get_lod_distance() const { return lod_distance; }
 	void set_screen_space_lod_enabled(bool p_enabled) { screen_space_lod_enabled = p_enabled; }
 	bool is_screen_space_lod_enabled() const { return screen_space_lod_enabled; }

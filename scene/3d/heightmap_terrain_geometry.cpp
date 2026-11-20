@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "heightmap_terrain_geometry.h"
+#include "terrain_geomorph_policy.h"
 
 namespace HeightmapTerrainGeometry {
 
@@ -167,6 +168,12 @@ bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, in
 	r_mesh.vertices.resize(body_vertices + skirt_vertices);
 	r_mesh.normals.resize(body_vertices + skirt_vertices);
 	r_mesh.uvs.resize(body_vertices + skirt_vertices);
+	const bool geomorph = p_params.geomorph_coarse_stride > p_stride &&
+			p_params.geomorph_coarse_stride <= p_quads;
+	if (geomorph) {
+		r_mesh.morph_uv2.resize(body_vertices + skirt_vertices);
+	}
+	Vector2 *morph_uv = geomorph ? r_mesh.morph_uv2.ptrw() : nullptr;
 	Vector3 *vertex = r_mesh.vertices.ptrw();
 	Vector3 *normal = r_mesh.normals.ptrw();
 	Vector2 *uv = r_mesh.uvs.ptrw();
@@ -183,6 +190,13 @@ bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, in
 			vertex[index] = Vector3(p_params.origin.x + real_t(sx) * p_params.spacing.x, y, p_params.origin.y + real_t(sz) * p_params.spacing.y);
 			normal[index] = sample_normal(p_field, sx, sz, p_params);
 			uv[index] = Vector2(real_t(sx) * u_scale, real_t(sz) * v_scale);
+			if (geomorph) {
+				const float target = TerrainGeomorphPolicy::coarse_sample(
+						i * p_stride, j * p_stride, p_x0, p_z0, p_params.geomorph_coarse_stride,
+						[&](int px, int pz) { return float(p_field.get(px, pz)); });
+				morph_uv[index] = Vector2(target * p_params.height_scale + p_params.height_offset,
+						TerrainGeomorphPolicy::interior_mask(i * p_stride, j * p_stride, p_quads));
+			}
 			min_y = MIN(min_y, y);
 			max_y = MAX(max_y, y);
 		}
@@ -212,6 +226,9 @@ bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, in
 			vertex[skirt_start[e] + k] = vertex[source] - Vector3(0, p_params.skirt_depth, 0);
 			normal[skirt_start[e] + k] = normal[source];
 			uv[skirt_start[e] + k] = uv[source];
+			if (geomorph) {
+				morph_uv[skirt_start[e] + k] = Vector2(vertex[skirt_start[e] + k].y, 0.0);
+			}
 		}
 	}
 	min_y -= MAX(p_params.skirt_depth, real_t(0.0));

@@ -1,0 +1,52 @@
+name: Chunked terrain GPU geomorph
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "scene/3d/chunked_terrain_3d.*"
+      - "scene/3d/heightmap_terrain_geometry.*"
+      - "scene/3d/terrain_geomorph_policy.h"
+      - "scene/3d/tests/test_terrain_geomorph_policy.cpp"
+      - "game/assets/shaders/ground.gdshader"
+      - "game/scripts/client/chunk_view.gd"
+      - ".github/workflows/chunked-terrain-geomorph.yml"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "scene/3d/chunked_terrain_3d.*"
+      - "scene/3d/heightmap_terrain_geometry.*"
+      - "scene/3d/terrain_geomorph_policy.h"
+      - "scene/3d/tests/test_terrain_geomorph_policy.cpp"
+      - "game/assets/shaders/ground.gdshader"
+      - "game/scripts/client/chunk_view.gd"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  geometry-policy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and test smooth terrain LOD math
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            scene/3d/tests/test_terrain_geomorph_policy.cpp -o /tmp/terrain-geomorph-test
+          /tmp/terrain-geomorph-test
+      - name: Check engine and game integration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          engine = Path('scene/3d/chunked_terrain_3d.cpp').read_text()
+          mesh = Path('scene/3d/heightmap_terrain_geometry.cpp').read_text()
+          shader = Path('game/assets/shaders/ground.gdshader').read_text()
+          game = Path('game/scripts/client/chunk_view.gd').read_text()
+          assert 'instance_geometry_set_shader_parameter' in engine
+          assert 'geomorph_coarse_stride' in mesh
+          assert 'ARRAY_TEX_UV2' in engine
+          assert 'aa_lod_morph * UV2.y' in shader and 'aa_lod_morph * UV2.y' in game
+          PY

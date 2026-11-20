@@ -3,6 +3,8 @@ render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
 global uniform float aa_weather_rain;
 global uniform float aa_ground_contact_strength;
+// Precomputed coarser-height target in UV2; interpolated on GPU per engine chunk.
+instance uniform float aa_lod_morph = 0.0;
 // High/Ultra only: subtle self-occlusion from normal-map microrelief,
 // fused into existing PBR AO without any extra texture or screen pass.
 global uniform float aa_terrain_micro_occlusion;
@@ -78,6 +80,7 @@ float fbm(vec2 p) {
 }
 
 void vertex() {
+	VERTEX.y = mix(VERTEX.y, UV2.x, aa_lod_morph * UV2.y);
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	// The broad biome color field has a ~83 m cell size. Sampling once per

@@ -65,12 +65,16 @@ struct Params {
 	Vector2 origin;
 	// Depth of the vertical skirt that hides cracks between chunks of different detail.
 	real_t skirt_depth = 1.0;
+	int geomorph_coarse_stride = 0; // 0 disables the extra UV2 vertex stream.
 };
 
 struct ChunkMesh {
 	PackedVector3Array vertices;
 	PackedVector3Array normals;
 	PackedVector2Array uvs;
+	// UV2.x = height on next coarser LOD, UV2.y = interior morph mask.
+	// Empty for the default/low-end non-geomorph path.
+	PackedVector2Array morph_uv2;
 	PackedInt32Array indices;
 	AABB bounds;
 };
