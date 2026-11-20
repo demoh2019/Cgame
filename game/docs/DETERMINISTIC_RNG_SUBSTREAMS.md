@@ -80,20 +80,35 @@ separate streams:
 | 1 | Initial bird positions |
 | 2 | Initial bird velocities and headings |
 | 3 | Wing animation custom-data phases |
+| 4 | Native Flock3D boids simulation seed |
 
 Adding or removing random wing effects does not reshuffle birds or
 their initial flight directions. A saved world seed recreates the same
-starting flock across sessions and on native/stock Godot. The native
-`Flock3D` boids renderer remains optional and receives the same
-initialized MultiMesh data. Gameplay damage, AI, authoritative world
-generation, loot and network packets are unchanged.
+starting flock across sessions on a given engine build.
+
+**Important native simulation detail:** Cgame's `Flock3D` already has
+its *own* C++ boids PRNG and regenerates agents on ready/count changes.
+This PR also adds the opt-in `Flock3D.simulation_seed` property and
+sets it from stream 4. In the seeded mode, every native flock reset
+restarts its PCG state from that seed, including scene-tree entry and
+graphics-quality changes, while existing unseeded Flock3D scenes retain
+their previous evolving RNG behavior. The same world and native build
+thus produce matching initial agent positions even after repeated
+rebuilds. The native boids algorithm is distinct from the script
+fallback's algorithm, so *exact positions across those two different
+boids implementations are not promised*.
+
+Gameplay damage, authoritative AI, world generation, loot and network
+packets are unchanged.
 
 ## Tests and verification
 
 - `tests/core/math/test_random_substreams.cpp`: native seed/state
   invariance, reproducibility after drawing, nested streams, negative
-  and high-bit IDs, statistical separation sanity and fixed hash
-  vectors.
+  and high-bit IDs, distinct stream seeds and fixed hash vectors.
+- `tests/scene/test_flock_3d.cpp`: native boids use the configured seed,
+  reproduce agent positions after count/quality resets and react to a
+  different seed.
 - `game/tests/test_seeded_substreams.gd`: bit-for-bit native/GDScript
   parity, fixed seed vectors, independent streams, actual ambient
   bird placement and live-game world-seed wiring.
@@ -106,6 +121,7 @@ generation, loot and network packets are unchanged.
 # Cgame compiled with tests=yes
 godot --headless --test --test-case="*Named substreams*"
 godot --headless --test --test-case="*Substreams distinguish*"
+godot --headless --test --test-case="*Seeded flock resets*"
 godot --headless --path game --script res://tests/run_rng_substreams.gd
 
 # Standard upstream Godot also executes the GDScript fallback
