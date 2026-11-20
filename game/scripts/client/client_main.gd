@@ -666,6 +666,7 @@ func _physics_process(delta: float) -> void:
 		bike_speed = Vector2(survivor.position.x - _last_bike_position.x,
 			survivor.position.z - _last_bike_position.z).length() / delta
 	_last_bike_position = survivor.position
+	_bike_visual.set_panniers(survivor.inventory.count("bike_panniers") > 0)
 	_bike_visual.set_riding(survivor.mounted and survivor.survival.alive, bike_speed, delta)
 	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
 	_camera.look_at(survivor.position + Vector3(0, 0.7, 0), Vector3.UP)
@@ -1091,6 +1092,8 @@ func _update_hud() -> void:
 		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		survivor.mount_cooldown]
 	if survivor.mounted:
+		if survivor.inventory.count("bike_panniers") > 0:
+			_stats.text += "\nBIKE PANNIERS: 28 kg supported; dismount = full load"
 		_stats.text += "\nBIKE GROUND: %s | uphill slows pedaling" % world.biome_at(
 			position.x, position.z).to_upper()
 	if not sim.night_horde.is_empty():

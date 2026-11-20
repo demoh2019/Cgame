@@ -43,6 +43,7 @@ const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
+const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
@@ -702,11 +703,15 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		player.crouching = crouch # Only input within the server time budget applies.
 		# No client-supplied cargo, stamina or sound radius: server owns all three.
 		var before_move: Vector3 = player.position
-		var factor: float = player.inventory.movement_factor(player.skills.bonus("carry_capacity"))
+		var factor: float = BikeCargo.movement_factor(player.inventory,
+			player.skills.bonus("carry_capacity"), player.mounted)
 		var moving := move_x * move_x + move_z * move_z > 0.00001
 		if player.mounted and (player.crouching or factor < 0.9999 or
 				player.survival.fracture > 0.0 or player.inventory.count(Mounts.ITEM_ID) < 1):
 			_dismount(player, false)
+			# Supported weight vanishes immediately after dismount.
+			factor = BikeCargo.movement_factor(player.inventory,
+				player.skills.bonus("carry_capacity"), false)
 		var sprint_allowed: bool = sprint and not player.mounted and not player.crouching and moving and factor >= 0.9999 and player.survival.try_sprint(allowed)
 		player.position = Movement.step(world, player.position, {
 			"x": move_x, "z": move_z, "sprint": sprint_allowed, "mounted": player.mounted,
@@ -3703,7 +3708,8 @@ func _tick_players(delta: float) -> void:
 			player.dirty_character = true
 		if player.mounted and (not _alive(player) or
 				player.inventory.count(Mounts.ITEM_ID) < 1 or
-				player.inventory.movement_factor(player.skills.bonus("carry_capacity")) < 0.9999 or
+				BikeCargo.movement_factor(player.inventory,
+					player.skills.bonus("carry_capacity"), true) < 0.9999 or
 				player.survival.fracture > 0.0):
 			_dismount(player, false)
 		var old_infamy: float = player.pvp_infamy
@@ -4679,6 +4685,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		if here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
 			nearby_players.append({"id": other.id, "name": other.name, "x": p.x, "y": p.y, "z": p.z, "yaw": other.yaw,
 				"alive": _alive(other), "crouching": other.crouching, "mounted": other.mounted,
+				"bike_panniers": BikeCargo.installed(other.inventory),
 				"weapon": other.inventory.weapon,
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
 				"guild": {"id": other.guild_id, "name": other.guild_name},
@@ -4844,7 +4851,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"regional_trade": RegionalTrade.public_offer(world, player.position),
 			"renown_next": Reputation.next_threshold(player.renown),
 			"carry_kg": player.inventory.total_weight(),
-			"cargo_factor": player.inventory.movement_factor(player.skills.bonus("carry_capacity")),
+			"cargo_factor": BikeCargo.movement_factor(player.inventory,
+				player.skills.bonus("carry_capacity"), player.mounted),
+			"bike_cargo_kg": BikeCargo.SUPPORTED_KG if player.mounted and BikeCargo.installed(player.inventory) else 0.0,
 			"max_health": player.survival.max_health,
 			"speed_bonus": player.skills.bonus("move_speed"), "carry_bonus": player.skills.bonus("carry_capacity"),
 		},

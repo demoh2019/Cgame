@@ -496,6 +496,7 @@ func _process(delta: float) -> void:
 		avatar_model.set_dead(not bool(client.you.get("alive", true)))
 		avatar_model.set_action_loop(_gather_animation())
 		var riding: bool = bool(client.you.get("mounted", false)) and avatar.visible
+		bike_visual.set_panniers(client.inventory.count("bike_panniers") > 0)
 		bike_visual.set_riding(riding, avatar_model.speed, delta)
 		audio.set_footsteps(avatar_model._moving and avatar.visible and not riding)
 		if not riding:

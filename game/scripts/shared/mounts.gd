@@ -1,6 +1,8 @@
 extends RefCounted
 ## Bike travel permissions. Only the server decides mount speed and eligibility.
 
+const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
+
 const ITEM_ID := "salvage_bike"
 const SPEED_FACTOR := 1.9
 const MANUAL_COOLDOWN := 2.0
@@ -23,7 +25,7 @@ static func refusal(player, now: float) -> String:
 		return "missing_bike"
 	if player.mount_cooldown > 0.0:
 		return "cooldown"
-	if player.inventory.movement_factor(player.skills.bonus("carry_capacity")) < 0.9999:
+	if BikeCargo.movement_factor(player.inventory, player.skills.bonus("carry_capacity"), true) < 0.9999:
 		return "overweight"
 	if player.survival.fracture > 0.0:
 		return "fracture"

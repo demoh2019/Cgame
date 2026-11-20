@@ -503,6 +503,12 @@ static func _build_items() -> void:
 		"tier": 1, "stack": 5, "weight": 0.3, "value": 24})
 	_add_recipe("bike_chain_wrap", "bike_chain_wrap", 1,
 		{"cloth_1": 2, "fiber_1": 2, "scrap": 2}, "workbench", 4.0)
+	# Tradeable, crafted saddle panniers support limited load only while mounted.
+	_add_item("bike_panniers", {"name": "Expedition Bike Panniers", "kind": "bike_cargo",
+		"tier": 2, "weight": 3.0, "value": 95})
+	_add_recipe("bike_panniers", "bike_panniers", 1,
+		{"cloth_2": 4, "plank_2": 2, "scrap": 3, "fiber_2": 3},
+		"workbench", 7.0)
 	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
 	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
 		"tier": 2, "weight": 12.0, "value": 180})

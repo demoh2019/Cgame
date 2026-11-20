@@ -27,4 +27,10 @@ func run(t) -> void:
 	t.eq(visual.visible, true, "mounted player has visible bike")
 	visual.set_riding(false)
 	t.eq(visual.visible, false, "dismount hides bicycle")
+	t.current = "visible cargo saddlebags"
+	visual.set_panniers(true)
+	t.eq(visual.get_node("LeftPannier").visible, true, "carried cargo has a visible left bag")
+	t.eq(visual.get_node("RightPannier").visible, true, "carried cargo has a visible right bag")
+	visual.set_panniers(false)
+	t.eq(visual.get_node("LeftPannier").visible, false, "losing cargo hides its bags")
 	visual.free()

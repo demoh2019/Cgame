@@ -38,6 +38,20 @@ persists across sessions; riding state and cooldown do not.
 Clients receive mount state via snapshots and use the same movement
 prediction. Network movement packets never supply mount speed authority.
 
+## Expedition cargo panniers
+
+A T2 workbench can craft one tradeable Expedition Bike Panniers item from
+4 cloth T2, 2 planks T2, 3 scrap and 3 fiber T2. The 3 kg item must remain
+in the survivor's inventory along with the bicycle. While riding, its
+28 kg support is subtracted from the *effective* weight used for movement
+penalties. On foot, the character immediately feels the entire real load;
+item counts and slots never change. The server validates ownership and
+weight before mounting and every tick. A missing or lost pannier forces
+dismount if the player would exceed the supported load. Full-loot death,
+stash, market, trading and saved character inventory still use actual items
+and actual weight. The client runs the exact same cargo calculation for
+movement prediction. A mounted HUD indication shows effective support.
+
 ## Presentation
 
 The bicycle has a procedural low-poly 3D model: orange metal frame,

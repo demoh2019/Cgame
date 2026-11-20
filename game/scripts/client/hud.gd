@@ -1524,6 +1524,9 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nQUIET CHAIN: %.0fs | Bike noise 9m" % quiet_left
 	elif bool(client.you.get("mounted", false)):
 		_info_label.text += "\nBIKE NOISE: 27m while moving (infected can hear)"
+	var supported_kg: float = float(client.you.get("bike_cargo_kg", 0.0))
+	if supported_kg > 0.0:
+		_info_label.text += "\nBIKE PANNIERS: %.0f kg supported (on foot: full load)" % supported_kg
 	_info_label.text += "\nTRAIL BIKE: %s | F4 mount/dismount | remount %.0fs" % [
 		"RIDING" if bool(client.you.get("mounted", false)) else ("CARRIED" if client.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		float(client.you.get("mount_cooldown", 0.0))]

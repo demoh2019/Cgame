@@ -6,6 +6,7 @@ const WHEEL_RADIUS := 0.43
 const WHEEL_OFFSET := 0.72
 
 var _wheel_pivots: Array[Node3D] = []
+var _panniers: Array[MeshInstance3D] = []
 
 
 func _ready() -> void:
@@ -60,6 +61,18 @@ func build() -> void:
 	# Black seat and wide handlebar make the vehicle readable from the isometric camera.
 	_beam(Vector3(0, 1.18, -0.28), Vector3(0, 1.18, -0.01), 0.10, leather)
 	_beam(Vector3(-0.36, 1.25, 0.48), Vector3(0.36, 1.25, 0.48), 0.043, steel)
+	# Cargo panniers: visible only for a real, equipped inventory upgrade.
+	for side in [-1, 1]:
+		var bag := MeshInstance3D.new()
+		bag.name = "LeftPannier" if side < 0 else "RightPannier"
+		var shape := BoxMesh.new()
+		shape.size = Vector3(0.27, 0.42, 0.52)
+		bag.mesh = shape
+		bag.position = Vector3(float(side) * 0.29, 0.78, -0.53)
+		bag.material_override = leather
+		bag.visible = false
+		add_child(bag)
+		_panniers.append(bag)
 
 
 static func _material(color: Color) -> StandardMaterial3D:
@@ -94,6 +107,11 @@ func set_riding(riding: bool, speed: float = 0.0, delta: float = 0.0) -> void:
 	var rotation_amount := clampf(speed * delta / WHEEL_RADIUS, 0.0, 4.0)
 	for pivot in _wheel_pivots:
 		pivot.rotation.x = wrapf(pivot.rotation.x + rotation_amount, -PI, PI)
+
+
+func set_panniers(enabled: bool) -> void:
+	for bag in _panniers:
+		bag.visible = enabled
 
 
 func wheel_count() -> int:

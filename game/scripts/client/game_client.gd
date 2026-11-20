@@ -6,6 +6,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
+const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 
@@ -156,8 +157,10 @@ func _reconcile(snapshot: Dictionary) -> void:
 		var replay_input: Dictionary = entry["input"].duplicate()
 		var duration: float = float(entry["dt"])
 		var moving := Vector2(float(replay_input["x"]), float(replay_input["z"])).length_squared() > 0.00001
-		var running := bool(replay_input["sprint"]) and not bool(you.get("mounted", false)) and not bool(replay_input.get("crouch", false)) and moving and float(replay_input["cargo_factor"]) >= 0.9999
 		replay_input["mounted"] = bool(you.get("mounted", false))
+		replay_input["cargo_factor"] = BikeCargo.movement_factor(inventory,
+			float(you.get("carry_bonus", 0.0)), bool(replay_input["mounted"]))
+		var running := bool(replay_input["sprint"]) and not bool(replay_input["mounted"]) and not bool(replay_input.get("crouch", false)) and moving and float(replay_input["cargo_factor"]) >= 0.9999
 		running = running and Survival.can_sprint_with(energy, float(you.get("hunger", 100.0)),
 				float(you.get("thirst", 100.0)), duration)
 		running = running and float(you.get("fracture", 0.0)) <= 0.0
@@ -185,7 +188,8 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float, crou
 	_seq += 1
 	yaw = face_yaw
 	# Prediction uses the same weight calculation as the authoritative server.
-	var factor: float = inventory.movement_factor(float(you.get("carry_bonus", 0.0)))
+	var factor: float = BikeCargo.movement_factor(inventory,
+		float(you.get("carry_bonus", 0.0)), bool(you.get("mounted", false)))
 	var mounted: bool = bool(you.get("mounted", false)) and not crouch and factor >= 0.9999
 	var running := sprint and not mounted and not crouch and move.length_squared() > 0.00001 and factor >= 0.9999
 	running = running and Survival.can_sprint_with(predicted_stamina,
