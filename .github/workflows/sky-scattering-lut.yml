@@ -1,0 +1,49 @@
+name: Sky scattering native LUT
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "modules/sky_scattering_lut/**"
+      - "game/assets/shaders/sky.gdshader"
+      - "game/scripts/client/atmosphere.gd"
+      - "game/scripts/client/graphics_profiles.gd"
+      - "game/scripts/client/graphics_quality.gd"
+      - ".github/workflows/sky-scattering-lut.yml"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/sky_scattering_lut/**"
+      - "game/assets/shaders/sky.gdshader"
+      - "game/scripts/client/atmosphere.gd"
+      - "game/scripts/client/graphics_profiles.gd"
+      - "game/scripts/client/graphics_quality.gd"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate bounded spectral LUT model
+        shell: bash
+        run: |
+          ${{ matrix.compiler }} -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            modules/sky_scattering_lut/tests/test_scattering_policy.cpp \
+            -o /tmp/test_sky_scattering_lut
+          /tmp/test_sky_scattering_lut
+      - name: Confirm game shader integration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          shader = Path("game/assets/shaders/sky.gdshader").read_text()
+          atmosphere = Path("game/scripts/client/atmosphere.gd").read_text()
+          quality = Path("game/scripts/client/graphics_quality.gd").read_text()
+          assert "has_atmospheric_lut && atmospheric_lut_strength > 0.001" in shader
+          assert "ClassDB.class_exists(\"SkyScatteringLUT\")" in atmosphere
+          assert "solar_elevation" in atmosphere
+          assert '"atmospheric_lut_strength"' in quality
+          PY

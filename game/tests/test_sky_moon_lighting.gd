@@ -8,7 +8,7 @@ func run(t) -> void:
 	if shader == null:
 		return
 	var code: String = shader.code
-	t.check(code.contains("moon_visibility") and code.contains("lunar_disc"),
+	t.check(code.contains("lunar_visibility") and code.contains("lunar_disc"),
 		"night has a distinct lunar disc, not the daytime sun")
 	t.check(code.contains("lunar_halo"), "moon has a broad low-cost atmospheric corona")
 	t.check(code.contains("sun_direction"), "lunar and solar light reuse the cached direction")

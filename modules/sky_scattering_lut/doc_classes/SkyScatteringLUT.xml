@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SkyScatteringLUT" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/classes/class.xsd">
+	<brief_description>
+		Generate a small HDR sky-scattering lookup texture.
+	</brief_description>
+	<description>
+		Returns a floating-point LUT indexed by view elevation (X) and solar elevation (Y). RGB stores approximate wavelength-dependent inscattering, alpha stores atmospheric transmittance. Generation happens on demand; callers should cache the ImageTexture and avoid rebuilding per frame. The approximation is meant for stylized skies, not scientific radiative-transfer simulations.
+	</description>
+	<methods>
+		<method name="generate_lut">
+			<return type="Image" />
+			<param index="0" name="width" type="int" default="128" />
+			<param index="1" name="height" type="int" default="64" />
+			<param index="2" name="aerosol" type="float" default="2.0" />
+			<description>
+				Generate a bounded RGBAH image with no mipmaps.
+			</description>
+		</method>
+	</methods>
+</class>

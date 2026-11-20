@@ -1,0 +1,19 @@
+/**************************************************************************/
+/*  sky_scattering_lut.h                                                  */
+/**************************************************************************/
+#pragma once
+
+#include "core/io/image.h"
+#include "core/object/ref_counted.h"
+
+// Runtime-agnostic small HDR LUT for sky view elevation and solar elevation.
+// A game can reuse it across every Sky material; no per-frame CPU/GPU work.
+class SkyScatteringLUT : public RefCounted {
+	GDCLASS(SkyScatteringLUT, RefCounted);
+
+protected:
+	static void _bind_methods();
+
+public:
+	Ref<Image> generate_lut(int p_width = 128, int p_height = 64, float p_aerosol = 2.0f) const;
+};

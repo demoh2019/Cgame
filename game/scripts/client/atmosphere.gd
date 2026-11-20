@@ -19,6 +19,7 @@ var sun: DirectionalLight3D
 var sky_material: ShaderMaterial
 var world_environment: WorldEnvironment
 var sky: Sky
+var _atmospheric_lut: Texture2D
 var _shadows_allowed := true
 var _cloud_shadows_allowed := true
 var _shadow_elapsed := 0.20 # At most five shadow-opacity updates per second.
@@ -193,6 +194,7 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	_sky_refresh_elapsed += maxf(delta, 0.0)
 	if _sky_refresh_elapsed >= _sky_refresh_interval:
 		_sky_refresh_elapsed = fmod(_sky_refresh_elapsed, _sky_refresh_interval)
+		sky_material.set_shader_parameter("solar_elevation", clampf(sun_height, -0.15, 1.0))
 		sky_material.set_shader_parameter("daylight", daylight)
 		sky_material.set_shader_parameter("dusk", dusk)
 		sky_material.set_shader_parameter("storm", storm)
@@ -270,6 +272,18 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	# Sky haze is cached with the radiance map; no per-frame shader updates.
 	sky_material.set_shader_parameter("aerosol_scattering_strength",
 		clampf(float(settings.get("sky_scattering_strength", 0.0)), 0.0, 1.0))
+	# Native HDR Rayleigh/Mie-inspired LUT is created once, only on High/Ultra.
+	# Stock Godot and Compatibility retain the original panoramic sky.
+	var lut_strength: float = clampf(float(settings.get("atmospheric_lut_strength", 0.0)), 0.0, 1.0)
+	if lut_strength > 0.001 and _atmospheric_lut == null and ClassDB.class_exists("SkyScatteringLUT"):
+		var generator: Object = ClassDB.instantiate("SkyScatteringLUT")
+		if generator != null and generator.has_method("generate_lut"):
+			var lut_image := generator.call("generate_lut", 128, 64, 2.0) as Image
+			if lut_image != null:
+				_atmospheric_lut = ImageTexture.create_from_image(lut_image)
+				sky_material.set_shader_parameter("atmospheric_lut", _atmospheric_lut)
+	sky_material.set_shader_parameter("has_atmospheric_lut", _atmospheric_lut != null and lut_strength > 0.001)
+	sky_material.set_shader_parameter("atmospheric_lut_strength", lut_strength)
 	# Tiny lunar surface shading only for the high-end graphics profiles.
 	sky_material.set_shader_parameter("moon_detail_strength",
 		clampf(float(settings.get("moon_detail_strength", 0.0)), 0.0, 1.0))

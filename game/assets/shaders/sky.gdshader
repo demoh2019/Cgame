@@ -26,6 +26,13 @@ uniform vec3 sun_color : source_color = vec3(1.0, 0.95, 0.82);
 uniform bool use_cached_radiance = false;
 // Natural sunlight scattering in thin atmospheric dust; no extra textures.
 uniform float aerosol_scattering_strength = 0.0;
+// The native engine generates one 128x64 RGBAH optical-depth LUT on demand.
+// X: view elevation [-0.08,1], Y: solar elevation [-0.15,1].
+// RGB: linear spectral in-scattering, A: medium transmittance.
+uniform sampler2D atmospheric_lut : filter_linear, repeat_disable;
+uniform bool has_atmospheric_lut = false;
+uniform float atmospheric_lut_strength = 0.0;
+uniform float solar_elevation = 0.7;
 // Moon phases reuse the existing night directional light and sky cubemap.
 uniform float moon_phase = 0.5;
 uniform float moon_detail_strength = 0.0;
@@ -64,6 +71,17 @@ void sky() {
 		float grey = dot(day, vec3(0.3, 0.59, 0.11));
 		day = mix(day, vec3(grey) * storm_color * 1.8, storm * 0.85);
 		day *= 1.0 - storm * 0.35;
+		// HDRP/Unreal-style baked optical depth: one bilinear lookup rather
+		// than expensive atmosphere raymarches at every sky pixel.
+		// A cubemap rebuild evaluates the same branch for coherent reflections.
+		if (has_atmospheric_lut && atmospheric_lut_strength > 0.001 && daylight > 0.025 && up > -0.08) {
+			vec2 optical_uv = vec2(
+				clamp((up + 0.08) / 1.08, 0.0, 1.0),
+				clamp((solar_elevation + 0.15) / 1.15, 0.0, 1.0));
+			vec4 optical = texture(atmospheric_lut, optical_uv);
+			float optical_weight = atmospheric_lut_strength * (1.0 - storm * 0.88);
+			day = mix(day, day * optical.a + optical.rgb, optical_weight);
+		}
 
 		vec3 night = mix(night_horizon, night_top, clamp(up * 1.4, 0.0, 1.0));
 		// A few hundred tiny point stars, distributed on stable spherical UVs.
