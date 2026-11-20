@@ -79,6 +79,31 @@ String WorldPartition3D::_get_scene_path(const Vector2i &p_cell) const {
 	return value;
 }
 
+void WorldPartition3D::_capture_cell_state(const Vector2i &p_cell, Node *p_instance) {
+	if (p_instance == nullptr || !p_instance->has_method(SNAME("capture_streaming_state"))) {
+		return;
+	}
+	const Variant result = p_instance->call(SNAME("capture_streaming_state"));
+	if (result.get_type() != Variant::DICTIONARY) {
+		WARN_PRINT(vformat("WorldPartition3D: cell %s capture_streaming_state() must return a Dictionary.", p_cell));
+		return;
+	}
+	const Dictionary state = result;
+	if (state.is_empty()) {
+		saved_cell_states.erase(p_cell);
+	} else {
+		saved_cell_states.insert(p_cell, state.duplicate(true));
+	}
+}
+
+void WorldPartition3D::_restore_cell_state(const Vector2i &p_cell, Node *p_instance) {
+	const Dictionary *state = saved_cell_states.getptr(p_cell);
+	if (p_instance != nullptr && state != nullptr && p_instance->has_method(SNAME("restore_streaming_state"))) {
+		// Pass a defensive copy; scripts cannot mutate the saved value implicitly.
+		p_instance->call(SNAME("restore_streaming_state"), state->duplicate(true));
+	}
+}
+
 void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 	const ObjectID *id = active_cells.getptr(p_cell);
 	if (id == nullptr) {
@@ -87,6 +112,7 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 
 	Node *node = Object::cast_to<Node>(ObjectDB::get_instance(*id));
 	if (node != nullptr) {
+		_capture_cell_state(p_cell, node);
 		node->queue_free();
 	}
 	active_cells.erase(p_cell);
@@ -183,6 +209,8 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	instance->set_position(instance->get_position() + cell_to_local_position(p_cell));
 	add_child(instance);
 	active_cells.insert(p_cell, instance->get_instance_id());
+	// Restoring after _ready() allows scene scripts to create their visuals first.
+	_restore_cell_state(p_cell, instance);
 	emit_signal(SNAME("cell_loaded"), p_cell);
 	return true;
 }
@@ -515,6 +543,69 @@ void WorldPartition3D::_stream_candidate_cell(const Vector2i &p_cell, int &r_new
 	}
 }
 
+void WorldPartition3D::set_cell_state(const Vector2i &p_cell, const Dictionary &p_state) {
+	if (p_state.is_empty()) {
+		saved_cell_states.erase(p_cell);
+	} else {
+		saved_cell_states.insert(p_cell, p_state.duplicate(true));
+	}
+	_restore_cell_state(p_cell, get_cell_instance(p_cell));
+}
+
+Dictionary WorldPartition3D::get_cell_state(const Vector2i &p_cell) const {
+	const Dictionary *state = saved_cell_states.getptr(p_cell);
+	return state != nullptr ? state->duplicate(true) : Dictionary();
+}
+
+bool WorldPartition3D::has_cell_state(const Vector2i &p_cell) const {
+	return saved_cell_states.has(p_cell);
+}
+
+void WorldPartition3D::erase_cell_state(const Vector2i &p_cell) {
+	saved_cell_states.erase(p_cell);
+}
+
+void WorldPartition3D::clear_cell_states() {
+	saved_cell_states.clear();
+}
+
+Dictionary WorldPartition3D::snapshot_cell_states() {
+	// Include gameplay changes in cells still resident, not only those unloaded.
+	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
+		Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(E.value));
+		_capture_cell_state(E.key, instance);
+	}
+	Dictionary snapshot;
+	for (const KeyValue<Vector2i, Dictionary> &E : saved_cell_states) {
+		snapshot[E.key] = E.value.duplicate(true);
+	}
+	return snapshot;
+}
+
+void WorldPartition3D::load_cell_states(const Dictionary &p_states) {
+	HashMap<Vector2i, Dictionary> accepted;
+	const Array keys = p_states.keys();
+	for (int i = 0; i < keys.size(); i++) {
+		const Variant key = keys[i];
+		const Variant value = p_states[key];
+		if (key.get_type() == Variant::VECTOR2I && value.get_type() == Variant::DICTIONARY) {
+			const Dictionary state = value;
+			if (!state.is_empty()) {
+				accepted.insert(key, state.duplicate(true));
+			}
+		}
+	}
+	saved_cell_states = accepted;
+	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
+		Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(E.value));
+		_restore_cell_state(E.key, instance);
+	}
+}
+
+int WorldPartition3D::get_cell_state_count() const {
+	return saved_cell_states.size();
+}
+
 void WorldPartition3D::update_streaming() {
 	_poll_requests();
 	if (!streaming_enabled || !is_inside_tree()) {
@@ -655,6 +746,14 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_cell_pinned", "cell"), &WorldPartition3D::is_cell_pinned);
 	ClassDB::bind_method(D_METHOD("get_pinned_cells"), &WorldPartition3D::get_pinned_cells);
 	ClassDB::bind_method(D_METHOD("get_pinned_cell_count"), &WorldPartition3D::get_pinned_cell_count);
+	ClassDB::bind_method(D_METHOD("set_cell_state", "cell", "state"), &WorldPartition3D::set_cell_state);
+	ClassDB::bind_method(D_METHOD("get_cell_state", "cell"), &WorldPartition3D::get_cell_state);
+	ClassDB::bind_method(D_METHOD("has_cell_state", "cell"), &WorldPartition3D::has_cell_state);
+	ClassDB::bind_method(D_METHOD("erase_cell_state", "cell"), &WorldPartition3D::erase_cell_state);
+	ClassDB::bind_method(D_METHOD("clear_cell_states"), &WorldPartition3D::clear_cell_states);
+	ClassDB::bind_method(D_METHOD("snapshot_cell_states"), &WorldPartition3D::snapshot_cell_states);
+	ClassDB::bind_method(D_METHOD("load_cell_states", "states"), &WorldPartition3D::load_cell_states);
+	ClassDB::bind_method(D_METHOD("get_cell_state_count"), &WorldPartition3D::get_cell_state_count);
 	ClassDB::bind_method(D_METHOD("set_cell_scenes", "scenes"), &WorldPartition3D::set_cell_scenes);
 	ClassDB::bind_method(D_METHOD("get_cell_scenes"), &WorldPartition3D::get_cell_scenes);
 	ClassDB::bind_method(D_METHOD("set_cell_scene", "cell", "scene_path"), &WorldPartition3D::set_cell_scene);
