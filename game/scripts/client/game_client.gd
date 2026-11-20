@@ -10,6 +10,7 @@ const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const WadingTravel = preload("res://scripts/shared/wading_travel.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
+const PartySupplyBeacon = preload("res://scripts/client/party_supply_beacon.gd")
 
 signal snapshot_received
 signal event_received(event: Dictionary)
@@ -46,6 +47,7 @@ var crates_used: Dictionary = {}
 var server_time: float = 0.0
 var snapshots_received: int = 0
 var events: Array = [] # Recent events, newest last (for the HUD log).
+var supply_beacon: Dictionary = {} # Latest active, private party aid location.
 var last_results: Dictionary = {} # command kind -> last result
 
 # Client side prediction.
@@ -70,14 +72,25 @@ func on_welcome(world_seed: int, _tick_rate: int) -> void:
 	welcomed = true
 	peer_id = net.multiplayer.get_unique_id()
 	predicted_stamina = Defs.MAX_STAMINA
+	supply_beacon = {} # A reconnect must not reveal previous party markers.
 
 
 func on_result(kind: String, data: Dictionary) -> void:
 	last_results[kind] = data
 
 
+func active_supply_beacon() -> Dictionary:
+	return PartySupplyBeacon.read(supply_beacon, peer_id, you.get("party", {}), server_time)
+
+
 func on_events(list: Array) -> void:
 	for event in list:
+		if str(event.get("type", "")) == "party_supply_request":
+			var seen: Dictionary = PartySupplyBeacon.read(
+				event, peer_id, you.get("party", {}), server_time)
+			if not seen.is_empty() and (supply_beacon.is_empty() or
+					float(seen["expires"]) >= float(supply_beacon.get("expires", -INF))):
+				supply_beacon = seen
 		events.append(event)
 		event_received.emit(event)
 	while events.size() > 40:
@@ -90,6 +103,8 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	snapshots_received += 1
 	server_time = float(snapshot["time"])
 	you = snapshot["you"]
+	supply_beacon = PartySupplyBeacon.read(
+		supply_beacon, peer_id, you.get("party", {}), server_time)
 	lightning_telegraph = snapshot.get("lightning_telegraph", {}).duplicate(true)
 	raid_telegraph = snapshot.get("raid_telegraph", {}).duplicate(true)
 	raid_interrupt = snapshot.get("raid_interrupt", {}).duplicate(true)
@@ -300,6 +315,14 @@ func use_item(item_id: String) -> void:
 	net.c_use.rpc_id(1, item_id)
 
 
+func smart_provision(intent: String) -> void:
+	net.c_smart_provision.rpc_id(1, intent)
+
+
+func quick_medicine() -> void:
+	net.c_quick_medicine.rpc_id(1)
+
+
 func expedition_restock(preset_id: String) -> void:
 	net.c_expedition_restock.rpc_id(1, preset_id)
 
@@ -365,8 +388,21 @@ func party_aid(target_id: int, item_id: String) -> void:
 	net.c_party_aid.rpc_id(1, target_id, item_id)
 
 
+func party_provision(target_id: int, kind: String) -> void:
+	net.c_party_provision.rpc_id(1, target_id, kind)
+
+
+func party_supply_request(need: String) -> void:
+	net.c_party_supply_request.rpc_id(1, need)
+
+
 func party_triage() -> void:
 	net.c_party_triage.rpc_id(1)
+
+
+func medic_cover() -> void:
+	# Selects no enemy or ally: server chooses the legitimate nearest guardian.
+	net.c_medic_cover.rpc_id(1)
 
 
 func party_ready_start() -> void:
@@ -537,6 +573,11 @@ func guardian_intercept(ally_id: int) -> void:
 	net.c_guardian_intercept.rpc_id(1, ally_id)
 
 
+func party_shield_wall() -> void:
+	# No targets, positions, durations or damage are accepted from the client.
+	net.c_party_shield_wall.rpc_id(1)
+
+
 func parry() -> void:
 	# Facing and equipped weapon are rechecked by the authoritative server.
 	net.c_parry.rpc_id(1)
@@ -553,6 +594,11 @@ func loot(entity_id: int) -> void:
 
 func dungeon(down: bool) -> void:
 	net.c_dungeon.rpc_id(1, down)
+
+
+func loot_sweep() -> void:
+	# No client-specified target IDs, positions or quantities.
+	net.c_loot_sweep.rpc_id(1)
 
 
 func build(point: Vector2, yaw: float = 0.0) -> void:
@@ -639,6 +685,11 @@ func nearest_campfire(point: Vector3, radius: float = 3.2) -> int:
 			closest = int(fire["id"])
 			best_squared = distance_squared
 	return closest
+
+
+func arm_camp_alarm(id: int) -> void:
+	if id >= 0:
+		net.c_arm_camp_alarm.rpc_id(1, id)
 
 
 func refuel_campfire(id: int) -> void:

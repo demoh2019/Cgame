@@ -150,6 +150,66 @@ func run(t) -> void:
 	t.eq(server.cmd_party_aid(11, 13, "water_bottle").get("reason", ""), "not_in_party",
 		"food and water cannot be sent to unrelated players")
 
+	t.current = "automatic aid uses the real full medical catalog"
+	var catalog: Array[String] = PartyAid.medical_items()
+	for medical_id in ["bandage", "field_splint", "herbal_poultice",
+			"spore_antidote", "purified_serum", "field_antiseptic"]:
+		t.check(catalog.has(medical_id), "every supported medical item appears in party UI")
+	t.check(not catalog.has("canned_food") and not catalog.has("field_triage_pack"),
+		"food and group-only triage packs never appear as single-target medicine")
+	t.check(catalog.size() >= 7, "party UI dynamically discovers all medical items")
+	t.eq(PartyAid.best_item(null, 60.0, 0.0, 0.0, 0.0), "",
+		"unknown inventory cannot invent free treatment")
+	t.eq(PartyAid.best_item(medic.inventory, NAN, 0.0, 0.0, 0.0), "",
+		"invalid client-independent vital values never select a medicine")
+
+	t.current = "automatic aid prioritizes fractures, infection and bleeding"
+	medic.inventory.add("field_splint", 1)
+	target.survival.add_fracture(30.0)
+	medic.party_aid_timer = 0.0
+	var splinted: Dictionary = server.cmd_party_aid(11, 12, "auto")
+	t.check(splinted.get("ok", false), "automatic support treats a genuine fracture")
+	t.eq(splinted.get("item", ""), "field_splint", "auto uses the fracture-specific tool")
+	t.near(target.survival.fracture, 0.0, 0.001, "splint restores mobility")
+	t.eq(medic.inventory.count("field_splint"), 0, "one carried splint is spent")
+	medic.party_aid_timer = 0.0
+	medic.inventory.add("spore_antidote", 1)
+	medic.inventory.add("herbal_poultice", 1)
+	target.survival.add_infection(14.0)
+	var herbs: Dictionary = server.cmd_party_aid(11, 12, "auto")
+	t.check(herbs.get("ok", false), "automatic support cleanses infected ally")
+	t.eq(herbs.get("item", ""), "herbal_poultice",
+		"cheap herbal medicine is preferred over rare spore antidote")
+	t.near(target.survival.infection, 0.0, 0.001, "herbs treat a mild infection")
+	t.eq(medic.inventory.count("herbal_poultice"), 0, "herbal treatment spends one item")
+	t.eq(medic.inventory.count("spore_antidote"), 1, "rare medicine is preserved")
+	medic.party_aid_timer = 0.0
+	target.survival.add_bleeding(34.0)
+	var bandaged: Dictionary = server.cmd_party_aid(11, 12, "auto")
+	t.eq(bandaged.get("item", ""), "bandage",
+		"bleeding takes priority and the cheapest dressing is selected")
+	t.near(target.survival.bleeding, 0.0, 0.001, "automatic dressing stops bleeding")
+	t.eq(medic.inventory.count("bandage"), 0, "remaining bandage is actually spent")
+	medic.party_aid_timer = 0.0
+	var preserved: Dictionary = medic.inventory.to_dict()
+	t.eq(server.cmd_party_aid(11, 12, "auto").get("reason", ""), "no_treatment",
+		"healthy ally does not waste any carried medicine")
+	t.eq(medic.inventory.to_dict(), preserved, "no-effect automatic aid is an atomic no-op")
+
+	t.current = "ally healing respects progression-increased maximum health"
+	medic.inventory.add("bandage", 1)
+	target.survival.max_health = 125.0
+	target.survival.health = 100.0
+	t.check(PartyAid.has_effect(Defs.item("bandage"), 100.0, 0.0, 0.0, 0.0, 100.0, 100.0, 125.0),
+		"healing an upgraded character at 100 HP is still effective")
+	var upgraded: Dictionary = server.cmd_party_aid(11, 12, "auto")
+	t.check(upgraded.get("ok", false), "auto heals a wounded high-health party member")
+	t.eq(upgraded.get("item", ""), "bandage", "healing is chosen after urgent afflictions")
+	t.near(target.survival.health, 125.0, 0.001, "medicine respects boosted HP cap")
+	t.eq(medic.inventory.count("bandage"), 0, "upgraded ally consumes one real dressing")
+	target.survival.max_health = Defs.MAX_HEALTH
+	target.survival.health = Defs.MAX_HEALTH
+
 	t.current = "range, verticality, death and leaving party block aid without charge"
 	medic.party_aid_timer = 0.0
 	target.survival.hurt(20.0)

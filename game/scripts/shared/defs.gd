@@ -13,6 +13,7 @@ const HUB_SAFE_RADIUS := 45.0 # Nobody can be hurt inside it.
 const ZONE_RADII := [260.0, 620.0, 1050.0] # Green ends at 260 m, yellow at 620 m, red at 1050 m, then black.
 const ZONE_NAMES := ["green", "yellow", "red", "black"]
 const MAX_TIER := 4
+const CAMP_FISH_STEW := "camp_fish_stew" # Clean fish-and-water camp meal.
 
 # --- Player tuning -------------------------------------------------------------------------------
 const WALK_SPEED := 4.2
@@ -331,11 +332,17 @@ static func _build_items() -> void:
 	_add_recipe("shore_bait", "shore_bait", 2,
 		{"berries": 2, "fiber_1": 1}, "", 1.5)
 	_add_item("raw_fish", {"name": "Raw Fish", "kind": "resource", "tier": 1,
-		"stack": 20, "value": 5, "weight": 0.7})
+		"stack": 20, "value": 5, "weight": 0.7, "unsafe_food": true})
 	_add_item("cooked_fish", {"name": "Cooked Fish", "kind": "food", "food": 35.0,
 		"stack": 10, "value": 13, "weight": 0.5})
 	_add_recipe("cooked_fish", "cooked_fish", 1, {"raw_fish": 1, "wood_1": 1},
 		"campfire", 3.0)
+	# Smoked trail rations cost more fuel plus fiber wrapping. Real campfires
+	# and the hub workbench use the existing atomic crafting transaction.
+	_add_item("smoked_fish", {"name": "Smoked Trail Fish T1", "kind": "food",
+		"tier": 1, "food": 26.0, "stack": 10, "value": 22, "weight": 0.45})
+	_add_recipe("smoked_fish", "smoked_fish", 1,
+		{"raw_fish": 1, "wood_1": 2, "fiber_1": 1}, "campfire", 5.0)
 	# T2-T4 coastal professions: stronger rods and valuable fish require
 	# matching crafting/gathering mastery and higher-risk shorelines.
 	for tier in range(2, MAX_TIER + 1):
@@ -349,6 +356,7 @@ static func _build_items() -> void:
 		_add_item("raw_fish_%d" % tier, {
 			"name": "Raw Coastal Fish T%d" % tier, "kind": "resource",
 			"tier": tier, "stack": 20, "value": 5 * tier, "weight": 0.7 + 0.15 * tier,
+			"unsafe_food": true,
 		})
 		_add_item("cooked_fish_%d" % tier, {
 			"name": "Cooked Coastal Fish T%d" % tier, "kind": "food",
@@ -358,6 +366,14 @@ static func _build_items() -> void:
 		_add_recipe("cooked_fish_%d" % tier, "cooked_fish_%d" % tier, 1,
 			{"raw_fish_%d" % tier: 1, "wood_%d" % tier: 1},
 			"campfire", 2.0 + float(tier))
+		_add_item("smoked_fish_%d" % tier, {
+			"name": "Smoked Trail Fish T%d" % tier, "kind": "food",
+			"tier": tier, "food": 18.0 + 8.0 * float(tier), "stack": 10,
+			"value": 22 * tier, "weight": 0.45 + 0.05 * float(tier),
+		})
+		_add_recipe("smoked_fish_%d" % tier, "smoked_fish_%d" % tier, 1,
+			{"raw_fish_%d" % tier: 1, "wood_%d" % tier: 2, "fiber_1": 1},
+			"campfire", 4.0 + float(tier))
 
 	# No permanent class or spell: craft and carry insulation for expeditions.
 	_add_item("thermal_wrap", {"name": "Emergency Heat Pack", "kind": "thermal",
@@ -407,6 +423,13 @@ static func _build_items() -> void:
 	_add_item("berries", {"name": "Berries", "kind": "food", "food": 12.0, "stack": 20, "value": 2})
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
+	# A hot expedition meal trades a clean bottle and fish for both nourishment
+	# and hydration in one backpack item. No raw or infected water is accepted.
+	_add_item(CAMP_FISH_STEW, {"name": "Camp Fish Stew", "kind": "food",
+		"tier": 1, "food": 40.0, "drink": 38.0, "stack": 10,
+		"weight": 0.85, "value": 25})
+	_add_recipe(CAMP_FISH_STEW, CAMP_FISH_STEW, 1,
+		{"raw_fish": 1, "water_bottle": 1, "wood_1": 1}, "campfire", 4.0)
 
 	# Unsafe lake water is a physical item, never a drink. Craft a pouch in the
 	# field, fill it at a real shore, then boil it at a live campfire or workbench.
@@ -425,6 +448,10 @@ static func _build_items() -> void:
 		{"bar_2": 1, "cloth_2": 2, "scrap": 2}, "workbench", 5.0)
 	# Durable camp craft: owners may anchor one live field tarp once, never a permanent base.
 	# Shared field-fire survival: paid storm-resistant fuel, without permanent heating.
+	_add_item("camp_alarm_kit", {"name": "Camp Sentry Alarm Kit",
+		"kind": "material", "tier": 1, "stack": 5, "weight": 0.65, "value": 32})
+	_add_recipe("camp_alarm_kit", "camp_alarm_kit", 1,
+		{"wood_1": 1, "fiber_1": 2, "scrap": 2}, "", 3.0)
 	_add_item("stormproof_briquette", {"name": "Stormproof Ember Briquette",
 		"kind": "fire_briquette", "tier": 1, "stack": 5, "weight": 0.65, "value": 29})
 	_add_recipe("stormproof_briquette", "stormproof_briquette", 1,
@@ -474,6 +501,11 @@ static func _build_items() -> void:
 		"stop_bleeding": true, "stack": 5, "weight": 0.30, "value": 30})
 	_add_recipe("herbal_poultice", "herbal_poultice", 1,
 		{"wild_herbs": 2, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# Preparatory dressing against physical infected bites, not acid or spores.
+	_add_item("wound_sealant", {"name": "Antiseptic Wound Sealant",
+		"kind": "wound_seal", "tier": 1, "stack": 5, "weight": 0.25, "value": 38})
+	_add_recipe("wound_sealant", "wound_sealant", 1,
+		{"wild_herbs": 2, "field_antiseptic": 1, "cloth_1": 1}, "", 4.0)
 	_add_item("field_splint", {"name": "Field Splint", "kind": "medical",
 		"fracture_treatment": 100.0, "stack": 5, "value": 24, "weight": 0.6})
 	_add_recipe("field_splint", "field_splint", 1,
@@ -485,6 +517,12 @@ static func _build_items() -> void:
 		"heal": 8.0, "cure": 40.0, "stop_bleeding": true, "stack": 5, "value": 20})
 	_add_recipe("field_antiseptic", "field_antiseptic", 1,
 		{"bandage": 1, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# Raw fish offers desperate field calories but causes food poisoning.
+	# This herbal tonic is the existing safe medicine/crafting counterplay.
+	_add_item("herbal_gut_tonic", {"name": "Herbal Stomach Remedy", "kind": "medical",
+		"tier": 1, "food_poison_treatment": 75.0, "stack": 5, "value": 38, "weight": 0.25})
+	_add_recipe("herbal_gut_tonic", "herbal_gut_tonic", 1,
+		{"wild_herbs": 2, "charcoal_filter": 1, "water_bottle": 1}, "", 3.0)
 	# Tier-two expedition triage turns real wound supplies into one mixed-injury
 	# treatment. Both self-use and party aid follow existing paid medical rules.
 	_add_item("expedition_trauma_kit", {"name": "Expedition Trauma Kit",

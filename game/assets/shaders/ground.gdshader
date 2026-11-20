@@ -1,10 +1,11 @@
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
+global uniform float aa_weather_wetness;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 
-// Textured ground. Eleven CC0 materials (Poly Haven) in two texture arrays:
+// Textured ground. Thirteen CC0 materials (Poly Haven) in two texture arrays:
 //   0 lush grass, 1 dry grass, 2 forest floor, 3 swamp mud, 4 road dirt, 5 cliff rock, 6 mountain rock, 7 sand, 8 snow,
-//   9 cracked asphalt (ruined cities), 10 broken concrete (bunkers and depots).
+//   9 cracked asphalt (ruined cities), 10 broken concrete (bunkers and depots), 11 weathered brick (cities), 12 old planks (docks).
 // Which material lies where comes from the chunk's biome map (forest, swamp, plains: baked on the CPU from the same noise
 // the server uses), from height (shore, mountains, snow), from slope (cliffs) and from the road mask. Each material is read
 // at two scales and the two are blended by noise, so the tiling never shows as a grid; cliffs use a triplanar projection.
@@ -19,7 +20,7 @@ uniform float biome_texels = 17.0;
 uniform float tile_meters = 6.0;
 uniform float normal_strength = 0.8;
 // Per-layer multiplier that moves the photo's average colour to the game's palette (computed on load).
-uniform vec3 layer_tint[11];
+uniform vec3 layer_tint[13];
 // Paved ground of the sites near this chunk: x, z, radius, layer (radius 0: unused). Weeds take back the cracks.
 uniform vec4 site_patches[4];
 
@@ -81,8 +82,8 @@ void fragment() {
 	vec2 biome_uv = local * ((biome_texels - 1.0) / biome_texels) + 0.5 / biome_texels;
 	vec3 biome = textureLod(biome_map, biome_uv, 0.0).rgb;
 
-	float w[11];
-	for (int i = 0; i < 11; i++) {
+	float w[13];
+	for (int i = 0; i < 13; i++) {
 		w[i] = 0.0;
 	}
 	// Grassland: lush and dry patches; plains lean dry.
@@ -135,14 +136,14 @@ void fragment() {
 		paved *= 1.0 - 0.9 * smoothstep(0.42, 0.68, fbm(p * 0.11 + 5.0)) * (1.0 - cliff);
 		paved *= 0.85;
 		paved *= 1.0 - cliff;
-		for (int i = 0; i < 11; i++) {
+		for (int i = 0; i < 13; i++) {
 			w[i] *= 1.0 - paved;
 		}
 		w[int(patch.w)] += paved;
 	}
 	// Roads.
 	float road = smoothstep(0.08, 0.55, textureLod(road_mask, local, 0.0).r);
-	for (int i = 0; i < 11; i++) {
+	for (int i = 0; i < 13; i++) {
 		w[i] *= 1.0 - road;
 	}
 	w[4] += road;
@@ -150,7 +151,7 @@ void fragment() {
 	vec3 color = vec3(0.0);
 	vec3 bump = vec3(0.0, 0.0, 0.0);
 	float total = 0.0;
-	for (int i = 0; i < 11; i++) {
+	for (int i = 0; i < 13; i++) {
 		if (w[i] < 0.02) {
 			continue;
 		}
@@ -189,9 +190,19 @@ void fragment() {
 	vec3 bitangent = normalize(cross(n, tangent));
 	vec3 detail = normalize(vec3(bump.xy * normal_strength, max(bump.z, 0.2)));
 	vec3 bent = normalize(tangent * detail.x + bitangent * detail.y + n * detail.z);
+
+	// Wet earth absorbs light; shallow mud and worn pavement collect small smooth puddles.
+	// Reuse existing biome and noise weights instead of additional texture reads or noise octaves.
+	float wettable = clamp(w[3] + w[4] + w[7] * 0.65 + w[9] + w[10] + w[2] * 0.25, 0.0, 1.0);
+	float wetness = clamp(aa_weather_wetness, 0.0, 1.0) * (0.22 + 0.78 * wettable) * (1.0 - clamp(w[8], 0.0, 1.0));
+	float puddle = wetness * clamp(w[3] + w[4] + w[9] + w[10], 0.0, 1.0)
+		* smoothstep(0.52, 0.78, mid) * (1.0 - smoothstep(0.08, 0.25, slope));
+	bent = normalize(mix(bent, n, puddle * 0.75));
 	NORMAL = normalize((VIEW_MATRIX * vec4(bent, 0.0)).xyz);
 
+	color *= 1.0 - wetness * 0.18 - puddle * 0.12;
 	ALBEDO = apply_cloud_shadow(color, p, TIME);
-	ROUGHNESS = mix(0.92, 0.6, w[8]) - 0.15 * shore;
-	SPECULAR = 0.2;
+	float dry_roughness = mix(0.92, 0.6, w[8]) - 0.15 * shore;
+	ROUGHNESS = mix(mix(dry_roughness, 0.28, wetness * 0.55), 0.08, puddle * 0.9);
+	SPECULAR = min(0.9, 0.2 + wetness * 0.2 + puddle * 0.3);
 }

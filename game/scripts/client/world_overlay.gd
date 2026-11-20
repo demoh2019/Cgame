@@ -139,11 +139,15 @@ func _draw_zombie_bars(view: Vector2) -> void:
 			tag = "PIN"
 		if float(zombie.get("sunder_seconds", 0.0)) > 0.0:
 			tag = "SUNDER" if tag == "" else tag + "+SND"
+		if bool(zombie.get("melee_blocked", false)):
+			tag = "BLOCKED" if tag == "" else tag + "+BLK"
 		var gait: String = str(zombie.get("wound_phase", ""))
 		if gait == "limping":
 			tag = "LIMP" if tag == "" else tag + "+LMP"
 		elif gait == "frenzied":
 			tag = "FRENZY" if tag == "" else tag + "+FRZ"
+		if int(zombie.get("resolve_stacks", 0)) >= 2 and float(zombie.get("resolve_seconds", 0.0)) > 0.0:
+			tag = "RESIST" if tag == "" else tag + "+RST"
 		var title: String = ("RAID BOSS" if boss else ("ELITE " if elite else "")) + ("" if boss else str(zombie.get("type", "")).capitalize())
 		if elite or boss or tag != "":
 			_text(Vector2(spot.x - 80.0, rect.position.y - 4.0), title + ("  " + tag if tag != "" else ""), 11, fill.lightened(0.3), 160.0, HORIZONTAL_ALIGNMENT_CENTER)

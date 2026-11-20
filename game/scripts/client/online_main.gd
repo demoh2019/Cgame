@@ -24,6 +24,8 @@ const Audio = preload("res://scripts/client/audio.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
 const WorldOverlay = preload("res://scripts/client/world_overlay.gd")
@@ -67,6 +69,10 @@ var help_panel
 var demo_phase := -1.0
 var demo_storm := false
 var atmosphere
+var _grade_material: ShaderMaterial
+var _auto_quality := GraphicsAutoQuality.new()
+var _auto_graphics := false
+var _quality_picker: OptionButton
 var effects
 var skills_panel
 var social
@@ -94,6 +100,7 @@ var _bobber: MeshInstance3D
 var _bobber_spot := Vector3.INF
 var _last_cast_spot := Vector3.INF # Kept after the cast ends, for the splash of the catch.
 var _party_rally_marker: Node3D
+var _party_supply_marker: Node3D
 var _raid_telegraph: Node3D
 var _lightning_visual: Node3D
 var _screenshot_path := ""
@@ -111,6 +118,12 @@ func _exit_tree() -> void:
 
 func _ready() -> void:
 	Engine.physics_ticks_per_second = 30
+	GraphicsQuality.load_preference()
+	var graphics_config := ConfigFile.new()
+	if graphics_config.load(GraphicsQuality.SETTINGS_PATH) == OK:
+		_auto_graphics = bool(graphics_config.get_value("rendering", "auto", false))
+	if _auto_graphics:
+		GraphicsQuality.set_level(_auto_quality.level, false)
 	_build_environment()
 	_build_connect_screen()
 	var args := OS.get_cmdline_user_args()
@@ -182,6 +195,44 @@ func _update_party_rally_marker() -> void:
 	label.text = "PARTY RALLY  %ds" % int(ceil(float(rally["remaining"])))
 
 
+## A short-lived help beacon is visible only to current group members.
+## All its coordinates come from a previously server-authorized event.
+func _make_party_supply_marker() -> void:
+	_party_supply_marker = Node3D.new()
+	_party_supply_marker.name = "PartySupplyHelp"
+	_party_supply_marker.visible = false
+	var beacon := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.4
+	sphere.height = 0.8
+	beacon.mesh = sphere
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(1.0, 0.68, 0.28)
+	beacon.material_override = material
+	_party_supply_marker.add_child(beacon)
+	var label := Label3D.new()
+	label.name = "Label"
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.position.y = 0.8
+	_party_supply_marker.add_child(label)
+	add_child(_party_supply_marker)
+
+
+func _update_party_supply_marker() -> void:
+	var signal_state: Dictionary = client.active_supply_beacon()
+	_party_supply_marker.visible = not signal_state.is_empty()
+	if signal_state.is_empty():
+		return
+	var x: float = float(signal_state["x"])
+	var z: float = float(signal_state["z"])
+	_party_supply_marker.position = Vector3(x, client.world.height_at(x, z) + 1.8, z)
+	var label := _party_supply_marker.get_node("Label") as Label3D
+	label.text = "PARTY NEEDS %s (%ds)" % [
+		str(signal_state["need"]).to_upper(),
+		ceili(maxf(0.0, float(signal_state["expires"]) - client.server_time))]
+
+
 func _build_environment() -> void:
 	atmosphere = Atmosphere.new()
 	add_child(atmosphere)
@@ -194,6 +245,7 @@ func _build_environment() -> void:
 	add_child(camera)
 	camera.look_at(Vector3.ZERO)
 	_make_party_rally_marker()
+	_make_party_supply_marker()
 	_raid_telegraph = RaidTelegraph.new()
 	_raid_telegraph.name = "RaidGroundSlamWarning"
 	add_child(_raid_telegraph)
@@ -231,10 +283,11 @@ func _build_environment() -> void:
 	var grade := ColorRect.new()
 	grade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	grade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var grade_material := ShaderMaterial.new()
-	grade_material.shader = load("res://assets/shaders/post_grade.gdshader")
-	grade.material = grade_material
+	_grade_material = ShaderMaterial.new()
+	_grade_material.shader = load("res://assets/shaders/post_grade.gdshader")
+	grade.material = _grade_material
 	post.add_child(grade)
+	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
 
 
 func _build_connect_screen() -> void:
@@ -351,6 +404,33 @@ func _build_connect_screen() -> void:
 	solo_slot_info.add_theme_color_override("font_color", UiTheme.GOLD)
 	box.add_child(solo_slot_info)
 	_update_solo_slot_info()
+	var graphics_caption := Label.new()
+	graphics_caption.text = "Graphics quality (Ctrl+F11 in game)"
+	graphics_caption.add_theme_font_size_override("font_size", 14)
+	graphics_caption.add_theme_color_override("font_color", Color(0.95, 0.84, 0.66))
+	box.add_child(graphics_caption)
+	var quality_picker := OptionButton.new()
+	_quality_picker = quality_picker
+	quality_picker.custom_minimum_size = Vector2(0, 40)
+	for state in ["normal", "hover", "pressed", "focus"]:
+		quality_picker.add_theme_stylebox_override(state, field_style if state != "hover" else field_focus)
+	quality_picker.add_theme_color_override("font_color", UiTheme.INK)
+	quality_picker.add_theme_color_override("font_hover_color", UiTheme.INK)
+	quality_picker.add_theme_color_override("font_pressed_color", UiTheme.INK)
+	for quality_level in GraphicsQuality.NAMES.size():
+		quality_picker.add_item(GraphicsQuality.NAMES[quality_level], quality_level)
+	quality_picker.add_item("Auto (adapts to FPS)", GraphicsQuality.NAMES.size())
+	quality_picker.select(GraphicsQuality.NAMES.size() if _auto_graphics else GraphicsQuality.level())
+	quality_picker.item_selected.connect(func(index: int) -> void:
+		var selected: int = quality_picker.get_item_id(index)
+		_set_auto_graphics(selected == GraphicsQuality.NAMES.size())
+		if _auto_graphics:
+			_auto_quality.set_mode("auto")
+			GraphicsQuality.set_level(_auto_quality.level, false)
+		else:
+			GraphicsQuality.set_level(selected)
+		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer))
+	box.add_child(quality_picker)
 	var gap2 := Control.new()
 	gap2.custom_minimum_size = Vector2(0, 8)
 	box.add_child(gap2)
@@ -868,6 +948,8 @@ func _on_welcomed() -> void:
 	streamer.max_instantiations_per_frame = 1
 	streamer.set_chunk_generator(_generate_chunk)
 	add_child(streamer)
+	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
+	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
 	hub_view = HubView.new()
 	add_child(hub_view)
 	hub_view.build(client.world)
@@ -923,6 +1005,10 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_frames += 1
+	# Auto mode watches sustained frame times only; manual quality remains fixed.
+	if _auto_graphics and client != null and client.welcomed and _auto_quality.sample_frame(delta):
+		GraphicsQuality.set_level(_auto_quality.level, false)
+		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
 	if _demo == "title" and _screenshot_path != "" and _frames == 90: # The title screen alone (screenshots).
 		RenderingServer.force_draw()
 		get_viewport().get_texture().get_image().save_png(_screenshot_path)
@@ -974,6 +1060,7 @@ func _process(delta: float) -> void:
 	_lightning_visual.set_warning(client.lightning_telegraph)
 	outposts.update_from(client)
 	_update_party_rally_marker()
+	_update_party_supply_marker()
 	# The camera glides after the player.
 	var target := position + CAMERA_OFFSET * _zoom
 	camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
@@ -1147,7 +1234,32 @@ func _near_water(p: Vector3) -> bool:
 	return false
 
 
+func _set_auto_graphics(enabled: bool) -> void:
+	_auto_graphics = enabled
+	# Preserve the other rendering preferences in the same config file.
+	var config := ConfigFile.new()
+	config.load(GraphicsQuality.SETTINGS_PATH)
+	config.set_value("rendering", "auto", enabled)
+	var error := config.save(GraphicsQuality.SETTINGS_PATH)
+	if error != OK:
+		push_warning("Could not save auto graphics mode: %d" % error)
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	# Ctrl+F11 cycles graphics quality without consuming the existing F11 medicine shortcut.
+	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
+		_set_auto_graphics(false)
+		GraphicsQuality.cycle()
+		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
+		if is_instance_valid(_quality_picker):
+			_quality_picker.select(GraphicsQuality.level())
+		var message := "Graphics: %s (Ctrl+F11 to change)" % GraphicsQuality.get_name()
+		if hud != null:
+			hud.say(message)
+		else:
+			print(message)
+		get_viewport().set_input_as_handled()
+		return
 	if client == null or not client.welcomed or hud == null:
 		return
 	if event is InputEventKey and event.pressed and not event.echo and not _typing():
@@ -1213,13 +1325,41 @@ func _unhandled_input(event: InputEvent) -> void:
 					else:
 						client.collect_fish_trap(fish_trap_id)
 			KEY_Q:
-				_interact()
+				if Input.is_key_pressed(KEY_SHIFT) and not hud.is_menu_open():
+					client.loot_sweep()
+				else:
+					_interact()
 			KEY_1:
-				_quick_use("canned_food")
+				if Input.is_key_pressed(KEY_ALT) and Input.is_key_pressed(KEY_SHIFT):
+					hud.eat_smoked()
+				elif Input.is_key_pressed(KEY_CTRL):
+					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+						client.smart_provision("food")
+				elif Input.is_key_pressed(KEY_ALT):
+					var raw_item := ""
+					for tier in range(1, 5):
+						var candidate: String = "raw_fish" if tier == 1 else "raw_fish_%d" % tier
+						if client.inventory.count(candidate) > 0:
+							raw_item = candidate
+							break
+					if raw_item != "":
+						_quick_use(raw_item)
+					else:
+						hud.say("No raw fish carried. Properly cooked food is safer.")
+				else:
+					_quick_use(Defs.CAMP_FISH_STEW if Input.is_key_pressed(KEY_SHIFT) else "canned_food")
 			KEY_2:
-				_quick_use("empty_water_pouch" if Input.is_key_pressed(KEY_SHIFT) else "water_bottle")
+				if Input.is_key_pressed(KEY_CTRL):
+					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+						client.smart_provision("drink")
+				else:
+					_quick_use("empty_water_pouch" if Input.is_key_pressed(KEY_SHIFT) else "water_bottle")
 			KEY_3:
-				_quick_use("expedition_trauma_kit" if Input.is_key_pressed(KEY_SHIFT) else "bandage")
+				if Input.is_key_pressed(KEY_CTRL):
+					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+						client.quick_medicine()
+				else:
+					_quick_use("expedition_trauma_kit" if Input.is_key_pressed(KEY_SHIFT) else "bandage")
 			KEY_4:
 				_cycle_weapon()
 			KEY_5:
@@ -1230,7 +1370,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_7:
 				_quick_use("antibiotics")
 			KEY_F11:
-				_quick_use("herbal_poultice")
+				_quick_use("herbal_gut_tonic" if Input.is_key_pressed(KEY_SHIFT) else "herbal_poultice")
 			KEY_8:
 				_quick_use("thermal_wrap")
 			KEY_PERIOD:
@@ -1272,7 +1412,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					chat_edit.visible = true
 					chat_edit.grab_focus()
 			KEY_E:
-				_interact()
+				if Input.is_key_pressed(KEY_SHIFT) and not hud.is_menu_open():
+					client.loot_sweep()
+				else:
+					_interact()
 			KEY_F:
 				client.drink()
 			KEY_F1:
@@ -1311,7 +1454,10 @@ func _unhandled_input(event: InputEvent) -> void:
 						client.extinguish_campfire(fire_id)
 			KEY_0:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
-					hud.quick_cook()
+					if Input.is_key_pressed(KEY_ALT):
+						hud.quick_smoke()
+					else:
+						hud.quick_cook(Input.is_key_pressed(KEY_SHIFT))
 			KEY_9:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					if Input.is_key_pressed(KEY_SHIFT):
@@ -1341,12 +1487,19 @@ func _unhandled_input(event: InputEvent) -> void:
 					client.throw_decoy(decoy_direction)
 			KEY_O:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
-					var direction: Vector2 = _aim_direction()
-					if direction == Vector2.ZERO:
-						direction = Vector2(sin(client.yaw), cos(client.yaw))
-					var target := Vector2(client.predicted.x, client.predicted.z) + direction * 2.8
-					client.light_campfire(target)
-					hud.say("At night, campfire light attracts infected. Press - to extinguish.")
+					if Input.is_key_pressed(KEY_SHIFT):
+						var fire_id: int = client.nearest_campfire(client.display_position())
+						if fire_id < 0:
+							hud.say("Camp alarm: stand within 3m of an active campfire.")
+						else:
+							client.arm_camp_alarm(fire_id)
+					else:
+						var direction: Vector2 = _aim_direction()
+						if direction == Vector2.ZERO:
+							direction = Vector2(sin(client.yaw), cos(client.yaw))
+						var target := Vector2(client.predicted.x, client.predicted.z) + direction * 2.8
+						client.light_campfire(target)
+						hud.say("At night, campfire light attracts infected. Press - to extinguish.")
 			KEY_U:
 				if _build_mode:
 					_place_wall()

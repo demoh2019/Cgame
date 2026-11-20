@@ -3229,3 +3229,165 @@ godot --headless --path game --script res://tests/run_all.gd
 
 No native Godot engine modifications are necessary; the existing
 authoritative combat simulation and private snapshots support it.
+
+
+## Raid tempo: extra loot for a fast boss kill
+
+A dangerous-zone party raid now has two **server-authoritative** finish
+tiers: defeating the current boss within **90 seconds** grants gold tempo
+(+2 infected cores and +25 silver per zone tier); within **150 seconds**
+grants silver tempo (+1 infected core and +12 silver per zone tier).
+A slower victory still receives the original boss loot. The reward is
+placed into the **same shared boss bag**, so all existing reservation and
+need/greed rules apply without a second claim path or new network RPC.
+The existing nearby `raid_defeated` event carries an optional
+`tempo_rank` field. The server rejects invalid clocks, unrelated brutes,
+and bogus safe-zone tiers; kills cannot be replayed to generate more bags.
+
+Regression suite: `game/tests/test_raid_tempo.gd`, included in
+`game/tests/run_all.gd`. Tests require a Godot/Cgame runtime.
+
+
+## Guardian Shield Wall (party damage mitigation)
+
+Classless survivor guardians can now protect nearby teammates with a
+brief, active **Shield Wall** formation. Use the new **Shield Wall
+(party melee)** button beside Guardian Taunt and Guard Ally in the
+inventory/party combat controls. The shield is always activated
+through an authenticated RPC: clients never choose affected teammates,
+damage values, distances, or shield durations.
+
+- A living guardian on foot must belong to an actual party with
+  **at least one nearby living ally** in a dangerous zone and have an
+  **owned equipped melee weapon**. They spend **30 combat energy**
+  to create a nonpersistent **6-second** protective stance with a
+  **32-second** cooldown. Invalid attempts spend no energy.
+- Living nearby party allies within **5.5 metres**, on the same
+  danger-zone map and within **3 metres vertically**, take **22%
+  less physical damage** from ordinary infected melee attacks. A
+  raid boss's direct claw is mitigated by **12%** instead.
+  The guardian themselves receive **no additional reduction**:
+  existing personal Guardian Brace and single-hit Intercept continue
+  to cover their own defensive roles.
+- The shield is applied **after the existing equipped-gear mitigation,
+  Guardian Brace, timed Parry, and any legitimate field armor plate**.
+  It does not prevent infection, bleeding or fracture wounds by
+  itself. Those remain governed by the existing armor and
+  Warden Aura systems.
+- The server validates current party membership, real equipment,
+  living status, mounting, location, range, height and safety **at
+  every melee hit**. Moving away, changing gear, entering safety,
+  losing party membership or dying removes its benefit instantly.
+  Multiple active guardians can protect the same ally, but **only one
+  shield applies**: the nearest eligible guardian is selected, with
+  a stable peer-ID tie break. No multiplicative stacking.
+- This ability **never** runs from PvP damage, firearm damage, raid
+  cone/slam AoE, spitter acid, weather, hunger or infection ticks.
+  It produces no free healing, gear, rewards, or threat.
+- Each survivor's private `you.shield_wall_seconds`,
+  `you.shield_wall_cooldown`, `you.shield_wall_guarded_seconds`
+  and `you.shield_wall_guarded_by` snapshot drives a personal HUD
+  countdown. A real mitigated hit emits a
+  `party_shield_wall_block` event visible **only** to the guardian
+  and the protected ally. Nearby strangers receive no private
+  group status or mitigation events.
+- The live aura clears on death or respawn, but respawning does not
+  reset a pending cooldown. The state is session-only, not saved
+  to the character record.
+
+Implementation: `scripts/shared/party_shield_wall.gd`,
+`scripts/server/game_server.gd`, `scripts/shared/net.gd`,
+`scripts/client/game_client.gd` and `scripts/client/hud.gd`.
+Tests in `tests/test_party_shield_wall.gd` are registered in
+`tests/run_all.gd` and exercise actual zombie hits, energy,
+short cooldowns, nonstacking auras, safe zones, equipment, elevation,
+team membership, private network events, death/respawn and the lower
+raid reduction.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+This uses the game's existing GDScript combat, multiplayer RPCs and
+private state snapshots. It needs no native Godot engine changes.
+
+
+## Medic Cover: emergency threat handoff to a party guardian
+
+Healing can attract infected toward medics because the game has real
+server-side healer hate generation. A classless **Medic Cover**
+ability now gives a restoration-staff medic a tactical rescue option
+when surrounded by infected. The medic presses **Medic Cover
+(staff + guardian)** in the party/inventory combat controls.
+
+- Requires a **physically equipped restoration staff**, a living
+  nonmounted medic outside the safe hub, and an **equipped melee
+  guardian** in the same real party within **8 metres** and no more
+  than **3 metres elevation difference**. A second restoration staff
+  does not qualify as a melee guardian. No targets, positions, hate
+  values or damage are accepted from clients.
+- A successful request spends **24 combat energy**, applies a
+  **30-second** per-character server cooldown and redirects up to
+  **3 already-engaged normal infected** to the closest eligible
+  guardian (stable peer-ID tie-break). Each transferred infected
+  focuses the guardian for **2 seconds** using the existing
+  `Zombie.force_taunt` logic and its normal bounded hate entries.
+- Only infected that are currently chasing/attacking the medic or
+  have positive, real hate against that medic qualify. Enemies must
+  be within **16 metres and their own pursuit leash** of both
+  the medic and guardian, in the same dangerous zone and within
+  **3 metres vertically**. Idle infected, unrelated players' mobs,
+  raid bosses and enemies already focused by another guardian's
+  forced taunt are unaffected.
+- Upon real transfer, the medic's **existing** hate on that infected
+  is reduced to **35%**, not wiped out, ensuring a careless healer
+  can still pull aggro again. No heal, loot, XP, summon or free enemy
+  spawn is created. The group still must survive the encounter.
+- If there is no legitimate guardian or qualifying infected, the
+  command refuses **without energy or cooldown charge**. Fast repeat
+  requests are blocked by the server. The timer is session-only,
+  advances in regular player ticks, and is displayed privately as
+  `you.medic_cover_cooldown` on the medic's HUD.
+- A **medic_cover** summary event is delivered only to the requesting
+  medic and the actual guardian. Neither individual infected IDs
+  nor raw threat dictionaries are sent to any client. Ordinary
+  PvP damage, loot, gear, wounds and rewards are unchanged.
+
+Implemented in `scripts/shared/medic_cover.gd`,
+`scripts/server/game_server.gd`, `scripts/shared/net.gd`,
+`scripts/client/game_client.gd`, and `scripts/client/hud.gd`.
+Regression cases in `tests/test_medic_cover.gd` cover real Zombie
+target selection, existing healer threat reductions, guardian equipment
+and party roles, 3-enemy limit, idle/boss/third-party immunity, invalid
+geometry, failed casts, rate-limiting, event privacy and death.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+No native engine changes needed; this uses authoritative current
+GDScript combat, group rosters and reliable multiplayer RPCs.
+
+
+## Raid guard ward: team coordination during boss waves
+
+The existing dangerous-zone boss receives temporary protection from **living
+server-spawned raid reinforcements**. Every actual surviving raid guard reduces
+incoming boss damage by **12%**, with a strict **24% cap**; killing guards
+restores normal boss damage. The mechanic works during both one-time waves,
+and any survivors from wave one still count after wave two begins. The server
+derives guard identities and health itself; neither client actions nor normal
+zombies can forge this protection. It is removed on boss victory or timeout.
+
+Nearby online clients see the number of remaining guards and mitigation in the
+existing raid HUD, derived from the authoritative enemy snapshot. The local
+preview also shows this information when the boss is nearby. New
+`raid_ward_changed` events announce real guard deaths only within the
+existing interest radius. No new RPC, save migration, or engine-level API is
+required. The combat, snapshot, event-filtering, and replay tests live in
+`game/tests/test_raid_ward.gd`, included in `game/tests/run_all.gd`.
+
+Run the test suite using:
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```

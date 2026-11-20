@@ -578,6 +578,13 @@ func c_light_campfire(x: float, z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_arm_camp_alarm(fire_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "camp_alarm_arm", sim.cmd_arm_camp_alarm(peer, fire_id))
+
+
+@rpc("any_peer", "reliable")
 func c_refuel_campfire(fire_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -808,10 +815,33 @@ func c_party_feast(item_id: String) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_supply_request(need: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		_s_result.rpc_id(peer, "party_supply_request",
+			sim.cmd_party_supply_request(peer, need))
+
+
+@rpc("any_peer", "reliable")
 func c_party_aid(target_id: int, item_id: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "party_aid", sim.cmd_party_aid(peer, target_id, item_id))
+
+
+@rpc("any_peer", "reliable")
+func c_medic_cover() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "medic_cover", sim.cmd_medic_cover(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_party_provision(target_id: int, kind: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_provision",
+			sim.cmd_party_provision(peer, target_id, kind))
 
 
 @rpc("any_peer", "reliable")
@@ -940,11 +970,34 @@ func c_use(item_id: String) -> void:
 		s_result.rpc_id(peer, "use", sim.cmd_use(peer, str(item_id)))
 
 
+## Authenticated sender only; no client-supplied medicine or target.
+## Only the authenticated player may request food or drink; item stays server-owned.
+@rpc("any_peer", "reliable")
+func c_smart_provision(intent: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "smart_provision", sim.cmd_smart_provision(peer, intent))
+
+
+@rpc("any_peer", "reliable")
+func c_quick_medicine() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "quick_medicine", sim.cmd_quick_medicine(peer))
+
+
 @rpc("any_peer", "reliable")
 func c_attack(dir_x: float, dir_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "attack", sim.cmd_attack(peer, dir_x, dir_z))
+
+
+@rpc("any_peer", "reliable")
+func c_party_shield_wall() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_shield_wall", sim.cmd_party_shield_wall(peer))
 
 
 @rpc("any_peer", "reliable")
@@ -987,6 +1040,13 @@ func c_dodge(dir_x: float, dir_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "dodge", sim.cmd_dodge(peer, dir_x, dir_z))
+
+
+@rpc("any_peer", "reliable")
+func c_loot_sweep() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "loot_sweep", sim.cmd_loot_sweep(peer))
 
 
 @rpc("any_peer", "reliable")
@@ -1135,11 +1195,46 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
 		"site_discovered", "caravan_escort_paid", "caravan_defended", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "party_flank", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "barricade_shot", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "stagger_finisher", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
+		"camp_alarm":
+			# A former ally, distant player, enemy, or recycled peer ID
+			# cannot receive camp locations or approximate infected counts.
+			if sim == null:
+				return false
+			var owner_id: int = int(event.get("peer", -1))
+			var owner = sim.players.get(owner_id)
+			var recipient = sim.players.get(peer)
+			if owner == null or recipient == null or not sim._alive(owner) or not sim._alive(recipient):
+				return false
+			if not recipient.position.is_finite():
+				return false
+			if Vector2(recipient.position.x - float(event.get("x", INF)),
+					recipient.position.z - float(event.get("z", INF))).length_squared() > (
+					Defs.INTEREST_RADIUS * Defs.INTEREST_RADIUS):
+				return false
+			if owner_id == peer:
+				return true
+			var group: int = int(event.get("group", 0))
+			return group > 0 and sim.parties.group_of(owner_id) == group and (
+				sim.parties.group_of(peer) == group) and (
+				sim.parties.members_of(owner_id).has(peer))
 		"caravan_ambushed":
 			return sim != null and CaravanEscort.can_receive_alert(
 				event, peer, sim.players, sim.parties)
-		"party_aid", "party_triage":
+		"party_aid", "party_triage", "medic_cover", "party_provision":
+			# Only the caster and actual defender see aggro handoffs.
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
+		"party_supply_request":
+			# Membership is checked when the event is delivered, not only
+			# when it was created: leaving a party revokes location access.
+			if sim == null:
+				return false
+			var source_id: int = int(event.get("peer", -1))
+			var group_id: int = int(event.get("group", 0))
+			return group_id > 0 and source_id != peer and \
+				sim.players.has(source_id) and sim.players.has(peer) and \
+				sim.parties.group_of(source_id) == group_id and \
+				sim.parties.group_of(peer) == group_id and \
+				sim.parties.members_of(source_id).has(peer)
 		"trade":
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"guardian_taunt":
@@ -1147,6 +1242,9 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 		"guardian_retribution":
 			# The earned counterstrike and enemy ID are private to its guardian.
 			return event.get("peer", -1) == peer
+		"party_shield_wall_block":
+			# Only the guardian and the directly shielded victim can see the hit.
+			return event.get("peer", -1) == peer or event.get("by", -1) == peer
 		"guardian_intercept":
 			# Share only with the protected ally and the real guardian.
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
@@ -1168,6 +1266,6 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
 			return event.get("id", -1) == peer or event.get("by", 0) == peer or _is_nearby(event, peer)
-		"lightning_warning", "lightning_struck", "attack", "siege_charge_armed", "siege_charge_disarmed", "siege_brace_placed", "siege_brace_absorbed", "siege_charge_detonated", "siege_charge_fizzled", "zombie_died", "armor_sunder", "finishing_strike", "decoy_thrown", "ember_thrown", "campfire_doused", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_interrupted", "raid_cone_warning", "raid_cone_struck", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
+		"lightning_warning", "lightning_struck", "attack", "siege_charge_armed", "siege_charge_disarmed", "siege_brace_placed", "siege_brace_absorbed", "siege_charge_detonated", "siege_charge_fizzled", "zombie_died", "armor_sunder", "finishing_strike", "decoy_thrown", "ember_thrown", "campfire_doused", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_interrupted", "raid_cone_warning", "raid_cone_struck", "raid_enraged", "raid_reinforcements", "raid_ward_changed", "raid_defeated", "raid_expired":
 			return _is_nearby(event, peer)
 	return false

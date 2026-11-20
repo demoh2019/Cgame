@@ -6,10 +6,12 @@ const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const Party = preload("res://scripts/shared/party.gd")
+const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
+const TrailRation = preload("res://scripts/shared/trail_ration.gd")
 const CombatStress = preload("res://scripts/shared/combat_stress.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
@@ -259,6 +261,12 @@ func _build() -> void:
 	var inventory_title := Label.new()
 	inventory_title.text = "Inventory: click = use/equip, right-click = bank one (at hub workbench)"
 	inventory_box.add_child(inventory_title)
+	var sweep_button := Button.new()
+	sweep_button.name = "CollectNearbyPveLoot"
+	sweep_button.text = "Collect nearby PvE bags (Shift+E / Shift+Q)"
+	sweep_button.tooltip_text = "Up to five eligible ordinary infected drops. Raids, full-loot PvP and guarded cargo remain manual."
+	sweep_button.pressed.connect(func() -> void: client.loot_sweep())
+	inventory_box.add_child(sweep_button)
 	var preset_title := Label.new()
 	preset_title.text = "Gear presets: save / equip / clear at safe hub workbench"
 	inventory_box.add_child(preset_title)
@@ -322,6 +330,17 @@ func _build() -> void:
 		var direction := Vector2(sin(client.yaw), cos(client.yaw))
 		client.light_campfire(Vector2(pos.x, pos.z) + direction * 2.8))
 	inventory_box.add_child(campfire_button)
+	var alarm_button := Button.new()
+	alarm_button.name = "ArmCampAlarm"
+	alarm_button.text = "Arm camp sentry alarm (Shift+O)"
+	alarm_button.tooltip_text = "Uses 1 field-crafted Camp Sentry Alarm Kit at a live fire. Detects infected within 21m for up to 3 minutes; private alerts at most every 24s."
+	alarm_button.pressed.connect(func() -> void:
+		var id: int = client.nearest_campfire(client.display_position())
+		if id < 0:
+			say("Camp alarm: stand within 3m of a live campfire.")
+		else:
+			client.arm_camp_alarm(id))
+	inventory_box.add_child(alarm_button)
 	var pitch_button := Button.new()
 	pitch_button.name = "PitchTarp"
 	pitch_button.text = "Pitch field tarp (2 cloth T1, 2 fiber T1, 1 plank T1)"
@@ -412,6 +431,12 @@ func _build() -> void:
 	alkali_button.tooltip_text = "Clears lingering spitter acid within 5.5 m, not the initial splash."
 	alkali_button.pressed.connect(func() -> void: client.use_item("field_alkali_kit"))
 	inventory_box.add_child(alkali_button)
+	var seal_button := Button.new()
+	seal_button.name = "UseWoundSealant"
+	seal_button.text = "Apply antiseptic bite seal (90s)"
+	seal_button.tooltip_text = "Craft from wild herbs, antiseptic and cloth. 45% less infected bite infection for 90s; no acid, spore or PvP immunity."
+	seal_button.pressed.connect(func() -> void: client.use_item("wound_sealant"))
+	inventory_box.add_child(seal_button)
 	var canteen_button := Button.new()
 	canteen_button.name = "RefillFieldCanteen"
 	canteen_button.text = "Refill canteen at shore (1 filter -> 1 clean water)"
@@ -424,6 +449,28 @@ func _build() -> void:
 	pouch_button.tooltip_text = "Craft an empty pouch from cloth + fiber. Fill near lake water, then craft Boiled Water using 1 wood at a live campfire (or hub workbench). Raw water cannot be drunk."
 	pouch_button.pressed.connect(func() -> void: client.use_item("empty_water_pouch"))
 	inventory_box.add_child(pouch_button)
+	var raw_fish_button := Button.new()
+	raw_fish_button.name = "EatRawFish"
+	raw_fish_button.text = "Emergency food: eat raw fish (Alt+1, poisoning risk)"
+	raw_fish_button.tooltip_text = "Eat one carried T1-T4 raw fish for limited hunger recovery. Causes food poisoning; cook it for a safe meal instead."
+	raw_fish_button.pressed.connect(func() -> void:
+		var chosen := ""
+		for tier in range(1, 5):
+			var candidate: String = "raw_fish" if tier == 1 else "raw_fish_%d" % tier
+			if client.inventory.count(candidate) > 0:
+				chosen = candidate
+				break
+		if chosen == "":
+			say("No raw fish carried. Try fishing at the shore.")
+		else:
+			client.use_item(chosen))
+	inventory_box.add_child(raw_fish_button)
+	var stomach_button := Button.new()
+	stomach_button.name = "UseStomachRemedy"
+	stomach_button.text = "Treat food poisoning (Shift+F11; herbal remedy)"
+	stomach_button.tooltip_text = "Craft from 2 wild herbs, 1 charcoal filter and 1 clean water. Reduces food poisoning by 75 points; no effect if already healthy."
+	stomach_button.pressed.connect(func() -> void: client.use_item("herbal_gut_tonic"))
+	inventory_box.add_child(stomach_button)
 	var storm_button := Button.new()
 	storm_button.name = "EquipStormInsulator"
 	storm_button.text = "Equip storm insulation (180s)"
@@ -666,8 +713,31 @@ func _build() -> void:
 	inventory_box.add_child(spores_button)
 	var cook_button := Button.new()
 	cook_button.text = "0: Quick-cook best carried fish (fire or hub)"
-	cook_button.pressed.connect(quick_cook)
+	cook_button.pressed.connect(func() -> void: quick_cook(false))
 	inventory_box.add_child(cook_button)
+	var stew_cook_button := Button.new()
+	stew_cook_button.name = "QuickCookCampFishStew"
+	stew_cook_button.text = "Shift+0: Cook fish stew (fish + clean water + wood)"
+	stew_cook_button.tooltip_text = "At an active campfire or the hub workbench. Makes 1 meal for hunger and thirst."
+	stew_cook_button.pressed.connect(func() -> void: quick_cook(true))
+	inventory_box.add_child(stew_cook_button)
+	var stew_eat_button := Button.new()
+	stew_eat_button.name = "EatCampFishStew"
+	stew_eat_button.text = "Shift+1: Eat fish stew (+40 food, +38 water)"
+	stew_eat_button.pressed.connect(func() -> void: client.use_item(Defs.CAMP_FISH_STEW))
+	inventory_box.add_child(stew_eat_button)
+	var smoked_craft := Button.new()
+	smoked_craft.name = "QuickSmokeTrailFish"
+	smoked_craft.text = "Alt+0: Smoke highest craftable fish (2 wood + 1 fiber)"
+	smoked_craft.tooltip_text = "A lit campfire or hub workbench is required. Smoked fish T1-T4 is safe travel food and reduces hunger use for a short time."
+	smoked_craft.pressed.connect(quick_smoke)
+	inventory_box.add_child(smoked_craft)
+	var smoked_eat := Button.new()
+	smoked_eat.name = "EatSmokedTrailFish"
+	smoked_eat.text = "Eat best carried smoked fish: travel hunger protection"
+	smoked_eat.tooltip_text = "Consumes one real smoked ration. Tier 1-4 reduces natural hunger loss for 210-390 seconds. It does not increase combat power."
+	smoked_eat.pressed.connect(eat_smoked)
+	inventory_box.add_child(smoked_eat)
 	var accept_contract := Button.new()
 	accept_contract.text = "Accept next mission"
 	accept_contract.pressed.connect(func() -> void: client.contract("accept"))
@@ -705,6 +775,21 @@ func _build() -> void:
 	inventory_box.add_child(_party_status)
 	_party_target = OptionButton.new()
 	inventory_box.add_child(_party_target)
+	var provision_row := HBoxContainer.new()
+	inventory_box.add_child(provision_row)
+	for kind in ["food", "water", "kit", "stew"]:
+		var package_kind: String = kind
+		var provision_button := Button.new()
+		provision_button.name = "CampProvision" + package_kind.capitalize()
+		provision_button.text = "Give " + package_kind.capitalize()
+		provision_button.tooltip_text = "Give real supplies to the selected teammate at the same burning campfire (3.2m, shared aid cooldown)."
+		provision_button.pressed.connect(func() -> void:
+			var selected: int = _party_target.get_selected_id()
+			if selected < 0:
+				say("Choose a nearby party ally to provision.")
+			else:
+				client.party_provision(selected, package_kind))
+		provision_row.add_child(provision_button)
 	var party_buttons := HBoxContainer.new()
 	inventory_box.add_child(party_buttons)
 	var invite_member := Button.new()
@@ -877,6 +962,12 @@ func _build() -> void:
 	guardian_button.tooltip_text = "Melee weapon, party, 25 combat energy, 20s cooldown; defend nearby allies"
 	guardian_button.pressed.connect(func() -> void: client.guardian_taunt())
 	inventory_box.add_child(guardian_button)
+	var shield_button := Button.new()
+	shield_button.name = "PartyShieldWall"
+	shield_button.text = "Shield Wall (party melee)"
+	shield_button.tooltip_text = "Guardian with an owned melee weapon: nearby allies within 5.5m take 22% less infected claw damage (12% boss claw) for 6 seconds. Costs 30 energy, 32s cooldown; no PvP, acid or AoE."
+	shield_button.pressed.connect(func() -> void: client.party_shield_wall())
+	inventory_box.add_child(shield_button)
 	var intercept_button := Button.new()
 	intercept_button.name = "GuardianIntercept"
 	intercept_button.text = "Guard ally (one PvE hit)"
@@ -974,16 +1065,21 @@ func _build() -> void:
 	var aid_row := HBoxContainer.new()
 	inventory_box.add_child(aid_row)
 	var aid_items := OptionButton.new()
-	for item_id in ["bandage", "field_antiseptic", "expedition_trauma_kit", "antibiotics", "purified_serum",
-			"berries", "canned_food", "water_bottle"]:
-		if Defs.is_item(item_id):
-			var index: int = aid_items.item_count
-			aid_items.add_item(str(Defs.item(item_id).get("name", item_id)))
-			aid_items.set_item_metadata(index, item_id)
+	aid_items.add_item("Auto (choose carried medicine)")
+	aid_items.set_item_metadata(0, "auto")
+	for item_id in PartyAid.medical_items():
+		var index: int = aid_items.item_count
+		aid_items.add_item(str(Defs.item(item_id).get("name", item_id)))
+		aid_items.set_item_metadata(index, item_id)
+	for item_id in ["berries", "canned_food", "water_bottle"]:
+		var index: int = aid_items.item_count
+		aid_items.add_item(str(Defs.item(item_id).get("name", item_id)))
+		aid_items.set_item_metadata(index, item_id)
+	aid_items.select(0)
 	aid_row.add_child(aid_items)
 	var aid_button := Button.new()
 	aid_button.text = "Aid / Share"
-	aid_button.tooltip_text = "Treat or feed a party member within 3.2m using your own medicine, berries, canned food or water. Shared 5s cooldown."
+	aid_button.tooltip_text = "Auto treats wounds only. Select a medical item, bite sealant, food or water to share manually. Bite sealant protects an ally for 90s, outside combat. Range 3.2m, cooldown 5s."
 	aid_button.pressed.connect(func() -> void:
 		var target: int = _party_target.get_selected_id()
 		if target < 0 or aid_items.selected < 0:
@@ -991,11 +1087,29 @@ func _build() -> void:
 		else:
 			client.party_aid(target, str(aid_items.get_selected_metadata())))
 	aid_row.add_child(aid_button)
+	var supplies_row := HBoxContainer.new()
+	inventory_box.add_child(supplies_row)
+	var need_food := Button.new()
+	need_food.text = "Request food"
+	need_food.tooltip_text = "Ask your party for food only when hunger is 60 or lower. 30s shared signal cooldown."
+	need_food.pressed.connect(func() -> void: client.party_supply_request("food"))
+	supplies_row.add_child(need_food)
+	var need_water := Button.new()
+	need_water.text = "Request water"
+	need_water.tooltip_text = "Ask your party for water only when thirst is 60 or lower. 30s shared signal cooldown."
+	need_water.pressed.connect(func() -> void: client.party_supply_request("water"))
+	supplies_row.add_child(need_water)
 	var triage_button := Button.new()
 	triage_button.text = "Triage nearby allies"
 	triage_button.tooltip_text = "Spend one crafted pack to treat up to 3 nearby allies (5.5m, 18s cooldown). Infected fighting them may turn toward the medic."
 	triage_button.pressed.connect(func() -> void: client.party_triage())
 	inventory_box.add_child(triage_button)
+	var cover_button := Button.new()
+	cover_button.name = "MedicCover"
+	cover_button.text = "Medic Cover (staff + guardian)"
+	cover_button.tooltip_text = "Restore-staff medic: 24 energy, 30s cooldown. A nearby equipped frontline guardian intercepts up to 3 already engaged infected (not raid bosses). No free healing or PvP aggro."
+	cover_button.pressed.connect(func() -> void: client.medic_cover())
+	inventory_box.add_child(cover_button)
 	# A cook supplies one real dish per present, eligible group member.
 	var feast_row := HBoxContainer.new()
 	inventory_box.add_child(feast_row)
@@ -1206,13 +1320,35 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 ## Invoked from the online '0' key and inventory button.
-func quick_cook() -> void:
+func quick_cook(stew: bool = false) -> void:
+	if stew:
+		# Same server-side crafting rules as any manually selected campfire recipe.
+		client.craft(Defs.CAMP_FISH_STEW, 1)
+		return
 	var recipe_id: String = QuickCooking.best_recipe(
 		client.inventory, int(client.you.get("crafting_level", 1)))
 	if recipe_id.is_empty():
 		say("Cooking: need fish, matching wood and sufficient crafting mastery")
 	else:
 		client.craft(recipe_id, 1)
+
+
+func quick_smoke() -> void:
+	var recipe: String = TrailRation.best_recipe(
+		client.inventory, int(client.you.get("crafting_level", 1)))
+	if recipe.is_empty():
+		say("Smoking fish needs raw fish, 2 matching wood and 1 fiber, plus crafting mastery.")
+	else:
+		client.craft(recipe, 1)
+
+
+func eat_smoked() -> void:
+	for tier in range(Defs.MAX_TIER, 0, -1):
+		var item_id: String = "smoked_fish" if tier == 1 else "smoked_fish_%d" % tier
+		if client.inventory.count(item_id) > 0:
+			client.use_item(item_id)
+			return
+	say("No smoked fish carried. Cook some at a campfire first.")
 
 
 func toggle_inventory() -> void:
@@ -1444,11 +1580,13 @@ func _press_key(key: int) -> void:
 # "pct" shows the value as percent, "s" as seconds left, "hits" as charges, "" as a flag.
 const EFFECTS := [
 	["infection", "spore_culture", "Infection: grows until treated with antiseptic or antibiotics", true, "pct"],
+	["food_poisoning", "herbal_gut_tonic", "Food poisoning: extra thirst and gradual health loss. Use herbal stomach remedy.", true, "pct"],
 	["bleeding", "bandage", "Bleeding: bandage it", true, "pct"],
 	["fracture", "field_splint", "Fracture: slows you; a splint helps", true, "pct"],
 	["exposure", "thermal_wrap", "Cold: warm up at a fire, in shelter or with a heat pack", true, "pct"],
 	["combat_tag_seconds", "machete", "In combat: logging out now drops your gear in full-loot zones", true, "s"],
 	["meal_seconds", "cooked_fish", "Hearty meal: better regeneration", false, "s"],
+	["ration_seconds", "smoked_fish", "Smoked travel ration: slower hunger drain", false, "s"],
 	["coating_seconds", "antiseptic_edge_oil", "Antiseptic edge oil on your weapon", false, "s"],
 	["sharpened_hits", "field_whetstone", "Sharpened weapon", false, "hits"],
 	["sighted_hits", "field_sighting_kit", "Sighted weapon", false, "hits"],
@@ -1534,7 +1672,7 @@ func _refresh_left_column() -> void:
 	for effect in EFFECTS:
 		var raw: Variant = you.get(effect[0], 0)
 		var value: float = 1.0 if raw is bool and raw else (float(raw) if (raw is float or raw is int) else 0.0)
-		if (effect[0] in ["infection", "bleeding", "fracture", "exposure"] and value < 0.5) or value <= 0.0:
+		if (effect[0] in ["infection", "food_poisoning", "bleeding", "fracture", "exposure"] and value < 0.5) or value <= 0.0:
 			continue
 		shown.append([effect, value])
 	var roster: Array = []
@@ -2064,6 +2202,9 @@ func _on_event(event: Dictionary) -> void:
 		"restoration_pulse":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Restoration pulse: %d ally%s treated." % [int(event.get("count", 0)), "" if int(event.get("count", 0)) == 1 else "s"])
+		"camp_alarm":
+			banner("CAMP ALERT: %d INFECTED NEAR YOUR FIRE" % int(
+				event.get("count", 0)), Color(1.0, 0.62, 0.25))
 		"snare_triggered":
 			say("A snare caught an infected.")
 		"barricade_broken":
@@ -2077,6 +2218,18 @@ func _on_event(event: Dictionary) -> void:
 				int(event.get("silver", 0))])
 		"caravan_defended":
 			say("CARAVAN DEFENDED! All attackers defeated. Earn 15% extra silver on delivery.")
+		"ruin_ambush_cleared":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("RUIN SECURED! All %d awakened infected defeated." % int(event.get("count", 0)))
+			elif my_group > 0 and int(event.get("group", 0)) == my_group:
+				say("RUIN SECURED! The group has cleared the infected ambush.")
+		"ruin_ambush":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("RUIN AMBUSH! %d infected awakened by your T%d cache. Fight or retreat!" % [
+					int(event.get("count", 0)), int(event.get("tier", 3))])
+			elif my_group > 0 and int(event.get("group", 0)) == my_group:
+				say("RUIN ALERT! A teammate woke %d infected. Regroup or fall back!" % [
+					int(event.get("count", 0))])
 		"caravan_ambushed":
 			if int(event.get("peer", 0)) == client.peer_id:
 				say("CARAVAN AMBUSH! %d infected are converging on your cargo. Defend or flee!" % [
@@ -2131,17 +2284,34 @@ func _on_event(event: Dictionary) -> void:
 		"outlaw_bounty":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("OUTLAW BOUNTY: +%d silver for a wanted survivor." % int(event.get("silver", 0)))
+		"medic_cover":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("MEDIC COVER: guardian #%d pulled %d infected off you!" % [
+					int(event.get("by", -1)), int(event.get("count", 0))])
+			elif int(event.get("by", -1)) == client.peer_id:
+				say("MEDIC COVER: drew %d attacking infected from medic #%d." % [
+					int(event.get("count", 0)), int(event.get("peer", -1))])
 		"party_triage":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Triage care received: +%d HP, -%d bleeding." % [
 					roundi(float(event.get("heal", 0.0))),
 					roundi(float(event.get("bleeding_stopped", 0.0)))])
+		"party_supply_request":
+			if int(event.get("peer", -1)) != client.peer_id:
+				say("%s needs %s (%d/100)! Meet at x%d z%d and use Aid / Share." % [
+					str(event.get("name", "Party member")),
+					str(event.get("need", "supplies")).to_upper(),
+					int(event.get("level", 0)),
+					roundi(float(event.get("x", 0.0))),
+					roundi(float(event.get("z", 0.0)))])
 		"party_aid":
 			if int(event.get("peer", -1)) == client.peer_id:
 				if float(event.get("food", 0.0)) > 0.0 or float(event.get("drink", 0.0)) > 0.0:
 					say("Teammate shared supplies: +%d hunger, +%d thirst." % [
 						roundi(float(event.get("food", 0.0))),
 						roundi(float(event.get("drink", 0.0)))])
+				elif float(event.get("food_poison_treated", 0.0)) > 0.0:
+					say("Teammate treated food poisoning: -%d severity." % roundi(float(event.get("food_poison_treated", 0.0))))
 				else:
 					say("Teammate treated you: +%d HP, -%d infection, -%d bleeding, -%d fracture." % [
 						roundi(float(event.get("heal", 0.0))),
@@ -2252,6 +2422,13 @@ func _on_event(event: Dictionary) -> void:
 		"guardian_retribution":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("GUARDIAN COUNTERSTRIKE! +25% melee damage against the intercepted infected.")
+		"party_shield_wall_block":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("SHIELD WALL: guardian #%d prevented %.1f infected melee damage to you!" % [
+					int(event.get("by", -1)), float(event.get("prevented", 0.0))])
+			elif int(event.get("by", -1)) == client.peer_id:
+				say("SHIELD WALL: prevented %.1f infected damage to ally #%d." % [
+					float(event.get("prevented", 0.0)), int(event.get("peer", -1))])
 		"guardian_intercept":
 			if int(event.get("by", -1)) == client.peer_id:
 				if bool(event.get("counter_ready", false)):
@@ -2297,8 +2474,16 @@ func _on_event(event: Dictionary) -> void:
 			say("PvP: +%d honor | %d total (%s)" % [int(event.get("earned", 0)),
 				int(event.get("honor", 0)), str(event.get("rank", "Wanderer"))])
 		"raid_reinforcements":
-			say("RAID PHASE %d! %d additional infected appeared." % [
-				int(event.get("phase", 1)), int(event.get("count", 0))])
+			say("RAID PHASE %d: %d new infected! WARD: %d guards, boss resists %d%% damage." % [
+				int(event.get("phase", 1)), int(event.get("count", 0)),
+				int(event.get("guards", 0)), int(event.get("reduction_percent", 0))])
+		"raid_ward_changed":
+			var guards: int = int(event.get("guards", 0))
+			if guards > 0:
+				say("RAID WARD: %d guards remain. Boss resists %d%% damage." % [
+					guards, int(event.get("reduction_percent", 0))])
+			else:
+				say("RAID WARD BROKEN! Boss now takes full damage.")
 		"scavenging":
 			if event.get("peer", -1) == client.peer_id:
 				say("+%d scavenging XP (rank %d)" % [
@@ -2363,6 +2548,43 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "smart_provision":
+		if bool(data.get("ok", false)):
+			var item_id: String = str(data.get("item", ""))
+			say("Survival supplies: used %s." % str(Defs.item(item_id).get("name", item_id)))
+		elif str(data.get("reason", "")) == "no_provision":
+			say("Survival supplies: no suitable safe ration or drink, or not needed yet.")
+		else:
+			say("Survival supplies: %s (no items spent)." % str(data.get("reason", "rejected")))
+		return
+	if kind == "use" and bool(data.get("trail_ration", false)):
+		say("Smoked fish consumed. Trail ration T%d: hunger use reduced for %.0fs." % [
+			int(data.get("tier", 1)), float(data.get("seconds", 0.0))])
+		return
+	if kind == "use" and bool(data.get("ate_raw_fish", false)):
+		say("Raw fish eaten! Food poisoning %d/100. Cook catches for safety; use a herbal stomach remedy." % int(data.get("severity", 0)))
+		return
+	if kind == "use" and bool(data.get("stomach_remedy", false)):
+		say("Stomach treatment applied. Food poisoning remaining: %d/100." % int(data.get("remaining", 0)))
+		return
+	if kind == "quick_medicine":
+		if bool(data.get("ok", false)):
+			var id: String = str(data.get("item", ""))
+			say("Field treatment: used %s." % str(Defs.item(id).get("name", id)))
+		elif str(data.get("reason", "")) == "no_treatment":
+			say("Field treatment: no useful medicine carried for current wounds.")
+		else:
+			say("Field treatment: %s (nothing spent)." % str(data.get("reason", "rejected")))
+		return
+	if kind == "use" and bool(data.get("wound_seal", false)):
+		if bool(data.get("ok", false)):
+			say("Wound seal active: -45% infected bite infection for 90s (not acid or spores).")
+		else:
+			say("Wound seal: " + str(data.get("reason", "rejected")) + " (dose not spent)")
+		return
+	if kind == "use" and bool(data.get("ok", false)) and str(data.get("item", "")) == "murky_water":
+		say("Collected unboiled lake water. Boil with 1 wood at a lit campfire or the hub workbench.")
+		return
 	if kind == "use" and bool(data.get("survey_signal", false)):
 		if bool(data.get("ok", false)):
 			say("Party mineral signal: T%d %s deposit shared for %.0fs. Allies can navigate there." % [
@@ -2675,6 +2897,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		say("Decoy deployed: nearby idle infected investigate the sound." if bool(data.get("ok", false)) else
 				"Decoy denied: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "party_shield_wall":
+		if bool(data.get("ok", false)):
+			say("SHIELD WALL active for %.0fs; protecting %d nearby allies." % [
+				float(data.get("seconds", 0.0)), int(data.get("allies", 0))])
+		else:
+			say("Shield Wall: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "guardian_intercept":
 		if bool(data.get("ok", false)):
 			say("GUARD LINK: ally #%d guarded for %.0fs, next melee hit only." % [
@@ -2694,6 +2923,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Outpost cache: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "medic_cover":
+		if bool(data.get("ok", false)):
+			say("Medic Cover: %d engaged infected redirected to guardian #%d." % [
+				int(data.get("count", 0)), int(data.get("guardian", -1))])
+		else:
+			say("Medic Cover denied: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "party_triage":
 		if bool(data.get("ok", false)):
 			say("Triage: treated %d allies (+%d HP total, -%d bleeding)." % [
@@ -2702,12 +2938,25 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Triage denied: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "party_supply_request":
+		if bool(data.get("ok", false)):
+			say("Party request sent: need %s (%d/100). Next signal in %ds." % [
+				str(data.get("need", "")), int(data.get("level", 0)),
+				int(data.get("seconds", 30))])
+		else:
+			say("Party request denied: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "party_aid":
 		if bool(data.get("ok", false)):
-			if float(data.get("food", 0.0)) > 0.0 or float(data.get("drink", 0.0)) > 0.0:
+			if data.has("wound_seal_seconds"):
+				say("Expedition ready: ally #%d sealed for %.0fs (-45%% infected bite infection)." % [
+					int(data.get("peer", 0)), float(data["wound_seal_seconds"])])
+			elif float(data.get("food", 0.0)) > 0.0 or float(data.get("drink", 0.0)) > 0.0:
 				say("Supplies shared: +%d hunger, +%d thirst." % [
 					roundi(float(data.get("food", 0.0))),
 					roundi(float(data.get("drink", 0.0)))])
+			elif float(data.get("food_poison_treated", 0.0)) > 0.0:
+				say("Field aid: treated ally food poisoning (-%d severity)." % roundi(float(data.get("food_poison_treated", 0.0))))
 			else:
 				say("Field aid: +%d HP, -%d infection, -%d bleeding." % [
 					roundi(float(data.get("heal", 0.0))),
@@ -2715,6 +2964,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 					roundi(float(data.get("bleeding_stopped", 0.0)))])
 		else:
 			say("Field aid / share denied: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "loot_sweep":
+		if bool(data.get("ok", false)):
+			say("PICKUP: %d items from %d PvE bags (%d emptied)." % [
+				int(data.get("items", 0)), int(data.get("bags", 0)), int(data.get("emptied", 0))])
+		else:
+			say("Nearby pickup: %s." % str(data.get("reason", "rejected")))
 		return
 	if kind == "loot" and str(data.get("reason", "")) == "guards_alive":
 		say("Cache sealed: eliminate %d infected guards." % int(data.get("remaining", 0)))
@@ -2771,6 +3027,22 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Party rally: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "party_provision":
+		if bool(data.get("ok", false)):
+			say("Camp supplies delivered: %s (5s shared support cooldown)." % str(data.get("items", {})))
+		else:
+			var reasons := {
+				"not_in_party": "Select a current party member.",
+				"too_far": "Move within 3.2m of your teammate.",
+				"no_fire": "Both teammates need the same burning campfire.",
+				"missing_supplies": "Required food or water is not in your backpack.",
+				"no_space": "Teammate's backpack has no room.",
+				"cooldown": "Wait for your shared party aid timer.",
+				"in_combat": "Finish combat before resupplying.",
+			}
+			say("Camp supplies: " + str(reasons.get(
+				str(data.get("reason", "")), str(data.get("reason", "rejected")))))
+		return
 	if kind == "party":
 		if bool(data.get("ok", false)):
 			say("Party updated. Member lists appear in the next server snapshot.")
@@ -2800,6 +3072,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Field tarp packed; materials are not refunded.")
 		else:
 			say("Pack tarp: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "camp_alarm_arm":
+		if bool(data.get("ok", false)):
+			say("Camp sentry armed for %d seconds; detects infected within %dm." % [
+				int(data.get("seconds", 0)), int(data.get("radius", 21))])
+		else:
+			say("Camp alarm: " + str(data.get("reason", "rejected")) + " (kit not spent).")
 		return
 	if kind == "campfire":
 		if bool(data.get("ok", false)):
@@ -3046,6 +3325,19 @@ func _process(_delta: float) -> void:
 	if not flank_hint.is_empty():
 		_info_label.text += "\nFLANK OPEN: infected #%d (+%d%% basic melee) — stay behind while ally tanks" % [
 			int(flank_hint.get("zombie", -1)), int(flank_hint.get("bonus", 18))]
+	var wall_active: float = float(client.you.get("shield_wall_seconds", 0.0))
+	var wall_cooldown: float = float(client.you.get("shield_wall_cooldown", 0.0))
+	if wall_active > 0.0:
+		_info_label.text += "\nSHIELD WALL: %.1fs (allies -22%% infected claw, raid -12%%)" % wall_active
+	elif wall_cooldown > 0.0:
+		_info_label.text += "\nShield Wall ready in %.0fs" % wall_cooldown
+	var guarded_for: float = float(client.you.get("shield_wall_guarded_seconds", 0.0))
+	if guarded_for > 0.0:
+		_info_label.text += "\nSHIELDED by guardian #%d: %.1fs (PvE melee only)" % [
+			int(client.you.get("shield_wall_guarded_by", -1)), guarded_for]
+	var cover_cooldown: float = float(client.you.get("medic_cover_cooldown", 0.0))
+	if cover_cooldown > 0.0:
+		_info_label.text += "\nMedic Cover ready in %.0fs (staff + guardian)" % cover_cooldown
 	var intercept_active: float = float(client.you.get("guardian_intercept_seconds", 0.0))
 	var intercept_cooldown: float = float(client.you.get("guardian_intercept_cooldown", 0.0))
 	if intercept_active > 0.0:
@@ -3093,6 +3385,10 @@ func _process(_delta: float) -> void:
 	# An exact server-derived recovery timer (not inferred from visual FX).
 	for enemy in client.zombies.values():
 		if bool(enemy.get("raid_boss", false)):
+			var ward_guards: int = int(enemy.get("raid_ward_guards", 0))
+			if ward_guards > 0:
+				_info_label.text += "\nRAID WARD: %d guards | -%d%% boss damage. Defeat adds!" % [
+					ward_guards, int(enemy.get("raid_ward_reduction", 0))]
 			var recovery: float = float(enemy.get("raid_exposed_seconds", 0.0))
 			if recovery > 0.0:
 				_info_label.text += "\nRAID BOSS EXPOSED: %.1fs (+15%% PvE damage)" % recovery
@@ -3183,6 +3479,9 @@ func _process(_delta: float) -> void:
 	var spore_filter_left: float = float(client.you.get("spore_filter_seconds", 0.0))
 	if spore_filter_left > 0.0:
 		_info_label.text += "\nSPORE FILTER: %.0fs remaining (airborne spores only)" % spore_filter_left
+	var seal_left: float = float(client.you.get("wound_seal_seconds", 0.0))
+	if seal_left > 0.0:
+		_info_label.text += "\nWOUND SEAL: %.0fs remaining (-45%% bite infection only)" % seal_left
 	var survey: Dictionary = client.you.get("ruin_survey", {})
 	if not survey.is_empty():
 		var destination := Vector2(float(survey["x"]), float(survey["z"]))
@@ -3401,6 +3700,11 @@ func _process(_delta: float) -> void:
 		_equipped.text += "\nPrepared meal T%d: %.0fs | +%.1f stamina/s, +%.2f energy/s" % [
 			meal_tier, meal_left, HeartyMeal.stamina_per_second(meal_tier),
 			HeartyMeal.energy_per_second(meal_tier)]
+	var ration_left: float = float(client.you.get("ration_seconds", 0.0))
+	var ration_tier: int = int(client.you.get("ration_tier", 0))
+	if ration_left > 0.0 and ration_tier > 0:
+		_equipped.text += "\nTrail ration T%d: %.0fs | %.0f%% less hunger drain" % [
+			ration_tier, ration_left, TrailRation.hunger_savings(ration_tier) * 100.0]
 	_refresh_left_column()
 	_party_frames.text = PartyFrames.describe(client.you.get("party", {}), client.peer_id)
 	_party_frames.visible = not _party_frames.text.is_empty()

@@ -25,12 +25,19 @@ const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
+const LootSweep = preload("res://scripts/shared/loot_sweep.gd")
 const DeathRecovery = preload("res://scripts/shared/death_recovery.gd")
 const PartyCorpseRescue = preload("res://scripts/shared/party_corpse_rescue.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
+const PartyMedicMastery = preload("res://scripts/shared/party_medic_mastery.gd")
+const CampProvisions = preload("res://scripts/shared/camp_provisions.gd")
+const QuickMedicine = preload("res://scripts/shared/quick_medicine.gd")
+const SmartProvisions = preload("res://scripts/shared/smart_provisions.gd")
+const PartySupplyRequest = preload("res://scripts/shared/party_supply_request.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
 const HealingAggro = preload("res://scripts/shared/healing_aggro.gd")
+const MedicCover = preload("res://scripts/shared/medic_cover.gd")
 const Threat = preload("res://scripts/shared/threat.gd")
 const FinishingStrike = preload("res://scripts/shared/finishing_strike.gd")
 const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
@@ -43,6 +50,7 @@ const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
 const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
+const RuinAmbush = preload("res://scripts/shared/ruin_ambush.gd")
 const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
 const CaravanEscortRewards = preload("res://scripts/shared/caravan_escort_rewards.gd")
 const NightCaravan = preload("res://scripts/shared/night_caravan.gd")
@@ -63,6 +71,7 @@ const FieldArmorPlate = preload("res://scripts/shared/field_armor_plate.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
+const InfectedMeleeCover = preload("res://scripts/shared/infected_melee_cover.gd")
 const BarricadeBallistics = preload("res://scripts/shared/barricade_ballistics.gd")
 const SiegeCharge = preload("res://scripts/shared/siege_charge.gd")
 const SiegeDefusal = preload("res://scripts/shared/siege_defusal.gd")
@@ -85,6 +94,7 @@ const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
+const WoundSealant = preload("res://scripts/shared/wound_sealant.gd")
 const GatheringNoise = preload("res://scripts/shared/gathering_noise.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
@@ -93,6 +103,7 @@ const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
+const RaidTempo = preload("res://scripts/shared/raid_tempo.gd")
 const RaidAggroView = preload("res://scripts/shared/raid_aggro_view.gd")
 const RaidRecovery = preload("res://scripts/shared/raid_recovery.gd")
 const RaidInterrupt = preload("res://scripts/shared/raid_interrupt.gd")
@@ -101,9 +112,11 @@ const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const AcidNeutralizer = preload("res://scripts/shared/acid_neutralizer.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
 const GuardianIntercept = preload("res://scripts/shared/guardian_intercept.gd")
+const PartyShieldWall = preload("res://scripts/shared/party_shield_wall.gd")
 const GuardianRetribution = preload("res://scripts/shared/guardian_retribution.gd")
 const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
+const RaidWard = preload("res://scripts/shared/raid_ward.gd")
 const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
 const RaidRoundRobin = preload("res://scripts/shared/raid_round_robin.gd")
 const RaidNeedGreed = preload("res://scripts/shared/raid_need_greed.gd")
@@ -141,6 +154,7 @@ const StormproofBriquette = preload("res://scripts/shared/stormproof_briquette.g
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
 const StormTarpAnchors = preload("res://scripts/shared/storm_tarp_anchors.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
+const CampAlarm = preload("res://scripts/shared/camp_alarm.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HandFlare = preload("res://scripts/shared/hand_flare.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
@@ -156,6 +170,8 @@ const RainHarvest = preload("res://scripts/shared/rain_harvest.gd")
 const FieldCanteen = preload("res://scripts/shared/field_canteen.gd")
 const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
+const TrailRation = preload("res://scripts/shared/trail_ration.gd")
+const FoodSafety = preload("res://scripts/shared/food_safety.gd")
 const CombatStress = preload("res://scripts/shared/combat_stress.gd")
 const PartyFeast = preload("res://scripts/shared/party_feast.gd")
 
@@ -218,6 +234,8 @@ class Player:
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
 	var party_aid_timer: float = 0.0 # Shared medical/provisions support cooldown.
+	var medic_cover_cooldown: float = 0.0 # Server-only healer aggro rescue cooldown.
+	var supply_request_last_at: float = -INF # Session-only anti-spam for supply distress signals.
 	var feast_timer: float = 0.0 # Session-only prepared group meal cooldown.
 	var combat_stress: float = 0.0 # Session-only PvE pressure; not a permanent condition.
 	var stress_pressure: float = 0.0 # Last trusted nearby infected threat sample.
@@ -227,6 +245,8 @@ class Player:
 	var guard_link_target: int = -1 # Server-only chosen ally for one zombie melee hit.
 	var guard_link_seconds: float = 0.0 # Valid for at most 9 seconds.
 	var guard_link_cooldown: float = 0.0 # Session-only cast cooldown.
+	var shield_wall_seconds: float = 0.0 # Classless guardian's active PvE group defense.
+	var shield_wall_cooldown: float = 0.0 # Session-only rate limit, no persistent stat.
 	var guard_counter_target: int = -1 # Exact infected whose melee was intercepted.
 	var guard_counter_seconds: float = 0.0 # 4s to answer with normal melee.
 	var guard_counter_weapon: String = "" # Original real melee gear.
@@ -235,11 +255,14 @@ class Player:
 	var rain_cooldown: float = 0.0 # Persisted storm water collection cooldown.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
 	var spore_filter_seconds: float = 0.0 # Paid temporary swamp respirator, persisted.
+	var wound_seal_seconds: float = 0.0 # Paid bite-wound prevention, persisted.
 	var soft_sole_seconds: float = 0.0 # Paid, persisted reduced sprint footstep hearing.
 	var storm_insulator_seconds: float = 0.0 # Persisted paid shock resistance.
 	var spore_sample_cooldown: float = 0.0 # Persistent harvest cooldown.
 	var meal_seconds: float = 0.0 # Remaining server-ticked cooked-fish recovery buff.
 	var meal_tier: int = 0 # Zero when no meal buff is active; never client-authored.
+	var ration_seconds: float = 0.0 # Item-paid, persisted reduced hunger drain.
+	var ration_tier: int = 0 # T1-T4 smoked fish; no stacked durations.
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
@@ -314,6 +337,8 @@ var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned ses
 var next_horde_at: float = NightHorde.START_DELAY # Separate night event schedule.
 var night_horde: Dictionary = {} # Active IDs, expiry, tier, public event coordinates.
 var caravan_ambushes: Array[Dictionary] = [] # Bounded server waves with expiry.
+var ruin_ambushes: Array[Dictionary] = [] # One-shot infected packs awakened by real ruin looting.
+var next_ruin_ambush_at: float = 0.0 # Global anti-spam cooldown; no client timer.
 var caravan_escort_progress: Dictionary = {} # Session-only verified co-travel for live parties.
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
@@ -356,6 +381,7 @@ var pair_persistence := false
 var pair_commits: Array = [] # [{a: peer, b: peer, tx: String}], drained by Net.
 var pair_locks: Dictionary = {} # peer -> transaction ID awaiting confirmation.
 var market_buy_requests: Dictionary = {} # Peer -> last request ID, arguments and result.
+var loot_sweep_next: Dictionary = {} # Session-only authenticated pickup throttle.
 var trade_by_player: Dictionary = {} # peer -> active trade
 var parties = Party.new() # Server-only session groups and short-lived invitations.
 var territory # Session outposts generated from this world seed.
@@ -454,6 +480,7 @@ func character_data(player: Player) -> Dictionary:
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 		"stamina": player.survival.stamina, "infection": player.survival.infection,
+		"food_poisoning": player.survival.food_poisoning,
 		"bleeding": player.survival.bleeding, "fracture": player.survival.fracture,
 		"exposure": player.survival.exposure, "wetness": player.survival.wetness,
 		"warmth_seconds": player.survival.warmth_seconds,
@@ -482,6 +509,7 @@ func character_data(player: Player) -> Dictionary:
 		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
 		"spore_filter_seconds": player.spore_filter_seconds,
+		"wound_seal_seconds": player.wound_seal_seconds,
 		"soft_sole_seconds": player.soft_sole_seconds,
 		"storm_insulator_seconds": player.storm_insulator_seconds,
 		"flare_seconds": player.flare_seconds,
@@ -492,6 +520,7 @@ func character_data(player: Player) -> Dictionary:
 		"tire_grip_seconds": player.tire_grip_seconds,
 		"flash_cooldown": player.flash_cooldown,
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
+		"ration_seconds": player.ration_seconds, "ration_tier": player.ration_tier,
 		"sharpened_weapon": player.sharpened_weapon if sharp_valid else "",
 		"sharpened_hits": player.sharpened_hits if sharp_valid else 0,
 		"sighted_weapon": player.sighted_weapon if sight_valid else "",
@@ -530,6 +559,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.finite_number(data.get("stamina", Defs.MAX_STAMINA), 0.0, Defs.MAX_STAMINA):
 		return false
 	if not SaveValidation.finite_number(data.get("infection", 0.0), 0.0, Defs.INFECTION_MAX):
+		return false
+	if not FoodSafety.valid_severity(data.get("food_poisoning", 0.0)):
 		return false
 	if not SaveValidation.finite_number(data.get("bleeding", 0.0), 0.0, Defs.BLEEDING_MAX):
 		return false
@@ -570,6 +601,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.finite_number(data.get("spore_filter_seconds", 0.0),
 			0.0, SporeHazard.FILTER_DURATION_SECONDS):
 		return false
+	if not SaveValidation.finite_number(data.get("wound_seal_seconds", 0.0),
+			0.0, WoundSealant.DURATION_SECONDS):
+		return false
 	if not SoftSoleWraps.valid_remaining(data.get("soft_sole_seconds", 0.0)):
 		return false
 	if not SaveValidation.finite_number(data.get("storm_insulator_seconds", 0.0),
@@ -595,6 +629,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not HeartyMeal.valid_state(data.get("meal_seconds", 0.0), data.get("meal_tier", 0)):
 		return false
+	if not TrailRation.valid_state(data.get("ration_seconds", 0.0), data.get("ration_tier", 0)):
+		return false
 	if not FieldWhetstone.valid_state(data.get("sharpened_weapon", ""),
 			data.get("sharpened_hits", 0), parsed_bag["inventory"]):
 		return false
@@ -617,6 +653,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	survival.stamina = float(data.get("stamina", Defs.MAX_STAMINA))
 	# Older version-1 saves without infection remain compatible.
 	survival.infection = float(data.get("infection", 0.0))
+	survival.food_poisoning = float(data.get("food_poisoning", 0.0))
 	# Legacy version-1 accounts predate the persistent wound mechanic.
 	survival.bleeding = float(data.get("bleeding", 0.0))
 	survival.fracture = float(data.get("fracture", 0.0)) # Legacy v1 defaults to healthy.
@@ -718,6 +755,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.rain_cooldown = float(data.get("rain_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
 	player.spore_filter_seconds = float(data.get("spore_filter_seconds", 0.0))
+	player.wound_seal_seconds = float(data.get("wound_seal_seconds", 0.0))
 	player.soft_sole_seconds = float(data.get("soft_sole_seconds", 0.0))
 	player.storm_insulator_seconds = float(data.get("storm_insulator_seconds", 0.0))
 	player.flare_seconds = float(data.get("flare_seconds", 0.0))
@@ -729,6 +767,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.flash_cooldown = float(data.get("flash_cooldown", 0.0))
 	player.meal_seconds = float(data.get("meal_seconds", 0.0))
 	player.meal_tier = int(data.get("meal_tier", 0))
+	player.ration_seconds = float(data.get("ration_seconds", 0.0))
+	player.ration_tier = int(data.get("ration_tier", 0))
 	player.sharpened_weapon = str(data.get("sharpened_weapon", ""))
 	player.sharpened_hits = int(data.get("sharpened_hits", 0))
 	player.sighted_weapon = str(data.get("sighted_weapon", ""))
@@ -796,6 +836,7 @@ func remove_player(peer_id: int) -> void:
 			survivor.guard_link_target = -1
 			survivor.guard_link_seconds = 0.0
 	market_buy_requests.erase(peer_id)
+	loot_sweep_next.erase(peer_id)
 	outpost_fortify_requests.erase(peer_id)
 	outpost_provision_requests.erase(peer_id)
 	outpost_breach_requests.erase(peer_id)
@@ -805,6 +846,10 @@ func remove_player(peer_id: int) -> void:
 	CaravanEscortRewards.clear_peer(caravan_escort_progress, peer_id)
 	_clear_caravan_waves(peer_id)
 	parties.disconnect_peer(peer_id)
+	# A recycled network peer ID must never inherit the previous camp alarm.
+	for fire in campfires.values():
+		if int(fire.get("alarm_owner", -1)) == peer_id:
+			fire["alarm_until"] = time
 	var player: Player = players.get(peer_id)
 	if player != null and not player.user_id.is_empty():
 		for wall in barricades.values():
@@ -836,6 +881,7 @@ func _spawn_player(player: Player) -> void:
 	player.guard_link_target = -1
 	player.guard_link_seconds = 0.0
 	player.guard_link_cooldown = 0.0
+	player.shield_wall_seconds = 0.0
 	GuardianRetribution.clear(player)
 	var kept_gear: bool = player.keep_inventory_on_respawn
 	player.keep_inventory_on_respawn = false
@@ -877,6 +923,8 @@ func _spawn_player(player: Player) -> void:
 	player.guardian_brace = 0.0
 	player.meal_seconds = 0.0
 	player.meal_tier = 0
+	player.ration_seconds = 0.0
+	player.ration_tier = 0
 	player.combat_energy = Defs.COMBAT_ENERGY_MAX
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
@@ -1659,6 +1707,83 @@ func _record_party_healing_threat(medic: Player, patients: Array) -> void:
 			Threat.record(infected.threat, medic.id, generated)
 
 
+## Panic button for medics: ask the nearest real, armed guardian to cover them.
+## No client-controlled enemy IDs, guardian IDs, range, aggro, threat or damage.
+## Only currently engaged non-boss infected with genuine medic attention qualify.
+func cmd_medic_cover(peer_id: int) -> Dictionary:
+	var medic: Player = players.get(peer_id)
+	if medic == null or not _alive(medic):
+		return {"ok": false, "reason": "dead"}
+	if medic.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not medic.position.is_finite() or _is_safe(medic.position):
+		return {"ok": false, "reason": "safe_zone"}
+	if parties.members_of(peer_id).size() < 2:
+		return {"ok": false, "reason": "not_in_party"}
+	if not MedicCover.has_staff(medic):
+		return {"ok": false, "reason": "need_restoration_staff"}
+	if medic.medic_cover_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown",
+			"remaining": medic.medic_cover_cooldown}
+	if medic.combat_energy < MedicCover.ENERGY_COST:
+		return {"ok": false, "reason": "no_energy"}
+	var guardian = MedicCover.guardian_for(medic, players, parties, world)
+	if guardian == null:
+		return {"ok": false, "reason": "no_guardian"}
+	var candidates: Array = []
+	for infected in zombies.values():
+		if MedicCover.can_redirect(infected, medic, guardian, world):
+			candidates.append(infected)
+	if candidates.is_empty():
+		return {"ok": false, "reason": "no_engaged_infected"}
+	# Stable target selection avoids positional jitter in a crowded battle.
+	candidates.sort_custom(func(a, b): return a.id < b.id)
+	var redirected: int = 0
+	for i in range(mini(MedicCover.MAX_ENEMIES, candidates.size())):
+		var infected = candidates[i]
+		if infected.force_taunt(guardian.id, MedicCover.TAUNT_SECONDS):
+			MedicCover.fade_threat(infected, medic.id)
+			redirected += 1
+	if redirected <= 0:
+		return {"ok": false, "reason": "no_engaged_infected"}
+	medic.combat_energy -= MedicCover.ENERGY_COST
+	medic.medic_cover_cooldown = MedicCover.COOLDOWN
+	medic.action = {}
+	events.append({"type": "medic_cover", "peer": peer_id,
+		"by": guardian.id, "count": redirected})
+	return {"ok": true, "guardian": guardian.id, "count": redirected,
+		"cooldown": MedicCover.COOLDOWN, "energy": medic.combat_energy}
+
+
+## A trusted survival check broadcasts only a genuine low-supply request
+## to the current party. The client supplies neither coordinates nor level.
+func cmd_party_supply_request(peer_id: int, need: String) -> Dictionary:
+	var requester: Player = players.get(peer_id)
+	if requester == null or not _alive(requester):
+		return {"ok": false, "reason": "dead"}
+	var group_id: int = parties.group_of(peer_id)
+	if group_id == 0 or parties.members_of(peer_id).size() < 2:
+		return {"ok": false, "reason": "not_in_party"}
+	if not PartySupplyRequest.valid_need(need):
+		return {"ok": false, "reason": "invalid_need"}
+	if not PartySupplyRequest.eligible(need, requester.survival.hunger, requester.survival.thirst):
+		return {"ok": false, "reason": "no_need"}
+	if not PartySupplyRequest.can_send(time, requester.supply_request_last_at):
+		return {"ok": false, "reason": "cooldown"}
+	if not requester.position.is_finite():
+		return {"ok": false, "reason": "invalid_position"}
+	var level: float = PartySupplyRequest.level(need,
+		requester.survival.hunger, requester.survival.thirst)
+	requester.supply_request_last_at = time
+	events.append({"type": "party_supply_request", "peer": peer_id,
+		"group": group_id, "name": requester.name, "need": need,
+		"level": roundi(level), "x": requester.position.x,
+		"z": requester.position.z,
+		"expires": time + PartySupplyRequest.ALERT_SECONDS})
+	return {"ok": true, "need": need, "level": roundi(level),
+		"seconds": PartySupplyRequest.COOLDOWN}
+
+
 ## Item-powered party medicine and provisions, resolved only on the server.
 func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var source: Player = players.get(peer_id)
@@ -1678,28 +1803,73 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 		return {"ok": false, "reason": "too_far"}
 	if source.party_aid_timer > 0.0:
 		return {"ok": false, "reason": "cooldown"}
-	var data: Dictionary = Defs.item(item_id)
-	if not PartyAid.supported_item(item_id, data):
+	var selected_item_id: String = item_id
+	if selected_item_id == "auto":
+		selected_item_id = PartyAid.best_item(source.inventory,
+			recipient.survival.health, recipient.survival.infection,
+			recipient.survival.bleeding, recipient.survival.fracture,
+			recipient.survival.max_health, recipient.survival.food_poisoning)
+		if selected_item_id.is_empty():
+			return {"ok": false, "reason": "no_treatment"}
+	var data: Dictionary = Defs.item(selected_item_id)
+	if not PartyAid.supported_item(selected_item_id, data):
 		return {"ok": false, "reason": "not_shareable"}
-	if source.inventory.count(item_id) < 1:
+	if source.inventory.count(selected_item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
+	if selected_item_id == WoundSealant.ITEM_ID:
+		# Party first aid can prepare an ally BEFORE combat. The existing
+		# party, reach, carried-inventory and five-second cooldown checks
+		# have already run. Never allow a teammate to refresh this buff.
+		if not SaveValidation.finite_number(recipient.wound_seal_seconds,
+				0.0, WoundSealant.DURATION_SECONDS):
+			return {"ok": false, "reason": "invalid_state"}
+		if recipient.wound_seal_seconds > 0.0:
+			return {"ok": false, "reason": "already_sealed",
+				"remaining": recipient.wound_seal_seconds}
+		if source.mounted or recipient.mounted:
+			return {"ok": false, "reason": "mounted"}
+		# Real PvE pursuits matter even without a PvP combat tag. Reuse the
+		# trusted infected pressure scan; no client may declare safety.
+		if CombatStress.pressure(zombies, source.id, source.position) > 0.0 or \
+				CombatStress.pressure(zombies, recipient.id, recipient.position) > 0.0:
+			return {"ok": false, "reason": "in_combat"}
+		if source.combat_tag_until > time or recipient.combat_tag_until > time or \
+				source.attack_timer > 0.0 or recipient.attack_timer > 0.0 or \
+				source.skill_timer > 0.0 or recipient.skill_timer > 0.0 or \
+				not source.action.is_empty() or not recipient.action.is_empty():
+			return {"ok": false, "reason": "in_combat"}
+		if not source.inventory.remove(selected_item_id, 1):
+			return {"ok": false, "reason": "not_carried"}
+		recipient.wound_seal_seconds = WoundSealant.DURATION_SECONDS
+		source.party_aid_timer = PartyAid.COOLDOWN
+		source.dirty_inventory = true
+		source.dirty_character = true
+		recipient.dirty_character = true
+		events.append({"type": "party_aid", "peer": target_id, "by": peer_id,
+			"item": selected_item_id, "wound_seal_seconds": WoundSealant.DURATION_SECONDS})
+		return {"ok": true, "peer": target_id, "item": selected_item_id,
+			"wound_seal_seconds": WoundSealant.DURATION_SECONDS}
 	if not PartyAid.has_effect(data, recipient.survival.health, recipient.survival.infection,
 			recipient.survival.bleeding, recipient.survival.fracture,
-			recipient.survival.hunger, recipient.survival.thirst):
+			recipient.survival.hunger, recipient.survival.thirst,
+			recipient.survival.max_health, recipient.survival.food_poisoning):
 		return {"ok": false, "reason": "no_effect"}
 	var hp_before: float = recipient.survival.health
 	var infection_before: float = recipient.survival.infection
+	var poison_before: float = recipient.survival.food_poisoning
 	var bleeding_before: float = recipient.survival.bleeding
 	var fracture_before: float = recipient.survival.fracture
 	var hunger_before: float = recipient.survival.hunger
 	var thirst_before: float = recipient.survival.thirst
-	if not source.inventory.remove(item_id, 1):
+	if not source.inventory.remove(selected_item_id, 1):
 		return {"ok": false, "reason": "not_carried"}
-	recipient.survival.heal(float(data.get("heal", 0.0)))
+	recipient.survival.heal(PartyMedicMastery.heal_amount(
+		float(data.get("heal", 0.0)), source.skills.bonus("heal_power")))
 	recipient.survival.treat_infection(float(data.get("cure", 0.0)))
 	if bool(data.get("stop_bleeding", false)):
 		recipient.survival.stop_bleeding()
 	recipient.survival.treat_fracture(float(data.get("fracture_treatment", 0.0)))
+	recipient.survival.treat_food_poisoning(float(data.get("food_poison_treatment", 0.0)))
 	recipient.survival.eat(float(data.get("food", 0.0)))
 	recipient.survival.drink(float(data.get("drink", 0.0)))
 	source.party_aid_timer = PartyAid.COOLDOWN
@@ -1710,17 +1880,68 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var healed: float = recipient.survival.health - hp_before
 	_record_party_healing_threat(source, [{"recipient": recipient, "healed": healed}])
 	var cured: float = infection_before - recipient.survival.infection
+	var poison_treated: float = poison_before - recipient.survival.food_poisoning
 	var staunched: float = bleeding_before - recipient.survival.bleeding
 	var splinted: float = fracture_before - recipient.survival.fracture
 	var fed: float = recipient.survival.hunger - hunger_before
 	var hydrated: float = recipient.survival.thirst - thirst_before
+	var mastery_xp: float = PartyMedicMastery.training_xp(healed, staunched,
+		cured, splinted, poison_treated)
+	if mastery_xp > 0.0:
+		_award(source, "medic", mastery_xp)
 	events.append({"type": "party_aid", "peer": target_id, "by": peer_id,
-		"item": item_id, "heal": healed, "cure": cured,
+		"item": selected_item_id, "heal": healed, "cure": cured,
 		"bleeding_stopped": staunched, "fracture_treated": splinted,
-		"food": fed, "drink": hydrated})
-	return {"ok": true, "peer": target_id, "item": item_id,
+		"food_poison_treated": poison_treated, "food": fed, "drink": hydrated})
+	return {"ok": true, "peer": target_id, "item": selected_item_id,
 		"heal": healed, "cure": cured, "bleeding_stopped": staunched,
-		"fracture_treated": splinted, "food": fed, "drink": hydrated}
+		"fracture_treated": splinted, "food_poison_treated": poison_treated,
+		"food": fed, "drink": hydrated}
+
+
+## Transfer only known real provisions between living party allies by ONE
+## actual campfire. This reuses the aid cooldown and inventory save flags.
+func cmd_party_provision(peer_id: int, target_id: int, kind: String) -> Dictionary:
+	var giver: Player = players.get(peer_id)
+	var receiver: Player = players.get(target_id)
+	if giver == null or not _alive(giver):
+		return {"ok": false, "reason": "dead"}
+	if peer_id == target_id:
+		return {"ok": false, "reason": "self"}
+	if receiver == null:
+		return {"ok": false, "reason": "invalid_target"}
+	if not _alive(receiver):
+		return {"ok": false, "reason": "dead"}
+	var group: int = parties.group_of(peer_id)
+	if group <= 0 or parties.group_of(target_id) != group:
+		return {"ok": false, "reason": "not_in_party"}
+	if CampProvisions.package_items(kind).is_empty():
+		return {"ok": false, "reason": "invalid_package"}
+	if giver.mounted or receiver.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not giver.recall.is_empty() or not receiver.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	if giver.combat_tag_until > time or receiver.combat_tag_until > time:
+		return {"ok": false, "reason": "in_combat"}
+	if not PartyAid.can_reach(giver.position, receiver.position):
+		return {"ok": false, "reason": "too_far"}
+	if not CampProvisions.shared_fire(campfires, giver.position, receiver.position, time):
+		return {"ok": false, "reason": "no_fire"}
+	if giver.party_aid_timer > 0.0:
+		return {"ok": false, "reason": "cooldown", "remaining": giver.party_aid_timer}
+	var error: String = CampProvisions.transfer(giver.inventory, receiver.inventory, kind)
+	if error != "":
+		return {"ok": false, "reason": error}
+	giver.party_aid_timer = PartyAid.COOLDOWN
+	giver.dirty_inventory = true
+	giver.dirty_character = true
+	receiver.dirty_inventory = true
+	receiver.dirty_character = true
+	var items: Dictionary = CampProvisions.package_items(kind)
+	events.append({"type": "party_provision", "peer": target_id,
+		"by": peer_id, "kind": kind, "items": items})
+	return {"ok": true, "peer": target_id, "kind": kind,
+		"items": items, "cooldown": giver.party_aid_timer}
 
 
 ## One authenticated medic spends one crafted pack for up to three injured
@@ -1761,13 +1982,15 @@ func cmd_party_triage(peer_id: int) -> Dictionary:
 		return {"ok": false, "reason": "not_carried"}
 	var treated: int = mini(candidates.size(), PartyTriage.MAX_RECIPIENTS)
 	var healed: float = 0.0
+	var heal_each: float = PartyMedicMastery.heal_amount(
+		PartyTriage.HEAL, medic.skills.bonus("heal_power"))
 	var bleeding_stopped: float = 0.0
 	var healing_events: Array = []
 	for i in range(treated):
 		var recipient: Player = candidates[i]["player"]
 		var old_health: float = recipient.survival.health
 		var old_bleeding: float = recipient.survival.bleeding
-		recipient.survival.heal(PartyTriage.HEAL)
+		recipient.survival.heal(heal_each)
 		recipient.survival.bleeding = maxf(0.0,
 			recipient.survival.bleeding - PartyTriage.BLEEDING_TREATMENT)
 		var hp_gain: float = recipient.survival.health - old_health
@@ -1779,6 +2002,10 @@ func cmd_party_triage(peer_id: int) -> Dictionary:
 		events.append({"type": "party_triage", "peer": recipient.id, "by": peer_id,
 			"heal": hp_gain, "bleeding_stopped": wound_care})
 	_record_party_healing_threat(medic, healing_events)
+	var mastery_xp: float = PartyMedicMastery.training_xp(healed, bleeding_stopped,
+		0.0, 0.0, 0.0)
+	if mastery_xp > 0.0:
+		_award(medic, "medic", mastery_xp)
 	medic.party_aid_timer = PartyTriage.COOLDOWN
 	medic.action = {}
 	medic.dirty_inventory = true
@@ -3173,6 +3400,33 @@ func cmd_extinguish_campfire(peer_id: int, id: int) -> Dictionary:
 	return {"ok": true, "id": id}
 
 
+## Attach a crafted 3-minute infected warning kit to a burning campfire.
+## Only a real nearby survivor can pay; server chooses who hears the signal.
+func cmd_arm_camp_alarm(peer_id: int, fire_id: int) -> Dictionary:
+	var survivor: Player = players.get(peer_id)
+	if survivor == null or not _alive(survivor):
+		return {"ok": false, "reason": "dead"}
+	if survivor.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not survivor.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	if survivor.combat_tag_until > time or survivor.attack_timer > 0.0 or (
+			survivor.skill_timer > 0.0 or not survivor.action.is_empty()):
+		return {"ok": false, "reason": "in_combat"}
+	var fire: Dictionary = campfires.get(fire_id, {})
+	var reason: String = CampAlarm.arm_reason(fire, survivor.position, time)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	if not survivor.inventory.remove(CampAlarm.ITEM_ID, 1):
+		return {"ok": false, "reason": "missing_kit"}
+	CampAlarm.install(fire, peer_id, parties.group_of(peer_id), time)
+	campfires[fire_id] = fire
+	survivor.dirty_inventory = true
+	survivor.dirty_character = true
+	return {"ok": true, "id": fire_id, "seconds": CampAlarm.seconds_left(fire, time),
+		"radius": CampAlarm.DETECTION_RADIUS}
+
+
 func cmd_refuel_campfire(peer_id: int, id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -3395,6 +3649,45 @@ func _damage_ranged_cover(attacker: Player, origin: Vector2,
 	return true
 
 
+## Smart field treatment, selected from the player's server-owned wounds and items.
+## Server verifies food/drink intent and selects one carried, safe ration.
+func cmd_smart_provision(peer_id: int, intent: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead", "smart_provision": true}
+	if intent != "food" and intent != "drink":
+		return {"ok": false, "reason": "invalid_intent", "smart_provision": true}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted", "smart_provision": true}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling", "smart_provision": true}
+	var item_id: String = SmartProvisions.pick(player.inventory, player.survival, intent)
+	if item_id.is_empty():
+		return {"ok": false, "reason": "no_provision", "smart_provision": true}
+	var result: Dictionary = cmd_use(peer_id, item_id)
+	result["smart_provision"] = true
+	result["item"] = item_id
+	result["intent"] = intent
+	return result
+
+
+func cmd_quick_medicine(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead", "quick_medicine": true}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted", "quick_medicine": true}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling", "quick_medicine": true}
+	var item_id: String = QuickMedicine.pick(player.inventory, player.survival)
+	if item_id.is_empty():
+		return {"ok": false, "reason": "no_treatment", "quick_medicine": true}
+	var result: Dictionary = cmd_use(peer_id, item_id)
+	result["quick_medicine"] = true
+	result["item"] = item_id
+	return result
+
+
 func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -3407,6 +3700,24 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"resource":
+			# Existing fish remain tradeable/craftable resources, but can be
+			# eaten raw when desperate. Never accept arbitrary resources as food.
+			var raw_tier: int = FoodSafety.raw_fish_tier(item_id)
+			if raw_tier == 0 or not bool(data.get("unsafe_food", false)):
+				return {"ok": false, "reason": "not_usable"}
+			if not FoodSafety.can_eat_raw(player.survival.hunger):
+				return {"ok": false, "reason": "not_hungry"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.survival.eat(FoodSafety.raw_hunger(raw_tier))
+			player.survival.add_food_poisoning(FoodSafety.raw_poison(raw_tier))
+			player.dirty_inventory = true
+			player.dirty_character = true
+			events.append({"type": "food_poisoning", "peer": peer_id,
+				"severity": player.survival.food_poisoning})
+			return {"ok": true, "ate_raw_fish": true,
+				"severity": player.survival.food_poisoning}
 		"water_pouch":
 			if item_id != "empty_water_pouch":
 				return {"ok": false, "reason": "not_usable"}
@@ -3848,6 +4159,21 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if not player.inventory.remove(item_id, 1):
 				return {"ok": false, "reason": "not_carried"}
 			player.spore_filter_seconds = SporeHazard.FILTER_DURATION_SECONDS
+		"wound_seal":
+			if item_id != WoundSealant.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "wound_seal": true}
+			if not SaveValidation.finite_number(player.wound_seal_seconds,
+					0.0, WoundSealant.DURATION_SECONDS):
+				return {"ok": false, "reason": "invalid_state", "wound_seal": true}
+			if player.wound_seal_seconds > 0.0:
+				return {"ok": false, "reason": "already_sealed",
+					"wound_seal": true, "remaining": player.wound_seal_seconds}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					player.skill_timer > 0.0 or not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "wound_seal": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "wound_seal": true}
+			player.wound_seal_seconds = WoundSealant.DURATION_SECONDS
 		"footstep_wrap":
 			if item_id != SoftSoleWraps.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3875,15 +4201,29 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			player.inventory.remove(item_id, 1)
 		"food":
 			var was_hungry: bool = player.survival.hunger <= SKILL_NOURISH_THRESHOLD
-			player.inventory.remove(item_id, 1)
-			player.survival.eat(float(data["food"]) * (1.0 + player.skills.bonus("food_power")))
-			# Prepared coastal meals grant a short, non-stacking recovery bonus.
-			# Canned food and berries only restore hunger as before.
+			var hydration: float = float(data.get("drink", 0.0))
+			var was_thirsty: bool = hydration > 0.0 and player.survival.thirst <= SKILL_NOURISH_THRESHOLD
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			var food_power: float = 1.0 + player.skills.bonus("food_power")
+			player.survival.eat(float(data["food"]) * food_power)
+			# Dual-purpose stew consumes one real item and replenishes both vitals.
+			# Ordinary food has no drink value, so its previous behavior is unchanged.
+			if hydration > 0.0:
+				player.survival.drink(hydration * food_power)
+			# Prepared fish or stew refreshes the same non-stacking recovery buff.
 			var cooked_tier: int = HeartyMeal.tier_for_food(item_id)
 			if cooked_tier > 0:
 				player.meal_tier = cooked_tier
 				player.meal_seconds = HeartyMeal.duration(cooked_tier)
-			if was_hungry: # Stuffing yourself while full teaches nothing.
+			# Smoked fish only reduces hunger decay, not combat or wound damage.
+			var travel_tier: int = TrailRation.tier_for_food(item_id)
+			if travel_tier > 0 and (player.ration_seconds <= 0.0 or
+					travel_tier >= player.ration_tier):
+				player.ration_tier = travel_tier
+				player.ration_seconds = TrailRation.duration(travel_tier)
+			# One legitimate survival lesson per consumed item, not two for stew.
+			if was_hungry or was_thirsty:
 				_award(player, "survivalist", 3.0)
 		"drink":
 			var was_thirsty: bool = player.survival.thirst <= SKILL_NOURISH_THRESHOLD
@@ -3896,10 +4236,12 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			var curing: float = float(data.get("cure", 0.0))
 			var staunch: bool = bool(data.get("stop_bleeding", false))
 			var splint: float = float(data.get("fracture_treatment", 0.0))
+			var stomach: float = float(data.get("food_poison_treatment", 0.0))
 			if (healing <= 0.0 or player.survival.health >= player.survival.max_health) and (
 					curing <= 0.0 or player.survival.infection <= 0.0) and (
 					not staunch or player.survival.bleeding <= 0.0) and (
-					splint <= 0.0 or player.survival.fracture <= 0.0):
+					splint <= 0.0 or player.survival.fracture <= 0.0) and (
+					stomach <= 0.0 or player.survival.food_poisoning <= 0.0):
 				return {"ok": false, "reason": "no_effect"}
 			player.inventory.remove(item_id, 1)
 			player.survival.heal(healing * (1.0 + player.skills.bonus("heal_power")))
@@ -3907,6 +4249,7 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if staunch:
 				player.survival.stop_bleeding()
 			player.survival.treat_fracture(splint)
+			player.survival.treat_food_poisoning(stomach)
 			_award(player, "medic", 6.0)
 		"head", "cape", "hands", "feet":
 			player.inventory.equip(item_id) # Worn pieces: a hood, a cloak, gloves, boots.
@@ -3928,6 +4271,12 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
 	player.dirty_character = true
+	if TrailRation.tier_for_food(item_id) > 0:
+		return {"ok": true, "trail_ration": true,
+			"tier": player.ration_tier, "seconds": player.ration_seconds}
+	if item_id == FoodSafety.REMEDY_ITEM:
+		return {"ok": true, "stomach_remedy": true,
+			"remaining": player.survival.food_poisoning}
 	if item_id == ProspectingChart.ITEM_ID:
 		var detected: Dictionary = ProspectingChart.public_mark(
 			player.prospect_mark, time, depleted)
@@ -3962,6 +4311,9 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 		return {"ok": true, "bike_service_meters": player.bike_service_meters}
 	if item_id == StormInsulator.ITEM_ID:
 		return {"ok": true, "storm_insulator_seconds": player.storm_insulator_seconds}
+	if item_id == WoundSealant.ITEM_ID:
+		return {"ok": true, "wound_seal": true,
+			"wound_seal_seconds": player.wound_seal_seconds}
 	if item_id == BikeIntegrity.KIT_ID:
 		return {"ok": true, "bike_integrity": player.bike_integrity}
 	if item_id == HandFlare.ITEM_ID:
@@ -4255,6 +4607,43 @@ func cmd_guardian_taunt(peer_id: int) -> Dictionary:
 		"x": player.position.x, "z": player.position.z, "count": count})
 	return {"ok": true, "count": count, "cooldown": player.guardian_timer,
 		"brace_seconds": player.guardian_brace, "energy": player.combat_energy}
+
+
+## Short nonstacking party frontline stance. No client-provided coordinates,
+## protected targets, damage values, enemy IDs or shared buff durations.
+func cmd_party_shield_wall(peer_id: int) -> Dictionary:
+	var guardian: Player = players.get(peer_id)
+	if guardian == null or not _alive(guardian):
+		return {"ok": false, "reason": "dead"}
+	if guardian.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not guardian.position.is_finite() or _is_safe(guardian.position):
+		return {"ok": false, "reason": "safe_zone"}
+	if parties.group_of(peer_id) <= 0 or parties.members_of(peer_id).size() < 2:
+		return {"ok": false, "reason": "not_in_party"}
+	if not GuardianTaunt.melee_equipped(guardian.inventory):
+		return {"ok": false, "reason": "need_melee"}
+	if guardian.shield_wall_seconds > 0.0:
+		return {"ok": false, "reason": "already_active"}
+	if guardian.shield_wall_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown",
+			"remaining": guardian.shield_wall_cooldown}
+	if guardian.combat_energy < PartyShieldWall.ENERGY_COST:
+		return {"ok": false, "reason": "no_energy"}
+	var nearby_allies: int = 0
+	for member_id in parties.members_of(peer_id):
+		var member: Player = players.get(int(member_id))
+		if PartyShieldWall.can_protect(guardian, member, parties, world):
+			nearby_allies += 1
+	if nearby_allies == 0:
+		return {"ok": false, "reason": "no_nearby_ally"}
+	guardian.combat_energy -= PartyShieldWall.ENERGY_COST
+	guardian.shield_wall_seconds = PartyShieldWall.DURATION
+	guardian.shield_wall_cooldown = PartyShieldWall.COOLDOWN
+	guardian.action = {}
+	return {"ok": true, "seconds": guardian.shield_wall_seconds,
+		"cooldown": guardian.shield_wall_cooldown,
+		"allies": nearby_allies, "energy": guardian.combat_energy}
 
 
 ## Protect exactly one verified party ally from their next infected MELEE hit.
@@ -4654,6 +5043,48 @@ func cmd_raid_claim_selected(peer_id: int, entity_id: int, item_id: String) -> D
 	return cmd_loot(peer_id, entity_id, item_id)
 
 
+## Authorized, reach-limited pickup from at most five existing PvE bags.
+## Raid, PvP death, supply and crate loot are always manual.
+func cmd_loot_sweep(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not player.position.is_finite():
+		return {"ok": false, "reason": "invalid_position"}
+	if time < float(loot_sweep_next.get(peer_id, -1000000.0)):
+		return {"ok": false, "reason": "cooldown",
+			"remaining": maxf(0.0, float(loot_sweep_next[peer_id]) - time)}
+	loot_sweep_next[peer_id] = time + LootSweep.COOLDOWN
+	var ids: Array[int] = LootSweep.candidates(bags, player.position, player, time)
+	if ids.is_empty():
+		return {"ok": false, "reason": "nothing_to_sweep"}
+	var moved: int = 0
+	var collected: int = 0
+	var emptied: int = 0
+	for bag_id in ids:
+		if not bags.has(bag_id):
+			continue
+		var original: Dictionary = (bags[bag_id]["items"] as Dictionary).duplicate()
+		# Recheck ownership, proximity, guards and inventory at transaction time.
+		var claimed: Dictionary = cmd_loot(peer_id, bag_id)
+		if not bool(claimed.get("ok", false)):
+			continue
+		var remaining: Dictionary = bags[bag_id]["items"] if bags.has(bag_id) else {}
+		var count: int = 0
+		for item_id in original.keys():
+			count += maxi(0, int(original[item_id]) - int(remaining.get(item_id, 0)))
+		if count > 0:
+			moved += count
+			collected += 1
+			if not bags.has(bag_id):
+				emptied += 1
+	if moved == 0:
+		return {"ok": false, "reason": "inventory_full"}
+	return {"ok": true, "items": moved, "bags": collected, "emptied": emptied}
+
+
 func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -4772,8 +5203,70 @@ func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dict
 		if DailyBounties.record_crate(player.daily_bounty, _refresh_daily(player), entity_id):
 			player.dirty_character = true
 		events.append({"type": "crate", "peer": peer_id, "id": entity_id})
+		# The cache is already committed as opened: no repeated RPC can create
+		# another mob wave or another lockpick reward for this same opening.
+		_trigger_ruin_ambush(player, crate, unlocked)
 		return {"ok": true, "scavenging_xp": gained_xp}
 	return {"ok": false, "reason": "nothing_there"}
+
+
+## Server-only PvE consequence of successfully opening a dangerous ruin.
+## A sealed cache always makes enough noise to wake a pack; an ordinary
+## cache wakes one with a deterministic chance based on its real world ID.
+func _trigger_ruin_ambush(player: Player, crate: Dictionary, lockpicked: bool) -> void:
+	if player == null or not _alive(player) or not player.position.is_finite() or \
+			time < next_ruin_ambush_at or raid_boss_id >= 0 or not night_horde.is_empty():
+		return
+	var zone: int = int(crate.get("zone", -1))
+	# Reject a survivor reaching across a protected boundary into a dangerous
+	# crate: every awakened enemy must have a legal, non-safe pursuit target.
+	if world.is_safe(player.position.x, player.position.z) or \
+			world.zone_at(player.position.x, player.position.z) != zone:
+		return
+	if not RuinAmbush.awakens(zone, int(crate.get("id", -1)),
+			int(world.world_seed), lockpicked):
+		return
+	var capacity: int = RuinAmbush.available(ruin_ambushes, zombies)
+	if capacity <= 0:
+		return
+	var survivors: Array[Vector3] = []
+	for nearby in players.values():
+		if _alive(nearby) and nearby.position.is_finite():
+			survivors.append(nearby.position)
+	var spots: Array[Dictionary] = RuinAmbush.sites(
+		world, crate, survivors, zombies, capacity,
+		int(crate["id"]) % SupplyDrops.GUARD_ANGLES)
+	if spots.is_empty():
+		return
+	var targets := {player.id: {"position": player.position, "alive": true, "safe": false}}
+	var ids: Array[int] = []
+	for spot in spots:
+		var x: float = float(spot["x"])
+		var z: float = float(spot["z"])
+		var enemy_id: int = new_id()
+		var enemy = Zombie.new(enemy_id, str(spot["kind"]),
+			Vector3(x, world.height_at(x, z), z), -1)
+		enemy.receive_pack_alert(player.id, targets)
+		zombies[enemy_id] = enemy
+		ids.append(enemy_id)
+	ruin_ambushes.append({"ids": ids, "defeated": [], "cleared": false,
+		"owner": player.id, "group": parties.group_of(player.id),
+		"expires": time + RuinAmbush.LIFETIME_SECONDS})
+	next_ruin_ambush_at = time + RuinAmbush.COOLDOWN_SECONDS
+	events.append({"type": "ruin_ambush", "peer": player.id,
+		"group": parties.group_of(player.id), "count": ids.size(), "tier": zone + 1})
+
+
+## Remove only temporary ruin encounters. Missing or dead enemies are safe to
+## sweep; natural spawn slots, rewards and persistent world data are untouched.
+func _tick_ruin_ambush() -> void:
+	for index in range(ruin_ambushes.size() - 1, -1, -1):
+		var wave: Dictionary = ruin_ambushes[index]
+		if time < float(wave["expires"]):
+			continue
+		for id in wave["ids"]:
+			zombies.erase(int(id))
+		ruin_ambushes.remove_at(index)
 
 
 # --- Skills -------------------------------------------------------------------------------------------------
@@ -5022,6 +5515,8 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		# after an actual server-resolved slam; no PvP or other infected bonus.
 		if zombie.id == raid_boss_id:
 			damage = RaidRecovery.amplify(damage, zombie, raid_exposed_until, time)
+			# Active raid guards reduce only their own boss incoming PvE damage.
+			damage = RaidWard.absorb(damage, zombie, raid_boss_id, raid_minions, zombies)
 		# Only real, positive, server-applied hits can qualify for group XP.
 		if damage > 0.0 and zombie.is_alive() and (zombie.contributors.size() < 16 or zombie.contributors.has(attacker.id)):
 			var equipped: String = attacker.inventory.weapon
@@ -5198,6 +5693,16 @@ func _party_award_assists(killer: Player, zombie) -> void:
 
 func _on_zombie_death(zombie, killer: Player) -> void:
 	parties.clear_focus_target(zombie.id)
+	# Confirmed kill of a real raid reinforcement weakens the same boss.
+	if zombie.id != raid_boss_id and raid_boss_id > 0 and raid_minions.has(zombie.id):
+		var current_boss = zombies.get(raid_boss_id)
+		if current_boss != null and current_boss.is_alive():
+			var remaining: int = RaidWard.living_count(current_boss,
+				raid_boss_id, raid_minions, zombies)
+			events.append({"type": "raid_ward_changed", "id": raid_boss_id,
+				"x": current_boss.position.x, "z": current_boss.position.z,
+				"guards": remaining,
+				"reduction_percent": RaidWard.reduction_percent(remaining)})
 	# A caravan is defended only after every originally summoned infected
 	# is confirmed dead, not when the wave disappears or its timer expires.
 	for wave in caravan_ambushes:
@@ -5212,6 +5717,16 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 			courier.dirty_character = true
 			events.append({"type": "caravan_defended", "peer": courier.id})
 		break
+	# Completion is awarded only for real zombie deaths, never for expiry or
+	# missing mobs. No free crate rewards or separate repeatable loot.
+	for wave in ruin_ambushes:
+		if time >= float(wave["expires"]) or not RuinAmbush.record_kill(wave, zombie.id):
+			continue
+		events.append({"type": "ruin_ambush_cleared",
+			"peer": int(wave.get("owner", -1)),
+			"group": int(wave.get("group", 0)),
+			"count": wave["ids"].size()})
+		break
 	var zone: int = world.zone_at(zombie.position.x, zombie.position.z)
 	var loot_rng := RandomNumberGenerator.new()
 	loot_rng.seed = WorldGen.mix(zombie.id, int(time * 10.0), world.world_seed, 5)
@@ -5221,9 +5736,18 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 	if loot.has("silver"):
 		loot["silver"] = int(round(float(loot["silver"]) * (1.0 + killer.skills.bonus("zombie_silver"))))
 	if zombie.raid_boss:
+		# A speed bonus uses only the authoritative encounter start, live boss
+		# identity and death timestamp; no client-supplied result or reward.
+		var tempo_bonus: Dictionary = {}
+		if zombie.id == raid_boss_id and raid_started_at > 0.0 and \
+				is_finite(time) and time >= raid_started_at:
+			tempo_bonus = RaidTempo.bonus(zone, time - raid_started_at)
 		# Fixed server-side reward bag; no player gets multiple personal copies.
-		for item_id in RaidEncounter.treasure(zone):
-			loot[item_id] = int(loot.get(item_id, 0)) + int(RaidEncounter.treasure(zone)[item_id])
+		var boss_treasure: Dictionary = RaidEncounter.treasure(zone)
+		for item_id in boss_treasure:
+			loot[item_id] = int(loot.get(item_id, 0)) + int(boss_treasure[item_id])
+		for item_id in tempo_bonus:
+			loot[item_id] = int(loot.get(item_id, 0)) + int(tempo_bonus[item_id])
 		raid_boss_id = -1
 		raid_pending_slam = {}
 		raid_pending_cone = {}
@@ -5231,7 +5755,8 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		_clear_raid_minions()
 		raid_wave = 0
 		events.append({"type": "raid_defeated", "id": zombie.id,
-			"x": zombie.position.x, "z": zombie.position.z})
+			"x": zombie.position.x, "z": zombie.position.z,
+			"tempo_rank": RaidTempo.rank(time - raid_started_at) if not tempo_bonus.is_empty() else ""})
 	var loot_bag_id: int = _make_bag(zombie.position, loot, -1 if zombie.raid_boss else killer.id)
 	if loot_bag_id >= 0 and not _is_safe(zombie.position):
 		CorpseScent.mark(bags[loot_bag_id], time)
@@ -5300,12 +5825,14 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.guardian_brace = 0.0
 	victim.guard_link_target = -1
 	victim.guard_link_seconds = 0.0
+	victim.shield_wall_seconds = 0.0
 	GuardianRetribution.clear(victim)
 	for teammate in players.values():
 		if teammate.guard_link_target == victim.id:
 			teammate.guard_link_target = -1
 			teammate.guard_link_seconds = 0.0
 	victim.spore_filter_seconds = 0.0
+	victim.wound_seal_seconds = 0.0
 	victim.soft_sole_seconds = 0.0
 	victim.chain_wrap_seconds = 0.0
 	victim.tire_grip_seconds = 0.0
@@ -5315,6 +5842,8 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	parties.clear_ping_by(victim.id)
 	victim.meal_seconds = 0.0
 	victim.meal_tier = 0
+	victim.ration_seconds = 0.0
+	victim.ration_tier = 0
 	victim.defense_target = -1
 	victim.defense_until = 0.0
 	var zone: int = world.zone_at(victim.position.x, victim.position.z)
@@ -5605,10 +6134,18 @@ func _tick_players(delta: float) -> void:
 			player.dirty_character = true
 		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
 		player.party_aid_timer = maxf(0.0, player.party_aid_timer - maxf(0.0, delta))
+		player.medic_cover_cooldown = maxf(0.0, player.medic_cover_cooldown - maxf(0.0, delta))
 		player.feast_timer = maxf(0.0, player.feast_timer - maxf(0.0, delta))
 		player.guardian_timer = maxf(0.0, player.guardian_timer - maxf(0.0, delta))
 		player.guardian_brace = maxf(0.0, player.guardian_brace - maxf(0.0, delta))
 		player.guard_link_cooldown = maxf(0.0, player.guard_link_cooldown - maxf(0.0, delta))
+		player.shield_wall_cooldown = maxf(0.0, player.shield_wall_cooldown - maxf(0.0, delta))
+		player.shield_wall_seconds = maxf(0.0, player.shield_wall_seconds - maxf(0.0, delta))
+		if player.shield_wall_seconds > 0.0 and (not _alive(player) or player.mounted or \
+				not player.position.is_finite() or _is_safe(player.position) or \
+				not GuardianTaunt.melee_equipped(player.inventory) or \
+				parties.members_of(player.id).size() < 2):
+			player.shield_wall_seconds = 0.0
 		player.guard_counter_seconds = maxf(0.0, player.guard_counter_seconds - maxf(0.0, delta))
 		if player.guard_counter_seconds <= 0.0 or not _alive(player) or player.mounted or \
 				parties.group_of(player.id) != player.guard_counter_party or \
@@ -5630,6 +6167,10 @@ func _tick_players(delta: float) -> void:
 		player.lake_drink_cooldown = maxf(0.0, player.lake_drink_cooldown - maxf(0.0, delta))
 		player.rain_cooldown = maxf(0.0, player.rain_cooldown - maxf(0.0, delta))
 		player.spore_sample_cooldown = maxf(0.0, player.spore_sample_cooldown - maxf(0.0, delta))
+		var previous_seal: float = player.wound_seal_seconds
+		player.wound_seal_seconds = maxf(0.0, previous_seal - maxf(0.0, delta))
+		if player.wound_seal_seconds != previous_seal:
+			player.dirty_character = true
 		player.stim_cooldown = maxf(0.0, player.stim_cooldown - maxf(0.0, delta))
 		player.decoy_timer = maxf(0.0, player.decoy_timer - maxf(0.0, delta))
 		player.flash_cooldown = maxf(0.0, player.flash_cooldown - maxf(0.0, delta))
@@ -5659,6 +6200,14 @@ func _tick_players(delta: float) -> void:
 		if player.meal_seconds <= 0.0 and player.meal_tier > 0:
 			player.meal_tier = 0
 		if active_meal > 0.0:
+			player.dirty_character = true
+		var ration_active: float = TrailRation.active_seconds(player.ration_seconds, delta)
+		var hunger_factor: float = TrailRation.hunger_factor(
+			player.ration_tier, player.ration_seconds, delta)
+		player.ration_seconds = maxf(0.0, player.ration_seconds - maxf(0.0, delta))
+		if player.ration_seconds <= 0.0:
+			player.ration_tier = 0
+		if ration_active > 0.0:
 			player.dirty_character = true
 		var nourished: bool = player.survival.hunger > 20.0 and player.survival.thirst > 20.0
 		var energy_bonus: float = (
@@ -5692,10 +6241,17 @@ func _tick_players(delta: float) -> void:
 			in_sanctuary, safe_rest, accompanied)
 		var stamina_before_stress_tick: float = player.survival.stamina
 		var stamina_recovery_delay_before_tick: float = player.survival.stamina_recovery_delay
+		var had_food_poisoning: float = player.survival.food_poisoning
 		var had_bleeding: bool = player.survival.bleeding > 0.0
 		var had_fracture: bool = player.survival.fracture > 0.0
 		var had_scent_mask: bool = player.survival.scent_mask_seconds > 0.0
+		# Apply only to survival; preserve trained hunger-rate skills afterwards.
+		var normal_hunger_mult: float = player.survival.hunger_mult
+		player.survival.hunger_mult = normal_hunger_mult * hunger_factor
 		var damage: float = player.survival.tick(delta)
+		player.survival.hunger_mult = normal_hunger_mult
+		if not is_equal_approx(player.survival.food_poisoning, had_food_poisoning):
+			player.dirty_character = true
 		# Only ordinary passive stamina regen is damped. Purchased food,
 		# party standards, skills and explicit healing stay unchanged.
 		var passive_gain: float = maxf(0.0,
@@ -6064,9 +6620,12 @@ func _tick_raid_reinforcements(boss) -> void:
 		zombies[enemy_id] = minion
 		raid_minions.append(enemy_id)
 	raid_wave = phase
+	var active_guards: int = RaidWard.living_count(boss, raid_boss_id,
+		raid_minions, zombies)
 	events.append({"type": "raid_reinforcements", "id": boss.id,
 		"x": boss.position.x, "z": boss.position.z,
-		"phase": phase, "count": points.size()})
+		"phase": phase, "count": points.size(), "guards": active_guards,
+		"reduction_percent": RaidWard.reduction_percent(active_guards)})
 
 
 func _clear_raid_minions() -> void:
@@ -6417,6 +6976,12 @@ func _tick_zombies(delta: float) -> void:
 		if result.has("hit"):
 			var victim: Player = players.get(result["hit"])
 			if victim != null and _alive(victim):
+				# Independently verify that server-resolved claws still have a
+				# clear path BEFORE parry, plates, intercept or wound effects.
+				# A last-moment obstruction cannot consume defensive resources.
+				if not InfectedMeleeCover.clear_attack(
+						world, zombie.position, victim.position, zombie.raid_boss):
+					continue
 				# An active dodge avoids infected wounds; normal PvP attacks still land.
 				if victim.dodge_immunity > 0.0:
 					events.append({"type": "evaded", "peer": victim.id, "zombie": zombie.id})
@@ -6444,6 +7009,16 @@ func _tick_zombies(delta: float) -> void:
 					if victim.plated_hits == 0:
 						victim.plated_armor = ""
 					victim.dirty_character = true
+				# Unlike taunt/intercept, the group wall mitigates melee damage
+				# to nearby allies only; never run this for acid, AoE or PvP.
+				var wall_guardian: int = PartyShieldWall.protector_for(
+					victim, players, parties, world)
+				if wall_guardian > 0 and damage > 0.0:
+					var reduced: float = PartyShieldWall.mitigate(damage, zombie.raid_boss)
+					events.append({"type": "party_shield_wall_block",
+						"peer": victim.id, "by": wall_guardian,
+						"prevented": maxf(0.0, damage - reduced)})
+					damage = reduced
 				var applied: float = _hurt_player(victim, damage)
 				# Only real carried armor protects from infected secondary wounds.
 				# PvP bleeding continues to follow its ordinary rules.
@@ -6461,6 +7036,9 @@ func _tick_zombies(delta: float) -> void:
 				var warded: bool = WardenAura.active_for(victim, players, parties, world)
 				wound_bleeding = WardenAura.mitigate_wound(wound_bleeding, warded)
 				wound_infection = WardenAura.mitigate_wound(wound_infection, warded)
+				# Apply only to infected melee; not environmental poison or PvP.
+				wound_infection = WoundSealant.mitigate(wound_infection,
+					victim.wound_seal_seconds)
 				if applied > 0.0 and _alive(victim) and victim.survival.add_bleeding(wound_bleeding):
 					victim.dirty_character = true
 					events.append({"type": "bleeding", "peer": victim.id,
@@ -6802,6 +7380,7 @@ func _tick_world(delta: float) -> void:
 	_tick_supply_drop()
 	_tick_night_horde()
 	_tick_caravan_ambush()
+	_tick_ruin_ambush()
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):
 			decoys.erase(id)
@@ -6827,13 +7406,24 @@ func _tick_world(delta: float) -> void:
 			float(fire["x"]), float(fire["z"]), time)
 		var storm_exposed: float = StormproofBriquette.exposed_seconds(delta, time, fire)
 		var extra: float = FieldCampfire.storm_extra_fuel(storm_exposed, local_weather)
-		if extra <= 0.0:
+		if extra > 0.0:
+			fire["expires"] = maxf(time, float(fire["expires"]) - extra)
+			if float(fire["expires"]) <= time:
+				campfires.erase(id)
+				events.append({"type": "campfire_doused", "id": id,
+					"x": fire["x"], "z": fire["z"]})
+				continue
+		# Sampling every two seconds bounds CPU work even with many camps.
+		var alarm_owner: int = int(fire.get("alarm_owner", -1))
+		var observer: Player = players.get(alarm_owner)
+		if observer == null or not _alive(observer):
 			continue
-		fire["expires"] = maxf(time, float(fire["expires"]) - extra)
-		if float(fire["expires"]) <= time:
-			campfires.erase(id)
-			events.append({"type": "campfire_doused", "id": id,
-				"x": fire["x"], "z": fire["z"]})
+		var detected: int = CampAlarm.scan(fire, zombies, time)
+		if detected > 0:
+			events.append({"type": "camp_alarm", "peer": alarm_owner,
+				"group": int(fire.get("alarm_group", 0)),
+				"x": float(fire["x"]), "z": float(fire["z"]),
+				"count": detected})
 	for id in depleted.keys():
 		if time >= float(depleted[id]):
 			depleted.erase(id)
@@ -6931,10 +7521,15 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					"elite": zombie.elite, "raid_boss": zombie.raid_boss,
 					"raid_enraged": zombie.raid_enraged,
 					"raid_exposed_seconds": RaidRecovery.remaining(zombie, raid_exposed_until, time) if zombie.id == raid_boss_id else 0.0,
+					"raid_ward_guards": RaidWard.living_count(zombie, raid_boss_id, raid_minions, zombies) if zombie.id == raid_boss_id else 0,
+					"raid_ward_reduction": RaidWard.reduction_percent(RaidWard.living_count(zombie, raid_boss_id, raid_minions, zombies)) if zombie.id == raid_boss_id else 0,
 					"max_hp": float(zombie.data.get("health", zombie.health)),
 					"wound_phase": InfectedWounds.phase(zombie),
 					"snared_seconds": zombie.snared_seconds,
 					"stagger_seconds": zombie.stagger_seconds,
+					"melee_blocked": zombie.melee_blocked,
+					"resolve_stacks": zombie.stagger_resolve_stacks if zombie.stagger_resolve_seconds > 0.0 else 0,
+					"resolve_seconds": zombie.stagger_resolve_seconds,
 					"sunder_seconds": SunderMark.remaining(zombie, time)})
 	# Replicate only pending, living spit warnings within sight of this
 	# survivor. Client visual effects never authorize an actual hit.
@@ -7038,6 +7633,13 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			if supporter.guard_link_seconds > guardian_guarded_seconds:
 				guardian_guarded_seconds = supporter.guard_link_seconds
 				guardian_guarded_by = supporter.id
+	# The protected survivor sees exactly one nearest legitimate guardian.
+	# Unrelated players do not receive party wall IDs or countdowns.
+	var wall_guardian_id: int = PartyShieldWall.protector_for(
+		player, players, parties, world)
+	var wall_guarded_seconds: float = 0.0
+	if wall_guardian_id > 0:
+		wall_guarded_seconds = players[wall_guardian_id].shield_wall_seconds
 	var snapshot := {
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
 		"outposts": siege_contracts.public_state(territory.public_state(time, players, parties), time),
@@ -7067,6 +7669,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"tire_grip_seconds": player.tire_grip_seconds,
 			"flash_cooldown": player.flash_cooldown,
 			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
+			"ration_seconds": player.ration_seconds, "ration_tier": player.ration_tier,
 			"coating_seconds": player.edge_coating_seconds,
 			"coating_weapon": player.edge_coating_weapon,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
@@ -7088,7 +7691,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"prospect_mark": ProspectingChart.public_mark(
 				player.prospect_mark, time, depleted) if _alive(player) else {},
 			"threat_scan": threat_scan_for(peer_id),
-			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
+			"infection": player.survival.infection,
+			"food_poisoning": player.survival.food_poisoning,
+			"bleeding": player.survival.bleeding,
 			"fracture": player.survival.fracture,
 			"blood_scent_radius": BloodScent.detection_radius(player.survival.bleeding,
 				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival)),
@@ -7115,6 +7720,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else "",
 				player.spore_filter_seconds),
 			"spore_filter_seconds": player.spore_filter_seconds,
+			"wound_seal_seconds": player.wound_seal_seconds,
 			"weather_insulation": Weather.protection(
 				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else ""),
 			"lake_drink_cooldown": player.lake_drink_cooldown,
@@ -7131,6 +7737,10 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"guardian_cooldown": player.guardian_timer,
 			"guardian_intercept_cooldown": player.guard_link_cooldown,
 			"guardian_intercept_seconds": player.guard_link_seconds,
+			"shield_wall_seconds": player.shield_wall_seconds,
+			"shield_wall_cooldown": player.shield_wall_cooldown,
+			"shield_wall_guarded_seconds": wall_guarded_seconds,
+			"shield_wall_guarded_by": wall_guardian_id,
 			"guardian_counter_seconds": player.guard_counter_seconds,
 			"guardian_counter_target": player.guard_counter_target if player.guard_counter_seconds > 0.0 else -1,
 			"guardian_intercept_target": player.guard_link_target if player.guard_link_seconds > 0.0 else -1,
@@ -7145,6 +7755,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"rest_cooldown": player.rest_cooldown,
 			"rested_xp_credit": player.rested_xp_credit,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
+			"medic_cover_cooldown": player.medic_cover_cooldown,
 			"stim_cooldown": player.stim_cooldown, "flare_seconds": player.flare_seconds,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 			"visual_signature": _visual_signature_for(player),

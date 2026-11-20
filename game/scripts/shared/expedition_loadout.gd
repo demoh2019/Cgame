@@ -8,13 +8,14 @@ const Inventory = preload("res://scripts/shared/inventory.gd")
 const ORDER := ["scout", "archer", "gunner", "medic", "miner"]
 const TARGETS := {
 	"scout": {"water_bottle": 3, "canned_food": 3, "bandage": 4,
-		"field_antiseptic": 1, "field_splint": 1},
+		"field_antiseptic": 1, "field_splint": 1, "wound_sealant": 1},
 	"archer": {"water_bottle": 2, "canned_food": 2, "bandage": 3,
 		"arrow": 48, "herbal_poultice": 2},
 	"gunner": {"water_bottle": 2, "canned_food": 2, "bandage": 3,
 		"ammo_9mm": 48, "field_antiseptic": 1},
 	"medic": {"water_bottle": 3, "canned_food": 2, "bandage": 6,
-		"field_antiseptic": 3, "antibiotics": 2, "field_triage_pack": 1},
+		"field_antiseptic": 3, "antibiotics": 2, "field_triage_pack": 1,
+		"wound_sealant": 2},
 	"miner": {"water_bottle": 3, "canned_food": 2, "bandage": 3,
 		"prospecting_chart": 2, "mining_wedges": 2, "field_antiseptic": 1},
 }

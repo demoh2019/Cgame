@@ -23,6 +23,10 @@ the server to drop the connection, so it is not the default.
   falling leaves and fireflies around the player (`effects.gd` `update_ambience`); moonlit nights; a diorama post pass under the
   HUD (`assets/shaders/post_grade.gdshader`: tilt-shift, split toning, vignette).
 * Grass: `scripts/client/grass_field.gd`, a procedural carpet of thin blades in Voronoi patches of short, knee-high and tall
-  grass, grown tile by tile near the camera.
+  grass, grown tile by tile near the camera. `chunk_view.gd` selects one of three cached geometry LODs every 0.35 s:
+  18 blades per tuft nearby, 9 at medium range and 4 at the far edge. The transitions use 3 m of hysteresis.
+  Close-up grass, coloring, wind and fading are unchanged. The medium and far meshes have 50% and ~78% fewer triangles
+  per tuft; this reduces geometry cost, not pixel shading cost. Regression: `tests/test_grass_lod.gd`. Profile GPU frame
+  time in forests and meadows before claiming an FPS increase.
 * Feedback: banners for captured outposts and sieges, rings and bursts for restoration pulses, flashes, pinning bolts, knockback
   and smashed barricades; music stings on death, level-ups and victories.

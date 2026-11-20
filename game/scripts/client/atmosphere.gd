@@ -6,6 +6,8 @@ var environment: Environment
 var sun: DirectionalLight3D
 var sky_material: ShaderMaterial
 var world_environment: WorldEnvironment
+var sky: Sky
+var _shadows_allowed := true
 var light_level := 1.0 # The daylight of the last update, 0 at night and 1 at noon.
 var storm := 0.0 # 0..1, eased toward the target so the weather fades in and out.
 
@@ -27,7 +29,7 @@ func _ready() -> void:
 	sky_material.set_shader_parameter("has_panorama", panorama != null)
 	if panorama != null:
 		sky_material.set_shader_parameter("day_panorama", panorama)
-	var sky := Sky.new()
+	sky = Sky.new()
 	sky.radiance_size = Sky.RADIANCE_SIZE_64
 	sky.sky_material = sky_material
 	environment.sky = sky
@@ -76,6 +78,8 @@ func _ready() -> void:
 func update(daylight: float, sun_height: float, phase: float, storming: bool, delta: float) -> void:
 	light_level = daylight
 	storm = move_toward(storm, 1.0 if storming else 0.0, delta * 0.25)
+	# One GPU global updates every terrain material, without iterating streamed chunks.
+	RenderingServer.global_shader_parameter_set(&"aa_weather_wetness", storm)
 	sun.rotation = Vector3(-deg_to_rad(lerpf(6.0, 62.0, clampf(sun_height, 0.0, 1.0))), deg_to_rad(35.0 + phase * 90.0), 0.0)
 	# Low sun is orange, high sun is white; the moon is a weak blue light from the opposite direction.
 	var low_sun := 1.0 - clampf(sun_height * 2.2, 0.0, 1.0)
@@ -84,7 +88,7 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		sun.light_color = Color(0.55, 0.66, 1.0)
 		sun.rotation = Vector3(-deg_to_rad(lerpf(8.0, 50.0, clampf(-sun_height, 0.0, 1.0))), deg_to_rad(215.0 + phase * 90.0), 0.0)
 		sun.light_energy = lerpf(0.12, 0.5, clampf(-sun_height * 2.0, 0.0, 1.0)) * (1.0 - storm * 0.6)
-		sun.shadow_enabled = true
+		sun.shadow_enabled = _shadows_allowed
 	else:
 		sun.light_color = warm
 		sun.light_energy = lerpf(0.05, 1.05, clampf(sun_height * 2.0, 0.0, 1.0)) * (1.0 - storm * 0.55)
@@ -106,3 +110,20 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	environment.fog_light_color = horizon.lerp(Color(0.5, 0.52, 0.56), storm * 0.5)
 	environment.fog_density = lerpf(0.0016, 0.0042, storm)
 	environment.adjustment_saturation = lerpf(1.0, 0.85, storm)
+
+
+## Render-only switches; weather and the shared day/night clock are unaffected.
+func apply_graphics_profile(settings: Dictionary) -> void:
+	_shadows_allowed = bool(settings["shadows"])
+	sun.shadow_enabled = _shadows_allowed
+	sun.directional_shadow_max_distance = float(settings["shadow_distance"])
+	environment.glow_enabled = bool(settings["glow"])
+	# SSAO requires Forward+; the Compatibility renderer ignores it safely.
+	environment.ssao_enabled = bool(settings["ssao"])
+	match int(settings["sky_radiance"]):
+		32:
+			sky.radiance_size = Sky.RADIANCE_SIZE_32
+		128:
+			sky.radiance_size = Sky.RADIANCE_SIZE_128
+		_:
+			sky.radiance_size = Sky.RADIANCE_SIZE_64

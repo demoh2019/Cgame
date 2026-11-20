@@ -21,3 +21,10 @@ common/physics_ticks_per_second=30
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
+
+[shader_globals]
+
+aa_weather_wetness={
+"type": "float",
+"value": 0.0
+}

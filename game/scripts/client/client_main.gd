@@ -13,6 +13,7 @@ const FieldSmoke = preload("res://scripts/shared/field_smoke.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
+const TrailRation = preload("res://scripts/shared/trail_ration.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
@@ -21,6 +22,7 @@ const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
+const RaidWard = preload("res://scripts/shared/raid_ward.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
@@ -427,6 +429,10 @@ func _sync_zombies() -> void:
 			tint = base_tint.lerp(Color(0.54, 0.52, 0.66), 0.65)
 		elif phase == "frenzied":
 			tint = base_tint.lerp(Color(1.0, 0.19, 0.1), 0.78)
+		elif zombie.stagger_resolve_stacks >= 2 and zombie.stagger_resolve_seconds > 0.0:
+			tint = base_tint.lerp(Color(0.74, 0.42, 0.95), 0.65)
+		if zombie.melee_blocked:
+			tint = base_tint.lerp(Color(0.94, 0.75, 0.38), 0.62)
 		var material: StandardMaterial3D = _zombie_meshes[zombie.id].material_override
 		material.albedo_color = tint
 		_zombie_meshes[zombie.id].position = zombie.position + Vector3(0.0, 0.975 if zombie.elite else 0.8, 0.0)
@@ -749,6 +755,18 @@ func _physics_process(delta: float) -> void:
 	if sim == null:
 		return
 	sim.tick(delta)
+	for game_event in sim.drain_events():
+		if str(game_event.get("type", "")) == "camp_alarm" and (
+				int(game_event.get("peer", -1)) == LOCAL_PLAYER_ID):
+			_feedback = "CAMP ALERT: %d infected near your fire! Prepare defenses." % int(game_event.get("count", 0))
+		elif str(game_event.get("type", "")) == "ruin_ambush" and \
+				int(game_event.get("peer", -1)) == LOCAL_PLAYER_ID:
+			_feedback = "RUIN AMBUSH! %d infected awakened. Fight or retreat!" % [
+				int(game_event.get("count", 0))]
+		elif str(game_event.get("type", "")) == "ruin_ambush_cleared" and \
+				int(game_event.get("peer", -1)) == LOCAL_PLAYER_ID:
+			_feedback = "RUIN SECURED! All %d awakened infected defeated." % [
+				int(game_event.get("count", 0))]
 	if sim.siege_waves_started > _last_siege_notification:
 		_last_siege_notification = sim.siege_waves_started
 		_feedback = "Night siege! Infected are approaching a nearby barricade."
@@ -962,11 +980,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_recall"):
 		_result("Return charm", sim.cmd_use(LOCAL_PLAYER_ID, "return_charm"))
 	elif event.is_action_pressed("survive_loot"):
-		var target := _nearest_loot()
-		if target.is_empty():
-			_feedback = "No nearby crate or loot bag."
+		if Input.is_key_pressed(KEY_SHIFT):
+			var sweep: Dictionary = sim.cmd_loot_sweep(LOCAL_PLAYER_ID)
+			_result("Nearby PvE pickup (%d items)" % int(sweep.get("items", 0)), sweep)
 		else:
-			_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
+			var target := _nearest_loot()
+			if target.is_empty():
+				_feedback = "No nearby crate or loot bag."
+			else:
+				_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
 	elif event.is_action_pressed("survive_mount"):
 		_result("Trail bike", sim.cmd_toggle_mount(LOCAL_PLAYER_ID))
 	elif event.is_action_pressed("survive_bike_lamp"):
@@ -1014,21 +1036,64 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not _recipes.is_empty():
 			_result("Craft", sim.cmd_craft(LOCAL_PLAYER_ID, _recipes[_recipe_index]))
 	elif event.is_action_pressed("survive_quick_cook"):
-		var cook_recipe: String = QuickCooking.best_recipe(
-			survivor.inventory, survivor.progression.crafting_level())
-		if cook_recipe.is_empty():
-			_feedback = "Cooking: need fish, matching wood and crafting mastery."
+		if Input.is_key_pressed(KEY_ALT):
+			var smoke_recipe: String = TrailRation.best_recipe(
+				survivor.inventory, survivor.progression.crafting_level())
+			if smoke_recipe.is_empty():
+				_feedback = "Smoking: need fish, 2 matching wood, 1 fiber and skill."
+			else:
+				_result("Smoke trail fish", sim.cmd_craft(LOCAL_PLAYER_ID, smoke_recipe))
+		elif Input.is_key_pressed(KEY_SHIFT):
+			_result("Cook fish stew", sim.cmd_craft(LOCAL_PLAYER_ID, Defs.CAMP_FISH_STEW))
 		else:
-			_result("Quick cook", sim.cmd_craft(LOCAL_PLAYER_ID, cook_recipe))
+			var cook_recipe: String = QuickCooking.best_recipe(
+				survivor.inventory, survivor.progression.crafting_level())
+			if cook_recipe.is_empty():
+				_feedback = "Cooking: need fish, matching wood and crafting mastery."
+			else:
+				_result("Quick cook", sim.cmd_craft(LOCAL_PLAYER_ID, cook_recipe))
 	elif event.is_action_pressed("survive_food"):
-		_result("Eat", sim.cmd_use(LOCAL_PLAYER_ID, "canned_food"))
+		if Input.is_key_pressed(KEY_ALT) and Input.is_key_pressed(KEY_SHIFT):
+			var carried_ration := ""
+			for tier in range(Defs.MAX_TIER, 0, -1):
+				var candidate: String = "smoked_fish" if tier == 1 else "smoked_fish_%d" % tier
+				if survivor.inventory.count(candidate) > 0:
+					carried_ration = candidate
+					break
+			if carried_ration == "":
+				_feedback = "No smoked fish carried. Cook one with Alt+0 at a fire."
+			else:
+				_result("Eat smoked travel ration", sim.cmd_use(LOCAL_PLAYER_ID, carried_ration))
+		elif Input.is_key_pressed(KEY_CTRL):
+			_result("Smart food", sim.cmd_smart_provision(LOCAL_PLAYER_ID, "food"))
+		elif Input.is_key_pressed(KEY_ALT):
+			var raw_item := ""
+			for tier in range(1, 5):
+				var candidate: String = "raw_fish" if tier == 1 else "raw_fish_%d" % tier
+				if survivor.inventory.count(candidate) > 0:
+					raw_item = candidate
+					break
+			if raw_item == "":
+				_feedback = "No raw fish carried. Properly cooked food is safer."
+			else:
+				_result("Raw fish (food poisoning risk)", sim.cmd_use(LOCAL_PLAYER_ID, raw_item))
+		else:
+			_result("Eat stew" if Input.is_key_pressed(KEY_SHIFT) else "Eat",
+				sim.cmd_use(LOCAL_PLAYER_ID,
+					Defs.CAMP_FISH_STEW if Input.is_key_pressed(KEY_SHIFT) else "canned_food"))
 	elif event.is_action_pressed("survive_water"):
-		if Input.is_key_pressed(KEY_SHIFT):
+		if Input.is_key_pressed(KEY_CTRL):
+			_result("Smart hydration", sim.cmd_smart_provision(LOCAL_PLAYER_ID, "drink"))
+		elif Input.is_key_pressed(KEY_SHIFT):
 			_result("Collect unboiled water", sim.cmd_use(LOCAL_PLAYER_ID, "empty_water_pouch"))
 		else:
 			_result("Drink", sim.cmd_use(LOCAL_PLAYER_ID, "water_bottle"))
 	elif event.is_action_pressed("survive_bandage"):
-		if Input.is_key_pressed(KEY_SHIFT):
+		if Input.is_key_pressed(KEY_CTRL):
+			var treatment: Dictionary = sim.cmd_quick_medicine(LOCAL_PLAYER_ID)
+			var medicine_name: String = str(Defs.item(str(treatment.get("item", ""))).get("name", "none"))
+			_result("Field medicine: " + medicine_name, treatment)
+		elif Input.is_key_pressed(KEY_SHIFT):
 			_result("Expedition trauma kit", sim.cmd_use(LOCAL_PLAYER_ID, "expedition_trauma_kit"))
 		else:
 			_result("Heal", sim.cmd_use(LOCAL_PLAYER_ID, "bandage"))
@@ -1044,7 +1109,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_antibiotics"):
 		_result("Antibiotics", sim.cmd_use(LOCAL_PLAYER_ID, "antibiotics"))
 	elif event.is_action_pressed("survive_poultice"):
-		_result("Herbal poultice", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_poultice"))
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Food poisoning treatment", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_gut_tonic"))
+		else:
+			_result("Herbal poultice", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_poultice"))
 	elif event.is_action_pressed("survive_warmth"):
 		_result("Heat pack", sim.cmd_use(LOCAL_PLAYER_ID, "thermal_wrap"))
 	elif event.is_action_pressed("survive_flare"):
@@ -1111,12 +1179,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_result("Pack tarp", sim.cmd_pack_shelter(LOCAL_PLAYER_ID, nearest))
 	elif event.is_action_pressed("survive_campfire"):
-		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
-		var fire_result: Dictionary = sim.cmd_light_campfire(LOCAL_PLAYER_ID, point.x, point.y)
-		_result("Light campfire", fire_result)
-		if bool(fire_result.get("ok", false)):
-			_feedback = "Campfire lit. At night its light attracts infected. Press - to extinguish."
-			_update_hud()
+		if Input.is_key_pressed(KEY_SHIFT):
+			var fire_id: int = _nearest_campfire()
+			_result("Arm camp alarm",
+				sim.cmd_arm_camp_alarm(LOCAL_PLAYER_ID, fire_id))
+		else:
+			var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
+			var fire_result: Dictionary = sim.cmd_light_campfire(LOCAL_PLAYER_ID, point.x, point.y)
+			_result("Light campfire", fire_result)
+			if bool(fire_result.get("ok", false)):
+				_feedback = "Campfire lit. At night its light attracts infected. Press - to extinguish."
+				_update_hud()
 	elif event.is_action_pressed("survive_build"):
 		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
 		_result("Build barricade", sim.cmd_build(LOCAL_PLAYER_ID, point.x, point.y))
@@ -1285,6 +1358,15 @@ func _update_hud() -> void:
 			_stats.text += "\nBIKE PANNIERS: 28 kg supported; dismount = full load"
 		_stats.text += "\nBIKE GROUND: %s | uphill slows pedaling" % world.biome_at(
 			position.x, position.z).to_upper()
+	if sim.raid_boss_id > 0:
+		var raid_boss = sim.zombies.get(sim.raid_boss_id)
+		if raid_boss != null and raid_boss.is_alive() and \
+				raid_boss.position.distance_to(survivor.position) <= 72.0:
+			var live_guards: int = RaidWard.living_count(raid_boss,
+				sim.raid_boss_id, sim.raid_minions, sim.zombies)
+			if live_guards > 0:
+				_stats.text += "\nRAID WARD: %d guards alive (-%d%% boss damage)" % [
+					live_guards, RaidWard.reduction_percent(live_guards)]
 	if not sim.night_horde.is_empty():
 		var remain: int = 0
 		for enemy_id in sim.night_horde.get("ids", []):
@@ -1366,7 +1448,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G skill / Shift+G finisher | Space dodge | F8 parry | F9 smoke | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic / Shift+6 coat melee 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter) / Ctrl+Shift+R boil (2 wood, live fire)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | F2 signal flare / F10 net / F12 collect net | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot / Shift+Q nearby PvE bags | F attack | G skill / Shift+G finisher | Space dodge | F8 parry | F9 smoke | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish / Shift+0 cook stew | Shift+1 eat stew | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food / Ctrl+1 smart food 2 water / Ctrl+2 smart drink 3 heal / Ctrl+3 smart treatment / Shift+3 trauma kit 4 cycle weapon 5 armor 6 antiseptic / Shift+6 coat melee 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter) / Ctrl+Shift+R boil (2 wood, live fire)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | F2 signal flare / F10 net / F12 collect net | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback

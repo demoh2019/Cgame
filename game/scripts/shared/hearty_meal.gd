@@ -9,6 +9,8 @@ const MAX_DURATION := 210.0
 
 
 static func tier_for_food(item_id: String) -> int:
+	if item_id == Defs.CAMP_FISH_STEW:
+		return 1 # Hot stew grants the ordinary T1 meal buff, never a stacked effect.
 	if item_id == "cooked_fish":
 		return 1
 	for tier in range(2, Defs.MAX_TIER + 1):
