@@ -299,7 +299,7 @@ void AudioStreamPlayer3D::_notification(int p_what) {
 				// bright transient highs for one buffer before being muffled.
 				const AudioOcclusionPolicy::Response initial_occlusion =
 						AudioOcclusionPolicy::evaluate(obstruction_amount, attenuation_filter_cutoff_hz);
-				AudioServer::get_singleton()->start_playback_stream(setplayback, bus_map, setplay.get(), actual_pitch_scale, linear_attenuation, initial_occlusion.cutoff_hz);
+				AudioServer::get_singleton()->start_playback_stream(setplayback, bus_map, setplay.get(), actual_pitch_scale, linear_attenuation * initial_occlusion.highshelf_gain, initial_occlusion.cutoff_hz);
 				setplayback.unref();
 				setplay.set(-1);
 			}
@@ -497,9 +497,10 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 			}
 		}
 
-		// Spatial blockage darkens the direct path and high frequencies.
-		// Preserve the previous distance/direction curve when unobstructed.
-		linear_attenuation = MAX(linear_attenuation, Math::db_to_linear(db_att) * obstruction.gain);
+		// Distance/direction highshelf and obstruction highshelf are separate
+		// independent factors. The audio policy applies its -15 dB spectral
+		// loss once, rather than reusing the -8 dB full-band gain twice.
+		linear_attenuation = MAX(linear_attenuation, Math::db_to_linear(db_att));
 
 		FixedVector<AudioFrame, VOLUME_VECTOR_SIZE> listener_volume_vector;
 		listener_volume_vector.resize_uninitialized(VOLUME_VECTOR_SIZE);
