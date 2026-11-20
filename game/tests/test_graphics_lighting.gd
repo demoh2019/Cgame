@@ -34,6 +34,25 @@ func run(t) -> void:
 	t.check(not bool(GraphicsLighting.settings(0, "forward_plus")["volumetric_fog"]),
 		"low-end Forward+ renders without volume allocation")
 
+	t.current = "renderer-aware reflection ray budget"
+	for tier in [0, 1]:
+		t.check(not bool(GraphicsLighting.settings(tier, "forward_plus")["ssr_enabled"]),
+			"Performance and Balanced never allocate the SSR pass")
+	t.check(bool(GraphicsLighting.settings(2, "forward_plus")["ssr_enabled"]),
+		"High reserves short half-resolution reflected rays for glossy materials")
+	t.check(bool(GraphicsLighting.settings(3, "forward_plus")["ssr_enabled"]),
+		"Ultra enables cinematic on-screen reflections")
+	t.eq(int(GraphicsLighting.settings(2, "forward_plus")["ssr_max_steps"]), 24,
+		"High limits per-pixel SSR ray travel")
+	t.eq(int(GraphicsLighting.settings(3, "forward_plus")["ssr_max_steps"]), 48,
+		"Ultra raises SSR quality without unbounded sampling")
+	for method in ["gl_compatibility", "mobile", ""]:
+		for tier in 4:
+			t.check(not bool(GraphicsLighting.settings(tier, method)["ssr_enabled"]),
+				"unsupported render methods never schedule screen-space reflection passes")
+	t.check(float(GraphicsLighting.settings(3, "forward_plus")["ssr_depth_tolerance"]) > 0.0,
+		"SSR depth tolerance remains positive to tolerate complex ruin geometry")
+
 	t.current = "actual Godot sun and environment properties follow presets"
 	var sun := DirectionalLight3D.new()
 	var env := Environment.new()
@@ -44,11 +63,16 @@ func run(t) -> void:
 		"High-quality cascades blend to reduce transition seams")
 	t.check(env.volumetric_fog_enabled,
 		"Ultra Forward+ activates actual environment fog")
+	t.check(env.ssr_enabled, "Ultra applies the Godot environment SSR flag")
+	t.eq(env.ssr_max_steps, 48, "Ultra reflection ray budget is applied to the environment")
+	t.near(env.ssr_depth_tolerance, 0.20, 0.0001, "depth tolerance reduces reflection holes")
 	t.near(env.volumetric_fog_length, 72.0, 0.01,
 		"volumetric fog stops within bounded camera range")
 	GraphicsLighting.apply(sun, env, 2, "forward_plus")
 	t.check(env.volumetric_fog_enabled and env.volumetric_fog_length < 72.0,
 		"High trades volume range for fog precision and bounded cost")
+	t.check(env.ssr_enabled and env.ssr_max_steps == 24,
+		"High reduces reflection steps after a live quality switch")
 	GraphicsLighting.apply(sun, env, 1, "gl_compatibility")
 	t.eq(sun.directional_shadow_mode, DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS,
 		"Compatibility Balanced retains efficient two-split shadows")
@@ -56,6 +80,8 @@ func run(t) -> void:
 		"Balanced saves work from blending shadow cascades")
 	t.check(not env.volumetric_fog_enabled,
 		"switching renderer or preset releases the fog effect")
+	t.check(not env.ssr_enabled,
+		"switching to Compatibility immediately disables unsupported reflection work")
 	GraphicsLighting.apply(sun, env, 0, "gl_compatibility")
 	t.eq(sun.directional_shadow_mode, DirectionalLight3D.SHADOW_ORTHOGONAL,
 		"Performance uses a cheap shadow mode if sun shadows are later enabled")
