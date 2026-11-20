@@ -36,10 +36,11 @@
 
 void Decal::set_size(const Vector3 &p_size) {
 	const Vector3 clamped = p_size.maxf(0.001);
-	if (size == clamped) {
+	if (size_sent && size == clamped) {
 		return;
 	}
 	size = clamped;
+	size_sent = true;
 	RS::get_singleton()->decal_set_size(decal, size);
 	update_gizmos();
 }
@@ -87,10 +88,11 @@ real_t Decal::get_emission_energy() const {
 void Decal::set_albedo_mix(real_t p_mix) {
 	// Pooled impact decals hold constant opacity for most of their lifetime.
 	// Do not dispatch identical values to the renderer every frame.
-	if (albedo_mix == p_mix) {
+	if (albedo_mix_sent && albedo_mix == p_mix) {
 		return;
 	}
 	albedo_mix = p_mix;
+	albedo_mix_sent = true;
 	RS::get_singleton()->decal_set_albedo_mix(decal, albedo_mix);
 }
 
