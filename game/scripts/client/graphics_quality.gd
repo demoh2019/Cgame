@@ -133,6 +133,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# MultiMesh tiles on a quality change.
 	RenderingServer.global_shader_parameter_set(&"aa_grass_transmission",
 		float(world_profile["grass_transmission"]))
+	# Animate grass lighting normals only on higher graphics levels. This
+	# shares the same vertex shader and never adds a pixel texture lookup.
+	RenderingServer.global_shader_parameter_set(&"aa_grass_normal_wind",
+		float(world_profile["grass_normal_wind"]))
 	# Crown AO scales down as genuine shadow maps and SSAO become available.
 	RenderingServer.global_shader_parameter_set(&"aa_canopy_occlusion",
 		float(world_profile["canopy_occlusion"]))

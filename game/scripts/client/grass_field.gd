@@ -30,10 +30,13 @@ const SHADER_CODE := """
 shader_type spatial;
 render_mode cull_disabled, diffuse_lambert_wrap, specular_disabled, shadows_disabled;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
+#include "res://assets/shaders/vegetation_wind_space.gdshaderinc"
 global uniform float aa_weather_wetness;
 global uniform vec3 aa_vegetation_wind;
 // One renderer-wide intensity controls thin-blade backlighting for all grass tiles.
 global uniform float aa_grass_transmission;
+// Quality-gated geometric-normal tilt, computed at the vertex without textures.
+global uniform float aa_grass_normal_wind;
 uniform float fade_start = 44.0;
 uniform float fade_end = 60.0;
 varying float tipness;
@@ -42,6 +45,7 @@ varying float sheen;
 varying float grass_light_fade;
 varying vec3 tint;
 varying vec2 ground_xz;
+varying vec3 aa_world_grass_normal;
 void vertex() {
 	tipness = UV.y;
 	shade = UV.x; // Each blade has its own brightness.
@@ -55,23 +59,36 @@ void vertex() {
 	// waves per vertex. This matters because MultiMesh tiles are still alive in the
 	// culling margin outside the shader fade range.
 	sheen = 0.0;
+	aa_world_grass_normal = vec3(0.0, 1.0, 0.0);
 	if (shrink > 0.001) {
-		// Wind: steady ripples with larger gusts, strongest at the tips.
-		float k = UV.y * UV.y;
-		vec2 wind_dir = aa_vegetation_wind.xy;
-		vec2 crosswind = vec2(-wind_dir.y, wind_dir.x);
 		float wind_power = clamp(aa_vegetation_wind.z, 0.0, 1.0);
-		float wave = TIME * (1.0 + wind_power * 0.6)
-			+ dot(root.xz, wind_dir * 0.31 + crosswind * 0.08);
-		float gust = sin(TIME * 0.7
-			+ dot(root.xz, wind_dir * 0.045 + crosswind * 0.02)) * 0.5 + 0.5;
-		gust *= gust;
-		float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.2;
-		vec2 motion = wind_dir * (sin(wave) * 0.035 + gust * 0.11)
-			+ crosswind * (cos(wave * 0.8) * 0.03 + gust * 0.05);
-		VERTEX.x += motion.x * k * shrink * storm_wind * wind_power;
-		VERTEX.z += motion.y * k * shrink * storm_wind * wind_power;
-		sheen = gust;
+		// Windless weather must not evaluate 3 wave functions per grass vertex.
+		if (wind_power > 0.001) {
+			// Wind: steady ripples with larger gusts, strongest at the tips.
+			float k = UV.y * UV.y;
+			vec2 wind_dir = aa_vegetation_wind.xy;
+			vec2 crosswind = vec2(-wind_dir.y, wind_dir.x);
+			float wave = TIME * (1.0 + wind_power * 0.6)
+				+ dot(root.xz, wind_dir * 0.31 + crosswind * 0.08);
+			float gust = sin(TIME * 0.7
+				+ dot(root.xz, wind_dir * 0.045 + crosswind * 0.02)) * 0.5 + 0.5;
+			gust *= gust;
+			float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.2;
+			vec2 motion = wind_dir * (sin(wave) * 0.035 + gust * 0.11)
+				+ crosswind * (cos(wave * 0.8) * 0.03 + gust * 0.05);
+			vec2 world_bend = motion * k * shrink * storm_wind * wind_power;
+			vec2 local_bend = aa_wind_world_to_local_xz(world_bend, MODEL_MATRIX);
+			VERTEX.x += local_bend.x;
+			VERTEX.z += local_bend.y;
+			// Thin blades follow the bent world-space normal for subtle moving
+			// sun highlights. Low presets leave the old upright normal unchanged.
+			if (aa_grass_normal_wind > 0.001) {
+				vec2 normal_slope = world_bend * (1.0 + UV.y) * aa_grass_normal_wind;
+				aa_world_grass_normal = normalize(vec3(
+					-normal_slope.x, 1.0, -normal_slope.y));
+			}
+			sheen = gust;
+		}
 	}
 	// Lit like the ground it grows from, so the carpet and the soil read as one surface.
 	NORMAL = vec3(0.0, 1.0, 0.0);
@@ -98,7 +115,7 @@ void fragment() {
 	ROUGHNESS = 0.85;
 	// Always lit from above, whichever side of the blade we see: with two-sided blades the engine would otherwise flip
 	// the normal of every back face downward and half the meadow would turn black.
-	NORMAL = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+	NORMAL = normalize((VIEW_MATRIX * vec4(aa_world_grass_normal, 0.0)).xyz);
 }
 """
 
