@@ -210,7 +210,9 @@ void Camera3D::add_spatial_trauma(const Vector3 &p_source, const Vector3 &p_list
 	}
 	const real_t falloff = CameraShake::spatial_falloff(p_listener, p_source, p_inner_radius, p_outer_radius);
 	if (falloff > real_t(0.0)) {
-		add_trauma(p_amount * falloff);
+		// Clamp before multiplication: even a huge finite network hint must
+		// not overflow to Inf and reset existing trauma.
+		add_trauma(MIN(p_amount, real_t(1.0)) * falloff);
 	}
 }
 
