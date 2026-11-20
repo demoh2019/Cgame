@@ -62,8 +62,33 @@ static func variants(species: String) -> Array:
 
 static func mesh(file: String) -> Mesh:
 	if not _meshes.has(file):
-		_meshes[file] = load(FOLDER + file) if ResourceLoader.exists(FOLDER + file) else null
+		var loaded: Mesh = load(FOLDER + file) if ResourceLoader.exists(FOLDER + file) else null
+		_meshes[file] = _foliage_ready(loaded) if loaded != null and not file.begins_with("../") else loaded
 	return _meshes[file]
+
+
+## Scanned leaf cards need foliage shading: lit from both sides, light shining through,
+## soft wrap diffuse, and a lower alpha cut so thin blades survive the distant mipmaps
+## instead of crumbling into dark specks.
+static func _foliage_ready(source: Mesh) -> Mesh:
+	var copy: Mesh = source.duplicate()
+	for surface in copy.get_surface_count():
+		var material: Material = copy.surface_get_material(surface)
+		if not (material is BaseMaterial3D):
+			continue
+		var leaf: BaseMaterial3D = (material as BaseMaterial3D).duplicate()
+		leaf.cull_mode = BaseMaterial3D.CULL_DISABLED
+		leaf.diffuse_mode = BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
+		leaf.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+		leaf.roughness = maxf(leaf.roughness, 0.7)
+		leaf.albedo_color = leaf.albedo_color * Color(1.18, 1.18, 1.12)
+		if leaf.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR or leaf.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA:
+			leaf.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+			leaf.alpha_scissor_threshold = 0.3
+		leaf.backlight_enabled = true
+		leaf.backlight = Color(0.32, 0.38, 0.16)
+		copy.surface_set_material(surface, leaf)
+	return copy
 
 
 static func quality_scale(level: int) -> float:
