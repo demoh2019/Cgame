@@ -1,0 +1,37 @@
+name: SSR finite-ray validation
+
+on:
+  pull_request:
+    paths:
+      - servers/rendering/renderer_rd/shaders/effects/screen_space_reflection.glsl
+      - tests/rendering/test_ssr_ray_guard.cpp
+      - game/scripts/client/graphics_reflections.gd
+  push:
+    branches: [develop]
+    paths:
+      - servers/rendering/renderer_rd/shaders/effects/screen_space_reflection.glsl
+      - tests/rendering/test_ssr_ray_guard.cpp
+      - game/scripts/client/graphics_reflections.gd
+
+jobs:
+  finite-ray-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and execute SSR numerical checks
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror tests/rendering/test_ssr_ray_guard.cpp -o /tmp/test_ssr_ray_guard
+          /tmp/test_ssr_ray_guard
+      - name: Verify renderer uses protected Hi-Z divisions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path("servers/rendering/renderer_rd/shaders/effects/screen_space_reflection.glsl").read_text()
+          assert "vec2 ssr_safe_ray_xy(vec2 v)" in src
+          assert "any(isnan(screen_ray_dir))" in src
+          assert "any(isinf(screen_ray_dir))" in src
+          assert "depth_delta <= 0.000001" in src
+          assert src.count("/ ray_xy_divisor;") == 4
+          assert "/ screen_ray_dir.xy;" not in src
+          assert "imageStore(output_mip_level, pixel_pos, vec4(0.0));" in src
+          PY
