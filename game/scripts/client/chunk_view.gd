@@ -35,6 +35,7 @@ global uniform float aa_ground_contact_strength;
 global uniform float aa_terrain_detail_radius;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/puddle_ripples.gdshaderinc"
+#include "res://assets/shaders/water_caustics.gdshaderinc"
 
 // A painted-looking ground: smooth patches of lush and dry grass, dirt, sand at the shore, strata on slopes and
 // snow on the peaks, all from layered value noise so nothing repeats in a visible grid.
@@ -154,6 +155,12 @@ void fragment() {
 	AO = ground_contact;
 	ALBEDO = color * mix(1.0, ground_contact, 0.12)
 		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), vertex_cloud_shade);
+	// Match the same water caustic field even if 13-layer PBR assets are absent.
+	// Low-end graphics uniformly skip the shader math on Compatibility.
+	float caustics = aa_water_caustic_illumination(
+		p, h, world_normal.y, distance_to_camera, TIME);
+	ALBEDO += vec3(0.10, 0.19, 0.18) * caustics
+		* (1.0 - vertex_cloud_shade * 0.70);
 	float dry_roughness = mix(0.95, 0.75, shore);
 	// Reuse the near-camera fine noise for subtle dry soil roughness variation;
 	// no extra texture samples, and wet puddles stay glossy.
