@@ -2205,6 +2205,12 @@ func _on_event(event: Dictionary) -> void:
 			if involved:
 				banner("SIEGE %s" % str(event.get("result", "over")).to_upper().replace("_", " "), Color(0.95, 0.78, 0.35))
 		# Combat feedback that used to show only as numbers.
+		"eel_bite":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Something bit you in the dark water! (-%d)" % int(event.get("damage", 0.0)))
+		"drowning":
+			if int(event.get("peer", -1)) == client.peer_id:
+				banner("OUT OF AIR — SURFACE!", Color(0.5, 0.8, 1.0))
 		"restoration_pulse":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Restoration pulse: %d ally%s treated." % [int(event.get("count", 0)), "" if int(event.get("count", 0)) == 1 else "s"])
@@ -2988,6 +2994,11 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Nearby pickup: %s." % str(data.get("reason", "rejected")))
 		return
+	if kind == "loot" and str(data.get("reason", "")) == "dive_to_reach":
+		say("The cache lies on the bottom. Hold crouch to dive down to it.")
+		return
+	if kind == "loot" and bool(data.get("sunken", false)) and bool(data.get("ok", false)):
+		say("You pry open the sunken cache.")
 	if kind == "loot" and str(data.get("reason", "")) == "guards_alive":
 		say("Cache sealed: eliminate %d infected guards." % int(data.get("remaining", 0)))
 		return

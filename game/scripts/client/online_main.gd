@@ -178,6 +178,8 @@ var _fp_pitch := 0.0
 var _start_first_person := false # --first-person launch flag (also for screenshots).
 var _jump_time := -1.0 # Seconds into the current cosmetic first-person hop, or -1 on the ground.
 var _crosshair: Control
+var _underwater_tint: ColorRect # Blue murk while the camera is below the surface.
+var _breath_label: Label # Air left while diving.
 var _dof_elapsed := 0.35 # Coalesce cinematic focus updates to ~3 Hz.
 var _attack_cooldown := 0.0
 var _build_mode := false # U: a ghost wall follows the aim until it is placed or cancelled.
@@ -941,6 +943,12 @@ func _spawn_effects(event: Dictionary) -> void:
 			for step in 6:
 				effects.burst(bolt_from.lerp(bolt_end, (step + 1) / 6.0), Color(0.55, 0.45, 1.0), 4, 0.6, 0.35, 0.12, 0.0, 0.0)
 			effects.ring(bolt_end - Vector3(0, 1.0, 0), Color(0.6, 0.5, 1.0, 0.9), 1.4 if bool(event.get("hit", false)) else 0.7, 0.4)
+		"eel_bite":
+			effects.burst(at - Vector3(0, 0.6, 0), Color(0.6, 0.1, 0.1), 14, 1.6, 0.6, 0.1, -0.5)
+			if int(event.get("peer", -1)) == client.peer_id:
+				_shake(0.35)
+		"drowning":
+			effects.burst(at, Color(0.8, 0.95, 1.0), 20, 1.2, 1.0, 0.08, -3.0)
 		"cataclysm":
 			var blast_radius: float = float(event.get("radius", 7.0))
 			effects.ring(at - Vector3(0, 1.0, 0), Color(1.0, 0.45, 0.2, 1.0), blast_radius, 0.8)
@@ -1376,6 +1384,7 @@ func _process(delta: float) -> void:
 			_jump_time = -1.0
 	if _crosshair != null:
 		_crosshair.visible = _first_person and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	_update_underwater()
 	if _demo == "sky":
 		# A low view toward the horizon to show the sky (screenshots only).
 		camera.position = position + Vector3(0.0, 14.0, 6.0)
@@ -1719,6 +1728,37 @@ func _update_grass_crushers(position: Vector3) -> void:
 	for zombie in client.zombies.values():
 		sources.append(["zombie", zombie])
 	physics_fx.plants.set_crushers(PlantInteraction.pick_crushers(Vector2(position.x, position.z), sources))
+
+
+## Murky blue view under the surface and an air gauge while diving (server-owned breath).
+func _update_underwater() -> void:
+	if hud == null or camera == null:
+		return
+	if _underwater_tint == null:
+		var layer := CanvasLayer.new()
+		layer.layer = -1 # Under the HUD, over the world.
+		add_child(layer)
+		_underwater_tint = ColorRect.new()
+		_underwater_tint.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_underwater_tint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_underwater_tint.color = Color(0.05, 0.22, 0.32, 0.55)
+		layer.add_child(_underwater_tint)
+		_breath_label = Label.new()
+		_breath_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		_breath_label.position.y -= 150.0
+		_breath_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_breath_label.add_theme_font_size_override("font_size", 20)
+		_breath_label.add_theme_color_override("font_outline_color", Color.BLACK)
+		_breath_label.add_theme_constant_override("outline_size", 6)
+		hud.add_child(_breath_label)
+	_underwater_tint.visible = camera.global_position.y < Defs.WATER_LEVEL - 0.05
+	var breath: float = float(client.you.get("breath", 100.0))
+	var diving: bool = bool(client.you.get("diving", false))
+	_breath_label.visible = diving or breath < 99.5
+	if _breath_label.visible:
+		var bars: int = clampi(int(ceil(breath / 10.0)), 0, 10)
+		_breath_label.text = "Air  " + "■".repeat(bars) + "□".repeat(10 - bars) + ("   DROWNING!" if breath <= 0.0 else "")
+		_breath_label.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3) if breath < 25.0 else Color(0.75, 0.92, 1.0))
 
 
 func _can_fight() -> bool:

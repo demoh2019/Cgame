@@ -91,6 +91,7 @@ const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const ParryRiposte = preload("res://scripts/shared/parry_riposte.gd")
 const StaggerFinisher = preload("res://scripts/shared/stagger_finisher.gd")
 const ArcaneAbilities = preload("res://scripts/shared/arcane_abilities.gd")
+const Swimming = preload("res://scripts/shared/swimming.gd")
 const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
@@ -280,6 +281,7 @@ class Player:
 	var finisher_cooldown: float = 0.0 # Server-owned, nonpersistent PvE execution timer.
 	var arcane_cooldown: float = 0.0 # Classless Arcane Bolt; server-owned, nonpersistent.
 	var ultimate_cooldown: float = 0.0 # Classless Cataclysm ultimate; server-owned, nonpersistent.
+	var breath: float = 100.0 # Air left while diving; refills at the surface. Nonpersistent.
 	var combat_energy: float = 100.0
 	var sharpened_weapon: String = "" # Prepared, owned melee weapon.
 	var sharpened_hits: int = 0 # Only confirmed ordinary infected contacts spend charges.
@@ -922,6 +924,7 @@ func _spawn_player(player: Player) -> void:
 	player.finisher_cooldown = 0.0
 	player.arcane_cooldown = 0.0
 	player.ultimate_cooldown = 0.0
+	player.breath = Swimming.MAX_BREATH
 	player.party_aid_timer = 0.0
 	player.feast_timer = 0.0
 	player.guardian_timer = 0.0
@@ -5270,6 +5273,10 @@ func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dict
 			return {"ok": false, "reason": "empty"}
 		if _distance_xz(player.position, crate) > Defs.REACH + 0.5:
 			return {"ok": false, "reason": "too_far"}
+		# Sunken caches lie on the bottom: only a diver (crouch in deep water) reaches them.
+		var sunken: bool = bool(crate.get("sunken", false))
+		if sunken and not _is_diving(player):
+			return {"ok": false, "reason": "dive_to_reach"}
 		var local_rng := RandomNumberGenerator.new()
 		local_rng.seed = WorldGen.mix(entity_id, int(time), world.world_seed, 3)
 		var zone: int = int(crate["zone"])
@@ -5309,6 +5316,16 @@ func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dict
 		events.append({"type": "crate", "peer": peer_id, "id": entity_id})
 		# The cache is already committed as opened: no repeated RPC can create
 		# another mob wave or another lockpick reward for this same opening.
+		if sunken:
+			# Disturbing the silt stirs whatever lives down there.
+			var zone_here: int = world.zone_at(player.position.x, player.position.z)
+			if Swimming.eel_chance(zone_here, _is_safe(player.position), 1.0) > 0.0:
+				var bite: float = _hurt_player(player, Swimming.eel_damage(zone_here))
+				events.append({"type": "eel_bite", "peer": peer_id, "damage": bite,
+					"x": player.position.x, "z": player.position.z})
+				if not _alive(player):
+					_on_player_death(player, -1)
+			return {"ok": true, "scavenging_xp": gained_xp, "sunken": true}
 		_trigger_ruin_ambush(player, crate, unlocked)
 		return {"ok": true, "scavenging_xp": gained_xp}
 	return {"ok": false, "reason": "nothing_there"}
@@ -5438,6 +5455,42 @@ func _apply_loot_skills(player: Player, loot: Dictionary, local_rng: RandomNumbe
 
 
 ## Damage a player takes: toughness reduces it and trains from it.
+func _is_diving(player: Player) -> bool:
+	return not player.mounted and player.crouching and \
+		Swimming.submerged(world, player.position.x, player.position.z, true)
+
+
+## Breath, drowning and eel bites for divers. Returns true when the survivor died.
+func _tick_underwater(player: Player, delta: float) -> bool:
+	var diving: bool = _is_diving(player)
+	var before: float = player.breath
+	var air: Vector2 = Swimming.breathe(player.breath, diving, delta)
+	player.breath = air.x
+	if not is_equal_approx(before, player.breath):
+		player.dirty_character = true
+	var hurt: float = 0.0
+	if air.y > 0.0:
+		hurt += _hurt_player(player, air.y)
+		if player.breath <= 0.0 and before > 0.0:
+			events.append({"type": "drowning", "peer": player.id,
+				"x": player.position.x, "z": player.position.z})
+	if diving:
+		var zone: int = world.zone_at(player.position.x, player.position.z)
+		var chance: float = Swimming.eel_chance(zone, _is_safe(player.position), delta)
+		if chance > 0.0 and rng.randf() < chance:
+			var bite: float = _hurt_player(player, Swimming.eel_damage(zone))
+			hurt += bite
+			events.append({"type": "eel_bite", "peer": player.id, "damage": bite,
+				"x": player.position.x, "z": player.position.z})
+			events.append({"type": "hit", "kind": "player", "id": player.id, "damage": bite, "by": -1})
+	if hurt > 0.0:
+		player.dirty_character = true
+		if not _alive(player):
+			_on_player_death(player, -1)
+			return true
+	return false
+
+
 func _hurt_player(victim: Player, raw_damage: float) -> float:
 	var reduced: float = raw_damage * (1.0 - victim.skills.bonus("damage_reduction"))
 	var applied: float = victim.survival.hurt(reduced)
@@ -6449,6 +6502,8 @@ func _tick_players(delta: float) -> void:
 			player.dirty_character = true
 		if damage > 0.0 and not _alive(player):
 			_on_player_death(player, -1)
+			continue
+		if _tick_underwater(player, delta):
 			continue
 		var zone: int = world.zone_at(player.position.x, player.position.z)
 		if zone != player.zone_notice:
@@ -7809,6 +7864,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"exposure": player.survival.exposure,
 			"wetness": player.survival.wetness,
 			"wading_depth_m": WadingWetness.depth_at(world, player.position),
+			"swimming": not player.mounted and Swimming.is_swimming(world, player.position.x, player.position.z),
+			"diving": _is_diving(player), "breath": player.breath,
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 			"tent_sheltered": PortableShelter.covers(shelters, player.position, time),

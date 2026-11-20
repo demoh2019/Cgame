@@ -282,6 +282,33 @@ func chunk(cell: Vector2i) -> Dictionary:
 	return data
 
 
+## Sunken caches lie on the bottom of deep water; only a diver can open them. A separate
+## random stream keeps every other piece of the chunk exactly as it was before.
+const SUNKEN_MIN_DEPTH := 2.2
+const SUNKEN_ID_BASE := 950
+
+
+func _add_sunken_caches(cell: Vector2i, origin: Vector2, zone: int, crates: Array) -> void:
+	var sunken_rng := RandomNumberGenerator.new()
+	sunken_rng.seed = mix(cell.x, cell.y, world_seed, 71)
+	if sunken_rng.randf() > 0.35:
+		return
+	var placed := 0
+	for attempt in 10:
+		if placed >= 2:
+			break
+		var p := origin + Vector2(sunken_rng.randf(), sunken_rng.randf()) * Defs.CHUNK_SIZE
+		var depth: float = Defs.WATER_LEVEL - height_at(p.x, p.y)
+		if depth < SUNKEN_MIN_DEPTH or is_safe(p.x, p.y):
+			continue
+		crates.append({
+			"id": entity_id(cell, SUNKEN_ID_BASE + placed), "kind": "crate", "sunken": true,
+			"tier": clampi(tier_for_zone(zone) + 1, 1, Defs.MAX_TIER),
+			"x": p.x, "z": p.y, "y": height_at(p.x, p.y), "radius": 0.6, "blocks": false,
+		})
+		placed += 1
+
+
 func _generate_chunk(cell: Vector2i) -> Dictionary:
 	var origin := cell_origin(cell)
 	if Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
@@ -433,6 +460,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 		for item in content["npcs"]:
 			if cell_rect.has_point(Vector2(float(item["x"]), float(item["z"]))):
 				npcs.append(item)
+	_add_sunken_caches(cell, origin, zone, crates)
 	return {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
 
 

@@ -11,6 +11,7 @@ const BikeIntegrity = preload("res://scripts/shared/bike_integrity.gd")
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const StormMud = preload("res://scripts/shared/storm_mud.gd")
 const WadingTravel = preload("res://scripts/shared/wading_travel.gd")
+const Swimming = preload("res://scripts/shared/swimming.gd")
 
 const MAX_DELTA := 0.1 # A longer step is clamped, so a lag spike cannot teleport a player.
 
@@ -19,6 +20,14 @@ const MAX_DELTA := 0.1 # A longer step is clamped, so a lag spike cannot telepor
 ## (y follows the ground). Water that is too deep and solid objects stop the player, and sliding
 ## along them keeps the movement smooth.
 static func step(world, position: Vector3, input: Dictionary, delta: float) -> Vector3:
+	var result: Vector3 = _step_on_foot(world, position, input, delta)
+	# Survivors on foot float in deep water; crouching dives. Bikes never enter it.
+	if not bool(input.get("mounted", false)) and result.is_finite() and Swimming.is_swimming(world, result.x, result.z):
+		result.y = Swimming.body_y(world, result.x, result.z, bool(input.get("crouch", false)))
+	return result
+
+
+static func _step_on_foot(world, position: Vector3, input: Dictionary, delta: float) -> Vector3:
 	if not is_finite(delta):
 		return Vector3(position.x, world.height_at(position.x, position.z), position.z)
 	delta = clampf(delta, 0.0, MAX_DELTA)
@@ -51,6 +60,10 @@ static func step(world, position: Vector3, input: Dictionary, delta: float) -> V
 	var base_speed: float = (Defs.WALK_SPEED * Mounts.SPEED_FACTOR
 		if mounted else (Defs.SPRINT_SPEED if sprint else Defs.WALK_SPEED))
 	var speed := base_speed * factor * injury_factor * (1.0 + bonus)
+	if not mounted and Swimming.is_swimming(world, position.x, position.z):
+		# Swimming: no sprint, roads or mud; diving is slower still.
+		var swim_speed: float = Defs.WALK_SPEED * factor * injury_factor * (1.0 + bonus) * Swimming.speed_factor(crouching)
+		return move(world, position, direction, swim_speed, delta, true)
 	if mounted:
 		# Surface, uphill drag and limited downhill boost are deterministic for both peers.
 		speed *= BikeTerrain.speed_factor(world, position, direction,
@@ -66,11 +79,11 @@ static func step(world, position: Vector3, input: Dictionary, delta: float) -> V
 		speed *= StormMud.factor(world, position, weather_time, mounted)
 	speed *= WadingTravel.factor(world, position, mounted)
 	speed *= StealthStance.speed_factor(crouching)
-	return move(world, position, direction, speed, delta)
+	return move(world, position, direction, speed, delta, not mounted)
 
 
 ## Moves along `direction` (unit or shorter) at `speed` meters per second. Shared by players and zombies.
-static func move(world, position: Vector3, direction: Vector2, speed: float, delta: float) -> Vector3:
+static func move(world, position: Vector3, direction: Vector2, speed: float, delta: float, allow_swim: bool = false) -> Vector3:
 	delta = clampf(delta, 0.0, MAX_DELTA)
 	if direction.length_squared() > 1.0:
 		direction = direction.normalized()
@@ -78,7 +91,7 @@ static func move(world, position: Vector3, direction: Vector2, speed: float, del
 	# Try the full move, then each axis alone, so the mover slides along walls and shores.
 	var candidates: Array[Vector2] = [target, Vector2(target.x, position.z), Vector2(position.x, target.y)]
 	for candidate in candidates:
-		if _is_free(world, candidate):
+		if _is_free(world, candidate, allow_swim):
 			return Vector3(candidate.x, world.height_at(candidate.x, candidate.y), candidate.y)
 	return Vector3(position.x, world.height_at(position.x, position.z), position.z)
 
@@ -113,9 +126,9 @@ static func sweep_displacement(world, position: Vector3, displacement: Vector2,
 	return result
 
 
-static func _is_free(world, point: Vector2) -> bool:
-	# Wading is allowed until the water is deeper than a meter.
-	if world.height_at(point.x, point.y) < Defs.WATER_LEVEL - 1.0:
+static func _is_free(world, point: Vector2, allow_swim: bool = false) -> bool:
+	# Wading is allowed until the water is deeper than a meter; beyond that only swimmers.
+	if not allow_swim and world.height_at(point.x, point.y) < Defs.WATER_LEVEL - 1.0:
 		return false
 	for blocker in world.blockers_near(point.x, point.y, Defs.PLAYER_RADIUS + 1.0):
 		var offset := Vector2(blocker["x"] - point.x, blocker["z"] - point.y)
