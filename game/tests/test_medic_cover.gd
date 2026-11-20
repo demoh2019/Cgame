@@ -137,10 +137,9 @@ func run(t) -> void:
 	net.free()
 
 	t.current = "real AI keeps the short guardian challenge"
-	var observations := {
-		medic.id: {"position": medic.position, "alive": true, "safe": false},
-		tank.id: {"position": tank.position, "alive": true, "safe": false}
-	}
+	var observations: Dictionary = {}
+	observations[medic.id] = {"position": medic.position, "alive": true, "safe": false}
+	observations[tank.id] = {"position": tank.position, "alive": true, "safe": false}
 	enemy._select_target(observations, Vector2(enemy.position.x, enemy.position.z))
 	t.eq(enemy.target_id, tank.id,
 		"actual zombie brain maintains server-authorized guardian focus")
