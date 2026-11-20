@@ -6,6 +6,7 @@ const GrassField = preload("res://scripts/client/grass_field.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const Online = preload("res://scripts/client/online_main.gd")
 const Offline = preload("res://scripts/client/client_main.gd")
+const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 
 func run(t) -> void:
 	t.current = "one global weather wind shared by grass and foliage"
@@ -43,3 +44,59 @@ func run(t) -> void:
 		"online client reads deterministic regional wind")
 	t.check((Offline as Script).source_code.contains("Weather.wind_at("),
 		"offline client uses identical world weather")
+
+
+	t.current = "world-space wind is invariant under instanced rotation and scale"
+	var include_code: String = FileAccess.get_file_as_string(
+		"res://assets/shaders/vegetation_wind_space.gdshaderinc")
+	t.check(include_code.contains("vec2 aa_wind_world_to_local_xz("),
+		"one shared shader implementation converts world wind to local vertices")
+	t.check(include_code.contains("dot(world_vector, local_x_axis)")
+		and include_code.contains("dot(world_vector, local_z_axis)"),
+		"basis projection uses both instance axes, never local movement as world wind")
+	t.check(include_code.contains("max(dot(local_x_axis, local_x_axis), 0.0001)"),
+		"nonuniform scaling and zero-scale instances remain bounded")
+	t.check(Foliage.SHADER_CODE.contains("vegetation_wind_space.gdshaderinc")
+		and GrassField.SHADER_CODE.contains("vegetation_wind_space.gdshaderinc"),
+		"tree and grass reuse identical rotation/scale correction")
+	t.check(Foliage.SHADER_CODE.contains("aa_wind_world_to_local_xz(motion * amount, MODEL_MATRIX)"),
+		"tree gust displacement follows the actual world wind on rotated assets")
+	t.check(GrassField.SHADER_CODE.contains("aa_wind_world_to_local_xz(world_bend, MODEL_MATRIX)"),
+		"per-tuft MultiMesh yaw and size cannot rotate the world breeze")
+	for angle in [0.0, 0.45, 1.57, -1.1, 3.14]:
+		for scale in [Vector3.ONE, Vector3(2.0, 1.0, 0.6), Vector3(0.6, 1.0, 1.7)]:
+			var basis := Basis(Vector3.UP, angle).scaled(scale)
+			for wind in [Vector2(0.1, 0.0), Vector2(0.0, -0.25), Vector2(0.3, 0.15)]:
+				var world_vector := Vector3(wind.x, 0.0, wind.y)
+				var bx: Vector3 = basis.x
+				var bz: Vector3 = basis.z
+				var local_x: float = world_vector.dot(bx) / maxf(bx.length_squared(), 0.0001)
+				var local_z: float = world_vector.dot(bz) / maxf(bz.length_squared(), 0.0001)
+				var reconstructed: Vector3 = basis * Vector3(local_x, 0.0, local_z)
+				t.near(reconstructed.x, wind.x, 0.0001,
+					"horizontal motion remains world-aligned across yaws and instance scales")
+				t.near(reconstructed.z, wind.y, 0.0001,
+					"the secondary world axis stays aligned after local-space reconstruction")
+	t.current = "calm foliage skips vertex wave work; graphics presets scale sunlit normals"
+	t.check(Foliage.SHADER_CODE.contains("if (wind_power > 0.001) {")
+		and GrassField.SHADER_CODE.contains("if (wind_power > 0.001) {"),
+		"quiet weather branches before wave trigonometry on both GPU shaders")
+	t.check(GrassField.SHADER_CODE.contains("varying vec3 aa_world_grass_normal;")
+		and GrassField.SHADER_CODE.contains("NORMAL = normalize((VIEW_MATRIX * vec4(aa_world_grass_normal, 0.0)).xyz);"),
+		"grass tips adjust PBR normal direction without a lighting texture or pass")
+	t.check(ProjectSettings.has_setting("shader_globals/aa_grass_normal_wind"),
+		"new GPU normal quality control exists before compilation")
+	var last_normal := -1.0
+	for level in 4:
+		var visual: Dictionary = VisualProfiles.settings(level)
+		var bend: float = float(visual.get("grass_normal_wind", -1.0))
+		t.check(bend >= 0.0 and bend <= 0.9,
+			"normal sway cost remains bounded at every detail preset")
+		t.check(bend >= last_normal,
+			"higher tier preserves at least as much moving grass light detail")
+		last_normal = bend
+	t.eq(float(VisualProfiles.settings(0)["grass_normal_wind"]), 0.0,
+		"Performance stays on static upward-facing grass normals")
+	t.check((load("res://scripts/client/graphics_quality.gd") as Script).source_code.contains(
+		'global_shader_parameter_set(&"aa_grass_normal_wind"'),
+		"preset changes update one shared grass-normal GPU parameter")

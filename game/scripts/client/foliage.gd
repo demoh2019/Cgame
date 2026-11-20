@@ -7,6 +7,7 @@ shader_type spatial;
 render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/specular_aa.gdshaderinc"
+#include "res://assets/shaders/vegetation_wind_space.gdshaderinc"
 global uniform float aa_weather_wetness;
 global uniform vec3 aa_vegetation_wind;
 // Shared quality knob: Performance = matte rain, Ultra = full PBR wet highlights.
@@ -99,21 +100,27 @@ void vertex() {
 	}
 	float wind_lod = 1.0 - smoothstep(wind_fade_start, wind_fade_end, distance_to_camera);
 	if (wind_lod > 0.001 && sway > 0.0) {
-		float k = clamp(VERTEX.y / height_ref, 0.0, 1.0);
-		k *= k; // Keep trunks steady; move light tips.
-		vec2 wind_dir = aa_vegetation_wind.xy;
-		vec2 crosswind = vec2(-wind_dir.y, wind_dir.x);
 		float wind_power = clamp(aa_vegetation_wind.z, 0.0, 1.0);
-		float gust = 0.78 + 0.22 * sin(TIME * 0.46
-			+ dot(root, wind_dir * 0.047 + crosswind * 0.012));
-		float phase = TIME * (0.95 + wind_power * 0.5)
-			+ dot(root, wind_dir * 0.23 + crosswind * 0.07);
-		// Existing weather shading increases gusts but regional wind sets the direction.
-		float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.25;
-		float amount = sway * k * gust * wind_lod * storm_wind * wind_power;
-		vec2 motion = wind_dir * sin(phase) + crosswind * cos(phase * 0.84) * 0.25;
-		VERTEX.x += motion.x * amount;
-		VERTEX.z += motion.y * amount;
+		// Sheltered and calm plants need neither trig nor world/local projection.
+		if (wind_power > 0.001) {
+			float k = clamp(VERTEX.y / height_ref, 0.0, 1.0);
+			k *= k; // Keep trunks steady; move light tips.
+			vec2 wind_dir = aa_vegetation_wind.xy;
+			vec2 crosswind = vec2(-wind_dir.y, wind_dir.x);
+			float gust = 0.78 + 0.22 * sin(TIME * 0.46
+				+ dot(root, wind_dir * 0.047 + crosswind * 0.012));
+			float phase = TIME * (0.95 + wind_power * 0.5)
+				+ dot(root, wind_dir * 0.23 + crosswind * 0.07);
+			float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.25;
+			float amount = sway * k * gust * wind_lod * storm_wind * wind_power;
+			vec2 motion = wind_dir * sin(phase) + crosswind * cos(phase * 0.84) * 0.25;
+			// The material's vertices are in LOCAL coordinates. Every imported
+			// tree and instanced bush has a different rotation/scale, so bending
+			// in world coordinates directly would break the prevailing wind.
+			vec2 local_motion = aa_wind_world_to_local_xz(motion * amount, MODEL_MATRIX);
+			VERTEX.x += local_motion.x;
+			VERTEX.z += local_motion.y;
+		}
 	}
 }
 void fragment() {
