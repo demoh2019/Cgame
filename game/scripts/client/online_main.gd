@@ -1180,7 +1180,7 @@ func _process(delta: float) -> void:
 	_update_party_supply_marker()
 	# The camera glides after the player.
 	camera_fx.update(delta, client.you, _move_input, avatar_model.speed if avatar_model != null else 0.0, GraphicsQuality.level())
-	var target := position + CAMERA_OFFSET * _zoom * camera_fx.zoom_mul + camera_fx.look
+	var target: Vector3 = position + CAMERA_OFFSET * _zoom * camera_fx.zoom_mul + camera_fx.look
 	if camera_fx.photo_active:
 		camera_fx.photo_camera(camera, position)
 	else:
