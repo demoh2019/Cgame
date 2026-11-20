@@ -2048,6 +2048,10 @@ func _process(_delta: float) -> void:
 				"SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED")),
 			int(client.you.get("exposure", 0.0)), int(ceil(float(client.you.get("warmth_seconds", 0.0))))
 		]
+	var wind_chill: Dictionary = client.you.get("wind_chill", {})
+	if float(wind_chill.get("extra", 0.0)) > 0.0:
+		_info_label.text += "\nWIND CHILL: %.1f m/s | +%.0f%% cold exposure intensity" % [
+			float(wind_chill.get("speed", 0.0)), 100.0 * float(wind_chill["extra"])]
 	var wet: float = float(client.you.get("wetness", 0.0))
 	if wet > 0.0:
 		_info_label.text += "\nWET CLOTHING: %d%% | cold increases exposure; dry at a campfire" % roundi(wet)

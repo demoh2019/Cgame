@@ -31,6 +31,7 @@ const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const WindChill = preload("res://scripts/shared/wind_chill.gd")
 const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
@@ -1277,6 +1278,13 @@ func _update_hud() -> void:
 	_stats.text += "\nSTORM INSULATION %d%% | %s" % [
 		int(round(100.0 * Weather.protection(local_armor))),
 		str(Defs.item(local_armor).get("name", "No armor"))]
+	var gust: Dictionary = WindChill.visible(world, position, sim.time,
+		vitals.wetness, local_armor,
+		FieldCampfire.has_warmth(sim.campfires, position, sim.time),
+		PortableShelter.covers(sim.shelters, position, sim.time))
+	if float(gust.get("extra", 0.0)) > 0.0:
+		_stats.text += "\nWIND CHILL: %.1f m/s | +%.0f%% cold exposure intensity" % [
+			float(gust.get("speed", 0.0)), 100.0 * float(gust["extra"])]
 	var visual: float = sim._visual_signature_for(survivor)
 	if PortableShelter.camouflaged(sim.shelters, survivor.position, sim.time,
 			survivor.crouching, survivor.noise_timer, vitals.alive):

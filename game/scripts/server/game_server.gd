@@ -92,6 +92,7 @@ const Weather = preload("res://scripts/shared/weather.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const StormInsulator = preload("res://scripts/shared/storm_insulator.gd")
 const WetClothing = preload("res://scripts/shared/wet_clothing.gd")
+const WindChill = preload("res://scripts/shared/wind_chill.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const SporeSampling = preload("res://scripts/shared/spore_sampling.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
@@ -4802,8 +4803,12 @@ func _tick_players(delta: float) -> void:
 		# crosses the rain-to-soaked boundary. A fire always overrides cold.
 		var average_wet: float = 0.5 * (old_wetness + player.survival.wetness)
 		var weather_severity: float = Weather.effective_severity(conditions, worn_armor)
+		# Regional server wind now raises exposure in cold open terrain. The
+		# existing fire, tarp and thermal-wrap protection applies afterward.
+		var wind: Vector2 = Weather.wind_at(world, player.position.x, player.position.z, time)
 		weather_severity = clampf(weather_severity +
-			WetClothing.cold_penalty(average_wet, conditions, worn_armor), 0.0, 1.0)
+			WetClothing.cold_penalty(average_wet, conditions, worn_armor) +
+			WindChill.penalty(conditions, wind, average_wet, worn_armor), 0.0, 1.0)
 		if at_warm_fire:
 			weather_severity = 0.0
 		weather_severity = PortableShelter.exposure_severity(weather_severity, under_tarp)
@@ -6043,6 +6048,11 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"tent_camouflaged": PortableShelter.camouflaged(shelters, player.position,
 				time, player.crouching, player.noise_timer, _alive(player)),
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
+			"wind_chill": WindChill.visible(world, player.position, time,
+				player.survival.wetness,
+				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else "",
+				FieldCampfire.has_warmth(campfires, player.position, time),
+				PortableShelter.covers(shelters, player.position, time)),
 			"weather_sight": Weather.sight_multiplier(
 				Weather.conditions(world, player.position.x, player.position.z, time)),
 			"spore": SporeHazard.status(world, player.position, time,
