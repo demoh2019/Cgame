@@ -45,6 +45,7 @@ const WorldOverlay = preload("res://scripts/client/world_overlay.gd")
 const HelpPanel = preload("res://scripts/client/help_panel.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Effects = preload("res://scripts/client/effects.gd")
+const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const TitleBanner = preload("res://scripts/client/title_banner.gd")
 const LocalServer = preload("res://scripts/client/local_server.gd")
@@ -95,6 +96,7 @@ var _adaptive_resolution := GraphicsDynamicResolution.new()
 var _auto_graphics := true
 var _quality_picker: OptionButton
 var effects
+var _footprints: Node3D
 var skills_panel
 var social
 var chat_edit: LineEdit
@@ -324,6 +326,9 @@ func _build_environment() -> void:
 	add_child(water)
 	effects = Effects.new()
 	add_child(effects)
+	_footprints = FootprintDecals.new()
+	_footprints.name = "TerrainFootprints"
+	add_child(_footprints)
 	# The finishing pass over the 3D view (tilt-shift, grading, vignette), drawn under every interface layer.
 	var post := CanvasLayer.new()
 	post.layer = -10
@@ -1247,6 +1252,15 @@ func _update_time_of_day(delta: float) -> void:
 		avatar_model.set_wetness_step(gear_step)
 	if entities != null:
 		entities.set_wetness_step(gear_step)
+	# Reuse native clustered decals without changing world physics or saves.
+	if _footprints != null and avatar_model != null:
+		var foot_at: Vector3 = client.display_position()
+		var walking: bool = avatar.visible and avatar_model._moving and (
+			avatar_model.speed >= 0.7) and not bool(client.you.get("mounted", false))
+		_footprints.update_track(foot_at, walking, delta, atmosphere.storm,
+			_visual_biome, GraphicsQuality.level(),
+			str(RenderingServer.get_current_rendering_method()), underground,
+			client.world.is_water(foot_at.x, foot_at.z))
 	# Time-of-day and storm grading shares the existing full-screen post material.
 	# Uniform updates are bounded and do not allocate GPU textures or new passes.
 	_grade_elapsed += maxf(delta, 0.0)
