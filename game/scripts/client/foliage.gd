@@ -93,27 +93,33 @@ void fragment() {
 	vec2 uv_dy = dFdy(UV);
 	float roughness = material_roughness;
 	float metallic = material_metallic;
-	if (use_orm_map) {
-		// Godot ORM convention: occlusion R, roughness G, metalness B.
-		vec3 orm = textureGrad(orm_tex, UV, uv_dx, uv_dy).rgb;
-		AO = orm.r;
-		roughness *= orm.g;
-		metallic *= orm.b;
-	} else {
-		if (use_roughness_map) {
-			roughness *= dot(textureGrad(roughness_tex, UV, uv_dx, uv_dy), roughness_mask);
-		}
-		if (use_metallic_map && material_metallic > 0.0) {
-			metallic *= dot(textureGrad(metallic_tex, UV, uv_dx, uv_dy), metallic_mask);
-		}
-	}
-	// High-frequency normal detail falls away smoothly with distance.
-	// Tangent-free procedural surfaces never enable the expensive normal sample.
-	float normal_fade = 1.0 - smoothstep(aa_terrain_detail_radius,
+	// As in distance-aware layered materials, stop sampling subpixel PBR maps.
+	// The same global budget governs terrain, vegetation and runtime graphics presets.
+	float pbr_detail = 1.0 - smoothstep(aa_terrain_detail_radius,
 		aa_terrain_detail_radius + 24.0, length(cloud_xz - CAMERA_POSITION_WORLD.xz));
-	if (use_normal_map && normal_fade > 0.01) {
-		NORMAL_MAP = textureGrad(normal_tex, UV, uv_dx, uv_dy).rgb;
-		NORMAL_MAP_DEPTH = normal_strength * normal_fade;
+	if (pbr_detail > 0.01) {
+		if (use_orm_map) {
+			// Godot ORM convention: occlusion R, roughness G, metalness B.
+			vec3 orm = textureGrad(orm_tex, UV, uv_dx, uv_dy).rgb;
+			AO = mix(1.0, orm.r, pbr_detail);
+			roughness *= mix(1.0, orm.g, pbr_detail);
+			metallic *= mix(1.0, orm.b, pbr_detail);
+		} else {
+			if (use_roughness_map) {
+				float map_roughness = dot(textureGrad(roughness_tex, UV, uv_dx, uv_dy), roughness_mask);
+				roughness *= mix(1.0, map_roughness, pbr_detail);
+			}
+			if (use_metallic_map && material_metallic > 0.0) {
+				float map_metallic = dot(textureGrad(metallic_tex, UV, uv_dx, uv_dy), metallic_mask);
+				metallic *= mix(1.0, map_metallic, pbr_detail);
+			}
+		}
+		// The tangent-space normal is meaningful only on imported surfaces with
+		// normal+tangent arrays. Do not pay a texture read for the distant LOD.
+		if (use_normal_map) {
+			NORMAL_MAP = textureGrad(normal_tex, UV, uv_dx, uv_dy).rgb;
+			NORMAL_MAP_DEPTH = normal_strength * pbr_detail;
+		}
 	}
 	float foliage_variation = cut_out ? plant_roughness : 1.0;
 	// Only inexpensive PBR parameters change in rain; optional PBR normal/
