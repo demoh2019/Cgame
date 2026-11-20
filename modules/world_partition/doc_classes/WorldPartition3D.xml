@@ -98,7 +98,14 @@
 			<return type="Dictionary" />
 			<param index="0" name="name" type="String" />
 			<description>
-				Returns a Dictionary with [code]center[/code], [code]load_radius[/code], [code]unload_radius[/code], [code]priority[/code], and [code]ready[/code], or an empty Dictionary for an unknown name. The returned Dictionary is a snapshot.
+				Returns a Dictionary with [code]center[/code], [code]load_radius[/code], [code]unload_radius[/code], [code]priority[/code], [code]ready[/code], and [code]progress[/code], or an empty Dictionary for an unknown name. The returned Dictionary is a snapshot.
+			</description>
+		</method>
+		<method name="get_streaming_source_progress" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the fraction of scene-instantiated cells inside a named source's square load radius, from 0.0 to 1.0. Missing, unregistered, or failed cells count as incomplete. Unknown names or disabled streaming return 0.0. This is [b]scene-tree readiness[/b] progress, not threaded resource byte progress, physics synchronization or shader compilation.
 			</description>
 		</method>
 		<method name="get_streaming_source_names" qualifiers="const">
