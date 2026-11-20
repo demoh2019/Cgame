@@ -13,6 +13,7 @@ const GraphicsShadowAtlas = preload("res://scripts/client/graphics_shadow_atlas.
 const GraphicsContactShadows = preload("res://scripts/client/graphics_contact_shadows.gd")
 const GraphicsSunShafts = preload("res://scripts/client/graphics_sun_shafts.gd")
 const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
+const LensDirt = preload("res://scripts/client/lens_dirt.gd")
 const GraphicsReflections = preload("res://scripts/client/graphics_reflections.gd")
 const GraphicsIndirectLighting = preload("res://scripts/client/graphics_indirect_lighting.gd")
 const WaterRefraction = preload("res://scripts/client/water_refraction.gd")
@@ -293,6 +294,8 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Native HDR lens fringing + filmic grain inside the same tonemap pass.
 		native_vignette = GraphicsLens.apply(env, _level, str(method))
 		lens_env = env
+		# Bloom dirt mask: bright lights reveal smudges on the lens (High/Ultra Forward+).
+		LensDirt.apply(env, _level, str(method))
 		# Hybrid sky + screen-space reflections on High/Ultra Forward+ only.
 		# Runtime changes (including Auto) also turn SSR off when required.
 		GraphicsReflections.apply(env, _level, method)

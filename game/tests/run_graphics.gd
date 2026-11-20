@@ -57,6 +57,7 @@ const SUITES := [
 	"res://tests/test_dragonflies.gd",
 	"res://tests/test_shooting_stars.gd",
 	"res://tests/test_dust_devils.gd",
+	"res://tests/test_lens_dirt.gd",
 	"res://tests/test_terrain_sdfgi.gd",
 	"res://tests/test_cinematic_bloom.gd",
 	"res://tests/test_foliage_spectral_optics.gd",
