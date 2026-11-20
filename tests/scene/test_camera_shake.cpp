@@ -115,6 +115,49 @@ TEST_CASE("[CameraShake] Noise is bounded, smooth and deterministic") {
 	CHECK(CameraShake::noise(5.0 - 1e-9, 1) == doctest::Approx(CameraShake::noise(5.0 + 1e-9, 1)).epsilon(0.001));
 }
 
+TEST_CASE("[CameraShake] Spatial impact attenuates smoothly and rejects invalid inputs") {
+	const Vector3 origin;
+	CHECK(CameraShake::spatial_falloff(origin, Vector3(0, 0, 0), 1.0, 9.0) == doctest::Approx(1.0));
+	CHECK(CameraShake::spatial_falloff(origin, Vector3(1, 0, 0), 1.0, 9.0) == doctest::Approx(1.0));
+	CHECK(CameraShake::spatial_falloff(origin, Vector3(5, 0, 0), 1.0, 9.0) == doctest::Approx(0.5));
+	CHECK(CameraShake::spatial_falloff(origin, Vector3(9, 0, 0), 1.0, 9.0) == doctest::Approx(0.0));
+	CHECK(CameraShake::spatial_falloff(origin, Vector3(50, 0, 0), 1.0, 9.0) == doctest::Approx(0.0));
+	const real_t near_boundary = CameraShake::spatial_falloff(origin, Vector3(1.00001, 0, 0), 1.0, 9.0);
+	CHECK(near_boundary > 0.99999);
+	const real_t far_boundary = CameraShake::spatial_falloff(origin, Vector3(8.99999, 0, 0), 1.0, 9.0);
+	CHECK(far_boundary < 0.00001);
+	CHECK(CameraShake::spatial_falloff(origin, Vector3(Math::NaN, 0, 0), 1.0, 9.0) == 0.0);
+	CHECK(CameraShake::spatial_falloff(origin, Vector3(Math::INF, 0, 0), 1.0, 9.0) == 0.0);
+	CHECK(CameraShake::spatial_falloff(origin, origin, -1.0, 9.0) == 0.0);
+	CHECK(CameraShake::spatial_falloff(origin, origin, 9.0, 1.0) == 0.0);
+	CHECK(CameraShake::spatial_falloff(origin, origin, 1.0, Math::NaN) == 0.0);
+}
+
+TEST_CASE("[SceneTree][Camera3D] Spatial combat impacts preserve the real camera transform") {
+	Camera3D *camera = memnew(Camera3D);
+	SceneTree::get_singleton()->get_root()->add_child(camera);
+	const Vector3 pos(3.0, 17.0, 12.0);
+	camera->set_position(pos);
+	camera->add_spatial_trauma(Vector3(0, 0, 0), Vector3(0, 0, 0), 0.25, 1.0, 10.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.25));
+	CHECK(camera->get_position() == pos);
+
+	camera->add_spatial_trauma(Vector3(6, 0, 0), Vector3(), 0.4, 1.0, 11.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.45)); // Half intensity.
+	camera->add_spatial_trauma(Vector3(25, 0, 0), Vector3(), 0.5, 1.0, 10.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.45)); // Too far.
+	camera->add_spatial_trauma(Vector3(Math::INF, 0, 0), Vector3(), 0.9, 1.0, 10.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.45)); // Invalid coordinates.
+	camera->add_spatial_trauma(Vector3(), Vector3(), Math::INF, 1.0, 10.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.45)); // Invalid impulse.
+	camera->add_spatial_trauma(Vector3(), Vector3(), 1.0e30, 1.0, 10.0);
+	CHECK(camera->get_trauma() == doctest::Approx(1.0)); // Huge but finite, clamped.
+	CHECK(camera->get_position() == pos);
+	camera->set_trauma(0.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.0));
+	memdelete(camera);
+}
+
 TEST_CASE("[SceneTree][Camera2D] Trauma shakes the view and fades out") {
 	Camera2D *camera = memnew(Camera2D);
 	SceneTree::get_singleton()->get_root()->add_child(camera);
