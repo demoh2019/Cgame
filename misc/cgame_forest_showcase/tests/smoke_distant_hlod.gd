@@ -78,6 +78,21 @@ func _run() -> void:
         _fail("far canopy should not cast costly full-resolution shadows")
         return
 
+    var second_proxy: MeshInstance3D = await _wait_proxy(manager, Vector2i(4, 0))
+    if second_proxy == null:
+        _fail("second distant forest proxy did not load")
+        return
+    var other_canopies := second_proxy.get_node_or_null("DistantForestCanopies") as MultiMeshInstance3D
+    if other_canopies == null or other_canopies.multimesh == null:
+        _fail("second distant forest has no instanced canopy batch")
+        return
+    if other_canopies.multimesh.mesh != impostors.multimesh.mesh:
+        _fail("distant cells failed to share a single low-poly canopy mesh")
+        return
+    if other_canopies.multimesh == impostors.multimesh:
+        _fail("distant cells must own distinct transform batches")
+        return
+
     if not await _wait_loaded(stream, Vector2i.ZERO):
         _fail("primary streamed terrain did not load")
         return
