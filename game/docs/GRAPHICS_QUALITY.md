@@ -47,3 +47,11 @@ When the 13-layer Poly Haven texture arrays are not installed, chunks render thr
 The existing WorldGen seed, server authority and chunk geometry remain unchanged. These are shader-level changes only. Profile radii are 24 / 42 / 68 / 96 meters, with smooth 24-meter fade zones. Shader call counts and gains are theoretical until measured with the game running.
 
 **Visual acceptance:** compare low/high presets around cliffs, roads, forests, rain puddles and snow transitions; sweep the camera slowly across the LOD radius looking for popping; inspect cloud alignment with grass, buildings and foliage. Benchmark p50/p95 GPU frame time in the same scene before interpreting the computational savings as actual FPS improvement.
+
+## Foliage gust coherence and distance LOD
+
+Nature-kit tree/bush meshes now keep their canopy motion spatially coherent: each MultiMesh instance derives a shared gust phase from its **root's world position**, with quadratic height weighting so trunks remain steadier than tips. An extra per-plant material-roughness variation makes repeated models react less uniformly to highlights without extra texture fetches.
+
+The vertex shader smoothly reduces wind between **48 m and 120 m** from the camera and skips costly wind-wave trigonometry beyond that range. Each plant's colour variation now derives its second hash from the first rather than evaluating a second sine. This follows the broad practice of distance-aware detail and instanced variation in large-world terrain pipelines; it is deliberately implemented in Godot's existing ShaderMaterial/MultiMesh path rather than attempting to transplant Unreal Nanite.
+
+The LOD is client-only and needs no changes to combat, collisions or server state. The regression suite checks the wind shader's budget gates and the conversion/caching of material-bearing meshes. Measure a dense nature scene on actual graphics hardware and watch for animation freezing near the 120 m threshold; the shader change itself does not establish a measured FPS improvement.
