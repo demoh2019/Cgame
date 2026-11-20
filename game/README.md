@@ -2618,3 +2618,45 @@ godot --headless --path game --script res://tests/run_all.gd
 
 Godot's existing RPC, timer and UI APIs are sufficient. No engine patch is
 needed for this feature.
+
+
+## Expedition triage packs — item-paid group field medicine
+
+A survivor group can now craft an **Expedition Triage Pack** at the
+workbench with **2 bandages, 1 field antiseptic, 2 cloth T1 and 1
+clean water bottle**. The multiplayer party panel has **Triage nearby
+allies**, which consumes one actual pack to treat **up to 3 current,
+injured party members** within **5.5 metres horizontally** and
+**2.5 metres vertically**. This is a teamwork ability; the carrier
+cannot treat themselves with the group action.
+
+The dedicated server prioritizes the most urgent injuries (stable
+peer-ID tie break) and heals **up to 18 HP** plus reduces bleeding
+by **up to 24** for each selected recipient. It cannot cure infection,
+remove fractures, revive the dead, or award experience. An **18-second
+cooldown** shares the existing medical-aid timer, preventing rapid
+stacking with the ordinary single-target bandage ability.
+
+The server authorizes group membership, real positions, live injuries,
+resource spending and targets. The client sends no target IDs or
+effect values. If there is no eligible wounded companion, if the
+medic has no pack, or if the cooldown is active, **nothing is spent**.
+One command consumes one pack only after all preconditions pass.
+Each treatment event reaches only the medic and recipient, never
+strangers or other teammates. The inventory and character state
+continue using existing server/Nakama save paths.
+
+Implementation: `scripts/shared/party_triage.gd`, item and recipe
+definitions, `GameServer.cmd_party_triage`, authenticated
+`Net.c_party_triage` RPC and online client/HUD. The local offline
+preview has no party members, so the ability is multiplayer-only.
+`tests/test_party_triage.gd` verifies crafting costs, reach,
+group privacy, recipient priority, no-duplication, death handling,
+no-effect calls and cooldown. It is part of `tests/run_all.gd`:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+Existing Cgame scripting, networking and UI APIs cover the mechanic;
+no native engine extension was required.
