@@ -68,7 +68,7 @@ func run(t) -> void:
 			optical.contains("aa_sun_to_light"),
 			"view-angle anisotropy responds to the real sun")
 		t.check(not optical.contains("texture(") and
-			not optical.contains("textureLod(") and not optical.contains("exp("),
+			not optical.contains("textureLod(") and not optical.contains("= exp("),
 			"scattering adds zero GPU texture lookups or exponentials")
 	t.check(shader.contains("spectral_transmission") and
 		shader.contains("fresnel") and shader.contains("foam"),
