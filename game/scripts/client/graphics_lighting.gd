@@ -23,6 +23,13 @@ static func settings(level: int, rendering_method: String) -> Dictionary:
 		"volumetric_fog_length": float(fog["length"]),
 		"volumetric_fog_density": float(fog["base_density"]),
 		"volumetric_fog_anisotropy": 0.38,
+		# HDRP-style reflection fidelity budget: short half-resolution rays on
+		# High, longer rays on Ultra. Sky reflections remain the fallback.
+		"ssr_enabled": rendering_method == "forward_plus" and tier >= 2,
+		"ssr_max_steps": 24 if tier == 2 else (48 if tier == 3 else 0),
+		"ssr_fade_in": 0.14,
+		"ssr_fade_out": 1.8,
+		"ssr_depth_tolerance": 0.20,
 	}
 
 
@@ -47,3 +54,12 @@ static func apply(sun: DirectionalLight3D, environment: Environment,
 	# the day/night weather rig. No second, conflicting fog controller.
 	CinematicFog.apply_profile(environment, sun,
 		CinematicFog.profile(level, rendering_method))
+	if environment != null:
+		# Screen-space reflections require Forward+; setting them only at
+		# quality changes avoids per-frame renderer reconfiguration.
+		environment.ssr_enabled = bool(profile["ssr_enabled"])
+		if environment.ssr_enabled:
+			environment.ssr_max_steps = int(profile["ssr_max_steps"])
+			environment.ssr_fade_in = float(profile["ssr_fade_in"])
+			environment.ssr_fade_out = float(profile["ssr_fade_out"])
+			environment.ssr_depth_tolerance = float(profile["ssr_depth_tolerance"])
