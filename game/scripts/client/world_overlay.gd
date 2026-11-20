@@ -137,6 +137,8 @@ func _draw_zombie_bars(view: Vector2) -> void:
 			tag = "STUN"
 		elif float(zombie.get("snared_seconds", 0.0)) > 0.0:
 			tag = "PIN"
+		if float(zombie.get("sunder_seconds", 0.0)) > 0.0:
+			tag = "SUNDER" if tag == "" else tag + "+SND"
 		var title: String = ("RAID BOSS" if boss else ("ELITE " if elite else "")) + ("" if boss else str(zombie.get("type", "")).capitalize())
 		if elite or boss or tag != "":
 			_text(Vector2(spot.x - 80.0, rect.position.y - 4.0), title + ("  " + tag if tag != "" else ""), 11, fill.lightened(0.3), 160.0, HORIZONTAL_ALIGNMENT_CENTER)

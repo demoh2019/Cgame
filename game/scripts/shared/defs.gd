@@ -206,6 +206,26 @@ static func _build_items() -> void:
 		_add_recipe("machete_%d" % t, "machete_%d" % t, 1,
 			{"plank_%d" % t: 2, "bar_%d" % t: 2, "scrap": 1},
 			"workbench", 6.0)
+		# Armor sundering creates a support role for raid damage dealers.
+		# The debuff is applied only after a confirmed infected melee hit.
+		_add_item("sunder_axe_%d" % t, {"name": "Ruin Sunder Axe T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 15.0 + 9.0 * float(t - 1), "cooldown": 0.94,
+			"weight": 4.0 + 0.25 * float(t), "value": 61 * t})
+		_add_recipe("sunder_axe_%d" % t, "sunder_axe_%d" % t, 1,
+			{"bar_%d" % t: 3, "plank_%d" % t: 1,
+				"fiber_%d" % t: 2, "scrap": 1},
+			"workbench", 6.5)
+		# Swift scavenger blades give a fragile melee combatant a paid
+		# precision finisher against an already wounded infected.
+		_add_item("dagger_%d" % t, {"name": "Ruin Dagger T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 11.0 + 6.0 * float(t - 1), "cooldown": 0.55,
+			"weight": 1.5 + 0.15 * float(t), "value": 49 * t})
+		_add_recipe("dagger_%d" % t, "dagger_%d" % t, 1,
+			{"bar_%d" % t: 2, "plank_%d" % t: 1,
+				"cloth_%d" % t: 1, "scrap": 1},
+			"workbench", 5.0)
 		# Weighted metal head: slower than a club, but its equipment-granted
 		# blow can briefly stagger living infected (never raid bosses).
 		_add_item("sledgehammer_%d" % t, {"name": "Salvage Sledgehammer T%d" % t,
@@ -292,6 +312,10 @@ static func _build_items() -> void:
 	_add_recipe("fishing_rod", "fishing_rod", 1, {"plank_1": 2, "fiber_1": 3},
 		"workbench", 4.0)
 	# Optional bait increases fish count, never the region/rod/skill tier.
+	_add_item("shore_fish_trap", {"name": "Shore Fish Trap",
+		"kind": "deployable", "tier": 1, "stack": 5, "weight": 1.5, "value": 35})
+	_add_recipe("shore_fish_trap", "shore_fish_trap", 1,
+		{"plank_1": 2, "fiber_1": 3, "scrap": 1}, "workbench", 4.0)
 	_add_item("shore_bait", {"name": "Shore Fishing Bait", "kind": "material",
 		"stack": 20, "weight": 0.1, "value": 4})
 	_add_recipe("shore_bait", "shore_bait", 2,
@@ -330,9 +354,48 @@ static func _build_items() -> void:
 		"stack": 5, "weight": 0.5, "value": 22, "warmth": THERMAL_WRAP_SECONDS})
 	_add_recipe("thermal_wrap", "thermal_wrap", 1,
 		{"cloth_1": 1, "fiber_1": 2, "wood_1": 1}, "", 2.5)
+	# Craftable melee preparation uses existing Cgame script APIs.
+	# Reinforced survival armor for three confirmed ordinary infected melee strikes.
+	_add_item("field_armor_plate", {"name": "Field Armor Plate", "kind": "armor_plate",
+		"tier": 1, "stack": 5, "weight": 1.1, "value": 38})
+	_add_recipe("field_armor_plate", "field_armor_plate", 1,
+		{"bar_1": 1, "cloth_1": 2, "scrap": 2}, "workbench", 4.0)
+	_add_item("field_whetstone", {"name": "Salvaged Whetstone", "kind": "whetstone",
+		"tier": 1, "stack": 10, "weight": 0.35, "value": 18})
+	_add_recipe("field_whetstone", "field_whetstone", 1,
+		{"stone_1": 2, "scrap": 1}, "workbench", 3.0)
+	# Paid scout preparation: one crafted scan reveals a living elite or
+	# raid boss farther away than the normal 90m replication radius.
+	_add_item("field_threat_scanner", {"name": "Salvaged Threat Scanner",
+		"kind": "threat_scanner", "tier": 2, "stack": 5,
+		"weight": 0.6, "value": 42})
+	_add_recipe("field_threat_scanner", "field_threat_scanner", 1,
+		{"scrap": 3, "bar_2": 1, "charcoal_filter": 1}, "workbench", 5.0)
+	# One-use wilderness prospecting; points at a live high-tier ore/rock node.
+	_add_item("prospecting_chart", {"name": "Geological Prospecting Chart",
+		"kind": "prospecting_chart", "tier": 1, "stack": 10,
+		"weight": 0.2, "value": 28})
+	_add_recipe("prospecting_chart", "prospecting_chart", 1,
+		{"cloth_1": 1, "scrap": 2, "stone_1": 1}, "", 3.0)
+	# Mining specialisation: three paid T2+ ore/rock bonuses, but louder work.
+	_add_item("mining_wedges", {"name": "Reinforced Mining Wedges",
+		"kind": "mining_wedges", "tier": 2, "stack": 5,
+		"weight": 0.9, "value": 72})
+	_add_recipe("mining_wedges", "mining_wedges", 1,
+		{"bar_2": 1, "scrap": 3, "stone_1": 2}, "workbench", 5.0)
 	_add_item("berries", {"name": "Berries", "kind": "food", "food": 12.0, "stack": 20, "value": 2})
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
+	# Workbench-made storm shock lining: a paid alternative to dodging bolts.
+	_add_item("storm_insulator", {"name": "Copper Storm Insulation Kit",
+		"kind": "storm_insulator", "tier": 2, "stack": 5, "weight": 0.7, "value": 55})
+	_add_recipe("storm_insulator", "storm_insulator", 1,
+		{"bar_2": 1, "cloth_2": 2, "scrap": 2}, "workbench", 5.0)
+	# Durable camp craft: owners may anchor one live field tarp once, never a permanent base.
+	_add_item("storm_tarp_anchors", {"name": "Storm Tarp Anchor Kit",
+		"kind": "tarp_anchor", "tier": 2, "stack": 5, "weight": 1.2, "value": 65})
+	_add_recipe("storm_tarp_anchors", "storm_tarp_anchors", 1,
+		{"bar_2": 1, "fiber_2": 2, "cloth_2": 2}, "workbench", 5.0)
 	# Automatically consumes one filter when drinking directly from a lake.
 	_add_item("rain_tarp", {"name": "Expedition Rain Catcher", "kind": "rain_catcher",
 		"stack": 5, "weight": 1.1, "value": 24})
@@ -356,6 +419,11 @@ static func _build_items() -> void:
 	_add_recipe("field_canteen", "field_canteen", 1,
 		{"cloth_1": 2, "fiber_1": 3, "wood_1": 1}, "", 4.0)
 	# Field-craftable salve hides only blood scent; no visual invisibility.
+	# Field-crafted wraps quiet only footfalls while sprinting: not weapons, bikes or blood.
+	_add_item("soft_sole_wraps", {"name": "Soft-Sole Trail Wraps", "kind": "footstep_wrap",
+		"tier": 1, "stack": 5, "weight": 0.35, "value": 26})
+	_add_recipe("soft_sole_wraps", "soft_sole_wraps", 1,
+		{"cloth_1": 2, "fiber_1": 2, "scrap": 1}, "", 3.0)
 	_add_item("herbal_scent_mask", {"name": "Herbal Scent Salve", "kind": "scent_mask",
 		"stack": 5, "weight": 0.2, "value": 18})
 	_add_recipe("herbal_scent_mask", "herbal_scent_mask", 1,
@@ -387,6 +455,14 @@ static func _build_items() -> void:
 		{"cloth_1": 2, "bar_1": 1, "charcoal_filter": 1}, "workbench", 4.0)
 	_add_item("spore_culture", {"name": "Hazardous Spore Culture", "kind": "resource",
 		"tier": 2, "stack": 20, "weight": 0.2, "value": 30})
+	# Prepared monster-hunting consumable: real swamp resources become
+	# a brief, bounded melee boost; raid bosses and survivors stay immune.
+	_add_item("antiseptic_edge_oil", {"name": "Antiseptic Edge Oil",
+		"kind": "weapon_coating", "tier": 2, "stack": 10,
+		"value": 65, "weight": 0.15})
+	_add_recipe("antiseptic_edge_oil", "antiseptic_edge_oil", 1,
+		{"spore_culture": 1, "field_antiseptic": 1, "scrap": 1},
+		"workbench", 4.0)
 	_add_item("spore_antidote", {"name": "Distilled Swamp Antidote",
 		"kind": "medical", "tier": 2, "cure": 75.0, "stack": 5,
 		"weight": 0.25, "value": 85})
@@ -502,6 +578,26 @@ static func _build_items() -> void:
 		"tier": 2, "stack": 5, "weight": 0.5, "value": 42})
 	_add_recipe("flash_charge", "flash_charge", 1,
 		{"scrap": 2, "bar_2": 1, "cloth_1": 1, "stone_1": 1}, "workbench", 5.0)
+	# Workbench-made burning-ground flask: tactical PvE, never PvP.
+	_add_item("ember_flask", {"name": "Scavenged Ember Flask",
+		"kind": "ember_flask", "tier": 2, "stack": 5, "weight": 0.75, "value": 55})
+	_add_recipe("ember_flask", "ember_flask", 1,
+		{"bar_2": 1, "cloth_1": 2, "wood_1": 3, "scrap": 1},
+		"workbench", 5.5)
+	# Risk-zone base sieges use a real short-fused workbench-made consumable.
+	# The server chooses the adjacent rival barricade; players cannot aim at IDs.
+	_add_item("siege_charge", {"name": "Improvised Siege Charge",
+		"kind": "siege_charge", "tier": 3, "stack": 5, "weight": 1.4, "value": 125})
+	_add_recipe("siege_charge", "siege_charge", 1,
+		{"bar_3": 2, "scrap": 8, "cloth_2": 2, "stone_2": 2},
+		"workbench", 9.0)
+	# Physical workbench-made countermeasure, one kit per successful defusal.
+	_add_item("siege_defusal_kit", {"name": "Field Siege Defusal Kit",
+		"kind": "siege_defusal", "tier": 2, "stack": 5,
+		"weight": 0.75, "value": 65})
+	_add_recipe("siege_defusal_kit", "siege_defusal_kit", 1,
+		{"bar_2": 1, "scrap": 4, "cloth_2": 1, "fiber_2": 1},
+		"workbench", 5.0)
 	# Defensive disposable wire snare; only the PvE server can trigger it.
 	_add_item("infected_snare", {"name": "Infected Tripwire Snare",
 		"kind": "deployable", "tier": 1, "stack": 10, "weight": 0.9, "value": 28})
@@ -518,6 +614,26 @@ static func _build_items() -> void:
 	_add_recipe("bike_panniers", "bike_panniers", 1,
 		{"cloth_2": 4, "plank_2": 2, "scrap": 3, "fiber_2": 3},
 		"workbench", 7.0)
+	# Specialized consumable off-road tire kit, uses existing network item RPC.
+	_add_item("trail_tire_grips", {"name": "Trail Tire Grips", "kind": "tire_grips",
+		"tier": 2, "stack": 5, "weight": 0.65, "value": 54})
+	_add_recipe("trail_tire_grips", "trail_tire_grips", 1,
+		{"cloth_2": 2, "fiber_2": 2, "scrap": 2}, "workbench", 5.0)
+	# Paid chain service lasts for an actual travelled distance.
+	_add_item("bike_service_kit", {"name": "Bicycle Drive Service Kit",
+		"kind": "bike_service", "tier": 1, "stack": 5, "weight": 0.8, "value": 35})
+	_add_recipe("bike_service_kit", "bike_service_kit", 1,
+		{"bar_1": 1, "scrap": 2, "cloth_1": 1}, "workbench", 4.0)
+	# Repairable bicycle frame: a patch restores 45 integrity points while dismounted.
+	_add_item("bike_frame_patch", {"name": "Salvaged Bike Frame Patch",
+		"kind": "bike_frame_repair", "tier": 2, "stack": 5, "weight": 1.5, "value": 75})
+	_add_recipe("bike_frame_patch", "bike_frame_patch", 1,
+		{"bar_2": 2, "scrap": 4, "cloth_2": 2}, "workbench", 6.0)
+	# A permanently craftable bike lamp trades night vision for infected attention.
+	_add_item("bike_dynamo_lamp", {"name": "Trail Bike Dynamo Lantern",
+		"kind": "bike_light", "tier": 2, "weight": 1.0, "value": 90})
+	_add_recipe("bike_dynamo_lamp", "bike_dynamo_lamp", 1,
+		{"bar_2": 1, "scrap": 3, "cloth_2": 1}, "workbench", 7.0)
 	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
 	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
 		"tier": 2, "weight": 12.0, "value": 180})

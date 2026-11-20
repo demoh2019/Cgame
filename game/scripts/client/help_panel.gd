@@ -3,20 +3,21 @@ extends PanelContainer
 
 const ENTRIES := [
 	["MOVE AND FIGHT", [
-		["WASD", "move"], ["Shift", "sprint"], ["F4", "ride / dismount crafted bike"], ["Space", "dodge"], ["Mouse", "aim; left click attacks"], ["G", "weapon skill"],
+		["WASD", "move"], ["Shift", "sprint"], ["F4", "ride / dismount crafted bike (crafted night lamp auto lights)"], ["PgUp", "service bike drive on foot"], ["PgDn", "repair damaged bike frame"], ["Space", "dodge"], ["Mouse", "aim; left click attacks"], ["G", "weapon skill"],
 		["F1", "guardian taunt"], ["4", "next weapon"], ["5", "equip armor"], ["Wheel", "zoom"]]],
 	["GATHER AND CRAFT", [
-		["E", "gather / open crate / take loot"], ["C", "crafting window"], ["0", "quick-cook best fish"],
+		["E", "gather (trees and mining attract infected) / loot"], ["C", "crafting window"], ["0", "quick-cook best fish"],
 		["T", "cast fishing rod (Shift: baited)"], ["I / Tab", "inventory (click: use or equip; right click: stash)"], ["B", "stash (at the hub)"]]],
 	["SURVIVE", [
-		["1", "eat"], ["2", "drink bottle"], ["3", "bandage"], ["6", "antiseptic"], ["7", "antibiotics"], ["8", "heat pack"], ["F9", "herbal poultice"],
-		["F / R", "drink from a lake (filter prevents infection)"], [".", "frontier stim"], ["/", "scent salve"], [";", "spore filter"], ["Z", "rest at the hub or a fire"]]],
+		["1", "eat"], ["2", "drink bottle"], ["3", "bandage"], ["6", "antiseptic"], ["7", "antibiotics"], ["8", "heat pack"], ["F11", "herbal poultice"],
+		["F / R", "drink from a lake (filter prevents infection)"], [".", "frontier stim"], ["/", "scent salve (Shift: quiet sprint wraps)"], [";", "spore filter"], ["Z", "rest at the hub or a fire"]]],
 	["BUILD AND DEFEND", [
 		["U", "build barricade"], ["H", "repair"], ["Y", "upgrade"], ["X", "dismantle"], ["O", "light campfire"],
-		["9", "refuel fire"], ["-", "extinguish fire"], [",", "throw noise decoy"]]],
+		["9", "refuel fire"], ["-", "extinguish fire"], [",", "throw noise decoy"],
+		["F5", "throw ember flask (PvE fire)"]]],
 	["TOWN", [
 		["N", "buy water"], ["V", "sell materials (Shift: fish)"], ["P", "accept contract (Shift: turn in, Ctrl: daily bounty)"],
-		["K", "skills and perks"], ["J", "map of the island"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["F3", "full text readout"]]],
+		["K", "skills and perks"], ["J", "map: click personal; Shift+click party; right clears"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["F3", "full text readout"]]],
 ]
 
 var _built := false

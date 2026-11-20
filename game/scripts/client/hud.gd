@@ -2,12 +2,20 @@ extends CanvasLayer
 ## All of the interface, built in code: vitals, zone, inventory, crafting and a message log.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
+const RaidCone = preload("res://scripts/shared/raid_cone.gd")
+const Party = preload("res://scripts/shared/party.gd")
+const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
+const Weather = preload("res://scripts/shared/weather.gd")
+const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
+const CraftingCatalog = preload("res://scripts/shared/crafting_catalog.gd")
+const ExpeditionLoadout = preload("res://scripts/shared/expedition_loadout.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
@@ -15,8 +23,10 @@ const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
+const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const PartyFrames = preload("res://scripts/client/party_frames.gd")
 const HudSkin = preload("res://scripts/client/hud_skin.gd")
+const EquipmentPresets = preload("res://scripts/shared/equipment_presets.gd")
 
 var client
 var _bars: Dictionary = {}
@@ -31,9 +41,13 @@ var _prompt: Label
 var _log: Label
 var _inventory_panel: PanelContainer
 var _inventory_grid: GridContainer
+var _preset_labels: Array[Label] = []
 var _stash_grid: GridContainer
 var _craft_panel: PanelContainer
 var _craft_list: VBoxContainer
+var _craft_search: LineEdit
+var _craft_ready_only: CheckBox
+var _craft_result_count: Label
 var _salvage_item: OptionButton
 var _death: Label
 var _equipped: Label
@@ -46,6 +60,17 @@ var _craft_signature: String = ""
 var _inventory_signature: String = ""
 var _trade_state: Dictionary = {}
 var _party_status: Label
+var _raid_loot_mode_button: Button
+var _raid_vote_bag_id: int = -1
+var _raid_vote_label: Label
+var _raid_vote_need: Button
+var _raid_vote_greed: Button
+var _raid_vote_pass: Button
+var _raid_skip_button: Button
+var _raid_item_select: OptionButton
+var _raid_claim_button: Button
+var _raid_items_signature: String = ""
+var _raid_skip_bag_id: int = -1
 var _duel_status: Label
 var _arena_queue_status: Label
 var _party_target: OptionButton
@@ -106,7 +131,7 @@ func _build() -> void:
 	card_gap.custom_minimum_size = Vector2(1, 178)
 	card_gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_left.add_child(card_gap)
-	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["bleeding", Color(0.73, 0.21, 0.27)], ["fracture", Color(0.75, 0.48, 0.2)], ["exposure", Color(0.38, 0.7, 0.88)]]:
+	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["bleeding", Color(0.73, 0.21, 0.27)], ["fracture", Color(0.75, 0.48, 0.2)], ["exposure", Color(0.38, 0.7, 0.88)], ["wetness", Color(0.29, 0.52, 0.84)]]:
 		var bar := ProgressBar.new()
 		bar.custom_minimum_size = Vector2(240, 18)
 		bar.max_value = 100.0
@@ -201,6 +226,24 @@ func _build() -> void:
 	var inventory_title := Label.new()
 	inventory_title.text = "Inventory: click = use/equip, right-click = bank one (at hub workbench)"
 	inventory_box.add_child(inventory_title)
+	var preset_title := Label.new()
+	preset_title.text = "Gear presets: save / equip / clear at safe hub workbench"
+	inventory_box.add_child(preset_title)
+	for slot in EquipmentPresets.SLOT_COUNT:
+		var index: int = slot
+		var row := HBoxContainer.new()
+		inventory_box.add_child(row)
+		var name_label := Label.new()
+		name_label.custom_minimum_size.x = 220.0
+		name_label.text = "Set %d: empty" % (index + 1)
+		_preset_labels.append(name_label)
+		row.add_child(name_label)
+		for action in ["save", "equip", "clear"]:
+			var button := Button.new()
+			button.text = action.capitalize()
+			button.tooltip_text = "Only next to the safe hub workbench, outside combat."
+			button.pressed.connect(func() -> void: client.equipment_preset(action, index))
+			row.add_child(button)
 	var dismantle_button := Button.new()
 	dismantle_button.text = "Dismantle nearby barricade (partial salvage)"
 	dismantle_button.pressed.connect(func() -> void:
@@ -248,6 +291,12 @@ func _build() -> void:
 		var heading := Vector2(sin(client.yaw), cos(client.yaw))
 		client.pitch_shelter(Vector2(position.x, position.z) + heading * 2.8))
 	inventory_box.add_child(pitch_button)
+	var anchor_button := Button.new()
+	anchor_button.name = "AnchorFieldTarp"
+	anchor_button.text = "Anchor my field tarp (+180s, 90% storm cover)"
+	anchor_button.tooltip_text = "Use one workbench-crafted Storm Tarp Anchor Kit at your nearby active tarp. One upgrade per tarp; no PvP protection."
+	anchor_button.pressed.connect(func() -> void: client.use_item("storm_tarp_anchors"))
+	inventory_box.add_child(anchor_button)
 	var pack_button := Button.new()
 	pack_button.name = "PackTarp"
 	pack_button.text = "Pack nearest tarp (owner only; no refund)"
@@ -279,6 +328,13 @@ func _build() -> void:
 	smoke_button.tooltip_text = "Consumes 1 crafted charge. Quiet survivors are less visible; no PvP or damage protection."
 	smoke_button.pressed.connect(func() -> void: client.use_item("smoke_charge"))
 	inventory_box.add_child(smoke_button)
+	var defusal_button := Button.new()
+	defusal_button.name = "DisarmSiegeCharge"
+	defusal_button.text = "Disarm siege charge (T2 defusal kit)"
+	defusal_button.tooltip_text = "Only the wall owner. Requires crafted toolkit and 3m reach before the four-second fuse expires."
+	defusal_button.pressed.connect(func() -> void:
+		client.use_item("siege_defusal_kit"))
+	inventory_box.add_child(defusal_button)
 	var snare_button := Button.new()
 	snare_button.name = "PlaceInfectedSnare"
 	snare_button.text = "Place infected tripwire (\\): roots one infected"
@@ -288,6 +344,22 @@ func _build() -> void:
 		var face := Vector2(sin(client.yaw), cos(client.yaw))
 		client.place_infected_snare(Vector2(at.x, at.z) + face * 2.8))
 	inventory_box.add_child(snare_button)
+	var fish_trap_button := Button.new()
+	fish_trap_button.name = "PlaceShoreFishTrap"
+	fish_trap_button.text = "Deploy shoreline fish trap (F10)"
+	fish_trap_button.tooltip_text = "One crafted trap + a real rod near water. Collect 2 fish after 120s."
+	fish_trap_button.pressed.connect(func() -> void: client.place_fish_trap())
+	inventory_box.add_child(fish_trap_button)
+	var collect_fish_button := Button.new()
+	collect_fish_button.name = "CollectShoreFishTrap"
+	collect_fish_button.text = "Collect nearest fish trap (F12)"
+	collect_fish_button.pressed.connect(func() -> void:
+		var id: int = client.nearest_fish_trap(client.display_position())
+		if id == -1:
+			say("No fish trap within reach of the shore.")
+		else:
+			client.collect_fish_trap(id))
+	inventory_box.add_child(collect_fish_button)
 	var alkali_button := Button.new()
 	alkali_button.name = "UseFieldAlkaliKit"
 	alkali_button.text = "Neutralize nearby acid pools (1 kit, up to 3)"
@@ -300,18 +372,54 @@ func _build() -> void:
 	canteen_button.tooltip_text = "Requires a crafted canteen, one carbon filter and the shared lake cooldown."
 	canteen_button.pressed.connect(func() -> void: client.refill_canteen())
 	inventory_box.add_child(canteen_button)
+	var storm_button := Button.new()
+	storm_button.name = "EquipStormInsulator"
+	storm_button.text = "Equip storm insulation (180s)"
+	storm_button.tooltip_text = "Workbench craft: 1 bar T2, 2 cloth T2, 2 scrap. Consumed kit reduces lightning damage 60%, not PvP/infected."
+	storm_button.pressed.connect(func() -> void: client.use_item("storm_insulator"))
+	inventory_box.add_child(storm_button)
 	var survey_button := Button.new()
 	survey_button.name = "RuinSurveyChart"
 	survey_button.text = "Survey dangerous ruins (F3; 1 crafted chart)"
 	survey_button.tooltip_text = "Mark nearest unopened red/black ruin within 190 m for 75s."
 	survey_button.pressed.connect(func() -> void: client.survey_ruins())
 	inventory_box.add_child(survey_button)
+	var scanner_button := Button.new()
+	scanner_button.name = "UseFieldThreatScanner"
+	scanner_button.text = "Scan elite / raid threats (145m; 1 crafted scanner)"
+	scanner_button.tooltip_text = "Workbench craft (3 scrap, T2 bar, filter). One successful scan privately marks a living raid boss or elite for 50s."
+	scanner_button.pressed.connect(func() -> void: client.use_item("field_threat_scanner"))
+	inventory_box.add_child(scanner_button)
+	var prospect_button := Button.new()
+	prospect_button.name = "UseProspectingChart"
+	prospect_button.text = "Prospect high-tier ore and stone (180m; 1 chart)"
+	prospect_button.tooltip_text = "Field craft: cloth, 2 scrap, stone. Spend only on a real T2+ vein; private 80s marker."
+	prospect_button.pressed.connect(func() -> void: client.use_item("prospecting_chart"))
+	inventory_box.add_child(prospect_button)
 	var chain_button := Button.new()
 	chain_button.name = "UseBikeChainWrap"
 	chain_button.text = "Quiet bike chain (180s; workbench craft)"
 	chain_button.tooltip_text = "Dismount and use 1 wrap: bike noise 27m -> 9m, gunshots unaffected."
 	chain_button.pressed.connect(func() -> void: client.use_item("bike_chain_wrap"))
 	inventory_box.add_child(chain_button)
+	var tires_button := Button.new()
+	tires_button.name = "FitTrailTireGrips"
+	tires_button.text = "Fit off-road tire grips (240s; workbench craft)"
+	tires_button.tooltip_text = "Fit 1 crafted kit to owned bike while dismounted; improves grip in mud, sand, forests, mountains."
+	tires_button.pressed.connect(func() -> void: client.use_item("trail_tire_grips"))
+	inventory_box.add_child(tires_button)
+	var service_button := Button.new()
+	service_button.name = "ServiceBikeDrive"
+	service_button.text = "Service bicycle drive (800 m; PgUp)"
+	service_button.tooltip_text = "Use a crafted drive service kit while dismounted; quiet riding for 800m, less off-road."
+	service_button.pressed.connect(func() -> void: client.use_item("bike_service_kit"))
+	inventory_box.add_child(service_button)
+	var frame_button := Button.new()
+	frame_button.name = "RepairBikeFrame"
+	frame_button.text = "Patch bicycle frame (+45%; PgDn)"
+	frame_button.tooltip_text = "Craft a frame patch at a workbench. Dismount to repair a damaged or broken bicycle."
+	frame_button.pressed.connect(func() -> void: client.use_item("bike_frame_patch"))
+	inventory_box.add_child(frame_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -344,13 +452,41 @@ func _build() -> void:
 	_stash_grid = GridContainer.new()
 	_stash_grid.columns = 4
 	stash_scroll.add_child(_stash_grid)
+	var bulk_button := Button.new()
+	bulk_button.name = "DepositAllMaterials"
+	bulk_button.text = "BANK ALL: resources + crafting materials"
+	bulk_button.tooltip_text = "At the hub workbench. Moves only raw/refined resources into your protected stash. Food, water, medicine, silver, gear and tools remain carried. Partial deposits are allowed if the bank is nearly full."
+	bulk_button.pressed.connect(func() -> void: client.deposit_materials())
+	inventory_box.add_child(bulk_button)
+	var restock_row := HBoxContainer.new()
+	restock_row.name = "ExpeditionRestock"
+	inventory_box.add_child(restock_row)
+	var preset_select := OptionButton.new()
+	preset_select.custom_minimum_size.x = 170.0
+	for preset_id in ExpeditionLoadout.ORDER:
+		preset_select.add_item(ExpeditionLoadout.title(preset_id))
+		preset_select.set_item_metadata(preset_select.item_count - 1, preset_id)
+	restock_row.add_child(preset_select)
+	var restock_button := Button.new()
+	restock_button.text = "RESTOCK KIT"
+	restock_button.tooltip_text = "At the hub workbench, withdraw missing expedition supplies from your protected stash. Never buys or crafts items."
+	restock_button.pressed.connect(func() -> void:
+		if preset_select.selected >= 0:
+			client.expedition_restock(str(preset_select.get_item_metadata(preset_select.selected))))
+	restock_row.add_child(restock_button)
 
 	var flare_button := Button.new()
 	flare_button.name = "UseSignalFlare"
-	flare_button.text = "Light signal flare: 120s (F10 offline)"
+	flare_button.text = "Light signal flare: 120s (F2 offline)"
 	flare_button.tooltip_text = "Crafted fuel: night-only glow also alerts nearby infected."
 	flare_button.pressed.connect(func() -> void: client.use_item("signal_flare"))
 	inventory_box.add_child(flare_button)
+	var edge_oil_button := Button.new()
+	edge_oil_button.name = "AntisepticEdgeOil"
+	edge_oil_button.text = "Coat melee weapon: +20% infected damage for 120s (Shift+6)"
+	edge_oil_button.tooltip_text = "Craft at workbench from 1 spore culture + antiseptic + scrap. No PvP or raid boss buff."
+	edge_oil_button.pressed.connect(func() -> void: client.use_item("antiseptic_edge_oil"))
+	inventory_box.add_child(edge_oil_button)
 	var recall_button := Button.new()
 	recall_button.name = "UseReturnCharm"
 	recall_button.text = "Return charm: 8s channel (green/yellow only)"
@@ -438,12 +574,12 @@ func _build() -> void:
 	bait_button.tooltip_text = "Craft from berries and fiber; no charge if the bonus cannot fit."
 	bait_button.pressed.connect(func() -> void: client.fish(true))
 	inventory_box.add_child(bait_button)
-	var storm_button := Button.new()
-	storm_button.name = "StormCast"
-	storm_button.text = "Storm cast (red/black coast; 8s, +2 fish)"
-	storm_button.tooltip_text = "During real storms in full-loot regions; canceled if weather changes. No bait used."
-	storm_button.pressed.connect(func() -> void: client.fish(false, true))
-	inventory_box.add_child(storm_button)
+	var storm_cast_button := Button.new()
+	storm_cast_button.name = "StormCast"
+	storm_cast_button.text = "Storm cast (red/black coast; 8s, +2 fish)"
+	storm_cast_button.tooltip_text = "During real storms in full-loot regions; canceled if weather changes. No bait used."
+	storm_cast_button.pressed.connect(func() -> void: client.fish(false, true))
+	inventory_box.add_child(storm_cast_button)
 	var rain_button := Button.new()
 	rain_button.name = "CollectStormWater"
 	rain_button.text = "Collect rainwater (1 crafted tarp -> 2 bottles)"
@@ -588,6 +724,64 @@ func _build() -> void:
 	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
 	rally_button.pressed.connect(func() -> void: client.party_rally())
 	party_buttons.add_child(rally_button)
+	_raid_loot_mode_button = Button.new()
+	_raid_loot_mode_button.text = "Raid loot: Free"
+	_raid_loot_mode_button.tooltip_text = "Leader: cycle future raid loot Free, Round robin, and Need/Greed (cores). Existing bags never change."
+	_raid_loot_mode_button.pressed.connect(func() -> void:
+		var current: String = str(client.you.get("party", {}).get("loot_mode", "free"))
+		var next: String = "round_robin" if current == "free" else (
+			"need_greed" if current == "round_robin" else "free")
+		client.party_loot_mode(next))
+	inventory_box.add_child(_raid_loot_mode_button)
+	_raid_vote_label = Label.new()
+	_raid_vote_label.text = "No active Need/Greed raid trophy ballot nearby."
+	_raid_vote_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inventory_box.add_child(_raid_vote_label)
+	var vote_row := HBoxContainer.new()
+	inventory_box.add_child(vote_row)
+	_raid_vote_need = Button.new()
+	_raid_vote_need.text = "Need"
+	_raid_vote_need.tooltip_text = "Priority roll for raid infected cores; one vote per eligible contributor."
+	_raid_vote_greed = Button.new()
+	_raid_vote_greed.text = "Greed"
+	_raid_vote_greed.tooltip_text = "Roll only if no contributor votes Need."
+	_raid_vote_pass = Button.new()
+	_raid_vote_pass.text = "Pass trophy"
+	_raid_vote_pass.tooltip_text = "Decline the infected core roll. Vote cannot be changed."
+	for option in [_raid_vote_need, _raid_vote_greed, _raid_vote_pass]:
+		option.disabled = true
+		vote_row.add_child(option)
+	_raid_vote_need.pressed.connect(func() -> void:
+		if _raid_vote_bag_id > 0:
+			client.raid_vote(_raid_vote_bag_id, "need"))
+	_raid_vote_greed.pressed.connect(func() -> void:
+		if _raid_vote_bag_id > 0:
+			client.raid_vote(_raid_vote_bag_id, "greed"))
+	_raid_vote_pass.pressed.connect(func() -> void:
+		if _raid_vote_bag_id > 0:
+			client.raid_vote(_raid_vote_bag_id, "pass"))
+	_raid_skip_button = Button.new()
+	_raid_skip_button.text = "Pass raid turn"
+	_raid_skip_button.tooltip_text = "If it is your round-robin turn and you are beside the raid bag, give the next contributor a turn without taking loot."
+	_raid_skip_button.disabled = true
+	_raid_skip_button.pressed.connect(func() -> void:
+		if _raid_skip_bag_id > 0:
+			client.raid_skip_turn(_raid_skip_bag_id))
+	inventory_box.add_child(_raid_skip_button)
+	var raid_choice_row := HBoxContainer.new()
+	inventory_box.add_child(raid_choice_row)
+	_raid_item_select = OptionButton.new()
+	_raid_item_select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_raid_item_select.disabled = true
+	_raid_item_select.tooltip_text = "Choose one type of available boss loot on your round-robin turn."
+	raid_choice_row.add_child(_raid_item_select)
+	_raid_claim_button = Button.new()
+	_raid_claim_button.text = "Claim selected"
+	_raid_claim_button.disabled = true
+	_raid_claim_button.pressed.connect(func() -> void:
+		if _raid_skip_bag_id > 0 and _raid_item_select.selected >= 0:
+			client.raid_claim_selected(_raid_skip_bag_id, str(_raid_item_select.get_selected_metadata())))
+	raid_choice_row.add_child(_raid_claim_button)
 	var focus_button := Button.new()
 	focus_button.text = "Focus infected"
 	focus_button.tooltip_text = "Leader: mark the nearest living infected within 24m for 18s. Allies near that exact enemy deal +8% PvE damage; 28s cooldown."
@@ -603,12 +797,29 @@ func _build() -> void:
 	guardian_button.tooltip_text = "Melee weapon, party, 25 combat energy, 20s cooldown; defend nearby allies"
 	guardian_button.pressed.connect(func() -> void: client.guardian_taunt())
 	inventory_box.add_child(guardian_button)
+	var intercept_button := Button.new()
+	intercept_button.name = "GuardianIntercept"
+	intercept_button.text = "Guard ally (one PvE hit)"
+	intercept_button.tooltip_text = "Melee guardian: choose a party ally above (within 4.5m). Spend 20 energy to block their next infected melee hit for up to 9s; 28s cooldown. Not PvP/AoE/acid."
+	intercept_button.pressed.connect(func() -> void:
+		var target_id: int = _party_target.get_selected_id()
+		if target_id < 0:
+			say("Guardian: choose a nearby party ally first.")
+		else:
+			client.guardian_intercept(target_id))
+	inventory_box.add_child(intercept_button)
 	var parry_button := Button.new()
 	parry_button.name = "MeleeParry"
 	parry_button.text = "Parry incoming infected (F8)"
 	parry_button.tooltip_text = "Hold real melee weapon; 20 stamina, 0.45s timing window, 4s cooldown. Front infected melee only."
 	parry_button.pressed.connect(func() -> void: client.parry())
 	inventory_box.add_child(parry_button)
+	var finisher_button := Button.new()
+	finisher_button.name = "StaggerFinisher"
+	finisher_button.text = "Finish staggered infected (Shift+G)"
+	finisher_button.tooltip_text = "Real melee weapon, 24 combat energy, stunned enemy in front, 6s cooldown."
+	finisher_button.pressed.connect(func() -> void: client.stagger_finisher())
+	inventory_box.add_child(finisher_button)
 	var fortify_button := Button.new()
 	fortify_button.name = "FortifyOutpost"
 	fortify_button.text = "Fortify controlled outpost (4m, wood + stone)"
@@ -690,7 +901,7 @@ func _build() -> void:
 	aid_row.add_child(aid_items)
 	var aid_button := Button.new()
 	aid_button.text = "Aid"
-	aid_button.tooltip_text = "Treat the selected nearby party member with one medical item; 5s cooldown."
+	aid_button.tooltip_text = "Use one medical item to treat a nearby party member; 5s cooldown. Restored HP generates infected threat if your ally is in combat."
 	aid_button.pressed.connect(func() -> void:
 		var target: int = _party_target.get_selected_id()
 		if target < 0 or aid_items.selected < 0:
@@ -700,7 +911,7 @@ func _build() -> void:
 	aid_row.add_child(aid_button)
 	var triage_button := Button.new()
 	triage_button.text = "Triage nearby allies"
-	triage_button.tooltip_text = "Spend 1 crafted Expedition Triage Pack to treat up to 3 injured nearby party allies (5.5 m, 18s shared medical cooldown)."
+	triage_button.tooltip_text = "Spend one crafted pack to treat up to 3 nearby allies (5.5m, 18s cooldown). Infected fighting them may turn toward the medic."
 	triage_button.pressed.connect(func() -> void: client.party_triage())
 	inventory_box.add_child(triage_button)
 	# A cook supplies one real dish per present, eligible group member.
@@ -775,7 +986,7 @@ func _build() -> void:
 	market_title.text = "Survivor market - ONLINE listings (hub)"
 	inventory_box.add_child(market_title)
 	_market_status = Label.new()
-	_market_status.text = "Refresh to browse listings. Stock is checked on purchase."
+	_market_status.text = "Refresh to browse listings. %d%% seller tax on successful sales." % MarketBoard.SALE_TAX_PERCENT
 	inventory_box.add_child(_market_status)
 	_market_select = OptionButton.new()
 	_market_select.custom_minimum_size.x = 320.0
@@ -832,8 +1043,27 @@ func _build() -> void:
 	var craft_title := Label.new()
 	craft_title.text = "Crafting (workbench in the hub or a village, or a held PvP outpost field bench)"
 	craft_box.add_child(craft_title)
+	var craft_controls := HBoxContainer.new()
+	craft_box.add_child(craft_controls)
+	_craft_search = LineEdit.new()
+	_craft_search.placeholder_text = "Find item or ingredients..."
+	_craft_search.custom_minimum_size = Vector2(230, 0)
+	_craft_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_craft_search.text_changed.connect(func(_value: String) -> void:
+		_craft_signature = ""
+		_refresh_crafting())
+	craft_controls.add_child(_craft_search)
+	_craft_ready_only = CheckBox.new()
+	_craft_ready_only.text = "Materials + level"
+	_craft_ready_only.tooltip_text = "Only recipes with enough ingredients, inventory room and crafting level. A workbench or campfire may still be needed."
+	_craft_ready_only.toggled.connect(func(_value: bool) -> void:
+		_craft_signature = ""
+		_refresh_crafting())
+	craft_controls.add_child(_craft_ready_only)
+	_craft_result_count = Label.new()
+	craft_box.add_child(_craft_result_count)
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(380, 380)
+	scroll.custom_minimum_size = Vector2(615, 380)
 	craft_box.add_child(scroll)
 	_craft_list = VBoxContainer.new()
 	scroll.add_child(_craft_list)
@@ -922,7 +1152,9 @@ func _arrange_inventory_window() -> void:
 	left.add_child(hint)
 	var stash_scroll: Control = _stash_grid.get_parent()
 	var stash_title: Control = box.get_child(stash_scroll.get_index() - 1)
-	for moved in [_inventory_grid, stash_title, stash_scroll]:
+	for moved in [_inventory_grid, stash_title, stash_scroll,
+			box.get_node("DepositAllMaterials"),
+			box.get_node("ExpeditionRestock")]:
 		moved.get_parent().remove_child(moved)
 		left.add_child(moved)
 	(stash_title as Label).text = "PROTECTED STASH  (survives death; click to take one at a workbench)"
@@ -988,6 +1220,18 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"caravan_escort_paid":
+			say("Convoy escort complete: +%d silver, Explorer XP and renown earned." % [
+				int(event.get("silver", 0))])
+		"caravan_defended":
+			say("CARAVAN DEFENDED! All attackers defeated. Earn 15% extra silver on delivery.")
+		"caravan_ambushed":
+			if int(event.get("peer", 0)) == client.peer_id:
+				say("CARAVAN AMBUSH! %d infected are converging on your cargo. Defend or flee!" % [
+					int(event.get("count", 0))])
+			else:
+				say("ESCORT ALERT! Party courier attacked by %d infected. Regroup!" % [
+					int(event.get("count", 0))])
 		"site_discovered":
 			say("DISCOVERED: %s · %d island landmarks visited! Explorer XP and renown earned." % [
 				str(event.get("name", "Unknown")), int(event.get("count", 0))])
@@ -1052,6 +1296,10 @@ func _on_event(event: Dictionary) -> void:
 			say("+%d %s%s" % [event["amount"],
 				Defs.item(event["item"]).get("name", event["item"]),
 				" (outpost +%d)" % harvest_extra if harvest_extra > 0 else ""])
+		"lightning_warning":
+			say("THUNDERSTORM: lightning landing nearby — step out of the purple circle!")
+		"lightning_struck":
+			say("Lightning hit the ground! Moving away or dodging avoids the bolt.")
 		"campfire_doused":
 			say("Storm exhausted a nearby campfire. Find shelter or refuel sooner.")
 		"campfire_refueled":
@@ -1116,10 +1364,32 @@ func _on_event(event: Dictionary) -> void:
 			say("WATCHTOWER ALERT: enemies at your fortified outpost #%d (X:%d Z:%d)! Rally defenders." % [
 				int(event.get("id", 0)), roundi(float(event.get("x", 0.0))),
 				roundi(float(event.get("z", 0.0)))])
+		"siege_charge_armed":
+			say("SIEGE CHARGE X:%d Z:%d! %.0fs to detonation; wall owner can defuse within 3m." % [
+				roundi(float(event.get("x", 0.0))),
+				roundi(float(event.get("z", 0.0))),
+				float(event.get("seconds", 4.0))])
+		"siege_charge_disarmed":
+			say("SIEGE DEFUSED! A defending survivor removed the live charge.")
+		"siege_charge_detonated":
+			if bool(event.get("broken", false)):
+				say("SIEGE BREACH! Enemy barricade destroyed.")
+			else:
+				say("SIEGE BLAST: -%d wall HP, %d remains." % [
+					roundi(float(event.get("damage", 0.0))),
+					roundi(float(event.get("hp", 0.0)))])
+		"siege_charge_fizzled":
+			say("Siege charge detonated, but its target was already gone.")
 		"siege_started":
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
 		"guardian_taunt":
 			say("Frontline guardian draws %d infected away from teammates!" % int(event.get("count", 0)))
+		"guardian_intercept":
+			if int(event.get("by", -1)) == client.peer_id:
+				say("GUARDIAN INTERCEPT: blocked infected melee for ally #%d; took %.1f damage." % [
+					int(event.get("peer", -1)), float(event.get("damage", 0.0))])
+			elif int(event.get("peer", -1)) == client.peer_id:
+				say("GUARDIAN INTERCEPT: ally #%d took the infected hit for you!" % int(event.get("by", -1)))
 		"spit_warning":
 			say("ACID SPIT! Leave the green circle before it lands.")
 		"spit_impact":
@@ -1132,9 +1402,15 @@ func _on_event(event: Dictionary) -> void:
 			say("RAID BOSS nearby! A mutant warlord entered the dangerous zone.")
 		"raid_enraged":
 			say("RAID PHASE TWO! The warlord is enraged. Dodge more frequent, stronger slams!")
+		"raid_cone_warning":
+			say("RAID CLEAVE in %.1fs! Move sideways out of the marked frontal sector." % float(event.get("seconds", 2.2)))
+		"raid_cone_struck":
+			say("Raid frontal cleave struck. Watch the boss's facing for the next sweep.")
 		"raid_warning":
-			say("RAID SLAM in %.1f seconds! Evade the marked %dm circle." % [
+			say("RAID SLAM in %.1f seconds! Evade the %dm circle or coordinate attacks to interrupt." % [
 				float(event.get("seconds", 2.0)), int(event.get("radius", 5))])
+		"raid_interrupted":
+			say("RAID INTERRUPTED! Two allies broke the slam. Boss exposed for %.1fs: +15%% damage!" % float(event.get("exposed_seconds", 0.0)))
 		"raid_slam":
 			var exposed: float = float(event.get("exposed_seconds", 0.0))
 			if exposed > 0.0:
@@ -1215,6 +1491,79 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and bool(data.get("tarp_anchor", false)):
+		if bool(data.get("ok", false)):
+			say("Storm tarp anchored: %.0fs of shelter remain; exposure reduction 90%%." % float(data.get("remaining", 0.0)))
+		else:
+			say("Tarp anchors: " + str(data.get("reason", "rejected")) + " (kit not spent)")
+		return
+	if kind == "use" and bool(data.get("defusal", false)):
+		if bool(data.get("ok", false)):
+			say("Siege defusal successful; one toolkit spent, wall safe.")
+		else:
+			say("Defusal: %s (kit not spent)." % str(data.get("reason", "rejected")))
+		return
+	if kind == "equipment_preset":
+		if bool(data.get("ok", false)):
+			say("Gear set %d: %s." % [
+				int(data.get("slot", 0)) + 1, str(data.get("action", "updated"))])
+		else:
+			say("Gear set: " + str(data.get("reason", "unavailable")))
+		return
+	if kind == "use" and bool(data.get("prospecting", false)):
+		if bool(data.get("ok", false)):
+			say("Prospecting: T%d %s at X:%d Z:%d — private 80s marker." % [
+				int(data.get("tier", 2)), str(data.get("kind", "rock")),
+				roundi(float(data.get("x", 0.0))),
+				roundi(float(data.get("z", 0.0)))])
+		else:
+			say("Prospecting: %s (chart not spent)." % str(
+				data.get("reason", "rejected")))
+		return
+	if kind == "use" and bool(data.get("threat_scan", false)):
+		if bool(data.get("ok", false)):
+			say("SCOUT: %s threat at X:%d Z:%d — private moving marker for %ds." % [
+				str(data.get("kind", "elite")).to_upper(),
+				roundi(float(data.get("x", 0.0))),
+				roundi(float(data.get("z", 0.0))),
+				int(data.get("seconds", 50))])
+		else:
+			say("Threat scanner: %s (device not spent)." % str(
+				data.get("reason", "rejected")))
+		return
+	if kind == "use" and data.has("storm_insulator_seconds"):
+		say("Copper shock lining active for 180s: -60% lightning damage.")
+		return
+	if kind == "use" and bool(data.get("storm_insulator", false)):
+		say("Storm insulation: " + str(data.get("reason", "rejected")) + " (kit not spent)")
+		return
+	if kind == "use" and data.has("coating_seconds"):
+		say("Coated %s: +20%% vs regular/elite infected for %.0fs. Unequipping ends the effect." % [
+			str(data.get("coating_weapon", "melee weapon")),
+			float(data["coating_seconds"])])
+		return
+	if kind == "use" and str(data.get("reason", "")) in ["need_melee", "already_coated"] and (
+			client.inventory.count("antiseptic_edge_oil") > 0):
+		say("Weapon coating: " + str(data["reason"]) + " (oil not spent)")
+		return
+	if kind == "attack" and bool(data.get("riposte", false)):
+		say("RIPOSTE! Perfect parry converted into a powerful counterstrike.")
+		return
+	if kind == "stagger_finisher":
+		if bool(data.get("ok", false)):
+			say("Stagger finisher: %d damage%s, %.0fs cooldown." % [
+				roundi(float(data.get("damage", 0.0))),
+				" (infected defeated!)" if bool(data.get("killed", false)) else "",
+				float(data.get("cooldown", 6.0))])
+		else:
+			say("Stagger finisher: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "use" and data.has("tire_grip_seconds"):
+		say("Off-road tire grips fitted: %.0fs of improved traction." % float(data["tire_grip_seconds"]))
+		return
+	if kind == "use" and bool(data.get("tire_grips", false)):
+		say("Tire grips: " + str(data.get("reason", "rejected")) + " (kit not spent)")
+		return
 	if kind == "caravan":
 		if not bool(data.get("ok", false)):
 			say("Caravan: " + str(data.get("reason", "unavailable")))
@@ -1227,7 +1576,14 @@ func _on_result(kind: String, data: Dictionary) -> void:
 						str(route.get("destination", "")), roundi(float(route.get("dst_x", 0.0))),
 						roundi(float(route.get("dst_z", 0.0))), int(route.get("silver", 0))])
 				"deliver":
-					say("Caravan delivered: +%d silver and explorer experience." % int(data.get("silver", 0)))
+					var shares: Array = data.get("escorts", [])
+					var bonus: int = int(data.get("defense_bonus", 0))
+					if shares.is_empty():
+						say("Caravan delivered: +%d silver (defense bonus +%d), Explorer XP." % [
+							int(data.get("silver", 0)), bonus])
+					else:
+						say("Caravan delivered: +%d silver (defense +%d), paid %d escort(s) from base fare." % [
+							int(data.get("silver", 0)), bonus, shares.size()])
 				"abandon":
 					say("Caravan route cancelled; no goods taken.")
 		return
@@ -1309,6 +1665,26 @@ func _on_result(kind: String, data: Dictionary) -> void:
 	if kind == "use" and str(data.get("reason", "")) == "no_acid_nearby":
 		say("Alkali kit: no active acid nearby. Your supplies were not spent.")
 		return
+	if kind == "raid_vote":
+		if bool(data.get("ok", false)):
+			say("Raid trophy vote: %s recorded%s." % [
+				str(data.get("choice", "")),
+				"; winner decided" if bool(data.get("resolved", false)) else ""])
+		else:
+			say("Raid trophy vote: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "party_loot_mode":
+		if bool(data.get("ok", false)):
+			say("Future raid loot: " + str(data.get("mode", "free")).replace("_", " "))
+		else:
+			say("Raid loot mode: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "raid_skip_turn":
+		if bool(data.get("ok", false)):
+			say("Raid turn passed. The next contributor can claim their share.")
+		else:
+			say("Cannot pass raid turn: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "party_focus":
 		if bool(data.get("ok", false)):
 			say("Party focus: infected #%d marked for %d seconds (+8%% PvE damage)." % [
@@ -1344,6 +1720,21 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Camp feast denied: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "place_fish_trap":
+		if bool(data.get("ok", false)):
+			say("Shore net T%d deployed. Fish ready in 120 seconds." % int(data.get("tier", 1)))
+		else:
+			say("Fish trap: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "collect_fish_trap":
+		if bool(data.get("ok", false)):
+			say("Shore net collected: %d x %s. Fishing XP earned." % [
+				int(data.get("count", 0)), str(data.get("item", "raw_fish"))])
+		elif str(data.get("reason", "")) == "not_ready":
+			say("Fish trap: %ds until ready." % ceili(float(data.get("remaining", 0.0))))
+		else:
+			say("Fish trap: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "infected_snare":
 		say("Tripwire placed: will root the first non-boss infected that steps on it." if bool(data.get("ok", false)) else
 			"Tripwire: " + str(data.get("reason", "rejected")))
@@ -1351,6 +1742,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 	if kind == "throw_decoy":
 		say("Decoy deployed: nearby idle infected investigate the sound." if bool(data.get("ok", false)) else
 				"Decoy denied: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "guardian_intercept":
+		if bool(data.get("ok", false)):
+			say("GUARD LINK: ally #%d guarded for %.0fs, next melee hit only." % [
+				int(data.get("target", 0)), float(data.get("seconds", 0.0))])
+		else:
+			say("Guardian intercept: " + str(data.get("reason", "rejected")))
 		return
 	if kind == "guardian_taunt":
 		if bool(data.get("ok", false)):
@@ -1383,6 +1781,28 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "loot" and str(data.get("reason", "")) == "guards_alive":
 		say("Cache sealed: eliminate %d infected guards." % int(data.get("remaining", 0)))
+		return
+	if kind == "loot" and bool(data.get("round_robin", false)) and bool(data.get("ok", false)):
+		say("Raid share: claimed %dx %s. Next contributor's turn!" % [
+			int(data.get("quantity", 0)), Defs.item(str(data.get("item", ""))).get("name", str(data.get("item", "")))])
+		return
+	if kind == "loot" and str(data.get("reason", "")) == "not_your_turn":
+		say("Raid round-robin: wait your turn (up to %ds)." % ceili(float(data.get("remaining", 0.0))))
+		return
+	if kind == "loot" and str(data.get("reason", "")) in ["item_unavailable", "invalid_item"]:
+		say("Raid reward: that item is no longer available. Select another.")
+		return
+	if kind == "loot" and str(data.get("reason", "")) == "inventory_full":
+		say("Raid loot: your inventory is full. Your turn was not spent.")
+		return
+	if kind == "loot" and str(data.get("reason", "")) == "raid_vote_pending":
+		say("Raid infected cores: vote in progress (%.0fs left). Other supplies can still be looted." % float(data.get("remaining", 0.0)))
+		return
+	if kind == "loot" and str(data.get("reason", "")) == "raid_winner_reserved":
+		say("Infected cores belong to the Need/Greed winner until raid reservation expires.")
+		return
+	if kind == "loot" and bool(data.get("core_locked", false)):
+		say("Raid supplies collected. Infected cores remain protected for the trophy roll.")
 		return
 	if kind == "loot" and str(data.get("reason", "")) == "raid_reserved":
 		say("Raid loot is reserved for its contributors (%ds remaining)." % [
@@ -1480,10 +1900,18 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "market":
 		if not bool(data.get("ok", false)):
-			say("Market: " + str(data.get("reason", "rejected")))
+			if str(data.get("reason", "")) == "already_listed":
+				say("Market: only %d unlisted units remain in your backpack." % int(data.get("available", 0)))
+			else:
+				say("Market: " + str(data.get("reason", "rejected")))
 		elif str(data.get("action", "")) == "list":
 			_market_listings = data.get("orders", [])
 			_refresh_market_options()
+		elif str(data.get("action", "")) == "bought":
+			say("Market: bought %dx %s for %d silver (tax %d; seller receives %d)." % [
+				int(data.get("quantity", 0)), str(data.get("item", "")), int(data.get("total", 0)),
+				int(data.get("tax", 0)), int(data.get("seller_net", 0))])
+			client.market_list()
 		else:
 			say("Market: %s %s" % [str(data.get("action", "updated")), str(data.get("item", ""))])
 			client.market_list()
@@ -1532,6 +1960,46 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				"no_space": "Vendor: backpack slots or stacks are full",
 			}
 			say(str(messages.get(str(data.get("reason", "")), "Vendor: rejected")))
+		return
+	if kind == "expedition_restock":
+		if bool(data.get("ok", false)):
+			var entries: Array[String] = []
+			for item_id in data.get("moved", {}):
+				entries.append("%s x%d" % [
+					str(Defs.item(str(item_id)).get("name", item_id)),
+					int(data["moved"][item_id])])
+			say("Restocked %s: %s%s" % [
+				ExpeditionLoadout.title(str(data.get("preset", ""))),
+				", ".join(entries),
+				" (partial; more supplies needed)" if bool(data.get("partial", false)) else ""])
+		else:
+			var reasons := {
+				"dead": "Restock: unavailable while dead.",
+				"no_station": "Restock: return to the hub workbench.",
+				"unknown_preset": "Restock: unknown kit.",
+				"already_supplied": "Restock: already carrying the kit targets.",
+				"no_stock": "Restock: required supplies are not in stash.",
+				"no_space": "Restock: backpack slots are full.",
+				"transaction_failed": "Restock: cancelled without moving items.",
+			}
+			say(str(reasons.get(str(data.get("reason", "")), "Restock rejected.")))
+		return
+	if kind == "stash_bulk":
+		if bool(data.get("ok", false)):
+			var moved_items: Dictionary = data.get("moved", {})
+			say("Banked %d materials (%d types)%s." % [
+				int(data.get("total", 0)), moved_items.size(),
+				"; %d units still carried (bank full)" % int(data.get("remaining", 0))
+					if bool(data.get("partial", false)) else ""])
+		else:
+			var bulk_errors := {
+				"dead": "Stash: cannot bank while dead.",
+				"no_station": "Stash: return to the hub workbench.",
+				"no_materials": "Stash: no raw or refined materials to store.",
+				"no_space": "Stash: protected bank is full.",
+				"transaction_failed": "Stash: transaction cancelled without moving items.",
+			}
+			say(str(bulk_errors.get(str(data.get("reason", "")), "Stash: deposit rejected.")))
 		return
 	if kind != "stash":
 		return
@@ -1582,10 +2050,17 @@ func _process(_delta: float) -> void:
 		if job.is_empty():
 			_caravan_status.text = "No route. Take one at a village or fort merchant."
 		else:
-			_caravan_status.text = "Carry %dx %s to %s (X:%d, Z:%d) | %d silver" % [
+			var here := TravelNavigation.target(client.you, "x", "z")
+			var destination := TravelNavigation.target(job, "dst_x", "dst_z")
+			var remaining: int = TravelNavigation.distance_meters(here, destination)
+			var heading: String = TravelNavigation.compass(here, destination)
+			var direction_text := "%dm %s" % [remaining, heading] if remaining >= 0 else "position unavailable"
+			_caravan_status.text = "Carry %dx %s to %s | %s | %d silver" % [
 				int(job.get("quantity", 0)), str(job.get("cargo", "")),
-				str(job.get("destination", "")), roundi(float(job.get("dst_x", 0.0))),
-				roundi(float(job.get("dst_z", 0.0))), int(job.get("silver", 0))]
+				str(job.get("destination", "")), direction_text,
+				int(job.get("silver", 0))]
+			if bool(client.you.get("caravan_defended", false)):
+				_caravan_status.text += " | DEFENDED +15% on delivery"
 	_bars["health"].value = client.you["health"]
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
@@ -1593,6 +2068,7 @@ func _process(_delta: float) -> void:
 	_bars["bleeding"].value = float(client.you.get("bleeding", 0.0))
 	_bars["fracture"].value = float(client.you.get("fracture", 0.0))
 	_bars["exposure"].value = float(client.you.get("exposure", 0.0))
+	_bars["wetness"].value = float(client.you.get("wetness", 0.0))
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone (T%d)\n%s" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1, ZoneRisk.description(zone)]
 	var response_time: float = float(client.you.get("self_defense_seconds", 0.0))
@@ -1610,6 +2086,31 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	var intercept_active: float = float(client.you.get("guardian_intercept_seconds", 0.0))
+	var intercept_cooldown: float = float(client.you.get("guardian_intercept_cooldown", 0.0))
+	if intercept_active > 0.0:
+		_info_label.text += "\nGUARD LINK to ally #%d: %.1fs (next infected melee hit)" % [
+			int(client.you.get("guardian_intercept_target", -1)), intercept_active]
+	elif intercept_cooldown > 0.0:
+		_info_label.text += "\nGuard link ready in %.0fs" % intercept_cooldown
+	var protected_for: float = float(client.you.get("guardian_guarded_seconds", 0.0))
+	if protected_for > 0.0:
+		_info_label.text += "\nPROTECTED by guardian #%d for %.1fs" % [
+			int(client.you.get("guardian_guarded_by", -1)), protected_for]
+	if float(client.you.get("cargo_factor", 1.0)) < 0.9999 and \
+			not bool(client.you.get("mounted", false)):
+		_info_label.text += "\nHEAVY CARGO: footsteps draw infected attention; crouch to stay quieter."
+	if int(client.you.get("rested_xp_credit", 0)) > 0:
+		_info_label.text += "\nRESTED TRAINING: %d bonus XP left (paid rest at hub/fire)" % int(
+			client.you["rested_xp_credit"])
+	for bag in client.bags.values():
+		if not bool(bag.get("corpse_scent", false)):
+			continue
+		var offset := Vector2(float(bag["x"]) - float(client.you.get("x", 0.0)),
+			float(bag["z"]) - float(client.you.get("z", 0.0)))
+		if offset.length_squared() <= CorpseScent.RADIUS * CorpseScent.RADIUS:
+			_info_label.text += "\nFRESH CORPSE: investigating infected may approach within 22 m"
+			break
 	# An exact server-derived recovery timer (not inferred from visual FX).
 	for enemy in client.zombies.values():
 		if bool(enemy.get("raid_boss", false)):
@@ -1617,6 +2118,57 @@ func _process(_delta: float) -> void:
 			if recovery > 0.0:
 				_info_label.text += "\nRAID BOSS EXPOSED: %.1fs (+15%% PvE damage)" % recovery
 			break
+	# Group-only raid boss threat view comes from the authoritative private snapshot.
+	# Never derive another player's hidden hate values from public enemy positions.
+	var raid_aggro: Dictionary = client.you.get("raid_aggro", {})
+	if not raid_aggro.is_empty():
+		var target_id: int = int(raid_aggro.get("target", 0))
+		var target_name: String = "unknown / other group"
+		if target_id == client.peer_id:
+			target_name = "YOU"
+		elif target_id > 0:
+			target_name = "#%d" % target_id
+			for ally in client.you.get("party", {}).get("roster", []):
+				if int(ally.get("id", 0)) == target_id:
+					target_name = str(ally.get("name", target_name))
+					break
+		var own_percent: int = int(raid_aggro.get("your_pct", 0))
+		_info_label.text += "\nRAID AGGRO: boss targets %s | your threat %d%% of party peak" % [
+			target_name, own_percent]
+		var pull_percent: int = int(raid_aggro.get("pull_pct", -1))
+		if target_id != client.peer_id and pull_percent >= 0:
+			_info_label.text += " | %d%% of aggro-switch threshold" % pull_percent
+			if pull_percent >= 85:
+				_info_label.text += " — ease damage or let guardian hold!"
+		if bool(raid_aggro.get("taunted", false)):
+			_info_label.text += " | GUARDIAN TAUNT %.1fs" % float(raid_aggro.get("taunt_seconds", 0.0))
+	var insulation_left: float = float(client.you.get("storm_insulator_seconds", 0.0))
+	if insulation_left > 0.0:
+		_info_label.text += "\nSTORM INSULATION %.0fs | -60%% bolt damage" % insulation_left
+	var bolt: Dictionary = client.lightning_telegraph
+	if not bolt.is_empty():
+		var warning_center := Vector2(float(bolt.get("x", 0.0)),
+			float(bolt.get("z", 0.0)))
+		var player_at := Vector2(float(client.you.get("x", 0.0)),
+			float(client.you.get("z", 0.0)))
+		var imminent: bool = player_at.distance_to(warning_center) <= StormLightning.RADIUS
+		_info_label.text += "\nLIGHTNING %s %.1fs — move or dodge!" % [
+			"ON YOUR POSITION" if imminent else "NEARBY",
+			maxf(0.0, float(bolt.get("at", client.server_time)) - client.server_time)]
+	var cone: Dictionary = client.raid_cone_telegraph
+	if not cone.is_empty():
+		var center_cone := Vector3(float(cone.get("x", 0.0)),
+			float(cone.get("y", 0.0)), float(cone.get("z", 0.0)))
+		var aim_cone := Vector2(float(cone.get("dx", 0.0)), float(cone.get("dz", 0.0)))
+		var where := Vector3(float(client.you.get("x", 0.0)),
+			float(client.you.get("y", 0.0)), float(client.you.get("z", 0.0)))
+		var threatened: bool = RaidCone.in_sector(center_cone, aim_cone, where)
+		var seconds: float = maxf(0.0, float(cone.get("until", client.server_time)) - client.server_time)
+		_info_label.text += "\nRAID CLEAVE %s %.1fs — sidestep now!" % [
+			"INCOMING" if threatened else "WARNING", seconds]
+	var counter_time: float = float(client.you.get("riposte_seconds", 0.0))
+	if counter_time > 0.0:
+		_info_label.text += "\nRIPOSTE %.1fs — strike the infected you parried!" % counter_time
 	var parry_ready: float = float(client.you.get("parry_window", 0.0))
 	if parry_ready > 0.0:
 		_info_label.text += "\nPARRY ACTIVE %.2fs — face incoming infected!" % parry_ready
@@ -1661,9 +2213,24 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nFLASH CHARGE: ready in %ds" % ceili(flash_wait)
 	if bool(client.you.get("smoke_concealed", false)):
 		_info_label.text += "\nSMOKE: quiet sight cover, no PvP immunity"
+	if not client.smoke_clouds.is_empty() and client.world != null:
+		var smoke_wind: Vector2 = Weather.wind_at(client.world,
+			float(client.you.get("x", 0.0)), float(client.you.get("z", 0.0)),
+			client.server_time)
+		_info_label.text += "\nSMOKE DRIFT: %.1f m/s | cover moves with regional wind" % smoke_wind.length()
 	var smoke_left: float = float(client.you.get("smoke_cooldown", 0.0))
 	if smoke_left > 0.0:
 		_info_label.text += "\nSMOKE: %ds recharge (F9)" % ceili(smoke_left)
+	var grip_remaining: float = float(client.you.get("tire_grip_seconds", 0.0))
+	if grip_remaining > 0.0:
+		_info_label.text += "\nOFF-ROAD TIRES: %.0fs | less mud/sand/roots/rock drag" % grip_remaining
+	var finisher_left: float = float(client.you.get("finisher_cooldown", 0.0))
+	if finisher_left > 0.0:
+		_info_label.text += "\nFINISHER: %.1fs cooldown | Shift+G vs stunned infected" % finisher_left
+	var oil_left: float = float(client.you.get("coating_seconds", 0.0))
+	if oil_left > 0.0:
+		_info_label.text += "\nANTISEPTIC EDGE %s %.0fs: +20%% infected damage (no PvP/bosses)" % [
+			str(client.you.get("coating_weapon", "")), oil_left]
 	var quiet_left: float = float(client.you.get("chain_wrap_seconds", 0.0))
 	if quiet_left > 0.0:
 		_info_label.text += "\nQUIET CHAIN: %.0fs | Bike noise 9m" % quiet_left
@@ -1672,16 +2239,25 @@ func _process(_delta: float) -> void:
 	var supported_kg: float = float(client.you.get("bike_cargo_kg", 0.0))
 	if supported_kg > 0.0:
 		_info_label.text += "\nBIKE PANNIERS: %.0f kg supported (on foot: full load)" % supported_kg
+	if bool(client.you.get("on_road", false)):
+		_info_label.text += "\nDIRT ROAD: +8% foot pace, stronger bicycle grip"
+	if client.inventory.count("salvage_bike") > 0:
+		_info_label.text += "\nBIKE SERVICE: %.0f m | PgUp service on foot" % float(client.you.get("bike_service_meters", 0.0))
+		_info_label.text += "\nBIKE FRAME: %.0f%% | PgDn patch on foot" % float(client.you.get("bike_integrity", 100.0))
+		if client.inventory.count("bike_dynamo_lamp") > 0:
+			_info_label.text += "\nDYNAMO LAMP: %s | light reveals you to infected at night" % ("ON" if bool(client.you.get("bike_lamp_lit", false)) else "OFF")
 	_info_label.text += "\nTRAIL BIKE: %s | F4 mount/dismount | remount %.0fs" % [
 		"RIDING" if bool(client.you.get("mounted", false)) else ("CARRIED" if client.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		float(client.you.get("mount_cooldown", 0.0))]
 	if bool(client.you.get("mounted", false)):
-		_info_label.text += "\nBIKE RATTLE: moving attracts infected within 27 m"
+		_info_label.text += "\nBIKE RATTLE: rolling attracts infected (wrap/service reduce sound)"
 		var bike_biome: String = client.world.biome_at(float(client.you.get("x", 0.0)),
 			float(client.you.get("z", 0.0)))
 		_info_label.text += "\nBIKE GROUND: %s | slope changes riding speed" % bike_biome.to_upper()
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
 		round(100.0 * float(client.you.get("weather_insulation", 0.0))))
+	if bool(client.you.get("tent_anchored", false)):
+		_info_label.text += "\nANCHORED TARP: -90% weather exposure, shared camp cover"
 	if bool(client.you.get("tent_camouflaged", false)):
 		_info_label.text += "\nCANOPY CAMOUFLAGE: infected see 25% less; sound, scent and fire still reveal"
 	var visual: float = float(client.you.get("visual_signature", 1.0))
@@ -1721,6 +2297,13 @@ func _process(_delta: float) -> void:
 				"SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED")),
 			int(client.you.get("exposure", 0.0)), int(ceil(float(client.you.get("warmth_seconds", 0.0))))
 		]
+	var wind_chill: Dictionary = client.you.get("wind_chill", {})
+	if float(wind_chill.get("extra", 0.0)) > 0.0:
+		_info_label.text += "\nWIND CHILL: %.1f m/s | +%.0f%% cold exposure intensity" % [
+			float(wind_chill.get("speed", 0.0)), 100.0 * float(wind_chill["extra"])]
+	var wet: float = float(client.you.get("wetness", 0.0))
+	if wet > 0.0:
+		_info_label.text += "\nWET CLOTHING: %d%% | cold increases exposure; dry at a campfire" % roundi(wet)
 	var storm_cover: float = float(client.you.get("weather_sight", 1.0))
 	if is_finite(storm_cover) and storm_cover < 1.0:
 		_info_label.text += "\nSTORM COVER: infected sight -%d%% (sound, scent & fire still reveal)" % [
@@ -1860,7 +2443,8 @@ func _refresh_market_options() -> void:
 		_market_select.set_item_metadata(index, int(order["id"]))
 		if int(order["id"]) == selected_id:
 			_market_select.select(index)
-	_market_status.text = "%d listings | quantity & price inputs below | inventory item from barter selector" % _market_listings.size()
+	_market_status.text = "%d listings | item then lowest price | %d%% seller tax" % [
+		_market_listings.size(), MarketBoard.SALE_TAX_PERCENT]
 
 
 func _refresh_party_controls() -> void:
@@ -1883,6 +2467,76 @@ func _refresh_party_controls() -> void:
 		_duel_status.text = "No duel pending. Select a nearby survivor above."
 	var state: Dictionary = client.you.get("party", {})
 	var group_id: int = int(state.get("id", 0))
+	var loot_mode: String = str(state.get("loot_mode", "free"))
+	_raid_loot_mode_button.disabled = group_id == 0 or int(state.get("leader", 0)) != client.peer_id
+	_raid_loot_mode_button.text = "Raid loot: " + ("Round robin" if loot_mode == "round_robin" else ("Need/Greed" if loot_mode == "need_greed" else "Free"))
+	_raid_skip_bag_id = -1
+	var nearest_raid_distance: float = INF
+	for reward in client.bags.values():
+		if not bool(reward.get("raid_round_robin", false)) or not bool(reward.get("raid_your_turn", false)) or not bool(reward.get("can_loot", false)):
+			continue
+		var dx: float = float(reward.get("x", 0.0)) - float(client.you.get("x", 0.0))
+		var dz: float = float(reward.get("z", 0.0)) - float(client.you.get("z", 0.0))
+		var distance_sq: float = dx * dx + dz * dz
+		if distance_sq <= (Defs.REACH + 0.5) * (Defs.REACH + 0.5) and distance_sq < nearest_raid_distance:
+			nearest_raid_distance = distance_sq
+			_raid_skip_bag_id = int(reward.get("id", -1))
+	_raid_skip_button.disabled = _raid_skip_bag_id <= 0
+	_raid_vote_bag_id = -1
+	var nearest_vote_distance: float = INF
+	var nearest_ballot: Dictionary = {}
+	for bag in client.bags.values():
+		var ballot: Dictionary = bag.get("raid_need_greed", {})
+		if ballot.is_empty():
+			continue
+		var dx_vote: float = float(bag.get("x", 0.0)) - float(client.you.get("x", 0.0))
+		var dz_vote: float = float(bag.get("z", 0.0)) - float(client.you.get("z", 0.0))
+		var distance: float = dx_vote * dx_vote + dz_vote * dz_vote
+		if distance <= Party.ASSIST_RANGE * Party.ASSIST_RANGE and distance < nearest_vote_distance:
+			nearest_vote_distance = distance
+			_raid_vote_bag_id = int(bag.get("id", -1))
+			nearest_ballot = ballot
+	var may_vote: bool = _raid_vote_bag_id > 0 and str(nearest_ballot.get("status", "")) == "voting" and str(nearest_ballot.get("your_vote", "")).is_empty()
+	_raid_vote_need.disabled = not may_vote
+	_raid_vote_greed.disabled = not may_vote
+	_raid_vote_pass.disabled = not may_vote
+	_raid_vote_label.text = "No active Need/Greed raid trophy ballot nearby."
+	if _raid_vote_bag_id > 0:
+		var ballot_status: String = str(nearest_ballot.get("status", ""))
+		if ballot_status == "voting":
+			_raid_vote_label.text = "Raid bag #%d: %d Infected Core. %d/%d votes, %.0fs. %s" % [
+				_raid_vote_bag_id, int(nearest_ballot.get("amount", 0)),
+				int(nearest_ballot.get("votes_cast", 0)),
+				int(nearest_ballot.get("participants", 0)),
+				float(nearest_ballot.get("remaining", 0.0)),
+				"Choose Need, Greed or Pass" if may_vote else "Your vote: " + str(nearest_ballot.get("your_vote", ""))]
+		elif ballot_status == "awarded":
+			_raid_vote_label.text = "Raid bag #%d: %s" % [_raid_vote_bag_id,
+				"YOU WON infected cores! Loot the bag." if bool(nearest_ballot.get("your_win", false)) else "Another contributor won the infected cores."]
+		elif ballot_status == "free":
+			_raid_vote_label.text = "Raid bag #%d: all passed. Infected cores open to eligible contributors." % _raid_vote_bag_id
+	var chosen_bag: Dictionary = client.bags.get(_raid_skip_bag_id, {})
+	var choices: Array = chosen_bag.get("raid_item_choices", [])
+	var choices_signature: String = "%d:%s" % [_raid_skip_bag_id, JSON.stringify(choices)]
+	if choices_signature != _raid_items_signature:
+		var previous: String = ""
+		if _raid_item_select.selected >= 0:
+			previous = str(_raid_item_select.get_selected_metadata())
+		_raid_items_signature = choices_signature
+		_raid_item_select.clear()
+		var preferred_index: int = 0
+		for raw_id in choices:
+			var item_id: String = str(raw_id)
+			var item_name: String = str(Defs.item(item_id).get("name", item_id))
+			_raid_item_select.add_item(item_name)
+			var index: int = _raid_item_select.item_count - 1
+			_raid_item_select.set_item_metadata(index, item_id)
+			if item_id == previous:
+				preferred_index = index
+		if _raid_item_select.item_count > 0:
+			_raid_item_select.select(preferred_index)
+	_raid_item_select.disabled = choices.is_empty()
+	_raid_claim_button.disabled = _raid_skip_bag_id <= 0 or choices.is_empty()
 	var roster: Array = state.get("roster", [])
 	var remaining_aid: float = float(client.you.get("party_aid_cooldown", 0.0))
 	var remaining_feast: float = float(client.you.get("party_feast_cooldown", 0.0))
@@ -1894,6 +2548,16 @@ func _refresh_party_controls() -> void:
 			var prefix: String = "[Leader] " if int(member["id"]) == int(state.get("leader", 0)) else ""
 			names.append("%s%s (%d HP)" % [prefix, str(member["name"]), int(member["health"])])
 		_party_status.text = "Party %d (%d/5): %s" % [group_id, roster.size(), ", ".join(names)]
+	if group_id != 0:
+		_party_status.text += "\nRaid loot: %s (leader controls future boss drops)" % (
+			"Round robin" if loot_mode == "round_robin" else "Free pickup")
+	for reward in client.bags.values():
+		if bool(reward.get("raid_round_robin", false)):
+			_party_status.text += "\nRaid bag #%d: %s (%.0fs)" % [
+				int(reward.get("id", 0)),
+				"YOUR TURN" if bool(reward.get("raid_your_turn", false)) else "waiting",
+				float(reward.get("raid_turn_seconds", 0.0))]
+			break
 	var focus_state: Dictionary = state.get("focus", {})
 	if not focus_state.is_empty():
 		_party_status.text += "\nFocus infected #%d: %ds remaining (+8%% PvE damage)" % [
@@ -1927,10 +2591,29 @@ func _refresh_party_controls() -> void:
 		var standard_cooldown: float = float(standard.get("cooldown", 0.0))
 		if standard_cooldown > 0.0:
 			_party_status.text += " | next in %ds" % int(ceil(standard_cooldown))
+	var escort: Dictionary = state.get("escort_caravan", {})
+	if not escort.is_empty():
+		var origin := TravelNavigation.target(client.you, "x", "z")
+		var destination := TravelNavigation.target(escort, "dst_x", "dst_z")
+		var remaining: int = TravelNavigation.distance_meters(origin, destination)
+		var compass: String = TravelNavigation.compass(origin, destination)
+		var guide := "%dm %s" % [remaining, compass] if remaining >= 0 else "unknown"
+		_party_status.text += "\nEscort %s: %dx %s to %s | %s" % [
+			str(escort.get("name", "Courier")), int(escort.get("quantity", 0)),
+			str(escort.get("cargo", "")), str(escort.get("destination", "")), guide]
+		if int(escort.get("owner", 0)) != client.peer_id:
+			var contributed: Dictionary = state.get("escort_progress", {})
+			_party_status.text += "\nEscort milestones %d/4 | travelled %dm (min 80m); up to 20%% of courier fare split with guards" % [
+				int(contributed.get("stage", 0)), int(contributed.get("meters", 0))]
 	var rally: Dictionary = state.get("rally", {})
 	if not rally.is_empty():
-		_party_status.text += "\nRally: x%d z%d (%d seconds)" % [
-			int(rally["x"]), int(rally["z"]), int(ceil(float(rally["remaining"])))]
+		var from_position := TravelNavigation.target(client.you, "x", "z")
+		var rally_position := TravelNavigation.target(rally, "x", "z")
+		var distance: int = TravelNavigation.distance_meters(from_position, rally_position)
+		var heading: String = TravelNavigation.compass(from_position, rally_position)
+		var guidance: String = "%dm %s" % [distance, heading] if distance >= 0 else "location unavailable"
+		_party_status.text += "\nRally: %s | %d seconds" % [
+			guidance, int(ceil(float(rally["remaining"])))]
 	var nearby: Array = []
 	for peer in client.players.values():
 		nearby.append([int(peer["id"]), str(peer.get("name", "Survivor"))])
@@ -2029,7 +2712,26 @@ func _style_slot(button: Button, item_id: String, equipped: bool) -> void:
 	button.add_theme_color_override("font_color", Color(1, 1, 1) if item_id != "" else Color(1, 1, 1, 0.3))
 
 
+func _refresh_presets() -> void:
+	var presets: Array = client.you.get("equipment_presets", [])
+	for slot in _preset_labels.size():
+		var name_label: Label = _preset_labels[slot]
+		if slot >= presets.size() or not (presets[slot] is Dictionary) or \
+				(presets[slot] as Dictionary).is_empty():
+			name_label.text = "Set %d: empty" % (slot + 1)
+			continue
+		var record: Dictionary = presets[slot]
+		var weapon: String = str(record.get("weapon", ""))
+		var armor: String = str(record.get("armor", ""))
+		var weapon_name: String = str(Defs.item(weapon).get("name", "Unarmed"))
+		var armor_name: String = str(Defs.item(armor).get("name", "No armor"))
+		var active: bool = weapon == client.inventory.weapon and armor == client.inventory.armor
+		name_label.text = "Set %d: %s / %s%s" % [
+			slot + 1, weapon_name, armor_name, " [ACTIVE]" if active else ""]
+
+
 func _refresh_inventory() -> void:
+	_refresh_presets()
 	var signature := str(client.inventory.to_dict()) + "|" + str(client.stash.to_dict())
 	if signature == _inventory_signature:
 		return
@@ -2097,31 +2799,52 @@ func _refresh_inventory() -> void:
 
 
 func _refresh_crafting() -> void:
-	var craftable: Array = Crafting.craftable(client.inventory)
-	var signature := str(craftable) + str(client.inventory.count("wood_1")) + str(client.you.get("crafting_level", 1))
+	# Every slot counts: changes to fish, ore, medicine etc must refresh recipes,
+	# not only the old special case of wood_1.
+	var signature := str(client.inventory.slots) + str(client.you.get("crafting_level", 1)) \
+		+ _craft_search.text + str(_craft_ready_only.button_pressed)
 	if signature == _craft_signature:
 		return
 	_craft_signature = signature
 	for child in _craft_list.get_children():
 		child.queue_free()
-	var ids: Array = Defs.recipes().keys()
-	ids.sort_custom(func(a: String, b: String) -> bool:
-		var ca := craftable.has(a)
-		var cb := craftable.has(b)
-		return (ca and not cb) or (ca == cb and a < b))
-	for id in ids:
-		var recipe: Dictionary = Defs.recipes()[id]
+	var entries: Array[Dictionary] = CraftingCatalog.entries(
+		client.inventory, _craft_search.text, _craft_ready_only.button_pressed,
+		int(client.you.get("crafting_level", 1)))
+	_craft_result_count.text = "%d recipes | Click to craft one, MAX for a material-and-space-safe batch (limit 50)." % entries.size()
+	if entries.is_empty():
+		var empty := Label.new()
+		empty.text = "No matching recipes. Try fewer words or disable the filter."
+		_craft_list.add_child(empty)
+	for entry in entries:
+		var recipe_id: String = str(entry["id"])
+		var recipe: Dictionary = Defs.recipes()[recipe_id]
 		var needs: Array[String] = []
 		for input in recipe["inputs"]:
-			needs.append("%dx %s" % [recipe["inputs"][input], Defs.item(input).get("name", input)])
+			needs.append("%dx %s" % [
+				int(recipe["inputs"][input]), str(Defs.item(str(input)).get("name", input))])
+		var row := HBoxContainer.new()
 		var button := Button.new()
-		var station_note := "  [bench]" if recipe["station"] == "workbench" else ("  [fire or bench]" if recipe["station"] == "campfire" else "")
-		button.text = "%s  <-  %s%s" % [Defs.item(recipe["output"]).get("name", recipe["output"]), ", ".join(needs), station_note]
+		var station: String = str(recipe["station"])
+		var station_note := " [bench]" if station == "workbench" else (
+			" [fire / bench]" if station == "campfire" else "")
+		button.text = "%s  <-  %s%s" % [
+			str(Defs.item(str(recipe["output"])).get("name", recipe["output"])),
+			", ".join(needs), station_note]
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		var required_tier: int = maxi(1, Defs.tier_of(String(recipe["output"])))
-		var skill_locked: bool = required_tier > int(client.you.get("crafting_level", 1))
-		button.disabled = not craftable.has(id) or skill_locked
-		if skill_locked:
-			button.text += "  [Craft Lv%d]" % required_tier
-		button.pressed.connect(func() -> void: client.craft(id, 1))
-		_craft_list.add_child(button)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.custom_minimum_size = Vector2(465, 0)
+		var ready: bool = bool(entry["ready"])
+		button.disabled = not ready
+		if not ready:
+			button.text += " [Lv%d]" % int(entry["tier"]) if bool(entry["skill_locked"]) else " [missing ingredients / space]"
+		button.pressed.connect(func() -> void: client.craft(recipe_id, 1))
+		row.add_child(button)
+		var amount: int = int(entry["max_batches"])
+		if ready and amount > 1:
+			var max_button := Button.new()
+			max_button.text = "MAX x%d" % amount
+			max_button.tooltip_text = "Craft %d batches in one validated server request (no partial material consumption)." % amount
+			max_button.pressed.connect(func() -> void: client.craft(recipe_id, amount))
+			row.add_child(max_button)
+		_craft_list.add_child(row)

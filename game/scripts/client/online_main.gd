@@ -11,6 +11,7 @@ const GameClient = preload("res://scripts/client/game_client.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 const EntityView = preload("res://scripts/client/entity_view.gd")
 const RaidTelegraph = preload("res://scripts/client/raid_telegraph.gd")
+const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
 const Hud = preload("res://scripts/client/hud.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
@@ -74,6 +75,7 @@ var _zoom := 1.0
 var _attack_cooldown := 0.0
 var _party_rally_marker: Node3D
 var _raid_telegraph: Node3D
+var _lightning_visual: Node3D
 var _screenshot_path := ""
 var _screenshot_frames := 0
 var _frame_ms: Array[float] = [] # Frame times before a demo screenshot, for the median printed with it.
@@ -171,6 +173,9 @@ func _build_environment() -> void:
 	_raid_telegraph = RaidTelegraph.new()
 	_raid_telegraph.name = "RaidGroundSlamWarning"
 	add_child(_raid_telegraph)
+	_lightning_visual = LightningVisual.new()
+	_lightning_visual.name = "StormLightningWarning"
+	add_child(_lightning_visual)
 	camera.current = true
 	chunk_root = Node3D.new()
 	chunk_root.name = "Chunks"
@@ -369,6 +374,12 @@ func _spawn_effects(event: Dictionary) -> void:
 				effects.hit_player(at)
 		"zombie_died":
 			effects.zombie_died(at)
+		"finishing_strike":
+			effects.burst(at, Color(0.95, 0.22, 0.38),
+				20, 4.3, 0.7, 0.12)
+		"armor_sunder":
+			effects.burst(at, Color(0.98, 0.55, 0.2),
+				16, 2.8, 0.65, 0.11)
 		"attack":
 			if bool(event.get("ranged", false)):
 				effects.muzzle_flash(at + Vector3(0, 0.2, 0))
@@ -397,6 +408,9 @@ func _on_skill_event(event: Dictionary) -> void:
 			var other: Dictionary = client.players.get(int(event.get("peer", -1)), {})
 			entities.play_attack(int(event.get("peer", -1)), str(other.get("weapon", "")), bool(event.get("ranged", false)))
 	match event["type"]:
+		"finishing_strike":
+			if int(event.get("peer", -1)) == client.peer_id:
+				hud.say("FINISHING STRIKE — wounded infected!")
 		"xp":
 			var parts: Array[String] = []
 			for skill_id in event["gains"]:
@@ -492,6 +506,7 @@ func _on_welcomed() -> void:
 	world_map = WorldMap.new()
 	hud.add_child(world_map)
 	world_map.setup(client)
+	world_map.personal_waypoint_changed.connect(hud._radar.set_personal_waypoint)
 	overlay = WorldOverlay.new()
 	overlay.name = "WorldOverlay"
 	hud.add_child(overlay)
@@ -521,6 +536,7 @@ func _on_welcomed() -> void:
 	client.event_received.connect(func(event: Dictionary) -> void: audio.on_event(event, client.peer_id, client.world.height_at))
 	_raid_telegraph.clear()
 	client.event_received.connect(func(event: Dictionary) -> void: _raid_telegraph.consume(event, client.world))
+	client.snapshot_received.connect(func() -> void: _raid_telegraph.update_interrupt(client.raid_interrupt))
 	avatar = Node3D.new()
 	avatar_model = CharacterModel.new()
 	avatar_model.setup(Color(1.0, 0.95, 0.5) if not Assets.has_characters() else Color.WHITE, 2.0, 1.0, Assets.CHARACTER_NAMES[abs(hash(name_edit.text)) % Assets.CHARACTER_NAMES.size()], false, abs(hash(name_edit.text)) / Assets.CHARACTER_NAMES.size())
@@ -588,6 +604,7 @@ func _process(delta: float) -> void:
 		avatar_model.set_action_loop(_gather_animation())
 		var riding: bool = bool(client.you.get("mounted", false)) and avatar.visible
 		bike_visual.set_panniers(client.inventory.count("bike_panniers") > 0)
+		bike_visual.set_lamp(bool(client.you.get("bike_lamp_lit", false)))
 		bike_visual.set_riding(riding, avatar_model.speed, delta)
 		flare_visual.set_burning(avatar.visible and float(client.you.get("flare_seconds", 0.0)) > 0.0)
 		audio.set_footsteps(avatar_model._moving and avatar.visible and not riding)
@@ -597,6 +614,7 @@ func _process(delta: float) -> void:
 		streamer.focus_position = position
 		_apply_world_state()
 	entities.update_from(client)
+	_lightning_visual.set_warning(client.lightning_telegraph)
 	outposts.update_from(client)
 	_update_party_rally_marker()
 	# The camera glides after the player.
@@ -718,6 +736,12 @@ func _update_prompt() -> void:
 		text += " | RIDING (F4 dismount)"
 	elif client.inventory.count("salvage_bike") > 0:
 		text += " | F4 ride bike"
+	if int(client.you.get("sharpened_hits", 0)) > 0:
+		text += " | SHARPENED: %d infected melee hits (End)" % int(client.you["sharpened_hits"])
+	if int(client.you.get("plated_hits", 0)) > 0:
+		text += " | ARMOR PLATE: %d claw hits (Ins)" % int(client.you["plated_hits"])
+	if float(client.you.get("soft_sole_seconds", 0.0)) > 0.0:
+		text += " | QUIET SPRINT: %.0fs (Shift+/)" % float(client.you["soft_sole_seconds"])
 	hud.set_prompt(text)
 
 
@@ -743,9 +767,37 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F4:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.toggle_mount()
+			KEY_PAGEUP:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.use_item("bike_service_kit")
+			KEY_END:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					_quick_use("field_whetstone")
+			KEY_INSERT:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					_quick_use("field_armor_plate")
+			KEY_PAGEDOWN:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.use_item("bike_frame_patch")
+			KEY_F5:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					var direction: Vector2 = _aim_direction()
+					if direction.length_squared() < 0.0001:
+						direction = Vector2(sin(client.yaw), cos(client.yaw))
+					client.throw_ember(direction)
 			KEY_F3:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.survey_ruins()
+			KEY_F10:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.place_fish_trap()
+			KEY_F12:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					var fish_trap_id: int = client.nearest_fish_trap(client.display_position())
+					if fish_trap_id < 0:
+						hud.say("No shoreline fish trap within reach.")
+					else:
+						client.collect_fish_trap(fish_trap_id)
 			KEY_Q:
 				_interact()
 			KEY_1:
@@ -759,17 +811,18 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_5:
 				_quick_use("jacket_1")
 			KEY_6:
-				_quick_use("field_antiseptic")
+				_quick_use("antiseptic_edge_oil" if Input.is_key_pressed(KEY_SHIFT)
+					else "field_antiseptic")
 			KEY_7:
 				_quick_use("antibiotics")
-			KEY_F9:
+			KEY_F11:
 				_quick_use("herbal_poultice")
 			KEY_8:
 				_quick_use("thermal_wrap")
 			KEY_PERIOD:
 				_quick_use("frontier_stim")
 			KEY_SLASH:
-				_quick_use("herbal_scent_mask")
+				_quick_use("soft_sole_wraps" if Input.is_key_pressed(KEY_SHIFT) else "herbal_scent_mask")
 			KEY_SEMICOLON:
 				_quick_use("spore_filter")
 			KEY_R:
@@ -816,10 +869,13 @@ func _unhandled_input(event: InputEvent) -> void:
 					client.use_item("smoke_charge")
 			KEY_G:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
-					var skill_direction: Vector2 = _aim_direction()
-					if skill_direction == Vector2.ZERO:
-						skill_direction = Vector2(sin(client.yaw), cos(client.yaw))
-					client.skill(skill_direction)
+					if Input.is_key_pressed(KEY_SHIFT):
+						client.stagger_finisher()
+					else:
+						var skill_direction: Vector2 = _aim_direction()
+						if skill_direction == Vector2.ZERO:
+							skill_direction = Vector2(sin(client.yaw), cos(client.yaw))
+						client.skill(skill_direction)
 			KEY_SPACE:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					# Move-direction dodge, or current aim/facing when stationary.

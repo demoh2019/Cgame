@@ -5,6 +5,14 @@ press F9. This creates a 9-second, 4.5-metre-radius cloud at the player's
 actual server position, reducing first-time **visual** detection by a factor
 of 0.52 for quiet survivors, never lower than the 0.35 visibility floor.
 
+Wind now drifts each paid smoke volume across the actual landscape. Regional wind is
+seeded from 256-metre weather cells and changes every 240 seconds. Clear weather
+moves clouds gently (0.24-0.34 m/s); storms push them at 1.10-1.42 m/s.
+Concealment follows the cloud, not the old throw position, so survivors must
+move with it to remain hidden. Water and the protected hub block drifting.
+Online and offline 3D smoke positions follow server snapshots; the HUD shows
+the local wind speed whenever smoke is nearby. No extra client RPC is trusted.
+
 Smoke does not break existing infected target/threat/pack alert, block
 hearing, scent or firelight, prevent PvP damage, protect from acid or heal.
 Deployment itself makes a brief quiet sound; to hide, let it subside.

@@ -5,6 +5,11 @@ extends Control
 
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
+const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
+const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
+const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
+const RaidCone = preload("res://scripts/shared/raid_cone.gd")
+const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 
 const METERS_RADIUS := 72.0
 const REFRESH_INTERVAL := 0.2
@@ -14,6 +19,7 @@ var world
 var sim
 var client
 var actor_id: int = 0
+var personal_waypoint: Vector2 = Vector2(INF, INF)
 var _elapsed: float = 0.0
 
 
@@ -32,6 +38,13 @@ static func in_range(origin: Vector2, target: Vector2,
 		meters > 0.0 and origin.is_finite() and target.is_finite()
 		and origin.distance_squared_to(target) <= meters * meters
 	)
+
+
+## Strictly local, unreplicated map click destination.
+func set_personal_waypoint(point: Vector2) -> void:
+	personal_waypoint = point if TravelNavigation.valid_destination(
+		point, WorldGen.WORLD_RADIUS) else Vector2(INF, INF)
+	queue_redraw()
 
 
 func _ready() -> void:
@@ -67,10 +80,145 @@ func current_yaw() -> float:
 	return 0.0
 
 
+## Only a local actor or the local private network snapshot may supply
+## waypoint coordinates. Other players' snapshots never carry these fields.
+func current_caravan() -> Dictionary:
+	if sim != null:
+		if sim.players.has(actor_id):
+			return sim.players[actor_id].caravan_view.duplicate(true)
+		return {}
+	if client != null:
+		return client.you.get("caravan", {}).duplicate(true)
+	return {}
+
+
+func current_escort_caravan() -> Dictionary:
+	if sim != null:
+		if sim.players.has(actor_id):
+			return sim._party_state_for(actor_id).get("escort_caravan", {}).duplicate(true)
+		return {}
+	if client != null:
+		return client.you.get("party", {}).get("escort_caravan", {}).duplicate(true)
+	return {}
+
+
+## A scanner pin exists only in the current player's private snapshot.
+## A consumed chart only reveals the owner's current server-confirmed vein.
+func current_prospect_mark() -> Dictionary:
+	if sim != null:
+		if not sim.players.has(actor_id):
+			return {}
+		var actor = sim.players[actor_id]
+		if not actor.survival.alive:
+			return {}
+		return ProspectingChart.public_mark(actor.prospect_mark,
+			sim.time, sim.depleted)
+	if client != null:
+		return client.you.get("prospect_mark", {}).duplicate(true)
+	return {}
+
+
+func current_threat_scan() -> Dictionary:
+	if sim != null:
+		if not sim.players.has(actor_id):
+			return {}
+		var actor = sim.players[actor_id]
+		if not actor.survival.alive:
+			return {}
+		return ThreatScan.public_mark(actor.threat_scan, sim.zombies,
+			actor.position, sim.time)
+	if client != null:
+		return client.you.get("threat_scan", {}).duplicate(true)
+	return {}
+
+
+func current_rally() -> Dictionary:
+	if sim != null:
+		return sim.parties.state_for(actor_id, sim.time).get("rally", {}).duplicate(true)
+	if client != null:
+		return client.you.get("party", {}).get("rally", {}).duplicate(true)
+	return {}
+
+
+## Authenticated party ping, with the same isolation as leader rally.
+func current_party_ping() -> Dictionary:
+	if sim != null:
+		return sim.parties.state_for(actor_id, sim.time).get("ping", {}).duplicate(true)
+	if client != null:
+		return client.you.get("party", {}).get("ping", {}).duplicate(true)
+	return {}
+
+
+## Draw an in-range beacon or an offscreen edge arrow in one shared style.
+func _draw_waypoint(origin: Vector2, info: Dictionary, x_key: String,
+		z_key: String, color: Color) -> void:
+	var destination: Vector2 = TravelNavigation.target(info, x_key, z_key)
+	var guide: Dictionary = TravelNavigation.project(origin, destination, size,
+		METERS_RADIUS, MAP_INSET)
+	if guide.is_empty():
+		return
+	var point: Vector2 = guide["point"]
+	if bool(guide["inside"]):
+		draw_arc(point, 7.5, 0.0, TAU, 24, color, 1.5)
+		draw_circle(point, 4.7, color)
+	else:
+		var heading: Vector2 = (destination - origin).normalized()
+		var side := Vector2(-heading.y, heading.x)
+		draw_colored_polygon(PackedVector2Array([
+			point, point - heading * 12.0 + side * 5.5,
+			point - heading * 12.0 - side * 5.5]), color)
+
+
 func _paint_pin(at: Vector2, center_world: Vector2, shade: Color,
 		pixel_radius: float) -> void:
 	if in_range(center_world, at):
 		draw_circle(map_point(center_world, at, size), pixel_radius, shade)
+
+
+## Only a snapshot-visible, server-issued cone is rendered as a tactical wedge.
+## This is presentation only; the server independently resolves all hits.
+func _draw_raid_cone(origin: Vector2, attack: Dictionary) -> void:
+	if attack.is_empty():
+		return
+	for key in ["x", "z", "dx", "dz", "reach", "half_angle", "until"]:
+		if not attack.has(key) or not is_finite(float(attack[key])):
+			return
+	var strike_origin := Vector2(float(attack["x"]), float(attack["z"]))
+	var facing := Vector2(float(attack["dx"]), float(attack["dz"]))
+	var reach: float = float(attack["reach"])
+	var half_angle: float = float(attack["half_angle"])
+	if not strike_origin.is_finite() or not facing.is_finite() or \
+			absf(facing.length_squared() - 1.0) > 0.01 or \
+			reach <= 0.0 or reach > RaidCone.REACH or \
+			half_angle <= 0.0 or half_angle > RaidCone.HALF_ANGLE_DEGREES:
+		return
+	if not in_range(origin, strike_origin):
+		return
+	var arc_points := PackedVector2Array()
+	arc_points.append(map_point(origin, strike_origin, size))
+	for index in range(17):
+		var radians := deg_to_rad(-half_angle + float(index) * (half_angle * 2.0 / 16.0))
+		var tip: Vector2 = strike_origin + facing.rotated(radians) * reach
+		arc_points.append(map_point(origin, tip, size))
+	draw_colored_polygon(arc_points, Color(1.0, 0.25, 0.12, 0.23))
+	draw_polyline(arc_points, Color(1.0, 0.42, 0.16, 0.82), 1.4)
+
+
+## Purple bolt indicator. Visual-only, the server checks real hit positions.
+func _draw_lightning(origin: Vector2, strike: Dictionary) -> void:
+	for key in ["x", "z", "at"]:
+		if not strike.has(key) or not is_finite(float(strike[key])):
+			return
+	var point := Vector2(float(strike["x"]), float(strike["z"]))
+	if not in_range(origin, point):
+		return
+	var pixels_per_meter: float = minf(size.x, size.y) * MAP_INSET / METERS_RADIUS
+	var pixel: Vector2 = map_point(origin, point, size)
+	draw_circle(pixel, StormLightning.RADIUS * pixels_per_meter,
+		Color(0.67, 0.30, 1.0, 0.23))
+	draw_arc(pixel, StormLightning.RADIUS * pixels_per_meter, 0.0, TAU,
+		30, Color(0.90, 0.64, 1.0, 0.95), 2.0)
+	draw_circle(pixel, 2.2, Color(0.95, 0.88, 1.0))
 
 
 func _draw() -> void:
@@ -138,6 +286,27 @@ func _draw() -> void:
 			_paint_pin(Vector2(float(bag["x"]), float(bag["z"])),
 				origin, Color(0.41, 0.93, 0.68), 3.0)
 
+	# Locked boss cleave: distinguish the dangerous sector from friendly markers.
+	var incoming_cone: Dictionary = {}
+	if sim != null and not sim.raid_pending_cone.is_empty():
+		incoming_cone = sim.raid_pending_cone.duplicate(true)
+		incoming_cone["until"] = float(sim.raid_pending_cone.get("at", 0.0))
+		incoming_cone["reach"] = RaidCone.REACH
+		incoming_cone["half_angle"] = RaidCone.HALF_ANGLE_DEGREES
+	elif client != null:
+		incoming_cone = client.raid_cone_telegraph
+	if not incoming_cone.is_empty():
+		_draw_raid_cone(origin, incoming_cone)
+
+	# Live server warning circle (also used by the offline local server).
+	var lightning: Dictionary = {}
+	if sim != null:
+		lightning = sim.lightning_pending
+	elif client != null:
+		lightning = client.lightning_telegraph
+	if not lightning.is_empty():
+		_draw_lightning(origin, lightning)
+
 	## The party standard is visible to members as a field aura radius.
 	# No non-member coordinates are ever sent by the server.
 	var current_standard: Dictionary = {}
@@ -175,6 +344,30 @@ func _draw() -> void:
 					tip, tip - arrow_direction * 12.0 + tangent * 5.0,
 					tip - arrow_direction * 12.0 - tangent * 5.0])
 				draw_colored_polygon(arrow, Color(0.84, 0.38, 0.98))
+
+	# Gold = personal map click. Does not appear in other players' snapshots.
+	if personal_waypoint.is_finite():
+		_draw_waypoint(origin, {"x": personal_waypoint.x, "z": personal_waypoint.y},
+			"x", "z", Color(1.0, 0.86, 0.3))
+	# Teal = private caravan destination; amber = temporary party-only rally.
+	# A remote target stays visible as an edge arrow until it is reached.
+	_draw_waypoint(origin, current_caravan(), "dst_x", "dst_z",
+		Color(0.28, 0.92, 0.92))
+	# Violet points to the current party courier's verified destination.
+	_draw_waypoint(origin, current_escort_caravan(), "dst_x", "dst_z",
+		Color(0.71, 0.51, 1.0))
+	_draw_waypoint(origin, current_rally(), "x", "z",
+		Color(1.0, 0.60, 0.22))
+	# Teal = limited-time teammate map ping; remote pins stay as edge arrows.
+	_draw_waypoint(origin, current_party_ping(), "x", "z",
+		Color(0.20, 0.95, 0.90))
+
+	# A spent scanner grants one short-lived private moving target pin.
+	_draw_waypoint(origin, current_threat_scan(), "x", "z",
+		Color(1.0, 0.32, 0.45))
+	# Copper = a private, paid high-tier ore/stone prospect; offscreen arrow included.
+	_draw_waypoint(origin, current_prospect_mark(), "x", "z",
+		Color(0.95, 0.62, 0.21))
 
 	# Local survivor always stays in the center of a player-following radar.
 	var yaw_value: float = current_yaw()

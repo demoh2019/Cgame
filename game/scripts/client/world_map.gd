@@ -3,7 +3,8 @@ extends Control
 ## north-west, contour lines, an inked coast with shallow water and ripple lines, paper grain and a vignette. Settlements and
 ## sites are badges with a silhouette glyph; names are placed greedily so they never overlap, with a paper-coloured halo.
 ## Dashed danger rings, cased roads, a compass rose, a scale bar and a pulsing player arrow. The wheel zooms toward the
-## cursor, dragging pans, Space centres on you. The picture is charted a few rows per frame the first time it opens.
+## cursor, dragging pans, Space centres on you. A click sets a private waypoint (Shift+click pings the party, right click
+## clears it), and the expedition atlas lists this player's goals: clicking one follows it, even as it moves. The picture is charted a few rows per frame the first time it opens.
 ## Techniques: ArcGIS hillshade (zenith 45°, azimuth 315°), cartographic label hierarchy (Axis Maps, Ordnance Survey),
 ## greedy candidate-position label placement.
 
@@ -12,6 +13,10 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
+const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
+const ExpeditionAtlas = preload("res://scripts/shared/expedition_atlas.gd")
+
+signal personal_waypoint_changed(point: Vector2)
 
 const PIXELS := 384
 const SPAN := WorldGen.WORLD_RADIUS * 2.0 + 200.0
@@ -59,6 +64,10 @@ var _dragging := false
 var _pulse := 0.0
 var _place_font: Font
 var _title_font: Font
+var waypoint: Vector2 = Vector2(INF, INF)
+var followed_objective: String = "" # Empty means manually placed private pin.
+var _objective_hitboxes: Array[Dictionary] = []
+var _press_at := Vector2(INF, INF) # Where the left button went down, to tell a click from a drag.
 
 
 func setup(p_client) -> void:
@@ -96,9 +105,111 @@ func toggle() -> void:
 		grab_focus()
 
 
+# --- Waypoints and the expedition atlas (private to this client: no RPC, no location leak) ----------------------
+
+## Available goals are derived solely from the authenticated local snapshot.
+func current_objectives() -> Array[Dictionary]:
+	if client == null:
+		return []
+	return ExpeditionAtlas.objectives(client.you)
+
+
+## Clicking a goal selects an ordinary private waypoint; there is no RPC.
+## Unlike a manual marker, a followed goal can move or expire.
+func select_objective(key: String) -> bool:
+	var info: Dictionary = ExpeditionAtlas.find(current_objectives(), key)
+	if info.is_empty():
+		return false
+	var point := Vector2(float(info["x"]), float(info["z"]))
+	if not set_waypoint(point):
+		return false
+	followed_objective = key
+	return true
+
+
+func _sync_followed_objective() -> void:
+	if followed_objective.is_empty():
+		return
+	var info: Dictionary = ExpeditionAtlas.find(current_objectives(), followed_objective)
+	if info.is_empty():
+		clear_waypoint()
+		return
+	var point := Vector2(float(info["x"]), float(info["z"]))
+	if not TravelNavigation.valid_destination(point, WorldGen.WORLD_RADIUS):
+		clear_waypoint()
+		return
+	if waypoint.distance_squared_to(point) > 0.01:
+		waypoint = point
+		personal_waypoint_changed.emit(waypoint)
+		queue_redraw()
+
+
+static func objective_color(key: String) -> Color:
+	match key:
+		"threat":
+			return Color(1.0, 0.32, 0.45)
+		"prospect":
+			return Color(0.95, 0.62, 0.21)
+		"ruin":
+			return Color(0.84, 0.38, 0.98)
+		"caravan":
+			return Color(0.28, 0.92, 0.92)
+		"escort":
+			return Color(0.71, 0.51, 1.0)
+		"rally":
+			return Color(1.0, 0.60, 0.22)
+		_:
+			return Color(0.20, 0.95, 0.90)
+
+
+## Player-owned navigation only. No RPC and no server-side location leak.
+func set_waypoint(point: Vector2) -> bool:
+	if not TravelNavigation.valid_destination(point, WorldGen.WORLD_RADIUS):
+		return false
+	followed_objective = ""
+	waypoint = point
+	personal_waypoint_changed.emit(waypoint)
+	queue_redraw()
+	return true
+
+
+func clear_waypoint() -> void:
+	followed_objective = ""
+	waypoint = Vector2(INF, INF)
+	personal_waypoint_changed.emit(waypoint)
+	queue_redraw()
+
+
+## A short left click (not a drag) on the chart: a goal marker follows that goal, anywhere else sets a waypoint, and with
+## Shift it pings the party instead (coordinates and party access are validated by the server).
+func _click(position: Vector2, shift: bool) -> void:
+	if not shift:
+		for row in _objective_hitboxes:
+			if (row["rect"] as Rect2).has_point(position):
+				select_objective(str(row["key"]))
+				return
+	if not _frame.has_point(position):
+		return
+	if not shift:
+		for objective in current_objectives():
+			if _to_screen(float(objective["x"]), float(objective["z"])).distance_squared_to(position) <= 12.0 * 12.0:
+				select_objective(str(objective["key"]))
+				return
+	var destination: Vector2 = _to_world(position)
+	if not TravelNavigation.valid_destination(destination, WorldGen.WORLD_RADIUS):
+		return
+	if shift:
+		if client != null:
+			client.party_ping(destination)
+	else:
+		set_waypoint(destination)
+
+
 # --- Charting the island --------------------------------------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	# A moving raid target keeps its radar route updated with the atlas CLOSED.
+	_sync_followed_objective()
 	if not visible:
 		return
 	_pulse = fmod(_pulse + delta / 1.2, 1.0)
@@ -222,9 +333,20 @@ func _gui_input(event: InputEvent) -> void:
 			_clamp_center()
 			accept_event()
 		elif button.button_index == MOUSE_BUTTON_LEFT:
-			_dragging = button.pressed
+			# Press and drag pans; a press released where it began is a click.
+			if button.pressed:
+				_press_at = button.position
+				_dragging = true
+			else:
+				_dragging = false
+				if _press_at.is_finite() and _press_at.distance_to(button.position) < 5.0:
+					_click(button.position, button.shift_pressed)
+				_press_at = Vector2(INF, INF)
 			accept_event()
-	elif event is InputEventMouseMotion and _dragging:
+		elif button.pressed and button.button_index == MOUSE_BUTTON_RIGHT:
+			clear_waypoint()
+			accept_event()
+	elif event is InputEventMouseMotion and _dragging and _press_at.distance_to((event as InputEventMouseMotion).position) >= 5.0:
 		_center -= (event as InputEventMouseMotion).relative / _scale()
 		_clamp_center()
 		accept_event()
@@ -255,6 +377,8 @@ func _draw() -> void:
 	for discovered_id in client.you.get("discovered_site_ids", []):
 		visited[int(discovered_id)] = true
 	_draw_sites_and_labels(visited, font)
+	var objectives: Array[Dictionary] = current_objectives()
+	_draw_navigation(objectives, font)
 	_draw_player()
 	# Mask everything that spilled over the edge of the chart, then the frame, vignette and furniture.
 	var dark := Color(0.07, 0.06, 0.05, 1.0)
@@ -268,11 +392,94 @@ func _draw() -> void:
 	_draw_compass(_frame.position + Vector2(_frame.size.x - 52.0, 52.0))
 	_draw_scale_bar(Vector2(_frame.position.x + 18.0, _frame.end.y - 22.0), font)
 	_draw_legend(visited, font)
+	_draw_atlas(objectives, font, view)
 	if _painted_rows < PIXELS:
 		var progress: float = (float(_sampled_rows) + float(_painted_rows)) / float(PIXELS * 2)
 		_halo_text(font, _frame.get_center() + Vector2(-90, 0), "Charting the island... %d%%" % int(progress * 100.0), 16, INK, PAPER)
 	if not _hover.is_empty():
 		_draw_tooltip(visited, font)
+
+
+## The private waypoint with its line from you, the party ping, and this player's expedition goals.
+func _draw_navigation(objectives: Array[Dictionary], font: Font) -> void:
+	if waypoint.is_finite():
+		var pin: Vector2 = _to_screen(waypoint.x, waypoint.y)
+		if client.you.has("x") and client.you.has("z"):
+			var from: Vector2 = _to_screen(float(client.you["x"]), float(client.you["z"]))
+			var length: float = from.distance_to(pin)
+			var steps: int = int(length / 10.0)
+			for i in steps:
+				if i % 2 == 0:
+					draw_line(from.lerp(pin, float(i) / float(steps)), from.lerp(pin, float(i + 1) / float(steps)), Color("#8a3a2a", 0.85), 2.0, true)
+		# A red "X marks the spot" on the chart.
+		draw_circle(pin, 10.0, Color(PAPER.r, PAPER.g, PAPER.b, 0.7))
+		draw_line(pin + Vector2(-6, -6), pin + Vector2(6, 6), Color("#8a3a2a"), 3.0, true)
+		draw_line(pin + Vector2(-6, 6), pin + Vector2(6, -6), Color("#8a3a2a"), 3.0, true)
+		_halo_text(_place_font, pin + Vector2(12, 4), "Waypoint", 13, Color("#8a3a2a"), PAPER)
+	var squad_ping: Dictionary = client.you.get("party", {}).get("ping", {})
+	if not squad_ping.is_empty():
+		var target := Vector2(float(squad_ping.get("x", INF)), float(squad_ping.get("z", INF)))
+		if TravelNavigation.valid_destination(target, WorldGen.WORLD_RADIUS):
+			var marker: Vector2 = _to_screen(target.x, target.y)
+			var hue := Color(0.15, 0.7, 0.68)
+			draw_circle(marker, 11.0, Color("#1e1a14"))
+			draw_colored_polygon(PackedVector2Array([marker + Vector2(0, -9), marker + Vector2(9, 0), marker + Vector2(0, 9), marker + Vector2(-9, 0)]), hue)
+			_halo_text(font, marker + Vector2(14, 4), "Party ping #%d  (%ds)" % [int(squad_ping.get("by", 0)), ceili(float(squad_ping.get("remaining", 0.0)))], 12, Color("#0f4f4c"), PAPER)
+	for objective in objectives:
+		var point: Vector2 = _to_screen(float(objective["x"]), float(objective["z"]))
+		var color: Color = objective_color(str(objective["key"]))
+		draw_circle(point, 9.5, Color("#1e1a14"))
+		draw_arc(point, 7.0, 0.0, TAU, 24, color, 2.4, true)
+		draw_circle(point, 2.8, color)
+		if str(objective["key"]) == followed_objective:
+			draw_arc(point, lerpf(11.0, 18.0, _pulse), 0.0, TAU, 24, Color(1, 1, 1, 0.8 * (1.0 - _pulse)), 1.6, true)
+
+
+## The expedition atlas: this player's goals as clickable rows, and how far the waypoint is.
+func _draw_atlas(objectives: Array[Dictionary], font: Font, view: Vector2) -> void:
+	_objective_hitboxes.clear()
+	var top: float = 76.0 + 46.0 + float(KIND_COLORS.size()) * 24.0 + 92.0 + 16.0
+	var rows: int = maxi(objectives.size(), 1)
+	var panel := Rect2(Vector2(24, top), Vector2(200, 34.0 + float(rows) * 30.0))
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color("#15130f", 0.9)
+	style.set_corner_radius_all(6)
+	style.set_border_width_all(1)
+	style.border_color = Color("#6b5a3a")
+	style.shadow_color = Color(0, 0, 0, 0.45)
+	style.shadow_size = 8
+	draw_style_box(style, panel)
+	draw_string(font, Vector2(panel.position.x + 14, top + 22), "EXPEDITION ATLAS", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#c9a45c"))
+	var y: float = top + 32.0
+	for objective in objectives:
+		var row_rect := Rect2(Vector2(panel.position.x + 6, y), Vector2(panel.size.x - 12, 26.0))
+		var chosen: bool = str(objective["key"]) == followed_objective
+		var row := StyleBoxFlat.new()
+		row.bg_color = Color("#3a2f1e", 0.95) if chosen else Color("#201c15", 0.9)
+		row.set_corner_radius_all(4)
+		if chosen:
+			row.set_border_width_all(1)
+			row.border_color = Color("#c9a45c")
+		draw_style_box(row, row_rect)
+		draw_circle(row_rect.position + Vector2(13.0, 13.0), 5.0, objective_color(str(objective["key"])))
+		draw_string(font, row_rect.position + Vector2(25.0, 18.0), str(objective["label"]), HORIZONTAL_ALIGNMENT_LEFT, row_rect.size.x - 30.0, 12,
+			Color.WHITE if chosen else Color(0.88, 0.86, 0.8))
+		_objective_hitboxes.append({"rect": row_rect, "key": str(objective["key"])})
+		y += 30.0
+	if objectives.is_empty():
+		draw_string(font, Vector2(panel.position.x + 14, y + 16.0), "No active expedition goals", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.68, 0.62))
+	var hint := "Click: waypoint   Shift+click: party ping   Right click: clear   Click a goal: follow it"
+	if waypoint.is_finite() and client.you.has("x") and client.you.has("z"):
+		var from_here := Vector2(float(client.you["x"]), float(client.you["z"]))
+		var distance := TravelNavigation.distance_meters(from_here, waypoint)
+		var bearing := TravelNavigation.compass(from_here, waypoint)
+		hint = "Waypoint: %d m %s   (Shift+click: party ping   Right click: clear)" % [distance, bearing]
+		if not followed_objective.is_empty():
+			var tracked: Dictionary = ExpeditionAtlas.find(objectives, followed_objective)
+			if not tracked.is_empty():
+				hint = "Following %s: %d m %s   (Right click: clear)" % [str(tracked["label"]), distance, bearing]
+	var width: float = font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	_halo_text(font, Vector2(_frame.get_center().x - width * 0.5, view.y - 16.0), hint, 14, Color("#e8c46a"), Color(0.07, 0.06, 0.05), 4)
 
 
 func _draw_vignette() -> void:

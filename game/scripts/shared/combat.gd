@@ -4,6 +4,8 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
+const FinishingStrike = preload("res://scripts/shared/finishing_strike.gd")
+const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 
 
 ## Damage after the target's armour. `armor_id` may be empty.
@@ -101,6 +103,19 @@ static func active_skill(weapon_id: String) -> Dictionary:
 		return {"id": "cleaving_arc", "energy_cost": 28.0, "cooldown": 7.0,
 			"attack_lock": 1.0, "range": Defs.MELEE_RANGE + 0.8,
 			"cleave_targets": 3, "damage": weapon_damage(weapon_id) * 1.35,
+			"ranged": false}
+	if weapon_id.begins_with("sunder_axe_") and str(info.get("weapon", "")) == "melee":
+		return {"id": "sundering_chop", "energy_cost": 34.0,
+			"cooldown": 9.0, "attack_lock": 1.05,
+			"range": Defs.MELEE_RANGE + 0.45,
+			"damage": weapon_damage(weapon_id) * 1.25,
+			"sunder_seconds": SunderMark.DURATION, "ranged": false}
+	if weapon_id.begins_with("dagger_") and str(info.get("weapon", "")) == "melee":
+		return {"id": "finishing_strike", "energy_cost": 30.0,
+			"cooldown": 6.5, "attack_lock": 0.85,
+			"range": Defs.MELEE_RANGE + 0.25,
+			"damage": weapon_damage(weapon_id) * 1.4,
+			"execute_threshold": FinishingStrike.THRESHOLD,
 			"ranged": false}
 	if weapon_id.begins_with("sledgehammer_") and str(info.get("weapon", "")) == "melee":
 		return {"id": "concussive_blow", "energy_cost": 35.0, "cooldown": 9.0,

@@ -7,6 +7,10 @@ const MAX_WARNING_SECONDS := 5.0
 
 var remaining_seconds: float = 0.0
 var encounter_id: int = -1
+var interrupt_damage: int = 0
+var interrupt_required: int = 0
+var interrupt_attackers: int = 0
+var interrupt_required_attackers: int = 0
 var _disk: MeshInstance3D
 var _material: StandardMaterial3D
 var _caption: Label3D
@@ -49,7 +53,7 @@ static func _valid_number(value: Variant) -> bool:
 ## Terminal event IDs must match; stale events cannot erase a newer warning.
 func consume(event: Dictionary, world) -> bool:
 	var kind: String = str(event.get("type", ""))
-	if kind in ["raid_slam", "raid_defeated", "raid_expired"]:
+	if kind in ["raid_slam", "raid_interrupted", "raid_defeated", "raid_expired"]:
 		if encounter_id > 0 and int(event.get("id", -1)) == encounter_id:
 			clear()
 			return true
@@ -75,15 +79,62 @@ func consume(event: Dictionary, world) -> bool:
 	position = Vector3(x, y + 0.16, z)
 	remaining_seconds = seconds
 	encounter_id = raid_id
-	_caption.text = "DANGER  %.1fs" % remaining_seconds
+	interrupt_damage = 0
+	interrupt_required = 0
+	interrupt_attackers = 0
+	interrupt_required_attackers = 0
+	_refresh_caption()
 	visible = true
 	set_process(true)
 	return true
 
 
+## Consumes only the sanitized party-only fields from a server snapshot.
+## A wrong encounter or malformed tally cannot replace a valid display.
+func update_interrupt(progress: Dictionary) -> bool:
+	if not visible:
+		return false
+	if progress.is_empty():
+		interrupt_damage = 0
+		interrupt_required = 0
+		interrupt_attackers = 0
+		interrupt_required_attackers = 0
+		_refresh_caption()
+		return true
+	for key in ["id", "damage", "required", "attackers", "required_attackers"]:
+		if not progress.get(key, null) is int:
+			return false
+	var required: int = int(progress["required"])
+	var attackers: int = int(progress["attackers"])
+	var needed: int = int(progress["required_attackers"])
+	var damage: int = int(progress["damage"])
+	if int(progress["id"]) != encounter_id or required <= 0 or required > 1000 or \
+			needed < 2 or needed > 8 or attackers < 0 or attackers > 8 or \
+			damage < 0 or damage > required:
+		return false
+	interrupt_damage = damage
+	interrupt_required = required
+	interrupt_attackers = attackers
+	interrupt_required_attackers = needed
+	_refresh_caption()
+	return true
+
+
+func _refresh_caption() -> void:
+	_caption.text = "DANGER  %.1fs" % remaining_seconds
+	if interrupt_required > 0:
+		_caption.text += "\nBREAK %d/%d  ALLIES %d/%d" % [
+			interrupt_damage, interrupt_required,
+			interrupt_attackers, interrupt_required_attackers]
+
+
 func clear() -> void:
 	remaining_seconds = 0.0
 	encounter_id = -1
+	interrupt_damage = 0
+	interrupt_required = 0
+	interrupt_attackers = 0
+	interrupt_required_attackers = 0
 	visible = false
 	set_process(false)
 
@@ -95,5 +146,5 @@ func _process(delta: float) -> void:
 	if remaining_seconds <= 0.0:
 		clear()
 		return
-	_caption.text = "DANGER  %.1fs" % remaining_seconds
+	_refresh_caption()
 	_material.albedo_color.a = 0.28 + 0.19 * absf(sin(remaining_seconds * 9.0))

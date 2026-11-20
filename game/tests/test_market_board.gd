@@ -32,11 +32,20 @@ func run(t) -> void:
 	var paid := MarketBoard.purchase(buyer_inv, seller_inv, advert, 3)
 	t.check(paid["ok"], "atomic purchase succeeds")
 	t.eq(seller_inv.count("wood_1"), 7, "seller gives 3 wood")
-	t.eq(seller_inv.count("silver"), 21, "seller earns 21 silver")
+	t.eq(seller_inv.count("silver"), 20, "seller receives 20 after 1 silver tax")
 	t.eq(buyer_inv.count("wood_1"), 3, "buyer gets 3 wood")
 	t.eq(buyer_inv.count("silver"), 79, "buyer pays 21 silver")
 	t.eq(seller_inv.count("wood_1") + buyer_inv.count("wood_1"), 10, "wood conserved")
-	t.eq(seller_inv.count("silver") + buyer_inv.count("silver"), 100, "currency conserved")
+	t.eq(seller_inv.count("silver") + buyer_inv.count("silver"), 99,
+		"one market-tax silver is removed from circulation")
+	t.eq(paid["total"], 21, "buyer pays advertised gross amount")
+	t.eq(paid["tax"], 1, "commission rounds up to one silver")
+	t.eq(paid["seller_net"], 20, "seller receives gross less commission")
+	t.eq(MarketBoard.sale_tax(1), 0, "a one-silver trade still pays its seller")
+	t.eq(MarketBoard.sale_tax(2), 1, "minimum seller income is one silver")
+	t.eq(MarketBoard.sale_tax(33), 1, "tax rounds upward at three percent")
+	t.eq(MarketBoard.sale_tax(34), 2, "tax jumps only at correct boundary")
+	t.eq(MarketBoard.sale_tax(100), 3, "full percentage applied to larger trades")
 	var initial_a: Dictionary = seller_inv.to_dict()
 	var initial_b: Dictionary = buyer_inv.to_dict()
 	t.eq(MarketBoard.purchase(buyer_inv, seller_inv, advert, 8)["reason"], "missing_items",
@@ -51,6 +60,28 @@ func run(t) -> void:
 	t.eq(tiny_buyer.to_dict(), initial_b, "no silver deducted on full backpack")
 	t.eq(MarketBoard.purchase(seller_inv, seller_inv, advert, 1)["reason"], "self_purchase",
 		"self-purchase cannot manufacture currency")
+
+	t.current = "seller silver capacity and tax transaction rollback"
+	var full_seller := Inventory.new(2)
+	var modest_buyer := Inventory.new(2)
+	full_seller.add("wood_1", 1)
+	full_seller.add("silver", 99999)
+	modest_buyer.add("silver", 2)
+	var low_order: Dictionary = {"item": "wood_1", "price": 2, "remaining": 1}
+	t.check(MarketBoard.purchase(modest_buyer, full_seller, low_order, 1)["ok"],
+		"net settlement fits even when gross sale would overflow the seller's silver stack")
+	t.eq(full_seller.count("silver"), 100000, "seller receives net 1 silver at the cap")
+	t.eq(modest_buyer.count("silver"), 0, "buyer still pays full gross 2 silver")
+	t.eq(modest_buyer.count("wood_1"), 1, "buyer receives item exactly once")
+	full_seller.add("wood_1", 1)
+	modest_buyer.add("silver", 3)
+	var seller_before: Dictionary = full_seller.to_dict()
+	var buyer_before: Dictionary = modest_buyer.to_dict()
+	low_order["price"] = 3
+	t.eq(MarketBoard.purchase(modest_buyer, full_seller, low_order, 1)["reason"],
+		"no_space", "sale rejected when net proceeds would overflow seller's stack")
+	t.eq(full_seller.to_dict(), seller_before, "seller is unchanged after failed net settlement")
+	t.eq(modest_buyer.to_dict(), buyer_before, "buyer is unchanged after failed net settlement")
 
 	t.current = "server board, partial fills and replay"
 	var server := GameServer.new(WorldGen.new(17), 9)
@@ -87,9 +118,14 @@ func run(t) -> void:
 	t.eq(server.market_orders[listing_id]["remaining"], 6, "six units remain listed")
 	t.eq(seller.inventory.count("wood_1"), 8, "seller debited four units")
 	t.eq(buyer.inventory.count("wood_1"), 4, "buyer owns four units")
-	t.eq(seller.inventory.count("silver"), 20, "seller paid once")
+	t.eq(seller.inventory.count("silver"), 19, "seller paid once after tax")
 	t.eq(buyer.inventory.count("silver"), 80, "buyer spent twenty")
 	t.eq(server.market_sales.size(), 1, "one receipt in bounded session audit")
+	t.eq(first_sale["total"], 20, "buyer sees the agreed gross total")
+	t.eq(first_sale["tax"], 1, "receipt discloses charged seller commission")
+	t.eq(first_sale["seller_net"], 19, "receipt discloses net seller payout")
+	t.eq(server.market_sales[0]["tax"], 1, "market session audit records tax once")
+	t.eq(server.market_sales[0]["seller_net"], 19, "audit records net payout")
 	t.eq(server.cmd_market_buy(200, listing_id, 7, 2)["reason"], "invalid_quantity",
 		"cannot exceed remaining listing amount")
 	t.eq(server.cmd_market_buy(200, listing_id, 7, 2)["reason"], "invalid_quantity",
@@ -103,8 +139,12 @@ func run(t) -> void:
 	t.check(not server.market_orders.has(listing_id), "filled listing is removed")
 	t.eq(server.cmd_market_buy(200, listing_id, 1, 4)["reason"], "unknown_listing",
 		"replayed purchase cannot double-award items")
-	t.eq(seller.inventory.count("silver"), 50, "seller receives 50 silver total")
+	t.eq(seller.inventory.count("silver"), 48, "seller receives 48 after two market sales taxes")
 	t.eq(buyer.inventory.count("wood_1"), 10, "buyer gets 10 wood total")
+	t.eq(server.market_sales[1]["tax"], 1, "second partial fill is independently taxed")
+	t.eq(server.market_sales[1]["seller_net"], 29, "second sale pays 29 silver net")
+	t.eq(seller.inventory.count("silver") + buyer.inventory.count("silver"), 98,
+		"exactly 2 silver was burned across both market fills")
 	t.check(seller.dirty_inventory and buyer.dirty_inventory, "both inventories marked dirty")
 	t.check(seller.dirty_character and buyer.dirty_character, "both saves marked dirty")
 
@@ -146,3 +186,83 @@ func run(t) -> void:
 	safe_seller.survival.hurt(10000.0)
 	server._on_player_death(safe_seller, 200)
 	t.check(not server.market_orders.has(int(dying["id"])), "death cancels advertised stock")
+
+	t.current = "non-escrow listing budgets and lowest-price-first browsing"
+	var order_book: Dictionary = {
+		10: {"seller": 1, "item": "wood_1", "remaining": 7},
+		11: {"seller": 1, "item": "wood_1", "remaining": 3},
+		12: {"seller": 2, "item": "wood_1", "remaining": 4},
+		13: {"seller": 1, "item": "stone_1", "remaining": 2},
+	}
+	var sample_pack := Inventory.new()
+	sample_pack.add("wood_1", 11)
+	t.eq(MarketBoard.listed_quantity(order_book, 1, "wood_1"), 10,
+		"same seller's live order quantities are added across listings")
+	t.eq(MarketBoard.unlisted_stock(sample_pack, order_book, 1, "wood_1"), 1,
+		"only remaining carried goods are available for a new listing")
+	t.eq(MarketBoard.listed_quantity(order_book, 2, "wood_1"), 4,
+		"another seller's advertised stock stays independent")
+	t.eq(MarketBoard.listed_quantity(order_book, 1, "stone_1"), 2,
+		"different resources do not compete for listing capacity")
+	t.eq(MarketBoard.unlisted_stock(sample_pack, order_book, 1, "stone_1"), 0,
+		"advertised quantity never yields negative available inventory")
+	t.check(MarketBoard.cheaper_first(
+		{"item": "wood_1", "price": 5, "id": 2},
+		{"item": "wood_1", "price": 7, "id": 3}), "cheaper wood comes first")
+	t.check(MarketBoard.cheaper_first(
+		{"item": "wood_1", "price": 5, "id": 2},
+		{"item": "wood_1", "price": 5, "id": 3}), "same-price orders keep older ID first")
+	t.check(MarketBoard.cheaper_first(
+		{"item": "stone_1", "price": 99, "id": 7},
+		{"item": "wood_1", "price": 1, "id": 1}), "market groups by item before price")
+
+	t.current = "authoritative double-listing protection, partial fills and stale stock"
+	var depth := GameServer.new(WorldGen.new(39), 39)
+	var maker = depth.add_player(701, "Maker")
+	var rival = depth.add_player(702, "Rival")
+	var taker = depth.add_player(703, "Taker")
+	_hub(depth, maker)
+	_hub(depth, rival)
+	_hub(depth, taker)
+	maker.inventory.add("wood_1", 10)
+	rival.inventory.add("wood_1", 3)
+	taker.inventory.add("silver", 1000)
+	var expensive: Dictionary = depth.cmd_market_create(701, "wood_1", 7, 20)
+	t.check(bool(expensive.get("ok", false)), "first seven-unit advert is posted")
+	var old_id: int = int(expensive.get("id", -1))
+	var rejected: Dictionary = depth.cmd_market_create(701, "wood_1", 4, 15)
+	t.eq(rejected.get("reason", ""), "already_listed",
+		"seller cannot advertise eleven items while carrying ten")
+	t.eq(rejected.get("available", -1), 3, "server reports exactly three unlisted units")
+	t.eq(depth.market_orders.size(), 1, "rejected advert is never published")
+	var cheap: Dictionary = depth.cmd_market_create(701, "wood_1", 3, 15)
+	var bargain: Dictionary = depth.cmd_market_create(702, "wood_1", 3, 5)
+	t.check(cheap.get("ok", false) and bargain.get("ok", false),
+		"remaining stock and another seller may both be listed")
+	t.eq(maker.inventory.count("wood_1"), 10, "posting does not remove actual items")
+	var browsing: Array = depth.cmd_market_list(703)["orders"]
+	t.eq(browsing.size(), 3, "all three backed listings are visible")
+	if browsing.size() == 3:
+		t.eq([browsing[0]["id"], browsing[1]["id"], browsing[2]["id"]],
+			[bargain["id"], cheap["id"], expensive["id"]],
+			"same-item offers sort by lowest price, not by creation order")
+	var sale: Dictionary = depth.cmd_market_buy(703, old_id, 4, 1)
+	t.check(sale.get("ok", false), "real partial fill settles normally")
+	t.eq(maker.inventory.count("wood_1"), 6, "four listed items are transferred")
+	t.eq(MarketBoard.listed_quantity(depth.market_orders, 701, "wood_1"), 6,
+		"remaining advertised quantities decrease with actual stock")
+	t.eq(depth.cmd_market_create(701, "wood_1", 1, 10).get("reason", ""), "already_listed",
+		"a partial fill does not reopen budget that was actually sold")
+	t.eq(depth.cmd_market_buy(703, old_id, 4, 1), sale,
+		"replayed purchase cannot release extra listing budget")
+	maker.inventory.remove("wood_1", 1)
+	var after_spending: Array = depth.cmd_market_list(703)["orders"]
+	t.eq(after_spending.size(), 2, "refresh automatically removes now-unbacked advert")
+	t.check(depth.market_orders.has(old_id), "oldest listing remains active first")
+	t.check(not depth.market_orders.has(int(cheap["id"])),
+		"newer competing listing is removed when merchant spends promised stock")
+	t.eq(depth.cmd_market_create(701, "wood_1", 2, 8).get("ok", false), true,
+		"seller can re-advertise stock left after deterministic pruning")
+	t.eq(depth.cmd_market_create(701, "wood_1", 1, 8).get("reason", ""), "already_listed",
+		"remaining stock cannot be promised a third time")
+	t.eq(rival.inventory.count("wood_1"), 3, "another seller's items remain untouched")

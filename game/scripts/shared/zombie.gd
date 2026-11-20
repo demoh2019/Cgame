@@ -8,6 +8,8 @@ const Threat = preload("res://scripts/shared/threat.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const WindHearing = preload("res://scripts/shared/wind_hearing.gd")
+const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -38,6 +40,7 @@ var spit_center: Vector2 = Vector2.ZERO
 var stuck_time: float = 0.0
 var snared_seconds: float = 0.0 # Server-owned root; movement-only, not attack immunity.
 var stagger_seconds: float = 0.0 # Short PvE-only incapacitation from a confirmed heavy blow.
+var sunder_until: float = 0.0 # Server-time expiry of PvE armor weakness.
 var contributors: Dictionary = {} # Server: peer -> time + equipped weapon for PvE assist XP.
 var data: Dictionary
 var threat: Dictionary = {} # Bounded per-zombie server combat threat; not sent to clients.
@@ -223,7 +226,12 @@ func _select_target(players: Dictionary, here: Vector2) -> void:
 			weather_cover = clampf(weather_raw, Weather.STORM_SIGHT_MULTIPLIER, 1.0)
 		var notice := minf(float(data["notice"]) * sight_multiplier * visual * weather_cover,
 			float(data["lose"]) - 1.0)
-		var hearing := clampf(float(info.get("noise", 0.0)), 0.0, float(data["lose"]) - 1.0)
+		# Server-provided wind shifts only first passive sound acquisition.
+		# Damage threat, taunts, sight and blood scent retain their own rules.
+		var local_wind: Variant = info.get("wind", Vector2.ZERO)
+		var wind: Vector2 = local_wind if local_wind is Vector2 else Vector2.ZERO
+		var hearing: float = WindHearing.radius(float(info.get("noise", 0.0)),
+			wind, Vector2(p.x, p.z), here, float(data["lose"]) - 1.0)
 		# Scent can improve discovery but never expands the pursuit leash,
 		# overrides combat threat or bypasses safe/dead player protections.
 		var scent_raw: float = float(info.get("scent", 0.0))
@@ -344,6 +352,15 @@ func apply_knockback(world, attacker_position: Vector3, meters: float) -> float:
 	return displacement
 
 
+## Debuff from an actual server-resolved axe hit. Refreshing cannot stack
+## magnitude or extend beyond a single duration from this point in time.
+func apply_sunder(now: float, seconds: float) -> bool:
+	if not is_alive() or not is_finite(now) or now < 0.0 or 			not is_finite(seconds) or seconds <= 0.0 or seconds > SunderMark.DURATION:
+		return false
+	sunder_until = maxf(sunder_until, now + seconds)
+	return true
+
+
 ## Server-only trap application; cannot target a boss or expired/dead zombie.
 func apply_snare(seconds: float) -> bool:
 	if not is_alive() or raid_boss or not is_finite(seconds) or seconds <= 0.0 or seconds > 3.0:
@@ -365,6 +382,7 @@ func take_damage(amount: float, attacker_id: int = -1) -> bool:
 		spit_pending = false
 		spit_seconds = 0.0
 		stagger_seconds = 0.0
+		sunder_until = 0.0
 		threat.clear()
 		return true
 	if state == State.IDLE or state == State.WANDER:

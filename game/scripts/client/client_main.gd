@@ -5,6 +5,7 @@ extends Node3D
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
+const EmberFlask = preload("res://scripts/shared/ember_flask.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
@@ -23,14 +24,19 @@ const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
+const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const WindChill = preload("res://scripts/shared/wind_chill.gd")
+const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
+const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
+const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const LOCAL_PLAYER_ID := 2
 const TERRAIN_STEP := 8.0
 
@@ -47,6 +53,7 @@ var _world_environment: Environment
 var _avatar: MeshInstance3D
 var _bike_visual
 var _flare_visual
+var _lightning_visual
 var _last_bike_position: Vector3 = Vector3.INF
 var _stats: Label
 var _instructions: Label
@@ -63,10 +70,12 @@ var _crate_meshes: Dictionary = {}
 var _zombie_meshes: Dictionary = {}
 var _spit_warning_meshes: Dictionary = {}
 var _acid_pool_meshes: Dictionary = {}
+var _ember_pool_meshes: Dictionary = {}
 var _barricade_bodies: Dictionary = {}
 var _campfire_visuals: Dictionary = {}
 var _shelter_visuals: Dictionary = {}
 var _decoy_visuals: Dictionary = {}
+var _fish_trap_visuals: Dictionary = {}
 var _smoke_visuals: Dictionary = {}
 var _materials: Dictionary = {}
 var _last_center: Vector2i = Vector2i(999999, 999999)
@@ -83,6 +92,9 @@ func _ready() -> void:
 	for recipe_id in recipe_ids:
 		_recipes.append(str(recipe_id))
 	_make_light_and_camera()
+	_lightning_visual = LightningVisual.new()
+	_lightning_visual.name = "StormLightningWarning"
+	add_child(_lightning_visual)
 	_make_avatar()
 	_make_workbench()
 	_make_bank_landmark()
@@ -100,13 +112,15 @@ func _setup_actions() -> void:
 	_bind_key("survive_crouch", KEY_CTRL)
 	_bind_key("survive_gather", KEY_E)
 	_bind_key("survive_fish", KEY_T)
+	_bind_key("survive_place_fish_trap", KEY_F10)
+	_bind_key("survive_collect_fish_trap", KEY_F12)
 	_bind_key("survive_loot", KEY_Q)
 	_bind_key("survive_attack", KEY_F)
 	_bind_key("survive_skill", KEY_G)
 	_bind_key("survive_dodge", KEY_SPACE)
 	_bind_key("survive_parry", KEY_F8)
-	_bind_key("survive_poultice", KEY_F9)
-	_bind_key("survive_flare", KEY_F10)
+	_bind_key("survive_poultice", KEY_F11)
+	_bind_key("survive_flare", KEY_F2)
 	_bind_key("survive_craft", KEY_C)
 	_bind_key("survive_quick_cook", KEY_0)
 	_bind_key("survive_next_recipe", KEY_TAB)
@@ -124,6 +138,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_shelter", KEY_F6)
 	_bind_key("survive_pack_shelter", KEY_F7)
 	_bind_key("survive_decoy", KEY_COMMA)
+	_bind_key("survive_ember", KEY_F5)
 	_bind_key("survive_smoke", KEY_F9)
 	_bind_key("survive_snare", KEY_BACKSLASH)
 	_bind_key("survive_stim", KEY_PERIOD)
@@ -138,6 +153,10 @@ func _setup_actions() -> void:
 	_bind_key("survive_vendor_sell", KEY_V)
 	_bind_key("survive_radar", KEY_M)
 	_bind_key("survive_mount", KEY_F4)
+	_bind_key("survive_bike_service", KEY_PAGEUP)
+	_bind_key("survive_whetstone", KEY_END)
+	_bind_key("survive_armor_plate", KEY_INSERT)
+	_bind_key("survive_bike_repair", KEY_PAGEDOWN)
 	_bind_key("survive_survey", KEY_F3)
 	_bind_key("survive_bank", KEY_B)
 	_bind_key("survive_bank_next", KEY_J)
@@ -464,6 +483,39 @@ func _sync_acid_pools() -> void:
 			_acid_pool_meshes.erase(id)
 
 
+## Local preview renders the same authoritative fields as online snapshots.
+func _sync_ember_pools() -> void:
+	var visible: Dictionary = {}
+	for field in sim.ember_pools.values():
+		if EmberFlask.remaining(field, sim.time) <= 0.0:
+			continue
+		var point := Vector2(float(field["x"]), float(field["z"]))
+		if point.distance_to(Vector2(survivor.position.x, survivor.position.z)) > 75.0:
+			continue
+		var id: int = int(field["id"])
+		visible[id] = true
+		if not _ember_pool_meshes.has(id):
+			var mesh := MeshInstance3D.new()
+			var disk := CylinderMesh.new()
+			disk.top_radius = EmberFlask.RADIUS
+			disk.bottom_radius = EmberFlask.RADIUS
+			disk.height = 0.06
+			mesh.mesh = disk
+			var mat := StandardMaterial3D.new()
+			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			mat.albedo_color = Color(1.0, 0.36, 0.07, 0.43)
+			mesh.material_override = mat
+			add_child(mesh)
+			_ember_pool_meshes[id] = mesh
+		_ember_pool_meshes[id].position = Vector3(
+			point.x, float(field["y"]) + 0.1, point.y)
+	for id in _ember_pool_meshes.keys():
+		if not visible.has(id):
+			_ember_pool_meshes[id].queue_free()
+			_ember_pool_meshes.erase(id)
+
+
 func _sync_barricades() -> void:
 	var active: Dictionary = {}
 	for id in sim.barricades:
@@ -593,6 +645,32 @@ func _sync_smoke() -> void:
 			_smoke_visuals.erase(id)
 
 
+func _sync_fish_traps() -> void:
+	var seen: Dictionary = {}
+	for id in sim.fish_traps:
+		var trap: Dictionary = sim.fish_traps[id]
+		var position := Vector3(float(trap["x"]), float(trap["y"]), float(trap["z"]))
+		if survivor.position.distance_to(position) > 95.0:
+			continue
+		seen[id] = true
+		if not _fish_trap_visuals.has(id):
+			var node := Node3D.new()
+			node.name = "FishTrap_%d" % int(id)
+			var buoy := _mesh(Vector3(0.9, 0.22, 0.9), Color(0.83, 0.51, 0.19))
+			buoy.position.y = 0.12
+			node.add_child(buoy)
+			var net := _mesh(Vector3(1.2, 0.08, 1.2), Color(0.30, 0.38, 0.27))
+			net.position.y = 0.02
+			node.add_child(net)
+			add_child(node)
+			_fish_trap_visuals[id] = node
+		_fish_trap_visuals[id].position = position
+	for id in _fish_trap_visuals.keys():
+		if not seen.has(id):
+			_fish_trap_visuals[id].queue_free()
+			_fish_trap_visuals.erase(id)
+
+
 func _sync_decoys() -> void:
 	var visible: Dictionary = {}
 	for id in sim.decoys:
@@ -657,6 +735,7 @@ func _physics_process(delta: float) -> void:
 		_last_siege_notification = sim.siege_waves_started
 		_feedback = "Night siege! Infected are approaching a nearby barricade."
 	_update_world_light()
+	_lightning_visual.set_warning(sim.lightning_pending)
 	var movement := Input.get_vector("survive_left", "survive_right", "survive_up", "survive_down")
 	if movement.length_squared() > 0.001:
 		_facing = movement.normalized()
@@ -673,6 +752,8 @@ func _physics_process(delta: float) -> void:
 			survivor.position.z - _last_bike_position.z).length() / delta
 	_last_bike_position = survivor.position
 	_bike_visual.set_panniers(survivor.inventory.count("bike_panniers") > 0)
+	_bike_visual.set_lamp(survivor.mounted and survivor.survival.alive and
+		WorldCycle.is_night(sim.time) and survivor.inventory.count("bike_dynamo_lamp") > 0)
 	_bike_visual.set_riding(survivor.mounted and survivor.survival.alive, bike_speed, delta)
 	_flare_visual.set_burning(survivor.survival.alive and survivor.flare_seconds > 0.0)
 	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
@@ -688,10 +769,12 @@ func _physics_process(delta: float) -> void:
 	_sync_zombies()
 	_sync_spit_warnings()
 	_sync_acid_pools()
+	_sync_ember_pools()
 	_sync_barricades()
 	_sync_campfires()
 	_sync_shelters()
 	_sync_smoke()
+	_sync_fish_traps()
 	_sync_decoys()
 	_hud_clock += delta
 	if _hud_clock > 0.15:
@@ -867,6 +950,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
 	elif event.is_action_pressed("survive_mount"):
 		_result("Trail bike", sim.cmd_toggle_mount(LOCAL_PLAYER_ID))
+	elif event.is_action_pressed("survive_bike_service"):
+		_result("Drive service", sim.cmd_use(LOCAL_PLAYER_ID, "bike_service_kit"))
+	elif event.is_action_pressed("survive_whetstone"):
+		_result("Sharpen weapon", sim.cmd_use(LOCAL_PLAYER_ID, "field_whetstone"))
+	elif event.is_action_pressed("survive_armor_plate"):
+		_result("Fit armor plate", sim.cmd_use(LOCAL_PLAYER_ID, "field_armor_plate"))
+	elif event.is_action_pressed("survive_bike_repair"):
+		_result("Frame repair", sim.cmd_use(LOCAL_PLAYER_ID, "bike_frame_patch"))
 	elif event.is_action_pressed("survive_survey"):
 		var result: Dictionary = sim.cmd_survey_ruins(LOCAL_PLAYER_ID)
 		_result("Survey ruins", result)
@@ -881,7 +972,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		if bool(attack_result.get("ambush", false)):
 			_feedback = "Silent ambush: +45% damage against unaware infected"
 	elif event.is_action_pressed("survive_skill"):
-		_result("Weapon Skill", sim.cmd_skill(LOCAL_PLAYER_ID, _facing.x, _facing.y))
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Stagger finisher", sim.cmd_stagger_finisher(LOCAL_PLAYER_ID))
+		else:
+			_result("Weapon Skill", sim.cmd_skill(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_parry"):
 		_result("Parry", sim.cmd_parry(LOCAL_PLAYER_ID))
 	elif event.is_action_pressed("survive_dodge"):
@@ -914,7 +1008,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_armor"):
 		_result("Equip armor", sim.cmd_use(LOCAL_PLAYER_ID, "jacket_1"))
 	elif event.is_action_pressed("survive_antiseptic"):
-		_result("Clean wound", sim.cmd_use(LOCAL_PLAYER_ID, "field_antiseptic"))
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Coat melee weapon", sim.cmd_use(LOCAL_PLAYER_ID, "antiseptic_edge_oil"))
+		else:
+			_result("Clean wound", sim.cmd_use(LOCAL_PLAYER_ID, "field_antiseptic"))
 	elif event.is_action_pressed("survive_antibiotics"):
 		_result("Antibiotics", sim.cmd_use(LOCAL_PLAYER_ID, "antibiotics"))
 	elif event.is_action_pressed("survive_poultice"):
@@ -926,7 +1023,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_stim"):
 		_result("Frontier stim", sim.cmd_use(LOCAL_PLAYER_ID, "frontier_stim"))
 	elif event.is_action_pressed("survive_scent_mask"):
-		_result("Apply herbal scent salve", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_scent_mask"))
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Apply soft-sole wraps", sim.cmd_use(LOCAL_PLAYER_ID, "soft_sole_wraps"))
+		else:
+			_result("Apply herbal scent salve", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_scent_mask"))
 	elif event.is_action_pressed("survive_spore_filter"):
 		_result("Apply expedition spore filter", sim.cmd_use(LOCAL_PLAYER_ID, "spore_filter"))
 	elif event.is_action_pressed("survive_lake"):
@@ -955,6 +1055,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Smoke charge", sim.cmd_use(LOCAL_PLAYER_ID, FieldSmoke.ITEM_ID))
 	elif event.is_action_pressed("survive_decoy"):
 		_result("Throw noise decoy", sim.cmd_throw_decoy(LOCAL_PLAYER_ID, _facing.x, _facing.y))
+	elif event.is_action_pressed("survive_ember"):
+		_result("Throw ember flask", sim.cmd_throw_ember(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_snare"):
 		var site := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
 		_result("Place infected snare", sim.cmd_place_infected_snare(LOCAL_PLAYER_ID, site.x, site.y))
@@ -1004,6 +1106,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_result("Dismantle barricade", sim.cmd_dismantle(LOCAL_PLAYER_ID, wall_id))
 
+	elif event.is_action_pressed("survive_place_fish_trap"):
+		_result("Place fish trap", sim.cmd_place_fish_trap(LOCAL_PLAYER_ID))
+	elif event.is_action_pressed("survive_collect_fish_trap"):
+		var closest_id := -1
+		var best_distance := 4.5 * 4.5
+		for trap in sim.fish_traps.values():
+			var d2: float = Vector2(survivor.position.x, survivor.position.z).distance_squared_to(
+				Vector2(float(trap["x"]), float(trap["z"])))
+			if d2 <= best_distance:
+				closest_id = int(trap["id"])
+				best_distance = d2
+		if closest_id < 0:
+			_feedback = "No shoreline fish trap within reach."
+		else:
+			_result("Collect fish trap", sim.cmd_collect_fish_trap(LOCAL_PLAYER_ID, closest_id))
 	elif event.is_action_pressed("survive_fish"):
 		var storm_mode: bool = Input.is_key_pressed(KEY_ALT)
 		var wants_bait: bool = Input.is_key_pressed(KEY_SHIFT) and not storm_mode
@@ -1085,6 +1202,20 @@ func _update_hud() -> void:
 		weight, speed_pct, survivor.inventory.count("silver"),
 		Contracts.description(survivor.contract_state), ", ".join(rows)
 	]
+	if survivor.rested_xp_credit > 0:
+		_stats.text += "\nRESTED TRAINING: %d bonus XP left (Z to rest at camp)" % survivor.rested_xp_credit
+	if survivor.sharpened_hits > 0:
+		_stats.text += "\nSHARPENED: %d infected melee hits left (End)" % survivor.sharpened_hits
+	if survivor.plated_hits > 0:
+		_stats.text += "\nARMOR PLATE: %d infected claw hits left (Insert)" % survivor.plated_hits
+	if not sim.lightning_pending.is_empty():
+		var strike: Dictionary = sim.lightning_pending
+		var danger_at := Vector2(float(strike["x"]), float(strike["z"]))
+		var personal_distance: float = Vector2(position.x, position.z).distance_to(danger_at)
+		_stats.text += "\nLIGHTNING: %.1fs — %s" % [
+			maxf(0.0, float(strike["at"]) - sim.time),
+			"MOVE OR DODGE!" if personal_distance <= StormLightning.RADIUS else
+			("strike %dm away" % roundi(personal_distance))]
 	if not survivor.recall.is_empty():
 		_stats.text += "\nRETURN CHARM: %.1fs — stay still" % maxf(
 			0.0, float(survivor.recall["until"]) - sim.time)
@@ -1097,6 +1228,13 @@ func _update_hud() -> void:
 		_stats.text += "\nRUIN CHART: X:%d Z:%d | %dm | %ds (F3)" % [
 			roundi(dest.x), roundi(dest.y), roundi(Vector2(position.x, position.z).distance_to(dest)),
 			ceili(float(map_point["remaining"]))]
+	if RoadTravel.on_road(world, position):
+		_stats.text += "\nDIRT ROAD: +8%% foot pace; stable bicycle grip"
+	if survivor.inventory.count("salvage_bike") > 0:
+		_stats.text += "\nBIKE SERVICE: %.0f m (PgUp applies kit on foot)" % survivor.bike_service_meters
+		_stats.text += "\nBIKE FRAME: %.0f%% (PgDn to patch on foot)" % survivor.bike_integrity
+		if survivor.inventory.count("bike_dynamo_lamp") > 0:
+			_stats.text += "\nDYNAMO LAMP: lights road at night, reveals rider to infected"
 	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
 		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		survivor.mount_cooldown]
@@ -1120,7 +1258,19 @@ func _update_hud() -> void:
 			str(nearby_offer["name"]), str(nearby_offer["category"]),
 			int(nearby_offer["premium_percent"])]
 	if survivor.flare_seconds > 0.0:
-		_stats.text += "\nFLARE: %ds (F10) | infected notice up to 28m" % ceili(survivor.flare_seconds)
+		_stats.text += "\nFLARE: %ds (F2) | infected notice up to 28m" % ceili(survivor.flare_seconds)
+	_stats.text += "\nWET CLOTHING: %d%% | dry under shelter or beside a lit campfire" % roundi(survivor.survival.wetness)
+	if not sim.smoke_clouds.is_empty():
+		var smoke_wind: Vector2 = Weather.wind_at(world, position.x, position.z, sim.time)
+		_stats.text += "\nSMOKE WIND: %.1f m/s | smoke clouds drift with the wind" % smoke_wind.length()
+	for bag in sim.bags.values():
+		if not CorpseScent.active(bag, sim.time):
+			continue
+		var offset := Vector2(float(bag["x"]) - position.x,
+			float(bag["z"]) - position.z)
+		if offset.length_squared() <= CorpseScent.RADIUS * CorpseScent.RADIUS:
+			_stats.text += "\nFRESH CORPSE: blood attracts infected within 22 m"
+			break
 	var equipped_ammo: String = str(Defs.item(survivor.inventory.weapon).get("ammo", ""))
 	if not equipped_ammo.is_empty():
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [
@@ -1131,12 +1281,22 @@ func _update_hud() -> void:
 			survivor.meal_tier, survivor.meal_seconds,
 			HeartyMeal.stamina_per_second(survivor.meal_tier),
 			HeartyMeal.energy_per_second(survivor.meal_tier)]
+	if survivor.edge_coating_seconds > 0.0:
+		_stats.text += "\nANTISEPTIC EDGE %s: %.0fs | +20%% vs ordinary/elite infected" % [
+			survivor.edge_coating_weapon, survivor.edge_coating_seconds]
 	var local_armor: String = survivor.inventory.armor
 	if local_armor != "" and survivor.inventory.count(local_armor) <= 0:
 		local_armor = ""
 	_stats.text += "\nSTORM INSULATION %d%% | %s" % [
 		int(round(100.0 * Weather.protection(local_armor))),
 		str(Defs.item(local_armor).get("name", "No armor"))]
+	var gust: Dictionary = WindChill.visible(world, position, sim.time,
+		vitals.wetness, local_armor,
+		FieldCampfire.has_warmth(sim.campfires, position, sim.time),
+		PortableShelter.covers(sim.shelters, position, sim.time))
+	if float(gust.get("extra", 0.0)) > 0.0:
+		_stats.text += "\nWIND CHILL: %.1f m/s | +%.0f%% cold exposure intensity" % [
+			float(gust.get("speed", 0.0)), 100.0 * float(gust["extra"])]
 	var visual: float = sim._visual_signature_for(survivor)
 	if PortableShelter.camouflaged(sim.shelters, survivor.position, sim.time,
 			survivor.crouching, survivor.noise_timer, vitals.alive):
@@ -1158,7 +1318,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G weapon skill | Space dodge | F8 parry | F9 smoke | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G skill / Shift+G finisher | Space dodge | F8 parry | F9 smoke | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic / Shift+6 coat melee 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | F2 signal flare / F10 net / F12 collect net | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback
@@ -1167,7 +1327,8 @@ func _update_hud() -> void:
 	if not fishing_status.is_empty():
 		_instructions.text += "\n" + fishing_status
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
-	_instructions.text += "\nF9 herbal poultice: treat wounds and mild infection; forage wild herbs from forest/swamp plants"
+	_instructions.text += "\nF11 herbal poultice: treat wounds and mild infection; herbs grow in forest/swamp"
+	_instructions.text += "\nHarvest sound: trees 25m, stone 24m, ore 28m; crouched bushes/berries are quiet"
 	_instructions.text += "\nF4 ride / dismount crafted Trail Bike (workbench T2; no combat or gathering while riding)"
 	_instructions.text += "\nField snares active: %d | roots first non-boss infected for 3s" % sim.infected_snares.size()
 	var scent_radius: float = BloodScent.detection_radius(survivor.survival.bleeding,
@@ -1175,6 +1336,8 @@ func _update_hud() -> void:
 		survivor.survival.scent_mask_seconds > 0.0)
 	if survivor.survival.scent_mask_seconds > 0.0:
 		_instructions.text += "\nHERBAL SCENT MASK: %.0fs remaining; infected still see and hear you" % survivor.survival.scent_mask_seconds
+	if survivor.soft_sole_seconds > 0.0:
+		_instructions.text += "\nSOFT-SOLE WRAPS: %.0fs; quieter sprint, gunshots and bikes stay loud (Shift+/)" % survivor.soft_sole_seconds
 	if scent_radius > 0.0:
 		_instructions.text += "\nBLOOD SCENT: infected may track you from %d m; use first aid" % ceili(scent_radius)
 	_instructions.text += "\nZ rest at hub (2 wood + canned food + water), or by a lit field fire (cooked fish/ration + water; no nearby enemies); 90s cooldown, remaining %.0fs" % survivor.rest_cooldown

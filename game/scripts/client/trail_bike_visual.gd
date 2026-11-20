@@ -7,6 +7,8 @@ const WHEEL_OFFSET := 0.72
 
 var _wheel_pivots: Array[Node3D] = []
 var _panniers: Array[MeshInstance3D] = []
+var _dynamo_light: SpotLight3D
+var _dynamo_lens: MeshInstance3D
 
 
 func _ready() -> void:
@@ -73,6 +75,31 @@ func build() -> void:
 		bag.visible = false
 		add_child(bag)
 		_panniers.append(bag)
+	# Station-free dynamo lantern. The server authorizes its presence at night.
+	_dynamo_light = SpotLight3D.new()
+	_dynamo_light.name = "DynamoBeam"
+	_dynamo_light.position = Vector3(0.0, 1.12, 0.54)
+	_dynamo_light.rotation.y = PI # Godot spotlights face -Z; the bike faces +Z.
+	_dynamo_light.spot_range = 13.0
+	_dynamo_light.spot_angle = 37.0
+	_dynamo_light.light_energy = 1.6
+	_dynamo_light.light_color = Color(1.0, 0.87, 0.61)
+	_dynamo_light.shadow_enabled = false
+	_dynamo_light.visible = false
+	add_child(_dynamo_light)
+	_dynamo_lens = MeshInstance3D.new()
+	_dynamo_lens.name = "DynamoLens"
+	var glass := SphereMesh.new()
+	glass.radius = 0.105
+	glass.height = 0.18
+	_dynamo_lens.mesh = glass
+	_dynamo_lens.position = Vector3(0.0, 1.12, 0.56)
+	var glow := StandardMaterial3D.new()
+	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow.albedo_color = Color(1.0, 0.9, 0.64)
+	_dynamo_lens.material_override = glow
+	_dynamo_lens.visible = false
+	add_child(_dynamo_lens)
 
 
 static func _material(color: Color) -> StandardMaterial3D:
@@ -112,6 +139,13 @@ func set_riding(riding: bool, speed: float = 0.0, delta: float = 0.0) -> void:
 func set_panniers(enabled: bool) -> void:
 	for bag in _panniers:
 		bag.visible = enabled
+
+
+func set_lamp(enabled: bool) -> void:
+	if _dynamo_light != null:
+		_dynamo_light.visible = enabled
+	if _dynamo_lens != null:
+		_dynamo_lens.visible = enabled
 
 
 func wheel_count() -> int:

@@ -30,9 +30,14 @@ var shelters: Dictionary = {} # Replicated temporary weather cover.
 var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
 var smoke_clouds: Dictionary = {} # Interest-limited, temporary visual smoke.
 var infected_snares: Dictionary = {} # Server-replicated temporary PvE traps.
+var fish_traps: Dictionary = {} # Anonymous public, server-owned shoreline nets.
+var lightning_telegraph: Dictionary = {} # Nearby server-authored lightning danger circle.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
+var raid_interrupt: Dictionary = {} # Anonymous party-only interrupt progress for visible warning.
+var raid_cone_telegraph: Dictionary = {} # Interest-limited server-authored cleave sector.
 var spit_zones: Dictionary = {} # Only the latest server-issued acid telegraphs.
 var acid_pools: Dictionary = {} # Replicated lingering ground hazards.
+var ember_pools: Dictionary = {} # Replicated server-owned burning ground.
 var outposts: Array = [] # Public server-controlled PvP objectives.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
@@ -84,13 +89,19 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	snapshots_received += 1
 	server_time = float(snapshot["time"])
 	you = snapshot["you"]
+	lightning_telegraph = snapshot.get("lightning_telegraph", {}).duplicate(true)
 	raid_telegraph = snapshot.get("raid_telegraph", {}).duplicate(true)
+	raid_interrupt = snapshot.get("raid_interrupt", {}).duplicate(true)
+	raid_cone_telegraph = snapshot.get("raid_cone_telegraph", {}).duplicate(true)
 	spit_zones.clear()
 	for zone in snapshot.get("spit_zones", []):
 		spit_zones[int(zone["id"])] = zone
 	acid_pools.clear()
 	for pool in snapshot.get("acid_pools", []):
 		acid_pools[int(pool["id"])] = pool
+	ember_pools.clear()
+	for field in snapshot.get("ember_pools", []):
+		ember_pools[int(field["id"])] = field
 	outposts = snapshot.get("outposts", [])
 	if snapshot.has("inventory"):
 		inventory.load_dict(snapshot["inventory"])
@@ -107,6 +118,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	infected_snares.clear()
 	for entity in snapshot.get("infected_snares", []):
 		infected_snares[int(entity["id"])] = entity
+	fish_traps.clear()
+	for entity in snapshot.get("fish_traps", []):
+		fish_traps[int(entity["id"])] = entity
 	decoys.clear()
 	for entity in snapshot.get("decoys", []):
 		decoys[int(entity["id"])] = entity
@@ -158,6 +172,8 @@ func _reconcile(snapshot: Dictionary) -> void:
 		var duration: float = float(entry["dt"])
 		var moving := Vector2(float(replay_input["x"]), float(replay_input["z"])).length_squared() > 0.00001
 		replay_input["mounted"] = bool(you.get("mounted", false))
+		replay_input["bike_integrity"] = float(you.get("bike_integrity", 100.0))
+		replay_input["tire_grip_seconds"] = float(you.get("tire_grip_seconds", 0.0))
 		replay_input["cargo_factor"] = BikeCargo.movement_factor(inventory,
 			float(you.get("carry_bonus", 0.0)), bool(replay_input["mounted"]))
 		var running := bool(replay_input["sprint"]) and not bool(replay_input["mounted"]) and not bool(replay_input.get("crouch", false)) and moving and float(replay_input["cargo_factor"]) >= 0.9999
@@ -197,7 +213,9 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float, crou
 	running = running and float(you.get("fracture", 0.0)) <= 0.0
 	var input := {"x": move.x, "z": move.y, "sprint": running, "mounted": mounted, "crouch": crouch,
 		"cargo_factor": factor, "speed_bonus": float(you.get("speed_bonus", 0.0)),
-		"injury_factor": Survival.fracture_speed_factor(float(you.get("fracture", 0.0)))}
+		"injury_factor": Survival.fracture_speed_factor(float(you.get("fracture", 0.0))),
+		"tire_grip_seconds": float(you.get("tire_grip_seconds", 0.0)),
+		"bike_integrity": float(you.get("bike_integrity", 100.0))}
 	predicted = Movement.step(world, predicted, input, delta)
 	if running:
 		predicted_stamina = maxf(0.0, predicted_stamina - Defs.SPRINT_STAMINA_PER_SECOND * delta)
@@ -228,6 +246,28 @@ func gather(node_id: int) -> void:
 	net.c_gather.rpc_id(1, node_id)
 
 
+func place_fish_trap() -> void:
+	net.c_place_fish_trap.rpc_id(1)
+
+
+func collect_fish_trap(trap_id: int) -> void:
+	net.c_collect_fish_trap.rpc_id(1, trap_id)
+
+
+func nearest_fish_trap(position: Vector3, radius: float = 4.5) -> int:
+	var nearest := -1
+	var best: float = radius * radius
+	if not position.is_finite():
+		return nearest
+	for trap in fish_traps.values():
+		var distance: float = Vector2(position.x, position.z).distance_squared_to(
+			Vector2(float(trap["x"]), float(trap["z"])))
+		if distance <= best:
+			nearest = int(trap["id"])
+			best = distance
+	return nearest
+
+
 func fish(baited: bool = false, storm_cast: bool = false) -> void:
 	net.c_fish.rpc_id(1, baited, storm_cast)
 
@@ -250,6 +290,18 @@ func toggle_mount() -> void:
 
 func use_item(item_id: String) -> void:
 	net.c_use.rpc_id(1, item_id)
+
+
+func expedition_restock(preset_id: String) -> void:
+	net.c_expedition_restock.rpc_id(1, preset_id)
+
+
+func equipment_preset(action: String, slot: int) -> void:
+	net.c_equipment_preset.rpc_id(1, action, slot)
+
+
+func deposit_materials() -> void:
+	net.c_stash_bulk.rpc_id(1)
 
 
 func move_stash(item_id: String, count: int, deposit: bool) -> void:
@@ -325,8 +377,29 @@ func party_rally() -> void:
 	net.c_party_rally.rpc_id(1)
 
 
+func party_ping(point: Vector2) -> void:
+	if point.is_finite():
+		net.c_party_ping.rpc_id(1, point.x, point.y)
+
+
 func party_focus() -> void:
 	net.c_party_focus.rpc_id(1)
+
+
+func party_loot_mode(mode: String) -> void:
+	net.c_party_loot_mode.rpc_id(1, mode)
+
+
+func raid_vote(bag_id: int, choice: String) -> void:
+	net.c_raid_vote.rpc_id(1, bag_id, choice)
+
+
+func raid_claim_selected(entity_id: int, item_id: String) -> void:
+	net.c_raid_claim_selected.rpc_id(1, entity_id, item_id)
+
+
+func raid_skip_turn(entity_id: int) -> void:
+	net.c_raid_skip_turn.rpc_id(1, entity_id)
 
 
 var _outpost_provision_request_id: int = 0
@@ -436,9 +509,20 @@ func skill(direction: Vector2) -> void:
 	net.c_skill.rpc_id(1, direction.x, direction.y)
 
 
+func stagger_finisher() -> void:
+	# Server picks the real stunned target; clients send no target ID.
+	net.c_stagger_finisher.rpc_id(1)
+
+
 func guardian_taunt() -> void:
 	# The server selects all targets; the client sends no enemy IDs.
 	net.c_guardian_taunt.rpc_id(1)
+
+
+func guardian_intercept(ally_id: int) -> void:
+	# Only the ally ID is requested; real group, weapon, range, hit and
+	# damage are confirmed by the authoritative simulation.
+	net.c_guardian_intercept.rpc_id(1, ally_id)
 
 
 func parry() -> void:
@@ -480,6 +564,12 @@ func place_infected_snare(point: Vector2) -> void:
 func throw_flash(direction: Vector2) -> void:
 	if direction.is_finite() and direction.length_squared() > 0.0001:
 		net.c_throw_flash.rpc_id(1, direction.normalized().x, direction.normalized().y)
+
+
+func throw_ember(direction: Vector2) -> void:
+	if direction.is_finite() and is_finite(direction.length_squared()) 			and direction.length_squared() > 0.0001:
+		var heading: Vector2 = direction.normalized()
+		net.c_throw_ember.rpc_id(1, heading.x, heading.y)
 
 
 func throw_decoy(direction: Vector2) -> void:

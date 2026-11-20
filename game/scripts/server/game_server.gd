@@ -26,6 +26,10 @@ const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
+const HealingAggro = preload("res://scripts/shared/healing_aggro.gd")
+const Threat = preload("res://scripts/shared/threat.gd")
+const FinishingStrike = preload("res://scripts/shared/finishing_strike.gd")
+const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
 const SiegeContracts = preload("res://scripts/shared/siege_contracts.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
@@ -34,35 +38,63 @@ const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
+const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
+const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
+const CaravanEscortRewards = preload("res://scripts/shared/caravan_escort_rewards.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
+const StashBulk = preload("res://scripts/shared/stash_bulk.gd")
+const EquipmentPresets = preload("res://scripts/shared/equipment_presets.gd")
+const ExpeditionLoadout = preload("res://scripts/shared/expedition_loadout.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
+const FieldWhetstone = preload("res://scripts/shared/field_whetstone.gd")
+const FieldArmorPlate = preload("res://scripts/shared/field_armor_plate.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
 const BarricadeBallistics = preload("res://scripts/shared/barricade_ballistics.gd")
+const SiegeCharge = preload("res://scripts/shared/siege_charge.gd")
+const SiegeDefusal = preload("res://scripts/shared/siege_defusal.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
+const CargoRattle = preload("res://scripts/shared/cargo_rattle.gd")
+const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
+const BikeService = preload("res://scripts/shared/bike_service.gd")
+const BikeIntegrity = preload("res://scripts/shared/bike_integrity.gd")
+const BikeLantern = preload("res://scripts/shared/bike_lantern.gd")
+const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
+const ParryRiposte = preload("res://scripts/shared/parry_riposte.gd")
+const StaggerFinisher = preload("res://scripts/shared/stagger_finisher.gd")
+const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
+const GatheringNoise = preload("res://scripts/shared/gathering_noise.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
+const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
+const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
+const RaidAggroView = preload("res://scripts/shared/raid_aggro_view.gd")
 const RaidRecovery = preload("res://scripts/shared/raid_recovery.gd")
+const RaidInterrupt = preload("res://scripts/shared/raid_interrupt.gd")
+const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const AcidNeutralizer = preload("res://scripts/shared/acid_neutralizer.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
+const GuardianIntercept = preload("res://scripts/shared/guardian_intercept.gd")
 const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
 const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
+const RaidRoundRobin = preload("res://scripts/shared/raid_round_robin.gd")
+const RaidNeedGreed = preload("res://scripts/shared/raid_need_greed.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
@@ -70,10 +102,15 @@ const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
 const NightHorde = preload("res://scripts/shared/night_horde.gd")
 const HubRecall = preload("res://scripts/shared/hub_recall.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
+const StormInsulator = preload("res://scripts/shared/storm_insulator.gd")
+const WetClothing = preload("res://scripts/shared/wet_clothing.gd")
+const WindChill = preload("res://scripts/shared/wind_chill.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const SporeSampling = preload("res://scripts/shared/spore_sampling.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const FieldScentMask = preload("res://scripts/shared/field_scent_mask.gd")
+const SoftSoleWraps = preload("res://scripts/shared/soft_sole_wraps.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
 const StealthAmbush = preload("res://scripts/shared/stealth_ambush.gd")
@@ -81,15 +118,20 @@ const FieldSmoke = preload("res://scripts/shared/field_smoke.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const WorldDiscovery = preload("res://scripts/shared/world_discovery.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
+const RestedTraining = preload("res://scripts/shared/rested_training.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
+const StormTarpAnchors = preload("res://scripts/shared/storm_tarp_anchors.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
+const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HandFlare = preload("res://scripts/shared/hand_flare.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const FlashCharge = preload("res://scripts/shared/flash_charge.gd")
+const EmberFlask = preload("res://scripts/shared/ember_flask.gd")
 const InfectedSnare = preload("res://scripts/shared/infected_snare.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
+const ShoreFishTrap = preload("res://scripts/shared/shore_fish_trap.gd")
 const FishingBait = preload("res://scripts/shared/fishing_bait.gd")
 const StormFishing = preload("res://scripts/shared/storm_fishing.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
@@ -143,21 +185,32 @@ class Player:
 	var skills_sent_at: float = -100.0
 	var inventory_sent_at: float = -100.0
 	var stash_sent_at: float = -100.0
+	var equipment_presets: Array = [] # Persistent owned weapon/armor shortcuts.
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
 	var caravan_state: Dictionary = {} # Saved canonical source/destination IDs only.
 	var caravan_view: Dictionary = {} # Verified route details for this private client.
+	var caravan_ambushed: bool = false # One PvE ambush per active route, persisted.
+	var caravan_defended: bool = false # All summoned attackers killed before deadline.
 	var daily_bounty: Dictionary = {} # Account-persisted UTC daily bounty, never set by clients.
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var discovered_sites: Dictionary = {} # Personal authenticated landmark journal.
+	var threat_scan: Dictionary = {} # Session-only, paid private tracking of one infected.
+	var prospect_mark: Dictionary = {} # One paid, session-only resource waypoint.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
+	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
 	var feast_timer: float = 0.0 # Session-only prepared group meal cooldown.
 	var guardian_timer: float = 0.0 # Session-only PvE frontline cooldown.
 	var guardian_brace: float = 0.0 # Short PvE-only defensive brace after a valid taunt.
+	var guard_link_target: int = -1 # Server-only chosen ally for one zombie melee hit.
+	var guard_link_seconds: float = 0.0 # Valid for at most 9 seconds.
+	var guard_link_cooldown: float = 0.0 # Session-only cast cooldown.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
 	var rain_cooldown: float = 0.0 # Persisted storm water collection cooldown.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
 	var spore_filter_seconds: float = 0.0 # Paid temporary swamp respirator, persisted.
+	var soft_sole_seconds: float = 0.0 # Paid, persisted reduced sprint footstep hearing.
+	var storm_insulator_seconds: float = 0.0 # Persisted paid shock resistance.
 	var spore_sample_cooldown: float = 0.0 # Persistent harvest cooldown.
 	var meal_seconds: float = 0.0 # Remaining server-ticked cooked-fish recovery buff.
 	var meal_tier: int = 0 # Zero when no meal buff is active; never client-authored.
@@ -169,7 +222,17 @@ class Player:
 	var dodge_immunity: float = 0.0
 	var parry_cooldown: float = 0.0 # Server-owned timed melee defense.
 	var parry_window: float = 0.0 # First valid infected melee consumes it.
+	var edge_coating_weapon: String = "" # Nonpersistent selected melee gear.
+	var edge_coating_seconds: float = 0.0 # 120s server-owned bonus only vs infected.
+	var riposte_seconds: float = 0.0 # Earned, private, short-lived PvE counter.
+	var riposte_target_id: int = -1 # Exact attacking infected.
+	var riposte_weapon: String = "" # Equipped weapon at parry impact.
+	var finisher_cooldown: float = 0.0 # Server-owned, nonpersistent PvE execution timer.
 	var combat_energy: float = 100.0
+	var sharpened_weapon: String = "" # Prepared, owned melee weapon.
+	var sharpened_hits: int = 0 # Only confirmed ordinary infected contacts spend charges.
+	var plated_armor: String = "" # Protected armor ID, tied to carried equipped item.
+	var plated_hits: int = 0 # Three paid ordinary infected-melee mitigations.
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
 	var smoke_cooldown: float = 0.0 # Session-only temporary PvE obscurant.
@@ -180,6 +243,9 @@ class Player:
 	var mounted: bool = false # Session-only; never saved.
 	var mount_cooldown: float = 0.0
 	var chain_wrap_seconds: float = 0.0 # Validated, persisted noise protection.
+	var bike_service_meters: float = 0.0 # Chain service measured from actual cycling.
+	var bike_integrity: float = 100.0 # Persisted frame condition, server-owned.
+	var tire_grip_seconds: float = 0.0 # Paid, validated off-road tire duration.
 	var decoy_timer: float = 0.0 # Anti-spam timer; no persistent character data.
 	var flash_cooldown: float = 0.0 # Persistent item-paid tactical cooldown.
 	var ruin_survey: Dictionary = {} # One owner-only temporary expedition waypoint.
@@ -216,8 +282,11 @@ var opened_crates: Dictionary = {} # crate id -> time it refills
 var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned session clock.
 var next_horde_at: float = NightHorde.START_DELAY # Separate night event schedule.
 var night_horde: Dictionary = {} # Active IDs, expiry, tier, public event coordinates.
+var caravan_ambushes: Array[Dictionary] = [] # Bounded server waves with expiry.
+var caravan_escort_progress: Dictionary = {} # Session-only verified co-travel for live parties.
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
+var siege_charges: Dictionary = {} # Armed, paid PvP devices: transient world state only.
 var siege_last_by_wall: Dictionary = {} # Session timers only; no character persistence.
 var last_siege_time: float = -1000000.0
 var siege_waves_started: int = 0 # Server-owned structures; authenticated walls may persist.
@@ -226,15 +295,22 @@ var last_raid_spawn_time: float = -1000000.0
 var raid_started_at: float = 0.0
 var raid_next_slam_at: float = 0.0
 var raid_pending_slam: Dictionary = {} # World position & deadline are server-owned.
+var raid_next_cone_at: float = 0.0 # Independent cooldown for aimed raid attack.
+var raid_pending_cone: Dictionary = {} # Locked origin and aim; server-only until strike.
 var raid_exposed_until: float = 0.0 # Post-slam PvE counterattack window, never persisted.
 var raid_wave: int = 0 # Number of completed reinforcement phases.
 var raid_minions: Array[int] = [] # Raid-only infected are cleared with boss.
+var lightning_pending: Dictionary = {} # One globally bounded storm ground warning.
+var next_lightning_at: float = 65.0 # Server-only schedule, never persisted.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
 var shelters: Dictionary = {} # Public, temporary weather tarps; never checkpointed.
 var decoys: Dictionary = {} # Temporary physical sound lures; server-owned, never persisted.
 var smoke_clouds: Dictionary = {} # Temporary visual cover, never checkpointed.
 var infected_snares: Dictionary = {} # Temporary PvE tripwires, never checkpointed.
+var fish_traps: Dictionary = {} # Paid coastal traps, session-only.
 var acid_pools: Dictionary = {} # Temporary nonpersistent corrosive terrain.
+var ember_pools: Dictionary = {} # Session-only PvE fire, no persistence.
+var _ember_last_hit: Dictionary = {} # Global per-infected burn throttle.
 var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stacking.
 var _acid_wall_last_hit: Dictionary = {} # Wall id -> last corrosion time; no overlap stacking.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
@@ -303,8 +379,11 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.progression = Progression.new()
 	player.skills = Skills.new()
 	player.contract_state = Contracts.empty_state()
+	player.equipment_presets = EquipmentPresets.empty_slots()
 	player.caravan_state = {}
 	player.caravan_view = {}
+	player.caravan_ambushed = false
+	player.caravan_defended = false
 	player.daily_bounty = DailyBounties.empty_state()
 	player.renown = 0
 	players[peer_id] = player
@@ -324,12 +403,18 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 ## The part of a player that survives between sessions.
 func character_data(player: Player) -> Dictionary:
 	var alive := _alive(player)
+	# Never write invalid bonuses for sold or lost equipment.
+	var sharp_valid: bool = FieldWhetstone.valid_state(
+		player.sharpened_weapon, player.sharpened_hits, player.inventory)
+	var plate_valid: bool = FieldArmorPlate.valid_state(
+		player.plated_armor, player.plated_hits, player.inventory)
 	return {
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 		"stamina": player.survival.stamina, "infection": player.survival.infection,
 		"bleeding": player.survival.bleeding, "fracture": player.survival.fracture,
-		"exposure": player.survival.exposure, "warmth_seconds": player.survival.warmth_seconds,
+		"exposure": player.survival.exposure, "wetness": player.survival.wetness,
+		"warmth_seconds": player.survival.warmth_seconds,
 		"scent_mask_seconds": player.survival.scent_mask_seconds,
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"pvp_infamy": player.pvp_infamy,
@@ -341,20 +426,33 @@ func character_data(player: Player) -> Dictionary:
 		"stash": player.stash.to_dict(),
 		"progression": player.progression.to_dict(),
 		"skills": player.skills.to_dict(),
+		"equipment_presets": player.equipment_presets.duplicate(true),
 		"contracts": player.contract_state.duplicate(true),
 		"caravan": player.caravan_state.duplicate(true),
+		"caravan_ambushed": player.caravan_ambushed,
+		"caravan_defended": player.caravan_defended,
 		"daily_bounty": player.daily_bounty.duplicate(true),
 		"renown": player.renown,
 		"discovered_sites": WorldDiscovery.to_saved(player.discovered_sites),
-		"rest_cooldown": player.rest_cooldown, "lake_drink_cooldown": player.lake_drink_cooldown,
+		"rest_cooldown": player.rest_cooldown, "rested_xp_credit": player.rested_xp_credit,
+		"lake_drink_cooldown": player.lake_drink_cooldown,
 		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
 		"spore_filter_seconds": player.spore_filter_seconds,
+		"soft_sole_seconds": player.soft_sole_seconds,
+		"storm_insulator_seconds": player.storm_insulator_seconds,
 		"flare_seconds": player.flare_seconds,
 		"spore_sample_cooldown": player.spore_sample_cooldown,
 		"chain_wrap_seconds": player.chain_wrap_seconds,
+		"bike_service_meters": player.bike_service_meters,
+		"bike_integrity": player.bike_integrity,
+		"tire_grip_seconds": player.tire_grip_seconds,
 		"flash_cooldown": player.flash_cooldown,
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
+		"sharpened_weapon": player.sharpened_weapon if sharp_valid else "",
+		"sharpened_hits": player.sharpened_hits if sharp_valid else 0,
+		"plated_armor": player.plated_armor if plate_valid else "",
+		"plated_hits": player.plated_hits if plate_valid else 0,
 	}
 
 
@@ -393,6 +491,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("exposure", 0.0), 0.0, 100.0):
 		return false
+	if not SaveValidation.finite_number(data.get("wetness", 0.0), 0.0, WetClothing.MAX_WETNESS):
+		return false
 	if not SaveValidation.finite_number(data.get("warmth_seconds", 0.0), 0.0, Defs.THERMAL_WRAP_SECONDS):
 		return false
 	if not SaveValidation.finite_number(data.get("scent_mask_seconds", 0.0), 0.0, FieldScentMask.DURATION_SECONDS):
@@ -413,6 +513,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("rest_cooldown", 0.0), 0.0, CampRest.COOLDOWN):
 		return false
+	if not RestedTraining.valid_credit(data.get("rested_xp_credit", 0)):
+		return false
 	if not SaveValidation.finite_number(data.get("lake_drink_cooldown", 0.0), 0.0, FieldWater.COOLDOWN_SECONDS):
 		return false
 	if not SaveValidation.finite_number(data.get("rain_cooldown", 0.0), 0.0, RainHarvest.COOLDOWN_SECONDS):
@@ -421,6 +523,11 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("spore_filter_seconds", 0.0),
 			0.0, SporeHazard.FILTER_DURATION_SECONDS):
+		return false
+	if not SoftSoleWraps.valid_remaining(data.get("soft_sole_seconds", 0.0)):
+		return false
+	if not SaveValidation.finite_number(data.get("storm_insulator_seconds", 0.0),
+			0.0, StormInsulator.DURATION_SECONDS):
 		return false
 	if not SaveValidation.finite_number(data.get("flare_seconds", 0.0),
 			0.0, HandFlare.BURN_SECONDS):
@@ -431,9 +538,22 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.finite_number(data.get("chain_wrap_seconds", 0.0),
 			0.0, BikeChain.DURATION_SECONDS):
 		return false
+	if not BikeService.valid_remaining(data.get("bike_service_meters", 0.0)):
+		return false
+	if not BikeIntegrity.valid(data.get("bike_integrity", BikeIntegrity.MAX_INTEGRITY)):
+		return false
+	if not SaveValidation.finite_number(data.get("tire_grip_seconds", 0.0),
+			0.0, BikeGrip.DURATION_SECONDS):
+		return false
 	if not SaveValidation.finite_number(data.get("flash_cooldown", 0.0), 0.0, FlashCharge.COOLDOWN_SECONDS):
 		return false
 	if not HeartyMeal.valid_state(data.get("meal_seconds", 0.0), data.get("meal_tier", 0)):
+		return false
+	if not FieldWhetstone.valid_state(data.get("sharpened_weapon", ""),
+			data.get("sharpened_hits", 0), parsed_bag["inventory"]):
+		return false
+	if not FieldArmorPlate.valid_state(data.get("plated_armor", ""),
+			data.get("plated_hits", 0), parsed_bag["inventory"]):
 		return false
 	if not (data.get("alive", true) is bool):
 		return false
@@ -451,6 +571,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	survival.fracture = float(data.get("fracture", 0.0)) # Legacy v1 defaults to healthy.
 	# Legacy survivors predating regional climate start with no exposure.
 	survival.exposure = float(data.get("exposure", 0.0))
+	survival.wetness = float(data.get("wetness", 0.0))
 	survival.warmth_seconds = float(data.get("warmth_seconds", 0.0))
 	survival.scent_mask_seconds = float(data.get("scent_mask_seconds", 0.0))
 	var x: Variant = data.get("x", 0.0)
@@ -476,12 +597,25 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	var loaded_contracts: Variant = data.get("contracts", Contracts.empty_state())
 	if not Contracts.valid_state(loaded_contracts):
 		return false
+	var loaded_presets: Variant = data.get("equipment_presets", EquipmentPresets.empty_slots())
+	if not EquipmentPresets.valid_state(loaded_presets):
+		return false
 	var loaded_caravan: Variant = data.get("caravan", {})
 	if not CaravanRoutes.valid_state(world, loaded_caravan):
 		return false
 	var caravan_view: Dictionary = CaravanRoutes.from_saved(world, loaded_caravan)
 	if (loaded_caravan as Dictionary).is_empty():
 		caravan_view = {}
+	# A completed ambush flag cannot be attached to an empty or altered
+	# route. Legacy saved characters start without a live ambush mark.
+	var loaded_caravan_ambushed: Variant = data.get("caravan_ambushed", false)
+	if not (loaded_caravan_ambushed is bool) or \
+			(bool(loaded_caravan_ambushed) and caravan_view.is_empty()):
+		return false
+	var loaded_caravan_defended: Variant = data.get("caravan_defended", false)
+	if not (loaded_caravan_defended is bool) or (bool(loaded_caravan_defended) and
+			(not bool(loaded_caravan_ambushed) or caravan_view.is_empty())):
+		return false
 	var loaded_daily: Variant = data.get("daily_bounty", DailyBounties.empty_state())
 	if not DailyBounties.valid_state(loaded_daily) \
 			or int(loaded_daily["day"]) > DailyBounties.utc_day():
@@ -507,8 +641,11 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.skills = loaded_skills
 	player.dirty_skills = true
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
+	player.equipment_presets = (loaded_presets as Array).duplicate(true)
 	player.caravan_state = (loaded_caravan as Dictionary).duplicate(true)
 	player.caravan_view = caravan_view.duplicate(true)
+	player.caravan_ambushed = bool(loaded_caravan_ambushed)
+	player.caravan_defended = bool(loaded_caravan_defended)
 	player.daily_bounty = (loaded_daily as Dictionary).duplicate(true)
 	player.renown = int(loaded_renown)
 	player.discovered_sites = loaded_discoveries["journal"]
@@ -519,16 +656,26 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.arena_wins = int(data.get("arena_wins", 0))
 	player.arena_losses = int(data.get("arena_losses", 0))
 	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
+	player.rested_xp_credit = int(data.get("rested_xp_credit", 0))
 	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
 	player.rain_cooldown = float(data.get("rain_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
 	player.spore_filter_seconds = float(data.get("spore_filter_seconds", 0.0))
+	player.soft_sole_seconds = float(data.get("soft_sole_seconds", 0.0))
+	player.storm_insulator_seconds = float(data.get("storm_insulator_seconds", 0.0))
 	player.flare_seconds = float(data.get("flare_seconds", 0.0))
 	player.spore_sample_cooldown = float(data.get("spore_sample_cooldown", 0.0))
 	player.chain_wrap_seconds = float(data.get("chain_wrap_seconds", 0.0))
+	player.bike_service_meters = float(data.get("bike_service_meters", 0.0))
+	player.bike_integrity = float(data.get("bike_integrity", BikeIntegrity.MAX_INTEGRITY))
+	player.tire_grip_seconds = float(data.get("tire_grip_seconds", 0.0))
 	player.flash_cooldown = float(data.get("flash_cooldown", 0.0))
 	player.meal_seconds = float(data.get("meal_seconds", 0.0))
 	player.meal_tier = int(data.get("meal_tier", 0))
+	player.sharpened_weapon = str(data.get("sharpened_weapon", ""))
+	player.sharpened_hits = int(data.get("sharpened_hits", 0))
+	player.plated_armor = str(data.get("plated_armor", ""))
+	player.plated_hits = int(data.get("plated_hits", 0))
 	player.inventory = parsed_bag["inventory"]
 	player.stash = parsed_stash["inventory"]
 	player.kills = int(data.get("kills", 0))
@@ -585,6 +732,9 @@ func remove_player(peer_id: int) -> void:
 		if survivor.defense_target == peer_id:
 			survivor.defense_target = -1
 			survivor.defense_until = 0.0
+		if survivor.guard_link_target == peer_id:
+			survivor.guard_link_target = -1
+			survivor.guard_link_seconds = 0.0
 	market_buy_requests.erase(peer_id)
 	outpost_fortify_requests.erase(peer_id)
 	outpost_provision_requests.erase(peer_id)
@@ -592,6 +742,8 @@ func remove_player(peer_id: int) -> void:
 	siege_declare_requests.erase(peer_id)
 	_cancel_market_seller(peer_id)
 	_cancel_player_trade(peer_id, "disconnected")
+	CaravanEscortRewards.clear_peer(caravan_escort_progress, peer_id)
+	_clear_caravan_waves(peer_id)
 	parties.disconnect_peer(peer_id)
 	var player: Player = players.get(peer_id)
 	if player != null and not player.user_id.is_empty():
@@ -618,6 +770,9 @@ func _spawn_player(player: Player) -> void:
 	player.spore_exposed = false
 	player.defense_target = -1
 	player.defense_until = 0.0
+	player.guard_link_target = -1
+	player.guard_link_seconds = 0.0
+	player.guard_link_cooldown = 0.0
 	var kept_gear: bool = player.keep_inventory_on_respawn
 	player.keep_inventory_on_respawn = false
 	if not kept_gear:
@@ -626,15 +781,29 @@ func _spawn_player(player: Player) -> void:
 			player.inventory.add(id, STARTER_KIT[id])
 	player.action = {}
 	player.recall = {}
+	player.threat_scan = {} # Death cannot preserve a scouting advantage.
+	player.sharpened_weapon = ""
+	player.sharpened_hits = 0
+	player.plated_armor = ""
+	player.plated_hits = 0
 	player.mounted = false
 	player.mount_cooldown = 0.0
+	if not kept_gear:
+		player.bike_integrity = BikeIntegrity.MAX_INTEGRITY
 	player.chain_wrap_seconds = 0.0
+	player.soft_sole_seconds = 0.0
+	player.bike_service_meters = 0.0
+	player.tire_grip_seconds = 0.0
 	player.attack_timer = 0.0
 	player.skill_timer = 0.0
 	player.dodge_timer = 0.0
 	player.dodge_immunity = 0.0
 	player.parry_cooldown = 0.0
 	player.parry_window = 0.0
+	player.edge_coating_seconds = 0.0
+	player.edge_coating_weapon = ""
+	ParryRiposte.clear(player)
+	player.finisher_cooldown = 0.0
 	player.party_aid_timer = 0.0
 	player.feast_timer = 0.0
 	player.guardian_timer = 0.0
@@ -646,6 +815,7 @@ func _spawn_player(player: Player) -> void:
 	player.noise_timer = 0.0
 	player.smoke_cooldown = 0.0
 	player.flare_seconds = 0.0
+	player.storm_insulator_seconds = 0.0
 	player.crouching = false
 	player.dirty_inventory = true
 	events.append({"type": "spawn", "peer": player.id})
@@ -712,6 +882,9 @@ func _dismount(player: Player, hit: bool) -> void:
 	if not player.mounted:
 		return
 	player.mounted = false
+	if hit:
+		player.bike_integrity = BikeIntegrity.after_hit(player.bike_integrity)
+		player.dirty_character = true
 	player.mount_cooldown = maxf(player.mount_cooldown,
 		Mounts.HIT_COOLDOWN if hit else Mounts.MANUAL_COOLDOWN)
 	events.append({"type": "mount", "peer": player.id, "mounted": false})
@@ -736,7 +909,8 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 			player.skills.bonus("carry_capacity"), player.mounted)
 		var moving := move_x * move_x + move_z * move_z > 0.00001
 		if player.mounted and (player.crouching or factor < 0.9999 or
-				player.survival.fracture > 0.0 or player.inventory.count(Mounts.ITEM_ID) < 1):
+				player.survival.fracture > 0.0 or not BikeIntegrity.can_ride(player.bike_integrity) or
+				player.inventory.count(Mounts.ITEM_ID) < 1):
 			_dismount(player, false)
 			# Supported weight vanishes immediately after dismount.
 			factor = BikeCargo.movement_factor(player.inventory,
@@ -746,8 +920,12 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 			"x": move_x, "z": move_z, "sprint": sprint_allowed, "mounted": player.mounted,
 			"crouch": player.crouching, "cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed"),
 			"injury_factor": Survival.fracture_speed_factor(player.survival.fracture),
+			"tire_grip_seconds": player.tire_grip_seconds,
+			"bike_integrity": player.bike_integrity,
 		}, allowed)
 		var moved: float = Vector2(player.position.x - before_move.x, player.position.z - before_move.z).length()
+		if moved > 0.0:
+			_record_caravan_escort_move(player, moved)
 		if not player.recall.is_empty():
 			var origin: Vector3 = player.recall["origin"]
 			if Vector2(player.position.x, player.position.z).distance_to(
@@ -766,15 +944,34 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 					player.run_meters -= SKILL_METERS_PER_ATHLETICS_XP
 					_award(player, "athletics", 1.0)
 		if sprint_allowed and player.position.distance_to(before_move) > 0.01:
-			player.noise_radius = maxf(player.noise_radius, Defs.SPRINT_NOISE_RADIUS)
+			player.noise_radius = maxf(player.noise_radius,
+				SoftSoleWraps.sprint_noise(Defs.SPRINT_NOISE_RADIUS, player.soft_sole_seconds))
 			player.noise_timer = maxf(player.noise_timer, Defs.SPRINT_NOISE_SECONDS)
+		# A laden backpack rattles only after the server observes real travel.
+		# Crouching suppresses this sound; mounted noise follows bike rules.
+		var pack_noise: float = CargoRattle.radius(factor, moved,
+			player.crouching, player.mounted)
+		if pack_noise > 0.0:
+			player.noise_radius = maxf(player.noise_radius, pack_noise)
+			player.noise_timer = maxf(player.noise_timer, CargoRattle.NOISE_SECONDS)
 		# Never trust movement or noise from a client. The server measures
 		# actual travel after collision, and only an owned mount creates rattle.
+		if player.mounted and moved > 0.0 and player.bike_service_meters > 0.0:
+			player.bike_service_meters = BikeService.remaining_after_move(
+				player.bike_service_meters, world.biome_at(before_move.x, before_move.z), moved)
+			player.dirty_character = true
 		var bike_noise: float = Mounts.noise_for_distance(moved) if player.mounted else 0.0
 		if bike_noise > 0.0:
 			player.noise_radius = maxf(player.noise_radius,
-				BikeChain.riding_radius(player.chain_wrap_seconds))
+				BikeService.riding_noise_radius(player.bike_service_meters,
+					BikeChain.riding_radius(player.chain_wrap_seconds)))
 			player.noise_timer = maxf(player.noise_timer, Mounts.NOISE_SECONDS)
+		if player.mounted and moved > 0.0:
+			player.bike_integrity = BikeIntegrity.after_ride(player.bike_integrity,
+				world.biome_at(before_move.x, before_move.z), moved)
+			player.dirty_character = true
+			if not BikeIntegrity.can_ride(player.bike_integrity):
+				_dismount(player, false)
 		# Walking away cancels gathering and shoreline fishing.
 		if not player.action.is_empty():
 			if player.action.has("fish"):
@@ -787,8 +984,103 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 					player.action = {}
 
 
+## Only an actual server-resolved movement update can record escort travel.
+## Late party joins never qualify without traversing all checkpoints.
+func _record_caravan_escort_move(escort: Player, moved: float) -> void:
+	var group_id: int = parties.group_of(escort.id)
+	if group_id <= 0 or not _alive(escort):
+		return
+	for member_id in parties.members_of(escort.id):
+		if int(member_id) == escort.id:
+			continue
+		var courier: Player = players.get(int(member_id))
+		if courier == null or not _alive(courier) or \
+				courier.caravan_state.is_empty() or courier.caravan_view.is_empty():
+			continue
+		if courier.inventory.count(str(courier.caravan_view.get("cargo", ""))) < 1:
+			continue
+		CaravanEscortRewards.record(caravan_escort_progress,
+			courier.id, escort.id, group_id, courier.caravan_view,
+			courier.position, escort.position, moved)
+
+
 ## Fishing is a delayed, cancelable server action; no catch count is supplied
 ## by clients. Distinct from lake drinking and free berry scavenging.
+## An authentic rod and procedural shore determine the maximum output tier;
+## client sends no location, reward or duration, only intent to place.
+func cmd_place_fish_trap(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	if not player.action.is_empty():
+		return {"ok": false, "reason": "busy"}
+	if fish_traps.size() >= ShoreFishTrap.MAX_GLOBAL:
+		return {"ok": false, "reason": "world_limit"}
+	for trap in fish_traps.values():
+		if float(trap["expires"]) > time and Structures.can_manage(
+				trap, peer_id, player.user_id):
+			return {"ok": false, "reason": "owner_limit"}
+	var rod: String = player.inventory.best_tool("fishing")
+	if rod.is_empty():
+		return {"ok": false, "reason": "need_rod"}
+	var site: Dictionary = ShoreFishTrap.site(world, player.position, fish_traps, time)
+	if not bool(site.get("ok", false)):
+		return site
+	if not player.inventory.remove(ShoreFishTrap.ITEM_ID, 1):
+		return {"ok": false, "reason": "not_carried"}
+	var tier: int = Fishing.catch_tier(world.zone_at(player.position.x,
+		player.position.z), Defs.tier_of(rod),
+		player.progression.gathering_level("fishing"))
+	var id := new_id()
+	fish_traps[id] = {"id": id, "x": float(site["x"]),
+		"z": float(site["z"]), "y": Defs.WATER_LEVEL,
+		"owner": peer_id, "owner_account": player.user_id, "tier": tier,
+		"ready_at": time + ShoreFishTrap.CATCH_SECONDS,
+		"expires": time + ShoreFishTrap.LIFETIME_SECONDS}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "id": id, "seconds": ShoreFishTrap.CATCH_SECONDS,
+		"tier": tier}
+
+
+## Authoritative pickup: no remote looting, expired nets, phantom XP or
+## partial inventory transfers. Rights survive authenticated reconnection.
+func cmd_collect_fish_trap(peer_id: int, trap_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	var trap: Dictionary = fish_traps.get(trap_id, {})
+	if trap.is_empty() or time >= float(trap["expires"]):
+		return {"ok": false, "reason": "no_trap"}
+	if not Structures.can_manage(trap, peer_id, player.user_id):
+		return {"ok": false, "reason": "not_owner"}
+	if not ShoreFishTrap.collectable(player.position, trap) or world.is_water(
+			player.position.x, player.position.z):
+		return {"ok": false, "reason": "out_of_range"}
+	if time < float(trap["ready_at"]):
+		return {"ok": false, "reason": "not_ready",
+			"remaining": float(trap["ready_at"]) - time}
+	var tier: int = int(trap["tier"])
+	var fish_id: String = Fishing.catch_item(tier)
+	if fish_id.is_empty() or player.inventory.free_space_for(fish_id) < ShoreFishTrap.COUNT:
+		return {"ok": false, "reason": "no_space"}
+	if player.inventory.add(fish_id, ShoreFishTrap.COUNT) != 0:
+		return {"ok": false, "reason": "no_space"}
+	fish_traps.erase(trap_id)
+	player.progression.award_gather("fishing", tier, ShoreFishTrap.COUNT)
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "item": fish_id, "tier": tier, "count": ShoreFishTrap.COUNT}
+
+
 func cmd_fish(peer_id: int, baited: bool = false, storm_cast: bool = false) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -1165,11 +1457,17 @@ func cmd_party_decline(peer_id: int) -> Dictionary:
 
 
 func cmd_party_leave(peer_id: int) -> Dictionary:
-	return parties.leave(peer_id)
+	var outcome: Dictionary = parties.leave(peer_id)
+	if bool(outcome.get("ok", false)):
+		CaravanEscortRewards.clear_peer(caravan_escort_progress, peer_id)
+	return outcome
 
 
 func cmd_party_kick(peer_id: int, target_id: int) -> Dictionary:
-	return parties.kick(peer_id, target_id)
+	var outcome: Dictionary = parties.kick(peer_id, target_id)
+	if bool(outcome.get("ok", false)):
+		CaravanEscortRewards.clear_peer(caravan_escort_progress, target_id)
+	return outcome
 
 
 ## The server determines the caller's identity and current simulation time.
@@ -1190,6 +1488,38 @@ func cmd_party_ready_answer(peer_id: int, ready: bool) -> Dictionary:
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	return parties.answer_ready_check(peer_id, ready, time)
+
+
+## Only actual, positive HP restored to a nearby party member already engaged
+## with an infected can create healer threat. This is never an RPC command.
+## One multi-target cast adds at most one bounded entry per living infected.
+func _record_party_healing_threat(medic: Player, patients: Array) -> void:
+	if medic == null or not _alive(medic) or not medic.position.is_finite() \
+			or _is_safe(medic.position) or patients.is_empty():
+		return
+	var group_id: int = parties.group_of(medic.id)
+	if group_id == 0:
+		return
+	var zone: int = world.zone_at(medic.position.x, medic.position.z)
+	for infected in zombies.values():
+		if not infected.is_alive() or not infected.position.is_finite() or \
+				world.zone_at(infected.position.x, infected.position.z) != zone:
+			continue
+		var total_healed: float = 0.0
+		for entry in patients:
+			var recipient: Player = entry.get("recipient", null)
+			var restored: float = float(entry.get("healed", 0.0))
+			if recipient == null or not _alive(recipient) or \
+				parties.group_of(recipient.id) != group_id or \
+				_is_safe(recipient.position) or \
+				world.zone_at(recipient.position.x, recipient.position.z) != zone:
+				continue
+			if HealingAggro.can_credit(infected, medic.position,
+					recipient.position, recipient.id):
+				total_healed += restored
+		var generated: float = HealingAggro.threat_for(total_healed)
+		if generated > 0.0:
+			Threat.record(infected.threat, medic.id, generated)
 
 
 ## Item-powered cooperative healing, resolved only by the authoritative server.
@@ -1236,6 +1566,7 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	source.dirty_character = true
 	recipient.dirty_character = true
 	var healed: float = recipient.survival.health - hp_before
+	_record_party_healing_threat(source, [{"recipient": recipient, "healed": healed}])
 	var cured: float = infection_before - recipient.survival.infection
 	var staunched: float = bleeding_before - recipient.survival.bleeding
 	var splinted: float = fracture_before - recipient.survival.fracture
@@ -1286,6 +1617,7 @@ func cmd_party_triage(peer_id: int) -> Dictionary:
 	var treated: int = mini(candidates.size(), PartyTriage.MAX_RECIPIENTS)
 	var healed: float = 0.0
 	var bleeding_stopped: float = 0.0
+	var healing_events: Array = []
 	for i in range(treated):
 		var recipient: Player = candidates[i]["player"]
 		var old_health: float = recipient.survival.health
@@ -1296,10 +1628,12 @@ func cmd_party_triage(peer_id: int) -> Dictionary:
 		var hp_gain: float = recipient.survival.health - old_health
 		var wound_care: float = old_bleeding - recipient.survival.bleeding
 		healed += hp_gain
+		healing_events.append({"recipient": recipient, "healed": hp_gain})
 		bleeding_stopped += wound_care
 		recipient.dirty_character = true
 		events.append({"type": "party_triage", "peer": recipient.id, "by": peer_id,
 			"heal": hp_gain, "bleeding_stopped": wound_care})
+	_record_party_healing_threat(medic, healing_events)
 	medic.party_aid_timer = PartyTriage.COOLDOWN
 	medic.action = {}
 	medic.dirty_inventory = true
@@ -1402,6 +1736,14 @@ func cmd_party_standard(peer_id: int) -> Dictionary:
 	return result
 
 
+## Secure, ephemeral tactical marker; movement and rewards are unaffected.
+func cmd_party_ping(peer_id: int, x: float, z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	return parties.mark_ping(peer_id, Vector2(x, z), time)
+
+
 func cmd_party_rally(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -1434,6 +1776,36 @@ func cmd_party_focus(peer_id: int) -> Dictionary:
 	return parties.start_focus(peer_id, best_id, time)
 
 
+## Only the authenticated party leader configures FUTURE raid loot bags.
+func cmd_party_loot_mode(peer_id: int, mode: String) -> Dictionary:
+	var leader: Player = players.get(peer_id)
+	if leader == null or not _alive(leader):
+		return {"ok": false, "reason": "dead"}
+	return parties.set_loot_mode(peer_id, mode)
+
+
+## Every ballot is validated against a frozen server entitlement list.
+## Voters must be nearby living survivors; no client-provided identity,
+## loot contents, roll value, winner or deadline is accepted.
+func cmd_raid_vote(peer_id: int, bag_id: int, choice: String) -> Dictionary:
+	var voter: Player = players.get(peer_id)
+	if voter == null or not _alive(voter):
+		return {"ok": false, "reason": "dead"}
+	var bag: Dictionary = bags.get(bag_id, {})
+	if bag.is_empty() or not bag.has("raid_need_greed"):
+		return {"ok": false, "reason": "no_vote"}
+	var point := Vector2(float(bag["x"]), float(bag["z"]))
+	var voter_at := Vector2(voter.position.x, voter.position.z)
+	if not voter.position.is_finite() or voter_at.distance_to(point) > Party.ASSIST_RANGE:
+		return {"ok": false, "reason": "too_far"}
+	if not RaidLoot.can_open(bag, voter, time):
+		return {"ok": false, "reason": "raid_reserved"}
+	var result: Dictionary = RaidNeedGreed.vote(bag, voter, choice, time)
+	if bool(result.get("ok", false)):
+		result["bag"] = bag_id
+	return result
+
+
 func _party_state_for(peer_id: int) -> Dictionary:
 	var state: Dictionary = parties.state_for(peer_id, time)
 	var roster: Array = []
@@ -1443,6 +1815,15 @@ func _party_state_for(peer_id: int) -> Dictionary:
 			roster.append({"id": int(id), "name": member.name,
 				"alive": _alive(member), "health": member.survival.health})
 	state["roster"] = roster
+	state["escort_caravan"] = CaravanEscort.shared_route(peer_id, players, parties)
+	var shared: Dictionary = state["escort_caravan"]
+	state["escort_progress"] = {}
+	if not shared.is_empty() and int(shared["owner"]) != peer_id:
+		var courier: Player = players.get(int(shared["owner"]))
+		if courier != null:
+			state["escort_progress"] = CaravanEscortRewards.status(
+				caravan_escort_progress, courier.id, peer_id,
+				parties.group_of(peer_id), courier.caravan_view)
 	var invite_from: int = int(state["invite_from"])
 	var sender: Player = players.get(invite_from)
 	state["invite_name"] = sender.name if sender != null else ""
@@ -1822,18 +2203,33 @@ func _cancel_market_seller(peer_id: int) -> void:
 
 
 func _tick_market() -> void:
-	for listing_id in market_orders.keys():
+	# Keep oldest adverts first when the seller consumes or moves listed goods.
+	# Revalidate the combined promised stock, not each order in isolation.
+	var claimed: Dictionary = {}
+	var ids: Array = market_orders.keys()
+	ids.sort()
+	for listing_id in ids:
 		var listing: Dictionary = market_orders[listing_id]
-		var seller: Player = players.get(int(listing["seller"]))
-		if seller == null or not _market_at_hub(seller) \
-				or time >= float(listing["expires"]) \
-				or seller.inventory.count(str(listing["item"])) < int(listing["remaining"]):
+		var seller_id: int = int(listing["seller"])
+		var seller: Player = players.get(seller_id)
+		if seller == null or not _market_at_hub(seller) or time >= float(listing["expires"]):
 			market_orders.erase(listing_id)
+			continue
+		var item_id: String = str(listing["item"])
+		var amount: int = int(listing["remaining"])
+		var key: String = "%d:%s" % [seller_id, item_id]
+		var already: int = int(claimed.get(key, 0))
+		if amount < 1 or already + amount > seller.inventory.count(item_id):
+			market_orders.erase(listing_id)
+			continue
+		claimed[key] = already + amount
 
 
 func cmd_market_list(peer_id: int) -> Dictionary:
 	if not players.has(peer_id):
 		return {"ok": false, "reason": "unknown_player"}
+	# Never show offers no longer backed by the seller's current inventory.
+	_tick_market()
 	var public_orders: Array = []
 	var sorted_ids: Array = market_orders.keys()
 	sorted_ids.sort()
@@ -1847,6 +2243,8 @@ func cmd_market_list(peer_id: int) -> Dictionary:
 			"price": order["price"], "seller_name": seller.name,
 			"own": seller.id == peer_id,
 		})
+	public_orders.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return MarketBoard.cheaper_first(a, b))
 	return {"ok": true, "action": "list", "orders": public_orders}
 
 
@@ -1854,6 +2252,7 @@ func cmd_market_create(peer_id: int, item_id: String, quantity: int, unit_price:
 	var seller: Player = players.get(peer_id)
 	if not _market_at_hub(seller):
 		return {"ok": false, "reason": "no_station"}
+	_tick_market()
 	var validation: String = MarketBoard.validate_listing(seller.inventory, item_id, quantity, unit_price)
 	if validation != "":
 		return {"ok": false, "reason": validation}
@@ -1865,6 +2264,9 @@ func cmd_market_create(peer_id: int, item_id: String, quantity: int, unit_price:
 			count += 1
 	if count >= MarketBoard.MAX_PER_SELLER:
 		return {"ok": false, "reason": "too_many_listings"}
+	var available: int = MarketBoard.unlisted_stock(seller.inventory, market_orders, peer_id, item_id)
+	if quantity > available:
+		return {"ok": false, "reason": "already_listed", "available": available}
 	var listing_id: int = new_id()
 	market_orders[listing_id] = {
 		"seller": peer_id, "item": item_id, "remaining": quantity,
@@ -1940,6 +2342,7 @@ func _execute_market_buy(peer_id: int, listing_id: int, quantity: int) -> Dictio
 		"id": receipt_id, "buyer": peer_id, "seller": seller_id,
 		"listing": listing_id, "item": listing["item"],
 		"quantity": quantity, "total": transaction["total"],
+		"tax": transaction["tax"], "seller_net": transaction["seller_net"],
 	})
 	if market_sales.size() > 128:
 		market_sales.pop_front()
@@ -1947,6 +2350,7 @@ func _execute_market_buy(peer_id: int, listing_id: int, quantity: int) -> Dictio
 		"ok": true, "action": "bought", "id": listing_id,
 		"receipt": receipt_id, "quantity": quantity,
 		"item": listing["item"], "total": transaction["total"],
+		"tax": transaction["tax"], "seller_net": transaction["seller_net"],
 	}
 
 
@@ -2040,11 +2444,13 @@ func cmd_rest(peer_id: int) -> Dictionary:
 		if not CampRest.recover(player.inventory, player.survival):
 			return {"ok": false, "reason": "transaction_failed"}
 	player.rest_cooldown = CampRest.COOLDOWN
+	# Paid and safe recovery earns a limited reserve of extra skill training.
+	player.rested_xp_credit = RestedTraining.refill(player.rested_xp_credit, at_fire)
 	player.action = {}
 	player.dirty_inventory = true
 	player.dirty_character = true
 	return {"ok": true, "rested": true, "field": at_fire,
-		"cooldown": player.rest_cooldown,
+		"cooldown": player.rest_cooldown, "rested_xp_credit": player.rested_xp_credit,
 		"health": player.survival.health, "stamina": player.survival.stamina}
 
 ## Roll forward once at midnight UTC, persisting a fresh daily journal.
@@ -2056,6 +2462,18 @@ func _refresh_daily(player: Player) -> int:
 	return today
 
 
+## Cancel orphaned event mobs after route disposal or disconnect. They must
+## not become a reward for a new player who inherits the same network peer ID.
+func _clear_caravan_waves(peer_id: int) -> void:
+	for index in range(caravan_ambushes.size() - 1, -1, -1):
+		var wave: Dictionary = caravan_ambushes[index]
+		if int(wave.get("owner", -1)) != peer_id:
+			continue
+		for infected_id in wave["ids"]:
+			zombies.erase(int(infected_id))
+		caravan_ambushes.remove_at(index)
+
+
 ## Cross-settlement resource couriers: the server selects and validates
 ## both real NPC stations. Goods are gathered by the player, not spawned.
 func cmd_caravan(peer_id: int, action: String) -> Dictionary:
@@ -2065,8 +2483,12 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 	if action == "abandon":
 		if player.caravan_state.is_empty():
 			return {"ok": false, "reason": "no_active"}
+		_clear_caravan_waves(peer_id)
 		player.caravan_state = {}
 		player.caravan_view = {}
+		player.caravan_ambushed = false
+		player.caravan_defended = false
+		caravan_escort_progress.erase(peer_id)
 		player.dirty_character = true
 		return {"ok": true, "action": "abandon"}
 	if action != "accept" and action != "deliver":
@@ -2080,21 +2502,55 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 		var offer: Dictionary = CaravanRoutes.offer_for(world, station)
 		if offer.is_empty():
 			return {"ok": false, "reason": "no_route"}
+		_clear_caravan_waves(peer_id)
 		player.caravan_state = CaravanRoutes.saved_state(offer)
 		player.caravan_view = offer.duplicate(true)
+		caravan_escort_progress.erase(peer_id)
+		player.caravan_ambushed = false
+		player.caravan_defended = false
 		player.dirty_character = true
 		return {"ok": true, "action": "accept", "route": offer.duplicate(true)}
 	if player.caravan_state.is_empty() or player.caravan_view.is_empty():
 		return {"ok": false, "reason": "no_active"}
 	if int(station["id"]) != int(player.caravan_view["dst_id"]):
 		return {"ok": false, "reason": "wrong_destination"}
-	var outcome: Dictionary = CaravanRoutes.deliver(player.inventory, player.caravan_view)
+	var eligible_escorts: Array = []
+	var group_id: int = parties.group_of(peer_id)
+	if group_id > 0:
+		for member_id in parties.members_of(peer_id):
+			if int(member_id) == peer_id:
+				continue
+			var member: Player = players.get(int(member_id))
+			if member == null or not _alive(member):
+				continue
+			if CaravanEscortRewards.qualifies(caravan_escort_progress,
+					peer_id, member.id, group_id, player.caravan_view,
+					player.position, member.position):
+				eligible_escorts.append(member)
+	var outcome: Dictionary = CaravanEscortRewards.settle(
+		player, eligible_escorts, player.caravan_view, player.caravan_defended)
 	if not bool(outcome.get("ok", false)):
 		return outcome
+	caravan_escort_progress.erase(peer_id)
+	_clear_caravan_waves(peer_id)
 	player.caravan_state = {}
 	player.caravan_view = {}
+	player.caravan_ambushed = false
+	player.caravan_defended = false
 	player.dirty_inventory = true
 	player.dirty_character = true
+	for member in eligible_escorts:
+		member.dirty_inventory = true
+		member.dirty_character = true
+		_award(member, "explorer", 10.0)
+		_earn_renown(member, 2, "caravan_escort")
+		var payout: int = 0
+		for receipt in outcome.get("escorts", []):
+			if int(receipt["peer"]) == member.id:
+				payout = int(receipt["silver"])
+				break
+		events.append({"type": "caravan_escort_paid", "peer": member.id,
+			"silver": payout})
 	_award(player, "explorer", 20.0)
 	_earn_renown(player, 4, "caravan")
 	outcome["action"] = "deliver"
@@ -2160,6 +2616,89 @@ func cmd_stash(peer_id: int, item_id: String, count: int, deposit: bool) -> Dict
 	player.dirty_stash = true
 	player.dirty_character = true
 	return {"ok": true, "item": item_id, "count": count, "deposit": deposit}
+
+
+## Players may record and swap three owned gear sets only at the hub workbench.
+## Client requests carry no gear IDs: server owns the inventory and saved sets.
+## Combat, movement actions, mounts and recall cannot become instant gear swaps.
+func cmd_equipment_preset(peer_id: int, action: String, slot: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null:
+		return {"ok": false, "reason": "unknown_player"}
+	if not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if not _market_at_hub(player):
+		return {"ok": false, "reason": "no_station"}
+	if slot < 0 or slot >= EquipmentPresets.SLOT_COUNT:
+		return {"ok": false, "reason": "invalid_slot"}
+	if player.mounted or not player.recall.is_empty() or \
+			player.combat_tag_until > time or player.attack_timer > 0.0 or \
+			player.skill_timer > 0.0 or not player.action.is_empty():
+		return {"ok": false, "reason": "busy"}
+	var result: Dictionary = {}
+	match action:
+		"save":
+			result = EquipmentPresets.save_slot(player.equipment_presets, slot, player.inventory)
+		"equip":
+			result = EquipmentPresets.equip_slot(player.equipment_presets, slot, player.inventory)
+		"clear":
+			result = EquipmentPresets.clear_slot(player.equipment_presets, slot)
+		_:
+			return {"ok": false, "reason": "invalid_action"}
+	if not bool(result.get("ok", false)):
+		return result
+	if action == "equip":
+		if bool(result.get("weapon_changed", false)):
+			player.edge_coating_seconds = 0.0
+			player.edge_coating_weapon = ""
+			player.sharpened_weapon = ""
+			player.sharpened_hits = 0
+			player.parry_window = 0.0
+			ParryRiposte.clear(player)
+		if bool(result.get("armor_changed", false)):
+			player.plated_armor = ""
+			player.plated_hits = 0
+		player.guardian_brace = 0.0
+		player.dirty_inventory = true
+	player.dirty_character = true
+	result["action"] = action
+	return result
+
+
+## One server-authorized action banks raw and refined crafting inputs.
+## The client selects no item IDs, quantities or receipt; failed operations
+## do not modify either inventory or the account-bound protected bank.
+func cmd_expedition_restock(peer_id: int, preset_id: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var at := Vector2(player.position.x, player.position.z)
+	if not at.is_finite() or at.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+		return {"ok": false, "reason": "no_station"}
+	var result: Dictionary = ExpeditionLoadout.restock(
+		player.inventory, player.stash, preset_id)
+	if bool(result.get("ok", false)):
+		player.dirty_inventory = true
+		player.dirty_stash = true
+		player.dirty_character = true
+	return result
+
+
+func cmd_stash_bulk(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var at := Vector2(player.position.x, player.position.z)
+	if not at.is_finite() or at.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+		return {"ok": false, "reason": "no_station"}
+	var result: Dictionary = StashBulk.deposit(player.inventory, player.stash)
+	if not bool(result.get("ok", false)):
+		return result
+	player.inventory.unequip_missing()
+	player.dirty_inventory = true
+	player.dirty_stash = true
+	player.dirty_character = true
+	return result
 
 
 ## Validate and build entirely on the authority. Clients only request a location.
@@ -2246,6 +2785,49 @@ func cmd_throw_flash(peer_id: int, direction_x: float, direction_z: float) -> Di
 	return {"ok": true, "hits": interrupted, "cooldown": player.flash_cooldown}
 
 
+## Inventory-paid, obstacle-checked PvE fire. Shares the persistent flash
+## timer to avoid rapid alternating charges or reconnect cooldown bypasses.
+func cmd_throw_ember(peer_id: int, direction_x: float, direction_z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	if not player.action.is_empty():
+		return {"ok": false, "reason": "busy"}
+	if player.flash_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown"}
+	if ember_pools.size() >= EmberFlask.MAX_ACTIVE:
+		return {"ok": false, "reason": "world_limit"}
+	var owned: int = 0
+	for field in ember_pools.values():
+		if int(field["owner"]) == peer_id and EmberFlask.remaining(field, time) > 0.0:
+			owned += 1
+	if owned >= EmberFlask.MAX_PER_OWNER:
+		return {"ok": false, "reason": "owner_limit"}
+	var site: Dictionary = EmberFlask.landing(world, player.position,
+		Vector2(direction_x, direction_z))
+	if site.is_empty():
+		return {"ok": false, "reason": "invalid_landing"}
+	if player.inventory.count(EmberFlask.ITEM_ID) < 1 or not player.inventory.remove(
+			EmberFlask.ITEM_ID, 1):
+		return {"ok": false, "reason": "not_carried"}
+	var id: int = new_id()
+	ember_pools[id] = EmberFlask.make_pool(id, site, peer_id, time)
+	player.flash_cooldown = EmberFlask.COOLDOWN_SECONDS
+	player.noise_radius = maxf(player.noise_radius, EmberFlask.NOISE_RADIUS)
+	player.noise_timer = maxf(player.noise_timer, EmberFlask.NOISE_SECONDS)
+	player.action = {}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	events.append({"type": "ember_thrown", "peer": peer_id, "id": id,
+		"x": site["x"], "z": site["z"]})
+	return {"ok": true, "id": id, "seconds": EmberFlask.DURATION,
+		"cooldown": player.flash_cooldown}
+
+
 func cmd_throw_decoy(peer_id: int, direction_x: float, direction_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -2317,7 +2899,7 @@ func cmd_pitch_shelter(peer_id: int, x: float, z: float) -> Dictionary:
 	var id := new_id()
 	shelters[id] = {"id": id, "x": point.x, "y": world.height_at(x, z),
 		"z": point.y, "owner": peer_id, "owner_account": player.user_id,
-		"expires": time + PortableShelter.DURATION}
+		"expires": time + PortableShelter.DURATION, "anchored": false}
 	player.dirty_inventory = true
 	player.dirty_character = true
 	return {"ok": true, "id": id, "seconds": PortableShelter.DURATION}
@@ -2635,6 +3217,130 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"tarp_anchor":
+			if item_id != StormTarpAnchors.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "tarp_anchor": true}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					player.skill_timer > 0.0 or not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "tarp_anchor": true}
+			var selected: Dictionary = StormTarpAnchors.nearest(shelters, player, time)
+			if not bool(selected.get("ok", false)):
+				selected["tarp_anchor"] = true
+				return selected
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "tarp_anchor": true}
+			var anchor_id: int = int(selected["id"])
+			var strengthened: Dictionary = shelters[anchor_id]
+			# Compute expiration BEFORE marking the one-shot upgrade consumed.
+			strengthened["expires"] = StormTarpAnchors.new_expiry(strengthened, time)
+			strengthened["anchored"] = true
+			shelters[anchor_id] = strengthened
+			player.dirty_inventory = true
+			player.dirty_character = true
+			events.append({"type": "tarp_anchored", "id": anchor_id,
+				"x": float(strengthened["x"]), "z": float(strengthened["z"])})
+			return {"ok": true, "tarp_anchor": true,
+				"anchored": true, "id": anchor_id,
+				"remaining": float(strengthened["expires"]) - time}
+		"prospecting_chart":
+			if item_id != ProspectingChart.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "prospecting": true}
+			if not player.position.is_finite():
+				return {"ok": false, "reason": "invalid_position", "prospecting": true}
+			if _is_safe(player.position):
+				return {"ok": false, "reason": "safe_zone", "prospecting": true}
+			if ProspectingChart.active(player.prospect_mark, time, depleted):
+				return {"ok": false, "reason": "already_marked", "prospecting": true}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "prospecting": true}
+			var vein: Dictionary = ProspectingChart.nearest(world, player.position, depleted)
+			if vein.is_empty():
+				return {"ok": false, "reason": "no_rich_vein", "prospecting": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "prospecting": true}
+			player.prospect_mark = {"id": int(vein["id"]), "kind": str(vein["kind"]),
+				"tier": int(vein["tier"]), "x": float(vein["x"]),
+				"z": float(vein["z"]), "until": time + ProspectingChart.MARK_SECONDS}
+		"threat_scanner":
+			if item_id != ThreatScan.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if not player.position.is_finite():
+				return {"ok": false, "reason": "invalid_position", "threat_scan": true}
+			if _is_safe(player.position):
+				return {"ok": false, "reason": "safe_zone", "threat_scan": true}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "threat_scan": true}
+			# No requested target/position is accepted from the remote client.
+			var target: Dictionary = ThreatScan.nearest(player.position, zombies)
+			if target.is_empty():
+				return {"ok": false, "reason": "no_threat_nearby",
+					"threat_scan": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "threat_scan": true}
+			player.threat_scan = {"target": int(target["target"]),
+				"expires": time + ThreatScan.MARK_SECONDS}
+		"weapon_coating":
+			if item_id != AntisepticEdge.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var oil_reason: String = AntisepticEdge.use_reason(
+				player.inventory, player.edge_coating_seconds)
+			if oil_reason != "":
+				return {"ok": false, "reason": oil_reason}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.edge_coating_weapon = player.inventory.weapon
+			player.edge_coating_seconds = AntisepticEdge.SECONDS
+			player.action = {}
+		"siege_defusal":
+			if item_id != SiegeDefusal.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "defusal": true}
+			if not player.action.is_empty():
+				return {"ok": false, "reason": "busy", "defusal": true}
+			var choice: Dictionary = SiegeDefusal.nearest(world, player,
+				siege_charges, barricades, time)
+			if not bool(choice.get("ok", false)):
+				choice["defusal"] = true
+				return choice
+			# Verify everything before consuming the actual crafted tool.
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "defusal": true}
+			siege_charges.erase(int(choice["id"]))
+			player.dirty_inventory = true
+			player.dirty_character = true
+			events.append({"type": "siege_charge_disarmed",
+				"id": int(choice["id"]), "x": float(choice["x"]),
+				"z": float(choice["z"])})
+			return {"ok": true, "defusal": true,
+				"id": int(choice["id"]), "wall": int(choice["wall"])}
+		"siege_charge":
+			if item_id != SiegeCharge.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var selection: Dictionary = SiegeCharge.nearest_wall(world, player, barricades)
+			if not bool(selection.get("ok", false)):
+				return selection
+			var selected_wall: int = int(selection["wall"])
+			var limit: String = SiegeCharge.placement_reason(siege_charges, selected_wall, player)
+			if limit != "":
+				return {"ok": false, "reason": limit}
+			# Commit only after all distance, ownership, zone and limit checks.
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			var charge_id: int = new_id()
+			siege_charges[charge_id] = {
+				"id": charge_id, "wall": selected_wall,
+				"x": float(selection["x"]), "z": float(selection["z"]),
+				"owner": SiegeCharge.owner_token(player),
+				"until": time + SiegeCharge.FUSE_SECONDS}
+			player.action = {}
+			player.dirty_inventory = true
+			player.dirty_character = true
+			events.append({"type": "siege_charge_armed", "id": charge_id,
+				"x": float(selection["x"]), "z": float(selection["z"]),
+				"seconds": SiegeCharge.FUSE_SECONDS})
+			return {"ok": true, "id": charge_id, "wall": selected_wall,
+				"seconds": SiegeCharge.FUSE_SECONDS}
 		"hand_flare":
 			if item_id != HandFlare.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -2710,6 +3416,68 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 				return {"ok": false, "reason": "not_carried"}
 			player.combat_energy = FrontierStim.apply(player.survival, player.combat_energy)
 			player.stim_cooldown = FrontierStim.COOLDOWN
+		"tire_grips":
+			if item_id != BikeGrip.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var grip_reason: String = BikeGrip.apply_reason(
+				player.inventory, player.tire_grip_seconds)
+			if grip_reason != "":
+				return {"ok": false, "reason": grip_reason, "tire_grips": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "tire_grips": true}
+			player.tire_grip_seconds = BikeGrip.DURATION_SECONDS
+		"bike_frame_repair":
+			if item_id != BikeIntegrity.KIT_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			var frame_reason: String = BikeIntegrity.repair_reason(player.inventory, player.bike_integrity)
+			if frame_reason != "":
+				return {"ok": false, "reason": frame_reason}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.bike_integrity = BikeIntegrity.after_repair(player.bike_integrity)
+		"armor_plate":
+			if item_id != FieldArmorPlate.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var current_armor: String = FieldArmorPlate.armor_equipped(player.inventory)
+			if current_armor.is_empty():
+				return {"ok": false, "reason": "need_armor"}
+			if player.attack_timer > 0.0 or player.skill_timer > 0.0 or (
+					player.combat_tag_until > time) or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			if player.plated_hits > 0 and player.plated_armor == current_armor:
+				return {"ok": false, "reason": "already_plated"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.plated_armor = current_armor
+			player.plated_hits = FieldArmorPlate.HITS
+		"whetstone":
+			if item_id != FieldWhetstone.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var prepared_weapon: String = FieldWhetstone.melee_weapon(player.inventory)
+			if prepared_weapon.is_empty():
+				return {"ok": false, "reason": "need_melee"}
+			if player.attack_timer > 0.0 or player.skill_timer > 0.0 or (
+					player.combat_tag_until > time) or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			if player.sharpened_hits > 0 and player.sharpened_weapon == prepared_weapon:
+				return {"ok": false, "reason": "already_sharpened"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.sharpened_weapon = prepared_weapon
+			player.sharpened_hits = FieldWhetstone.HITS
+		"bike_service":
+			if item_id != BikeService.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			var service_reason: String = BikeService.repair_reason(player.inventory, player.bike_service_meters)
+			if service_reason != "":
+				return {"ok": false, "reason": service_reason}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.bike_service_meters = BikeService.MAX_METERS
 		"bike_wrap":
 			if item_id != BikeChain.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -2720,6 +3488,16 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if not player.inventory.remove(item_id, 1):
 				return {"ok": false, "reason": "not_carried", "chain_wrap": true}
 			player.chain_wrap_seconds = BikeChain.DURATION_SECONDS
+		"storm_insulator":
+			if item_id != StormInsulator.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var insulation_reason: String = StormInsulator.apply_reason(
+				player.storm_insulator_seconds)
+			if insulation_reason != "":
+				return {"ok": false, "reason": insulation_reason, "storm_insulator": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "storm_insulator": true}
+			player.storm_insulator_seconds = StormInsulator.DURATION_SECONDS
 		"spore_filter":
 			if item_id != SporeHazard.FILTER_ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -2732,6 +3510,19 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if not player.inventory.remove(item_id, 1):
 				return {"ok": false, "reason": "not_carried"}
 			player.spore_filter_seconds = SporeHazard.FILTER_DURATION_SECONDS
+		"footstep_wrap":
+			if item_id != SoftSoleWraps.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if not SoftSoleWraps.valid_remaining(player.soft_sole_seconds):
+				return {"ok": false, "reason": "invalid_state"}
+			if player.soft_sole_seconds > 0.0:
+				return {"ok": false, "reason": "already_wrapped"}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					player.skill_timer > 0.0) or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.soft_sole_seconds = SoftSoleWraps.DURATION_SECONDS
 		"scent_mask":
 			if item_id != FieldScentMask.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -2780,15 +3571,58 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			player.survival.treat_fracture(splint)
 			_award(player, "medic", 6.0)
 		"weapon", "armor":
+			var previous_weapon: String = player.inventory.weapon
+			var previous_armor: String = player.inventory.armor
 			player.inventory.equip(item_id)
+			if previous_armor != player.inventory.armor:
+				player.plated_armor = ""
+				player.plated_hits = 0
+			if previous_weapon != player.inventory.weapon:
+				player.edge_coating_seconds = 0.0
+				player.edge_coating_weapon = ""
+				player.sharpened_weapon = ""
+				player.sharpened_hits = 0
 		_:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
 	player.dirty_character = true
+	if item_id == ProspectingChart.ITEM_ID:
+		var detected: Dictionary = ProspectingChart.public_mark(
+			player.prospect_mark, time, depleted)
+		return {"ok": true, "prospecting": true,
+			"kind": str(detected.get("kind", "rock")),
+			"tier": int(detected.get("tier", 2)),
+			"x": float(detected.get("x", 0.0)),
+			"z": float(detected.get("z", 0.0)),
+			"seconds": ProspectingChart.MARK_SECONDS}
+	if item_id == ThreatScan.ITEM_ID:
+		var found: Dictionary = ThreatScan.public_mark(
+			player.threat_scan, zombies, player.position, time)
+		return {"ok": true, "threat_scan": true,
+			"kind": found.get("kind", "elite"),
+			"x": float(found.get("x", 0.0)), "z": float(found.get("z", 0.0)),
+			"seconds": ThreatScan.MARK_SECONDS}
+	if item_id == FieldWhetstone.ITEM_ID:
+		return {"ok": true, "weapon": player.sharpened_weapon,
+			"hits": player.sharpened_hits}
+	if item_id == FieldArmorPlate.ITEM_ID:
+		return {"ok": true, "armor": player.plated_armor,
+			"hits": player.plated_hits}
+	if item_id == BikeGrip.ITEM_ID:
+		return {"ok": true, "tire_grip_seconds": player.tire_grip_seconds}
 	if item_id == BikeChain.ITEM_ID:
 		return {"ok": true, "chain_wrap_seconds": player.chain_wrap_seconds}
+	if item_id == BikeService.ITEM_ID:
+		return {"ok": true, "bike_service_meters": player.bike_service_meters}
+	if item_id == StormInsulator.ITEM_ID:
+		return {"ok": true, "storm_insulator_seconds": player.storm_insulator_seconds}
+	if item_id == BikeIntegrity.KIT_ID:
+		return {"ok": true, "bike_integrity": player.bike_integrity}
 	if item_id == HandFlare.ITEM_ID:
 		return {"ok": true, "flare_seconds": player.flare_seconds}
+	if item_id == AntisepticEdge.ITEM_ID:
+		return {"ok": true, "coating_seconds": player.edge_coating_seconds,
+			"coating_weapon": player.edge_coating_weapon}
 	if item_id == FieldSmoke.ITEM_ID:
 		return {"ok": true, "smoke_seconds": FieldSmoke.DURATION,
 			"cooldown": player.smoke_cooldown}
@@ -2951,6 +3785,13 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	if crit:
 		damage *= 1.5 + player.skills.bonus("crit_damage")
 	var hit := _find_hit(player, origin, direction, reach, kind == "ranged")
+	# The FIRST legal attack spends a server-earned counter, including misses.
+	var riposte: bool = false
+	if player.riposte_seconds > 0.0:
+		if not is_ranged and not hit.is_empty() and str(hit["kind"]) == "zombie":
+			riposte = ParryRiposte.can_strike(player,
+				zombies.get(int(hit["id"])), weapon)
+		ParryRiposte.clear(player)
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": kind == "ranged", "x": player.position.x, "z": player.position.z})
 	if hit.is_empty():
 		var cover_hit: bool = is_ranged and _damage_ranged_cover(player,
@@ -2970,9 +3811,28 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 			damage *= factor
 			events.append({"type": "stealth_ambush", "peer": peer_id,
 				"zombie": int(hit["id"]), "multiplier": factor})
+	# Prevent multiplying reactive damage with random crits or stealth openers.
+	if riposte and not ambush:
+		if crit:
+			damage /= 1.5 + player.skills.bonus("crit_damage")
+			crit = false
+		damage *= ParryRiposte.DAMAGE_FACTOR
+	else:
+		riposte = false
+	# Misses, player targets, ranged attacks and ghost gear cannot apply the bonus.
+	var sharpened: bool = not is_ranged and str(hit["kind"]) == "zombie" and (
+		FieldWhetstone.bonus_active(player.sharpened_weapon,
+			player.sharpened_hits, player.inventory, weapon))
+	if sharpened:
+		damage *= FieldWhetstone.DAMAGE_FACTOR
+		player.sharpened_hits -= 1
+		if player.sharpened_hits == 0:
+			player.sharpened_weapon = ""
+		player.dirty_character = true
 	_damage_target(player, hit, damage, "ranged" if is_ranged else "melee")
 	return {"ok": true, "hit": true, "target": hit["kind"],
-		"crit": crit, "ambush": ambush}
+		"crit": crit, "ambush": ambush, "riposte": riposte,
+		"sharpened": sharpened}
 
 
 ## Party frontline role: no client-authored targets, aggro, radius or damage.
@@ -3020,6 +3880,76 @@ func cmd_guardian_taunt(peer_id: int) -> Dictionary:
 		"x": player.position.x, "z": player.position.z, "count": count})
 	return {"ok": true, "count": count, "cooldown": player.guardian_timer,
 		"brace_seconds": player.guardian_brace, "energy": player.combat_energy}
+
+
+## Protect exactly one verified party ally from their next infected MELEE hit.
+## Client supplies an ally ID, never the enemy, damage amount or hit outcome.
+func cmd_guardian_intercept(peer_id: int, target_id: int) -> Dictionary:
+	var guardian: Player = players.get(peer_id)
+	if guardian == null or not _alive(guardian):
+		return {"ok": false, "reason": "dead"}
+	if target_id == peer_id:
+		return {"ok": false, "reason": "self"}
+	var ally: Player = players.get(target_id)
+	if ally == null or not _alive(ally):
+		return {"ok": false, "reason": "invalid_target"}
+	if guardian.guard_link_seconds > 0.0:
+		return {"ok": false, "reason": "already_guarding"}
+	if guardian.guard_link_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown",
+			"remaining": guardian.guard_link_cooldown}
+	if parties.group_of(peer_id) == 0 or parties.group_of(peer_id) != parties.group_of(target_id):
+		return {"ok": false, "reason": "not_in_party"}
+	if not GuardianTaunt.melee_equipped(guardian.inventory):
+		return {"ok": false, "reason": "need_melee"}
+	if not GuardianIntercept.can_guard(guardian, ally, parties, world):
+		return {"ok": false, "reason": "too_far_or_unsafe"}
+	if guardian.combat_energy < GuardianIntercept.ENERGY_COST:
+		return {"ok": false, "reason": "no_energy"}
+	guardian.combat_energy -= GuardianIntercept.ENERGY_COST
+	guardian.guard_link_target = target_id
+	guardian.guard_link_seconds = GuardianIntercept.DURATION
+	guardian.guard_link_cooldown = GuardianIntercept.COOLDOWN
+	guardian.action = {}
+	return {"ok": true, "target": target_id, "seconds": guardian.guard_link_seconds,
+		"cooldown": guardian.guard_link_cooldown}
+
+
+## Called only after an authentic zombie brain emits a MELEE hit.
+## One selected guardian takes reduced damage, fully preventing this hit's
+## physical wounds for the warded ally. AoE, acid and PvP use other paths.
+func _try_guardian_intercept(ally: Player, infected, raw_damage: float) -> bool:
+	if ally == null or infected == null or not infected.is_alive() or \
+			not is_finite(raw_damage) or raw_damage <= 0.0:
+		return false
+	var chosen: Player = null
+	var best_distance: float = INF
+	for guardian in players.values():
+		if not GuardianIntercept.can_intercept(guardian, ally, parties, world):
+			continue
+		var d: float = guardian.position.distance_squared_to(ally.position)
+		if d < best_distance - 0.001 or (absf(d - best_distance) <= 0.001 and
+				(chosen == null or guardian.id < chosen.id)):
+			chosen = guardian
+			best_distance = d
+	if chosen == null:
+		return false
+	# Consume before resolving the damage/death callback, so recursive hits
+	# and repeated network commands cannot spend the same shield twice.
+	chosen.guard_link_target = -1
+	chosen.guard_link_seconds = 0.0
+	var armor_id: String = chosen.inventory.armor
+	var equipped: bool = armor_id != "" and chosen.inventory.count(armor_id) > 0
+	var damage: float = Combat.apply_armor(GuardianIntercept.damage(raw_damage),
+		armor_id if equipped else "")
+	damage = _infected_damage_for(chosen, damage)
+	var taken: float = _hurt_player(chosen, damage)
+	chosen.dirty_character = true
+	events.append({"type": "guardian_intercept", "peer": ally.id,
+		"by": chosen.id, "zombie": infected.id, "damage": taken})
+	if not _alive(chosen):
+		_on_player_death(chosen, -infected.id)
+	return true
 
 
 ## Resolve active combat on the server; the client supplies only aim direction.
@@ -3089,12 +4019,16 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	if skill.has("party_heal"):
 		var treated: int = mini(heal_candidates.size(), RestorationStaff.MAX_TARGETS)
 		var total_healed: float = 0.0
+		var healing_events: Array = []
 		for index in range(treated):
 			var recipient: Player = heal_candidates[index]["player"]
 			var before_health: float = recipient.survival.health
 			recipient.survival.heal(float(skill["party_heal"]))
-			total_healed += recipient.survival.health - before_health
+			var gained: float = recipient.survival.health - before_health
+			total_healed += gained
+			healing_events.append({"recipient": recipient, "healed": gained})
 			recipient.dirty_character = true
+		_record_party_healing_threat(player, healing_events)
 		player.dirty_character = true
 		# Public effect contains no recipient IDs or medical details.
 		events.append({"type": "restoration_pulse", "peer": peer_id,
@@ -3115,6 +4049,7 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var use_line: bool = ranged or (max_hits > 1 and not skill.has("cleave_targets"))
 	var ignored: Dictionary = {}
 	var count := 0
+	var finishers := 0
 	var first_target: String = ""
 	var skilled_damage: float = float(skill["damage"]) * player.progression.combat_damage_multiplier(weapon) \
 		* (1.0 + player.skills.bonus("ranged_damage" if ranged else "melee_damage"))
@@ -3125,7 +4060,31 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		ignored[str(hit["kind"]) + ":" + str(hit["id"])] = true
 		if count == 0:
 			first_target = str(hit["kind"])
-		_damage_target(player, hit, skilled_damage, "ranged" if ranged else "melee")
+		# Execute bonus is resolved on pre-hit infected health. Do not use
+		# client health/target IDs, and never boost damage against survivors.
+		var hit_damage: float = skilled_damage
+		if hit["kind"] == "zombie" and skill.has("execute_threshold"):
+			var marked = zombies.get(hit["id"])
+			if marked != null and marked.is_alive():
+				var multiplier: float = FinishingStrike.multiplier(
+					marked.health, float(marked.data.get("health", 0.0)),
+					marked.elite, marked.raid_boss)
+				if multiplier > 1.0:
+					hit_damage *= multiplier
+					finishers += 1
+					events.append({"type": "finishing_strike",
+						"peer": peer_id, "id": marked.id,
+						"x": marked.position.x, "z": marked.position.z})
+		_damage_target(player, hit, hit_damage, "ranged" if ranged else "melee")
+		# The armor debuff begins AFTER this strike, benefiting subsequent
+		# real infected hits without giving the applicator free extra damage.
+		# Player PvP hits and enemies killed by the strike are never marked.
+		if hit["kind"] == "zombie" and skill.has("sunder_seconds"):
+			var sundered = zombies.get(hit["id"])
+			if sundered != null and sundered.apply_sunder(time,
+					float(skill["sunder_seconds"])):
+				events.append({"type": "armor_sunder", "id": sundered.id,
+					"x": sundered.position.x, "z": sundered.position.z})
 		# PvE-only crowd control follows a real resolved hit. Never stun players,
 		# corpses or raid bosses, and never trust client-provided stun duration.
 		if hit["kind"] == "zombie" and skill.has("stagger_seconds"):
@@ -3160,13 +4119,55 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		return {"ok": true, "hit": false, "hits": 0,
 			"cover_hit": cover_hit, "energy": player.combat_energy}
 	return {"ok": true, "hit": true, "target": first_target,
-		"hits": count, "energy": player.combat_energy}
+		"hits": count, "finishers": finishers,
+		"energy": player.combat_energy}
 
 
 ## Classless evasion: no client-supplied distance, speed, stamina or invulnerability.
 ## Reuse swept-in-small-steps world collision and restrict zombie immunity to 0.30 s.
 ## Timed, one-hit melee parry. Facing, ownership and the actual enemy strike
 ## are evaluated on the authoritative server; no client target is accepted.
+## The caller chooses no enemy: server selects the nearest visible and
+## genuinely stunned infected. Bosses, players and barriers are excluded.
+func cmd_stagger_finisher(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if player.finisher_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown", "remaining": player.finisher_cooldown}
+	if player.attack_timer > 0.0 or player.skill_timer > 0.0:
+		return {"ok": false, "reason": "attack_lock"}
+	if not MeleeParry.equipped(player.inventory):
+		return {"ok": false, "reason": "need_melee"}
+	if not player.position.is_finite() or _is_safe(player.position):
+		return {"ok": false, "reason": "safe_zone"}
+	if player.combat_energy < StaggerFinisher.ENERGY_COST:
+		return {"ok": false, "reason": "no_energy"}
+	var target = StaggerFinisher.nearest(world, player, zombies)
+	if target == null:
+		return {"ok": false, "reason": "no_staggered_target"}
+	var damage: float = StaggerFinisher.damage(
+		player.inventory.weapon, player.progression, player.skills)
+	player.combat_energy -= StaggerFinisher.ENERGY_COST
+	player.finisher_cooldown = StaggerFinisher.COOLDOWN_SECONDS
+	player.attack_timer = StaggerFinisher.ATTACK_LOCK
+	player.skill_timer = maxf(player.skill_timer, StaggerFinisher.ATTACK_LOCK)
+	player.parry_window = 0.0
+	player.action = {}
+	player.dirty_character = true
+	# A finishing blow consumes the once-only stagger even if the target lives.
+	target.stagger_seconds = 0.0
+	target.attack_timer = maxf(target.attack_timer, StaggerFinisher.RECOVERY_SECONDS)
+	_damage_target(player, {"kind": "zombie", "id": target.id}, damage, "melee")
+	events.append({"type": "stagger_finisher", "peer": peer_id,
+		"zombie": target.id, "killed": not target.is_alive()})
+	return {"ok": true, "target": target.id, "damage": damage,
+		"killed": not target.is_alive(), "cooldown": player.finisher_cooldown,
+		"energy": player.combat_energy}
+
+
 func cmd_parry(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -3187,6 +4188,7 @@ func cmd_parry(peer_id: int) -> Dictionary:
 	player.survival.stamina_recovery_delay = Defs.STAMINA_RECOVERY_DELAY
 	player.parry_cooldown = MeleeParry.COOLDOWN_SECONDS
 	player.parry_window = MeleeParry.WINDOW_SECONDS
+	ParryRiposte.clear(player)
 	player.attack_timer = maxf(player.attack_timer, MeleeParry.ATTACK_LOCK)
 	player.action = {}
 	player.dirty_character = true
@@ -3223,6 +4225,7 @@ func cmd_dodge(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	player.dodge_timer = Evasion.COOLDOWN
 	player.dodge_immunity = Evasion.INVULNERABLE_TO_INFECTED
 	player.parry_window = 0.0 # An actual dodge cancels the remaining parry.
+	ParryRiposte.clear(player)
 	player.attack_timer = maxf(player.attack_timer, Evasion.ATTACK_LOCK)
 	player.action = {}
 	player.noise_radius = Defs.SPRINT_NOISE_RADIUS
@@ -3233,7 +4236,44 @@ func cmd_dodge(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		"z": new_position.z, "stamina": player.survival.stamina}
 
 
-func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
+## A contributor may voluntarily pass only their OWN active raid turn.
+## The server owns identities, world distance, timers and the bag contents.
+func cmd_raid_skip_turn(peer_id: int, entity_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not bags.has(entity_id):
+		return {"ok": false, "reason": "nothing_there"}
+	var bag: Dictionary = bags[entity_id]
+	if _distance_xz(player.position, bag) > Defs.REACH + 0.5:
+		return {"ok": false, "reason": "too_far"}
+	var guards: int = SupplyDrops.living_guards(bag, zombies)
+	if guards > 0:
+		return {"ok": false, "reason": "guards_alive", "remaining": guards}
+	if not RaidRoundRobin.active(bag, time):
+		return {"ok": false, "reason": "not_active"}
+	if not RaidLoot.can_open(bag, player, time):
+		return {"ok": false, "reason": "raid_reserved", "remaining": RaidLoot.remaining(bag, time)}
+	if not LootRights.can_loot(bag, player, time):
+		return {"ok": false, "reason": "reserved"}
+	return RaidRoundRobin.skip_turn(bag, player, time)
+
+
+## Explicit type selection only applies to live round-robin raid bags;
+## ordinary scavenging stays unchanged, including the keyboard pickup.
+func cmd_raid_claim_selected(peer_id: int, entity_id: int, item_id: String) -> Dictionary:
+	if item_id.is_empty() or item_id.length() > 96:
+		return {"ok": false, "reason": "invalid_item"}
+	if not bags.has(entity_id):
+		return {"ok": false, "reason": "nothing_there"}
+	if not RaidRoundRobin.active(bags[entity_id], time):
+		return {"ok": false, "reason": "not_active"}
+	return cmd_loot(peer_id, entity_id, item_id)
+
+
+func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
@@ -3253,6 +4293,52 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 				"remaining": RaidLoot.remaining(bag, time)}
 		if not LootRights.can_loot(bag, player, time):
 			return {"ok": false, "reason": "reserved"}
+		# Optional MMORPG raid mode: each eligible survivor claims one
+		# bounded share at a time. The physical bag is never cloned.
+		if RaidRoundRobin.active(bag, time):
+			var claim: Dictionary = RaidRoundRobin.offer(bag, player, time, requested_item)
+			if not bool(claim.get("ok", false)):
+				return {"ok": false, "reason": claim.get("reason", "not_your_turn"),
+					"remaining": float(claim.get("remaining", 0.0))}
+			var item_id: String = str(claim["item"])
+			var desired: int = int(claim["quantity"])
+			var leftover: Dictionary = _give_items(player, {item_id: desired})
+			var received: int = desired - int(leftover.get(item_id, 0))
+			if received <= 0:
+				return {"ok": false, "reason": "inventory_full"}
+			var unclaimed: int = int(bag["items"].get(item_id, 0)) - received
+			if unclaimed > 0:
+				bag["items"][item_id] = unclaimed
+			else:
+				bag["items"].erase(item_id)
+			RaidRoundRobin.complete(bag, int(claim["index"]), time)
+			_award(player, "scavenging", 3.0)
+			var complete: bool = bag["items"].is_empty()
+			if complete:
+				bags.erase(entity_id)
+			return {"ok": true, "complete": complete, "item": item_id,
+				"quantity": received, "round_robin": true}
+		# Need/Greed freezes only the core trophy; ordinary supplies in the
+		# same raid bag are always available to eligible scavengers.
+		var protected: Dictionary = RaidNeedGreed.protection(bag, player, time)
+		if bool(protected.get("locked", false)):
+			var supplies: Dictionary = (bag["items"] as Dictionary).duplicate()
+			supplies.erase(RaidNeedGreed.ITEM_ID)
+			if supplies.is_empty():
+				return {"ok": false, "reason": str(protected["reason"]),
+					"remaining": float(protected.get("remaining", 0.0))}
+			var before_supplies: int = _item_total(supplies)
+			var supply_left: Dictionary = _give_items(player, supplies)
+			if _item_total(supply_left) >= before_supplies:
+				return {"ok": false, "reason": "inventory_full"}
+			for supply_id in supplies:
+				if supply_left.has(supply_id):
+					bag["items"][supply_id] = int(supply_left[supply_id])
+				else:
+					bag["items"].erase(supply_id)
+			_award(player, "scavenging", 3.0)
+			return {"ok": true, "complete": false, "need_greed": true,
+				"core_locked": true}
 		var taken_before: int = _item_total(bag["items"])
 		var left := _give_items(player, bag["items"])
 		if _item_total(left) < taken_before:
@@ -3328,9 +4414,13 @@ func _apply_skill_bonuses(player: Player) -> void:
 
 ## The one place XP is granted. Callers pass what the action was worth; refused actions never call it.
 func _award(player: Player, skill: String, amount: float) -> void:
-	var result: Dictionary = player.skills.add_xp(skill, amount)
+	# The only place that consumes rested credit. Refused actions never call
+	# this method; no extra reward is spent when the skill is already maxed.
+	var extra: int = RestedTraining.bonus_for(amount, player.rested_xp_credit)
+	var result: Dictionary = player.skills.add_xp(skill, amount + float(extra))
 	if int(result["gained"]) <= 0:
 		return
+	player.rested_xp_credit = maxi(0, player.rested_xp_credit - extra)
 	player.pending_xp[skill] = int(player.pending_xp.get(skill, 0)) + int(result["gained"])
 	player.dirty_skills = true
 	player.dirty_character = true
@@ -3528,12 +4618,17 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		var equipped_weapon: String = attacker.inventory.weapon
 		var physically_owned: bool = equipped_weapon != "" and attacker.inventory.count(equipped_weapon) > 0
 		damage = Combat.against_infected(damage, equipped_weapon, physically_owned)
+		damage = AntisepticEdge.damage(damage, attacker.inventory,
+			attacker.edge_coating_weapon, attacker.edge_coating_seconds, zombie)
 		damage *= 1.0 + attacker.skills.bonus("zombie_damage")
 		# A modest PvE-only team bonus: exact marked infected and living
 		# party member in range. Never applied to player-vs-player attacks.
 		damage = PartyFocus.damage(damage, zombie.is_alive() and _alive(attacker) and
 			PartyFocus.in_range(attacker.position, zombie.position) and
 			parties.has_focus(attacker.id, zombie.id, time))
+		# The same short-lived exposed state benefits nearby survivors
+		# regardless of weapon choice, but never applies to player PvP.
+		damage = SunderMark.amplify(damage, zombie, time)
 		# Boss armor recovery is applied only to the current live raid boss,
 		# after an actual server-resolved slam; no PvP or other infected bonus.
 		if zombie.id == raid_boss_id:
@@ -3568,6 +4663,22 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 			if DailyBounties.record_kill(attacker.daily_bounty, _refresh_daily(attacker)):
 				attacker.dirty_character = true
 			_on_zombie_death(zombie, attacker)
+		elif zombie.id == raid_boss_id and not raid_pending_slam.is_empty() and \
+				physically_owned and _alive(attacker) and attacker.position.is_finite() and \
+				not _is_safe(attacker.position) and \
+				Vector2(attacker.position.x, attacker.position.z).distance_to(
+					Vector2(zombie.position.x, zombie.position.z)) <= RaidInterrupt.MAX_DISTANCE:
+			# Only server-applied, nonlethal hits with an owned, equipped weapon
+			# can count. The warning tracks distinct real party members.
+			if RaidInterrupt.record_hit(raid_pending_slam, zombie, attacker.id,
+					parties.group_of(attacker.id), damage, time):
+				var center := Vector2(float(raid_pending_slam["x"]),
+					float(raid_pending_slam["z"]))
+				raid_pending_slam = {}
+				var exposed: float = RaidRecovery.window_seconds(zombie)
+				raid_exposed_until = maxf(raid_exposed_until, time + exposed)
+				events.append({"type": "raid_interrupted", "id": zombie.id,
+					"x": center.x, "z": center.y, "exposed_seconds": exposed})
 	else:
 		var victim: Player = players.get(hit["id"])
 		if victim == null or not _alive(victim):
@@ -3698,6 +4809,20 @@ func _party_award_assists(killer: Player, zombie) -> void:
 
 func _on_zombie_death(zombie, killer: Player) -> void:
 	parties.clear_focus_target(zombie.id)
+	# A caravan is defended only after every originally summoned infected
+	# is confirmed dead, not when the wave disappears or its timer expires.
+	for wave in caravan_ambushes:
+		if time >= float(wave["expires"]) or not CaravanAmbush.record_kill(wave, zombie.id):
+			continue
+		var courier: Player = players.get(int(wave.get("owner", -1)))
+		if (courier != null and _alive(courier) and courier.caravan_ambushed and
+				not courier.caravan_defended and courier.deaths == int(wave.get("deaths", -1)) and
+				courier.caravan_state == wave.get("route", {}) and
+				courier.inventory.count(str(courier.caravan_view.get("cargo", ""))) > 0):
+			courier.caravan_defended = true
+			courier.dirty_character = true
+			events.append({"type": "caravan_defended", "peer": courier.id})
+		break
 	var zone: int = world.zone_at(zombie.position.x, zombie.position.z)
 	var loot_rng := RandomNumberGenerator.new()
 	loot_rng.seed = WorldGen.mix(zombie.id, int(time * 10.0), world.world_seed, 5)
@@ -3712,17 +4837,24 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 			loot[item_id] = int(loot.get(item_id, 0)) + int(RaidEncounter.treasure(zone)[item_id])
 		raid_boss_id = -1
 		raid_pending_slam = {}
+		raid_pending_cone = {}
 		raid_exposed_until = 0.0
 		_clear_raid_minions()
 		raid_wave = 0
 		events.append({"type": "raid_defeated", "id": zombie.id,
 			"x": zombie.position.x, "z": zombie.position.z})
 	var loot_bag_id: int = _make_bag(zombie.position, loot, -1 if zombie.raid_boss else killer.id)
+	if loot_bag_id >= 0 and not _is_safe(zombie.position):
+		CorpseScent.mark(bags[loot_bag_id], time)
 	if zombie.raid_boss and loot_bag_id >= 0:
 		# Entitlements are frozen at the confirmed kill; guests use object
 		# identity, accounts survive reconnect. No client-authored loot rights.
 		var eligible: Array = RaidLoot.eligible(killer, zombie, players, parties, world, time)
 		RaidLoot.reserve(bags[loot_bag_id], eligible, time)
+		if parties.loot_mode_for(killer.id) == "round_robin" and eligible.size() > 1:
+			RaidRoundRobin.activate(bags[loot_bag_id], eligible, zombie.id, time)
+		elif parties.loot_mode_for(killer.id) == "need_greed" and eligible.size() > 1:
+			RaidNeedGreed.activate(bags[loot_bag_id], eligible, zombie.id, time)
 	if spawn_state.has(zombie.spawn_id):
 		spawn_state[zombie.spawn_id] = {"zombie": -1, "next": time + (240.0 if zone < 2 else 360.0)}
 	# The client must learn when ALL original guards are down. A per-cache
@@ -3751,21 +4883,39 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 ## Full-loot deaths occur in red/black. Green/yellow deaths retain gear.
 func _on_player_death(victim: Player, killer: int) -> void:
 	victim.flare_seconds = 0.0
+	victim.storm_insulator_seconds = 0.0
 	_cancel_recall(victim, "dead")
 	_abort_training(victim.id, "death")
 	_cancel_market_seller(victim.id)
 	_cancel_player_trade(victim.id, "dead")
 	victim.deaths += 1
+	# A courier must survive their defense; a later respawn cannot reclaim it.
+	victim.caravan_defended = false
 	victim.dirty_character = true
 	victim.action = {}
+	victim.sharpened_weapon = ""
+	victim.sharpened_hits = 0
+	victim.plated_armor = ""
+	victim.plated_hits = 0
 	victim.ruin_survey = {} # Dead scouts cannot retain private map beacons.
+	victim.prospect_mark = {} # Death clears paid exploration marks.
 	victim.dodge_immunity = 0.0
+	ParryRiposte.clear(victim)
 	victim.guardian_brace = 0.0
+	victim.guard_link_target = -1
+	victim.guard_link_seconds = 0.0
+	for teammate in players.values():
+		if teammate.guard_link_target == victim.id:
+			teammate.guard_link_target = -1
+			teammate.guard_link_seconds = 0.0
 	victim.spore_filter_seconds = 0.0
+	victim.soft_sole_seconds = 0.0
 	victim.chain_wrap_seconds = 0.0
+	victim.tire_grip_seconds = 0.0
 	parties.clear_standard_by(victim.id)
 	parties.cancel_ready_check_for(victim.id)
 	parties.cancel_focus_by(victim.id)
+	parties.clear_ping_by(victim.id)
 	victim.meal_seconds = 0.0
 	victim.meal_tier = 0
 	victim.defense_target = -1
@@ -3776,7 +4926,9 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.keep_inventory_on_respawn = not drops_gear
 	if drops_gear:
 		var everything: Dictionary = victim.inventory.take_everything()
-		_make_bag(victim.position, everything)
+		var death_bag_id: int = _make_bag(victim.position, everything)
+		if death_bag_id >= 0 and not _is_safe(victim.position):
+			CorpseScent.mark(bags[death_bag_id], time)
 	victim.respawn_timer = Defs.RESPAWN_SECONDS
 	victim.dirty_inventory = true
 	events.append({"type": "death", "peer": victim.id, "killer": killer, "full_loot": drops_gear, "zone": zone})
@@ -3794,6 +4946,7 @@ func tick(delta: float) -> void:
 	_tick_trades()
 	parties.expire(time)
 	_tick_players(delta)
+	_tick_siege_charges()
 	if tick_count % WorldDiscovery.SCAN_EVERY_TICKS == 0:
 		_tick_site_discoveries()
 	_tick_training()
@@ -3805,10 +4958,97 @@ func tick(delta: float) -> void:
 	if tick_count % SiegeWaves.CHECK_EVERY_TICKS == 0:
 		_tick_siege_waves()
 	_tick_raid_encounter()
+	_tick_lightning()
 	_tick_zombies(delta)
 	_tick_acid_pools()
+	_tick_ember_pools()
 	_tick_recalls()
 	_tick_world(delta)
+
+
+## One server-wide storm hazard, never selected by a client. It is announced
+## before damage, then resolved at the locked world coordinate. There can be
+## only one pending bolt, independent of the number of connected players.
+func _tick_lightning() -> void:
+	if not lightning_pending.is_empty():
+		if time < float(lightning_pending["at"]):
+			return
+		var strike: Dictionary = lightning_pending
+		lightning_pending = {}
+		if not StormLightning.strike_valid(world, strike, time):
+			return
+		var center := Vector2(float(strike["x"]), float(strike["z"]))
+		for survivor in players.values():
+			if not _alive(survivor) or _is_safe(survivor.position) or \
+					not StormLightning.in_blast(center, survivor.position):
+				continue
+			if survivor.dodge_immunity > 0.0:
+				events.append({"type": "evaded", "peer": survivor.id, "zombie": -1})
+				continue
+			var shock_damage: float = StormInsulator.lightning_damage(
+				StormLightning.DAMAGE, survivor.storm_insulator_seconds)
+			var taken: float = survivor.survival.hurt(shock_damage)
+			if taken > 0.0:
+				_dismount(survivor, true)
+				survivor.dirty_character = true
+				events.append({"type": "hit", "kind": "player",
+					"id": survivor.id, "damage": taken, "by": -1})
+			if not _alive(survivor):
+				_on_player_death(survivor, -1)
+		events.append({"type": "lightning_struck", "x": center.x,
+			"z": center.y, "radius": StormLightning.RADIUS})
+		return
+	if time < next_lightning_at:
+		return
+	next_lightning_at = time + StormLightning.RETRY_INTERVAL
+	var candidates: Array = players.keys()
+	candidates.sort() # Deterministic regardless of session insertion order.
+	for peer in candidates:
+		var survivor: Player = players[peer]
+		if not _alive(survivor):
+			continue
+		var warning: Dictionary = StormLightning.create_warning(
+			world, survivor.position, time)
+		if warning.is_empty():
+			continue
+		lightning_pending = warning
+		next_lightning_at = time + StormLightning.CHECK_INTERVAL
+		events.append({"type": "lightning_warning",
+			"x": warning["x"], "z": warning["z"],
+			"radius": StormLightning.RADIUS, "at": warning["at"]})
+		break
+
+
+## Armed charges resolve exactly once. The charge has been paid for and fixed
+## to a real wall; disconnecting or moving cannot move/double-spend the blast.
+func _tick_siege_charges() -> void:
+	var ready: Array = siege_charges.keys()
+	ready.sort()
+	for charge_id in ready:
+		var charge: Dictionary = siege_charges.get(charge_id, {})
+		if charge.is_empty() or time < float(charge.get("until", INF)):
+			continue
+		siege_charges.erase(charge_id) # Remove before applying damage or broadcasting.
+		var x: float = float(charge["x"])
+		var z: float = float(charge["z"])
+		if not SiegeCharge.valid_detonation(world, charge, barricades):
+			events.append({"type": "siege_charge_fizzled", "id": charge_id,
+				"x": x, "z": z})
+			continue
+		var wall_id: int = int(charge["wall"])
+		var prior_hp: float = float(barricades[wall_id]["hp"])
+		var broken: bool = damage_barricade(wall_id, SiegeCharge.DAMAGE)
+		var hp: float = 0.0 if broken else float(barricades[wall_id]["hp"])
+		events.append({"type": "siege_charge_detonated", "id": charge_id,
+			"x": x, "z": z, "wall": wall_id, "hp": hp,
+			"damage": prior_hp - hp, "broken": broken})
+		# Explosions attract infected to the actual wall position, never by
+		# falsely marking all nearby players as loud. Reuse bounded sound lures.
+		if decoys.size() < NoiseDecoy.MAX_ACTIVE:
+			var noise_id: int = new_id()
+			decoys[noise_id] = {"id": noise_id, "x": x,
+				"y": world.height_at(x, z), "z": z,
+				"owner": -1, "expires": time + SiegeCharge.NOISE_SECONDS}
 
 
 ## Completion occurs after all AI, melee, infection and acid damage in tick().
@@ -3869,18 +5109,44 @@ func _tick_players(delta: float) -> void:
 	for player in players.values():
 		if not RuinSurvey.active(player.ruin_survey, time, opened_crates):
 			player.ruin_survey = {}
+		if not ProspectingChart.active(player.prospect_mark, time, depleted):
+			player.prospect_mark = {}
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.mount_cooldown = maxf(0.0, player.mount_cooldown - maxf(0.0, delta))
 		player.smoke_cooldown = maxf(0.0, player.smoke_cooldown - maxf(0.0, delta))
+		player.edge_coating_seconds = AntisepticEdge.tick(player.inventory,
+			player.edge_coating_weapon, player.edge_coating_seconds,
+			maxf(0.0, delta), _alive(player))
+		if player.edge_coating_seconds <= 0.0:
+			player.edge_coating_weapon = ""
+		if player.storm_insulator_seconds > 0.0:
+			player.storm_insulator_seconds = StormInsulator.remaining(
+				player.storm_insulator_seconds, delta)
+			player.dirty_character = true
 		if player.flare_seconds > 0.0:
 			player.flare_seconds = HandFlare.remaining(player.flare_seconds, delta)
+			player.dirty_character = true
+		if player.soft_sole_seconds > 0.0:
+			player.soft_sole_seconds = maxf(0.0,
+				player.soft_sole_seconds - maxf(0.0, delta))
 			player.dirty_character = true
 		if player.chain_wrap_seconds > 0.0:
 			player.chain_wrap_seconds = maxf(0.0,
 				player.chain_wrap_seconds - maxf(0.0, delta))
 			player.dirty_character = true
+		if player.tire_grip_seconds > 0.0:
+			player.tire_grip_seconds = maxf(0.0,
+				player.tire_grip_seconds - maxf(0.0, delta))
+			player.dirty_character = true
+		if player.inventory.count(Mounts.ITEM_ID) < 1 and player.bike_integrity < BikeIntegrity.MAX_INTEGRITY:
+			player.bike_integrity = BikeIntegrity.MAX_INTEGRITY
+			player.dirty_character = true
+		if player.inventory.count(Mounts.ITEM_ID) < 1 and player.bike_service_meters > 0.0:
+			player.bike_service_meters = 0.0
+			player.dirty_character = true
 		if player.mounted and (not _alive(player) or
 				player.inventory.count(Mounts.ITEM_ID) < 1 or
+				not BikeIntegrity.can_ride(player.bike_integrity) or
 				BikeCargo.movement_factor(player.inventory,
 					player.skills.bonus("carry_capacity"), true) < 0.9999 or
 				player.survival.fracture > 0.0):
@@ -3889,11 +5155,28 @@ func _tick_players(delta: float) -> void:
 		player.pvp_infamy = PvpInfamy.decay(old_infamy, delta)
 		if player.pvp_infamy < old_infamy:
 			player.dirty_character = true
+		if not FieldWhetstone.valid_state(player.sharpened_weapon,
+				player.sharpened_hits, player.inventory):
+			player.sharpened_weapon = ""
+			player.sharpened_hits = 0
+			player.dirty_character = true
+		if not FieldArmorPlate.valid_state(player.plated_armor,
+				player.plated_hits, player.inventory):
+			player.plated_armor = ""
+			player.plated_hits = 0
+			player.dirty_character = true
 		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
 		player.party_aid_timer = maxf(0.0, player.party_aid_timer - maxf(0.0, delta))
 		player.feast_timer = maxf(0.0, player.feast_timer - maxf(0.0, delta))
 		player.guardian_timer = maxf(0.0, player.guardian_timer - maxf(0.0, delta))
 		player.guardian_brace = maxf(0.0, player.guardian_brace - maxf(0.0, delta))
+		player.guard_link_cooldown = maxf(0.0, player.guard_link_cooldown - maxf(0.0, delta))
+		player.guard_link_seconds = maxf(0.0, player.guard_link_seconds - maxf(0.0, delta))
+		if player.guard_link_seconds > 0.0 and not GuardianIntercept.can_guard(
+				player, players.get(player.guard_link_target), parties, world):
+			player.guard_link_seconds = 0.0
+		if player.guard_link_seconds <= 0.0:
+			player.guard_link_target = -1
 		# A disconnected teammate or removed weapon cannot prolong protection.
 		if player.guardian_brace > 0.0 and (parties.members_of(player.id).size() < 2 or
 				not GuardianTaunt.melee_equipped(player.inventory)):
@@ -3909,7 +5192,10 @@ func _tick_players(delta: float) -> void:
 		player.dodge_timer = maxf(player.dodge_timer - delta, 0.0)
 		player.dodge_immunity = maxf(player.dodge_immunity - delta, 0.0)
 		player.parry_cooldown = maxf(0.0, player.parry_cooldown - maxf(0.0, delta))
+		player.finisher_cooldown = maxf(0.0,
+			player.finisher_cooldown - maxf(0.0, delta))
 		player.parry_window = maxf(0.0, player.parry_window - maxf(0.0, delta))
+		ParryRiposte.tick(player, delta)
 		player.noise_timer = maxf(player.noise_timer - delta, 0.0)
 		if player.noise_timer <= 0.0:
 			player.noise_radius = 0.0
@@ -3975,11 +5261,28 @@ func _tick_players(delta: float) -> void:
 		var worn_armor: String = player.inventory.armor
 		if worn_armor != "" and player.inventory.count(worn_armor) <= 0:
 			worn_armor = ""
+		var at_warm_fire: bool = FieldCampfire.has_warmth(campfires,
+			player.position, time)
+		var under_tarp: bool = PortableShelter.covers(shelters, player.position, time)
+		var old_wetness: float = player.survival.wetness
+		player.survival.wetness = WetClothing.next_wetness(old_wetness, delta,
+			conditions, worn_armor, under_tarp, at_warm_fire)
+		if not is_equal_approx(old_wetness, player.survival.wetness):
+			player.dirty_character = true
+		# Average the old and new moisture when a large simulation tick
+		# crosses the rain-to-soaked boundary. A fire always overrides cold.
+		var average_wet: float = 0.5 * (old_wetness + player.survival.wetness)
 		var weather_severity: float = Weather.effective_severity(conditions, worn_armor)
-		if FieldCampfire.has_warmth(campfires, player.position, time):
+		# Regional server wind now raises exposure in cold open terrain. The
+		# existing fire, tarp and thermal-wrap protection applies afterward.
+		var wind: Vector2 = Weather.wind_at(world, player.position.x, player.position.z, time)
+		weather_severity = clampf(weather_severity +
+			WetClothing.cold_penalty(average_wet, conditions, worn_armor) +
+			WindChill.penalty(conditions, wind, average_wet, worn_armor), 0.0, 1.0)
+		if at_warm_fire:
 			weather_severity = 0.0
 		weather_severity = PortableShelter.exposure_severity(weather_severity,
-			PortableShelter.covers(shelters, player.position, time))
+			under_tarp, StormTarpAnchors.anchored_covers(shelters, player.position, time))
 		damage += player.survival.weather_tick(delta, weather_severity)
 		# The filter only protects for the portion of a tick it actually covers.
 		# An oversized server tick cannot extend the buff past its remaining time.
@@ -4109,13 +5412,22 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 		_award(player, gather_skill, (3.0 + 2.0 * float(amount - left)) * float(int(node["tier"])))
 	# No XP for items that did not fit, nor for repeat attempts on depleted nodes.
 	player.progression.award_gather(String(node["kind"]), int(node["tier"]), amount - left)
+	# Finishing a genuine resource harvest generates sound exactly once. This
+	# uses the same short-lived channel as footsteps and gunfire; existing
+	# infected hearing, chase leashes, safe zones and camouflage rules apply.
+	var harvest_noise: float = GatheringNoise.radius(String(node["kind"]),
+		player.crouching, amount - left)
+	if harvest_noise > 0.0:
+		player.noise_radius = maxf(player.noise_radius, harvest_noise)
+		player.noise_timer = maxf(player.noise_timer, GatheringNoise.SOUND_SECONDS)
 	player.dirty_inventory = true
 	player.dirty_character = true
 	player.action = {}
 	depleted[int(node["id"])] = time + float(info["respawn"])
 	events.append({"type": "gathered", "peer": player.id, "item": item_id,
 		"amount": amount - left, "node": node["id"],
-		"herbs": herbs_added, "outpost_bonus": paid_outpost_bonus})
+		"herbs": herbs_added, "harvest_noise": harvest_noise,
+		"outpost_bonus": paid_outpost_bonus})
 
 
 ## Rare dangerous-zone group boss. One live boss per simulation and a 10-minute
@@ -4126,6 +5438,7 @@ func _tick_raid_encounter() -> void:
 		if boss == null or not boss.is_alive():
 			raid_boss_id = -1
 			raid_pending_slam = {}
+			raid_pending_cone = {}
 			raid_exposed_until = 0.0
 			_clear_raid_minions()
 			raid_wave = 0
@@ -4138,6 +5451,7 @@ func _tick_raid_encounter() -> void:
 				"x": at.x, "z": at.y})
 			raid_boss_id = -1
 			raid_pending_slam = {}
+			raid_pending_cone = {}
 			raid_exposed_until = 0.0
 			_clear_raid_minions()
 			raid_wave = 0
@@ -4158,15 +5472,39 @@ func _tick_raid_encounter() -> void:
 				raid_pending_slam = {}
 				_resolve_raid_slam(boss_id, center)
 			return
+		if not raid_pending_cone.is_empty():
+			if time >= float(raid_pending_cone["at"]):
+				var strike: Dictionary = raid_pending_cone
+				raid_pending_cone = {}
+				_resolve_raid_cone(strike)
+			return
 		if time >= raid_next_slam_at and boss.target_id != -1:
 			raid_pending_slam = {"id": raid_boss_id,
 				"x": at.x, "z": at.y,
-				"at": time + RaidEncounter.SLAM_WARNING}
+				"at": time + RaidEncounter.SLAM_WARNING,
+				"party": 0, "contributors": {}}
 			raid_next_slam_at = time + RaidEncounter.slam_cooldown(boss)
 			events.append({"type": "raid_warning", "id": raid_boss_id,
 				"x": at.x, "z": at.y,
 				"radius": RaidEncounter.SLAM_RADIUS,
 				"seconds": RaidEncounter.SLAM_WARNING})
+			return
+		if raid_next_cone_at > 0.0 and time >= raid_next_cone_at:
+			var target: Player = players.get(boss.target_id)
+			if target != null and _alive(target) and not _is_safe(target.position) and \
+					world.zone_at(target.position.x, target.position.z) >= RaidEncounter.MIN_ZONE and \
+					RaidCone.can_aim(boss.position, target.position):
+				var aim: Vector2 = RaidCone.direction(boss.position, target.position)
+				raid_pending_cone = {"id": raid_boss_id, "x": boss.position.x,
+					"y": boss.position.y, "z": boss.position.z,
+					"dx": aim.x, "dz": aim.y,
+					"at": time + RaidCone.WINDUP_SECONDS}
+				raid_next_cone_at = time + RaidCone.cooldown(boss)
+				events.append({"type": "raid_cone_warning", "id": raid_boss_id,
+					"x": boss.position.x, "z": boss.position.z,
+					"dx": aim.x, "dz": aim.y, "reach": RaidCone.REACH,
+					"half_angle": RaidCone.HALF_ANGLE_DEGREES,
+					"seconds": RaidCone.WINDUP_SECONDS})
 		return
 
 	if time < RaidEncounter.START_DELAY or \
@@ -4195,6 +5533,8 @@ func _tick_raid_encounter() -> void:
 	raid_minions.clear()
 	raid_started_at = time
 	raid_exposed_until = 0.0
+	raid_pending_cone = {}
+	raid_next_cone_at = time + 16.0
 	last_raid_spawn_time = time
 	raid_next_slam_at = time + 9.0
 	events.append({"type": "raid_started", "id": spawn_id,
@@ -4248,6 +5588,39 @@ func _infected_damage_for(victim: Player, armored_damage: float) -> float:
 	return GuardianTaunt.brace_damage(armored_damage, victim.guardian_brace,
 		GuardianTaunt.melee_equipped(victim.inventory),
 		parties.members_of(victim.id).size() >= 2)
+
+
+## A telegraphed cone locks the boss position and direction at wind-up.
+## No attacker-supplied victim list; dodge, safety and armor are verified at impact.
+func _resolve_raid_cone(strike: Dictionary) -> void:
+	var boss_id: int = int(strike.get("id", -1))
+	var boss = zombies.get(boss_id)
+	if boss_id != raid_boss_id or boss == null or not boss.is_alive() or not boss.raid_boss:
+		return
+	var origin := Vector3(float(strike["x"]), float(strike["y"]), float(strike["z"]))
+	var direction := Vector2(float(strike["dx"]), float(strike["dz"]))
+	if not origin.is_finite() or not direction.is_finite() or absf(direction.length_squared() - 1.0) > 0.01:
+		return
+	for survivor in players.values():
+		if not _alive(survivor) or _is_safe(survivor.position) or \
+				world.zone_at(survivor.position.x, survivor.position.z) < RaidEncounter.MIN_ZONE or \
+				not RaidCone.in_sector(origin, direction, survivor.position):
+			continue
+		if survivor.dodge_immunity > 0.0:
+			events.append({"type": "evaded", "peer": survivor.id, "zombie": boss_id})
+			continue
+		var damage: float = Combat.apply_armor(RaidCone.damage(boss), survivor.inventory.armor)
+		damage = _infected_damage_for(survivor, damage)
+		var taken: float = survivor.survival.hurt(damage)
+		if taken > 0.0:
+			_dismount(survivor, true)
+		events.append({"type": "hit", "kind": "player", "id": survivor.id,
+			"damage": damage, "by": -boss_id})
+		if not _alive(survivor):
+			_on_player_death(survivor, -boss_id)
+	events.append({"type": "raid_cone_struck", "id": boss_id,
+		"x": origin.x, "z": origin.z, "dx": direction.x,
+		"dz": direction.y, "reach": RaidCone.REACH})
 
 
 func _resolve_raid_slam(boss_id: int, center: Vector2) -> void:
@@ -4428,6 +5801,54 @@ func _tick_acid_pools() -> void:
 				_on_player_death(survivor, -int(pool["source"]))
 
 
+## Bounded environmental burning: no player damage, global overlap guard,
+## cover checks every second, and real kill credit through _damage_target.
+func _tick_ember_pools() -> void:
+	if ember_pools.is_empty():
+		_ember_last_hit.clear()
+		return
+	var ids: Array = ember_pools.keys()
+	ids.sort()
+	for field_id in ids:
+		var field: Dictionary = ember_pools[field_id]
+		if EmberFlask.remaining(field, time) <= 0.0:
+			ember_pools.erase(field_id)
+			continue
+		var caster: Player = players.get(int(field["owner"]))
+		if caster == null or not _alive(caster) or _is_safe(caster.position):
+			ember_pools.erase(field_id)
+			continue
+		if time < float(field["next_tick"]):
+			continue
+		field["next_tick"] = time + EmberFlask.TICK_SECONDS
+		var center := Vector2(float(field["x"]), float(field["z"]))
+		var candidates: Array = zombies.keys()
+		candidates.sort()
+		var hits: int = 0
+		for target_id in candidates:
+			if hits >= EmberFlask.MAX_TARGETS_PER_TICK:
+				break
+			var infected = zombies.get(target_id)
+			if infected == null or not infected.is_alive():
+				continue
+			if time - float(_ember_last_hit.get(infected.id, -INF)) < EmberFlask.TICK_SECONDS:
+				continue
+			if not EmberFlask.affects(world, center, infected.position):
+				continue
+			_ember_last_hit[infected.id] = time
+			var burn: float = EmberFlask.DAMAGE_PER_TICK * (
+				0.5 if infected.raid_boss else 1.0)
+			_damage_target(caster, {"kind": "zombie", "id": infected.id},
+				burn, "ranged")
+			hits += 1
+	if ember_pools.is_empty():
+		_ember_last_hit.clear()
+	elif _ember_last_hit.size() > 1024:
+		for target_id in _ember_last_hit.keys():
+			if time - float(_ember_last_hit[target_id]) > EmberFlask.DURATION:
+				_ember_last_hit.erase(target_id)
+
+
 ## Single source of truth for infected sight and owner HUD replication.
 func _visual_signature_for(player: Player) -> float:
 	var armor_id: String = player.inventory.armor
@@ -4446,13 +5867,16 @@ func _tick_zombies(delta: float) -> void:
 	for player in players.values():
 		info[player.id] = {"position": player.position, "alive": _alive(player),
 			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
+			"wind": Weather.wind_at(world, player.position.x, player.position.z, time),
 			"notice_multiplier": WorldCycle.notice_multiplier(time),
 			"weather_sight": Weather.sight_multiplier(
 				Weather.conditions(world, player.position.x, player.position.z, time)),
-			"firelight": maxf(CampfireThreat.reveal_radius(campfires,
-				player.position, time, WorldCycle.is_night(time)),
-				HandFlare.infected_radius(player.flare_seconds, _alive(player),
-					WorldCycle.is_night(time), _is_safe(player.position))),
+			"firelight": maxf(BikeLantern.reveal_radius(player.inventory, player.mounted,
+				_alive(player), WorldCycle.is_night(time)),
+				maxf(CampfireThreat.reveal_radius(campfires,
+					player.position, time, WorldCycle.is_night(time)),
+					HandFlare.infected_radius(player.flare_seconds, _alive(player),
+						WorldCycle.is_night(time), _is_safe(player.position)))),
 			"visual_signature": _visual_signature_for(player),
 			# Only actual server wounds contribute; never trust client input.
 			"scent": BloodScent.detection_radius(player.survival.bleeding,
@@ -4506,10 +5930,13 @@ func _tick_zombies(delta: float) -> void:
 				if victim.dodge_immunity > 0.0:
 					events.append({"type": "evaded", "peer": victim.id, "zombie": zombie.id})
 					continue
+				if _try_guardian_intercept(victim, zombie, float(result["damage"])):
+					continue
 				var parried: bool = MeleeParry.can_block(victim, zombie)
 				if parried:
 					victim.parry_window = 0.0
 					zombie.attack_timer = maxf(zombie.attack_timer, MeleeParry.STAGGER_SECONDS)
+					ParryRiposte.arm(victim, zombie)
 					events.append({"type": "parried", "peer": victim.id, "zombie": zombie.id})
 				var armor_id: String = victim.inventory.armor
 				var armor_owned: bool = armor_id != "" and victim.inventory.count(armor_id) > 0
@@ -4518,6 +5945,15 @@ func _tick_zombies(delta: float) -> void:
 				damage = _infected_damage_for(victim, damage)
 				if parried:
 					damage *= MeleeParry.DAMAGE_FACTOR
+				# Only ordinary confirmed claws consume this plate. Raid boss, acid
+				# and player attacks retain their original combat rules.
+				if not zombie.raid_boss and damage > 0.0 and FieldArmorPlate.active(
+						victim.plated_armor, victim.plated_hits, victim.inventory):
+					damage *= FieldArmorPlate.DAMAGE_FACTOR
+					victim.plated_hits -= 1
+					if victim.plated_hits == 0:
+						victim.plated_armor = ""
+					victim.dirty_character = true
 				var applied: float = _hurt_player(victim, damage)
 				# Only real carried armor protects from infected secondary wounds.
 				# PvP bleeding continues to follow its ordinary rules.
@@ -4553,6 +5989,10 @@ func _tick_zombies(delta: float) -> void:
 				events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": damage, "by": -zombie.id})
 				if not _alive(victim):
 					_on_player_death(victim, -zombie.id)
+	# Real survivors are considered before idle infected investigate remains.
+	# Reuse existing investigate_decoy: never replace combat targets or spawn mobs.
+	if tick_count % 5 == 0 and not bags.is_empty():
+		_alert_corpse_scents()
 	# Evaluate real survivors before luring unattended infected toward light.
 	# This prevents a campfire from delaying direct player detection.
 	if tick_count % 5 == 0 and not campfires.is_empty() and WorldCycle.is_night(time):
@@ -4576,6 +6016,19 @@ func _alert_noise_decoys() -> void:
 		var lure: Dictionary = NoiseDecoy.closest_audible(buckets, infected.position, time)
 		if not lure.is_empty():
 			infected.investigate_decoy(Vector2(float(lure["x"]), float(lure["z"])))
+
+
+## Spatial-indexed investigation of confirmed, unlooted fresh corpses.
+func _alert_corpse_scents() -> void:
+	var scent_index: Dictionary = CorpseScent.buckets(bags, time)
+	if scent_index.is_empty():
+		return
+	for infected in zombies.values():
+		if not infected.is_alive() or infected.raid_boss:
+			continue
+		var corpse: Dictionary = CorpseScent.closest(scent_index, infected.position, time)
+		if not corpse.is_empty():
+			infected.investigate_decoy(Vector2(float(corpse["x"]), float(corpse["z"])))
 
 
 ## Night campfires lure idle infected, but never steal active combat aggro.
@@ -4794,18 +6247,82 @@ func _tick_night_horde() -> void:
 		return
 
 
+## Finite caravan ambushes spawn only during actual cargo transport in a
+## dangerous zone. No RPC can request enemies, wave count or threat positions.
+func _tick_caravan_ambush() -> void:
+	for index in range(caravan_ambushes.size() - 1, -1, -1):
+		var wave: Dictionary = caravan_ambushes[index]
+		if time < float(wave["expires"]):
+			continue
+		for id in wave["ids"]:
+			zombies.erase(int(id)) # Event enemies never occupy world respawn slots.
+		caravan_ambushes.remove_at(index)
+	if tick_count % CaravanAmbush.CHECK_EVERY_TICKS != 0 or \
+			raid_boss_id >= 0 or not night_horde.is_empty():
+		return
+	var capacity: int = CaravanAmbush.available(caravan_ambushes, zombies)
+	if capacity < 2:
+		return
+	var survivors: Array[Vector3] = []
+	for nearby in players.values():
+		if _alive(nearby) and nearby.position.is_finite():
+			survivors.append(nearby.position)
+	for peer_id in players.keys():
+		var player: Player = players[peer_id]
+		var route: Dictionary = player.caravan_view
+		var cargo: int = player.inventory.count(str(route.get("cargo", ""))) if not route.is_empty() else 0
+		if not CaravanAmbush.eligible(world, player.position, route,
+				cargo, player.caravan_ambushed, _alive(player)):
+			continue
+		var positions: Array[Dictionary] = CaravanAmbush.placement(world,
+				player.position, survivors, zombies, capacity,
+				rng.randi_range(0, NightHorde.ANGLES - 1))
+		if positions.size() < 2:
+			continue
+		var visible := {player.id: {"position": player.position,
+			"alive": true, "safe": false}}
+		var ids: Array[int] = []
+		for spot in positions:
+			var x: float = float(spot["x"])
+			var z: float = float(spot["z"])
+			var enemy_id: int = new_id()
+			var enemy = Zombie.new(enemy_id, str(spot["kind"]),
+				Vector3(x, world.height_at(x, z), z), -1)
+			enemy.receive_pack_alert(player.id, visible)
+			zombies[enemy_id] = enemy
+			ids.append(enemy_id)
+		player.caravan_ambushed = true
+		player.dirty_character = true
+		caravan_ambushes.append({"ids": ids, "defeated": [], "owner": player.id,
+			"route": player.caravan_state.duplicate(true), "deaths": player.deaths,
+			"expires": time + CaravanAmbush.LIFETIME_SECONDS})
+		events.append({"type": "caravan_ambushed", "peer": player.id,
+			"group": parties.group_of(player.id), "count": ids.size(), "zone": world.zone_at(player.position.x,
+				player.position.z)})
+		return # One encounter per check interval, not an unbounded global burst.
+
+
 func _tick_world(delta: float) -> void:
+	for id in fish_traps.keys():
+		if time >= float(fish_traps[id]["expires"]):
+			fish_traps.erase(id)
 	for id in infected_snares.keys():
 		if time >= float(infected_snares[id]["expires"]):
 			infected_snares.erase(id)
 	_tick_supply_drop()
 	_tick_night_horde()
+	_tick_caravan_ambush()
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):
 			decoys.erase(id)
 	for id in smoke_clouds.keys():
 		if time >= float(smoke_clouds[id]["expires"]):
 			smoke_clouds.erase(id)
+		else:
+			# Wind advances only server-owned clouds. Clients receive updated
+			# positions through ordinary interest-limited world snapshots.
+			smoke_clouds[id] = FieldSmoke.drift(smoke_clouds[id],
+				world, time, delta)
 	for id in shelters.keys():
 		if time >= float(shelters[id]["expires"]):
 			shelters.erase(id)
@@ -4863,6 +6380,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"alive": _alive(other), "crouching": other.crouching, "mounted": other.mounted,
 				"flare_lit": HandFlare.lit(other.flare_seconds, _alive(other)),
 				"bike_panniers": BikeCargo.installed(other.inventory),
+				"bike_lamp_lit": BikeLantern.lit(other.inventory, other.mounted,
+					_alive(other), WorldCycle.is_night(time)),
 				"weapon": other.inventory.weapon,
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
 				"guild": {"id": other.guild_id, "name": other.guild_name},
@@ -4878,7 +6397,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					"raid_exposed_seconds": RaidRecovery.remaining(zombie, raid_exposed_until, time) if zombie.id == raid_boss_id else 0.0,
 					"max_hp": float(zombie.data.get("health", zombie.health)),
 					"snared_seconds": zombie.snared_seconds,
-					"stagger_seconds": zombie.stagger_seconds})
+					"stagger_seconds": zombie.stagger_seconds,
+					"sunder_seconds": SunderMark.remaining(zombie, time)})
 	# Replicate only pending, living spit warnings within sight of this
 	# survivor. Client visual effects never authorize an actual hit.
 	var spit_zones: Array = []
@@ -4901,6 +6421,12 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"x": float(pool["x"]), "y": float(pool["y"]),
 				"z": float(pool["z"]), "radius": AcidSpitter.RADIUS,
 				"remaining": AcidSpitter.pool_remaining(pool, time)})
+	# Replicate only public position/radius/lifetime, never owner or tick data.
+	var nearby_ember_pools: Array = []
+	for field in ember_pools.values():
+		if EmberFlask.remaining(field, time) > 0.0 and here.distance_to(
+				Vector2(float(field["x"]), float(field["z"]))) <= Defs.INTEREST_RADIUS:
+			nearby_ember_pools.append(EmberFlask.public_state(field, time))
 	var nearby_barricades: Array = []
 	for wall in barricades.values():
 		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
@@ -4911,6 +6437,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_snares: Array = InfectedSnare.visible(
 		infected_snares, player.position, time, Defs.INTEREST_RADIUS)
+	var nearby_fish_traps: Array = ShoreFishTrap.visible(
+		fish_traps, player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_smoke: Array = FieldSmoke.visible(smoke_clouds,
 			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_decoys: Array = []
@@ -4929,8 +6457,24 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				bag_view["reserved_seconds"] = RaidLoot.remaining(bag, time)
 				bag_view["reserved"] = float(bag_view["reserved_seconds"]) > 0.0
 				bag_view["can_loot"] = RaidLoot.can_open(bag, player, time)
+				if RaidRoundRobin.active(bag, time):
+					var turn: Dictionary = RaidRoundRobin.visible(bag, player, time)
+					bag_view["raid_round_robin"] = true
+					bag_view["raid_your_turn"] = bool(turn["your_turn"])
+					bag_view["raid_turn_seconds"] = float(turn["seconds"])
+					bag_view["can_loot"] = bool(bag_view["can_loot"]) and bool(turn["your_turn"])
+					# Only the eligible current turn holder sees the real bag choices.
+					if bool(bag_view["can_loot"]):
+						bag_view["raid_item_choices"] = RaidRoundRobin.choice_ids(bag)
+				var ballot: Dictionary = RaidNeedGreed.visible(bag, player, time)
+				if not ballot.is_empty():
+					bag_view["raid_need_greed"] = ballot
+				var core_lock: Dictionary = RaidNeedGreed.protection(bag, player, time)
+				if bool(core_lock.get("locked", false)) and bag["items"].size() == 1:
+					bag_view["can_loot"] = false
 			bag_view["horde_cache"] = bool(bag.get("horde_cache", false))
 			bag_view["supply_drop"] = bool(bag.get("supply_drop", false))
+			bag_view["corpse_scent"] = CorpseScent.active(bag, time)
 			bag_view["guards_remaining"] = SupplyDrops.living_guards(bag, zombies)
 			if int(bag_view["guards_remaining"]) > 0:
 				bag_view["can_loot"] = false
@@ -4941,12 +6485,28 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var used_crates: Array = []
 	for id in opened_crates:
 		used_crates.append(id)
+	# A player's private raid threat HUD never reveals unrelated hate tables.
+	# Compute it only for a visible, live boss and an eligible nearby party.
+	var raid_aggro_state: Dictionary = {}
+	if raid_boss_id > 0:
+		raid_aggro_state = RaidAggroView.for_viewer(
+			zombies.get(raid_boss_id), player, players, parties, world)
+	var guardian_guarded_seconds: float = 0.0
+	var guardian_guarded_by: int = -1
+	for supporter in players.values():
+		if GuardianIntercept.can_intercept(supporter, player, parties, world):
+			if supporter.guard_link_seconds > guardian_guarded_seconds:
+				guardian_guarded_seconds = supporter.guard_link_seconds
+				guardian_guarded_by = supporter.id
 	var snapshot := {
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
 		"outposts": siege_contracts.public_state(territory.public_state(time, players, parties), time),
 		"you": {
 			"party": _party_state_for(peer_id),
+			"raid_aggro": raid_aggro_state,
 			"caravan": player.caravan_view.duplicate(true),
+			"equipment_presets": player.equipment_presets.duplicate(true),
+			"caravan_defended": player.caravan_defended,
 			"guild": {"id": player.guild_id, "name": player.guild_name, "rank": player.guild_rank},
 			"guild_siege_wins": int(guild_siege_wins.get(player.guild_id, 0)),
 			"siege_wins": int(siege_contracts.victories.get(parties.group_of(peer_id), 0)),
@@ -4957,8 +6517,12 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"smoke_cooldown": player.smoke_cooldown,
 			"smoke_concealed": FieldSmoke.inside(smoke_clouds, player.position, time),
 			"chain_wrap_seconds": player.chain_wrap_seconds,
+			"storm_insulator_seconds": player.storm_insulator_seconds,
+			"tire_grip_seconds": player.tire_grip_seconds,
 			"flash_cooldown": player.flash_cooldown,
 			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
+			"coating_seconds": player.edge_coating_seconds,
+			"coating_weapon": player.edge_coating_weapon,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),
 			"combat_tag_seconds": CombatLogout.remaining(player.combat_tag_until, time),
@@ -4975,18 +6539,30 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"arena_tier": ArenaRating.tier(player.arena_rating),
 			"action": player.action.duplicate(),
 			"ruin_survey": RuinSurvey.public_mark(player.ruin_survey, time, opened_crates),
+			"prospect_mark": ProspectingChart.public_mark(
+				player.prospect_mark, time, depleted) if _alive(player) else {},
+			"threat_scan": ThreatScan.public_mark(
+				player.threat_scan, zombies, player.position, time) if _alive(player) else {},
 			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
 			"fracture": player.survival.fracture,
 			"blood_scent_radius": BloodScent.detection_radius(player.survival.bleeding,
 				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival)),
 			"scent_mask_seconds": player.survival.scent_mask_seconds,
+			"soft_sole_seconds": player.soft_sole_seconds,
 			"exposure": player.survival.exposure,
+			"wetness": player.survival.wetness,
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 			"tent_sheltered": PortableShelter.covers(shelters, player.position, time),
+			"tent_anchored": StormTarpAnchors.anchored_covers(shelters, player.position, time),
 			"tent_camouflaged": PortableShelter.camouflaged(shelters, player.position,
 				time, player.crouching, player.noise_timer, _alive(player)),
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
+			"wind_chill": WindChill.visible(world, player.position, time,
+				player.survival.wetness,
+				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else "",
+				FieldCampfire.has_warmth(campfires, player.position, time),
+				PortableShelter.covers(shelters, player.position, time)),
 			"weather_sight": Weather.sight_multiplier(
 				Weather.conditions(world, player.position.x, player.position.z, time)),
 			"spore": SporeHazard.status(world, player.position, time,
@@ -4999,12 +6575,24 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"rain_cooldown": player.rain_cooldown,
 			"spore_sample_cooldown": player.spore_sample_cooldown,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
+			"sharpened_hits": player.sharpened_hits if FieldWhetstone.valid_state(
+				player.sharpened_weapon, player.sharpened_hits, player.inventory) else 0,
+			"plated_hits": player.plated_hits if FieldArmorPlate.valid_state(
+				player.plated_armor, player.plated_hits, player.inventory) else 0,
 			"guardian_cooldown": player.guardian_timer,
+			"guardian_intercept_cooldown": player.guard_link_cooldown,
+			"guardian_intercept_seconds": player.guard_link_seconds,
+			"guardian_intercept_target": player.guard_link_target if player.guard_link_seconds > 0.0 else -1,
+			"guardian_guarded_seconds": guardian_guarded_seconds,
+			"guardian_guarded_by": guardian_guarded_by,
 			"warden_ward": WardenAura.active_for(player, players, parties, world),
 			"guardian_brace": player.guardian_brace,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"parry_cooldown": player.parry_cooldown, "parry_window": player.parry_window,
+			"riposte_seconds": player.riposte_seconds,
+			"finisher_cooldown": player.finisher_cooldown,
 			"rest_cooldown": player.rest_cooldown,
+			"rested_xp_credit": player.rested_xp_credit,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
 			"stim_cooldown": player.stim_cooldown, "flare_seconds": player.flare_seconds,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
@@ -5029,21 +6617,35 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"vendor_discount": Reputation.discount_percent(player.renown),
 			"regional_trade": RegionalTrade.public_offer(world, player.position),
 			"renown_next": Reputation.next_threshold(player.renown),
+			"on_road": RoadTravel.on_road(world, player.position),
 			"carry_kg": player.inventory.total_weight(),
 			"cargo_factor": BikeCargo.movement_factor(player.inventory,
 				player.skills.bonus("carry_capacity"), player.mounted),
 			"bike_cargo_kg": BikeCargo.SUPPORTED_KG if player.mounted and BikeCargo.installed(player.inventory) else 0.0,
+			"bike_service_meters": player.bike_service_meters,
+			"bike_integrity": player.bike_integrity,
+			"bike_lamp_lit": BikeLantern.lit(player.inventory, player.mounted,
+				_alive(player), WorldCycle.is_night(time)),
 			"max_health": player.survival.max_health,
 			"speed_bonus": player.skills.bonus("move_speed"), "carry_bonus": player.skills.bonus("carry_capacity"),
 		},
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
 		"spit_zones": spit_zones, "acid_pools": nearby_acid_pools,
+		"ember_pools": nearby_ember_pools,
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
 		"shelters": nearby_shelters,
 		"decoys": nearby_decoys, "smoke_clouds": nearby_smoke,
+		"fish_traps": nearby_fish_traps,
 		"infected_snares": nearby_snares,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}
+	# A lightning warning is public only to nearby survivors, not to global
+	# clients watching a different part of the island.
+	if not lightning_pending.is_empty():
+		var lightning_at := Vector2(float(lightning_pending["x"]),
+			float(lightning_pending["z"]))
+		if here.distance_to(lightning_at) <= Defs.INTEREST_RADIUS:
+			snapshot["lightning_telegraph"] = lightning_pending.duplicate(true)
 	# Send a ground telegraph only to survivors close enough to see it.
 	# The server remains the sole authority on the slam center and deadline.
 	if not raid_pending_slam.is_empty():
@@ -5055,6 +6657,20 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"y": world.height_at(warning_at.x, warning_at.y),
 				"z": warning_at.y, "radius": RaidEncounter.SLAM_RADIUS,
 				"until": float(raid_pending_slam["at"])}
+			# The countdown area is public; live interrupt progress is party-only.
+			var interrupt: Dictionary = RaidInterrupt.public_progress(
+				raid_pending_slam, time, parties.group_of(peer_id))
+			if not interrupt.is_empty():
+				snapshot["raid_interrupt"] = interrupt
+	if not raid_pending_cone.is_empty():
+		var cone_at := Vector2(float(raid_pending_cone["x"]), float(raid_pending_cone["z"]))
+		if here.distance_to(cone_at) <= Defs.INTEREST_RADIUS:
+			snapshot["raid_cone_telegraph"] = {"id": int(raid_pending_cone["id"]),
+				"x": cone_at.x, "y": float(raid_pending_cone["y"]),
+				"z": cone_at.y, "dx": float(raid_pending_cone["dx"]),
+				"dz": float(raid_pending_cone["dz"]), "reach": RaidCone.REACH,
+				"half_angle": RaidCone.HALF_ANGLE_DEGREES,
+				"until": float(raid_pending_cone["at"])}
 	# The skill sheet is small, but snapshots can be lost: resend it when it changed and every few seconds.
 	if player.dirty_skills or time - player.skills_sent_at > SNAPSHOT_REPEAT_SECONDS:
 		var sheet: Dictionary = player.skills.to_dict()

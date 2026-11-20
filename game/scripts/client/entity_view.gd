@@ -32,6 +32,8 @@ func update_from(client) -> void:
 		_touch("spit:%d" % id, "spit_warning", client.spit_zones[id], seen)
 	for id in client.acid_pools:
 		_touch("pool:%d" % id, "acid_pool", client.acid_pools[id], seen)
+	for id in client.ember_pools:
+		_touch("ember:%d" % id, "ember_pool", client.ember_pools[id], seen)
 	for id in client.bags:
 		_touch("bag:%d" % id, "bag", client.bags[id], seen)
 	for id in client.barricades:
@@ -46,6 +48,8 @@ func update_from(client) -> void:
 		_touch("smoke:%d" % id, "smoke", client.smoke_clouds[id], seen)
 	for id in client.infected_snares:
 		_touch("snare:%d" % id, "snare", client.infected_snares[id], seen)
+	for id in client.fish_traps:
+		_touch("fish_trap:%d" % id, "fish_trap", client.fish_traps[id], seen)
 	if not client.raid_telegraph.is_empty():
 		_touch("raid_warning:%d" % int(client.raid_telegraph["id"]),
 			"raid_warning", client.raid_telegraph, seen)
@@ -65,7 +69,11 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 	_targets[key] = {"position": Vector3(entity["x"], entity["y"], entity["z"]), "yaw": float(entity.get("yaw", 0.0))}
 	var label: Label3D = _nodes[key].get_node_or_null("Label")
 	if label != null:
-		if kind == "zombie":
+		if kind == "fish_trap":
+			label.text = "FISH NET T%d | %s" % [
+				int(entity.get("tier", 1)), "READY" if bool(entity.get("ready", false)) else
+				("%ds" % ceili(float(entity.get("ready_in", 0.0))))]
+		elif kind == "zombie":
 			label.visible = false # The overlay draws a health bar instead (world_overlay.gd).
 			label.text = "%s%s  %d" % [
 				"ENRAGED RAID BOSS " if bool(entity.get("raid_enraged", false)) else (
@@ -76,6 +84,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 				label.text += " [STAGGERED]"
 			elif float(entity.get("snared_seconds", 0.0)) > 0.0:
 				label.text += " [PINNED]"
+			if float(entity.get("sunder_seconds", 0.0)) > 0.0:
+				label.text += " [EXPOSED]"
 		elif kind == "player":
 			label.text = ("%s%s" % [
 				"OUTLAW " if bool(entity.get("outlaw", false)) else "", str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
@@ -113,7 +123,10 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			base = Color(0.98, 0.65, 0.18)
 		var staggered: bool = float(entity.get("stagger_seconds", 0.0)) > 0.0
 		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
+		var exposed: bool = float(entity.get("sunder_seconds", 0.0)) > 0.0
 		var tint: Color = base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base
+		if exposed:
+			tint = base.lerp(Color(0.96, 0.42, 0.14), 0.65)
 		if pinned:
 			tint = base.lerp(Color(1.0, 0.84, 0.25), 0.65)
 		if staggered:
@@ -124,6 +137,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		_nodes[key].get_node("HandFlare").set_burning(bool(entity.get("flare_lit", false)) and bool(entity.get("alive", false)))
 		var bike = _nodes[key].get_node("TrailBike")
 		bike.set_panniers(bool(entity.get("bike_panniers", false)))
+		bike.set_lamp(bool(entity.get("bike_lamp_lit", false)))
 		bike.set_riding(bool(entity.get("mounted", false)) and bool(entity.get("alive", false)))
 		var player_model: Node3D = _nodes[key].get_node("Model")
 		player_model.scale = Vector3(1.0,
@@ -151,6 +165,28 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		puddle.material_override = poison
 		root.add_child(puddle)
 		return root
+	if kind == "ember_pool":
+		var embers := MeshInstance3D.new()
+		var shape := CylinderMesh.new()
+		shape.top_radius = float(entity.get("radius", 3.0))
+		shape.bottom_radius = shape.top_radius
+		shape.height = 0.06
+		embers.mesh = shape
+		embers.position.y = 0.10
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.albedo_color = Color(1.0, 0.36, 0.07, 0.43)
+		embers.material_override = mat
+		root.add_child(embers)
+		var light := OmniLight3D.new()
+		light.position.y = 0.8
+		light.light_color = Color(1.0, 0.32, 0.08)
+		light.light_energy = 0.55
+		light.omni_range = 4.5
+		light.shadow_enabled = false
+		root.add_child(light)
+		return root
 	if kind == "spit_warning":
 		var warning := MeshInstance3D.new()
 		var disk := CylinderMesh.new()
@@ -176,6 +212,35 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		material.albedo_color = Color(0.6, 0.45, 0.27)
 		barricade.material_override = material
 		root.add_child(barricade)
+		return root
+	if kind == "fish_trap":
+		var bobber := MeshInstance3D.new()
+		var shape := CylinderMesh.new()
+		shape.top_radius = 0.42
+		shape.bottom_radius = 0.45
+		shape.height = 0.22
+		bobber.mesh = shape
+		bobber.position.y = 0.12
+		var orange := StandardMaterial3D.new()
+		orange.albedo_color = Color(0.83, 0.49, 0.15)
+		bobber.material_override = orange
+		root.add_child(bobber)
+		var net := MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(1.12, 0.07, 1.12)
+		net.mesh = mesh
+		net.position.y = 0.015
+		var gray := StandardMaterial3D.new()
+		gray.albedo_color = Color(0.30, 0.36, 0.25)
+		net.material_override = gray
+		root.add_child(net)
+		var label := Label3D.new()
+		label.name = "Label"
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.font_size = 18
+		label.pixel_size = 0.007
+		label.position.y = 1.0
+		root.add_child(label)
 		return root
 	if kind == "snare":
 		var tripwire := MeshInstance3D.new()
@@ -373,7 +438,7 @@ func _process(delta: float) -> void:
 		var node: Node3D = _nodes[key]
 		var target: Dictionary = _targets[key]
 		node.position = node.position.lerp(target["position"], blend)
-		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
+		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
 			model.update_motion(delta)

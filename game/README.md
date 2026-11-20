@@ -2791,3 +2791,250 @@ godot --headless --path game --script res://tests/run_all.gd
 
 Existing Godot gameplay scripting and networking already support
 this feature; no native engine patches were necessary.
+
+
+## Telegraphed directional raid cleave — sidestep the warlord
+
+The canonical multiplayer raid boss now periodically performs a
+**directional frontal cleave** alongside its existing circle slam and
+post-slam counterattack opportunity. Players must read the boss facing,
+sidestep or circle behind it rather than simply running away.
+
+- The raid server first selects a **living current target within 13 m**
+  and fixes the boss's world position and a normalized attack direction
+  for the entire **2.2-second telegraph**. Changing aggro during windup
+  does **not** secretly rotate the attack toward another player.
+- The sector extends **13 m**, **38 degrees to either side** of the
+  locked direction, and at most **3.5 m vertically**. An ordinary-phase
+  hit causes **24 base damage**; enrage increases it to **33**.
+  Existing armor, guardian brace, timed dodge invulnerability, death
+  handling and safe-zone rules remain authoritative.
+- Directional attacks have a **22-second cooldown** normally, dropping
+  to **15 seconds during enrage**. The server schedules either a
+  circular slam or a directional cleave, never both telegraphs at the
+  same time in normal play. The cone does **not** trigger the extra
+  damage vulnerability reserved for completed slam attacks.
+- Nearby multiplayer clients receive a bounded
+  `raid_cone_telegraph` containing the fixed origin, direction,
+  sector geometry and server deadline. The **tactical radar paints a
+  red sector**, and the HUD displays the remaining warning and whether
+  the local survivor stands inside it. Distant clients receive neither
+  the attack position nor the full raid event.
+- Pending strikes are session-only and are discarded if the boss dies,
+  retreats or the encounter is reset. Clients cannot spawn a strike,
+  select victims, alter damage or submit an aim direction.
+
+Files: `scripts/shared/raid_cone.gd`,
+`scripts/server/game_server.gd`, `scripts/shared/net.gd`,
+`scripts/client/game_client.gd`, `scripts/client/hud.gd` and
+`scripts/client/survival_radar.gd`. The new
+`tests/test_raid_cone.gd` is included in `tests/run_all.gd`
+and covers sector geometry, server authorization, locked aim, windup,
+dodge, cooldowns, enrage, interest-limited snapshots, PvE hit
+resolution and retreat cleanup.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+The engine's existing scene drawing, RPC, and physics coordinate APIs
+support this feature. No native engine changes were needed.
+
+
+## Optional raid loot round robin — MMORPG group reward fairness
+
+The party leader may toggle **Raid loot: Free / Round robin** in the
+multiplayer party controls. **Free** is the default and preserves the
+original single-bag, first-pickup raid flow. The setting affects only
+**future** boss kills and is shared in the party's private state.
+
+When the server confirms a raid boss death, it first freezes the real
+eligible combat contributors using the existing 75-second loot
+reservation. If at least two contributors belong to a party with
+Round robin enabled, the server initializes a single rotation on the
+**one actual shared loot bag**. Switching the leader's mode afterward
+never rewrites an already-dropped bag.
+
+- The initial turn rotates deterministically by boss identity instead
+  of always granting the killing player first pick. Only contributors
+  can collect while the 75-second boss reservation is active.
+- A successful click grants **one item type**, with a quantity capped
+  to **ceil(original stack size / number of contributors)**. Every
+  awarded unit is subtracted from the original bag inventory;
+  no parallel personal reward inventories or duplicate copies exist.
+- A successful claim advances to the next contributor. If the
+  inventory cannot hold any of the offered items, nothing is taken
+  and the turn is **not** consumed. Unused turns expire after
+  **12 seconds**, allowing active survivors to keep collecting.
+- A private per-viewer snapshot shows whether it is your turn and
+  how many seconds remain, without revealing participant account
+  identifiers to strangers or other clients. The network RPC
+  authorizes only the leader's future loot-mode choice.
+- After the existing **75-second reservation expires**, any survivor
+  can collect the remaining bag normally. Regular infected,
+  ordinary containers, PvP full-loot bags, nonparticipating groups
+  and solo boss kills retain their previous behavior.
+
+Implementation: `scripts/shared/raid_round_robin.gd`,
+`scripts/shared/party.gd`, `scripts/server/game_server.gd`,
+`scripts/shared/net.gd`, `scripts/client/game_client.gd`,
+`scripts/client/hud.gd`. The new
+`tests/test_raid_round_robin.gd` covers leader permissions,
+free-mode compatibility, shared bag deductions, turn switching,
+replay protection, private visibility and public loot unlock.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+The current Godot networking, inventory and UI APIs support the
+mechanic without changes to the native engine.
+
+
+## Raid trophy Need/Greed voting
+
+The multiplayer party leader can cycle the future raid loot mode through
+**Free → Round robin → Need/Greed**, without changing rewards that have
+already dropped. Free remains the default for old solo and group gameplay.
+
+For a raid boss killed by a party with at least **two actual combat
+contributors**, Need/Greed opens a **25-second private ballot** for the
+`infected_core` trophy stack in the **one existing shared reward bag**.
+Other drops (silver, metal bars, bandages) remain collectable immediately
+by the same eligible raid contributors.
+
+- Eligible survivors who took part in the boss fight each choose
+  **Need**, **Greed** or **Pass** once. Votes cannot be changed or replayed.
+  The server validates the authenticated sender, their account/session
+  identity, live position within 28 m, participation frozen at the
+  boss kill, the bag ID, the deadline and the selected action.
+- **Need** rolls win over all **Greed** rolls, even with a lower die
+  value. Within the winning category, the server chooses the highest
+  deterministic **d100** roll, with a stable identity tiebreaker.
+  Unsubmitted votes become Pass after 25 seconds; all completed votes
+  end the election immediately.
+- The winner gets the exclusive right to pick up the **original
+  Infected Core stack** before the normal 75-second raid entitlement
+  expires. The winner does not receive an item remotely; they must
+  reach the original bag and have sufficient backpack space.
+  If everyone passes, eligible contributors can claim the cores under
+  the existing raid reservation rules.
+- The server never makes extra bags, personal copies, or new items.
+  Only a normal successful pickup decrements the original bag inventory.
+  The legacy 75-second reservation still protects the bag from
+  outsiders; after it expires, all leftovers become public.
+- Network snapshots show a player only their own choice, total votes,
+  remaining duration, vote status, and whether **they** won.
+  Account/session tokens, full ballots and other players' rolls
+  remain server-only. Nearby eligible players see three vote buttons
+  and their result in the group/inventory panel.
+
+Implementation: `scripts/shared/raid_need_greed.gd`,
+`scripts/shared/party.gd`, `scripts/server/game_server.gd`,
+`scripts/shared/net.gd`, `scripts/client/game_client.gd`,
+`scripts/client/hud.gd`. New
+`tests/test_raid_need_greed.gd` covers authorization, Need > Greed,
+replay safety, private snapshots, bag-item conservation, mode freezing,
+all-pass release, deadline expiry and the existing free pickup mode.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+This feature uses the project's current Godot scripts, RPCs and
+inventory implementation; no native engine modifications are necessary.
+
+## Salvaged Whetstone: classless melee preparation
+
+At the workbench craft a **Salvaged Whetstone** from **2 Stone T1 + 1 Scrap**.
+Equip any carried melee weapon and press **End** in the offline or
+online client, outside combat. The next three **confirmed ordinary melee hits
+against infected** deal 15% more damage. Misses and player-versus-player
+attacks never receive or spend infected-only charges. Equipment active skills
+remain unchanged. Reapplying with unused charges is rejected without spending
+an item. Switching or losing the weapon, dying, or respawning cancels the
+preparation. The server owns the cost, damage and charges; the client only
+renders the remaining hit counter.
+
+Strict validation persists remaining charges and the tied weapon in existing
+version-1 character saves; older saves default to no preparation. A dedicated
+`game/tests/test_field_whetstone.gd` suite is included in `run_all.gd`.
+No native engine change is needed: this uses existing inventory, simulation
+and RPC infrastructure.
+
+## Field Armor Plate: defensive preparation for infected melee
+
+At the workbench, craft a **Field Armor Plate** from 1 Metal Bar T1,
+2 Cloth T1 and 2 Scrap. Equip owned body armor and press **Insert**
+(in either the offline or online client) while out of combat. A plate is
+consumed only on successful preparation. The next three confirmed ordinary
+infected melee/claw attacks have their **health damage reduced by 20%** after
+normal armor and parry mitigation. Dodges do not consume charges; PvP,
+spitter acid, raid-boss attacks and environmental hazards are unaffected.
+Existing infection, bleeding and fracture mechanics remain unchanged.
+
+The server binds all charges to an owned equipped armor item. Reapplying while
+prepared is rejected, and switching/loss of the armor, death or respawn clears
+the remaining charges. The exact armor ID and remaining hits are validated
+and saved with version-1 account data; older saves default to an empty plate.
+`game/tests/test_field_armor_plate.gd` exercises those invariants.
+No Godot/Cgame engine extension is needed.
+
+
+## Raid threat awareness for party roles
+
+During raid fights, the existing tank/guardian threat, healer threat
+and infected hate-list mechanics now feed a **read-only, party-private
+boss aggro advisory** on each nearby survivor's HUD.
+
+- Only a living, currently active raid boss can produce this status.
+  The receiving survivor must be a **living party member** in the
+  same dangerous zone and within **42 metres** of the boss, with a
+  vertical difference of at most **7 metres**. The group must have at
+  least two members and have already engaged the boss.
+- The HUD identifies the boss's current **actual target** if that
+  target belongs to the survivor's party. Another party's target ID
+  is never sent. When the guardian is the target, members see a
+  **TAUNT LOCK** countdown taken from the server's real forced-target
+  timer.
+- **Your threat, % of party peak** compares personal threat with the
+  highest actual party contribution to the boss's hate list.
+  Non-tanks also see the percentage of the **aggro-switch threshold**
+  required to pull the boss (the engine's existing 125% hysteresis).
+  A warning appears close to that threshold. Tanking abilities and
+  damage remain entirely server-authoritative.
+- Only the requesting player's private `you.raid_aggro` snapshot
+  contains this bounded advisory. Public `zombies` snapshots,
+  outsider views, enemy player views and disconnected accounts never
+  carry raw hate tables, account IDs or another group's targets.
+  Stale targets, dead raid bosses, distant participants and invalid
+  numerical threat values produce no misleading data.
+
+Files: `scripts/shared/raid_aggro_view.gd`,
+`scripts/server/game_server.gd`, `scripts/client/hud.gd`.
+Tests in `tests/test_raid_aggro_view.gd` are registered in the main
+`tests/run_all.gd` suite, covering private visibility, healer aggro,
+guardian forced targeting, 125% swap threshold, danger-zone and
+distance checks, corrupt values and boss-death cleanup.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+No native Godot engine changes are required: existing server authority
+and replicated private character state support this system.
+
+## Soft-Sole Trail Wraps: tactical footstep muffling
+
+Field-craft **Soft-Sole Trail Wraps** using 2 Cloth T1, 2 Fiber T1 and
+1 Scrap. While on foot and out of combat, use **Shift+/** (ordinary
+**/** still applies herbal scent salve) to consume one bundle for **90s**.
+The server reduces the *new* sprint noise radius to 55% of its ordinary
+value; it never silences an already audible sprint/gunshot, mounted bike
+noise, attack noise, gathering, blood scent or line of sight. Sprinting
+still breaks camouflage and costs stamina. The effect is private, saved
+and time-decrements on the authoritative server, never refreshes by
+relogging, and clears on death/respawn. Legacy saves remain compatible.
+
+Test suite: `game/tests/test_soft_sole_wraps.gd`.
+No Godot/Cgame engine changes are required.

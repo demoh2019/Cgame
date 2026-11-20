@@ -16,6 +16,7 @@ var infection: float = 0.0
 var bleeding: float = 0.0 # Wound severity 0..100, independent of infection.
 var fracture: float = 0.0 # Persistent blunt injury, prevents sprint.
 var exposure: float = 0.0 # 0..100 cumulative weather stress.
+var wetness: float = 0.0 # 0..100 soaking, persists until dried.
 var warmth_seconds: float = 0.0 # Remaining protection from a carried heat pack.
 var scent_mask_seconds: float = 0.0 # Temporary herb camouflage, server-owned.
 var stamina: float = Defs.MAX_STAMINA
@@ -199,10 +200,11 @@ func reset() -> void:
 	bleeding = 0.0
 	fracture = 0.0
 	exposure = 0.0
+	wetness = 0.0
 	warmth_seconds = 0.0
 	scent_mask_seconds = 0.0
 	alive = true
 
 
 func to_dict() -> Dictionary:
-	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "bleeding": bleeding, "fracture": fracture, "exposure": exposure, "warmth_seconds": warmth_seconds, "scent_mask_seconds": scent_mask_seconds, "alive": alive}
+	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "bleeding": bleeding, "fracture": fracture, "exposure": exposure, "wetness": wetness, "warmth_seconds": warmth_seconds, "scent_mask_seconds": scent_mask_seconds, "alive": alive}

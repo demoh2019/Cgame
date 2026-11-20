@@ -1,7 +1,7 @@
 extends RefCounted
 ## Dirt roads that join the hub and the places of the island, worked out from the seed like everything else. Every place
 ## that people built is linked to its two nearest neighbours (and the hub to its four), and each link winds a little so
-## it does not look ruled. Roads are scenery: they cost nothing to the server and do not change movement.
+## it does not look ruled. Road segments are also indexed for deterministic travel grip.
 ##
 ## The client asks per chunk: the road pieces crossing it (to paint the ground) and the signposts standing in it.
 
@@ -121,6 +121,37 @@ func _add_piece(p: Vector2, q: Vector2) -> void:
 			if not _pieces_by_cell.has(key):
 				_pieces_by_cell[key] = []
 			_pieces_by_cell[key].append([p, q])
+
+## Nearest point on each terrain-painted segment. All road checks use the
+## existing spatial cell index, never the full network on every frame.
+static func coverage_on_segments(point: Vector2, segments: Array) -> float:
+	if not point.is_finite():
+		return 0.0
+	var closest := 0.0
+	for piece in segments:
+		if not (piece is Array) or piece.size() != 2:
+			continue
+		var a: Vector2 = piece[0]
+		var b: Vector2 = piece[1]
+		if not a.is_finite() or not b.is_finite():
+			continue
+		var line: Vector2 = b - a
+		var squared: float = line.length_squared()
+		if squared < 0.00001:
+			continue
+		var t: float = clampf((point - a).dot(line) / squared, 0.0, 1.0)
+		var distance: float = point.distance_to(a + line * t)
+		closest = maxf(closest, 1.0 - smoothstep(
+			HALF_WIDTH * 0.75, HALF_WIDTH + 1.0, distance))
+		if closest >= 0.9999:
+			return 1.0
+	return closest
+
+func coverage_at(x: float, z: float) -> float:
+	if not is_finite(x) or not is_finite(z) or world.is_water(x, z):
+		return 0.0
+	var cell := Vector2i(floori(x / Defs.CHUNK_SIZE), floori(z / Defs.CHUNK_SIZE))
+	return coverage_on_segments(Vector2(x, z), pieces_in_cell(cell))
 
 
 ## A signpost a little way along the road from one end (the start when `at_start`), naming and pointing to `destination`

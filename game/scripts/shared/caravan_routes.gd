@@ -64,6 +64,7 @@ static func offer_for(world, source: Dictionary) -> Dictionary:
 		"src_rx": int(floor(float(source["x"]) / WorldPoi.REGION_SIZE)),
 		"src_rz": int(floor(float(source["z"]) / WorldPoi.REGION_SIZE)),
 		"src_id": int(source["id"]), "dst_id": best_id,
+		"src_x": float(source["station_x"]), "src_z": float(source["station_z"]),
 		"destination": str(selected["display"]), "dst_x": float(selected["station_x"]),
 		"dst_z": float(selected["station_z"]), "cargo": item,
 		"quantity": CARGO_COUNT, "silver": payout,

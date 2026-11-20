@@ -3,6 +3,7 @@ extends Node
 ## and on every client (Godot needs that), and `role` decides which half of it does anything.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildSiegeLedger = preload("res://scripts/shared/guild_siege_ledger.gd")
 const SiegeOutbox = preload("res://scripts/server/siege_outbox.gd")
@@ -390,6 +391,20 @@ func c_toggle_mount() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_place_fish_trap() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "place_fish_trap", sim.cmd_place_fish_trap(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_collect_fish_trap(trap_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "collect_fish_trap", sim.cmd_collect_fish_trap(peer, trap_id))
+
+
+@rpc("any_peer", "reliable")
 func c_fish(baited: bool = false, storm_cast: bool = false) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -444,6 +459,14 @@ func c_throw_flash(direction_x: float, direction_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "throw_flash", sim.cmd_throw_flash(peer, direction_x, direction_z))
+
+
+@rpc("any_peer", "reliable")
+func c_throw_ember(direction_x: float, direction_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "throw_ember",
+			sim.cmd_throw_ember(peer, direction_x, direction_z))
 
 
 @rpc("any_peer", "reliable")
@@ -508,6 +531,29 @@ func c_dismantle(structure_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "dismantle", sim.cmd_dismantle(peer, structure_id))
+
+
+@rpc("any_peer", "reliable")
+func c_expedition_restock(preset_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "expedition_restock",
+			sim.cmd_expedition_restock(peer, str(preset_id)))
+
+
+@rpc("any_peer", "reliable")
+func c_equipment_preset(action: String, slot: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "equipment_preset",
+			sim.cmd_equipment_preset(peer, str(action), slot))
+
+
+@rpc("any_peer", "reliable")
+func c_stash_bulk() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "stash_bulk", sim.cmd_stash_bulk(peer))
 
 
 @rpc("any_peer", "reliable")
@@ -634,10 +680,31 @@ func c_party_standard() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_raid_vote(bag_id: int, choice: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "raid_vote", sim.cmd_raid_vote(peer, bag_id, choice))
+
+
+@rpc("any_peer", "reliable")
+func c_party_loot_mode(mode: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_loot_mode", sim.cmd_party_loot_mode(peer, mode))
+
+
+@rpc("any_peer", "reliable")
 func c_party_focus() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "party_focus", sim.cmd_party_focus(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_party_ping(x: float, z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_ping", sim.cmd_party_ping(peer, x, z))
 
 
 @rpc("any_peer", "reliable")
@@ -795,6 +862,13 @@ func c_attack(dir_x: float, dir_z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_guardian_intercept(target_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "guardian_intercept", sim.cmd_guardian_intercept(peer, target_id))
+
+
+@rpc("any_peer", "reliable")
 func c_guardian_taunt() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -806,6 +880,13 @@ func c_skill(dir_x: float, dir_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "skill", sim.cmd_skill(peer, dir_x, dir_z))
+
+
+@rpc("any_peer", "reliable")
+func c_stagger_finisher() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "stagger_finisher", sim.cmd_stagger_finisher(peer))
 
 
 @rpc("any_peer", "reliable")
@@ -827,6 +908,20 @@ func c_loot(entity_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "loot", sim.cmd_loot(peer, entity_id))
+
+
+@rpc("any_peer", "reliable")
+func c_raid_claim_selected(entity_id: int, item_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "loot", sim.cmd_raid_claim_selected(peer, entity_id, item_id))
+
+
+@rpc("any_peer", "reliable")
+func c_raid_skip_turn(entity_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "raid_skip_turn", sim.cmd_raid_skip_turn(peer, entity_id))
 
 
 @rpc("any_peer", "reliable")
@@ -952,14 +1047,20 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"site_discovered", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "barricade_shot", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
+		"site_discovered", "caravan_escort_paid", "caravan_defended", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "barricade_shot", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "stagger_finisher", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
+		"caravan_ambushed":
+			return sim != null and CaravanEscort.can_receive_alert(
+				event, peer, sim.players, sim.parties)
 		"party_aid", "party_triage":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
 		"trade":
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"guardian_taunt":
 			return _is_nearby(event, peer)
+		"guardian_intercept":
+			# Share only with the protected ally and the real guardian.
+			return event.get("peer", -1) == peer or event.get("by", -1) == peer
 		"outpost_watch":
 			# Private outpost distress signal: no remote enemy or third-party feed.
 			return sim != null and sim.territory.watch_recipient(peer,
@@ -978,6 +1079,6 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
 			return event.get("id", -1) == peer or event.get("by", 0) == peer or _is_nearby(event, peer)
-		"attack", "zombie_died", "decoy_thrown", "campfire_doused", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
+		"lightning_warning", "lightning_struck", "attack", "siege_charge_armed", "siege_charge_disarmed", "siege_charge_detonated", "siege_charge_fizzled", "zombie_died", "armor_sunder", "finishing_strike", "decoy_thrown", "ember_thrown", "campfire_doused", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_interrupted", "raid_cone_warning", "raid_cone_struck", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
 			return _is_nearby(event, peer)
 	return false
