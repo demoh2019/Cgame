@@ -614,6 +614,7 @@ func _unhandled_input(event: InputEvent) -> void:
 						direction = Vector2(sin(client.yaw), cos(client.yaw))
 					var target := Vector2(client.predicted.x, client.predicted.z) + direction * 2.8
 					client.light_campfire(target)
+					hud.say("At night, campfire light attracts infected. Press - to extinguish.")
 			KEY_U:
 				var direction: Vector2 = _aim_direction()
 				if direction.length_squared() > 0.001:

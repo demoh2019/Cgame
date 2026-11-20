@@ -54,6 +54,7 @@ const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
+const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const FishingBait = preload("res://scripts/shared/fishing_bait.gd")
@@ -3158,6 +3159,8 @@ func _tick_zombies(delta: float) -> void:
 		info[player.id] = {"position": player.position, "alive": _alive(player),
 			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
 			"notice_multiplier": WorldCycle.notice_multiplier(time),
+			"firelight": CampfireThreat.reveal_radius(campfires, player.position,
+				time, WorldCycle.is_night(time)),
 			"visual_signature": Camouflage.visual_signature(
 				player.inventory.armor, player.inventory.armor != "" and
 				player.inventory.count(player.inventory.armor) > 0,
@@ -3170,8 +3173,11 @@ func _tick_zombies(delta: float) -> void:
 		_manage_zombie_population()
 	# Every fourth of a second alert only idle, non-raid infected within
 	# hearing range. Active chases and combat threat always take priority.
-	if tick_count % 5 == 0 and not decoys.is_empty():
-		_alert_noise_decoys()
+	if tick_count % 5 == 0:
+		if not decoys.is_empty():
+			_alert_noise_decoys()
+		if not campfires.is_empty() and WorldCycle.is_night(time):
+			_alert_campfire_lights()
 	for zombie in zombies.values():
 		var result: Dictionary = zombie.think(world, info, delta, rng)
 		# Zombies chip away at obstacles only while actually stuck pursuing
@@ -3258,6 +3264,19 @@ func _alert_noise_decoys() -> void:
 		var lure: Dictionary = NoiseDecoy.closest_audible(buckets, infected.position, time)
 		if not lure.is_empty():
 			infected.investigate_decoy(Vector2(float(lure["x"]), float(lure["z"])))
+
+
+## Night campfires lure idle infected, but never steal active combat aggro.
+func _alert_campfire_lights() -> void:
+	var buckets: Dictionary = CampfireThreat.light_buckets(campfires, time, true)
+	if buckets.is_empty():
+		return
+	for infected in zombies.values():
+		if not infected.is_alive() or infected.raid_boss:
+			continue
+		var fire: Dictionary = CampfireThreat.nearest_light(buckets, infected.position)
+		if not fire.is_empty():
+			infected.investigate_decoy(Vector2(float(fire["x"]), float(fire["z"])))
 
 
 func _alert_infected_pack(player_info: Dictionary) -> void:
