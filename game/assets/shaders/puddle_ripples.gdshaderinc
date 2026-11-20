@@ -6,13 +6,18 @@
 vec2 aa_puddle_ripple_tilt(vec2 world_xz, float seconds) {
 	const float CELL = 2.6;
 	vec2 cell = floor(world_xz / CELL);
-	vec2 center = (cell + vec2(0.5)) * CELL;
-	vec2 offset = world_xz - center;
-	float distance_from_drop = length(offset);
 	// Arithmetic world-space hash. No trigonometry and no texture read.
 	vec2 h = fract(cell * vec2(0.1031, 0.11369));
 	h += vec2(dot(h, h.yx + vec2(19.19)));
 	float phase = fract(h.x * h.y);
+	// Small position jitter prevents a visible checkerboard of identical
+	// drop centres. Max offset is 0.1m; waves fade by radius 1.18m,
+	// before the nearest possible tile edge (1.2m).
+	vec2 jitter = (vec2(phase, fract(phase * 7.37 + 0.19))
+		- vec2(0.5)) * 0.20;
+	vec2 center = (cell + vec2(0.5)) * CELL + jitter;
+	vec2 offset = world_xz - center;
+	float distance_from_drop = length(offset);
 	// One spreading ring per cell. Different cells begin at different times.
 	float age = fract(seconds * 0.67 + phase);
 	float radius = age * 1.08;
