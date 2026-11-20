@@ -551,6 +551,10 @@ func loot(entity_id: int) -> void:
 	net.c_loot.rpc_id(1, entity_id)
 
 
+func dungeon(down: bool) -> void:
+	net.c_dungeon.rpc_id(1, down)
+
+
 func build(point: Vector2, yaw: float = 0.0) -> void:
 	if point.is_finite():
 		net.c_build.rpc_id(1, point.x, point.y, yaw)

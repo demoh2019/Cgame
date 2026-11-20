@@ -5,6 +5,7 @@ extends Node3D
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const Foliage = preload("res://scripts/client/foliage.gd")
@@ -303,9 +304,95 @@ func build(p_world, p_cell: Vector2i) -> void:
 	_world = p_world
 	cell = p_cell
 	var origin := WorldGen.cell_origin(cell)
+	if Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
+		_build_dungeon(origin)
+		_build_objects(_world.chunk(cell)) # The chests.
+		return
 	_build_terrain(origin)
 	var data: Dictionary = _world.chunk(cell)
 	_build_objects(data)
+
+
+# --- Underground ------------------------------------------------------------------------------------------------------
+
+static var _kit_scenes: Dictionary = {}
+
+
+## A piece of the dungeon kit, scaled so its width is `width` metres, standing at `at` facing `yaw`.
+func _kit(piece: String, at: Vector3, yaw: float, width: float = Dungeon.TILE, height_factor: float = 1.0) -> Node3D:
+	if not _kit_scenes.has(piece):
+		var path: String = Assets.PACKS + "dungeon/%s.gltf" % piece
+		_kit_scenes[piece] = load(path) if ResourceLoader.exists(path) else null
+	var scene := _kit_scenes[piece] as PackedScene
+	if scene == null:
+		return null
+	var node := scene.instantiate() as Node3D
+	var bounds := AABB()
+	var first := true
+	for found in node.find_children("*", "MeshInstance3D", true, false):
+		var mesh_box: AABB = (found as MeshInstance3D).get_aabb()
+		bounds = mesh_box if first else bounds.merge(mesh_box)
+		first = false
+	var size: float = maxf(bounds.size.x, bounds.size.z)
+	var factor: float = width / size if size > 0.01 else 1.0
+	node.scale = Vector3(factor, factor * height_factor, factor)
+	node.position = at - Vector3(_world_origin().x, 0, _world_origin().y)
+	# `yaw` turns the piece's length along the wall; kit pieces that run along their own Z need a quarter turn more.
+	node.rotation.y = yaw + (PI * 0.5 if bounds.size.z > bounds.size.x * 1.2 else 0.0)
+	add_child(node)
+	return node
+
+
+## A chunk below ground: dark rock everywhere, and where the complex's rooms are, stone floors, low walls (the camera
+## looks down over them), columns at the doorways and a torch in every room.
+func _build_dungeon(origin: Vector2) -> void:
+	var rock := MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = Vector2.ONE * Defs.CHUNK_SIZE
+	var dark := StandardMaterial3D.new()
+	dark.albedo_color = Color(0.05, 0.045, 0.04)
+	dark.roughness = 1.0
+	plane.material = dark
+	rock.mesh = plane
+	rock.position = Vector3(Defs.CHUNK_SIZE * 0.5, Dungeon.FLOOR_Y - 0.03, Defs.CHUNK_SIZE * 0.5)
+	add_child(rock)
+	var cell_rect := Rect2(origin, Vector2.ONE * Defs.CHUNK_SIZE)
+	var region: Vector2i = Dungeon.region_of(origin.x + Defs.CHUNK_SIZE * 0.5, origin.y + Defs.CHUNK_SIZE * 0.5)
+	if _world.dungeon_bunker(region).is_empty():
+		return
+	var layout: Dictionary = Dungeon.layout(_world.world_seed, region)
+	for room in layout["rooms"]:
+		var center: Vector2 = Dungeon.room_center(region, room)
+		for i in Dungeon.ROOM_TILES:
+			for j in Dungeon.ROOM_TILES:
+				var tile: Vector2 = center + (Vector2(i, j) - Vector2.ONE * float(Dungeon.ROOM_TILES - 1) * 0.5) * Dungeon.TILE
+				if cell_rect.has_point(tile):
+					_kit("floor_tile_large" if (i + j + room.x) % 3 != 0 else "floor_tile_large_rocks", Vector3(tile.x, Dungeon.FLOOR_Y, tile.y), 0.0)
+		if cell_rect.has_point(center):
+			# A torch on the north wall lights the room.
+			var torch_at := Vector3(center.x, Dungeon.FLOOR_Y, center.y - Dungeon.ROOM * 0.5 + 0.4)
+			_kit("torch_mounted", torch_at + Vector3(0, 1.4, 0), 0.0, 0.5)
+			var light := OmniLight3D.new()
+			light.light_color = Color(1.0, 0.68, 0.36)
+			light.light_energy = 2.2
+			light.omni_range = 11.0
+			light.position = torch_at + Vector3(0, 2.2, 1.2) - Vector3(origin.x, 0, origin.y)
+			add_child(light)
+			if room == layout["boss"]:
+				_kit("chest_gold", Vector3(center.x + 2.0, Dungeon.FLOOR_Y, center.y + 2.0), PI, 1.2)
+	for piece in Dungeon.walls(_world.world_seed, region):
+		var a: Vector2 = piece["a"]
+		var b: Vector2 = piece["b"]
+		var mid: Vector2 = (a + b) * 0.5
+		if not cell_rect.has_point(mid):
+			continue
+		var yaw: float = atan2(-(b - a).y, (b - a).x)
+		if piece["door"]:
+			_kit("column", Vector3(a.x, Dungeon.FLOOR_Y, a.y), 0.0, 0.9)
+			_kit("column", Vector3(b.x, Dungeon.FLOOR_Y, b.y), 0.0, 0.9)
+		else:
+			# The kit's 4 m wall, kept below head height so the camera looks over it into the next room.
+			_kit("wall", Vector3(mid.x, Dungeon.FLOOR_Y, mid.y), yaw, Dungeon.TILE, 0.45)
 
 
 func _build_terrain(origin: Vector2) -> void:

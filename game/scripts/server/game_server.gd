@@ -4,6 +4,7 @@ extends RefCounted
 ## reads snapshots out of it, so the whole game can be tested by calling it directly.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
@@ -1189,6 +1190,40 @@ func cmd_fish(peer_id: int, baited: bool = false, storm_cast: bool = false) -> D
 	return {"ok": true, "seconds": cast_seconds,
 		"tier": int(eligibility["tier"]), "item": str(eligibility["item"]),
 		"baited": baited, "storm_cast": storm_cast}
+
+
+## Down the hatch of a bunker into its dungeon (`down`), or up the stairs of the first room back to the hatch.
+func cmd_dungeon(peer_id: int, down: bool) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not player.action.is_empty() or not player.recall.is_empty():
+		return {"ok": false, "reason": "busy"}
+	var at := Vector2(player.position.x, player.position.z)
+	if down:
+		if Dungeon.is_underground(at.x):
+			return {"ok": false, "reason": "already_below"}
+		var bunker: Dictionary = Dungeon.bunker_at(world, at.x, at.y)
+		if bunker.is_empty():
+			return {"ok": false, "reason": "no_hatch"}
+		var region: Vector2i = Dungeon.region_of_site(bunker)
+		if world.dungeon_bunker(region).is_empty():
+			return {"ok": false, "reason": "no_hatch"}
+		var below: Vector2 = Dungeon.arrival(region)
+		player.position = Vector3(below.x, Dungeon.FLOOR_Y, below.y)
+		events.append({"type": "dungeon_entered", "peer": peer_id, "zone": world.zone_at(below.x, below.y)})
+		return {"ok": true, "down": true, "zone": world.zone_at(below.x, below.y)}
+	if not Dungeon.is_underground(at.x) or not Dungeon.at_stairs(at.x, at.y):
+		return {"ok": false, "reason": "no_stairs"}
+	var above: Dictionary = world.dungeon_bunker(Dungeon.region_of(at.x, at.y))
+	if above.is_empty():
+		return {"ok": false, "reason": "no_stairs"}
+	var out: Vector2 = Dungeon.hatch(world, above) + Vector2(0, 1.6)
+	player.position = Vector3(out.x, world.height_at(out.x, out.y), out.y)
+	events.append({"type": "dungeon_left", "peer": peer_id})
+	return {"ok": true, "down": false}
 
 
 ## One strike per cast: inside the bite window it hooks the fish (a bigger catch), outside it the fish slips away.
@@ -6554,8 +6589,8 @@ func _manage_zombie_population() -> void:
 			# Only dangerous-zone ruins can roll a deterministic champion.
 			if EliteInfected.is_elite_spawn(int(spawn["id"]),
 					world.zone_at(float(spawn["x"]), float(spawn["z"])),
-					bool(spawn["ruin"]), world.world_seed):
-				z.become_elite()
+					bool(spawn["ruin"]), world.world_seed) or bool(spawn.get("dungeon_boss", false)):
+				z.become_elite() # The guardian of a dungeon's deepest room is always a champion.
 			zombies[zombie_id] = z
 			state["zombie"] = zombie_id
 	# Sleeping: remove zombies nobody is near, and let their spawns create them again later.

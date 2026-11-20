@@ -4,6 +4,7 @@ extends RefCounted
 ## be sent over the network, only what changes in it.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 
@@ -70,6 +71,8 @@ static func mix(a: int, b: int, c: int, d: int = 0) -> int:
 
 ## Terrain height: the natural land, levelled under every site so buildings stand on flat ground.
 func height_at(x: float, z: float) -> float:
+	if x >= Dungeon.UNDERGROUND_X - 40.0 and not poi_building:
+		return Dungeon.FLOOR_Y # The stone floor of the dungeons below the bunkers.
 	var raw: float = _raw_height(x, z)
 	if poi_building:
 		return raw
@@ -119,6 +122,8 @@ func normal_at(x: float, z: float) -> Vector3:
 
 
 func biome_at(x: float, z: float) -> String:
+	if Dungeon.is_underground(x, z):
+		return "dungeon"
 	var height := height_at(x, z)
 	if height < Defs.WATER_LEVEL - 0.4:
 		return "water"
@@ -141,6 +146,7 @@ const AREA_NOUNS := {
 	"forest": ["Pines", "Woods", "Thicket", "Timberland"], "plains": ["Fields", "Meadows", "Downs", "Steppe"],
 	"swamp": ["Marsh", "Fen", "Bog"], "mountain": ["Peaks", "Crags", "Heights"], "beach": ["Shore", "Sands", "Coast"],
 	"water": ["Bay", "Waters", "Deep"],
+	"dungeon": ["Vaults", "Depths", "Catacombs", "Undercroft"],
 }
 
 
@@ -153,7 +159,57 @@ func area_name(x: float, z: float) -> String:
 
 
 func zone_at(x: float, z: float) -> int:
+	if Dungeon.is_underground(x, z):
+		return dungeon_zone(Dungeon.region_of(x, z))
 	return Defs.zone_index_for_distance(Vector2(x, z).length())
+
+
+var _dungeon_zones: Dictionary = {}
+
+
+## A dungeon is one zone deeper than the land above it (harder infected, richer chests), at most black.
+func dungeon_zone(region: Vector2i) -> int:
+	if not _dungeon_zones.has(region):
+		var zone := 3
+		var bunker: Dictionary = dungeon_bunker(region)
+		if not bunker.is_empty():
+			zone = mini(3, Defs.zone_index_for_distance(Vector2(float(bunker["x"]), float(bunker["z"])).length()) + 1)
+		_dungeon_zones[region] = zone
+	return _dungeon_zones[region]
+
+
+## The bunker above a region's dungeon, or {} where that region has none.
+func dungeon_bunker(region: Vector2i) -> Dictionary:
+	for site in poi.sites_in_region(region.x, region.y):
+		if str(site.get("kind", "")) == "bunker":
+			return site
+	return {}
+
+
+## A chunk underground: the infected and the chests of the dungeon rooms whose centre lies in it; no trees, no sites.
+func _dungeon_chunk(cell: Vector2i, origin: Vector2) -> Dictionary:
+	var nodes: Array = []
+	var crates: Array = []
+	var spawns: Array = []
+	var cell_rect := Rect2(origin, Vector2.ONE * Defs.CHUNK_SIZE)
+	var region: Vector2i = Dungeon.region_of(origin.x + Defs.CHUNK_SIZE * 0.5, origin.y + Defs.CHUNK_SIZE * 0.5)
+	var zone: int = dungeon_zone(region)
+	var index := 0
+	if not dungeon_bunker(region).is_empty():
+		for room in Dungeon.layout(world_seed, region)["rooms"]:
+			if not cell_rect.has_point(Dungeon.room_center(region, room)):
+				continue
+			var contents: Dictionary = Dungeon.room_contents(world_seed, region, room, zone)
+			for infected in contents["infected"]:
+				spawns.append({"id": entity_id(cell, index), "x": float(infected["x"]), "z": float(infected["z"]),
+					"type": str(infected["type"]), "ruin": true, "dungeon_boss": bool(infected["boss"])})
+				index += 1
+			for chest in contents["chests"]:
+				crates.append({"id": entity_id(cell, index), "kind": "crate", "tier": int(chest["tier"]), "dungeon": true,
+					"x": float(chest["x"]), "z": float(chest["z"]), "y": Dungeon.FLOOR_Y, "radius": 0.6, "blocks": true})
+				index += 1
+	return {"cell": cell, "zone": zone, "tier": tier_for_zone(zone), "ruin": true, "nodes": nodes, "crates": crates,
+		"spawns": spawns, "structures": [], "props": [], "npcs": [], "pois": [], "dungeon": true}
 
 
 static func tier_for_zone(zone: int) -> int:
@@ -228,6 +284,8 @@ func chunk(cell: Vector2i) -> Dictionary:
 
 func _generate_chunk(cell: Vector2i) -> Dictionary:
 	var origin := cell_origin(cell)
+	if Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
+		return _dungeon_chunk(cell, origin)
 	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
 	var zone := zone_at(center.x, center.y)
 	var tier := tier_for_zone(zone)
@@ -456,6 +514,12 @@ func remove_dynamic_blocker(id: int) -> void:
 
 func blockers_near(x: float, z: float, radius: float) -> Array:
 	var result: Array = []
+	if Dungeon.is_underground(x, z):
+		result = Dungeon.blockers_near(world_seed, x, z, radius)
+		for barricade in dynamic_blockers.values():
+			if absf(float(barricade["x"]) - x) <= radius + float(barricade["radius"]) and absf(float(barricade["z"]) - z) <= radius + float(barricade["radius"]):
+				result.append(barricade)
+		return result
 	if Vector2(x, z).length() < 60.0 + radius:
 		for structure in hub_structures():
 			if structure["blocks"] and absf(structure["x"] - x) < radius + structure["radius"] and absf(structure["z"] - z) < radius + structure["radius"]:

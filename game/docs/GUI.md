@@ -43,6 +43,12 @@ main action) and keeps text over the world light. Item icons: `item_icons.gd` (g
   crumbles over 2 hours. Facing and upkeep are saved with the world.
 * **Fishing**: T casts (rod in hand, line and bobber on the water); when the bobber dips ("BITE!"), T strikes for one more
   fish; too early or too late the fish slips (the cast still pays as an ordinary one).
+* **Dungeons**: every bunker has a hatch beside it; E there climbs down into its dungeon (the prompt names its zone, one
+  deeper than the land above). Six to nine stone rooms joined by doorways, the same for everyone (from the world seed),
+  infected in every room, a chest in each, an elite guardian and a gold chest in the deepest room. Torches light the rooms
+  and you carry a light; no weather below. E on the stairs of the first room climbs back up to the hatch. Rules:
+  `scripts/shared/dungeon.gd` (the complexes live east of the island, where WorldGen answers with their floor, walls,
+  spawns and chests), server `cmd_dungeon`, client `chunk_view.gd` (`_build_dungeon`), test `tests/test_dungeons.gd`.
 * **Title screen**: the sign-in card is a hanging red banner with the title, the fields and a red PLAY SOLO button.
 
 ## Controls

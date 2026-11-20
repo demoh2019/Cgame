@@ -5,6 +5,7 @@ extends Node3D
 const Defs = preload("res://scripts/shared/defs.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
+const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Net = preload("res://scripts/shared/net.gd")
@@ -569,6 +570,23 @@ func _update_fishing_line(_delta: float) -> void:
 	_fishing_line.visible = true
 
 
+var _carried_light: OmniLight3D
+
+
+## A warm light around you underground (a lantern's worth), so the rooms between torches are not black.
+func _set_carried_light(on: bool) -> void:
+	if avatar == null:
+		return
+	if _carried_light == null:
+		_carried_light = OmniLight3D.new()
+		_carried_light.light_color = Color(1.0, 0.8, 0.55)
+		_carried_light.light_energy = 1.3
+		_carried_light.omni_range = 8.0
+		_carried_light.position = Vector3(0, 2.4, 0)
+		avatar.add_child(_carried_light)
+	_carried_light.visible = on
+
+
 ## Where the planned wall would stand: 2.8 m out along the aim.
 func _build_target() -> Vector2:
 	var direction: Vector2 = _aim_direction()
@@ -1013,7 +1031,17 @@ func _update_time_of_day(delta: float) -> void:
 	# No rain under the settlement roofs, where the server also treats the player as sheltered.
 	var storming: bool = demo_storm or (str(weather.get("condition", "clear")) == "storm" and not bool(weather.get("sheltered", false)))
 	var clock: float = client.server_time if demo_phase < 0.0 else demo_phase * WorldCycle.DAY_LENGTH
-	atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta)
+	var underground: bool = client != null and client.you.has("x") and Dungeon.is_underground(float(client.you["x"]))
+	if underground:
+		# Below ground: no sky, no weather; the torches of the rooms and the light you carry.
+		atmosphere.update(0.0, -0.3, WorldCycle.phase(clock), false, delta)
+		sun.light_energy *= 0.15
+		environment.ambient_light_energy = 0.32
+		environment.ambient_light_color = Color(0.45, 0.4, 0.34)
+		storming = false
+	else:
+		atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta)
+	_set_carried_light(underground)
 	if audio != null:
 		audio.update_music(WorldCycle.daylight(clock), delta)
 	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO, atmosphere.storm)
@@ -1047,7 +1075,13 @@ func _update_prompt() -> void:
 	var p: Vector3 = client.predicted
 	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
 	var node: Dictionary = client.nearest_node(p, Defs.REACH)
-	if not loot.is_empty():
+	var below: bool = Dungeon.is_underground(p.x)
+	if below and Dungeon.at_stairs(p.x, p.z):
+		text = "[E] Climb the stairs back to the surface"
+	elif not below and not Dungeon.bunker_at(client.world, p.x, p.z).is_empty():
+		var depth_zone: int = client.world.dungeon_zone(Dungeon.region_of_site(Dungeon.bunker_at(client.world, p.x, p.z)))
+		text = "[E] Climb down the hatch into the bunker dungeon (%s zone)" % ["green", "yellow", "red", "black"][clampi(depth_zone, 0, 3)]
+	elif not loot.is_empty():
 		text = "[E] Loot" if loot["kind"] == "bag" else "[E] Search the crate"
 	elif not node.is_empty():
 		text = "[E] Gather %s (tier %d)" % [node["kind"], node["tier"]]
@@ -1377,6 +1411,13 @@ func _cycle_weapon() -> void:
 
 func _interact() -> void:
 	var p: Vector3 = client.predicted
+	# The hatch of a bunker leads down into its dungeon; the stairs of the first room lead back up.
+	if Dungeon.is_underground(p.x) and Dungeon.at_stairs(p.x, p.z):
+		client.dungeon(false)
+		return
+	if not Dungeon.is_underground(p.x) and not Dungeon.bunker_at(client.world, p.x, p.z).is_empty():
+		client.dungeon(true)
+		return
 	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
 	if not loot.is_empty():
 		client.loot(loot["id"])
@@ -1475,6 +1516,30 @@ func _run_demo() -> void:
 				if OS.get_environment("CGAME_DEMO_QUICK") == "1": # Fill the quick-use sockets as a double click would.
 					hud._put_in_doll("canned_food")
 					hud._put_in_doll("bandage")
+		"dungeon":
+			if _demo_frames == 30:
+				var best: Dictionary = {}
+				for rx in range(-4, 5):
+					for rz in range(-4, 5):
+						for site in client.world.poi.sites_in_region(rx, rz):
+							if str(site.get("kind", "")) == "bunker" and (best.is_empty() or Vector2(site["x"], site["z"]).length() < Vector2(best["x"], best["z"]).length()):
+								best = site
+				if not best.is_empty():
+					var hatch: Vector2 = Dungeon.hatch(client.world, best)
+					net_ref.c_debug.rpc_id(1, "teleport", {"x": hatch.x, "z": hatch.y})
+			if _demo_frames == 80:
+				client.dungeon(true)
+			if _demo_frames == 120:
+				# Step into the room beyond the first doorway for the picture.
+				var here := Vector2(client.predicted.x, client.predicted.z)
+				var region: Vector2i = Dungeon.region_of(here.x, here.y)
+				var layout: Dictionary = Dungeon.layout(client.world.world_seed, region)
+				var target: Vector2 = Dungeon.origin(region)
+				for room in layout["rooms"]:
+					if room != Vector2i.ZERO and Dungeon.linked(layout, Vector2i.ZERO, room):
+						target = Dungeon.room_center(region, room).lerp(Dungeon.origin(region), 0.55)
+						break
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": target.x, "z": target.y})
 		"build":
 			if _demo_frames == 30:
 				for entry in [["wood_1", 20], ["stone_1", 10], ["plank_2", 8], ["stone_2", 4]]:

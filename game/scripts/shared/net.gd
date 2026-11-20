@@ -512,6 +512,13 @@ func c_salvage_gear(item_id: String) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_dungeon(down: bool) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "dungeon", sim.cmd_dungeon(peer, down))
+
+
+@rpc("any_peer", "reliable")
 func c_build(x: float, z: float, yaw: float = 0.0) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
