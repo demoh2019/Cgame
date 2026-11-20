@@ -35,7 +35,8 @@ static func guardian_ok(medic, guardian, parties, world) -> bool:
 			not guardian.survival.alive or medic.mounted or guardian.mounted or \
 			not medic.position.is_finite() or not guardian.position.is_finite():
 		return false
-	if not has_staff(medic) or not GuardianTaunt.melee_equipped(guardian.inventory):
+	if not has_staff(medic) or not GuardianTaunt.melee_equipped(guardian.inventory) or \
+			guardian.inventory.weapon.begins_with("restoration_staff_"):
 		return false
 	var group: int = parties.group_of(medic.id)
 	if group <= 0 or group != parties.group_of(guardian.id):
