@@ -108,7 +108,7 @@ func _build() -> void:
 	card_gap.custom_minimum_size = Vector2(1, 178)
 	card_gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_left.add_child(card_gap)
-	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["bleeding", Color(0.73, 0.21, 0.27)], ["fracture", Color(0.75, 0.48, 0.2)], ["exposure", Color(0.38, 0.7, 0.88)]]:
+	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["bleeding", Color(0.73, 0.21, 0.27)], ["fracture", Color(0.75, 0.48, 0.2)], ["exposure", Color(0.38, 0.7, 0.88)], ["wetness", Color(0.29, 0.52, 0.84)]]:
 		var bar := ProgressBar.new()
 		bar.custom_minimum_size = Vector2(240, 18)
 		bar.max_value = 100.0
@@ -1647,6 +1647,7 @@ func _process(_delta: float) -> void:
 	_bars["bleeding"].value = float(client.you.get("bleeding", 0.0))
 	_bars["fracture"].value = float(client.you.get("fracture", 0.0))
 	_bars["exposure"].value = float(client.you.get("exposure", 0.0))
+	_bars["wetness"].value = float(client.you.get("wetness", 0.0))
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone (T%d)\n%s" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1, ZoneRisk.description(zone)]
 	var response_time: float = float(client.you.get("self_defense_seconds", 0.0))
@@ -1791,6 +1792,9 @@ func _process(_delta: float) -> void:
 				"SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED")),
 			int(client.you.get("exposure", 0.0)), int(ceil(float(client.you.get("warmth_seconds", 0.0))))
 		]
+	var wet: float = float(client.you.get("wetness", 0.0))
+	if wet > 0.0:
+		_info_label.text += "\nWET CLOTHING: %d%% | cold increases exposure; dry at a campfire" % roundi(wet)
 	var storm_cover: float = float(client.you.get("weather_sight", 1.0))
 	if is_finite(storm_cover) and storm_cover < 1.0:
 		_info_label.text += "\nSTORM COVER: infected sight -%d%% (sound, scent & fire still reveal)" % [

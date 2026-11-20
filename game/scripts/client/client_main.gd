@@ -1208,6 +1208,7 @@ func _update_hud() -> void:
 			int(nearby_offer["premium_percent"])]
 	if survivor.flare_seconds > 0.0:
 		_stats.text += "\nFLARE: %ds (F10) | infected notice up to 28m" % ceili(survivor.flare_seconds)
+	_stats.text += "\nWET CLOTHING: %d%% | dry under shelter or beside a lit campfire" % roundi(survivor.survival.wetness)
 	var equipped_ammo: String = str(Defs.item(survivor.inventory.weapon).get("ammo", ""))
 	if not equipped_ammo.is_empty():
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [

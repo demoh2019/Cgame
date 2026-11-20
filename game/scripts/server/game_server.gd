@@ -74,6 +74,7 @@ const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
 const NightHorde = preload("res://scripts/shared/night_horde.gd")
 const HubRecall = preload("res://scripts/shared/hub_recall.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const WetClothing = preload("res://scripts/shared/wet_clothing.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const SporeSampling = preload("res://scripts/shared/spore_sampling.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
@@ -341,7 +342,8 @@ func character_data(player: Player) -> Dictionary:
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 		"stamina": player.survival.stamina, "infection": player.survival.infection,
 		"bleeding": player.survival.bleeding, "fracture": player.survival.fracture,
-		"exposure": player.survival.exposure, "warmth_seconds": player.survival.warmth_seconds,
+		"exposure": player.survival.exposure, "wetness": player.survival.wetness,
+		"warmth_seconds": player.survival.warmth_seconds,
 		"scent_mask_seconds": player.survival.scent_mask_seconds,
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"pvp_infamy": player.pvp_infamy,
@@ -406,6 +408,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("exposure", 0.0), 0.0, 100.0):
 		return false
+	if not SaveValidation.finite_number(data.get("wetness", 0.0), 0.0, WetClothing.MAX_WETNESS):
+		return false
 	if not SaveValidation.finite_number(data.get("warmth_seconds", 0.0), 0.0, Defs.THERMAL_WRAP_SECONDS):
 		return false
 	if not SaveValidation.finite_number(data.get("scent_mask_seconds", 0.0), 0.0, FieldScentMask.DURATION_SECONDS):
@@ -467,6 +471,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	survival.fracture = float(data.get("fracture", 0.0)) # Legacy v1 defaults to healthy.
 	# Legacy survivors predating regional climate start with no exposure.
 	survival.exposure = float(data.get("exposure", 0.0))
+	survival.wetness = float(data.get("wetness", 0.0))
 	survival.warmth_seconds = float(data.get("warmth_seconds", 0.0))
 	survival.scent_mask_seconds = float(data.get("scent_mask_seconds", 0.0))
 	var x: Variant = data.get("x", 0.0)
@@ -4131,11 +4136,23 @@ func _tick_players(delta: float) -> void:
 		var worn_armor: String = player.inventory.armor
 		if worn_armor != "" and player.inventory.count(worn_armor) <= 0:
 			worn_armor = ""
+		var at_warm_fire: bool = FieldCampfire.has_warmth(campfires,
+			player.position, time)
+		var under_tarp: bool = PortableShelter.covers(shelters, player.position, time)
+		var old_wetness: float = player.survival.wetness
+		player.survival.wetness = WetClothing.next_wetness(old_wetness, delta,
+			conditions, worn_armor, under_tarp, at_warm_fire)
+		if not is_equal_approx(old_wetness, player.survival.wetness):
+			player.dirty_character = true
+		# Average the old and new moisture when a large simulation tick
+		# crosses the rain-to-soaked boundary. A fire always overrides cold.
+		var average_wet: float = 0.5 * (old_wetness + player.survival.wetness)
 		var weather_severity: float = Weather.effective_severity(conditions, worn_armor)
-		if FieldCampfire.has_warmth(campfires, player.position, time):
+		weather_severity = clampf(weather_severity +
+			WetClothing.cold_penalty(average_wet, conditions, worn_armor), 0.0, 1.0)
+		if at_warm_fire:
 			weather_severity = 0.0
-		weather_severity = PortableShelter.exposure_severity(weather_severity,
-			PortableShelter.covers(shelters, player.position, time))
+		weather_severity = PortableShelter.exposure_severity(weather_severity, under_tarp)
 		damage += player.survival.weather_tick(delta, weather_severity)
 		# The filter only protects for the portion of a tick it actually covers.
 		# An oversized server tick cannot extend the buff past its remaining time.
@@ -5266,6 +5283,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival)),
 			"scent_mask_seconds": player.survival.scent_mask_seconds,
 			"exposure": player.survival.exposure,
+			"wetness": player.survival.wetness,
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 			"tent_sheltered": PortableShelter.covers(shelters, player.position, time),
