@@ -61,3 +61,5 @@ the server to drop the connection, so it is not the default.
 * Scenery draw-range/mesh LOD: `scripts/client/scenery_lod.gd` and `chunk_view.gd` adjust visual culling and imported mesh LOD bias by graphics quality without hiding settlement landmarks or changing server gameplay. See `docs/CLOUD_HLOD_2026_11.md`.
 
 * Camera-scale atmospheric fog: `scripts/client/cinematic_fog.gd` adds an inexpensive sea-level height haze to all supported renderers, and bounded physically based Forward+ volumetric shafts on High/Ultra. The same engine-native `Atmosphere` and `GraphicsLighting` now share one time-of-day, storm and quality budget; see `docs/CINEMATIC_FOG_RENDERING.md`.
+
+* Instanced atmospheric detail: `scripts/client/ambient_motes.gd` and `assets/shaders/ambient_motes.gdshader` render light-catching pollen in clear daylight and golden forest/swamp fireflies at night, with weather, regional wind, stable seeded world tiles and four GPU-quality budgets. A single MultiMesh handles all visible motes in both clients. See `docs/ATMOSPHERIC_MOTES.md`.
