@@ -73,6 +73,12 @@
 		<member name="light_energy" type="float" setter="set_param" getter="get_param" default="1.0">
 			The light's strength multiplier (this is not a physical unit). For [OmniLight3D] and [SpotLight3D], changing this value will only change the light color's intensity, not the light's radius.
 		</member>
+		<member name="light_flicker" type="float" setter="set_flicker" getter="get_flicker" default="0.0">
+			Native flame-like flicker of the light's energy, like Source engine light styles or Unreal Engine flicker light functions. Layered, per-light-phased noise with occasional dips, computed in the engine each frame; [member light_energy] keeps its base value. [code]0.0[/code] disables it and costs nothing.
+		</member>
+		<member name="light_flicker_speed" type="float" setter="set_flicker_speed" getter="get_flicker_speed" default="1.0">
+			Time scale of [member light_flicker]. Lower values give a slow, smouldering pulse; higher values a nervous, windy flame.
+		</member>
 		<member name="light_indirect_energy" type="float" setter="set_param" getter="get_param" default="1.0">
 			Secondary multiplier used with indirect light (light bounces). Used with [VoxelGI] and SDFGI (see [member Environment.sdfgi_enabled]).
 			[b]Note:[/b] This property is ignored if [member light_energy] is equal to [code]0.0[/code], as the light won't be present at all in the GI shader.

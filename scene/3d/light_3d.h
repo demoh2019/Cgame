@@ -88,6 +88,12 @@ private:
 	Color correlated_color = Color(1.0, 1.0, 1.0);
 	float temperature = 6500.0;
 	bool allow_contact_shadows = true;
+	// Native flicker (Source light styles / UE flicker light functions): modulates only
+	// the energy sent to the renderer; get_param(PARAM_ENERGY) keeps the base value.
+	float flicker = 0.0f;
+	float flicker_speed = 1.0f;
+	double flicker_time = 0.0;
+	void _update_flicker_process();
 	// bind helpers
 
 	virtual void owner_changed_notify() override;
@@ -108,6 +114,11 @@ public:
 	bool is_editor_only() const;
 
 	void set_param(Param p_param, real_t p_value);
+	void set_flicker(float p_amount);
+	float get_flicker() const;
+	void set_flicker_speed(float p_speed);
+	float get_flicker_speed() const;
+	static float flicker_factor(double p_time, float p_amount, float p_phase);
 	real_t get_param(Param p_param) const;
 
 	void set_shadow(bool p_enable);

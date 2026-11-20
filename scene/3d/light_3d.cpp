@@ -372,7 +372,51 @@ void Light3D::_notification(int p_what) {
 		case NOTIFICATION_ENTER_TREE: {
 			_update_visibility();
 		} break;
+		case NOTIFICATION_INTERNAL_PROCESS: {
+			if (flicker <= 0.0f || !is_visible_in_tree()) {
+				break;
+			}
+			flicker_time += get_process_delta_time() * flicker_speed;
+			// Per-light phase from the instance ID so neighbouring torches never pulse in sync.
+			const float phase = float(get_instance_id() % 1024) * 0.618f;
+			RS::get_singleton()->light_set_param(light, RSE::LIGHT_PARAM_ENERGY, param[PARAM_ENERGY] * flicker_factor(flicker_time, flicker, phase));
+		} break;
 	}
+}
+
+float Light3D::flicker_factor(double p_time, float p_amount, float p_phase) {
+	// Layered incommensurate sines plus a rare deep dip read as a living flame,
+	// never as a strobe. Result stays within [1 - amount, 1 + 0.35 * amount].
+	const double t = p_time;
+	float n = float(Math::sin(t * 7.3 + p_phase) * 0.45 + Math::sin(t * 13.1 + p_phase * 2.0) * 0.3 + Math::sin(t * 23.7 + p_phase * 3.0) * 0.25);
+	const float dip = float(MAX(0.0, Math::sin(t * 1.7 + p_phase * 5.0) - 0.92) / 0.08);
+	n = n * 0.35 - dip * 0.65;
+	return CLAMP(1.0f + n * p_amount, 1.0f - p_amount, 1.0f + 0.35f * p_amount);
+}
+
+void Light3D::_update_flicker_process() {
+	set_process_internal(flicker > 0.0f);
+	if (flicker <= 0.0f) {
+		// Restore the exact base energy when flicker is switched off.
+		RS::get_singleton()->light_set_param(light, RSE::LIGHT_PARAM_ENERGY, param[PARAM_ENERGY]);
+	}
+}
+
+void Light3D::set_flicker(float p_amount) {
+	flicker = CLAMP(p_amount, 0.0f, 1.0f);
+	_update_flicker_process();
+}
+
+float Light3D::get_flicker() const {
+	return flicker;
+}
+
+void Light3D::set_flicker_speed(float p_speed) {
+	flicker_speed = CLAMP(p_speed, 0.0f, 10.0f);
+}
+
+float Light3D::get_flicker_speed() const {
+	return flicker_speed;
 }
 
 void Light3D::set_editor_only(bool p_editor_only) {
@@ -411,6 +455,10 @@ void Light3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_shadow"), &Light3D::has_shadow);
 
 	ClassDB::bind_method(D_METHOD("set_negative", "enabled"), &Light3D::set_negative);
+	ClassDB::bind_method(D_METHOD("set_flicker", "amount"), &Light3D::set_flicker);
+	ClassDB::bind_method(D_METHOD("get_flicker"), &Light3D::get_flicker);
+	ClassDB::bind_method(D_METHOD("set_flicker_speed", "speed"), &Light3D::set_flicker_speed);
+	ClassDB::bind_method(D_METHOD("get_flicker_speed"), &Light3D::get_flicker_speed);
 	ClassDB::bind_method(D_METHOD("is_negative"), &Light3D::is_negative);
 
 	ClassDB::bind_method(D_METHOD("set_cull_mask", "cull_mask"), &Light3D::set_cull_mask);
@@ -463,6 +511,8 @@ void Light3D::_bind_methods() {
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "light_size", PROPERTY_HINT_RANGE, "0,1,0.001,or_greater,suffix:m"), "set_param", "get_param", PARAM_SIZE);
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "light_angular_distance", PROPERTY_HINT_RANGE, "0,90,0.01,degrees"), "set_param", "get_param", PARAM_SIZE);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "light_negative"), "set_negative", "is_negative");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "light_flicker", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_flicker", "get_flicker");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "light_flicker_speed", PROPERTY_HINT_RANGE, "0,10,0.01"), "set_flicker_speed", "get_flicker_speed");
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "light_specular", PROPERTY_HINT_RANGE, "0,16,0.001,or_greater"), "set_param", "get_param", PARAM_SPECULAR);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "light_bake_mode", PROPERTY_HINT_ENUM, "Disabled,Static,Dynamic"), "set_bake_mode", "get_bake_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "light_cull_mask", PROPERTY_HINT_LAYERS_3D_RENDER), "set_cull_mask", "get_cull_mask");

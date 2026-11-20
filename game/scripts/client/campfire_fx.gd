@@ -52,6 +52,10 @@ func build(level: int, rendering_method: String) -> void:
 	light.omni_attenuation = 1.4
 	light.shadow_enabled = rich
 	light.shadow_blur = 2.0
+	# Engine-native flicker when available (no per-frame script work).
+	if "light_flicker" in light:
+		light.set("light_flicker", 0.35)
+		light.set("light_flicker_speed", 1.2)
 	add_child(light)
 	if not rich:
 		return
@@ -107,6 +111,9 @@ func build(level: int, rendering_method: String) -> void:
 
 func _process(delta: float) -> void:
 	if light == null:
+		return
+	if "light_flicker" in light:
+		set_process(false) # The engine flickers the light natively.
 		return
 	_t += delta
 	var k := flicker(_t, _seed)
