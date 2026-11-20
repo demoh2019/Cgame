@@ -534,6 +534,14 @@ func c_dismantle(structure_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_expedition_restock(preset_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "expedition_restock",
+			sim.cmd_expedition_restock(peer, str(preset_id)))
+
+
+@rpc("any_peer", "reliable")
 func c_stash_bulk() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

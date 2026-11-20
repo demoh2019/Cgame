@@ -292,6 +292,10 @@ func use_item(item_id: String) -> void:
 	net.c_use.rpc_id(1, item_id)
 
 
+func expedition_restock(preset_id: String) -> void:
+	net.c_expedition_restock.rpc_id(1, preset_id)
+
+
 func deposit_materials() -> void:
 	net.c_stash_bulk.rpc_id(1)
 

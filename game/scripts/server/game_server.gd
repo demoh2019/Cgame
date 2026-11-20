@@ -45,6 +45,7 @@ const Skills = preload("res://scripts/shared/skills.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const StashBulk = preload("res://scripts/shared/stash_bulk.gd")
+const ExpeditionLoadout = preload("res://scripts/shared/expedition_loadout.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
@@ -2591,6 +2592,22 @@ func cmd_stash(peer_id: int, item_id: String, count: int, deposit: bool) -> Dict
 ## One server-authorized action banks raw and refined crafting inputs.
 ## The client selects no item IDs, quantities or receipt; failed operations
 ## do not modify either inventory or the account-bound protected bank.
+func cmd_expedition_restock(peer_id: int, preset_id: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var at := Vector2(player.position.x, player.position.z)
+	if not at.is_finite() or at.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+		return {"ok": false, "reason": "no_station"}
+	var result: Dictionary = ExpeditionLoadout.restock(
+		player.inventory, player.stash, preset_id)
+	if bool(result.get("ok", false)):
+		player.dirty_inventory = true
+		player.dirty_stash = true
+		player.dirty_character = true
+	return result
+
+
 func cmd_stash_bulk(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):

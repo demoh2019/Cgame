@@ -15,6 +15,7 @@ const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const CraftingCatalog = preload("res://scripts/shared/crafting_catalog.gd")
+const ExpeditionLoadout = preload("res://scripts/shared/expedition_loadout.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
@@ -424,6 +425,22 @@ func _build() -> void:
 	bulk_button.tooltip_text = "At the hub workbench. Moves only raw/refined resources into your protected stash. Food, water, medicine, silver, gear and tools remain carried. Partial deposits are allowed if the bank is nearly full."
 	bulk_button.pressed.connect(func() -> void: client.deposit_materials())
 	inventory_box.add_child(bulk_button)
+	var restock_row := HBoxContainer.new()
+	restock_row.name = "ExpeditionRestock"
+	inventory_box.add_child(restock_row)
+	var preset_select := OptionButton.new()
+	preset_select.custom_minimum_size.x = 170.0
+	for preset_id in ExpeditionLoadout.ORDER:
+		preset_select.add_item(ExpeditionLoadout.title(preset_id))
+		preset_select.set_item_metadata(preset_select.item_count - 1, preset_id)
+	restock_row.add_child(preset_select)
+	var restock_button := Button.new()
+	restock_button.text = "RESTOCK KIT"
+	restock_button.tooltip_text = "At the hub workbench, withdraw missing expedition supplies from your protected stash. Never buys or crafts items."
+	restock_button.pressed.connect(func() -> void:
+		if preset_select.selected >= 0:
+			client.expedition_restock(str(preset_select.get_item_metadata(preset_select.selected))))
+	restock_row.add_child(restock_button)
 
 	var flare_button := Button.new()
 	flare_button.name = "UseSignalFlare"
@@ -1092,7 +1109,8 @@ func _arrange_inventory_window() -> void:
 	var stash_scroll: Control = _stash_grid.get_parent()
 	var stash_title: Control = box.get_child(stash_scroll.get_index() - 1)
 	for moved in [_inventory_grid, stash_title, stash_scroll,
-			box.get_node("DepositAllMaterials")]:
+			box.get_node("DepositAllMaterials"),
+			box.get_node("ExpeditionRestock")]:
 		moved.get_parent().remove_child(moved)
 		left.add_child(moved)
 	(stash_title as Label).text = "PROTECTED STASH  (survives death; click to take one at a workbench)"
@@ -1862,6 +1880,29 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				"no_space": "Vendor: backpack slots or stacks are full",
 			}
 			say(str(messages.get(str(data.get("reason", "")), "Vendor: rejected")))
+		return
+	if kind == "expedition_restock":
+		if bool(data.get("ok", false)):
+			var entries: Array[String] = []
+			for item_id in data.get("moved", {}):
+				entries.append("%s x%d" % [
+					str(Defs.item(str(item_id)).get("name", item_id)),
+					int(data["moved"][item_id])])
+			say("Restocked %s: %s%s" % [
+				ExpeditionLoadout.title(str(data.get("preset", ""))),
+				", ".join(entries),
+				" (partial; more supplies needed)" if bool(data.get("partial", false)) else ""])
+		else:
+			var reasons := {
+				"dead": "Restock: unavailable while dead.",
+				"no_station": "Restock: return to the hub workbench.",
+				"unknown_preset": "Restock: unknown kit.",
+				"already_supplied": "Restock: already carrying the kit targets.",
+				"no_stock": "Restock: required supplies are not in stash.",
+				"no_space": "Restock: backpack slots are full.",
+				"transaction_failed": "Restock: cancelled without moving items.",
+			}
+			say(str(reasons.get(str(data.get("reason", "")), "Restock rejected.")))
 		return
 	if kind == "stash_bulk":
 		if bool(data.get("ok", false)):
