@@ -5820,10 +5820,13 @@ func _tick_players(delta: float) -> void:
 			in_sanctuary, safe_rest, accompanied)
 		var stamina_before_stress_tick: float = player.survival.stamina
 		var stamina_recovery_delay_before_tick: float = player.survival.stamina_recovery_delay
+		var had_food_poisoning: float = player.survival.food_poisoning
 		var had_bleeding: bool = player.survival.bleeding > 0.0
 		var had_fracture: bool = player.survival.fracture > 0.0
 		var had_scent_mask: bool = player.survival.scent_mask_seconds > 0.0
 		var damage: float = player.survival.tick(delta)
+		if not is_equal_approx(player.survival.food_poisoning, had_food_poisoning):
+			player.dirty_character = true
 		# Only ordinary passive stamina regen is damped. Purchased food,
 		# party standards, skills and explicit healing stay unchanged.
 		var passive_gain: float = maxf(0.0,
