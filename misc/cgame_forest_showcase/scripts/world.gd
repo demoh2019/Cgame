@@ -368,6 +368,8 @@ func _on_player_damaged(amount: int) -> void:
     player_health = maxi(player_health - amount, 0)
     player_hit_grace = 0.55
     if player_health == 0:
+        if travel_controller != null:
+            travel_controller.cancel_travel()
         # A safe, deterministic camp respawn instead of losing quest progress.
         player.call("teleport_to_ground", 0.0, 9.0, height_at(0.0, 9.0))
         player_health = 100
@@ -657,6 +659,8 @@ func _collect_nearest() -> void:
             distance = dist
             nearest = candidate
     if nearest:
+        if travel_controller != null and travel_controller.active and nearest == quest_target:
+            travel_controller.cancel_travel()
         var id: int = nearest.name.trim_prefix("Crystal_").to_int()
         if not collected_ids.has(id):
             collected_ids.append(id)
