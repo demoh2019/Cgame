@@ -22,8 +22,10 @@ the real world renderer, not a mock screenshot or a combat mechanic.
   the individual shoe, rather than assuming a flat scene or the
   avatar's vertical offset. Falling/cliff traversal is rejected.
 - Footprints have a finite lifetime of **12 seconds**; the final
-  3 seconds fade smoothly. Position sampling uses the actual travel
-  distance, not a stationary periodic particle emitter.
+  3 seconds fade smoothly. A storm ending (or stepping onto dry soil)
+  prevents **new** marks but does not suddenly erase already stamped
+  terrain: those marks remain until their natural fade-out. Position
+  sampling uses real travel distance, not a stationary emitter.
 - Water, tunnels, dead/stationary characters, bike riding, teleports,
   invalid weather and dry terrain do not generate marks.
 - One source of truth handles both online and solo mode. No server
