@@ -520,3 +520,71 @@ References:
 - https://docs.godotengine.org/en/4.6/classes/class_performance.html
 - https://docs.godotengine.org/en/4.6/tutorials/scripting/debug/the_profiler.html
 - https://dev.epicgames.com/documentation/en-us/unreal-engine/introduction-to-performance-profiling-and-configuration-in-unreal-engine
+
+
+## Visual Quality Lab v13 — predictive scene streaming and per-cell hotspot diagnostics
+
+This release adds reusable, deterministic **velocity-aware streaming priorities**
+and an in-game **per-cell performance inspector**. Both are integrated in the
+existing playable forest and work with the v8–v12 streaming, state, quality,
+AI and CPU budgeting modules.
+
+### New engine services
+
+`WorldStreamingPlanner3D` (`addons/visual_quality/world_streaming_planner.gd`)
+contains pure, testable algorithms for predicting which cell the player is
+likely to reach using their *local-space velocity*. Look-ahead is limited to
+0.8 seconds and 2 cells by default. All urgently needed cells inside the
+current loading radius are sorted first (closest cells before distant ones),
+with velocity direction used only to break ties. At most 4 optional look-ahead
+cells inside the unloading radius are appended afterwards; speculative cells
+cannot evict currently needed cells or bypass the spawn operation/time budgets.
+A stopped player does not trigger speculative requests. The planner reads
+registered/active cell coordinates and never instantiates scene-tree objects.
+
+`WorldStreamer3D` now records per-cell costs for successful instantiation
+and unload callbacks: last spawn, peak spawn, last unload, and number of
+operations. Profiling includes scene instantiation and ready/cell-loaded
+callbacks; unload timing covers detach/queue-free work, **not** deferred
+memory reclamation. Only the most recent 96 cell profiles are retained by
+default, with oldest-record eviction so diagnostics do not grow forever.
+A sorted `get_slowest_cells()` accessor returns **defensive copies**.
+The v12 profiler/CSV stream adds cumulative prefetch count, number of
+profiled cells, and the worst observed cell spawn cost.
+
+### Game tools and controls
+
+The new `WorldStreamingInspector3D` shows a compact spatial map at the top
+right: `@` is the player cell, `#` a loaded cell, `+` a predicted future
+cell, and `.` a registered-but-unloaded cell. The map also shows aggregate
+load metrics and the three most expensive cell spawns by CPU time. Press
+**K** to show/hide the map, and **L** to export per-cell hotspot data to
+`user://visual_quality_cell_hotspots.csv`. Existing **P** telemetry CSV and
+**B** automatic work-budget controls remain available. Exporting is
+explicit and accepts only `user://` paths.
+
+### Tests and scope
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+godot --headless --path . --script res://tests/test_streaming_planner.gd
+godot --headless --path . --script res://tests/test_streaming_cell_profiler.gd
+godot --headless --path . --script res://tests/test_predictive_streaming_runtime.gd
+```
+
+30/30 Python static/package tests passed locally. The new Godot tests cover
+negative coordinates, prediction limits, deterministic priority, resource
+safety, bounded profiling, CSV output and an actual predictive load/unload
+scene flow. **They have not executed in Godot here**: the project's CI remains
+queued, the authorized Mac is offline, and this environment lacks the Godot
+runtime. No unverified FPS or hardware improvement is claimed.
+
+This is **a reusable GDScript engine extension immediately applied to the
+demonstration game** in `misc/visual_quality_lab`, not a rewrite of Godot's
+C++ streaming core nor an implementation of Unreal World Partition/HLOD.
+A different, local game project remains out of reach and is not modified.
+
+References:
+- https://docs.godotengine.org/en/4.6/tutorials/io/background_loading.html
+- https://docs.godotengine.org/en/4.6/tutorials/performance/thread_safe_apis.html
+- https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine
