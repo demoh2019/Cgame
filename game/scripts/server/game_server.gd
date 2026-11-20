@@ -48,6 +48,7 @@ const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
+const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
@@ -183,6 +184,7 @@ class Player:
 	var mounted: bool = false # Session-only; never saved.
 	var mount_cooldown: float = 0.0
 	var chain_wrap_seconds: float = 0.0 # Validated, persisted noise protection.
+	var tire_grip_seconds: float = 0.0 # Paid, validated off-road tire duration.
 	var decoy_timer: float = 0.0 # Anti-spam timer; no persistent character data.
 	var flash_cooldown: float = 0.0 # Persistent item-paid tactical cooldown.
 	var ruin_survey: Dictionary = {} # One owner-only temporary expedition waypoint.
@@ -358,6 +360,7 @@ func character_data(player: Player) -> Dictionary:
 		"flare_seconds": player.flare_seconds,
 		"spore_sample_cooldown": player.spore_sample_cooldown,
 		"chain_wrap_seconds": player.chain_wrap_seconds,
+		"tire_grip_seconds": player.tire_grip_seconds,
 		"flash_cooldown": player.flash_cooldown,
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 	}
@@ -435,6 +438,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("chain_wrap_seconds", 0.0),
 			0.0, BikeChain.DURATION_SECONDS):
+		return false
+	if not SaveValidation.finite_number(data.get("tire_grip_seconds", 0.0),
+			0.0, BikeGrip.DURATION_SECONDS):
 		return false
 	if not SaveValidation.finite_number(data.get("flash_cooldown", 0.0), 0.0, FlashCharge.COOLDOWN_SECONDS):
 		return false
@@ -531,6 +537,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.flare_seconds = float(data.get("flare_seconds", 0.0))
 	player.spore_sample_cooldown = float(data.get("spore_sample_cooldown", 0.0))
 	player.chain_wrap_seconds = float(data.get("chain_wrap_seconds", 0.0))
+	player.tire_grip_seconds = float(data.get("tire_grip_seconds", 0.0))
 	player.flash_cooldown = float(data.get("flash_cooldown", 0.0))
 	player.meal_seconds = float(data.get("meal_seconds", 0.0))
 	player.meal_tier = int(data.get("meal_tier", 0))
@@ -634,6 +641,7 @@ func _spawn_player(player: Player) -> void:
 	player.mounted = false
 	player.mount_cooldown = 0.0
 	player.chain_wrap_seconds = 0.0
+	player.tire_grip_seconds = 0.0
 	player.attack_timer = 0.0
 	player.skill_timer = 0.0
 	player.dodge_timer = 0.0
@@ -751,6 +759,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 			"x": move_x, "z": move_z, "sprint": sprint_allowed, "mounted": player.mounted,
 			"crouch": player.crouching, "cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed"),
 			"injury_factor": Survival.fracture_speed_factor(player.survival.fracture),
+			"tire_grip_seconds": player.tire_grip_seconds,
 		}, allowed)
 		var moved: float = Vector2(player.position.x - before_move.x, player.position.z - before_move.z).length()
 		if not player.recall.is_empty():
@@ -2715,6 +2724,16 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 				return {"ok": false, "reason": "not_carried"}
 			player.combat_energy = FrontierStim.apply(player.survival, player.combat_energy)
 			player.stim_cooldown = FrontierStim.COOLDOWN
+		"tire_grips":
+			if item_id != BikeGrip.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var grip_reason: String = BikeGrip.apply_reason(
+				player.inventory, player.tire_grip_seconds)
+			if grip_reason != "":
+				return {"ok": false, "reason": grip_reason, "tire_grips": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "tire_grips": true}
+			player.tire_grip_seconds = BikeGrip.DURATION_SECONDS
 		"bike_wrap":
 			if item_id != BikeChain.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -2790,6 +2809,8 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
 	player.dirty_character = true
+	if item_id == BikeGrip.ITEM_ID:
+		return {"ok": true, "tire_grip_seconds": player.tire_grip_seconds}
 	if item_id == BikeChain.ITEM_ID:
 		return {"ok": true, "chain_wrap_seconds": player.chain_wrap_seconds}
 	if item_id == HandFlare.ITEM_ID:
@@ -3769,6 +3790,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.guardian_brace = 0.0
 	victim.spore_filter_seconds = 0.0
 	victim.chain_wrap_seconds = 0.0
+	victim.tire_grip_seconds = 0.0
 	parties.clear_standard_by(victim.id)
 	parties.cancel_ready_check_for(victim.id)
 	parties.cancel_focus_by(victim.id)
@@ -3884,6 +3906,10 @@ func _tick_players(delta: float) -> void:
 		if player.chain_wrap_seconds > 0.0:
 			player.chain_wrap_seconds = maxf(0.0,
 				player.chain_wrap_seconds - maxf(0.0, delta))
+			player.dirty_character = true
+		if player.tire_grip_seconds > 0.0:
+			player.tire_grip_seconds = maxf(0.0,
+				player.tire_grip_seconds - maxf(0.0, delta))
 			player.dirty_character = true
 		if player.mounted and (not _alive(player) or
 				player.inventory.count(Mounts.ITEM_ID) < 1 or
@@ -5032,6 +5058,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"smoke_cooldown": player.smoke_cooldown,
 			"smoke_concealed": FieldSmoke.inside(smoke_clouds, player.position, time),
 			"chain_wrap_seconds": player.chain_wrap_seconds,
+			"tire_grip_seconds": player.tire_grip_seconds,
 			"flash_cooldown": player.flash_cooldown,
 			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,

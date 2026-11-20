@@ -49,7 +49,8 @@ static func step(world, position: Vector3, input: Dictionary, delta: float) -> V
 	var speed := base_speed * factor * injury_factor * (1.0 + bonus)
 	if mounted:
 		# Surface, uphill drag and limited downhill boost are deterministic for both peers.
-		speed *= BikeTerrain.speed_factor(world, position, direction)
+		speed *= BikeTerrain.speed_factor(world, position, direction,
+			float(input.get("tire_grip_seconds", 0.0)))
 	else:
 		# Genuine road speed for walking and sprinting, but not crouched stealth.
 		speed *= RoadTravel.foot_factor(world, position, crouching)

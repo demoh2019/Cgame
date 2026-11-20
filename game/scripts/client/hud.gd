@@ -314,6 +314,12 @@ func _build() -> void:
 	chain_button.tooltip_text = "Dismount and use 1 wrap: bike noise 27m -> 9m, gunshots unaffected."
 	chain_button.pressed.connect(func() -> void: client.use_item("bike_chain_wrap"))
 	inventory_box.add_child(chain_button)
+	var tires_button := Button.new()
+	tires_button.name = "FitTrailTireGrips"
+	tires_button.text = "Fit off-road tire grips (240s; workbench craft)"
+	tires_button.tooltip_text = "Fit 1 crafted kit to owned bike while dismounted; improves grip in mud, sand, forests, mountains."
+	tires_button.pressed.connect(func() -> void: client.use_item("trail_tire_grips"))
+	inventory_box.add_child(tires_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -1221,6 +1227,12 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and data.has("tire_grip_seconds"):
+		say("Off-road tire grips fitted: %.0fs of improved traction." % float(data["tire_grip_seconds"]))
+		return
+	if kind == "use" and bool(data.get("tire_grips", false)):
+		say("Tire grips: " + str(data.get("reason", "rejected")) + " (kit not spent)")
+		return
 	if kind == "caravan":
 		if not bool(data.get("ok", false)):
 			say("Caravan: " + str(data.get("reason", "unavailable")))
@@ -1686,6 +1698,9 @@ func _process(_delta: float) -> void:
 	var smoke_left: float = float(client.you.get("smoke_cooldown", 0.0))
 	if smoke_left > 0.0:
 		_info_label.text += "\nSMOKE: %ds recharge (F9)" % ceili(smoke_left)
+	var grip_remaining: float = float(client.you.get("tire_grip_seconds", 0.0))
+	if grip_remaining > 0.0:
+		_info_label.text += "\nOFF-ROAD TIRES: %.0fs | less mud/sand/roots/rock drag" % grip_remaining
 	var quiet_left: float = float(client.you.get("chain_wrap_seconds", 0.0))
 	if quiet_left > 0.0:
 		_info_label.text += "\nQUIET CHAIN: %.0fs | Bike noise 9m" % quiet_left

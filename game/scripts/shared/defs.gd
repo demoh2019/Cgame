@@ -518,6 +518,11 @@ static func _build_items() -> void:
 	_add_recipe("bike_panniers", "bike_panniers", 1,
 		{"cloth_2": 4, "plank_2": 2, "scrap": 3, "fiber_2": 3},
 		"workbench", 7.0)
+	# Specialized consumable off-road tire kit, uses existing network item RPC.
+	_add_item("trail_tire_grips", {"name": "Trail Tire Grips", "kind": "tire_grips",
+		"tier": 2, "stack": 5, "weight": 0.65, "value": 54})
+	_add_recipe("trail_tire_grips", "trail_tire_grips", 1,
+		{"cloth_2": 2, "fiber_2": 2, "scrap": 2}, "workbench", 5.0)
 	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
 	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
 		"tier": 2, "weight": 12.0, "value": 180})

@@ -3,6 +3,7 @@ extends RefCounted
 ## authoritative server and predictive clients. No client-supplied grip values.
 
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
+const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const SAMPLE_DISTANCE := 2.0
 const MIN_TRACTION := 0.40
 const MAX_TRACTION := 1.08
@@ -28,11 +29,13 @@ static func surface_factor(biome: String) -> float:
 
 ## Direction is normalized to avoid forged input lengths altering grade sampling.
 ## The sample is from the deterministic, terrain-levelled world on both peers.
-static func speed_factor(world, position: Vector3, direction: Vector2) -> float:
+static func speed_factor(world, position: Vector3, direction: Vector2, grip_seconds: float = 0.0) -> float:
 	if not position.is_finite() or not direction.is_finite():
 		return 1.0
+	var biome: String = world.biome_at(position.x, position.z)
+	# Tires restore off-road traction; seeded roads retain their own boost.
 	var surface: float = RoadTravel.bike_surface(
-		surface_factor(world.biome_at(position.x, position.z)),
+		BikeGrip.surface_factor(biome, surface_factor(biome), grip_seconds),
 		RoadTravel.coverage(world, position))
 	if direction.length_squared() < 0.000001:
 		return surface
