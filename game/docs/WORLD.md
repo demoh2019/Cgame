@@ -18,3 +18,13 @@ places and the same people, so nothing of it travels over the network.
 * Entity ids are built from the chunk coordinates (no hash collisions), props block movement through the same collision list as everything else.
 
 Tests: `tests/test_world_sites.gd` (24 000 checks: island, sites, contents, chunks, stations, determinism).
+
+## Roads and landmarks
+
+* **Roads** (`scripts/shared/world_roads.gd`): every place people built is joined to its two nearest neighbours and the hub to its four, about 345
+  winding dirt roads (77 km) on seed 1337, stopping at the shore. Each road has **signposts** near both ends naming the place at the other end and the
+  distance. Roads are scenery: the ground shader paints them from a per-chunk mask, the map draws them, movement is unchanged.
+* **Landmarks** fill the regions without a settlement: **Stone Circle** (standing stones round an offering chest), **Crystal Grove** (giant crystals and
+  crystal ore), **Great Tree** (a 21 m tree with a hermit and a chest), **Old Shrine** (pillars, braziers, an altar chest and a keeper) and **Battlefield**
+  (wreckage, supplies and many infected). They count as places for discovery, the map and the banners.
+* **Trees by biome**: forests mix broadleaf trees, pines and the painted trees; swamps get dead and twisted trees; mountains pines.

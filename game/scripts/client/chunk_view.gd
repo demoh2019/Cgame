@@ -10,6 +10,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Foliage = preload("res://scripts/client/foliage.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
+const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
 const HEIGHT_MIN := -45.0
@@ -22,6 +23,10 @@ render_mode diffuse_burley, specular_schlick_ggx;
 // snow on the peaks, all from layered value noise so nothing repeats in a visible grid.
 varying vec3 world_position;
 varying vec3 world_normal;
+// Roads of this chunk: a 1 m per pixel mask of the chunk (white = road). Chunks without roads keep the black default.
+uniform sampler2D road_mask : hint_default_black, filter_linear, repeat_disable;
+uniform vec2 chunk_origin = vec2(0.0);
+uniform float chunk_size = 64.0;
 
 float hash21(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
@@ -86,6 +91,15 @@ void fragment() {
 	color = mix(color, rock * 0.85, smoothstep(40.0, 58.0, h));
 	color = mix(color, snow, smoothstep(88.0, 108.0, h + (broad - 0.5) * 14.0) * (1.0 - smoothstep(0.3, 0.55, slope)));
 
+	// Packed dirt roads with pebbles and a worn, darker middle.
+	float road = textureLod(road_mask, (p - chunk_origin) / chunk_size, 0.0).r;
+	if (road > 0.01) {
+		vec3 dirt_road = vec3(0.44, 0.35, 0.24) * (0.82 + 0.3 * mid) * (0.9 + 0.2 * fine);
+		dirt_road = mix(dirt_road, vec3(0.6, 0.56, 0.5), smoothstep(0.78, 0.95, speck) * 0.6);
+		dirt_road *= 1.0 - 0.12 * smoothstep(0.75, 1.0, road);
+		color = mix(color, dirt_road, smoothstep(0.08, 0.55, road));
+	}
+
 	ALBEDO = color;
 	ROUGHNESS = mix(0.95, 0.75, shore);
 	SPECULAR = 0.15;
@@ -110,6 +124,47 @@ static func ground_material() -> ShaderMaterial:
 		_ground_material = ShaderMaterial.new()
 		_ground_material.shader = shader
 	return _ground_material
+
+
+## The shared ground material, or a copy that carries this chunk's road mask when roads cross it.
+func _ground_with_roads(origin: Vector2) -> Material:
+	if _world.roads == null:
+		return ground_material()
+	var pieces: Array = _world.roads.pieces_in_cell(cell)
+	if pieces.is_empty():
+		return ground_material()
+	var size: int = int(Defs.CHUNK_SIZE)
+	var data := PackedByteArray()
+	data.resize(size * size)
+	var half: float = WorldRoads.HALF_WIDTH
+	var soft: float = 1.2
+	for piece in pieces:
+		var a: Vector2 = piece[0] - origin
+		var b: Vector2 = piece[1] - origin
+		var reach: float = half + soft
+		var x0: int = maxi(0, floori(minf(a.x, b.x) - reach))
+		var x1: int = mini(size - 1, ceili(maxf(a.x, b.x) + reach))
+		var y0: int = maxi(0, floori(minf(a.y, b.y) - reach))
+		var y1: int = mini(size - 1, ceili(maxf(a.y, b.y) + reach))
+		var ab: Vector2 = b - a
+		var length_squared: float = maxf(ab.length_squared(), 0.0001)
+		for py in range(y0, y1 + 1):
+			for px in range(x0, x1 + 1):
+				var point := Vector2(float(px) + 0.5, float(py) + 0.5)
+				var t_along: float = clampf((point - a).dot(ab) / length_squared, 0.0, 1.0)
+				var distance: float = point.distance_to(a + ab * t_along)
+				if distance >= reach:
+					continue
+				var value: int = int(255.0 * clampf((reach - distance) / soft, 0.0, 1.0))
+				var index: int = py * size + px
+				if value > data[index]:
+					data[index] = value
+	var image := Image.create_from_data(size, size, false, Image.FORMAT_L8, data)
+	var material := ground_material().duplicate() as ShaderMaterial
+	material.set_shader_parameter("road_mask", ImageTexture.create_from_image(image))
+	material.set_shader_parameter("chunk_origin", origin)
+	material.set_shader_parameter("chunk_size", Defs.CHUNK_SIZE)
+	return material
 
 
 func build(p_world, p_cell: Vector2i) -> void:
@@ -143,14 +198,43 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.collision_enabled = false # The server decides where players can stand.
 	_terrain.cast_shadows = false
 	_terrain.update_interval = 0.5
-	_terrain.material = ground_material()
+	_terrain.material = _ground_with_roads(origin)
 	_terrain.set_height_data(heights, Vector2i(SAMPLES, SAMPLES))
 	add_child(_terrain)
+
+
+# Trees by biome (nature kit file names; "painted:N" is a tree of the hand-painted collection).
+const TREES_BY_BIOME := {
+	"forest": ["CommonTree_1", "CommonTree_2", "CommonTree_3", "CommonTree_4", "CommonTree_5", "Pine_1", "Pine_2", "Pine_3", "painted:0", "painted:1", "painted:2", "painted:3", "painted:4"],
+	"plains": ["CommonTree_1", "CommonTree_2", "CommonTree_4", "painted:5", "painted:6", "painted:7"],
+	"swamp": ["DeadTree_1", "DeadTree_2", "DeadTree_3", "DeadTree_4", "DeadTree_5", "TwistedTree_1", "TwistedTree_2", "TwistedTree_3", "TwistedTree_4"],
+	"mountain": ["Pine_1", "Pine_2", "Pine_3", "Pine_4", "Pine_5", "DeadTree_2"],
+	"beach": ["CommonTree_2", "CommonTree_5", "Pine_4"],
+}
+
+
+## Which tree stands at a node: by biome, stable for the node id.
+func _tree_key(node: Dictionary) -> String:
+	var biome: String = _world.biome_at(float(node["x"]), float(node["z"]))
+	var options: Array = TREES_BY_BIOME.get(biome, TREES_BY_BIOME["forest"])
+	if not ModelCatalog.has_painted_trees():
+		options = options.filter(func(name: String) -> bool: return not name.begins_with("painted"))
+	return "tree:" + str(options[WorldGen.mix(int(node["id"]), 3, 5) % options.size()])
 
 
 ## Mesh of a group. Kinds with a number ("tree:3", "building:5") are variants; the catalog picks the model installed for it,
 ## and each branch falls back to the Kenney or procedural models when its packs are missing.
 func _mesh_for(kind: String) -> Mesh:
+	if _use_nature and kind.begins_with("tree:") and not kind.substr(5).is_valid_int():
+		var tree_id: String = kind.substr(5)
+		if tree_id.begins_with("painted:"):
+			return Foliage.swayed(ModelCatalog.painted_tree(int(tree_id.get_slice(":", 1))), "painted:" + tree_id, 0.2)
+		return Foliage.swayed(Assets.nature_mesh(tree_id), "tree:" + tree_id, 0.08 if tree_id.begins_with("DeadTree") else 0.2)
+	if kind.begins_with("monument:"):
+		var monument: Mesh = ModelCatalog.monument(int(kind.get_slice(":", 1)))
+		if monument != null:
+			return Foliage.swayed(monument, "monument:" + kind, 0.35) if kind == "monument:2" else monument
+		return Assets.building_mesh(4)
 	var base: String = kind.get_slice(":", 0)
 	var variant: int = int(kind.get_slice(":", 1)) if kind.contains(":") else 0
 	var picked: Mesh = null
@@ -221,6 +305,10 @@ func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> fl
 	var base: String = kind.get_slice(":", 0)
 	var variant: int = int(kind.get_slice(":", 1)) if kind.contains(":") else 0
 	var baked: bool = _is_baked(base, variant)
+	if kind.begins_with("tree:TwistedTree"):
+		return rng.randf_range(0.45, 0.6)
+	if kind.begins_with("monument:"):
+		return 1.0 if ModelCatalog.monument(int(kind.get_slice(":", 1))) != null else 3.0
 	match base:
 		"tree":
 			if _use_nature:
@@ -280,7 +368,7 @@ func _build_objects(data: Dictionary) -> void:
 		var kind: String = node["kind"]
 		var variant: int = WorldGen.mix(int(node["id"]), 3, 5)
 		if kind == "tree":
-			kind = "tree:%d" % (variant % tree_variants)
+			kind = _tree_key(node) if _use_nature else "tree:%d" % (variant % tree_variants)
 		elif kind == "rock" and (_use_nature or rock_variants > Assets.ROCK_FILES.size()):
 			kind = "rock:%d" % (variant % rock_variants)
 		elif kind == "ore" and crystal_count > 0:
@@ -311,7 +399,7 @@ func _build_objects(data: Dictionary) -> void:
 		multimesh.instance_count = list.size()
 		var index: Dictionary = {}
 		var transforms: Array = []
-		var is_building: bool = kind.begins_with("wall") or kind.begins_with("building:") or kind.begins_with("tower") or kind == "workbench" or kind.begins_with("ruin:")
+		var is_building: bool = kind.begins_with("wall") or kind.begins_with("building:") or kind.begins_with("tower") or kind == "workbench" or kind.begins_with("ruin:") or kind.begins_with("monument:")
 		for i in list.size():
 			var node: Dictionary = list[i]
 			var size: float = _size_for(kind, node, rng)
@@ -331,7 +419,7 @@ func _build_objects(data: Dictionary) -> void:
 			transforms.append(transform)
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind.begins_with("wall") or kind.begins_with("tower") or kind.begins_with("ruin:")) else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind.begins_with("wall") or kind.begins_with("tower") or kind.begins_with("ruin:") or kind.begins_with("monument:")) else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if _use_nature and kind.begins_with("ore:") and crystal_count == 0:
 			instance.material_override = _ore_material(multimesh.mesh)
 		add_child(instance)
@@ -339,7 +427,70 @@ func _build_objects(data: Dictionary) -> void:
 	if _use_nature:
 		_build_decor(origin, rng)
 	_build_windmills(windmills, origin)
+	_build_signposts(origin)
 	_build_npcs(data.get("npcs", []))
+
+
+## Wooden signposts beside the roads, naming the place at the other end and how far it is.
+func _build_signposts(origin: Vector2) -> void:
+	if _world.roads == null:
+		return
+	for sign in _world.roads.signs_in_cell(cell):
+		var root := Node3D.new()
+		var ground: float = _world.height_at(float(sign["x"]), float(sign["z"]))
+		root.position = Vector3(float(sign["x"]) - origin.x, ground, float(sign["z"]) - origin.y)
+		root.rotation.y = float(sign["yaw"])
+		add_child(root)
+		var pole := MeshInstance3D.new()
+		pole.mesh = _signpost_pole()
+		pole.position.y = 1.3
+		root.add_child(pole)
+		var board := MeshInstance3D.new()
+		board.mesh = _signpost_board()
+		board.position = Vector3(0.0, 2.25, 0.45) # The arrow end points along the road.
+		root.add_child(board)
+		var label := Label3D.new()
+		label.text = "%s\n%d m" % [sign["to"], int(sign["metres"])]
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.font_size = 26
+		label.pixel_size = 0.007
+		label.outline_size = 8
+		label.modulate = Color(1.0, 0.93, 0.75)
+		label.position = Vector3(0.0, 3.0, 0.0)
+		label.visibility_range_end = 34.0
+		root.add_child(label)
+
+
+static var _pole_mesh: Mesh
+static var _board_mesh: Mesh
+
+
+static func _wood_material() -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.45, 0.3, 0.17)
+	material.roughness = 0.95
+	return material
+
+
+static func _signpost_pole() -> Mesh:
+	if _pole_mesh == null:
+		var cylinder := CylinderMesh.new()
+		cylinder.top_radius = 0.07
+		cylinder.bottom_radius = 0.09
+		cylinder.height = 2.6
+		cylinder.radial_segments = 6
+		cylinder.material = _wood_material()
+		_pole_mesh = cylinder
+	return _pole_mesh
+
+
+static func _signpost_board() -> Mesh:
+	if _board_mesh == null:
+		var box := BoxMesh.new()
+		box.size = Vector3(0.08, 0.34, 1.3)
+		box.material = _wood_material()
+		_board_mesh = box
+	return _board_mesh
 
 
 var _sails: Array = [] # [{"node": Node3D, "axis": Vector3, "speed": float}]

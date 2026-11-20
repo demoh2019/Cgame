@@ -26,6 +26,13 @@ const WALL_STONE := 1 # Fort wall.
 const PROP_RADII := [0.45, 0.45, 0.6, 0.6, 0.35, 0.3, 0.5, 0.5, 0.6, 2.4, 0.4, 0.7, 0.9, 0.7, 0.8, 0.5, 0.9, 0.2, 1.0, 0.9]
 const RUIN_RADII := [0.8, 0.8, 1.8, 1.8, 1.1, 2.6, 1.6, 0.5, 1.9, 2.2]
 const CRATE_VARIANTS := 5
+# Landmarks fill the regions that hold no settlement: odd, memorable places to find. Their big pieces are "monument"
+# structures; the client's MONUMENTS list draws them (standing stone, giant crystal, great tree, shrine pillar).
+const MONUMENT_RADII := [1.1, 1.3, 2.6, 0.9]
+const LANDMARKS := [
+	{"title": "Stone Circle"}, {"title": "Crystal Grove"}, {"title": "Great Tree"}, {"title": "Old Shrine"}, {"title": "Battlefield"},
+]
+const LANDMARK_CHANCE := 0.85
 # Which props belong where. Indices into PROP_RADII.
 const RUSTIC_PROPS := [0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12]
 const MARKET_PROPS := [9, 10, 8, 16, 11]
@@ -44,6 +51,7 @@ const KINDS := {
 	"bunker": {"title": "Bunker", "radius": 34.0, "clear": 0.9, "station": false},
 	"lighthouse": {"title": "Lighthouse", "radius": 16.0, "clear": 0.8, "station": false},
 	"dock": {"title": "Dock", "radius": 20.0, "clear": 0.7, "station": false},
+	"landmark": {"title": "Landmark", "radius": 24.0, "clear": 0.85, "station": false},
 }
 
 const PREFIXES := ["Ash", "Black", "Bright", "Cold", "Crow", "Dun", "Elm", "Fair", "Grey", "Hollow", "Iron", "Kings", "Lone", "Mill", "North", "Oak", "Pine", "Raven", "Stone", "Thorn", "West", "Wolf", "Red", "Gold", "Mist", "Storm", "Rust", "Salt", "Ember", "Frost"]
@@ -137,7 +145,7 @@ func _find_site(rx: int, rz: int) -> Array:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = world.mix(rx, rz, world.world_seed, 71)
 	if rng.randf() > SITE_CHANCE:
-		return []
+		return _find_landmark(rx, rz)
 	var origin := Vector2(rx, rz) * REGION_SIZE
 	for attempt in 14:
 		var p := origin + Vector2(rng.randf_range(54.0, REGION_SIZE - 54.0), rng.randf_range(54.0, REGION_SIZE - 54.0))
@@ -160,7 +168,56 @@ func _find_site(rx: int, rz: int) -> Array:
 			"station": bool(KINDS[kind]["station"]), "station_x": p.x + station_offset.x, "station_z": p.y + station_offset.y,
 			"seed": site_seed,
 		}]
+	return _find_landmark(rx, rz)
+
+
+## A landmark for a region without a settlement. Its own random stream, so the settlements of other regions never move.
+func _find_landmark(rx: int, rz: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = world.mix(rx, rz, world.world_seed, 79)
+	if rng.randf() > LANDMARK_CHANCE:
+		return []
+	var origin := Vector2(rx, rz) * REGION_SIZE
+	for attempt in 12:
+		var p := origin + Vector2(rng.randf_range(40.0, REGION_SIZE - 40.0), rng.randf_range(40.0, REGION_SIZE - 40.0))
+		var hub_distance: float = p.length()
+		if hub_distance < MIN_HUB_DISTANCE or hub_distance > world.WORLD_RADIUS - 220.0 or world.is_water(p.x, p.y):
+			continue
+		if not _flat_and_dry(p, 18.0, 9.0):
+			continue
+		var zone: int = world.zone_at(p.x, p.y)
+		var biome: String = world.biome_at(p.x, p.y)
+		var variant: int = _pick_landmark(zone, biome, rng)
+		var site_seed: int = world.mix(rx, rz, world.world_seed, 81)
+		var name := _place_name(site_seed)
+		var title: String = LANDMARKS[variant]["title"]
+		var radius: float = float(KINDS["landmark"]["radius"])
+		return [{
+			"id": site_seed % 10000000, "kind": "landmark", "variant": variant, "name": name, "title": title,
+			"display": "%s %s" % [name, title], "x": p.x, "z": p.y, "y": world.height_at(p.x, p.y),
+			"radius": radius, "clear": float(KINDS["landmark"]["clear"]) * radius, "zone": zone, "biome": biome,
+			"station": false, "station_x": p.x, "station_z": p.y, "seed": site_seed,
+		}]
 	return []
+
+
+func _pick_landmark(zone: int, biome: String, rng: RandomNumberGenerator) -> int:
+	var weights := {0: 3.0, 3: 2.0}
+	if biome == "forest" or biome == "plains" or biome == "swamp":
+		weights[2] = 4.0
+	if biome == "mountain" or zone >= 1:
+		weights[1] = 3.5 if biome == "mountain" else 1.5
+	if zone >= 2:
+		weights[4] = 3.0
+	var total := 0.0
+	for key in weights:
+		total += float(weights[key])
+	var roll: float = rng.randf() * total
+	for key in weights:
+		roll -= float(weights[key])
+		if roll <= 0.0:
+			return int(key)
+	return 0
 
 
 func _near_water(p: Vector2) -> bool:
@@ -320,6 +377,8 @@ func contents(site: Dictionary) -> Dictionary:
 			_props(result, rng, center, rng.randi_range(3, 5), 3.0, 11.0)
 			_npcs(result, rng, site, [["watch", 1]], 4.0, 7.0)
 			_zombies(result, rng, center, rng.randi_range(0, 2), 12.0, 26.0, zone, false)
+		"landmark":
+			_landmark(result, rng, site, center, zone, taken)
 		"dock":
 			_houses(result, rng, center, 2, 7.0, 14.0, 10.0, taken, 5.0)
 			_crates(result, rng, center, 2, 4.0, 12.0, taken)
@@ -346,6 +405,59 @@ func _usable(p: Vector2, taken: Array, spacing: float) -> bool:
 		if q.distance_to(p) < spacing:
 			return false
 	return true
+
+
+func _monument(result: Dictionary, p: Vector2, variant: int, yaw: float) -> void:
+	result["structures"].append({"kind": "monument", "variant": variant, "scale": 1.0, "x": p.x, "z": p.y, "y": _ground(p), "yaw": yaw, "radius": MONUMENT_RADII[variant], "blocks": true})
+
+
+func _landmark(result: Dictionary, rng: RandomNumberGenerator, site: Dictionary, center: Vector2, zone: int, taken: Array) -> void:
+	match int(site.get("variant", 0)):
+		0: # Stone circle: standing stones in a ring round an offering chest.
+			var stones: int = rng.randi_range(7, 9)
+			for i in stones:
+				var angle: float = TAU * float(i) / float(stones)
+				var p: Vector2 = center + Vector2.from_angle(angle) * 11.0
+				taken.append(p)
+				_monument(result, p, 0, -angle)
+			taken.append(center)
+			result["crates"].append({"kind": "crate", "variant": 1, "x": center.x, "z": center.y, "y": _ground(center), "radius": 0.6, "blocks": true})
+			_props(result, rng, center, 2, 4.0, 6.0, [8])
+			_zombies(result, rng, center, 0 if zone == 0 else rng.randi_range(1, 3), 17.0, 26.0, zone, false)
+		1: # Crystal grove: giant crystals and crystal ore to mine.
+			for i in rng.randi_range(6, 9):
+				var p: Vector2 = center + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(3.0, 15.0)
+				if _usable(p, taken, 4.0):
+					taken.append(p)
+					_monument(result, p, 1, rng.randf() * TAU)
+			_ore(result, rng, center, rng.randi_range(5, 7), 4.0, 19.0, zone)
+			_zombies(result, rng, center, rng.randi_range(2, 4), 10.0, 24.0, zone, false)
+		2: # Great tree: one giant with a camp of a hermit at its foot.
+			taken.append(center)
+			_monument(result, center, 2, rng.randf() * TAU)
+			var foot: Vector2 = center + Vector2.from_angle(rng.randf() * TAU) * 6.0
+			taken.append(foot)
+			result["crates"].append({"kind": "crate", "variant": 2, "x": foot.x, "z": foot.y, "y": _ground(foot), "radius": 0.6, "blocks": true})
+			_props(result, rng, center, rng.randi_range(3, 5), 6.0, 12.0, [2, 11, 12, 8])
+			_npcs(result, rng, site, [["sitter", 1]], 7.0, 10.0)
+			_zombies(result, rng, center, 0 if zone == 0 else rng.randi_range(0, 2), 18.0, 26.0, zone, false)
+		3: # Old shrine: pillars round an altar chest and two braziers.
+			for corner in [Vector2(-7, -7), Vector2(7, -7), Vector2(7, 7), Vector2(-7, 7)]:
+				var p: Vector2 = center + corner
+				taken.append(p)
+				_monument(result, p, 3, 0.0)
+			taken.append(center)
+			result["crates"].append({"kind": "crate", "variant": 3, "x": center.x, "z": center.y, "y": _ground(center), "radius": 0.6, "blocks": true})
+			for side in [Vector2(-3.5, 0), Vector2(3.5, 0)]:
+				var p: Vector2 = center + side
+				result["props"].append({"kind": "prop", "variant": 8, "x": p.x, "z": p.y, "y": _ground(p), "yaw": 0.0, "scale": 1.5, "radius": PROP_RADII[8], "blocks": true})
+			_npcs(result, rng, site, [["watch", 1]], 9.0, 12.0)
+			_zombies(result, rng, center, rng.randi_range(1, 2), 14.0, 22.0, zone, false)
+		_: # Battlefield: wreckage, broken walls, abandoned supplies and the dead that walk.
+			_ruin_bits(result, rng, center, rng.randi_range(6, 10), 4.0, 20.0, taken)
+			_props(result, rng, center, rng.randi_range(6, 9), 3.0, 20.0, MILITARY_PROPS)
+			_crates(result, rng, center, rng.randi_range(3, 4), 3.0, 16.0, taken)
+			_zombies(result, rng, center, rng.randi_range(4, 7) + zone, 4.0, 22.0, zone, true)
 
 
 func _station(result: Dictionary, site: Dictionary) -> void:

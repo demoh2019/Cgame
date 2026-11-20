@@ -77,6 +77,14 @@ const RUINS := [
 	{"path": "dungeon/stairs_wide.gltf", "kind": "length", "size": 5.0, "radius": 2.2},
 ]
 
+# The big pieces of landmarks, by WorldPoi monument variant. Each variant lists models in order of preference.
+const MONUMENTS := [
+	[{"path": "loose/the_ancient_mystic_stone.glb", "node": "LP_Stone_Main_0", "kind": "height", "size": 4.2}, {"path": "dungeon/pillar.gltf", "kind": "height", "size": 4.0}],
+	[{"path": "loose/crystal.glb", "kind": "height", "size": 4.6}, {"path": "loose/toon_style_-_crystal.glb", "node": "Crystal_Crystal_0", "kind": "height", "size": 4.6}],
+	[{"path": "loose/stylized_hand_painted_trees.glb", "node": "Object_12", "kind": "height", "size": 21.0}, {"path": "nature/CommonTree_3.gltf", "kind": "height", "size": 21.0}],
+	[{"path": "dungeon/pillar_decorated.gltf", "kind": "height", "size": 5.0}, {"path": "dungeon/pillar.gltf", "kind": "height", "size": 5.0}],
+]
+
 # Containers that hold loot: variant = crate id hash % size. Chests of three artists.
 const CRATES := [
 	{"path": "village/EA03_Prop_Container_Crate_01a.glb", "kind": "height", "size": 0.9},
@@ -230,6 +238,16 @@ static func stone(variant: int) -> Mesh:
 	if not _cache.has(key):
 		_cache[key] = bake(STONE_FILE, node, "length", 2.2 if node.begins_with("Small") else 3.0)
 	return _cache[key]
+
+
+## The model of a landmark piece, or null when none of its candidates is installed.
+static func monument(variant: int) -> Mesh:
+	if variant < 0 or variant >= MONUMENTS.size():
+		return null
+	for entry in MONUMENTS[variant]:
+		if exists(String(entry["path"])):
+			return entry_mesh(entry)
+	return null
 
 
 static func has_painted_trees() -> bool:

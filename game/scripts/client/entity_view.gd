@@ -66,6 +66,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 	var label: Label3D = _nodes[key].get_node_or_null("Label")
 	if label != null:
 		if kind == "zombie":
+			label.visible = false # The overlay draws a health bar instead (world_overlay.gd).
 			label.text = "%s%s  %d" % [
 				"ENRAGED RAID BOSS " if bool(entity.get("raid_enraged", false)) else (
 				"RAID BOSS " if bool(entity.get("raid_boss", false)) else (

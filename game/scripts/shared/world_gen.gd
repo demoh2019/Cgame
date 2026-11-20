@@ -5,6 +5,7 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
+const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 
 var world_seed: int
 var _continent: FastNoiseLite
@@ -19,6 +20,7 @@ var _level_rx: int = 1 << 30
 var _level_rz: int = 1 << 30
 var _levellers: Array = []
 var poi_building := false # While sites are being found, terrain is read without their levelling.
+var roads # Dirt roads between the places (scenery for the client): see world_roads.gd.
 var poi # Villages, camps, forts, ruined cities and the rest: see world_poi.gd.
 const CACHE_LIMIT := 256
 
@@ -39,6 +41,7 @@ func _init(p_seed: int = 1337) -> void:
 	_temperature = _make_noise(p_seed + 303, 0.0021, 2)
 	_moisture = _make_noise(p_seed + 404, 0.0026, 2)
 	poi = WorldPoi.new(self)
+	roads = WorldRoads.new(self)
 
 
 static func _make_noise(p_seed: int, frequency: float, octaves: int) -> FastNoiseLite:

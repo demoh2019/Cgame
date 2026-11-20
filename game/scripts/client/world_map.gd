@@ -13,6 +13,7 @@ const KIND_COLORS := {
 	"village": Color(1.0, 0.85, 0.3), "farm": Color(0.8, 0.9, 0.35), "camp": Color(0.95, 0.65, 0.35), "depot": Color(0.7, 0.75, 0.85),
 	"outpost": Color(0.4, 0.8, 1.0), "tower": Color(0.85, 0.85, 0.9), "mine": Color(0.75, 0.55, 0.4), "city": Color(0.95, 0.4, 0.4),
 	"bunker": Color(0.75, 0.4, 0.95), "lighthouse": Color(1.0, 1.0, 0.7), "dock": Color(0.5, 0.75, 0.95),
+	"landmark": Color(0.5, 1.0, 0.85),
 }
 const ZONE_COLORS := [Color(0.35, 0.85, 0.45, 0.5), Color(0.95, 0.82, 0.3, 0.5), Color(0.95, 0.45, 0.3, 0.5)]
 
@@ -97,6 +98,15 @@ func _draw() -> void:
 	for i in Defs.ZONE_RADII.size():
 		var radius: float = float(Defs.ZONE_RADII[i]) / SPAN * _panel_rect.size.x
 		draw_arc(_to_screen(0.0, 0.0), radius, 0.0, TAU, 96, ZONE_COLORS[i], 1.5)
+	# Roads.
+	if client.world.roads != null:
+		for road in client.world.roads.all_roads():
+			var points: PackedVector2Array = road["points"]
+			var line := PackedVector2Array()
+			for i in range(0, points.size(), 2):
+				line.append(_to_screen(points[i].x, points[i].y))
+			line.append(_to_screen(points[points.size() - 1].x, points[points.size() - 1].y))
+			draw_polyline(line, Color(0.85, 0.72, 0.5, 0.55), 1.2, true)
 	var edge: float = WorldGen.WORLD_RADIUS / SPAN * _panel_rect.size.x
 	draw_arc(_to_screen(0.0, 0.0), edge, 0.0, TAU, 128, Color(1, 1, 1, 0.25), 1.0)
 	# Seeded site positions are public; personal visited marks are not.
@@ -111,6 +121,15 @@ func _draw() -> void:
 		var spot: Vector2 = _to_screen(float(site["x"]), float(site["z"]))
 		var color: Color = KIND_COLORS.get(site["kind"], Color.WHITE)
 		var size := 5.0 if bool(site["station"]) else 3.2
+		if site["kind"] == "landmark":
+			size = 3.6
+			draw_colored_polygon(PackedVector2Array([spot + Vector2(0, -size - 1.5), spot + Vector2(size + 1.5, 0), spot + Vector2(0, size + 1.5), spot + Vector2(-size - 1.5, 0)]), Color(0, 0, 0, 0.7))
+			draw_colored_polygon(PackedVector2Array([spot + Vector2(0, -size), spot + Vector2(size, 0), spot + Vector2(0, size), spot + Vector2(-size, 0)]), color)
+			var landmark_gap: float = spot.distance_to(mouse)
+			if landmark_gap < best:
+				best = landmark_gap
+				_hover = site
+			continue
 		if site["kind"] == "city":
 			size = 4.2
 		if bool(site["station"]):

@@ -157,6 +157,10 @@ func _build() -> void:
 	_log.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_log.size_flags_vertical = Control.SIZE_SHRINK_END
 	_log.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Keep the log left of the action bar: a fixed width and wrapped lines.
+	_log.custom_minimum_size = Vector2(390, 0)
+	_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_log.max_lines_visible = 7
 	var log_style := StyleBoxFlat.new()
 	log_style.bg_color = Color(0.04, 0.05, 0.08, 0.62)
 	log_style.set_corner_radius_all(10)
@@ -861,6 +865,7 @@ func _build() -> void:
 	_skin.setup(client)
 	_skin.client_info_label = _info_label
 	set_details_visible(false)
+	_arrange_inventory_window()
 
 
 
@@ -893,7 +898,63 @@ func quick_cook() -> void:
 func toggle_inventory() -> void:
 	_inventory_panel.visible = not _inventory_panel.visible
 	if _inventory_panel.visible:
+		_inventory_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 		client.market_list()
+
+
+## The inventory window holds the backpack, the stash and dozens of actions added over time. Lay it out as two columns:
+## the backpack and stash on the left, every action in a scrolling list on the right, centred and always on screen.
+func _arrange_inventory_window() -> void:
+	var box: VBoxContainer = _inventory_panel.get_child(0)
+	var columns := HBoxContainer.new()
+	columns.add_theme_constant_override("separation", 14)
+	var left := VBoxContainer.new()
+	left.custom_minimum_size = Vector2(390, 0)
+	var header := Label.new()
+	header.text = "BACKPACK"
+	header.add_theme_font_size_override("font_size", 18)
+	header.add_theme_color_override("font_color", Color(0.95, 0.78, 0.35))
+	left.add_child(header)
+	var hint := Label.new()
+	hint.text = "Click: use or equip.  Right click: stash one (at a workbench)."
+	hint.add_theme_font_size_override("font_size", 11)
+	hint.add_theme_color_override("font_color", Color(0.75, 0.8, 0.9))
+	left.add_child(hint)
+	var stash_scroll: Control = _stash_grid.get_parent()
+	var stash_title: Control = box.get_child(stash_scroll.get_index() - 1)
+	for moved in [_inventory_grid, stash_title, stash_scroll]:
+		moved.get_parent().remove_child(moved)
+		left.add_child(moved)
+	(stash_title as Label).text = "PROTECTED STASH  (survives death; click to take one at a workbench)"
+	(stash_title as Label).add_theme_font_size_override("font_size", 12)
+	(stash_title as Label).add_theme_color_override("font_color", Color(0.55, 0.85, 1.0))
+	stash_scroll.custom_minimum_size = Vector2(380, 150)
+	var right := VBoxContainer.new()
+	var actions_title := Label.new()
+	actions_title.text = "ACTIONS"
+	actions_title.add_theme_font_size_override("font_size", 18)
+	actions_title.add_theme_color_override("font_color", Color(0.95, 0.78, 0.35))
+	right.add_child(actions_title)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(430, 520)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	right.add_child(scroll)
+	_inventory_panel.remove_child(box)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(box)
+	# The old one-line title is replaced by the column headers.
+	if box.get_child_count() > 0 and box.get_child(0) is Label:
+		box.get_child(0).queue_free()
+	# Long action labels wrap instead of widening the window.
+	for button in box.find_children("*", "Button", true, false):
+		if button is OptionButton:
+			continue
+		(button as Button).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		(button as Button).alignment = HORIZONTAL_ALIGNMENT_LEFT
+		(button as Button).add_theme_font_size_override("font_size", 12)
+	columns.add_child(left)
+	columns.add_child(right)
+	_inventory_panel.add_child(columns)
 
 
 func toggle_crafting() -> void:
@@ -906,6 +967,7 @@ func is_menu_open() -> bool:
 
 func set_prompt(text: String) -> void:
 	_prompt.text = text
+	_prompt.visible = not text.is_empty() # An empty pill would sit over the action bar.
 
 
 ## A big announcement in the middle of the screen (level ups, places you enter).
@@ -1931,6 +1993,42 @@ func _refresh_trade_controls() -> void:
 		]
 
 
+const TIER_COLORS := [Color(0.62, 0.64, 0.68), Color(0.62, 0.64, 0.68), Color(0.36, 0.82, 0.42), Color(0.36, 0.62, 1.0), Color(0.78, 0.42, 1.0)]
+
+
+## A short tag for the kind of item, shown in its slot.
+static func _kind_glyph(kind: String) -> String:
+	match kind:
+		"weapon": return "[ATK]"
+		"armor": return "[DEF]"
+		"tool": return "[TOOL]"
+		"food": return "[FOOD]"
+		"drink": return "[DRINK]"
+		"medical": return "[MED]"
+		"material": return "[MAT]"
+	return "[%s]" % kind.substr(0, 4).to_upper() if kind != "" else ""
+
+
+## An inventory slot card: dark, with a border in the colour of the item tier, gold when equipped.
+func _style_slot(button: Button, item_id: String, equipped: bool) -> void:
+	var tier: int = clampi(Defs.tier_of(item_id), 0, TIER_COLORS.size() - 1) if item_id != "" else 0
+	var edge: Color = Color(0.95, 0.78, 0.35) if equipped else (TIER_COLORS[tier] if item_id != "" else Color(1, 1, 1, 0.08))
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.05, 0.06, 0.09, 0.92) if item_id != "" else Color(0.03, 0.035, 0.05, 0.6)
+		if state == "hover":
+			style.bg_color = Color(0.12, 0.13, 0.18, 0.96)
+		elif state == "pressed":
+			style.bg_color = Color(0.22, 0.18, 0.08, 0.98)
+		style.set_corner_radius_all(8)
+		style.set_border_width_all(2 if (equipped or state == "hover") else 1)
+		style.border_width_bottom = 4 if item_id != "" else 1
+		style.border_color = edge
+		style.set_content_margin_all(4)
+		button.add_theme_stylebox_override(state, style)
+	button.add_theme_color_override("font_color", Color(1, 1, 1) if item_id != "" else Color(1, 1, 1, 0.3))
+
+
 func _refresh_inventory() -> void:
 	var signature := str(client.inventory.to_dict()) + "|" + str(client.stash.to_dict())
 	if signature == _inventory_signature:
@@ -1963,15 +2061,21 @@ func _refresh_inventory() -> void:
 		child.queue_free()
 	for slot in client.inventory.slots:
 		var button := Button.new()
-		button.custom_minimum_size = Vector2(76, 44)
+		button.custom_minimum_size = Vector2(88, 60)
 		button.add_theme_font_size_override("font_size", 11)
 		if slot.is_empty():
 			button.disabled = true
-			button.text = "-"
+			button.text = ""
+			_style_slot(button, "", false)
 		else:
 			var item_id: String = slot["id"]
 			var equipped: bool = item_id == client.inventory.weapon or item_id == client.inventory.armor
-			button.text = "%s\nx%d%s" % [Defs.item(item_id).get("name", item_id), slot["count"], "  [on]" if equipped else ""]
+			var info: Dictionary = Defs.item(item_id)
+			button.text = "%s\n%s  x%d" % [str(info.get("name", item_id)), _kind_glyph(str(info.get("kind", ""))), int(slot["count"])]
+			button.tooltip_text = "%s\n%s  Tier %d%s\nClick: use or equip   Right click: put one in the stash" % [
+				str(info.get("name", item_id)), str(info.get("kind", "item")).capitalize(), maxi(1, Defs.tier_of(item_id)),
+				"\nEQUIPPED" if equipped else ""]
+			_style_slot(button, item_id, equipped)
 			button.pressed.connect(func() -> void: client.use_item(item_id))
 			button.gui_input.connect(func(event: InputEvent) -> void:
 				if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:

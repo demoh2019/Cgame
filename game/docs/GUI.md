@@ -20,3 +20,14 @@
 F2 shows every control (the same keys work in the local and the online client): 1-8 quick uses (food, water, bandage, next weapon, armor,
 antiseptic, antibiotics, heat pack), `.` stim, `/` scent salve, R or F lake water, T fishing, Z camp rest, N and V vendor, P contracts,
 B stash, Q or E interact. Siege outposts are drawn in the world with their owner's colour, capture ring and a label.
+
+## On the world (world_overlay.gd)
+
+* **Health bars over the infected** instead of text: red, gold for elites, magenta for raid bosses, a red frame when they hunt you, STUN and PIN tags.
+* **Damage numbers** pop up where a hit lands (yellow on the infected, red on you, orange on other players).
+* **Place markers** at the screen edge for the three nearest places within 650 m: name (or "? Village" until you discover it), kind colour and distance.
+
+## Inventory window
+
+Two columns: the backpack (slot cards with a border in the tier colour, gold when equipped, kind tag, tooltip) and the protected stash on the left, every
+action of the game in a scrolling list on the right; centred and always on screen. The log has a fixed width and wraps; the prompt pill hides when empty.

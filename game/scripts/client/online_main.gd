@@ -23,6 +23,7 @@ const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
+const WorldOverlay = preload("res://scripts/client/world_overlay.gd")
 const HelpPanel = preload("res://scripts/client/help_panel.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Effects = preload("res://scripts/client/effects.gd")
@@ -52,6 +53,7 @@ var audio
 var hub_view
 var outposts
 var world_map
+var overlay
 var _site_id := -1
 var _area_name := ""
 var _place_timer := 0.0
@@ -411,6 +413,11 @@ func _on_welcomed() -> void:
 	world_map = WorldMap.new()
 	hud.add_child(world_map)
 	world_map.setup(client)
+	overlay = WorldOverlay.new()
+	overlay.name = "WorldOverlay"
+	hud.add_child(overlay)
+	hud.move_child(overlay, 0) # Under every panel and card.
+	overlay.setup(client, camera)
 	outposts = OutpostView.new()
 	add_child(outposts)
 	hud.say("F2 shows every control.")
@@ -877,6 +884,29 @@ func _run_demo() -> void:
 					net_ref.c_debug.rpc_id(1, "teleport", {"x": float(site["x"]) - 3.0, "z": float(site["z"]) + 7.0})
 					_zoom = 1.8
 					_screenshot_frames = 480
+		"stones", "crystals", "greattree", "shrine", "battlefield":
+			if _demo_frames == 40:
+				var title: String = {"stones": "Stone Circle", "crystals": "Crystal Grove", "greattree": "Great Tree", "shrine": "Old Shrine", "battlefield": "Battlefield"}[_demo]
+				var landmark := _nearest_site("landmark", title)
+				if not landmark.is_empty():
+					net_ref.c_debug.rpc_id(1, "teleport", {"x": float(landmark["x"]) - 4.0, "z": float(landmark["z"]) + 14.0})
+					_zoom = 1.8
+					_screenshot_frames = 480
+		"road":
+			if _demo_frames == 40:
+				var spot := _nearest_signpost()
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": spot.x + 3.0, "z": spot.y + 5.0})
+				_zoom = 1.5
+				_screenshot_frames = 480
+		"inventory":
+			if _demo_frames == 30:
+				for entry in [["club_2", 1], ["pistol", 1], ["ammo_9mm", 24], ["jacket_2", 1], ["axe_2", 1], ["canned_food", 4], ["water_bottle", 3], ["bandage", 5], ["wood_3", 12], ["ore_4", 6], ["silver", 240]]:
+					net_ref.c_debug.rpc_id(1, "give", {"item": entry[0], "count": entry[1]})
+			if _demo_frames == 70:
+				client.use_item("club_2")
+				client.use_item("jacket_2")
+			if _demo_frames == 110:
+				hud.toggle_inventory()
 		"map":
 			if _demo_frames == 60:
 				world_map.toggle()
@@ -904,14 +934,27 @@ func _run_demo() -> void:
 
 
 ## The site of a kind closest to the hub (demos and screenshots).
-func _nearest_site(kind: String) -> Dictionary:
+func _nearest_signpost() -> Vector2:
+	var best := Vector2(60.0, 60.0)
+	var best_distance := INF
+	for cx in range(-10, 11):
+		for cz in range(-10, 11):
+			for sign in client.world.roads.signs_in_cell(Vector2i(cx, cz)):
+				var spot := Vector2(float(sign["x"]), float(sign["z"]))
+				if spot.length() > 70.0 and spot.length() < best_distance:
+					best = spot
+					best_distance = spot.length()
+	return best
+
+
+func _nearest_site(kind: String, title: String = "") -> Dictionary:
 	var best := {}
 	var best_distance := INF
 	for rx in range(-14, 14):
 		for rz in range(-14, 14):
 			for site in client.world.poi.sites_in_region(rx, rz):
 				var distance: float = Vector2(float(site["x"]), float(site["z"])).length()
-				if site["kind"] == kind and distance < best_distance:
+				if site["kind"] == kind and (title == "" or str(site.get("title", "")) == title) and distance < best_distance:
 					best = site
 					best_distance = distance
 	return best
