@@ -53,3 +53,39 @@ func run(t) -> void:
 	terrain.free()
 	ChunkView.configure_terrain_mesh_budget(
 		int(GraphicsQuality.profile(1)["terrain_mesh_build_budget_usec"]))
+
+	t.current = "camera-priority terrain mesh streaming"
+	var priority_modes := [1, 2, 2, 2]
+	for tier in 4:
+		var cfg: Dictionary = GraphicsQuality.profile(tier)
+		t.eq(int(cfg.get("terrain_mesh_streaming_priority", -1)),
+			priority_modes[tier],
+			"the graphics profile enables near-first streaming with a view bonus when supported")
+	var prioritized := ChunkedTerrain3D.new()
+	t.eq(prioritized.mesh_streaming_priority, 0,
+		"custom engine scenes retain row-major streaming unless opted in")
+	prioritized.mesh_streaming_priority = -8
+	t.eq(prioritized.mesh_streaming_priority, 0,
+		"invalid negative priority modes restore legacy ordering")
+	prioritized.mesh_streaming_priority = 10
+	t.eq(prioritized.mesh_streaming_priority, 2,
+		"streaming priority clamps to camera-facing mode")
+	prioritized.add_to_group(ChunkView.TERRAIN_LOD_GROUP)
+	ChunkView.configure_terrain_streaming_priority(1)
+	ChunkView.apply_terrain_streaming_priority(prioritized)
+	t.eq(prioritized.mesh_streaming_priority, 1,
+		"live streamed terrain can switch to near-first without regeneration")
+	ChunkView.configure_terrain_streaming_priority(2)
+	ChunkView.apply_terrain_streaming_priority(prioritized)
+	t.eq(prioritized.mesh_streaming_priority, 2,
+		"live streamed terrain can prioritize camera-facing surfaces")
+	var source: String = (ChunkView as Script).source_code
+	t.check(source.contains("_terrain.mesh_streaming_priority = terrain_mesh_streaming_priority"),
+		"new terrain chunks receive streaming priority before entering SceneTree")
+	var graphics: String = (GraphicsQuality as Script).source_code
+	t.check(graphics.contains("ChunkView.apply_terrain_streaming_priority(lod_terrain)"),
+		"graphics preset changes reprioritize already loaded terrain nodes")
+	prioritized.free()
+	ChunkView.configure_terrain_streaming_priority(
+		int(GraphicsQuality.profile(1)["terrain_mesh_streaming_priority"]))
+

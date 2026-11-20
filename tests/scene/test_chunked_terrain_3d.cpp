@@ -34,6 +34,7 @@ TEST_FORCE_LINK(test_chunked_terrain_3d)
 
 #include "scene/3d/chunked_terrain_3d.h"
 #include "scene/3d/terrain_streaming_budget_policy.h"
+#include "scene/3d/terrain_streaming_priority_policy.h"
 #include "scene/3d/node_3d.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
@@ -435,6 +436,50 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Time-sliced mesh streaming is starvatio
 	terrain->set_mesh_build_budget_usec(0);
 	CHECK(terrain->get_height_dimensions() == Vector2i(65, 65));
 	CHECK(terrain->get_chunk_count() == 4);
+	memdelete(terrain);
+}
+
+
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Visible terrain holes win the streaming queue") {
+	using namespace TerrainStreamingPriorityPolicy;
+	LocalVector<Candidate> candidates;
+	candidates.push_back({ 4, 4.0f, false }); // Near LOD upgrade.
+	candidates.push_back({ 9, 200.0f, true }); // New visible terrain, farther away.
+	candidates.push_back({ 2, 5.0f, true }); // New terrain, near camera.
+	candidates.push_back({ 1, 5.0f, true }); // Tie uses deterministic index.
+	candidates.push_back({ 3, 20.0f, false });
+	candidates.sort_custom<Less>();
+	CHECK(candidates[0].index == 1);
+	CHECK(candidates[1].index == 2);
+	CHECK(candidates[2].index == 9);
+	CHECK(candidates[3].index == 4);
+	CHECK(candidates[4].index == 3);
+
+	// Camera bias is bounded to 35% of distance: forward-facing terrain
+	// gets priority without discarding chunks behind the player.
+	CHECK(score(100.0f, 1.0f, 1) == doctest::Approx(100.0));
+	CHECK(score(100.0f, 1.0f, 2) == doctest::Approx(65.0));
+	CHECK(score(100.0f, -1.0f, 2) == doctest::Approx(135.0));
+	CHECK(score(-10.0f, 0.5f, 2) == doctest::Approx(0.0));
+	CHECK(score(100.0f, 8.0f, 2) == doctest::Approx(65.0));
+}
+
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Mesh streaming priority stays optional") {
+	ChunkedTerrain3D *terrain = make_terrain(33, 64.0, 10.0);
+	CHECK(terrain->get_mesh_streaming_priority() == 0);
+	terrain->set_mesh_streaming_priority(-10);
+	CHECK(terrain->get_mesh_streaming_priority() == 0);
+	terrain->set_mesh_streaming_priority(7);
+	CHECK(terrain->get_mesh_streaming_priority() == 2);
+	terrain->set_mesh_streaming_priority(1);
+	CHECK(terrain->get_mesh_streaming_priority() == 1);
+	terrain->set_mesh_build_budget_usec(0);
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	terrain->force_update();
+	// The priority setting only changes construction order when budgeted,
+	// never the final geometry, collision, material, or LOD count.
+	CHECK(terrain->get_visible_chunk_count() == 1);
+	CHECK(terrain->get_height_dimensions() == Vector2i(33, 33));
 	memdelete(terrain);
 }
 

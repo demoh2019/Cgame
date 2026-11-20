@@ -221,6 +221,7 @@ static var terrain_horizon_enabled := false
 static var terrain_screen_lod_quality := 1
 static var terrain_lod_pixel_error := 3.5
 static var terrain_mesh_build_budget_usec := 1500
+static var terrain_mesh_streaming_priority := 2
 static var terrain_error_lod_quality := 1
 const TERRAIN_LOD_GROUP := "aa_chunked_terrain_lod"
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
@@ -299,6 +300,17 @@ static func configure_terrain_mesh_budget(microseconds: int) -> void:
 static func apply_terrain_mesh_budget(node: Node) -> void:
 	if node is ChunkedTerrain3D and node.is_in_group(TERRAIN_LOD_GROUP):
 		node.mesh_build_budget_usec = terrain_mesh_build_budget_usec
+
+
+## Prioritize filling visible terrain gaps before costly LOD upgrades.
+## Modes: 0=legacy order, 1=near first, 2=near + view-facing bias.
+static func configure_terrain_streaming_priority(mode: int) -> void:
+	terrain_mesh_streaming_priority = clampi(mode, 0, 2)
+
+
+static func apply_terrain_streaming_priority(node: Node) -> void:
+	if node is ChunkedTerrain3D and node.is_in_group(TERRAIN_LOD_GROUP):
+		node.mesh_streaming_priority = terrain_mesh_streaming_priority
 
 
 static func configure_terrain_geomorph(quality: int) -> void:
@@ -781,6 +793,7 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.lod_pixel_error = terrain_lod_pixel_error
 	# Must be set before add_child() triggers native initial mesh streaming.
 	_terrain.mesh_build_budget_usec = terrain_mesh_build_budget_usec
+	_terrain.mesh_streaming_priority = terrain_mesh_streaming_priority
 	apply_terrain_error_lod(_terrain)
 	_terrain.lod_geomorph_enabled = terrain_geomorph_enabled
 	_terrain.skirt_depth = 3.0
