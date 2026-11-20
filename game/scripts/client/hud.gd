@@ -10,6 +10,7 @@ const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
+const CombatStress = preload("res://scripts/shared/combat_stress.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
@@ -2158,6 +2159,11 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	var combat_stress: float = float(client.you.get("combat_stress", 0.0))
+	if combat_stress >= CombatStress.HUD_THRESHOLD:
+		_info_label.text += "\nINFECTED PRESSURE: %d/100 | passive stamina recovery -%d%%. Regroup or find shelter." % [
+			roundi(combat_stress),
+			roundi(100.0 * (1.0 - float(client.you.get("combat_stress_regen", 1.0))))]
 	var intercept_active: float = float(client.you.get("guardian_intercept_seconds", 0.0))
 	var intercept_cooldown: float = float(client.you.get("guardian_intercept_cooldown", 0.0))
 	if intercept_active > 0.0:

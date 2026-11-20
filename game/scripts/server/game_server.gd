@@ -146,6 +146,7 @@ const RainHarvest = preload("res://scripts/shared/rain_harvest.gd")
 const FieldCanteen = preload("res://scripts/shared/field_canteen.gd")
 const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
+const CombatStress = preload("res://scripts/shared/combat_stress.gd")
 const PartyFeast = preload("res://scripts/shared/party_feast.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
@@ -207,6 +208,9 @@ class Player:
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
 	var feast_timer: float = 0.0 # Session-only prepared group meal cooldown.
+	var combat_stress: float = 0.0 # Session-only PvE pressure; not a permanent condition.
+	var stress_pressure: float = 0.0 # Last trusted nearby infected threat sample.
+	var stress_scan_seconds: float = 0.0 # Bound scanning to twice per second.
 	var guardian_timer: float = 0.0 # Session-only PvE frontline cooldown.
 	var guardian_brace: float = 0.0 # Short PvE-only defensive brace after a valid taunt.
 	var guard_link_target: int = -1 # Server-only chosen ally for one zombie melee hit.
@@ -781,6 +785,9 @@ func _spawn_player(player: Player) -> void:
 	player.position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
 	_apply_skill_bonuses(player)
 	player.survival.reset()
+	player.combat_stress = 0.0
+	player.stress_pressure = 0.0
+	player.stress_scan_seconds = 0.0
 	player.spore_exposed = false
 	player.defense_target = -1
 	player.defense_until = 0.0
@@ -4980,6 +4987,9 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	_cancel_market_seller(victim.id)
 	_cancel_player_trade(victim.id, "dead")
 	victim.deaths += 1
+	victim.combat_stress = 0.0
+	victim.stress_pressure = 0.0
+	victim.stress_scan_seconds = 0.0
 	# A courier must survive their defense; a later respawn cannot reclaim it.
 	victim.caravan_defended = false
 	victim.dirty_character = true
@@ -5321,11 +5331,35 @@ func _tick_players(delta: float) -> void:
 		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX,
 			player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta + energy_bonus +
 				RallyStandard.ENERGY_PER_SECOND * standard_seconds)
+		# Session-only stress from infected currently hunting THIS survivor.
+		# Sample rarely (not on every world tick) and never consider nearby
+		# neutral creatures, other players' PvP, or idle/investigating zombies.
+		player.stress_scan_seconds -= maxf(0.0, delta)
+		if player.stress_scan_seconds <= 0.0:
+			player.stress_scan_seconds = CombatStress.SCAN_SECONDS
+			player.stress_pressure = CombatStress.pressure(
+				zombies, player.id, player.position)
+		var in_sanctuary: bool = _is_safe(player.position)
+		var safe_rest: bool = in_sanctuary or FieldCampfire.has_warmth(
+			campfires, player.position, time) or PortableShelter.covers(
+			shelters, player.position, time)
+		var accompanied: bool = CombatStress.has_live_companion(
+			player.id, player.position, players, parties)
+		player.combat_stress = CombatStress.advance(
+			player.combat_stress, delta, player.stress_pressure,
+			in_sanctuary, safe_rest, accompanied)
+		var stamina_before_stress_tick: float = player.survival.stamina
 		var stamina_recovery_delay_before_tick: float = player.survival.stamina_recovery_delay
 		var had_bleeding: bool = player.survival.bleeding > 0.0
 		var had_fracture: bool = player.survival.fracture > 0.0
 		var had_scent_mask: bool = player.survival.scent_mask_seconds > 0.0
 		var damage: float = player.survival.tick(delta)
+		# Only ordinary passive stamina regen is damped. Purchased food,
+		# party standards, skills and explicit healing stay unchanged.
+		var passive_gain: float = maxf(0.0,
+			player.survival.stamina - stamina_before_stress_tick)
+		player.survival.stamina -= passive_gain * (
+			1.0 - CombatStress.regen_multiplier(player.combat_stress))
 		if damage > 0.0:
 			_dismount(player, true)
 		if had_scent_mask:
@@ -6629,7 +6663,10 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"siege_wins": int(siege_contracts.victories.get(parties.group_of(peer_id), 0)),
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
-			"stamina": player.survival.stamina, "crouching": player.crouching,
+			"stamina": player.survival.stamina,
+			"combat_stress": player.combat_stress,
+			"combat_stress_regen": CombatStress.regen_multiplier(player.combat_stress),
+			"crouching": player.crouching,
 			"mounted": player.mounted, "mount_cooldown": player.mount_cooldown,
 			"smoke_cooldown": player.smoke_cooldown,
 			"smoke_concealed": FieldSmoke.inside(smoke_clouds, player.position, time),
