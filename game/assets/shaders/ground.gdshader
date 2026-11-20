@@ -1,6 +1,6 @@
 shader_type spatial;
-global uniform float aa_weather_wetness;
 render_mode diffuse_burley, specular_schlick_ggx;
+global uniform float aa_weather_wetness;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 
 // Textured ground. Eleven CC0 materials (Poly Haven) in two texture arrays:
