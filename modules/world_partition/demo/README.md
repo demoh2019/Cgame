@@ -40,9 +40,10 @@ detailed cells and lightweight distant proxies with no additional engine rendere
   once the corresponding cell has streamed in. A landmark's 3D label and
   the HUD reflect the current saved gameplay progress.
 - Press K to save a checkpoint to `user://cgame_demo_checkpoint.dat` and J
-  to restore cell state, pin choices, and player-camera transform. The demo
+  to restore cell state, pin choices, **Data Layer activation states**, and player-camera transform. The demo
   writes a Godot Variant file with `FileAccess.store_var` and reads via
   `get_var(false)` to avoid instantiating object data from a save.
+- **Runtime Data Layers:** detailed cells (4,2), (4,3), (5,2) and (5,3) belong to the `combat_event` layer, initially **disabled** even when near the camera. Press **T** to activate/deactivate all four scenes at once. Press **G** to pin the arena independently: a disabled layer still wins over a pin. Their progress survives layer transitions, and the HUD reports the layer state.
 - New native `WorldPartition3D.pin_cell()` keeps gameplay-important areas loaded. The scene starts with the **Quest Hub** at cell (0, 0) pinned, regardless of the moving camera. Press **H** to release/re-pin it, or **G** to pin/release the **Combat Arena** at (4, 2). Both landmarks have an emissive marker in their detailed cell scene. The HUD shows the pin count and residency status.
 - Optional additional observer attached 180 m in front of camera prefetches
   detailed cells when PR #919 is included.
@@ -92,7 +93,8 @@ near/far proxy handoff is implemented without renderer-specific effects.
 WASD to fly, Space/Ctrl for up/down, Shift for speed, P to toggle forward prefetch,
 L to toggle distant proxy scenes, F to toggle near/far crossfade,
 H to keep/release the Quest Hub, G to keep/release the Combat Arena,
-C claim the hub reward, B complete an arena round, K save and J load a
+T to toggle the four-cell Combat Event Data Layer, C claim the hub reward,
+B complete an arena round, K save and J load a
 checkpoint, R to retry failed resource loads when the telemetry/retry API from PR #916 is present.
 Without that engine API, R displays a warning instead of silently doing nothing.
 HUD displays FPS, detail/proxy cell counts, the active quality preset and auto mode.
@@ -117,6 +119,7 @@ Quality controller assertions (after importing the project):
 ## Limitations / validation
 
 - Native `get_cell_instance()` is required for proxy handoff and `pin_cell()` is required for the gameplay residency controls; this stacked branch includes both.
+- The Data Layers implementation has one named layer per cell rather than Unreal's full multiple-layer actor graph, and is strictly a runtime loading toggle, not a visibility-only toggle. Disabled-layer cells are unloaded within the existing per-frame unload budget, not removed synchronously.
 - Pinning only controls residency; the **separate native cell-state API** captures
   and restores opt-in gameplay dictionaries. It does not serialize arbitrary
   child nodes, navigation meshes, physics bodies or network state automatically.

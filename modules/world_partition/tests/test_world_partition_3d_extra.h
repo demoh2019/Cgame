@@ -45,6 +45,92 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Layer dictionaries normalize keys and protect getters") {
+	WorldPartition3D world;
+	Dictionary membership;
+	membership[Vector2i(0, 0)] = "hub";
+	membership[Vector2i(0, 0)] = "hub";
+	membership[Vector2i(4, 2)] = "combat";
+	membership[String("invalid")] = "combat";
+	membership[Vector2i(3, 2)] = 42;
+	world.set_cell_layers(membership);
+	CHECK(world.get_cell_layers().size() == 2);
+	CHECK(world.get_cell_layer(Vector2i(4, 2)) == "combat");
+	Dictionary copy = world.get_cell_layers();
+	copy.clear();
+	CHECK(world.get_cell_layers().size() == 2);
+	CHECK(world.is_cell_layer_enabled(Vector2i(4, 2)));
+	Dictionary states;
+	states["combat"] = false;
+	states["hub"] = true;
+	states[Vector2i(0, 0)] = false;
+	states["bad"] = String("not boolean");
+	world.set_layer_states(states);
+	CHECK(world.get_layer_states().size() == 2);
+	CHECK_FALSE(world.is_cell_layer_enabled(Vector2i(4, 2)));
+	CHECK(world.is_cell_layer_enabled(Vector2i(0, 0)));
+	CHECK(world.is_cell_layer_enabled(Vector2i(15, 15)));
+	Dictionary state_copy = world.get_layer_states();
+	state_copy.clear();
+	CHECK(world.get_layer_states().size() == 2);
+	world.set_cell_layer(Vector2i(3, 2), "combat");
+	CHECK_FALSE(world.is_cell_layer_enabled(Vector2i(3, 2)));
+	world.clear_cell_layer(Vector2i(3, 2));
+	CHECK(world.is_cell_layer_enabled(Vector2i(3, 2)));
+	world.set_layer_enabled("combat", true);
+	CHECK(world.is_layer_enabled("combat"));
+	world.set_layer_states(Dictionary());
+	CHECK(world.is_cell_layer_enabled(Vector2i(4, 2)));
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Disabled layer prevents pinned load and preserves pin") {
+	const String path = make_cell_scene("layer_pin_gate");
+	{
+		WorldFixture fixture;
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->set_cell_layer(Vector2i(0, 0), "combat");
+		fixture.world->pin_cell(Vector2i(0, 0));
+		fixture.world->set_layer_enabled("combat", false);
+		for (int i = 0; i < 3; i++) {
+			fixture.world->update_streaming();
+		}
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK(fixture.world->is_cell_pinned(Vector2i(0, 0)));
+		fixture.world->set_layer_enabled("combat", true);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		fixture.world->set_layer_enabled("combat", false);
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK(fixture.world->is_cell_pinned(Vector2i(0, 0)));
+		fixture.world->clear_cell_layer(Vector2i(0, 0));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Layer deactivates without any observer and avoids unrelated unload") {
+	const String path = make_cell_scene("layer_without_observer");
+	{
+		WorldFixture fixture;
+		fixture.world->set_load_radius(1);
+		fixture.world->set_unload_radius(2);
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->set_cell_scene(Vector2i(1, 0), path);
+		fixture.world->set_cell_layer(Vector2i(0, 0), "mission");
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(1, 0)));
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->set_layer_enabled("mission", false);
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK(fixture.world->is_cell_loaded(Vector2i(1, 0)));
+		fixture.world->set_layer_enabled("mission", true);
+		fixture.world->pin_cell(Vector2i(0, 0));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
 TEST_CASE("[WorldPartition3D] Cell state setters and getters isolate nested dictionaries") {
 	WorldPartition3D world;
 	Dictionary nested;

@@ -36,6 +36,12 @@ func _run() -> void:
     world.set("unload_radius", 1)
     world.set("observer_path", world.get_path_to(observer))
     world.call("set_cell_scene", CELL, SCENE_PATH)
+    world.call("set_cell_layer", CELL, "quest_event")
+    world.call("set_layer_enabled", "quest_event", false)
+    for i in 3:
+        world.call("update_streaming")
+    assert(not bool(world.call("is_cell_loaded", CELL)))
+    world.call("set_layer_enabled", "quest_event", true)
 
     assert(await _wait_for_cell(world, true))
     var first := world.call("get_cell_instance", CELL) as Node3D
@@ -76,6 +82,16 @@ func _run() -> void:
     assert(restored.call("capture_streaming_state")["reward_claimed"] == false)
     world.call("load_cell_states", loaded)
     assert(restored.call("capture_streaming_state")["reward_claimed"] == true)
+
+    # Even pinned cells are evicted by an inactive gameplay Data Layer.
+    world.call("set_layer_enabled", "quest_event", false)
+    assert(await _wait_for_cell(world, false))
+    assert(bool(world.call("is_cell_pinned", CELL)))
+    assert(world.call("get_cell_state", CELL)["reward_claimed"] == true)
+    world.call("set_layer_enabled", "quest_event", true)
+    assert(await _wait_for_cell(world, true))
+    var returned := world.call("get_cell_instance", CELL) as Node3D
+    assert(returned.call("capture_streaming_state")["reward_claimed"] == true)
 
     world.set("streaming_enabled", false)
     world.queue_free()

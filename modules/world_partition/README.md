@@ -7,6 +7,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Register a sparse mapping from `Vector2i` cell coordinates to local `PackedScene` resource paths (saved with your `.tscn` scene).
 - Choose a `Node3D` observer, cell size, and square loading/unloading radii; negative coordinates are handled with floor division.
 - Add up to 16 extra observer paths for co-op, split-screen, cutscene cameras, portals and predictive prefetch (attach a Node3D in front of a moving character). All source locations share streaming budgets. Streaming scans nearest grid rings across sources, so another observer's central cell is considered before the primary observer's outer rings.
+- Assign cells to event-driven **Runtime Data Layers** via `cell_layers` and toggle them with `set_layer_enabled(name, bool)`. Disabled layers override even pinned and near-camera cells, but obey unload budgets. `layer_states` supports inspector editing and save-game snapshots; missing layer states default to enabled. Each cell has at most one layer, unlike Unreal's broader actor-layer model.
 - Keep up to 128 specific gameplay-critical cells resident with `pin_cell`, `unpin_cell` and `clear_pinned_cells`. The `pinned_cells` property also appears in the inspector and is serialized with the node for design-time always-loaded areas. Pins are prioritized before camera neighborhoods, but respect the same request and instance budgets. Use this for arenas, quest scenes, safe towns and checkpoints; runtime pins do not require an observer and do not create scene mappings.
 - Load scene resources asynchronously using Godot's `ResourceLoader.load_threaded_request` backend and poll without blocking while still in progress.
 - Share a resource-load request between cells using the same scene path.
@@ -65,6 +66,40 @@ re-enabling streaming restores them. If you remove a cell mapping, pinning does
 not re-register the scene.
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Runtime Data Layers (gameplay events)
+
+Use `cell_layers` (a [Vector2i → String] dictionary) and `layer_states`
+(a [String → bool] dictionary) to control scene activation independently of
+distance, multiple observers and pinned-cell residency. The properties are
+exposed in the Godot inspector and persisted in scenes.
+
+```gdscript
+# An inactive combat quest has no active arena scene, even if it is pinned:
+world.set_cell_layer(Vector2i(4, 2), "combat")
+world.set_layer_enabled("combat", false)
+world.pin_cell(Vector2i(4, 2))
+# On quest activation, the cell streams in using the regular budgets:
+world.set_layer_enabled("combat", true)
+world.update_streaming()  # Optional explicit tick; the node also processes.
+# Persist activation states with the checkpoint along with cell state/pins.
+var states: Dictionary = world.get_layer_states()
+world.set_layer_states(states)
+```
+
+Layer deactivation stops new requests and instantiations, cancels pending cell
+mappings and queues existing loaded scenes for budgeted unload. The
+`capture_streaming_state()` callback runs during unload and is applied when
+the layer is activated and the cell is loaded again. Removing a layer
+assignment makes the cell eligible immediately, while deleting a saved
+activation state makes that layer enabled by default.
+
+A layer is only a runtime loading *gate*, not a separate renderer,
+visibility-only switch or general multi-layer boolean-expression system.
+One cell is assigned at most one named layer; default unassigned cells are
+always enabled. Layers on two separate `WorldPartition3D` nodes are
+independent. For large numbers of cells, stagger activation and profile
+`max_instances_per_frame` and `max_unloads_per_frame`.
 
 ## Streaming gameplay state and save files
 
@@ -139,7 +174,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 76 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (55), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 79 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (58), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"

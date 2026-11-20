@@ -6,7 +6,7 @@
 	<description>
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around a primary observer node and optional additional observers. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
-		Additional observers in [member additional_observer_paths] are useful for split-screen cameras, co-op players, cinematic cameras and manual prefetch nodes. Cells are kept when in range of any valid observer, while all observers share the same per-frame request and instance budgets. Pinned cells from [method pin_cell] take priority, followed by the nearest grid rings of all observers. Within the same ring the primary observer takes priority, followed by additional observers in array order.
+		Additional observers in [member additional_observer_paths] are useful for split-screen cameras, co-op players, cinematic cameras and manual prefetch nodes. Cells are kept when in range of any valid observer, while all observers share the same per-frame request and instance budgets. The [member cell_layers] and [member layer_states] properties enable event-driven activation of runtime groups of cells: a disabled layer overrides pins and observers, and its cached gameplay state remains available. Pinned cells from [method pin_cell] take priority among enabled cells, followed by the nearest grid rings of all observers. Within the same ring the primary observer takes priority, followed by additional observers in array order.
 		Loaded scene roots may optionally implement [code]capture_streaming_state()[/code] and [code]restore_streaming_state(state)[/code]. The streamer captures the former when unloading a cell and applies the latter after instantiation. [method snapshot_cell_states] and [method load_cell_states] provide a save-game bridge; they do not themselves write disk files. The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
@@ -27,6 +27,13 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Returns the local-space origin of [param cell]. The Y component is always zero.
+			</description>
+		</method>
+		<method name="clear_cell_layer">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Removes the layer assignment of [param cell], making it eligible for normal distance/pin-based streaming irrespective of inactive layer states. Does not delete the registered scene or its saved gameplay state.
 			</description>
 		</method>
 		<method name="clear_cell_scenes">
@@ -67,6 +74,19 @@
 				Returns the currently instantiated [Node3D] scene root for [param cell], or [code]null[/code] if it is not loaded. The returned node is owned by the streamer and can be unloaded at any time; do not retain the reference across streaming updates without checking [method @GlobalScope.is_instance_valid]. Useful for controlling proxy visibility when layering detail and distant scene streamers.
 			</description>
 		</method>
+		<method name="get_cell_layer" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the assigned layer name for this cell, or an empty string when no layer is assigned.
+			</description>
+		</method>
+		<method name="get_cell_layers" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns a copy of [member cell_layers]. Modifying the result does not change the layer configuration.
+			</description>
+		</method>
 		<method name="get_cell_scene" qualifiers="const">
 			<return type="String" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -101,6 +121,12 @@
 				Returns the number of registered scene paths, whether loaded or unloaded.
 			</description>
 		</method>
+		<method name="get_layer_states" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns a copy of [member layer_states]. Missing layer names are enabled by default.
+			</description>
+		</method>
 		<method name="get_loaded_cell_count" qualifiers="const">
 			<return type="int" />
 			<description>
@@ -132,6 +158,13 @@
 				Returns [code]true[/code] if a nonempty gameplay state is cached for the cell.
 			</description>
 		</method>
+		<method name="is_cell_layer_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns whether a cell's assigned layer permits it to load. Unassigned cells are enabled. This does not imply that a scene is currently loaded.
+			</description>
+		</method>
 		<method name="is_cell_loaded" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -144,6 +177,13 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Returns [code]true[/code] while a cell is pinned, even if it has no registered scene.
+			</description>
+		</method>
+		<method name="is_layer_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="layer" type="String" />
+			<description>
+				Returns the effective runtime state of the named layer. An unregistered layer or empty name defaults to enabled.
 			</description>
 		</method>
 		<method name="load_cell_states">
@@ -181,6 +221,21 @@
 				Registers up to 16 extra [NodePath] observer references. Empty, duplicate, and non-[NodePath] entries are discarded. The observer paths are resolved relative to this node, and must point to living [Node3D] instances to affect streaming.
 			</description>
 		</method>
+		<method name="set_cell_layer">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="layer" type="String" />
+			<description>
+				Assigns [param cell] to a single named layer. Passing an empty layer removes its assignment. A change to an inactive layer unloads its scene over the normal frame budget.
+			</description>
+		</method>
+		<method name="set_cell_layers">
+			<return type="void" />
+			<param index="0" name="layers" type="Dictionary" />
+			<description>
+				Replaces the dictionary of [Vector2i] to nonempty [String] layer assignments. Invalid dictionary entries are omitted. Existing scene registrations, pinning and cached gameplay state are preserved.
+			</description>
+		</method>
 		<method name="set_cell_scene">
 			<return type="void" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -195,6 +250,21 @@
 			<param index="1" name="state" type="Dictionary" />
 			<description>
 				Stores a deep copy of [param state] for a cell. An empty dictionary erases a previous cached state. For an active scene root with a [code]restore_streaming_state(state)[/code] method, a copy is applied immediately.
+			</description>
+		</method>
+		<method name="set_layer_enabled">
+			<return type="void" />
+			<param index="0" name="layer" type="String" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				Enables or disables a named runtime layer. Disabled layers prevent new loads (including pinned cells), cancel their pending scene instantiations, and unload loaded cells within [member max_unloads_per_frame]. Other layers remain unaffected. Empty names are rejected.
+			</description>
+		</method>
+		<method name="set_layer_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces the dictionary of named runtime states. Only nonempty [String] keys with [bool] values are accepted. Missing layer names are active by default. Useful for restoring event-state data from a save game.
 			</description>
 		</method>
 		<method name="set_pinned_cells">
@@ -228,11 +298,17 @@
 		<member name="additional_observer_paths" type="Array" setter="set_additional_observer_paths" getter="get_additional_observer_paths" default="[]">
 			Additional [NodePath] streaming sources (max 16). Their load and unload neighborhoods are combined with [member observer_path], but resource and instantiation limits remain global to this node.
 		</member>
+		<member name="cell_layers" type="Dictionary" setter="set_cell_layers" getter="get_cell_layers" default="{}">
+			A dictionary assigning each [Vector2i] cell coordinate to one named [String] runtime layer. Each cell may be assigned to at most one layer. Unassigned cells are always eligible for distance- or pin-based loading.
+		</member>
 		<member name="cell_scenes" type="Dictionary" setter="set_cell_scenes" getter="get_cell_scenes" default="{}">
 			Dictionary mapping [Vector2i] coordinates to [String] scene resource paths. Invalid keys and values are discarded.
 		</member>
 		<member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="128.0">
 			Width and depth of a single square cell in local 3D units.
+		</member>
+		<member name="layer_states" type="Dictionary" setter="set_layer_states" getter="get_layer_states" default="{}">
+			A dictionary from nonempty layer [String] names to [bool] enabled states. Missing layers are enabled. Disabling a layer unloads its cells, even if they are pinned or near a streaming observer, subject to the normal unload budget.
 		</member>
 		<member name="load_radius" type="int" setter="set_load_radius" getter="get_load_radius" default="1">
 			Radius in cells to load around the observer, between 0 and 32.
