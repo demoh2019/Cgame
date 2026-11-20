@@ -189,8 +189,35 @@ class VisualQualityPackageTests(unittest.TestCase):
             self.assertIn(token, demo)
         self.assertLess(demo.index('add_child(world_state)'), demo.index('add_child(streamer)'))
 
+    def test_navmesh_tile_and_patrol_agent_engine_components(self):
+        tile = (ROOT / 'addons/visual_quality/navigation_tile.gd').read_text()
+        npc = (ROOT / 'addons/visual_quality/streamed_patrol_npc.gd').read_text()
+        for token in ('extends NavigationRegion3D', 'make_flat_tile',
+                      'NavigationMesh.new()', 'PackedVector3Array', 'add_polygon'):
+            self.assertIn(token, tile)
+        for token in ('extends CharacterBody3D', 'NavigationAgent3D.new()',
+                      'get_next_path_position()', 'map_get_iteration_id',
+                      'avoidance_enabled = false', 'should_alert', 'patrol_point',
+                      'export_npc_state', 'import_npc_state',
+                      'think_interval_seconds', 'move_and_slide()'):
+            self.assertIn(token, npc)
+        self.assertIn('if not _navigation_ready:', npc)
+
+    def test_streamed_cell_creates_navigation_and_persists_npc_state(self):
+        cell = (ROOT / 'world/forest_cell.gd').read_text()
+        demo = (ROOT / 'demo.gd').read_text()
+        for token in ('NavigationTile.new()', 'NPC.new()',
+                      '_npc.player = owner_streamer.source', 'get_active_npc',
+                      '_npc.export_npc_state()', '_npc.import_npc_state(state)',
+                      'set_ai_enabled', 'state.merge(npc_data)'):
+            self.assertIn(token, cell)
+        for token in ('_count_npc_behaviors()', '_toggle_ai_simulation',
+                      'npc_counts.x', 'KEY_9', 'set_ai_enabled'):
+            self.assertIn(token, demo)
+        self.assertLess(cell.index('add_child(_navigation_tile)'), cell.index('add_child(_npc)'))
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
