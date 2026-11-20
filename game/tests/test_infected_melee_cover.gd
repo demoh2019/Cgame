@@ -71,8 +71,8 @@ func run(t) -> void:
 			"subsequent blocked ticks cannot inflict wounds")
 	t.check(zombie.stuck_time >= 0.12,
 		"blocked hunter builds ordinary obstacle-bashing contact")
-	t.near(zombie.position.x, 0.0, 0.001,
-		"normal collision prevents clipping through the barricade")
+	t.check(zombie.position.x < 0.15,
+		"short approach is allowed but real collision prevents wall tunnelling")
 	world.blockers.clear()
 	result = zombie.think(world, _actors(victim), 0.05, rng)
 	t.eq(int(result.get("hit", -1)), 42, "clearing cover immediately restores a real strike")
@@ -115,6 +115,10 @@ func run(t) -> void:
 	sim._tick_zombies(0.05)
 	t.near(survivor.survival.health, health_before, 0.001,
 		"authoritative server refuses claw damage across real dynamic cover")
+	t.near(survivor.survival.infection, 0.0, 0.001,
+		"blocked strike cannot sneak an infection through the wall")
+	t.near(survivor.survival.bleeding, 0.0, 0.001,
+		"blocked strike cannot create a bleeding injury")
 	t.check(attacker.melee_blocked, "server brain marks blocked contact")
 	var snap: Array = sim.snapshot_for(survivor.id)["zombies"]
 	t.eq(snap.size(), 1, "blocked infected remains visible to nearby player")
