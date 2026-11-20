@@ -53,6 +53,7 @@ const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
 const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
+const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
 const WORKBENCH_RANGE := 6.0
@@ -106,6 +107,8 @@ class Player:
 	var guardian_brace: float = 0.0 # Short PvE-only defensive brace after a valid taunt.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
+	var meal_seconds: float = 0.0 # Remaining server-ticked cooked-fish recovery buff.
+	var meal_tier: int = 0 # Zero when no meal buff is active; never client-authored.
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
@@ -253,6 +256,7 @@ func character_data(player: Player) -> Dictionary:
 		"renown": player.renown,
 		"rest_cooldown": player.rest_cooldown, "lake_drink_cooldown": player.lake_drink_cooldown,
 		"stim_cooldown": player.stim_cooldown,
+		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 	}
 
 
@@ -306,6 +310,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.finite_number(data.get("lake_drink_cooldown", 0.0), 0.0, FieldWater.COOLDOWN_SECONDS):
 		return false
 	if not SaveValidation.finite_number(data.get("stim_cooldown", 0.0), 0.0, FrontierStim.COOLDOWN):
+		return false
+	if not HeartyMeal.valid_state(data.get("meal_seconds", 0.0), data.get("meal_tier", 0)):
 		return false
 	if not (data.get("alive", true) is bool):
 		return false
@@ -374,6 +380,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
 	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
+	player.meal_seconds = float(data.get("meal_seconds", 0.0))
+	player.meal_tier = int(data.get("meal_tier", 0))
 	player.inventory = parsed_bag["inventory"]
 	player.stash = parsed_stash["inventory"]
 	player.kills = int(data.get("kills", 0))
@@ -471,6 +479,8 @@ func _spawn_player(player: Player) -> void:
 	player.party_aid_timer = 0.0
 	player.guardian_timer = 0.0
 	player.guardian_brace = 0.0
+	player.meal_seconds = 0.0
+	player.meal_tier = 0
 	player.combat_energy = Defs.COMBAT_ENERGY_MAX
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
@@ -1678,6 +1688,12 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			var was_hungry: bool = player.survival.hunger <= SKILL_NOURISH_THRESHOLD
 			player.inventory.remove(item_id, 1)
 			player.survival.eat(float(data["food"]) * (1.0 + player.skills.bonus("food_power")))
+			# Prepared coastal meals grant a short, non-stacking recovery bonus.
+			# Canned food and berries only restore hunger as before.
+			var cooked_tier: int = HeartyMeal.tier_for_food(item_id)
+			if cooked_tier > 0:
+				player.meal_tier = cooked_tier
+				player.meal_seconds = HeartyMeal.duration(cooked_tier)
 			if was_hungry: # Stuffing yourself while full teaches nothing.
 				_award(player, "survivalist", 3.0)
 		"drink":
@@ -2377,6 +2393,8 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.action = {}
 	victim.dodge_immunity = 0.0
 	victim.guardian_brace = 0.0
+	victim.meal_seconds = 0.0
+	victim.meal_tier = 0
 	victim.defense_target = -1
 	victim.defense_until = 0.0
 	var zone: int = world.zone_at(victim.position.x, victim.position.z)
@@ -2443,9 +2461,27 @@ func _tick_players(delta: float) -> void:
 			if player.respawn_timer <= 0.0:
 				_spawn_player(player)
 			continue
-		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX, player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta)
+		# Integrate only the fraction of the tick while the cooked meal is active.
+		var meal_effect_tier: int = player.meal_tier
+		var active_meal: float = HeartyMeal.bonus_seconds(player.meal_seconds, delta)
+		var stamina_meal_seconds: float = HeartyMeal.stamina_seconds(
+			active_meal, player.survival.stamina_recovery_delay)
+		player.meal_seconds = maxf(0.0, player.meal_seconds - maxf(0.0, delta))
+		if player.meal_seconds <= 0.0 and player.meal_tier > 0:
+			player.meal_tier = 0
+		if active_meal > 0.0:
+			player.dirty_character = true
+		var nourished: bool = player.survival.hunger > 20.0 and player.survival.thirst > 20.0
+		var energy_bonus: float = (
+			HeartyMeal.energy_per_second(meal_effect_tier) * active_meal) if nourished else 0.0
+		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX,
+			player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta + energy_bonus)
 		var had_bleeding: bool = player.survival.bleeding > 0.0
 		var damage: float = player.survival.tick(delta)
+		if nourished and stamina_meal_seconds > 0.0:
+			player.survival.stamina = minf(Defs.MAX_STAMINA,
+				player.survival.stamina +
+					HeartyMeal.stamina_per_second(meal_effect_tier) * stamina_meal_seconds)
 		# Holding a contested PvP outpost grants a small local rally advantage.
 		# Only the server owns party identity, site control and stamina.
 		if player.survival.stamina_recovery_delay <= 0.0 and \
@@ -3008,6 +3044,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 			"stamina": player.survival.stamina,
+			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),
 			"combat_tag_seconds": CombatLogout.remaining(player.combat_tag_until, time),
