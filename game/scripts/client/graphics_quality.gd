@@ -232,6 +232,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		atmosphere_profile["moon_detail_strength"] = world_profile["moon_detail_strength"]
 		atmosphere_profile["cirrus_detail"] = world_profile["cirrus_detail"]
 		atmosphere_profile["cirrus_opacity"] = world_profile["cirrus_opacity"]
+		atmosphere_profile["cloud_lighting_strength"] = world_profile["cloud_lighting_strength"]
 		# Only desktop Forward+ gets froxel volumetrics. Compatibility/Mobile use
 		# one lightweight weather-driven height-fog layer instead.
 		atmosphere_profile["quality_level"] = _level
