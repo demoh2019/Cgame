@@ -10,6 +10,7 @@ const SeededSubstreams = preload("res://scripts/client/seeded_substreams.gd")
 const STREAM_POSITION := 1
 const STREAM_VELOCITY := 2
 const STREAM_WING_PHASE := 3
+const STREAM_NATIVE_FLOCK := 4
 const MAX_BIRDS := 18
 const ALTITUDE := 22.0
 const SPEED := 6.5
@@ -94,6 +95,10 @@ func _init(p_world_seed: int = 0) -> void:
 		_native.set("cast_shadow", GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
 		_native.set("speed", SPEED)
 		_native.set("agent_scale", 1.4)
+		# Flock3D has its own C++ boids RNG; seed the real native simulation
+		# instead of only seeding the MultiMesh cosmetic custom data.
+		if _native.has_method("set_simulation_seed"):
+			_native.call("set_simulation_seed", SeededSubstreams.fork(root, STREAM_NATIVE_FLOCK).seed)
 		_native.set("active", false)
 		_native.visible = false
 		add_child(_native)
