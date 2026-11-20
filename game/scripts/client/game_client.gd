@@ -215,7 +215,8 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float, crou
 		"cargo_factor": factor, "speed_bonus": float(you.get("speed_bonus", 0.0)),
 		"injury_factor": Survival.fracture_speed_factor(float(you.get("fracture", 0.0))),
 		"tire_grip_seconds": float(you.get("tire_grip_seconds", 0.0)),
-		"bike_integrity": float(you.get("bike_integrity", 100.0))}
+		"bike_integrity": float(you.get("bike_integrity", 100.0)),
+		"weather_time": server_time}
 	predicted = Movement.step(world, predicted, input, delta)
 	if running:
 		predicted_stamina = maxf(0.0, predicted_stamina - Defs.SPRINT_STAMINA_PER_SECOND * delta)

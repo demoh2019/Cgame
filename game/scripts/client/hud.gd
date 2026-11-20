@@ -2154,6 +2154,10 @@ func _process(_delta: float) -> void:
 			_info_label.text += "\nLOST BACKPACK: %dm %s | %.0fs until public loot expires (open map to track)" % [
 				distance, TravelNavigation.compass(here, destination),
 				float(dropped.get("remaining", 0.0))]
+	var mud_traction: float = float(client.you.get("storm_mud_factor", 1.0))
+	if mud_traction < 0.999:
+		_info_label.text += "\nSTORM MUD: ground travel -%.0f%% | roads reduce the penalty." % [
+			(1.0 - mud_traction) * 100.0]
 	if int(client.you.get("rested_xp_credit", 0)) > 0:
 		_info_label.text += "\nRESTED TRAINING: %d bonus XP left (paid rest at hub/fire)" % int(
 			client.you["rested_xp_credit"])

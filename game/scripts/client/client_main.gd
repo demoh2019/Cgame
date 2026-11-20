@@ -31,6 +31,7 @@ const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const StormMud = preload("res://scripts/shared/storm_mud.gd")
 const WindChill = preload("res://scripts/shared/wind_chill.gd")
 const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
@@ -1182,6 +1183,7 @@ func _update_hud() -> void:
 	var speed_pct: int = int(round(survivor.inventory.movement_factor() * 100.0))
 	var risk: String = "SAFE HUB" if world.is_safe(position.x, position.z) else ZoneRisk.description(zone)
 	var weather: Dictionary = Weather.conditions(world, position.x, position.z, sim.time)
+	var rain_grip: float = StormMud.factor(world, position, sim.time, survivor.mounted)
 	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\n%s | World clock %.0fs\nHP %d HUNGER %d THIRST %d STAMINA %d INFECTION %d BLEEDING %d EXPOSURE %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs DODGE CD %.1fs WEAPON %s\nWEATHER %s %.0fC %s | HEAT PACK %ds%s\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Fish T%d Craft T%d Scavenge T%d\nWEAPON MASTERY Melee L%d Ranged L%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nCONTRACT %s\nINVENTORY %s" % [
 		"NIGHT - infected notice farther" if WorldCycle.is_night(sim.time) else "DAY", sim.time,
 		int(vitals.health), int(vitals.hunger), int(vitals.thirst), int(vitals.stamina),
@@ -1260,6 +1262,9 @@ func _update_hud() -> void:
 	if survivor.flare_seconds > 0.0:
 		_stats.text += "\nFLARE: %ds (F2) | infected notice up to 28m" % ceili(survivor.flare_seconds)
 	_stats.text += "\nWET CLOTHING: %d%% | dry under shelter or beside a lit campfire" % roundi(survivor.survival.wetness)
+	if rain_grip < 0.999:
+		_stats.text += "\nSTORM MUD: ground travel -%.0f%% | follow roads for traction" % [
+			(1.0 - rain_grip) * 100.0]
 	if not sim.smoke_clouds.is_empty():
 		var smoke_wind: Vector2 = Weather.wind_at(world, position.x, position.z, sim.time)
 		_stats.text += "\nSMOKE WIND: %.1f m/s | smoke clouds drift with the wind" % smoke_wind.length()

@@ -105,6 +105,7 @@ const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
 const NightHorde = preload("res://scripts/shared/night_horde.gd")
 const HubRecall = preload("res://scripts/shared/hub_recall.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const StormMud = preload("res://scripts/shared/storm_mud.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const StormInsulator = preload("res://scripts/shared/storm_insulator.gd")
 const WetClothing = preload("res://scripts/shared/wet_clothing.gd")
@@ -931,6 +932,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 			"injury_factor": Survival.fracture_speed_factor(player.survival.fracture),
 			"tire_grip_seconds": player.tire_grip_seconds,
 			"bike_integrity": player.bike_integrity,
+			"weather_time": time,
 		}, allowed)
 		var moved: float = Vector2(player.position.x - before_move.x, player.position.z - before_move.z).length()
 		if moved > 0.0:
@@ -6678,6 +6680,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"regional_trade": RegionalTrade.public_offer(world, player.position),
 			"renown_next": Reputation.next_threshold(player.renown),
 			"on_road": RoadTravel.on_road(world, player.position),
+			"storm_mud_factor": StormMud.factor(world, player.position, time, player.mounted),
 			"carry_kg": player.inventory.total_weight(),
 			"cargo_factor": BikeCargo.movement_factor(player.inventory,
 				player.skills.bonus("carry_capacity"), player.mounted),
