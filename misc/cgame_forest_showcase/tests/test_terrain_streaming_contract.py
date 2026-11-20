@@ -351,6 +351,60 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn('hud.text.contains("Дрон X=0 Z=4")', moving)
 
 
+    def test_native_physics_activation_and_gameplay_contract(self) -> None:
+        """Two real physics ticks gate scene activation and game collisions."""
+        repository = ROOT.parents[1]
+        header = (repository / "modules/world_partition/world_partition_3d.h").read_text(encoding="utf-8")
+        cpp = (repository / "modules/world_partition/world_partition_3d.cpp").read_text(encoding="utf-8")
+        xml = (repository / "modules/world_partition/doc_classes/WorldPartition3D.xml").read_text(encoding="utf-8")
+        native_tests = (repository / "modules/world_partition/tests/test_world_partition_3d.h").read_text(encoding="utf-8")
+        world = (ROOT / "scripts/world.gd").read_text(encoding="utf-8")
+        player = (ROOT / "scripts/explorer_character.gd").read_text(encoding="utf-8")
+        smoke = (ROOT / "tests/smoke_physics_readiness.gd").read_text(encoding="utf-8")
+        physics_smoke = (ROOT / "tests/smoke_physics.gd").read_text(encoding="utf-8")
+        travel_smoke = (ROOT / "tests/smoke_fast_travel.gd").read_text(encoding="utf-8")
+
+        self.assertIn("physics_pending_cells;", header)
+        self.assertIn("physics_ready_cells;", header)
+        self.assertIn("uint64_t physics_tick_counter = 0;", header)
+        for method in (
+            "is_cell_physics_ready", "are_cells_physics_ready",
+            "get_physics_ready_cell_count",
+        ):
+            self.assertIn(method + "(", header)
+            self.assertIn("WorldPartition3D::" + method + "(", cpp)
+            self.assertIn('D_METHOD("' + method + '"', cpp)
+            self.assertIn('method name="' + method + '"', xml)
+
+        self.assertIn("physics_pending_cells.insert(p_cell, physics_tick_counter + 2)", cpp)
+        self.assertIn("physics_tick_counter++;", cpp)
+        self.assertIn("NOTIFICATION_PHYSICS_PROCESS", cpp)
+        self.assertIn("NOTIFICATION_ENTER_TREE", cpp)
+        self.assertIn("physics_pending_cells.erase(p_cell)", cpp)
+        self.assertIn("physics_ready_cells.erase(p_cell)", cpp)
+        self.assertIn("set_physics_process(runtime && streaming_enabled", cpp)
+        self.assertIn('SNAME("cell_physics_ready")', cpp)
+        self.assertIn('SNAME("cell_physics_unready")', cpp)
+        self.assertIn('signal name="cell_physics_ready"', xml)
+        self.assertIn('signal name="cell_physics_unready"', xml)
+        self.assertIn("Physics activation barrier resets on unload and re-stream", native_tests)
+        self.assertIn("SceneTree::get_singleton()->physics_process(1.0 / 60.0)", native_tests)
+
+        self.assertIn("cell_physics_ready.connect(_on_stream_cell_physics_ready)", world)
+        self.assertIn("cell_physics_unready.connect(_on_stream_cell_physics_unready)", world)
+        self.assertIn('world_partition.is_cell_physics_ready(cell)', world)
+        self.assertIn('streaming_world.is_cell_physics_ready(cell)', player)
+        self.assertIn('world_partition.are_cells_physics_ready(target_cell, 0)', world)
+        self.assertIn('hit.get("collider") != terrain_body', world)
+        self.assertIn('get_world_3d().direct_space_state.intersect_ray(ray)', world)
+        self.assertIn('get_physics_ready_cell_count()', world)
+        self.assertIn("stream.cell_physics_ready.connect", smoke)
+        self.assertIn("stream.cell_physics_unready.connect", smoke)
+        self.assertIn("stream.get_physics_ready_cell_count() != 1", smoke)
+        self.assertIn("stream.is_cell_physics_ready(origin)", physics_smoke)
+        self.assertIn("stream.is_cell_physics_ready(OUTPOST_CELL)", travel_smoke)
+        self.assertIn("stream.is_cell_physics_ready(HOME_CELL)", travel_smoke)
+
     def test_native_manual_pin_streaming_contract(self) -> None:
         """Engine pins, editor docs and playable fast travel stay in sync."""
         repository = ROOT.parents[1]
@@ -389,11 +443,11 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn("KEY_F6:", world)
         self.assertIn("KEY_F7:", world)
         self.assertIn("world_partition.pin_cell(target_cell)", world)
-        self.assertIn("world_partition.are_cells_loaded(target_cell, 0)", world)
+        self.assertIn("world_partition.are_cells_physics_ready(target_cell, 0)", world)
         self.assertIn("world_partition.unpin_cell(target_cell)", world)
         self.assertIn("_fast_travel_in_progress = true", world)
         self.assertIn("await get_tree().physics_frame", world)
-        self.assertIn("if not world_partition.are_cells_loaded(target_cell, 0):", world)
+        self.assertIn("if not world_partition.are_cells_physics_ready(target_cell, 0):", world)
         self.assertIn('world.get("_fast_travel_in_progress")', travel)
         self.assertIn("await physics_frame", travel)
 
@@ -444,7 +498,7 @@ class StreamedTerrainContracts(TestCase):
         assert "terrain_collision.position = Vector3(CELL_SIZE * 0.5" in patch
         assert "TerrainPatch.new()" in forest
         assert "_create_terrain()" not in world
-        assert "world_partition.are_cells_loaded(cell, 0)" in world
+        assert "world_partition.is_cell_physics_ready(cell)" in world
         assert "_position_has_terrain" in player
         assert "WORLD_CELLS_PER_SIDE: int = 32" in world
         assert "world_partition.set_cell_scenes(registered_cells)" in world
