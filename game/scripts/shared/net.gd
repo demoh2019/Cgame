@@ -903,6 +903,8 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return true # Public server-generated announcement.
 		"supply_cleared":
 			return _is_nearby(event, peer) # Only witnesses receive clearance coordinates.
+		"horde_started", "horde_cleared", "horde_expired":
+			return _is_nearby(event, peer) # Only local survivors can track this PvP encounter.
 		"death":
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":

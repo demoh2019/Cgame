@@ -4,6 +4,8 @@ extends RefCounted
 
 
 static func for_bag(bag: Dictionary) -> String:
+	if bool(bag.get("horde_cache", false)):
+		return "HORDE TROPHY - public"
 	if bool(bag.get("supply_drop", false)):
 		var guards: int = maxi(0, int(bag.get("guards_remaining", 0)))
 		return "SUPPLY DROP - guarded (%d)" % guards if guards > 0 else "SUPPLY DROP - public"

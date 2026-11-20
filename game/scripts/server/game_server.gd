@@ -54,6 +54,7 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
+const NightHorde = preload("res://scripts/shared/night_horde.gd")
 const HubRecall = preload("res://scripts/shared/hub_recall.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
@@ -182,6 +183,8 @@ var zombies: Dictionary = {} # zombie id -> Zombie
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned session clock.
+var next_horde_at: float = NightHorde.START_DELAY # Separate night event schedule.
+var night_horde: Dictionary = {} # Active IDs, expiry, tier, public event coordinates.
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
 var siege_last_by_wall: Dictionary = {} # Session timers only; no character persistence.
@@ -3156,6 +3159,19 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		if SupplyDrops.mark_cleared(cache, zombies):
 			events.append({"type": "supply_cleared", "id": int(cache["id"]),
 				"x": float(cache["x"]), "z": float(cache["z"])})
+	# Only death of the final real horde member can release the one-shot
+	# public trophy; a missing/despawned mob never counts as a victory.
+	if not night_horde.is_empty() and time < float(night_horde["expires"]):
+		var horde_ids: Array = night_horde["ids"]
+		if horde_ids.has(zombie.id) and NightHorde.fully_defeated(horde_ids, zombies):
+			var horde_zone: int = int(night_horde["zone"])
+			var reward_id: int = _make_bag(zombie.position, NightHorde.loot(horde_zone))
+			if reward_id >= 0:
+				bags[reward_id]["horde_cache"] = true
+				bags[reward_id]["expires"] = time + NightHorde.CACHE_DURATION
+				events.append({"type": "horde_cleared", "id": reward_id,
+					"x": zombie.position.x, "z": zombie.position.z, "tier": horde_zone + 1})
+			night_horde = {}
 	events.append({"type": "zombie_died", "id": zombie.id, "x": zombie.position.x, "z": zombie.position.z})
 
 
@@ -3984,6 +4000,8 @@ func _manage_zombie_population() -> void:
 			gone.append(zombie.id)
 		elif zombie.supply_cache_id >= 0 and bags.has(zombie.supply_cache_id):
 			continue # Guard stays loaded while its loot is alive: no lure-and-return exploit.
+		elif not night_horde.is_empty() and night_horde.get("ids", []).has(zombie.id):
+			continue # Prevent running away to unload an active horde and claim a win.
 		elif _nearest_player_distance(Vector2(zombie.position.x, zombie.position.z)) > ZOMBIE_ACTIVE_RADIUS:
 			gone.append(zombie.id)
 			if spawn_state.has(zombie.spawn_id):
@@ -4060,11 +4078,71 @@ func _spawn_supply_guards(site: Dictionary, bag_id: int) -> Array[int]:
 	return ids
 
 
+## One short-lived PvPvE hunt at a time. Spawn, expiry and the reward are
+## entirely owned by the simulation; no client can request or claim an event.
+func _tick_night_horde() -> void:
+	if not night_horde.is_empty():
+		if time >= float(night_horde["expires"]):
+			for id in night_horde["ids"]:
+				zombies.erase(int(id)) # Event-specific spawns have no respawn slot.
+			events.append({"type": "horde_expired", "x": float(night_horde["x"]),
+				"z": float(night_horde["z"])})
+			night_horde = {}
+			next_horde_at = maxf(next_horde_at, time + NightHorde.RETRY_SECONDS)
+		return
+	if time < next_horde_at or tick_count % NightHorde.CHECK_EVERY_TICKS != 0:
+		return
+	next_horde_at = time + NightHorde.RETRY_SECONDS
+	if not WorldCycle.is_night(time) or raid_boss_id >= 0 or \
+			zombies.size() >= NightHorde.MAX_ACTIVE_INFECTED:
+		return
+	var eligible: Array = []
+	for player in players.values():
+		if _alive(player) and player.position.is_finite() and \
+				ZoneRisk.full_loot(world.zone_at(player.position.x, player.position.z)):
+			eligible.append(player)
+	if eligible.is_empty():
+		return
+	var start: int = rng.randi_range(0, eligible.size() - 1)
+	var survivors: Array[Vector3] = []
+	for player in players.values():
+		if _alive(player) and player.position.is_finite():
+			survivors.append(player.position)
+	for shift in eligible.size():
+		var target: Player = eligible[(start + shift) % eligible.size()]
+		var available: int = NightHorde.MAX_ACTIVE_INFECTED - zombies.size()
+		var positions: Array[Dictionary] = NightHorde.sites(world, target.position,
+			survivors, zombies, available, rng.randi_range(0, NightHorde.ANGLES - 1))
+		if positions.size() < 2:
+			continue # No one-enemy "horde" or isolated, trivial trophy.
+		var ids: Array[int] = []
+		var visible: Dictionary = {target.id: {"position": target.position,
+			"alive": true, "safe": false}}
+		for spawn in positions:
+			var x: float = float(spawn["x"])
+			var z: float = float(spawn["z"])
+			var enemy_id: int = new_id()
+			var enemy = Zombie.new(enemy_id, str(spawn["kind"]),
+				Vector3(x, world.height_at(x, z), z), -1)
+			enemy.receive_pack_alert(target.id, visible)
+			zombies[enemy_id] = enemy
+			ids.append(enemy_id)
+		var zone: int = world.zone_at(target.position.x, target.position.z)
+		night_horde = {"ids": ids, "zone": zone,
+			"x": target.position.x, "z": target.position.z,
+			"expires": time + NightHorde.MAX_DURATION}
+		next_horde_at = time + NightHorde.COOLDOWN_SECONDS
+		events.append({"type": "horde_started", "x": target.position.x,
+			"z": target.position.z, "tier": zone + 1, "count": ids.size()})
+		return
+
+
 func _tick_world(delta: float) -> void:
 	for id in infected_snares.keys():
 		if time >= float(infected_snares[id]["expires"]):
 			infected_snares.erase(id)
 	_tick_supply_drop()
+	_tick_night_horde()
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):
 			decoys.erase(id)
@@ -4180,6 +4258,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				bag_view["reserved_seconds"] = RaidLoot.remaining(bag, time)
 				bag_view["reserved"] = float(bag_view["reserved_seconds"]) > 0.0
 				bag_view["can_loot"] = RaidLoot.can_open(bag, player, time)
+			bag_view["horde_cache"] = bool(bag.get("horde_cache", false))
 			bag_view["supply_drop"] = bool(bag.get("supply_drop", false))
 			bag_view["guards_remaining"] = SupplyDrops.living_guards(bag, zombies)
 			if int(bag_view["guards_remaining"]) > 0:

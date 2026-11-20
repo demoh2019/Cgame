@@ -326,6 +326,16 @@ func _on_skill_event(event: Dictionary) -> void:
 		"supply_cleared":
 			hud.say("SUPPLY CLEARED at %.0f, %.0f! The crate is public — collect it before rival parties!" % [
 				float(event.get("x", 0)), float(event.get("z", 0))])
+		"horde_started":
+			hud.say("NIGHT HORDE (T%d): %d infected at %.0f, %.0f! Defeat them for a public trophy." % [
+				int(event.get("tier", 3)), int(event.get("count", 0)),
+				float(event.get("x", 0)), float(event.get("z", 0))])
+		"horde_cleared":
+			hud.say("HORDE DEFEATED! Public trophy at %.0f, %.0f — rival survivors can claim it!" % [
+				float(event.get("x", 0)), float(event.get("z", 0))])
+		"horde_expired":
+			hud.say("The night horde dispersed at %.0f, %.0f." % [
+				float(event.get("x", 0)), float(event.get("z", 0))])
 
 
 func _setup_chat() -> void:
