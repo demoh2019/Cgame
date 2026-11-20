@@ -82,6 +82,10 @@ var name_edit: LineEdit
 var status_label: Label
 var _zoom := 1.0
 var _attack_cooldown := 0.0
+var _build_mode := false # U: a ghost wall follows the aim until it is placed or cancelled.
+var _build_yaw := 0.0
+var _build_ghost: MeshInstance3D
+var _build_reason := ""
 var _move_input := Vector2.ZERO # This frame's movement keys, for facing the way you walk.
 var _last_attack_msec := -100000
 var _fishing_line: MeshInstance3D # Line from the rod tip to the bobber while fishing.
@@ -136,6 +140,9 @@ func _ready() -> void:
 		i += 1
 	address_edit.text = address
 	name_edit.text = player_name
+	if _demo != "" and _screenshot_path != "":
+		# A scripted screenshot run must not take the keyboard from whoever is working at this machine.
+		get_window().unfocusable = true
 	if "--connect" in args:
 		_connect_remote()
 
@@ -562,6 +569,55 @@ func _update_fishing_line(_delta: float) -> void:
 	_fishing_line.visible = true
 
 
+## Where the planned wall would stand: 2.8 m out along the aim.
+func _build_target() -> Vector2:
+	var direction: Vector2 = _aim_direction()
+	if direction.length_squared() < 0.001:
+		direction = Vector2(sin(avatar.rotation.y), cos(avatar.rotation.y))
+	return Vector2(client.predicted.x, client.predicted.z) + direction.normalized() * 2.8
+
+
+## The ghost wall of build mode: the real tier-1 model, see-through, green where it may stand and red where not.
+func _update_build_ghost() -> void:
+	if not _build_mode or not bool(client.you.get("alive", false)):
+		if _build_ghost != null:
+			_build_ghost.visible = false
+		return
+	if _build_ghost == null:
+		_build_ghost = MeshInstance3D.new()
+		_build_ghost.mesh = EntityView.wall_mesh(1)
+		var glass := StandardMaterial3D.new()
+		glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		glass.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_build_ghost.material_override = glass
+		_build_ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_build_ghost)
+	var target: Vector2 = _build_target()
+	_build_reason = Structures.placement_reason(client.world, target, Vector2(client.predicted.x, client.predicted.z))
+	if _build_reason == "" and not client.inventory.has_all(Structures.COST):
+		_build_reason = "missing_materials"
+	_build_ghost.visible = true
+	_build_ghost.global_position = Vector3(target.x, client.world.height_at(target.x, target.y), target.y)
+	_build_ghost.rotation.y = _build_yaw
+	(_build_ghost.material_override as StandardMaterial3D).albedo_color = \
+		Color(0.35, 1.0, 0.45, 0.45) if _build_reason == "" else Color(1.0, 0.3, 0.25, 0.45)
+
+
+func _place_wall() -> void:
+	_update_build_ghost()
+	if _build_reason != "":
+		hud.say("Cannot build here: %s." % _build_reason.replace("_", " "))
+		return
+	client.build(_build_target(), _build_yaw)
+	_end_build_mode()
+
+
+func _end_build_mode() -> void:
+	_build_mode = false
+	if _build_ghost != null:
+		_build_ghost.visible = false
+
+
 ## Camera shake through the fork's built-in Camera3D trauma, which decays by itself.
 func _shake(amount: float) -> void:
 	if camera != null and camera.has_method("add_trauma"):
@@ -841,7 +897,7 @@ func _physics_process(delta: float) -> void:
 	var aim := _aim_direction()
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
 	client.send_input(move, sprint, yaw, delta, crouch)
-	if alive and not hud.is_menu_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
+	if alive and not _build_mode and not hud.is_menu_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
 		client.attack(aim)
 		_attack_cooldown = 0.18
 		_last_attack_msec = Time.get_ticks_msec()
@@ -880,6 +936,7 @@ func _process(delta: float) -> void:
 			in_hand = "fishing_rod"
 		avatar_model.set_weapon(in_hand)
 		_update_fishing_line(delta)
+		_update_build_ghost()
 		avatar_model.set_gear(client.inventory.gear)
 		avatar_model.update_motion(delta)
 		avatar_model.set_dead(not bool(client.you.get("alive", true)))
@@ -1039,6 +1096,12 @@ func _update_prompt() -> void:
 		var protection: float = float(client.campfires[nearby_fire_id].get("stormproof_seconds", 0.0))
 		if protection > 0.0:
 			text += " | STORMPROOF FIRE: %.0fs" % protection
+	if _build_mode:
+		text = "BUILD WALL  (4 wood, 2 stone)   wheel: turn   click or U: place   right click: cancel"
+		if _build_reason != "":
+			text += "   -   " + {"out_of_range": "too near or too far", "safe_zone": "not in the settlement",
+				"bad_terrain": "ground too steep or wet", "blocked": "something is in the way",
+				"missing_materials": "not enough wood and stone"}.get(_build_reason, _build_reason)
 	hud.set_prompt(text)
 
 
@@ -1251,10 +1314,13 @@ func _unhandled_input(event: InputEvent) -> void:
 					client.light_campfire(target)
 					hud.say("At night, campfire light attracts infected. Press - to extinguish.")
 			KEY_U:
-				var direction: Vector2 = _aim_direction()
-				if direction.length_squared() > 0.001:
-					var target: Vector2 = Vector2(client.predicted.x, client.predicted.z) + direction * 2.8
-					client.build(target)
+				if _build_mode:
+					_place_wall()
+				else:
+					_build_mode = true
+			KEY_ESCAPE:
+				if _build_mode:
+					_end_build_mode()
 			KEY_H:
 				var id: int = client.nearest_barricade(client.predicted)
 				if id != -1:
@@ -1267,6 +1333,19 @@ func _unhandled_input(event: InputEvent) -> void:
 				var id: int = client.nearest_barricade(client.predicted)
 				if id != -1:
 					client.dismantle(id)
+	if event is InputEventMouseButton and event.pressed and _build_mode:
+		# Build mode: the wheel turns the wall, a left click places it, a right click puts the plan away.
+		match event.button_index:
+			MOUSE_BUTTON_WHEEL_UP:
+				_build_yaw = fposmod(_build_yaw + Structures.ROTATION_STEP, TAU)
+			MOUSE_BUTTON_WHEEL_DOWN:
+				_build_yaw = fposmod(_build_yaw - Structures.ROTATION_STEP, TAU)
+			MOUSE_BUTTON_LEFT:
+				_place_wall()
+			MOUSE_BUTTON_RIGHT:
+				_end_build_mode()
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_zoom = clampf(_zoom - 0.1, 0.55, 1.8)
@@ -1396,6 +1475,21 @@ func _run_demo() -> void:
 				if OS.get_environment("CGAME_DEMO_QUICK") == "1": # Fill the quick-use sockets as a double click would.
 					hud._put_in_doll("canned_food")
 					hud._put_in_doll("bandage")
+		"build":
+			if _demo_frames == 30:
+				for entry in [["wood_1", 20], ["stone_1", 10], ["plank_2", 8], ["stone_2", 4]]:
+					net_ref.c_debug.rpc_id(1, "give", {"item": entry[0], "count": entry[1]})
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": 72.0, "z": 20.0})
+			if _demo_frames == 70:
+				var here := Vector2(client.predicted.x, client.predicted.z)
+				client.build(here + Vector2(2.5, 1.2), 0.0)
+				client.build(here + Vector2(-0.4, 2.8), PI / 4.0)
+			if _demo_frames == 95:
+				var id: int = client.nearest_barricade(client.predicted)
+				if id != -1:
+					client.upgrade(id)
+				_build_mode = true
+				_build_yaw = PI / 2.0
 		"fish":
 			if _demo_frames == 30:
 				net_ref.c_debug.rpc_id(1, "give", {"item": "fishing_rod", "count": 1})

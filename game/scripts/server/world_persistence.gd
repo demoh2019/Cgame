@@ -38,6 +38,8 @@ static func capture(sim) -> Dictionary:
 			"x": float(item["x"]), "z": float(item["z"]),
 			"hp": float(item["hp"]), "tier": Structures.tier_of(item), "owner_account": account,
 			"owner_guild": str(item.get("owner_guild", "")),
+			"yaw": float(item.get("yaw", 0.0)),
+			"upkeep": clampf(float(item.get("upkeep_until", sim.time)) - sim.time, 0.0, Structures.UPKEEP_SECONDS),
 		})
 	walls.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return int(a["id"]) < int(b["id"]))
@@ -95,7 +97,12 @@ static func validate(data: Variant, sim) -> Dictionary:
 	var ids: Dictionary = {}
 	var owner_counts: Dictionary = {}
 	for value in source:
-		if typeof(value) != TYPE_DICTIONARY or value.size() not in [5, 6, 7]:
+		if typeof(value) != TYPE_DICTIONARY or value.size() not in [5, 6, 7, 9]:
+			return {}
+		# Current checkpoints add the facing and the upkeep left.
+		if value.size() == 9 and not (value.has("tier") and value.has("owner_guild") and value.has("yaw") and value.has("upkeep")):
+			return {}
+		if not _bounded_float(value.get("yaw", 0.0), 0.0, TAU) or not _bounded_float(value.get("upkeep", 0.0), 0.0, Structures.UPKEEP_SECONDS):
 			return {}
 		# Old checkpoints have five or six fields, before guild identity existed.
 		if value.size() == 6 and not value.has("tier"):
@@ -146,7 +153,8 @@ static func validate(data: Variant, sim) -> Dictionary:
 			return {}
 		owner_counts[uid] = next_count
 		walls.append({"id": id, "x": x, "z": z, "hp": float(value["hp"]),
-			"tier": tier, "owner_account": uid, "owner_guild": guild})
+			"tier": tier, "owner_account": uid, "owner_guild": guild,
+			"yaw": float(value.get("yaw", 0.0)), "upkeep": float(value.get("upkeep", Structures.UPKEEP_SECONDS))})
 	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls, "outposts": holds}
 
 
@@ -165,6 +173,7 @@ static func restore(sim, data: Variant) -> bool:
 			"id": id, "x": x, "y": sim.world.height_at(x, z), "z": z,
 			"hp": float(wall["hp"]), "tier": int(wall.get("tier", 1)), "owner": -1,
 			"owner_account": wall["owner_account"], "owner_guild": str(wall.get("owner_guild", "")),
+			"yaw": float(wall.get("yaw", 0.0)), "upkeep_until": sim.time + float(wall.get("upkeep", Structures.UPKEEP_SECONDS)),
 		}
 		sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 		sim._next_id = maxi(sim._next_id, id)

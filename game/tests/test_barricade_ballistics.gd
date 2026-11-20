@@ -106,6 +106,8 @@ func run(t) -> void:
 		"invalid guild field is rejected atomically")
 	var legacy: Dictionary = checkpoint.duplicate(true)
 	legacy["barricades"][0].erase("owner_guild")
+	legacy["barricades"][0].erase("yaw") # Snapshots of that time had no facing or upkeep either.
+	legacy["barricades"][0].erase("upkeep")
 	t.check(WorldPersistence.restore(GameServer.new(WorldGen.new(310), 310), legacy),
 		"pre-ballistics world snapshots still load")
 

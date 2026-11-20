@@ -127,6 +127,8 @@ func run(t) -> void:
 	var old_record: Dictionary = checkpoint.duplicate(true)
 	old_record["barricades"][0].erase("tier")
 	old_record["barricades"][0].erase("owner_guild")
+	old_record["barricades"][0].erase("yaw") # Legacy checkpoints had no facing or upkeep either.
+	old_record["barricades"][0].erase("upkeep")
 	old_record["barricades"][0]["hp"] = 100.0
 	var migrated = GameServer.new(WorldGen.new(214), 315)
 	t.check(Persist.restore(migrated, JSON.parse_string(JSON.stringify(old_record))), "legacy T1 checkpoint loads without tier key")

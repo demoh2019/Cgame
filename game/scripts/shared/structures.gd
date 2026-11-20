@@ -112,4 +112,44 @@ static func public_state(data: Dictionary) -> Dictionary:
 		"hp": float(data["hp"]),
 		"tier": tier_of(data), "max_hp": max_health(tier_of(data)),
 		"owner": int(data["owner"]),
+		"yaw": float(data.get("yaw", 0.0)),
 	}
+
+
+# --- Placement, facing and upkeep -----------------------------------------------------------------------------------
+
+const ROTATION_STEP := PI / 4.0 # Walls turn in eighths of a circle, so lines and corners meet.
+# A wall stays in good repair while its owner comes by (within UPKEEP_RANGE) or repairs or upgrades it; left alone longer
+# than UPKEEP_SECONDS of world time it crumbles, from full health to nothing in DECAY_SECONDS, and is gone at zero.
+const UPKEEP_SECONDS := 6.0 * 3600.0
+const UPKEEP_RANGE := 15.0
+const DECAY_SECONDS := 2.0 * 3600.0
+
+
+## Where a wall may stand, judged from the builder's position: "" when it may, else the reason. The server checks this and
+## more (other walls, people, materials); the client uses it to colour the placement ghost.
+static func placement_reason(world, point: Vector2, from: Vector2) -> String:
+	if not point.is_finite() or not from.is_finite():
+		return "invalid_position"
+	var distance: float = point.distance_to(from)
+	if distance < MIN_BUILD_DISTANCE or distance > BUILD_RANGE:
+		return "out_of_range"
+	if point.length() < MIN_HUB_DISTANCE:
+		return "safe_zone"
+	if world.is_water(point.x, point.y) or world.normal_at(point.x, point.y).y < MIN_SLOPE_NORMAL_Y:
+		return "bad_terrain"
+	for blocker in world.blockers_near(point.x, point.y, RADIUS + 1.0):
+		if point.distance_to(Vector2(float(blocker["x"]), float(blocker["z"]))) < RADIUS + float(blocker["radius"]) + 0.1:
+			return "blocked"
+	return ""
+
+
+## Facing snapped to the rotation step; anything not a finite number faces north.
+static func snap_yaw(yaw: float) -> float:
+	if not is_finite(yaw):
+		return 0.0
+	return fposmod(roundf(yaw / ROTATION_STEP) * ROTATION_STEP, TAU)
+
+
+static func decay_per_second(tier: int) -> float:
+	return max_health(tier) / DECAY_SECONDS

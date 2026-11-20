@@ -36,6 +36,13 @@ main action) and keeps text over the world light. Item icons: `item_icons.gd` (g
   ingredients' have/need; the same category side buttons).
 * **Worn gear**: hood (head), cloak (cape), gloves (hands), boots (feet), four tiers each, crafted at a workbench; every
   worn piece adds protection on top of the body armor (80% at most). Hood, cloak and boots show on the character.
+* **Building**: U opens build mode, a see-through wall at the aim point, green where it may stand and red (with the reason
+  in the prompt) where not; the mouse wheel turns it in eighths, a click or U places it, right click or Esc cancels.
+  Walls show their tier's model (plank fence, cobble fence, stone wall, tall stone wall) and darken as they are damaged.
+  A wall stays kept while its owner comes within 15 m or repairs or upgrades it; left alone for 6 hours of world time it
+  crumbles over 2 hours. Facing and upkeep are saved with the world.
+* **Fishing**: T casts (rod in hand, line and bobber on the water); when the bobber dips ("BITE!"), T strikes for one more
+  fish; too early or too late the fish slips (the cast still pays as an ordinary one).
 * **Title screen**: the sign-in card is a hanging red banner with the title, the fields and a red PLAY SOLO button.
 
 ## Controls

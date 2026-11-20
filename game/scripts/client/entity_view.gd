@@ -3,6 +3,7 @@ extends Node3D
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
+const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -20,6 +21,19 @@ const ALERT_TINT := Color(1.0, 0.45, 0.4)
 
 var _nodes: Dictionary = {} # "kind:id" -> Node3D
 var _targets: Dictionary = {} # "kind:id" -> {"position": Vector3, "yaw": float}
+
+
+## The wall model of a tier, or a timber box when the packs are missing.
+static func wall_mesh(tier: int) -> Mesh:
+	var mesh: Mesh = ModelCatalog.barricade_mesh(tier)
+	if mesh != null:
+		return mesh
+	var box := BoxMesh.new()
+	box.size = Vector3(2.0, 1.6, 0.5)
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Structures.color_for_tier(tier)
+	box.material = material
+	return box
 
 
 func update_from(client) -> void:
@@ -106,11 +120,20 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		else:
 			loot_material.albedo_color = Color(0.64, 0.42, 0.23)
 	if kind == "barricade":
-		var barricade_mesh: MeshInstance3D = _nodes[key].get_child(0)
-		var barricade_material: StandardMaterial3D = barricade_mesh.material_override
+		# The tier's wall model, turned to its facing, darkening as it is damaged.
+		var barricade_mesh: MeshInstance3D = _nodes[key].get_node("Wall")
 		var tier: int = Structures.tier_of(entity)
+		if int(barricade_mesh.get_meta("tier", 0)) != tier:
+			barricade_mesh.set_meta("tier", tier)
+			barricade_mesh.mesh = wall_mesh(tier)
+			if barricade_mesh.material_overlay == null:
+				var wear := StandardMaterial3D.new()
+				wear.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				wear.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				barricade_mesh.material_overlay = wear
+		_nodes[key].rotation.y = float(entity.get("yaw", 0.0))
 		var fraction: float = clampf(float(entity.get("hp", 0.0)) / maxf(1.0, Structures.max_health(tier)), 0.0, 1.0)
-		barricade_material.albedo_color = Color(0.20, 0.18, 0.18).lerp(Structures.color_for_tier(tier), fraction)
+		(barricade_mesh.material_overlay as StandardMaterial3D).albedo_color = Color(0.08, 0.06, 0.05, (1.0 - fraction) * 0.6)
 	if kind == "zombie":
 		# A zombie that has locked on to someone flushes red.
 		var model: Node3D = _nodes[key].get_node("Model")
@@ -209,13 +232,7 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		return root
 	if kind == "barricade":
 		var barricade := MeshInstance3D.new()
-		var barrier := BoxMesh.new()
-		barrier.size = Vector3(1.7, 1.6, 1.7)
-		barricade.mesh = barrier
-		barricade.position.y = 0.8
-		var material := StandardMaterial3D.new()
-		material.albedo_color = Color(0.6, 0.45, 0.27)
-		barricade.material_override = material
+		barricade.name = "Wall"
 		root.add_child(barricade)
 		return root
 	if kind == "fish_trap":

@@ -28,6 +28,22 @@ const TOWERS := [
 	{"path": "village/EA03_Village_Tover_01a.glb", "kind": "height", "size": 9.0},
 ]
 
+# Player-built walls by tier: timber planks, a cobble fence, a stone wall, a tall village stone wall. Baked to the width of
+# the wall's footprint (about two metres).
+const BARRICADE_MODELS := [
+	{"path": "village/EA03_Fence_Plank_02a.glb", "kind": "length", "size": 2.0},
+	{"path": "village/EA03_Fence_Cobble_01a.glb", "kind": "length", "size": 2.0},
+	{"path": "props/AllAssets_with_texture.glb", "node": "Wall_Stone01", "kind": "length", "size": 2.0},
+	{"path": "village/EA03_Fence_Wall_01b.glb", "kind": "length", "size": 2.0},
+]
+
+
+## The wall model of a tier (1..4), or null when its pack is missing.
+static func barricade_mesh(tier: int) -> Mesh:
+	var entry: Dictionary = BARRICADE_MODELS[clampi(tier, 1, BARRICADE_MODELS.size()) - 1]
+	return entry_mesh(entry) if exists(String(entry["path"])) else null
+
+
 const WALLS := [
 	{"path": "village/EA03_Fence_Wall_01b.glb", "kind": "length", "size": 3.8},
 	{"path": "highlands/SM_WallMid.fbx", "kind": "length", "size": 3.8, "tex": "highlands/T_WallMid_diffuse.png"},

@@ -551,9 +551,9 @@ func loot(entity_id: int) -> void:
 	net.c_loot.rpc_id(1, entity_id)
 
 
-func build(point: Vector2) -> void:
+func build(point: Vector2, yaw: float = 0.0) -> void:
 	if point.is_finite():
-		net.c_build.rpc_id(1, point.x, point.y)
+		net.c_build.rpc_id(1, point.x, point.y, yaw)
 
 
 func repair(id: int) -> void:

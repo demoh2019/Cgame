@@ -3150,21 +3150,15 @@ func cmd_refuel_campfire(peer_id: int, id: int) -> Dictionary:
 	return {"ok": true, "id": id, "remaining": float(camp["expires"]) - time}
 
 
-func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
+func cmd_build(peer_id: int, x: float, z: float, yaw: float = 0.0) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	var point := Vector2(x, z)
 	var from := Vector2(player.position.x, player.position.z)
-	if not point.is_finite() or not from.is_finite():
-		return {"ok": false, "reason": "invalid_position"}
-	var distance := point.distance_to(from)
-	if distance < Structures.MIN_BUILD_DISTANCE or distance > Structures.BUILD_RANGE:
-		return {"ok": false, "reason": "out_of_range"}
-	if point.length() < Structures.MIN_HUB_DISTANCE:
-		return {"ok": false, "reason": "safe_zone"}
-	if world.is_water(x, z) or world.normal_at(x, z).y < Structures.MIN_SLOPE_NORMAL_Y:
-		return {"ok": false, "reason": "bad_terrain"}
+	var reason: String = Structures.placement_reason(world, point, from)
+	if reason != "":
+		return {"ok": false, "reason": reason}
 	if barricades.size() >= Structures.MAX_GLOBAL:
 		return {"ok": false, "reason": "world_limit"}
 	var owned := 0
@@ -3193,7 +3187,8 @@ func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 	var id := new_id()
 	var item := {"id": id, "x": x, "y": world.height_at(x, z), "z": z,
 		"hp": Structures.MAX_HEALTH, "tier": 1, "owner": peer_id,
-		"owner_account": player.user_id, "owner_guild": player.guild_id}
+		"owner_account": player.user_id, "owner_guild": player.guild_id,
+		"yaw": Structures.snap_yaw(yaw), "upkeep_until": time + Structures.UPKEEP_SECONDS}
 	barricades[id] = item
 	world_structure_revision += 1
 	world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
@@ -3228,6 +3223,7 @@ func cmd_repair(peer_id: int, id: int) -> Dictionary:
 	for item_id in cost:
 		player.inventory.remove(str(item_id), int(cost[item_id]))
 	item["hp"] = minf(max_hp, float(item["hp"]) + Structures.repair_amount(tier))
+	item["upkeep_until"] = time + Structures.UPKEEP_SECONDS
 	barricades[id] = item
 	world_structure_revision += 1
 	player.dirty_inventory = true
@@ -3264,6 +3260,7 @@ func cmd_upgrade(peer_id: int, id: int) -> Dictionary:
 	for item_id in cost:
 		player.inventory.remove(str(item_id), int(cost[item_id]))
 	item["tier"] = next_tier
+	item["upkeep_until"] = time + Structures.UPKEEP_SECONDS
 	item["hp"] = Structures.max_health(next_tier) * fraction
 	barricades[id] = item
 	world_structure_revision += 1
@@ -5287,7 +5284,36 @@ func tick(delta: float) -> void:
 	_tick_acid_pools()
 	_tick_ember_pools()
 	_tick_recalls()
+	if tick_count % Defs.TICK_RATE == 0:
+		_tick_barricade_upkeep(float(Defs.TICK_RATE) * delta)
 	_tick_world(delta)
+
+
+## Walls whose owner comes by stay kept; walls left alone past their upkeep crumble and are gone at zero health.
+func _tick_barricade_upkeep(seconds: float) -> void:
+	var crumbled: Array = []
+	for id in barricades:
+		var wall: Dictionary = barricades[id]
+		var at := Vector2(float(wall["x"]), float(wall["z"]))
+		for survivor in players.values():
+			if not _alive(survivor) or not Structures.can_manage(wall, survivor.id, survivor.user_id):
+				continue
+			if at.distance_to(Vector2(survivor.position.x, survivor.position.z)) <= Structures.UPKEEP_RANGE:
+				wall["upkeep_until"] = time + Structures.UPKEEP_SECONDS
+				break
+		if time <= float(wall.get("upkeep_until", time + 1.0)):
+			continue
+		wall["hp"] = float(wall["hp"]) - Structures.decay_per_second(Structures.tier_of(wall)) * seconds
+		world_structure_revision += 1
+		if float(wall["hp"]) <= 0.0:
+			crumbled.append(id)
+	for id in crumbled:
+		barricades.erase(id)
+		_acid_wall_last_hit.erase(id)
+		siege_last_by_wall.erase(id)
+		siege_braces.erase(id)
+		world.remove_dynamic_blocker(id)
+		events.append({"type": "barricade_decayed", "id": id})
 
 
 ## One server-wide storm hazard, never selected by a client. It is announced
