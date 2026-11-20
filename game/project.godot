@@ -59,6 +59,16 @@ aa_weather_wetness={
 "value": 0.0
 }
 
+aa_water_caustics_strength={
+"type": "float",
+"value": 0.0
+}
+
+aa_water_caustics_sun={
+"type": "float",
+"value": 0.0
+}
+
 ; One sun vector and radiance shared by shallow-water scattering.
 ; Values are refreshed with the existing cached sky cadence, not every pixel.
 aa_sun_to_light={
