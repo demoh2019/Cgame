@@ -56,6 +56,9 @@ func _run() -> void:
     if not world.has_streaming_source(QuestNavigation.SOURCE_NAME):
         _fail("quest source missing after registration")
         return
+    if world.get_streaming_source_priority(QuestNavigation.SOURCE_NAME) != QuestNavigation.STREAMING_PRIORITY:
+        _fail("quest source did not use background priority")
+        return
     if world.get_streaming_source_cell(QuestNavigation.SOURCE_NAME) != Vector2i.ZERO:
         _fail("unexpected world cell for 20m target in default 128m grid")
         return
