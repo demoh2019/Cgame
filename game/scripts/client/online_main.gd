@@ -81,6 +81,10 @@ var _frames := 0
 var _demo_frames := 0 # Frames since the first snapshot arrived.
 
 
+func _exit_tree() -> void:
+	CharacterModel.clear_templates() # Cached survivor models live outside the tree.
+
+
 func _ready() -> void:
 	Engine.physics_ticks_per_second = 30
 	_build_environment()
@@ -191,35 +195,98 @@ func _build_connect_screen() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 10
 	add_child(layer)
-	connect_panel = PanelContainer.new()
-	connect_panel.set_anchors_preset(Control.PRESET_CENTER)
-	connect_panel.position = Vector2(-190, -110)
-	layer.add_child(connect_panel)
-	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(380, 0)
-	connect_panel.add_child(box)
+	# Title screen: the sky panorama behind a dark vignette, the name in gold, the sign-in card below it.
+	var backdrop := Control.new()
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.theme = UiTheme.get_theme()
+	layer.add_child(backdrop)
+	var panorama := load("res://assets/textures/sky/day_sky.jpg") as Texture2D
+	if panorama != null:
+		var sky := TextureRect.new()
+		sky.texture = panorama
+		sky.set_anchors_preset(Control.PRESET_FULL_RECT)
+		sky.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		sky.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		sky.modulate = Color(0.62, 0.58, 0.55)
+		backdrop.add_child(sky)
+	var shade := TextureRect.new()
+	var gradient := Gradient.new()
+	gradient.set_color(0, Color(0.02, 0.02, 0.03, 0.15))
+	gradient.set_color(1, Color(0.02, 0.02, 0.03, 0.88))
+	var fade := GradientTexture2D.new()
+	fade.gradient = gradient
+	fade.fill = GradientTexture2D.FILL_RADIAL
+	fade.fill_from = Vector2(0.5, 0.42)
+	fade.fill_to = Vector2(1.15, 1.1)
+	shade.texture = fade
+	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	shade.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	backdrop.add_child(shade)
+	var column := VBoxContainer.new()
+	column.set_anchors_preset(Control.PRESET_CENTER)
+	column.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	column.grow_vertical = Control.GROW_DIRECTION_BOTH
+	column.alignment = BoxContainer.ALIGNMENT_CENTER
+	column.add_theme_constant_override("separation", 18)
+	backdrop.add_child(column)
 	var title := Label.new()
 	title.text = "ALBION AFTER"
-	title.add_theme_font_size_override("font_size", 30)
+	title.add_theme_font_size_override("font_size", 64)
+	title.add_theme_color_override("font_color", UiTheme.GOLD)
+	title.add_theme_constant_override("outline_size", 10)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(title)
+	column.add_child(title)
 	var subtitle := Label.new()
 	subtitle.text = "Gather. Craft. Survive. Lose everything."
+	subtitle.add_theme_font_size_override("font_size", 20)
+	subtitle.add_theme_color_override("font_color", Color(0.86, 0.84, 0.78))
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(subtitle)
-	name_edit = LineEdit.new()
-	name_edit.placeholder_text = "Name"
-	box.add_child(name_edit)
-	address_edit = LineEdit.new()
-	address_edit.placeholder_text = "host:port"
-	box.add_child(address_edit)
+	column.add_child(subtitle)
+	connect_panel = PanelContainer.new()
+	connect_panel.custom_minimum_size = Vector2(400, 0)
+	connect_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	column.add_child(connect_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	connect_panel.add_child(box)
+	for field in [["Survivor name", "Name"], ["Server", "host:port"]]:
+		var caption := Label.new()
+		caption.text = field[0]
+		caption.add_theme_font_size_override("font_size", 13)
+		caption.add_theme_color_override("font_color", Color(0.75, 0.74, 0.7))
+		box.add_child(caption)
+		var edit := LineEdit.new()
+		edit.placeholder_text = field[1]
+		edit.custom_minimum_size = Vector2(0, 38)
+		edit.text_submitted.connect(func(_text: String) -> void: _connect())
+		box.add_child(edit)
+		if name_edit == null:
+			name_edit = edit
+		else:
+			address_edit = edit
 	var button := Button.new()
-	button.text = "Connect"
+	button.text = "Enter the world"
+	button.custom_minimum_size = Vector2(0, 46)
+	button.add_theme_font_size_override("font_size", 18)
+	button.add_theme_stylebox_override("normal", UiTheme._box(Color(0.42, 0.33, 0.13, 0.95), 8, 1.5, UiTheme.GOLD, 6))
+	button.add_theme_stylebox_override("hover", UiTheme._box(Color(0.55, 0.43, 0.17, 1.0), 8, 2.0, UiTheme.GOLD, 6))
 	button.pressed.connect(_connect)
 	box.add_child(button)
 	status_label = Label.new()
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status_label.add_theme_color_override("font_color", Color(0.95, 0.7, 0.55))
 	box.add_child(status_label)
+	var credits := Label.new()
+	credits.text = "Models and textures: Poly Haven, Quaternius, Kenney, KayKit (CC0) and more - see docs/ASSETS.md"
+	credits.add_theme_font_size_override("font_size", 12)
+	credits.add_theme_color_override("font_color", Color(0.7, 0.7, 0.68, 0.8))
+	credits.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	credits.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	credits.position.y -= 34
+	credits.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	backdrop.add_child(credits)
+	# The whole title screen comes and goes with the sign-in card.
+	connect_panel.visibility_changed.connect(func() -> void: backdrop.visible = connect_panel.visible)
 
 
 func _device_id() -> String:
@@ -444,7 +511,7 @@ func _on_welcomed() -> void:
 	client.event_received.connect(func(event: Dictionary) -> void: _raid_telegraph.consume(event, client.world))
 	avatar = Node3D.new()
 	avatar_model = CharacterModel.new()
-	avatar_model.setup(Color(1.0, 0.95, 0.5) if not Assets.has_characters() else Color.WHITE, 2.0, 1.0, Assets.CHARACTER_NAMES[abs(hash(name_edit.text)) % Assets.CHARACTER_NAMES.size()], false)
+	avatar_model.setup(Color(1.0, 0.95, 0.5) if not Assets.has_characters() else Color.WHITE, 2.0, 1.0, Assets.CHARACTER_NAMES[abs(hash(name_edit.text)) % Assets.CHARACTER_NAMES.size()], false, abs(hash(name_edit.text)) / Assets.CHARACTER_NAMES.size())
 	avatar.add_child(avatar_model)
 	bike_visual = TrailBikeVisual.new()
 	bike_visual.name = "TrailBike"
@@ -524,6 +591,10 @@ func _process(delta: float) -> void:
 	var target := position + CAMERA_OFFSET * _zoom
 	camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
 	camera.look_at(position + Vector3(0, 0.8, 0))
+	if _demo == "sky":
+		# A low view toward the horizon to show the sky (screenshots only).
+		camera.position = position + Vector3(0.0, 14.0, 6.0)
+		camera.look_at(position + Vector3(0.0, 20.0, -60.0))
 	water.position.x = position.x
 	water.position.z = position.z
 	_update_time_of_day(delta)
@@ -574,6 +645,8 @@ func _update_time_of_day(delta: float) -> void:
 	var storming: bool = demo_storm or (str(weather.get("condition", "clear")) == "storm" and not bool(weather.get("sheltered", false)))
 	var clock: float = client.server_time if demo_phase < 0.0 else demo_phase * WorldCycle.DAY_LENGTH
 	atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta)
+	if audio != null:
+		audio.update_music(WorldCycle.daylight(clock), delta)
 	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO, atmosphere.storm)
 
 
@@ -857,6 +930,7 @@ func _run_demo() -> void:
 				net_ref.c_debug.rpc_id(1, "zombie", {"type": "walker", "x": site.x - 8.0, "z": site.y + 12.0})
 				net_ref.c_debug.rpc_id(1, "zombie", {"type": "runner", "x": site.x - 4.0, "z": site.y + 6.0})
 				net_ref.c_debug.rpc_id(1, "zombie", {"type": "brute", "x": site.x, "z": site.y + 14.0})
+				_screenshot_frames = 600 # Shoot while the fight is on, before the brute wins it.
 			if _demo_frames == 90:
 				client.use_item("club_2")
 				client.use_item("jacket_2")
@@ -907,6 +981,10 @@ func _run_demo() -> void:
 				client.use_item("jacket_2")
 			if _demo_frames == 110:
 				hud.toggle_inventory()
+		"sky":
+			if _demo_frames == 40:
+				var vista := _open_shore()
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": vista.x, "z": vista.y})
 		"map":
 			if _demo_frames == 60:
 				world_map.toggle()
@@ -934,6 +1012,24 @@ func _run_demo() -> void:
 
 
 ## The site of a kind closest to the hub (demos and screenshots).
+## A beach facing open sea toward -z, for a clear view of the sky (demo).
+func _open_shore() -> Vector2:
+	var world = client.world
+	for radius in range(200, 2400, 40):
+		for step in 24:
+			var spot := Vector2.from_angle(float(step) * TAU / 24.0) * float(radius)
+			if world.is_water(spot.x, spot.y) or world.biome_at(spot.x, spot.y) != "beach":
+				continue
+			var open := true
+			for ahead in range(10, 140, 10):
+				if not world.is_water(spot.x, spot.y - float(ahead)):
+					open = false
+					break
+			if open:
+				return spot
+	return Vector2(0.0, 40.0)
+
+
 func _nearest_signpost() -> Vector2:
 	var best := Vector2(60.0, 60.0)
 	var best_distance := INF

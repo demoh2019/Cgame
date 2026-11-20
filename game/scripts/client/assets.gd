@@ -85,6 +85,13 @@ static func has_characters() -> bool:
 	return pack_exists("characters/Orc_Male.glb") and pack_exists("animations/UAL1_Standard.glb") and pack_exists("animations/UAL2_Standard.glb")
 
 
+## Human survivors in clothes (Universal Base Characters + Modular Character Outfits, Quaternius, CC0), on the same
+## skeleton as the animation library. When installed they replace the bare fantasy bodies for players and settlers.
+static func has_survivors() -> bool:
+	return has_characters() and pack_exists("outfits/Superhero_Male_FullBody.gltf") and pack_exists("outfits/Male_Peasant.gltf") \
+		and pack_exists("outfits/Female_Peasant_Body.gltf") and pack_exists("outfits/Female_Ranger_Legs.gltf")
+
+
 ## The first mesh of a pack model (all of the props are one mesh with one or two surfaces).
 static func pack_mesh(relative: String) -> Mesh:
 	var key := "pack:" + relative

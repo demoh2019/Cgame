@@ -341,12 +341,12 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 			zombie_model = "Orc_Female"
 		model.setup(look["tint"], float(look["scale"]) * (
 			1.75 if bool(entity.get("raid_boss", false)) else (
-			1.18 if bool(entity.get("elite", false)) else 1.0)), look["walk"], zombie_model, true)
+			1.18 if bool(entity.get("elite", false)) else 1.0)), look["walk"], zombie_model, true, int(entity["id"]))
 		height = 1.3 * float(look["scale"]) * (1.75 if bool(entity.get("raid_boss", false)) else 1.0)
 	else:
 		var hue := float(abs(int(entity["id"]) * 2654435761 % 1000)) / 1000.0
 		var character: String = Assets.CHARACTER_NAMES[int(abs(int(entity["id"]))) % Assets.CHARACTER_NAMES.size()]
-		model.setup(Color.WHITE if Assets.has_characters() else Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0, character, false)
+		model.setup(Color.WHITE if Assets.has_characters() else Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0, character, false, int(abs(int(entity["id"]))) / Assets.CHARACTER_NAMES.size())
 	root.add_child(model)
 	if kind == "player":
 		var bike := TrailBikeVisual.new()

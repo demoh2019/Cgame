@@ -43,3 +43,29 @@ checks that both sides stay the same length.
 
 Not used: the 163 MB floating island, the 57 MB apothecary lab, the forest scenes, the aloe set and the rock formations (each is one huge scene or in
 centimetre units; they would need hand-made splitting), and the Wandering Merchant, Treasure and Throwing Animations packs.
+
+## In the repository: Poly Haven (CC0)
+
+Poly Haven assets are public domain, so they are committed and every clone gets them:
+
+* `assets/textures/terrain/`: eleven ground materials (grass, dry grass, forest floor, mud, dirt, cliff, mountain rock, sand, snow,
+  cracked asphalt under ruined cities, broken concrete under bunkers, depots and docks), drawn by `assets/shaders/ground.gdshader`.
+* `assets/textures/plaza/`: the hub's cobblestones (and the stone of its fountain). `assets/textures/sky/`: the day sky panorama.
+* `assets/models/polyhaven/`: 42 scanned models: rocks, stumps and fallen trunks for the wilds; fuel and oil barrels, a fire barrel,
+  jerrycans, military crates, ammo boxes, tyres, wheel rims, road barriers, bins, rubbish bags, propane tanks, a generator, street
+  lamps, hydrants, tables, benches, racks and carts for ruins, depots, forts and villages (`PROPS` 26-49 in `model_catalog.gd`).
+  `tools/fetch_polyhaven.sh` downloads the sources, `tools/bake_polyhaven.gd` cuts them to a triangle budget into `baked/*.res`;
+  only the textures and the baked meshes are committed.
+
+## Clothed survivors (third import)
+
+`tools/import_downloads.sh` also takes **Universal Base Characters** and **Modular Character Outfits - Fantasy** (Quaternius, CC0,
+free "Standard" versions from quaternius.itch.io). They share the animation library's skeleton. When installed, players, settlers and
+infected walkers are people in clothes instead of the bare fantasy bodies: `character_model.gd` keeps only the head of the base body
+(so skin never pokes through), adds an outfit (peasant, ranger or a mix of their pieces) and a hairstyle in one of six hair colours,
+picked from the entity id. The infected get filthy peasant clothes and green skin; the brute stays the big orc. Each look is assembled
+once and copied after that (about 1.5 ms a character), so a horde streams in without a hitch. The import shrinks the kit's 4096 px
+textures to 1024 px (normal maps 512 px): at full size, loading them mid-game stalled the client long enough to be disconnected.
+
+**Fantasy RPG Music Vol. 2** (its licence allows use in games, not redistribution) goes to `assets/packs/music/`: `audio.gd`
+crossfades calm tracks by day, night tracks after dusk and action tracks for nine seconds after you hit or are hit.

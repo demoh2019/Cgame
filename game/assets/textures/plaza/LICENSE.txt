@@ -1,0 +1,2 @@
+Plaza texture: cobblestone_floor_05 from Poly Haven (https://polyhaven.com), CC0 1.0 Universal (public domain).
+1k diffuse and OpenGL normal maps, roughness shrunk to 512 px.

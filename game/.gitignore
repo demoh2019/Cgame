@@ -1,4 +1,7 @@
 .godot/
 *.import
-assets/packs/
+assets/packs
 *.uid
+# Poly Haven sources: only the baked meshes and the textures they use are kept (tools/fetch_polyhaven.sh gets the rest).
+assets/models/polyhaven/*/*.gltf
+assets/models/polyhaven/*/*.bin

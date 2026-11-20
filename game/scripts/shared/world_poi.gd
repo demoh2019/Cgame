@@ -23,9 +23,9 @@ const WALL_STONE := 1 # Fort wall.
 
 # What blocks movement, per variant, of the client's PROPS and RUINS lists (the server never loads a model): a test checks
 # that these tables and the lists in model_catalog.gd have the same length.
-const PROP_RADII := [0.45, 0.45, 0.6, 0.6, 0.35, 0.3, 0.5, 0.5, 0.6, 2.4, 0.4, 0.7, 0.9, 0.7, 0.8, 0.5, 0.9, 0.2, 1.0, 0.9]
+const PROP_RADII := [0.45, 0.45, 0.6, 0.6, 0.35, 0.3, 0.5, 0.5, 0.6, 2.4, 0.4, 0.7, 0.9, 0.7, 0.8, 0.5, 0.9, 0.2, 1.0, 0.9, 0.8, 0.45, 1.5, 0.25, 0.25, 1.3, 0.45, 0.45, 0.5, 0.25, 0.25, 0.6, 0.55, 0.25, 0.4, 0.3, 1.1, 0.4, 0.35, 0.35, 0.5, 0.3, 0.25, 0.9, 0.25, 0.3, 0.45, 0.8, 0.5, 0.6]
 const RUIN_RADII := [0.8, 0.8, 1.8, 1.8, 1.1, 2.6, 1.6, 0.5, 1.9, 2.2]
-const CRATE_VARIANTS := 5
+const CRATE_VARIANTS := 6
 # Landmarks fill the regions that hold no settlement: odd, memorable places to find. Their big pieces are "monument"
 # structures; the client's MONUMENTS list draws them (standing stone, giant crystal, great tree, shrine pillar).
 const MONUMENT_RADII := [1.1, 1.3, 2.6, 0.9]
@@ -34,10 +34,10 @@ const LANDMARKS := [
 ]
 const LANDMARK_CHANCE := 0.85
 # Which props belong where. Indices into PROP_RADII.
-const RUSTIC_PROPS := [0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12]
-const MARKET_PROPS := [9, 10, 8, 16, 11]
-const MILITARY_PROPS := [6, 7, 13, 14, 15, 17, 8]
-const RUIN_PROPS := [13, 14, 15, 16, 19, 12, 0, 1]
+const RUSTIC_PROPS := [0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 20, 21, 22, 23, 24, 43, 46, 49, 45, 29, 28]
+const MARKET_PROPS := [9, 10, 8, 16, 11, 25, 22, 43, 46, 44, 49]
+const MILITARY_PROPS := [6, 7, 13, 14, 15, 17, 8, 20, 22, 31, 32, 33, 30, 39, 40, 36, 26, 27, 47]
+const RUIN_PROPS := [13, 14, 15, 16, 19, 12, 0, 1, 26, 27, 28, 34, 35, 36, 37, 38, 41, 42, 45, 47, 48, 29, 44]
 
 const KINDS := {
 	"village": {"title": "Village", "radius": 58.0, "clear": 0.8, "station": true},

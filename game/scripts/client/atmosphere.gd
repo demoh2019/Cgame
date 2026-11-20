@@ -4,7 +4,7 @@ extends Node3D
 
 var environment: Environment
 var sun: DirectionalLight3D
-var sky_material: ProceduralSkyMaterial
+var sky_material: ShaderMaterial
 var world_environment: WorldEnvironment
 var storm := 0.0 # 0..1, eased toward the target so the weather fades in and out.
 
@@ -20,12 +20,14 @@ const STORM_HORIZON := Color(0.45, 0.48, 0.52)
 func _ready() -> void:
 	environment = Environment.new()
 	environment.background_mode = Environment.BG_SKY
-	sky_material = ProceduralSkyMaterial.new()
-	sky_material.sky_curve = 0.18
-	sky_material.ground_curve = 0.05
-	sky_material.sun_angle_max = 28.0
-	sky_material.sun_curve = 0.12
+	sky_material = ShaderMaterial.new()
+	sky_material.shader = load("res://assets/shaders/sky.gdshader")
+	var panorama := load("res://assets/textures/sky/day_sky.jpg") as Texture2D
+	sky_material.set_shader_parameter("has_panorama", panorama != null)
+	if panorama != null:
+		sky_material.set_shader_parameter("day_panorama", panorama)
 	var sky := Sky.new()
+	sky.radiance_size = Sky.RADIANCE_SIZE_64
 	sky.sky_material = sky_material
 	environment.sky = sky
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
@@ -40,7 +42,7 @@ func _ready() -> void:
 	environment.glow_hdr_threshold = 1.1
 	environment.adjustment_enabled = true
 	environment.adjustment_contrast = 1.1
-	environment.adjustment_saturation = 1.1
+	environment.adjustment_saturation = 1.0
 	# Contact shadows in corners and under trees (Forward+ only).
 	environment.ssao_enabled = true
 	environment.ssao_radius = 1.6
@@ -91,11 +93,10 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	horizon = horizon.lerp(DUSK_HORIZON, dusk * 0.7)
 	top = top.lerp(STORM_TOP.darkened(1.0 - maxf(daylight, 0.15)), storm * 0.85)
 	horizon = horizon.lerp(STORM_HORIZON.darkened(1.0 - maxf(daylight, 0.12)), storm * 0.8)
-	sky_material.sky_top_color = top
-	sky_material.sky_horizon_color = horizon
-	sky_material.ground_horizon_color = horizon
-	sky_material.ground_bottom_color = horizon.darkened(0.45)
+	sky_material.set_shader_parameter("daylight", daylight)
+	sky_material.set_shader_parameter("dusk", dusk)
+	sky_material.set_shader_parameter("storm", storm)
 	environment.ambient_light_energy = lerpf(0.35, 0.8, daylight) * (1.0 - storm * 0.25)
 	environment.fog_light_color = horizon.lerp(Color(0.5, 0.52, 0.56), storm * 0.5)
 	environment.fog_density = lerpf(0.0016, 0.0042, storm)
-	environment.adjustment_saturation = lerpf(1.1, 0.95, storm)
+	environment.adjustment_saturation = lerpf(1.0, 0.85, storm)

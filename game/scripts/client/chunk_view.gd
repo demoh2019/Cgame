@@ -107,6 +107,17 @@ void fragment() {
 """
 
 static var _ground_material: ShaderMaterial
+static var _textured_material: ShaderMaterial
+static var _textured_checked := false
+const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete"]
+const TERRAIN_DIR := "res://assets/textures/terrain/"
+# The colour each layer should average to: photos of real ground pulled toward the stylised palette of the models.
+const TERRAIN_TARGETS := [Color(0.25, 0.37, 0.15), Color(0.41, 0.42, 0.22), Color(0.32, 0.33, 0.16), Color(0.27, 0.29, 0.17),
+	Color(0.46, 0.37, 0.25), Color(0.46, 0.43, 0.4), Color(0.43, 0.41, 0.37), Color(0.68, 0.6, 0.44), Color(0.92, 0.94, 0.98),
+	Color(0.3, 0.3, 0.29), Color(0.34, 0.33, 0.31)]
+# Paved ground under sites (see ground.gdshader): kind -> [terrain layer, share of the site radius].
+const SITE_PAVING := {"city": [9, 0.8], "bunker": [10, 0.75], "depot": [10, 0.6], "dock": [10, 0.5]}
+const BIOME_TEXELS := 17 # Biome samples per chunk side (every 4 m), shared on the borders with the neighbours.
 
 var cell: Vector2i
 var _world
@@ -126,13 +137,121 @@ static func ground_material() -> ShaderMaterial:
 	return _ground_material
 
 
-## The shared ground material, or a copy that carries this chunk's road mask when roads cross it.
+## The textured ground material (Poly Haven layers in two texture arrays), or null when the textures are missing.
+static func textured_material() -> ShaderMaterial:
+	if _textured_checked:
+		return _textured_material
+	_textured_checked = true
+	var albedo: Array[Image] = []
+	var normals: Array[Image] = []
+	for layer in TERRAIN_LAYERS:
+		var diffuse_texture := load(TERRAIN_DIR + layer + "_diff.jpg") as Texture2D
+		var normal_texture := load(TERRAIN_DIR + layer + "_nor_gl.jpg") as Texture2D
+		if diffuse_texture == null or normal_texture == null:
+			return null
+		albedo.append(_layer_image(diffuse_texture, 1024))
+		normals.append(_layer_image(normal_texture, 512))
+	var tints := PackedVector3Array()
+	for index in albedo.size():
+		var small: Image = albedo[index].duplicate()
+		small.clear_mipmaps()
+		small.resize(16, 16, Image.INTERPOLATE_BILINEAR)
+		var sum := Vector3.ZERO
+		for y in 16:
+			for x in 16:
+				var pixel: Color = small.get_pixel(x, y)
+				sum += Vector3(pixel.r, pixel.g, pixel.b)
+		var average: Vector3 = sum / 256.0
+		var target: Color = TERRAIN_TARGETS[index]
+		tints.append(Vector3(target.r / maxf(average.x, 0.02), target.g / maxf(average.y, 0.02), target.b / maxf(average.z, 0.02)))
+	var albedo_array := Texture2DArray.new()
+	var normal_array := Texture2DArray.new()
+	if albedo_array.create_from_images(albedo) != OK or normal_array.create_from_images(normals) != OK:
+		return null
+	var shader := load("res://assets/shaders/ground.gdshader") as Shader
+	if shader == null:
+		return null
+	_textured_material = ShaderMaterial.new()
+	_textured_material.shader = shader
+	_textured_material.set_shader_parameter("albedo_layers", albedo_array)
+	_textured_material.set_shader_parameter("normal_layers", normal_array)
+	_textured_material.set_shader_parameter("biome_texels", float(BIOME_TEXELS))
+	_textured_material.set_shader_parameter("layer_tint", tints)
+	return _textured_material
+
+
+## An imported texture as a plain RGB image of a fixed size with mipmaps, so all layers of an array match.
+static func _layer_image(texture: Texture2D, size: int) -> Image:
+	var image: Image = texture.get_image()
+	if image.is_compressed():
+		image.decompress()
+	image.clear_mipmaps()
+	image.convert(Image.FORMAT_RGB8)
+	if image.get_width() != size or image.get_height() != size:
+		image.resize(size, size, Image.INTERPOLATE_LANCZOS)
+	image.generate_mipmaps()
+	return image
+
+
+## Up to four paved sites that reach into this chunk, as x, z, radius, layer for the ground shader.
+func _site_patches(origin: Vector2) -> PackedVector4Array:
+	var patches := PackedVector4Array()
+	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	for site in _world.poi.sites_near(center.x, center.y, Defs.CHUNK_SIZE * 0.75):
+		if patches.size() >= 4 or not SITE_PAVING.has(site["kind"]):
+			continue
+		var paving: Array = SITE_PAVING[site["kind"]]
+		patches.append(Vector4(float(site["x"]), float(site["z"]), float(site["radius"]) * float(paving[1]), float(paving[0])))
+	while patches.size() < 4:
+		patches.append(Vector4.ZERO)
+	return patches
+
+
+## Forest, swamp and plains weights of the chunk, one texel every 4 m, edges shared with the neighbouring chunks.
+func _biome_texture(origin: Vector2) -> ImageTexture:
+	var data := PackedByteArray()
+	data.resize(BIOME_TEXELS * BIOME_TEXELS * 3)
+	var step: float = Defs.CHUNK_SIZE / float(BIOME_TEXELS - 1)
+	for j in BIOME_TEXELS:
+		for i in BIOME_TEXELS:
+			var biome: String = _world.biome_at(origin.x + float(i) * step, origin.y + float(j) * step)
+			var index: int = (j * BIOME_TEXELS + i) * 3
+			data[index] = 255 if biome == "forest" else 0
+			data[index + 1] = 255 if biome == "swamp" else 0
+			data[index + 2] = 255 if biome == "plains" else 0
+	return ImageTexture.create_from_image(Image.create_from_data(BIOME_TEXELS, BIOME_TEXELS, false, Image.FORMAT_RGB8, data))
+
+
+## The ground material of this chunk: the textured one with this chunk's biome map and road mask, or the painted shader
+## (with the road mask when roads cross it) when the terrain textures are missing.
 func _ground_with_roads(origin: Vector2) -> Material:
-	if _world.roads == null:
+	var textured: ShaderMaterial = textured_material()
+	var road_texture: ImageTexture = _road_texture(origin)
+	if textured != null:
+		var own := textured.duplicate() as ShaderMaterial
+		own.set_shader_parameter("biome_map", _biome_texture(origin))
+		if road_texture != null:
+			own.set_shader_parameter("road_mask", road_texture)
+		own.set_shader_parameter("chunk_origin", origin)
+		own.set_shader_parameter("chunk_size", Defs.CHUNK_SIZE)
+		own.set_shader_parameter("site_patches", _site_patches(origin))
+		return own
+	if road_texture == null:
 		return ground_material()
+	var material := ground_material().duplicate() as ShaderMaterial
+	material.set_shader_parameter("road_mask", road_texture)
+	material.set_shader_parameter("chunk_origin", origin)
+	material.set_shader_parameter("chunk_size", Defs.CHUNK_SIZE)
+	return material
+
+
+## The roads crossing this chunk as a 1 m per pixel mask, or null when none does.
+func _road_texture(origin: Vector2) -> ImageTexture:
+	if _world.roads == null:
+		return null
 	var pieces: Array = _world.roads.pieces_in_cell(cell)
 	if pieces.is_empty():
-		return ground_material()
+		return null
 	var size: int = int(Defs.CHUNK_SIZE)
 	var data := PackedByteArray()
 	data.resize(size * size)
@@ -159,12 +278,7 @@ func _ground_with_roads(origin: Vector2) -> Material:
 				var index: int = py * size + px
 				if value > data[index]:
 					data[index] = value
-	var image := Image.create_from_data(size, size, false, Image.FORMAT_L8, data)
-	var material := ground_material().duplicate() as ShaderMaterial
-	material.set_shader_parameter("road_mask", ImageTexture.create_from_image(image))
-	material.set_shader_parameter("chunk_origin", origin)
-	material.set_shader_parameter("chunk_size", Defs.CHUNK_SIZE)
-	return material
+	return ImageTexture.create_from_image(Image.create_from_data(size, size, false, Image.FORMAT_L8, data))
 
 
 func build(p_world, p_cell: Vector2i) -> void:
@@ -250,6 +364,10 @@ func _mesh_for(kind: String) -> Mesh:
 			if not _use_nature:
 				return Assets.tree_meshes()[variant % Assets.tree_meshes().size()]
 		"rock":
+			if ModelCatalog.has_scanned_rocks():
+				picked = ModelCatalog.scanned_rock(variant)
+				if picked != null:
+					return picked
 			if _use_nature and variant < Assets.ROCK_FILES.size():
 				return Assets.nature_mesh(Assets.ROCK_FILES[variant])
 			if ModelCatalog.has_stones():
@@ -315,6 +433,8 @@ func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> fl
 				return rng.randf_range(0.85, 1.25)
 			return Assets.TREE_SCALE * rng.randf_range(0.85, 1.3)
 		"rock":
+			if ModelCatalog.has_scanned_rocks():
+				return rng.randf_range(0.75, 1.15)
 			if baked or _use_nature:
 				return rng.randf_range(0.7, 1.05)
 			return rng.randf_range(0.8, 1.3)
@@ -361,6 +481,8 @@ func _build_objects(data: Dictionary) -> void:
 	if _use_nature:
 		tree_variants = Assets.TREE_FILES.size() + (ModelCatalog.PAINTED_TREES.size() if ModelCatalog.has_painted_trees() else 0)
 	var rock_variants: int = Assets.ROCK_FILES.size() + (ModelCatalog.STONES.size() if ModelCatalog.has_stones() else 0)
+	if ModelCatalog.has_scanned_rocks():
+		rock_variants = ModelCatalog.SCANNED_ROCKS.size()
 	var crystal_count: int = ModelCatalog.available("crystals", ModelCatalog.CRYSTALS).size()
 	# Group everything that shares a mesh, so each group is one draw call.
 	var by_kind: Dictionary = {}
@@ -369,7 +491,7 @@ func _build_objects(data: Dictionary) -> void:
 		var variant: int = WorldGen.mix(int(node["id"]), 3, 5)
 		if kind == "tree":
 			kind = _tree_key(node) if _use_nature else "tree:%d" % (variant % tree_variants)
-		elif kind == "rock" and (_use_nature or rock_variants > Assets.ROCK_FILES.size()):
+		elif kind == "rock" and (_use_nature or rock_variants > Assets.ROCK_FILES.size() or ModelCatalog.has_scanned_rocks()):
 			kind = "rock:%d" % (variant % rock_variants)
 		elif kind == "ore" and crystal_count > 0:
 			kind = "ore:%d" % (variant % crystal_count)
@@ -538,7 +660,7 @@ func _build_npcs(npcs: Array) -> void:
 	for npc in npcs:
 		var model := CharacterModel.new()
 		add_child(model)
-		model.setup(Color.WHITE, 2.0, 1.0, str(npc["model"]) if Assets.has_characters() else "", false)
+		model.setup(Color.WHITE, 2.0, 1.0, str(npc["model"]) if Assets.has_characters() else "", false, hash(str(npc["name"]) + str(npc["role"])))
 		model.position = Vector3(float(npc["x"]), float(npc["y"]), float(npc["z"])) - Vector3(_world_origin().x, 0.0, _world_origin().y)
 		model.rotation.y = float(npc["yaw"])
 		model.play_fixed(str(npc["animation"]))
