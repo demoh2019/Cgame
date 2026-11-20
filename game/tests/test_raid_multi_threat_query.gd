@@ -35,19 +35,22 @@ func run(t) -> void:
 	var candidates: Array[Vector2] = [
 		Vector2(1, 0), Vector2(-1, 0), Vector2(0, 10), Vector2(0, -10)]
 	var players: Array[Vector2] = [Vector2.ZERO, Vector2(0, 9)]
+	var reversed: Array[Vector2] = [Vector2(0, 9), Vector2.ZERO]
+	var empty: Array[Vector2] = []
+	var invalid: Array[Vector2] = [Vector2(INF, 0)]
 	var expected: Array[Vector2] = [
 		Vector2(0, -10), Vector2(1, 0), Vector2(-1, 0), Vector2(0, 10)]
 	t.eq(Reinforcements.rank_sites(candidates, players, Vector2.ZERO), expected,
 		"farthest point from its nearest player is selected before a crowded one")
-	t.eq(Reinforcements.rank_sites(candidates, [Vector2(0, 9), Vector2.ZERO], Vector2.ZERO), expected,
+	t.eq(Reinforcements.rank_sites(candidates, reversed, Vector2.ZERO), expected,
 		"switching player insertion order does not affect rankings")
-	t.eq(Reinforcements.rank_sites(candidates, [], Vector2.ZERO), candidates,
+	t.eq(Reinforcements.rank_sites(candidates, empty, Vector2.ZERO), candidates,
 		"empty player context preserves deterministic pre-existing candidate order")
-	t.eq(Reinforcements.rank_sites(candidates, [Vector2(INF, 0)], Vector2.ZERO),
+	t.eq(Reinforcements.rank_sites(candidates, invalid, Vector2.ZERO),
 		candidates, "invalid player positions never enter the scoring system")
 	t.eq(Reinforcements.rank_sites(candidates, players, Vector2(NAN, 0)),
 		[], "invalid query origins cannot generate positions")
-	t.eq(Reinforcements.rank_sites([Vector2(INF, 0)], players, Vector2.ZERO),
+	t.eq(Reinforcements.rank_sites(invalid, players, Vector2.ZERO),
 		[], "nonfinite candidate coordinates are ignored")
 
 	t.current = "Cgame multi-actor EQS and stock GDScript fallback rank the same inputs"
