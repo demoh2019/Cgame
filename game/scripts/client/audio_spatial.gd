@@ -45,6 +45,24 @@ static func obstruction_db(amount: float) -> float:
 	return OCCLUDED_GAIN_DB * weight
 
 
+## Runs independent raycasts as one native PhysicsDirectSpaceState3D call when
+## the Cgame extension is present; otherwise preserves official Godot's exact
+## physics query semantics. The engine hard-caps batched calls to 32; gameplay
+## adds its own stricter per-tick budget (3 for spatial audio).
+static func trace_rays(space: Object, queries: Array[PhysicsRayQueryParameters3D]) -> Array:
+	if space == null or queries.is_empty():
+		return []
+	if queries.size() <= 32 and space.has_method("intersect_rays"):
+		var native_results: Array = space.call("intersect_rays", queries)
+		if native_results.size() == queries.size():
+			return native_results
+	# Compatible fallback: same query resources, same order and hit dictionaries.
+	var results: Array = []
+	for ray in queries:
+		results.append(space.call("intersect_ray", ray))
+	return results
+
+
 ## Bus low-pass target for the listener: muffled underground, slightly dulled in a storm.
 static func listener_cutoff(underground: bool, storm: float) -> float:
 	if underground:
