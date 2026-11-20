@@ -11,6 +11,7 @@ const SUITES := [
 	"res://tests/test_puddle_ripples.gd",
 	"res://tests/test_weather_cloud_advection.gd",
 	"res://tests/test_graphics_quality.gd",
+	"res://tests/test_graphics_native_specular_aa.gd",
 	"res://tests/test_storm_lightning.gd",
 ]
 
