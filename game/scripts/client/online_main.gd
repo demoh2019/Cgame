@@ -843,8 +843,8 @@ func _spawn_effects(event: Dictionary) -> void:
 		at = Vector3(event["x"], client.world.height_at(event["x"], event["z"]) + 1.0, event["z"])
 	# Trigger from the server-confirmed impact only. Accessibility flash
 	# settings do not silence thunder; underground areas remain sheltered.
-	if str(event.get("type", "")) == "lightning_struck" and _storm_thunder != null \
-			and client != null and client.world != null:
+	if str(event.get("type", "")) in ["lightning_struck", "distant_thunder"] \
+			and _storm_thunder != null and client != null and client.world != null:
 		_storm_thunder.on_strike(event, here, client.world.height_at,
 			Dungeon.is_underground(float(client.you.get("x", 0.0))))
 	if str(event.get("type", "")) == "fish_hooked" and int(event.get("peer", -1)) == client.peer_id and _last_cast_spot != Vector3.INF:
