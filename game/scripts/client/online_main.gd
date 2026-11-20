@@ -658,6 +658,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F3:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.survey_ruins()
+			KEY_F10:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.place_fish_trap()
+			KEY_F12:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					var fish_trap_id: int = client.nearest_fish_trap(client.display_position())
+					if fish_trap_id < 0:
+						hud.say("No shoreline fish trap within reach.")
+					else:
+						client.collect_fish_trap(fish_trap_id)
 			KEY_Q:
 				_interact()
 			KEY_1:

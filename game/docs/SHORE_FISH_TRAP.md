@@ -16,7 +16,7 @@ world/base saves. Limits: one live trap per owner, 80 worldwide, no overlapping
 buoys. Neighboring players see water buoy, readiness and tier, but no
 private owner/account identifiers. Nets do not block movement, combat or PvP.
 
-Controls: Deploy fish trap F11 / Collect nearest F12 in online and offline,
+Controls: Deploy fish trap F10 / Collect nearest F12 in online and offline,
 also available from online Inventory.
 
 Run: godot --headless --path game --script res://tests/run_all.gd

@@ -290,6 +290,22 @@ func _build() -> void:
 		var face := Vector2(sin(client.yaw), cos(client.yaw))
 		client.place_infected_snare(Vector2(at.x, at.z) + face * 2.8))
 	inventory_box.add_child(snare_button)
+	var fish_trap_button := Button.new()
+	fish_trap_button.name = "PlaceShoreFishTrap"
+	fish_trap_button.text = "Deploy shoreline fish trap (F10)"
+	fish_trap_button.tooltip_text = "One crafted trap + a real rod near water. Collect 2 fish after 120s."
+	fish_trap_button.pressed.connect(func() -> void: client.place_fish_trap())
+	inventory_box.add_child(fish_trap_button)
+	var collect_fish_button := Button.new()
+	collect_fish_button.name = "CollectShoreFishTrap"
+	collect_fish_button.text = "Collect nearest fish trap (F12)"
+	collect_fish_button.pressed.connect(func() -> void:
+		var id: int = client.nearest_fish_trap(client.display_position())
+		if id == -1:
+			say("No fish trap within reach of the shore.")
+		else:
+			client.collect_fish_trap(id))
+	inventory_box.add_child(collect_fish_button)
 	var alkali_button := Button.new()
 	alkali_button.name = "UseFieldAlkaliKit"
 	alkali_button.text = "Neutralize nearby acid pools (1 kit, up to 3)"
@@ -1361,6 +1377,21 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				int(data.get("tier", 1)), int(data.get("served", 0))])
 		else:
 			say("Camp feast denied: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "place_fish_trap":
+		if bool(data.get("ok", false)):
+			say("Shore net T%d deployed. Fish ready in 120 seconds." % int(data.get("tier", 1)))
+		else:
+			say("Fish trap: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "collect_fish_trap":
+		if bool(data.get("ok", false)):
+			say("Shore net collected: %d x %s. Fishing XP earned." % [
+				int(data.get("count", 0)), str(data.get("item", "raw_fish"))])
+		elif str(data.get("reason", "")) == "not_ready":
+			say("Fish trap: %ds until ready." % ceili(float(data.get("remaining", 0.0))))
+		else:
+			say("Fish trap: " + str(data.get("reason", "rejected")))
 		return
 	if kind == "infected_snare":
 		say("Tripwire placed: will root the first non-boss infected that steps on it." if bool(data.get("ok", false)) else

@@ -68,6 +68,7 @@ var _barricade_bodies: Dictionary = {}
 var _campfire_visuals: Dictionary = {}
 var _shelter_visuals: Dictionary = {}
 var _decoy_visuals: Dictionary = {}
+var _fish_trap_visuals: Dictionary = {}
 var _smoke_visuals: Dictionary = {}
 var _materials: Dictionary = {}
 var _last_center: Vector2i = Vector2i(999999, 999999)
@@ -101,6 +102,8 @@ func _setup_actions() -> void:
 	_bind_key("survive_crouch", KEY_CTRL)
 	_bind_key("survive_gather", KEY_E)
 	_bind_key("survive_fish", KEY_T)
+	_bind_key("survive_place_fish_trap", KEY_F10)
+	_bind_key("survive_collect_fish_trap", KEY_F12)
 	_bind_key("survive_loot", KEY_Q)
 	_bind_key("survive_attack", KEY_F)
 	_bind_key("survive_skill", KEY_G)
@@ -594,6 +597,32 @@ func _sync_smoke() -> void:
 			_smoke_visuals.erase(id)
 
 
+func _sync_fish_traps() -> void:
+	var seen: Dictionary = {}
+	for id in sim.fish_traps:
+		var trap: Dictionary = sim.fish_traps[id]
+		var position := Vector3(float(trap["x"]), float(trap["y"]), float(trap["z"]))
+		if survivor.position.distance_to(position) > 95.0:
+			continue
+		seen[id] = true
+		if not _fish_trap_visuals.has(id):
+			var node := Node3D.new()
+			node.name = "FishTrap_%d" % int(id)
+			var buoy := _mesh(Vector3(0.9, 0.22, 0.9), Color(0.83, 0.51, 0.19))
+			buoy.position.y = 0.12
+			node.add_child(buoy)
+			var net := _mesh(Vector3(1.2, 0.08, 1.2), Color(0.30, 0.38, 0.27))
+			net.position.y = 0.02
+			node.add_child(net)
+			add_child(node)
+			_fish_trap_visuals[id] = node
+		_fish_trap_visuals[id].position = position
+	for id in _fish_trap_visuals.keys():
+		if not seen.has(id):
+			_fish_trap_visuals[id].queue_free()
+			_fish_trap_visuals.erase(id)
+
+
 func _sync_decoys() -> void:
 	var visible: Dictionary = {}
 	for id in sim.decoys:
@@ -693,6 +722,7 @@ func _physics_process(delta: float) -> void:
 	_sync_campfires()
 	_sync_shelters()
 	_sync_smoke()
+	_sync_fish_traps()
 	_sync_decoys()
 	_hud_clock += delta
 	if _hud_clock > 0.15:
@@ -1005,6 +1035,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_result("Dismantle barricade", sim.cmd_dismantle(LOCAL_PLAYER_ID, wall_id))
 
+	elif event.is_action_pressed("survive_place_fish_trap"):
+		_result("Place fish trap", sim.cmd_place_fish_trap(LOCAL_PLAYER_ID))
+	elif event.is_action_pressed("survive_collect_fish_trap"):
+		var closest_id := -1
+		var best_distance := 4.5 * 4.5
+		for trap in sim.fish_traps.values():
+			var d2: float = Vector2(survivor.position.x, survivor.position.z).distance_squared_to(
+				Vector2(float(trap["x"]), float(trap["z"])))
+			if d2 <= best_distance:
+				closest_id = int(trap["id"])
+				best_distance = d2
+		if closest_id < 0:
+			_feedback = "No shoreline fish trap within reach."
+		else:
+			_result("Collect fish trap", sim.cmd_collect_fish_trap(LOCAL_PLAYER_ID, closest_id))
 	elif event.is_action_pressed("survive_fish"):
 		var storm_mode: bool = Input.is_key_pressed(KEY_ALT)
 		var wants_bait: bool = Input.is_key_pressed(KEY_SHIFT) and not storm_mode
@@ -1161,7 +1206,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G weapon skill | Space dodge | F8 parry | F9 smoke | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G weapon skill | Space dodge | F8 parry | F9 smoke | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | F10 net / F12 collect net | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback
