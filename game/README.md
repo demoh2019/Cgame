@@ -2603,7 +2603,7 @@ The leader can start another check after an 8-second anti-spam cooldown.
 The dedicated server owns the clock, group roster and response identities.
 Clients cannot vote on behalf of another peer, reset an active deadline or
 expose votes to unrelated players. Changes in membership (including kick,
-leave, disconnection and accepting a new member) cancel old votes. These
+leave, disconnection and accepting a new member) cancel old votes. Death also cancels readiness, and a check cannot start with a fallen teammate. These
 session-only confirmations do not move characters, grant items or launch
 combat; they are a coordination tool for voluntary raid starts.
 
