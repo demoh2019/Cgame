@@ -35,6 +35,8 @@
 #include "scene/3d/node_3d.h"
 #include "scene/resources/packed_scene.h"
 
+#include <cstdint>
+
 // A sparse X/Z grid for streaming sub-scenes around a moving observer.
 // Each registered PackedScene root must be a Node3D and use cell-local coordinates.
 class WorldPartition3D : public Node3D {
@@ -56,6 +58,9 @@ class WorldPartition3D : public Node3D {
 	int simulation_radius = -1; // -1 keeps all streamed scenes simulation-active.
 	int simulation_hysteresis_cells = 1;
 	int max_simulation_transitions_per_frame = 2;
+	// Minimum completed engine physics ticks before a newly-instantiated scene
+	// can pass the optional gameplay activation readiness check (0 to 8).
+	int min_physics_frames_after_load = 2;
 	// Optional, bounded future-cell streaming source; velocity is in world units/second.
 	Vector3 predictive_velocity;
 	real_t predictive_lookahead_seconds = 0.0;
@@ -66,6 +71,7 @@ class WorldPartition3D : public Node3D {
 	bool observer_cell_valid = false;
 
 	HashMap<Vector2i, ObjectID> active_cells;
+	HashMap<Vector2i, uint64_t> cell_creation_physics_frames;
 	HashMap<Vector2i, int> active_detail_levels; // Only scene roots that opt into set_streaming_lod().
 	HashMap<Vector2i, bool> active_simulation_cells; // All loaded cells; optional root callback.
 	HashMap<Vector2i, String> pending_cells;
@@ -188,12 +194,18 @@ public:
 	int get_streaming_source_failed_cell_count(const String &p_name) const;
 	real_t get_streaming_source_progress(const String &p_name) const;
 	bool is_streaming_source_ready(const String &p_name) const;
+	int get_streaming_source_activated_cell_count(const String &p_name) const;
+	real_t get_streaming_source_activation_progress(const String &p_name) const;
+	bool is_streaming_source_activation_ready(const String &p_name) const;
 
 	Vector2i local_position_to_cell(const Vector3 &p_local_position) const;
 	Vector3 cell_to_local_position(const Vector2i &p_cell) const;
 	Array get_cells_in_radius(const Vector2i &p_center, int p_radius) const;
 
 	void update_streaming();
+	void set_min_physics_frames_after_load(int p_frames);
+	int get_min_physics_frames_after_load() const;
+	bool is_cell_activation_ready(const Vector2i &p_cell) const;
 	bool is_cell_loaded(const Vector2i &p_cell) const;
 	Node3D *get_cell_instance(const Vector2i &p_cell) const;
 	int get_loaded_cell_count() const;
