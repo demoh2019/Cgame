@@ -957,6 +957,14 @@ func c_use(item_id: String) -> void:
 
 
 ## Authenticated sender only; no client-supplied medicine or target.
+## Only the authenticated player may request food or drink; item stays server-owned.
+@rpc("any_peer", "reliable")
+func c_smart_provision(intent: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "smart_provision", sim.cmd_smart_provision(peer, intent))
+
+
 @rpc("any_peer", "reliable")
 func c_quick_medicine() -> void:
 	var peer := multiplayer.get_remote_sender_id()

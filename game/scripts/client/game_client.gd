@@ -315,6 +315,10 @@ func use_item(item_id: String) -> void:
 	net.c_use.rpc_id(1, item_id)
 
 
+func smart_provision(intent: String) -> void:
+	net.c_smart_provision.rpc_id(1, intent)
+
+
 func quick_medicine() -> void:
 	net.c_quick_medicine.rpc_id(1)
 
