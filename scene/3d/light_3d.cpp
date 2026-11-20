@@ -39,10 +39,11 @@
 
 void Light3D::set_param(Param p_param, real_t p_value) {
 	ERR_FAIL_INDEX(p_param, PARAM_MAX);
-	// Weather-driven shadows are updated several times per second. Reject
-	// invalid parameters before they can enter GPU light buffers and avoid
-	// redundant uploads when the quantized shadow value did not change.
-	if (p_param == PARAM_SHADOW_OPACITY || p_param == PARAM_SHADOW_BLUR) {
+	// Shadow and contact-shadow filtering are updated by quality presets
+	// and atmospheric weather. Keep non-finite values out of the native
+	// renderer, and avoid identical uniform uploads while the scene streams.
+	if (p_param == PARAM_SHADOW_OPACITY || p_param == PARAM_SHADOW_BLUR ||
+			p_param == PARAM_CONTACT_SHADOW_BLUR) {
 		if (!Math::is_finite(p_value)) {
 			return;
 		}
@@ -189,6 +190,11 @@ uint32_t Light3D::get_shadow_caster_mask() const {
 }
 
 void Light3D::set_allow_contact_shadows(bool p_enable) {
+	// Quality switching and automatic profiles can reapply the same flag.
+	// Contact-shadow changes need a render-thread update only on transition.
+	if (allow_contact_shadows == p_enable) {
+		return;
+	}
 	allow_contact_shadows = p_enable;
 	RS::get_singleton()->light_set_allow_contact_shadows(light, p_enable);
 }
