@@ -181,6 +181,10 @@ public:
 	// Perspective/frustum use camera-space depth; orthogonal is constant.
 	// This is a geometry LOD hint (before viewport 3D resolution scaling).
 	real_t get_pixels_per_meter_at_position(const Vector3 &p_world_pos) const;
+	// World-space diameter for a target on-screen pixel width. Useful for
+	// particles, labels and impostors with stable coverage across camera zoom.
+	// Returns 0 for invalid inputs or positions behind perspective cameras.
+	real_t get_world_size_for_pixel_diameter_at_position(const Vector3 &p_world_pos, real_t p_pixel_diameter) const;
 
 	virtual Vector3 project_ray_normal(const Point2 &p_pos) const;
 	virtual Vector3 project_ray_origin(const Point2 &p_pos) const;
