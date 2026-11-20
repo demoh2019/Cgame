@@ -41,7 +41,7 @@ bool BehaviorTree::_validate_node(const Variant &p_node, int p_depth, int &r_cou
 		return false;
 	}
 	const String type = node["type"];
-	if (type == "sequence" || type == "selector") {
+	if (type == "sequence" || type == "selector" || type == "reactive_sequence" || type == "reactive_selector") {
 		if (!node.has("children") || node["children"].get_type() != Variant::ARRAY) {
 			return false;
 		}
@@ -123,11 +123,19 @@ BehaviorTree::Status BehaviorTree::_tick_node(const Dictionary &p_node, const St
 		return status == SUCCESS ? FAILURE : (status == FAILURE ? SUCCESS : RUNNING);
 	}
 	const Array children = p_node["children"];
-	const bool is_sequence = type == "sequence";
-	const int start = memory.has(p_path) ? int(memory[p_path]) : 0;
+	const bool is_sequence = type == "sequence" || type == "reactive_sequence";
+	const bool is_reactive = type == "reactive_sequence" || type == "reactive_selector";
+	const int previous_running_child = memory.has(p_path) ? int(memory[p_path]) : -1;
+	// Reactive composites re-evaluate higher priority children every tick.
+	const int start = is_reactive ? 0 : MAX(previous_running_child, 0);
 	for (int i = start; i < children.size(); i++) {
 		const Status status = _tick_node(children[i], p_path + "/" + String::num_int64(i));
 		if (status == RUNNING) {
+			// When a higher-priority child takes over, discard the abandoned subtree's
+			// execution state so its waits restart if that branch becomes active again.
+			if (is_reactive && previous_running_child >= 0 && previous_running_child != i) {
+				_clear_memory_prefix(p_path + "/" + String::num_int64(previous_running_child));
+			}
 			memory[p_path] = i;
 			return RUNNING;
 		}
