@@ -398,6 +398,10 @@ func _refresh_hud() -> void:
     var failed: int = world_partition.get_failed_cell_count() if world_partition != null else 0
     var pinned: int = world_partition.get_pinned_cell_count() if world_partition != null else 0
     var outpost_ready: bool = world_partition.is_cell_loaded(OUTPOST_CELL) if world_partition != null else false
+    var outpost_status: String = "ГОТОВ" if outpost_ready else (
+        "ЗАГРУЖАЕТСЯ" if world_partition != null and world_partition.is_cell_pinned(OUTPOST_CELL)
+        else "НЕ ЗАКРЕПЛЁН")
+    var home_ready: bool = world_partition.is_cell_loaded(Vector2i.ZERO) if world_partition != null else false
     var stream_ms: float = world_partition.get_last_streaming_update_ms() if world_partition != null else 0.0
     var created_this_frame: int = world_partition.get_last_instantiation_attempt_count() if world_partition != null else 0
     var cache: Dictionary = TileCache.get_stats()
@@ -415,7 +419,7 @@ func _refresh_hud() -> void:
         + "Стриминг CPU: %.2f ms   попыток создания: %d\n" % [stream_ms, created_this_frame] \
         + "Кэш HLOD: %d/%d   попадания: %d   промахи: %d\n" % [far_cache["entries"], far_cache["capacity"], far_cache["hits"], far_cache["misses"]] \
         + "Генерация HLOD CPU: %.2f ms   мягкий бюджет: 2.0 ms\n" % hlod_cpu_ms \
-        + "Закреплено ячеек: %d/16   удалённый маяк: %s" % [pinned, "ГОТОВ" if outpost_ready else "ЗАГРУЗКА"]
+        + "Закреплено: %d/16   маяк: %s   дом: %s" % [pinned, outpost_status, "ГОТОВ" if home_ready else "НЕТ"]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
