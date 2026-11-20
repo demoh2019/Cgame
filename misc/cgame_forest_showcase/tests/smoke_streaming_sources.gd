@@ -86,11 +86,20 @@ func _run() -> void:
     if world.is_streaming_source_ready("watchtower"):
         _fail("lower-priority watchtower became ready before survey region")
         return
+    if absf(world.get_streaming_source_progress("survey") - 1.0) > 0.00001:
+        _fail("fully instantiated survey area did not reach 100 percent")
+        return
+    if world.get_streaming_source_progress("watchtower") != 0.0:
+        _fail("low-priority watchtower progress advanced ahead of the survey")
+        return
     if world.get_loaded_cell_count() != 10:
         _fail("player plus nine survey cells should be resident before watchtower")
         return
     if not await _wait_source(world, "watchtower"):
         _fail("secondary watchtower source failed to become ready")
+        return
+    if world.get_streaming_source_progress("watchtower") != 1.0:
+        _fail("completed one-cell source did not report 100 percent")
         return
     if not ready_names.has("survey") or not ready_names.has("watchtower"):
         _fail("named source readiness signals were not emitted")
