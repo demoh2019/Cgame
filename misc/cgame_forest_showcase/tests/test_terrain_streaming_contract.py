@@ -46,9 +46,9 @@ def route_supercover(ax: float, az: float, bx: float, bz: float,
     """Independent 2D supercover model with a hard nontruncating cell cap."""
     x, z = floor(ax / size), floor(az / size)
     last_x, last_z = floor(bx / size), floor(bz / size)
-    result = [(x, z)]
-    if (x, z) == (last_x, last_z):
-        return result if max_cells >= 1 else []
+    if max_cells < 1:
+        return []
+    result: list[tuple[int, int]] = []
     dx, dz = (bx - ax) / size, (bz - az) / size
     sx, sz = (1 if dx > 0 else -1 if dx < 0 else 0,
               1 if dz > 0 else -1 if dz < 0 else 0)
@@ -61,9 +61,30 @@ def route_supercover(ax: float, az: float, bx: float, bz: float,
         else (az / size - floor(az / size))) / abs_dz
     dtx = float("inf") if sx == 0 else 1 / abs_dx
     dtz = float("inf") if sz == 0 else 1 / abs_dz
+    boundary_x = sx == 0 and ax / size == floor(ax / size)
+    boundary_z = sz == 0 and az / size == floor(az / size)
+
+    def append_cell(cx: int, cz: int) -> bool:
+        touched = [(cx, cz)]
+        if boundary_x:
+            touched.append((cx - 1, cz))
+        if boundary_z:
+            touched.append((cx, cz - 1))
+        if boundary_x and boundary_z:
+            touched.append((cx - 1, cz - 1))
+        if len(result) + len(touched) > max_cells:
+            return False
+        result.extend(touched)
+        return True
+
+    if not append_cell(x, z):
+        return []
+    if (x, z) == (last_x, last_z):
+        return result
     while (x, z) != (last_x, last_z):
         if sx and sz and isclose(tx, tz, rel_tol=1e-8, abs_tol=1e-8):
-            result.extend(((x + sx, z), (x, z + sz)))
+            if not append_cell(x + sx, z) or not append_cell(x, z + sz):
+                return []
             x, z = x + sx, z + sz
             tx, tz = tx + dtx, tz + dtz
         elif tx < tz:
@@ -72,8 +93,7 @@ def route_supercover(ax: float, az: float, bx: float, bz: float,
         else:
             z += sz
             tz += dtz
-        result.append((x, z))
-        if len(result) > max_cells:
+        if not append_cell(x, z):
             return []
     return result
 
@@ -408,6 +428,10 @@ class StreamedTerrainContracts(TestCase):
 
         self.assertIn("p_max_cells < 1 || p_max_cells > 256", cpp)
         self.assertIn("Math::is_equal_approx(t_max_x, t_max_z)", cpp)
+        self.assertIn("const bool boundary_x = step_x == 0", cpp)
+        self.assertIn("const bool boundary_z = step_z == 0", cpp)
+        self.assertIn("result.push_back(Vector2i(p_cell.x - 1, p_cell.y))", cpp)
+        self.assertIn("result.push_back(Vector2i(p_cell.x, p_cell.y - 1))", cpp)
         self.assertIn("append_cell(Vector2i(cell.x + step_x, cell.y))", cpp)
         self.assertIn("append_cell(Vector2i(cell.x, cell.y + step_z))", cpp)
         self.assertIn("return Array(); // Never report a silently truncated corridor.", cpp)
@@ -457,6 +481,19 @@ class StreamedTerrainContracts(TestCase):
         self.assertEqual(route_supercover(2, 9, 70, 9, 2), [])
         self.assertEqual(route_supercover(1, 1, 65, 65, 6), [])
         self.assertEqual(route_supercover(1, 1, 65, 65, 7)[-1], (2, 2))
+        self.assertEqual(
+            route_supercover(32, 1, 32, 70),
+            [(1, 0), (0, 0), (1, 1), (0, 1), (1, 2), (0, 2)],
+        )
+        self.assertEqual(
+            route_supercover(1, 32, 70, 32),
+            [(0, 1), (0, 0), (1, 1), (1, 0), (2, 1), (2, 0)],
+        )
+        self.assertEqual(
+            route_supercover(32, 32, 32, 32),
+            [(1, 1), (0, 1), (1, 0), (0, 0)],
+        )
+        self.assertEqual(route_supercover(32, 1, 32, 70, 5), [])
 
     def test_streamed_navigation_and_agent_contract(self) -> None:
         """Native NavServer readiness must match the actual procedural game."""
