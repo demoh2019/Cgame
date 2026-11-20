@@ -1274,6 +1274,17 @@ func cmd_dungeon(peer_id: int, down: bool) -> Dictionary:
 	return {"ok": true, "down": false}
 
 
+## What a player is visibly doing, for the others: "fish", "chop" (a tree), "harvest" (anything else gathered) or "".
+## Only the kind of work: never the node, the catch, the timing or the bite.
+func _public_action(player: Player) -> String:
+	if player.action.is_empty():
+		return ""
+	if bool(player.action.get("fish", false)):
+		return "fish"
+	var node: Dictionary = _find_node(int(player.action.get("node", -1)))
+	return "chop" if str(node.get("kind", "")) == "tree" else "harvest"
+
+
 ## One strike per cast: inside the bite window it hooks the fish (a bigger catch), outside it the fish slips away.
 func _hook_fish(player: Player) -> Dictionary:
 	if bool(player.action.get("struck", false)):
@@ -7502,6 +7513,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					_alive(other), WorldCycle.is_night(time), other.bike_lamp_enabled),
 				"weapon": other.inventory.weapon,
 				"gear": other.inventory.gear.duplicate(), # Worn pieces show on the character for everyone.
+				"doing": _public_action(other), # What they are visibly busy with: a pose for everyone else.
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
 				"guild": {"id": other.guild_id, "name": other.guild_name},
 				"pvp_rank": PvPHonor.rank(other.pvp_honor),

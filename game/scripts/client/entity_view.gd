@@ -21,6 +21,11 @@ const ALERT_TINT := Color(1.0, 0.45, 0.4)
 
 var _nodes: Dictionary = {} # "kind:id" -> Node3D
 var _targets: Dictionary = {} # "kind:id" -> {"position": Vector3, "yaw": float}
+var _history: Dictionary = {} # "player:id" / "zombie:id" -> [[server time, position, yaw], ...] oldest first
+var _snapshot_time := 0.0
+var _render_time := -1.0
+const INTERPOLATION_DELAY := 0.12 # A little more than one snapshot interval (10 per second).
+const TELEPORT_DISTANCE := 8.0
 
 
 ## The wall model of a tier, or a timber box when the packs are missing.
@@ -37,6 +42,10 @@ static func wall_mesh(tier: int) -> Mesh:
 
 
 func update_from(client) -> void:
+	# The render clock follows the server clock a fixed delay behind, gently, so it never jumps backwards.
+	_snapshot_time = float(client.server_time)
+	if _render_time < 0.0 or absf(_render_time - (_snapshot_time - INTERPOLATION_DELAY)) > 0.5:
+		_render_time = _snapshot_time - INTERPOLATION_DELAY
 	var seen: Dictionary = {}
 	for id in client.players:
 		_touch("player:%d" % id, "player", client.players[id], seen)
@@ -72,6 +81,7 @@ func update_from(client) -> void:
 			_nodes[key].queue_free()
 			_nodes.erase(key)
 			_targets.erase(key)
+			_history.erase(key)
 
 
 func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> void:
@@ -81,6 +91,20 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		add_child(_nodes[key])
 		_nodes[key].position = Vector3(entity["x"], entity["y"], entity["z"])
 	_targets[key] = {"position": Vector3(entity["x"], entity["y"], entity["z"]), "yaw": float(entity.get("yaw", 0.0))}
+	if kind == "player" or kind == "zombie":
+		# Moving things keep a short history on the server clock; they are drawn a little in the past, between two
+		# real samples, so uneven packet arrival does not show as stutter.
+		var history: Array = _history.get_or_add(key, [])
+		var sample := [_snapshot_time, Vector3(entity["x"], entity["y"], entity["z"]), float(entity.get("yaw", 0.0))]
+		if not history.is_empty() and float(history[-1][0]) >= _snapshot_time:
+			history[-1] = sample
+		else:
+			if not history.is_empty() and (history[-1][1] as Vector3).distance_to(sample[1]) > TELEPORT_DISTANCE:
+				history.clear() # A teleport, a hatch, a respawn: no sliding across the map.
+				_nodes[key].position = sample[1]
+			history.append(sample)
+		while history.size() > 8:
+			history.pop_front()
 	var label: Label3D = _nodes[key].get_node_or_null("Label")
 	if label != null:
 		if kind == "fish_trap":
@@ -177,7 +201,10 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		if player_model.pack_mode:
 			# Sneaking and riding are real poses; the weapon they carry is in their hand.
 			player_model.set_stance(bool(entity.get("crouching", false)), bool(entity.get("mounted", false)))
-			player_model.set_weapon(str(entity.get("weapon", "")))
+			# What they are busy with shows as the pose and the tool in hand: a rod held out, an axe at a tree.
+			var doing: String = str(entity.get("doing", ""))
+			player_model.set_action_loop({"fish": "Idle_Torch_Loop", "chop": "TreeChopping_Loop", "harvest": "Farm_Harvest"}.get(doing, ""))
+			player_model.set_weapon({"fish": "fishing_rod", "chop": "axe_1"}.get(doing, str(entity.get("weapon", ""))))
 			player_model.set_gear(entity.get("gear", {}) if entity.get("gear", {}) is Dictionary else {})
 		else:
 			player_model.scale = Vector3(1.0, 0.72 if bool(entity.get("crouching", false)) else 1.0, 1.0)
@@ -467,10 +494,18 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 
 func _process(delta: float) -> void:
 	var blend := 1.0 - exp(-14.0 * delta)
+	if _render_time >= 0.0:
+		_render_time += delta
+		_render_time += ((_snapshot_time - INTERPOLATION_DELAY) - _render_time) * clampf(delta * 2.0, 0.0, 1.0)
 	for key in _nodes:
 		var node: Node3D = _nodes[key]
 		var target: Dictionary = _targets[key]
-		node.position = node.position.lerp(target["position"], blend)
+		var sampled: Array = _sample(key)
+		if sampled.is_empty():
+			node.position = node.position.lerp(target["position"], blend)
+		else:
+			node.position = sampled[0]
+			target["yaw"] = sampled[1]
 		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
@@ -479,6 +514,24 @@ func _process(delta: float) -> void:
 				var bike = node.get_node("TrailBike")
 				if bike.visible:
 					bike.set_riding(true, model.speed, delta)
+
+
+## Position and facing of a moving entity at the render time, between the two samples around it; past the newest
+## sample it holds there (a short gap in packets is a pause, not a guess). [] when there is no history.
+func _sample(key: String) -> Array:
+	var history: Array = _history.get(key, [])
+	if history.is_empty():
+		return []
+	if history.size() == 1 or _render_time <= float(history[0][0]):
+		return [history[0][1], history[0][2]]
+	for i in range(history.size() - 1, 0, -1):
+		var older: Array = history[i - 1]
+		var newer: Array = history[i]
+		if _render_time >= float(older[0]):
+			var span: float = maxf(float(newer[0]) - float(older[0]), 0.001)
+			var k: float = clampf((_render_time - float(older[0])) / span, 0.0, 1.0)
+			return [(older[1] as Vector3).lerp(newer[1], k), lerp_angle(float(older[2]), float(newer[2]), k)]
+	return [history[-1][1], history[-1][2]]
 
 
 ## A swing or a shot by another player.

@@ -70,3 +70,14 @@ func run(t) -> void:
 	sim._finish_fishing(player)
 	var untouched: int = player.inventory.count("raw_fish") - before
 	t.check(untouched >= 1 and untouched <= 2, "an ordinary catch (%d)" % untouched)
+
+	t.current = "others see that you fish, never when the fish bites"
+	var watcher = sim.add_player(10, "Watcher")
+	watcher.position = player.position + Vector3(3.0, 0.0, 0.0)
+	t.check(bool(_cast(sim, player).get("ok", false)), "cast while watched")
+	var seen: Dictionary = {}
+	for other in sim.snapshot_for(10)["players"]:
+		if int(other["id"]) == player.id:
+			seen = other
+	t.eq(str(seen.get("doing", "")), "fish", "the angler shows as fishing")
+	t.check(not str(seen).contains("bite"), "no bite timing reaches anyone else")

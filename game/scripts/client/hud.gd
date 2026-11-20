@@ -1277,9 +1277,15 @@ func _build() -> void:
 	_death.add_theme_font_size_override("font_size", 28)
 	_death.add_theme_color_override("font_color", Color(0.95, 0.25, 0.2))
 	_death.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# A fixed-width card centred on the screen; long messages wrap instead of running off the right edge.
+	_death.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_death.set_anchors_preset(Control.PRESET_CENTER)
-	_death.position = Vector2(-300, -60)
-	_death.size = Vector2(600, 120)
+	_death.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_death.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_death.offset_left = -340.0
+	_death.offset_right = 340.0
+	_death.offset_top = -70.0
+	_death.offset_bottom = 70.0
 	_death.visible = false
 	var death_style := StyleBoxFlat.new()
 	death_style.bg_color = Color(0.1, 0.0, 0.0, 0.72)
