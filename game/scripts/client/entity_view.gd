@@ -633,7 +633,7 @@ func _update_corpses(delta: float) -> void:
 		corpse["age"] = float(corpse["age"]) + delta
 		var burn_t: float = CorpseBurn.progress(float(corpse["age"]), Ragdoll.SETTLE_SECONDS, Ragdoll.SINK_SECONDS)
 		if burn_t > 0.0:
-			if corpse["burn"] == null:
+			if corpse["burn"] == null and is_instance_valid(corpse["model"]):
 				corpse["burn"] = CorpseBurn.start(corpse["model"])
 			if corpse["burn"] != null:
 				(corpse["burn"] as ShaderMaterial).set_shader_parameter("progress", burn_t)
