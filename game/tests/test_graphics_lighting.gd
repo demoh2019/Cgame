@@ -34,6 +34,28 @@ func run(t) -> void:
 	t.check(not bool(GraphicsLighting.settings(0, "forward_plus")["volumetric_fog"]),
 		"low-end Forward+ renders without volume allocation")
 
+	t.current = "premium near-field contact shadows"
+	for tier in [0, 1]:
+		t.check(not bool(GraphicsLighting.settings(tier, "forward_plus")["contact_shadows"]),
+			"Performance and Balanced skip native screen-space contact shadow rays")
+	for backend in ["mobile", "gl_compatibility", ""]:
+		for tier in 4:
+			t.check(not bool(GraphicsLighting.settings(tier, backend)["contact_shadows"]),
+				"unsupported renderer cannot allocate the extra contact-shadow pass")
+	t.check(bool(GraphicsLighting.settings(2, "forward_plus")["contact_shadows"]),
+		"High restores fine-scale shadows at object-ground contacts")
+	t.check(bool(GraphicsLighting.settings(3, "forward_plus")["contact_shadows"]),
+		"Ultra refines small tree-root and ruin detail contact")
+	t.check(float(GraphicsLighting.settings(3, "forward_plus")["contact_shadow_blur"]) <
+		float(GraphicsLighting.settings(2, "forward_plus")["contact_shadow_blur"]),
+		"Ultra has a sharper near-field contact shadow penumbra")
+	t.check(ProjectSettings.get_setting(
+		"rendering/lights_and_shadows/contact_shadow/enabled", false),
+		"project enables contact shadows only for opted-in light instances")
+	t.check((Atmosphere as Script).source_code.contains(
+		"sun.shadow_contact_shadows_allow = false"),
+		"startup stays on the inexpensive Balanced light state")
+
 	t.current = "tier-matched sun shadow biases"
 	var balanced_bias: Dictionary = GraphicsLighting.settings(1, "forward_plus")
 	var high_bias: Dictionary = GraphicsLighting.settings(2, "forward_plus")
@@ -82,6 +104,10 @@ func run(t) -> void:
 	var sun := DirectionalLight3D.new()
 	var env := Environment.new()
 	GraphicsLighting.apply(sun, env, 3, "forward_plus")
+	t.check(sun.shadow_contact_shadows_allow,
+		"Ultra activates native Godot directional contact shadows")
+	t.near(sun.shadow_contact_shadows_blur, 0.55, 0.0001,
+		"Ultra uses a tightly filtered contact shadow")
 	t.eq(sun.directional_shadow_mode, DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS,
 		"Ultra applies the real Godot four-cascade shadow mode")
 	t.check(sun.directional_shadow_blend_splits,
@@ -98,6 +124,10 @@ func run(t) -> void:
 	t.near(sun.shadow_normal_bias, float(ultra_bias["shadow_normal_bias"]), 0.0001,
 		"Ultra actually applies tighter normal bias to Godot sun")
 	GraphicsLighting.apply(sun, env, 2, "forward_plus")
+	t.check(sun.shadow_contact_shadows_allow,
+		"High still renders short-range contacts without extra sun lights")
+	t.near(sun.shadow_contact_shadows_blur, 0.9, 0.0001,
+		"High receives the cheaper contact filter")
 	t.check(env.volumetric_fog_enabled and env.volumetric_fog_length < 72.0,
 		"High trades volume range for fog precision and bounded cost")
 	t.check(env.ssr_enabled and env.ssr_max_steps == 24,
@@ -107,6 +137,8 @@ func run(t) -> void:
 	t.near(sun.shadow_normal_bias, float(high_bias["shadow_normal_bias"]), 0.0001,
 		"High updates native sun normal bias")
 	GraphicsLighting.apply(sun, env, 1, "gl_compatibility")
+	t.check(not sun.shadow_contact_shadows_allow,
+		"renderer fallback releases near-field shadow ray work")
 	t.eq(sun.directional_shadow_mode, DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS,
 		"Compatibility Balanced retains efficient two-split shadows")
 	t.check(not sun.directional_shadow_blend_splits,
