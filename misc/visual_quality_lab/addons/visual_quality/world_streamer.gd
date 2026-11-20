@@ -14,6 +14,7 @@ signal asset_load_failed(path: String, error: int)
 @export_range(1, 10, 1) var unload_radius_cells: int = 3
 @export_range(0.05, 2.0, 0.05) var update_interval_seconds: float = 0.15
 @export_range(1, 8, 1) var max_spawns_per_update: int = 2
+@export_range(100, 10000, 100) var max_spawn_time_usec_per_update: int = 2500
 @export_range(1, 16, 1) var max_unloads_per_update: int = 4
 @export_range(1, 8, 1) var max_concurrent_loads: int = 2
 @export var streaming_enabled: bool = true
@@ -25,6 +26,12 @@ var _scene_cache: Dictionary = {}  # String -> PackedScene
 var _pending_paths: Dictionary = {} # String -> true
 var _failed_paths: Dictionary = {} # String -> Error
 var _elapsed: float = 0.0
+var last_update_micros: int = 0
+var peak_update_micros: int = 0
+var last_spawned_count: int = 0
+var last_unloaded_count: int = 0
+var total_spawned_count: int = 0
+var total_unloaded_count: int = 0
 
 
 func _process(delta: float) -> void:
@@ -55,6 +62,9 @@ func clear_failed_asset(path: String) -> void:
 func refresh_now() -> void:
 	if not streaming_enabled or source == null or not is_instance_valid(source):
 		return
+	var started_usec: int = Time.get_ticks_usec()
+	last_spawned_count = 0
+	last_unloaded_count = 0
 	_poll_background_loads()
 	var center: Vector2i = cell_at_local_position(to_local(source.global_position), cell_size)
 	# Unload outside a larger radius to avoid jitter at load boundaries.
@@ -64,6 +74,8 @@ func refresh_now() -> void:
 			break
 		if not _definitions.has(coord) or not within_cell_radius(coord, center, unload_radius_cells):
 			_unload_cell(coord)
+			last_unloaded_count += 1
+			total_unloaded_count += 1
 			unload_budget -= 1
 	var wanted: Array[Vector2i] = []
 	for coord in _definitions.keys():
@@ -79,16 +91,23 @@ func refresh_now() -> void:
 		return ad < bd
 	)
 	var spawn_budget: int = max_spawns_per_update
+	var spawn_started_usec: int = Time.get_ticks_usec()
 	for coord in wanted:
-		if spawn_budget <= 0:
+		# Cooperative budget: cannot interrupt a single PackedScene.instantiate(),
+		# but can stop before attempting the next one.
+		if spawn_budget <= 0 or Time.get_ticks_usec() - spawn_started_usec >= max_spawn_time_usec_per_update:
 			break
 		var path: String = _definitions[coord]
 		if _scene_cache.has(path):
 			if _spawn_cell(coord, _scene_cache[path]):
 				spawn_budget -= 1
+				last_spawned_count += 1
+				total_spawned_count += 1
 		elif not _pending_paths.has(path) and not _failed_paths.has(path):
 			if _pending_paths.size() < max_concurrent_loads:
 				_request_asset(path)
+	last_update_micros = Time.get_ticks_usec() - started_usec
+	peak_update_micros = maxi(peak_update_micros, last_update_micros)
 
 
 func _request_asset(path: String) -> void:
