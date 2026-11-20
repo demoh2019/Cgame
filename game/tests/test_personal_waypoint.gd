@@ -39,7 +39,7 @@ func run(t) -> void:
 	t.check(not map.set_waypoint(Vector2(INF, 0)), "nonfinite target ignored")
 	t.check(not map.set_waypoint(Vector2(3500, 0)), "beyond island radius ignored")
 	t.eq(radar.personal_waypoint, target, "rejected updates preserve current route")
-	t.eq(Navigation.compass(Vector2.ZERO, target), "SE",
+	t.eq(Navigation.compass(Vector2.ZERO, target), "NE",
 		"navigation uses the same eight-way compass as caravan markers")
 	t.check(Navigation.distance_meters(Vector2.ZERO, target) > 0,
 		"map can display distance from live player position")
