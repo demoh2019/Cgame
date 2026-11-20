@@ -395,6 +395,7 @@ void fragment() {
 					cliff_world_normal = normalize(
 						along_x * blend.x + along_y * blend.y + along_z * blend.z);
 				}
+			}
 			normal_sample = vec4(0.0, 0.0, 1.0, cliff_coherence);
 		} else {
 			c = top_albedo(layer, material_p, mixer, detail_fade, lod_dx, lod_dy);
