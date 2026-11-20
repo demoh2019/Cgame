@@ -200,6 +200,7 @@ static var _textured_checked := false
 static var terrain_filter_quality := 1
 static var terrain_geomorph_enabled := false
 static var terrain_screen_lod_quality := 1
+static var terrain_lod_pixel_error := 3.5
 static var terrain_error_lod_quality := 1
 const TERRAIN_LOD_GROUP := "aa_chunked_terrain_lod"
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
@@ -299,6 +300,17 @@ static func apply_terrain_error_lod(node: Node) -> void:
 		var terrain := node as ChunkedTerrain3D
 		terrain.lod_geometric_error_strength = terrain_error_strength_for_quality(
 			terrain_error_lod_quality)
+
+
+## Per-chunk geometric simplification budget in screen pixels.
+## The same group includes PBR and procedural fallback terrain.
+static func configure_terrain_pixel_error(pixels: float) -> void:
+	terrain_lod_pixel_error = maxf(pixels, 0.0)
+
+
+static func apply_terrain_pixel_error(terrain: Node) -> void:
+	if terrain is ChunkedTerrain3D and terrain.is_in_group(TERRAIN_LOD_GROUP):
+		terrain.lod_pixel_error = terrain_lod_pixel_error
 
 
 static func configure_terrain_filter(quality: int) -> void:
@@ -647,6 +659,7 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.lod_count = 3
 	_terrain.lod_distance = 70.0
 	apply_terrain_screen_lod(_terrain)
+	_terrain.lod_pixel_error = terrain_lod_pixel_error
 	apply_terrain_error_lod(_terrain)
 	_terrain.lod_geomorph_enabled = terrain_geomorph_enabled
 	_terrain.skirt_depth = 3.0
