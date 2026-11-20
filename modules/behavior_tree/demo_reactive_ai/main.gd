@@ -25,16 +25,16 @@ func _ready() -> void:
         "type": "reactive_sequence",
         "children": [
             {"type": "condition", "key": "low_health", "equals": true},
-            {"type": "wait", "ticks": 2},
-            {"type": "set", "key": "action", "value": "retreat"}
+            {"type": "set", "key": "action", "value": "retreat"},
+            {"type": "wait", "ticks": 2}
         ]
     }
     var pursue := {
         "type": "reactive_sequence",
         "children": [
             {"type": "condition", "key": "player_visible", "equals": true},
-            {"type": "wait", "ticks": 2},
-            {"type": "set", "key": "action", "value": "chase"}
+            {"type": "set", "key": "action", "value": "chase"},
+            {"type": "wait", "ticks": 2}
         ]
     }
     var priorities := {
@@ -70,7 +70,7 @@ func _physics_process(delta: float) -> void:
         brain.set_blackboard_value("low_health", enemy_health <= 30)
         brain.set_blackboard_value("player_visible", enemy_position.distance_to(player_position) <= VISION_RADIUS)
         last_status = brain.tick()
-        current_action = "thinking" if last_status == BehaviorTree.RUNNING else str(brain.get_blackboard_value("action", "patrol"))
+        current_action = str(brain.get_blackboard_value("action", "patrol"))
 
     match current_action:
         "patrol":
@@ -93,18 +93,20 @@ func _physics_process(delta: float) -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-    if not event is InputEventKey or not event.pressed or event.echo:
-        return
-    if event.keycode == KEY_SPACE and player_position.distance_to(enemy_position) <= HIT_RADIUS:
-        enemy_health = maxi(0, enemy_health - 35)
-    elif event.keycode == KEY_R:
-        enemy_health = 100
-        player_position = Vector2(160, 350)
-        enemy_position = Vector2(660, 350)
-        current_action = "patrol"
-        ai_timer = 0.0
-        brain.reset()
-        brain.clear_blackboard()
+    if event is InputEventKey:
+        if not event.pressed or event.echo:
+            return
+        if event.keycode == KEY_SPACE and player_position.distance_to(enemy_position) <= HIT_RADIUS:
+            enemy_health = maxi(0, enemy_health - 35)
+        elif event.keycode == KEY_R:
+            enemy_health = 100
+            player_position = Vector2(160, 350)
+            enemy_position = Vector2(660, 350)
+            current_action = "patrol"
+            last_status = BehaviorTree.SUCCESS
+            ai_timer = 0.0
+            brain.reset()
+            brain.clear_blackboard()
 
 
 func _update_hud() -> void:
