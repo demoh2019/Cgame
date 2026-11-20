@@ -38,6 +38,7 @@ const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const GraphicsCinematicDof = preload("res://scripts/client/graphics_cinematic_dof.gd")
 const RainGear = preload("res://scripts/client/character_rain_gear.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
+const WorldStreamingPolicy = preload("res://scripts/client/world_streaming_policy.gd")
 const GraphicsColorGrade = preload("res://scripts/client/graphics_color_grade.gd")
 const GraphicsLensRain = preload("res://scripts/client/graphics_lens_rain.gd")
 const RenderBenchmark = preload("res://scripts/client/render_benchmark.gd")
@@ -1066,6 +1067,7 @@ func _on_welcomed() -> void:
 	streamer.max_chunk_work_usec = 2500
 	streamer.set_chunk_generator(_generate_chunk)
 	add_child(streamer)
+	_access.set_world_streamer(streamer)
 	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
 	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
 		streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics)
@@ -1215,6 +1217,8 @@ func _process(delta: float) -> void:
 		_stream_previous_position = position
 		_stream_has_previous_position = true
 		streamer.velocity_hint = _stream_velocity
+		# Longer forward streaming on the bike; idle/teleport uses exact nearby cells.
+		WorldStreamingPolicy.apply(streamer, bool(client.you.get("mounted", false)), _stream_velocity)
 		_apply_world_state()
 	entities.update_from(client)
 	_lightning_visual.set_warning(client.lightning_telegraph)
