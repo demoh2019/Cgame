@@ -66,6 +66,8 @@ TEST_CASE("[WorldPartition3D] Defaults") {
 	CHECK(partition->get_loaded_cell_count() == 0);
 	CHECK_FALSE(partition->are_cells_loaded(Vector2i(0, 0)));
 	CHECK_FALSE(partition->are_cells_loaded(Vector2i(0, 0), 1));
+	CHECK(partition->get_last_streaming_update_ms() == 0.0);
+	CHECK(partition->get_last_instantiation_attempt_count() == 0);
 	CHECK(partition->get_pending_cell_count() == 0);
 	CHECK(partition->get_inflight_request_count() == 0);
 	CHECK(partition->get_failed_cell_count() == 0);
