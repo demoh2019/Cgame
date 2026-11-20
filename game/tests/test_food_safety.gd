@@ -105,6 +105,8 @@ func run(t) -> void:
 	t.current = "crafting and applying the herbal remedy uses actual materials"
 	t.eq(sim.cmd_use(p.id, FoodSafety.REMEDY_ITEM).get("reason", ""),
 		"not_carried", "missing medicine cannot cure")
+	# Starter characters already carry clean water; remove it for the missing-input test.
+	p.inventory.remove("water_bottle", p.inventory.count("water_bottle"))
 	p.inventory.add("wild_herbs", 2)
 	p.inventory.add("charcoal_filter", 1)
 	t.eq(sim.cmd_craft(p.id, FoodSafety.REMEDY_ITEM).get("reason", ""),
