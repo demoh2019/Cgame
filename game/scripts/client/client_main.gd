@@ -785,6 +785,16 @@ func _physics_process(delta: float) -> void:
 		return
 	sim.tick(delta)
 	for game_event in sim.drain_events():
+		# Offline uses the identical authoritative strike event. Flash only on
+		# an actual resolved impact, never on a forecast or warning disk.
+		if str(game_event.get("type", "")) == "lightning_struck" and \
+				_atmosphere != null and game_event.has("x") and game_event.has("z") and \
+				not Dungeon.is_underground(survivor.position.x):
+			var strike_xz := Vector2(float(game_event["x"]), float(game_event["z"]))
+			if strike_xz.is_finite():
+				var distance_m: float = Vector2(survivor.position.x,
+					survivor.position.z).distance_to(strike_xz)
+				_atmosphere.trigger_lightning(distance_m)
 		if str(game_event.get("type", "")) == "camp_alarm" and (
 				int(game_event.get("peer", -1)) == LOCAL_PLAYER_ID):
 			_feedback = "CAMP ALERT: %d infected near your fire! Prepare defenses." % int(game_event.get("count", 0))
