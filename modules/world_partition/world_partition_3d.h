@@ -64,6 +64,10 @@ class WorldPartition3D : public Node3D {
 	// wall-clock polling or duplicate ready signals after frame spikes.
 	HashMap<Vector2i, uint64_t> physics_pending_cells;
 	HashSet<Vector2i> physics_ready_cells;
+	// Navigation readiness is tracked per streamed NavigationRegion3D RID,
+	// not merely by passing physics frames. No region => never nav-ready.
+	HashMap<Vector2i, ObjectID> navigation_pending_regions;
+	HashMap<Vector2i, ObjectID> navigation_ready_regions;
 	uint64_t physics_tick_counter = 0;
 	HashMap<Vector2i, String> pending_cells;
 	HashSet<String> requested_paths;
@@ -94,6 +98,9 @@ class WorldPartition3D : public Node3D {
 	bool _instantiate_cell(const Vector2i &p_cell, const Ref<PackedScene> &p_scene);
 	void _refresh_processing();
 	void _update_physics_readiness();
+	void _update_navigation_readiness();
+	void _clear_navigation_cell(const Vector2i &p_cell);
+	Node * _find_navigation_region(Node *p_root) const;
 	void _refresh_source_readiness();
 	void _update_streaming_source_positions();
 	void _notification(int p_what);
@@ -170,6 +177,9 @@ public:
 	bool is_cell_physics_ready(const Vector2i &p_cell) const;
 	bool are_cells_physics_ready(const Vector2i &p_center, int p_radius = 0) const;
 	int get_physics_ready_cell_count() const;
+	bool is_cell_navigation_ready(const Vector2i &p_cell) const;
+	bool are_cells_navigation_ready(const Vector2i &p_center, int p_radius = 0) const;
+	int get_navigation_ready_cell_count() const;
 	Node3D *get_cell_node(const Vector2i &p_cell) const;
 	bool are_cells_loaded(const Vector2i &p_center, int p_radius = 0) const;
 	int get_loaded_cell_count() const;
