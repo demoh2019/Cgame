@@ -107,7 +107,8 @@ func clear_standard_by(peer_id: int) -> void:
 	if group_id == 0 or not groups.has(group_id):
 		return
 	var group: Dictionary = groups[group_id]
-	if int(group.get("standard", {}).get("by", -1)) == peer_id:
+	var deployed: Dictionary = group.get("standard", {})
+	if not deployed.is_empty() and int(deployed.get("by", -1)) == peer_id:
 		group.erase("standard")
 
 
