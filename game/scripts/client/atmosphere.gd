@@ -125,7 +125,7 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		sky_material.set_shader_parameter("storm", storm)
 		sky_material.set_shader_parameter("sky_time", _sky_seconds)
 		# DirectionalLight3D emits along -Z. Cache exactly that direction for the disc.
-		sky_material.set_shader_parameter("sun_direction", -sun.global_transform.basis.z)
+		sky_material.set_shader_parameter("sun_direction", sun.global_transform.basis.z.normalized())
 		var light_color: Color = sun.light_color
 		sky_material.set_shader_parameter("sun_color", Vector3(light_color.r, light_color.g, light_color.b) * sun.light_energy)
 	# Moonlit nights: the black night sky gives no ambient light, so a cool blue fill takes over as the light goes, and the
