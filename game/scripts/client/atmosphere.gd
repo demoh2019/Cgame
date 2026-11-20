@@ -5,6 +5,7 @@ const CinematicColorGrade = preload("res://scripts/client/cinematic_color_grade.
 const VegetationWind = preload("res://scripts/client/vegetation_wind.gd")
 const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
 const BiomeAtmosphere = preload("res://scripts/client/biome_atmosphere.gd")
+const SunShadowAtmosphere = preload("res://scripts/client/sun_shadow_atmosphere.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
 ## Everything degrades gracefully on the compatibility renderer (SSAO and the like are simply ignored).
 
@@ -23,6 +24,10 @@ var _sky_seconds := 0.0
 var _vegetation_wind := Vector3.ZERO
 var _cloud_offset := Vector2.ZERO # Wrapped 1024 m high-cloud motion, shared by all surface materials.
 var _wind_publish_seconds := 0.1
+# Conservative 4 Hz native light update; profile switches force a refresh.
+var _shadow_filter_level := 1
+var _shadow_filter_seconds := 0.25
+const SHADOW_FILTER_INTERVAL := 0.25
 var _visual_biome_settings: Dictionary = {}
 var light_level := 1.0 # The daylight of the last update, 0 at night and 1 at noon.
 var storm := 0.0 # 0..1, eased toward the target so the weather fades in and out.
@@ -108,6 +113,10 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		CloudShadowLut.shadow_strength(daylight, storm, _cloud_shadows_allowed))
 	# One GPU global updates every terrain material, without iterating streamed chunks.
 	RenderingServer.global_shader_parameter_set(&"aa_weather_wetness", storm)
+	_shadow_filter_seconds += maxf(delta, 0.0)
+	if _shadow_filter_seconds >= SHADOW_FILTER_INTERVAL:
+		_shadow_filter_seconds = fmod(_shadow_filter_seconds, SHADOW_FILTER_INTERVAL)
+		SunShadowAtmosphere.apply(sun, _shadow_filter_level, daylight, sun_height, storm)
 	# Weather-synchronised GPU foliage: one packed upload, maximum 10 times a second.
 	_vegetation_wind = VegetationWind.smooth(
 		_vegetation_wind, VegetationWind.target(wind), delta)
@@ -176,6 +185,8 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 func apply_graphics_profile(settings: Dictionary) -> void:
 	_shadows_allowed = bool(settings["shadows"])
 	_cloud_shadows_allowed = bool(settings.get("cloud_shadows", true))
+	_shadow_filter_level = clampi(int(settings.get("quality_level", 1)), 0, 3)
+	_shadow_filter_seconds = SHADOW_FILTER_INTERVAL
 	_fog_profile = CinematicFog.profile(
 		int(settings.get("quality_level", 1)), str(settings.get("rendering_method", "gl_compatibility")))
 	CinematicFog.apply_profile(environment, sun, _fog_profile)
