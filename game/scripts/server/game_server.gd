@@ -48,6 +48,7 @@ const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
 const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
+const RuinAmbush = preload("res://scripts/shared/ruin_ambush.gd")
 const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
 const CaravanEscortRewards = preload("res://scripts/shared/caravan_escort_rewards.gd")
 const NightCaravan = preload("res://scripts/shared/night_caravan.gd")
@@ -328,6 +329,8 @@ var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned ses
 var next_horde_at: float = NightHorde.START_DELAY # Separate night event schedule.
 var night_horde: Dictionary = {} # Active IDs, expiry, tier, public event coordinates.
 var caravan_ambushes: Array[Dictionary] = [] # Bounded server waves with expiry.
+var ruin_ambushes: Array[Dictionary] = [] # One-shot infected packs awakened by real ruin looting.
+var next_ruin_ambush_at: float = 0.0 # Global anti-spam cooldown; no client timer.
 var caravan_escort_progress: Dictionary = {} # Session-only verified co-travel for live parties.
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
@@ -5090,8 +5093,63 @@ func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dict
 		if DailyBounties.record_crate(player.daily_bounty, _refresh_daily(player), entity_id):
 			player.dirty_character = true
 		events.append({"type": "crate", "peer": peer_id, "id": entity_id})
+		# The cache is already committed as opened: no repeated RPC can create
+		# another mob wave or another lockpick reward for this same opening.
+		_trigger_ruin_ambush(player, crate, unlocked)
 		return {"ok": true, "scavenging_xp": gained_xp}
 	return {"ok": false, "reason": "nothing_there"}
+
+
+## Server-only PvE consequence of successfully opening a dangerous ruin.
+## A sealed cache always makes enough noise to wake a pack; an ordinary
+## cache wakes one with a deterministic chance based on its real world ID.
+func _trigger_ruin_ambush(player: Player, crate: Dictionary, lockpicked: bool) -> void:
+	if player == null or not _alive(player) or not player.position.is_finite() or \
+			time < next_ruin_ambush_at or raid_boss_id >= 0 or not night_horde.is_empty():
+		return
+	var zone: int = int(crate.get("zone", -1))
+	if not RuinAmbush.awakens(zone, int(crate.get("id", -1)),
+			int(world.world_seed), lockpicked):
+		return
+	var capacity: int = RuinAmbush.available(ruin_ambushes, zombies)
+	if capacity <= 0:
+		return
+	var survivors: Array[Vector3] = []
+	for nearby in players.values():
+		if _alive(nearby) and nearby.position.is_finite():
+			survivors.append(nearby.position)
+	var spots: Array[Dictionary] = RuinAmbush.sites(
+		world, crate, survivors, zombies, capacity,
+		int(crate["id"]) % SupplyDrops.GUARD_ANGLES)
+	if spots.is_empty():
+		return
+	var targets := {player.id: {"position": player.position, "alive": true, "safe": false}}
+	var ids: Array[int] = []
+	for spot in spots:
+		var x: float = float(spot["x"])
+		var z: float = float(spot["z"])
+		var enemy_id: int = new_id()
+		var enemy = Zombie.new(enemy_id, str(spot["kind"]),
+			Vector3(x, world.height_at(x, z), z), -1)
+		enemy.receive_pack_alert(player.id, targets)
+		zombies[enemy_id] = enemy
+		ids.append(enemy_id)
+	ruin_ambushes.append({"ids": ids, "expires": time + RuinAmbush.LIFETIME_SECONDS})
+	next_ruin_ambush_at = time + RuinAmbush.COOLDOWN_SECONDS
+	events.append({"type": "ruin_ambush", "peer": player.id,
+		"group": parties.group_of(player.id), "count": ids.size(), "tier": zone + 1})
+
+
+## Remove only temporary ruin encounters. Missing or dead enemies are safe to
+## sweep; natural spawn slots, rewards and persistent world data are untouched.
+func _tick_ruin_ambush() -> void:
+	for index in range(ruin_ambushes.size() - 1, -1, -1):
+		var wave: Dictionary = ruin_ambushes[index]
+		if time < float(wave["expires"]):
+			continue
+		for id in wave["ids"]:
+			zombies.erase(int(id))
+		ruin_ambushes.remove_at(index)
 
 
 # --- Skills -------------------------------------------------------------------------------------------------
@@ -7160,6 +7218,7 @@ func _tick_world(delta: float) -> void:
 	_tick_supply_drop()
 	_tick_night_horde()
 	_tick_caravan_ambush()
+	_tick_ruin_ambush()
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):
 			decoys.erase(id)
