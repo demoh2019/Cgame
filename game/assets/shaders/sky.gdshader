@@ -14,7 +14,9 @@ uniform vec3 day_top : source_color = vec3(0.2, 0.4, 0.78);
 uniform vec3 day_horizon : source_color = vec3(0.66, 0.78, 0.9);
 uniform vec3 dusk_color : source_color = vec3(1.0, 0.55, 0.28);
 uniform vec3 storm_color : source_color = vec3(0.32, 0.35, 0.4);
-uniform float drift = 0.004;
+// Advect the daytime panorama using the same wind integration as ground cloud shadows.
+// Updated only alongside the cached sky radiance: no realtime cubemap rebuilds.
+uniform float cloud_wind_rotation = 0.0;
 // Updated at a bounded cadence by Atmosphere; avoids forcing radiance rebuilds every frame.
 uniform float sky_time = 0.0;
 uniform vec3 sun_direction = vec3(0.0, 0.4, 0.9165);
@@ -44,7 +46,7 @@ void sky() {
 	// Full-screen night pixels never sample the daytime panorama or evaluate
 	// spherical UV atan/acos; the discarded contribution is below 0.5%.
 	if (has_panorama && daylight > 0.005) {
-		float u = atan(dir.x, -dir.z) / (2.0 * PI) + 0.5 + sky_time * drift * 0.01;
+		float u = atan(dir.x, -dir.z) / (2.0 * PI) + 0.5 + cloud_wind_rotation;
 		float v = acos(clamp(dir.y, -1.0, 1.0)) / PI;
 		day = texture(day_panorama, vec2(u, min(v, 0.499))).rgb * 1.08;
 	}
