@@ -70,6 +70,14 @@ void prioritize_cells_for_motion(LocalVector<Vector3i> &r_cells, const Vector3 &
 		const Vector3 &p_velocity, real_t p_lookahead_seconds, real_t p_max_prediction,
 		real_t p_cell_size, Axes p_axes);
 
+// Prioritize near, visible cells using the camera's ground-plane heading and
+// the existing capped motion prediction in a SINGLE sort. Membership/radii
+// are unchanged and the player's own cell is always first. Invalid/zero view
+// hints reduce to the original motion-only priority.
+void prioritize_cells_for_motion_and_view(LocalVector<Vector3i> &r_cells, const Vector3 &p_focus,
+		const Vector3 &p_velocity, real_t p_lookahead_seconds, real_t p_max_prediction,
+		const Vector3 &p_view_direction, real_t p_view_weight, real_t p_cell_size, Axes p_axes);
+
 // Loaded cells that are now farther than `p_unload_radius` (hysteresis: it should be at least the
 // load radius so cells on the border do not flicker in and out).
 void cells_to_unload(const Vector3 &p_position, real_t p_unload_radius, real_t p_cell_size, Axes p_axes, const HashSet<Vector3i> &p_loaded, LocalVector<Vector3i> &r_cells);

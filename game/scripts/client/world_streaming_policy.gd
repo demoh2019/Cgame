@@ -23,3 +23,40 @@ static func apply(streamer: WorldStreamer, mounted: bool, velocity: Vector3) -> 
 	var desired: float = lookahead_seconds(mounted, velocity)
 	if not is_equal_approx(streamer.lookahead_seconds, desired):
 		streamer.lookahead_seconds = desired
+
+
+## Visibility-weighted streaming source inspired by Unreal World Partition.
+## View weighting affects ONLY scheduling, never player-centered residency.
+## No camera or mesh work is performed in the native chunk generator.
+const VIEW_WEIGHTS := [0.35, 0.48, 0.66, 0.80]
+
+
+static func view_weight(level: int) -> float:
+	return float(VIEW_WEIGHTS[clampi(level, 0, VIEW_WEIGHTS.size() - 1)])
+
+
+static func ground_view(camera: Camera3D) -> Vector3:
+	if camera == null:
+		return Vector3.ZERO
+	var forward: Vector3 = -camera.global_transform.basis.z
+	if not forward.is_finite():
+		return Vector3.ZERO
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		return Vector3.ZERO
+	return forward.normalized()
+
+
+## Run after Camera3D look_at(), so zoom/photo orbit uses the actual
+## rendered view instead of stale movement input. Native Cgame setters are
+## idempotent; do not touch loaded cells or resource allocations here.
+static func apply_view(streamer: WorldStreamer, camera: Camera3D,
+		graphics_level: int) -> void:
+	if streamer == null:
+		return
+	var weight: float = view_weight(graphics_level)
+	if not is_equal_approx(streamer.view_priority, weight):
+		streamer.view_priority = weight
+	var direction: Vector3 = ground_view(camera)
+	if not streamer.view_direction.is_equal_approx(direction):
+		streamer.view_direction = direction
