@@ -324,9 +324,9 @@ void WorldStreamer::_update_streaming() {
 	// World Partition-style streaming source prediction: prioritize only
 	// cells that are already inside the real load radius. Never enlarge the
 	// resident set or unload cells based on estimated movement.
-	WorldStreamingGrid::prioritize_cells_for_motion(wanted, position, velocity_hint,
-			lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
-			cell_size, _grid_axes());
+	WorldStreamingGrid::prioritize_cells_for_motion_and_view(wanted, position,
+			velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
+			view_direction, view_priority, cell_size, _grid_axes());
 	if (truncated && !truncated_warned) {
 		truncated_warned = true;
 		WARN_PRINT(vformat("WorldStreamer: load_radius %s with cell_size %s covers more than %d cells; only the nearest are streamed. Increase cell_size or reduce load_radius.", rtos(load_radius), rtos(cell_size), WorldStreamingGrid::MAX_CELLS));
@@ -479,6 +479,28 @@ void WorldStreamer::set_lookahead_seconds(real_t p_seconds) {
 	lookahead_seconds = CLAMP(p_seconds, real_t(0.0), real_t(4.0));
 }
 
+void WorldStreamer::set_view_direction(const Vector3 &p_direction) {
+	if (!p_direction.is_finite()) {
+		return; // Invalid camera/network data cannot corrupt streaming priority.
+	}
+	const Vector3 unit = p_direction.normalized();
+	if (view_direction.is_equal_approx(unit)) {
+		return;
+	}
+	view_direction = unit;
+}
+
+void WorldStreamer::set_view_priority(real_t p_weight) {
+	if (!Math::is_finite(p_weight)) {
+		return;
+	}
+	const real_t safe = CLAMP(p_weight, real_t(0.0), real_t(1.0));
+	if (Math::is_equal_approx(view_priority, safe)) {
+		return;
+	}
+	view_priority = safe;
+}
+
 void WorldStreamer::set_max_concurrent_loads(int p_count) {
 	max_concurrent_loads = MAX(p_count, 1);
 }
@@ -589,6 +611,10 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_velocity_hint"), &WorldStreamer::get_velocity_hint);
 	ClassDB::bind_method(D_METHOD("set_lookahead_seconds", "seconds"), &WorldStreamer::set_lookahead_seconds);
 	ClassDB::bind_method(D_METHOD("get_lookahead_seconds"), &WorldStreamer::get_lookahead_seconds);
+	ClassDB::bind_method(D_METHOD("set_view_direction", "direction"), &WorldStreamer::set_view_direction);
+	ClassDB::bind_method(D_METHOD("get_view_direction"), &WorldStreamer::get_view_direction);
+	ClassDB::bind_method(D_METHOD("set_view_priority", "weight"), &WorldStreamer::set_view_priority);
+	ClassDB::bind_method(D_METHOD("get_view_priority"), &WorldStreamer::get_view_priority);
 	ClassDB::bind_method(D_METHOD("set_max_concurrent_loads", "count"), &WorldStreamer::set_max_concurrent_loads);
 	ClassDB::bind_method(D_METHOD("get_max_concurrent_loads"), &WorldStreamer::get_max_concurrent_loads);
 	ClassDB::bind_method(D_METHOD("set_max_instantiations_per_frame", "count"), &WorldStreamer::set_max_instantiations_per_frame);
@@ -630,6 +656,8 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "unload_radius", PROPERTY_HINT_RANGE, "0,100000,0.1,or_greater,suffix:m"), "set_unload_radius", "get_unload_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "velocity_hint", PROPERTY_HINT_NONE, "suffix:m/s"), "set_velocity_hint", "get_velocity_hint");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lookahead_seconds", PROPERTY_HINT_RANGE, "0,4,0.1,suffix:s"), "set_lookahead_seconds", "get_lookahead_seconds");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "view_direction", PROPERTY_HINT_NONE), "set_view_direction", "get_view_direction");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "view_priority", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_view_priority", "get_view_priority");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "chunk_path_template", PROPERTY_HINT_NONE, ""), "set_chunk_path_template", "get_chunk_path_template");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "chunk_parent", PROPERTY_HINT_NONE, ""), "set_chunk_parent", "get_chunk_parent");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "position_chunks"), "set_position_chunks", "get_position_chunks");
