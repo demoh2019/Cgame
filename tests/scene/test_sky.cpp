@@ -270,6 +270,27 @@ TEST_CASE("[SceneTree][Environment] Filmic AgX and ACES ignore invalid exposure 
 	CHECK(scene_environment->get_tonemapper() == Environment::TONE_MAPPER_ACES);
 }
 
+TEST_CASE("[SceneTree][Environment] Indirect volumetric light injection is bounded and idempotent") {
+	if (RenderingServer::get_singleton() == nullptr) {
+		return;
+	}
+	Ref<Environment> env;
+	env.instantiate();
+
+	// A conservative Ultra blend adds SDFGI light to existing froxels.
+	env->set_volumetric_fog_gi_inject(0.24f);
+	CHECK(env->get_volumetric_fog_gi_inject() == 0.24f);
+	env->set_volumetric_fog_gi_inject(0.24f); // No redundant renderer update.
+	CHECK(env->get_volumetric_fog_gi_inject() == 0.24f);
+
+	// Bad authoring inputs never replace the current GPU GI strength.
+	env->set_volumetric_fog_gi_inject(-0.2f);
+	CHECK(env->get_volumetric_fog_gi_inject() == 0.24f);
+	env->set_volumetric_fog_gi_inject(0.0f);
+	CHECK(env->get_volumetric_fog_gi_inject() == 0.0f);
+	CHECK(env->get_volumetric_fog_ambient_inject() == 0.0f);
+}
+
 TEST_CASE("[SceneTree][Environment] Volumetric fog history is finite and bounded") {
 	if (RenderingServer::get_singleton() == nullptr) {
 		return;
