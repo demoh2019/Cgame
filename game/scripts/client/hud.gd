@@ -412,6 +412,12 @@ func _build() -> void:
 	canteen_button.tooltip_text = "Requires a crafted canteen, one carbon filter and the shared lake cooldown."
 	canteen_button.pressed.connect(func() -> void: client.refill_canteen())
 	inventory_box.add_child(canteen_button)
+	var pouch_button := Button.new()
+	pouch_button.name = "FillRawWaterPouch"
+	pouch_button.text = "Fill crafted water pouch at shore (Shift+2)"
+	pouch_button.tooltip_text = "Craft an empty pouch from cloth + fiber. Fill near lake water, then craft Boiled Water using 1 wood at a live campfire (or hub workbench). Raw water cannot be drunk."
+	pouch_button.pressed.connect(func() -> void: client.use_item("empty_water_pouch"))
+	inventory_box.add_child(pouch_button)
 	var storm_button := Button.new()
 	storm_button.name = "EquipStormInsulator"
 	storm_button.text = "Equip storm insulation (180s)"
