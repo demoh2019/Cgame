@@ -22,6 +22,7 @@ const SUITES := [
 	"res://tests/test_terrain_seam_normals.gd",
 	"res://tests/test_terrain_noise_lod.gd",
 	"res://tests/test_terrain_material_fidelity.gd",
+	"res://tests/test_terrain_curvature.gd",
 	"res://tests/test_terrain_antitiling.gd",
 	"res://tests/test_terrain_anisotropy.gd",
 	"res://tests/test_specular_aa.gd",
