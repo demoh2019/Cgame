@@ -599,13 +599,23 @@ void WorldPartition3D::update_streaming() {
 		}
 		return false;
 	};
+	// An additional source retains cells out to unload_radius and requests
+	// new cells within load_radius, independently of the player and pins.
+	const auto is_source_cell = [&](const Vector2i &p_cell, bool p_for_unload) -> bool {
+		for (const StreamingSource &source : streaming_sources) {
+			if (_within_radius(p_cell, source.center, p_for_unload ? source.unload_radius : source.load_radius)) {
+				return true;
+			}
+		}
+		return false;
+	};
 	const bool observer_cell_changed = !observer_cell_valid || observer_cell != center;
 	observer_cell = center;
 	observer_cell_valid = true;
 
 	Vector<Vector2i> unload;
 	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
-		if ((!_within_radius(E.key, center, unload_radius) && !is_prefetch_cell(E.key) && !pinned_cells.has(E.key)) || ObjectDB::get_instance(E.value) == nullptr) {
+		if ((!_within_radius(E.key, center, unload_radius) && !is_prefetch_cell(E.key) && !pinned_cells.has(E.key) && !is_source_cell(E.key, true)) || ObjectDB::get_instance(E.value) == nullptr) {
 			unload.push_back(E.key);
 		}
 	}
@@ -615,7 +625,7 @@ void WorldPartition3D::update_streaming() {
 
 	Vector<Vector2i> cancel;
 	for (const KeyValue<Vector2i, String> &E : pending_cells) {
-		if (!_within_radius(E.key, center, load_radius) && !is_prefetch_cell(E.key) && !pinned_cells.has(E.key)) {
+		if (!_within_radius(E.key, center, load_radius) && !is_prefetch_cell(E.key) && !pinned_cells.has(E.key) && !is_source_cell(E.key, false)) {
 			cancel.push_back(E.key);
 		}
 	}
@@ -731,6 +741,50 @@ void WorldPartition3D::update_streaming() {
 		}
 	}
 
+	// Named sources are visited after the player and explicit pins, but before
+	// speculative lookahead. Higher priorities win the shared frame budgets.
+	Vector<StreamingSource> source_snapshot = streaming_sources;
+	for (int i = 1; i < source_snapshot.size(); i++) {
+		const StreamingSource item = source_snapshot[i];
+		int j = i;
+		while (j > 0 && (source_snapshot[j - 1].priority < item.priority ||
+				(source_snapshot[j - 1].priority == item.priority && source_snapshot[j - 1].name.naturalnocasecmp_to(item.name) > 0))) {
+			source_snapshot.write[j] = source_snapshot[j - 1];
+			j--;
+		}
+		source_snapshot.write[j] = item;
+	}
+	for (const StreamingSource &source : source_snapshot) {
+		for (int radius = 0; radius <= source.load_radius; radius++) {
+			for (int dz = -radius; dz <= radius; dz++) {
+				for (int dx = -radius; dx <= radius; dx++) {
+					if (MAX(ABS(dx), ABS(dz)) != radius) {
+						continue;
+					}
+					const int64_t x = int64_t(source.center.x) + dx;
+					const int64_t z = int64_t(source.center.y) + dz;
+					if (x < INT32_MIN || x > INT32_MAX || z < INT32_MIN || z > INT32_MAX) {
+						continue;
+					}
+					// A cell_loaded callback may mutate the sources while _ready()
+					// runs. Skip stale source snapshots after reconfiguration.
+					bool still_current = false;
+					for (const StreamingSource &current : streaming_sources) {
+						if (current.name == source.name && current.center == source.center &&
+								current.load_radius == source.load_radius && current.unload_radius == source.unload_radius &&
+								current.priority == source.priority) {
+							still_current = true;
+							break;
+						}
+					}
+					if (still_current) {
+						visit_cell(Vector2i(int32_t(x), int32_t(z)));
+					}
+				}
+			}
+		}
+	}
+
 	// Optional direction-aware corridor, including cells beyond load_radius.
 	// No duplicate requests occur: the core path checks active/pending cells.
 	if (prefetch_direction != Vector2i()) {
@@ -744,6 +798,7 @@ void WorldPartition3D::update_streaming() {
 	_purge_unused_ready_scenes();
 	last_instantiation_attempt_count = attempted_instances;
 	last_streaming_update_ms = real_t(Time::get_singleton()->get_ticks_usec() - update_started_usec) / 1000.0;
+	_refresh_source_readiness();
 	if (observer_cell_changed) {
 		emit_signal(SNAME("observer_cell_changed"), observer_cell);
 	}
