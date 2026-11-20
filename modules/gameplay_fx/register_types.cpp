@@ -31,6 +31,7 @@
 
 #include "radial_force_field_3d.h"
 #include "sound_concurrency.h"
+#include "sound_propagation.h"
 
 #include "core/object/class_db.h"
 
@@ -40,6 +41,7 @@ void initialize_gameplay_fx_module(ModuleInitializationLevel p_level) {
 	}
 	GDREGISTER_CLASS(SoundConcurrency);
 	GDREGISTER_CLASS(SoundConcurrencyManager);
+	GDREGISTER_CLASS(SoundPropagation);
 	GDREGISTER_CLASS(RadialForceField3D);
 }
 
