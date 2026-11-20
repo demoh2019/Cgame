@@ -16,6 +16,7 @@ var world_environment: Environment
 var hud: Label
 var hint: Label
 var world_partition: WorldPartition3D
+var current_region: Vector2i = Vector2i.ZERO
 var crystals: Array[Node3D] = []
 var collected_ids: Array[int] = []
 
@@ -195,12 +196,19 @@ func _create_streaming_world() -> void:
     add_child(world_partition)
     world_partition.observer_path = world_partition.get_path_to(player)
     world_partition.cell_loaded.connect(_on_stream_cell_loaded)
+    world_partition.observer_cell_changed.connect(_on_observer_cell_changed)
 
     for cz in range(-2, 2):
         for cx in range(-2, 2):
             world_partition.set_cell_scene(
                 Vector2i(cx, cz), "res://cells/forest_cell.tscn")
     world_partition.update_streaming()
+
+
+func _on_observer_cell_changed(cell: Vector2i) -> void:
+    # Event-driven region updates: other gameplay systems can subscribe here.
+    current_region = cell
+    _refresh_hud()
 
 
 func _on_stream_cell_loaded(_cell: Vector2i) -> void:
@@ -315,7 +323,7 @@ func _refresh_hud() -> void:
     hud.text = "AURORA FOREST  |  Cgame / Godot 4.8\n" \
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
-        + "Ячейки: %d/%d   очередь: %d   запросы: %d   ошибки: %d" % [loaded, configured, pending, inflight, failed]
+        + "Ячейки: %d/%d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d" % [loaded, configured, pending, inflight, failed, current_region.x, current_region.y]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
