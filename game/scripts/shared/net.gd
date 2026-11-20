@@ -5,6 +5,7 @@ extends Node
 const Defs = preload("res://scripts/shared/defs.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildSiegeLedger = preload("res://scripts/shared/guild_siege_ledger.gd")
+const SiegeOutbox = preload("res://scripts/server/siege_outbox.gd")
 
 signal welcomed
 signal join_refused(reason: String)
@@ -32,7 +33,9 @@ const SAVE_INTERVAL := 30.0
 const GUILD_REFRESH_SECONDS := 45.0
 var _guild_refresh_clock: float = 0.0
 var _guild_refresh_running: bool = false
-var _siege_ledger_pending: Array[Dictionary] = [] # Pending same-ID retries, RAM only.
+var _siege_ledger_pending: Array[Dictionary] = [] # Journaled event IDs awaiting Nakama confirmation.
+var _siege_ledger_unjournaled: Array[Dictionary] = [] # IO failures; retry writing before sending.
+var siege_outbox # SiegeOutbox, configured by the dedicated server at startup.
 var _siege_ledger_running: bool = false
 var _siege_ledger_retry_clock: float = 0.0
 var _guild_score_loading: Dictionary = {}
@@ -51,9 +54,12 @@ func _process(delta: float) -> void:
 			_refresh_verified_guilds()
 		_siege_ledger_retry_clock += maxf(0.0, delta)
 		if _siege_ledger_retry_clock >= SIEGE_LEDGER_RETRY_SECONDS \
-				and not _siege_ledger_running and not _siege_ledger_pending.is_empty():
+				and not _siege_ledger_running and \
+				(not _siege_ledger_pending.is_empty() or not _siege_ledger_unjournaled.is_empty()):
 			_siege_ledger_retry_clock = 0.0
-			_flush_siege_ledger()
+			_persist_unjournaled_siege_events()
+			if not _siege_ledger_pending.is_empty():
+				_flush_siege_ledger()
 
 
 ## Memberships can change while a character is online. Only freshly
@@ -83,24 +89,67 @@ func _refresh_verified_guilds() -> void:
 	_guild_refresh_running = false
 
 
-## Guild wins are historical, server-authoritative scores. The actual
-## siege result comes from sim.tick(), never from client RPC input.
+## Load the durable outbox before accepting clients. A malformed or wrong-seed
+## journal fails closed so a restart never silently discards a committed win.
+func configure_siege_outbox(journal_path: String) -> bool:
+	if role != "server" or sim == null or gateway == null or not gateway.enabled:
+		return false
+	if siege_outbox != null:
+		return false
+	var journal = SiegeOutbox.new()
+	if not journal.open_file(journal_path, int(sim.world.world_seed)):
+		return false
+	siege_outbox = journal
+	_siege_ledger_pending = journal.snapshot()
+	if not _siege_ledger_pending.is_empty():
+		call_deferred("_flush_siege_ledger")
+	return true
+
+
+## Append a server-generated win to disk before any attempt to send it to
+## Nakama. A failed disk write stays in the local retry backlog and is
+## *never* sent until it can be journaled with its original event ID.
 func _queue_guild_siege_victories(events: Array) -> void:
 	if gateway == null or not gateway.enabled:
 		return
 	for event in events:
-		var record: Dictionary = GuildSiegeLedger.eligible_victory(event, sim)
-		if record.is_empty():
+		var eligible: Dictionary = GuildSiegeLedger.eligible_victory(event, sim)
+		if eligible.is_empty():
 			continue
-		record["event_id"] = Crypto.new().generate_random_bytes(16).hex_encode()
-		_siege_ledger_pending.append(record)
+		var record: Dictionary = {
+			"guild_id": str(eligible["guild_id"]),
+			"event_id": Crypto.new().generate_random_bytes(16).hex_encode(),
+			"site": int(eligible["site"]),
+			"world_seed": int(eligible["world_seed"]),
+		}
+		if siege_outbox != null and not siege_outbox.enqueue(record):
+			_siege_ledger_unjournaled.append(record)
+			push_error("Siege victory could not be journaled; retrying locally before Nakama commit.")
+		else:
+			_siege_ledger_pending.append(record)
+	if not _siege_ledger_unjournaled.is_empty():
+		_persist_unjournaled_siege_events()
 	if not _siege_ledger_pending.is_empty() and not _siege_ledger_running:
 		_siege_ledger_retry_clock = 0.0
 		_flush_siege_ledger()
 
 
-## Retry the *same* event ID after ambiguous RPC failures. A new event ID
-## would turn one win into two persisted wins after a network timeout.
+func _persist_unjournaled_siege_events() -> void:
+	if siege_outbox == null:
+		while not _siege_ledger_unjournaled.is_empty():
+			_siege_ledger_pending.append(_siege_ledger_unjournaled.pop_front())
+		return
+	while not _siege_ledger_unjournaled.is_empty():
+		var record: Dictionary = _siege_ledger_unjournaled.front()
+		if not siege_outbox.enqueue(record):
+			break
+		_siege_ledger_pending.append(record)
+		_siege_ledger_unjournaled.pop_front()
+
+
+## Nakama's receipt resolves ambiguous RPC outcomes. Only after success may
+## the front event be removed from the disk checkpoint. Failed disk removal
+## leaves the original event in place, safe to replay on the next boot.
 func _flush_siege_ledger() -> void:
 	if _siege_ledger_running or gateway == null or not gateway.enabled:
 		return
@@ -116,7 +165,11 @@ func _flush_siege_ledger() -> void:
 		var guild_id: String = str(item["guild_id"])
 		sim.guild_siege_wins[guild_id] = maxi(
 			int(sim.guild_siege_wins.get(guild_id, 0)), int(result.get("wins", 0)))
+		if siege_outbox != null and not siege_outbox.acknowledge(str(item["event_id"])):
+			push_error("Could not checkpoint siege receipt ACK; retaining event for idempotent replay.")
+			break
 		_siege_ledger_pending.pop_front()
+		_persist_unjournaled_siege_events()
 	_siege_ledger_running = false
 
 
@@ -308,7 +361,8 @@ func _save_all() -> void:
 ## Called for an orderly server stop, including --quit-after.
 func shutdown() -> bool:
 	shutting_down = true
-	var all_saved := true
+	_persist_unjournaled_siege_events()
+	var all_saved := _siege_ledger_unjournaled.is_empty()
 	for peer in sim.players.keys():
 		var ok: bool = await leave(peer)
 		if not ok:

@@ -2420,3 +2420,48 @@ repair and dismantling work as before. Destroyed/dismantled walls clear
 their short-lived cooldown entries and any active pool expires within
 5 seconds. Testing: `game/tests/test_acid_wall_corrosion.gd` in the
 existing headless test suite.
+
+## Crash-recoverable siege victory outbox (dedicated server)
+
+Nakama guild siege victories are now written to a **local write-ahead
+outbox** before the server sends a score/receipt RPC. The outbox saves each
+event's original 128-bit ID, verified guild UUID, outpost ID and world seed
+under `user://albion_after_siege_outbox_<seed>.json`. Each append and
+acknowledgement uses a flushed temporary file followed by an atomic file
+rename, replacing one validated complete checkpoint. Only after Nakama
+confirms its idempotent receipt does the server remove an event from the
+journal. Network errors and ambiguous responses retain the **same ID**.
+
+When the dedicated server next starts with `--nakama`, it validates
+and reloads the queue **before accepting player connections**, then
+resubmits unacknowledged events. A confirmed-but-not-yet-deleted event
+is safe to replay because the Nakama backend recognizes its immutable
+receipt. Files with an invalid schema, duplicate IDs, impossible values,
+oversized content, another world seed or an unsafe path cause startup
+to fail instead of silently resetting guild history. Pending events for
+different seeds cannot be mixed.
+
+The outbox is enabled automatically when launching a dedicated Nakama
+server; offline play is unchanged. Administrators can choose a dedicated
+journal path with `--siege-outbox user://backups/siege_1337.json` alongside
+`--nakama`. **Only one server process may write a given journal file**;
+it is not a cross-shard consensus ledger. `--no-world-save` does not turn
+off the siege outbox. Preserve both the Nakama database and the server's
+`user://` volume across container restarts.
+
+For a disk write failure, the server retains affected events in a
+**RAM-only retry backlog and refuses to send them to Nakama until they have
+been journaled**. Graceful shutdown reports failure while such events
+remain unjournaled; a sudden crash during an unjournaled IO failure can
+still lose those events. The small interval between calculating a world
+capture and writing its outbox entry is also not a transactional boundary
+with Nakama. Durable castle ownership and cross-shard exactly-once
+transactions are separate future features.
+
+Implementation: `scripts/server/siege_outbox.gd`,
+`scripts/shared/net.gd`, `scripts/server/server_main.gd`.
+The offline `tests/test_siege_outbox.gd` suite checks real file recovery,
+record validation, append order, duplicate rejection, acknowledgement
+restarts, seed isolation and corruption fail-closed behavior. Nakama
+integration tests continue checking receipt idempotence. No native Cgame
+engine API was missing.
