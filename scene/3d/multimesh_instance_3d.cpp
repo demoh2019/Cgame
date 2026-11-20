@@ -59,6 +59,7 @@ void MultiMeshInstance3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_multimesh", "multimesh"), &MultiMeshInstance3D::set_multimesh);
 	ClassDB::bind_method(D_METHOD("get_multimesh"), &MultiMeshInstance3D::get_multimesh);
 	ClassDB::bind_method(D_METHOD("find_nearest_visible_instance", "world_position", "max_distance"), &MultiMeshInstance3D::find_nearest_visible_instance);
+	ClassDB::bind_method(D_METHOD("find_visible_instances_in_radius", "world_position", "max_distance"), &MultiMeshInstance3D::find_visible_instances_in_radius);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "multimesh", PROPERTY_HINT_RESOURCE_TYPE, MultiMesh::get_class_static(), PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_EDITOR_INSTANTIATE_OBJECT), "set_multimesh", "get_multimesh");
 }
 
@@ -80,6 +81,32 @@ void MultiMeshInstance3D::set_multimesh(const Ref<MultiMesh> &p_multimesh) {
 
 Ref<MultiMesh> MultiMeshInstance3D::get_multimesh() const {
 	return multimesh;
+}
+
+PackedInt32Array MultiMeshInstance3D::find_visible_instances_in_radius(const Vector3 &p_world_position, real_t p_max_distance) const {
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_max_distance) || p_max_distance < 0, PackedInt32Array(), "Search radius must be finite and non-negative.");
+	PackedInt32Array matches;
+	if (!is_inside_tree() || multimesh.is_null() || multimesh->get_mesh().is_null() || multimesh->get_transform_format() != MultiMesh::TRANSFORM_3D) {
+		return matches;
+	}
+
+	int count = multimesh->get_visible_instance_count();
+	if (count == -1) {
+		count = multimesh->get_instance_count();
+	}
+	if (count <= 0) {
+		return matches;
+	}
+
+	const Transform3D world_transform = get_global_transform();
+	const real_t radius_squared = p_max_distance * p_max_distance;
+	for (int i = 0; i < count; i++) {
+		const Vector3 world_pos = world_transform * multimesh->get_instance_transform(i).origin;
+		if (world_pos.distance_squared_to(p_world_position) <= radius_squared) {
+			matches.push_back(i);
+		}
+	}
+	return matches;
 }
 
 int MultiMeshInstance3D::find_nearest_visible_instance(const Vector3 &p_world_position, real_t p_max_distance) const {

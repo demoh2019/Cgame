@@ -13,6 +13,16 @@
 		<link title="Animating thousands of fish with MultiMeshInstance">$DOCS_URL/tutorials/performance/vertex_animation/animating_thousands_of_fish.html</link>
 	</tutorials>
 	<methods>
+		<method name="find_visible_instances_in_radius" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="world_position" type="Vector3" />
+			<param index="1" name="max_distance" type="float" />
+			<description>
+				Returns ascending indices of visible 3D instance [b]origins[/b] within [param max_distance] of [param world_position], in world coordinates, including the radius boundary.
+				The query uses [member MultiMesh.visible_instance_count] ([code]-1[/code] means all instances, [code]0[/code] means none). Returns an empty array if no instances match, the node is outside the scene tree, or [member multimesh] does not contain a valid 3D mesh.
+				This does [b]not[/b] test mesh bounds, collisions, frustum visibility or occlusion. Radius must be finite and non-negative. The scan has O(N) cost per call: run it for gameplay interactions, not per frame, and divide large worlds into spatial chunks. Buffer indices are not persistent IDs when transforms are swapped.
+			</description>
+		</method>
 		<method name="find_nearest_visible_instance" qualifiers="const">
 			<return type="int" />
 			<param index="0" name="world_position" type="Vector3" />
