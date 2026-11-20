@@ -41,6 +41,7 @@ const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
+const AcidNeutralizer = preload("res://scripts/shared/acid_neutralizer.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
 const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
@@ -2085,6 +2086,23 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"acid_neutralizer":
+			if item_id != AcidNeutralizer.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if not player.position.is_finite() or _is_safe(player.position):
+				return {"ok": false, "reason": "safe_zone"}
+			# Never accept target IDs, positions or counts from a client.
+			var ids: Array[int] = AcidNeutralizer.targets(
+				acid_pools, player.position, time)
+			if ids.is_empty():
+				return {"ok": false, "reason": "no_acid_nearby"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			for acid_id in ids:
+				acid_pools.erase(acid_id)
+			player.dirty_inventory = true
+			player.dirty_character = true
+			return {"ok": true, "neutralized": ids.size()}
 		"stimulant":
 			if item_id != FrontierStim.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}

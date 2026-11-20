@@ -229,6 +229,12 @@ func _build() -> void:
 		var face := Vector2(sin(client.yaw), cos(client.yaw))
 		client.place_infected_snare(Vector2(at.x, at.z) + face * 2.8))
 	inventory_box.add_child(snare_button)
+	var alkali_button := Button.new()
+	alkali_button.name = "UseFieldAlkaliKit"
+	alkali_button.text = "Neutralize nearby acid pools (1 kit, up to 3)"
+	alkali_button.tooltip_text = "Clears lingering spitter acid within 5.5 m, not the initial splash."
+	alkali_button.pressed.connect(func() -> void: client.use_item("field_alkali_kit"))
+	inventory_box.add_child(alkali_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -929,6 +935,12 @@ func _claim_nearest_outpost_cache() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and data.has("neutralized"):
+		say("Alkali kit: cleared %d active acid pools nearby." % int(data["neutralized"]))
+		return
+	if kind == "use" and str(data.get("reason", "")) == "no_acid_nearby":
+		say("Alkali kit: no active acid nearby. Your supplies were not spent.")
+		return
 	if kind == "party_standard":
 		if bool(data.get("ok", false)):
 			say("Rally standard raised: nearby allies recover stamina and combat energy for 90 seconds.")
