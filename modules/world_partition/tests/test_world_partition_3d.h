@@ -71,7 +71,116 @@ TEST_CASE("[WorldPartition3D] Defaults") {
 	CHECK(partition->get_pending_cell_count() == 0);
 	CHECK(partition->get_inflight_request_count() == 0);
 	CHECK(partition->get_failed_cell_count() == 0);
+	CHECK(partition->get_pinned_cell_count() == 0);
+	CHECK_FALSE(partition->is_cell_pinned(Vector2i(0, 0)));
 	memdelete(partition);
+}
+
+TEST_CASE("[WorldPartition3D] Pinned cells are registered bounded and lifecycle-safe") {
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(partition->pin_cell(Vector2i(200, 200)));
+	ERR_PRINT_ON;
+	for (int i = 0; i < 17; i++) {
+		partition->set_cell_scene(Vector2i(i, 0), "res://valid_test_scene.tscn");
+	}
+	for (int i = 0; i < 16; i++) {
+		CHECK(partition->pin_cell(Vector2i(i, 0)));
+	}
+	CHECK(partition->get_pinned_cell_count() == 16);
+	CHECK(partition->pin_cell(Vector2i(0, 0))); // Idempotent.
+	CHECK(partition->get_pinned_cell_count() == 16);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(partition->pin_cell(Vector2i(16, 0))); // Bounded.
+	ERR_PRINT_ON;
+	CHECK_FALSE(partition->is_cell_pinned(Vector2i(16, 0)));
+
+	partition->unpin_cell(Vector2i(3, 0));
+	CHECK(partition->get_pinned_cell_count() == 15);
+	partition->remove_cell_scene(Vector2i(4, 0));
+	CHECK_FALSE(partition->is_cell_pinned(Vector2i(4, 0)));
+	CHECK(partition->get_pinned_cell_count() == 14);
+	partition->set_streaming_enabled(false);
+	CHECK(partition->get_pinned_cell_count() == 14);
+	partition->set_streaming_enabled(true);
+
+	Dictionary new_cells;
+	new_cells[Vector2i(-3, 2)] = "res://next_scene.tscn";
+	partition->set_cell_scenes(new_cells);
+	CHECK(partition->get_pinned_cell_count() == 0);
+	CHECK_FALSE(partition->is_cell_pinned(Vector2i(0, 0)));
+	CHECK(partition->pin_cell(Vector2i(-3, 2)));
+	partition->clear_cell_scenes();
+	CHECK(partition->get_pinned_cell_count() == 0);
+	memdelete(partition);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Pinned remote cells load and unload independently of the observer") {
+	Node3D *template_root = memnew(Node3D);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	REQUIRE(packed->pack(template_root) == OK);
+	memdelete(template_root);
+	const String path = "user://world_partition_pins_doctest_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	REQUIRE(ResourceSaver::save(packed, path) == OK);
+
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	Node3D *observer = memnew(Node3D);
+	observer->set_name("PinObserver");
+	SceneTree::get_singleton()->get_root()->add_child(observer);
+	SceneTree::get_singleton()->get_root()->add_child(partition);
+	partition->set_cell_size(16);
+	partition->set_load_radius(0);
+	partition->set_unload_radius(0);
+	partition->set_max_instances_per_frame(1);
+	partition->set_observer_path(partition->get_path_to(observer));
+	partition->set_cell_scene(Vector2i(0, 0), path);
+	partition->set_cell_scene(Vector2i(5, 0), path);
+	CHECK(partition->pin_cell(Vector2i(5, 0)));
+
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(0, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(Vector2i(0, 0)));
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(5, 0))); // Near-first budget.
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(5, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(Vector2i(5, 0)));
+	CHECK(partition->get_loaded_cell_count() == 2);
+
+	partition->unpin_cell(Vector2i(5, 0));
+	partition->update_streaming();
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(5, 0)));
+	CHECK(partition->get_loaded_cell_count() == 1);
+	CHECK(partition->get_cell_scene(Vector2i(5, 0)) == path);
+
+	CHECK(partition->pin_cell(Vector2i(5, 0)));
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(5, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(Vector2i(5, 0)));
+	partition->set_streaming_enabled(false);
+	CHECK(partition->get_loaded_cell_count() == 0);
+	CHECK(partition->is_cell_pinned(Vector2i(5, 0)));
+	partition->set_streaming_enabled(true);
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(5, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	CHECK(partition->is_cell_loaded(Vector2i(5, 0)));
+	partition->clear_pinned_cells();
+	partition->update_streaming();
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(5, 0)));
+
+	SceneTree::get_singleton()->get_root()->remove_child(partition);
+	SceneTree::get_singleton()->get_root()->remove_child(observer);
+	memdelete(partition);
+	memdelete(observer);
+	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
 TEST_CASE("[SceneTree][WorldPartition3D] Observer cell follows motion and grid changes") {
