@@ -1,0 +1,16 @@
+; Cgame Forest Showcase. Open this folder as a Godot project using a Cgame build
+; that includes AdaptiveResolution3D (PR #907).
+config_version=5
+
+[application]
+config/name="Cgame — Aurora Forest"
+run/main_scene="res://world.tscn"
+config/description="GPU-instanced forest, atmospheric sky, interactive exploration and adaptive 3D resolution."
+
+[display]
+window/size/viewport_width=1600
+window/size/viewport_height=900
+window/stretch/mode="canvas_items"
+
+[rendering]
+textures/default_filters/use_nearest_mipmap_filter=false
