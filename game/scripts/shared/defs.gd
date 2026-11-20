@@ -206,6 +206,16 @@ static func _build_items() -> void:
 		_add_recipe("machete_%d" % t, "machete_%d" % t, 1,
 			{"plank_%d" % t: 2, "bar_%d" % t: 2, "scrap": 1},
 			"workbench", 6.0)
+		# Armor sundering creates a support role for raid damage dealers.
+		# The debuff is applied only after a confirmed infected melee hit.
+		_add_item("sunder_axe_%d" % t, {"name": "Ruin Sunder Axe T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 15.0 + 9.0 * float(t - 1), "cooldown": 0.94,
+			"weight": 4.0 + 0.25 * float(t), "value": 61 * t})
+		_add_recipe("sunder_axe_%d" % t, "sunder_axe_%d" % t, 1,
+			{"bar_%d" % t: 3, "plank_%d" % t: 1,
+				"fiber_%d" % t: 2, "scrap": 1},
+			"workbench", 6.5)
 		# Swift scavenger blades give a fragile melee combatant a paid
 		# precision finisher against an already wounded infected.
 		_add_item("dagger_%d" % t, {"name": "Ruin Dagger T%d" % t,

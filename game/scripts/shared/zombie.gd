@@ -8,6 +8,7 @@ const Threat = preload("res://scripts/shared/threat.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -38,6 +39,7 @@ var spit_center: Vector2 = Vector2.ZERO
 var stuck_time: float = 0.0
 var snared_seconds: float = 0.0 # Server-owned root; movement-only, not attack immunity.
 var stagger_seconds: float = 0.0 # Short PvE-only incapacitation from a confirmed heavy blow.
+var sunder_until: float = 0.0 # Server-time expiry of PvE armor weakness.
 var contributors: Dictionary = {} # Server: peer -> time + equipped weapon for PvE assist XP.
 var data: Dictionary
 var threat: Dictionary = {} # Bounded per-zombie server combat threat; not sent to clients.
@@ -344,6 +346,15 @@ func apply_knockback(world, attacker_position: Vector3, meters: float) -> float:
 	return displacement
 
 
+## Debuff from an actual server-resolved axe hit. Refreshing cannot stack
+## magnitude or extend beyond a single duration from this point in time.
+func apply_sunder(now: float, seconds: float) -> bool:
+	if not is_alive() or not is_finite(now) or now < 0.0 or 			not is_finite(seconds) or seconds <= 0.0 or seconds > SunderMark.DURATION:
+		return false
+	sunder_until = maxf(sunder_until, now + seconds)
+	return true
+
+
 ## Server-only trap application; cannot target a boss or expired/dead zombie.
 func apply_snare(seconds: float) -> bool:
 	if not is_alive() or raid_boss or not is_finite(seconds) or seconds <= 0.0 or seconds > 3.0:
@@ -365,6 +376,7 @@ func take_damage(amount: float, attacker_id: int = -1) -> bool:
 		spit_pending = false
 		spit_seconds = 0.0
 		stagger_seconds = 0.0
+		sunder_until = 0.0
 		threat.clear()
 		return true
 	if state == State.IDLE or state == State.WANDER:

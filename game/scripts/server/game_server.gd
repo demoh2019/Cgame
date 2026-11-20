@@ -27,6 +27,7 @@ const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
 const FinishingStrike = preload("res://scripts/shared/finishing_strike.gd")
+const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
 const SiegeContracts = preload("res://scripts/shared/siege_contracts.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
@@ -3431,6 +3432,15 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 						"peer": peer_id, "id": marked.id,
 						"x": marked.position.x, "z": marked.position.z})
 		_damage_target(player, hit, hit_damage, "ranged" if ranged else "melee")
+		# The armor debuff begins AFTER this strike, benefiting subsequent
+		# real infected hits without giving the applicator free extra damage.
+		# Player PvP hits and enemies killed by the strike are never marked.
+		if hit["kind"] == "zombie" and skill.has("sunder_seconds"):
+			var sundered = zombies.get(hit["id"])
+			if sundered != null and sundered.apply_sunder(time,
+					float(skill["sunder_seconds"])):
+				events.append({"type": "armor_sunder", "id": sundered.id,
+					"x": sundered.position.x, "z": sundered.position.z})
 		# PvE-only crowd control follows a real resolved hit. Never stun players,
 		# corpses or raid bosses, and never trust client-provided stun duration.
 		if hit["kind"] == "zombie" and skill.has("stagger_seconds"):
@@ -3935,6 +3945,9 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		damage = PartyFocus.damage(damage, zombie.is_alive() and _alive(attacker) and
 			PartyFocus.in_range(attacker.position, zombie.position) and
 			parties.has_focus(attacker.id, zombie.id, time))
+		# The same short-lived exposed state benefits nearby survivors
+		# regardless of weapon choice, but never applies to player PvP.
+		damage = SunderMark.amplify(damage, zombie, time)
 		# Boss armor recovery is applied only to the current live raid boss,
 		# after an actual server-resolved slam; no PvP or other infected bonus.
 		if zombie.id == raid_boss_id:
@@ -5611,7 +5624,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					"raid_exposed_seconds": RaidRecovery.remaining(zombie, raid_exposed_until, time) if zombie.id == raid_boss_id else 0.0,
 					"max_hp": float(zombie.data.get("health", zombie.health)),
 					"snared_seconds": zombie.snared_seconds,
-					"stagger_seconds": zombie.stagger_seconds})
+					"stagger_seconds": zombie.stagger_seconds,
+					"sunder_seconds": SunderMark.remaining(zombie, time)})
 	# Replicate only pending, living spit warnings within sight of this
 	# survivor. Client visual effects never authorize an actual hit.
 	var spit_zones: Array = []

@@ -298,6 +298,9 @@ func _spawn_effects(event: Dictionary) -> void:
 		"finishing_strike":
 			effects.burst(at, Color(0.95, 0.22, 0.38),
 				20, 4.3, 0.7, 0.12)
+		"armor_sunder":
+			effects.burst(at, Color(0.98, 0.55, 0.2),
+				16, 2.8, 0.65, 0.11)
 		"attack":
 			if bool(event.get("ranged", false)):
 				effects.muzzle_flash(at + Vector3(0, 0.2, 0))

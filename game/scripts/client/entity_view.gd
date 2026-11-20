@@ -84,6 +84,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 				label.text += " [STAGGERED]"
 			elif float(entity.get("snared_seconds", 0.0)) > 0.0:
 				label.text += " [PINNED]"
+			if float(entity.get("sunder_seconds", 0.0)) > 0.0:
+				label.text += " [EXPOSED]"
 		elif kind == "player":
 			label.text = ("%s%s" % [
 				"OUTLAW " if bool(entity.get("outlaw", false)) else "", str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
@@ -121,7 +123,10 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			base = Color(0.98, 0.65, 0.18)
 		var staggered: bool = float(entity.get("stagger_seconds", 0.0)) > 0.0
 		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
+		var exposed: bool = float(entity.get("sunder_seconds", 0.0)) > 0.0
 		var tint: Color = base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base
+		if exposed:
+			tint = base.lerp(Color(0.96, 0.42, 0.14), 0.65)
 		if pinned:
 			tint = base.lerp(Color(1.0, 0.84, 0.25), 0.65)
 		if staggered:
