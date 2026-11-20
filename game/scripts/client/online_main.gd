@@ -14,6 +14,7 @@ const RaidTelegraph = preload("res://scripts/client/raid_telegraph.gd")
 const Hud = preload("res://scripts/client/hud.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
+const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const HubView = preload("res://scripts/client/hub_view.gd")
 const Audio = preload("res://scripts/client/audio.gd")
 const Assets = preload("res://scripts/client/assets.gd")
@@ -44,6 +45,7 @@ var water: MeshInstance3D
 var hud
 var avatar: Node3D
 var avatar_model
+var bike_visual
 var audio
 var hub_view
 var outposts
@@ -435,6 +437,9 @@ func _on_welcomed() -> void:
 	avatar_model = CharacterModel.new()
 	avatar_model.setup(Color(1.0, 0.95, 0.5) if not Assets.has_characters() else Color.WHITE, 2.0, 1.0, Assets.CHARACTER_NAMES[abs(hash(name_edit.text)) % Assets.CHARACTER_NAMES.size()], false)
 	avatar.add_child(avatar_model)
+	bike_visual = TrailBikeVisual.new()
+	bike_visual.name = "TrailBike"
+	avatar.add_child(bike_visual)
 	var label := Label3D.new()
 	label.text = name_edit.text
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -490,8 +495,11 @@ func _process(delta: float) -> void:
 		avatar_model.update_motion(delta)
 		avatar_model.set_dead(not bool(client.you.get("alive", true)))
 		avatar_model.set_action_loop(_gather_animation())
-		audio.set_footsteps(avatar_model._moving and avatar.visible)
-		effects.footsteps(position, avatar_model.speed, delta)
+		var riding: bool = bool(client.you.get("mounted", false)) and avatar.visible
+		bike_visual.set_riding(riding, avatar_model.speed, delta)
+		audio.set_footsteps(avatar_model._moving and avatar.visible and not riding)
+		if not riding:
+			effects.footsteps(position, avatar_model.speed, delta)
 	if streamer != null:
 		streamer.focus_position = position
 		_apply_world_state()

@@ -17,6 +17,7 @@ const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
+const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
@@ -41,6 +42,8 @@ var _camera: Camera3D
 var _sun: DirectionalLight3D
 var _world_environment: Environment
 var _avatar: MeshInstance3D
+var _bike_visual
+var _last_bike_position: Vector3 = Vector3.INF
 var _stats: Label
 var _instructions: Label
 var _radar
@@ -200,6 +203,10 @@ func _make_avatar() -> void:
 	_avatar = _mesh(Vector3(0.8, 1.7, 0.8), Color(0.25, 0.69, 0.84))
 	_avatar.name = "Survivor"
 	add_child(_avatar)
+	_bike_visual = TrailBikeVisual.new()
+	_bike_visual.name = "TrailBike"
+	_bike_visual.position = Vector3(0.0, -0.85, 0.0)
+	_avatar.add_child(_bike_visual)
 
 
 ## A visible landmark for the station validation enforced by GameServer.
@@ -613,7 +620,14 @@ func _physics_process(delta: float) -> void:
 			Input.is_action_pressed("survive_sprint"), atan2(_facing.x, _facing.y), delta,
 			Input.is_action_pressed("survive_crouch"))
 	_avatar.position = survivor.position + Vector3(0, 0.85, 0)
+	_avatar.rotation.y = atan2(_facing.x, _facing.y)
 	_avatar.scale = Vector3(1.0, 0.72 if survivor.crouching else 1.0, 1.0)
+	var bike_speed := 0.0
+	if _last_bike_position != Vector3.INF and delta > 0.0:
+		bike_speed = Vector2(survivor.position.x - _last_bike_position.x,
+			survivor.position.z - _last_bike_position.z).length() / delta
+	_last_bike_position = survivor.position
+	_bike_visual.set_riding(survivor.mounted and survivor.survival.alive, bike_speed, delta)
 	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
 	_camera.look_at(survivor.position + Vector3(0, 0.7, 0), Vector3.UP)
 	_stream_chunks()

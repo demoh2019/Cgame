@@ -29,7 +29,17 @@ persists across sessions; riding state and cooldown do not.
 Clients receive mount state via snapshots and use the same movement
 prediction. Network movement packets never supply mount speed authority.
 
+## Presentation
+
+The bicycle has a procedural low-poly 3D model: orange metal frame,
+two rotating tires with hubs, saddle and handlebars. Rendered wheel rotation
+uses measured motion, not untrusted network data. Local preview, online
+player and remotely replicated riders use the same
+`scripts/client/trail_bike_visual.gd`. Dismounting or dying hides the
+bike; riding suppresses walking sounds and footstep dust. F2 help lists F4.
+
 ## Tests
+
 
 `godot --headless --path game --script res://tests/run_all.gd`
 

@@ -5,6 +5,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
+const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const LootLabel = preload("res://scripts/shared/loot_label.gd")
 
@@ -109,6 +110,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base))
 		model.set_zombie_state(int(entity["state"]))
 	if kind == "player":
+		var bike = _nodes[key].get_node("TrailBike")
+		bike.set_riding(bool(entity.get("mounted", false)) and bool(entity.get("alive", false)))
 		var player_model: Node3D = _nodes[key].get_node("Model")
 		player_model.scale = Vector3(1.0,
 			0.72 if bool(entity.get("crouching", false)) else 1.0, 1.0)
@@ -315,6 +318,10 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		var character: String = Assets.CHARACTER_NAMES[int(abs(int(entity["id"]))) % Assets.CHARACTER_NAMES.size()]
 		model.setup(Color.WHITE if Assets.has_characters() else Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0, character, false)
 	root.add_child(model)
+	if kind == "player":
+		var bike := TrailBikeVisual.new()
+		bike.name = "TrailBike"
+		root.add_child(bike)
 	var label := Label3D.new()
 	label.name = "Label"
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -335,7 +342,12 @@ func _process(delta: float) -> void:
 		node.position = node.position.lerp(target["position"], blend)
 		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("snare") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
-			node.get_node("Model").update_motion(delta)
+			var model: Node3D = node.get_node("Model")
+			model.update_motion(delta)
+			if key.begins_with("player:"):
+				var bike = node.get_node("TrailBike")
+				if bike.visible:
+					bike.set_riding(true, model.speed, delta)
 
 
 ## A swing or a shot by another player.
