@@ -1,79 +1,79 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <class name="AIVisualSensor2D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
-    <brief_description>Reusable, deterministic single-target 2D vision sensor with field of view, range hysteresis, occlusion and memory.</brief_description>
-    <description>
-        Tracks whether an NPC can currently see one target and remembers its last visible position for a configurable duration after sight is lost. The caller supplies observer position, facing direction, target position, and a line-of-sight boolean obtained from its physics world (for example with [code]PhysicsDirectSpaceState2D.intersect_ray[/code]). The sensor does not perform collision queries by itself and does not own target Nodes.
-        [code]sight_radius[/code] controls acquisition; [code]lose_sight_radius[/code] can be larger to avoid boundary flicker. A target that is occluded or outside the field of view is lost immediately but may remain in memory. Use [code]is_target_visible()[/code], [code]has_target_memory()[/code] and [code]get_last_known_position()[/code] to populate a [code]BehaviorTree[/code] blackboard. Create a separate instance per NPC/target pair.
-    </description>
-    <tutorials>
-    </tutorials>
-    <methods>
-        <method name="observe">
-            <return type="void" />
-            <param index="0" name="observer_position" type="Vector2" />
-            <param index="1" name="forward" type="Vector2" />
-            <param index="2" name="target_position" type="Vector2" />
-            <param index="3" name="has_line_of_sight" type="bool" />
-            <param index="4" name="delta" type="float" />
-            <description>Updates visibility and memory once per physics or AI tick. Provide [code]false[/code] for blocked line of sight; [code]delta[/code] is elapsed seconds, not tick count. A zero forward vector cannot see anything outside the exact observer position unless the field of view is 360 degrees.</description>
-        </method>
-        <method name="is_target_visible" qualifiers="const">
-            <return type="bool" />
-            <description>Returns [code]true[/code] only when the target passed range, FOV and LOS checks on the latest update.</description>
-        </method>
-        <method name="has_target_memory" qualifiers="const">
-            <return type="bool" />
-            <description>Returns [code]true[/code] while visible or until the configured memory duration expires.</description>
-        </method>
-        <method name="get_last_known_position" qualifiers="const">
-            <return type="Vector2" />
-            <description>Returns the most recent position observed while visible; returns [code]Vector2.ZERO[/code] after reset. Check [code]has_target_memory[/code] before relying on it.</description>
-        </method>
-        <method name="get_memory_remaining" qualifiers="const">
-            <return type="float" />
-            <description>Returns the remaining seconds of target memory, refreshed while visible.</description>
-        </method>
-        <method name="reset">
-            <return type="void" />
-            <description>Forgets the current target, last known position and memory countdown.</description>
-        </method>
-        <method name="set_sight_radius">
-            <return type="void" />
-            <param index="0" name="radius" type="float" />
-            <description>Sets the positive acquisition range and grows the lose-sight range if necessary.</description>
-        </method>
-        <method name="get_sight_radius" qualifiers="const">
-            <return type="float" />
-        </method>
-        <method name="set_lose_sight_radius">
-            <return type="void" />
-            <param index="0" name="radius" type="float" />
-            <description>Sets the retention range; must be at least the acquisition radius.</description>
-        </method>
-        <method name="get_lose_sight_radius" qualifiers="const">
-            <return type="float" />
-        </method>
-        <method name="set_field_of_view_degrees">
-            <return type="void" />
-            <param index="0" name="degrees" type="float" />
-            <description>Sets the full vision cone angle in degrees (more than 0 and no more than 360).</description>
-        </method>
-        <method name="get_field_of_view_degrees" qualifiers="const">
-            <return type="float" />
-        </method>
-        <method name="set_memory_duration">
-            <return type="void" />
-            <param index="0" name="seconds" type="float" />
-            <description>Sets how long the last known target position remains available after sight is lost.</description>
-        </method>
-        <method name="get_memory_duration" qualifiers="const">
-            <return type="float" />
-        </method>
-    </methods>
-    <members>
-        <member name="sight_radius" type="float" setter="set_sight_radius" getter="get_sight_radius" default="240.0">Maximum detection range for new targets.</member>
-        <member name="lose_sight_radius" type="float" setter="set_lose_sight_radius" getter="get_lose_sight_radius" default="300.0">Maximum range while already seeing a target.</member>
-        <member name="field_of_view_degrees" type="float" setter="set_field_of_view_degrees" getter="get_field_of_view_degrees" default="180.0">Full field-of-view angle in degrees.</member>
-        <member name="memory_duration" type="float" setter="set_memory_duration" getter="get_memory_duration" default="1.5">Seconds to retain the last known position after losing sight.</member>
-    </members>
+	<brief_description>Reusable, deterministic single-target 2D vision sensor with field of view, range hysteresis, occlusion and memory.</brief_description>
+	<description>
+		Tracks whether an NPC can currently see one target and remembers its last visible position for a configurable duration after sight is lost. The caller supplies observer position, facing direction, target position, and a line-of-sight boolean obtained from its physics world (for example with [code]PhysicsDirectSpaceState2D.intersect_ray[/code]). The sensor does not perform collision queries by itself and does not own target Nodes.
+		[code]sight_radius[/code] controls acquisition; [code]lose_sight_radius[/code] can be larger to avoid boundary flicker. A target that is occluded or outside the field of view is lost immediately but may remain in memory. Use [code]is_target_visible()[/code], [code]has_target_memory()[/code] and [code]get_last_known_position()[/code] to populate a [code]BehaviorTree[/code] blackboard. Create a separate instance per NPC/target pair.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="observe">
+			<return type="void" />
+			<param index="0" name="observer_position" type="Vector2" />
+			<param index="1" name="forward" type="Vector2" />
+			<param index="2" name="target_position" type="Vector2" />
+			<param index="3" name="has_line_of_sight" type="bool" />
+			<param index="4" name="delta" type="float" />
+			<description>Updates visibility and memory once per physics or AI tick. Provide [code]false[/code] for blocked line of sight; [code]delta[/code] is elapsed seconds, not tick count. A zero forward vector cannot see anything outside the exact observer position unless the field of view is 360 degrees.</description>
+		</method>
+		<method name="is_target_visible" qualifiers="const">
+			<return type="bool" />
+			<description>Returns [code]true[/code] only when the target passed range, FOV and LOS checks on the latest update.</description>
+		</method>
+		<method name="has_target_memory" qualifiers="const">
+			<return type="bool" />
+			<description>Returns [code]true[/code] while visible or until the configured memory duration expires.</description>
+		</method>
+		<method name="get_last_known_position" qualifiers="const">
+			<return type="Vector2" />
+			<description>Returns the most recent position observed while visible; returns [code]Vector2.ZERO[/code] after reset. Check [code]has_target_memory[/code] before relying on it.</description>
+		</method>
+		<method name="get_memory_remaining" qualifiers="const">
+			<return type="float" />
+			<description>Returns the remaining seconds of target memory, refreshed while visible.</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>Forgets the current target, last known position and memory countdown.</description>
+		</method>
+		<method name="set_sight_radius">
+			<return type="void" />
+			<param index="0" name="radius" type="float" />
+			<description>Sets the positive acquisition range and grows the lose-sight range if necessary.</description>
+		</method>
+		<method name="get_sight_radius" qualifiers="const">
+			<return type="float" />
+		</method>
+		<method name="set_lose_sight_radius">
+			<return type="void" />
+			<param index="0" name="radius" type="float" />
+			<description>Sets the retention range; must be at least the acquisition radius.</description>
+		</method>
+		<method name="get_lose_sight_radius" qualifiers="const">
+			<return type="float" />
+		</method>
+		<method name="set_field_of_view_degrees">
+			<return type="void" />
+			<param index="0" name="degrees" type="float" />
+			<description>Sets the full vision cone angle in degrees (more than 0 and no more than 360).</description>
+		</method>
+		<method name="get_field_of_view_degrees" qualifiers="const">
+			<return type="float" />
+		</method>
+		<method name="set_memory_duration">
+			<return type="void" />
+			<param index="0" name="seconds" type="float" />
+			<description>Sets how long the last known target position remains available after sight is lost.</description>
+		</method>
+		<method name="get_memory_duration" qualifiers="const">
+			<return type="float" />
+		</method>
+	</methods>
+	<members>
+		<member name="sight_radius" type="float" setter="set_sight_radius" getter="get_sight_radius" default="240.0">Maximum detection range for new targets.</member>
+		<member name="lose_sight_radius" type="float" setter="set_lose_sight_radius" getter="get_lose_sight_radius" default="300.0">Maximum range while already seeing a target.</member>
+		<member name="field_of_view_degrees" type="float" setter="set_field_of_view_degrees" getter="get_field_of_view_degrees" default="180.0">Full field-of-view angle in degrees.</member>
+		<member name="memory_duration" type="float" setter="set_memory_duration" getter="get_memory_duration" default="1.5">Seconds to retain the last known position after losing sight.</member>
+	</members>
 </class>
