@@ -25,12 +25,12 @@ func run(t) -> void:
 	var ally = server.add_player(102, "Harvest Ally", "harvest-user-102")
 	var wing = server.add_player(103, "Harvest Wing", "harvest-user-103")
 	var rival = server.add_player(104, "Harvest Rival")
-	_place(server, lead, x + 5.0, z)
-	_place(server, ally, x + 3.0, z)
-	_place(server, wing, x + 6.0, z)
+	_place(server, lead, x + 20.0, z)
+	_place(server, ally, x + 23.0, z)
+	_place(server, wing, x + 20.0, z)
 	_place(server, rival, x + 180.0, z)
 	var node: Dictionary = {"id": 999991, "kind": "tree", "tier": 3,
-		"x": x + 5.0, "z": z}
+		"x": x + 20.0, "z": z}
 	t.eq(server.territory.harvest_bonus(101, node, server.players,
 		server.parties, server.time, server.world), 0,
 		"neutral outpost provides no economic bonus")
@@ -53,7 +53,7 @@ func run(t) -> void:
 	for member in [101, 102, 103]:
 		t.check(server.set_verified_guild(member, membership),
 			"server accepts verified Nakama guild identity")
-	_place(server, wing, x + 5.0, z)
+	_place(server, wing, x + 20.0, z)
 	t.eq(server.territory.harvest_bonus(103, node, server.players,
 		server.parties, server.time, server.world), 1,
 		"verified guildmate can gather without sharing the capture party")
@@ -83,7 +83,7 @@ func run(t) -> void:
 	_place(server, lead, float(far["x"]), float(far["z"]))
 	t.eq(server.territory.harvest_bonus(101, far, server.players,
 		server.parties, server.time, server.world), 0, "bonus does not extend beyond outpost region")
-	_place(server, lead, x + 5.0, z)
+	_place(server, lead, x + 20.0, z)
 	var wrong_position: Dictionary = node.duplicate()
 	wrong_position["x"] = x + 40.0
 	t.eq(server.territory.harvest_bonus(101, wrong_position, server.players,

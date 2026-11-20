@@ -3111,10 +3111,11 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 		amount += 1 # Skill: a lucky harvest.
 	var outpost_bonus: int = territory.harvest_bonus(player.id, node, players,
 		parties, time, world)
+	var ordinary_amount: int = amount
 	amount += outpost_bonus
 	var left: int = player.inventory.add(item_id, amount)
 	# Never advertise an outpost bonus if a full bag could not accept it.
-	var paid_outpost_bonus: int = mini(outpost_bonus, maxi(0, amount - left - (amount - outpost_bonus)))
+	var paid_outpost_bonus: int = mini(outpost_bonus, maxi(0, amount - left - ordinary_amount))
 	if gather_skill != "" and amount - left > 0:
 		_award(player, gather_skill, (3.0 + 2.0 * float(amount - left)) * float(int(node["tier"])))
 	# No XP for items that did not fit, nor for repeat attempts on depleted nodes.
