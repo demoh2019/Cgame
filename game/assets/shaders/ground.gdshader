@@ -2,6 +2,9 @@ shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
 global uniform float aa_ground_contact_strength;
+// High/Ultra only: subtle self-occlusion from normal-map microrelief,
+// fused into existing PBR AO without any extra texture or screen pass.
+global uniform float aa_terrain_micro_occlusion;
 global uniform float aa_puddle_ripple_strength;
 // Radius of full two-scale albedo and normal mapping; shared by all streamed chunks.
 global uniform float aa_terrain_detail_radius;
@@ -406,7 +409,14 @@ void fragment() {
 		ground_contact = 1.0 - (1.0 - contact_sample)
 			* aa_ground_contact_strength * detail_fade;
 	}
-	AO = ground_contact;
+	// HDRP-like micro-occlusion from already sampled tangent-space normals.
+	// Flattened distant normals cost nothing; wet puddles visually fill cracks.
+	// Keep the effect subtle because Forward+ also supplies screen-space AO.
+	float micro_cavity = 1.0 - clamp(bump.z, 0.0, 1.0);
+	float micro_shadow = 1.0 - min(0.18,
+		micro_cavity * 0.32 * aa_terrain_micro_occlusion * detail_fade
+		* (1.0 - puddle * 0.85));
+	AO = ground_contact * micro_shadow;
 	ALBEDO = color * mix(1.0, ground_contact, 0.12)
 		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), aa_vertex_cloud_shadow);
 	// Sunlight focused by moving shallow waves only on submerged near-field
