@@ -39,85 +39,85 @@ void sky() {
 	// Preserve high-resolution panorama and pinpoint stars on High/Ultra.
 	if (use_cached_radiance && !AT_CUBEMAP_PASS) {
 		COLOR = texture(RADIANCE, dir).rgb;
-		return;
-	}
-	float up = dir.y;
-	// Below the horizon: a dark ground haze (the camera rarely sees it, the reflections do).
-	vec3 gradient = mix(day_horizon, day_top, clamp(up * 1.6, 0.0, 1.0));
-	vec3 day = gradient;
-	// Full-screen night pixels never sample the daytime panorama or evaluate
-	// spherical UV atan/acos; the discarded contribution is below 0.5%.
-	if (has_panorama && daylight > 0.005) {
-		float u = atan(dir.x, -dir.z) / (2.0 * PI) + 0.5 + cloud_wind_rotation;
-		float v = acos(clamp(dir.y, -1.0, 1.0)) / PI;
-		day = texture(day_panorama, vec2(u, min(v, 0.499))).rgb * 1.08;
-	}
-	day = mix(day, day * 0.55 + dusk_color * 0.45, dusk * (1.0 - smoothstep(0.0, 0.5, up)));
-	float grey = dot(day, vec3(0.3, 0.59, 0.11));
-	day = mix(day, vec3(grey) * storm_color * 1.8, storm * 0.85);
-	day *= 1.0 - storm * 0.35;
-
-	vec3 night = mix(night_horizon, night_top, clamp(up * 1.4, 0.0, 1.0));
-	// A few hundred tiny point stars, distributed on stable spherical UVs.
-	// Evaluate hash/twinkle ONLY in darkness; use derivatives to anti-alias
-	// the circular core instead of flashing entire pixel-sized square cells.
-	if (daylight < 0.95 && up > 0.02 && storm < 0.98) {
-		vec2 star_uv = SKY_COORDS * vec2(480.0, 240.0);
-		vec2 star_cell = floor(star_uv);
-		float pick = hash(vec3(star_cell, 7.0));
-		// Evaluate derivatives before the non-uniform star selection branch.
-		float footprint = clamp(length(fwidth(star_uv)) * 0.38, 0.02, 0.50);
-		if (pick > 0.9975) {
-			vec2 shift = vec2(hash(vec3(star_cell, 13.0)),
-				hash(vec3(star_cell, 29.0))) * 0.5 - 0.25;
-			vec2 within_cell = fract(star_uv) - 0.5 - shift;
-			float radius = mix(0.065, 0.18, hash(vec3(star_cell, 41.0)));
-			float point_star = 1.0 - smoothstep(radius,
-				radius + footprint, length(within_cell));
-			float twinkle = 0.85 + 0.15 * sin(
-				sky_time * 0.6 + hash(vec3(star_cell, 53.0)) * 23.0);
-			float strength = point_star * twinkle *
-				(1.0 - smoothstep(0.04, 0.58, daylight)) *
-				smoothstep(0.02, 0.25, up) * (1.0 - storm);
-			vec3 tint = mix(vec3(0.74, 0.83, 1.0),
-				vec3(1.0, 0.88, 0.73), hash(vec3(star_cell, 61.0)));
-			night += tint * strength * 1.4;
+	} else {
+		float up = dir.y;
+		// Below the horizon: a dark ground haze (the camera rarely sees it, the reflections do).
+		vec3 gradient = mix(day_horizon, day_top, clamp(up * 1.6, 0.0, 1.0));
+		vec3 day = gradient;
+		// Full-screen night pixels never sample the daytime panorama or evaluate
+		// spherical UV atan/acos; the discarded contribution is below 0.5%.
+		if (has_panorama && daylight > 0.005) {
+			float u = atan(dir.x, -dir.z) / (2.0 * PI) + 0.5 + cloud_wind_rotation;
+			float v = acos(clamp(dir.y, -1.0, 1.0)) / PI;
+			day = texture(day_panorama, vec2(u, min(v, 0.499))).rgb * 1.08;
 		}
-	}
+		day = mix(day, day * 0.55 + dusk_color * 0.45, dusk * (1.0 - smoothstep(0.0, 0.5, up)));
+		float grey = dot(day, vec3(0.3, 0.59, 0.11));
+		day = mix(day, vec3(grey) * storm_color * 1.8, storm * 0.85);
+		day *= 1.0 - storm * 0.35;
 
-	vec3 color = mix(night, day, daylight);
-	if (up < 0.0) {
-		color = mix(color, color * 0.35, clamp(-up * 4.0, 0.0, 1.0));
+		vec3 night = mix(night_horizon, night_top, clamp(up * 1.4, 0.0, 1.0));
+		// A few hundred tiny point stars, distributed on stable spherical UVs.
+		// Evaluate hash/twinkle ONLY in darkness; use derivatives to anti-alias
+		// the circular core instead of flashing entire pixel-sized square cells.
+		if (daylight < 0.95 && up > 0.02 && storm < 0.98) {
+			vec2 star_uv = SKY_COORDS * vec2(480.0, 240.0);
+			vec2 star_cell = floor(star_uv);
+			float pick = hash(vec3(star_cell, 7.0));
+			// Evaluate derivatives before the non-uniform star selection branch.
+			float footprint = clamp(length(fwidth(star_uv)) * 0.38, 0.02, 0.50);
+			if (pick > 0.9975) {
+				vec2 shift = vec2(hash(vec3(star_cell, 13.0)),
+					hash(vec3(star_cell, 29.0))) * 0.5 - 0.25;
+				vec2 within_cell = fract(star_uv) - 0.5 - shift;
+				float radius = mix(0.065, 0.18, hash(vec3(star_cell, 41.0)));
+				float point_star = 1.0 - smoothstep(radius,
+					radius + footprint, length(within_cell));
+				float twinkle = 0.85 + 0.15 * sin(
+					sky_time * 0.6 + hash(vec3(star_cell, 53.0)) * 23.0);
+				float strength = point_star * twinkle *
+					(1.0 - smoothstep(0.04, 0.58, daylight)) *
+					smoothstep(0.02, 0.25, up) * (1.0 - storm);
+				vec3 tint = mix(vec3(0.74, 0.83, 1.0),
+					vec3(1.0, 0.88, 0.73), hash(vec3(star_cell, 61.0)));
+				night += tint * strength * 1.4;
+			}
+		}
+
+		vec3 color = mix(night, day, daylight);
+		if (up < 0.0) {
+			color = mix(color, color * 0.35, clamp(-up * 4.0, 0.0, 1.0));
+		}
+		// A cached light direction preserves the sun/moon disc without LIGHT0_* dependency.
+		// The directional light itself still moves every frame, so gameplay shadows stay smooth.
+		float facing = dot(dir, normalize(sun_direction));
+		float disc = smoothstep(0.9993, 0.9997, facing);
+		float glow = pow(max(facing, 0.0), 220.0) * 0.6 + pow(max(facing, 0.0), 14.0) * 0.12;
+		float visible = 1.0 - storm * 0.85;
+		color += sun_color * (disc * 2.5 + glow) * visible * mix(0.35, 1.0, daylight);
+		// Single-scattering-inspired warm horizon halo reuses the existing glow term.
+		// No additional noise lookups or texture taps on low-end hardware.
+		float horizon_halo = 1.0 - smoothstep(0.04, 0.42, abs(up));
+		// Transition from the original narrow painted halo toward directional haze.
+		color += vec3(0.9, 0.31, 0.10) * (glow * 0.38) * horizon_halo
+			* dusk * visible * (1.0 - aerosol_scattering_strength * 0.65);
+		// Henyey-Greenstein-inspired aerosol lobe for sunset aerial perspective.
+		// Sun orientation affects both visible sky and the reflected sky cubemap.
+		if (aerosol_scattering_strength > 0.001 && daylight > 0.025 && up > -0.06 && storm < 0.98) {
+			float anisotropy = 0.67;
+			float denom = max(1.0 + anisotropy * anisotropy
+				- 2.0 * anisotropy * clamp(facing, -1.0, 1.0), 0.10);
+			float aerosol_phase = (1.0 - anisotropy * anisotropy)
+				* inversesqrt(denom) / denom;
+			float sunward = clamp(aerosol_phase * 0.074, 0.0, 1.0);
+			float horizon_air = 1.0 - smoothstep(0.06, 0.63, max(up, 0.0));
+			float twilight = clamp(dusk, 0.0, 1.0) * smoothstep(0.08, 0.40, daylight);
+			vec3 aerosol_color = mix(vec3(0.42, 0.64, 0.86),
+				vec3(1.0, 0.48, 0.21), twilight);
+			float atmospheric_visibility = daylight * (1.0 - storm * 0.88);
+			color += aerosol_color * sunward * horizon_air * 0.42
+				* atmospheric_visibility * aerosol_scattering_strength;
+		}
+		COLOR = color;
 	}
-	// A cached light direction preserves the sun/moon disc without LIGHT0_* dependency.
-	// The directional light itself still moves every frame, so gameplay shadows stay smooth.
-	float facing = dot(dir, normalize(sun_direction));
-	float disc = smoothstep(0.9993, 0.9997, facing);
-	float glow = pow(max(facing, 0.0), 220.0) * 0.6 + pow(max(facing, 0.0), 14.0) * 0.12;
-	float visible = 1.0 - storm * 0.85;
-	color += sun_color * (disc * 2.5 + glow) * visible * mix(0.35, 1.0, daylight);
-	// Single-scattering-inspired warm horizon halo reuses the existing glow term.
-	// No additional noise lookups or texture taps on low-end hardware.
-	float horizon_halo = 1.0 - smoothstep(0.04, 0.42, abs(up));
-	// Transition from the original narrow painted halo toward directional haze.
-	color += vec3(0.9, 0.31, 0.10) * (glow * 0.38) * horizon_halo
-		* dusk * visible * (1.0 - aerosol_scattering_strength * 0.65);
-	// Henyey-Greenstein-inspired aerosol lobe for sunset aerial perspective.
-	// Sun orientation affects both visible sky and the reflected sky cubemap.
-	if (aerosol_scattering_strength > 0.001 && daylight > 0.025 && up > -0.06 && storm < 0.98) {
-		float anisotropy = 0.67;
-		float denom = max(1.0 + anisotropy * anisotropy
-			- 2.0 * anisotropy * clamp(facing, -1.0, 1.0), 0.10);
-		float aerosol_phase = (1.0 - anisotropy * anisotropy)
-			* inversesqrt(denom) / denom;
-		float sunward = clamp(aerosol_phase * 0.074, 0.0, 1.0);
-		float horizon_air = 1.0 - smoothstep(0.06, 0.63, max(up, 0.0));
-		float twilight = clamp(dusk, 0.0, 1.0) * smoothstep(0.08, 0.40, daylight);
-		vec3 aerosol_color = mix(vec3(0.42, 0.64, 0.86),
-			vec3(1.0, 0.48, 0.21), twilight);
-		float atmospheric_visibility = daylight * (1.0 - storm * 0.88);
-		color += aerosol_color * sunward * horizon_air * 0.42
-			* atmospheric_visibility * aerosol_scattering_strength;
-	}
-	COLOR = color;
 }
