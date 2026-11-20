@@ -45,6 +45,14 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Unloaded cells have no accessible scene instance") {
+	WorldPartition3D world;
+	world.set_cell_scene(Vector2i(7, -3), "res://unloaded.tscn");
+	CHECK(world.get_cell_instance(Vector2i(7, -3)) == nullptr);
+	CHECK(world.get_cell_instance(Vector2i(100, 100)) == nullptr);
+	CHECK_FALSE(world.is_cell_loaded(Vector2i(7, -3)));
+}
+
 TEST_CASE("[WorldPartition3D] Additional observers are normalized and getter is defensive") {
 	WorldPartition3D world;
 	Array input;
@@ -548,6 +556,25 @@ TEST_CASE("[SceneTree][WorldPartition3D] Failed resources leave no user load tok
 		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
 	}
 	CHECK(ResourceLoader::load_threaded_get_status(missing_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Cell instance lookup tracks streaming lifetime") {
+	const String path = make_cell_scene("instance_lookup");
+	{
+		WorldFixture fixture;
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		Node3D *instance = fixture.world->get_cell_instance(Vector2i(0, 0));
+		REQUIRE(instance != nullptr);
+		CHECK(instance->get_parent() == fixture.world);
+		CHECK(instance->get_name() == "AuthoredCell");
+		CHECK(fixture.world->get_cell_instance(Vector2i(1, 0)) == nullptr);
+		fixture.observer->set_position(Vector3(96, 0, 0));
+		fixture.world->update_streaming();
+		CHECK(fixture.world->get_cell_instance(Vector2i(0, 0)) == nullptr);
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
 TEST_CASE("[SceneTree][WorldPartition3D] Two observers stream and retain distant cells") {
