@@ -96,6 +96,16 @@ Vector3 sample_normal_bilinear(const HeightField &p_field, real_t p_x, real_t p_
 // whole terrain from 0 to 1. Returns false for invalid input.
 bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, int p_stride, const Params &p_params, ChunkMesh &r_mesh);
 
+// Largest deviation of the original heightfield from a coarse triangulated
+// mesh over a chunk (in source height units). Pure CPU preparation; evaluated
+// lazily and cached once for native terrain LOD selection.
+real_t chunk_lod_deviation(const HeightField &p_field, int p_x0, int p_z0,
+		int p_quads, int p_coarse_stride);
+
+// Bounded LOD distance bias: low-error flat areas become cheaper, high-error
+// rocks retain silhouette detail. Zero strength preserves legacy behavior.
+real_t geometric_error_lod_bias(real_t p_deviation_meters, real_t p_strength);
+
 // Minimum and maximum raw sample value inside a chunk (inclusive of its far border samples).
 void chunk_height_range(const HeightField &p_field, int p_x0, int p_z0, int p_quads, real_t &r_min, real_t &r_max);
 
