@@ -20,6 +20,7 @@ const SUITES := [
 	"res://tests/test_weather_cloud_advection.gd",
 	"res://tests/test_graphics_quality.gd",
 	"res://tests/test_terrain_mesh_streaming.gd",
+	"res://tests/test_staged_scenery_streaming.gd",
 	"res://tests/test_graphics_stone_microdetail.gd",
 	"res://tests/test_native_detail_normal_blend.gd",
 	"res://tests/test_graphics_stone_parallax.gd",
