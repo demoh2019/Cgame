@@ -272,6 +272,7 @@ class StreamedTerrainContracts(TestCase):
             "get_streaming_source_names",
             "get_streaming_source_count",
             "is_streaming_source_ready",
+            "get_streaming_source_progress",
         )
         for name in native_methods:
             self.assertIn(name + "(", header)
@@ -309,6 +310,9 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn("KEY_F8:", world)
         self.assertIn("KEY_F10:", world)
         self.assertIn("world_partition.set_streaming_source(", world)
+        self.assertIn("world_partition.get_streaming_source_progress(SURVEY_SOURCE)", world)
+        self.assertIn("world_partition.get_streaming_source_progress(WATCHTOWER_SOURCE)", world)
+        self.assertIn("world.get_streaming_source_progress(\"survey\")", smoke)
         self.assertIn("world_partition.remove_streaming_source(name)", world)
         self.assertIn("streaming_source_ready.connect(_on_streaming_source_ready)", world)
         self.assertIn("streaming_source_unready.connect(_on_streaming_source_unready)", world)
