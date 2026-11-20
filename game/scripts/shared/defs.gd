@@ -475,6 +475,11 @@ static func _build_items() -> void:
 		"kind": "standard", "tier": 1, "stack": 3, "weight": 2.0, "value": 55})
 	_add_recipe("field_standard", "field_standard", 1,
 		{"plank_1": 2, "cloth_1": 2, "scrap": 1}, "workbench", 5.0)
+	_add_item("smoke_charge", {"name": "Improvised Smoke Charge",
+		"kind": "smoke_charge", "tier": 1, "stack": 10,
+		"value": 30, "weight": 0.35})
+	_add_recipe("smoke_charge", "smoke_charge", 1,
+		{"cloth_1": 2, "scrap": 1}, "workbench", 3.0)
 	_add_item("noise_decoy", {"name": "Clattering Decoy", "kind": "decoy",
 		"tier": 1, "stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("noise_decoy", "noise_decoy", 1,

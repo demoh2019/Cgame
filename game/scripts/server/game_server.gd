@@ -73,6 +73,7 @@ const FieldScentMask = preload("res://scripts/shared/field_scent_mask.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
 const StealthAmbush = preload("res://scripts/shared/stealth_ambush.gd")
+const FieldSmoke = preload("res://scripts/shared/field_smoke.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const WorldDiscovery = preload("res://scripts/shared/world_discovery.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
@@ -163,6 +164,7 @@ class Player:
 	var combat_energy: float = 100.0
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
+	var smoke_cooldown: float = 0.0 # Session-only temporary PvE obscurant.
 	var recall: Dictionary = {} # Ephemeral channel, no character persistence.
 	var recall_ready_at: float = 0.0
 	var crouching: bool = false # Ephemeral, server-authorized posture.
@@ -220,6 +222,7 @@ var raid_minions: Array[int] = [] # Raid-only infected are cleared with boss.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
 var shelters: Dictionary = {} # Public, temporary weather tarps; never checkpointed.
 var decoys: Dictionary = {} # Temporary physical sound lures; server-owned, never persisted.
+var smoke_clouds: Dictionary = {} # Temporary visual cover, never checkpointed.
 var infected_snares: Dictionary = {} # Temporary PvE tripwires, never checkpointed.
 var acid_pools: Dictionary = {} # Temporary nonpersistent corrosive terrain.
 var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stacking.
@@ -611,6 +614,7 @@ func _spawn_player(player: Player) -> void:
 	player.combat_energy = Defs.COMBAT_ENERGY_MAX
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
+	player.smoke_cooldown = 0.0
 	player.crouching = false
 	player.dirty_inventory = true
 	events.append({"type": "spawn", "peer": player.id})
@@ -2484,6 +2488,30 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"smoke_charge":
+			if item_id != FieldSmoke.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if not player.position.is_finite():
+				return {"ok": false, "reason": "invalid_position"}
+			if _is_safe(player.position):
+				return {"ok": false, "reason": "safe_zone"}
+			if player.smoke_cooldown > 0.0:
+				return {"ok": false, "reason": "cooldown", "remaining": player.smoke_cooldown}
+			if smoke_clouds.size() >= FieldSmoke.MAX_GLOBAL:
+				return {"ok": false, "reason": "world_limit"}
+			for cloud in smoke_clouds.values():
+				if float(cloud["expires"]) > time and int(cloud["owner"]) == peer_id:
+					return {"ok": false, "reason": "owner_limit"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			var cloud_id := new_id()
+			smoke_clouds[cloud_id] = {"id": cloud_id,
+				"x": player.position.x, "y": player.position.y, "z": player.position.z,
+				"expires": time + FieldSmoke.DURATION, "owner": peer_id}
+			player.smoke_cooldown = FieldSmoke.COOLDOWN
+			player.noise_radius = maxf(player.noise_radius, FieldSmoke.USE_NOISE_RADIUS)
+			player.noise_timer = maxf(player.noise_timer, FieldSmoke.USE_NOISE_SECONDS)
+			player.action = {}
 		"recall":
 			if item_id != HubRecall.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -2602,6 +2630,9 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	player.dirty_character = true
 	if item_id == BikeChain.ITEM_ID:
 		return {"ok": true, "chain_wrap_seconds": player.chain_wrap_seconds}
+	if item_id == FieldSmoke.ITEM_ID:
+		return {"ok": true, "smoke_seconds": FieldSmoke.DURATION,
+			"cooldown": player.smoke_cooldown}
 	return {"ok": true}
 
 
@@ -3664,6 +3695,7 @@ func _tick_players(delta: float) -> void:
 			player.ruin_survey = {}
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.mount_cooldown = maxf(0.0, player.mount_cooldown - maxf(0.0, delta))
+		player.smoke_cooldown = maxf(0.0, player.smoke_cooldown - maxf(0.0, delta))
 		if player.chain_wrap_seconds > 0.0:
 			player.chain_wrap_seconds = maxf(0.0,
 				player.chain_wrap_seconds - maxf(0.0, delta))
@@ -4211,8 +4243,10 @@ func _visual_signature_for(player: Player) -> float:
 	var stance: float = StealthStance.visual_signature(
 		Camouflage.visual_signature(armor_id, owns, player.noise_timer, _alive(player)),
 		player.crouching, player.noise_timer, _alive(player))
-	return PortableShelter.visual_signature(stance, shelters, player.position, time,
+	var tarp: float = PortableShelter.visual_signature(stance, shelters, player.position, time,
 		player.crouching, player.noise_timer, _alive(player))
+	return FieldSmoke.signature(tarp, smoke_clouds, player.position, time,
+		player.noise_timer, _alive(player))
 
 
 func _tick_zombies(delta: float) -> void:
@@ -4575,6 +4609,9 @@ func _tick_world(delta: float) -> void:
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):
 			decoys.erase(id)
+	for id in smoke_clouds.keys():
+		if time >= float(smoke_clouds[id]["expires"]):
+			smoke_clouds.erase(id)
 	for id in shelters.keys():
 		if time >= float(shelters[id]["expires"]):
 			shelters.erase(id)
@@ -4678,6 +4715,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_snares: Array = InfectedSnare.visible(
 		infected_snares, player.position, time, Defs.INTEREST_RADIUS)
+	var nearby_smoke: Array = FieldSmoke.visible(smoke_clouds,
+			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_decoys: Array = []
 	for lure in decoys.values():
 		if NoiseDecoy.is_audible(lure, player.position, time) or (
@@ -4718,6 +4757,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 			"stamina": player.survival.stamina, "crouching": player.crouching,
 			"mounted": player.mounted, "mount_cooldown": player.mount_cooldown,
+			"smoke_cooldown": player.smoke_cooldown,
+			"smoke_concealed": FieldSmoke.inside(smoke_clouds, player.position, time),
 			"chain_wrap_seconds": player.chain_wrap_seconds,
 			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
@@ -4799,7 +4840,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"spit_zones": spit_zones, "acid_pools": nearby_acid_pools,
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
 		"shelters": nearby_shelters,
-		"decoys": nearby_decoys, "infected_snares": nearby_snares,
+		"decoys": nearby_decoys, "smoke_clouds": nearby_smoke,
+		"infected_snares": nearby_snares,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}
 	# Send a ground telegraph only to survivors close enough to see it.
