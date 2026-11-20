@@ -90,7 +90,7 @@ func _spawn_trees() -> void:
     # Bounded local NavigationServer avoidance bodies: they deflect nearby
     # NPCs but do not pretend to carve these obstacles from pathfinding.
     for i in range(0, trunks.size(), 7):
-        if i / 7 >= MAX_TREE_AVOIDANCE_OBSTACLES:
+        if i >= MAX_TREE_AVOIDANCE_OBSTACLES * 7:
             break
         var placement: Transform3D = trunks[i]
         var tree_scale: float = placement.basis.y.length()
