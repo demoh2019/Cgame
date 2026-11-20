@@ -177,6 +177,12 @@ func _physics_process(delta: float) -> void:
     elif player_distance >= AGGRO_DISTANCE and away_from_home.length() > 1.5:
         walk_direction = away_from_home.normalized()
 
+    # Moving enemies receive a higher scheduling tier than stationary
+    # combatants; idle actors do not waste the first priority slots.
+    if is_instance_valid(streamer):
+        streamer.set_navigation_agent_priority(encounter_id,
+            NAVIGATION_PRIORITY if walk_direction.length_squared() >= 0.001 else 0)
+
     # The native scheduler bounds expensive obstacle probes/path recomputation
     # across all active NPCs; each agent reuses its previous local steering
     # between granted physics frames. No navmesh is assumed in this demo.
