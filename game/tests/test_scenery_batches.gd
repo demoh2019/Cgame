@@ -13,9 +13,9 @@ func run(t) -> void:
 	]
 	t.eq(SceneryBatches.partition(small).size(), 1, "sparse objects keep one draw call")
 	var dense: Array[Transform3D] = []
-	for i in 30:
+	for i in 60:
 		var x: float = 5.0 + float(i % 6) * 10.0
-		var z: float = 5.0 + float(int(i / 6)) * 12.0
+		var z: float = 5.0 + float(int(i / 6)) * 6.0
 		dense.append(Transform3D(Basis(Vector3.UP, float(i) * 0.19).scaled(Vector3.ONE * 1.2), Vector3(x, 4.0, z)))
 	var groups: Array = SceneryBatches.partition(dense)
 	t.eq(groups.size(), 4, "dense 64 m chunk splits into four 32 m groups")
