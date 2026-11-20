@@ -9,6 +9,7 @@ const Rules = preload("res://scripts/shared/mining_wedges.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
+const ExpeditionLoadout = preload("res://scripts/shared/expedition_loadout.gd")
 const GatheringNoise = preload("res://scripts/shared/gathering_noise.gd")
 
 
@@ -59,6 +60,25 @@ func run(t) -> void:
 		Crafting.Result.OK, "workshop can craft one physical wedge kit")
 	t.eq(materials.count(Rules.ITEM_ID), 1, "one kit appears in inventory")
 	t.eq(materials.count("scrap"), 0, "three scrap were consumed")
+
+	t.current = "bank-backed mining expedition prep withdraws paid resources only"
+	t.check(ExpeditionLoadout.valid_preset("miner"),
+		"miner is available in profession expedition presets")
+	t.eq(ExpeditionLoadout.TARGETS["miner"].get(Rules.ITEM_ID, 0), 2,
+		"mining loadout needs two actual kits, not fabricated ones")
+	var load_bag := Inventory.new()
+	var load_bank := Inventory.new(Defs.STASH_SLOTS)
+	load_bank.add(Rules.ITEM_ID, 2)
+	load_bank.add("prospecting_chart", 1)
+	var restock: Dictionary = ExpeditionLoadout.restock(load_bag, load_bank, "miner")
+	t.check(bool(restock.get("ok", false)) and bool(restock.get("partial", false)),
+		"partial profession restock withdraws only stocked supplies")
+	t.eq(load_bag.count(Rules.ITEM_ID), 2,
+		"real bank wedge stock transfers to expedition backpack")
+	t.eq(load_bag.count("prospecting_chart"), 1,
+		"real chart stock can accompany miner's crafted wedges")
+	t.eq(load_bank.count(Rules.ITEM_ID), 0,
+		"withdrawal spends stash inventory, not free shop credits")
 
 	t.current = "bounded rules deny low tier, unrelated and inventory-starved yields"
 	t.check(Rules.valid_state(0) and Rules.valid_state(Rules.CHARGES),
