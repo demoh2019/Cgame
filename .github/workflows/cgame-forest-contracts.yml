@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "misc/cgame_forest_showcase/**"
+      - "modules/world_partition/**"
       - ".github/workflows/cgame-forest-contracts.yml"
   workflow_dispatch:
 
@@ -20,6 +21,7 @@ jobs:
         with:
           sparse-checkout: |
             misc/cgame_forest_showcase
+            modules/world_partition
           sparse-checkout-cone-mode: true
       - uses: actions/setup-python@v5
         with:
