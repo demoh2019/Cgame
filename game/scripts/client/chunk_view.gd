@@ -199,12 +199,14 @@ static var scenery_quality := 1
 static var grass_budget_usec := 2500
 static var grass_range := 110.0
 static var grass_visibility_end := 82.0
+static var grass_fade_end := GrassField.FADE_END
 
 
 static func configure_grass(build_radius: float, budget_usec: int, fade_start: float, fade_end: float) -> void:
 	grass_range = build_radius
 	grass_budget_usec = budget_usec
 	grass_visibility_end = fade_end + 22.0
+	grass_fade_end = fade_end
 	var material: ShaderMaterial = GrassField.material()
 	material.set_shader_parameter("fade_start", fade_start)
 	material.set_shader_parameter("fade_end", fade_end)
@@ -967,15 +969,21 @@ func _update_grass_lods() -> void:
 	if view_camera == null:
 		return
 	var camera_xz := Vector2(view_camera.global_position.x, view_camera.global_position.z)
+	# Compute one focal-length ratio for the whole chunk, not for each tuft.
+	# Changing Ultra/Performance now changes real distant detail, not just
+	# the shader's sink-to-ground fade range.
+	var screen_height: float = float(view_camera.get_viewport().get_visible_rect().size.y)
+	var screen_scale: float = GrassField.screen_lod_scale(screen_height, view_camera.fov)
+	var range_scale: float = maxf(grass_fade_end / GrassField.FADE_END, 0.1) * screen_scale
 	for tile in _grass_tiles:
 		var tile_center: Vector3 = to_global(tile.custom_aabb.position + tile.custom_aabb.size * 0.5)
 		var distance: float = camera_xz.distance_to(Vector2(tile_center.x, tile_center.z))
 		var previous: int = int(tile.get_meta("blade_lod", 0))
-		var tier: int = GrassField.lod_for_distance(distance, previous)
+		var tier: int = GrassField.lod_for_distance(distance, previous, range_scale)
 		# MultiMesh.visible_instance_count is a GPU draw limit; changing this
 		# does not upload transforms or spawn new nodes every frame.
 		var draw_count: int = GrassField.visible_count_for_distance(
-			tile.multimesh.instance_count, distance)
+			tile.multimesh.instance_count, distance, range_scale)
 		if tile.multimesh.visible_instance_count != draw_count:
 			tile.multimesh.visible_instance_count = draw_count
 		if tier != previous:
