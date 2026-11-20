@@ -3367,6 +3367,35 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"water_pouch":
+			if item_id != "empty_water_pouch":
+				return {"ok": false, "reason": "not_usable"}
+			# Reuse the persisted lake cooldown: switching between drinking,
+			# filtered refills and pouch collection cannot bypass shore limits.
+			if player.lake_drink_cooldown > 0.0:
+				return {"ok": false, "reason": "cooldown",
+					"remaining": player.lake_drink_cooldown}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					player.skill_timer > 0.0 or not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat"}
+			if not FieldWater.can_access_lake(world, player.position):
+				return {"ok": false, "reason": "no_water"}
+			# Inventory swap is atomic, including a full bag whose last pouch
+			# frees the only possible slot for the dirty water.
+			var saved_slots: Dictionary = player.inventory.to_dict()
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			if player.inventory.free_space_for("murky_water") < 1:
+				player.inventory.load_dict(saved_slots)
+				return {"ok": false, "reason": "no_space"}
+			if player.inventory.add("murky_water", 1) != 0:
+				player.inventory.load_dict(saved_slots)
+				return {"ok": false, "reason": "no_space"}
+			player.lake_drink_cooldown = FieldWater.COOLDOWN_SECONDS
+			player.dirty_inventory = true
+			player.dirty_character = true
+			return {"ok": true, "item": "murky_water", "count": 1,
+				"cooldown": player.lake_drink_cooldown}
 		"survey_signal":
 			if item_id != SurveySignal.ITEM_ID:
 				return {"ok": false, "reason": "not_usable", "survey_signal": true}
