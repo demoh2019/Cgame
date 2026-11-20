@@ -18,8 +18,7 @@ Run from a local Godot 4 editor, after import has finished:
 
 ```sh
 godot --headless --editor --path game --quit
-godot --headless --path game --script res://tests/test_environment_assets.gd
 godot --headless --path game --script res://tests/run_all.gd
 ```
 
-For the first direct test, `test_environment_assets.gd` is a test suite with `run(t)` and should be run through the existing `run_all.gd` test harness instead. Verify imported meshes in a live game scene at a woodland area, a ruined city and a dock, and profile overdraw/frame time on integrated GPUs. Note that no Godot executable was available in the editing environment at the time of this commit.
+The new `test_environment_assets.gd` suite runs through `run_all.gd`. Verify imported meshes in a live game scene at a woodland area, a ruined city and a dock, and profile overdraw/frame time on integrated GPUs. Note that no Godot executable was available in the editing environment at the time of this commit.
