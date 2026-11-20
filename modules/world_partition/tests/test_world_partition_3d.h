@@ -308,6 +308,100 @@ TEST_CASE("[SceneTree][WorldPartition3D] Named source priority and readiness sur
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
+TEST_CASE("[SceneTree][WorldPartition3D] Actor-driven streaming follows Node3D movement and missing targets") {
+	Node3D *template_root = memnew(Node3D);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	REQUIRE(packed->pack(template_root) == OK);
+	memdelete(template_root);
+	const String path = "user://world_partition_follow_doctest_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	REQUIRE(ResourceSaver::save(packed, path) == OK);
+
+	Node3D *observer = memnew(Node3D);
+	observer->set_name("FollowObserver");
+	Node3D *drone = memnew(Node3D);
+	drone->set_name("FollowDrone");
+	drone->set_position(Vector3(48, 0, 0));
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	SceneTree::get_singleton()->get_root()->add_child(observer);
+	SceneTree::get_singleton()->get_root()->add_child(drone);
+	SceneTree::get_singleton()->get_root()->add_child(partition);
+	partition->set_cell_size(16);
+	partition->set_load_radius(0);
+	partition->set_unload_radius(0);
+	partition->set_max_instances_per_frame(1);
+	partition->set_observer_path(partition->get_path_to(observer));
+	partition->set_cell_scene(Vector2i(0, 0), path);
+	partition->set_cell_scene(Vector2i(3, 0), path);
+	partition->set_cell_scene(Vector2i(6, 0), path);
+
+	ERR_PRINT_OFF;
+	CHECK_FALSE(partition->set_streaming_source_node("invalid", NodePath(), 0, 0, 80));
+	CHECK_FALSE(partition->set_streaming_source_node("invalid", NodePath("../FollowDrone:position"), 0, 0, 80));
+	ERR_PRINT_ON;
+	CHECK(partition->get_streaming_source_count() == 0);
+	CHECK(partition->set_streaming_source_node("drone", partition->get_path_to(drone), 0, 0, 80));
+	CHECK(partition->get_streaming_source_count() == 1);
+
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(3, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(Vector2i(0, 0)));
+	REQUIRE(partition->is_cell_loaded(Vector2i(3, 0)));
+	Dictionary info = partition->get_streaming_source("drone");
+	CHECK(bool(info["active"]));
+	CHECK(info["center"] == Vector2i(3, 0));
+	CHECK(info["node_path"] == partition->get_path_to(drone));
+	CHECK(partition->is_streaming_source_ready("drone"));
+	CHECK(partition->get_streaming_source_progress("drone") == 1.0);
+
+	drone->set_position(Vector3(96, 0, 0));
+	partition->update_streaming();
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(3, 0)));
+	CHECK(partition->get_streaming_source("drone")["center"] == Vector2i(6, 0));
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(6, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(Vector2i(6, 0)));
+	CHECK(partition->is_streaming_source_ready("drone"));
+
+	SceneTree::get_singleton()->get_root()->remove_child(drone);
+	partition->update_streaming();
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(6, 0)));
+	CHECK_FALSE(partition->is_streaming_source_ready("drone"));
+	CHECK(partition->get_streaming_source_progress("drone") == 0.0);
+	CHECK_FALSE(bool(partition->get_streaming_source("drone")["active"]));
+	CHECK(partition->get_streaming_source_count() == 1);
+
+	SceneTree::get_singleton()->get_root()->add_child(drone);
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(6, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(Vector2i(6, 0)));
+	CHECK(partition->is_streaming_source_ready("drone"));
+
+	CHECK(partition->set_streaming_source("drone", Vector2i(3, 0), 0, 0, 80));
+	partition->update_streaming();
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(6, 0)));
+	CHECK(partition->get_streaming_source("drone")["node_path"] == NodePath());
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(3, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	CHECK(partition->is_cell_loaded(Vector2i(3, 0)));
+
+	SceneTree::get_singleton()->get_root()->remove_child(partition);
+	SceneTree::get_singleton()->get_root()->remove_child(drone);
+	SceneTree::get_singleton()->get_root()->remove_child(observer);
+	memdelete(partition);
+	memdelete(drone);
+	memdelete(observer);
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
 TEST_CASE("[SceneTree][WorldPartition3D] Observer cell follows motion and grid changes") {
 	WorldPartition3D *partition = memnew(WorldPartition3D);
 	Node3D *observer = memnew(Node3D);
