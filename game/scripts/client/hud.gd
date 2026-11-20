@@ -3,6 +3,7 @@ extends CanvasLayer
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
+const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
@@ -1037,6 +1038,12 @@ func _process(_delta: float) -> void:
 		_equipped.text += "\nAmmo: %s ×%d" % [
 			str(Defs.item(ranged_ammo).get("name", ranged_ammo)),
 			client.inventory.count(ranged_ammo)]
+	var meal_left: float = float(client.you.get("meal_seconds", 0.0))
+	var meal_tier: int = int(client.you.get("meal_tier", 0))
+	if meal_left > 0.0 and meal_tier > 0:
+		_equipped.text += "\nPrepared meal T%d: %.0fs | +%.1f stamina/s, +%.2f energy/s" % [
+			meal_tier, meal_left, HeartyMeal.stamina_per_second(meal_tier),
+			HeartyMeal.energy_per_second(meal_tier)]
 	_party_frames.text = PartyFrames.describe(client.you.get("party", {}), client.peer_id)
 	_party_frames.visible = not _party_frames.text.is_empty()
 	_death.visible = not bool(client.you.get("alive", true))
