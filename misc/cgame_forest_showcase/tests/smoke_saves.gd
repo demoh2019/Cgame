@@ -46,6 +46,16 @@ func _run() -> void:
         _fail("graphics quality was not restored")
         return
 
+    # The expanded 1km world accepts valid remote positions and clamps
+    # out-of-bounds saves to safe coordinates just inside perimeter walls.
+    if not GameSave.save_state({"position_xz": [600.0, -600.0]}, TEMP_PATH):
+        _fail("could not write boundary test save")
+        return
+    var clamped: Dictionary = GameSave.load_state(8, TEMP_PATH)
+    if (clamped.get("position_xz", Vector2.ZERO) as Vector2).distance_to(Vector2(510.0, -510.0)) > 0.001:
+        _fail("1km world save positions were not clamped correctly")
+        return
+
     var file := FileAccess.open(TEMP_PATH, FileAccess.WRITE)
     if file == null:
         _fail("could not write tampered test data")
