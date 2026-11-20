@@ -181,6 +181,9 @@ public:
 	bool are_cells_navigation_ready(const Vector2i &p_center, int p_radius = 0) const;
 	int get_navigation_ready_cell_count() const;
 	int get_navigation_pending_cell_count() const;
+	Array get_navigation_route_cells(const Vector3 &p_from_global, const Vector3 &p_to_global, int p_max_cells = 64) const;
+	bool is_navigation_route_ready(const Vector3 &p_from_global, const Vector3 &p_to_global, int p_max_cells = 64) const;
+	PackedVector3Array get_streamed_navigation_path(const Vector3 &p_from_global, const Vector3 &p_to_global, bool p_optimize = true, int p_navigation_layers = 1, int p_max_cells = 64) const;
 	bool is_streaming_source_navigation_ready(const String &p_name) const;
 	real_t get_streaming_source_navigation_progress(const String &p_name) const;
 	Node3D *get_cell_node(const Vector2i &p_cell) const;
