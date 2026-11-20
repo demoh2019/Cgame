@@ -85,6 +85,7 @@ const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
+const HandFlare = preload("res://scripts/shared/hand_flare.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const FlashCharge = preload("res://scripts/shared/flash_charge.gd")
 const InfectedSnare = preload("res://scripts/shared/infected_snare.gd")
@@ -172,6 +173,7 @@ class Player:
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
 	var smoke_cooldown: float = 0.0 # Session-only temporary PvE obscurant.
+	var flare_seconds: float = 0.0 # Paid fuel, saved to defeat relog refills.
 	var recall: Dictionary = {} # Ephemeral channel, no character persistence.
 	var recall_ready_at: float = 0.0
 	var crouching: bool = false # Ephemeral, server-authorized posture.
@@ -348,6 +350,7 @@ func character_data(player: Player) -> Dictionary:
 		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
 		"spore_filter_seconds": player.spore_filter_seconds,
+		"flare_seconds": player.flare_seconds,
 		"spore_sample_cooldown": player.spore_sample_cooldown,
 		"chain_wrap_seconds": player.chain_wrap_seconds,
 		"flash_cooldown": player.flash_cooldown,
@@ -418,6 +421,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("spore_filter_seconds", 0.0),
 			0.0, SporeHazard.FILTER_DURATION_SECONDS):
+		return false
+	if not SaveValidation.finite_number(data.get("flare_seconds", 0.0),
+			0.0, HandFlare.BURN_SECONDS):
 		return false
 	if not SaveValidation.finite_number(data.get("spore_sample_cooldown", 0.0),
 			0.0, SporeSampling.COOLDOWN_SECONDS):
@@ -517,6 +523,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.rain_cooldown = float(data.get("rain_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
 	player.spore_filter_seconds = float(data.get("spore_filter_seconds", 0.0))
+	player.flare_seconds = float(data.get("flare_seconds", 0.0))
 	player.spore_sample_cooldown = float(data.get("spore_sample_cooldown", 0.0))
 	player.chain_wrap_seconds = float(data.get("chain_wrap_seconds", 0.0))
 	player.flash_cooldown = float(data.get("flash_cooldown", 0.0))
@@ -638,6 +645,7 @@ func _spawn_player(player: Player) -> void:
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
 	player.smoke_cooldown = 0.0
+	player.flare_seconds = 0.0
 	player.crouching = false
 	player.dirty_inventory = true
 	events.append({"type": "spawn", "peer": player.id})
@@ -2627,6 +2635,16 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"hand_flare":
+			if item_id != HandFlare.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var problem: String = HandFlare.ignite_reason(
+				player.flare_seconds, time, player.position, _is_safe(player.position))
+			if problem != "":
+				return {"ok": false, "reason": problem}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.flare_seconds = HandFlare.BURN_SECONDS
 		"smoke_charge":
 			if item_id != FieldSmoke.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -2769,6 +2787,8 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	player.dirty_character = true
 	if item_id == BikeChain.ITEM_ID:
 		return {"ok": true, "chain_wrap_seconds": player.chain_wrap_seconds}
+	if item_id == HandFlare.ITEM_ID:
+		return {"ok": true, "flare_seconds": player.flare_seconds}
 	if item_id == FieldSmoke.ITEM_ID:
 		return {"ok": true, "smoke_seconds": FieldSmoke.DURATION,
 			"cooldown": player.smoke_cooldown}
@@ -3730,6 +3750,7 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 
 ## Full-loot deaths occur in red/black. Green/yellow deaths retain gear.
 func _on_player_death(victim: Player, killer: int) -> void:
+	victim.flare_seconds = 0.0
 	_cancel_recall(victim, "dead")
 	_abort_training(victim.id, "death")
 	_cancel_market_seller(victim.id)
@@ -3851,6 +3872,9 @@ func _tick_players(delta: float) -> void:
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.mount_cooldown = maxf(0.0, player.mount_cooldown - maxf(0.0, delta))
 		player.smoke_cooldown = maxf(0.0, player.smoke_cooldown - maxf(0.0, delta))
+		if player.flare_seconds > 0.0:
+			player.flare_seconds = HandFlare.remaining(player.flare_seconds, delta)
+			player.dirty_character = true
 		if player.chain_wrap_seconds > 0.0:
 			player.chain_wrap_seconds = maxf(0.0,
 				player.chain_wrap_seconds - maxf(0.0, delta))
@@ -4425,8 +4449,10 @@ func _tick_zombies(delta: float) -> void:
 			"notice_multiplier": WorldCycle.notice_multiplier(time),
 			"weather_sight": Weather.sight_multiplier(
 				Weather.conditions(world, player.position.x, player.position.z, time)),
-			"firelight": CampfireThreat.reveal_radius(campfires, player.position,
-				time, WorldCycle.is_night(time)),
+			"firelight": maxf(CampfireThreat.reveal_radius(campfires,
+				player.position, time, WorldCycle.is_night(time)),
+				HandFlare.infected_radius(player.flare_seconds, _alive(player),
+					WorldCycle.is_night(time), _is_safe(player.position))),
 			"visual_signature": _visual_signature_for(player),
 			# Only actual server wounds contribute; never trust client input.
 			"scent": BloodScent.detection_radius(player.survival.bleeding,
@@ -4835,6 +4861,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		if here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
 			nearby_players.append({"id": other.id, "name": other.name, "x": p.x, "y": p.y, "z": p.z, "yaw": other.yaw,
 				"alive": _alive(other), "crouching": other.crouching, "mounted": other.mounted,
+				"flare_lit": HandFlare.lit(other.flare_seconds, _alive(other)),
 				"bike_panniers": BikeCargo.installed(other.inventory),
 				"weapon": other.inventory.weapon,
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
@@ -4979,7 +5006,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"parry_cooldown": player.parry_cooldown, "parry_window": player.parry_window,
 			"rest_cooldown": player.rest_cooldown,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
-			"stim_cooldown": player.stim_cooldown,
+			"stim_cooldown": player.stim_cooldown, "flare_seconds": player.flare_seconds,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 			"visual_signature": _visual_signature_for(player),
 			"last_death_full_loot": player.last_death_full_loot,

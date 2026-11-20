@@ -15,6 +15,7 @@ const Hud = preload("res://scripts/client/hud.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
+const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const HubView = preload("res://scripts/client/hub_view.gd")
 const Audio = preload("res://scripts/client/audio.gd")
 const Assets = preload("res://scripts/client/assets.gd")
@@ -46,6 +47,7 @@ var hud
 var avatar: Node3D
 var avatar_model
 var bike_visual
+var flare_visual
 var audio
 var hub_view
 var outposts
@@ -440,6 +442,9 @@ func _on_welcomed() -> void:
 	bike_visual = TrailBikeVisual.new()
 	bike_visual.name = "TrailBike"
 	avatar.add_child(bike_visual)
+	flare_visual = HandFlareVisual.new()
+	flare_visual.name = "HandFlare"
+	avatar.add_child(flare_visual)
 	var label := Label3D.new()
 	label.text = name_edit.text
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -498,6 +503,7 @@ func _process(delta: float) -> void:
 		var riding: bool = bool(client.you.get("mounted", false)) and avatar.visible
 		bike_visual.set_panniers(client.inventory.count("bike_panniers") > 0)
 		bike_visual.set_riding(riding, avatar_model.speed, delta)
+		flare_visual.set_burning(avatar.visible and float(client.you.get("flare_seconds", 0.0)) > 0.0)
 		audio.set_footsteps(avatar_model._moving and avatar.visible and not riding)
 		if not riding:
 			effects.footsteps(position, avatar_model.speed, delta)

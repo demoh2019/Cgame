@@ -6,6 +6,7 @@ const Structures = preload("res://scripts/shared/structures.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
+const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const LootLabel = preload("res://scripts/shared/loot_label.gd")
 
@@ -119,6 +120,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		model.set_tint(tint)
 		model.set_zombie_state(int(entity["state"]))
 	if kind == "player":
+		_nodes[key].get_node("HandFlare").set_burning(bool(entity.get("flare_lit", false)) and bool(entity.get("alive", false)))
 		var bike = _nodes[key].get_node("TrailBike")
 		bike.set_panniers(bool(entity.get("bike_panniers", false)))
 		bike.set_riding(bool(entity.get("mounted", false)) and bool(entity.get("alive", false)))
@@ -349,6 +351,9 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		var bike := TrailBikeVisual.new()
 		bike.name = "TrailBike"
 		root.add_child(bike)
+		var flare := HandFlareVisual.new()
+		flare.name = "HandFlare"
+		root.add_child(flare)
 	var label := Label3D.new()
 	label.name = "Label"
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED

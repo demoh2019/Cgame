@@ -489,6 +489,11 @@ static func _build_items() -> void:
 		"value": 30, "weight": 0.35})
 	_add_recipe("smoke_charge", "smoke_charge", 1,
 		{"cloth_1": 2, "scrap": 1}, "workbench", 3.0)
+	# A moving emergency night light that sacrifices stealth for visibility.
+	_add_item("signal_flare", {"name": "Handheld Signal Flare", "kind": "hand_flare",
+		"tier": 1, "stack": 10, "weight": 0.25, "value": 22})
+	_add_recipe("signal_flare", "signal_flare", 1,
+		{"wood_1": 2, "cloth_1": 1, "scrap": 1}, "", 3.0)
 	_add_item("noise_decoy", {"name": "Clattering Decoy", "kind": "decoy",
 		"tier": 1, "stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("noise_decoy", "noise_decoy", 1,

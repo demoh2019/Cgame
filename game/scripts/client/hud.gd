@@ -341,6 +341,12 @@ func _build() -> void:
 	_stash_grid.columns = 4
 	stash_scroll.add_child(_stash_grid)
 
+	var flare_button := Button.new()
+	flare_button.name = "UseSignalFlare"
+	flare_button.text = "Light signal flare: 120s (F10 offline)"
+	flare_button.tooltip_text = "Crafted fuel: night-only glow also alerts nearby infected."
+	flare_button.pressed.connect(func() -> void: client.use_item("signal_flare"))
+	inventory_box.add_child(flare_button)
 	var recall_button := Button.new()
 	recall_button.name = "UseReturnCharm"
 	recall_button.text = "Return charm: 8s channel (green/yellow only)"
@@ -1180,6 +1186,12 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Spore sampling: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "use" and data.has("flare_seconds"):
+		say("Signal flare burning for 120s; infected and rival survivors see its light.")
+		return
+	if kind == "use" and str(data.get("reason", "")) in ["already_burning", "daylight"]:
+		say("Flare cannot ignite: %s (nothing consumed)." % str(data["reason"]))
+		return
 	if kind == "use" and data.has("smoke_seconds"):
 		say("Smoke deployed for nine seconds. Noise and blood scent still reveal you.")
 		return
@@ -1628,6 +1640,9 @@ func _process(_delta: float) -> void:
 	var mask_seconds: float = float(client.you.get("scent_mask_seconds", 0.0))
 	if mask_seconds > 0.0:
 		_info_label.text += "\nSCENT MASK: %.0fs remaining (vision and hearing unchanged)" % mask_seconds
+	var flare_time: float = float(client.you.get("flare_seconds", 0.0))
+	if flare_time > 0.0:
+		_info_label.text += "\nSIGNAL FLARE: %ds | night infected notice 28m" % ceili(flare_time)
 	var blood_range: float = float(client.you.get("blood_scent_radius", 0.0))
 	if blood_range > 0.0:
 		_info_label.text += "\nBLOOD SCENT: infected can sense the wound from %d m" % ceili(blood_range)

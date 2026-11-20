@@ -16,6 +16,7 @@ const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
+const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -45,6 +46,7 @@ var _sun: DirectionalLight3D
 var _world_environment: Environment
 var _avatar: MeshInstance3D
 var _bike_visual
+var _flare_visual
 var _last_bike_position: Vector3 = Vector3.INF
 var _stats: Label
 var _instructions: Label
@@ -104,6 +106,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_dodge", KEY_SPACE)
 	_bind_key("survive_parry", KEY_F8)
 	_bind_key("survive_poultice", KEY_F9)
+	_bind_key("survive_flare", KEY_F10)
 	_bind_key("survive_craft", KEY_C)
 	_bind_key("survive_quick_cook", KEY_0)
 	_bind_key("survive_next_recipe", KEY_TAB)
@@ -213,6 +216,9 @@ func _make_avatar() -> void:
 	_bike_visual.name = "TrailBike"
 	_bike_visual.position = Vector3(0.0, -0.85, 0.0)
 	_avatar.add_child(_bike_visual)
+	_flare_visual = HandFlareVisual.new()
+	_flare_visual.name = "HandFlare"
+	_avatar.add_child(_flare_visual)
 
 
 ## A visible landmark for the station validation enforced by GameServer.
@@ -668,6 +674,7 @@ func _physics_process(delta: float) -> void:
 	_last_bike_position = survivor.position
 	_bike_visual.set_panniers(survivor.inventory.count("bike_panniers") > 0)
 	_bike_visual.set_riding(survivor.mounted and survivor.survival.alive, bike_speed, delta)
+	_flare_visual.set_burning(survivor.survival.alive and survivor.flare_seconds > 0.0)
 	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
 	_camera.look_at(survivor.position + Vector3(0, 0.7, 0), Vector3.UP)
 	_stream_chunks()
@@ -914,6 +921,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Herbal poultice", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_poultice"))
 	elif event.is_action_pressed("survive_warmth"):
 		_result("Heat pack", sim.cmd_use(LOCAL_PLAYER_ID, "thermal_wrap"))
+	elif event.is_action_pressed("survive_flare"):
+		_result("Ignite signal flare", sim.cmd_use(LOCAL_PLAYER_ID, "signal_flare"))
 	elif event.is_action_pressed("survive_stim"):
 		_result("Frontier stim", sim.cmd_use(LOCAL_PLAYER_ID, "frontier_stim"))
 	elif event.is_action_pressed("survive_scent_mask"):
@@ -1110,6 +1119,8 @@ func _update_hud() -> void:
 		_stats.text += "\nREGIONAL TRADE: %s buys %s +%d%%" % [
 			str(nearby_offer["name"]), str(nearby_offer["category"]),
 			int(nearby_offer["premium_percent"])]
+	if survivor.flare_seconds > 0.0:
+		_stats.text += "\nFLARE: %ds (F10) | infected notice up to 28m" % ceili(survivor.flare_seconds)
 	var equipped_ammo: String = str(Defs.item(survivor.inventory.weapon).get("ammo", ""))
 	if not equipped_ammo.is_empty():
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [
