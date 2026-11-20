@@ -92,7 +92,7 @@ func configure(id: String, player: Node3D, spawn_position: Vector3,
 
 func _exit_tree() -> void:
     if is_instance_valid(streamer) and not encounter_id.is_empty():
-        streamer.unregister_navigation_agent(encounter_id)
+        streamer.unregister_navigation_agent_if_owner(encounter_id, self)
 
 
 func _steering_ray_blocked(from: Vector3, direction: Vector3) -> bool:
