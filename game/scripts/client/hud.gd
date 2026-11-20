@@ -387,6 +387,12 @@ func _build() -> void:
 	flare_button.tooltip_text = "Crafted fuel: night-only glow also alerts nearby infected."
 	flare_button.pressed.connect(func() -> void: client.use_item("signal_flare"))
 	inventory_box.add_child(flare_button)
+	var edge_oil_button := Button.new()
+	edge_oil_button.name = "AntisepticEdgeOil"
+	edge_oil_button.text = "Coat melee weapon: +20% infected damage for 120s (Shift+6)"
+	edge_oil_button.tooltip_text = "Craft at workbench from 1 spore culture + antiseptic + scrap. No PvP or raid boss buff."
+	edge_oil_button.pressed.connect(func() -> void: client.use_item("antiseptic_edge_oil"))
+	inventory_box.add_child(edge_oil_button)
 	var recall_button := Button.new()
 	recall_button.name = "UseReturnCharm"
 	recall_button.text = "Return charm: 8s channel (green/yellow only)"
@@ -1301,6 +1307,15 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and data.has("coating_seconds"):
+		say("Coated %s: +20%% vs regular/elite infected for %.0fs. Unequipping ends the effect." % [
+			str(data.get("coating_weapon", "melee weapon")),
+			float(data["coating_seconds"])])
+		return
+	if kind == "use" and str(data.get("reason", "")) in ["need_melee", "already_coated"] and (
+			client.inventory.count("antiseptic_edge_oil") > 0):
+		say("Weapon coating: " + str(data["reason"]) + " (oil not spent)")
+		return
 	if kind == "attack" and bool(data.get("riposte", false)):
 		say("RIPOSTE! Perfect parry converted into a powerful counterstrike.")
 		return
@@ -1854,6 +1869,10 @@ func _process(_delta: float) -> void:
 	var finisher_left: float = float(client.you.get("finisher_cooldown", 0.0))
 	if finisher_left > 0.0:
 		_info_label.text += "\nFINISHER: %.1fs cooldown | Shift+G vs stunned infected" % finisher_left
+	var oil_left: float = float(client.you.get("coating_seconds", 0.0))
+	if oil_left > 0.0:
+		_info_label.text += "\nANTISEPTIC EDGE %s %.0fs: +20%% infected damage (no PvP/bosses)" % [
+			str(client.you.get("coating_weapon", "")), oil_left]
 	var quiet_left: float = float(client.you.get("chain_wrap_seconds", 0.0))
 	if quiet_left > 0.0:
 		_info_label.text += "\nQUIET CHAIN: %.0fs | Bike noise 9m" % quiet_left

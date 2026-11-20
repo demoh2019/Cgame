@@ -996,7 +996,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_armor"):
 		_result("Equip armor", sim.cmd_use(LOCAL_PLAYER_ID, "jacket_1"))
 	elif event.is_action_pressed("survive_antiseptic"):
-		_result("Clean wound", sim.cmd_use(LOCAL_PLAYER_ID, "field_antiseptic"))
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Coat melee weapon", sim.cmd_use(LOCAL_PLAYER_ID, "antiseptic_edge_oil"))
+		else:
+			_result("Clean wound", sim.cmd_use(LOCAL_PLAYER_ID, "field_antiseptic"))
 	elif event.is_action_pressed("survive_antibiotics"):
 		_result("Antibiotics", sim.cmd_use(LOCAL_PLAYER_ID, "antibiotics"))
 	elif event.is_action_pressed("survive_poultice"):
@@ -1251,6 +1254,9 @@ func _update_hud() -> void:
 			survivor.meal_tier, survivor.meal_seconds,
 			HeartyMeal.stamina_per_second(survivor.meal_tier),
 			HeartyMeal.energy_per_second(survivor.meal_tier)]
+	if survivor.edge_coating_seconds > 0.0:
+		_stats.text += "\nANTISEPTIC EDGE %s: %.0fs | +20%% vs ordinary/elite infected" % [
+			survivor.edge_coating_weapon, survivor.edge_coating_seconds]
 	var local_armor: String = survivor.inventory.armor
 	if local_armor != "" and survivor.inventory.count(local_armor) <= 0:
 		local_armor = ""
@@ -1278,7 +1284,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G skill / Shift+G finisher | Space dodge | F8 parry | F9 smoke | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | F2 signal flare / F10 net / F12 collect net | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G skill / Shift+G finisher | Space dodge | F8 parry | F9 smoke | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic / Shift+6 coat melee 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | F2 signal flare / F10 net / F12 collect net | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback

@@ -710,7 +710,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_5:
 				_quick_use("jacket_1")
 			KEY_6:
-				_quick_use("field_antiseptic")
+				_quick_use("antiseptic_edge_oil" if Input.is_key_pressed(KEY_SHIFT)
+					else "field_antiseptic")
 			KEY_7:
 				_quick_use("antibiotics")
 			KEY_F11:
