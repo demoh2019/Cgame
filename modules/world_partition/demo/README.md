@@ -55,6 +55,7 @@ extension is required for content generation). The default covers the full
 ```sh
 godot --headless --path modules/world_partition/demo --import --quit
 godot --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=6 --stride=8
+# A second identical invocation should report: Baked 0, skipped 169.
 godot --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=6 --stride=8
 godot --headless --path modules/world_partition/demo --script res://tests/hlod_bake_test.gd
 ```

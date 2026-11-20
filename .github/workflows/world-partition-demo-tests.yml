@@ -39,5 +39,12 @@ jobs:
           output=$(godot --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=1 --stride=8)
           echo "$output"
           grep -q "Baked 0, skipped 9" <<< "$output"
+      - name: Verify stale proxy is rebuilt without touching other cells
+        shell: bash
+        run: |
+          printf '\n; intentional checksum change\n' >> modules/world_partition/demo/generated/forest_proxy_0_0.tscn
+          output=$(godot --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=1 --stride=8)
+          echo "$output"
+          grep -q "Baked 1, skipped 8" <<< "$output"
       - name: Verify generated proxy geometry, signatures and cell determinism
         run: godot --headless --path modules/world_partition/demo --script res://tests/hlod_bake_test.gd

@@ -5,12 +5,12 @@ extends RefCounted
 const SCHEMA_VERSION := 1
 const MANIFEST_PATH := "res://generated/hlod_manifest.json"
 const PROXY_FOLDER := "res://generated"
-const INPUT_FILES := PackedStringArray([
+const INPUT_FILES := [
     "res://scenes/cell_detail.tscn",
     "res://scripts/cell_art.gd",
     "res://tools/bake_hlod_proxies.gd",
     "res://tools/hlod_bake_manifest.gd",
-])
+]
 
 static func cell_key(cell: Vector2i) -> String:
     return "%d,%d" % [cell.x, cell.y]
