@@ -30,6 +30,7 @@
 
 #include "multimesh.h"
 
+#include "core/math/random_pcg.h"
 #include "core/object/class_db.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -206,6 +207,36 @@ void MultiMesh::set_buffer(const Vector<float> &p_buffer) {
 	ERR_FAIL_COND_MSG(stride * instance_count != p_buffer.size(), "Cannot set a buffer on a Multimesh that is a different size from the Multimesh's existing buffer.");
 
 	RS::get_singleton()->multimesh_set_buffer(multimesh, p_buffer);
+}
+
+
+Vector<float> MultiMesh::shuffled_instance_buffer(const Vector<float> &p_buffer, uint64_t p_seed) const {
+	// MultiMesh buffers contain interleaved transform, color, and custom data.
+	// Shuffle records, not floats, so distance-based visible_instance_count
+	// produces scattered coverage without corrupting matrix rows or tints.
+	const int stride = (transform_format == TRANSFORM_2D ? 8 : 12) +
+			(use_colors ? 4 : 0) + (use_custom_data ? 4 : 0);
+	if (instance_count <= 1 || p_buffer.size() != instance_count * stride) {
+		return p_buffer;
+	}
+	Vector<float> shuffled = p_buffer;
+	float *records = shuffled.ptrw(); // Copy-on-write; do not mutate caller data.
+	RandomPCG rng;
+	rng.seed(p_seed);
+	for (int i = instance_count - 1; i > 0; --i) {
+		const int other = rng.random(0, i);
+		if (i == other) {
+			continue;
+		}
+		const int a = i * stride;
+		const int b = other * stride;
+		for (int channel = 0; channel < stride; ++channel) {
+			const float saved = records[a + channel];
+			records[a + channel] = records[b + channel];
+			records[b + channel] = saved;
+		}
+	}
+	return shuffled;
 }
 
 Vector<float> MultiMesh::get_buffer() const {
@@ -399,6 +430,7 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_aabb"), &MultiMesh::get_aabb);
 
 	ClassDB::bind_method(D_METHOD("get_buffer"), &MultiMesh::get_buffer);
+	ClassDB::bind_method(D_METHOD("shuffled_instance_buffer", "buffer", "seed"), &MultiMesh::shuffled_instance_buffer);
 	ClassDB::bind_method(D_METHOD("set_buffer", "buffer"), &MultiMesh::set_buffer);
 
 	ClassDB::bind_method(D_METHOD("set_buffer_interpolated", "buffer_curr", "buffer_prev"), &MultiMesh::set_buffer_interpolated);
