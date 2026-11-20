@@ -1145,7 +1145,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_R:
 				if Input.is_key_pressed(KEY_CTRL):
 					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
-						client.refill_canteen()
+						client.refill_canteen(Input.is_key_pressed(KEY_SHIFT))
 				elif Input.is_key_pressed(KEY_SHIFT):
 					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 						_quick_use("field_alkali_kit")
