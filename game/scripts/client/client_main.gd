@@ -132,6 +132,7 @@ func _ready() -> void:
 	GraphicsQuality.apply(get_viewport(), _atmosphere, null)
 	_footprints = FootprintDecals.new()
 	_footprints.name = "TerrainFootprints"
+	_footprints.setup(world)
 	add_child(_footprints)
 	_rain_vfx = RainVfx.create(str(RenderingServer.get_current_rendering_method()))
 	add_child(_rain_vfx)
