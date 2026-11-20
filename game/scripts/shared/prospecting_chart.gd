@@ -3,6 +3,8 @@ extends RefCounted
 ## The server alone selects a real world node. Clients cannot request a
 ## particular node ID, item quantity, reward, radius, or location.
 
+const WorldGen = preload("res://scripts/shared/world_gen.gd")
+
 const ITEM_ID := "prospecting_chart"
 const SCAN_RADIUS := 180.0
 const CHUNK_RADIUS := 3
@@ -17,7 +19,7 @@ static func nearest(world, at: Vector3, depleted: Dictionary) -> Dictionary:
 	if world == null or not at.is_finite() or world.is_safe(at.x, at.z):
 		return {}
 	var origin := Vector2(at.x, at.z)
-	var cell: Vector2i = world.cell_of(origin.x, origin.y)
+	var cell: Vector2i = WorldGen.cell_of(origin.x, origin.y)
 	var best: Dictionary = {}
 	var best_tier: int = -1
 	var best_ore: bool = false
