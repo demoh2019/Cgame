@@ -26,6 +26,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const GraphicsColorGrade = preload("res://scripts/client/graphics_color_grade.gd")
 const RenderBenchmark = preload("res://scripts/client/render_benchmark.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
@@ -1149,6 +1150,10 @@ func _update_time_of_day(delta: float) -> void:
 	var storming: bool = demo_storm or (str(weather.get("condition", "clear")) == "storm" and not bool(weather.get("sheltered", false)))
 	var clock: float = client.server_time if demo_phase < 0.0 else demo_phase * WorldCycle.DAY_LENGTH
 	var underground: bool = client != null and client.you.has("x") and Dungeon.is_underground(float(client.you["x"]))
+	# Occlusion has a CPU cost: enable it only when enclosed dungeon walls
+	# provide opportunities to hide other rooms behind them.
+	DungeonOcclusion.update_viewport(get_viewport(), GraphicsQuality.level(),
+		str(RenderingServer.get_current_rendering_method()), underground)
 	# Stable 256m regional wind is only sampled four times per second.
 	_wind_sample_left -= maxf(delta, 0.0)
 	if underground:
