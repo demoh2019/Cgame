@@ -12,12 +12,15 @@ detailed cells and lightweight distant proxies with no additional engine rendere
 - Detailed forest scenes stream at load radius 1, unload radius 2.
 - Proxy forest scenes stream at load radius 4, unload radius 5.
 - Detailed scenes generate deterministic trees through MultiMesh. Distant
-  scenes use prebaked proxy files when available, falling back to the
-  procedurally generated proxy scene for unbaked cells.
+  scenes use prebaked proxy files **only when the current manifest validates
+  their source fingerprint and saved-file checksum**; otherwise the runtime
+  falls back to procedural proxy scenes.
 - The offline baker imports the detailed forest scene, subsamples instance
   transforms, substitutes a low-poly canopy mesh, and serializes each cell
-  as a PackedScene with no runtime generation script. It does not merge
-  different meshes into a single static draw call.
+  as a PackedScene with no runtime generation script. A SHA-256 manifest tracks
+  the source scene, generator scripts, baking stride, and saved asset bytes.
+  Repeat builds skip unchanged cells. It does not merge different meshes
+  into a single static draw call.
 - The full detail layer uses 160 trees per cell; the proxy layer uses 20 and a
   simpler canopy mesh. This reduces scene and geometry complexity away from the camera.
 - Both layers remain independently budgeted, to limit new instances per frame.
@@ -52,16 +55,25 @@ extension is required for content generation). The default covers the full
 ```sh
 godot --headless --path modules/world_partition/demo --import --quit
 godot --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=6 --stride=8
+# A second identical invocation should report: Baked 0, skipped 169.
+godot --headless --path modules/world_partition/demo --script res://tools/bake_hlod_proxies.gd -- --radius=6 --stride=8
 godot --headless --path modules/world_partition/demo --script res://tests/hlod_bake_test.gd
 ```
 
 For a quick validation without generating all 169 cells, use `--radius=1`.
 Output is written to `res://generated/forest_proxy_X_Z.tscn` and kept out of
-Git by the local `.gitignore`. The demo automatically registers existing baked
-scenes; missing files use the old procedural scene instead. The HUD reports the
-number of baked proxies selected at startup. A rebuild is needed after changing
-the detail scene or baker stride, and the game must be restarted to refresh
-its registered scene paths.
+Git by the local `.gitignore`, along with `res://generated/hlod_manifest.json`.
+The manifest records the SHA-256 of each stored proxy and a revision fingerprint
+of the detail scene, its generating script, the baker, its manifest helper and
+the selected stride. A second identical bake skips all 169 cells rather than
+recreating their assets. Changing source inputs invalidates the cache and
+forces regeneration. A partial bake deliberately replaces the manifest with
+only the covered cells; other proxy scenes remain on disk but are excluded
+until the full bake is run again. At runtime the demo checks the manifest
+and each proxy's checksum before registering it; invalid or absent files use
+the old procedural scene instead. The HUD reports the number of verified
+proxy scenes and the measured checksum-scan time (milliseconds) at startup.
+Restart the game after rebaking content.
 
 The project uses Compatibility renderer so it can be inspected on low-end GPUs;
 near/far proxy handoff is implemented without renderer-specific effects.
@@ -93,6 +105,11 @@ Quality controller assertions (after importing the project):
 - Native `get_cell_instance()` is required for proxy handoff; this branch includes it.
 - This is not the user's actual game project. The example lives in the engine
   source repository so it can be copied into a real Godot game once its source is available.
+- The manifest checks are designed for integrity and content invalidation,
+  not for cryptographic authentication of untrusted third-party assets.
+  Computing SHA-256 for prepared scenes adds startup I/O; measure it for
+  much larger worlds and consider a signed asset registry or optimized build
+  catalog when scaling beyond the example grid.
 - The proxy baker supports this demo's MeshInstance3D/MultiMeshInstance3D
   scene shape. It preserves source mesh materials and transforms but does
   not yet combine disparate materials, bake textures, or generate atlas

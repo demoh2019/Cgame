@@ -10,6 +10,7 @@ const PROXY_SCENE := "res://scenes/cell_proxy.tscn"
 const FLY_SCRIPT := preload("res://scripts/free_fly.gd")
 const QUALITY_SCRIPT := preload("res://scripts/streaming_quality.gd")
 const CROSSFADE_SCRIPT := preload("res://scripts/hlod_crossfade_controller.gd")
+const MANIFEST_SCRIPT := preload("res://tools/hlod_bake_manifest.gd")
 
 var camera: Camera3D
 var prefetch_source: Node3D
@@ -20,6 +21,8 @@ var prefetch_enabled := true
 var proxies_enabled := true
 var hud_elapsed := 0.0
 var baked_proxy_cell_count := 0
+var baked_validation_ms := 0
+var baked_manifest: Dictionary = {}
 var quality_controller = QUALITY_SCRIPT.new()
 var crossfade_controller: CROSSFADE_SCRIPT
 
@@ -28,7 +31,17 @@ func _ready() -> void:
     if not ClassDB.class_exists("WorldPartition3D"):
         push_error("Cgame build with native world_partition module is required.")
         return
+    # The manifest is tied to the current detailed art, baking code and stride.
+    # No stale or corrupted proxy file should be registered by the streamer.
+    var manifest_file := MANIFEST_SCRIPT.MANIFEST_PATH
+    if FileAccess.file_exists(manifest_file):
+        var raw: Variant = JSON.parse_string(FileAccess.get_file_as_string(manifest_file))
+        if raw is Dictionary:
+            var stride: int = int(raw.get("stride", -1))
+            baked_manifest = MANIFEST_SCRIPT.read_valid_manifest(stride)
+    var validation_start: int = Time.get_ticks_msec()
     distant = _make_streamer("DistantProxies", 4, 5, PROXY_SCENE, 1)
+    baked_validation_ms = Time.get_ticks_msec() - validation_start
     detail = _make_streamer("DetailedCells", 1, 2, DETAIL_SCENE, 2)
     _apply_quality_profile()
     if not distant.has_method("get_cell_instance") or not detail.has_method("get_cell_instance"):
@@ -60,10 +73,12 @@ func _make_streamer(name: String, radius: int, unload_radius: int, scene_path: S
         for z in range(-WORLD_HALF_EXTENT, WORLD_HALF_EXTENT + 1):
             var path := scene_path
             if scene_path == PROXY_SCENE:
-                var baked := "res://generated/forest_proxy_%d_%d.tscn" % [x, z]
-                if ResourceLoader.exists(baked, "PackedScene"):
-                    path = baked
-                    baked_proxy_cell_count += 1
+                var cell := Vector2i(x, z)
+                if MANIFEST_SCRIPT.is_cached_proxy_valid(cell, baked_manifest):
+                    var baked: String = MANIFEST_SCRIPT.proxy_path(cell)
+                    if ResourceLoader.exists(baked, "PackedScene"):
+                        path = baked
+                        baked_proxy_cell_count += 1
             cell_paths[Vector2i(x, z)] = path
     world.call("set_cell_scenes", cell_paths)
     return world
@@ -179,11 +194,12 @@ func _update_hud() -> void:
         return
     var detail_count: int = int(detail.call("get_loaded_cell_count")) if detail != null else 0
     var distant_count: int = int(distant.call("get_loaded_cell_count")) if distant != null else 0
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nOffline baked proxies: %d / 169 registered cells\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
         baked_proxy_cell_count,
+        baked_validation_ms,
         str(quality_controller.get_profile()["name"]),
         "ON" if quality_controller.automatic else "OFF",
         "ON" if crossfade_controller != null and crossfade_controller.enabled else "OFF",
