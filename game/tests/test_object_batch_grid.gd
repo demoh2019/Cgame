@@ -12,7 +12,9 @@ func run(t) -> void:
 	for i in 20:
 		trees.append({"id": 100 + i, "x": 4.0 + float(i % 5) * 12.0,
 			"y": 0.0, "z": 5.0 + float(i / 5) * 12.0})
-	var crates: Array = [{"id": 900 + i, "x": 5.0 + float(i), "z": 6.0} for i in 16]
+	var crates: Array = []
+	for i in 16:
+		crates.append({"id": 900 + i, "x": 5.0 + float(i), "z": 6.0})
 	var input := {"tree:0": trees, "crate:0": crates}
 	var batches: Dictionary = ObjectBatchGrid.partition(input, Vector2.ZERO, 64.0)
 	var ids: Dictionary = {}
