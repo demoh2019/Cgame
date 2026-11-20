@@ -40,6 +40,7 @@ var _craft_signature: String = ""
 var _inventory_signature: String = ""
 var _trade_state: Dictionary = {}
 var _party_status: Label
+var _duel_status: Label
 var _party_target: OptionButton
 var _party_peer_signature: String = ""
 var _trade_target: OptionButton
@@ -324,6 +325,31 @@ func _build() -> void:
 	leave_party.text = "Leave"
 	leave_party.pressed.connect(func() -> void: client.party_leave())
 	party_buttons.add_child(leave_party)
+	var duel_heading := Label.new()
+	duel_heading.text = "Training duel (green hub only, no gear loss)"
+	inventory_box.add_child(duel_heading)
+	_duel_status = Label.new()
+	_duel_status.text = "No duel pending."
+	inventory_box.add_child(_duel_status)
+	var duel_buttons := HBoxContainer.new()
+	inventory_box.add_child(duel_buttons)
+	var duel_invite := Button.new()
+	duel_invite.text = "Challenge selected"
+	duel_invite.pressed.connect(func() -> void:
+		var target: int = _party_target.get_selected_id()
+		if target >= 0:
+			client.duel_invite(target)
+		else:
+			say("Select a visible survivor above"))
+	duel_buttons.add_child(duel_invite)
+	var duel_accept := Button.new()
+	duel_accept.text = "Accept"
+	duel_accept.pressed.connect(func() -> void: client.duel_accept())
+	duel_buttons.add_child(duel_accept)
+	var duel_cancel := Button.new()
+	duel_cancel.text = "Decline / end"
+	duel_cancel.pressed.connect(func() -> void: client.duel_cancel())
+	duel_buttons.add_child(duel_cancel)
 	var rally_button := Button.new()
 	rally_button.text = "Set rally"
 	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
@@ -596,6 +622,16 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"duel":
+			match str(event.get("phase", "")):
+				"invited":
+					say("Duel challenge from %s. Open inventory to accept." % str(event.get("name", "Survivor")))
+				"started":
+					say("Training duel started vs %s. No loot loss." % str(event.get("opponent", "Survivor")))
+				"finished":
+					var winner: int = int(event.get("winner", -1))
+					say("Duel %s (%s)." % ["won" if winner == client.peer_id else ("lost" if winner > 0 else "ended"),
+						str(event.get("reason", "finished"))])
 		"self_defense":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("ATTACKED! You may retaliate for 30 seconds without infamy.")
@@ -1081,6 +1117,15 @@ func _refresh_market_options() -> void:
 
 
 func _refresh_party_controls() -> void:
+	var training: Dictionary = client.you.get("duel", {})
+	if bool(training.get("active", false)):
+		_duel_status.text = "Sparring with #%d — %ds" % [
+			int(training.get("opponent", -1)), ceili(float(training.get("seconds", 0.0)))]
+	elif int(training.get("invite_from", -1)) > 0:
+		_duel_status.text = "Challenge from #%d — %ds to accept" % [
+			int(training.get("invite_from", -1)), ceili(float(training.get("seconds", 0.0)))]
+	else:
+		_duel_status.text = "No duel pending. Select a nearby survivor above."
 	var state: Dictionary = client.you.get("party", {})
 	var group_id: int = int(state.get("id", 0))
 	var roster: Array = state.get("roster", [])

@@ -10,6 +10,7 @@ const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const CombatLogout = preload("res://scripts/shared/combat_logout.gd")
+const TrainingDuel = preload("res://scripts/shared/training_duel.gd")
 const PvPHonor = preload("res://scripts/shared/pvp_honor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
@@ -170,6 +171,9 @@ var territory # Session outposts generated from this world seed.
 var siege_contracts = SiegeContracts.new() # Session-only declared siege windows and honor.
 var outpost_fortify_requests: Dictionary = {} # Peer -> last request and cached result.
 var outpost_breach_requests: Dictionary = {} # Peer -> last command and cached result.
+var training_invites: Dictionary = {} # Target peer -> verified invitation.
+var training_matches: Dictionary = {} # Both peer IDs reference the same session.
+var training_invite_last: Dictionary = {} # Bounded per peer by disconnect cleanup.
 var pvp_honor_ledger: Dictionary = {} # Bounded server-only account/guest kill cooldowns.
 var siege_declare_requests: Dictionary = {} # Peer -> last declared request and cached result.
 var world_structure_revision: int = 0
@@ -428,6 +432,8 @@ func prepare_disconnect(peer_id: int) -> bool:
 
 
 func remove_player(peer_id: int) -> void:
+	_abort_training(peer_id, "disconnected")
+	training_invite_last.erase(peer_id)
 	# Direct server removals must obey the same rule as authenticated Net.leave.
 	prepare_disconnect(peer_id)
 	# Prevent a recycled peer ID inheriting another survivor's guilt.
@@ -637,6 +643,126 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 # --- Cooperative survivor parties (classic MMO-style group play) -----------------------
 ## Invite only a real nearby player. All membership and leadership is
 ## session-owned; no client supplies a party ID or its member list.
+
+## Mutual, proximity-checked hub sparring: no loot, crimes or PvP rewards.
+func cmd_duel_invite(peer_id: int, target_id: int) -> Dictionary:
+	var source: Player = players.get(peer_id)
+	var target: Player = players.get(target_id)
+	var denial: String = TrainingDuel.invitation_reason(world, source, target, time)
+	if denial != "":
+		return {"ok": false, "reason": denial}
+	if training_matches.has(peer_id) or training_matches.has(target_id):
+		return {"ok": false, "reason": "already_dueling"}
+	if time < float(training_invite_last.get(peer_id, -INF)) + TrainingDuel.INVITE_COOLDOWN:
+		return {"ok": false, "reason": "cooldown"}
+	if training_invites.has(target_id) and float(training_invites[target_id].get("until", 0.0)) > time:
+		return {"ok": false, "reason": "invite_pending"}
+	training_invite_last[peer_id] = time
+	training_invites[target_id] = {"from": peer_id,
+		"until": time + TrainingDuel.INVITE_SECONDS,
+		"from_instance": source.get_instance_id(), "to_instance": target.get_instance_id()}
+	events.append({"type": "duel", "peer": target_id, "phase": "invited",
+		"name": source.name, "by": peer_id})
+	return {"ok": true, "phase": "invited"}
+
+
+func cmd_duel_accept(peer_id: int) -> Dictionary:
+	var invite: Dictionary = training_invites.get(peer_id, {})
+	if invite.is_empty() or float(invite.get("until", 0.0)) <= time:
+		training_invites.erase(peer_id)
+		return {"ok": false, "reason": "no_invite"}
+	var first: Player = players.get(int(invite["from"]))
+	var second: Player = players.get(peer_id)
+	if first == null or second == null or first.get_instance_id() != int(invite["from_instance"]) or \
+			second.get_instance_id() != int(invite["to_instance"]):
+		training_invites.erase(peer_id)
+		return {"ok": false, "reason": "stale_invite"}
+	var denial: String = TrainingDuel.invitation_reason(world, first, second, time)
+	if denial != "" or training_matches.has(first.id) or training_matches.has(second.id):
+		training_invites.erase(peer_id)
+		return {"ok": false, "reason": denial if denial != "" else "already_dueling"}
+	training_invites.erase(peer_id)
+	var duel: Dictionary = {"a": first.id, "b": second.id,
+		"until": time + TrainingDuel.MATCH_SECONDS,
+		"a_hp": first.survival.health, "b_hp": second.survival.health}
+	training_matches[first.id] = duel
+	training_matches[second.id] = duel
+	for member in [first, second]:
+		events.append({"type": "duel", "peer": member.id, "phase": "started",
+			"opponent": second.name if member.id == first.id else first.name,
+			"seconds": TrainingDuel.MATCH_SECONDS})
+	return {"ok": true, "phase": "started"}
+
+
+func cmd_duel_cancel(peer_id: int) -> Dictionary:
+	if training_matches.has(peer_id):
+		_end_training(peer_id, -1, "cancelled")
+		return {"ok": true, "phase": "cancelled"}
+	if training_invites.has(peer_id):
+		training_invites.erase(peer_id)
+		return {"ok": true, "phase": "declined"}
+	var found: bool = false
+	for target_id in training_invites.keys():
+		if int(training_invites[target_id].get("from", -1)) == peer_id:
+			training_invites.erase(target_id)
+			found = true
+	return {"ok": found, "reason": "" if found else "no_duel"}
+
+
+func _end_training(peer_id: int, winner_id: int, reason: String) -> void:
+	var duel: Dictionary = training_matches.get(peer_id, {})
+	if duel.is_empty():
+		return
+	var a: int = int(duel["a"])
+	var b: int = int(duel["b"])
+	training_matches.erase(a)
+	training_matches.erase(b)
+	for member_id in [a, b]:
+		var member: Player = players.get(member_id)
+		if member == null:
+			continue
+		if _alive(member):
+			var initial: float = float(duel["a_hp"] if member_id == a else duel["b_hp"])
+			member.survival.health = maxf(member.survival.health, initial)
+		events.append({"type": "duel", "peer": member_id, "phase": "finished",
+			"winner": winner_id, "reason": reason})
+
+
+func _abort_training(peer_id: int, reason: String) -> void:
+	_end_training(peer_id, -1, reason)
+	training_invites.erase(peer_id)
+	for target_id in training_invites.keys():
+		if int(training_invites[target_id].get("from", -1)) == peer_id:
+			training_invites.erase(target_id)
+
+
+func _tick_training() -> void:
+	for peer_id in training_matches.keys():
+		var duel: Dictionary = training_matches.get(peer_id, {})
+		if duel.is_empty() or int(duel["a"]) != int(peer_id):
+			continue
+		var first: Player = players.get(int(duel["a"]))
+		var second: Player = players.get(int(duel["b"]))
+		if not TrainingDuel.active_for(training_matches, world, first, second, time):
+			_end_training(int(peer_id), -1, "expired_or_left_hub")
+	for peer_id in training_invites.keys():
+		if float(training_invites[peer_id]["until"]) <= time:
+			training_invites.erase(peer_id)
+
+
+func _training_snapshot(peer_id: int) -> Dictionary:
+	var match_data: Dictionary = training_matches.get(peer_id, {})
+	if not match_data.is_empty():
+		return {"active": true,
+			"opponent": int(match_data["b"]) if peer_id == int(match_data["a"]) else int(match_data["a"]),
+			"seconds": maxf(0.0, float(match_data["until"]) - time)}
+	var invite: Dictionary = training_invites.get(peer_id, {})
+	if not invite.is_empty() and float(invite["until"]) > time:
+		return {"active": false, "invite_from": int(invite["from"]),
+			"seconds": float(invite["until"]) - time}
+	return {}
+
+
 func cmd_party_invite(peer_id: int, target_id: int) -> Dictionary:
 	var source: Player = players.get(peer_id)
 	var target: Player = players.get(target_id)
@@ -2169,18 +2295,20 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 		if distance >= 0.0 and distance < best_distance:
 			best = {"kind": "zombie", "id": zombie.id}
 			best_distance = distance
-	# Red/black PvP only; zone borders do not permit attacking protected players.
-	if ZoneRisk.allows_pvp(attacker_zone):
+	# PvP zones remain unchanged; only the mutually accepted hub opponent
+	# may be targetable in the otherwise peaceful settlement.
+	if ZoneRisk.allows_pvp(attacker_zone) or training_matches.has(attacker.id):
 		for other in players.values():
 			if other.id == attacker.id or not _alive(other) or ignored.has("player:" + str(other.id)):
 				continue
 			# Friendly party members do not intercept attacks aimed at enemies.
+			var training: bool = TrainingDuel.active_for(training_matches, world, attacker, other, time)
 			var group_id: int = parties.group_of(attacker.id)
-			if group_id != 0 and parties.group_of(other.id) == group_id:
+			if not training and group_id != 0 and parties.group_of(other.id) == group_id:
 				continue
-			if GuildIdentity.same_guild(attacker, other):
+			if not training and GuildIdentity.same_guild(attacker, other):
 				continue # Verified guildmates cannot intercept PvP attacks.
-			if not ZoneRisk.can_pvp(attacker_zone, world.zone_at(other.position.x, other.position.z)):
+			if not training and not ZoneRisk.can_pvp(attacker_zone, world.zone_at(other.position.x, other.position.z)):
 				continue
 			var distance := _hit_distance(origin, direction, Vector2(other.position.x, other.position.z), reach, ranged, 0.5)
 			if distance >= 0.0 and distance < best_distance:
@@ -2253,6 +2381,18 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 	else:
 		var victim: Player = players.get(hit["id"])
 		if victim == null or not _alive(victim):
+			return
+		if TrainingDuel.active_for(training_matches, world, attacker, victim, time):
+			# Nonlethal combat. No PvP points, infamy, deaths, item loss, XP,
+			# bleeding or combat logout penalty can originate from sparring.
+			var strike: float = maxf(0.0, Combat.apply_armor(damage, victim.inventory.armor))
+			strike *= 1.0 - clampf(victim.skills.bonus("damage_reduction"), 0.0, 0.4)
+			var previous: float = victim.survival.health
+			var applied: float = victim.survival.hurt(minf(strike, maxf(0.0, previous - 1.0)))
+			if applied > 0.0:
+				victim.dirty_character = true
+			if strike >= previous - 1.0 and strike > 0.0:
+				_end_training(victim.id, attacker.id, "knockout")
 			return
 		# Parties are cooperative: do not allow friendly fire in red zones.
 		var attacker_party: int = parties.group_of(attacker.id)
@@ -2387,6 +2527,7 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 
 ## Full-loot deaths occur in red/black. Green/yellow deaths retain gear.
 func _on_player_death(victim: Player, killer: int) -> void:
+	_abort_training(victim.id, "death")
 	_cancel_market_seller(victim.id)
 	_cancel_player_trade(victim.id, "dead")
 	victim.deaths += 1
@@ -2422,6 +2563,7 @@ func tick(delta: float) -> void:
 	_tick_trades()
 	parties.expire(time)
 	_tick_players(delta)
+	_tick_training()
 	var capture_events: Array = territory.tick(delta, time, players, parties)
 	events.append_array(capture_events)
 	events.append_array(siege_contracts.tick(time, territory.sites, parties, capture_events))
@@ -3103,6 +3245,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),
 			"combat_tag_seconds": CombatLogout.remaining(player.combat_tag_until, time),
+			"duel": _training_snapshot(peer_id),
 			"self_defense_seconds": PvpInfamy.defense_remaining(
 				player.defense_target, player.defense_until, time),
 			"pvp_kills": player.pvp_kills, "pvp_honor": player.pvp_honor,
