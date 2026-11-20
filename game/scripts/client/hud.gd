@@ -398,6 +398,12 @@ func _build() -> void:
 	prospect_button.tooltip_text = "Field craft: cloth, 2 scrap, stone. Spend only on a real T2+ vein; private 80s marker."
 	prospect_button.pressed.connect(func() -> void: client.use_item("prospecting_chart"))
 	inventory_box.add_child(prospect_button)
+	var group_survey_button := Button.new()
+	group_survey_button.name = "ShareMineralSurvey"
+	group_survey_button.text = "Share scouted vein with party (1 crafted signal)"
+	group_survey_button.tooltip_text = "First prospect a real T2+ node, then spend one field-made signal. Teammates receive a temporary amber mining waypoint."
+	group_survey_button.pressed.connect(func() -> void: client.use_item("surveyor_signal"))
+	inventory_box.add_child(group_survey_button)
 	var mining_wedges_button := Button.new()
 	mining_wedges_button.name = "EquipMiningWedges"
 	mining_wedges_button.text = "Prepare mining wedges (3 T2+ deposits)"
@@ -1525,6 +1531,15 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and bool(data.get("survey_signal", false)):
+		if bool(data.get("ok", false)):
+			say("Party mineral signal: T%d %s deposit shared for %.0fs. Allies can navigate there." % [
+				int(data.get("tier", 2)), str(data.get("material", "ore")),
+				float(data.get("seconds", 0.0))])
+		else:
+			say("Party mineral signal: %s (signal not spent)." % str(
+				data.get("reason", "rejected")))
+		return
 	if kind == "corpse_rescue":
 		if bool(data.get("ok", false)):
 			say("RESCUE SIGNAL: lost backpack shared privately for %ds. Loot stays public." % [
