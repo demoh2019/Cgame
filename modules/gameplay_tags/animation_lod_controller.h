@@ -79,6 +79,11 @@ public:
 	// 1 = every frame, 2 = every 2nd, 4 = every 4th, 0 = paused (offscreen or beyond far_distance).
 	static int update_interval(real_t p_distance, bool p_visible, real_t p_near, real_t p_mid, real_t p_far);
 
+	// Stable, finite-only nearest-first selection for a bounded number of
+	// combat-critical mixer updates. Gameplay never uses this visual ranking.
+	// Public to native tests; not exported as a script API.
+	static Vector<int> select_nearest_priority_indices(const Vector<real_t> &p_distances, int p_budget);
+
 	void register_mixer(AnimationMixer *p_mixer, bool p_manage_modifiers = true);
 	void unregister_mixer(AnimationMixer *p_mixer);
 	void clear_mixers();
