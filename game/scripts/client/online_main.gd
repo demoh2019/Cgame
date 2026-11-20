@@ -70,6 +70,11 @@ var net
 var client
 var peer: ENetMultiplayerPeer
 var streamer: WorldStreamer
+# Last displayed position, not input intent: online prediction uses actual
+# corrected player motion and resets on teleport/network resync.
+var _stream_previous_position := Vector3.ZERO
+var _stream_has_previous_position := false
+var _stream_velocity := Vector3.ZERO
 var chunk_root: Node3D
 var entities: Node3D
 var camera: Camera3D
@@ -1049,6 +1054,9 @@ func _on_welcomed() -> void:
 	streamer.load_radius = 150.0
 	streamer.unload_radius = 220.0
 	streamer.update_interval = 0.15
+	# Prioritize content ahead of actual movement, while the engine retains
+	# the current focus radius, unload hysteresis and one-chunk frame budget.
+	streamer.lookahead_seconds = 2.0
 	streamer.max_instantiations_per_frame = 1
 	streamer.set_chunk_generator(_generate_chunk)
 	add_child(streamer)
@@ -1187,6 +1195,19 @@ func _process(delta: float) -> void:
 			combat_vfx.update_player(position, client.world.height_at(position.x, position.z), avatar_model.speed, delta)
 	if streamer != null:
 		streamer.focus_position = position
+		# Cheap, local movement hint for native chunk queue ordering. Server
+		# correction and teleports never prefetch in an unrelated direction.
+		var moved: Vector3 = position - _stream_previous_position
+		if _stream_has_previous_position and is_finite(delta) and delta > 0.0001 \
+				and moved.length_squared() < 576.0:
+			var measured_velocity: Vector3 = (moved / delta).limit_length(18.0)
+			_stream_velocity = _stream_velocity.lerp(measured_velocity,
+				clampf(delta * 7.0, 0.0, 1.0))
+		else:
+			_stream_velocity = Vector3.ZERO
+		_stream_previous_position = position
+		_stream_has_previous_position = true
+		streamer.velocity_hint = _stream_velocity
 		_apply_world_state()
 	entities.update_from(client)
 	_lightning_visual.set_warning(client.lightning_telegraph)
