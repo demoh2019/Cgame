@@ -16,7 +16,7 @@ var player: CharacterBody3D
 var world_environment: Environment
 var sky_material: ShaderMaterial
 var sun_light: DirectionalLight3D
-var atmosphere_clock: Node
+var atmosphere_clock # Script-backed Node; keep dynamic type for controller-specific API.
 var hud: Label
 var hint: Label
 var world_partition: WorldPartition3D
