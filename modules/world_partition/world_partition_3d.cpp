@@ -218,7 +218,7 @@ int WorldPartition3D::get_unload_radius() const {
 }
 
 void WorldPartition3D::set_prefetch_direction(const Vector2i &p_direction) {
-	ERR_FAIL_COND_MSG(ABS(p_direction.x) > 1 || ABS(p_direction.y) > 1, "WorldPartition3D prefetch_direction components must be -1, 0 or 1.");
+	ERR_FAIL_COND_MSG(p_direction.x < -1 || p_direction.x > 1 || p_direction.y < -1 || p_direction.y > 1, "WorldPartition3D prefetch_direction components must be -1, 0 or 1.");
 	prefetch_direction = p_direction;
 }
 
