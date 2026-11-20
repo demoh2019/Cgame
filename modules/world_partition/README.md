@@ -11,6 +11,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Instantiate `Node3D` cell roots on the main thread, preserving their authored transform and applying the cell origin.
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
+- Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
 - Avoid running streaming implicitly in the editor.
 
 ## Using the node
@@ -32,6 +33,18 @@ func _ready() -> void:
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Inspecting streaming load
+
+```gdscript
+# Poll sparingly (for example 4 Hz), not necessarily every render frame.
+var loaded := world.get_loaded_cell_count()
+var queued := world.get_pending_cell_count()
+var requests := world.get_inflight_request_count()
+var failed := world.get_failed_cell_count()
+```
+
+These counters describe the current state, not a prediction of future memory or throughput. One background resource request may serve multiple pending cells with the same PackedScene path. See `misc/cgame_forest_showcase` for a playable, deterministic 16-cell demonstration and headless reload test.
 
 ## Tests
 
