@@ -141,7 +141,8 @@ func _run() -> void:
     await process_frame
     # A SceneTree root is a Window; use its World3D physics space.
     var hit: Dictionary = root.get_world_3d().direct_space_state.intersect_ray(query)
-    if hit.get("collider") != body:
+    var foliage_id: int = body.get_instance_id()
+    if hit.get("collider_id", -1) != foliage_id:
         _fail("physics query did not hit newly activated remote foliage")
         return
 
@@ -152,7 +153,7 @@ func _run() -> void:
     await physics_frame
     await process_frame
     hit = root.get_world_3d().direct_space_state.intersect_ray(query)
-    if hit.get("collider") == body:
+    if hit.get("collider_id", -1) == foliage_id:
         _fail("dormant foliage was still hit by collision ray")
         return
     if not stream.is_cell_loaded(REMOTE) or stream.get_cell_instance(REMOTE) == null:
