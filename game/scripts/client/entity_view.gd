@@ -16,6 +16,7 @@ const LootDropBounce = preload("res://scripts/client/loot_drop_bounce.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 const AnimLod = preload("res://scripts/client/anim_lod.gd")
+const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
 var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
 var _world = null
 var _corpses: Array[Dictionary] = []
@@ -424,24 +425,11 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		wood_material.albedo_color = Color(0.32, 0.18, 0.09)
 		wood.material_override = wood_material
 		root.add_child(wood)
-		var flame := MeshInstance3D.new()
-		var fire_mesh := SphereMesh.new()
-		fire_mesh.radius = 0.34
-		fire_mesh.height = 0.7
-		flame.mesh = fire_mesh
-		flame.position.y = 0.57
-		var fire_material := StandardMaterial3D.new()
-		fire_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		fire_material.albedo_color = Color(1.0, 0.42, 0.08)
-		flame.material_override = fire_material
-		root.add_child(flame)
-		var light := OmniLight3D.new()
-		light.position.y = 0.8
-		light.light_color = Color(1.0, 0.48, 0.18)
-		light.light_energy = 0.8
-		light.omni_range = 4.0
-		light.shadow_enabled = false
-		root.add_child(light)
+		# Animated HDR flame, flickering light, embers and heat haze (High/Ultra).
+		var fire := CampfireFx.new()
+		fire.build(GraphicsQuality.level(),
+			str(ProjectSettings.get_setting("rendering/renderer/rendering_method", "")))
+		root.add_child(fire)
 		return root
 	if kind == "raid_warning":
 		# Flat translucent danger disc. No physics body, network authority or
