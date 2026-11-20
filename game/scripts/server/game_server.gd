@@ -981,6 +981,21 @@ func cmd_party_kick(peer_id: int, target_id: int) -> Dictionary:
 	return parties.kick(peer_id, target_id)
 
 
+## The server determines the caller's identity and current simulation time.
+func cmd_party_ready_start(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	return parties.start_ready_check(peer_id, time)
+
+
+func cmd_party_ready_answer(peer_id: int, ready: bool) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	return parties.answer_ready_check(peer_id, ready, time)
+
+
 ## Item-powered cooperative healing, resolved only by the authoritative server.
 func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var source: Player = players.get(peer_id)
