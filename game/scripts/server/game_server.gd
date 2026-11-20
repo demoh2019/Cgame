@@ -100,6 +100,7 @@ const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const AcidNeutralizer = preload("res://scripts/shared/acid_neutralizer.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
 const GuardianIntercept = preload("res://scripts/shared/guardian_intercept.gd")
+const PartyShieldWall = preload("res://scripts/shared/party_shield_wall.gd")
 const GuardianRetribution = preload("res://scripts/shared/guardian_retribution.gd")
 const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
@@ -226,6 +227,8 @@ class Player:
 	var guard_link_target: int = -1 # Server-only chosen ally for one zombie melee hit.
 	var guard_link_seconds: float = 0.0 # Valid for at most 9 seconds.
 	var guard_link_cooldown: float = 0.0 # Session-only cast cooldown.
+	var shield_wall_seconds: float = 0.0 # Classless guardian's active PvE group defense.
+	var shield_wall_cooldown: float = 0.0 # Session-only rate limit, no persistent stat.
 	var guard_counter_target: int = -1 # Exact infected whose melee was intercepted.
 	var guard_counter_seconds: float = 0.0 # 4s to answer with normal melee.
 	var guard_counter_weapon: String = "" # Original real melee gear.
@@ -835,6 +838,7 @@ func _spawn_player(player: Player) -> void:
 	player.guard_link_target = -1
 	player.guard_link_seconds = 0.0
 	player.guard_link_cooldown = 0.0
+	player.shield_wall_seconds = 0.0
 	GuardianRetribution.clear(player)
 	var kept_gear: bool = player.keep_inventory_on_respawn
 	player.keep_inventory_on_respawn = false
@@ -4222,6 +4226,43 @@ func cmd_guardian_taunt(peer_id: int) -> Dictionary:
 		"brace_seconds": player.guardian_brace, "energy": player.combat_energy}
 
 
+## Short nonstacking party frontline stance. No client-provided coordinates,
+## protected targets, damage values, enemy IDs or shared buff durations.
+func cmd_party_shield_wall(peer_id: int) -> Dictionary:
+	var guardian: Player = players.get(peer_id)
+	if guardian == null or not _alive(guardian):
+		return {"ok": false, "reason": "dead"}
+	if guardian.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not guardian.position.is_finite() or _is_safe(guardian.position):
+		return {"ok": false, "reason": "safe_zone"}
+	if parties.group_of(peer_id) <= 0 or parties.members_of(peer_id).size() < 2:
+		return {"ok": false, "reason": "not_in_party"}
+	if not GuardianTaunt.melee_equipped(guardian.inventory):
+		return {"ok": false, "reason": "need_melee"}
+	if guardian.shield_wall_seconds > 0.0:
+		return {"ok": false, "reason": "already_active"}
+	if guardian.shield_wall_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown",
+			"remaining": guardian.shield_wall_cooldown}
+	if guardian.combat_energy < PartyShieldWall.ENERGY_COST:
+		return {"ok": false, "reason": "no_energy"}
+	var nearby_allies: int = 0
+	for member_id in parties.members_of(peer_id):
+		var member: Player = players.get(int(member_id))
+		if PartyShieldWall.can_protect(guardian, member, parties, world):
+			nearby_allies += 1
+	if nearby_allies == 0:
+		return {"ok": false, "reason": "no_nearby_ally"}
+	guardian.combat_energy -= PartyShieldWall.ENERGY_COST
+	guardian.shield_wall_seconds = PartyShieldWall.DURATION
+	guardian.shield_wall_cooldown = PartyShieldWall.COOLDOWN
+	guardian.action = {}
+	return {"ok": true, "seconds": guardian.shield_wall_seconds,
+		"cooldown": guardian.shield_wall_cooldown,
+		"allies": nearby_allies, "energy": guardian.combat_energy}
+
+
 ## Protect exactly one verified party ally from their next infected MELEE hit.
 ## Client supplies an ally ID, never the enemy, damage amount or hit outcome.
 func cmd_guardian_intercept(peer_id: int, target_id: int) -> Dictionary:
@@ -5265,6 +5306,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.guardian_brace = 0.0
 	victim.guard_link_target = -1
 	victim.guard_link_seconds = 0.0
+	victim.shield_wall_seconds = 0.0
 	GuardianRetribution.clear(victim)
 	for teammate in players.values():
 		if teammate.guard_link_target == victim.id:
@@ -5574,6 +5616,13 @@ func _tick_players(delta: float) -> void:
 		player.guardian_timer = maxf(0.0, player.guardian_timer - maxf(0.0, delta))
 		player.guardian_brace = maxf(0.0, player.guardian_brace - maxf(0.0, delta))
 		player.guard_link_cooldown = maxf(0.0, player.guard_link_cooldown - maxf(0.0, delta))
+		player.shield_wall_cooldown = maxf(0.0, player.shield_wall_cooldown - maxf(0.0, delta))
+		player.shield_wall_seconds = maxf(0.0, player.shield_wall_seconds - maxf(0.0, delta))
+		if player.shield_wall_seconds > 0.0 and (not _alive(player) or player.mounted or \
+				not player.position.is_finite() or _is_safe(player.position) or \
+				not GuardianTaunt.melee_equipped(player.inventory) or \
+				parties.members_of(player.id).size() < 2):
+			player.shield_wall_seconds = 0.0
 		player.guard_counter_seconds = maxf(0.0, player.guard_counter_seconds - maxf(0.0, delta))
 		if player.guard_counter_seconds <= 0.0 or not _alive(player) or player.mounted or \
 				parties.group_of(player.id) != player.guard_counter_party or \
@@ -6409,6 +6458,16 @@ func _tick_zombies(delta: float) -> void:
 					if victim.plated_hits == 0:
 						victim.plated_armor = ""
 					victim.dirty_character = true
+				# Unlike taunt/intercept, the group wall mitigates melee damage
+				# to nearby allies only; never run this for acid, AoE or PvP.
+				var wall_guardian: int = PartyShieldWall.protector_for(
+					victim, players, parties, world)
+				if wall_guardian > 0 and damage > 0.0:
+					var reduced: float = PartyShieldWall.mitigate(damage, zombie.raid_boss)
+					events.append({"type": "party_shield_wall_block",
+						"peer": victim.id, "by": wall_guardian,
+						"prevented": maxf(0.0, damage - reduced)})
+					damage = reduced
 				var applied: float = _hurt_player(victim, damage)
 				# Only real carried armor protects from infected secondary wounds.
 				# PvP bleeding continues to follow its ordinary rules.
@@ -7003,6 +7062,13 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			if supporter.guard_link_seconds > guardian_guarded_seconds:
 				guardian_guarded_seconds = supporter.guard_link_seconds
 				guardian_guarded_by = supporter.id
+	# The protected survivor sees exactly one nearest legitimate guardian.
+	# Unrelated players do not receive party wall IDs or countdowns.
+	var wall_guardian_id: int = PartyShieldWall.protector_for(
+		player, players, parties, world)
+	var wall_guarded_seconds: float = 0.0
+	if wall_guardian_id > 0:
+		wall_guarded_seconds = players[wall_guardian_id].shield_wall_seconds
 	var snapshot := {
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
 		"outposts": siege_contracts.public_state(territory.public_state(time, players, parties), time),
@@ -7096,6 +7162,10 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"guardian_cooldown": player.guardian_timer,
 			"guardian_intercept_cooldown": player.guard_link_cooldown,
 			"guardian_intercept_seconds": player.guard_link_seconds,
+			"shield_wall_seconds": player.shield_wall_seconds,
+			"shield_wall_cooldown": player.shield_wall_cooldown,
+			"shield_wall_guarded_seconds": wall_guarded_seconds,
+			"shield_wall_guarded_by": wall_guardian_id,
 			"guardian_counter_seconds": player.guard_counter_seconds,
 			"guardian_counter_target": player.guard_counter_target if player.guard_counter_seconds > 0.0 else -1,
 			"guardian_intercept_target": player.guard_link_target if player.guard_link_seconds > 0.0 else -1,
