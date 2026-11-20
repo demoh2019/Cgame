@@ -13,13 +13,20 @@ const MAX_VALID_GPU_MS := 80.0
 
 var level: int = 1
 var scale: float = 0.77
+var floor_scale: float = 0.65
 var _warmup := 0.0
 var _slow := 0.0
 var _fast := 0.0
 
 
-func configure(value: int) -> void:
+func configure(value: int, device_min_scale: float = 0.0) -> void:
 	level = clampi(value, 0, FLOORS.size() - 1)
+	# MetalFX on Apple GPUs can have a higher minimum temporal input
+	# scale. Its hardware floor is authoritative, but quality ceilings
+	# and ordinary FSR2 behavior remain unchanged.
+	var native_min: float = device_min_scale if is_finite(device_min_scale) else 0.0
+	floor_scale = clampf(maxf(float(FLOORS[level]), native_min),
+		float(FLOORS[level]), float(CEILINGS[level]))
 	scale = float(CEILINGS[level])
 	_warmup = 0.0
 	_slow = 0.0
@@ -27,7 +34,7 @@ func configure(value: int) -> void:
 
 
 func at_floor() -> bool:
-	return scale <= float(FLOORS[level]) + 0.0001
+	return scale <= floor_scale + 0.0001
 
 
 func at_ceiling() -> bool:
@@ -56,7 +63,9 @@ func sample_frame(delta: float, measured_gpu_ms: float = 0.0) -> bool:
 		if _slow >= LOWER_AFTER:
 			_slow = 0.0
 			if not at_floor():
-				scale = roundf(maxf(float(FLOORS[level]), scale - 0.04) * 100.0) / 100.0
+				scale = roundf(maxf(floor_scale, scale - 0.04) * 100.0) / 100.0
+				# Rounding must not step under device minimum.
+				scale = maxf(scale, floor_scale)
 				return true
 	elif demand <= FAST_FRAME:
 		_fast += delta

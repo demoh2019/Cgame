@@ -169,6 +169,27 @@ TEST_CASE("[SceneTree][Viewport] mipmap bias rejects invalid and extreme inputs"
 	root->set_texture_mipmap_bias(original);
 }
 
+TEST_CASE("[SceneTree][Viewport] MetalFX modes require the native Metal driver") {
+	Window *root = SceneTree::get_singleton()->get_root();
+	const Viewport::Scaling3DMode original = root->get_scaling_3d_mode();
+	const String driver = RenderingServer::get_singleton()->get_current_rendering_driver_name().to_lower();
+	// Native MetalFX's minimum device scale is checked by the game policy.
+	// This protects saved scenes opened with a different rendering backend.
+	root->set_scaling_3d_mode(Viewport::SCALING_3D_MODE_METALFX_TEMPORAL);
+	if (driver != "metal") {
+		CHECK(root->get_scaling_3d_mode() != Viewport::SCALING_3D_MODE_METALFX_TEMPORAL);
+	} else {
+		CHECK(root->get_scaling_3d_mode() == Viewport::SCALING_3D_MODE_METALFX_TEMPORAL);
+	}
+	root->set_scaling_3d_mode(Viewport::SCALING_3D_MODE_METALFX_SPATIAL);
+	if (driver != "metal") {
+		CHECK(root->get_scaling_3d_mode() != Viewport::SCALING_3D_MODE_METALFX_SPATIAL);
+	} else {
+		CHECK(root->get_scaling_3d_mode() == Viewport::SCALING_3D_MODE_METALFX_SPATIAL);
+	}
+	root->set_scaling_3d_mode(original);
+}
+
 TEST_CASE("[SceneTree][Viewport] 3D resolution scale rejects invalid inputs") {
 	Window *root = SceneTree::get_singleton()->get_root();
 	const float original = root->get_scaling_3d_scale();

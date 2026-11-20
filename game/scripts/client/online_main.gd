@@ -172,7 +172,8 @@ func _ready() -> void:
 		_auto_graphics = bool(graphics_config.get_value("rendering", "auto", false))
 	if _auto_graphics:
 		GraphicsQuality.set_level(_auto_quality.level, false)
-	_adaptive_resolution.configure(GraphicsQuality.level())
+	_adaptive_resolution.configure(GraphicsQuality.level(),
+		GraphicsQuality.metalfx_resolution_floor())
 	_update_gpu_measurements()
 	_build_environment()
 	_build_connect_screen()
@@ -519,7 +520,8 @@ func _build_connect_screen() -> void:
 			GraphicsQuality.set_level(_auto_quality.level, false)
 		else:
 			GraphicsQuality.set_level(selected)
-		_adaptive_resolution.configure(GraphicsQuality.level())
+		_adaptive_resolution.configure(GraphicsQuality.level(),
+		GraphicsQuality.metalfx_resolution_floor())
 		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
 			streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics))
 	box.add_child(quality_picker)
@@ -1144,7 +1146,8 @@ func _process(delta: float) -> void:
 			rd, _adaptive_resolution.at_floor(), _adaptive_resolution.at_ceiling(), delta, gpu_ms)
 		if quality_limit and _auto_quality.sample_frame(delta, gpu_ms):
 			GraphicsQuality.set_level(_auto_quality.level, false)
-			_adaptive_resolution.configure(GraphicsQuality.level())
+			_adaptive_resolution.configure(GraphicsQuality.level(),
+		GraphicsQuality.metalfx_resolution_floor())
 			GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
 				streamer, _adaptive_resolution.scale if rd else -1.0, rd)
 	if _demo == "title" and _screenshot_path != "" and _frames == 90: # The title screen alone (screenshots).
@@ -1493,7 +1496,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
 		_set_auto_graphics(false)
 		GraphicsQuality.cycle()
-		_adaptive_resolution.configure(GraphicsQuality.level())
+		_adaptive_resolution.configure(GraphicsQuality.level(),
+		GraphicsQuality.metalfx_resolution_floor())
 		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
 		streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics)
 		if is_instance_valid(_quality_picker):
