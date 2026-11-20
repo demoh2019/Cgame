@@ -257,7 +257,7 @@ func set_loot_mode(peer_id: int, mode: String) -> Dictionary:
 	var group: Dictionary = groups[group_id]
 	if int(group["leader"]) != peer_id:
 		return {"ok": false, "reason": "leader_only"}
-	if mode != "free" and mode != "round_robin":
+	if mode != "free" and mode != "round_robin" and mode != "need_greed":
 		return {"ok": false, "reason": "invalid_mode"}
 	group["loot_mode"] = mode
 	return {"ok": true, "mode": mode}
