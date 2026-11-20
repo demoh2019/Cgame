@@ -33,6 +33,7 @@ var infected_snares: Dictionary = {} # Server-replicated temporary PvE traps.
 var fish_traps: Dictionary = {} # Anonymous public, server-owned shoreline nets.
 var lightning_telegraph: Dictionary = {} # Nearby server-authored lightning danger circle.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
+var raid_interrupt: Dictionary = {} # Anonymous party-only interrupt progress for visible warning.
 var raid_cone_telegraph: Dictionary = {} # Interest-limited server-authored cleave sector.
 var spit_zones: Dictionary = {} # Only the latest server-issued acid telegraphs.
 var acid_pools: Dictionary = {} # Replicated lingering ground hazards.
@@ -90,6 +91,7 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	you = snapshot["you"]
 	lightning_telegraph = snapshot.get("lightning_telegraph", {}).duplicate(true)
 	raid_telegraph = snapshot.get("raid_telegraph", {}).duplicate(true)
+	raid_interrupt = snapshot.get("raid_interrupt", {}).duplicate(true)
 	raid_cone_telegraph = snapshot.get("raid_cone_telegraph", {}).duplicate(true)
 	spit_zones.clear()
 	for zone in snapshot.get("spit_zones", []):
