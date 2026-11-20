@@ -662,4 +662,36 @@ TEST_CASE("[WorldPartition3D] Additional streaming sources enforce caps and upse
 	memdelete(world);
 }
 
+TEST_CASE("[WorldPartition3D] Simulation activation defaults and validated budgets") {
+	WorldPartition3D *world = memnew(WorldPartition3D);
+	CHECK(world->get_simulation_radius() == -1);
+	CHECK(world->get_simulation_hysteresis_cells() == 1);
+	CHECK(world->get_max_simulation_transitions_per_frame() == 2);
+	CHECK(world->get_simulation_active_cell_count() == 0);
+	CHECK_FALSE(world->is_cell_simulation_active(Vector2i()));
+	world->set_simulation_radius(0);
+	world->set_simulation_hysteresis_cells(2);
+	world->set_max_simulation_transitions_per_frame(1);
+	CHECK(world->get_simulation_radius() == 0);
+	CHECK(world->get_simulation_hysteresis_cells() == 2);
+	CHECK(world->get_max_simulation_transitions_per_frame() == 1);
+	world->set_simulation_radius(32);
+	world->set_simulation_hysteresis_cells(8);
+	world->set_max_simulation_transitions_per_frame(64);
+	ERR_PRINT_OFF;
+	world->set_simulation_radius(-2);
+	world->set_simulation_radius(33);
+	world->set_simulation_hysteresis_cells(-1);
+	world->set_simulation_hysteresis_cells(9);
+	world->set_max_simulation_transitions_per_frame(0);
+	world->set_max_simulation_transitions_per_frame(65);
+	ERR_PRINT_ON;
+	CHECK(world->get_simulation_radius() == 32);
+	CHECK(world->get_simulation_hysteresis_cells() == 8);
+	CHECK(world->get_max_simulation_transitions_per_frame() == 64);
+	world->set_simulation_radius(-1);
+	CHECK(world->get_simulation_radius() == -1);
+	memdelete(world);
+}
+
 } // namespace TestWorldPartition3D
