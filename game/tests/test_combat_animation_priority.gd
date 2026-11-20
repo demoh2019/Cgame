@@ -49,8 +49,8 @@ func run(t) -> void:
 		"native full-rate quota is updated on tier changes")
 	t.check(entity_code.contains('aa_combat_animation_priority'),
 		"priority is cached on the model instead of dispatched every frame")
-	t.check(entity_code.contains("_anim_lod.register_mixer(upper_layer)"),
-		"upper-body weapon mixer shares native crowd LOD with locomotion")
+	t.check(entity_code.contains("_anim_lod.register_mixer(upper_layer, false)"),
+		"upper-body mixer shares native LOD without duplicating skeleton modifier culling")
 	t.check(entity_code.contains("_anim_lod.unregister_mixer(upper_layer)"),
 		"despawning a zombie restores both animation layers")
 	t.check(entity_code.contains('"set_mixer_high_priority", upper_layer, priority'),
