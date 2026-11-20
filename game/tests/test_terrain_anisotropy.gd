@@ -35,11 +35,30 @@ func run(t) -> void:
 		and ultra_code.contains("aa_cliff_normal_quality"),
 		"weather and cliff PBR are preserved")
 	t.eq(high_code.length(), base_code.length() +
-		Anisotropy.ALBEDO_ANISO.length() - Anisotropy.ALBEDO_LINEAR.length(),
-		"High changes only one sampler declaration")
+		Anisotropy.ALBEDO_ANISO.length() - Anisotropy.ALBEDO_LINEAR.length() +
+		Anisotropy.WET_COAT_DEFINE.length(),
+		"High changes one sampler and enables a wet-film PBR variant")
 	t.eq(ultra_code.length(), high_code.length() +
 		Anisotropy.NORMAL_ANISO.length() - Anisotropy.NORMAL_LINEAR.length(),
 		"Ultra changes one additional sampler declaration")
+
+	t.current = "shader variant excludes expensive clearcoat on lower tiers"
+	t.check(not base_code.contains("#define AA_TERRAIN_WET_CLEARCOAT"),
+		"base source has no active clearcoat macro")
+	t.check(high_code.contains("#define AA_TERRAIN_WET_CLEARCOAT")
+		and ultra_code.contains("#define AA_TERRAIN_WET_CLEARCOAT"),
+		"only High/Ultra compile the second dielectric specular lobe")
+	t.check(base_code.contains("#ifdef AA_TERRAIN_WET_CLEARCOAT")
+		and base_code.contains("CLEARCOAT = clamp(water_film"),
+		"cached premium variants shade existing wet paving as thin film")
+	t.check(base_code.contains("float hard_surface = clamp(w[4]") and
+		base_code.contains("w[9] + w[10] + w[11]"),
+		"coating follows roads, asphalt, stone and masonry")
+	t.check(base_code.contains("water_film = wetness * hard_surface * detail_fade")
+		and base_code.contains("clamp(w[8], 0.0, 1.0)"),
+		"coating fades with distance, weather and excludes snow")
+	t.check(not base_code.contains("clearcoat_texture"),
+		"no new coat texture, VRAM, or screen pass is required")
 
 	t.current = "cached shader variants and live material state"
 	var plain: Shader = Anisotropy.shader_for_quality(0)
@@ -92,6 +111,21 @@ func run(t) -> void:
 	Anisotropy.apply(material, 1)
 	t.check(material.shader == plain, "no work on an unchanged tier")
 
+	t.current = "preset and GPU parameter integration"
+	t.check(ProjectSettings.has_setting("shader_globals/aa_terrain_wet_clearcoat"),
+		"wet film strength is registered before the world is streamed")
+	var strengths := []
+	for level in range(4):
+		var film: float = float(GraphicsQuality.profile(level).get("wet_clearcoat", -1.0))
+		t.check(film >= 0.0 and film <= 0.65, "terrain wet-film intensity stays bounded")
+		strengths.append(film)
+	t.eq(strengths[0], 0.0, "Performance skips film")
+	t.eq(strengths[1], 0.0, "Balanced skips film")
+	t.check(strengths[2] > 0.0 and strengths[3] > strengths[2],
+		"higher visual quality increases wet hard-surface reflection detail")
+	t.check((GraphicsQuality as Script).source_code.contains(
+		'global_shader_parameter_set(&"aa_terrain_wet_clearcoat"'),
+		"live graphics controller updates the PBR coat on existing chunks")
 	t.current = "game integration"
 	var graphics_code: String = (GraphicsQuality as Script).source_code
 	var chunk_code: String = (ChunkView as Script).source_code

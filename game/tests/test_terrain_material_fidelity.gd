@@ -26,6 +26,16 @@ func run(t) -> void:
 	t.eq(GraphicsQuality.profile(90)["cliff_normal_quality"], stages[3],
 		"invalid upper tier clamps")
 
+	t.current = "physically layered wet dielectric finish"
+	var coat: Dictionary = ProjectSettings.get_setting(
+		"shader_globals/aa_terrain_wet_clearcoat", {})
+	t.eq(str(coat.get("type", "")), "float",
+		"wet-film BRDF uses a single shared scalar")
+	t.near(float(coat.get("value", -1.0)), 0.0, 0.0001,
+		"base quality has no extra clearcoat lighting")
+	t.check(float(GraphicsQuality.profile(3)["wet_clearcoat"]) >
+		float(GraphicsQuality.profile(2)["wet_clearcoat"]),
+		"Ultra has a stronger premium rain film than High")
 	t.current = "GPU shader computes rock normals with distance and blend weights"
 	var shader := load("res://assets/shaders/ground.gdshader") as Shader
 	t.check(shader != null, "existing PBR terrain shader loads")

@@ -20,6 +20,7 @@ const SUITES := [
 	"res://tests/test_graphics_auto_quality.gd",
 	"res://tests/test_graphics_texture_streaming.gd",
 	"res://tests/test_terrain_antitiling.gd",
+	"res://tests/test_terrain_anisotropy.gd",
 	"res://tests/test_graphics_native_specular_aa.gd",
 	"res://tests/test_storm_lightning.gd",
 ]
