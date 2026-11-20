@@ -94,6 +94,7 @@ const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
+const RaidTempo = preload("res://scripts/shared/raid_tempo.gd")
 const RaidAggroView = preload("res://scripts/shared/raid_aggro_view.gd")
 const RaidRecovery = preload("res://scripts/shared/raid_recovery.gd")
 const RaidInterrupt = preload("res://scripts/shared/raid_interrupt.gd")
@@ -5291,9 +5292,18 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 	if loot.has("silver"):
 		loot["silver"] = int(round(float(loot["silver"]) * (1.0 + killer.skills.bonus("zombie_silver"))))
 	if zombie.raid_boss:
+		# A speed bonus uses only the authoritative encounter start, live boss
+		# identity and death timestamp; no client-supplied result or reward.
+		var tempo_bonus: Dictionary = {}
+		if zombie.id == raid_boss_id and raid_started_at > 0.0 and \
+				is_finite(time) and time >= raid_started_at:
+			tempo_bonus = RaidTempo.bonus(zone, time - raid_started_at)
 		# Fixed server-side reward bag; no player gets multiple personal copies.
-		for item_id in RaidEncounter.treasure(zone):
-			loot[item_id] = int(loot.get(item_id, 0)) + int(RaidEncounter.treasure(zone)[item_id])
+		var boss_treasure: Dictionary = RaidEncounter.treasure(zone)
+		for item_id in boss_treasure:
+			loot[item_id] = int(loot.get(item_id, 0)) + int(boss_treasure[item_id])
+		for item_id in tempo_bonus:
+			loot[item_id] = int(loot.get(item_id, 0)) + int(tempo_bonus[item_id])
 		raid_boss_id = -1
 		raid_pending_slam = {}
 		raid_pending_cone = {}
@@ -5301,7 +5311,8 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		_clear_raid_minions()
 		raid_wave = 0
 		events.append({"type": "raid_defeated", "id": zombie.id,
-			"x": zombie.position.x, "z": zombie.position.z})
+			"x": zombie.position.x, "z": zombie.position.z,
+			"tempo_rank": RaidTempo.rank(time - raid_started_at) if not tempo_bonus.is_empty() else ""})
 	var loot_bag_id: int = _make_bag(zombie.position, loot, -1 if zombie.raid_boss else killer.id)
 	if loot_bag_id >= 0 and not _is_safe(zombie.position):
 		CorpseScent.mark(bags[loot_bag_id], time)

@@ -3229,3 +3229,20 @@ godot --headless --path game --script res://tests/run_all.gd
 
 No native Godot engine modifications are necessary; the existing
 authoritative combat simulation and private snapshots support it.
+
+
+## Raid tempo: extra loot for a fast boss kill
+
+A dangerous-zone party raid now has two **server-authoritative** finish
+tiers: defeating the current boss within **90 seconds** grants gold tempo
+(+2 infected cores and +25 silver per zone tier); within **150 seconds**
+grants silver tempo (+1 infected core and +12 silver per zone tier).
+A slower victory still receives the original boss loot. The reward is
+placed into the **same shared boss bag**, so all existing reservation and
+need/greed rules apply without a second claim path or new network RPC.
+The existing nearby `raid_defeated` event carries an optional
+`tempo_rank` field. The server rejects invalid clocks, unrelated brutes,
+and bogus safe-zone tiers; kills cannot be replayed to generate more bags.
+
+Regression suite: `game/tests/test_raid_tempo.gd`, included in
+`game/tests/run_all.gd`. Tests require a Godot/Cgame runtime.
