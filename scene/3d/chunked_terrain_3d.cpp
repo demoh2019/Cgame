@@ -354,11 +354,14 @@ void ChunkedTerrain3D::_update_chunks() {
 		Camera3D *camera = viewport ? viewport->get_camera_3d() : nullptr;
 		if (camera && camera->get_projection() == Camera3D::PROJECTION_PERSPECTIVE) {
 			const Size2 viewport_size = viewport->get_visible_rect().size;
+			// Match actual rendered 3D resolution, not just the window size.
+			// Dynamic resolution / FSR must not keep excessive terrain geometry.
+			const real_t real_3d_height = viewport_size.y * viewport->get_scaling_3d_scale();
 			real_t vertical_fov = camera->get_fov();
 			if (camera->get_keep_aspect_mode() == Camera3D::KEEP_WIDTH && viewport_size.x > 0.0) {
 				vertical_fov = Projection::get_fovy(vertical_fov, viewport_size.y / viewport_size.x);
 			}
-			effective_lod_distance *= screen_lod_multiplier(viewport_size.y, vertical_fov, lod_reference_fov);
+			effective_lod_distance *= screen_lod_multiplier(real_3d_height, vertical_fov, lod_reference_fov);
 		}
 	}
 
