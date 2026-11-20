@@ -34,6 +34,31 @@ func run(t) -> void:
 	t.check(not bool(GraphicsLighting.settings(0, "forward_plus")["volumetric_fog"]),
 		"low-end Forward+ renders without volume allocation")
 
+	t.current = "tier-matched sun shadow biases"
+	var balanced_bias: Dictionary = GraphicsLighting.settings(1, "forward_plus")
+	var high_bias: Dictionary = GraphicsLighting.settings(2, "forward_plus")
+	var ultra_bias: Dictionary = GraphicsLighting.settings(3, "forward_plus")
+	t.near(float(balanced_bias["shadow_bias"]), 0.04, 0.0001,
+		"Balanced keeps its original safe depth offset")
+	t.near(float(balanced_bias["shadow_normal_bias"]), 1.2, 0.0001,
+		"Balanced keeps its original normal offset")
+	t.check(float(ultra_bias["shadow_bias"]) < float(high_bias["shadow_bias"])
+		and float(high_bias["shadow_bias"]) < float(balanced_bias["shadow_bias"]),
+		"higher resolution sun maps allow tighter depth contact")
+	t.check(float(ultra_bias["shadow_normal_bias"]) <
+		float(high_bias["shadow_normal_bias"]) and
+		float(high_bias["shadow_normal_bias"]) <
+		float(balanced_bias["shadow_normal_bias"]),
+		"higher resolution sun maps improve ground contact without more passes")
+	for tier in 4:
+		var p: Dictionary = GraphicsLighting.settings(tier, "forward_plus")
+		t.check(float(p["shadow_bias"]) >= 0.02
+			and float(p["shadow_normal_bias"]) >= 0.8,
+			"shadow bias remains conservatively above zero")
+	for renderer in ["gl_compatibility", "mobile"]:
+		t.near(float(GraphicsLighting.settings(1, renderer)["shadow_bias"]),
+			0.04, 0.0001, "default fallback keeps safe bias")
+
 	t.current = "renderer-aware reflection ray budget"
 	for tier in [0, 1]:
 		t.check(not bool(GraphicsLighting.settings(tier, "forward_plus")["ssr_enabled"]),
@@ -68,11 +93,19 @@ func run(t) -> void:
 	t.near(env.ssr_depth_tolerance, 0.20, 0.0001, "depth tolerance reduces reflection holes")
 	t.near(env.volumetric_fog_length, 72.0, 0.01,
 		"volumetric fog stops within bounded camera range")
+	t.near(sun.shadow_bias, float(ultra_bias["shadow_bias"]), 0.0001,
+		"Ultra actually applies tighter depth bias to Godot sun")
+	t.near(sun.shadow_normal_bias, float(ultra_bias["shadow_normal_bias"]), 0.0001,
+		"Ultra actually applies tighter normal bias to Godot sun")
 	GraphicsLighting.apply(sun, env, 2, "forward_plus")
 	t.check(env.volumetric_fog_enabled and env.volumetric_fog_length < 72.0,
 		"High trades volume range for fog precision and bounded cost")
 	t.check(env.ssr_enabled and env.ssr_max_steps == 24,
 		"High reduces reflection steps after a live quality switch")
+	t.near(sun.shadow_bias, float(high_bias["shadow_bias"]), 0.0001,
+		"High updates native sun depth bias")
+	t.near(sun.shadow_normal_bias, float(high_bias["shadow_normal_bias"]), 0.0001,
+		"High updates native sun normal bias")
 	GraphicsLighting.apply(sun, env, 1, "gl_compatibility")
 	t.eq(sun.directional_shadow_mode, DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS,
 		"Compatibility Balanced retains efficient two-split shadows")
@@ -82,6 +115,10 @@ func run(t) -> void:
 		"switching renderer or preset releases the fog effect")
 	t.check(not env.ssr_enabled,
 		"switching to Compatibility immediately disables unsupported reflection work")
+	t.near(sun.shadow_bias, float(balanced_bias["shadow_bias"]), 0.0001,
+		"Compatibility restores the original conservative depth offset")
+	t.near(sun.shadow_normal_bias, float(balanced_bias["shadow_normal_bias"]), 0.0001,
+		"Compatibility restores the original conservative normal offset")
 	GraphicsLighting.apply(sun, env, 0, "gl_compatibility")
 	t.eq(sun.directional_shadow_mode, DirectionalLight3D.SHADOW_ORTHOGONAL,
 		"Performance uses a cheap shadow mode if sun shadows are later enabled")
