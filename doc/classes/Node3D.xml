@@ -47,6 +47,18 @@
 				Returns all the [EditorNode3DGizmo] objects attached to this node. Only works in the editor.
 			</description>
 		</method>
+		<method name="interpolate_network_snapshot">
+			<return type="Vector3" />
+			<param index="0" name="from" type="Vector3" />
+			<param index="1" name="to" type="Vector3" />
+			<param index="2" name="from_velocity" type="Vector3" />
+			<param index="3" name="to_velocity" type="Vector3" />
+			<param index="4" name="snapshot_delta" type="float" />
+			<param index="5" name="fraction" type="float" />
+			<description>
+				Returns a visually interpolated position between two server-authoritative position samples using monotone cubic Hermite interpolation and estimated endpoint velocities. [param snapshot_delta] is the elapsed time between samples, not the render frame duration; [param fraction] is clamped to [code]0.0[/code]–[code]1.0[/code]. Each interpolated coordinate stays between the two authoritative endpoint coordinates, preventing overshoot at corners, walls and steps. For missing/invalid velocities, invalid timing, long gaps, or corrections exceeding 8 meters, the function falls back to linear interpolation. The method changes no node transform, physics state, playback clock or network authority. Intended for remote characters and other non-authoritative visual proxies; it is not client-side prediction. Existing two-snapshot linear interpolation is preserved when endpoint velocities both equal the segment velocity. It is safe to call on any [Node3D], including off-tree nodes.
+			</description>
+		</method>
 		<method name="get_global_transform_interpolated">
 			<return type="Transform3D" />
 			<description>
