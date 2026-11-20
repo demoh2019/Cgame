@@ -6,11 +6,15 @@ const QualityManager = preload("res://addons/visual_quality/quality_manager.gd")
 const AtmosphereController = preload("res://addons/visual_quality/atmosphere_controller.gd")
 const ChunkedFoliage = preload("res://addons/visual_quality/foliage_chunks.gd")
 const FlyCamera = preload("res://addons/visual_quality/fly_camera.gd")
+const ExplorationQuest = preload("res://addons/visual_quality/exploration_quest.gd")
 
 var controller: AdaptiveResolution3D
 var manager: VisualQualityManager
 var atmosphere: AtmosphereController3D
 var foliage: ChunkedFoliage3D
+var quest: ExplorationQuest3D
+var quest_progress_label: Label
+var quest_hint_label: Label
 var sun_light: DirectionalLight3D
 var weather_label: Label
 var cycle_button: Button
@@ -52,6 +56,16 @@ func _ready() -> void:
 	add_child(atmosphere)
 	_build_atmosphere_ui()
 	_update_atmosphere_ui(atmosphere.hour, atmosphere.overcast)
+	quest = ExplorationQuest.new()
+	quest.name = "ExplorationQuest3D"
+	quest.player = get_viewport().get_camera_3d()
+	quest.progress_changed.connect(_on_quest_progress)
+	quest.pickup_hint_changed.connect(_on_quest_hint)
+	quest.quest_finished.connect(_on_quest_finished)
+	add_child(quest)
+	_build_quest_ui()
+	_on_quest_progress(quest.collected_count(), quest.positions.size())
+	_on_quest_hint(quest.current_hint())
 
 
 func _update_foliage_quality(profile: int, _adaptive: bool) -> void:
@@ -82,6 +96,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_toggle_weather()
 			KEY_6:
 				_toggle_cycle()
+			KEY_R:
+				_reset_quest()
 
 
 func _build_graphics_ui() -> void:
@@ -155,6 +171,46 @@ func _update_atmosphere_ui(hour: float, cloudiness: float) -> void:
 		hour, cloudiness * 100.0, atmosphere.update_interval_seconds
 	]
 	cycle_button.text = "6: Cycle %s" % ("ON" if atmosphere.auto_cycle else "OFF")
+
+
+func _build_quest_ui() -> void:
+	var ui: CanvasLayer = get_node("VisualQualityUI") as CanvasLayer
+	quest_progress_label = Label.new()
+	quest_progress_label.position = Vector2(18, 248)
+	quest_progress_label.add_theme_font_size_override("font_size", 19)
+	quest_progress_label.add_theme_color_override("font_color", Color(0.35, 0.98, 1.0))
+	ui.add_child(quest_progress_label)
+	quest_hint_label = Label.new()
+	quest_hint_label.position = Vector2(18, 280)
+	ui.add_child(quest_hint_label)
+	var reset_button: Button = Button.new()
+	reset_button.text = "R: Restart light-shard quest"
+	reset_button.position = Vector2(18, 314)
+	reset_button.pressed.connect(_reset_quest)
+	ui.add_child(reset_button)
+
+
+func _reset_quest() -> void:
+	if is_instance_valid(quest):
+		quest.reset_quest()
+
+
+func _on_quest_progress(collected: int, total: int) -> void:
+	if is_instance_valid(quest_progress_label):
+		quest_progress_label.text = "LIGHT SHARDS  %d / %d" % [collected, total]
+
+
+func _on_quest_hint(message: String) -> void:
+	if is_instance_valid(quest_hint_label):
+		quest_hint_label.text = message
+
+
+func _on_quest_finished() -> void:
+	# A visible world-state consequence of the completed exploration goal.
+	atmosphere.set_auto_cycle(false)
+	atmosphere.set_overcast(0.0)
+	atmosphere.set_hour(12.0)
+	_on_quest_hint("Quest complete: you restored the forest light! Press R to replay.")
 
 
 func _build_world() -> void:
