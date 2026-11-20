@@ -165,6 +165,8 @@ var raid_wave: int = 0 # Number of completed reinforcement phases.
 var raid_minions: Array[int] = [] # Raid-only infected are cleared with boss.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
 var decoys: Dictionary = {} # Temporary physical sound lures; server-owned, never persisted.
+var acid_pools: Dictionary = {} # Temporary nonpersistent corrosive terrain.
+var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stacking.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
@@ -440,6 +442,7 @@ func prepare_disconnect(peer_id: int) -> bool:
 
 
 func remove_player(peer_id: int) -> void:
+	_acid_last_hit.erase(peer_id) # Network peer reuse cannot inherit old hit cooldown.
 	_abort_training(peer_id, "disconnected")
 	training_invite_last.erase(peer_id)
 	# Direct server removals must obey the same rule as authenticated Net.leave.
@@ -2644,6 +2647,7 @@ func tick(delta: float) -> void:
 		_tick_siege_waves()
 	_tick_raid_encounter()
 	_tick_zombies(delta)
+	_tick_acid_pools()
 	_tick_world(delta)
 
 
@@ -3030,6 +3034,60 @@ func _resolve_spit_impact(zombie, center: Vector2) -> void:
 			_on_player_death(survivor, -zombie.id)
 	events.append({"type": "spit_impact", "id": zombie.id, "x": center.x,
 		"z": center.y, "radius": AcidSpitter.RADIUS})
+	# Only dangerous land can hold the hazard. Capacity limits are server
+	# owned: a full pool budget skips lingering effects, never the splash.
+	if acid_pools.size() < AcidSpitter.MAX_ACTIVE_POOLS 			and world.zone_at(center.x, center.y) >= AcidSpitter.MIN_ZONE 			and not world.is_water(center.x, center.y) and not world.is_safe(center.x, center.y):
+		var id: int = new_id()
+		var pool: Dictionary = AcidSpitter.make_pool(id, center,
+			world.height_at(center.x, center.y), time, zombie.id)
+		if not pool.is_empty():
+			acid_pools[id] = pool
+
+
+## Damage from lingering acid is once per second per survivor ACROSS ALL
+## active pools; it is not a new attack or a source of loot/experience.
+## Existing armor, dodge, group defense, ward and safe zones still apply.
+func _tick_acid_pools() -> void:
+	if acid_pools.is_empty():
+		return
+	var pool_ids: Array = acid_pools.keys()
+	pool_ids.sort()
+	for id in pool_ids:
+		var pool: Dictionary = acid_pools[id]
+		if AcidSpitter.pool_remaining(pool, time) <= 0.0:
+			acid_pools.erase(id)
+			continue
+		if time < float(pool["next_tick"]):
+			continue
+		# Skip late intervals rather than applying a burst of backlogged
+		# damage after a frame stall.
+		pool["next_tick"] = time + AcidSpitter.POOL_TICK_SECONDS
+		var center := Vector2(float(pool["x"]), float(pool["z"]))
+		for survivor in players.values():
+			if not _alive(survivor) or _is_safe(survivor.position) 					or world.zone_at(survivor.position.x, survivor.position.z) < AcidSpitter.MIN_ZONE 					or not AcidSpitter.hits(center, survivor.position) 					or survivor.dodge_immunity > 0.0:
+				continue
+			if time - float(_acid_last_hit.get(survivor.id, -INF)) < AcidSpitter.POOL_TICK_SECONDS:
+				continue
+			var armor_id: String = survivor.inventory.armor
+			var owned: bool = armor_id != "" and survivor.inventory.count(armor_id) > 0
+			var impact: float = Combat.apply_armor(AcidSpitter.POOL_DAMAGE,
+				armor_id if owned else "")
+			impact = _infected_damage_for(survivor, impact)
+			var applied: float = _hurt_player(survivor, impact)
+			_acid_last_hit[survivor.id] = time
+			if applied > 0.0 and _alive(survivor):
+				var wound: float = Combat.infected_wound_amount(
+					AcidSpitter.POOL_INFECTION, armor_id, owned, "infection")
+				wound = WardenAura.mitigate_wound(wound,
+					WardenAura.active_for(survivor, players, parties, world))
+				if survivor.survival.add_infection(wound):
+					survivor.dirty_character = true
+					events.append({"type": "infection", "peer": survivor.id,
+						"severity": survivor.survival.infection, "source": "acid_pool"})
+			events.append({"type": "hit", "kind": "player", "id": survivor.id,
+				"damage": impact, "by": -int(pool["source"])})
+			if not _alive(survivor):
+				_on_player_death(survivor, -int(pool["source"]))
 
 
 func _tick_zombies(delta: float) -> void:
@@ -3279,6 +3337,17 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"y": world.height_at(infected.spit_center.x, infected.spit_center.y),
 				"z": infected.spit_center.y, "radius": AcidSpitter.RADIUS,
 				"remaining": infected.spit_seconds})
+	# Only public position, radius and remaining duration are replicated;
+	# source IDs, tick scheduling and player hit cooldowns stay server-only.
+	var nearby_acid_pools: Array = []
+	for pool in acid_pools.values():
+		if AcidSpitter.pool_remaining(pool, time) <= 0.0:
+			continue
+		if here.distance_to(Vector2(float(pool["x"]), float(pool["z"]))) <= Defs.INTEREST_RADIUS:
+			nearby_acid_pools.append({"id": int(pool["id"]),
+				"x": float(pool["x"]), "y": float(pool["y"]),
+				"z": float(pool["z"]), "radius": AcidSpitter.RADIUS,
+				"remaining": AcidSpitter.pool_remaining(pool, time)})
 	var nearby_barricades: Array = []
 	for wall in barricades.values():
 		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
@@ -3374,7 +3443,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"speed_bonus": player.skills.bonus("move_speed"), "carry_bonus": player.skills.bonus("carry_capacity"),
 		},
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
-		"spit_zones": spit_zones,
+		"spit_zones": spit_zones, "acid_pools": nearby_acid_pools,
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
 		"decoys": nearby_decoys,
 		"depleted": gone_nodes, "crates_used": used_crates,

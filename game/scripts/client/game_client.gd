@@ -28,6 +28,7 @@ var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provide
 var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
 var spit_zones: Dictionary = {} # Only the latest server-issued acid telegraphs.
+var acid_pools: Dictionary = {} # Replicated lingering ground hazards.
 var outposts: Array = [] # Public server-controlled PvP objectives.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
@@ -83,6 +84,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	spit_zones.clear()
 	for zone in snapshot.get("spit_zones", []):
 		spit_zones[int(zone["id"])] = zone
+	acid_pools.clear()
+	for pool in snapshot.get("acid_pools", []):
+		acid_pools[int(pool["id"])] = pool
 	outposts = snapshot.get("outposts", [])
 	if snapshot.has("inventory"):
 		inventory.load_dict(snapshot["inventory"])

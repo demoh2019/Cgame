@@ -52,6 +52,7 @@ var _resource_meshes: Dictionary = {}
 var _crate_meshes: Dictionary = {}
 var _zombie_meshes: Dictionary = {}
 var _spit_warning_meshes: Dictionary = {}
+var _acid_pool_meshes: Dictionary = {}
 var _barricade_bodies: Dictionary = {}
 var _campfire_visuals: Dictionary = {}
 var _decoy_visuals: Dictionary = {}
@@ -400,6 +401,38 @@ func _sync_spit_warnings() -> void:
 			_spit_warning_meshes.erase(id)
 
 
+## Render the same temporary server hazards during offline preview.
+func _sync_acid_pools() -> void:
+	var visible: Dictionary = {}
+	for pool in sim.acid_pools.values():
+		if AcidSpitter.pool_remaining(pool, sim.time) <= 0.0:
+			continue
+		var at := Vector2(float(pool["x"]), float(pool["z"]))
+		if at.distance_to(Vector2(survivor.position.x, survivor.position.z)) > 75.0:
+			continue
+		var id: int = int(pool["id"])
+		visible[id] = true
+		if not _acid_pool_meshes.has(id):
+			var puddle := MeshInstance3D.new()
+			var disk := CylinderMesh.new()
+			disk.top_radius = AcidSpitter.RADIUS
+			disk.bottom_radius = AcidSpitter.RADIUS
+			disk.height = 0.04
+			puddle.mesh = disk
+			var mat := StandardMaterial3D.new()
+			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			mat.albedo_color = Color(0.55, 0.45, 0.08, 0.55)
+			puddle.material_override = mat
+			add_child(puddle)
+			_acid_pool_meshes[id] = puddle
+		_acid_pool_meshes[id].position = Vector3(at.x, float(pool["y"]) + 0.07, at.y)
+	for id in _acid_pool_meshes.keys():
+		if not visible.has(id):
+			_acid_pool_meshes[id].queue_free()
+			_acid_pool_meshes.erase(id)
+
+
 func _sync_barricades() -> void:
 	var active: Dictionary = {}
 	for id in sim.barricades:
@@ -551,6 +584,7 @@ func _physics_process(delta: float) -> void:
 		_crate_meshes[item_id].visible = not sim.opened_crates.has(item_id)
 	_sync_zombies()
 	_sync_spit_warnings()
+	_sync_acid_pools()
 	_sync_barricades()
 	_sync_campfires()
 	_sync_decoys()

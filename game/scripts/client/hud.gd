@@ -690,7 +690,7 @@ func _on_event(event: Dictionary) -> void:
 		"spit_warning":
 			say("ACID SPIT! Leave the green circle before it lands.")
 		"spit_impact":
-			say("Corrosive spit landed — move away from the next warning.")
+			say("Corrosive spit landed — the acid remains dangerous for 5 seconds!")
 		"raid_started":
 			say("RAID BOSS nearby! A mutant warlord entered the dangerous zone.")
 		"raid_enraged":

@@ -28,6 +28,8 @@ func update_from(client) -> void:
 		_touch("zombie:%d" % id, "zombie", client.zombies[id], seen)
 	for id in client.spit_zones:
 		_touch("spit:%d" % id, "spit_warning", client.spit_zones[id], seen)
+	for id in client.acid_pools:
+		_touch("pool:%d" % id, "acid_pool", client.acid_pools[id], seen)
 	for id in client.bags:
 		_touch("bag:%d" % id, "bag", client.bags[id], seen)
 	for id in client.barricades:
@@ -105,6 +107,21 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 
 func _make(kind: String, entity: Dictionary) -> Node3D:
 	var root := Node3D.new()
+	if kind == "acid_pool":
+		var puddle := MeshInstance3D.new()
+		var pool_disk := CylinderMesh.new()
+		pool_disk.top_radius = float(entity.get("radius", 2.4))
+		pool_disk.bottom_radius = pool_disk.top_radius
+		pool_disk.height = 0.04
+		puddle.mesh = pool_disk
+		puddle.position.y = 0.07
+		var poison := StandardMaterial3D.new()
+		poison.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		poison.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		poison.albedo_color = Color(0.55, 0.45, 0.08, 0.55)
+		puddle.material_override = poison
+		root.add_child(puddle)
+		return root
 	if kind == "spit_warning":
 		var warning := MeshInstance3D.new()
 		var disk := CylinderMesh.new()

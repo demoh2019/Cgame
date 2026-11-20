@@ -9,6 +9,33 @@ const RADIUS := 2.4
 const WINDUP_SECONDS := 1.4
 const COOLDOWN := 6.0
 const INFECTION_PER_HIT := 10.0
+# After the initial warned splash, corrosive ground remains dangerous.
+# Cap active pools and globally limit overlapping pools to one hit per
+# survivor per second, so multiple spitters cannot instantly kill someone.
+const POOL_SECONDS := 5.0
+const POOL_DAMAGE := 3.0
+const POOL_INFECTION := 1.0
+const POOL_TICK_SECONDS := 1.0
+const MAX_ACTIVE_POOLS := 64
+
+
+static func make_pool(id: int, center: Vector2, ground_y: float,
+		now: float, source_id: int) -> Dictionary:
+	if id <= 0 or source_id <= 0 or not center.is_finite() 			or not is_finite(ground_y) or not is_finite(now):
+		return {}
+	return {"id": id, "x": center.x, "y": ground_y, "z": center.y,
+		"source": source_id, "expires": now + POOL_SECONDS,
+		"next_tick": now + POOL_TICK_SECONDS}
+
+
+static func pool_remaining(pool: Dictionary, now: float) -> float:
+	if pool.is_empty() or not is_finite(now):
+		return 0.0
+	var expires: float = float(pool.get("expires", 0.0))
+	if not is_finite(expires):
+		return 0.0
+	return clampf(expires - now, 0.0, POOL_SECONDS)
+
 
 
 static func spawn_chance(zone: int) -> float:

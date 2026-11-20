@@ -2233,3 +2233,28 @@ Implementation: `scripts/shared/guild_territory.gd` and
 `territory_control.gd`; regression checks in
 `tests/test_guild_territory.gd` through `tests/run_all.gd`.
 No native Cgame engine change was needed.
+
+## Lingering acid pools after spitter attacks
+
+The **acid spitter** now leaves a shallow corrosive patch for **5 seconds**
+after its original telegraphed impact. The initial hit remains the same;
+survivors standing in the patch take **3 base damage each second** plus a
+small infected wound. This forces parties to reposition instead of camping
+on a fixed raid position. Armor, dodge immunity, guardian mitigation,
+wound resistance and safe-zone rules still apply.
+
+An authoritative server maximum of **64 active patches** prevents
+unbounded world entities; two overlapping pools are globally limited
+to **one periodic hit per survivor per second**, not multiplicative burst
+damage. Skipped server frames never cause a backlog of damage, and expired
+pools cannot apply damage later. Only the patch center, radius and
+remaining lifetime are interest-filtered to clients; actor identifiers and
+hit cooldowns stay private on the server.
+
+Both playable clients render yellow-green shallow pools in-world and remove
+them when they expire. These hazards are temporary gameplay state, not
+persistent map edits, craftable resources or new PvP interactions. Headless
+regressions in `tests/test_acid_pools.gd` cover initial splash, delayed
+damage, immunity, overlapping pools, out-of-area movement, safe hubs,
+expiry, network privacy and disconnect cleanup. Existing Cgame API
+capabilities are sufficient.
