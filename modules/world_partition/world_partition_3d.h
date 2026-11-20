@@ -148,6 +148,7 @@ public:
 	Array get_streaming_source_names() const;
 	int get_streaming_source_count() const;
 	bool is_streaming_source_ready(const String &p_name) const;
+	real_t get_streaming_source_progress(const String &p_name) const;
 
 	Vector2i local_position_to_cell(const Vector3 &p_local_position) const;
 	Vector3 cell_to_local_position(const Vector2i &p_cell) const;
