@@ -192,6 +192,10 @@ public:
 	void set_shadow_mode(ShadowMode p_mode);
 	ShadowMode get_shadow_mode() const;
 
+	// Practical logarithmic/uniform cascade distribution. Returns true for
+	// a valid plan (including idempotent calls); no shadow-map reallocation.
+	bool configure_practical_shadow_cascades(float p_near, float p_far, float p_lambda);
+
 	void set_blend_splits(bool p_enable);
 	bool is_blend_splits_enabled() const;
 
