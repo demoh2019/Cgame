@@ -43,8 +43,10 @@ func run(t) -> void:
 		"near-field detail and quality gate the additional shader arithmetic")
 	t.check(source.contains("(1.0 - puddle * 0.85)"),
 		"wet puddles soften micro-crevice shadows")
-	t.check(source.contains("AO = ground_contact * micro_shadow;"),
-		"micro-shadows combine with the existing contact AO, not a new pass")
+	t.check(source.contains("AO = clamp(ground_contact * micro_shadow * cavity_visibility"),
+		"micro-shadows and curvature combine into bounded PBR AO, not a new pass")
+	t.check(source.contains("float cavity_visibility = 1.0 - cavity * 0.24 * (1.0 - puddle * 0.85);"),
+		"rain-filled cavities gradually restore indirect PBR reflection visibility")
 	t.check(source.contains("min(0.18,"),
 		"the micro-shadow contribution remains subtle even on Ultra")
 	t.check(source.contains("ROUGHNESS = filter_specular_roughness"),
