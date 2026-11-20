@@ -4,6 +4,7 @@ const SunShafts = preload("res://scripts/client/graphics_sun_shafts.gd")
 
 
 func run(t) -> void:
+	test_golden_hour(t)
 	t.current = "sun shafts only on desktop Forward+ High/Ultra"
 	for method in ["gl_compatibility", "mobile", ""]:
 		for tier in 4:
@@ -40,3 +41,10 @@ func run(t) -> void:
 	t.check(not node.visible, "hidden on Compatibility")
 	cam.free()
 	sun.free()
+
+
+func test_golden_hour(t) -> void:
+	t.current = "golden hour shafts are stronger"
+	var low := SunShafts.shaft_color(Color(1, 1, 1), 1.0, Vector3(0, 0.18, 1).normalized())
+	var high := SunShafts.shaft_color(Color(1, 1, 1), 1.0, Vector3(0, 1, 0))
+	t.check(low.r > high.r, "a low sun throws stronger rays")

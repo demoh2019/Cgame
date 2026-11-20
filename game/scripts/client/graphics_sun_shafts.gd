@@ -29,6 +29,9 @@ static func settings(level: int, rendering_method: String) -> Dictionary:
 static func shaft_color(light_color: Color, energy: float, sun_dir: Vector3) -> Color:
 	var horizon: float = clampf((sun_dir.normalized().y + 0.05) / 0.25, 0.0, 1.0)
 	var e: float = clampf(energy, 0.0, 2.0) * horizon
+	# Golden hour: a low sun throws long, strong shafts through trees and haze.
+	var golden: float = clampf(1.0 - absf(sun_dir.normalized().y - 0.18) / 0.2, 0.0, 1.0)
+	e *= 1.0 + 0.8 * golden
 	return Color(light_color.r * e, light_color.g * e, light_color.b * e)
 
 
