@@ -50,7 +50,10 @@ var _action_sections: Array = [[0, "Gear"]]
 var _inventory_summary: Label
 var _inventory_tabs: TabContainer
 var _actions_panel: PanelContainer
-var _equip_row: HBoxContainer
+var _doll: GridContainer # Equipment sockets of the bag window.
+var _doll_info: VBoxContainer
+var _quick_slots := {"food": "", "potion": ""} # Client-side quick use picks, saved in user://quick_slots.cfg.
+var _drag_role := "" # The doll socket the dragged item fits, lit while dragging.
 var _stash_grid: GridContainer
 var _craft_panel: PanelContainer
 var _craft_list: VBoxContainer
@@ -1214,12 +1217,23 @@ func _arrange_inventory_window() -> void:
 	_inventory_summary.add_theme_font_size_override("font_size", 12)
 	_inventory_summary.add_theme_color_override("font_color", UiTheme.INK_SOFT)
 	window.add_child(_inventory_summary)
-	window.add_child(_section_label("EQUIPPED", ""))
-	_equip_row = HBoxContainer.new()
-	_equip_row.add_theme_constant_override("separation", 8)
-	window.add_child(_equip_row)
+	# The character's equipment as a paper doll: three sockets over three, the carry weight beside it.
+	var doll_row := HBoxContainer.new()
+	doll_row.add_theme_constant_override("separation", 14)
+	doll_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	window.add_child(doll_row)
+	_doll = GridContainer.new()
+	_doll.columns = 3
+	_doll.add_theme_constant_override("h_separation", 10)
+	_doll.add_theme_constant_override("v_separation", 10)
+	doll_row.add_child(_doll)
+	_doll_info = VBoxContainer.new()
+	_doll_info.alignment = BoxContainer.ALIGNMENT_CENTER
+	_doll_info.custom_minimum_size.x = 130
+	doll_row.add_child(_doll_info)
+	_load_quick_slots()
 	window.add_child(_rule())
-	window.add_child(_section_label("BACKPACK", "Click: use or equip.  Right click: stash one at a workbench."))
+	window.add_child(_section_label("BACKPACK", "Double click or drag onto a lit slot: equip.  Right click: stash one at a workbench."))
 	var stash_scroll: Control = _stash_grid.get_parent()
 	var stash_title: Control = box.get_child(stash_scroll.get_index() - 1)
 	_inventory_grid.get_parent().remove_child(_inventory_grid)
@@ -3196,13 +3210,15 @@ func _refresh_inventory() -> void:
 		var equipped: bool = item_id == client.inventory.weapon or item_id == client.inventory.armor
 		var info: Dictionary = Defs.item(item_id)
 		var card := _item_card(item_id, int(slot["count"]), equipped, Vector2(64, 64))
-		card.tooltip_text = "%s\n%s  ·  Tier %d%s\n\nClick: use or equip\nRight click: put one in the stash" % [
+		card.tooltip_text = "%s\n%s  ·  Tier %d%s\n\nDouble click or drag to a lit slot: equip\nRight click: put one in the stash" % [
 			str(info.get("name", item_id)), str(info.get("kind", "item")).capitalize().replace("_", " "), maxi(1, Defs.tier_of(item_id)),
 			"\nEQUIPPED" if equipped else ""]
-		card.pressed.connect(func() -> void: client.use_item(item_id))
 		card.gui_input.connect(func(event: InputEvent) -> void:
 			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
-				client.move_stash(item_id, 1, true))
+				client.move_stash(item_id, 1, true)
+			elif event is InputEventMouseButton and event.double_click and event.button_index == MOUSE_BUTTON_LEFT:
+				_put_in_doll(item_id))
+		card.set_drag_forwarding(func(_at: Vector2) -> Variant: return _drag_item(item_id), Callable(), Callable())
 		_inventory_grid.add_child(card)
 	for child in _stash_grid.get_children():
 		child.queue_free()
@@ -3284,33 +3300,173 @@ func _card_badge(text: String, color: Color, corner: int) -> Label:
 	return badge
 
 
-## What you carry in hand and wear: two big slots with their names, like the paper doll of a character sheet.
+# The equipment sockets of the paper doll: [role, caption, ghost icon item].
+const DOLL_SLOTS := [["weapon", "Weapon", "club"], ["armor", "Armor", "jacket"], ["bag", "Bag", "trail_backpack"],
+	["food", "Food", "canned_food"], ["potion", "Potion", "bandage"], ["mount", "Mount", "salvage_bike"]]
+
+
+## Which doll socket an item belongs in ("" for none): weapons and armor are worn, a carry pack and a bike count while
+## carried, food and medicine go in the two quick-use sockets.
+static func _doll_role(item_id: String) -> String:
+	match str(Defs.item(item_id).get("kind", "")):
+		"weapon":
+			return "weapon"
+		"armor":
+			return "armor"
+		"carry_pack":
+			return "bag"
+		"mount":
+			return "mount"
+		"food", "drink":
+			return "food"
+		"medical", "party_medical", "stimulant":
+			return "potion"
+	return ""
+
+
+## What fills a socket now.
+func _doll_item(role: String) -> String:
+	match role:
+		"weapon":
+			return client.inventory.weapon
+		"armor":
+			return client.inventory.armor
+		"food", "potion":
+			var picked: String = str(_quick_slots[role])
+			return picked if picked != "" and client.inventory.count(picked) > 0 else ""
+	for slot in client.inventory.slots:
+		if not slot.is_empty() and _doll_role(str(slot["id"])) == role:
+			return str(slot["id"])
+	return ""
+
+
 func _refresh_equipment() -> void:
-	if _equip_row == null:
+	if _doll == null:
 		return
-	for child in _equip_row.get_children():
+	for child in _doll.get_children():
 		child.queue_free()
-	for entry in [[client.inventory.weapon, "Weapon", "Fists"], [client.inventory.armor, "Armor", "No armor"]]:
-		var item_id: String = str(entry[0])
-		var card := _item_card(item_id, 0, false, Vector2(64, 64))
-		if item_id != "":
-			card.tooltip_text = str(Defs.item(item_id).get("name", item_id))
-			card.pressed.connect(func() -> void: client.use_item(item_id))
-		_equip_row.add_child(card)
-		var names := VBoxContainer.new()
-		names.alignment = BoxContainer.ALIGNMENT_CENTER
-		names.custom_minimum_size.x = 140
-		var slot_name := Label.new()
-		slot_name.text = str(entry[1]).to_upper()
-		slot_name.add_theme_font_size_override("font_size", 11)
-		slot_name.add_theme_color_override("font_color", UiTheme.INK_SOFT)
-		names.add_child(slot_name)
-		var item_name := Label.new()
-		item_name.text = str(Defs.item(item_id).get("name", item_id)) if item_id != "" else str(entry[2])
-		item_name.add_theme_font_size_override("font_size", 13)
-		item_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		names.add_child(item_name)
-		_equip_row.add_child(names)
+	for entry in DOLL_SLOTS:
+		var role: String = entry[0]
+		var item_id: String = _doll_item(role)
+		var count: int = client.inventory.count(item_id) if role in ["food", "potion"] and item_id != "" else 0
+		var card := _item_card(item_id, count, false, Vector2(62, 62))
+		card.disabled = false
+		if item_id == "":
+			# An empty socket shows a faint outline of what goes there.
+			var ghost := TextureRect.new()
+			ghost.texture = ItemIcons.icon(str(entry[2]))
+			ghost.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			ghost.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			ghost.modulate = Color(UiTheme.WOOD.r, UiTheme.WOOD.g, UiTheme.WOOD.b, 0.28)
+			ghost.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			ghost.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 12)
+			card.add_child(ghost)
+		card.tooltip_text = "%s: %s" % [entry[1], str(Defs.item(item_id).get("name", item_id)) if item_id != "" else "empty"]
+		match role:
+			"food", "potion":
+				card.tooltip_text += "\nClick: use one.  Right click: clear.  Double click or drag food or medicine here."
+				card.pressed.connect(func() -> void:
+					if item_id != "":
+						client.use_item(item_id))
+				card.gui_input.connect(func(event: InputEvent) -> void:
+					if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+						_set_quick_slot(role, ""))
+			"mount":
+				card.tooltip_text += "\nClick: mount or get off (F4)."
+				card.pressed.connect(func() -> void: _press_key(KEY_F4))
+			"bag":
+				card.tooltip_text += "\nA carried pack eases heavy loads by itself."
+		if _drag_role == role:
+			var glow := StyleBoxFlat.new()
+			glow.bg_color = Color(UiTheme.GOLD.r, UiTheme.GOLD.g, UiTheme.GOLD.b, 0.35)
+			glow.set_corner_radius_all(9)
+			glow.set_border_width_all(3)
+			glow.border_color = UiTheme.GOLD
+			glow.shadow_color = Color(1.0, 0.85, 0.4, 0.6)
+			glow.shadow_size = 8
+			card.add_theme_stylebox_override("normal", glow)
+		var accepts := func(_at: Vector2, data: Variant) -> bool:
+			return data is Dictionary and _doll_role(str(data.get("item", ""))) == role
+		var receive := func(_at: Vector2, data: Variant) -> void:
+			_put_in_doll(str(data.get("item", "")))
+		card.set_drag_forwarding(Callable(), accepts, receive)
+		_doll.add_child(card)
+	# Silver and carried weight beside the sockets.
+	for child in _doll_info.get_children():
+		child.queue_free()
+	var silver := Label.new()
+	silver.text = "Silver  %d" % client.inventory.count("silver")
+	silver.add_theme_font_size_override("font_size", 13)
+	_doll_info.add_child(silver)
+	var weight: float = client.inventory.total_weight()
+	var load := Label.new()
+	load.text = "Load  %.1f kg" % weight
+	load.add_theme_font_size_override("font_size", 13)
+	_doll_info.add_child(load)
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(120, 10)
+	bar.show_percentage = false
+	bar.max_value = Defs.CARRY_HEAVY_KG
+	bar.value = minf(weight, Defs.CARRY_HEAVY_KG)
+	var fill := StyleBoxFlat.new()
+	fill.set_corner_radius_all(5)
+	fill.bg_color = Color(0.45, 0.6, 0.25) if weight <= Defs.CARRY_COMFORT_KG else (Color(0.85, 0.6, 0.2) if weight < Defs.CARRY_HEAVY_KG else Color(0.75, 0.2, 0.15))
+	bar.add_theme_stylebox_override("fill", fill)
+	bar.tooltip_text = "Comfortable up to %d kg, heavy at %d kg." % [int(Defs.CARRY_COMFORT_KG), int(Defs.CARRY_HEAVY_KG)]
+	_doll_info.add_child(bar)
+
+
+## Equip or assign an item, as dropping it on its socket or double clicking it does.
+func _put_in_doll(item_id: String) -> void:
+	match _doll_role(item_id):
+		"weapon", "armor":
+			if item_id != client.inventory.weapon and item_id != client.inventory.armor:
+				client.use_item(item_id) # The server equips weapons and armor on use.
+		"food", "potion":
+			_set_quick_slot(_doll_role(item_id), item_id)
+		"bag", "mount":
+			say("%s works while you carry it." % str(Defs.item(item_id).get("name", item_id)))
+		_:
+			client.use_item(item_id)
+
+
+func _set_quick_slot(role: String, item_id: String) -> void:
+	_quick_slots[role] = item_id
+	var config := ConfigFile.new()
+	for key in _quick_slots:
+		config.set_value("quick", key, _quick_slots[key])
+	config.save("user://quick_slots.cfg")
+	_inventory_signature = "" # Redraw the bag.
+
+
+func _load_quick_slots() -> void:
+	var config := ConfigFile.new()
+	if config.load("user://quick_slots.cfg") == OK:
+		for key in _quick_slots:
+			_quick_slots[key] = str(config.get_value("quick", key, ""))
+
+
+## Picking up a backpack item: a ghost of its icon follows the mouse and the socket it fits lights up.
+func _drag_item(item_id: String) -> Variant:
+	var preview := TextureRect.new()
+	preview.texture = ItemIcons.icon(item_id)
+	preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	preview.custom_minimum_size = Vector2(48, 48)
+	preview.size = Vector2(48, 48)
+	preview.modulate = Color(1, 1, 1, 0.85)
+	var holder := Control.new()
+	holder.add_child(preview)
+	preview.position = Vector2(-24, -24)
+	_inventory_panel.set_drag_preview(holder)
+	_drag_role = _doll_role(item_id)
+	_refresh_equipment()
+	return {"item": item_id}
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_DRAG_END and _drag_role != "":
+		_drag_role = ""
+		_inventory_signature = ""
 
 
 static func _short_count(count: int) -> String:
@@ -3344,46 +3500,74 @@ func _refresh_crafting() -> void:
 	for entry in entries:
 		var recipe_id: String = str(entry["id"])
 		var recipe: Dictionary = Defs.recipes()[recipe_id]
-		var needs: Array[String] = []
-		for input in recipe["inputs"]:
-			needs.append("%dx %s" % [
-				int(recipe["inputs"][input]), str(Defs.item(str(input)).get("name", input))])
+		# A recipe row in the manner of an RPG workshop: the product as a big tile (click it to craft), its name, and the
+		# ingredients as small tiles with have / need under each, red where something is missing.
 		var row := HBoxContainer.new()
-		var button := Button.new()
-		var station: String = str(recipe["station"])
-		var station_note := " [bench]" if station == "workbench" else (
-			" [fire / bench]" if station == "campfire" else "")
-		button.text = "%s  <-  %s%s" % [
-			str(Defs.item(str(recipe["output"])).get("name", recipe["output"])),
-			", ".join(needs), station_note]
-		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.custom_minimum_size = Vector2(465, 34)
-		button.icon = ItemIcons.icon(str(recipe["output"]))
-		button.add_theme_constant_override("icon_max_width", 26)
-		var output_kind: String = str(Defs.item(str(recipe["output"])).get("kind", ""))
-		for state in ["icon_normal_color", "icon_hover_color", "icon_pressed_color"]:
-			button.add_theme_color_override(state, ItemIcons.kind_color(output_kind))
-		button.add_theme_color_override("icon_disabled_color", Color(0.5, 0.52, 0.56, 0.6))
+		row.add_theme_constant_override("separation", 10)
 		var ready: bool = bool(entry["ready"])
-		button.disabled = not ready
-		if not ready:
-			button.text += " [Lv%d]" % int(entry["tier"]) if bool(entry["skill_locked"]) else " [missing ingredients / space]"
-		button.pressed.connect(func() -> void:
+		var output_id: String = str(recipe["output"])
+		var tile := _item_card(output_id, int(recipe.get("count", 1)), false, Vector2(58, 58))
+		tile.disabled = not ready
+		tile.modulate = Color(1, 1, 1) if ready else Color(1, 1, 1, 0.55)
+		var station: String = str(recipe["station"])
+		tile.tooltip_text = "%s\n%s%s" % [str(Defs.item(output_id).get("name", output_id)),
+			"Click to craft" if ready else ("Needs crafting level %d" % int(entry["tier"]) if bool(entry["skill_locked"]) else "Missing ingredients or space"),
+			"  (at a workbench)" if station == "workbench" else ("  (campfire or workbench)" if station == "campfire" else "")]
+		tile.pressed.connect(func() -> void:
 			if use_bank:
 				client.craft_from_stash(recipe_id, 1)
 			else:
 				client.craft(recipe_id, 1))
-		row.add_child(button)
-		var amount: int = int(entry["max_batches"])
-		if ready and amount > 1:
+		row.add_child(tile)
+		var body := VBoxContainer.new()
+		body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		body.add_theme_constant_override("separation", 2)
+		var title := Label.new()
+		title.text = str(Defs.item(output_id).get("name", output_id))
+		title.add_theme_font_size_override("font_size", 15)
+		title.add_theme_color_override("font_color", UiTheme.INK if ready else UiTheme.INK_SOFT)
+		body.add_child(title)
+		var parts := HBoxContainer.new()
+		parts.add_theme_constant_override("separation", 6)
+		for input in recipe["inputs"]:
+			var need: int = int(recipe["inputs"][input])
+			var have: int = client.inventory.count(str(input)) + (client.stash.count(str(input)) if use_bank else 0)
+			var part := VBoxContainer.new()
+			part.add_theme_constant_override("separation", 0)
+			var small := _item_card(str(input), 0, false, Vector2(32, 32))
+			small.mouse_filter = Control.MOUSE_FILTER_PASS
+			small.tooltip_text = str(Defs.item(str(input)).get("name", input))
+			for badge in small.get_children():
+				if badge is Label:
+					badge.queue_free() # Too small for tier badges; the tile colour and frame tell the tier.
+			part.add_child(small)
+			var amount := Label.new()
+			amount.text = "%d/%d" % [mini(have, 999), need]
+			amount.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			amount.add_theme_font_size_override("font_size", 10)
+			amount.add_theme_color_override("font_color", UiTheme.INK_SOFT if have >= need else Color(0.7, 0.15, 0.1))
+			part.add_child(amount)
+			parts.add_child(part)
+		body.add_child(parts)
+		row.add_child(body)
+		var amount_max: int = int(entry["max_batches"])
+		if ready and amount_max > 1:
 			var max_button := Button.new()
-			max_button.text = "MAX x%d" % amount
-			max_button.tooltip_text = "Craft %d batches in one validated server request (no partial material consumption)." % amount
+			max_button.text = "x%d" % amount_max
+			max_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			max_button.tooltip_text = "Craft %d batches in one validated server request (no partial material consumption)." % amount_max
 			max_button.pressed.connect(func() -> void:
 				if use_bank:
-					client.craft_from_stash(recipe_id, amount)
+					client.craft_from_stash(recipe_id, amount_max)
 				else:
-					client.craft(recipe_id, amount))
+					client.craft(recipe_id, amount_max))
 			row.add_child(max_button)
+		var divider := VBoxContainer.new()
+		divider.add_theme_constant_override("separation", 6)
+		divider.add_child(row)
+		divider.add_child(_rule())
+		row = HBoxContainer.new()
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(divider)
+		divider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_craft_list.add_child(row)

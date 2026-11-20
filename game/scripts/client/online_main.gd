@@ -1281,6 +1281,9 @@ func _run_demo() -> void:
 					hud._inventory_tabs.current_tab = int(OS.get_environment("CGAME_DEMO_TAB"))
 				if OS.get_environment("CGAME_DEMO_CRAFT") == "1":
 					hud.toggle_crafting()
+				if OS.get_environment("CGAME_DEMO_QUICK") == "1": # Fill the quick-use sockets as a double click would.
+					hud._put_in_doll("canned_food")
+					hud._put_in_doll("bandage")
 		"sky":
 			if _demo_frames == 40:
 				var vista := _open_shore()
