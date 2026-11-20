@@ -237,6 +237,19 @@ static func lod_for_distance(distance: float, previous: int = 0, range_scale: fl
 	return tier
 
 
+## Avoid walking every tile when a stationary camera has not changed its
+## pixel budget or when grass generation has made no progress. Changes smaller
+## than 25 cm cannot materially affect 16-metre tile distance LOD thresholds.
+static func needs_lod_refresh(previous_eye: Vector2, previous_scale: float,
+		previous_tile_count: int, eye: Vector2, range_scale: float,
+		tile_count: int) -> bool:
+	if previous_tile_count != tile_count or previous_scale < 0.0:
+		return true
+	if not is_finite(range_scale) or not is_finite(previous_scale):
+		return true
+	return absf(previous_scale - range_scale) > 0.002 or previous_eye.distance_squared_to(eye) >= 0.0625
+
+
 ## The MultiMesh renderer draws only a prefix of each tuft buffer.
 ## Smooth ranges let distant grass thin gradually without any mesh rebuild.
 ## It never changes the number of gameplay entities or collision objects.
