@@ -25,6 +25,7 @@ const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
+const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const RainVfx = preload("res://scripts/client/rain_vfx.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
@@ -66,6 +67,7 @@ var _world_environment: Environment
 var _atmosphere # Script-backed Atmosphere instance; custom fields are not members of Node3D.
 var _rain_vfx: Node3D
 var _ambient_motes
+var _ground_mist
 var _weather_next_update: float = -1.0
 var _weather_storming := false
 var _visual_weather_wind := Vector2.ZERO
@@ -113,6 +115,9 @@ func _ready() -> void:
 	for recipe_id in recipe_ids:
 		_recipes.append(str(recipe_id))
 	_make_light_and_camera()
+	_ground_mist = GroundMist.new()
+	_ground_mist.name = "RegionalGroundMist"
+	add_child(_ground_mist)
 	# Reuse the online mode\x27s one-draw night fireflies and sunlit pollen.
 	_ambient_motes = AmbientMotes.new()
 	_ambient_motes.setup(world)
@@ -243,6 +248,11 @@ func _update_world_light(delta: float = 0.0) -> void:
 		_weather_next_update = seconds + 0.25
 	_atmosphere.update(WorldCycle.daylight(seconds), WorldCycle.sun_height(seconds),
 		WorldCycle.phase(seconds), _weather_storming, delta, _visual_weather_wind, _visual_biome, MoonVisuals.phase_at(seconds))
+	if _ground_mist != null and survivor != null:
+		_ground_mist.update_view(survivor.position, _visual_biome,
+			WorldCycle.daylight(seconds), WorldCycle.sun_height(seconds),
+			_atmosphere.storm, _visual_weather_wind,
+			GraphicsQuality.level(), delta)
 
 
 func _mesh(box_size: Vector3, color: Color) -> MeshInstance3D:

@@ -76,8 +76,11 @@ bool FogVolume::_get(const StringName &p_name, Variant &r_property) const {
 #endif // DISABLE_DEPRECATED
 
 void FogVolume::set_size(const Vector3 &p_size) {
-	size = p_size;
-	size = size.maxf(0);
+	const Vector3 clamped_size = p_size.maxf(0);
+	if (size == clamped_size) {
+		return; // A repeated quality preset must not dirty rendering state or gizmos.
+	}
+	size = clamped_size;
 	RS::get_singleton()->fog_volume_set_size(_get_volume(), size);
 	update_gizmos();
 }
@@ -87,6 +90,9 @@ Vector3 FogVolume::get_size() const {
 }
 
 void FogVolume::set_shape(RSE::FogVolumeShape p_type) {
+	if (shape == p_type) {
+		return; // Keep the current culling mode; avoid needless backend updates.
+	}
 	shape = p_type;
 	RS::get_singleton()->fog_volume_set_shape(_get_volume(), shape);
 	RS::get_singleton()->instance_set_ignore_culling(get_instance(), shape == RSE::FOG_VOLUME_SHAPE_WORLD);
@@ -99,6 +105,9 @@ RSE::FogVolumeShape FogVolume::get_shape() const {
 }
 
 void FogVolume::set_material(const Ref<Material> &p_material) {
+	if (material == p_material) {
+		return; // Material resource edits still update through their own RID.
+	}
 	material = p_material;
 	RID material_rid;
 	if (material.is_valid()) {

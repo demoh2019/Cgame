@@ -112,6 +112,12 @@ void Fog::fog_volume_set_size(RID p_fog_volume, const Vector3 &p_size) {
 	FogVolume *fog_volume = fog_volume_owner.get_or_null(p_fog_volume);
 	ERR_FAIL_NULL(fog_volume);
 
+	// Localized fog profiles may write the same bounds repeatedly. Avoid
+	// dirtying renderer dependencies and invalidating the fog AABB when no
+	// geometry changes; this also protects direct RenderingServer callers.
+	if (fog_volume->size == p_size) {
+		return;
+	}
 	fog_volume->size = p_size;
 	fog_volume->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_AABB);
 }
