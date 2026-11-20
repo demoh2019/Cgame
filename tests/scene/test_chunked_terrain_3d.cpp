@@ -65,6 +65,27 @@ static ChunkedTerrain3D *make_terrain(int p_samples, real_t p_size, real_t p_hei
 	return terrain;
 }
 
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Static GI flag survives streamed LOD setup") {
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
+	CHECK_FALSE(terrain->is_contributing_to_gi());
+	terrain->set_contribute_to_gi(true);
+	CHECK(terrain->is_contributing_to_gi());
+
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	terrain->force_update();
+	const int original_chunks = terrain->get_chunk_count();
+	terrain->set_contribute_to_gi(true); // No redundant RID updates.
+	terrain->set_contribute_to_gi(false);
+	CHECK_FALSE(terrain->is_contributing_to_gi());
+	terrain->set_contribute_to_gi(true);
+	terrain->force_update();
+	CHECK(terrain->is_contributing_to_gi());
+	CHECK(terrain->get_chunk_count() == original_chunks);
+	// GI participation must not change the terrain mesh or collision policy.
+	CHECK(terrain->is_collision_enabled());
+	memdelete(terrain);
+}
+
 TEST_CASE("[SceneTree][ChunkedTerrain3D] Heights and normals follow the field") {
 	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
 	SceneTree::get_singleton()->get_root()->add_child(terrain);
