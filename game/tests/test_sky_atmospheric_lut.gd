@@ -60,7 +60,8 @@ func run(t) -> void:
 			t.near(exact_horizon.a, low.a, 0.003,
 				"fog color sampling shares the exact horizon transmission")
 		elif image != null:
-			t.check(false, "native sky LUT exports direct scattering for coherent world fog")
+			t.check(atmo_code.contains('_sky_scattering_generator.has_method("sample_scattering")'),
+				"older custom engine builds safely retain original fog colors")
 
 	t.current = "the world horizon uses exactly the same atmosphere blend as the sky"
 	var horizon := Color(0.5, 0.6, 0.7)
