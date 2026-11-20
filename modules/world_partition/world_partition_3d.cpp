@@ -403,6 +403,25 @@ int WorldPartition3D::get_pinned_cell_count() const {
 	return pinned_cells.size();
 }
 
+bool WorldPartition3D::set_streaming_source_node(const String &p_name, const NodePath &p_node_path, int p_load_radius, int p_unload_radius, int p_priority) {
+	ERR_FAIL_COND_V_MSG(p_node_path.is_empty() || p_node_path.is_subname(), false, "WorldPartition3D moving source requires a nonempty Node3D path, not a property path.");
+	// Reuse all name/radius/priority validation and the eight-source limit.
+	// Resolution is deferred to update_streaming(), allowing scene setup before
+	// the referenced actor has entered the active SceneTree.
+	if (!set_streaming_source(p_name, Vector2i(), p_load_radius, p_unload_radius, p_priority)) {
+		return false;
+	}
+	for (int i = 0; i < streaming_sources.size(); i++) {
+		StreamingSource &source = streaming_sources.write[i];
+		if (source.name == p_name) {
+			source.node_path = p_node_path;
+			source.active = false;
+			return true;
+		}
+	}
+	return false;
+}
+
 bool WorldPartition3D::set_streaming_source(const String &p_name, const Vector2i &p_center, int p_load_radius, int p_unload_radius, int p_priority) {
 	ERR_FAIL_COND_V_MSG(p_name.is_empty() || p_name.length() > 64, false, "WorldPartition3D source name must have 1 to 64 characters.");
 	ERR_FAIL_COND_V_MSG(p_load_radius < 0 || p_load_radius > 4 || p_unload_radius < p_load_radius || p_unload_radius > 8, false, "WorldPartition3D source radii must satisfy 0 <= load <= 4 and load <= unload <= 8.");
@@ -418,6 +437,8 @@ bool WorldPartition3D::set_streaming_source(const String &p_name, const Vector2i
 		}
 		// Mutate an existing source in place; no extra slot is reserved.
 		source.center = p_center;
+		source.node_path = NodePath();
+		source.active = true;
 		source.load_radius = p_load_radius;
 		source.unload_radius = p_unload_radius;
 		source.priority = p_priority;
@@ -432,6 +453,29 @@ bool WorldPartition3D::set_streaming_source(const String &p_name, const Vector2i
 	source.priority = p_priority;
 	streaming_sources.push_back(source);
 	return true;
+}
+
+void WorldPartition3D::_update_streaming_source_positions() {
+	for (int i = 0; i < streaming_sources.size(); i++) {
+		StreamingSource &source = streaming_sources.write[i];
+		if (source.node_path.is_empty()) {
+			source.active = true;
+			continue;
+		}
+		Node3D *target = Object::cast_to<Node3D>(get_node_or_null(source.node_path));
+		if (target == nullptr || !target->is_inside_tree()) {
+			// Do not keep loading the actor's stale position after removal.
+			source.active = false;
+			continue;
+		}
+		const Vector3 local_position = to_local(target->get_global_position());
+		if (!local_position.is_finite()) {
+			source.active = false;
+			continue;
+		}
+		source.center = local_position_to_cell(local_position);
+		source.active = true;
+	}
 }
 
 void WorldPartition3D::remove_streaming_source(const String &p_name) {
@@ -466,6 +510,8 @@ Dictionary WorldPartition3D::get_streaming_source(const String &p_name) const {
 	for (const StreamingSource &source : streaming_sources) {
 		if (source.name == p_name) {
 			result["center"] = source.center;
+			result["node_path"] = source.node_path;
+			result["active"] = source.active;
 			result["load_radius"] = source.load_radius;
 			result["unload_radius"] = source.unload_radius;
 			result["priority"] = source.priority;
@@ -496,7 +542,7 @@ bool WorldPartition3D::is_streaming_source_ready(const String &p_name) const {
 	}
 	for (const StreamingSource &source : streaming_sources) {
 		if (source.name == p_name) {
-			return are_cells_loaded(source.center, source.load_radius);
+			return source.active && are_cells_loaded(source.center, source.load_radius);
 		}
 	}
 	return false;
@@ -509,6 +555,9 @@ real_t WorldPartition3D::get_streaming_source_progress(const String &p_name) con
 	for (const StreamingSource &source : streaming_sources) {
 		if (source.name != p_name) {
 			continue;
+		}
+		if (!source.active) {
+			return 0.0;
 		}
 		int loaded = 0;
 		const int width = source.load_radius * 2 + 1;
@@ -532,7 +581,7 @@ void WorldPartition3D::_refresh_source_readiness() {
 	Vector<String> became_unready;
 	for (int i = 0; i < streaming_sources.size(); i++) {
 		StreamingSource &source = streaming_sources.write[i];
-		const bool now_ready = streaming_enabled && is_inside_tree() && are_cells_loaded(source.center, source.load_radius);
+		const bool now_ready = streaming_enabled && is_inside_tree() && source.active && are_cells_loaded(source.center, source.load_radius);
 		if (now_ready != source.ready) {
 			source.ready = now_ready;
 			if (now_ready) {
@@ -598,6 +647,7 @@ void WorldPartition3D::update_streaming() {
 		return;
 	}
 
+	_update_streaming_source_positions();
 	const Vector2i center = local_position_to_cell(to_local(observer->get_global_position()));
 	// Predictive prefetch is an extra directional corridor, never a replacement
 	// for the square around the observer. Overflow-safe 64-bit arithmetic also
@@ -627,7 +677,7 @@ void WorldPartition3D::update_streaming() {
 	// new cells within load_radius, independently of the player and pins.
 	const auto is_source_cell = [&](const Vector2i &p_cell, bool p_for_unload) -> bool {
 		for (const StreamingSource &source : streaming_sources) {
-			if (_within_radius(p_cell, source.center, p_for_unload ? source.unload_radius : source.load_radius)) {
+			if (source.active && _within_radius(p_cell, source.center, p_for_unload ? source.unload_radius : source.load_radius)) {
 				return true;
 			}
 		}
@@ -779,6 +829,9 @@ void WorldPartition3D::update_streaming() {
 		source_snapshot.write[j] = item;
 	}
 	for (const StreamingSource &source : source_snapshot) {
+		if (!source.active) {
+			continue;
+		}
 		for (int radius = 0; radius <= source.load_radius; radius++) {
 			for (int dz = -radius; dz <= radius; dz++) {
 				for (int dx = -radius; dx <= radius; dx++) {
@@ -794,7 +847,8 @@ void WorldPartition3D::update_streaming() {
 					// runs. Skip stale source snapshots after reconfiguration.
 					bool still_current = false;
 					for (const StreamingSource &current : streaming_sources) {
-						if (current.name == source.name && current.center == source.center &&
+						if (current.active && current.name == source.name && current.center == source.center &&
+								current.node_path == source.node_path &&
 								current.load_radius == source.load_radius && current.unload_radius == source.unload_radius &&
 								current.priority == source.priority) {
 							still_current = true;
@@ -943,6 +997,7 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_cell_pinned", "cell"), &WorldPartition3D::is_cell_pinned);
 	ClassDB::bind_method(D_METHOD("get_pinned_cell_count"), &WorldPartition3D::get_pinned_cell_count);
 	ClassDB::bind_method(D_METHOD("set_streaming_source", "name", "center", "load_radius", "unload_radius", "priority"), &WorldPartition3D::set_streaming_source);
+	ClassDB::bind_method(D_METHOD("set_streaming_source_node", "name", "node_path", "load_radius", "unload_radius", "priority"), &WorldPartition3D::set_streaming_source_node);
 	ClassDB::bind_method(D_METHOD("remove_streaming_source", "name"), &WorldPartition3D::remove_streaming_source);
 	ClassDB::bind_method(D_METHOD("clear_streaming_sources"), &WorldPartition3D::clear_streaming_sources);
 	ClassDB::bind_method(D_METHOD("get_streaming_source", "name"), &WorldPartition3D::get_streaming_source);
