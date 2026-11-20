@@ -18,7 +18,7 @@ class WaterTerrain:
 
 func _find_wade(world) -> Vector2:
 	# The large island is encircled by ocean. Scan radial crossings from land
-	# and bisect the first shoreline to sample legal 0.4 m shallow water.
+	# and bisect the 0.35 m depth crossing for legal shallow water.
 	for ray in range(24):
 		var axis := Vector2.from_angle(TAU * float(ray) / 24.0)
 		var land: Vector2 = axis * 150.0
@@ -26,7 +26,7 @@ func _find_wade(world) -> Vector2:
 		for n in range(1, 63):
 			var sea: Vector2 = axis * (150.0 + float(n) * 52.0)
 			var sea_h: float = world.height_at(sea.x, sea.y)
-			if land_h >= Defs.WATER_LEVEL and sea_h < Defs.WATER_LEVEL - 0.5:
+			if land_h >= Defs.WATER_LEVEL - 0.35 and sea_h < Defs.WATER_LEVEL - 0.35:
 				var a: Vector2 = land
 				var b: Vector2 = sea
 				# Target a submerged-but-walkable point instead of deep ocean.
