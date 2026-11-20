@@ -23,6 +23,7 @@ var target: Node3D
 var streamer: WorldPartition3D
 var steering_direction: Vector3 = Vector3.ZERO
 var steering_updates: int = 0 # Diagnostics: actual CPU steering recalculations.
+var avoidance_turns: int = 0 # Number of recalculations that saw a blocking collider.
 var home_position: Vector3
 var health: int = MAX_HEALTH
 var active: bool = false
@@ -112,6 +113,7 @@ func _recompute_steering(desired_direction: Vector3) -> Vector3:
     var origin: Vector3 = global_position + Vector3.UP * AVOIDANCE_EYE_HEIGHT
     if not _steering_ray_blocked(origin, direction):
         return direction
+    avoidance_turns += 1
     # Local obstacle avoidance without requiring a baked navigation mesh.
     # Keep this bounded to three PhysicsServer queries per granted update.
     var left: Vector3 = direction.rotated(Vector3.UP, AVOIDANCE_ANGLE)
