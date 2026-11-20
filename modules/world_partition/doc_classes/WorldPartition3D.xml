@@ -6,6 +6,7 @@
 	<description>
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
+		Streaming cells containing a [NavigationRegion3D] expose a third readiness stage using [method is_cell_navigation_ready] and [signal cell_navigation_ready], after [NavigationServer3D] map and region synchronization. NPCs should not interpret scene loading or the physical activation barrier alone as a usable navigation surface.
 		In addition to scene-tree [signal cell_loaded], [WorldPartition3D] exposes a two-physics-tick activation barrier via [signal cell_physics_ready] and [method is_cell_physics_ready]. Unlike waiting an arbitrary wall-clock time, this barrier stops during physics pause. It is a scheduling signal, not proof that the cell contains valid collision or navigation data.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
 		Runtime sources may also follow moving [Node3D] actors through [method set_streaming_source_node], automatically re-centering when those actors cross the grid.
@@ -231,6 +232,47 @@
 				[b]Note:[/b] This reports scene-tree readiness only. Physics server synchronization, navigation baking, shader compilation, and resource uploads may still require additional frames or application-level readiness checks.
 			</description>
 		</method>
+		<method name="is_cell_navigation_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] only when [param cell] has completed its physical activation barrier and contains a live, enabled [NavigationRegion3D] whose populated [NavigationMesh] has been synchronized by [NavigationServer3D]. The check validates the navigation server region's map and iteration IDs; it is not inferred from scene loading alone. Cells without a navigation region are never navigation-ready. Current implementation tracks the first eligible navigation region in each cell.
+			</description>
+		</method>
+		<method name="are_cells_navigation_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" default="0" />
+			<description>
+				Returns true only if all cells in the square of radius 0–32 pass [method is_cell_navigation_ready]. Useful before enabling streamed NPCs or allowing path requests over distant mission regions. This does not verify that a valid route between arbitrary points exists.
+			</description>
+		</method>
+		<method name="get_navigation_ready_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Counts loaded cells whose primary region has completed NavigationServer synchronization and physical readiness. Navigation data is revoked when cells unload, disabled regions become unready, or navigation maps detach.
+			</description>
+		</method>
+		<method name="get_navigation_pending_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Number of navigation regions detected in streamed scenes that are still waiting for the NavigationServer synchronization and physics prerequisite. A disabled or invalid region may remain pending; this counter reports state, not an exact remaining-work estimate.
+			</description>
+		</method>
+		<method name="is_streaming_source_navigation_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Checks whether every grid cell in a named streaming source's load radius is navigation-ready. Returns false for unknown, disabled or inactive sources. This is stricter than [method is_streaming_source_ready], which only checks scene instantiation.
+			</description>
+		</method>
+		<method name="get_streaming_source_navigation_progress" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Fraction (0.0–1.0) of navigation-ready cells in a named streaming source. Absent, invalid and pending NavigationRegion3D assets count as incomplete. Intended for streaming mission/NPC readiness HUDs; not a byte-transfer percentage or proof that a path between two positions exists.
+			</description>
+		</method>
 		<method name="is_cell_physics_ready" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -343,6 +385,18 @@
 			<param index="0" name="name" type="String" />
 			<description>
 				Emitted when a previously ready named source becomes incomplete or is removed or disabled. Callers should not treat this as a physics-server readiness signal.
+			</description>
+		</signal>
+		<signal name="cell_navigation_ready">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted after a streaming cell's detected [NavigationRegion3D] is synchronized by [NavigationServer3D] and the scene passes its physical activation barrier. This signal is separate from [signal cell_loaded] and [signal cell_physics_ready].
+			</description>
+		</signal>
+		<signal name="cell_navigation_unready">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted when a previously navigation-ready cell unloads, its region is disabled, or it is detached from a navigation map. Actors may use this signal to disable navigation-dependent behavior before the cell's scene is deleted.
 			</description>
 		</signal>
 		<signal name="cell_physics_ready">
