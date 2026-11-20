@@ -12,6 +12,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
+- **Nonblocking streaming-source completion:** `get_streaming_source_cell_count`, `get_streaming_source_loaded_cell_count`, `get_streaming_source_failed_cell_count`, `get_streaming_source_progress` and `is_streaming_source_ready` expose bounded readiness for already-registered destination cells. Unregistered/missing source centers fail closed, and ready requires a valid active observer and all relevant `Node3D` roots to be live.
 - **Live scene-root accessor:** `get_cell_instance(cell)` returns the active Node3D scene root or `null` without scanning all children or requesting a load. Useful for gameplay population, navigation and cell-local scripts. Never cache the returned scene root beyond an unload without `is_instance_valid()`.
 - **Extra mission streaming sources:** up to 8 named world-space locations with radius 0 or 1 can stream quest areas, cinematic viewpoints or teleport destinations independently of the player's grid location. They share the existing threaded asset and instantiation budgets and are removed explicitly when no longer needed.
 - **Asymmetric LOD hysteresis:** keep an already detailed cell in full quality for 0–8 extra cell rings, while promotions still happen only at the inner threshold; suppresses rebuild thrashing when observers change grid cells.
@@ -51,6 +52,28 @@ func _physics_process(_delta: float) -> void:
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Asynchronous source readiness and safe fast travel
+
+A streaming source is **not** ready simply because it was registered or its resource request started. Query the native loaded-scene counters to gate camera switches, quest portals or fast travel without blocking the main thread:
+
+```gdscript
+# The target cell must already be registered in cell_scenes.
+if world.set_streaming_source("fast_travel", destination.global_position, 0):
+    var scene_count := world.get_streaming_source_cell_count("fast_travel")
+    if scene_count == 0:
+        world.remove_streaming_source("fast_travel")
+    else:
+        # In _process(), do not busy-wait or call load_threaded_get().
+        if world.get_streaming_source_failed_cell_count("fast_travel") > 0:
+            cancel_travel() # Gameplay-owned action, includes source removal.
+        elif world.is_streaming_source_ready("fast_travel"):
+            finish_travel() # Gameplay-owned movement to the destination.
+        else:
+            print(world.get_streaming_source_progress("fast_travel"))
+```
+
+The readiness contract is **live instantiated scene roots**, not byte-level resource loading, GPU texture readiness, navmesh baking, full physics synchronization or safe-spawn validation. Sparse source radius neighbors with no registered scene are ignored; the **center** must be registered or `is_streaming_source_ready` stays false. A nonexistent source or disabled streamer is never considered ready. Remote source requests still compete for the original request and instantiation frame budgets. Always implement failure/cancellation and a timeout in gameplay. The complete usage and headless regression are at `misc/cgame_forest_showcase/scripts/streaming_travel.gd` and `tests/smoke_travel.gd`.
 
 ## Live cell roots for gameplay
 
@@ -130,6 +153,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Readiness is not an all-systems fence.** A `true` completion result means the relevant PackedScene roots exist in the live scene tree, not that they finished deferred physics initialization, navigation baking or GPU uploads. Games that stream collision/terrain separately must add their own activation checks.
 - **External source fanout is bounded:** at most 8 sources and radius 1; no custom shapes, priorities, source replication or automatic quest area generation. Additional source load requests can be delayed by high-priority camera/player work.
 - **Distance LOD hysteresis:** independently adjust the demotion boundary with `detail_hysteresis_cells`. It only changes levels of already-instantiated roots and does not increase the resource streaming radius; check that existing full-detail collision in the added ring is affordable.
 - **Distance LOD is opt-in.** Cell roots without `set_streaming_lod()` continue unchanged. The transition budget applies only to *existing loaded* cells, not their initial scene instantiation; scene authors must profile CPU spikes and physically remove/recreate colliders safely.
