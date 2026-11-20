@@ -655,6 +655,8 @@ func _update_prompt() -> void:
 		text += " | SHARPENED: %d infected melee hits (End)" % int(client.you["sharpened_hits"])
 	if int(client.you.get("plated_hits", 0)) > 0:
 		text += " | ARMOR PLATE: %d claw hits (Ins)" % int(client.you["plated_hits"])
+	if float(client.you.get("soft_sole_seconds", 0.0)) > 0.0:
+		text += " | QUIET SPRINT: %.0fs (Shift+/)" % float(client.you["soft_sole_seconds"])
 	hud.set_prompt(text)
 
 
@@ -735,7 +737,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_PERIOD:
 				_quick_use("frontier_stim")
 			KEY_SLASH:
-				_quick_use("herbal_scent_mask")
+				_quick_use("soft_sole_wraps" if Input.is_key_pressed(KEY_SHIFT) else "herbal_scent_mask")
 			KEY_SEMICOLON:
 				_quick_use("spore_filter")
 			KEY_R:

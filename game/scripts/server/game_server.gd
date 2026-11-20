@@ -107,6 +107,7 @@ const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const SporeSampling = preload("res://scripts/shared/spore_sampling.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const FieldScentMask = preload("res://scripts/shared/field_scent_mask.gd")
+const SoftSoleWraps = preload("res://scripts/shared/soft_sole_wraps.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
 const StealthAmbush = preload("res://scripts/shared/stealth_ambush.gd")
@@ -201,6 +202,7 @@ class Player:
 	var rain_cooldown: float = 0.0 # Persisted storm water collection cooldown.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
 	var spore_filter_seconds: float = 0.0 # Paid temporary swamp respirator, persisted.
+	var soft_sole_seconds: float = 0.0 # Paid, persisted reduced sprint footstep hearing.
 	var storm_insulator_seconds: float = 0.0 # Persisted paid shock resistance.
 	var spore_sample_cooldown: float = 0.0 # Persistent harvest cooldown.
 	var meal_seconds: float = 0.0 # Remaining server-ticked cooked-fish recovery buff.
@@ -430,6 +432,7 @@ func character_data(player: Player) -> Dictionary:
 		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
 		"spore_filter_seconds": player.spore_filter_seconds,
+		"soft_sole_seconds": player.soft_sole_seconds,
 		"storm_insulator_seconds": player.storm_insulator_seconds,
 		"flare_seconds": player.flare_seconds,
 		"spore_sample_cooldown": player.spore_sample_cooldown,
@@ -513,6 +516,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("spore_filter_seconds", 0.0),
 			0.0, SporeHazard.FILTER_DURATION_SECONDS):
+		return false
+	if not SoftSoleWraps.valid_remaining(data.get("soft_sole_seconds", 0.0)):
 		return false
 	if not SaveValidation.finite_number(data.get("storm_insulator_seconds", 0.0),
 			0.0, StormInsulator.DURATION_SECONDS):
@@ -649,6 +654,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.rain_cooldown = float(data.get("rain_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
 	player.spore_filter_seconds = float(data.get("spore_filter_seconds", 0.0))
+	player.soft_sole_seconds = float(data.get("soft_sole_seconds", 0.0))
 	player.storm_insulator_seconds = float(data.get("storm_insulator_seconds", 0.0))
 	player.flare_seconds = float(data.get("flare_seconds", 0.0))
 	player.spore_sample_cooldown = float(data.get("spore_sample_cooldown", 0.0))
@@ -772,6 +778,7 @@ func _spawn_player(player: Player) -> void:
 	if not kept_gear:
 		player.bike_integrity = BikeIntegrity.MAX_INTEGRITY
 	player.chain_wrap_seconds = 0.0
+	player.soft_sole_seconds = 0.0
 	player.bike_service_meters = 0.0
 	player.tire_grip_seconds = 0.0
 	player.attack_timer = 0.0
@@ -924,7 +931,8 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 					player.run_meters -= SKILL_METERS_PER_ATHLETICS_XP
 					_award(player, "athletics", 1.0)
 		if sprint_allowed and player.position.distance_to(before_move) > 0.01:
-			player.noise_radius = maxf(player.noise_radius, Defs.SPRINT_NOISE_RADIUS)
+			player.noise_radius = maxf(player.noise_radius,
+				SoftSoleWraps.sprint_noise(Defs.SPRINT_NOISE_RADIUS, player.soft_sole_seconds))
 			player.noise_timer = maxf(player.noise_timer, Defs.SPRINT_NOISE_SECONDS)
 		# A laden backpack rattles only after the server observes real travel.
 		# Crouching suppresses this sound; mounted noise follows bike rules.
@@ -3443,6 +3451,19 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if not player.inventory.remove(item_id, 1):
 				return {"ok": false, "reason": "not_carried"}
 			player.spore_filter_seconds = SporeHazard.FILTER_DURATION_SECONDS
+		"footstep_wrap":
+			if item_id != SoftSoleWraps.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if not SoftSoleWraps.valid_remaining(player.soft_sole_seconds):
+				return {"ok": false, "reason": "invalid_state"}
+			if player.soft_sole_seconds > 0.0:
+				return {"ok": false, "reason": "already_wrapped"}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					player.skill_timer > 0.0) or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.soft_sole_seconds = SoftSoleWraps.DURATION_SECONDS
 		"scent_mask":
 			if item_id != FieldScentMask.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -4753,6 +4774,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	ParryRiposte.clear(victim)
 	victim.guardian_brace = 0.0
 	victim.spore_filter_seconds = 0.0
+	victim.soft_sole_seconds = 0.0
 	victim.chain_wrap_seconds = 0.0
 	victim.tire_grip_seconds = 0.0
 	parties.clear_standard_by(victim.id)
@@ -4968,6 +4990,10 @@ func _tick_players(delta: float) -> void:
 			player.dirty_character = true
 		if player.flare_seconds > 0.0:
 			player.flare_seconds = HandFlare.remaining(player.flare_seconds, delta)
+			player.dirty_character = true
+		if player.soft_sole_seconds > 0.0:
+			player.soft_sole_seconds = maxf(0.0,
+				player.soft_sole_seconds - maxf(0.0, delta))
 			player.dirty_character = true
 		if player.chain_wrap_seconds > 0.0:
 			player.chain_wrap_seconds = maxf(0.0,
@@ -6366,6 +6392,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"blood_scent_radius": BloodScent.detection_radius(player.survival.bleeding,
 				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival)),
 			"scent_mask_seconds": player.survival.scent_mask_seconds,
+			"soft_sole_seconds": player.soft_sole_seconds,
 			"exposure": player.survival.exposure,
 			"wetness": player.survival.wetness,
 			"warmth_seconds": player.survival.warmth_seconds,

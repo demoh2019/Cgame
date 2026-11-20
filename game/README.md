@@ -3023,3 +3023,18 @@ godot --headless --path game --script res://tests/run_all.gd
 
 No native Godot engine changes are required: existing server authority
 and replicated private character state support this system.
+
+## Soft-Sole Trail Wraps: tactical footstep muffling
+
+Field-craft **Soft-Sole Trail Wraps** using 2 Cloth T1, 2 Fiber T1 and
+1 Scrap. While on foot and out of combat, use **Shift+/** (ordinary
+**/** still applies herbal scent salve) to consume one bundle for **90s**.
+The server reduces the *new* sprint noise radius to 55% of its ordinary
+value; it never silences an already audible sprint/gunshot, mounted bike
+noise, attack noise, gathering, blood scent or line of sight. Sprinting
+still breaks camouflage and costs stamina. The effect is private, saved
+and time-decrements on the authoritative server, never refreshes by
+relogging, and clears on death/respawn. Legacy saves remain compatible.
+
+Test suite: `game/tests/test_soft_sole_wraps.gd`.
+No Godot/Cgame engine changes are required.

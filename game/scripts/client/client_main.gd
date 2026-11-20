@@ -1021,7 +1021,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_stim"):
 		_result("Frontier stim", sim.cmd_use(LOCAL_PLAYER_ID, "frontier_stim"))
 	elif event.is_action_pressed("survive_scent_mask"):
-		_result("Apply herbal scent salve", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_scent_mask"))
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Apply soft-sole wraps", sim.cmd_use(LOCAL_PLAYER_ID, "soft_sole_wraps"))
+		else:
+			_result("Apply herbal scent salve", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_scent_mask"))
 	elif event.is_action_pressed("survive_spore_filter"):
 		_result("Apply expedition spore filter", sim.cmd_use(LOCAL_PLAYER_ID, "spore_filter"))
 	elif event.is_action_pressed("survive_lake"):
@@ -1329,6 +1332,8 @@ func _update_hud() -> void:
 		survivor.survival.scent_mask_seconds > 0.0)
 	if survivor.survival.scent_mask_seconds > 0.0:
 		_instructions.text += "\nHERBAL SCENT MASK: %.0fs remaining; infected still see and hear you" % survivor.survival.scent_mask_seconds
+	if survivor.soft_sole_seconds > 0.0:
+		_instructions.text += "\nSOFT-SOLE WRAPS: %.0fs; quieter sprint, gunshots and bikes stay loud (Shift+/)" % survivor.soft_sole_seconds
 	if scent_radius > 0.0:
 		_instructions.text += "\nBLOOD SCENT: infected may track you from %d m; use first aid" % ceili(scent_radius)
 	_instructions.text += "\nZ rest at hub (2 wood + canned food + water), or by a lit field fire (cooked fish/ration + water; no nearby enemies); 90s cooldown, remaining %.0fs" % survivor.rest_cooldown

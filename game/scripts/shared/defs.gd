@@ -408,6 +408,11 @@ static func _build_items() -> void:
 	_add_recipe("field_canteen", "field_canteen", 1,
 		{"cloth_1": 2, "fiber_1": 3, "wood_1": 1}, "", 4.0)
 	# Field-craftable salve hides only blood scent; no visual invisibility.
+	# Field-crafted wraps quiet only footfalls while sprinting: not weapons, bikes or blood.
+	_add_item("soft_sole_wraps", {"name": "Soft-Sole Trail Wraps", "kind": "footstep_wrap",
+		"tier": 1, "stack": 5, "weight": 0.35, "value": 26})
+	_add_recipe("soft_sole_wraps", "soft_sole_wraps", 1,
+		{"cloth_1": 2, "fiber_1": 2, "scrap": 1}, "", 3.0)
 	_add_item("herbal_scent_mask", {"name": "Herbal Scent Salve", "kind": "scent_mask",
 		"stack": 5, "weight": 0.2, "value": 18})
 	_add_recipe("herbal_scent_mask", "herbal_scent_mask", 1,
