@@ -12,6 +12,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
+- **Native fixed-physics-frame navigation scheduler:** register up to 128 live Node3D agents, give them priority 0–3, and cap costly path/steering **recalculations** at `max_navigation_updates_per_physics_frame` (1–64, default 2). The engine chooses winners deterministically by priority, least recent update, then agent name, avoiding starvation among equally important active NPCs. Only loaded simulation-active physics-active cells qualify. Grants are consumed once per agent per physics tick and weak ObjectIDs protect against deleted agents; owner-safe unregister prevents stale NPC replacement bugs. Aurora Forest uses these grants to schedule real obstacle raycasts; this is not navmesh baking.
 - **Independent native physics streaming tier:** per-cell `physics_radius` (-1 all-loaded legacy), `physics_hysteresis_cells` (0–8) and `max_physics_transitions_per_frame` (1–64). Loaded visuals and AI simulation stay separate. An opt-in root `set_streaming_physics_active(active)` filters its authored colliders; `cell_physics_changed`, `is_cell_physics_active()`, `get_physics_active_cell_count()` expose state. Important/urgent streaming sources and pinned hubs force destination cells to full visual LOD and active physics, while background quest preload remains cheap. `is_streaming_source_physics_ready(name)` requires an additional physics tick and optional scene predicate before travel.
 - **Physics-frame scene activation fence:** every instantiated cell records its creation physics frame. `min_physics_frames_after_load` (0–8, default 2) delays an additional **activation** state. An optional root method `is_streaming_activation_ready() -> bool` can veto activation until game-specific collision/navmesh/terrain setup is complete. Query `is_cell_activation_ready(cell)`, `is_streaming_source_activation_ready(name)`, source activated-cell counts, and activation progress separately from loaded scene roots; unloading/reloading always resets the fence.
 - **Independent bounded simulation activation:** loaded cells can retain visuals but pause script/AI simulation independently of LOD. Configure `simulation_radius` (-1 disables), `simulation_hysteresis_cells` (0–8) and `max_simulation_transitions_per_frame` (1–64). The native engine tracks per-cell activation, exposes `is_cell_simulation_active()` and `get_simulation_active_cell_count()`, emits `cell_simulation_changed`, and calls an optional scene-root `set_streaming_simulation_active(active)` **before** `_ready()` for initial state.
@@ -56,6 +57,33 @@ func _physics_process(_delta: float) -> void:
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Navigation and AI work scheduling
+
+`WorldPartition3D` now provides a bounded, deterministic **per-physics-frame allowance** for expensive NPC steering/path recomputation. It is independent of resource, collision and simulation transition budgets; the engine does **not** automatically generate navigation meshes or calculate `NavigationServer3D` paths. This lets game-level AI scale query work without freezing `CharacterBody3D` movement.
+
+```gdscript
+world.max_navigation_updates_per_physics_frame = 2
+
+func configure_npc(npc: CharacterBody3D, agent_id: String) -> void:
+    world.register_navigation_agent(agent_id, npc, 2)
+
+func _physics_process(delta: float) -> void:
+    # Keep movement integration and any NavigationAgent3D internal stepping
+    # running every physics frame; throttle only EXPENSIVE path/target updates.
+    if world.try_acquire_navigation_update(agent_id):
+        cached_steering = recalculate_expensive_steering_or_path()
+    move_and_slide_with_cached_steering(delta)
+
+func _exit_tree() -> void:
+    world.unregister_navigation_agent_if_owner(agent_id, self)
+```
+
+**Scheduler behavior:** registered names are 1–64 characters (128 agents max); priorities 0–3. Each physics frame the native code freezes a list of at most `max_navigation_updates_per_physics_frame` eligible winners. Eligible agents are live, inside the scene tree, receiving physics processing, and currently in a streamed cell where both `is_cell_simulation_active` and `is_cell_physics_active` are true. The highest priority wins; equal priorities use least-recently-selected ordering and alphabetical name to break ties. Every grant can be consumed only once per frame, regardless of which enemy script processes first. If urgent agents permanently saturate the budget, background agents can wait indefinitely: priorities are **strict**, while fairness is for agents within a priority tier.
+
+On a cell unload, dormant actors stop qualifying immediately; game code should call `unregister_navigation_agent_if_owner` when the node exits. If an enemy respawns under the same stable ID while the old instance is queued for deletion, the old instance **cannot** unregister the replacement. Deleted ObjectIDs are pruned on the next scheduling pass.
+
+**Godot NavigationAgent3D caution:** its `get_next_path_position()` needs to be called every physics frame to advance its internal path state. Do **not** throttle that step with this scheduler. Throttle goal changes, explicit `NavigationServer3D` path requests or other costly steering calculations. Query a navmap only after server synchronization. Aurora Forest currently has **no baked navmesh**; it uses up to three `PhysicsDirectSpaceState3D.intersect_ray()` obstacle probes per granted steering recalculation; actor physics movement continues every tick. This is local avoidance, **not** globally correct pathfinding. Run `smoke_navigation_budget.gd` to test native grants, fairness, priority, dormant filtering and stalker integration.
 
 ## Independent collision streaming tiers
 
@@ -230,7 +258,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 67 Doctest cases across `test_world_partition_3d.h` (31) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 68 Doctest cases across `test_world_partition_3d.h` (32) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -241,6 +269,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Navigation scheduler supplies permits, not pathfinding or a navmesh.** The engine keeps physics, navigation map synchronization and actual movement separate. It limits how often expensive query results can be recomputed, but doesn't guarantee path quality or modify the cost per permitted calculation. Persistent high-priority agents can starve lower priorities; same-priority agents rotate fairly. Registration is bounded at 128 names and invalid/old nodes are weakly tracked.
 - **Independent collision filtering is opt-in.** Only scene roots implementing `set_streaming_physics_active(active)` actually change collision properties. The engine's state does not automatically remove shapes from broadphase or reduce shape memory. Urgent sources can temporarily force near LOD and more expensive colliders even far from the observer, within existing transition budgets.
 - **Scene activation is a gameplay fence, not an engine-wide physics promise.** The physics frame counter establishes a minimum age. Only a scene author's opt-in predicate can verify domain-specific readiness; a bug or omission in it cannot be detected by the engine. Streaming and physics activation remain decoupled from any GPU upload/texture residency.
 - **Simulation activation is opt-in per scene or game manager.** It never unloads geometry, removes physics bodies, or pauses arbitrary descendant scripts automatically. Callback scripts must tolerate calls before `_ready()` and execute their own activation logic. Hysteresis can intentionally keep some neighboring cells active even when outside the inner radius.

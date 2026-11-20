@@ -76,6 +76,9 @@ func _run() -> void:
     if director.call("get_alive_count") != 1:
         _fail("loaded near cell did not create one deterministic encounter")
         return
+    if not stream.has_navigation_agent("-1:0") or stream.get_navigation_agent_count() != 1:
+        _fail("encounter failed to register its real NPC with native navigation")
+        return
 
     player.global_position.x = 100.0
     stream.update_streaming()
@@ -84,6 +87,10 @@ func _run() -> void:
         return
     if stream.get_cell_instance(CELL) != null or director.call("get_alive_count") != 0:
         _fail("unloaded cell retained its scene or combat NPC")
+        return
+    await process_frame
+    if stream.has_navigation_agent("-1:0"):
+        _fail("unloaded encounter retained a native navigation registration")
         return
 
     player.global_position.x = -16.0
@@ -97,6 +104,9 @@ func _run() -> void:
     if director.call("get_alive_count") != 1:
         _fail("returned cell did not restore its undefeated stalker")
         return
+    if not stream.has_navigation_agent("-1:0"):
+        _fail("reloaded encounter did not restore its navigation registration")
+        return
     var enemy: Node = director.get_child(0)
     if enemy == null or enemy.get("encounter_id") != "-1:0":
         _fail("NPC encounter ID is not stable across streaming")
@@ -109,6 +119,9 @@ func _run() -> void:
         _fail("defeated encounter did not update persistent state")
         return
     await process_frame
+    if stream.has_navigation_agent("-1:0"):
+        _fail("dead stalker retained a native steering registration")
+        return
     director.call("refresh_encounters")
     if director.call("get_alive_count") != 0:
         _fail("defeated stalker respawned after refreshing loaded cells")

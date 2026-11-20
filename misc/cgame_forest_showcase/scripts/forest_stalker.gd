@@ -13,9 +13,17 @@ const ATTACK_COOLDOWN: float = 1.6
 const AGGRO_DISTANCE: float = 14.0
 const LEASH_DISTANCE: float = 22.0
 const WALK_SPEED: float = 2.8
+const NAVIGATION_PRIORITY: int = 2
+const AVOIDANCE_CHECK_DISTANCE: float = 2.7
+const AVOIDANCE_ANGLE: float = 0.75
+const AVOIDANCE_EYE_HEIGHT: float = 0.45
 
 var encounter_id: String = ""
 var target: Node3D
+var streamer: WorldPartition3D
+var steering_direction: Vector3 = Vector3.ZERO
+var steering_updates: int = 0 # Diagnostics: actual CPU steering recalculations.
+var avoidance_turns: int = 0 # Number of recalculations that saw a blocking collider.
 var home_position: Vector3
 var health: int = MAX_HEALTH
 var active: bool = false
@@ -72,11 +80,54 @@ func _ready() -> void:
     set_encounter_active(false)
 
 
-func configure(id: String, player: Node3D, spawn_position: Vector3) -> void:
+func configure(id: String, player: Node3D, spawn_position: Vector3,
+        partition: WorldPartition3D = null) -> void:
     encounter_id = id
     target = player
     home_position = spawn_position
     global_position = spawn_position
+    streamer = partition
+    if is_instance_valid(streamer):
+        streamer.register_navigation_agent(encounter_id, self, NAVIGATION_PRIORITY)
+
+
+func _exit_tree() -> void:
+    if is_instance_valid(streamer) and not encounter_id.is_empty():
+        streamer.unregister_navigation_agent_if_owner(encounter_id, self)
+
+
+func _steering_ray_blocked(from: Vector3, direction: Vector3) -> bool:
+    var query := PhysicsRayQueryParameters3D.create(
+        from, from + direction * AVOIDANCE_CHECK_DISTANCE)
+    query.collision_mask = 1 # Terrain and tree/rock collision only.
+    query.exclude = [get_rid()]
+    var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+    return not hit.is_empty() and hit.get("collider") != target
+
+
+func _recompute_steering(desired_direction: Vector3) -> Vector3:
+    steering_updates += 1
+    var direction: Vector3 = desired_direction.normalized()
+    if direction == Vector3.ZERO:
+        return direction
+    var origin: Vector3 = global_position + Vector3.UP * AVOIDANCE_EYE_HEIGHT
+    if not _steering_ray_blocked(origin, direction):
+        return direction
+    avoidance_turns += 1
+    # Local obstacle avoidance without requiring a baked navigation mesh.
+    # Keep this bounded to three PhysicsServer queries per granted update.
+    var left: Vector3 = direction.rotated(Vector3.UP, AVOIDANCE_ANGLE)
+    var right: Vector3 = direction.rotated(Vector3.UP, -AVOIDANCE_ANGLE)
+    var left_blocked: bool = _steering_ray_blocked(origin, left)
+    var right_blocked: bool = _steering_ray_blocked(origin, right)
+    if not left_blocked and right_blocked:
+        return left
+    if not right_blocked and left_blocked:
+        return right
+    if not left_blocked and not right_blocked:
+        return left if steering_direction.dot(left) >= steering_direction.dot(right) else right
+    # Both side probes blocked: avoid oscillating direction every tick.
+    return left if steering_direction.dot(left) >= steering_direction.dot(right) else right
 
 
 func set_encounter_active(enabled: bool) -> void:
@@ -85,6 +136,7 @@ func set_encounter_active(enabled: bool) -> void:
     set_physics_process(active)
     if not active:
         velocity = Vector3.ZERO
+        steering_direction = Vector3.ZERO
 
 
 func is_alive() -> bool:
@@ -125,8 +177,24 @@ func _physics_process(delta: float) -> void:
     elif player_distance >= AGGRO_DISTANCE and away_from_home.length() > 1.5:
         walk_direction = away_from_home.normalized()
 
-    velocity.x = move_toward(velocity.x, walk_direction.x * WALK_SPEED, delta * 14.0)
-    velocity.z = move_toward(velocity.z, walk_direction.z * WALK_SPEED, delta * 14.0)
+    # Moving enemies receive a higher scheduling tier than stationary
+    # combatants; idle actors do not waste the first priority slots.
+    if is_instance_valid(streamer):
+        streamer.set_navigation_agent_priority(encounter_id,
+            NAVIGATION_PRIORITY if walk_direction.length_squared() >= 0.001 else 0)
+
+    # The native scheduler bounds expensive obstacle probes/path recomputation
+    # across all active NPCs; each agent reuses its previous local steering
+    # between granted physics frames. No navmesh is assumed in this demo.
+    if walk_direction.length_squared() < 0.001:
+        steering_direction = Vector3.ZERO
+    elif not is_instance_valid(streamer):
+        steering_direction = _recompute_steering(walk_direction)
+    elif streamer.try_acquire_navigation_update(encounter_id):
+        steering_direction = _recompute_steering(walk_direction)
+
+    velocity.x = move_toward(velocity.x, steering_direction.x * WALK_SPEED, delta * 14.0)
+    velocity.z = move_toward(velocity.z, steering_direction.z * WALK_SPEED, delta * 14.0)
     velocity.y -= 24.0 * delta
     move_and_slide()
 

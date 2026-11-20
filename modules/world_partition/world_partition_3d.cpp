@@ -209,6 +209,9 @@ void WorldPartition3D::_notification(int p_what) {
 		// A future re-entry should report the first resolved observer cell.
 		observer_cell_valid = false;
 		predicted_cell_valid = false;
+		navigation_schedule_valid = false;
+		navigation_selected.clear();
+		navigation_consumed.clear();
 	}
 }
 
@@ -584,6 +587,165 @@ bool WorldPartition3D::is_streaming_source_physics_ready(const String &p_name) c
 		}
 	}
 	return true;
+}
+
+void WorldPartition3D::set_max_navigation_updates_per_physics_frame(int p_count) {
+	ERR_FAIL_COND_MSG(p_count < 1 || p_count > 64, "WorldPartition3D navigation update budget must be 1 to 64 per physics frame.");
+	max_navigation_updates_per_physics_frame = p_count;
+}
+
+int WorldPartition3D::get_max_navigation_updates_per_physics_frame() const {
+	return max_navigation_updates_per_physics_frame;
+}
+
+bool WorldPartition3D::register_navigation_agent(const String &p_name, Node3D *p_agent, int p_priority) {
+	ERR_FAIL_COND_V_MSG(p_name.is_empty() || p_name.length() > 64, false, "Navigation agent name must contain 1 to 64 characters.");
+	ERR_FAIL_COND_V_MSG(p_agent == nullptr, false, "Navigation agent must be a Node3D.");
+	ERR_FAIL_COND_V_MSG(p_priority < 0 || p_priority > 3, false, "Navigation priority must be 0 to 3.");
+	ERR_FAIL_COND_V_MSG(!navigation_agents.has(p_name) && navigation_agents.size() >= MAX_NAVIGATION_AGENTS, false, "WorldPartition3D has reached its 128-agent limit.");
+	// One live Node3D may have only one registered name, so aliases cannot
+	// claim multiple path/steering grants under different IDs.
+	for (const KeyValue<String, NavigationAgentEntry> &E : navigation_agents) {
+		if (E.key != p_name && E.value.node_id == p_agent->get_instance_id()) {
+			return false;
+		}
+	}
+	NavigationAgentEntry next;
+	next.node_id = p_agent->get_instance_id();
+	next.priority = p_priority;
+	const NavigationAgentEntry *previous = navigation_agents.getptr(p_name);
+	if (previous != nullptr && previous->node_id == next.node_id) {
+		next.last_selected_frame = previous->last_selected_frame;
+	}
+	navigation_agents.insert(p_name, next);
+	// Existing frame reservations deliberately do not reset; upserts cannot
+	// spend extra slots by repeatedly registering during the same frame.
+	return true;
+}
+
+bool WorldPartition3D::unregister_navigation_agent_if_owner(const String &p_name, Node3D *p_agent) {
+	const NavigationAgentEntry *entry = navigation_agents.getptr(p_name);
+	if (entry == nullptr || p_agent == nullptr || entry->node_id != p_agent->get_instance_id()) {
+		return false;
+	}
+	navigation_agents.erase(p_name);
+	return true;
+}
+
+void WorldPartition3D::unregister_navigation_agent(const String &p_name) {
+	navigation_agents.erase(p_name);
+	// Do not clear existing frame reservations: deregister/re-register must not
+	// circumvent the per-physics-frame budget.
+}
+
+bool WorldPartition3D::has_navigation_agent(const String &p_name) const {
+	return navigation_agents.has(p_name);
+}
+
+int WorldPartition3D::get_navigation_agent_count() const {
+	return navigation_agents.size();
+}
+
+bool WorldPartition3D::set_navigation_agent_priority(const String &p_name, int p_priority) {
+	ERR_FAIL_COND_V_MSG(p_priority < 0 || p_priority > 3, false, "Navigation priority must be 0 to 3.");
+	NavigationAgentEntry *entry = navigation_agents.getptr(p_name);
+	if (entry == nullptr) {
+		return false;
+	}
+	entry->priority = p_priority;
+	return true;
+}
+
+int WorldPartition3D::get_navigation_agent_priority(const String &p_name) const {
+	const NavigationAgentEntry *entry = navigation_agents.getptr(p_name);
+	return entry != nullptr ? entry->priority : -1;
+}
+
+void WorldPartition3D::_schedule_navigation_updates() {
+	const uint64_t frame = Engine::get_singleton()->get_physics_frames();
+	if (navigation_schedule_valid && navigation_schedule_frame == frame) {
+		return;
+	}
+	navigation_schedule_frame = frame;
+	navigation_schedule_valid = true;
+	navigation_selected.clear();
+	navigation_consumed.clear();
+
+	Vector<String> candidates;
+	Vector<String> stale;
+	for (const KeyValue<String, NavigationAgentEntry> &E : navigation_agents) {
+		Node3D *node = Object::cast_to<Node3D>(ObjectDB::get_instance(E.value.node_id));
+		if (node == nullptr || node->is_queued_for_deletion()) {
+			stale.push_back(E.key);
+			continue;
+		}
+		if (!node->is_inside_tree() || !node->is_physics_processing() || !node->can_process()) {
+			continue;
+		}
+		const Vector2i cell = local_position_to_cell(to_local(node->get_global_position()));
+		if (!is_cell_simulation_active(cell) || !is_cell_physics_active(cell)) {
+			continue; // Never spend navigation work on a dormant streamed cell.
+		}
+		candidates.push_back(E.key);
+	}
+	for (const String &name : stale) {
+		navigation_agents.erase(name);
+	}
+	candidates.sort(); // Stable tie-break independent of HashMap iteration.
+	const int budget = MIN(max_navigation_updates_per_physics_frame, candidates.size());
+	for (int slot = 0; slot < budget; slot++) {
+		int best_index = -1;
+		for (int i = 0; i < candidates.size(); i++) {
+			if (navigation_selected.has(candidates[i])) {
+				continue;
+			}
+			const NavigationAgentEntry *entry = navigation_agents.getptr(candidates[i]);
+			if (entry == nullptr) {
+				continue;
+			}
+			if (best_index < 0) {
+				best_index = i;
+				continue;
+			}
+			const NavigationAgentEntry *best = navigation_agents.getptr(candidates[best_index]);
+			if (entry->priority > best->priority ||
+					(entry->priority == best->priority && entry->last_selected_frame < best->last_selected_frame)) {
+				best_index = i;
+			}
+		}
+		if (best_index < 0) {
+			break;
+		}
+		const String &name = candidates[best_index];
+		navigation_selected.insert(name);
+		NavigationAgentEntry *entry = navigation_agents.getptr(name);
+		entry->last_selected_frame = frame;
+	}
+}
+
+bool WorldPartition3D::try_acquire_navigation_update(const String &p_name) {
+	if (!streaming_enabled || !is_inside_tree() || !navigation_agents.has(p_name)) {
+		return false;
+	}
+	_schedule_navigation_updates();
+	if (!navigation_selected.has(p_name) || navigation_consumed.has(p_name)) {
+		return false;
+	}
+	NavigationAgentEntry *entry = navigation_agents.getptr(p_name);
+	Node3D *node = entry != nullptr ? Object::cast_to<Node3D>(ObjectDB::get_instance(entry->node_id)) : nullptr;
+	if (node == nullptr || node->is_queued_for_deletion() || !node->is_inside_tree() || !node->is_physics_processing() || !node->can_process()) {
+		return false;
+	}
+	const Vector2i cell = local_position_to_cell(to_local(node->get_global_position()));
+	if (!is_cell_simulation_active(cell) || !is_cell_physics_active(cell)) {
+		return false;
+	}
+	navigation_consumed.insert(p_name);
+	return true;
+}
+
+int WorldPartition3D::get_navigation_updates_used_this_frame() const {
+	return navigation_schedule_valid && navigation_schedule_frame == Engine::get_singleton()->get_physics_frames() ? navigation_consumed.size() : 0;
 }
 
 void WorldPartition3D::set_observer_path(const NodePath &p_path) {
@@ -1215,6 +1377,17 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_physics_active_cell_count"), &WorldPartition3D::get_physics_active_cell_count);
 	ClassDB::bind_method(D_METHOD("is_cell_physics_ready", "cell"), &WorldPartition3D::is_cell_physics_ready);
 	ClassDB::bind_method(D_METHOD("is_streaming_source_physics_ready", "name"), &WorldPartition3D::is_streaming_source_physics_ready);
+	ClassDB::bind_method(D_METHOD("set_max_navigation_updates_per_physics_frame", "count"), &WorldPartition3D::set_max_navigation_updates_per_physics_frame);
+	ClassDB::bind_method(D_METHOD("get_max_navigation_updates_per_physics_frame"), &WorldPartition3D::get_max_navigation_updates_per_physics_frame);
+	ClassDB::bind_method(D_METHOD("register_navigation_agent", "name", "agent", "priority"), &WorldPartition3D::register_navigation_agent, DEFVAL(1));
+	ClassDB::bind_method(D_METHOD("unregister_navigation_agent", "name"), &WorldPartition3D::unregister_navigation_agent);
+	ClassDB::bind_method(D_METHOD("unregister_navigation_agent_if_owner", "name", "agent"), &WorldPartition3D::unregister_navigation_agent_if_owner);
+	ClassDB::bind_method(D_METHOD("has_navigation_agent", "name"), &WorldPartition3D::has_navigation_agent);
+	ClassDB::bind_method(D_METHOD("get_navigation_agent_count"), &WorldPartition3D::get_navigation_agent_count);
+	ClassDB::bind_method(D_METHOD("set_navigation_agent_priority", "name", "priority"), &WorldPartition3D::set_navigation_agent_priority);
+	ClassDB::bind_method(D_METHOD("get_navigation_agent_priority", "name"), &WorldPartition3D::get_navigation_agent_priority);
+	ClassDB::bind_method(D_METHOD("try_acquire_navigation_update", "name"), &WorldPartition3D::try_acquire_navigation_update);
+	ClassDB::bind_method(D_METHOD("get_navigation_updates_used_this_frame"), &WorldPartition3D::get_navigation_updates_used_this_frame);
 	ClassDB::bind_method(D_METHOD("set_observer_path", "path"), &WorldPartition3D::set_observer_path);
 	ClassDB::bind_method(D_METHOD("get_observer_path"), &WorldPartition3D::get_observer_path);
 	ClassDB::bind_method(D_METHOD("set_predictive_velocity", "velocity"), &WorldPartition3D::set_predictive_velocity);
@@ -1296,6 +1469,8 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "physics_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_physics_radius", "get_physics_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "physics_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_physics_hysteresis_cells", "get_physics_hysteresis_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_physics_transitions_per_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_physics_transitions_per_frame", "get_max_physics_transitions_per_frame");
+	ADD_GROUP("Navigation Scheduling", "");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_navigation_updates_per_physics_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_navigation_updates_per_physics_frame", "get_max_navigation_updates_per_physics_frame");
 	ADD_GROUP("Cell Activation", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "min_physics_frames_after_load", PROPERTY_HINT_RANGE, "0,8,1"), "set_min_physics_frames_after_load", "get_min_physics_frames_after_load");
 
@@ -1324,4 +1499,7 @@ WorldPartition3D::~WorldPartition3D() {
 	pending_cells.clear();
 	ready_scenes.clear();
 	pinned_cells.clear();
+	navigation_agents.clear();
+	navigation_selected.clear();
+	navigation_consumed.clear();
 }

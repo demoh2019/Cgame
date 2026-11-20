@@ -63,6 +63,9 @@ class WorldPartition3D : public Node3D {
 	int physics_radius = -1; // Backward-compatible: all loaded cells active.
 	int physics_hysteresis_cells = 1;
 	int max_physics_transitions_per_frame = 2;
+	// Limit expensive steering/path recalculations to a deterministic number
+	// of active agents per *physics* frame (not render frame).
+	int max_navigation_updates_per_physics_frame = 2;
 	// Minimum completed engine physics ticks before a newly-instantiated scene
 	// can pass the optional gameplay activation readiness check (0 to 8).
 	int min_physics_frames_after_load = 2;
@@ -98,6 +101,19 @@ class WorldPartition3D : public Node3D {
 	};
 	HashMap<String, StreamingSource> streaming_sources;
 	static constexpr int MAX_STREAMING_SOURCES = 8;
+
+	struct NavigationAgentEntry {
+		ObjectID node_id;
+		int priority = 1; // 0 background, 1 normal, 2 important, 3 urgent.
+		uint64_t last_selected_frame = 0;
+	};
+	HashMap<String, NavigationAgentEntry> navigation_agents;
+	static constexpr int MAX_NAVIGATION_AGENTS = 128;
+	uint64_t navigation_schedule_frame = 0;
+	bool navigation_schedule_valid = false;
+	HashSet<String> navigation_selected; // Winners chosen at physics-frame start.
+	HashSet<String> navigation_consumed; // A grant is consumed only once.
+	void _schedule_navigation_updates();
 
 	static bool _within_radius(const Vector2i &p_cell, const Vector2i &p_center, int p_radius);
 	String _get_scene_path(const Vector2i &p_cell) const;
@@ -172,6 +188,18 @@ public:
 	int get_physics_active_cell_count() const;
 	bool is_cell_physics_ready(const Vector2i &p_cell) const;
 	bool is_streaming_source_physics_ready(const String &p_name) const;
+
+	void set_max_navigation_updates_per_physics_frame(int p_count);
+	int get_max_navigation_updates_per_physics_frame() const;
+	bool register_navigation_agent(const String &p_name, Node3D *p_agent, int p_priority = 1);
+	void unregister_navigation_agent(const String &p_name);
+	bool unregister_navigation_agent_if_owner(const String &p_name, Node3D *p_agent);
+	bool has_navigation_agent(const String &p_name) const;
+	int get_navigation_agent_count() const;
+	bool set_navigation_agent_priority(const String &p_name, int p_priority);
+	int get_navigation_agent_priority(const String &p_name) const;
+	bool try_acquire_navigation_update(const String &p_name);
+	int get_navigation_updates_used_this_frame() const;
 
 	void set_observer_path(const NodePath &p_path);
 	NodePath get_observer_path() const;
