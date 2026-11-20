@@ -271,9 +271,9 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 		ready_cells.push_back(item.cell);
 	}
 	if (have_focus) {
-		WorldStreamingGrid::prioritize_cells_for_motion(ready_cells, position, velocity_hint,
-				lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
-				cell_size, _grid_axes());
+		WorldStreamingGrid::prioritize_cells_for_motion_and_view(ready_cells, position,
+				velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
+				view_direction, view_priority, cell_size, _grid_axes());
 	}
 	for (const Vector3i &cell : ready_cells) {
 		const String path = loading[cell];
@@ -327,6 +327,9 @@ void WorldStreamer::_update_streaming() {
 	WorldStreamingGrid::prioritize_cells_for_motion_and_view(wanted, position,
 			velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
 			view_direction, view_priority, cell_size, _grid_axes());
+	// Compare future camera turns against the last actually published queue,
+	// not the previous render frame. Ordinary motion still uses the old rate.
+	last_queued_view_direction = view_direction;
 	if (truncated && !truncated_warned) {
 		truncated_warned = true;
 		WARN_PRINT(vformat("WorldStreamer: load_radius %s with cell_size %s covers more than %d cells; only the nearest are streamed. Increase cell_size or reduce load_radius.", rtos(load_radius), rtos(cell_size), WorldStreamingGrid::MAX_CELLS));
@@ -380,6 +383,7 @@ void WorldStreamer::_reset_state() {
 	missing.clear();
 	failed.clear();
 	generate_queue.clear();
+	last_queued_view_direction = Vector3();
 	truncated_warned = false;
 	time_since_update = 1e9;
 }
@@ -419,7 +423,14 @@ void WorldStreamer::_notification(int p_what) {
 			const uint64_t frame_started_usec = OS::get_singleton()->get_ticks_usec();
 			_poll_loading(frame_budget, frame_started_usec);
 			time_since_update += get_process_delta_time();
-			if (time_since_update >= update_interval) {
+			// Camera cuts and rapid 180-degree turns should reprioritize
+			// the PROCEDURAL queue before the normal 150 ms refresh. The
+			// 50 ms minimum protects CPU budgets against per-frame resorting.
+			const bool turned = enabled && view_priority > real_t(0.0) &&
+					WorldStreamingGrid::should_refresh_for_view_turn(
+							last_queued_view_direction, view_direction, fast_view_refresh_degrees);
+			const bool early = turned && time_since_update >= 0.05;
+			if (time_since_update >= update_interval || early) {
 				time_since_update = 0.0;
 				_update_streaming();
 			}
@@ -499,6 +510,13 @@ void WorldStreamer::set_view_priority(real_t p_weight) {
 		return;
 	}
 	view_priority = safe;
+}
+
+void WorldStreamer::set_fast_view_refresh_degrees(real_t p_degrees) {
+	if (!Math::is_finite(p_degrees)) {
+		return;
+	}
+	fast_view_refresh_degrees = CLAMP(p_degrees, real_t(0.0), real_t(180.0));
 }
 
 void WorldStreamer::set_max_concurrent_loads(int p_count) {
@@ -615,6 +633,8 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_view_direction"), &WorldStreamer::get_view_direction);
 	ClassDB::bind_method(D_METHOD("set_view_priority", "weight"), &WorldStreamer::set_view_priority);
 	ClassDB::bind_method(D_METHOD("get_view_priority"), &WorldStreamer::get_view_priority);
+	ClassDB::bind_method(D_METHOD("set_fast_view_refresh_degrees", "degrees"), &WorldStreamer::set_fast_view_refresh_degrees);
+	ClassDB::bind_method(D_METHOD("get_fast_view_refresh_degrees"), &WorldStreamer::get_fast_view_refresh_degrees);
 	ClassDB::bind_method(D_METHOD("set_max_concurrent_loads", "count"), &WorldStreamer::set_max_concurrent_loads);
 	ClassDB::bind_method(D_METHOD("get_max_concurrent_loads"), &WorldStreamer::get_max_concurrent_loads);
 	ClassDB::bind_method(D_METHOD("set_max_instantiations_per_frame", "count"), &WorldStreamer::set_max_instantiations_per_frame);
@@ -658,6 +678,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lookahead_seconds", PROPERTY_HINT_RANGE, "0,4,0.1,suffix:s"), "set_lookahead_seconds", "get_lookahead_seconds");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "view_direction", PROPERTY_HINT_NONE), "set_view_direction", "get_view_direction");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "view_priority", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_view_priority", "get_view_priority");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fast_view_refresh_degrees", PROPERTY_HINT_RANGE, "0,180,1,suffix:°"), "set_fast_view_refresh_degrees", "get_fast_view_refresh_degrees");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "chunk_path_template", PROPERTY_HINT_NONE, ""), "set_chunk_path_template", "get_chunk_path_template");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "chunk_parent", PROPERTY_HINT_NONE, ""), "set_chunk_parent", "get_chunk_parent");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "position_chunks"), "set_position_chunks", "get_position_chunks");

@@ -78,6 +78,13 @@ void prioritize_cells_for_motion_and_view(LocalVector<Vector3i> &r_cells, const 
 		const Vector3 &p_velocity, real_t p_lookahead_seconds, real_t p_max_prediction,
 		const Vector3 &p_view_direction, real_t p_view_weight, real_t p_cell_size, Axes p_axes);
 
+// Opt-in fast camera-turn refresh decision. Vectors are view headings from
+// the last queue rebuild and the current camera; invalid/zero hints do not
+// cause repeated refreshes. Positive degrees are clamped by the caller.
+// This helper is deterministic and independent of scene-tree timing.
+bool should_refresh_for_view_turn(const Vector3 &p_last_view, const Vector3 &p_current_view,
+		real_t p_degrees);
+
 // Loaded cells that are now farther than `p_unload_radius` (hysteresis: it should be at least the
 // load radius so cells on the border do not flicker in and out).
 void cells_to_unload(const Vector3 &p_position, real_t p_unload_radius, real_t p_cell_size, Axes p_axes, const HashSet<Vector3i> &p_loaded, LocalVector<Vector3i> &r_cells);

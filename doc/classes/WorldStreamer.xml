@@ -130,6 +130,9 @@
 		<member name="enabled" type="bool" setter="set_enabled" getter="is_enabled" default="true">
 			If [code]false[/code], no chunks are loaded or unloaded. Chunks that are already loaded stay.
 		</member>
+		<member name="fast_view_refresh_degrees" type="float" setter="set_fast_view_refresh_degrees" getter="get_fast_view_refresh_degrees" default="0.0">
+			Opt-in threshold for quickly refreshing the chunk priority queue after a large camera turn. When [member view_direction] changes this many degrees from the direction used by the last queue rebuild, and [member view_priority] is positive, the engine may refresh scheduling earlier than [member update_interval], but no more frequently than every 50 milliseconds. A value of [code]0[/code] disables the fast path and preserves legacy update timing. The threshold is clamped from 0 through 180 degrees. It changes scheduling only: load/unload radii, CPU work budgets and scene ownership stay unchanged.
+		</member>
 		<member name="focus" type="NodePath" setter="set_focus" getter="get_focus" default="NodePath(&quot;&quot;)">
 			Node whose position decides which chunks are needed, usually the player or the camera. It can be a [Node3D] or a [Node2D]. If it is empty or invalid, [member focus_position] is used.
 		</member>
@@ -156,6 +159,12 @@
 		</member>
 		<member name="unload_radius" type="float" setter="set_unload_radius" getter="get_unload_radius" default="192.0">
 			Loaded cells farther than this distance from the focus are freed. Values below [member load_radius] are treated as equal to it.
+		</member>
+		<member name="view_direction" type="Vector3" setter="set_view_direction" getter="get_view_direction" default="Vector3(0, 0, 0)">
+			Optional normalized camera heading. When [member view_priority] is positive, both procedural chunk generation and completed threaded scene activation prefer nearby cells within the camera's view direction. A zero or non-finite direction disables view weighting, returning to movement-only priority. This is independent of residency and does not add extra cells to memory.
+		</member>
+		<member name="view_priority" type="float" setter="set_view_priority" getter="get_view_priority" default="0.0">
+			Weight from 0 to 1 for camera-visible chunk priority. Zero preserves movement-only streaming; positive values favor camera-facing cells without starving nearby cells behind the player. The weight is applied equally to queued generators and finished threaded scene loads.
 		</member>
 		<member name="velocity_hint" type="Vector3" setter="set_velocity_hint" getter="get_velocity_hint" default="Vector3(0, 0, 0)">
 			Estimated velocity of the player or camera, in metres per second, used only to prioritize chunks within [member load_radius]. The ignored grid axis is discarded. Non-finite hints are rejected, while zero velocity preserves nearest-first loading. Update this when the character moves; reset it after a teleport or network correction.
