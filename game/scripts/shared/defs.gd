@@ -485,6 +485,15 @@ static func _build_items() -> void:
 		"heal": 8.0, "cure": 40.0, "stop_bleeding": true, "stack": 5, "value": 20})
 	_add_recipe("field_antiseptic", "field_antiseptic", 1,
 		{"bandage": 1, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# Tier-two expedition triage turns real wound supplies into one mixed-injury
+	# treatment. Both self-use and party aid follow existing paid medical rules.
+	_add_item("expedition_trauma_kit", {"name": "Expedition Trauma Kit",
+		"kind": "medical", "tier": 2, "heal": 38.0, "cure": 15.0,
+		"stop_bleeding": true, "fracture_treatment": 45.0,
+		"stack": 5, "weight": 0.85, "value": 95})
+	_add_recipe("expedition_trauma_kit", "expedition_trauma_kit", 1,
+		{"bandage": 2, "field_splint": 1, "field_antiseptic": 1, "cloth_2": 2},
+		"workbench", 6.0)
 	# Dangerous swamps produce rare cultures for an infection medicine.
 	_add_item("spore_sampler", {"name": "Sealed Spore Sample Kit", "kind": "sampler",
 		"tier": 1, "stack": 5, "weight": 0.4, "value": 30})
