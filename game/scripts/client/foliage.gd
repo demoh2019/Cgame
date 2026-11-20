@@ -9,6 +9,23 @@ render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
 uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform vec4 albedo_color : source_color = vec4(1.0);
+// Preserve source glTF PBR data. Optional maps are sampled only if actually present.
+global uniform float aa_terrain_detail_radius;
+uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap, repeat_enable;
+uniform sampler2D roughness_tex : hint_default_white, filter_linear_mipmap, repeat_enable;
+uniform sampler2D metallic_tex : hint_default_white, filter_linear_mipmap, repeat_enable;
+uniform sampler2D orm_tex : hint_default_white, filter_linear_mipmap, repeat_enable;
+uniform bool use_normal_map = false;
+uniform bool use_roughness_map = false;
+uniform bool use_metallic_map = false;
+uniform bool use_orm_map = false;
+uniform bool use_vertex_colors = false;
+uniform vec4 roughness_mask = vec4(1.0, 0.0, 0.0, 0.0);
+uniform vec4 metallic_mask = vec4(1.0, 0.0, 0.0, 0.0);
+uniform float material_roughness = 1.0;
+uniform float material_metallic = 0.0;
+uniform float material_specular = 0.5;
+uniform float normal_strength = 1.0;
 uniform float sway = 0.12;
 uniform float height_ref = 4.0;
 // Small movements disappear below a pixel at this range; avoid distant trigonometry.
@@ -23,7 +40,7 @@ varying vec3 plant_hue;
 varying vec2 cloud_xz;
 varying float plant_roughness;
 void vertex() {
-	instance_tint = instance_tinted ? COLOR.rgb : vec3(1.0);
+	instance_tint = (instance_tinted || use_vertex_colors) ? COLOR.rgb : vec3(1.0);
 	// World-space plant roots give every MultiMesh instance stable colour and gust phase.
 	vec2 root = MODEL_MATRIX[3].xz;
 	// Two cheap arithmetic hashes replace a per-vertex sine while retaining stable per-tree colour.
@@ -69,8 +86,37 @@ void fragment() {
 	if (!FRONT_FACING) {
 		NORMAL = -NORMAL;
 	}
-	// Nonuniform micro-roughness breaks up overly identical highlights at no texture cost.
-	ROUGHNESS = mix(cut_out ? plant_roughness : 0.93, cut_out ? 0.58 : 0.68, wet_foliage);
+	// Explicit gradients keep mip selection stable in GPU branches.
+	vec2 uv_dx = dFdx(UV);
+	vec2 uv_dy = dFdy(UV);
+	float roughness = material_roughness;
+	float metallic = material_metallic;
+	if (use_orm_map) {
+		// Godot ORM convention: occlusion R, roughness G, metalness B.
+		vec3 orm = textureGrad(orm_tex, UV, uv_dx, uv_dy).rgb;
+		AO = orm.r;
+		roughness *= orm.g;
+		metallic *= orm.b;
+	} else {
+		if (use_roughness_map) {
+			roughness *= dot(textureGrad(roughness_tex, UV, uv_dx, uv_dy), roughness_mask);
+		}
+		if (use_metallic_map && material_metallic > 0.0) {
+			metallic *= dot(textureGrad(metallic_tex, UV, uv_dx, uv_dy), metallic_mask);
+		}
+	}
+	// High-frequency normal detail falls away smoothly with distance.
+	// Tangent-free procedural surfaces never enable the expensive normal sample.
+	float normal_fade = 1.0 - smoothstep(aa_terrain_detail_radius,
+		aa_terrain_detail_radius + 24.0, length(cloud_xz - CAMERA_POSITION_WORLD.xz));
+	if (use_normal_map && normal_fade > 0.01) {
+		NORMAL_MAP = textureGrad(normal_tex, UV, uv_dx, uv_dy).rgb;
+		NORMAL_MAP_DEPTH = normal_strength * normal_fade;
+	}
+	float foliage_variation = cut_out ? plant_roughness : 1.0;
+	ROUGHNESS = clamp(mix(roughness * foliage_variation, cut_out ? 0.58 : 0.68, wet_foliage), 0.04, 1.0);
+	METALLIC = clamp(metallic, 0.0, 1.0);
+	SPECULAR = clamp(material_specular, 0.0, 1.0);
 	if (cut_out) {
 		ALPHA = t.a;
 		ALPHA_SCISSOR_THRESHOLD = scissor;
@@ -80,6 +126,21 @@ void fragment() {
 
 static var _shader: Shader
 static var _cache: Dictionary = {}
+
+
+## StandardMaterial3D can pack roughness and metallic in arbitrary channels.
+static func _channel_mask(channel: int) -> Vector4:
+	match channel:
+		BaseMaterial3D.TEXTURE_CHANNEL_GREEN:
+			return Vector4(0.0, 1.0, 0.0, 0.0)
+		BaseMaterial3D.TEXTURE_CHANNEL_BLUE:
+			return Vector4(0.0, 0.0, 1.0, 0.0)
+		BaseMaterial3D.TEXTURE_CHANNEL_ALPHA:
+			return Vector4(0.0, 0.0, 0.0, 1.0)
+		BaseMaterial3D.TEXTURE_CHANNEL_GRAYSCALE:
+			return Vector4(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, 0.0)
+		_:
+			return Vector4(1.0, 0.0, 0.0, 0.0)
 
 
 ## A swaying copy of `source` (cached by key). `sway` is the tip displacement in meters. `tinted`: multiply by the
@@ -106,6 +167,33 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 			material.set_shader_parameter("instance_tinted", tinted)
 			material.set_shader_parameter("height_ref", height)
 			material.set_shader_parameter("albedo_color", standard.albedo_color)
+			material.set_shader_parameter("use_vertex_colors", standard.vertex_color_use_as_albedo)
+			material.set_shader_parameter("material_roughness", standard.roughness)
+			material.set_shader_parameter("material_metallic", standard.metallic)
+			material.set_shader_parameter("material_specular", standard.metallic_specular)
+			var orm: Texture2D = standard.orm_texture
+			if orm != null:
+				material.set_shader_parameter("use_orm_map", true)
+				material.set_shader_parameter("orm_tex", orm)
+			else:
+				var roughness_map: Texture2D = standard.roughness_texture
+				if roughness_map != null:
+					material.set_shader_parameter("use_roughness_map", true)
+					material.set_shader_parameter("roughness_tex", roughness_map)
+					material.set_shader_parameter("roughness_mask", _channel_mask(standard.roughness_texture_channel))
+				var metallic_map: Texture2D = standard.metallic_texture
+				if metallic_map != null and standard.metallic > 0.0:
+					material.set_shader_parameter("use_metallic_map", true)
+					material.set_shader_parameter("metallic_tex", metallic_map)
+					material.set_shader_parameter("metallic_mask", _channel_mask(standard.metallic_texture_channel))
+			# Normal textures require normals AND tangents (the original renderer rule).
+			var tangent_data = arrays[Mesh.ARRAY_TANGENT]
+			var normal_data = arrays[Mesh.ARRAY_NORMAL]
+			var normal_map: Texture2D = standard.normal_texture
+			if standard.normal_enabled and normal_map != null and tangent_data != null and tangent_data.size() > 0 and normal_data != null and normal_data.size() > 0:
+				material.set_shader_parameter("use_normal_map", true)
+				material.set_shader_parameter("normal_tex", normal_map)
+				material.set_shader_parameter("normal_strength", standard.normal_scale)
 			var texture: Texture2D = standard.albedo_texture
 			# The kit's twisted-tree leaves (also on Bush_Common) are autumn red; this world is green, so the shader turns
 			# them green (red and green swapped keeps the shape and shading of the leaves).
