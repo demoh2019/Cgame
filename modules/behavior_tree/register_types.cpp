@@ -30,9 +30,9 @@
 
 #include "register_types.h"
 
-#include "behavior_tree.h"
-#include "ai_visual_sensor_2d.h"
 #include "ai_hearing_sensor_2d.h"
+#include "ai_visual_sensor_2d.h"
+#include "behavior_tree.h"
 
 #include "core/object/class_db.h"
 
