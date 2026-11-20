@@ -23,6 +23,7 @@
 
 #include "core/object/ref_counted.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/variant.h"
 
 class GameplayAbilitySystem : public RefCounted {
     GDCLASS(GameplayAbilitySystem, RefCounted);

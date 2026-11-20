@@ -73,8 +73,12 @@ TEST_CASE("[GameplayAbilitySystem] Hierarchical status tags gate abilities") {
     Ref<GameplayAbilitySystem> system;
     system.instantiate();
     Dictionary spell = ability(5.0, 0.0);
-    spell["required_tags"] = PackedStringArray::make("class.mage");
-    spell["blocked_tags"] = PackedStringArray::make("status.stunned");
+    PackedStringArray required_tags;
+    required_tags.push_back("class.mage");
+    spell["required_tags"] = required_tags;
+    PackedStringArray blocked_tags;
+    blocked_tags.push_back("status.stunned");
+    spell["blocked_tags"] = blocked_tags;
     REQUIRE(system->register_ability("cast", spell));
     CHECK(system->activate("cast") == GameplayAbilitySystem::MISSING_REQUIRED_TAG);
     CHECK(system->add_tag("class.mage.fire"));
