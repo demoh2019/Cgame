@@ -531,16 +531,18 @@ func _register_anim_lod(model: Node) -> void:
 	var animator: AnimationPlayer = model.get("animator")
 	if animator == null:
 		return
+	# One owner per animator: without the native controller, CharacterModel's own
+	# crowd tiers (set_anim_lod) already throttle updates, so a second script LOD
+	# would advance the same AnimationPlayer twice.
+	if not EngineFeatures.has("AnimationLODController"):
+		return
+	model.set("external_anim_lod", true)
 	if _anim_lod == null:
 		var lod_scale := AnimLod.distance_scale(GraphicsQuality.level())
-		if EngineFeatures.has("AnimationLODController"):
-			_anim_lod = ClassDB.instantiate("AnimationLODController")
-			_anim_lod.near_distance = AnimLod.NEAR * lod_scale
-			_anim_lod.mid_distance = AnimLod.MID * lod_scale
-			_anim_lod.far_distance = AnimLod.FAR * lod_scale
-		else:
-			_anim_lod = AnimLod.new()
-			_anim_lod.scale_factor = lod_scale
+		_anim_lod = ClassDB.instantiate("AnimationLODController")
+		_anim_lod.near_distance = AnimLod.NEAR * lod_scale
+		_anim_lod.mid_distance = AnimLod.MID * lod_scale
+		_anim_lod.far_distance = AnimLod.FAR * lod_scale
 		_anim_lod.name = "AnimLod"
 		add_child(_anim_lod)
 	if _anim_lod is AnimLod:

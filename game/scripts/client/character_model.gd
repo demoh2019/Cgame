@@ -13,6 +13,7 @@ static var _tinted: Dictionary = {}
 
 var animator: AnimationPlayer
 var pack_mode := false
+var external_anim_lod := false # True when the native AnimationLODController advances `animator`.
 var _materials: Array[StandardMaterial3D] = []
 var _wet_surfaces: Array[Dictionary] = [] # Live outfit/gear surfaces and their original materials.
 var _wet_surface_keys: Dictionary = {}
@@ -450,10 +451,11 @@ func set_anim_lod(tier: int) -> void:
 		return
 	_lod_tier = tier
 	var cheap := tier >= 2
-	var mode := AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL if cheap else AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_IDLE
-	animator.callback_mode_process = mode
-	if _layer != null:
-		_layer.callback_mode_process = mode
+	if not external_anim_lod: # The native AnimationLODController owns the update rate when present.
+		var mode := AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL if cheap else AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_IDLE
+		animator.callback_mode_process = mode
+		if _layer != null:
+			_layer.callback_mode_process = mode
 	_lod_accum = 0.0
 	if _procedural != null and not _dead:
 		_procedural.set("foot_ik", tier == 0)
@@ -483,7 +485,7 @@ func _tick_procedural(delta: float) -> void:
 		if _layer_left <= 0.0 and _oneshot == "" and _swing_trail != null:
 			_swing_trail.set("emitting", false)
 	var interval := Anim.lod_interval(_lod_tier)
-	if interval > 0.0:
+	if interval > 0.0 and not external_anim_lod:
 		_lod_accum += delta
 		if _lod_accum >= interval:
 			animator.advance(_lod_accum)
