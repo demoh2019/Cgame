@@ -187,6 +187,27 @@ func _run() -> void:
     assert(not bool(world.call("release_cell_lease", cinematic_lease)))
     assert(int(world.call("get_cell_lease_count_total")) == 0)
 
+    # Native route prefetch, independent of observation and ordinary leases.
+    var target_cell := Vector2i(1, 0)
+    world.call("set_cell_scene", target_cell, SCENE_PATH)
+    var corridor: Array = world.call("get_cell_route", CELL, target_cell)
+    assert(corridor.size() == 2)
+    assert(corridor[0] == CELL and corridor[1] == target_cell)
+    var route_tokens: Array = world.call("acquire_cell_route", CELL, target_cell)
+    assert(route_tokens.size() == 2)
+    assert(await _wait_for_cell(world, true, target_cell))
+
+    # Route acquisition must be atomic if an event layer blocks its endpoint.
+    world.call("set_cell_layer", target_cell, "locked_path")
+    world.call("set_layer_enabled", "locked_path", false)
+    assert(world.call("acquire_cell_route", CELL, target_cell).is_empty())
+    assert(int(world.call("get_cell_lease_count_total")) == 2)
+    world.call("set_layer_enabled", "locked_path", true)
+    assert(await _wait_for_cell(world, true, target_cell))
+    assert(int(world.call("release_cell_route", route_tokens)) == 2)
+    assert(int(world.call("release_cell_route", route_tokens)) == 0)
+    assert(int(world.call("get_cell_lease_count_total")) == 0)
+
     world.set("streaming_enabled", false)
     assert(activated_cells.size() >= 2)
     assert(deactivating_cells.size() >= 2)
