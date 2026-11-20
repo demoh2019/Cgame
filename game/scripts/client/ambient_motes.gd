@@ -128,7 +128,10 @@ func update_view(center: Vector3, biome: String, daylight: float,
 		_center_cell = cell
 	# Interleaved instance order keeps every grid tile represented even
 	# when a lower quality preset reduces the visible instance count.
-	_batch.visible_instance_count = int(state["count"])
+	# The renderer's -1 sentinel shows the entire buffer on Ultra; the
+	# engine now reuploads formerly hidden dirty regions on this transition.
+	var draw_count: int = int(state["count"])
+	_batch.visible_instance_count = -1 if draw_count == MAX_INSTANCES else draw_count
 	_material.set_shader_parameter("firefly_strength", float(state["fireflies"]))
 	_material.set_shader_parameter("pollen_strength", float(state["pollen"]))
 	_material.set_shader_parameter("fade_distance", float(state["radius"]))
