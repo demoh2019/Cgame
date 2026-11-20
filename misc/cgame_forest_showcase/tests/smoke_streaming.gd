@@ -109,6 +109,14 @@ func _run() -> void:
     if origin_vertices.size() != 1089:
         _fail("terrain patch should contain 33 x 33 vertices")
         return
+    var collision_heights: PackedFloat32Array = height_shape.map_data
+    if collision_heights.size() != origin_vertices.size():
+        _fail("heightfield collision and visual patch have different sample counts")
+        return
+    for sample in [0, 16, 32, 32 * 33, 32 * 33 + 16, 1088, 16 * 33 + 16]:
+        if absf(collision_heights[sample] - origin_vertices[sample].y) > 0.0001:
+            _fail("heightfield collision and visual mesh disagree at vertex %d" % sample)
+            return
     var previous_count: int = 2048
     for step in [2, 4, 8]:
         var lod: PackedInt32Array = patch.call("_build_lod_indices", int(step))
@@ -119,6 +127,14 @@ func _run() -> void:
             _fail("terrain LOD does not reduce triangle count at step %d" % step)
             return
         previous_count = int(lod.size() / 3)
+        for triangle in range(0, lod.size(), 3):
+            var a: Vector3 = origin_vertices[lod[triangle]]
+            var b: Vector3 = origin_vertices[lod[triangle + 1]]
+            var c: Vector3 = origin_vertices[lod[triangle + 2]]
+            var y_normal: float = (b - a).cross(c - a).y
+            if y_normal <= 0.0:
+                _fail("terrain LOD generated a degenerate or inverted triangle")
+                return
         var boundary_indices: Dictionary = {}
         for index in lod:
             if index < 0 or index >= origin_vertices.size():
