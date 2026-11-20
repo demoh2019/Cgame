@@ -1581,6 +1581,12 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 		set_process(true)
 
 
+## Called once by native WorldStreamer upon chunk adoption. Loaded world
+## objects are authoritative already; cosmetics can still be in flight.
+func has_pending_visual_detail() -> bool:
+	return _decor_next < _decor_tasks.size()
+
+
 ## Builds one visual category each time the frame scheduler grants a turn.
 ## Interactive loot, vegetation gathering, buildings, and terrain are instant.
 func _build_next_decor_entry() -> void:
@@ -1593,6 +1599,9 @@ func _build_next_decor_entry() -> void:
 	else:
 		_build_extra_decor_entry(task["entry"])
 	if _decor_next >= _decor_tasks.size():
+		var streamer := get_parent() as WorldStreamer
+		if streamer != null:
+			streamer.mark_visual_details_ready(Vector3i(cell.x, 0, cell.y))
 		_decor_tasks.clear()
 		_decor_rng = null
 		_decor_anchors.clear()
