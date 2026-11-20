@@ -68,6 +68,7 @@ const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
+const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const InfectedSnare = preload("res://scripts/shared/infected_snare.gd")
@@ -200,6 +201,7 @@ var raid_pending_slam: Dictionary = {} # World position & deadline are server-ow
 var raid_wave: int = 0 # Number of completed reinforcement phases.
 var raid_minions: Array[int] = [] # Raid-only infected are cleared with boss.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
+var shelters: Dictionary = {} # Public, temporary weather tarps; never checkpointed.
 var decoys: Dictionary = {} # Temporary physical sound lures; server-owned, never persisted.
 var infected_snares: Dictionary = {} # Temporary PvE tripwires, never checkpointed.
 var acid_pools: Dictionary = {} # Temporary nonpersistent corrosive terrain.
@@ -2041,6 +2043,67 @@ func cmd_throw_decoy(peer_id: int, direction_x: float, direction_z: float) -> Di
 	return {"ok": true, "id": id, "seconds": NoiseDecoy.DURATION}
 
 
+## Shared expedition tarp: weather reduction, not PvP protection.
+func cmd_pitch_shelter(peer_id: int, x: float, z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if shelters.size() >= PortableShelter.MAX_GLOBAL:
+		return {"ok": false, "reason": "world_limit"}
+	var owned := 0
+	for tarp in shelters.values():
+		if Structures.can_manage(tarp, peer_id, player.user_id):
+			owned += 1
+	if owned >= PortableShelter.MAX_PER_OWNER:
+		return {"ok": false, "reason": "owner_limit"}
+	var point := Vector2(x, z)
+	var origin := Vector2(player.position.x, player.position.z)
+	var reason: String = PortableShelter.valid_site(world, point, origin,
+		shelters, campfires)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	for other in players.values():
+		if _alive(other) and point.distance_to(
+				Vector2(other.position.x, other.position.z)) < (
+				PortableShelter.CANOPY_RADIUS + Defs.PLAYER_RADIUS + 0.15):
+			return {"ok": false, "reason": "blocked"}
+	for infected in zombies.values():
+		if infected.is_alive() and point.distance_to(
+				Vector2(infected.position.x, infected.position.z)) < (
+				PortableShelter.CANOPY_RADIUS + 0.7):
+			return {"ok": false, "reason": "blocked"}
+	if not player.inventory.has_all(PortableShelter.COST):
+		return {"ok": false, "reason": "missing_materials"}
+	for item_id in PortableShelter.COST:
+		player.inventory.remove(str(item_id), int(PortableShelter.COST[item_id]))
+	var id := new_id()
+	shelters[id] = {"id": id, "x": point.x, "y": world.height_at(x, z),
+		"z": point.y, "owner": peer_id, "owner_account": player.user_id,
+		"expires": time + PortableShelter.DURATION}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "id": id, "seconds": PortableShelter.DURATION}
+
+
+func cmd_pack_shelter(peer_id: int, shelter_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var tarp: Dictionary = shelters.get(shelter_id, {})
+	if tarp.is_empty() or float(tarp["expires"]) <= time:
+		return {"ok": false, "reason": "no_shelter"}
+	if not Structures.can_manage(tarp, peer_id, player.user_id):
+		return {"ok": false, "reason": "not_owner"}
+	if Vector2(player.position.x, player.position.z).distance_squared_to(
+			Vector2(float(tarp["x"]), float(tarp["z"]))) > (
+			PortableShelter.PACK_RANGE * PortableShelter.PACK_RANGE):
+		return {"ok": false, "reason": "out_of_range"}
+	shelters.erase(shelter_id)
+	return {"ok": true, "id": shelter_id}
+
+
 func cmd_light_campfire(peer_id: int, x: float, z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -3405,6 +3468,8 @@ func _tick_players(delta: float) -> void:
 		var weather_severity: float = Weather.effective_severity(conditions, worn_armor)
 		if FieldCampfire.has_warmth(campfires, player.position, time):
 			weather_severity = 0.0
+		weather_severity = PortableShelter.exposure_severity(weather_severity,
+			PortableShelter.covers(shelters, player.position, time))
 		damage += player.survival.weather_tick(delta, weather_severity)
 		# The filter only protects for the portion of a tick it actually covers.
 		# An oversized server tick cannot extend the buff past its remaining time.
@@ -4186,6 +4251,9 @@ func _tick_world(delta: float) -> void:
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):
 			decoys.erase(id)
+	for id in shelters.keys():
+		if time >= float(shelters[id]["expires"]):
+			shelters.erase(id)
 	for id in campfires.keys():
 		var fire: Dictionary = campfires[id]
 		if time >= float(fire["expires"]):
@@ -4280,6 +4348,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			nearby_barricades.append(Structures.public_state(wall))
 	var nearby_campfires: Array = FieldCampfire.visible(campfires,
 			player.position, time, Defs.INTEREST_RADIUS)
+	var nearby_shelters: Array = PortableShelter.visible(shelters,
+			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_snares: Array = InfectedSnare.visible(
 		infected_snares, player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_decoys: Array = []
@@ -4346,6 +4416,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"exposure": player.survival.exposure,
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
+			"tent_sheltered": PortableShelter.covers(shelters, player.position, time),
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
 			"weather_sight": Weather.sight_multiplier(
 				Weather.conditions(world, player.position.x, player.position.z, time)),
@@ -4396,6 +4467,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
 		"spit_zones": spit_zones, "acid_pools": nearby_acid_pools,
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
+		"shelters": nearby_shelters,
 		"decoys": nearby_decoys, "infected_snares": nearby_snares,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}
