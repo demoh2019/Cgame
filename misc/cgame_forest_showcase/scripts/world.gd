@@ -10,6 +10,9 @@ const WORLD_EXTENT: float = 512.0
 const WORLD_CELLS_PER_SIDE: int = 32
 const CHUNK_EDGE: float = 32.0
 const CRYSTAL_TOTAL: int = 8
+const OUTPOST_CELL: Vector2i = Vector2i(6, 6)
+const OUTPOST_POSITION: Vector2 = Vector2(208.0, 208.0)
+const HOME_POSITION: Vector2 = Vector2(0.0, 9.0)
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var camera: Camera3D
@@ -36,6 +39,7 @@ func _ready() -> void:
     _create_sun()
     _create_world_boundaries()
     _create_crystals()
+    _create_outpost_beacon()
     _create_camera()
     _create_hud()
     _create_streaming_world()
@@ -176,6 +180,50 @@ func _create_distant_terrain() -> void:
     add_child(distant_terrain)
 
 
+func _toggle_outpost_pin() -> void:
+    if world_partition == null:
+        return
+    if world_partition.is_cell_pinned(OUTPOST_CELL):
+        world_partition.unpin_cell(OUTPOST_CELL)
+    else:
+        if not world_partition.pin_cell(OUTPOST_CELL):
+            push_warning("Outpost cell could not be pinned for streaming.")
+            return
+    world_partition.update_streaming()
+    _refresh_hud()
+
+
+func _fast_travel() -> void:
+    if player == null or world_partition == null:
+        return
+
+    # F7 alternates between the distant 208m outpost and the home clearing.
+    # The first press can request a pinned target; a later press travels only
+    # once its FULL scene is instantiated, never into an HLOD-only proxy.
+    var position := Vector2(player.global_position.x, player.global_position.z)
+    var going_home: bool = position.distance_to(OUTPOST_POSITION) < 48.0
+    var target_cell: Vector2i = Vector2i.ZERO if going_home else OUTPOST_CELL
+    var target: Vector2 = HOME_POSITION if going_home else OUTPOST_POSITION
+
+    if not world_partition.are_cells_loaded(target_cell, 0):
+        if not world_partition.pin_cell(target_cell):
+            push_warning("Fast-travel destination is not available to stream.")
+            return
+        world_partition.update_streaming()
+        _refresh_hud()
+        return
+
+    # Teleport only after a prior game update has created the terrain nodes;
+    # a compiled runtime must still validate the physics server handoff.
+    player.call("teleport_to_ground",
+        target.x, target.y, height_at(target.x, target.y))
+    world_partition.unpin_cell(target_cell)
+    world_partition.prefetch_direction = Vector2i.ZERO
+    world_partition.update_streaming()
+    _refresh_player_stream_safety()
+    _refresh_hud()
+
+
 func _on_observer_cell_changed(cell: Vector2i) -> void:
     current_region = cell
     _refresh_player_stream_safety()
@@ -239,6 +287,30 @@ func _create_crystals() -> void:
         crystals.append(holder)
 
 
+func _create_outpost_beacon() -> void:
+    # A simple in-world destination for testing resident streaming beyond the
+    # local player radius. The marker itself is persistent and has no physics.
+    var marker := MeshInstance3D.new()
+    marker.name = "FastTravelOutpost"
+    var monument := CylinderMesh.new()
+    monument.top_radius = 0.30
+    monument.bottom_radius = 0.62
+    monument.height = 5.0
+    monument.radial_segments = 8
+    var material := StandardMaterial3D.new()
+    material.albedo_color = Color(0.10, 0.44, 0.64)
+    material.roughness = 0.28
+    material.emission_enabled = true
+    material.emission = Color(0.10, 0.58, 0.85)
+    material.emission_energy_multiplier = 2.2
+    monument.material = material
+    marker.mesh = monument
+    marker.position = Vector3(
+        OUTPOST_POSITION.x, height_at(OUTPOST_POSITION.x, OUTPOST_POSITION.y) + 2.5,
+        OUTPOST_POSITION.y)
+    add_child(marker)
+
+
 func _create_camera() -> void:
     # Physics body owns yaw and collision, camera owns only pitch.
     # This follows the standard first-person controller hierarchy.
@@ -272,10 +344,10 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 306)
+    hint.position = Vector2(22, 333)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: сброс кэшей  •  F4: повтор загрузки  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
+    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: сброс кэшей  •  F4: повтор загрузки  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор\nF6: закрепить маяк  •  F7: подготовить и переместиться к маяку/домой"
     canvas.add_child(hint)
 
 
@@ -309,6 +381,8 @@ func _refresh_hud() -> void:
     var pending: int = world_partition.get_pending_cell_count() if world_partition != null else 0
     var inflight: int = world_partition.get_inflight_request_count() if world_partition != null else 0
     var failed: int = world_partition.get_failed_cell_count() if world_partition != null else 0
+    var pinned: int = world_partition.get_pinned_cell_count() if world_partition != null else 0
+    var outpost_ready: bool = world_partition.is_cell_loaded(OUTPOST_CELL) if world_partition != null else false
     var stream_ms: float = world_partition.get_last_streaming_update_ms() if world_partition != null else 0.0
     var created_this_frame: int = world_partition.get_last_instantiation_attempt_count() if world_partition != null else 0
     var cache: Dictionary = TileCache.get_stats()
@@ -325,7 +399,8 @@ func _refresh_hud() -> void:
         + "Дальний HLOD: %d плит / %d подготовлено, %d крон\n" % [far["visible"], far["allocated"], far["visible_canopies"]] \
         + "Стриминг CPU: %.2f ms   попыток создания: %d\n" % [stream_ms, created_this_frame] \
         + "Кэш HLOD: %d/%d   попадания: %d   промахи: %d\n" % [far_cache["entries"], far_cache["capacity"], far_cache["hits"], far_cache["misses"]] \
-        + "Генерация HLOD CPU: %.2f ms   мягкий бюджет: 2.0 ms" % hlod_cpu_ms
+        + "Генерация HLOD CPU: %.2f ms   мягкий бюджет: 2.0 ms\n" % hlod_cpu_ms \
+        + "Закреплено ячеек: %d/16   удалённый маяк: %s" % [pinned, "ГОТОВ" if outpost_ready else "ЗАГРУЗКА"]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
@@ -376,6 +451,10 @@ func _unhandled_input(event: InputEvent) -> void:
                     _refresh_hud()
             KEY_F5:
                 _save_game()
+            KEY_F6:
+                _toggle_outpost_pin()
+            KEY_F7:
+                _fast_travel()
             KEY_F9:
                 _load_game()
                 _apply_quality(high_quality)
