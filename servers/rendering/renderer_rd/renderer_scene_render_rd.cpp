@@ -84,8 +84,15 @@ void RendererSceneRenderRD::environment_glow_set_use_bicubic_upscale(bool p_enab
 }
 
 void RendererSceneRenderRD::environment_set_volumetric_fog_volume_size(int p_size, int p_depth) {
-	volumetric_fog_size = p_size;
-	volumetric_fog_depth = p_depth;
+	// Runtime-adjustable fog quality must remain within a safe GPU memory budget.
+	// The clustered renderer recreates buffers only when dimensions change.
+	const uint32_t size = uint32_t(CLAMP(p_size, 32, 256));
+	const uint32_t depth = uint32_t(CLAMP(p_depth, 32, 256));
+	if (volumetric_fog_size == size && volumetric_fog_depth == depth) {
+		return;
+	}
+	volumetric_fog_size = size;
+	volumetric_fog_depth = depth;
 }
 
 void RendererSceneRenderRD::environment_set_volumetric_fog_filter_active(bool p_enable) {
