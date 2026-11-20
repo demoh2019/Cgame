@@ -73,8 +73,17 @@ func run(t) -> void:
 	t.current = "stable first buffer, fresh terrain LOS and voice priority"
 	t.check(source.contains("AudioSpatial.source_cutoff(distance, false, _humidity)"),
 		"initial air absorption is unblocked so occlusion is applied exactly once")
-	t.check(source.contains('"original_cutoff": player.attenuation_filter_cutoff_hz'),
+	t.check(source.contains('"original_cutoff": unblocked_cutoff_hz'),
 		"stock fallback stores the same unblocked source cutoff")
+	t.check(source.contains("var initial_obstruction: float = 1.0 if occluded else 0.0"),
+		"terrain-muffled sounds are blocked from their first playback buffer")
+	t.check(source.contains('player.call("set_obstruction_amount", initial_obstruction)'),
+		"native player gets terrain obstruction before play()")
+	t.check(source.contains('AudioSpatial.obstruction_cutoff(\n') or
+		source.contains("AudioSpatial.obstruction_cutoff(\r\n"),
+		"stock Godot also starts with a prefiltered sound")
+	t.check(source.contains('"original_db": unblocked_volume_db'),
+		"fallback restores clear source volume when the listener leaves cover")
 	t.check(source.contains("record[\"terrain_blocked\"] = terrain_blocked"),
 		"moving listener terrain occlusion recomputes within ray budget")
 	t.check(source.contains("listener_eye, source_eye, _ground"),
