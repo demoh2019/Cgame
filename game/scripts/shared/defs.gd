@@ -13,6 +13,7 @@ const HUB_SAFE_RADIUS := 45.0 # Nobody can be hurt inside it.
 const ZONE_RADII := [260.0, 620.0, 1050.0] # Green ends at 260 m, yellow at 620 m, red at 1050 m, then black.
 const ZONE_NAMES := ["green", "yellow", "red", "black"]
 const MAX_TIER := 4
+const CAMP_FISH_STEW := "camp_fish_stew" # Clean fish-and-water camp meal.
 
 # --- Player tuning -------------------------------------------------------------------------------
 const WALK_SPEED := 4.2
@@ -407,6 +408,13 @@ static func _build_items() -> void:
 	_add_item("berries", {"name": "Berries", "kind": "food", "food": 12.0, "stack": 20, "value": 2})
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
+	# A hot expedition meal trades a clean bottle and fish for both nourishment
+	# and hydration in one backpack item. No raw or infected water is accepted.
+	_add_item(CAMP_FISH_STEW, {"name": "Camp Fish Stew", "kind": "food",
+		"tier": 1, "food": 40.0, "drink": 38.0, "stack": 10,
+		"weight": 0.85, "value": 25})
+	_add_recipe(CAMP_FISH_STEW, CAMP_FISH_STEW, 1,
+		{"raw_fish": 1, "water_bottle": 1, "wood_1": 1}, "campfire", 4.0)
 
 	# Unsafe lake water is a physical item, never a drink. Craft a pouch in the
 	# field, fill it at a real shore, then boil it at a live campfire or workbench.
