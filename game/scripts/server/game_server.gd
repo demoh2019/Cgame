@@ -26,6 +26,8 @@ const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
+const HealingAggro = preload("res://scripts/shared/healing_aggro.gd")
+const Threat = preload("res://scripts/shared/threat.gd")
 const FinishingStrike = preload("res://scripts/shared/finishing_strike.gd")
 const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
@@ -1449,6 +1451,38 @@ func cmd_party_ready_answer(peer_id: int, ready: bool) -> Dictionary:
 	return parties.answer_ready_check(peer_id, ready, time)
 
 
+## Only actual, positive HP restored to a nearby party member already engaged
+## with an infected can create healer threat. This is never an RPC command.
+## One multi-target cast adds at most one bounded entry per living infected.
+func _record_party_healing_threat(medic: Player, patients: Array) -> void:
+	if medic == null or not _alive(medic) or not medic.position.is_finite() \
+			or _is_safe(medic.position) or patients.is_empty():
+		return
+	var group_id: int = parties.group_of(medic.id)
+	if group_id == 0:
+		return
+	var zone: int = world.zone_at(medic.position.x, medic.position.z)
+	for infected in zombies.values():
+		if not infected.is_alive() or not infected.position.is_finite() or \
+				world.zone_at(infected.position.x, infected.position.z) != zone:
+			continue
+		var total_healed: float = 0.0
+		for entry in patients:
+			var recipient: Player = entry.get("recipient", null)
+			var restored: float = float(entry.get("healed", 0.0))
+			if recipient == null or not _alive(recipient) or \
+				parties.group_of(recipient.id) != group_id or \
+				_is_safe(recipient.position) or \
+				world.zone_at(recipient.position.x, recipient.position.z) != zone:
+				continue
+			if HealingAggro.can_credit(infected, medic.position,
+					recipient.position, recipient.id):
+				total_healed += restored
+		var generated: float = HealingAggro.threat_for(total_healed)
+		if generated > 0.0:
+			Threat.record(infected.threat, medic.id, generated)
+
+
 ## Item-powered cooperative healing, resolved only by the authoritative server.
 func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var source: Player = players.get(peer_id)
@@ -1493,6 +1527,7 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	source.dirty_character = true
 	recipient.dirty_character = true
 	var healed: float = recipient.survival.health - hp_before
+	_record_party_healing_threat(source, [{"recipient": recipient, "healed": healed}])
 	var cured: float = infection_before - recipient.survival.infection
 	var staunched: float = bleeding_before - recipient.survival.bleeding
 	var splinted: float = fracture_before - recipient.survival.fracture
@@ -1543,6 +1578,7 @@ func cmd_party_triage(peer_id: int) -> Dictionary:
 	var treated: int = mini(candidates.size(), PartyTriage.MAX_RECIPIENTS)
 	var healed: float = 0.0
 	var bleeding_stopped: float = 0.0
+	var healing_events: Array = []
 	for i in range(treated):
 		var recipient: Player = candidates[i]["player"]
 		var old_health: float = recipient.survival.health
@@ -1553,10 +1589,12 @@ func cmd_party_triage(peer_id: int) -> Dictionary:
 		var hp_gain: float = recipient.survival.health - old_health
 		var wound_care: float = old_bleeding - recipient.survival.bleeding
 		healed += hp_gain
+		healing_events.append({"recipient": recipient, "healed": hp_gain})
 		bleeding_stopped += wound_care
 		recipient.dirty_character = true
 		events.append({"type": "party_triage", "peer": recipient.id, "by": peer_id,
 			"heal": hp_gain, "bleeding_stopped": wound_care})
+	_record_party_healing_threat(medic, healing_events)
 	medic.party_aid_timer = PartyTriage.COOLDOWN
 	medic.action = {}
 	medic.dirty_inventory = true
@@ -3750,12 +3788,16 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	if skill.has("party_heal"):
 		var treated: int = mini(heal_candidates.size(), RestorationStaff.MAX_TARGETS)
 		var total_healed: float = 0.0
+		var healing_events: Array = []
 		for index in range(treated):
 			var recipient: Player = heal_candidates[index]["player"]
 			var before_health: float = recipient.survival.health
 			recipient.survival.heal(float(skill["party_heal"]))
-			total_healed += recipient.survival.health - before_health
+			var gained: float = recipient.survival.health - before_health
+			total_healed += gained
+			healing_events.append({"recipient": recipient, "healed": gained})
 			recipient.dirty_character = true
+		_record_party_healing_threat(player, healing_events)
 		player.dirty_character = true
 		# Public effect contains no recipient IDs or medical details.
 		events.append({"type": "restoration_pulse", "peer": peer_id,

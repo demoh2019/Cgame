@@ -834,7 +834,7 @@ func _build() -> void:
 	aid_row.add_child(aid_items)
 	var aid_button := Button.new()
 	aid_button.text = "Aid"
-	aid_button.tooltip_text = "Treat the selected nearby party member with one medical item; 5s cooldown."
+	aid_button.tooltip_text = "Use one medical item to treat a nearby party member; 5s cooldown. Restored HP generates infected threat if your ally is in combat."
 	aid_button.pressed.connect(func() -> void:
 		var target: int = _party_target.get_selected_id()
 		if target < 0 or aid_items.selected < 0:
@@ -844,7 +844,7 @@ func _build() -> void:
 	aid_row.add_child(aid_button)
 	var triage_button := Button.new()
 	triage_button.text = "Triage nearby allies"
-	triage_button.tooltip_text = "Spend 1 crafted Expedition Triage Pack to treat up to 3 injured nearby party allies (5.5 m, 18s shared medical cooldown)."
+	triage_button.tooltip_text = "Spend one crafted pack to treat up to 3 nearby allies (5.5m, 18s cooldown). Infected fighting them may turn toward the medic."
 	triage_button.pressed.connect(func() -> void: client.party_triage())
 	inventory_box.add_child(triage_button)
 	# A cook supplies one real dish per present, eligible group member.
