@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  ai_visual_sensor_2d                                                  */
+/*  ai_visual_sensor_2d.h                                                 */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -36,39 +36,39 @@
 // Single-target deterministic visual perception. The caller supplies LOS from
 // its own physics world; the sensor handles cone/range checks and target memory.
 class AIVisualSensor2D : public RefCounted {
-    GDCLASS(AIVisualSensor2D, RefCounted);
+	GDCLASS(AIVisualSensor2D, RefCounted);
 
-    real_t sight_radius = 240.0;
-    real_t lose_sight_radius = 300.0;
-    real_t field_of_view_degrees = 180.0;
-    real_t memory_duration = 1.5;
+	real_t sight_radius = 240.0;
+	real_t lose_sight_radius = 300.0;
+	real_t field_of_view_degrees = 180.0;
+	real_t memory_duration = 1.5;
 
-    bool target_visible = false;
-    real_t memory_remaining = 0.0;
-    Vector2 last_known_position;
+	bool target_visible = false;
+	real_t memory_remaining = 0.0;
+	Vector2 last_known_position;
 
 protected:
-    static void _bind_methods();
+	static void _bind_methods();
 
 public:
-    void set_sight_radius(real_t p_radius);
-    real_t get_sight_radius() const;
+	void set_sight_radius(real_t p_radius);
+	real_t get_sight_radius() const;
 
-    void set_lose_sight_radius(real_t p_radius);
-    real_t get_lose_sight_radius() const;
+	void set_lose_sight_radius(real_t p_radius);
+	real_t get_lose_sight_radius() const;
 
-    void set_field_of_view_degrees(real_t p_degrees);
-    real_t get_field_of_view_degrees() const;
+	void set_field_of_view_degrees(real_t p_degrees);
+	real_t get_field_of_view_degrees() const;
 
-    void set_memory_duration(real_t p_seconds);
-    real_t get_memory_duration() const;
+	void set_memory_duration(real_t p_seconds);
+	real_t get_memory_duration() const;
 
-    // Update once per AI/physics tick. An unobstructed ray from observer to
-    // target should be passed as p_has_line_of_sight.
-    void observe(const Vector2 &p_observer, const Vector2 &p_forward, const Vector2 &p_target, bool p_has_line_of_sight, real_t p_delta);
-    bool is_target_visible() const;
-    bool has_target_memory() const;
-    Vector2 get_last_known_position() const;
-    real_t get_memory_remaining() const;
-    void reset();
+	// Update once per AI/physics tick. An unobstructed ray from observer to
+	// target should be passed as p_has_line_of_sight.
+	void observe(const Vector2 &p_observer, const Vector2 &p_forward, const Vector2 &p_target, bool p_has_line_of_sight, real_t p_delta);
+	bool is_target_visible() const;
+	bool has_target_memory() const;
+	Vector2 get_last_known_position() const;
+	real_t get_memory_remaining() const;
+	void reset();
 };
