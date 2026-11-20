@@ -133,7 +133,7 @@ func run(t) -> void:
 			"removing camera falls back to original motion lookahead")
 	viewing_camera.free()
 
-		t.current = "fast camera-turn streaming respects old scene defaults"
+	t.current = "fast camera-turn streaming respects old scene defaults"
 	var old_world := WorldStreamer.new()
 	t.near(old_world.fast_view_refresh_degrees, 0.0, 0.0001,
 			"custom engine scenes keep legacy update cadence by default")
