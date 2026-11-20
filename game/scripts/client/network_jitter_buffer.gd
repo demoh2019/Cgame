@@ -31,6 +31,11 @@ func observe(server_time: float, local_arrival_time: float) -> float:
 	if not is_finite(server_time) or not is_finite(local_arrival_time) \
 			or server_time < 0.0 or local_arrival_time < 0.0:
 		return delay
+	# A frame loop may see the same snapshot thousands of times while
+	# disconnected; this is NOT an arrival event even after several seconds.
+	if _last_server_time >= 0.0 and server_time <= _last_server_time \
+			and server_time >= _last_server_time - 0.5:
+		return delay
 	if _last_server_time < 0.0 or server_time < _last_server_time - 0.5 \
 			or local_arrival_time < _last_arrival_time \
 			or local_arrival_time - _last_arrival_time > 2.0:
