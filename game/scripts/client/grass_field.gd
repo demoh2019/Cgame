@@ -16,6 +16,15 @@ const FADE_END := 60.0
 const LOD_BLADES := [18, 9, 4]
 const LOD_SWITCH_DISTANCE := [24.0, 42.0]
 const LOD_HYSTERESIS := 3.0
+# Distance-dependent density is independent of mesh LOD to avoid abrupt gaps.
+# A randomized buffer order ensures visible_instance_count removes plants
+# across the whole tile instead of erasing its last rows.
+const DENSITY_FIRST_START := 18.0
+const DENSITY_FIRST_END := 34.0
+const DENSITY_SECOND_START := 35.0
+const DENSITY_SECOND_END := 55.0
+const DENSITY_FIRST_DROP := 0.28
+const DENSITY_SECOND_DROP := 0.32
 
 const SHADER_CODE := """
 shader_type spatial;
@@ -191,6 +200,42 @@ static func lod_for_distance(distance: float, previous: int = 0) -> int:
 	return tier
 
 
+## The MultiMesh renderer draws only a prefix of each tuft buffer.
+## Smooth ranges let distant grass thin gradually without any mesh rebuild.
+## It never changes the number of gameplay entities or collision objects.
+static func visible_count_for_distance(total: int, distance: float) -> int:
+	if total <= 0:
+		return 0
+	if not is_finite(distance) or distance < 0.0:
+		return total
+	var fraction: float = 1.0
+	fraction -= DENSITY_FIRST_DROP * smoothstep(
+		DENSITY_FIRST_START, DENSITY_FIRST_END, distance)
+	fraction -= DENSITY_SECOND_DROP * smoothstep(
+		DENSITY_SECOND_START, DENSITY_SECOND_END, distance)
+	return clampi(ceili(float(total) * fraction), 1, total)
+
+
+## Fisher-Yates is done once during each tile's budgeted construction.
+## Crucial: move all 16 floats (12 transform + 4 tint) together; otherwise
+## fractional visible_instance_count would delete whole spatial rows.
+static func shuffle_instances(buffer: PackedFloat32Array, total: int, seed: int) -> void:
+	if total < 2:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed
+	for i in range(total - 1, 0, -1):
+		var other: int = rng.randi_range(0, i)
+		if other == i:
+			continue
+		var a: int = i * 16
+		var b: int = other * 16
+		for field in 16:
+			var saved: float = buffer[a + field]
+			buffer[a + field] = buffer[b + field]
+			buffer[b + field] = saved
+
+
 static func material() -> ShaderMaterial:
 	if _material == null:
 		var shader := Shader.new()
@@ -335,6 +380,9 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 	if count == 0:
 		return null
 	buffer.resize(count * 16)
+	# Randomize spatial order once. As draw count drops with distance, every
+	# prefix remains scattered across the same tile, without rectangular gaps.
+	shuffle_instances(buffer, count, WorldGen.mix(int(origin.x), int(origin.y), 981, tile))
 	var multimesh := MultiMesh.new()
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
 	multimesh.use_colors = true

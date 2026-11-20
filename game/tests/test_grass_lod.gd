@@ -30,3 +30,45 @@ func run(t) -> void:
 	t.eq(GrassField.lod_for_distance(21.0, 1), 0, "return to close mesh")
 	t.eq(GrassField.lod_for_distance(100.0, 0), 2, "large camera jumps can skip tiers")
 	t.eq(GrassField.lod_for_distance(0.0, 2), 0, "camera teleport restores detail")
+
+
+	t.current = "distance-aware grass density keeps nearby detail and limits far GPU instances"
+	t.eq(GrassField.visible_count_for_distance(1000, 0.0), 1000, "close grass is fully populated")
+	t.eq(GrassField.visible_count_for_distance(1000, 18.0), 1000, "density starts at the designed distance")
+	t.eq(GrassField.visible_count_for_distance(1000, 34.0), 720, "first fade removes only distant instances")
+	t.eq(GrassField.visible_count_for_distance(1000, 35.0), 720, "transitions have no hard density jump")
+	t.eq(GrassField.visible_count_for_distance(1000, 55.0), 400, "far grass uses forty percent")
+	t.eq(GrassField.visible_count_for_distance(1000, 500.0), 400, "far density is bounded")
+	t.eq(GrassField.visible_count_for_distance(0, 25.0), 0, "empty tiles remain empty")
+	t.eq(GrassField.visible_count_for_distance(1, 100.0), 1, "one real tuft is never lost")
+	t.eq(GrassField.visible_count_for_distance(100, -1.0), 100, "invalid negative distance stays conservative")
+	t.eq(GrassField.visible_count_for_distance(100, NAN), 100, "invalid distance does not hide grass")
+	var last_count := 1000
+	for distance in range(0, 100, 2):
+		var current: int = GrassField.visible_count_for_distance(1000, float(distance))
+		t.check(current <= last_count and current >= 400,
+			"density decreases monotonically with distance")
+		last_count = current
+
+	t.current = "shuffled instance prefixes preserve uniform spatial coverage and colors"
+	var records := PackedFloat32Array()
+	records.resize(64 * 16)
+	for id in 64:
+		for field in 16:
+			records[id * 16 + field] = float(id * 32 + field)
+	var shuffled: PackedFloat32Array = records.duplicate()
+	var repeated: PackedFloat32Array = records.duplicate()
+	GrassField.shuffle_instances(shuffled, 64, 2026)
+	GrassField.shuffle_instances(repeated, 64, 2026)
+	t.eq(shuffled, repeated, "same seed yields deterministic placement draw order")
+	t.check(shuffled != records, "instances are no longer in row-major placement order")
+	var seen: Dictionary = {}
+	for id in 64:
+		var original_id: int = int(shuffled[id * 16]) / 32
+		t.check(original_id >= 0 and original_id < 64, "all shuffled rows have valid origins")
+		t.check(not seen.has(original_id), "shuffle does not duplicate plant positions")
+		seen[original_id] = true
+		for field in 16:
+			t.eq(shuffled[id * 16 + field], float(original_id * 32 + field),
+				"tint and transform always travel together")
+	t.eq(seen.size(), 64, "all physical grass placements are preserved")
