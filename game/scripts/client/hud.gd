@@ -449,6 +449,24 @@ func _build() -> void:
 		else:
 			client.party_aid(target, str(aid_items.get_selected_metadata())))
 	aid_row.add_child(aid_button)
+	# A cook supplies one real dish per present, eligible group member.
+	var feast_row := HBoxContainer.new()
+	inventory_box.add_child(feast_row)
+	var feast_item := OptionButton.new()
+	for tier in range(1, Defs.MAX_TIER + 1):
+		var meal_id: String = "cooked_fish" if tier == 1 else "cooked_fish_%d" % tier
+		feast_item.add_item(str(Defs.item(meal_id).get("name", meal_id)))
+		feast_item.set_item_metadata(feast_item.item_count - 1, meal_id)
+	feast_row.add_child(feast_item)
+	var feast_button := Button.new()
+	feast_button.text = "Share cooked meal"
+	feast_button.tooltip_text = "At a lit campfire, share one cooked fish per nearby party member (20s cooldown)."
+	feast_button.pressed.connect(func() -> void:
+		if feast_item.selected < 0:
+			say("Select the prepared fish tier to share.")
+		else:
+			client.party_feast(str(feast_item.get_selected_metadata())))
+	feast_row.add_child(feast_button)
 
 	var trade_title := Label.new()
 	trade_title.text = "Player barter (safe hub, within 6 metres)"
@@ -622,6 +640,10 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"party_feast":
+			if int(event.get("peer", -1)) == client.peer_id and int(event.get("by", -1)) != client.peer_id:
+				say("A teammate shared a T%d cooked meal. Recovery boosted for %ds." % [
+					int(event.get("tier", 1)), int(event.get("seconds", 0))])
 		"duel":
 			match str(event.get("phase", "")):
 				"invited":
@@ -754,6 +776,13 @@ func _claim_nearest_outpost_cache() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "party_feast":
+		if bool(data.get("ok", false)):
+			say("Camp feast: shared T%d cooked fish with %d survivors." % [
+				int(data.get("tier", 1)), int(data.get("served", 0))])
+		else:
+			say("Camp feast denied: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "throw_decoy":
 		say("Decoy deployed: nearby idle infected investigate the sound." if bool(data.get("ok", false)) else
 				"Decoy denied: " + str(data.get("reason", "rejected")))
@@ -1139,6 +1168,7 @@ func _refresh_party_controls() -> void:
 	var group_id: int = int(state.get("id", 0))
 	var roster: Array = state.get("roster", [])
 	var remaining_aid: float = float(client.you.get("party_aid_cooldown", 0.0))
+	var remaining_feast: float = float(client.you.get("party_feast_cooldown", 0.0))
 	if group_id == 0:
 		_party_status.text = "No party. Invite someone nearby to start one."
 	else:
@@ -1149,6 +1179,8 @@ func _refresh_party_controls() -> void:
 		_party_status.text = "Party %d (%d/5): %s" % [group_id, roster.size(), ", ".join(names)]
 	if remaining_aid > 0.0:
 		_party_status.text += "\nMedical aid ready in %.1f s" % remaining_aid
+	if remaining_feast > 0.0:
+		_party_status.text += "\nCamp feast ready in %.1f s" % remaining_feast
 	if int(state.get("invite_from", 0)) > 0:
 		_party_status.text += "\nInvitation from " + str(state.get("invite_name", "Survivor"))
 	var rally: Dictionary = state.get("rally", {})
