@@ -418,6 +418,21 @@ func _build() -> void:
 	leave_party.text = "Leave"
 	leave_party.pressed.connect(func() -> void: client.party_leave())
 	party_buttons.add_child(leave_party)
+	var ready_buttons := HBoxContainer.new()
+	inventory_box.add_child(ready_buttons)
+	var start_ready := Button.new()
+	start_ready.text = "Start ready check"
+	start_ready.tooltip_text = "Party leader: ask all members whether they are prepared for a raid."
+	start_ready.pressed.connect(func() -> void: client.party_ready_start())
+	ready_buttons.add_child(start_ready)
+	var vote_ready := Button.new()
+	vote_ready.text = "I'm ready"
+	vote_ready.pressed.connect(func() -> void: client.party_ready_answer(true))
+	ready_buttons.add_child(vote_ready)
+	var vote_not_ready := Button.new()
+	vote_not_ready.text = "Not ready"
+	vote_not_ready.pressed.connect(func() -> void: client.party_ready_answer(false))
+	ready_buttons.add_child(vote_not_ready)
 	var duel_heading := Label.new()
 	duel_heading.text = "Training duel (green hub only, no gear loss)"
 	inventory_box.add_child(duel_heading)
@@ -978,6 +993,18 @@ func _on_result(kind: String, data: Dictionary) -> void:
 	if kind == "use" and str(data.get("reason", "")) == "no_acid_nearby":
 		say("Alkali kit: no active acid nearby. Your supplies were not spent.")
 		return
+	if kind == "party_ready":
+		if not bool(data.get("ok", false)):
+			say("Ready check: " + str(data.get("reason", "denied")))
+		elif data.has("seconds"):
+			say("Party ready check started. All members must respond within 30 seconds.")
+		elif str(data.get("result", "pending")) == "all_ready":
+			say("Party: everyone is ready for the expedition!")
+		elif str(data.get("result", "pending")) == "not_ready":
+			say("Party: a member is not ready. Regroup before departing.")
+		else:
+			say("Ready response recorded. Waiting for the rest of your party.")
+		return
 	if kind == "party_standard":
 		if bool(data.get("ok", false)):
 			say("Rally standard raised: nearby allies recover stamina and combat energy for 90 seconds.")
@@ -1442,6 +1469,20 @@ func _refresh_party_controls() -> void:
 			var prefix: String = "[Leader] " if int(member["id"]) == int(state.get("leader", 0)) else ""
 			names.append("%s%s (%d HP)" % [prefix, str(member["name"]), int(member["health"])])
 		_party_status.text = "Party %d (%d/5): %s" % [group_id, roster.size(), ", ".join(names)]
+	var ready_state: Dictionary = state.get("ready_check", {})
+	if not ready_state.is_empty():
+		var votes: PackedStringArray = []
+		for vote in ready_state.get("votes", []):
+			var vote_id: int = int(vote.get("id", 0))
+			var member_name := "#%d" % vote_id
+			for member in roster:
+				if int(member.get("id", 0)) == vote_id:
+					member_name = str(member.get("name", member_name))
+					break
+			votes.append("%s: %s" % [member_name, str(vote.get("status", "pending"))])
+		_party_status.text += "\nReady check [%s] %ds — %s" % [
+			str(ready_state.get("result", "pending")),
+			int(ceil(float(ready_state.get("remaining", 0.0)))), ", ".join(votes)]
 	if remaining_aid > 0.0:
 		_party_status.text += "\nMedical aid ready in %.1f s" % remaining_aid
 	if remaining_feast > 0.0:
