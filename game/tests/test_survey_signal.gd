@@ -90,7 +90,7 @@ func run(t) -> void:
 	t.check(bool(server.cmd_party_invite(leader.id, scout.id).get("ok", false)),
 		"nearby leader can invite a surveyor")
 	t.eq(server.cmd_use(scout.id, SurveySignal.ITEM_ID).get("reason", ""),
-		"need_party", "unaccepted invitation is not a group membership")
+		"not_in_party", "unaccepted invitation does not make a scout a party member")
 	t.check(bool(server.cmd_party_accept(scout.id).get("ok", false)),
 		"real teammate accepts the authenticated invitation")
 
