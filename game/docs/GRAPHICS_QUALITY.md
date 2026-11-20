@@ -35,3 +35,15 @@ For validation, capture the same water-heavy view and camera angle at the same t
 ## Automatic graphics adjustment
 
 The graphics selector includes **Auto (adapts to FPS)**. It starts at Balanced and changes between Performance, Balanced and High in response to sustained frame time, with 45/55 FPS hysteresis. It reduces detail after 3.5 seconds of low FPS and restores it after 9 seconds of good FPS. Single frames slower than 200 ms are ignored as likely loading stalls. **Ultra stays manual** to avoid uncontrolled GPU load. The automatic preference is stored alongside the manual level in `user://albion_after_graphics.cfg`; choosing a manual quality or Ctrl+F11 disables automation.
+
+## Procedural terrain material LOD
+
+When the 13-layer Poly Haven texture arrays are not installed, chunks render through the procedural `ChunkView.GROUND_SHADER` fallback. It now shares the same `aa_terrain_detail_radius` global uniform already used by textured terrain.
+
+* Near the camera: high-frequency soil/pebble noise and fine mountain strata stay visible. Variations in dry soil roughness reuse the existing noise, without extra texture fetches.
+* Over a 24-meter transition beyond the profile's terrain detail radius: fine detail fades to neutral values, while distant cliffs retain broad striation from the macro noise. Fine-noise evaluations and four-octave strata calculations are then skipped.
+* Moving cloud shadows use the existing common cloud-field functions, but sample in the **vertex stage**, interpolating over terrain faces. This is a cheap approximation suitable for broad cloud shadows and the default OpenGL Compatibility renderer; it does not replace real-time directional shadows or contact AO.
+
+The existing WorldGen seed, server authority and chunk geometry remain unchanged. These are shader-level changes only. Profile radii are 24 / 42 / 68 / 96 meters, with smooth 24-meter fade zones. Shader call counts and gains are theoretical until measured with the game running.
+
+**Visual acceptance:** compare low/high presets around cliffs, roads, forests, rain puddles and snow transitions; sweep the camera slowly across the LOD radius looking for popping; inspect cloud alignment with grass, buildings and foliage. Benchmark p50/p95 GPU frame time in the same scene before interpreting the computational savings as actual FPS improvement.
