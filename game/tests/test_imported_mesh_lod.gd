@@ -38,7 +38,8 @@ func run(t) -> void:
 	if lods.size() == 1:
 		var threshold: float = float(lods.keys()[0])
 		t.near(threshold, 0.8, 0.0001, "source edge-length threshold is intact")
-		t.eq((lods[threshold] as PackedInt32Array).size(), 3, "the distant LOD draws one triangle")
+		var short_indices: PackedInt32Array = lods[threshold]
+		t.eq(short_indices.size(), 3, "the distant LOD draws one triangle")
 	var doubled: Dictionary = MeshLOD.copy_lods(mesh, 0, 2.0)
 	t.eq(doubled.size(), 1, "scaled LOD survives decoding")
 	if doubled.size() == 1:
@@ -49,8 +50,8 @@ func run(t) -> void:
 	t.eq(fitted_lods.size(), 1, "baked mesh keeps imported LOD indices")
 	if fitted_lods.size() == 1:
 		t.near(float(fitted_lods.keys()[0]), 1.6, 0.0001, "baking rescales geometric LOD error")
-	t.eq((fitted.surface_get_arrays(0)[Mesh.ARRAY_INDEX] as PackedInt32Array).size(), 6,
-			"full-resolution mesh stays available")
+	var full_indices: PackedInt32Array = fitted.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+	t.eq(full_indices.size(), 6, "full-resolution mesh stays available")
 
 	var wind_mesh: Mesh = Foliage.swayed(mesh, "mesh_lod_pipeline:synthetic", 0.12)
 	t.eq(MeshLOD.copy_lods(wind_mesh, 0).size(), 1, "wind shader conversion keeps LODs")
