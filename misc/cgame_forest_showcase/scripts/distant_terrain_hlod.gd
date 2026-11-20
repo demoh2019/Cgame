@@ -20,6 +20,7 @@ const CELL_SIZE: int = 32
 const GRID_WIDTH: int = 33
 const LOD_STEP: int = 8
 const MAX_BUILDS_PER_FRAME: int = 2
+const MAX_BUILD_CPU_MS: float = 2.0
 const MAX_RADIUS: int = 6
 
 var streaming_world: WorldPartition3D
@@ -33,6 +34,7 @@ var _dirty: bool = true
 var _last_center: Vector2i = Vector2i.ZERO
 var _center_valid: bool = false
 var _built_total: int = 0
+var _last_rebuild_cpu_ms: float = 0.0
 
 
 func _ready() -> void:
@@ -91,6 +93,7 @@ func _process(_delta: float) -> void:
 
 
 func _rebuild_visible_set(center: Vector2i) -> void:
+    var started_usec: int = Time.get_ticks_usec()
     var wanted: Dictionary = {}
     var built_this_frame: int = 0
     var missing: bool = false
@@ -112,7 +115,14 @@ func _rebuild_visible_set(center: Vector2i) -> void:
                 if proxy != null:
                     proxy.visible = not loaded
                 elif not loaded:
-                    if built_this_frame < MAX_BUILDS_PER_FRAME:
+                    # A soft wall-time budget prevents multiple cold HLOD
+                    # meshes being generated in one slow frame. The first
+                    # missing cell always builds, so small budgets cannot
+                    # starve HLOD creation altogether.
+                    var elapsed_usec: int = Time.get_ticks_usec() - started_usec
+                    if built_this_frame < MAX_BUILDS_PER_FRAME \
+                            and (built_this_frame == 0 \
+                            or float(elapsed_usec) < MAX_BUILD_CPU_MS * 1000.0):
                         proxy = _create_proxy(cell)
                         _proxies[cell] = proxy
                         built_this_frame += 1
@@ -129,6 +139,7 @@ func _rebuild_visible_set(center: Vector2i) -> void:
                 old.queue_free()
             _proxies.erase(cell)
 
+    _last_rebuild_cpu_ms = float(Time.get_ticks_usec() - started_usec) / 1000.0
     _dirty = missing
 
 
@@ -225,5 +236,7 @@ func get_stats() -> Dictionary:
         "visible_canopies": visible_canopies,
         "built_total": _built_total,
         "max_per_frame": MAX_BUILDS_PER_FRAME,
+        "soft_cpu_budget_ms": MAX_BUILD_CPU_MS,
+        "last_rebuild_cpu_ms": _last_rebuild_cpu_ms,
         "cache": HLODCache.get_stats()
     }
