@@ -53,6 +53,7 @@ const SUITES := [
 	"res://tests/test_ranged_skills.gd",
 	"res://tests/test_bows.gd",
 	"res://tests/test_ranged_cover.gd",
+	"res://tests/test_barricade_ballistics.gd",
 	"res://tests/test_suppressed_pistol.gd",
 	"res://tests/test_purifier_maul.gd",
 	"res://tests/test_combat_mastery.gd",
