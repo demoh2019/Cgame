@@ -76,6 +76,27 @@ func _run() -> void:
             Vector2i(2, 2)]:
         _fail("supercover corner crossing skipped an adjacent tile")
         return
+    var vertical_edge: Array = stream.get_navigation_route_cells(
+        Vector3(32.0, 0.0, 1.0), Vector3(32.0, 0.0, 70.0))
+    if vertical_edge != [
+            Vector2i(1, 0), Vector2i(0, 0),
+            Vector2i(1, 1), Vector2i(0, 1),
+            Vector2i(1, 2), Vector2i(0, 2)]:
+        _fail("line on a vertical grid edge skipped one adjacent tile")
+        return
+    var horizontal_edge: Array = stream.get_navigation_route_cells(
+        Vector3(1.0, 0.0, 32.0), Vector3(70.0, 0.0, 32.0))
+    if horizontal_edge != [
+            Vector2i(0, 1), Vector2i(0, 0),
+            Vector2i(1, 1), Vector2i(1, 0),
+            Vector2i(2, 1), Vector2i(2, 0)]:
+        _fail("line on a horizontal grid edge skipped one adjacent tile")
+        return
+    if not stream.get_navigation_route_cells(
+            Vector3(32.0, 0.0, 1.0), Vector3(32.0, 0.0, 70.0), 5).is_empty():
+        _fail("grid-edge route exceeded the cap without failing closed")
+        return
+
     if not stream.get_navigation_route_cells(from, to, 1).is_empty():
         _fail("max-cells budget silently truncated a route")
         return
