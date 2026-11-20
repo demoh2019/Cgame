@@ -55,6 +55,12 @@ struct CameraShake {
 	Vector3 get_translation_unit() const;
 	Vector3 get_rotation_unit() const;
 
+	// Smooth, finite, bounded distance attenuation for cosmetic gameplay
+	// impacts. Full intensity inside inner radius, zero beyond outer radius;
+	// independent of framerate, view direction and simulated gameplay damage.
+	static real_t spatial_falloff(const Vector3 &p_listener, const Vector3 &p_source,
+			real_t p_inner_radius, real_t p_outer_radius);
+
 	// Smooth (C2) 1D value noise in [-1, 1]; `p_channel` selects an independent noise stream.
 	static real_t noise(double p_x, uint32_t p_channel);
 };
