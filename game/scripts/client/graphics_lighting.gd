@@ -1,6 +1,7 @@
 extends RefCounted
 
 const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
+const PracticalShadowCascades = preload("res://scripts/client/practical_shadow_cascades.gd")
 ## Renderer-aware lighting budgets for Albion After.
 ## The same presets drive the online world and local playable preview.
 ## No gameplay state, world seed, server packets or character saves are affected.
@@ -56,9 +57,16 @@ static func apply(sun: DirectionalLight3D, environment: Environment,
 		else:
 			sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 		sun.directional_shadow_blend_splits = bool(profile["shadow_blend"])
-		sun.directional_shadow_split_1 = float(profile["shadow_split_1"])
-		sun.directional_shadow_split_2 = float(profile["shadow_split_2"])
-		sun.directional_shadow_split_3 = float(profile["shadow_split_3"])
+		# HDRP-style practical CSM allocation: preserve the atlas budget
+		# and existing 2/4 cascade count, concentrate texels on nearby
+		# player/foliage/ruin silhouettes. Engine validates and quantizes
+		# split distances so repeated quality updates are idempotent.
+		if not PracticalShadowCascades.try_apply(sun, level, rendering_method):
+			# Stock Godot, low-end backends and invalid plans keep the
+			# original authored split fractions without any new native API.
+			sun.directional_shadow_split_1 = float(profile["shadow_split_1"])
+			sun.directional_shadow_split_2 = float(profile["shadow_split_2"])
+			sun.directional_shadow_split_3 = float(profile["shadow_split_3"])
 		sun.shadow_blur = float(profile["shadow_blur"])
 		sun.shadow_bias = float(profile["shadow_bias"])
 		sun.shadow_normal_bias = float(profile["shadow_normal_bias"])
