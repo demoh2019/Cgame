@@ -767,6 +767,15 @@ func _shake(amount: float) -> void:
 ## Particles for what just happened, at the place it happened.
 func _spawn_effects(event: Dictionary) -> void:
 	var here: Vector3 = client.display_position() + Vector3(0, 1.0, 0)
+	# The real server emits this once at impact; never flash on mere warning,
+	# ordinary rain, or while underground. No new dynamic light is allocated.
+	if str(event.get("type", "")) == "lightning_struck" and atmosphere != null and \
+			event.has("x") and event.has("z") and \
+			not Dungeon.is_underground(float(client.you.get("x", 0.0))):
+		var strike_xz := Vector2(float(event["x"]), float(event["z"]))
+		if strike_xz.is_finite():
+			var distance_m: float = Vector2(here.x, here.z).distance_to(strike_xz)
+			atmosphere.trigger_lightning(distance_m)
 	var at := here
 	if event.has("x") and event.has("z"):
 		at = Vector3(event["x"], client.world.height_at(event["x"], event["z"]) + 1.0, event["z"])
