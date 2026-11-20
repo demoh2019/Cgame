@@ -66,6 +66,14 @@
 				This allows you to move all instances instantaneously, and should usually be used when initially placing instances to prevent graphical glitches.
 			</description>
 		</method>
+		<method name="shuffled_instance_buffer" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="buffer" type="PackedFloat32Array" />
+			<param index="1" name="seed" type="int" />
+			<description>
+				Returns a new buffer containing the same instance records in a seeded random order, without modifying [param buffer] or uploading anything to the rendering device. Each record's transform, color, and optional custom data are moved together. This makes an evenly shuffled prefix suitable for distance-dependent [member visible_instance_count] with no missing spatial rows. The current [member transform_format], [member use_colors], [member use_custom_data], and [member instance_count] determine the packed record stride. If the buffer length is not exactly compatible with the instance count and stride, the input is returned unchanged. The seed uses Godot's [RandomNumberGenerator] PCG sequence, matching a Fisher-Yates shuffle from the final record to the second record with [method RandomNumberGenerator.randi_range] between index 0 and the current index. Use the returned array as [member buffer] once after instance allocation; do not invoke this helper every render frame. This engine extension also supports 2D instances.
+			</description>
+		</method>
 		<method name="set_buffer_interpolated">
 			<return type="void" />
 			<param index="0" name="buffer_curr" type="PackedFloat32Array" />
