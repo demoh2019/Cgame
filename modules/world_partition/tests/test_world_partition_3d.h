@@ -49,6 +49,8 @@ TEST_CASE("[WorldPartition3D] Defaults") {
 	CHECK(partition->get_cell_size() == 128.0);
 	CHECK(partition->get_load_radius() == 1);
 	CHECK(partition->get_unload_radius() == 2);
+	CHECK(partition->get_prefetch_direction() == Vector2i());
+	CHECK(partition->get_prefetch_distance() == 0);
 	CHECK(partition->get_max_new_requests_per_frame() == 2);
 	CHECK(partition->get_max_instances_per_frame() == 2);
 	CHECK(partition->get_max_instantiation_time_ms() == 0.0);
@@ -57,6 +59,8 @@ TEST_CASE("[WorldPartition3D] Defaults") {
 	partition->set_max_instantiation_time_ms(0.0);
 	CHECK(partition->get_max_instantiation_time_ms() == 0.0);
 	CHECK(partition->get_max_concurrent_requests() == 8);
+	CHECK(partition->get_prefetch_direction() == Vector2i());
+	CHECK(partition->get_prefetch_distance() == 0);
 	CHECK(partition->is_streaming_enabled());
 	CHECK(partition->get_configured_cell_count() == 0);
 	CHECK(partition->get_loaded_cell_count() == 0);
@@ -287,6 +291,10 @@ TEST_CASE("[WorldPartition3D] Invalid settings are rejected without mutation") {
 	partition->set_max_new_requests_per_frame(0);
 	partition->set_max_instances_per_frame(0);
 	partition->set_max_concurrent_requests(0);
+	partition->set_prefetch_direction(Vector2i(2, 0));
+	partition->set_prefetch_direction(Vector2i(0, -2));
+	partition->set_prefetch_distance(-1);
+	partition->set_prefetch_distance(5);
 	const Array invalid_cells = partition->get_cells_in_radius(Vector2i(), -1);
 	ERR_PRINT_ON;
 	CHECK(partition->get_cell_size() == 128.0);
@@ -370,6 +378,73 @@ TEST_CASE("[SceneTree][WorldPartition3D] Stream one authored PackedScene and unl
 	CHECK(streamed_child->is_queued_for_deletion());
 	CHECK_FALSE(authored_child->is_queued_for_deletion());
 	CHECK(authored_child->get_parent() == partition);
+
+	SceneTree::get_singleton()->get_root()->remove_child(partition);
+	SceneTree::get_singleton()->get_root()->remove_child(observer);
+	memdelete(partition);
+	memdelete(observer);
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Directional corridor prefetch prioritizes observer and unloads stale cells") {
+	Node3D *template_root = memnew(Node3D);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	REQUIRE(packed->pack(template_root) == OK);
+	memdelete(template_root);
+
+	const String path = "user://world_partition_prefetch_doctest_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	REQUIRE(ResourceSaver::save(packed, path) == OK);
+
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	Node3D *observer = memnew(Node3D);
+	observer->set_name("PrefetchObserver");
+	SceneTree::get_singleton()->get_root()->add_child(observer);
+	SceneTree::get_singleton()->get_root()->add_child(partition);
+	partition->set_cell_size(16);
+	partition->set_load_radius(0);
+	partition->set_unload_radius(0);
+	partition->set_max_instances_per_frame(1);
+	partition->set_prefetch_direction(Vector2i(1, 0));
+	partition->set_prefetch_distance(2);
+	partition->set_observer_path(partition->get_path_to(observer));
+	for (int x = -2; x <= 2; x++) {
+		partition->set_cell_scene(Vector2i(x, 0), path);
+	}
+
+	const Vector2i origin(0, 0);
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(origin); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(origin));
+	// The first instantiation always serves the primary observer grid.
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(1, 0)));
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(2, 0)));
+
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(2, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	CHECK(partition->is_cell_loaded(Vector2i(1, 0)));
+	CHECK(partition->is_cell_loaded(Vector2i(2, 0)));
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(-1, 0)));
+	CHECK(partition->get_loaded_cell_count() == 3);
+
+	// Changing direction immediately makes previous prefetch cells eligible
+	// for unloading, even though the player has not changed grid cells.
+	partition->set_prefetch_direction(Vector2i(-1, 0));
+	partition->update_streaming();
+	CHECK(partition->is_cell_loaded(origin));
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(1, 0)));
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(2, 0)));
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(-2, 0)); i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	CHECK(partition->is_cell_loaded(Vector2i(-1, 0)));
+	CHECK(partition->is_cell_loaded(Vector2i(-2, 0)));
+	CHECK(partition->are_cells_loaded(origin));
 
 	SceneTree::get_singleton()->get_root()->remove_child(partition);
 	SceneTree::get_singleton()->get_root()->remove_child(observer);
