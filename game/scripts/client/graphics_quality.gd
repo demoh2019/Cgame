@@ -180,6 +180,14 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Sub-LSB output dither is fused into the existing grade pass. Auto
 		# resolution and renderer switching cannot leave stale grain enabled.
 		post_material.set_shader_parameter("deband_strength", float(p["deband_strength"]))
+	# Texture-group-style anisotropy on expensive terrain samplers only:
+	# Performance/Balanced use trilinear; High sharpens color at grazing
+	# angles; Ultra also filters normal detail. Existing chunk road/biome
+	# maps are kept in place when a preset is switched.
+	ChunkView.configure_terrain_filter(_level)
+	if viewport != null:
+		for terrain in viewport.get_tree().get_nodes_in_group(ChunkView.TERRAIN_GROUP):
+			ChunkView.apply_terrain_filter(terrain)
 	# Reuse the game's existing 3-tier grass LOD; never rebuild world geometry on a preset switch.
 	ChunkView.configure_grass(float(world_profile["grass_build_radius"]), int(world_profile["grass_budget_usec"]),
 			float(world_profile["grass_fade_start"]), float(world_profile["grass_fade_end"]))
