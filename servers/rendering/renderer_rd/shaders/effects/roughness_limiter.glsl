@@ -21,15 +21,22 @@ params;
 void main() {
 	// Pixel being shaded
 	ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
-	if (any(greaterThan(pos, params.screen_size))) { //too large, do nothing
+	// Dispatch is rounded up to workgroups. The comparison must include
+	// the first pixel outside each dimension, not only pixels beyond it.
+	if (any(greaterThanEqual(pos, params.screen_size))) {
 		return;
 	}
 
+	// The 2x2 normal footprint touches the last row/column for edge pixels.
+	// Clamp texel coordinates explicitly: texelFetch ignores sampler wrap and
+	// edge reads outside the normal image are undefined on Metal/Vulkan.
+	ivec2 last_pixel = params.screen_size - ivec2(1);
 	vec3 normal_accum = vec3(0.0);
 	float accum = 0.0;
 	for (int i = 0; i <= 1; i++) {
 		for (int j = 0; j <= 1; j++) {
-			normal_accum += normalize(texelFetch(source_normal, pos + ivec2(i, j), 0).xyz * 2.0 - 1.0);
+			ivec2 sample_pos = min(pos + ivec2(i, j), last_pixel);
+			normal_accum += normalize(texelFetch(source_normal, sample_pos, 0).xyz * 2.0 - 1.0);
 			accum += 1.0;
 		}
 	}
