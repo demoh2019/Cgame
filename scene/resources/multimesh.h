@@ -113,6 +113,8 @@ public:
 	Color get_instance_color(int p_instance) const;
 
 	void set_instance_custom_data(int p_instance, const Color &p_custom_data);
+	// Prevalidate all indices and values before dispatching bulk shader updates.
+	bool set_instance_custom_data_batch(const PackedInt32Array &p_indices, const PackedColorArray &p_custom_data);
 	Color get_instance_custom_data(int p_instance) const;
 
 	void reset_instance_physics_interpolation(int p_instance);
