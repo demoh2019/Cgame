@@ -185,6 +185,23 @@ void ChunkedTerrain3D::_rebuild() {
 			const Vector3 a(params.origin.x + real_t(chunk.x0) * params.spacing.x, low * height_scale + height_offset, params.origin.y + real_t(chunk.z0) * params.spacing.y);
 			const Vector3 b(params.origin.x + real_t(x1) * params.spacing.x, high * height_scale + height_offset, params.origin.y + real_t(z1) * params.spacing.y);
 			chunk.bounds = AABB(a, b - a).abs();
+			// An error bound is measured only when the source field is rebuilt.
+			// It is shared by all LOD mesh variants and never sampled on GPU.
+			chunk.lod_errors[0] = 0.0;
+			int previous_stride = 1;
+			for (int level = 1; level < MAX_LOD; level++) {
+				const int stride = lod_stride(level, chunk_quads);
+				if (stride == previous_stride) {
+					chunk.lod_errors[level] = chunk.lod_errors[level - 1];
+				} else {
+					const real_t error = chunk_lod_max_error(field, chunk.x0, chunk.z0,
+							chunk_quads, stride) * Math::abs(height_scale);
+					// Monotonic errors make LOD choice stable even for
+					// terrain where independent simplification levels cross.
+					chunk.lod_errors[level] = MAX(error, chunk.lod_errors[level - 1]);
+				}
+				previous_stride = stride;
+			}
 		}
 	}
 	built = true;
@@ -340,6 +357,30 @@ void ChunkedTerrain3D::_update_chunks() {
 		}
 	}
 
+	// One camera-dependent projection factor per streaming update. Pixel-error
+	// selection uses the *rendered 3D* resolution, including FSR scaling.
+	real_t projection_scale = 0.0;
+	if (lod_pixel_error > 0.0 && has_viewer) {
+		Viewport *viewport = get_viewport();
+		if (viewport != nullptr) {
+			Camera3D *camera = viewport->get_camera_3d();
+			const Size2 viewport_size = viewport->get_visible_rect().size;
+			const real_t pixel_height = viewport_size.y * viewport->get_scaling_3d_scale();
+			if (camera != nullptr && pixel_height > 0.0) {
+				if (camera->get_projection() == Camera3D::PROJECTION_ORTHOGONAL) {
+					projection_scale = pixel_height / MAX(camera->get_size(), real_t(0.001));
+				} else {
+					real_t vertical_fov = camera->get_fov();
+					if (camera->get_keep_aspect_mode() == Camera3D::KEEP_WIDTH && viewport_size.x > 0.0) {
+						vertical_fov = Projection::get_fovy(vertical_fov, viewport_size.y / viewport_size.x);
+					}
+					const real_t half_fov = Math::deg_to_rad(vertical_fov * real_t(0.5));
+					projection_scale = pixel_height / MAX(real_t(2.0) * Math::tan(half_fov), real_t(0.001));
+				}
+			}
+		}
+	}
+
 	for (Chunk &chunk : chunks) {
 		// Distance from the viewer to the closest point of the chunk's box, in world units.
 		real_t distance = 0.0;
@@ -358,7 +399,15 @@ void ChunkedTerrain3D::_update_chunks() {
 			}
 		} else {
 			// Without a viewer (editor) use a moderate level instead of the most expensive one.
-			const int lod = has_viewer ? select_lod(distance, effective_lod_distance, lod_count, chunk.lod) : MIN(1, lod_count - 1);
+			int lod = has_viewer ? select_lod(distance, effective_lod_distance, lod_count, chunk.lod) : MIN(1, lod_count - 1);
+			if (has_viewer && lod_pixel_error > 0.0 && projection_scale > 0.0) {
+				real_t errors[MAX_LOD] = {};
+				for (int level = 0; level < lod_count; level++) {
+					errors[level] = chunk.lod_errors[level] * scale.y;
+				}
+				lod = select_lod_by_pixel_error(errors, lod_count, distance,
+						projection_scale, lod_pixel_error, chunk.lod);
+			}
 			if (lod != chunk.lod || !chunk.instance.is_valid()) {
 				_ensure_mesh(chunk, lod);
 				if (chunk.meshes[lod].is_valid()) {
@@ -376,7 +425,13 @@ void ChunkedTerrain3D::_update_chunks() {
 			if (chunk.instance.is_valid()) {
 				float target = 0.0f;
 				if (lod_geomorph_enabled && has_viewer && chunk.lod >= 0 && chunk.lod < lod_count - 1) {
-					const real_t threshold = effective_lod_distance * real_t(1 << chunk.lod);
+					// Geometric LOD morphs toward the coarser mesh as its
+					// measured projected error approaches the pixel budget.
+					real_t threshold = effective_lod_distance * real_t(1 << chunk.lod);
+					if (lod_pixel_error > 0.0 && projection_scale > 0.0) {
+						threshold = MAX(chunk.lod_errors[chunk.lod + 1] * scale.y *
+								projection_scale / lod_pixel_error, real_t(1.0));
+					}
 					target = TerrainGeomorphPolicy::factor(float(distance), float(threshold));
 				}
 				if (chunk.morph < 0.0f || Math::abs(chunk.morph - target) > 0.015f) {
@@ -568,6 +623,19 @@ void ChunkedTerrain3D::set_lod_count(int p_count) {
 
 void ChunkedTerrain3D::set_lod_distance(real_t p_distance) {
 	lod_distance = MAX(p_distance, real_t(1.0));
+}
+
+void ChunkedTerrain3D::set_lod_pixel_error(real_t p_pixels) {
+	const real_t error = Math::is_finite(p_pixels) ? MAX(p_pixels, real_t(0.0)) : real_t(0.0);
+	if (lod_pixel_error == error) {
+		return;
+	}
+	lod_pixel_error = error;
+	// A graphics-quality change will reselect one of the already cached
+	// LOD mesh variants; height data, world collision and materials survive.
+	for (Chunk &chunk : chunks) {
+		chunk.lod = -1;
+	}
 }
 
 void ChunkedTerrain3D::set_lod_geomorph_enabled(bool p_enabled) {
@@ -784,6 +852,8 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_lod_geomorph_enabled", "enabled"), &ChunkedTerrain3D::set_lod_geomorph_enabled);
 	ClassDB::bind_method(D_METHOD("is_lod_geomorph_enabled"), &ChunkedTerrain3D::is_lod_geomorph_enabled);
 	ClassDB::bind_method(D_METHOD("get_lod_distance"), &ChunkedTerrain3D::get_lod_distance);
+	ClassDB::bind_method(D_METHOD("set_lod_pixel_error", "pixels"), &ChunkedTerrain3D::set_lod_pixel_error);
+	ClassDB::bind_method(D_METHOD("get_lod_pixel_error"), &ChunkedTerrain3D::get_lod_pixel_error);
 	ClassDB::bind_method(D_METHOD("set_screen_space_lod_enabled", "enabled"), &ChunkedTerrain3D::set_screen_space_lod_enabled);
 	ClassDB::bind_method(D_METHOD("is_screen_space_lod_enabled"), &ChunkedTerrain3D::is_screen_space_lod_enabled);
 	ClassDB::bind_method(D_METHOD("set_lod_reference_fov", "degrees"), &ChunkedTerrain3D::set_lod_reference_fov);
@@ -831,6 +901,7 @@ void ChunkedTerrain3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "chunk_quads", PROPERTY_HINT_RANGE, "2,256,1"), "set_chunk_quads", "get_chunk_quads");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "lod_count", PROPERTY_HINT_RANGE, "1,8,1"), "set_lod_count", "get_lod_count");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_distance", PROPERTY_HINT_RANGE, "1,100000,1,or_greater,suffix:m"), "set_lod_distance", "get_lod_distance");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_pixel_error", PROPERTY_HINT_RANGE, "0,20,0.1,or_greater,suffix:px"), "set_lod_pixel_error", "get_lod_pixel_error");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "screen_space_lod_enabled"), "set_screen_space_lod_enabled", "is_screen_space_lod_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_reference_fov", PROPERTY_HINT_RANGE, "1.01,178.99,0.1,degrees"), "set_lod_reference_fov", "get_lod_reference_fov");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "lod_geomorph_enabled"), "set_lod_geomorph_enabled", "is_lod_geomorph_enabled");
