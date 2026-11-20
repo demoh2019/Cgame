@@ -159,8 +159,38 @@ class VisualQualityPackageTests(unittest.TestCase):
         self.assertIn('Foliage.new()', world)
         self.assertNotIn('foliage = ChunkedFoliage.new()', demo)
 
+    def test_world_state_store_has_versioning_and_safe_save_protocol(self):
+        script = (ROOT / 'addons/visual_quality/world_state_store.gd').read_text()
+        for token in ('class_name WorldStateStore3D', 'SAVE_VERSION', 'world_id',
+                      'cell_about_to_unload.connect', 'cell_loaded.connect',
+                      'capture_cell', 'load_from_disk', 'save_now',
+                      'ConfigFile.new()', 'DirAccess.rename_absolute',
+                      'sanitize_state', 'TYPE_DICTIONARY', 'MAX_SAVED_CELLS',
+                      'clear_all_states', 'get_saved_state'):
+            self.assertIn(token, script)
+
+    def test_unload_signal_precedes_node_deletion(self):
+        streamer = (ROOT / 'addons/visual_quality/world_streamer.gd').read_text()
+        unload = streamer.split('func _unload_cell(coord: Vector2i) -> void:', 1)[1]
+        unload = unload.split('func _record_failure', 1)[0]
+        self.assertIn('cell_about_to_unload.emit(coord, instance)', unload)
+        self.assertLess(unload.index('cell_about_to_unload.emit'), unload.index('remove_child(instance)'))
+        self.assertLess(unload.index('cell_about_to_unload.emit'), unload.index('instance.queue_free()'))
+
+    def test_gameplay_uses_stream_state_and_beacon_ui(self):
+        world = (ROOT / 'world/forest_cell.gd').read_text()
+        demo = (ROOT / 'demo.gd').read_text()
+        for token in ('save_stream_state', 'load_stream_state', 'try_activate_beacon',
+                      'stream_state_changed.emit', 'get_stream_cell_coord'):
+            self.assertIn(token, world)
+        for token in ('WorldStateStore.new()', 'world_state.streamer = streamer',
+                      'world_state.saved_cell_count()', 'KEY_G', 'KEY_8',
+                      '_try_activate_world_beacon', '_reset_world_beacons'):
+            self.assertIn(token, demo)
+        self.assertLess(demo.index('add_child(world_state)'), demo.index('add_child(streamer)'))
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
