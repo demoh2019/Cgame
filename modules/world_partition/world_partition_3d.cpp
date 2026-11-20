@@ -67,6 +67,7 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 		node->queue_free();
 	}
 	active_cells.erase(p_cell);
+	cell_creation_physics_frames.erase(p_cell);
 	active_detail_levels.erase(p_cell);
 	active_simulation_cells.erase(p_cell);
 	emit_signal(SNAME("cell_unloaded"), p_cell);
@@ -176,6 +177,7 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	}
 	add_child(instance);
 	active_cells.insert(p_cell, instance->get_instance_id());
+	cell_creation_physics_frames.insert(p_cell, Engine::get_singleton()->get_physics_frames());
 	emit_signal(SNAME("cell_loaded"), p_cell);
 	return true;
 }
@@ -709,6 +711,42 @@ bool WorldPartition3D::is_streaming_source_ready(const String &p_name) const {
 	return total > 0 && get_streaming_source_failed_cell_count(p_name) == 0 && get_streaming_source_loaded_cell_count(p_name) == total;
 }
 
+int WorldPartition3D::get_streaming_source_activated_cell_count(const String &p_name) const {
+	const StreamingSource *source = streaming_sources.getptr(p_name);
+	if (source == nullptr) {
+		return 0;
+	}
+	const Vector2i center = local_position_to_cell(to_local(source->global_position));
+	if (_get_scene_path(center).is_empty()) {
+		return 0;
+	}
+	int count = 0;
+	for (int dz = -source->radius; dz <= source->radius; dz++) {
+		for (int dx = -source->radius; dx <= source->radius; dx++) {
+			const Vector2i cell = center + Vector2i(dx, dz);
+			if (!_get_scene_path(cell).is_empty() && is_cell_activation_ready(cell)) {
+				count++;
+			}
+		}
+	}
+	return count;
+}
+
+real_t WorldPartition3D::get_streaming_source_activation_progress(const String &p_name) const {
+	const int total = get_streaming_source_cell_count(p_name);
+	return total > 0 ? real_t(get_streaming_source_activated_cell_count(p_name)) / real_t(total) : 0.0;
+}
+
+bool WorldPartition3D::is_streaming_source_activation_ready(const String &p_name) const {
+	// Scene-root readiness is a prerequisite, but not enough for physics-aware
+	// gameplay activation. This API is a bounded physics-tick and script fence,
+	// NOT a guarantee of collision, navmesh or GPU residency.
+	if (!is_streaming_source_ready(p_name)) {
+		return false;
+	}
+	return get_streaming_source_activated_cell_count(p_name) == get_streaming_source_cell_count(p_name);
+}
+
 bool WorldPartition3D::_is_cell_required_by_source(const Vector2i &p_cell, int p_extra_radius) const {
 	for (const KeyValue<String, StreamingSource> &E : streaming_sources) {
 		const Vector2i center = local_position_to_cell(to_local(E.value.global_position));
@@ -921,6 +959,34 @@ void WorldPartition3D::update_streaming() {
 	}
 }
 
+void WorldPartition3D::set_min_physics_frames_after_load(int p_frames) {
+	ERR_FAIL_COND_MSG(p_frames < 0 || p_frames > 8, "WorldPartition3D min_physics_frames_after_load must be between 0 and 8.");
+	min_physics_frames_after_load = p_frames;
+}
+
+int WorldPartition3D::get_min_physics_frames_after_load() const {
+	return min_physics_frames_after_load;
+}
+
+bool WorldPartition3D::is_cell_activation_ready(const Vector2i &p_cell) const {
+	Node3D *scene_root = get_cell_instance(p_cell);
+	const uint64_t *created_on_frame = cell_creation_physics_frames.getptr(p_cell);
+	if (scene_root == nullptr || created_on_frame == nullptr) {
+		return false;
+	}
+	const uint64_t current_frame = Engine::get_singleton()->get_physics_frames();
+	if (current_frame < *created_on_frame || current_frame - *created_on_frame < uint64_t(min_physics_frames_after_load)) {
+		return false;
+	}
+	// An opt-in scene can gate readiness on its terrain, collision setup,
+	// navmesh availability or gameplay state. Invalid return values fail closed.
+	if (scene_root->has_method(SNAME("is_streaming_activation_ready"))) {
+		const Variant result = scene_root->call(SNAME("is_streaming_activation_ready"));
+		return result.get_type() == Variant::BOOL && bool(result);
+	}
+	return true;
+}
+
 bool WorldPartition3D::is_cell_loaded(const Vector2i &p_cell) const {
 	const ObjectID *id = active_cells.getptr(p_cell);
 	return id != nullptr && ObjectDB::get_instance(*id) != nullptr;
@@ -1030,10 +1096,16 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_streaming_source_failed_cell_count", "name"), &WorldPartition3D::get_streaming_source_failed_cell_count);
 	ClassDB::bind_method(D_METHOD("get_streaming_source_progress", "name"), &WorldPartition3D::get_streaming_source_progress);
 	ClassDB::bind_method(D_METHOD("is_streaming_source_ready", "name"), &WorldPartition3D::is_streaming_source_ready);
+	ClassDB::bind_method(D_METHOD("get_streaming_source_activated_cell_count", "name"), &WorldPartition3D::get_streaming_source_activated_cell_count);
+	ClassDB::bind_method(D_METHOD("get_streaming_source_activation_progress", "name"), &WorldPartition3D::get_streaming_source_activation_progress);
+	ClassDB::bind_method(D_METHOD("is_streaming_source_activation_ready", "name"), &WorldPartition3D::is_streaming_source_activation_ready);
 	ClassDB::bind_method(D_METHOD("local_position_to_cell", "local_position"), &WorldPartition3D::local_position_to_cell);
 	ClassDB::bind_method(D_METHOD("cell_to_local_position", "cell"), &WorldPartition3D::cell_to_local_position);
 	ClassDB::bind_method(D_METHOD("get_cells_in_radius", "center", "radius"), &WorldPartition3D::get_cells_in_radius);
 	ClassDB::bind_method(D_METHOD("update_streaming"), &WorldPartition3D::update_streaming);
+	ClassDB::bind_method(D_METHOD("set_min_physics_frames_after_load", "frames"), &WorldPartition3D::set_min_physics_frames_after_load);
+	ClassDB::bind_method(D_METHOD("get_min_physics_frames_after_load"), &WorldPartition3D::get_min_physics_frames_after_load);
+	ClassDB::bind_method(D_METHOD("is_cell_activation_ready", "cell"), &WorldPartition3D::is_cell_activation_ready);
 	ClassDB::bind_method(D_METHOD("is_cell_loaded", "cell"), &WorldPartition3D::is_cell_loaded);
 	ClassDB::bind_method(D_METHOD("get_cell_instance", "cell"), &WorldPartition3D::get_cell_instance);
 	ClassDB::bind_method(D_METHOD("get_loaded_cell_count"), &WorldPartition3D::get_loaded_cell_count);
@@ -1064,6 +1136,8 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "simulation_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_simulation_radius", "get_simulation_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "simulation_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_simulation_hysteresis_cells", "get_simulation_hysteresis_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_simulation_transitions_per_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_simulation_transitions_per_frame", "get_max_simulation_transitions_per_frame");
+	ADD_GROUP("Cell Activation", "");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "min_physics_frames_after_load", PROPERTY_HINT_RANGE, "0,8,1"), "set_min_physics_frames_after_load", "get_min_physics_frames_after_load");
 
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_unloaded", PropertyInfo(Variant::VECTOR2I, "cell")));
@@ -1081,6 +1155,7 @@ WorldPartition3D::~WorldPartition3D() {
 	requested_paths.clear();
 	// Child nodes belong to Node; drop references without touching queued deletions.
 	active_cells.clear();
+	cell_creation_physics_frames.clear();
 	active_detail_levels.clear();
 	active_simulation_cells.clear();
 	pending_cells.clear();
