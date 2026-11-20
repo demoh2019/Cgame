@@ -18,14 +18,7 @@ func _fail(reason: String) -> void:
 
 
 func _find_cell(stream: WorldPartition3D, coordinate: Vector2i) -> Node3D:
-    var expected: Vector3 = stream.cell_to_local_position(coordinate)
-    for child in stream.get_children():
-        var node := child as Node3D
-        if node != null and not node.is_queued_for_deletion():
-            if node.position.distance_to(expected) < 0.001:
-                return node
-    return null
-
+    return stream.get_cell_node(coordinate)
 
 func _run() -> void:
     var packed: PackedScene = load("res://world.tscn")
