@@ -6,7 +6,7 @@ const SAVE_PATH: String = "user://aurora_forest_save_v1.json"
 const FORMAT_VERSION: int = 1
 
 
-static func save_state(state: Dictionary) -> bool:
+static func save_state(state: Dictionary, path: String = SAVE_PATH) -> bool:
     var payload: Dictionary = {
         "version": FORMAT_VERSION,
         "relics": state.get("relics", []),
@@ -14,7 +14,7 @@ static func save_state(state: Dictionary) -> bool:
         "look": state.get("look", [0.0, 0.0]),
         "quality": state.get("quality", true)
     }
-    var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+    var file := FileAccess.open(path, FileAccess.WRITE)
     if file == null:
         push_error("Aurora Forest: failed to open local save file")
         return false
@@ -23,10 +23,10 @@ static func save_state(state: Dictionary) -> bool:
     return true
 
 
-static func load_state(max_relics: int) -> Dictionary:
-    if not FileAccess.file_exists(SAVE_PATH):
+static func load_state(max_relics: int, path: String = SAVE_PATH) -> Dictionary:
+    if not FileAccess.file_exists(path):
         return {}
-    var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
+    var file := FileAccess.open(path, FileAccess.READ)
     if file == null:
         return {}
     var parsed: Variant = JSON.parse_string(file.get_as_text())
