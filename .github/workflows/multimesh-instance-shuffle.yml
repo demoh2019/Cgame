@@ -1,0 +1,71 @@
+name: Native MultiMesh instance buffer shuffle
+
+on:
+  pull_request:
+    paths:
+      - 'scene/resources/multimesh.cpp'
+      - 'scene/resources/multimesh.h'
+      - 'doc/classes/MultiMesh.xml'
+      - 'tests/scene/test_multimesh_visibility.cpp'
+      - 'game/scripts/client/grass_field.gd'
+      - 'game/tests/test_native_multimesh_shuffle.gd'
+      - '.github/workflows/multimesh-instance-shuffle.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/resources/multimesh.cpp'
+      - 'scene/resources/multimesh.h'
+      - 'tests/scene/test_multimesh_visibility.cpp'
+      - 'game/scripts/client/grass_field.gd'
+      - '.github/workflows/multimesh-instance-shuffle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-shuffle-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-multimesh-instance-shuffle
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-multimesh-instance-shuffle
+        continue-on-error: true
+      - name: Run C++ seeded record shuffle regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          "$BIN" --headless --test --test-case="*Seeded native buffer shuffle*"
+      - name: Import and run Albion After grass parity on Cgame
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee native-grass-import.log
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_graphics.gd 2>&1 | tee native-grass-tests.log
+          grep -E '^GRAPHICS TOTAL: [0-9]+ checks, 0 failures$' native-grass-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-grass-tests.log; then exit 1; fi
+      - name: Upload grass streaming test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multimesh-shuffle-native-tests
+          if-no-files-found: ignore
+          path: |
+            native-grass-import.log
+            native-grass-tests.log
