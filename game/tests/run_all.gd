@@ -44,6 +44,7 @@ const SUITES := [
 	"res://tests/test_cinematic_bloom.gd",
 	"res://tests/test_graphics_dynamic_resolution.gd",
 	"res://tests/test_graphics_indirect_lighting.gd",
+	"res://tests/test_terrain_sdfgi.gd",
 	"res://tests/test_graphics_eye_adaptation.gd",
 	"res://tests/test_cloud_shadow_lut.gd",
 	"res://tests/test_weather_cloud_advection.gd",
