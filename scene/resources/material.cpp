@@ -420,6 +420,31 @@ Ref<Shader> ShaderMaterial::get_shader() const {
 }
 
 void ShaderMaterial::set_shader_parameter(const StringName &p_param, const Variant &p_value) {
+	// Weather, dynamic skies and graphics profiles can reapply unchanged
+	// scalar uniforms many times. A repeated RenderingServer material write
+	// may still invalidate shader uniform buffers or sky radiance captures.
+	// Compare only immutable small value types. Do NOT skip OBJECT textures:
+	// their underlying RID may change without replacing the resource.
+	switch (p_value.get_type()) {
+		case Variant::NIL:
+		case Variant::BOOL:
+		case Variant::INT:
+		case Variant::FLOAT:
+		case Variant::VECTOR2:
+		case Variant::VECTOR3:
+		case Variant::VECTOR4:
+		case Variant::COLOR: {
+			const Variant *cached = param_cache.getptr(p_param);
+			if (cached != nullptr && *cached == p_value) {
+				return;
+			}
+			if (cached == nullptr && p_value.get_type() == Variant::NIL) {
+				return;
+			}
+		} break;
+		default:
+			break;
+	}
 	RID material_rid = _get_material();
 	if (p_value.get_type() == Variant::NIL) {
 		param_cache.erase(p_param);
