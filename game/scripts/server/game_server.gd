@@ -2931,6 +2931,14 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 				events.append({"type": "stagger", "id": infected.id,
 					"seconds": infected.stagger_seconds,
 					"x": infected.position.x, "z": infected.position.z})
+		# Pinning bolts only root a living infected hit by a real projectile.
+		# Existing snare rules protect raid bosses and exclude PvP players.
+		if hit["kind"] == "zombie" and skill.has("snare_seconds"):
+			var pinned = zombies.get(hit["id"])
+			if pinned != null and pinned.apply_snare(float(skill["snare_seconds"])):
+				events.append({"type": "pinning_bolt", "id": pinned.id,
+					"seconds": pinned.snared_seconds,
+					"x": pinned.position.x, "z": pinned.position.z})
 		count += 1
 	if count == 0:
 		return {"ok": true, "hit": false, "hits": 0, "energy": player.combat_energy}

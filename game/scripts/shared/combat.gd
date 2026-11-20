@@ -117,6 +117,12 @@ static func active_skill(weapon_id: String) -> Dictionary:
 			"attack_lock": 0.95, "range": Defs.MELEE_RANGE + 0.6,
 			"damage": weapon_damage(weapon_id) * 1.6,
 			"ranged": false}
+	if weapon_id.begins_with("crossbow_") and str(info.get("weapon", "")) == "ranged":
+		return {"id": "pinning_bolt", "energy_cost": 32.0, "cooldown": 7.5,
+			"attack_lock": 1.35, "range": ranged_range(weapon_id) + 3.0,
+			"damage": weapon_damage(weapon_id) * 1.35,
+			"snare_seconds": 2.0, "ranged": true,
+			"ammo": str(info.get("ammo", ""))}
 	if weapon_id.begins_with("bow_") and str(info.get("weapon", "")) == "ranged":
 		return {"id": "power_draw", "energy_cost": 30.0, "cooldown": 6.0,
 			"attack_lock": 1.2, "range": ranged_range(weapon_id) + 5.0,

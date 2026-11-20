@@ -237,6 +237,18 @@ static func _build_items() -> void:
 		_add_recipe("bow_%d" % t, "bow_%d" % t, 1,
 			{"plank_%d" % t: 2, "fiber_%d" % t: 2,
 				"cloth_%d" % t: 1}, "workbench", 5.0)
+		# Mechanical crossbows trade fire rate and noise for powerful bolts.
+		# Their equipped skill pins infected in place, never PvP players.
+		_add_item("crossbow_%d" % t, {"name": "Salvage Crossbow T%d" % t,
+			"kind": "weapon", "weapon": "ranged", "tier": t,
+			"damage": 18.0 + 10.0 * float(t - 1), "cooldown": 1.55,
+			"range": 25.0, "ammo": "arrow",
+			"shot_noise_radius": 12.0, "shot_noise_seconds": 1.0,
+			"weight": 3.6 + 0.2 * float(t), "value": 60 * t})
+		_add_recipe("crossbow_%d" % t, "crossbow_%d" % t, 1,
+			{"plank_%d" % t: 2, "bar_%d" % t: 2,
+				"fiber_%d" % t: 2, "scrap": 1},
+			"workbench", 7.0)
 		# Armour: reduces incoming damage.
 		_add_item("jacket_%d" % t, {"name": "Jacket T%d" % t, "kind": "armor", "tier": t, "armor": 0.08 + 0.07 * (t - 1), "value": 35 * t})
 		_add_recipe("jacket_%d" % t, "jacket_%d" % t, 1, {"cloth_%d" % t: 4}, "workbench", 5.0)

@@ -70,6 +70,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 				str(entity["type"]), int(entity["hp"])]
 			if float(entity.get("stagger_seconds", 0.0)) > 0.0:
 				label.text += " [STAGGERED]"
+			elif float(entity.get("snared_seconds", 0.0)) > 0.0:
+				label.text += " [PINNED]"
 		elif kind == "player":
 			label.text = ("%s%s" % [
 				"OUTLAW " if bool(entity.get("outlaw", false)) else "", str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
@@ -106,8 +108,13 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		elif bool(entity.get("elite", false)):
 			base = Color(0.98, 0.65, 0.18)
 		var staggered: bool = float(entity.get("stagger_seconds", 0.0)) > 0.0
-		model.set_tint(base.lerp(Color(0.38, 0.8, 1.0), 0.7) if staggered else (
-			base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base))
+		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
+		var tint: Color = base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base
+		if pinned:
+			tint = base.lerp(Color(1.0, 0.84, 0.25), 0.65)
+		if staggered:
+			tint = base.lerp(Color(0.38, 0.8, 1.0), 0.7)
+		model.set_tint(tint)
 		model.set_zombie_state(int(entity["state"]))
 	if kind == "player":
 		var bike = _nodes[key].get_node("TrailBike")
