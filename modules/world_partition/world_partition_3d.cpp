@@ -122,16 +122,14 @@ void WorldPartition3D::_poll_requests() {
 }
 
 void WorldPartition3D::_purge_unused_ready_scenes() {
+	// O(pending + ready) instead of re-scanning every pending cell for each scene.
+	HashSet<String> pending_paths;
+	for (const KeyValue<Vector2i, String> &E : pending_cells) {
+		pending_paths.insert(E.value);
+	}
 	Vector<String> unused;
 	for (const KeyValue<String, Ref<PackedScene>> &E : ready_scenes) {
-		bool needed = false;
-		for (const KeyValue<Vector2i, String> &P : pending_cells) {
-			if (P.value == E.key) {
-				needed = true;
-				break;
-			}
-		}
-		if (!needed) {
+		if (!pending_paths.has(E.key)) {
 			unused.push_back(E.key);
 		}
 	}
@@ -471,6 +469,23 @@ Array WorldPartition3D::get_loaded_cells() const {
 	return result;
 }
 
+int WorldPartition3D::get_pending_cell_count() const {
+	return pending_cells.size();
+}
+
+int WorldPartition3D::get_active_request_count() const {
+	return requested_paths.size();
+}
+
+int WorldPartition3D::get_failed_cell_count() const {
+	return failed_cells.size();
+}
+
+void WorldPartition3D::retry_failed_cells() {
+	// Explicit retry preserves registrations and already instantiated cells.
+	failed_cells.clear();
+}
+
 void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_cell_size", "size"), &WorldPartition3D::set_cell_size);
 	ClassDB::bind_method(D_METHOD("get_cell_size"), &WorldPartition3D::get_cell_size);
@@ -502,6 +517,10 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_cell_loaded", "cell"), &WorldPartition3D::is_cell_loaded);
 	ClassDB::bind_method(D_METHOD("get_loaded_cell_count"), &WorldPartition3D::get_loaded_cell_count);
 	ClassDB::bind_method(D_METHOD("get_loaded_cells"), &WorldPartition3D::get_loaded_cells);
+	ClassDB::bind_method(D_METHOD("get_pending_cell_count"), &WorldPartition3D::get_pending_cell_count);
+	ClassDB::bind_method(D_METHOD("get_active_request_count"), &WorldPartition3D::get_active_request_count);
+	ClassDB::bind_method(D_METHOD("get_failed_cell_count"), &WorldPartition3D::get_failed_cell_count);
+	ClassDB::bind_method(D_METHOD("retry_failed_cells"), &WorldPartition3D::retry_failed_cells);
 
 	ADD_GROUP("World Grid", "");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "1,4096,1,or_greater,suffix:m"), "set_cell_size", "get_cell_size");
