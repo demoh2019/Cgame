@@ -72,3 +72,9 @@ func run(t) -> void:
 			t.eq(shuffled[id * 16 + field], float(original_id * 32 + field),
 				"tint and transform always travel together")
 	t.eq(seen.size(), 64, "all physical grass placements are preserved")
+
+	t.current = "grass vertex shader fade budget"
+	var wind_shader: String = GrassField.SHADER_CODE
+	t.check(wind_shader.contains("if (shrink > 0.001)"), "fully-faded blades skip trig after distance LOD")
+	t.check(wind_shader.contains("sheen = 0.0;"), "fully-faded blades have a deterministic zero-gust fallback")
+	t.check(wind_shader.contains("VERTEX.y *= shrink;"), "old gradual fade is retained")
