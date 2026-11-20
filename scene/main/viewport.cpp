@@ -5128,12 +5128,15 @@ float Viewport::get_scaling_3d_scale() const {
 
 void Viewport::set_fsr_sharpness(float p_fsr_sharpness) {
 	ERR_MAIN_THREAD_GUARD;
+	// FSR2's RCAS stage expects a finite, bounded sharpening input.
+	// Sanitize before comparing to the cached value, so invalid user input
+	// can neither reach the GPU nor cause unnecessary renderer updates.
+	if (!Math::is_finite(p_fsr_sharpness)) {
+		p_fsr_sharpness = 0.2f;
+	}
+	p_fsr_sharpness = CLAMP(p_fsr_sharpness, 0.0f, 2.0f);
 	if (fsr_sharpness == p_fsr_sharpness) {
 		return;
-	}
-
-	if (p_fsr_sharpness < 0.0f) {
-		p_fsr_sharpness = 0.0f;
 	}
 
 	fsr_sharpness = p_fsr_sharpness;

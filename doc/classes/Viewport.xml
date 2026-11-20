@@ -345,7 +345,7 @@
 			Disable 3D rendering (but keep 2D rendering).
 		</member>
 		<member name="fsr_sharpness" type="float" setter="set_fsr_sharpness" getter="get_fsr_sharpness" default="0.2">
-			Determines how sharp the upscaled image will be when using the FSR upscaling mode. Sharpness halves with every whole number. Values go from 0.0 (sharpest) to 2.0. Values above 2.0 won't make a visible difference.
+			Determines how sharp the upscaled image will be when using the FSR upscaling mode. Sharpness halves with every whole number. Values go from 0.0 (sharpest) to 2.0. Values outside this range are clamped, and non-finite values fall back to 0.2.
 			To control this property on the root viewport, set the [member ProjectSettings.rendering/scaling_3d/fsr_sharpness] project setting.
 		</member>
 		<member name="global_canvas_transform" type="Transform2D" setter="set_global_canvas_transform" getter="get_global_canvas_transform">

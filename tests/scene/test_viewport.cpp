@@ -42,6 +42,8 @@ TEST_FORCE_LINK(test_viewport)
 #include "tests/display_server_mock.h"
 #include "tests/signal_watcher.h"
 
+#include <limits>
+
 #ifndef PHYSICS_2D_DISABLED
 #include "scene/2d/physics/area_2d.h"
 #include "scene/2d/physics/collision_shape_2d.h"
@@ -50,6 +52,25 @@ TEST_FORCE_LINK(test_viewport)
 #endif // PHYSICS_2D_DISABLED
 
 namespace TestViewport {
+
+TEST_CASE("[SceneTree][Viewport] FSR sharpness is finite and bounded") {
+	Window *root = SceneTree::get_singleton()->get_root();
+	const float original = root->get_fsr_sharpness();
+
+	root->set_fsr_sharpness(-1.0f);
+	CHECK(root->get_fsr_sharpness() == 0.0f);
+	root->set_fsr_sharpness(4.0f);
+	CHECK(root->get_fsr_sharpness() == 2.0f);
+
+	root->set_fsr_sharpness(std::numeric_limits<float>::infinity());
+	CHECK(root->get_fsr_sharpness() == 0.2f);
+	root->set_fsr_sharpness(std::numeric_limits<float>::quiet_NaN());
+	CHECK(root->get_fsr_sharpness() == 0.2f);
+
+	root->set_fsr_sharpness(0.16f);
+	CHECK(root->get_fsr_sharpness() == 0.16f);
+	root->set_fsr_sharpness(original);
+}
 
 class NotificationControlViewport : public Control {
 	GDCLASS(NotificationControlViewport, Control);
