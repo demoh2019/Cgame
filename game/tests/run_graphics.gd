@@ -20,6 +20,7 @@ const SUITES := [
 	"res://tests/test_graphics_quality.gd",
 	"res://tests/test_graphics_stone_microdetail.gd",
 	"res://tests/test_graphics_reflections.gd",
+	"res://tests/test_pbr_reflection_occlusion.gd",
 	"res://tests/test_graphics_indirect_lighting.gd",
 	"res://tests/test_graphics_lighting.gd",
 	"res://tests/test_cinematic_fog.gd",
