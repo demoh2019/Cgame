@@ -257,7 +257,14 @@ func _spawn_instances(label: String, mesh: Mesh,
     node.name = label
     node.multimesh = multi
     node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-    node.visibility_range_end = 145.0
+    # Fine grass has a shorter visibility range and a soft camera-distance fade.
+    # Tree and rock clusters remain visible much farther away.
+    if label.begins_with("Grass_"):
+        node.visibility_range_end = 64.0
+        node.visibility_range_end_margin = 11.0
+        node.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+    else:
+        node.visibility_range_end = 145.0
     add_child(node)
     return node
 
