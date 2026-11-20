@@ -145,8 +145,8 @@ func _process(delta: float) -> void:
 func _update_hud() -> void:
     if hud == null:
         return
-    var detail_count := detail.call("get_loaded_cell_count") if detail != null else 0
-    var distant_count := distant.call("get_loaded_cell_count") if distant != null else 0
+    var detail_count: int = int(detail.call("get_loaded_cell_count")) if detail != null else 0
+    var distant_count: int = int(distant.call("get_loaded_cell_count")) if distant != null else 0
     hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nWASD fly  Space/Ctrl vertical  Shift fast  Esc mouse\nP: predictive prefetch %s   L: distant proxies %s   R: retry" % [
         Engine.get_frames_per_second(),
         detail_count,
