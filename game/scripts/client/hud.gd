@@ -282,6 +282,12 @@ func _build() -> void:
 	canteen_button.tooltip_text = "Requires a crafted canteen, one carbon filter and the shared lake cooldown."
 	canteen_button.pressed.connect(func() -> void: client.refill_canteen())
 	inventory_box.add_child(canteen_button)
+	var chain_button := Button.new()
+	chain_button.name = "UseBikeChainWrap"
+	chain_button.text = "Quiet bike chain (180s; workbench craft)"
+	chain_button.tooltip_text = "Dismount and use 1 wrap: bike noise 27m -> 9m, gunshots unaffected."
+	chain_button.pressed.connect(func() -> void: client.use_item("bike_chain_wrap"))
+	inventory_box.add_child(chain_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -1063,6 +1069,12 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and data.has("chain_wrap_seconds"):
+		say("Quiet bike chain fitted: %.0fs quieter riding." % float(data["chain_wrap_seconds"]))
+		return
+	if kind == "use" and bool(data.get("chain_wrap", false)):
+		say("Bike chain wrap: " + str(data.get("reason", "rejected")) + " (no kit spent)")
+		return
 	if kind == "outpost_provision":
 		if bool(data.get("ok", false)):
 			say("Outpost supplied: +%ds hold time, %d deliveries left." % [
@@ -1401,6 +1413,11 @@ func _process(_delta: float) -> void:
 	var spore_filter_left: float = float(client.you.get("spore_filter_seconds", 0.0))
 	if spore_filter_left > 0.0:
 		_info_label.text += "\nSPORE FILTER: %.0fs remaining (airborne spores only)" % spore_filter_left
+	var quiet_left: float = float(client.you.get("chain_wrap_seconds", 0.0))
+	if quiet_left > 0.0:
+		_info_label.text += "\nQUIET CHAIN: %.0fs | Bike noise 9m" % quiet_left
+	elif bool(client.you.get("mounted", false)):
+		_info_label.text += "\nBIKE NOISE: 27m while moving (infected can hear)"
 	_info_label.text += "\nTRAIL BIKE: %s | F4 mount/dismount | remount %.0fs" % [
 		"RIDING" if bool(client.you.get("mounted", false)) else ("CARRIED" if client.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		float(client.you.get("mount_cooldown", 0.0))]

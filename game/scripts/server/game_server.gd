@@ -39,6 +39,7 @@ const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
+const BikeChain = preload("res://scripts/shared/bike_chain.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
@@ -154,6 +155,7 @@ class Player:
 	var crouching: bool = false # Ephemeral, server-authorized posture.
 	var mounted: bool = false # Session-only; never saved.
 	var mount_cooldown: float = 0.0
+	var chain_wrap_seconds: float = 0.0 # Validated, persisted noise protection.
 	var decoy_timer: float = 0.0 # Anti-spam timer; no persistent character data.
 	var action: Dictionary = {} # Current gathering or fishing: {"remaining": s, "total": s, ...}
 	var fish_next_at: float = 0.0
@@ -316,6 +318,7 @@ func character_data(player: Player) -> Dictionary:
 		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
 		"spore_filter_seconds": player.spore_filter_seconds,
+		"chain_wrap_seconds": player.chain_wrap_seconds,
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 	}
 
@@ -383,6 +386,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("spore_filter_seconds", 0.0),
 			0.0, SporeHazard.FILTER_DURATION_SECONDS):
+		return false
+	if not SaveValidation.finite_number(data.get("chain_wrap_seconds", 0.0),
+			0.0, BikeChain.DURATION_SECONDS):
 		return false
 	if not HeartyMeal.valid_state(data.get("meal_seconds", 0.0), data.get("meal_tier", 0)):
 		return false
@@ -460,6 +466,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.rain_cooldown = float(data.get("rain_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
 	player.spore_filter_seconds = float(data.get("spore_filter_seconds", 0.0))
+	player.chain_wrap_seconds = float(data.get("chain_wrap_seconds", 0.0))
 	player.meal_seconds = float(data.get("meal_seconds", 0.0))
 	player.meal_tier = int(data.get("meal_tier", 0))
 	player.inventory = parsed_bag["inventory"]
@@ -561,6 +568,7 @@ func _spawn_player(player: Player) -> void:
 	player.recall = {}
 	player.mounted = false
 	player.mount_cooldown = 0.0
+	player.chain_wrap_seconds = 0.0
 	player.attack_timer = 0.0
 	player.skill_timer = 0.0
 	player.dodge_timer = 0.0
@@ -669,7 +677,8 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		# actual travel after collision, and only an owned mount creates rattle.
 		var bike_noise: float = Mounts.noise_for_distance(moved) if player.mounted else 0.0
 		if bike_noise > 0.0:
-			player.noise_radius = maxf(player.noise_radius, bike_noise)
+			player.noise_radius = maxf(player.noise_radius,
+				BikeChain.riding_radius(player.chain_wrap_seconds))
 			player.noise_timer = maxf(player.noise_timer, Mounts.NOISE_SECONDS)
 		# Walking away cancels gathering and shoreline fishing.
 		if not player.action.is_empty():
@@ -2428,6 +2437,16 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 				return {"ok": false, "reason": "not_carried"}
 			player.combat_energy = FrontierStim.apply(player.survival, player.combat_energy)
 			player.stim_cooldown = FrontierStim.COOLDOWN
+		"bike_wrap":
+			if item_id != BikeChain.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var wrap_reason: String = BikeChain.apply_reason(
+				player.inventory, player.chain_wrap_seconds)
+			if wrap_reason != "":
+				return {"ok": false, "reason": wrap_reason, "chain_wrap": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "chain_wrap": true}
+			player.chain_wrap_seconds = BikeChain.DURATION_SECONDS
 		"spore_filter":
 			if item_id != SporeHazard.FILTER_ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -2493,6 +2512,8 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
 	player.dirty_character = true
+	if item_id == BikeChain.ITEM_ID:
+		return {"ok": true, "chain_wrap_seconds": player.chain_wrap_seconds}
 	return {"ok": true}
 
 
@@ -3312,6 +3333,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.dodge_immunity = 0.0
 	victim.guardian_brace = 0.0
 	victim.spore_filter_seconds = 0.0
+	victim.chain_wrap_seconds = 0.0
 	parties.clear_standard_by(victim.id)
 	parties.cancel_ready_check_for(victim.id)
 	victim.meal_seconds = 0.0
@@ -3396,6 +3418,10 @@ func _tick_players(delta: float) -> void:
 	for player in players.values():
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.mount_cooldown = maxf(0.0, player.mount_cooldown - maxf(0.0, delta))
+		if player.chain_wrap_seconds > 0.0:
+			player.chain_wrap_seconds = maxf(0.0,
+				player.chain_wrap_seconds - maxf(0.0, delta))
+			player.dirty_character = true
 		if player.mounted and (not _alive(player) or
 				player.inventory.count(Mounts.ITEM_ID) < 1 or
 				player.inventory.movement_factor(player.skills.bonus("carry_capacity")) < 0.9999 or
@@ -4415,6 +4441,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 			"stamina": player.survival.stamina, "crouching": player.crouching,
 			"mounted": player.mounted, "mount_cooldown": player.mount_cooldown,
+			"chain_wrap_seconds": player.chain_wrap_seconds,
 			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),

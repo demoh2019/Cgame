@@ -442,6 +442,11 @@ static func _build_items() -> void:
 		"kind": "deployable", "tier": 1, "stack": 10, "weight": 0.9, "value": 28})
 	_add_recipe("infected_snare", "infected_snare", 1,
 		{"wood_1": 2, "fiber_1": 2, "scrap": 1}, "", 3.0)
+	# Field-fitted chain wrap lowers the noise from an otherwise rattling bike.
+	_add_item("bike_chain_wrap", {"name": "Quiet Chain Wrap", "kind": "bike_wrap",
+		"tier": 1, "stack": 5, "weight": 0.3, "value": 24})
+	_add_recipe("bike_chain_wrap", "bike_chain_wrap", 1,
+		{"cloth_1": 2, "fiber_1": 2, "scrap": 2}, "workbench", 4.0)
 	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
 	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
 		"tier": 2, "weight": 12.0, "value": 180})
