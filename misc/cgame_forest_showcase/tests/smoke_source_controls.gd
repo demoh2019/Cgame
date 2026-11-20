@@ -27,6 +27,14 @@ func _wait_source(stream: WorldPartition3D, name: String) -> bool:
     return false
 
 
+func _wait_navigation_source(stream: WorldPartition3D, name: String) -> bool:
+    for i in range(MAX_FRAMES):
+        if stream.is_streaming_source_navigation_ready(name):
+            return true
+        await physics_frame
+    return false
+
+
 func _run() -> void:
     var scene: PackedScene = load("res://world.tscn")
     if scene == null:
@@ -88,6 +96,16 @@ func _run() -> void:
     if not stream.is_cell_loaded(SURVEY) or not stream.is_cell_loaded(TOWER):
         _fail("independent distant areas are missing")
         return
+    if not await _wait_navigation_source(stream, SURVEY_NAME):
+        _fail("survey NavServer navigation did not synchronize across its region")
+        return
+    if not await _wait_navigation_source(stream, TOWER_NAME):
+        _fail("watchtower NavServer navigation did not synchronize")
+        return
+    if stream.get_streaming_source_navigation_progress(SURVEY_NAME) != 1.0 \
+            or stream.get_streaming_source_navigation_progress(TOWER_NAME) != 1.0:
+        _fail("named sources did not report 100% synchronized navigation")
+        return
 
     # Renderer/game HUD is updated on the normal game update frequency.
     for i in range(3):
@@ -103,7 +121,8 @@ func _run() -> void:
     world.call("_refresh_hud")
     if not label.text.contains("Источники: 2/8") \
             or not label.text.contains("разведка: ГОТОВ") \
-            or not label.text.contains("башня: ГОТОВ"):
+            or not label.text.contains("башня: ГОТОВ") \
+            or not label.text.contains("Навигация зон: разведка 100%   башня 100%"):
         _fail("HUD did not report both ready remote streaming sources")
         return
     if int(world.get("source_ready_events")) < 2:
