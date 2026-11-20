@@ -11,14 +11,22 @@ func run(t) -> void:
 	t.eq(str(config.get("type", "")), "float", "terrain LOD radius is a float")
 	t.near(float(config.get("value", -1.0)), 42.0, 0.001, "initial terrain quality is balanced")
 	var previous := 0.0
+	var previous_budget := 0
 	for level in GraphicsQuality.NAMES.size():
 		var p: Dictionary = GraphicsQuality.profile(level)
 		var radius: float = float(p.get("terrain_detail_radius", -1.0))
 		t.check(radius >= 20.0 and radius <= 120.0, "terrain LOD distance has sane bounds for %s" % GraphicsQuality.NAMES[level])
 		t.check(radius > previous, "%s quality increases detail radius" % GraphicsQuality.NAMES[level])
 		previous = radius
+		var budget: int = int(p.get("terrain_layer_budget", 0))
+		t.check(budget > previous_budget and budget <= 13, "PBR texture layer budget grows with %s" % GraphicsQuality.NAMES[level])
+		previous_budget = budget
 
 	t.current = "terrain shading cost"
+	t.check(ProjectSettings.has_setting("shader_globals/aa_terrain_layer_budget"), "PBR blend budget is a registered global uniform")
+	var budget_config: Dictionary = ProjectSettings.get_setting("shader_globals/aa_terrain_layer_budget", {})
+	t.eq(str(budget_config.get("type", "")), "int", "layer budget uses integer shader global")
+	t.eq(int(budget_config.get("value", -1)), 3, "default three blended PBR layers")
 	var shader := load("res://assets/shaders/ground.gdshader") as Shader
 	t.check(shader != null, "textured terrain shader is loadable")
 	if shader != null:
@@ -32,8 +40,14 @@ func run(t) -> void:
 		t.check(code.contains("dFdx(p / tile_meters)") and code.contains("dFdy(p / tile_meters)"), "mip gradients are evaluated before dynamic branches")
 		t.check(code.contains("aa_weather_wetness"), "rain-wet materials remain supported")
 		t.check(code.contains("site_patches"), "roads and city ground are still layered")
+		t.check(code.contains("global uniform int aa_terrain_layer_budget;"), "shader obeys global layer budget")
+		t.check(code.contains("selected_ids[4]") and code.contains("selected_weights[4]"), "bounded top-weighted selection is active")
+		t.check(code.contains("layer_average[i]"), "discarded detail layers preserve palette through macro colors")
+		t.check(code.contains("if (layer_budget >= 13)"), "Ultra preserves all texture layers")
+		t.check(code.contains("textureGrad(albedo_layers, vec3(world_position.zy"), "cliff mapping has explicit mip gradients")
 
 	var controller := load("res://scripts/client/graphics_quality.gd") as Script
 	t.check(controller != null, "gameplay graphics controller is available")
 	if controller != null:
 		t.check(controller.source_code.contains('global_shader_parameter_set(&"aa_terrain_detail_radius"'), "graphics preset changes update the terrain GPU global")
+		t.check(controller.source_code.contains('global_shader_parameter_set(&"aa_terrain_layer_budget"'), "quality switch applies the texture layer budget")

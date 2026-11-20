@@ -61,3 +61,11 @@ The LOD is client-only and needs no changes to combat, collisions or server stat
 The cloud shader now uses a **one-time 128×128 L8 tileable GPU texture** shared by terrain, grass and foliage, instead of computing three sine/hash fBM octaves for each fragment. Cloud contrast fades with nighttime and heavy storm cover; Performance disables the texture lookup altogether. No new CPU work occurs during normal frame rendering.
 
 Quality levels also adjust the draw distance and imported mesh `lod_bias` for streamed **tree / rock / bush / decorative** MultiMeshes. Settlement structures remain uncapped. Existing batches update on the active preset change, without rebuilding world data. Dense decorative meshes already use the existing 32 m spatial partitions. See [CLOUD_HLOD_2026_11.md](CLOUD_HLOD_2026_11.md) for implementation, test commands, and the GPU benchmarking plan.
+
+## Bounded terrain layer sampling
+
+Based on Unreal Landscape layer blending and Unity Terrain Layers, the Poly Haven textured ground now selects only the strongest **2 / 3 / 4 / 13** layers per fragment on Performance / Balanced / High / Ultra. All 13 surfaces still participate in biome, road, snow and settlement weight calculations. The remaining layers contribute their existing artist-targeted average color, so limiting texture samples does not erase coastlines or the underlying biome palette.
+
+The shader chooses the dominant weighted layers before making costly array texture fetches. Their PBR albedo and normal detail is sampled exactly as before; Ultra samples the entire blend for maximum visual fidelity. Cliff triplanar samples now use explicit gradients, preventing unstable mip selection within the conditional blending path. The new integer global `aa_terrain_layer_budget` is shared by all streamed terrain chunks and updated by the existing quality selector.
+
+The palette approximation trades off subtle texture detail in weakly weighted layers on lower presets. It does not reduce the full weight calculation, so improvements must be confirmed with a GPU profile and 1% lows rather than assumed. Benchmark wooded trails, shorelines, ruined towns and cliffs at equal camera distance and weather; compare Ultra versus High to check blend quality and ensure there are no visible seams when ranked layers change.

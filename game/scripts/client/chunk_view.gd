@@ -243,6 +243,7 @@ static func textured_material() -> ShaderMaterial:
 		albedo.append(_layer_image(diffuse_texture, 1024))
 		normals.append(_layer_image(normal_texture, 512))
 	var tints := PackedVector3Array()
+	var averages := PackedVector3Array()
 	for index in albedo.size():
 		var small: Image = albedo[index].duplicate()
 		small.clear_mipmaps()
@@ -254,6 +255,7 @@ static func textured_material() -> ShaderMaterial:
 				sum += Vector3(pixel.r, pixel.g, pixel.b)
 		var average: Vector3 = sum / 256.0
 		var target: Color = TERRAIN_TARGETS[index]
+		averages.append(Vector3(target.r, target.g, target.b))
 		tints.append(Vector3(target.r / maxf(average.x, 0.02), target.g / maxf(average.y, 0.02), target.b / maxf(average.z, 0.02)))
 	var albedo_array := Texture2DArray.new()
 	var normal_array := Texture2DArray.new()
@@ -268,6 +270,7 @@ static func textured_material() -> ShaderMaterial:
 	_textured_material.set_shader_parameter("normal_layers", normal_array)
 	_textured_material.set_shader_parameter("biome_texels", float(BIOME_TEXELS))
 	_textured_material.set_shader_parameter("layer_tint", tints)
+	_textured_material.set_shader_parameter("layer_average", averages)
 	return _textured_material
 
 
