@@ -3,6 +3,7 @@
 extends Node3D
 
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
+const GameSave = preload("res://scripts/game_save.gd")
 const WORLD_EXTENT: float = 64.0
 const GRID_SEGMENTS: int = 112
 const CHUNK_EDGE: float = 32.0
@@ -15,6 +16,7 @@ var hud: Label
 var hint: Label
 var world_partition: WorldPartition3D
 var crystals: Array[Node3D] = []
+var collected_ids: Array[int] = []
 
 var elapsed: float = 0.0
 var hud_elapsed: float = 0.0
@@ -32,7 +34,8 @@ func _ready() -> void:
     _create_camera()
     _create_hud()
     _create_streaming_world()
-    _apply_quality(true)
+    _load_game()
+    _apply_quality(high_quality)
     _refresh_hud()
 
 
@@ -192,6 +195,8 @@ func _create_crystals() -> void:
         Vector2(43, 22), Vector2(35, -41)
     ]
     for i in range(positions.size()):
+        if collected_ids.has(i):
+            continue
         var p: Vector2 = positions[i]
         var holder := Node3D.new()
         holder.name = "Crystal_%02d" % i
@@ -231,7 +236,7 @@ func _create_hud() -> void:
     hint.position = Vector2(22, 166)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD / стрелки: движение  •  мышь: обзор (щелчок)  •  E: сбор\nF1: кинематографично  •  F2: производительность  •  Esc: курсор"
+    hint.text = "WASD / стрелки: движение  •  мышь: обзор (щелчок)  •  E: сбор\nF1: качество  •  F2: скорость  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
     canvas.add_child(hint)
 
 
@@ -318,8 +323,46 @@ func _unhandled_input(event: InputEvent) -> void:
                 _apply_quality(true)
             KEY_F2:
                 _apply_quality(false)
+            KEY_F5:
+                _save_game()
+            KEY_F9:
+                _load_game()
+                _apply_quality(high_quality)
             KEY_E:
                 _collect_nearest()
+
+
+func _save_game() -> void:
+    var saved: bool = GameSave.save_state({
+        "relics": collected_ids,
+        "position_xz": [camera.position.x, camera.position.z],
+        "look": [camera.rotation.x, camera.rotation.y],
+        "quality": high_quality
+    })
+    if saved and collected < CRYSTAL_TOTAL:
+        hint.text = "Прогресс сохранён локально. F9: загрузить. W/A/S/D: ходьба, E: реликвии."
+
+
+func _load_game() -> void:
+    var state: Dictionary = GameSave.load_state(CRYSTAL_TOTAL)
+    if state.is_empty():
+        return
+    collected_ids = state["relics"]
+    collected = collected_ids.size()
+    for crystal in crystals:
+        crystal.queue_free()
+    crystals.clear()
+    _create_crystals()
+
+    var position: Vector2 = state["position_xz"]
+    camera.position.x = position.x
+    camera.position.z = position.y
+    camera.position.y = height_at(position.x, position.y) + 2.1
+    var look: Vector2 = state["look"]
+    camera.rotation.x = look.x
+    camera.rotation.y = look.y
+    high_quality = state["quality"]
+    _refresh_hud()
 
 
 func _collect_nearest() -> void:
@@ -334,7 +377,11 @@ func _collect_nearest() -> void:
             distance = dist
             nearest = candidate
     if nearest:
+        var id: int = nearest.name.trim_prefix("Crystal_").to_int()
+        if not collected_ids.has(id):
+            collected_ids.append(id)
         crystals.erase(nearest)
         nearest.queue_free()
-        collected += 1
+        collected = collected_ids.size()
+        _save_game()
         _refresh_hud()
