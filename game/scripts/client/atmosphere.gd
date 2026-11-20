@@ -213,7 +213,8 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		sky_material.set_shader_parameter("solar_elevation", clampf(sun_height, -0.15, 1.0))
 		# Use the same native spectral model as the sky LUT for distant-world fog.
 		# This CPU sample runs only at the existing sky radiance refresh cadence.
-		if _sky_scattering_generator != null and _atmospheric_lut != null:
+		if _sky_scattering_generator != null and _atmospheric_lut != null \
+				and _sky_scattering_generator.has_method("sample_scattering"):
 			var optical: Variant = _sky_scattering_generator.call(
 				"sample_scattering", 0.04, clampf(sun_height, -0.15, 1.0), 2.0)
 			if optical is Color:
