@@ -32,6 +32,7 @@
 
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
+#include "core/templates/vector.h"
 #include "scene/3d/node_3d.h"
 #include "scene/resources/packed_scene.h"
 
@@ -42,6 +43,7 @@ class WorldPartition3D : public Node3D {
 
 	Dictionary cell_scenes;
 	NodePath observer_path;
+	Array additional_observer_paths;
 	real_t cell_size = 128.0;
 	int load_radius = 1;
 	int unload_radius = 2;
@@ -57,6 +59,8 @@ class WorldPartition3D : public Node3D {
 	HashSet<Vector2i> failed_cells;
 
 	static bool _within_radius(const Vector2i &p_cell, const Vector2i &p_center, int p_radius);
+	void _append_source_center(const NodePath &p_path, Vector<Vector2i> &r_centers) const;
+	bool _within_any_radius(const Vector2i &p_cell, const Vector<Vector2i> &p_centers, int p_radius) const;
 	String _get_scene_path(const Vector2i &p_cell) const;
 	void _unload_cell(const Vector2i &p_cell);
 	void _clear_active_cells();
@@ -93,6 +97,9 @@ public:
 
 	void set_observer_path(const NodePath &p_path);
 	NodePath get_observer_path() const;
+
+	void set_additional_observer_paths(const Array &p_paths);
+	Array get_additional_observer_paths() const;
 
 	void set_cell_scenes(const Dictionary &p_cells);
 	Dictionary get_cell_scenes() const;
