@@ -37,6 +37,8 @@
 #include "core/object/object.h"
 #include "core/os/time.h"
 #include "scene/main/node.h"
+#include "scene/3d/navigation/navigation_region_3d.h"
+#include "servers/navigation_3d/navigation_server_3d.h"
 
 #include <cstdint>
 
@@ -176,13 +178,142 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	return true;
 }
 
+Node *WorldPartition3D::_find_navigation_region(Node *p_root) const {
+	if (p_root == nullptr) {
+		return nullptr;
+	}
+	NavigationRegion3D *region = Object::cast_to<NavigationRegion3D>(p_root);
+	if (region != nullptr && region->is_enabled() && region->get_navigation_mesh().is_valid() &&
+			region->get_navigation_mesh()->get_polygon_count() > 0) {
+		return region;
+	}
+	for (int i = 0; i < p_root->get_child_count(); i++) {
+		Node *found = _find_navigation_region(p_root->get_child(i));
+		if (found != nullptr) {
+			return found;
+		}
+	}
+	return nullptr;
+}
+
+void WorldPartition3D::_clear_navigation_cell(const Vector2i &p_cell) {
+	navigation_pending_regions.erase(p_cell);
+	const bool was_ready = navigation_ready_regions.has(p_cell);
+	navigation_ready_regions.erase(p_cell);
+	if (was_ready) {
+		emit_signal(SNAME("cell_navigation_unready"), p_cell);
+	}
+}
+
+bool WorldPartition3D::is_cell_navigation_ready(const Vector2i &p_cell) const {
+	if (!streaming_enabled || !is_inside_tree() || !is_cell_physics_ready(p_cell)) {
+		return false;
+	}
+	const ObjectID *id = navigation_ready_regions.getptr(p_cell);
+	if (id == nullptr) {
+		return false;
+	}
+	NavigationRegion3D *region = Object::cast_to<NavigationRegion3D>(ObjectDB::get_instance(*id));
+	if (region == nullptr || !region->is_inside_tree() || region->is_queued_for_deletion() || !region->is_enabled()) {
+		return false;
+	}
+	const Ref<NavigationMesh> mesh = region->get_navigation_mesh();
+	if (mesh.is_null() || mesh->get_polygon_count() == 0) {
+		return false;
+	}
+	NavigationServer3D *navigation = NavigationServer3D::get_singleton();
+	const RID region_rid = region->get_rid();
+	const RID map = region->get_navigation_map();
+	return navigation != nullptr && navigation->region_get_enabled(region_rid) &&
+			navigation->region_get_map(region_rid) == map && map.is_valid() &&
+			navigation->map_get_iteration_id(map) > 0 &&
+			navigation->region_get_iteration_id(region_rid) > 0;
+}
+
+bool WorldPartition3D::are_cells_navigation_ready(const Vector2i &p_center, int p_radius) const {
+	ERR_FAIL_COND_V_MSG(p_radius < 0 || p_radius > 32, false, "WorldPartition3D navigation-ready query radius must be between 0 and 32.");
+	const Array cells = get_cells_in_radius(p_center, p_radius);
+	if (cells.is_empty()) {
+		return false;
+	}
+	for (int i = 0; i < cells.size(); i++) {
+		if (!is_cell_navigation_ready(cells[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+int WorldPartition3D::get_navigation_ready_cell_count() const {
+	int result = 0;
+	for (const KeyValue<Vector2i, ObjectID> &E : navigation_ready_regions) {
+		if (is_cell_navigation_ready(E.key)) {
+			result++;
+		}
+	}
+	return result;
+}
+
+void WorldPartition3D::_update_navigation_readiness() {
+	// NavigationServer applies region map changes asynchronously. A scene
+	// root's _ready() and our physics activation barrier cannot replace its
+	// own iteration counters. Check the actual navigation server here.
+	Vector<Vector2i> lost;
+	for (const KeyValue<Vector2i, ObjectID> &E : navigation_ready_regions) {
+		if (!is_cell_navigation_ready(E.key)) {
+			lost.push_back(E.key);
+		}
+	}
+	for (const Vector2i &cell : lost) {
+		_clear_navigation_cell(cell);
+	}
+	Vector<Vector2i> available;
+	for (const KeyValue<Vector2i, ObjectID> &E : navigation_pending_regions) {
+		if (!is_cell_physics_ready(E.key)) {
+			continue;
+		}
+		NavigationRegion3D *region = Object::cast_to<NavigationRegion3D>(ObjectDB::get_instance(E.value));
+		if (region == nullptr || !region->is_inside_tree() || region->is_queued_for_deletion() || !region->is_enabled()) {
+			continue;
+		}
+		const Ref<NavigationMesh> mesh = region->get_navigation_mesh();
+		if (mesh.is_null() || mesh->get_polygon_count() == 0) {
+			continue;
+		}
+		NavigationServer3D *navigation = NavigationServer3D::get_singleton();
+		if (navigation == nullptr) {
+			continue;
+		}
+		const RID region_rid = region->get_rid();
+		const RID map = region->get_navigation_map();
+		if (map.is_valid() && navigation->region_get_enabled(region_rid) &&
+				navigation->region_get_map(region_rid) == map &&
+				navigation->map_get_iteration_id(map) > 0 &&
+				navigation->region_get_iteration_id(region_rid) > 0) {
+			available.push_back(E.key);
+		}
+	}
+	for (const Vector2i &cell : available) {
+		const ObjectID *id = navigation_pending_regions.getptr(cell);
+		if (id == nullptr || !is_cell_physics_ready(cell)) {
+			continue;
+		}
+		navigation_ready_regions.insert(cell, *id);
+		navigation_pending_regions.erase(cell);
+		// Callback handlers may unload other cells. Always recheck each entry.
+		emit_signal(SNAME("cell_navigation_ready"), cell);
+	}
+	_refresh_processing();
+}
+
 void WorldPartition3D::_refresh_processing() {
 	if (is_inside_tree()) {
 		const bool runtime = !Engine::get_singleton()->is_editor_hint();
 		set_process(runtime && (streaming_enabled || !requested_paths.is_empty()));
 		// Only tick physics while newly loaded cells are waiting to be armed.
 		// This keeps normal idle streaming free of a per-physics-tick scan.
-		set_physics_process(runtime && streaming_enabled && !physics_pending_cells.is_empty());
+		set_physics_process(runtime && streaming_enabled && (!physics_pending_cells.is_empty() ||
+				!navigation_pending_regions.is_empty() || !navigation_ready_regions.is_empty()));
 	}
 }
 
@@ -208,6 +339,7 @@ void WorldPartition3D::_update_physics_readiness() {
 		// never iterate the pending map while emitting gameplay signals.
 		emit_signal(SNAME("cell_physics_ready"), cell);
 	}
+	_update_navigation_readiness();
 	_refresh_processing();
 }
 
