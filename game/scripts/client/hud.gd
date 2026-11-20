@@ -350,6 +350,12 @@ func _build() -> void:
 	survey_button.tooltip_text = "Mark nearest unopened red/black ruin within 190 m for 75s."
 	survey_button.pressed.connect(func() -> void: client.survey_ruins())
 	inventory_box.add_child(survey_button)
+	var scanner_button := Button.new()
+	scanner_button.name = "UseFieldThreatScanner"
+	scanner_button.text = "Scan elite / raid threats (145m; 1 crafted scanner)"
+	scanner_button.tooltip_text = "Workbench craft (3 scrap, T2 bar, filter). One successful scan privately marks a living raid boss or elite for 50s."
+	scanner_button.pressed.connect(func() -> void: client.use_item("field_threat_scanner"))
+	inventory_box.add_child(scanner_button)
 	var chain_button := Button.new()
 	chain_button.name = "UseBikeChainWrap"
 	chain_button.text = "Quiet bike chain (180s; workbench craft)"
@@ -1400,6 +1406,17 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and bool(data.get("threat_scan", false)):
+		if bool(data.get("ok", false)):
+			say("SCOUT: %s threat at X:%d Z:%d — private moving marker for %ds." % [
+				str(data.get("kind", "elite")).to_upper(),
+				roundi(float(data.get("x", 0.0))),
+				roundi(float(data.get("z", 0.0))),
+				int(data.get("seconds", 50))])
+		else:
+			say("Threat scanner: %s (device not spent)." % str(
+				data.get("reason", "rejected")))
+		return
 	if kind == "use" and data.has("storm_insulator_seconds"):
 		say("Copper shock lining active for 180s: -60% lightning damage.")
 		return
