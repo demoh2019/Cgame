@@ -324,6 +324,8 @@ public:
 	float get_ssil_normal_rejection() const;
 
 	// SDFGI
+	// Update runtime GI budget in a single RenderingServer transaction.
+	void configure_sdfgi(bool p_enabled, int p_cascades, float p_min_cell_size, bool p_read_sky_light, float p_bounce_feedback, float p_energy);
 	void set_sdfgi_enabled(bool p_enabled);
 	bool is_sdfgi_enabled() const;
 	void set_sdfgi_cascades(int p_cascades);
