@@ -1,6 +1,9 @@
 shader_type spatial;
 render_mode blend_mix, depth_draw_never, cull_back, diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
+// Shared smoothed regional weather wind, uploaded at 10 Hz by Atmosphere.
+// xy is the wind direction, z is normalized wind strength (0..1).
+global uniform vec3 aa_vegetation_wind;
 
 // Open water: colour from the depth under the surface, a soft foam line along the shore, scrolling ripples
 // and a Fresnel sheen that picks up the sky.
@@ -16,6 +19,8 @@ uniform vec3 shallow_color : source_color = vec3(0.16, 0.5, 0.52);
 uniform vec3 deep_color : source_color = vec3(0.02, 0.15, 0.3);
 uniform float clarity = 5.0;
 uniform float ripple_strength = 0.35;
+// Optional near-camera wind-aligned wave response. Zero on low-end tiers.
+uniform float wind_wave_strength = 0.0;
 uniform float detail_fade_start = 65.0;
 uniform float detail_fade_end = 125.0;
 // Near-shore light filaments are enabled only on high-end presets and only in shallow water.
@@ -76,6 +81,20 @@ void fragment() {
 			float h = value_noise(flow);
 			slope += vec2(value_noise(flow + vec2(e, 0.0)) - h,
 				value_noise(flow + vec2(0.0, e)) - h) * (0.13 / e) * detail_fade;
+		}
+		// High/Ultra wind fetch: one analytic travelling wave, oriented by
+		// the already smoothed regional weather vector. Use the same slope
+		// for PBR normals, screen refraction and storm whitecaps.
+		// Near-only and preset-gated: no additional work offshore in the
+		// distance, in calm weather, or on Performance/Balanced.
+		if (wind_wave_strength > 0.001 && detail_fade > 0.001
+				&& aa_vegetation_wind.z > 0.001) {
+			vec2 wind_dir = normalize(aa_vegetation_wind.xy);
+			float wind_power = clamp(aa_vegetation_wind.z, 0.0, 1.0);
+			float flow_phase = dot(p, wind_dir) * 1.25
+				- t * (0.7 + 0.9 * wind_power);
+			vec2 wind_slope = wind_dir * cos(flow_phase) * (0.035 + storm * 0.025);
+			slope += wind_slope * wind_wave_strength * wind_power * detail_fade;
 		}
 		// Amplify the existing waves rather than adding costly new noise samples.
 		slope *= storm_wave_strength;
