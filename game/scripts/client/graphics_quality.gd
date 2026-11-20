@@ -232,6 +232,8 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		atmosphere_profile["sky_use_cached_radiance"] = world_profile["sky_use_cached_radiance"]
 		atmosphere_profile["sky_scattering_strength"] = world_profile["sky_scattering_strength"]
 		atmosphere_profile["atmospheric_lut_strength"] = world_profile["atmospheric_lut_strength"]
+		# Keep the world's directional light in sync with spectral sky extinction.
+		atmosphere_profile["sun_transmittance_strength"] = world_profile["sun_transmittance_strength"]
 		atmosphere_profile["moon_detail_strength"] = world_profile["moon_detail_strength"]
 		atmosphere_profile["cirrus_detail"] = world_profile["cirrus_detail"]
 		atmosphere_profile["volumetric_cloud_steps"] = world_profile["volumetric_cloud_steps"]
