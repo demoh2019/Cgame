@@ -58,6 +58,7 @@ const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
 const RaidRecovery = preload("res://scripts/shared/raid_recovery.gd")
+const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const AcidNeutralizer = preload("res://scripts/shared/acid_neutralizer.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
@@ -227,6 +228,8 @@ var last_raid_spawn_time: float = -1000000.0
 var raid_started_at: float = 0.0
 var raid_next_slam_at: float = 0.0
 var raid_pending_slam: Dictionary = {} # World position & deadline are server-owned.
+var raid_next_cone_at: float = 0.0 # Independent cooldown for aimed raid attack.
+var raid_pending_cone: Dictionary = {} # Locked origin and aim; server-only until strike.
 var raid_exposed_until: float = 0.0 # Post-slam PvE counterattack window, never persisted.
 var raid_wave: int = 0 # Number of completed reinforcement phases.
 var raid_minions: Array[int] = [] # Raid-only infected are cleared with boss.
@@ -3713,6 +3716,7 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 			loot[item_id] = int(loot.get(item_id, 0)) + int(RaidEncounter.treasure(zone)[item_id])
 		raid_boss_id = -1
 		raid_pending_slam = {}
+		raid_pending_cone = {}
 		raid_exposed_until = 0.0
 		_clear_raid_minions()
 		raid_wave = 0
@@ -4127,6 +4131,7 @@ func _tick_raid_encounter() -> void:
 		if boss == null or not boss.is_alive():
 			raid_boss_id = -1
 			raid_pending_slam = {}
+			raid_pending_cone = {}
 			raid_exposed_until = 0.0
 			_clear_raid_minions()
 			raid_wave = 0
@@ -4139,6 +4144,7 @@ func _tick_raid_encounter() -> void:
 				"x": at.x, "z": at.y})
 			raid_boss_id = -1
 			raid_pending_slam = {}
+			raid_pending_cone = {}
 			raid_exposed_until = 0.0
 			_clear_raid_minions()
 			raid_wave = 0
@@ -4159,6 +4165,12 @@ func _tick_raid_encounter() -> void:
 				raid_pending_slam = {}
 				_resolve_raid_slam(boss_id, center)
 			return
+		if not raid_pending_cone.is_empty():
+			if time >= float(raid_pending_cone["at"]):
+				var strike: Dictionary = raid_pending_cone
+				raid_pending_cone = {}
+				_resolve_raid_cone(strike)
+			return
 		if time >= raid_next_slam_at and boss.target_id != -1:
 			raid_pending_slam = {"id": raid_boss_id,
 				"x": at.x, "z": at.y,
@@ -4168,6 +4180,23 @@ func _tick_raid_encounter() -> void:
 				"x": at.x, "z": at.y,
 				"radius": RaidEncounter.SLAM_RADIUS,
 				"seconds": RaidEncounter.SLAM_WARNING})
+			return
+		if time >= raid_next_cone_at:
+			var target: Player = players.get(boss.target_id)
+			if target != null and _alive(target) and not _is_safe(target.position) and \
+					world.zone_at(target.position.x, target.position.z) >= RaidEncounter.MIN_ZONE and \
+					RaidCone.can_aim(boss.position, target.position):
+				var aim: Vector2 = RaidCone.direction(boss.position, target.position)
+				raid_pending_cone = {"id": raid_boss_id, "x": boss.position.x,
+					"y": boss.position.y, "z": boss.position.z,
+					"dx": aim.x, "dz": aim.y,
+					"at": time + RaidCone.WINDUP_SECONDS}
+				raid_next_cone_at = time + RaidCone.cooldown(boss)
+				events.append({"type": "raid_cone_warning", "id": raid_boss_id,
+					"x": boss.position.x, "z": boss.position.z,
+					"dx": aim.x, "dz": aim.y, "reach": RaidCone.REACH,
+					"half_angle": RaidCone.HALF_ANGLE_DEGREES,
+					"seconds": RaidCone.WINDUP_SECONDS})
 		return
 
 	if time < RaidEncounter.START_DELAY or \
@@ -4196,6 +4225,8 @@ func _tick_raid_encounter() -> void:
 	raid_minions.clear()
 	raid_started_at = time
 	raid_exposed_until = 0.0
+	raid_pending_cone = {}
+	raid_next_cone_at = time + 16.0
 	last_raid_spawn_time = time
 	raid_next_slam_at = time + 9.0
 	events.append({"type": "raid_started", "id": spawn_id,
@@ -4249,6 +4280,39 @@ func _infected_damage_for(victim: Player, armored_damage: float) -> float:
 	return GuardianTaunt.brace_damage(armored_damage, victim.guardian_brace,
 		GuardianTaunt.melee_equipped(victim.inventory),
 		parties.members_of(victim.id).size() >= 2)
+
+
+## A telegraphed cone locks the boss position and direction at wind-up.
+## No attacker-supplied victim list; dodge, safety and armor are verified at impact.
+func _resolve_raid_cone(strike: Dictionary) -> void:
+	var boss_id: int = int(strike.get("id", -1))
+	var boss = zombies.get(boss_id)
+	if boss_id != raid_boss_id or boss == null or not boss.is_alive() or not boss.raid_boss:
+		return
+	var origin := Vector3(float(strike["x"]), float(strike["y"]), float(strike["z"]))
+	var direction := Vector2(float(strike["dx"]), float(strike["dz"]))
+	if not origin.is_finite() or not direction.is_finite() or absf(direction.length_squared() - 1.0) > 0.01:
+		return
+	for survivor in players.values():
+		if not _alive(survivor) or _is_safe(survivor.position) or \
+				world.zone_at(survivor.position.x, survivor.position.z) < RaidEncounter.MIN_ZONE or \
+				not RaidCone.in_sector(origin, direction, survivor.position):
+			continue
+		if survivor.dodge_immunity > 0.0:
+			events.append({"type": "evaded", "peer": survivor.id, "zombie": boss_id})
+			continue
+		var damage: float = Combat.apply_armor(RaidCone.damage(boss), survivor.inventory.armor)
+		damage = _infected_damage_for(survivor, damage)
+		var taken: float = survivor.survival.hurt(damage)
+		if taken > 0.0:
+			_dismount(survivor, true)
+		events.append({"type": "hit", "kind": "player", "id": survivor.id,
+			"damage": damage, "by": -boss_id})
+		if not _alive(survivor):
+			_on_player_death(survivor, -boss_id)
+	events.append({"type": "raid_cone_struck", "id": boss_id,
+		"x": origin.x, "z": origin.z, "dx": direction.x,
+		"dz": direction.y, "reach": RaidCone.REACH})
 
 
 func _resolve_raid_slam(boss_id: int, center: Vector2) -> void:
@@ -5057,6 +5121,15 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"y": world.height_at(warning_at.x, warning_at.y),
 				"z": warning_at.y, "radius": RaidEncounter.SLAM_RADIUS,
 				"until": float(raid_pending_slam["at"])}
+	if not raid_pending_cone.is_empty():
+		var cone_at := Vector2(float(raid_pending_cone["x"]), float(raid_pending_cone["z"]))
+		if here.distance_to(cone_at) <= Defs.INTEREST_RADIUS:
+			snapshot["raid_cone_telegraph"] = {"id": int(raid_pending_cone["id"]),
+				"x": cone_at.x, "y": float(raid_pending_cone["y"]),
+				"z": cone_at.y, "dx": float(raid_pending_cone["dx"]),
+				"dz": float(raid_pending_cone["dz"]), "reach": RaidCone.REACH,
+				"half_angle": RaidCone.HALF_ANGLE_DEGREES,
+				"until": float(raid_pending_cone["at"])}
 	# The skill sheet is small, but snapshots can be lost: resend it when it changed and every few seconds.
 	if player.dirty_skills or time - player.skills_sent_at > SNAPSHOT_REPEAT_SECONDS:
 		var sheet: Dictionary = player.skills.to_dict()
