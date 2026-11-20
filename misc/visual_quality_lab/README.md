@@ -143,3 +143,16 @@ It does not implement tree collision, wind, seasons, or a playable quest system.
 Godot reference: https://docs.godotengine.org/en/4.6/tutorials/performance/using_multimesh.html
 Visibility ranges: https://docs.godotengine.org/en/4.6/tutorials/3d/visibility_ranges.html
 Unreal HLOD: https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-hierarchical-level-of-detail-in-unreal-engine
+
+
+## Visual Quality Lab v6 — playable forest quest and persistent progression
+
+Instead of limiting the example to a graphics showcase, the demo now includes a small **playable exploration quest**. Twelve emissive light shards spawn around the forest on a deterministic seed, with a 15–35 meter radius and a non-overlapping angular distribution. Fly with WASD/Q/E, approach a glowing blue shard, and press **F** within 2.5 meters to collect. The HUD shows progress and proximity guidance. Press **R** or the restart button to replay. On collecting the final shard, the quest clears overcast and restores full midday sunlight through the existing atmosphere controller.
+
+The reusable module is `addons/visual_quality/exploration_quest.gd` (`ExplorationQuest3D`). It validates pickups on the game side, prevents duplicate collection, and saves collected IDs to `user://visual_quality_quest_v1.cfg` with version, seed, and item-count checks. The quest uses no network services, accounts, premium currency, telemetry, or copyrighted content. It is a **local single-player prototype** (not a multiplayer-authoritative reward system), and does not claim to be an entire RPG.
+
+To use the quest in another game, create an `ExplorationQuest3D` node, assign its `player` to a camera/player `Node3D` *before adding it to the scene*, and optionally connect `progress_changed`, `pickup_hint_changed`, and `quest_finished` to your own UI and world systems. The world-space placements assume a flat floor around local Y=0; replace `generate_positions()` with terrain-sampling for uneven worlds. `get_viewport().get_camera_3d()` is used only in the demo integration.
+
+New regression script: `res://tests/test_exploration_quest.gd`, covering deterministic spawn layout, bounds, pickup proximity, duplicate prevention, reset and state validation. CI runs this test as part of the Godot headless suite. **Actual Godot execution and Apple Metal rendering remain unverified while the CI job is queued and the authorized Mac is offline.**
+
+Source pattern: [Godot user:// data paths](https://docs.godotengine.org/en/stable/tutorials/io/data_paths.html), [Godot ConfigFile](https://docs.godotengine.org/en/stable/classes/class_configfile.html).
