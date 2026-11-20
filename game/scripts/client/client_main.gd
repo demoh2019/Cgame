@@ -58,7 +58,7 @@ var _recipes: Array[String] = []
 var _camera: Camera3D
 var _sun: DirectionalLight3D
 var _world_environment: Environment
-var _atmosphere: Node3D
+var _atmosphere # Script-backed Atmosphere instance; custom fields are not members of Node3D.
 var _weather_next_update: float = -1.0
 var _weather_storming := false
 var _avatar: MeshInstance3D
