@@ -110,6 +110,9 @@ private:
 	float emission_angle_filter_attenuation_db = -12.0;
 	float attenuation_filter_cutoff_hz = 5000.0;
 	float attenuation_filter_db = -24.0;
+	// Independent geometry obstruction. Gameplay samples world collision in
+	// the physics frame; the native mixer applies gain + spectral loss.
+	float obstruction_amount = 0.0f;
 
 	float linear_attenuation = 0;
 
@@ -196,6 +199,9 @@ public:
 
 	void set_attenuation_filter_db(float p_db);
 	float get_attenuation_filter_db() const;
+
+	void set_obstruction_amount(float p_amount);
+	float get_obstruction_amount() const;
 
 	void set_attenuation_model(AttenuationModel p_model);
 	AttenuationModel get_attenuation_model() const;
