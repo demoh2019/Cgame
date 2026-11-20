@@ -173,8 +173,14 @@
 		<member name="lod_distance" type="float" setter="set_lod_distance" getter="get_lod_distance" default="128.0">
 			Distance within which chunks have full detail. Each further level starts at twice the distance of the previous one. A chunk keeps its level a little past a boundary, so it does not flip back and forth.
 		</member>
+		<member name="lod_reference_fov" type="float" setter="set_lod_reference_fov" getter="get_lod_reference_fov" default="60.0">
+			Reference vertical perspective camera field of view in degrees for [member screen_space_lod_enabled]. At 720 pixels of viewport height and this vertical FOV, [member lod_distance] is unchanged. Higher pixel density or a narrower field of view keeps terrain detailed farther away. Ignored by orthographic cameras.
+		</member>
 		<member name="material" type="Material" setter="set_material" getter="get_material">
 			Material of the terrain. Texture coordinates run from [code]0[/code] to [code]1[/code] over the whole terrain; use a [ShaderMaterial] to splat textures by height or slope.
+		</member>
+		<member name="screen_space_lod_enabled" type="bool" setter="set_screen_space_lod_enabled" getter="is_screen_space_lod_enabled" default="false">
+			If [code]true[/code], rescale distance-based terrain mesh LOD by viewport pixel height and perspective field of view, inspired by screen-size LOD systems in Unreal Engine and Unity. The multiplier is limited to [code]0.6[/code]–[code]1.65[/code]. Disabled by default to preserve existing scenes; cached meshes, collision, skirts, smooth LOD morphing and culling remain unchanged.
 		</member>
 		<member name="size" type="Vector2" setter="set_size" getter="get_size" default="Vector2(1024, 1024)">
 			Width (x) and depth (z) of the terrain in meters. The distance between samples follows from this and the number of samples.
