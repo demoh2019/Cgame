@@ -31,6 +31,7 @@ const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const WadingWetness = preload("res://scripts/shared/wading_wetness.gd")
 const StormMud = preload("res://scripts/shared/storm_mud.gd")
 const WindChill = preload("res://scripts/shared/wind_chill.gd")
 const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
@@ -1271,6 +1272,9 @@ func _update_hud() -> void:
 	if survivor.flare_seconds > 0.0:
 		_stats.text += "\nFLARE: %ds (F2) | infected notice up to 28m" % ceili(survivor.flare_seconds)
 	_stats.text += "\nWET CLOTHING: %d%% | dry under shelter or beside a lit campfire" % roundi(survivor.survival.wetness)
+	var wading: float = WadingWetness.depth_at(world, position)
+	if wading > 0.0:
+		_stats.text += "\nWADING: %.1f m deep | water soaks your clothing" % wading
 	if rain_grip < 0.999:
 		_stats.text += "\nSTORM MUD: ground travel -%.0f%% | follow roads for traction" % [
 			(1.0 - rain_grip) * 100.0]

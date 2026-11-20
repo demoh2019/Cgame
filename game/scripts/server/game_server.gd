@@ -110,6 +110,7 @@ const StormMud = preload("res://scripts/shared/storm_mud.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const StormInsulator = preload("res://scripts/shared/storm_insulator.gd")
 const WetClothing = preload("res://scripts/shared/wet_clothing.gd")
+const WadingWetness = preload("res://scripts/shared/wading_wetness.gd")
 const WindChill = preload("res://scripts/shared/wind_chill.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const SporeSampling = preload("res://scripts/shared/spore_sampling.gd")
@@ -5360,6 +5361,11 @@ func _tick_players(delta: float) -> void:
 		var old_wetness: float = player.survival.wetness
 		player.survival.wetness = WetClothing.next_wetness(old_wetness, delta,
 			conditions, worn_armor, under_tarp, at_warm_fire)
+		# Walking into a shallow ocean/ford soaks clothes, even beneath a
+		# roof or while standing near a fire. Terrain is server-owned.
+		var water_depth: float = WadingWetness.depth_at(world, player.position)
+		player.survival.wetness = WadingWetness.after_weather(old_wetness,
+			player.survival.wetness, delta, water_depth)
 		if not is_equal_approx(old_wetness, player.survival.wetness):
 			player.dirty_character = true
 		# Average the old and new moisture when a large simulation tick
@@ -6662,6 +6668,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"soft_sole_seconds": player.soft_sole_seconds,
 			"exposure": player.survival.exposure,
 			"wetness": player.survival.wetness,
+			"wading_depth_m": WadingWetness.depth_at(world, player.position),
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 			"tent_sheltered": PortableShelter.covers(shelters, player.position, time),

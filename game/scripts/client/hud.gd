@@ -2391,6 +2391,9 @@ func _process(_delta: float) -> void:
 	if float(wind_chill.get("extra", 0.0)) > 0.0:
 		_info_label.text += "\nWIND CHILL: %.1f m/s | +%.0f%% cold exposure intensity" % [
 			float(wind_chill.get("speed", 0.0)), 100.0 * float(wind_chill["extra"])]
+	var wade: float = float(client.you.get("wading_depth_m", 0.0))
+	if wade > 0.0:
+		_info_label.text += "\nWADING: %.1f m deep | water soaks clothing even without rain" % wade
 	var wet: float = float(client.you.get("wetness", 0.0))
 	if wet > 0.0:
 		_info_label.text += "\nWET CLOTHING: %d%% | cold increases exposure; dry at a campfire" % roundi(wet)
