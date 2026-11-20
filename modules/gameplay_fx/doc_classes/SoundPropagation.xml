@@ -16,5 +16,13 @@
 				Returns the hearing range, in meters, from an original server-owned source radius and an already wind-adjusted range (including pursuit leash). If [param blocked] is [code]true[/code], attenuates quiet sounds to 62% and loud sounds to at most 80%. An open path keeps the wind-adjusted range. Invalid or silent inputs return zero. This method never expands the detection range.
 			</description>
 		</method>
+		<method name="travel_delay_seconds" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="distance_m" type="float" />
+			<param index="1" name="temperature_c" type="float" default="20.0" />
+			<description>
+				Computes the arrival delay of an audible event from the distance between the source and listener at the given air temperature, using an approximate speed of sound of [code]331.3 + 0.606 * temperature_c[/code] meters/second. Intended for flashes and delayed thunder, explosions over distance, or other events where sound arrives after the visual impact. Events outside [code]0..2400[/code] meters, temperatures outside [code]-40..60[/code] degrees Celsius, and non-finite values return [code]-1.0[/code] (invalid), not a zero-delay event. Does not schedule or play audio.
+			</description>
+		</method>
 	</methods>
 </class>
