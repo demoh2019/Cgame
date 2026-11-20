@@ -35,6 +35,7 @@ const Tumbleweeds = preload("res://scripts/client/tumbleweeds.gd")
 const DamageNumbers = preload("res://scripts/client/damage_numbers.gd")
 const OcclusionSilhouette = preload("res://scripts/client/occlusion_silhouette.gd")
 const DamageDirection = preload("res://scripts/client/damage_direction.gd")
+const BloodDecals = preload("res://scripts/client/blood_decals.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -122,6 +123,7 @@ var _breath
 var _tumbleweeds
 var _damage_numbers
 var _damage_direction
+var _blood_decals
 var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
@@ -867,6 +869,9 @@ func _spawn_effects(event: Dictionary) -> void:
 	camera_fx.on_event(event, client.peer_id, at.distance_to(here))
 	if _damage_numbers != null:
 		_damage_numbers.on_event(event, at, client.peer_id)
+	if _blood_decals != null and str(event.get("type", "")) == "hit" and float(event.get("damage", 0.0)) >= 4.0 \
+			and BloodDecals.enabled(GraphicsQuality.level(), str(RenderingServer.get_current_rendering_method())):
+		_blood_decals.splat(client.world, at.x, at.z, str(event.get("kind", "")) == "zombie", float(event.get("damage", 0.0)))
 	# Hit flash on your own character too (remote ones flash from snapshot HP).
 	if str(event.get("type", "")) == "hit" and str(event.get("kind", "")) != "zombie" \
 			and int(event.get("id", -1)) == client.peer_id and avatar_model != null:
@@ -1128,6 +1133,8 @@ func _on_welcomed() -> void:
 	add_child(_tumbleweeds)
 	_damage_numbers = DamageNumbers.new()
 	add_child(_damage_numbers)
+	_blood_decals = BloodDecals.new()
+	add_child(_blood_decals)
 	_damage_direction = DamageDirection.new()
 	_damage_direction.camera = camera
 	add_child(_damage_direction)

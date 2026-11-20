@@ -103,6 +103,7 @@ const SUITES := [
 	"res://tests/test_loot_beam.gd",
 	"res://tests/test_corpse_burn.gd",
 	"res://tests/test_damage_direction.gd",
+	"res://tests/test_blood_decals.gd",
 	"res://tests/test_sun_shadow_atmosphere.gd",
 	"res://tests/test_graphics_reflections.gd",
 	"res://tests/test_pbr_reflection_occlusion.gd",
