@@ -47,6 +47,7 @@ class WorldPartition3D : public Node3D {
 	int unload_radius = 2;
 	int max_new_requests_per_frame = 2;
 	int max_instances_per_frame = 2;
+	real_t max_instantiation_time_ms = 0.0;
 	int max_concurrent_requests = 8;
 	bool streaming_enabled = true;
 	Vector2i observer_cell;
@@ -86,6 +87,9 @@ public:
 
 	void set_max_instances_per_frame(int p_count);
 	int get_max_instances_per_frame() const;
+
+	void set_max_instantiation_time_ms(real_t p_milliseconds);
+	real_t get_max_instantiation_time_ms() const;
 
 	void set_max_concurrent_requests(int p_count);
 	int get_max_concurrent_requests() const;
