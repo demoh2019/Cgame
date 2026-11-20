@@ -980,6 +980,10 @@ func _on_event(event: Dictionary) -> void:
 		"evaded":
 			if event.get("peer", -1) == client.peer_id:
 				say("Evaded an infected attack!")
+		"outpost_watch":
+			say("WATCHTOWER ALERT: enemies at your fortified outpost #%d (X:%d Z:%d)! Rally defenders." % [
+				int(event.get("id", 0)), roundi(float(event.get("x", 0.0))),
+				roundi(float(event.get("z", 0.0)))])
 		"siege_started":
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
 		"guardian_taunt":

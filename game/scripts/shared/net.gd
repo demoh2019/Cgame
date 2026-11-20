@@ -925,6 +925,11 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"guardian_taunt":
 			return _is_nearby(event, peer)
+		"outpost_watch":
+			# Private outpost distress signal: no remote enemy or third-party feed.
+			return sim != null and sim.territory.watch_recipient(peer,
+				int(event.get("id", -1)), int(event.get("owner", 0)),
+				sim.players, sim.parties, sim.time)
 		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_provisioned", "outpost_breached", \
 				"siege_contract_declared", "siege_contract_result":
 			return _is_nearby(event, peer)

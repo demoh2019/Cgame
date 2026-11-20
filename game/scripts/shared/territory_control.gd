@@ -6,6 +6,7 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
+const OutpostWatch = preload("res://scripts/shared/outpost_watch.gd")
 const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const OutpostSupplies = preload("res://scripts/shared/outpost_supplies.gd")
 const OutpostProvisions = preload("res://scripts/shared/outpost_provisions.gd")
@@ -48,7 +49,7 @@ func _init(world) -> void:
 				"id": index + 1, "x": position.x, "z": position.y,
 				"owner": 0, "until": 0.0, "challenger": 0,
 				"progress": 0.0, "contested": false, "fortification": 0,
-				"breach_ready_at": 0.0,
+				"breach_ready_at": 0.0, "watch_ready_at": 0.0,
 				"supplies_left": 0, "supply_epoch": 0, "provisioned_seconds": 0.0,
 				"supply_claims": {},
 			})
@@ -78,6 +79,24 @@ func public_state(now: float, players: Dictionary = {}, parties = null) -> Array
 ## Neutral and newly captured sites always use the base capture duration.
 func capture_target(site: Dictionary) -> float:
 	return OutpostFortification.capture_duration(CAPTURE_SECONDS, int(site.get("fortification", 0)))
+
+
+## Remote alarm delivery is limited to the current owner party and
+## backend-verified members of its homogeneous guild banner.
+## Previously queued events for a lost/captured flag cannot leak to a new owner.
+func watch_recipient(peer_id: int, site_id: int, event_owner: int,
+		players: Dictionary, parties, now: float) -> bool:
+	var site: Dictionary = site_by_id(site_id)
+	if site.is_empty() or event_owner <= 0 or int(site["owner"]) != event_owner or \
+			not parties.groups.has(event_owner) or not is_finite(now) or \
+			now >= float(site["until"]) or \
+			int(site.get("fortification", 0)) < OutpostWatch.MIN_FORTIFICATION:
+		return false
+	var player = players.get(peer_id)
+	if player == null or not player.survival.alive:
+		return false
+	return parties.group_of(peer_id) == event_owner or \
+		GuildTerritory.same_owner_guild(site, player, players, parties)
 
 
 func site_by_id(site_id: int) -> Dictionary:
@@ -123,8 +142,13 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 			site["fortification"] = 0
 			site["supply_claims"] = {}
 			site["breach_ready_at"] = 0.0
+			site["watch_ready_at"] = 0.0
 			changed.append({"type": "outpost_lost", "id": site["id"], "x": site["x"], "z": site["z"]})
 		var occupants: Dictionary = _occupied_groups(site, players, parties)
+		# Unlike a contested flag snapshot, this also detects unopposed
+		# hostile infiltration when every defender is stationed elsewhere.
+		if OutpostWatch.ready(site, owner, now, occupants):
+			changed.append(OutpostWatch.activate(site, now))
 		site["contested"] = occupants.size() > 1
 		var group_id := 0
 		if occupants.size() == 1:
@@ -148,6 +172,7 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 			site["provisioned_seconds"] = 0.0
 			site["fortification"] = 0 # Previous defenders lose their walls.
 			site["breach_ready_at"] = 0.0 # Siege timer belongs to former owner.
+			site["watch_ready_at"] = 0.0 # Alarm is per capture, not an inherited lockout.
 			site["challenger"] = 0
 			site["progress"] = 0.0
 			changed.append({
