@@ -155,11 +155,15 @@ func _create_streaming_world() -> void:
     world_partition.streaming_source_ready.connect(_on_streaming_source_ready)
     world_partition.streaming_source_unready.connect(_on_streaming_source_unready)
 
+    # Bulk registration avoids 1,024 native mutation/purge calls on startup.
+    # Each world cell shares the same PackedScene path and gets unique terrain
+    # and foliage offsets only when it actually streams in.
+    var registered_cells: Dictionary = {}
     var half_cells: int = WORLD_CELLS_PER_SIDE >> 1
     for cz in range(-half_cells, half_cells):
         for cx in range(-half_cells, half_cells):
-            world_partition.set_cell_scene(
-                Vector2i(cx, cz), "res://cells/forest_cell.tscn")
+            registered_cells[Vector2i(cx, cz)] = "res://cells/forest_cell.tscn"
+    world_partition.set_cell_scenes(registered_cells)
     world_partition.update_streaming()
 
 
