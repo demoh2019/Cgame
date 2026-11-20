@@ -70,6 +70,13 @@ func _run() -> void:
     if stream.get_loaded_cell_count() != 1:
         _fail("unexpected initial loaded count")
         return
+    if stream.get_last_streaming_update_ms() < 0.0:
+        _fail("native streaming CPU timer returned a negative value")
+        return
+    if stream.get_last_instantiation_attempt_count() < 0 \
+            or stream.get_last_instantiation_attempt_count() > stream.max_instances_per_frame:
+        _fail("native streaming instantiation attempt count exceeds budget")
+        return
     if not stream.are_cells_loaded(origin) or stream.are_cells_loaded(origin, 1):
         _fail("native region readiness did not reflect loaded vs missing tiles")
         return
