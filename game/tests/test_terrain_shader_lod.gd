@@ -124,3 +124,43 @@ func run(t) -> void:
 			"mid-frequency soil detail remains pixel-accurate")
 		t.check(fragment_code.contains("textureGrad(normal_layers"),
 			"high-frequency normal detail remains supported")
+
+	t.current = "triplanar rock color LOD: full near-detail, zero far texture fetches"
+	if ground != null:
+		var code: String = ground.code
+		var cliff_start: int = code.find("if (i == 5) {")
+		var cliff_end: int = code.find("} else {", cliff_start)
+		t.check(cliff_start >= 0 and cliff_end > cliff_start,
+			"the imported rock branch remains isolated from the other twelve materials")
+		var cliff_code: String = code.substr(cliff_start, cliff_end - cliff_start)
+		t.check(cliff_code.contains("c = layer_average[5];"),
+			"far rock uses the exact palette average already bound by ChunkView")
+		t.check(cliff_code.contains("if (detail_fade > 0.001)"),
+			"three expensive cliff albedo fetches are gated by camera distance")
+		t.check(cliff_code.contains("c = mix(c, cliff_detail * layer_tint[5], detail_fade);"),
+			"full triplanar color fades in smoothly without geometric seams")
+		t.check(cliff_code.contains("aa_cliff_normal_quality > 0.001"),
+			"three cliff normal samples remain exclusive to High and Ultra")
+		t.check(cliff_code.contains("textureGrad(albedo_layers, vec3(world_position.zy"),
+			"X projection preserves imported rock and correct mip gradients")
+		t.check(cliff_code.contains("textureGrad(albedo_layers, vec3(world_position.xy"),
+			"Z projection remains available at close camera range")
+		t.check(cliff_code.contains("vec3 blend = pow(abs(n), vec3(4.0));"),
+			"near mapping still blends by true slope rather than a hard projection axis")
+		t.check(cliff_code.contains("c = mix(c, cliff_detail * layer_tint[5], detail_fade);"),
+			"rock PBR hue still uses the game's original terrain palette")
+		t.check(cliff_code.contains("if (aa_cliff_normal_quality > 0.001) {"),
+			"normal-map sampling is nested inside the distance gate")
+		t.check(code.contains("float detail_fade = 1.0 - smoothstep(aa_terrain_detail_radius"),
+			"the quality preset still controls the distance of full-detail cliffs")
+		t.check(code.contains("vec3 cliff_world_normal = n;"),
+			"distant rock returns to geometry normal without extra texture lookups")
+
+	# The interpolation cannot change either endpoint or any material weights.
+	for fraction in [0.0, 0.1, 0.35, 0.5, 0.85, 1.0]:
+		var result: Color = Color(0.42, 0.39, 0.36).lerp(
+			Color(0.50, 0.47, 0.42), fraction)
+		t.check(result.r >= 0.42 and result.r <= 0.50,
+			"transition keeps rock albedo in the original material color range")
+		t.check(result.g >= 0.39 and result.g <= 0.47,
+			"triplanar rock blends without an overshooting color band")

@@ -261,33 +261,38 @@ void fragment() {
 		vec3 c;
 		vec3 nn;
 		if (i == 5) {
-			// Cliffs keep their triplanar mapping; explicit gradients avoid invalid
-			// implicit mip derivatives after a texture-layer selection branch.
-			vec3 blend = pow(abs(n), vec3(4.0));
-			blend /= max(blend.x + blend.y + blend.z, 0.0001);
-			c = textureGrad(albedo_layers, vec3(world_position.zy / tile_meters, layer), cliff_dx_zy, cliff_dy_zy).rgb * blend.x
-				+ textureGrad(albedo_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy).rgb * blend.y
-				+ textureGrad(albedo_layers, vec3(world_position.xy / tile_meters, layer), cliff_dx_xy, cliff_dy_xy).rgb * blend.z;
-			c *= layer_tint[5];
-			// High/Ultra cliff relief: triplanar normal mapping with stable
-			// explicit texture gradients. No extra samples on low settings
-			// or distant/subpixel terrain.
-			if (aa_cliff_normal_quality > 0.001 && detail_fade > 0.001) {
-				vec3 nx = textureGrad(normal_layers,
-					vec3(world_position.zy / tile_meters, layer),
-					cliff_dx_zy, cliff_dy_zy).rgb * 2.0 - 1.0;
-				vec3 ny = textureGrad(normal_layers,
-					vec3(p / tile_meters, layer),
-					lod_dx, lod_dy).rgb * 2.0 - 1.0;
-				vec3 nz = textureGrad(normal_layers,
-					vec3(world_position.xy / tile_meters, layer),
-					cliff_dx_xy, cliff_dy_xy).rgb * 2.0 - 1.0;
-				vec3 along_x = normalize(vec3(sign(n.x) * nx.z, nx.y, nx.x));
-				vec3 along_y = normalize(vec3(ny.x, sign(n.y) * ny.z, ny.y));
-				vec3 along_z = normalize(vec3(nz.x, nz.y, sign(n.z) * nz.z));
-				cliff_world_normal = normalize(
-					along_x * blend.x + along_y * blend.y + along_z * blend.z);
-			}
+			// An distant cliff contributes its existing palette average instead
+			// of paying for three tiny, subpixel albedo projections per pixel.
+			// The exact high-detail triplanar appearance is preserved nearby;
+			// the same smooth camera-distance fade avoids LOD popping.
+			c = layer_average[5];
+			if (detail_fade > 0.001) {
+				// Explicit gradients were computed before any divergent branch,
+				// keeping all imported rock mip levels stable on all renderers.
+				vec3 blend = pow(abs(n), vec3(4.0));
+				blend /= max(blend.x + blend.y + blend.z, 0.0001);
+				vec3 cliff_detail = textureGrad(albedo_layers, vec3(world_position.zy / tile_meters, layer), cliff_dx_zy, cliff_dy_zy).rgb * blend.x
+					+ textureGrad(albedo_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy).rgb * blend.y
+					+ textureGrad(albedo_layers, vec3(world_position.xy / tile_meters, layer), cliff_dx_xy, cliff_dy_xy).rgb * blend.z;
+				c = mix(c, cliff_detail * layer_tint[5], detail_fade);
+				// High/Ultra keep the exact existing cliff normal mapping nearby.
+				// Far fragments already skip both normal and albedo fetches.
+				if (aa_cliff_normal_quality > 0.001) {
+					vec3 nx = textureGrad(normal_layers,
+						vec3(world_position.zy / tile_meters, layer),
+						cliff_dx_zy, cliff_dy_zy).rgb * 2.0 - 1.0;
+					vec3 ny = textureGrad(normal_layers,
+						vec3(p / tile_meters, layer),
+						lod_dx, lod_dy).rgb * 2.0 - 1.0;
+					vec3 nz = textureGrad(normal_layers,
+						vec3(world_position.xy / tile_meters, layer),
+						cliff_dx_xy, cliff_dy_xy).rgb * 2.0 - 1.0;
+					vec3 along_x = normalize(vec3(sign(n.x) * nx.z, nx.y, nx.x));
+					vec3 along_y = normalize(vec3(ny.x, sign(n.y) * ny.z, ny.y));
+					vec3 along_z = normalize(vec3(nz.x, nz.y, sign(n.z) * nz.z));
+					cliff_world_normal = normalize(
+						along_x * blend.x + along_y * blend.y + along_z * blend.z);
+				}
 			nn = vec3(0.0, 0.0, 1.0);
 		} else {
 			c = top_albedo(layer, p, mixer, detail_fade, lod_dx, lod_dy);
