@@ -258,6 +258,12 @@ TEST_CASE("[HeightmapTerrain] Screen-relative terrain LOD preserves pixels and F
 	CHECK(screen_lod_multiplier(1080, 38, 38) == doctest::Approx(1.5));
 	CHECK(screen_lod_multiplier(360, 38, 38) == doctest::Approx(0.6));
 	CHECK(screen_lod_multiplier(1440, 38, 38) == doctest::Approx(1.65)); // GPU cap.
+	// FSR-like internal scale changes geometry LOD according to rendered
+	// pixels instead of output/window pixels (e.g. 1080p at 2/3 scale).
+	CHECK(screen_lod_multiplier(1080.0 * (2.0 / 3.0), 38, 38) == doctest::Approx(1.0));
+	CHECK(screen_lod_multiplier(720.0 * 0.7, 38, 38) == doctest::Approx(0.7));
+	CHECK(screen_lod_multiplier(720.0, 38, 38) >
+			screen_lod_multiplier(720.0 * 0.7, 38, 38));
 	CHECK(screen_lod_multiplier(720, 24, 38) > 1.0); // Narrower view.
 	CHECK(screen_lod_multiplier(720, 70, 38) < 1.0); // Wider view.
 	CHECK(screen_lod_multiplier(0, 38, 38) == doctest::Approx(1.0));
