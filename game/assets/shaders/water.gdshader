@@ -5,6 +5,13 @@ global uniform float aa_weather_wetness;
 // Open water: colour from the depth under the surface, a soft foam line along the shore, scrolling ripples
 // and a Fresnel sheen that picks up the sky.
 uniform sampler2D depth_tex : hint_depth_texture, repeat_disable, filter_nearest;
+// The screen sampler only exists in the dedicated high-end Forward+ variant.
+#ifdef WATER_REFRACTION
+uniform sampler2D scene_color_tex : hint_screen_texture, repeat_disable, filter_linear;
+uniform float refraction_strength = 0.0;
+uniform float refraction_fade_start = 25.0;
+uniform float refraction_fade_end = 74.0;
+#endif
 uniform vec3 shallow_color : source_color = vec3(0.16, 0.5, 0.52);
 uniform vec3 deep_color : source_color = vec3(0.02, 0.15, 0.3);
 uniform float clarity = 5.0;
@@ -48,6 +55,9 @@ void fragment() {
 	// pixel positions. Two opposing wave trains preserve motion and sun glints.
 	// High/Ultra add fine noise only where their visual budget allows it.
 	float crest = 0.0;
+#ifdef WATER_REFRACTION
+	vec2 refract_slope = vec2(0.0);
+#endif
 	// Only high-quality fine noise needs camera distance. Balanced/Performance
 	// skip this calculation and all expensive high-frequency noise octaves.
 	float detail_fade = 0.0;
@@ -69,6 +79,9 @@ void fragment() {
 		}
 		// Amplify the existing waves rather than adding costly new noise samples.
 		slope *= storm_wave_strength;
+#ifdef WATER_REFRACTION
+		refract_slope = slope;
+#endif
 		vec3 world_normal = normalize(vec3(-slope.x * ripple_strength * 2.5, 1.0,
 			-slope.y * ripple_strength * 2.5));
 		NORMAL = normalize((VIEW_MATRIX * vec4(world_normal, 0.0)).xyz);
@@ -126,6 +139,54 @@ void fragment() {
 		}
 	}
 	color += vec3(0.06, 0.12, 0.11) * shore_glimmer;
+#ifdef WATER_REFRACTION
+	// Thin-water transmission with actual screen-space refraction:
+	// clipped geometry, depth discontinuities and screen edges fade to base
+	// water instead of creating the halos typical of naïve refraction.
+	float refraction_mix = 0.0;
+	vec3 refracted_rgb = vec3(0.0);
+	if (refraction_strength > 0.001 && thickness > 0.08 && thickness < 3.8) {
+		float near_fade = 1.0 - smoothstep(refraction_fade_start,
+			refraction_fade_end, distance(p, CAMERA_POSITION_WORLD.xz));
+		if (near_fade > 0.001) {
+			// The analytic wave is already computed for NORMAL: no extra noise.
+			vec2 shift = refract_slope * refraction_strength * 0.062
+				* min(thickness * 0.7, 1.0);
+			vec2 refracted_uv = clamp(SCREEN_UV + shift,
+				vec2(0.006), vec2(0.994));
+			vec2 margins = min(refracted_uv, vec2(1.0) - refracted_uv);
+			float edge_guard = smoothstep(0.006, 0.024,
+				min(margins.x, margins.y));
+			if (edge_guard > 0.001) {
+				float warped_depth = textureLod(depth_tex,
+					refracted_uv, 0.0).r;
+#if CURRENT_RENDERER == RENDERER_COMPATIBILITY
+				vec3 warped_ndc = vec3(refracted_uv * 2.0 - 1.0,
+					warped_depth * 2.0 - 1.0);
+#else
+				vec3 warped_ndc = vec3(refracted_uv * 2.0 - 1.0,
+					warped_depth);
+#endif
+				vec4 warped_scene = INV_PROJECTION_MATRIX *
+					vec4(warped_ndc, 1.0);
+				float warped_thickness = max(
+					-warped_scene.z / warped_scene.w + VERTEX.z, 0.0);
+				float depth_guard = smoothstep(0.08, 0.35,
+					warped_thickness) * (1.0 - smoothstep(
+					0.48, 1.65, abs(warped_thickness - thickness)));
+				float shallow_guard = 1.0 - smoothstep(
+					2.2, 3.8, thickness);
+				refraction_mix = refraction_strength * near_fade
+					* edge_guard * depth_guard * shallow_guard
+					* sqrt(transmission);
+				if (refraction_mix > 0.001) {
+					refracted_rgb = textureLod(scene_color_tex,
+						refracted_uv, 0.0).rgb;
+				}
+			}
+		}
+	}
+#endif
 
 	// Schlick Fresnel for the 2%-reflective water/air interface, instead of
 	// a stylized cubic approximation that over-brightens front-facing water.
@@ -133,6 +194,12 @@ void fragment() {
 	float fresnel = 0.02 + 0.98 * pow(1.0 - ndotv, 5.0);
 	ALBEDO = color;
 	ALPHA = clamp(mix(0.28, 0.93, smoothstep(0.0, 2.5, thickness)) + foam * 0.5 + fresnel * 0.25, 0.0, 1.0);
+#ifdef WATER_REFRACTION
+	// The captured scene has already been lit. Refract it as transmission
+	// through EMISSION, rather than applying a second light calculation.
+	ALBEDO *= 1.0 - 0.66 * refraction_mix;
+	ALPHA = clamp(ALPHA + refraction_mix * 0.20, 0.0, 1.0);
+#endif
 	ROUGHNESS = mix(0.06 + storm * 0.05, 0.4 + storm * 0.05, foam);
 	SPECULAR = 0.7;
 	METALLIC = 0.0;
@@ -140,4 +207,7 @@ void fragment() {
 		+ vec3(0.08, 0.12, 0.16) * fresnel
 		+ vec3(0.015, 0.025, 0.028) * crest * (1.0 - foam)
 		+ vec3(0.07, 0.13, 0.12) * shore_glimmer;
+#ifdef WATER_REFRACTION
+	EMISSION += refracted_rgb * refraction_mix * 0.75;
+#endif
 }
