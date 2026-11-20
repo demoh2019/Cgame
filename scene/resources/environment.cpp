@@ -868,6 +868,9 @@ Environment::FogMode Environment::get_fog_mode() const {
 }
 
 void Environment::set_fog_light_color(const Color &p_light_color) {
+	if (fog_light_color == p_light_color) {
+		return;
+	}
 	fog_light_color = p_light_color;
 	_update_fog();
 }
@@ -882,6 +885,9 @@ float Environment::get_fog_light_energy() const {
 	return fog_light_energy;
 }
 void Environment::set_fog_sun_scatter(float p_amount) {
+	if (fog_sun_scatter == p_amount) {
+		return;
+	}
 	fog_sun_scatter = p_amount;
 	_update_fog();
 }
@@ -889,6 +895,9 @@ float Environment::get_fog_sun_scatter() const {
 	return fog_sun_scatter;
 }
 void Environment::set_fog_density(float p_amount) {
+	if (fog_density == p_amount) {
+		return;
+	}
 	fog_density = p_amount;
 	_update_fog();
 }
@@ -896,6 +905,9 @@ float Environment::get_fog_density() const {
 	return fog_density;
 }
 void Environment::set_fog_height(float p_amount) {
+	if (fog_height == p_amount) {
+		return;
+	}
 	fog_height = p_amount;
 	_update_fog();
 }
@@ -903,6 +915,9 @@ float Environment::get_fog_height() const {
 	return fog_height;
 }
 void Environment::set_fog_height_density(float p_amount) {
+	if (fog_height_density == p_amount) {
+		return;
+	}
 	fog_height_density = p_amount;
 	_update_fog();
 }
@@ -925,6 +940,25 @@ void Environment::set_fog_sky_affect(float p_sky_affect) {
 
 float Environment::get_fog_sky_affect() const {
 	return fog_sky_affect;
+}
+
+void Environment::configure_weather_fog(const Color &p_color, float p_density, float p_height,
+		float p_height_density, float p_sun_scatter) {
+	// Called every render tick by open-world weather. Do not allocate
+	// or send five successive renderer messages for one coherent frame.
+	ERR_FAIL_COND(!Math::is_finite(p_density) || !Math::is_finite(p_height) ||
+			!Math::is_finite(p_height_density) || !Math::is_finite(p_sun_scatter));
+	if (fog_light_color == p_color && fog_density == p_density &&
+			fog_height == p_height && fog_height_density == p_height_density &&
+			fog_sun_scatter == p_sun_scatter) {
+		return;
+	}
+	fog_light_color = p_color;
+	fog_density = p_density;
+	fog_height = p_height;
+	fog_height_density = p_height_density;
+	fog_sun_scatter = p_sun_scatter;
+	_update_fog();
 }
 
 void Environment::_update_fog() {
@@ -1596,6 +1630,7 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_fog_light_color"), &Environment::get_fog_light_color);
 	ClassDB::bind_method(D_METHOD("set_fog_light_energy", "light_energy"), &Environment::set_fog_light_energy);
 	ClassDB::bind_method(D_METHOD("get_fog_light_energy"), &Environment::get_fog_light_energy);
+	ClassDB::bind_method(D_METHOD("configure_weather_fog", "light_color", "density", "height", "height_density", "sun_scatter"), &Environment::configure_weather_fog);
 	ClassDB::bind_method(D_METHOD("set_fog_sun_scatter", "sun_scatter"), &Environment::set_fog_sun_scatter);
 	ClassDB::bind_method(D_METHOD("get_fog_sun_scatter"), &Environment::get_fog_sun_scatter);
 
