@@ -397,6 +397,12 @@ func _build() -> void:
 	prospect_button.tooltip_text = "Field craft: cloth, 2 scrap, stone. Spend only on a real T2+ vein; private 80s marker."
 	prospect_button.pressed.connect(func() -> void: client.use_item("prospecting_chart"))
 	inventory_box.add_child(prospect_button)
+	var mining_wedges_button := Button.new()
+	mining_wedges_button.name = "EquipMiningWedges"
+	mining_wedges_button.text = "Prepare mining wedges (3 T2+ deposits)"
+	mining_wedges_button.tooltip_text = "Workbench craft: 1 T2 bar, 3 scrap, 2 stone. Requires a pickaxe. +2 ore/stone per eligible deposit, but mining noise rises to 42m."
+	mining_wedges_button.pressed.connect(func() -> void: client.use_item("mining_wedges"))
+	inventory_box.add_child(mining_wedges_button)
 	var chain_button := Button.new()
 	chain_button.name = "UseBikeChainWrap"
 	chain_button.text = "Quiet bike chain (180s; workbench craft)"
@@ -1228,6 +1234,10 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"gathered":
+			if int(event.get("peer", -1)) == client.peer_id and int(event.get("wedge_bonus", 0)) > 0:
+				say("Reinforced extraction: +%d %s, loud pickaxe work attracts infected (42m)." % [
+					int(event["wedge_bonus"]), str(event.get("item", "ore"))])
 		"caravan_escort_paid":
 			say("Convoy escort complete: +%d silver, Explorer XP and renown earned." % [
 				int(event.get("silver", 0))])
@@ -1499,6 +1509,12 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and bool(data.get("mining_wedges", false)):
+		if bool(data.get("ok", false)):
+			say("Mining wedges fitted: %d T2+ ore/stone harvests grant +2 extra material. Noise 42m." % int(data.get("charges", 0)))
+		else:
+			say("Mining wedges: %s (kit not spent)." % str(data.get("reason", "rejected")))
+		return
 	if kind == "use" and bool(data.get("tarp_anchor", false)):
 		if bool(data.get("ok", false)):
 			say("Storm tarp anchored: %.0fs of shelter remain; exposure reduction 90%%." % float(data.get("remaining", 0.0)))
