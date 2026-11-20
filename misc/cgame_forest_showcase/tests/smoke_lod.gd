@@ -85,7 +85,7 @@ func _run() -> void:
     if far_trees.multimesh.instance_count != 16 or near_trees.multimesh.instance_count <= 16:
         _fail("near and distant tree budgets are not distinct")
         return
-    var expected_first: Transform3D = far_trees.multimesh.get_instance_transform(0)
+    var expected_first: Transform3D = near_trees.multimesh.get_instance_transform(0)
 
     observer.position.x = 33.0
     stream.update_streaming()
