@@ -94,6 +94,7 @@ const SUITES := [
 	"res://tests/test_guardian_brace.gd",
 	"res://tests/test_elite_infected.gd",
 	"res://tests/test_raid_loot_rights.gd",
+	"res://tests/test_raid_round_robin.gd",
 	"res://tests/test_loot_labels.gd",
 	"res://tests/test_world_cycle.gd",
 	"res://tests/test_supply_drops.gd",
