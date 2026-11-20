@@ -63,4 +63,32 @@ func run(t) -> void:
 	t.check(marker.consume(warning, world), "warning can be armed for retreat")
 	t.check(marker.consume({"type": "raid_expired", "id": 1337}, world),
 		"encounter timeout also clears the telegraph")
+	t.current = "raid interruption tally is validated and dismissed"
+	t.check(marker.consume(warning, world), "new warning can show coordinated objective")
+	var progress := {"id": 1337, "damage": 16, "required": 26,
+		"attackers": 1, "required_attackers": 2}
+	t.check(marker.update_interrupt(progress), "valid party snapshot updates overlay")
+	t.eq(marker.interrupt_damage, 16, "overlay uses actual, not predicted party damage")
+	t.eq(marker.interrupt_attackers, 1, "real attacker count is presented")
+	var caption := marker.get_node("Countdown") as Label3D
+	t.check(caption.text.contains("BREAK 16/26"),
+		"visible caption explains remaining coordinated damage")
+	marker._process(0.2)
+	t.check(caption.text.contains("BREAK 16/26"),
+		"server progress survives local countdown redraw")
+	var wrong := progress.duplicate()
+	wrong["id"] = 999
+	t.check(not marker.update_interrupt(wrong), "stale boss cannot overwrite active tally")
+	wrong = progress.duplicate()
+	wrong["damage"] = 9000
+	t.check(not marker.update_interrupt(wrong), "invalid oversized damage is rejected")
+	t.eq(marker.interrupt_damage, 16, "rejected update keeps last good progress")
+	t.check(marker.update_interrupt({}), "empty party-only progress erases stale tally")
+	t.check(not caption.text.contains("BREAK"),
+		"no other party's contribution stays on screen")
+	t.check(marker.update_interrupt(progress), "progress appears again after next snapshot")
+	t.check(marker.consume({"type": "raid_interrupted", "id": 1337}, world),
+		"successful interrupt removes danger warning immediately")
+	t.check(not marker.visible, "cancelled slam cannot leave dangerous fake circle")
+	t.eq(marker.interrupt_required, 0, "interrupt state cleared with attack")
 	marker.free()
