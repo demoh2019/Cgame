@@ -358,7 +358,9 @@ class VisualQualityPackageTests(unittest.TestCase):
                         'interaction_router.focused_action_changed.connect',
                         'interaction_router.interaction_completed.connect',
                         '_build_interaction_ui()', 'WorldInteractionPrompt',
-                        'WorldInteractionFeedback'):
+                        'WorldInteractionFeedback',
+                        'interaction_label.anchor_bottom = 1.0',
+                        'interaction_result_label.anchor_bottom = 1.0'):
             self.assertIn(feature, demo)
         self.assertLess(demo.index('add_child(quest)'), demo.index('add_child(interaction_router)'))
 
