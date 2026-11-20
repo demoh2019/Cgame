@@ -21,6 +21,7 @@ const SUITES := [
 	"res://tests/test_graphics_quality.gd",
 	"res://tests/test_terrain_mesh_streaming.gd",
 	"res://tests/test_graphics_stone_microdetail.gd",
+	"res://tests/test_native_detail_normal_blend.gd",
 	"res://tests/test_graphics_stone_parallax.gd",
 	"res://tests/test_graphics_reflections.gd",
 	"res://tests/test_pbr_reflection_occlusion.gd",

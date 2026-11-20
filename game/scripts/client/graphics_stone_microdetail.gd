@@ -59,7 +59,13 @@ static func height_at(uv: Vector2) -> float:
 	var chip: float = sin(x * 9.0 + sin(y * 5.0) * 0.38) * \
 		sin(y * 11.0 + cos(x * 4.0) * 0.42)
 	var grain: float = sin(x * 19.0 + y * 13.0) * 0.30
-	return chip * 0.70 + grain
+	# Narrow intersecting fractures make relief readable in glancing light.
+	# All frequencies are integer-periodic, matching the existing tiled
+	# heightmap for Ultra POM. Generated once per shared image, never on GPU.
+	var fissure_x: float = absf(sin(x * 4.0 + sin(y * 3.0) * 0.25))
+	var fissure_y: float = absf(sin(y * 5.0 + cos(x * 2.0) * 0.20))
+	var fracture: float = pow(1.0 - minf(fissure_x, fissure_y), 11.0)
+	return chip * 0.70 + grain - fracture * 0.12
 
 
 static func normal_at(uv: Vector2, amount: float) -> Vector3:
@@ -148,6 +154,9 @@ static func _set_parallax(material: BaseMaterial3D, tier: int) -> void:
 static func _set_detail(material: BaseMaterial3D, tier: int) -> void:
 	# All cached instances and new streamed stone follow the same tier.
 	_set_parallax(material, tier)
+	# The Godot fork composes detail_normal even when detail_albedo is null.
+	# Keeping albedo absent saves one GPU texture fetch and preserves every
+	# pixel of the imported stone, glTF normal/ORM maps and hand-painted tint.
 	var enabled: bool = tier >= 2
 	if not enabled:
 		if material.detail_enabled:

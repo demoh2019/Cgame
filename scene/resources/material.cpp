@@ -2153,13 +2153,41 @@ void fragment() {)";
 			}
 		}
 
-		if (textures[TEXTURE_DETAIL_NORMAL].is_valid() && textures[TEXTURE_DETAIL_ALBEDO].is_valid()) {
-			code += R"(	vec3 detail_norm = mix(NORMAL_MAP, detail_norm_tex.rgb, detail_tex.a);)";
-
+		if (textures[TEXTURE_DETAIL_NORMAL].is_valid()) {
+			// Normal-only detail is a valid material: do not depend on a
+			// detail-albedo texture. This path is used by our streamed PBR
+			// masonry and by artists who want relief without recoloring.
+			//
+			// NORMAL_MAP and sampled maps contain packed [0, 1] tangent
+			// normals. Compose in signed normal space (Whiteout blend) so
+			// the imported base normal is preserved instead of overwritten.
+			// An untextured base has a flat normal, never an uninitialized
+			// NORMAL_MAP shader output.
+			const String base_normal = features[FEATURE_NORMAL_MAPPING] ? "NORMAL_MAP" : "vec3(0.5, 0.5, 1.0)";
+			code += "	vec3 detail_base_packed = " + base_normal + ";\n";
+			code += R"(
+	vec3 detail_base_signed = normalize(detail_base_packed * 2.0 - 1.0);
+	vec3 detail_overlay_signed = normalize(detail_norm_tex.rgb * 2.0 - 1.0);
+	vec3 detail_composed_signed = normalize(vec3(
+		detail_base_signed.xy + detail_overlay_signed.xy,
+		detail_base_signed.z * detail_overlay_signed.z));
+	vec3 detail_composed = detail_composed_signed * 0.5 + 0.5;
+)";
+			// When an albedo layer exists, its alpha still controls normal
+			// layering exactly as before. An optional dedicated detail
+			// mask then modulates both albedo and normal coverage.
+			if (textures[TEXTURE_DETAIL_ALBEDO].is_valid()) {
+				code += "	detail_composed = mix(detail_base_packed, detail_composed, detail_tex.a);\n";
+			}
 			if (textures[TEXTURE_DETAIL_MASK].is_valid()) {
-				code += R"(	NORMAL_MAP = mix(NORMAL_MAP, detail_norm, detail_mask_tex.r);)";
+				code += "	NORMAL_MAP = mix(detail_base_packed, detail_composed, detail_mask_tex.r);\n";
 			} else {
-				code += R"(	NORMAL_MAP = detail_norm;)";
+				code += "	NORMAL_MAP = detail_composed;\n";
+			}
+			if (!features[FEATURE_NORMAL_MAPPING]) {
+				// Tangent-space relief is valid even when the authored mesh
+				// has no base normal texture (but does have UVs/tangents).
+				code += "	NORMAL_MAP_DEPTH = 1.0;\n";
 			}
 		}
 	}
@@ -2531,6 +2559,11 @@ BaseMaterial3D::BlendMode BaseMaterial3D::get_blend_mode() const {
 }
 
 void BaseMaterial3D::set_detail_blend_mode(BlendMode p_mode) {
+	// An unchanged layer blend cannot change the generated PBR shader.
+	// Skip the redundant shader invalidation during profile/editor refresh.
+	if (detail_blend_mode == p_mode) {
+		return;
+	}
 	detail_blend_mode = p_mode;
 	_queue_shader_change();
 }
