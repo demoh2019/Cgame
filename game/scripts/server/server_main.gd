@@ -33,6 +33,7 @@ func _initialize() -> void:
 	var nakama_address := "" # host:port of Nakama; empty means offline mode.
 	var nakama_http_key := "albion_http_key"
 	var world_save_override: String = ""
+	var siege_outbox_override: String = ""
 	var disable_world_save: bool = false
 	var args := OS.get_cmdline_user_args()
 	var i := 0
@@ -65,7 +66,18 @@ func _initialize() -> void:
 				world_save_override = args[i]
 			"--no-world-save":
 				disable_world_save = true
+			"--siege-outbox":
+				i += 1
+				if i >= args.size():
+					printerr("SERVER --siege-outbox requires a user:// file path")
+					quit(2)
+					return
+				siege_outbox_override = args[i]
 		i += 1
+	if nakama_address.is_empty() and not siege_outbox_override.is_empty():
+		printerr("SERVER --siege-outbox requires --nakama")
+		quit(2)
+		return
 	Engine.physics_ticks_per_second = Defs.TICK_RATE
 	sim = GameServer.new(WorldGen.new(world_seed), world_seed)
 	if not disable_world_save:
@@ -98,6 +110,14 @@ func _initialize() -> void:
 		var parts := nakama_address.split(":")
 		gateway.setup(parts[0], int(parts[1]) if parts.size() > 1 else 7350, "albion_after_key", nakama_http_key)
 		net.gateway = gateway
+		var outbox_path: String = siege_outbox_override if not siege_outbox_override.is_empty() \
+			else "user://albion_after_siege_outbox_%d.json" % world_seed
+		if not net.configure_siege_outbox(outbox_path):
+			printerr("SERVER refused invalid or inaccessible siege outbox: " + outbox_path)
+			quit(3)
+			return
+		print("SERVER siege outbox restored %d unacknowledged guild victories" %
+			net._siege_ledger_pending.size())
 	peer = ENetMultiplayerPeer.new()
 	var error := peer.create_server(port, max_clients)
 	if error != OK:

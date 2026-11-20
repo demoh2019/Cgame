@@ -1,6 +1,7 @@
 extends RefCounted
 ## Regressions: real ruin exploration, danger bonuses, save safety and anti-farming.
 
+const Defs = preload("res://scripts/shared/defs.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
@@ -110,3 +111,56 @@ func run(t) -> void:
 	server._on_player_death(player, -1)
 	server._spawn_player(player)
 	t.eq(player.progression.scavenging_xp, expected_xp, "full-loot death retains XP")
+
+	t.current = "sealed compartments require an actual consumable in dangerous ruin crates"
+	t.check(Defs.is_item(Scavenging.LOCKPICK_ITEM), "lockpick exists in the item catalog")
+	var recipe: Dictionary = Defs.recipes().get(Scavenging.LOCKPICK_ITEM, {})
+	t.check(not recipe.is_empty(), "lockpick has a craftable workbench recipe")
+	t.eq(str(recipe.get("station", "")), "workbench", "kit is assembled at a bench")
+	t.check(Scavenging.can_unlock(2, 1), "red crate with one kit is eligible")
+	t.check(Scavenging.can_unlock(3, 1), "black crate with one kit is eligible")
+	t.check(not Scavenging.can_unlock(1, 100), "safe-zone crates cannot consume kits")
+	t.check(not Scavenging.can_unlock(2, 0), "without a kit there is no reward")
+	t.check(not Scavenging.can_unlock(999, 1), "forged zone cannot unlock")
+	var sealed_rng := RandomNumberGenerator.new()
+	sealed_rng.seed = 3141
+	t.check(Scavenging.sealed_compartment_loot(1, sealed_rng).is_empty(), "safe tier cannot roll loot")
+	for dangerous_zone in [2, 3]:
+		var prize: Dictionary = Scavenging.sealed_compartment_loot(dangerous_zone, sealed_rng)
+		t.check(int(prize.get("scrap", 0)) >= 2 and int(prize.get("scrap", 0)) <= 4,
+			"extra scrap has a fixed limit")
+		t.check(int(prize.get("bar_%d" % (dangerous_zone + 1), 0)) >= 1 and
+			int(prize.get("bar_%d" % (dangerous_zone + 1), 0)) <= 2,
+			"only materials matching the zone are created")
+		for item_id in prize:
+			t.check(Defs.is_item(str(item_id)), "all extra loot IDs exist")
+			t.check(int(prize[item_id]) <= Defs.stack_size(str(item_id)), "all extra counts fit one stack")
+
+	var lock_server := GameServer.new(world, 3141)
+	var locksmith = lock_server.add_player(911, "Locksmith")
+	t.eq(locksmith.inventory.add(Scavenging.LOCKPICK_ITEM, 1), 0, "one kit fits inventory")
+	locksmith.position = Vector3(0.0, world.height_at(0.0, 0.0), 0.0)
+	t.eq(str(lock_server.cmd_loot(911, int(crate["id"])).get("reason", "")),
+		"too_far", "the client cannot spend a kit remotely")
+	t.eq(locksmith.inventory.count(Scavenging.LOCKPICK_ITEM), 1, "refused search preserves kit")
+	locksmith.position = Vector3(x - 1.0, world.height_at(x - 1.0, z), z)
+	var expected_rng := RandomNumberGenerator.new()
+	expected_rng.seed = WorldGen.mix(int(crate["id"]), int(lock_server.time), world.world_seed, 3)
+	var ordinary: Dictionary = Combat.crate_loot(zone, expected_rng)
+	var lock_result: Dictionary = lock_server.cmd_loot(911, int(crate["id"]))
+	t.check(bool(lock_result.get("ok", false)), "legitimate nearby red/black search works")
+	t.eq(locksmith.inventory.count(Scavenging.LOCKPICK_ITEM), 0, "exactly one kit is spent")
+	t.check(locksmith.inventory.count("scrap") >= int(ordinary.get("scrap", 0)) + 2,
+		"secured cache grants bounded additional salvage")
+	t.check(locksmith.inventory.count("bar_%d" % (zone + 1)) >=
+		int(ordinary.get("bar_%d" % (zone + 1), 0)) + 1,
+		"secured cache grants tier-appropriate metal")
+	var once: int = locksmith.inventory.count("scrap")
+	t.eq(str(lock_server.cmd_loot(911, int(crate["id"])).get("reason", "")),
+		"empty", "opening the same compartment twice is rejected")
+	t.eq(locksmith.inventory.count("scrap"), once, "repeat cannot duplicate salvage")
+	var unlock_events := 0
+	for event in lock_server.drain_events():
+		if str(event.get("type", "")) == "lockpick" and int(event.get("peer", -1)) == 911:
+			unlock_events += 1
+	t.eq(unlock_events, 1, "a single verified lockpick event is published")

@@ -222,6 +222,16 @@ static func _build_items() -> void:
 			_add_recipe(storm_id, storm_id, 1,
 				{"cloth_%d" % t: 6, "fiber_%d" % t: 4},
 				"workbench", 6.0 + float(t))
+			# The sealed suit trades PvP armor and warmth for environmental protection.
+			var sealed_id: String = "sealed_suit_%d" % t
+			var spore_resistance: float = 0.65 + 0.1 * float(t - 2)
+			_add_item(sealed_id, {"name": "Sealed Expedition Suit T%d" % t,
+				"kind": "armor", "tier": t, "armor": 0.04 + 0.015 * float(t - 2),
+				"spore_resistance": spore_resistance, "insulation": 0.25,
+				"weight": 4.0 + 0.4 * float(t - 2), "value": 68 * t})
+			_add_recipe(sealed_id, sealed_id, 1,
+				{"cloth_%d" % t: 5, "bar_%d" % t: 2,
+					"fiber_%d" % t: 3}, "workbench", 6.0 + float(t))
 			# Lightweight stealth clothing: weak in combat but breaks visual
 			# acquisition by idle infected. Noise and blood scent are unchanged.
 			var ghillie_id: String = "ghillie_cloak_%d" % t
@@ -302,6 +312,12 @@ static func _build_items() -> void:
 		"heal": 8.0, "cure": 40.0, "stop_bleeding": true, "stack": 5, "value": 20})
 	_add_recipe("field_antiseptic", "field_antiseptic", 1,
 		{"bandage": 1, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# Spitter counterplay: consumes real survival supplies instead of
+	# granting immunity to the initial splash or healing past wounds.
+	_add_item("field_alkali_kit", {"name": "Field Alkali Kit",
+		"kind": "acid_neutralizer", "stack": 5, "weight": 0.5, "value": 32})
+	_add_recipe("field_alkali_kit", "field_alkali_kit", 1,
+		{"stone_1": 2, "water_bottle": 1, "cloth_1": 1}, "", 3.0)
 	_add_item("antibiotics", {"name": "Antibiotics", "kind": "medical",
 		"cure": 100.0, "stack": 5, "value": 80})
 	# Lineage-style elite hunts feed back into survival via medical crafting.
@@ -349,11 +365,27 @@ static func _build_items() -> void:
 	_add_recipe("ammo_9mm", "ammo_9mm", 12,
 		{"scrap": 2, "bar_2": 1}, "workbench", 4.0)
 	_add_item("scrap", {"name": "Scrap Metal", "kind": "resource", "tier": 2, "stack": 100, "value": 3})
+	# Reusable scrap economy: one consumable pick unlocks a sealed compartment
+	# only when its owner searches an actual red/black ruin crate.
+	_add_item("lockpick_kit", {"name": "Improvised Lockpick Kit", "kind": "material",
+		"tier": 2, "stack": 10, "value": 24, "weight": 0.25})
+	_add_recipe("lockpick_kit", "lockpick_kit", 1,
+		{"scrap": 2, "bar_1": 1, "fiber_1": 2}, "workbench", 4.0)
 	# Crafted noise maker: brief diversion for stealth runs, not free aggro.
+	# A tactical consumable: gathering + scavenged scrap become a squad buff.
+	_add_item("field_standard", {"name": "Expedition Rally Standard",
+		"kind": "standard", "tier": 1, "stack": 3, "weight": 2.0, "value": 55})
+	_add_recipe("field_standard", "field_standard", 1,
+		{"plank_1": 2, "cloth_1": 2, "scrap": 1}, "workbench", 5.0)
 	_add_item("noise_decoy", {"name": "Clattering Decoy", "kind": "decoy",
 		"tier": 1, "stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("noise_decoy", "noise_decoy", 1,
 		{"wood_1": 2, "scrap": 1}, "", 2.5)
+	# Defensive disposable wire snare; only the PvE server can trigger it.
+	_add_item("infected_snare", {"name": "Infected Tripwire Snare",
+		"kind": "deployable", "tier": 1, "stack": 10, "weight": 0.9, "value": 28})
+	_add_recipe("infected_snare", "infected_snare", 1,
+		{"wood_1": 2, "fiber_1": 2, "scrap": 1}, "", 3.0)
 	_add_item("silver", {"name": "Silver", "kind": "currency", "stack": 100000, "value": 1})
 
 

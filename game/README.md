@@ -2360,6 +2360,47 @@ membership revocation. The Nakama integration suite
 replays, event collisions, independent victories, reload and server-key
 permissions. No Cgame engine modifications were necessary.
 
+
+## Survivor tripwire snares — tactical infected control in the wilderness
+
+The canonical `game/` adds a **field-craftable Infected Tripwire Snare**.
+Make one kit from **2 T1 wood, 2 T1 fiber, 1 scavenged scrap**, without
+a workbench. Place it **1.5–4 metres** away on traversable ground outside
+the safe settlement. The authoritative server rejects obstructed terrain,
+water, overlapping traps, positions under living players/infected, and
+nonfinite/out-of-range coordinates before consuming anything.
+
+A placed trap lasts **150 seconds** or until the **first ordinary or elite
+infected walks within 1.35 metres**. It is spent once, rooting ordinary
+infected for **3 seconds** or elites for **1.5 seconds**, without dealing
+damage, granting XP, changing PvP combat, or bypassing zombie aggro.
+Raid bosses are immune and do not consume traps. Rooted enemies can still
+attack if their existing target is within reach; the root only prevents
+movement. The root cannot count as being stuck against a destructible wall.
+
+Each survivor account may have at most **3 active snares**; the world cap
+is **64**. Account-based ownership survives a peer-ID change within the
+server session without exposing account identity to other players.
+Trap positions are visible to nearby players through bounded public
+snapshots, but ownership and absolute expiration clocks stay server-only.
+Trap objects are session-limited world devices, not serialized as owned
+gear or saved in the survivor's Nakama character.
+
+Controls: local preview **backslash (\\)** plants a kit 2.8m ahead;
+online **backslash** or the inventory's **Place infected tripwire**
+button sends the desired point to the existing authenticated network
+server. The multiplayer world renders low-profile tripwire meshes and
+labels; traps disappear when triggered or expired.
+
+The new shared `scripts/shared/infected_snare.gd` defines placement,
+trigger, lifetime, public state and caps; `scripts/shared/zombie.gd`
+implements temporary movement rooting; `GameServer` owns consumption,
+triggers and expiry; network/client/HUD/entity view provide gameplay.
+`game/tests/test_infected_snare.gd` is part of `tests/run_all.gd` and
+covers paid craft/placement, spatial rejection, visibility/privacy,
+normal/elite/boss interactions, wall-safe immobilization and expiry.
+Existing Godot APIs support the mechanic without native-engine patches.
+
 ## Corrosive infected can damage player-built barricades
 
 Lingering acid from a dangerous-zone spitter now **corrodes nearby
@@ -2379,3 +2420,117 @@ repair and dismantling work as before. Destroyed/dismantled walls clear
 their short-lived cooldown entries and any active pool expires within
 5 seconds. Testing: `game/tests/test_acid_wall_corrosion.gd` in the
 existing headless test suite.
+
+## Crash-recoverable siege victory outbox (dedicated server)
+
+Nakama guild siege victories are now written to a **local write-ahead
+outbox** before the server sends a score/receipt RPC. The outbox saves each
+event's original 128-bit ID, verified guild UUID, outpost ID and world seed
+under `user://albion_after_siege_outbox_<seed>.json`. Each append and
+acknowledgement uses a flushed temporary file followed by an atomic file
+rename, replacing one validated complete checkpoint. Only after Nakama
+confirms its idempotent receipt does the server remove an event from the
+journal. Network errors and ambiguous responses retain the **same ID**.
+
+When the dedicated server next starts with `--nakama`, it validates
+and reloads the queue **before accepting player connections**, then
+resubmits unacknowledged events. A confirmed-but-not-yet-deleted event
+is safe to replay because the Nakama backend recognizes its immutable
+receipt. Files with an invalid schema, duplicate IDs, impossible values,
+oversized content, another world seed or an unsafe path cause startup
+to fail instead of silently resetting guild history. Pending events for
+different seeds cannot be mixed.
+
+The outbox is enabled automatically when launching a dedicated Nakama
+server; offline play is unchanged. Administrators can choose a dedicated
+journal path with `--siege-outbox user://backups/siege_1337.json` alongside
+`--nakama`. **Only one server process may write a given journal file**;
+it is not a cross-shard consensus ledger. `--no-world-save` does not turn
+off the siege outbox. Preserve both the Nakama database and the server's
+`user://` volume across container restarts.
+
+For a disk write failure, the server retains affected events in a
+**RAM-only retry backlog and refuses to send them to Nakama until they have
+been journaled**. Graceful shutdown reports failure while such events
+remain unjournaled; a sudden crash during an unjournaled IO failure can
+still lose those events. The small interval between calculating a world
+capture and writing its outbox entry is also not a transactional boundary
+with Nakama. Durable castle ownership and cross-shard exactly-once
+transactions are separate future features.
+
+Implementation: `scripts/server/siege_outbox.gd`,
+`scripts/shared/net.gd`, `scripts/server/server_main.gd`.
+The offline `tests/test_siege_outbox.gd` suite checks real file recovery,
+record validation, append order, duplicate rejection, acknowledgement
+restarts, seed isolation and corruption fail-closed behavior. Nakama
+integration tests continue checking receipt idempotence. No native Cgame
+engine API was missing.
+
+
+## Field alkali kits: item-paid counterplay to spitter acid pools
+
+`game/` now includes a **Field Alkali Kit**, craftable in the field from
+**2 T1 stone, 1 clean water bottle and 1 T1 cloth**. The kit is available
+through ordinary inventory use in online play; the inventory also has
+a dedicated **Neutralize nearby acid pools** action. Local preview uses
+**Shift+R** to activate a carried kit (plain R retains lake drinking).
+
+An authorized survivor can clear **up to 3 nearest, still-active spitter
+acid pools within 5.5 metres** using one real kit. Selection is wholly
+server-controlled, ordered by distance and stable ID, without accepting
+pool IDs, coordinates or claimed counts from the client. Expired pools,
+hazards outside range, invalid positions, dead survivors and safe hubs
+are not eligible. Repeated calls without an actual removable pool
+report `no_acid_nearby` and **do not consume the kit**.
+
+Neutralization removes lingering terrain corrosion/damage from the
+shared server simulation and nearby network snapshots, protecting
+party routes and fortifications from *future* acid ticks. It **does not**
+heal existing damage or infection, cancel the spitter's warned initial
+impact, defeat enemies, award combat XP, or affect PvP attacks.
+
+Implementation uses `scripts/shared/acid_neutralizer.gd`, real
+`defs.gd` crafting recipes, the authenticated existing `c_use` RPC,
+server `GameServer.cmd_use`, local preview controls and online HUD.
+`game/tests/test_acid_neutralizer.gd` is registered in the headless
+`game/tests/run_all.gd` regression suite. Existing engine systems
+already support the feature; no native Cgame modifications are needed.
+
+
+## Expedition rally standard — crafted group combat recovery
+
+A party leader can now craft an **Expedition Rally Standard** at a workbench
+using **2 plank T1, 2 cloth T1 and 1 scavenged scrap**. Outside the protected
+settlement, the leader can raise the standard using the **Raise standard**
+button in the online party panel while at least one living ally is nearby.
+
+- Deployment consumes exactly **one carried standard**, only after the
+  server confirms accepted party leadership, dry land, nearby teammates,
+  no active standard, and deployment cooldown. It cannot be placed for free
+  or from an arbitrary client-supplied coordinate.
+- For **90 seconds**, current group members within **11 m horizontally**
+  and **3 m vertically** gain **+1.4 stamina/second** and **+0.8 combat
+  energy/second** on top of existing regeneration. Hunger or thirst at
+  20 or below blocks the additional recovery. Sprint/dodge stamina delay
+  and fractures prevent additional standard stamina restoration.
+  Recovery cannot exceed the normal stamina/combat-energy caps.
+- The leader must wait **120 seconds** between standard placements.
+  A dead or departed leader immediately cancels the standard.
+  The effect disappears on expiry and when the party disbands; it is
+  temporary session state, not a permanently persisted ability.
+- Only actual party members receive the standard location in their
+  authenticated snapshots. The online party HUD displays its remaining
+  duration and the north-up tactical radar draws its position and radius;
+  outsiders cannot see this private marker or receive its recovery.
+- Server tick integration clamps recovery to the real active portion
+  of each tick, avoiding overpayment when a temporary marker expires.
+
+Gameplay is implemented in `scripts/shared/rally_standard.gd`,
+`scripts/shared/party.gd` and the authoritative game server,
+using existing crafting, network, party HUD and radar systems.
+`tests/test_rally_standard.gd` is registered in `tests/run_all.gd`
+and checks ingredient costs, consent, placement, XP-safe recovery,
+cooldowns, stat caps, death cleanup, event privacy and visibility.
+
+Run `godot --headless --path game --script res://tests/run_all.gd`.
+No native Cgame engine additions were required for this mechanic.

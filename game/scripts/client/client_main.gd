@@ -7,6 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
+const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
@@ -85,6 +86,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_left", KEY_A)
 	_bind_key("survive_right", KEY_D)
 	_bind_key("survive_sprint", KEY_SHIFT)
+	_bind_key("survive_crouch", KEY_CTRL)
 	_bind_key("survive_gather", KEY_E)
 	_bind_key("survive_fish", KEY_T)
 	_bind_key("survive_loot", KEY_Q)
@@ -106,6 +108,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_build", KEY_U)
 	_bind_key("survive_campfire", KEY_O)
 	_bind_key("survive_decoy", KEY_COMMA)
+	_bind_key("survive_snare", KEY_BACKSLASH)
 	_bind_key("survive_stim", KEY_PERIOD)
 	_bind_key("survive_scent_mask", KEY_SLASH)
 	_bind_key("survive_refuel", KEY_9)
@@ -570,8 +573,10 @@ func _physics_process(delta: float) -> void:
 		_facing = movement.normalized()
 	_sequence += 1
 	sim.submit_input(LOCAL_PLAYER_ID, _sequence, movement.x, movement.y,
-			Input.is_action_pressed("survive_sprint"), atan2(_facing.x, _facing.y), delta)
+			Input.is_action_pressed("survive_sprint"), atan2(_facing.x, _facing.y), delta,
+			Input.is_action_pressed("survive_crouch"))
 	_avatar.position = survivor.position + Vector3(0, 0.85, 0)
+	_avatar.scale = Vector3(1.0, 0.72 if survivor.crouching else 1.0, 1.0)
 	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
 	_camera.look_at(survivor.position + Vector3(0, 0.7, 0), Vector3.UP)
 	_stream_chunks()
@@ -634,6 +639,8 @@ func _nearest_loot() -> Dictionary:
 func _result(action: String, data: Dictionary) -> void:
 	if bool(data.get("ok", false)):
 		_feedback = "%s: SUCCESS" % action
+	elif str(data.get("reason", "")) == "guards_alive":
+		_feedback = "Supply crate guarded: defeat %d infected before looting." % int(data.get("remaining", 0))
 	else:
 		_feedback = "%s: %s" % [action, str(data.get("reason", "failed"))]
 	_update_hud()
@@ -800,8 +807,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_scent_mask"):
 		_result("Apply herbal scent salve", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_scent_mask"))
 	elif event.is_action_pressed("survive_lake"):
-		var drink_result: Dictionary = sim.cmd_drink_water(LOCAL_PLAYER_ID)
-		_result("Filtered lake water" if bool(drink_result.get("filtered", false)) else "Lake water (infection risk)", drink_result)
+		if Input.is_key_pressed(KEY_SHIFT):
+			var result: Dictionary = sim.cmd_use(LOCAL_PLAYER_ID, "field_alkali_kit")
+			_result("Neutralize acid (%d pools)" % int(result.get("neutralized", 0)),
+				result)
+		else:
+			var drink_result: Dictionary = sim.cmd_drink_water(LOCAL_PLAYER_ID)
+			_result("Filtered lake water" if bool(drink_result.get("filtered", false)) else "Lake water (infection risk)", drink_result)
 	elif event.is_action_pressed("survive_extinguish"):
 		var fire_id: int = _nearest_campfire()
 		if fire_id == -1:
@@ -816,6 +828,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_result("Refuel campfire", sim.cmd_refuel_campfire(LOCAL_PLAYER_ID, fire_id))
 	elif event.is_action_pressed("survive_decoy"):
 		_result("Throw noise decoy", sim.cmd_throw_decoy(LOCAL_PLAYER_ID, _facing.x, _facing.y))
+	elif event.is_action_pressed("survive_snare"):
+		var site := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
+		_result("Place infected snare", sim.cmd_place_infected_snare(LOCAL_PLAYER_ID, site.x, site.y))
 	elif event.is_action_pressed("survive_campfire"):
 		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
 		var fire_result: Dictionary = sim.cmd_light_campfire(LOCAL_PLAYER_ID, point.x, point.y)
@@ -847,9 +862,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_result("Dismantle barricade", sim.cmd_dismantle(LOCAL_PLAYER_ID, wall_id))
 
 	elif event.is_action_pressed("survive_fish"):
-		var wants_bait: bool = Input.is_key_pressed(KEY_SHIFT)
-		_result("Baited cast" if wants_bait else "Cast fishing rod",
-			sim.cmd_fish(LOCAL_PLAYER_ID, wants_bait))
+		var storm_mode: bool = Input.is_key_pressed(KEY_ALT)
+		var wants_bait: bool = Input.is_key_pressed(KEY_SHIFT) and not storm_mode
+		_result("Storm cast" if storm_mode else (
+			"Baited cast" if wants_bait else "Cast fishing rod"),
+			sim.cmd_fish(LOCAL_PLAYER_ID, wants_bait, storm_mode))
 	elif event.is_action_pressed("survive_contract"):
 		var action := "daily_claim" if Input.is_key_pressed(KEY_CTRL) else ("claim" if Input.is_key_pressed(KEY_SHIFT) else "accept")
 		var response: Dictionary = sim.cmd_contract(LOCAL_PLAYER_ID, action)
@@ -938,10 +955,12 @@ func _update_hud() -> void:
 	_stats.text += "\nSTORM INSULATION %d%% | %s" % [
 		int(round(100.0 * Weather.protection(local_armor))),
 		str(Defs.item(local_armor).get("name", "No armor"))]
-	var visual: float = Camouflage.visual_signature(local_armor, not local_armor.is_empty(),
-		survivor.noise_timer, vitals.alive)
+	var visual: float = StealthStance.visual_signature(
+		Camouflage.visual_signature(local_armor, not local_armor.is_empty(),
+			survivor.noise_timer, vitals.alive),
+		survivor.crouching, survivor.noise_timer, vitals.alive)
 	if visual < 0.999:
-		_stats.text += "\nCAMOUFLAGE: infected vision -%d%% (noise/blood still reveal you)" % [
+		_stats.text += "\nSTEALTH STANCE / GEAR: infected vision -%d%% (noise/blood still reveal you)" % [
 			int(round(100.0 * (1.0 - visual)))]
 	elif float(Defs.item(local_armor).get("visual_signature", 1.0)) < 1.0 and survivor.noise_timer > 0.0:
 		_stats.text += "\nCAMOUFLAGE BROKEN: your noise is attracting infected"
@@ -957,7 +976,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | . stimulant | / scent salve | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer (3 pools)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback
@@ -966,6 +985,7 @@ func _update_hud() -> void:
 	if not fishing_status.is_empty():
 		_instructions.text += "\n" + fishing_status
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
+	_instructions.text += "\nField snares active: %d | roots first non-boss infected for 3s" % sim.infected_snares.size()
 	var scent_radius: float = BloodScent.detection_radius(survivor.survival.bleeding,
 		survivor.survival.alive, world.is_safe(survivor.position.x, survivor.position.z),
 		survivor.survival.scent_mask_seconds > 0.0)

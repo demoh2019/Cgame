@@ -16,6 +16,7 @@ var elite: bool = false
 var raid_boss: bool = false # Session-only group encounter; never a client-spawnable type.
 var raid_enraged: bool = false # Server transitions once at low raid boss health.
 var spawn_id: int
+var supply_cache_id: int = -1 # Server-only guardian of a live contested supply cache.
 var position: Vector3
 var yaw: float = 0.0
 var health: float
@@ -34,6 +35,7 @@ var spit_pending: bool = false # Delayed ground attack, only for "spitter".
 var spit_seconds: float = 0.0
 var spit_center: Vector2 = Vector2.ZERO
 var stuck_time: float = 0.0
+var snared_seconds: float = 0.0 # Server-owned root; movement-only, not attack immunity.
 var contributors: Dictionary = {} # Server: peer -> time + equipped weapon for PvE assist XP.
 var data: Dictionary
 var threat: Dictionary = {} # Bounded per-zombie server combat threat; not sent to clients.
@@ -72,6 +74,7 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 	if state == State.DEAD:
 		return {}
 	attack_timer = maxf(attack_timer - delta, 0.0)
+	snared_seconds = maxf(0.0, snared_seconds - maxf(0.0, delta))
 	Threat.decay(threat, delta)
 	forced_target_seconds = maxf(0.0, forced_target_seconds - delta)
 	if forced_target_seconds <= 0.0:
@@ -273,6 +276,9 @@ func investigate_decoy(site: Vector2) -> bool:
 
 
 func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: float) -> void:
+	if snared_seconds > 0.0:
+		stuck_time = 0.0 # A trap cannot be mistaken for a wall to damage.
+		return
 	var direction := goal - here
 	if direction.length() < 0.01:
 		return
@@ -285,6 +291,15 @@ func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: floa
 		stuck_time += delta
 	else:
 		stuck_time = 0.0
+
+
+## Server-only trap application; cannot target a boss or expired/dead zombie.
+func apply_snare(seconds: float) -> bool:
+	if not is_alive() or raid_boss or not is_finite(seconds) or seconds <= 0.0 or seconds > 3.0:
+		return false
+	snared_seconds = maxf(snared_seconds, seconds)
+	stuck_time = 0.0
+	return true
 
 
 func take_damage(amount: float, attacker_id: int = -1) -> bool:

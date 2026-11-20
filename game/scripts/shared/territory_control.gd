@@ -13,6 +13,7 @@ const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 const MAX_SITES := 3
 const CAPTURE_RADIUS := 12.0
 const RALLY_RADIUS := 18.0
+const HARVEST_RADIUS := 100.0 # Economic benefit is local to a captured outpost.
 const CAPTURE_SECONDS := 30.0
 const HOLD_SECONDS := 900.0
 const MIN_CAPTURERS := 2
@@ -189,3 +190,44 @@ func has_rally_bonus(peer_id: int, position: Vector3, parties, now: float,
 				Vector2(site["x"], site["z"])) <= RALLY_RADIUS * RALLY_RADIUS:
 			return true
 	return false
+
+## Holding a dangerous-zone outpost rewards nearby harvesters, not remote farmers.
+## All ownership, Nakama clan membership and live contesting sides are resolved
+## on the server at harvest completion, so losing a flag cancels the benefit.
+## The reward is exactly one additional raw crafting resource per node.
+func harvest_bonus(peer_id: int, node: Dictionary, players: Dictionary,
+		parties, now: float, world) -> int:
+	if not is_finite(now) or not ["tree", "rock", "ore", "bush"].has(
+			str(node.get("kind", ""))):
+		return 0
+	var x: float = float(node.get("x", NAN))
+	var z: float = float(node.get("z", NAN))
+	if not is_finite(x) or not is_finite(z) or not ZoneRisk.full_loot(world.zone_at(x, z)):
+		return 0
+	var player = players.get(peer_id)
+	if player == null or not player.survival.alive or not player.position.is_finite():
+		return 0
+	var node_position := Vector2(x, z)
+	if Vector2(player.position.x, player.position.z).distance_to(
+			node_position) > Defs.REACH + 0.8:
+		return 0
+	var group_id: int = parties.group_of(peer_id)
+	for site in sites:
+		var owner: int = int(site["owner"])
+		if owner <= 0 or not parties.groups.has(owner) or now >= float(site["until"]):
+			continue
+		if node_position.distance_squared_to(Vector2(float(site["x"]), float(site["z"]))) > \
+				HARVEST_RADIUS * HARVEST_RADIUS:
+			continue
+		if group_id != owner and not GuildTerritory.same_owner_guild(
+				site, player, players, parties):
+			continue
+		# Re-evaluate occupants immediately; cached contested flags may be stale.
+		var blocked := false
+		for presence_group in _occupied_groups(site, players, parties):
+			if int(presence_group) != owner:
+				blocked = true
+				break
+		if not blocked:
+			return 1
+	return 0

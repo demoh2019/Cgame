@@ -318,6 +318,14 @@ func _on_skill_event(event: Dictionary) -> void:
 			audio.play_ui("coin", -2.0)
 		"perk":
 			hud.say("Perk learned: %s" % Skills.PERKS[event["perk"]]["name"])
+		"supply_drop":
+			var guard_count: int = int(event.get("guards", 0))
+			hud.say("SUPPLY DROP (T%d) at %.0f, %.0f — %d infected guards!" % [
+				int(event.get("tier", 3)), float(event.get("x", 0)),
+				float(event.get("z", 0)), guard_count])
+		"supply_cleared":
+			hud.say("SUPPLY CLEARED at %.0f, %.0f! The crate is public — collect it before rival parties!" % [
+				float(event.get("x", 0)), float(event.get("z", 0))])
 
 
 func _setup_chat() -> void:
@@ -434,14 +442,16 @@ func _physics_process(delta: float) -> void:
 	var alive: bool = bool(client.you.get("alive", true))
 	var move := Vector2.ZERO
 	var sprint := false
+	var crouch := false
 	if alive and not _typing():
 		move.x = Input.get_axis("ui_left", "ui_right") + float(Input.is_key_pressed(KEY_D)) - float(Input.is_key_pressed(KEY_A))
 		move.y = Input.get_axis("ui_up", "ui_down") + float(Input.is_key_pressed(KEY_S)) - float(Input.is_key_pressed(KEY_W))
 		sprint = Input.is_key_pressed(KEY_SHIFT)
+		crouch = Input.is_key_pressed(KEY_CTRL)
 	move = move.limit_length(1.0)
 	var aim := _aim_direction()
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
-	client.send_input(move, sprint, yaw, delta)
+	client.send_input(move, sprint, yaw, delta, crouch)
 	if alive and not hud.is_menu_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
 		client.attack(aim)
 		_attack_cooldown = 0.18
@@ -457,6 +467,8 @@ func _process(delta: float) -> void:
 		avatar.position = position
 		avatar.rotation.y = lerp_angle(avatar.rotation.y, client.yaw, 1.0 - exp(-16.0 * delta))
 		avatar.visible = bool(client.you.get("alive", true))
+		avatar_model.scale = Vector3(1.0,
+			0.72 if bool(client.you.get("crouching", false)) else 1.0, 1.0)
 		avatar_model.update_motion(delta)
 		avatar_model.set_dead(not bool(client.you.get("alive", true)))
 		avatar_model.set_action_loop(_gather_animation())
@@ -654,6 +666,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.toggle_inventory()
 			KEY_C:
 				hud.toggle_crafting()
+			KEY_BACKSLASH:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					var dir: Vector2 = _aim_direction()
+					if dir.length_squared() < 0.0001:
+						dir = Vector2(sin(client.yaw), cos(client.yaw))
+					var site := Vector2(client.predicted.x, client.predicted.z) + dir * 2.8
+					client.place_infected_snare(site)
 			KEY_COMMA:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var decoy_direction: Vector2 = _aim_direction()
