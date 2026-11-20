@@ -68,6 +68,10 @@ bool WorldPartition3D::_within_any_radius(const Vector2i &p_cell, const Vector<V
 	return false;
 }
 
+bool WorldPartition3D::_has_residency_claim(const Vector2i &p_cell) const {
+	return pinned_cells.has(p_cell) || cell_lease_counts.has(p_cell);
+}
+
 String WorldPartition3D::_get_scene_path(const Vector2i &p_cell) const {
 	if (!cell_scenes.has(p_cell)) {
 		return String();
@@ -414,6 +418,65 @@ int WorldPartition3D::get_pinned_cell_count() const {
 	return pinned_cells.size();
 }
 
+int WorldPartition3D::acquire_cell_lease(const Vector2i &p_cell) {
+	ERR_FAIL_COND_V_MSG(cell_leases.size() >= 256, 0, "WorldPartition3D allows at most 256 active cell leases.");
+	for (int attempt = 0; attempt < 257; attempt++) {
+		const int token = next_cell_lease_token;
+		// Wrap without signed-integer overflow. Active tokens are never recycled.
+		next_cell_lease_token = token == INT32_MAX ? 1 : token + 1;
+		if (cell_leases.has(token)) {
+			continue;
+		}
+		cell_leases.insert(token, p_cell);
+		const int *count = cell_lease_counts.getptr(p_cell);
+		cell_lease_counts.insert(p_cell, count != nullptr ? *count + 1 : 1);
+		unload_after_last_pin_removed = false;
+		return token;
+	}
+	ERR_FAIL_V_MSG(0, "WorldPartition3D could not allocate a unique cell lease token.");
+}
+
+bool WorldPartition3D::release_cell_lease(int p_lease_token) {
+	const Vector2i *cell = cell_leases.getptr(p_lease_token);
+	if (cell == nullptr) {
+		return false;
+	}
+	const Vector2i cell_coord = *cell;
+	cell_leases.erase(p_lease_token);
+	const int *count = cell_lease_counts.getptr(cell_coord);
+	if (count != nullptr) {
+		if (*count <= 1) {
+			cell_lease_counts.erase(cell_coord);
+		} else {
+			cell_lease_counts.insert(cell_coord, *count - 1);
+		}
+	}
+	// Recheck eligibility even if no observer remains.
+	unload_after_last_pin_removed = true;
+	return true;
+}
+
+void WorldPartition3D::clear_cell_leases() {
+	if (!cell_leases.is_empty()) {
+		cell_leases.clear();
+		cell_lease_counts.clear();
+		unload_after_last_pin_removed = true;
+	}
+}
+
+int WorldPartition3D::get_cell_lease_count(const Vector2i &p_cell) const {
+	const int *count = cell_lease_counts.getptr(p_cell);
+	return count != nullptr ? *count : 0;
+}
+
+int WorldPartition3D::get_cell_lease_count_total() const {
+	return cell_leases.size();
+}
+
+int WorldPartition3D::get_leased_cell_count() const {
+	return cell_lease_counts.size();
+}
+
 void WorldPartition3D::set_cell_layers(const Dictionary &p_layers) {
 	Dictionary clean;
 	const Array keys = p_layers.keys();
@@ -753,7 +816,7 @@ void WorldPartition3D::update_streaming() {
 		// With a valid observer, ordinary distance-based eviction runs normally.
 		unload_after_last_pin_removed = false;
 	}
-	if (centers.is_empty() && pinned_cells.is_empty() && !unload_after_last_pin_removed && !layer_update_needed) {
+	if (centers.is_empty() && pinned_cells.is_empty() && cell_leases.is_empty() && !unload_after_last_pin_removed && !layer_update_needed) {
 		// Preserve cells if all observer nodes disappear temporarily without
 		// an explicit pin release (e.g., a brief scene-tree reparenting).
 		_purge_unused_ready_scenes();
@@ -765,10 +828,10 @@ void WorldPartition3D::update_streaming() {
 
 	// If no observer remains, preserve unrelated cells unless the last pin was
 	// explicitly released. A layer deactivation still removes its own cells.
-	const bool distance_eviction = !centers.is_empty() || !pinned_cells.is_empty() || unload_after_last_pin_removed;
+	const bool distance_eviction = !centers.is_empty() || !pinned_cells.is_empty() || !cell_leases.is_empty() || unload_after_last_pin_removed;
 	Vector<Vector2i> unload;
 	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
-		if (!_is_cell_layer_enabled(E.key) || (distance_eviction && !pinned_cells.has(E.key) && !_within_any_radius(E.key, centers, unload_radius)) || ObjectDB::get_instance(E.value) == nullptr) {
+		if (!_is_cell_layer_enabled(E.key) || (distance_eviction && !_has_residency_claim(E.key) && !_within_any_radius(E.key, centers, unload_radius)) || ObjectDB::get_instance(E.value) == nullptr) {
 			unload.push_back(E.key);
 		}
 	}
@@ -785,7 +848,7 @@ void WorldPartition3D::update_streaming() {
 
 	Vector<Vector2i> cancel;
 	for (const KeyValue<Vector2i, String> &E : pending_cells) {
-		if (!_is_cell_layer_enabled(E.key) || (distance_eviction && !pinned_cells.has(E.key) && !_within_any_radius(E.key, centers, load_radius))) {
+		if (!_is_cell_layer_enabled(E.key) || (distance_eviction && !_has_residency_claim(E.key) && !_within_any_radius(E.key, centers, load_radius))) {
 			cancel.push_back(E.key);
 		}
 	}
@@ -798,6 +861,13 @@ void WorldPartition3D::update_streaming() {
 	// Priority-pinned gameplay cells share this node's global resource budgets.
 	for (const Vector2i &cell : pinned_cells) {
 		_stream_candidate_cell(cell, new_requests, instances);
+	}
+	// Independent lease owners share the same budgets. Iterate distinct cells
+	// once, regardless of how many systems retain a single location.
+	for (const KeyValue<Vector2i, int> &E : cell_lease_counts) {
+		if (!pinned_cells.has(E.key)) {
+			_stream_candidate_cell(E.key, new_requests, instances);
+		}
 	}
 	// Visit the closest ring of every source before requesting farther cells.
 	// Primary still wins ties at a given radius; budgets remain global.
@@ -825,7 +895,7 @@ void WorldPartition3D::update_streaming() {
 	if (!disabled_active) {
 		layer_update_needed = false;
 	}
-	if (centers.is_empty() && pinned_cells.is_empty() && active_cells.is_empty() && pending_cells.is_empty()) {
+	if (centers.is_empty() && pinned_cells.is_empty() && cell_leases.is_empty() && active_cells.is_empty() && pending_cells.is_empty()) {
 		unload_after_last_pin_removed = false;
 	}
 }
@@ -886,6 +956,12 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_cell_pinned", "cell"), &WorldPartition3D::is_cell_pinned);
 	ClassDB::bind_method(D_METHOD("get_pinned_cells"), &WorldPartition3D::get_pinned_cells);
 	ClassDB::bind_method(D_METHOD("get_pinned_cell_count"), &WorldPartition3D::get_pinned_cell_count);
+	ClassDB::bind_method(D_METHOD("acquire_cell_lease", "cell"), &WorldPartition3D::acquire_cell_lease);
+	ClassDB::bind_method(D_METHOD("release_cell_lease", "lease_token"), &WorldPartition3D::release_cell_lease);
+	ClassDB::bind_method(D_METHOD("clear_cell_leases"), &WorldPartition3D::clear_cell_leases);
+	ClassDB::bind_method(D_METHOD("get_cell_lease_count", "cell"), &WorldPartition3D::get_cell_lease_count);
+	ClassDB::bind_method(D_METHOD("get_cell_lease_count_total"), &WorldPartition3D::get_cell_lease_count_total);
+	ClassDB::bind_method(D_METHOD("get_leased_cell_count"), &WorldPartition3D::get_leased_cell_count);
 	ClassDB::bind_method(D_METHOD("set_cell_layers", "layers"), &WorldPartition3D::set_cell_layers);
 	ClassDB::bind_method(D_METHOD("get_cell_layers"), &WorldPartition3D::get_cell_layers);
 	ClassDB::bind_method(D_METHOD("set_cell_layer", "cell", "layer"), &WorldPartition3D::set_cell_layer);

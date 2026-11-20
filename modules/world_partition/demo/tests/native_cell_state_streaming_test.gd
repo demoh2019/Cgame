@@ -3,6 +3,7 @@ extends SceneTree
 # This integration test REQUIRES the custom Cgame executable compiled with
 # modules/world_partition. The stock Godot CI does not execute this script.
 const CELL := Vector2i(0, 0)
+const LEASE_CELL := Vector2i(5, -4)
 const SCENE_PATH := "res://scenes/cell_detail.tscn"
 const CHECKPOINT := "user://cgame_native_state_regression.dat"
 
@@ -18,10 +19,10 @@ func _on_cell_state_changed(cell: Vector2i, state: Dictionary) -> void:
 func _initialize() -> void:
     call_deferred("_run")
 
-func _wait_for_cell(world: Node3D, desired: bool) -> bool:
+func _wait_for_cell(world: Node3D, desired: bool, cell: Vector2i = CELL) -> bool:
     for i in 240:
         world.call("update_streaming")
-        if bool(world.call("is_cell_loaded", CELL)) == desired:
+        if bool(world.call("is_cell_loaded", cell)) == desired:
             return true
         await process_frame
     return false
@@ -129,6 +130,35 @@ func _run() -> void:
     world.call("set_layer_states", {})
     assert(layer_notifications.size() == notifications_before + 2)
     assert(layer_notifications.back()["enabled"] == true)
+
+    # Independent owners hold a different cell without a valid observer.
+    world.set("observer_path", NodePath())
+    world.call("set_cell_scene", LEASE_CELL, SCENE_PATH)
+    var quest_lease: int = int(world.call("acquire_cell_lease", LEASE_CELL))
+    var cinematic_lease: int = int(world.call("acquire_cell_lease", LEASE_CELL))
+    assert(quest_lease > 0 and cinematic_lease > 0 and quest_lease != cinematic_lease)
+    assert(int(world.call("get_cell_lease_count", LEASE_CELL)) == 2)
+    assert(await _wait_for_cell(world, true, LEASE_CELL))
+
+    # Quest ending must not unload a cinematic still running there.
+    assert(bool(world.call("release_cell_lease", quest_lease)))
+    world.call("update_streaming")
+    assert(bool(world.call("is_cell_loaded", LEASE_CELL)))
+    assert(int(world.call("get_cell_lease_count", LEASE_CELL)) == 1)
+
+    # Data Layers still supersede a valid lease.
+    world.call("set_cell_layer", LEASE_CELL, "cinematic")
+    world.call("set_layer_enabled", "cinematic", false)
+    assert(await _wait_for_cell(world, false, LEASE_CELL))
+    assert(int(world.call("get_cell_lease_count", LEASE_CELL)) == 1)
+    world.call("set_layer_enabled", "cinematic", true)
+    assert(await _wait_for_cell(world, true, LEASE_CELL))
+
+    # Releasing the final handle makes the distant cell unloadable.
+    assert(bool(world.call("release_cell_lease", cinematic_lease)))
+    assert(await _wait_for_cell(world, false, LEASE_CELL))
+    assert(not bool(world.call("release_cell_lease", cinematic_lease)))
+    assert(int(world.call("get_cell_lease_count_total")) == 0)
 
     world.set("streaming_enabled", false)
     world.queue_free()

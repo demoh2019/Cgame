@@ -33,6 +33,8 @@ var baked_proxy_cell_count := 0
 var baked_validation_ms := 0
 var baked_manifest: Dictionary = {}
 var last_gameplay_event := "Claim the hub reward with C to unlock combat."
+var quest_arena_lease := 0
+var manual_arena_lease := 0
 var quality_controller = QUALITY_SCRIPT.new()
 var crossfade_controller: CROSSFADE_SCRIPT
 
@@ -62,6 +64,9 @@ func _ready() -> void:
         return
     if not detail.has_method("set_cell_layers") or not detail.has_method("set_layer_enabled"):
         push_error("Cgame WorldPartition3D runtime Data Layers API required.")
+        return
+    if not detail.has_method("acquire_cell_lease") or not detail.has_method("release_cell_lease"):
+        push_error("Cgame WorldPartition3D independent cell lease API required.")
         return
     # The Combat Event is initially inactive even if a pinned gameplay cell
     # or an observer overlaps its region. The quest hub stays available.
@@ -176,6 +181,45 @@ func _toggle_gameplay_pin(cell: Vector2i) -> void:
     else:
         detail.call("pin_cell", cell)
 
+func _sync_quest_arena_lease() -> void:
+    if detail == null:
+        return
+    # The mission owns its own lease. A cutscene/manual owner can release its
+    # token independently without disrupting this gameplay guarantee.
+    var hub_claimed := bool(_stateful_progress(HUB_CELL, "reward_claimed", false))
+    var victories := int(_stateful_progress(ARENA_CELL, "arena_wins", 0))
+    var mission_active := hub_claimed and victories < EVENT_RULES.CHAMPION_REQUIRED_WINS
+    if mission_active and quest_arena_lease == 0:
+        quest_arena_lease = int(detail.call("acquire_cell_lease", ARENA_CELL))
+    elif not mission_active and quest_arena_lease != 0:
+        detail.call("release_cell_lease", quest_arena_lease)
+        quest_arena_lease = 0
+
+func _toggle_manual_arena_lease() -> void:
+    if detail == null:
+        return
+    if manual_arena_lease == 0:
+        manual_arena_lease = int(detail.call("acquire_cell_lease", ARENA_CELL))
+    else:
+        detail.call("release_cell_lease", manual_arena_lease)
+        manual_arena_lease = 0
+    print("Arena manual lease: %s" % ("ACTIVE" if manual_arena_lease != 0 else "RELEASED"))
+
+func _release_all_owned_leases() -> void:
+    if not is_instance_valid(detail):
+        quest_arena_lease = 0
+        manual_arena_lease = 0
+        return
+    if quest_arena_lease != 0:
+        detail.call("release_cell_lease", quest_arena_lease)
+        quest_arena_lease = 0
+    if manual_arena_lease != 0:
+        detail.call("release_cell_lease", manual_arena_lease)
+        manual_arena_lease = 0
+
+func _exit_tree() -> void:
+    _release_all_owned_leases()
+
 func _toggle_combat_event() -> void:
     if detail == null:
         return
@@ -185,15 +229,18 @@ func _toggle_combat_event() -> void:
     print("Combat Event layer: %s" % ("ACTIVE" if not enabled else "INACTIVE"))
 
 func _on_cell_state_changed(cell: Vector2i, state: Dictionary) -> void:
-    var action: Dictionary = EVENT_RULES.next_event(cell, state)
-    if action.is_empty() or detail == null:
+    if detail == null:
         return
-    var layer: String = str(action["layer"])
-    # Idempotent: repeated snapshots/unloads never re-trigger the quest.
-    if not bool(detail.call("is_layer_enabled", layer)):
-        detail.call("set_layer_enabled", layer, true)
-        last_gameplay_event = str(action["message"])
-        print(last_gameplay_event)
+    var action: Dictionary = EVENT_RULES.next_event(cell, state)
+    if not action.is_empty():
+        var layer: String = str(action["layer"])
+        # Idempotent: repeated snapshots/unloads never re-trigger the quest.
+        if not bool(detail.call("is_layer_enabled", layer)):
+            detail.call("set_layer_enabled", layer, true)
+            last_gameplay_event = str(action["message"])
+            print(last_gameplay_event)
+    if cell == HUB_CELL or cell == ARENA_CELL:
+        _sync_quest_arena_lease()
 
 func _on_layer_state_changed(layer: String, enabled: bool) -> void:
     # Driven by native C++ notifications, not a per-frame layer poll.
@@ -274,10 +321,13 @@ func _load_checkpoint() -> void:
     if states.size() > 4096 or pins.size() > 128 or layers.size() > 64:
         push_warning("Checkpoint exceeds scene-state or pin limits.")
         return
-    # Snapshot contents are validated and cloned by the native engine.
+    # Runtime leases are owner-owned handles, not persisted tokens. Recreate
+    # the quest lease from checkpoint gameplay state after import.
+    _release_all_owned_leases()
     detail.call("load_cell_states", states)
     detail.call("set_layer_states", layers)
     detail.call("set_pinned_cells", pins)
+    _sync_quest_arena_lease()
     camera.global_transform = record["camera_transform"]
     detail.call("update_streaming")
     print("Checkpoint restored: %d cached gameplay cell states." % int(detail.call("get_cell_state_count")))
@@ -318,6 +368,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
             _toggle_gameplay_pin(HUB_CELL)
         KEY_G:
             _toggle_gameplay_pin(ARENA_CELL)
+        KEY_M:
+            _toggle_manual_arena_lease()
         KEY_T:
             _toggle_combat_event()
         KEY_C:
@@ -367,6 +419,8 @@ func _update_hud() -> void:
     var detail_count: int = int(detail.call("get_loaded_cell_count")) if detail != null else 0
     var distant_count: int = int(distant.call("get_loaded_cell_count")) if distant != null else 0
     var pin_count: int = int(detail.call("get_pinned_cell_count")) if detail != null else 0
+    var lease_total: int = int(detail.call("get_cell_lease_count_total")) if detail != null else 0
+    var arena_owners: int = int(detail.call("get_cell_lease_count", ARENA_CELL)) if detail != null else 0
     var hub_pinned := detail != null and bool(detail.call("is_cell_pinned", HUB_CELL))
     var arena_pinned := detail != null and bool(detail.call("is_cell_pinned", ARENA_CELL))
     var hub_loaded := detail != null and bool(detail.call("is_cell_loaded", HUB_CELL))
@@ -377,7 +431,7 @@ func _update_hud() -> void:
     var reward_claimed := bool(_stateful_progress(HUB_CELL, "reward_claimed", false))
     var arena_wins: int = int(_stateful_progress(ARENA_CELL, "arena_wins", 0))
     var state_count: int = int(detail.call("get_cell_state_count")) if detail != null else 0
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nCell leases: %d  Arena owners: %d | Quest: %s  M Manual: %s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
@@ -388,6 +442,10 @@ func _update_hud() -> void:
         "loaded" if hub_loaded else "away",
         "ON" if arena_pinned else "OFF",
         "loaded" if arena_loaded else "away",
+        lease_total,
+        arena_owners,
+        "ACTIVE" if quest_arena_lease != 0 else "RELEASED",
+        "ACTIVE" if manual_arena_lease != 0 else "RELEASED",
         "ON" if combat_active else "OFF",
         "ON" if champion_active else "OFF",
         "CLAIMED" if champion_claimed else "READY",

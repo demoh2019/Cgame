@@ -6,7 +6,7 @@
 	<description>
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around a primary observer node and optional additional observers. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
-		Additional observers in [member additional_observer_paths] are useful for split-screen cameras, co-op players, cinematic cameras and manual prefetch nodes. Cells are kept when in range of any valid observer, while all observers share the same per-frame request and instance budgets. The [member cell_layers] and [member layer_states] properties enable event-driven activation of runtime groups of cells: a disabled layer overrides pins and observers, and its cached gameplay state remains available. Pinned cells from [method pin_cell] take priority among enabled cells, followed by the nearest grid rings of all observers. Within the same ring the primary observer takes priority, followed by additional observers in array order.
+		Additional observers in [member additional_observer_paths] are useful for split-screen cameras, co-op players, cinematic cameras and manual prefetch nodes. Cells are kept when in range of any valid observer, while all observers share the same per-frame request and instance budgets. The [member cell_layers] and [member layer_states] properties enable event-driven activation of runtime groups of cells: a disabled layer overrides pins and observers, and its cached gameplay state remains available. Pinned cells from [method pin_cell] take priority among enabled cells, followed by independent residency leases from [method acquire_cell_lease], then the nearest grid rings of observers. Independent owners retain the same cell without interfering; all owners share one request and scene-instantiation budget. Within the same ring the primary observer takes priority, followed by additional observers in array order.
 		Loaded scene roots may optionally implement [code]capture_streaming_state()[/code] and [code]restore_streaming_state(state)[/code]. The streamer captures the former when unloading a cell and applies the latter after instantiation. [method snapshot_cell_states] and [method load_cell_states] provide a save-game bridge; they do not themselves write disk files. The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
@@ -22,6 +22,13 @@
 		Streaming is disabled while editing a scene; the node processes automatically while the game runs. Call [method update_streaming] if an immediate update is required after moving the observer.
 	</description>
 	<methods>
+		<method name="acquire_cell_lease">
+			<return type="int" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Acquires an independent residency claim for a cell and returns its positive token, or 0 when the maximum 256 simultaneous tokens are in use. Multiple independent owners can acquire the same cell. Leases use normal asynchronous streaming budgets and cannot bypass disabled [member layer_states] or [member streaming_enabled]. Tokens belong to this WorldPartition3D instance and must be released explicitly.
+			</description>
+		</method>
 		<method name="cell_to_local_position" qualifiers="const">
 			<return type="Vector3" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -34,6 +41,12 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Removes the layer assignment of [param cell], making it eligible for normal distance/pin-based streaming irrespective of inactive layer states. Does not delete the registered scene or its saved gameplay state.
+			</description>
+		</method>
+		<method name="clear_cell_leases">
+			<return type="void" />
+			<description>
+				Releases all independent runtime lease tokens without touching [member pinned_cells], scene registrations or saved gameplay progress. Any formerly retained scenes become eligible for normal budgeted unloading.
 			</description>
 		</method>
 		<method name="clear_cell_scenes">
@@ -87,6 +100,19 @@
 				Returns a copy of [member cell_layers]. Modifying the result does not change the layer configuration.
 			</description>
 		</method>
+		<method name="get_cell_lease_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the number of independent runtime lease tokens currently retaining the specified cell, excluding manual pins and observer sources.
+			</description>
+		</method>
+		<method name="get_cell_lease_count_total" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the total number of independent active lease tokens in this WorldPartition3D, limited to 256.
+			</description>
+		</method>
 		<method name="get_cell_scene" qualifiers="const">
 			<return type="String" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -125,6 +151,12 @@
 			<return type="Dictionary" />
 			<description>
 				Returns a copy of [member layer_states]. Missing layer names are enabled by default.
+			</description>
+		</method>
+		<method name="get_leased_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of distinct cell coordinates currently covered by at least one runtime lease, even when their scenes are not loaded or their layers are disabled.
 			</description>
 		</method>
 		<method name="get_loaded_cell_count" qualifiers="const">
@@ -205,6 +237,13 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Keeps a registered scene cell loaded independent of observer distance, including when no observer exists. Pins are prioritized before spatial requests, while the same threaded request and instantiation budgets apply. An unregistered coordinate is remembered but cannot load a scene until it is registered. Pinned cells do not bypass [member streaming_enabled]. Up to 128 distinct cells may be pinned.
+			</description>
+		</method>
+		<method name="release_cell_lease">
+			<return type="bool" />
+			<param index="0" name="lease_token" type="int" />
+			<description>
+				Releases exactly one independent owner token. Returns true once, or false for an unknown or previously released token. A cell still needed by another lease, manual pin or observer remains active. Without owners, it becomes eligible for normal unload even without any observer.
 			</description>
 		</method>
 		<method name="remove_cell_scene">

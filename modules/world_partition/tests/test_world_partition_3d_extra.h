@@ -45,6 +45,144 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Cell lease tokens isolate independent owners") {
+	WorldPartition3D world;
+	const Vector2i arena(4, 2);
+	const int quest_token = world.acquire_cell_lease(arena);
+	const int cinematic_token = world.acquire_cell_lease(arena);
+	CHECK(quest_token > 0);
+	CHECK(cinematic_token > 0);
+	CHECK(quest_token != cinematic_token);
+	CHECK(world.get_cell_lease_count(arena) == 2);
+	CHECK(world.get_cell_lease_count_total() == 2);
+	CHECK(world.get_leased_cell_count() == 1);
+	CHECK(world.release_cell_lease(quest_token));
+	CHECK_FALSE(world.release_cell_lease(quest_token));
+	CHECK(world.get_cell_lease_count(arena) == 1);
+	CHECK(world.get_cell_lease_count_total() == 1);
+	CHECK(world.release_cell_lease(cinematic_token));
+	CHECK(world.get_cell_lease_count(arena) == 0);
+	CHECK(world.get_leased_cell_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Cell leases coexist with manual pins and clear independently") {
+	WorldPartition3D world;
+	const Vector2i hub(0, 0);
+	world.pin_cell(hub);
+	const int token = world.acquire_cell_lease(hub);
+	world.clear_pinned_cells();
+	CHECK_FALSE(world.is_cell_pinned(hub));
+	CHECK(world.get_cell_lease_count(hub) == 1);
+	world.pin_cell(hub);
+	world.clear_cell_leases();
+	CHECK(world.is_cell_pinned(hub));
+	CHECK(world.get_cell_lease_count_total() == 0);
+	CHECK_FALSE(world.release_cell_lease(token));
+	world.unpin_cell(hub);
+	CHECK(world.get_pinned_cell_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Lease token cap is guarded without losing existing owners") {
+	WorldPartition3D world;
+	Vector<int> tokens;
+	for (int i = 0; i < 256; i++) {
+		const int token = world.acquire_cell_lease(Vector2i(i, 0));
+		REQUIRE(token > 0);
+		tokens.push_back(token);
+	}
+	ERR_PRINT_OFF;
+	CHECK(world.acquire_cell_lease(Vector2i(999, 0)) == 0);
+	ERR_PRINT_ON;
+	CHECK(world.get_cell_lease_count_total() == 256);
+	CHECK(world.get_cell_lease_count(Vector2i(999, 0)) == 0);
+	CHECK(world.release_cell_lease(tokens[0]));
+	const int new_token = world.acquire_cell_lease(Vector2i(999, 0));
+	CHECK(new_token > 0);
+	CHECK(new_token != tokens[0]);
+	CHECK(world.get_cell_lease_count_total() == 256);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Two leases retain distant cell until both release") {
+	const String path = make_cell_scene("lease_two_systems");
+	{
+		WorldFixture fixture;
+		const Vector2i arena(5, -2);
+		fixture.world->set_cell_scene(arena, path);
+		fixture.world->set_observer_path(NodePath());
+		const int quest = fixture.world->acquire_cell_lease(arena);
+		const int cutscene = fixture.world->acquire_cell_lease(arena);
+		REQUIRE(wait_for_cell(fixture.world, arena));
+		CHECK(fixture.world->release_cell_lease(quest));
+		fixture.world->update_streaming();
+		CHECK(fixture.world->is_cell_loaded(arena));
+		CHECK(fixture.world->release_cell_lease(cutscene));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(arena));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Releasing manual pin does not override independent lease") {
+	const String path = make_cell_scene("lease_survives_pin_release");
+	{
+		WorldFixture fixture;
+		const Vector2i cell(7, -3);
+		fixture.world->set_cell_scene(cell, path);
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->pin_cell(cell);
+		const int lease = fixture.world->acquire_cell_lease(cell);
+		REQUIRE(lease > 0);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		fixture.world->unpin_cell(cell);
+		fixture.world->update_streaming();
+		CHECK(fixture.world->is_cell_loaded(cell));
+		CHECK(fixture.world->get_cell_lease_count(cell) == 1);
+		CHECK(fixture.world->release_cell_lease(lease));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Data Layer deactivation overrides leased cells") {
+	const String path = make_cell_scene("lease_layer_gate");
+	{
+		WorldFixture fixture;
+		const Vector2i arena(0, 0);
+		fixture.world->set_cell_scene(arena, path);
+		fixture.world->set_cell_layer(arena, "combat");
+		const int lease = fixture.world->acquire_cell_lease(arena);
+		REQUIRE(wait_for_cell(fixture.world, arena));
+		fixture.world->set_layer_enabled("combat", false);
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(arena));
+		CHECK(fixture.world->get_cell_lease_count(arena) == 1);
+		fixture.world->set_layer_enabled("combat", true);
+		REQUIRE(wait_for_cell(fixture.world, arena));
+		CHECK(fixture.world->release_cell_lease(lease));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Lease request uses global streaming request budget") {
+	const String near_path = make_cell_scene("lease_budget_near");
+	const String leased_path = make_cell_scene("lease_budget_far");
+	{
+		WorldFixture fixture;
+		fixture.world->set_max_new_requests_per_frame(1);
+		fixture.world->set_cell_scene(Vector2i(0, 0), near_path);
+		fixture.world->set_cell_scene(Vector2i(5, 0), leased_path);
+		fixture.world->acquire_cell_lease(Vector2i(5, 0));
+		fixture.world->update_streaming();
+		CHECK(ResourceLoader::load_threaded_get_status(leased_path) != ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		CHECK(ResourceLoader::load_threaded_get_status(near_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(5, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(near_path) == OK);
+	CHECK(DirAccess::remove_absolute(leased_path) == OK);
+}
+
 TEST_CASE("[WorldPartition3D] Reactive world signals are exposed to scripts") {
 	WorldPartition3D world;
 	CHECK(world.has_signal(SNAME("cell_state_changed")));

@@ -48,6 +48,9 @@ class WorldPartition3D : public Node3D {
 	NodePath observer_path;
 	Array additional_observer_paths;
 	Vector<Vector2i> pinned_cells;
+	HashMap<int, Vector2i> cell_leases;
+	HashMap<Vector2i, int> cell_lease_counts;
+	int next_cell_lease_token = 1;
 	bool unload_after_last_pin_removed = false;
 	real_t cell_size = 128.0;
 	int load_radius = 1;
@@ -68,6 +71,7 @@ class WorldPartition3D : public Node3D {
 	static bool _within_radius(const Vector2i &p_cell, const Vector2i &p_center, int p_radius);
 	void _append_source_center(const NodePath &p_path, Vector<Vector2i> &r_centers) const;
 	bool _within_any_radius(const Vector2i &p_cell, const Vector<Vector2i> &p_centers, int p_radius) const;
+	bool _has_residency_claim(const Vector2i &p_cell) const;
 	String _get_scene_path(const Vector2i &p_cell) const;
 	bool _is_cell_layer_enabled(const Vector2i &p_cell) const;
 	void _capture_cell_state(const Vector2i &p_cell, Node *p_instance);
@@ -122,6 +126,13 @@ public:
 	bool is_cell_pinned(const Vector2i &p_cell) const;
 	Array get_pinned_cells() const;
 	int get_pinned_cell_count() const;
+
+	int acquire_cell_lease(const Vector2i &p_cell);
+	bool release_cell_lease(int p_lease_token);
+	void clear_cell_leases();
+	int get_cell_lease_count(const Vector2i &p_cell) const;
+	int get_cell_lease_count_total() const;
+	int get_leased_cell_count() const;
 
 	void set_cell_layers(const Dictionary &p_layers);
 	Dictionary get_cell_layers() const;
