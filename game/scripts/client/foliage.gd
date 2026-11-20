@@ -15,6 +15,11 @@ global uniform float aa_vegetation_wet_gloss;
 global uniform float aa_leaf_transmission;
 // Shared ambient self-occlusion budget for dense tree crowns.
 global uniform float aa_canopy_occlusion;
+// Shared tree/bush visibility limits match the actual scene HLOD profiles.
+// A zero width disables dithering entirely on low-end hardware.
+global uniform float aa_foliage_fade_width;
+global uniform float aa_foliage_tree_cull;
+global uniform float aa_foliage_bush_cull;
 uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform vec4 albedo_color : source_color = vec4(1.0);
 // Preserve source glTF PBR data. Optional maps are sampled only if actually present.
@@ -37,6 +42,8 @@ uniform float normal_strength = 1.0;
 uniform float sway = 0.12;
 uniform float height_ref = 4.0;
 uniform float height_min = 0.0;
+// 0 = no fade (landmarks/decor), 1 = tree, 2 = bush or berry.
+uniform int fade_role = 0;
 // Small movements disappear below a pixel at this range; avoid distant trigonometry.
 uniform float wind_fade_start = 48.0;
 uniform float wind_fade_end = 120.0;
@@ -49,6 +56,20 @@ varying vec3 plant_hue;
 varying vec2 cloud_xz;
 varying float plant_roughness;
 varying float canopy_height;
+varying float fade_coverage;
+
+// 4x4 ordered Bayer pattern, without a noise texture or transparent draw.
+// Each threshold is stable as the camera moves; the fade is only evaluated
+// inside the last few metres of an instance's draw distance.
+float ordered_dither_4x4(vec2 fragcoord) {
+	vec2 cell = mod(floor(fragcoord), 4.0);
+	vec2 low = mod(cell, 2.0);
+	vec2 high = floor(cell * 0.5);
+	float low_rank = low.x * 2.0 + low.y * 3.0 - 4.0 * low.x * low.y;
+	float high_rank = high.x * 2.0 + high.y * 3.0 - 4.0 * high.x * high.y;
+	return (low_rank * 4.0 + high_rank + 0.5) * (1.0 / 16.0);
+}
+
 void vertex() {
 	instance_tint = (instance_tinted || use_vertex_colors) ? COLOR.rgb : vec3(1.0);
 	// World-space plant roots give every MultiMesh instance stable colour and gust phase.
@@ -70,6 +91,12 @@ void vertex() {
 	// Use the root, not each vertex, for the low-frequency wind: the entire crown
 	// bends together instead of looking like disconnected branches.
 	float distance_to_camera = length(root - CAMERA_POSITION_WORLD.xz);
+	fade_coverage = 1.0;
+	if (aa_foliage_fade_width > 0.001 && fade_role > 0) {
+		float cull_end = fade_role == 1 ? aa_foliage_tree_cull : aa_foliage_bush_cull;
+		fade_coverage = 1.0 - smoothstep(cull_end - aa_foliage_fade_width,
+			cull_end, distance_to_camera);
+	}
 	float wind_lod = 1.0 - smoothstep(wind_fade_start, wind_fade_end, distance_to_camera);
 	if (wind_lod > 0.001 && sway > 0.0) {
 		float k = clamp(VERTEX.y / height_ref, 0.0, 1.0);
@@ -90,6 +117,13 @@ void vertex() {
 	}
 }
 void fragment() {
+	// Opaque fragment discard avoids alpha-blend sorting and extra screen passes.
+	// Zero-width presets skip this branch; near plants skip the Bayer calculation.
+	if (fade_coverage < 0.999) {
+		if (fade_coverage <= ordered_dither_4x4(FRAGCOORD.xy)) {
+			discard;
+		}
+	}
 	vec4 t = texture(albedo_tex, UV) * albedo_color;
 	if (red_to_green) {
 		// The red autumn leaves become a natural summer green: their brightness drives a deep-to-sunlit leaf ramp, so the
@@ -253,6 +287,16 @@ static func _channel_mask(channel: int) -> Vector4:
 			return Vector4(1.0, 0.0, 0.0, 0.0)
 
 
+## The exact scene-category fade ranges are shared through global uniforms.
+## Never apply the tree/bush range to monuments or decor with authored ranges.
+static func fade_role_for(key: String) -> int:
+	if key.begins_with("tree:") or key.begins_with("painted:") or key.begins_with("kenney_expanded_tree:"):
+		return 1
+	if key == "bush" or key == "berry":
+		return 2
+	return 0
+
+
 ## A swaying copy of `source` (cached by key). `sway` is the tip displacement in meters. `tinted`: multiply by the
 ## MultiMesh instance colour.
 static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false) -> Mesh:
@@ -278,6 +322,7 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 			material.set_shader_parameter("instance_tinted", tinted)
 			material.set_shader_parameter("height_ref", height)
 			material.set_shader_parameter("height_min", min_height)
+			material.set_shader_parameter("fade_role", fade_role_for(key))
 			material.set_shader_parameter("albedo_color", standard.albedo_color)
 			material.set_shader_parameter("use_vertex_colors", standard.vertex_color_use_as_albedo)
 			material.set_shader_parameter("material_roughness", standard.roughness)

@@ -92,3 +92,18 @@ aa_canopy_occlusion={
 "type": "float",
 "value": 0.32
 }
+
+aa_foliage_fade_width={
+"type": "float",
+"value": 0.0
+}
+
+aa_foliage_tree_cull={
+"type": "float",
+"value": 160.0
+}
+
+aa_foliage_bush_cull={
+"type": "float",
+"value": 104.0
+}

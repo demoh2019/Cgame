@@ -12,6 +12,7 @@ const WaterRefraction = preload("res://scripts/client/water_refraction.gd")
 const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const Foliage = preload("res://scripts/client/foliage.gd")
+const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
@@ -109,6 +110,14 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# Shared normal-variance filter is completely disabled on low-end presets.
 	RenderingServer.global_shader_parameter_set(&"aa_specular_aa_strength",
 		float(p["specular_aa_strength"]))
+	# Per-instance foliage fade shares the exact GPU batch visibility ranges.
+	# The shader is opaque (ordered discard), never alpha-blended.
+	RenderingServer.global_shader_parameter_set(&"aa_foliage_tree_cull",
+		SceneryLod.range_for("tree", _level))
+	RenderingServer.global_shader_parameter_set(&"aa_foliage_bush_cull",
+		SceneryLod.range_for("bush", _level))
+	RenderingServer.global_shader_parameter_set(&"aa_foliage_fade_width",
+		SceneryLod.foliage_fade_width(_level))
 	var world_profile: Dictionary = VisualProfiles.settings(_level)
 	# One uniform controls wet foliage highlights in every streamed nature batch.
 	# Performance skips specular detail without rebuilding any meshes.

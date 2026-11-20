@@ -20,6 +20,12 @@ static func preset(quality: int) -> Dictionary:
 	return PRESETS[clampi(quality, 0, PRESETS.size() - 1)].duplicate(true)
 
 
+## Dither distance, only for high-fidelity foliage; low tiers keep zero
+## extra fragment work. Culling remains the existing MultiMesh end range.
+static func foliage_fade_width(quality: int) -> float:
+	return [0.0, 0.0, 14.0, 22.0][clampi(quality, 0, 3)]
+
+
 static func category(kind: String) -> String:
 	if kind.begins_with("tree:") or kind == "tree":
 		return "tree"
