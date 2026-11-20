@@ -304,4 +304,16 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Custom normals support seam continuity 
 	memdelete(terrain);
 }
 
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Terrain shape-error budget is opt-in and safe") {
+	ChunkedTerrain3D *terrain = make_terrain(33, 64.0, 12.0);
+	CHECK(terrain->get_max_lod_pixel_error() == doctest::Approx(0.0));
+	terrain->set_max_lod_pixel_error(1.5);
+	CHECK(terrain->get_max_lod_pixel_error() == doctest::Approx(1.5));
+	terrain->set_max_lod_pixel_error(100.0);
+	CHECK(terrain->get_max_lod_pixel_error() == doctest::Approx(32.0));
+	terrain->set_max_lod_pixel_error(-1.0);
+	CHECK(terrain->get_max_lod_pixel_error() == doctest::Approx(0.0));
+	memdelete(terrain);
+}
+
 } // namespace TestChunkedTerrain3D
