@@ -48,7 +48,7 @@ func request_travel(place: Vector3, label: String = "точка") -> bool:
     elapsed = 0.0
     active = true
     last_message = "Подготовка: " + destination_name
-    player.set("movement_enabled", false)
+    # Keep gameplay responsive while destination scenes stream in the background.
     set_process(true)
     return true
 
@@ -113,7 +113,5 @@ func _finish(success: bool, message: String) -> void:
     last_message = message
     if is_instance_valid(streamer):
         streamer.remove_streaming_source(SOURCE_NAME)
-    if is_instance_valid(player):
-        player.set("movement_enabled", true)
     if not success:
         travel_failed.emit(message)
