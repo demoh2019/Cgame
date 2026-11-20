@@ -4,7 +4,7 @@ This directory is a **standalone playable reference project**, not a replacement
 
 ## Features integrated into this demo
 
-- Deterministic rolling terrain with normal maps derived from an analytic heightfield and vertex-colored PBR material.
+- Deterministic rolling terrain with vertex normals derived from an analytic heightfield and vertex-colored PBR material.
 - Chunked GPU-instanced tree trunks, animated canopies, rocks, and 3,600 wind-swaying grass tufts (one MultiMesh per chunk/type), instead of a separate scene node per instance.
 - Atmospheric procedural sky with the DirectionalLight3D sun, stable ambient sky radiance, cinematic AgX tone mapping, optional SSAO, SSIL, volumetric fog, and glowing collectible crystals.
 - Exploration movement, mouse-look, eight collectible forest relics, HUD, and interactive high/performance profiles.
