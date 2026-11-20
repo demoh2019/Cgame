@@ -73,9 +73,43 @@ func run(t) -> void:
 	t.eq(streamer.lookahead_seconds, 0.0,
 		"stop/teleport resets prediction without clearing cached world chunks")
 
+	t.current = "camera gaze makes visible world chunks stream first"
+	t.near(StreamingPolicy.view_weight(0), 0.35, 0.0001,
+			"Performance uses small camera bias, preserving closest-cell priority")
+	t.near(StreamingPolicy.view_weight(3), 0.80, 0.0001,
+			"Ultra prioritizes architecture in the visible camera sector")
+	t.check(StreamingPolicy.view_weight(1) < StreamingPolicy.view_weight(2),
+			"camera-visible priority increases with visual quality")
+	var viewing_camera := Camera3D.new()
+	viewing_camera.rotation = Vector3(0.0, -PI * 0.5, 0.0)
+	var forward: Vector3 = StreamingPolicy.ground_view(viewing_camera)
+	t.check(forward.x > 0.99 and absf(forward.y) < 0.0001,
+			"screen forward is projected to the native XZ streaming plane")
+	StreamingPolicy.apply_view(streamer, viewing_camera, 3)
+	t.near(streamer.view_priority, 0.80, 0.0001,
+			"camera priority weight reaches the modified C++ streamer")
+	t.check(streamer.view_direction.is_equal_approx(forward),
+			"native streaming gets the actual camera look direction")
+	var previous_direction: Vector3 = streamer.view_direction
+	StreamingPolicy.apply_view(streamer, viewing_camera, 3)
+	t.check(streamer.view_direction.is_equal_approx(previous_direction),
+			"unchanged camera avoids unnecessary streaming property updates")
+	viewing_camera.rotation = Vector3(0.0, PI * 0.5, 0.0)
+	StreamingPolicy.apply_view(streamer, viewing_camera, 2)
+	t.check(streamer.view_direction.x < -0.99,
+			"turning camera reverses priority even while the player stands still")
+	t.near(streamer.view_priority, 0.66, 0.0001,
+			"switching High quality adjusts only ordering, not world chunk count")
+	StreamingPolicy.apply_view(streamer, null, 0)
+	t.check(streamer.view_direction.is_zero_approx(),
+			"camera removed during loading safely returns to motion prediction")
+	viewing_camera.free()
+
 	t.current = "actual UI and network game consume the native scene queue"
 	var online := FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
 	var ui := FileAccess.get_file_as_string("res://scripts/client/ui_accessibility_layer.gd")
+		t.check(online.contains("WorldStreamingPolicy.apply_view(streamer, camera, GraphicsQuality.level())"),
+			"online play feeds camera perspective after actual camera rotation")
 	t.check(online.contains("WorldStreamingPolicy.apply(streamer"),
 		"networked world forwards actual mounted state to streaming scheduling")
 	t.check(online.contains("_access.set_world_streamer(streamer)"),
