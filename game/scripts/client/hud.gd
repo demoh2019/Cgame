@@ -1059,6 +1059,12 @@ func _build() -> void:
 	triage_button.tooltip_text = "Spend one crafted pack to treat up to 3 nearby allies (5.5m, 18s cooldown). Infected fighting them may turn toward the medic."
 	triage_button.pressed.connect(func() -> void: client.party_triage())
 	inventory_box.add_child(triage_button)
+	var cover_button := Button.new()
+	cover_button.name = "MedicCover"
+	cover_button.text = "Medic Cover (staff + guardian)"
+	cover_button.tooltip_text = "Restore-staff medic: 24 energy, 30s cooldown. A nearby equipped frontline guardian intercepts up to 3 already engaged infected (not raid bosses). No free healing or PvP aggro."
+	cover_button.pressed.connect(func() -> void: client.medic_cover())
+	inventory_box.add_child(cover_button)
 	# A cook supplies one real dish per present, eligible group member.
 	var feast_row := HBoxContainer.new()
 	inventory_box.add_child(feast_row)
@@ -2199,6 +2205,13 @@ func _on_event(event: Dictionary) -> void:
 		"outlaw_bounty":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("OUTLAW BOUNTY: +%d silver for a wanted survivor." % int(event.get("silver", 0)))
+		"medic_cover":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("MEDIC COVER: guardian #%d pulled %d infected off you!" % [
+					int(event.get("by", -1)), int(event.get("count", 0))])
+			elif int(event.get("by", -1)) == client.peer_id:
+				say("MEDIC COVER: drew %d attacking infected from medic #%d." % [
+					int(event.get("count", 0)), int(event.get("peer", -1))])
 		"party_triage":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Triage care received: +%d HP, -%d bleeding." % [
@@ -2808,6 +2821,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Outpost cache: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "medic_cover":
+		if bool(data.get("ok", false)):
+			say("Medic Cover: %d engaged infected redirected to guardian #%d." % [
+				int(data.get("count", 0)), int(data.get("guardian", -1))])
+		else:
+			say("Medic Cover denied: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "party_triage":
 		if bool(data.get("ok", false)):
 			say("Triage: treated %d allies (+%d HP total, -%d bleeding)." % [
@@ -3178,6 +3198,9 @@ func _process(_delta: float) -> void:
 	if guarded_for > 0.0:
 		_info_label.text += "\nSHIELDED by guardian #%d: %.1fs (PvE melee only)" % [
 			int(client.you.get("shield_wall_guarded_by", -1)), guarded_for]
+	var cover_cooldown: float = float(client.you.get("medic_cover_cooldown", 0.0))
+	if cover_cooldown > 0.0:
+		_info_label.text += "\nMedic Cover ready in %.0fs (staff + guardian)" % cover_cooldown
 	var intercept_active: float = float(client.you.get("guardian_intercept_seconds", 0.0))
 	var intercept_cooldown: float = float(client.you.get("guardian_intercept_cooldown", 0.0))
 	if intercept_active > 0.0:
