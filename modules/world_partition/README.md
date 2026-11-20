@@ -6,6 +6,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 
 - Register a sparse mapping from `Vector2i` cell coordinates to local `PackedScene` resource paths (saved with your `.tscn` scene).
 - Choose a `Node3D` observer, cell size, and square loading/unloading radii; negative coordinates are handled with floor division.
+- **Manually pinned regions:** `pin_cell(cell)`, `unpin_cell(cell)`, `is_cell_pinned(cell)`, `get_pinned_cell_count()`, `clear_pinned_cells()`. Keep up to **16** registered cells available beyond the observer's normal radii (e.g. quest locations or fast-travel destinations). Near-observer cells still receive first priority, pins are serviced before predictive prefetch, and all share the asynchronous request/instantiation limits. Missing/unregistered pins fail; duplicate pins are idempotent. Pinning never blocks, so verify `is_cell_loaded(cell)` before teleporting. Pins are removed when their cell is unregistered or all registrations are replaced/cleared.
 - Optionally prefetch a short directional corridor with `prefetch_direction` (each axis -1, 0 or 1) and `prefetch_distance` (0–4 cells, off by default). Cells within the observer's normal radius always have priority. When direction changes, obsolete ahead cells unload if outside hysteresis; resource requests remain shared and budgets are enforced across both passes.
 - Load scene resources asynchronously using Godot's `ResourceLoader.load_threaded_request` backend and poll without blocking while still in progress.
 - Share a resource-load request between cells using the same scene path.
@@ -36,9 +37,11 @@ func _ready() -> void:
     world.prefetch_distance = 2 # preload up to 2 cells ahead
     world.max_new_requests_per_frame = 2
     world.max_instances_per_frame = 2
+    world.pin_cell(Vector2i(10, -4)) # after registering that cell
     world.observer_path = world.get_path_to($Player)
     world.set_cell_scene(Vector2i(0, 0), "res://world/0_0.tscn")
     world.set_cell_scene(Vector2i(-1, 0), "res://world/-1_0.tscn")
+    world.set_cell_scene(Vector2i(10, -4), "res://world/distant_outpost.tscn")
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
@@ -52,6 +55,8 @@ var queued := world.get_pending_cell_count()
 var requests := world.get_inflight_request_count()
 var failed := world.get_failed_cell_count()
 ```
+
+You can also inspect `world.get_pinned_cell_count()` to track manual residency requests. 
 
 These counters describe the current state, not a prediction of future memory or throughput. One background resource request may serve multiple pending cells with the same PackedScene path. See `misc/cgame_forest_showcase` for a 1,024-cell registered world with a short distance-based active radius, directional predictive prefetch, reusable terrain resources and headless streaming regressions.
 
