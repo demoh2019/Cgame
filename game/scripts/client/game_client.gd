@@ -539,6 +539,10 @@ func nearest_barricade(point: Vector3, radius: float = 3.0) -> int:
 	return nearest
 
 
+func sample_spores() -> void:
+	net.c_sample_spores.rpc_id(1)
+
+
 func collect_rain() -> void:
 	net.c_collect_rain.rpc_id(1)
 

@@ -823,6 +823,13 @@ func c_refill_canteen() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_sample_spores() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "sample_spores", sim.cmd_sample_spores(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_collect_rain() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

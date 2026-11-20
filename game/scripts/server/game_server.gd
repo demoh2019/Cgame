@@ -65,6 +65,7 @@ const NightHorde = preload("res://scripts/shared/night_horde.gd")
 const HubRecall = preload("res://scripts/shared/hub_recall.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
+const SporeSampling = preload("res://scripts/shared/spore_sampling.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const FieldScentMask = preload("res://scripts/shared/field_scent_mask.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
@@ -146,6 +147,7 @@ class Player:
 	var rain_cooldown: float = 0.0 # Persisted storm water collection cooldown.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
 	var spore_filter_seconds: float = 0.0 # Paid temporary swamp respirator, persisted.
+	var spore_sample_cooldown: float = 0.0 # Persistent harvest cooldown.
 	var meal_seconds: float = 0.0 # Remaining server-ticked cooked-fish recovery buff.
 	var meal_tier: int = 0 # Zero when no meal buff is active; never client-authored.
 	var input_budget: float = 0.0
@@ -329,6 +331,7 @@ func character_data(player: Player) -> Dictionary:
 		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
 		"spore_filter_seconds": player.spore_filter_seconds,
+		"spore_sample_cooldown": player.spore_sample_cooldown,
 		"chain_wrap_seconds": player.chain_wrap_seconds,
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 	}
@@ -397,6 +400,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("spore_filter_seconds", 0.0),
 			0.0, SporeHazard.FILTER_DURATION_SECONDS):
+		return false
+	if not SaveValidation.finite_number(data.get("spore_sample_cooldown", 0.0),
+			0.0, SporeSampling.COOLDOWN_SECONDS):
 		return false
 	if not SaveValidation.finite_number(data.get("chain_wrap_seconds", 0.0),
 			0.0, BikeChain.DURATION_SECONDS):
@@ -483,6 +489,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.rain_cooldown = float(data.get("rain_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
 	player.spore_filter_seconds = float(data.get("spore_filter_seconds", 0.0))
+	player.spore_sample_cooldown = float(data.get("spore_sample_cooldown", 0.0))
 	player.chain_wrap_seconds = float(data.get("chain_wrap_seconds", 0.0))
 	player.meal_seconds = float(data.get("meal_seconds", 0.0))
 	player.meal_tier = int(data.get("meal_tier", 0))
@@ -2587,6 +2594,41 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	return {"ok": true}
 
 
+## A dangerous-swamp research loop; world, kit, protective suit, filtration,
+## infection exposure and output are exclusively server-owned.
+func cmd_sample_spores(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	if player.spore_sample_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown", "remaining": player.spore_sample_cooldown}
+	var site: String = SporeSampling.site_reason(world, player.position)
+	if site != "":
+		return {"ok": false, "reason": site}
+	var outcome: Dictionary = SporeSampling.transact(player.inventory)
+	if not bool(outcome.get("ok", false)):
+		return outcome
+	var armor: String = player.inventory.armor
+	if armor != "" and player.inventory.count(armor) < 1:
+		armor = ""
+	var hazard: Dictionary = SporeHazard.status(world, player.position,
+		time, armor, player.spore_filter_seconds)
+	var infection: float = SporeSampling.infection_cost(
+		float(hazard.get("protection", 0.0)))
+	player.survival.add_infection(infection)
+	player.spore_sample_cooldown = SporeSampling.COOLDOWN_SECONDS
+	player.dirty_inventory = true
+	player.dirty_character = true
+	events.append({"type": "spore_sampled", "peer": peer_id,
+		"count": SporeSampling.CULTURES_PER_KIT, "infection": infection})
+	return {"ok": true, "count": SporeSampling.CULTURES_PER_KIT,
+		"infection": infection, "cooldown": player.spore_sample_cooldown}
+
+
 ## Convert a crafted tarp into clean bottled stormwater. The server decides
 ## climate, terrain, swamp contamination, costs and output, never the client.
 func cmd_collect_rain(peer_id: int) -> Dictionary:
@@ -3622,6 +3664,7 @@ func _tick_players(delta: float) -> void:
 			player.guardian_brace = 0.0
 		player.lake_drink_cooldown = maxf(0.0, player.lake_drink_cooldown - maxf(0.0, delta))
 		player.rain_cooldown = maxf(0.0, player.rain_cooldown - maxf(0.0, delta))
+		player.spore_sample_cooldown = maxf(0.0, player.spore_sample_cooldown - maxf(0.0, delta))
 		player.stim_cooldown = maxf(0.0, player.stim_cooldown - maxf(0.0, delta))
 		player.decoy_timer = maxf(0.0, player.decoy_timer - maxf(0.0, delta))
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
@@ -4681,6 +4724,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else ""),
 			"lake_drink_cooldown": player.lake_drink_cooldown,
 			"rain_cooldown": player.rain_cooldown,
+			"spore_sample_cooldown": player.spore_sample_cooldown,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"guardian_cooldown": player.guardian_timer,
 			"warden_ward": WardenAura.active_for(player, players, parties, world),

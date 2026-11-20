@@ -359,6 +359,18 @@ static func _build_items() -> void:
 		"heal": 8.0, "cure": 40.0, "stop_bleeding": true, "stack": 5, "value": 20})
 	_add_recipe("field_antiseptic", "field_antiseptic", 1,
 		{"bandage": 1, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# Dangerous swamps produce rare cultures for an infection medicine.
+	_add_item("spore_sampler", {"name": "Sealed Spore Sample Kit", "kind": "sampler",
+		"tier": 1, "stack": 5, "weight": 0.4, "value": 30})
+	_add_recipe("spore_sampler", "spore_sampler", 1,
+		{"cloth_1": 2, "bar_1": 1, "charcoal_filter": 1}, "workbench", 4.0)
+	_add_item("spore_culture", {"name": "Hazardous Spore Culture", "kind": "resource",
+		"tier": 2, "stack": 20, "weight": 0.2, "value": 30})
+	_add_item("spore_antidote", {"name": "Distilled Swamp Antidote",
+		"kind": "medical", "tier": 2, "cure": 75.0, "stack": 5,
+		"weight": 0.25, "value": 85})
+	_add_recipe("spore_antidote", "spore_antidote", 1,
+		{"spore_culture": 2, "bandage": 1, "water_bottle": 1}, "workbench", 6.0)
 	# A single material-paid squad treatment; no free healing or item duplication.
 	_add_item("field_triage_pack", {"name": "Expedition Triage Pack",
 		"kind": "party_medical", "tier": 1, "stack": 5, "weight": 0.8, "value": 42})

@@ -404,6 +404,12 @@ func _build() -> void:
 	rain_button.tooltip_text = "Outdoors in a storm; swamps also consume 1 charcoal filter. 90s cooldown."
 	rain_button.pressed.connect(func() -> void: client.collect_rain())
 	inventory_box.add_child(rain_button)
+	var spores_button := Button.new()
+	spores_button.name = "CollectSporeCultures"
+	spores_button.text = "Sample swamp spores (1 kit -> 2 cultures)"
+	spores_button.tooltip_text = "Dangerous swamp only. Causes infection; 150s cooldown. Distill antidote at a workbench."
+	spores_button.pressed.connect(func() -> void: client.sample_spores())
+	inventory_box.add_child(spores_button)
 	var cook_button := Button.new()
 	cook_button.text = "0: Quick-cook best carried fish (fire or hub)"
 	cook_button.pressed.connect(quick_cook)
@@ -1096,6 +1102,15 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "sample_spores":
+		if bool(data.get("ok", false)):
+			say("Spore sample: %d cultures collected; infection +%.1f." % [
+				int(data.get("count", 0)), float(data.get("infection", 0.0))])
+		elif str(data.get("reason", "")) == "cooldown":
+			say("Spore sampling: ready in %ds" % ceili(float(data.get("remaining", 0.0))))
+		else:
+			say("Spore sampling: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "parry":
 		if bool(data.get("ok", false)):
 			say("Parry ready for 0.45s. Face the infected and time its strike!")
@@ -1458,6 +1473,9 @@ func _process(_delta: float) -> void:
 	var rain_remaining: float = float(client.you.get("rain_cooldown", 0.0))
 	if rain_remaining > 0.0:
 		_info_label.text += "\nRAIN CATCHER: next harvest in %ds" % ceili(rain_remaining)
+	var spore_harvest_wait: float = float(client.you.get("spore_sample_cooldown", 0.0))
+	if spore_harvest_wait > 0.0:
+		_info_label.text += "\nSPORE SAMPLES: next in %ds" % ceili(spore_harvest_wait)
 	var spore_state: Dictionary = client.you.get("spore", {})
 	if bool(spore_state.get("active", false)):
 		_info_label.text += "\nSPORE SWAMP: +%.2f infection/s | Total protection %d%%" % [
