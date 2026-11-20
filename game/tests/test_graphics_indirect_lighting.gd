@@ -21,10 +21,16 @@ func run(t) -> void:
 			"Performance and Balanced stay free of indirect lighting passes")
 	var high: Dictionary = Indirect.settings(2, "forward_plus")
 	var ultra: Dictionary = Indirect.settings(3, "forward_plus")
-	t.check(bool(high["ssao_enabled"]) and not bool(high["ssil_enabled"]),
-		"High uses only bounded contact shadows")
+	t.check(bool(high["ssao_enabled"]) and bool(high["ssil_enabled"]) and not bool(high["sdfgi_enabled"]),
+		"High uses a bounded half-resolution screen-space color bounce")
 	t.check(bool(ultra["ssao_enabled"]) and bool(ultra["sdfgi_enabled"]) and not bool(ultra["ssil_enabled"]),
 		"Ultra uses AO plus offscreen SDFGI instead of overlapping SSIL")
+	t.check(float(high["ssil_radius"]) <= 2.0 and float(high["ssil_intensity"]) <= 0.40,
+		"High limits diffuse color bleeding and haloes around silhouettes")
+	t.check(float(high["ssil_sharpness"]) >= 0.94 and float(high["ssil_normal_rejection"]) >= 0.98,
+		"edge-aware bounce rejects leak-prone mismatched surface normals")
+	t.check(ProjectSettings.get_setting("rendering/environment/ssil/half_size", false),
+		"screen-space bounce samples half-size buffers, not full resolution")
 	t.check(float(ultra["ssao_intensity"]) <= 1.5,
 		"cinematic AO does not crush ambient light under vegetation")
 	t.eq(int(ultra["sdfgi_cascades"]), 2, "Ultra limits costly distance-field cascades")
@@ -47,16 +53,30 @@ func run(t) -> void:
 	t.near(env.sdfgi_energy, 0.72, 0.0001, "indirect lighting does not overwhelm direct light")
 	t.check(env.sdfgi_read_sky_light, "sky-scattered light reaches indirect lighting")
 	Indirect.apply(env, 2, "forward_plus")
-	t.check(env.ssao_enabled and not env.ssil_enabled and not env.sdfgi_enabled,
-		"live Ultra-to-High switches off SDFGI and retains contact AO")
+	t.check(env.ssao_enabled and env.ssil_enabled and not env.sdfgi_enabled,
+		"live Ultra-to-High switches off SDFGI before enabling cheaper SSIL")
+	t.near(env.ssil_radius, 2.0, 0.0001,
+		"High native Environment traces short-range indirect light")
+	t.near(env.ssil_intensity, 0.38, 0.0001,
+		"short-range color bleed retains a conservative exposure budget")
+	t.check(env.has_method("configure_ssil"),
+		"Cgame engine exposes atomic SSIL reconfiguration")
+	Indirect.apply(env, 3, "forward_plus")
+	t.check(env.sdfgi_enabled and not env.ssil_enabled,
+		"switching High to Ultra releases screen-space bounce before SDFGI")
 	Indirect.apply(env, 3, "gl_compatibility")
 	t.check(not env.ssao_enabled and not env.ssil_enabled and not env.sdfgi_enabled,
 		"renderer fallback switches off unsupported GI buffers")
 	Indirect.apply(env, 3, "mobile")
 	t.check(not env.ssao_enabled and not env.ssil_enabled and not env.sdfgi_enabled,
 		"mobile never enables Forward+ effects")
+	t.check(GraphicsQuality.profile(2)["ssil"] and not GraphicsQuality.profile(2)["sdfgi"],
+		"High's visible graphics preset enables short-range indirect light")
 	t.check(GraphicsQuality.profile(3)["sdfgi"] and not GraphicsQuality.profile(3)["ssil"],
 		"Ultra's visible preset matches the SDFGI renderer budget")
+	t.check((Indirect as Script).source_code.contains(
+		'environment.call("configure_ssil", enabled'),
+		"quality controller uses atomic native SSIL batch when available")
 
 	t.current = "scene-aware Ultra GI light leak protection"
 	for method in ["gl_compatibility", "mobile", ""]:
