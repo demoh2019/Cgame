@@ -312,6 +312,12 @@ static func _build_items() -> void:
 		"heal": 8.0, "cure": 40.0, "stop_bleeding": true, "stack": 5, "value": 20})
 	_add_recipe("field_antiseptic", "field_antiseptic", 1,
 		{"bandage": 1, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# Spitter counterplay: consumes real survival supplies instead of
+	# granting immunity to the initial splash or healing past wounds.
+	_add_item("field_alkali_kit", {"name": "Field Alkali Kit",
+		"kind": "acid_neutralizer", "stack": 5, "weight": 0.5, "value": 32})
+	_add_recipe("field_alkali_kit", "field_alkali_kit", 1,
+		{"stone_1": 2, "water_bottle": 1, "cloth_1": 1}, "", 3.0)
 	_add_item("antibiotics", {"name": "Antibiotics", "kind": "medical",
 		"cure": 100.0, "stack": 5, "value": 80})
 	# Lineage-style elite hunts feed back into survival via medical crafting.

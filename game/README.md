@@ -2467,6 +2467,36 @@ integration tests continue checking receipt idempotence. No native Cgame
 engine API was missing.
 
 
+## Field alkali kits: item-paid counterplay to spitter acid pools
+
+`game/` now includes a **Field Alkali Kit**, craftable in the field from
+**2 T1 stone, 1 clean water bottle and 1 T1 cloth**. The kit is available
+through ordinary inventory use in online play; the inventory also has
+a dedicated **Neutralize nearby acid pools** action. Local preview uses
+**Shift+R** to activate a carried kit (plain R retains lake drinking).
+
+An authorized survivor can clear **up to 3 nearest, still-active spitter
+acid pools within 5.5 metres** using one real kit. Selection is wholly
+server-controlled, ordered by distance and stable ID, without accepting
+pool IDs, coordinates or claimed counts from the client. Expired pools,
+hazards outside range, invalid positions, dead survivors and safe hubs
+are not eligible. Repeated calls without an actual removable pool
+report `no_acid_nearby` and **do not consume the kit**.
+
+Neutralization removes lingering terrain corrosion/damage from the
+shared server simulation and nearby network snapshots, protecting
+party routes and fortifications from *future* acid ticks. It **does not**
+heal existing damage or infection, cancel the spitter's warned initial
+impact, defeat enemies, award combat XP, or affect PvP attacks.
+
+Implementation uses `scripts/shared/acid_neutralizer.gd`, real
+`defs.gd` crafting recipes, the authenticated existing `c_use` RPC,
+server `GameServer.cmd_use`, local preview controls and online HUD.
+`game/tests/test_acid_neutralizer.gd` is registered in the headless
+`game/tests/run_all.gd` regression suite. Existing engine systems
+already support the feature; no native Cgame modifications are needed.
+
+
 ## Expedition rally standard — crafted group combat recovery
 
 A party leader can now craft an **Expedition Rally Standard** at a workbench
