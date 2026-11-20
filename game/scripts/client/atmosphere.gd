@@ -270,7 +270,8 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		sky_material.set_shader_parameter("rainbow_strength",
 			SkyRainbow.strength(storm, storming, daylight, sun_height))
 		sky_material.set_shader_parameter("aurora_strength",
-			SkyAurora.strength(_shadow_filter_level, daylight, storm))
+			SkyAurora.strength(_shadow_filter_level, daylight, storm, biome,
+				_bloom_method))
 		sky_material.set_shader_parameter("sky_time", _sky_seconds)
 		sky_material.set_shader_parameter("moon_phase", moon_phase)
 		# The sky panorama and sunlit terrain clouds follow the same wind.

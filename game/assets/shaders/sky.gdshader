@@ -256,24 +256,29 @@ void sky() {
 		// The same cached cloud field shades distant terrain and the upper sky.
 		// Do not use the camera position or built-in TIME: Godot would refresh
 		// sky radiance on every camera move/frame instead of the chosen cadence.
-		if (aurora_strength > 0.001 && up > 0.04) {
-			// Curtains hang on a high plane; ray-march a few layers for vertical streaks.
-			vec3 acc = vec3(0.0);
-			for (int i = 0; i < 6; i++) {
-				float hgt = 1.0 + float(i) * 0.09;
-				vec2 q = dir.xz * (hgt / up) * 0.35;
-				float t = sky_time * 0.02;
-				// Folded ribbon: a wavy line in the plane, thickened by noise.
-				float wave = q.y + sin(q.x * 1.3 + t * 3.0) * 0.35 + vnoise(vec3(q * 1.7, t)) * 0.6;
-				float band = exp(-pow(fract(wave * 0.5) - 0.5, 2.0) * 60.0);
-				float rays = 0.55 + 0.45 * vnoise(vec3(q.x * 14.0, 0.0, t * 4.0));
-				float layer = float(i) / 5.0;
-				vec3 tint = mix(vec3(0.1, 1.0, 0.45), vec3(0.55, 0.2, 0.9), layer * layer);
-				acc += tint * band * rays * (1.0 - layer * 0.7);
-			}
-			float altitude_fade = smoothstep(0.04, 0.2, up) * (1.0 - smoothstep(0.55, 0.9, up));
-			float pulse = 0.75 + 0.25 * sin(sky_time * 0.05);
-			color += acc * 0.12 * aurora_strength * altitude_fade * pulse;
+		// Aurora is behind BOTH cirrus and volumetric cumulus, not painted on
+		// top of clouds. No new textures/sky passes/looped noise. The native
+		// radiance cubemap intentionally keeps its physical night IBL.
+		if (aurora_strength > 0.001 && !AT_CUBEMAP_PASS
+				&& up > 0.08 && up < 0.92 && dir.z > 0.05) {
+			float north = smoothstep(0.05, 0.48, dir.z);
+			float along = dir.x * 10.0;
+			float slow_time = sky_time * 0.011;
+			float center = 0.35 + 0.075 * sin(along + slow_time);
+			float rise = (up - center) / 0.18;
+			float curtain = exp(-rise * rise * 2.2);
+			float folds = 0.5 + 0.5 * sin(along * 6.5
+				+ 1.5 * sin(along * 1.2 + slow_time)
+				- sky_time * 0.024);
+			float strands = mix(0.24, 1.0, folds * folds);
+			float upper_haze = exp(-pow((up - 0.54) / 0.28, 2.0));
+			float emission = (curtain * strands + upper_haze * 0.09)
+				* north * aurora_strength;
+			vec3 green = vec3(0.07, 0.82, 0.38);
+			vec3 violet = vec3(0.28, 0.30, 0.92);
+			vec3 spectral = mix(green, violet,
+				smoothstep(0.43, 0.72, up));
+			color += spectral * emission;
 		}
 		if (cirrus_detail > 0 && cirrus_opacity > 0.001 && up > 0.08) {
 			// Project directions onto a fixed-height cloud plane. Avoid its
