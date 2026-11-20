@@ -860,6 +860,10 @@ func _spawn_effects(event: Dictionary) -> void:
 		effects.ring(_last_cast_spot + Vector3(0, 0.05, 0), Color(0.85, 0.95, 1.0), 1.4, 0.7) # The fish breaks the surface.
 	combat_vfx.handle_event(event, here, at, client.world.biome_at(at.x, at.z))
 	camera_fx.on_event(event, client.peer_id, at.distance_to(here))
+	# Hit flash on your own character too (remote ones flash from snapshot HP).
+	if str(event.get("type", "")) == "hit" and str(event.get("kind", "")) != "zombie" \
+			and int(event.get("id", -1)) == client.peer_id and avatar_model != null:
+		avatar_model.hit_flash(0.6 + float(event.get("damage", 0.0)) / 40.0)
 	physics_fx.on_event(event, at)
 	match event["type"]:
 		"hit":
