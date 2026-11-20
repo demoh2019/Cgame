@@ -47,6 +47,7 @@ const SUITES := [
 	"res://tests/test_damage_numbers.gd",
 	"res://tests/test_occlusion_silhouette.gd",
 	"res://tests/test_loot_beam.gd",
+	"res://tests/test_corpse_burn.gd",
 	"res://tests/test_terrain_sdfgi.gd",
 	"res://tests/test_cinematic_bloom.gd",
 	"res://tests/test_foliage_spectral_optics.gd",

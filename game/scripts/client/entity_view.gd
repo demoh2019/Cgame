@@ -20,6 +20,7 @@ const AnimLod = preload("res://scripts/client/anim_lod.gd")
 const CombatAnimationPriority = preload("res://scripts/client/combat_animation_priority.gd")
 const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
 const LootBeam = preload("res://scripts/client/loot_beam.gd")
+const CorpseBurn = preload("res://scripts/client/corpse_burn.gd")
 var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
 var _priority_quality: int = -1
 var _world = null
@@ -622,7 +623,7 @@ func _try_ragdoll(node: Node3D) -> bool:
 	var p := node.position
 	var ground := Ragdoll.ground_patch(p.x, float(_world.height_at(p.x, p.z)), p.z, _world.height_at)
 	add_child(ground)
-	_corpses.append({"node": node, "ground": ground, "age": 0.0})
+	_corpses.append({"node": node, "ground": ground, "age": 0.0, "burn": null, "model": model})
 	return true
 
 
@@ -630,6 +631,12 @@ func _update_corpses(delta: float) -> void:
 	for i in range(_corpses.size() - 1, -1, -1):
 		var corpse: Dictionary = _corpses[i]
 		corpse["age"] = float(corpse["age"]) + delta
+		var burn_t: float = CorpseBurn.progress(float(corpse["age"]), Ragdoll.SETTLE_SECONDS, Ragdoll.SINK_SECONDS)
+		if burn_t > 0.0:
+			if corpse["burn"] == null:
+				corpse["burn"] = CorpseBurn.start(corpse["model"])
+			if corpse["burn"] != null:
+				(corpse["burn"] as ShaderMaterial).set_shader_parameter("progress", burn_t)
 		if corpse["age"] > Ragdoll.SETTLE_SECONDS:
 			# The ground patch sinks and the body settles into the earth with it, then both go.
 			(corpse["ground"] as Node3D).position.y -= delta * 0.5
