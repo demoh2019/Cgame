@@ -10,6 +10,9 @@ uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable
 uniform vec4 albedo_color : source_color = vec4(1.0);
 uniform float sway = 0.12;
 uniform float height_ref = 4.0;
+// Small movements disappear below a pixel at this range; avoid distant trigonometry.
+uniform float wind_fade_start = 48.0;
+uniform float wind_fade_end = 120.0;
 uniform float scissor = 0.5;
 uniform bool cut_out = false;
 uniform bool red_to_green = false;
@@ -17,21 +20,32 @@ uniform bool instance_tinted = false; // Decor MultiMeshes carry a per-instance 
 varying vec3 instance_tint;
 varying vec3 plant_hue;
 varying vec2 cloud_xz;
+varying float plant_roughness;
 void vertex() {
 	instance_tint = instance_tinted ? COLOR.rgb : vec3(1.0);
-	// Every plant a slightly different green (some yellower, some bluer, some darker), as in a real wood: identical
-	// copies of one tree are what make a forest look artificial.
+	// World-space plant roots give every MultiMesh instance stable colour and gust phase.
 	vec2 root = MODEL_MATRIX[3].xz;
 	float h1 = fract(sin(dot(root, vec2(12.9898, 78.233))) * 43758.5453);
-	float h2 = fract(sin(dot(root, vec2(39.346, 11.135))) * 24634.6345);
+	float h2 = fract(h1 * 31.37 + 0.173); // One hash/trig per vertex, not two.
 	plant_hue = mix(vec3(0.86, 0.94, 0.86), vec3(1.1, 1.06, 0.84), h1) * mix(0.84, 1.08, h2);
+	plant_roughness = mix(0.83, 0.93, h2);
 	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	cloud_xz = w.xz;
-	float k = clamp(VERTEX.y / height_ref, 0.0, 1.0);
-	k *= k;
-	float phase = TIME * 1.5 + w.x * 0.33 + w.z * 0.27;
-	VERTEX.x += (sin(phase) + 0.4 * sin(phase * 2.3)) * sway * k;
-	VERTEX.z += cos(phase * 0.83) * sway * 0.7 * k;
+
+	// Shader-side wind LOD has no CPU work and no geometry rebuild when the camera moves.
+	// Use the root, not each vertex, for the low-frequency wind: the entire crown
+	// bends together instead of looking like disconnected branches.
+	float distance_to_camera = length(root - CAMERA_POSITION_WORLD.xz);
+	float wind_lod = 1.0 - smoothstep(wind_fade_start, wind_fade_end, distance_to_camera);
+	if (wind_lod > 0.001 && sway > 0.0) {
+		float k = clamp(VERTEX.y / height_ref, 0.0, 1.0);
+		k *= k; // Keep trunks steady; move light tips.
+		float gust = 0.78 + 0.22 * sin(TIME * 0.46 + dot(root, vec2(0.047, 0.034)));
+		float phase = TIME * 1.45 + dot(root, vec2(0.23, 0.19));
+		float amount = sway * k * gust * wind_lod;
+		VERTEX.x += sin(phase) * amount;
+		VERTEX.z += cos(phase * 0.84) * amount * 0.7;
+	}
 }
 void fragment() {
 	vec4 t = texture(albedo_tex, UV) * albedo_color;
@@ -47,7 +61,8 @@ void fragment() {
 	if (!FRONT_FACING) {
 		NORMAL = -NORMAL;
 	}
-	ROUGHNESS = 0.9;
+	// Nonuniform micro-roughness breaks up overly identical highlights at no texture cost.
+	ROUGHNESS = cut_out ? plant_roughness : 0.93;
 	if (cut_out) {
 		ALPHA = t.a;
 		ALPHA_SCISSOR_THRESHOLD = scissor;
