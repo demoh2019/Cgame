@@ -4,6 +4,7 @@ extends Node3D
 ## Per-cell deterministic seeds keep the same foliage layout on reload.
 
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
+const TerrainPatch = preload("res://scripts/streamed_terrain_patch.gd")
 const CELL_SIZE: float = 32.0
 const TREE_COUNT: int = 54
 const GRASS_COUNT: int = 225
@@ -19,6 +20,12 @@ func _ready() -> void:
     var cell_x: int = int(round(global_position.x / CELL_SIZE))
     var cell_z: int = int(round(global_position.z / CELL_SIZE))
     rng.seed = 913481 + cell_x * 73856093 + cell_z * 19349663
+
+    # Terrain geometry and heightfield physics are tied to the exact same cell
+    # lifecycle as vegetation. No world-wide monolithic mesh stays resident.
+    var ground := TerrainPatch.new()
+    ground.name = "TerrainPatch"
+    add_child(ground)
 
     # A single static body groups primitive collision shapes for this cell.
     # The engine unloads these shapes together with the visual vegetation.
