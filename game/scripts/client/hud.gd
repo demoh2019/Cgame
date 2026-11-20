@@ -1965,6 +1965,9 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	if float(client.you.get("cargo_factor", 1.0)) < 0.9999 and \
+			not bool(client.you.get("mounted", false)):
+		_info_label.text += "\nHEAVY CARGO: footsteps draw infected attention; crouch to stay quieter."
 	if int(client.you.get("rested_xp_credit", 0)) > 0:
 		_info_label.text += "\nRESTED TRAINING: %d bonus XP left (paid rest at hub/fire)" % int(
 			client.you["rested_xp_credit"])

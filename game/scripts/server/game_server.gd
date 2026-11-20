@@ -57,6 +57,7 @@ const BarricadeBallistics = preload("res://scripts/shared/barricade_ballistics.g
 const SiegeCharge = preload("res://scripts/shared/siege_charge.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
+const CargoRattle = preload("res://scripts/shared/cargo_rattle.gd")
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
 const BikeService = preload("res://scripts/shared/bike_service.gd")
@@ -915,6 +916,13 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		if sprint_allowed and player.position.distance_to(before_move) > 0.01:
 			player.noise_radius = maxf(player.noise_radius, Defs.SPRINT_NOISE_RADIUS)
 			player.noise_timer = maxf(player.noise_timer, Defs.SPRINT_NOISE_SECONDS)
+		# A laden backpack rattles only after the server observes real travel.
+		# Crouching suppresses this sound; mounted noise follows bike rules.
+		var pack_noise: float = CargoRattle.radius(factor, moved,
+			player.crouching, player.mounted)
+		if pack_noise > 0.0:
+			player.noise_radius = maxf(player.noise_radius, pack_noise)
+			player.noise_timer = maxf(player.noise_timer, CargoRattle.NOISE_SECONDS)
 		# Never trust movement or noise from a client. The server measures
 		# actual travel after collision, and only an owned mount creates rattle.
 		if player.mounted and moved > 0.0 and player.bike_service_meters > 0.0:
