@@ -68,6 +68,14 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 		node->queue_free();
 	}
 	active_cells.erase(p_cell);
+	physics_pending_cells.erase(p_cell);
+	// Gameplay should disarm the associated AI/physics interactions before
+	// the scene root is deleted at the end of the frame.
+	if (physics_ready_cells.has(p_cell)) {
+		physics_ready_cells.erase(p_cell);
+		emit_signal(SNAME("cell_physics_unready"), p_cell);
+	}
+	_refresh_processing();
 	emit_signal(SNAME("cell_unloaded"), p_cell);
 }
 
@@ -161,24 +169,71 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	instance->set_position(instance->get_position() + cell_to_local_position(p_cell));
 	add_child(instance);
 	active_cells.insert(p_cell, instance->get_instance_id());
+	physics_ready_cells.erase(p_cell);
+	physics_pending_cells.insert(p_cell, physics_tick_counter + 2);
+	_refresh_processing();
 	emit_signal(SNAME("cell_loaded"), p_cell);
 	return true;
 }
 
 void WorldPartition3D::_refresh_processing() {
 	if (is_inside_tree()) {
-		set_process(!Engine::get_singleton()->is_editor_hint() && (streaming_enabled || !requested_paths.is_empty()));
+		const bool runtime = !Engine::get_singleton()->is_editor_hint();
+		set_process(runtime && (streaming_enabled || !requested_paths.is_empty()));
+		// Only tick physics while newly loaded cells are waiting to be armed.
+		// This keeps normal idle streaming free of a per-physics-tick scan.
+		set_physics_process(runtime && streaming_enabled && !physics_pending_cells.is_empty());
 	}
 }
 
+void WorldPartition3D::_update_physics_readiness() {
+	physics_tick_counter++;
+	Vector<Vector2i> completed;
+	for (const KeyValue<Vector2i, uint64_t> &E : physics_pending_cells) {
+		if (E.value <= physics_tick_counter) {
+			completed.push_back(E.key);
+		}
+	}
+	for (const Vector2i &cell : completed) {
+		physics_pending_cells.erase(cell);
+		if (!streaming_enabled || !is_inside_tree() || !is_cell_loaded(cell)) {
+			continue;
+		}
+		Node3D *instance = get_cell_node(cell);
+		if (instance == nullptr || instance->is_queued_for_deletion()) {
+			continue;
+		}
+		physics_ready_cells.insert(cell);
+		// Callbacks may unload this or other cells. Work from the snapshot,
+		// never iterate the pending map while emitting gameplay signals.
+		emit_signal(SNAME("cell_physics_ready"), cell);
+	}
+	_refresh_processing();
+}
+
 void WorldPartition3D::_notification(int p_what) {
-	if (p_what == NOTIFICATION_READY) {
+	if (p_what == NOTIFICATION_ENTER_TREE) {
+		// A re-entered streamed world needs a fresh physics barrier even when
+		// its child scene instances were preserved outside the scene tree.
+		physics_pending_cells.clear();
+		physics_ready_cells.clear();
+		for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
+			if (ObjectDB::get_instance(E.value) != nullptr) {
+				physics_pending_cells.insert(E.key, physics_tick_counter + 2);
+			}
+		}
+		_refresh_processing();
+	} else if (p_what == NOTIFICATION_READY) {
 		_refresh_processing();
 	} else if (p_what == NOTIFICATION_PROCESS) {
 		update_streaming();
+	} else if (p_what == NOTIFICATION_PHYSICS_PROCESS) {
+		_update_physics_readiness();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		// A future re-entry should report the first resolved observer cell.
 		observer_cell_valid = false;
+		physics_pending_cells.clear();
+		physics_ready_cells.clear();
 	}
 }
 
@@ -887,6 +942,32 @@ bool WorldPartition3D::is_cell_loaded(const Vector2i &p_cell) const {
 	return id != nullptr && ObjectDB::get_instance(*id) != nullptr;
 }
 
+bool WorldPartition3D::is_cell_physics_ready(const Vector2i &p_cell) const {
+	if (!streaming_enabled || !is_inside_tree() || !physics_ready_cells.has(p_cell)) {
+		return false;
+	}
+	Node3D *node = get_cell_node(p_cell);
+	return node != nullptr && !node->is_queued_for_deletion();
+}
+
+bool WorldPartition3D::are_cells_physics_ready(const Vector2i &p_center, int p_radius) const {
+	ERR_FAIL_COND_V_MSG(p_radius < 0 || p_radius > 32, false, "WorldPartition3D physics-ready query radius must be between 0 and 32.");
+	const Array cells = get_cells_in_radius(p_center, p_radius);
+	if (cells.is_empty()) {
+		return false;
+	}
+	for (int i = 0; i < cells.size(); i++) {
+		if (!is_cell_physics_ready(cells[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+int WorldPartition3D::get_physics_ready_cell_count() const {
+	return streaming_enabled && is_inside_tree() ? physics_ready_cells.size() : 0;
+}
+
 Node3D *WorldPartition3D::get_cell_node(const Vector2i &p_cell) const {
 	const ObjectID *id = active_cells.getptr(p_cell);
 	if (id == nullptr) {
@@ -1010,6 +1091,9 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cells_in_radius", "center", "radius"), &WorldPartition3D::get_cells_in_radius);
 	ClassDB::bind_method(D_METHOD("update_streaming"), &WorldPartition3D::update_streaming);
 	ClassDB::bind_method(D_METHOD("is_cell_loaded", "cell"), &WorldPartition3D::is_cell_loaded);
+	ClassDB::bind_method(D_METHOD("is_cell_physics_ready", "cell"), &WorldPartition3D::is_cell_physics_ready);
+	ClassDB::bind_method(D_METHOD("are_cells_physics_ready", "center", "radius"), &WorldPartition3D::are_cells_physics_ready, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("get_physics_ready_cell_count"), &WorldPartition3D::get_physics_ready_cell_count);
 	ClassDB::bind_method(D_METHOD("get_cell_node", "cell"), &WorldPartition3D::get_cell_node);
 	ClassDB::bind_method(D_METHOD("are_cells_loaded", "center", "radius"), &WorldPartition3D::are_cells_loaded, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_loaded_cell_count"), &WorldPartition3D::get_loaded_cell_count);
@@ -1037,6 +1121,8 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_requests", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_concurrent_requests", "get_max_concurrent_requests");
 
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
+	ADD_SIGNAL(MethodInfo("cell_physics_ready", PropertyInfo(Variant::VECTOR2I, "cell")));
+	ADD_SIGNAL(MethodInfo("cell_physics_unready", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_unloaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("observer_cell_changed", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("streaming_source_ready", PropertyInfo(Variant::STRING, "name")));
@@ -1052,6 +1138,8 @@ WorldPartition3D::~WorldPartition3D() {
 	requested_paths.clear();
 	// Child nodes belong to Node; drop references without touching queued deletions.
 	active_cells.clear();
+	physics_pending_cells.clear();
+	physics_ready_cells.clear();
 	pending_cells.clear();
 	ready_scenes.clear();
 }
