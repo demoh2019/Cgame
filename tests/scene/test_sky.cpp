@@ -94,6 +94,36 @@ TEST_CASE("[SceneTree][Sky] Process mode setter and getter") {
 	CHECK(test_sky->get_process_mode() == Sky::PROCESS_MODE_INCREMENTAL);
 }
 
+TEST_CASE("[SceneTree][Sky] Coalesced cloud radiance budget") {
+	Ref<Sky> sky;
+	sky.instantiate();
+	CHECK(sky->get_radiance_size() == Sky::RADIANCE_SIZE_256);
+	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_AUTOMATIC);
+
+	// Repeated auto-quality profile updates must be safe and idempotent.
+	sky->configure_render_budget(Sky::RADIANCE_SIZE_128, Sky::PROCESS_MODE_INCREMENTAL);
+	CHECK(sky->get_radiance_size() == Sky::RADIANCE_SIZE_128);
+	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_INCREMENTAL);
+	sky->configure_render_budget(Sky::RADIANCE_SIZE_128, Sky::PROCESS_MODE_INCREMENTAL);
+	CHECK(sky->get_radiance_size() == Sky::RADIANCE_SIZE_128);
+	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_INCREMENTAL);
+
+	sky->configure_render_budget(Sky::RADIANCE_SIZE_256, Sky::PROCESS_MODE_INCREMENTAL);
+	CHECK(sky->get_radiance_size() == Sky::RADIANCE_SIZE_256);
+	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_INCREMENTAL);
+	sky->configure_render_budget(Sky::RADIANCE_SIZE_32, Sky::PROCESS_MODE_REALTIME);
+	CHECK(sky->get_radiance_size() == Sky::RADIANCE_SIZE_32);
+	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_REALTIME);
+
+	// Invalid two-property profile must not apply either half of the state.
+	ERR_PRINT_OFF;
+	sky->configure_render_budget(Sky::RADIANCE_SIZE_MAX, Sky::PROCESS_MODE_INCREMENTAL);
+	sky->configure_render_budget(Sky::RADIANCE_SIZE_128, Sky::ProcessMode(-1));
+	ERR_PRINT_ON;
+	CHECK(sky->get_radiance_size() == Sky::RADIANCE_SIZE_32);
+	CHECK(sky->get_process_mode() == Sky::PROCESS_MODE_REALTIME);
+}
+
 TEST_CASE("[SceneTree][Sky] Material setter and getter") {
 	Ref<Sky> test_sky;
 	test_sky.instantiate();
