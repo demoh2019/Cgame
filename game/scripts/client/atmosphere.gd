@@ -391,12 +391,22 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	environment.glow_enabled = bool(settings["glow"])
 	# SSAO requires Forward+; the Compatibility renderer ignores it safely.
 	environment.ssao_enabled = bool(settings["ssao"])
+	# Auto quality may reapply the same sky size each time the FPS budget
+	# settles. Reuse the current radiance cubemap instead of asking the
+	# native renderer to resize or reconvolve it on every identical preset.
+	var desired_radiance: int = Sky.RADIANCE_SIZE_64
 	match int(settings["sky_radiance"]):
 		32:
-			sky.radiance_size = Sky.RADIANCE_SIZE_32
+			desired_radiance = Sky.RADIANCE_SIZE_32
 		128:
-			sky.radiance_size = Sky.RADIANCE_SIZE_128
+			desired_radiance = Sky.RADIANCE_SIZE_128
 		256:
-			sky.radiance_size = Sky.RADIANCE_SIZE_256
+			desired_radiance = Sky.RADIANCE_SIZE_256
 		_:
-			sky.radiance_size = Sky.RADIANCE_SIZE_64
+			desired_radiance = Sky.RADIANCE_SIZE_64
+	if sky.has_method("configure_render_budget"):
+		# Custom engine coalesces native backend updates.
+		sky.call("configure_render_budget", desired_radiance, Sky.PROCESS_MODE_INCREMENTAL)
+	elif sky.radiance_size != desired_radiance:
+		# Stock Godot still avoids redundant radiance allocation requests.
+		sky.radiance_size = desired_radiance
