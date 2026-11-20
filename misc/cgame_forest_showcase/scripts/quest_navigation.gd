@@ -4,6 +4,7 @@ extends RefCounted
 ## Once selected, gameplay keeps the target until collection or save reload.
 
 const SOURCE_NAME: String = "relic_objective"
+const STREAMING_PRIORITY: int = 0 # Background objective prep.
 
 
 static func closest_relic(relics: Array[Node3D], player_position: Vector3) -> Node3D:
@@ -50,4 +51,4 @@ static func sync_streaming_source(stream: WorldPartition3D, target: Node3D) -> b
     if not is_instance_valid(target) or target.is_queued_for_deletion():
         stream.remove_streaming_source(SOURCE_NAME)
         return true
-    return stream.set_streaming_source(SOURCE_NAME, target.global_position, 0)
+    return stream.set_streaming_source(SOURCE_NAME, target.global_position, 0, STREAMING_PRIORITY)
