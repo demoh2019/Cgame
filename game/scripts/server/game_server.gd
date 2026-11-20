@@ -94,6 +94,7 @@ const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const FlashCharge = preload("res://scripts/shared/flash_charge.gd")
 const InfectedSnare = preload("res://scripts/shared/infected_snare.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
+const ShoreFishTrap = preload("res://scripts/shared/shore_fish_trap.gd")
 const FishingBait = preload("res://scripts/shared/fishing_bait.gd")
 const StormFishing = preload("res://scripts/shared/storm_fishing.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
@@ -241,6 +242,7 @@ var shelters: Dictionary = {} # Public, temporary weather tarps; never checkpoin
 var decoys: Dictionary = {} # Temporary physical sound lures; server-owned, never persisted.
 var smoke_clouds: Dictionary = {} # Temporary visual cover, never checkpointed.
 var infected_snares: Dictionary = {} # Temporary PvE tripwires, never checkpointed.
+var fish_traps: Dictionary = {} # Paid coastal traps, session-only.
 var acid_pools: Dictionary = {} # Temporary nonpersistent corrosive terrain.
 var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stacking.
 var _acid_wall_last_hit: Dictionary = {} # Wall id -> last corrosion time; no overlap stacking.
@@ -803,6 +805,81 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 
 ## Fishing is a delayed, cancelable server action; no catch count is supplied
 ## by clients. Distinct from lake drinking and free berry scavenging.
+## An authentic rod and procedural shore determine the maximum output tier;
+## client sends no location, reward or duration, only intent to place.
+func cmd_place_fish_trap(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	if not player.action.is_empty():
+		return {"ok": false, "reason": "busy"}
+	if fish_traps.size() >= ShoreFishTrap.MAX_GLOBAL:
+		return {"ok": false, "reason": "world_limit"}
+	for trap in fish_traps.values():
+		if float(trap["expires"]) > time and Structures.can_manage(
+				trap, peer_id, player.user_id):
+			return {"ok": false, "reason": "owner_limit"}
+	var rod: String = player.inventory.best_tool("fishing")
+	if rod.is_empty():
+		return {"ok": false, "reason": "need_rod"}
+	var site: Dictionary = ShoreFishTrap.site(world, player.position, fish_traps, time)
+	if not bool(site.get("ok", false)):
+		return site
+	if not player.inventory.remove(ShoreFishTrap.ITEM_ID, 1):
+		return {"ok": false, "reason": "not_carried"}
+	var tier: int = Fishing.catch_tier(world.zone_at(player.position.x,
+		player.position.z), Defs.tier_of(rod),
+		player.progression.gathering_level("fishing"))
+	var id := new_id()
+	fish_traps[id] = {"id": id, "x": float(site["x"]),
+		"z": float(site["z"]), "y": Defs.WATER_LEVEL,
+		"owner": peer_id, "owner_account": player.user_id, "tier": tier,
+		"ready_at": time + ShoreFishTrap.CATCH_SECONDS,
+		"expires": time + ShoreFishTrap.LIFETIME_SECONDS}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "id": id, "seconds": ShoreFishTrap.CATCH_SECONDS,
+		"tier": tier}
+
+
+## Authoritative pickup: no remote looting, expired nets, phantom XP or
+## partial inventory transfers. Rights survive authenticated reconnection.
+func cmd_collect_fish_trap(peer_id: int, trap_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	var trap: Dictionary = fish_traps.get(trap_id, {})
+	if trap.is_empty() or time >= float(trap["expires"]):
+		return {"ok": false, "reason": "no_trap"}
+	if not Structures.can_manage(trap, peer_id, player.user_id):
+		return {"ok": false, "reason": "not_owner"}
+	if not ShoreFishTrap.collectable(player.position, trap) or world.is_water(
+			player.position.x, player.position.z):
+		return {"ok": false, "reason": "out_of_range"}
+	if time < float(trap["ready_at"]):
+		return {"ok": false, "reason": "not_ready",
+			"remaining": float(trap["ready_at"]) - time}
+	var tier: int = int(trap["tier"])
+	var fish_id: String = Fishing.catch_item(tier)
+	if fish_id.is_empty() or player.inventory.free_space_for(fish_id) < ShoreFishTrap.COUNT:
+		return {"ok": false, "reason": "no_space"}
+	if player.inventory.add(fish_id, ShoreFishTrap.COUNT) != 0:
+		return {"ok": false, "reason": "no_space"}
+	fish_traps.erase(trap_id)
+	player.progression.award_gather("fishing", tier, ShoreFishTrap.COUNT)
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "item": fish_id, "tier": tier, "count": ShoreFishTrap.COUNT}
+
+
 func cmd_fish(peer_id: int, baited: bool = false, storm_cast: bool = false) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -4896,6 +4973,9 @@ func _tick_night_horde() -> void:
 
 
 func _tick_world(delta: float) -> void:
+	for id in fish_traps.keys():
+		if time >= float(fish_traps[id]["expires"]):
+			fish_traps.erase(id)
 	for id in infected_snares.keys():
 		if time >= float(infected_snares[id]["expires"]):
 			infected_snares.erase(id)
@@ -5012,6 +5092,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_snares: Array = InfectedSnare.visible(
 		infected_snares, player.position, time, Defs.INTEREST_RADIUS)
+	var nearby_fish_traps: Array = ShoreFishTrap.visible(
+		fish_traps, player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_smoke: Array = FieldSmoke.visible(smoke_clouds,
 			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_decoys: Array = []
@@ -5144,6 +5226,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
 		"shelters": nearby_shelters,
 		"decoys": nearby_decoys, "smoke_clouds": nearby_smoke,
+		"fish_traps": nearby_fish_traps,
 		"infected_snares": nearby_snares,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}

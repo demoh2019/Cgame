@@ -292,6 +292,10 @@ static func _build_items() -> void:
 	_add_recipe("fishing_rod", "fishing_rod", 1, {"plank_1": 2, "fiber_1": 3},
 		"workbench", 4.0)
 	# Optional bait increases fish count, never the region/rod/skill tier.
+	_add_item("shore_fish_trap", {"name": "Shore Fish Trap",
+		"kind": "deployable", "tier": 1, "stack": 5, "weight": 1.5, "value": 35})
+	_add_recipe("shore_fish_trap", "shore_fish_trap", 1,
+		{"plank_1": 2, "fiber_1": 3, "scrap": 1}, "workbench", 4.0)
 	_add_item("shore_bait", {"name": "Shore Fishing Bait", "kind": "material",
 		"stack": 20, "weight": 0.1, "value": 4})
 	_add_recipe("shore_bait", "shore_bait", 2,
