@@ -268,36 +268,63 @@ func _physics_process(delta: float) -> void:
 	var viewport: Viewport = get_viewport()
 	var world: World3D = viewport.world_3d if viewport != null else null
 	var state: PhysicsDirectSpaceState3D = world.direct_space_state if world != null else null
+
+	# Gather at most three independent wall probes, then submit them through
+	# one Cgame physics-space call. Queries retain their individual collision
+	# masks and flags. Ordinary Godot uses identical serial ray queries.
+	var probe_indices: Array[int] = []
+	var probe_queries: Array[PhysicsRayQueryParameters3D] = []
+	var probe_sources: Array[Vector3] = []
+	var probe_listeners: Array[Vector3] = []
 	var rays: int = 0
+	if state != null:
+		for index in _voices.size():
+			if rays >= OBSTRUCTION_RAYS_PER_TICK:
+				break
+			var record: Dictionary = _voices[index]
+			var player: AudioStreamPlayer3D = record.get("player") as AudioStreamPlayer3D
+			if not is_instance_valid(player) or not player.is_playing():
+				continue
+			if _obstruction_clock < float(record.get("next_obstruction_check", 0.0)):
+				continue
+			var listener_eye: Vector3 = _listener + Vector3(0.0, 1.6, 0.0)
+			var source_eye: Vector3 = player.global_position + Vector3(0.0, 0.5, 0.0)
+			var ray: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
+				listener_eye, source_eye, OBSTRUCTION_GEOMETRY_MASK)
+			ray.collide_with_areas = false
+			probe_indices.append(index)
+			probe_queries.append(ray)
+			probe_sources.append(source_eye)
+			probe_listeners.append(listener_eye)
+			rays += 1
+
+		if rays > 0:
+			var hits: Array = AudioSpatial.trace_rays(state, probe_queries)
+			for i in mini(hits.size(), probe_indices.size()):
+				var index: int = probe_indices[i]
+				var record: Dictionary = _voices[index]
+				var source_eye: Vector3 = probe_sources[i]
+				var listener_eye: Vector3 = probe_listeners[i]
+				var hit: Dictionary = hits[i]
+				# Geometry and heightfield terrain share the old three-ray budget.
+				# A hit within 75 cm of the source is likely its own support prop.
+				var blocked: bool = not hit.is_empty() and \
+					(hit.get("position", source_eye) as Vector3).distance_to(source_eye) > 0.75
+				var terrain_blocked: bool = _ground.is_valid() and AudioSpatial.terrain_blocked(
+					listener_eye, source_eye, _ground)
+				record["terrain_blocked"] = terrain_blocked
+				record["target_obstruction"] = 1.0 if blocked or terrain_blocked else 0.0
+				record["next_obstruction_check"] = _obstruction_clock + OBSTRUCTION_RECHECK_SECONDS
+				_voices[index] = record
+
+	# Smooth every active voice even when its ray was not checked this tick.
+	# Existing native audio gain/filter or stock Godot fallback is unchanged.
 	for index in _voices.size():
 		var record: Dictionary = _voices[index]
 		var player: AudioStreamPlayer3D = record.get("player") as AudioStreamPlayer3D
 		if not is_instance_valid(player) or not player.is_playing():
 			continue
 		var target: float = float(record.get("target_obstruction", 0.0))
-		if state != null and rays < OBSTRUCTION_RAYS_PER_TICK \
-				and _obstruction_clock >= float(record.get("next_obstruction_check", 0.0)):
-			var listener_eye: Vector3 = _listener + Vector3(0.0, 1.6, 0.0)
-			var source_eye: Vector3 = player.global_position + Vector3(0.0, 0.5, 0.0)
-			# Include world obstacles and barriers, not Area3D triggers.
-			# Impacts very near the source are the source's own floor/prop.
-			var ray: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
-				listener_eye, source_eye, OBSTRUCTION_GEOMETRY_MASK)
-			ray.collide_with_areas = false
-			var hit: Dictionary = state.intersect_ray(ray)
-			var blocked: bool = not hit.is_empty() and \
-				(hit.get("position", source_eye) as Vector3).distance_to(source_eye) > 0.75
-			# Live occlusion rays keep terrain masking current as the listener
-			# moves around ridges. Reuse the SAME three-ray scheduler: no
-			# uncapped per-frame sound-source heightfield scans.
-			var terrain_blocked: bool = _ground.is_valid() and AudioSpatial.terrain_blocked(
-				listener_eye, source_eye, _ground)
-			record["terrain_blocked"] = terrain_blocked
-			target = 1.0 if blocked or terrain_blocked else 0.0
-			record["target_obstruction"] = target
-			record["next_obstruction_check"] = _obstruction_clock + OBSTRUCTION_RECHECK_SECONDS
-			rays += 1
-		# Smooth changes to prevent a harsh click when crossing a doorway.
 		var old_amount: float = float(record.get("obstruction", 0.0))
 		var amount: float = move_toward(old_amount, target, delta * 6.0)
 		if absf(amount - old_amount) > 0.0001:
