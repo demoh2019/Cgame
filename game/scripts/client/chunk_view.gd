@@ -602,8 +602,7 @@ func _build_objects(data: Dictionary) -> void:
 			instance.material_override = _ore_material(multimesh.mesh)
 		add_child(instance)
 		_groups[kind] = {"multimesh": multimesh, "index": index, "transforms": transforms}
-	if _use_nature:
-		_build_decor(origin, rng, data)
+	_build_decor(origin, rng, data)
 	_build_windmills(windmills, origin)
 	_build_signposts(origin)
 	_build_npcs(data.get("npcs", []))
@@ -917,30 +916,31 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 	anchors["meadow"] = _meadow_centers(origin, anchors["tree"], road_pieces)
 	for k in 2:
 		anchors["rare"].append(origin + Vector2(rng.randf(), rng.randf()) * Defs.CHUNK_SIZE)
-	for entry in DECOR:
-		var file := String(entry["file"])
-		var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(file), "decor:" + file, 0.0 if file.begins_with("Pebble") or file.begins_with("Petal") else (0.2 if file.begins_with("Grass") else 0.12))
-		if mesh == null:
-			continue
-		var places: Array = _anchored_spots(entry, anchors[str(entry["anchor"])], origin, rng, road_pieces, road_clear)
-		if places.is_empty():
-			continue
-		var multimesh := MultiMesh.new()
-		multimesh.transform_format = MultiMesh.TRANSFORM_3D
-		multimesh.mesh = mesh
-		multimesh.instance_count = places.size()
-		for i in places.size():
-			var at: Vector2 = places[i]
-			var size := rng.randf_range(float(entry["scale"][0]), float(entry["scale"][1]))
-			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
-			multimesh.set_instance_transform(i, Transform3D(basis, Vector3(at.x - origin.x, _world.height_at(at.x, at.y) - 0.02, at.y - origin.y)))
-		var instance := MultiMeshInstance3D.new()
-		instance.multimesh = multimesh
-		# Bushes are big enough to cast a shadow; the rest would only cost time.
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if file.begins_with("Bush") else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		instance.visibility_range_end = float(entry["range"])
-		instance.visibility_range_end_margin = 8.0
-		add_child(instance)
+	if _use_nature:
+		for entry in DECOR:
+			var file := String(entry["file"])
+			var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(file), "decor:" + file, 0.0 if file.begins_with("Pebble") or file.begins_with("Petal") else (0.2 if file.begins_with("Grass") else 0.12))
+			if mesh == null:
+				continue
+			var places: Array = _anchored_spots(entry, anchors[str(entry["anchor"])], origin, rng, road_pieces, road_clear)
+			if places.is_empty():
+				continue
+			var multimesh := MultiMesh.new()
+			multimesh.transform_format = MultiMesh.TRANSFORM_3D
+			multimesh.mesh = mesh
+			multimesh.instance_count = places.size()
+			for i in places.size():
+				var at: Vector2 = places[i]
+				var size := rng.randf_range(float(entry["scale"][0]), float(entry["scale"][1]))
+				var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
+				multimesh.set_instance_transform(i, Transform3D(basis, Vector3(at.x - origin.x, _world.height_at(at.x, at.y) - 0.02, at.y - origin.y)))
+			var instance := MultiMeshInstance3D.new()
+			instance.multimesh = multimesh
+			# Bushes are big enough to cast a shadow; the rest would only cost time.
+			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if file.begins_with("Bush") else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			instance.visibility_range_end = float(entry["range"])
+			instance.visibility_range_end_margin = 8.0
+			add_child(instance)
 	# Logs, branches, roots, scree and the odd standing stone, each where it belongs.
 	for entry in ModelCatalog.available("decor", ModelCatalog.DECOR_EXTRA):
 		var extra_mesh: Mesh = ModelCatalog.entry_mesh(entry)
