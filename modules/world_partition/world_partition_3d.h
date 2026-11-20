@@ -76,6 +76,7 @@ class WorldPartition3D : public Node3D {
 	struct StreamingSource {
 		Vector3 global_position;
 		int radius = 0;
+		int priority = 1; // 0 background, 1 normal, 2 important, 3 urgent.
 	};
 	HashMap<String, StreamingSource> streaming_sources;
 	static constexpr int MAX_STREAMING_SOURCES = 8;
@@ -158,7 +159,9 @@ public:
 	Array get_pinned_cells() const;
 	int get_pinned_cell_count() const;
 
-	bool set_streaming_source(const String &p_name, const Vector3 &p_global_position, int p_radius = 0);
+	bool set_streaming_source(const String &p_name, const Vector3 &p_global_position, int p_radius = 0, int p_priority = 1);
+	bool set_streaming_source_priority(const String &p_name, int p_priority);
+	int get_streaming_source_priority(const String &p_name) const;
 	void remove_streaming_source(const String &p_name);
 	void clear_streaming_sources();
 	bool has_streaming_source(const String &p_name) const;
