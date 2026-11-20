@@ -4,6 +4,7 @@ extends Node3D
 ## call GameServer. Multiplayer transport will be wired to this presentation separately.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
@@ -846,6 +847,11 @@ func _update_hud() -> void:
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [
 			str(Defs.item(equipped_ammo).get("name", equipped_ammo)),
 			survivor.inventory.count(equipped_ammo)]
+	if survivor.meal_seconds > 0.0:
+		_stats.text += "\nPREPARED MEAL T%d: %.0fs | +%.1f stamina/s, +%.2f energy/s" % [
+			survivor.meal_tier, survivor.meal_seconds,
+			HeartyMeal.stamina_per_second(survivor.meal_tier),
+			HeartyMeal.energy_per_second(survivor.meal_tier)]
 	var local_armor: String = survivor.inventory.armor
 	if local_armor != "" and survivor.inventory.count(local_armor) <= 0:
 		local_armor = ""
