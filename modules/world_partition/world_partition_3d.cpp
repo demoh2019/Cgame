@@ -338,7 +338,7 @@ int WorldPartition3D::get_distant_cell_count() const {
 int WorldPartition3D::_cell_detail_level(const Vector2i &p_cell, const Vector2i &p_center, int p_previous_level) const {
 	// Pinned gameplay locations always retain full detail. New cells have no
 	// previous state and are classified using the unexpanded inner radius.
-	if (detail_radius < 0 || pinned_cells.has(p_cell) || _within_radius(p_cell, p_center, detail_radius)) {
+	if (detail_radius < 0 || pinned_cells.has(p_cell) || _is_cell_required_by_important_source(p_cell) || _within_radius(p_cell, p_center, detail_radius)) {
 		return 0;
 	}
 	// Only an already-near cell enjoys the wider demotion threshold.
