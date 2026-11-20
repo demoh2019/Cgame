@@ -6,6 +6,10 @@ on:
     paths:
       - 'core/math/random_number_generator.cpp'
       - 'core/math/random_number_generator.h'
+      - 'scene/3d/flock_3d.cpp'
+      - 'scene/3d/flock_3d.h'
+      - 'doc/classes/Flock3D.xml'
+      - 'tests/scene/test_flock_3d.cpp'
       - 'doc/classes/RandomNumberGenerator.xml'
       - 'tests/core/math/test_random_substreams.cpp'
       - 'game/scripts/client/seeded_substreams.gd'
@@ -19,6 +23,10 @@ on:
     paths:
       - 'core/math/random_number_generator.cpp'
       - 'core/math/random_number_generator.h'
+      - 'scene/3d/flock_3d.cpp'
+      - 'scene/3d/flock_3d.h'
+      - 'doc/classes/Flock3D.xml'
+      - 'tests/scene/test_flock_3d.cpp'
       - 'tests/core/math/test_random_substreams.cpp'
       - 'game/scripts/client/seeded_substreams.gd'
       - 'game/scripts/client/ambient_birds.gd'
@@ -58,6 +66,7 @@ jobs:
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 240s "$BIN" --headless --test --test-case="*Named substreams*"
           timeout 240s "$BIN" --headless --test --test-case="*Substreams distinguish*"
+          timeout 240s "$BIN" --headless --test --test-case="*Seeded flock resets*"
       - name: Import Albion After assets and GDScript
         shell: bash
         run: |
