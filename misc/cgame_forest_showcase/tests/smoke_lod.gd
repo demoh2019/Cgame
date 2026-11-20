@@ -120,5 +120,35 @@ func _run() -> void:
         _fail("missing cell must have no detail level")
         return
 
-    print("Forest LOD smoke PASSED: near/far geometry, deterministic silhouettes, pinned hubs, disabling detail")
+    # Hysteresis: already-full cells stay detailed for one extra grid ring,
+    # but genuinely distant cells only return to full detail in inner radius.
+    stream.detail_radius = 0
+    stream.detail_hysteresis_cells = 1
+    observer.position.x = 0.0
+    stream.update_streaming()
+    if stream.get_cell_detail_level(home) != 0:
+        _fail("home cell failed to enter full detail at the inner radius")
+        return
+    observer.position.x = 33.0
+    stream.update_streaming()
+    if stream.get_cell_detail_level(home) != 0:
+        _fail("one-cell hysteresis did not preserve near detail")
+        return
+    observer.position.x = 65.0
+    stream.update_streaming()
+    if stream.get_cell_detail_level(home) != 1:
+        _fail("home cell did not demote outside the hysteresis radius")
+        return
+    observer.position.x = 33.0
+    stream.update_streaming()
+    if stream.get_cell_detail_level(home) != 1:
+        _fail("far cell promoted too early and will thrash at the boundary")
+        return
+    observer.position.x = 0.0
+    stream.update_streaming()
+    if stream.get_cell_detail_level(home) != 0:
+        _fail("far cell did not promote on entering the inner radius")
+        return
+
+    print("Forest LOD smoke PASSED: deterministic near/far tiers, pins, disabling LOD, and boundary hysteresis")
     quit(0)

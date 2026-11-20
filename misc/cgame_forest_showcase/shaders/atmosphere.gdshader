@@ -7,6 +7,7 @@ uniform vec3 horizon_color : source_color = vec3(0.79, 0.45, 0.29);
 uniform vec3 ground_color : source_color = vec3(0.16, 0.16, 0.17);
 uniform float cloud_coverage : hint_range(0.0, 1.0) = 0.42;
 uniform float sun_halo : hint_range(0.0, 3.0) = 1.35;
+uniform float aurora_intensity : hint_range(0.0, 1.0) = 0.0;
 
 float hash21(vec2 p) {
     p = fract(p * vec2(127.1, 311.7));
@@ -57,6 +58,24 @@ void sky() {
         sky_color = mix(sky_color, sky_color * 0.67 + vec3(0.67, 0.58, 0.55) * 0.35, coverage * fade * 0.65);
     } else {
         sky_color = mix(horizon_color * 0.65, ground_color, smoothstep(0.0, 0.65, -view_dir.y));
+    }
+
+    // Low-cost, time-independent auroral curtains on the north-facing sky.
+    // CPU-side weather controller adjusts only the intensity twice per second;
+    // removing TIME avoids per-render-frame radiance invalidations.
+    if (aurora_intensity > 0.001 && view_dir.y > 0.0) {
+        float north = smoothstep(-0.12, 0.64, -view_dir.z);
+        float altitude = smoothstep(0.07, 0.23, view_dir.y)
+            * (1.0 - smoothstep(0.74, 0.95, view_dir.y));
+        float ribbon_motion = sin(view_dir.y * 10.0 + view_dir.x * 8.0) * 0.08
+            + sin(view_dir.y * 5.0 - view_dir.x * 7.0) * 0.045;
+        float curtain_a = exp(-pow((view_dir.x + 0.30 + ribbon_motion) * 10.0, 2.0));
+        float curtain_b = exp(-pow((view_dir.x - 0.19 - ribbon_motion) * 13.0, 2.0));
+        float vertical_striation = 0.65 + 0.35 * hash21(
+            floor(vec2(view_dir.x * 115.0, view_dir.y * 16.0)));
+        vec3 aurora = vec3(0.09, 0.67, 0.46) * curtain_a
+            + vec3(0.12, 0.37, 0.83) * curtain_b;
+        sky_color += aurora * altitude * north * vertical_striation * aurora_intensity;
     }
 
     // Godot sky shaders cannot return from sky(): all branches converge here.

@@ -50,6 +50,7 @@ class WorldPartition3D : public Node3D {
 	int max_concurrent_requests = 8;
 	bool streaming_enabled = true;
 	int detail_radius = -1; // -1 disables dynamic detail levels.
+	int detail_hysteresis_cells = 0; // Extra cells tolerated before demoting an already-near scene.
 	int max_detail_transitions_per_frame = 2;
 	// Optional, bounded future-cell streaming source; velocity is in world units/second.
 	Vector3 predictive_velocity;
@@ -76,7 +77,7 @@ class WorldPartition3D : public Node3D {
 	void _clear_active_cells();
 	void _poll_requests();
 	void _request_cell(const Vector2i &p_cell, int &r_new_requests, int &r_instances);
-	int _cell_detail_level(const Vector2i &p_cell, const Vector2i &p_center) const;
+	int _cell_detail_level(const Vector2i &p_cell, const Vector2i &p_center, int p_previous_level = -1) const;
 	void _refresh_cell_detail(const Vector2i &p_center);
 	void _purge_unused_ready_scenes();
 	bool _instantiate_cell(const Vector2i &p_cell, const Ref<PackedScene> &p_scene);
@@ -110,6 +111,8 @@ public:
 
 	void set_detail_radius(int p_radius);
 	int get_detail_radius() const;
+	void set_detail_hysteresis_cells(int p_hysteresis);
+	int get_detail_hysteresis_cells() const;
 	void set_max_detail_transitions_per_frame(int p_budget);
 	int get_max_detail_transitions_per_frame() const;
 	int get_cell_detail_level(const Vector2i &p_cell) const;

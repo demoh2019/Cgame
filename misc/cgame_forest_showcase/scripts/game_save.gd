@@ -12,7 +12,10 @@ static func save_state(state: Dictionary, path: String = SAVE_PATH) -> bool:
         "relics": state.get("relics", []),
         "position_xz": state.get("position_xz", [0.0, 9.0]),
         "look": state.get("look", [0.0, 0.0]),
-        "quality": state.get("quality", true)
+        "quality": state.get("quality", true),
+        # Additive v1 fields: older saves lacking these keys remain compatible.
+        "time_of_day": state.get("time_of_day", 17.25),
+        "weather": state.get("weather", 0)
     }
     var file := FileAccess.open(path, FileAccess.WRITE)
     if file == null:
@@ -62,9 +65,22 @@ static func load_state(max_relics: int, path: String = SAVE_PATH) -> Dictionary:
             look.x = clampf(float(angles[0]), -1.42, 1.42)
             look.y = clampf(float(angles[1]), -PI * 2.0, PI * 2.0)
 
+    var time_of_day: float = 17.25
+    var raw_clock: Variant = raw.get("time_of_day", 17.25)
+    if (typeof(raw_clock) == TYPE_FLOAT or typeof(raw_clock) == TYPE_INT) \
+            and is_finite(float(raw_clock)):
+        time_of_day = fposmod(float(raw_clock), 24.0)
+
+    var weather: int = 0
+    var raw_weather: Variant = raw.get("weather", 0)
+    if typeof(raw_weather) == TYPE_INT and int(raw_weather) >= 0 and int(raw_weather) <= 2:
+        weather = int(raw_weather)
+
     return {
         "relics": ids,
         "position_xz": position,
         "look": look,
-        "quality": raw.get("quality", true) == true
+        "quality": raw.get("quality", true) == true,
+        "time_of_day": time_of_day,
+        "weather": weather
     }

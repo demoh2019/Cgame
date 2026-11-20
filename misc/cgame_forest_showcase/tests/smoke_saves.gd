@@ -27,7 +27,9 @@ func _run() -> void:
         "relics": [0, 3, 3, -5, 99],
         "position_xz": [10.5, -20.25],
         "look": [0.3, 0.5],
-        "quality": false
+        "quality": false,
+        "time_of_day": 22.75,
+        "weather": 2
     }, TEMP_PATH)
     if not saved:
         _fail("could not write file")
@@ -44,6 +46,33 @@ func _run() -> void:
         return
     if loaded.get("quality", true) != false:
         _fail("graphics quality was not restored")
+        return
+    if not is_equal_approx(float(loaded.get("time_of_day", 0.0)), 22.75):
+        _fail("time-of-day was not restored")
+        return
+    if loaded.get("weather", -1) != 2:
+        _fail("saved weather was not restored")
+        return
+
+    # Original v1 saves predate the weather and clock. They must still load.
+    var legacy := FileAccess.open(TEMP_PATH, FileAccess.WRITE)
+    if legacy == null:
+        _fail("could not write legacy state")
+        return
+    legacy.store_string('{"version":1,"relics":[2],"quality":true,"position_xz":[0.0,9.0],"look":[0.0,0.0]}')
+    legacy.close()
+    var legacy_state: Dictionary = GameSave.load_state(8, TEMP_PATH)
+    if legacy_state.get("weather", -1) != 0 or not is_equal_approx(float(legacy_state.get("time_of_day", 0.0)), 17.25):
+        _fail("older v1 saves lost backwards compatibility")
+        return
+
+    # External JSON cannot force invalid state into dynamic lighting.
+    legacy = FileAccess.open(TEMP_PATH, FileAccess.WRITE)
+    legacy.store_string('{"version":1,"time_of_day":"bad","weather":999}')
+    legacy.close()
+    var bad_atmosphere: Dictionary = GameSave.load_state(8, TEMP_PATH)
+    if bad_atmosphere.get("weather", -1) != 0 or not is_equal_approx(float(bad_atmosphere.get("time_of_day", 0.0)), 17.25):
+        _fail("invalid atmosphere state was not sanitized")
         return
 
     var file := FileAccess.open(TEMP_PATH, FileAccess.WRITE)
@@ -64,5 +93,5 @@ func _run() -> void:
         return
 
     _cleanup()
-    print("Forest save smoke PASSED: round trip, deduplication, bounds checks, invalid JSON and version rejection")
+    print("Forest save smoke PASSED: atmosphere roundtrip, legacy v1, sanitization, deduplication, invalid JSON and version rejection")
     quit(0)
