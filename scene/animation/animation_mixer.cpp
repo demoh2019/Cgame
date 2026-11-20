@@ -512,6 +512,8 @@ void AnimationMixer::set_callback_mode_process(AnimationCallbackModeProcess p_mo
 	}
 
 	callback_mode_process = p_mode;
+	// Switching back to full-rate evaluation must not replay stale time.
+	budgeted_advance_accumulated = 0.0;
 
 	if (was_active) {
 		set_active(true);
@@ -2118,6 +2120,38 @@ void AnimationMixer::advance(double p_time) {
 	_process_animation(p_time);
 }
 
+bool AnimationMixer::advance_budgeted(double p_delta, double p_update_interval, double p_max_catchup) {
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_delta) || !Math::is_finite(p_update_interval) ||
+					!Math::is_finite(p_max_catchup) || p_delta < 0.0 ||
+					p_update_interval <= 0.0 || p_max_catchup <= 0.0, false,
+			"Animation budget delta, interval, and catchup must be finite and positive.");
+	// Only manually ticked visual animators may opt in: automatic tick users
+	// would otherwise evaluate the same pose twice each frame.
+	if (!active || callback_mode_process != ANIMATION_CALLBACK_MODE_PROCESS_MANUAL) {
+		budgeted_advance_accumulated = 0.0;
+		return false;
+	}
+	// At least one update must fit in the cap, or slow-tier characters could
+	// remain frozen forever. Discard exceptional >500 ms loading-stall time.
+	const double catchup = MAX(p_update_interval, p_max_catchup);
+	budgeted_advance_accumulated = MIN(budgeted_advance_accumulated + p_delta, catchup);
+	if (budgeted_advance_accumulated + 0.000000001 < p_update_interval) {
+		return false;
+	}
+	const double due = budgeted_advance_accumulated;
+	budgeted_advance_accumulated = 0.0;
+	advance(due); // Virtual: AnimationPlayer/Tree retain their existing states.
+	return true;
+}
+
+void AnimationMixer::reset_advance_budget() {
+	budgeted_advance_accumulated = 0.0;
+}
+
+double AnimationMixer::get_advance_budget_accumulated() const {
+	return budgeted_advance_accumulated;
+}
+
 void AnimationMixer::clear_caches() {
 	_clear_caches();
 }
@@ -2499,6 +2533,9 @@ void AnimationMixer::_bind_methods() {
 	/* ---- Blending processor ---- */
 	ClassDB::bind_method(D_METHOD("clear_caches"), &AnimationMixer::clear_caches);
 	ClassDB::bind_method(D_METHOD("advance", "delta"), &AnimationMixer::advance);
+	ClassDB::bind_method(D_METHOD("advance_budgeted", "delta", "interval", "max_catchup"), &AnimationMixer::advance_budgeted, DEFVAL(0.5));
+	ClassDB::bind_method(D_METHOD("reset_advance_budget"), &AnimationMixer::reset_advance_budget);
+	ClassDB::bind_method(D_METHOD("get_advance_budget_accumulated"), &AnimationMixer::get_advance_budget_accumulated);
 	GDVIRTUAL_BIND(_post_process_key_value, "animation", "track", "value", "object_id", "object_sub_idx");
 
 	/* ---- Capture feature ---- */
