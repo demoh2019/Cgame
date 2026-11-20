@@ -1,0 +1,43 @@
+#include "../sound_propagation_policy.h"
+
+#include <cassert>
+#include <cmath>
+#include <limits>
+
+using namespace SoundPropagationPolicy;
+
+int main() {
+	// Calibrated to Albion After's existing server-owned 21m steps / 32m shots.
+	assert(std::abs(hearing_radius(21.0f, 21.0f, true) - 13.02f) < 0.001f);
+	assert(std::abs(hearing_radius(32.0f, 32.0f, true) - 25.6f) < 0.001f);
+	assert(hearing_radius(21.0f, 21.0f, false) == 21.0f);
+	assert(hearing_radius(32.0f, 32.0f, false) == 32.0f);
+	assert(transmission(32.0f) > transmission(21.0f));
+	assert(transmission(999.0f) == LOUD_TRANSMISSION);
+	assert(transmission(1.0f) == QUIET_TRANSMISSION);
+	assert(hearing_radius(0.0f, 21.0f, false) == 0.0f);
+	assert(hearing_radius(0.0f, 21.0f, true) == 0.0f);
+	assert(hearing_radius(-1.0f, 21.0f, true) == 0.0f);
+	for (int n = 1; n <= 150; ++n) {
+		for (int wind = 1; wind <= 60; ++wind) {
+			const float original = float(wind);
+			const float adjusted = hearing_radius(float(n), original, true);
+			assert(std::isfinite(adjusted) && adjusted > 0.0f);
+			assert(adjusted >= original * QUIET_TRANSMISSION - 0.001f);
+			assert(adjusted <= original * LOUD_TRANSMISSION + 0.001f);
+			assert(adjusted < hearing_radius(float(n), original, false));
+		}
+	}
+	const float invalid[] = {
+		std::numeric_limits<float>::quiet_NaN(),
+		std::numeric_limits<float>::infinity(),
+		-std::numeric_limits<float>::infinity()
+	};
+	for (float bad : invalid) {
+		assert(hearing_radius(bad, 21.0f, true) == 0.0f);
+		assert(hearing_radius(21.0f, bad, true) == 0.0f);
+		assert(transmission(bad) == 0.0f);
+	}
+	// Leash-clipped sound remains clipped even if original noise was loud.
+	assert(hearing_radius(32.0f, 29.0f, true) <= 29.0f);
+}
