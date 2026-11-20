@@ -170,7 +170,8 @@ class StreamedTerrainContracts(TestCase):
             self.assertIn(expected, manager)
         self.assertIn("_create_distant_terrain()", world)
         self.assertIn('distant_terrain.call("set_high_quality", high)', world)
-        self.assertIn("DistantTerrainHLOD", smoke)
+        self.assertIn("DistantTerrainHLOD", world)
+        self.assertIn("HLODTestManager", smoke)
         self.assertNotIn("StaticBody3D.new()", manager)
 
     def test_native_directional_prefetch_contract(self) -> None:
