@@ -39,6 +39,19 @@
 
 void Light3D::set_param(Param p_param, real_t p_value) {
 	ERR_FAIL_INDEX(p_param, PARAM_MAX);
+	// Weather-driven shadows are updated several times per second. Reject
+	// invalid parameters before they can enter GPU light buffers and avoid
+	// redundant uploads when the quantized shadow value did not change.
+	if (p_param == PARAM_SHADOW_OPACITY || p_param == PARAM_SHADOW_BLUR) {
+		if (!Math::is_finite(p_value)) {
+			return;
+		}
+		const real_t max_value = p_param == PARAM_SHADOW_OPACITY ? 1.0 : 10.0;
+		p_value = CLAMP(p_value, real_t(0.0), max_value);
+		if (param[p_param] == p_value) {
+			return;
+		}
+	}
 	param[p_param] = p_value;
 
 	RS::get_singleton()->light_set_param(light, RSE::LightParam(p_param), p_value);
