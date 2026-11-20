@@ -7,8 +7,14 @@
 void SoundPropagation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("effective_radius", "source_radius", "wind_radius", "blocked"),
 			&SoundPropagation::effective_radius);
+	ClassDB::bind_method(D_METHOD("travel_delay_seconds", "distance_m", "temperature_c"),
+			&SoundPropagation::travel_delay_seconds, DEFVAL(20.0f));
 }
 
 float SoundPropagation::effective_radius(float p_source_radius, float p_wind_radius, bool p_blocked) const {
 	return SoundPropagationPolicy::hearing_radius(p_source_radius, p_wind_radius, p_blocked);
+}
+
+float SoundPropagation::travel_delay_seconds(float p_distance_m, float p_temperature_c) const {
+	return SoundPropagationPolicy::sound_delay_seconds(p_distance_m, p_temperature_c);
 }
