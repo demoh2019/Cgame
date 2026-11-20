@@ -134,3 +134,49 @@ func run(t) -> void:
 		"Compatibility and low-end tiers never allocate the high-end fog grid")
 	t.check(not bool(GraphicsQuality.profile(0)["ssao"]),
 		"low-end graphics retains other existing low-cost postprocessing choices")
+
+
+	t.current = "lightning has crisp, low-ghosting volumetric history"
+	var high_fog: Dictionary = CinematicFog.profile(2, "forward_plus")
+	var ultra_fog: Dictionary = CinematicFog.profile(3, "forward_plus")
+	t.near(CinematicFog.history_for_lightning(high_fog, 0.0),
+		0.66, 0.00001, "calm High fog uses the authored temporal denoiser")
+	t.near(CinematicFog.history_for_lightning(ultra_fog, 0.0),
+		0.74, 0.00001, "calm Ultra fog preserves denoised sun rays")
+	t.check(CinematicFog.history_for_lightning(high_fog, 0.5) <
+		CinematicFog.history_for_lightning(high_fog, 0.1),
+		"brighter strikes use more current-frame lighting")
+	t.near(CinematicFog.history_for_lightning(high_fog, 1.0),
+		CinematicFog.LIGHTNING_HISTORY_FLOOR, 0.00001,
+		"direct strike suppresses most of the previous fog frame")
+	t.check(CinematicFog.history_for_lightning(ultra_fog, 1.0) <= 0.15,
+		"Ultra does not produce prolonged lightning trails")
+	t.near(CinematicFog.history_for_lightning(high_fog, NAN),
+		0.66, 0.00001, "invalid network intensity retains safe fog history")
+	t.near(CinematicFog.history_for_lightning(high_fog, -1.0),
+		0.66, 0.00001, "negative pulses do not reduce normal fog quality")
+	t.check(CinematicFog.history_for_lightning(CinematicFog.profile(1,
+		"gl_compatibility"), 1.0) == 0.0,
+		"Compatibility never enables volumetric temporal history")
+	var history_env := Environment.new()
+	var history_sun := DirectionalLight3D.new()
+	CinematicFog.apply_profile(history_env, history_sun, high_fog)
+	CinematicFog.apply_lightning_history(history_env, high_fog, 0.9)
+	t.check(history_env.volumetric_fog_temporal_reprojection_amount < 0.2,
+		"active real Environment prioritizes instantaneous lightning shading")
+	CinematicFog.apply_lightning_history(history_env, high_fog, 0.0)
+	t.near(history_env.volumetric_fog_temporal_reprojection_amount,
+		0.66, 0.00001, "after the flash, high-quality denoising returns")
+	CinematicFog.apply_profile(history_env, history_sun,
+		CinematicFog.profile(1, "gl_compatibility"))
+	var disabled_history: float = history_env.volumetric_fog_temporal_reprojection_amount
+	CinematicFog.apply_lightning_history(history_env, high_fog, 1.0)
+	t.near(history_env.volumetric_fog_temporal_reprojection_amount,
+		disabled_history, 0.00001,
+		"disabled renderer never updates an unsupported volume")
+	history_sun.free()
+	var atmosphere_code: String = FileAccess.get_file_as_string(
+		"res://scripts/client/atmosphere.gd")
+	t.check(atmosphere_code.contains(
+		"CinematicFog.apply_lightning_history(environment, _fog_profile, amount)"),
+		"both clients automatically use confirmed lightning to clear temporal ghosts")

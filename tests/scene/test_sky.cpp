@@ -270,6 +270,35 @@ TEST_CASE("[SceneTree][Environment] Filmic AgX and ACES ignore invalid exposure 
 	CHECK(scene_environment->get_tonemapper() == Environment::TONE_MAPPER_ACES);
 }
 
+TEST_CASE("[SceneTree][Environment] Volumetric fog history is finite and bounded") {
+	if (RenderingServer::get_singleton() == nullptr) {
+		return;
+	}
+	Ref<Environment> scene_environment;
+	scene_environment.instantiate();
+	scene_environment->set_volumetric_fog_temporal_reprojection_amount(0.66f);
+	CHECK(scene_environment->get_volumetric_fog_temporal_reprojection_amount() == 0.66f);
+	scene_environment->set_volumetric_fog_temporal_reprojection_amount(2.0f);
+	CHECK(scene_environment->get_volumetric_fog_temporal_reprojection_amount() == 1.0f);
+	scene_environment->set_volumetric_fog_temporal_reprojection_amount(-0.5f);
+	CHECK(scene_environment->get_volumetric_fog_temporal_reprojection_amount() == 0.0f);
+	scene_environment->set_volumetric_fog_temporal_reprojection_amount(0.74f);
+	scene_environment->set_volumetric_fog_temporal_reprojection_amount(0.74f);
+	CHECK(scene_environment->get_volumetric_fog_temporal_reprojection_amount() == 0.74f);
+	scene_environment->set_volumetric_fog_density(0.008f);
+	scene_environment->set_volumetric_fog_density(-1.0f);
+	CHECK(scene_environment->get_volumetric_fog_density() == 0.008f);
+	scene_environment->set_volumetric_fog_detail_spread(2.35f);
+	scene_environment->set_volumetric_fog_detail_spread(2.35f);
+	CHECK(scene_environment->get_volumetric_fog_detail_spread() == 2.35f);
+	scene_environment->set_volumetric_fog_enabled(true);
+	scene_environment->set_volumetric_fog_enabled(true);
+	CHECK(scene_environment->is_volumetric_fog_enabled());
+	scene_environment->set_volumetric_fog_temporal_reprojection_enabled(false);
+	scene_environment->set_volumetric_fog_temporal_reprojection_enabled(false);
+	CHECK(!scene_environment->is_volumetric_fog_temporal_reprojection_enabled());
+}
+
 } // namespace TestSky
 
 #endif // _3D_DISABLED
