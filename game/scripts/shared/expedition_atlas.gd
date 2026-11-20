@@ -65,6 +65,8 @@ static func objectives(you: Variant) -> Array[Dictionary]:
 		var group: Dictionary = party
 		_add(result, group.get("escort_caravan", {}), "escort",
 			"ESCORT COURIER", "dst_x", "dst_z")
+		_add(result, group.get("corpse_rescue", {}), "rescue",
+			"RECOVER TEAMMATE GEAR", "x", "z", true)
 		_add(result, group.get("rally", {}), "rally",
 			"PARTY RALLY", "x", "z", true)
 		_add(result, group.get("ping", {}), "ping",

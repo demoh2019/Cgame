@@ -378,6 +378,10 @@ func party_standard() -> void:
 	net.c_party_standard.rpc_id(1)
 
 
+func party_corpse_rescue() -> void:
+	net.c_party_corpse_rescue.rpc_id(1)
+
+
 func party_rally() -> void:
 	net.c_party_rally.rpc_id(1)
 

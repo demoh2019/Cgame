@@ -732,6 +732,12 @@ func _build() -> void:
 	duel_cancel.text = "Decline / end"
 	duel_cancel.pressed.connect(func() -> void: client.duel_cancel())
 	duel_buttons.add_child(duel_cancel)
+	var rescue_button := Button.new()
+	rescue_button.name = "ShareLostGearWithParty"
+	rescue_button.text = "Ask party to recover dropped gear"
+	rescue_button.tooltip_text = "Opt-in: share your actual full-loot bag with teammates for up to 90 seconds. Loot remains public."
+	rescue_button.pressed.connect(func() -> void: client.party_corpse_rescue())
+	party_buttons.add_child(rescue_button)
 	var rally_button := Button.new()
 	rally_button.text = "Set rally"
 	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
@@ -1515,6 +1521,14 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "corpse_rescue":
+		if bool(data.get("ok", false)):
+			say("RESCUE SIGNAL: lost backpack shared privately for %ds. Loot stays public." % [
+				ceili(float(data.get("seconds", 0.0)))])
+		else:
+			say("Rescue signal: %s (no position shared)." % str(
+				data.get("reason", "rejected")))
+		return
 	if kind == "use" and bool(data.get("mining_wedges", false)):
 		if bool(data.get("ok", false)):
 			say("Mining wedges fitted: %d T2+ ore/stone harvests grant +2 extra material. Noise 42m." % int(data.get("charges", 0)))

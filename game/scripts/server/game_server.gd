@@ -24,6 +24,7 @@ const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const DeathRecovery = preload("res://scripts/shared/death_recovery.gd")
+const PartyCorpseRescue = preload("res://scripts/shared/party_corpse_rescue.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
@@ -1771,6 +1772,12 @@ func cmd_party_ping(peer_id: int, x: float, z: float) -> Dictionary:
 	return parties.mark_ping(peer_id, Vector2(x, z), time)
 
 
+## No position, bag ID or payout is client-selected. Even a dead member
+## may ask their existing party to help recover lost equipment.
+func cmd_party_corpse_rescue(peer_id: int) -> Dictionary:
+	return PartyCorpseRescue.request(players.get(peer_id), parties, bags, time)
+
+
 func cmd_party_rally(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -1842,6 +1849,7 @@ func _party_state_for(peer_id: int) -> Dictionary:
 			roster.append({"id": int(id), "name": member.name,
 				"alive": _alive(member), "health": member.survival.health})
 	state["roster"] = roster
+	state["corpse_rescue"] = PartyCorpseRescue.shared(peer_id, players, parties, bags, time)
 	state["escort_caravan"] = CaravanEscort.shared_route(peer_id, players, parties)
 	var shared: Dictionary = state["escort_caravan"]
 	state["escort_progress"] = {}

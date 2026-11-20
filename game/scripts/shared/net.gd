@@ -716,6 +716,13 @@ func c_party_ping(x: float, z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_corpse_rescue() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "corpse_rescue", sim.cmd_party_corpse_rescue(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_party_rally() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
