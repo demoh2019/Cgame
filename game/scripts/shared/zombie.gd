@@ -16,6 +16,7 @@ var elite: bool = false
 var raid_boss: bool = false # Session-only group encounter; never a client-spawnable type.
 var raid_enraged: bool = false # Server transitions once at low raid boss health.
 var spawn_id: int
+var supply_cache_id: int = -1 # Server-only guardian of a live contested supply cache.
 var position: Vector3
 var yaw: float = 0.0
 var health: float

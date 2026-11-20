@@ -8,10 +8,11 @@ server simulation**, with a retry every 60 seconds if no living player is in a d
 - Rewards use existing items: T3/T4 metal and cloth, silver, bandages, 9 mm ammunition.
 - The item selection and site are determined solely by the server RNG; the client has no
   endpoint to create a cache or change its rewards.
-- Caches are **public** from the start (no party or raid reservation), and therefore
-  attract competition under the existing full-loot PvP rules.
-- Their blue pickup model and `SUPPLY DROP - public` label distinguish them from death
-  bags. Every connected player receives a coordinate/tier announcement; only nearby
+- The server spawns up to three nearby infected guards. While one assigned guard
+  remains alive, the cache is sealed. Guards remain active even if players retreat.
+  If no guard can spawn safely, the crate is public immediately.
+- Once cleared, caches are public (no party/raid reservation) under existing full-loot PvP rules.
+- Orange `SUPPLY DROP - guarded (N)` models become blue `SUPPLY DROP - public` after the guards fall. Every connected player receives a coordinate/tier announcement; only nearby
   clients receive the visible loot bag snapshot. Contents remain server-side.
 - They expire after **420 seconds** or disappear when looted. Partial looting respects
   inventory capacity and keeps uncollected items on the ground.

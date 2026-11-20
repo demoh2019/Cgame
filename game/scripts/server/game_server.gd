@@ -2374,6 +2374,9 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 		var bag: Dictionary = bags[entity_id]
 		if _distance_xz(player.position, bag) > Defs.REACH + 0.5:
 			return {"ok": false, "reason": "too_far"}
+		var remaining_guards: int = SupplyDrops.living_guards(bag, zombies)
+		if remaining_guards > 0:
+			return {"ok": false, "reason": "guards_alive", "remaining": remaining_guards}
 		# Raid trophies are reserved briefly for the killing group members
 		# who actually participated. The server owns the access list and time.
 		if not RaidLoot.can_open(bag, player, time):
@@ -3543,6 +3546,8 @@ func _manage_zombie_population() -> void:
 	for zombie in zombies.values():
 		if not zombie.is_alive():
 			gone.append(zombie.id)
+		elif zombie.supply_cache_id >= 0 and bags.has(zombie.supply_cache_id):
+			continue # Guard stays loaded while its loot is alive: no lure-and-return exploit.
 		elif _nearest_player_distance(Vector2(zombie.position.x, zombie.position.z)) > ZOMBIE_ACTIVE_RADIUS:
 			gone.append(zombie.id)
 			if spawn_state.has(zombie.spawn_id):
@@ -3584,19 +3589,21 @@ func _tick_supply_drop() -> void:
 		bags[bag_id]["expires"] = time + SupplyDrops.LIFETIME_SECONDS
 		# Spawn a bounded, collidable, one-time infected escort for this crate.
 		# The public bag stays lootable even if no safe guard site exists.
-		var guard_count: int = _spawn_supply_guards(site)
+		var guard_ids: Array[int] = _spawn_supply_guards(site, bag_id)
+		bags[bag_id]["supply_guard_ids"] = guard_ids
 		next_supply_drop_at = time + SupplyDrops.INTERVAL_SECONDS
 		events.append({"type": "supply_drop", "id": bag_id, "x": site["x"],
-			"z": site["z"], "tier": int(site["zone"]) + 1, "guards": guard_count})
+			"z": site["z"], "tier": int(site["zone"]) + 1, "guards": guard_ids.size()})
 		return
 
 
 ## Guards patrol toward the crate using the existing investigation state.
 ## They neither fake a player target nor respawn from world spawn slots.
-func _spawn_supply_guards(site: Dictionary) -> int:
+func _spawn_supply_guards(site: Dictionary, bag_id: int) -> Array[int]:
+	var ids: Array[int] = []
 	var capacity: int = SupplyDrops.MAX_ACTIVE_INFECTED - zombies.size()
 	if capacity <= 0:
-		return 0
+		return ids
 	var positions: Array[Vector3] = []
 	for player in players.values():
 		if _alive(player) and player.position.is_finite():
@@ -3611,8 +3618,10 @@ func _spawn_supply_guards(site: Dictionary) -> int:
 		var guard = Zombie.new(enemy_id, str(spot["kind"]),
 			Vector3(x, world.height_at(x, z), z), -1)
 		guard.investigate_decoy(target)
+		guard.supply_cache_id = bag_id
 		zombies[enemy_id] = guard
-	return sites.size()
+		ids.append(enemy_id)
+	return ids
 
 
 func _tick_world(delta: float) -> void:
@@ -3735,6 +3744,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				bag_view["reserved"] = float(bag_view["reserved_seconds"]) > 0.0
 				bag_view["can_loot"] = RaidLoot.can_open(bag, player, time)
 			bag_view["supply_drop"] = bool(bag.get("supply_drop", false))
+			bag_view["guards_remaining"] = SupplyDrops.living_guards(bag, zombies)
+			if int(bag_view["guards_remaining"]) > 0:
+				bag_view["can_loot"] = false
 			nearby_bags.append(bag_view)
 	var gone_nodes: Array = []
 	for id in depleted:

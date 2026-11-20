@@ -842,9 +842,9 @@ func _on_event(event: Dictionary) -> void:
 		"spit_impact":
 			say("Corrosive spit landed — the acid remains dangerous for 5 seconds!")
 		"supply_drop":
-			say("SUPPLY DROP T%d at X:%d Z:%d! Public loot in a full-loot PvP zone." % [
+			say("SUPPLY DROP T%d at X:%d Z:%d! %d guards. Full-loot PvP." % [
 				int(event.get("tier", 3)), roundi(float(event.get("x", 0.0))),
-				roundi(float(event.get("z", 0.0)))])
+				roundi(float(event.get("z", 0.0))), int(event.get("guards", 0))])
 		"raid_started":
 			say("RAID BOSS nearby! A mutant warlord entered the dangerous zone.")
 		"raid_enraged":
@@ -952,6 +952,9 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				roundi(float(data.get("bleeding_stopped", 0.0)))])
 		else:
 			say("Field aid denied: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "loot" and str(data.get("reason", "")) == "guards_alive":
+		say("Cache sealed: eliminate %d infected guards." % int(data.get("remaining", 0)))
 		return
 	if kind == "loot" and str(data.get("reason", "")) == "raid_reserved":
 		say("Raid loot is reserved for its contributors (%ds remaining)." % [

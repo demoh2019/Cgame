@@ -45,6 +45,17 @@ static func loot_for_zone(zone: int, rng: RandomNumberGenerator) -> Dictionary:
 		"ammo_9mm": rng.randi_range(6, 12),
 	}
 
+## IDs are server-only and absent from client snapshots. Ordinary bags are unaffected.
+static func living_guards(bag: Dictionary, infected: Dictionary) -> int:
+	if not bool(bag.get("supply_drop", false)):
+		return 0
+	var remaining := 0
+	for id in bag.get("supply_guard_ids", []):
+		var guard = infected.get(int(id))
+		if guard != null and guard.is_alive():
+			remaining += 1
+	return remaining
+
 
 # Each crate is a small PvE encounter as well as a public PvP objective.
 # Escorts are ordinary session zombies: no extra private rewards and no respawn.
