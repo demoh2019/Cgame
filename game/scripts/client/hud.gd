@@ -1986,6 +1986,30 @@ func _process(_delta: float) -> void:
 			if recovery > 0.0:
 				_info_label.text += "\nRAID BOSS EXPOSED: %.1fs (+15%% PvE damage)" % recovery
 			break
+	# Group-only raid boss threat view comes from the authoritative private snapshot.
+	# Never derive another player's hidden hate values from public enemy positions.
+	var raid_aggro: Dictionary = client.you.get("raid_aggro", {})
+	if not raid_aggro.is_empty():
+		var target_id: int = int(raid_aggro.get("target", 0))
+		var target_name: String = "unknown / other group"
+		if target_id == client.peer_id:
+			target_name = "YOU"
+		elif target_id > 0:
+			target_name = "#%d" % target_id
+			for ally in client.you.get("party", {}).get("roster", []):
+				if int(ally.get("id", 0)) == target_id:
+					target_name = str(ally.get("name", target_name))
+					break
+		var own_percent: int = int(raid_aggro.get("your_pct", 0))
+		_info_label.text += "\nRAID AGGRO: boss targets %s | your threat %d%% of party peak" % [
+			target_name, own_percent]
+		var pull_percent: int = int(raid_aggro.get("pull_pct", -1))
+		if target_id != client.peer_id and pull_percent >= 0:
+			_info_label.text += " | %d%% of aggro-switch threshold" % pull_percent
+			if pull_percent >= 85:
+				_info_label.text += " — ease damage or let guardian hold!"
+		if bool(raid_aggro.get("taunted", false)):
+			_info_label.text += " | GUARDIAN TAUNT %.1fs" % float(raid_aggro.get("taunt_seconds", 0.0))
 	var insulation_left: float = float(client.you.get("storm_insulator_seconds", 0.0))
 	if insulation_left > 0.0:
 		_info_label.text += "\nSTORM INSULATION %.0fs | -60%% bolt damage" % insulation_left
