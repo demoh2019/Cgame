@@ -34,7 +34,7 @@ near/far proxy handoff is implemented without renderer-specific effects.
 
 WASD to fly, Space/Ctrl for up/down, Shift for speed, P to toggle forward prefetch,
 L to toggle distant proxy scenes, R to retry failed resource loads.
-HUD displays FPS and number of loaded detail/proxy cells.
+HUD displays FPS, detail/proxy cell counts, the active quality preset and auto mode.\n\nThe optional adaptive quality controller monitors a 3-second time-weighted FPS\nwindow. Under 48 FPS it reduces streaming distance/instantiation budgets, and\nat 58+ FPS it increases them after a 10-second cooldown. The modes are\nPerformance (proxy radius 2), Balanced (4) and Cinematic (5). Switch with\nkeys 1/2/3 (manual), or Q (automatic toggle). This is an intentionally simple\ndemo controller, not a measured production GPU or frametime feedback system.\n\nQuality controller assertions (after importing the project):\n\n\`\`\`sh\n./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/world_partition/demo --script res://tests/quality_controller_test.gd\n\`\`\`
 
 ## Limitations / validation
 
