@@ -6,6 +6,7 @@ extends Node3D
 const Assets = preload("res://scripts/client/assets.gd")
 const RainGear = preload("res://scripts/client/character_rain_gear.gd")
 const Ragdoll = preload("res://scripts/client/ragdoll.gd")
+const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 const Anim = preload("res://scripts/client/character_anim.gd")
 const AnimModifier = preload("res://scripts/client/character_anim_modifier.gd")
 
@@ -699,6 +700,7 @@ func start_ragdoll(push: Vector3) -> PhysicalBoneSimulator3D:
 	var skeleton := _find_skeleton()
 	if skeleton == null:
 		return null
+	disable_foot_placement()
 	var simulator := Ragdoll.build(skeleton)
 	if simulator == null:
 		return null
@@ -715,6 +717,43 @@ func start_ragdoll(push: Vector3) -> PhysicalBoneSimulator3D:
 		if body is PhysicalBone3D:
 			(body as PhysicalBone3D).apply_central_impulse(push * (body as PhysicalBone3D).mass)
 	return simulator
+
+
+## Plants the feet on the terrain with the engine's FootPlacementModifier3D (two-bone leg IK, pelvis drop,
+## foot-to-ground tilt). `height_at` is Callable(x, z) -> float in world space. A no-op on engine builds
+## without the class (see game/docs/ENGINE_FOOT_PLACEMENT.md). Returns true when the modifier is active.
+func enable_foot_placement(height_at: Callable) -> bool:
+	if not pack_mode or not height_at.is_valid() or not EngineFeatures.has("FootPlacementModifier3D"):
+		return false
+	var skeleton := _find_skeleton()
+	if skeleton == null or skeleton.find_bone("pelvis") < 0 or skeleton.find_bone("foot_l") < 0 or skeleton.find_bone("foot_r") < 0:
+		return false
+	var existing := skeleton.get_node_or_null("FootPlacement")
+	if existing != null:
+		existing.set("ground_height_callback", height_at)
+		existing.set("active", true)
+		return true
+	var modifier = ClassDB.instantiate("FootPlacementModifier3D")
+	if modifier == null:
+		return false
+	modifier.name = "FootPlacement"
+	modifier.set("pelvis_bone", "pelvis")
+	modifier.set("ground_height_callback", height_at)
+	modifier.set("max_pelvis_offset", 0.35)
+	modifier.set("max_foot_angle", deg_to_rad(35.0))
+	modifier.call("add_leg", "thigh_l", "calf_l", "foot_l", 0.0)
+	modifier.call("add_leg", "thigh_r", "calf_r", "foot_r", 0.0)
+	skeleton.add_child(modifier)
+	return true
+
+
+func disable_foot_placement() -> void:
+	var skeleton := _find_skeleton()
+	if skeleton == null:
+		return
+	var modifier := skeleton.get_node_or_null("FootPlacement")
+	if modifier != null:
+		modifier.set("active", false)
 
 
 func _find_skeleton() -> Skeleton3D:

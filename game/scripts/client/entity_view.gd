@@ -502,6 +502,8 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		model.setup(Color.WHITE if Assets.has_characters() else Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0, character, false, int(abs(int(entity["id"]))) / Assets.CHARACTER_NAMES.size())
 	model.set_wetness_step(_wetness_step)
 	root.add_child(model)
+	if _world != null and GraphicsQuality.level() >= 2: # High and Ultra; no-op without the native class.
+		model.enable_foot_placement(_world.height_at)
 	_register_anim_lod(model)
 	if kind == "zombie":
 		EngineFeatures.tag_node(root, ["Enemy.Infected.%s" % String(entity["type"]).capitalize()])
