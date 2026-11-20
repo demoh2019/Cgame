@@ -29,34 +29,22 @@
 				Returns the local-space origin of [param cell]. The Y component is always zero.
 			</description>
 		</method>
-		<method name="clear_pinned_cells">
-			<return type="void" />
-			<description>
-				Releases all runtime cell pins. Cells outside every observer's unload radius become eligible for normal budgeted unloading at the next update.
-			</description>
-		</method>
 		<method name="clear_cell_scenes">
 			<return type="void" />
 			<description>
 				Removes all registered cells and unloads instantiated cells.
 			</description>
 		</method>
+		<method name="clear_pinned_cells">
+			<return type="void" />
+			<description>
+				Releases all runtime cell pins. Cells outside every observer's unload radius become eligible for normal budgeted unloading at the next update.
+			</description>
+		</method>
 		<method name="get_additional_observer_paths" qualifiers="const">
 			<return type="Array" />
 			<description>
 				Returns a copy of the additional observer paths; modifying this array does not change the streamer configuration.
-			</description>
-		</method>
-		<method name="get_pinned_cells" qualifiers="const">
-			<return type="Array" />
-			<description>
-				Returns a new array of the pinned [Vector2i] coordinates in insertion order. No more than 128 cells may be pinned at once.
-			</description>
-		</method>
-		<method name="get_pinned_cell_count" qualifiers="const">
-			<return type="int" />
-			<description>
-				Returns the number of runtime pins, including pins not mapped to any registered scene.
 			</description>
 		</method>
 		<method name="get_cell_instance" qualifiers="const">
@@ -99,11 +87,16 @@
 				Returns the cell coordinates of currently instantiated scenes.
 			</description>
 		</method>
-		<method name="is_cell_pinned" qualifiers="const">
-			<return type="bool" />
-			<param index="0" name="cell" type="Vector2i" />
+		<method name="get_pinned_cell_count" qualifiers="const">
+			<return type="int" />
 			<description>
-				Returns [code]true[/code] while a cell is pinned, even if it has no registered scene.
+				Returns the number of runtime pins, including pins not mapped to any registered scene.
+			</description>
+		</method>
+		<method name="get_pinned_cells" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns a new array of the pinned [Vector2i] coordinates in insertion order. No more than 128 cells may be pinned at once.
 			</description>
 		</method>
 		<method name="is_cell_loaded" qualifiers="const">
@@ -111,6 +104,13 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Returns [code]true[/code] when the cell has a living instantiated scene.
+			</description>
+		</method>
+		<method name="is_cell_pinned" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] while a cell is pinned, even if it has no registered scene.
 			</description>
 		</method>
 		<method name="local_position_to_cell" qualifiers="const">
