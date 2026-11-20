@@ -46,6 +46,7 @@ const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
 const FieldWhetstone = preload("res://scripts/shared/field_whetstone.gd")
+const FieldArmorPlate = preload("res://scripts/shared/field_armor_plate.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
@@ -211,6 +212,8 @@ class Player:
 	var combat_energy: float = 100.0
 	var sharpened_weapon: String = "" # Prepared, owned melee weapon.
 	var sharpened_hits: int = 0 # Only confirmed ordinary infected contacts spend charges.
+	var plated_armor: String = "" # Protected armor ID, tied to carried equipped item.
+	var plated_hits: int = 0 # Three paid ordinary infected-melee mitigations.
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
 	var smoke_cooldown: float = 0.0 # Session-only temporary PvE obscurant.
@@ -383,6 +386,8 @@ func character_data(player: Player) -> Dictionary:
 	# Never write invalid bonuses for sold or lost equipment.
 	var sharp_valid: bool = FieldWhetstone.valid_state(
 		player.sharpened_weapon, player.sharpened_hits, player.inventory)
+	var plate_valid: bool = FieldArmorPlate.valid_state(
+		player.plated_armor, player.plated_hits, player.inventory)
 	return {
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
@@ -424,6 +429,8 @@ func character_data(player: Player) -> Dictionary:
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 		"sharpened_weapon": player.sharpened_weapon if sharp_valid else "",
 		"sharpened_hits": player.sharpened_hits if sharp_valid else 0,
+		"plated_armor": player.plated_armor if plate_valid else "",
+		"plated_hits": player.plated_hits if plate_valid else 0,
 	}
 
 
@@ -520,6 +527,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not FieldWhetstone.valid_state(data.get("sharpened_weapon", ""),
 			data.get("sharpened_hits", 0), parsed_bag["inventory"]):
+		return false
+	if not FieldArmorPlate.valid_state(data.get("plated_armor", ""),
+			data.get("plated_hits", 0), parsed_bag["inventory"]):
 		return false
 	if not (data.get("alive", true) is bool):
 		return false
@@ -635,6 +645,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.meal_tier = int(data.get("meal_tier", 0))
 	player.sharpened_weapon = str(data.get("sharpened_weapon", ""))
 	player.sharpened_hits = int(data.get("sharpened_hits", 0))
+	player.plated_armor = str(data.get("plated_armor", ""))
+	player.plated_hits = int(data.get("plated_hits", 0))
 	player.inventory = parsed_bag["inventory"]
 	player.stash = parsed_stash["inventory"]
 	player.kills = int(data.get("kills", 0))
@@ -737,6 +749,8 @@ func _spawn_player(player: Player) -> void:
 	player.threat_scan = {} # Death cannot preserve a scouting advantage.
 	player.sharpened_weapon = ""
 	player.sharpened_hits = 0
+	player.plated_armor = ""
+	player.plated_hits = 0
 	player.mounted = false
 	player.mount_cooldown = 0.0
 	if not kept_gear:
@@ -3194,6 +3208,21 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if not player.inventory.remove(item_id, 1):
 				return {"ok": false, "reason": "not_carried"}
 			player.bike_integrity = BikeIntegrity.after_repair(player.bike_integrity)
+		"armor_plate":
+			if item_id != FieldArmorPlate.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var current_armor: String = FieldArmorPlate.armor_equipped(player.inventory)
+			if current_armor.is_empty():
+				return {"ok": false, "reason": "need_armor"}
+			if player.attack_timer > 0.0 or player.skill_timer > 0.0 or (
+					player.combat_tag_until > time) or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			if player.plated_hits > 0 and player.plated_armor == current_armor:
+				return {"ok": false, "reason": "already_plated"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.plated_armor = current_armor
+			player.plated_hits = FieldArmorPlate.HITS
 		"whetstone":
 			if item_id != FieldWhetstone.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3301,7 +3330,11 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			_award(player, "medic", 6.0)
 		"weapon", "armor":
 			var previous_weapon: String = player.inventory.weapon
+			var previous_armor: String = player.inventory.armor
 			player.inventory.equip(item_id)
+			if previous_armor != player.inventory.armor:
+				player.plated_armor = ""
+				player.plated_hits = 0
 			if previous_weapon != player.inventory.weapon:
 				player.edge_coating_seconds = 0.0
 				player.edge_coating_weapon = ""
@@ -3321,6 +3354,9 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if item_id == FieldWhetstone.ITEM_ID:
 		return {"ok": true, "weapon": player.sharpened_weapon,
 			"hits": player.sharpened_hits}
+	if item_id == FieldArmorPlate.ITEM_ID:
+		return {"ok": true, "armor": player.plated_armor,
+			"hits": player.plated_hits}
 	if item_id == BikeGrip.ITEM_ID:
 		return {"ok": true, "tire_grip_seconds": player.tire_grip_seconds}
 	if item_id == BikeChain.ITEM_ID:
@@ -4534,6 +4570,8 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.action = {}
 	victim.sharpened_weapon = ""
 	victim.sharpened_hits = 0
+	victim.plated_armor = ""
+	victim.plated_hits = 0
 	victim.ruin_survey = {} # Dead scouts cannot retain private map beacons.
 	victim.dodge_immunity = 0.0
 	ParryRiposte.clear(victim)
@@ -4782,6 +4820,11 @@ func _tick_players(delta: float) -> void:
 				player.sharpened_hits, player.inventory):
 			player.sharpened_weapon = ""
 			player.sharpened_hits = 0
+			player.dirty_character = true
+		if not FieldArmorPlate.valid_state(player.plated_armor,
+				player.plated_hits, player.inventory):
+			player.plated_armor = ""
+			player.plated_hits = 0
 			player.dirty_character = true
 		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
 		player.party_aid_timer = maxf(0.0, player.party_aid_timer - maxf(0.0, delta))
@@ -5551,6 +5594,15 @@ func _tick_zombies(delta: float) -> void:
 				damage = _infected_damage_for(victim, damage)
 				if parried:
 					damage *= MeleeParry.DAMAGE_FACTOR
+				# Only ordinary confirmed claws consume this plate. Raid boss, acid
+				# and player attacks retain their original combat rules.
+				if not zombie.raid_boss and damage > 0.0 and FieldArmorPlate.active(
+						victim.plated_armor, victim.plated_hits, victim.inventory):
+					damage *= FieldArmorPlate.DAMAGE_FACTOR
+					victim.plated_hits -= 1
+					if victim.plated_hits == 0:
+						victim.plated_armor = ""
+					victim.dirty_character = true
 				var applied: float = _hurt_player(victim, damage)
 				# Only real carried armor protects from infected secondary wounds.
 				# PvP bleeding continues to follow its ordinary rules.
@@ -6153,6 +6205,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"sharpened_hits": player.sharpened_hits if FieldWhetstone.valid_state(
 				player.sharpened_weapon, player.sharpened_hits, player.inventory) else 0,
+			"plated_hits": player.plated_hits if FieldArmorPlate.valid_state(
+				player.plated_armor, player.plated_hits, player.inventory) else 0,
 			"guardian_cooldown": player.guardian_timer,
 			"warden_ward": WardenAura.active_for(player, players, parties, world),
 			"guardian_brace": player.guardian_brace,

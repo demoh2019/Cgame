@@ -2961,3 +2961,21 @@ version-1 character saves; older saves default to no preparation. A dedicated
 `game/tests/test_field_whetstone.gd` suite is included in `run_all.gd`.
 No native engine change is needed: this uses existing inventory, simulation
 and RPC infrastructure.
+
+## Field Armor Plate: defensive preparation for infected melee
+
+At the workbench, craft a **Field Armor Plate** from 1 Metal Bar T1,
+2 Cloth T1 and 2 Scrap. Equip owned body armor and press **Insert**
+(in either the offline or online client) while out of combat. A plate is
+consumed only on successful preparation. The next three confirmed ordinary
+infected melee/claw attacks have their **health damage reduced by 20%** after
+normal armor and parry mitigation. Dodges do not consume charges; PvP,
+spitter acid, raid-boss attacks and environmental hazards are unaffected.
+Existing infection, bleeding and fracture mechanics remain unchanged.
+
+The server binds all charges to an owned equipped armor item. Reapplying while
+prepared is rejected, and switching/loss of the armor, death or respawn clears
+the remaining charges. The exact armor ID and remaining hits are validated
+and saved with version-1 account data; older saves default to an empty plate.
+`game/tests/test_field_armor_plate.gd` exercises those invariants.
+No Godot/Cgame engine extension is needed.

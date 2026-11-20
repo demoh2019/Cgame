@@ -355,6 +355,11 @@ static func _build_items() -> void:
 	_add_recipe("thermal_wrap", "thermal_wrap", 1,
 		{"cloth_1": 1, "fiber_1": 2, "wood_1": 1}, "", 2.5)
 	# Craftable melee preparation uses existing Cgame script APIs.
+	# Reinforced survival armor for three confirmed ordinary infected melee strikes.
+	_add_item("field_armor_plate", {"name": "Field Armor Plate", "kind": "armor_plate",
+		"tier": 1, "stack": 5, "weight": 1.1, "value": 38})
+	_add_recipe("field_armor_plate", "field_armor_plate", 1,
+		{"bar_1": 1, "cloth_1": 2, "scrap": 2}, "workbench", 4.0)
 	_add_item("field_whetstone", {"name": "Salvaged Whetstone", "kind": "whetstone",
 		"tier": 1, "stack": 10, "weight": 0.35, "value": 18})
 	_add_recipe("field_whetstone", "field_whetstone", 1,
