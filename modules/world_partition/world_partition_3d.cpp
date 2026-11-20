@@ -36,6 +36,9 @@
 #include "core/object/class_db.h"
 #include "core/object/object.h"
 #include "scene/main/node.h"
+#include "scene/3d/physics/collision_object_3d.h"
+#include "scene/3d/physics/collision_shape_3d.h"
+#include "scene/3d/navigation_region_3d.h"
 
 #include <cstdint>
 
@@ -88,6 +91,24 @@ bool WorldPartition3D::_is_cell_layer_enabled(const Vector2i &p_cell) const {
 	return layer.is_empty() || is_layer_enabled(layer);
 }
 
+void WorldPartition3D::_notify_cell_activating(const Vector2i &p_cell, Node *p_instance) {
+	// Runs after scene instantiation, _ready() and gameplay state restoration.
+	// NavigationServer3D geometry still needs a physics tick before path queries.
+	if (p_instance != nullptr && p_instance->has_method(SNAME("streaming_activated"))) {
+		p_instance->call(SNAME("streaming_activated"), p_cell);
+	}
+	emit_signal(SNAME("cell_activated"), p_cell);
+}
+
+void WorldPartition3D::_notify_cell_deactivating(const Vector2i &p_cell, Node *p_instance) {
+	// queue_free() is deferred, so disable physics/navigation participation
+	// before the scene can remain alive until the end of the frame.
+	if (p_instance != nullptr && p_instance->has_method(SNAME("streaming_deactivating"))) {
+		p_instance->call(SNAME("streaming_deactivating"), p_cell);
+	}
+	emit_signal(SNAME("cell_deactivating"), p_cell);
+}
+
 void WorldPartition3D::_capture_cell_state(const Vector2i &p_cell, Node *p_instance) {
 	if (p_instance == nullptr || !p_instance->has_method(SNAME("capture_streaming_state"))) {
 		return;
@@ -126,6 +147,7 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 
 	Node *node = Object::cast_to<Node>(ObjectDB::get_instance(*id));
 	if (node != nullptr) {
+		_notify_cell_deactivating(p_cell, node);
 		_capture_cell_state(p_cell, node);
 		node->queue_free();
 	}
@@ -225,6 +247,7 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	active_cells.insert(p_cell, instance->get_instance_id());
 	// Restoring after _ready() allows scene scripts to create their visuals first.
 	_restore_cell_state(p_cell, instance);
+	_notify_cell_activating(p_cell, instance);
 	emit_signal(SNAME("cell_loaded"), p_cell);
 	return true;
 }
@@ -928,6 +951,45 @@ Array WorldPartition3D::get_loaded_cells() const {
 	return result;
 }
 
+Dictionary WorldPartition3D::get_cell_simulation_stats(const Vector2i &p_cell) const {
+	Dictionary counts;
+	counts["collision_objects"] = 0;
+	counts["collision_shapes"] = 0;
+	counts["navigation_regions"] = 0;
+
+	Node3D *root = get_cell_instance(p_cell);
+	if (root == nullptr) {
+		return counts;
+	}
+	// Count only on explicit request. Never walk the entire scene tree in the
+	// per-frame streamer: physics/nav instrumentation is a diagnostic tool.
+	int collision_objects = 0;
+	int collision_shapes = 0;
+	int navigation_regions = 0;
+	Vector<Node *> traversal;
+	traversal.push_back(root);
+	while (!traversal.is_empty()) {
+		Node *node = traversal[traversal.size() - 1];
+		traversal.remove_at(traversal.size() - 1);
+		if (Object::cast_to<CollisionObject3D>(node) != nullptr) {
+			collision_objects++;
+		}
+		if (Object::cast_to<CollisionShape3D>(node) != nullptr) {
+			collision_shapes++;
+		}
+		if (Object::cast_to<NavigationRegion3D>(node) != nullptr) {
+			navigation_regions++;
+		}
+		for (int i = 0; i < node->get_child_count(); i++) {
+			traversal.push_back(node->get_child(i));
+		}
+	}
+	counts["collision_objects"] = collision_objects;
+	counts["collision_shapes"] = collision_shapes;
+	counts["navigation_regions"] = navigation_regions;
+	return counts;
+}
+
 void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_cell_size", "size"), &WorldPartition3D::set_cell_size);
 	ClassDB::bind_method(D_METHOD("get_cell_size"), &WorldPartition3D::get_cell_size);
@@ -995,6 +1057,7 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cell_instance", "cell"), &WorldPartition3D::get_cell_instance);
 	ClassDB::bind_method(D_METHOD("get_loaded_cell_count"), &WorldPartition3D::get_loaded_cell_count);
 	ClassDB::bind_method(D_METHOD("get_loaded_cells"), &WorldPartition3D::get_loaded_cells);
+	ClassDB::bind_method(D_METHOD("get_cell_simulation_stats", "cell"), &WorldPartition3D::get_cell_simulation_stats);
 
 	ADD_GROUP("World Grid", "");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "1,4096,1,or_greater,suffix:m"), "set_cell_size", "get_cell_size");
@@ -1013,6 +1076,8 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unloads_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_unloads_per_frame", "get_max_unloads_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_requests", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_concurrent_requests", "get_max_concurrent_requests");
 
+	ADD_SIGNAL(MethodInfo("cell_activated", PropertyInfo(Variant::VECTOR2I, "cell")));
+	ADD_SIGNAL(MethodInfo("cell_deactivating", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_unloaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_state_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::DICTIONARY, "state")));

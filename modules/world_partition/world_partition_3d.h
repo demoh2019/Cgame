@@ -74,6 +74,8 @@ class WorldPartition3D : public Node3D {
 	bool _has_residency_claim(const Vector2i &p_cell) const;
 	String _get_scene_path(const Vector2i &p_cell) const;
 	bool _is_cell_layer_enabled(const Vector2i &p_cell) const;
+	void _notify_cell_activating(const Vector2i &p_cell, Node *p_instance);
+	void _notify_cell_deactivating(const Vector2i &p_cell, Node *p_instance);
 	void _capture_cell_state(const Vector2i &p_cell, Node *p_instance);
 	void _restore_cell_state(const Vector2i &p_cell, Node *p_instance);
 	void _unload_cell(const Vector2i &p_cell);
@@ -171,6 +173,7 @@ public:
 	Node3D *get_cell_instance(const Vector2i &p_cell) const;
 	int get_loaded_cell_count() const;
 	Array get_loaded_cells() const;
+	Dictionary get_cell_simulation_stats(const Vector2i &p_cell) const;
 
 	~WorldPartition3D();
 };
