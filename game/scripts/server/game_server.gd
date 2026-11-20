@@ -42,6 +42,7 @@ const CaravanEscortRewards = preload("res://scripts/shared/caravan_escort_reward
 const Skills = preload("res://scripts/shared/skills.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
+const StashBulk = preload("res://scripts/shared/stash_bulk.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
@@ -2536,6 +2537,26 @@ func cmd_stash(peer_id: int, item_id: String, count: int, deposit: bool) -> Dict
 	player.dirty_stash = true
 	player.dirty_character = true
 	return {"ok": true, "item": item_id, "count": count, "deposit": deposit}
+
+
+## One server-authorized action banks raw and refined crafting inputs.
+## The client selects no item IDs, quantities or receipt; failed operations
+## do not modify either inventory or the account-bound protected bank.
+func cmd_stash_bulk(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var at := Vector2(player.position.x, player.position.z)
+	if not at.is_finite() or at.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+		return {"ok": false, "reason": "no_station"}
+	var result: Dictionary = StashBulk.deposit(player.inventory, player.stash)
+	if not bool(result.get("ok", false)):
+		return result
+	player.inventory.unequip_missing()
+	player.dirty_inventory = true
+	player.dirty_stash = true
+	player.dirty_character = true
+	return result
 
 
 ## Validate and build entirely on the authority. Clients only request a location.

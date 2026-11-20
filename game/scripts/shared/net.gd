@@ -534,6 +534,13 @@ func c_dismantle(structure_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_stash_bulk() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "stash_bulk", sim.cmd_stash_bulk(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_stash(item_id: String, count: int, deposit: bool) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

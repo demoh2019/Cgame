@@ -292,6 +292,10 @@ func use_item(item_id: String) -> void:
 	net.c_use.rpc_id(1, item_id)
 
 
+func deposit_materials() -> void:
+	net.c_stash_bulk.rpc_id(1)
+
+
 func move_stash(item_id: String, count: int, deposit: bool) -> void:
 	net.c_stash.rpc_id(1, item_id, count, deposit)
 

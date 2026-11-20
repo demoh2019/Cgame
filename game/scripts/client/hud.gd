@@ -412,6 +412,12 @@ func _build() -> void:
 	_stash_grid = GridContainer.new()
 	_stash_grid.columns = 4
 	stash_scroll.add_child(_stash_grid)
+	var bulk_button := Button.new()
+	bulk_button.name = "DepositAllMaterials"
+	bulk_button.text = "BANK ALL: resources + crafting materials"
+	bulk_button.tooltip_text = "At the hub workbench. Moves only raw/refined resources into your protected stash. Food, water, medicine, silver, gear and tools remain carried. Partial deposits are allowed if the bank is nearly full."
+	bulk_button.pressed.connect(func() -> void: client.deposit_materials())
+	inventory_box.add_child(bulk_button)
 
 	var flare_button := Button.new()
 	flare_button.name = "UseSignalFlare"
@@ -1079,7 +1085,8 @@ func _arrange_inventory_window() -> void:
 	left.add_child(hint)
 	var stash_scroll: Control = _stash_grid.get_parent()
 	var stash_title: Control = box.get_child(stash_scroll.get_index() - 1)
-	for moved in [_inventory_grid, stash_title, stash_scroll]:
+	for moved in [_inventory_grid, stash_title, stash_scroll,
+			box.get_node("DepositAllMaterials")]:
 		moved.get_parent().remove_child(moved)
 		left.add_child(moved)
 	(stash_title as Label).text = "PROTECTED STASH  (survives death; click to take one at a workbench)"
@@ -1839,6 +1846,23 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				"no_space": "Vendor: backpack slots or stacks are full",
 			}
 			say(str(messages.get(str(data.get("reason", "")), "Vendor: rejected")))
+		return
+	if kind == "stash_bulk":
+		if bool(data.get("ok", false)):
+			var moved_items: Dictionary = data.get("moved", {})
+			say("Banked %d materials (%d types)%s." % [
+				int(data.get("total", 0)), moved_items.size(),
+				"; %d units still carried (bank full)" % int(data.get("remaining", 0))
+					if bool(data.get("partial", false)) else ""])
+		else:
+			var bulk_errors := {
+				"dead": "Stash: cannot bank while dead.",
+				"no_station": "Stash: return to the hub workbench.",
+				"no_materials": "Stash: no raw or refined materials to store.",
+				"no_space": "Stash: protected bank is full.",
+				"transaction_failed": "Stash: transaction cancelled without moving items.",
+			}
+			say(str(bulk_errors.get(str(data.get("reason", "")), "Stash: deposit rejected.")))
 		return
 	if kind != "stash":
 		return
