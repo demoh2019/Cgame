@@ -239,6 +239,13 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	_fog_profile = CinematicFog.profile(
 		int(settings.get("quality_level", 1)), str(settings.get("rendering_method", "gl_compatibility")))
 	CinematicFog.apply_profile(environment, sun, _fog_profile)
+	# HDR AgX on desktop high tiers, ACES as low-end and mobile fallback.
+	var use_agx: bool = (
+		str(settings.get("rendering_method", "gl_compatibility")) == "forward_plus"
+		and _shadow_filter_level >= 2
+	)
+	environment.tonemap_mode = Environment.TONE_MAPPER_AGX if use_agx else Environment.TONE_MAPPER_ACES
+	environment.tonemap_exposure = 1.28 if use_agx else 0.82
 	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_strength",
 		CloudShadowLut.shadow_strength(light_level, storm, _cloud_shadows_allowed))
 	_sky_refresh_interval = clampf(float(settings.get("sky_refresh_interval", 0.4)), 0.12, 2.0)
@@ -250,6 +257,8 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	# Sky haze is cached with the radiance map; no per-frame shader updates.
 	sky_material.set_shader_parameter("aerosol_scattering_strength",
 		clampf(float(settings.get("sky_scattering_strength", 0.0)), 0.0, 1.0))
+	sky_material.set_shader_parameter("spectral_scattering_strength",
+		clampf(float(settings.get("sky_spectral_scattering", 0.0)), 0.0, 1.0))
 	# Tiny lunar surface shading only for the high-end graphics profiles.
 	sky_material.set_shader_parameter("moon_detail_strength",
 		clampf(float(settings.get("moon_detail_strength", 0.0)), 0.0, 1.0))
@@ -276,5 +285,7 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 			sky.radiance_size = Sky.RADIANCE_SIZE_32
 		128:
 			sky.radiance_size = Sky.RADIANCE_SIZE_128
+		256:
+			sky.radiance_size = Sky.RADIANCE_SIZE_256
 		_:
 			sky.radiance_size = Sky.RADIANCE_SIZE_64

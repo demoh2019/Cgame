@@ -61,6 +61,7 @@ const SUITES := [
 	"res://tests/test_sky_lighting_budget.gd",
 	"res://tests/test_sky_moon_lighting.gd",
 	"res://tests/test_sky_aerosol_scattering.gd",
+	"res://tests/test_sky_spectral_scattering.gd",
 	"res://tests/test_procedural_moon.gd",
 	"res://tests/test_sky_cirrus_lut.gd",
 	"res://tests/test_grass_lod.gd",

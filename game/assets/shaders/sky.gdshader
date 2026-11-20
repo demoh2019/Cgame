@@ -26,6 +26,8 @@ uniform vec3 sun_color : source_color = vec3(1.0, 0.95, 0.82);
 uniform bool use_cached_radiance = false;
 // Natural sunlight scattering in thin atmospheric dust; no extra textures.
 uniform float aerosol_scattering_strength = 0.0;
+// Optional wavelength-dependent scattering for High/Ultra.
+uniform float spectral_scattering_strength = 0.0;
 // Moon phases reuse the existing night directional light and sky cubemap.
 uniform float moon_phase = 0.5;
 uniform float moon_detail_strength = 0.0;
@@ -172,6 +174,26 @@ void sky() {
 			float atmospheric_visibility = daylight * (1.0 - storm * 0.88);
 			color += aerosol_color * sunward * horizon_air * 0.42
 				* atmospheric_visibility * aerosol_scattering_strength;
+		}
+		// Wavelength-dependent extinction adds an airy blue horizon at noon and
+		// a gently reddened long optical path at sunset. It runs without extra
+		// textures, ray marches, built-in TIME or screen-space passes.
+		if (spectral_scattering_strength > 0.001 && daylight > 0.025
+				&& up > -0.06 && storm < 0.98) {
+			float horizon_airmass = exp(-max(up, 0.0) * 5.0);
+			float solar_angle = clamp(facing, -1.0, 1.0);
+			float rayleigh_phase = 0.75 * (1.0 + solar_angle * solar_angle);
+			float warm_sun = dusk * smoothstep(0.06, 0.35, daylight);
+			float air_path = horizon_airmass * (0.28 + 1.20 * warm_sun);
+			vec3 transmittance = exp(-vec3(0.18, 0.37, 0.79) * air_path);
+			vec3 blue_airlight = vec3(0.23, 0.43, 0.80) * (0.085 * rayleigh_phase);
+			vec3 sunset_airlight = vec3(0.92, 0.35, 0.10)
+				* (0.18 * warm_sun * smoothstep(-0.2, 0.75, solar_angle));
+			float horizon_fade = smoothstep(-0.06, 0.12, up);
+			float visibility = daylight * (1.0 - storm * 0.88)
+				* spectral_scattering_strength * horizon_fade;
+			color = mix(color, color * transmittance
+				+ (blue_airlight + sunset_airlight) * horizon_airmass, visibility);
 		}
 		// The same cached cloud field shades distant terrain and the upper sky.
 		// Do not use the camera position or built-in TIME: Godot would refresh
