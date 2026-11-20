@@ -33,7 +33,7 @@ func run(t) -> void:
 	t.check(party.accept(11, 0.0).get("ok", false), "ally joins")
 	t.eq(party.set_loot_mode(11, "round_robin").get("reason", ""),
 		"leader_only", "nonleaders cannot silently change loot distribution")
-	t.eq(party.set_loot_mode(10, "need_greed").get("reason", ""),
+	t.eq(party.set_loot_mode(10, "master_loot").get("reason", ""),
 		"invalid_mode", "arbitrary client mode values are rejected")
 	t.eq(party.loot_mode_for(11), "free", "default stays backwards compatible")
 	t.check(party.set_loot_mode(10, "round_robin").get("ok", false),
