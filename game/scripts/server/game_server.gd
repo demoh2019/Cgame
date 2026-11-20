@@ -78,6 +78,7 @@ const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
 const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
 const RaidRoundRobin = preload("res://scripts/shared/raid_round_robin.gd")
+const RaidNeedGreed = preload("res://scripts/shared/raid_need_greed.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
@@ -1587,6 +1588,28 @@ func cmd_party_loot_mode(peer_id: int, mode: String) -> Dictionary:
 	if leader == null or not _alive(leader):
 		return {"ok": false, "reason": "dead"}
 	return parties.set_loot_mode(peer_id, mode)
+
+
+## Every ballot is validated against a frozen server entitlement list.
+## Voters must be nearby living survivors; no client-provided identity,
+## loot contents, roll value, winner or deadline is accepted.
+func cmd_raid_vote(peer_id: int, bag_id: int, choice: String) -> Dictionary:
+	var voter: Player = players.get(peer_id)
+	if voter == null or not _alive(voter):
+		return {"ok": false, "reason": "dead"}
+	var bag: Dictionary = bags.get(bag_id, {})
+	if bag.is_empty() or not bag.has("raid_need_greed"):
+		return {"ok": false, "reason": "no_vote"}
+	var point := Vector2(float(bag["x"]), float(bag["z"]))
+	var voter_at := Vector2(voter.position.x, voter.position.z)
+	if not voter.position.is_finite() or voter_at.distance_to(point) > Party.ASSIST_RANGE:
+		return {"ok": false, "reason": "too_far"}
+	if not RaidLoot.can_open(bag, voter, time):
+		return {"ok": false, "reason": "raid_reserved"}
+	var result: Dictionary = RaidNeedGreed.vote(bag, voter, choice, time)
+	if bool(result.get("ok", false)):
+		result["bag"] = bag_id
+	return result
 
 
 func _party_state_for(peer_id: int) -> Dictionary:
@@ -3662,6 +3685,27 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 				bags.erase(entity_id)
 			return {"ok": true, "complete": complete, "item": item_id,
 				"quantity": received, "round_robin": true}
+		# Need/Greed freezes only the core trophy; ordinary supplies in the
+		# same raid bag are always available to eligible scavengers.
+		var protected: Dictionary = RaidNeedGreed.protection(bag, player, time)
+		if bool(protected.get("locked", false)):
+			var supplies: Dictionary = (bag["items"] as Dictionary).duplicate()
+			supplies.erase(RaidNeedGreed.ITEM_ID)
+			if supplies.is_empty():
+				return {"ok": false, "reason": str(protected["reason"]),
+					"remaining": float(protected.get("remaining", 0.0))}
+			var before_supplies: int = _item_total(supplies)
+			var supply_left: Dictionary = _give_items(player, supplies)
+			if _item_total(supply_left) >= before_supplies:
+				return {"ok": false, "reason": "inventory_full"}
+			for supply_id in supplies:
+				if supply_left.has(supply_id):
+					bag["items"][supply_id] = int(supply_left[supply_id])
+				else:
+					bag["items"].erase(supply_id)
+			_award(player, "scavenging", 3.0)
+			return {"ok": true, "complete": false, "need_greed": true,
+				"core_locked": true}
 		var taken_before: int = _item_total(bag["items"])
 		var left := _give_items(player, bag["items"])
 		if _item_total(left) < taken_before:
@@ -4158,6 +4202,8 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		RaidLoot.reserve(bags[loot_bag_id], eligible, time)
 		if parties.loot_mode_for(killer.id) == "round_robin" and eligible.size() > 1:
 			RaidRoundRobin.activate(bags[loot_bag_id], eligible, zombie.id, time)
+		elif parties.loot_mode_for(killer.id) == "need_greed" and eligible.size() > 1:
+			RaidNeedGreed.activate(bags[loot_bag_id], eligible, zombie.id, time)
 	if spawn_state.has(zombie.spawn_id):
 		spawn_state[zombie.spawn_id] = {"zombie": -1, "next": time + (240.0 if zone < 2 else 360.0)}
 	# The client must learn when ALL original guards are down. A per-cache
@@ -5690,6 +5736,12 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					bag_view["raid_your_turn"] = bool(turn["your_turn"])
 					bag_view["raid_turn_seconds"] = float(turn["seconds"])
 					bag_view["can_loot"] = bool(bag_view["can_loot"]) and bool(turn["your_turn"])
+				var ballot: Dictionary = RaidNeedGreed.visible(bag, player, time)
+				if not ballot.is_empty():
+					bag_view["raid_need_greed"] = ballot
+				var core_lock: Dictionary = RaidNeedGreed.protection(bag, player, time)
+				if bool(core_lock.get("locked", false)) and bag["items"].size() == 1:
+					bag_view["can_loot"] = false
 			bag_view["horde_cache"] = bool(bag.get("horde_cache", false))
 			bag_view["supply_drop"] = bool(bag.get("supply_drop", false))
 			bag_view["corpse_scent"] = CorpseScent.active(bag, time)
