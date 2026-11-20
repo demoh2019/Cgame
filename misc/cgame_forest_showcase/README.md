@@ -5,11 +5,13 @@ This directory is a **standalone playable reference project**, not a replacement
 ## Features integrated into this demo
 
 - Deterministic rolling terrain with vertex normals derived from an analytic heightfield and vertex-colored PBR material.
+- **Seam-resistant LOD:** native `detail_hysteresis_cells = 1` means an already-full-detail forest cell stays full for an extra ring before demotion; the original inner radius remains the promotion threshold. This reduces rapid foliage/collider reconstruction when the player moves back and forth near boundaries.
 - **Distance LOD forest:** with a 2-cell streaming radius, the inner 1-cell radius uses 54 trees, 225 grass tufts, 9 rocks and local obstacle colliders per cell, while outer cells use 16 deterministic tree silhouettes with cheaper foliage meshes and no per-tree physics or shadows. Pinned home hubs stay full-detail even when far away. **F4** toggles the native detail system and the HUD counts distant cells.
 - **Predictive scene streaming:** Aurora Forest feeds the first-person character's velocity into the native streamer. A bounded 2.5-second / 28-meter lookahead requests one upcoming cell before crossing its border, after visible and pinned cells. The HUD shows the target and **F3** toggles this feature for A/B comparison.
 - **Persistent home clearing:** native `pin_cell(Vector2i.ZERO)` retains a home hub even outside the unload radius, with a low-cost emissive beacon, a shadow-free OmniLight and a pinned-cell HUD counter. Removing a pin returns the cell to ordinary unload behavior (verified by the streaming smoke test).
 - **WorldPartition3D streaming:** 16 registered 32 m × 32 m cells reference the **same** packed forest scene; the engine shares the threaded resource request, instantiates around the camera (one cell/frame) and unloads distant cells with hysteresis. The fork also exposes an `observer_cell_changed` event for region-aware gameplay; the demo displays the current cell without polling player coordinates.
 - **Chunked GPU instancing:** each loaded cell generates up to 54 trees, 225 animated grass tufts, and 9 rocks using five or fewer MultiMesh draw groups, instead of one Node3D per instance. At most 3,600 grass tufts exist if all 16 cells are loaded.
+- **Day/night and weather:** a 16-minute 24-hour clock drives directional sunlight, AgX sky colors, ambient energy, fog and cloud coverage twice per second. Clear, overcast and mist presets; nighttime procedural north-facing aurora ribbons are rendered without a `TIME`-dependent sky shader. F6 cycles weather, F7 pauses time and F8 jumps 3 in-game hours. Time and weather are saved in backward-compatible v1 save files.
 - Atmospheric procedural sky with the DirectionalLight3D sun, stable ambient sky radiance, cinematic AgX tone mapping, optional SSAO, SSIL, volumetric fog, and glowing collectible crystals.
 - **First-person physics:** a capsule `CharacterBody3D` controller with frame-rate-independent gravity, grounded and air acceleration, sprinting, jumping, slope snapping and mouse look; collision from the terrain's generated triangle mesh plus dynamically streamed tree-trunk and boulder primitives.
 - Exploration, eight collectible forest relics, HUD with loaded cell count, and interactive high/performance profiles.
@@ -22,9 +24,10 @@ This directory is a **standalone playable reference project**, not a replacement
 2. Open this **folder**, `misc/cgame_forest_showcase`, as a separate Godot project with that Cgame editor executable.
 3. Use the Forward+ rendering backend and click Play. The project uses FSR2 and expects the selected rendering backend to support it.
 4. Click inside the window to capture the mouse. **WASD / arrow keys** move, **mouse** looks around, **Shift** sprints, **Space** jumps, **E** picks up nearby crystals, **F5/F9** save/load, **Esc** releases the mouse.
-5. Press **F4** to enable/disable near/far cell detail and compare GPU cost, CPU physics and memory use. When disabled, all loaded cells return to full detail under the 2-transitions/frame budget.
-6. Press **F3** to enable/disable velocity-driven prefetch. In the HUD, an upcoming coordinate means a distinct next cell; `—` means no distinct forecast, and `OFF` means the feature is disabled.
-7. Press **F1** for the cinematic profile (SSAO, SSIL, volumetric fog and all grass), **F2** for the performance profile (less grass, no SSAO/SSIL/volumetric fog). GPU-budget scaling runs in both.
+5. Press **F6** to cycle clear/cloudy/mist, **F7** to pause/resume the day/night clock and **F8** to jump ahead 3 in-game hours. Changes are shown in the HUD and persist across save/load (F5/F9).
+6. Press **F4** to enable/disable near/far cell detail and compare GPU cost, CPU physics and memory use. When disabled, all loaded cells return to full detail under the 2-transitions/frame budget.
+7. Press **F3** to enable/disable velocity-driven prefetch. In the HUD, an upcoming coordinate means a distinct next cell; `—` means no distinct forecast, and `OFF` means the feature is disabled.
+8. Press **F1** for the cinematic profile (SSAO, SSIL, volumetric fog and all grass), **F2** for the performance profile (less grass, no SSAO/SSIL/volumetric fog). GPU-budget scaling runs in both.
 
 ## Technical constraints
 
@@ -41,9 +44,10 @@ With a **compiled Cgame binary** (the generic upstream editor lacks the fork's n
 /path/to/cgame --headless --path misc/cgame_forest_showcase --script res://tests/smoke_saves.gd
 /path/to/cgame --headless --path misc/cgame_forest_showcase --script res://tests/smoke_physics.gd
 /path/to/cgame --headless --path misc/cgame_forest_showcase --script res://tests/smoke_lod.gd
+/path/to/cgame --headless --path misc/cgame_forest_showcase --script res://tests/smoke_atmosphere.gd
 ```
 
-`smoke_streaming.gd` checks motion prefetch before the observer crosses a cell boundary, persistent home-cell pinning and unpinning, async shared-cell load/unload/reload, deterministic per-cell instance transforms, negative grid coordinates, streaming obstacle collision and performance density. `smoke_saves.gd` uses a separate throwaway save path, checking round-trip, deduplication, invalid JSON and version rejection. `smoke_lod.gd` verifies actual near/distant foliage generation, stable transforms across tier switches, pinned hubs retaining full detail, and switching LOD off. `smoke_physics.gd` instantiates the real scene, queries static terrain collision and checks that a spawned character falls onto the terrain; it also checks that obstacles are constructed in streamed cells. These tests are **added, not claimed to have been executed**.
+`smoke_streaming.gd` checks motion prefetch before the observer crosses a cell boundary, persistent home-cell pinning and unpinning, async shared-cell load/unload/reload, deterministic per-cell instance transforms, negative grid coordinates, streaming obstacle collision and performance density. `smoke_saves.gd` uses a separate throwaway save path, checking round-trip, deduplication, invalid JSON and version rejection. `smoke_lod.gd` verifies actual near/distant foliage generation, stable transforms across tier switches, pinned hubs retaining full detail, disabling LOD and LOD hysteresis at grid boundaries. `smoke_atmosphere.gd` checks night aurora, sunlight, weather presets, clock wrap-around, pausing, shader uniform updates and the 0.5s sky-work throttle. `smoke_physics.gd` instantiates the real scene, queries static terrain collision and checks that a spawned character falls onto the terrain; it also checks that obstacles are constructed in streamed cells. These tests are **added, not claimed to have been executed**.
 
 ## Verification checklist
 
@@ -51,12 +55,14 @@ With a **compiled Cgame binary** (the generic upstream editor lacks the fork's n
 - [ ] Demo imports and scene starts with no errors on Cgame's Forward+ renderer.
 - [ ] Sky shader compiles on Vulkan and Metal (note: `sky()` has no early `return`).
 - [ ] Wind, grass instancing and sky render correctly on Apple M1.
+- [ ] Check F6/F7/F8 day-night and weather changes in Forward+/Metal, including the sky shader and light probes; compare radiance reprocessing cost at the 0.5-second update interval and frame spikes.
+- [ ] Check old v1 save data still loads, and that atmosphere state returns after an explicit save/load.
 - [ ] Confirm F4 changes distant tree count and removes/restores distant grass and colliders without duplicates; profile FPS, GPU milliseconds, CPU frame time and VRAM on Apple M1/Metal.
 - [ ] Confirm F3 toggles prediction and run a repeated sprint path while comparing scene load delay, FPS and memory usage in both modes.
 - [ ] The (0,0) home beacon remains loaded beyond the unload radius; unpinning it allows unloading, and pinning cannot exceed 128 cells.
 - [ ] Walking through cell boundaries updates the loaded-cell HUD, preserves terrain/foliage alignment, and unloads/reloads cells without flicker.
 - [ ] Verify capsule grounding, jumping, collision against trunks/rocks, world bounds, camera position and save/load after teleporting.
-- [ ] Run all four headless smoke scripts on the compiled fork.
+- [ ] Run all five headless smoke scripts on the compiled fork.
 - [ ] Picking up eight crystals updates the HUD, the savegame persists after reopening, and profile switching changes measured GPU time.
 - [ ] Confirm that GPU timings are available and adaptive resolution reacts to sustained load.
 - [ ] Record frame time, GPU time, FPS, and VRAM in F1 and F2 profiles, using the same camera path.
