@@ -134,6 +134,8 @@ public:
 	bool swap_instance_data(int p_first, int p_second);
 	// Swap-remove from visible prefix while preserving full per-instance payload.
 	bool remove_visible_instance(int p_instance);
+	// Atomically validate a set of visible indices, then swap-remove in descending order.
+	int remove_visible_instances(const PackedInt32Array &p_instances);
 	// Swap a hidden slot into the end of the visible prefix and reveal it.
 	bool activate_hidden_instance(int p_hidden_instance);
 
