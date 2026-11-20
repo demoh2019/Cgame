@@ -448,6 +448,10 @@ static func _build_items() -> void:
 		{"bar_2": 1, "cloth_2": 2, "scrap": 2}, "workbench", 5.0)
 	# Durable camp craft: owners may anchor one live field tarp once, never a permanent base.
 	# Shared field-fire survival: paid storm-resistant fuel, without permanent heating.
+	_add_item("camp_alarm_kit", {"name": "Camp Sentry Alarm Kit",
+		"kind": "material", "tier": 1, "stack": 5, "weight": 0.65, "value": 32})
+	_add_recipe("camp_alarm_kit", "camp_alarm_kit", 1,
+		{"wood_1": 1, "fiber_1": 2, "scrap": 2}, "", 3.0)
 	_add_item("stormproof_briquette", {"name": "Stormproof Ember Briquette",
 		"kind": "fire_briquette", "tier": 1, "stack": 5, "weight": 0.65, "value": 29})
 	_add_recipe("stormproof_briquette", "stormproof_briquette", 1,

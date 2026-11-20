@@ -330,6 +330,17 @@ func _build() -> void:
 		var direction := Vector2(sin(client.yaw), cos(client.yaw))
 		client.light_campfire(Vector2(pos.x, pos.z) + direction * 2.8))
 	inventory_box.add_child(campfire_button)
+	var alarm_button := Button.new()
+	alarm_button.name = "ArmCampAlarm"
+	alarm_button.text = "Arm camp sentry alarm (Shift+O)"
+	alarm_button.tooltip_text = "Uses 1 field-crafted Camp Sentry Alarm Kit at a live fire. Detects infected within 21m for up to 3 minutes; private alerts at most every 24s."
+	alarm_button.pressed.connect(func() -> void:
+		var id: int = client.nearest_campfire(client.display_position())
+		if id < 0:
+			say("Camp alarm: stand within 3m of a live campfire.")
+		else:
+			client.arm_camp_alarm(id))
+	inventory_box.add_child(alarm_button)
 	var pitch_button := Button.new()
 	pitch_button.name = "PitchTarp"
 	pitch_button.text = "Pitch field tarp (2 cloth T1, 2 fiber T1, 1 plank T1)"
@@ -2191,6 +2202,9 @@ func _on_event(event: Dictionary) -> void:
 		"restoration_pulse":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Restoration pulse: %d ally%s treated." % [int(event.get("count", 0)), "" if int(event.get("count", 0)) == 1 else "s"])
+		"camp_alarm":
+			banner("CAMP ALERT: %d INFECTED NEAR YOUR FIRE" % int(
+				event.get("count", 0)), Color(1.0, 0.62, 0.25))
 		"snare_triggered":
 			say("A snare caught an infected.")
 		"barricade_broken":
@@ -3045,6 +3059,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Field tarp packed; materials are not refunded.")
 		else:
 			say("Pack tarp: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "camp_alarm_arm":
+		if bool(data.get("ok", false)):
+			say("Camp sentry armed for %d seconds; detects infected within %dm." % [
+				int(data.get("seconds", 0)), int(data.get("radius", 21))])
+		else:
+			say("Camp alarm: " + str(data.get("reason", "rejected")) + " (kit not spent).")
 		return
 	if kind == "campfire":
 		if bool(data.get("ok", false)):

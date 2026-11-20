@@ -683,6 +683,11 @@ func nearest_campfire(point: Vector3, radius: float = 3.2) -> int:
 	return closest
 
 
+func arm_camp_alarm(id: int) -> void:
+	if id >= 0:
+		net.c_arm_camp_alarm.rpc_id(1, id)
+
+
 func refuel_campfire(id: int) -> void:
 	if id >= 0:
 		net.c_refuel_campfire.rpc_id(1, id)
