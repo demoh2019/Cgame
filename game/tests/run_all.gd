@@ -5,6 +5,7 @@ extends SceneTree
 const TestCase = preload("res://tests/test_case.gd")
 const SUITES := [
 	"res://tests/test_physics_parity.gd",
+	"res://tests/test_radial_blast_shielding.gd",
 	"res://tests/test_world_gen.gd",
 	"res://tests/test_world_sites.gd",
 	"res://tests/test_model_catalog.gd",
