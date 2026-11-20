@@ -1073,6 +1073,9 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"guardian_taunt":
 			return _is_nearby(event, peer)
+		"guardian_retribution":
+			# The earned counterstrike and enemy ID are private to its guardian.
+			return event.get("peer", -1) == peer
 		"guardian_intercept":
 			# Share only with the protected ally and the real guardian.
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
