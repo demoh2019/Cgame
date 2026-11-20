@@ -124,3 +124,19 @@ Like Unity HDRP alpha clipping, the animated cutout foliage material now has a s
 **Important:** Coverage is enabled only when the actual viewport MSAA is active on a renderer that supports alpha-to-coverage (Forward+ or Vulkan Mobile). With the current graphics profiles, manually selected High/Ultra on Forward+ use 2x/4x MSAA, while Forward+ FSR2, dynamic resolution, and GL Compatibility continue to use the original efficient cutout shader. Runtime quality changes swap shared shader references on the already-cached meshes; imported materials, instances, collision and network state are untouched.
 
 Check moving foliage against bright sky and strong directional backlight at 720p and 1080p. Look for reduced stair-stepping/shimmering, preserved cutout density (no see-through thinning), stable distant mip levels and unchanged shadow rendering. Actual GPU cost must be measured; no FPS improvement is implied by the shader change.
+
+
+## Sparse settlement-paving shading
+
+The textured ground retains all **13 authored biome, rock and ruined-city layers**, weather-dependent puddles and their original moss-covered paving transitions. Its former path evaluated three-octave reclaiming vegetation noise for **every paved site in every covered chunk**, even outside the site's footprint. The updated path now:
+
+- Checks each possible paved site against a conservative squared-distance bound before calculating distance, eliminating off-site square roots and procedural noise.
+- Skips the moss noise if the distorted paving weight is already zero.
+- Computes the exact same moss field **once per pixel**, then reuses it for up to four overlapping sites; no new textures or extra draw passes.
+- Keeps identical original paving noise frequencies, blend weights and site textures at valid sample locations.
+
+The cutoff is mathematically safe: the three-octave `fbm` weight sum limits `mid` to 0..0.875; the original border distortion is `(mid - 0.5) * 0.35`, so paving weight must be zero at normalized radius >= **1.175**. Other terrain texture LOD, triplanar normals, cloud shadows and quality profiles remain unchanged.
+
+**Visual and performance QA:** compare identical camera paths through ruined towns and alongside remote bunkers on each quality preset. Watch for discontinuities around the 1.175-radius bound, especially where settlement circles overlap. Measure p50/p95/p99 GPU time and shader instructions on a representative urban world chunk; this change reduces redundant work but does not establish any particular measured FPS gain.
+
+Related: `game/tests/test_terrain_shader_lod.gd` checks the early rejection, cached noise, and conservative geometric bounds.
