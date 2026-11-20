@@ -19,7 +19,13 @@ var _sfx_bus := -1
 var _sfx_lowpass := -1
 var _rain: AudioStreamPlayer
 var _wind: AudioStreamPlayer
-var _voices: Array = [] # {"player", "name", "audibility", "born"} for the voice limiter.
+var _voices: Array = [] # Active 3D sources, including bounded obstacle probes.
+# Unreal-style sound obstruction checks: only static geometry on layer 1,
+# no per-frame physics casts for every active sound.
+const OBSTRUCTION_RAYS_PER_TICK := 3
+const OBSTRUCTION_RECHECK_SECONDS := 0.25
+const OBSTRUCTION_GEOMETRY_MASK := 1
+var _obstruction_clock := 0.0
 var _listener := Vector3.ZERO
 var _ground := Callable()
 var _humidity := 0.0
@@ -219,12 +225,69 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 		return
 	add_child(player)
 	player.global_position = position
-	var record := {"player": player, "name": sound_name, "audibility": loudness, "born": now}
+	var record := {
+		"player": player, "name": sound_name, "audibility": loudness, "born": now,
+		"terrain_blocked": occluded,
+		"obstruction": 0.0,
+		"target_obstruction": 1.0 if occluded else 0.0,
+		"next_obstruction_check": 0.0,
+		"original_db": player.volume_db,
+		"original_cutoff": player.attenuation_filter_cutoff_hz
+	}
 	_voices.append(record)
 	player.finished.connect(func() -> void:
 		_voices.erase(record)
 		player.queue_free())
 	player.play()
+
+
+## Scene physics is read only during physics ticks. This detects wooden
+## barricades, ruins and dungeon walls in addition to the existing terrain
+## heightfield obstruction, without querying on every audio mixer update.
+## The native engine handles the actual volume/low-pass response. Stock
+## Godot receives the identical effect via its standard player properties.
+func _physics_process(delta: float) -> void:
+	if not enabled or _voices.is_empty() or not is_finite(delta) or delta <= 0.0:
+		return
+	_obstruction_clock += minf(delta, 0.1)
+	var viewport: Viewport = get_viewport()
+	var world: World3D = viewport.world_3d if viewport != null else null
+	var state: PhysicsDirectSpaceState3D = world.direct_space_state if world != null else null
+	var rays: int = 0
+	for index in _voices.size():
+		var record: Dictionary = _voices[index]
+		var player: AudioStreamPlayer3D = record.get("player") as AudioStreamPlayer3D
+		if not is_instance_valid(player) or not player.is_playing():
+			continue
+		var target: float = float(record.get("target_obstruction", 0.0))
+		if state != null and rays < OBSTRUCTION_RAYS_PER_TICK \
+				and _obstruction_clock >= float(record.get("next_obstruction_check", 0.0)):
+			var listener_eye: Vector3 = _listener + Vector3(0.0, 1.6, 0.0)
+			var source_eye: Vector3 = player.global_position + Vector3(0.0, 0.5, 0.0)
+			# Include world obstacles and barriers, not Area3D triggers.
+			# Impacts very near the source are the source's own floor/prop.
+			var ray: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
+				listener_eye, source_eye, OBSTRUCTION_GEOMETRY_MASK)
+			ray.collide_with_areas = false
+			var hit: Dictionary = state.intersect_ray(ray)
+			var blocked: bool = not hit.is_empty() and \
+				(hit.get("position", source_eye) as Vector3).distance_to(source_eye) > 0.75
+			target = 1.0 if blocked or bool(record["terrain_blocked"]) else 0.0
+			record["target_obstruction"] = target
+			record["next_obstruction_check"] = _obstruction_clock + OBSTRUCTION_RECHECK_SECONDS
+			rays += 1
+		# Smooth changes to prevent a harsh click when crossing a doorway.
+		var old_amount: float = float(record.get("obstruction", 0.0))
+		var amount: float = move_toward(old_amount, target, delta * 6.0)
+		if absf(amount - old_amount) > 0.0001:
+			record["obstruction"] = amount
+			if player.has_method("set_obstruction_amount"):
+				player.call("set_obstruction_amount", amount)
+			else:
+				var base_cutoff: float = float(record["original_cutoff"])
+				player.attenuation_filter_cutoff_hz = AudioSpatial.obstruction_cutoff(base_cutoff, amount)
+				player.volume_db = float(record["original_db"]) + AudioSpatial.obstruction_db(amount)
+		_voices[index] = record
 
 
 ## Creates the engine SoundConcurrencyManager once, when the binary has it; victims it stops are freed here.
