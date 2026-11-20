@@ -54,6 +54,8 @@ class WorldPartition3D : public Node3D {
 	bool streaming_enabled = true;
 	Vector2i observer_cell;
 	bool observer_cell_valid = false;
+	real_t last_streaming_update_ms = 0.0;
+	int last_instantiation_attempt_count = 0;
 
 	HashMap<Vector2i, ObjectID> active_cells;
 	HashMap<Vector2i, String> pending_cells;
@@ -131,6 +133,8 @@ public:
 	int get_pending_cell_count() const;
 	int get_inflight_request_count() const;
 	int get_failed_cell_count() const;
+	real_t get_last_streaming_update_ms() const;
+	int get_last_instantiation_attempt_count() const;
 
 	~WorldPartition3D();
 };
