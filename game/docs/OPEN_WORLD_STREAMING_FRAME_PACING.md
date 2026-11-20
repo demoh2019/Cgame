@@ -61,6 +61,12 @@ hysteresis**, **3 chunks maximum per update** and **2.5 ms soft CPU budget**,
 later updated by the existing quality profiles. Prediction changes queue
 order only: it never extends the actual load radius or adds new assets.
 
+Stopping a bicycle restores nearest-first ordering for **already queued**
+cells, rather than leaving the previous ride direction at the front of the
+generator backlog. The native `WorldStreamingGrid::prioritize_cells_for_motion`
+sorts both the motion-predicted and zero-motion paths, always reserving first
+priority for the current player cell. Invalid hints safely use zero prediction.
+
 The optional FPS overlay now shows `World: N chunks | M queued` alongside
 FPS, frame time and draw calls. It updates every 0.25 seconds **only while the
 player has enabled the FPS overlay**, not every frame.
