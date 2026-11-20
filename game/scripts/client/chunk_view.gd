@@ -31,6 +31,7 @@ const GROUND_SHADER := """
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
+global uniform float aa_weather_rain;
 global uniform float aa_puddle_ripple_strength;
 global uniform float aa_ground_contact_strength;
 global uniform float aa_terrain_detail_radius;
@@ -170,7 +171,7 @@ void fragment() {
 	SPECULAR = min(0.9, 0.15 + wetness * 0.12 + puddle * 0.3);
 	// Even without downloaded terrain textures, puddles have the same
 	// coherent near-field rain rings. NORMAL is view-space in fragment().
-	if (aa_puddle_ripple_strength > 0.001 && puddle > 0.05
+	if (aa_puddle_ripple_strength > 0.001 && aa_weather_rain > 0.005 && puddle > 0.05
 			&& distance_to_camera < aa_terrain_detail_radius) {
 		float ripple_fade = 1.0 - smoothstep(
 			aa_terrain_detail_radius * 0.58, aa_terrain_detail_radius,
@@ -179,7 +180,7 @@ void fragment() {
 		vec3 view_tilt = (VIEW_MATRIX *
 			vec4(ripple_tilt.x, 0.0, ripple_tilt.y, 0.0)).xyz;
 		NORMAL = normalize(NORMAL + view_tilt
-			* (aa_puddle_ripple_strength * sqrt(puddle) * ripple_fade));
+			* (aa_weather_rain * aa_puddle_ripple_strength * sqrt(puddle) * ripple_fade));
 	}
 }
 """

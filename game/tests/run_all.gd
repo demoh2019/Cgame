@@ -12,6 +12,7 @@ const SUITES := [
 	"res://tests/test_character_rain_gear.gd",
 	"res://tests/test_environment_assets.gd",
 	"res://tests/test_weather_wetness_shader.gd",
+	"res://tests/test_weather_surface_memory.gd",
 	"res://tests/test_weather_surface_response.gd",
 	"res://tests/test_puddle_ripples.gd",
 	"res://tests/test_water_refraction.gd",

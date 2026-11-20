@@ -32,6 +32,7 @@ render_mode cull_disabled, diffuse_lambert_wrap, specular_disabled, shadows_disa
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/vegetation_wind_space.gdshaderinc"
 global uniform float aa_weather_wetness;
+global uniform float aa_weather_rain;
 global uniform vec3 aa_vegetation_wind;
 // One renderer-wide intensity controls thin-blade backlighting for all grass tiles.
 global uniform float aa_grass_transmission;
@@ -73,7 +74,7 @@ void vertex() {
 			float gust = sin(TIME * 0.7
 				+ dot(root.xz, wind_dir * 0.045 + crosswind * 0.02)) * 0.5 + 0.5;
 			gust *= gust;
-			float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.2;
+			float storm_wind = 1.0 + clamp(aa_weather_rain, 0.0, 1.0) * 0.2;
 			vec2 motion = wind_dir * (sin(wave) * 0.035 + gust * 0.11)
 				+ crosswind * (cos(wave * 0.8) * 0.03 + gust * 0.05);
 			vec2 world_bend = motion * k * shrink * storm_wind * wind_power;

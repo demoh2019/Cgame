@@ -125,6 +125,12 @@ void Fog::fog_volume_set_size(RID p_fog_volume, const Vector3 &p_size) {
 void Fog::fog_volume_set_material(RID p_fog_volume, RID p_material) {
 	FogVolume *fog_volume = fog_volume_owner.get_or_null(p_fog_volume);
 	ERR_FAIL_NULL(fog_volume);
+	// Avoid redundant writes while reusing the same native FogVolume across
+	// graphical quality and weather changes. Resource updates still carry
+	// their own RID, so this does not hide live ShaderMaterial parameter edits.
+	if (fog_volume->material == p_material) {
+		return;
+	}
 	fog_volume->material = p_material;
 }
 

@@ -1,6 +1,7 @@
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
+global uniform float aa_weather_rain;
 global uniform float aa_ground_contact_strength;
 // High/Ultra only: subtle self-occlusion from normal-map microrelief,
 // fused into existing PBR AO without any extra texture or screen pass.
@@ -386,14 +387,14 @@ void fragment() {
 	bent = normalize(mix(bent, n, puddle * 0.75));
 	// Near, wet, flat ground only: animated impact rings disturb existing
 	// PBR puddle reflections without any extra texture samples or meshes.
-	if (aa_puddle_ripple_strength > 0.001 && puddle > 0.05
+	if (aa_puddle_ripple_strength > 0.001 && aa_weather_rain > 0.005 && puddle > 0.05
 			&& camera_distance < aa_terrain_detail_radius) {
 		float ripple_fade = 1.0 - smoothstep(
 			aa_terrain_detail_radius * 0.58, aa_terrain_detail_radius,
 			camera_distance);
 		vec2 ripple_tilt = aa_puddle_ripple_tilt(p, TIME);
 		bent = normalize(bent + vec3(ripple_tilt.x, 0.0, ripple_tilt.y)
-			* (aa_puddle_ripple_strength * sqrt(puddle) * ripple_fade));
+			* (aa_weather_rain * aa_puddle_ripple_strength * sqrt(puddle) * ripple_fade));
 	}
 	NORMAL = normalize((VIEW_MATRIX * vec4(bent, 0.0)).xyz);
 

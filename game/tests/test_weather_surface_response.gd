@@ -12,7 +12,7 @@ func run(t) -> void:
 	t.check(water != null, "water shader loads")
 	if water != null:
 		var code: String = water.code
-		t.check(code.contains("global uniform float aa_weather_wetness"), "water uses the existing weather global")
+		t.check(code.contains("global uniform float aa_weather_rain"), "open water uses active rain instead of soil moisture")
 		t.check(code.contains("storm_wave_strength"), "storm strengthens analytic waves")
 		t.check(code.contains("storm_whitecaps"), "whitecaps appear during storms")
 		t.check(code.contains("hint_depth_texture"), "shoreline foam still uses water depth")
@@ -23,7 +23,7 @@ func run(t) -> void:
 	t.check(foliage.contains("ALPHA_SCISSOR_THRESHOLD"), "leaf transparency remains cut out")
 	t.check(foliage.contains("instance_tint"), "foliage instance colors are preserved")
 	var grass: String = GrassField.SHADER_CODE
-	t.check(grass.contains("global uniform float aa_weather_wetness"), "grass uses shared storm global")
+	t.check(grass.contains("global uniform float aa_weather_wetness"), "grass uses shared retained surface moisture")
 	t.check(grass.contains("wet_grass"), "wet grass color is visibly darker")
 	t.check(grass.contains("storm_wind"), "storms increase grass gust amplitude")
 	t.check(grass.contains("shrink > 0.001"), "distant grass skips wind animation")

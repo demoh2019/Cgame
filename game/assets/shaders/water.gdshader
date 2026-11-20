@@ -1,6 +1,7 @@
 shader_type spatial;
 render_mode blend_mix, depth_draw_never, cull_back, diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
+global uniform float aa_weather_rain;
 // Sun vector/radiance are cached with the sky, so water never asks the CPU
 // to update a material per pixel or per streamed ocean mesh.
 global uniform vec3 aa_sun_to_light;
@@ -64,7 +65,7 @@ void vertex() {
 void fragment() {
 	float t = TIME;
 	vec2 p = world_position.xz;
-	float storm = clamp(aa_weather_wetness, 0.0, 1.0);
+	float storm = clamp(aa_weather_rain, 0.0, 1.0);
 	float storm_wave_strength = 1.0 + storm * 0.65;
 	// Analytic wave slopes avoid recomputing three octaves of noise at three nearby
 	// pixel positions. Two opposing wave trains preserve motion and sun glints.
