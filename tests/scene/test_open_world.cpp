@@ -124,6 +124,66 @@ TEST_CASE("[WorldStreaming] Cells in radius are sorted nearest first and within 
 	CHECK(cells.is_empty());
 }
 
+TEST_CASE("[WorldStreaming] Motion priority preserves residency and favors forward cells") {
+	const Vector3 focus(5, 0, 5);
+	LocalVector<Vector3i> cells;
+	cells_in_radius(focus, 25.0, 10.0, AXES_XZ, cells);
+	REQUIRE(cells.size() > 3);
+	const uint32_t count = cells.size();
+	// With a stopped player the legacy nearest-first order is untouched.
+	LocalVector<Vector3i> original;
+	for (const Vector3i &cell : cells) {
+		original.push_back(cell);
+	}
+	prioritize_cells_for_motion(cells, focus, Vector3(), 2.0, 10.0, 10.0, AXES_XZ);
+	for (uint32_t i = 0; i < count; i++) {
+		CHECK(cells[i] == original[i]);
+	}
+	// Move east: stream eastern cells before equally distant western cells.
+	prioritize_cells_for_motion(cells, focus, Vector3(20, 0, 0), 2.0, 10.0, 10.0, AXES_XZ);
+	CHECK(cells.size() == count);
+	CHECK(cells[0] == Vector3i(0, 0, 0)); // Never starve the player's cell.
+	int east_index = -1;
+	int west_index = -1;
+	for (uint32_t i = 0; i < cells.size(); i++) {
+		if (cells[i] == Vector3i(1, 0, 0)) {
+			east_index = int(i);
+		} else if (cells[i] == Vector3i(-1, 0, 0)) {
+			west_index = int(i);
+		}
+	}
+	REQUIRE(east_index >= 0);
+	REQUIRE(west_index >= 0);
+	CHECK(east_index < west_index);
+	// Exactly the same candidate set survives, with no added memory cost.
+	for (const Vector3i &cell : original) {
+		bool found = false;
+		for (const Vector3i &next : cells) {
+			found |= cell == next;
+		}
+		CHECK(found);
+	}
+	prioritize_cells_for_motion(cells, focus, Vector3(Math::INF, 0, 0), 2.0, 10.0, 10.0, AXES_XZ);
+	CHECK(cells[0] == Vector3i(0, 0, 0)); // Invalid hint ignored.
+}
+
+TEST_CASE("[WorldStreaming] WorldStreamer motion hint is validated and bounded") {
+	WorldStreamer *streamer = memnew(WorldStreamer);
+	CHECK(streamer->get_lookahead_seconds() == 0.0);
+	CHECK(streamer->get_velocity_hint() == Vector3());
+	streamer->set_velocity_hint(Vector3(10.0, 0.0, -5.0));
+	streamer->set_lookahead_seconds(2.0);
+	CHECK(streamer->get_velocity_hint() == Vector3(10.0, 0.0, -5.0));
+	CHECK(streamer->get_lookahead_seconds() == 2.0);
+	streamer->set_velocity_hint(Vector3(Math::INF, 0, 0));
+	CHECK(streamer->get_velocity_hint() == Vector3(10.0, 0.0, -5.0));
+	streamer->set_lookahead_seconds(99.0);
+	CHECK(streamer->get_lookahead_seconds() == 4.0);
+	streamer->set_lookahead_seconds(-10.0);
+	CHECK(streamer->get_lookahead_seconds() == 0.0);
+	memdelete(streamer);
+}
+
 TEST_CASE("[WorldStreaming] Cell count is capped for huge radii") {
 	LocalVector<Vector3i> cells;
 	bool truncated = false;
