@@ -369,6 +369,10 @@ func party_loot_mode(mode: String) -> void:
 	net.c_party_loot_mode.rpc_id(1, mode)
 
 
+func raid_vote(bag_id: int, choice: String) -> void:
+	net.c_raid_vote.rpc_id(1, bag_id, choice)
+
+
 func raid_claim_selected(entity_id: int, item_id: String) -> void:
 	net.c_raid_claim_selected.rpc_id(1, entity_id, item_id)
 
