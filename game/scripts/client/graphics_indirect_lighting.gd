@@ -3,7 +3,9 @@ extends RefCounted
 ## Unlike a duplicate post shader this reuses Godot's internal half-resolution
 ## SSAO (horizon-based) and SSIL buffers. Compatibility and Mobile allocate none.
 ##
-## High: focused contact AO in cracks and under objects.
+## High: focused contact AO plus bounded half-resolution screen-space bounce.
+## Screen-space color bleed makes sunlit ruin walls and vegetation illuminate
+## nearby surfaces without the memory/voxel cost of SDFGI.
 ## Ultra: distance-field GI captures off-screen bounced light from streamed
 ## static terrain and structures. Short SDFGI cascades + half-resolution GI
 ## keep the opt-in Ultra tier bounded on unified-memory GPUs. Do not stack
@@ -16,7 +18,7 @@ static func settings(level: int, method: String) -> Dictionary:
 	var forward: bool = method == "forward_plus"
 	var ao: bool = forward and tier >= 2
 	var sdfgi: bool = forward and tier == 3
-	var bounce: bool = false # Ultra uses SDFGI rather than the overlapping SSIL pass.
+	var bounce: bool = forward and tier == 2 # High only; Ultra uses SDFGI, never both.
 	return {
 		"ssao_enabled": ao,
 		"ssao_radius": 1.10 if tier == 2 else 1.30,
@@ -28,9 +30,11 @@ static func settings(level: int, method: String) -> Dictionary:
 		# Keep direct sunlight and artificial lights intact. AO acts on indirect.
 		"ssao_light_affect": 0.0,
 		"ssil_enabled": bounce,
-		"ssil_radius": 2.6,
-		"ssil_intensity": 0.72,
-		"ssil_sharpness": 0.94,
+		# Short rays and restrained intensity prevent strong halos at silhouettes.
+		# The project renders SSIL at half resolution.
+		"ssil_radius": 2.0,
+		"ssil_intensity": 0.38,
+		"ssil_sharpness": 0.96,
 		"ssil_normal_rejection": 1.0,
 		"sdfgi_enabled": sdfgi,
 		"sdfgi_cascades": 2,
@@ -48,8 +52,15 @@ static func apply(environment: Environment, level: int, method: String) -> void:
 		return
 	var p: Dictionary = settings(level, method)
 	environment.ssao_enabled = bool(p["ssao_enabled"])
-	environment.ssil_enabled = bool(p["ssil_enabled"])
-	apply_sdfgi(environment, p)
+	# Never enable SDFGI while High's SSIL bounce is still active.
+	# In the reverse transition, release SDFGI before enabling SSIL.
+	# Each transition avoids a frame of double-indirect GPU work.
+	if bool(p["sdfgi_enabled"]):
+		apply_ssil(environment, p)
+		apply_sdfgi(environment, p)
+	else:
+		apply_sdfgi(environment, p)
+		apply_ssil(environment, p)
 	if environment.ssao_enabled:
 		environment.ssao_radius = float(p["ssao_radius"])
 		environment.ssao_intensity = float(p["ssao_intensity"])
@@ -58,11 +69,33 @@ static func apply(environment: Environment, level: int, method: String) -> void:
 		environment.ssao_horizon = float(p["ssao_horizon"])
 		environment.ssao_sharpness = float(p["ssao_sharpness"])
 		environment.ssao_light_affect = float(p["ssao_light_affect"])
-	if environment.ssil_enabled:
+
+
+
+## Native Cgame batches all SSIL fields into one renderer update. Stock Godot
+## uses the same Environment API without requiring a patched engine build.
+static func apply_ssil(environment: Environment, p: Dictionary) -> void:
+	var enabled: bool = bool(p["ssil_enabled"])
+	if environment.has_method("configure_ssil"):
+		environment.call("configure_ssil", enabled, float(p["ssil_radius"]),
+			float(p["ssil_intensity"]), float(p["ssil_sharpness"]),
+			float(p["ssil_normal_rejection"]))
+		return
+	if not enabled:
+		if environment.ssil_enabled:
+			environment.ssil_enabled = false
+		return
+	# Set inactive parameters first, enabling the pass only after it is ready.
+	if not is_equal_approx(environment.ssil_radius, float(p["ssil_radius"])):
 		environment.ssil_radius = float(p["ssil_radius"])
+	if not is_equal_approx(environment.ssil_intensity, float(p["ssil_intensity"])):
 		environment.ssil_intensity = float(p["ssil_intensity"])
+	if not is_equal_approx(environment.ssil_sharpness, float(p["ssil_sharpness"])):
 		environment.ssil_sharpness = float(p["ssil_sharpness"])
+	if not is_equal_approx(environment.ssil_normal_rejection, float(p["ssil_normal_rejection"])):
 		environment.ssil_normal_rejection = float(p["ssil_normal_rejection"])
+	if not environment.ssil_enabled:
+		environment.ssil_enabled = true
 
 
 ## The local dynamic GI budget is applied only when the graphics preset or
