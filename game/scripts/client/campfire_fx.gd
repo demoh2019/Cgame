@@ -13,9 +13,9 @@ var _seed := 0.0
 
 
 ## Layered-sine flicker in ~[0.75, 1.15]: cheap, smooth, never strobes.
-static func flicker(time: float, seed: float) -> float:
-	var f := sin(time * 7.3 + seed) * 0.07 + sin(time * 13.1 + seed * 2.0) * 0.05 \
-		+ sin(time * 23.7 + seed * 3.0) * 0.03
+static func flicker(time: float, phase: float) -> float:
+	var f := sin(time * 7.3 + phase) * 0.07 + sin(time * 13.1 + phase * 2.0) * 0.05 \
+		+ sin(time * 23.7 + phase * 3.0) * 0.03
 	return clampf(0.95 + f, 0.75, 1.15)
 
 
@@ -113,3 +113,46 @@ func _process(delta: float) -> void:
 	light.light_energy = BASE_ENERGY * k
 	# Flame tongues also shift the light origin slightly, making shadows dance.
 	light.position = Vector3(sin(_t * 5.1 + _seed) * 0.04, 0.9 + (k - 0.95) * 0.3, cos(_t * 4.3 + _seed) * 0.04)
+
+
+## Small animated flame (no light: torches already have budgeted lights) placed
+## on top of an already-instanced torch model, from its world-space mesh bounds.
+static func add_torch_flame(torch: Node3D, flame_height: float = 0.45) -> Node3D:
+	if torch == null or torch.get_parent() == null:
+		return null
+	var bounds := AABB()
+	var first := true
+	for found in torch.find_children("*", "MeshInstance3D", true, false):
+		var mi := found as MeshInstance3D
+		# Bounds in the torch parent's space; works before the chunk enters the tree.
+		var xf: Transform3D = mi.transform
+		var p: Node = mi.get_parent()
+		while p != torch and p is Node3D:
+			xf = (p as Node3D).transform * xf
+			p = p.get_parent()
+		var box: AABB = (torch.transform * xf) * mi.get_aabb()
+		bounds = box if first else bounds.merge(box)
+		first = false
+	if first:
+		return null
+	var top := Vector3(bounds.get_center().x, bounds.end.y, bounds.get_center().z)
+	var flame := Node3D.new()
+	flame.name = "TorchFlame"
+	var flame_seed := randf() * 10.0
+	for i in 2:
+		var q := MeshInstance3D.new()
+		var mesh := QuadMesh.new()
+		mesh.size = Vector2(flame_height * 0.6, flame_height)
+		q.mesh = mesh
+		q.position.y = flame_height * 0.4
+		q.rotation.y = PI * 0.5 * i
+		var m := ShaderMaterial.new()
+		m.shader = FLAME_SHADER
+		m.set_shader_parameter("seed", flame_seed + i)
+		m.set_shader_parameter("intensity", 2.6)
+		q.material_override = m
+		q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		flame.add_child(q)
+	torch.get_parent().add_child(flame)
+	flame.position = top
+	return flame

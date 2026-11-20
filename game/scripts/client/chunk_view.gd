@@ -26,6 +26,7 @@ const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection
 const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection_budget.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
+const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
 const HEIGHT_MIN := -45.0
@@ -696,7 +697,8 @@ func _build_dungeon(origin: Vector2) -> void:
 			add_child(room_anchor)
 			# A torch on the north wall lights the room.
 			var torch_at := Vector3(center.x, Dungeon.FLOOR_Y, center.y - Dungeon.ROOM * 0.5 + 0.4)
-			_kit("torch_mounted", torch_at + Vector3(0, 1.4, 0), 0.0, 0.5)
+			# Living HDR flame on the torch model (bloom-lit; the light stays budgeted).
+			CampfireFx.add_torch_flame(_kit("torch_mounted", torch_at + Vector3(0, 1.4, 0), 0.0, 0.5))
 			var light := OmniLight3D.new()
 			light.light_color = Color(1.0, 0.68, 0.36)
 			light.light_energy = 2.2
