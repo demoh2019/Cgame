@@ -27,6 +27,7 @@ var barricades: Dictionary = {} # Nearby defenses from the server.
 var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
 var shelters: Dictionary = {} # Replicated temporary weather cover.
 var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
+var smoke_clouds: Dictionary = {} # Interest-limited, temporary visual smoke.
 var infected_snares: Dictionary = {} # Server-replicated temporary PvE traps.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
 var spit_zones: Dictionary = {} # Only the latest server-issued acid telegraphs.
@@ -108,6 +109,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	decoys.clear()
 	for entity in snapshot.get("decoys", []):
 		decoys[int(entity["id"])] = entity
+	smoke_clouds.clear()
+	for entity in snapshot.get("smoke_clouds", []):
+		smoke_clouds[int(entity["id"])] = entity
 	campfires.clear()
 	for entity in snapshot.get("campfires", []):
 		campfires[int(entity["id"])] = entity

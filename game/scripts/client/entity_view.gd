@@ -41,6 +41,8 @@ func update_from(client) -> void:
 		_touch("shelter:%d" % id, "shelter", client.shelters[id], seen)
 	for id in client.decoys:
 		_touch("decoy:%d" % id, "decoy", client.decoys[id], seen)
+	for id in client.smoke_clouds:
+		_touch("smoke:%d" % id, "smoke", client.smoke_clouds[id], seen)
 	for id in client.infected_snares:
 		_touch("snare:%d" % id, "snare", client.infected_snares[id], seen)
 	if not client.raid_telegraph.is_empty():
@@ -189,6 +191,23 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		label.pixel_size = 0.006
 		label.position.y = 0.7
 		root.add_child(label)
+		return root
+	if kind == "smoke":
+		var cloud := MeshInstance3D.new()
+		var shape := SphereMesh.new()
+		shape.radius = float(entity.get("radius", 4.5))
+		shape.height = 3.2
+		shape.radial_segments = 24
+		shape.rings = 12
+		cloud.mesh = shape
+		cloud.position.y = 1.6
+		var haze := StandardMaterial3D.new()
+		haze.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		haze.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		haze.albedo_color = Color(0.52, 0.57, 0.58, 0.28)
+		haze.cull_mode = BaseMaterial3D.CULL_DISABLED
+		cloud.material_override = haze
+		root.add_child(cloud)
 		return root
 	if kind == "decoy":
 		var clacker := MeshInstance3D.new()
@@ -347,7 +366,7 @@ func _process(delta: float) -> void:
 		var node: Node3D = _nodes[key]
 		var target: Dictionary = _targets[key]
 		node.position = node.position.lerp(target["position"], blend)
-		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("snare") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
+		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
 			model.update_motion(delta)

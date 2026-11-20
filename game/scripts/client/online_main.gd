@@ -709,6 +709,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F8:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.parry()
+			KEY_F9:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.use_item("smoke_charge")
 			KEY_G:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var skill_direction: Vector2 = _aim_direction()

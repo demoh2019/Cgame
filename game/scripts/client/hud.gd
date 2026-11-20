@@ -261,6 +261,12 @@ func _build() -> void:
 		var heading := Vector2(sin(client.yaw), cos(client.yaw))
 		client.throw_decoy(heading))
 	inventory_box.add_child(decoy_button)
+	var smoke_button := Button.new()
+	smoke_button.name = "UseSmokeCharge"
+	smoke_button.text = "Smoke charge (F9): nine-second sight cover"
+	smoke_button.tooltip_text = "Consumes 1 crafted charge. Quiet survivors are less visible; no PvP or damage protection."
+	smoke_button.pressed.connect(func() -> void: client.use_item("smoke_charge"))
+	inventory_box.add_child(smoke_button)
 	var snare_button := Button.new()
 	snare_button.name = "PlaceInfectedSnare"
 	snare_button.text = "Place infected tripwire (\\): roots one infected"
@@ -1115,6 +1121,9 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Spore sampling: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "use" and data.has("smoke_seconds"):
+		say("Smoke deployed for nine seconds. Noise and blood scent still reveal you.")
+		return
 	if kind == "parry":
 		if bool(data.get("ok", false)):
 			say("Parry ready for 0.45s. Face the infected and time its strike!")
@@ -1505,6 +1514,11 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nRUIN CHART: X:%d Z:%d | %dm | %ds (F3)" % [
 			roundi(destination.x), roundi(destination.y),
 			roundi(from.distance_to(destination)), ceili(float(survey["remaining"]))]
+	if bool(client.you.get("smoke_concealed", false)):
+		_info_label.text += "\nSMOKE: quiet sight cover, no PvP immunity"
+	var smoke_left: float = float(client.you.get("smoke_cooldown", 0.0))
+	if smoke_left > 0.0:
+		_info_label.text += "\nSMOKE: %ds recharge (F9)" % ceili(smoke_left)
 	var quiet_left: float = float(client.you.get("chain_wrap_seconds", 0.0))
 	if quiet_left > 0.0:
 		_info_label.text += "\nQUIET CHAIN: %.0fs | Bike noise 9m" % quiet_left

@@ -8,6 +8,7 @@ const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
+const FieldSmoke = preload("res://scripts/shared/field_smoke.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
@@ -64,6 +65,7 @@ var _barricade_bodies: Dictionary = {}
 var _campfire_visuals: Dictionary = {}
 var _shelter_visuals: Dictionary = {}
 var _decoy_visuals: Dictionary = {}
+var _smoke_visuals: Dictionary = {}
 var _materials: Dictionary = {}
 var _last_center: Vector2i = Vector2i(999999, 999999)
 var _hud_clock: float = 0.0
@@ -119,6 +121,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_shelter", KEY_F6)
 	_bind_key("survive_pack_shelter", KEY_F7)
 	_bind_key("survive_decoy", KEY_COMMA)
+	_bind_key("survive_smoke", KEY_F9)
 	_bind_key("survive_snare", KEY_BACKSLASH)
 	_bind_key("survive_stim", KEY_PERIOD)
 	_bind_key("survive_scent_mask", KEY_SLASH)
@@ -551,6 +554,39 @@ func _sync_shelters() -> void:
 			_shelter_visuals.erase(id)
 
 
+func _sync_smoke() -> void:
+	var shown: Dictionary = {}
+	for id in sim.smoke_clouds:
+		var cloud: Dictionary = sim.smoke_clouds[id]
+		var point := Vector3(float(cloud["x"]), float(cloud["y"]), float(cloud["z"]))
+		if survivor.position.distance_to(point) > 95.0:
+			continue
+		shown[id] = true
+		if not _smoke_visuals.has(id):
+			var root := Node3D.new()
+			root.name = "Smoke_%d" % int(id)
+			var mesh := MeshInstance3D.new()
+			var shape := SphereMesh.new()
+			shape.radius = FieldSmoke.RADIUS
+			shape.height = 3.2
+			mesh.mesh = shape
+			mesh.position.y = 1.6
+			var haze := StandardMaterial3D.new()
+			haze.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			haze.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			haze.albedo_color = Color(0.52, 0.57, 0.58, 0.28)
+			haze.cull_mode = BaseMaterial3D.CULL_DISABLED
+			mesh.material_override = haze
+			root.add_child(mesh)
+			add_child(root)
+			_smoke_visuals[id] = root
+		_smoke_visuals[id].position = point
+	for id in _smoke_visuals.keys():
+		if not shown.has(id):
+			_smoke_visuals[id].queue_free()
+			_smoke_visuals.erase(id)
+
+
 func _sync_decoys() -> void:
 	var visible: Dictionary = {}
 	for id in sim.decoys:
@@ -647,6 +683,7 @@ func _physics_process(delta: float) -> void:
 	_sync_barricades()
 	_sync_campfires()
 	_sync_shelters()
+	_sync_smoke()
 	_sync_decoys()
 	_hud_clock += delta
 	if _hud_clock > 0.15:
@@ -904,6 +941,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_feedback = "Refuel: no campfire within 3 metres."
 		else:
 			_result("Refuel campfire", sim.cmd_refuel_campfire(LOCAL_PLAYER_ID, fire_id))
+	elif event.is_action_pressed("survive_smoke"):
+		_result("Smoke charge", sim.cmd_use(LOCAL_PLAYER_ID, FieldSmoke.ITEM_ID))
 	elif event.is_action_pressed("survive_decoy"):
 		_result("Throw noise decoy", sim.cmd_throw_decoy(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_snare"):
@@ -1105,7 +1144,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G weapon skill | Space dodge | F8 parry | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G weapon skill | Space dodge | F8 parry | F9 smoke | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback
