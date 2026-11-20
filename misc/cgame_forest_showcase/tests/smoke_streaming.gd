@@ -105,17 +105,23 @@ func _run() -> void:
         _fail("foliage layout changed across stream unload/reload")
         return
 
-    observer.position.x = -39.0
-    var negative := Vector2i(-2, 0)
-    # -39.0 belongs to grid cell -2 with a 32m cell width.
-    # Only -1 is configured, so the observer's current cell must still track -2.
-    if not await _wait_for_cell(stream, Vector2i(-1, 0), true):
+    observer.position.x = -25.0
+    var negative := Vector2i(-1, 0)
+    # -25.0 belongs to cell -1 with a 32m cell width and has a registered scene.
+    if not await _wait_for_cell(stream, negative, true):
         _fail("negative X cell did not load")
         return
     if stream.get_observer_cell() != negative or last_observed_cell != negative:
         _fail("observer_cell_changed did not track negative coordinates")
         return
-    if observed_cell_events < 4:
+
+    observer.position.x = -39.0
+    # Cell -2 has no registered scene. Grid tracking must still report -2.
+    await process_frame
+    if stream.get_observer_cell() != Vector2i(-2, 0) or last_observed_cell != Vector2i(-2, 0):
+        _fail("observer transition into an unregistered cell was not reported")
+        return
+    if observed_cell_events < 5:
         _fail("observer transitions were not signaled reliably")
         return
 
