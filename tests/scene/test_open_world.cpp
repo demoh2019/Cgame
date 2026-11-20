@@ -589,6 +589,30 @@ TEST_CASE("[SceneTree][WorldStreamer] Reconcile stale procedural requests after 
 	memdelete(streamer);
 }
 
+
+TEST_CASE("[WorldStreaming] Visual readiness is optional and independent of residency") {
+	WorldStreamer *streamer = memnew(WorldStreamer);
+	CHECK(streamer->get_pending_visual_details_count() == 0);
+	streamer->mark_visual_details_ready(Vector3i(1, 0, 1));
+	CHECK(streamer->get_pending_visual_details_count() == 0);
+	streamer->set_cell_size(16.0);
+	streamer->set_focus_position(Vector3(2, 0, 2));
+	streamer->set_load_radius(0.1);
+	streamer->set_max_instantiations_per_frame(1);
+	Generator generator;
+	streamer->set_chunk_generator(callable_mp(&generator, &Generator::generate));
+	streamer->refresh();
+	CHECK(streamer->get_loaded_count() == 1);
+	// Ordinary chunks never opt into staged visuals, preserving legacy
+	// engine behavior, even if an external script calls completion twice.
+	CHECK(streamer->get_pending_visual_details_count() == 0);
+	streamer->mark_visual_details_ready(Vector3i(0, 0, 0));
+	CHECK(streamer->get_pending_visual_details_count() == 0);
+	streamer->unload_all();
+	CHECK(streamer->get_pending_visual_details_count() == 0);
+	memdelete(streamer);
+}
+
 TEST_CASE("[SceneTree][WorldStreamer] Generator obeys one drain and soft CPU budget") {
 	BudgetedGenerator generator;
 	WorldStreamer *streamer = memnew(WorldStreamer);

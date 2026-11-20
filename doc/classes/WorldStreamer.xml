@@ -60,6 +60,12 @@
 				Returns the number of loaded chunks.
 			</description>
 		</method>
+		<method name="get_pending_visual_details_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Counts resident chunks which have reported unfinished optional cosmetic detail work, independently of queued procedural cells and threaded scene loads. A chunk can be fully playable while its grass, flowers or small debris are still being generated within a graphics frame budget. Only chunks implementing [code]has_pending_visual_detail()[/code] returning [code]true[/code] at adoption are counted. The counter is automatically cleared when such chunks are unloaded, even if their visual tasks never finish.
+			</description>
+		</method>
 		<method name="get_pending_count" qualifiers="const">
 			<return type="int" />
 			<description>
@@ -84,6 +90,13 @@
 			<param index="0" name="retry" type="bool" default="false" />
 			<description>
 				Updates the streaming immediately instead of waiting for [member update_interval]. If [param retry] is [code]true[/code], cells that had no scene or failed to load are tried again, for example after new chunk files were added.
+			</description>
+		</method>
+		<method name="mark_visual_details_ready">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Marks optional staged cosmetic work complete for a previously loaded chunk. Does nothing for unknown or already-completed cells. Emits [signal chunk_visual_details_ready] once, without affecting gameplay state, chunk residency, load/unload radius or the procedural generation budget. Call this after cosmetic MultiMesh categories are finished.
 			</description>
 		</method>
 		<method name="set_chunk_generator">
@@ -179,6 +192,12 @@
 			<param index="1" name="path" type="String" />
 			<description>
 				Emitted when a chunk scene could not be loaded or instantiated. The cell is not retried until [method refresh] is called with [code]retry[/code].
+			</description>
+		</signal>
+		<signal name="chunk_visual_details_ready">
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Emitted once after a loaded chunk finishes optional staged cosmetic work. Core world objects are accessible from [signal chunk_loaded] before this signal. Unloading a chunk clears its pending visual status without emitting this completion signal.
 			</description>
 		</signal>
 		<signal name="chunk_loaded">

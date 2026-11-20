@@ -86,6 +86,8 @@ private:
 	bool enabled = true;
 
 	HashMap<Vector3i, ObjectID> loaded;
+	// Optional cosmetic work is tracked separately from playable chunk residency.
+	HashSet<Vector3i> pending_visual_details;
 	HashMap<Vector3i, String> loading;
 	// Cells without a chunk scene, and cells whose scene failed to load. Not asked again until
 	// refresh(true) or a change of the grid or the path template.
@@ -168,6 +170,10 @@ public:
 	// Procedural cells queue separately from threaded scene loads.
 	// Expose their backlog for streaming telemetry and adaptive game scheduling.
 	int get_queued_generation_count() const { return int(generate_queue.size()); }
+	int get_pending_visual_details_count() const { return int(pending_visual_details.size()); }
+	// A loaded procedural chunk calls this after staged scenery is complete.
+	// The world is already playable; this is visual-progress telemetry only.
+	void mark_visual_details_ready(const Vector3i &p_cell);
 
 	// Re-evaluates immediately instead of waiting for the update interval. With `p_retry`, cells
 	// that were missing or failed are tried again.

@@ -76,6 +76,7 @@ const SUITES := [
 	"res://tests/test_sky_cloud_lighting_lut.gd",
 	"res://tests/test_weather_cloud_advection.gd",
 	"res://tests/test_scenery_lod.gd",
+	"res://tests/test_staged_scenery_streaming.gd",
 	"res://tests/test_foliage_dither_fade.gd",
 	"res://tests/test_foliage_coverage_mipmaps.gd",
 	"res://tests/test_contact_shadow_batch.gd",

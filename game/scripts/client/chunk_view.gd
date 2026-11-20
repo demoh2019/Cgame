@@ -20,6 +20,7 @@ const TerrainHorizonAO = preload("res://scripts/client/terrain_horizon_ao.gd")
 const TerrainAnisotropy = preload("res://scripts/client/terrain_anisotropy.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
+const DecorStreamingPolicy = preload("res://scripts/client/decor_streaming_policy.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
@@ -246,6 +247,17 @@ var _patches := PackedVector4Array()
 # Grass grows tile by tile once the chunk is near the camera, within a time budget per frame across all chunks.
 var _grass_source
 var _grass_next_tile := 0
+# Cosmetic visual tasks are separate from server-authoritative resources.
+var _decor_origin := Vector2.ZERO
+var _decor_rng: RandomNumberGenerator
+var _decor_anchors: Dictionary = {}
+var _decor_road_pieces: Array = []
+var _decor_road_clear := 0.0
+var _decor_tasks: Array[Dictionary] = []
+var _decor_next := 0
+static var _decor_pending: Array[WeakRef] = []
+static var _decor_last_frame := -1
+static var decor_budget_usec := 1500
 var _grass_tiles: Array[MultiMeshInstance3D] = []
 var _grass_lod_elapsed := 0.0
 var _grass_last_eye := Vector2.ZERO
@@ -402,6 +414,20 @@ static func configure_grass(build_radius: float, budget_usec: int, fade_start: f
 	material.set_shader_parameter("fade_end", fade_end)
 ## Streamed instances inherit user quality; existing instances change only
 ## when the preset changes, not each frame.
+## One shared budget for ALL loaded ChunkViews, not one limit per cell.
+static func configure_decor_budget(microseconds: int) -> void:
+	decor_budget_usec = clampi(microseconds, 100, 12000)
+
+
+static func get_pending_decor_count() -> int:
+	var count := 0
+	for reference in _decor_pending:
+		var view = reference.get_ref()
+		if view != null and view.is_inside_tree() and view._decor_next < view._decor_tasks.size():
+			count += view._decor_tasks.size() - view._decor_next
+	return count
+
+
 static func configure_scenery(quality: int) -> void:
 	scenery_quality = clampi(quality, 0, 3)
 
@@ -1184,6 +1210,7 @@ func _build_windmills(windmills: Array, origin: Vector2) -> void:
 
 
 func _process(delta: float) -> void:
+	_service_decor(self)
 	_grow_grass()
 	_grass_lod_elapsed += delta
 	if _grass_lod_elapsed >= GRASS_LOD_INTERVAL:
@@ -1195,6 +1222,62 @@ func _process(delta: float) -> void:
 		_update_shadow_casters()
 	for sail in _sails:
 		(sail["node"] as Node3D).rotate_object_local(sail["axis"], sail["speed"] * delta)
+
+
+## Weak-reference global queue. Newly near-camera chunks take precedence, and
+## completed/unloaded chunks vanish without retaining their world resources.
+static func _service_decor(host: Node3D) -> void:
+	var frame: int = Engine.get_process_frames()
+	if _decor_last_frame == frame:
+		return
+	_decor_last_frame = frame
+	if _decor_pending.is_empty():
+		return
+	var camera: Camera3D = host.get_viewport().get_camera_3d()
+	var candidates: Array[Dictionary] = []
+	var alive: Array[WeakRef] = []
+	for reference in _decor_pending:
+		var view = reference.get_ref()
+		if view == null or not view.is_inside_tree() or view._decor_next >= view._decor_tasks.size():
+			continue
+		alive.append(reference)
+		var score := 0.0
+		if camera != null:
+			var center: Vector3 = view.global_position + Vector3(
+				Defs.CHUNK_SIZE * 0.5, 0.0, Defs.CHUNK_SIZE * 0.5)
+			var delta: Vector3 = center - camera.global_position
+			var forward: Vector3 = -camera.global_transform.basis.z
+			forward.y = 0.0
+			delta.y = 0.0
+			var facing := 0.0
+			if forward.length_squared() > 0.0001 and delta.length_squared() > 0.0001:
+				facing = delta.normalized().dot(forward.normalized())
+			score = DecorStreamingPolicy.rank(delta.length(), facing)
+		candidates.append({"view": view, "score": score, "cell": view.cell})
+	_decor_pending = alive
+	candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if not is_equal_approx(float(a["score"]), float(b["score"])):
+			return float(a["score"]) < float(b["score"])
+		var ac: Vector2i = a["cell"]
+		var bc: Vector2i = b["cell"]
+		return ac.x < bc.x if ac.x != bc.x else ac.y < bc.y)
+	var elapsed := 0
+	var processed := 0
+	var next := 0
+	while not candidates.is_empty() and DecorStreamingPolicy.can_continue(
+			elapsed, decor_budget_usec, processed):
+		var selected = candidates[next]["view"]
+		var started: int = Time.get_ticks_usec()
+		selected._build_next_decor_entry()
+		elapsed += Time.get_ticks_usec() - started
+		processed += 1
+		if selected._decor_tasks.is_empty():
+			candidates.remove_at(next)
+			if candidates.is_empty():
+				break
+			next %= candidates.size()
+		else:
+			next = (next + 1) % candidates.size()
 
 
 func _grow_grass() -> void:
@@ -1481,62 +1564,115 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 	anchors["meadow"] = _meadow_centers(origin, anchors["tree"], road_pieces)
 	for k in 2:
 		anchors["rare"].append(origin + Vector2(rng.randf(), rng.randf()) * Defs.CHUNK_SIZE)
+	_decor_origin = origin
+	_decor_rng = rng
+	_decor_anchors = anchors
+	_decor_road_pieces = road_pieces
+	_decor_road_clear = road_clear
+	_decor_tasks.clear()
+	_decor_next = 0
 	if _use_nature:
 		for entry in DECOR:
-			var file := String(entry["file"])
-			var tint_plant: bool = SceneryBatches.colorful_plant(file)
-			var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(file), "decor:" + file,
-				0.0 if file.begins_with("Pebble") or file.begins_with("Petal")
-				else (0.2 if file.begins_with("Grass") else 0.12),
-				tint_plant)
-			if mesh == null:
-				continue
-			var places: Array = _anchored_spots(entry, anchors[str(entry["anchor"])], origin, rng, road_pieces, road_clear)
-			if places.is_empty():
-				continue
-			var transforms: Array[Transform3D] = []
-			for i in places.size():
-				var at: Vector2 = places[i]
-				var size := rng.randf_range(float(entry["scale"][0]), float(entry["scale"][1]))
-				var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
-				transforms.append(Transform3D(basis, Vector3(at.x - origin.x, _world.height_at(at.x, at.y) - 0.02, at.y - origin.y)))
-			# Dense vegetation is split into camera-cullable cells, sparse props remain one draw call.
-			for decor_batch in SceneryBatches.add(self, mesh, transforms,
-					float(entry["range"]), file.begins_with("Bush"), 8.0,
-					tint_plant, origin):
-				register_scenery(decor_batch, "decor:" + file, float(entry["range"]))
-				if file.begins_with("Bush"):
-					_shadow_casters.append({"node": decor_batch, "role": "bush", "bounds": decor_batch.custom_aabb})
-	# Logs, branches, roots, scree and the odd standing stone, each where it belongs.
+			_decor_tasks.append({"type": "nature", "entry": entry})
 	for entry in ModelCatalog.available("decor", ModelCatalog.DECOR_EXTRA):
-		var extra_mesh: Mesh = ModelCatalog.entry_mesh(entry)
-		if extra_mesh == null:
-			continue
-		var size_range: Array = entry.get("scale", [0.8, 1.3])
-		var group: int = int(entry.get("group", 0))
-		var placed: Array = [] # [position, scale]
-		for at in _anchored_spots(entry, anchors[str(entry.get("anchor", "rare"))], origin, rng, road_pieces, road_clear):
-			# Sizes lean small: many little ones, now and then a big one.
-			var t: float = rng.randf()
-			var main_scale: float = lerpf(float(size_range[0]), float(size_range[1]), t * t)
-			placed.append([at, main_scale])
-			# A few smaller ones lying around it, as stones and sticks really do.
-			for k in group:
-				var around: Vector2 = at + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(0.8, 2.6) * main_scale
-				if around.x < origin.x or around.y < origin.y or around.x >= origin.x + Defs.CHUNK_SIZE or around.y >= origin.y + Defs.CHUNK_SIZE or _world.is_water(around.x, around.y):
-					continue
-				placed.append([around, main_scale * rng.randf_range(0.25, 0.6)])
-		if placed.is_empty():
-			continue
-		var transforms: Array[Transform3D] = []
-		for i in placed.size():
-			var where: Vector2 = placed[i][0]
-			# Tilted a little, sunk a little: lying in the ground for ages, not placed on it.
-			var basis := Basis(Vector3.UP, rng.randf() * TAU).rotated(Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)).normalized(), rng.randf_range(0.0, 0.12))
-			basis = basis.scaled(Vector3.ONE * float(placed[i][1]))
-			transforms.append(Transform3D(basis, Vector3(where.x - origin.x, _world.height_at(where.x, where.y) - 0.06 * float(placed[i][1]), where.y - origin.y)))
-		for extra_batch in SceneryBatches.add(self, extra_mesh, transforms, 140.0):
-			register_scenery(extra_batch, "decor:extra", 140.0)
+		_decor_tasks.append({"type": "extra", "entry": entry})
+	if not _decor_tasks.is_empty():
+		_decor_pending.append(weakref(self))
+		set_process(true)
+
+
+## Called once by native WorldStreamer upon chunk adoption. Loaded world
+## objects are authoritative already; cosmetics can still be in flight.
+func has_pending_visual_detail() -> bool:
+	return _decor_next < _decor_tasks.size()
+
+
+## Builds one visual category each time the frame scheduler grants a turn.
+## Interactive loot, vegetation gathering, buildings, and terrain are instant.
+func _build_next_decor_entry() -> void:
+	if _decor_next >= _decor_tasks.size():
+		return
+	var task: Dictionary = _decor_tasks[_decor_next]
+	_decor_next += 1
+	if str(task["type"]) == "nature":
+		_build_nature_decor_entry(task["entry"])
+	else:
+		_build_extra_decor_entry(task["entry"])
+	if _decor_next >= _decor_tasks.size():
+		var streamer := get_parent() as WorldStreamer
+		if streamer != null:
+			streamer.mark_visual_details_ready(Vector3i(cell.x, 0, cell.y))
+		_decor_tasks.clear()
+		_decor_rng = null
+		_decor_anchors.clear()
+		_decor_road_pieces.clear()
+
+
+func _build_nature_decor_entry(entry: Dictionary) -> void:
+	var origin: Vector2 = _decor_origin
+	var rng: RandomNumberGenerator = _decor_rng
+	var anchors: Dictionary = _decor_anchors
+	var road_pieces: Array = _decor_road_pieces
+	var road_clear: float = _decor_road_clear
+	var file := String(entry["file"])
+	var tint_plant: bool = SceneryBatches.colorful_plant(file)
+	var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(file), "decor:" + file,
+		0.0 if file.begins_with("Pebble") or file.begins_with("Petal")
+		else (0.2 if file.begins_with("Grass") else 0.12),
+		tint_plant)
+	if mesh == null:
+		return
+	var places: Array = _anchored_spots(entry, anchors[str(entry["anchor"])], origin, rng, road_pieces, road_clear)
+	if places.is_empty():
+		return
+	var transforms: Array[Transform3D] = []
+	for i in places.size():
+		var at: Vector2 = places[i]
+		var size := rng.randf_range(float(entry["scale"][0]), float(entry["scale"][1]))
+		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
+		transforms.append(Transform3D(basis, Vector3(at.x - origin.x, _world.height_at(at.x, at.y) - 0.02, at.y - origin.y)))
+	# Dense vegetation is split into camera-cullable cells, sparse props remain one draw call.
+	for decor_batch in SceneryBatches.add(self, mesh, transforms,
+			float(entry["range"]), file.begins_with("Bush"), 8.0,
+			tint_plant, origin):
+		register_scenery(decor_batch, "decor:" + file, float(entry["range"]))
+		if file.begins_with("Bush"):
+			_shadow_casters.append({"node": decor_batch, "role": "bush", "bounds": decor_batch.custom_aabb})
+
+func _build_extra_decor_entry(entry: Dictionary) -> void:
+	var origin: Vector2 = _decor_origin
+	var rng: RandomNumberGenerator = _decor_rng
+	var anchors: Dictionary = _decor_anchors
+	var road_pieces: Array = _decor_road_pieces
+	var road_clear: float = _decor_road_clear
+	var extra_mesh: Mesh = ModelCatalog.entry_mesh(entry)
+	if extra_mesh == null:
+		return
+	var size_range: Array = entry.get("scale", [0.8, 1.3])
+	var group: int = int(entry.get("group", 0))
+	var placed: Array = [] # [position, scale]
+	for at in _anchored_spots(entry, anchors[str(entry.get("anchor", "rare"))], origin, rng, road_pieces, road_clear):
+		# Sizes lean small: many little ones, now and then a big one.
+		var t: float = rng.randf()
+		var main_scale: float = lerpf(float(size_range[0]), float(size_range[1]), t * t)
+		placed.append([at, main_scale])
+		# A few smaller ones lying around it, as stones and sticks really do.
+		for k in group:
+			var around: Vector2 = at + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(0.8, 2.6) * main_scale
+			if around.x < origin.x or around.y < origin.y or around.x >= origin.x + Defs.CHUNK_SIZE or around.y >= origin.y + Defs.CHUNK_SIZE or _world.is_water(around.x, around.y):
+				continue
+			placed.append([around, main_scale * rng.randf_range(0.25, 0.6)])
+	if placed.is_empty():
+		return
+	var transforms: Array[Transform3D] = []
+	for i in placed.size():
+		var where: Vector2 = placed[i][0]
+		# Tilted a little, sunk a little: lying in the ground for ages, not placed on it.
+		var basis := Basis(Vector3.UP, rng.randf() * TAU).rotated(Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)).normalized(), rng.randf_range(0.0, 0.12))
+		basis = basis.scaled(Vector3.ONE * float(placed[i][1]))
+		transforms.append(Transform3D(basis, Vector3(where.x - origin.x, _world.height_at(where.x, where.y) - 0.06 * float(placed[i][1]), where.y - origin.y)))
+	for extra_batch in SceneryBatches.add(self, extra_mesh, transforms, 140.0):
+		register_scenery(extra_batch, "decor:extra", 140.0)
 
 
 ## Rebuild the tiny 64x64 L8 mask only when a world object disappears.
