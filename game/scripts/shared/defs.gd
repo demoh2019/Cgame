@@ -332,7 +332,7 @@ static func _build_items() -> void:
 	_add_recipe("shore_bait", "shore_bait", 2,
 		{"berries": 2, "fiber_1": 1}, "", 1.5)
 	_add_item("raw_fish", {"name": "Raw Fish", "kind": "resource", "tier": 1,
-		"stack": 20, "value": 5, "weight": 0.7})
+		"stack": 20, "value": 5, "weight": 0.7, "unsafe_food": true})
 	_add_item("cooked_fish", {"name": "Cooked Fish", "kind": "food", "food": 35.0,
 		"stack": 10, "value": 13, "weight": 0.5})
 	_add_recipe("cooked_fish", "cooked_fish", 1, {"raw_fish": 1, "wood_1": 1},
@@ -350,6 +350,7 @@ static func _build_items() -> void:
 		_add_item("raw_fish_%d" % tier, {
 			"name": "Raw Coastal Fish T%d" % tier, "kind": "resource",
 			"tier": tier, "stack": 20, "value": 5 * tier, "weight": 0.7 + 0.15 * tier,
+			"unsafe_food": true,
 		})
 		_add_item("cooked_fish_%d" % tier, {
 			"name": "Cooked Coastal Fish T%d" % tier, "kind": "food",
@@ -498,6 +499,12 @@ static func _build_items() -> void:
 		"heal": 8.0, "cure": 40.0, "stop_bleeding": true, "stack": 5, "value": 20})
 	_add_recipe("field_antiseptic", "field_antiseptic", 1,
 		{"bandage": 1, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# Raw fish offers desperate field calories but causes food poisoning.
+	# This herbal tonic is the existing safe medicine/crafting counterplay.
+	_add_item("herbal_gut_tonic", {"name": "Herbal Stomach Remedy", "kind": "medical",
+		"tier": 1, "food_poison_treatment": 75.0, "stack": 5, "value": 38, "weight": 0.25})
+	_add_recipe("herbal_gut_tonic", "herbal_gut_tonic", 1,
+		{"wild_herbs": 2, "charcoal_filter": 1, "water_bottle": 1}, "", 3.0)
 	# Tier-two expedition triage turns real wound supplies into one mixed-injury
 	# treatment. Both self-use and party aid follow existing paid medical rules.
 	_add_item("expedition_trauma_kit", {"name": "Expedition Trauma Kit",
