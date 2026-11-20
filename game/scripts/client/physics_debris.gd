@@ -20,6 +20,9 @@ const SHRINK := 0.8
 const GROUND_SIZE := 17 # Heightmap samples per side, 1 m apart.
 const RECENTER := 4.0
 const WATER_SURFACE := -0.35 # Matches the water plane in online_main (WATER_LEVEL - 0.35).
+const BLAST_WALL_MASK := 1 # World geometry (not cosmetic debris or ragdolls).
+const BLAST_WALL_ATTENUATION := 0.25 # Thick walls absorb 75% of the impulse.
+const BLAST_MAX_OCCLUSION_RAYS := 24 # One extra ray per body, bounded.
 
 var _height_at := Callable()
 var _is_water := Callable()
@@ -266,7 +269,8 @@ func eject_casing(at: Vector3, facing_yaw: float) -> bool:
 ## RadialForceField3D when compiled in, else the script sphere query below — never both.
 func blast(center: Vector3, radius: float, impulse: float) -> void:
 	if radius > 0.0 and impulse > 0.0 and center.is_finite() and is_inside_tree() \
-			and EngineFeatures.radial_push(self, center, radius, impulse, 0.6, LAYER | Ragdoll.LAYER):
+			and EngineFeatures.radial_push(self, center, radius, impulse, 0.6, LAYER | Ragdoll.LAYER,
+				BLAST_WALL_MASK, BLAST_WALL_ATTENUATION, true):
 		return
 	if radius > 0.0 and impulse > 0.0 and center.is_finite() and _blasts.size() < 8:
 		_blasts.append([center, radius, impulse])
@@ -277,6 +281,7 @@ func _apply_blasts() -> void:
 		return
 	var space := get_world_3d().direct_space_state
 	for blast_data in _blasts:
+		var occlusion_rays := 0
 		var center: Vector3 = blast_data[0]
 		var radius: float = blast_data[1]
 		var impulse: float = blast_data[2]
@@ -294,14 +299,32 @@ func _apply_blasts() -> void:
 			var push := falloff(offset.length(), radius)
 			if push <= 0.0:
 				continue
-			var direction := (offset + Vector3(0, 0.6 * radius, 0)).normalized()
+			# Mirror the native field: ray-test world collision separately
+			# from the debris/ragdoll overlap mask, using one conservative
+			# 24-query budget per explosion. Exclude the receiving body.
+			var shielding := 1.0
+			if offset.length_squared() > 0.000001 and BLAST_WALL_MASK != 0:
+				var blocked := true
+				if occlusion_rays < BLAST_MAX_OCCLUSION_RAYS:
+					var wall_ray := PhysicsRayQueryParameters3D.create(
+						center, (collider as Node3D).global_position, BLAST_WALL_MASK)
+					wall_ray.collide_with_areas = false
+					wall_ray.exclude = [(collider as PhysicsBody3D).get_rid()]
+					blocked = not space.intersect_ray(wall_ray).is_empty()
+					occlusion_rays += 1
+				shielding = BLAST_WALL_ATTENUATION if blocked else 1.0
+			if shielding <= 0.0:
+				continue
+			var outward := offset.normalized() if offset.length_squared() > 0.000001 else Vector3.UP
+			var direction := (outward + Vector3.UP * 0.6).normalized()
 			if collider is RigidBody3D:
 				var rigid := collider as RigidBody3D
 				rigid.sleeping = false
-				rigid.apply_central_impulse(direction * impulse * push * rigid.mass)
+				rigid.apply_central_impulse(direction * impulse * push * shielding * rigid.mass)
 				rigid.set_meta("asleep", 0.0)
 			else:
-				(collider as PhysicalBone3D).apply_central_impulse(direction * impulse * push)
+				var bone := collider as PhysicalBone3D
+				bone.apply_central_impulse(direction * impulse * push * shielding * bone.mass)
 	_blasts.clear()
 
 
