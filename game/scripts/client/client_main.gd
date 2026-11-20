@@ -1052,6 +1052,7 @@ func _update_hud() -> void:
 				remain += 1
 		_stats.text += "\nNIGHT HORDE: %d infected remaining; %ds left to clear" % [
 			remain, ceili(maxf(0.0, float(sim.night_horde["expires"]) - sim.time))]
+	_stats.text += "\nCARTOGRAPHY: %d island landmarks visited" % survivor.discovered_sites.size()
 	var equipped_ammo: String = str(Defs.item(survivor.inventory.weapon).get("ammo", ""))
 	if not equipped_ammo.is_empty():
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [

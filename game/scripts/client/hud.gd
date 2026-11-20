@@ -867,6 +867,9 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"site_discovered":
+			say("DISCOVERED: %s · %d island landmarks visited! Explorer XP and renown earned." % [
+				str(event.get("name", "Unknown")), int(event.get("count", 0))])
 		"recall_started":
 			say("Return charm: stand still for 8 seconds; avoid infected.")
 		"recall_cancelled":
@@ -1488,6 +1491,7 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nRETURN CHARM: channeling %ds — stand still" % ceili(return_seconds)
 	elif float(client.you.get("recall_cooldown", 0.0)) > 0.0:
 		_info_label.text += "\nRETURN CHARM cooldown: %ds" % ceili(float(client.you["recall_cooldown"]))
+	_info_label.text += "\nCARTOGRAPHY: %d landmarks mapped (J: island map)" % int(client.you.get("discovered_count", 0))
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	_contract_label.text += "\n" + str(client.you.get("daily_description", "Daily bounty pending server"))

@@ -68,6 +68,7 @@ const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
 const StealthAmbush = preload("res://scripts/shared/stealth_ambush.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
+const WorldDiscovery = preload("res://scripts/shared/world_discovery.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
@@ -132,6 +133,7 @@ class Player:
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
 	var daily_bounty: Dictionary = {} # Account-persisted UTC daily bounty, never set by clients.
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
+	var discovered_sites: Dictionary = {} # Personal authenticated landmark journal.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
 	var feast_timer: float = 0.0 # Session-only prepared group meal cooldown.
@@ -317,6 +319,7 @@ func character_data(player: Player) -> Dictionary:
 		"contracts": player.contract_state.duplicate(true),
 		"daily_bounty": player.daily_bounty.duplicate(true),
 		"renown": player.renown,
+		"discovered_sites": WorldDiscovery.to_saved(player.discovered_sites),
 		"rest_cooldown": player.rest_cooldown, "lake_drink_cooldown": player.lake_drink_cooldown,
 		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
@@ -444,6 +447,11 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	var loaded_renown: Variant = data.get("renown", 0)
 	if not Reputation.valid_points(loaded_renown):
 		return false
+	# Old characters start empty; each saved record must belong to this world seed.
+	var loaded_discoveries: Dictionary = WorldDiscovery.from_saved(
+		data.get("discovered_sites", []), world)
+	if loaded_discoveries.is_empty():
+		return false
 
 	# Characters saved before the skill tree start with a blank sheet. A sheet that is present must be consistent.
 	var loaded_skills = Skills.new()
@@ -458,6 +466,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
 	player.daily_bounty = (loaded_daily as Dictionary).duplicate(true)
 	player.renown = int(loaded_renown)
+	player.discovered_sites = loaded_discoveries["journal"]
 	player.pvp_infamy = float(data.get("pvp_infamy", 0.0))
 	player.pvp_kills = int(data.get("pvp_kills", 0))
 	player.pvp_honor = int(data.get("pvp_honor", 0))
@@ -3439,6 +3448,8 @@ func tick(delta: float) -> void:
 	_tick_trades()
 	parties.expire(time)
 	_tick_players(delta)
+	if tick_count % WorldDiscovery.SCAN_EVERY_TICKS == 0:
+		_tick_site_discoveries()
 	_tick_training()
 	if tick_count % ArenaMatchmaking.CHECK_EVERY_TICKS == 0:
 		_tick_arena_queue()
@@ -3487,6 +3498,25 @@ func _tick_recalls() -> void:
 		player.dirty_inventory = true
 		player.dirty_character = true
 		events.append({"type": "recall_completed", "peer": player.id})
+
+
+## Generated POI bounds and player coordinates are read exclusively from
+## the server simulation. No client discovery, site-ID or reward command exists.
+func _tick_site_discoveries() -> void:
+	for player in players.values():
+		if not _alive(player) or not player.position.is_finite():
+			continue
+		var found: Dictionary = WorldDiscovery.reveal(
+			world, player.position, player.discovered_sites)
+		if found.is_empty():
+			continue
+		var zone: int = int(found["zone"])
+		_award(player, "explorer", WorldDiscovery.explorer_xp(zone))
+		_earn_renown(player, WorldDiscovery.renown(zone), "landmark")
+		player.dirty_character = true
+		events.append({"type": "site_discovered", "peer": player.id,
+			"id": int(found["id"]), "name": str(found["display"]),
+			"zone": zone, "count": player.discovered_sites.size()})
 
 
 func _tick_players(delta: float) -> void:
@@ -4580,10 +4610,13 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"scavenging_xp": player.progression.scavenging_xp,
 			"combat_levels": player.progression.combat_levels(),
 			"contract": player.contract_state.duplicate(true),
+			"discovered_site_ids": WorldDiscovery.ids(player.discovered_sites),
+			"discovered_count": player.discovered_sites.size(),
 			"daily_bounty": player.daily_bounty.duplicate(true),
 			"daily_description": DailyBounties.description(player.daily_bounty, DailyBounties.utc_day()),
 			"daily_utc_day": DailyBounties.utc_day(),
 			"renown": player.renown,
+
 			"renown_rank": Reputation.title(player.renown),
 			"vendor_discount": Reputation.discount_percent(player.renown),
 			"renown_next": Reputation.next_threshold(player.renown),
