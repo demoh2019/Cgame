@@ -290,6 +290,9 @@ func _spawn_effects(event: Dictionary) -> void:
 				effects.hit_player(at)
 		"zombie_died":
 			effects.zombie_died(at)
+		"finishing_strike":
+			effects.burst(at, Color(0.95, 0.22, 0.38),
+				20, 4.3, 0.7, 0.12)
 		"attack":
 			if bool(event.get("ranged", false)):
 				effects.muzzle_flash(at + Vector3(0, 0.2, 0))
@@ -318,6 +321,9 @@ func _on_skill_event(event: Dictionary) -> void:
 			var other: Dictionary = client.players.get(int(event.get("peer", -1)), {})
 			entities.play_attack(int(event.get("peer", -1)), str(other.get("weapon", "")), bool(event.get("ranged", false)))
 	match event["type"]:
+		"finishing_strike":
+			if int(event.get("peer", -1)) == client.peer_id:
+				hud.say("FINISHING STRIKE — wounded infected!")
 		"xp":
 			var parts: Array[String] = []
 			for skill_id in event["gains"]:

@@ -206,6 +206,16 @@ static func _build_items() -> void:
 		_add_recipe("machete_%d" % t, "machete_%d" % t, 1,
 			{"plank_%d" % t: 2, "bar_%d" % t: 2, "scrap": 1},
 			"workbench", 6.0)
+		# Swift scavenger blades give a fragile melee combatant a paid
+		# precision finisher against an already wounded infected.
+		_add_item("dagger_%d" % t, {"name": "Ruin Dagger T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 11.0 + 6.0 * float(t - 1), "cooldown": 0.55,
+			"weight": 1.5 + 0.15 * float(t), "value": 49 * t})
+		_add_recipe("dagger_%d" % t, "dagger_%d" % t, 1,
+			{"bar_%d" % t: 2, "plank_%d" % t: 1,
+				"cloth_%d" % t: 1, "scrap": 1},
+			"workbench", 5.0)
 		# Weighted metal head: slower than a club, but its equipment-granted
 		# blow can briefly stagger living infected (never raid bosses).
 		_add_item("sledgehammer_%d" % t, {"name": "Salvage Sledgehammer T%d" % t,

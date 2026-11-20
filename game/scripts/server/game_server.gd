@@ -26,6 +26,7 @@ const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
+const FinishingStrike = preload("res://scripts/shared/finishing_strike.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
 const SiegeContracts = preload("res://scripts/shared/siege_contracts.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
@@ -3351,6 +3352,7 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var use_line: bool = ranged or (max_hits > 1 and not skill.has("cleave_targets"))
 	var ignored: Dictionary = {}
 	var count := 0
+	var finishers := 0
 	var first_target: String = ""
 	var skilled_damage: float = float(skill["damage"]) * player.progression.combat_damage_multiplier(weapon) \
 		* (1.0 + player.skills.bonus("ranged_damage" if ranged else "melee_damage"))
@@ -3361,7 +3363,22 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		ignored[str(hit["kind"]) + ":" + str(hit["id"])] = true
 		if count == 0:
 			first_target = str(hit["kind"])
-		_damage_target(player, hit, skilled_damage, "ranged" if ranged else "melee")
+		# Execute bonus is resolved on pre-hit infected health. Do not use
+		# client health/target IDs, and never boost damage against survivors.
+		var hit_damage: float = skilled_damage
+		if hit["kind"] == "zombie" and skill.has("execute_threshold"):
+			var marked = zombies.get(hit["id"])
+			if marked != null and marked.is_alive():
+				var multiplier: float = FinishingStrike.multiplier(
+					marked.health, float(marked.data.get("health", 0.0)),
+					marked.elite, marked.raid_boss)
+				if multiplier > 1.0:
+					hit_damage *= multiplier
+					finishers += 1
+					events.append({"type": "finishing_strike",
+						"peer": peer_id, "id": marked.id,
+						"x": marked.position.x, "z": marked.position.z})
+		_damage_target(player, hit, hit_damage, "ranged" if ranged else "melee")
 		# PvE-only crowd control follows a real resolved hit. Never stun players,
 		# corpses or raid bosses, and never trust client-provided stun duration.
 		if hit["kind"] == "zombie" and skill.has("stagger_seconds"):
@@ -3396,7 +3413,8 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		return {"ok": true, "hit": false, "hits": 0,
 			"cover_hit": cover_hit, "energy": player.combat_energy}
 	return {"ok": true, "hit": true, "target": first_target,
-		"hits": count, "energy": player.combat_energy}
+		"hits": count, "finishers": finishers,
+		"energy": player.combat_energy}
 
 
 ## Classless evasion: no client-supplied distance, speed, stamina or invulnerability.
