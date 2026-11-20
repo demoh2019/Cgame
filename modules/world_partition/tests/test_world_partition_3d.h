@@ -538,6 +538,9 @@ TEST_CASE("[SceneTree][WorldPartition3D] Prediction loads a future cell before o
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->is_cell_loaded(Vector2i(1, 0)));
 	CHECK(partition->get_loaded_cell_count() == 2);
+	CHECK(partition->is_cell_physics_active(Vector2i(0, 0)));
+	CHECK(partition->is_cell_physics_active(Vector2i(1, 0)));
+	CHECK(partition->get_physics_active_cell_count() == 2);
 	CHECK(partition->set_streaming_source("arrival", Vector3(16.0, 0.0, 0.0)));
 	CHECK(partition->get_streaming_source_cell_count("arrival") == 1);
 	CHECK(partition->get_streaming_source_loaded_cell_count("arrival") == 1);
@@ -577,6 +580,8 @@ TEST_CASE("[SceneTree][WorldPartition3D] Prediction loads a future cell before o
 	partition->update_streaming();
 	CHECK_FALSE(partition->has_predicted_cell());
 	CHECK_FALSE(partition->is_cell_loaded(Vector2i(1, 0)));
+	CHECK_FALSE(partition->is_cell_physics_active(Vector2i(1, 0)));
+	CHECK_FALSE(partition->is_cell_physics_ready(Vector2i(1, 0)));
 	CHECK(partition->get_cell_instance(Vector2i(1, 0)) == nullptr);
 	CHECK_FALSE(partition->is_cell_activation_ready(Vector2i(1, 0)));
 	CHECK(partition->get_cell_instance(Vector2i(0, 0)) == loaded_origin);
@@ -729,6 +734,40 @@ TEST_CASE("[WorldPartition3D] Physics activation frame fence validates bounds") 
 	CHECK(partition->get_min_physics_frames_after_load() == 8);
 	CHECK_FALSE(partition->is_streaming_source_activation_ready("absent"));
 	memdelete(partition);
+}
+
+TEST_CASE("[WorldPartition3D] Physics collision tiers validate ranges and unknown cells") {
+	WorldPartition3D *world = memnew(WorldPartition3D);
+	CHECK(world->get_physics_radius() == -1);
+	CHECK(world->get_physics_hysteresis_cells() == 1);
+	CHECK(world->get_max_physics_transitions_per_frame() == 2);
+	CHECK_FALSE(world->is_cell_physics_active(Vector2i(3, -2)));
+	CHECK_FALSE(world->is_cell_physics_ready(Vector2i(3, -2)));
+	CHECK(world->get_physics_active_cell_count() == 0);
+	CHECK_FALSE(world->is_streaming_source_physics_ready("missing"));
+	world->set_physics_radius(0);
+	world->set_physics_hysteresis_cells(2);
+	world->set_max_physics_transitions_per_frame(1);
+	CHECK(world->get_physics_radius() == 0);
+	CHECK(world->get_physics_hysteresis_cells() == 2);
+	CHECK(world->get_max_physics_transitions_per_frame() == 1);
+	world->set_physics_radius(32);
+	world->set_physics_hysteresis_cells(8);
+	world->set_max_physics_transitions_per_frame(64);
+	ERR_PRINT_OFF;
+	world->set_physics_radius(-2);
+	world->set_physics_radius(33);
+	world->set_physics_hysteresis_cells(-1);
+	world->set_physics_hysteresis_cells(9);
+	world->set_max_physics_transitions_per_frame(0);
+	world->set_max_physics_transitions_per_frame(65);
+	ERR_PRINT_ON;
+	CHECK(world->get_physics_radius() == 32);
+	CHECK(world->get_physics_hysteresis_cells() == 8);
+	CHECK(world->get_max_physics_transitions_per_frame() == 64);
+	world->set_physics_radius(-1);
+	CHECK(world->get_physics_radius() == -1);
+	memdelete(world);
 }
 
 } // namespace TestWorldPartition3D
