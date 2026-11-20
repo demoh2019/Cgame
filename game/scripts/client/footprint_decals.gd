@@ -34,7 +34,9 @@ static func surface_kind(level: int, renderer: String, storm: float,
 		return ""
 	if biome == "mountain" and elevation >= 88.0:
 		return "snow"
-	if storm >= 0.32 and biome in ["forest", "swamp", "plains", "beach"]:
+	# Swamp earth remains damp even after the rain stops; other soils
+	# need a recent storm before they can hold a dark footprint.
+	if biome == "swamp" or (storm >= 0.32 and biome in ["forest", "plains", "beach"]):
 		return "mud"
 	return ""
 
@@ -94,7 +96,7 @@ func _get_decal(level: int) -> int:
 	if _decals.size() < limit:
 		var mark := Decal.new()
 		mark.name = "GroundFootprint%02d" % _decals.size()
-		mark.size = Vector3(0.48, 0.26, 0.82)
+		mark.size = Vector3(0.48, 0.60, 0.82)
 		mark.normal_fade = 0.85
 		mark.distance_fade_enabled = true
 		mark.distance_fade_begin = 27.0
@@ -117,13 +119,13 @@ func _stamp(at: Vector3, heading: Vector2, kind: String, level: int) -> void:
 	_left = not _left
 	var lateral: Vector2 = Vector2(-heading.y, heading.x)
 	var side: float = -0.14 if _left else 0.14
-	var projected: Vector3 = at + Vector3(lateral.x * side, 0.1, lateral.y * side)
+	var projected: Vector3 = at + Vector3(lateral.x * side, 0.20, lateral.y * side)
 	if _world != null and _world.has_method("height_at"):
 		var ground: float = float(_world.call("height_at", projected.x, projected.z))
 		# Do not paint mid-air or across high cliffs when the actor falls.
 		if absf(ground - at.y) > 1.2:
 			return
-		projected.y = ground + 0.10
+		projected.y = ground + 0.20
 	var i: int = _get_decal(level)
 	var mark: Decal = _decals[i]
 	mark.global_position = projected
