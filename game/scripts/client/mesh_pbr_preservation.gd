@@ -64,6 +64,11 @@ static func material_for_bake(source: Material, tangent_frame_valid: bool, dunge
 	if not (source is BaseMaterial3D):
 		return source
 	var result := (source as BaseMaterial3D).duplicate() as BaseMaterial3D
+	# Better glancing-angle detail on imported glTF PBR surfaces without extra
+	# texture fetches in shaders. The viewport presets cap anisotropy at 2/4/8/16x.
+	# Do not override intentionally pixelated or explicitly anisotropic art.
+	if result.texture_filter == BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS:
+		result.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	if result.normal_enabled and not tangent_frame_valid:
 		result.normal_enabled = false
 	if dungeon_style:

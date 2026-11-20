@@ -10,6 +10,14 @@ func run(t) -> void:
 	t.eq(GraphicsQuality.profile(-1), GraphicsQuality.profile(0), "below range clamps to Performance")
 	t.eq(GraphicsQuality.profile(99), GraphicsQuality.profile(3), "above range clamps to Ultra")
 	t.check(not GraphicsQuality.profile(0)["shadows"], "Performance omits shadow maps")
+	t.eq(GraphicsQuality.profile(0)["anisotropy"], Viewport.ANISOTROPY_2X,
+		"Performance uses affordable anisotropy")
+	t.eq(GraphicsQuality.profile(1)["anisotropy"], Viewport.ANISOTROPY_4X,
+		"Balanced keeps baseline 4x")
+	t.eq(GraphicsQuality.profile(2)["anisotropy"], Viewport.ANISOTROPY_8X,
+		"High improves ground angle sampling")
+	t.eq(GraphicsQuality.profile(3)["anisotropy"], Viewport.ANISOTROPY_16X,
+		"Ultra resolves oblique terrain texture detail")
 	t.check(GraphicsQuality.profile(0)["blur_quality"] == 0, "Performance uses one screen sample")
 	t.check(GraphicsQuality.profile(1)["blur_quality"] == 1, "Balanced uses five screen samples")
 	t.check(GraphicsQuality.profile(2)["blur_quality"] == 2, "High retains the nine-sample diorama")

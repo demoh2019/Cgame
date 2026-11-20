@@ -73,6 +73,10 @@ func run(t) -> void:
 	t.check(baked.roughness_texture == roughness_texture, "source roughness map stays attached")
 	t.near(baked.metallic, 0.87, 0.0001, "authored metal reflectance is no longer clamped")
 	t.near(baked.roughness, 0.27, 0.0001, "authored microfacet roughness is preserved")
+	t.eq(baked.texture_filter, BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC,
+		"baked imported PBR materials opt into viewport-scaled anisotropy")
+	t.eq(source.texture_filter, BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS,
+		"original imported material filtering stays intact")
 	t.check(source.normal_enabled, "original imported material is untouched")
 	var fallback: BaseMaterial3D = MeshPBR.material_for_bake(source, false)
 	t.check(not fallback.normal_enabled, "normal mapping disables safely without tangents")
