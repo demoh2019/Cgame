@@ -37,6 +37,7 @@ const SUITES := [
 	"res://tests/test_postprocess_sharpen.gd",
 	"res://tests/test_postprocess_deband.gd",
 	"res://tests/test_cinematic_color_grade.gd",
+	"res://tests/test_cinematic_bloom.gd",
 	"res://tests/test_graphics_dynamic_resolution.gd",
 	"res://tests/test_graphics_indirect_lighting.gd",
 	"res://tests/test_graphics_eye_adaptation.gd",

@@ -5,6 +5,7 @@ const SkyFogHarmony = preload("res://scripts/client/sky_fog_harmony.gd")
 const WaterCaustics = preload("res://scripts/client/water_caustics.gd")
 const Moisture = preload("res://scripts/client/weather_surface_memory.gd")
 const CinematicColorGrade = preload("res://scripts/client/cinematic_color_grade.gd")
+const CinematicBloom = preload("res://scripts/client/cinematic_bloom.gd")
 const VegetationWind = preload("res://scripts/client/vegetation_wind.gd")
 const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
 const SunShadowQuality = preload("res://scripts/client/sun_shadow_quality.gd")
@@ -44,6 +45,11 @@ var _surface_wetness := 0.0
 var _shadow_filter_level := 1
 var _shadow_filter_seconds := 0.25
 const SHADOW_FILTER_INTERVAL := 0.25
+# 5Hz native Glow parameter updates suffice for slowly changing sky/light.
+const BLOOM_INTERVAL := 0.20
+var _bloom_elapsed := BLOOM_INTERVAL
+var _bloom_quality := 1
+var _bloom_method := "gl_compatibility"
 var _visual_biome_settings: Dictionary = {}
 var light_level := 1.0 # The daylight of the last update, 0 at night and 1 at noon.
 var storm := 0.0 # 0..1, eased toward the target so the weather fades in and out.
@@ -260,6 +266,11 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		_fog_profile, fog_horizon, _visual_biome_settings)
 	# Run the ACES-grade after atmospheric weather/fog, without replacing fog state.
 	CinematicColorGrade.apply(environment, daylight, sun_height, storm)
+	_bloom_elapsed += maxf(delta, 0.0)
+	if _bloom_elapsed >= BLOOM_INTERVAL:
+		_bloom_elapsed = fmod(_bloom_elapsed, BLOOM_INTERVAL)
+		CinematicBloom.apply(environment, _bloom_quality, _bloom_method,
+			daylight, sun_height, storm)
 	# Render only: two short flashes from the real lightning_struck event.
 	# We only modify the existing sun, ambient and fog after their normal update.
 	var amount: float = LightningFlash.sample(_lightning_elapsed,
@@ -287,6 +298,9 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	_shadows_allowed = bool(settings["shadows"])
 	_cloud_shadows_allowed = bool(settings.get("cloud_shadows", true))
 	_shadow_filter_level = clampi(int(settings.get("quality_level", 1)), 0, 3)
+	_bloom_quality = _shadow_filter_level
+	_bloom_method = str(settings.get("rendering_method", "gl_compatibility"))
+	_bloom_elapsed = BLOOM_INTERVAL
 	_lightning_quality = _shadow_filter_level
 	_shadow_filter_seconds = SHADOW_FILTER_INTERVAL
 	GraphicsEyeAdaptation.apply(world_environment, _shadow_filter_level,
