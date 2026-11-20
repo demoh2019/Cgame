@@ -665,7 +665,13 @@ Light3D::~Light3D() {
 /////////////////////////////////////////
 
 void DirectionalLight3D::set_shadow_mode(ShadowMode p_mode) {
+	ERR_FAIL_COND_MSG(p_mode != SHADOW_ORTHOGONAL && p_mode != SHADOW_PARALLEL_2_SPLITS && p_mode != SHADOW_PARALLEL_4_SPLITS, "Unsupported directional light shadow mode.");
+	// The first setter call from the constructor must still configure the renderer.
+	if (shadow_mode_initialized && shadow_mode == p_mode) {
+		return;
+	}
 	shadow_mode = p_mode;
+	shadow_mode_initialized = true;
 	RS::get_singleton()->light_directional_set_shadow_mode(light, RSE::LightDirectionalShadowMode(p_mode));
 	notify_property_list_changed();
 }

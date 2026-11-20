@@ -197,6 +197,7 @@ public:
 private:
 	bool blend_splits;
 	ShadowMode shadow_mode;
+	bool shadow_mode_initialized = false;
 	SkyMode sky_mode = SKY_MODE_LIGHT_AND_SKY;
 
 protected:
