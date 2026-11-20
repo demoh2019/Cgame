@@ -1,5 +1,5 @@
 // Cheap foliage thin-sheet spectral transport approximation.
-// A rational Beer-Lambert fit avoids three exp() instructions and samples
+// A rational Beer-Lambert fit avoids costly exponential evaluations and samples
 // NO new textures. Color pigment and geometric thickness approximate veins.
 // The scene's existing BACKLIGHT supplies real per-light color/shadows.
 vec3 aa_foliage_spectral_filter(vec3 pigment, float thickness, float strength) {
