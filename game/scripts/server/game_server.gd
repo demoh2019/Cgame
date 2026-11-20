@@ -3979,11 +3979,10 @@ func cmd_collect_rain(peer_id: int) -> Dictionary:
 
 ## Lake water hydrates but can infect: clean bottles remain a risk-free alternative.
 ## Filtration is item-paid, never a free client flag or cure.
-## Bottle clean water at an actual shore; the canteen stays in inventory,
-## while a real filter is spent only after an atomic slot-capacity check.
-## Shares the persisted lake-water cooldown to prevent alternating/refill spam
-## and reconnect bypass. Clients cannot choose bottles, count or freshness.
-func cmd_refill_canteen(peer_id: int) -> Dictionary:
+## Bottle clean water at an actual shore with either a charcoal filter or
+## two wood beside a LIVE campfire. Shared persisted cooldown prevents
+## alternating methods and reconnect bypass. The client chooses only method.
+func cmd_refill_canteen(peer_id: int, boil: bool = false) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
@@ -3991,14 +3990,17 @@ func cmd_refill_canteen(peer_id: int) -> Dictionary:
 		return {"ok": false, "reason": "cooldown", "remaining": player.lake_drink_cooldown}
 	if not FieldWater.can_access_lake(world, player.position):
 		return {"ok": false, "reason": "no_water"}
-	var result: String = FieldCanteen.fill(player.inventory)
+	if boil and not FieldCanteen.can_boil(campfires, player.position, time):
+		return {"ok": false, "reason": "no_fire"}
+	var result: String = (FieldCanteen.boil(player.inventory) if boil
+		else FieldCanteen.fill(player.inventory))
 	if result != "":
 		return {"ok": false, "reason": result}
 	player.lake_drink_cooldown = FieldWater.COOLDOWN_SECONDS
 	player.dirty_inventory = true
 	player.dirty_character = true
 	return {"ok": true, "item": FieldCanteen.OUTPUT_ITEM, "count": 1,
-		"cooldown": player.lake_drink_cooldown}
+		"boiled": boil, "cooldown": player.lake_drink_cooldown}
 
 
 func cmd_drink_water(peer_id: int) -> Dictionary:
