@@ -391,6 +391,10 @@ public:
 	float get_fog_light_energy() const;
 	void set_fog_sun_scatter(float p_amount);
 	float get_fog_sun_scatter() const;
+	// A single renderer update for synchronised weather/biome fog state.
+	// Reduces five Environment setters per weather tick to one transaction.
+	void configure_weather_fog(const Color &p_color, float p_density, float p_height,
+			float p_height_density, float p_sun_scatter);
 
 	void set_fog_density(float p_amount);
 	float get_fog_density() const;
