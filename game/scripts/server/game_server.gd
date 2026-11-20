@@ -49,6 +49,7 @@ const EquipmentPresets = preload("res://scripts/shared/equipment_presets.gd")
 const ExpeditionLoadout = preload("res://scripts/shared/expedition_loadout.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
+const CraftFromStash = preload("res://scripts/shared/craft_from_stash.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
 const FieldWhetstone = preload("res://scripts/shared/field_whetstone.gd")
 const MiningWedges = preload("res://scripts/shared/mining_wedges.gd")
@@ -1158,7 +1159,8 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 	return {"ok": true, "seconds": total}
 
 
-func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
+func cmd_craft(peer_id: int, recipe_id: String, times: int = 1,
+		from_stash: bool = false) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
@@ -1166,6 +1168,10 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 		return {"ok": false, "reason": "mounted"}
 	if not player.recall.is_empty():
 		return {"ok": false, "reason": "recall_channeling"}
+	# Using account-protected items is an exclusive hub bank privilege,
+	# never available at rural benches, field outposts or wilderness fires.
+	if from_stash and not _market_at_hub(player):
+		return {"ok": false, "reason": "no_station"}
 	times = clampi(times, 1, 50)
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	if recipe.is_empty():
@@ -1178,7 +1184,10 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 		or territory.has_field_workbench(peer_id, players, parties, time))
 	var at_fire: bool = String(recipe["station"]) == "campfire" and FieldCampfire.has_warmth(
 			campfires, player.position, time)
-	var status: int = Crafting.craft(player.inventory, recipe_id, at_bench, times, at_fire)
+	var status: int = CraftFromStash.craft(
+		player.inventory, player.stash, recipe_id, times
+	) if from_stash else Crafting.craft(
+		player.inventory, recipe_id, at_bench, times, at_fire)
 	if status == Crafting.Result.OK:
 		player.progression.award_craft(recipe_tier, times)
 		_award(player, "crafting", 8.0 * float(recipe_tier) * float(times))
@@ -1187,10 +1196,15 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 		for batch in times:
 			if not input_ids.is_empty() and rng.randf() < player.skills.bonus("craft_refund"):
 				player.inventory.add(String(input_ids[rng.randi() % input_ids.size()]), 1)
+		player.inventory.unequip_missing()
 		player.dirty_inventory = true
+		if from_stash:
+			player.dirty_stash = true
 		player.dirty_character = true
-		return {"ok": true}
-	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status]}
+		return {"ok": true, "recipe": recipe_id, "times": times,
+			"from_stash": from_stash}
+	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status],
+		"from_stash": from_stash}
 
 
 ## Recycle unused equipment at the settlement workbench.

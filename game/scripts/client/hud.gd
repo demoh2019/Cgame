@@ -47,6 +47,7 @@ var _craft_panel: PanelContainer
 var _craft_list: VBoxContainer
 var _craft_search: LineEdit
 var _craft_ready_only: CheckBox
+var _craft_use_stash: CheckBox
 var _craft_result_count: Label
 var _salvage_item: OptionButton
 var _death: Label
@@ -1060,6 +1061,13 @@ func _build() -> void:
 		_craft_signature = ""
 		_refresh_crafting())
 	craft_controls.add_child(_craft_ready_only)
+	_craft_use_stash = CheckBox.new()
+	_craft_use_stash.text = "Use bank"
+	_craft_use_stash.tooltip_text = "Craft with carried + protected stash materials at the main HUB workbench only. Finished items enter your backpack. Cannot use at other villages or field stations."
+	_craft_use_stash.toggled.connect(func(_value: bool) -> void:
+		_craft_signature = ""
+		_refresh_crafting())
+	craft_controls.add_child(_craft_use_stash)
 	_craft_result_count = Label.new()
 	craft_box.add_child(_craft_result_count)
 	var scroll := ScrollContainer.new()
@@ -1502,6 +1510,27 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Siege defusal successful; one toolkit spent, wall safe.")
 		else:
 			say("Defusal: %s (kit not spent)." % str(data.get("reason", "rejected")))
+		return
+	if kind == "craft_stash":
+		if bool(data.get("ok", false)):
+			var made_id: String = str(data.get("recipe", ""))
+			var recipe: Dictionary = Defs.recipes().get(made_id, {})
+			say("Crafted from bank: %d × %s, materials debited safely." % [
+				int(data.get("times", 1)) * int(recipe.get("count", 1)),
+				str(Defs.item(str(recipe.get("output", ""))).get("name", made_id))])
+		else:
+			var errors := {
+				"dead": "unavailable while dead",
+				"mounted": "dismount first",
+				"recall_channeling": "finish recall first",
+				"no_station": "only at the hub workbench",
+				"unknown_recipe": "unknown recipe",
+				"need_skill": "crafting level too low",
+				"missing_inputs": "materials missing from both containers",
+				"no_space": "backpack has no room for the finished items",
+			}
+			say("Craft from bank: %s" % str(errors.get(
+				str(data.get("reason", "")), "rejected")))
 		return
 	if kind == "equipment_preset":
 		if bool(data.get("ok", false)):
@@ -2801,8 +2830,10 @@ func _refresh_inventory() -> void:
 func _refresh_crafting() -> void:
 	# Every slot counts: changes to fish, ore, medicine etc must refresh recipes,
 	# not only the old special case of wood_1.
+	var use_bank: bool = _craft_use_stash.button_pressed
 	var signature := str(client.inventory.slots) + str(client.you.get("crafting_level", 1)) \
-		+ _craft_search.text + str(_craft_ready_only.button_pressed)
+		+ _craft_search.text + str(_craft_ready_only.button_pressed) \
+		+ str(use_bank) + (str(client.stash.slots) if use_bank else "")
 	if signature == _craft_signature:
 		return
 	_craft_signature = signature
@@ -2810,8 +2841,10 @@ func _refresh_crafting() -> void:
 		child.queue_free()
 	var entries: Array[Dictionary] = CraftingCatalog.entries(
 		client.inventory, _craft_search.text, _craft_ready_only.button_pressed,
-		int(client.you.get("crafting_level", 1)))
-	_craft_result_count.text = "%d recipes | Click to craft one, MAX for a material-and-space-safe batch (limit 50)." % entries.size()
+		int(client.you.get("crafting_level", 1)),
+		client.stash if use_bank else null)
+	_craft_result_count.text = "%d recipes | %s | MAX is a safe batch (limit 50)." % [
+		entries.size(), "Hub bank materials + backpack" if use_bank else "Backpack materials only"]
 	if entries.is_empty():
 		var empty := Label.new()
 		empty.text = "No matching recipes. Try fewer words or disable the filter."
@@ -2838,13 +2871,21 @@ func _refresh_crafting() -> void:
 		button.disabled = not ready
 		if not ready:
 			button.text += " [Lv%d]" % int(entry["tier"]) if bool(entry["skill_locked"]) else " [missing ingredients / space]"
-		button.pressed.connect(func() -> void: client.craft(recipe_id, 1))
+		button.pressed.connect(func() -> void:
+			if use_bank:
+				client.craft_from_stash(recipe_id, 1)
+			else:
+				client.craft(recipe_id, 1))
 		row.add_child(button)
 		var amount: int = int(entry["max_batches"])
 		if ready and amount > 1:
 			var max_button := Button.new()
 			max_button.text = "MAX x%d" % amount
 			max_button.tooltip_text = "Craft %d batches in one validated server request (no partial material consumption)." % amount
-			max_button.pressed.connect(func() -> void: client.craft(recipe_id, amount))
+			max_button.pressed.connect(func() -> void:
+				if use_bank:
+					client.craft_from_stash(recipe_id, amount)
+				else:
+					client.craft(recipe_id, amount))
 			row.add_child(max_button)
 		_craft_list.add_child(row)

@@ -276,6 +276,10 @@ func craft(recipe: String, times: int = 1) -> void:
 	net.c_craft.rpc_id(1, recipe, times)
 
 
+func craft_from_stash(recipe: String, times: int = 1) -> void:
+	net.c_craft_from_stash.rpc_id(1, recipe, times)
+
+
 func salvage_gear(item_id: String) -> void:
 	net.c_salvage_gear.rpc_id(1, item_id)
 
