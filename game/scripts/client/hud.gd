@@ -2213,6 +2213,9 @@ func _process(_delta: float) -> void:
 				_info_label.text += " — ease damage or let guardian hold!"
 		if bool(raid_aggro.get("taunted", false)):
 			_info_label.text += " | GUARDIAN TAUNT %.1fs" % float(raid_aggro.get("taunt_seconds", 0.0))
+	var wedge_left: int = int(client.you.get("mining_wedge_charges", 0))
+	if wedge_left > 0:
+		_info_label.text += "\nMINING WEDGES: %d T2+ vein bonuses left (+2 ore/stone, noise 42m)" % wedge_left
 	var insulation_left: float = float(client.you.get("storm_insulator_seconds", 0.0))
 	if insulation_left > 0.0:
 		_info_label.text += "\nSTORM INSULATION %.0fs | -60%% bolt damage" % insulation_left
