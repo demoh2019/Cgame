@@ -108,6 +108,11 @@ func run(t) -> void:
 	t.check(sim.apply_character(ally, saved), "recipient reload keeps spent buff")
 	t.near(ally.wound_seal_seconds, WoundSealant.DURATION_SECONDS, 0.001,
 		"cannot relog to restart timing")
+	# Remove other survivors from zombie sensing before the hit so this
+	# test exercises the actually protected target, not aggro rerouting.
+	var old_medic_position: Vector3 = medic.position
+	medic.position = Vector3(450.0, world.height_at(450.0, 450.0), 450.0)
+	outsider.position = Vector3(460.0, world.height_at(460.0, 460.0), 460.0)
 	sim.zombies.clear()
 	var infected := Zombie.new(sim.new_id(), "walker",
 		ally.position + Vector3(1.1, 0.0, 0.0))
@@ -122,6 +127,7 @@ func run(t) -> void:
 		"bite bleed is not mitigated")
 	ally.survival.reset()
 	ally.wound_seal_seconds = 0.0
+	medic.position = old_medic_position
 	medic.party_aid_timer = 0.0
 	t.check(sim.cmd_party_aid(medic.id, ally.id, WoundSealant.ITEM_ID).get("ok", false),
 		"a fresh dose can be applied after protection expires")
