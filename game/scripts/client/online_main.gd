@@ -1179,7 +1179,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					else:
 						client.collect_fish_trap(fish_trap_id)
 			KEY_Q:
-				_interact()
+				if Input.is_key_pressed(KEY_SHIFT) and not hud.is_menu_open():
+					client.loot_sweep()
+				else:
+					_interact()
 			KEY_1:
 				if Input.is_key_pressed(KEY_ALT):
 					var raw_item := ""
@@ -1254,7 +1257,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					chat_edit.visible = true
 					chat_edit.grab_focus()
 			KEY_E:
-				_interact()
+				if Input.is_key_pressed(KEY_SHIFT) and not hud.is_menu_open():
+					client.loot_sweep()
+				else:
+					_interact()
 			KEY_F:
 				client.drink()
 			KEY_F1:

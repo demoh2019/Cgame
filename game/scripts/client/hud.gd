@@ -260,6 +260,12 @@ func _build() -> void:
 	var inventory_title := Label.new()
 	inventory_title.text = "Inventory: click = use/equip, right-click = bank one (at hub workbench)"
 	inventory_box.add_child(inventory_title)
+	var sweep_button := Button.new()
+	sweep_button.name = "CollectNearbyPveLoot"
+	sweep_button.text = "Collect nearby PvE bags (Shift+E / Shift+Q)"
+	sweep_button.tooltip_text = "Up to five eligible ordinary infected drops. Raids, full-loot PvP and guarded cargo remain manual."
+	sweep_button.pressed.connect(func() -> void: client.loot_sweep())
+	inventory_box.add_child(sweep_button)
 	var preset_title := Label.new()
 	preset_title.text = "Gear presets: save / equip / clear at safe hub workbench"
 	inventory_box.add_child(preset_title)
@@ -2879,6 +2885,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 					roundi(float(data.get("bleeding_stopped", 0.0)))])
 		else:
 			say("Field aid / share denied: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "loot_sweep":
+		if bool(data.get("ok", false)):
+			say("PICKUP: %d items from %d PvE bags (%d emptied)." % [
+				int(data.get("items", 0)), int(data.get("bags", 0)), int(data.get("emptied", 0))])
+		else:
+			say("Nearby pickup: %s." % str(data.get("reason", "rejected")))
 		return
 	if kind == "loot" and str(data.get("reason", "")) == "guards_alive":
 		say("Cache sealed: eliminate %d infected guards." % int(data.get("remaining", 0)))
