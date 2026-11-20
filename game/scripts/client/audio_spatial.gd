@@ -10,10 +10,6 @@ const MUFFLED_CUTOFF := 1400.0
 const OCCLUDED_GAIN_DB := -8.0
 
 
-static func occlusion_gain_db(blocked: bool) -> float:
-	return OCCLUDED_GAIN_DB if blocked else 0.0
-
-
 
 ## True when the straight line from listener to source dips below the terrain somewhere between them.
 static func terrain_blocked(from: Vector3, to: Vector3, height_at: Callable, steps: int = 8, margin: float = 0.4) -> bool:
@@ -46,7 +42,7 @@ static func obstruction_cutoff(base_cutoff: float, amount: float) -> float:
 
 static func obstruction_db(amount: float) -> float:
 	var weight: float = clampf(amount if is_finite(amount) else 0.0, 0.0, 1.0)
-	return -8.0 * weight
+	return OCCLUDED_GAIN_DB * weight
 
 
 ## Bus low-pass target for the listener: muffled underground, slightly dulled in a storm.
