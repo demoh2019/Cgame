@@ -85,6 +85,9 @@ private:
 	real_t skirt_depth = 4.0;
 	Ref<Material> material;
 	bool cast_shadows = true;
+	// The RID-backed heightfield is static and can contribute to SDFGI without
+	// becoming a shadow caster. Off by default for non-GI projects.
+	bool contribute_to_gi = false;
 	bool collision_enabled = true;
 	real_t collision_distance = 128.0;
 	uint32_t collision_layer = 1;
@@ -160,6 +163,8 @@ public:
 	Ref<Material> get_material() const { return material; }
 	void set_cast_shadows(bool p_enabled);
 	bool get_cast_shadows() const { return cast_shadows; }
+	void set_contribute_to_gi(bool p_enabled);
+	bool is_contributing_to_gi() const { return contribute_to_gi; }
 	void set_collision_enabled(bool p_enabled);
 	bool is_collision_enabled() const { return collision_enabled; }
 	void set_collision_distance(real_t p_distance);
