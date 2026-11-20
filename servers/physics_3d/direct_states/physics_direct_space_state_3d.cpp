@@ -33,6 +33,57 @@
 #include "core/object/class_db.h"
 #include "core/variant/typed_array.h"
 
+// Keep the same dictionary contract for individual and batched rays.
+static Dictionary _ray_result_dictionary(const PS3DT::RayResult &p_result) {
+	Dictionary d;
+	d["position"] = p_result.position;
+	d["normal"] = p_result.normal;
+	d["face_index"] = p_result.face_index;
+	d["collider_id"] = p_result.collider_id;
+	d["collider"] = p_result.get_collider();
+	d["shape"] = p_result.shape;
+	d["rid"] = p_result.rid;
+	return d;
+}
+
+TypedArray<Dictionary> PhysicsDirectSpaceState3D::_intersect_rays(const Array &p_ray_queries) {
+	// API guard: this is synchronous physics work, not async GPU ray tracing.
+	// Prevent callers from accidentally scheduling an unbounded number of
+	// world queries in a single physics frame.
+	constexpr int MAX_BATCH_RAYS = 32;
+	ERR_FAIL_COND_V_MSG(p_ray_queries.size() > MAX_BATCH_RAYS, TypedArray<Dictionary>(),
+			"intersect_rays accepts at most 32 ray query parameters per call.");
+
+	// Validate all input before querying, so malformed arrays never return
+	// partial results or dereference an invalid typed resource.
+	for (int i = 0; i < p_ray_queries.size(); i++) {
+		const Variant value = p_ray_queries[i];
+		ERR_FAIL_COND_V_MSG(value.get_type() != Variant::OBJECT, TypedArray<Dictionary>(),
+				"intersect_rays elements must be PhysicsRayQueryParameters3D instances.");
+		Object *object = value;
+		const PhysicsRayQueryParameters3D *query = Object::cast_to<PhysicsRayQueryParameters3D>(object);
+		ERR_FAIL_NULL_V_MSG(query, TypedArray<Dictionary>(),
+				"intersect_rays elements must be non-null PhysicsRayQueryParameters3D instances.");
+		const PS3DT::RayParameters &parameters = query->get_parameters();
+		ERR_FAIL_COND_V_MSG(!parameters.from.is_finite() || !parameters.to.is_finite(), TypedArray<Dictionary>(),
+				"intersect_rays requires finite ray endpoints.");
+	}
+
+	TypedArray<Dictionary> results;
+	results.resize(p_ray_queries.size());
+	for (int i = 0; i < p_ray_queries.size(); i++) {
+		Object *object = p_ray_queries[i];
+		const PhysicsRayQueryParameters3D *query = Object::cast_to<PhysicsRayQueryParameters3D>(object);
+		PS3DT::RayResult ray_hit;
+		if (intersect_ray(query->get_parameters(), ray_hit)) {
+			results[i] = _ray_result_dictionary(ray_hit);
+		} else {
+			results[i] = Dictionary();
+		}
+	}
+	return results;
+}
+
 Dictionary PhysicsDirectSpaceState3D::_intersect_ray(RequiredParam<PhysicsRayQueryParameters3D> p_ray_query) {
 	EXTRACT_PARAM_OR_FAIL_V(ray_query, p_ray_query, Dictionary());
 
@@ -43,16 +94,7 @@ Dictionary PhysicsDirectSpaceState3D::_intersect_ray(RequiredParam<PhysicsRayQue
 		return Dictionary();
 	}
 
-	Dictionary d;
-	d["position"] = result.position;
-	d["normal"] = result.normal;
-	d["face_index"] = result.face_index;
-	d["collider_id"] = result.collider_id;
-	d["collider"] = result.get_collider();
-	d["shape"] = result.shape;
-	d["rid"] = result.rid;
-
-	return d;
+	return _ray_result_dictionary(result);
 }
 
 TypedArray<Dictionary> PhysicsDirectSpaceState3D::_intersect_point(RequiredParam<PhysicsPointQueryParameters3D> p_point_query, int p_max_results) {
@@ -208,6 +250,7 @@ PhysicsDirectSpaceState3D::PhysicsDirectSpaceState3D() {
 
 void PhysicsDirectSpaceState3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("intersect_ray", "parameters"), &PhysicsDirectSpaceState3D::_intersect_ray);
+	ClassDB::bind_method(D_METHOD("intersect_rays", "queries"), &PhysicsDirectSpaceState3D::_intersect_rays);
 	ClassDB::bind_method(D_METHOD("intersect_point", "parameters", "max_results"), &PhysicsDirectSpaceState3D::_intersect_point, DEFVAL(32));
 	ClassDB::bind_method(D_METHOD("intersect_shape", "parameters", "max_results"), &PhysicsDirectSpaceState3D::_intersect_shape, DEFVAL(32));
 	ClassDB::bind_method(D_METHOD("cast_motion", "parameters"), &PhysicsDirectSpaceState3D::_cast_motion);
