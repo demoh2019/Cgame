@@ -102,6 +102,7 @@ const FieldSmoke = preload("res://scripts/shared/field_smoke.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const WorldDiscovery = preload("res://scripts/shared/world_discovery.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
+const RestedTraining = preload("res://scripts/shared/rested_training.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
@@ -175,6 +176,7 @@ class Player:
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var discovered_sites: Dictionary = {} # Personal authenticated landmark journal.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
+	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
 	var feast_timer: float = 0.0 # Session-only prepared group meal cooldown.
 	var guardian_timer: float = 0.0 # Session-only PvE frontline cooldown.
@@ -394,7 +396,8 @@ func character_data(player: Player) -> Dictionary:
 		"daily_bounty": player.daily_bounty.duplicate(true),
 		"renown": player.renown,
 		"discovered_sites": WorldDiscovery.to_saved(player.discovered_sites),
-		"rest_cooldown": player.rest_cooldown, "lake_drink_cooldown": player.lake_drink_cooldown,
+		"rest_cooldown": player.rest_cooldown, "rested_xp_credit": player.rested_xp_credit,
+		"lake_drink_cooldown": player.lake_drink_cooldown,
 		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
 		"spore_filter_seconds": player.spore_filter_seconds,
@@ -466,6 +469,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 			not ArenaRating.valid_record(data.get("arena_losses", 0)):
 		return false
 	if not SaveValidation.finite_number(data.get("rest_cooldown", 0.0), 0.0, CampRest.COOLDOWN):
+		return false
+	if not RestedTraining.valid_credit(data.get("rested_xp_credit", 0)):
 		return false
 	if not SaveValidation.finite_number(data.get("lake_drink_cooldown", 0.0), 0.0, FieldWater.COOLDOWN_SECONDS):
 		return false
@@ -591,6 +596,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.arena_wins = int(data.get("arena_wins", 0))
 	player.arena_losses = int(data.get("arena_losses", 0))
 	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
+	player.rested_xp_credit = int(data.get("rested_xp_credit", 0))
 	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
 	player.rain_cooldown = float(data.get("rain_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
@@ -2287,11 +2293,13 @@ func cmd_rest(peer_id: int) -> Dictionary:
 		if not CampRest.recover(player.inventory, player.survival):
 			return {"ok": false, "reason": "transaction_failed"}
 	player.rest_cooldown = CampRest.COOLDOWN
+	# Paid and safe recovery earns a limited reserve of extra skill training.
+	player.rested_xp_credit = RestedTraining.refill(player.rested_xp_credit, at_fire)
 	player.action = {}
 	player.dirty_inventory = true
 	player.dirty_character = true
 	return {"ok": true, "rested": true, "field": at_fire,
-		"cooldown": player.rest_cooldown,
+		"cooldown": player.rest_cooldown, "rested_xp_credit": player.rested_xp_credit,
 		"health": player.survival.health, "stamina": player.survival.stamina}
 
 ## Roll forward once at midnight UTC, persisting a fresh daily journal.
@@ -3913,9 +3921,13 @@ func _apply_skill_bonuses(player: Player) -> void:
 
 ## The one place XP is granted. Callers pass what the action was worth; refused actions never call it.
 func _award(player: Player, skill: String, amount: float) -> void:
-	var result: Dictionary = player.skills.add_xp(skill, amount)
+	# The only place that consumes rested credit. Refused actions never call
+	# this method; no extra reward is spent when the skill is already maxed.
+	var extra: int = RestedTraining.bonus_for(amount, player.rested_xp_credit)
+	var result: Dictionary = player.skills.add_xp(skill, amount + float(extra))
 	if int(result["gained"]) <= 0:
 		return
+	player.rested_xp_credit = maxi(0, player.rested_xp_credit - extra)
 	player.pending_xp[skill] = int(player.pending_xp.get(skill, 0)) + int(result["gained"])
 	player.dirty_skills = true
 	player.dirty_character = true
@@ -5972,6 +5984,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"riposte_seconds": player.riposte_seconds,
 			"finisher_cooldown": player.finisher_cooldown,
 			"rest_cooldown": player.rest_cooldown,
+			"rested_xp_credit": player.rested_xp_credit,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
 			"stim_cooldown": player.stim_cooldown, "flare_seconds": player.flare_seconds,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,

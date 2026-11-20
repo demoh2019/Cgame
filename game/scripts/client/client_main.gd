@@ -1190,6 +1190,8 @@ func _update_hud() -> void:
 		weight, speed_pct, survivor.inventory.count("silver"),
 		Contracts.description(survivor.contract_state), ", ".join(rows)
 	]
+	if survivor.rested_xp_credit > 0:
+		_stats.text += "\nRESTED TRAINING: %d bonus XP left (Z to rest at camp)" % survivor.rested_xp_credit
 	if not sim.lightning_pending.is_empty():
 		var strike: Dictionary = sim.lightning_pending
 		var danger_at := Vector2(float(strike["x"]), float(strike["z"]))
