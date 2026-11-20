@@ -1643,14 +1643,23 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 		return {"ok": false, "reason": "too_far"}
 	if source.party_aid_timer > 0.0:
 		return {"ok": false, "reason": "cooldown"}
-	var data: Dictionary = Defs.item(item_id)
-	if not PartyAid.supported_item(item_id, data):
+	var selected_item_id: String = item_id
+	if selected_item_id == "auto":
+		selected_item_id = PartyAid.best_item(source.inventory,
+			recipient.survival.health, recipient.survival.infection,
+			recipient.survival.bleeding, recipient.survival.fracture,
+			recipient.survival.max_health)
+		if selected_item_id.is_empty():
+			return {"ok": false, "reason": "no_treatment"}
+	var data: Dictionary = Defs.item(selected_item_id)
+	if not PartyAid.supported_item(selected_item_id, data):
 		return {"ok": false, "reason": "not_shareable"}
-	if source.inventory.count(item_id) < 1:
+	if source.inventory.count(selected_item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	if not PartyAid.has_effect(data, recipient.survival.health, recipient.survival.infection,
 			recipient.survival.bleeding, recipient.survival.fracture,
-			recipient.survival.hunger, recipient.survival.thirst):
+			recipient.survival.hunger, recipient.survival.thirst,
+			recipient.survival.max_health):
 		return {"ok": false, "reason": "no_effect"}
 	var hp_before: float = recipient.survival.health
 	var infection_before: float = recipient.survival.infection
@@ -1658,7 +1667,7 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var fracture_before: float = recipient.survival.fracture
 	var hunger_before: float = recipient.survival.hunger
 	var thirst_before: float = recipient.survival.thirst
-	if not source.inventory.remove(item_id, 1):
+	if not source.inventory.remove(selected_item_id, 1):
 		return {"ok": false, "reason": "not_carried"}
 	recipient.survival.heal(float(data.get("heal", 0.0)))
 	recipient.survival.treat_infection(float(data.get("cure", 0.0)))
@@ -1680,10 +1689,10 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var fed: float = recipient.survival.hunger - hunger_before
 	var hydrated: float = recipient.survival.thirst - thirst_before
 	events.append({"type": "party_aid", "peer": target_id, "by": peer_id,
-		"item": item_id, "heal": healed, "cure": cured,
+		"item": selected_item_id, "heal": healed, "cure": cured,
 		"bleeding_stopped": staunched, "fracture_treated": splinted,
 		"food": fed, "drink": hydrated})
-	return {"ok": true, "peer": target_id, "item": item_id,
+	return {"ok": true, "peer": target_id, "item": selected_item_id,
 		"heal": healed, "cure": cured, "bleeding_stopped": staunched,
 		"fracture_treated": splinted, "food": fed, "drink": hydrated}
 

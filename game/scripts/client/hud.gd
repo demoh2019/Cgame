@@ -6,6 +6,7 @@ const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const Party = preload("res://scripts/shared/party.gd")
+const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
@@ -974,16 +975,21 @@ func _build() -> void:
 	var aid_row := HBoxContainer.new()
 	inventory_box.add_child(aid_row)
 	var aid_items := OptionButton.new()
-	for item_id in ["bandage", "field_antiseptic", "expedition_trauma_kit", "antibiotics", "purified_serum",
-			"berries", "canned_food", "water_bottle"]:
-		if Defs.is_item(item_id):
-			var index: int = aid_items.item_count
-			aid_items.add_item(str(Defs.item(item_id).get("name", item_id)))
-			aid_items.set_item_metadata(index, item_id)
+	aid_items.add_item("Auto (choose carried medicine)")
+	aid_items.set_item_metadata(0, "auto")
+	for item_id in PartyAid.medical_items():
+		var index: int = aid_items.item_count
+		aid_items.add_item(str(Defs.item(item_id).get("name", item_id)))
+		aid_items.set_item_metadata(index, item_id)
+	for item_id in ["berries", "canned_food", "water_bottle"]:
+		var index: int = aid_items.item_count
+		aid_items.add_item(str(Defs.item(item_id).get("name", item_id)))
+		aid_items.set_item_metadata(index, item_id)
+	aid_items.select(0)
 	aid_row.add_child(aid_items)
 	var aid_button := Button.new()
 	aid_button.text = "Aid / Share"
-	aid_button.tooltip_text = "Treat or feed a party member within 3.2m using your own medicine, berries, canned food or water. Shared 5s cooldown."
+	aid_button.tooltip_text = "Auto chooses the cheapest effective carried medicine for bleeding, fracture, infection or wounds. Select a specific medicine, food or water to share manually. Range 3.2m, cooldown 5s."
 	aid_button.pressed.connect(func() -> void:
 		var target: int = _party_target.get_selected_id()
 		if target < 0 or aid_items.selected < 0:
