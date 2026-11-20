@@ -219,6 +219,23 @@ ReflectionProbe::UpdateMode ReflectionProbe::get_update_mode() const {
 	return update_mode;
 }
 
+void ReflectionProbe::request_update() {
+	// Reuse the existing UPDATE_ONCE capture and atlas. Godot's renderer
+	// marks a probe dirty on a changed instance transform, not on a repeat
+	// of the current one. Submit one transient transform and restore the
+	// exact original immediately, before the next capture is scheduled.
+	// This does not move the Node3D or switch to costly UPDATE_ALWAYS
+	// (which would also resize the shared reflection atlas).
+	if (update_mode != UPDATE_ONCE || !is_inside_tree() || !is_visible_in_tree()) {
+		return;
+	}
+	const Transform3D original = get_global_transform();
+	Transform3D invalidate = original;
+	invalidate.basis.rows[0].x += 0.01f;
+	RS::get_singleton()->instance_set_transform(get_instance(), invalidate);
+	RS::get_singleton()->instance_set_transform(get_instance(), original);
+}
+
 AABB ReflectionProbe::get_aabb() const {
 	AABB aabb;
 	aabb.position = -size / 2;
@@ -282,6 +299,7 @@ void ReflectionProbe::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_update_mode", "mode"), &ReflectionProbe::set_update_mode);
 	ClassDB::bind_method(D_METHOD("get_update_mode"), &ReflectionProbe::get_update_mode);
+	ClassDB::bind_method(D_METHOD("request_update"), &ReflectionProbe::request_update);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "update_mode", PROPERTY_HINT_ENUM, "Once (Fast),Always (Slow)"), "set_update_mode", "get_update_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "intensity", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_intensity", "get_intensity");
