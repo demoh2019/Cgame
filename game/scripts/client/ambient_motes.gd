@@ -9,6 +9,7 @@ const CELL_COUNT := GRID_SIDE * GRID_SIDE
 const MAX_PER_TILE := 28
 const MAX_INSTANCES := CELL_COUNT * MAX_PER_TILE
 const UPDATE_INTERVAL := 0.25
+const TILE_CACHE_LIMIT := 18 # Recent tiles are reused when walking back.
 const PRESETS := [
 	{"per_tile": 0, "radius": 0.0},
 	{"per_tile": 8, "radius": 36.0},
@@ -22,7 +23,9 @@ var _renderer: MultiMeshInstance3D
 var _material: ShaderMaterial
 var _center_cell := Vector2i(1000000, 1000000)
 var _elapsed := UPDATE_INTERVAL
-var _generated_tiles := 0
+var _generated_tiles := 0 # Counts only newly sampled world tiles.
+var _tile_cache: Dictionary = {} # Vector2i -> Array of stable per-tile mote data
+var _tile_cache_order: Array[Vector2i] = []
 
 
 static func profile(level: int) -> Dictionary:
@@ -132,28 +135,48 @@ func update_view(center: Vector3, biome: String, daylight: float,
 	_material.set_shader_parameter("ambient_wind", wind.limit_length(10.0))
 
 
+## One heightmap query per new mote only. Returning across a chunk boundary
+## reuses recent tile heights and appearance seeds from a bounded CPU cache.
+func _tile_data(tile: Vector2i) -> Array:
+	if _tile_cache.has(tile):
+		return _tile_cache[tile]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = tile_seed(tile)
+	var entries: Array = []
+	for j in MAX_PER_TILE:
+		var x: float = (float(tile.x) + rng.randf()) * TILE_SIZE
+		var z: float = (float(tile.y) + rng.randf()) * TILE_SIZE
+		var ground: float = 0.0
+		if _world != null and _world.has_method("height_at"):
+			ground = float(_world.call("height_at", x, z))
+		entries.append({
+			"position": Vector3(x, ground + rng.randf_range(0.8, 3.8), z),
+			"kind": 1.0 if j % 3 == 0 else 0.0,
+			"phase": rng.randf(),
+			"pulse": rng.randf(),
+			"brightness": rng.randf_range(0.52, 1.0),
+		})
+	_tile_cache[tile] = entries
+	_tile_cache_order.append(tile)
+	if _tile_cache_order.size() > TILE_CACHE_LIMIT:
+		var previous: Vector2i = _tile_cache_order.pop_front()
+		_tile_cache.erase(previous)
+	_generated_tiles += 1
+	return entries
+
+
 func _regenerate(cell: Vector2i) -> void:
 	position = Vector3(float(cell.x) * TILE_SIZE, 0.0, float(cell.y) * TILE_SIZE)
 	for tile_index in CELL_COUNT:
 		var tile: Vector2i = cell + Vector2i(
 			tile_index % GRID_SIDE - 1, int(tile_index / GRID_SIDE) - 1)
-		var rng := RandomNumberGenerator.new()
-		rng.seed = tile_seed(tile)
+		var entries: Array = _tile_data(tile)
 		for j in MAX_PER_TILE:
-			var x: float = (float(tile.x) + rng.randf()) * TILE_SIZE
-			var z: float = (float(tile.y) + rng.randf()) * TILE_SIZE
-			var ground: float = 0.0
-			if _world != null and _world.has_method("height_at"):
-				ground = float(_world.call("height_at", x, z))
-			# Emphasize low-level mist/light, never cloud-height particles.
-			var y: float = ground + rng.randf_range(0.8, 3.8)
-			var is_firefly: bool = j % 3 == 0
-			var phase: float = rng.randf()
-			var pulse: float = rng.randf()
-			var brightness: float = rng.randf_range(0.52, 1.0)
+			var entry: Dictionary = entries[j]
+			var at: Vector3 = entry["position"]
 			var slot: int = j * CELL_COUNT + tile_index
-			_batch.set_instance_transform(slot, Transform3D(Basis(),
-				Vector3(x - position.x, y, z - position.z)))
+			_batch.set_instance_transform(slot,
+				Transform3D(Basis(), at - position))
 			_batch.set_instance_custom_data(slot, Color(
-				1.0 if is_firefly else 0.0, phase, pulse, brightness))
-	_generated_tiles += CELL_COUNT
+				float(entry["kind"]), float(entry["phase"]),
+				float(entry["pulse"]), float(entry["brightness"])))
