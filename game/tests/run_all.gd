@@ -105,6 +105,7 @@ const SUITES := [
 	"res://tests/test_acid_neutralizer.gd",
 	"res://tests/test_acid_wall_corrosion.gd",
 	"res://tests/test_threat_aggro.gd",
+	"res://tests/test_raid_aggro_view.gd",
 	"res://tests/test_guardian_taunt.gd",
 	"res://tests/test_guardian_brace.gd",
 	"res://tests/test_elite_infected.gd",
