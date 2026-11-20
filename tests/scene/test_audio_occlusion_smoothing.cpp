@@ -36,6 +36,8 @@ TEST_FORCE_LINK(test_audio_occlusion_smoothing)
 
 #include "scene/3d/audio_stream_player_3d.h"
 
+#include <limits>
+
 namespace TestAudioOcclusionSmoothing {
 
 TEST_CASE("[SceneTree][AudioStreamPlayer3D] Obstruction attack and release are time consistent") {
@@ -74,7 +76,7 @@ TEST_CASE("[SceneTree][AudioStreamPlayer3D] Obstruction attack and release are t
 
 	// Invalid inputs must never poison the real-time audio mixer.
 	const float before = source->get_obstruction_amount();
-	CHECK(source->advance_obstruction_amount(Math::NaN, 0.1f) == before);
+	CHECK(source->advance_obstruction_amount(std::numeric_limits<float>::quiet_NaN(), 0.1f) == before);
 	CHECK(source->advance_obstruction_amount(0.0f, -0.1f) == before);
 	CHECK(source->advance_obstruction_amount(0.0f, 0.1f, 0.0f) == before);
 	CHECK(source->advance_obstruction_amount(0.0f, 0.1f, 0.08f, -0.2f) == before);
