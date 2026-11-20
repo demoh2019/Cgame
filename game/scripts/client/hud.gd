@@ -2172,6 +2172,13 @@ func _on_event(event: Dictionary) -> void:
 				int(event.get("silver", 0))])
 		"caravan_defended":
 			say("CARAVAN DEFENDED! All attackers defeated. Earn 15% extra silver on delivery.")
+		"ruin_ambush":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("RUIN AMBUSH! %d infected awakened by your T%d cache. Fight or retreat!" % [
+					int(event.get("count", 0)), int(event.get("tier", 3))])
+			elif my_group > 0 and int(event.get("group", 0)) == my_group:
+				say("RUIN ALERT! A teammate woke %d infected. Regroup or fall back!" % [
+					int(event.get("count", 0))])
 		"caravan_ambushed":
 			if int(event.get("peer", 0)) == client.peer_id:
 				say("CARAVAN AMBUSH! %d infected are converging on your cargo. Defend or flee!" % [
