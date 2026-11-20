@@ -24,6 +24,8 @@ uniform vec3 sun_color : source_color = vec3(1.0, 0.95, 0.82);
 // Performance/Balanced reuse the radiance cubemap as the background.
 // Cubemap rendering always evaluates the full sky to avoid feedback loops.
 uniform bool use_cached_radiance = false;
+// Natural sunlight scattering in thin atmospheric dust; no extra textures.
+uniform float aerosol_scattering_strength = 0.0;
 
 float hash(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -97,6 +99,25 @@ void sky() {
 	// Single-scattering-inspired warm horizon halo reuses the existing glow term.
 	// No additional noise lookups or texture taps on low-end hardware.
 	float horizon_halo = 1.0 - smoothstep(0.04, 0.42, abs(up));
-	color += vec3(0.9, 0.31, 0.10) * (glow * 0.38) * horizon_halo * dusk * visible;
+	// Transition from the original narrow painted halo toward directional haze.
+	color += vec3(0.9, 0.31, 0.10) * (glow * 0.38) * horizon_halo
+		* dusk * visible * (1.0 - aerosol_scattering_strength * 0.65);
+	// Henyey-Greenstein-inspired aerosol lobe for sunset aerial perspective.
+	// Sun orientation affects both visible sky and the reflected sky cubemap.
+	if (aerosol_scattering_strength > 0.001 && daylight > 0.025 && up > -0.06 && storm < 0.98) {
+		float anisotropy = 0.67;
+		float denom = max(1.0 + anisotropy * anisotropy
+			- 2.0 * anisotropy * clamp(facing, -1.0, 1.0), 0.10);
+		float aerosol_phase = (1.0 - anisotropy * anisotropy)
+			* inversesqrt(denom) / denom;
+		float sunward = clamp(aerosol_phase * 0.074, 0.0, 1.0);
+		float horizon_air = 1.0 - smoothstep(0.06, 0.63, max(up, 0.0));
+		float twilight = clamp(dusk, 0.0, 1.0) * smoothstep(0.08, 0.40, daylight);
+		vec3 aerosol_color = mix(vec3(0.42, 0.64, 0.86),
+			vec3(1.0, 0.48, 0.21), twilight);
+		float atmospheric_visibility = daylight * (1.0 - storm * 0.88);
+		color += aerosol_color * sunward * horizon_air * 0.42
+			* atmospheric_visibility * aerosol_scattering_strength;
+	}
 	COLOR = color;
 }
