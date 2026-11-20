@@ -1446,10 +1446,14 @@ func _update_time_of_day(delta: float) -> void:
 		snow_fraction = SnowVfx.snow_fraction(client.world.height_at(ground_at.x, ground_at.z))
 	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO,
 		atmosphere.storm, snow_fraction)
+	if underground and camera_fx != null:
+		camera_fx.cold = 0.0
 	if _breath != null and not underground and client != null and client.world != null and client.you.has("x"):
 		var breath_at: Vector3 = client.display_position()
-		_breath.update_view(BreathVapor.coldness(client.world.height_at(breath_at.x, breath_at.z),
-			WorldCycle.daylight(clock), _visual_biome, atmosphere.storm * snow_fraction),
+		var cold_now: float = BreathVapor.coldness(client.world.height_at(breath_at.x, breath_at.z),
+			WorldCycle.daylight(clock), _visual_biome, atmosphere.storm * snow_fraction)
+		camera_fx.cold = cold_now # Frosted screen edges creep in while you stay in the cold.
+		_breath.update_view(cold_now,
 			avatar_model.speed if avatar_model != null else 0.0, GraphicsQuality.level(), delta)
 	if client != null and client.you.has("x"):
 		var here: Vector3 = client.display_position()

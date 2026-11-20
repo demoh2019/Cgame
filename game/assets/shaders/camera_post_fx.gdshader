@@ -13,6 +13,18 @@ uniform float aberration = 0.0;
 uniform float radial_blur = 0.0;
 uniform int blur_taps = 0; // 0 disables the blur loop entirely (Low quality).
 uniform float letterbox = 0.0;
+uniform float frost = 0.0; // 0..1 icy screen edges in cold air (The Long Dark / Frostpunk).
+
+float frost_hash(vec2 p) {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float frost_noise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(frost_hash(i), frost_hash(i + vec2(1, 0)), f.x), mix(frost_hash(i + vec2(0, 1)), frost_hash(i + vec2(1, 1)), f.x), f.y);
+}
 
 vec3 grab(vec2 p, vec2 o) {
 	return vec3(texture(screen, p + o).r, texture(screen, p).g, texture(screen, p - o).b);
@@ -45,6 +57,16 @@ void fragment() {
 	float vig = smoothstep(0.22, 0.85, r);
 	col = mix(col, hurt_color, clamp(vig * hurt * 0.7, 0.0, 0.85));
 	col = mix(col, hurt_color * 0.3, vig * heartbeat * 0.5);
+	if (frost > 0.001) {
+		// Feathery ice: ridged noise at three scales, growing inward from the edges as it gets colder.
+		vec2 q = uv * vec2(1.6, 1.0) * 9.0;
+		float ridges = 1.0 - abs(frost_noise(q) * 2.0 - 1.0);
+		ridges = ridges * 0.55 + (1.0 - abs(frost_noise(q * 2.7 + 3.1) * 2.0 - 1.0)) * 0.3 + frost_noise(q * 8.0) * 0.15;
+		float reach = mix(0.62, 0.38, frost);
+		float mask = smoothstep(reach, reach + 0.28, r + ridges * 0.12) * frost;
+		vec3 ice = vec3(0.86, 0.93, 1.0) * (0.75 + 0.35 * ridges);
+		col = mix(col, ice, clamp(mask * (0.45 + 0.4 * ridges), 0.0, 0.8));
+	}
 	float bar = letterbox * 0.11;
 	if (uv.y < bar || uv.y > 1.0 - bar) {
 		col = vec3(0.0);

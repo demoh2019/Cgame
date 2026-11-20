@@ -20,6 +20,8 @@ var _hurt := 0.0
 var _aberration := 0.0
 var _blur := 0.0
 var _letterbox := 0.0
+var _frost := 0.0
+var cold := 0.0 ## 0..1 set by the client from altitude/snow/night (see breath_vapor.gd).
 var _clock := 0.0
 var _stop_until_msec := 0
 var _photo_yaw := 0.0
@@ -187,6 +189,9 @@ func update(delta: float, you: Dictionary, move_input: Vector2, speed: float, qu
 	var beat := heartbeat(_clock, low)
 	_blur = move_toward(_blur, radial_blur_amount(speed, sprinting, riding, quality_level), d * 2.5)
 	_letterbox = move_toward(_letterbox, letterbox_target(alive), d * 0.9)
+	# Frost creeps in slowly (~25 s) and melts faster (~8 s); off on Performance.
+	var frost_target: float = clampf(cold, 0.0, 1.0) * 0.8 if quality_level >= 1 else 0.0
+	_frost = move_toward(_frost, frost_target, d * (0.03 if frost_target > _frost else 0.12))
 	_fov = lerpf(_fov, fov_target(BASE_FOV, sprinting, riding, speed), 1.0 - exp(-5.0 * d))
 	if camera != null:
 		camera.fov = _fov
@@ -194,7 +199,7 @@ func update(delta: float, you: Dictionary, move_input: Vector2, speed: float, qu
 	var lead := look_ahead(move_input, speed) if alive else Vector3.ZERO
 	_look_smooth = _look_smooth.lerp(lead, 1.0 - exp(-3.0 * d))
 	look = _look_smooth
-	var active := _hurt > 0.01 or _aberration > 0.01 or low > 0.0 or _blur > 0.01 or _letterbox > 0.001
+	var active := _hurt > 0.01 or _aberration > 0.01 or low > 0.0 or _blur > 0.01 or _letterbox > 0.001 or _frost > 0.01
 	if _rect != null:
 		_rect.visible = active
 		if active:
@@ -205,6 +210,7 @@ func update(delta: float, you: Dictionary, move_input: Vector2, speed: float, qu
 			_mat.set_shader_parameter("radial_blur", _blur)
 			_mat.set_shader_parameter("blur_taps", blur_taps(quality_level))
 			_mat.set_shader_parameter("letterbox", _letterbox)
+			_mat.set_shader_parameter("frost", _frost)
 
 
 ## Photo mode: free orbit around the player with the interface hidden. Ctrl+Alt+P toggles, Esc leaves.
