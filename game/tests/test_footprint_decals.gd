@@ -5,6 +5,12 @@ const Online = preload("res://scripts/client/online_main.gd")
 const Offline = preload("res://scripts/client/client_main.gd")
 
 
+class FlatTerrain:
+	extends RefCounted
+	func height_at(_x: float, _z: float) -> float:
+		return 4.0
+
+
 func run(t) -> void:
 	t.current = "native projector budget and ground eligibility"
 	t.eq(Tracks.surface_kind(1, "forward_plus", 1.0, "swamp", 12.0,
@@ -40,6 +46,29 @@ func run(t) -> void:
 	t.near(Tracks.mask_at(Vector2.ZERO), 0.0, 0.00001,
 		"procedural texture corners stay fully transparent")
 
+	t.current = "footprint profile and actual terrain height"
+	t.eq(Tracks.max_marks(1), 0, "Balanced avoids clustered decals")
+	t.eq(Tracks.max_marks(2), 16, "High caps terrain marks to sixteen")
+	t.eq(Tracks.max_marks(3), Tracks.MAX_MARKS, "Ultra uses thirty-two marks")
+	t.eq(Tracks.surface_kind(3, "forward_plus", 0.0, "swamp", 8.0,
+		false, false), "mud", "swamp footprints persist without rainfall")
+	var on_slope := Tracks.new()
+	on_slope.setup(FlatTerrain.new())
+	for i in 20:
+		on_slope.update_track(Vector3(0.0, 4.0, float(i) * 0.31), true,
+			1.0 / 30.0, 0.0, "swamp", 2, "forward_plus")
+	t.check(not on_slope._decals.is_empty(), "real terrain produces tracks")
+	if not on_slope._decals.is_empty():
+		t.near(on_slope._decals[0].global_position.y, 4.2, 0.001,
+			"footprint follows the exact heightmap under the shoe")
+	var count_before: int = on_slope._decals.size()
+	for i in 20:
+		on_slope.update_track(Vector3(0.0, 10.0, 9.0 + float(i) * 0.31), true,
+			1.0 / 30.0, 0.0, "swamp", 2, "forward_plus")
+	t.eq(on_slope._decals.size(), count_before,
+		"falling characters never project footprints from the sky")
+	on_slope.free()
+
 	t.current = "pooled real Godot Decal nodes"
 	var footprints := Tracks.new()
 	footprints.update_track(Vector3.ZERO, true, 1.0 / 30.0,
@@ -61,12 +90,21 @@ func run(t) -> void:
 			"native GPU distance fading is active")
 		t.near(mark.distance_fade_begin, 27.0, 0.0001,
 			"camera draw cost is capped at the defined visual range")
+	footprints.update_track(Vector3(0.0, 2.0, 60.0), false,
+		1.0 / 30.0, 0.8, "swamp", 2, "forward_plus")
+	for i in range(Tracks.HIGH_MARKS, footprints._decals.size()):
+		t.check(not footprints._decals[i].visible,
+			"lowering Ultra to High immediately culls excess decals")
 	footprints.clear_marks()
 	for decal in footprints._decals:
 		t.check(not decal.visible, "clearing hides all old projectors")
 	footprints.free()
 
 	t.current = "online and offline integration"
+	t.check((Online as Script).source_code.contains("_footprints.setup(client.world)"),
+		"multiplayer projects imprints onto the streamed terrain heightmap")
+	t.check((Offline as Script).source_code.contains("_footprints.setup(world)"),
+		"local client projects imprints onto the same terrain heightmap")
 	t.check((Online as Script).source_code.contains("_footprints.update_track("),
 		"networked player movement renders native decals")
 	t.check((Offline as Script).source_code.contains("_footprints.update_track("),
