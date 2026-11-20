@@ -126,5 +126,5 @@ class StreamedTerrainContracts(TestCase):
         assert "terrain_collision.position = Vector3(CELL_SIZE * 0.5" in patch
         assert "TerrainPatch.new()" in forest
         assert "_create_terrain()" not in world
-        assert "world_partition.is_cell_loaded(cell)" in world
+        assert "world_partition.are_cells_loaded(cell, 0)" in world
         assert "_position_has_terrain" in player
