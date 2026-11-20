@@ -17,8 +17,10 @@ func run(t) -> void:
 	var shader: String = terrain.code
 	t.check(shader.contains("float cavity_visibility = 1.0 - cavity * 0.24 * (1.0 - puddle * 0.85);"),
 		"rain-filled stone cavities restore GGX ambient reflection visibility")
-	t.check(shader.contains("AO = clamp(ground_contact * micro_shadow * cavity_visibility, 0.0, 1.0);"),
-		"terrain feeds bounded contact and cavity visibility into the native PBR renderer")
+	t.check(shader.contains("AO = clamp(ground_contact * micro_shadow * cavity_visibility * sky_visibility, 0.0, 1.0);"),
+		"terrain combines bounded contact, cavity and landscape horizon AO for native PBR")
+	t.check(shader.contains("float sky_visibility = 1.0;"),
+		"low-tier and flat-ground horizon visibility preserves full ambient light")
 	t.check(shader.contains("ROUGHNESS = filter_specular_roughness(final_roughness, bent);"),
 		"wet stone reflection filtering shares the native roughness-aware path")
 	t.check(shader.contains("float final_roughness = clamp("),
