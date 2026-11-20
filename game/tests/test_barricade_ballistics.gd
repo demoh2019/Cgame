@@ -5,6 +5,7 @@ extends RefCounted
 const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
 const Ballistics = preload("res://scripts/shared/barricade_ballistics.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
+const WorldPersistence = preload("res://scripts/server/world_persistence.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Net = preload("res://scripts/shared/net.gd")
@@ -91,6 +92,23 @@ func run(t) -> void:
 	var wall: Dictionary = server.barricades[wall_id]
 	t.eq(str(wall.get("owner_guild", "")), "wolf-guild",
 		"server records verified guild at construction time")
+	var checkpoint: Dictionary = WorldPersistence.capture(server)
+	t.eq(str(checkpoint["barricades"][0].get("owner_guild", "")), "wolf-guild",
+		"dedicated-server save preserves wall guild affiliation")
+	var reboot := GameServer.new(WorldGen.new(310), 310)
+	t.check(WorldPersistence.restore(reboot, checkpoint),
+		"authenticated world checkpoint restores the real barricade")
+	t.eq(str(reboot.barricades[wall_id].get("owner_guild", "")), "wolf-guild",
+		"guildmate protection survives server restart")
+	var forged: Dictionary = checkpoint.duplicate(true)
+	forged["barricades"][0]["owner_guild"] = 42
+	t.check(not WorldPersistence.restore(GameServer.new(WorldGen.new(310), 310), forged),
+		"invalid guild field is rejected atomically")
+	var legacy: Dictionary = checkpoint.duplicate(true)
+	legacy["barricades"][0].erase("owner_guild")
+	t.check(WorldPersistence.restore(GameServer.new(WorldGen.new(310), 310), legacy),
+		"pre-ballistics world snapshots still load")
+
 	t.check(not Ballistics.can_damage(builder, wall, 2, 2),
 		"an owner cannot shoot their own barricade")
 	t.check(not Ballistics.can_damage(ally, wall, 2, 2),
@@ -130,14 +148,15 @@ func run(t) -> void:
 	var wall_events: Array = server.events.filter(func(event):
 		return str(event.get("type", "")) == "barricade_shot")
 	t.eq(wall_events.size(), 1, "one server shot creates one damage event")
-	var net := Net.new()
-	net.role = "server"
-	net.sim = server
-	t.check(net._event_visible_to(wall_events[0], shooter.id),
-		"shooter receives private wall hit feedback")
-	t.check(not net._event_visible_to(wall_events[0], builder.id),
-		"other accounts cannot read private hit feedback")
-	net.free()
+	if not wall_events.is_empty():
+		var net := Net.new()
+		net.role = "server"
+		net.sim = server
+		t.check(net._event_visible_to(wall_events[0], shooter.id),
+			"shooter receives private wall hit feedback")
+		t.check(not net._event_visible_to(wall_events[0], builder.id),
+			"other accounts cannot read private hit feedback")
+		net.free()
 
 	t.current = "charged ranged skill damages cover once, with tier resistance"
 	shooter.attack_timer = 0.0
