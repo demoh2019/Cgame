@@ -1247,6 +1247,9 @@ func _update_hud() -> void:
 	if survivor.flare_seconds > 0.0:
 		_stats.text += "\nFLARE: %ds (F2) | infected notice up to 28m" % ceili(survivor.flare_seconds)
 	_stats.text += "\nWET CLOTHING: %d%% | dry under shelter or beside a lit campfire" % roundi(survivor.survival.wetness)
+	if not sim.smoke_clouds.is_empty():
+		var smoke_wind: Vector2 = Weather.wind_at(world, position.x, position.z, sim.time)
+		_stats.text += "\nSMOKE WIND: %.1f m/s | smoke clouds drift with the wind" % smoke_wind.length()
 	for bag in sim.bags.values():
 		if not CorpseScent.active(bag, sim.time):
 			continue

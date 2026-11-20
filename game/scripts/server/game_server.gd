@@ -5827,6 +5827,11 @@ func _tick_world(delta: float) -> void:
 	for id in smoke_clouds.keys():
 		if time >= float(smoke_clouds[id]["expires"]):
 			smoke_clouds.erase(id)
+		else:
+			# Wind advances only server-owned clouds. Clients receive updated
+			# positions through ordinary interest-limited world snapshots.
+			smoke_clouds[id] = FieldSmoke.drift(smoke_clouds[id],
+				world, time, delta)
 	for id in shelters.keys():
 		if time >= float(shelters[id]["expires"]):
 			shelters.erase(id)

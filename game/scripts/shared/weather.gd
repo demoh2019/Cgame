@@ -42,6 +42,27 @@ static func conditions(world, x: float, z: float, server_seconds: float) -> Dict
 	}
 
 
+## Regional, seed-stable horizontal wind in metres per second. It changes with
+## the existing 256m weather cells and weather epochs, not with client FPS.
+## Smoke moves faster in storms, with no wind inside the protected hub.
+static func wind_at(world, x: float, z: float, seconds: float) -> Vector2:
+	if not is_finite(x) or not is_finite(z) or not is_finite(seconds):
+		return Vector2.ZERO
+	var local: Dictionary = conditions(world, x, z, seconds)
+	if local.is_empty() or bool(local.get("sheltered", false)):
+		return Vector2.ZERO
+	var rx: int = floori(x / WEATHER_CELL_METERS)
+	var rz: int = floori(z / WEATHER_CELL_METERS)
+	var epoch: int = maxi(0, floori(seconds / CHANGE_SECONDS))
+	var seed: int = WorldGen.mix(rx, rz, int(world.world_seed), epoch + 7921)
+	# Slow prevailing wind between storms; stronger gusts during rainfall.
+	var storm: bool = str(local.get("condition", "")) == "storm"
+	var speed: float = (1.10 if storm else 0.24) + float(seed % 5) * \
+		(0.08 if storm else 0.025)
+	var radians: float = TAU * float(seed % 3600) / 3600.0
+	return Vector2.from_angle(radians) * speed
+
+
 ## Armor works as simple wind/rain insulation for the first survival slice.
 ## The protection is derived from the equipped item on the authoritative server.
 static func protection(armor_id: String) -> float:
