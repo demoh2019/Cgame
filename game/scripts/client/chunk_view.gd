@@ -228,6 +228,14 @@ static var terrain_error_lod_quality := 1
 const TERRAIN_LOD_GROUP := "aa_chunked_terrain_lod"
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
 const TERRAIN_DIR := "res://assets/textures/terrain/"
+const TERRAIN_PBR_DIR := "res://assets/textures/terrain_pbr/"
+# Natural layers now use the photoscanned Poly Haven sets in terrain_pbr (paved layers keep their files).
+const TERRAIN_SOURCES := {
+	"lush": "forrest_ground_01", "dry": "aerial_rocks_01", "forest": "forest_leaves_04", "swamp": "brown_mud_03",
+	"road": "rocky_trail", "cliff": "cliff_side", "mountain": "aerial_rocks_02", "sand": "coast_sand_02", "snow": "snow_02",
+}
+# How strongly each photo is pulled toward the art-directed biome colour (0 keeps the real photo colours).
+const TERRAIN_TINT_STRENGTH := 0.25
 # The colour each layer should average to: photos of real ground pulled toward the stylised palette of the models.
 const TERRAIN_TARGETS := [Color(0.24, 0.38, 0.14), Color(0.37, 0.41, 0.19), Color(0.28, 0.32, 0.15), Color(0.27, 0.29, 0.17),
 	Color(0.4, 0.38, 0.26), Color(0.36, 0.39, 0.29), Color(0.37, 0.41, 0.28), Color(0.66, 0.59, 0.44), Color(0.92, 0.94, 0.98),
@@ -476,8 +484,17 @@ static func textured_material() -> ShaderMaterial:
 	var albedo: Array[Image] = []
 	var normals: Array[Image] = []
 	for layer in TERRAIN_LAYERS:
-		var diffuse_texture := load(TERRAIN_DIR + layer + "_diff.jpg") as Texture2D
-		var normal_texture := load(TERRAIN_DIR + layer + "_nor_gl.jpg") as Texture2D
+		var diffuse_texture: Texture2D = null
+		var normal_texture: Texture2D = null
+		if TERRAIN_SOURCES.has(layer):
+			var id: String = TERRAIN_SOURCES[layer]
+			var folder: String = TERRAIN_PBR_DIR + id + "/" + id
+			if ResourceLoader.exists(folder + "_diff.jpg") and ResourceLoader.exists(folder + "_nor_gl.jpg"):
+				diffuse_texture = load(folder + "_diff.jpg") as Texture2D
+				normal_texture = load(folder + "_nor_gl.jpg") as Texture2D
+		if diffuse_texture == null or normal_texture == null:
+			diffuse_texture = load(TERRAIN_DIR + layer + "_diff.jpg") as Texture2D
+			normal_texture = load(TERRAIN_DIR + layer + "_nor_gl.jpg") as Texture2D
 		if diffuse_texture == null or normal_texture == null:
 			return null
 		albedo.append(_layer_image(diffuse_texture, 1024))
@@ -510,8 +527,10 @@ static func textured_material() -> ShaderMaterial:
 				sum += Vector3(pixel.r, pixel.g, pixel.b)
 		var average: Vector3 = sum / 256.0
 		var target: Color = TERRAIN_TARGETS[index]
-		averages.append(Vector3(target.r, target.g, target.b))
-		tints.append(Vector3(target.r / maxf(average.x, 0.02), target.g / maxf(average.y, 0.02), target.b / maxf(average.z, 0.02)))
+		var full_tint := Vector3(target.r / maxf(average.x, 0.02), target.g / maxf(average.y, 0.02), target.b / maxf(average.z, 0.02))
+		var tint: Vector3 = Vector3.ONE.lerp(full_tint, TERRAIN_TINT_STRENGTH)
+		tints.append(tint)
+		averages.append(average * tint)
 	var albedo_array := Texture2DArray.new()
 	var normal_array := Texture2DArray.new()
 	if albedo_array.create_from_images(albedo) != OK or normal_array.create_from_images(normals) != OK:
