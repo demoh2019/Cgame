@@ -32,7 +32,6 @@ static func make_flat_tile(width: float) -> NavigationMesh:
 	return result
 
 
-
 ## Generate an obstacle-aware navigation tile from simple rectangles without
 ## scanning scene geometry or initiating expensive runtime navigation baking.
 ## Shared, welded grid vertices keep adjacent walkable polygons connected.
