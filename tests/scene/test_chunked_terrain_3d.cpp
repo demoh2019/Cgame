@@ -300,7 +300,9 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Authored vertex colors validate and res
 	CHECK(terrain->get_color_data()[500].is_equal_approx(colors[500]));
 	// A malformed external buffer cannot clobber valid surface shading.
 	ERR_PRINT_OFF;
-	terrain->set_color_data(PackedColorArray{ Color(1, 0, 0) });
+	PackedColorArray invalid_colors;
+	invalid_colors.push_back(Color(1, 0, 0));
+	terrain->set_color_data(invalid_colors);
 	ERR_PRINT_ON;
 	CHECK(terrain->get_color_data().size() == 33 * 33);
 	SceneTree::get_singleton()->get_root()->add_child(terrain);
