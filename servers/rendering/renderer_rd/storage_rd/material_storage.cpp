@@ -2032,7 +2032,12 @@ void MaterialStorage::global_shader_parameters_load_settings(bool p_load_texture
 			Variant value = d["value"];
 
 			if (gvtype >= RSE::GLOBAL_VAR_TYPE_SAMPLER2D) {
-				String path = value;
+				// A null default is valid for textures assigned at runtime. Converting NIL
+				// directly to a String gives "<null>" and tries to load res://<null>.
+				String path;
+				if (value.get_type() != Variant::NIL) {
+					path = value;
+				}
 				// Don't load the textures, but still add the parameter so shaders compile correctly while loading.
 				if (!p_load_textures || path.is_empty()) {
 					value = RID();
