@@ -39,6 +39,7 @@ const Crafting = preload("res://scripts/shared/crafting.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
+const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
@@ -3135,12 +3136,17 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 	var best: Dictionary = {}
 	var best_distance := INF
 	var attacker_zone: int = world.zone_at(attacker.position.x, attacker.position.z)
+	# Server-owned collision blocks both normal shots and ranged skills.
+	# Compute once per shot before choosing a target. Melee rules are unchanged.
+	var cover_distance: float = INF
+	if ranged:
+		cover_distance = RangedCover.first_blocker_distance(world, origin, direction, reach)
 	# Zombies.
 	for zombie in zombies.values():
 		if not zombie.is_alive() or ignored.has("zombie:" + str(zombie.id)):
 			continue
 		var distance := _hit_distance(origin, direction, Vector2(zombie.position.x, zombie.position.z), reach, ranged, 0.55)
-		if distance >= 0.0 and distance < best_distance:
+		if distance >= 0.0 and distance < best_distance and distance < cover_distance:
 			best = {"kind": "zombie", "id": zombie.id}
 			best_distance = distance
 	# PvP zones remain unchanged; only the mutually accepted hub opponent
@@ -3159,7 +3165,7 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 			if not training and not ZoneRisk.can_pvp(attacker_zone, world.zone_at(other.position.x, other.position.z)):
 				continue
 			var distance := _hit_distance(origin, direction, Vector2(other.position.x, other.position.z), reach, ranged, 0.5)
-			if distance >= 0.0 and distance < best_distance:
+			if distance >= 0.0 and distance < best_distance and distance < cover_distance:
 				best = {"kind": "player", "id": other.id}
 				best_distance = distance
 	return best
