@@ -3174,3 +3174,58 @@ godot --headless --path game --script res://tests/run_all.gd
 
 Current Godot combat, scene UI and multiplayer APIs are sufficient;
 this requires no native engine modifications.
+
+
+## Coordinated party flanking (engaged infected)
+
+A new spatial party-combat rule rewards deliberately taking positions
+around enemies, drawing from MMORPG tank/damage roles without removing
+Days After's gear-based combat or Albion's open-world risk.
+
+When a **living group tank holds a real infected target in CHASE or
+ATTACK state**, a teammate using a physically equipped **melee weapon**
+can move behind that infected and land an **ordinary basic melee
+strike** with a positional damage bonus. Unlike the existing crouched
+stealth ambush, this works **during active combat**, not on idle or
+unaware enemies:
+
+- **+18% damage** to ordinary infected and elites, and **+10%** to
+  an active raid boss. Bonuses apply only to a server-confirmed basic
+  melee collision against an actual zombie; not bows, guns, skills,
+  area attacks, direct scripted damage or PvP.
+- The infected must be **actively pursuing a different living member
+  of the attacker's current group**, with that frontline player
+  within **10 m** of the enemy. The flanker must be within **3.2 m**,
+  on the opposite side of the zombie (direction dot ≤ −0.55).
+  Both teammates must be within **3 m vertically** of the infected,
+  in the same active danger zone, and not inside a safe hub.
+- The server computes the actual enemy target, party membership,
+  weapon ownership, positions, health and engagement state at the
+  moment of the hit. Moving out of position, losing gear, mounting,
+  switching the infected's aggro, or disbanding the group instantly
+  disables the bonus. Players cannot supply a multiplier or enemy
+  target ID over RPC.
+- The private `you.party_flank_hint` snapshot shows a single nearby
+  **FLANK OPEN** opportunity for the local survivor, including the
+  expected 10%/18% bonus. The normal public zombie list does **not**
+  expose private hate lists or allied targets.
+- Each actual bonus hit emits a **party_flank** notification to
+  the authenticated attacking player only. Standard combat, threat,
+  loot ownership, combat training and survival injury rules remain
+  unchanged. Existing stealth rear-openers cannot overlap with an
+  enemy actively chasing a frontline party member.
+
+Implementation: `scripts/shared/party_flank.gd`,
+`scripts/server/game_server.gd`, `scripts/shared/net.gd`,
+`scripts/client/hud.gd`. Registered regression suite
+`tests/test_party_flank.gd` covers geometry, true target ownership,
+live zombie AI state, ranges, invalid coordinates, gear, mounting,
+privacy, actual melee-hit integration, damage paths, boss scaling and
+party changes.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+No native Godot engine modifications are necessary; the existing
+authoritative combat simulation and private snapshots support it.
