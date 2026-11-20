@@ -12,6 +12,7 @@ const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const CombatLogout = preload("res://scripts/shared/combat_logout.gd")
 const TrainingDuel = preload("res://scripts/shared/training_duel.gd")
 const ArenaRating = preload("res://scripts/shared/arena_rating.gd")
+const ArenaMatchmaking = preload("res://scripts/shared/arena_matchmaking.gd")
 const PvPHonor = preload("res://scripts/shared/pvp_honor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
@@ -191,6 +192,7 @@ var training_invites: Dictionary = {} # Target peer -> verified invitation.
 var training_matches: Dictionary = {} # Both peer IDs reference the same session.
 var training_invite_last: Dictionary = {} # Bounded per peer by disconnect cleanup.
 var arena_recent_pairs: Dictionary = {} # Server-session account-pair ranked cooldowns.
+var arena_queue: Dictionary = {} # Peer -> account and instance of explicit rated opt-in.
 var pvp_honor_ledger: Dictionary = {} # Bounded server-only account/guest kill cooldowns.
 var siege_declare_requests: Dictionary = {} # Peer -> last declared request and cached result.
 var world_structure_revision: int = 0
@@ -465,6 +467,7 @@ func prepare_disconnect(peer_id: int) -> bool:
 
 
 func remove_player(peer_id: int) -> void:
+	arena_queue.erase(peer_id)
 	_acid_last_hit.erase(peer_id) # Network peer reuse cannot inherit old hit cooldown.
 	_abort_training(peer_id, "disconnected")
 	training_invite_last.erase(peer_id)
@@ -682,6 +685,71 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 ## session-owned; no client supplies a party ID or its member list.
 
 ## Mutual, proximity-checked hub sparring: no loot, crimes or PvP rewards.
+## Voluntary ranked match search. Queueing means consenting to a rated
+## match against a valid opponent, with existing nonlethal duel protections.
+func cmd_arena_queue_join(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	var reason: String = ArenaMatchmaking.join_reason(world, player, time)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	if training_matches.has(peer_id) or training_invites.has(peer_id):
+		return {"ok": false, "reason": "already_dueling"}
+	for invitation in training_invites.values():
+		if int(invitation.get("from", -1)) == peer_id:
+			return {"ok": false, "reason": "invite_pending"}
+	if arena_queue.has(peer_id):
+		return {"ok": true, "status": "queued"}
+	if arena_queue.size() >= ArenaMatchmaking.MAX_QUEUED:
+		return {"ok": false, "reason": "queue_full"}
+	arena_queue[peer_id] = {"account": player.user_id,
+		"instance": player.get_instance_id(), "at": time}
+	events.append({"type": "arena_queue", "peer": peer_id, "status": "queued"})
+	return {"ok": true, "status": "queued"}
+
+
+func cmd_arena_queue_leave(peer_id: int) -> Dictionary:
+	if not arena_queue.has(peer_id):
+		return {"ok": false, "reason": "not_queued"}
+	arena_queue.erase(peer_id)
+	events.append({"type": "arena_queue", "peer": peer_id, "status": "left"})
+	return {"ok": true, "status": "left"}
+
+
+func _tick_arena_queue() -> void:
+	# Revalidate after movement, death, reconnect and direct challenges. A
+	# queue entry never extends a duel or combat-tag permission.
+	for peer_id in arena_queue.keys():
+		var player: Player = players.get(peer_id)
+		if not ArenaMatchmaking.entry_valid(arena_queue[peer_id], player, world,
+				time, training_matches, training_invites):
+			arena_queue.erase(peer_id)
+			if player != null:
+				events.append({"type": "arena_queue", "peer": peer_id, "status": "cancelled"})
+	var pair: Array[int] = ArenaMatchmaking.choose(arena_queue, players, world,
+		time, arena_recent_pairs, training_matches, training_invites)
+	if pair.size() != 2:
+		return
+	# The two users already opted in. Reuse the ordinary validated duel
+	# invitation/acceptance path instead of minting a second combat system.
+	var invitation: Dictionary = cmd_duel_invite(pair[0], pair[1], true)
+	if not bool(invitation.get("ok", false)):
+		return
+	var result: Dictionary = cmd_duel_accept(pair[1])
+	if not bool(result.get("ok", false)):
+		training_invites.erase(pair[1])
+		return
+	arena_queue.erase(pair[0])
+	arena_queue.erase(pair[1])
+
+
+func _arena_queue_state(peer_id: int) -> Dictionary:
+	var state: Dictionary = arena_queue.get(peer_id, {})
+	if state.is_empty():
+		return {"queued": false}
+	return {"queued": true, "seconds": maxf(0.0, time - float(state["at"])),
+		"search_gap": ArenaMatchmaking.gap_after(time - float(state["at"]))}
+
+
 func cmd_duel_invite(peer_id: int, target_id: int, ranked: bool = false) -> Dictionary:
 	var source: Player = players.get(peer_id)
 	var target: Player = players.get(target_id)
@@ -734,6 +802,8 @@ func cmd_duel_accept(peer_id: int) -> Dictionary:
 		"a_hp": first.survival.health, "b_hp": second.survival.health}
 	training_matches[first.id] = duel
 	training_matches[second.id] = duel
+	arena_queue.erase(first.id)
+	arena_queue.erase(second.id)
 	for member in [first, second]:
 		events.append({"type": "duel", "peer": member.id, "phase": "started",
 			"opponent": second.name if member.id == first.id else first.name,
@@ -2701,6 +2771,8 @@ func tick(delta: float) -> void:
 	parties.expire(time)
 	_tick_players(delta)
 	_tick_training()
+	if tick_count % ArenaMatchmaking.CHECK_EVERY_TICKS == 0:
+		_tick_arena_queue()
 	var capture_events: Array = territory.tick(delta, time, players, parties)
 	events.append_array(capture_events)
 	events.append_array(siege_contracts.tick(time, territory.sites, parties, capture_events))
@@ -3542,6 +3614,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),
 			"combat_tag_seconds": CombatLogout.remaining(player.combat_tag_until, time),
 			"duel": _training_snapshot(peer_id),
+			"arena_queue": _arena_queue_state(peer_id),
 			"self_defense_seconds": PvpInfamy.defense_remaining(
 				player.defense_target, player.defense_until, time),
 			"pvp_kills": player.pvp_kills, "pvp_honor": player.pvp_honor,

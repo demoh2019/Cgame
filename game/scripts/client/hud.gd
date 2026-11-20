@@ -41,6 +41,7 @@ var _inventory_signature: String = ""
 var _trade_state: Dictionary = {}
 var _party_status: Label
 var _duel_status: Label
+var _arena_queue_status: Label
 var _party_target: OptionButton
 var _party_peer_signature: String = ""
 var _trade_target: OptionButton
@@ -363,6 +364,20 @@ func _build() -> void:
 		else:
 			say("Ranked: choose a nearby survivor first"))
 	duel_buttons.add_child(ranked_button)
+	var queue_buttons := HBoxContainer.new()
+	inventory_box.add_child(queue_buttons)
+	var queue_join := Button.new()
+	queue_join.text = "Find rated opponent"
+	queue_join.tooltip_text = "Opt into automatic matching with nearby authenticated hub players."
+	queue_join.pressed.connect(func() -> void: client.arena_queue_join())
+	queue_buttons.add_child(queue_join)
+	var queue_leave := Button.new()
+	queue_leave.text = "Leave arena queue"
+	queue_leave.pressed.connect(func() -> void: client.arena_queue_leave())
+	queue_buttons.add_child(queue_leave)
+	_arena_queue_status = Label.new()
+	_arena_queue_status.text = "Ranked queue: not searching"
+	inventory_box.add_child(_arena_queue_status)
 	var duel_accept := Button.new()
 	duel_accept.text = "Accept"
 	duel_accept.pressed.connect(func() -> void: client.duel_accept())
@@ -665,6 +680,9 @@ func _on_event(event: Dictionary) -> void:
 			if int(event.get("peer", -1)) == client.peer_id and int(event.get("by", -1)) != client.peer_id:
 				say("A teammate shared a T%d cooked meal. Recovery boosted for %ds." % [
 					int(event.get("tier", 1)), int(event.get("seconds", 0))])
+		"arena_queue":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Arena matchmaking: " + str(event.get("status", "unknown")))
 		"duel":
 			match str(event.get("phase", "")):
 				"invited":
@@ -814,6 +832,9 @@ func _claim_nearest_outpost_cache() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "arena_queue":
+		say("Arena queue: " + (str(data.get("status", "queued")) if bool(data.get("ok", false)) else str(data.get("reason", "denied"))))
+		return
 	if kind == "party_feast":
 		if bool(data.get("ok", false)):
 			say("Camp feast: shared T%d cooked fish with %d survivors." % [
@@ -1199,6 +1220,12 @@ func _refresh_market_options() -> void:
 
 
 func _refresh_party_controls() -> void:
+	var queue: Dictionary = client.you.get("arena_queue", {})
+	if bool(queue.get("queued", false)):
+		_arena_queue_status.text = "Finding rated match: %ds · ±%d Elo" % [
+			ceili(float(queue.get("seconds", 0.0))), int(queue.get("search_gap", 125))]
+	else:
+		_arena_queue_status.text = "Ranked queue: not searching"
 	var training: Dictionary = client.you.get("duel", {})
 	if bool(training.get("active", false)):
 		_duel_status.text = "%s with #%d — %ds" % [

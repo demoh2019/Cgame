@@ -440,6 +440,20 @@ func c_contract(action: String) -> void:
 ## Party identities are always the RPC sender; the client can only nominate
 ## a nearby target to invite/kick, never the leader or group identifier.
 @rpc("any_peer", "reliable")
+func c_arena_queue_join() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "arena_queue", sim.cmd_arena_queue_join(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_arena_queue_leave() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "arena_queue", sim.cmd_arena_queue_leave(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_duel_invite(target_id: int, ranked: bool = false) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -757,7 +771,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "duel", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast":
+		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "duel", "arena_queue", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast":
 			return event.get("peer", -1) == peer
 		"party_aid":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
