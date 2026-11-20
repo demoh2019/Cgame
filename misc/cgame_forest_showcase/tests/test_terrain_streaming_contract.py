@@ -227,6 +227,7 @@ class StreamedTerrainContracts(TestCase):
             "TREE_COUNT: int = 54",
             "rng.randf_range(1.0, CELL_SIZE - 1.0)",
             "Vector2(wx, wz - 9.0).length() < 8.0",
+            "Vector2(wx - 208.0, wz - 208.0).length() < 6.0",
             "rng.randf_range(0.70, 1.5)",
             "Basis(Vector3.UP, rng.randf_range(-PI, PI))",
             "scale * 4.15",
