@@ -9,6 +9,7 @@ const INVITE_RANGE := 16.0
 const ASSIST_RANGE := 28.0
 const ASSIST_WINDOW := 20.0
 const ASSIST_XP_RATE := 0.5
+const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
 # Party-only temporary rendezvous; server position, never client coordinates.
 const RALLY_SECONDS := 45.0
 const RALLY_COOLDOWN := 12.0
@@ -53,6 +54,51 @@ func mark_rally(peer_id: int, position: Vector3, now: float) -> Dictionary:
 		"expires": now + RALLY_SECONDS,
 	}
 	return {"ok": true, "seconds": RALLY_SECONDS}
+
+
+## Validate a free-standing tactical marker before taking a real crafted item.
+func standard_reason(peer_id: int, position: Vector3, now: float) -> String:
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return "not_in_party"
+	if int(groups[group_id]["leader"]) != peer_id:
+		return "leader_only"
+	if not position.is_finite() or not is_finite(now):
+		return "invalid_position"
+	var group: Dictionary = groups[group_id]
+	var marker: Dictionary = group.get("standard", {})
+	if not marker.is_empty() and now < float(marker["expires"]):
+		return "already_active"
+	if now - float(group.get("standard_last_at", -INF)) < RallyStandard.COOLDOWN:
+		return "cooldown"
+	return ""
+
+
+func raise_standard(peer_id: int, position: Vector3, now: float) -> Dictionary:
+	var reason: String = standard_reason(peer_id, position, now)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	var group: Dictionary = groups[group_of(peer_id)]
+	group["standard_last_at"] = now
+	group["standard"] = {"by": peer_id, "x": position.x, "y": position.y,
+		"z": position.z, "placed_at": now, "expires": now + RallyStandard.DURATION}
+	return {"ok": true, "seconds": RallyStandard.DURATION}
+
+
+## A party member can only benefit from its own current group marker.
+func standard_at(peer_id: int, position: Vector3, now: float) -> Dictionary:
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return {}
+	var marker: Dictionary = groups[group_id].get("standard", {})
+	if marker.is_empty() or float(marker["expires"]) <= now:
+		return {}
+	var source := Vector3(float(marker["x"]), float(marker["y"]), float(marker["z"]))
+	if not RallyStandard.within_range(source, position):
+		return {}
+	if not groups[group_id]["members"].has(int(marker["by"])):
+		return {}
+	return marker
 
 
 func members_of(peer_id: int) -> Array:
@@ -131,6 +177,10 @@ func leave(peer_id: int) -> Dictionary:
 	var members: Array = group["members"]
 	members.erase(peer_id)
 	group_by_peer.erase(peer_id)
+	# An abandoned standard cannot buff former teammates or a new leader.
+	var raised: Dictionary = group.get("standard", {})
+	if not raised.is_empty() and int(raised.get("by", -1)) == peer_id:
+		group.erase("standard")
 	# Invitations to disconnected leaders and disbanded parties are invalid.
 	for target in invites.keys():
 		var offer: Dictionary = invites[target]
@@ -179,7 +229,7 @@ func expire(now: float) -> void:
 func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 	var group_id: int = group_of(peer_id)
 	if group_id == 0 or not groups.has(group_id):
-		return {"id": 0, "leader": 0, "members": [], "rally": {},
+		return {"id": 0, "leader": 0, "members": [], "rally": {}, "standard": {},
 			"invite_from": int(invites.get(peer_id, {}).get("from", 0))}
 	var group: Dictionary = groups[group_id]
 	var marker: Dictionary = group.get("rally", {})
@@ -189,6 +239,15 @@ func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 		shared_marker = {"x": float(marker["x"]), "y": float(marker["y"]),
 			"z": float(marker["z"]),
 			"remaining": maxf(0.0, float(marker["expires"]) - now)}
+	var source_standard: Dictionary = group.get("standard", {})
+	var public_standard: Dictionary = {}
+	if not source_standard.is_empty() and now < float(source_standard["expires"]):
+		public_standard = {"x": float(source_standard["x"]),
+			"y": float(source_standard["y"]), "z": float(source_standard["z"]),
+			"remaining": maxf(0.0, float(source_standard["expires"]) - now),
+			"cooldown": maxf(0.0, float(group.get("standard_last_at", now)) +
+				RallyStandard.COOLDOWN - now)}
 	return {"id": group_id, "leader": int(group["leader"]),
 		"members": (group["members"] as Array).duplicate(), "rally": shared_marker,
+		"standard": public_standard,
 		"invite_from": int(invites.get(peer_id, {}).get("from", 0))}
