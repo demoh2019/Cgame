@@ -51,3 +51,26 @@ Visual QA: walk and teleport into a large forest or city with many new streamed 
 Measure **main-thread p50/p95/p99 frame time**, number of deferred meshes, terrain visibility pop-in latency, mesh building costs, and p50/p95 GPU time on target devices. Compare before/after using identical camera movement and world seeds. The budget helps distribute CPU spikes; it does not reduce total triangle generation or guarantee a particular FPS uplift.
 
 **Requires a rebuilt custom engine; native compilation and actual CPU/GPU benchmarking are not available in this session.**
+
+## Priority within a terrain node
+
+The native limiter previously walked chunk meshes in height-grid storage order. When the CPU time slice had run out, a near-camera patch with missing geometry could wait behind a far or offscreen LOD, producing avoidable pop-in.
+
+The engine now exposes **`ChunkedTerrain3D.mesh_streaming_priority`** with three modes:
+
+| Mode | Streaming order | Use |
+| --- | --- | --- |
+| 0 | Original row-major order | Legacy engine scenes, tests and tools (default) |
+| 1 | Missing visible meshes first, then distance to focus | Performance |
+| 2 | Same, with a bounded camera-facing preference | Balanced, High and Ultra |
+
+Both new and already loaded Albion After terrain nodes receive this property through `ChunkView.configure_terrain_streaming_priority` / `apply_terrain_streaming_priority`. A fixed 35% multiplier makes camera-facing chunks load earlier without rejecting terrain behind the player. When the camera is unavailable the mode-2 priority degrades to mode-1 distance order. Ties use stable source-grid indices.
+
+**The priority pass is local to each `ChunkedTerrain3D` node.** It does not implement a fully global ranked list of every terrain chunk. The CPU time-slice budget remains shared across all terrain nodes, preventing their costs from adding independently. The optional priority pass runs only when a node has multiple chunks, an active viewer and a positive mesh-build budget. Large native terrain nodes use an O(N log N) sort over small temporary records; the world game's 64 m terrain nodes each contain only four 16-quad render subchunks. Existing mesh caches, geomorph targets, normal streams, PBR materials and collision flags are unchanged.
+
+When an upgrade is deferred, the engine preserves both the visible mesh and its existing geomorph shader parameter, avoiding a transient shading or silhouette jump while that upgrade is waiting. Neither priority mode alters the selected LOD, geometry accuracy, shadows or lighting; it changes only **which pending CPU construction finishes first**.
+
+Engine regression tests in `tests/scene/test_chunked_terrain_3d.cpp` cover stable ordering, visible holes before upgrades, facing-direction weighting, extreme inputs and backward-compatible property clamping. `game/tests/test_terrain_mesh_streaming.gd` checks new terrain nodes, quality presets and live retuning. Benchmark near-camera terrain pop-in latency during teleports, rapid forward movement and 180-degree camera turns. Also monitor CPU p95/p99 frame time and pending mesh counts to ensure the sort cost stays below the existing time slice.
+
+The implementation is inspired by Unreal Engine World Partition streaming-source priorities and Unity's throttled runtime asset integration, but is not identical to either engine's internal streamer. The C++ source needs a custom Godot rebuild and actual hardware validation before any measured performance benefit is claimed.
+
