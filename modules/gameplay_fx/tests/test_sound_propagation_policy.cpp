@@ -38,6 +38,28 @@ int main() {
 		assert(hearing_radius(21.0f, bad, true) == 0.0f);
 		assert(transmission(bad) == 0.0f);
 	}
+	// The flash is immediate, but thunder travels at the temperature-
+	// adjusted speed of sound. Frame timing is not part of this calculation.
+	const float t343 = sound_delay_seconds(343.42f, 20.0f);
+	assert(std::abs(t343 - 1.0f) < 0.0001f);
+	assert(sound_delay_seconds(0.0f) == 0.0f);
+	assert(sound_delay_seconds(700.0f, -20.0f) >
+			sound_delay_seconds(700.0f, 35.0f));
+	assert(sound_delay_seconds(2400.0f, 20.0f) > 6.9f);
+	assert(sound_delay_seconds(2400.0f, 20.0f) < 7.1f);
+	assert(sound_delay_seconds(-1.0f) == -1.0f);
+	assert(sound_delay_seconds(2400.1f) == -1.0f);
+	assert(sound_delay_seconds(100.0f, 80.0f) == -1.0f);
+	for (float bad : invalid) {
+		assert(sound_delay_seconds(bad) == -1.0f);
+		assert(sound_delay_seconds(100.0f, bad) == -1.0f);
+	}
+	for (int d = 0; d <= 2400; ++d) {
+		const float delay = sound_delay_seconds(float(d), 20.0f);
+		assert(std::isfinite(delay) && delay >= 0.0f);
+		assert(delay <= 7.0f);
+	}
+
 	// Leash-clipped sound remains clipped even if original noise was loud.
 	assert(hearing_radius(32.0f, 29.0f, true) <= 29.0f);
 }
