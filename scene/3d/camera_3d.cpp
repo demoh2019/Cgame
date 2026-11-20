@@ -203,6 +203,17 @@ void Camera3D::add_trauma(real_t p_amount) {
 	_update_process_mode();
 }
 
+void Camera3D::add_spatial_trauma(const Vector3 &p_source, const Vector3 &p_listener,
+		real_t p_amount, real_t p_inner_radius, real_t p_outer_radius) {
+	if (!Math::is_finite(p_amount) || !(p_amount > real_t(0.0))) {
+		return;
+	}
+	const real_t falloff = CameraShake::spatial_falloff(p_listener, p_source, p_inner_radius, p_outer_radius);
+	if (falloff > real_t(0.0)) {
+		add_trauma(p_amount * falloff);
+	}
+}
+
 void Camera3D::set_trauma(real_t p_trauma) {
 	shake.set_trauma(p_trauma);
 	if (!(shake.trauma > 0.0)) {
@@ -851,6 +862,7 @@ void Camera3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_projection"), &Camera3D::get_projection);
 	ClassDB::bind_method(D_METHOD("set_projection", "mode"), &Camera3D::set_projection);
 	ClassDB::bind_method(D_METHOD("add_trauma", "amount"), &Camera3D::add_trauma);
+	ClassDB::bind_method(D_METHOD("add_spatial_trauma", "source", "listener", "amount", "inner_radius", "outer_radius"), &Camera3D::add_spatial_trauma);
 	ClassDB::bind_method(D_METHOD("set_trauma", "trauma"), &Camera3D::set_trauma);
 	ClassDB::bind_method(D_METHOD("get_trauma"), &Camera3D::get_trauma);
 	ClassDB::bind_method(D_METHOD("get_shake_translation"), &Camera3D::get_shake_translation);
