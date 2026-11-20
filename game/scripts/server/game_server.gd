@@ -45,6 +45,7 @@ const Skills = preload("res://scripts/shared/skills.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const StashBulk = preload("res://scripts/shared/stash_bulk.gd")
+const EquipmentPresets = preload("res://scripts/shared/equipment_presets.gd")
 const ExpeditionLoadout = preload("res://scripts/shared/expedition_loadout.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
@@ -179,6 +180,7 @@ class Player:
 	var skills_sent_at: float = -100.0
 	var inventory_sent_at: float = -100.0
 	var stash_sent_at: float = -100.0
+	var equipment_presets: Array = [] # Persistent owned weapon/armor shortcuts.
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
 	var caravan_state: Dictionary = {} # Saved canonical source/destination IDs only.
 	var caravan_view: Dictionary = {} # Verified route details for this private client.
@@ -368,6 +370,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.progression = Progression.new()
 	player.skills = Skills.new()
 	player.contract_state = Contracts.empty_state()
+	player.equipment_presets = EquipmentPresets.empty_slots()
 	player.caravan_state = {}
 	player.caravan_view = {}
 	player.caravan_ambushed = false
@@ -414,6 +417,7 @@ func character_data(player: Player) -> Dictionary:
 		"stash": player.stash.to_dict(),
 		"progression": player.progression.to_dict(),
 		"skills": player.skills.to_dict(),
+		"equipment_presets": player.equipment_presets.duplicate(true),
 		"contracts": player.contract_state.duplicate(true),
 		"caravan": player.caravan_state.duplicate(true),
 		"caravan_ambushed": player.caravan_ambushed,
@@ -581,6 +585,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	var loaded_contracts: Variant = data.get("contracts", Contracts.empty_state())
 	if not Contracts.valid_state(loaded_contracts):
 		return false
+	var loaded_presets: Variant = data.get("equipment_presets", EquipmentPresets.empty_slots())
+	if not EquipmentPresets.valid_state(loaded_presets):
+		return false
 	var loaded_caravan: Variant = data.get("caravan", {})
 	if not CaravanRoutes.valid_state(world, loaded_caravan):
 		return false
@@ -622,6 +629,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.skills = loaded_skills
 	player.dirty_skills = true
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
+	player.equipment_presets = (loaded_presets as Array).duplicate(true)
 	player.caravan_state = (loaded_caravan as Dictionary).duplicate(true)
 	player.caravan_view = caravan_view.duplicate(true)
 	player.caravan_ambushed = bool(loaded_caravan_ambushed)
@@ -2587,6 +2595,53 @@ func cmd_stash(peer_id: int, item_id: String, count: int, deposit: bool) -> Dict
 	player.dirty_stash = true
 	player.dirty_character = true
 	return {"ok": true, "item": item_id, "count": count, "deposit": deposit}
+
+
+## Players may record and swap three owned gear sets only at the hub workbench.
+## Client requests carry no gear IDs: server owns the inventory and saved sets.
+## Combat, movement actions, mounts and recall cannot become instant gear swaps.
+func cmd_equipment_preset(peer_id: int, action: String, slot: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null:
+		return {"ok": false, "reason": "unknown_player"}
+	if not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if not _market_at_hub(player):
+		return {"ok": false, "reason": "no_station"}
+	if slot < 0 or slot >= EquipmentPresets.SLOT_COUNT:
+		return {"ok": false, "reason": "invalid_slot"}
+	if player.mounted or not player.recall.is_empty() or \
+			player.combat_tag_until > time or player.attack_timer > 0.0 or \
+			player.skill_timer > 0.0 or not player.action.is_empty():
+		return {"ok": false, "reason": "busy"}
+	var result: Dictionary = {}
+	match action:
+		"save":
+			result = EquipmentPresets.save_slot(player.equipment_presets, slot, player.inventory)
+		"equip":
+			result = EquipmentPresets.equip_slot(player.equipment_presets, slot, player.inventory)
+		"clear":
+			result = EquipmentPresets.clear_slot(player.equipment_presets, slot)
+		_:
+			return {"ok": false, "reason": "invalid_action"}
+	if not bool(result.get("ok", false)):
+		return result
+	if action == "equip":
+		if bool(result.get("weapon_changed", false)):
+			player.edge_coating_seconds = 0.0
+			player.edge_coating_weapon = ""
+			player.sharpened_weapon = ""
+			player.sharpened_hits = 0
+			player.parry_window = 0.0
+			ParryRiposte.clear(player)
+		if bool(result.get("armor_changed", false)):
+			player.plated_armor = ""
+			player.plated_hits = 0
+		player.guardian_brace = 0.0
+		player.dirty_inventory = true
+	player.dirty_character = true
+	result["action"] = action
+	return result
 
 
 ## One server-authorized action banks raw and refined crafting inputs.
@@ -6268,6 +6323,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"party": _party_state_for(peer_id),
 			"raid_aggro": raid_aggro_state,
 			"caravan": player.caravan_view.duplicate(true),
+			"equipment_presets": player.equipment_presets.duplicate(true),
 			"caravan_defended": player.caravan_defended,
 			"guild": {"id": player.guild_id, "name": player.guild_name, "rank": player.guild_rank},
 			"guild_siege_wins": int(guild_siege_wins.get(player.guild_id, 0)),

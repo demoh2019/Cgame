@@ -542,6 +542,14 @@ func c_expedition_restock(preset_id: String) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_equipment_preset(action: String, slot: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "equipment_preset",
+			sim.cmd_equipment_preset(peer, str(action), slot))
+
+
+@rpc("any_peer", "reliable")
 func c_stash_bulk() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
