@@ -27,6 +27,10 @@ static func _axis(a: float, b: float, va: float, vb: float, span: float, t: floa
 
 static func hermite(from: Vector3, to: Vector3, v_from: Vector3,
 		v_to: Vector3, span: float, alpha: float, host: Node3D = null) -> Vector3:
+	# Broken network coordinates must not leak NaNs into the scene tree,
+	# culling AABBs or motion vectors. Match the native Node3D guard.
+	if not from.is_finite() or not to.is_finite():
+		return to if to.is_finite() else (from if from.is_finite() else Vector3.ZERO)
 	var t: float = clampf(alpha if is_finite(alpha) else 0.0, 0.0, 1.0)
 	if t <= 0.0:
 		return from
