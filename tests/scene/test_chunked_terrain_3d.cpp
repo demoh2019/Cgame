@@ -288,4 +288,30 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Custom normals support seam continuity 
 	memdelete(terrain);
 }
 
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Authored vertex colors validate and reset on terrain change") {
+	ChunkedTerrain3D *terrain = make_terrain(33, 64.0, 10.0);
+	PackedColorArray colors;
+	colors.resize(33 * 33);
+	for (int i = 0; i < colors.size(); i++) {
+		colors.set(i, Color(0.2, 0.45, 0.0, 1.0));
+	}
+	terrain->set_color_data(colors);
+	CHECK(terrain->get_color_data().size() == 33 * 33);
+	CHECK(terrain->get_color_data()[500].is_equal_approx(colors[500]));
+	// A malformed external buffer cannot clobber valid surface shading.
+	ERR_PRINT_OFF;
+	terrain->set_color_data(PackedColorArray{ Color(1, 0, 0) });
+	ERR_PRINT_ON;
+	CHECK(terrain->get_color_data().size() == 33 * 33);
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	terrain->force_update();
+	CHECK(terrain->get_visible_chunk_count() > 0);
+	terrain->set_height_data(make_ramp(33, 33), Vector2i(33, 33));
+	CHECK(terrain->get_color_data().is_empty());
+	terrain->set_color_data(colors);
+	terrain->clear_height_data();
+	CHECK(terrain->get_color_data().is_empty());
+	memdelete(terrain);
+}
+
 } // namespace TestChunkedTerrain3D
