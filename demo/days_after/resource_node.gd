@@ -1,5 +1,7 @@
 extends Area3D
 
+const RISK_RULES = preload("res://risk_zone_rules.gd")
+
 ## Harvestable world resource. Gathering rules and inventory belong to the
 ## player, while this node provides a finite deposit with interaction collision.
 
@@ -51,7 +53,12 @@ func _ready() -> void:
 func interact(player: Node) -> void:
     if depleted or not player.has_method("try_gather"):
         return
-    if bool(player.call("try_gather", resource_kind, tier, yield_count)):
+    var harvest_quantity: int = yield_count
+    if player is Node3D:
+        harvest_quantity = RISK_RULES.gathering_yield(
+            (player as Node3D).global_position, global_position, yield_count
+        )
+    if bool(player.call("try_gather", resource_kind, tier, harvest_quantity)):
         depleted = true
         visible = false
         set_deferred("collision_layer", 0)

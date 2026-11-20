@@ -107,3 +107,19 @@ world containers, crafting cooldowns and multiplayer state are not persisted.
 ```sh
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_saves.gd
 ```
+
+
+## Risk zones, sheltered camp and exclusion scavenging
+
+The starter camp protects the survivor from infected aggression and
+environmental exposure. The surrounding wasteland retains normal gathering
+and infected danger. Beyond the exclusion boundary, survivors take
+**2.5 HP/s** of environmental damage and earn **+1 material** on successful
+nearby resource harvesting. Resource skill/tier/tool gates remain intact.
+
+Two high-risk deposits were added for the new gameplay loop. An independent
+zone HUD shows the active region. This is offline PvE risk/reward; actual
+shared PvP territory, safe-zone enforcement for other players and
+server-authoritative progression are later milestones.
+
+Detailed rules and regression commands: `RISK_ZONES.md`.
