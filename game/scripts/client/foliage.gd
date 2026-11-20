@@ -7,6 +7,7 @@ shader_type spatial;
 render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 global uniform float aa_weather_wetness;
+global uniform vec3 aa_vegetation_wind;
 // Shared quality knob: Performance = matte rain, Ultra = full PBR wet highlights.
 global uniform float aa_vegetation_wet_gloss;
 // Screen-independent, inexpensive thin-leaf backlight. Performance turns it off.
@@ -65,13 +66,19 @@ void vertex() {
 	if (wind_lod > 0.001 && sway > 0.0) {
 		float k = clamp(VERTEX.y / height_ref, 0.0, 1.0);
 		k *= k; // Keep trunks steady; move light tips.
-		float gust = 0.78 + 0.22 * sin(TIME * 0.46 + dot(root, vec2(0.047, 0.034)));
-		float phase = TIME * 1.45 + dot(root, vec2(0.23, 0.19));
-		// Existing weather blending supplies a smooth storm strength with no per-plant CPU updates.
-		float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.65;
-		float amount = sway * k * gust * wind_lod * storm_wind;
-		VERTEX.x += sin(phase) * amount;
-		VERTEX.z += cos(phase * 0.84) * amount * 0.7;
+		vec2 wind_dir = aa_vegetation_wind.xy;
+		vec2 crosswind = vec2(-wind_dir.y, wind_dir.x);
+		float wind_power = clamp(aa_vegetation_wind.z, 0.0, 1.0);
+		float gust = 0.78 + 0.22 * sin(TIME * 0.46
+			+ dot(root, wind_dir * 0.047 + crosswind * 0.012));
+		float phase = TIME * (0.95 + wind_power * 0.5)
+			+ dot(root, wind_dir * 0.23 + crosswind * 0.07);
+		// Existing weather shading increases gusts but regional wind sets the direction.
+		float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.25;
+		float amount = sway * k * gust * wind_lod * storm_wind * wind_power;
+		vec2 motion = wind_dir * sin(phase) + crosswind * cos(phase * 0.84) * 0.25;
+		VERTEX.x += motion.x * amount;
+		VERTEX.z += motion.y * amount;
 	}
 }
 void fragment() {

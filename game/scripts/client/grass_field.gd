@@ -31,6 +31,7 @@ shader_type spatial;
 render_mode cull_disabled, diffuse_lambert_wrap, specular_disabled, shadows_disabled;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 global uniform float aa_weather_wetness;
+global uniform vec3 aa_vegetation_wind;
 uniform float fade_start = 44.0;
 uniform float fade_end = 60.0;
 varying float tipness;
@@ -53,12 +54,19 @@ void vertex() {
 	if (shrink > 0.001) {
 		// Wind: steady ripples with larger gusts, strongest at the tips.
 		float k = UV.y * UV.y;
-		float wave = TIME * 1.6 + root.x * 0.31 + root.z * 0.27;
-		float gust = sin(TIME * 0.7 + root.x * 0.045 + root.z * 0.03) * 0.5 + 0.5;
+		vec2 wind_dir = aa_vegetation_wind.xy;
+		vec2 crosswind = vec2(-wind_dir.y, wind_dir.x);
+		float wind_power = clamp(aa_vegetation_wind.z, 0.0, 1.0);
+		float wave = TIME * (1.0 + wind_power * 0.6)
+			+ dot(root.xz, wind_dir * 0.31 + crosswind * 0.08);
+		float gust = sin(TIME * 0.7
+			+ dot(root.xz, wind_dir * 0.045 + crosswind * 0.02)) * 0.5 + 0.5;
 		gust *= gust;
-		float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.45;
-		VERTEX.x += (sin(wave) * 0.035 + gust * 0.11) * k * shrink * storm_wind;
-		VERTEX.z += (cos(wave * 0.8) * 0.03 + gust * 0.05) * k * shrink * storm_wind;
+		float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.2;
+		vec2 motion = wind_dir * (sin(wave) * 0.035 + gust * 0.11)
+			+ crosswind * (cos(wave * 0.8) * 0.03 + gust * 0.05);
+		VERTEX.x += motion.x * k * shrink * storm_wind * wind_power;
+		VERTEX.z += motion.y * k * shrink * storm_wind * wind_power;
 		sheen = gust;
 	}
 	// Lit like the ground it grows from, so the carpet and the soil read as one surface.

@@ -61,6 +61,7 @@ var _world_environment: Environment
 var _atmosphere # Script-backed Atmosphere instance; custom fields are not members of Node3D.
 var _weather_next_update: float = -1.0
 var _weather_storming := false
+var _visual_weather_wind := Vector2.ZERO
 var _avatar: MeshInstance3D
 var _bike_visual
 var _flare_visual
@@ -217,9 +218,10 @@ func _update_world_light(delta: float = 0.0) -> void:
 		var at: Vector3 = survivor.position if survivor != null else Vector3.ZERO
 		var weather: Dictionary = Weather.conditions(world, at.x, at.z, seconds)
 		_weather_storming = str(weather.get("condition", "")) == "storm"
+		_visual_weather_wind = Weather.wind_at(world, at.x, at.z, seconds)
 		_weather_next_update = seconds + 0.25
 	_atmosphere.update(WorldCycle.daylight(seconds), WorldCycle.sun_height(seconds),
-		WorldCycle.phase(seconds), _weather_storming, delta)
+		WorldCycle.phase(seconds), _weather_storming, delta, _visual_weather_wind)
 
 
 func _mesh(box_size: Vector3, color: Color) -> MeshInstance3D:

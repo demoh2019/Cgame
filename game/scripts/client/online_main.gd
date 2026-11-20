@@ -7,6 +7,7 @@ const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
+const Weather = preload("res://scripts/shared/weather.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Net = preload("res://scripts/shared/net.gd")
 const GameClient = preload("res://scripts/client/game_client.gd")
@@ -70,6 +71,8 @@ var _place_timer := 0.0
 var help_panel
 var demo_phase := -1.0
 var demo_storm := false
+var _wind_sample_left := 0.0
+var _visual_weather_wind := Vector2.ZERO
 var atmosphere
 var _grade_material: ShaderMaterial
 var _auto_quality := GraphicsAutoQuality.new()
@@ -1142,15 +1145,24 @@ func _update_time_of_day(delta: float) -> void:
 	var storming: bool = demo_storm or (str(weather.get("condition", "clear")) == "storm" and not bool(weather.get("sheltered", false)))
 	var clock: float = client.server_time if demo_phase < 0.0 else demo_phase * WorldCycle.DAY_LENGTH
 	var underground: bool = client != null and client.you.has("x") and Dungeon.is_underground(float(client.you["x"]))
+	# Stable 256m regional wind is only sampled four times per second.
+	_wind_sample_left -= maxf(delta, 0.0)
+	if underground:
+		_visual_weather_wind = Vector2.ZERO
+		_wind_sample_left = 0.0
+	elif _wind_sample_left <= 0.0 and client != null and client.world != null and client.you.has("x"):
+		var here: Vector3 = client.display_position()
+		_visual_weather_wind = Weather.wind_at(client.world, here.x, here.z, clock)
+		_wind_sample_left = 0.25
 	if underground:
 		# Below ground: no sky, no weather; the torches of the rooms and the light you carry.
-		atmosphere.update(0.0, -0.3, WorldCycle.phase(clock), false, delta)
+		atmosphere.update(0.0, -0.3, WorldCycle.phase(clock), false, delta, Vector2.ZERO)
 		sun.light_energy *= 0.15
 		environment.ambient_light_energy = 0.32
 		environment.ambient_light_color = Color(0.45, 0.4, 0.34)
 		storming = false
 	else:
-		atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta)
+		atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta, _visual_weather_wind)
 	_set_carried_light(underground)
 	if audio != null:
 		audio.update_music(WorldCycle.daylight(clock), delta)
