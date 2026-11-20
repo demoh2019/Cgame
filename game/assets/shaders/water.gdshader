@@ -1,5 +1,6 @@
 shader_type spatial;
 render_mode blend_mix, depth_draw_never, cull_back, diffuse_burley, specular_schlick_ggx;
+global uniform float aa_weather_wetness;
 
 // Open water: colour from the depth under the surface, a soft foam line along the shore, scrolling ripples
 // and a Fresnel sheen that picks up the sky.
@@ -37,6 +38,8 @@ void vertex() {
 void fragment() {
 	float t = TIME;
 	vec2 p = world_position.xz;
+	float storm = clamp(aa_weather_wetness, 0.0, 1.0);
+	float storm_wave_strength = 1.0 + storm * 0.65;
 	// Analytic wave slopes avoid recomputing three octaves of noise at three nearby
 	// pixel positions. Two opposing wave trains preserve motion and sun glints.
 	// High/Ultra add fine noise only where their visual budget allows it.
@@ -60,6 +63,8 @@ void fragment() {
 			slope += vec2(value_noise(flow + vec2(e, 0.0)) - h,
 				value_noise(flow + vec2(0.0, e)) - h) * (0.13 / e) * detail_fade;
 		}
+		// Amplify the existing waves rather than adding costly new noise samples.
+		slope *= storm_wave_strength;
 		vec3 world_normal = normalize(vec3(-slope.x * ripple_strength * 2.5, 1.0,
 			-slope.y * ripple_strength * 2.5));
 		NORMAL = normalize((VIEW_MATRIX * vec4(world_normal, 0.0)).xyz);
@@ -93,12 +98,16 @@ void fragment() {
 		}
 		foam = smoothstep(0.35, 0.75, foam_noise + edge * 0.9 - 0.55) * edge;
 	}
-	color = mix(color, vec3(0.95, 0.98, 1.0), foam);
+	// Small storm whitecaps extend over deep water, with zero extra texture reads.
+	float storm_whitecaps = crest * storm * min(ripple_strength * 1.2, 0.55)
+		* smoothstep(0.2, 1.2, thickness);
+	foam = clamp(foam + storm_whitecaps, 0.0, 1.0);
+	color = mix(color * (1.0 - storm * 0.10), vec3(0.95, 0.98, 1.0), foam);
 
 	float fresnel = pow(1.0 - clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0), 3.0);
 	ALBEDO = color;
 	ALPHA = clamp(mix(0.28, 0.93, smoothstep(0.0, 2.5, thickness)) + foam * 0.5 + fresnel * 0.25, 0.0, 1.0);
-	ROUGHNESS = mix(0.06, 0.4, foam);
+	ROUGHNESS = mix(0.06 + storm * 0.05, 0.4 + storm * 0.05, foam);
 	SPECULAR = 0.7;
 	METALLIC = 0.0;
 	EMISSION = vec3(0.01, 0.04, 0.05) * (1.0 - depth_mix)
