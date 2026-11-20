@@ -12,6 +12,7 @@ const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd"
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const Foliage = preload("res://scripts/client/foliage.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
+const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
 static var _level: int = 1
@@ -112,6 +113,8 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	ShadowBudget.configure(world_profile)
 	# One global torch budget covers all streamed underground rooms.
 	DungeonLightBudget.configure(_level)
+	# Local dungeon cubemaps are pooled and captured only on nearby room changes.
+	DungeonReflectionBudget.configure(_level)
 	# The active backend can differ from ProjectSettings after a driver fallback.
 	var method := RenderingServer.get_current_rendering_method()
 	if viewport != null:
