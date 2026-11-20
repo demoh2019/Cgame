@@ -51,12 +51,14 @@ weather systems without network or gameplay changes.
 
 - Godot spatial shader PBR materials and per-pixel normals:
   https://docs.godotengine.org/en/4.5/tutorials/3d/standard_material_3d.html
-- Unreal's material shading models use physically based response and
-  material-dependent subsurface/reflection behavior:
-  https://dev.epicgames.com/documentation/en-us/unreal-engine/shading-models-in-unreal-engine
-- Unity HDRP terrain demonstrations explain the importance of cohesive
-  physically lit environmental materials and budgeted detail:
-  https://unity.com/blog/games/experience-the-new-unity-terrain-demo-scenes-for-hdrp-and-urp
+- Unreal Engine's Light Function Atlas explicitly supports projected
+  caustic patterns and explains how to batch light functions:
+  https://dev.epicgames.com/documentation/unreal-engine/using-light-functions-in-unreal-engine
+- Unity HDRP computes caustics on opaque geometry visible through water;
+  its simulation-based caustics are more costly than our near-field pattern:
+  https://docs.unity.cn/Packages/com.unity.render-pipelines.high-definition%4017.0/manual/WaterSystem-caustics.html
+- GPU Gems documents techniques for believable animated water caustics:
+  https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-2-rendering-water-caustics
 
 This is a native Godot shader implementation; no proprietary
 Unreal/Unity rendering pipeline is copied.
