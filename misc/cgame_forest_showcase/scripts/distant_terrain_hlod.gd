@@ -13,6 +13,7 @@ extends Node3D
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const TerrainPatch = preload("res://scripts/streamed_terrain_patch.gd")
 const SharedAssets = preload("res://scripts/forest_shared_assets.gd")
+const DistantCanopies = preload("res://scripts/distant_forest_canopies.gd")
 
 const CELL_SIZE: int = 32
 const GRID_WIDTH: int = 33
@@ -136,6 +137,13 @@ func _create_proxy(cell: Vector2i) -> MeshInstance3D:
     proxy.name = "FarTerrain_%d_%d" % [cell.x, cell.y]
     proxy.mesh = mesh
     proxy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+    # One shared low-poly MultiMesh batch preserves each tree's original
+    # random position and size. Parent visibility handles exact HLOD
+    # swaps atomically: no full-res / low-res crown double rendering.
+    var canopies := DistantCanopies.new()
+    canopies.configure(cell)
+    proxy.add_child(canopies)
     add_child(proxy)
     proxy.global_position = streaming_world.to_global(
         streaming_world.cell_to_local_position(cell))
@@ -192,13 +200,18 @@ func get_proxy_for_cell(cell: Vector2i) -> MeshInstance3D:
 
 func get_stats() -> Dictionary:
     var visible: int = 0
+    var visible_canopies: int = 0
     for proxy in _proxies.values():
         if is_instance_valid(proxy) and proxy.visible:
             visible += 1
+            var canopies := proxy.get_node_or_null("DistantForestCanopies") as MultiMeshInstance3D
+            if canopies != null and canopies.multimesh != null:
+                visible_canopies += canopies.multimesh.instance_count
     return {
         "radius": _radius,
         "allocated": _proxies.size(),
         "visible": visible,
+        "visible_canopies": visible_canopies,
         "built_total": _built_total,
         "max_per_frame": MAX_BUILDS_PER_FRAME
     }
