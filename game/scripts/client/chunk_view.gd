@@ -22,6 +22,7 @@ const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
+const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection_budget.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 
@@ -568,6 +569,26 @@ func build(p_world, p_cell: Vector2i) -> void:
 	_build_terrain(origin)
 	var data: Dictionary = _world.chunk(cell)
 	_build_objects(data)
+	_add_outdoor_reflection_anchors(origin, data)
+
+
+## Only the containing chunk creates a cheap site marker, never a GPU probe.
+## The single world-wide reflection manager captures at most 1/2 nearby sites.
+func _add_outdoor_reflection_anchors(origin: Vector2, data: Dictionary) -> void:
+	for site in data.get("pois", []):
+		var kind: String = str(site.get("kind", ""))
+		if not OutdoorReflectionBudget.SITE_KINDS.has(kind):
+			continue
+		var x: float = float(site["x"])
+		var z: float = float(site["z"])
+		if not OutdoorReflectionBudget.belongs_to_chunk(x, z, origin, Defs.CHUNK_SIZE):
+			continue
+		var anchor := Node3D.new()
+		anchor.name = "OutdoorReflectionAnchor"
+		anchor.position = Vector3(x - origin.x,
+			float(_world.height_at(x, z)) + 3.5, z - origin.y)
+		anchor.add_to_group(OutdoorReflectionBudget.GROUP)
+		add_child(anchor)
 
 
 # --- Underground ------------------------------------------------------------------------------------------------------

@@ -6,10 +6,12 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
+const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection_budget.gd")
 
 
 func build(world) -> void:
 	var height: float = WorldGen.HUB_HEIGHT
+	_add_reflection_anchors(height)
 	var village := Assets.has_village()
 	if village:
 		_build_cobble_plaza(height)
@@ -56,6 +58,17 @@ func build(world) -> void:
 	var lamp := Assets.mesh("city/road-straight-lightposts")
 	for corner in [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]:
 		_place(lamp, Vector3(corner.x * 17.5, height, corner.y * 17.5), 4.0, atan2(corner.x, corner.y))
+
+
+## Three cheap markers cover the central plaza and its nearest building ring.
+## Only the camera-local outdoor pool renders a cubemap for a nearby marker.
+func _add_reflection_anchors(height: float) -> void:
+	for offset in [Vector2.ZERO, Vector2(23.0, 0.0), Vector2(-23.0, 0.0)]:
+		var anchor := Node3D.new()
+		anchor.name = "HubReflectionAnchor"
+		anchor.position = Vector3(offset.x, height + 3.5, offset.y)
+		anchor.add_to_group(OutdoorReflectionBudget.GROUP)
+		add_child(anchor)
 
 
 func _place(mesh: Mesh, position: Vector3, scale_factor: float, yaw: float) -> void:

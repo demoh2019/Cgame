@@ -23,6 +23,7 @@ const Foliage = preload("res://scripts/client/foliage.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
+const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection_budget.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
 static var _level: int = 1
@@ -183,6 +184,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	DungeonLightBudget.configure(_level)
 	# Local dungeon cubemaps are pooled and captured only on nearby room changes.
 	DungeonReflectionBudget.configure(_level)
+	OutdoorReflectionBudget.configure(_level)
 	# The active backend can differ from ProjectSettings after a driver fallback.
 	var method := RenderingServer.get_current_rendering_method()
 	# Opaque submerged PBR terrain and procedural terrain share a single

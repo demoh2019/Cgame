@@ -42,6 +42,7 @@ const GraphicsLensRain = preload("res://scripts/client/graphics_lens_rain.gd")
 const RenderBenchmark = preload("res://scripts/client/render_benchmark.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
+const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection_budget.gd")
 const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
@@ -312,6 +313,10 @@ func _build_environment() -> void:
 	var dungeon_reflections := DungeonReflectionBudget.new()
 	dungeon_reflections.name = "DungeonReflectionBudget"
 	add_child(dungeon_reflections)
+	# Only one pool of high-end architectural reflection captures in the world.
+	var outdoor_reflections := OutdoorReflectionBudget.new()
+	outdoor_reflections.name = "OutdoorReflectionBudget"
+	add_child(outdoor_reflections)
 	if camera.has_method("set_shake_max_offset"):
 		# Trauma shake (engine feature of this fork): small offsets for a top-down view, quick decay.
 		camera.set_shake_max_offset(Vector3(0.35, 0.25, 0.35))
