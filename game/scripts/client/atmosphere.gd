@@ -135,6 +135,9 @@ func _ready() -> void:
 	# Quality selection enables PCSS only for High/Ultra on Forward+.
 	# The startup value must never allocate expensive PCSS by default.
 	sun.light_angular_distance = 0.0
+	# Project-wide contact shadows are enabled, but the startup Balanced preset
+	# is cheap: only Forward+ High/Ultra opt in through GraphicsQuality.
+	sun.shadow_contact_shadows_allow = false
 	sun.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_AND_SKY
 	sun.light_volumetric_fog_energy = 0.0
 	add_child(sun)
