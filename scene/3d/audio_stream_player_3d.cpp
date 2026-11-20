@@ -294,7 +294,12 @@ void AudioStreamPlayer3D::_notification(int p_what) {
 				internal->active.set();
 				HashMap<StringName, Vector<AudioFrame>> bus_map;
 				bus_map[_get_actual_bus()] = volume_vector;
-				AudioServer::get_singleton()->start_playback_stream(setplayback, bus_map, setplay.get(), actual_pitch_scale, linear_attenuation, attenuation_filter_cutoff_hz);
+				// The first audio mix must use the *same* obstruction curve as
+				// later physics updates. Otherwise a shot behind a ridge leaks
+				// bright transient highs for one buffer before being muffled.
+				const AudioOcclusionPolicy::Response initial_occlusion =
+						AudioOcclusionPolicy::evaluate(obstruction_amount, attenuation_filter_cutoff_hz);
+				AudioServer::get_singleton()->start_playback_stream(setplayback, bus_map, setplay.get(), actual_pitch_scale, linear_attenuation, initial_occlusion.cutoff_hz);
 				setplayback.unref();
 				setplay.set(-1);
 			}
@@ -492,7 +497,9 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 			}
 		}
 
-		linear_attenuation = MAX(linear_attenuation, Math::db_to_linear(db_att));
+		// Spatial blockage darkens the direct path and high frequencies.
+		// Preserve the previous distance/direction curve when unobstructed.
+		linear_attenuation = MAX(linear_attenuation, Math::db_to_linear(db_att) * obstruction.gain);
 
 		FixedVector<AudioFrame, VOLUME_VECTOR_SIZE> listener_volume_vector;
 		listener_volume_vector.resize_uninitialized(VOLUME_VECTOR_SIZE);
