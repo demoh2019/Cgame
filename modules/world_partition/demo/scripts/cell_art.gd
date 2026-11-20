@@ -7,6 +7,12 @@ extends Node3D
 const CELL_SIZE := 128.0
 const TREE_COUNT := 160
 const PROXY_STRIDE := 8
+const QUEST_HUB := Vector2i(0, 0)
+const COMBAT_ARENA := Vector2i(4, 2)
+
+var cell_coords: Vector2i = Vector2i(9999, 9999)
+var hub_reward_claimed := false
+var arena_wins := 0
 
 static var _trunk_mesh: CylinderMesh
 static var _crown_detail_mesh: SphereMesh
@@ -29,6 +35,7 @@ func _ready() -> void:
     var trunks := _build_multimesh(_trunk_mesh, count)
     var crowns := _build_multimesh(_crown_proxy_mesh if proxy else _crown_detail_mesh, count)
     var grid := Vector2i(roundi(position.x / CELL_SIZE), roundi(position.z / CELL_SIZE))
+    cell_coords = grid
     var rng := RandomNumberGenerator.new()
     rng.seed = int(500003 + (grid.x + 1000) * 73856093 + (grid.y + 1000) * 19349663)
     var output_index := 0
@@ -54,8 +61,51 @@ func _ready() -> void:
 
     # Gameplay landmarks belong to detailed scenes only. The demo's native
     # pinning API allows the hub and event arena to remain resident offscreen.
-    if not proxy and (grid == Vector2i(0, 0) or grid == Vector2i(4, 2)):
-        _add_gameplay_landmark(grid == Vector2i(0, 0))
+    if not proxy and (grid == QUEST_HUB or grid == COMBAT_ARENA):
+        _add_gameplay_landmark(grid == QUEST_HUB)
+        _refresh_landmark()
+
+# The native WorldPartition3D streamer invokes these optional scene-root hooks.
+# Only gameplay cells retain state; uninteresting procedural foliage returns {}.
+func capture_streaming_state() -> Dictionary:
+    if proxy:
+        return {}
+    if cell_coords == QUEST_HUB:
+        return {"reward_claimed": hub_reward_claimed}
+    if cell_coords == COMBAT_ARENA:
+        return {"arena_wins": arena_wins}
+    return {}
+
+func restore_streaming_state(state: Dictionary) -> void:
+    if cell_coords == QUEST_HUB:
+        hub_reward_claimed = bool(state.get("reward_claimed", false))
+    elif cell_coords == COMBAT_ARENA:
+        arena_wins = maxi(0, int(state.get("arena_wins", 0)))
+    _refresh_landmark()
+
+func claim_hub_reward() -> bool:
+    if proxy or cell_coords != QUEST_HUB or hub_reward_claimed:
+        return false
+    hub_reward_claimed = true
+    _refresh_landmark()
+    return true
+
+func win_arena_round() -> int:
+    if proxy or cell_coords != COMBAT_ARENA:
+        return -1
+    arena_wins += 1
+    _refresh_landmark()
+    return arena_wins
+
+func _refresh_landmark() -> void:
+    if cell_coords == QUEST_HUB:
+        var label := get_node_or_null("QuestHub/StateLabel") as Label3D
+        if label != null:
+            label.text = "HUB REWARD CLAIMED" if hub_reward_claimed else "HUB REWARD READY  [C]"
+    elif cell_coords == COMBAT_ARENA:
+        var label := get_node_or_null("CombatArena/StateLabel") as Label3D
+        if label != null:
+            label.text = "ARENA WINS: %d  [B]" % arena_wins
 
 func _add_gameplay_landmark(is_hub: bool) -> void:
     var anchor := Node3D.new()
@@ -80,6 +130,7 @@ func _add_gameplay_landmark(is_hub: bool) -> void:
     anchor.add_child(column)
 
     var nameplate := Label3D.new()
+    nameplate.name = "StateLabel"
     nameplate.text = "QUEST HUB  [H]" if is_hub else "COMBAT ARENA  [G]"
     nameplate.font_size = 64
     nameplate.pixel_size = 0.01
