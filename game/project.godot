@@ -19,6 +19,10 @@ common/physics_ticks_per_second=30
 
 [rendering]
 
+; Cap explicitly opted-in terrain anisotropic samplers at 8x. Performance
+; and Balanced keep trilinear sampling, so their GPU texture cost is unchanged.
+textures/default_filters/anisotropic_filtering_level=8
+
 ; Software occluders are generated only from solid dungeon walls, while the
 ; viewport disables the extra CPU work in the open world.
 occlusion_culling/use_occlusion_culling=true
