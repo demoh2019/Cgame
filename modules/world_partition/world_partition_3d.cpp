@@ -763,6 +763,16 @@ bool WorldPartition3D::is_cell_loaded(const Vector2i &p_cell) const {
 	return id != nullptr && ObjectDB::get_instance(*id) != nullptr;
 }
 
+Node3D *WorldPartition3D::get_cell_instance(const Vector2i &p_cell) const {
+	const ObjectID *id = active_cells.getptr(p_cell);
+	if (id == nullptr) {
+		return nullptr;
+	}
+	// Never expose stale node pointers after an external free or stream unload.
+	Node3D *instance = Object::cast_to<Node3D>(ObjectDB::get_instance(*id));
+	return instance != nullptr && !instance->is_queued_for_deletion() ? instance : nullptr;
+}
+
 int WorldPartition3D::get_loaded_cell_count() const {
 	return active_cells.size();
 }
@@ -847,6 +857,7 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cells_in_radius", "center", "radius"), &WorldPartition3D::get_cells_in_radius);
 	ClassDB::bind_method(D_METHOD("update_streaming"), &WorldPartition3D::update_streaming);
 	ClassDB::bind_method(D_METHOD("is_cell_loaded", "cell"), &WorldPartition3D::is_cell_loaded);
+	ClassDB::bind_method(D_METHOD("get_cell_instance", "cell"), &WorldPartition3D::get_cell_instance);
 	ClassDB::bind_method(D_METHOD("get_loaded_cell_count"), &WorldPartition3D::get_loaded_cell_count);
 	ClassDB::bind_method(D_METHOD("get_loaded_cells"), &WorldPartition3D::get_loaded_cells);
 	ClassDB::bind_method(D_METHOD("get_pending_cell_count"), &WorldPartition3D::get_pending_cell_count);

@@ -15,7 +15,9 @@ static func save_state(state: Dictionary, path: String = SAVE_PATH) -> bool:
         "quality": state.get("quality", true),
         # Additive v1 fields: older saves lacking these keys remain compatible.
         "time_of_day": state.get("time_of_day", 17.25),
-        "weather": state.get("weather", 0)
+        "weather": state.get("weather", 0),
+        # Optional progression field; older v1 saves still load without it.
+        "defeated_enemies": state.get("defeated_enemies", [])
     }
     var file := FileAccess.open(path, FileAccess.WRITE)
     if file == null:
@@ -76,11 +78,29 @@ static func load_state(max_relics: int, path: String = SAVE_PATH) -> Dictionary:
     if typeof(raw_weather) == TYPE_INT and int(raw_weather) >= 0 and int(raw_weather) <= 2:
         weather = int(raw_weather)
 
+    var defeated: Array[String] = []
+    var raw_defeated: Variant = raw.get("defeated_enemies", [])
+    if raw_defeated is Array:
+        for value in raw_defeated:
+            if not (value is String) or defeated.size() >= 15:
+                continue
+            var pieces: PackedStringArray = value.split(":")
+            if pieces.size() != 2 or not pieces[0].is_valid_int() or not pieces[1].is_valid_int():
+                continue
+            var x: int = pieces[0].to_int()
+            var z: int = pieces[1].to_int()
+            if x < -2 or x > 1 or z < -2 or z > 1 or (x == 0 and z == 0):
+                continue
+            var id: String = "%d:%d" % [x, z]
+            if not defeated.has(id):
+                defeated.append(id)
+
     return {
         "relics": ids,
         "position_xz": position,
         "look": look,
         "quality": raw.get("quality", true) == true,
         "time_of_day": time_of_day,
-        "weather": weather
+        "weather": weather,
+        "defeated_enemies": defeated
     }

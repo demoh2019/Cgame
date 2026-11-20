@@ -58,6 +58,7 @@ TEST_CASE("[WorldPartition3D] Defaults") {
 	CHECK(partition->get_pending_cell_count() == 0);
 	CHECK(partition->get_inflight_request_count() == 0);
 	CHECK(partition->get_failed_cell_count() == 0);
+	CHECK(partition->get_cell_instance(Vector2i()) == nullptr);
 	memdelete(partition);
 }
 
@@ -532,11 +533,19 @@ TEST_CASE("[SceneTree][WorldPartition3D] Prediction loads a future cell before o
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->is_cell_loaded(Vector2i(1, 0)));
 	CHECK(partition->get_loaded_cell_count() == 2);
+	Node3D *loaded_origin = partition->get_cell_instance(Vector2i(0, 0));
+	Node3D *loaded_forecast = partition->get_cell_instance(Vector2i(1, 0));
+	CHECK(loaded_origin != nullptr);
+	CHECK(loaded_forecast != nullptr);
+	CHECK(loaded_origin != loaded_forecast);
+	CHECK(partition->get_cell_instance(Vector2i(50, -50)) == nullptr);
 
 	partition->set_predictive_lookahead_seconds(0.0);
 	partition->update_streaming();
 	CHECK_FALSE(partition->has_predicted_cell());
 	CHECK_FALSE(partition->is_cell_loaded(Vector2i(1, 0)));
+	CHECK(partition->get_cell_instance(Vector2i(1, 0)) == nullptr);
+	CHECK(partition->get_cell_instance(Vector2i(0, 0)) == loaded_origin);
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
 
 	SceneTree::get_singleton()->get_root()->remove_child(partition);

@@ -170,6 +170,7 @@ public:
 
 	void update_streaming();
 	bool is_cell_loaded(const Vector2i &p_cell) const;
+	Node3D *get_cell_instance(const Vector2i &p_cell) const;
 	int get_loaded_cell_count() const;
 	Array get_loaded_cells() const;
 	int get_pending_cell_count() const;
