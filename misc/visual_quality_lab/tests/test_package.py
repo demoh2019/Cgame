@@ -245,8 +245,46 @@ class VisualQualityPackageTests(unittest.TestCase):
                       'ai_interest.last_update_micros'):
             self.assertIn(token, demo)
 
+    def test_world_telemetry_is_bounded_and_csv_export_is_explicit(self):
+        telemetry = (ROOT / 'addons/visual_quality/world_telemetry.gd').read_text()
+        for token in ('class_name WorldTelemetry3D', 'Performance.TIME_PROCESS',
+                      'Performance.TIME_PHYSICS_PROCESS', 'Performance.TIME_FPS',
+                      'Time.get_ticks_msec()', 'sample_interval_seconds',
+                      'capacity', '_next_index', 'push_snapshot',
+                      'percentile_nearest_rank', 'store_csv_line',
+                      'csv_path.begins_with("user://")', 'get_samples_oldest_first'):
+            self.assertIn(token, telemetry)
+        self.assertNotIn('FileAccess.open(csv_path, FileAccess.WRITE)', telemetry.split('func _process', 1)[1].split('func export_csv', 1)[0])
+
+    def test_governor_uses_cpu_guard_and_streak_hysteresis(self):
+        governor = (ROOT / 'addons/visual_quality/world_budget_governor.gd').read_text()
+        for token in ('class_name WorldBudgetGovernor3D', 'target_cpu_ms',
+                      'overload_windows', 'recovery_windows', '_overload_streak',
+                      '_recovery_streak', 'high_load_ratio', 'low_load_ratio',
+                      'cpu_ms > target_cpu_ms', 'is_finite(cpu_ms)',
+                      'max_spawns_per_update', 'max_cells_per_update',
+                      'set_quality_profile', 'set_automatic_enabled',
+                      'budget_changed.emit'):
+            self.assertIn(token, governor)
+        self.assertNotIn('Engine.get_frames_per_second()', governor)
+
+    def test_world_profiler_and_governor_wired_into_game_and_streamer(self):
+        demo = (ROOT / 'demo.gd').read_text()
+        streamer = (ROOT / 'addons/visual_quality/world_streamer.gd').read_text()
+        for token in ('Telemetry.new()', 'BudgetGovernor.new()',
+                      'telemetry.snapshot_captured.connect',
+                      'governor.set_quality_profile(profile)',
+                      'governor.set_automatic_enabled', 'KEY_0', 'KEY_B',
+                      'KEY_P', 'telemetry.export_csv()', 'get_cpu_p95_ms()'):
+            self.assertIn(token, demo)
+        for token in ('last_update_micros', 'last_spawned_count',
+                      'last_unloaded_count', 'peak_update_micros',
+                      'Time.get_ticks_usec()', 'total_spawned_count'):
+            self.assertIn(token, streamer)
+        self.assertLess(streamer.index('var started_usec: int = Time.get_ticks_usec()'), streamer.index('_poll_background_loads()'))
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
