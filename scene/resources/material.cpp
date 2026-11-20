@@ -1545,7 +1545,9 @@ void fragment() {)";
 			// Multiply the heightmap scale by 0.01 to improve heightmap scale usability.
 			code += R"(
 		// Height Deep Parallax: Enabled
-		float num_layers = mix(float(heightmap_max_layers), float(heightmap_min_layers), abs(dot(vec3(0.0, 0.0, 1.0), view_dir)));
+		// Bound even script-provided out-of-range layer uniforms to avoid
+		// unexpectedly long parallax raymarches on grazing surfaces.
+		float num_layers = clamp(mix(float(heightmap_max_layers), float(heightmap_min_layers), abs(dot(vec3(0.0, 0.0, 1.0), view_dir))), 1.0, 64.0);
 		float layer_depth = 1.0 / num_layers;
 		float current_layer_depth = 0.0;
 		vec2 p = view_dir.xy * heightmap_scale * 0.01;
@@ -1559,7 +1561,9 @@ void fragment() {)";
 			}
 			code += R"(
 		float current_depth = 0.0;
-		while (current_depth < depth) {
+		// Depth is nominally [0,1]. The extra bound protects against
+		// malformed imported height textures and invalid external inputs.
+		while (current_depth < depth && current_depth < 1.0) {
 			ofs -= delta;
 )";
 			if (flags[FLAG_INVERT_HEIGHTMAP]) {
@@ -2968,6 +2972,11 @@ bool BaseMaterial3D::get_particles_anim_loop() const {
 }
 
 void BaseMaterial3D::set_heightmap_deep_parallax(bool p_enable) {
+	// Avoid forcing a new shader variant when auto quality or editor scripts
+	// reapply an already active heightmap mode. Exact state is authoritative.
+	if (deep_parallax == p_enable) {
+		return;
+	}
 	deep_parallax = p_enable;
 	_queue_shader_change();
 	notify_property_list_changed();
