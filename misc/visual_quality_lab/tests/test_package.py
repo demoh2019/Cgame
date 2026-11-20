@@ -30,7 +30,10 @@ class VisualQualityPackageTests(unittest.TestCase):
         for feature in ('_fps_sum', '_samples', 'cooldown_seconds', 'low_fps_ratio',
                         'high_fps_ratio', 'restore_on_exit', 'calculate_next_scale',
                         'Performance.TIME_PROCESS', 'Performance.TIME_PHYSICS_PROCESS',
-                        'is_cpu_bound', 'skip_cpu_bound_drops'):
+                        'is_cpu_bound', 'skip_cpu_bound_drops',
+                        'viewport_set_measure_render_time',
+                        'viewport_get_measured_render_time_gpu',
+                        'calculate_next_scale_from_gpu', 'gpu_headroom_ratio'):
             self.assertIn(feature, script)
 
     def test_quality_manager_persists_only_opt_in_project_preferences(self):
