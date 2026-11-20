@@ -144,7 +144,7 @@ func _spawn(cell: Vector2i) -> void:
     enemy.name = "Stalker_%d_%d" % [cell.x, cell.y]
     enemy.set_script(Stalker)
     add_child(enemy)
-    enemy.call("configure", encounter_key(cell), player, _spawn_position(cell))
+    enemy.call("configure", encounter_key(cell), player, _spawn_position(cell), streamer)
     enemy.connect("attack_landed", _on_enemy_attack)
     enemy.connect("defeated", _on_enemy_defeated)
     active_enemies[cell] = enemy
