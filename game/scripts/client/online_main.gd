@@ -18,6 +18,7 @@ const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd"
 const Hud = preload("res://scripts/client/hud.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
+const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const HubView = preload("res://scripts/client/hub_view.gd")
@@ -289,6 +290,12 @@ func _build_environment() -> void:
 	add_child(chunk_root)
 	entities = EntityView.new()
 	add_child(entities)
+	# One GPU draw grounds local/remote players, infected and streamed NPCs.
+	# This avoids a separate transparent shadow MeshInstance for every actor.
+	var ground_shadows := ContactShadowBatch.new()
+	ground_shadows.name = "GroundContactShadows"
+	ground_shadows.setup(atmosphere)
+	add_child(ground_shadows)
 	# The sea: one big plane that follows the player.
 	water = MeshInstance3D.new()
 	var plane := PlaneMesh.new()
