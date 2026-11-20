@@ -35,6 +35,7 @@ var raid_telegraph: Dictionary = {} # Current server-authored raid attack warnin
 var raid_cone_telegraph: Dictionary = {} # Interest-limited server-authored cleave sector.
 var spit_zones: Dictionary = {} # Only the latest server-issued acid telegraphs.
 var acid_pools: Dictionary = {} # Replicated lingering ground hazards.
+var ember_pools: Dictionary = {} # Replicated server-owned burning ground.
 var outposts: Array = [] # Public server-controlled PvP objectives.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
@@ -94,6 +95,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	acid_pools.clear()
 	for pool in snapshot.get("acid_pools", []):
 		acid_pools[int(pool["id"])] = pool
+	ember_pools.clear()
+	for field in snapshot.get("ember_pools", []):
+		ember_pools[int(field["id"])] = field
 	outposts = snapshot.get("outposts", [])
 	if snapshot.has("inventory"):
 		inventory.load_dict(snapshot["inventory"])
@@ -510,6 +514,12 @@ func place_infected_snare(point: Vector2) -> void:
 func throw_flash(direction: Vector2) -> void:
 	if direction.is_finite() and direction.length_squared() > 0.0001:
 		net.c_throw_flash.rpc_id(1, direction.normalized().x, direction.normalized().y)
+
+
+func throw_ember(direction: Vector2) -> void:
+	if direction.is_finite() and is_finite(direction.length_squared()) 			and direction.length_squared() > 0.0001:
+		var heading: Vector2 = direction.normalized()
+		net.c_throw_ember.rpc_id(1, heading.x, heading.y)
 
 
 func throw_decoy(direction: Vector2) -> void:

@@ -461,6 +461,14 @@ func c_throw_flash(direction_x: float, direction_z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_throw_ember(direction_x: float, direction_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "throw_ember",
+			sim.cmd_throw_ember(peer, direction_x, direction_z))
+
+
+@rpc("any_peer", "reliable")
 func c_throw_decoy(direction_x: float, direction_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -992,6 +1000,6 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
 			return event.get("id", -1) == peer or event.get("by", 0) == peer or _is_nearby(event, peer)
-		"attack", "zombie_died", "decoy_thrown", "campfire_doused", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_cone_warning", "raid_cone_struck", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
+		"attack", "zombie_died", "decoy_thrown", "ember_thrown", "campfire_doused", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_cone_warning", "raid_cone_struck", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
 			return _is_nearby(event, peer)
 	return false

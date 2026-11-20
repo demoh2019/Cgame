@@ -506,6 +506,12 @@ static func _build_items() -> void:
 		"tier": 2, "stack": 5, "weight": 0.5, "value": 42})
 	_add_recipe("flash_charge", "flash_charge", 1,
 		{"scrap": 2, "bar_2": 1, "cloth_1": 1, "stone_1": 1}, "workbench", 5.0)
+	# Workbench-made burning-ground flask: tactical PvE, never PvP.
+	_add_item("ember_flask", {"name": "Scavenged Ember Flask",
+		"kind": "ember_flask", "tier": 2, "stack": 5, "weight": 0.75, "value": 55})
+	_add_recipe("ember_flask", "ember_flask", 1,
+		{"bar_2": 1, "cloth_1": 2, "wood_1": 3, "scrap": 1},
+		"workbench", 5.5)
 	# Defensive disposable wire snare; only the PvE server can trigger it.
 	_add_item("infected_snare", {"name": "Infected Tripwire Snare",
 		"kind": "deployable", "tier": 1, "stack": 10, "weight": 0.9, "value": 28})

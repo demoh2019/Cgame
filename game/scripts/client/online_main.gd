@@ -655,6 +655,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F4:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.toggle_mount()
+			KEY_F5:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					var direction: Vector2 = _aim_direction()
+					if direction.length_squared() < 0.0001:
+						direction = Vector2(sin(client.yaw), cos(client.yaw))
+					client.throw_ember(direction)
 			KEY_F3:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.survey_ruins()

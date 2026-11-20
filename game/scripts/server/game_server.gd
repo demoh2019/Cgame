@@ -92,6 +92,7 @@ const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
 const HandFlare = preload("res://scripts/shared/hand_flare.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const FlashCharge = preload("res://scripts/shared/flash_charge.gd")
+const EmberFlask = preload("res://scripts/shared/ember_flask.gd")
 const InfectedSnare = preload("res://scripts/shared/infected_snare.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const ShoreFishTrap = preload("res://scripts/shared/shore_fish_trap.gd")
@@ -244,6 +245,8 @@ var smoke_clouds: Dictionary = {} # Temporary visual cover, never checkpointed.
 var infected_snares: Dictionary = {} # Temporary PvE tripwires, never checkpointed.
 var fish_traps: Dictionary = {} # Paid coastal traps, session-only.
 var acid_pools: Dictionary = {} # Temporary nonpersistent corrosive terrain.
+var ember_pools: Dictionary = {} # Session-only PvE fire, no persistence.
+var _ember_last_hit: Dictionary = {} # Global per-infected burn throttle.
 var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stacking.
 var _acid_wall_last_hit: Dictionary = {} # Wall id -> last corrosion time; no overlap stacking.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
@@ -2337,6 +2340,49 @@ func cmd_throw_flash(peer_id: int, direction_x: float, direction_z: float) -> Di
 	return {"ok": true, "hits": interrupted, "cooldown": player.flash_cooldown}
 
 
+## Inventory-paid, obstacle-checked PvE fire. Shares the persistent flash
+## timer to avoid rapid alternating charges or reconnect cooldown bypasses.
+func cmd_throw_ember(peer_id: int, direction_x: float, direction_z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	if not player.action.is_empty():
+		return {"ok": false, "reason": "busy"}
+	if player.flash_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown"}
+	if ember_pools.size() >= EmberFlask.MAX_ACTIVE:
+		return {"ok": false, "reason": "world_limit"}
+	var owned: int = 0
+	for field in ember_pools.values():
+		if int(field["owner"]) == peer_id and EmberFlask.remaining(field, time) > 0.0:
+			owned += 1
+	if owned >= EmberFlask.MAX_PER_OWNER:
+		return {"ok": false, "reason": "owner_limit"}
+	var site: Dictionary = EmberFlask.landing(world, player.position,
+		Vector2(direction_x, direction_z))
+	if site.is_empty():
+		return {"ok": false, "reason": "invalid_landing"}
+	if player.inventory.count(EmberFlask.ITEM_ID) < 1 or not player.inventory.remove(
+			EmberFlask.ITEM_ID, 1):
+		return {"ok": false, "reason": "not_carried"}
+	var id: int = new_id()
+	ember_pools[id] = EmberFlask.make_pool(id, site, peer_id, time)
+	player.flash_cooldown = EmberFlask.COOLDOWN_SECONDS
+	player.noise_radius = maxf(player.noise_radius, EmberFlask.NOISE_RADIUS)
+	player.noise_timer = maxf(player.noise_timer, EmberFlask.NOISE_SECONDS)
+	player.action = {}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	events.append({"type": "ember_thrown", "peer": peer_id, "id": id,
+		"x": site["x"], "z": site["z"]})
+	return {"ok": true, "id": id, "seconds": EmberFlask.DURATION,
+		"cooldown": player.flash_cooldown}
+
+
 func cmd_throw_decoy(peer_id: int, direction_x: float, direction_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -3912,6 +3958,7 @@ func tick(delta: float) -> void:
 	_tick_raid_encounter()
 	_tick_zombies(delta)
 	_tick_acid_pools()
+	_tick_ember_pools()
 	_tick_recalls()
 	_tick_world(delta)
 
@@ -4606,6 +4653,54 @@ func _tick_acid_pools() -> void:
 				_on_player_death(survivor, -int(pool["source"]))
 
 
+## Bounded environmental burning: no player damage, global overlap guard,
+## cover checks every second, and real kill credit through _damage_target.
+func _tick_ember_pools() -> void:
+	if ember_pools.is_empty():
+		_ember_last_hit.clear()
+		return
+	var ids: Array = ember_pools.keys()
+	ids.sort()
+	for field_id in ids:
+		var field: Dictionary = ember_pools[field_id]
+		if EmberFlask.remaining(field, time) <= 0.0:
+			ember_pools.erase(field_id)
+			continue
+		var caster: Player = players.get(int(field["owner"]))
+		if caster == null or not _alive(caster) or _is_safe(caster.position):
+			ember_pools.erase(field_id)
+			continue
+		if time < float(field["next_tick"]):
+			continue
+		field["next_tick"] = time + EmberFlask.TICK_SECONDS
+		var center := Vector2(float(field["x"]), float(field["z"]))
+		var candidates: Array = zombies.keys()
+		candidates.sort()
+		var hits: int = 0
+		for target_id in candidates:
+			if hits >= EmberFlask.MAX_TARGETS_PER_TICK:
+				break
+			var infected = zombies.get(target_id)
+			if infected == null or not infected.is_alive():
+				continue
+			if time - float(_ember_last_hit.get(infected.id, -INF)) < EmberFlask.TICK_SECONDS:
+				continue
+			if not EmberFlask.affects(world, center, infected.position):
+				continue
+			_ember_last_hit[infected.id] = time
+			var burn: float = EmberFlask.DAMAGE_PER_TICK * (
+				0.5 if infected.raid_boss else 1.0)
+			_damage_target(caster, {"kind": "zombie", "id": infected.id},
+				burn, "ranged")
+			hits += 1
+	if ember_pools.is_empty():
+		_ember_last_hit.clear()
+	elif _ember_last_hit.size() > 1024:
+		for target_id in _ember_last_hit.keys():
+			if time - float(_ember_last_hit[target_id]) > EmberFlask.DURATION:
+				_ember_last_hit.erase(target_id)
+
+
 ## Single source of truth for infected sight and owner HUD replication.
 func _visual_signature_for(player: Player) -> float:
 	var armor_id: String = player.inventory.armor
@@ -5082,6 +5177,12 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"x": float(pool["x"]), "y": float(pool["y"]),
 				"z": float(pool["z"]), "radius": AcidSpitter.RADIUS,
 				"remaining": AcidSpitter.pool_remaining(pool, time)})
+	# Replicate only public position/radius/lifetime, never owner or tick data.
+	var nearby_ember_pools: Array = []
+	for field in ember_pools.values():
+		if EmberFlask.remaining(field, time) > 0.0 and here.distance_to(
+				Vector2(float(field["x"]), float(field["z"]))) <= Defs.INTEREST_RADIUS:
+			nearby_ember_pools.append(EmberFlask.public_state(field, time))
 	var nearby_barricades: Array = []
 	for wall in barricades.values():
 		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
@@ -5223,6 +5324,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		},
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
 		"spit_zones": spit_zones, "acid_pools": nearby_acid_pools,
+		"ember_pools": nearby_ember_pools,
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
 		"shelters": nearby_shelters,
 		"decoys": nearby_decoys, "smoke_clouds": nearby_smoke,

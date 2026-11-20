@@ -5,6 +5,7 @@ extends Node3D
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
+const EmberFlask = preload("res://scripts/shared/ember_flask.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
@@ -64,6 +65,7 @@ var _crate_meshes: Dictionary = {}
 var _zombie_meshes: Dictionary = {}
 var _spit_warning_meshes: Dictionary = {}
 var _acid_pool_meshes: Dictionary = {}
+var _ember_pool_meshes: Dictionary = {}
 var _barricade_bodies: Dictionary = {}
 var _campfire_visuals: Dictionary = {}
 var _shelter_visuals: Dictionary = {}
@@ -128,6 +130,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_shelter", KEY_F6)
 	_bind_key("survive_pack_shelter", KEY_F7)
 	_bind_key("survive_decoy", KEY_COMMA)
+	_bind_key("survive_ember", KEY_F5)
 	_bind_key("survive_smoke", KEY_F9)
 	_bind_key("survive_snare", KEY_BACKSLASH)
 	_bind_key("survive_stim", KEY_PERIOD)
@@ -468,6 +471,39 @@ func _sync_acid_pools() -> void:
 			_acid_pool_meshes.erase(id)
 
 
+## Local preview renders the same authoritative fields as online snapshots.
+func _sync_ember_pools() -> void:
+	var visible: Dictionary = {}
+	for field in sim.ember_pools.values():
+		if EmberFlask.remaining(field, sim.time) <= 0.0:
+			continue
+		var point := Vector2(float(field["x"]), float(field["z"]))
+		if point.distance_to(Vector2(survivor.position.x, survivor.position.z)) > 75.0:
+			continue
+		var id: int = int(field["id"])
+		visible[id] = true
+		if not _ember_pool_meshes.has(id):
+			var mesh := MeshInstance3D.new()
+			var disk := CylinderMesh.new()
+			disk.top_radius = EmberFlask.RADIUS
+			disk.bottom_radius = EmberFlask.RADIUS
+			disk.height = 0.06
+			mesh.mesh = disk
+			var mat := StandardMaterial3D.new()
+			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			mat.albedo_color = Color(1.0, 0.36, 0.07, 0.43)
+			mesh.material_override = mat
+			add_child(mesh)
+			_ember_pool_meshes[id] = mesh
+		_ember_pool_meshes[id].position = Vector3(
+			point.x, float(field["y"]) + 0.1, point.y)
+	for id in _ember_pool_meshes.keys():
+		if not visible.has(id):
+			_ember_pool_meshes[id].queue_free()
+			_ember_pool_meshes.erase(id)
+
+
 func _sync_barricades() -> void:
 	var active: Dictionary = {}
 	for id in sim.barricades:
@@ -718,6 +754,7 @@ func _physics_process(delta: float) -> void:
 	_sync_zombies()
 	_sync_spit_warnings()
 	_sync_acid_pools()
+	_sync_ember_pools()
 	_sync_barricades()
 	_sync_campfires()
 	_sync_shelters()
@@ -986,6 +1023,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Smoke charge", sim.cmd_use(LOCAL_PLAYER_ID, FieldSmoke.ITEM_ID))
 	elif event.is_action_pressed("survive_decoy"):
 		_result("Throw noise decoy", sim.cmd_throw_decoy(LOCAL_PLAYER_ID, _facing.x, _facing.y))
+	elif event.is_action_pressed("survive_ember"):
+		_result("Throw ember flask", sim.cmd_throw_ember(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_snare"):
 		var site := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
 		_result("Place infected snare", sim.cmd_place_infected_snare(LOCAL_PLAYER_ID, site.x, site.y))

@@ -32,6 +32,8 @@ func update_from(client) -> void:
 		_touch("spit:%d" % id, "spit_warning", client.spit_zones[id], seen)
 	for id in client.acid_pools:
 		_touch("pool:%d" % id, "acid_pool", client.acid_pools[id], seen)
+	for id in client.ember_pools:
+		_touch("ember:%d" % id, "ember_pool", client.ember_pools[id], seen)
 	for id in client.bags:
 		_touch("bag:%d" % id, "bag", client.bags[id], seen)
 	for id in client.barricades:
@@ -156,6 +158,28 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		poison.albedo_color = Color(0.55, 0.45, 0.08, 0.55)
 		puddle.material_override = poison
 		root.add_child(puddle)
+		return root
+	if kind == "ember_pool":
+		var embers := MeshInstance3D.new()
+		var shape := CylinderMesh.new()
+		shape.top_radius = float(entity.get("radius", 3.0))
+		shape.bottom_radius = shape.top_radius
+		shape.height = 0.06
+		embers.mesh = shape
+		embers.position.y = 0.10
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.albedo_color = Color(1.0, 0.36, 0.07, 0.43)
+		embers.material_override = mat
+		root.add_child(embers)
+		var light := OmniLight3D.new()
+		light.position.y = 0.8
+		light.light_color = Color(1.0, 0.32, 0.08)
+		light.light_energy = 0.55
+		light.omni_range = 4.5
+		light.shadow_enabled = false
+		root.add_child(light)
 		return root
 	if kind == "spit_warning":
 		var warning := MeshInstance3D.new()
@@ -408,7 +432,7 @@ func _process(delta: float) -> void:
 		var node: Node3D = _nodes[key]
 		var target: Dictionary = _targets[key]
 		node.position = node.position.lerp(target["position"], blend)
-		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
+		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
 			model.update_motion(delta)
