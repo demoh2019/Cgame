@@ -31,6 +31,8 @@ const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
+const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
@@ -50,6 +52,7 @@ var _world_environment: Environment
 var _avatar: MeshInstance3D
 var _bike_visual
 var _flare_visual
+var _lightning_visual
 var _last_bike_position: Vector3 = Vector3.INF
 var _stats: Label
 var _instructions: Label
@@ -88,6 +91,9 @@ func _ready() -> void:
 	for recipe_id in recipe_ids:
 		_recipes.append(str(recipe_id))
 	_make_light_and_camera()
+	_lightning_visual = LightningVisual.new()
+	_lightning_visual.name = "StormLightningWarning"
+	add_child(_lightning_visual)
 	_make_avatar()
 	_make_workbench()
 	_make_bank_landmark()
@@ -725,6 +731,7 @@ func _physics_process(delta: float) -> void:
 		_last_siege_notification = sim.siege_waves_started
 		_feedback = "Night siege! Infected are approaching a nearby barricade."
 	_update_world_light()
+	_lightning_visual.set_warning(sim.lightning_pending)
 	var movement := Input.get_vector("survive_left", "survive_right", "survive_up", "survive_down")
 	if movement.length_squared() > 0.001:
 		_facing = movement.normalized()
@@ -1177,6 +1184,14 @@ func _update_hud() -> void:
 		weight, speed_pct, survivor.inventory.count("silver"),
 		Contracts.description(survivor.contract_state), ", ".join(rows)
 	]
+	if not sim.lightning_pending.is_empty():
+		var strike: Dictionary = sim.lightning_pending
+		var danger_at := Vector2(float(strike["x"]), float(strike["z"]))
+		var personal_distance: float = Vector2(position.x, position.z).distance_to(danger_at)
+		_stats.text += "\nLIGHTNING: %.1fs — %s" % [
+			maxf(0.0, float(strike["at"]) - sim.time),
+			"MOVE OR DODGE!" if personal_distance <= StormLightning.RADIUS else
+			("strike %dm away" % roundi(personal_distance))]
 	if not survivor.recall.is_empty():
 		_stats.text += "\nRETURN CHARM: %.1fs — stay still" % maxf(
 			0.0, float(survivor.recall["until"]) - sim.time)

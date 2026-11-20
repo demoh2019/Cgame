@@ -4,6 +4,7 @@ extends CanvasLayer
 const Defs = preload("res://scripts/shared/defs.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
+const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
@@ -1104,6 +1105,10 @@ func _on_event(event: Dictionary) -> void:
 			say("+%d %s%s" % [event["amount"],
 				Defs.item(event["item"]).get("name", event["item"]),
 				" (outpost +%d)" % harvest_extra if harvest_extra > 0 else ""])
+		"lightning_warning":
+			say("THUNDERSTORM: lightning landing nearby — step out of the purple circle!")
+		"lightning_struck":
+			say("Lightning hit the ground! Moving away or dodging avoids the bolt.")
 		"campfire_doused":
 			say("Storm exhausted a nearby campfire. Find shelter or refuel sooner.")
 		"campfire_refueled":
@@ -1748,6 +1753,16 @@ func _process(_delta: float) -> void:
 			if recovery > 0.0:
 				_info_label.text += "\nRAID BOSS EXPOSED: %.1fs (+15%% PvE damage)" % recovery
 			break
+	var bolt: Dictionary = client.lightning_telegraph
+	if not bolt.is_empty():
+		var warning_center := Vector2(float(bolt.get("x", 0.0)),
+			float(bolt.get("z", 0.0)))
+		var player_at := Vector2(float(client.you.get("x", 0.0)),
+			float(client.you.get("z", 0.0)))
+		var imminent: bool = player_at.distance_to(warning_center) <= StormLightning.RADIUS
+		_info_label.text += "\nLIGHTNING %s %.1fs — move or dodge!" % [
+			"ON YOUR POSITION" if imminent else "NEARBY",
+			maxf(0.0, float(bolt.get("at", client.server_time)) - client.server_time)]
 	var cone: Dictionary = client.raid_cone_telegraph
 	if not cone.is_empty():
 		var center_cone := Vector3(float(cone.get("x", 0.0)),

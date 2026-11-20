@@ -7,6 +7,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
+const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 
 const METERS_RADIUS := 72.0
 const REFRESH_INTERVAL := 0.2
@@ -91,6 +92,16 @@ func current_escort_caravan() -> Dictionary:
 	return {}
 
 
+func current_escort_caravan() -> Dictionary:
+	if sim != null:
+		if sim.players.has(actor_id):
+			return sim._party_state_for(actor_id).get("escort_caravan", {}).duplicate(true)
+		return {}
+	if client != null:
+		return client.you.get("party", {}).get("escort_caravan", {}).duplicate(true)
+	return {}
+
+
 func current_rally() -> Dictionary:
 	if sim != null:
 		return sim.parties.state_for(actor_id, sim.time).get("rally", {}).duplicate(true)
@@ -152,6 +163,23 @@ func _draw_raid_cone(origin: Vector2, attack: Dictionary) -> void:
 		arc_points.append(map_point(origin, tip, size))
 	draw_colored_polygon(arc_points, Color(1.0, 0.25, 0.12, 0.23))
 	draw_polyline(arc_points, Color(1.0, 0.42, 0.16, 0.82), 1.4)
+
+
+## Purple bolt indicator. Visual-only, the server checks real hit positions.
+func _draw_lightning(origin: Vector2, strike: Dictionary) -> void:
+	for key in ["x", "z", "at"]:
+		if not strike.has(key) or not is_finite(float(strike[key])):
+			return
+	var point := Vector2(float(strike["x"]), float(strike["z"]))
+	if not in_range(origin, point):
+		return
+	var pixels_per_meter: float = minf(size.x, size.y) * MAP_INSET / METERS_RADIUS
+	var pixel: Vector2 = map_point(origin, point, size)
+	draw_circle(pixel, StormLightning.RADIUS * pixels_per_meter,
+		Color(0.67, 0.30, 1.0, 0.23))
+	draw_arc(pixel, StormLightning.RADIUS * pixels_per_meter, 0.0, TAU,
+		30, Color(0.90, 0.64, 1.0, 0.95), 2.0)
+	draw_circle(pixel, 2.2, Color(0.95, 0.88, 1.0))
 
 
 func _draw() -> void:
@@ -230,6 +258,15 @@ func _draw() -> void:
 		incoming_cone = client.raid_cone_telegraph
 	if not incoming_cone.is_empty():
 		_draw_raid_cone(origin, incoming_cone)
+
+	# Live server warning circle (also used by the offline local server).
+	var lightning: Dictionary = {}
+	if sim != null:
+		lightning = sim.lightning_pending
+	elif client != null:
+		lightning = client.lightning_telegraph
+	if not lightning.is_empty():
+		_draw_lightning(origin, lightning)
 
 	## The party standard is visible to members as a field aura radius.
 	# No non-member coordinates are ever sent by the server.

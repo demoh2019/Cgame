@@ -31,6 +31,7 @@ var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
 var smoke_clouds: Dictionary = {} # Interest-limited, temporary visual smoke.
 var infected_snares: Dictionary = {} # Server-replicated temporary PvE traps.
 var fish_traps: Dictionary = {} # Anonymous public, server-owned shoreline nets.
+var lightning_telegraph: Dictionary = {} # Nearby server-authored lightning danger circle.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
 var raid_cone_telegraph: Dictionary = {} # Interest-limited server-authored cleave sector.
 var spit_zones: Dictionary = {} # Only the latest server-issued acid telegraphs.
@@ -87,6 +88,7 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	snapshots_received += 1
 	server_time = float(snapshot["time"])
 	you = snapshot["you"]
+	lightning_telegraph = snapshot.get("lightning_telegraph", {}).duplicate(true)
 	raid_telegraph = snapshot.get("raid_telegraph", {}).duplicate(true)
 	raid_cone_telegraph = snapshot.get("raid_cone_telegraph", {}).duplicate(true)
 	spit_zones.clear()

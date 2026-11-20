@@ -11,6 +11,7 @@ const GameClient = preload("res://scripts/client/game_client.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 const EntityView = preload("res://scripts/client/entity_view.gd")
 const RaidTelegraph = preload("res://scripts/client/raid_telegraph.gd")
+const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
 const Hud = preload("res://scripts/client/hud.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
@@ -74,6 +75,7 @@ var _zoom := 1.0
 var _attack_cooldown := 0.0
 var _party_rally_marker: Node3D
 var _raid_telegraph: Node3D
+var _lightning_visual: Node3D
 var _screenshot_path := ""
 var _screenshot_frames := 0
 var _demo := ""
@@ -166,6 +168,9 @@ func _build_environment() -> void:
 	_raid_telegraph = RaidTelegraph.new()
 	_raid_telegraph.name = "RaidGroundSlamWarning"
 	add_child(_raid_telegraph)
+	_lightning_visual = LightningVisual.new()
+	_lightning_visual.name = "StormLightningWarning"
+	add_child(_lightning_visual)
 	camera.current = true
 	chunk_root = Node3D.new()
 	chunk_root.name = "Chunks"
@@ -524,6 +529,7 @@ func _process(delta: float) -> void:
 		streamer.focus_position = position
 		_apply_world_state()
 	entities.update_from(client)
+	_lightning_visual.set_warning(client.lightning_telegraph)
 	outposts.update_from(client)
 	_update_party_rally_marker()
 	# The camera glides after the player.

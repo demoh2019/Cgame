@@ -82,6 +82,7 @@ const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
 const NightHorde = preload("res://scripts/shared/night_horde.gd")
 const HubRecall = preload("res://scripts/shared/hub_recall.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const WetClothing = preload("res://scripts/shared/wet_clothing.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const SporeSampling = preload("res://scripts/shared/spore_sampling.gd")
@@ -256,6 +257,8 @@ var raid_pending_cone: Dictionary = {} # Locked origin and aim; server-only unti
 var raid_exposed_until: float = 0.0 # Post-slam PvE counterattack window, never persisted.
 var raid_wave: int = 0 # Number of completed reinforcement phases.
 var raid_minions: Array[int] = [] # Raid-only infected are cleared with boss.
+var lightning_pending: Dictionary = {} # One globally bounded storm ground warning.
+var next_lightning_at: float = 65.0 # Server-only schedule, never persisted.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
 var shelters: Dictionary = {} # Public, temporary weather tarps; never checkpointed.
 var decoys: Dictionary = {} # Temporary physical sound lures; server-owned, never persisted.
@@ -4159,11 +4162,63 @@ func tick(delta: float) -> void:
 	if tick_count % SiegeWaves.CHECK_EVERY_TICKS == 0:
 		_tick_siege_waves()
 	_tick_raid_encounter()
+	_tick_lightning()
 	_tick_zombies(delta)
 	_tick_acid_pools()
 	_tick_ember_pools()
 	_tick_recalls()
 	_tick_world(delta)
+
+
+## One server-wide storm hazard, never selected by a client. It is announced
+## before damage, then resolved at the locked world coordinate. There can be
+## only one pending bolt, independent of the number of connected players.
+func _tick_lightning() -> void:
+	if not lightning_pending.is_empty():
+		if time < float(lightning_pending["at"]):
+			return
+		var strike: Dictionary = lightning_pending
+		lightning_pending = {}
+		if not StormLightning.strike_valid(world, strike, time):
+			return
+		var center := Vector2(float(strike["x"]), float(strike["z"]))
+		for survivor in players.values():
+			if not _alive(survivor) or _is_safe(survivor.position) or \
+					not StormLightning.in_blast(center, survivor.position):
+				continue
+			if survivor.dodge_immunity > 0.0:
+				events.append({"type": "evaded", "peer": survivor.id, "zombie": -1})
+				continue
+			var taken: float = survivor.survival.hurt(StormLightning.DAMAGE)
+			if taken > 0.0:
+				_dismount(survivor, true)
+				survivor.dirty_character = true
+				events.append({"type": "hit", "kind": "player",
+					"id": survivor.id, "damage": taken, "by": -1})
+			if not _alive(survivor):
+				_on_player_death(survivor, -1)
+		events.append({"type": "lightning_struck", "x": center.x,
+			"z": center.y, "radius": StormLightning.RADIUS})
+		return
+	if time < next_lightning_at:
+		return
+	next_lightning_at = time + StormLightning.RETRY_INTERVAL
+	var candidates: Array = players.keys()
+	candidates.sort() # Deterministic regardless of session insertion order.
+	for peer in candidates:
+		var survivor: Player = players[peer]
+		if not _alive(survivor):
+			continue
+		var warning: Dictionary = StormLightning.create_warning(
+			world, survivor.position, time)
+		if warning.is_empty():
+			continue
+		lightning_pending = warning
+		next_lightning_at = time + StormLightning.CHECK_INTERVAL
+		events.append({"type": "lightning_warning",
+			"x": warning["x"], "z": warning["z"],
+			"radius": StormLightning.RADIUS, "at": warning["at"]})
+		break
 
 
 ## Armed charges resolve exactly once. The charge has been paid for and fixed
@@ -5669,6 +5724,13 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"infected_snares": nearby_snares,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}
+	# A lightning warning is public only to nearby survivors, not to global
+	# clients watching a different part of the island.
+	if not lightning_pending.is_empty():
+		var lightning_at := Vector2(float(lightning_pending["x"]),
+			float(lightning_pending["z"]))
+		if here.distance_to(lightning_at) <= Defs.INTEREST_RADIUS:
+			snapshot["lightning_telegraph"] = lightning_pending.duplicate(true)
 	# Send a ground telegraph only to survivors close enough to see it.
 	# The server remains the sole authority on the slam center and deadline.
 	if not raid_pending_slam.is_empty():
