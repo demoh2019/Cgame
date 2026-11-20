@@ -1419,6 +1419,14 @@
 				Sets the camera lens effects. See [member Environment.lens_chromatic_aberration], [member Environment.lens_film_grain], [member Environment.lens_flare] and [member Environment.motion_blur_amount] for more details.
 			</description>
 		</method>
+		<method name="environment_set_lens_vignette">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="amount" type="float" />
+			<description>
+				Sets the optical vignette strength. See [member Environment.lens_vignette] for more details.
+			</description>
+		</method>
 		<method name="environment_set_sdfgi">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />

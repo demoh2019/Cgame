@@ -90,7 +90,7 @@ layout(push_constant, std430) uniform Params {
 	uint lens_aberration_grain; // x: chromatic aberration, y: film grain (packed halves).
 	float motion_blur;
 	float lens_time;
-	float lens_flare;
+	uint lens_flare_vignette; // x: lens flare, y: vignette (packed halves).
 }
 params;
 
@@ -877,7 +877,7 @@ vec3 gather_lens_flare(vec2 uv) {
 	vec2 halo_uv = flipped + halo_dir * 0.42;
 	float halo_weight = pow(clamp(1.0 - length(vec2(0.5) - halo_uv) * 1.41421356, 0.0, 1.0), 5.0);
 	flare += gather_glow(source_glow, clamp(halo_uv, vec2(0.0), vec2(1.0))) * halo_weight * vec3(1.0, 0.9, 0.8);
-	return flare * params.lens_flare * 0.25;
+	return flare * unpackHalf2x16(params.lens_flare_vignette).x * 0.25;
 }
 
 void main() {
@@ -951,7 +951,7 @@ void main() {
 
 	if (bool(params.flags & FLAG_USE_GLOW) && params.glow_mode != GLOW_MODE_SOFTLIGHT) {
 		vec3 glow = gather_glow(source_glow, uv_interp);
-		if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && params.lens_flare > 0.0) {
+		if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && unpackHalf2x16(params.lens_flare_vignette).x > 0.0) {
 			glow += gather_lens_flare(uv_interp);
 		}
 		glow *= params.glow_intensity;
@@ -977,7 +977,7 @@ void main() {
 		// at 1.0 and higher. This makes the issue only appear with HDR output that
 		// can exceed a 1.0 output value.
 		vec3 glow = gather_glow(source_glow, uv_interp);
-		if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && params.lens_flare > 0.0) {
+		if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && unpackHalf2x16(params.lens_flare_vignette).x > 0.0) {
 			glow += gather_lens_flare(uv_interp);
 		}
 		glow *= params.glow_intensity;
@@ -1023,6 +1023,19 @@ void main() {
 		}
 	} else if (bool(params.flags & FLAG_CONVERT_TO_SRGB)) {
 		color.rgb = linear_to_srgb(color.rgb);
+	}
+
+	// Vignette, as in Unreal Engine 5 "Vignette Intensity" and Unity HDRP Vignette: a smooth,
+	// aspect-correct cos^4-style optical falloff that draws the eye to the frame center.
+	if (bool(params.flags & FLAG_USE_LENS_EFFECTS)) {
+		float vignette = unpackHalf2x16(params.lens_flare_vignette).y;
+		if (vignette > 0.0) {
+			vec2 aspect = vec2(params.pixel_size.y / params.pixel_size.x, 1.0);
+			vec2 d = (uv_interp - vec2(0.5)) * aspect / max(aspect.x, 1.0) * 1.41421356;
+			float r2 = dot(d, d);
+			float falloff = 1.0 / ((1.0 + r2 * 0.5) * (1.0 + r2 * 0.5)); // cos^4 of the field angle.
+			color.rgb *= mix(1.0, falloff * falloff, vignette);
+		}
 	}
 
 	// Film grain, as in Unreal Engine 5's filmic grain: animated, luminance-weighted noise

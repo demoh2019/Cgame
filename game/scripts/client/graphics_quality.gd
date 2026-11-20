@@ -239,6 +239,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# Far leaf alpha coverage uses cached native mip levels even with FSR2.
 	# Low-end renderers retain their original imported texture allocations.
 	Foliage.configure_alpha_mipmaps(_level, str(method))
+	var native_vignette := false
 	if atmosphere != null:
 		# The atmosphere owns the persistent shadow enable flag used by its day/night update.
 		# Applying only to the sun node would let nighttime weather restore shadows on Performance.
@@ -285,7 +286,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Forward+ High/Ultra. Low-end remains on the established ACES curve.
 		GraphicsTonemapping.apply(env, _level, str(method))
 		# Native HDR lens fringing + filmic grain inside the same tonemap pass.
-		GraphicsLens.apply(env, _level, str(method))
+		native_vignette = GraphicsLens.apply(env, _level, str(method))
 		# Hybrid sky + screen-space reflections on High/Ultra Forward+ only.
 		# Runtime changes (including Auto) also turn SSR off when required.
 		GraphicsReflections.apply(env, _level, method)
@@ -296,6 +297,8 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Sub-LSB output dither is fused into the existing grade pass. Auto
 		# resolution and renderer switching cannot leave stale grain enabled.
 		post_material.set_shader_parameter("deband_strength", float(p["deband_strength"]))
+		# The engine's optical cos^4 vignette replaces the flat canvas one on High/Ultra.
+		post_material.set_shader_parameter("vignette", 0.0 if native_vignette else 0.28)
 	# Texture-group-style anisotropy on expensive terrain samplers only:
 	# Performance/Balanced use trilinear; High sharpens color at grazing
 	# angles; Ultra also filters normal detail. Existing chunk road/biome

@@ -127,7 +127,7 @@ private:
 		uint32_t lens_aberration_grain; //  4 - 116 (two packed half floats)
 		float motion_blur; //  4 - 120
 		float lens_time; //  4 - 124
-		float lens_flare; //  4 - 128
+		uint32_t lens_flare_vignette; //  4 - 128 (two packed half floats: lens flare, vignette)
 	};
 
 	struct TonemapPushConstantMobile {
@@ -217,6 +217,7 @@ public:
 		// Physically motivated camera lens effects (Forward+ only).
 		float lens_chromatic_aberration = 0.0;
 		float lens_film_grain = 0.0;
+		float lens_vignette = 0.0;
 		float lens_time = 0.0;
 		float lens_flare = 0.0;
 		float motion_blur = 0.0;

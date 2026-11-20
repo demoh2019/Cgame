@@ -125,11 +125,12 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	memset(&tonemap.push_constant, 0, sizeof(TonemapPushConstant));
 
 	const bool use_motion_blur = p_settings.motion_blur > 0.0001f && p_settings.velocity_texture.is_valid() && p_settings.view_count == 1;
-	if (p_settings.lens_chromatic_aberration > 0.0001f || p_settings.lens_film_grain > 0.0001f || (p_settings.use_glow && p_settings.lens_flare > 0.0001f) || use_motion_blur) {
+	if (p_settings.lens_chromatic_aberration > 0.0001f || p_settings.lens_film_grain > 0.0001f || p_settings.lens_vignette > 0.0001f || (p_settings.use_glow && p_settings.lens_flare > 0.0001f) || use_motion_blur) {
 		tonemap.push_constant.flags |= TONEMAP_FLAG_USE_LENS_EFFECTS;
 		tonemap.push_constant.lens_aberration_grain = uint32_t(Math::make_half_float(p_settings.lens_chromatic_aberration)) | (uint32_t(Math::make_half_float(p_settings.lens_film_grain)) << 16);
 		tonemap.push_constant.motion_blur = use_motion_blur ? p_settings.motion_blur : 0.0f;
-		tonemap.push_constant.lens_flare = p_settings.use_glow ? p_settings.lens_flare : 0.0f;
+		const float lens_flare = p_settings.use_glow ? p_settings.lens_flare : 0.0f;
+		tonemap.push_constant.lens_flare_vignette = uint32_t(Math::make_half_float(lens_flare)) | (uint32_t(Math::make_half_float(p_settings.lens_vignette)) << 16);
 		// Wrap to keep float precision in the shader's hash on long sessions.
 		tonemap.push_constant.lens_time = Math::fmod(p_settings.lens_time, 1000.0f);
 	}

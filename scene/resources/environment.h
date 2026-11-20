@@ -228,6 +228,7 @@ private:
 	float lens_chromatic_aberration = 0.0;
 	float lens_film_grain = 0.0;
 	float lens_flare = 0.0;
+	float lens_vignette = 0.0;
 	float motion_blur_amount = 0.0;
 	void _update_lens_effects();
 
@@ -474,6 +475,8 @@ public:
 	float get_lens_film_grain() const;
 	void set_lens_flare(float p_amount);
 	float get_lens_flare() const;
+	void set_lens_vignette(float p_amount);
+	float get_lens_vignette() const;
 	void set_motion_blur_amount(float p_amount);
 	float get_motion_blur_amount() const;
 

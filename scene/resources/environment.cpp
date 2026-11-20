@@ -1305,6 +1305,15 @@ float Environment::get_lens_flare() const {
 	return lens_flare;
 }
 
+void Environment::set_lens_vignette(float p_amount) {
+	lens_vignette = CLAMP(p_amount, 0.0f, 1.0f);
+	RS::get_singleton()->environment_set_lens_vignette(environment, lens_vignette);
+}
+
+float Environment::get_lens_vignette() const {
+	return lens_vignette;
+}
+
 void Environment::set_motion_blur_amount(float p_amount) {
 	motion_blur_amount = CLAMP(p_amount, 0.0f, 1.0f);
 	_update_lens_effects();
@@ -1834,6 +1843,8 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_lens_film_grain"), &Environment::get_lens_film_grain);
 	ClassDB::bind_method(D_METHOD("set_lens_flare", "amount"), &Environment::set_lens_flare);
 	ClassDB::bind_method(D_METHOD("get_lens_flare"), &Environment::get_lens_flare);
+	ClassDB::bind_method(D_METHOD("set_lens_vignette", "amount"), &Environment::set_lens_vignette);
+	ClassDB::bind_method(D_METHOD("get_lens_vignette"), &Environment::get_lens_vignette);
 	ClassDB::bind_method(D_METHOD("set_motion_blur_amount", "amount"), &Environment::set_motion_blur_amount);
 	ClassDB::bind_method(D_METHOD("get_motion_blur_amount"), &Environment::get_motion_blur_amount);
 
@@ -1841,6 +1852,7 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_chromatic_aberration", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_lens_chromatic_aberration", "get_lens_chromatic_aberration");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_film_grain", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_lens_film_grain", "get_lens_film_grain");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_flare", PROPERTY_HINT_RANGE, "0.0,4.0,0.01"), "set_lens_flare", "get_lens_flare");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_vignette", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_lens_vignette", "get_lens_vignette");
 
 	ADD_GROUP("Motion Blur", "motion_blur_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "motion_blur_amount", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_motion_blur_amount", "get_motion_blur_amount");
