@@ -387,6 +387,16 @@ static func _build_items() -> void:
 		"workbench", 8.0)
 	# Days After loot: only found while scavenging ruins.
 	_add_item("pistol", {"name": "Pistol", "kind": "weapon", "weapon": "ranged", "tier": 3, "damage": 22.0, "cooldown": 0.45, "ammo": "ammo_9mm", "value": 150})
+	# Rebuild one scavenged pistol into a quieter but weaker exploration weapon.
+	# Reduced sound is server-owned and fed into existing infected hearing logic.
+	_add_item("suppressed_pistol", {"name": "Improvised Suppressed Pistol",
+		"kind": "weapon", "weapon": "ranged", "tier": 3,
+		"damage": 18.0, "cooldown": 0.7, "range": 32.0,
+		"ammo": "ammo_9mm", "shot_noise_radius": 12.0,
+		"shot_noise_seconds": 1.1, "weight": 3.3, "value": 260})
+	_add_recipe("suppressed_pistol", "suppressed_pistol", 1,
+		{"pistol": 1, "bar_3": 2, "cloth_3": 2, "scrap": 6},
+		"workbench", 10.0)
 	# Ranged fighting can be sustained through scavenging and T2 metalworking.
 	# Recipes use the existing authoritative bench and crafting mastery rules.
 	_add_item("arrow", {"name": "Wooden Arrows", "kind": "ammo",
