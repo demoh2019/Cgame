@@ -41,6 +41,7 @@ varying vec3 world_normal;
 // Slowly changing fields are interpolated over terrain triangles instead of
 // evaluating multi-octave noise and cloud-map lookups for every screen pixel.
 varying float aa_macro_broad;
+varying float aa_vertex_mid;
 varying float aa_vertex_cloud_shadow;
 
 float hash21(vec2 p) {
@@ -74,6 +75,10 @@ void vertex() {
 	// terrain vertex preserves stable world alignment while avoiding 3 fBM
 	// octaves per fragment on large stretches of visible terrain.
 	aa_macro_broad = fbm(world_position.xz * 0.012);
+	// Distant dirt/forest/ruin noise is too small for per-pixel evaluation.
+	// The near-field keeps its original fragment FBM exactly; far terrain
+	// interpolates the same noise from existing terrain vertices.
+	aa_vertex_mid = fbm(world_position.xz * 0.07 + 3.0);
 	// Cloud-shadow LUT is 128 texels across 1024 m (~8 m/texel). Terrain
 	// vertices have ample resolution to interpolate these soft shadows.
 	// This shares the exact LUT/phase/strength with grass and tree leaves.
@@ -108,14 +113,10 @@ void fragment() {
 	vec3 n = normalize(world_normal);
 	float slope = 1.0 - clamp(n.y, 0.0, 1.0);
 	float broad = aa_macro_broad;
-	float mid = fbm(p * 0.07 + 3.0);
-	float mixer = smoothstep(0.3, 0.7, value_noise(p * 0.05 + 11.0));
-	// View-dependent terrain shading LOD is continuous and independent of chunk boundaries.
-	// All visible biomes/roads remain authored by the original high fidelity blend.
-	// Gradients must be evaluated before any dynamic branch to keep mipmapping stable.
+	// Explicit texture gradients must be evaluated before any dynamic
+	// noise or texture selection branch to keep cliff mipmapping stable.
 	vec2 lod_dx = dFdx(p / tile_meters);
 	vec2 lod_dy = dFdy(p / tile_meters);
-	// Explicit derivatives must be evaluated outside branch-dependent cliff samples.
 	vec2 cliff_dx_zy = dFdx(world_position.zy / tile_meters);
 	vec2 cliff_dy_zy = dFdy(world_position.zy / tile_meters);
 	vec2 cliff_dx_xy = dFdx(world_position.xy / tile_meters);
@@ -123,6 +124,17 @@ void fragment() {
 	float camera_distance = distance(p, CAMERA_POSITION_WORLD.xz);
 	float detail_fade = 1.0 - smoothstep(aa_terrain_detail_radius,
 		aa_terrain_detail_radius + 24.0, camera_distance);
+	// Quality-dependent material complexity, like distance-faded detail
+	// in high-end engines: far pixels reuse one interpolated vertex field.
+	// Within the full-detail radius, the old pixel noise is preserved exactly.
+	float mid = aa_vertex_mid;
+	float mixer = 0.5;
+	if (detail_fade > 0.001) {
+		mid = mix(aa_vertex_mid, fbm(p * 0.07 + 3.0), detail_fade);
+		// At far LOD the per-pixel mixer had no contribution to albedo:
+		// near_weight is already multiplied by detail_fade.
+		mixer = smoothstep(0.3, 0.7, value_noise(p * 0.05 + 11.0));
+	}
 
 	// Biome weights from the chunk map, sampled between texel centres so neighbouring chunks meet exactly.
 	vec2 local = (p - chunk_origin) / chunk_size;
