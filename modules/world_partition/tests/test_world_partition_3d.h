@@ -356,6 +356,8 @@ TEST_CASE("[SceneTree][WorldPartition3D] Stream one authored PackedScene and unl
 		OS::get_singleton()->delay_usec(1000);
 	}
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
+	CHECK(partition->get_cell_node(Vector2i(0, 0)) != nullptr);
+	CHECK(partition->get_cell_node(Vector2i(100, 100)) == nullptr);
 	CHECK(partition->are_cells_loaded(Vector2i(0, 0)));
 	CHECK_FALSE(partition->are_cells_loaded(Vector2i(0, 0), 1));
 	CHECK(partition->get_loaded_cell_count() == 1);
@@ -373,6 +375,7 @@ TEST_CASE("[SceneTree][WorldPartition3D] Stream one authored PackedScene and unl
 	observer->set_position(Vector3(64, 0, 0));
 	partition->update_streaming();
 	CHECK_FALSE(partition->is_cell_loaded(Vector2i(0, 0)));
+	CHECK(partition->get_cell_node(Vector2i(0, 0)) == nullptr);
 	CHECK(partition->get_loaded_cell_count() == 0);
 	// queue_free() defers removal until the end of the frame.
 	CHECK(streamed_child->is_queued_for_deletion());
