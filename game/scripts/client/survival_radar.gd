@@ -5,6 +5,7 @@ extends Control
 
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
+const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
@@ -100,13 +101,18 @@ func current_escort_caravan() -> Dictionary:
 	return {}
 
 
-func current_escort_caravan() -> Dictionary:
+## A scanner pin exists only in the current player's private snapshot.
+func current_threat_scan() -> Dictionary:
 	if sim != null:
-		if sim.players.has(actor_id):
-			return sim._party_state_for(actor_id).get("escort_caravan", {}).duplicate(true)
-		return {}
+		if not sim.players.has(actor_id):
+			return {}
+		var actor = sim.players[actor_id]
+		if not actor.survival.alive:
+			return {}
+		return ThreatScan.public_mark(actor.threat_scan, sim.zombies,
+			actor.position, sim.time)
 	if client != null:
-		return client.you.get("party", {}).get("escort_caravan", {}).duplicate(true)
+		return client.you.get("threat_scan", {}).duplicate(true)
 	return {}
 
 
@@ -327,6 +333,10 @@ func _draw() -> void:
 		Color(0.71, 0.51, 1.0))
 	_draw_waypoint(origin, current_rally(), "x", "z",
 		Color(1.0, 0.60, 0.22))
+
+	# A spent scanner grants one short-lived private moving target pin.
+	_draw_waypoint(origin, current_threat_scan(), "x", "z",
+		Color(1.0, 0.32, 0.45))
 
 	# Local survivor always stays in the center of a player-following radar.
 	var yaw_value: float = current_yaw()
