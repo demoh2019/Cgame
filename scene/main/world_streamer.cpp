@@ -165,8 +165,8 @@ bool WorldStreamer::_finalize_chunk(const Vector3i &p_cell, const String &p_path
 }
 
 // Generates queued cells on the main thread, a bounded number per call.
-void WorldStreamer::_run_generator_queue() {
-	if (generate_queue.is_empty() || !chunk_generator.is_valid()) {
+void WorldStreamer::_run_generator_queue(int &r_instantiation_budget, uint64_t p_frame_started_usec) {
+	if (!enabled || r_instantiation_budget <= 0 || generate_queue.is_empty() || !chunk_generator.is_valid()) {
 		return;
 	}
 	Vector3 position;
@@ -174,14 +174,12 @@ void WorldStreamer::_run_generator_queue() {
 	// Queued work must still be within the *load* radius. The larger unload
 	// radius is only for keeping existing cells alive after moving away.
 	const real_t request_radius = load_radius;
-	const uint64_t started_usec = OS::get_singleton()->get_ticks_usec();
-	int budget = MAX(max_instantiations_per_frame, 1);
 	uint32_t consumed = 0;
-	while (consumed < generate_queue.size() && budget > 0) {
+	while (consumed < generate_queue.size() && r_instantiation_budget > 0) {
 		// A single generator call cannot be interrupted. After at least one
 		// chunk, stop before the next one if this frame's CPU budget ran out.
-		if (max_chunk_work_usec > 0 && budget < MAX(max_instantiations_per_frame, 1) &&
-				OS::get_singleton()->get_ticks_usec() - started_usec >= uint64_t(max_chunk_work_usec)) {
+		if (max_chunk_work_usec > 0 && r_instantiation_budget < MAX(max_instantiations_per_frame, 1) &&
+				OS::get_singleton()->get_ticks_usec() - p_frame_started_usec >= uint64_t(max_chunk_work_usec)) {
 			break;
 		}
 		const Vector3i cell = generate_queue[consumed++];
@@ -192,7 +190,8 @@ void WorldStreamer::_run_generator_queue() {
 		if (!have_focus || WorldStreamingGrid::distance_to_cell(position, cell, cell_size, _grid_axes()) > request_radius) {
 			continue;
 		}
-		budget--;
+		// Generator calls can be expensive even when a chunk is missing or fails.
+		r_instantiation_budget--;
 		Variant cell_variant = cell;
 		const Variant *args[1] = { &cell_variant };
 		Variant result;
@@ -223,8 +222,8 @@ void WorldStreamer::_run_generator_queue() {
 	}
 }
 
-void WorldStreamer::_poll_loading() {
-	if (loading.is_empty()) {
+void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_started_usec) {
+	if (!enabled || loading.is_empty()) {
 		return;
 	}
 	Vector3 position;
@@ -263,8 +262,6 @@ void WorldStreamer::_poll_loading() {
 		}
 		ready[j + 1] = item;
 	}
-	int budget = MAX(max_instantiations_per_frame, 1);
-	const uint64_t started_usec = OS::get_singleton()->get_ticks_usec();
 	for (const Ready &item : ready) {
 		const String path = loading[item.cell];
 		const bool still_wanted = have_focus && item.distance <= request_radius && !loaded.has(item.cell);
@@ -274,11 +271,11 @@ void WorldStreamer::_poll_loading() {
 			ResourceLoader::load_threaded_get(path);
 			continue;
 		}
-		if (budget <= 0 || (max_chunk_work_usec > 0 && budget < MAX(max_instantiations_per_frame, 1) &&
-				OS::get_singleton()->get_ticks_usec() - started_usec >= uint64_t(max_chunk_work_usec))) {
+		if (r_instantiation_budget <= 0 || (max_chunk_work_usec > 0 && r_instantiation_budget < MAX(max_instantiations_per_frame, 1) &&
+				OS::get_singleton()->get_ticks_usec() - p_frame_started_usec >= uint64_t(max_chunk_work_usec))) {
 			continue; // Keep loaded resources ready for the next frame.
 		}
-		budget--;
+		r_instantiation_budget--;
 		loading.erase(item.cell);
 		if (!_finalize_chunk(item.cell, path)) {
 			failed.insert(item.cell);
@@ -405,7 +402,11 @@ void WorldStreamer::_notification(int p_what) {
 			if (Engine::get_singleton()->is_editor_hint()) {
 				return;
 			}
-			_poll_loading();
+			// One budget and wall-clock deadline are shared by threaded
+			// scene finalization and procedural world generation this frame.
+			int frame_budget = MAX(max_instantiations_per_frame, 1);
+			const uint64_t frame_started_usec = OS::get_singleton()->get_ticks_usec();
+			_poll_loading(frame_budget, frame_started_usec);
 			time_since_update += get_process_delta_time();
 			if (time_since_update >= update_interval) {
 				time_since_update = 0.0;
@@ -414,7 +415,7 @@ void WorldStreamer::_notification(int p_what) {
 			// Exactly one queue drain per frame. Previously _poll_loading() and
 			// this path both ran procedural generation on update frames, doubling
 			// max_instantiations_per_frame and causing occasional frame spikes.
-			_run_generator_queue();
+			_run_generator_queue(frame_budget, frame_started_usec);
 		} break;
 	}
 }
@@ -536,14 +537,17 @@ TypedArray<Vector3i> WorldStreamer::get_loaded_cells() const {
 }
 
 void WorldStreamer::refresh(bool p_retry) {
+	// Explicit refresh also shares its budget across both kinds of chunks.
+	int refresh_budget = MAX(max_instantiations_per_frame, 1);
+	const uint64_t started_usec = OS::get_singleton()->get_ticks_usec();
 	if (p_retry) {
 		missing.clear();
 		failed.clear();
 		truncated_warned = false;
 	}
-	_poll_loading();
+	_poll_loading(refresh_budget, started_usec);
 	_update_streaming();
-	_run_generator_queue();
+	_run_generator_queue(refresh_budget, started_usec);
 	time_since_update = 0.0;
 }
 
@@ -602,6 +606,7 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_loaded_cells"), &WorldStreamer::get_loaded_cells);
 	ClassDB::bind_method(D_METHOD("get_loaded_count"), &WorldStreamer::get_loaded_count);
 	ClassDB::bind_method(D_METHOD("get_pending_count"), &WorldStreamer::get_pending_count);
+	ClassDB::bind_method(D_METHOD("get_queued_generation_count"), &WorldStreamer::get_queued_generation_count);
 	ClassDB::bind_method(D_METHOD("refresh", "retry"), &WorldStreamer::refresh, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("unload_all"), &WorldStreamer::unload_all);
 
