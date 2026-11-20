@@ -54,19 +54,27 @@ static func profile(value: int) -> Dictionary:
 		0:
 			return {"shadows": false, "shadow_distance": 45.0, "msaa": Viewport.MSAA_DISABLED,
 				"blur_quality": 0, "blur_radius": 0.0, "glow": false, "ssao": false, "ssil": false, "cloud_shadows": false,
-				"scale": 0.59, "grass_radius": 66.0, "grass_budget": 1500, "grass_fade_start": 25.0, "grass_fade_end": 40.0, "terrain_detail_radius": 24.0, "mesh_lod_threshold": 4.0, "terrain_layer_budget": 2}
+				"scale": 0.59, "grass_radius": 66.0, "grass_budget": 1500, "grass_fade_start": 25.0, "grass_fade_end": 40.0, "terrain_detail_radius": 24.0, "mesh_lod_threshold": 4.0, "terrain_layer_budget": 2, "sharpen_strength": 0.0}
 		1:
 			return {"shadows": true, "shadow_distance": 70.0, "msaa": Viewport.MSAA_DISABLED,
 				"blur_quality": 1, "blur_radius": 1.6, "glow": false, "ssao": false, "ssil": false, "cloud_shadows": true,
-				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3}
+				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3, "sharpen_strength": 0.0}
 		2:
 			return {"shadows": true, "shadow_distance": 110.0, "msaa": Viewport.MSAA_2X,
 				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": true, "ssil": false, "cloud_shadows": true,
-				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0, "terrain_detail_radius": 68.0, "mesh_lod_threshold": 1.0, "terrain_layer_budget": 4}
+				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0, "terrain_detail_radius": 68.0, "mesh_lod_threshold": 1.0, "terrain_layer_budget": 4, "sharpen_strength": 0.14}
 		_:
 			return {"shadows": true, "shadow_distance": 140.0, "msaa": Viewport.MSAA_4X,
 				"blur_quality": 2, "blur_radius": 3.0, "glow": true, "ssao": true, "ssil": true, "cloud_shadows": true,
-				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0, "terrain_detail_radius": 96.0, "mesh_lod_threshold": 0.75, "terrain_layer_budget": 13}
+				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0, "terrain_detail_radius": 96.0, "mesh_lod_threshold": 0.75, "terrain_layer_budget": 13, "sharpen_strength": 0.22}
+
+
+## Native manual High/Ultra can use a small focused detail boost. Forward+ adaptive
+## FSR2 already performs image reconstruction; never sharpen that output twice.
+static func post_sharpen_strength(value: int, method: String, adaptive: bool) -> float:
+	if method == "forward_plus" and adaptive:
+		return 0.0
+	return float(profile(value)["sharpen_strength"])
 
 
 ## Fast path for frame-rate adjustment; no scene-node, texture, LOD or
@@ -130,6 +138,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	if post_material != null:
 		post_material.set_shader_parameter("blur_quality", p["blur_quality"])
 		post_material.set_shader_parameter("blur_radius", p["blur_radius"])
+		post_material.set_shader_parameter("sharpen_strength", post_sharpen_strength(_level, method, adaptive))
 	# Reuse the game's existing 3-tier grass LOD; never rebuild world geometry on a preset switch.
 	ChunkView.configure_grass(float(world_profile["grass_build_radius"]), int(world_profile["grass_budget_usec"]),
 			float(world_profile["grass_fade_start"]), float(world_profile["grass_fade_end"]))

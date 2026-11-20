@@ -10,6 +10,7 @@ uniform float blur_radius = 2.6; // In pixels at the very edge.
 uniform float vignette = 0.28;
 uniform float grade = 1.0;
 uniform int blur_quality = 1; // 0: no blur, 1: 4 extra samples, 2: 8 extra samples.
+uniform float sharpen_strength = 0.0; // High/Ultra only: local contrast enhancement of the sharp player band.
 
 void fragment() {
 	vec2 uv = SCREEN_UV;
@@ -32,6 +33,27 @@ void fragment() {
 		} else {
 			color = sum / 5.0;
 		}
+	}
+	// Native-resolution detail enhancement inspired by contrast-adaptive sharpening.
+	// The focus mask never overlaps the tilt-shift blur: peripheral bokeh stays soft.
+	// Performance/Balanced and adaptive Forward+ FSR2 skip all four extra taps.
+	float sharp_focus = 1.0 - smoothstep(focus_width * 0.38, focus_width * 0.80,
+		abs(uv.y - focus_center));
+	if (sharpen_strength > 0.001 && sharp_focus > 0.001) {
+		vec2 pixel = SCREEN_PIXEL_SIZE;
+		vec3 left = texture(screen, clamp(uv - vec2(pixel.x, 0.0), vec2(0.0), vec2(1.0))).rgb;
+		vec3 right = texture(screen, clamp(uv + vec2(pixel.x, 0.0), vec2(0.0), vec2(1.0))).rgb;
+		vec3 up = texture(screen, clamp(uv - vec2(0.0, pixel.y), vec2(0.0), vec2(1.0))).rgb;
+		vec3 down = texture(screen, clamp(uv + vec2(0.0, pixel.y), vec2(0.0), vec2(1.0))).rgb;
+		vec3 average = (left + right + up + down) * 0.25;
+		vec3 min_neighbor = min(color, min(min(left, right), min(up, down)));
+		vec3 max_neighbor = max(color, max(max(left, right), max(up, down)));
+		vec3 contrast = max_neighbor - min_neighbor;
+		float local_contrast = max(contrast.r, max(contrast.g, contrast.b));
+		// Suppress severe outlines, then clamp the result to the current 5-pixel range.
+		float edge_limit = 1.0 - smoothstep(0.24, 0.70, local_contrast);
+		vec3 enhanced = color + (color - average) * sharpen_strength * sharp_focus * edge_limit;
+		color = clamp(enhanced, min_neighbor, max_neighbor);
 	}
 	// Split toning: shadows lean blue-teal, highlights lean warm gold.
 	float luma = dot(color, vec3(0.299, 0.587, 0.114));
