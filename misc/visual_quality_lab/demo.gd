@@ -3,9 +3,14 @@ extends Node3D
 const ResolutionController = preload("res://addons/visual_quality/adaptive_resolution.gd")
 const FilmicSky = preload("res://addons/visual_quality/filmic_sky.gdshader")
 const QualityManager = preload("res://addons/visual_quality/quality_manager.gd")
+const AtmosphereController = preload("res://addons/visual_quality/atmosphere_controller.gd")
 
 var controller: AdaptiveResolution3D
 var manager: VisualQualityManager
+var atmosphere: AtmosphereController3D
+var sun_light: DirectionalLight3D
+var weather_label: Label
+var cycle_button: Button
 var mode_label: Label
 var adaptive_button: Button
 var world_environment: Environment
@@ -29,6 +34,16 @@ func _ready() -> void:
 	add_child(manager)
 	_build_graphics_ui()
 	_update_graphics_ui(manager.current_profile, manager.adaptive_enabled)
+	atmosphere = AtmosphereController.new()
+	atmosphere.name = "AtmosphereController3D"
+	atmosphere.sun = sun_light
+	atmosphere.environment = world_environment
+	atmosphere.sky_material = sky_material
+	atmosphere.animate_clouds = animate_clouds
+	atmosphere.atmosphere_changed.connect(_update_atmosphere_ui)
+	add_child(atmosphere)
+	_build_atmosphere_ui()
+	_update_atmosphere_ui(atmosphere.hour, atmosphere.overcast)
 
 
 func _process(delta: float) -> void:
@@ -37,11 +52,6 @@ func _process(delta: float) -> void:
 			Engine.get_frames_per_second(), get_viewport().scaling_3d_scale,
 			RenderingServer.get_current_rendering_method()
 		]
-	if animate_clouds:
-		cloud_elapsed += delta
-		if cloud_elapsed >= 0.35:
-			cloud_elapsed = 0.0
-			sky_material.set_shader_parameter("cloud_time", Time.get_ticks_msec() * 0.00004)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -53,6 +63,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				manager.set_profile(1)
 			KEY_3:
 				manager.set_profile(2)
+			KEY_4:
+				_toggle_hour()
+			KEY_5:
+				_toggle_weather()
+			KEY_6:
+				_toggle_cycle()
 
 
 func _build_graphics_ui() -> void:
@@ -85,6 +101,49 @@ func _update_graphics_ui(profile: int, adaptive: bool) -> void:
 	adaptive_button.text = "Adaptive: %s" % ("ON" if adaptive else "OFF")
 
 
+func _build_atmosphere_ui() -> void:
+	var ui: CanvasLayer = get_node("VisualQualityUI") as CanvasLayer
+	var menu: HBoxContainer = HBoxContainer.new()
+	menu.position = Vector2(18, 162)
+	ui.add_child(menu)
+	var time_button: Button = Button.new()
+	time_button.text = "4: Day / Night"
+	time_button.pressed.connect(_toggle_hour)
+	menu.add_child(time_button)
+	var weather_button: Button = Button.new()
+	weather_button.text = "5: Clear / Cloudy"
+	weather_button.pressed.connect(_toggle_weather)
+	menu.add_child(weather_button)
+	cycle_button = Button.new()
+	cycle_button.pressed.connect(_toggle_cycle)
+	menu.add_child(cycle_button)
+	weather_label = Label.new()
+	weather_label.position = Vector2(18, 206)
+	ui.add_child(weather_label)
+
+
+func _toggle_hour() -> void:
+	atmosphere.set_hour(22.0 if atmosphere.hour >= 8.0 and atmosphere.hour < 18.0 else 14.0)
+
+
+func _toggle_weather() -> void:
+	atmosphere.set_overcast(0.0 if atmosphere.overcast >= 0.4 else 0.75)
+
+
+func _toggle_cycle() -> void:
+	atmosphere.set_auto_cycle(not atmosphere.auto_cycle)
+	_update_atmosphere_ui(atmosphere.hour, atmosphere.overcast)
+
+
+func _update_atmosphere_ui(hour: float, cloudiness: float) -> void:
+	if not is_instance_valid(weather_label) or not is_instance_valid(cycle_button):
+		return
+	weather_label.text = "Time: %.1f h | Overcast: %.0f%% | Sky update: %.1f s" % [
+		hour, cloudiness * 100.0, atmosphere.update_interval_seconds
+	]
+	cycle_button.text = "6: Cycle %s" % ("ON" if atmosphere.auto_cycle else "OFF")
+
+
 func _build_world() -> void:
 	sky_material = ShaderMaterial.new()
 	sky_material.shader = FilmicSky
@@ -98,11 +157,12 @@ func _build_world() -> void:
 	world.environment = world_environment
 	add_child(world)
 
-	var sun: DirectionalLight3D = DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-35.0, 25.0, 0.0)
-	sun.light_energy = 1.4
-	sun.shadow_enabled = true
-	add_child(sun)
+	sun_light = DirectionalLight3D.new()
+	sun_light.name = "Sun"
+	sun_light.rotation_degrees = Vector3(-35.0, 25.0, 0.0)
+	sun_light.light_energy = 1.4
+	sun_light.shadow_enabled = true
+	add_child(sun_light)
 
 	var floor: MeshInstance3D = MeshInstance3D.new()
 	var plane: PlaneMesh = PlaneMesh.new()
