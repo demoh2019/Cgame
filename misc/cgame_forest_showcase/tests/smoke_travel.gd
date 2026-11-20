@@ -65,6 +65,7 @@ func _run() -> void:
     world.unload_radius = 0
     world.max_new_requests_per_frame = 1
     world.max_instances_per_frame = 1
+    world.min_physics_frames_after_load = 2
     root.add_child(world)
     world.observer_path = world.get_path_to(pawn)
     world.set_cell_scene(Vector2i(0, 0), FOREST)
@@ -87,6 +88,12 @@ func _run() -> void:
     if world.get_streaming_source_cell_count(Travel.SOURCE_NAME) != 1:
         _fail("travel source did not register its destination scene")
         return
+    if world.is_streaming_source_activation_ready(Travel.SOURCE_NAME):
+        _fail("staged travel was activation ready before remote scene loaded")
+        return
+    if not travel.get_status_text().contains("физика"):
+        _fail("travel HUD did not expose activation progress")
+        return
     if world.get_streaming_source_priority(Travel.SOURCE_NAME) != Travel.STREAMING_PRIORITY:
         _fail("travel source did not request urgent streaming priority")
         return
@@ -98,6 +105,9 @@ func _run() -> void:
         return
     if world.has_streaming_source(Travel.SOURCE_NAME):
         _fail("travel source was not removed after arrival")
+        return
+    if world.is_streaming_source_activation_ready(Travel.SOURCE_NAME):
+        _fail("finished travel retained an activation-ready source")
         return
 
     # A cancellation must leave the pawn at its existing location.
