@@ -533,6 +533,20 @@ TEST_CASE("[SceneTree][WorldPartition3D] Prediction loads a future cell before o
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->is_cell_loaded(Vector2i(1, 0)));
 	CHECK(partition->get_loaded_cell_count() == 2);
+	CHECK(partition->set_streaming_source("arrival", Vector3(16.0, 0.0, 0.0)));
+	CHECK(partition->get_streaming_source_cell_count("arrival") == 1);
+	CHECK(partition->get_streaming_source_loaded_cell_count("arrival") == 1);
+	CHECK(partition->get_streaming_source_failed_cell_count("arrival") == 0);
+	CHECK(partition->get_streaming_source_progress("arrival") == 1.0);
+	CHECK(partition->is_streaming_source_ready("arrival"));
+	CHECK(partition->set_streaming_source("arrival", Vector3(0.0, 0.0, 0.0), 1));
+	CHECK(partition->get_streaming_source_cell_count("arrival") == 2);
+	CHECK(partition->get_streaming_source_loaded_cell_count("arrival") == 2);
+	CHECK(partition->is_streaming_source_ready("arrival"));
+	CHECK(partition->set_streaming_source("arrival", Vector3(48.0, 0.0, 0.0)));
+	CHECK(partition->get_streaming_source_cell_count("arrival") == 0);
+	CHECK_FALSE(partition->is_streaming_source_ready("arrival"));
+	partition->remove_streaming_source("arrival");
 	Node3D *loaded_origin = partition->get_cell_instance(Vector2i(0, 0));
 	Node3D *loaded_forecast = partition->get_cell_instance(Vector2i(1, 0));
 	CHECK(loaded_origin != nullptr);
@@ -591,6 +605,11 @@ TEST_CASE("[WorldPartition3D] Additional streaming sources enforce caps and upse
 	CHECK(world->get_streaming_source_count() == 0);
 	CHECK_FALSE(world->has_streaming_source("quest"));
 	CHECK(world->get_streaming_source_cell("missing") == Vector2i());
+	CHECK(world->get_streaming_source_cell_count("quest") == 0);
+	CHECK(world->get_streaming_source_loaded_cell_count("quest") == 0);
+	CHECK(world->get_streaming_source_failed_cell_count("quest") == 0);
+	CHECK(world->get_streaming_source_progress("quest") == 0.0);
+	CHECK_FALSE(world->is_streaming_source_ready("quest"));
 	CHECK(world->set_streaming_source("quest", Vector3(256.0, 0.0, 0.0)));
 	CHECK(world->has_streaming_source("quest"));
 	CHECK(world->get_streaming_source_count() == 1);
@@ -598,6 +617,12 @@ TEST_CASE("[WorldPartition3D] Additional streaming sources enforce caps and upse
 	CHECK(world->set_streaming_source("quest", Vector3(-256.0, 0.0, 0.0), 1));
 	CHECK(world->get_streaming_source_count() == 1);
 	CHECK(world->get_streaming_source_cell("quest") == Vector2i(-2, 0));
+	CHECK(world->get_streaming_source_cell_count("quest") == 0);
+	CHECK_FALSE(world->is_streaming_source_ready("quest")); // Destination not registered.
+	world->set_cell_scene(Vector2i(-2, 0), "res://tests/nonexistent_scene.tscn");
+	CHECK(world->get_streaming_source_cell_count("quest") == 1);
+	CHECK(world->get_streaming_source_loaded_cell_count("quest") == 0);
+	CHECK_FALSE(world->is_streaming_source_ready("quest")); // Not inside a SceneTree.
 
 	ERR_PRINT_OFF;
 	CHECK_FALSE(world->set_streaming_source("", Vector3()));

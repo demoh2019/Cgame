@@ -550,6 +550,62 @@ Vector2i WorldPartition3D::get_streaming_source_cell(const String &p_name) const
 	return source != nullptr ? local_position_to_cell(to_local(source->global_position)) : Vector2i();
 }
 
+int WorldPartition3D::_count_source_cells(const String &p_name, int p_kind) const {
+	const StreamingSource *source = streaming_sources.getptr(p_name);
+	if (source == nullptr) {
+		return 0;
+	}
+	const Vector2i center = local_position_to_cell(to_local(source->global_position));
+	// A source whose destination cell is unregistered cannot be ready, even
+	// when some neighbors have valid scenes. Fail closed for safe fast travel.
+	if (_get_scene_path(center).is_empty()) {
+		return 0;
+	}
+	int count = 0;
+	for (int dz = -source->radius; dz <= source->radius; dz++) {
+		for (int dx = -source->radius; dx <= source->radius; dx++) {
+			const Vector2i cell = center + Vector2i(dx, dz);
+			if (_get_scene_path(cell).is_empty()) {
+				continue; // Sparse worlds do not require missing neighbors.
+			}
+			if (p_kind == 0 || (p_kind == 1 && get_cell_instance(cell) != nullptr) || (p_kind == 2 && failed_cells.has(cell))) {
+				count++;
+			}
+		}
+	}
+	return count;
+}
+
+int WorldPartition3D::get_streaming_source_cell_count(const String &p_name) const {
+	return _count_source_cells(p_name, 0);
+}
+
+int WorldPartition3D::get_streaming_source_loaded_cell_count(const String &p_name) const {
+	return _count_source_cells(p_name, 1);
+}
+
+int WorldPartition3D::get_streaming_source_failed_cell_count(const String &p_name) const {
+	return _count_source_cells(p_name, 2);
+}
+
+real_t WorldPartition3D::get_streaming_source_progress(const String &p_name) const {
+	const int total = get_streaming_source_cell_count(p_name);
+	if (total == 0) {
+		return 0.0;
+	}
+	return real_t(get_streaming_source_loaded_cell_count(p_name)) / real_t(total);
+}
+
+bool WorldPartition3D::is_streaming_source_ready(const String &p_name) const {
+	// Merely registering a source is not sufficient. The node must be actively
+	// streaming, with a resolved observer and a registered destination.
+	if (!streaming_enabled || !is_inside_tree() || observer_path.is_empty() || Object::cast_to<Node3D>(get_node_or_null(observer_path)) == nullptr) {
+		return false;
+	}
+	const int total = get_streaming_source_cell_count(p_name);
+	return total > 0 && get_streaming_source_failed_cell_count(p_name) == 0 && get_streaming_source_loaded_cell_count(p_name) == total;
+}
+
 bool WorldPartition3D::_is_cell_required_by_source(const Vector2i &p_cell, int p_extra_radius) const {
 	for (const KeyValue<String, StreamingSource> &E : streaming_sources) {
 		const Vector2i center = local_position_to_cell(to_local(E.value.global_position));
@@ -852,6 +908,11 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_streaming_source", "name"), &WorldPartition3D::has_streaming_source);
 	ClassDB::bind_method(D_METHOD("get_streaming_source_count"), &WorldPartition3D::get_streaming_source_count);
 	ClassDB::bind_method(D_METHOD("get_streaming_source_cell", "name"), &WorldPartition3D::get_streaming_source_cell);
+	ClassDB::bind_method(D_METHOD("get_streaming_source_cell_count", "name"), &WorldPartition3D::get_streaming_source_cell_count);
+	ClassDB::bind_method(D_METHOD("get_streaming_source_loaded_cell_count", "name"), &WorldPartition3D::get_streaming_source_loaded_cell_count);
+	ClassDB::bind_method(D_METHOD("get_streaming_source_failed_cell_count", "name"), &WorldPartition3D::get_streaming_source_failed_cell_count);
+	ClassDB::bind_method(D_METHOD("get_streaming_source_progress", "name"), &WorldPartition3D::get_streaming_source_progress);
+	ClassDB::bind_method(D_METHOD("is_streaming_source_ready", "name"), &WorldPartition3D::is_streaming_source_ready);
 	ClassDB::bind_method(D_METHOD("local_position_to_cell", "local_position"), &WorldPartition3D::local_position_to_cell);
 	ClassDB::bind_method(D_METHOD("cell_to_local_position", "cell"), &WorldPartition3D::cell_to_local_position);
 	ClassDB::bind_method(D_METHOD("get_cells_in_radius", "center", "radius"), &WorldPartition3D::get_cells_in_radius);

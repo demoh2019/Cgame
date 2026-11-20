@@ -83,6 +83,7 @@ class WorldPartition3D : public Node3D {
 	static bool _within_radius(const Vector2i &p_cell, const Vector2i &p_center, int p_radius);
 	String _get_scene_path(const Vector2i &p_cell) const;
 	bool _is_cell_required_by_source(const Vector2i &p_cell, int p_extra_radius) const;
+	int _count_source_cells(const String &p_name, int p_kind) const; // 0 registered, 1 active, 2 failed.
 	void _unload_cell(const Vector2i &p_cell);
 	void _clear_active_cells();
 	void _poll_requests();
@@ -163,6 +164,11 @@ public:
 	bool has_streaming_source(const String &p_name) const;
 	int get_streaming_source_count() const;
 	Vector2i get_streaming_source_cell(const String &p_name) const;
+	int get_streaming_source_cell_count(const String &p_name) const;
+	int get_streaming_source_loaded_cell_count(const String &p_name) const;
+	int get_streaming_source_failed_cell_count(const String &p_name) const;
+	real_t get_streaming_source_progress(const String &p_name) const;
+	bool is_streaming_source_ready(const String &p_name) const;
 
 	Vector2i local_position_to_cell(const Vector3 &p_local_position) const;
 	Vector3 cell_to_local_position(const Vector2i &p_cell) const;
