@@ -75,6 +75,18 @@ static func falloff(distance: float, radius: float) -> float:
 	return k * k
 
 
+## Factor for the energy of an explosion behind a wall. The same
+## calculation is in RadialForceField3D::occlusion_scale (native C++).
+static func blast_shielding(blocked: bool, attenuation: float = BLAST_WALL_ATTENUATION) -> float:
+	return clampf(attenuation, 0.0, 1.0) if blocked else 1.0
+
+
+## Mass-independent explosion: the impulse scales by mass, so the
+## resulting velocity change is independent of the body's weight.
+static func blast_impulse_magnitude(strength: float, falloff_scale: float, mass: float) -> float:
+	return strength * falloff_scale * mass
+
+
 ## Upward buoyancy force for a body whose centre is `depth` metres below the surface (<= 0 = above water).
 ## `density_ratio` is body density over water density: wood (< 1) floats, brass (> 1) sinks.
 static func buoyancy_force(depth: float, mass: float, density_ratio: float, gravity: float = 9.8) -> float:
@@ -312,7 +324,7 @@ func _apply_blasts() -> void:
 					wall_ray.exclude = [(collider as PhysicsBody3D).get_rid()]
 					blocked = not space.intersect_ray(wall_ray).is_empty()
 					occlusion_rays += 1
-				shielding = BLAST_WALL_ATTENUATION if blocked else 1.0
+				shielding = blast_shielding(blocked)
 			if shielding <= 0.0:
 				continue
 			var outward := offset.normalized() if offset.length_squared() > 0.000001 else Vector3.UP
@@ -320,11 +332,11 @@ func _apply_blasts() -> void:
 			if collider is RigidBody3D:
 				var rigid := collider as RigidBody3D
 				rigid.sleeping = false
-				rigid.apply_central_impulse(direction * impulse * push * shielding * rigid.mass)
+				rigid.apply_central_impulse(direction * blast_impulse_magnitude(impulse, push * shielding, rigid.mass))
 				rigid.set_meta("asleep", 0.0)
 			else:
 				var bone := collider as PhysicalBone3D
-				bone.apply_central_impulse(direction * impulse * push * shielding * bone.mass)
+				bone.apply_central_impulse(direction * blast_impulse_magnitude(impulse, push * shielding, bone.mass))
 	_blasts.clear()
 
 
