@@ -99,6 +99,45 @@ func _run() -> void:
 	check(found_guild.get("ok", false) and str(found_guild.get("guild_id", "")) == created_guild.id
 		and int(found_guild.get("rank", -1)) == 0,
 		"founder role is independently verified on the game server")
+	# Guild siege wins persist in Nakama, and a duplicated server RPC
+	# returns the same receipt without increasing the guild's score again.
+	var zero_wins: Dictionary = await gateway.load_guild_siege_score(created_guild.id)
+	check(zero_wins.get("ok", false) and int(zero_wins.get("wins", -1)) == 0,
+		"a newly created guild has zero persisted siege wins")
+	var event_id: String = Crypto.new().generate_random_bytes(16).hex_encode()
+	var first_win: Dictionary = await gateway.record_guild_siege_win(
+		created_guild.id, event_id, 1, 205)
+	check(first_win.get("ok", false) and int(first_win.get("wins", -1)) == 1
+		and not bool(first_win.get("replayed", true)),
+		"the first siege victory is persisted exactly once")
+	var repeated_win: Dictionary = await gateway.record_guild_siege_win(
+		created_guild.id, event_id, 1, 205)
+	check(repeated_win.get("ok", false) and repeated_win.get("replayed", false)
+		and int(repeated_win.get("wins", -1)) == 1,
+		"ambiguous repeated RPC uses the original immutable receipt")
+	var altered_win: Dictionary = await gateway.record_guild_siege_win(
+		created_guild.id, event_id, 2, 205)
+	check(not altered_win.get("ok", true) and
+		altered_win.get("reason", "") == "event_id_conflict",
+		"an event ID cannot be reused with changed outpost metadata")
+	var second_id: String = Crypto.new().generate_random_bytes(16).hex_encode()
+	var second_win: Dictionary = await gateway.record_guild_siege_win(
+		created_guild.id, second_id, 1, 205)
+	check(second_win.get("ok", false) and int(second_win.get("wins", -1)) == 2,
+		"a distinct siege receives a second guild victory")
+	var verified_score: Dictionary = await gateway.load_guild_siege_score(created_guild.id)
+	check(verified_score.get("ok", false) and int(verified_score.get("wins", -1)) == 2,
+		"guild score can be recovered from durable storage")
+	var player_write = await player_client.rpc_async(session, "guild_siege_commit",
+		JSON.stringify({"guild_id": created_guild.id, "event_id": second_id,
+			"site": 1, "world_seed": 205}))
+	check(player_write.is_exception(),
+		"an ordinary Nakama session cannot forge a guild victory")
+	var player_read = await player_client.rpc_async(session, "guild_siege_score",
+		JSON.stringify({"guild_id": created_guild.id}))
+	check(player_read.is_exception(),
+		"ordinary player sessions cannot read server-only ledger RPCs")
+
 	var no_other_guild: Dictionary = await gateway.lookup_guild(other_id)
 	check(no_other_guild.get("ok", false) and str(no_other_guild.get("guild_id", "")) == "",
 		"an unrelated account cannot inherit a founder's group")

@@ -1025,6 +1025,7 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nGuild: %s | allies nearby: %d" % [
 			str(guild.get("name", "")), nearby_mates
 		]
+		_info_label.text += " | Historic clan siege wins: %d" % int(client.you.get("guild_siege_wins", 0))
 	if bool(client.you.get("warden_ward", false)):
 		_info_label.text += "\nWARDEN'S WARD: -15% infected wounds (nearby relic ally)"
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(

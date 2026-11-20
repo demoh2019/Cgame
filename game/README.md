@@ -2324,3 +2324,38 @@ Code: `scripts/shared/party_feast.gd`, `scripts/server/game_server.gd`,
 `godot --headless --path game --script res://tests/run_all.gd` runner.
 The Cgame engine already supplies the necessary multiplayer and world
 simulation APIs; no native engine changes were needed.
+
+## Durable Nakama guild siege honor (server-only journal)
+
+Victory history now survives a dedicated server restart in **Nakama**.
+When a real `siege_contract_result` with `result = won` comes from
+the authoritative territory simulation, the game checks that its attacker
+still owns the outpost and has a homogeneous party of **verified Nakama
+guild members**. Only then does it enqueue a guild victory. Guest players
+and mixed-party victories remain valid gameplay wins, but do not increment
+a persistent guild score.
+
+The backend `guild_siege_commit` RPC requires the server runtime key and
+writes both a private guild score and an **immutable 128-bit event receipt**
+in a single version-checked storage batch. Retries reuse the same event ID,
+so a timeout after a committed write cannot create a second win. Competing
+writes retry on optimistic-version conflicts. Reusing an ID with changed
+guild, world seed or site is rejected. The `guild_siege_score` RPC reads
+the persisted total; connecting guild members retrieve it and the server
+refreshes the cache periodically. The HUD shows **Historic clan siege wins**
+in addition to session-specific party siege wins.
+
+**Scope and recovery:** Guild scores and already committed receipts are
+durable. The world server's queue of unsent events is still RAM-only;
+an abrupt crash *before* Nakama confirms a write can lose that pending
+achievement. This is not yet an exactly-once **end-to-end** event pipeline,
+an offline guild treasury, or persistent castle ownership. Reliable
+survival of pre-commit events will need a local durable outbox and recovery
+at boot. Guild tags, outpost occupancy and siege authority remain
+server-owned; clients never submit score events or guild IDs.
+
+Tests: `tests/test_guild_siege_ledger.gd` checks event eligibility and
+membership revocation. The Nakama integration suite
+`tests/test_nakama_backend.gd` covers original writes, identical
+replays, event collisions, independent victories, reload and server-key
+permissions. No Cgame engine modifications were necessary.

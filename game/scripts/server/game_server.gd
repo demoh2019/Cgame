@@ -180,6 +180,7 @@ var trade_by_player: Dictionary = {} # peer -> active trade
 var parties = Party.new() # Server-only session groups and short-lived invitations.
 var territory # Session outposts generated from this world seed.
 var siege_contracts = SiegeContracts.new() # Session-only declared siege windows and honor.
+var guild_siege_wins: Dictionary = {} # Historical Nakama totals cached for connected guilds.
 var outpost_fortify_requests: Dictionary = {} # Peer -> last request and cached result.
 var outpost_breach_requests: Dictionary = {} # Peer -> last command and cached result.
 var training_invites: Dictionary = {} # Target peer -> verified invitation.
@@ -3432,6 +3433,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"you": {
 			"party": _party_state_for(peer_id),
 			"guild": {"id": player.guild_id, "name": player.guild_name, "rank": player.guild_rank},
+			"guild_siege_wins": int(guild_siege_wins.get(player.guild_id, 0)),
 			"siege_wins": int(siege_contracts.victories.get(parties.group_of(peer_id), 0)),
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
