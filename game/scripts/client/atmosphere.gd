@@ -1,6 +1,7 @@
 extends Node3D
 
 const CloudShadowLut = preload("res://scripts/client/cloud_shadow_lut.gd")
+const CinematicColorGrade = preload("res://scripts/client/cinematic_color_grade.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
 ## Everything degrades gracefully on the compatibility renderer (SSAO and the like are simply ignored).
 
@@ -135,7 +136,9 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	environment.ambient_light_energy = lerpf(0.75, 0.8, daylight) * (1.0 - storm * 0.25)
 	environment.fog_light_color = horizon.lerp(Color(0.5, 0.52, 0.56), storm * 0.5)
 	environment.fog_density = lerpf(0.0016, 0.0042, storm)
-	environment.adjustment_saturation = lerpf(1.0, 0.85, storm)
+	# Filmic grade changes only ACES/exposure and Environment adjustment values.
+	# Keep weather/fog and the gameplay simulation independent of this rendering pass.
+	CinematicColorGrade.apply(environment, daylight, sun_height, storm)
 
 
 ## Render-only switches; weather and the shared day/night clock are unaffected.
