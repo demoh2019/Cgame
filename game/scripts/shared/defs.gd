@@ -401,6 +401,14 @@ static func _build_items() -> void:
 		{"cloth_1": 2, "bar_1": 1, "charcoal_filter": 1}, "workbench", 4.0)
 	_add_item("spore_culture", {"name": "Hazardous Spore Culture", "kind": "resource",
 		"tier": 2, "stack": 20, "weight": 0.2, "value": 30})
+	# Prepared monster-hunting consumable: real swamp resources become
+	# a brief, bounded melee boost; raid bosses and survivors stay immune.
+	_add_item("antiseptic_edge_oil", {"name": "Antiseptic Edge Oil",
+		"kind": "weapon_coating", "tier": 2, "stack": 10,
+		"value": 65, "weight": 0.15})
+	_add_recipe("antiseptic_edge_oil", "antiseptic_edge_oil", 1,
+		{"spore_culture": 1, "field_antiseptic": 1, "scrap": 1},
+		"workbench", 4.0)
 	_add_item("spore_antidote", {"name": "Distilled Swamp Antidote",
 		"kind": "medical", "tier": 2, "cure": 75.0, "stack": 5,
 		"weight": 0.25, "value": 85})

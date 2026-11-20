@@ -58,6 +58,7 @@ const Evasion = preload("res://scripts/shared/evasion.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const ParryRiposte = preload("res://scripts/shared/parry_riposte.gd")
 const StaggerFinisher = preload("res://scripts/shared/stagger_finisher.gd")
+const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
@@ -188,6 +189,8 @@ class Player:
 	var dodge_immunity: float = 0.0
 	var parry_cooldown: float = 0.0 # Server-owned timed melee defense.
 	var parry_window: float = 0.0 # First valid infected melee consumes it.
+	var edge_coating_weapon: String = "" # Nonpersistent selected melee gear.
+	var edge_coating_seconds: float = 0.0 # 120s server-owned bonus only vs infected.
 	var riposte_seconds: float = 0.0 # Earned, private, short-lived PvE counter.
 	var riposte_target_id: int = -1 # Exact attacking infected.
 	var riposte_weapon: String = "" # Equipped weapon at parry impact.
@@ -693,6 +696,8 @@ func _spawn_player(player: Player) -> void:
 	player.dodge_immunity = 0.0
 	player.parry_cooldown = 0.0
 	player.parry_window = 0.0
+	player.edge_coating_seconds = 0.0
+	player.edge_coating_weapon = ""
 	ParryRiposte.clear(player)
 	player.finisher_cooldown = 0.0
 	player.party_aid_timer = 0.0
@@ -2833,6 +2838,18 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"weapon_coating":
+			if item_id != AntisepticEdge.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var oil_reason: String = AntisepticEdge.use_reason(
+				player.inventory, player.edge_coating_seconds)
+			if oil_reason != "":
+				return {"ok": false, "reason": oil_reason}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.edge_coating_weapon = player.inventory.weapon
+			player.edge_coating_seconds = AntisepticEdge.SECONDS
+			player.action = {}
 		"siege_charge":
 			if item_id != SiegeCharge.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3026,7 +3043,11 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			player.survival.treat_fracture(splint)
 			_award(player, "medic", 6.0)
 		"weapon", "armor":
+			var previous_weapon: String = player.inventory.weapon
 			player.inventory.equip(item_id)
+			if previous_weapon != player.inventory.weapon:
+				player.edge_coating_seconds = 0.0
+				player.edge_coating_weapon = ""
 		_:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
@@ -3039,6 +3060,9 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 		return {"ok": true, "bike_service_meters": player.bike_service_meters}
 	if item_id == HandFlare.ITEM_ID:
 		return {"ok": true, "flare_seconds": player.flare_seconds}
+	if item_id == AntisepticEdge.ITEM_ID:
+		return {"ok": true, "coating_seconds": player.edge_coating_seconds,
+			"coating_weapon": player.edge_coating_weapon}
 	if item_id == FieldSmoke.ITEM_ID:
 		return {"ok": true, "smoke_seconds": FieldSmoke.DURATION,
 			"cooldown": player.smoke_cooldown}
@@ -3903,6 +3927,8 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		var equipped_weapon: String = attacker.inventory.weapon
 		var physically_owned: bool = equipped_weapon != "" and attacker.inventory.count(equipped_weapon) > 0
 		damage = Combat.against_infected(damage, equipped_weapon, physically_owned)
+		damage = AntisepticEdge.damage(damage, attacker.inventory,
+			attacker.edge_coating_weapon, attacker.edge_coating_seconds, zombie)
 		damage *= 1.0 + attacker.skills.bonus("zombie_damage")
 		# A modest PvE-only team bonus: exact marked infected and living
 		# party member in range. Never applied to player-vs-player attacks.
@@ -4358,6 +4384,11 @@ func _tick_players(delta: float) -> void:
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.mount_cooldown = maxf(0.0, player.mount_cooldown - maxf(0.0, delta))
 		player.smoke_cooldown = maxf(0.0, player.smoke_cooldown - maxf(0.0, delta))
+		player.edge_coating_seconds = AntisepticEdge.tick(player.inventory,
+			player.edge_coating_weapon, player.edge_coating_seconds,
+			maxf(0.0, delta), _alive(player))
+		if player.edge_coating_seconds <= 0.0:
+			player.edge_coating_weapon = ""
 		if player.flare_seconds > 0.0:
 			player.flare_seconds = HandFlare.remaining(player.flare_seconds, delta)
 			player.dirty_character = true
@@ -5677,6 +5708,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"tire_grip_seconds": player.tire_grip_seconds,
 			"flash_cooldown": player.flash_cooldown,
 			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
+			"coating_seconds": player.edge_coating_seconds,
+			"coating_weapon": player.edge_coating_weapon,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),
 			"combat_tag_seconds": CombatLogout.remaining(player.combat_tag_until, time),
