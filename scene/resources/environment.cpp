@@ -495,6 +495,26 @@ void Environment::_update_ssil() {
 // Applies all runtime SDFGI parameters at once to avoid six consecutive
 // RenderingServer uploads and intermediate cascade reallocations on tier changes.
 // The input is validated atomically: failed configurations preserve the old GI.
+// Interior SDFGI light-leak protection: apply occlusion, sky contribution
+// and sampling bias together. This is only called on outdoor/indoor transitions;
+// unchanged state never sends a RenderingServer update. Normal/probe biases
+// are validated as a transaction instead of permitting corrupted GI fields.
+void Environment::configure_sdfgi_visibility(bool p_occlusion, bool p_read_sky_light, float p_normal_bias, float p_probe_bias) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_normal_bias) || p_normal_bias < 0.0f || p_normal_bias > 4.0f,
+			"SDFGI normal bias must be finite and in [0, 4].");
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_probe_bias) || p_probe_bias < 0.0f || p_probe_bias > 4.0f,
+			"SDFGI probe bias must be finite and in [0, 4].");
+	if (sdfgi_use_occlusion == p_occlusion && sdfgi_read_sky_light == p_read_sky_light &&
+			sdfgi_normal_bias == p_normal_bias && sdfgi_probe_bias == p_probe_bias) {
+		return;
+	}
+	sdfgi_use_occlusion = p_occlusion;
+	sdfgi_read_sky_light = p_read_sky_light;
+	sdfgi_normal_bias = p_normal_bias;
+	sdfgi_probe_bias = p_probe_bias;
+	_update_sdfgi();
+}
+
 void Environment::configure_sdfgi(bool p_enabled, int p_cascades, float p_min_cell_size, bool p_read_sky_light, float p_bounce_feedback, float p_energy) {
 	ERR_FAIL_COND_MSG(p_cascades < 1 || p_cascades > 8, "SDFGI cascades must be between 1 and 8.");
 	ERR_FAIL_COND_MSG(!Math::is_finite(p_min_cell_size) || p_min_cell_size <= 0.0f, "SDFGI cell size must be positive and finite.");
@@ -1535,6 +1555,7 @@ void Environment::_bind_methods() {
 	// SDFGI
 
 	ClassDB::bind_method(D_METHOD("configure_sdfgi", "enabled", "cascades", "min_cell_size", "read_sky_light", "bounce_feedback", "energy"), &Environment::configure_sdfgi);
+	ClassDB::bind_method(D_METHOD("configure_sdfgi_visibility", "use_occlusion", "read_sky_light", "normal_bias", "probe_bias"), &Environment::configure_sdfgi_visibility);
 	ClassDB::bind_method(D_METHOD("set_sdfgi_enabled", "enabled"), &Environment::set_sdfgi_enabled);
 	ClassDB::bind_method(D_METHOD("is_sdfgi_enabled"), &Environment::is_sdfgi_enabled);
 	ClassDB::bind_method(D_METHOD("set_sdfgi_cascades", "amount"), &Environment::set_sdfgi_cascades);
