@@ -13,6 +13,7 @@ const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
+const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
 const HEIGHT_MIN := -45.0
@@ -1036,22 +1037,14 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 			var places: Array = _anchored_spots(entry, anchors[str(entry["anchor"])], origin, rng, road_pieces, road_clear)
 			if places.is_empty():
 				continue
-			var multimesh := MultiMesh.new()
-			multimesh.transform_format = MultiMesh.TRANSFORM_3D
-			multimesh.mesh = mesh
-			multimesh.instance_count = places.size()
+			var transforms: Array[Transform3D] = []
 			for i in places.size():
 				var at: Vector2 = places[i]
 				var size := rng.randf_range(float(entry["scale"][0]), float(entry["scale"][1]))
 				var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
-				multimesh.set_instance_transform(i, Transform3D(basis, Vector3(at.x - origin.x, _world.height_at(at.x, at.y) - 0.02, at.y - origin.y)))
-			var instance := MultiMeshInstance3D.new()
-			instance.multimesh = multimesh
-			# Bushes are big enough to cast a shadow; the rest would only cost time.
-			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if file.begins_with("Bush") else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			instance.visibility_range_end = float(entry["range"])
-			instance.visibility_range_end_margin = 8.0
-			add_child(instance)
+				transforms.append(Transform3D(basis, Vector3(at.x - origin.x, _world.height_at(at.x, at.y) - 0.02, at.y - origin.y)))
+			# Dense vegetation is split into camera-cullable cells, sparse props remain one draw call.
+			SceneryBatches.add(self, mesh, transforms, float(entry["range"]), file.begins_with("Bush"))
 	# Logs, branches, roots, scree and the odd standing stone, each where it belongs.
 	for entry in ModelCatalog.available("decor", ModelCatalog.DECOR_EXTRA):
 		var extra_mesh: Mesh = ModelCatalog.entry_mesh(entry)
@@ -1073,20 +1066,14 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 				placed.append([around, main_scale * rng.randf_range(0.25, 0.6)])
 		if placed.is_empty():
 			continue
-		var extra := MultiMesh.new()
-		extra.transform_format = MultiMesh.TRANSFORM_3D
-		extra.mesh = extra_mesh
-		extra.instance_count = placed.size()
+		var transforms: Array[Transform3D] = []
 		for i in placed.size():
 			var where: Vector2 = placed[i][0]
 			# Tilted a little, sunk a little: lying in the ground for ages, not placed on it.
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).rotated(Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)).normalized(), rng.randf_range(0.0, 0.12))
 			basis = basis.scaled(Vector3.ONE * float(placed[i][1]))
-			extra.set_instance_transform(i, Transform3D(basis, Vector3(where.x - origin.x, _world.height_at(where.x, where.y) - 0.06 * float(placed[i][1]), where.y - origin.y)))
-		var extra_instance := MultiMeshInstance3D.new()
-		extra_instance.multimesh = extra
-		extra_instance.visibility_range_end = 140.0
-		add_child(extra_instance)
+			transforms.append(Transform3D(basis, Vector3(where.x - origin.x, _world.height_at(where.x, where.y) - 0.06 * float(placed[i][1]), where.y - origin.y)))
+		SceneryBatches.add(self, extra_mesh, transforms, 140.0)
 
 
 ## Hides depleted nodes and opened crates. `hidden_ids` is the set of ids the server says are gone.
