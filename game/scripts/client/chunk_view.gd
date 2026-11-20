@@ -204,6 +204,8 @@ var _grass_lod_elapsed := 0.0
 var _grass_last_eye := Vector2.ZERO
 var _grass_last_scale := -1.0
 var _grass_last_tile_count := -1
+var _grass_last_camera_y := INF
+var _grass_last_camera_forward := Vector3.ZERO
 const GRASS_LOD_INTERVAL := 0.35 # Update a few times a second, not every render frame.
 var _shadow_casters: Array[Dictionary] = [] # Instanced geometry with true bounds and visual role.
 # All shadows are static until a quality change or streamed caster changes.
@@ -1044,19 +1046,41 @@ func _update_grass_lods() -> void:
 		# FSR2 renders fewer 3D pixels than the window contains.
 		render_scale = clampf(active_viewport.scaling_3d_scale, 0.5, 1.0)
 	var screen_height: float = float(screen_size.y) * render_scale
-	# Avoid multiplying geometry cost on 4K screens: preserve additional
-	# detail only up to 15% beyond the active grass fade-range budget.
+	# The fork's native projection query handles perspective, frustum and
+	# orthographic zoom, including tilted terrain and elevated grass.
+	# Upstream Godot retains the original FOV-based approximation.
+	var native_projection: bool = view_camera.has_method("get_pixels_per_meter_at_position")
 	var screen_scale: float = minf(1.15, GrassField.screen_lod_scale(screen_height, vertical_fov))
-	var range_scale: float = maxf(grass_fade_end / GrassField.FADE_END, 0.1) * screen_scale
+	var raw_focal_ratio: float = (screen_height / tan(deg_to_rad(vertical_fov) * 0.5)) / (
+		720.0 / tan(deg_to_rad(38.0) * 0.5))
+	var quality_range: float = maxf(grass_fade_end / GrassField.FADE_END, 0.1)
+	# Native pixels-per-meter already accounts for resolution and FOV, while
+	# the fallback needs the old focal-length multiplier.
+	var range_scale: float = quality_range if native_projection else quality_range * screen_scale
+	var refresh_signature: float = quality_range * raw_focal_ratio
+	if view_camera.projection == Camera3D.PROJECTION_ORTHOGONAL:
+		refresh_signature = quality_range * (720.0 / maxf(view_camera.size, 0.01))
+	var camera_forward: Vector3 = -view_camera.global_transform.basis.z
+	var orientation_changed: bool = camera_forward.distance_squared_to(
+		_grass_last_camera_forward) > 0.0001
+	var height_changed: bool = absf(view_camera.global_position.y - _grass_last_camera_y) > 0.1
 	if not GrassField.needs_lod_refresh(_grass_last_eye, _grass_last_scale,
-			_grass_last_tile_count, camera_xz, range_scale, _grass_tiles.size()):
+			_grass_last_tile_count, camera_xz, refresh_signature, _grass_tiles.size()) \
+			and not orientation_changed and not height_changed:
 		return
 	_grass_last_eye = camera_xz
-	_grass_last_scale = range_scale
+	_grass_last_scale = refresh_signature
 	_grass_last_tile_count = _grass_tiles.size()
+	_grass_last_camera_y = view_camera.global_position.y
+	_grass_last_camera_forward = camera_forward
 	for tile in _grass_tiles:
 		var tile_center: Vector3 = to_global(tile.custom_aabb.position + tile.custom_aabb.size * 0.5)
 		var distance: float = camera_xz.distance_to(Vector2(tile_center.x, tile_center.z))
+		if native_projection:
+			var pixels_per_meter: float = float(view_camera.call(
+				"get_pixels_per_meter_at_position", tile_center)) * render_scale
+			distance = GrassField.projected_lod_distance(
+				distance, pixels_per_meter, raw_focal_ratio)
 		var previous: int = int(tile.get_meta("blade_lod", 0))
 		var tier: int = GrassField.lod_for_distance(distance, previous, range_scale)
 		# MultiMesh.visible_instance_count is a GPU draw limit; changing this
