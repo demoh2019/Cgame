@@ -9,6 +9,7 @@ const Meshes = preload("res://scripts/client/meshes.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const Foliage = preload("res://scripts/client/foliage.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
+const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
 const HEIGHT_MIN := -45.0
@@ -147,83 +148,132 @@ func _build_terrain(origin: Vector2) -> void:
 	add_child(_terrain)
 
 
+## Mesh of a group. Kinds with a number ("tree:3", "building:5") are variants; the catalog picks the model installed for it,
+## and each branch falls back to the Kenney or procedural models when its packs are missing.
 func _mesh_for(kind: String) -> Mesh:
-	if _use_nature:
-		# The downloaded Quaternius nature kit.
-		if kind.begins_with("tree:"):
-			var tree_file: String = Assets.TREE_FILES[int(kind.get_slice(":", 1)) % Assets.TREE_FILES.size()]
-			return Foliage.swayed(Assets.nature_mesh(tree_file), "tree:" + tree_file, 0.22)
-		if kind.begins_with("rock:") or kind.begins_with("ore:"):
-			return Assets.nature_mesh(Assets.ROCK_FILES[int(kind.get_slice(":", 1)) % Assets.ROCK_FILES.size()])
-		if kind == "bush":
-			return Foliage.swayed(Assets.nature_mesh("Bush_Common"), "bush", 0.08)
-		if kind == "berry":
-			return Foliage.swayed(Assets.nature_mesh("Bush_Common_Flowers"), "berry", 0.08)
-	if _use_village:
-		if kind == "tower":
-			return Assets.village_mesh(Assets.TOWER_FILE)
-		if kind == "workbench":
-			return Assets.village_mesh(Assets.STATION_FILE)
-		if kind.begins_with("prop:"):
-			return Assets.village_mesh(Assets.PROP_FILES[int(kind.get_slice(":", 1)) % Assets.PROP_FILES.size()])
-		if kind.begins_with("building:"):
-			return Assets.pack_building(int(kind.get_slice(":", 1)))["mesh"]
-		if kind == "wall":
-			return Assets.village_mesh("EA03_Fence_Wall_01b")
-		if kind == "crate":
-			return Assets.village_mesh("EA03_Prop_Container_Crate_01a")
-	if kind.begins_with("tree:"):
-		return Assets.tree_meshes()[int(kind.get_slice(":", 1))]
-	if kind == "tower":
-		return Assets.building_mesh(4)
-	if kind == "workbench":
-		return Meshes.get_mesh("workbench")
-	if kind.begins_with("prop:"):
-		return Meshes.get_mesh("crate")
-	if kind.begins_with("building:"):
-		return Assets.building_mesh(int(kind.get_slice(":", 1)))
-	if kind == "wall":
-		return Assets.mesh("fps/wall-high")
-	if kind.begins_with("rock:") or kind.begins_with("ore:"):
-		return Meshes.get_mesh(kind.get_slice(":", 0))
-	return Meshes.get_mesh(kind)
+	var base: String = kind.get_slice(":", 0)
+	var variant: int = int(kind.get_slice(":", 1)) if kind.contains(":") else 0
+	var picked: Mesh = null
+	match base:
+		"tree":
+			if _use_nature and variant < Assets.TREE_FILES.size():
+				var tree_file: String = Assets.TREE_FILES[variant]
+				return Foliage.swayed(Assets.nature_mesh(tree_file), "tree:" + tree_file, 0.22)
+			if ModelCatalog.has_painted_trees() and _use_nature:
+				var painted: Mesh = ModelCatalog.painted_tree(variant - Assets.TREE_FILES.size())
+				if painted != null:
+					return Foliage.swayed(painted, "painted:%d" % variant, 0.2)
+			if not _use_nature:
+				return Assets.tree_meshes()[variant % Assets.tree_meshes().size()]
+		"rock":
+			if _use_nature and variant < Assets.ROCK_FILES.size():
+				return Assets.nature_mesh(Assets.ROCK_FILES[variant])
+			if ModelCatalog.has_stones():
+				picked = ModelCatalog.stone(variant - Assets.ROCK_FILES.size())
+			elif _use_nature:
+				return Assets.nature_mesh(Assets.ROCK_FILES[variant % Assets.ROCK_FILES.size()])
+		"ore":
+			picked = ModelCatalog.entry_mesh(ModelCatalog.pick("crystals", ModelCatalog.CRYSTALS, variant))
+			if picked == null and _use_nature:
+				return Assets.nature_mesh(Assets.ROCK_FILES[variant % Assets.ROCK_FILES.size()])
+		"bush":
+			if _use_nature:
+				return Foliage.swayed(Assets.nature_mesh("Bush_Common"), "bush", 0.08)
+		"berry":
+			if _use_nature:
+				return Foliage.swayed(Assets.nature_mesh("Bush_Common_Flowers"), "berry", 0.08)
+		"building":
+			picked = ModelCatalog.entry_mesh(ModelCatalog.pick("houses", ModelCatalog.HOUSES, variant))
+			if picked == null:
+				return Assets.building_mesh(variant)
+		"wall":
+			picked = ModelCatalog.entry_mesh(ModelCatalog.pick("walls", ModelCatalog.WALLS, variant))
+			if picked == null:
+				return Assets.mesh("fps/wall-high")
+		"tower":
+			picked = ModelCatalog.entry_mesh(ModelCatalog.pick("towers", ModelCatalog.TOWERS, variant))
+			if picked == null:
+				return Assets.building_mesh(4)
+		"workbench":
+			if _use_village:
+				return Assets.village_mesh(Assets.STATION_FILE)
+			return Meshes.get_mesh("workbench")
+		"prop":
+			picked = ModelCatalog.entry_mesh(ModelCatalog.pick("props", ModelCatalog.PROPS, variant))
+			if picked == null:
+				return Meshes.get_mesh("crate")
+		"ruin":
+			picked = ModelCatalog.entry_mesh(ModelCatalog.pick("ruins", ModelCatalog.RUINS, variant))
+			if picked == null:
+				return Assets.building_mesh(variant)
+		"crate":
+			picked = ModelCatalog.entry_mesh(ModelCatalog.pick("crates", ModelCatalog.CRATES, variant))
+			if picked == null:
+				return Meshes.get_mesh("crate")
+	if picked != null:
+		return picked
+	return Meshes.get_mesh(base)
 
 
-## Size of one instance of a group, and (for pack models) the yaw-independent ground offset.
+## Size multiplier of one instance. Catalog meshes are baked to meters already, so this is only the variation between
+## instances and the difference between a structure's own scale and the nominal one the mesh was baked for.
 func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> float:
-	if _use_nature and kind.begins_with("tree:"):
-		return rng.randf_range(0.85, 1.25)
-	if _use_nature and (kind.begins_with("rock:") or kind.begins_with("ore:")):
-		return rng.randf_range(0.65, 1.0) * (1.0 if kind.begins_with("rock:") else 0.8)
-	if _use_nature and (kind == "bush" or kind == "berry"):
-		return rng.randf_range(0.8, 1.1)
-	if _use_village and kind == "tower":
-		return Assets.fit_scale(_mesh_for(kind), float(node["scale"]))
-	if _use_village and kind == "workbench":
-		return 2.2
-	if kind.begins_with("prop:"):
-		return float(node.get("scale", 1.5)) * (1.0 if _use_village else 0.5)
-	if _use_village and kind.begins_with("building:"):
-		return Assets.fit_scale(_mesh_for(kind), Assets.BUILDING_FOOTPRINT * float(node["scale"]) / 6.0)
-	if _use_village and kind == "wall":
-		return Assets.fit_scale(_mesh_for(kind), Assets.WALL_LENGTH)
-	if _use_village and kind == "crate":
-		return 1.5
-	if kind.begins_with("tree:"):
-		return Assets.TREE_SCALE * rng.randf_range(0.85, 1.3)
-	if kind.begins_with("rock:") or kind.begins_with("ore:") or kind == "rock" or kind == "ore":
-		return rng.randf_range(0.8, 1.3)
-	if kind == "wall" or kind.begins_with("building:") or kind == "tower":
-		return float(node["scale"])
+	var base: String = kind.get_slice(":", 0)
+	var variant: int = int(kind.get_slice(":", 1)) if kind.contains(":") else 0
+	var baked: bool = _is_baked(base, variant)
+	match base:
+		"tree":
+			if _use_nature:
+				return rng.randf_range(0.85, 1.25)
+			return Assets.TREE_SCALE * rng.randf_range(0.85, 1.3)
+		"rock":
+			if baked or _use_nature:
+				return rng.randf_range(0.7, 1.05)
+			return rng.randf_range(0.8, 1.3)
+		"ore":
+			return rng.randf_range(0.8, 1.15)
+		"bush", "berry":
+			return rng.randf_range(0.8, 1.1) if _use_nature else 1.0
+		"building":
+			return float(node["scale"]) / 6.0 if baked else float(node["scale"])
+		"wall":
+			return float(node["scale"]) / 3.0 if baked else float(node["scale"])
+		"tower":
+			return float(node["scale"]) / 5.0 if baked else float(node["scale"])
+		"workbench":
+			return 2.2 if _use_village else 1.0
+		"prop":
+			return float(node.get("scale", 1.5)) / 1.5 if baked else 0.5
+		"ruin", "crate":
+			return 1.0
 	return 1.0
+
+
+## Whether the model of a kind came from the catalog (already in meters) rather than from the old fallback sets.
+func _is_baked(base: String, variant: int) -> bool:
+	match base:
+		"building":
+			return not ModelCatalog.available("houses", ModelCatalog.HOUSES).is_empty()
+		"wall":
+			return not ModelCatalog.available("walls", ModelCatalog.WALLS).is_empty()
+		"tower":
+			return not ModelCatalog.available("towers", ModelCatalog.TOWERS).is_empty()
+		"prop":
+			return not ModelCatalog.available("props", ModelCatalog.PROPS).is_empty()
+		"rock":
+			return variant >= Assets.ROCK_FILES.size() and ModelCatalog.has_stones()
+	return false
 
 
 func _build_objects(data: Dictionary) -> void:
 	var origin := WorldGen.cell_origin(cell)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = WorldGen.mix(cell.x, cell.y, 99)
-	var tree_variants: int = Assets.TREE_FILES.size() if _use_nature else Assets.tree_meshes().size()
-	var rock_variants: int = Assets.ROCK_FILES.size()
+	var tree_variants: int = Assets.tree_meshes().size()
+	if _use_nature:
+		tree_variants = Assets.TREE_FILES.size() + (ModelCatalog.PAINTED_TREES.size() if ModelCatalog.has_painted_trees() else 0)
+	var rock_variants: int = Assets.ROCK_FILES.size() + (ModelCatalog.STONES.size() if ModelCatalog.has_stones() else 0)
+	var crystal_count: int = ModelCatalog.available("crystals", ModelCatalog.CRYSTALS).size()
 	# Group everything that shares a mesh, so each group is one draw call.
 	var by_kind: Dictionary = {}
 	for node in data["nodes"]:
@@ -231,15 +281,24 @@ func _build_objects(data: Dictionary) -> void:
 		var variant: int = WorldGen.mix(int(node["id"]), 3, 5)
 		if kind == "tree":
 			kind = "tree:%d" % (variant % tree_variants)
-		elif _use_nature and (kind == "rock" or kind == "ore"):
-			kind = "%s:%d" % [kind, variant % rock_variants]
+		elif kind == "rock" and (_use_nature or rock_variants > Assets.ROCK_FILES.size()):
+			kind = "rock:%d" % (variant % rock_variants)
+		elif kind == "ore" and crystal_count > 0:
+			kind = "ore:%d" % (variant % crystal_count)
+		elif kind == "ore" and _use_nature:
+			kind = "ore:%d" % (variant % Assets.ROCK_FILES.size())
 		by_kind.get_or_add(kind, []).append(node)
 	for crate in data["crates"]:
-		by_kind.get_or_add("crate", []).append(crate)
+		by_kind.get_or_add("crate:%d" % int(crate.get("variant", WorldGen.mix(int(crate["id"]), 4, 6))), []).append(crate)
+	var windmills: Array = []
 	for structure in data["structures"]:
-		var key: String = "building:%d" % structure["variant"]
-		if structure["kind"] == "wall" or structure["kind"] == "tower" or structure["kind"] == "workbench":
-			key = structure["kind"]
+		var structure_kind: String = structure["kind"]
+		if structure_kind == "windmill":
+			windmills.append(structure)
+			continue
+		var key: String = structure_kind
+		if structure_kind != "workbench":
+			key = "%s:%d" % [structure_kind, int(structure["variant"])]
 		by_kind.get_or_add(key, []).append(structure)
 	for prop in data.get("props", []):
 		by_kind.get_or_add("prop:%d" % int(prop["variant"]), []).append(prop)
@@ -252,7 +311,7 @@ func _build_objects(data: Dictionary) -> void:
 		multimesh.instance_count = list.size()
 		var index: Dictionary = {}
 		var transforms: Array = []
-		var is_building: bool = kind == "wall" or kind.begins_with("building:") or kind == "tower" or kind == "workbench"
+		var is_building: bool = kind.begins_with("wall") or kind.begins_with("building:") or kind.begins_with("tower") or kind == "workbench" or kind.begins_with("ruin:")
 		for i in list.size():
 			var node: Dictionary = list[i]
 			var size: float = _size_for(kind, node, rng)
@@ -263,7 +322,7 @@ func _build_objects(data: Dictionary) -> void:
 			multimesh.set_instance_transform(i, transform)
 			# The tier shows as a tint on the Kenney meshes (which use vertex colors).
 			var tier: int = node.get("tier", 1)
-			if kind in ["rock", "ore"]:
+			if kind.begins_with("rock") or kind.begins_with("ore"):
 				multimesh.set_instance_color(i, Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2))
 			else:
 				multimesh.set_instance_color(i, Color.WHITE.darkened((tier - 1) * 0.07) if kind.begins_with("tree:") else Color.WHITE)
@@ -272,14 +331,55 @@ func _build_objects(data: Dictionary) -> void:
 			transforms.append(transform)
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind == "wall" or kind == "tower") else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		if _use_nature and kind.begins_with("ore:"):
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind.begins_with("wall") or kind.begins_with("tower") or kind.begins_with("ruin:")) else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if _use_nature and kind.begins_with("ore:") and crystal_count == 0:
 			instance.material_override = _ore_material(multimesh.mesh)
 		add_child(instance)
 		_groups[kind] = {"multimesh": multimesh, "index": index, "transforms": transforms}
 	if _use_nature:
 		_build_decor(origin, rng)
+	_build_windmills(windmills, origin)
 	_build_npcs(data.get("npcs", []))
+
+
+var _sails: Array = [] # [{"node": Node3D, "axis": Vector3, "speed": float}]
+
+
+## Windmills are single objects with sails that turn.
+func _build_windmills(windmills: Array, origin: Vector2) -> void:
+	if windmills.is_empty():
+		return
+	var model: Dictionary = ModelCatalog.windmill()
+	for item in windmills:
+		var root := Node3D.new()
+		root.position = Vector3(float(item["x"]) - origin.x, float(item["y"]) - 0.05, float(item["z"]) - origin.y)
+		root.rotation.y = float(item["yaw"])
+		add_child(root)
+		if model.is_empty():
+			var mesh := MeshInstance3D.new()
+			mesh.mesh = Assets.building_mesh(4)
+			mesh.scale = Vector3.ONE * 4.0
+			root.add_child(mesh)
+			continue
+		var body := MeshInstance3D.new()
+		body.mesh = model["body"]
+		body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		root.add_child(body)
+		# The sails turn about their own centre: a pivot node at that point, the mesh moved back by the same amount.
+		var pivot := Node3D.new()
+		pivot.position = model["pivot"]
+		root.add_child(pivot)
+		var sails := MeshInstance3D.new()
+		sails.mesh = model["sails"]
+		sails.position = -Vector3(model["pivot"])
+		pivot.add_child(sails)
+		_sails.append({"node": pivot, "axis": model["axis"], "speed": 0.5 + float(WorldGen.mix(int(item["x"]), int(item["z"]), 8, 1) % 40) / 100.0})
+	set_process(true)
+
+
+func _process(delta: float) -> void:
+	for sail in _sails:
+		(sail["node"] as Node3D).rotate_object_local(sail["axis"], sail["speed"] * delta)
 
 
 ## The people of the settlements: standing, sitting, working, each with a name and a role above their head.
@@ -362,6 +462,32 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator) -> void:
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		instance.visibility_range_end = 110.0 # Small things are not worth drawing far away.
 		add_child(instance)
+	# Logs, stumps, painted flowers and the odd standing stone from the loose collections.
+	for entry in ModelCatalog.available("decor", ModelCatalog.DECOR_EXTRA):
+		var extra_mesh: Mesh = ModelCatalog.entry_mesh(entry)
+		if extra_mesh == null:
+			continue
+		var places: Array = []
+		for i in int(entry["count"]):
+			var x := origin.x + rng.randf() * Defs.CHUNK_SIZE
+			var z := origin.y + rng.randf() * Defs.CHUNK_SIZE
+			if _world.is_water(x, z) or not (_world.biome_at(x, z) in entry["biomes"]):
+				continue
+			places.append(Vector3(x, _world.height_at(x, z), z))
+		if places.is_empty():
+			continue
+		var extra := MultiMesh.new()
+		extra.transform_format = MultiMesh.TRANSFORM_3D
+		extra.mesh = extra_mesh
+		extra.instance_count = places.size()
+		for i in places.size():
+			var scale_factor := rng.randf_range(0.8, 1.3)
+			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * scale_factor)
+			extra.set_instance_transform(i, Transform3D(basis, Vector3(places[i].x - origin.x, places[i].y, places[i].z - origin.y)))
+		var extra_instance := MultiMeshInstance3D.new()
+		extra_instance.multimesh = extra
+		extra_instance.visibility_range_end = 140.0
+		add_child(extra_instance)
 
 
 ## Hides depleted nodes and opened crates. `hidden_ids` is the set of ids the server says are gone.

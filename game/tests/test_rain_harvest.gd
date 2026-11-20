@@ -122,7 +122,7 @@ func run(t) -> void:
 	var world_time: float = -1.0
 	for ring in [320.0, 540.0, 770.0]:
 		for i in range(48):
-			var candidate := Vector2.from_angle(float(i) * TAU / 48.0) * ring
+			var candidate = Vector2.from_angle(float(i) * TAU / 48.0) * ring
 			if world.is_water(candidate.x, candidate.y):
 				continue
 			var here := Vector3(candidate.x, world.height_at(candidate.x, candidate.y),

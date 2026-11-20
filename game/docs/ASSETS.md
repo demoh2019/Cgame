@@ -24,3 +24,22 @@ redistributing the files themselves, and a public repository is exactly that. Ev
 (a fresh clone, CI) the game falls back to the Kenney set and all tests still run.
 
 Houses are scaled so their longest side is 7 m, which matches the circle the server collides with (3.7 m radius).
+
+## More packs (second import)
+
+`tools/import_downloads.sh` also takes, when present in the downloads folder:
+
+* **HighLandsFantasyBuildings** (FBX): huts, barracks, a town centre, towers, a wall, a windmill with turning sails and props. Only the diffuse
+  atlases are used (shrunk to 2048 px, normal maps skipped: 70 MB each).
+* **KayKit Dungeon Pack** (CC0, glTF): pillars, broken walls, rubble, stairs, chests, kegs, tables, torches, beds and shelves for ruined cities, bunkers and forts.
+* **FreeVersion** (RAR, one textured glb): market stalls, huts, benches, braziers, lamps, logs, fences and stone walls.
+* The loose **glb** files: a painted tree collection, a stone pack, crystals (used for ore), a treasure chest, logs, stumps, flowers, a mystic stone.
+
+Most of these are collections of many objects in one file, each far from the origin and in its own units, so `scripts/client/model_catalog.gd` bakes
+every object into its own mesh once: transform applied, scaled to a size in meters, bottom centre at the origin. The lists (`HOUSES`, `PROPS`, `RUINS`, `CRATES` ...)
+are filtered to what is installed and a variant number from the world data picks `variant % installed`, so the server never loads a model and a missing pack
+shortens a list instead of breaking anything. Blocking radii of props and ruins live in `WorldPoi` (`PROP_RADII`, `RUIN_RADII`); `tests/test_model_catalog.gd`
+checks that both sides stay the same length.
+
+Not used: the 163 MB floating island, the 57 MB apothecary lab, the forest scenes, the aloe set and the rock formations (each is one huge scene or in
+centimetre units; they would need hand-made splitting), and the Wandering Merchant, Treasure and Throwing Animations packs.

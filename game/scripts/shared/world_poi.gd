@@ -15,7 +15,22 @@ const SITE_CHANCE := 0.82
 const STATION_RANGE := 6.0
 const BUILDING_SCALE := 6.0
 const WALL_SCALE := 3.0
-const BUILDING_VARIANTS := 5
+const BUILDING_VARIANTS := 9 # Models of the client's HOUSES list; the client takes variant % installed models.
+const TOWN_CENTER_VARIANT := 7 # The big building in the middle of a village (not drawn at random for ordinary houses).
+const TOWER_VARIANTS := 3 # Watchtower, round tower, tall coastal tower.
+const WALL_WOOD := 2 # Palisade of villages, farms and camps.
+const WALL_STONE := 1 # Fort wall.
+
+# What blocks movement, per variant, of the client's PROPS and RUINS lists (the server never loads a model): a test checks
+# that these tables and the lists in model_catalog.gd have the same length.
+const PROP_RADII := [0.45, 0.45, 0.6, 0.6, 0.35, 0.3, 0.5, 0.5, 0.6, 2.4, 0.4, 0.7, 0.9, 0.7, 0.8, 0.5, 0.9, 0.2, 1.0, 0.9]
+const RUIN_RADII := [0.8, 0.8, 1.8, 1.8, 1.1, 2.6, 1.6, 0.5, 1.9, 2.2]
+const CRATE_VARIANTS := 5
+# Which props belong where. Indices into PROP_RADII.
+const RUSTIC_PROPS := [0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12]
+const MARKET_PROPS := [9, 10, 8, 16, 11]
+const MILITARY_PROPS := [6, 7, 13, 14, 15, 17, 8]
+const RUIN_PROPS := [13, 14, 15, 16, 19, 12, 0, 1]
 
 const KINDS := {
 	"village": {"title": "Village", "radius": 58.0, "clear": 0.8, "station": true},
@@ -45,7 +60,6 @@ const ROLES := {
 	"miner": {"title": "Miner", "animation": "Fixing_Kneeling"},
 	"fisher": {"title": "Fisher", "animation": "Idle_Rail_Loop"},
 }
-const PROP_VARIANTS := 6 # barrel, crate, bench, table, basket, stool: see Assets.PROP_FILES.
 
 var world
 var _regions: Dictionary = {}
@@ -232,15 +246,20 @@ func contents(site: Dictionary) -> Dictionary:
 	match kind:
 		"village":
 			_station(result, site)
-			_houses(result, rng, center, rng.randi_range(6, 9), 20.0, 46.0, 12.0, taken)
-			_fences(result, rng, center, rng.randi_range(3, 5), 48.0, 54.0)
+			_town_center(result, rng, center, 13.0, 19.0, taken)
+			_houses(result, rng, center, rng.randi_range(6, 9), 22.0, 48.0, 12.0, taken)
+			if rng.randf() < 0.6:
+				_windmill(result, rng, center, 30.0, 50.0, taken)
+			_fences(result, rng, center, rng.randi_range(5, 8), 50.0, 56.0, [WALL_WOOD, WALL_WOOD, 3])
 			_crates(result, rng, center, rng.randi_range(2, 4), 8.0, 36.0, taken)
 			_props(result, rng, center, rng.randi_range(12, 18), 6.0, 36.0)
+			_props(result, rng, center, rng.randi_range(3, 5), 5.0, 22.0, MARKET_PROPS)
 			_npcs(result, rng, site, [["guard", 2], ["villager", 3], ["farmer", 1]], 6.0, 26.0)
 			_zombies(result, rng, center, rng.randi_range(0, 1) if zone == 0 else rng.randi_range(1, 3), 62.0, 80.0, zone, false)
 		"farm":
 			_houses(result, rng, center, rng.randi_range(2, 3), 12.0, 24.0, 12.0, taken)
-			_ring_walls(result, rng, center, 33.0, 0.7)
+			_windmill(result, rng, center, 8.0, 24.0, taken)
+			_ring_walls(result, rng, center, 33.0, 0.7, [WALL_WOOD, 3])
 			_crates(result, rng, center, rng.randi_range(1, 2), 6.0, 24.0, taken)
 			_props(result, rng, center, rng.randi_range(10, 14), 4.0, 28.0)
 			_npcs(result, rng, site, [["farmer", 2], ["villager", 1]], 8.0, 26.0)
@@ -253,23 +272,24 @@ func contents(site: Dictionary) -> Dictionary:
 			_zombies(result, rng, center, rng.randi_range(1, 3), 22.0, 40.0, zone, false)
 		"depot":
 			_houses(result, rng, center, 2, 12.0, 20.0, 18.0, taken, 9.0)
-			_ring_walls(result, rng, center, 28.0, 0.55)
+			_ring_walls(result, rng, center, 28.0, 0.55, [WALL_STONE, 4])
 			_crates(result, rng, center, rng.randi_range(4, 6), 5.0, 22.0, taken)
-			_props(result, rng, center, rng.randi_range(10, 14), 4.0, 24.0)
+			_props(result, rng, center, rng.randi_range(10, 14), 4.0, 24.0, MILITARY_PROPS)
 			_zombies(result, rng, center, rng.randi_range(3, 5) + zone, 5.0, 30.0, zone, true)
 		"outpost":
 			_station(result, site)
-			_ring_walls(result, rng, center, 31.0, 0.78)
-			_towers(result, center, [Vector2(-31.0, -31.0), Vector2(31.0, 31.0)])
-			_houses(result, rng, center, 2, 9.0, 18.0, 12.0, taken)
+			_ring_walls(result, rng, center, 31.0, 0.78, [WALL_STONE, WALL_STONE, 4, 0])
+			_towers(result, center, [Vector2(-31.0, -31.0), Vector2(31.0, 31.0), Vector2(-31.0, 31.0), Vector2(31.0, -31.0)], 1.0, 1)
+			_town_center(result, rng, center, 9.0, 14.0, taken)
+			_houses(result, rng, center, 2, 16.0, 24.0, 12.0, taken)
 			_crates(result, rng, center, rng.randi_range(3, 5), 5.0, 24.0, taken)
-			_props(result, rng, center, rng.randi_range(8, 12), 4.0, 26.0)
+			_props(result, rng, center, rng.randi_range(8, 12), 4.0, 26.0, MILITARY_PROPS)
 			_npcs(result, rng, site, [["guard", 4]], 6.0, 22.0)
 			_zombies(result, rng, center, rng.randi_range(3, 5), 40.0, 58.0, zone, false)
 		"tower":
-			_towers(result, center, [Vector2.ZERO])
+			_towers(result, center, [Vector2.ZERO], 1.0, 0)
 			_crates(result, rng, center, 1, 3.0, 7.0, taken)
-			_props(result, rng, center, rng.randi_range(3, 5), 3.0, 9.0)
+			_props(result, rng, center, rng.randi_range(3, 5), 3.0, 9.0, MILITARY_PROPS)
 			_zombies(result, rng, center, rng.randi_range(1, 3), 5.0, 14.0, zone, true)
 		"mine":
 			_houses(result, rng, center, rng.randi_range(1, 2), 8.0, 14.0, 10.0, taken, 5.0)
@@ -280,19 +300,21 @@ func contents(site: Dictionary) -> Dictionary:
 			_zombies(result, rng, center, rng.randi_range(2, 4), 6.0, 24.0, zone, true)
 		"city":
 			_houses(result, rng, center, rng.randi_range(14, 22), 14.0, 80.0, 12.0, taken)
-			_fences(result, rng, center, rng.randi_range(8, 14), 10.0, 82.0)
+			_ruin_bits(result, rng, center, rng.randi_range(24, 36), 8.0, 84.0, taken)
+			_fences(result, rng, center, rng.randi_range(8, 14), 10.0, 82.0, [WALL_STONE, 4, 0])
 			_crates(result, rng, center, rng.randi_range(6, 10), 8.0, 64.0, taken)
-			_props(result, rng, center, rng.randi_range(20, 30), 6.0, 70.0)
+			_props(result, rng, center, rng.randi_range(20, 30), 6.0, 70.0, RUIN_PROPS)
 			_zombies(result, rng, center, rng.randi_range(8, 14) + zone, 8.0, 70.0, zone, true)
 		"bunker":
-			_ring_walls(result, rng, center, 24.0, 0.85)
-			_towers(result, center, [Vector2(-20.0, 0.0), Vector2(20.0, 0.0)] if rng.randf() < 0.5 else [Vector2(0.0, 0.0)])
+			_ring_walls(result, rng, center, 24.0, 0.85, [WALL_STONE, 4])
+			_towers(result, center, [Vector2(-20.0, 0.0), Vector2(20.0, 0.0)] if rng.randf() < 0.5 else [Vector2(0.0, 0.0)], 1.0, 1)
 			_houses(result, rng, center, rng.randi_range(1, 2), 8.0, 15.0, 12.0, taken)
+			_ruin_bits(result, rng, center, rng.randi_range(5, 9), 6.0, 26.0, taken)
 			_crates(result, rng, center, rng.randi_range(5, 7), 3.0, 18.0, taken)
-			_props(result, rng, center, rng.randi_range(6, 10), 3.0, 20.0)
+			_props(result, rng, center, rng.randi_range(6, 10), 3.0, 20.0, MILITARY_PROPS)
 			_zombies(result, rng, center, rng.randi_range(6, 9) + zone, 4.0, 28.0, zone, true)
 		"lighthouse":
-			_towers(result, center, [Vector2.ZERO], 1.5)
+			_towers(result, center, [Vector2.ZERO], 1.5, 2)
 			_houses(result, rng, center, 1, 8.0, 11.0, 8.0, taken, 5.0)
 			_crates(result, rng, center, 1, 4.0, 9.0, taken)
 			_props(result, rng, center, rng.randi_range(3, 5), 3.0, 11.0)
@@ -306,6 +328,11 @@ func contents(site: Dictionary) -> Dictionary:
 			_zombies(result, rng, center, rng.randi_range(0, 2), 14.0, 28.0, zone, false)
 	site["contents"] = result
 	return result
+
+
+func _house_variant(rng: RandomNumberGenerator, limit: int) -> int:
+	var variant: int = rng.randi_range(0, mini(limit, BUILDING_VARIANTS - 1) - 1)
+	return variant + 1 if variant >= TOWN_CENTER_VARIANT and limit > TOWN_CENTER_VARIANT else variant
 
 
 func _ground(p: Vector2) -> float:
@@ -328,7 +355,7 @@ func _station(result: Dictionary, site: Dictionary) -> void:
 	_add_npc(result, site, "trader", trader_spot, p, int(site["seed"]) + 11)
 
 
-func _houses(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, count: int, rmin: float, rmax: float, spacing: float, taken: Array, scale: float = BUILDING_SCALE, variant_limit: int = BUILDING_VARIANTS) -> void:
+func _houses(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, count: int, rmin: float, rmax: float, spacing: float, taken: Array, scale: float = BUILDING_SCALE, variant_limit: int = BUILDING_VARIANTS - 1) -> void:
 	var placed := 0
 	for attempt in count * 14:
 		if placed >= count:
@@ -340,19 +367,19 @@ func _houses(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, co
 		placed += 1
 		# Houses in a settlement face the centre; ruins sit at any angle.
 		var yaw: float = -atan2(p.y - center.y, p.x - center.x) + PI * 0.5 + rng.randf_range(-0.35, 0.35)
-		result["structures"].append({"kind": "building", "variant": rng.randi_range(0, variant_limit - 1), "scale": scale, "x": p.x, "z": p.y, "y": _ground(p), "yaw": yaw, "radius": scale * 0.62, "blocks": true})
+		result["structures"].append({"kind": "building", "variant": _house_variant(rng, variant_limit), "scale": scale, "x": p.x, "z": p.y, "y": _ground(p), "yaw": yaw, "radius": scale * 0.62, "blocks": true})
 
 
-func _fences(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, count: int, rmin: float, rmax: float) -> void:
+func _fences(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, count: int, rmin: float, rmax: float, variants: Array = [WALL_WOOD]) -> void:
 	for i in count:
 		var p := center + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(rmin, rmax)
 		if world.is_water(p.x, p.y):
 			continue
-		result["structures"].append({"kind": "wall", "variant": 0, "scale": WALL_SCALE, "x": p.x, "z": p.y, "y": _ground(p), "yaw": rng.randf() * PI, "radius": WALL_SCALE * 0.6, "blocks": true})
+		result["structures"].append({"kind": "wall", "variant": variants[rng.randi() % variants.size()], "scale": WALL_SCALE, "x": p.x, "z": p.y, "y": _ground(p), "yaw": rng.randf() * PI, "radius": WALL_SCALE * 0.6, "blocks": true})
 
 
 ## A fence or palisade round a site with a few gaps for the way in.
-func _ring_walls(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, radius: float, coverage: float) -> void:
+func _ring_walls(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, radius: float, coverage: float, variants: Array = [WALL_WOOD]) -> void:
 	var segments: int = int(TAU * radius / 3.6)
 	var gap_a: float = rng.randf() * TAU
 	var gap_b: float = gap_a + PI
@@ -365,15 +392,15 @@ func _ring_walls(result: Dictionary, rng: RandomNumberGenerator, center: Vector2
 		var p := center + Vector2.from_angle(angle) * radius
 		if world.is_water(p.x, p.y):
 			continue
-		result["structures"].append({"kind": "wall", "variant": 0, "scale": WALL_SCALE, "x": p.x, "z": p.y, "y": _ground(p), "yaw": -angle + PI * 0.5, "radius": WALL_SCALE * 0.6, "blocks": true})
+		result["structures"].append({"kind": "wall", "variant": variants[rng.randi() % variants.size()], "scale": WALL_SCALE, "x": p.x, "z": p.y, "y": _ground(p), "yaw": -angle + PI * 0.5, "radius": WALL_SCALE * 0.6, "blocks": true})
 
 
-func _towers(result: Dictionary, center: Vector2, offsets: Array, height_scale: float = 1.0) -> void:
+func _towers(result: Dictionary, center: Vector2, offsets: Array, height_scale: float = 1.0, variant: int = 0) -> void:
 	for offset in offsets:
 		var p: Vector2 = center + offset
 		if world.is_water(p.x, p.y):
 			continue
-		result["structures"].append({"kind": "tower", "variant": 0, "scale": 5.0 * height_scale, "x": p.x, "z": p.y, "y": _ground(p), "yaw": 0.0, "radius": 2.4, "blocks": true})
+		result["structures"].append({"kind": "tower", "variant": variant, "scale": 5.0 * height_scale, "x": p.x, "z": p.y, "y": _ground(p), "yaw": 0.0, "radius": 2.4, "blocks": true})
 
 
 func _crates(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, count: int, rmin: float, rmax: float, taken: Array) -> void:
@@ -384,15 +411,53 @@ func _crates(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, co
 		if not _usable(p, taken, 4.5):
 			continue
 		taken.append(p)
-		result["crates"].append({"kind": "crate", "x": p.x, "z": p.y, "y": _ground(p), "radius": 0.6, "blocks": true})
+		result["crates"].append({"kind": "crate", "variant": rng.randi_range(0, CRATE_VARIANTS - 1), "x": p.x, "z": p.y, "y": _ground(p), "radius": 0.6, "blocks": true})
 
 
-func _props(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, count: int, rmin: float, rmax: float) -> void:
+func _props(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, count: int, rmin: float, rmax: float, pool: Array = RUSTIC_PROPS) -> void:
 	for i in count:
 		var p := center + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(rmin, rmax)
 		if world.is_water(p.x, p.y) or p.length() < Defs.HUB_SAFE_RADIUS + 8.0:
 			continue
-		result["props"].append({"kind": "prop", "variant": rng.randi_range(0, PROP_VARIANTS - 1), "x": p.x, "z": p.y, "y": _ground(p), "yaw": rng.randf() * TAU, "scale": 1.5, "radius": 0.45, "blocks": true})
+		var variant: int = pool[rng.randi() % pool.size()]
+		result["props"].append({"kind": "prop", "variant": variant, "x": p.x, "z": p.y, "y": _ground(p), "yaw": rng.randf() * TAU, "scale": 1.5, "radius": PROP_RADII[variant], "blocks": true})
+
+
+## Broken walls, pillars and heaps of rubble of a ruined place.
+func _ruin_bits(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, count: int, rmin: float, rmax: float, taken: Array) -> void:
+	var placed := 0
+	for attempt in count * 6:
+		if placed >= count:
+			break
+		var p := center + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(rmin, rmax)
+		if not _usable(p, taken, 6.0):
+			continue
+		taken.append(p)
+		placed += 1
+		var variant: int = rng.randi_range(0, RUIN_RADII.size() - 1)
+		result["structures"].append({"kind": "ruin", "variant": variant, "scale": 1.0, "x": p.x, "z": p.y, "y": _ground(p), "yaw": rng.randf() * TAU, "radius": RUIN_RADII[variant], "blocks": true})
+
+
+func _windmill(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, rmin: float, rmax: float, taken: Array) -> void:
+	for attempt in 20:
+		var p := center + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(rmin, rmax)
+		if not _usable(p, taken, 10.0):
+			continue
+		taken.append(p)
+		result["structures"].append({"kind": "windmill", "variant": 0, "scale": 1.0, "x": p.x, "z": p.y, "y": _ground(p), "yaw": rng.randf() * TAU, "radius": 2.4, "blocks": true})
+		return
+
+
+## The big building in the middle of a village or fort.
+func _town_center(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, rmin: float, rmax: float, taken: Array) -> void:
+	for attempt in 20:
+		var p := center + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(rmin, rmax)
+		if not _usable(p, taken, 14.0):
+			continue
+		taken.append(p)
+		var yaw: float = -atan2(p.y - center.y, p.x - center.x) + PI * 0.5
+		result["structures"].append({"kind": "building", "variant": TOWN_CENTER_VARIANT, "scale": 8.0, "x": p.x, "z": p.y, "y": _ground(p), "yaw": yaw, "radius": 8.0 * 0.62, "blocks": true})
+		return
 
 
 func _ore(result: Dictionary, rng: RandomNumberGenerator, center: Vector2, count: int, rmin: float, rmax: float, zone: int) -> void:
