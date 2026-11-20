@@ -59,5 +59,9 @@ void sky() {
 	float glow = pow(max(facing, 0.0), 220.0) * 0.6 + pow(max(facing, 0.0), 14.0) * 0.12;
 	float visible = 1.0 - storm * 0.85;
 	color += sun_color * (disc * 2.5 + glow) * visible * mix(0.35, 1.0, daylight);
+	// Single-scattering-inspired warm horizon halo reuses the existing glow term.
+	// No additional noise lookups or texture taps on low-end hardware.
+	float horizon_halo = 1.0 - smoothstep(0.04, 0.42, abs(up));
+	color += vec3(0.9, 0.31, 0.10) * (glow * 0.38) * horizon_halo * dusk * visible;
 	COLOR = color;
 }
