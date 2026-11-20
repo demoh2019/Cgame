@@ -14,6 +14,7 @@ global uniform float aa_cliff_normal_quality; // 0 on low-end, 0.7 High, 1 Ultra
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/specular_aa.gdshaderinc"
 #include "res://assets/shaders/puddle_ripples.gdshaderinc"
+#include "res://assets/shaders/water_caustics.gdshaderinc"
 
 // Textured ground. Thirteen CC0 materials (Poly Haven) in two texture arrays:
 //   0 lush grass, 1 dry grass, 2 forest floor, 3 swamp mud, 4 road dirt, 5 cliff rock, 6 mountain rock, 7 sand, 8 snow,
@@ -408,6 +409,13 @@ void fragment() {
 	AO = ground_contact;
 	ALBEDO = color * mix(1.0, ground_contact, 0.12)
 		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), aa_vertex_cloud_shadow);
+	// Sunlight focused by moving shallow waves only on submerged near-field
+	// terrain. High/Ultra Forward+ only; keeps the existing PBR normal/ORM,
+	// SSR, roughness and alpha-free opaque path. No screen or texture read.
+	float caustics = aa_water_caustic_illumination(
+		p, h, n.y, camera_distance, TIME);
+	ALBEDO += vec3(0.10, 0.19, 0.18) * caustics
+		* (1.0 - aa_vertex_cloud_shadow * 0.70);
 	// A physically plausible microfacet roughness for each existing layer.
 	// This reuses the 13 biome weights (no extra textures or VRAM).
 	float dry_roughness = (
