@@ -44,6 +44,7 @@ class WorldPartition3D : public Node3D {
 	Dictionary cell_scenes;
 	NodePath observer_path;
 	Array additional_observer_paths;
+	Vector<Vector2i> pinned_cells;
 	real_t cell_size = 128.0;
 	int load_radius = 1;
 	int unload_radius = 2;
@@ -68,6 +69,7 @@ class WorldPartition3D : public Node3D {
 	void _poll_requests();
 	void _purge_unused_ready_scenes();
 	bool _instantiate_cell(const Vector2i &p_cell, const Ref<PackedScene> &p_scene);
+	void _stream_candidate_cell(const Vector2i &p_cell, int &r_new_requests, int &r_instances);
 	void _refresh_processing();
 	void _notification(int p_what);
 
@@ -104,6 +106,13 @@ public:
 
 	void set_additional_observer_paths(const Array &p_paths);
 	Array get_additional_observer_paths() const;
+
+	void pin_cell(const Vector2i &p_cell);
+	void unpin_cell(const Vector2i &p_cell);
+	void clear_pinned_cells();
+	bool is_cell_pinned(const Vector2i &p_cell) const;
+	Array get_pinned_cells() const;
+	int get_pinned_cell_count() const;
 
 	void set_cell_scenes(const Dictionary &p_cells);
 	Dictionary get_cell_scenes() const;
