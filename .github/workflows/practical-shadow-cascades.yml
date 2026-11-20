@@ -1,0 +1,62 @@
+name: Practical directional shadow cascades
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "scene/3d/practical_shadow_cascade_policy.h"
+      - "scene/3d/light_3d.cpp"
+      - "scene/3d/light_3d.h"
+      - "tests/scene/test_practical_shadow_cascades.cpp"
+      - "game/scripts/client/practical_shadow_cascades.gd"
+      - "game/scripts/client/graphics_lighting.gd"
+      - "game/tests/test_practical_shadow_cascades.gd"
+      - ".github/workflows/practical-shadow-cascades.yml"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "scene/3d/practical_shadow_cascade_policy.h"
+      - "scene/3d/light_3d.cpp"
+      - "scene/3d/light_3d.h"
+      - "tests/scene/test_practical_shadow_cascades.cpp"
+      - "game/scripts/client/practical_shadow_cascades.gd"
+      - "game/scripts/client/graphics_lighting.gd"
+      - "game/tests/test_practical_shadow_cascades.gd"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  practical-shadow-splits:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run portable CSM math regression
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            tests/scene/test_practical_shadow_cascades.cpp \
+            -o /tmp/test-practical-shadow-cascades
+          /tmp/test-practical-shadow-cascades
+      - name: Verify renderer and game quality integration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          native = Path("scene/3d/light_3d.cpp").read_text()
+          header = Path("scene/3d/light_3d.h").read_text()
+          quality = Path("game/scripts/client/graphics_lighting.gd").read_text()
+          budget = Path("game/scripts/client/practical_shadow_cascades.gd").read_text()
+          runner = Path("game/tests/run_all.gd").read_text()
+          assert 'D_METHOD("configure_practical_shadow_cascades"' in native
+          assert 'PracticalShadowCascades::compute' in native
+          assert 'configure_practical_shadow_cascades' in header
+          assert 'PracticalShadowCascades.try_apply(sun, level, rendering_method)' in quality
+          assert 'sun.directional_shadow_split_1 = float(profile["shadow_split_1"])' in quality
+          assert 'shadow_distance <= 8192.0' in budget
+          assert 'test_practical_shadow_cascades.gd' in runner
+          PY
