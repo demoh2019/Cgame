@@ -294,6 +294,7 @@ func _apply_blasts() -> void:
 	var space := get_world_3d().direct_space_state
 	for blast_data in _blasts:
 		var occlusion_rays := 0
+		var seen: Dictionary = {} # Multiple collision shapes must not push one body twice.
 		var center: Vector3 = blast_data[0]
 		var radius: float = blast_data[1]
 		var impulse: float = blast_data[2]
@@ -307,6 +308,10 @@ func _apply_blasts() -> void:
 			var collider: Object = hit["collider"]
 			if not (collider is RigidBody3D or collider is PhysicalBone3D):
 				continue
+			var object_id: int = collider.get_instance_id()
+			if seen.has(object_id):
+				continue
+			seen[object_id] = true
 			var offset: Vector3 = (collider as Node3D).global_position - center
 			var push := falloff(offset.length(), radius)
 			if push <= 0.0:
