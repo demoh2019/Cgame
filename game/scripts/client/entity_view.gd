@@ -22,6 +22,7 @@ const ALERT_TINT := Color(1.0, 0.45, 0.4)
 var _nodes: Dictionary = {} # "kind:id" -> Node3D
 var _targets: Dictionary = {} # "kind:id" -> {"position": Vector3, "yaw": float}
 var _history: Dictionary = {} # "player:id" / "zombie:id" -> [[server time, position, yaw], ...] oldest first
+var _wetness_step: int = 0
 var _snapshot_time := 0.0
 var _render_time := -1.0
 const INTERPOLATION_DELAY := 0.12 # A little more than one snapshot interval (10 per second).
@@ -39,6 +40,21 @@ static func wall_mesh(tier: int) -> Mesh:
 	material.albedo_color = Structures.color_for_tier(tier)
 	box.material = material
 	return box
+
+
+## A single discrete weather switch updates existing actors; no per-zombie
+## per-frame material edits. Newly streamed actors inherit _wetness_step.
+func set_wetness_step(step: int) -> void:
+	var next_step: int = clampi(step, 0, 4)
+	if _wetness_step == next_step:
+		return
+	_wetness_step = next_step
+	for key in _nodes:
+		if not (str(key).begins_with("player:") or str(key).begins_with("zombie:")):
+			continue
+		var model := (_nodes[key] as Node3D).get_node_or_null("Model")
+		if model != null:
+			model.set_wetness_step(_wetness_step)
 
 
 func update_from(client) -> void:
@@ -472,6 +488,7 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		var hue := float(abs(int(entity["id"]) * 2654435761 % 1000)) / 1000.0
 		var character: String = Assets.CHARACTER_NAMES[int(abs(int(entity["id"]))) % Assets.CHARACTER_NAMES.size()]
 		model.setup(Color.WHITE if Assets.has_characters() else Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0, character, false, int(abs(int(entity["id"]))) / Assets.CHARACTER_NAMES.size())
+	model.set_wetness_step(_wetness_step)
 	root.add_child(model)
 	if kind == "player":
 		var bike := TrailBikeVisual.new()
