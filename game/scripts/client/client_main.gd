@@ -21,6 +21,7 @@ const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const RainVfx = preload("res://scripts/client/rain_vfx.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
@@ -108,6 +109,11 @@ func _ready() -> void:
 	for recipe_id in recipe_ids:
 		_recipes.append(str(recipe_id))
 	_make_light_and_camera()
+	# The solo scene shares the same single-draw soft grounding shadows.
+	var ground_shadows := ContactShadowBatch.new()
+	ground_shadows.name = "GroundContactShadows"
+	ground_shadows.setup(_atmosphere)
+	add_child(ground_shadows)
 	GraphicsQuality.apply(get_viewport(), _atmosphere, null)
 	_rain_vfx = RainVfx.create(str(RenderingServer.get_current_rendering_method()))
 	add_child(_rain_vfx)
@@ -249,6 +255,9 @@ func _mesh(box_size: Vector3, color: Color) -> MeshInstance3D:
 func _make_avatar() -> void:
 	_avatar = _mesh(Vector3(0.8, 1.7, 0.8), Color(0.25, 0.69, 0.84))
 	_avatar.name = "Survivor"
+	_avatar.add_to_group(ContactShadowBatch.GROUP)
+	_avatar.set_meta("aa_contact_shadow_ground_offset", 0.85)
+	_avatar.set_meta("aa_contact_shadow_radius", 0.88)
 	add_child(_avatar)
 	_bike_visual = TrailBikeVisual.new()
 	_bike_visual.name = "TrailBike"
@@ -432,6 +441,9 @@ func _sync_zombies() -> void:
 			# _mesh caches materials by color. Give each wounded infected its
 			# own material so an individual change cannot recolor its pack.
 			mesh.material_override = mesh.material_override.duplicate() as StandardMaterial3D
+			mesh.add_to_group(ContactShadowBatch.GROUP)
+			mesh.set_meta("aa_contact_shadow_ground_offset", 0.975 if zombie.elite else 0.8)
+			mesh.set_meta("aa_contact_shadow_radius", 1.1 if zombie.elite else 0.82)
 			add_child(mesh)
 			_zombie_meshes[zombie.id] = mesh
 		var phase: String = InfectedWounds.phase(zombie)
@@ -793,6 +805,8 @@ func _physics_process(delta: float) -> void:
 	_avatar.position = survivor.position + Vector3(0, 0.85, 0)
 	_avatar.rotation.y = atan2(_facing.x, _facing.y)
 	_avatar.scale = Vector3(1.0, 0.72 if survivor.crouching else 1.0, 1.0)
+	_avatar.set_meta("aa_contact_shadow_alive", survivor.survival.alive)
+	_avatar.set_meta("aa_contact_shadow_riding", survivor.mounted)
 	var bike_speed := 0.0
 	if _last_bike_position != Vector3.INF and delta > 0.0:
 		bike_speed = Vector2(survivor.position.x - _last_bike_position.x,
