@@ -9,6 +9,7 @@ const WorldStateStore = preload("res://addons/visual_quality/world_state_store.g
 const AIInterest = preload("res://addons/visual_quality/ai_interest_manager.gd")
 const Telemetry = preload("res://addons/visual_quality/world_telemetry.gd")
 const BudgetGovernor = preload("res://addons/visual_quality/world_budget_governor.gd")
+const StreamingInspector = preload("res://addons/visual_quality/world_streaming_inspector.gd")
 const CharacterController = preload("res://addons/visual_quality/character_controller.gd")
 const ExplorationQuest = preload("res://addons/visual_quality/exploration_quest.gd")
 
@@ -22,6 +23,7 @@ var ai_simulation_enabled: bool = true
 var ai_interest: WorldAIInterestManager3D
 var telemetry: WorldTelemetry3D
 var governor: WorldBudgetGovernor3D
+var streaming_inspector: WorldStreamingInspector3D
 var telemetry_label: Label
 var last_export_result: String = ""
 var player_character: VisualLabCharacter3D
@@ -93,6 +95,10 @@ func _ready() -> void:
 	governor.telemetry = telemetry
 	add_child(governor)
 	governor.set_quality_profile(manager.current_profile)
+	streaming_inspector = StreamingInspector.new()
+	streaming_inspector.name = "WorldStreamingInspector3D"
+	streaming_inspector.streamer = streamer
+	add_child(streaming_inspector)
 	_build_graphics_ui()
 	_update_graphics_ui(manager.current_profile, manager.adaptive_enabled)
 	atmosphere = AtmosphereController.new()
@@ -183,6 +189,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_export_telemetry_csv()
 			KEY_B:
 				_toggle_budget_governor()
+			KEY_K:
+				streaming_inspector.toggle_visible()
+			KEY_L:
+				_export_cell_hotspots()
 
 
 func _build_graphics_ui() -> void:
@@ -433,6 +443,15 @@ func _toggle_budget_governor() -> void:
 	if is_instance_valid(governor):
 		governor.set_automatic_enabled(not governor.automatic_enabled)
 		_update_telemetry_ui(telemetry.get_latest())
+
+
+func _export_cell_hotspots() -> void:
+	if not is_instance_valid(streaming_inspector):
+		return
+	var result: Error = streaming_inspector.export_hotspot_csv()
+	last_export_result = "Cell hotspots: %s" % (streaming_inspector.hotspot_csv_path
+		if result == OK else "export failed (%d)" % result)
+	_update_telemetry_ui(telemetry.get_latest())
 
 
 func _build_world() -> void:
