@@ -7,7 +7,7 @@
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work. Optional predictive streaming can preload one cell ahead of the observer using [member predictive_velocity], [member predictive_lookahead_seconds], and [member predictive_max_distance]. Current cells and pinned hubs always take priority over speculative work. [method set_streaming_source] registers up to 8 named world-space sources (radius 0 or 1 cell) for mission targets, cameras and portals. They run after observer cells and pinned hubs, before the speculative velocity forecast, using the same asynchronous work budgets. Each source has a priority 0 through 3; urgent sources are scheduled before background sources without starving immediate observer work. Equal priorities use stable alphabetical ordering by name. For fast travel, use [method get_streaming_source_progress] and [method is_streaming_source_ready] to wait non-blockingly for registered destination scenes to instantiate; do not assume the source is ready immediately after registration. They are runtime-only, not persistent pins.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries. For persistent camps or quest hubs, use [method pin_cell] and [method unpin_cell] to override distance-based unloading. At most 128 registered cells may be pinned; a disabled streamer still unloads all cells.
-		To activate collision separately from simulation and visuals, set [member physics_radius], [member physics_hysteresis_cells] and [member max_physics_transitions_per_frame]. Pinned cells and important/urgent sources automatically request full-detail physics while ordinary preloads remain dormant. Scene roots opt into [code]set_streaming_physics_active(active)[/code]. Use [method is_streaming_source_physics_ready] to wait for collision activation after a physics tick; a scene can additionally implement [code]is_streaming_physics_ready()[/code] to validate its own colliders. This policy never automatically disables collision in other nodes. To stage gameplay transitions, [method is_streaming_source_activation_ready] requires live source roots, [member min_physics_frames_after_load] elapsed engine physics ticks and any scene-defined [code]is_streaming_activation_ready()[/code] check. This is intentionally stricter than [method is_streaming_source_ready], which requires only live scene roots. It cannot guarantee arbitrary physics/navmesh/GPU readiness unless your scene implements the relevant check. Optionally set [member simulation_radius] to gate AI/script activity independently from graphics. An opt-in scene root implements [code]set_streaming_simulation_active(active)[/code] and can pause its own processing; game systems may query [method is_cell_simulation_active] or subscribe to [signal cell_simulation_changed]. Activation is not automatic tree-wide pausing. Changes to existing loaded cells are limited by [member max_simulation_transitions_per_frame], and [member simulation_hysteresis_cells] reduces oscillations. Optionally set [member detail_radius] to enable near/distant scene-detail callbacks. A cell root script must implement [code]set_streaming_lod(level)[/code], where 0 means near detail and 1 means distant. The engine invokes this method before the new root enters the tree (so its [code]_ready()[/code] can generate only the required content), and again when an existing cell changes tier. Changes are bounded by [member max_detail_transitions_per_frame]. Optionally increase [member detail_hysteresis_cells] to suppress LOD oscillation while the observer moves around grid boundaries. Pinned cells always receive level 0. This does not generate simplified meshes automatically; the scene script must provide both representations.
+		To activate collision separately from simulation and visuals, set [member physics_radius], [member physics_hysteresis_cells] and [member max_physics_transitions_per_frame]. Pinned cells and important/urgent sources automatically request full-detail physics while ordinary preloads remain dormant. Scene roots opt into [code]set_streaming_physics_active(active)[/code]. Use [method is_streaming_source_physics_ready] to wait for collision activation after a physics tick; a scene can additionally implement [code]is_streaming_physics_ready()[/code] to validate its own colliders. This policy never automatically disables collision in other nodes. To stage gameplay transitions, [method is_streaming_source_activation_ready] requires live source roots, [member min_physics_frames_after_load] elapsed engine physics ticks and any scene-defined [code]is_streaming_activation_ready()[/code] check. This is intentionally stricter than [method is_streaming_source_ready], which requires only live scene roots. It cannot guarantee arbitrary physics/navmesh/GPU readiness unless your scene implements the relevant check. To budget costly NPC pathfinding and local obstacle avoidance, register live Node3D agents using [method register_navigation_agent], call [method try_acquire_navigation_update] from their physics processing to decide when to recalculate steering, and call [method unregister_navigation_agent_if_owner] on removal. [member max_navigation_updates_per_physics_frame] bounds native permits per fixed physics frame. This is a task scheduler, not an authored navigation mesh or a replacement for NavigationAgent3D updates. Optionally set [member simulation_radius] to gate AI/script activity independently from graphics. An opt-in scene root implements [code]set_streaming_simulation_active(active)[/code] and can pause its own processing; game systems may query [method is_cell_simulation_active] or subscribe to [signal cell_simulation_changed]. Activation is not automatic tree-wide pausing. Changes to existing loaded cells are limited by [member max_simulation_transitions_per_frame], and [member simulation_hysteresis_cells] reduces oscillations. Optionally set [member detail_radius] to enable near/distant scene-detail callbacks. A cell root script must implement [code]set_streaming_lod(level)[/code], where 0 means near detail and 1 means distant. The engine invokes this method before the new root enters the tree (so its [code]_ready()[/code] can generate only the required content), and again when an existing cell changes tier. Changes are bounded by [member max_detail_transitions_per_frame]. Optionally increase [member detail_hysteresis_cells] to suppress LOD oscillation while the observer moves around grid boundaries. Pinned cells always receive level 0. This does not generate simplified meshes automatically; the scene script must provide both representations.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
 		var partition := WorldPartition3D.new()
@@ -23,6 +23,84 @@
 		Streaming is disabled while editing a scene; the node processes automatically while the game runs. Call [method update_streaming] if an immediate update is required after moving the observer.
 	</description>
 	<methods>
+		<method name="set_max_navigation_updates_per_physics_frame">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Sets the global per-physics-frame budget for expensive navigation/steering recomputations, from 1 to 64 (default 2). This scheduler grants update slots; it does not run pathfinding, bake a navigation mesh, or automatically slow down Node physics processing.
+			</description>
+		</method>
+		<method name="get_max_navigation_updates_per_physics_frame" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the configured maximum updates allowed across all active registered navigation agents in a single engine physics frame.
+			</description>
+		</method>
+		<method name="register_navigation_agent">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="agent" type="Node3D" />
+			<param index="2" name="priority" type="int" default="1" />
+			<description>
+				Registers or replaces one named agent as a weak ObjectID reference. Name length 1 to 64; priorities 0 (background) to 3 (urgent). At most 128 entries; duplicate names are upserted but registering the same Node3D under two distinct names is rejected. Returns false for invalid data or exceeded capacity. Register after adding the agent to a SceneTree, and call unregister when it is removed.
+			</description>
+		</method>
+		<method name="unregister_navigation_agent">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Removes an agent by name. If this ID may be reused by a new NPC before the old one exits, prefer [method unregister_navigation_agent_if_owner] to prevent a stale object's cleanup from removing the replacement.
+			</description>
+		</method>
+		<method name="unregister_navigation_agent_if_owner">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="agent" type="Node3D" />
+			<description>
+				Unregisters only if the supplied Node3D currently owns this name. Returns false for missing, null or replaced nodes; avoids stale NPC cleanup unregistering a newly spawned actor.
+			</description>
+		</method>
+		<method name="has_navigation_agent" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns whether the name is present in the runtime agent registry; stale weak references are pruned during the next scheduling pass.
+			</description>
+		</method>
+		<method name="get_navigation_agent_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of registered agent entries, including dormant agents. Automatic stale-reference cleanup runs during scheduling; callers should unregister on scene exit.
+			</description>
+		</method>
+		<method name="set_navigation_agent_priority">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="priority" type="int" />
+			<description>
+				Sets registered agent priority 0 to 3; higher priorities receive scarce update slots first. A change takes effect from the next physics-frame selection, not retroactively in an already frozen frame.
+			</description>
+		</method>
+		<method name="get_navigation_agent_priority" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns priority 0 to 3 or -1 for an unknown agent name.
+			</description>
+		</method>
+		<method name="try_acquire_navigation_update">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Grants one steering/path recalculation slot to a registered agent selected for the current physics frame, at most once per agent and without exceeding [member max_navigation_updates_per_physics_frame]. Only live, tree-bound physics-processing agents in loaded, simulation-active, physics-active cells are eligible. Selection is priority-first then least-recently-selected, then alphabetical for deterministic ties; decisions are frozen per physics frame, regardless of agent callback order. Call from physics processing only; reuse cached steering when false. No automatic navmesh computation is performed. Equal-priority agents share slots fairly; a permanently higher priority can monopolize a saturated budget.
+			</description>
+		</method>
+		<method name="get_navigation_updates_used_this_frame" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many selected navigation updates have actually been consumed in the current engine physics frame; returns zero when the cached schedule belongs to an older frame. Useful for profiling HUDs, but not an absolute CPU or pathfinding cost metric.
+			</description>
+		</method>
 		<method name="set_physics_radius">
 			<return type="void" />
 			<param index="0" name="radius" type="int" />
@@ -531,6 +609,9 @@
 		</method>
 	</methods>
 	<members>
+		<member name="max_navigation_updates_per_physics_frame" type="int" setter="set_max_navigation_updates_per_physics_frame" getter="get_max_navigation_updates_per_physics_frame" default="2">
+			Maximum number of native navigation work permits issued per physics frame across up to 128 registered Node3D agents, 1 to 64. Uses a deterministic priority-first and least-recently-selected schedule, constrained to live agents in loaded, simulation-active, physics-active cells. This limits caller-submitted expensive steering/path refreshes, not the agent's actual movement/physics updates.
+		</member>
 		<member name="physics_radius" type="int" setter="set_physics_radius" getter="get_physics_radius" default="-1">
 			Independent collision policy radius in cell rings, -1 (all loaded active, default) or 0 to 32. Pinned hubs and priorities 2 or 3 streaming sources force active collision and full visual LOD. Scene roots implement [code]set_streaming_physics_active(active)[/code] to actually filter colliders. Background sources do not force physics.
 		</member>
