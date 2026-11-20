@@ -6068,6 +6068,11 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"y": world.height_at(warning_at.x, warning_at.y),
 				"z": warning_at.y, "radius": RaidEncounter.SLAM_RADIUS,
 				"until": float(raid_pending_slam["at"])}
+			# The countdown area is public; live interrupt progress is party-only.
+			var interrupt: Dictionary = RaidInterrupt.public_progress(
+				raid_pending_slam, time, parties.group_of(peer_id))
+			if not interrupt.is_empty():
+				snapshot["raid_interrupt"] = interrupt
 	if not raid_pending_cone.is_empty():
 		var cone_at := Vector2(float(raid_pending_cone["x"]), float(raid_pending_cone["z"]))
 		if here.distance_to(cone_at) <= Defs.INTEREST_RADIUS:
