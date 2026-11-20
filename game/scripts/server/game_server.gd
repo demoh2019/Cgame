@@ -89,6 +89,7 @@ const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const AcidNeutralizer = preload("res://scripts/shared/acid_neutralizer.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
+const GuardianIntercept = preload("res://scripts/shared/guardian_intercept.gd")
 const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
 const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
@@ -201,6 +202,9 @@ class Player:
 	var feast_timer: float = 0.0 # Session-only prepared group meal cooldown.
 	var guardian_timer: float = 0.0 # Session-only PvE frontline cooldown.
 	var guardian_brace: float = 0.0 # Short PvE-only defensive brace after a valid taunt.
+	var guard_link_target: int = -1 # Server-only chosen ally for one zombie melee hit.
+	var guard_link_seconds: float = 0.0 # Valid for at most 9 seconds.
+	var guard_link_cooldown: float = 0.0 # Session-only cast cooldown.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
 	var rain_cooldown: float = 0.0 # Persisted storm water collection cooldown.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
@@ -728,6 +732,9 @@ func remove_player(peer_id: int) -> void:
 		if survivor.defense_target == peer_id:
 			survivor.defense_target = -1
 			survivor.defense_until = 0.0
+		if survivor.guard_link_target == peer_id:
+			survivor.guard_link_target = -1
+			survivor.guard_link_seconds = 0.0
 	market_buy_requests.erase(peer_id)
 	outpost_fortify_requests.erase(peer_id)
 	outpost_provision_requests.erase(peer_id)
@@ -763,6 +770,9 @@ func _spawn_player(player: Player) -> void:
 	player.spore_exposed = false
 	player.defense_target = -1
 	player.defense_until = 0.0
+	player.guard_link_target = -1
+	player.guard_link_seconds = 0.0
+	player.guard_link_cooldown = 0.0
 	var kept_gear: bool = player.keep_inventory_on_respawn
 	player.keep_inventory_on_respawn = false
 	if not kept_gear:
@@ -3872,6 +3882,76 @@ func cmd_guardian_taunt(peer_id: int) -> Dictionary:
 		"brace_seconds": player.guardian_brace, "energy": player.combat_energy}
 
 
+## Protect exactly one verified party ally from their next infected MELEE hit.
+## Client supplies an ally ID, never the enemy, damage amount or hit outcome.
+func cmd_guardian_intercept(peer_id: int, target_id: int) -> Dictionary:
+	var guardian: Player = players.get(peer_id)
+	if guardian == null or not _alive(guardian):
+		return {"ok": false, "reason": "dead"}
+	if target_id == peer_id:
+		return {"ok": false, "reason": "self"}
+	var ally: Player = players.get(target_id)
+	if ally == null or not _alive(ally):
+		return {"ok": false, "reason": "invalid_target"}
+	if guardian.guard_link_seconds > 0.0:
+		return {"ok": false, "reason": "already_guarding"}
+	if guardian.guard_link_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown",
+			"remaining": guardian.guard_link_cooldown}
+	if parties.group_of(peer_id) == 0 or parties.group_of(peer_id) != parties.group_of(target_id):
+		return {"ok": false, "reason": "not_in_party"}
+	if not GuardianTaunt.melee_equipped(guardian.inventory):
+		return {"ok": false, "reason": "need_melee"}
+	if not GuardianIntercept.can_guard(guardian, ally, parties, world):
+		return {"ok": false, "reason": "too_far_or_unsafe"}
+	if guardian.combat_energy < GuardianIntercept.ENERGY_COST:
+		return {"ok": false, "reason": "no_energy"}
+	guardian.combat_energy -= GuardianIntercept.ENERGY_COST
+	guardian.guard_link_target = target_id
+	guardian.guard_link_seconds = GuardianIntercept.DURATION
+	guardian.guard_link_cooldown = GuardianIntercept.COOLDOWN
+	guardian.action = {}
+	return {"ok": true, "target": target_id, "seconds": guardian.guard_link_seconds,
+		"cooldown": guardian.guard_link_cooldown}
+
+
+## Called only after an authentic zombie brain emits a MELEE hit.
+## One selected guardian takes reduced damage, fully preventing this hit's
+## physical wounds for the warded ally. AoE, acid and PvP use other paths.
+func _try_guardian_intercept(ally: Player, infected, raw_damage: float) -> bool:
+	if ally == null or infected == null or not infected.is_alive() or \
+			not is_finite(raw_damage) or raw_damage <= 0.0:
+		return false
+	var chosen: Player = null
+	var best_distance: float = INF
+	for guardian in players.values():
+		if not GuardianIntercept.can_intercept(guardian, ally, parties, world):
+			continue
+		var d: float = guardian.position.distance_squared_to(ally.position)
+		if d < best_distance - 0.001 or (absf(d - best_distance) <= 0.001 and
+				(chosen == null or guardian.id < chosen.id)):
+			chosen = guardian
+			best_distance = d
+	if chosen == null:
+		return false
+	# Consume before resolving the damage/death callback, so recursive hits
+	# and repeated network commands cannot spend the same shield twice.
+	chosen.guard_link_target = -1
+	chosen.guard_link_seconds = 0.0
+	var armor_id: String = chosen.inventory.armor
+	var equipped: bool = armor_id != "" and chosen.inventory.count(armor_id) > 0
+	var damage: float = Combat.apply_armor(GuardianIntercept.damage(raw_damage),
+		armor_id if equipped else "")
+	damage = _infected_damage_for(chosen, damage)
+	var taken: float = _hurt_player(chosen, damage)
+	chosen.dirty_character = true
+	events.append({"type": "guardian_intercept", "peer": ally.id,
+		"by": chosen.id, "zombie": infected.id, "damage": taken})
+	if not _alive(chosen):
+		_on_player_death(chosen, -infected.id)
+	return true
+
+
 ## Resolve active combat on the server; the client supplies only aim direction.
 func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
@@ -4822,6 +4902,12 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.dodge_immunity = 0.0
 	ParryRiposte.clear(victim)
 	victim.guardian_brace = 0.0
+	victim.guard_link_target = -1
+	victim.guard_link_seconds = 0.0
+	for teammate in players.values():
+		if teammate.guard_link_target == victim.id:
+			teammate.guard_link_target = -1
+			teammate.guard_link_seconds = 0.0
 	victim.spore_filter_seconds = 0.0
 	victim.soft_sole_seconds = 0.0
 	victim.chain_wrap_seconds = 0.0
@@ -5084,6 +5170,13 @@ func _tick_players(delta: float) -> void:
 		player.feast_timer = maxf(0.0, player.feast_timer - maxf(0.0, delta))
 		player.guardian_timer = maxf(0.0, player.guardian_timer - maxf(0.0, delta))
 		player.guardian_brace = maxf(0.0, player.guardian_brace - maxf(0.0, delta))
+		player.guard_link_cooldown = maxf(0.0, player.guard_link_cooldown - maxf(0.0, delta))
+		player.guard_link_seconds = maxf(0.0, player.guard_link_seconds - maxf(0.0, delta))
+		if player.guard_link_seconds > 0.0 and not GuardianIntercept.can_guard(
+				player, players.get(player.guard_link_target), parties, world):
+			player.guard_link_seconds = 0.0
+		if player.guard_link_seconds <= 0.0:
+			player.guard_link_target = -1
 		# A disconnected teammate or removed weapon cannot prolong protection.
 		if player.guardian_brace > 0.0 and (parties.members_of(player.id).size() < 2 or
 				not GuardianTaunt.melee_equipped(player.inventory)):
@@ -5837,6 +5930,8 @@ func _tick_zombies(delta: float) -> void:
 				if victim.dodge_immunity > 0.0:
 					events.append({"type": "evaded", "peer": victim.id, "zombie": zombie.id})
 					continue
+				if _try_guardian_intercept(victim, zombie, float(result["damage"])):
+					continue
 				var parried: bool = MeleeParry.can_block(victim, zombie)
 				if parried:
 					victim.parry_window = 0.0
@@ -6396,6 +6491,13 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	if raid_boss_id > 0:
 		raid_aggro_state = RaidAggroView.for_viewer(
 			zombies.get(raid_boss_id), player, players, parties, world)
+	var guardian_guarded_seconds: float = 0.0
+	var guardian_guarded_by: int = -1
+	for supporter in players.values():
+		if GuardianIntercept.can_intercept(supporter, player, parties, world):
+			if supporter.guard_link_seconds > guardian_guarded_seconds:
+				guardian_guarded_seconds = supporter.guard_link_seconds
+				guardian_guarded_by = supporter.id
 	var snapshot := {
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
 		"outposts": siege_contracts.public_state(territory.public_state(time, players, parties), time),
@@ -6478,6 +6580,11 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"plated_hits": player.plated_hits if FieldArmorPlate.valid_state(
 				player.plated_armor, player.plated_hits, player.inventory) else 0,
 			"guardian_cooldown": player.guardian_timer,
+			"guardian_intercept_cooldown": player.guard_link_cooldown,
+			"guardian_intercept_seconds": player.guard_link_seconds,
+			"guardian_intercept_target": player.guard_link_target if player.guard_link_seconds > 0.0 else -1,
+			"guardian_guarded_seconds": guardian_guarded_seconds,
+			"guardian_guarded_by": guardian_guarded_by,
 			"warden_ward": WardenAura.active_for(player, players, parties, world),
 			"guardian_brace": player.guardian_brace,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
