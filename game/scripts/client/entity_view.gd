@@ -677,6 +677,11 @@ func _sample(key: String) -> Array:
 		if _render_time >= float(older[0]):
 			var span: float = maxf(float(newer[0]) - float(older[0]), 0.001)
 			var k: float = clampf((_render_time - float(older[0])) / span, 0.0, 1.0)
+			# Performance retains the old two-point smoothing with no
+			# additional velocity history reads or cubic GDScript work.
+			if GraphicsQuality.level() == 0:
+				return [(older[1] as Vector3).lerp(newer[1], k),
+					lerp_angle(float(older[2]), float(newer[2]), k)]
 			# Bounded Hermite reconstructs smooth visual speed from the
 			# two neighboring server snapshots. Teleports and missing
 			# timestamps keep the original safe linear behavior.
