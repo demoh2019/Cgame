@@ -72,6 +72,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 	# One global uniform adjusts every streamed terrain chunk; no resource reimport or per-chunk updates.
 	RenderingServer.global_shader_parameter_set(&"aa_terrain_detail_radius", float(p["terrain_detail_radius"]))
 	var world_profile: Dictionary = VisualProfiles.settings(_level)
+	# One uniform controls wet foliage highlights in every streamed nature batch.
+	# Performance skips specular detail without rebuilding any meshes.
+	RenderingServer.global_shader_parameter_set(&"aa_vegetation_wet_gloss",
+		float(world_profile["wet_leaf_gloss"]))
 	# Shadow maps are budgeted independently from normal object visibility.
 	ShadowBudget.configure(world_profile)
 	# The active backend can differ from ProjectSettings after a driver fallback.
