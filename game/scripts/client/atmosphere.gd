@@ -1,6 +1,7 @@
 extends Node3D
 
 const CloudShadowLut = preload("res://scripts/client/cloud_shadow_lut.gd")
+const WaterCaustics = preload("res://scripts/client/water_caustics.gd")
 const CinematicColorGrade = preload("res://scripts/client/cinematic_color_grade.gd")
 const VegetationWind = preload("res://scripts/client/vegetation_wind.gd")
 const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
@@ -30,6 +31,7 @@ var _sky_seconds := 0.0
 var _vegetation_wind := Vector3.ZERO
 var _cloud_offset := Vector2.ZERO # Wrapped 1024 m high-cloud motion, shared by all surface materials.
 var _wind_publish_seconds := 0.1
+var _caustic_publish_seconds := 1.0 / WaterCaustics.UPDATES_PER_SECOND
 # Conservative 4 Hz native light update; profile switches force a refresh.
 var _shadow_filter_level := 1
 var _shadow_filter_seconds := 0.25
@@ -55,6 +57,7 @@ func _ready() -> void:
 	# Initialize before the first streamed chunk compiles its materials.
 	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_map", CloudShadowLut.texture())
 	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_strength", 0.0)
+	RenderingServer.global_shader_parameter_set(&"aa_water_caustics_sun", 0.0)
 	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_offset", Vector2.ZERO)
 	environment = Environment.new()
 	environment.background_mode = Environment.BG_SKY
@@ -137,6 +140,14 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		CloudShadowLut.shadow_strength(daylight, storm, _cloud_shadows_allowed))
 	# One GPU global updates every terrain material, without iterating streamed chunks.
 	RenderingServer.global_shader_parameter_set(&"aa_weather_wetness", storm)
+	# Sunlight focused through waves is a 5Hz scalar shared by every ground
+	# material. Night, severe overcast and invalid weather suppress it.
+	_caustic_publish_seconds += maxf(0.0, delta)
+	if _caustic_publish_seconds >= 1.0 / WaterCaustics.UPDATES_PER_SECOND:
+		_caustic_publish_seconds = fmod(_caustic_publish_seconds,
+			1.0 / WaterCaustics.UPDATES_PER_SECOND)
+		RenderingServer.global_shader_parameter_set(&"aa_water_caustics_sun",
+			WaterCaustics.light_factor(daylight, sun_height, storm))
 	_shadow_filter_seconds += maxf(delta, 0.0)
 	if _shadow_filter_seconds >= SHADOW_FILTER_INTERVAL:
 		_shadow_filter_seconds = fmod(_shadow_filter_seconds, SHADOW_FILTER_INTERVAL)
