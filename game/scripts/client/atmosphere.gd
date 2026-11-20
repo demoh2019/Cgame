@@ -7,6 +7,7 @@ const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
 const SunShadowQuality = preload("res://scripts/client/sun_shadow_quality.gd")
 const BiomeAtmosphere = preload("res://scripts/client/biome_atmosphere.gd")
 const SunShadowAtmosphere = preload("res://scripts/client/sun_shadow_atmosphere.gd")
+const LightningFlash = preload("res://scripts/client/graphics_lightning_flash.gd")
 const GraphicsEyeAdaptation = preload("res://scripts/client/graphics_eye_adaptation.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
 ## Everything degrades gracefully on the compatibility renderer (SSAO and the like are simply ignored).
@@ -35,6 +36,9 @@ const SHADOW_FILTER_INTERVAL := 0.25
 var _visual_biome_settings: Dictionary = {}
 var light_level := 1.0 # The daylight of the last update, 0 at night and 1 at noon.
 var storm := 0.0 # 0..1, eased toward the target so the weather fades in and out.
+var _lightning_elapsed := LightningFlash.DURATION
+var _lightning_weight := 0.0
+var _lightning_quality := 1
 
 const NIGHT_TOP := Color(0.01, 0.015, 0.05)
 const NIGHT_HORIZON := Color(0.04, 0.05, 0.11)
@@ -196,6 +200,23 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		_fog_profile, horizon, _visual_biome_settings)
 	# Run the ACES-grade after atmospheric weather/fog, without replacing fog state.
 	CinematicColorGrade.apply(environment, daylight, sun_height, storm)
+	# Render only: two short flashes from the real lightning_struck event.
+	# We only modify the existing sun, ambient and fog after their normal update.
+	var amount: float = LightningFlash.sample(_lightning_elapsed,
+		_lightning_weight * LightningFlash.strength(_lightning_quality))
+	LightningFlash.apply(environment, sun, amount)
+	_lightning_elapsed = minf(LightningFlash.DURATION,
+		_lightning_elapsed + maxf(0.0, delta))
+
+
+## Called only for an authenticated lightning_struck event from the server
+## (or the same authoritative local simulation), never every rain frame.
+func trigger_lightning(distance_m: float) -> void:
+	var weight: float = LightningFlash.attenuation(distance_m)
+	if weight <= 0.0:
+		return
+	_lightning_weight = weight
+	_lightning_elapsed = 0.0
 
 
 ## Render-only switches; weather and the shared day/night clock are unaffected.
@@ -203,6 +224,7 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	_shadows_allowed = bool(settings["shadows"])
 	_cloud_shadows_allowed = bool(settings.get("cloud_shadows", true))
 	_shadow_filter_level = clampi(int(settings.get("quality_level", 1)), 0, 3)
+	_lightning_quality = _shadow_filter_level
 	_shadow_filter_seconds = SHADOW_FILTER_INTERVAL
 	GraphicsEyeAdaptation.apply(world_environment, _shadow_filter_level,
 		str(settings.get("rendering_method", "gl_compatibility")))
