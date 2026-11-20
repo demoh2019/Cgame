@@ -82,6 +82,21 @@ func run(t) -> void:
 	t.eq(RuinAmbush.available([], near_limit), 1,
 		"only one more infected can spawn at the global cap")
 
+	t.current = "ruin ambush: strict confirmed-kill ledger"
+	var ledger := {"ids": [11, 12], "defeated": [], "cleared": false}
+	t.check(not RuinAmbush.record_kill(ledger, 99),
+		"a kill outside the original mob roster cannot count")
+	t.check(not RuinAmbush.record_kill(ledger, 11),
+		"a partial pack kill is not a victory")
+	t.check(not RuinAmbush.record_kill(ledger, 11),
+		"duplicate death callback never increments progress")
+	t.check(RuinAmbush.record_kill(ledger, 12),
+		"final real enemy completes the original pack")
+	t.check(not RuinAmbush.record_kill(ledger, 12),
+		"victory is announced only once")
+	t.check(not RuinAmbush.record_kill({"ids": [], "defeated": []}, 11),
+		"an empty or missing encounter cannot win")
+
 	t.current = "ruin ambush: collision, terrain and player separation"
 	var flat := FlatDangerWorld.new()
 	var site := {"x": 250.0, "z": 200.0, "zone": 2}
@@ -167,6 +182,20 @@ func run(t) -> void:
 		"server-wide cooldown blocks chained sealed-cache awakenings")
 	t.check(not server.character_data(looter).has("ruin_ambushes"),
 		"temporary encounters are never serialized into player data")
+	# Confirm actual server zombie deaths, not timer expiry or fake IDs.
+	for id in ids:
+		var enemy = server.zombies.get(id)
+		if enemy == null:
+			continue
+		enemy.take_damage(100000.0, looter.id)
+		server._on_zombie_death(enemy, looter)
+	var victories := 0
+	for event in server.events:
+		if str(event.get("type", "")) == "ruin_ambush_cleared":
+			victories += 1
+			t.eq(int(event.get("count", -1)), ids.size(),
+				"victory is based on every spawned enemy")
+	t.eq(victories, 1, "all confirmed infected deaths announce one victory")
 	server.time += RuinAmbush.LIFETIME_SECONDS + 1.0
 	server._tick_ruin_ambush()
 	t.eq(server.ruin_ambushes.size(), 0,
