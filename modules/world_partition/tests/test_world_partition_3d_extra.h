@@ -517,8 +517,18 @@ TEST_CASE("[SceneTree][WorldPartition3D] Failed resources leave no user load tok
 			}
 			OS::get_singleton()->delay_usec(1000);
 		}
+		// Re-enter the update loop until the failed-cell counter reflects
+		// the consumed ResourceLoader failure token, then explicitly reset.
+		for (int i = 0; i < 100 && fixture.world->get_failed_cell_count() == 0; i++) {
+			fixture.world->update_streaming();
+			OS::get_singleton()->delay_usec(1000);
+		}
 		ERR_PRINT_ON;
 		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK(fixture.world->get_failed_cell_count() == 1);
+		fixture.world->retry_failed_cells();
+		CHECK(fixture.world->get_failed_cell_count() == 0);
+		CHECK(fixture.world->get_configured_cell_count() == 1);
 	}
 	CHECK(ResourceLoader::load_threaded_get_status(missing_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
 }

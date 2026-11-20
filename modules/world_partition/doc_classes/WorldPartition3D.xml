@@ -6,7 +6,13 @@
 	<description>
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
+		Streaming cells containing a [NavigationRegion3D] expose a third readiness stage using [method is_cell_navigation_ready] and [signal cell_navigation_ready], after [NavigationServer3D] map and region synchronization. NPCs should not interpret scene loading or the physical activation barrier alone as a usable navigation surface.
+		In addition to scene-tree [signal cell_loaded], [WorldPartition3D] exposes a two-physics-tick activation barrier via [signal cell_physics_ready] and [method is_cell_physics_ready]. Unlike waiting an arbitrary wall-clock time, this barrier stops during physics pause. It is a scheduling signal, not proof that the cell contains valid collision or navigation data.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
+		Runtime sources may also follow moving [Node3D] actors through [method set_streaming_source_node], automatically re-centering when those actors cross the grid.
+		Multiple runtime streaming sources can load independent remote regions with per-source radii and priorities, and report completion using [signal streaming_source_ready] and [method is_streaming_source_ready]. They share the request and instantiation budgets with the primary player observer.
+		Manual cell residency pins can independently keep a small number of registered areas available for fast travel, cinematics or an off-screen quest. Use [method pin_cell], [method is_cell_loaded] and [method unpin_cell] to manage the lifecycle, without increasing the main player streaming radius.
+		Optional directional prefetch can warm additional cells in front of a moving observer. The forward corridor is separate from normal loading, and it uses the same asynchronous resource loading and per-frame instantiation budgets. Use [member prefetch_direction] (grid X/Z components) and [member prefetch_distance].
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
 		var partition := WorldPartition3D.new()
@@ -32,6 +38,107 @@
 			<return type="void" />
 			<description>
 				Removes all registered cells and unloads instantiated cells.
+			</description>
+		</method>
+		<method name="get_pinned_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many registered cells have been explicitly pinned for streaming, up to 16. Pinning is separate from [member load_radius] and [member prefetch_distance].
+			</description>
+		</method>
+		<method name="is_cell_pinned" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns whether [param cell] is explicitly pinned. A pin requests asynchronous loading but does not itself guarantee the scene is ready; use [method is_cell_loaded] before entering it.
+			</description>
+		</method>
+		<method name="pin_cell">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Pins a registered cell outside the observer's streaming radius so it can be loaded and retained independently of player movement. Returns [code]false[/code] if the cell is not registered or the limit of 16 distinct pinned cells has been reached. Repeating an existing pin succeeds without increasing its count. Nearby observer cells are prioritized over pins; pins are processed before speculative directional prefetch and use the same request/instantiation budgets. Call [method update_streaming] to start loading immediately; pinning never blocks until ready. Pins remain configured if [member streaming_enabled] is temporarily disabled, but their nodes unload until streaming resumes.
+			</description>
+		</method>
+		<method name="unpin_cell">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Releases a cell residency pin. On the next streaming update, the cell may unload if it is outside both the normal unload radius and the predictive prefetch corridor. Unpinning does not unregister the scene.
+			</description>
+		</method>
+		<method name="clear_pinned_cells">
+			<return type="void" />
+			<description>
+				Releases all manual residency pins without removing scene registrations. Replacing all cell registrations with [method set_cell_scenes] or clearing registrations also removes the old pins.
+			</description>
+		</method>
+		<method name="set_streaming_source_node">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="node_path" type="NodePath" />
+			<param index="2" name="load_radius" type="int" />
+			<param index="3" name="unload_radius" type="int" />
+			<param index="4" name="priority" type="int" />
+			<description>
+				Creates or updates a named source that follows the global position of a [Node3D] at [param node_path], resolved relative to this WorldPartition3D node. The engine converts its global position into partition-local grid coordinates each streaming update, so moving actors, drones, NPCs and secondary cameras can request regions without per-frame script registration calls. A source whose path is not yet resolvable remains configured but inactive, with readiness false and progress zero; its previously streamed cells unload unless still requested by another source, the player or a pin. The path may be registered before the target enters the scene tree. Replacing it using [method set_streaming_source] returns the source to a fixed grid center. Name/radius/priority validation and the eight-source limit are shared with [method set_streaming_source]. Returns false for invalid source parameters or an empty/property [NodePath]. Use [method get_streaming_source] to inspect the most recently resolved center and [code]active[/code] state.
+			</description>
+		</method>
+		<method name="set_streaming_source">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="center" type="Vector2i" />
+			<param index="2" name="load_radius" type="int" />
+			<param index="3" name="unload_radius" type="int" />
+			<param index="4" name="priority" type="int" />
+			<description>
+				Creates or updates a named runtime streaming source centered on [param center] in grid-cell coordinates. Valid load radius is 0–4, unload radius must be at least load radius and at most 8, and priority must be 0–100 (larger is serviced first). Names must contain 1–64 characters. A maximum of 8 sources may exist at once; updating one does not consume a new slot. A source loads registered [PackedScene] cells in its square load radius and retains already loaded cells through its unload radius. Streaming occurs asynchronously within the same request and instantiation budgets used for the player. Processing precedence: player, manual pins, named sources in descending priority order, then directional prefetch. Call [method update_streaming] for an immediate update. Returns [code]false[/code] for an invalid source.
+			</description>
+		</method>
+		<method name="remove_streaming_source">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Removes one named streaming source. Its cells may unload on the next update unless requested by the player, another source or an explicit pin.
+			</description>
+		</method>
+		<method name="clear_streaming_sources">
+			<return type="void" />
+			<description>
+				Removes all named streaming sources without removing registered cell scenes or manually pinned cells.
+			</description>
+		</method>
+		<method name="get_streaming_source" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns a Dictionary with [code]center[/code], [code]load_radius[/code], [code]unload_radius[/code], [code]priority[/code], [code]node_path[/code], [code]active[/code], [code]ready[/code], and [code]progress[/code], or an empty Dictionary for an unknown name. The returned Dictionary is a snapshot.
+			</description>
+		</method>
+		<method name="get_streaming_source_progress" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the fraction of scene-instantiated cells inside a named source's square load radius, from 0.0 to 1.0. Missing, unregistered, or failed cells count as incomplete. Unknown names or disabled streaming return 0.0. This is [b]scene-tree readiness[/b] progress, not threaded resource byte progress, physics synchronization or shader compilation.
+			</description>
+		</method>
+		<method name="get_streaming_source_names" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the names of all registered named streaming sources in alphabetical order.
+			</description>
+		</method>
+		<method name="get_streaming_source_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of currently configured named streaming sources (0–8).
+			</description>
+		</method>
+		<method name="is_streaming_source_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns true only when every registered cell covered by the source's load radius has an instantiated scene root, and streaming is enabled. Missing or failed cells make it false. This does not guarantee later physics-server synchronization or resource uploads.
 			</description>
 		</method>
 		<method name="get_cell_scene" qualifiers="const">
@@ -61,10 +168,159 @@
 				Returns the number of tracked instantiated cells.
 			</description>
 		</method>
+		<method name="get_pending_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many registered cells are waiting for their scene resource to finish loading or to be instantiated. This is a runtime streaming diagnostic, not the total number of configured cells.
+			</description>
+		</method>
+		<method name="get_inflight_request_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of distinct asynchronous resource paths whose background loads have not completed. Several cells using the same scene path share one request.
+			</description>
+		</method>
+		<method name="get_failed_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cells that failed to load or instantiate. Failed cells are not retried until their configuration changes.
+			</description>
+		</method>
+		<method name="has_observer_cell" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] after the configured [member observer_path] has resolved to a [Node3D] and a streaming update has computed its cell.
+			</description>
+		</method>
+		<method name="get_observer_cell" qualifiers="const">
+			<return type="Vector2i" />
+			<description>
+				Returns the last observed cell in this node's local grid coordinates. Only meaningful when [method has_observer_cell] is [code]true[/code]. This result updates when the observer enters a new cell or its grid configuration changes.
+			</description>
+		</method>
+		<method name="get_cell_node" qualifiers="const">
+			<return type="Node3D" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the instantiated [Node3D] scene root for [param cell], or [code]null[/code] if it is not loaded. Unlike scanning child nodes, this lookup uses the streamer's direct cell mapping. Use it from [signal cell_loaded] callbacks to configure only the newly instantiated cell.
+			</description>
+		</method>
+		<method name="get_last_streaming_update_ms" qualifiers="const">
+			<return type="float" />
+			<description>
+				CPU wall-clock time in milliseconds spent in the most recent [method update_streaming] call, including completed background-request polling and synchronous scene instantiation. This does not include later physics-server synchronization or rendering GPU work and is not a persistent per-frame average.
+			</description>
+		</method>
+		<method name="get_last_instantiation_attempt_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Number of cell-scene instantiation attempts performed in the most recent [method update_streaming] call. Includes unsuccessful attempts and never exceeds [member max_instances_per_frame]. This is reset to zero if an update runs without a valid streaming observer.
+			</description>
+		</method>
 		<method name="get_loaded_cells" qualifiers="const">
 			<return type="Array" />
 			<description>
 				Returns the cell coordinates of currently instantiated scenes.
+			</description>
+		</method>
+		<method name="are_cells_loaded" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" default="0" />
+			<description>
+				Returns [code]true[/code] only when all cells in the square area around [param center] are currently instantiated. A radius of [code]0[/code] checks one cell, while a radius of [code]1[/code] checks nine. Missing, unregistered, failed, or still-loading cells make the result [code]false[/code]. The maximum radius is [code]32[/code]. Regions that would overflow integer cell coordinates return [code]false[/code].
+				[b]Note:[/b] This reports scene-tree readiness only. Physics server synchronization, navigation baking, shader compilation, and resource uploads may still require additional frames or application-level readiness checks.
+			</description>
+		</method>
+		<method name="is_cell_navigation_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] only when [param cell] has completed its physical activation barrier and contains a live, enabled [NavigationRegion3D] whose populated [NavigationMesh] has been synchronized by [NavigationServer3D]. The check validates the navigation server region's map and iteration IDs; it is not inferred from scene loading alone. Cells without a navigation region are never navigation-ready. Current implementation tracks the first eligible navigation region in each cell.
+			</description>
+		</method>
+		<method name="are_cells_navigation_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" default="0" />
+			<description>
+				Returns true only if all cells in the square of radius 0–32 pass [method is_cell_navigation_ready]. Useful before enabling streamed NPCs or allowing path requests over distant mission regions. This does not verify that a valid route between arbitrary points exists.
+			</description>
+		</method>
+		<method name="get_navigation_ready_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Counts loaded cells whose primary region has completed NavigationServer synchronization and physical readiness. Navigation data is revoked when cells unload, disabled regions become unready, or navigation maps detach.
+			</description>
+		</method>
+		<method name="get_navigation_route_cells" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="from_global" type="Vector3" />
+			<param index="1" name="to_global" type="Vector3" />
+			<param index="2" name="max_cells" type="int" default="64" />
+			<description>
+				Returns an ordered [Array] of [Vector2i] grid cells touched by a straight segment between two global 3D positions, in this partition's [b]local X/Z[/b] coordinate system. Uses conservative 2D supercover grid traversal: if a segment crosses a grid corner, both adjacent side cells are included so no potentially required streamed tile is skipped. The cell list does not check whether scenes are loaded. Returns an empty Array for non-finite/out-of-range positions, an unavailable scene tree, invalid [param max_cells] (1–256), or a corridor that exceeds the cell cap. It never silently truncates routes; use this to inspect the corridor before requesting more streaming sources or pins.
+			</description>
+		</method>
+		<method name="is_navigation_route_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="from_global" type="Vector3" />
+			<param index="1" name="to_global" type="Vector3" />
+			<param index="2" name="max_cells" type="int" default="64" />
+			<description>
+				Returns true when every grid cell conservatively intersected by the direct segment between [param from_global] and [param to_global] passes [method is_cell_navigation_ready]. This is a conservative streaming guard; it does not prove a traversable NavigationServer path exists, and diagonal paths touching cell corners may require both adjacent cells. Returns false for missing, disabled or unloaded regions and corridors over [param max_cells].
+			</description>
+		</method>
+		<method name="get_streamed_navigation_path" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<param index="0" name="from_global" type="Vector3" />
+			<param index="1" name="to_global" type="Vector3" />
+			<param index="2" name="optimize" type="bool" default="true" />
+			<param index="3" name="navigation_layers" type="int" default="1" />
+			<param index="4" name="max_cells" type="int" default="64" />
+			<description>
+				Requests a path from [NavigationServer3D] only after the straight-line streaming corridor is navigation-ready. It checks the server map has synchronized, rejects partial/disconnected paths whose first or final point is far from the requested endpoints, and verifies [b]every segment of the returned route[/b] against the same navigation-ready cell requirement. Returns an empty [PackedVector3Array] if any region is unavailable, a route exceeds the per-segment [param max_cells] cap, or the NavigationServer cannot reach the destination. This method does not load or pin cells, perform obstacle carving, or reserve a corridor for future frames; consumers must recheck readiness if regions stream out.
+			</description>
+		</method>
+		<method name="get_navigation_pending_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Number of navigation regions detected in streamed scenes that are still waiting for the NavigationServer synchronization and physics prerequisite. A disabled or invalid region may remain pending; this counter reports state, not an exact remaining-work estimate.
+			</description>
+		</method>
+		<method name="is_streaming_source_navigation_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Checks whether every grid cell in a named streaming source's load radius is navigation-ready. Returns false for unknown, disabled or inactive sources. This is stricter than [method is_streaming_source_ready], which only checks scene instantiation.
+			</description>
+		</method>
+		<method name="get_streaming_source_navigation_progress" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Fraction (0.0–1.0) of navigation-ready cells in a named streaming source. Absent, invalid and pending NavigationRegion3D assets count as incomplete. Intended for streaming mission/NPC readiness HUDs; not a byte-transfer percentage or proof that a path between two positions exists.
+			</description>
+		</method>
+		<method name="is_cell_physics_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] only after a currently instantiated, non-deleting cell has passed two actual [code]_physics_process[/code] notifications since its scene was added. This is stricter than [method is_cell_loaded] but does not check the contents of the scene or guarantee that the PhysicsServer has a valid collision for a particular point. Gameplay can additionally raycast to a known [CollisionObject3D] before teleporting.
+			</description>
+		</method>
+		<method name="are_cells_physics_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" default="0" />
+			<description>
+				Returns [code]true[/code] if all cells in a square radius 0–32 around [param center] satisfy [method is_cell_physics_ready]. Unregistered, missing, unloaded or pending-physics cells make this false. Coordinate overflow is rejected.
+			</description>
+		</method>
+		<method name="get_physics_ready_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Number of loaded cells that passed the native two-physics-tick activation barrier. This can lag behind [method get_loaded_cell_count] by several engine physics ticks and resets on unload or disabled streaming.
 			</description>
 		</method>
 		<method name="is_cell_loaded" qualifiers="const">
@@ -86,6 +342,12 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Unregisters [param cell] and unloads its existing instance.
+			</description>
+		</method>
+		<method name="retry_failed_cells">
+			<return type="void" />
+			<description>
+				Clears failed-cell suppression so that registered cells still relevant to the current observer can be retried during a subsequent [method update_streaming] call. Useful after a transient asset, filesystem or delivery error has been fixed. This method does not replace registrations, cancel in-progress resource requests, or retry continuously. If the resource remains unavailable, the cell can fail again.
 			</description>
 		</method>
 		<method name="set_cell_scene">
@@ -119,8 +381,17 @@
 		<member name="max_instances_per_frame" type="int" setter="set_max_instances_per_frame" getter="get_max_instances_per_frame" default="2">
 			Maximum number of loaded cell scenes instantiated per frame.
 		</member>
+		<member name="max_instantiation_time_ms" type="float" setter="set_max_instantiation_time_ms" getter="get_max_instantiation_time_ms" default="0.0">
+			Optional soft wall-time budget, in milliseconds, for cell scene instantiation within one streaming update. A value of [code]0.0[/code] disables the time budget. The first ready cell can always instantiate to avoid starvation. Subsequent cells may be postponed once the limit is exceeded; at most [member max_instances_per_frame] cells instantiate per update. A single expensive scene may exceed the budget, so this setting reduces consecutive stalls but cannot interrupt an individual scene's [code]_ready()[/code] work. Valid range: [code]0.0[/code] to [code]100.0[/code].
+		</member>
 		<member name="max_new_requests_per_frame" type="int" setter="set_max_new_requests_per_frame" getter="get_max_new_requests_per_frame" default="2">
 			Maximum number of new resource-load requests per frame.
+		</member>
+		<member name="prefetch_direction" type="Vector2i" setter="set_prefetch_direction" getter="get_prefetch_direction" default="Vector2i(0, 0)">
+			Optional horizontal prefetch direction in grid cells. X and Y components must each be -1, 0 or 1 (the Y component corresponds to the world's Z axis). A zero vector disables predictive prefetch. Use [member prefetch_distance] to control how many cells ahead are requested.
+		</member>
+		<member name="prefetch_distance" type="int" setter="set_prefetch_distance" getter="get_prefetch_distance" default="0">
+			Number of cells ahead of the observer to additionally prefetch, along [member prefetch_direction]. Valid range: 0 to 4; 0 disables directional prefetch. The observer's normal [member load_radius] area is always prioritized, with prefetch cells processed only afterward. Prefetch cells remain alive while the configured direction includes them even if they are outside the regular [member unload_radius].
 		</member>
 		<member name="observer_path" type="NodePath" setter="set_observer_path" getter="get_observer_path" default="NodePath(&quot;&quot;)">
 			Path relative to this node pointing to a [Node3D] observer, such as a player or camera.
@@ -133,10 +404,52 @@
 		</member>
 	</members>
 	<signals>
+		<signal name="streaming_source_ready">
+			<param index="0" name="name" type="String" />
+			<description>
+				Emitted when a named source transitions to fully instantiated scene-tree readiness across its load radius. Signals are emitted after the streamer's main-thread loading update.
+			</description>
+		</signal>
+		<signal name="streaming_source_unready">
+			<param index="0" name="name" type="String" />
+			<description>
+				Emitted when a previously ready named source becomes incomplete or is removed or disabled. Callers should not treat this as a physics-server readiness signal.
+			</description>
+		</signal>
+		<signal name="cell_navigation_ready">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted after a streaming cell's detected [NavigationRegion3D] is synchronized by [NavigationServer3D] and the scene passes its physical activation barrier. This signal is separate from [signal cell_loaded] and [signal cell_physics_ready].
+			</description>
+		</signal>
+		<signal name="cell_navigation_unready">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted when a previously navigation-ready cell unloads, its region is disabled, or it is detached from a navigation map. Actors may use this signal to disable navigation-dependent behavior before the cell's scene is deleted.
+			</description>
+		</signal>
+		<signal name="cell_physics_ready">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted once for each loaded instance after its two-tick physics activation barrier. On unload and subsequent reload the cell must cross the barrier again. A server collider/path-query can still require a separate verification by gameplay code.
+			</description>
+		</signal>
+		<signal name="cell_physics_unready">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted once when a previously physics-ready cell is unloaded or disabled. This signal fires before [signal cell_unloaded], allowing gameplay to stop or deactivate dependent actors.
+			</description>
+		</signal>
 		<signal name="cell_loaded">
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Emitted after a [PackedScene] is instantiated as a child of this node.
+			</description>
+		</signal>
+		<signal name="observer_cell_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted when the observer enters a different grid cell (including the first resolved cell after setting [member observer_path] or changing [member cell_size]). Use this to trigger cell-based game logic without checking the observer's position every frame.
 			</description>
 		</signal>
 		<signal name="cell_unloaded">

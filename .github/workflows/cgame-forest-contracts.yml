@@ -1,0 +1,30 @@
+name: Cgame forest terrain contracts
+
+on:
+  pull_request:
+    paths:
+      - "misc/cgame_forest_showcase/**"
+      - "modules/world_partition/**"
+      - ".github/workflows/cgame-forest-contracts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terrain-math:
+    name: Terrain seam and LOD topology contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            misc/cgame_forest_showcase
+            modules/world_partition
+          sparse-checkout-cone-mode: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate geometry continuity and streaming references
+        run: python3 -m unittest discover -s misc/cgame_forest_showcase/tests -p 'test_terrain_*.py' -v

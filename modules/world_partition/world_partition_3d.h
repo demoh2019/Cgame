@@ -32,6 +32,7 @@
 
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
+#include "core/templates/vector.h"
 #include "scene/3d/node_3d.h"
 #include "scene/resources/packed_scene.h"
 
@@ -45,16 +46,48 @@ class WorldPartition3D : public Node3D {
 	real_t cell_size = 128.0;
 	int load_radius = 1;
 	int unload_radius = 2;
+	Vector2i prefetch_direction;
+	int prefetch_distance = 0;
 	int max_new_requests_per_frame = 2;
 	int max_instances_per_frame = 2;
+	real_t max_instantiation_time_ms = 0.0;
 	int max_concurrent_requests = 8;
 	bool streaming_enabled = true;
+	Vector2i observer_cell;
+	bool observer_cell_valid = false;
+	real_t last_streaming_update_ms = 0.0;
+	int last_instantiation_attempt_count = 0;
 
 	HashMap<Vector2i, ObjectID> active_cells;
+	// An instantiated scene is not immediately eligible for collision-gated
+	// gameplay. Wait for two actual physics processing notifications; no
+	// wall-clock polling or duplicate ready signals after frame spikes.
+	HashMap<Vector2i, uint64_t> physics_pending_cells;
+	HashSet<Vector2i> physics_ready_cells;
+	// Navigation readiness is tracked per streamed NavigationRegion3D RID,
+	// not merely by passing physics frames. No region => never nav-ready.
+	HashMap<Vector2i, ObjectID> navigation_pending_regions;
+	HashMap<Vector2i, ObjectID> navigation_ready_regions;
+	uint64_t physics_tick_counter = 0;
 	HashMap<Vector2i, String> pending_cells;
 	HashSet<String> requested_paths;
 	HashMap<String, Ref<PackedScene>> ready_scenes;
 	HashSet<Vector2i> failed_cells;
+	HashSet<Vector2i> pinned_cells;
+	static constexpr int MAX_PINNED_CELLS = 16;
+
+	struct StreamingSource {
+		String name;
+		Vector2i center;
+		NodePath node_path; // Empty = fixed grid center, otherwise follow Node3D.
+		bool active = true; // Dynamic sources suspend while their node is missing.
+		int load_radius = 0;
+		int unload_radius = 1;
+		int priority = 0;
+		bool ready = false;
+	};
+	Vector<StreamingSource> streaming_sources;
+	static constexpr int MAX_STREAMING_SOURCES = 8;
 
 	static bool _within_radius(const Vector2i &p_cell, const Vector2i &p_center, int p_radius);
 	String _get_scene_path(const Vector2i &p_cell) const;
@@ -64,6 +97,12 @@ class WorldPartition3D : public Node3D {
 	void _purge_unused_ready_scenes();
 	bool _instantiate_cell(const Vector2i &p_cell, const Ref<PackedScene> &p_scene);
 	void _refresh_processing();
+	void _update_physics_readiness();
+	void _update_navigation_readiness();
+	void _clear_navigation_cell(const Vector2i &p_cell);
+	Node *_find_navigation_region(Node *p_root) const;
+	void _refresh_source_readiness();
+	void _update_streaming_source_positions();
 	void _notification(int p_what);
 
 protected:
@@ -79,11 +118,20 @@ public:
 	void set_unload_radius(int p_radius);
 	int get_unload_radius() const;
 
+	void set_prefetch_direction(const Vector2i &p_direction);
+	Vector2i get_prefetch_direction() const;
+
+	void set_prefetch_distance(int p_distance);
+	int get_prefetch_distance() const;
+
 	void set_max_new_requests_per_frame(int p_count);
 	int get_max_new_requests_per_frame() const;
 
 	void set_max_instances_per_frame(int p_count);
 	int get_max_instances_per_frame() const;
+
+	void set_max_instantiation_time_ms(real_t p_milliseconds);
+	real_t get_max_instantiation_time_ms() const;
 
 	void set_max_concurrent_requests(int p_count);
 	int get_max_concurrent_requests() const;
@@ -93,6 +141,8 @@ public:
 
 	void set_observer_path(const NodePath &p_path);
 	NodePath get_observer_path() const;
+	bool has_observer_cell() const;
+	Vector2i get_observer_cell() const;
 
 	void set_cell_scenes(const Dictionary &p_cells);
 	Dictionary get_cell_scenes() const;
@@ -102,14 +152,50 @@ public:
 	void clear_cell_scenes();
 	int get_configured_cell_count() const;
 
+	bool pin_cell(const Vector2i &p_cell);
+	void unpin_cell(const Vector2i &p_cell);
+	void clear_pinned_cells();
+	bool is_cell_pinned(const Vector2i &p_cell) const;
+	int get_pinned_cell_count() const;
+
+	bool set_streaming_source(const String &p_name, const Vector2i &p_center, int p_load_radius, int p_unload_radius, int p_priority);
+	bool set_streaming_source_node(const String &p_name, const NodePath &p_node_path, int p_load_radius, int p_unload_radius, int p_priority);
+	void remove_streaming_source(const String &p_name);
+	void clear_streaming_sources();
+	Dictionary get_streaming_source(const String &p_name) const;
+	Array get_streaming_source_names() const;
+	int get_streaming_source_count() const;
+	bool is_streaming_source_ready(const String &p_name) const;
+	real_t get_streaming_source_progress(const String &p_name) const;
+
 	Vector2i local_position_to_cell(const Vector3 &p_local_position) const;
 	Vector3 cell_to_local_position(const Vector2i &p_cell) const;
 	Array get_cells_in_radius(const Vector2i &p_center, int p_radius) const;
 
 	void update_streaming();
 	bool is_cell_loaded(const Vector2i &p_cell) const;
+	bool is_cell_physics_ready(const Vector2i &p_cell) const;
+	bool are_cells_physics_ready(const Vector2i &p_center, int p_radius = 0) const;
+	int get_physics_ready_cell_count() const;
+	bool is_cell_navigation_ready(const Vector2i &p_cell) const;
+	bool are_cells_navigation_ready(const Vector2i &p_center, int p_radius = 0) const;
+	int get_navigation_ready_cell_count() const;
+	int get_navigation_pending_cell_count() const;
+	Array get_navigation_route_cells(const Vector3 &p_from_global, const Vector3 &p_to_global, int p_max_cells = 64) const;
+	bool is_navigation_route_ready(const Vector3 &p_from_global, const Vector3 &p_to_global, int p_max_cells = 64) const;
+	PackedVector3Array get_streamed_navigation_path(const Vector3 &p_from_global, const Vector3 &p_to_global, bool p_optimize = true, int p_navigation_layers = 1, int p_max_cells = 64) const;
+	bool is_streaming_source_navigation_ready(const String &p_name) const;
+	real_t get_streaming_source_navigation_progress(const String &p_name) const;
+	Node3D *get_cell_node(const Vector2i &p_cell) const;
+	bool are_cells_loaded(const Vector2i &p_center, int p_radius = 0) const;
 	int get_loaded_cell_count() const;
 	Array get_loaded_cells() const;
+	int get_pending_cell_count() const;
+	int get_inflight_request_count() const;
+	int get_failed_cell_count() const;
+	void retry_failed_cells();
+	real_t get_last_streaming_update_ms() const;
+	int get_last_instantiation_attempt_count() const;
 
 	~WorldPartition3D();
 };
