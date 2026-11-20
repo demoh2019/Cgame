@@ -137,9 +137,6 @@
 		<member name="cast_shadows" type="bool" setter="set_cast_shadows" getter="get_cast_shadows" default="true">
 			If [code]true[/code], the terrain casts shadows.
 		</member>
-		<member name="contribute_to_gi" type="bool" setter="set_contribute_to_gi" getter="is_contributing_to_gi" default="false">
-			If [code]true[/code], each native GPU terrain chunk is marked as static GI geometry for SDFGI and baked lighting. This flag is applied when streaming new LOD chunks and can be changed for existing chunks without rebuilding their meshes, physics or draw-call batches. For dynamically deforming terrain, disable this property to avoid stale SDFGI lighting. This flag has no additional GI processing cost if SDFGI/lightmaps are disabled.
-		</member>
 		<member name="centered" type="bool" setter="set_centered" getter="is_centered" default="true">
 			If [code]true[/code], the middle of the terrain is at the node's origin; otherwise its corner with the lowest x and z is.
 		</member>
@@ -158,7 +155,10 @@
 		<member name="collision_mask" type="int" setter="set_collision_mask" getter="get_collision_mask" default="1">
 			The physics layers the terrain scans for collisions.
 		</member>
-		<member name="focus" type="NodePath" setter="set_focus" getter="get_focus" default="NodePath(&quot;&quot;)">
+			<member name="contribute_to_gi" type="bool" setter="set_contribute_to_gi" getter="is_contributing_to_gi" default="false">
+			If [code]true[/code], each native GPU terrain chunk is marked as static GI geometry for SDFGI and baked lighting. This flag is applied when streaming new LOD chunks and can be changed for existing chunks without rebuilding their meshes, physics or draw-call batches. For dynamically deforming terrain, disable this property to avoid stale SDFGI lighting. This flag has no additional GI processing cost if SDFGI/lightmaps are disabled.
+		</member>
+	<member name="focus" type="NodePath" setter="set_focus" getter="get_focus" default="NodePath(&quot;&quot;)">
 			Node used as the viewer for detail and collision. If empty, the current [Camera3D] of the viewport is used.
 		</member>
 		<member name="height_offset" type="float" setter="set_height_offset" getter="get_height_offset" default="0.0">
