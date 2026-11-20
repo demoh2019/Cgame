@@ -6,7 +6,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 
 - Register a sparse mapping from `Vector2i` cell coordinates to local `PackedScene` resource paths (saved with your `.tscn` scene).
 - Choose a `Node3D` observer, cell size, and square loading/unloading radii; negative coordinates are handled with floor division.
-- Add up to 16 extra observer paths for co-op, split-screen, cutscene cameras, portals and predictive prefetch (attach a Node3D in front of a moving character). All source locations share streaming budgets.
+- Add up to 16 extra observer paths for co-op, split-screen, cutscene cameras, portals and predictive prefetch (attach a Node3D in front of a moving character). All source locations share streaming budgets. Streaming scans nearest grid rings across sources, so another observer's central cell is considered before the primary observer's outer rings.
 - Load scene resources asynchronously using Godot's `ResourceLoader.load_threaded_request` backend and poll without blocking while still in progress.
 - Share a resource-load request between cells using the same scene path.
 - Instantiate `Node3D` cell roots on the main thread, preserving their authored transform and applying the cell origin.
@@ -46,7 +46,7 @@ Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to 
 
 ## Tests
 
-The module includes 63 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (42), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 64 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (43), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"

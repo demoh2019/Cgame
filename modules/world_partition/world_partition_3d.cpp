@@ -443,10 +443,10 @@ void WorldPartition3D::update_streaming() {
 
 	int new_requests = max_new_requests_per_frame;
 	int instances = max_instances_per_frame;
-	// All sources share request/instantiation budgets. Primary source wins ties.
-	for (const Vector2i &center : centers) {
-		// Visit nearer cells first and produce a deterministic order.
-		for (int radius = 0; radius <= load_radius; radius++) {
+	// Visit the closest ring of every source before requesting farther cells.
+	// Primary still wins ties at a given radius; budgets remain global.
+	for (int radius = 0; radius <= load_radius; radius++) {
+		for (const Vector2i &center : centers) {
 			for (int dz = -radius; dz <= radius; dz++) {
 				for (int dx = -radius; dx <= radius; dx++) {
 					if (MAX(ABS(dx), ABS(dz)) != radius) {
