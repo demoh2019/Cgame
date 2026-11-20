@@ -54,6 +54,14 @@ func run(t) -> void:
 		"Forward+ storm adds denser light scattering")
 	t.check(float(sunrise["sun_scatter"]) > float(clear["sun_scatter"]),
 		"low sun enhances dawn haze")
+	t.check(float(sunrise["anisotropy"]) > float(clear["anisotropy"]),
+		"low sun increases forward scattering and cinematic light shafts")
+	t.check(float(storm["anisotropy"]) < float(clear["anisotropy"]),
+		"storm droplets soften shafts instead of boosting forward scattering")
+	for sky_frame in [clear, sunrise, storm]:
+		t.check(float(sky_frame["anisotropy"]) >= 0.24
+			and float(sky_frame["anisotropy"]) <= 0.55,
+			"physical fog phase asymmetry stays within a bounded GPU-safe range")
 	t.eq(CinematicFog.weather(1.0, 0.5, 1.0, balanced)["volume_density"], 0.0,
 		"Balanced never burns GPU time on volumetric fog")
 	t.eq(CinematicFog.weather(1.0, 0.5, 1.0, CinematicFog.profile(3, "gl_compatibility"))["volume_density"], 0.0,
@@ -86,6 +94,9 @@ func run(t) -> void:
 	t.eq(sun.light_volumetric_fog_energy, 0.8,
 		"sun participates in scattering without increasing light count")
 	CinematicFog.apply_weather(env, 0.4, 0.08, 1.0, high, Color(0.4, 0.5, 0.6))
+	t.near(env.volumetric_fog_anisotropy,
+		float(CinematicFog.weather(0.4, 0.08, 1.0, high)["anisotropy"]),
+		0.011, "live sun shafts follow the smoothed physical scattering phase")
 	t.near(env.volumetric_fog_density,
 		float(CinematicFog.weather(0.4, 0.08, 1.0, high)["volume_density"]),
 		0.000001, "live storm density matches pure weather rules")
