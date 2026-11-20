@@ -1055,7 +1055,18 @@ func _unhandled_input(event: InputEvent) -> void:
 			else:
 				_result("Quick cook", sim.cmd_craft(LOCAL_PLAYER_ID, cook_recipe))
 	elif event.is_action_pressed("survive_food"):
-		if Input.is_key_pressed(KEY_CTRL):
+		if Input.is_key_pressed(KEY_ALT) and Input.is_key_pressed(KEY_SHIFT):
+			var carried_ration := ""
+			for tier in range(Defs.MAX_TIER, 0, -1):
+				var candidate: String = "smoked_fish" if tier == 1 else "smoked_fish_%d" % tier
+				if survivor.inventory.count(candidate) > 0:
+					carried_ration = candidate
+					break
+			if carried_ration == "":
+				_feedback = "No smoked fish carried. Cook one with Alt+0 at a fire."
+			else:
+				_result("Eat smoked travel ration", sim.cmd_use(LOCAL_PLAYER_ID, carried_ration))
+		elif Input.is_key_pressed(KEY_CTRL):
 			_result("Smart food", sim.cmd_smart_provision(LOCAL_PLAYER_ID, "food"))
 		elif Input.is_key_pressed(KEY_ALT):
 			var raw_item := ""
