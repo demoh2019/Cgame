@@ -425,6 +425,22 @@ real_t Camera3D::get_pixels_per_meter_at_position(const Vector3 &p_world_pos) co
 	return focal_y_pixels / depth;
 }
 
+// Inverse projection footprint for a fixed pixel-sized object. Reuses the
+// existing camera projection computation so aspect-lock and frustum offsets
+// match the renderer; a zero result is safer than a huge billboard for a
+// behind-camera position, zero viewport or non-finite request.
+real_t Camera3D::get_world_size_for_pixel_diameter_at_position(const Vector3 &p_world_pos, real_t p_pixel_diameter) const {
+	if (!Math::is_finite(p_pixel_diameter) || p_pixel_diameter <= 0.0) {
+		return 0.0;
+	}
+	const real_t pixels_per_meter = get_pixels_per_meter_at_position(p_world_pos);
+	if (!Math::is_finite(pixels_per_meter) || pixels_per_meter <= CMP_EPSILON) {
+		return 0.0;
+	}
+	const real_t world_size = p_pixel_diameter / pixels_per_meter;
+	return Math::is_finite(world_size) ? world_size : 0.0;
+}
+
 void Camera3D::set_perspective(real_t p_fovy_degrees, real_t p_z_near, real_t p_z_far) {
 	if (!force_change && fov == p_fovy_degrees && p_z_near == _near && p_z_far == _far && mode == PROJECTION_PERSPECTIVE) {
 		return;
@@ -821,6 +837,7 @@ void Camera3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_camera_transform"), &Camera3D::get_camera_transform);
 	ClassDB::bind_method(D_METHOD("get_camera_projection"), &Camera3D::get_camera_projection);
 	ClassDB::bind_method(D_METHOD("get_pixels_per_meter_at_position", "world_point"), &Camera3D::get_pixels_per_meter_at_position);
+	ClassDB::bind_method(D_METHOD("get_world_size_for_pixel_diameter_at_position", "world_point", "pixel_diameter"), &Camera3D::get_world_size_for_pixel_diameter_at_position);
 	ClassDB::bind_method(D_METHOD("get_fov"), &Camera3D::get_fov);
 	ClassDB::bind_method(D_METHOD("get_frustum_offset"), &Camera3D::get_frustum_offset);
 	ClassDB::bind_method(D_METHOD("get_size"), &Camera3D::get_size);
