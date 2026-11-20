@@ -57,6 +57,10 @@ func run(t) -> void:
 		"ripples fade inside each tile and do not snap at cell seams")
 	t.check(rings.contains("float phase = fract(h.x * h.y);"),
 		"ring phases differ deterministically across neighboring cells")
+	t.check(rings.contains("vec2 jitter = (vec2(phase,"),
+		"drop centers are slightly jittered, avoiding visible periodic grids")
+	t.check(rings.contains("* 0.20;"),
+		"jitter is smaller than the safe cell edge margin")
 	t.check(not rings.contains("texture(") and not rings.contains("textureLod("),
 		"no extra albedo, normal, or screen-space texture fetch is required")
 	t.check(not rings.contains("sin(") and not rings.contains("cos("),
