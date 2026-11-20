@@ -4,6 +4,7 @@ extends SceneTree
 
 const HLOD = preload("res://scripts/distant_terrain_hlod.gd")
 const Height = preload("res://scripts/terrain_height.gd")
+const HLODCache = preload("res://scripts/distant_hlod_cache.gd")
 const MAX_FRAMES: int = 450
 
 
@@ -34,6 +35,7 @@ func _wait_loaded(stream: WorldPartition3D, cell: Vector2i) -> bool:
 
 
 func _run() -> void:
+    HLODCache.clear()
     var observer := Node3D.new()
     observer.name = "HLODTestObserver"
     root.add_child(observer)
@@ -195,5 +197,31 @@ func _run() -> void:
         _fail("performance profile retained an out-of-radius proxy")
         return
 
-    print("Distant terrain and forest HLOD smoke PASSED: compact stitched terrain, deterministic canopy transforms, full-detail handoff and quality radius")
+    # Cross the HLOD visibility horizon and return. Both expensive
+    # resources must be reused without another terrain/foliage regeneration.
+    var old_terrain_mesh: Mesh = far_proxy.mesh
+    var old_canopy_batch: MultiMesh = impostors.multimesh
+    var hits_before: int = int(HLODCache.get_stats()["hits"])
+    observer.position.x = -6.0 * 32.0
+    for i in range(5):
+        await process_frame
+    if manager.call("get_proxy_for_cell", far) != null:
+        _fail("HLOD node was not evicted when its cell left the horizon")
+        return
+    observer.position.x = 0.0
+    var revisited: MeshInstance3D = await _wait_proxy(manager, far)
+    if revisited == null:
+        _fail("HLOD proxy was not reconstructed after returning")
+        return
+    var new_canopies := revisited.get_node_or_null("DistantForestCanopies") as MultiMeshInstance3D
+    if new_canopies == null or revisited.mesh != old_terrain_mesh \
+            or new_canopies.multimesh != old_canopy_batch:
+        _fail("HLOD cache did not reuse both terrain mesh and canopy MultiMesh")
+        return
+    var cache_stats: Dictionary = HLODCache.get_stats()
+    if int(cache_stats["hits"]) <= hits_before or int(cache_stats["entries"]) > 96:
+        _fail("HLOD cache failed to record a hit or respect its memory limit")
+        return
+
+    print("Distant terrain/forest HLOD smoke PASSED: stitched terrain, canopy transforms, full-detail handoff, profile radius and resource reuse")
     quit(0)
