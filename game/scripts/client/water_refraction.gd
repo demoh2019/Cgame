@@ -38,6 +38,10 @@ static func apply(material: ShaderMaterial, profile: Dictionary,
 		# close to the camera. Low renderer variants do not declare it.
 		material.set_shader_parameter("wind_foam_strength",
 			clampf(float(profile.get("wind_foam_strength", 0.0)), 0.0, 0.5))
+		# Reuse the one cached premium shader; no new variant or GPU target.
+		# The low-end shader never declares (or evaluates) this parameter.
+		material.set_shader_parameter("sun_glitter_strength",
+			clampf(float(profile.get("sun_glitter_strength", 0.0)), 0.0, 1.0))
 		material.set_shader_parameter("refraction_strength",
 			clampf(float(profile.get("water_refraction_strength", 0.0)), 0.0, 1.0))
 		material.set_shader_parameter("refraction_fade_start",
