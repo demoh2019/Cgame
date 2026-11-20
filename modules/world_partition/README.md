@@ -12,6 +12,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
+- **Opt-in cell detail LOD:** scene roots implementing `set_streaming_lod(level)` receive 0 inside the full-detail radius (or when pinned) and 1 in distant loaded cells. The engine sets the tier *before* the root's `_ready()` and updates existing cells under a per-frame transition budget. The game supplies simpler distant graphics and disables distant physics itself.
 - **Bounded motion prefetch:** optional world-space velocity input projects the observer up to 5 seconds / 128 world units ahead and attempts to load one future cell, after immediate-radius cells and pinned hubs. It uses the same async resource cache and per-frame budgets and releases no-longer-relevant speculative scenes.
 - **Persistent hub pins:** `pin_cell(cell)`/`unpin_cell(cell)` keep registered camps and quest hubs resident outside the observer's unload radius. At most 128 cells may be pinned to bound intentional scene retention; pinned cells still use normal async load and instantiation budgets.
 - **Observer grid events:** `has_observer_cell()`, `get_observer_cell()` and `observer_cell_changed(cell)` help gameplay react to crossing streaming cell boundaries without polling player coordinates. The first successful observer lookup emits this signal, as does a subsequent cell-size or observer-path change.
@@ -36,6 +37,8 @@ func _ready() -> void:
     world.pin_cell(Vector2i(0, 0)) # Home base persists while exploring
     world.predictive_lookahead_seconds = 2.0
     world.predictive_max_distance = 32.0
+    world.detail_radius = 1 # Keep high detail within one cell from the observer
+    world.max_detail_transitions_per_frame = 2
 
 func _physics_process(_delta: float) -> void:
     # Supply world-space movement velocity, in world units per second.
@@ -43,6 +46,29 @@ func _physics_process(_delta: float) -> void:
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Scene detail callback (optional)
+
+A cell scene can opt in to budgeted near/far streaming detail:
+
+```gdscript
+extends Node3D
+var streaming_lod: int = 0
+
+func set_streaming_lod(level: int) -> void:
+    if streaming_lod == level:
+        return
+    streaming_lod = level
+    if is_node_ready():
+        rebuild_visuals_and_collisions() # A project-defined helper.
+
+func _ready() -> void:
+    rebuild_visuals_and_collisions()
+```
+
+The native streamer calls this method **before** attaching new roots, so their `_ready()` can create only the desired detail. Existing cells receive level 0 when near or pinned, and level 1 when distant. Set `detail_radius = -1` to disable and restore full detail under the configured per-frame transition budget. Diagnostics: `get_cell_detail_level(cell)` (0 near, 1 distant, -1 absent/unsupported), `get_distant_cell_count()` and `cell_detail_changed(cell, detail_level)`.
+
+This is a *two-tier cell-content callback*, not automatic mesh decimation, full HLOD baking or Nanite. The game must maintain collision/navmesh behavior during level switches. See `misc/cgame_forest_showcase/tests/smoke_lod.gd` for a near/far scene regression.
 
 ## Inspecting streaming load
 
@@ -62,7 +88,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 61 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 63 Doctest cases across `test_world_partition_3d.h` (27) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -73,6 +99,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Distance LOD is opt-in.** Cell roots without `set_streaming_lod()` continue unchanged. The transition budget applies only to *existing loaded* cells, not their initial scene instantiation; scene authors must profile CPU spikes and physically remove/recreate colliders safely.
 - **Prediction is opportunistic, not a guaranteed load.** At most one additional grid cell is preloaded. Moving abruptly, changing direction or teleporting can invalidate a forecast; normal observer-radius loading handles these cases. No prefetch cones, priority queues or automatic navmesh/collision warmup are provided.
 - **No automatic editor bake/partition yet.** Split source scenes and save each cell manually. Automated authoring and terrain/HLOD export are future integrations.
 - **No terrain sculpting, painting or foliage authoring in this module.** They can output regular cell `PackedScene` resources.

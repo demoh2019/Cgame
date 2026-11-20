@@ -49,6 +49,8 @@ class WorldPartition3D : public Node3D {
 	int max_instances_per_frame = 2;
 	int max_concurrent_requests = 8;
 	bool streaming_enabled = true;
+	int detail_radius = -1; // -1 disables dynamic detail levels.
+	int max_detail_transitions_per_frame = 2;
 	// Optional, bounded future-cell streaming source; velocity is in world units/second.
 	Vector3 predictive_velocity;
 	real_t predictive_lookahead_seconds = 0.0;
@@ -59,6 +61,7 @@ class WorldPartition3D : public Node3D {
 	bool observer_cell_valid = false;
 
 	HashMap<Vector2i, ObjectID> active_cells;
+	HashMap<Vector2i, int> active_detail_levels; // Only scene roots that opt into set_streaming_lod().
 	HashMap<Vector2i, String> pending_cells;
 	HashSet<String> requested_paths;
 	HashMap<String, Ref<PackedScene>> ready_scenes;
@@ -73,6 +76,8 @@ class WorldPartition3D : public Node3D {
 	void _clear_active_cells();
 	void _poll_requests();
 	void _request_cell(const Vector2i &p_cell, int &r_new_requests, int &r_instances);
+	int _cell_detail_level(const Vector2i &p_cell, const Vector2i &p_center) const;
+	void _refresh_cell_detail(const Vector2i &p_center);
 	void _purge_unused_ready_scenes();
 	bool _instantiate_cell(const Vector2i &p_cell, const Ref<PackedScene> &p_scene);
 	void _refresh_processing();
@@ -102,6 +107,13 @@ public:
 
 	void set_streaming_enabled(bool p_enabled);
 	bool is_streaming_enabled() const;
+
+	void set_detail_radius(int p_radius);
+	int get_detail_radius() const;
+	void set_max_detail_transitions_per_frame(int p_budget);
+	int get_max_detail_transitions_per_frame() const;
+	int get_cell_detail_level(const Vector2i &p_cell) const;
+	int get_distant_cell_count() const;
 
 	void set_observer_path(const NodePath &p_path);
 	NodePath get_observer_path() const;

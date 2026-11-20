@@ -25,6 +25,7 @@ var hud_elapsed: float = 0.0
 var collected: int = 0
 var high_quality: bool = true
 var predictive_streaming: bool = true
+var distance_lod_enabled: bool = true
 var mouse_sensitivity: float = 0.0018
 
 
@@ -189,8 +190,11 @@ func _create_streaming_world() -> void:
     world_partition = WorldPartition3D.new()
     world_partition.name = "WorldPartition_32m"
     world_partition.cell_size = CHUNK_EDGE
-    world_partition.load_radius = 1
-    world_partition.unload_radius = 2
+    # Two rings of streamed cells: full-detail near, low-cost silhouettes far.
+    world_partition.load_radius = 2
+    world_partition.unload_radius = 3
+    world_partition.detail_radius = 1
+    world_partition.max_detail_transitions_per_frame = 2
     world_partition.max_new_requests_per_frame = 2
     world_partition.max_instances_per_frame = 1
     world_partition.max_concurrent_requests = 4
@@ -200,6 +204,7 @@ func _create_streaming_world() -> void:
     add_child(world_partition)
     world_partition.observer_path = world_partition.get_path_to(player)
     world_partition.cell_loaded.connect(_on_stream_cell_loaded)
+    world_partition.cell_detail_changed.connect(_on_cell_detail_changed)
     world_partition.observer_cell_changed.connect(_on_observer_cell_changed)
 
     for cz in range(-2, 2):
@@ -210,6 +215,10 @@ func _create_streaming_world() -> void:
     # One pinned cell shares the existing request/instantiation frame budgets.
     world_partition.pin_cell(Vector2i.ZERO)
     world_partition.update_streaming()
+
+
+func _on_cell_detail_changed(_cell: Vector2i, _detail_level: int) -> void:
+    _refresh_hud()
 
 
 func _on_observer_cell_changed(cell: Vector2i) -> void:
@@ -295,7 +304,7 @@ func _create_hud() -> void:
     hint.position = Vector2(22, 166)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: упреждение  •  F5/F9: сохранение  •  Esc: курсор"
+    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: упреждение  •  F4: LOD  •  F5/F9: сохранение  •  Esc: курсор"
     canvas.add_child(hint)
 
 
@@ -328,6 +337,7 @@ func _refresh_hud() -> void:
     var inflight: int = world_partition.get_inflight_request_count() if world_partition != null else 0
     var failed: int = world_partition.get_failed_cell_count() if world_partition != null else 0
     var pinned: int = world_partition.get_pinned_cell_count() if world_partition != null else 0
+    var distant: int = world_partition.get_distant_cell_count() if world_partition != null else 0
     var predicted_text: String = "OFF" if not predictive_streaming else "—"
     if world_partition != null and world_partition.has_predicted_cell():
         var next_cell: Vector2i = world_partition.get_predicted_cell()
@@ -336,7 +346,7 @@ func _refresh_hud() -> void:
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   закреплено: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pinned, pending, inflight, failed, current_region.x, current_region.y] \
-        + "Упреждающая загрузка: %s   (F3: вкл./выкл.)" % predicted_text
+        + "Упреждающая загрузка: %s   LOD дальних: %d   F3/F4: сравнение" % [predicted_text, distant]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
@@ -383,6 +393,12 @@ func _unhandled_input(event: InputEvent) -> void:
                 predictive_streaming = not predictive_streaming
                 if world_partition != null:
                     world_partition.predictive_lookahead_seconds = 2.5 if predictive_streaming else 0.0
+                _refresh_hud()
+            KEY_F4:
+                distance_lod_enabled = not distance_lod_enabled
+                if world_partition != null:
+                    world_partition.detail_radius = 1 if distance_lod_enabled else -1
+                    world_partition.update_streaming()
                 _refresh_hud()
             KEY_F5:
                 _save_game()

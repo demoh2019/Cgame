@@ -8,30 +8,64 @@ const CELL_SIZE: float = 32.0
 const TREE_COUNT: int = 54
 const GRASS_COUNT: int = 225
 const ROCK_COUNT: int = 9
+const DISTANT_TREE_COUNT: int = 16
+
+# 0 = fully interactive vegetation; 1 = distant GPU-only canopy proxy.
+# The native streamer calls set_streaming_lod() before _ready on new cells.
 
 var rng := RandomNumberGenerator.new()
 var grass: MultiMeshInstance3D
 var obstacles: StaticBody3D
 var high_quality: bool = true
+var streaming_lod: int = 0
+var cell_seed: int = 0
+var cell_x: int = 0
+var cell_z: int = 0
 
 
 func _ready() -> void:
-    var cell_x: int = int(round(global_position.x / CELL_SIZE))
-    var cell_z: int = int(round(global_position.z / CELL_SIZE))
-    rng.seed = 913481 + cell_x * 73856093 + cell_z * 19349663
+    cell_x = int(round(global_position.x / CELL_SIZE))
+    cell_z = int(round(global_position.z / CELL_SIZE))
+    cell_seed = 913481 + cell_x * 73856093 + cell_z * 19349663
+    _rebuild_lod()
 
-    # A single static body groups primitive collision shapes for this cell.
-    # The engine unloads these shapes together with the visual vegetation.
-    obstacles = StaticBody3D.new()
-    obstacles.name = "FoliageCollisions"
-    obstacles.collision_layer = 1
-    obstacles.collision_mask = 0
-    add_child(obstacles)
+
+func set_streaming_lod(level: int) -> void:
+    # The streamer can call this before this Node3D enters the scene tree.
+    # At runtime, rebuild only if the level actually changed.
+    var next_level: int = clampi(level, 0, 1)
+    if streaming_lod == next_level:
+        return
+    streaming_lod = next_level
+    if is_node_ready():
+        _rebuild_lod()
+
+
+func _rebuild_lod() -> void:
+    # Each cell has no authored children; only the root script. Remove previous
+    # generated geometry/colliders immediately, defer freeing their resources.
+    for generated in get_children():
+        remove_child(generated)
+        generated.queue_free()
+    grass = null
+    obstacles = null
+    rng.seed = cell_seed
+
+    if streaming_lod == 0:
+        obstacles = StaticBody3D.new()
+        obstacles.name = "FoliageCollisions"
+        obstacles.collision_layer = 1
+        obstacles.collision_mask = 0
+        add_child(obstacles)
+
+    # Even far cells retain silhouettes using MultiMesh, but no grass,
+    # individual tree/rock colliders, shadow maps, or small stones.
     _spawn_trees()
-    _spawn_grass()
-    _spawn_rocks()
-    if cell_x == 0 and cell_z == 0:
-        _spawn_home_beacon()
+    if streaming_lod == 0:
+        _spawn_grass()
+        _spawn_rocks()
+        if cell_x == 0 and cell_z == 0:
+            _spawn_home_beacon()
     set_high_quality(high_quality)
 
 
@@ -54,8 +88,8 @@ func _spawn_trees() -> void:
     var foliage_mesh := SphereMesh.new()
     foliage_mesh.radius = 1.0
     foliage_mesh.height = 2.0
-    foliage_mesh.radial_segments = 11
-    foliage_mesh.rings = 6
+    foliage_mesh.radial_segments = 11 if streaming_lod == 0 else 7
+    foliage_mesh.rings = 6 if streaming_lod == 0 else 4
     var wind := ShaderMaterial.new()
     wind.shader = preload("res://shaders/foliage_wind.gdshader")
     foliage_mesh.material = wind
@@ -63,7 +97,8 @@ func _spawn_trees() -> void:
     var trunks: Array[Transform3D] = []
     var crowns: Array[Transform3D] = []
     var custom: Array[Color] = []
-    for i in range(TREE_COUNT):
+    var tree_count: int = TREE_COUNT if streaming_lod == 0 else DISTANT_TREE_COUNT
+    for i in range(tree_count):
         var px: float = rng.randf_range(1.0, CELL_SIZE - 1.0)
         var pz: float = rng.randf_range(1.0, CELL_SIZE - 1.0)
         var wx: float = global_position.x + px
@@ -82,8 +117,9 @@ func _spawn_trees() -> void:
         custom.push_back(Color(rng.randf(), rng.randf(), rng.randf(), 1.0))
     _spawn_instances("TreeTrunks", trunk_mesh, trunks, custom, true, false)
     _spawn_instances("WindCanopies", foliage_mesh, crowns, custom, true, false)
-    # MultiMesh is draw-only; collision shapes must be authored separately.
-    # Keep capsule-based player collision cheap with primitive cylinders.
+    # Distant cells do not allocate physics. Near cells keep simple primitives.
+    if obstacles == null:
+        return
     for trunk_transform in trunks:
         var scale: float = trunk_transform.basis.y.length()
         var cylinder := CylinderShape3D.new()
@@ -164,7 +200,7 @@ func _spawn_instances(label: String, mesh: Mesh,
     var node := MultiMeshInstance3D.new()
     node.name = label
     node.multimesh = multi
-    node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadows and streaming_lod == 0 else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
     if is_grass:
         node.visibility_range_end = 64.0
         node.visibility_range_end_margin = 11.0

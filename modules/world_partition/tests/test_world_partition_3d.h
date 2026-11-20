@@ -546,4 +546,29 @@ TEST_CASE("[SceneTree][WorldPartition3D] Prediction loads a future cell before o
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
+TEST_CASE("[WorldPartition3D] Optional detail distance and transition budgets validate boundaries") {
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	CHECK(partition->get_detail_radius() == -1);
+	CHECK(partition->get_max_detail_transitions_per_frame() == 2);
+	CHECK(partition->get_distant_cell_count() == 0);
+	CHECK(partition->get_cell_detail_level(Vector2i(0, 0)) == -1);
+	partition->set_detail_radius(0);
+	partition->set_max_detail_transitions_per_frame(3);
+	CHECK(partition->get_detail_radius() == 0);
+	CHECK(partition->get_max_detail_transitions_per_frame() == 3);
+	partition->set_detail_radius(32);
+	CHECK(partition->get_detail_radius() == 32);
+	ERR_PRINT_OFF;
+	partition->set_detail_radius(-2);
+	partition->set_detail_radius(33);
+	partition->set_max_detail_transitions_per_frame(0);
+	partition->set_max_detail_transitions_per_frame(129);
+	ERR_PRINT_ON;
+	CHECK(partition->get_detail_radius() == 32);
+	CHECK(partition->get_max_detail_transitions_per_frame() == 3);
+	partition->set_detail_radius(-1);
+	CHECK(partition->get_detail_radius() == -1);
+	memdelete(partition);
+}
+
 } // namespace TestWorldPartition3D
