@@ -1027,7 +1027,11 @@ func _on_event(event: Dictionary) -> void:
 			say("RAID SLAM in %.1f seconds! Evade the marked %dm circle." % [
 				float(event.get("seconds", 2.0)), int(event.get("radius", 5))])
 		"raid_slam":
-			say("Raid boss slam struck. Dodge or retreat from the next circle.")
+			var exposed: float = float(event.get("exposed_seconds", 0.0))
+			if exposed > 0.0:
+				say("RAID COUNTERATTACK! Boss exposed for %.1fs: +15%% damage. Strike now!" % exposed)
+			else:
+				say("Raid boss slam struck. Dodge or retreat from the next circle.")
 		"raid_defeated":
 			say("RAID VICTORY! The warlord dropped one shared loot bag.")
 		"raid_expired":
@@ -1455,6 +1459,13 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	# An exact server-derived recovery timer (not inferred from visual FX).
+	for enemy in client.zombies.values():
+		if bool(enemy.get("raid_boss", false)):
+			var recovery: float = float(enemy.get("raid_exposed_seconds", 0.0))
+			if recovery > 0.0:
+				_info_label.text += "\nRAID BOSS EXPOSED: %.1fs (+15%% PvE damage)" % recovery
+			break
 	var parry_ready: float = float(client.you.get("parry_window", 0.0))
 	if parry_ready > 0.0:
 		_info_label.text += "\nPARRY ACTIVE %.2fs — face incoming infected!" % parry_ready
