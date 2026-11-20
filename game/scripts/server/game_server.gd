@@ -216,7 +216,7 @@ class Player:
 	var prospect_mark: Dictionary = {} # One paid, session-only resource waypoint.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
-	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
+	var party_aid_timer: float = 0.0 # Shared medical/provisions support cooldown.
 	var feast_timer: float = 0.0 # Session-only prepared group meal cooldown.
 	var combat_stress: float = 0.0 # Session-only PvE pressure; not a permanent condition.
 	var stress_pressure: float = 0.0 # Last trusted nearby infected threat sample.
@@ -1624,7 +1624,7 @@ func _record_party_healing_threat(medic: Player, patients: Array) -> void:
 			Threat.record(infected.threat, medic.id, generated)
 
 
-## Item-powered cooperative healing, resolved only by the authoritative server.
+## Item-powered party medicine and provisions, resolved only on the server.
 func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var source: Player = players.get(peer_id)
 	var recipient: Player = players.get(target_id)
@@ -1644,17 +1644,20 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	if source.party_aid_timer > 0.0:
 		return {"ok": false, "reason": "cooldown"}
 	var data: Dictionary = Defs.item(item_id)
-	if str(data.get("kind", "")) != "medical":
-		return {"ok": false, "reason": "not_medical"}
+	if not PartyAid.supported_item(item_id, data):
+		return {"ok": false, "reason": "not_shareable"}
 	if source.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	if not PartyAid.has_effect(data, recipient.survival.health, recipient.survival.infection,
-			recipient.survival.bleeding, recipient.survival.fracture):
+			recipient.survival.bleeding, recipient.survival.fracture,
+			recipient.survival.hunger, recipient.survival.thirst):
 		return {"ok": false, "reason": "no_effect"}
 	var hp_before: float = recipient.survival.health
 	var infection_before: float = recipient.survival.infection
 	var bleeding_before: float = recipient.survival.bleeding
 	var fracture_before: float = recipient.survival.fracture
+	var hunger_before: float = recipient.survival.hunger
+	var thirst_before: float = recipient.survival.thirst
 	if not source.inventory.remove(item_id, 1):
 		return {"ok": false, "reason": "not_carried"}
 	recipient.survival.heal(float(data.get("heal", 0.0)))
@@ -1662,6 +1665,8 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	if bool(data.get("stop_bleeding", false)):
 		recipient.survival.stop_bleeding()
 	recipient.survival.treat_fracture(float(data.get("fracture_treatment", 0.0)))
+	recipient.survival.eat(float(data.get("food", 0.0)))
+	recipient.survival.drink(float(data.get("drink", 0.0)))
 	source.party_aid_timer = PartyAid.COOLDOWN
 	source.action = {}
 	source.dirty_inventory = true
@@ -1672,12 +1677,15 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	var cured: float = infection_before - recipient.survival.infection
 	var staunched: float = bleeding_before - recipient.survival.bleeding
 	var splinted: float = fracture_before - recipient.survival.fracture
+	var fed: float = recipient.survival.hunger - hunger_before
+	var hydrated: float = recipient.survival.thirst - thirst_before
 	events.append({"type": "party_aid", "peer": target_id, "by": peer_id,
 		"item": item_id, "heal": healed, "cure": cured,
-		"bleeding_stopped": staunched, "fracture_treated": splinted})
+		"bleeding_stopped": staunched, "fracture_treated": splinted,
+		"food": fed, "drink": hydrated})
 	return {"ok": true, "peer": target_id, "item": item_id,
 		"heal": healed, "cure": cured, "bleeding_stopped": staunched,
-		"fracture_treated": splinted}
+		"fracture_treated": splinted, "food": fed, "drink": hydrated}
 
 
 ## One authenticated medic spends one crafted pack for up to three injured

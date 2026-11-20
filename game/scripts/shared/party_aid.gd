@@ -17,14 +17,34 @@ static func can_reach(source: Vector3, target: Vector3) -> bool:
 	return offset.length_squared() <= RANGE * RANGE
 
 
-static func has_effect(item_data: Dictionary, health: float, infection: float, bleeding: float = 0.0, fracture: float = 0.0) -> bool:
-	if str(item_data.get("kind", "")) != "medical":
+## Only plain provisions can be handed over. Special meals and potions retain
+## their separate gameplay rules; clients cannot submit an arbitrary item ID.
+static func supported_item(item_id: String, item_data: Dictionary) -> bool:
+	match item_id:
+		"berries", "canned_food":
+			return str(item_data.get("kind", "")) == "food" and float(item_data.get("food", 0.0)) > 0.0
+		"water_bottle":
+			return str(item_data.get("kind", "")) == "drink" and float(item_data.get("drink", 0.0)) > 0.0
+		_:
+			return str(item_data.get("kind", "")) == "medical"
+
+
+static func has_effect(item_data: Dictionary, health: float, infection: float,
+		bleeding: float = 0.0, fracture: float = 0.0,
+		hunger: float = 100.0, thirst: float = 100.0) -> bool:
+	if not is_finite(health) or not is_finite(infection) or not is_finite(bleeding) or \
+			not is_finite(fracture) or not is_finite(hunger) or not is_finite(thirst):
 		return false
-	if not is_finite(health) or not is_finite(infection) or not is_finite(bleeding) or not is_finite(fracture):
-		return false
-	var heal_amount: float = float(item_data.get("heal", 0.0))
-	var cure_amount: float = float(item_data.get("cure", 0.0))
-	return (heal_amount > 0.0 and health < Defs.MAX_HEALTH) or (
-		cure_amount > 0.0 and infection > 0.0) or (
-		bool(item_data.get("stop_bleeding", false)) and bleeding > 0.0) or (
-		float(item_data.get("fracture_treatment", 0.0)) > 0.0 and fracture > 0.0)
+	match str(item_data.get("kind", "")):
+		"food":
+			return float(item_data.get("food", 0.0)) > 0.0 and hunger < 100.0
+		"drink":
+			return float(item_data.get("drink", 0.0)) > 0.0 and thirst < 100.0
+		"medical":
+			var heal_amount: float = float(item_data.get("heal", 0.0))
+			var cure_amount: float = float(item_data.get("cure", 0.0))
+			return (heal_amount > 0.0 and health < Defs.MAX_HEALTH) or (
+				cure_amount > 0.0 and infection > 0.0) or (
+				bool(item_data.get("stop_bleeding", false)) and bleeding > 0.0) or (
+				float(item_data.get("fracture_treatment", 0.0)) > 0.0 and fracture > 0.0)
+	return false

@@ -44,7 +44,7 @@ func run(t) -> void:
 	t.check(server.cmd_party_invite(11, 12).get("ok", false), "medic invites nearby warrior")
 	t.check(server.cmd_party_accept(12).get("ok", false), "warrior joins party voluntarily")
 	t.eq(server.cmd_party_aid(11, 13, "bandage").get("reason", ""), "not_in_party", "outsider cannot receive party care")
-	t.eq(server.cmd_party_aid(11, 12, "canned_food").get("reason", ""), "not_medical", "food cannot be forged into healing")
+	t.eq(server.cmd_party_aid(11, 12, "cooked_fish").get("reason", ""), "not_shareable", "special meals cannot bypass their own rules")
 	t.eq(server.cmd_party_aid(11, 12, "antibiotics").get("reason", ""), "not_carried", "missing items cannot be used")
 
 	t.current = "successful aid consumes exactly one carried item and starts cooldown"
@@ -94,6 +94,61 @@ func run(t) -> void:
 	t.check(server.cmd_party_aid(11, 12, "antibiotics").get("ok", false), "antibiotics may cure allied infection")
 	t.near(target.survival.infection, 0.0, 0.001, "antibiotics cure remaining infection")
 	t.eq(medic.inventory.count("antibiotics"), 0, "one antibiotic dose used")
+
+	t.current = "authoritative party food and water sharing"
+	t.check(PartyAid.supported_item("canned_food", Defs.item("canned_food")),
+		"ordinary canned food is permitted")
+	t.check(PartyAid.supported_item("water_bottle", Defs.item("water_bottle")),
+		"plain drinking water is permitted")
+	t.check(not PartyAid.supported_item("cooked_fish", Defs.item("cooked_fish")),
+		"special meals cannot be transferred as basic sustenance")
+	t.check(not PartyAid.has_effect(Defs.item("water_bottle"), 100.0, 0.0),
+		"water is not wasted on a fully hydrated teammate")
+	t.check(not PartyAid.has_effect(Defs.item("canned_food"), 100.0, 0.0),
+		"food is not wasted on a fully fed teammate")
+	t.check(PartyAid.has_effect(Defs.item("canned_food"), 100.0, 0.0, 0.0, 0.0, 20.0, 100.0),
+		"food works when the recipient is hungry")
+	t.check(PartyAid.has_effect(Defs.item("water_bottle"), 100.0, 0.0, 0.0, 0.0, 100.0, 20.0),
+		"water works when the recipient is thirsty")
+	t.check(not PartyAid.has_effect(Defs.item("water_bottle"), 100.0, 0.0, 0.0, 0.0, 100.0, NAN),
+		"invalid thirst cannot cause item consumption")
+	medic.party_aid_timer = 0.0
+	medic.inventory.add("water_bottle", 2)
+	medic.inventory.add("canned_food", 2)
+	target.survival.thirst = 22.0
+	target.survival.hunger = 38.0
+	var before_water: int = medic.inventory.count("water_bottle")
+	var water_share: Dictionary = server.cmd_party_aid(11, 12, "water_bottle")
+	t.check(water_share.get("ok", false), "giver shares a real carried water bottle")
+	t.near(target.survival.thirst, 67.0, 0.001, "recipient thirst restored by 45")
+	t.near(float(water_share.get("drink", 0.0)), 45.0, 0.001,
+		"authoritative result contains the actual thirst restored")
+	t.eq(medic.inventory.count("water_bottle"), before_water - 1,
+		"exactly one bottle leaves the giver")
+	t.eq(server.cmd_party_aid(11, 12, "canned_food").get("reason", ""), "cooldown",
+		"sharing food cannot bypass the existing party aid cooldown")
+	medic.party_aid_timer = 0.0
+	var before_food: int = medic.inventory.count("canned_food")
+	var food_share: Dictionary = server.cmd_party_aid(11, 12, "canned_food")
+	t.check(food_share.get("ok", false), "giver shares canned food")
+	t.near(target.survival.hunger, 80.0, 0.001, "recipient hunger restored by 42")
+	t.near(float(food_share.get("food", 0.0)), 42.0, 0.001,
+		"result reflects actual hunger restoration")
+	t.eq(medic.inventory.count("canned_food"), before_food - 1,
+		"exactly one food ration leaves the giver")
+	medic.party_aid_timer = 0.0
+	target.survival.eat(100.0)
+	t.eq(server.cmd_party_aid(11, 12, "canned_food").get("reason", ""), "no_effect",
+		"full hunger cannot waste another ration")
+	t.eq(medic.inventory.count("canned_food"), before_food - 1,
+		"rejected food share consumes nothing")
+	target.survival.drink(100.0)
+	t.eq(server.cmd_party_aid(11, 12, "water_bottle").get("reason", ""), "no_effect",
+		"full thirst cannot waste another bottle")
+	t.eq(medic.inventory.count("water_bottle"), before_water - 1,
+		"rejected water share consumes nothing")
+	t.eq(server.cmd_party_aid(11, 13, "water_bottle").get("reason", ""), "not_in_party",
+		"food and water cannot be sent to unrelated players")
 
 	t.current = "range, verticality, death and leaving party block aid without charge"
 	medic.party_aid_timer = 0.0
