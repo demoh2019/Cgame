@@ -16,6 +16,17 @@ const MIN_SEPARATION := 2.5
 const MAX_GLOBAL := 96
 const MAX_PER_OWNER := 2
 const CAMP_RADIUS := 0.45
+const STORM_BURN_MULTIPLIER := 2.0
+
+
+## Ordinary time already burns one second of fuel per server second.
+## The storm penalty only applies to the extra second; invalid input is safe.
+static func storm_extra_fuel(delta: float, weather: Dictionary) -> float:
+	if not is_finite(delta) or delta <= 0.0:
+		return 0.0
+	if str(weather.get("condition", "")) != "storm" or bool(weather.get("sheltered", false)):
+		return 0.0
+	return delta * (STORM_BURN_MULTIPLIER - 1.0)
 
 
 static func valid_site(world, point: Vector2, from: Vector2, campfires: Dictionary) -> String:

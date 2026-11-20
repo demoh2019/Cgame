@@ -696,6 +696,8 @@ func _on_event(event: Dictionary) -> void:
 					roundi(float(event.get("bleeding_stopped", 0.0)))])
 		"gathered":
 			say("+%d %s" % [event["amount"], Defs.item(event["item"]).get("name", event["item"])])
+		"campfire_doused":
+			say("Storm exhausted a nearby campfire. Find shelter or refuel sooner.")
 		"campfire_refueled":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("You added wood to the shared campfire.")

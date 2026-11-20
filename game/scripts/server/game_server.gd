@@ -3322,13 +3322,27 @@ func _nearest_player_distance(point: Vector2) -> float:
 	return best
 
 
-func _tick_world(_delta: float) -> void:
+func _tick_world(delta: float) -> void:
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):
 			decoys.erase(id)
 	for id in campfires.keys():
-		if time >= float(campfires[id]["expires"]):
+		var fire: Dictionary = campfires[id]
+		if time >= float(fire["expires"]):
 			campfires.erase(id)
+			continue
+		# Weather must be read at the server-owned fire position, not from a client.
+		# The normal fuel tick has already advanced the simulation clock.
+		var local_weather: Dictionary = Weather.conditions(world,
+			float(fire["x"]), float(fire["z"]), time)
+		var extra: float = FieldCampfire.storm_extra_fuel(delta, local_weather)
+		if extra <= 0.0:
+			continue
+		fire["expires"] = maxf(time, float(fire["expires"]) - extra)
+		if float(fire["expires"]) <= time:
+			campfires.erase(id)
+			events.append({"type": "campfire_doused", "id": id,
+				"x": fire["x"], "z": fire["z"]})
 	for id in depleted.keys():
 		if time >= float(depleted[id]):
 			depleted.erase(id)
