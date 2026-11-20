@@ -17,12 +17,56 @@ uniform float sharpen_strength = 0.0; // High/Ultra only: local contrast enhance
 // Interleaved-gradient noise suppresses 8-bit bands in ACES sky/fog gradients.
 // Runs in the existing composite, with no extra screen texture sample or pass.
 uniform float deband_strength = 0.0; // Disabled on Performance/Balanced.
+// Raindrops share the existing screen-reading post pass. In clear weather,
+// low quality and Compatibility, the uniform fast-path avoids all droplet work.
+uniform float lens_rain_strength = 0.0;
+uniform vec2 lens_rain_wind = vec2(0.0);
+
+
+// Stateless per-cell droplets: stable screen-space layout, slow drift with
+// weather wind and gravity, no separate normal atlas or simulation texture.
+float lens_drop_hash(vec2 seed) {
+	return fract(sin(dot(seed, vec2(127.1, 311.7))) * 43758.5453);
+}
 
 
 void fragment() {
 	vec2 uv = SCREEN_UV;
 	float away = smoothstep(focus_width, focus_width + 0.32, abs(uv.y - focus_center));
 	vec3 color = texture(screen, uv).rgb;
+	// Extra refraction is sampled only inside an occasional drop, not per
+	// screen pixel. The focus area around the character remains clean.
+	if (lens_rain_strength > 0.001) {
+		vec2 lens_position = vec2(uv.x * SCREEN_PIXEL_SIZE.y /
+			max(SCREEN_PIXEL_SIZE.x, 0.000001), uv.y);
+		vec2 field = lens_position * 14.0 + vec2(
+			-TIME * lens_rain_wind.x * 0.05,
+			TIME * (0.035 + lens_rain_strength * 0.07));
+		vec2 cell = floor(field);
+		float seed = lens_drop_hash(cell);
+		if (seed > mix(0.93, 0.77, lens_rain_strength)) {
+			vec2 jitter = vec2(lens_drop_hash(cell + vec2(17.0, 7.0)),
+				lens_drop_hash(cell + vec2(3.0, 23.0))) - 0.5;
+			vec2 within = fract(field) - vec2(0.5) - jitter * 0.50;
+			float radius = length(within / vec2(0.24, 0.32));
+			float core = 1.0 - smoothstep(0.66, 1.00, radius);
+			float safe_center = smoothstep(0.19, 0.42,
+				length((uv - vec2(0.5, focus_center)) * vec2(1.6, 1.0)));
+			float coverage = core * safe_center * lens_rain_strength;
+			if (coverage > 0.001) {
+				vec2 bend = normalize(within + vec2(0.0001, 0.0001));
+				vec2 offset = bend * SCREEN_PIXEL_SIZE * (1.7 + 1.6 * core);
+				vec2 refracted_uv = clamp(uv + offset, vec2(0.002), vec2(0.998));
+				vec3 behind_drop = texture(screen, refracted_uv).rgb;
+				color = mix(color, behind_drop, coverage * 0.70);
+				// A faint ring highlight suggests the curved water surface,
+				// but never blows out dark scenes or hides gameplay silhouettes.
+				float rim = smoothstep(0.51, 0.72, radius) *
+					(1.0 - smoothstep(0.81, 1.02, radius));
+				color += vec3(0.012, 0.016, 0.020) * rim * coverage;
+			}
+		}
+	}
 	if (away > 0.01 && blur_quality > 0) {
 		// Four taps for balanced hardware; four more for the high-quality diorama look.
 		vec2 r = SCREEN_PIXEL_SIZE * blur_radius * away;
