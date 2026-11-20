@@ -1316,6 +1316,9 @@ func _process(_delta: float) -> void:
 	var spore_filter_left: float = float(client.you.get("spore_filter_seconds", 0.0))
 	if spore_filter_left > 0.0:
 		_info_label.text += "\nSPORE FILTER: %.0fs remaining (airborne spores only)" % spore_filter_left
+	_info_label.text += "\nTRAIL BIKE: %s | F4 mount/dismount | remount %.0fs" % [
+		"RIDING" if bool(client.you.get("mounted", false)) else ("CARRIED" if client.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
+		float(client.you.get("mount_cooldown", 0.0))]
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
 		round(100.0 * float(client.you.get("weather_insulation", 0.0))))
 	var visual: float = float(client.you.get("visual_signature", 1.0))

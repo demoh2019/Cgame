@@ -120,6 +120,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_vendor_buy", KEY_N)
 	_bind_key("survive_vendor_sell", KEY_V)
 	_bind_key("survive_radar", KEY_M)
+	_bind_key("survive_mount", KEY_F4)
 	_bind_key("survive_bank", KEY_B)
 	_bind_key("survive_bank_next", KEY_J)
 	_bind_key("survive_bank_deposit", KEY_K)
@@ -767,6 +768,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_feedback = "No nearby crate or loot bag."
 		else:
 			_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
+	elif event.is_action_pressed("survive_mount"):
+		_result("Trail bike", sim.cmd_toggle_mount(LOCAL_PLAYER_ID))
 	elif event.is_action_pressed("survive_attack"):
 		var attack_result: Dictionary = sim.cmd_attack(
 			LOCAL_PLAYER_ID, _facing.x, _facing.y)
@@ -957,6 +960,9 @@ func _update_hud() -> void:
 			0.0, float(survivor.recall["until"]) - sim.time)
 	elif survivor.recall_ready_at > sim.time:
 		_stats.text += "\nRETURN CHARM COOLDOWN: %.0fs" % (survivor.recall_ready_at - sim.time)
+	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
+		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
+		survivor.mount_cooldown]
 	var equipped_ammo: String = str(Defs.item(survivor.inventory.weapon).get("ammo", ""))
 	if not equipped_ammo.is_empty():
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [
@@ -1003,6 +1009,7 @@ func _update_hud() -> void:
 	if not fishing_status.is_empty():
 		_instructions.text += "\n" + fishing_status
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
+	_instructions.text += "\nF4 ride / dismount crafted Trail Bike (workbench T2; no combat or gathering while riding)"
 	_instructions.text += "\nField snares active: %d | roots first non-boss infected for 3s" % sim.infected_snares.size()
 	var scent_radius: float = BloodScent.detection_radius(survivor.survival.bleeding,
 		survivor.survival.alive, world.is_safe(survivor.position.x, survivor.position.z),

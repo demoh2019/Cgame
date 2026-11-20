@@ -36,6 +36,7 @@ const Crafting = preload("res://scripts/shared/crafting.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
+const Mounts = preload("res://scripts/shared/mounts.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
@@ -146,6 +147,8 @@ class Player:
 	var recall: Dictionary = {} # Ephemeral channel, no character persistence.
 	var recall_ready_at: float = 0.0
 	var crouching: bool = false # Ephemeral, server-authorized posture.
+	var mounted: bool = false # Session-only; never saved.
+	var mount_cooldown: float = 0.0
 	var decoy_timer: float = 0.0 # Anti-spam timer; no persistent character data.
 	var action: Dictionary = {} # Current gathering or fishing: {"remaining": s, "total": s, ...}
 	var fish_next_at: float = 0.0
@@ -546,6 +549,8 @@ func _spawn_player(player: Player) -> void:
 			player.inventory.add(id, STARTER_KIT[id])
 	player.action = {}
 	player.recall = {}
+	player.mounted = false
+	player.mount_cooldown = 0.0
 	player.attack_timer = 0.0
 	player.skill_timer = 0.0
 	player.dodge_timer = 0.0
@@ -576,6 +581,33 @@ func _is_safe(position: Vector3) -> bool:
 
 ## A movement input measured by the client. `dt` is how long the client says it moved. The server
 ## accepts at most as much movement time as real time has passed, so a modified client cannot speed up.
+## Bike ownership and eligibility are validated exclusively on the server.
+func cmd_toggle_mount(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		_dismount(player, false)
+		return {"ok": true, "mounted": false, "cooldown": player.mount_cooldown}
+	var reason: String = Mounts.refusal(player, time)
+	if not reason.is_empty():
+		return {"ok": false, "reason": reason, "cooldown": player.mount_cooldown}
+	player.mounted = true
+	player.crouching = false
+	_cancel_recall(player, "mounted")
+	events.append({"type": "mount", "peer": peer_id, "mounted": true})
+	return {"ok": true, "mounted": true}
+
+
+func _dismount(player: Player, hit: bool) -> void:
+	if not player.mounted:
+		return
+	player.mounted = false
+	player.mount_cooldown = maxf(player.mount_cooldown,
+		Mounts.HIT_COOLDOWN if hit else Mounts.MANUAL_COOLDOWN)
+	events.append({"type": "mount", "peer": player.id, "mounted": false})
+
+
 func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: bool, yaw: float, dt: float, crouch: bool = false) -> void:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player) or seq <= player.last_input_seq:
@@ -593,9 +625,12 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		var before_move: Vector3 = player.position
 		var factor: float = player.inventory.movement_factor(player.skills.bonus("carry_capacity"))
 		var moving := move_x * move_x + move_z * move_z > 0.00001
-		var sprint_allowed: bool = sprint and not player.crouching and moving and factor >= 0.9999 and player.survival.try_sprint(allowed)
+		if player.mounted and (player.crouching or factor < 0.9999 or
+				player.survival.fracture > 0.0 or player.inventory.count(Mounts.ITEM_ID) < 1):
+			_dismount(player, false)
+		var sprint_allowed: bool = sprint and not player.mounted and not player.crouching and moving and factor >= 0.9999 and player.survival.try_sprint(allowed)
 		player.position = Movement.step(world, player.position, {
-			"x": move_x, "z": move_z, "sprint": sprint_allowed,
+			"x": move_x, "z": move_z, "sprint": sprint_allowed, "mounted": player.mounted,
 			"crouch": player.crouching, "cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed"),
 			"injury_factor": Survival.fracture_speed_factor(player.survival.fracture),
 		}, allowed)
@@ -638,6 +673,8 @@ func cmd_fish(peer_id: int, baited: bool = false, storm_cast: bool = false) -> D
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
 	if not player.recall.is_empty():
 		return {"ok": false, "reason": "recall_channeling"}
 	if not player.action.is_empty():
@@ -669,6 +706,8 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
 	if not player.recall.is_empty():
 		return {"ok": false, "reason": "recall_channeling"}
 	var node := _find_node(node_id)
@@ -704,6 +743,8 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
 	if not player.recall.is_empty():
 		return {"ok": false, "reason": "recall_channeling"}
 	times = clampi(times, 1, 50)
@@ -2156,6 +2197,8 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
 	if not player.recall.is_empty():
 		return {"ok": false, "reason": "recall_channeling"}
 	var data := Defs.item(item_id)
@@ -2351,6 +2394,8 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
 	if player.attack_timer > 0.0:
 		return {"ok": false, "reason": "cooldown"}
 	var direction := Vector2(dir_x, dir_z)
@@ -2417,6 +2462,8 @@ func cmd_guardian_taunt(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
 	if _is_safe(player.position):
 		return {"ok": false, "reason": "safe_zone"}
 	var allies: Array = parties.members_of(peer_id)
@@ -2462,6 +2509,8 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
 	if player.attack_timer > 0.0 or player.skill_timer > 0.0:
 		return {"ok": false, "reason": "cooldown"}
 	var weapon: String = player.inventory.weapon
@@ -2528,6 +2577,8 @@ func cmd_dodge(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
 	if player.dodge_timer > 0.0:
 		return {"ok": false, "reason": "cooldown"}
 	if player.attack_timer > 0.0:
@@ -2564,6 +2615,8 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
 	if bags.has(entity_id):
 		var bag: Dictionary = bags[entity_id]
 		if _distance_xz(player.position, bag) > Defs.REACH + 0.5:
@@ -2699,6 +2752,7 @@ func _hurt_player(victim: Player, raw_damage: float) -> float:
 	var reduced: float = raw_damage * (1.0 - victim.skills.bonus("damage_reduction"))
 	var applied: float = victim.survival.hurt(reduced)
 	if applied > 0.0:
+		_dismount(victim, true)
 		_cancel_recall(victim, "hurt")
 		_award(victim, "toughness", minf(applied * 0.4, 6.0))
 	return applied
@@ -2890,6 +2944,7 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 			var previous: float = victim.survival.health
 			var applied: float = victim.survival.hurt(minf(strike, maxf(0.0, previous - 1.0)))
 			if applied > 0.0:
+				_dismount(victim, true)
 				victim.dirty_character = true
 			if strike >= previous - 1.0 and strike > 0.0:
 				_end_training(victim.id, attacker.id, "knockout")
@@ -3137,6 +3192,12 @@ func _tick_recalls() -> void:
 func _tick_players(delta: float) -> void:
 	for player in players.values():
 		player.input_budget = minf(player.input_budget + delta, 0.25)
+		player.mount_cooldown = maxf(0.0, player.mount_cooldown - maxf(0.0, delta))
+		if player.mounted and (not _alive(player) or
+				player.inventory.count(Mounts.ITEM_ID) < 1 or
+				player.inventory.movement_factor(player.skills.bonus("carry_capacity")) < 0.9999 or
+				player.survival.fracture > 0.0):
+			_dismount(player, false)
 		var old_infamy: float = player.pvp_infamy
 		player.pvp_infamy = PvpInfamy.decay(old_infamy, delta)
 		if player.pvp_infamy < old_infamy:
@@ -3194,6 +3255,8 @@ func _tick_players(delta: float) -> void:
 		var had_fracture: bool = player.survival.fracture > 0.0
 		var had_scent_mask: bool = player.survival.scent_mask_seconds > 0.0
 		var damage: float = player.survival.tick(delta)
+		if damage > 0.0:
+			_dismount(player, true)
 		if had_scent_mask:
 			player.dirty_character = true
 		if nourished and stamina_meal_seconds > 0.0:
@@ -3494,7 +3557,9 @@ func _resolve_raid_slam(boss_id: int, center: Vector2) -> void:
 			continue
 		var damage: float = Combat.apply_armor(RaidEncounter.slam_damage(boss), survivor.inventory.armor)
 		damage = _infected_damage_for(survivor, damage)
-		survivor.survival.hurt(damage)
+		var taken: float = survivor.survival.hurt(damage)
+		if taken > 0.0:
+			_dismount(survivor, true)
 		events.append({"type": "hit", "kind": "player", "id": survivor.id,
 			"damage": damage, "by": -boss_id})
 		if not _alive(survivor):
@@ -3992,7 +4057,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		var p: Vector3 = other.position
 		if here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
 			nearby_players.append({"id": other.id, "name": other.name, "x": p.x, "y": p.y, "z": p.z, "yaw": other.yaw,
-				"alive": _alive(other), "crouching": other.crouching,
+				"alive": _alive(other), "crouching": other.crouching, "mounted": other.mounted,
 				"weapon": other.inventory.weapon,
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
 				"guild": {"id": other.guild_id, "name": other.guild_name},
@@ -4075,6 +4140,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 			"stamina": player.survival.stamina, "crouching": player.crouching,
+			"mounted": player.mounted, "mount_cooldown": player.mount_cooldown,
 			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),

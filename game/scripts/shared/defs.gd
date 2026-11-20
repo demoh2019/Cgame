@@ -417,6 +417,12 @@ static func _build_items() -> void:
 		"kind": "deployable", "tier": 1, "stack": 10, "weight": 0.9, "value": 28})
 	_add_recipe("infected_snare", "infected_snare", 1,
 		{"wood_1": 2, "fiber_1": 2, "scrap": 1}, "", 3.0)
+	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
+	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
+		"tier": 2, "weight": 12.0, "value": 180})
+	_add_recipe("salvage_bike", "salvage_bike", 1,
+		{"bar_2": 4, "plank_2": 3, "scrap": 5, "fiber_2": 4},
+		"workbench", 12.0)
 	_add_item("silver", {"name": "Silver", "kind": "currency", "stack": 100000, "value": 1})
 
 

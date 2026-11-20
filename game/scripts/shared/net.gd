@@ -383,6 +383,13 @@ func c_input(seq: int, move_x: float, move_z: float, sprint: bool, yaw: float, d
 
 
 @rpc("any_peer", "reliable")
+func c_toggle_mount() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "mount", sim.cmd_toggle_mount(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_fish(baited: bool = false, storm_cast: bool = false) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
