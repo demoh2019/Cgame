@@ -45,6 +45,8 @@ void FogVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_shape"), &FogVolume::get_shape);
 	ClassDB::bind_method(D_METHOD("set_material", "material"), &FogVolume::set_material);
 	ClassDB::bind_method(D_METHOD("get_material"), &FogVolume::get_material);
+	ClassDB::bind_static_method("FogVolume", D_METHOD("snap_world_anchor", "world_position", "grid_step"), &FogVolume::snap_world_anchor);
+	ClassDB::bind_method(D_METHOD("set_snapped_world_anchor", "world_position", "grid_step", "distance_epsilon"), &FogVolume::set_snapped_world_anchor, DEFVAL(0.10));
 
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "size", PROPERTY_HINT_RANGE, "0.01,1024,0.01,or_greater,suffix:m"), "set_size", "get_size");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "shape", PROPERTY_HINT_ENUM, "Ellipsoid (Local),Cone (Local),Cylinder (Local),Box (Local),World (Global)"), "set_shape", "get_shape");
@@ -75,7 +77,35 @@ bool FogVolume::_get(const StringName &p_name, Variant &r_property) const {
 }
 #endif // DISABLE_DEPRECATED
 
+Vector3 FogVolume::snap_world_anchor(const Vector3 &p_world_position, real_t p_grid_step) {
+	if (!Math::is_finite(p_world_position.x) || !Math::is_finite(p_world_position.y) ||
+			!Math::is_finite(p_world_position.z) || !Math::is_finite(p_grid_step) ||
+			p_grid_step <= 0.0) {
+		return p_world_position;
+	}
+	return Vector3(Math::round(p_world_position.x / p_grid_step) * p_grid_step,
+			p_world_position.y,
+			Math::round(p_world_position.z / p_grid_step) * p_grid_step);
+}
+
+bool FogVolume::set_snapped_world_anchor(const Vector3 &p_world_position, real_t p_grid_step,
+		real_t p_distance_epsilon) {
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_world_position.x) || !Math::is_finite(p_world_position.y) ||
+					!Math::is_finite(p_world_position.z) || !Math::is_finite(p_grid_step) ||
+					p_grid_step <= 0.0 || !Math::is_finite(p_distance_epsilon) ||
+					p_distance_epsilon < 0.0, false, "FogVolume requires finite world coordinates, a positive grid step and a nonnegative distance epsilon.");
+	const Vector3 target = snap_world_anchor(p_world_position, p_grid_step);
+	if (get_global_position().distance_squared_to(target) <= p_distance_epsilon * p_distance_epsilon) {
+		return false;
+	}
+	set_global_position(target);
+	return true;
+}
+
 void FogVolume::set_size(const Vector3 &p_size) {
+	// A NaN/INF dimension corrupts the AABB used for froxel culling.
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_size.x) || !Math::is_finite(p_size.y) ||
+					!Math::is_finite(p_size.z), "FogVolume size must contain finite dimensions.");
 	const Vector3 clamped_size = p_size.maxf(0);
 	if (size == clamped_size) {
 		return; // A repeated quality preset must not dirty rendering state or gizmos.
