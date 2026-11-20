@@ -1,6 +1,7 @@
 extends RefCounted
 ## Regressions: real ruin exploration, danger bonuses, save safety and anti-farming.
 
+const Defs = preload("res://scripts/shared/defs.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
