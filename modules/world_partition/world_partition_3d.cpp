@@ -581,8 +581,26 @@ void WorldPartition3D::update_streaming() {
 	// They retain unloaded/loaded cells beyond the observer's radius and are
 	// processed after nearby physics cells but before speculative prefetch.
 	// Pins share the same request deduplication and per-frame budgets.
+	Vector<Vector2i> pinned_snapshot;
 	for (const Vector2i &cell : pinned_cells) {
-		visit_cell(cell);
+		pinned_snapshot.push_back(cell);
+	}
+	// Signal callbacks from _instantiate_cell may pin/unpin cells. Iterate a
+	// snapshot, and process surviving pins in a deterministic grid order.
+	for (int i = 1; i < pinned_snapshot.size(); i++) {
+		const Vector2i value = pinned_snapshot[i];
+		int j = i;
+		while (j > 0 && (pinned_snapshot[j - 1].x > value.x ||
+				(pinned_snapshot[j - 1].x == value.x && pinned_snapshot[j - 1].y > value.y))) {
+			pinned_snapshot.write[j] = pinned_snapshot[j - 1];
+			j--;
+		}
+		pinned_snapshot.write[j] = value;
+	}
+	for (const Vector2i &cell : pinned_snapshot) {
+		if (pinned_cells.has(cell)) {
+			visit_cell(cell);
+		}
 	}
 
 	// Optional direction-aware corridor, including cells beyond load_radius.
