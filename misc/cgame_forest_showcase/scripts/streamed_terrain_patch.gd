@@ -9,6 +9,7 @@ extends Node3D
 
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const TerrainTileCache = preload("res://scripts/terrain_tile_cache.gd")
+const SharedAssets = preload("res://scripts/forest_shared_assets.gd")
 const CELL_SIZE: int = 32
 const SEGMENTS: int = 32
 const VERTICES_PER_SIDE: int = SEGMENTS + 1
@@ -90,10 +91,7 @@ func _build_patch() -> void:
     }
     var mesh := ArrayMesh.new()
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], lods)
-    var material := StandardMaterial3D.new()
-    material.vertex_color_use_as_albedo = true
-    material.roughness = 0.97
-    mesh.surface_set_material(0, material)
+    mesh.surface_set_material(0, SharedAssets.ground_material())
 
     var collision_shape := HeightMapShape3D.new()
     collision_shape.map_width = VERTICES_PER_SIDE
