@@ -134,7 +134,7 @@ func _create_streaming_world() -> void:
     world_partition.cell_unloaded.connect(_on_stream_cell_unloaded)
     world_partition.observer_cell_changed.connect(_on_observer_cell_changed)
 
-    var half_cells: int = WORLD_CELLS_PER_SIDE / 2
+    var half_cells: int = WORLD_CELLS_PER_SIDE >> 1
     for cz in range(-half_cells, half_cells):
         for cx in range(-half_cells, half_cells):
             world_partition.set_cell_scene(
