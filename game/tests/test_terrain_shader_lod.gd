@@ -200,6 +200,6 @@ func run(t) -> void:
 		"fallback procedural landscape uses the same contact shading")
 	t.check(ChunkView.GROUND_SHADER.contains("AO = ground_contact;"),
 		"Compatibility fallback receives the contact occlusion")
-	var controller := load("res://scripts/client/graphics_quality.gd") as GDScript
-	t.check(controller != null and controller.source_code.contains('global_shader_parameter_set(&"aa_ground_contact_strength"'),
+	var quality_controller := load("res://scripts/client/graphics_quality.gd") as GDScript
+	t.check(quality_controller != null and quality_controller.source_code.contains('global_shader_parameter_set(&"aa_ground_contact_strength"'),
 		"graphics quality updates one contact shadow budget for all chunks")
