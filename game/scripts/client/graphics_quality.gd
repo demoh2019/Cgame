@@ -55,19 +55,19 @@ static func profile(value: int) -> Dictionary:
 		0:
 			return {"shadows": false, "shadow_distance": 45.0, "msaa": Viewport.MSAA_DISABLED,
 				"blur_quality": 0, "blur_radius": 0.0, "glow": false, "ssao": false, "ssil": false, "cloud_shadows": false,
-				"scale": 0.59, "grass_radius": 66.0, "grass_budget": 1500, "grass_fade_start": 25.0, "grass_fade_end": 40.0, "terrain_detail_radius": 24.0, "mesh_lod_threshold": 4.0, "terrain_layer_budget": 2, "sharpen_strength": 0.0}
+				"scale": 0.59, "grass_radius": 66.0, "grass_budget": 1500, "grass_fade_start": 25.0, "grass_fade_end": 40.0, "terrain_detail_radius": 24.0, "mesh_lod_threshold": 4.0, "terrain_layer_budget": 2, "cliff_normal_quality": 0.0, "sharpen_strength": 0.0}
 		1:
 			return {"shadows": true, "shadow_distance": 70.0, "msaa": Viewport.MSAA_DISABLED,
 				"blur_quality": 1, "blur_radius": 1.6, "glow": false, "ssao": false, "ssil": false, "cloud_shadows": true,
-				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3, "sharpen_strength": 0.0}
+				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3, "cliff_normal_quality": 0.0, "sharpen_strength": 0.0}
 		2:
 			return {"shadows": true, "shadow_distance": 110.0, "msaa": Viewport.MSAA_2X,
 				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": true, "ssil": false, "cloud_shadows": true,
-				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0, "terrain_detail_radius": 68.0, "mesh_lod_threshold": 1.0, "terrain_layer_budget": 4, "sharpen_strength": 0.14}
+				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0, "terrain_detail_radius": 68.0, "mesh_lod_threshold": 1.0, "terrain_layer_budget": 4, "cliff_normal_quality": 0.7, "sharpen_strength": 0.14}
 		_:
 			return {"shadows": true, "shadow_distance": 140.0, "msaa": Viewport.MSAA_4X,
 				"blur_quality": 2, "blur_radius": 3.0, "glow": true, "ssao": true, "ssil": true, "cloud_shadows": true,
-				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0, "terrain_detail_radius": 96.0, "mesh_lod_threshold": 0.75, "terrain_layer_budget": 13, "sharpen_strength": 0.22}
+				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0, "terrain_detail_radius": 96.0, "mesh_lod_threshold": 0.75, "terrain_layer_budget": 13, "cliff_normal_quality": 1.0, "sharpen_strength": 0.22}
 
 
 ## Native manual High/Ultra can use a small focused detail boost. Forward+ adaptive
@@ -95,6 +95,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# One global uniform adjusts every streamed terrain chunk; no resource reimport or per-chunk updates.
 	RenderingServer.global_shader_parameter_set(&"aa_terrain_detail_radius", float(p["terrain_detail_radius"]))
 	RenderingServer.global_shader_parameter_set(&"aa_terrain_layer_budget", int(p["terrain_layer_budget"]))
+	# Only High/Ultra near cliffs sample three extra rock normal projections.
+	RenderingServer.global_shader_parameter_set(&"aa_cliff_normal_quality",
+		float(p["cliff_normal_quality"]))
 	var world_profile: Dictionary = VisualProfiles.settings(_level)
 	# One uniform controls wet foliage highlights in every streamed nature batch.
 	# Performance skips specular detail without rebuilding any meshes.

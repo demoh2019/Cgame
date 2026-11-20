@@ -12,6 +12,7 @@ const SUITES := [
 	"res://tests/test_weather_wetness_shader.gd",
 	"res://tests/test_weather_surface_response.gd",
 	"res://tests/test_terrain_shader_lod.gd",
+	"res://tests/test_terrain_material_fidelity.gd",
 	"res://tests/test_graphics_quality.gd",
 	"res://tests/test_graphics_resolution.gd",
 	"res://tests/test_postprocess_sharpen.gd",
