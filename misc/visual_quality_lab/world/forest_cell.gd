@@ -18,6 +18,7 @@ var _foliage: ChunkedFoliage3D
 var _navigation_tile: StreamedNavigationTile3D
 var _npc: StreamedPatrolNPC3D
 var ai_enabled: bool = true
+var _rock: StaticBody3D
 var beacon_activated: bool = false
 var _beacon: MeshInstance3D
 
@@ -62,7 +63,12 @@ func _create_navigation_and_npc() -> void:
 	_navigation_tile = NavigationTile.new()
 	_navigation_tile.name = "NavigationTile"
 	_navigation_tile.tile_size = local_chunk_size
+	if cell_coord != Vector2i.ZERO:
+		# Navigation hole and actual physics blocker use the same footprint.
+		_navigation_tile.blocked_rectangles = [Rect2(Vector2(-1.1, -1.1), Vector2(2.2, 2.2))]
 	add_child(_navigation_tile)
+	if cell_coord != Vector2i.ZERO:
+		_create_rock_obstacle()
 	_npc = NPC.new()
 	_npc.name = "PatrolNPC"
 	_npc.cell_seed = Foliage.cell_seed(world_seed, cell_coord.x, cell_coord.y)
@@ -73,6 +79,27 @@ func _create_navigation_and_npc() -> void:
 	add_child(_npc)
 	set_quality(_quality_profile)
 	set_ai_enabled(ai_enabled)
+
+
+func _create_rock_obstacle() -> void:
+	_rock = StaticBody3D.new()
+	_rock.name = "NavigationRock"
+	_rock.position = Vector3(0.0, 1.0, 0.0)
+	var collider: CollisionShape3D = CollisionShape3D.new()
+	var shape: BoxShape3D = BoxShape3D.new()
+	shape.size = Vector3(2.2, 2.0, 2.2)
+	collider.shape = shape
+	_rock.add_child(collider)
+	var visual: MeshInstance3D = MeshInstance3D.new()
+	var mesh: BoxMesh = BoxMesh.new()
+	mesh.size = shape.size
+	visual.mesh = mesh
+	var material: StandardMaterial3D = StandardMaterial3D.new()
+	material.albedo_color = Color(0.31, 0.32, 0.35)
+	material.roughness = 0.91
+	visual.material_override = material
+	_rock.add_child(visual)
+	add_child(_rock)
 
 
 func get_stream_cell_coord() -> Vector2i:
