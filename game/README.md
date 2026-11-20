@@ -3096,3 +3096,55 @@ godot --headless --path game --script res://tests/run_all.gd
 This mechanic uses existing GDScript, scene UI, multiplayer RPCs and
 the server's current combat pipeline; no native engine extension
 is needed.
+
+
+## Guardian Retribution — shield interception into a counterstrike
+
+Guardian Intercept now has a short, high-commitment **retaliatory
+follow-up** that links party survival to MMORPG tank aggro control.
+The guardian must first activate a legitimate ally guard link and
+actually block an infected's melee strike. Neither the player nor a
+client RPC can arm this follow-up directly.
+
+- Once the server confirms the rescued ally's actual infected melee
+  hit, **the same infected challenges the guardian for 1.5 seconds**.
+  The challenge follows the existing bounded Zombie force-taunt logic
+  and threat table; fleeing outside its leash or entering safety ends
+  the forced focus normally.
+- A living, still-equipped guardian earns **4 seconds** to land **one
+  basic melee counterattack** against **that exact attacking infected**.
+  The server applies **+25% PvE damage** after the ordinary weapon,
+  mastery and combat bonuses. There is no extra free click: the player
+  must aim and physically hit using the normal authoritative melee
+  hit test and cooldown.
+- The **first normal melee swing consumes the mark even on a miss,
+  a wrong target or a PvP hit**, so timing and positioning matter.
+  Ranged shots, area skill activations, phantom equipment and
+  unrelated infected cannot claim this bonus.
+- Changing or losing the original melee weapon, leaving the group,
+  dying, riding, disconnecting, the marked infected dying or the
+  4-second expiration removes the counter. The marked target and
+  timer are **session-only**, never written to character saves.
+- A private per-player `you.guardian_counter_seconds` and
+  `you.guardian_counter_target` snapshot drives the tactical
+  **GUARD COUNTER READY** HUD message. A successful retaliation emits
+  one event visible only to the guardian. Public zombie snapshots
+  never contain another player's mark.
+- Ordinary PvP and the existing boss AoE, spitter acid and survival
+  damage pipelines remain unchanged; only a confirmed basic infected
+  melee hit can start this reaction.
+
+Implementation: `scripts/shared/guardian_retribution.gd`,
+`scripts/server/game_server.gd`, `scripts/shared/net.gd` and
+`scripts/client/hud.gd`. Tests in
+`tests/test_guardian_retribution.gd` cover a real zombie intercept,
+short aggro transfer, one basic counter, misses, duplicate attempts,
+weapon loss, party disbanding, expiry, death/respawn, invalid numbers
+and private network visibility.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+Current Godot combat, scene UI and multiplayer APIs are sufficient;
+this requires no native engine modifications.
