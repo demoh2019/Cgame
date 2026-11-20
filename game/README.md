@@ -2750,3 +2750,44 @@ godot --headless --path game --script res://tests/run_all.gd
 
 Existing Godot/Cgame RPCs, RefCounted scripts and HUD widgets suffice;
 no native engine modifications were required.
+
+
+## Raid warlord armor recovery — tactical counterattack after a slam
+
+The existing party raid boss now has a short, fully server-authoritative
+**armor-exposure window after its telegraphed ground slam resolves**.
+This connects the warning-and-dodge survival loop to a cooperative MMO
+counterattack phase without introducing any client-powered ability.
+
+- In the first phase, the living boss is exposed for **4 seconds** after
+  the actual area attack resolves. Once enraged, exposure lasts only
+  **2.5 seconds**. These are not pauses or stuns: the boss can still
+  fight back, and avoiding the circle remains necessary.
+- During that window, real server-confirmed player hits against the
+  **one currently active raid boss** deal **15% more PvE damage**.
+  Ordinary infected, unrelated bosses, player-versus-player damage,
+  hits before the slam and attacks after expiry gain nothing.
+  Existing party focus is checked independently; all real damage still
+  passes through the normal combat, threat, XP and loot pipeline.
+- The server resets the temporary exposure on boss death, retreat,
+  missing boss cleanup and the next spawn. It is **session-only** and
+  cannot be restored by save files, requested by an RPC or fabricated
+  from client-supplied timestamps.
+- Nearby clients see the precise remaining time in the boss snapshot
+  as `raid_exposed_seconds`. The online HUD announces the counterattack
+  after the existing `raid_slam` event and shows a short exposure
+  countdown. The event remains interest-radius filtered: distant
+  players do not receive the raid location.
+
+Implementation: `scripts/shared/raid_recovery.gd`,
+`scripts/server/game_server.gd`, `scripts/client/hud.gd`.
+The new `tests/test_raid_recovery.gd` suite is registered in
+`tests/run_all.gd` and covers phase durations, telegraphs, combat,
+dead/normal infected, snapshot privacy, expiration, and death cleanup.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+Existing Godot gameplay scripting and networking already support
+this feature; no native engine patches were necessary.
