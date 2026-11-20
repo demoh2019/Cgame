@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "audio_stream_player_3d.h"
+#include "audio_occlusion_policy.h"
 #include "audio_stream_player_3d.compat.inc"
 
 #include "core/config/project_settings.h"
@@ -382,6 +383,10 @@ static float _get_max_volume(const FixedVector<AudioFrame, AuSC::MAX_CHANNELS_PE
 
 // Interacts with PhysicsServer3D, so can only be called during _physics_process.
 Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
+	// Geometry obstruction changes only the direct path gain and highshelf
+	// cutoff. Keep existing distance falloff, source panning and bus reverb.
+	const AudioOcclusionPolicy::Response obstruction =
+			AudioOcclusionPolicy::evaluate(obstruction_amount, attenuation_filter_cutoff_hz);
 	Vector<AudioFrame> output_volume_vector;
 	output_volume_vector.resize(VOLUME_VECTOR_SIZE);
 	output_volume_vector.fill(AudioFrame(0, 0));
@@ -505,7 +510,7 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 		}
 
 		for (AudioFrame &frame : listener_volume_vector) {
-			frame *= multiplier;
+			frame *= multiplier * obstruction.gain;
 		}
 
 		_apply_max_volume_from_vector(output_volume_vector, listener_volume_vector);
@@ -553,7 +558,7 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 	}
 
 	for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
-		AudioServer::get_singleton()->set_playback_highshelf_params(playback, linear_attenuation, attenuation_filter_cutoff_hz);
+		AudioServer::get_singleton()->set_playback_highshelf_params(playback, linear_attenuation, obstruction.cutoff_hz);
 	}
 
 	bus_volumes.clear();
@@ -770,6 +775,21 @@ float AudioStreamPlayer3D::get_attenuation_filter_db() const {
 	return attenuation_filter_db;
 }
 
+void AudioStreamPlayer3D::set_obstruction_amount(float p_amount) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_amount), "Obstruction amount must be finite.");
+	const float amount = CLAMP(p_amount, 0.0f, 1.0f);
+	if (Math::is_equal_approx(obstruction_amount, amount)) {
+		return;
+	}
+	obstruction_amount = amount;
+	// Sound source filters are refreshed on the next physics/audio update.
+	force_update_panning = true;
+}
+
+float AudioStreamPlayer3D::get_obstruction_amount() const {
+	return obstruction_amount;
+}
+
 void AudioStreamPlayer3D::set_attenuation_model(AttenuationModel p_model) {
 	ERR_FAIL_INDEX((int)p_model, 4);
 	attenuation_model = p_model;
@@ -909,6 +929,8 @@ void AudioStreamPlayer3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_attenuation_filter_db", "db"), &AudioStreamPlayer3D::set_attenuation_filter_db);
 	ClassDB::bind_method(D_METHOD("get_attenuation_filter_db"), &AudioStreamPlayer3D::get_attenuation_filter_db);
+	ClassDB::bind_method(D_METHOD("set_obstruction_amount", "amount"), &AudioStreamPlayer3D::set_obstruction_amount);
+	ClassDB::bind_method(D_METHOD("get_obstruction_amount"), &AudioStreamPlayer3D::get_obstruction_amount);
 
 	ClassDB::bind_method(D_METHOD("set_attenuation_model", "model"), &AudioStreamPlayer3D::set_attenuation_model);
 	ClassDB::bind_method(D_METHOD("get_attenuation_model"), &AudioStreamPlayer3D::get_attenuation_model);
@@ -954,6 +976,8 @@ void AudioStreamPlayer3D::_bind_methods() {
 	ADD_GROUP("Attenuation Filter", "attenuation_filter_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "attenuation_filter_cutoff_hz", PROPERTY_HINT_RANGE, "1,20500,1,suffix:Hz"), "set_attenuation_filter_cutoff_hz", "get_attenuation_filter_cutoff_hz");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "attenuation_filter_db", PROPERTY_HINT_RANGE, "-80,0,0.1,suffix:dB"), "set_attenuation_filter_db", "get_attenuation_filter_db");
+	ADD_GROUP("Geometry Obstruction", "obstruction_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "obstruction_amount", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_obstruction_amount", "get_obstruction_amount");
 	ADD_GROUP("Doppler", "doppler_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "doppler_tracking", PROPERTY_HINT_ENUM, "Disabled,Idle,Physics"), "set_doppler_tracking", "get_doppler_tracking");
 
