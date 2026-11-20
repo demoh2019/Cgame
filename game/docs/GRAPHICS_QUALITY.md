@@ -7,7 +7,7 @@ The online client uses a configurable graphics profile. Press **Ctrl+F11** on th
 - **High**: 2× MSAA, farther shadows, 9-tap blur and glow where the renderer supports it.
 - **Ultra**: 4× MSAA, longest shadows, enhanced bloom and SSAO on Forward+.
 
-The project remains on the Compatibility renderer. SSAO and glow can be unavailable there; these flags take effect with a compatible Forward+ build. Game/network simulation and deterministic world generation are unchanged.
+The desktop project now starts with the **Forward+** renderer; Mobile and Web default to Compatibility. Forward+-only effects (SSAO, SSIL, volumetric fog and SSR) are disabled gracefully when the running renderer does not support them. Game/network simulation and deterministic world generation are unchanged.
 
 Grass tiles are already drawn as MultiMeshes. Their build-time CPU budget is reduced from 10 ms to 2.5 ms per frame across chunks to reduce hitching while streaming. A single tile may still exceed the budget because tile construction is synchronous.
 
@@ -98,3 +98,21 @@ For actual performance validation, compare GPU median/p95 frame time on represen
 ## Cinematic, renderer-aware volumetric lighting
 
 The live day/night/weather rig now creates a cheap low-level **height fog** on every renderer (including default Compatibility) and adds short-range, physically based **volumetric sunlight scattering** only on Forward+ High (48 m) and Ultra (72 m). Lower tiers and renderer fallbacks never allocate the volumetric pass. Density is clamped, smoothly animated with storms and low sun, and temporal reprojection is tuned to reduce ghosting. The existing shadow-cascade module uses the same shared fog policy instead of overriding its settings. See [CINEMATIC_FOG_RENDERING.md](CINEMATIC_FOG_RENDERING.md) for GPU budgets, testing and limitations.
+
+
+## Budgeted screen-space reflections (Forward+)
+
+The live `graphics_lighting.gd` pipeline now enables **Godot-native SSR** for the reflective parts of ruined settlements, worn pavement and rain-wet ground. This is a view-dependent specular reflection pass, not a replacement for the existing sky radiance/reflection fallback, and it does not affect translucent ocean water in the same way as opaque PBR surfaces.
+
+| Tier | SSR pass | Max ray steps | Renderer |
+| --- | --- | ---: | --- |
+| Performance | Off | 0 | All |
+| Balanced | Off | 0 | All |
+| High | On | 24 | Forward+ only |
+| Ultra | On | 48 | Forward+ only |
+
+The defaults use the engine's normal **half-resolution SSR** setting to avoid a full-resolution screen-wide raymarch. Depth tolerance is 0.20 and edge fade-in/out are 0.14/1.8 to limit typical screen-edge artifacts. An unsupported backend, or a lower preset selected at runtime, immediately disables the SSR flag. The effect is applied only on quality changes, not on each gameplay frame.
+
+This copies the *budgeting strategy*, not the renderer implementation, from HDRP-style screen-space reflections. Performance must be measured in the same scene at the same graphics scale with SSR off/High/Ultra, including wet ruined streets at sunset and indoor metallic equipment. Watch for screen-edge disappearance, ghost-like reflections and increased GPU frame time. SSR is a screen-space approximation and cannot reflect objects outside the camera view. The headless test suite checks profile limits, backend fallback and live property assignment; it cannot validate visual quality or actual GPU speed.
+
+Reference: [Godot environment SSR documentation](https://docs.godotengine.org/en/4.5/tutorials/3d/environment_and_post_processing.html).
