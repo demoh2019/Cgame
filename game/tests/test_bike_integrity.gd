@@ -99,7 +99,7 @@ func run(t) -> void:
 	t.near(float(sim.snapshot_for(318)["you"]["bike_integrity"]),
 		rider.bike_integrity, 0.0001,
 		"authoritative frame condition is replicated to owner")
-	var after_move := rider.bike_integrity
+	var after_move: float = rider.bike_integrity
 	rider.input_budget = 0.1
 	sim.submit_input(318, 2, 0.0, 0.0, false, 0.0, 0.1)
 	t.near(rider.bike_integrity, after_move, 0.0001,

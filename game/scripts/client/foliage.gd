@@ -15,9 +15,16 @@ uniform bool cut_out = false;
 uniform bool red_to_green = false;
 uniform bool instance_tinted = false; // Decor MultiMeshes carry a per-instance colour; other meshes may have dark vertex colours.
 varying vec3 instance_tint;
+varying vec3 plant_hue;
 varying vec2 cloud_xz;
 void vertex() {
 	instance_tint = instance_tinted ? COLOR.rgb : vec3(1.0);
+	// Every plant a slightly different green (some yellower, some bluer, some darker), as in a real wood: identical
+	// copies of one tree are what make a forest look artificial.
+	vec2 root = MODEL_MATRIX[3].xz;
+	float h1 = fract(sin(dot(root, vec2(12.9898, 78.233))) * 43758.5453);
+	float h2 = fract(sin(dot(root, vec2(39.346, 11.135))) * 24634.6345);
+	plant_hue = mix(vec3(0.86, 0.94, 0.86), vec3(1.1, 1.06, 0.84), h1) * mix(0.84, 1.08, h2);
 	vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	cloud_xz = w.xz;
 	float k = clamp(VERTEX.y / height_ref, 0.0, 1.0);
@@ -29,9 +36,13 @@ void vertex() {
 void fragment() {
 	vec4 t = texture(albedo_tex, UV) * albedo_color;
 	if (red_to_green) {
-		t.rgb = vec3(t.g * 0.8, t.r * 0.92, t.b * 0.7);
+		// The red autumn leaves become a natural summer green: their brightness drives a deep-to-sunlit leaf ramp, so the
+		// shading of the painted leaves stays and the colour is never the acid green of a plain channel swap.
+		float lum = clamp(dot(t.rgb, vec3(0.6, 0.3, 0.1)) * 1.25, 0.0, 1.0);
+		t.rgb = mix(vec3(0.09, 0.17, 0.06), vec3(0.44, 0.58, 0.21), lum);
 	}
-	ALBEDO = apply_cloud_shadow(t.rgb * instance_tint, cloud_xz, TIME);
+	vec3 hue = cut_out ? plant_hue : mix(vec3(1.0), plant_hue, 0.35);
+	ALBEDO = apply_cloud_shadow(t.rgb * instance_tint * hue, cloud_xz, TIME);
 	// Both sides of a blade are lit as if they faced the viewer: otherwise half the grass turns black.
 	if (!FRONT_FACING) {
 		NORMAL = -NORMAL;

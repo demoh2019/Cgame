@@ -22,7 +22,7 @@ func _ambush_point(world, offer: Dictionary) -> Vector3:
 	var source := Vector2(float(offer["src_x"]), float(offer["src_z"]))
 	for radius in [760.0, 820.0, 900.0, 1100.0, 1200.0]:
 		for i in range(96):
-			var point := Vector2.from_angle(TAU * float(i) / 96.0) * radius
+			var point: Vector2 = Vector2.from_angle(TAU * float(i) / 96.0) * radius
 			if point.distance_to(source) < 120.0 or world.zone_at(point.x, point.y) != 2 \
 					or world.is_water(point.x, point.y) or world.normal_at(point.x, point.y).y < 0.8:
 				continue

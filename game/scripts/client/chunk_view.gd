@@ -338,7 +338,8 @@ func _build_terrain(origin: Vector2) -> void:
 const TREES_BY_BIOME := {
 	"forest": ["CommonTree_1", "CommonTree_2", "CommonTree_3", "CommonTree_4", "CommonTree_5", "Pine_1", "Pine_2", "Pine_3", "painted:0", "painted:1", "painted:2", "painted:3", "painted:4"],
 	"plains": ["CommonTree_1", "CommonTree_2", "CommonTree_4", "painted:5", "painted:6", "painted:7"],
-	"swamp": ["DeadTree_1", "DeadTree_2", "DeadTree_3", "DeadTree_4", "DeadTree_5", "TwistedTree_1", "TwistedTree_2", "TwistedTree_3", "TwistedTree_4"],
+	# Wet woodland, alive and overgrown: twisted alders and broad trees, a rare drowned snag for the mood.
+	"swamp": ["TwistedTree_1", "TwistedTree_2", "TwistedTree_3", "TwistedTree_4", "TwistedTree_1", "TwistedTree_3", "CommonTree_3", "CommonTree_5", "painted:8", "painted:9", "DeadTree_1"],
 	"mountain": ["Pine_1", "Pine_2", "Pine_3", "Pine_4", "Pine_5", "DeadTree_2"],
 	"beach": ["CommonTree_2", "CommonTree_5", "Pine_4"],
 }
@@ -447,7 +448,14 @@ func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> fl
 	match base:
 		"tree":
 			if _use_nature:
-				return rng.randf_range(0.85, 1.25)
+				# Mostly mature trees, a few saplings and now and then an old giant that towers over the canopy: the
+				# height range is what gives a wood its silhouette.
+				var age: float = rng.randf()
+				if age < 0.1:
+					return rng.randf_range(1.55, 1.95)
+				if age < 0.25:
+					return rng.randf_range(0.6, 0.8)
+				return rng.randf_range(0.9, 1.3)
 			return Assets.TREE_SCALE * rng.randf_range(0.85, 1.3)
 		"rock":
 			if ModelCatalog.has_scanned_rocks():
@@ -564,7 +572,7 @@ func _build_objects(data: Dictionary) -> void:
 		add_child(instance)
 		_groups[kind] = {"multimesh": multimesh, "index": index, "transforms": transforms}
 	if _use_nature:
-		_build_decor(origin, rng)
+		_build_decor(origin, rng, data["nodes"])
 	_build_windmills(windmills, origin)
 	_build_signposts(origin)
 	_build_npcs(data.get("npcs", []))
@@ -737,33 +745,31 @@ static func _ore_material(mesh: Mesh) -> Material:
 
 
 # Decoration that exists only on the client: it never blocks anyone, so the server knows nothing about it.
-# `count` is tries per chunk; `cluster` how strongly the lushness noise gathers it into meadows and thickets (0: even);
-# `range` how far away it is still drawn. Grass and flowers grow in drifts, bushes at forest edges, mushrooms in the shade.
+# Every piece has a place it belongs to, as in a real landscape and as environment artists compose one (detail
+# gathered in zones, calm open ground between them, roughly 70/30), instead of an even sprinkle that reads as noise:
+#   "tree":   around tree trunks (ferns, mushrooms, bushes, the forest floor's branches, bark and roots);
+#   "rock":   around rocks and ore (scree, pebbles);
+#   "meadow": in drifts on the lushest open ground away from trees (flowers, petals, tall grass);
+#   "rare":   a few single accents per chunk (boulders, a standing stone).
+# chance: share of anchors that get any; per: [min, max] pieces at such an anchor; ring: [min, max] metres from it.
 const DECOR := [
-	{"file": "Grass_Common_Tall", "count": 28, "scale": [0.6, 2.1], "biomes": ["forest", "plains", "swamp"], "cluster": 0.8, "range": 95.0},
-	{"file": "Grass_Wispy_Tall", "count": 24, "scale": [0.7, 2.3], "biomes": ["plains", "swamp", "beach"], "cluster": 0.9, "range": 95.0},
-	{"file": "Clover_1", "count": 40, "scale": [0.9, 1.5], "biomes": ["forest", "plains"], "cluster": 0.7, "range": 60.0},
-	{"file": "Clover_2", "count": 30, "scale": [0.9, 1.5], "biomes": ["forest", "plains"], "cluster": 0.7, "range": 60.0},
-	{"file": "Fern_1", "count": 32, "scale": [0.5, 1.9], "biomes": ["forest", "swamp"], "cluster": 0.8, "range": 110.0},
-	{"file": "Plant_1", "count": 18, "scale": [0.8, 1.3], "biomes": ["forest", "swamp"], "cluster": 0.6, "range": 100.0},
-	{"file": "Plant_1_Big", "count": 10, "scale": [0.8, 1.2], "biomes": ["forest", "swamp"], "cluster": 0.6, "range": 130.0},
-	{"file": "Bush_Common", "count": 34, "scale": [0.8, 1.5], "biomes": ["forest", "plains", "swamp"], "cluster": 1.0, "range": 170.0},
-	{"file": "Bush_Common_Flowers", "count": 16, "scale": [0.8, 1.4], "biomes": ["forest", "plains"], "cluster": 1.0, "range": 170.0},
-	{"file": "Flower_3_Group", "count": 40, "scale": [0.8, 1.3], "biomes": ["plains", "forest"], "cluster": 1.2, "range": 90.0},
-	{"file": "Flower_4_Group", "count": 36, "scale": [0.8, 1.3], "biomes": ["plains"], "cluster": 1.2, "range": 90.0},
-	{"file": "Flower_3_Single", "count": 25, "scale": [0.8, 1.4], "biomes": ["plains", "forest", "beach"], "cluster": 1.0, "range": 60.0},
-	{"file": "Flower_4_Single", "count": 25, "scale": [0.8, 1.4], "biomes": ["plains"], "cluster": 1.0, "range": 60.0},
-	{"file": "Petal_1", "count": 14, "scale": [0.8, 1.6], "biomes": ["plains", "forest"], "cluster": 1.2, "range": 50.0},
-	{"file": "Mushroom_Common", "count": 16, "scale": [0.9, 1.7], "biomes": ["forest", "swamp"], "cluster": 0.9, "range": 70.0},
-	{"file": "Mushroom_Laetiporus", "count": 6, "scale": [0.9, 1.5], "biomes": ["forest", "swamp"], "cluster": 0.9, "range": 70.0},
-	{"file": "Pebble_Round_1", "count": 40, "scale": [0.4, 2.6], "biomes": ["forest", "plains", "beach", "mountain", "swamp"], "cluster": 0.0, "range": 80.0},
-	{"file": "Pebble_Round_3", "count": 30, "scale": [0.8, 1.8], "biomes": ["forest", "plains", "beach", "mountain"], "cluster": 0.0, "range": 80.0},
-	{"file": "Pebble_Round_5", "count": 20, "scale": [0.4, 3.0], "biomes": ["forest", "plains", "mountain"], "cluster": 0.0, "range": 80.0},
-	{"file": "Pebble_Square_4", "count": 16, "scale": [0.8, 2.0], "biomes": ["plains", "mountain", "swamp"], "cluster": 0.0, "range": 80.0},
-	{"file": "Pebble_Square_2", "count": 24, "scale": [0.8, 1.8], "biomes": ["plains", "beach", "mountain"], "cluster": 0.0, "range": 80.0},
+	{"file": "Fern_1", "anchor": "tree", "chance": 0.55, "per": [1, 4], "ring": [0.8, 3.6], "scale": [0.6, 1.7], "biomes": ["forest", "swamp", "plains"], "range": 110.0},
+	{"file": "Bush_Common", "anchor": "tree", "chance": 0.3, "per": [1, 2], "ring": [1.4, 3.8], "scale": [0.8, 1.6], "biomes": ["forest", "plains", "swamp"], "range": 170.0},
+	{"file": "Plant_1_Big", "anchor": "tree", "chance": 0.08, "per": [1, 1], "ring": [1.0, 3.0], "scale": [0.8, 1.2], "biomes": ["forest", "swamp"], "range": 130.0},
+	{"file": "Mushroom_Common", "anchor": "tree", "chance": 0.22, "per": [1, 3], "ring": [0.5, 1.6], "scale": [0.7, 1.6], "biomes": ["forest", "swamp"], "range": 70.0},
+	{"file": "Mushroom_Laetiporus", "anchor": "tree", "chance": 0.08, "per": [1, 2], "ring": [0.4, 1.0], "scale": [0.8, 1.4], "biomes": ["forest", "swamp"], "range": 70.0},
+	{"file": "Pebble_Round_1", "anchor": "rock", "chance": 0.8, "per": [2, 6], "ring": [0.9, 2.8], "scale": [0.4, 2.2], "biomes": ["forest", "plains", "beach", "mountain", "swamp"], "range": 80.0},
+	{"file": "Pebble_Square_2", "anchor": "rock", "chance": 0.5, "per": [1, 3], "ring": [1.0, 3.0], "scale": [0.6, 1.8], "biomes": ["plains", "beach", "mountain"], "range": 80.0},
+	{"file": "Flower_3_Group", "anchor": "meadow", "chance": 1.0, "per": [10, 18], "ring": [0.0, 4.5], "scale": [0.8, 1.3], "biomes": ["plains", "forest"], "range": 95.0},
+	{"file": "Flower_4_Group", "anchor": "meadow", "chance": 0.8, "per": [8, 14], "ring": [0.0, 4.0], "scale": [0.8, 1.3], "biomes": ["plains"], "range": 95.0},
+	{"file": "Flower_3_Single", "anchor": "meadow", "chance": 1.0, "per": [8, 14], "ring": [1.5, 6.5], "scale": [0.8, 1.4], "biomes": ["plains", "forest", "beach"], "range": 70.0},
+	{"file": "Flower_4_Single", "anchor": "meadow", "chance": 0.8, "per": [6, 12], "ring": [1.5, 6.5], "scale": [0.8, 1.4], "biomes": ["plains"], "range": 70.0},
+	{"file": "Bush_Common_Flowers", "anchor": "meadow", "chance": 0.6, "per": [1, 2], "ring": [4.0, 7.0], "scale": [0.8, 1.4], "biomes": ["forest", "plains"], "range": 170.0},
+	{"file": "Grass_Wispy_Tall", "anchor": "meadow", "chance": 0.7, "per": [4, 8], "ring": [3.0, 7.5], "scale": [0.8, 2.0], "biomes": ["plains", "swamp", "beach"], "range": 95.0},
+	{"file": "Petal_1", "anchor": "meadow", "chance": 0.6, "per": [3, 6], "ring": [0.0, 3.5], "scale": [0.8, 1.6], "biomes": ["plains", "forest"], "range": 50.0},
 ]
-# Grass is never quite one colour: each blade group is tinted between these.
-const GRASS_TINTS := [Color(1.2, 1.2, 1.15), Color(1.05, 1.15, 0.95), Color(1.25, 1.2, 0.95), Color(1.1, 1.08, 0.88)]
+const MEADOWS_PER_CHUNK := 3
+const MEADOW_CLEARANCE := 7.0 # Metres from the nearest tree for a meadow's heart.
 
 
 static func _on_road(pieces: Array, point: Vector2, clearance: float) -> bool:
@@ -776,7 +782,58 @@ static func _on_road(pieces: Array, point: Vector2, clearance: float) -> bool:
 	return false
 
 
-func _build_decor(origin: Vector2, rng: RandomNumberGenerator) -> void:
+## Where the meadows' hearts are in this chunk: the lushest open spots, well away from trees and roads.
+func _meadow_centers(origin: Vector2, trees: Array, road_pieces: Array) -> Array:
+	var candidates: Array = []
+	for j in 8:
+		for i in 8:
+			var spot := origin + Vector2(float(i) + 0.5, float(j) + 0.5) * (Defs.CHUNK_SIZE / 8.0)
+			var lush: float = GrassField.lushness(spot.x, spot.y)
+			if lush < 0.55 or _world.is_water(spot.x, spot.y) or _on_road(road_pieces, spot, 4.0):
+				continue
+			var open := true
+			for tree in trees:
+				if spot.distance_squared_to(tree) < MEADOW_CLEARANCE * MEADOW_CLEARANCE:
+					open = false
+					break
+			if open:
+				candidates.append([lush, spot])
+	candidates.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) > float(b[0]))
+	var picked: Array = []
+	for candidate in candidates:
+		var spot: Vector2 = candidate[1]
+		var spaced := true
+		for other in picked:
+			if spot.distance_to(other) < 18.0:
+				spaced = false
+				break
+		if spaced:
+			picked.append(spot)
+		if picked.size() >= MEADOWS_PER_CHUNK:
+			break
+	return picked
+
+
+## Positions for one decor entry around its anchors (world x, z), clipped to this chunk and kept off water and roads.
+func _anchored_spots(entry: Dictionary, anchors: Array, origin: Vector2, rng: RandomNumberGenerator, road_pieces: Array, road_clear: float) -> Array:
+	var spots: Array = []
+	var ring: Array = entry.get("ring", [0.5, 3.0])
+	var per: Array = entry.get("per", [1, 1])
+	for anchor in anchors:
+		if rng.randf() > float(entry.get("chance", 1.0)):
+			continue
+		for k in rng.randi_range(int(per[0]), int(per[1])):
+			# Denser toward the anchor (square-root falloff would spread evenly; a plain random radius gathers them).
+			var at: Vector2 = anchor + Vector2.from_angle(rng.randf() * TAU) * lerpf(float(ring[0]), float(ring[1]), rng.randf())
+			if at.x < origin.x or at.y < origin.y or at.x >= origin.x + Defs.CHUNK_SIZE or at.y >= origin.y + Defs.CHUNK_SIZE:
+				continue
+			if _world.is_water(at.x, at.y) or not (_world.biome_at(at.x, at.y) in entry["biomes"]) or _on_road(road_pieces, at, road_clear):
+				continue
+			spots.append(at)
+	return spots
+
+
+func _build_decor(origin: Vector2, rng: RandomNumberGenerator, nodes: Array = []) -> void:
 	if _raw_heights.size() == SAMPLES * SAMPLES and _biome_names.size() == BIOME_TEXELS * BIOME_TEXELS:
 		_grass_source = GrassField.Source.new(origin, _raw_heights, SAMPLES, _biome_names, BIOME_TEXELS, _road_data, _patches)
 		set_process(true)
@@ -786,38 +843,34 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator) -> void:
 	# Nothing grows on the roads (they are 1 m wider here than the drawn dirt, so blades never lean onto it).
 	var road_pieces: Array = _world.roads.pieces_in_cell(cell) if _world.roads != null else []
 	var road_clear: float = WorldRoads.HALF_WIDTH + 1.0
+	var anchors := {"tree": [], "rock": [], "meadow": [], "rare": []}
+	for node in nodes:
+		var at := Vector2(float(node["x"]), float(node["z"]))
+		match str(node["kind"]):
+			"tree":
+				anchors["tree"].append(at)
+			"rock", "ore":
+				anchors["rock"].append(at)
+	anchors["meadow"] = _meadow_centers(origin, anchors["tree"], road_pieces)
+	for k in 2:
+		anchors["rare"].append(origin + Vector2(rng.randf(), rng.randf()) * Defs.CHUNK_SIZE)
 	for entry in DECOR:
 		var file := String(entry["file"])
 		var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(file), "decor:" + file, 0.0 if file.begins_with("Pebble") or file.begins_with("Petal") else (0.2 if file.begins_with("Grass") else 0.12))
 		if mesh == null:
 			continue
-		var cluster: float = float(entry["cluster"])
-		var spots: Array = []
-		for i in int(entry["count"]):
-			var x := origin.x + rng.randf() * Defs.CHUNK_SIZE
-			var z := origin.y + rng.randf() * Defs.CHUNK_SIZE
-			# Lush spots keep almost every try, bare ones few: drifts and clearings instead of an even carpet.
-			var keep: float = clampf(1.0 - cluster + cluster * 1.6 * GrassField.lushness(x, z), 0.05, 1.0)
-			if rng.randf() > keep:
-				continue
-			if _world.is_water(x, z) or not (_world.biome_at(x, z) in entry["biomes"]) or _on_road(road_pieces, Vector2(x, z), road_clear):
-				continue
-			spots.append(Vector3(x, _world.height_at(x, z), z))
-		if spots.is_empty():
+		var places: Array = _anchored_spots(entry, anchors[str(entry["anchor"])], origin, rng, road_pieces, road_clear)
+		if places.is_empty():
 			continue
 		var multimesh := MultiMesh.new()
 		multimesh.transform_format = MultiMesh.TRANSFORM_3D
-		multimesh.use_colors = true
 		multimesh.mesh = mesh
-		multimesh.instance_count = spots.size()
-		# No per-instance tint: the kit keeps its wind weights in the vertex colours, which the instance colour would multiply.
-		var tinted := false
-		for i in spots.size():
+		multimesh.instance_count = places.size()
+		for i in places.size():
+			var at: Vector2 = places[i]
 			var size := rng.randf_range(float(entry["scale"][0]), float(entry["scale"][1]))
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
-			multimesh.set_instance_transform(i, Transform3D(basis, Vector3(spots[i].x - origin.x, spots[i].y - 0.02, spots[i].z - origin.y)))
-			var tint: Color = GRASS_TINTS[rng.randi() % GRASS_TINTS.size()] if tinted else Color.WHITE
-			multimesh.set_instance_color(i, tint)
+			multimesh.set_instance_transform(i, Transform3D(basis, Vector3(at.x - origin.x, _world.height_at(at.x, at.y) - 0.02, at.y - origin.y)))
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
 		# Bushes are big enough to cast a shadow; the rest would only cost time.
@@ -825,7 +878,7 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator) -> void:
 		instance.visibility_range_end = float(entry["range"])
 		instance.visibility_range_end_margin = 8.0
 		add_child(instance)
-	# Logs, stumps, painted flowers and the odd standing stone from the loose collections.
+	# Logs, branches, roots, scree and the odd standing stone, each where it belongs.
 	for entry in ModelCatalog.available("decor", ModelCatalog.DECOR_EXTRA):
 		var extra_mesh: Mesh = ModelCatalog.entry_mesh(entry)
 		if extra_mesh == null:
@@ -833,23 +886,17 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator) -> void:
 		var size_range: Array = entry.get("scale", [0.8, 1.3])
 		var group: int = int(entry.get("group", 0))
 		var placed: Array = [] # [position, scale]
-		for i in int(entry["count"]):
-			var x := origin.x + rng.randf() * Defs.CHUNK_SIZE
-			var z := origin.y + rng.randf() * Defs.CHUNK_SIZE
-			if _world.is_water(x, z) or not (_world.biome_at(x, z) in entry["biomes"]) or _on_road(road_pieces, Vector2(x, z), road_clear):
-				continue
+		for at in _anchored_spots(entry, anchors[str(entry.get("anchor", "rare"))], origin, rng, road_pieces, road_clear):
 			# Sizes lean small: many little ones, now and then a big one.
 			var t: float = rng.randf()
 			var main_scale: float = lerpf(float(size_range[0]), float(size_range[1]), t * t)
-			placed.append([Vector3(x, _world.height_at(x, z), z), main_scale])
+			placed.append([at, main_scale])
 			# A few smaller ones lying around it, as stones and sticks really do.
 			for k in group:
-				var around := Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(0.8, 2.6) * main_scale
-				var sx: float = x + around.x
-				var sz: float = z + around.y
-				if sx < origin.x or sz < origin.y or sx >= origin.x + Defs.CHUNK_SIZE or sz >= origin.y + Defs.CHUNK_SIZE or _world.is_water(sx, sz):
+				var around: Vector2 = at + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(0.8, 2.6) * main_scale
+				if around.x < origin.x or around.y < origin.y or around.x >= origin.x + Defs.CHUNK_SIZE or around.y >= origin.y + Defs.CHUNK_SIZE or _world.is_water(around.x, around.y):
 					continue
-				placed.append([Vector3(sx, _world.height_at(sx, sz), sz), main_scale * rng.randf_range(0.25, 0.6)])
+				placed.append([around, main_scale * rng.randf_range(0.25, 0.6)])
 		if placed.is_empty():
 			continue
 		var extra := MultiMesh.new()
@@ -857,11 +904,11 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator) -> void:
 		extra.mesh = extra_mesh
 		extra.instance_count = placed.size()
 		for i in placed.size():
-			var where: Vector3 = placed[i][0]
+			var where: Vector2 = placed[i][0]
 			# Tilted a little, sunk a little: lying in the ground for ages, not placed on it.
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).rotated(Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)).normalized(), rng.randf_range(0.0, 0.12))
 			basis = basis.scaled(Vector3.ONE * float(placed[i][1]))
-			extra.set_instance_transform(i, Transform3D(basis, Vector3(where.x - origin.x, where.y - 0.06 * float(placed[i][1]), where.z - origin.y)))
+			extra.set_instance_transform(i, Transform3D(basis, Vector3(where.x - origin.x, _world.height_at(where.x, where.y) - 0.06 * float(placed[i][1]), where.y - origin.y)))
 		var extra_instance := MultiMeshInstance3D.new()
 		extra_instance.multimesh = extra
 		extra_instance.visibility_range_end = 140.0

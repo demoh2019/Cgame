@@ -65,12 +65,12 @@ static var _material: ShaderMaterial
 const BIOME_GRASS := {
 	"forest": [Color(0.24, 0.37, 0.14), Color(0.31, 0.37, 0.16)],
 	"plains": [Color(0.26, 0.4, 0.15), Color(0.42, 0.44, 0.21)],
-	"swamp": [Color(0.26, 0.31, 0.16), Color(0.33, 0.35, 0.18)],
+	"swamp": [Color(0.22, 0.34, 0.14), Color(0.3, 0.36, 0.16)],
 	"beach": [Color(0.42, 0.45, 0.25), Color(0.52, 0.5, 0.3)],
 	"mountain": [Color(0.31, 0.39, 0.2), Color(0.39, 0.42, 0.24)],
 }
 # How much of the ground each biome covers.
-const BIOME_DENSITY := {"forest": 0.9, "plains": 1.0, "swamp": 0.75, "beach": 0.25, "mountain": 0.55}
+const BIOME_DENSITY := {"forest": 0.95, "plains": 1.0, "swamp": 0.95, "beach": 0.25, "mountain": 0.6}
 
 
 ## 0..1: how lush the ground is here. Smooth noise from fixed hashes, so every client grows the same meadows.
