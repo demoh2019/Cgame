@@ -45,6 +45,7 @@ const WorldOverlay = preload("res://scripts/client/world_overlay.gd")
 const HelpPanel = preload("res://scripts/client/help_panel.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Effects = preload("res://scripts/client/effects.gd")
+const ImpactDecals = preload("res://scripts/client/impact_decals.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const TitleBanner = preload("res://scripts/client/title_banner.gd")
 const LocalServer = preload("res://scripts/client/local_server.gd")
@@ -95,6 +96,7 @@ var _auto_graphics := true
 var _quality_picker: OptionButton
 var effects
 var _footprints: Node3D
+var decals
 var skills_panel
 var social
 var chat_edit: LineEdit
@@ -327,6 +329,8 @@ func _build_environment() -> void:
 	_footprints = FootprintDecals.new()
 	_footprints.name = "TerrainFootprints"
 	add_child(_footprints)
+	decals = ImpactDecals.new()
+	add_child(decals)
 	# The finishing pass over the 3D view (tilt-shift, grading, vignette), drawn under every interface layer.
 	var post := CanvasLayer.new()
 	post.layer = -10
@@ -800,11 +804,13 @@ func _spawn_effects(event: Dictionary) -> void:
 		"hit":
 			if str(event.get("kind", "")) == "zombie":
 				effects.hit_zombie(at)
+				decals.splat(at, Color(0.3, 0.42, 0.12, 0.85), 0.8)
 				entities.play_hit("zombie", int(event.get("id", -1)), float(event.get("damage", 0.0)) >= 30.0)
 				if at.distance_to(here) < 4.0:
 					_shake(0.12) # Your own blow landing.
 			else:
 				effects.hit_player(at)
+				decals.splat(at, Color(0.45, 0.04, 0.04, 0.85), 0.7)
 				if int(event.get("id", -1)) == client.peer_id:
 					_shake(0.42) # You were hit.
 					if avatar_model != null:
@@ -813,6 +819,7 @@ func _spawn_effects(event: Dictionary) -> void:
 					entities.play_hit("player", int(event.get("id", -1)))
 		"zombie_died":
 			effects.zombie_died(at)
+			decals.splat(at, Color(0.25, 0.35, 0.1, 0.9), 1.6)
 			if at.distance_to(here) < 6.0:
 				_shake(0.18)
 		"restoration_pulse":
@@ -1259,6 +1266,7 @@ func _update_time_of_day(delta: float) -> void:
 	_set_carried_light(underground)
 	if audio != null:
 		audio.update_music(WorldCycle.daylight(clock), delta)
+		audio.update_reverb(underground, _visual_biome, delta)
 	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO, atmosphere.storm)
 	if client != null and client.you.has("x"):
 		var here: Vector3 = client.display_position()

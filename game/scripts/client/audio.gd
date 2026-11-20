@@ -3,6 +3,8 @@ extends Node
 
 const Assets = preload("res://scripts/client/assets.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
+const ReverbZones = preload("res://scripts/client/reverb_zones.gd")
+var _sfx_bus := -1
 
 var _ambience: AudioStreamPlayer
 var _steps: AudioStreamPlayer
@@ -26,6 +28,7 @@ var _combat_left := 0.0
 
 
 func _ready() -> void:
+	_sfx_bus = ReverbZones.ensure_bus()
 	_ambience = AudioStreamPlayer.new()
 	_ambience.stream = Assets.sound("ambience")
 	_ambience.volume_db = -22.0
@@ -143,6 +146,7 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	player.volume_db = volume_db
 	player.unit_size = 14.0
 	player.max_distance = 90.0
+	player.bus = ReverbZones.BUS
 	add_child(player)
 	player.global_position = position
 	player.finished.connect(player.queue_free)
@@ -158,6 +162,11 @@ func play_ui(sound_name: String, volume_db: float = -6.0) -> void:
 	add_child(player)
 	player.finished.connect(player.queue_free)
 	player.play()
+
+
+## Glides world-sound reverb toward the listener's acoustic zone (cave, forest, open ground).
+func update_reverb(underground: bool, biome: String, delta: float) -> void:
+	ReverbZones.blend(ReverbZones.reverb(_sfx_bus), ReverbZones.zone_for(underground, biome), 1.0 - exp(-2.0 * delta))
 
 
 ## Reacts to one server event. `height` is the ground height used for positions without one.
