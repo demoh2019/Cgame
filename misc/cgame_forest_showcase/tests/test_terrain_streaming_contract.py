@@ -420,6 +420,10 @@ class StreamedTerrainContracts(TestCase):
         assert "world_partition.are_cells_loaded(cell, 0)" in world
         assert "_position_has_terrain" in player
         assert "WORLD_CELLS_PER_SIDE: int = 32" in world
+        assert "world_partition.set_cell_scenes(registered_cells)" in world
+        assert 'registered_cells[Vector2i(cx, cz)] = "res://cells/forest_cell.tscn"' in world
+        assert "world_partition.set_cell_scene(" not in world
+
         assert "WORLD_EXTENT: float = 512.0" in world
 
         cache = (ROOT / "scripts/terrain_tile_cache.gd").read_text(encoding="utf-8")
