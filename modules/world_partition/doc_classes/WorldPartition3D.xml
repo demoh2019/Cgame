@@ -5,7 +5,7 @@
 	</brief_description>
 	<description>
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
-		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work. Optional predictive streaming can preload one cell ahead of the observer using [member predictive_velocity], [member predictive_lookahead_seconds], and [member predictive_max_distance]. Current cells and pinned hubs always take priority over speculative work. [method set_streaming_source] registers up to 8 named world-space sources (radius 0 or 1 cell) for mission targets, cameras and portals. They run after observer cells and pinned hubs, before the speculative velocity forecast, using the same asynchronous work budgets. For fast travel, use [method get_streaming_source_progress] and [method is_streaming_source_ready] to wait non-blockingly for registered destination scenes to instantiate; do not assume the source is ready immediately after registration. They are runtime-only, not persistent pins.
+		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work. Optional predictive streaming can preload one cell ahead of the observer using [member predictive_velocity], [member predictive_lookahead_seconds], and [member predictive_max_distance]. Current cells and pinned hubs always take priority over speculative work. [method set_streaming_source] registers up to 8 named world-space sources (radius 0 or 1 cell) for mission targets, cameras and portals. They run after observer cells and pinned hubs, before the speculative velocity forecast, using the same asynchronous work budgets. Each source has a priority 0 through 3; urgent sources are scheduled before background sources without starving immediate observer work. Equal priorities use stable alphabetical ordering by name. For fast travel, use [method get_streaming_source_progress] and [method is_streaming_source_ready] to wait non-blockingly for registered destination scenes to instantiate; do not assume the source is ready immediately after registration. They are runtime-only, not persistent pins.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries. For persistent camps or quest hubs, use [method pin_cell] and [method unpin_cell] to override distance-based unloading. At most 128 registered cells may be pinned; a disabled streamer still unloads all cells.
 		Optionally set [member detail_radius] to enable near/distant scene-detail callbacks. A cell root script must implement [code]set_streaming_lod(level)[/code], where 0 means near detail and 1 means distant. The engine invokes this method before the new root enters the tree (so its [code]_ready()[/code] can generate only the required content), and again when an existing cell changes tier. Changes are bounded by [member max_detail_transitions_per_frame]. Optionally increase [member detail_hysteresis_cells] to suppress LOD oscillation while the observer moves around grid boundaries. Pinned cells always receive level 0. This does not generate simplified meshes automatically; the scene script must provide both representations.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
@@ -19,10 +19,25 @@
 		partition.set_cell_scene(Vector2i(0, 0), "res://world/cell_0_0.tscn")
 		partition.set_cell_scene(Vector2i(-1, 0), "res://world/cell_-1_0.tscn")
 		[/codeblock]
-		For example, [code]partition.set_streaming_source("quest", $Objective.global_position, 0)[/code] keeps the objective's scene cell loaded while the player explores; call [code]partition.remove_streaming_source("quest")[/code] after completion. This requires a valid configured observer. It never automatically registers a [PackedScene] for a source cell.
+		For example, [code]partition.set_streaming_source("quest", $Objective.global_position, 0, 0)[/code] keeps the objective's scene cell loaded while the player explores; call [code]partition.remove_streaming_source("quest")[/code] after completion. This requires a valid configured observer. It never automatically registers a [PackedScene] for a source cell.
 		Streaming is disabled while editing a scene; the node processes automatically while the game runs. Call [method update_streaming] if an immediate update is required after moving the observer.
 	</description>
 	<methods>
+		<method name="set_streaming_source_priority">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="priority" type="int" />
+			<description>
+				Changes an existing named source's priority without moving it or changing its radius. Valid values are 0 (background), 1 (normal), 2 (important), 3 (urgent). Returns [code]false[/code] if the name is unknown or the priority is invalid. Only work waiting for a frame budget is reordered; already-running threaded resource requests are not preempted.
+			</description>
+		</method>
+		<method name="get_streaming_source_priority" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the registered source priority between 0 and 3. Returns -1 for unknown source names. Higher values are processed first after the primary observer and pinned hub cells.
+			</description>
+		</method>
 		<method name="get_streaming_source_cell_count" qualifiers="const">
 			<return type="int" />
 			<param index="0" name="name" type="String" />
@@ -69,9 +84,10 @@
 			<return type="bool" />
 			<param index="0" name="name" type="String" />
 			<param index="1" name="global_position" type="Vector3" />
-			<param index="2" name="radius" type="int" />
+			<param index="2" name="radius" type="int" default="0" />
+			<param index="3" name="priority" type="int" default="1" />
 			<description>
-				Registers or updates one named extra streaming source at the given world-space position. Radius can be 0 or 1 cell (default 0). Returns [code]false[/code] for invalid data or when creating a ninth source; updating an existing one is allowed. It shares existing asynchronous request and instantiation budgets. This runtime state is not serialized.
+				Registers or updates one named extra streaming source at the given world-space position. Radius can be 0 or 1 cell (default 0); priority can be 0 (background), 1 (normal/default), 2 (important), or 3 (urgent). Higher-priority sources are scheduled first within the common streaming budgets, after the observer and pinned hubs and before velocity prediction. Equal-priority names use alphabetical order, independent of dictionary iteration order. Updating a registered source with an omitted priority resets it to the normal default 1; use [method set_streaming_source_priority] to change priority without moving a source. The scheduler cannot preempt an already-running thread. Returns [code]false[/code] for invalid data or when creating a ninth source; updating an existing one is allowed. It shares existing asynchronous request and instantiation budgets. This runtime state is not serialized.
 			</description>
 		</method>
 		<method name="remove_streaming_source">
