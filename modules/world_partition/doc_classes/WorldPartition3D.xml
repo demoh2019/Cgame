@@ -120,6 +120,13 @@
 				Returns the registered scene path or an empty string if none exists.
 			</description>
 		</method>
+		<method name="get_cell_simulation_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns an on-demand count of loaded physics and navigation components under the specified cell root, including descendants: [code]collision_objects[/code] (CollisionObject3D), [code]collision_shapes[/code] (CollisionShape3D) and [code]navigation_regions[/code] (NavigationRegion3D). Unloaded cells return zeros. This traverses the instantiated cell hierarchy; do not call it for all cells every frame in production.
+			</description>
+		</method>
 		<method name="get_cell_state" qualifiers="const">
 			<return type="Dictionary" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -378,6 +385,18 @@
 		</member>
 	</members>
 	<signals>
+		<signal name="cell_activated">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted after a cell scene has entered the tree, finished [code]_ready()[/code], restored cached gameplay state and received its optional [code]streaming_activated(cell)[/code] callback. The cell is in [code]active_cells[/code], but NavigationServer3D requires a later physics frame to synchronize regions for path queries.
+			</description>
+		</signal>
+		<signal name="cell_deactivating">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted after the root's optional [code]streaming_deactivating(cell)[/code] callback, before [code]capture_streaming_state()[/code], scene removal and [code]queue_free()[/code]. Use this opportunity to release external references, disable collision participation and remove navigation registrations before deferred deletion. [signal cell_unloaded] follows the unload bookkeeping.
+			</description>
+		</signal>
 		<signal name="cell_loaded">
 			<param index="0" name="cell" type="Vector2i" />
 			<description>

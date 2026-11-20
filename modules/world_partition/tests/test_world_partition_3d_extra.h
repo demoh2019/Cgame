@@ -45,6 +45,42 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Simulation diagnostics for missing cells return zero counts") {
+	WorldPartition3D world;
+	const Dictionary counts = world.get_cell_simulation_stats(Vector2i(999, -999));
+	CHECK(counts["collision_objects"] == 0);
+	CHECK(counts["collision_shapes"] == 0);
+	CHECK(counts["navigation_regions"] == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Streaming lifecycle callbacks are registered as native signals") {
+	WorldPartition3D world;
+	CHECK(world.has_signal(SNAME("cell_activated")));
+	CHECK(world.has_signal(SNAME("cell_deactivating")));
+	CHECK(world.has_signal(SNAME("cell_loaded")));
+	CHECK(world.has_signal(SNAME("cell_unloaded")));
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Lifecycle and simulation statistics work with ordinary scenes") {
+	const String path = make_cell_scene("simulation_lifecycle");
+	{
+		WorldFixture fixture;
+		const Vector2i cell(0, 0);
+		fixture.world->set_cell_scene(cell, path);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		const Dictionary counts = fixture.world->get_cell_simulation_stats(cell);
+		CHECK(counts["collision_objects"] == 0);
+		CHECK(counts["collision_shapes"] == 0);
+		CHECK(counts["navigation_regions"] == 0);
+		fixture.observer->set_position(Vector3(128, 0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
+		const Dictionary unloaded = fixture.world->get_cell_simulation_stats(cell);
+		CHECK(unloaded["collision_objects"] == 0);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
 TEST_CASE("[WorldPartition3D] Cell lease tokens isolate independent owners") {
 	WorldPartition3D world;
 	const Vector2i arena(4, 2);
@@ -1050,7 +1086,7 @@ TEST_CASE("[SceneTree][WorldPartition3D] Unload budget spreads teleport cleanup 
 		REQUIRE(wait_for_cell(fixture.world, Vector2i(1, 0)));
 		CHECK(fixture.world->get_loaded_cell_count() == 3);
 
-		fixture.observer->set_position(Vector3(160, 0, 0));
+		fixture.observer->set_position(Vector3(1280, 0, 0));
 		fixture.world->update_streaming();
 		CHECK(fixture.world->get_loaded_cell_count() == 2);
 		fixture.world->update_streaming();

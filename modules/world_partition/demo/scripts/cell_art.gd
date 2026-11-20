@@ -15,11 +15,15 @@ var cell_coords: Vector2i = Vector2i(9999, 9999)
 var hub_reward_claimed := false
 var arena_wins := 0
 var champion_reward_claimed := false
+var streaming_activation_count := 0
+var streaming_deactivation_count := 0
 
 static var _trunk_mesh: CylinderMesh
 static var _crown_detail_mesh: SphereMesh
 static var _crown_proxy_mesh: SphereMesh
 static var _ground_mesh: PlaneMesh
+static var _collision_shape_resource: BoxShape3D
+static var _flat_navigation_mesh: NavigationMesh
 static var _trunk_material: StandardMaterial3D
 static var _leaf_material: StandardMaterial3D
 static var _ground_material: StandardMaterial3D
@@ -61,6 +65,11 @@ func _ready() -> void:
     _add_instances("Trunks", trunks)
     _add_instances("Canopies", crowns)
 
+    # Only close detail scenes contribute to PhysicsServer3D/NavigationServer3D.
+    # HLOD proxy scenes are intentionally visual-only, including prebaked ones.
+    if not proxy:
+        _create_streamed_simulation_components()
+
     # Gameplay landmarks belong to detailed scenes only. The demo's native
     # pinning API allows the hub and event arena to remain resident offscreen.
     if not proxy:
@@ -70,6 +79,56 @@ func _ready() -> void:
         elif grid == CHAMPION_SHRINE:
             _add_champion_shrine()
             _refresh_landmark()
+
+func _create_streamed_simulation_components() -> void:
+    # Collision is deliberately coarse, not generated from all 160 tree meshes.
+    # This keeps the physics cost bounded as detailed cells enter the world.
+    var physics := StaticBody3D.new()
+    physics.name = "TerrainPhysics"
+    physics.collision_layer = 1
+    physics.collision_mask = 0
+    add_child(physics)
+
+    var ground_collision := CollisionShape3D.new()
+    ground_collision.name = "GroundShape"
+    ground_collision.shape = _collision_shape_resource
+    ground_collision.position = Vector3(CELL_SIZE * 0.5, -0.1, CELL_SIZE * 0.5)
+    physics.add_child(ground_collision)
+
+    # A tiny, pre-authored navigation polygon resource is shared by cells.
+    # We do not invoke runtime NavigationMesh baking on the rendering thread.
+    var navigation := NavigationRegion3D.new()
+    navigation.name = "WalkableRegion"
+    navigation.navigation_mesh = _flat_navigation_mesh
+    navigation.navigation_layers = 1
+    navigation.enabled = true
+    add_child(navigation)
+
+# Called by the native streamer AFTER _ready() and after restoring gameplay
+# state. NavigationServer3D still needs a physics frame to synchronize regions.
+func streaming_activated(_cell: Vector2i) -> void:
+    streaming_activation_count += 1
+    if proxy:
+        return
+    var collision := get_node_or_null("TerrainPhysics/GroundShape") as CollisionShape3D
+    if collision != null:
+        collision.disabled = false
+    var navigation := get_node_or_null("WalkableRegion") as NavigationRegion3D
+    if navigation != null:
+        navigation.enabled = true
+
+# Called BEFORE state capture and queue_free(). Disabling registration here
+# avoids a stale collision or pathfinding region until deferred deletion.
+func streaming_deactivating(_cell: Vector2i) -> void:
+    streaming_deactivation_count += 1
+    if proxy:
+        return
+    var navigation := get_node_or_null("WalkableRegion") as NavigationRegion3D
+    if navigation != null:
+        navigation.enabled = false
+    var collision := get_node_or_null("TerrainPhysics/GroundShape") as CollisionShape3D
+    if collision != null:
+        collision.disabled = true
 
 # The native WorldPartition3D streamer invokes these optional scene-root hooks.
 # Only gameplay cells retain state; uninteresting procedural foliage returns {}.
@@ -226,6 +285,19 @@ func _ensure_shared_resources() -> void:
     _crown_proxy_mesh.radial_segments = 6
     _crown_proxy_mesh.rings = 3
     _crown_proxy_mesh.material = _leaf_material
+
+    _collision_shape_resource = BoxShape3D.new()
+    _collision_shape_resource.size = Vector3(CELL_SIZE, 0.2, CELL_SIZE)
+
+    # Consistent winding produces an upward-facing walkable quad in X/Z.
+    _flat_navigation_mesh = NavigationMesh.new()
+    _flat_navigation_mesh.vertices = PackedVector3Array([
+        Vector3(0, 0, 0),
+        Vector3(CELL_SIZE, 0, 0),
+        Vector3(CELL_SIZE, 0, CELL_SIZE),
+        Vector3(0, 0, CELL_SIZE),
+    ])
+    _flat_navigation_mesh.add_polygon(PackedInt32Array([0, 3, 2, 1]))
 
     _ground_mesh = PlaneMesh.new()
     _ground_mesh.size = Vector2(CELL_SIZE, CELL_SIZE)
