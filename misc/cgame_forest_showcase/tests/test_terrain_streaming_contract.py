@@ -204,6 +204,10 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn("multimesh = cached_batch", canopies)
         self.assertIn('far.get("cache",', world)
         self.assertIn('far_cache["hits"]', world)
+        self.assertIn("KEY_F3:", world)
+        self.assertIn("HLODCache.clear()", world)
+        self.assertIn("TileCache.clear()", world)
+
         self.assertIn("HLODCache.clear()", smoke)
         self.assertIn('int(stats["entries"]) != capacity', smoke)
         self.assertIn('revisited.mesh != old_terrain_mesh', runtime_smoke)
