@@ -4,6 +4,7 @@ const CloudShadowLut = preload("res://scripts/client/cloud_shadow_lut.gd")
 const CinematicColorGrade = preload("res://scripts/client/cinematic_color_grade.gd")
 const VegetationWind = preload("res://scripts/client/vegetation_wind.gd")
 const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
+const SunShadowQuality = preload("res://scripts/client/sun_shadow_quality.gd")
 const BiomeAtmosphere = preload("res://scripts/client/biome_atmosphere.gd")
 const SunShadowAtmosphere = preload("res://scripts/client/sun_shadow_atmosphere.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
@@ -16,6 +17,8 @@ var world_environment: WorldEnvironment
 var sky: Sky
 var _shadows_allowed := true
 var _cloud_shadows_allowed := true
+var _shadow_elapsed := 0.20 # At most five shadow-opacity updates per second.
+var _last_sun_height := 0.7
 var _fog_profile: Dictionary = CinematicFog.profile(1, "gl_compatibility")
 ## Slow-moving sky lighting is cached separately from per-frame directional light and fog.
 var _sky_refresh_interval := 0.4
@@ -98,7 +101,9 @@ func _ready() -> void:
 	sun.shadow_bias = 0.04
 	sun.shadow_normal_bias = 1.2
 	sun.shadow_blur = 1.4
-	sun.light_angular_distance = 0.6
+	# Quality selection enables PCSS only for High/Ultra on Forward+.
+	# The startup value must never allocate expensive PCSS by default.
+	sun.light_angular_distance = 0.0
 	sun.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_AND_SKY
 	sun.light_volumetric_fog_energy = 0.0
 	add_child(sun)
@@ -108,7 +113,15 @@ func _ready() -> void:
 func update(daylight: float, sun_height: float, phase: float, storming: bool, delta: float,
 		wind: Vector2 = Vector2.ZERO, biome: String = "plains") -> void:
 	light_level = daylight
+	_last_sun_height = sun_height
 	storm = move_toward(storm, 1.0 if storming else 0.0, delta * 0.25)
+	# Clouds and the solar altitude change directional contrast. The native
+	# shadow opacity updates sparingly, independent of the existing cascades.
+	if _shadows_allowed:
+		_shadow_elapsed += maxf(delta, 0.0)
+		if _shadow_elapsed >= 0.20:
+			_shadow_elapsed = fmod(_shadow_elapsed, 0.20)
+			SunShadowQuality.update_opacity(sun, daylight, sun_height, storm)
 	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_strength",
 		CloudShadowLut.shadow_strength(daylight, storm, _cloud_shadows_allowed))
 	# One GPU global updates every terrain material, without iterating streamed chunks.
@@ -203,6 +216,13 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 		clampf(float(settings.get("sky_scattering_strength", 0.0)), 0.0, 1.0))
 	sun.shadow_enabled = _shadows_allowed
 	sun.directional_shadow_max_distance = float(settings["shadow_distance"])
+	# Renderer-aware PCSS is configured once per quality switch. Balanced and
+	# Compatibility use the cheaper shadow filtering path.
+	SunShadowQuality.apply(sun,
+		int(settings.get("quality_level", 1)),
+		str(settings.get("rendering_method", "gl_compatibility")),
+		light_level, _last_sun_height, storm)
+	_shadow_elapsed = 0.0
 	environment.glow_enabled = bool(settings["glow"])
 	# SSAO requires Forward+; the Compatibility renderer ignores it safely.
 	environment.ssao_enabled = bool(settings["ssao"])
