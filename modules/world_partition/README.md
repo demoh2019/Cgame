@@ -6,6 +6,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 
 - Register a sparse mapping from `Vector2i` cell coordinates to local `PackedScene` resource paths (saved with your `.tscn` scene).
 - Choose a `Node3D` observer, cell size, and square loading/unloading radii; negative coordinates are handled with floor division.
+- **Named multi-source streaming:** up to **8** independent sources with `set_streaming_source(name, center, load_radius, unload_radius, priority)`. Source load radii are 0–4 cells, unload radii 0–8 (at least load radius), priorities 0–100. Nearby player cells are always serviced first, then manual pins, then named sources by descending priority, then predictive prefetch. `get_streaming_source(name)`, `get_streaming_source_names()`, `get_streaming_source_count()`, `remove_streaming_source(name)`, `clear_streaming_sources()` provide control and diagnostics. `is_streaming_source_ready(name)` checks entire region; `streaming_source_ready(name)` and `streaming_source_unready(name)` signal scene-tree completion transitions. One cell overlapping multiple sources is instantiated once, and all sources share the same per-frame budgets.
 - **Manually pinned regions:** `pin_cell(cell)`, `unpin_cell(cell)`, `is_cell_pinned(cell)`, `get_pinned_cell_count()`, `clear_pinned_cells()`. Keep up to **16** registered cells available beyond the observer's normal radii (e.g. quest locations or fast-travel destinations). Near-observer cells still receive first priority, pins are serviced before predictive prefetch, and all share the asynchronous request/instantiation limits. Missing/unregistered pins fail; duplicate pins are idempotent. Pinning never blocks, so verify `is_cell_loaded(cell)` before teleporting. Pins are removed when their cell is unregistered or all registrations are replaced/cleared.
 - Optionally prefetch a short directional corridor with `prefetch_direction` (each axis -1, 0 or 1) and `prefetch_distance` (0–4 cells, off by default). Cells within the observer's normal radius always have priority. When direction changes, obsolete ahead cells unload if outside hysteresis; resource requests remain shared and budgets are enforced across both passes.
 - Load scene resources asynchronously using Godot's `ResourceLoader.load_threaded_request` backend and poll without blocking while still in progress.
@@ -42,6 +43,7 @@ func _ready() -> void:
     world.set_cell_scene(Vector2i(-1, 0), "res://world/-1_0.tscn")
     world.set_cell_scene(Vector2i(10, -4), "res://world/distant_outpost.tscn")
     world.pin_cell(Vector2i(10, -4)) # now registered, load in background
+    world.set_streaming_source("survey", Vector2i(10, -4), 1, 2, 75) # register matching region scenes separately
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
@@ -56,7 +58,7 @@ var requests := world.get_inflight_request_count()
 var failed := world.get_failed_cell_count()
 ```
 
-You can also inspect `world.get_pinned_cell_count()` to track manual residency requests.
+You can also inspect `world.get_pinned_cell_count()` to track manual residency requests. Inspect `world.get_streaming_source_count()` to track additional region sources; use `world.is_streaming_source_ready("survey")` before entering a remote location.
 
 These counters describe the current state, not a prediction of future memory or throughput. One background resource request may serve multiple pending cells with the same PackedScene path. See `misc/cgame_forest_showcase` for a 1,024-cell registered world with a short distance-based active radius, directional predictive prefetch, reusable terrain resources and headless streaming regressions.
 
@@ -73,6 +75,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Streaming sources are runtime-only, bounded and square.** They don't author/bake region assets, add network replication, or guarantee physics-server/navmesh synchronization. A secondary source requires a valid main observer path to keep the streamer active.
 - **No automatic editor bake/partition yet.** Split source scenes and save each cell manually. Automated authoring and terrain/HLOD export are future integrations.
 - **No terrain sculpting, painting or foliage authoring in this module.** They can output regular cell `PackedScene` resources.
 - **No cancellation primitive for a running ResourceLoader request.** Moving the observer drops obsolete pending instances; the running resource request finishes and is then discarded.
