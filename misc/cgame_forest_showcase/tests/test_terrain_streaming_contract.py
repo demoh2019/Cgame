@@ -115,6 +115,64 @@ class StreamedTerrainContracts(TestCase):
             self.assertEqual(boundary, border)
             self.assertEqual(sum(count == 1 for count in edge_use.values()), CELLS * 4)
 
+    def test_distant_hlod_sparse_vertex_contract(self) -> None:
+        """The simplified mesh keeps 1m borders with 8m interior cells."""
+        source = lod_indices(8)
+        unique = set(source)
+        self.assertEqual(len(source) // 3, 176)
+        self.assertEqual(len(unique), 153)
+        self.assertLess(len(unique), SAMPLES * SAMPLES)
+
+        border = (
+            {_index(x, 0) for x in range(SAMPLES)}
+            | {_index(x, CELLS) for x in range(SAMPLES)}
+            | {_index(0, z) for z in range(SAMPLES)}
+            | {_index(CELLS, z) for z in range(SAMPLES)}
+        )
+        self.assertEqual(len(border), 128)
+        self.assertTrue(border.issubset(unique))
+
+        # This mirrors the runtime's stable source-index -> compact-index map.
+        mapping: dict[int, int] = {}
+        compact: list[tuple[int, int]] = []
+        remapped: list[int] = []
+        for old in source:
+            if old not in mapping:
+                mapping[old] = len(compact)
+                compact.append((old % SAMPLES, old // SAMPLES))
+            remapped.append(mapping[old])
+        self.assertEqual(len(compact), 153)
+        self.assertTrue(all(0 <= i < len(compact) for i in remapped))
+        for tile_x, tile_z in ((-2, -1), (0, 0), (9, 7)):
+            for local_x, local_z in compact:
+                if local_x in (0, CELLS) or local_z in (0, CELLS):
+                    x = tile_x * CELLS + local_x
+                    z = tile_z * CELLS + local_z
+                    self.assertEqual(
+                        tile_sample(tile_x, tile_z, local_x, local_z),
+                        (height(float(x), float(z)), normal(float(x), float(z))),
+                    )
+
+    def test_distant_hlod_wiring(self) -> None:
+        manager = (ROOT / "scripts/distant_terrain_hlod.gd").read_text(encoding="utf-8")
+        world = (ROOT / "scripts/world.gd").read_text(encoding="utf-8")
+        smoke = (ROOT / "tests/smoke_distant_hlod.gd").read_text(encoding="utf-8")
+        for expected in (
+            "TerrainHeight.height_at(wx, wz)",
+            "TerrainHeight.normal_at(wx, wz)",
+            "SharedAssets.ground_material()",
+            "source._build_lod_indices(LOD_STEP)",
+            "streaming_world.is_cell_loaded(cell)",
+            "get_proxy_for_cell(cell: Vector2i)",
+            "MAX_BUILDS_PER_FRAME: int = 2",
+            "proxy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF",
+        ):
+            self.assertIn(expected, manager)
+        self.assertIn("_create_distant_terrain()", world)
+        self.assertIn('distant_terrain.call("set_high_quality", high)', world)
+        self.assertIn("DistantTerrainHLOD", smoke)
+        self.assertNotIn("StaticBody3D.new()", manager)
+
     def test_native_directional_prefetch_contract(self) -> None:
         """Spot-check the native engine integration as well as the GDScript client."""
         repository = ROOT.parents[1]
