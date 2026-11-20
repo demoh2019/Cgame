@@ -1120,6 +1120,12 @@ float Environment::get_volumetric_fog_detail_spread() const {
 }
 
 void Environment::set_volumetric_fog_gi_inject(float p_gi_inject) {
+	// Volumetric GI injection is enabled only on premium scene profiles.
+	// Ignore invalid authoring data and repeated profile values before
+	// uploading the froxel lighting parameters to RenderingServer.
+	if (!Math::is_finite(p_gi_inject) || p_gi_inject < 0.0f || volumetric_fog_gi_inject == p_gi_inject) {
+		return;
+	}
 	volumetric_fog_gi_inject = p_gi_inject;
 	_update_volumetric_fog();
 }
