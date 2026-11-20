@@ -91,7 +91,7 @@ class VisualQualityPackageTests(unittest.TestCase):
         player = (ROOT / 'addons/visual_quality/character_controller.gd').read_text()
         self.assertIn('extends CharacterBody3D', player)
         for feature in ('move_and_slide()', 'floor_snap_length', 'is_on_floor()',
-                        'CapsuleShape3D.new()', 'jump_buffer_seconds', 'coyote_time_seconds',
+                        'CapsuleShape3D.new()', 'start_in_fly_mode', 'jump_buffer_seconds', 'coyote_time_seconds',
                         'step_horizontal_velocity', 'should_jump', 'MOTION_MODE_FLOATING',
                         'MOTION_MODE_GROUNDED', 'KEY_SPACE', 'KEY_V', 'MOUSE_BUTTON_RIGHT'):
             self.assertIn(feature, player)
