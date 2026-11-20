@@ -65,6 +65,7 @@ const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
 const BikeService = preload("res://scripts/shared/bike_service.gd")
 const BikeIntegrity = preload("res://scripts/shared/bike_integrity.gd")
+const BikeLantern = preload("res://scripts/shared/bike_lantern.gd")
 const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
@@ -5750,10 +5751,12 @@ func _tick_zombies(delta: float) -> void:
 			"notice_multiplier": WorldCycle.notice_multiplier(time),
 			"weather_sight": Weather.sight_multiplier(
 				Weather.conditions(world, player.position.x, player.position.z, time)),
-			"firelight": maxf(CampfireThreat.reveal_radius(campfires,
-				player.position, time, WorldCycle.is_night(time)),
-				HandFlare.infected_radius(player.flare_seconds, _alive(player),
-					WorldCycle.is_night(time), _is_safe(player.position))),
+			"firelight": maxf(BikeLantern.reveal_radius(player.inventory, player.mounted,
+				_alive(player), WorldCycle.is_night(time)),
+				maxf(CampfireThreat.reveal_radius(campfires,
+					player.position, time, WorldCycle.is_night(time)),
+					HandFlare.infected_radius(player.flare_seconds, _alive(player),
+						WorldCycle.is_night(time), _is_safe(player.position)))),
 			"visual_signature": _visual_signature_for(player),
 			# Only actual server wounds contribute; never trust client input.
 			"scent": BloodScent.detection_radius(player.survival.bleeding,
@@ -6255,6 +6258,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"alive": _alive(other), "crouching": other.crouching, "mounted": other.mounted,
 				"flare_lit": HandFlare.lit(other.flare_seconds, _alive(other)),
 				"bike_panniers": BikeCargo.installed(other.inventory),
+				"bike_lamp_lit": BikeLantern.lit(other.inventory, other.mounted,
+					_alive(other), WorldCycle.is_night(time)),
 				"weapon": other.inventory.weapon,
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
 				"guild": {"id": other.guild_id, "name": other.guild_name},
@@ -6484,6 +6489,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"bike_cargo_kg": BikeCargo.SUPPORTED_KG if player.mounted and BikeCargo.installed(player.inventory) else 0.0,
 			"bike_service_meters": player.bike_service_meters,
 			"bike_integrity": player.bike_integrity,
+			"bike_lamp_lit": BikeLantern.lit(player.inventory, player.mounted,
+				_alive(player), WorldCycle.is_night(time)),
 			"max_health": player.survival.max_health,
 			"speed_bonus": player.skills.bonus("move_speed"), "carry_bonus": player.skills.bonus("carry_capacity"),
 		},

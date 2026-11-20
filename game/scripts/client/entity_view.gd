@@ -137,6 +137,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		_nodes[key].get_node("HandFlare").set_burning(bool(entity.get("flare_lit", false)) and bool(entity.get("alive", false)))
 		var bike = _nodes[key].get_node("TrailBike")
 		bike.set_panniers(bool(entity.get("bike_panniers", false)))
+		bike.set_lamp(bool(entity.get("bike_lamp_lit", false)))
 		bike.set_riding(bool(entity.get("mounted", false)) and bool(entity.get("alive", false)))
 		var player_model: Node3D = _nodes[key].get_node("Model")
 		player_model.scale = Vector3(1.0,

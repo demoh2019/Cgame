@@ -752,6 +752,8 @@ func _physics_process(delta: float) -> void:
 			survivor.position.z - _last_bike_position.z).length() / delta
 	_last_bike_position = survivor.position
 	_bike_visual.set_panniers(survivor.inventory.count("bike_panniers") > 0)
+	_bike_visual.set_lamp(survivor.mounted and survivor.survival.alive and
+		WorldCycle.is_night(sim.time) and survivor.inventory.count("bike_dynamo_lamp") > 0)
 	_bike_visual.set_riding(survivor.mounted and survivor.survival.alive, bike_speed, delta)
 	_flare_visual.set_burning(survivor.survival.alive and survivor.flare_seconds > 0.0)
 	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
@@ -1231,6 +1233,8 @@ func _update_hud() -> void:
 	if survivor.inventory.count("salvage_bike") > 0:
 		_stats.text += "\nBIKE SERVICE: %.0f m (PgUp applies kit on foot)" % survivor.bike_service_meters
 		_stats.text += "\nBIKE FRAME: %.0f%% (PgDn to patch on foot)" % survivor.bike_integrity
+		if survivor.inventory.count("bike_dynamo_lamp") > 0:
+			_stats.text += "\nDYNAMO LAMP: lights road at night, reveals rider to infected"
 	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
 		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		survivor.mount_cooldown]
