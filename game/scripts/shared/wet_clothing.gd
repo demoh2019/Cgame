@@ -12,10 +12,11 @@ const MAX_WETNESS := 100.0
 
 static func next_wetness(current: float, delta: float, conditions: Dictionary,
 		armor_id: String, under_tarp: bool, near_fire: bool) -> float:
-	if not is_finite(current) or not is_finite(delta):
+	if not is_finite(current):
 		return 0.0
 	var wet: float = clampf(current, 0.0, MAX_WETNESS)
-	if delta <= 0.0:
+	# A bad server delta must not wash a player dry; preserve saved moisture.
+	if not is_finite(delta) or delta <= 0.0:
 		return wet
 	var step: float = delta
 	if near_fire:

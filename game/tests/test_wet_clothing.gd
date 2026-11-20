@@ -26,21 +26,21 @@ func run(t) -> void:
 		"physical armor insulation delays soaking")
 	t.eq(WetClothing.next_wetness(0.0, 300.0, rain, "", false, false), 100.0,
 		"hours of rain cannot overflow the wetness scale")
-	t.eq(WetClothing.next_wetness(40.0, 10.0, rain, "", true, false), 34.5,
+	t.near(WetClothing.next_wetness(40.0, 10.0, rain, "", true, false), 34.5, 0.0001,
 		"tarp canopy blocks rain and dries the player")
 	t.eq(WetClothing.next_wetness(40.0, 10.0, rain, "", false, true), 15.0,
 		"lit campfire rapidly dries clothing despite a storm")
 	t.eq(WetClothing.next_wetness(40.0, 10.0,
 		{"condition": "storm", "sheltered": true}, "", false, false), 34.5,
 		"hub or indoor shelter is protected from rainfall")
-	t.eq(WetClothing.next_wetness(40.0, 10.0, clear, "", false, false), 38.4,
+	t.near(WetClothing.next_wetness(40.0, 10.0, clear, "", false, false), 38.4, 0.0001,
 		"dry air slowly removes residual moisture")
 	t.eq(WetClothing.next_wetness(40.0, 0.0, rain, "", false, false), 40.0,
 		"zero simulation delta preserves wetness")
 	t.eq(WetClothing.next_wetness(40.0, -50.0, rain, "", false, false), 40.0,
 		"negative time cannot turn into infinite drying")
-	t.eq(WetClothing.next_wetness(40.0, INF, rain, "", false, false), 0.0,
-		"nonfinite delta cannot introduce infinite exposure")
+	t.eq(WetClothing.next_wetness(40.0, INF, rain, "", false, false), 40.0,
+		"nonfinite delta cannot erase persistent moisture")
 
 	t.current = "rain penalty increases real cold exposure, never warmth"
 	t.check(WetClothing.cold_penalty(100.0, clear, "") > 0.0,
@@ -96,7 +96,26 @@ func run(t) -> void:
 	resumed._tick_players(2.0)
 	t.check(restored.survival.wetness < prior, "clothes dry once rainfall ends")
 	t.check(restored.dirty_character, "wetness change is scheduled for persistence")
+	t.current = "real tarp and actual lit fire dry clothes during a storm"
+	resumed.time = float(storm["time"])
+	restored.survival.wetness = 50.0
+	resumed.shelters[501] = {"id": 501, "owner": restored.id, "x": restored.position.x,
+		"z": restored.position.z, "expires": resumed.time + 100.0}
+	resumed._tick_players(10.0)
+	t.near(restored.survival.wetness, 44.5, 0.0001,
+		"actual server shelter stops storm ingress and dries wet clothing")
+	resumed.shelters.clear()
+	resumed.campfires[502] = {"id": 502, "owner": restored.id, "x": restored.position.x,
+		"z": restored.position.z, "expires": resumed.time + 100.0}
+	resumed._tick_players(10.0)
+	t.near(restored.survival.wetness, 19.5, 0.0001,
+		"live field campfire dries actual server survivor within warmth radius")
+	resumed.campfires[502]["expires"] = resumed.time
+	resumed._tick_players(10.0)
+	t.check(restored.survival.wetness > 19.5,
+		"an expired campfire can no longer shelter from new storm rain")
 	var invalid: Dictionary = saved.duplicate(true)
+	var previous: float = restored.survival.wetness
 	invalid["wetness"] = 101.0
 	t.check(not resumed.apply_character(restored, invalid),
 		"forged >100 wetness rejects the whole saved survivor")
@@ -108,7 +127,6 @@ func run(t) -> void:
 	invalid["wetness"] = "dry"
 	t.check(not resumed.apply_character(restored, invalid),
 		"string wetness cannot bypass typed save validation")
-	var previous: float = restored.survival.wetness
 	t.eq(restored.survival.wetness, previous,
 		"invalid saves leave live wetness untouched")
 	var legacy: Dictionary = saved.duplicate(true)
