@@ -31,6 +31,7 @@ var hud_elapsed: float = 0.0
 var collected: int = 0
 var high_quality: bool = true
 var mouse_sensitivity: float = 0.0018
+var _fast_travel_in_progress: bool = false
 
 
 func _ready() -> void:
@@ -194,7 +195,7 @@ func _toggle_outpost_pin() -> void:
 
 
 func _fast_travel() -> void:
-    if player == null or world_partition == null:
+    if player == null or world_partition == null or _fast_travel_in_progress:
         return
 
     # F7 alternates between the distant 208m outpost and the home clearing.
@@ -213,14 +214,28 @@ func _fast_travel() -> void:
         _refresh_hud()
         return
 
-    # Teleport only after a prior game update has created the terrain nodes;
-    # a compiled runtime must still validate the physics server handoff.
+    # The scene-tree node can be instantiated before the PhysicsServer has
+    # performed its collision-world synchronization. Hold the target pinned
+    # for two physics-frame signals and recheck readiness before teleporting.
+    if not world_partition.pin_cell(target_cell):
+        return
+    _fast_travel_in_progress = true
+    await get_tree().physics_frame
+    await get_tree().physics_frame
+    if not is_inside_tree() or world_partition == null or player == null:
+        _fast_travel_in_progress = false
+        return
+    if not world_partition.are_cells_loaded(target_cell, 0):
+        _fast_travel_in_progress = false
+        return
+
     player.call("teleport_to_ground",
         target.x, target.y, height_at(target.x, target.y))
     world_partition.unpin_cell(target_cell)
     world_partition.prefetch_direction = Vector2i.ZERO
     world_partition.update_streaming()
     _refresh_player_stream_safety()
+    _fast_travel_in_progress = false
     _refresh_hud()
 
 
