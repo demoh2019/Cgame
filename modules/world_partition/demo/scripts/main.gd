@@ -20,6 +20,7 @@ const QUALITY_SCRIPT := preload("res://scripts/streaming_quality.gd")
 const CROSSFADE_SCRIPT := preload("res://scripts/hlod_crossfade_controller.gd")
 const MANIFEST_SCRIPT := preload("res://tools/hlod_bake_manifest.gd")
 const EVENT_RULES := preload("res://scripts/world_event_rules.gd")
+const PATROL_SCRIPT := preload("res://scripts/route_patrol_agent.gd")
 
 var camera: Camera3D
 var prefetch_source: Node3D
@@ -36,6 +37,7 @@ var last_gameplay_event := "Claim the hub reward with C to unlock combat."
 var last_nav_query := "N: test local nav path after physics sync"
 var quest_arena_lease := 0
 var manual_arena_lease := 0
+var patrol_agent: CharacterBody3D
 var quality_controller = QUALITY_SCRIPT.new()
 var crossfade_controller: CROSSFADE_SCRIPT
 
@@ -72,6 +74,9 @@ func _ready() -> void:
     if not detail.has_method("get_cell_simulation_stats"):
         push_error("Cgame WorldPartition3D collision/navigation diagnostics required.")
         return
+    if not detail.has_method("acquire_cell_route") or not detail.has_method("release_cell_route"):
+        push_error("Cgame WorldPartition3D navigation route streaming API required.")
+        return
     # The Combat Event is initially inactive even if a pinned gameplay cell
     # or an observer overlaps its region. The quest hub stays available.
     var combat_cells: Dictionary = {}
@@ -94,6 +99,7 @@ func _ready() -> void:
     add_child(crossfade_controller)
     _set_prefetch(true)
     _create_hud()
+    _spawn_patrol_agent()
 
 func _make_streamer(name: String, radius: int, unload_radius: int, scene_path: String, budget: int) -> Node3D:
     var world := ClassDB.instantiate("WorldPartition3D") as Node3D
@@ -255,6 +261,19 @@ func _gameplay_cell_root(cell: Vector2i) -> Node3D:
         return null
     return detail.call("get_cell_instance", cell) as Node3D
 
+func _spawn_patrol_agent() -> void:
+    if not is_instance_valid(detail):
+        return
+    patrol_agent = PATROL_SCRIPT.new() as CharacterBody3D
+    patrol_agent.name = "PatrolAgent"
+    patrol_agent.call("configure", detail)
+    add_child(patrol_agent)
+
+func _toggle_patrol_agent() -> void:
+    if is_instance_valid(patrol_agent):
+        var status: Dictionary = patrol_agent.call("get_patrol_status")
+        patrol_agent.call("set_patrol_enabled", not bool(status.get("enabled", false)))
+
 func _test_navigation_path() -> void:
     if detail == null:
         return
@@ -320,6 +339,7 @@ func _save_checkpoint() -> void:
         "pinned_cells": detail.call("get_pinned_cells"),
         "layer_states": detail.call("get_layer_states"),
         "camera_transform": camera.global_transform,
+        "patrol_state": patrol_agent.call("capture_patrol_state") if is_instance_valid(patrol_agent) else {},
     }
     var output := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
     if output == null:
@@ -345,7 +365,7 @@ func _load_checkpoint() -> void:
     if record.get("version") != SAVE_VERSION:
         push_warning("Unsupported checkpoint version.")
         return
-    if not (record.get("cell_states") is Dictionary) or not (record.get("pinned_cells") is Array) or not (record.get("layer_states") is Dictionary) or not (record.get("camera_transform") is Transform3D):
+    if not (record.get("cell_states") is Dictionary) or not (record.get("pinned_cells") is Array) or not (record.get("layer_states") is Dictionary) or not (record.get("camera_transform") is Transform3D) or not (record.get("patrol_state", {}) is Dictionary):
         push_warning("Checkpoint fields are incomplete.")
         return
     var states: Dictionary = record["cell_states"]
@@ -361,6 +381,8 @@ func _load_checkpoint() -> void:
     detail.call("set_layer_states", layers)
     detail.call("set_pinned_cells", pins)
     _sync_quest_arena_lease()
+    if is_instance_valid(patrol_agent):
+        patrol_agent.call("restore_patrol_state", record.get("patrol_state", {}))
     camera.global_transform = record["camera_transform"]
     detail.call("update_streaming")
     print("Checkpoint restored: %d cached gameplay cell states." % int(detail.call("get_cell_state_count")))
@@ -405,6 +427,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
             _toggle_manual_arena_lease()
         KEY_N:
             _test_navigation_path()
+        KEY_O:
+            _toggle_patrol_agent()
         KEY_T:
             _toggle_combat_event()
         KEY_C:
@@ -466,6 +490,11 @@ func _update_hud() -> void:
     var reward_claimed := bool(_stateful_progress(HUB_CELL, "reward_claimed", false))
     var arena_wins: int = int(_stateful_progress(ARENA_CELL, "arena_wins", 0))
     var state_count: int = int(detail.call("get_cell_state_count")) if detail != null else 0
+    var patrol_state: Dictionary = patrol_agent.call("get_patrol_status") if is_instance_valid(patrol_agent) else {}
+    var patrol_text: String = str(patrol_state.get("status", "Loading patrol"))
+    var patrol_crossings: int = int(patrol_state.get("crossings", 0))
+    var patrol_tokens: int = int(patrol_state.get("route_tokens", 0))
+    var patrol_cell: Vector2i = patrol_state.get("current_cell", Vector2i.ZERO)
     var collision_count := 0
     var navigation_count := 0
     if detail != null:
@@ -473,7 +502,7 @@ func _update_hud() -> void:
             var stats: Dictionary = detail.call("get_cell_simulation_stats", cell)
             collision_count += int(stats.get("collision_objects", 0))
             navigation_count += int(stats.get("navigation_regions", 0))
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nCell leases: %d  Arena owners: %d | Quest: %s  M Manual: %s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nSimulation near landmarks: %d collision bodies, %d nav regions\n%s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nCell leases: %d  Arena owners: %d | Quest: %s  M Manual: %s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nO AI patrol: %s  crossings: %d  route leases: %d  cell: %s\nSimulation near landmarks: %d collision bodies, %d nav regions\n%s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
@@ -492,6 +521,10 @@ func _update_hud() -> void:
         "ON" if champion_active else "OFF",
         "CLAIMED" if champion_claimed else "READY",
         last_gameplay_event,
+        patrol_text,
+        patrol_crossings,
+        patrol_tokens,
+        str(patrol_cell),
         collision_count,
         navigation_count,
         last_nav_query,
