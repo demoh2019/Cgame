@@ -58,6 +58,11 @@ TEST_CASE("[WorldPartition3D] Defaults") {
 	CHECK(partition->get_pending_cell_count() == 0);
 	CHECK(partition->get_inflight_request_count() == 0);
 	CHECK(partition->get_failed_cell_count() == 0);
+	CHECK(partition->get_min_physics_frames_after_load() == 2);
+	CHECK_FALSE(partition->is_cell_activation_ready(Vector2i()));
+	CHECK(partition->get_streaming_source_activated_cell_count("none") == 0);
+	CHECK(partition->get_streaming_source_activation_progress("none") == 0.0);
+	CHECK_FALSE(partition->is_streaming_source_activation_ready("none"));
 	CHECK(partition->get_cell_instance(Vector2i()) == nullptr);
 	memdelete(partition);
 }
@@ -539,12 +544,26 @@ TEST_CASE("[SceneTree][WorldPartition3D] Prediction loads a future cell before o
 	CHECK(partition->get_streaming_source_failed_cell_count("arrival") == 0);
 	CHECK(partition->get_streaming_source_progress("arrival") == 1.0);
 	CHECK(partition->is_streaming_source_ready("arrival"));
+	// The root exists but the minimum physics-frame barrier is not yet passed.
+	partition->set_min_physics_frames_after_load(1);
+	CHECK_FALSE(partition->is_cell_activation_ready(Vector2i(1, 0)));
+	CHECK(partition->get_streaming_source_activated_cell_count("arrival") == 0);
+	CHECK_FALSE(partition->is_streaming_source_activation_ready("arrival"));
+	partition->set_min_physics_frames_after_load(0);
+	CHECK(partition->is_cell_activation_ready(Vector2i(1, 0)));
+	CHECK(partition->get_streaming_source_activated_cell_count("arrival") == 1);
+	CHECK(partition->get_streaming_source_activation_progress("arrival") == 1.0);
+	CHECK(partition->is_streaming_source_activation_ready("arrival"));
 	CHECK(partition->set_streaming_source("arrival", Vector3(0.0, 0.0, 0.0), 1));
 	CHECK(partition->get_streaming_source_cell_count("arrival") == 2);
 	CHECK(partition->get_streaming_source_loaded_cell_count("arrival") == 2);
+	CHECK(partition->get_streaming_source_activated_cell_count("arrival") == 2);
+	CHECK(partition->is_streaming_source_activation_ready("arrival"));
 	CHECK(partition->is_streaming_source_ready("arrival"));
 	CHECK(partition->set_streaming_source("arrival", Vector3(48.0, 0.0, 0.0)));
 	CHECK(partition->get_streaming_source_cell_count("arrival") == 0);
+	CHECK(partition->get_streaming_source_activated_cell_count("arrival") == 0);
+	CHECK_FALSE(partition->is_streaming_source_activation_ready("arrival"));
 	CHECK_FALSE(partition->is_streaming_source_ready("arrival"));
 	partition->remove_streaming_source("arrival");
 	Node3D *loaded_origin = partition->get_cell_instance(Vector2i(0, 0));
@@ -559,6 +578,7 @@ TEST_CASE("[SceneTree][WorldPartition3D] Prediction loads a future cell before o
 	CHECK_FALSE(partition->has_predicted_cell());
 	CHECK_FALSE(partition->is_cell_loaded(Vector2i(1, 0)));
 	CHECK(partition->get_cell_instance(Vector2i(1, 0)) == nullptr);
+	CHECK_FALSE(partition->is_cell_activation_ready(Vector2i(1, 0)));
 	CHECK(partition->get_cell_instance(Vector2i(0, 0)) == loaded_origin);
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
 
@@ -692,6 +712,23 @@ TEST_CASE("[WorldPartition3D] Simulation activation defaults and validated budge
 	world->set_simulation_radius(-1);
 	CHECK(world->get_simulation_radius() == -1);
 	memdelete(world);
+}
+
+
+TEST_CASE("[WorldPartition3D] Physics activation frame fence validates bounds") {
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	CHECK(partition->get_min_physics_frames_after_load() == 2);
+	partition->set_min_physics_frames_after_load(0);
+	CHECK(partition->get_min_physics_frames_after_load() == 0);
+	partition->set_min_physics_frames_after_load(8);
+	CHECK(partition->get_min_physics_frames_after_load() == 8);
+	ERR_PRINT_OFF;
+	partition->set_min_physics_frames_after_load(-1);
+	partition->set_min_physics_frames_after_load(9);
+	ERR_PRINT_ON;
+	CHECK(partition->get_min_physics_frames_after_load() == 8);
+	CHECK_FALSE(partition->is_streaming_source_activation_ready("absent"));
+	memdelete(partition);
 }
 
 } // namespace TestWorldPartition3D
