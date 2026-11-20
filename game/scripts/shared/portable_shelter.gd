@@ -5,6 +5,7 @@ const COST := {"cloth_1": 2, "fiber_1": 2, "plank_1": 1}
 const DURATION := 240.0
 const COVER_RADIUS := 3.5
 const WEATHER_REDUCTION := 0.75
+const ANCHORED_WEATHER_REDUCTION := 0.90
 # Only the vision of idle infected changes; not smell, noise, PvP, or attacks.
 const VISUAL_REDUCTION := 0.25
 const MIN_VISUAL := 0.35
@@ -64,10 +65,12 @@ static func visual_signature(base: float, shelters: Dictionary, position: Vector
 	return clampf(value, MIN_VISUAL, 1.0)
 
 
-static func exposure_severity(severity: float, covered: bool) -> float:
+static func exposure_severity(severity: float, covered: bool, anchored: bool = false) -> float:
 	if not is_finite(severity):
 		return 0.0
-	return clampf(severity, 0.0, 1.0) * (1.0 - WEATHER_REDUCTION if covered else 1.0)
+	var reduction: float = ANCHORED_WEATHER_REDUCTION if covered and anchored else (
+		WEATHER_REDUCTION if covered else 0.0)
+	return clampf(severity, 0.0, 1.0) * (1.0 - reduction)
 
 
 static func visible(shelters: Dictionary, position: Vector3, now: float, radius: float) -> Array:
@@ -82,5 +85,6 @@ static func visible(shelters: Dictionary, position: Vector3, now: float, radius:
 		var site := Vector2(float(shelter["x"]), float(shelter["z"]))
 		if here.distance_squared_to(site) <= radius * radius:
 			result.append({"id": int(shelter["id"]), "x": site.x,
-				"y": float(shelter["y"]), "z": site.y, "remaining": remaining})
+				"y": float(shelter["y"]), "z": site.y, "remaining": remaining,
+				"anchored": bool(shelter.get("anchored", false))})
 	return result
