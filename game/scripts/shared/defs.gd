@@ -359,6 +359,13 @@ static func _build_items() -> void:
 		"tier": 1, "stack": 10, "weight": 0.35, "value": 18})
 	_add_recipe("field_whetstone", "field_whetstone", 1,
 		{"stone_1": 2, "scrap": 1}, "workbench", 3.0)
+	# Paid scout preparation: one crafted scan reveals a living elite or
+	# raid boss farther away than the normal 90m replication radius.
+	_add_item("field_threat_scanner", {"name": "Salvaged Threat Scanner",
+		"kind": "threat_scanner", "tier": 2, "stack": 5,
+		"weight": 0.6, "value": 42})
+	_add_recipe("field_threat_scanner", "field_threat_scanner", 1,
+		{"scrap": 3, "bar_2": 1, "charcoal_filter": 1}, "workbench", 5.0)
 	_add_item("berries", {"name": "Berries", "kind": "food", "food": 12.0, "stack": 20, "value": 2})
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
