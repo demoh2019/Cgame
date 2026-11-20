@@ -297,9 +297,18 @@ func _physics_process(delta: float) -> void:
 			record["target_obstruction"] = target
 			record["next_obstruction_check"] = _obstruction_clock + OBSTRUCTION_RECHECK_SECONDS
 			rays += 1
-		# Smooth changes to prevent a harsh click when crossing a doorway.
+		# Unreal-style occlusion attack/release: fall behind a wall quickly,
+		# recover smoothly when the player steps into the open. Cgame handles
+		# interpolation in the native 3D source; stock Godot uses the same
+		# frame-rate-independent exponential curve in GDScript.
 		var old_amount: float = float(record.get("obstruction", 0.0))
-		var amount: float = move_toward(old_amount, target, delta * 6.0)
+		var native_smoothing: bool = player.has_method("advance_obstruction_amount")
+		var amount: float
+		if native_smoothing:
+			amount = float(player.call("advance_obstruction_amount", target, delta,
+				AudioSpatial.OBSTRUCTION_ATTACK_SECONDS, AudioSpatial.OBSTRUCTION_RELEASE_SECONDS))
+		else:
+			amount = AudioSpatial.smooth_obstruction(old_amount, target, delta)
 		if absf(amount - old_amount) > 0.0001:
 			record["obstruction"] = amount
 			# Muffled shots should lose voice-priority against clear,
@@ -307,7 +316,8 @@ func _physics_process(delta: float) -> void:
 			record["audibility"] = float(record.get("base_audibility", record["audibility"])) \
 				+ AudioSpatial.obstruction_db(amount)
 			if player.has_method("set_obstruction_amount"):
-				player.call("set_obstruction_amount", amount)
+				if not native_smoothing:
+					player.call("set_obstruction_amount", amount)
 			else:
 				var base_cutoff: float = float(record["original_cutoff"])
 				player.attenuation_filter_cutoff_hz = AudioSpatial.obstruction_cutoff(base_cutoff, amount)
