@@ -99,6 +99,12 @@ Vector3 sample_normal_bilinear(const HeightField &p_field, real_t p_x, real_t p_
 // whole terrain from 0 to 1. Returns false for invalid input.
 bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, int p_stride, const Params &p_params, ChunkMesh &r_mesh);
 
+// Baked terrain sky visibility: a low-cost horizon AO approximation from
+// eight directions, excluding a local planar slope to avoid double-darkening
+// hillside normals. Padded input keeps neighbouring chunks seamless.
+Vector<real_t> bake_horizon_visibility(const HeightField &p_field,
+		real_t p_spacing, int p_radius_steps);
+
 // Largest deviation of the original heightfield from a coarse triangulated
 // mesh over a chunk (in source height units). Pure CPU preparation; evaluated
 // lazily and cached once for native terrain LOD selection.
