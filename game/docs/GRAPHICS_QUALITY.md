@@ -197,3 +197,9 @@ The forked engine's `scene/3d/decal.cpp` skips redundant modulate and
 distance-fade RenderingServer submissions, a general optimization
 for any pooled fading decal. See [footprint_decals.md](footprint_decals.md)
 for renderer gates, native tests and GPU profiling.
+
+## Premium sun-aligned water glints and atomic atmospheric fog
+
+Forward+ High/Ultra now add a subtle camera/sun-aligned sparkle over water using **the existing moving wave normals** and the cached, real sky sun radiance. Sun-glitter strengths are **0 / 0 / 0.38 / 0.80** for Performance/Balanced/High/Ultra. The entire code is inside the already-cached premium water shader: low-end variants never compile it, and the premium version introduces **no additional texture fetches or rendering passes**. Foam and distant water suppress the highlights; nights receive no solar glint.
+
+The custom native Godot `Environment.configure_weather_fog()` now applies sky color, distance fog, sea-level height, height density and sunlight scattering in **one** RenderingServer update instead of five sequential setter calls. The game uses `has_method` for a stock-engine fallback and keeps existing biome-dependent visual results. See [ATOMIC_WEATHER_FOG_OCEAN_GLITTER.md](ATOMIC_WEATHER_FOG_OCEAN_GLITTER.md) for code, build validation, test coverage and GPU profiling.
