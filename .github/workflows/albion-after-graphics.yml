@@ -1,0 +1,74 @@
+name: Albion After graphics regression (Godot)
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'game/scripts/client/**'
+      - 'game/assets/shaders/**'
+      - 'game/tests/**'
+      - 'game/project.godot'
+      - '.github/workflows/albion-after-graphics.yml'
+  pull_request:
+    paths:
+      - 'game/scripts/client/**'
+      - 'game/assets/shaders/**'
+      - 'game/tests/**'
+      - 'game/project.godot'
+      - '.github/workflows/albion-after-graphics.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: graphics-godot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  graphics-headless:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout only Albion After game
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            game
+          sparse-checkout-cone-mode: true
+
+      - name: Install verified official Godot 4.7.2 editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum --check --status
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+          ./godot --version
+
+      - name: Import game resources and catch GDScript parse errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 360s ./godot --headless --path game --editor --import --quit 2>&1 | tee graphics-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' graphics-import.log; then exit 1; fi
+
+      - name: Execute renderer and lightning regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./godot --headless --path game --script res://tests/run_graphics.gd 2>&1 | tee graphics-tests.log
+          grep -E '^GRAPHICS TOTAL: [0-9]+ checks, 0 failures$' graphics-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' graphics-tests.log; then exit 1; fi
+
+      - name: Upload graphics regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: albion-after-graphics-logs
+          if-no-files-found: ignore
+          path: |
+            graphics-import.log
+            graphics-tests.log
