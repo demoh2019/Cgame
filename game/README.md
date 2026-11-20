@@ -2093,3 +2093,39 @@ local 3D preview display concealment status; nearby enemies still use
 normal safe-zone and sight/hearing rules.
 
 Regressions: `game/tests/test_camouflage.gd` in the canonical suite.
+
+
+## Hearty cooked meals — classless expedition recovery
+
+Cooked coastal fish are now a meaningful **temporary combat provision** as
+well as normal hunger-restoring food. This connects Days After cooking and
+survival with Albion/Lineage-style preparation for expeditions, without
+adding a fixed class or any client-authoritative stat changes.
+
+- Eating a carried **cooked fish T1–T4** grants a single, non-stacking meal
+  buff lasting **120 / 150 / 180 / 210 seconds**, respectively.
+- During the buff, a nourished and hydrated survivor gains **+2.0 / +2.5 /
+  +3.0 / +3.5 stamina per second** after the normal sprint/dodge recovery delay,
+  and **+0.75 / +1.0 / +1.25 / +1.5 combat energy per second**. Existing
+  stamina/energy maxima still apply. Starving or dehydrated characters
+  get no additional recovery.
+- Eating another cooked fish **replaces** the current tier and duration;
+  it cannot stack the timers or inflate recovery. Berries and canned
+  food remain food only, with no temporary combat bonus.
+- The authoritative `GameServer.cmd_use` consumes one real cooked item.
+  All recovery and expiry occur on the server tick, including partial
+  final frames. The buff is **persisted with strict validation** through
+  logouts and reconnects, and cleared on death/respawn. Older version-1
+  characters with no buff fields load with an inactive effect.
+- The multiplayer and local survivor HUDs display the meal tier, seconds
+  remaining and recovery rates. No new networking endpoint is required;
+  the owner snapshot contains `meal_tier` and `meal_seconds`.
+
+Implementation: `scripts/shared/hearty_meal.gd` and
+`scripts/server/game_server.gd`. Headless tests:
+`tests/test_hearty_meal.gd`, registered by `tests/run_all.gd`.
+
+Run `godot --headless --path game --script res://tests/run_all.gd` to
+verify game food, stamina, combat energy, save safety and respawn regressions.
+This uses existing Cgame server simulation and HUD primitives; no native
+engine extension was needed.
