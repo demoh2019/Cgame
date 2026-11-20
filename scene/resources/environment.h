@@ -317,6 +317,8 @@ public:
 	float get_ssao_ao_channel_affect() const;
 
 	// SSIL
+	// One native render-thread update for the entire quality-tier bounce budget.
+	void configure_ssil(bool p_enabled, float p_radius, float p_intensity, float p_sharpness, float p_normal_rejection);
 	void set_ssil_enabled(bool p_enabled);
 	bool is_ssil_enabled() const;
 	void set_ssil_radius(float p_radius);
