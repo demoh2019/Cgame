@@ -854,8 +854,9 @@ func _grow_grass() -> void:
 		_grass_spent_usec += Time.get_ticks_usec() - started
 
 
-## Three cached grass meshes (18 / 9 / 4 blades) keep dense nearby grass while cutting geometry in the distance.
-## Only geometry changes; tile transforms, material, wind and color stay untouched.
+## Three cached grass meshes (18 / 9 / 4 blades) keep detailed nearby grass.
+## The tile buffer is shuffled once, so drawing fewer distant instances does not
+## cut holes into one side of a tile. Changing visible count does not rebuild meshes.
 func _update_grass_lods() -> void:
 	if _grass_tiles.is_empty():
 		return
@@ -868,10 +869,15 @@ func _update_grass_lods() -> void:
 		var distance: float = camera_xz.distance_to(Vector2(tile_center.x, tile_center.z))
 		var previous: int = int(tile.get_meta("blade_lod", 0))
 		var tier: int = GrassField.lod_for_distance(distance, previous)
-		if tier == previous:
-			continue
-		tile.multimesh.mesh = GrassField.clump_mesh(GrassField.LOD_BLADES[tier])
-		tile.set_meta("blade_lod", tier)
+		# MultiMesh.visible_instance_count is a GPU draw limit; changing this
+		# does not upload transforms or spawn new nodes every frame.
+		var draw_count: int = GrassField.visible_count_for_distance(
+			tile.multimesh.instance_count, distance)
+		if tile.multimesh.visible_instance_count != draw_count:
+			tile.multimesh.visible_instance_count = draw_count
+		if tier != previous:
+			tile.multimesh.mesh = GrassField.clump_mesh(GrassField.LOD_BLADES[tier])
+			tile.set_meta("blade_lod", tier)
 
 
 ## The people of the settlements: standing, sitting, working, each with a name and a role above their head.
