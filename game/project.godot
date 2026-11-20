@@ -175,6 +175,52 @@ aa_plant_bend={
 "value": Vector4(0, 0, 0, 0)
 }
 
+; Up to eight object footprints (x, z, radius, strength) that flatten grass under them.
+aa_plant_crush_count={
+"type": "float",
+"value": 0.0
+}
+
+aa_plant_crush_0={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_1={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_2={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_3={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_4={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_5={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_6={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_crush_7={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
 aa_plant_shake={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)

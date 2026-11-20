@@ -59,6 +59,9 @@ void vertex() {
 	float shrink = 1.0 - smoothstep(fade_start, fade_end, length(root.xz - CAMERA_POSITION_WORLD.xz));
 	grass_light_fade = shrink;
 	VERTEX.y *= shrink;
+	// Grass under a campfire, wall, bag or walker is pressed flat rather than poking through it.
+	float crushed = aa_plant_crush(root.xz);
+	VERTEX.y *= 1.0 - crushed * 0.94;
 	// Blades already sunk into the ground should not evaluate several wind trigonometric
 	// waves per vertex. This matters because MultiMesh tiles are still alive in the
 	// culling margin outside the shader fade range.

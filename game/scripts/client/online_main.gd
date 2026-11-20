@@ -78,6 +78,8 @@ const CombatCameraFeedback = preload("res://scripts/client/combat_camera_feedbac
 const ImpactDecals = preload("res://scripts/client/impact_decals.gd")
 const CameraPostFx = preload("res://scripts/client/camera_post_fx.gd")
 const PhysicsWorldFx = preload("res://scripts/client/physics_world_fx.gd")
+const PlantInteraction = preload("res://scripts/client/plant_interaction.gd")
+const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const TitleBanner = preload("res://scripts/client/title_banner.gd")
 const LocalServer = preload("res://scripts/client/local_server.gd")
@@ -1292,6 +1294,7 @@ func _process(delta: float) -> void:
 	client.decay_correction(delta)
 	var position: Vector3 = client.display_position()
 	physics_fx.update(delta, position)
+	_update_grass_crushers(position)
 	if avatar != null:
 		avatar.position = position
 		# The body turns where it walks; it faces the cursor while fighting, aiming (right mouse) or working, so walking
@@ -1693,6 +1696,29 @@ func _set_auto_graphics(enabled: bool) -> void:
 	var error := config.save(GraphicsQuality.SETTINGS_PATH)
 	if error != OK:
 		push_warning("Could not save auto graphics mode: %d" % error)
+
+
+## Objects and walkers near you flatten the grass under them instead of clipping through it.
+func _update_grass_crushers(position: Vector3) -> void:
+	var sources: Array = []
+	for fire in client.campfires.values():
+		sources.append(["campfire", fire])
+	for shelter in client.shelters.values():
+		sources.append(["shelter", shelter])
+	for wall in client.barricades.values():
+		sources.append(["barricade", wall])
+	for bag in client.bags.values():
+		sources.append(["bag", bag])
+	for snare in client.infected_snares.values():
+		sources.append(["snare", snare])
+	for decoy in client.decoys.values():
+		sources.append(["decoy", decoy])
+	for other in client.players.values():
+		if int(other.get("id", -1)) != client.peer_id:
+			sources.append(["player", other])
+	for zombie in client.zombies.values():
+		sources.append(["zombie", zombie])
+	physics_fx.plants.set_crushers(PlantInteraction.pick_crushers(Vector2(position.x, position.z), sources))
 
 
 func _can_fight() -> bool:
@@ -2282,6 +2308,16 @@ func _run_demo() -> void:
 		"hub":
 			if _demo_frames == 40:
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": 14.0, "z": 6.0})
+		"campfire":
+			# Grass crush check: a campfire lit just ahead, seen from first person (needs --debug-commands).
+			if _demo_frames == 40:
+				for cost_item in FieldCampfire.COST:
+					net_ref.c_debug.rpc_id(1, "give", {"item": cost_item, "count": int(FieldCampfire.COST[cost_item])})
+			if _demo_frames == 80:
+				var ahead := Vector2(client.predicted.x, client.predicted.z) + Vector2(sin(client.yaw), cos(client.yaw)) * 2.2
+				client.light_campfire(ahead)
+				_fp_yaw = client.yaw
+				_fp_pitch = -0.55
 	if _screenshot_path != "":
 		_screenshot_frames += 1
 		if _screenshot_frames > 540:

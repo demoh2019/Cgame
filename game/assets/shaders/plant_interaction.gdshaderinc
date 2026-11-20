@@ -19,3 +19,42 @@ vec2 aa_plant_displacement(vec2 root, float height_k, float time) {
 	}
 	return result;
 }
+
+// Objects resting in the grass (campfires, shelters, walls, bags, traps, other walkers): up to 8 nearby
+// footprints (x, z, radius, strength) chosen on the CPU. Blades inside are squashed flat instead of growing
+// through the object. aa_plant_crush_count = 0 costs a single comparison.
+global uniform float aa_plant_crush_count;
+global uniform vec4 aa_plant_crush_0;
+global uniform vec4 aa_plant_crush_1;
+global uniform vec4 aa_plant_crush_2;
+global uniform vec4 aa_plant_crush_3;
+global uniform vec4 aa_plant_crush_4;
+global uniform vec4 aa_plant_crush_5;
+global uniform vec4 aa_plant_crush_6;
+global uniform vec4 aa_plant_crush_7;
+
+float aa_plant_crush_one(vec2 root, vec4 c) {
+	if (c.w <= 0.001) {
+		return 0.0;
+	}
+	float d = length(root - c.xy);
+	return (1.0 - smoothstep(c.z * 0.75, c.z * 1.15, d)) * c.w;
+}
+
+// 0 = untouched, 1 = flattened to the ground.
+float aa_plant_crush(vec2 root) {
+	if (aa_plant_crush_count < 0.5) {
+		return 0.0;
+	}
+	float f = aa_plant_crush_one(root, aa_plant_crush_0);
+	f = max(f, aa_plant_crush_one(root, aa_plant_crush_1));
+	f = max(f, aa_plant_crush_one(root, aa_plant_crush_2));
+	f = max(f, aa_plant_crush_one(root, aa_plant_crush_3));
+	if (aa_plant_crush_count > 4.5) {
+		f = max(f, aa_plant_crush_one(root, aa_plant_crush_4));
+		f = max(f, aa_plant_crush_one(root, aa_plant_crush_5));
+		f = max(f, aa_plant_crush_one(root, aa_plant_crush_6));
+		f = max(f, aa_plant_crush_one(root, aa_plant_crush_7));
+	}
+	return clamp(f, 0.0, 1.0);
+}
