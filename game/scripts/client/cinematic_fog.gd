@@ -85,22 +85,34 @@ static func apply_profile(env: Environment, sun: DirectionalLight3D,
 ## fog combines with it only in a short, limited range.
 static func apply_weather(env: Environment, daylight: float, sun_height: float,
 		storm: float, settings: Dictionary, horizon: Color,
-		biome: Dictionary = {}) -> void:
+		biome: Dictionary = {}, base_fog: Dictionary = {}) -> void:
 	if env == null:
 		return
 	var frame: Dictionary = weather(daylight, sun_height, storm, settings)
-	env.fog_height = 2.6
 	# The biomes modify the existing height and froxel fog, never add a pass.
 	var height_scale: float = clampf(float(biome.get("height_factor", 1.0)), 0.55, 1.45)
 	var volume_scale: float = clampf(float(biome.get("volume_factor", 1.0)), 0.65, 1.25)
 	var tint_amount: float = clampf(float(biome.get("tint_amount", 0.0)), 0.0, 0.22) * clampf(daylight, 0.0, 1.0)
 	var tint: Color = biome.get("tint", horizon)
-	env.fog_height_density = minf(float(frame["height_density"]) * height_scale, MAX_HEIGHT_DENSITY)
-	env.fog_sun_scatter = float(frame["sun_scatter"])
-	# Atmosphere sets the sky-derived base color first; this is a subtle
-	# daylight tint that does not accumulate between successive frames.
+	var height_density: float = minf(
+		float(frame["height_density"]) * height_scale, MAX_HEIGHT_DENSITY)
+	var fog_color: Color = base_fog.get("color", env.fog_light_color)
+	var fog_density: float = float(base_fog.get("density", env.fog_density))
+	# Always tint the sky-derived base color, never last frame's tinted
+	# result. Otherwise crossing a forest biome accumulates green each tick.
 	if not biome.is_empty():
-		env.fog_light_color = env.fog_light_color.lerp(tint, tint_amount)
+		fog_color = fog_color.lerp(tint, tint_amount)
+	# The fork batches five weather/biome parameters into exactly one native
+	# RenderingServer update. Stock Godot uses equivalent individual setters.
+	if env.has_method("configure_weather_fog"):
+		env.call("configure_weather_fog", fog_color, fog_density, 2.6,
+			height_density, float(frame["sun_scatter"]))
+	else:
+		env.fog_light_color = fog_color
+		env.fog_density = fog_density
+		env.fog_height = 2.6
+		env.fog_height_density = height_density
+		env.fog_sun_scatter = float(frame["sun_scatter"])
 	if bool(settings.get("enabled", false)):
 		# Update when the weather actually changes enough; the renderer otherwise
 		# keeps the previous value instead of sending new state every frame.
