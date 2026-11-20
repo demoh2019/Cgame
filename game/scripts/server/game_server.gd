@@ -1754,6 +1754,34 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 		return {"ok": false, "reason": "not_shareable"}
 	if source.inventory.count(selected_item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
+	if selected_item_id == WoundSealant.ITEM_ID:
+		# Party first aid can prepare an ally BEFORE combat. The existing
+		# party, reach, carried-inventory and five-second cooldown checks
+		# have already run. Never allow a teammate to refresh this buff.
+		if not SaveValidation.finite_number(recipient.wound_seal_seconds,
+				0.0, WoundSealant.DURATION_SECONDS):
+			return {"ok": false, "reason": "invalid_state"}
+		if recipient.wound_seal_seconds > 0.0:
+			return {"ok": false, "reason": "already_sealed",
+				"remaining": recipient.wound_seal_seconds}
+		if source.mounted or recipient.mounted:
+			return {"ok": false, "reason": "mounted"}
+		if source.combat_tag_until > time or recipient.combat_tag_until > time or \
+				source.attack_timer > 0.0 or recipient.attack_timer > 0.0 or \
+				source.skill_timer > 0.0 or recipient.skill_timer > 0.0 or \
+				not source.action.is_empty() or not recipient.action.is_empty():
+			return {"ok": false, "reason": "in_combat"}
+		if not source.inventory.remove(selected_item_id, 1):
+			return {"ok": false, "reason": "not_carried"}
+		recipient.wound_seal_seconds = WoundSealant.DURATION_SECONDS
+		source.party_aid_timer = PartyAid.COOLDOWN
+		source.dirty_inventory = true
+		source.dirty_character = true
+		recipient.dirty_character = true
+		events.append({"type": "party_aid", "peer": target_id, "by": peer_id,
+			"item": selected_item_id, "wound_seal_seconds": WoundSealant.DURATION_SECONDS})
+		return {"ok": true, "peer": target_id, "item": selected_item_id,
+			"wound_seal_seconds": WoundSealant.DURATION_SECONDS}
 	if not PartyAid.has_effect(data, recipient.survival.health, recipient.survival.infection,
 			recipient.survival.bleeding, recipient.survival.fracture,
 			recipient.survival.hunger, recipient.survival.thirst,

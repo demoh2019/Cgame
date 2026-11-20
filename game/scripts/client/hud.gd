@@ -1034,7 +1034,7 @@ func _build() -> void:
 	aid_row.add_child(aid_items)
 	var aid_button := Button.new()
 	aid_button.text = "Aid / Share"
-	aid_button.tooltip_text = "Auto chooses the cheapest effective carried medicine for bleeding, fracture, infection or wounds. Select a specific medicine, food or water to share manually. Range 3.2m, cooldown 5s."
+	aid_button.tooltip_text = "Auto treats wounds only. Select a medical item, bite sealant, food or water to share manually. Bite sealant protects an ally for 90s, outside combat. Range 3.2m, cooldown 5s."
 	aid_button.pressed.connect(func() -> void:
 		var target: int = _party_target.get_selected_id()
 		if target < 0 or aid_items.selected < 0:
@@ -2848,7 +2848,10 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "party_aid":
 		if bool(data.get("ok", false)):
-			if float(data.get("food", 0.0)) > 0.0 or float(data.get("drink", 0.0)) > 0.0:
+			if data.has("wound_seal_seconds"):
+				say("Expedition ready: ally #%d sealed for %.0fs (-45%% infected bite infection)." % [
+					int(data.get("peer", 0)), float(data["wound_seal_seconds"])])
+			elif float(data.get("food", 0.0)) > 0.0 or float(data.get("drink", 0.0)) > 0.0:
 				say("Supplies shared: +%d hunger, +%d thirst." % [
 					roundi(float(data.get("food", 0.0))),
 					roundi(float(data.get("drink", 0.0)))])

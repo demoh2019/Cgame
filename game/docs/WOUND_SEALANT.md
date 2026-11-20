@@ -13,6 +13,20 @@ Character saves validate the remaining buff, older saves start at zero,
 death cancels the effect, and the private snapshot drives the HUD status.
 All actions use existing authenticated networking and item/crafting systems.
 
+## Team expedition preparation
+
+Medics can select **Antiseptic Wound Sealant** in the ordinary **Aid / Share**
+party action and apply one carried dose to a **living consenting party member**
+within 3.2 metres. This shares the existing 5-second party-aid cooldown.
+Both players must be out of combat and dismounted. A protected teammate cannot
+receive a second dose until their current 90-second protection expires.
+Failed attempts never spend medicine. The action uses the existing
+authenticated party RPC, private medical events and the recipient's own
+validated save/snapshot; there is no client-set duration or target immunity.
+
+The hub expedition restock presets now include **1 sealant for scouts** and
+**2 for medics**, withdrawn only from real protected-bank stock.
+
 Regression suite: `res://tests/test_wound_sealant.gd`, wired into
 `res://tests/run_all.gd`.
 

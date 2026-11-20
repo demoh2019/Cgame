@@ -3,6 +3,7 @@ extends RefCounted
 ## Client requests only recipient and carried item; server owns all other rules.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const WoundSealant = preload("res://scripts/shared/wound_sealant.gd")
 const RANGE := 3.2
 const MAX_HEIGHT_DIFF := 2.5
 const COOLDOWN := 5.0
@@ -26,6 +27,8 @@ static func supported_item(item_id: String, item_data: Dictionary) -> bool:
 		"water_bottle":
 			return str(item_data.get("kind", "")) == "drink" and float(item_data.get("drink", 0.0)) > 0.0
 		_:
+			if item_id == WoundSealant.ITEM_ID:
+				return str(item_data.get("kind", "")) == "wound_seal"
 			return str(item_data.get("kind", "")) == "medical"
 
 
@@ -60,7 +63,8 @@ static func medical_items() -> Array[String]:
 	var result: Array[String] = []
 	for raw_id in Defs.items():
 		var item_id: String = str(raw_id)
-		if str(Defs.item(item_id).get("kind", "")) == "medical":
+		var kind: String = str(Defs.item(item_id).get("kind", ""))
+		if kind == "medical" or (item_id == WoundSealant.ITEM_ID and kind == "wound_seal"):
 			result.append(item_id)
 	result.sort()
 	return result
