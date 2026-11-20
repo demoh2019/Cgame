@@ -293,6 +293,12 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn("world_partition.pin_cell(target_cell)", world)
         self.assertIn("world_partition.are_cells_loaded(target_cell, 0)", world)
         self.assertIn("world_partition.unpin_cell(target_cell)", world)
+        self.assertIn("_fast_travel_in_progress = true", world)
+        self.assertIn("await get_tree().physics_frame", world)
+        self.assertIn("if not world_partition.are_cells_loaded(target_cell, 0):", world)
+        self.assertIn('world.get("_fast_travel_in_progress")', travel)
+        self.assertIn("await physics_frame", travel)
+
         self.assertIn("world_partition.get_pinned_cell_count()", world)
         self.assertIn("stream.pin_cell(remote)", smoke)
         self.assertIn("stream.clear_pinned_cells()", smoke)
