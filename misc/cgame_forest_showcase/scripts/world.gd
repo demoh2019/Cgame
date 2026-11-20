@@ -5,7 +5,8 @@ extends Node3D
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const TileCache = preload("res://scripts/terrain_tile_cache.gd")
 const GameSave = preload("res://scripts/game_save.gd")
-const WORLD_EXTENT: float = 64.0
+const WORLD_EXTENT: float = 512.0
+const WORLD_CELLS_PER_SIDE: int = 32
 const CHUNK_EDGE: float = 32.0
 const CRYSTAL_TOTAL: int = 8
 
@@ -133,8 +134,9 @@ func _create_streaming_world() -> void:
     world_partition.cell_unloaded.connect(_on_stream_cell_unloaded)
     world_partition.observer_cell_changed.connect(_on_observer_cell_changed)
 
-    for cz in range(-2, 2):
-        for cx in range(-2, 2):
+    var half_cells: int = WORLD_CELLS_PER_SIDE / 2
+    for cz in range(-half_cells, half_cells):
+        for cx in range(-half_cells, half_cells):
             world_partition.set_cell_scene(
                 Vector2i(cx, cz), "res://cells/forest_cell.tscn")
     world_partition.update_streaming()
