@@ -70,9 +70,9 @@ TEST_CASE("[SceneTree][Node3D] Network snapshots use bounded Hermite interpolati
 		const real_t t = real_t(i) / 100.0;
 		const Vector3 sample = actor->interpolate_network_snapshot(
 				a, b, Vector3(130, 0, -75), Vector3(-80, 100, 45), 0.1, t);
-		CHECK(sample.x >= a.x && sample.x <= b.x);
-		CHECK(sample.y >= a.y && sample.y <= b.y);
-		CHECK(sample.z >= a.z && sample.z <= b.z);
+		CHECK((sample.x >= a.x && sample.x <= b.x));
+		CHECK((sample.y >= a.y && sample.y <= b.y));
+		CHECK((sample.z >= a.z && sample.z <= b.z));
 	}
 
 	// A centered sample with unlike but safe tangents changes the timing

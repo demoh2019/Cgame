@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SpringDamper" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Springy, frame-rate independent motion toward a target that can overshoot and wobble.
+	</brief_description>
+	<description>
+		SpringDamper moves a value toward a target like a damped spring. It uses the exact solution of a damped harmonic oscillator, so it behaves the same at any frame rate and stays stable with large [code]delta[/code] values. Unlike [SmoothDamp], it can overshoot, which suits weapon recoil, UI bounce, hanging props and procedural camera sway.
+		[codeblock]
+		var spring := SpringDamper.new()
+		spring.frequency = 3.0
+		spring.damping_ratio = 0.4
+
+		func _process(delta):
+		    position = spring.step(position, target.position, delta)
+		[/codeblock]
+		Floats, [Vector2], [Vector3] and [Vector4] are supported. Use one SpringDamper per value, since each keeps its own velocity.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_impulse">
+			<return type="void" />
+			<param index="0" name="impulse" type="Variant" />
+			<description>
+				Adds [param impulse] to the current velocity, for example to kick a camera when the player is hit. The impulse must have the same type as the value being smoothed.
+			</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>
+				Clears the stored velocity. Call this after teleporting the smoothed value.
+			</description>
+		</method>
+		<method name="step">
+			<return type="Variant" />
+			<param index="0" name="current" type="Variant" />
+			<param index="1" name="target" type="Variant" />
+			<param index="2" name="delta" type="float" />
+			<description>
+				Advances the spring by [param delta] seconds and returns the new value. [member velocity] is updated.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="damping_ratio" type="float" setter="set_damping_ratio" getter="get_damping_ratio" default="0.5">
+			How quickly oscillation dies out. [code]1.0[/code] is critically damped (no overshoot, fastest settling), values below [code]1.0[/code] bounce, values above [code]1.0[/code] approach the target more slowly. [code]0.0[/code] oscillates forever.
+		</member>
+		<member name="frequency" type="float" setter="set_frequency" getter="get_frequency" default="4.0">
+			Natural frequency of the spring in hertz. Higher values make it stiffer and faster.
+		</member>
+		<member name="velocity" type="Variant" setter="set_velocity" getter="get_velocity" default="null">
+			Current velocity of the smoothed value, in units per second.
+		</member>
+	</members>
+</class>

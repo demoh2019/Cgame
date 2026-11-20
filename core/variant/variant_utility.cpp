@@ -558,6 +558,24 @@ double VariantUtilityFunctions::smoothstep(double p_from, double p_to, double p_
 	return Math::smoothstep(p_from, p_to, p_step);
 }
 
+double VariantUtilityFunctions::remap_clamped(double p_value, double p_istart, double p_istop, double p_ostart, double p_ostop) {
+	if (p_istart == p_istop) {
+		return p_value >= p_istop ? p_ostop : p_ostart;
+	}
+	const double t = CLAMP((p_value - p_istart) / (p_istop - p_istart), 0.0, 1.0);
+	return Math::lerp(p_ostart, p_ostop, t);
+}
+
+// Frame-rate independent exponential smoothing: the same lambda gives the
+// same curve at any frame rate, unlike lerp() with a constant weight.
+double VariantUtilityFunctions::damp(double p_from, double p_to, double p_lambda, double p_delta) {
+	return Math::lerp(p_from, p_to, 1.0 - Math::exp(-MAX(p_lambda, 0.0) * MAX(p_delta, 0.0)));
+}
+
+double VariantUtilityFunctions::damp_angle(double p_from, double p_to, double p_lambda, double p_delta) {
+	return Math::lerp_angle(p_from, p_to, 1.0 - Math::exp(-MAX(p_lambda, 0.0) * MAX(p_delta, 0.0)));
+}
+
 double VariantUtilityFunctions::move_toward(double p_from, double p_to, double p_delta) {
 	return Math::move_toward(p_from, p_to, p_delta);
 }
@@ -1705,6 +1723,9 @@ void Variant::_register_variant_utility_functions() {
 	FUNCBINDR(remap, sarray("value", "istart", "istop", "ostart", "ostop"), Variant::UTILITY_FUNC_TYPE_MATH);
 
 	FUNCBINDR(smoothstep, sarray("from", "to", "x"), Variant::UTILITY_FUNC_TYPE_MATH);
+	FUNCBINDR(remap_clamped, sarray("value", "istart", "istop", "ostart", "ostop"), Variant::UTILITY_FUNC_TYPE_MATH);
+	FUNCBINDR(damp, sarray("from", "to", "lambda", "delta"), Variant::UTILITY_FUNC_TYPE_MATH);
+	FUNCBINDR(damp_angle, sarray("from", "to", "lambda", "delta"), Variant::UTILITY_FUNC_TYPE_MATH);
 	FUNCBINDR(move_toward, sarray("from", "to", "delta"), Variant::UTILITY_FUNC_TYPE_MATH);
 	FUNCBINDR(rotate_toward, sarray("from", "to", "delta"), Variant::UTILITY_FUNC_TYPE_MATH);
 

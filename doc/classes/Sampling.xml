@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="Sampling" inherits="Object" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Deterministic point distributions for procedural placement.
+	</brief_description>
+	<description>
+		Sampling provides static functions that generate evenly spread points, for scattering trees, rocks, loot or spawn points without visible clumps. Results depend only on the arguments, so the same seed always produces the same layout on every machine.
+		[codeblock]
+		for point in Sampling.poisson_disk_2d(Vector2(64, 64), 4.0, chunk_seed):
+		    spawn_tree(Vector3(point.x, 0.0, point.y))
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="halton" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="base" type="int" />
+			<description>
+				Returns element [param index] of the Halton low-discrepancy sequence in [param base], in the range [code][0, 1)[/code]. Use different prime bases (2, 3, 5...) for each dimension.
+			</description>
+		</method>
+		<method name="halton_2d" qualifiers="static">
+			<return type="PackedVector2Array" />
+			<param index="0" name="count" type="int" />
+			<param index="1" name="offset" type="int" default="1" />
+			<description>
+				Returns [param count] points in the unit square from the Halton sequence in bases 2 and 3, starting at index [param offset]. Points fill the square evenly and progressively, which suits sampling patterns and jitter.
+			</description>
+		</method>
+		<method name="poisson_disk_2d" qualifiers="static">
+			<return type="PackedVector2Array" />
+			<param index="0" name="size" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="seed" type="int" default="0" />
+			<param index="3" name="max_attempts" type="int" default="30" />
+			<param index="4" name="max_points" type="int" default="100000" />
+			<description>
+				Returns points inside the rectangle from [code]Vector2(0, 0)[/code] to [param size] where no two points are closer than [param radius] (blue noise). Uses Bridson's algorithm. [param max_attempts] is the number of candidates tried around each point before it is retired; [param max_points] caps the result size.
+			</description>
+		</method>
+	</methods>
+</class>

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PIDController" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Proportional-integral-derivative controller for driving a value toward a target with a force.
+	</brief_description>
+	<description>
+		PIDController computes a correction from the error between a measured value and a target. It is useful when you control a value indirectly, through a force, torque or throttle: hovering vehicles, turret aim, steering, temperature or stamina systems.
+		[codeblock]
+		var pid := PIDController.new()
+		pid.proportional_gain = 8.0
+		pid.integral_gain = 0.5
+		pid.derivative_gain = 2.0
+		pid.output_limit = 50.0
+
+		func _physics_process(delta):
+		    var force := pid.step(global_position.y, hover_height, delta)
+		    apply_central_force(Vector3.UP * force)
+		[/codeblock]
+		The derivative term uses the change of the measured value rather than the error, so changing the target does not cause a sudden spike in output.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_integral" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the accumulated integral of the error.
+			</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>
+				Clears the accumulated integral and the previous measurement.
+			</description>
+		</method>
+		<method name="step">
+			<return type="float" />
+			<param index="0" name="current" type="float" />
+			<param index="1" name="target" type="float" />
+			<param index="2" name="delta" type="float" />
+			<description>
+				Returns the controller output for the measured [param current] value and the desired [param target] after [param delta] seconds.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="derivative_gain" type="float" setter="set_derivative_gain" getter="get_derivative_gain" default="0.0">
+			Gain applied to the rate of change of the measured value. Dampens overshoot.
+		</member>
+		<member name="integral_gain" type="float" setter="set_integral_gain" getter="get_integral_gain" default="0.0">
+			Gain applied to the accumulated error. Removes steady-state error, such as a hovering object sagging under gravity.
+		</member>
+		<member name="integral_limit" type="float" setter="set_integral_limit" getter="get_integral_limit" default="0.0">
+			If greater than [code]0.0[/code], the accumulated integral is clamped to this magnitude to prevent wind-up.
+		</member>
+		<member name="output_limit" type="float" setter="set_output_limit" getter="get_output_limit" default="0.0">
+			If greater than [code]0.0[/code], the output is clamped to this magnitude.
+		</member>
+		<member name="proportional_gain" type="float" setter="set_proportional_gain" getter="get_proportional_gain" default="1.0">
+			Gain applied to the current error.
+		</member>
+	</members>
+</class>

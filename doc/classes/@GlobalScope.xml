@@ -345,6 +345,29 @@
 				It can perform smoother interpolation than [method cubic_interpolate] by the time values.
 			</description>
 		</method>
+		<method name="damp" keywords="lerp, smooth, interpolate">
+			<return type="float" />
+			<param index="0" name="from" type="float" />
+			<param index="1" name="to" type="float" />
+			<param index="2" name="lambda" type="float" />
+			<param index="3" name="delta" type="float" />
+			<description>
+				Moves [param from] toward [param to] by exponential decay, independent of the frame rate. [param lambda] is the decay rate per second: higher values approach the target faster. Use it instead of [code]lerp(a, b, k)[/code] with a constant [code]k[/code] in [code]_process()[/code], which behaves differently at different frame rates.
+				[codeblock]
+				camera_height = damp(camera_height, target_height, 8.0, delta)
+				[/codeblock]
+			</description>
+		</method>
+		<method name="damp_angle">
+			<return type="float" />
+			<param index="0" name="from" type="float" />
+			<param index="1" name="to" type="float" />
+			<param index="2" name="lambda" type="float" />
+			<param index="3" name="delta" type="float" />
+			<description>
+				Like [method damp], but for angles in radians: it takes the shortest path and wraps correctly, like [method lerp_angle].
+			</description>
+		</method>
 		<method name="db_to_linear">
 			<return type="float" />
 			<param index="0" name="db" type="float" />
@@ -1103,6 +1126,20 @@
 				[/codeblock]
 				For complex use cases where multiple ranges are needed, consider using [Curve] or [Gradient] instead.
 				[b]Note:[/b] If [code]istart == istop[/code], the return value is undefined (most likely NaN, INF, or -INF).
+			</description>
+		</method>
+		<method name="remap_clamped" keywords="range, lerp, interpolate">
+			<return type="float" />
+			<param index="0" name="value" type="float" />
+			<param index="1" name="istart" type="float" />
+			<param index="2" name="istop" type="float" />
+			<param index="3" name="ostart" type="float" />
+			<param index="4" name="ostop" type="float" />
+			<description>
+				Like [method remap], but the result never leaves the range [code][ostart, ostop][/code].
+				[codeblock]
+				remap_clamped(150, 0, 100, 0, 1) # Returns 1.0
+				[/codeblock]
 			</description>
 		</method>
 		<method name="rid_allocate_id">
