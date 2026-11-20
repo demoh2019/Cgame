@@ -9,6 +9,28 @@ const CHECKPOINT := "user://cgame_native_state_regression.dat"
 
 var layer_notifications: Array[Dictionary] = []
 var cell_notifications: Array[Dictionary] = []
+var native_world: Node3D
+var activated_cells: Array[Vector2i] = []
+var deactivating_cells: Array[Vector2i] = []
+
+func _on_native_cell_activated(cell: Vector2i) -> void:
+    activated_cells.append(cell)
+    var scene := native_world.call("get_cell_instance", cell) as Node3D
+    assert(scene != null)
+    assert(int(scene.get("streaming_activation_count")) == 1)
+    var stats: Dictionary = native_world.call("get_cell_simulation_stats", cell)
+    assert(int(stats["collision_objects"]) == 1)
+    assert(int(stats["collision_shapes"]) == 1)
+    assert(int(stats["navigation_regions"]) == 1)
+    assert((scene.get_node("WalkableRegion") as NavigationRegion3D).enabled)
+
+func _on_native_cell_deactivating(cell: Vector2i) -> void:
+    deactivating_cells.append(cell)
+    var scene := native_world.call("get_cell_instance", cell) as Node3D
+    assert(scene != null)
+    assert(int(scene.get("streaming_deactivation_count")) == 1)
+    assert((scene.get_node("TerrainPhysics/GroundShape") as CollisionShape3D).disabled)
+    assert(not (scene.get_node("WalkableRegion") as NavigationRegion3D).enabled)
 
 func _on_layer_changed(layer: String, enabled: bool) -> void:
     layer_notifications.append({"name": layer, "enabled": enabled})
@@ -41,6 +63,9 @@ func _run() -> void:
     assert(world != null)
     world.name = "StateTestWorld"
     get_root().add_child(world)
+    native_world = world
+    world.connect("cell_activated", Callable(self, "_on_native_cell_activated"))
+    world.connect("cell_deactivating", Callable(self, "_on_native_cell_deactivating"))
     world.connect("layer_state_changed", Callable(self, "_on_layer_changed"))
     world.connect("cell_state_changed", Callable(self, "_on_cell_state_changed"))
     world.set("cell_size", 128.0)
@@ -62,6 +87,7 @@ func _run() -> void:
     assert(layer_notifications[1]["enabled"] == true)
 
     assert(await _wait_for_cell(world, true))
+    assert(activated_cells.has(CELL))
     var first := world.call("get_cell_instance", CELL) as Node3D
     assert(first != null)
     assert(first.call("claim_hub_reward"))
@@ -75,6 +101,7 @@ func _run() -> void:
     # Move the observer outside the unload radius to destroy the scene.
     observer.position = Vector3(1024, 0, 0)
     assert(await _wait_for_cell(world, false))
+    assert(deactivating_cells.has(CELL))
     assert(bool(world.call("has_cell_state", CELL)))
     assert(world.call("get_cell_state", CELL)["reward_claimed"] == true)
     assert(cell_notifications.size() == 1)  # Unload snapshot unchanged.
@@ -161,6 +188,8 @@ func _run() -> void:
     assert(int(world.call("get_cell_lease_count_total")) == 0)
 
     world.set("streaming_enabled", false)
+    assert(activated_cells.size() >= 2)
+    assert(deactivating_cells.size() >= 2)
     world.queue_free()
     observer.queue_free()
     await process_frame
