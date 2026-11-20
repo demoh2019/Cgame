@@ -6,6 +6,8 @@ extends Node3D
 const Assets = preload("res://scripts/client/assets.gd")
 const RainGear = preload("res://scripts/client/character_rain_gear.gd")
 const Ragdoll = preload("res://scripts/client/ragdoll.gd")
+const Anim = preload("res://scripts/client/character_anim.gd")
+const AnimModifier = preload("res://scripts/client/character_anim_modifier.gd")
 
 static var _tinted: Dictionary = {}
 
@@ -19,6 +21,17 @@ var _moving := false
 var _walk_speed := 1.0
 var _last_position := Vector3.INF
 var speed := 0.0 # Measured ground speed in m/s.
+
+# Procedural animation (see character_anim.gd).
+static var _upper_cache: Dictionary = {}
+var _procedural: SkeletonModifier3D
+var _layer: AnimationPlayer # Upper-body-only clips over locomotion.
+var _layer_left := 0.0
+var _dt := 0.0
+var _last_yaw := INF
+var _yaw_rate := 0.0
+var _lod_tier := 0
+var _lod_accum := 0.0
 
 # Pack mode state.
 var _zombie := false
@@ -242,6 +255,7 @@ func _setup_pack(tint: Color, scale_factor: float, model_name: String, look_seed
 	animator.add_animation_library("", Assets.animation_library())
 	animator.animation_finished.connect(_on_animation_finished)
 	_play("Zombie_Idle_Loop" if _zombie else "Idle_Loop", 1.0)
+	_setup_procedural(model)
 	_capture_wet_surfaces(model)
 
 
@@ -353,7 +367,10 @@ func _play(animation_name: String, speed_scale: float) -> void:
 	# A play() issued before the model entered the tree can leave the right name set but nothing running.
 	if animator.current_animation != animation_name or not animator.is_playing():
 		animator.play(animation_name, 0.2)
-	animator.speed_scale = speed_scale
+		animator.speed_scale = speed_scale
+	else:
+		# Same clip: ease the playback rate so crossing a speed bracket does not pop the stride.
+		animator.speed_scale = Anim.smooth_rate(animator.speed_scale, speed_scale, _dt, 3.0)
 
 
 func _on_animation_finished(finished: StringName) -> void:
@@ -378,6 +395,9 @@ func play_fixed(animation_name: String) -> void:
 func play_action(animation_name: String, speed_scale: float = 1.0) -> void:
 	if not pack_mode or animator == null or _dead or not animator.has_animation(animation_name):
 		return
+	if _layer != null and not _riding and not _swimming and not _crouching and Anim.layerable(animation_name, _moving, _zombie):
+		_play_layered(animation_name, speed_scale)
+		return
 	_oneshot = animation_name
 	if _swing_trail != null and (animation_name.begins_with("Sword") or animation_name.begins_with("Melee")):
 		_swing_trail.set("emitting", true)
@@ -389,6 +409,101 @@ func play_action(animation_name: String, speed_scale: float = 1.0) -> void:
 ## A looping activity such as chopping; an empty name stops it.
 func set_action_loop(animation_name: String) -> void:
 	_action_loop = animation_name
+
+
+# --- Procedural layer (see character_anim.gd) -----------------------------------------------------------------------
+
+func _setup_procedural(model: Node3D) -> void:
+	var skeleton := model.find_children("*", "Skeleton3D", true, false)
+	if skeleton.is_empty():
+		return
+	var modifier := AnimModifier.new()
+	modifier.name = "ProceduralAnim"
+	modifier.body = self
+	(skeleton[0] as Skeleton3D).add_child(modifier)
+	_procedural = modifier
+	_layer = AnimationPlayer.new()
+	_layer.name = "UpperBodyLayer"
+	model.add_child(_layer) # Added after the base player, so its upper-body tracks win.
+	_layer.add_animation_library("", AnimationLibrary.new())
+
+
+## World height source `(x, z) -> y` for foot IK (the terrain's height_at).
+func set_ground_source(source: Callable) -> void:
+	if _procedural != null:
+		_procedural.set("ground_fn", source)
+
+
+func has_ground_source() -> bool:
+	return _procedural != null and (_procedural.get("ground_fn") as Callable).is_valid()
+
+
+## World point the head turns toward (camera or threat); Vector3.INF clears it.
+func set_look_point(point: Vector3) -> void:
+	if _procedural != null:
+		_procedural.set("look_point", point)
+
+
+## Animation LOD tier from Anim.assign_tiers: 0 full, 1 no IK/look, 2+ reduced update rate and no modifiers.
+func set_anim_lod(tier: int) -> void:
+	if tier == _lod_tier or animator == null or not pack_mode:
+		return
+	_lod_tier = tier
+	var cheap := tier >= 2
+	var mode := AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL if cheap else AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_IDLE
+	animator.callback_mode_process = mode
+	if _layer != null:
+		_layer.callback_mode_process = mode
+	_lod_accum = 0.0
+	if _procedural != null and not _dead:
+		_procedural.set("foot_ik", tier == 0)
+		_procedural.set("look_at_enabled", tier == 0)
+		if cheap:
+			_procedural.call("reset")
+		_procedural.active = not cheap
+
+
+func anim_lod_tier() -> int:
+	return _lod_tier
+
+
+func _track_yaw(delta: float) -> void:
+	var yaw := global_rotation.y
+	if _last_yaw != INF and delta > 0.0:
+		_yaw_rate = lerpf(_yaw_rate, angle_difference(_last_yaw, yaw) / delta, clampf(delta * 8.0, 0.0, 1.0))
+	_last_yaw = yaw
+
+
+func _tick_procedural(delta: float) -> void:
+	if _procedural != null:
+		_procedural.set("yaw_rate", _yaw_rate)
+		_procedural.set("move_speed", speed)
+	if _layer_left > 0.0:
+		_layer_left -= delta
+		if _layer_left <= 0.0 and _oneshot == "" and _swing_trail != null:
+			_swing_trail.set("emitting", false)
+	var interval := Anim.lod_interval(_lod_tier)
+	if interval > 0.0:
+		_lod_accum += delta
+		if _lod_accum >= interval:
+			animator.advance(_lod_accum)
+			if _layer != null:
+				_layer.advance(_lod_accum)
+			_lod_accum = 0.0
+
+
+## Plays an action clip on the upper body only; the legs keep their locomotion clip.
+func _play_layered(animation_name: String, speed_scale: float) -> void:
+	if not _upper_cache.has(animation_name):
+		_upper_cache[animation_name] = Anim.upper_body_copy(animator.get_animation(animation_name))
+	var library := _layer.get_animation_library("")
+	if not library.has_animation(animation_name):
+		library.add_animation(animation_name, _upper_cache[animation_name])
+	if _swing_trail != null and (animation_name.begins_with("Sword") or animation_name.begins_with("Melee")):
+		_swing_trail.set("emitting", true)
+	_layer.play(animation_name, 0.1)
+	_layer.speed_scale = speed_scale
+	_layer_left = _layer.get_animation(animation_name).length / maxf(speed_scale, 0.1)
 
 
 # --- Weapon in hand -------------------------------------------------------------------------------------------------
@@ -586,6 +701,11 @@ func start_ragdoll(push: Vector3) -> PhysicalBoneSimulator3D:
 	if simulator == null:
 		return null
 	_dead = true
+	if _procedural != null:
+		_procedural.call("reset")
+		_procedural.active = false
+	if _layer != null:
+		_layer.stop()
 	if animator != null:
 		animator.pause() # Keep the last pose as the starting pose.
 	simulator.physical_bones_start_simulation()
@@ -611,8 +731,17 @@ func set_stance(crouching: bool, riding: bool, swimming: bool = false) -> void:
 
 
 ## A flinch when struck (not while already playing an action, dead, or riding).
-func play_hit(heavy: bool = false) -> void:
-	if not pack_mode or _dead or _riding or _oneshot != "":
+func play_hit(heavy: bool = false, from_dir: Vector3 = Vector3.ZERO) -> void:
+	if not pack_mode or _dead or _riding:
+		return
+	# Additive flinch on top of whatever is playing.
+	if _procedural != null:
+		var local_dir := global_transform.basis.inverse() * from_dir if from_dir != Vector3.ZERO else Vector3.BACK
+		_procedural.call("kick", local_dir, 1.0 if heavy else 0.55)
+		# Moving, acting or a light hit: the flinch alone, locomotion is not interrupted.
+		if _oneshot != "" or _moving or not heavy:
+			return
+	elif _oneshot != "":
 		return
 	play_action("Hit_Knockback" if heavy else ("Hit_Chest" if randf() < 0.6 else "Hit_Head"), 1.3)
 
@@ -628,6 +757,8 @@ func set_zombie_state(state: int) -> void:
 
 ## Call each frame after the node has moved: works out the speed and picks what to play.
 func update_motion(delta: float) -> void:
+	_dt = delta
+	_track_yaw(delta)
 	var here := global_position
 	if _last_position != Vector3.INF and delta > 0.0:
 		speed = lerpf(speed, Vector2(here.x - _last_position.x, here.z - _last_position.z).length() / delta, clampf(delta * 10.0, 0.0, 1.0))
@@ -637,6 +768,7 @@ func update_motion(delta: float) -> void:
 	_last_position = here
 	if not pack_mode or animator == null:
 		return
+	_tick_procedural(delta)
 	if _oneshot != "":
 		_oneshot_left -= delta
 		if _oneshot_left > 0.0:

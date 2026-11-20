@@ -100,3 +100,26 @@ lines in `online_main.gd`. Tests: `tests/test_audio_parity.gd`.
 
 Not done: doppler on projectiles (one-shots are static on the client), HRTF or
 convolution reverb.
+
+## Character animation (Unity Animation Rigging + Mecanim / Unreal Control Rig + AnimBP)
+
+Static helpers in `scripts/client/character_anim.gd`, runtime driver
+`scripts/client/character_anim_modifier.gd` (a `SkeletonModifier3D` that runs after the AnimationPlayer and undoes
+its own changes each pass), wiring in `character_model.gd` and one crowd call in `entity_view.gd`.
+
+| Feature | Unity | Unreal | Cgame now |
+| --- | --- | --- | --- |
+| Foot IK on slopes | Animation Rigging Two Bone IK / Animator IK | Foot Placement / Two Bone IK | Analytic two-bone leg solve to `world.height_at`, planted-foot weight (swing legs untouched), foot tilt to ground normal |
+| Pelvis height adjust | Hips offset in IK | Pelvis offset in Foot Placement | Hips follow the lower foot target, clamped 0.35 m, smoothed |
+| Head look-at | Multi-Aim / LookAt IK | Look At node | Neck 40% + head 60%, yaw/pitch clamped, eases off when the target is behind; camera for the nearest characters |
+| Lean into turns | Animation Rigging damped transform | Control Rig lean | Spine roll from measured yaw rate, forward pitch with speed |
+| Breathing idle additive | Additive layer | Additive anim | Chest pitch sine, fades while moving |
+| Additive hit reaction | Additive animation layer | Additive hit / Physical Animation | Spring-damper flinch on the spine; moving or acting characters are not interrupted, only heavy idle hits also play the clip |
+| Upper/lower body layering | Avatar Mask layer | Layered Blend Per Bone | Second `AnimationPlayer` with upper-body-only clip copies, so a swing plays while the legs keep walking |
+| Smooth locomotion rate | Blend Tree speed | BlendSpace1D play rate | Playback rate eased (3/s) within the same clip |
+| Animation LOD (URO) | Animator Culling / LOD | Update Rate Optimization | 5 tiers by distance: IK/look off, then 30/15/8 Hz manual `advance`, modifiers off |
+| Crowd anim budget | n/a | Animation Budget Allocator | Only the nearest 0/4/8/14 characters (quality tier) run IK and look-at |
+| Ragdoll compatibility | Ragdoll takeover | Physics blend | `start_ragdoll` resets and disables the modifier and layer |
+
+Tests: `tests/test_animation_parity.gd`. The live-skeleton and `CharacterModel` checks need a running scene tree and
+are skipped under `run_all.gd`'s `_initialize`; run the suite after a `process_frame` to include them.

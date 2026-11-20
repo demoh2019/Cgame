@@ -11,6 +11,7 @@ const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const LootLabel = preload("res://scripts/shared/loot_label.gd")
 const Ragdoll = preload("res://scripts/client/ragdoll.gd")
+const CharacterAnim = preload("res://scripts/client/character_anim.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 var _world = null
 var _corpses: Array[Dictionary] = []
@@ -554,6 +555,7 @@ func _process(delta: float) -> void:
 	if _render_time >= 0.0:
 		_render_time += delta
 		_render_time += ((_snapshot_time - INTERPOLATION_DELAY) - _render_time) * clampf(delta * 2.0, 0.0, 1.0)
+	var anim_models: Array = []
 	for key in _nodes:
 		var node: Node3D = _nodes[key]
 		var target: Dictionary = _targets[key]
@@ -567,10 +569,14 @@ func _process(delta: float) -> void:
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
 			model.update_motion(delta)
+			anim_models.append(model)
 			if key.begins_with("player:"):
 				var bike = node.get_node("TrailBike")
 				if bike.visible:
 					bike.set_riding(true, model.speed, delta)
+	# Animation LOD / crowd budget, foot IK terrain source and head look-at (character_anim.gd).
+	CharacterAnim.apply_crowd(anim_models, get_viewport().get_camera_3d(), GraphicsQuality.level(),
+		_world.height_at if _world != null else Callable())
 
 
 ## Position and facing of a moving entity at the render time, between the two samples around it; past the newest
