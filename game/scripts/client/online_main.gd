@@ -2064,9 +2064,9 @@ func _run_demo() -> void:
 			# Distinguish missing streamed terrain from slow rendering in
 			# automatic screenshot benchmarks, with no per-frame HUD work.
 			if streamer != null:
-				print("CLIENT streaming: loaded=%d queued=%d threaded=%d" % [
+				print("CLIENT streaming: loaded=%d queued=%d threaded=%d visual=%d" % [
 					streamer.get_loaded_count(), streamer.get_queued_generation_count(),
-					streamer.get_pending_count()])
+					streamer.get_pending_count(), streamer.get_pending_visual_details_count()])
 			print("CLIENT screenshot saved: ", _screenshot_path)
 			get_tree().quit()
 
