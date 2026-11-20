@@ -11,7 +11,8 @@ Rain already darkens terrain, reduces roughness and gathers shallow puddles
 in swamp mud, dirt roads and aged settlement paving. The new shared
 `aa_puddle_ripple_tilt` function generates animated circular rain impacts
 in **world metres** inside a 2.6-m grid. Each cell has a stable, cheap
-arithmetic-hash phase; expanding wavefronts die entirely before the cell
+arithmetic-hash phase and a slightly jittered impact centre to prevent an
+obvious repeating grid; expanding wavefronts die entirely before the cell
 boundary. Adjacent streamed terrain chunks see the *same* pattern with
 no geometry seams or texture UV discontinuities.
 
