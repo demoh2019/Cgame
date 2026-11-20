@@ -18,7 +18,7 @@ const ENTRIES := [
 		["F5", "throw ember flask (PvE fire)"], ["F6 / F7", "pitch / pack field tarp"], ["Home", "return charm"], ["Alt+T", "storm cast"]]],
 	["TOWN", [
 		["N", "buy water"], ["V", "sell materials (Shift: fish)"], ["P", "accept contract (Shift: turn in, Ctrl: daily bounty)"],
-		["K", "skills and perks"], ["J", "map: drag pans, wheel zooms, click waypoint, Shift+click party ping, right clears"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["`", "full text readout"], ["F3", "survey ruins"]]],
+		["K", "skills and perks"], ["J", "map: drag pans, wheel zooms, click waypoint, Shift+click party ping, right clears"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["`", "full text readout"], ["F3", "survey ruins"], ["Ctrl+F11", "graphics quality preset"]]],
 ]
 
 var _built := false
