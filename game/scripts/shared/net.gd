@@ -818,7 +818,7 @@ func c_party_feast(item_id: String) -> void:
 func c_party_supply_request(need: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
-		_s_result.rpc_id(peer, "party_supply_request",
+		s_result.rpc_id(peer, "party_supply_request",
 			sim.cmd_party_supply_request(peer, need))
 
 
