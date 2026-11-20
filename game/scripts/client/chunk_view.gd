@@ -16,6 +16,7 @@ const GrassField = preload("res://scripts/client/grass_field.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
+const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
@@ -458,7 +459,10 @@ func _build_dungeon(origin: Vector2) -> void:
 			light.light_color = Color(1.0, 0.68, 0.36)
 			light.light_energy = 2.2
 			light.omni_range = 11.0
+			light.shadow_enabled = false # Keep nearby torch lighting affordable on Compatibility.
 			light.position = torch_at + Vector3(0, 2.2, 1.2) - Vector3(origin.x, 0, origin.y)
+			light.set_meta("aa_flame_seed", float(room.x * 13 + room.y * 7))
+			light.add_to_group(DungeonLightBudget.GROUP)
 			add_child(light)
 			if room == layout["boss"]:
 				_kit("chest_gold", Vector3(center.x + 2.0, Dungeon.FLOOR_Y, center.y + 2.0), PI, 1.2)
