@@ -58,6 +58,7 @@ const SUITES := [
 	"res://tests/test_frontier_stim.gd",
 	"res://tests/test_weapon_skills.gd",
 	"res://tests/test_field_whetstone.gd",
+	"res://tests/test_field_threat_scanner.gd",
 	"res://tests/test_spears.gd",
 	"res://tests/test_machetes.gd",
 	"res://tests/test_daggers.gd",
