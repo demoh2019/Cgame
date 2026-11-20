@@ -407,16 +407,28 @@ void ChunkedTerrain3D::_update_chunks() {
 			// chunk and only with the opt-in setting. Flat terrain downshifts
 			// early; cliffs/ridges retain geometry, following pixel-error LOD.
 			real_t chunk_lod_distance = effective_lod_distance;
+			real_t error_factor = 1.0;
 			if (lod_geometric_error_strength > real_t(0.001) && has_viewer && lod_count > 1) {
-				if (chunk.geometric_error < 0.0f) {
-					const int coarse_stride = lod_stride(MIN(lod_count - 1, 2), chunk_quads);
-					chunk.geometric_error = float(chunk_lod_deviation(_field(),
-							chunk.x0, chunk.z0, chunk_quads, coarse_stride));
+				real_t error_meters = 0.0;
+				if (lod_pixel_error > 0.0 && projection_scale > 0.0) {
+					// Pixel-error LOD already caches geometry deviations per
+					// level when building the heightfield: reuse that result.
+					// The game never performs a duplicate heightfield scan.
+					error_meters = chunk.lod_errors[MIN(lod_count - 1, 2)] * scale.y;
+				} else {
+					// Legacy distance-only LOD measures its coarse deviation
+					// lazily, only once on the first visible update.
+					if (chunk.geometric_error < 0.0f) {
+						const int coarse_stride = lod_stride(MIN(lod_count - 1, 2), chunk_quads);
+						chunk.geometric_error = float(chunk_lod_deviation(_field(),
+								chunk.x0, chunk.z0, chunk_quads, coarse_stride));
+					}
+					error_meters = real_t(chunk.geometric_error) *
+							Math::abs(height_scale * scale.y);
 				}
-				const real_t error_meters = real_t(chunk.geometric_error) *
-						Math::abs(height_scale * scale.y);
-				chunk_lod_distance *= geometric_error_lod_bias(error_meters,
+				error_factor = geometric_error_lod_bias(error_meters,
 						lod_geometric_error_strength);
+				chunk_lod_distance *= error_factor;
 			}
 			// Without a viewer (editor) use a moderate level instead of the most expensive one.
 			int lod = has_viewer ? select_lod(distance, chunk_lod_distance, lod_count, chunk.lod) : MIN(1, lod_count - 1);
@@ -425,8 +437,11 @@ void ChunkedTerrain3D::_update_chunks() {
 				for (int level = 0; level < lod_count; level++) {
 					errors[level] = chunk.lod_errors[level] * scale.y;
 				}
+				// Error-derived weight tightens pixel tolerance for peaks and
+				// relaxes it on flat surfaces; LOD and morph use the same bound.
+				const real_t pixel_error_tolerance = lod_pixel_error / error_factor;
 				lod = select_lod_by_pixel_error(errors, lod_count, distance,
-						projection_scale, lod_pixel_error, chunk.lod);
+						projection_scale, pixel_error_tolerance, chunk.lod);
 			}
 			if (lod != chunk.lod || !chunk.instance.is_valid()) {
 				_ensure_mesh(chunk, lod);
@@ -453,7 +468,7 @@ void ChunkedTerrain3D::_update_chunks() {
 					real_t threshold = chunk_lod_distance * real_t(1 << chunk.lod);
 					if (lod_pixel_error > 0.0 && projection_scale > 0.0) {
 						threshold = MAX(chunk.lod_errors[chunk.lod + 1] * scale.y *
-								projection_scale / lod_pixel_error, real_t(1.0));
+								projection_scale / (lod_pixel_error / error_factor), real_t(1.0));
 					}
 					target = TerrainGeomorphPolicy::factor(float(distance), float(threshold));
 				}
