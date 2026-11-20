@@ -12,6 +12,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
+- **Live scene-root accessor:** `get_cell_instance(cell)` returns the active Node3D scene root or `null` without scanning all children or requesting a load. Useful for gameplay population, navigation and cell-local scripts. Never cache the returned scene root beyond an unload without `is_instance_valid()`.
 - **Extra mission streaming sources:** up to 8 named world-space locations with radius 0 or 1 can stream quest areas, cinematic viewpoints or teleport destinations independently of the player's grid location. They share the existing threaded asset and instantiation budgets and are removed explicitly when no longer needed.
 - **Asymmetric LOD hysteresis:** keep an already detailed cell in full quality for 0–8 extra cell rings, while promotions still happen only at the inner threshold; suppresses rebuild thrashing when observers change grid cells.
 - **Opt-in cell detail LOD:** scene roots implementing `set_streaming_lod(level)` receive 0 inside the full-detail radius (or when pinned) and 1 in distant loaded cells. The engine sets the tier *before* the root's `_ready()` and updates existing cells under a per-frame transition budget. The game supplies simpler distant graphics and disables distant physics itself.
@@ -50,6 +51,19 @@ func _physics_process(_delta: float) -> void:
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Live cell roots for gameplay
+
+`get_cell_instance(cell: Vector2i) -> Node3D` gives the currently loaded scene root (or `null`) from the native ObjectID map. Use it in gameplay orchestration:
+
+```gdscript
+func _on_cell_loaded(cell: Vector2i) -> void:
+    var root: Node3D = world.get_cell_instance(cell)
+    if root != null and not root.is_queued_for_deletion():
+        spawn_cell_encounters(root, cell) # Implemented in the game.
+```
+
+The native method does not load new cells, change streaming budgets or transfer node ownership. The returned instance belongs to `WorldPartition3D` and can disappear when the region unloads, the scene is replaced, or the node is externally freed. Use `cell_unloaded(cell)` for cleanup, and avoid holding a raw pointer beyond the streaming lifecycle. The Aurora Forest `forest_encounters.gd` sample demonstrates this with a maximum of five near-field NPCs, and the existing native prediction integration test now asserts loaded/unloaded lookup semantics.
 
 ## Additional quest and camera sources
 
