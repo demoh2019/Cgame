@@ -238,8 +238,11 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 		var base := source.surface_get_material(surface)
 		if base is BaseMaterial3D:
 			var standard := base as BaseMaterial3D
+			var cut: bool = standard.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED
 			var material := ShaderMaterial.new()
-			material.shader = _shader_for_surface(false)
+			# Select the shader before setting imported PBR parameters so the
+			# material uniforms are initialized once for either quality variant.
+			material.shader = _shader_for_surface(cut)
 			material.set_shader_parameter("sway", sway)
 			material.set_shader_parameter("instance_tinted", tinted)
 			material.set_shader_parameter("height_ref", height)
@@ -277,9 +280,6 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 			material.set_shader_parameter("red_to_green", texture != null and texture.resource_path.ends_with("Leaves_TwistedTree_C.png"))
 			if texture != null:
 				material.set_shader_parameter("albedo_tex", texture)
-			var cut: bool = standard.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED
-			if cut:
-				material.shader = _shader_for_surface(true)
 			material.set_shader_parameter("cut_out", cut)
 			material.set_shader_parameter("scissor", standard.alpha_scissor_threshold if standard.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR else 0.5)
 			copy.surface_set_material(surface, material)
