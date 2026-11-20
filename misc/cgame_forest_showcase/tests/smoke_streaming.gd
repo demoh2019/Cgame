@@ -86,6 +86,30 @@ func _run() -> void:
     if cell == null or not cell.has_node("WindGrass"):
         _fail("streamed cell did not generate its instances")
         return
+    var patch := cell.get_node_or_null("TerrainPatch") as Node3D
+    if patch == null:
+        _fail("streamed cell has no terrain patch")
+        return
+    var ground := patch.get_node_or_null("GroundMesh") as MeshInstance3D
+    var terrain_body := patch.get_node_or_null("GroundCollision") as StaticBody3D
+    var shape_node := patch.get_node_or_null("GroundCollision/HeightmapCollision") as CollisionShape3D
+    if ground == null or terrain_body == null or shape_node == null:
+        _fail("streamed terrain has no mesh or collision")
+        return
+    var height_shape := shape_node.shape as HeightMapShape3D
+    if height_shape == null or height_shape.map_width != 33 or height_shape.map_depth != 33:
+        _fail("terrain heightmap has unexpected shape or dimensions")
+        return
+    if shape_node.position.distance_to(Vector3(16, 0, 16)) > 0.001:
+        _fail("terrain heightmap collision is not centered within its 32m tile")
+        return
+    var origin_arrays: Array = ground.mesh.surface_get_arrays(0)
+    var origin_vertices: PackedVector3Array = origin_arrays[Mesh.ARRAY_VERTEX]
+    var origin_normals: PackedVector3Array = origin_arrays[Mesh.ARRAY_NORMAL]
+    if origin_vertices.size() != 1089:
+        _fail("terrain patch should contain 33 x 33 vertices")
+        return
+
     var obstacles := cell.get_node_or_null("FoliageCollisions") as StaticBody3D
     if obstacles == null or obstacles.get_child_count() < 9:
         _fail("streamed cell has no obstacle colliders")
@@ -128,6 +152,29 @@ func _run() -> void:
         _fail("observer_cell_changed did not track negative coordinates")
         return
 
+    var negative_root := _get_active_cell_node(stream, negative)
+    if negative_root == null:
+        _fail("neighbor tile was not instantiated")
+        return
+    var other_ground := negative_root.get_node_or_null("TerrainPatch/GroundMesh") as MeshInstance3D
+    if other_ground == null:
+        _fail("negative tile lacks a terrain mesh")
+        return
+    var negative_arrays: Array = other_ground.mesh.surface_get_arrays(0)
+    var negative_vertices: PackedVector3Array = negative_arrays[Mesh.ARRAY_VERTEX]
+    var negative_normals: PackedVector3Array = negative_arrays[Mesh.ARRAY_NORMAL]
+    # X=0 in the origin cell matches X=32 in the adjacent negative-X cell.
+    # Both the height and the analytic normals must match to avoid visible seams.
+    for z in [0, 1, 7, 16, 24, 31, 32]:
+        var near_index: int = int(z) * 33
+        var far_index: int = int(z) * 33 + 32
+        if absf(origin_vertices[near_index].y - negative_vertices[far_index].y) > 0.0001:
+            _fail("neighboring terrain tiles disagree on seam heights at Z=%d" % z)
+            return
+        if origin_normals[near_index].distance_to(negative_normals[far_index]) > 0.0001:
+            _fail("neighboring terrain tiles disagree on seam normals at Z=%d" % z)
+            return
+
     observer.position.x = -39.0
     # Cell -2 has no registered scene. Grid tracking must still report -2.
     # Explicitly advance streaming: process_frame fires before the Node process callback.
@@ -139,5 +186,5 @@ func _run() -> void:
         _fail("observer transitions were not signaled reliably")
         return
 
-    print("Forest streaming smoke PASSED: deterministic shared-cell reload, negative coordinates, observer signals and performance quality")
+    print("Forest streaming smoke PASSED: deterministic terrain seams, heightmap colliders, reload, observer signals and quality")
     quit(0)
