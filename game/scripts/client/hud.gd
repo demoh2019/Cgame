@@ -342,6 +342,16 @@ func _build() -> void:
 		else:
 			say("Select a visible survivor above"))
 	duel_buttons.add_child(duel_invite)
+	var ranked_button := Button.new()
+	ranked_button.text = "Ranked challenge"
+	ranked_button.tooltip_text = "Authenticated accounts only; Elo after knockout/forfeit. 20-minute same-opponent cooldown."
+	ranked_button.pressed.connect(func() -> void:
+		var target: int = _party_target.get_selected_id()
+		if target >= 0:
+			client.duel_invite(target, true)
+		else:
+			say("Ranked: choose a nearby survivor first"))
+	duel_buttons.add_child(ranked_button)
 	var duel_accept := Button.new()
 	duel_accept.text = "Accept"
 	duel_accept.pressed.connect(func() -> void: client.duel_accept())
@@ -647,13 +657,20 @@ func _on_event(event: Dictionary) -> void:
 		"duel":
 			match str(event.get("phase", "")):
 				"invited":
-					say("Duel challenge from %s. Open inventory to accept." % str(event.get("name", "Survivor")))
+					say("%s challenge from %s. Open inventory to accept." % [
+						"RANKED" if bool(event.get("ranked", false)) else "Training duel",
+						str(event.get("name", "Survivor"))])
 				"started":
-					say("Training duel started vs %s. No loot loss." % str(event.get("opponent", "Survivor")))
+					say("%s duel started vs %s. No loot loss." % [
+						"Ranked" if bool(event.get("ranked", false)) else "Training",
+						str(event.get("opponent", "Survivor"))])
 				"finished":
 					var winner: int = int(event.get("winner", -1))
 					say("Duel %s (%s)." % ["won" if winner == client.peer_id else ("lost" if winner > 0 else "ended"),
 						str(event.get("reason", "finished"))])
+					if bool(event.get("ranked", false)):
+						say("Arena rating: %d (%+d)" % [int(event.get("rating", 1200)),
+							int(event.get("rating_change", 0))])
 		"self_defense":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("ATTACKED! You may retaliate for 30 seconds without infamy.")
@@ -1036,6 +1053,9 @@ func _process(_delta: float) -> void:
 		int(client.you.get("pvp_kills", 0)), int(client.you.get("pvp_honor", 0)),
 		str(client.you.get("pvp_rank", "Wanderer"))
 	]
+	_info_label.text += " | Arena %d %s (%dW / %dL)" % [
+		int(client.you.get("arena_rating", 1200)), str(client.you.get("arena_tier", "Silver")),
+		int(client.you.get("arena_wins", 0)), int(client.you.get("arena_losses", 0))]
 	# A lightweight compass for siege outposts; all coordinates, owners and
 	# progress originate in the authoritative snapshot, not client commands.
 	var closest: Dictionary = {}
@@ -1157,10 +1177,12 @@ func _refresh_market_options() -> void:
 func _refresh_party_controls() -> void:
 	var training: Dictionary = client.you.get("duel", {})
 	if bool(training.get("active", false)):
-		_duel_status.text = "Sparring with #%d — %ds" % [
+		_duel_status.text = "%s with #%d — %ds" % [
+			"Ranked" if bool(training.get("ranked", false)) else "Sparring",
 			int(training.get("opponent", -1)), ceili(float(training.get("seconds", 0.0)))]
 	elif int(training.get("invite_from", -1)) > 0:
-		_duel_status.text = "Challenge from #%d — %ds to accept" % [
+		_duel_status.text = "%s challenge from #%d — %ds to accept" % [
+			"Ranked" if bool(training.get("ranked", false)) else "Training",
 			int(training.get("invite_from", -1)), ceili(float(training.get("seconds", 0.0)))]
 	else:
 		_duel_status.text = "No duel pending. Select a nearby survivor above."

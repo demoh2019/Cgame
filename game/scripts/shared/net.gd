@@ -197,6 +197,8 @@ func leave(peer: int) -> bool:
 	# the final Nakama character. Otherwise a disconnect could save gear
 	# from before the drop, creating both a public bag and a retained copy.
 	sim.prepare_disconnect(peer)
+	# Ranked duel forfeits must be reflected in the final account save.
+	sim._abort_training(peer, "disconnected")
 	var data: Dictionary = sim.character_data(player)
 	if user_id != "":
 		_departing_accounts[user_id] = true
@@ -374,10 +376,10 @@ func c_contract(action: String) -> void:
 ## Party identities are always the RPC sender; the client can only nominate
 ## a nearby target to invite/kick, never the leader or group identifier.
 @rpc("any_peer", "reliable")
-func c_duel_invite(target_id: int) -> void:
+func c_duel_invite(target_id: int, ranked: bool = false) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
-		s_result.rpc_id(peer, "duel", sim.cmd_duel_invite(peer, target_id))
+		s_result.rpc_id(peer, "duel", sim.cmd_duel_invite(peer, target_id, ranked))
 
 
 @rpc("any_peer", "reliable")

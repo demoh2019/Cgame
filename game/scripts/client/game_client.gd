@@ -226,8 +226,8 @@ func move_stash(item_id: String, count: int, deposit: bool) -> void:
 
 
 ## Trade ids and revisions originate from server events. No client-side inventory mutation.
-func duel_invite(target_id: int) -> void:
-	net.c_duel_invite.rpc_id(1, target_id)
+func duel_invite(target_id: int, ranked: bool = false) -> void:
+	net.c_duel_invite.rpc_id(1, target_id, ranked)
 
 
 func duel_accept() -> void:

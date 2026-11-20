@@ -11,6 +11,7 @@ const Vendor = preload("res://scripts/shared/vendor.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const CombatLogout = preload("res://scripts/shared/combat_logout.gd")
 const TrainingDuel = preload("res://scripts/shared/training_duel.gd")
+const ArenaRating = preload("res://scripts/shared/arena_rating.gd")
 const PvPHonor = preload("res://scripts/shared/pvp_honor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
@@ -138,6 +139,9 @@ class Player:
 	var defense_until: float = 0.0 # Current server-clock expiry; never saved.
 	var pvp_kills: int = 0
 	var pvp_honor: int = 0
+	var arena_rating: int = ArenaRating.START_RATING
+	var arena_wins: int = 0
+	var arena_losses: int = 0
 	var zone_notice: int = -1
 	var dirty_inventory: bool = true
 	var dirty_stash: bool = true
@@ -180,6 +184,7 @@ var outpost_breach_requests: Dictionary = {} # Peer -> last command and cached r
 var training_invites: Dictionary = {} # Target peer -> verified invitation.
 var training_matches: Dictionary = {} # Both peer IDs reference the same session.
 var training_invite_last: Dictionary = {} # Bounded per peer by disconnect cleanup.
+var arena_recent_pairs: Dictionary = {} # Server-session account-pair ranked cooldowns.
 var pvp_honor_ledger: Dictionary = {} # Bounded server-only account/guest kill cooldowns.
 var siege_declare_requests: Dictionary = {} # Peer -> last declared request and cached result.
 var world_structure_revision: int = 0
@@ -258,6 +263,8 @@ func character_data(player: Player) -> Dictionary:
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"pvp_infamy": player.pvp_infamy,
 		"pvp_kills": player.pvp_kills, "pvp_honor": player.pvp_honor,
+		"arena_rating": player.arena_rating, "arena_wins": player.arena_wins,
+		"arena_losses": player.arena_losses,
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
 		"stash": player.stash.to_dict(),
@@ -319,6 +326,10 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		if not SaveValidation.valid_counter(data.get(key, 0)) or \
 				float(data.get(key, 0)) > PvPHonor.MAX_POINTS:
 			return false
+	if not ArenaRating.valid_rating(data.get("arena_rating", ArenaRating.START_RATING)) or \
+			not ArenaRating.valid_record(data.get("arena_wins", 0)) or \
+			not ArenaRating.valid_record(data.get("arena_losses", 0)):
+		return false
 	if not SaveValidation.finite_number(data.get("rest_cooldown", 0.0), 0.0, CampRest.COOLDOWN):
 		return false
 	if not SaveValidation.finite_number(data.get("lake_drink_cooldown", 0.0), 0.0, FieldWater.COOLDOWN_SECONDS):
@@ -392,6 +403,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.pvp_infamy = float(data.get("pvp_infamy", 0.0))
 	player.pvp_kills = int(data.get("pvp_kills", 0))
 	player.pvp_honor = int(data.get("pvp_honor", 0))
+	player.arena_rating = int(data.get("arena_rating", ArenaRating.START_RATING))
+	player.arena_wins = int(data.get("arena_wins", 0))
+	player.arena_losses = int(data.get("arena_losses", 0))
 	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
 	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
@@ -657,7 +671,7 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 ## session-owned; no client supplies a party ID or its member list.
 
 ## Mutual, proximity-checked hub sparring: no loot, crimes or PvP rewards.
-func cmd_duel_invite(peer_id: int, target_id: int) -> Dictionary:
+func cmd_duel_invite(peer_id: int, target_id: int, ranked: bool = false) -> Dictionary:
 	var source: Player = players.get(peer_id)
 	var target: Player = players.get(target_id)
 	var denial: String = TrainingDuel.invitation_reason(world, source, target, time)
@@ -665,17 +679,21 @@ func cmd_duel_invite(peer_id: int, target_id: int) -> Dictionary:
 		return {"ok": false, "reason": denial}
 	if training_matches.has(peer_id) or training_matches.has(target_id):
 		return {"ok": false, "reason": "already_dueling"}
+	if ranked:
+		var eligibility: String = ArenaRating.eligibility(source, target, time, arena_recent_pairs)
+		if eligibility != "":
+			return {"ok": false, "reason": eligibility}
 	if time < float(training_invite_last.get(peer_id, -INF)) + TrainingDuel.INVITE_COOLDOWN:
 		return {"ok": false, "reason": "cooldown"}
 	if training_invites.has(target_id) and float(training_invites[target_id].get("until", 0.0)) > time:
 		return {"ok": false, "reason": "invite_pending"}
 	training_invite_last[peer_id] = time
-	training_invites[target_id] = {"from": peer_id,
+	training_invites[target_id] = {"from": peer_id, "ranked": ranked,
 		"until": time + TrainingDuel.INVITE_SECONDS,
 		"from_instance": source.get_instance_id(), "to_instance": target.get_instance_id()}
 	events.append({"type": "duel", "peer": target_id, "phase": "invited",
-		"name": source.name, "by": peer_id})
-	return {"ok": true, "phase": "invited"}
+		"name": source.name, "by": peer_id, "ranked": ranked})
+	return {"ok": true, "phase": "invited", "ranked": ranked}
 
 
 func cmd_duel_accept(peer_id: int) -> Dictionary:
@@ -693,8 +711,14 @@ func cmd_duel_accept(peer_id: int) -> Dictionary:
 	if denial != "" or training_matches.has(first.id) or training_matches.has(second.id):
 		training_invites.erase(peer_id)
 		return {"ok": false, "reason": denial if denial != "" else "already_dueling"}
+	if bool(invite.get("ranked", false)):
+		var status: String = ArenaRating.eligibility(first, second, time, arena_recent_pairs)
+		if status != "":
+			training_invites.erase(peer_id)
+			return {"ok": false, "reason": status}
 	training_invites.erase(peer_id)
 	var duel: Dictionary = {"a": first.id, "b": second.id,
+		"ranked": bool(invite.get("ranked", false)),
 		"until": time + TrainingDuel.MATCH_SECONDS,
 		"a_hp": first.survival.health, "b_hp": second.survival.health}
 	training_matches[first.id] = duel
@@ -702,13 +726,17 @@ func cmd_duel_accept(peer_id: int) -> Dictionary:
 	for member in [first, second]:
 		events.append({"type": "duel", "peer": member.id, "phase": "started",
 			"opponent": second.name if member.id == first.id else first.name,
-			"seconds": TrainingDuel.MATCH_SECONDS})
-	return {"ok": true, "phase": "started"}
+			"seconds": TrainingDuel.MATCH_SECONDS, "ranked": bool(duel["ranked"])})
+	return {"ok": true, "phase": "started", "ranked": bool(duel["ranked"])}
 
 
 func cmd_duel_cancel(peer_id: int) -> Dictionary:
 	if training_matches.has(peer_id):
-		_end_training(peer_id, -1, "cancelled")
+		var duel: Dictionary = training_matches[peer_id]
+		var winner: int = -1
+		if bool(duel.get("ranked", false)):
+			winner = int(duel["b"]) if peer_id == int(duel["a"]) else int(duel["a"])
+		_end_training(peer_id, winner, "surrender" if winner > 0 else "cancelled")
 		return {"ok": true, "phase": "cancelled"}
 	if training_invites.has(peer_id):
 		training_invites.erase(peer_id)
@@ -729,6 +757,12 @@ func _end_training(peer_id: int, winner_id: int, reason: String) -> void:
 	var b: int = int(duel["b"])
 	training_matches.erase(a)
 	training_matches.erase(b)
+	var rating_result: Dictionary = {}
+	if bool(duel.get("ranked", false)) and winner_id in [a, b] and reason in ["knockout", "surrender", "disconnected"]:
+		var winner: Player = players.get(winner_id)
+		var loser: Player = players.get(b if winner_id == a else a)
+		if winner != null and loser != null:
+			rating_result = ArenaRating.settle(winner, loser, time, arena_recent_pairs)
 	for member_id in [a, b]:
 		var member: Player = players.get(member_id)
 		if member == null:
@@ -737,11 +771,16 @@ func _end_training(peer_id: int, winner_id: int, reason: String) -> void:
 			var initial: float = float(duel["a_hp"] if member_id == a else duel["b_hp"])
 			member.survival.health = maxf(member.survival.health, initial)
 		events.append({"type": "duel", "peer": member_id, "phase": "finished",
-			"winner": winner_id, "reason": reason})
+			"winner": winner_id, "reason": reason, "ranked": bool(duel.get("ranked", false)),
+			"rating": member.arena_rating, "rating_change": int(rating_result.get("change", 0)) if member_id == winner_id else -int(rating_result.get("change", 0))})
 
 
 func _abort_training(peer_id: int, reason: String) -> void:
-	_end_training(peer_id, -1, reason)
+	var duel: Dictionary = training_matches.get(peer_id, {})
+	var winner_id: int = -1
+	if reason == "disconnected" and bool(duel.get("ranked", false)):
+		winner_id = int(duel["b"]) if peer_id == int(duel["a"]) else int(duel["a"])
+	_end_training(peer_id, winner_id, reason)
 	training_invites.erase(peer_id)
 	for target_id in training_invites.keys():
 		if int(training_invites[target_id].get("from", -1)) == peer_id:
@@ -765,12 +804,13 @@ func _tick_training() -> void:
 func _training_snapshot(peer_id: int) -> Dictionary:
 	var match_data: Dictionary = training_matches.get(peer_id, {})
 	if not match_data.is_empty():
-		return {"active": true,
+		return {"active": true, "ranked": bool(match_data.get("ranked", false)),
 			"opponent": int(match_data["b"]) if peer_id == int(match_data["a"]) else int(match_data["a"]),
 			"seconds": maxf(0.0, float(match_data["until"]) - time)}
 	var invite: Dictionary = training_invites.get(peer_id, {})
 	if not invite.is_empty() and float(invite["until"]) > time:
 		return {"active": false, "invite_from": int(invite["from"]),
+			"ranked": bool(invite.get("ranked", false)),
 			"seconds": float(invite["until"]) - time}
 	return {}
 
@@ -3317,7 +3357,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"alive": _alive(other), "weapon": other.inventory.weapon,
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
 				"guild": {"id": other.guild_id, "name": other.guild_name},
-				"pvp_rank": PvPHonor.rank(other.pvp_honor)})
+				"pvp_rank": PvPHonor.rank(other.pvp_honor),
+				"arena_tier": ArenaRating.tier(other.arena_rating)})
 	var nearby_zombies: Array = []
 	for zombie in zombies.values():
 		var p: Vector3 = zombie.position
@@ -3396,6 +3437,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				player.defense_target, player.defense_until, time),
 			"pvp_kills": player.pvp_kills, "pvp_honor": player.pvp_honor,
 			"pvp_rank": PvPHonor.rank(player.pvp_honor),
+			"arena_rating": player.arena_rating, "arena_wins": player.arena_wins,
+			"arena_losses": player.arena_losses,
+			"arena_tier": ArenaRating.tier(player.arena_rating),
 			"action": player.action.duplicate(),
 			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
 			"blood_scent_radius": BloodScent.detection_radius(player.survival.bleeding,

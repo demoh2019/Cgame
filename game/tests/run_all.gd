@@ -65,6 +65,7 @@ const SUITES := [
 	"res://tests/test_pvp_infamy.gd",
 	"res://tests/test_pvp_justice.gd",
 	"res://tests/test_training_duel.gd",
+	"res://tests/test_ranked_duels.gd",
 	"res://tests/test_pvp_combat_logout.gd",
 	"res://tests/test_pvp_honor.gd",
 	"res://tests/test_loot_rights.gd",
