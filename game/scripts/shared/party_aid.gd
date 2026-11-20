@@ -32,10 +32,11 @@ static func supported_item(item_id: String, item_data: Dictionary) -> bool:
 static func has_effect(item_data: Dictionary, health: float, infection: float,
 		bleeding: float = 0.0, fracture: float = 0.0,
 		hunger: float = 100.0, thirst: float = 100.0,
-		max_health: float = Defs.MAX_HEALTH) -> bool:
+		max_health: float = Defs.MAX_HEALTH, food_poisoning: float = 0.0) -> bool:
 	if not is_finite(health) or not is_finite(infection) or not is_finite(bleeding) or \
 			not is_finite(fracture) or not is_finite(hunger) or not is_finite(thirst) or \
-			not is_finite(max_health) or max_health <= 0.0:
+			not is_finite(max_health) or max_health <= 0.0 or \
+			not is_finite(food_poisoning) or food_poisoning < 0.0:
 		return false
 	match str(item_data.get("kind", "")):
 		"food":
@@ -48,7 +49,8 @@ static func has_effect(item_data: Dictionary, health: float, infection: float,
 			return (heal_amount > 0.0 and health < max_health) or (
 				cure_amount > 0.0 and infection > 0.0) or (
 				bool(item_data.get("stop_bleeding", false)) and bleeding > 0.0) or (
-				float(item_data.get("fracture_treatment", 0.0)) > 0.0 and fracture > 0.0)
+				float(item_data.get("fracture_treatment", 0.0)) > 0.0 and fracture > 0.0) or (
+				float(item_data.get("food_poison_treatment", 0.0)) > 0.0 and food_poisoning > 0.0)
 	return false
 
 
@@ -69,14 +71,17 @@ static func medical_items() -> Array[String]:
 ## condition: bleeding, fracture, infection, then missing health.
 ## Manual item selection stays available for deliberate expensive treatments.
 static func best_item(inventory, health: float, infection: float,
-		bleeding: float, fracture: float, max_health: float = Defs.MAX_HEALTH) -> String:
+		bleeding: float, fracture: float, max_health: float = Defs.MAX_HEALTH,
+		food_poisoning: float = 0.0) -> String:
 	if inventory == null or not is_finite(health) or not is_finite(infection) or \
-			not is_finite(bleeding) or not is_finite(fracture) or not is_finite(max_health):
+			not is_finite(bleeding) or not is_finite(fracture) or not is_finite(max_health) or \
+			not is_finite(food_poisoning):
 		return ""
 	if health < 0.0 or max_health <= 0.0 or health > max_health or \
 			infection < 0.0 or infection > Defs.INFECTION_MAX or \
 			bleeding < 0.0 or bleeding > Defs.BLEEDING_MAX or \
-			fracture < 0.0 or fracture > Defs.FRACTURE_MAX:
+			fracture < 0.0 or fracture > Defs.FRACTURE_MAX or \
+			food_poisoning < 0.0 or food_poisoning > 100.0:
 		return ""
 	var selected := ""
 	var selected_priority := 99
@@ -85,15 +90,18 @@ static func best_item(inventory, health: float, infection: float,
 		if inventory.count(item_id) < 1:
 			continue
 		var data: Dictionary = Defs.item(item_id)
-		if not has_effect(data, health, infection, bleeding, fracture, 100.0, 100.0, max_health):
+		if not has_effect(data, health, infection, bleeding, fracture, 100.0, 100.0,
+			max_health, food_poisoning):
 			continue
-		var priority := 3
+		var priority := 4
 		if bleeding > 0.0 and bool(data.get("stop_bleeding", false)):
 			priority = 0
 		elif fracture > 0.0 and float(data.get("fracture_treatment", 0.0)) > 0.0:
 			priority = 1
 		elif infection > 0.0 and float(data.get("cure", 0.0)) > 0.0:
 			priority = 2
+		elif food_poisoning > 0.0 and float(data.get("food_poison_treatment", 0.0)) > 0.0:
+			priority = 3
 		var value: int = maxi(0, int(data.get("value", 0)))
 		var better: bool = priority < selected_priority
 		if priority == selected_priority:
