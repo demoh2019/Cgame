@@ -95,6 +95,18 @@ bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, in
 // Minimum and maximum raw sample value inside a chunk (inclusive of its far border samples).
 void chunk_height_range(const HeightField &p_field, int p_x0, int p_z0, int p_quads, real_t &r_min, real_t &r_max);
 
+// Maximum vertical height deviation (source height units) when rendering
+// a heightfield chunk using a coarser mesh with its actual triangle diagonal.
+// The final partial edge is clamped to the field's border.
+real_t chunk_lod_max_error(const HeightField &p_field, int p_x0, int p_z0, int p_quads, int p_stride);
+
+// Select a terrain LOD by projected geometric error in pixels. p_errors
+// contains monotonic world-space maximum deviation per LOD; p_projection_scale
+// converts an error at distance 1 to screen pixels. p_current adds hysteresis.
+int select_lod_by_pixel_error(const real_t *p_errors, int p_lod_count,
+		real_t p_distance, real_t p_projection_scale, real_t p_pixel_error,
+		int p_current = -1);
+
 // Detail level for a chunk at `p_distance` from the viewer. Level 0 is full detail, and every
 // level doubles the distance. `p_current` (or -1) adds hysteresis: the current level is kept while
 // the distance stays within 10% of its range, so chunks at a boundary do not flip every frame.
