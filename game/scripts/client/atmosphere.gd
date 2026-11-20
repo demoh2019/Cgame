@@ -1,6 +1,7 @@
 extends Node3D
 
 const CloudShadowLut = preload("res://scripts/client/cloud_shadow_lut.gd")
+const CinematicColorGrade = preload("res://scripts/client/cinematic_color_grade.gd")
 const VegetationWind = preload("res://scripts/client/vegetation_wind.gd")
 const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
@@ -152,7 +153,8 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	environment.fog_density = lerpf(0.0016, 0.0042, storm)
 	CinematicFog.apply_weather(environment, daylight, sun_height, storm,
 		_fog_profile, horizon)
-	environment.adjustment_saturation = lerpf(1.0, 0.85, storm)
+	# Run the ACES-grade after atmospheric weather/fog, without replacing fog state.
+	CinematicColorGrade.apply(environment, daylight, sun_height, storm)
 
 
 ## Render-only switches; weather and the shared day/night clock are unaffected.

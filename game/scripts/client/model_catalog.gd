@@ -7,6 +7,7 @@ extends RefCounted
 
 const PACKS := "res://assets/packs/"
 const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
+const MeshPBR = preload("res://scripts/client/mesh_pbr_preservation.gd")
 
 # kind: "footprint" (longest horizontal side), "height" or "length" (longest horizontal side too, for walls and fences).
 # tex: a texture to put on every surface (the Highlands FBX files carry no usable material); node: the object inside a collection.
@@ -314,32 +315,24 @@ static func bake(path: String, node_name: String, kind: String, size: float, tex
 		for i in vertices.size():
 			moved[i] = ((transform * vertices[i]) + offset) * factor
 		arrays[Mesh.ARRAY_VERTEX] = moved
-		if arrays[Mesh.ARRAY_NORMAL] != null:
-			var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
-			var turned := PackedVector3Array()
-			turned.resize(normals.size())
-			var normal_basis: Basis = transform.basis.inverse().transposed()
-			for i in normals.size():
-				turned[i] = (normal_basis * normals[i]).normalized()
-			arrays[Mesh.ARRAY_NORMAL] = turned
-		arrays[Mesh.ARRAY_TANGENT] = null # Tangents would need the same turning; the ground-level props do without normal maps.
+		# Preserve the normal-map tangent space under arbitrary imported transforms.
+		# This runs once per cached model, not in the render loop.
+		var tangent_frame_valid: bool = MeshPBR.transform_frame(arrays, transform.basis)
 		baked.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], MeshLOD.copy_lods(source.mesh, surface, world_scale))
-		var material: Material = source.mesh.surface_get_material(surface)
+		# Imported scenes can override materials per mesh instance.
+		var material: Material = source.get_surface_override_material(surface)
+		if material == null:
+			material = source.mesh.surface_get_material(surface)
 		if texture != null:
 			var painted := StandardMaterial3D.new()
 			painted.albedo_texture = texture
 			painted.roughness = 0.9
 			painted.cull_mode = BaseMaterial3D.CULL_DISABLED
 			material = painted
-		elif material is BaseMaterial3D:
-			# Source materials may carry normal maps and big metallic values that look wrong at this distance: keep it matte.
-			material = (material as BaseMaterial3D).duplicate()
-			(material as BaseMaterial3D).normal_enabled = false
-			(material as BaseMaterial3D).metallic = minf((material as BaseMaterial3D).metallic, 0.2)
-			if path.begins_with("dungeon/"):
-				# KayKit's clean pastel stone reads as plastic next to the scanned props: weather it to a darker, warmer grey.
-				(material as BaseMaterial3D).albedo_color = Color(0.68, 0.64, 0.58)
-				(material as BaseMaterial3D).roughness = 1.0
+		else:
+			# Preserve source roughness, metalness, normal maps and ORM textures.
+			# Keep dungeon's intentional hand-painted palette as a separate opt-in.
+			material = MeshPBR.material_for_bake(material, tangent_frame_valid, path.begins_with("dungeon/"))
 		baked.surface_set_material(surface, material)
 	root.free()
 	return baked
