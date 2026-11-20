@@ -599,7 +599,7 @@ real_t WorldPartition3D::get_streaming_source_progress(const String &p_name) con
 bool WorldPartition3D::is_streaming_source_ready(const String &p_name) const {
 	// Merely registering a source is not sufficient. The node must be actively
 	// streaming, with a resolved observer and a registered destination.
-	if (!streaming_enabled || !is_inside_tree() || observer_path.is_empty() || get_node_or_null(observer_path) == nullptr) {
+	if (!streaming_enabled || !is_inside_tree() || observer_path.is_empty() || Object::cast_to<Node3D>(get_node_or_null(observer_path)) == nullptr) {
 		return false;
 	}
 	const int total = get_streaming_source_cell_count(p_name);
