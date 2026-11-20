@@ -13,6 +13,15 @@ sprint stamina use. The server applies regular water, collision, encumbrance
 and fracture limits. Crouching cancels riding. Gathering, looting, crafting,
 consumables, melee/ranged attacks, weapon skills and dodge require dismounting.
 
+**Terrain handling:** The same shared bicycle physics runs on the dedicated
+server and on predicting clients. Firm plains and the hub are fastest; trees
+and roots slow riding to 90%, loose mountain stones to 78%, beach sand to 72%,
+and muddy swamps to 56% before gradient penalties. Uphill slopes reduce
+forward speed to a safe minimum, while descents offer at most an 8% boost.
+These values come exclusively from the deterministic world seed and travel
+direction, never a claimed client biome. On-foot speed is unchanged.
+Invalid/nonfinite movement values cannot grant free speed.
+
 **Sound risk:** Rolling bikes produce a 27 m audible rattle, compared with
 21 m for sprinting. The noise fades 0.9 seconds after stopping. It is heard
 by the normal infected AI, while safe zones and NPC chase distances remain
@@ -42,6 +51,9 @@ bike; riding suppresses walking sounds and footstep dust. F2 help lists F4.
 
 
 `godot --headless --path game --script res://tests/run_all.gd`
+
+`game/tests/test_bike_terrain.gd` checks slope limits, terrain grip, walking
+regression, malformed movement inputs and authoritative server consistency.
 
 `game/tests/test_mounts.gd` checks crafting data, speed bounds, server
 ownership, combat restrictions, hit dismount, cooldown, acoustic aggro,

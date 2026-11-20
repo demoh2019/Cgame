@@ -1047,6 +1047,9 @@ func _update_hud() -> void:
 	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
 		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		survivor.mount_cooldown]
+	if survivor.mounted:
+		_stats.text += "\nBIKE GROUND: %s | uphill slows pedaling" % world.biome_at(
+			position.x, position.z).to_upper()
 	if not sim.night_horde.is_empty():
 		var remain: int = 0
 		for enemy_id in sim.night_horde.get("ids", []):

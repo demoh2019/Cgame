@@ -1501,6 +1501,9 @@ func _process(_delta: float) -> void:
 		float(client.you.get("mount_cooldown", 0.0))]
 	if bool(client.you.get("mounted", false)):
 		_info_label.text += "\nBIKE RATTLE: moving attracts infected within 27 m"
+		var bike_biome: String = client.world.biome_at(float(client.you.get("x", 0.0)),
+			float(client.you.get("z", 0.0)))
+		_info_label.text += "\nBIKE GROUND: %s | slope changes riding speed" % bike_biome.to_upper()
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
 		round(100.0 * float(client.you.get("weather_insulation", 0.0))))
 	if bool(client.you.get("tent_camouflaged", false)):
