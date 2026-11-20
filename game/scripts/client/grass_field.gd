@@ -334,11 +334,11 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 		var width := rng.randf_range(0.012, 0.03)
 		match species:
 			SPECIES_BROAD:
-				height = rng.randf_range(0.14, 0.32)
+				height = rng.randf_range(0.14, 0.3)
 				lean = rng.randf_range(0.12, 0.26) # Broad leaves flop outwards.
-				width = rng.randf_range(0.038, 0.062)
+				width = rng.randf_range(0.03, 0.048)
 			SPECIES_STALK:
-				height = rng.randf_range(0.48, 0.72)
+				height = rng.randf_range(0.38, 0.52)
 				lean = rng.randf_range(0.02, 0.08) # Stiff, nearly upright.
 				width = rng.randf_range(0.008, 0.014)
 			SPECIES_LOW:
@@ -347,19 +347,19 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 				width = rng.randf_range(0.04, 0.06)
 				root = out * rng.randf_range(0.05, 0.3)
 			SPECIES_WISPY:
-				height = rng.randf_range(0.45, 0.68)
+				height = rng.randf_range(0.36, 0.5)
 				lean = rng.randf_range(0.22, 0.36) # Long, arching, feathery.
 				width = rng.randf_range(0.006, 0.011)
 			SPECIES_FLOWER:
-				height = rng.randf_range(0.26, 0.56)
+				height = rng.randf_range(0.24, 0.44)
 				lean = rng.randf_range(0.02, 0.07)
 				width = rng.randf_range(0.006, 0.01)
 			SPECIES_REED:
-				height = rng.randf_range(0.55, 0.85)
+				height = rng.randf_range(0.4, 0.55)
 				lean = rng.randf_range(0.03, 0.1)
-				width = rng.randf_range(0.03, 0.045)
+				width = rng.randf_range(0.018, 0.026)
 			SPECIES_REDTOP:
-				height = rng.randf_range(0.35, 0.6)
+				height = rng.randf_range(0.3, 0.46)
 				lean = rng.randf_range(0.08, 0.18)
 				width = rng.randf_range(0.008, 0.014)
 			SPECIES_SPROUT:
@@ -666,9 +666,9 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 			var roll: float = clumps.rolls[clump]
 			var scale: float
 			if roll < 0.18 + lush * 0.3:
-				scale = rng.randf_range(2.4, 3.9)
+				scale = rng.randf_range(2.1, 3.0)
 			elif roll < 0.62:
-				scale = rng.randf_range(1.1, 2.3)
+				scale = rng.randf_range(1.0, 2.0)
 			else:
 				scale = rng.randf_range(0.4, 1.05)
 			# Individual tufts break the patch height: some cut low, some shooting up.
@@ -676,7 +676,7 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 			if odd < 0.08:
 				scale *= 0.5
 			elif odd > 0.94:
-				scale *= 1.45
+				scale *= 1.25
 			# Lower toward the patch edge, so tall patches have soft borders.
 			var to_center: Vector2 = Vector2(wx, wz) - clumps.centers[clump]
 			scale *= lerpf(1.0, 0.7, clampf(to_center.length() / (CLUMP_CELL * 0.8), 0.0, 1.0))
@@ -693,7 +693,7 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 			var dry: float = clampf((1.0 - lush) * 0.7 + rng.randf() * 0.45 - 0.15
 				+ (0.25 if biome == "beach" or biome == "mountain" else 0.0), 0.0, 1.0)
 			# Width varies on its own: some tufts spread wide and low, others are narrow.
-			var spread: float = rng.randf_range(0.6, 1.65)
+			var spread: float = rng.randf_range(0.7, 1.4)
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(spread * rng.randf_range(0.9, 1.1), scale, spread * rng.randf_range(0.9, 1.1)))
 			var at: int = count * 16
 			buffer[at] = basis.x.x
