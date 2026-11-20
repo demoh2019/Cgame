@@ -65,7 +65,7 @@ aa_vegetation_wet_gloss={
 
 aa_cloud_shadow_map={
 "type": "sampler2D",
-"value": null
+"value": "res://assets/textures/cloud_shadow_fallback.tres"
 }
 
 aa_cloud_shadow_strength={
