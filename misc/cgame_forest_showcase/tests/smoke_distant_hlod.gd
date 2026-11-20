@@ -63,6 +63,21 @@ func _run() -> void:
     if not far_proxy.visible:
         _fail("distant proxy was hidden with no full-detail cell loaded")
         return
+    var impostors := far_proxy.get_node_or_null("DistantForestCanopies") as MultiMeshInstance3D
+    if impostors == null or impostors.multimesh == null:
+        _fail("distant terrain has no instanced forest canopy batch")
+        return
+    if impostors.multimesh.instance_count < 1 or impostors.multimesh.instance_count > 54:
+        _fail("distant forest instance count exceeds tree placement budget")
+        return
+    var far_crown_mesh := impostors.multimesh.mesh as SphereMesh
+    if far_crown_mesh == null or far_crown_mesh.radial_segments != 5 or far_crown_mesh.rings != 2:
+        _fail("distant forest did not use the shared low-poly canopy mesh")
+        return
+    if impostors.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+        _fail("far canopy should not cast costly full-resolution shadows")
+        return
+
     if not await _wait_loaded(stream, Vector2i.ZERO):
         _fail("primary streamed terrain did not load")
         return
@@ -120,6 +135,26 @@ func _run() -> void:
         _fail("proxy overlapped full-detail streamed ground")
         return
 
+    # A correct HLOD handoff preserves every procedural tree's transform.
+    # This compares against the ACTUAL full-res game scene, not a reimplementation.
+    var near_root: Node3D = stream.get_cell_node(far)
+    if near_root == null:
+        _fail("native streamer lost the loaded full-detail tile")
+        return
+    var near_canopies := near_root.get_node_or_null("WindCanopies") as MultiMeshInstance3D
+    if near_canopies == null or near_canopies.multimesh == null:
+        _fail("full-detail forest is missing tree canopy instances")
+        return
+    if impostors.multimesh.instance_count != near_canopies.multimesh.instance_count:
+        _fail("far forest tree count disagrees with near forest")
+        return
+    for i in range(impostors.multimesh.instance_count):
+        var low: Transform3D = impostors.multimesh.get_instance_transform(i)
+        var high: Transform3D = near_canopies.multimesh.get_instance_transform(i)
+        if not low.is_equal_approx(high):
+            _fail("tree %d changes position/orientation at full-detail handoff" % i)
+            return
+
     observer.position.x = 0.0
     if not await _wait_loaded(stream, Vector2i.ZERO):
         _fail("origin full-detail tile did not reload")
@@ -128,6 +163,10 @@ func _run() -> void:
         await process_frame
     if stream.is_cell_loaded(far) or not far_proxy.visible:
         _fail("distant proxy did not reappear when full cell unloaded")
+        return
+    var visible_stats: Dictionary = manager.call("get_stats")
+    if int(visible_stats["visible_canopies"]) < impostors.multimesh.instance_count:
+        _fail("distant canopy visibility statistics are incorrect")
         return
 
     manager.call("set_high_quality", false)
@@ -141,5 +180,5 @@ func _run() -> void:
         _fail("performance profile retained an out-of-radius proxy")
         return
 
-    print("Distant terrain HLOD smoke PASSED: compact border-stitch mesh, render/physics separation, streaming handoff and quality radius")
+    print("Distant terrain and forest HLOD smoke PASSED: compact stitched terrain, deterministic canopy transforms, full-detail handoff and quality radius")
     quit(0)
