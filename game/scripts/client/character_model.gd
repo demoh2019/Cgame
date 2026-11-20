@@ -15,6 +15,7 @@ static var _tinted: Dictionary = {}
 var animator: AnimationPlayer
 var pack_mode := false
 var external_anim_lod := false # True when the native AnimationLODController advances `animator`.
+var _native_feet := false # True when the engine FootPlacementModifier3D plants the feet.
 var _materials: Array[StandardMaterial3D] = []
 var _wet_surfaces: Array[Dictionary] = [] # Live outfit/gear surfaces and their original materials.
 var _wet_surface_keys: Dictionary = {}
@@ -459,7 +460,7 @@ func set_anim_lod(tier: int) -> void:
 			_layer.callback_mode_process = mode
 	_lod_accum = 0.0
 	if _procedural != null and not _dead:
-		_procedural.set("foot_ik", tier == 0)
+		_procedural.set("foot_ik", tier == 0 and not _native_feet) # Native FootPlacementModifier3D wins when present.
 		_procedural.set("look_at_enabled", tier == 0)
 		if cheap:
 			_procedural.call("reset")
@@ -744,6 +745,9 @@ func enable_foot_placement(height_at: Callable) -> bool:
 	modifier.call("add_leg", "thigh_l", "calf_l", "foot_l", 0.0)
 	modifier.call("add_leg", "thigh_r", "calf_r", "foot_r", 0.0)
 	skeleton.add_child(modifier)
+	_native_feet = true
+	if _procedural != null:
+		_procedural.set("foot_ik", false) # One leg solver per skeleton.
 	return true
 
 
