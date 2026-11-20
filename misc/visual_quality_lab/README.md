@@ -65,3 +65,55 @@ When `enable_gpu_frame_measurement` is enabled, the adaptive scaler uses Godot's
 **Shared-viewport warning:** `viewport_set_measure_render_time` toggles measurement on an entire viewport and does not provide reference counting. Avoid enabling this feature on viewports whose GPU timer measurements are owned by another profiler or quality system. The component disables measurement on exit; use `enable_gpu_frame_measurement=false` if that interferes with other tools. GPU timings are not verified on macOS Metal in this session.
 
 GPU measurement documentation: [Godot RenderingServer](https://docs.godotengine.org/en/stable/classes/class_renderingserver.html#class-renderingserver-method-viewport-get-measured-render-time-gpu).
+
+
+## Visual Quality Lab v4 — dynamic atmosphere + tiered sky radiance
+
+The demo now includes a portable **AtmosphereController3D** (
+`res://addons/visual_quality/atmosphere_controller.gd`) that adds a 24-hour
+sunlight curve, warm sunrise/sunset tint, shaded nights, sparse procedural
+stars, controllable overcast/cloud layers, and inexpensive distance fog.
+The sky's radiance cubemap is refreshed only after explicit setting changes
+or at `update_interval_seconds` (2 seconds by default), not every game frame.
+Use the **4** key or **Day / Night** button to jump between 14:00 and 22:00,
+**5** or **Clear / Cloudy** to switch overcast, and **6** or the **Cycle**
+button to enable/disable a full 24-hour loop (480 seconds by default).
+Cloud movement is optional (`animate_clouds = false` by default).
+
+**Integration:** copy the `addons/visual_quality` folder into your game.
+Create an AtmosphereController3D Node using the script, assign its
+`sun: DirectionalLight3D`, `environment: Environment` and
+`sky_material: ShaderMaterial` references **before adding it** to the scene
+ tree. The provided sky shader must be used for night/star parameters; otherwise
+update the script's shader uniforms to match your own sky. The controller
+captures and restores the original sun, fog, and sky material uniforms on
+exit. Set `restore_on_exit = false` only if you intentionally want changes to
+persist after removing the controller.
+
+**Quality scaling:** VisualQualityManager now also sets the radiance cubemap
+resolution for its assigned Sky: Eco=128, Balanced=256, Cinematic=256.
+A high-end-only opt-in switch `use_512_radiance_in_cinematic` enables 512 for
+Cinematic, which may be too expensive on Apple M1 and laptops. Original
+sky radiance size is restored on exit. This is intentionally separate from
+the dynamic 3D resolution and can be disabled with `manage_sky_radiance`.
+
+### Validation for v4
+
+```sh
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+godot --headless --path . --script res://tests/test_atmosphere.gd
+godot --headless --path . --script res://tests/test_adaptive_resolution.gd
+godot --headless --path . --script res://tests/test_quality_manager.gd
+godot --headless --path . --quit-after 120
+```
+
+Python static/package suite: **9 passing checks** in the authoring environment.
+GDScript runtime, shader compilation, visual output, and performance on macOS
+Metal remain **unverified** until run in Godot on the target hardware.
+Avoid running the time-of-day system on a shared Sky resource without cloning
+it first; multiple scenes referencing the same resource will see the change.
+
+Design references:
+- [Godot Sky process modes and radiance sizes](https://docs.godotengine.org/en/4.6/classes/class_sky.html)
+- [Godot environment and fog](https://docs.godotengine.org/en/4.6/classes/class_environment.html)
+- [Unreal Engine dynamic resolution](https://dev.epicgames.com/documentation/en-us/unreal-engine/dynamic-resolution-in-unreal-engine)
