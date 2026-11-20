@@ -965,7 +965,18 @@ bool WorldPartition3D::are_cells_physics_ready(const Vector2i &p_center, int p_r
 }
 
 int WorldPartition3D::get_physics_ready_cell_count() const {
-	return streaming_enabled && is_inside_tree() ? physics_ready_cells.size() : 0;
+	if (!streaming_enabled || !is_inside_tree()) {
+		return 0;
+	}
+	// Defensive accounting: a game might manually free a streamed scene root
+	// before the next streaming update purges its ObjectID.
+	int result = 0;
+	for (const Vector2i &cell : physics_ready_cells) {
+		if (is_cell_physics_ready(cell)) {
+			result++;
+		}
+	}
+	return result;
 }
 
 Node3D *WorldPartition3D::get_cell_node(const Vector2i &p_cell) const {
