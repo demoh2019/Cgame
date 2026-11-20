@@ -1,6 +1,8 @@
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
+// Radius of full two-scale albedo and normal mapping; shared by all streamed chunks.
+global uniform float aa_terrain_detail_radius;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 
 // Textured ground. Thirteen CC0 materials (Poly Haven) in two texture arrays:
@@ -56,16 +58,26 @@ void vertex() {
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 }
 
-// Albedo of one layer seen from above, at two scales mixed by noise (`mixer`).
-vec3 top_albedo(float layer, vec2 p, float mixer) {
-	vec3 near_tile = texture(albedo_layers, vec3(p / tile_meters, layer)).rgb;
+// Distant terrain keeps the existing broad-scale tiling, but skips nearby microdetail samples.
+// The blending weight tends smoothly to zero, avoiding hard texture LOD boundaries.
+vec3 top_albedo(float layer, vec2 p, float mixer, float detail_fade) {
 	vec3 far_tile = texture(albedo_layers, vec3(p / (tile_meters * 3.3) + 0.37, layer)).rgb;
-	return mix(near_tile, far_tile, mixer) * layer_tint[int(layer)];
+	float near_weight = (1.0 - mixer) * detail_fade;
+	if (near_weight > 0.001) {
+		vec3 near_tile = texture(albedo_layers, vec3(p / tile_meters, layer)).rgb;
+		far_tile = mix(far_tile, near_tile, near_weight);
+	}
+	return far_tile * layer_tint[int(layer)];
 }
 
-vec3 top_normal(float layer, vec2 p) {
-	vec3 n = texture(normal_layers, vec3(p / tile_meters, layer)).rgb * 2.0 - 1.0;
-	return vec3(n.x, n.y, n.z);
+vec3 top_normal(float layer, vec2 p, float detail_fade) {
+	// When far enough, even the normal map fetch is skipped: distant microrelief is subpixel.
+	vec3 normal = vec3(0.0, 0.0, 1.0);
+	if (detail_fade > 0.001) {
+		vec3 mapped = texture(normal_layers, vec3(p / tile_meters, layer)).rgb * 2.0 - 1.0;
+		normal = mix(normal, mapped, detail_fade);
+	}
+	return normal;
 }
 
 void fragment() {
@@ -76,6 +88,11 @@ void fragment() {
 	float broad = fbm(p * 0.012);
 	float mid = fbm(p * 0.07 + 3.0);
 	float mixer = smoothstep(0.3, 0.7, value_noise(p * 0.05 + 11.0));
+	// View-dependent terrain shading LOD is continuous and independent of chunk boundaries.
+	// All visible biomes/roads remain authored by the original high fidelity blend.
+	float camera_distance = distance(p, CAMERA_POSITION_WORLD.xz);
+	float detail_fade = 1.0 - smoothstep(aa_terrain_detail_radius,
+		aa_terrain_detail_radius + 24.0, camera_distance);
 
 	// Biome weights from the chunk map, sampled between texel centres so neighbouring chunks meet exactly.
 	vec2 local = (p - chunk_origin) / chunk_size;
@@ -168,8 +185,8 @@ void fragment() {
 			c *= layer_tint[5];
 			nn = vec3(0.0, 0.0, 1.0);
 		} else {
-			c = top_albedo(layer, p, mixer);
-			nn = top_normal(layer, p);
+			c = top_albedo(layer, p, mixer, detail_fade);
+			nn = top_normal(layer, p, detail_fade);
 		}
 		color += c * w[i];
 		bump += nn * w[i];
