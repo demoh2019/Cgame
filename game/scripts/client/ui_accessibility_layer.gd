@@ -10,6 +10,7 @@ const UiColorblind = preload("res://scripts/client/ui_colorblind.gd")
 const UiCaptions = preload("res://scripts/client/ui_captions.gd")
 const UiGamepad = preload("res://scripts/client/ui_gamepad.gd")
 const UiAccess = preload("res://scripts/client/ui_access.gd")
+const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
 const PauseMenu = preload("res://scripts/client/ui_pause_menu.gd")
 
 var menu: Control
@@ -56,7 +57,7 @@ func _ready() -> void:
 	add_child(captions)
 	fps_label = _make_label(Control.PRESET_TOP_RIGHT)
 	fps_label.position = Vector2(-280, 6)
-	fps_label.custom_minimum_size = Vector2(270, 44)
+	fps_label.custom_minimum_size = Vector2(270, 68)
 	fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	prompt_label = _make_label(Control.PRESET_BOTTOM_LEFT)
 	prompt_label.position = Vector2(12, -26)
@@ -140,6 +141,11 @@ func _process(delta: float) -> void:
 			var metrics: String = "%d FPS  %.1f ms  %d draws" % [Engine.get_frames_per_second(),
 				1000.0 / maxf(float(Engine.get_frames_per_second()), 1.0),
 				int(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))]
+			# Show the real upscaler, not the requested quality preset.
+			# Reading viewport properties at 4Hz has no GPU work.
+			var vp: Viewport = get_viewport()
+			metrics += "\n3D: " + GraphicsResolution.diagnostic_label(
+				int(vp.scaling_3d_mode), float(vp.scaling_3d_scale))
 			if is_instance_valid(_world_streamer):
 				metrics += "\nWorld: %d chunks | %d queued" % [
 					_world_streamer.get_loaded_count(),

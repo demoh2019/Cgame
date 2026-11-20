@@ -80,6 +80,23 @@ func run(t) -> void:
 		"live game does not reassign unchanged native scaling settings")
 	t.check(native_source.contains("if not is_equal_approx(viewport.scaling_3d_scale"),
 		"dynamic render scale only updates when the pixel budget changes")
+	t.current = "actual game upscaler diagnostics without GPU timer overhead"
+	t.eq(Resolution.diagnostic_label(Viewport.SCALING_3D_MODE_METALFX_TEMPORAL, 0.70),
+		"MetalFX Temporal 70%", "optional FPS overlay identifies native Apple temporal scaler")
+	t.eq(Resolution.diagnostic_label(Viewport.SCALING_3D_MODE_FSR2, 0.77),
+		"FSR2 77%", "FPS overlay identifies portable AMD FSR2 reconstruction")
+	t.eq(Resolution.diagnostic_label(Viewport.SCALING_3D_MODE_BILINEAR, 1.0),
+		"Native 100%", "manual Ultra shows real full-resolution path")
+	t.eq(Resolution.diagnostic_label(Viewport.SCALING_3D_MODE_BILINEAR, 0.6),
+		"Bilinear 60%", "upscaling is not mislabelled native when scaled")
+	t.eq(Resolution.diagnostic_label(Viewport.SCALING_3D_MODE_FSR2, NAN),
+		"FSR2 100%", "invalid render scale cannot create misleading FPS metrics")
+	var access_source: String = FileAccess.get_file_as_string(
+		"res://scripts/client/ui_accessibility_layer.gd")
+	t.check(access_source.contains("GraphicsResolution.diagnostic_label("),
+		"actual optional game FPS overlay reports current viewport's upscaler")
+	t.check(access_source.contains("if fps_label.visible:"),
+		"renderer diagnostics remain disabled when overlay is hidden")
 	t.current = "desktop modern, legacy devices supported"
 	t.eq(ProjectSettings.get_setting("rendering/renderer/rendering_method"),
 		"forward_plus", "modern desktop default")

@@ -42,7 +42,8 @@ class Fsr2CameraHistoryTests(unittest.TestCase):
         self.assertIn("prev_transform.basis.get_column(2).normalized().dot(", source)
         self.assertIn("prev_transform.basis.get_column(1).normalized().dot(", source)
         self.assertIn("Math::abs(prev_proj.get_fov() - cur_proj.get_fov()) > 20.0f", source)
-        self.assertIn("params.reset_accumulation = camera_teleported || camera_rotated || lens_cut;", source)
+        self.assertIn("const bool temporal_camera_cut = camera_teleported || camera_rotated || lens_cut;", source)
+        self.assertIn("params.reset_accumulation = temporal_camera_cut;", source)
         self.assertNotIn("params.reset_accumulation = false;", source)
 
     def test_walk_sprint_and_minor_camera_motion_keep_history(self):
@@ -73,6 +74,40 @@ class Fsr2CameraHistoryTests(unittest.TestCase):
         source = FSR2.read_text(encoding="utf-8")
         self.assertIn("Math::is_finite(p_params.delta_time)", source)
         self.assertIn("p_params.reset_accumulation || !valid_frame_delta || p_params.delta_time > 0.2f", source)
+
+    def test_apple_metalfx_history_resets_on_every_camera_cut(self):
+        source = FORWARD.read_text(encoding="utf-8")
+        self.assertIn("params.reset = reset || temporal_camera_cut || temporal_time_cut;", source)
+        self.assertIn("bool reset = rb_data->ensure_mfx_temporal(mfx_temporal_effect);", source)
+        self.assertIn("mfx_temporal_effect->process(rb_data->get_mfx_temporal_context(), params);", source)
+        self.assertNotIn("params.reset = reset;\n", source)
+
+    def test_metalfx_and_fsr2_share_one_camera_discontinuity_check(self):
+        source = FORWARD.read_text(encoding="utf-8")
+        self.assertEqual(source.count("const bool camera_teleported ="), 1)
+        self.assertEqual(source.count("const bool camera_rotated ="), 1)
+        self.assertEqual(source.count("const bool lens_cut ="), 1)
+        self.assertLess(source.index("const bool temporal_camera_cut ="),
+                        source.index("if (scale_type == SCALE_FSR2)"))
+        self.assertLess(source.index("const bool temporal_camera_cut ="),
+                        source.index("} else if (scale_type == SCALE_MFX)"))
+
+    def test_metalfx_stall_and_invalid_time_rejects_history(self):
+        source = FORWARD.read_text(encoding="utf-8")
+        self.assertIn("!Math::is_finite(time_step) || time_step <= 0.0 || time_step > 0.2", source)
+        for secs in (0.0, -1.0, 0.201, 1.0, float("nan"), float("inf")):
+            self.assertTrue(needs_time_reset(secs))
+        for secs in (1/144, 1/60, 1/20, 0.2):
+            self.assertFalse(needs_time_reset(secs))
+
+    def test_metalfx_reset_does_not_affect_normal_camera_motion(self):
+        for walk in (0.0, 0.1, 2.0, 8.0):
+            for delta in (1/120, 1/60, 1/30):
+                self.assertFalse(camera_cut(walk))
+                self.assertFalse(needs_time_reset(delta))
+        self.assertTrue(camera_cut(9.0))
+        self.assertTrue(camera_cut(0.0, forward_cos=0.4))
+        self.assertTrue(camera_cut(0.0, fov_change=25.0))
 
     def test_no_additional_gpu_history_or_sharpening_passes(self):
         source = FORWARD.read_text(encoding="utf-8")

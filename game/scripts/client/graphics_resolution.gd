@@ -61,6 +61,25 @@ static func plan(method: String, profile: Dictionary,
 		"screen_space_aa": Viewport.SCREEN_SPACE_AA_FXAA if msaa == Viewport.MSAA_DISABLED else Viewport.SCREEN_SPACE_AA_DISABLED}
 
 
+## Diagnostics expose the backend the viewport actually selected, rather
+## than a requested preset. Called only by the optional 4Hz FPS overlay.
+static func diagnostic_label(mode: int, scale: float) -> String:
+	var safe_scale: float = clampf(scale if is_finite(scale) else 1.0, 0.5, 1.0)
+	var name: String
+	match mode:
+		Viewport.SCALING_3D_MODE_METALFX_TEMPORAL:
+			name = "MetalFX Temporal"
+		Viewport.SCALING_3D_MODE_FSR2:
+			name = "FSR2"
+		Viewport.SCALING_3D_MODE_BILINEAR:
+			name = "Native" if safe_scale >= 0.995 else "Bilinear"
+		Viewport.SCALING_3D_MODE_FSR:
+			name = "FSR1"
+		_:
+			name = "3D upscale"
+	return "%s %d%%" % [name, roundi(safe_scale * 100.0)]
+
+
 static func apply(viewport: Viewport, settings: Dictionary) -> void:
 	if viewport == null:
 		return
