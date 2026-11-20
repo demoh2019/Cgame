@@ -46,6 +46,7 @@ const WorldOverlay = preload("res://scripts/client/world_overlay.gd")
 const HelpPanel = preload("res://scripts/client/help_panel.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Effects = preload("res://scripts/client/effects.gd")
+const CombatVfx = preload("res://scripts/client/combat_vfx.gd")
 const ImpactDecals = preload("res://scripts/client/impact_decals.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const TitleBanner = preload("res://scripts/client/title_banner.gd")
@@ -96,6 +97,7 @@ var _adaptive_resolution := GraphicsDynamicResolution.new()
 var _auto_graphics := true
 var _quality_picker: OptionButton
 var effects
+var combat_vfx
 var _footprints: Node3D
 var decals
 var skills_panel
@@ -327,6 +329,8 @@ func _build_environment() -> void:
 	add_child(water)
 	effects = Effects.new()
 	add_child(effects)
+	combat_vfx = CombatVfx.new()
+	add_child(combat_vfx)
 	_footprints = FootprintDecals.new()
 	_footprints.name = "TerrainFootprints"
 	add_child(_footprints)
@@ -801,6 +805,7 @@ func _spawn_effects(event: Dictionary) -> void:
 		_shake(0.12)
 	if str(event.get("type", "")) == "fished" and int(event.get("peer", -1)) == client.peer_id and _last_cast_spot != Vector3.INF:
 		effects.ring(_last_cast_spot + Vector3(0, 0.05, 0), Color(0.85, 0.95, 1.0), 1.4, 0.7) # The fish breaks the surface.
+	combat_vfx.handle_event(event, here, at, client.world.biome_at(at.x, at.z))
 	match event["type"]:
 		"hit":
 			if str(event.get("kind", "")) == "zombie":
@@ -1147,6 +1152,7 @@ func _process(delta: float) -> void:
 		audio.set_footsteps(avatar_model._moving and avatar.visible and not riding)
 		if not riding:
 			effects.footsteps(position, avatar_model.speed, delta)
+			combat_vfx.update_player(position, client.world.height_at(position.x, position.z), avatar_model.speed, delta)
 	if streamer != null:
 		streamer.focus_position = position
 		_apply_world_state()
