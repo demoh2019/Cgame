@@ -110,6 +110,10 @@ public:
 	bool is_cell_loaded(const Vector2i &p_cell) const;
 	int get_loaded_cell_count() const;
 	Array get_loaded_cells() const;
+	int get_pending_cell_count() const;
+	int get_active_request_count() const;
+	int get_failed_cell_count() const;
+	void retry_failed_cells();
 
 	~WorldPartition3D();
 };

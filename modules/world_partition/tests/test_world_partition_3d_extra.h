@@ -45,6 +45,20 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Streaming telemetry starts empty and retry is idempotent") {
+	WorldPartition3D world;
+	world.set_cell_scene(Vector2i(-1, 2), "res://some_cell.tscn");
+	CHECK(world.get_loaded_cell_count() == 0);
+	CHECK(world.get_pending_cell_count() == 0);
+	CHECK(world.get_active_request_count() == 0);
+	CHECK(world.get_failed_cell_count() == 0);
+	world.retry_failed_cells();
+	world.retry_failed_cells();
+	CHECK(world.get_configured_cell_count() == 1);
+	CHECK(world.get_cell_scene(Vector2i(-1, 2)) == "res://some_cell.tscn");
+	CHECK(world.get_failed_cell_count() == 0);
+}
+
 struct WorldFixture {
 	Node3D *observer = nullptr;
 	WorldPartition3D *world = nullptr;
@@ -521,6 +535,34 @@ TEST_CASE("[SceneTree][WorldPartition3D] Failed resources leave no user load tok
 		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
 	}
 	CHECK(ResourceLoader::load_threaded_get_status(missing_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Retry loads a scene added after its first request failed") {
+	const String id = "retry_recover";
+	const String path = "user://partition_extra_" + id + "_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	DirAccess::remove_absolute(path);
+	{
+		WorldFixture fixture;
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		ERR_PRINT_OFF;
+		for (int i = 0; i < 2000 && fixture.world->get_failed_cell_count() == 0; i++) {
+			fixture.world->update_streaming();
+			OS::get_singleton()->delay_usec(1000);
+		}
+		ERR_PRINT_ON;
+		REQUIRE(fixture.world->get_failed_cell_count() == 1);
+		CHECK(fixture.world->get_pending_cell_count() == 0);
+		CHECK(fixture.world->get_active_request_count() == 0);
+		const String restored = make_cell_scene(id);
+		REQUIRE(restored == path);
+		fixture.world->retry_failed_cells();
+		CHECK(fixture.world->get_failed_cell_count() == 0);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		CHECK(fixture.world->get_pending_cell_count() == 0);
+		CHECK(fixture.world->get_active_request_count() == 0);
+		CHECK(fixture.world->get_loaded_cell_count() == 1);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
 TEST_CASE("[SceneTree][WorldPartition3D] No observer prevents resource requests") {
