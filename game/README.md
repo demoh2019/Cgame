@@ -2709,3 +2709,44 @@ godot --headless --path game --script res://tests/run_all.gd
 
 Existing Cgame scripting, networking and UI APIs cover the mechanic;
 no native engine extension was required.
+
+
+## Tactical party focus: targeted infected coordination
+
+The multiplayer party panel includes **Focus infected**. A living party
+leader marks the **nearest living infected within 24 metres horizontally
+and 4 metres vertically**, for **18 seconds**. The dedicated server
+selects the target from its actual enemy state: the client cannot
+submit an infected ID, position, expiry or damage amount.
+
+- Current teammates see the target ID and remaining duration in their
+  private party snapshots. Unrelated survivors never receive the marker.
+- Party members within 24 metres and 4 metres vertically of the **exact
+  marked infected** deal **8% additional damage to that infected only**.
+  Enemy kills and mastery still use existing server-owned combat rules.
+  Players, other infected, distant party members, solo survivors and
+  expired marks receive **no damage increase**.
+- A new focus has a **28-second leader cooldown**. No nearby living
+  infected means no new focus or cooldown. An active focus cannot
+  be replaced until it expires.
+- The mark is removed when the infected is killed, when its timer expires,
+  the leader dies, or the party gains/loses a member. Cooldown remains
+  intact after early removal, preventing boss focus spam.
+
+Implementation: `scripts/shared/party_focus.gd`,
+`scripts/shared/party.gd`, `scripts/server/game_server.gd`,
+`scripts/shared/net.gd`, `scripts/client/game_client.gd` and
+`scripts/client/hud.gd`. Offline local preview cannot form a party;
+this is a multiplayer combat coordination feature.
+
+`tests/test_party_focus.gd` is registered in the headless suite and
+covers leadership, temporal expiry, membership changes, server target
+selection, private snapshots, range checks, and actual marked/unmarked
+damage. Run:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+Existing Godot/Cgame RPCs, RefCounted scripts and HUD widgets suffice;
+no native engine modifications were required.
