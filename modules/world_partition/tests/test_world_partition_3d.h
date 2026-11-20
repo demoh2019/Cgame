@@ -189,6 +189,7 @@ TEST_CASE("[WorldPartition3D] Named streaming sources validate radii priority an
 	CHECK(partition->get_streaming_source("unknown").is_empty());
 	CHECK(partition->get_streaming_source_names().is_empty());
 	CHECK_FALSE(partition->is_streaming_source_ready("unknown"));
+	CHECK(partition->get_streaming_source_progress("unknown") == 0.0);
 	CHECK(partition->has_signal(SNAME("streaming_source_ready")));
 	CHECK(partition->has_signal(SNAME("streaming_source_unready")));
 
@@ -200,6 +201,7 @@ TEST_CASE("[WorldPartition3D] Named streaming sources validate radii priority an
 	CHECK(survey["unload_radius"] == 2);
 	CHECK(survey["priority"] == 75);
 	CHECK_FALSE(partition->is_streaming_source_ready("survey"));
+	CHECK(partition->get_streaming_source_progress("survey") == 0.0);
 	CHECK(partition->set_streaming_source("survey", Vector2i(11, -4), 0, 0, 99));
 	CHECK(partition->get_streaming_source_count() == 1);
 	CHECK(partition->get_streaming_source("survey")["center"] == Vector2i(11, -4));
@@ -272,13 +274,16 @@ TEST_CASE("[SceneTree][WorldPartition3D] Named source priority and readiness sur
 	REQUIRE(partition->is_cell_loaded(Vector2i(5, 0)));
 	CHECK_FALSE(partition->is_cell_loaded(Vector2i(-5, 0)));
 	CHECK(partition->is_streaming_source_ready("high"));
+	CHECK(partition->get_streaming_source_progress("high") == 1.0);
 	CHECK_FALSE(partition->is_streaming_source_ready("low"));
+	CHECK(partition->get_streaming_source_progress("low") == 0.0);
 	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(-5, 0)); i++) {
 		partition->update_streaming();
 		OS::get_singleton()->delay_usec(1000);
 	}
 	REQUIRE(partition->is_cell_loaded(Vector2i(-5, 0)));
 	CHECK(partition->is_streaming_source_ready("low"));
+	CHECK(partition->get_streaming_source_progress("low") == 1.0);
 	CHECK(partition->get_loaded_cell_count() == 3);
 
 	CHECK(partition->set_streaming_source("high", Vector2i(7, 0), 0, 1, 95));
