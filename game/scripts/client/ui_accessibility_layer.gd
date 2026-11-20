@@ -22,6 +22,13 @@ var _client
 var _camera: Camera3D
 var _blocked: Callable = Callable() # Returns true while Esc belongs to something else (build mode, a window, typing).
 var _fps_timer := 0.0
+var _world_streamer: WorldStreamer
+
+
+## Assign the native streamer after it is created; diagnostic counts are
+## polled at 4 Hz only while the optional FPS overlay is visible.
+func set_world_streamer(streamer: WorldStreamer) -> void:
+	_world_streamer = streamer
 
 
 func _init() -> void:
@@ -48,7 +55,9 @@ func _ready() -> void:
 	captions = UiCaptions.CaptionView.new()
 	add_child(captions)
 	fps_label = _make_label(Control.PRESET_TOP_RIGHT)
-	fps_label.position = Vector2(-150, 6)
+	fps_label.position = Vector2(-280, 6)
+	fps_label.custom_minimum_size = Vector2(270, 44)
+	fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	prompt_label = _make_label(Control.PRESET_BOTTOM_LEFT)
 	prompt_label.position = Vector2(12, -26)
 	prompt_label.add_theme_font_size_override("font_size", 13)
@@ -128,9 +137,14 @@ func _process(delta: float) -> void:
 		_fps_timer -= delta
 		if _fps_timer <= 0.0:
 			_fps_timer = 0.25
-			fps_label.text = "%d FPS  %.1f ms  %d draws" % [Engine.get_frames_per_second(),
+			var metrics: String = "%d FPS  %.1f ms  %d draws" % [Engine.get_frames_per_second(),
 				1000.0 / maxf(float(Engine.get_frames_per_second()), 1.0),
 				int(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))]
+			if is_instance_valid(_world_streamer):
+				metrics += "\nWorld: %d chunks | %d queued" % [
+					_world_streamer.get_loaded_count(),
+					_world_streamer.get_queued_generation_count()]
+			fps_label.text = metrics
 
 
 func _update_prompt() -> void:
