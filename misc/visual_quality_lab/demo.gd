@@ -5,6 +5,7 @@ const FilmicSky = preload("res://addons/visual_quality/filmic_sky.gdshader")
 const QualityManager = preload("res://addons/visual_quality/quality_manager.gd")
 const AtmosphereController = preload("res://addons/visual_quality/atmosphere_controller.gd")
 const WorldStreamer = preload("res://addons/visual_quality/world_streamer.gd")
+const WorldStateStore = preload("res://addons/visual_quality/world_state_store.gd")
 const CharacterController = preload("res://addons/visual_quality/character_controller.gd")
 const ExplorationQuest = preload("res://addons/visual_quality/exploration_quest.gd")
 
@@ -12,6 +13,8 @@ var controller: AdaptiveResolution3D
 var manager: VisualQualityManager
 var atmosphere: AtmosphereController3D
 var streamer: WorldStreamer3D
+var world_state: WorldStateStore3D
+var world_state_label: Label
 var player_character: VisualLabCharacter3D
 var movement_label: Label
 var quest: ExplorationQuest3D
@@ -52,6 +55,13 @@ func _ready() -> void:
 	for z in range(-3, 4):
 		for x in range(-3, 4):
 			streamer.register_scene_cell(Vector2i(x, z), "res://world/forest_cell.tscn")
+	world_state = WorldStateStore.new()
+	world_state.name = "WorldStateStore3D"
+	world_state.streamer = streamer
+	world_state.world_id = "visual_quality_lab_forest_20261120"
+	world_state.state_saved.connect(_on_world_state_saved)
+	# The store subscribes before the first scene is streamed.
+	add_child(world_state)
 	add_child(streamer)
 	streamer.streaming_enabled = true
 	streamer.set_quality_profile(manager.current_profile)
@@ -76,6 +86,7 @@ func _ready() -> void:
 	add_child(quest)
 	_build_quest_ui()
 	_build_movement_ui()
+	_build_world_state_ui()
 	_on_quest_progress(quest.collected_count(), quest.positions.size())
 	_on_quest_hint(quest.current_hint())
 
@@ -122,6 +133,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_reset_quest()
 			KEY_7:
 				streamer.streaming_enabled = not streamer.streaming_enabled
+			KEY_G:
+				_try_activate_world_beacon()
+			KEY_8:
+				_reset_world_beacons()
 
 
 func _build_graphics_ui() -> void:
@@ -258,6 +273,55 @@ func _toggle_player_mode() -> void:
 func _update_movement_mode(is_flying: bool) -> void:
 	if is_instance_valid(movement_label):
 		movement_label.text = "Character mode: %s" % ("FLY  |  Q/E vertical" if is_flying else "WALK  |  Space jump")
+
+
+func _build_world_state_ui() -> void:
+	var ui: CanvasLayer = get_node("VisualQualityUI") as CanvasLayer
+	world_state_label = Label.new()
+	world_state_label.position = Vector2(18, 433)
+	world_state_label.add_theme_color_override("font_color", Color(0.82, 1.0, 0.58))
+	ui.add_child(world_state_label)
+	var reset_button: Button = Button.new()
+	reset_button.text = "8: Reset forest beacons"
+	reset_button.position = Vector2(18, 465)
+	reset_button.pressed.connect(_reset_world_beacons)
+	ui.add_child(reset_button)
+	_update_world_state_ui()
+
+
+func _try_activate_world_beacon() -> void:
+	if not is_instance_valid(streamer) or not is_instance_valid(player_character):
+		return
+	var eyes: Vector3 = player_character.global_position + Vector3.UP * 0.8
+	var nearest: Node3D
+	var nearest_distance_sq: float = 2.8 * 2.8
+	for cell in streamer.get_active_cells():
+		if not cell.has_method("try_activate_beacon"):
+			continue
+		if cell.get("beacon_activated") == true:
+			continue
+		var distance_sq: float = eyes.distance_squared_to(cell.call("get_beacon_world_position"))
+		if distance_sq <= nearest_distance_sq:
+			nearest_distance_sq = distance_sq
+			nearest = cell
+	if nearest != null:
+		nearest.call("try_activate_beacon", eyes, 2.8)
+	_update_world_state_ui()
+
+
+func _reset_world_beacons() -> void:
+	if is_instance_valid(world_state):
+		world_state.clear_all_states()
+	_update_world_state_ui()
+
+
+func _on_world_state_saved(_path: String, _count: int) -> void:
+	_update_world_state_ui()
+
+
+func _update_world_state_ui() -> void:
+	if is_instance_valid(world_state_label) and is_instance_valid(world_state):
+		world_state_label.text = "G: Activate a nearby orange beacon  |  Saved cells: %d" % world_state.saved_cell_count()
 
 
 func _build_world() -> void:
