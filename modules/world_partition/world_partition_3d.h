@@ -133,6 +133,7 @@ public:
 	int get_pending_cell_count() const;
 	int get_inflight_request_count() const;
 	int get_failed_cell_count() const;
+	void retry_failed_cells();
 	real_t get_last_streaming_update_ms() const;
 	int get_last_instantiation_attempt_count() const;
 
