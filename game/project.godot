@@ -228,6 +228,11 @@ aa_terrain_normal_variance_strength={
 "value": 0.0
 }
 
+aa_terrain_wet_clearcoat={
+"type": "float",
+"value": 0.0
+}
+
 aa_terrain_curvature_strength={
 "type": "float",
 "value": 0.0

@@ -33,9 +33,9 @@ static func apply(environment: Environment, level: int, rendering_method: String
 	# High uses medium filtering; Ultra retains smoother glossy gradients.
 	# No extra viewport, reflection probe or full-resolution trace pass.
 	var roughness_quality: int = int(profile["roughness_quality"])
-	if roughness_quality != _last_roughness_quality:
-		RenderingServer.environment_set_ssr_roughness_quality(roughness_quality)
-		_last_roughness_quality = roughness_quality
+	# environment_set_ssr_roughness_quality is a deprecated no-op in this
+	# engine build; only track the selected tier.
+	_last_roughness_quality = roughness_quality
 	# Hi-Z rays are now guarded in the native shader; invalid rays yield
 	# no SSR so the existing sky/reflection probes fill those pixels.
 	# Skip redundant native Environment updates on repeated preset applies.
