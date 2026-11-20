@@ -1,6 +1,7 @@
 extends Node3D
 
 const CloudShadowLut = preload("res://scripts/client/cloud_shadow_lut.gd")
+const VegetationWind = preload("res://scripts/client/vegetation_wind.gd")
 const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
 ## Everything degrades gracefully on the compatibility renderer (SSAO and the like are simply ignored).
@@ -17,6 +18,8 @@ var _fog_profile: Dictionary = CinematicFog.profile(1, "gl_compatibility")
 var _sky_refresh_interval := 0.4
 var _sky_refresh_elapsed := 2.0 # Force the first material upload.
 var _sky_seconds := 0.0
+var _vegetation_wind := Vector3.ZERO
+var _wind_publish_seconds := 0.1
 var light_level := 1.0 # The daylight of the last update, 0 at night and 1 at noon.
 var storm := 0.0 # 0..1, eased toward the target so the weather fades in and out.
 
@@ -92,13 +95,21 @@ func _ready() -> void:
 
 
 ## `daylight` 0..1 (0 night), `sun_height` -1..1, `phase` 0..1 around the day, `storming` whether it is stormy here.
-func update(daylight: float, sun_height: float, phase: float, storming: bool, delta: float) -> void:
+func update(daylight: float, sun_height: float, phase: float, storming: bool, delta: float,
+		wind: Vector2 = Vector2.ZERO) -> void:
 	light_level = daylight
 	storm = move_toward(storm, 1.0 if storming else 0.0, delta * 0.25)
 	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_strength",
 		CloudShadowLut.shadow_strength(daylight, storm, _cloud_shadows_allowed))
 	# One GPU global updates every terrain material, without iterating streamed chunks.
 	RenderingServer.global_shader_parameter_set(&"aa_weather_wetness", storm)
+	# Weather-synchronised GPU foliage: one packed upload, maximum 10 times a second.
+	_vegetation_wind = VegetationWind.smooth(
+		_vegetation_wind, VegetationWind.target(wind), delta)
+	_wind_publish_seconds += maxf(0.0, delta)
+	if _wind_publish_seconds >= 0.1:
+		_wind_publish_seconds = fmod(_wind_publish_seconds, 0.1)
+		RenderingServer.global_shader_parameter_set(&"aa_vegetation_wind", _vegetation_wind)
 	sun.rotation = Vector3(-deg_to_rad(lerpf(6.0, 62.0, clampf(sun_height, 0.0, 1.0))), deg_to_rad(35.0 + phase * 90.0), 0.0)
 	# Low sun is orange, high sun is white; the moon is a weak blue light from the opposite direction.
 	var low_sun := 1.0 - clampf(sun_height * 2.2, 0.0, 1.0)

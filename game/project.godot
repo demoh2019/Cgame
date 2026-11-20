@@ -59,3 +59,8 @@ aa_leaf_transmission={
 "type": "float",
 "value": 0.28
 }
+
+aa_vegetation_wind={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}

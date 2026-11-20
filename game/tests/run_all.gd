@@ -25,6 +25,7 @@ const SUITES := [
 	"res://tests/test_shadow_budget.gd",
 	"res://tests/test_object_batch_grid.gd",
 	"res://tests/test_foliage_wind_weather.gd",
+	"res://tests/test_vegetation_wind.gd",
 	"res://tests/test_rain_wet_foliage.gd",
 	"res://tests/test_sky_lighting_budget.gd",
 	"res://tests/test_grass_lod.gd",
