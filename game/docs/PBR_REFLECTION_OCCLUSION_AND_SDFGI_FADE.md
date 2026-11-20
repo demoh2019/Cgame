@@ -77,9 +77,12 @@ stone's strong curvature occlusion:
 
 ```glsl
 float cavity_visibility = 1.0 - cavity * 0.24 * (1.0 - puddle * 0.85);
-AO = clamp(ground_contact * micro_shadow * cavity_visibility, 0.0, 1.0);
+AO = clamp(ground_contact * micro_shadow * cavity_visibility * sky_visibility, 0.0, 1.0);
 ```
 
+The existing horizon AO can supply `sky_visibility` through native terrain
+vertex colors on High/Ultra, further blocking bright reflected sky beneath
+overhangs without a texture. Performance/Balanced preserve visibility 1.0.
 Foliage still supplies imported ORM ambient occlusion and bounded canopy AO.
 High activates cheap SSAO and short SSR; Ultra additionally enables SDFGI
 and the repaired sky reflection transition. Performance and Balanced do not
