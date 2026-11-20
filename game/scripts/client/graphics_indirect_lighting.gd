@@ -4,14 +4,19 @@ extends RefCounted
 ## SSAO (horizon-based) and SSIL buffers. Compatibility and Mobile allocate none.
 ##
 ## High: focused contact AO in cracks and under objects.
-## Ultra: softer contact AO plus nearby screen-space diffuse light bouncing.
-## Limit SSIL radius to avoid light leaking and long undersampled streaks.
+## Ultra: distance-field GI captures off-screen bounced light from streamed
+## static terrain and structures. Short SDFGI cascades + half-resolution GI
+## keep the opt-in Ultra tier bounded on unified-memory GPUs. Do not stack
+## a duplicate SSIL bounce pass over SDFGI.
+## The Cgame engine can commit all settings atomically; regular Godot falls back
+## to the same runtime Environment properties.
 
 static func settings(level: int, method: String) -> Dictionary:
 	var tier: int = clampi(level, 0, 3)
 	var forward: bool = method == "forward_plus"
 	var ao: bool = forward and tier >= 2
-	var bounce: bool = forward and tier == 3
+	var sdfgi: bool = forward and tier == 3
+	var bounce: bool = false # Ultra uses SDFGI rather than the overlapping SSIL pass.
 	return {
 		"ssao_enabled": ao,
 		"ssao_radius": 1.10 if tier == 2 else 1.30,
@@ -27,6 +32,12 @@ static func settings(level: int, method: String) -> Dictionary:
 		"ssil_intensity": 0.72,
 		"ssil_sharpness": 0.94,
 		"ssil_normal_rejection": 1.0,
+		"sdfgi_enabled": sdfgi,
+		"sdfgi_cascades": 2,
+		"sdfgi_min_cell_size": 0.5,
+		"sdfgi_read_sky_light": true,
+		"sdfgi_bounce_feedback": 0.32,
+		"sdfgi_energy": 0.72,
 	}
 
 
@@ -38,6 +49,7 @@ static func apply(environment: Environment, level: int, method: String) -> void:
 	var p: Dictionary = settings(level, method)
 	environment.ssao_enabled = bool(p["ssao_enabled"])
 	environment.ssil_enabled = bool(p["ssil_enabled"])
+	apply_sdfgi(environment, p)
 	if environment.ssao_enabled:
 		environment.ssao_radius = float(p["ssao_radius"])
 		environment.ssao_intensity = float(p["ssao_intensity"])
@@ -51,3 +63,33 @@ static func apply(environment: Environment, level: int, method: String) -> void:
 		environment.ssil_intensity = float(p["ssil_intensity"])
 		environment.ssil_sharpness = float(p["ssil_sharpness"])
 		environment.ssil_normal_rejection = float(p["ssil_normal_rejection"])
+
+
+## The local dynamic GI budget is applied only when the graphics preset or
+## rendering backend changes, never on a weather/day-night tick.
+## Native Cgame coalesces this into one RendererServer update per tier switch.
+static func apply_sdfgi(environment: Environment, p: Dictionary) -> void:
+	var enabled: bool = bool(p["sdfgi_enabled"])
+	if environment.has_method("configure_sdfgi"):
+		environment.call("configure_sdfgi", enabled, int(p["sdfgi_cascades"]),
+			float(p["sdfgi_min_cell_size"]), bool(p["sdfgi_read_sky_light"]),
+			float(p["sdfgi_bounce_feedback"]), float(p["sdfgi_energy"]))
+		return
+	# Stock Godot compatibility: disable first, release any old GI cascades,
+	# and leave all expensive setup untouched on Performance/Balanced/Mobile.
+	if not enabled:
+		if environment.sdfgi_enabled:
+			environment.sdfgi_enabled = false
+		return
+	if environment.sdfgi_cascades != int(p["sdfgi_cascades"]):
+		environment.sdfgi_cascades = int(p["sdfgi_cascades"])
+	if not is_equal_approx(environment.sdfgi_min_cell_size, float(p["sdfgi_min_cell_size"])):
+		environment.sdfgi_min_cell_size = float(p["sdfgi_min_cell_size"])
+	if environment.sdfgi_read_sky_light != bool(p["sdfgi_read_sky_light"]):
+		environment.sdfgi_read_sky_light = bool(p["sdfgi_read_sky_light"])
+	if not is_equal_approx(environment.sdfgi_bounce_feedback, float(p["sdfgi_bounce_feedback"])):
+		environment.sdfgi_bounce_feedback = float(p["sdfgi_bounce_feedback"])
+	if not is_equal_approx(environment.sdfgi_energy, float(p["sdfgi_energy"])):
+		environment.sdfgi_energy = float(p["sdfgi_energy"])
+	if not environment.sdfgi_enabled:
+		environment.sdfgi_enabled = true
