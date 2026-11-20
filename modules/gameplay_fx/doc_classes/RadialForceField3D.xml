@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="RadialForceField3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Radial impulse field that pushes nearby rigid bodies and ragdoll bones.
+	</brief_description>
+	<description>
+		Equivalent of Unity's [code]Rigidbody.AddExplosionForce[/code] and Unreal Chaos radial force fields. On [method fire], every [RigidBody3D] and [PhysicalBone3D] overlapping a sphere of [member radius] (filtered by [member collision_mask]) receives an impulse pointing away from the field's origin. Its magnitude is [member strength] scaled by [method falloff_scale].
+		The physics space can only be queried during the physics frame. If [method fire] is called elsewhere, the impulse is applied at the next physics frame instead.
+	</description>
+	<methods>
+		<method name="falloff_scale" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="distance" type="float" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="mode" type="int" enum="RadialForceField3D.Falloff" />
+			<description>Returns the 0 to 1 scale for a body at [param distance] from the center. [constant FALLOFF_LINEAR] gives [code]1 - d/r[/code], [constant FALLOFF_QUADRATIC] its square, [constant FALLOFF_NONE] always 1. Returns 0 if [param radius] is not positive.</description>
+		</method>
+		<method name="fire">
+			<return type="int" />
+			<description>Applies the impulse. Returns the number of bodies pushed, or 0 when the application was deferred to the next physics frame. Emits [signal fired] when applied.</description>
+		</method>
+		<method name="get_collision_mask_value" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="layer_number" type="int" />
+			<description>Returns whether the given 1-based layer is enabled in [member collision_mask].</description>
+		</method>
+		<method name="impulse_direction" qualifiers="static">
+			<return type="Vector3" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="body_position" type="Vector3" />
+			<param index="2" name="upward_bias" type="float" />
+			<description>Returns the normalized impulse direction from [param center] to [param body_position], tilted upward by [param upward_bias].</description>
+		</method>
+		<method name="set_collision_mask_value">
+			<return type="void" />
+			<param index="0" name="layer_number" type="int" />
+			<param index="1" name="value" type="bool" />
+			<description>Enables or disables the given 1-based layer in [member collision_mask].</description>
+		</method>
+	</methods>
+	<members>
+		<member name="affect_physical_bones" type="bool" setter="set_affect_physical_bones" getter="is_affecting_physical_bones" default="true">If [code]true[/code], [PhysicalBone3D] nodes are pushed.</member>
+		<member name="affect_rigid_bodies" type="bool" setter="set_affect_rigid_bodies" getter="is_affecting_rigid_bodies" default="true">If [code]true[/code], [RigidBody3D] nodes are pushed.</member>
+		<member name="collision_mask" type="int" setter="set_collision_mask" getter="get_collision_mask" default="1">Physics layers that are searched for bodies.</member>
+		<member name="continuous" type="bool" setter="set_continuous" getter="is_continuous" default="false">If [code]true[/code], [member strength] is applied every physics frame as impulse per second.</member>
+		<member name="falloff" type="int" setter="set_falloff" getter="get_falloff" enum="RadialForceField3D.Falloff" default="1">How the impulse fades with distance.</member>
+		<member name="free_after_fire" type="bool" setter="set_free_after_fire" getter="is_free_after_fire" default="false">If [code]true[/code], the node calls [method Node.queue_free] after firing.</member>
+		<member name="max_bodies" type="int" setter="set_max_bodies" getter="get_max_bodies" default="64">Maximum number of physics query results.</member>
+		<member name="radius" type="float" setter="set_radius" getter="get_radius" default="5.0">Radius of the affected sphere in meters.</member>
+		<member name="strength" type="float" setter="set_strength" getter="get_strength" default="10.0">Impulse magnitude at the center. Negative values pull bodies inward.</member>
+		<member name="upward_bias" type="float" setter="set_upward_bias" getter="get_upward_bias" default="0.0">Added to the Y component of the direction before normalizing.</member>
+	</members>
+	<signals>
+		<signal name="fired">
+			<param index="0" name="affected_count" type="int" />
+			<description>Emitted after the impulse was applied.</description>
+		</signal>
+	</signals>
+	<constants>
+		<constant name="FALLOFF_NONE" value="0" enum="Falloff">
+			Full strength everywhere inside the radius.
+		</constant>
+		<constant name="FALLOFF_LINEAR" value="1" enum="Falloff">
+			Strength decreases linearly to zero at the radius.
+		</constant>
+		<constant name="FALLOFF_QUADRATIC" value="2" enum="Falloff">
+			Strength decreases with the square of the remaining distance fraction.
+		</constant>
+	</constants>
+</class>

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SoundConcurrencyManager" inherits="Node" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Limits simultaneous voices per sound group.
+	</brief_description>
+	<description>
+		Tracks [AudioStreamPlayer], [AudioStreamPlayer2D] and [AudioStreamPlayer3D] instances per named group. Call [method request_play] before playing a sound; if it returns [code]true[/code], start the player. Victims chosen by the group's [SoundConcurrency] rule are stopped automatically, and slots are released when the player emits [signal AudioStreamPlayer.finished].
+		The player's [code]volume_db[/code] is lowered according to [member SoundConcurrency.volume_scale] and restored when the slot is released.
+	</description>
+	<methods>
+		<method name="clear_group_configs">
+			<return type="void" />
+			<description>Removes all per-group configurations (the default applies afterwards).</description>
+		</method>
+		<method name="get_active_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="group" type="StringName" />
+			<description>Returns the number of tracked voices in [param group].</description>
+		</method>
+		<method name="get_group_config" qualifiers="const">
+			<return type="SoundConcurrency" />
+			<param index="0" name="group" type="StringName" />
+			<description>Returns the configuration used for [param group] (the default when none was set).</description>
+		</method>
+		<method name="has_group_config" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="group" type="StringName" />
+			<description>Returns [code]true[/code] if [param group] has its own configuration.</description>
+		</method>
+		<method name="release_player">
+			<return type="void" />
+			<param index="0" name="player" type="Node" />
+			<description>Stops [param player] and frees its slot.</description>
+		</method>
+		<method name="remove_group_config">
+			<return type="void" />
+			<param index="0" name="group" type="StringName" />
+			<description>Removes the configuration of [param group].</description>
+		</method>
+		<method name="request_play">
+			<return type="bool" />
+			<param index="0" name="group" type="StringName" />
+			<param index="1" name="player" type="Node" />
+			<param index="2" name="position" type="Vector3" />
+			<param index="3" name="listener" type="Vector3" />
+			<description>Asks to play [param player] in [param group]. [param position] is the sound's world position and [param listener] the listener position (used by the farthest rule). Returns [code]false[/code] when the sound was rejected by the retrigger interval or the group's resolution rule; otherwise stops victims if needed, registers the voice and returns [code]true[/code]. This method does not call [code]play()[/code].</description>
+		</method>
+		<method name="set_group_config">
+			<return type="void" />
+			<param index="0" name="group" type="StringName" />
+			<param index="1" name="concurrency" type="SoundConcurrency" />
+			<description>Sets the configuration for [param group]. Passing [code]null[/code] removes it.</description>
+		</method>
+		<method name="stop_all">
+			<return type="void" />
+			<description>Stops every tracked voice in every group.</description>
+		</method>
+		<method name="stop_group">
+			<return type="void" />
+			<param index="0" name="group" type="StringName" />
+			<description>Stops every tracked voice in [param group].</description>
+		</method>
+	</methods>
+	<members>
+		<member name="default_concurrency" type="SoundConcurrency" setter="set_default_concurrency" getter="get_default_concurrency">Configuration used by groups without their own. Defaults to 8 voices, stop oldest.</member>
+	</members>
+	<signals>
+		<signal name="voice_stopped">
+			<param index="0" name="player" type="Node" />
+			<description>Emitted after the manager stopped [param player] (as a victim, or through [method release_player], [method stop_group] or [method stop_all]). Players that were stopped this way never emit [code]finished[/code], so connect here to free pooled or one-shot players.</description>
+		</signal>
+	</signals>
+</class>

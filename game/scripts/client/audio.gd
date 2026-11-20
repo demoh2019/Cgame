@@ -10,6 +10,11 @@ const AudioVoices = preload("res://scripts/client/audio_voices.gd")
 const AudioSpatial = preload("res://scripts/client/audio_spatial.gd")
 const AudioDucking = preload("res://scripts/client/audio_ducking.gd")
 const AudioAmbient = preload("res://scripts/client/audio_ambient.gd")
+const EngineFeatures = preload("res://scripts/client/engine_features.gd")
+## Optional engine SoundConcurrencyManager (null on a binary without the gameplay_fx module).
+const CONCURRENCY_GROUPS := {"enemy_hurt": 4, "coin": 3, "blaster": 4, "blaster_repeater": 4, "break": 3}
+var _concurrency: Node = null
+var _concurrency_tried := false
 var _sfx_bus := -1
 var _sfx_lowpass := -1
 var _rain: AudioStreamPlayer
@@ -208,6 +213,10 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	var occluded: bool = _ground.is_valid() and AudioSpatial.terrain_blocked(_listener + Vector3(0, 1.6, 0), position, _ground)
 	player.attenuation_filter_cutoff_hz = AudioSpatial.source_cutoff(distance, occluded, _humidity)
 	player.attenuation_filter_db = -18.0 if occluded else -24.0
+	_ensure_concurrency()
+	if _concurrency != null and not bool(_concurrency.call("request_play", StringName(sound_name), player, position, _listener)):
+		player.free()
+		return
 	add_child(player)
 	player.global_position = position
 	var record := {"player": player, "name": sound_name, "audibility": loudness, "born": now}
@@ -216,6 +225,24 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 		_voices.erase(record)
 		player.queue_free())
 	player.play()
+
+
+## Creates the engine SoundConcurrencyManager once, when the binary has it; victims it stops are freed here.
+func _ensure_concurrency() -> void:
+	if _concurrency_tried:
+		return
+	_concurrency_tried = true
+	_concurrency = EngineFeatures.make("SoundConcurrencyManager") as Node
+	if _concurrency == null:
+		return
+	add_child(_concurrency)
+	_concurrency.connect("voice_stopped", func(stopped: Node) -> void:
+		if is_instance_valid(stopped):
+			stopped.queue_free())
+	for group in CONCURRENCY_GROUPS:
+		var rule := EngineFeatures.make("SoundConcurrency", {
+			"max_count": int(CONCURRENCY_GROUPS[group]), "resolution_rule": 1, "volume_scale": 0.85}) as Resource
+		_concurrency.call("set_group_config", StringName(group), rule)
 
 
 func play_ui(sound_name: String, volume_db: float = -6.0) -> void:

@@ -6,6 +6,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
+const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const MoonVisuals = preload("res://scripts/client/moon_visuals.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
@@ -865,6 +866,7 @@ func _spawn_effects(event: Dictionary) -> void:
 		"flash_thrown":
 			effects.ring(at - Vector3(0, 1.0, 0), Color(1.0, 1.0, 0.9, 1.0), 7.0, 0.45)
 			effects.burst(at, Color(1.0, 1.0, 0.85), 30, 6.0, 0.35, 0.14, 0.0)
+			EngineFeatures.radial_push(self, at, 6.0, 14.0, 0.5) # Ragdolls near the blast get shoved (engine class, no-op without it).
 			if at.distance_to(here) < 12.0:
 				_shake(0.25)
 		"ember_thrown":
@@ -875,6 +877,7 @@ func _spawn_effects(event: Dictionary) -> void:
 			effects.burst(at - Vector3(0, 0.6, 0), Color(0.5, 0.38, 0.22), 14, 2.0, 0.5, 0.1)
 		"barricade_broken":
 			effects.burst(at, Color(0.55, 0.38, 0.2), 34, 5.0, 0.9, 0.16, 9.0)
+			EngineFeatures.radial_push(self, at, 4.5, 10.0, 0.6)
 			if at.distance_to(here) < 10.0:
 				_shake(0.3)
 		"outpost_taken", "siege_contract_result":

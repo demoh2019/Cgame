@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SoundConcurrency" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Concurrency settings for a group of sounds (Unreal "Sound Concurrency").
+	</brief_description>
+	<description>
+		Describes how many voices of a sound group may play at once and which voice loses when the limit is reached. Assign instances to a [SoundConcurrencyManager] with [method SoundConcurrencyManager.set_group_config].
+		The victim selection and per-voice volume scaling are exposed as pure static helpers ([method pick_victim], [method volume_scale_for]) so they can be used and tested without any audio nodes.
+	</description>
+	<methods>
+		<method name="pick_victim" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="start_msec" type="PackedInt64Array" />
+			<param index="1" name="distances" type="PackedFloat32Array" />
+			<param index="2" name="volumes" type="PackedFloat32Array" />
+			<param index="3" name="rule" type="int" enum="SoundConcurrency.ResolutionRule" />
+			<param index="4" name="new_distance" type="float" />
+			<param index="5" name="new_volume" type="float" />
+			<description>Given parallel arrays describing the currently playing voices (start time in milliseconds, distance to the listener, linear volume), returns the index of the voice to stop to make room for the new sound, or [code]-1[/code] when the new sound must not be played. With [constant RESOLUTION_STOP_FARTHEST] and [constant RESOLUTION_STOP_QUIETEST] the new sound is rejected if it would itself be the farthest or quietest.</description>
+		</method>
+		<method name="volume_scale_for" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="active_count" type="int" />
+			<param index="1" name="scale_per_voice" type="float" />
+			<description>Returns the linear gain for a new voice when [param active_count] voices are already playing: [code]scale_per_voice ^ active_count[/code].</description>
+		</method>
+	</methods>
+	<members>
+		<member name="max_count" type="int" setter="set_max_count" getter="get_max_count" default="4">Maximum simultaneous voices in the group. [code]0[/code] means unlimited.</member>
+		<member name="resolution_rule" type="int" setter="set_resolution_rule" getter="get_resolution_rule" enum="SoundConcurrency.ResolutionRule" default="0">What happens when [member max_count] is reached.</member>
+		<member name="retrigger_interval" type="float" setter="set_retrigger_interval" getter="get_retrigger_interval" default="0.0">Minimum time in seconds between two accepted plays in the group.</member>
+		<member name="volume_scale" type="float" setter="set_volume_scale" getter="get_volume_scale" default="1.0">Linear gain multiplier applied for every voice already playing in the group when a new one starts.</member>
+	</members>
+	<constants>
+		<constant name="RESOLUTION_STOP_OLDEST" value="0" enum="ResolutionRule">
+			Stop the voice that started first.
+		</constant>
+		<constant name="RESOLUTION_STOP_FARTHEST" value="1" enum="ResolutionRule">
+			Stop the voice farthest from the listener.
+		</constant>
+		<constant name="RESOLUTION_STOP_QUIETEST" value="2" enum="ResolutionRule">
+			Stop the voice with the lowest volume.
+		</constant>
+		<constant name="RESOLUTION_PREVENT_NEW" value="3" enum="ResolutionRule">
+			Do not start the new sound.
+		</constant>
+	</constants>
+</class>
