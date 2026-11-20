@@ -551,7 +551,8 @@ func _register_anim_lod(model: Node) -> void:
 		# with the SAME scheduler, otherwise distant actors animate it at 60 Hz.
 		var upper_layer: AnimationPlayer = model.get("_layer")
 		if upper_layer != null:
-			_anim_lod.register_mixer(upper_layer)
+			# The body animator alone controls shared SkeletonModifier3D culling.
+			_anim_lod.register_mixer(upper_layer, false)
 
 
 ## Sync the same priority hint to both native animation LOD and stock Godot's
