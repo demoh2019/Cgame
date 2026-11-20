@@ -1237,6 +1237,10 @@ func _process(delta: float) -> void:
 		# A low view toward the horizon to show the sky (screenshots only).
 		camera.position = position + Vector3(0.0, 14.0, 6.0)
 		camera.look_at(position + Vector3(0.0, 20.0, -60.0))
+	# Stream the world in the direction the camera actually faces, including
+	# photo orbit and zoom. Never expand the real player-centered load radius.
+	if streamer != null:
+		WorldStreamingPolicy.apply_view(streamer, camera, GraphicsQuality.level())
 	# Native far-only DOF tracks player zoom/photo orbit at a bounded rate.
 	# The character and nearby combat remain in focus; CanvasLayer HUD never
 	# participates in 3D depth blur. Native DOF adds its own renderer cost,
