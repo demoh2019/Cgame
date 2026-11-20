@@ -50,6 +50,11 @@ TEST_CASE("[RandomNumberGenerator] Named substreams are deterministic and indepe
 	REQUIRE(another_positions.is_valid());
 	CHECK(parent->get_state() == original_state);
 	CHECK(parent->get_seed() == 1337);
+	// Version-one seed mixer golden vectors: cosmetic worlds and saved seeds
+	// must not silently change if someone refactors the native implementation.
+	CHECK(parent->get_substream_seed(1) == UINT64_C(0x8f526e51b7b8a28e));
+	CHECK(parent->get_substream_seed(2) == UINT64_C(0x340c10e1d6410236));
+	CHECK(parent->get_substream_seed(3) == UINT64_C(0xf3c91fbd0ac485e5));
 	CHECK(positions->get_seed() == parent->get_substream_seed(1));
 	CHECK(velocities->get_seed() == parent->get_substream_seed(2));
 	CHECK(positions->get_seed() != velocities->get_seed());
