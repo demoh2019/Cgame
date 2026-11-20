@@ -18,6 +18,9 @@ const HubView = preload("res://scripts/client/hub_view.gd")
 const Audio = preload("res://scripts/client/audio.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
+const Atmosphere = preload("res://scripts/client/atmosphere.gd")
+const Effects = preload("res://scripts/client/effects.gd")
+const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const SkillsPanel = preload("res://scripts/client/skills_panel.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 
@@ -39,6 +42,10 @@ var avatar: Node3D
 var avatar_model
 var audio
 var hub_view
+var demo_phase := -1.0
+var demo_storm := false
+var atmosphere
+var effects
 var skills_panel
 var social
 var chat_edit: LineEdit
@@ -80,6 +87,11 @@ func _ready() -> void:
 			"--demo":
 				i += 1
 				_demo = args[i]
+			"--phase":
+				i += 1
+				demo_phase = float(args[i]) # 0..1 around the day, for screenshots.
+			"--storm":
+				demo_storm = true
 			"--connect":
 				address_edit.text = address
 		i += 1
@@ -124,22 +136,10 @@ func _update_party_rally_marker() -> void:
 
 
 func _build_environment() -> void:
-	environment = Environment.new()
-	environment.background_mode = Environment.BG_SKY
-	var sky := Sky.new()
-	sky.sky_material = ProceduralSkyMaterial.new()
-	environment.sky = sky
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	environment.fog_enabled = true
-	environment.fog_density = 0.0028
-	environment.fog_light_color = Color(0.7, 0.78, 0.86)
-	var world_environment := WorldEnvironment.new()
-	world_environment.environment = environment
-	add_child(world_environment)
-	sun = DirectionalLight3D.new()
-	sun.shadow_enabled = false
-	sun.rotation_degrees = Vector3(-52, 35, 0)
-	add_child(sun)
+	atmosphere = Atmosphere.new()
+	add_child(atmosphere)
+	environment = atmosphere.environment
+	sun = atmosphere.sun
 	camera = Camera3D.new()
 	camera.fov = 38.0
 	camera.far = 700.0
@@ -159,16 +159,16 @@ func _build_environment() -> void:
 	# The sea: one big plane that follows the player.
 	water = MeshInstance3D.new()
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(1400, 1400)
+	plane.size = Vector2(1600, 1600)
 	water.mesh = plane
-	var water_material := StandardMaterial3D.new()
-	water_material.albedo_color = Color(0.12, 0.35, 0.55, 0.72)
-	water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	water_material.roughness = 0.15
-	water_material.metallic = 0.2
+	var water_material := ShaderMaterial.new()
+	water_material.shader = load("res://assets/shaders/water.gdshader")
 	water.material_override = water_material
+	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	water.position.y = Defs.WATER_LEVEL - 0.35
 	add_child(water)
+	effects = Effects.new()
+	add_child(effects)
 
 
 func _build_connect_screen() -> void:
@@ -260,7 +260,39 @@ func _gather_animation() -> String:
 	return "TreeChopping_Loop" if node.get("kind", "") == "tree" else "Farm_Harvest"
 
 
+## Particles for what just happened, at the place it happened.
+func _spawn_effects(event: Dictionary) -> void:
+	var here: Vector3 = client.display_position() + Vector3(0, 1.0, 0)
+	var at := here
+	if event.has("x") and event.has("z"):
+		at = Vector3(event["x"], client.world.height_at(event["x"], event["z"]) + 1.0, event["z"])
+	match event["type"]:
+		"hit":
+			if str(event.get("kind", "")) == "zombie":
+				effects.hit_zombie(at)
+			else:
+				effects.hit_player(at)
+		"zombie_died":
+			effects.zombie_died(at)
+		"attack":
+			if bool(event.get("ranged", false)):
+				effects.muzzle_flash(at + Vector3(0, 0.2, 0))
+		"gathered":
+			var item: String = str(event.get("item", ""))
+			var chips := Color(0.4, 0.7, 0.25)
+			if item.begins_with("wood"):
+				chips = Color(0.55, 0.38, 0.2)
+			elif item.begins_with("stone") or item.begins_with("ore"):
+				chips = Color(0.6, 0.6, 0.62)
+			effects.gathered(here, chips)
+		"crate":
+			effects.loot(here)
+		"skill_up":
+			effects.level_up(client.display_position() + Vector3(0, 0.6, 0))
+
+
 func _on_skill_event(event: Dictionary) -> void:
+	_spawn_effects(event)
 	if event["type"] == "attack" and avatar_model != null:
 		# Everyone's swings and shots: this player's own model, or the one drawn for that player.
 		if int(event.get("peer", -1)) == client.peer_id:
@@ -342,6 +374,7 @@ func _on_welcomed() -> void:
 	skills_panel = SkillsPanel.new()
 	hud.add_child(skills_panel)
 	skills_panel.setup(client)
+	UiTheme.apply(hud)
 	client.event_received.connect(_on_skill_event)
 	_setup_chat()
 	# Streaming: chunks are built from the seed as the player walks.
@@ -418,6 +451,7 @@ func _process(delta: float) -> void:
 		avatar_model.set_dead(not bool(client.you.get("alive", true)))
 		avatar_model.set_action_loop(_gather_animation())
 		audio.set_footsteps(avatar_model._moving and avatar.visible)
+		effects.footsteps(position, avatar_model.speed, delta)
 	if streamer != null:
 		streamer.focus_position = position
 		_apply_world_state()
@@ -429,7 +463,7 @@ func _process(delta: float) -> void:
 	camera.look_at(position + Vector3(0, 0.8, 0))
 	water.position.x = position.x
 	water.position.z = position.z
-	_update_time_of_day()
+	_update_time_of_day(delta)
 	_update_prompt()
 	_run_demo()
 
@@ -444,15 +478,13 @@ func _apply_world_state() -> void:
 			chunk.apply_state(hidden)
 
 
-func _update_time_of_day() -> void:
-	var day := WorldCycle.phase(client.server_time)
-	var height := WorldCycle.sun_height(client.server_time) # 1 at noon, -1 at midnight.
-	sun.rotation = Vector3(-deg_to_rad(lerpf(8.0, 70.0, clampf(height, 0.0, 1.0))), deg_to_rad(35.0 + day * 90.0), 0.0)
-	var daylight := WorldCycle.daylight(client.server_time)
-	sun.light_energy = lerpf(0.08, 1.15, daylight)
-	sun.light_color = Color(1.0, 0.85, 0.65).lerp(Color(1.0, 0.98, 0.94), clampf(height * 1.5, 0.0, 1.0))
-	environment.ambient_light_energy = lerpf(0.25, 1.0, daylight)
-	environment.fog_light_color = Color(0.05, 0.07, 0.12).lerp(Color(0.7, 0.78, 0.86), daylight)
+func _update_time_of_day(delta: float) -> void:
+	var weather: Dictionary = client.you.get("weather", {})
+	# No rain under the settlement roofs, where the server also treats the player as sheltered.
+	var storming: bool = demo_storm or (str(weather.get("condition", "clear")) == "storm" and not bool(weather.get("sheltered", false)))
+	var clock: float = client.server_time if demo_phase < 0.0 else demo_phase * WorldCycle.DAY_LENGTH
+	atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta)
+	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO, atmosphere.storm)
 
 
 func _aim_direction() -> Vector2:

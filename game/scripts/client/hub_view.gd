@@ -74,7 +74,7 @@ func _build_cobble_plaza(height: float) -> void:
 	disc.radial_segments = 48
 	disc.rings = 1
 	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.5, 0.49, 0.47)
+	material.albedo_color = Color(0.36, 0.35, 0.33)
 	material.roughness = 0.95
 	var instance := MeshInstance3D.new()
 	instance.mesh = disc

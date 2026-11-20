@@ -7,40 +7,86 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const Assets = preload("res://scripts/client/assets.gd")
+const Foliage = preload("res://scripts/client/foliage.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
 const HEIGHT_MIN := -45.0
 const HEIGHT_RANGE := 220.0
 const GROUND_SHADER := """
 shader_type spatial;
+render_mode diffuse_burley, specular_schlick_ggx;
+
+// A painted-looking ground: smooth patches of lush and dry grass, dirt, sand at the shore, strata on slopes and
+// snow on the peaks, all from layered value noise so nothing repeats in a visible grid.
 varying vec3 world_position;
 varying vec3 world_normal;
-uniform float water_level = 0.0;
+
+float hash21(vec2 p) {
+	p = fract(p * vec2(123.34, 456.21));
+	p += dot(p, p + 45.32);
+	return fract(p.x * p.y);
+}
+
+float value_noise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x), mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+float fbm(vec2 p) {
+	float v = 0.0;
+	float a = 0.5;
+	for (int i = 0; i < 4; i++) {
+		v += a * value_noise(p);
+		p = p * 2.03 + 17.0;
+		a *= 0.5;
+	}
+	return v;
+}
+
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 }
-float hash21(vec2 p) {
-	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
+
 void fragment() {
+	vec2 p = world_position.xz;
 	float h = world_position.y;
 	float slope = 1.0 - clamp(world_normal.y, 0.0, 1.0);
-	vec3 grass = vec3(0.28, 0.46, 0.2);
-	vec3 dry = vec3(0.5, 0.5, 0.26);
-	vec3 sand = vec3(0.76, 0.69, 0.47);
-	vec3 rock = vec3(0.46, 0.44, 0.42);
-	vec3 snow = vec3(0.93, 0.95, 0.98);
-	float patch = hash21(floor(world_position.xz * 0.35));
-	vec3 base = mix(grass, dry, smoothstep(0.35, 0.9, patch) * 0.55);
-	base = mix(sand, base, smoothstep(0.5, 2.2, h));
-	base = mix(base, rock, smoothstep(0.22, 0.5, slope));
-	base = mix(base, rock * 0.9, smoothstep(38.0, 55.0, h));
-	base = mix(base, snow, smoothstep(85.0, 105.0, h) * (1.0 - smoothstep(0.35, 0.6, slope)));
-	// Wet ground at the waterline.
-	base = mix(base * 0.7, base, smoothstep(-1.0, 0.8, h));
-	ALBEDO = base * (0.92 + 0.16 * hash21(floor(world_position.xz * 1.5)));
-	ROUGHNESS = 0.95;
+	float broad = fbm(p * 0.012);
+	float mid = fbm(p * 0.09 + 3.0);
+	float fine = value_noise(p * 3.1);
+	float speck = value_noise(p * 11.0);
+
+	vec3 lush = vec3(0.14, 0.34, 0.1);
+	vec3 dry = vec3(0.4, 0.42, 0.18);
+	vec3 meadow = mix(lush, dry, smoothstep(0.35, 0.7, broad));
+	meadow *= 0.78 + 0.5 * mid;
+	meadow = mix(meadow, meadow * vec3(1.15, 1.1, 0.75), smoothstep(0.65, 0.9, speck) * 0.5);
+	meadow *= 0.93 + 0.14 * fine;
+	vec3 dirt = vec3(0.34, 0.25, 0.16) * (0.8 + 0.4 * mid);
+	vec3 sand = vec3(0.62, 0.55, 0.38) * (0.92 + 0.12 * fine);
+	vec3 rock = vec3(0.45, 0.42, 0.4);
+	float strata = fbm(vec2(p.x * 0.18 + p.y * 0.14, h * 1.6));
+	rock *= 0.65 + 0.7 * strata;
+	vec3 snow = vec3(0.94, 0.96, 1.0);
+
+	vec3 color = meadow;
+	// Bare earth in patches and along steeper ground.
+	color = mix(color, dirt, smoothstep(0.62, 0.8, mid + slope * 0.9) * 0.85);
+	// Sand and wet ground at the shore.
+	float shore = 1.0 - smoothstep(0.4, 2.4, h + (broad - 0.5) * 1.2);
+	color = mix(color, sand, shore);
+	color = mix(color, color * 0.55, 1.0 - smoothstep(-1.4, 0.7, h));
+	// Cliffs and mountains.
+	color = mix(color, rock, smoothstep(0.2, 0.46, slope + (strata - 0.5) * 0.12));
+	color = mix(color, rock * 0.85, smoothstep(40.0, 58.0, h));
+	color = mix(color, snow, smoothstep(88.0, 108.0, h + (broad - 0.5) * 14.0) * (1.0 - smoothstep(0.3, 0.55, slope)));
+
+	ALBEDO = color;
+	ROUGHNESS = mix(0.95, 0.75, shore);
+	SPECULAR = 0.15;
 }
 """
 
@@ -104,13 +150,14 @@ func _mesh_for(kind: String) -> Mesh:
 	if _use_nature:
 		# The downloaded Quaternius nature kit.
 		if kind.begins_with("tree:"):
-			return Assets.nature_mesh(Assets.TREE_FILES[int(kind.get_slice(":", 1)) % Assets.TREE_FILES.size()])
+			var tree_file: String = Assets.TREE_FILES[int(kind.get_slice(":", 1)) % Assets.TREE_FILES.size()]
+			return Foliage.swayed(Assets.nature_mesh(tree_file), "tree:" + tree_file, 0.22)
 		if kind.begins_with("rock:") or kind.begins_with("ore:"):
 			return Assets.nature_mesh(Assets.ROCK_FILES[int(kind.get_slice(":", 1)) % Assets.ROCK_FILES.size()])
 		if kind == "bush":
-			return Assets.nature_mesh("Bush_Common")
+			return Foliage.swayed(Assets.nature_mesh("Bush_Common"), "bush", 0.08)
 		if kind == "berry":
-			return Assets.nature_mesh("Bush_Common_Flowers")
+			return Foliage.swayed(Assets.nature_mesh("Bush_Common_Flowers"), "berry", 0.08)
 	if _use_village:
 		if kind.begins_with("building:"):
 			return Assets.pack_building(int(kind.get_slice(":", 1)))["mesh"]
@@ -201,7 +248,7 @@ func _build_objects(data: Dictionary) -> void:
 			transforms.append(transform)
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
-		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind == "wall") else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if _use_nature and kind.begins_with("ore:"):
 			instance.material_override = _ore_material(multimesh.mesh)
 		add_child(instance)
@@ -239,7 +286,7 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator) -> void:
 	if center.length() < Defs.HUB_SAFE_RADIUS + 30.0:
 		return # The hub is paved.
 	for entry in DECOR:
-		var mesh := Assets.nature_mesh(entry["file"])
+		var mesh: Mesh = Foliage.swayed(Assets.nature_mesh(entry["file"]), "decor:" + String(entry["file"]), 0.0 if String(entry["file"]).begins_with("Pebble") else 0.12)
 		if mesh == null:
 			continue
 		var spots: Array = []

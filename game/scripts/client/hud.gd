@@ -119,6 +119,11 @@ func _build() -> void:
 	top_right.size_flags_horizontal = Control.SIZE_SHRINK_END
 	top_right.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	margin.add_child(top_right)
+	# The minimap sits in the top-right corner: start the text column below it.
+	var minimap_gap := Control.new()
+	minimap_gap.custom_minimum_size = Vector2(1, 236)
+	minimap_gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top_right.add_child(minimap_gap)
 	_zone_label = Label.new()
 	_zone_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_zone_label.add_theme_font_size_override("font_size", 20)
