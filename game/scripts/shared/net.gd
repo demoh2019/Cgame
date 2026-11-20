@@ -768,6 +768,8 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_breached", \
 				"siege_contract_declared", "siege_contract_result":
 			return _is_nearby(event, peer)
+		"supply_drop":
+			return true # Public server-generated announcement.
 		"death":
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":

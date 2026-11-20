@@ -52,6 +52,7 @@ const SUITES := [
 	"res://tests/test_raid_loot_rights.gd",
 	"res://tests/test_loot_labels.gd",
 	"res://tests/test_world_cycle.gd",
+	"res://tests/test_supply_drops.gd",
 	"res://tests/test_camp_rest.gd",
 	"res://tests/test_field_rest.gd",
 	"res://tests/test_field_campfire.gd",

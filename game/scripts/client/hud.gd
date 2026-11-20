@@ -747,6 +747,10 @@ func _on_event(event: Dictionary) -> void:
 			say("ACID SPIT! Leave the green circle before it lands.")
 		"spit_impact":
 			say("Corrosive spit landed — the acid remains dangerous for 5 seconds!")
+		"supply_drop":
+			say("SUPPLY DROP T%d at X:%d Z:%d! Public loot in a full-loot PvP zone." % [
+				int(event.get("tier", 3)), roundi(float(event.get("x", 0.0))),
+				roundi(float(event.get("z", 0.0)))])
 		"raid_started":
 			say("RAID BOSS nearby! A mutant warlord entered the dangerous zone.")
 		"raid_enraged":

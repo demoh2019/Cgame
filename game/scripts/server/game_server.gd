@@ -46,6 +46,7 @@ const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
+const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const FieldScentMask = preload("res://scripts/shared/field_scent_mask.gd")
@@ -157,6 +158,7 @@ var players: Dictionary = {} # peer id -> Player
 var zombies: Dictionary = {} # zombie id -> Zombie
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
+var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned session clock.
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
 var siege_last_by_wall: Dictionary = {} # Session timers only; no character persistence.
@@ -3374,7 +3376,37 @@ func _nearest_player_distance(point: Vector2) -> float:
 	return best
 
 
+## Periodic server-owned public caches in dangerous PvP zones.
+func _tick_supply_drop() -> void:
+	if time < next_supply_drop_at:
+		return
+	next_supply_drop_at = time + SupplyDrops.RETRY_SECONDS
+	var eligible: Array = []
+	for player in players.values():
+		if _alive(player) and ZoneRisk.full_loot(world.zone_at(player.position.x, player.position.z)):
+			eligible.append(player)
+	if eligible.is_empty():
+		return
+	var first: int = rng.randi_range(0, eligible.size() - 1)
+	for offset in eligible.size():
+		var player: Player = eligible[(first + offset) % eligible.size()]
+		var site: Dictionary = SupplyDrops.site_near(world, player.position, rng)
+		if site.is_empty():
+			continue
+		var bag_id: int = _make_bag(Vector3(float(site["x"]), float(site["y"]), float(site["z"])),
+			SupplyDrops.loot_for_zone(int(site["zone"]), rng))
+		if bag_id < 0:
+			return
+		bags[bag_id]["supply_drop"] = true
+		bags[bag_id]["expires"] = time + SupplyDrops.LIFETIME_SECONDS
+		next_supply_drop_at = time + SupplyDrops.INTERVAL_SECONDS
+		events.append({"type": "supply_drop", "id": bag_id, "x": site["x"],
+			"z": site["z"], "tier": int(site["zone"]) + 1})
+		return
+
+
 func _tick_world(delta: float) -> void:
+	_tick_supply_drop()
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):
 			decoys.erase(id)
@@ -3486,6 +3518,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				bag_view["reserved_seconds"] = RaidLoot.remaining(bag, time)
 				bag_view["reserved"] = float(bag_view["reserved_seconds"]) > 0.0
 				bag_view["can_loot"] = RaidLoot.can_open(bag, player, time)
+			bag_view["supply_drop"] = bool(bag.get("supply_drop", false))
 			nearby_bags.append(bag_view)
 	var gone_nodes: Array = []
 	for id in depleted:

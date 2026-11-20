@@ -73,7 +73,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		# Gold = available to your party, grey = reserved, brown = public.
 		var loot_mesh: MeshInstance3D = _nodes[key].get_child(0)
 		var loot_material: StandardMaterial3D = loot_mesh.material_override
-		if bool(entity.get("reserved", false)):
+		if bool(entity.get("supply_drop", false)):
+			loot_material.albedo_color = Color(0.20, 0.73, 0.96)
+		elif bool(entity.get("reserved", false)):
 			loot_material.albedo_color = (
 				Color(0.96, 0.69, 0.22) if bool(entity.get("can_loot", false))
 				else Color(0.43, 0.47, 0.51))
