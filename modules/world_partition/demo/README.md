@@ -46,6 +46,7 @@ detailed cells and lightweight distant proxies with no additional engine rendere
 - **Runtime Data Layers:** combat cells (4,2), (4,3), (5,2) belong to `combat_event` (initially disabled); the Champion Shrine at (5,3) belongs to an independent `champion_event` layer. Press **T** to manually activate/deactivate combat scenes. Press **G** to pin the arena independently: a disabled layer still wins over a pin. Their progress survives layer transitions.
 - **Native C++ signal-driven quest progression:** the demo subscribes to `cell_state_changed` and `layer_state_changed`. Claim the Quest Hub reward with **C** to unlock combat, record three arena victories with **B** to unlock the Champion Shrine, then approach (5,3) and press **V** to claim the unique champion reward. The game publishes gameplay state through `set_cell_state` so these events fire immediately. Stage activation and the one-time prize are included in checkpoints.
 - The pure rule evaluator in `scripts/world_event_rules.gd` is tested with stock Godot, separate from the native module, so quest progression stays deterministic and easily extendable.
+- **Competing runtime leases:** after claiming the Quest Hub reward, the quest owns an independent lease of the combat arena until three victories are recorded. Press **M** to acquire/release a second manually owned arena lease. Releasing either one leaves the other active. The HUD shows total active lease tokens and arena owner count. **G** still controls a separate manual pin; inactive combat Data Layers override both types of claims. Quest leases are reconstructed from progress after loading a checkpoint, while manual leases are intentionally transient.
 - New native `WorldPartition3D.pin_cell()` keeps gameplay-important areas loaded. The scene starts with the **Quest Hub** at cell (0, 0) pinned, regardless of the moving camera. Press **H** to release/re-pin it, or **G** to pin/release the **Combat Arena** at (4, 2). Both landmarks have an emissive marker in their detailed cell scene. The HUD shows the pin count and residency status.
 - Optional additional observer attached 180 m in front of camera prefetches
   detailed cells when PR #919 is included.
@@ -94,7 +95,8 @@ near/far proxy handoff is implemented without renderer-specific effects.
 
 WASD to fly, Space/Ctrl for up/down, Shift for speed, P to toggle forward prefetch,
 L to toggle distant proxy scenes, F to toggle near/far crossfade,
-H to keep/release the Quest Hub, G to keep/release the Combat Arena,
+H to keep/release the Quest Hub, G to keep/release the Combat Arena pin,
+M to acquire/release the arena's manual lease,
 T to toggle the three-cell Combat Event Data Layer, C claim the hub reward,
 B complete an arena round, V claim the Champion Shrine prize, K save and J load a
 checkpoint, R to retry failed resource loads when the telemetry/retry API from PR #916 is present.
@@ -123,6 +125,7 @@ Quality controller assertions (after importing the project):
 
 - Native `get_cell_instance()` is required for proxy handoff and `pin_cell()` is required for the gameplay residency controls; this stacked branch includes both.
 - The Data Layers implementation has one named layer per cell rather than Unreal's full multiple-layer actor graph, and is strictly a runtime loading toggle, not a visibility-only toggle. Disabled-layer cells are unloaded within the existing per-frame unload budget, not removed synchronously.
+- Lease tokens are held by their creator, not automatically persisted in checkpoints. Clients must release them on teardown and reacquire required cells from saved gameplay state. Manual demo tokens are discarded on checkpoint load.
 - World event callbacks are synchronous Godot signals, not a multi-threaded quest scheduler or a general gameplay ability system. They respond to explicit cell-state updates, not arbitrary live-property changes.
 - Pinning only controls residency; the **separate native cell-state API** captures
   and restores opt-in gameplay dictionaries. It does not serialize arbitrary
