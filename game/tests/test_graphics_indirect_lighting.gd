@@ -57,3 +57,54 @@ func run(t) -> void:
 		"mobile never enables Forward+ effects")
 	t.check(GraphicsQuality.profile(3)["sdfgi"] and not GraphicsQuality.profile(3)["ssil"],
 		"Ultra's visible preset matches the SDFGI renderer budget")
+
+	t.current = "scene-aware Ultra GI light leak protection"
+	for method in ["gl_compatibility", "mobile", ""]:
+		var fallback: Dictionary = Indirect.visibility_settings(3, method, true)
+		t.check(not bool(fallback["use_occlusion"]) and bool(fallback["read_sky_light"]),
+			"unsupported renderer never traces SDFGI occlusion rays")
+	for tier in [0, 1, 2]:
+		var low: Dictionary = Indirect.visibility_settings(tier, "forward_plus", true)
+		t.check(not bool(low["use_occlusion"]) and bool(low["read_sky_light"]),
+			"low tiers cannot enable SDFGI occlusion even inside a dungeon")
+	var surface: Dictionary = Indirect.visibility_settings(3, "forward_plus", false)
+	var dungeon: Dictionary = Indirect.visibility_settings(3, "forward_plus", true)
+	t.check(not bool(surface["use_occlusion"]) and bool(surface["read_sky_light"]),
+		"exterior keeps skylight and avoids expensive occlusion rays")
+	t.check(bool(dungeon["use_occlusion"]) and not bool(dungeon["read_sky_light"]),
+		"Ultra dungeon rejects offscreen sky and samples wall visibility")
+	t.check(float(dungeon["normal_bias"]) < float(surface["normal_bias"])
+		and float(dungeon["probe_bias"]) < float(surface["probe_bias"]),
+		"interiors reduce probe bias to limit leaks through walls")
+
+	Indirect.apply(env, 3, "forward_plus")
+	Indirect.update_visibility(env, 3, "forward_plus", true)
+	t.check(env.sdfgi_use_occlusion and not env.sdfgi_read_sky_light,
+		"native environment enables interior GI occlusion and blocks sky")
+	t.near(env.sdfgi_normal_bias, float(dungeon["normal_bias"]), 0.0001,
+		"live GI samples with interior normal bias")
+	t.near(env.sdfgi_probe_bias, float(dungeon["probe_bias"]), 0.0001,
+		"live GI samples with interior probe bias")
+	Indirect.update_visibility(env, 3, "forward_plus", true)
+	t.check(env.sdfgi_use_occlusion,
+		"repeated dungeon updates are idempotent")
+	Indirect.update_visibility(env, 3, "forward_plus", false)
+	t.check(not env.sdfgi_use_occlusion and env.sdfgi_read_sky_light,
+		"returning outdoors releases expensive GI visibility rays")
+	Indirect.update_visibility(env, 3, "forward_plus", true)
+	Indirect.apply(env, 2, "forward_plus")
+	Indirect.update_visibility(env, 2, "forward_plus", true)
+	t.check(not env.sdfgi_enabled and not env.sdfgi_use_occlusion,
+		"live Ultra-to-High cancels indoor occlusion entirely")
+	Indirect.apply(env, 3, "gl_compatibility")
+	Indirect.update_visibility(env, 3, "gl_compatibility", true)
+	t.check(not env.sdfgi_enabled and not env.sdfgi_use_occlusion and env.sdfgi_read_sky_light,
+		"renderer fallback cannot inherit stale dungeon lighting")
+
+	var graphics_source: String = (GraphicsQuality as Script).source_code
+	var online_source: String = FileAccess.get_file_as_string(
+		"res://scripts/client/online_main.gd")
+	t.check(graphics_source.contains("static func update_dynamic_sdfgi("),
+		"the real graphics controller exposes environment-aware GI")
+	t.check(online_source.contains("GraphicsQuality.update_dynamic_sdfgi(environment, underground)"),
+		"the playable online scene updates GI on actual dungeon transitions")
