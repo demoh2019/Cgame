@@ -31,3 +31,7 @@ The water shader uses **analytic slopes from two crossing wave trains** rather t
 The previous full ripple path used up to **11 calls to `value_noise` per water pixel** (3 octaves × 3 normal samples + 2 foam samples); the new high-detail path uses up to **5**, and the mid-tier uses **1**. These counts describe shader work, **not** measured FPS. Changes also add subtle emissive wave-crest highlights while preserving the original shoreline depth transitions.
 
 For validation, capture the same water-heavy view and camera angle at the same time of day under each preset, warm up shader compilation, compare median/p95 GPU frame times, and inspect shallow-water foam and highlights during a storm and at dusk.
+
+## Automatic graphics adjustment
+
+The graphics selector includes **Auto (adapts to FPS)**. It starts at Balanced and changes between Performance, Balanced and High in response to sustained frame time, with 45/55 FPS hysteresis. It reduces detail after 3.5 seconds of low FPS and restores it after 9 seconds of good FPS. Single frames slower than 200 ms are ignored as likely loading stalls. **Ultra stays manual** to avoid uncontrolled GPU load. The automatic preference is stored alongside the manual level in `user://albion_after_graphics.cfg`; choosing a manual quality or Ctrl+F11 disables automation.

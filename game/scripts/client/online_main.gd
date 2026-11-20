@@ -24,6 +24,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
 const WorldOverlay = preload("res://scripts/client/world_overlay.gd")
@@ -68,6 +69,9 @@ var demo_phase := -1.0
 var demo_storm := false
 var atmosphere
 var _grade_material: ShaderMaterial
+var _auto_quality := GraphicsAutoQuality.new()
+var _auto_graphics := false
+var _quality_picker: OptionButton
 var effects
 var skills_panel
 var social
@@ -114,6 +118,11 @@ func _exit_tree() -> void:
 func _ready() -> void:
 	Engine.physics_ticks_per_second = 30
 	GraphicsQuality.load_preference()
+	var graphics_config := ConfigFile.new()
+	if graphics_config.load(GraphicsQuality.SETTINGS_PATH) == OK:
+		_auto_graphics = bool(graphics_config.get_value("rendering", "auto", false))
+	if _auto_graphics:
+		GraphicsQuality.set_level(_auto_quality.level, false)
 	_build_environment()
 	_build_connect_screen()
 	var args := OS.get_cmdline_user_args()
@@ -400,6 +409,7 @@ func _build_connect_screen() -> void:
 	graphics_caption.add_theme_color_override("font_color", Color(0.95, 0.84, 0.66))
 	box.add_child(graphics_caption)
 	var quality_picker := OptionButton.new()
+	_quality_picker = quality_picker
 	quality_picker.custom_minimum_size = Vector2(0, 40)
 	for state in ["normal", "hover", "pressed", "focus"]:
 		quality_picker.add_theme_stylebox_override(state, field_style if state != "hover" else field_focus)
@@ -408,9 +418,16 @@ func _build_connect_screen() -> void:
 	quality_picker.add_theme_color_override("font_pressed_color", UiTheme.INK)
 	for quality_level in GraphicsQuality.NAMES.size():
 		quality_picker.add_item(GraphicsQuality.NAMES[quality_level], quality_level)
-	quality_picker.select(GraphicsQuality.level())
+	quality_picker.add_item("Auto (adapts to FPS)", GraphicsQuality.NAMES.size())
+	quality_picker.select(GraphicsQuality.NAMES.size() if _auto_graphics else GraphicsQuality.level())
 	quality_picker.item_selected.connect(func(index: int) -> void:
-		GraphicsQuality.set_level(quality_picker.get_item_id(index))
+		var selected: int = quality_picker.get_item_id(index)
+		_set_auto_graphics(selected == GraphicsQuality.NAMES.size())
+		if _auto_graphics:
+			_auto_quality.set_mode("auto")
+			GraphicsQuality.set_level(_auto_quality.level, false)
+		else:
+			GraphicsQuality.set_level(selected)
 		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer))
 	box.add_child(quality_picker)
 	var gap2 := Control.new()
@@ -970,6 +987,10 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_frames += 1
+	# Auto mode watches sustained frame times only; manual quality remains fixed.
+	if _auto_graphics and client != null and client.welcomed and _auto_quality.sample_frame(delta):
+		GraphicsQuality.set_level(_auto_quality.level, false)
+		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
 	if _demo == "title" and _screenshot_path != "" and _frames == 90: # The title screen alone (screenshots).
 		RenderingServer.force_draw()
 		get_viewport().get_texture().get_image().save_png(_screenshot_path)
@@ -1179,11 +1200,25 @@ func _near_water(p: Vector3) -> bool:
 	return false
 
 
+func _set_auto_graphics(enabled: bool) -> void:
+	_auto_graphics = enabled
+	# Preserve the other rendering preferences in the same config file.
+	var config := ConfigFile.new()
+	config.load(GraphicsQuality.SETTINGS_PATH)
+	config.set_value("rendering", "auto", enabled)
+	var error := config.save(GraphicsQuality.SETTINGS_PATH)
+	if error != OK:
+		push_warning("Could not save auto graphics mode: %d" % error)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	# Ctrl+F11 cycles graphics quality without consuming the existing F11 medicine shortcut.
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
+		_set_auto_graphics(false)
 		GraphicsQuality.cycle()
 		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
+		if is_instance_valid(_quality_picker):
+			_quality_picker.select(GraphicsQuality.level())
 		var message := "Graphics: %s (Ctrl+F11 to change)" % GraphicsQuality.get_name()
 		if hud != null:
 			hud.say(message)
