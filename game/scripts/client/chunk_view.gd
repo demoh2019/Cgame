@@ -219,6 +219,7 @@ static var terrain_geomorph_enabled := false
 static var terrain_horizon_enabled := false
 static var terrain_screen_lod_quality := 1
 static var terrain_lod_pixel_error := 3.5
+static var terrain_mesh_build_budget_usec := 1500
 static var terrain_error_lod_quality := 1
 const TERRAIN_LOD_GROUP := "aa_chunked_terrain_lod"
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
@@ -285,6 +286,18 @@ static func apply_terrain_horizon(node: Node) -> void:
 		var owner: Node = node.get_parent()
 		if owner != null and owner.has_method("_refresh_terrain_horizon"):
 			owner.call("_refresh_terrain_horizon")
+
+
+## Like Unreal's streaming time slice, our native Godot fork amortizes
+## expensive uncached terrain mesh builds across process frames. The limit
+## is shared by all ChunkedTerrain3D nodes, not multiplied per world cell.
+static func configure_terrain_mesh_budget(microseconds: int) -> void:
+	terrain_mesh_build_budget_usec = clampi(microseconds, 0, 20000)
+
+
+static func apply_terrain_mesh_budget(node: Node) -> void:
+	if node is ChunkedTerrain3D and node.is_in_group(TERRAIN_LOD_GROUP):
+		node.mesh_build_budget_usec = terrain_mesh_build_budget_usec
 
 
 static func configure_terrain_geomorph(quality: int) -> void:
@@ -764,6 +777,8 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.lod_distance = 70.0
 	apply_terrain_screen_lod(_terrain)
 	_terrain.lod_pixel_error = terrain_lod_pixel_error
+	# Must be set before add_child() triggers native initial mesh streaming.
+	_terrain.mesh_build_budget_usec = terrain_mesh_build_budget_usec
 	apply_terrain_error_lod(_terrain)
 	_terrain.lod_geomorph_enabled = terrain_geomorph_enabled
 	_terrain.skirt_depth = 3.0
