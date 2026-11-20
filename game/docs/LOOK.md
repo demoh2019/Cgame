@@ -28,6 +28,18 @@ the server to drop the connection, so it is not the default.
   Close-up grass, coloring, wind and fading are unchanged. The medium and far meshes have 50% and ~78% fewer triangles
   per tuft; this reduces geometry cost, not pixel shading cost. Regression: `tests/test_grass_lod.gd`. Profile GPU frame
   time in forests and meadows before claiming an FPS increase.
+* Screen-space grass quality: the game now scales its three cached LOD meshes **and**
+  the existing distant-instance density from the camera's projected pixel budget:
+  vertical FOV, viewport height, active 3D render scale (FSR2 where supported)
+  and the selected graphics preset's grass fade range. The previous distance-only
+  transition remains the 720p/38-degree reference. Narrow-angle/high-resolution
+  views keep blade silhouettes farther away; Performance and low-resolution views
+  thin grass earlier instead of burning vertices on subpixel plants. Extra geometry
+  is capped at a 15% increase beyond each preset's fade-range budget, and mesh
+  switches retain hysteresis. Nothing touches server gameplay, chunk placement
+  or VRAM texture allocations. `tests/test_grass_lod.gd` checks screen-space
+  behavior and density bounds. GPU/visual benchmark still required before
+  quantifying frame-rate improvements.
 * Feedback: banners for captured outposts and sieges, rings and bursts for restoration pulses, flashes, pinning bolts, knockback
   and smashed barricades; music stings on death, level-ups and victories.
 
