@@ -145,6 +145,9 @@ func run(t) -> void:
 
 	t.current = "death, abandoned route and disconnected wave remove claims"
 	owner.caravan_defended = true
+	# Keep the test independent of full-loot rules: exercise the death latch
+	# in the safe hub, then return to the real NPC delivery station.
+	_at(sim, owner, 0.0, 0.0)
 	sim._on_player_death(owner, -1)
 	t.check(not owner.caravan_defended, "courier death forfeits unpaid defense reward")
 	_at(sim, owner, float(route["dst_x"]), float(route["dst_z"]))

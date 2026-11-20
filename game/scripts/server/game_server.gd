@@ -4417,10 +4417,10 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		if time >= float(wave["expires"]) or not CaravanAmbush.record_kill(wave, zombie.id):
 			continue
 		var courier: Player = players.get(int(wave.get("owner", -1)))
-		if courier != null and _alive(courier) and courier.caravan_ambushed and
+		if (courier != null and _alive(courier) and courier.caravan_ambushed and
 				not courier.caravan_defended and courier.deaths == int(wave.get("deaths", -1)) and
 				courier.caravan_state == wave.get("route", {}) and
-				courier.inventory.count(str(courier.caravan_view.get("cargo", ""))) > 0:
+				courier.inventory.count(str(courier.caravan_view.get("cargo", ""))) > 0):
 			courier.caravan_defended = true
 			courier.dirty_character = true
 			events.append({"type": "caravan_defended", "peer": courier.id})
