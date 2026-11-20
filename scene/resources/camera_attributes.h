@@ -114,6 +114,10 @@ public:
 	void set_dof_blur_amount(float p_amount);
 	float get_dof_blur_amount() const;
 
+	// Apply a complete, bounded far-DOF profile with one RenderingServer
+	// update. Keeps the shared auto-exposure resource and editor defaults.
+	void configure_cinematic_dof(bool p_enabled, float p_far_distance, float p_far_transition, float p_amount);
+
 	void set_auto_exposure_min_sensitivity(float p_min);
 	float get_auto_exposure_min_sensitivity() const;
 	void set_auto_exposure_max_sensitivity(float p_max);
