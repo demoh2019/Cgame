@@ -362,8 +362,23 @@ void ChunkedTerrain3D::_update_chunks() {
 				chunk.visible = false;
 			}
 		} else {
+			// Geometric error is computed only when the renderer first needs this
+			// chunk and only with the opt-in setting. Flat terrain downshifts
+			// early; cliffs/ridges retain geometry, following pixel-error LOD.
+			real_t chunk_lod_distance = effective_lod_distance;
+			if (lod_geometric_error_strength > real_t(0.001) && has_viewer && lod_count > 1) {
+				if (chunk.geometric_error < 0.0f) {
+					const int coarse_stride = lod_stride(MIN(lod_count - 1, 2), chunk_quads);
+					chunk.geometric_error = float(chunk_lod_deviation(_field(),
+							chunk.x0, chunk.z0, chunk_quads, coarse_stride));
+				}
+				const real_t error_meters = real_t(chunk.geometric_error) *
+						Math::abs(height_scale * scale.y);
+				chunk_lod_distance *= geometric_error_lod_bias(error_meters,
+						lod_geometric_error_strength);
+			}
 			// Without a viewer (editor) use a moderate level instead of the most expensive one.
-			const int lod = has_viewer ? select_lod(distance, effective_lod_distance, lod_count, chunk.lod) : MIN(1, lod_count - 1);
+			const int lod = has_viewer ? select_lod(distance, chunk_lod_distance, lod_count, chunk.lod) : MIN(1, lod_count - 1);
 			if (lod != chunk.lod || !chunk.instance.is_valid()) {
 				_ensure_mesh(chunk, lod);
 				if (chunk.meshes[lod].is_valid()) {
@@ -384,7 +399,7 @@ void ChunkedTerrain3D::_update_chunks() {
 			if (chunk.instance.is_valid()) {
 				float target = 0.0f;
 				if (lod_geomorph_enabled && has_viewer && chunk.lod >= 0 && chunk.lod < lod_count - 1) {
-					const real_t threshold = effective_lod_distance * real_t(1 << chunk.lod);
+					const real_t threshold = chunk_lod_distance * real_t(1 << chunk.lod);
 					target = TerrainGeomorphPolicy::factor(float(distance), float(threshold));
 				}
 				if (chunk.morph < 0.0f || Math::abs(chunk.morph - target) > 0.015f) {
@@ -578,6 +593,7 @@ void ChunkedTerrain3D::set_lod_count(int p_count) {
 	lod_count = CLAMP(p_count, 1, MAX_LOD);
 	for (Chunk &chunk : chunks) {
 		chunk.lod = -1; // Re-evaluate; the existing meshes stay cached.
+		chunk.geometric_error = -1.0f; // A new LOD count may change sample stride.
 	}
 }
 
@@ -599,6 +615,12 @@ void ChunkedTerrain3D::set_lod_geomorph_enabled(bool p_enabled) {
 void ChunkedTerrain3D::set_lod_reference_fov(real_t p_degrees) {
 	ERR_FAIL_COND_MSG(!Math::is_finite(p_degrees), "Terrain reference FOV must be finite.");
 	lod_reference_fov = CLAMP(p_degrees, real_t(1.01), real_t(178.99));
+}
+
+void ChunkedTerrain3D::set_lod_geometric_error_strength(real_t p_strength) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_strength), "Terrain LOD error strength must be finite.");
+	lod_geometric_error_strength = CLAMP(p_strength, real_t(0.0), real_t(1.0));
+	// Cached errors remain valid when adjusting the budget; no mesh rebuild.
 }
 
 void ChunkedTerrain3D::set_view_distance(real_t p_distance) {
@@ -752,6 +774,7 @@ void ChunkedTerrain3D::update_region(const Rect2i &p_region) {
 		}
 		chunk.lod = -1;
 		chunk.morph = -1.0f;
+		chunk.geometric_error = -1.0f; // Height edits invalidate cached deviation.
 		chunk.visible = false;
 		_free_collision(chunk);
 
@@ -823,6 +846,8 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_screen_space_lod_enabled"), &ChunkedTerrain3D::is_screen_space_lod_enabled);
 	ClassDB::bind_method(D_METHOD("set_lod_reference_fov", "degrees"), &ChunkedTerrain3D::set_lod_reference_fov);
 	ClassDB::bind_method(D_METHOD("get_lod_reference_fov"), &ChunkedTerrain3D::get_lod_reference_fov);
+	ClassDB::bind_method(D_METHOD("set_lod_geometric_error_strength", "strength"), &ChunkedTerrain3D::set_lod_geometric_error_strength);
+	ClassDB::bind_method(D_METHOD("get_lod_geometric_error_strength"), &ChunkedTerrain3D::get_lod_geometric_error_strength);
 	ClassDB::bind_method(D_METHOD("set_view_distance", "distance"), &ChunkedTerrain3D::set_view_distance);
 	ClassDB::bind_method(D_METHOD("get_view_distance"), &ChunkedTerrain3D::get_view_distance);
 	ClassDB::bind_method(D_METHOD("set_skirt_depth", "depth"), &ChunkedTerrain3D::set_skirt_depth);
@@ -871,6 +896,7 @@ void ChunkedTerrain3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_distance", PROPERTY_HINT_RANGE, "1,100000,1,or_greater,suffix:m"), "set_lod_distance", "get_lod_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "screen_space_lod_enabled"), "set_screen_space_lod_enabled", "is_screen_space_lod_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_reference_fov", PROPERTY_HINT_RANGE, "1.01,178.99,0.1,degrees"), "set_lod_reference_fov", "get_lod_reference_fov");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_geometric_error_strength", PROPERTY_HINT_RANGE, "0,1,0.05"), "set_lod_geometric_error_strength", "get_lod_geometric_error_strength");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "lod_geomorph_enabled"), "set_lod_geomorph_enabled", "is_lod_geomorph_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "view_distance", PROPERTY_HINT_RANGE, "0,100000,1,or_greater,suffix:m"), "set_view_distance", "get_view_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "skirt_depth", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:m"), "set_skirt_depth", "get_skirt_depth");
