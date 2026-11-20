@@ -18,6 +18,10 @@ func run(t) -> void:
 		"higher quality allows a bounded number of more local lights")
 	t.check(float(low["radius"]) < float(ultra["radius"]),
 		"Ultra illuminates more distant rooms")
+	t.eq(int(low["shadow_lights"]), 0, "Performance avoids torch shadow maps")
+	t.eq(int(balanced["shadow_lights"]), 0, "Balanced avoids torch shadow maps")
+	t.eq(int(high["shadow_lights"]), 1, "High allows one cinematic torch shadow")
+	t.eq(int(ultra["shadow_lights"]), 2, "Ultra allows two cinematic torch shadows")
 	low["max_lights"] = 100000
 	t.check(int(DungeonLightBudget.settings(0)["max_lights"]) < 10,
 		"callers cannot mutate the profile constants")
