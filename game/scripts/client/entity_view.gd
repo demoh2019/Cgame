@@ -16,8 +16,10 @@ const LootDropBounce = preload("res://scripts/client/loot_drop_bounce.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 const AnimLod = preload("res://scripts/client/anim_lod.gd")
+const CombatAnimationPriority = preload("res://scripts/client/combat_animation_priority.gd")
 const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
 var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
+var _priority_quality: int = -1
 var _world = null
 var _corpses: Array[Dictionary] = []
 
@@ -220,6 +222,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			tint = base.lerp(Color(0.38, 0.8, 1.0), 0.7)
 		model.set_tint(tint)
 		model.set_zombie_state(int(entity["state"]))
+	# Snapshot-driven priority is purely visual: never changes server AI or damage.
+	if kind == "zombie":
+		_apply_combat_animation_priority(_nodes[key].get_node("Model"), kind, entity)
 	if kind == "player":
 		_nodes[key].get_node("HandFlare").set_burning(bool(entity.get("flare_lit", false)) and bool(entity.get("alive", false)))
 		var bike = _nodes[key].get_node("TrailBike")
@@ -535,10 +540,29 @@ func _register_anim_lod(model: Node) -> void:
 		_anim_lod.far_distance = AnimLod.FAR * lod_scale
 		_anim_lod.name = "AnimLod"
 		add_child(_anim_lod)
+		if _anim_lod.has_method("set_max_priority_mixers"):
+			_priority_quality = GraphicsQuality.level()
+			_anim_lod.call("set_max_priority_mixers", CombatAnimationPriority.slots(_priority_quality))
 	if _anim_lod is AnimLod:
 		_anim_lod.register(animator, model as Node3D)
 	else:
 		_anim_lod.register_mixer(animator) # Native: skips inactive/paused (ragdolled) animators itself.
+
+
+## Sync the same priority hint to both native animation LOD and stock Godot's
+## existing animation-tick fallback. A per-model meta flag avoids repeated
+## native method dispatches when successive network snapshots are unchanged.
+func _apply_combat_animation_priority(model: Node, kind: String, entity: Dictionary) -> void:
+	if model == null:
+		return
+	var priority: bool = CombatAnimationPriority.wants_priority(kind, entity)
+	if bool(model.get_meta("aa_combat_animation_priority", false)) == priority:
+		return
+	model.set_meta("aa_combat_animation_priority", priority)
+	if _anim_lod != null and _anim_lod.has_method("set_mixer_high_priority"):
+		var animator: AnimationPlayer = model.get("animator")
+		if animator != null:
+			_anim_lod.call("set_mixer_high_priority", animator, priority)
 
 
 func _unregister_anim_lod(node: Node) -> void:
@@ -588,6 +612,13 @@ func _update_corpses(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	# Native full-rate combat slots follow the same live 4-tier graphics budget.
+	# The setter is called only on quality transitions, not each render frame.
+	if _anim_lod != null and _anim_lod.has_method("set_max_priority_mixers"):
+		var quality: int = GraphicsQuality.level()
+		if _priority_quality != quality:
+			_priority_quality = quality
+			_anim_lod.call("set_max_priority_mixers", CombatAnimationPriority.slots(quality))
 	_update_corpses(delta)
 	var blend := 1.0 - exp(-14.0 * delta)
 	if _render_time >= 0.0:
