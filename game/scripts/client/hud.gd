@@ -598,6 +598,11 @@ func _build() -> void:
 		else:
 			client.party_aid(target, str(aid_items.get_selected_metadata())))
 	aid_row.add_child(aid_button)
+	var triage_button := Button.new()
+	triage_button.text = "Triage nearby allies"
+	triage_button.tooltip_text = "Spend 1 crafted Expedition Triage Pack to treat up to 3 injured nearby party allies (5.5 m, 18s shared medical cooldown)."
+	triage_button.pressed.connect(func() -> void: client.party_triage())
+	inventory_box.add_child(triage_button)
 	# A cook supplies one real dish per present, eligible group member.
 	var feast_row := HBoxContainer.new()
 	inventory_box.add_child(feast_row)
@@ -858,6 +863,11 @@ func _on_event(event: Dictionary) -> void:
 		"outlaw_bounty":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("OUTLAW BOUNTY: +%d silver for a wanted survivor." % int(event.get("silver", 0)))
+		"party_triage":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Triage care received: +%d HP, -%d bleeding." % [
+					roundi(float(event.get("heal", 0.0))),
+					roundi(float(event.get("bleeding_stopped", 0.0)))])
 		"party_aid":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Teammate treated you: +%d HP, -%d infection, -%d bleeding, -%d fracture." % [
@@ -1077,6 +1087,14 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Outpost supplies collected! %d cache shares left. Inventory updated." % int(data.get("remaining", 0)))
 		else:
 			say("Outpost cache: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "party_triage":
+		if bool(data.get("ok", false)):
+			say("Triage: treated %d allies (+%d HP total, -%d bleeding)." % [
+				int(data.get("treated", 0)), roundi(float(data.get("heal", 0.0))),
+				roundi(float(data.get("bleeding_stopped", 0.0)))])
+		else:
+			say("Triage denied: " + str(data.get("reason", "rejected")))
 		return
 	if kind == "party_aid":
 		if bool(data.get("ok", false)):
