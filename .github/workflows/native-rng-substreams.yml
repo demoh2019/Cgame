@@ -1,0 +1,83 @@
+name: Native deterministic RNG substreams and Albion After wildlife
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/math/random_number_generator.cpp'
+      - 'core/math/random_number_generator.h'
+      - 'doc/classes/RandomNumberGenerator.xml'
+      - 'tests/core/math/test_random_substreams.cpp'
+      - 'game/scripts/client/seeded_substreams.gd'
+      - 'game/scripts/client/ambient_birds.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/tests/test_seeded_substreams.gd'
+      - 'game/tests/run_rng_substreams.gd'
+      - '.github/workflows/native-rng-substreams.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/math/random_number_generator.cpp'
+      - 'core/math/random_number_generator.h'
+      - 'tests/core/math/test_random_substreams.cpp'
+      - 'game/scripts/client/seeded_substreams.gd'
+      - 'game/scripts/client/ambient_birds.gd'
+      - 'game/tests/test_seeded_substreams.gd'
+      - '.github/workflows/native-rng-substreams.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-rng-streams:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-rng-substreams
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-rng-substreams
+        continue-on-error: true
+      - name: Test independent native Cgame PCG substreams
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*Named substreams*"
+          timeout 240s "$BIN" --headless --test --test-case="*Substreams distinguish*"
+      - name: Import Albion After assets and GDScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee rng-streams-import.log
+      - name: Check real bird initialization and cross-language seeded RNG parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_rng_substreams.gd 2>&1 | tee rng-streams-tests.log
+          grep -E '^RNG SUBSTREAM TOTAL: [0-9]+ checks, 0 failures$' rng-streams-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' rng-streams-tests.log; then exit 1; fi
+      - name: Archive reproducibility test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rng-substreams-test-logs
+          if-no-files-found: ignore
+          path: |
+            rng-streams-import.log
+            rng-streams-tests.log
