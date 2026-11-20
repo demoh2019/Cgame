@@ -4873,7 +4873,6 @@ func _tick_players(delta: float) -> void:
 			player.ruin_survey = {}
 		if not ProspectingChart.active(player.prospect_mark, time, depleted):
 			player.prospect_mark = {}
-	player.prospect_mark = {}
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.mount_cooldown = maxf(0.0, player.mount_cooldown - maxf(0.0, delta))
 		player.smoke_cooldown = maxf(0.0, player.smoke_cooldown - maxf(0.0, delta))
