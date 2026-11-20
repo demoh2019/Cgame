@@ -583,6 +583,15 @@ func parry() -> void:
 	net.c_parry.rpc_id(1)
 
 
+func arcane_bolt(direction: Vector2) -> void:
+	net.c_arcane_bolt.rpc_id(1, direction.x, direction.y)
+
+
+func ultimate() -> void:
+	# The server picks every target inside the blast; the client sends nothing else.
+	net.c_ultimate.rpc_id(1)
+
+
 func dodge(direction: Vector2) -> void:
 	# Server owns the travel distance and cooldown; reconciliation handles positioning.
 	net.c_dodge.rpc_id(1, direction.x, direction.y)

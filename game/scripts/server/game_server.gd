@@ -90,6 +90,7 @@ const Evasion = preload("res://scripts/shared/evasion.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const ParryRiposte = preload("res://scripts/shared/parry_riposte.gd")
 const StaggerFinisher = preload("res://scripts/shared/stagger_finisher.gd")
+const ArcaneAbilities = preload("res://scripts/shared/arcane_abilities.gd")
 const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
@@ -277,6 +278,8 @@ class Player:
 	var riposte_target_id: int = -1 # Exact attacking infected.
 	var riposte_weapon: String = "" # Equipped weapon at parry impact.
 	var finisher_cooldown: float = 0.0 # Server-owned, nonpersistent PvE execution timer.
+	var arcane_cooldown: float = 0.0 # Classless Arcane Bolt; server-owned, nonpersistent.
+	var ultimate_cooldown: float = 0.0 # Classless Cataclysm ultimate; server-owned, nonpersistent.
 	var combat_energy: float = 100.0
 	var sharpened_weapon: String = "" # Prepared, owned melee weapon.
 	var sharpened_hits: int = 0 # Only confirmed ordinary infected contacts spend charges.
@@ -917,6 +920,8 @@ func _spawn_player(player: Player) -> void:
 	player.edge_coating_weapon = ""
 	ParryRiposte.clear(player)
 	player.finisher_cooldown = 0.0
+	player.arcane_cooldown = 0.0
+	player.ultimate_cooldown = 0.0
 	player.party_aid_timer = 0.0
 	player.feast_timer = 0.0
 	player.guardian_timer = 0.0
@@ -4977,6 +4982,94 @@ func cmd_parry(peer_id: int) -> Dictionary:
 		"cooldown": player.parry_cooldown, "stamina": player.survival.stamina}
 
 
+## Arcane Bolt: a classless magic projectile. Same line-of-fire, cover and PvP
+## protection rules as any shot; no ammo, paid with combat energy.
+func cmd_arcane_bolt(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null:
+		return {"ok": false, "reason": "dead"}
+	var reason: String = ArcaneAbilities.refusal(_alive(player), player.mounted,
+		player.attack_timer > 0.0, player.arcane_cooldown, player.combat_energy, ArcaneAbilities.BOLT_ENERGY_COST)
+	if reason != "":
+		return {"ok": false, "reason": reason, "remaining": player.arcane_cooldown}
+	var direction := Vector2(dir_x, dir_z)
+	if not direction.is_finite() or direction.length_squared() < 0.0001:
+		return {"ok": false, "reason": "no_direction"}
+	direction = direction.normalized()
+	player.combat_energy -= ArcaneAbilities.BOLT_ENERGY_COST
+	player.arcane_cooldown = ArcaneAbilities.BOLT_COOLDOWN
+	player.attack_timer = maxf(player.attack_timer, ArcaneAbilities.BOLT_ATTACK_LOCK)
+	player.action = {}
+	player.yaw = atan2(direction.x, direction.y)
+	player.dirty_character = true
+	var origin := Vector2(player.position.x, player.position.z)
+	var hit: Dictionary = _find_hit(player, origin, direction, ArcaneAbilities.BOLT_RANGE, true)
+	var reach: float = ArcaneAbilities.BOLT_RANGE
+	if not hit.is_empty():
+		var target_position := Vector2.ZERO
+		if hit["kind"] == "zombie" and zombies.has(hit["id"]):
+			var z = zombies[hit["id"]]
+			target_position = Vector2(z.position.x, z.position.z)
+		elif hit["kind"] == "player" and players.has(hit["id"]):
+			var o: Player = players[hit["id"]]
+			target_position = Vector2(o.position.x, o.position.z)
+		reach = minf(reach, origin.distance_to(target_position))
+		_damage_target(player, hit, ArcaneAbilities.bolt_damage(player.skills.bonus("ranged_damage")), "ranged")
+	else:
+		reach = minf(reach, RangedCover.first_blocker_distance(world, origin, direction, ArcaneAbilities.BOLT_RANGE))
+	var end := origin + direction * reach
+	events.append({"type": "arcane_bolt", "peer": peer_id, "x": player.position.x, "z": player.position.z,
+		"to_x": end.x, "to_z": end.y, "hit": not hit.is_empty()})
+	return {"ok": true, "hit": not hit.is_empty(), "energy": player.combat_energy,
+		"cooldown": player.arcane_cooldown}
+
+
+## Cataclysm ultimate: every living infected within the blast takes falloff damage
+## and is staggered. PvE only; survivors are never damaged by it.
+func cmd_ultimate(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null:
+		return {"ok": false, "reason": "dead"}
+	var reason: String = ArcaneAbilities.refusal(_alive(player), player.mounted,
+		player.attack_timer > 0.0, player.ultimate_cooldown, player.combat_energy, ArcaneAbilities.ULTIMATE_ENERGY_COST)
+	if reason != "":
+		return {"ok": false, "reason": reason, "remaining": player.ultimate_cooldown}
+	if not player.position.is_finite() or _is_safe(player.position):
+		return {"ok": false, "reason": "safe_zone"}
+	player.combat_energy -= ArcaneAbilities.ULTIMATE_ENERGY_COST
+	player.ultimate_cooldown = ArcaneAbilities.ULTIMATE_COOLDOWN
+	player.attack_timer = maxf(player.attack_timer, ArcaneAbilities.ULTIMATE_ATTACK_LOCK)
+	player.action = {}
+	player.dirty_character = true
+	var center := Vector2(player.position.x, player.position.z)
+	var targets: Array = []
+	for zombie in zombies.values():
+		if not zombie.is_alive():
+			continue
+		var distance: float = center.distance_to(Vector2(zombie.position.x, zombie.position.z))
+		if distance <= ArcaneAbilities.ULTIMATE_RADIUS:
+			targets.append({"zombie": zombie, "distance": distance})
+	targets.sort_custom(func(a, b): return float(a["distance"]) < float(b["distance"]) \
+		if float(a["distance"]) != float(b["distance"]) else int(a["zombie"].id) < int(b["zombie"].id))
+	var melee_bonus: float = player.skills.bonus("melee_damage")
+	var hits := 0
+	var kills := 0
+	for entry in targets.slice(0, ArcaneAbilities.ULTIMATE_MAX_TARGETS):
+		var zombie = entry["zombie"]
+		_damage_target(player, {"kind": "zombie", "id": zombie.id},
+			ArcaneAbilities.ultimate_damage(float(entry["distance"]), melee_bonus), "melee")
+		hits += 1
+		if not zombie.is_alive():
+			kills += 1
+		elif zombie.apply_stagger(ArcaneAbilities.ULTIMATE_STAGGER_SECONDS):
+			events.append({"type": "stagger", "id": zombie.id, "seconds": zombie.stagger_seconds,
+				"x": zombie.position.x, "z": zombie.position.z})
+	events.append({"type": "cataclysm", "peer": peer_id, "x": player.position.x, "z": player.position.z,
+		"radius": ArcaneAbilities.ULTIMATE_RADIUS, "hits": hits})
+	return {"ok": true, "hits": hits, "kills": kills, "energy": player.combat_energy,
+		"cooldown": player.ultimate_cooldown}
+
+
 func cmd_dodge(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -6192,6 +6285,8 @@ func _tick_players(delta: float) -> void:
 		player.parry_cooldown = maxf(0.0, player.parry_cooldown - maxf(0.0, delta))
 		player.finisher_cooldown = maxf(0.0,
 			player.finisher_cooldown - maxf(0.0, delta))
+		player.arcane_cooldown = maxf(0.0, player.arcane_cooldown - maxf(0.0, delta))
+		player.ultimate_cooldown = maxf(0.0, player.ultimate_cooldown - maxf(0.0, delta))
 		player.parry_window = maxf(0.0, player.parry_window - maxf(0.0, delta))
 		ParryRiposte.tick(player, delta)
 		player.noise_timer = maxf(player.noise_timer - delta, 0.0)
@@ -7764,6 +7859,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"parry_cooldown": player.parry_cooldown, "parry_window": player.parry_window,
 			"riposte_seconds": player.riposte_seconds,
 			"finisher_cooldown": player.finisher_cooldown,
+			"arcane_cooldown": player.arcane_cooldown, "ultimate_cooldown": player.ultimate_cooldown,
 			"rest_cooldown": player.rest_cooldown,
 			"rested_xp_credit": player.rested_xp_credit,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,

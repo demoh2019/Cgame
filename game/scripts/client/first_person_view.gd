@@ -10,6 +10,8 @@ const CROUCH_EYE_HEIGHT := 1.1
 const MOUNTED_EYE_HEIGHT := 2.05
 const MAX_PITCH := 1.45
 const MOUSE_SENSITIVITY := 0.0025
+const JUMP_SECONDS := 0.55
+const JUMP_HEIGHT := 0.75
 
 
 ## Forward direction on the XZ plane for a yaw.
@@ -46,3 +48,28 @@ static func camera_transform(feet: Vector3, yaw: float, pitch: float, height: fl
 	# A camera looks down -Z; rotating by yaw + PI points it along forward(yaw).
 	var basis := Basis(Vector3.UP, yaw + PI) * Basis(Vector3.RIGHT, pitch)
 	return Transform3D(basis.orthonormalized(), feet + Vector3(0.0, height, 0.0))
+
+
+## Vertical camera offset for a cosmetic hop; t < 0 means on the ground.
+static func jump_offset(t: float) -> float:
+	if t < 0.0 or t >= JUMP_SECONDS:
+		return 0.0
+	var u: float = t / JUMP_SECONDS
+	return 4.0 * JUMP_HEIGHT * u * (1.0 - u)
+
+
+## A small centred cross that shows where attacks and spells will go.
+static func make_crosshair() -> Control:
+	var root := Control.new()
+	root.name = "Crosshair"
+	root.set_anchors_preset(Control.PRESET_CENTER)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for bar in [Rect2(-9, -1, 6, 2), Rect2(3, -1, 6, 2), Rect2(-1, -9, 2, 6), Rect2(-1, 3, 2, 6), Rect2(-1, -1, 2, 2)]:
+		var piece := ColorRect.new()
+		piece.color = Color(1, 1, 1, 0.85)
+		piece.position = bar.position
+		piece.size = bar.size
+		piece.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(piece)
+	root.visible = false
+	return root

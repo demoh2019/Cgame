@@ -174,6 +174,8 @@ var _first_person := false
 var _fp_yaw := PI
 var _fp_pitch := 0.0
 var _start_first_person := false # --first-person launch flag (also for screenshots).
+var _jump_time := -1.0 # Seconds into the current cosmetic first-person hop, or -1 on the ground.
+var _crosshair: Control
 var _dof_elapsed := 0.35 # Coalesce cinematic focus updates to ~3 Hz.
 var _attack_cooldown := 0.0
 var _build_mode := false # U: a ghost wall follows the aim until it is placed or cancelled.
@@ -931,6 +933,19 @@ func _spawn_effects(event: Dictionary) -> void:
 			effects.zombie_died(at)
 			decals.splat(at, Color(0.25, 0.35, 0.1, 0.9), 1.6)
 			CombatCameraFeedback.apply(camera, "zombie_died", at, here, UiSettings.shake_scale())
+		"arcane_bolt":
+			var bolt_end := Vector3(float(event.get("to_x", at.x)), at.y, float(event.get("to_z", at.z)))
+			var bolt_from := at + Vector3(0, 0.3, 0)
+			for step in 6:
+				effects.burst(bolt_from.lerp(bolt_end, (step + 1) / 6.0), Color(0.55, 0.45, 1.0), 4, 0.6, 0.35, 0.12, 0.0, 0.0)
+			effects.ring(bolt_end - Vector3(0, 1.0, 0), Color(0.6, 0.5, 1.0, 0.9), 1.4 if bool(event.get("hit", false)) else 0.7, 0.4)
+		"cataclysm":
+			var blast_radius: float = float(event.get("radius", 7.0))
+			effects.ring(at - Vector3(0, 1.0, 0), Color(1.0, 0.45, 0.2, 1.0), blast_radius, 0.8)
+			effects.ring(at - Vector3(0, 0.9, 0), Color(0.7, 0.4, 1.0, 0.9), blast_radius * 0.6, 0.6)
+			effects.burst(at, Color(1.0, 0.6, 0.25), 60, blast_radius * 1.2, 0.9, 0.18, 2.0, 1.2)
+			CombatCameraFeedback.apply(camera, "knockback", at, here, UiSettings.shake_scale())
+			_shake(0.55)
 		"restoration_pulse":
 			effects.ring(at - Vector3(0, 1.0, 0), Color(0.4, 1.0, 0.55, 0.9), 6.0, 0.9)
 			effects.burst(at, Color(0.5, 1.0, 0.6), 22, 2.4, 0.9, 0.1, -1.5)
@@ -1239,7 +1254,7 @@ func _physics_process(delta: float) -> void:
 	if _first_person:
 		move = FirstPersonView.to_world_move(move, _fp_yaw)
 	_move_input = move
-	var aim: Vector2 = FirstPersonView.forward(_fp_yaw) if _first_person else _aim_direction()
+	var aim := _aim_direction()
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
 	client.send_input(move, sprint, yaw, delta, crouch)
 	if alive and not _build_mode and not hud.is_menu_open() and not _access.is_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
@@ -1346,11 +1361,18 @@ func _process(delta: float) -> void:
 		camera_fx.photo_camera(camera, position)
 	elif _first_person:
 		camera.global_transform = FirstPersonView.camera_transform(position, _fp_yaw, _fp_pitch,
-			FirstPersonView.eye_height(bool(client.you.get("crouching", false)), bool(client.you.get("mounted", false))))
+			FirstPersonView.eye_height(bool(client.you.get("crouching", false)), bool(client.you.get("mounted", false)))
+			+ FirstPersonView.jump_offset(_jump_time))
 	else:
 		camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
 		camera.look_at(position + Vector3(0, 0.8, 0) + camera_fx.look)
 	_update_first_person_mouse()
+	if _jump_time >= 0.0:
+		_jump_time += delta
+		if _jump_time >= FirstPersonView.JUMP_SECONDS:
+			_jump_time = -1.0
+	if _crosshair != null:
+		_crosshair.visible = _first_person and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 	if _demo == "sky":
 		# A low view toward the horizon to show the sky (screenshots only).
 		camera.position = position + Vector3(0.0, 14.0, 6.0)
@@ -1554,6 +1576,8 @@ func _update_time_of_day(delta: float) -> void:
 
 
 func _aim_direction() -> Vector2:
+	if _first_person:
+		return FirstPersonView.forward(_fp_yaw)
 	var viewport := get_viewport()
 	if viewport == null or client == null or not client.you.has("x"):
 		return Vector2.ZERO
@@ -1671,10 +1695,26 @@ func _set_auto_graphics(enabled: bool) -> void:
 		push_warning("Could not save auto graphics mode: %d" % error)
 
 
+func _can_fight() -> bool:
+	return client != null and client.welcomed and hud != null and not hud.is_menu_open() and not _typing() \
+		and not _build_mode and bool(client.you.get("alive", false))
+
+
+func _cast_arcane_bolt() -> void:
+	var direction: Vector2 = _aim_direction()
+	if direction == Vector2.ZERO:
+		direction = Vector2(sin(client.yaw), cos(client.yaw))
+	client.arcane_bolt(direction)
+
+
 func _set_first_person(enabled: bool) -> void:
 	if enabled == _first_person or client == null or not client.welcomed:
 		return
 	_first_person = enabled
+	_jump_time = -1.0
+	if _crosshair == null:
+		_crosshair = FirstPersonView.make_crosshair()
+		hud.add_child(_crosshair)
 	if enabled:
 		# Start looking the way the survivor already faces.
 		_fp_yaw = avatar.rotation.y if avatar != null else float(client.yaw)
@@ -1878,7 +1918,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				else:
 					_interact()
 			KEY_F:
-				client.drink()
+				if Input.is_key_pressed(KEY_CTRL):
+					if _can_fight():
+						_cast_arcane_bolt()
+				else:
+					client.drink()
 			KEY_F1:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.guardian_taunt()
@@ -1890,7 +1934,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					client.use_item("smoke_charge")
 			KEY_G:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
-					if Input.is_key_pressed(KEY_SHIFT):
+					if Input.is_key_pressed(KEY_CTRL):
+						client.ultimate()
+					elif Input.is_key_pressed(KEY_SHIFT):
 						client.stagger_finisher()
 					else:
 						var skill_direction: Vector2 = _aim_direction()
@@ -1898,7 +1944,11 @@ func _unhandled_input(event: InputEvent) -> void:
 							skill_direction = Vector2(sin(client.yaw), cos(client.yaw))
 						client.skill(skill_direction)
 			KEY_SPACE:
-				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+				if _first_person and not Input.is_key_pressed(KEY_SHIFT):
+					# First person: Space jumps (cosmetic hop); Shift+Space keeps the dodge.
+					if _jump_time < 0.0 and _can_fight() and not bool(client.you.get("mounted", false)):
+						_jump_time = 0.0
+				elif not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					# Move-direction dodge, or current aim/facing when stationary.
 					var dodge_direction := Vector2(
 						Input.get_axis("ui_left", "ui_right") + float(Input.is_key_pressed(KEY_D)) - float(Input.is_key_pressed(KEY_A)),
@@ -1994,6 +2044,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				_end_build_mode()
 		get_viewport().set_input_as_handled()
 		return
+	if event is InputEventMouseButton and event.pressed and _can_fight():
+		if (event.button_index == MOUSE_BUTTON_RIGHT and _first_person) or event.button_index == MOUSE_BUTTON_XBUTTON1:
+			_cast_arcane_bolt()
+			get_viewport().set_input_as_handled()
+			return
+		if event.button_index == MOUSE_BUTTON_XBUTTON2:
+			client.ultimate()
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
 			_set_first_person(not _first_person)

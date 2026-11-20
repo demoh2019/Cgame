@@ -137,6 +137,7 @@ const SUITES := [
 	"res://tests/test_foliage_wind_weather.gd",
 	"res://tests/test_vegetation_wind.gd",
 	"res://tests/test_first_person_view.gd",
+	"res://tests/test_arcane_abilities.gd",
 	"res://tests/test_rain_wet_foliage.gd",
 	"res://tests/test_sky_lighting_budget.gd",
 	"res://tests/test_sky_ibl_fidelity.gd",

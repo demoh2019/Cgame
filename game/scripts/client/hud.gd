@@ -2554,6 +2554,16 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "arcane_bolt" or kind == "ultimate":
+		var label: String = "Arcane Bolt" if kind == "arcane_bolt" else "Cataclysm"
+		if bool(data.get("ok", false)):
+			if kind == "ultimate":
+				say("Cataclysm! %d infected caught in the blast." % int(data.get("hits", 0)))
+		elif str(data.get("reason", "")) == "cooldown":
+			say("%s ready in %.0fs." % [label, ceilf(float(data.get("remaining", 0.0)))])
+		else:
+			say("%s: %s." % [label, str(data.get("reason", "rejected")).replace("_", " ")])
+		return
 	if kind == "smart_provision":
 		if bool(data.get("ok", false)):
 			var item_id: String = str(data.get("item", ""))

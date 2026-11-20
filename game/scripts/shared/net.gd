@@ -1037,6 +1037,20 @@ func c_parry() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_arcane_bolt(dir_x: float, dir_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "arcane_bolt", sim.cmd_arcane_bolt(peer, dir_x, dir_z))
+
+
+@rpc("any_peer", "reliable")
+func c_ultimate() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "ultimate", sim.cmd_ultimate(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_dodge(dir_x: float, dir_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

@@ -40,3 +40,8 @@ func run(t) -> void:
 	t.check(FirstPersonView.eye_height(true, false) < FirstPersonView.eye_height(false, false), "crouching lowers the eyes")
 	t.check(FirstPersonView.eye_height(false, true) > FirstPersonView.eye_height(false, false), "riding raises the eyes")
 	t.near(FirstPersonView.camera_transform(Vector3(1, 2, 3), 0.0, 0.0, 1.6).origin.y, 3.6, 0.0001, "camera at feet + eye height")
+
+	t.current = "cosmetic jump"
+	t.eq(FirstPersonView.jump_offset(-1.0), 0.0, "on the ground")
+	t.near(FirstPersonView.jump_offset(FirstPersonView.JUMP_SECONDS * 0.5), FirstPersonView.JUMP_HEIGHT, 0.0001, "apex at mid-jump")
+	t.eq(FirstPersonView.jump_offset(FirstPersonView.JUMP_SECONDS), 0.0, "lands again")
