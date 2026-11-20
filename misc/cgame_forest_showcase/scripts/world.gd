@@ -123,6 +123,7 @@ func _create_streaming_world() -> void:
     world_partition.cell_size = CHUNK_EDGE
     world_partition.load_radius = 1
     world_partition.unload_radius = 2
+    world_partition.prefetch_distance = 2  # Prefetch a two-tile corridor when running.
     world_partition.max_new_requests_per_frame = 2
     world_partition.max_instances_per_frame = 2
     world_partition.max_instantiation_time_ms = 2.0
@@ -140,6 +141,25 @@ func _create_streaming_world() -> void:
             world_partition.set_cell_scene(
                 Vector2i(cx, cz), "res://cells/forest_cell.tscn")
     world_partition.update_streaming()
+
+
+func _update_predictive_streaming() -> void:
+    if world_partition == null or player == null:
+        return
+
+    # Read physics velocity every quarter-second rather than changing the
+    # streamer direction every render frame. Movements under 2 m/s do not
+    # justify extra terrain loading. Diagonal movement prefetches diagonally.
+    var horizontal := Vector2(player.velocity.x, player.velocity.z)
+    var direction := Vector2i.ZERO
+    if horizontal.length_squared() >= 4.0:
+        if absf(horizontal.x) >= 2.0:
+            direction.x = 1 if horizontal.x > 0.0 else -1
+        if absf(horizontal.y) >= 2.0:
+            direction.y = 1 if horizontal.y > 0.0 else -1
+
+    if world_partition.prefetch_direction != direction:
+        world_partition.prefetch_direction = direction
 
 
 func _on_observer_cell_changed(cell: Vector2i) -> void:
@@ -238,7 +258,7 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 184)
+    hint.position = Vector2(22, 208)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
     hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
@@ -274,11 +294,13 @@ func _refresh_hud() -> void:
     var inflight: int = world_partition.get_inflight_request_count() if world_partition != null else 0
     var failed: int = world_partition.get_failed_cell_count() if world_partition != null else 0
     var cache: Dictionary = TileCache.get_stats()
+    var ahead: Vector2i = world_partition.prefetch_direction if world_partition != null else Vector2i.ZERO
     hud.text = "AURORA FOREST  |  Cgame / Godot 4.8\n" \
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pending, inflight, failed, current_region.x, current_region.y] \
-        + "Кэш земли: %d/%d   попадания: %d   промахи: %d" % [cache["entries"], cache["capacity"], cache["hits"], cache["misses"]]
+        + "Кэш земли: %d/%d   попадания: %d   промахи: %d\n" % [cache["entries"], cache["capacity"], cache["hits"], cache["misses"]] \
+        + "Предзагрузка: X=%d Z=%d   впереди: %d ячейки" % [ahead.x, ahead.y, world_partition.prefetch_distance]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
@@ -288,6 +310,7 @@ func _process(delta: float) -> void:
     hud_elapsed += delta
     if hud_elapsed >= 0.25:
         hud_elapsed = 0.0
+        _update_predictive_streaming()
         _refresh_hud()
 
     for i in range(crystals.size()):
@@ -347,7 +370,8 @@ func _load_game() -> void:
     var position: Vector2 = state["position_xz"]
     player.call("teleport_to_ground", position.x, position.y,
         height_at(position.x, position.y))
-    # Prioritize the destination tile after a saved-game teleport.
+    # A saved-game teleport resets velocity and forward prefetch direction.
+    world_partition.prefetch_direction = Vector2i.ZERO
     world_partition.update_streaming()
     _refresh_player_stream_safety()
     var look: Vector2 = state["look"]
