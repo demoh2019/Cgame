@@ -14,6 +14,7 @@ const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const TerrainPatch = preload("res://scripts/streamed_terrain_patch.gd")
 const SharedAssets = preload("res://scripts/forest_shared_assets.gd")
 const DistantCanopies = preload("res://scripts/distant_forest_canopies.gd")
+const HLODCache = preload("res://scripts/distant_hlod_cache.gd")
 
 const CELL_SIZE: int = 32
 const GRID_WIDTH: int = 33
@@ -132,7 +133,19 @@ func _rebuild_visible_set(center: Vector2i) -> void:
 
 
 func _create_proxy(cell: Vector2i) -> MeshInstance3D:
-    var mesh := _build_proxy_mesh(cell)
+    # A tile leaves the active horizon much more often than its geometry
+    # changes. Reuse both GPU resources from a bounded LRU on revisits.
+    var resources: Dictionary = HLODCache.lookup(cell)
+    var mesh: ArrayMesh
+    var canopies := DistantCanopies.new()
+    if resources.is_empty():
+        mesh = _build_proxy_mesh(cell)
+        canopies.configure(cell)
+        HLODCache.insert(cell, mesh, canopies.multimesh)
+    else:
+        mesh = resources["terrain"]
+        canopies.configure(cell, resources["canopies"])
+
     var proxy := MeshInstance3D.new()
     proxy.name = "FarTerrain_%d_%d" % [cell.x, cell.y]
     proxy.mesh = mesh
@@ -141,8 +154,6 @@ func _create_proxy(cell: Vector2i) -> MeshInstance3D:
     # One shared low-poly MultiMesh batch preserves each tree's original
     # random position and size. Parent visibility handles exact HLOD
     # swaps atomically: no full-res / low-res crown double rendering.
-    var canopies := DistantCanopies.new()
-    canopies.configure(cell)
     proxy.add_child(canopies)
     add_child(proxy)
     proxy.global_position = streaming_world.to_global(
@@ -213,5 +224,6 @@ func get_stats() -> Dictionary:
         "visible": visible,
         "visible_canopies": visible_canopies,
         "built_total": _built_total,
-        "max_per_frame": MAX_BUILDS_PER_FRAME
+        "max_per_frame": MAX_BUILDS_PER_FRAME,
+        "cache": HLODCache.get_stats()
     }
