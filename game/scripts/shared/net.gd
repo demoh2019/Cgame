@@ -430,6 +430,13 @@ func c_party_rally() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_feast(item_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_feast", sim.cmd_party_feast(peer, item_id))
+
+
+@rpc("any_peer", "reliable")
 func c_party_aid(target_id: int, item_id: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -683,7 +690,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "duel", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk":
+		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "duel", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast":
 			return event.get("peer", -1) == peer
 		"party_aid":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
