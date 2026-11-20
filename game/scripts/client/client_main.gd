@@ -1028,7 +1028,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_result("Drink", sim.cmd_use(LOCAL_PLAYER_ID, "water_bottle"))
 	elif event.is_action_pressed("survive_bandage"):
-		_result("Heal", sim.cmd_use(LOCAL_PLAYER_ID, "bandage"))
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Expedition trauma kit", sim.cmd_use(LOCAL_PLAYER_ID, "expedition_trauma_kit"))
+		else:
+			_result("Heal", sim.cmd_use(LOCAL_PLAYER_ID, "bandage"))
 	elif event.is_action_pressed("survive_weapon"):
 		_cycle_owned_weapon()
 	elif event.is_action_pressed("survive_armor"):
