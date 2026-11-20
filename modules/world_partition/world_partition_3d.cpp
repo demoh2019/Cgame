@@ -399,16 +399,20 @@ Array WorldPartition3D::get_cells_in_radius(const Vector2i &p_center, int p_radi
 }
 
 void WorldPartition3D::update_streaming() {
+	const uint64_t update_started_usec = Time::get_singleton()->get_ticks_usec();
+	last_instantiation_attempt_count = 0;
 	_poll_requests();
 	if (!streaming_enabled || !is_inside_tree() || observer_path.is_empty()) {
 		_purge_unused_ready_scenes();
 		_refresh_processing();
+		last_streaming_update_ms = real_t(Time::get_singleton()->get_ticks_usec() - update_started_usec) / 1000.0;
 		return;
 	}
 
 	Node3D *observer = Object::cast_to<Node3D>(get_node_or_null(observer_path));
 	if (observer == nullptr) {
 		_purge_unused_ready_scenes();
+		last_streaming_update_ms = real_t(Time::get_singleton()->get_ticks_usec() - update_started_usec) / 1000.0;
 		return;
 	}
 
@@ -554,6 +558,8 @@ void WorldPartition3D::update_streaming() {
 		}
 	}
 	_purge_unused_ready_scenes();
+	last_instantiation_attempt_count = attempted_instances;
+	last_streaming_update_ms = real_t(Time::get_singleton()->get_ticks_usec() - update_started_usec) / 1000.0;
 	if (observer_cell_changed) {
 		emit_signal(SNAME("observer_cell_changed"), observer_cell);
 	}
@@ -620,6 +626,14 @@ int WorldPartition3D::get_failed_cell_count() const {
 	return failed_cells.size();
 }
 
+real_t WorldPartition3D::get_last_streaming_update_ms() const {
+	return last_streaming_update_ms;
+}
+
+int WorldPartition3D::get_last_instantiation_attempt_count() const {
+	return last_instantiation_attempt_count;
+}
+
 void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_cell_size", "size"), &WorldPartition3D::set_cell_size);
 	ClassDB::bind_method(D_METHOD("get_cell_size"), &WorldPartition3D::get_cell_size);
@@ -664,6 +678,8 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_pending_cell_count"), &WorldPartition3D::get_pending_cell_count);
 	ClassDB::bind_method(D_METHOD("get_inflight_request_count"), &WorldPartition3D::get_inflight_request_count);
 	ClassDB::bind_method(D_METHOD("get_failed_cell_count"), &WorldPartition3D::get_failed_cell_count);
+	ClassDB::bind_method(D_METHOD("get_last_streaming_update_ms"), &WorldPartition3D::get_last_streaming_update_ms);
+	ClassDB::bind_method(D_METHOD("get_last_instantiation_attempt_count"), &WorldPartition3D::get_last_instantiation_attempt_count);
 
 	ADD_GROUP("World Grid", "");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "1,4096,1,or_greater,suffix:m"), "set_cell_size", "get_cell_size");
