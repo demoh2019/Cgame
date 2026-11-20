@@ -271,7 +271,16 @@ void WorldPartition3D::_update_navigation_readiness() {
 		}
 	}
 	for (const Vector2i &cell : lost) {
+		const ObjectID *id = navigation_ready_regions.getptr(cell);
+		const ObjectID region_id = id != nullptr ? *id : ObjectID();
 		_clear_navigation_cell(cell);
+		// An existing NavigationRegion3D may be temporarily disabled or
+		// detached from its map and enabled again without reloading the tile.
+		// Keep watching that specific live region for a new server sync.
+		NavigationRegion3D *region = Object::cast_to<NavigationRegion3D>(ObjectDB::get_instance(region_id));
+		if (region != nullptr && !region->is_queued_for_deletion() && is_cell_loaded(cell)) {
+			navigation_pending_regions.insert(cell, region_id);
+		}
 	}
 	Vector<Vector2i> available;
 	for (const KeyValue<Vector2i, ObjectID> &E : navigation_pending_regions) {
