@@ -181,7 +181,7 @@ func _update_hud() -> void:
     var status_text := "RUNNING" if last_status == BehaviorTree.RUNNING else ("SUCCESS" if last_status == BehaviorTree.SUCCESS else "FAILURE")
     hud.text = "VISUAL PERCEPTION + BEHAVIOR TREE | Arrows: move | Space: attack | R: reset\n"
     hud.text += "Enemy HP: %d | AI: %s | Tree: %s | Visible: %s\n" % [enemy_health, current_action, status_text, str(sensor.is_target_visible())]
-    hud.text += "Target memory: %.1f s | Red wall blocks LOS | Yellow X = last seen position" % sensor.get_memory_remaining()
+    hud.text += "Target memory: %.1f s | Gray wall blocks LOS | Yellow X = last seen position" % sensor.get_memory_remaining()
 
 
 func _draw() -> void:
