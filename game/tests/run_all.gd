@@ -38,6 +38,7 @@ const SUITES := [
 	"res://tests/test_terrain_curvature.gd",
 	"res://tests/test_terrain_height_blend.gd",
 	"res://tests/test_terrain_micro_occlusion.gd",
+	"res://tests/test_terrain_normal_variance_mips.gd",
 	"res://tests/test_terrain_antitiling.gd",
 	"res://tests/test_terrain_anisotropy.gd",
 	"res://tests/test_specular_aa.gd",

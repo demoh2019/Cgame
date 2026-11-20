@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="NormalVarianceMipmaps" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/classes/class.xsd">
+	<brief_description>
+		Precompute normal-map coherence to stabilize glossy PBR highlights.
+	</brief_description>
+	<description>
+		The input must be an uncompressed RGB8 tangent-space normal image, at most 1024 pixels per side. Each output RGBA8 mip level stores the unit mean surface normal in RGB and the length of the original averaged normals in A (coherence). Sample alpha with the same normal lookup and increase roughness only where unresolved normals reduce coherence. On the low-end, shaders can ignore alpha.
+	</description>
+	<methods>
+		<method name="build_image">
+			<return type="Image" />
+			<param index="0" name="normal_map" type="Image" />
+			<description>
+				Return a new RGBA8 image with a complete normal-aware mip chain, leaving the source untouched.
+			</description>
+		</method>
+	</methods>
+</class>

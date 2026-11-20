@@ -395,6 +395,21 @@ static func textured_material() -> ShaderMaterial:
 			return null
 		albedo.append(_layer_image(diffuse_texture, 1024))
 		normals.append(_layer_image(normal_texture, 512))
+	# The forked engine builds Toksvig normal mipmaps once per layer.
+	# Stock Godot keeps the existing RGB8 mipmaps, with alpha=1 in sampling.
+	# Avoid partially converted arrays: Texture2DArray requires one format.
+	if ClassDB.class_exists("NormalVarianceMipmaps"):
+		var prefilter: Object = ClassDB.instantiate("NormalVarianceMipmaps")
+		if prefilter != null and prefilter.has_method("build_image"):
+			var filtered_normals: Array[Image] = []
+			for normal_image in normals:
+				var variance_image: Image = prefilter.call("build_image", normal_image) as Image
+				if variance_image == null:
+					filtered_normals.clear()
+					break
+				filtered_normals.append(variance_image)
+			if filtered_normals.size() == normals.size():
+				normals = filtered_normals
 	var tints := PackedVector3Array()
 	var averages := PackedVector3Array()
 	for index in albedo.size():

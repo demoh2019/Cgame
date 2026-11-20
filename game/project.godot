@@ -212,6 +212,12 @@ aa_terrain_micro_occlusion={
 "value": 0.0
 }
 
+; Variance-mip normal coherence filter is opt-in on High/Ultra.
+aa_terrain_normal_variance_strength={
+"type": "float",
+"value": 0.0
+}
+
 aa_terrain_curvature_strength={
 "type": "float",
 "value": 0.0

@@ -1,0 +1,51 @@
+name: Native normal variance mipmaps
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "modules/normal_variance_mipmaps/**"
+      - "game/assets/shaders/ground.gdshader"
+      - "game/scripts/client/chunk_view.gd"
+      - "game/scripts/client/graphics_quality.gd"
+      - "game/tests/test_terrain_normal_variance_mips.gd"
+      - ".github/workflows/normal-variance-mips.yml"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/normal_variance_mipmaps/**"
+      - "game/assets/shaders/ground.gdshader"
+      - "game/scripts/client/chunk_view.gd"
+      - "game/scripts/client/graphics_quality.gd"
+      - "game/tests/test_terrain_normal_variance_mips.gd"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  normal-variance:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify native portable normal-coherence math
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            modules/normal_variance_mipmaps/tests/test_normal_variance_policy.cpp \
+            -o /tmp/test-normal-variance
+          /tmp/test-normal-variance
+      - name: Verify shader and engine wiring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          shader = Path("game/assets/shaders/ground.gdshader").read_text()
+          game = Path("game/scripts/client/chunk_view.gd").read_text()
+          quality = Path("game/scripts/client/graphics_quality.gd").read_text()
+          native = Path("modules/normal_variance_mipmaps/normal_variance_mipmaps.cpp").read_text()
+          assert "coherence_sum += normal_sample.a * w[i]" in shader
+          assert "prefilter.call(\"build_image\", normal_image)" in game
+          assert '"normal_variance_strength"' in quality
+          assert "Image::FORMAT_RGBA8" in native
+          PY

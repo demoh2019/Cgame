@@ -8,6 +8,9 @@ instance uniform float aa_lod_morph = 0.0;
 // High/Ultra only: subtle self-occlusion from normal-map microrelief,
 // fused into existing PBR AO without any extra texture or screen pass.
 global uniform float aa_terrain_micro_occlusion;
+// Normal-map alpha stores prefiltered Toksvig coherence. Premium tiers
+// resolve missed microfacet variance without additional GPU texture taps.
+global uniform float aa_terrain_normal_variance_strength;
 // Optional High/Ultra PBR second reflection lobe. The compile-time variant
 // omits its GPU work entirely on Performance/Balanced and GL-safe presets.
 #ifdef AA_TERRAIN_WET_CLEARCOAT
@@ -116,12 +119,13 @@ vec3 top_albedo(float layer, vec2 p, float mixer, float detail_fade, vec2 lod_dx
 	return far_tile * layer_tint[int(layer)];
 }
 
-vec3 top_normal(float layer, vec2 p, float detail_fade, vec2 lod_dx, vec2 lod_dy) {
-	// When far enough, even the normal map fetch is skipped: distant microrelief is subpixel.
-	vec3 normal = vec3(0.0, 0.0, 1.0);
+vec4 top_normal(float layer, vec2 p, float detail_fade, vec2 lod_dx, vec2 lod_dy) {
+	// One existing texture read supplies both unit normal and averaged
+	// normal coherence in alpha. Far terrain skips the texture entirely.
+	vec4 normal = vec4(0.0, 0.0, 1.0, 1.0);
 	if (detail_fade > 0.001) {
-		vec3 mapped = textureGrad(normal_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy).rgb * 2.0 - 1.0;
-		normal = mix(normal, mapped, detail_fade);
+		vec4 mapped = textureGrad(normal_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy);
+		normal = mix(normal, vec4(mapped.rgb * 2.0 - 1.0, mapped.a), detail_fade);
 	}
 	return normal;
 }
@@ -327,6 +331,7 @@ void fragment() {
 	}
 	vec3 color = macro_color;
 	vec3 bump = vec3(0.0);
+	float coherence_sum = 0.0;
 	vec3 cliff_world_normal = n;
 	float sampled_weight = 0.0;
 	for (int slot = 0; slot < 13; slot++) {
@@ -342,7 +347,8 @@ void fragment() {
 		}
 		float layer = float(i);
 		vec3 c;
-		vec3 nn;
+		vec4 normal_sample;
+		float cliff_coherence = 1.0;
 		if (i == 5) {
 			// An distant cliff contributes its existing palette average instead
 			// of paying for three tiny, subpixel albedo projections per pixel.
@@ -361,30 +367,36 @@ void fragment() {
 				// High/Ultra keep the exact existing cliff normal mapping nearby.
 				// Far fragments already skip both normal and albedo fetches.
 				if (aa_cliff_normal_quality > 0.001) {
-					vec3 nx = textureGrad(normal_layers,
+					vec4 nx_sample = textureGrad(normal_layers,
 						vec3(world_position.zy / tile_meters, layer),
-						cliff_dx_zy, cliff_dy_zy).rgb * 2.0 - 1.0;
-					vec3 ny = textureGrad(normal_layers,
+						cliff_dx_zy, cliff_dy_zy);
+					vec4 ny_sample = textureGrad(normal_layers,
 						vec3(p / tile_meters, layer),
-						lod_dx, lod_dy).rgb * 2.0 - 1.0;
-					vec3 nz = textureGrad(normal_layers,
+						lod_dx, lod_dy);
+					vec4 nz_sample = textureGrad(normal_layers,
 						vec3(world_position.xy / tile_meters, layer),
-						cliff_dx_xy, cliff_dy_xy).rgb * 2.0 - 1.0;
+						cliff_dx_xy, cliff_dy_xy);
+					vec3 nx = nx_sample.rgb * 2.0 - 1.0;
+					vec3 ny = ny_sample.rgb * 2.0 - 1.0;
+					vec3 nz = nz_sample.rgb * 2.0 - 1.0;
+					cliff_coherence = clamp(dot(
+						vec3(nx_sample.a, ny_sample.a, nz_sample.a), blend), 0.0, 1.0);
 					vec3 along_x = normalize(vec3(sign(n.x) * nx.z, nx.y, nx.x));
 					vec3 along_y = normalize(vec3(ny.x, sign(n.y) * ny.z, ny.y));
 					vec3 along_z = normalize(vec3(nz.x, nz.y, sign(n.z) * nz.z));
 					cliff_world_normal = normalize(
 						along_x * blend.x + along_y * blend.y + along_z * blend.z);
 				}
-			nn = vec3(0.0, 0.0, 1.0);
+			normal_sample = vec4(0.0, 0.0, 1.0, cliff_coherence);
 		} else {
 			c = top_albedo(layer, material_p, mixer, detail_fade, lod_dx, lod_dy);
-			nn = top_normal(layer, material_p, detail_fade, lod_dx, lod_dy);
+			normal_sample = top_normal(layer, material_p, detail_fade, lod_dx, lod_dy);
 		}
 		// Replace the approximate layer color with the actual PBR texture; the
 		// unselected layers still contribute their average palette color.
 		color += (c - layer_average[i]) * w[i];
-		bump += nn * w[i];
+		bump += normal_sample.xyz * w[i];
+		coherence_sum += normal_sample.a * w[i];
 		sampled_weight += w[i];
 	}
 	color /= max(all_weight, 0.0001);
@@ -490,8 +502,20 @@ void fragment() {
 	float final_roughness = clamp(
 		mix(mix(dry_roughness, 0.28, wetness * 0.55), 0.08, puddle * 0.9),
 		0.045, 1.0);
-	// Resolve subpixel roughness on moving normal-mapped cliffs and wet ground
-	// without additional PBR texture fetches.
+	// Toksvig-like prefiltered normal variance reveals unresolved microrelief.
+	// The native engine stores coherence in alpha of the *existing* normal tap.
+	// Zero strength on low tiers skips this ALU, and water-filled puddles stay
+	// optically smooth rather than turning matte due to the underlying mud.
+	if (aa_terrain_normal_variance_strength > 0.001 && detail_fade > 0.001
+			&& sampled_weight > 0.001 && puddle < 0.85) {
+		float coherence = clamp(coherence_sum / sampled_weight, 0.05, 1.0);
+		float variance = min((1.0 - coherence) / coherence, 0.14);
+		final_roughness = sqrt(min(1.0, final_roughness * final_roughness
+			+ variance * aa_terrain_normal_variance_strength
+			* detail_fade * (1.0 - puddle)));
+	}
+	// Existing screen-space normal derivatives handle additional subpixel
+	// variation without losing the prefiltered normal-map variance.
 	ROUGHNESS = filter_specular_roughness(final_roughness, bent);
 	SPECULAR = 0.5;
 #ifdef AA_TERRAIN_WET_CLEARCOAT
