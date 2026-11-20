@@ -94,6 +94,12 @@ func run(t) -> void:
 	world.solids = [{"x": 9.0, "z": 0.0, "radius": 1.5, "blocks": false}]
 	t.check(Hearing.audible(world, source, origin, 21.0, 21.0),
 		"nonblocking decorations cannot hide a runner")
+	world.solids = [{"x": 9.0, "z": 0.0, "radius": 0.9, "blocks": true}]
+	t.check(Hearing.audible(world, source, origin, 21.0, 21.0),
+		"small workbench and thin saplings do not behave like full soundproof walls")
+	world.solids = [{"x": 9.0, "z": 0.0, "radius": 1.5, "blocks": true}]
+	t.check(not Hearing.audible(world, source, origin, 21.0, 21.0),
+		"replacing the prop with a substantial barricade blocks marginal hearing")
 	t.check(not Hearing.audible(null, source, origin, 21.0, 21.0),
 		"invalid world input cannot fabricate a successful hearing event")
 	t.check(not Hearing.audible(world, source, origin, NAN, 21.0),
