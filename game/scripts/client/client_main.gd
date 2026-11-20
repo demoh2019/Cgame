@@ -4,6 +4,7 @@ extends Node3D
 ## call GameServer. Multiplayer transport will be wired to this presentation separately.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
@@ -50,6 +51,7 @@ var _chunks: Dictionary = {}
 var _resource_meshes: Dictionary = {}
 var _crate_meshes: Dictionary = {}
 var _zombie_meshes: Dictionary = {}
+var _spit_warning_meshes: Dictionary = {}
 var _barricade_bodies: Dictionary = {}
 var _campfire_visuals: Dictionary = {}
 var _decoy_visuals: Dictionary = {}
@@ -353,7 +355,8 @@ func _sync_zombies() -> void:
 		if not _zombie_meshes.has(zombie.id):
 			var mesh := _mesh(
 				Vector3(1.05, 1.95, 1.05) if zombie.elite else Vector3(0.85, 1.6, 0.85),
-				Color(0.98, 0.65, 0.18) if zombie.elite else Color(0.66, 0.37, 0.35))
+				Color(0.98, 0.65, 0.18) if zombie.elite else (
+					Color(0.4, 0.9, 0.23) if zombie.type == "spitter" else Color(0.66, 0.37, 0.35)))
 			add_child(mesh)
 			_zombie_meshes[zombie.id] = mesh
 		_zombie_meshes[zombie.id].position = zombie.position + Vector3(0.0, 0.975 if zombie.elite else 0.8, 0.0)
@@ -361,6 +364,39 @@ func _sync_zombies() -> void:
 		if not active.has(zombie_id):
 			_zombie_meshes[zombie_id].queue_free()
 			_zombie_meshes.erase(zombie_id)
+
+
+## Local preview uses the same server-authored telegraphs as online play.
+func _sync_spit_warnings() -> void:
+	var visible: Dictionary = {}
+	for zombie in sim.zombies.values():
+		if zombie.type != "spitter" or not zombie.is_alive() or not zombie.spit_pending:
+			continue
+		if Vector2(survivor.position.x, survivor.position.z).distance_to(
+				zombie.spit_center) > 75.0:
+			continue
+		visible[zombie.id] = true
+		if not _spit_warning_meshes.has(zombie.id):
+			var marker := MeshInstance3D.new()
+			var disk := CylinderMesh.new()
+			disk.top_radius = AcidSpitter.RADIUS
+			disk.bottom_radius = AcidSpitter.RADIUS
+			disk.height = 0.06
+			marker.mesh = disk
+			var chemical := StandardMaterial3D.new()
+			chemical.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			chemical.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			chemical.albedo_color = Color(0.5, 1.0, 0.16, 0.42)
+			marker.material_override = chemical
+			add_child(marker)
+			_spit_warning_meshes[zombie.id] = marker
+		var at: Vector2 = zombie.spit_center
+		_spit_warning_meshes[zombie.id].position = Vector3(
+			at.x, world.height_at(at.x, at.y) + 0.08, at.y)
+	for id in _spit_warning_meshes.keys():
+		if not visible.has(id):
+			_spit_warning_meshes[id].queue_free()
+			_spit_warning_meshes.erase(id)
 
 
 func _sync_barricades() -> void:
@@ -513,6 +549,7 @@ func _physics_process(delta: float) -> void:
 	for item_id in _crate_meshes:
 		_crate_meshes[item_id].visible = not sim.opened_crates.has(item_id)
 	_sync_zombies()
+	_sync_spit_warnings()
 	_sync_barricades()
 	_sync_campfires()
 	_sync_decoys()

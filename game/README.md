@@ -2129,3 +2129,28 @@ Run `godot --headless --path game --script res://tests/run_all.gd` to
 verify game food, stamina, combat energy, save safety and respawn regressions.
 This uses existing Cgame server simulation and HUD primitives; no native
 engine extension was needed.
+
+## Acid spitters: telegraphed red/black-zone infected PvE
+
+A new **spitter** enemy appears rarely among red-zone ruins and more
+frequently in black zones, but never spawns in the protected green/yellow
+wilderness. A spitter takes position 3–12 metres from its target and
+winds up a corrosive area attack for **1.4 seconds**. A bright green
+**2.4-metre-radius** ground marker shows the exact landing zone; players
+can leave it or time a dodge. The server freezes the target point at
+warning time, never follows a moving player, and resolves one impact
+against nearby survivors only once. The infected's volley has a
+**6-second cooldown**, deals 14 base damage and can add an infected wound.
+
+The existing armor, dodge, guardian group protection, PvE wound ward and
+safe-zone checks are respected. PvP attacks and ordinary zombie melee
+remain unchanged; a dead spitter cannot land a pending projectile. The
+online interest-filtered snapshots expose warning positions but do not
+expose internal AI target IDs. Both the local playable scene and online
+clients render the ground warning, and the multiplayer HUD announces
+incoming acid. Normal spitter defeats award ordinary combat mastery and
+renown; no client can spawn or control this enemy.
+
+Regression checks are in `game/tests/test_acid_spitter.gd`, registered
+in the canonical headless runner. This uses Cgame's current AI, materials
+and networking APIs without requiring new C++-engine primitives.

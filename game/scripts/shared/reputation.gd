@@ -52,6 +52,7 @@ static func kill_points(zombie_type: String, elite: bool, raid_boss: bool) -> in
 		"walker": basic = 1
 		"runner": basic = 2
 		"brute": basic = 4
+		"spitter": basic = 3
 		_: return 0
 	if elite:
 		basic += 5

@@ -35,6 +35,7 @@ const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
+const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
 const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
@@ -2778,6 +2779,40 @@ func _tick_siege_waves() -> void:
 			return # At most one wave per scheduler check.
 
 
+## Fixed-position corrosive AoE: dodge or walk away during a visible
+## 1.4-second telegraph. No target/position/damage comes from the client.
+func _resolve_spit_impact(zombie, center: Vector2) -> void:
+	if not zombie.is_alive() or zombie.type != "spitter" or not center.is_finite():
+		return
+	for survivor in players.values():
+		if not _alive(survivor) or _is_safe(survivor.position) 				or world.zone_at(survivor.position.x, survivor.position.z) < AcidSpitter.MIN_ZONE 				or not AcidSpitter.hits(center, survivor.position):
+			continue
+		if survivor.dodge_immunity > 0.0:
+			events.append({"type": "evaded", "peer": survivor.id, "zombie": zombie.id})
+			continue
+		var armor_id: String = survivor.inventory.armor
+		var owned: bool = armor_id != "" and survivor.inventory.count(armor_id) > 0
+		var impact: float = Combat.apply_armor(float(zombie.data["damage"]),
+			armor_id if owned else "")
+		impact = _infected_damage_for(survivor, impact)
+		var applied: float = _hurt_player(survivor, impact)
+		if applied > 0.0 and _alive(survivor):
+			var wound: float = Combat.infected_wound_amount(
+				AcidSpitter.INFECTION_PER_HIT, armor_id, owned, "infection")
+			wound = WardenAura.mitigate_wound(wound,
+				WardenAura.active_for(survivor, players, parties, world))
+			if survivor.survival.add_infection(wound):
+				survivor.dirty_character = true
+				events.append({"type": "infection", "peer": survivor.id,
+					"severity": survivor.survival.infection, "source": "spitter"})
+		events.append({"type": "hit", "kind": "player", "id": survivor.id,
+			"damage": impact, "by": -zombie.id})
+		if not _alive(survivor):
+			_on_player_death(survivor, -zombie.id)
+	events.append({"type": "spit_impact", "id": zombie.id, "x": center.x,
+		"z": center.y, "radius": AcidSpitter.RADIUS})
+
+
 func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
 	for player in players.values():
@@ -2814,7 +2849,16 @@ func _tick_zombies(delta: float) -> void:
 						if offset.length() <= Structures.ZOMBIE_REACH and offset.dot(toward) > 0.0:
 							damage_barricade(wall_id, float(zombie.data["damage"]) * delta * 2.0)
 							break
-		if not result.is_empty():
+		if result.has("spit_warning"):
+			events.append({"type": "spit_warning", "id": zombie.id,
+				"x": float(result["x"]), "z": float(result["z"]),
+				"seconds": AcidSpitter.WINDUP_SECONDS,
+				"radius": AcidSpitter.RADIUS})
+			continue
+		if result.has("spit_impact"):
+			_resolve_spit_impact(zombie, Vector2(float(result["x"]), float(result["z"])))
+			continue
+		if result.has("hit"):
 			var victim: Player = players.get(result["hit"])
 			if victim != null and _alive(victim):
 				# An active dodge avoids infected wounds; normal PvP attacks still land.
@@ -3005,6 +3049,17 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					"elite": zombie.elite, "raid_boss": zombie.raid_boss,
 					"raid_enraged": zombie.raid_enraged,
 					"max_hp": float(zombie.data.get("health", zombie.health))})
+	# Replicate only pending, living spit warnings within sight of this
+	# survivor. Client visual effects never authorize an actual hit.
+	var spit_zones: Array = []
+	for infected in zombies.values():
+		if infected.type != "spitter" or not infected.is_alive() or not infected.spit_pending:
+			continue
+		if here.distance_to(infected.spit_center) <= Defs.INTEREST_RADIUS:
+			spit_zones.append({"id": infected.id, "x": infected.spit_center.x,
+				"y": world.height_at(infected.spit_center.x, infected.spit_center.y),
+				"z": infected.spit_center.y, "radius": AcidSpitter.RADIUS,
+				"remaining": infected.spit_seconds})
 	var nearby_barricades: Array = []
 	for wall in barricades.values():
 		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
@@ -3097,6 +3152,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"speed_bonus": player.skills.bonus("move_speed"), "carry_bonus": player.skills.bonus("carry_capacity"),
 		},
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
+		"spit_zones": spit_zones,
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
 		"decoys": nearby_decoys,
 		"depleted": gone_nodes, "crates_used": used_crates,

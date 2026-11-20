@@ -308,10 +308,14 @@ static func _pick_zombie(zone: int, rng: RandomNumberGenerator) -> String:
 	var roll := rng.randf()
 	var brute_chance := 0.03 + 0.04 * zone
 	var runner_chance := 0.18 + 0.06 * zone
+	# Acid spitters only appear in the two highest-risk regions.
+	var spitter_chance := 0.0 if zone < 2 else 0.08 + 0.04 * float(mini(zone, 3) - 2)
 	if roll < brute_chance:
 		return "brute"
 	if roll < brute_chance + runner_chance:
 		return "runner"
+	if roll < brute_chance + runner_chance + spitter_chance:
+		return "spitter"
 	return "walker"
 
 

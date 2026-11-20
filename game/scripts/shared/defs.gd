@@ -26,12 +26,12 @@ const INFECTION_MAX := 100.0
 const INFECTION_GROWTH_PER_SECOND := 0.065
 const INFECTION_DAMAGE_START := 30.0
 const INFECTION_DAMAGE_PER_SECOND := 1.4
-const ZOMBIE_INFECTION_PER_HIT := {"walker": 8.0, "runner": 12.0, "brute": 20.0}
+const ZOMBIE_INFECTION_PER_HIT := {"walker": 8.0, "runner": 12.0, "brute": 20.0, "spitter": 10.0}
 # Persistent wounds: real attacks cause bleeding; untreated bleeding slowly clots but costs HP.
 const BLEEDING_MAX := 100.0
 const BLEEDING_DAMAGE_PER_SECOND := 1.2
 const BLEEDING_DECAY_PER_SECOND := 0.2
-const ZOMBIE_BLEEDING_PER_HIT := {"walker": 9.0, "runner": 13.0, "brute": 22.0}
+const ZOMBIE_BLEEDING_PER_HIT := {"walker": 9.0, "runner": 13.0, "brute": 22.0, "spitter": 3.0}
 const PVP_MELEE_BLEEDING_PER_HIT := 12.0
 const COMBAT_ENERGY_MAX := 100.0
 const COMBAT_ENERGY_REGEN := 9.0
@@ -70,6 +70,7 @@ const ZOMBIES := {
 	"walker": {"health": 45.0, "speed": 1.7, "damage": 9.0, "attack_range": 1.6, "attack_cooldown": 1.3, "notice": 16.0, "lose": 34.0, "xp": 5},
 	"runner": {"health": 28.0, "speed": 4.4, "damage": 7.0, "attack_range": 1.6, "attack_cooldown": 0.9, "notice": 24.0, "lose": 40.0, "xp": 8},
 	"brute": {"health": 170.0, "speed": 2.2, "damage": 26.0, "attack_range": 2.0, "attack_cooldown": 1.8, "notice": 14.0, "lose": 30.0, "xp": 25},
+	"spitter": {"health": 52.0, "speed": 2.0, "damage": 14.0, "attack_range": 1.6, "attack_cooldown": 2.0, "notice": 21.0, "lose": 36.0, "xp": 12},
 }
 
 # --- Items -------------------------------------------------------------------------------------------

@@ -651,6 +651,10 @@ func _on_event(event: Dictionary) -> void:
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
 		"guardian_taunt":
 			say("Frontline guardian draws %d infected away from teammates!" % int(event.get("count", 0)))
+		"spit_warning":
+			say("ACID SPIT! Leave the green circle before it lands.")
+		"spit_impact":
+			say("Corrosive spit landed — move away from the next warning.")
 		"raid_started":
 			say("RAID BOSS nearby! A mutant warlord entered the dangerous zone.")
 		"raid_enraged":
