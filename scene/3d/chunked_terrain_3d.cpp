@@ -31,6 +31,7 @@
 #include "chunked_terrain_3d.h"
 #include "terrain_geomorph_policy.h"
 #include "terrain_streaming_budget_policy.h"
+#include "terrain_streaming_priority_policy.h"
 
 #include "core/config/engine.h"
 #include "core/object/callable_mp.h"
@@ -429,7 +430,46 @@ void ChunkedTerrain3D::_update_chunks(bool p_ignore_mesh_budget) {
 		}
 	}
 
-	for (Chunk &chunk : chunks) {
+	// Sort only when terrain streaming is time-sliced and an actual viewer
+	// exists. The legacy, unbudgeted renderer retains its original array scan.
+	// This is per-node ordering: the shared CPU ledger is still global across
+	// all ChunkedTerrain3D instances in the scene.
+	LocalVector<TerrainStreamingPriorityPolicy::Candidate> stream_order;
+	if (time_sliced && mesh_streaming_priority > 0 && has_viewer && chunks.size() > 1) {
+		stream_order.resize(chunks.size());
+		Vector3 camera_forward;
+		if (mesh_streaming_priority >= 2) {
+			Viewport *viewport = get_viewport();
+			Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
+			if (camera != nullptr) {
+				camera_forward = -camera->get_global_transform().basis.get_column(2).normalized();
+			}
+		}
+		for (uint32_t i = 0; i < chunks.size(); i++) {
+			const Chunk &chunk = chunks[i];
+			const Vector3 closest = viewer.clamp(chunk.bounds.position, chunk.bounds.get_end());
+			const float distance = float((viewer - closest).length() * unit_scale);
+			float alignment = 0.0f;
+			if (camera_forward.length_squared() > real_t(0.0001)) {
+				const Vector3 toward = global.xform(chunk.bounds.get_center()) - viewer_global;
+				if (toward.length_squared() > real_t(0.0001)) {
+					alignment = float(toward.normalized().dot(camera_forward));
+				}
+			}
+			TerrainStreamingPriorityPolicy::Candidate &priority = stream_order[i];
+			priority.index = i;
+			priority.score = TerrainStreamingPriorityPolicy::score(distance,
+					alignment, mesh_streaming_priority);
+			// Never favor an out-of-range cell ahead of a visible one.
+			const bool in_range = view_distance <= 0.0 || distance <= view_distance;
+			priority.missing_visible_mesh = in_range && !chunk.instance.is_valid();
+		}
+		stream_order.sort_custom<TerrainStreamingPriorityPolicy::Less>();
+	}
+
+	for (uint32_t stream_index = 0; stream_index < chunks.size(); stream_index++) {
+		Chunk &chunk = chunks[stream_order.is_empty() ?
+				stream_index : stream_order[stream_index].index];
 		// Distance from the viewer to the closest point of the chunk's box, in world units.
 		real_t distance = 0.0;
 		if (has_viewer) {
@@ -486,6 +526,7 @@ void ChunkedTerrain3D::_update_chunks(bool p_ignore_mesh_budget) {
 				lod = select_lod_by_pixel_error(errors, lod_count, distance,
 						projection_scale, pixel_error_tolerance, chunk.lod);
 			}
+			bool mesh_deferred = false;
 			if (lod != chunk.lod || !chunk.instance.is_valid()) {
 				const bool needs_mesh = !chunk.meshes[lod].is_valid();
 				bool may_build = true;
@@ -496,9 +537,10 @@ void ChunkedTerrain3D::_update_chunks(bool p_ignore_mesh_budget) {
 							elapsed, shared_mesh_budget_usec, shared_mesh_builds_this_frame);
 				}
 				if (!may_build) {
-					// Keep the existing visible LOD until its replacement
-					// can be generated. Newly streamed chunks retry next frame.
+					// Keep the existing visible LOD and shader morph weight
+					// until the replacement can be generated next frame.
 					pending_mesh_build_count++;
+					mesh_deferred = true;
 				} else {
 					_ensure_mesh(chunk, lod);
 					if (needs_mesh && time_sliced && chunk.meshes[lod].is_valid()) {
@@ -519,7 +561,7 @@ void ChunkedTerrain3D::_update_chunks(bool p_ignore_mesh_budget) {
 					}
 				}
 			}
-			if (chunk.instance.is_valid()) {
+			if (chunk.instance.is_valid() && !mesh_deferred) {
 				float target = 0.0f;
 				if (lod_geomorph_enabled && has_viewer && chunk.lod >= 0 && chunk.lod < lod_count - 1) {
 					// Pixel-based LOD morphs toward the next geometry level
@@ -784,6 +826,11 @@ void ChunkedTerrain3D::set_mesh_build_budget_usec(int p_usec) {
 	mesh_build_budget_usec = uint32_t(CLAMP(p_usec, 0, 20000));
 }
 
+void ChunkedTerrain3D::set_mesh_streaming_priority(int p_mode) {
+	// Reordering candidates never invalidates cached meshes or collision.
+	mesh_streaming_priority = CLAMP(p_mode, 0, 2);
+}
+
 void ChunkedTerrain3D::set_lod_geomorph_enabled(bool p_enabled) {
 	if (lod_geomorph_enabled == p_enabled) {
 		return;
@@ -1032,6 +1079,8 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_lod_pixel_error"), &ChunkedTerrain3D::get_lod_pixel_error);
 	ClassDB::bind_method(D_METHOD("set_mesh_build_budget_usec", "microseconds"), &ChunkedTerrain3D::set_mesh_build_budget_usec);
 	ClassDB::bind_method(D_METHOD("get_mesh_build_budget_usec"), &ChunkedTerrain3D::get_mesh_build_budget_usec);
+	ClassDB::bind_method(D_METHOD("set_mesh_streaming_priority", "mode"), &ChunkedTerrain3D::set_mesh_streaming_priority);
+	ClassDB::bind_method(D_METHOD("get_mesh_streaming_priority"), &ChunkedTerrain3D::get_mesh_streaming_priority);
 	ClassDB::bind_method(D_METHOD("get_pending_mesh_build_count"), &ChunkedTerrain3D::get_pending_mesh_build_count);
 	ClassDB::bind_method(D_METHOD("set_screen_space_lod_enabled", "enabled"), &ChunkedTerrain3D::set_screen_space_lod_enabled);
 	ClassDB::bind_method(D_METHOD("is_screen_space_lod_enabled"), &ChunkedTerrain3D::is_screen_space_lod_enabled);
@@ -1087,6 +1136,7 @@ void ChunkedTerrain3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_distance", PROPERTY_HINT_RANGE, "1,100000,1,or_greater,suffix:m"), "set_lod_distance", "get_lod_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_pixel_error", PROPERTY_HINT_RANGE, "0,20,0.1,or_greater,suffix:px"), "set_lod_pixel_error", "get_lod_pixel_error");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "mesh_build_budget_usec", PROPERTY_HINT_RANGE, "0,20000,100,suffix:us"), "set_mesh_build_budget_usec", "get_mesh_build_budget_usec");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "mesh_streaming_priority", PROPERTY_HINT_ENUM, "Original order,Nearest first,Camera facing"), "set_mesh_streaming_priority", "get_mesh_streaming_priority");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "screen_space_lod_enabled"), "set_screen_space_lod_enabled", "is_screen_space_lod_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_reference_fov", PROPERTY_HINT_RANGE, "1.01,178.99,0.1,degrees"), "set_lod_reference_fov", "get_lod_reference_fov");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lod_geometric_error_strength", PROPERTY_HINT_RANGE, "0,1,0.05"), "set_lod_geometric_error_strength", "get_lod_geometric_error_strength");
