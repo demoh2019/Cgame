@@ -98,6 +98,20 @@ TEST_CASE("[SceneTree][MultiMesh] Repeated visible instance counts preserve stat
 	CHECK(multimesh->get_visible_instance_count() == -1);
 }
 
+TEST_CASE("[SceneTree][MultiMesh] Physics interpolation quality updates only when changed") {
+	Ref<MultiMesh> multimesh;
+	multimesh.instantiate();
+
+	CHECK(multimesh->get_physics_interpolation_quality() == MultiMesh::INTERP_QUALITY_FAST);
+	multimesh->set_physics_interpolation_quality(MultiMesh::INTERP_QUALITY_FAST);
+	CHECK(multimesh->get_physics_interpolation_quality() == MultiMesh::INTERP_QUALITY_FAST);
+	multimesh->set_physics_interpolation_quality(MultiMesh::INTERP_QUALITY_HIGH);
+	multimesh->set_physics_interpolation_quality(MultiMesh::INTERP_QUALITY_HIGH);
+	CHECK(multimesh->get_physics_interpolation_quality() == MultiMesh::INTERP_QUALITY_HIGH);
+	multimesh->set_physics_interpolation_quality(MultiMesh::INTERP_QUALITY_FAST);
+	CHECK(multimesh->get_physics_interpolation_quality() == MultiMesh::INTERP_QUALITY_FAST);
+}
+
 } // namespace TestMultiMesh
 
 #endif // _3D_DISABLED

@@ -257,6 +257,9 @@ int MultiMesh::get_visible_instance_count() const {
 }
 
 void MultiMesh::set_physics_interpolation_quality(PhysicsInterpolationQuality p_quality) {
+	if (_physics_interpolation_quality == p_quality) {
+		return; // No need to resend unchanged interpolation quality to the renderer.
+	}
 	_physics_interpolation_quality = p_quality;
 	RenderingServer::get_singleton()->multimesh_set_physics_interpolation_quality(multimesh, (RSE::MultimeshPhysicsInterpolationQuality)p_quality);
 }
