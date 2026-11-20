@@ -133,6 +133,7 @@ const SUITES := [
 	"res://tests/test_raid_reinforcements.gd",
 	"res://tests/test_raid_phase.gd",
 	"res://tests/test_raid_recovery.gd",
+	"res://tests/test_raid_cone.gd",
 	"res://tests/test_world_persistence.gd",
 	"res://tests/test_world_backup.gd",
 	"res://tests/test_dismantle.gd",
