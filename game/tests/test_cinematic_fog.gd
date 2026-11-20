@@ -27,10 +27,16 @@ func run(t) -> void:
 		"quality tiers scale the expensive lighting grid")
 	t.check(int(lowest["froxel_size"]) == 0 and int(balanced["froxel_size"]) == 0,
 		"low-end profiles do not reserve a volumetric grid")
+	t.eq(float(high["gi_inject"]), 0.0,
+		"High avoids sampling SDFGI while lighting fog")
+	t.check(float(ultra["gi_inject"]) > 0.0 and float(ultra["gi_inject"]) <= 0.3,
+		"Ultra can receive subtle SDFGI light without washing out shadows")
 	for renderer in ["gl_compatibility", "mobile", "", "vulkan_compatibility"]:
 		for quality in 4:
 			t.check(not bool(CinematicFog.profile(quality, renderer)["enabled"]),
 				"non-Forward+ renderer never enables unsupported volumetrics")
+			t.eq(float(CinematicFog.profile(quality, renderer)["gi_inject"]), 0.0,
+				"fallback renderer never requests expensive volumetric GI")
 	t.eq(CinematicFog.profile(-10, "forward_plus")["length"], lowest["length"],
 		"negative tier clamps to Performance budget")
 	t.eq(CinematicFog.profile(99, "forward_plus")["length"], ultra["length"],
@@ -90,7 +96,7 @@ func run(t) -> void:
 	t.check(env.volumetric_fog_temporal_reprojection_amount < 0.9,
 		"history blend is limited to avoid ghost trails")
 	t.eq(env.volumetric_fog_gi_inject, 0.0,
-		"no expensive indirect-light injection runs when not requested")
+		"High avoids costly volumetric GI injection without SDFGI")
 	t.eq(sun.light_volumetric_fog_energy, 0.8,
 		"sun participates in scattering without increasing light count")
 	CinematicFog.apply_weather(env, 0.4, 0.08, 1.0, high, Color(0.4, 0.5, 0.6))
@@ -103,8 +109,25 @@ func run(t) -> void:
 	t.check(env.fog_height_density > 0.0,
 		"low-cost fallback haze remains active near sea level")
 	t.check(env.fog_sun_scatter >= 0.0, "sun shafts stay physically non-negative")
+	# A single shared SDFGI field lights the existing volumetric fog on Ultra.
+	# Test both opt-in and missing-GI fallbacks with real Environment resources.
+	env.sdfgi_enabled = true
+	CinematicFog.apply_profile(env, sun, ultra)
+	t.near(env.volumetric_fog_gi_inject, float(ultra["gi_inject"]), 0.00001,
+		"Ultra subtly injects off-screen bounced light into existing froxels")
+	CinematicFog.apply_profile(env, sun, ultra)
+	t.near(env.volumetric_fog_gi_inject, float(ultra["gi_inject"]), 0.00001,
+		"reapplying same preset does not accumulate indirect fog energy")
+	env.sdfgi_enabled = false
+	CinematicFog.apply_profile(env, sun, ultra)
+	t.eq(env.volumetric_fog_gi_inject, 0.0,
+		"without SDFGI, Ultra does not sample uninitialized GI data")
+	env.sdfgi_enabled = true
+	CinematicFog.apply_profile(env, sun, ultra)
 	CinematicFog.apply_profile(env, sun, balanced)
 	t.check(not env.volumetric_fog_enabled, "dropping quality disables volumetric pass")
+	t.eq(env.volumetric_fog_gi_inject, 0.0,
+		"disabling volumetric fog clears residual bounced light")
 	t.eq(env.volumetric_fog_density, 0.0,
 		"disabled volumetric data cannot continue scattering light")
 	t.eq(sun.light_volumetric_fog_energy, 0.0,
