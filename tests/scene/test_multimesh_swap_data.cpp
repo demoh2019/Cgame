@@ -214,6 +214,80 @@ TEST_CASE("[SceneTree][MultiMesh] Activate from zero-visible 2D prefix") {
 	CHECK(mm->get_visible_instance_count() == -1);
 }
 
+TEST_CASE("[SceneTree][MultiMesh] Batch remove unsorted indices preserves surviving full payload") {
+	Ref<MultiMesh> mm;
+	mm.instantiate();
+	mm->set_transform_format(MultiMesh::TRANSFORM_3D);
+	mm->set_use_colors(true);
+	mm->set_use_custom_data(true);
+	mm->set_instance_count(6);
+	for (int i = 0; i < 6; i++) {
+		mm->set_instance_transform(i, Transform3D(Basis(), Vector3(i, 0, 0)));
+		mm->set_instance_color(i, Color(i / 5.0, 0, 0, 1));
+		mm->set_instance_custom_data(i, Color(0, i / 5.0, 0, 1));
+	}
+
+	PackedInt32Array to_remove;
+	to_remove.push_back(1);
+	to_remove.push_back(4);
+	CHECK(mm->remove_visible_instances(to_remove) == 2);
+	CHECK(mm->get_visible_instance_count() == 4);
+	CHECK(mm->get_instance_count() == 6);
+	// Removing original #4 then #1 swaps original #5 into slot #1.
+	CHECK(mm->get_instance_transform(0).origin == Vector3(0, 0, 0));
+	CHECK(mm->get_instance_transform(1).origin == Vector3(5, 0, 0));
+	CHECK(mm->get_instance_transform(2).origin == Vector3(2, 0, 0));
+	CHECK(mm->get_instance_transform(3).origin == Vector3(3, 0, 0));
+	CHECK(mm->get_instance_color(1) == Color(1, 0, 0, 1));
+	CHECK(mm->get_instance_custom_data(1) == Color(0, 1, 0, 1));
+
+	PackedInt32Array empty;
+	CHECK(mm->remove_visible_instances(empty) == 0);
+	CHECK(mm->get_visible_instance_count() == 4);
+
+	PackedInt32Array duplicated;
+	duplicated.push_back(0);
+	duplicated.push_back(0);
+	PackedInt32Array hidden;
+	hidden.push_back(4);
+	PackedInt32Array mixed_invalid;
+	mixed_invalid.push_back(0);
+	mixed_invalid.push_back(6);
+	ERR_PRINT_OFF;
+	CHECK(mm->remove_visible_instances(duplicated) == -1);
+	CHECK(mm->remove_visible_instances(hidden) == -1);
+	CHECK(mm->remove_visible_instances(mixed_invalid) == -1);
+	ERR_PRINT_ON;
+	CHECK(mm->get_visible_instance_count() == 4);
+	CHECK(mm->get_instance_transform(1).origin == Vector3(5, 0, 0));
+
+	PackedInt32Array rest;
+	rest.push_back(2);
+	rest.push_back(0);
+	rest.push_back(3);
+	rest.push_back(1);
+	CHECK(mm->remove_visible_instances(rest) == 4);
+	CHECK(mm->get_visible_instance_count() == 0);
+}
+
+TEST_CASE("[SceneTree][MultiMesh] Batch removal works with partial visible 2D buffers") {
+	Ref<MultiMesh> mm;
+	mm.instantiate();
+	mm->set_transform_format(MultiMesh::TRANSFORM_2D);
+	mm->set_instance_count(4);
+	for (int i = 0; i < 4; i++) {
+		mm->set_instance_transform_2d(i, Transform2D(0.0, Vector2(i * 2, 0)));
+	}
+	mm->set_visible_instance_count(3);
+	PackedInt32Array indices;
+	indices.push_back(0);
+	indices.push_back(2);
+	CHECK(mm->remove_visible_instances(indices) == 2);
+	CHECK(mm->get_visible_instance_count() == 1);
+	CHECK(mm->get_instance_transform_2d(0).get_origin() == Vector2(2, 0));
+	CHECK(mm->get_instance_transform_2d(3).get_origin() == Vector2(6, 0));
+}
+
 } // namespace TestMultiMeshSwapData
 
 #endif // _3D_DISABLED

@@ -123,6 +123,16 @@
 				[b]Important:[/b] This is a low-level instance-pooling primitive. It does not restore a game entity's persistent ID, physics collision, or original transform automatically. Game code must track stable IDs and restore the desired payload to the chosen hidden instance before calling. When an instance is activated from a different hidden slot, hidden slot order changes.
 			</description>
 		</method>
+		<method name="remove_visible_instances">
+			<return type="int" />
+			<param index="0" name="instances" type="PackedInt32Array" />
+			<description>
+				Removes multiple currently visible instance indices from the active prefix, without changing [member instance_count]. The list may be unsorted; this method validates every index, rejects duplicates, then performs swap-removal from the [b]highest original index to the lowest[/b], preserving the requested set of removals. It copies and sorts the list internally.
+				Returns the number of instances removed, [code]0[/code] for an empty array, or [code]-1[/code] if any index is invalid, hidden, or repeated. Invalid input causes [b]no[/b] modifications. When [member visible_instance_count] is [code]-1[/code], all allocated instances are initially visible. Optional instance color and shader data are transferred together with their transforms.
+				[b]Important:[/b] Slot indices of surviving instances may change after removal. Track stable gameplay IDs separately. This call only changes rendering state; game collision and navigation must be handled elsewhere.
+				The batch validates and sorts indices in [code]O(K log K)[/code] time and performs [code]K[/code] individual renderer updates. It reduces script API crossings and safely handles unordered input, but does [b]not[/b] submit a single GPU batch command.
+			</description>
+		</method>
 		<method name="remove_visible_instance">
 			<return type="bool" />
 			<param index="0" name="instance" type="int" />

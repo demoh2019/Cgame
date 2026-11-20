@@ -356,6 +356,32 @@ bool MultiMesh::remove_visible_instance(int p_instance) {
 	return true;
 }
 
+int MultiMesh::remove_visible_instances(const PackedInt32Array &p_instances) {
+	const int active_count = visible_instance_count == -1 ? instance_count : visible_instance_count;
+	ERR_FAIL_COND_V_MSG(p_instances.size() > active_count, -1, "Cannot remove more instances than are visible.");
+	if (p_instances.is_empty()) {
+		return 0;
+	}
+
+	// Validate the complete input BEFORE changing rendering state.
+	// Process in descending index order so every index still refers to its
+	// original visible slot at the moment it is removed.
+	PackedInt32Array sorted = p_instances;
+	sorted.sort();
+	for (int i = 0; i < sorted.size(); i++) {
+		ERR_FAIL_INDEX_V_MSG(sorted[i], active_count, -1, "Only visible instance indices may be removed.");
+		if (i > 0) {
+			ERR_FAIL_COND_V_MSG(sorted[i] == sorted[i - 1], -1, "Duplicate instance indices are not allowed.");
+		}
+	}
+	for (int i = sorted.size() - 1; i >= 0; i--) {
+		if (!remove_visible_instance(sorted[i])) {
+			return -1;
+		}
+	}
+	return sorted.size();
+}
+
 bool MultiMesh::activate_hidden_instance(int p_hidden_instance) {
 	const int active_count = visible_instance_count == -1 ? instance_count : visible_instance_count;
 	ERR_FAIL_INDEX_V_MSG(p_hidden_instance, instance_count, false, "Instance index is out of bounds.");
@@ -459,6 +485,7 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_instance_custom_data", "instance"), &MultiMesh::get_instance_custom_data);
 	ClassDB::bind_method(D_METHOD("swap_instance_data", "first", "second"), &MultiMesh::swap_instance_data);
 	ClassDB::bind_method(D_METHOD("remove_visible_instance", "instance"), &MultiMesh::remove_visible_instance);
+	ClassDB::bind_method(D_METHOD("remove_visible_instances", "instances"), &MultiMesh::remove_visible_instances);
 	ClassDB::bind_method(D_METHOD("activate_hidden_instance", "hidden_instance"), &MultiMesh::activate_hidden_instance);
 	ClassDB::bind_method(D_METHOD("reset_instance_physics_interpolation", "instance"), &MultiMesh::reset_instance_physics_interpolation);
 	ClassDB::bind_method(D_METHOD("reset_instances_physics_interpolation"), &MultiMesh::reset_instances_physics_interpolation);
