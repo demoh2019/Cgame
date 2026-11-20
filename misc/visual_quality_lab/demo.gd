@@ -12,6 +12,7 @@ const BudgetGovernor = preload("res://addons/visual_quality/world_budget_governo
 const StreamingInspector = preload("res://addons/visual_quality/world_streaming_inspector.gd")
 const CharacterController = preload("res://addons/visual_quality/character_controller.gd")
 const ExplorationQuest = preload("res://addons/visual_quality/exploration_quest.gd")
+const InteractionRouter = preload("res://addons/visual_quality/world_interaction_router.gd")
 
 var controller: AdaptiveResolution3D
 var manager: VisualQualityManager
@@ -29,6 +30,9 @@ var last_export_result: String = ""
 var player_character: VisualLabCharacter3D
 var movement_label: Label
 var quest: ExplorationQuest3D
+var interaction_router: WorldInteractionRouter3D
+var interaction_label: Label
+var interaction_result_label: Label
 var quest_progress_label: Label
 var quest_hint_label: Label
 var sun_light: DirectionalLight3D
@@ -122,6 +126,16 @@ func _ready() -> void:
 	_build_movement_ui()
 	_build_world_state_ui()
 	_build_telemetry_ui()
+	interaction_router = InteractionRouter.new()
+	interaction_router.name = "WorldInteractionRouter3D"
+	interaction_router.streamer = streamer
+	interaction_router.quest = quest
+	interaction_router.player = player_character
+	interaction_router.camera = player_character.get_view_camera()
+	interaction_router.focused_action_changed.connect(_on_interaction_focus_changed)
+	interaction_router.interaction_completed.connect(_on_interaction_completed)
+	add_child(interaction_router)
+	_build_interaction_ui()
 	_on_quest_progress(quest.collected_count(), quest.positions.size())
 	_on_quest_hint(quest.current_hint())
 
@@ -452,6 +466,33 @@ func _export_cell_hotspots() -> void:
 	last_export_result = "Cell hotspots: %s" % (streaming_inspector.hotspot_csv_path
 		if result == OK else "export failed (%d)" % result)
 	_update_telemetry_ui(telemetry.get_latest())
+
+
+func _build_interaction_ui() -> void:
+	var ui: CanvasLayer = get_node("VisualQualityUI") as CanvasLayer
+	interaction_label = Label.new()
+	interaction_label.name = "WorldInteractionPrompt"
+	interaction_label.position = Vector2(18, 660)
+	interaction_label.add_theme_font_size_override("font_size", 19)
+	interaction_label.add_theme_color_override("font_color", Color(1.0, 0.94, 0.61))
+	ui.add_child(interaction_label)
+	interaction_result_label = Label.new()
+	interaction_result_label.name = "WorldInteractionFeedback"
+	interaction_result_label.position = Vector2(18, 692)
+	ui.add_child(interaction_result_label)
+	_on_interaction_focus_changed("", "")
+
+
+func _on_interaction_focus_changed(label: String, _stable_id: String) -> void:
+	if is_instance_valid(interaction_label):
+		interaction_label.text = ("H: %s" % label if not label.is_empty()
+			else "H: Посмотрите на предмет, маяк или стража")
+
+
+func _on_interaction_completed(_stable_id: String, success: bool, message: String) -> void:
+	if is_instance_valid(interaction_result_label):
+		interaction_result_label.text = message if success else "Действие недоступно"
+	_update_world_state_ui()
 
 
 func _build_world() -> void:
