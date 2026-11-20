@@ -100,6 +100,15 @@ void main() {
 	if (any(greaterThanEqual(pixel_pos, params.screen_size))) {
 		return;
 	}
+	// Geometric normals use up to two neighboring Hi-Z texels. At the
+	// screen border those texels do not exist; return transparent SSR and
+	// let sky/probes provide the physically plausible off-screen fallback.
+	if (any(lessThan(pixel_pos, ivec2(2))) ||
+			any(greaterThanEqual(pixel_pos, params.screen_size - ivec2(2)))) {
+		imageStore(output_color, pixel_pos, vec4(0.0));
+		imageStore(output_mip_level, pixel_pos, vec4(0.0));
+		return;
+	}
 
 	vec4 color = vec4(0.0);
 	float mip_level = 0.0;
@@ -120,13 +129,16 @@ void main() {
 		}
 		roughness /= (127.0 / 255.0);
 
-		// Do not compute SSR for rough materials to improve
-		// performance at the cost of subtle artifacting.
+		// Rough materials use sky/reflection probes instead of expensive
+		// screen rays. Fade out smoothly before the hard skip threshold,
+		// matching the reflection hierarchy used by Unreal/Unity HDRP.
+		// The branch still avoids ALL ray work for roughness >= 0.7.
 		if (roughness >= 0.7) {
 			imageStore(output_color, pixel_pos, vec4(0.0));
 			imageStore(output_mip_level, pixel_pos, vec4(0.0));
 			return;
 		}
+		float roughness_confidence = 1.0 - smoothstep(0.52, 0.70, roughness);
 
 		vec3 geom_normal = normalize(compute_geometric_normal(pixel_pos, screen_pos.z, pos, 0.5));
 
@@ -226,7 +238,11 @@ void main() {
 		reprojected_pos.z = cur_screen_pos.z;
 		reprojected_pos.w = 1.0;
 		reprojected_pos = scene_data.reprojection[params.view_index] * reprojected_pos;
-		reprojected_pos.xy = reprojected_pos.xy / reprojected_pos.w * 0.5 + 0.5;
+		// Reject degenerate previous-frame positions without invalid UV
+		// samples or NaN-dependent mip filtering on Metal/Vulkan.
+		bool valid_reprojection = abs(reprojected_pos.w) > 0.00001;
+		reprojected_pos.xy = valid_reprojection
+				? reprojected_pos.xy / reprojected_pos.w * 0.5 + 0.5 : vec2(-1.0);
 
 		// Instead of hard rejecting samples, write sample validity to the alpha channel.
 		// This allows invalid samples to write mip levels to let valid samples have smoother roughness transitions.
@@ -235,10 +251,18 @@ void main() {
 		// Hit validation logic is referenced from here:
 		// https://github.com/GPUOpen-Effects/FidelityFX-SSSR/blob/master/ffx-sssr/ffx_sssr.h
 
-		ivec2 cur_pixel_pos = ivec2(cur_screen_pos.xy * params.screen_size);
-
-		float hit_depth = texelFetch(source_hiz, cur_pixel_pos, 0).x;
-		if (t >= t_max || hit_depth == 0.0) {
+		// Hi-Z hits can leave the viewport near reflected scene borders.
+		// texelFetch outside an image is undefined on Metal/Vulkan; never
+		// request one, even if the hit is going to be rejected afterwards.
+		bool hit_in_bounds = all(greaterThanEqual(cur_screen_pos.xy, vec2(0.0))) &&
+				all(lessThan(cur_screen_pos.xy, vec2(1.0)));
+		ivec2 cur_pixel_pos = clamp(ivec2(cur_screen_pos.xy * params.screen_size),
+				ivec2(0), params.screen_size - ivec2(1));
+		float hit_depth = 0.0;
+		if (hit_in_bounds) {
+			hit_depth = texelFetch(source_hiz, cur_pixel_pos, 0).x;
+		}
+		if (!hit_in_bounds || t >= t_max || hit_depth == 0.0) {
 			validity = 0.0;
 		}
 
@@ -281,7 +305,15 @@ void main() {
 			fade = 1.0;
 		}
 
-		validity *= fade * margin_blend;
+		// Smoothly blend to the already-rendered sky/probe reflection as
+		// surface roughness approaches the ray budget cutoff. Preserve
+		// the SSR alpha contract used by the existing resolver.
+		validity *= fade * margin_blend * roughness_confidence;
+		if (!valid_reprojection ||
+				any(lessThan(reprojected_pos.xy, vec2(0.0))) ||
+				any(greaterThanEqual(reprojected_pos.xy, vec2(1.0)))) {
+			validity = 0.0;
+		}
 
 		if (validity > 0.0) {
 			color = vec4(textureLod(source_last_frame, reprojected_pos.xy, 0).xyz, 1.0) * validity;
