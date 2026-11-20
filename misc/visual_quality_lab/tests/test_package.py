@@ -87,12 +87,26 @@ class VisualQualityPackageTests(unittest.TestCase):
         self.assertIn('ChunkedFoliage.new()', (ROOT / 'demo.gd').read_text())
         self.assertIn('foliage.set_quality(profile)', (ROOT / 'demo.gd').read_text())
 
-    def test_demo_exploration_camera(self):
-        camera = (ROOT / 'addons/visual_quality/fly_camera.gd').read_text()
-        self.assertIn('extends Camera3D', camera)
-        self.assertIn('MOUSE_BUTTON_RIGHT', camera)
-        self.assertIn('direction.normalized()', camera)
-        self.assertIn('var camera: Camera3D = FlyCamera.new()', (ROOT / 'demo.gd').read_text())
+    def test_walkable_player_character_and_controls(self):
+        player = (ROOT / 'addons/visual_quality/character_controller.gd').read_text()
+        self.assertIn('extends CharacterBody3D', player)
+        for feature in ('move_and_slide()', 'floor_snap_length', 'is_on_floor()',
+                        'CapsuleShape3D.new()', 'jump_buffer_seconds', 'coyote_time_seconds',
+                        'step_horizontal_velocity', 'should_jump', 'MOTION_MODE_FLOATING',
+                        'MOTION_MODE_GROUNDED', 'KEY_SPACE', 'KEY_V', 'MOUSE_BUTTON_RIGHT'):
+            self.assertIn(feature, player)
+        demo = (ROOT / 'demo.gd').read_text()
+        self.assertIn('player_character = CharacterController.new()', demo)
+        self.assertIn('quest.player = player_character.get_view_camera()', demo)
+        self.assertIn('player_character.movement_mode_changed.connect', demo)
+
+    def test_ground_and_obstacles_have_collision(self):
+        demo = (ROOT / 'demo.gd').read_text()
+        for feature in ('GroundCollision', 'BoxShape3D.new()',
+                        'SphereShape3D.new()', 'StaticBody3D.new()',
+                        'ground_collision.shape', 'obstacle_shape.shape'):
+            self.assertIn(feature, demo)
+        self.assertNotIn('var camera: Camera3D = FlyCamera.new()', demo)
 
     def test_gameplay_quest_is_deterministic_and_persistent(self):
         source = (ROOT / 'addons/visual_quality/exploration_quest.gd').read_text()
@@ -113,7 +127,7 @@ class VisualQualityPackageTests(unittest.TestCase):
             self.assertIn(feature, demo)
 
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
