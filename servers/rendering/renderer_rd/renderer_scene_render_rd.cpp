@@ -1579,6 +1579,19 @@ void RendererSceneRenderRD::set_time(double p_time, double p_step) {
 }
 
 void RendererSceneRenderRD::screen_space_roughness_limiter_set_active(bool p_enable, float p_amount, float p_limit) {
+	// Game quality presets can reconfigure this renderer-native filter at runtime.
+	// Never propagate invalid or out-of-range values into the screen-space
+	// roughness pass, and skip redundant state changes on unchanged presets.
+	if (!Math::is_finite(p_amount) || !Math::is_finite(p_limit)) {
+		return;
+	}
+	p_amount = CLAMP(p_amount, 0.0f, 4.0f);
+	p_limit = CLAMP(p_limit, 0.01f, 1.0f);
+	if (screen_space_roughness_limiter == p_enable &&
+			screen_space_roughness_limiter_amount == p_amount &&
+			screen_space_roughness_limiter_limit == p_limit) {
+		return;
+	}
 	screen_space_roughness_limiter = p_enable;
 	screen_space_roughness_limiter_amount = p_amount;
 	screen_space_roughness_limiter_limit = p_limit;

@@ -19,6 +19,12 @@ common/physics_ticks_per_second=30
 
 [rendering]
 
+; Match the initial Balanced runtime native PBR highlight AA policy, so
+; first load does not reconfigure the renderer or blur any UI pixels.
+anti_aliasing/screen_space_roughness_limiter/enabled=true
+anti_aliasing/screen_space_roughness_limiter/amount=0.25
+anti_aliasing/screen_space_roughness_limiter/limit=0.18
+
 ; The default Balanced quality uses 2048/16-bit directional shadows.
 ; The runtime graphics preset changes atlas size/precision only when needed.
 ; This avoids first-frame 4096->2048 GPU reallocation on standard settings.
