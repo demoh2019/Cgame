@@ -232,6 +232,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# not declare a screen sampler, so it cannot force a buffer copy.
 		WaterRefraction.apply(water_shader, world_profile, _level, str(method))
 		water_shader.set_shader_parameter("ripple_strength", float(world_profile["water_ripples"]))
+		# Wind-driven water waves reuse the atmosphere's existing weather vector
+		# and the existing normal/whitecap calculations. No extra wave meshes.
+		water_shader.set_shader_parameter("wind_wave_strength",
+			float(world_profile["wind_wave_strength"]))
 		# Only high-frequency ocean detail is faded, not the large waves,
 		# shoreline transparency, Fresnel or the physically lit reflections.
 		water_shader.set_shader_parameter("detail_fade_start", float(world_profile["water_detail_start"]))
