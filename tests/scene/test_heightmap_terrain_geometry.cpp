@@ -266,6 +266,37 @@ TEST_CASE("[HeightmapTerrain] Screen-relative terrain LOD preserves pixels and F
 	CHECK(screen_lod_multiplier(720, 38, 179) == doctest::Approx(1.0));
 }
 
+TEST_CASE("[HeightmapTerrain] Geometric deviation preserves rocky ridges") {
+	// A planar hillside is exactly representable by any coarse triangular grid.
+	const Vector<real_t> plane = make_field(9, 9, [](int x, int z) {
+		return real_t(2 * x + 3 * z);
+	});
+	CHECK(chunk_lod_deviation(view(plane, 9, 9), 0, 0, 8, 4) == doctest::Approx(0.0));
+
+	// A narrow peak between the coarse corners would disappear at low LOD.
+	const Vector<real_t> peak = make_field(9, 9, [](int x, int z) {
+		return x == 2 && z == 2 ? real_t(8.0) : real_t(0.0);
+	});
+	const HeightField field = view(peak, 9, 9);
+	CHECK(chunk_lod_deviation(field, 0, 0, 8, 4) == doctest::Approx(8.0));
+	CHECK(chunk_lod_deviation(field, 0, 0, 8, 2) == doctest::Approx(8.0));
+	CHECK(chunk_lod_deviation(field, 0, 0, 8, 3) == doctest::Approx(0.0)); // Non-divisor.
+	CHECK(chunk_lod_deviation(field, 0, 0, 8, 1) == doctest::Approx(0.0));
+	CHECK(chunk_lod_deviation(HeightField(), 0, 0, 8, 4) == doctest::Approx(0.0));
+	CHECK(chunk_lod_deviation(field, 90, 90, 8, 4) == doctest::Approx(0.0));
+
+	// No quality influence when disabled; active mode adjusts geometric detail.
+	CHECK(geometric_error_lod_bias(0.0, 0.0) == doctest::Approx(1.0));
+	CHECK(geometric_error_lod_bias(8.0, 0.0) == doctest::Approx(1.0));
+	CHECK(geometric_error_lod_bias(0.0, 1.0) == doctest::Approx(0.72));
+	CHECK(geometric_error_lod_bias(8.0, 1.0) == doctest::Approx(1.65));
+	CHECK(geometric_error_lod_bias(2.0, 1.0) > 1.0);
+	CHECK(geometric_error_lod_bias(0.0, 0.5) < 1.0);
+	CHECK(geometric_error_lod_bias(-10.0, 1.0) == doctest::Approx(0.72));
+	CHECK(geometric_error_lod_bias(8.0, 9.0) == doctest::Approx(1.65));
+	CHECK(geometric_error_lod_bias(Math::INF, 1.0) == doctest::Approx(1.0));
+}
+
 TEST_CASE("[HeightmapTerrain] Chunk height range includes the far border samples") {
 	const Vector<real_t> data = make_field(9, 9, [](int x, int z) { return real_t(x == 4 && z == 4 ? 7 : (x == 0 ? -3 : 1)); });
 	const HeightField field = view(data, 9, 9);
