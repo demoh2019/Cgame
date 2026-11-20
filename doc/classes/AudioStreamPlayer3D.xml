@@ -13,6 +13,16 @@
 		<link title="Audio streams">$DOCS_URL/tutorials/audio/audio_streams.html</link>
 	</tutorials>
 	<methods>
+		<method name="advance_obstruction_amount">
+			<return type="float" />
+			<param index="0" name="target" type="float" />
+			<param index="1" name="delta" type="float" />
+			<param index="2" name="attack_seconds" type="float" default="0.08" />
+			<param index="3" name="release_seconds" type="float" default="0.22" />
+			<description>
+				Cgame extension: moves [member obstruction_amount] toward [param target] in a frame-rate-independent exponential curve. [param attack_seconds] determines how quickly a source becomes muffled, and [param release_seconds] determines how slowly it becomes clear again. Both durations must be positive and finite. The target is clamped between [code]0.0[/code] and [code]1.0[/code]; invalid values and negative time steps leave the current value unchanged. Small residual errors settle exactly to avoid repeated mixer updates. Returns the resulting obstruction, and uses the existing native gain and filter path without modifying the audio bus or performing geometry raycasts. Call this after your physics occlusion test, not from the audio mixing thread. A first-buffer obstruction can still be set instantly through [member obstruction_amount] before starting playback.
+			</description>
+		</method>
 		<method name="get_playback_position">
 			<return type="float" />
 			<description>
