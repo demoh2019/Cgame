@@ -762,6 +762,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			tonemap.lens_chromatic_aberration = environment_get_lens_chromatic_aberration(p_render_data->environment);
 			tonemap.lens_film_grain = environment_get_lens_film_grain(p_render_data->environment);
 			tonemap.lens_time = float(time);
+			tonemap.lens_flare = environment_get_lens_flare(p_render_data->environment);
 			tonemap.use_bcs = environment_get_adjustments_enabled(p_render_data->environment);
 			tonemap.brightness = environment_get_adjustments_brightness(p_render_data->environment);
 			tonemap.contrast = environment_get_adjustments_contrast(p_render_data->environment);

@@ -10,6 +10,7 @@ func run(t) -> void:
 		var low: Dictionary = GraphicsLens.settings(tier, "forward_plus")
 		t.eq(float(low["chromatic_aberration"]), 0.0, "tier %d skips chromatic aberration" % tier)
 		t.eq(float(low["film_grain"]), 0.0, "tier %d skips film grain" % tier)
+		t.eq(float(low["lens_flare"]), 0.0, "tier %d skips lens flare" % tier)
 	for method in ["gl_compatibility", "mobile"]:
 		var other: Dictionary = GraphicsLens.settings(3, method)
 		t.eq(float(other["film_grain"]), 0.0, "%s has no native lens pass" % method)
@@ -23,6 +24,8 @@ func run(t) -> void:
 	GraphicsLens.apply(env, 3, "forward_plus")
 	t.near(float(env.get("lens_chromatic_aberration")), float(ultra["chromatic_aberration"]), 0.001, "Ultra applies chromatic aberration")
 	t.near(float(env.get("lens_film_grain")), float(ultra["film_grain"]), 0.001, "Ultra applies film grain")
+	t.near(float(env.get("lens_flare")), float(ultra["lens_flare"]), 0.001, "Ultra applies lens flare")
+	t.check(float(ultra["lens_flare"]) <= 1.0, "lens flare stays subtle")
 	GraphicsLens.apply(env, 0, "forward_plus")
 	t.eq(float(env.get("lens_film_grain")), 0.0, "Performance turns grain back off")
 	env.set("lens_film_grain", 5.0)

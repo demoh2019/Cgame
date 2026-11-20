@@ -1413,8 +1413,9 @@
 			<param index="0" name="env" type="RID" />
 			<param index="1" name="chromatic_aberration" type="float" />
 			<param index="2" name="film_grain" type="float" />
+			<param index="3" name="lens_flare" type="float" />
 			<description>
-				Sets the camera lens effects. See [member Environment.lens_chromatic_aberration] and [member Environment.lens_film_grain] for more details.
+				Sets the camera lens effects. See [member Environment.lens_chromatic_aberration], [member Environment.lens_film_grain] and [member Environment.lens_flare] for more details.
 			</description>
 		</method>
 		<method name="environment_set_sdfgi">

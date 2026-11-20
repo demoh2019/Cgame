@@ -89,7 +89,7 @@ layout(push_constant, std430) uniform Params {
 	float lens_chromatic_aberration;
 	float lens_film_grain;
 	float lens_time;
-	float lens_pad;
+	float lens_flare;
 }
 params;
 
@@ -857,6 +857,28 @@ vec3 screen_space_dither(vec2 frag_coord, float bit_alignment_diviser) {
 	return (dither.rgb - 0.5) / bit_alignment_diviser;
 }
 
+// Image-based lens flare, as in Unreal Engine's bloom "Lens Flares" (after John Chapman's
+// pseudo lens flare): mirrored "ghosts" and a ring halo are built from the already
+// blurred, threshold-filtered glow texture, so no extra pass or bright-pass is needed.
+vec3 gather_lens_flare(vec2 uv) {
+	const vec3 GHOST_TINTS[4] = vec3[](vec3(1.0, 0.75, 0.55), vec3(0.6, 0.85, 1.0), vec3(0.85, 1.0, 0.7), vec3(1.0, 0.6, 0.9));
+	vec2 flipped = vec2(1.0) - uv;
+	vec2 ghost_step = (vec2(0.5) - flipped) * 0.37;
+	vec3 flare = vec3(0.0);
+	for (int i = 0; i < 4; i++) {
+		vec2 ghost_uv = flipped + ghost_step * float(i);
+		// Fade ghosts out towards the frame edges to avoid hard cut-offs.
+		float weight = pow(clamp(1.0 - length(vec2(0.5) - ghost_uv) * 1.41421356, 0.0, 1.0), 6.0);
+		flare += gather_glow(source_glow, clamp(ghost_uv, vec2(0.0), vec2(1.0))) * weight * GHOST_TINTS[i];
+	}
+	vec2 aspect = vec2(params.pixel_size.y / params.pixel_size.x, 1.0);
+	vec2 halo_dir = normalize((vec2(0.5) - flipped) * aspect + vec2(1e-5)) / aspect;
+	vec2 halo_uv = flipped + halo_dir * 0.42;
+	float halo_weight = pow(clamp(1.0 - length(vec2(0.5) - halo_uv) * 1.41421356, 0.0, 1.0), 5.0);
+	flare += gather_glow(source_glow, clamp(halo_uv, vec2(0.0), vec2(1.0))) * halo_weight * vec3(1.0, 0.9, 0.8);
+	return flare * params.lens_flare * 0.25;
+}
+
 void main() {
 #ifdef USE_MULTIVIEW
 	vec4 color = textureLod(source_color, vec3(uv_interp, ViewIndex), 0.0f);
@@ -898,7 +920,11 @@ void main() {
 	}
 
 	if (bool(params.flags & FLAG_USE_GLOW) && params.glow_mode != GLOW_MODE_SOFTLIGHT) {
-		vec3 glow = gather_glow(source_glow, uv_interp) * params.glow_intensity;
+		vec3 glow = gather_glow(source_glow, uv_interp);
+		if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && params.lens_flare > 0.0) {
+			glow += gather_lens_flare(uv_interp);
+		}
+		glow *= params.glow_intensity;
 		if (params.glow_map_strength > 0.001) {
 			glow = mix(glow, texture(glow_map, uv_interp).rgb * glow, params.glow_map_strength);
 		}
@@ -920,7 +946,11 @@ void main() {
 		// Apply soft light after tonemapping to mitigate the issue of discontinuity
 		// at 1.0 and higher. This makes the issue only appear with HDR output that
 		// can exceed a 1.0 output value.
-		vec3 glow = gather_glow(source_glow, uv_interp) * params.glow_intensity;
+		vec3 glow = gather_glow(source_glow, uv_interp);
+		if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && params.lens_flare > 0.0) {
+			glow += gather_lens_flare(uv_interp);
+		}
+		glow *= params.glow_intensity;
 		if (params.glow_map_strength > 0.001) {
 			glow = mix(glow, texture(glow_map, uv_interp).rgb * glow, params.glow_map_strength);
 		}

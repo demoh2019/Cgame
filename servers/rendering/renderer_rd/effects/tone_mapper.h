@@ -127,7 +127,7 @@ private:
 		float lens_chromatic_aberration; //  4 - 116
 		float lens_film_grain; //  4 - 120
 		float lens_time; //  4 - 124
-		float lens_pad; //  4 - 128
+		float lens_flare; //  4 - 128
 	};
 
 	struct TonemapPushConstantMobile {
@@ -218,6 +218,7 @@ public:
 		float lens_chromatic_aberration = 0.0;
 		float lens_film_grain = 0.0;
 		float lens_time = 0.0;
+		float lens_flare = 0.0;
 	};
 
 	void tonemapper(RID p_source_color, RID p_dst_framebuffer, const TonemapSettings &p_settings);

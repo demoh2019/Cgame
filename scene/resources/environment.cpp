@@ -1296,8 +1296,17 @@ float Environment::get_lens_film_grain() const {
 	return lens_film_grain;
 }
 
+void Environment::set_lens_flare(float p_amount) {
+	lens_flare = CLAMP(p_amount, 0.0f, 4.0f);
+	_update_lens_effects();
+}
+
+float Environment::get_lens_flare() const {
+	return lens_flare;
+}
+
 void Environment::_update_lens_effects() {
-	RS::get_singleton()->environment_set_lens_effects(environment, lens_chromatic_aberration, lens_film_grain);
+	RS::get_singleton()->environment_set_lens_effects(environment, lens_chromatic_aberration, lens_film_grain, lens_flare);
 }
 
 void Environment::_update_adjustment() {
@@ -1814,10 +1823,13 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_lens_chromatic_aberration"), &Environment::get_lens_chromatic_aberration);
 	ClassDB::bind_method(D_METHOD("set_lens_film_grain", "amount"), &Environment::set_lens_film_grain);
 	ClassDB::bind_method(D_METHOD("get_lens_film_grain"), &Environment::get_lens_film_grain);
+	ClassDB::bind_method(D_METHOD("set_lens_flare", "amount"), &Environment::set_lens_flare);
+	ClassDB::bind_method(D_METHOD("get_lens_flare"), &Environment::get_lens_flare);
 
 	ADD_GROUP("Lens", "lens_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_chromatic_aberration", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_lens_chromatic_aberration", "get_lens_chromatic_aberration");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_film_grain", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_lens_film_grain", "get_lens_film_grain");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lens_flare", PROPERTY_HINT_RANGE, "0.0,4.0,0.01"), "set_lens_flare", "get_lens_flare");
 
 	// Constants
 

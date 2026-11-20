@@ -241,6 +241,10 @@
 			Strength of animated film grain, applied after tonemapping. The grain is strongest in mid-tones and fades in deep shadows and highlights, and also hides banding in smooth gradients. [code]0.0[/code] disables the effect.
 			[b]Note:[/b] Only supported in the Forward+ rendering method.
 		</member>
+		<member name="lens_flare" type="float" setter="set_lens_flare" getter="get_lens_flare" default="0.0">
+			Strength of the image-based lens flare: tinted mirrored ghosts and a ring halo built from the glow buffer, so only areas bright enough to glow produce flares. Requires [member glow_enabled]. [code]0.0[/code] disables the effect.
+			[b]Note:[/b] Only supported in the Forward+ rendering method.
+		</member>
 		<member name="reflected_light_source" type="int" setter="set_reflection_source" getter="get_reflection_source" enum="Environment.ReflectionSource" default="0">
 			The reflected (specular) light source.
 		</member>

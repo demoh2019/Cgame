@@ -227,6 +227,7 @@ private:
 	// Lens effects
 	float lens_chromatic_aberration = 0.0;
 	float lens_film_grain = 0.0;
+	float lens_flare = 0.0;
 	void _update_lens_effects();
 
 protected:
@@ -470,6 +471,8 @@ public:
 	float get_lens_chromatic_aberration() const;
 	void set_lens_film_grain(float p_amount);
 	float get_lens_film_grain() const;
+	void set_lens_flare(float p_amount);
+	float get_lens_flare() const;
 
 	Environment();
 	~Environment();
