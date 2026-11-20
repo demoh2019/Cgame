@@ -26,6 +26,7 @@ var zombies: Dictionary = {}
 var barricades: Dictionary = {} # Nearby defenses from the server.
 var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
 var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
+var infected_snares: Dictionary = {} # Server-replicated temporary PvE traps.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
 var spit_zones: Dictionary = {} # Only the latest server-issued acid telegraphs.
 var acid_pools: Dictionary = {} # Replicated lingering ground hazards.
@@ -100,6 +101,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	zombies.clear()
 	for entity in snapshot["zombies"]:
 		zombies[entity["id"]] = entity
+	infected_snares.clear()
+	for entity in snapshot.get("infected_snares", []):
+		infected_snares[int(entity["id"])] = entity
 	decoys.clear()
 	for entity in snapshot.get("decoys", []):
 		decoys[int(entity["id"])] = entity
@@ -397,6 +401,11 @@ func build(point: Vector2) -> void:
 
 func repair(id: int) -> void:
 	net.c_repair.rpc_id(1, id)
+
+
+func place_infected_snare(point: Vector2) -> void:
+	if point.is_finite():
+		net.c_place_infected_snare.rpc_id(1, point.x, point.y)
 
 
 func throw_decoy(direction: Vector2) -> void:

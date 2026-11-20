@@ -601,6 +601,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.toggle_inventory()
 			KEY_C:
 				hud.toggle_crafting()
+			KEY_BACKSLASH:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					var dir: Vector2 = _aim_direction()
+					if dir.length_squared() < 0.0001:
+						dir = Vector2(sin(client.yaw), cos(client.yaw))
+					var site := Vector2(client.predicted.x, client.predicted.z) + dir * 2.8
+					client.place_infected_snare(site)
 			KEY_COMMA:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var decoy_direction: Vector2 = _aim_direction()

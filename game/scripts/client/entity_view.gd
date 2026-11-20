@@ -38,6 +38,8 @@ func update_from(client) -> void:
 		_touch("campfire:%d" % id, "campfire", client.campfires[id], seen)
 	for id in client.decoys:
 		_touch("decoy:%d" % id, "decoy", client.decoys[id], seen)
+	for id in client.infected_snares:
+		_touch("snare:%d" % id, "snare", client.infected_snares[id], seen)
 	if not client.raid_telegraph.is_empty():
 		_touch("raid_warning:%d" % int(client.raid_telegraph["id"]),
 			"raid_warning", client.raid_telegraph, seen)
@@ -149,6 +151,25 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		material.albedo_color = Color(0.6, 0.45, 0.27)
 		barricade.material_override = material
 		root.add_child(barricade)
+		return root
+	if kind == "snare":
+		var tripwire := MeshInstance3D.new()
+		var bar := BoxMesh.new()
+		bar.size = Vector3(1.8, 0.12, 0.22)
+		tripwire.mesh = bar
+		tripwire.position.y = 0.08
+		var metal := StandardMaterial3D.new()
+		metal.albedo_color = Color(0.78, 0.53, 0.22)
+		tripwire.material_override = metal
+		root.add_child(tripwire)
+		var label := Label3D.new()
+		label.name = "Label"
+		label.text = "SNARE"
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.font_size = 18
+		label.pixel_size = 0.006
+		label.position.y = 0.7
+		root.add_child(label)
 		return root
 	if kind == "decoy":
 		var clacker := MeshInstance3D.new()
@@ -279,7 +300,7 @@ func _process(delta: float) -> void:
 		var node: Node3D = _nodes[key]
 		var target: Dictionary = _targets[key]
 		node.position = node.position.lerp(target["position"], blend)
-		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire")):
+		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("snare") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			node.get_node("Model").update_motion(delta)
 

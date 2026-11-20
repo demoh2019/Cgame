@@ -220,6 +220,15 @@ func _build() -> void:
 		var heading := Vector2(sin(client.yaw), cos(client.yaw))
 		client.throw_decoy(heading))
 	inventory_box.add_child(decoy_button)
+	var snare_button := Button.new()
+	snare_button.name = "PlaceInfectedSnare"
+	snare_button.text = "Place infected tripwire (\\): roots one infected"
+	snare_button.tooltip_text = "Requires one crafted snare; outside safe zones, up to 3 deployed per survivor."
+	snare_button.pressed.connect(func() -> void:
+		var at: Vector3 = client.display_position()
+		var face := Vector2(sin(client.yaw), cos(client.yaw))
+		client.place_infected_snare(Vector2(at.x, at.z) + face * 2.8))
+	inventory_box.add_child(snare_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -903,6 +912,10 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				int(data.get("tier", 1)), int(data.get("served", 0))])
 		else:
 			say("Camp feast denied: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "infected_snare":
+		say("Tripwire placed: will root the first non-boss infected that steps on it." if bool(data.get("ok", false)) else
+			"Tripwire: " + str(data.get("reason", "rejected")))
 		return
 	if kind == "throw_decoy":
 		say("Decoy deployed: nearby idle infected investigate the sound." if bool(data.get("ok", false)) else

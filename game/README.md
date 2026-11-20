@@ -2360,6 +2360,47 @@ membership revocation. The Nakama integration suite
 replays, event collisions, independent victories, reload and server-key
 permissions. No Cgame engine modifications were necessary.
 
+
+## Survivor tripwire snares — tactical infected control in the wilderness
+
+The canonical `game/` adds a **field-craftable Infected Tripwire Snare**.
+Make one kit from **2 T1 wood, 2 T1 fiber, 1 scavenged scrap**, without
+a workbench. Place it **1.5–4 metres** away on traversable ground outside
+the safe settlement. The authoritative server rejects obstructed terrain,
+water, overlapping traps, positions under living players/infected, and
+nonfinite/out-of-range coordinates before consuming anything.
+
+A placed trap lasts **150 seconds** or until the **first ordinary or elite
+infected walks within 1.35 metres**. It is spent once, rooting ordinary
+infected for **3 seconds** or elites for **1.5 seconds**, without dealing
+damage, granting XP, changing PvP combat, or bypassing zombie aggro.
+Raid bosses are immune and do not consume traps. Rooted enemies can still
+attack if their existing target is within reach; the root only prevents
+movement. The root cannot count as being stuck against a destructible wall.
+
+Each survivor account may have at most **3 active snares**; the world cap
+is **64**. Account-based ownership survives a peer-ID change within the
+server session without exposing account identity to other players.
+Trap positions are visible to nearby players through bounded public
+snapshots, but ownership and absolute expiration clocks stay server-only.
+Trap objects are session-limited world devices, not serialized as owned
+gear or saved in the survivor's Nakama character.
+
+Controls: local preview **backslash (\\)** plants a kit 2.8m ahead;
+online **backslash** or the inventory's **Place infected tripwire**
+button sends the desired point to the existing authenticated network
+server. The multiplayer world renders low-profile tripwire meshes and
+labels; traps disappear when triggered or expired.
+
+The new shared `scripts/shared/infected_snare.gd` defines placement,
+trigger, lifetime, public state and caps; `scripts/shared/zombie.gd`
+implements temporary movement rooting; `GameServer` owns consumption,
+triggers and expiry; network/client/HUD/entity view provide gameplay.
+`game/tests/test_infected_snare.gd` is part of `tests/run_all.gd` and
+covers paid craft/placement, spatial rejection, visibility/privacy,
+normal/elite/boss interactions, wall-safe immobilization and expiry.
+Existing Godot APIs support the mechanic without native-engine patches.
+
 ## Corrosive infected can damage player-built barricades
 
 Lingering acid from a dangerous-zone spitter now **corrodes nearby
