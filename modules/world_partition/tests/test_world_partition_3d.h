@@ -51,6 +51,11 @@ TEST_CASE("[WorldPartition3D] Defaults") {
 	CHECK(partition->get_unload_radius() == 2);
 	CHECK(partition->get_max_new_requests_per_frame() == 2);
 	CHECK(partition->get_max_instances_per_frame() == 2);
+	CHECK(partition->get_max_instantiation_time_ms() == 0.0);
+	partition->set_max_instantiation_time_ms(2.5);
+	CHECK(partition->get_max_instantiation_time_ms() == 2.5);
+	partition->set_max_instantiation_time_ms(0.0);
+	CHECK(partition->get_max_instantiation_time_ms() == 0.0);
 	CHECK(partition->get_max_concurrent_requests() == 8);
 	CHECK(partition->is_streaming_enabled());
 	CHECK(partition->get_configured_cell_count() == 0);
