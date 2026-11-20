@@ -1544,6 +1544,11 @@ void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buf
 }
 
 void RenderForwardClustered::_process_sscs(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection *p_projections, const Transform3D &p_transform, const LocalVector<int> &p_contact_shadows, const RenderShadowData *p_render_shadows, const float p_taa_frame_count) {
+	// No eligible directional lights: leave the temporary SSCS texture
+	// unallocated. Common on low-end graphics presets and in previews.
+	if (p_contact_shadows.is_empty()) {
+		return;
+	}
 	ERR_FAIL_NULL(ss_effects);
 	ERR_FAIL_COND(p_render_buffers.is_null());
 
