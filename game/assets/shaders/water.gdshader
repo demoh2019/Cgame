@@ -34,6 +34,9 @@ uniform float wind_wave_strength = 0.0;
 // Godot's built-in anisotropic BRDF handles direct lights and IBL without
 // another reflection pass or any new texture sample.
 uniform float wind_anisotropy_strength = 0.0;
+// Premium water only: wind-advected foam ribbons share the existing wave
+// slope, depth, and weather fields. Disabled in low-end compiled variants.
+uniform float wind_foam_strength = 0.0;
 #endif
 uniform float detail_fade_start = 65.0;
 uniform float detail_fade_end = 125.0;
@@ -186,6 +189,32 @@ void fragment() {
 	float storm_whitecaps = crest * storm * min(ripple_strength * 1.2, 0.55)
 		* smoothstep(0.2, 1.2, thickness);
 	foam = clamp(foam + storm_whitecaps, 0.0, 1.0);
+#ifdef WATER_REFRACTION
+	// Long, broken foam ribbons appear in windy water, as in high-end
+	// water rendering. One low-cost analytic pattern, no new textures,
+	// depth samples, transparencies or simulation buffers.
+	// World-space wind direction guarantees streaks travel with weather
+	// rather than moving when the camera or screen resolution changes.
+	if (wind_foam_strength > 0.001 && detail_fade > 0.001
+			&& aa_vegetation_wind.z > 0.22 && thickness > 0.65) {
+		vec2 foam_wind_dir = normalize(aa_vegetation_wind.xy);
+		float foam_wind_power = smoothstep(0.20, 0.85,
+			clamp(aa_vegetation_wind.z, 0.0, 1.0));
+		float along_wind = dot(p, foam_wind_dir);
+		float across_wind = dot(p, vec2(-foam_wind_dir.y, foam_wind_dir.x));
+		float advect_phase = along_wind * 2.4
+			- t * (1.4 + 0.7 * foam_wind_power);
+		float ribbon_wave = sin(advect_phase + 0.44 * sin(across_wind * 1.5));
+		float breakup_wave = sin(across_wind * 6.6
+			+ along_wind * 0.4 - t * 0.25);
+		float ribbon_mask = smoothstep(0.62, 0.88, ribbon_wave)
+			* smoothstep(-0.2, 0.5, breakup_wave);
+		float wind_foam = ribbon_mask * (0.3 + 0.7 * crest)
+			* foam_wind_power * wind_foam_strength * detail_fade
+			* (0.45 + 0.55 * storm) * smoothstep(0.65, 2.0, thickness);
+		foam = clamp(foam + wind_foam, 0.0, 1.0);
+	}
+#endif
 	color = mix(color * (1.0 - storm * 0.10), vec3(0.95, 0.98, 1.0), foam);
 	// Low-cost animated shallow-water glints. No screen-texture, extra render pass,
 	// caustic texture or per-pixel shoreline noise on Performance/Balanced.
