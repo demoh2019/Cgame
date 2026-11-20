@@ -77,6 +77,27 @@ TEST_CASE("[SceneTree][MultiMeshInstance3D] Reassigning the same MultiMesh is sa
 	memdelete(instance);
 }
 
+
+TEST_CASE("[SceneTree][MultiMesh] Repeated visible instance counts preserve state") {
+	Ref<MultiMesh> multimesh;
+	multimesh.instantiate();
+	multimesh->set_transform_format(MultiMesh::TRANSFORM_3D);
+	multimesh->set_instance_count(4);
+	CHECK(multimesh->get_visible_instance_count() == -1);
+
+	multimesh->set_visible_instance_count(2);
+	CHECK(multimesh->get_visible_instance_count() == 2);
+	multimesh->set_visible_instance_count(2);
+	CHECK(multimesh->get_visible_instance_count() == 2);
+
+	multimesh->set_visible_instance_count(0);
+	multimesh->set_visible_instance_count(0);
+	CHECK(multimesh->get_visible_instance_count() == 0);
+	multimesh->set_visible_instance_count(-1);
+	multimesh->set_visible_instance_count(-1);
+	CHECK(multimesh->get_visible_instance_count() == -1);
+}
+
 } // namespace TestMultiMesh
 
 #endif // _3D_DISABLED

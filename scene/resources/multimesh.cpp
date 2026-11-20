@@ -245,6 +245,9 @@ int MultiMesh::get_instance_count() const {
 void MultiMesh::set_visible_instance_count(int p_count) {
 	ERR_FAIL_COND(p_count < -1);
 	ERR_FAIL_COND(p_count > instance_count);
+	if (visible_instance_count == p_count) {
+		return; // Avoid a redundant renderer command when visibility is unchanged.
+	}
 	RenderingServer::get_singleton()->multimesh_set_visible_instances(multimesh, p_count);
 	visible_instance_count = p_count;
 }
