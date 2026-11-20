@@ -304,6 +304,45 @@ Color MultiMesh::get_instance_custom_data(int p_instance) const {
 	return RenderingServer::get_singleton()->multimesh_instance_get_custom_data(multimesh, p_instance);
 }
 
+bool MultiMesh::swap_instance_data(int p_first, int p_second) {
+	ERR_FAIL_INDEX_V_MSG(p_first, instance_count, false, "First instance index is out of bounds.");
+	ERR_FAIL_INDEX_V_MSG(p_second, instance_count, false, "Second instance index is out of bounds.");
+	if (p_first == p_second) {
+		return true;
+	}
+
+	if (transform_format == TRANSFORM_3D) {
+		const Transform3D first = get_instance_transform(p_first);
+		const Transform3D second = get_instance_transform(p_second);
+		set_instance_transform(p_first, second);
+		set_instance_transform(p_second, first);
+	} else {
+		const Transform2D first = get_instance_transform_2d(p_first);
+		const Transform2D second = get_instance_transform_2d(p_second);
+		set_instance_transform_2d(p_first, second);
+		set_instance_transform_2d(p_second, first);
+	}
+
+	if (use_colors) {
+		const Color first_color = get_instance_color(p_first);
+		const Color second_color = get_instance_color(p_second);
+		set_instance_color(p_first, second_color);
+		set_instance_color(p_second, first_color);
+	}
+
+	if (use_custom_data) {
+		const Color first_data = get_instance_custom_data(p_first);
+		const Color second_data = get_instance_custom_data(p_second);
+		set_instance_custom_data(p_first, second_data);
+		set_instance_custom_data(p_second, first_data);
+	}
+
+	// Swap-removal is a teleport for both slots, not a movement to interpolate.
+	reset_instance_physics_interpolation(p_first);
+	reset_instance_physics_interpolation(p_second);
+	return true;
+}
+
 void MultiMesh::reset_instance_physics_interpolation(int p_instance) {
 	ERR_FAIL_INDEX_MSG(p_instance, instance_count, "Instance index out of bounds. Instance index must be less than `instance_count` and greater than or equal to zero.");
 	RenderingServer::get_singleton()->multimesh_instance_reset_physics_interpolation(multimesh, p_instance);
@@ -386,6 +425,7 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_instance_color", "instance"), &MultiMesh::get_instance_color);
 	ClassDB::bind_method(D_METHOD("set_instance_custom_data", "instance", "custom_data"), &MultiMesh::set_instance_custom_data);
 	ClassDB::bind_method(D_METHOD("get_instance_custom_data", "instance"), &MultiMesh::get_instance_custom_data);
+	ClassDB::bind_method(D_METHOD("swap_instance_data", "first", "second"), &MultiMesh::swap_instance_data);
 	ClassDB::bind_method(D_METHOD("reset_instance_physics_interpolation", "instance"), &MultiMesh::reset_instance_physics_interpolation);
 	ClassDB::bind_method(D_METHOD("reset_instances_physics_interpolation"), &MultiMesh::reset_instances_physics_interpolation);
 	ClassDB::bind_method(D_METHOD("set_custom_aabb", "aabb"), &MultiMesh::set_custom_aabb);

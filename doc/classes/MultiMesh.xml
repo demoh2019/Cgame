@@ -113,6 +113,16 @@
 				Sets the [Transform2D] for a specific instance.
 			</description>
 		</method>
+		<method name="swap_instance_data">
+			<return type="bool" />
+			<param index="0" name="first" type="int" />
+			<param index="1" name="second" type="int" />
+			<description>
+				Swaps the complete payload of two instances: their [Transform3D] or [Transform2D], instance color (if [member use_colors] is enabled), and per-instance custom data (if [member use_custom_data] is enabled). Returns [code]true[/code] on success; invalid indices return [code]false[/code] without changing any instance. Passing the same index twice succeeds without modifying anything.
+				This method can be used for constant-time, order-independent removal from an active prefix: swap the unwanted index with the last visible slot, then decrease [member visible_instance_count]. The method itself does [b]not[/b] change the instance count, visible count, or persistent game entity IDs. It resets physics interpolation of the swapped slots to avoid visual trails.
+				[b]Note:[/b] In-memory slot indices are not persistent entity identifiers when swap-removal is used. Maintain a separate mapping from stable game IDs to current indices. This helper does not perform culling, collision or allocation changes.
+			</description>
+		</method>
 	</methods>
 	<members>
 		<member name="buffer" type="PackedFloat32Array" setter="set_buffer" getter="get_buffer" default="PackedFloat32Array()">
