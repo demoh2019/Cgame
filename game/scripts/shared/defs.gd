@@ -377,6 +377,12 @@ static func _build_items() -> void:
 		"weight": 0.2, "value": 28})
 	_add_recipe("prospecting_chart", "prospecting_chart", 1,
 		{"cloth_1": 1, "scrap": 2, "stone_1": 1}, "", 3.0)
+	# A real chart can reveal a rare deposit to authenticated party members.
+	_add_item("surveyor_signal", {"name": "Cooperative Mineral Signal",
+		"kind": "survey_signal", "tier": 1, "stack": 10,
+		"weight": 0.3, "value": 29})
+	_add_recipe("surveyor_signal", "surveyor_signal", 1,
+		{"scrap": 2, "cloth_1": 1, "charcoal_filter": 1}, "", 3.0)
 	# Mining specialisation: three paid T2+ ore/rock bonuses, but louder work.
 	_add_item("mining_wedges", {"name": "Reinforced Mining Wedges",
 		"kind": "mining_wedges", "tier": 2, "stack": 5,
