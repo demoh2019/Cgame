@@ -108,3 +108,7 @@ func run(t) -> void:
 		"the real graphics controller exposes environment-aware GI")
 	t.check(online_source.contains("GraphicsQuality.update_dynamic_sdfgi(environment, underground)"),
 		"the playable online scene updates GI on actual dungeon transitions")
+	var solo_source: String = FileAccess.get_file_as_string(
+		"res://scripts/client/client_main.gd")
+	t.check(solo_source.contains("GraphicsQuality.update_dynamic_sdfgi(_world_environment"),
+		"offline client applies the same dungeon visibility policy")
