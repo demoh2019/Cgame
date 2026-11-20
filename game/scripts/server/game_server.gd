@@ -17,6 +17,7 @@ const PvPHonor = preload("res://scripts/shared/pvp_honor.gd")
 const OutlawBounty = preload("res://scripts/shared/outlaw_bounty.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
+const PartyFocus = preload("res://scripts/shared/party_focus.gd")
 const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
@@ -1353,6 +1354,30 @@ func cmd_party_rally(peer_id: int) -> Dictionary:
 		return {"ok": false, "reason": "dead"}
 	# Position comes from the authoritative player model, not any RPC argument.
 	return parties.mark_rally(peer_id, player.position, time)
+
+
+## Leader marks the closest currently living infected in real server space.
+## No client-specified target, range, damage, position or enemy identity.
+func cmd_party_focus(peer_id: int) -> Dictionary:
+	var leader: Player = players.get(peer_id)
+	if leader == null or not _alive(leader):
+		return {"ok": false, "reason": "dead"}
+	var reason: String = parties.focus_reason(peer_id, time)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	var best_id: int = -1
+	var best_distance: float = INF
+	for enemy in zombies.values():
+		if not enemy.is_alive() or not PartyFocus.in_range(leader.position, enemy.position):
+			continue
+		var distance: float = Vector2(leader.position.x - enemy.position.x,
+			leader.position.z - enemy.position.z).length_squared()
+		if distance < best_distance - 0.0001 or (absf(distance - best_distance) <= 0.0001 and (best_id < 0 or enemy.id < best_id)):
+			best_id = enemy.id
+			best_distance = distance
+	if best_id < 0:
+		return {"ok": false, "reason": "no_infected_nearby"}
+	return parties.start_focus(peer_id, best_id, time)
 
 
 func _party_state_for(peer_id: int) -> Dictionary:
@@ -3202,6 +3227,11 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		var physically_owned: bool = equipped_weapon != "" and attacker.inventory.count(equipped_weapon) > 0
 		damage = Combat.against_infected(damage, equipped_weapon, physically_owned)
 		damage *= 1.0 + attacker.skills.bonus("zombie_damage")
+		# A modest PvE-only team bonus: exact marked infected and living
+		# party member in range. Never applied to player-vs-player attacks.
+		damage = PartyFocus.damage(damage, zombie.is_alive() and _alive(attacker) and
+			PartyFocus.in_range(attacker.position, zombie.position) and
+			parties.has_focus(attacker.id, zombie.id, time))
 		# Only real, positive, server-applied hits can qualify for group XP.
 		if damage > 0.0 and zombie.is_alive() and (zombie.contributors.size() < 16 or zombie.contributors.has(attacker.id)):
 			var equipped: String = attacker.inventory.weapon
@@ -3361,6 +3391,7 @@ func _party_award_assists(killer: Player, zombie) -> void:
 
 
 func _on_zombie_death(zombie, killer: Player) -> void:
+	parties.clear_focus_target(zombie.id)
 	var zone: int = world.zone_at(zombie.position.x, zombie.position.z)
 	var loot_rng := RandomNumberGenerator.new()
 	loot_rng.seed = WorldGen.mix(zombie.id, int(time * 10.0), world.world_seed, 5)
@@ -3426,6 +3457,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.chain_wrap_seconds = 0.0
 	parties.clear_standard_by(victim.id)
 	parties.cancel_ready_check_for(victim.id)
+	parties.cancel_focus_by(victim.id)
 	victim.meal_seconds = 0.0
 	victim.meal_tier = 0
 	victim.defense_target = -1
