@@ -54,6 +54,8 @@ private:
 		RID instance;
 		RID meshes[MAX_LOD];
 		int lod = -1;
+		// Cached maximum world-height error for each LOD.
+		real_t lod_errors[MAX_LOD] = {};
 		bool visible = false;
 #ifndef PHYSICS_3D_DISABLED
 		RID body;
@@ -76,6 +78,8 @@ private:
 	int chunk_quads = 32;
 	int lod_count = 4;
 	real_t lod_distance = 128.0;
+	// 0 preserves the existing distance-only LOD behavior.
+	real_t lod_pixel_error = 0.0;
 	real_t view_distance = 0.0;
 	real_t skirt_depth = 4.0;
 	Ref<Material> material;
@@ -139,6 +143,8 @@ public:
 	int get_lod_count() const { return lod_count; }
 	void set_lod_distance(real_t p_distance);
 	real_t get_lod_distance() const { return lod_distance; }
+	void set_lod_pixel_error(real_t p_pixels);
+	real_t get_lod_pixel_error() const { return lod_pixel_error; }
 	void set_view_distance(real_t p_distance);
 	real_t get_view_distance() const { return view_distance; }
 	void set_skirt_depth(real_t p_depth);

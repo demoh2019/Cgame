@@ -288,4 +288,22 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Custom normals support seam continuity 
 	memdelete(terrain);
 }
 
+
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Pixel error is runtime configurable without replacing height data") {
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	terrain->set_lod_count(3);
+	terrain->force_update();
+	CHECK(terrain->get_lod_pixel_error() == doctest::Approx(0.0));
+	terrain->set_lod_pixel_error(2.5);
+	CHECK(terrain->get_lod_pixel_error() == doctest::Approx(2.5));
+	CHECK(terrain->get_chunk_count() == 4);
+	terrain->set_lod_pixel_error(-8.0);
+	CHECK(terrain->get_lod_pixel_error() == doctest::Approx(0.0));
+	terrain->set_lod_pixel_error(Math::INF);
+	CHECK(terrain->get_lod_pixel_error() == doctest::Approx(0.0));
+	CHECK(terrain->get_height_dimensions() == Vector2i(65, 65));
+	memdelete(terrain);
+}
+
 } // namespace TestChunkedTerrain3D
