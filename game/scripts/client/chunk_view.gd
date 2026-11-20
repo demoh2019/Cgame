@@ -632,6 +632,11 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.skirt_depth = 3.0
 	_terrain.collision_enabled = false # The server decides where players can stand.
 	_terrain.cast_shadows = false
+	# Native ChunkedTerrain3D uses raw RenderingServer RIDs, not
+	# GeometryInstance3D; explicitly include the static heightfield in
+	# optional Ultra SDFGI. No extra cascades or shadow atlas allocations
+	# exist on Performance/Balanced/High.
+	_terrain.contribute_to_gi = true
 	_terrain.update_interval = 0.16 if terrain_geomorph_enabled else 0.5
 	_terrain.material = _ground_with_roads(origin)
 	_terrain.set_height_data(heights, Vector2i(SAMPLES, SAMPLES))
