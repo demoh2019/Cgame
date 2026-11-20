@@ -95,7 +95,7 @@ func _on_layer_state_changed(layer: String, enabled: bool) -> void:
 # Explicit gameplay mutations should publish their new serialized state.
 var hub: Node3D = world.get_cell_instance(Vector2i(0, 0))
 if hub != null and hub.has_method("capture_streaming_state"):
-    world.set_cell_state(Vector2i(0, 0), hub.capture_streaming_state())
+    world.set_cell_state(Vector2i(0, 0), hub.call("capture_streaming_state"))
 ```
 
 The signal is not a global bus and does not observe every property of every
