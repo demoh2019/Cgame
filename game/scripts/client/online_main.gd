@@ -660,6 +660,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_quick_use("field_antiseptic")
 			KEY_7:
 				_quick_use("antibiotics")
+			KEY_F9:
+				_quick_use("herbal_poultice")
 			KEY_8:
 				_quick_use("thermal_wrap")
 			KEY_PERIOD:

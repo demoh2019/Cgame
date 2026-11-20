@@ -360,6 +360,15 @@ static func _build_items() -> void:
 		"stack": 5, "weight": 0.2, "value": 18})
 	_add_recipe("herbal_scent_mask", "herbal_scent_mask", 1,
 		{"fiber_1": 2, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# Forest and swamp foraging yields tradeable medicinal plants. These are
+	# rarer than ordinary fiber/berries and have no independent client action.
+	_add_item("wild_herbs", {"name": "Wild Medicinal Herbs", "kind": "resource",
+		"tier": 1, "stack": 20, "weight": 0.15, "value": 8})
+	_add_item("herbal_poultice", {"name": "Field Herbal Poultice",
+		"kind": "medical", "tier": 1, "heal": 10.0, "cure": 18.0,
+		"stop_bleeding": true, "stack": 5, "weight": 0.30, "value": 30})
+	_add_recipe("herbal_poultice", "herbal_poultice", 1,
+		{"wild_herbs": 2, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
 	_add_item("field_splint", {"name": "Field Splint", "kind": "medical",
 		"fracture_treatment": 100.0, "stack": 5, "value": 24, "weight": 0.6})
 	_add_recipe("field_splint", "field_splint", 1,

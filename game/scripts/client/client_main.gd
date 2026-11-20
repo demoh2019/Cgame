@@ -101,6 +101,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_skill", KEY_G)
 	_bind_key("survive_dodge", KEY_SPACE)
 	_bind_key("survive_parry", KEY_F8)
+	_bind_key("survive_poultice", KEY_F9)
 	_bind_key("survive_craft", KEY_C)
 	_bind_key("survive_quick_cook", KEY_0)
 	_bind_key("survive_next_recipe", KEY_TAB)
@@ -871,6 +872,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Clean wound", sim.cmd_use(LOCAL_PLAYER_ID, "field_antiseptic"))
 	elif event.is_action_pressed("survive_antibiotics"):
 		_result("Antibiotics", sim.cmd_use(LOCAL_PLAYER_ID, "antibiotics"))
+	elif event.is_action_pressed("survive_poultice"):
+		_result("Herbal poultice", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_poultice"))
 	elif event.is_action_pressed("survive_warmth"):
 		_result("Heat pack", sim.cmd_use(LOCAL_PLAYER_ID, "thermal_wrap"))
 	elif event.is_action_pressed("survive_stim"):
@@ -1111,6 +1114,7 @@ func _update_hud() -> void:
 	if not fishing_status.is_empty():
 		_instructions.text += "\n" + fishing_status
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
+	_instructions.text += "\nF9 herbal poultice: treat wounds and mild infection; forage wild herbs from forest/swamp plants"
 	_instructions.text += "\nF4 ride / dismount crafted Trail Bike (workbench T2; no combat or gathering while riding)"
 	_instructions.text += "\nField snares active: %d | roots first non-boss infected for 3s" % sim.infected_snares.size()
 	var scent_radius: float = BloodScent.detection_radius(survivor.survival.bleeding,

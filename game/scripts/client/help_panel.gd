@@ -9,7 +9,7 @@ const ENTRIES := [
 		["E", "gather / open crate / take loot"], ["C", "crafting window"], ["0", "quick-cook best fish"],
 		["T", "cast fishing rod (Shift: baited)"], ["I / Tab", "inventory (click: use or equip; right click: stash)"], ["B", "stash (at the hub)"]]],
 	["SURVIVE", [
-		["1", "eat"], ["2", "drink bottle"], ["3", "bandage"], ["6", "antiseptic"], ["7", "antibiotics"], ["8", "heat pack"],
+		["1", "eat"], ["2", "drink bottle"], ["3", "bandage"], ["6", "antiseptic"], ["7", "antibiotics"], ["8", "heat pack"], ["F9", "herbal poultice"],
 		["F / R", "drink from a lake (filter prevents infection)"], [".", "frontier stim"], ["/", "scent salve"], [";", "spore filter"], ["Z", "rest at the hub or a fire"]]],
 	["BUILD AND DEFEND", [
 		["U", "build barricade"], ["H", "repair"], ["Y", "upgrade"], ["X", "dismantle"], ["O", "light campfire"],

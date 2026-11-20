@@ -48,6 +48,7 @@ const Evasion = preload("res://scripts/shared/evasion.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
+const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
@@ -3912,6 +3913,16 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	var ordinary_amount: int = amount
 	amount += outpost_bonus
 	var left: int = player.inventory.add(item_id, amount)
+	# One optional medicinal plant per actual successful bush/berry harvest.
+	# The server reads biome and risk from the generated world itself. A full
+	# bag, an invalid habitat, and exhausted nodes cannot mint extra supplies.
+	var herbs_added: int = 0
+	if amount - left > 0:
+		var found_herb: String = HerbalForaging.roll(String(node["kind"]),
+			world.biome_at(float(node["x"]), float(node["z"])),
+			world.zone_at(float(node["x"]), float(node["z"])), rng)
+		if found_herb != "" and player.inventory.add(found_herb, 1) == 0:
+			herbs_added = 1
 	# Never advertise an outpost bonus if a full bag could not accept it.
 	var paid_outpost_bonus: int = mini(outpost_bonus, maxi(0, amount - left - ordinary_amount))
 	if gather_skill != "" and amount - left > 0:
@@ -3923,7 +3934,8 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	player.action = {}
 	depleted[int(node["id"])] = time + float(info["respawn"])
 	events.append({"type": "gathered", "peer": player.id, "item": item_id,
-		"amount": amount - left, "node": node["id"], "outpost_bonus": paid_outpost_bonus})
+		"amount": amount - left, "node": node["id"],
+		"herbs": herbs_added, "outpost_bonus": paid_outpost_bonus})
 
 
 ## Rare dangerous-zone group boss. One live boss per simulation and a 10-minute
