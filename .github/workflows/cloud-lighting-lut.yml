@@ -1,0 +1,40 @@
+name: Cloud lighting sky LUT
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "modules/sky_scattering_lut/sky_scattering_lut.cpp"
+      - "modules/sky_scattering_lut/sky_scattering_lut.h"
+      - "game/assets/shaders/sky.gdshader"
+      - "game/scripts/client/atmosphere.gd"
+      - "game/scripts/client/graphics_profiles.gd"
+      - "game/scripts/client/graphics_quality.gd"
+      - "game/tests/test_sky_cloud_lighting_lut.gd"
+      - ".github/workflows/cloud-lighting-lut.yml"
+  pull_request:
+    branches: [develop]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify engine-to-game cloud pipeline
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          engine = Path("modules/sky_scattering_lut/sky_scattering_lut.cpp").read_text()
+          header = Path("modules/sky_scattering_lut/sky_scattering_lut.h").read_text()
+          shader = Path("game/assets/shaders/sky.gdshader").read_text()
+          controller = Path("game/scripts/client/atmosphere.gd").read_text()
+          profiles = Path("game/scripts/client/graphics_profiles.gd").read_text()
+          tests = Path("game/tests/run_all.gd").read_text()
+          assert "generate_cloud_lighting_lut" in header and engine
+          assert "Image::FORMAT_RGBA8" in engine and "p_density->get_data()" in engine
+          assert "cloud_profile = texture(cloud_lighting_lut, cloud_uv)" in shader
+          assert '"generate_cloud_lighting_lut", CloudShadowLut.build_image()' in controller
+          assert '"cloud_lighting_strength": 0.88' in profiles
+          assert "test_sky_cloud_lighting_lut.gd" in tests
+          PY
