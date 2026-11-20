@@ -2025,9 +2025,13 @@ void fragment_shader(in SceneData scene_data, uint instance_index) {
 			if (blend > 0.0) {
 				//blend
 				if (cascade == sdfgi.max_cascades - 1) {
+					// Match diffuse GI's fade to the sky/reflection radiance.
+					// The final specular assignment below uses this LOCAL result;
+					// assigning indirect_specular_light here is overwritten and
+					// previously created a visible glossy seam at the outer cascade.
 					diffuse = mix(diffuse, ambient_light, blend);
 					if (use_specular) {
-						indirect_specular_light = mix(specular, indirect_specular_light, blend);
+						specular = mix(specular, indirect_specular_light, blend);
 					}
 				} else {
 					vec3 diffuse2, specular2;
