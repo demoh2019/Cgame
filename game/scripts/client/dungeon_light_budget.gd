@@ -6,6 +6,7 @@ extends Node
 const GROUP := "aa_dungeon_torches"
 const UPDATE_INTERVAL := 0.13
 const FADE_DISTANCE := 7.0
+const DungeonTorchCookie = preload("res://scripts/client/dungeon_torch_cookie.gd")
 
 const PRESETS := [
 	{"max_lights": 3, "radius": 28.0, "flicker": 0.035, "shadow_lights": 0},
@@ -102,9 +103,14 @@ func _process(delta: float) -> void:
 		light.light_energy = 2.2 * power
 		# Only the closest one/two torches cast expensive realtime shadows,
 		# and only on Forward+. Compatibility remains shadowless for local lights.
-		var cast: bool = allow_shadows and updated.size() < int(profile["shadow_lights"]) and power > 0.25
+		var cast: bool = allow_shadows and \
+			updated.size() < int(profile["shadow_lights"]) and power > 0.25 and \
+			distance <= DungeonTorchCookie.shadow_distance(_quality)
 		if light.shadow_enabled != cast:
 			light.shadow_enabled = cast
+		# Godot native 360-degree cookie is bound only to already-shadowed
+		# torches. Reuses one tiny image for the entire streamed dungeon.
+		DungeonTorchCookie.apply(light, _quality, renderer, cast)
 		# Use engine-side distance fade so border lights also disappear gradually.
 		light.distance_fade_enabled = true
 		light.distance_fade_begin = maxf(0.0, radius - FADE_DISTANCE)
@@ -115,4 +121,5 @@ func _process(delta: float) -> void:
 		if is_instance_valid(light) and not keep.has(light.get_instance_id()):
 			light.visible = false
 			light.shadow_enabled = false
+			DungeonTorchCookie.apply(light, _quality, renderer, false)
 	_active = updated
