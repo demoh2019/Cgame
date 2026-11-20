@@ -51,6 +51,49 @@ static void free_root_node(Node3D *p_node) {
 	memdelete(p_node);
 }
 
+TEST_CASE("[SceneTree][Node3D] Network snapshots use bounded Hermite interpolation") {
+	Node3D *actor = memnew(Node3D);
+	const Vector3 a(0.0, 1.0, -2.0);
+	const Vector3 b(10.0, 3.0, 2.0);
+	const Vector3 chord = (b - a) / real_t(0.1);
+
+	// Two known snapshots are identical to the old linear path, including
+	// exact endpoints. All visual-only interpolation leaves node state alone.
+	CHECK(actor->interpolate_network_snapshot(a, b, chord, chord, 0.1, 0.0) == a);
+	CHECK(actor->interpolate_network_snapshot(a, b, chord, chord, 0.1, 1.0) == b);
+	CHECK(actor->interpolate_network_snapshot(a, b, chord, chord, 0.1, 0.5).distance_to(a.lerp(b, 0.5)) < 0.0001);
+	CHECK(actor->get_position() == Vector3());
+
+	// A rapidly slowing character has non-linear speed but must remain
+	// inside the authoritative segment on every axis and time fraction.
+	for (int i = 0; i <= 100; i++) {
+		const real_t t = real_t(i) / 100.0;
+		const Vector3 sample = actor->interpolate_network_snapshot(
+				a, b, Vector3(130, 0, -75), Vector3(-80, 100, 45), 0.1, t);
+		CHECK(sample.x >= a.x && sample.x <= b.x);
+		CHECK(sample.y >= a.y && sample.y <= b.y);
+		CHECK(sample.z >= a.z && sample.z <= b.z);
+	}
+
+	// A centered sample with unlike but safe tangents changes the timing
+	// (smoother acceleration) without changing authoritative endpoints.
+	const Vector3 eased = actor->interpolate_network_snapshot(
+			Vector3(), Vector3(4, 0, 0), Vector3(20, 0, 0), Vector3(0, 0, 0), 0.1, 0.5);
+	CHECK(eased.x > 2.0);
+	CHECK(eased.x < 4.0);
+
+	// Invalid timestamps, velocities and stalled data cannot poison
+	// transforms. A >8m correction returns to legacy linear smoothing.
+	const Vector3 long_jump = actor->interpolate_network_snapshot(
+			Vector3(), Vector3(12, 0, 0), Vector3(2, 0, 0), Vector3(2, 0, 0), 0.1, 0.5);
+	CHECK(long_jump == Vector3(6, 0, 0));
+	CHECK(actor->interpolate_network_snapshot(a, b, chord, chord, 1.5, 0.5) == a.lerp(b, 0.5));
+	CHECK(actor->interpolate_network_snapshot(a, b, chord, chord, 0.0, 0.5) == a.lerp(b, 0.5));
+	CHECK(actor->interpolate_network_snapshot(a, b, Vector3(Math::INF, 0, 0), chord, 0.1, 0.5) == a.lerp(b, 0.5));
+	CHECK(actor->interpolate_network_snapshot(a, b, chord, chord, 0.1, Math::INF) == a);
+	memdelete(actor);
+}
+
 TEST_CASE("[SceneTree][Node3D] Detached node does not report visible in tree") {
 	Node3D *node = memnew(Node3D);
 	CHECK(node->is_visible());
