@@ -34,6 +34,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const GraphicsCinematicDof = preload("res://scripts/client/graphics_cinematic_dof.gd")
 const RainGear = preload("res://scripts/client/character_rain_gear.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const GraphicsColorGrade = preload("res://scripts/client/graphics_color_grade.gd")
@@ -122,6 +123,7 @@ var address_edit: LineEdit
 var name_edit: LineEdit
 var status_label: Label
 var _zoom := 1.0
+var _dof_elapsed := 0.35 # Coalesce cinematic focus updates to ~3 Hz.
 var _attack_cooldown := 0.0
 var _build_mode := false # U: a ghost wall follows the aim until it is placed or cancelled.
 var _build_yaw := 0.0
@@ -1197,6 +1199,16 @@ func _process(delta: float) -> void:
 		# A low view toward the horizon to show the sky (screenshots only).
 		camera.position = position + Vector3(0.0, 14.0, 6.0)
 		camera.look_at(position + Vector3(0.0, 20.0, -60.0))
+	# Native far-only DOF tracks player zoom/photo orbit at a bounded rate.
+	# The character and nearby combat remain in focus; CanvasLayer HUD never
+	# participates in the 3D depth blur. No new post-processing pass.
+	_dof_elapsed += maxf(delta, 0.0)
+	if _dof_elapsed >= 0.35:
+		_dof_elapsed = fmod(_dof_elapsed, 0.35)
+		GraphicsCinematicDof.apply(atmosphere.world_environment as WorldEnvironment,
+			GraphicsQuality.level(), str(RenderingServer.get_current_rendering_method()),
+			camera.global_position.distance_to(position + Vector3(0.0, 0.8, 0.0)),
+			camera_fx.photo_active)
 	water.position.x = position.x
 	water.position.z = position.z
 	_update_time_of_day(delta)
