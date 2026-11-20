@@ -44,8 +44,8 @@ func run(t) -> void:
 		"Ultra can request higher depth precision")
 	t.check(Atlas.needs_apply(ultra, balanced),
 		"downgrade releases the high-quality atlas")
-	t.check(not Atlas.needs_apply(high, Atlas.plan(3, "gl_compatibility"))
-		== false, "the backend change produces a real plan difference")
+	t.check(Atlas.needs_apply(high, Atlas.plan(3, "gl_compatibility")),
+		"the backend change produces a real plan difference")
 	var balanced_bytes: int = int(balanced["size"]) * int(balanced["size"]) * 2
 	var high_bytes: int = int(high["size"]) * int(high["size"]) * 2
 	var ultra_bytes: int = int(ultra["size"]) * int(ultra["size"]) * 4
