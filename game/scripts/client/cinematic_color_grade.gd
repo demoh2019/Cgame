@@ -34,4 +34,5 @@ static func apply(environment: Environment, daylight: float, sun_height: float, 
 	environment.tonemap_exposure = float(p["exposure"])
 	environment.adjustment_contrast = float(p["contrast"])
 	environment.adjustment_saturation = float(p["saturation"])
-	environment.glow_intensity = float(p["glow_intensity"])
+	# Bloom is updated independently by CinematicBloom at a bounded rate.
+	# Its expensive renderer state must not be resubmitted every frame.

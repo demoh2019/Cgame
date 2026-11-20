@@ -650,6 +650,11 @@ void Environment::_update_sdfgi() {
 // Glow
 
 void Environment::set_glow_enabled(bool p_enabled) {
+	// Automatic quality may reapply the same profile many times.
+	// Do not resend unchanged glow state to the render thread.
+	if (glow_enabled == p_enabled) {
+		return;
+	}
 	glow_enabled = p_enabled;
 	_update_glow();
 }
@@ -683,6 +688,15 @@ bool Environment::is_glow_normalized() const {
 }
 
 void Environment::set_glow_intensity(float p_intensity) {
+	// Weather-driven lens bloom is quantized in the game. Guard custom
+	// engine callers as well, so a bad value cannot poison HDR uniforms.
+	if (!Math::is_finite(p_intensity)) {
+		return;
+	}
+	p_intensity = CLAMP(p_intensity, 0.0f, 8.0f);
+	if (Math::is_equal_approx(glow_intensity, p_intensity)) {
+		return;
+	}
 	glow_intensity = p_intensity;
 	_update_glow();
 }
@@ -710,6 +724,13 @@ float Environment::get_glow_mix() const {
 }
 
 void Environment::set_glow_bloom(float p_threshold) {
+	if (!Math::is_finite(p_threshold)) {
+		return;
+	}
+	p_threshold = CLAMP(p_threshold, 0.0f, 1.0f);
+	if (Math::is_equal_approx(glow_bloom, p_threshold)) {
+		return;
+	}
 	glow_bloom = p_threshold;
 	_update_glow();
 }
@@ -729,6 +750,13 @@ Environment::GlowBlendMode Environment::get_glow_blend_mode() const {
 }
 
 void Environment::set_glow_hdr_bleed_threshold(float p_threshold) {
+	if (!Math::is_finite(p_threshold)) {
+		return;
+	}
+	p_threshold = CLAMP(p_threshold, 0.0f, 4.0f);
+	if (Math::is_equal_approx(glow_hdr_bleed_threshold, p_threshold)) {
+		return;
+	}
 	glow_hdr_bleed_threshold = p_threshold;
 	_update_glow();
 }
