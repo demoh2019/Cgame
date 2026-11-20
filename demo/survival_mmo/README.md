@@ -6,7 +6,8 @@ collisions, rendering and UI**. No source code or assets are copied from
 Days After or Albion Online.
 
 **Current scope: offline single-player.** Networking, guilds, territorial
-PvP, economy and persistent online world are NOT implemented.
+PvP, economy and persistent online world are NOT implemented. Local JSON
+persistence is for development only; it is not authoritative or anti-cheat.
 
 ## Run
 
@@ -15,11 +16,12 @@ Open `demo/survival_mmo/project.godot` in a compatible Cgame editor:
 ```sh
 godot --path demo/survival_mmo
 godot --headless --path demo/survival_mmo --script res://smoke_test.gd
+godot --headless --path demo/survival_mmo --script res://save_test.gd
 ```
 
-The headless script covers combat, skill advancement, resource collection,
-crafting, upgrade prerequisites, barricade collision validation and refunds.
-A successful test run has not yet been verified on a Cgame executable.
+The headless scripts cover combat and crafting, progression, collision-checked
+construction, and persistence snapshots including malformed/incompatible saves.
+Successful test runs have not yet been verified on a Cgame executable.
 
 ## Gameplay
 
@@ -39,7 +41,17 @@ A successful test run has not yet been verified on a Cgame executable.
   placement validation happens **before** resources are spent. Obstacles or
   characters prevent overlapping construction. Successful building grants
   10 crafting XP.
-- **R** restarts the prototype and resets progress (no save system yet).
+- **K** saves the character and world in `user://survival_world_v1.json`.
+- **L** restores inventory, skills, health/hunger, weapon, position, depleted
+  resource nodes, infected health/position and built barricades. Loading an
+  invalid snapshot leaves the active world unchanged.
+- **R** restarts the prototype without overwriting the last save.
+
+The save format is JSON with an explicit schema version and bounded values;
+saves are written via a temporary file and a previous-save backup. Interrupted
+saves can recover from a valid `.bak` file. Local saves are user-editable:
+**do not use them as client-authoritative data in an online MMO**. No autosave,
+cloud saves, migrations or chunk/world streaming exists yet.
 
 Crafting a weapon grants 12 crafting XP; using a bandage grants 8. This
 prototype uses constant recipes and simple progression as balance placeholders.
@@ -57,8 +69,8 @@ Cgame/Godot gameplay primitives.
 
 ## Next milestones
 
-1. Save/load for local prototypes; transition to server-side persistence.
-2. Data-driven equipment inventory (durability, slots, tiers, weight).
-3. Building previews, terrain checks, destruction and structural durability.
-4. Authoritative multiplayer protocol, persistence, interest management.
+1. Data-driven equipment inventory (durability, slots, tiers, weight).
+2. Building previews, terrain checks, destruction and structural durability.
+3. Server-authoritative protocol and durable database persistence.
+4. Interest management, world partitioning, server-validated interactions.
 5. PvP zones, guild structures, player economy and server load tests.
