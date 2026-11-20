@@ -564,6 +564,14 @@ bool WorldPartition3D::is_cell_loaded(const Vector2i &p_cell) const {
 	return id != nullptr && ObjectDB::get_instance(*id) != nullptr;
 }
 
+Node3D *WorldPartition3D::get_cell_node(const Vector2i &p_cell) const {
+	const ObjectID *id = active_cells.getptr(p_cell);
+	if (id == nullptr) {
+		return nullptr;
+	}
+	return Object::cast_to<Node3D>(ObjectDB::get_instance(*id));
+}
+
 bool WorldPartition3D::are_cells_loaded(const Vector2i &p_center, int p_radius) const {
 	ERR_FAIL_COND_V_MSG(p_radius < 0 || p_radius > 32, false, "WorldPartition3D region readiness radius must be between 0 and 32.");
 	// A checked 64-bit bounds calculation prevents overflow when testing a
@@ -649,6 +657,7 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cells_in_radius", "center", "radius"), &WorldPartition3D::get_cells_in_radius);
 	ClassDB::bind_method(D_METHOD("update_streaming"), &WorldPartition3D::update_streaming);
 	ClassDB::bind_method(D_METHOD("is_cell_loaded", "cell"), &WorldPartition3D::is_cell_loaded);
+	ClassDB::bind_method(D_METHOD("get_cell_node", "cell"), &WorldPartition3D::get_cell_node);
 	ClassDB::bind_method(D_METHOD("are_cells_loaded", "center", "radius"), &WorldPartition3D::are_cells_loaded, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_loaded_cell_count"), &WorldPartition3D::get_loaded_cell_count);
 	ClassDB::bind_method(D_METHOD("get_loaded_cells"), &WorldPartition3D::get_loaded_cells);
