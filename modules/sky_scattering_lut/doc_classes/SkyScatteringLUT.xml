@@ -16,5 +16,14 @@
 				Generate a bounded RGBAH image with no mipmaps.
 			</description>
 		</method>
+		<method name="sample_scattering">
+			<return type="Color" />
+			<param index="0" name="view_elevation" type="float" />
+			<param index="1" name="sun_elevation" type="float" />
+			<param index="2" name="aerosol" type="float" default="2.0" />
+			<description>
+				Sample the same spectral model as [method generate_lut] without allocating an image. RGB stores approximate linear in-scattered radiance, and alpha stores transmittance. The view and sun elevations are normalized direction Y coordinates, clamped to [-0.08, 1.0] and [-0.15, 1.0]. Sample at a bounded cadence to match the distant fog to the sky.
+			</description>
+		</method>
 	</methods>
 </class>
