@@ -49,7 +49,8 @@ varying float sheen;
 varying float grass_light_fade;
 varying vec3 tint;
 varying vec2 ground_xz;
-varying float species; // 0 fine, 1 broad, 2 seed stalk, 3 low leaf, 4 feather grass, 5 flower stem.
+varying float species; // 0 fine, 1 broad, 2 seed, 3 low, 4 feather, 5 flower, 6 reed, 7 red-top, 8 sprout.
+varying float petal_t; // 0 at a flower's centre, 1 at the petal tips.
 varying float flower_head; // 1 on the petals of a flowering stem.
 varying vec3 flower_color;
 varying float blade_rand;
@@ -58,9 +59,10 @@ varying vec3 aa_world_grass_normal;
 void vertex() {
 	tipness = min(UV.y, 1.0);
 	flower_head = UV.y > 1.2 ? 1.0 : 0.0;
+	petal_t = UV.x;
 	shade = UV.x; // Each blade has its own brightness.
 	tint = COLOR.rgb; // The MultiMesh instance colour (the Compatibility renderer does not pass custom data here).
-	species = floor(UV2.x * 6.0);
+	species = floor(UV2.x * 9.0);
 	blade_rand = UV2.y;
 	dryness = clamp(1.0 - COLOR.a, 0.0, 1.0);
 	vec3 root = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
@@ -149,6 +151,10 @@ void fragment() {
 		base *= vec3(0.88, 1.05, 0.78); // Low leaves: fresh, saturated.
 	} else if (species > 3.5 && species < 4.5) {
 		base = mix(base, vec3(0.52, 0.5, 0.33), 0.45); // Feather grass: pale, silvery-straw.
+	} else if (species > 5.5 && species < 6.5) {
+		base *= vec3(0.7, 0.86, 0.72); // Reeds: dark rush green.
+	} else if (species > 7.5) {
+		base = mix(base, vec3(0.42, 0.62, 0.12), 0.55); // Sprouts: bright lime.
 	}
 	// Real grass: tips catch light and turn slightly yellow-green, they do not go minty white.
 	vec3 tip = base * vec3(1.22, 1.16, 0.92) + vec3(0.03, 0.025, 0.0);
@@ -157,13 +163,19 @@ void fragment() {
 	tip = mix(tip, vec3(0.6, 0.53, 0.3), dry_tip * 0.85);
 	if (species > 1.5 && species < 2.5) {
 		tip = mix(tip, vec3(0.55, 0.45, 0.26), smoothstep(0.7, 1.0, tipness));
+	} else if (species > 6.5 && species < 7.5) {
+		tip = mix(tip, vec3(0.5, 0.22, 0.3), smoothstep(0.55, 1.0, tipness) * 0.8); // Red-top seed haze.
 	}
 	vec3 color = mix(base * 0.95, tip, smoothstep(0.0, 1.0, tipness));
 	color *= mix(0.84, 1.08, shade);
 	// Inside a tuft the lower blades are shaded by the upper ones: darker toward the root.
 	color *= mix(0.55, 1.0, smoothstep(0.0, 0.55, tipness));
+	// Richer, more saturated greens.
+	float lum = dot(color, vec3(0.299, 0.587, 0.114));
+	color = max(mix(vec3(lum), color, 1.3), vec3(0.0));
 	if (flower_head > 0.5) {
-		color = flower_color * mix(0.85, 1.05, blade_rand);
+		vec3 petal = flower_color * mix(0.8, 1.08, blade_rand) * mix(0.82, 1.0, petal_t);
+		color = mix(vec3(0.95, 0.72, 0.12), petal, smoothstep(0.08, 0.3, petal_t)); // Golden centre.
 	}
 	color += vec3(0.04, 0.05, 0.015) * sheen * tipness;
 	// A richer wet-grass palette at no additional texture sampling cost.
@@ -198,9 +210,9 @@ static var _material: ShaderMaterial
 
 # Grass colour per biome (fresh, then dry); the lushness noise moves between them.
 const BIOME_GRASS := {
-	"forest": [Color(0.17, 0.29, 0.09), Color(0.27, 0.32, 0.12)],
-	"plains": [Color(0.21, 0.34, 0.1), Color(0.4, 0.39, 0.17)],
-	"swamp": [Color(0.16, 0.27, 0.11), Color(0.25, 0.3, 0.13)],
+	"forest": [Color(0.15, 0.3, 0.07), Color(0.26, 0.33, 0.1)],
+	"plains": [Color(0.19, 0.36, 0.07), Color(0.4, 0.4, 0.13)],
+	"swamp": [Color(0.13, 0.28, 0.09), Color(0.24, 0.31, 0.11)],
 	"beach": [Color(0.4, 0.41, 0.22), Color(0.52, 0.48, 0.28)],
 	"mountain": [Color(0.25, 0.32, 0.15), Color(0.37, 0.38, 0.2)],
 }
@@ -275,7 +287,10 @@ const SPECIES_STALK := 2
 const SPECIES_LOW := 3
 const SPECIES_WISPY := 4 # Feather grass: very thin, pale, long and arching.
 const SPECIES_FLOWER := 5 # A stem with a flower head; the head only shows in flowering patches.
-const SPECIES_COUNT := 6.0
+const SPECIES_REED := 6 # Thick, tall, dark rush-like blade.
+const SPECIES_REDTOP := 7 # Bentgrass with a reddish-purple seed haze.
+const SPECIES_SPROUT := 8 # Short, bright lime new growth.
+const SPECIES_COUNT := 9.0
 
 
 ## One tuft: thin, curved blades of several species leaning outwards. UV.y runs from root (0) to tip (1).
@@ -298,16 +313,22 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 		var brightness := rng.randf()
 		var species := SPECIES_FINE
 		var roll := rng.randf()
-		if roll < 0.13:
+		if roll < 0.11:
 			species = SPECIES_BROAD
-		elif roll < 0.21:
+		elif roll < 0.18:
 			species = SPECIES_STALK
-		elif roll < 0.27:
+		elif roll < 0.23:
 			species = SPECIES_LOW
-		elif roll < 0.34:
+		elif roll < 0.3:
 			species = SPECIES_WISPY
-		elif roll < 0.42:
+		elif roll < 0.39:
 			species = SPECIES_FLOWER
+		elif roll < 0.44:
+			species = SPECIES_REED
+		elif roll < 0.51:
+			species = SPECIES_REDTOP
+		elif roll < 0.58:
+			species = SPECIES_SPROUT
 		var height := rng.randf_range(0.16, 0.44)
 		var lean := rng.randf_range(0.04, 0.2)
 		var width := rng.randf_range(0.012, 0.03)
@@ -330,9 +351,21 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 				lean = rng.randf_range(0.22, 0.36) # Long, arching, feathery.
 				width = rng.randf_range(0.006, 0.011)
 			SPECIES_FLOWER:
-				height = rng.randf_range(0.3, 0.52)
+				height = rng.randf_range(0.26, 0.56)
 				lean = rng.randf_range(0.02, 0.07)
 				width = rng.randf_range(0.006, 0.01)
+			SPECIES_REED:
+				height = rng.randf_range(0.55, 0.85)
+				lean = rng.randf_range(0.03, 0.1)
+				width = rng.randf_range(0.03, 0.045)
+			SPECIES_REDTOP:
+				height = rng.randf_range(0.35, 0.6)
+				lean = rng.randf_range(0.08, 0.18)
+				width = rng.randf_range(0.008, 0.014)
+			SPECIES_SPROUT:
+				height = rng.randf_range(0.08, 0.2)
+				lean = rng.randf_range(0.03, 0.1)
+				width = rng.randf_range(0.016, 0.026)
 		var blade_random := rng.randf()
 		var start := vertices.size()
 		# Root pair, middle pair, tip: the blade bends further out near the top.
@@ -347,18 +380,29 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 			normals.append(Vector3.UP)
 		indices.append_array([start, start + 1, start + 2, start + 1, start + 3, start + 2, start + 2, start + 3, start + 4, start + 3, start + 5, start + 4])
 		if species == SPECIES_FLOWER:
-			# Two crossed petals quads at the tip (UV.y = 1.5 marks the head for the shader).
-			var head := tip + Vector3.UP * 0.015
-			var r := rng.randf_range(0.03, 0.05)
-			for axis in [side, out]:
-				var h0 := vertices.size()
-				for corner in [head - axis * r - Vector3.UP * r * 0.6, head + axis * r - Vector3.UP * r * 0.6,
-						head - axis * r + Vector3.UP * r * 0.6, head + axis * r + Vector3.UP * r * 0.6]:
-					vertices.append(corner)
-					uvs.append(Vector2(brightness, 1.5))
+			# A corolla of five pointed petals around a small centre, tilted outwards so it reads
+			# from the side as well as from above. UV.y >= 1.5 marks the head for the shader;
+			# UV.x is 0 at the centre and 1 at the petal tips.
+			var head := tip + Vector3.UP * 0.01
+			var radius := rng.randf_range(0.035, 0.06)
+			var normal := (Vector3.UP * 0.75 + out * 0.65).normalized()
+			var axis_a := normal.cross(Vector3.FORWARD if absf(normal.z) < 0.9 else Vector3.RIGHT).normalized()
+			var axis_b := normal.cross(axis_a).normalized()
+			var spin := rng.randf() * TAU
+			var petals := 5
+			for petal in petals:
+				var angle_mid := spin + TAU * float(petal) / float(petals)
+				var half := PI / float(petals) * 0.8
+				var dir_mid := axis_a * cos(angle_mid) + axis_b * sin(angle_mid)
+				var dir_l := axis_a * cos(angle_mid - half) + axis_b * sin(angle_mid - half)
+				var dir_r := axis_a * cos(angle_mid + half) + axis_b * sin(angle_mid + half)
+				var p0 := vertices.size()
+				for entry in [[head, 0.0], [head + dir_l * radius * 0.55, 0.6], [head + dir_mid * radius, 1.0], [head + dir_r * radius * 0.55, 0.6]]:
+					vertices.append(entry[0])
+					uvs.append(Vector2(entry[1], 1.5))
 					uv2s.append(Vector2((float(species) + 0.5) / SPECIES_COUNT, blade_random))
-					normals.append(Vector3.UP)
-				indices.append_array([h0, h0 + 1, h0 + 2, h0 + 1, h0 + 3, h0 + 2])
+					normals.append(normal)
+				indices.append_array([p0, p0 + 1, p0 + 2, p0, p0 + 2, p0 + 3])
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
@@ -622,11 +666,17 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 			var roll: float = clumps.rolls[clump]
 			var scale: float
 			if roll < 0.18 + lush * 0.3:
-				scale = rng.randf_range(2.6, 3.6)
+				scale = rng.randf_range(2.4, 3.9)
 			elif roll < 0.62:
-				scale = rng.randf_range(1.3, 2.0)
+				scale = rng.randf_range(1.1, 2.3)
 			else:
-				scale = rng.randf_range(0.55, 0.95)
+				scale = rng.randf_range(0.4, 1.05)
+			# Individual tufts break the patch height: some cut low, some shooting up.
+			var odd: float = rng.randf()
+			if odd < 0.08:
+				scale *= 0.5
+			elif odd > 0.94:
+				scale *= 1.45
 			# Lower toward the patch edge, so tall patches have soft borders.
 			var to_center: Vector2 = Vector2(wx, wz) - clumps.centers[clump]
 			scale *= lerpf(1.0, 0.7, clampf(to_center.length() / (CLUMP_CELL * 0.8), 0.0, 1.0))
@@ -643,7 +693,7 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 			var dry: float = clampf((1.0 - lush) * 0.7 + rng.randf() * 0.45 - 0.15
 				+ (0.25 if biome == "beach" or biome == "mountain" else 0.0), 0.0, 1.0)
 			# Width varies on its own: some tufts spread wide and low, others are narrow.
-			var spread: float = rng.randf_range(0.75, 1.4)
+			var spread: float = rng.randf_range(0.6, 1.65)
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(spread * rng.randf_range(0.9, 1.1), scale, spread * rng.randf_range(0.9, 1.1)))
 			var at: int = count * 16
 			buffer[at] = basis.x.x
