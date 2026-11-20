@@ -53,6 +53,64 @@ func run(t) -> void:
 		"quality selector drives the real atmospheric sky material")
 	t.check(Clouds.build_image() != null, "existing cloud shadow field still builds")
 
+	t.current = "conservative volumetric cloud density guards"
+	if sky != null:
+		var cloud_source: String = sky.code
+		t.check(cloud_source.contains("float cloud_threshold = 1.0 - coverage;"),
+			"raymarch uses the same exact cloud coverage threshold")
+		t.check(cloud_source.contains("if (broad + 0.45 <= cloud_threshold)"),
+			"first octave cheaply excludes guaranteed-empty cloud regions")
+		t.check(cloud_source.contains("if (broad + medium + 0.17 <= cloud_threshold)"),
+			"second octave can exclude a region before expensive fine noise")
+		t.check(cloud_source.contains("if (base <= cloud_threshold)"),
+			"high-frequency edge erosion cannot run outside actual cloud density")
+		t.check(cloud_source.contains("if (h <= 0.0 || h >= 1.0)"),
+			"the empty top and bottom of the slab skip all density noise")
+		t.check(cloud_source.contains("bool cloud_sunlit = dot(sun_l, sun_l) > 0.0001;"),
+			"nighttime ambient clouds skip irrelevant direct-shadow rays")
+		t.check(cloud_source.contains("if (cloud_sunlit)") and
+			cloud_source.contains("for (int k = 1; k <= 3; k++)"),
+			"daytime clouds preserve original three-point self-shadowing")
+		t.check(cloud_source.contains("if (trans < 0.02)") and
+			cloud_source.contains("int steps = AT_CUBEMAP_PASS ?"),
+			"original early ray termination and lower-cost reflection probes remain")
+		t.check(not cloud_source.contains("return;"),
+			"no forbidden early return inside the Godot sky processor")
+	# This is a deterministic *conservative upper bound*, not an artistic
+	# approximation: omitted noise octaves cannot exceed their coefficients.
+	for coverage in [0.05, 0.45, 0.70, 0.98]:
+		var threshold: float = 1.0 - coverage
+		for n0 in [0.0, 0.2, 0.6, 1.0]:
+			for n1 in [0.0, 0.4, 1.0]:
+				for n2 in [0.0, 0.6, 1.0]:
+					var broad: float = n0 * 0.55
+					var medium: float = n1 * 0.28
+					var fine: float = n2 * 0.17
+					if broad + 0.45 <= threshold:
+						t.check(broad + medium + fine <= threshold + 0.000001,
+							"coarse conservative bound cannot cull a visible cloud")
+					if broad + medium + 0.17 <= threshold:
+						t.check(broad + medium + fine <= threshold + 0.000001,
+							"medium conservative bound cannot cull a visible cloud")
+
+	t.current = "native sky radiance reuse under adaptive quality"
+	var cached_sky := Sky.new()
+	var desired: int = Sky.RADIANCE_SIZE_128
+	if cached_sky.has_method("configure_render_budget"):
+		cached_sky.call("configure_render_budget", desired, Sky.PROCESS_MODE_INCREMENTAL)
+		cached_sky.call("configure_render_budget", desired, Sky.PROCESS_MODE_INCREMENTAL)
+	else:
+		cached_sky.radiance_size = desired
+		cached_sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
+	t.eq(cached_sky.radiance_size, desired,
+		"native fork and stock fallback select the same radiance budget")
+	t.eq(cached_sky.process_mode, Sky.PROCESS_MODE_INCREMENTAL,
+		"all graphics tiers retain incremental reflection cubemap filtering")
+	var atmo_source: String = (Atmosphere as Script).source_code
+	t.check(atmo_source.contains('sky.has_method("configure_render_budget")') and
+		atmo_source.contains('sky.radiance_size != desired_radiance'),
+		"quality switches avoid redundant native and stock Godot cubemap resizing")
+
 	t.current = "native RGBA field matches real terrain cloud density"
 	if ClassDB.class_exists("SkyScatteringLUT"):
 		var generator: Object = ClassDB.instantiate("SkyScatteringLUT")
