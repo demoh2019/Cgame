@@ -68,6 +68,7 @@ const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const GatheringNoise = preload("res://scripts/shared/gathering_noise.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
+const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
@@ -178,6 +179,7 @@ class Player:
 	var daily_bounty: Dictionary = {} # Account-persisted UTC daily bounty, never set by clients.
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var discovered_sites: Dictionary = {} # Personal authenticated landmark journal.
+	var threat_scan: Dictionary = {} # Session-only, paid private tracking of one infected.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
@@ -732,6 +734,7 @@ func _spawn_player(player: Player) -> void:
 			player.inventory.add(id, STARTER_KIT[id])
 	player.action = {}
 	player.recall = {}
+	player.threat_scan = {} # Death cannot preserve a scouting advantage.
 	player.sharpened_weapon = ""
 	player.sharpened_hits = 0
 	player.mounted = false
@@ -3029,6 +3032,25 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"threat_scanner":
+			if item_id != ThreatScan.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if not player.position.is_finite():
+				return {"ok": false, "reason": "invalid_position", "threat_scan": true}
+			if _is_safe(player.position):
+				return {"ok": false, "reason": "safe_zone", "threat_scan": true}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "threat_scan": true}
+			# No requested target/position is accepted from the remote client.
+			var target: Dictionary = ThreatScan.nearest(player.position, zombies)
+			if target.is_empty():
+				return {"ok": false, "reason": "no_threat_nearby",
+					"threat_scan": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "threat_scan": true}
+			player.threat_scan = {"target": int(target["target"]),
+				"expires": time + ThreatScan.MARK_SECONDS}
 		"weapon_coating":
 			if item_id != AntisepticEdge.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3281,6 +3303,13 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
 	player.dirty_character = true
+	if item_id == ThreatScan.ITEM_ID:
+		var found: Dictionary = ThreatScan.public_mark(
+			player.threat_scan, zombies, player.position, time)
+		return {"ok": true, "threat_scan": true,
+			"kind": found.get("kind", "elite"),
+			"x": float(found.get("x", 0.0)), "z": float(found.get("z", 0.0)),
+			"seconds": ThreatScan.MARK_SECONDS}
 	if item_id == FieldWhetstone.ITEM_ID:
 		return {"ok": true, "weapon": player.sharpened_weapon,
 			"hits": player.sharpened_hits}
@@ -6081,6 +6110,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"arena_tier": ArenaRating.tier(player.arena_rating),
 			"action": player.action.duplicate(),
 			"ruin_survey": RuinSurvey.public_mark(player.ruin_survey, time, opened_crates),
+			"threat_scan": ThreatScan.public_mark(
+				player.threat_scan, zombies, player.position, time) if _alive(player) else {},
 			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
 			"fracture": player.survival.fracture,
 			"blood_scent_radius": BloodScent.detection_radius(player.survival.bleeding,
