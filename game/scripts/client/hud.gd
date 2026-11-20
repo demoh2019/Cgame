@@ -802,7 +802,10 @@ func _on_event(event: Dictionary) -> void:
 					roundi(float(event.get("bleeding_stopped", 0.0))),
 					roundi(float(event.get("fracture_treated", 0.0)))])
 		"gathered":
-			say("+%d %s" % [event["amount"], Defs.item(event["item"]).get("name", event["item"])])
+			var harvest_extra: int = int(event.get("outpost_bonus", 0))
+			say("+%d %s%s" % [event["amount"],
+				Defs.item(event["item"]).get("name", event["item"]),
+				" (outpost +%d)" % harvest_extra if harvest_extra > 0 else ""])
 		"campfire_doused":
 			say("Storm exhausted a nearby campfire. Find shelter or refuel sooner.")
 		"campfire_refueled":

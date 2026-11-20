@@ -3105,7 +3105,12 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	var gather_skill := Skills.skill_for_node(String(node["kind"]))
 	if gather_skill != "" and rng.randf() < player.skills.bonus("gather_yield." + gather_skill):
 		amount += 1 # Skill: a lucky harvest.
+	var outpost_bonus: int = territory.harvest_bonus(player.id, node, players,
+		parties, time, world)
+	amount += outpost_bonus
 	var left: int = player.inventory.add(item_id, amount)
+	# Never advertise an outpost bonus if a full bag could not accept it.
+	var paid_outpost_bonus: int = mini(outpost_bonus, maxi(0, amount - left - (amount - outpost_bonus)))
 	if gather_skill != "" and amount - left > 0:
 		_award(player, gather_skill, (3.0 + 2.0 * float(amount - left)) * float(int(node["tier"])))
 	# No XP for items that did not fit, nor for repeat attempts on depleted nodes.
@@ -3114,7 +3119,8 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	player.dirty_character = true
 	player.action = {}
 	depleted[int(node["id"])] = time + float(info["respawn"])
-	events.append({"type": "gathered", "peer": player.id, "item": item_id, "amount": amount - left, "node": node["id"]})
+	events.append({"type": "gathered", "peer": player.id, "item": item_id,
+		"amount": amount - left, "node": node["id"], "outpost_bonus": paid_outpost_bonus})
 
 
 ## Rare dangerous-zone group boss. One live boss per simulation and a 10-minute
