@@ -7,6 +7,8 @@ const CELL_SIZE := 128.0
 const WORLD_HALF_EXTENT := 6
 const HUB_CELL := Vector2i(0, 0)
 const ARENA_CELL := Vector2i(4, 2)
+const SAVE_PATH := "user://cgame_demo_checkpoint.dat"
+const SAVE_VERSION := 1
 const DETAIL_SCENE := "res://scenes/cell_detail.tscn"
 const PROXY_SCENE := "res://scenes/cell_proxy.tscn"
 const FLY_SCRIPT := preload("res://scripts/free_fly.gd")
@@ -48,6 +50,9 @@ func _ready() -> void:
     _apply_quality_profile()
     if not detail.has_method("pin_cell") or not detail.has_method("get_pinned_cell_count"):
         push_error("Cgame pinned gameplay cells API required (pin_cell/get_pinned_cell_count).")
+        return
+    if not detail.has_method("snapshot_cell_states") or not detail.has_method("load_cell_states"):
+        push_error("Cgame gameplay state streaming API required (snapshot_cell_states/load_cell_states).")
         return
     # The quest hub remains active while the player explores other regions.
     detail.call("pin_cell", HUB_CELL)
@@ -152,6 +157,87 @@ func _toggle_gameplay_pin(cell: Vector2i) -> void:
     else:
         detail.call("pin_cell", cell)
 
+func _gameplay_cell_root(cell: Vector2i) -> Node3D:
+    if detail == null:
+        return null
+    return detail.call("get_cell_instance", cell) as Node3D
+
+func _claim_hub_reward() -> void:
+    var root := _gameplay_cell_root(HUB_CELL)
+    if root != null and root.has_method("claim_hub_reward"):
+        if bool(root.call("claim_hub_reward")):
+            print("Quest reward claimed. It now survives streaming.")
+    else:
+        push_warning("Quest Hub not ready; H pins its scene.")
+
+func _win_arena_round() -> void:
+    var root := _gameplay_cell_root(ARENA_CELL)
+    if root != null and root.has_method("win_arena_round"):
+        root.call("win_arena_round")
+    else:
+        push_warning("Combat Arena not ready; G pins its scene.")
+
+func _save_checkpoint() -> void:
+    if detail == null or camera == null:
+        return
+    # Captures even the game scenes currently loaded by WorldPartition3D.
+    var snapshot: Dictionary = detail.call("snapshot_cell_states")
+    var record := {
+        "version": SAVE_VERSION,
+        "cell_states": snapshot,
+        "pinned_cells": detail.call("get_pinned_cells"),
+        "camera_transform": camera.global_transform,
+    }
+    var output := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+    if output == null:
+        push_error("Cannot write checkpoint: " + SAVE_PATH)
+        return
+    output.store_var(record, false)
+    output.close()
+    print("Checkpoint saved with %d gameplay cell states." % snapshot.size())
+
+func _load_checkpoint() -> void:
+    if detail == null or camera == null:
+        return
+    var input := FileAccess.open(SAVE_PATH, FileAccess.READ)
+    if input == null:
+        push_warning("Checkpoint not found: " + SAVE_PATH)
+        return
+    var value: Variant = input.get_var(false)
+    input.close()
+    if not (value is Dictionary):
+        push_warning("Invalid checkpoint format.")
+        return
+    var record: Dictionary = value
+    if record.get("version") != SAVE_VERSION:
+        push_warning("Unsupported checkpoint version.")
+        return
+    if not (record.get("cell_states") is Dictionary) or not (record.get("pinned_cells") is Array) or not (record.get("camera_transform") is Transform3D):
+        push_warning("Checkpoint fields are incomplete.")
+        return
+    var states: Dictionary = record["cell_states"]
+    var pins: Array = record["pinned_cells"]
+    if states.size() > 4096 or pins.size() > 128:
+        push_warning("Checkpoint exceeds scene-state or pin limits.")
+        return
+    # Snapshot contents are validated and cloned by the native engine.
+    detail.call("load_cell_states", states)
+    detail.call("set_pinned_cells", pins)
+    camera.global_transform = record["camera_transform"]
+    detail.call("update_streaming")
+    print("Checkpoint restored: %d cached gameplay cell states." % int(detail.call("get_cell_state_count")))
+
+func _stateful_progress(cell: Vector2i, key: String, fallback: Variant) -> Variant:
+    if detail == null:
+        return fallback
+    var loaded_root := _gameplay_cell_root(cell)
+    if loaded_root != null and loaded_root.has_method("capture_streaming_state"):
+        var current: Variant = loaded_root.call("capture_streaming_state")
+        if current is Dictionary:
+            return current.get(key, fallback)
+    var cached: Dictionary = detail.call("get_cell_state", cell)
+    return cached.get(key, fallback)
+
 func _create_hud() -> void:
     var layer := CanvasLayer.new()
     add_child(layer)
@@ -177,6 +263,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
             _toggle_gameplay_pin(HUB_CELL)
         KEY_G:
             _toggle_gameplay_pin(ARENA_CELL)
+        KEY_C:
+            _claim_hub_reward()
+        KEY_B:
+            _win_arena_round()
+        KEY_K:
+            _save_checkpoint()
+        KEY_J:
+            _load_checkpoint()
         KEY_L:
             proxies_enabled = not proxies_enabled
             if distant != null:
@@ -218,7 +312,10 @@ func _update_hud() -> void:
     var arena_pinned := detail != null and bool(detail.call("is_cell_pinned", ARENA_CELL))
     var hub_loaded := detail != null and bool(detail.call("is_cell_loaded", HUB_CELL))
     var arena_loaded := detail != null and bool(detail.call("is_cell_loaded", ARENA_CELL))
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    var reward_claimed := bool(_stateful_progress(HUB_CELL, "reward_claimed", false))
+    var arena_wins: int = int(_stateful_progress(ARENA_CELL, "arena_wins", 0))
+    var state_count: int = int(detail.call("get_cell_state_count")) if detail != null else 0
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
@@ -229,6 +326,9 @@ func _update_hud() -> void:
         "loaded" if hub_loaded else "away",
         "ON" if arena_pinned else "OFF",
         "loaded" if arena_loaded else "away",
+        "CLAIMED" if reward_claimed else "READY",
+        arena_wins,
+        state_count,
         str(quality_controller.get_profile()["name"]),
         "ON" if quality_controller.automatic else "OFF",
         "ON" if crossfade_controller != null and crossfade_controller.enabled else "OFF",
