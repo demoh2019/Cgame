@@ -377,6 +377,12 @@ static func _build_items() -> void:
 		"weight": 0.2, "value": 28})
 	_add_recipe("prospecting_chart", "prospecting_chart", 1,
 		{"cloth_1": 1, "scrap": 2, "stone_1": 1}, "", 3.0)
+	# Mining specialisation: three paid T2+ ore/rock bonuses, but louder work.
+	_add_item("mining_wedges", {"name": "Reinforced Mining Wedges",
+		"kind": "mining_wedges", "tier": 2, "stack": 5,
+		"weight": 0.9, "value": 72})
+	_add_recipe("mining_wedges", "mining_wedges", 1,
+		{"bar_2": 1, "scrap": 3, "stone_1": 2}, "workbench", 5.0)
 	_add_item("berries", {"name": "Berries", "kind": "food", "food": 12.0, "stack": 20, "value": 2})
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
