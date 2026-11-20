@@ -3310,3 +3310,60 @@ godot --headless --path game --script res://tests/run_all.gd
 
 This uses the game's existing GDScript combat, multiplayer RPCs and
 private state snapshots. It needs no native Godot engine changes.
+
+
+## Medic Cover: emergency threat handoff to a party guardian
+
+Healing can attract infected toward medics because the game has real
+server-side healer hate generation. A classless **Medic Cover**
+ability now gives a restoration-staff medic a tactical rescue option
+when surrounded by infected. The medic presses **Medic Cover
+(staff + guardian)** in the party/inventory combat controls.
+
+- Requires a **physically equipped restoration staff**, a living
+  nonmounted medic outside the safe hub, and an **equipped melee
+  guardian** in the same real party within **8 metres** and no more
+  than **3 metres elevation difference**. A second restoration staff
+  does not qualify as a melee guardian. No targets, positions, hate
+  values or damage are accepted from clients.
+- A successful request spends **24 combat energy**, applies a
+  **30-second** per-character server cooldown and redirects up to
+  **3 already-engaged normal infected** to the closest eligible
+  guardian (stable peer-ID tie-break). Each transferred infected
+  focuses the guardian for **2 seconds** using the existing
+  `Zombie.force_taunt` logic and its normal bounded hate entries.
+- Only infected that are currently chasing/attacking the medic or
+  have positive, real hate against that medic qualify. Enemies must
+  be within **16 metres and their own pursuit leash** of both
+  the medic and guardian, in the same dangerous zone and within
+  **3 metres vertically**. Idle infected, unrelated players' mobs,
+  raid bosses and enemies already focused by another guardian's
+  forced taunt are unaffected.
+- Upon real transfer, the medic's **existing** hate on that infected
+  is reduced to **35%**, not wiped out, ensuring a careless healer
+  can still pull aggro again. No heal, loot, XP, summon or free enemy
+  spawn is created. The group still must survive the encounter.
+- If there is no legitimate guardian or qualifying infected, the
+  command refuses **without energy or cooldown charge**. Fast repeat
+  requests are blocked by the server. The timer is session-only,
+  advances in regular player ticks, and is displayed privately as
+  `you.medic_cover_cooldown` on the medic's HUD.
+- A **medic_cover** summary event is delivered only to the requesting
+  medic and the actual guardian. Neither individual infected IDs
+  nor raw threat dictionaries are sent to any client. Ordinary
+  PvP damage, loot, gear, wounds and rewards are unchanged.
+
+Implemented in `scripts/shared/medic_cover.gd`,
+`scripts/server/game_server.gd`, `scripts/shared/net.gd`,
+`scripts/client/game_client.gd`, and `scripts/client/hud.gd`.
+Regression cases in `tests/test_medic_cover.gd` cover real Zombie
+target selection, existing healer threat reductions, guardian equipment
+and party roles, 3-enemy limit, idle/boss/third-party immunity, invalid
+geometry, failed casts, rate-limiting, event privacy and death.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+No native engine changes needed; this uses authoritative current
+GDScript combat, group rosters and reliable multiplayer RPCs.
