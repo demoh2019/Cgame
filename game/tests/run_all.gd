@@ -172,6 +172,7 @@ const SUITES := [
 	"res://tests/test_stormproof_briquette.gd",
 	"res://tests/test_campfire_extinguish.gd",
 	"res://tests/test_field_cooking.gd",
+	"res://tests/test_trail_ration.gd",
 	"res://tests/test_camp_fish_stew.gd",
 	"res://tests/test_hearty_meal.gd",
 	"res://tests/test_party_feast.gd",
