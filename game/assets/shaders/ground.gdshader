@@ -120,6 +120,23 @@ void fragment() {
 	// noise or texture selection branch to keep cliff mipmapping stable.
 	vec2 lod_dx = dFdx(p / tile_meters);
 	vec2 lod_dy = dFdy(p / tile_meters);
+	// Domain warp and the PBR blend must share the same near/far mid-frequency
+	// soil field. Declare it before use: shader processors reject forward local
+	// references (and the prior layout could fail to compile on Metal).
+	float camera_distance = distance(p, CAMERA_POSITION_WORLD.xz);
+	float detail_fade = 1.0 - smoothstep(aa_terrain_detail_radius,
+		aa_terrain_detail_radius + 24.0, camera_distance);
+	// Quality-dependent material complexity, like distance-faded detail
+	// in high-end engines: far pixels reuse one interpolated vertex field.
+	// Within the full-detail radius, the old pixel noise is preserved exactly.
+	float mid = aa_vertex_mid;
+	float mixer = 0.5;
+	if (detail_fade > 0.001) {
+		mid = mix(aa_vertex_mid, fbm(p * 0.07 + 3.0), detail_fade);
+		// At far LOD the per-pixel mixer had no contribution to albedo:
+		// near_weight is already multiplied by detail_fade.
+		mixer = smoothstep(0.3, 0.7, value_noise(p * 0.05 + 11.0));
+	}
 	// Texture-coordinate domain warp inspired by terrain anti-tiling materials.
 	// Reuse the two already computed spatially continuous noise fields:
 	// no new texture fetches, fbm loops, GPU passes or geometry changes.
@@ -139,20 +156,6 @@ void fragment() {
 	vec2 cliff_dy_zy = dFdy(world_position.zy / tile_meters);
 	vec2 cliff_dx_xy = dFdx(world_position.xy / tile_meters);
 	vec2 cliff_dy_xy = dFdy(world_position.xy / tile_meters);
-	float camera_distance = distance(p, CAMERA_POSITION_WORLD.xz);
-	float detail_fade = 1.0 - smoothstep(aa_terrain_detail_radius,
-		aa_terrain_detail_radius + 24.0, camera_distance);
-	// Quality-dependent material complexity, like distance-faded detail
-	// in high-end engines: far pixels reuse one interpolated vertex field.
-	// Within the full-detail radius, the old pixel noise is preserved exactly.
-	float mid = aa_vertex_mid;
-	float mixer = 0.5;
-	if (detail_fade > 0.001) {
-		mid = mix(aa_vertex_mid, fbm(p * 0.07 + 3.0), detail_fade);
-		// At far LOD the per-pixel mixer had no contribution to albedo:
-		// near_weight is already multiplied by detail_fade.
-		mixer = smoothstep(0.3, 0.7, value_noise(p * 0.05 + 11.0));
-	}
 
 	// Biome weights from the chunk map, sampled between texel centres so neighbouring chunks meet exactly.
 	vec2 local = (p - chunk_origin) / chunk_size;
