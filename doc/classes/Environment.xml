@@ -18,6 +18,17 @@
 		<link title="Third Person Shooter (TPS) Demo">https://godotengine.org/asset-library/asset/2710</link>
 	</tutorials>
 	<methods>
+		<method name="configure_ssil">
+			<return type="void" />
+			<param index="0" name="enabled" type="bool" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="intensity" type="float" />
+			<param index="3" name="sharpness" type="float" />
+			<param index="4" name="normal_rejection" type="float" />
+			<description>
+				Configures screen-space indirect lighting in one [RenderingServer] update. Intended for switching real-time lighting quality without repeatedly reconfiguring the renderer. Identical settings are skipped. Inputs must be finite; radius must be in (0, 16], intensity in [0, 16], and sharpness and normal rejection in [0, 1]. Invalid input leaves the previous configuration unchanged. Only Forward+ supports SSIL. Provided by the Cgame engine fork.
+			</description>
+		</method>
 		<method name="configure_sdfgi">
 			<return type="void" />
 			<param index="0" name="enabled" type="bool" />
