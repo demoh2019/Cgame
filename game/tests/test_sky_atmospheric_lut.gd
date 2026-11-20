@@ -4,6 +4,7 @@ extends RefCounted
 const Profiles = preload("res://scripts/client/graphics_profiles.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const Quality = preload("res://scripts/client/graphics_quality.gd")
+const SkyFogHarmony = preload("res://scripts/client/sky_fog_harmony.gd")
 
 
 func run(t) -> void:
@@ -49,3 +50,37 @@ func run(t) -> void:
 			var low := image.get_pixel(0, 31)
 			t.check(top.b > top.r, "zenith scattering emphasizes blue wavelengths")
 			t.check(low.a < top.a, "horizon has lower optical transmittance")
+		if generator.has_method("sample_scattering") and image != null:
+			var exact_zenith: Color = generator.call("sample_scattering", 1.0, 1.0, 2.0)
+			var exact_horizon: Color = generator.call("sample_scattering", -0.08, 1.0, 2.0)
+			t.near(exact_zenith.r, top.r, 0.003,
+				"native CPU scattering shares the LUT's red optical model")
+			t.near(exact_zenith.b, top.b, 0.003,
+				"native CPU scattering shares the LUT's blue optical model")
+			t.near(exact_horizon.a, low.a, 0.003,
+				"fog color sampling shares the exact horizon transmission")
+		elif image != null:
+			t.check(false, "native sky LUT exports direct scattering for coherent world fog")
+
+	t.current = "the world horizon uses exactly the same atmosphere blend as the sky"
+	var horizon := Color(0.5, 0.6, 0.7)
+	var optical := Color(0.2, 0.15, 0.1, 0.5)
+	var result: Color = SkyFogHarmony.blend(horizon, optical, 1.0, 1.0, 0.0)
+	for channel in [result.r, result.g, result.b]:
+		t.near(channel, 0.45, 0.0001,
+			"world fog matches shader optical absorption and in-scattering")
+	t.eq(SkyFogHarmony.blend(horizon, optical, 0.0, 1.0, 0.0), horizon,
+		"disabled atmospheric LUT keeps original horizon without extra work")
+	t.eq(SkyFogHarmony.blend(horizon, optical, 1.0, 0.0, 0.0), horizon,
+		"night sky does not incorrectly light distant world fog")
+	var wet: Color = SkyFogHarmony.blend(horizon, optical, 1.0, 1.0, 1.0)
+	t.check(wet.r > result.r,
+		"heavy clouds attenuate the new daytime atmosphere tint")
+	t.eq(SkyFogHarmony.blend(horizon, Color(NAN, 0.0, 0.0), 1.0, 1.0, 0.0),
+		horizon, "invalid native optical data cannot contaminate fog color")
+	t.check(atmo_code.contains("SkyFogHarmony.blend(horizon, _sky_horizon_optical"),
+		"live fog applies spectral scattering to the existing daylight horizon")
+	t.check(atmo_code.contains('_sky_scattering_generator.has_method("sample_scattering")'),
+		"older engine builds retain the unmodified fog fallback")
+	t.check(atmo_code.contains('CinematicFog.apply_weather(environment, daylight, sun_height, storm,'),
+		"game still uses the existing fog and biome weather pipeline")
