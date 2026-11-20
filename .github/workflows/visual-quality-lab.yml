@@ -49,7 +49,8 @@ jobs:
           for script in \
             res://tests/test_adaptive_resolution.gd \
             res://tests/test_quality_manager.gd \
-            res://tests/test_atmosphere.gd; do
+            res://tests/test_atmosphere.gd \
+            res://tests/test_foliage.gd; do
             /tmp/godot-bin/Godot_v4.6.3-stable_linux.x86_64 --headless --path . --script "$script"
           done
 
