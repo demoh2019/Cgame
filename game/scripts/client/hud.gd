@@ -878,6 +878,12 @@ func _build() -> void:
 	guardian_button.tooltip_text = "Melee weapon, party, 25 combat energy, 20s cooldown; defend nearby allies"
 	guardian_button.pressed.connect(func() -> void: client.guardian_taunt())
 	inventory_box.add_child(guardian_button)
+	var shield_button := Button.new()
+	shield_button.name = "PartyShieldWall"
+	shield_button.text = "Shield Wall (party melee)"
+	shield_button.tooltip_text = "Guardian with an owned melee weapon: nearby allies within 5.5m take 22% less infected claw damage (12% boss claw) for 6 seconds. Costs 30 energy, 32s cooldown; no PvP, acid or AoE."
+	shield_button.pressed.connect(func() -> void: client.party_shield_wall())
+	inventory_box.add_child(shield_button)
 	var intercept_button := Button.new()
 	intercept_button.name = "GuardianIntercept"
 	intercept_button.text = "Guard ally (one PvE hit)"
@@ -2278,6 +2284,13 @@ func _on_event(event: Dictionary) -> void:
 		"guardian_retribution":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("GUARDIAN COUNTERSTRIKE! +25% melee damage against the intercepted infected.")
+		"party_shield_wall_block":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("SHIELD WALL: guardian #%d prevented %.1f infected melee damage to you!" % [
+					int(event.get("by", -1)), float(event.get("prevented", 0.0))])
+			elif int(event.get("by", -1)) == client.peer_id:
+				say("SHIELD WALL: prevented %.1f infected damage to ally #%d." % [
+					float(event.get("prevented", 0.0)), int(event.get("peer", -1))])
 		"guardian_intercept":
 			if int(event.get("by", -1)) == client.peer_id:
 				if bool(event.get("counter_ready", false)):
@@ -2704,6 +2717,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		say("Decoy deployed: nearby idle infected investigate the sound." if bool(data.get("ok", false)) else
 				"Decoy denied: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "party_shield_wall":
+		if bool(data.get("ok", false)):
+			say("SHIELD WALL active for %.0fs; protecting %d nearby allies." % [
+				float(data.get("seconds", 0.0)), int(data.get("allies", 0))])
+		else:
+			say("Shield Wall: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "guardian_intercept":
 		if bool(data.get("ok", false)):
 			say("GUARD LINK: ally #%d guarded for %.0fs, next melee hit only." % [
@@ -3083,6 +3103,16 @@ func _process(_delta: float) -> void:
 	if not flank_hint.is_empty():
 		_info_label.text += "\nFLANK OPEN: infected #%d (+%d%% basic melee) — stay behind while ally tanks" % [
 			int(flank_hint.get("zombie", -1)), int(flank_hint.get("bonus", 18))]
+	var wall_active: float = float(client.you.get("shield_wall_seconds", 0.0))
+	var wall_cooldown: float = float(client.you.get("shield_wall_cooldown", 0.0))
+	if wall_active > 0.0:
+		_info_label.text += "\nSHIELD WALL: %.1fs (allies -22%% infected claw, raid -12%%)" % wall_active
+	elif wall_cooldown > 0.0:
+		_info_label.text += "\nShield Wall ready in %.0fs" % wall_cooldown
+	var guarded_for: float = float(client.you.get("shield_wall_guarded_seconds", 0.0))
+	if guarded_for > 0.0:
+		_info_label.text += "\nSHIELDED by guardian #%d: %.1fs (PvE melee only)" % [
+			int(client.you.get("shield_wall_guarded_by", -1)), guarded_for]
 	var intercept_active: float = float(client.you.get("guardian_intercept_seconds", 0.0))
 	var intercept_cooldown: float = float(client.you.get("guardian_intercept_cooldown", 0.0))
 	if intercept_active > 0.0:
