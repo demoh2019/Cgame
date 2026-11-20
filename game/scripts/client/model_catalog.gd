@@ -6,6 +6,7 @@ extends RefCounted
 ## Kenney fallback". Which entry a house or prop takes is `variant % available.size()`, so the world data never has to know.
 
 const PACKS := "res://assets/packs/"
+const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
 
 # kind: "footprint" (longest horizontal side), "height" or "length" (longest horizontal side too, for walls and fences).
 # tex: a texture to put on every surface (the Highlands FBX files carry no usable material); node: the object inside a collection.
@@ -297,6 +298,10 @@ static func bake(path: String, node_name: String, kind: String, size: float, tex
 	var longest: float = maxf(maxf(box.size.x, box.size.z), 0.0001)
 	var factor: float = (size / maxf(box.size.y, 0.0001)) if kind == "height" else (size / longest)
 	var offset := Vector3(-(box.position.x + box.size.x * 0.5), -box.position.y, -(box.position.z + box.size.z * 0.5))
+	# The importer LOD thresholds describe geometric error in source units.
+	# Account for the node hierarchy's nonuniform scale conservatively.
+	var world_scale: float = factor * maxf(
+		maxf(transform.basis.x.length(), transform.basis.y.length()), transform.basis.z.length())
 	var baked := ArrayMesh.new()
 	var texture: Texture2D = null
 	if texture_path != "":
@@ -318,7 +323,7 @@ static func bake(path: String, node_name: String, kind: String, size: float, tex
 				turned[i] = (normal_basis * normals[i]).normalized()
 			arrays[Mesh.ARRAY_NORMAL] = turned
 		arrays[Mesh.ARRAY_TANGENT] = null # Tangents would need the same turning; the ground-level props do without normal maps.
-		baked.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		baked.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], MeshLOD.copy_lods(source.mesh, surface, world_scale))
 		var material: Material = source.mesh.surface_get_material(surface)
 		if texture != null:
 			var painted := StandardMaterial3D.new()
@@ -353,7 +358,7 @@ static func _fit_mesh(source: Mesh, kind: String, size: float) -> Mesh:
 		for i in vertices.size():
 			vertices[i] = (vertices[i] + offset) * factor
 		arrays[Mesh.ARRAY_VERTEX] = vertices
-		fitted.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		fitted.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], MeshLOD.copy_lods(source, surface, factor))
 		fitted.surface_set_material(surface, source.surface_get_material(surface))
 	return fitted
 
@@ -468,7 +473,7 @@ static func _scaled(source: Mesh, offset: Vector3, factor: float, texture: Textu
 			moved[i] = (vertices[i] + offset) * factor
 		arrays[Mesh.ARRAY_VERTEX] = moved
 		arrays[Mesh.ARRAY_TANGENT] = null
-		result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], MeshLOD.copy_lods(source, surface, factor))
 		var material := StandardMaterial3D.new()
 		material.albedo_texture = texture
 		material.roughness = 0.9
