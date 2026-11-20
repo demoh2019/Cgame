@@ -34,6 +34,7 @@ const SUITES := [
 	"res://tests/test_combat_animation_priority.gd",
 	"res://tests/test_vfx_parity.gd",
 	"res://tests/test_camera_post_parity.gd",
+	"res://tests/test_combat_camera_feedback.gd",
 	"res://tests/test_audio_parity.gd",
 	"res://tests/test_audio_geometry_occlusion.gd",
 	"res://tests/test_animation_parity.gd",
