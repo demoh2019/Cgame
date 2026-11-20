@@ -437,7 +437,10 @@ half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 tex_
 	if (blocker_count > 0.0) {
 		//blockers found, do soft shadow
 		blocker_average /= blocker_count;
-		float penumbra = (-pssm_coord.z + blocker_average) / (1.0 - blocker_average);
+		// PCSS blockers at the far plane may equal 1.0. Bound the
+		// penumbra so the filter cannot produce Inf/NaN UVs on Metal.
+		float penumbra = clamp((blocker_average - pssm_coord.z) /
+				max(1.0 - blocker_average, 0.0001), 0.0, 8.0);
 		tex_scale *= penumbra;
 
 		float s = 0.0;
@@ -576,7 +579,9 @@ void light_process_omni(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 			if (blocker_count > 0.0) {
 				//blockers found, do soft shadow
 				blocker_average /= blocker_count;
-				float penumbra = (-z_norm + blocker_average) / (1.0 - blocker_average);
+				// Guard depth-map extremities and prevent unbounded PCSS footprints.
+				float penumbra = clamp((blocker_average - z_norm) /
+						max(1.0 - blocker_average, 0.0001), 0.0, 8.0);
 				tangent *= penumbra;
 				bitangent *= penumbra;
 
@@ -859,7 +864,9 @@ void light_process_spot(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 			if (blocker_count > 0.0) {
 				//blockers found, do soft shadow
 				blocker_average /= blocker_count;
-				float penumbra = (-z_norm + blocker_average) / (1.0 - blocker_average);
+				// Guard depth-map extremities and prevent unbounded PCSS footprints.
+				float penumbra = clamp((blocker_average - z_norm) /
+						max(1.0 - blocker_average, 0.0001), 0.0, 8.0);
 				uv_size *= penumbra;
 
 				shadow = half(0.0);
@@ -1079,7 +1086,9 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 			if (blocker_count > 0.0) {
 				//blockers found, do soft shadow
 				blocker_average /= blocker_count;
-				float penumbra = (-z_norm + blocker_average) / (1.0 - blocker_average);
+				// Guard depth-map extremities and prevent unbounded PCSS footprints.
+				float penumbra = clamp((blocker_average - z_norm) /
+						max(1.0 - blocker_average, 0.0001), 0.0, 8.0);
 				tangent *= penumbra;
 				bitangent *= penumbra;
 
