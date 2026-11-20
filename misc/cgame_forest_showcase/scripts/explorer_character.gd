@@ -16,6 +16,7 @@ const CENTER_ABOVE_GROUND: float = CAPSULE_HEIGHT * 0.5
 const EYE_FROM_CENTER: float = 0.76
 
 var movement_enabled: bool = true
+var streaming_world: WorldPartition3D
 
 
 func _ready() -> void:
@@ -37,6 +38,12 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+    # Async stream initialization and savegame teleports must not let the
+    # character fall before the destination HeightMapShape3D is registered.
+    if not movement_enabled:
+        velocity = Vector3.ZERO
+        return
+
     var direction := Vector3.ZERO
     if movement_enabled:
         var horizontal := 0.0
@@ -59,6 +66,17 @@ func _physics_process(delta: float) -> void:
     velocity.x = move_toward(velocity.x, direction.x * speed, response * delta)
     velocity.z = move_toward(velocity.z, direction.z * speed, response * delta)
 
+    # An asynchronously loading neighboring cell may be absent for a frame
+    # even though its resource was requested. Stop at the seam rather than
+    # moving the capsule beyond the loaded collision tiles.
+    var horizontal_motion := Vector3(velocity.x, 0.0, velocity.z) * delta
+    if horizontal_motion.length_squared() > 0.000001:
+        var edge_offset: Vector3 = horizontal_motion.normalized() * (CAPSULE_RADIUS + 0.04)
+        var upcoming: Vector3 = global_position + horizontal_motion + edge_offset
+        if not _position_has_terrain(upcoming):
+            velocity.x = 0.0
+            velocity.z = 0.0
+
     if is_on_floor():
         if movement_enabled and Input.is_physical_key_pressed(KEY_SPACE):
             velocity.y = jump_speed
@@ -68,6 +86,14 @@ func _physics_process(delta: float) -> void:
         velocity.y -= gravity_strength * delta
 
     move_and_slide()
+
+
+func _position_has_terrain(world_position: Vector3) -> bool:
+    if streaming_world == null:
+        return true
+    var local: Vector3 = streaming_world.to_local(world_position)
+    var cell: Vector2i = streaming_world.local_position_to_cell(local)
+    return streaming_world.is_cell_loaded(cell)
 
 
 func teleport_to_ground(world_x: float, world_z: float, ground_y: float) -> void:
