@@ -67,6 +67,9 @@ void MultiMeshInstance3D::_notification(int p_what) {
 }
 
 void MultiMeshInstance3D::set_multimesh(const Ref<MultiMesh> &p_multimesh) {
+	if (multimesh == p_multimesh) {
+		return; // Avoid unnecessary set_base() calls for unchanged MultiMesh resources.
+	}
 	multimesh = p_multimesh;
 	if (multimesh.is_valid()) {
 		set_base(multimesh->get_rid());
