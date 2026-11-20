@@ -44,6 +44,29 @@ world.additional_observer_paths = [world.get_path_to($OtherPlayer)]
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
 
+## Offline HLOD proxy authoring example
+
+The built-in demo at `modules/world_partition/demo/` includes a headless
+content-generation tool: `tools/bake_hlod_proxies.gd`. It instantiates the
+example detailed forest at each cell origin, subsamples MultiMesh transforms,
+uses simpler canopy geometry, and writes packed proxy scenes to
+`res://generated/forest_proxy_X_Z.tscn`. The game prefers these saved scenes,
+falling back to dynamic proxy generation where an asset is missing.
+
+```sh
+# Runs with a stock Godot editor, before compiling this Cgame fork.
+godot --headless --path modules/world_partition/demo --import --quit
+godot --headless --path modules/world_partition/demo \
+  --script res://tools/bake_hlod_proxies.gd -- --radius=6 --stride=8
+godot --headless --path modules/world_partition/demo \
+  --script res://tests/hlod_bake_test.gd
+```
+
+This is a **demo-specific offline foliage/mesh subsampler**, not an editor
+plugin that automatically merges arbitrary authored scenes, bakes texture
+atlases or builds HLOD layers. Mesh/scene import, source file changes and
+performance on the intended hardware still require validation.
+
 ## Tests
 
 The module includes 66 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (45), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
@@ -57,7 +80,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
-- **No automatic editor bake/partition yet.** Split source scenes and save each cell manually. Automated authoring and terrain/HLOD export are future integrations.
+- **No general-purpose editor partitioner or mesh-merging HLOD baker yet.** The demo has a specialized offline forest proxy exporter, but arbitrary authored scenes still require their own cell splitter and asset-generation pipeline.
 - **No terrain sculpting, painting or foliage authoring in this module.** They can output regular cell `PackedScene` resources.
 - **No cancellation primitive for a running ResourceLoader request.** Moving the observer drops obsolete pending instances; the running resource request finishes and is then discarded.
 - **No per-cell physics/navmesh warmup guarantees or server-style streaming replication.** Instances use the regular scene tree.
