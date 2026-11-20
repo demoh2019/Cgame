@@ -18,6 +18,8 @@ global uniform float aa_terrain_wet_clearcoat;
 #endif
 // World-height curvature stored in native vertex colors, not a texture.
 global uniform float aa_terrain_curvature_strength;
+ // GPU receives the baked horizon from existing terrain COLOR.b; no lookup.
+ global uniform float aa_terrain_horizon_ao_strength;
 global uniform float aa_puddle_ripple_strength;
 // Radius of full two-scale albedo and normal mapping; shared by all streamed chunks.
 global uniform float aa_terrain_detail_radius;
@@ -483,8 +485,17 @@ void fragment() {
 		* aa_terrain_curvature_strength * detail_fade;
 	float ridge = clamp(COLOR.g, 0.0, 1.0)
 		* aa_terrain_curvature_strength * detail_fade;
-	AO = ground_contact * micro_shadow * (1.0 - cavity * 0.24);
-	ALBEDO = color * (1.0 - cavity * 0.095 + ridge * 0.035)
+	// Native CPU sky-view integration, baked into the third existing vertex
+	// color component. High/Ultra get softly darker valley floors; the
+	// Quality=0 branch preserves all original low-end material behavior.
+	float sky_visibility = 1.0;
+	if (aa_terrain_horizon_ao_strength > 0.001) {
+		sky_visibility = mix(1.0, clamp(COLOR.b, 0.0, 1.0),
+			clamp(aa_terrain_horizon_ao_strength, 0.0, 1.0));
+	}
+	AO = ground_contact * micro_shadow * (1.0 - cavity * 0.24) * sky_visibility;
+	ALBEDO = color * mix(1.0, sky_visibility, 0.10)
+		* (1.0 - cavity * 0.095 + ridge * 0.035)
 		* mix(1.0, ground_contact, 0.12)
 		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), aa_vertex_cloud_shadow);
 	// Sunlight focused by moving shallow waves only on submerged near-field
