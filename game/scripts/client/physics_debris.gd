@@ -9,6 +9,7 @@ extends Node3D
 ## Per-tier budgets cap live bodies; the oldest are recycled first.
 
 const Ragdoll = preload("res://scripts/client/ragdoll.gd")
+const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 
 const LAYER := 1 << 20
 const CHUNK_BUDGET := [0, 10, 24, 48] # Low, Medium, High, Ultra.
@@ -261,7 +262,12 @@ func eject_casing(at: Vector3, facing_yaw: float) -> bool:
 
 
 ## Queue a radial impulse field; applied on the next physics step to debris and ragdoll bones in range.
+## The one place blasts push debris and ragdolls (physics_world_fx feeds it): the engine's
+## RadialForceField3D when compiled in, else the script sphere query below — never both.
 func blast(center: Vector3, radius: float, impulse: float) -> void:
+	if radius > 0.0 and impulse > 0.0 and center.is_finite() and is_inside_tree() \
+			and EngineFeatures.radial_push(self, center, radius, impulse, 0.6, LAYER | Ragdoll.LAYER):
+		return
 	if radius > 0.0 and impulse > 0.0 and center.is_finite() and _blasts.size() < 8:
 		_blasts.append([center, radius, impulse])
 
