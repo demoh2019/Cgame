@@ -17,4 +17,13 @@ func run(t) -> void:
 	GraphicsQuality.set_level(99, false)
 	t.eq(GraphicsQuality.level(), 3, "setting level is clamped")
 	t.eq(GraphicsQuality.get_name(), "Ultra", "level has a display name")
+	t.current = "scalable foliage and resolution"
+	var low: Dictionary = GraphicsQuality.profile(0)
+	var balanced: Dictionary = GraphicsQuality.profile(1)
+	var high: Dictionary = GraphicsQuality.profile(2)
+	var ultra: Dictionary = GraphicsQuality.profile(3)
+	t.check(float(low["scale"]) < float(balanced["scale"]) and float(balanced["scale"]) < float(high["scale"]), "RD upscaler quality steps are ordered")
+	t.check(float(low["grass_radius"]) < float(balanced["grass_radius"]) and float(balanced["grass_radius"]) < float(high["grass_radius"]) and float(high["grass_radius"]) < float(ultra["grass_radius"]), "grass distances increase with quality")
+	t.check(int(low["grass_budget"]) < int(ultra["grass_budget"]), "grass generation is cheaper on Performance")
+	t.check(not bool(low["ssil"]) and bool(ultra["ssil"]), "indirect light is exclusive to Ultra")
 	GraphicsQuality.set_level(1, false)
