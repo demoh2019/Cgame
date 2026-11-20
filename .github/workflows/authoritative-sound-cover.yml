@@ -1,0 +1,56 @@
+name: Authoritative acoustic cover and AI hearing
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "modules/gameplay_fx/**"
+      - "game/scripts/shared/infected_hearing.gd"
+      - "game/scripts/shared/zombie.gd"
+      - "game/tests/test_infected_acoustic_cover.gd"
+      - "game/tests/run_all.gd"
+      - ".github/workflows/authoritative-sound-cover.yml"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/gameplay_fx/**"
+      - "game/scripts/shared/infected_hearing.gd"
+      - "game/scripts/shared/zombie.gd"
+      - "game/tests/test_infected_acoustic_cover.gd"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  acoustic-policy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify portable hearing physics with bounded inputs
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            modules/gameplay_fx/tests/test_sound_propagation_policy.cpp \
+            -o /tmp/test_sound_propagation_policy
+          /tmp/test_sound_propagation_policy
+      - name: Verify native/stock engine, world geometry and AI test wiring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          engine = Path("modules/gameplay_fx/sound_propagation.cpp").read_text()
+          register = Path("modules/gameplay_fx/register_types.cpp").read_text()
+          policy = Path("game/scripts/shared/infected_hearing.gd").read_text()
+          ai = Path("game/scripts/shared/zombie.gd").read_text()
+          test = Path("game/tests/test_infected_acoustic_cover.gd").read_text()
+          runner = Path("game/tests/run_all.gd").read_text()
+          assert "SoundPropagationPolicy::hearing_radius" in engine
+          assert "GDREGISTER_CLASS(SoundPropagation)" in register
+          assert 'ClassDB.class_exists("SoundPropagation")' in policy
+          assert "RangedCover.first_blocker_distance" in policy
+          assert "InfectedHearing.audible(" in ai
+          assert "distance > scent and peer_id != target_id" in ai
+          assert "real destructible barricade changes authoritative AI hearing" in test
+          assert "test_infected_acoustic_cover.gd" in runner
+          PY
