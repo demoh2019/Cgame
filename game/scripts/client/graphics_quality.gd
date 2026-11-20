@@ -166,6 +166,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Populate the cached-sky fast path and directional sunset haze budget.
 		atmosphere_profile["sky_use_cached_radiance"] = world_profile["sky_use_cached_radiance"]
 		atmosphere_profile["sky_scattering_strength"] = world_profile["sky_scattering_strength"]
+		atmosphere_profile["moon_detail_strength"] = world_profile["moon_detail_strength"]
 		# Only desktop Forward+ gets froxel volumetrics. Compatibility/Mobile use
 		# one lightweight weather-driven height-fog layer instead.
 		atmosphere_profile["quality_level"] = _level
