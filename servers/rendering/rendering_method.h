@@ -326,6 +326,9 @@ public:
 	virtual float environment_get_lens_flare(RID p_env) const = 0;
 	virtual void environment_set_lens_vignette(RID p_env, float p_amount) = 0;
 	virtual float environment_get_lens_vignette(RID p_env) const = 0;
+	virtual void environment_set_white_balance(RID p_env, float p_temperature, float p_tint) = 0;
+	virtual float environment_get_white_temperature(RID p_env) const = 0;
+	virtual float environment_get_white_tint(RID p_env) const = 0;
 	virtual float environment_get_motion_blur(RID p_env) const = 0;
 
 	virtual bool environment_get_adjustments_enabled(RID p_env) const = 0;

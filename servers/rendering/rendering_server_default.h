@@ -902,6 +902,7 @@ public:
 	FUNC7(environment_set_adjustment, RID, bool, float, float, float, bool, RID)
 	FUNC5(environment_set_lens_effects, RID, float, float, float, float)
 	FUNC2(environment_set_lens_vignette, RID, float)
+	FUNC3(environment_set_white_balance, RID, float, float)
 
 	FUNC11(environment_set_fog, RID, bool, const Color &, float, float, float, float, float, float, float, RSE::EnvironmentFogMode)
 

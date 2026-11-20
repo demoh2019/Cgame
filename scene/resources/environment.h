@@ -229,6 +229,9 @@ private:
 	float lens_film_grain = 0.0;
 	float lens_flare = 0.0;
 	float lens_vignette = 0.0;
+	float lens_white_temperature = 0.0;
+	float lens_white_tint = 0.0;
+	void _update_white_balance();
 	float motion_blur_amount = 0.0;
 	void _update_lens_effects();
 
@@ -477,6 +480,10 @@ public:
 	float get_lens_flare() const;
 	void set_lens_vignette(float p_amount);
 	float get_lens_vignette() const;
+	void set_lens_white_temperature(float p_temperature);
+	float get_lens_white_temperature() const;
+	void set_lens_white_tint(float p_tint);
+	float get_lens_white_tint() const;
 	void set_motion_blur_amount(float p_amount);
 	float get_motion_blur_amount() const;
 

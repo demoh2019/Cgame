@@ -764,6 +764,8 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			tonemap.lens_time = float(time);
 			tonemap.lens_flare = environment_get_lens_flare(p_render_data->environment);
 			tonemap.lens_vignette = environment_get_lens_vignette(p_render_data->environment);
+			tonemap.white_temperature = environment_get_white_temperature(p_render_data->environment);
+			tonemap.white_tint = environment_get_white_tint(p_render_data->environment);
 			tonemap.motion_blur = environment_get_motion_blur(p_render_data->environment);
 			if (tonemap.motion_blur > 0.0f && rb->get_view_count() == 1 && rb->has_velocity_buffer(false)) {
 				tonemap.velocity_texture = rb->get_velocity_buffer(false);

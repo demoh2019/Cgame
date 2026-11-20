@@ -249,6 +249,14 @@
 			Strength of the optical vignette: a smooth, aspect-correct cos⁴ falloff that darkens the frame edges, like Unreal Engine's "Vignette Intensity" and Unity HDRP's Vignette. Applied in the tonemap pass with no extra render target. [code]0.0[/code] disables the effect.
 			[b]Note:[/b] Only supported in the Forward+ rendering method.
 		</member>
+		<member name="lens_white_temperature" type="float" setter="set_lens_white_temperature" getter="get_lens_white_temperature" default="0.0">
+			White balance temperature shift, like Unreal Engine's "White Temp" and Unity HDRP's White Balance. Negative values cool the image towards blue, positive values warm it towards orange. Applied to the HDR image before tonemapping with luminance-normalized gains, so overall brightness is preserved.
+			[b]Note:[/b] Only supported in the Forward+ rendering method.
+		</member>
+		<member name="lens_white_tint" type="float" setter="set_lens_white_tint" getter="get_lens_white_tint" default="0.0">
+			White balance tint, like Unreal Engine's "White Tint". Negative values shift towards green, positive values towards magenta. See also [member lens_white_temperature].
+			[b]Note:[/b] Only supported in the Forward+ rendering method.
+		</member>
 		<member name="motion_blur_amount" type="float" setter="set_motion_blur_amount" getter="get_motion_blur_amount" default="0.0">
 			Strength of per-pixel motion blur. [code]1.0[/code] blurs along the full screen-space motion of each pixel during one frame. Enabling it makes the renderer write motion vectors even without TAA or upscaling. [code]0.0[/code] disables the effect.
 			[b]Note:[/b] Only supported in the Forward+ rendering method, and not in XR (multiview).

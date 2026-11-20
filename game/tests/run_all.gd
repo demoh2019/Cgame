@@ -90,6 +90,7 @@ const SUITES := [
 	"res://tests/test_shader_uniform_idempotence.gd",
 	"res://tests/test_ambient_birds.gd",
 	"res://tests/test_snow_vfx.gd",
+	"res://tests/test_graphics_white_balance.gd",
 	"res://tests/test_sun_shadow_atmosphere.gd",
 	"res://tests/test_graphics_reflections.gd",
 	"res://tests/test_pbr_reflection_occlusion.gd",

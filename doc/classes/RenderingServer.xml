@@ -1427,6 +1427,15 @@
 				Sets the optical vignette strength. See [member Environment.lens_vignette] for more details.
 			</description>
 		</method>
+		<method name="environment_set_white_balance">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="temperature" type="float" />
+			<param index="2" name="tint" type="float" />
+			<description>
+				Sets the white balance. See [member Environment.lens_white_temperature] and [member Environment.lens_white_tint] for more details.
+			</description>
+		</method>
 		<method name="environment_set_sdfgi">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />

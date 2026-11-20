@@ -622,6 +622,18 @@ float RendererSceneRender::environment_get_lens_vignette(RID p_env) const {
 	return environment_storage.environment_get_lens_vignette(p_env);
 }
 
+void RendererSceneRender::environment_set_white_balance(RID p_env, float p_temperature, float p_tint) {
+	environment_storage.environment_set_white_balance(p_env, p_temperature, p_tint);
+}
+
+float RendererSceneRender::environment_get_white_temperature(RID p_env) const {
+	return environment_storage.environment_get_white_temperature(p_env);
+}
+
+float RendererSceneRender::environment_get_white_tint(RID p_env) const {
+	return environment_storage.environment_get_white_tint(p_env);
+}
+
 float RendererSceneRender::environment_get_adjustments_brightness(RID p_env) const {
 	return environment_storage.environment_get_adjustments_brightness(p_env);
 }

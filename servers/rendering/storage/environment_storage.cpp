@@ -941,6 +941,25 @@ float RendererEnvironmentStorage::environment_get_lens_vignette(RID p_env) const
 	return env->lens_vignette;
 }
 
+void RendererEnvironmentStorage::environment_set_white_balance(RID p_env, float p_temperature, float p_tint) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->white_temperature = CLAMP(p_temperature, -1.0f, 1.0f);
+	env->white_tint = CLAMP(p_tint, -1.0f, 1.0f);
+}
+
+float RendererEnvironmentStorage::environment_get_white_temperature(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.0f);
+	return env->white_temperature;
+}
+
+float RendererEnvironmentStorage::environment_get_white_tint(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.0f);
+	return env->white_tint;
+}
+
 // Adjustments
 
 void RendererEnvironmentStorage::environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction) {

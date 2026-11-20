@@ -87,7 +87,7 @@ layout(push_constant, std430) uniform Params {
 
 	vec4 tonemapper_params;
 
-	uint lens_aberration_grain; // x: chromatic aberration, y: film grain (packed halves).
+	uint lens_aberration_grain; // unorm4x8: x chromatic aberration, y film grain, z white temperature, w white tint (z,w: -1..1 mapped to 0..1).
 	float motion_blur;
 	float lens_time;
 	uint lens_flare_vignette; // x: lens flare, y: vignette (packed halves).
@@ -886,7 +886,7 @@ void main() {
 #else
 	vec4 color = textureLod(source_color, uv_interp, 0.0f);
 #endif
-	vec2 lens_params = unpackHalf2x16(params.lens_aberration_grain);
+	vec4 lens_params = unpackUnorm4x8(params.lens_aberration_grain);
 	bool motion_blurred = false;
 
 	// Per-pixel motion blur, as in Unreal Engine and Unity HDRP: the HDR scene color is
@@ -963,6 +963,18 @@ void main() {
 			color.rgb = color.rgb * (1.0 - params.glow_intensity) + glow;
 		} else {
 			color.rgb = apply_glow(color.rgb, glow, params.white);
+		}
+	}
+
+	// White balance, as in Unreal Engine 5 "White Temp/Tint" and Unity HDRP White Balance:
+	// per-channel von Kries-style gains in linear HDR, luminance-normalized so exposure holds.
+	if (bool(params.flags & FLAG_USE_LENS_EFFECTS)) {
+		float temperature = lens_params.z * 2.0 - 1.0;
+		float tint = lens_params.w * 2.0 - 1.0;
+		if (abs(temperature) > 0.004 || abs(tint) > 0.004) {
+			vec3 gains = vec3(1.0 + 0.3 * temperature + 0.1 * tint, 1.0 - 0.2 * tint, 1.0 - 0.3 * temperature + 0.1 * tint);
+			gains /= dot(gains, vec3(0.2126, 0.7152, 0.0722));
+			color.rgb *= gains;
 		}
 	}
 

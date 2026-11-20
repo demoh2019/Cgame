@@ -3,6 +3,7 @@ extends Node3D
 const CloudShadowLut = preload("res://scripts/client/cloud_shadow_lut.gd")
 const SkyRainbow = preload("res://scripts/client/sky_rainbow.gd")
 const SkyAurora = preload("res://scripts/client/sky_aurora.gd")
+const GraphicsWhiteBalance = preload("res://scripts/client/graphics_white_balance.gd")
 const SkyFogHarmony = preload("res://scripts/client/sky_fog_harmony.gd")
 const WaterCaustics = preload("res://scripts/client/water_caustics.gd")
 const Moisture = preload("res://scripts/client/weather_surface_memory.gd")
@@ -313,6 +314,8 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		{"color": base_fog_color, "density": base_fog_density})
 	# Run the ACES-grade after atmospheric weather/fog, without replacing fog state.
 	CinematicColorGrade.apply(environment, daylight, sun_height, storm)
+	# Native white balance (engine fork): warm golden hour, cool moonlight.
+	GraphicsWhiteBalance.apply(environment, daylight, sun_height, storm)
 	_bloom_elapsed += maxf(delta, 0.0)
 	if _bloom_elapsed >= BLOOM_INTERVAL:
 		_bloom_elapsed = fmod(_bloom_elapsed, BLOOM_INTERVAL)
