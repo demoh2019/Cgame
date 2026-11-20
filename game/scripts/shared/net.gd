@@ -974,7 +974,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"site_discovered", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "barricade_shot", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
+		"site_discovered", "caravan_ambushed", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "barricade_shot", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
 		"party_aid", "party_triage":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer

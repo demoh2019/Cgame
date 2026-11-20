@@ -34,6 +34,7 @@ const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CaravanRoutes = preload("res://scripts/shared/caravan_routes.gd")
+const CaravanAmbush = preload("res://scripts/shared/caravan_ambush.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
@@ -153,6 +154,7 @@ class Player:
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
 	var caravan_state: Dictionary = {} # Saved canonical source/destination IDs only.
 	var caravan_view: Dictionary = {} # Verified route details for this private client.
+	var caravan_ambushed: bool = false # One PvE ambush per active route, persisted.
 	var daily_bounty: Dictionary = {} # Account-persisted UTC daily bounty, never set by clients.
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var discovered_sites: Dictionary = {} # Personal authenticated landmark journal.
@@ -224,6 +226,7 @@ var opened_crates: Dictionary = {} # crate id -> time it refills
 var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned session clock.
 var next_horde_at: float = NightHorde.START_DELAY # Separate night event schedule.
 var night_horde: Dictionary = {} # Active IDs, expiry, tier, public event coordinates.
+var caravan_ambushes: Array[Dictionary] = [] # Bounded server waves with expiry.
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
 var siege_last_by_wall: Dictionary = {} # Session timers only; no character persistence.
@@ -318,6 +321,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.contract_state = Contracts.empty_state()
 	player.caravan_state = {}
 	player.caravan_view = {}
+	player.caravan_ambushed = false
 	player.daily_bounty = DailyBounties.empty_state()
 	player.renown = 0
 	players[peer_id] = player
@@ -357,6 +361,7 @@ func character_data(player: Player) -> Dictionary:
 		"skills": player.skills.to_dict(),
 		"contracts": player.contract_state.duplicate(true),
 		"caravan": player.caravan_state.duplicate(true),
+		"caravan_ambushed": player.caravan_ambushed,
 		"daily_bounty": player.daily_bounty.duplicate(true),
 		"renown": player.renown,
 		"discovered_sites": WorldDiscovery.to_saved(player.discovered_sites),
@@ -503,6 +508,12 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	var caravan_view: Dictionary = CaravanRoutes.from_saved(world, loaded_caravan)
 	if (loaded_caravan as Dictionary).is_empty():
 		caravan_view = {}
+	# A completed ambush flag cannot be attached to an empty or altered
+	# route. Legacy saved characters start without a live ambush mark.
+	var loaded_caravan_ambushed: Variant = data.get("caravan_ambushed", false)
+	if not (loaded_caravan_ambushed is bool) or \
+			(bool(loaded_caravan_ambushed) and caravan_view.is_empty()):
+		return false
 	var loaded_daily: Variant = data.get("daily_bounty", DailyBounties.empty_state())
 	if not DailyBounties.valid_state(loaded_daily) \
 			or int(loaded_daily["day"]) > DailyBounties.utc_day():
@@ -530,6 +541,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
 	player.caravan_state = (loaded_caravan as Dictionary).duplicate(true)
 	player.caravan_view = caravan_view.duplicate(true)
+	player.caravan_ambushed = bool(loaded_caravan_ambushed)
 	player.daily_bounty = (loaded_daily as Dictionary).duplicate(true)
 	player.renown = int(loaded_renown)
 	player.discovered_sites = loaded_discoveries["journal"]
@@ -2166,6 +2178,7 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 			return {"ok": false, "reason": "no_active"}
 		player.caravan_state = {}
 		player.caravan_view = {}
+		player.caravan_ambushed = false
 		player.dirty_character = true
 		return {"ok": true, "action": "abandon"}
 	if action != "accept" and action != "deliver":
@@ -2181,6 +2194,7 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 			return {"ok": false, "reason": "no_route"}
 		player.caravan_state = CaravanRoutes.saved_state(offer)
 		player.caravan_view = offer.duplicate(true)
+		player.caravan_ambushed = false
 		player.dirty_character = true
 		return {"ok": true, "action": "accept", "route": offer.duplicate(true)}
 	if player.caravan_state.is_empty() or player.caravan_view.is_empty():
@@ -2192,6 +2206,7 @@ func cmd_caravan(peer_id: int, action: String) -> Dictionary:
 		return outcome
 	player.caravan_state = {}
 	player.caravan_view = {}
+	player.caravan_ambushed = false
 	player.dirty_inventory = true
 	player.dirty_character = true
 	_award(player, "explorer", 20.0)
@@ -5084,6 +5099,60 @@ func _tick_night_horde() -> void:
 		return
 
 
+## Finite caravan ambushes spawn only during actual cargo transport in a
+## dangerous zone. No RPC can request enemies, wave count or threat positions.
+func _tick_caravan_ambush() -> void:
+	for index in range(caravan_ambushes.size() - 1, -1, -1):
+		var wave: Dictionary = caravan_ambushes[index]
+		if time < float(wave["expires"]):
+			continue
+		for id in wave["ids"]:
+			zombies.erase(int(id)) # Event enemies never occupy world respawn slots.
+		caravan_ambushes.remove_at(index)
+	if tick_count % CaravanAmbush.CHECK_EVERY_TICKS != 0 or \
+			raid_boss_id >= 0 or not night_horde.is_empty():
+		return
+	var capacity: int = CaravanAmbush.available(caravan_ambushes, zombies)
+	if capacity < 2:
+		return
+	var survivors: Array[Vector3] = []
+	for nearby in players.values():
+		if _alive(nearby) and nearby.position.is_finite():
+			survivors.append(nearby.position)
+	for peer_id in players.keys():
+		var player: Player = players[peer_id]
+		var route: Dictionary = player.caravan_view
+		var cargo: int = player.inventory.count(str(route.get("cargo", ""))) if not route.is_empty() else 0
+		if not CaravanAmbush.eligible(world, player.position, route,
+				cargo, player.caravan_ambushed, _alive(player)):
+			continue
+		var positions: Array[Dictionary] = CaravanAmbush.placement(world,
+				player.position, survivors, zombies, capacity,
+				rng.randi_range(0, NightHorde.ANGLES - 1))
+		if positions.size() < 2:
+			continue
+		var visible := {player.id: {"position": player.position,
+			"alive": true, "safe": false}}
+		var ids: Array[int] = []
+		for spot in positions:
+			var x: float = float(spot["x"])
+			var z: float = float(spot["z"])
+			var enemy_id: int = new_id()
+			var enemy = Zombie.new(enemy_id, str(spot["kind"]),
+				Vector3(x, world.height_at(x, z), z), -1)
+			enemy.receive_pack_alert(player.id, visible)
+			zombies[enemy_id] = enemy
+			ids.append(enemy_id)
+		player.caravan_ambushed = true
+		player.dirty_character = true
+		caravan_ambushes.append({"ids": ids,
+			"expires": time + CaravanAmbush.LIFETIME_SECONDS})
+		events.append({"type": "caravan_ambushed", "peer": player.id,
+			"count": ids.size(), "zone": world.zone_at(player.position.x,
+				player.position.z)})
+		return # One encounter per check interval, not an unbounded global burst.
+
+
 func _tick_world(delta: float) -> void:
 	for id in fish_traps.keys():
 		if time >= float(fish_traps[id]["expires"]):
@@ -5093,6 +5162,7 @@ func _tick_world(delta: float) -> void:
 			infected_snares.erase(id)
 	_tick_supply_drop()
 	_tick_night_horde()
+	_tick_caravan_ambush()
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):
 			decoys.erase(id)

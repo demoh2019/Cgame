@@ -142,6 +142,7 @@ const SUITES := [
 	"res://tests/test_vendor.gd",
 	"res://tests/test_regional_trade.gd",
 	"res://tests/test_caravan_routes.gd",
+	"res://tests/test_caravan_ambush.gd",
 	"res://tests/test_player_trade.gd",
 	"res://tests/test_party.gd",
 	"res://tests/test_party_ready.gd",

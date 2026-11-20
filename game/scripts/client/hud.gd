@@ -1012,6 +1012,9 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"caravan_ambushed":
+			say("CARAVAN AMBUSH! %d infected are converging on your cargo in a full-loot zone. Defend or flee!" % [
+				int(event.get("count", 0))])
 		"site_discovered":
 			say("DISCOVERED: %s · %d island landmarks visited! Explorer XP and renown earned." % [
 				str(event.get("name", "Unknown")), int(event.get("count", 0))])
