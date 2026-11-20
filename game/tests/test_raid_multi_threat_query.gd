@@ -84,7 +84,8 @@ func run(t) -> void:
 			t.eq(native_ranked, expected,
 				"native multi-context order exactly matches the portable GDScript order")
 			query.set("threat_positions", PackedVector3Array())
-			t.eq((query.call("get_threat_positions") as PackedVector3Array).size(), 0,
+			var cleared: PackedVector3Array = query.call("get_threat_positions")
+			t.eq(cleared.size(), 0,
 				"clearing multi-threat contexts restores the single-threat engine path")
 		else:
 			t.check(true, "pre-feature Cgame uses portable deterministic GDScript")
