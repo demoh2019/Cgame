@@ -42,6 +42,9 @@ func sample_now() -> Dictionary:
 		"unloaded": 0,
 		"total_spawned": 0,
 		"total_unloaded": 0,
+		"total_prefetched": 0,
+		"profiled_cells": 0,
+		"hottest_cell_us": 0,
 		"ai_us": 0,
 		"sleeping_npcs": 0,
 		"objects": int(Performance.get_monitor(Performance.OBJECT_COUNT))
@@ -54,6 +57,11 @@ func sample_now() -> Dictionary:
 		row["unloaded"] = streamer.last_unloaded_count
 		row["total_spawned"] = streamer.total_spawned_count
 		row["total_unloaded"] = streamer.total_unloaded_count
+		row["total_prefetched"] = streamer.total_prefetched_count
+		row["profiled_cells"] = streamer.profiled_cell_count()
+		var hottest: Array[Dictionary] = streamer.get_slowest_cells(1)
+		if not hottest.is_empty():
+			row["hottest_cell_us"] = hottest[0]["peak_spawn_us"]
 	if is_instance_valid(ai_interest):
 		row["ai_us"] = ai_interest.last_update_micros
 		row["sleeping_npcs"] = ai_interest.sleeping_npc_count()
@@ -107,7 +115,8 @@ func export_csv() -> Error:
 	var columns: PackedStringArray = PackedStringArray([
 		"elapsed_ms", "fps", "process_ms", "physics_ms", "cpu_ms",
 		"active_cells", "pending_assets", "streamer_us", "spawned",
-		"unloaded", "total_spawned", "total_unloaded", "ai_us", "sleeping_npcs", "objects"
+		"unloaded", "total_spawned", "total_unloaded", "total_prefetched",
+		"profiled_cells", "hottest_cell_us", "ai_us", "sleeping_npcs", "objects"
 	])
 	file.store_csv_line(columns)
 	for item in get_samples_oldest_first():
