@@ -321,7 +321,8 @@ func _apply_blasts() -> void:
 					var wall_ray := PhysicsRayQueryParameters3D.create(
 						center, (collider as Node3D).global_position, BLAST_WALL_MASK)
 					wall_ray.collide_with_areas = false
-					wall_ray.exclude = [(collider as PhysicsBody3D).get_rid()]
+					var excluded: Array[RID] = [(collider as PhysicsBody3D).get_rid()]
+					wall_ray.exclude = excluded
 					blocked = not space.intersect_ray(wall_ray).is_empty()
 					occlusion_rays += 1
 				shielding = blast_shielding(blocked)
