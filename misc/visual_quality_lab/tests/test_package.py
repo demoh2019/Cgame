@@ -216,8 +216,37 @@ class VisualQualityPackageTests(unittest.TestCase):
             self.assertIn(token, demo)
         self.assertLess(cell.index('add_child(_navigation_tile)'), cell.index('add_child(_npc)'))
 
+    def test_navigation_avoids_authored_rectangles_with_clearance(self):
+        nav = (ROOT / 'addons/visual_quality/navigation_tile.gd').read_text()
+        for token in ('make_obstacle_tile', 'blocked_rectangles', 'obstacle_clearance',
+                      'clipped.append', 'blocker.has_point', 'deduplicate_breaks',
+                      'result.add_polygon', 'mini(blocked.size(), 8)'):
+            self.assertIn(token, nav)
+
+    def test_streamed_rocks_match_navigation_holes(self):
+        cell = (ROOT / 'world/forest_cell.gd').read_text()
+        for token in ('_navigation_tile.blocked_rectangles', '_create_rock_obstacle',
+                      'NavigationRock', 'StaticBody3D.new()', 'BoxShape3D.new()',
+                      'shape.size = Vector3(2.2, 2.0, 2.2)'):
+            self.assertIn(token, cell)
+        self.assertLess(cell.index('add_child(_navigation_tile)'), cell.index('_create_rock_obstacle()'))
+
+    def test_ai_interest_engine_scheduler_integrated(self):
+        interest = (ROOT / 'addons/visual_quality/ai_interest_manager.gd').read_text()
+        demo = (ROOT / 'demo.gd').read_text()
+        for token in ('WorldAIInterestManager3D', 'should_simulate',
+                      'max_cells_per_update', 'Time.get_ticks_usec()',
+                      'sleeping_npc_count', 'refresh_budgeted', 'exit_margin',
+                      'set_global_enabled', 'streamer.cell_loaded.connect'):
+            self.assertIn(token, interest)
+        for token in ('AIInterest.new()', 'ai_interest.streamer = streamer',
+                      'ai_interest.player = player_character', 'ai_interest.set_quality_profile',
+                      'ai_interest.set_global_enabled', 'sleeping_npc_count()',
+                      'ai_interest.last_update_micros'):
+            self.assertIn(token, demo)
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
