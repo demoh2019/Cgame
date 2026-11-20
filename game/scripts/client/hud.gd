@@ -893,7 +893,7 @@ func _on_event(event: Dictionary) -> void:
 				say("Infected wound: severity %d. Use antiseptic or antibiotics." % int(event.get("severity", 0)))
 		"spore_enter":
 			if int(event.get("peer", -1)) == client.peer_id:
-				say("SPORE SWAMP: airborne infection! Wear a sealed expedition suit or leave.")
+				say("SPORE SWAMP: airborne infection! Use a field filter, sealed suit, or leave.")
 		"spore_exit":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Clean air: escaped the infected spores.")
@@ -1291,9 +1291,12 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nRAIN CATCHER: next harvest in %ds" % ceili(rain_remaining)
 	var spore_state: Dictionary = client.you.get("spore", {})
 	if bool(spore_state.get("active", false)):
-		_info_label.text += "\nSPORE SWAMP: +%.2f infection/s | Suit filter %d%%" % [
+		_info_label.text += "\nSPORE SWAMP: +%.2f infection/s | Total protection %d%%" % [
 			float(spore_state.get("rate", 0.0)),
 			int(round(100.0 * float(spore_state.get("protection", 0.0))))]
+	var spore_filter_left: float = float(client.you.get("spore_filter_seconds", 0.0))
+	if spore_filter_left > 0.0:
+		_info_label.text += "\nSPORE FILTER: %.0fs remaining (airborne spores only)" % spore_filter_left
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
 		round(100.0 * float(client.you.get("weather_insulation", 0.0))))
 	var visual: float = float(client.you.get("visual_signature", 1.0))

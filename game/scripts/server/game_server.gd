@@ -130,6 +130,7 @@ class Player:
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
 	var rain_cooldown: float = 0.0 # Persisted storm water collection cooldown.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
+	var spore_filter_seconds: float = 0.0 # Paid temporary swamp respirator, persisted.
 	var meal_seconds: float = 0.0 # Remaining server-ticked cooked-fish recovery buff.
 	var meal_tier: int = 0 # Zero when no meal buff is active; never client-authored.
 	var input_budget: float = 0.0
@@ -299,6 +300,7 @@ func character_data(player: Player) -> Dictionary:
 		"rest_cooldown": player.rest_cooldown, "lake_drink_cooldown": player.lake_drink_cooldown,
 		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
+		"spore_filter_seconds": player.spore_filter_seconds,
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 	}
 
@@ -363,6 +365,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.finite_number(data.get("rain_cooldown", 0.0), 0.0, RainHarvest.COOLDOWN_SECONDS):
 		return false
 	if not SaveValidation.finite_number(data.get("stim_cooldown", 0.0), 0.0, FrontierStim.COOLDOWN):
+		return false
+	if not SaveValidation.finite_number(data.get("spore_filter_seconds", 0.0),
+			0.0, SporeHazard.FILTER_DURATION_SECONDS):
 		return false
 	if not HeartyMeal.valid_state(data.get("meal_seconds", 0.0), data.get("meal_tier", 0)):
 		return false
@@ -439,6 +444,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
 	player.rain_cooldown = float(data.get("rain_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
+	player.spore_filter_seconds = float(data.get("spore_filter_seconds", 0.0))
 	player.meal_seconds = float(data.get("meal_seconds", 0.0))
 	player.meal_tier = int(data.get("meal_tier", 0))
 	player.inventory = parsed_bag["inventory"]
@@ -2166,6 +2172,18 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 				return {"ok": false, "reason": "not_carried"}
 			player.combat_energy = FrontierStim.apply(player.survival, player.combat_energy)
 			player.stim_cooldown = FrontierStim.COOLDOWN
+		"spore_filter":
+			if item_id != SporeHazard.FILTER_ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if not SaveValidation.finite_number(player.spore_filter_seconds,
+					0.0, SporeHazard.FILTER_DURATION_SECONDS):
+				return {"ok": false, "reason": "invalid_state"}
+			if player.spore_filter_seconds > 0.0:
+				return {"ok": false, "reason": "already_filtered",
+					"remaining": player.spore_filter_seconds}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.spore_filter_seconds = SporeHazard.FILTER_DURATION_SECONDS
 		"scent_mask":
 			if item_id != FieldScentMask.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3002,6 +3020,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.action = {}
 	victim.dodge_immunity = 0.0
 	victim.guardian_brace = 0.0
+	victim.spore_filter_seconds = 0.0
 	parties.clear_standard_by(victim.id)
 	parties.cancel_ready_check_for(victim.id)
 	victim.meal_seconds = 0.0
@@ -3137,14 +3156,26 @@ func _tick_players(delta: float) -> void:
 		if FieldCampfire.has_warmth(campfires, player.position, time):
 			weather_severity = 0.0
 		damage += player.survival.weather_tick(delta, weather_severity)
-		# Only the server knows the terrain, time and actually carried sealed suit.
-		var spores: Dictionary = SporeHazard.status(world, player.position, time, worn_armor)
+		# The filter only protects for the portion of a tick it actually covers.
+		# An oversized server tick cannot extend the buff past its remaining time.
+		var remaining_filter: float = player.spore_filter_seconds
+		var filtered_seconds: float = minf(maxf(0.0, remaining_filter), maxf(0.0, delta))
+		var unfiltered_seconds: float = maxf(0.0, delta) - filtered_seconds
+		var spores: Dictionary = SporeHazard.status(world, player.position, time,
+			worn_armor, remaining_filter)
 		var in_spores: bool = bool(spores["active"])
 		if in_spores != player.spore_exposed:
 			player.spore_exposed = in_spores
 			events.append({"type": "spore_enter" if in_spores else "spore_exit",
 				"peer": player.id, "rate": float(spores["rate"])})
-		if in_spores and player.survival.add_infection(float(spores["rate"]) * maxf(0.0, delta)):
+		var spore_dose: float = float(spores["rate"]) * filtered_seconds
+		if unfiltered_seconds > 0.0:
+			var bare_spores: Dictionary = SporeHazard.status(world, player.position, time, worn_armor)
+			spore_dose += float(bare_spores["rate"]) * unfiltered_seconds
+		if in_spores and player.survival.add_infection(spore_dose):
+			player.dirty_character = true
+		if remaining_filter > 0.0 and delta > 0.0:
+			player.spore_filter_seconds = maxf(0.0, remaining_filter - delta)
 			player.dirty_character = true
 		if player.survival.exposure > 0.0 or player.survival.warmth_seconds > 0.0:
 			player.dirty_character = true
@@ -4001,7 +4032,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"weather_sight": Weather.sight_multiplier(
 				Weather.conditions(world, player.position.x, player.position.z, time)),
 			"spore": SporeHazard.status(world, player.position, time,
-				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else ""),
+				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else "",
+				player.spore_filter_seconds),
+			"spore_filter_seconds": player.spore_filter_seconds,
 			"weather_insulation": Weather.protection(
 				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else ""),
 			"lake_drink_cooldown": player.lake_drink_cooldown,

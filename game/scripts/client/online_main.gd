@@ -601,6 +601,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_quick_use("frontier_stim")
 			KEY_SLASH:
 				_quick_use("herbal_scent_mask")
+			KEY_SEMICOLON:
+				_quick_use("spore_filter")
 			KEY_R:
 				client.drink()
 			KEY_T:

@@ -309,6 +309,12 @@ static func _build_items() -> void:
 		"stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("charcoal_filter", "charcoal_filter", 1,
 		{"cloth_1": 1, "wood_1": 1, "stone_1": 1}, "", 2.5)
+	# One paid 120-second expedition filter against ambient swamp infection.
+	# Does not mitigate bites, spitter acid, combat damage or PvP.
+	_add_item("spore_filter", {"name": "Expedition Spore Filter",
+		"kind": "spore_filter", "stack": 5, "weight": 0.35, "value": 35})
+	_add_recipe("spore_filter", "spore_filter", 1,
+		{"charcoal_filter": 1, "cloth_1": 2, "field_antiseptic": 1}, "", 3.0)
 	# Permanent T1 expedition tool; each bottled-water refill still consumes
 	# one carbon filter and a real timed stop at a natural shoreline.
 	_add_item("field_canteen", {"name": "Reusable Field Canteen",

@@ -33,6 +33,7 @@ const SUITES := [
 	"res://tests/test_weather.gd",
 	"res://tests/test_storm_stealth.gd",
 	"res://tests/test_spore_hazard.gd",
+	"res://tests/test_spore_filter.gd",
 	"res://tests/test_stormcoats.gd",
 	"res://tests/test_field_water.gd",
 	"res://tests/test_rain_harvest.gd",
