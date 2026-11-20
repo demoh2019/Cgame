@@ -42,6 +42,16 @@ the server to drop the connection, so it is not the default.
   quantifying frame-rate improvements. Tile LOD recalculation is also skipped
   for stationary cameras until they move at least 25 cm, a new tile appears,
   or the quality/FOV/pixel budget changes; wind remains GPU-animated.
+* Native engine pixel-density LOD: our Godot fork adds
+  `Camera3D.get_pixels_per_meter_at_position(world_point)` (C++ scene camera API).
+  Grass in `chunk_view.gd` uses the actual camera projection and per-tile depth
+  for smooth, angle/zoom/height-aware mesh and density selection. A conservative
+  40% horizontal-distance mix retains the original grass-carpet composition.
+  4K pixel budgets are bounded; native query work is amortized by the existing
+  0.35s refresh and camera-motion cache. Upstream Godot safely keeps the old
+  FOV/distance algorithm. The engine API, game integration and profiling recipe
+  are detailed in `docs/CAMERA_SCREEN_SPACE_LOD.md`. Regression:
+  `tests/test_camera_pixel_density.gd`.
 * Feedback: banners for captured outposts and sieges, rings and bursts for restoration pulses, flashes, pinning bolts, knockback
   and smashed barricades; music stings on death, level-ups and victories.
 
