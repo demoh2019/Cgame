@@ -78,7 +78,7 @@ static func thunder_wave() -> AudioStreamWAV:
 ## never creates thunder and underground players hear no outdoor bolt.
 func on_strike(event: Dictionary, listener: Vector3, height_at: Callable,
 		underground: bool) -> bool:
-	if underground or not is_inside_tree() or not listener.is_finite() \
+	if underground or not listener.is_finite() \
 			or str(event.get("type", "")) != "lightning_struck" \
 			or not event.has("x") or not event.has("z") \
 			or not height_at.is_valid():
