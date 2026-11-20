@@ -36,6 +36,10 @@ func run(t) -> void:
 	t.check(int(low["grass_budget"]) < int(ultra["grass_budget"]), "grass generation is cheaper on Performance")
 	t.check(not bool(low["sdfgi"]) and not bool(high["sdfgi"]) and bool(ultra["sdfgi"]),
 		"optional SDFGI bounced light is exclusive to Ultra")
+	t.check(not bool(low["ssil"]) and not bool(balanced["ssil"]),
+		"lightweight presets do not pay for screen-space diffuse bounce")
+	t.check(bool(high["ssil"]) and not bool(high["sdfgi"]),
+		"High uses short-distance diffuse bounce without SDFGI voxels")
 	t.check(not bool(ultra["ssil"]), "Ultra avoids double screen-space GI")
 	GraphicsQuality.set_level(1, false)
 
