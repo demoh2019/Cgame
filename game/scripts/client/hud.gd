@@ -1143,6 +1143,18 @@ func _on_event(event: Dictionary) -> void:
 			say("WATCHTOWER ALERT: enemies at your fortified outpost #%d (X:%d Z:%d)! Rally defenders." % [
 				int(event.get("id", 0)), roundi(float(event.get("x", 0.0))),
 				roundi(float(event.get("z", 0.0)))])
+		"siege_charge_armed":
+			say("SIEGE CHARGE ARMED! Enemy wall will explode in %.0f seconds." %
+				float(event.get("seconds", 4.0)))
+		"siege_charge_detonated":
+			if bool(event.get("broken", false)):
+				say("SIEGE BREACH! Enemy barricade destroyed.")
+			else:
+				say("SIEGE BLAST: -%d wall HP, %d remains." % [
+					roundi(float(event.get("damage", 0.0))),
+					roundi(float(event.get("hp", 0.0)))])
+		"siege_charge_fizzled":
+			say("Siege charge detonated, but its target was already gone.")
 		"siege_started":
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
 		"guardian_taunt":

@@ -45,6 +45,7 @@ const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
 const BarricadeBallistics = preload("res://scripts/shared/barricade_ballistics.gd")
+const SiegeCharge = preload("res://scripts/shared/siege_charge.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
@@ -229,6 +230,7 @@ var night_horde: Dictionary = {} # Active IDs, expiry, tier, public event coordi
 var caravan_ambushes: Array[Dictionary] = [] # Bounded server waves with expiry.
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
+var siege_charges: Dictionary = {} # Armed, paid PvP devices: transient world state only.
 var siege_last_by_wall: Dictionary = {} # Session timers only; no character persistence.
 var last_siege_time: float = -1000000.0
 var siege_waves_started: int = 0 # Server-owned structures; authenticated walls may persist.
@@ -2792,6 +2794,33 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"siege_charge":
+			if item_id != SiegeCharge.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var selection: Dictionary = SiegeCharge.nearest_wall(world, player, barricades)
+			if not bool(selection.get("ok", false)):
+				return selection
+			var selected_wall: int = int(selection["wall"])
+			var limit: String = SiegeCharge.placement_reason(siege_charges, selected_wall, player)
+			if limit != "":
+				return {"ok": false, "reason": limit}
+			# Commit only after all distance, ownership, zone and limit checks.
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			var charge_id: int = new_id()
+			siege_charges[charge_id] = {
+				"id": charge_id, "wall": selected_wall,
+				"x": float(selection["x"]), "z": float(selection["z"]),
+				"owner": SiegeCharge.owner_token(player),
+				"until": time + SiegeCharge.FUSE_SECONDS}
+			player.action = {}
+			player.dirty_inventory = true
+			player.dirty_character = true
+			events.append({"type": "siege_charge_armed", "id": charge_id,
+				"x": float(selection["x"]), "z": float(selection["z"]),
+				"seconds": SiegeCharge.FUSE_SECONDS})
+			return {"ok": true, "id": charge_id, "wall": selected_wall,
+				"seconds": SiegeCharge.FUSE_SECONDS}
 		"hand_flare":
 			if item_id != HandFlare.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3965,6 +3994,7 @@ func tick(delta: float) -> void:
 	_tick_trades()
 	parties.expire(time)
 	_tick_players(delta)
+	_tick_siege_charges()
 	if tick_count % WorldDiscovery.SCAN_EVERY_TICKS == 0:
 		_tick_site_discoveries()
 	_tick_training()
@@ -3981,6 +4011,38 @@ func tick(delta: float) -> void:
 	_tick_ember_pools()
 	_tick_recalls()
 	_tick_world(delta)
+
+
+## Armed charges resolve exactly once. The charge has been paid for and fixed
+## to a real wall; disconnecting or moving cannot move/double-spend the blast.
+func _tick_siege_charges() -> void:
+	var ready: Array = siege_charges.keys()
+	ready.sort()
+	for charge_id in ready:
+		var charge: Dictionary = siege_charges.get(charge_id, {})
+		if charge.is_empty() or time < float(charge.get("until", INF)):
+			continue
+		siege_charges.erase(charge_id) # Remove before applying damage or broadcasting.
+		var x: float = float(charge["x"])
+		var z: float = float(charge["z"])
+		if not SiegeCharge.valid_detonation(world, charge, barricades):
+			events.append({"type": "siege_charge_fizzled", "id": charge_id,
+				"x": x, "z": z})
+			continue
+		var wall_id: int = int(charge["wall"])
+		var prior_hp: float = float(barricades[wall_id]["hp"])
+		var broken: bool = damage_barricade(wall_id, SiegeCharge.DAMAGE)
+		var hp: float = 0.0 if broken else float(barricades[wall_id]["hp"])
+		events.append({"type": "siege_charge_detonated", "id": charge_id,
+			"x": x, "z": z, "wall": wall_id, "hp": hp,
+			"damage": prior_hp - hp, "broken": broken})
+		# Explosions attract infected to the actual wall position, never by
+		# falsely marking all nearby players as loud. Reuse bounded sound lures.
+		if decoys.size() < NoiseDecoy.MAX_ACTIVE:
+			var noise_id: int = new_id()
+			decoys[noise_id] = {"id": noise_id, "x": x,
+				"y": world.height_at(x, z), "z": z,
+				"owner": -1, "expires": time + SiegeCharge.NOISE_SECONDS}
 
 
 ## Completion occurs after all AI, melee, infection and acid damage in tick().
