@@ -46,7 +46,7 @@ func run(t) -> void:
 		"fitted cargo removes load penalty up to its finite limit")
 	t.check(bool(server.cmd_toggle_mount(83).get("mounted", false)),
 		"loaded bicycle can now mount when bags support the weight")
-	var before: int = rider.position
+	var before: Vector3 = rider.position
 	var expected := Movement.step(world, before, {
 		"x": 1.0, "mounted": true, "cargo_factor":
 		BikeCargo.movement_factor(rider.inventory, rider.skills.bonus("carry_capacity"), true),
