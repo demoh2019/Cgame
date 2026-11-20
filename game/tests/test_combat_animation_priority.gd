@@ -28,6 +28,14 @@ func run(t) -> void:
 		{"elite": true, "state": 0}), "idle elites do not spend priority slots")
 	t.check(CombatPriority.wants_priority("zombie",
 		{"type": "spitter", "state": 3}), "spitter attack warning is prioritized")
+	t.check(CombatPriority.wants_priority("zombie",
+		{"type": "runner", "state": 3}), "normal runner bites compete for visible full-rate slots")
+	t.check(CombatPriority.wants_priority("zombie",
+		{"type": "brute", "state": 3}), "heavy brute strikes keep readable attack poses")
+	t.check(CombatPriority.wants_priority("zombie",
+		{"type": "walker", "state": 3}), "ordinary attacks are eligible but never bypass the slot cap")
+	t.check(not CombatPriority.wants_priority("zombie",
+		{"type": "walker", "state": 2}), "ordinary chasing crowds still use low-cost animation")
 	t.check(not CombatPriority.wants_priority("zombie",
 		{"type": "spitter", "state": 0}), "idle spitters run at normal crowd LOD")
 	t.check(CombatPriority.wants_priority("zombie",
@@ -55,6 +63,10 @@ func run(t) -> void:
 		"despawning a zombie restores both animation layers")
 	t.check(entity_code.contains('"set_mixer_high_priority", upper_layer, priority'),
 		"boss telegraphs prioritize both body and weapon attack tracks")
+	var policy_code: String = (CombatPriority as Script).source_code
+	t.check(policy_code.contains("if state == ZOMBIE_ATTACK:") and
+		policy_code.contains("return true"),
+		"nearest-first native selection receives genuine attacker pose candidates")
 	var anim_code: String = (CharacterAnim as Script).source_code
 	t.check(anim_code.contains("var preferred: Array[int] = []"),
 		"stock Godot uses the existing LOD driver without a second animator owner")
