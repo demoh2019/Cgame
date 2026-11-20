@@ -2033,6 +2033,12 @@ func _run_demo() -> void:
 			print("CLIENT frame: %d fps, %d draw calls, %d primitives, %d objects" % [Engine.get_frames_per_second(),
 				Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
 				Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)])
+			# Distinguish missing streamed terrain from slow rendering in
+			# automatic screenshot benchmarks, with no per-frame HUD work.
+			if streamer != null:
+				print("CLIENT streaming: loaded=%d queued=%d threaded=%d" % [
+					streamer.get_loaded_count(), streamer.get_queued_generation_count(),
+					streamer.get_pending_count()])
 			print("CLIENT screenshot saved: ", _screenshot_path)
 			get_tree().quit()
 
