@@ -94,7 +94,9 @@ func _run() -> void:
     for i in range(7):
         await physics_frame
     await process_frame
-    if _grants(c) < before_c + 5 or _grants(a) > before_a + 2             or _grants(b) > before_b + 2:
+    if (_grants(c) < before_c + 5
+            or _grants(a) > before_a + 2
+            or _grants(b) > before_b + 2):
         _fail("priority scheduling does not favor the urgent agent")
         return
 
@@ -134,7 +136,8 @@ func _run() -> void:
     for i in range(8):
         await physics_frame
         await process_frame
-    if not stream.is_cell_simulation_active(Vector2i(3, 0))             or not stream.is_cell_physics_active(Vector2i(3, 0)):
+    if (not stream.is_cell_simulation_active(Vector2i(3, 0))
+            or not stream.is_cell_physics_active(Vector2i(3, 0))):
         _fail("remote streamed cell did not enter active simulation/physics")
         return
     if _grants(remote) == 0:
