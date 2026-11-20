@@ -867,6 +867,13 @@ func c_loot(entity_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_raid_claim_selected(entity_id: int, item_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "loot", sim.cmd_raid_claim_selected(peer, entity_id, item_id))
+
+
+@rpc("any_peer", "reliable")
 func c_raid_skip_turn(entity_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

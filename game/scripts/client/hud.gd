@@ -53,6 +53,9 @@ var _trade_state: Dictionary = {}
 var _party_status: Label
 var _raid_loot_mode_button: Button
 var _raid_skip_button: Button
+var _raid_item_select: OptionButton
+var _raid_claim_button: Button
+var _raid_items_signature: String = ""
 var _raid_skip_bag_id: int = -1
 var _duel_status: Label
 var _arena_queue_status: Label
@@ -645,6 +648,20 @@ func _build() -> void:
 		if _raid_skip_bag_id > 0:
 			client.raid_skip_turn(_raid_skip_bag_id))
 	inventory_box.add_child(_raid_skip_button)
+	var raid_choice_row := HBoxContainer.new()
+	inventory_box.add_child(raid_choice_row)
+	_raid_item_select = OptionButton.new()
+	_raid_item_select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_raid_item_select.disabled = true
+	_raid_item_select.tooltip_text = "Choose one type of available boss loot on your round-robin turn."
+	raid_choice_row.add_child(_raid_item_select)
+	_raid_claim_button = Button.new()
+	_raid_claim_button.text = "Claim selected"
+	_raid_claim_button.disabled = true
+	_raid_claim_button.pressed.connect(func() -> void:
+		if _raid_skip_bag_id > 0 and _raid_item_select.selected >= 0:
+			client.raid_claim_selected(_raid_skip_bag_id, str(_raid_item_select.get_selected_metadata())))
+	raid_choice_row.add_child(_raid_claim_button)
 	var focus_button := Button.new()
 	focus_button.text = "Focus infected"
 	focus_button.tooltip_text = "Leader: mark the nearest living infected within 24m for 18s. Allies near that exact enemy deal +8% PvE damage; 28s cooldown."
@@ -1537,6 +1554,9 @@ func _on_result(kind: String, data: Dictionary) -> void:
 	if kind == "loot" and str(data.get("reason", "")) == "not_your_turn":
 		say("Raid round-robin: wait your turn (up to %ds)." % ceili(float(data.get("remaining", 0.0))))
 		return
+	if kind == "loot" and str(data.get("reason", "")) in ["item_unavailable", "invalid_item"]:
+		say("Raid reward: that item is no longer available. Select another.")
+		return
 	if kind == "loot" and str(data.get("reason", "")) == "inventory_full":
 		say("Raid loot: your inventory is full. Your turn was not spent.")
 		return
@@ -2114,6 +2134,28 @@ func _refresh_party_controls() -> void:
 			nearest_raid_distance = distance_sq
 			_raid_skip_bag_id = int(reward.get("id", -1))
 	_raid_skip_button.disabled = _raid_skip_bag_id <= 0
+	var chosen_bag: Dictionary = client.bags.get(_raid_skip_bag_id, {})
+	var choices: Array = chosen_bag.get("raid_item_choices", [])
+	var choices_signature: String = "%d:%s" % [_raid_skip_bag_id, JSON.stringify(choices)]
+	if choices_signature != _raid_items_signature:
+		var previous: String = ""
+		if _raid_item_select.selected >= 0:
+			previous = str(_raid_item_select.get_selected_metadata())
+		_raid_items_signature = choices_signature
+		_raid_item_select.clear()
+		var preferred_index: int = 0
+		for raw_id in choices:
+			var item_id: String = str(raw_id)
+			var item_name: String = str(Defs.item(item_id).get("name", item_id))
+			_raid_item_select.add_item(item_name)
+			var index: int = _raid_item_select.item_count - 1
+			_raid_item_select.set_item_metadata(index, item_id)
+			if item_id == previous:
+				preferred_index = index
+		if _raid_item_select.item_count > 0:
+			_raid_item_select.select(preferred_index)
+	_raid_item_select.disabled = choices.is_empty()
+	_raid_claim_button.disabled = _raid_skip_bag_id <= 0 or choices.is_empty()
 	var roster: Array = state.get("roster", [])
 	var remaining_aid: float = float(client.you.get("party_aid_cooldown", 0.0))
 	var remaining_feast: float = float(client.you.get("party_feast_cooldown", 0.0))

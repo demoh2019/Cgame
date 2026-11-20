@@ -54,7 +54,9 @@ static func turn(bag: Dictionary, player, now: float) -> Dictionary:
 
 ## One claim gets one item type and at most 1/N of its ORIGINAL count.
 ## This prevents a first-click grab of an entire currency stack.
-static func offer(bag: Dictionary, player, now: float) -> Dictionary:
+## Empty choice preserves Q auto-loot; explicit choices are validated against
+## the original server-owned bag before any inventory transfer.
+static func offer(bag: Dictionary, player, now: float, requested_item: String = "") -> Dictionary:
 	var status: Dictionary = turn(bag, player, now)
 	if not bool(status["ok"]):
 		return {"ok": false, "reason": status.get("reason", "not_your_turn"),
@@ -66,6 +68,11 @@ static func offer(bag: Dictionary, player, now: float) -> Dictionary:
 	var contents: Dictionary = bag.get("items", {})
 	var ids: Array = contents.keys()
 	ids.sort()
+	if not requested_item.is_empty():
+		if not contents.has(requested_item) or int(contents[requested_item]) <= 0 \
+				or not (rule["original"] as Dictionary).has(requested_item):
+			return {"ok": false, "reason": "item_unavailable"}
+		ids = [requested_item]
 	for item_id in ids:
 		var available: int = int(contents[item_id])
 		if available <= 0:
@@ -78,6 +85,18 @@ static func offer(bag: Dictionary, player, now: float) -> Dictionary:
 
 
 ## Called only after inventory.add actually accepts positive items.
+## Only material item IDs, not identities or private loot rotation metadata,
+## may be sent to a contributor whose turn is active.
+static func choice_ids(bag: Dictionary) -> Array[String]:
+	var result: Array[String] = []
+	var contents: Dictionary = bag.get("items", {})
+	for item_id in contents.keys():
+		if int(contents[item_id]) > 0:
+			result.append(str(item_id))
+	result.sort()
+	return result
+
+
 static func complete(bag: Dictionary, current_index: int, now: float) -> void:
 	if not active(bag, now):
 		return

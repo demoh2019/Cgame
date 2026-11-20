@@ -3640,7 +3640,19 @@ func cmd_raid_skip_turn(peer_id: int, entity_id: int) -> Dictionary:
 	return RaidRoundRobin.skip_turn(bag, player, time)
 
 
-func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
+## Explicit type selection only applies to live round-robin raid bags;
+## ordinary scavenging stays unchanged, including the keyboard pickup.
+func cmd_raid_claim_selected(peer_id: int, entity_id: int, item_id: String) -> Dictionary:
+	if item_id.is_empty() or item_id.length() > 96:
+		return {"ok": false, "reason": "invalid_item"}
+	if not bags.has(entity_id):
+		return {"ok": false, "reason": "nothing_there"}
+	if not RaidRoundRobin.active(bags[entity_id], time):
+		return {"ok": false, "reason": "not_active"}
+	return cmd_loot(peer_id, entity_id, item_id)
+
+
+func cmd_loot(peer_id: int, entity_id: int, requested_item: String = "") -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
@@ -3663,7 +3675,7 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 		# Optional MMORPG raid mode: each eligible survivor claims one
 		# bounded share at a time. The physical bag is never cloned.
 		if RaidRoundRobin.active(bag, time):
-			var claim: Dictionary = RaidRoundRobin.offer(bag, player, time)
+			var claim: Dictionary = RaidRoundRobin.offer(bag, player, time, requested_item)
 			if not bool(claim.get("ok", false)):
 				return {"ok": false, "reason": claim.get("reason", "not_your_turn"),
 					"remaining": float(claim.get("remaining", 0.0))}
@@ -5736,6 +5748,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					bag_view["raid_your_turn"] = bool(turn["your_turn"])
 					bag_view["raid_turn_seconds"] = float(turn["seconds"])
 					bag_view["can_loot"] = bool(bag_view["can_loot"]) and bool(turn["your_turn"])
+					# Only the eligible current turn holder sees the real bag choices.
+					if bool(bag_view["can_loot"]):
+						bag_view["raid_item_choices"] = RaidRoundRobin.choice_ids(bag)
 				var ballot: Dictionary = RaidNeedGreed.visible(bag, player, time)
 				if not ballot.is_empty():
 					bag_view["raid_need_greed"] = ballot
