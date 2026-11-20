@@ -109,7 +109,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# HDRP-style normal-map micro-shadows: reuse existing sampled terrain
 	# normals, preserve SSAO lighting, no new textures or GPU passes.
 	RenderingServer.global_shader_parameter_set(&"aa_terrain_micro_occlusion",
-		float(p["micro_occlusion"]))
+		float(p.get("micro_occlusion", 0.0)))
 	# Rain ripples share one shader uniform across every streamed terrain material.
 	# Zero on Performance: the expensive per-pixel ring work is skipped entirely.
 	RenderingServer.global_shader_parameter_set(&"aa_puddle_ripple_strength",
