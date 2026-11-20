@@ -150,7 +150,9 @@ void AnimationLODController::_update(double p_delta) {
 		}
 		const bool want_modifier_cull = modifier_cull_distance > 0.0 &&
 				(!visible || (!urgent && distance > modifier_cull_distance));
-		_set_modifiers_culled(entry, mixer, want_modifier_cull);
+		if (entry.manage_modifiers) {
+			_set_modifiers_culled(entry, mixer, want_modifier_cull);
+		}
 
 		const int interval = urgent ? 1 : base_interval;
 		if (interval == 0) {
@@ -196,7 +198,7 @@ void AnimationLODController::_notification(int p_what) {
 	}
 }
 
-void AnimationLODController::register_mixer(AnimationMixer *p_mixer) {
+void AnimationLODController::register_mixer(AnimationMixer *p_mixer, bool p_manage_modifiers) {
 	ERR_FAIL_NULL(p_mixer);
 	const ObjectID id = p_mixer->get_instance_id();
 	for (int i = 0; i < entries.size(); i++) {
@@ -207,6 +209,7 @@ void AnimationLODController::register_mixer(AnimationMixer *p_mixer) {
 	Entry entry;
 	entry.mixer_id = id;
 	entry.original_mode = p_mixer->get_callback_mode_process();
+	entry.manage_modifiers = p_manage_modifiers;
 	entry.phase = next_phase++;
 	entries.push_back(entry);
 	if (enabled && is_inside_tree()) {
@@ -277,7 +280,7 @@ void AnimationLODController::set_enabled(bool p_enabled) {
 void AnimationLODController::_bind_methods() {
 	ClassDB::bind_static_method("AnimationLODController", D_METHOD("update_interval", "distance", "visible", "near", "mid", "far"), &AnimationLODController::update_interval);
 
-	ClassDB::bind_method(D_METHOD("register_mixer", "mixer"), &AnimationLODController::register_mixer);
+	ClassDB::bind_method(D_METHOD("register_mixer", "mixer", "manage_modifiers"), &AnimationLODController::register_mixer, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("unregister_mixer", "mixer"), &AnimationLODController::unregister_mixer);
 	ClassDB::bind_method(D_METHOD("clear_mixers"), &AnimationLODController::clear_mixers);
 	ClassDB::bind_method(D_METHOD("get_mixer_count"), &AnimationLODController::get_mixer_count);
