@@ -396,3 +396,59 @@ Technical references:
 - https://docs.godotengine.org/en/stable/tutorials/navigation/navigation_using_navigationmeshes.html
 - https://docs.godotengine.org/en/stable/tutorials/navigation/navigation_optimizing_performance.html
 - https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partitioned-navigation-mesh-in-unreal-engine
+
+
+
+## Visual Quality Lab v11 — obstacle-aware streamed navigation and AI simulation LOD
+
+**Engine addon:** `StreamedNavigationTile3D` now supports rectangular blocked
+regions and an agent clearance margin. Rather than rebaking the visual scene,
+it builds a low-polygon, welded navigation grid whose blocked polygons are
+omitted. A single center obstacle uses **8 walkable quads** (versus one flat
+quad that allowed movement through obstacles). A configurable maximum of eight
+rectangles per tile bounds the polygon count. Existing baked `NavigationMesh`
+resources remain untouched; the runtime generator is an opt-in fallback for
+simple flat world cells. For complex geometry or dynamic obstacles, bake or
+incrementally update actual navigation meshes using Godot's official APIs.
+
+**Immediately in the game:** streamed forest cells outside the central showcase
+cell now contain a 2.2 × 2.2 m solid rock. Their navmesh has a corresponding
+exclusion expanded by 0.35 m, so NPC centers should route around the rock.
+The central showcase retains its existing stage props and flat navigation
+surface; those showcase props are **not yet** represented in the navigation
+mesh. The generated nav tiles also do not account for procedural tree trunks,
+which currently have no individual collision shapes.
+
+**AI service:** `WorldAIInterestManager3D` manages nearby vs sleeping NPCs
+according to player distance with entry/exit hysteresis. Instead of updating
+all agents simultaneously, it checks up to **6 / 8 / 12 cells per update**
+(Eco / Balanced / Cinematic), every 0.45 seconds by default. Simulation radii
+are 18 / 28 / 42 m; asleep NPCs suspend their per-physics-tick AI, without
+unloading persistent state. A global AI disable suspends all currently loaded
+agents immediately. The manager also reports the CPU microseconds spent in
+its **own interest-update pass**, not total navigation/AI frame time.
+The HUD shows sleeping NPCs and the last interest pass duration.
+
+This is an opt-in GDScript engine service integrated into the Visual Quality Lab
+playable demo, not a Godot C++ core rewrite, Unreal MassEntity implementation,
+full Recast bake, dynamic RVO crowd system or a finished AAA game.
+
+### New regression scripts
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -q
+godot --headless --path . --script res://tests/test_navigation_obstacles.gd
+godot --headless --path . --script res://tests/test_ai_interest.gd
+godot --headless --path . --script res://tests/test_navigation_obstacles_runtime.gd
+```
+
+**24/24 Python static/package checks** passed locally. The GDScript algorithm,
+collision/navigation and rendered-frame verification requires a working Godot
+binary; the authorized Apple Silicon machine remains offline, and CI is not
+confirmed passing. No unverified behavior should be treated as production-ready.
+
+Technical references:
+- https://docs.godotengine.org/en/stable/tutorials/navigation/navigation_using_navigationmeshes.html
+- https://docs.godotengine.org/en/stable/tutorials/navigation/navigation_optimizing_performance.html
+- https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-gameplay-in-unreal-engine
+- https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partitioned-navigation-mesh
