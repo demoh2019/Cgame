@@ -24,5 +24,10 @@ func _initialize() -> void:
 	assert(Adaptive.is_cpu_bound(0.018, 60.0, 0.90), "18ms CPU frame is CPU-limited")
 	assert(not Adaptive.is_cpu_bound(0.003, 60.0, 0.90), "3ms CPU frame can be GPU-limited")
 	assert(not Adaptive.is_cpu_bound(0.0, 60.0, 0.90), "Unmeasured CPU time must not block scaling")
-	print("AdaptiveResolution3D: 9 checks passed")
+	# Hardware GPU timer, when supported, overrides V-Sync-capped FPS.
+	assert(is_equal_approx(Adaptive.calculate_next_scale_from_gpu(1.0, 22.0, 60.0, 0.67, 1.0, 0.05, 0.025, 1.03, 0.85), 0.95))
+	assert(is_equal_approx(Adaptive.calculate_next_scale_from_gpu(0.8, 10.0, 60.0, 0.67, 1.0, 0.05, 0.025, 1.03, 0.85), 0.825))
+	assert(is_equal_approx(Adaptive.calculate_next_scale_from_gpu(0.8, 16.0, 60.0, 0.67, 1.0, 0.05, 0.025, 1.03, 0.85), 0.8))
+	assert(is_equal_approx(Adaptive.calculate_next_scale_from_gpu(0.8, 0.0, 60.0, 0.67, 1.0, 0.05, 0.025, 1.03, 0.85), 0.8))
+	print("AdaptiveResolution3D: 13 checks passed")
 	quit(0)
