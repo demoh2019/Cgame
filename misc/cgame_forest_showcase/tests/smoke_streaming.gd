@@ -8,6 +8,14 @@ extends SceneTree
 const CELL_SCENE_PATH: String = "res://cells/forest_cell.tscn"
 const MAX_FRAMES: int = 360
 
+var observed_cell_events: int = 0
+var last_observed_cell: Vector2i = Vector2i.ZERO
+
+
+func _on_observer_cell_changed(cell: Vector2i) -> void:
+    observed_cell_events += 1
+    last_observed_cell = cell
+
 
 func _initialize() -> void:
     call_deferred("_run")
@@ -46,6 +54,7 @@ func _run() -> void:
     stream.max_concurrent_requests = 2
     root.add_child(stream)
     stream.observer_path = stream.get_path_to(observer)
+    stream.observer_cell_changed.connect(_on_observer_cell_changed)
     stream.set_cell_scene(Vector2i(0, 0), CELL_SCENE_PATH)
     stream.set_cell_scene(Vector2i(-1, 0), CELL_SCENE_PATH)
 
@@ -55,6 +64,12 @@ func _run() -> void:
         return
     if stream.get_loaded_cell_count() != 1:
         _fail("unexpected initial loaded count")
+        return
+    if not stream.has_observer_cell() or stream.get_observer_cell() != origin:
+        _fail("native observer cell did not initialize")
+        return
+    if observed_cell_events < 1 or last_observed_cell != origin:
+        _fail("observer_cell_changed did not emit for the first cell")
         return
 
     var cell := stream.get_child(0) as Node3D
@@ -91,10 +106,18 @@ func _run() -> void:
         return
 
     observer.position.x = -39.0
-    var negative := Vector2i(-1, 0)
-    if not await _wait_for_cell(stream, negative, true):
+    var negative := Vector2i(-2, 0)
+    # -39.0 belongs to grid cell -2 with a 32m cell width.
+    # Only -1 is configured, so the observer's current cell must still track -2.
+    if not await _wait_for_cell(stream, Vector2i(-1, 0), true):
         _fail("negative X cell did not load")
         return
+    if stream.get_observer_cell() != negative or last_observed_cell != negative:
+        _fail("observer_cell_changed did not track negative coordinates")
+        return
+    if observed_cell_events < 4:
+        _fail("observer transitions were not signaled reliably")
+        return
 
-    print("Forest streaming smoke PASSED: deterministic shared-cell reload, negative coordinates, performance quality")
+    print("Forest streaming smoke PASSED: deterministic shared-cell reload, negative coordinates, observer signals and performance quality")
     quit(0)
