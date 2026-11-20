@@ -13,6 +13,9 @@ const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
 # Party-only temporary rendezvous; server position, never client coordinates.
 const RALLY_SECONDS := 45.0
 const RALLY_COOLDOWN := 12.0
+const READY_SECONDS := 30.0
+const READY_RESULT_SECONDS := 10.0
+const READY_COOLDOWN := 8.0
 
 
 ## Only the server invokes this after a confirmed infected kill.
@@ -112,6 +115,67 @@ func clear_standard_by(peer_id: int) -> void:
 		group.erase("standard")
 
 
+## Party-only, short-lived consent check before an expedition or raid.
+## A leader starts it; nobody can vote for another member or pass a deadline.
+func start_ready_check(peer_id: int, now: float) -> Dictionary:
+	if not is_finite(now):
+		return {"ok": false, "reason": "invalid_time"}
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return {"ok": false, "reason": "not_in_party"}
+	var group: Dictionary = groups[group_id]
+	if int(group["leader"]) != peer_id:
+		return {"ok": false, "reason": "leader_only"}
+	if group["members"].size() < 2:
+		return {"ok": false, "reason": "need_party"}
+	var active: Dictionary = group.get("ready_check", {})
+	if not active.is_empty() and now < float(active["expires"]) and str(active["result"]) == "pending":
+		return {"ok": false, "reason": "in_progress"}
+	if now < float(group.get("ready_cooldown_until", -INF)):
+		return {"ok": false, "reason": "cooldown"}
+	var votes: Dictionary = {}
+	for member_id in group["members"]:
+		votes[int(member_id)] = "pending"
+	group["ready_check"] = {"expires": now + READY_SECONDS,
+		"result": "pending", "votes": votes}
+	group["ready_cooldown_until"] = now + READY_COOLDOWN
+	return {"ok": true, "seconds": READY_SECONDS}
+
+
+func answer_ready_check(peer_id: int, is_ready: bool, now: float) -> Dictionary:
+	if not is_finite(now):
+		return {"ok": false, "reason": "invalid_time"}
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return {"ok": false, "reason": "not_in_party"}
+	var group: Dictionary = groups[group_id]
+	var check: Dictionary = group.get("ready_check", {})
+	if check.is_empty():
+		return {"ok": false, "reason": "no_check"}
+	if now >= float(check["expires"]):
+		group.erase("ready_check")
+		return {"ok": false, "reason": "expired"}
+	if str(check["result"]) != "pending":
+		return {"ok": false, "reason": "finished"}
+	var votes: Dictionary = check["votes"]
+	if not votes.has(peer_id):
+		return {"ok": false, "reason": "not_in_party"}
+	if str(votes[peer_id]) != "pending":
+		return {"ok": false, "reason": "already_responded"}
+	votes[peer_id] = "ready" if is_ready else "not_ready"
+	var complete: bool = not is_ready
+	if is_ready:
+		complete = true
+		for status in votes.values():
+			if str(status) != "ready":
+				complete = false
+				break
+	if complete:
+		check["result"] = "all_ready" if is_ready else "not_ready"
+		check["expires"] = now + READY_RESULT_SECONDS
+	return {"ok": true, "ready": is_ready, "result": str(check["result"])}
+
+
 func members_of(peer_id: int) -> Array:
 	var group_id: int = int(group_by_peer.get(peer_id, 0))
 	if group_id == 0 or not groups.has(group_id):
@@ -170,6 +234,8 @@ func accept(target_id: int, now: float) -> Dictionary:
 		return {"ok": false, "reason": "party_full"}
 	group["members"].append(target_id)
 	group_by_peer[target_id] = group_id
+	# Membership changes invalidate old consent, including completed results.
+	group.erase("ready_check")
 	return {"ok": true, "group": group_id, "leader": source}
 
 
@@ -188,6 +254,7 @@ func leave(peer_id: int) -> Dictionary:
 	var members: Array = group["members"]
 	members.erase(peer_id)
 	group_by_peer.erase(peer_id)
+	group.erase("ready_check")
 	# An abandoned standard cannot buff former teammates or a new leader.
 	var raised: Dictionary = group.get("standard", {})
 	if not raised.is_empty() and int(raised.get("by", -1)) == peer_id:
@@ -235,13 +302,18 @@ func expire(now: float) -> void:
 	for target in invites.keys():
 		if now >= float(invites[target]["expires"]):
 			invites.erase(target)
+	for group_id in groups.keys():
+		var group: Dictionary = groups[group_id]
+		var active: Dictionary = group.get("ready_check", {})
+		if not active.is_empty() and now >= float(active["expires"]):
+			group.erase("ready_check")
 
 
 func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 	var group_id: int = group_of(peer_id)
 	if group_id == 0 or not groups.has(group_id):
 		return {"id": 0, "leader": 0, "members": [], "rally": {}, "standard": {},
-			"invite_from": int(invites.get(peer_id, {}).get("from", 0))}
+			"ready_check": {}, "invite_from": int(invites.get(peer_id, {}).get("from", 0))}
 	var group: Dictionary = groups[group_id]
 	var marker: Dictionary = group.get("rally", {})
 	var shared_marker := {}
@@ -258,7 +330,18 @@ func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 			"remaining": maxf(0.0, float(source_standard["expires"]) - now),
 			"cooldown": maxf(0.0, float(group.get("standard_last_at", now)) +
 				RallyStandard.COOLDOWN - now)}
+	var public_ready: Dictionary = {}
+	var ready: Dictionary = group.get("ready_check", {})
+	if not ready.is_empty() and now < float(ready["expires"]):
+		var visible_votes: Array = []
+		var votes: Dictionary = ready["votes"]
+		for member_id in group["members"]:
+			visible_votes.append({"id": int(member_id),
+				"status": str(votes.get(int(member_id), "pending"))})
+		public_ready = {"result": str(ready["result"]),
+			"remaining": maxf(0.0, float(ready["expires"]) - now),
+			"votes": visible_votes}
 	return {"id": group_id, "leader": int(group["leader"]),
 		"members": (group["members"] as Array).duplicate(), "rally": shared_marker,
-		"standard": public_standard,
+		"standard": public_standard, "ready_check": public_ready,
 		"invite_from": int(invites.get(peer_id, {}).get("from", 0))}
