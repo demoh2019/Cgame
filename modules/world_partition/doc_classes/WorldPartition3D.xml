@@ -7,7 +7,7 @@
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work. Optional predictive streaming can preload one cell ahead of the observer using [member predictive_velocity], [member predictive_lookahead_seconds], and [member predictive_max_distance]. Current cells and pinned hubs always take priority over speculative work. [method set_streaming_source] registers up to 8 named world-space sources (radius 0 or 1 cell) for mission targets, cameras and portals. They run after observer cells and pinned hubs, before the speculative velocity forecast, using the same asynchronous work budgets. Each source has a priority 0 through 3; urgent sources are scheduled before background sources without starving immediate observer work. Equal priorities use stable alphabetical ordering by name. For fast travel, use [method get_streaming_source_progress] and [method is_streaming_source_ready] to wait non-blockingly for registered destination scenes to instantiate; do not assume the source is ready immediately after registration. They are runtime-only, not persistent pins.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries. For persistent camps or quest hubs, use [method pin_cell] and [method unpin_cell] to override distance-based unloading. At most 128 registered cells may be pinned; a disabled streamer still unloads all cells.
-		Optionally set [member detail_radius] to enable near/distant scene-detail callbacks. A cell root script must implement [code]set_streaming_lod(level)[/code], where 0 means near detail and 1 means distant. The engine invokes this method before the new root enters the tree (so its [code]_ready()[/code] can generate only the required content), and again when an existing cell changes tier. Changes are bounded by [member max_detail_transitions_per_frame]. Optionally increase [member detail_hysteresis_cells] to suppress LOD oscillation while the observer moves around grid boundaries. Pinned cells always receive level 0. This does not generate simplified meshes automatically; the scene script must provide both representations.
+		Optionally set [member simulation_radius] to gate AI/script activity independently from graphics. An opt-in scene root implements [code]set_streaming_simulation_active(active)[/code] and can pause its own processing; game systems may query [method is_cell_simulation_active] or subscribe to [signal cell_simulation_changed]. Activation is not automatic tree-wide pausing. Changes to existing loaded cells are limited by [member max_simulation_transitions_per_frame], and [member simulation_hysteresis_cells] reduces oscillations. Optionally set [member detail_radius] to enable near/distant scene-detail callbacks. A cell root script must implement [code]set_streaming_lod(level)[/code], where 0 means near detail and 1 means distant. The engine invokes this method before the new root enters the tree (so its [code]_ready()[/code] can generate only the required content), and again when an existing cell changes tier. Changes are bounded by [member max_detail_transitions_per_frame]. Optionally increase [member detail_hysteresis_cells] to suppress LOD oscillation while the observer moves around grid boundaries. Pinned cells always receive level 0. This does not generate simplified meshes automatically; the scene script must provide both representations.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
 		var partition := WorldPartition3D.new()
@@ -23,6 +23,58 @@
 		Streaming is disabled while editing a scene; the node processes automatically while the game runs. Call [method update_streaming] if an immediate update is required after moving the observer.
 	</description>
 	<methods>
+		<method name="get_simulation_radius" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the independent AI/script activation radius, -1 when the simulation tier is disabled.
+			</description>
+		</method>
+		<method name="set_simulation_radius">
+			<return type="void" />
+			<param index="0" name="radius" type="int" />
+			<description>
+				Sets the inner active simulation radius in grid cells. -1 leaves simulation active in all loaded cells (default); 0 to 32 uses distance from the observer. Pinned cells always remain active. This does not unload geometry or automatically disable scene processes.
+			</description>
+		</method>
+		<method name="get_simulation_hysteresis_cells" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns extra cell rings tolerated before an already-active scene is deactivated. Newly inactive cells reactivate only inside [member simulation_radius].
+			</description>
+		</method>
+		<method name="set_simulation_hysteresis_cells">
+			<return type="void" />
+			<param index="0" name="cells" type="int" />
+			<description>
+				Sets 0 to 8 extra demotion rings for active simulation, suppressing rapid AI start/stop around cell boundaries.
+			</description>
+		</method>
+		<method name="get_max_simulation_transitions_per_frame" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the maximum number of already-loaded cell activation changes processed per streaming update.
+			</description>
+		</method>
+		<method name="set_max_simulation_transitions_per_frame">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Limits existing-cell activation transitions to 1 to 64 per frame. Initial activation is applied on instantiation and not charged against this budget.
+			</description>
+		</method>
+		<method name="is_cell_simulation_active" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the native simulation policy's current state for a live cell. False for absent/unloaded cells. Distinct from visual detail level. Game-owned AI/controllers must use this state or implement the callback; the engine does not automatically pause physics or navigation.
+			</description>
+		</method>
+		<method name="get_simulation_active_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of live loaded cells currently marked as simulation-active, including pinned hubs. This is a state count, not a CPU-time metric.
+			</description>
+		</method>
 		<method name="set_streaming_source_priority">
 			<return type="bool" />
 			<param index="0" name="name" type="String" />
@@ -372,6 +424,15 @@
 		</method>
 	</methods>
 	<members>
+		<member name="simulation_radius" type="int" setter="set_simulation_radius" getter="get_simulation_radius" default="-1">
+			Independent simulation-active neighborhood, -1 (disabled, all loaded cells active) or 0 to 32 cell rings. Unlike [member detail_radius], this is a logical activation flag for AI/script systems and never unloads graphics. Scene roots may opt into [code]set_streaming_simulation_active(active)[/code] and game controllers can call [method is_cell_simulation_active]. Pinned cells are always active.
+		</member>
+		<member name="simulation_hysteresis_cells" type="int" setter="set_simulation_hysteresis_cells" getter="get_simulation_hysteresis_cells" default="1">
+			Additional 0 to 8 cell rings tolerated before disabling an already-active cell. Inactive cells activate only within [member simulation_radius].
+		</member>
+		<member name="max_simulation_transitions_per_frame" type="int" setter="set_max_simulation_transitions_per_frame" getter="get_max_simulation_transitions_per_frame" default="2">
+			Maximum number of existing loaded cell activation changes per frame (1 to 64). Initial activation on scene instantiation is not budgeted.
+		</member>
 		<member name="detail_hysteresis_cells" type="int" setter="set_detail_hysteresis_cells" getter="get_detail_hysteresis_cells" default="0">
 			Extra cell rings tolerated before an already-near loaded scene is downgraded to distant detail. A far scene upgrades only inside [member detail_radius], reducing back-and-forth regeneration near cell boundaries. The default is 0 for backward compatibility; maximum 8. New cells always use [member detail_radius] without hysteresis.
 		</member>
@@ -419,6 +480,13 @@
 		</member>
 	</members>
 	<signals>
+		<signal name="cell_simulation_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="active" type="bool" />
+			<description>
+				Emitted when a loaded cell switches its simulation activation state. New cell initialization uses [signal cell_loaded] instead; scripts implementing [code]set_streaming_simulation_active(active)[/code] receive that call before [code]_ready()[/code] for the initial state.
+			</description>
+		</signal>
 		<signal name="cell_detail_changed">
 			<param index="0" name="cell" type="Vector2i" />
 			<param index="1" name="detail_level" type="int" />
