@@ -404,7 +404,7 @@ int WorldPartition3D::get_pinned_cell_count() const {
 }
 
 bool WorldPartition3D::set_streaming_source_node(const String &p_name, const NodePath &p_node_path, int p_load_radius, int p_unload_radius, int p_priority) {
-	ERR_FAIL_COND_V_MSG(p_node_path.is_empty() || p_node_path.is_subname(), false, "WorldPartition3D moving source requires a nonempty Node3D path, not a property path.");
+	ERR_FAIL_COND_V_MSG(p_node_path.is_empty() || p_node_path.get_subname_count() > 0, false, "WorldPartition3D moving source requires a nonempty Node3D path, not a property path.");
 	// Reuse all name/radius/priority validation and the eight-source limit.
 	// Resolution is deferred to update_streaming(), allowing scene setup before
 	// the referenced actor has entered the active SceneTree.
