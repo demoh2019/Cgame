@@ -53,6 +53,24 @@ TEST_FORCE_LINK(test_viewport)
 
 namespace TestViewport {
 
+TEST_CASE("[SceneTree][Viewport] mipmap bias rejects invalid and extreme inputs") {
+	Window *root = SceneTree::get_singleton()->get_root();
+	const float original = root->get_texture_mipmap_bias();
+
+	root->set_texture_mipmap_bias(-0.35f);
+	CHECK(root->get_texture_mipmap_bias() == -0.35f);
+	root->set_texture_mipmap_bias(std::numeric_limits<float>::quiet_NaN());
+	CHECK(root->get_texture_mipmap_bias() == -0.35f);
+	root->set_texture_mipmap_bias(std::numeric_limits<float>::infinity());
+	CHECK(root->get_texture_mipmap_bias() == -0.35f);
+	root->set_texture_mipmap_bias(-20.0f);
+	CHECK(root->get_texture_mipmap_bias() == -2.0f);
+	root->set_texture_mipmap_bias(20.0f);
+	CHECK(root->get_texture_mipmap_bias() == 2.0f);
+
+	root->set_texture_mipmap_bias(original);
+}
+
 TEST_CASE("[SceneTree][Viewport] 3D resolution scale rejects invalid inputs") {
 	Window *root = SceneTree::get_singleton()->get_root();
 	const float original = root->get_scaling_3d_scale();

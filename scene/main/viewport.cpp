@@ -5158,6 +5158,13 @@ float Viewport::get_fsr_sharpness() const {
 
 void Viewport::set_texture_mipmap_bias(float p_texture_mipmap_bias) {
 	ERR_MAIN_THREAD_GUARD;
+	// The render buffer combines this bias with log2(resolution scale).
+	// Reject invalid values before they can poison material mip selection,
+	// and limit extreme shimmering/overblur on temporal upscalers.
+	if (!Math::is_finite(p_texture_mipmap_bias)) {
+		return;
+	}
+	p_texture_mipmap_bias = CLAMP(p_texture_mipmap_bias, -2.0f, 2.0f);
 	if (texture_mipmap_bias == p_texture_mipmap_bias) {
 		return;
 	}
