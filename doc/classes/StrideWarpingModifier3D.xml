@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="StrideWarpingModifier3D" inherits="SkeletonModifier3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Scales the stride of a walk or run animation so feet do not slide when the playback speed is clamped.
+	</brief_description>
+	<description>
+		A [SkeletonModifier3D] similar to Unreal Engine's "Stride Warping". It scales the horizontal (skeleton-space XZ) offsets of the feet from the pelvis by [member stride_scale] and re-solves each leg with analytic two-bone IK. [member stride_scale] is usually [code]actual_speed / animation_speed[/code]; see [method set_speeds].
+		The skeleton Y axis is expected to point up in the skeleton's own space.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_leg">
+			<return type="int" />
+			<param index="0" name="thigh_bone" type="String" />
+			<param index="1" name="calf_bone" type="String" />
+			<param index="2" name="foot_bone" type="String" />
+			<description>
+				Adds a leg and returns its index.
+			</description>
+		</method>
+		<method name="clear_legs">
+			<return type="void" />
+			<description>
+				Removes all legs.
+			</description>
+		</method>
+		<method name="compute_stride_scale" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="actual_speed" type="float" />
+			<param index="1" name="animation_speed" type="float" />
+			<param index="2" name="min_scale" type="float" />
+			<param index="3" name="max_scale" type="float" />
+			<description>
+				Returns [code]actual_speed / animation_speed[/code] clamped to the given range, or [code]1.0[/code] if [param animation_speed] is zero.
+			</description>
+		</method>
+		<method name="set_speeds">
+			<return type="void" />
+			<param index="0" name="actual_speed" type="float" />
+			<param index="1" name="animation_speed" type="float" />
+			<description>
+				Sets [member stride_scale] from the actual movement speed and the speed the animation was authored for, clamped by [member min_stride_scale] and [member max_stride_scale].
+			</description>
+		</method>
+		<method name="warp_foot_position" qualifiers="static">
+			<return type="Vector3" />
+			<param index="0" name="foot" type="Vector3" />
+			<param index="1" name="pelvis" type="Vector3" />
+			<param index="2" name="scale" type="float" />
+			<description>
+				Scales the XZ offset of [param foot] from [param pelvis] by [param scale] and keeps the foot height.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="leg_count" type="int" setter="set_leg_count" getter="get_leg_count" default="0">
+			The number of legs. Each leg has [code]legs/&lt;index&gt;/thigh_bone[/code], [code]calf_bone[/code] and [code]foot_bone[/code].
+		</member>
+		<member name="max_stride_scale" type="float" setter="set_max_stride_scale" getter="get_max_stride_scale" default="2.0">
+			The upper bound used by [method set_speeds].
+		</member>
+		<member name="min_stride_scale" type="float" setter="set_min_stride_scale" getter="get_min_stride_scale" default="0.5">
+			The lower bound used by [method set_speeds].
+		</member>
+		<member name="pelvis_bone" type="String" setter="set_pelvis_bone" getter="get_pelvis_bone" default="&quot;&quot;">
+			The pelvis bone feet offsets are measured from. Required.
+		</member>
+		<member name="stride_scale" type="float" setter="set_stride_scale" getter="get_stride_scale" default="1.0">
+			The factor applied to the horizontal foot offsets from the pelvis. [code]1.0[/code] leaves the animation unchanged.
+		</member>
+	</members>
+</class>

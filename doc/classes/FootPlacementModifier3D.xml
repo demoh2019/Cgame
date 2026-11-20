@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="FootPlacementModifier3D" inherits="SkeletonModifier3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Plants the feet of a character on uneven ground using analytic two-bone IK and lowers the pelvis.
+	</brief_description>
+	<description>
+		A [SkeletonModifier3D] similar to Unreal Engine's "Foot Placement" / "Leg IK" and Unity's Animation Rigging "Two Bone IK" ground alignment. For every leg (thigh, calf and foot bone) it samples the ground height below the animated foot, moves the foot to the ground height difference relative to the skeleton origin, solves the leg with the law of cosines (keeping the animated knee direction), and tilts the foot to the ground normal, clamped by [member max_foot_angle]. The pelvis is lowered by the largest negative leg offset, clamped by [member max_pelvis_offset] and smoothed by [member pelvis_interp_speed].
+		The ground is sampled either with [member ground_height_callback], a [Callable] taking [code]x[/code] and [code]z[/code] in world space and returning the ground height as a [float], or, when no valid callback is set and [member use_raycast] is [code]true[/code], with a physics raycast. The skeleton origin is assumed to stand on the ground.
+		The skeleton Y axis is expected to point up in the skeleton's own space, as is common for imported character models.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_leg">
+			<return type="int" />
+			<param index="0" name="thigh_bone" type="String" />
+			<param index="1" name="calf_bone" type="String" />
+			<param index="2" name="foot_bone" type="String" />
+			<param index="3" name="foot_height_offset" type="float" default="0.0" />
+			<description>
+				Adds a leg and returns its index. [param foot_height_offset] is an extra world-space height added to the foot target.
+			</description>
+		</method>
+		<method name="clear_legs">
+			<return type="void" />
+			<description>
+				Removes all legs.
+			</description>
+		</method>
+		<method name="get_current_pelvis_offset" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the current smoothed vertical pelvis offset (zero or negative).
+			</description>
+		</method>
+		<method name="pelvis_offset" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="leg_offsets" type="PackedFloat32Array" />
+			<param index="1" name="max_offset" type="float" />
+			<description>
+				Returns the pelvis offset for the given leg height offsets: the most negative offset, never positive, and not lower than [code]-max_offset[/code].
+			</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>
+				Resets the pelvis smoothing so the next frame snaps to the target.
+			</description>
+		</method>
+		<method name="solve_two_bone_angles" qualifiers="static">
+			<return type="Vector2" />
+			<param index="0" name="upper_len" type="float" />
+			<param index="1" name="lower_len" type="float" />
+			<param index="2" name="target_dist" type="float" />
+			<description>
+				Solves a two-bone chain with the law of cosines. Returns a [Vector2] where [code]x[/code] is the angle at the root joint between the root-target line and the upper bone, and [code]y[/code] is the interior angle at the middle joint (PI when the chain is straight). [param target_dist] is clamped to the reachable range.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="align_foot_to_ground" type="bool" setter="set_align_foot_to_ground" getter="is_aligning_foot_to_ground" default="true">
+			If [code]true[/code], the foot is rotated to the ground normal estimated from three height samples.
+		</member>
+		<member name="collision_mask" type="int" setter="set_collision_mask" getter="get_collision_mask" default="1">
+			Physics layers used by the raycast ground source.
+		</member>
+		<member name="ground_height_callback" type="Callable" setter="set_ground_height_callback" getter="get_ground_height_callback" default="Callable()">
+			Callable [code]func(x: float, z: float) -&gt; float[/code] returning the world-space ground height. Takes priority over [member use_raycast].
+		</member>
+		<member name="leg_count" type="int" setter="set_leg_count" getter="get_leg_count" default="0">
+			The number of legs. Each leg has [code]legs/&lt;index&gt;/thigh_bone[/code], [code]calf_bone[/code], [code]foot_bone[/code] and [code]foot_height_offset[/code].
+		</member>
+		<member name="max_foot_angle" type="float" setter="set_max_foot_angle" getter="get_max_foot_angle" default="0.69813174">
+			The maximum angle the foot may tilt from upright, in radians.
+		</member>
+		<member name="max_pelvis_offset" type="float" setter="set_max_pelvis_offset" getter="get_max_pelvis_offset" default="0.4">
+			The maximum distance the pelvis may be lowered.
+		</member>
+		<member name="normal_sample_distance" type="float" setter="set_normal_sample_distance" getter="get_normal_sample_distance" default="0.15">
+			The distance along X and Z between height samples used to estimate the ground normal.
+		</member>
+		<member name="pelvis_bone" type="String" setter="set_pelvis_bone" getter="get_pelvis_bone" default="&quot;&quot;">
+			The name of the pelvis bone that is lowered. If empty, the pelvis is not moved.
+		</member>
+		<member name="pelvis_interp_speed" type="float" setter="set_pelvis_interp_speed" getter="get_pelvis_interp_speed" default="12.0">
+			Smoothing speed of the pelvis offset. If [code]0[/code], no smoothing is applied.
+		</member>
+		<member name="ray_length" type="float" setter="set_ray_length" getter="get_ray_length" default="3.0">
+			Length of the downward ground raycast.
+		</member>
+		<member name="ray_start_height" type="float" setter="set_ray_start_height" getter="get_ray_start_height" default="1.0">
+			Height above the skeleton origin where the ground raycast starts.
+		</member>
+		<member name="use_raycast" type="bool" setter="set_use_raycast" getter="is_using_raycast" default="false">
+			If [code]true[/code] and no valid [member ground_height_callback] is set, the ground is found with a physics raycast.
+		</member>
+	</members>
+</class>

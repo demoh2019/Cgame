@@ -246,6 +246,7 @@
 #include "scene/3d/fabr_ik_3d.h"
 #include "scene/3d/floating_origin_3d.h"
 #include "scene/3d/fog_volume.h"
+#include "scene/3d/foot_placement_modifier_3d.h"
 #include "scene/3d/gpu_particles_3d.h"
 #include "scene/3d/gpu_particles_collision_3d.h"
 #include "scene/3d/ik_modifier_3d.h"
@@ -279,6 +280,7 @@
 #include "scene/3d/spring_bone_collision_sphere_3d.h"
 #include "scene/3d/spring_bone_simulator_3d.h"
 #include "scene/3d/sprite_3d.h"
+#include "scene/3d/stride_warping_modifier_3d.h"
 #include "scene/3d/trail_3d.h"
 #include "scene/3d/two_bone_ik_3d.h"
 #include "scene/3d/visible_on_screen_notifier_3d.h"
@@ -727,6 +729,8 @@ void register_scene_types() {
 	GDREGISTER_CLASS(CCDIK3D);
 	GDREGISTER_CLASS(JacobianIK3D);
 	GDREGISTER_CLASS(LimitAngularVelocityModifier3D);
+	GDREGISTER_CLASS(FootPlacementModifier3D);
+	GDREGISTER_CLASS(StrideWarpingModifier3D);
 	GDREGISTER_CLASS(BoneTwistDisperser3D);
 	GDREGISTER_CLASS(ModifierBoneTarget3D);
 
