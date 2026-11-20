@@ -15,9 +15,15 @@ const CELL_SIZE: float = 32.0
 const TREE_COUNT: int = 54
 
 
-func configure(cell: Vector2i) -> void:
+func configure(cell: Vector2i, cached_batch: MultiMesh = null) -> void:
     name = "DistantForestCanopies"
     cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+    # A cached MultiMesh contains immutable world-independent local tree
+    # transforms. Its renderer resource can outlive any individual HLOD node.
+    if cached_batch != null:
+        multimesh = cached_batch
+        return
 
     var rng := RandomNumberGenerator.new()
     rng.seed = 913481 + cell.x * 73856093 + cell.y * 19349663
