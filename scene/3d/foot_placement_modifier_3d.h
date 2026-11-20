@@ -32,7 +32,7 @@
 
 #include "scene/3d/skeleton_modifier_3d.h"
 
-#include "core/object/callable.h"
+#include "core/variant/callable.h"
 
 class FootPlacementModifier3D : public SkeletonModifier3D {
 	GDCLASS(FootPlacementModifier3D, SkeletonModifier3D);

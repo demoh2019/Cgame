@@ -60,7 +60,7 @@ public:
 	};
 
 	// Returned by pick_victim() when the new sound must not be played.
-	static const int VICTIM_REJECT_NEW = -1;
+	static constexpr int VICTIM_REJECT_NEW = -1;
 
 private:
 	int max_count = 4;

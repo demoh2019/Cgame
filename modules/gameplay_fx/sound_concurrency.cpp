@@ -354,7 +354,8 @@ void SoundConcurrencyManager::stop_group(const StringName &p_group) {
 	if (!E) {
 		return;
 	}
-	LocalVector<Entry> entries = E->value;
+	LocalVector<Entry> entries;
+	entries = E->value;
 	E->value.clear();
 	for (uint32_t i = 0; i < entries.size(); i++) {
 		Node *player = ObjectDB::get_instance<Node>(entries[i].player);
