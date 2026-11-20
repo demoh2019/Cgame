@@ -3,6 +3,7 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
 
 
 ## Damage after the target's armour. `armor_id` may be empty.
@@ -105,6 +106,11 @@ static func active_skill(weapon_id: String) -> Dictionary:
 		return {"id": "concussive_blow", "energy_cost": 35.0, "cooldown": 9.0,
 			"attack_lock": 1.2, "range": Defs.MELEE_RANGE + 0.5,
 			"stagger_seconds": 1.3, "damage": weapon_damage(weapon_id) * 1.25,
+			"ranged": false}
+	if weapon_id.begins_with("restoration_staff_") and str(info.get("weapon", "")) == "melee":
+		return {"id": "restoration_pulse", "energy_cost": 40.0,
+			"cooldown": 12.0, "attack_lock": 0.9,
+			"party_heal": RestorationStaff.heal_for_tier(Defs.tier_of(weapon_id)),
 			"ranged": false}
 	if weapon_id.begins_with("club_") and str(info.get("weapon", "")) == "melee":
 		return {"id": "heavy_strike", "energy_cost": 30.0, "cooldown": 6.0,

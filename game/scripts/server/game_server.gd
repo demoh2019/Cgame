@@ -23,6 +23,7 @@ const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
+const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
 const SiegeContracts = preload("res://scripts/shared/siege_contracts.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
@@ -2755,6 +2756,35 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var cost: float = float(skill["energy_cost"])
 	if player.combat_energy < cost:
 		return {"ok": false, "reason": "no_energy"}
+	# The staff selects injured verified teammates on the server; the
+	# caller cannot submit a target ID, health value, or heal quantity.
+	# Rejected pulses cost no energy and never start a cooldown.
+	var heal_candidates: Array = []
+	if skill.has("party_heal"):
+		var group: Array = parties.members_of(peer_id)
+		if group.size() < 2:
+			return {"ok": false, "reason": "not_in_party"}
+		var caster_zone: int = world.zone_at(player.position.x, player.position.z)
+		for member_id in group:
+			var target_id: int = int(member_id)
+			if target_id == peer_id:
+				continue # Healing allies is not a free self-heal.
+			var ally: Player = players.get(target_id)
+			if ally == null or not _alive(ally):
+				continue
+			if world.zone_at(ally.position.x, ally.position.z) != caster_zone:
+				continue
+			if not RestorationStaff.can_reach(player.position, ally.position):
+				continue
+			var urgency: float = RestorationStaff.urgency(
+				ally.survival.health, ally.survival.max_health)
+			if urgency <= 0.0:
+				continue
+			heal_candidates.append({"id": target_id, "urgency": urgency, "player": ally})
+		if heal_candidates.is_empty():
+			return {"ok": false, "reason": "no_wounded_allies"}
+		heal_candidates.sort_custom(func(a, b):
+			return float(a["urgency"]) > float(b["urgency"]) if float(a["urgency"]) != float(b["urgency"]) else int(a["id"]) < int(b["id"]))
 	var ranged: bool = bool(skill.get("ranged", false))
 	var ammo: String = str(skill.get("ammo", ""))
 	# Validate and consume exactly one physical cartridge before charging energy.
@@ -2771,6 +2801,21 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	player.attack_timer = float(skill["attack_lock"])
 	player.action = {}
 	player.yaw = atan2(direction.x, direction.y)
+	if skill.has("party_heal"):
+		var treated: int = mini(heal_candidates.size(), RestorationStaff.MAX_TARGETS)
+		var total_healed: float = 0.0
+		for index in range(treated):
+			var recipient: Player = heal_candidates[index]["player"]
+			var before_health: float = recipient.survival.health
+			recipient.survival.heal(float(skill["party_heal"]))
+			total_healed += recipient.survival.health - before_health
+			recipient.dirty_character = true
+		player.dirty_character = true
+		# Public effect contains no recipient IDs or medical details.
+		events.append({"type": "restoration_pulse", "peer": peer_id,
+			"count": treated, "x": player.position.x, "z": player.position.z})
+		return {"ok": true, "treated": treated, "healed": total_healed,
+			"energy": player.combat_energy}
 	if ranged:
 		var shot_noise: Dictionary = Combat.ranged_noise(weapon)
 		player.noise_radius = maxf(player.noise_radius, float(shot_noise["radius"]))

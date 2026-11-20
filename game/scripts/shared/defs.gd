@@ -215,6 +215,18 @@ static func _build_items() -> void:
 		_add_recipe("sledgehammer_%d" % t, "sledgehammer_%d" % t, 1,
 			{"plank_%d" % t: 1, "bar_%d" % t: 3, "scrap": 2},
 			"workbench", 7.0)
+		# Classless field medicine: a low-damage weapon that supports nearby
+		# party allies through an energy-limited restorative ability.
+		_add_item("restoration_staff_%d" % t, {
+			"name": "Expedition Restoration Staff T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 5.0 + 3.0 * float(t - 1), "cooldown": 1.0,
+			"weight": 2.0 + 0.2 * t, "value": 62 * t})
+		_add_recipe("restoration_staff_%d" % t,
+			"restoration_staff_%d" % t, 1,
+			{"plank_%d" % t: 2, "cloth_%d" % t: 2,
+				"bar_%d" % t: 1, "field_antiseptic": 1},
+			"workbench", 7.0)
 		# Lightweight classless archery: affordable arrows, limited distance and noise.
 		_add_item("bow_%d" % t, {"name": "Survival Bow T%d" % t,
 			"kind": "weapon", "weapon": "ranged", "tier": t,
