@@ -43,6 +43,10 @@ static func weather(daylight: float, sun_height: float, storm: float,
 		"height_density": height_density,
 		"volume_density": volume_density,
 		"sun_scatter": (0.06 + 0.22 * dawn) * (1.0 - 0.5 * rain) * sun,
+		# Forward Mie scattering: low sun reveals rays through mist while storm
+		# droplets broaden the lobe. No extra lights, textures, or fog passes.
+		"anisotropy": clampf(0.38 + 0.16 * dawn * (1.0 - 0.6 * rain)
+			- 0.10 * rain, 0.24, 0.55),
 	}
 
 
@@ -98,6 +102,11 @@ static func apply_weather(env: Environment, daylight: float, sun_height: float,
 	if not biome.is_empty():
 		env.fog_light_color = env.fog_light_color.lerp(tint, tint_amount)
 	if bool(settings.get("enabled", false)):
+		# Update when the weather actually changes enough; the renderer otherwise
+		# keeps the previous value instead of sending new state every frame.
+		var anisotropy: float = float(frame["anisotropy"])
+		if absf(env.volumetric_fog_anisotropy - anisotropy) > 0.01:
+			env.volumetric_fog_anisotropy = anisotropy
 		env.volumetric_fog_density = minf(
 			float(frame["volume_density"]) * volume_scale, MAX_VOLUME_DENSITY)
 		env.volumetric_fog_albedo = horizon.lerp(Color(0.66, 0.7, 0.73), 0.18).lerp(tint, tint_amount)
