@@ -311,4 +311,36 @@ TEST_CASE("[HeightmapTerrain] External normals follow LOD vertices and skirts") 
 	CHECK(sample_normal_bilinear(field, 0.0, 8.0, params).is_equal_approx(supplied[8 * 17]));
 }
 
+TEST_CASE("[HeightmapTerrain] Error budget follows actual relief, including partial edges") {
+	const Vector<real_t> flat = make_field(33, 33, [](int x, int z) { return real_t(x * 0.1 + z * 0.2); });
+	const HeightField plane = view(flat, 33, 33);
+	CHECK(chunk_lod_max_error(plane, 0, 0, 16, 2) == doctest::Approx(0.0).epsilon(1e-5));
+	CHECK(chunk_lod_max_error(plane, 0, 0, 16, 8) == doctest::Approx(0.0).epsilon(1e-5));
+	const Vector<real_t> peak = make_field(33, 33, [](int x, int z) { return real_t(x == 3 && z == 5 ? 9.0 : 0.0); });
+	const HeightField hill = view(peak, 33, 33);
+	CHECK(chunk_lod_max_error(hill, 0, 0, 16, 1) == doctest::Approx(0.0));
+	CHECK(chunk_lod_max_error(hill, 0, 0, 16, 2) == doctest::Approx(9.0));
+	CHECK(chunk_lod_max_error(hill, 0, 0, 16, 4) == doctest::Approx(9.0));
+	CHECK(chunk_lod_max_error(hill, 16, 16, 16, 4) == doctest::Approx(0.0));
+	const Vector<real_t> partial = make_field(20, 20, [](int x, int z) {
+		return real_t(x * 0.3 + z * 0.15 + (x == 18 && z == 18 ? 2.0 : 0.0));
+	});
+	CHECK(chunk_lod_max_error(view(partial, 20, 20), 16, 16, 16, 4) >= real_t(2.0));
+}
+
+TEST_CASE("[HeightmapTerrain] Screen-pixel LOD protects relief and simplifies flats") {
+	const real_t flat[] = { 0.0, 0.0, 0.0, 0.0 };
+	CHECK(select_lod_by_pixel_error(flat, 4, 20, 700, 1.0) == 3);
+	const real_t ridge[] = { 0.0, 0.1, 0.5, 2.0 };
+	CHECK(select_lod_by_pixel_error(ridge, 4, 100, 700, 2.0) == 1);
+	CHECK(select_lod_by_pixel_error(ridge, 4, 100, 700, 4.0) == 2);
+	CHECK(select_lod_by_pixel_error(ridge, 4, 400, 700, 2.0) == 2);
+	CHECK(select_lod_by_pixel_error(ridge, 4, 100, 1400, 2.0) == 1);
+	// Entering and leaving a level has a 10% stable screen-error band.
+	CHECK(select_lod_by_pixel_error(ridge, 4, 100, 700, 3.4, 2) == 2);
+	CHECK(select_lod_by_pixel_error(ridge, 4, 100, 700, 3.0, 2) == 1);
+	CHECK(select_lod_by_pixel_error(ridge, 4, NAN, 700, 2.0) == 0);
+	CHECK(select_lod_by_pixel_error(ridge, 4, 100, 0.0, 2.0) == 0);
+}
+
 } // namespace TestHeightmapTerrainGeometry
