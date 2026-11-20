@@ -58,6 +58,20 @@ func _run() -> void:
         _fail("spawn tile failed to load before physics timeout")
         return
 
+    # The native physics activation barrier is separate from scene creation.
+    # Character movement must remain frozen until two engine physics ticks
+    # have followed instantiation of its actual HeightMapShape3D tile.
+    for i in range(MAX_PHYSICS_FRAMES):
+        if stream.is_cell_physics_ready(origin):
+            break
+        await physics_frame
+    if not stream.are_cells_physics_ready(origin, 0):
+        _fail("spawn tile failed native physics-frame readiness")
+        return
+    if stream.get_physics_ready_cell_count() < 1:
+        _fail("native ready cell counter is not tracking terrain activation")
+        return
+
     var tile := _find_cell(stream, origin)
     if tile == null:
         _fail("loaded origin scene root could not be located")
@@ -112,5 +126,5 @@ func _run() -> void:
         _fail("character reports terrain present outside registered cells")
         return
 
-    print("Forest physics smoke PASSED: streamed heightfield raycast, capsule landing, per-cell obstacles and collision safety")
+    print("Forest physics smoke PASSED: activation barrier, terrain raycast, capsule landing and collision-safe streaming")
     quit(0)
