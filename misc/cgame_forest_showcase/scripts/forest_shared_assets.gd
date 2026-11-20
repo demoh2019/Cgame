@@ -9,6 +9,7 @@ extends RefCounted
 
 static var _trunk: CylinderMesh
 static var _canopy: SphereMesh
+static var _distant_canopy: SphereMesh
 static var _grass: QuadMesh
 static var _rock: SphereMesh
 static var _ground_material: StandardMaterial3D
@@ -41,6 +42,23 @@ static func tree_canopy() -> SphereMesh:
         wind.shader = preload("res://shaders/foliage_wind.gdshader")
         _canopy.material = wind
     return _canopy
+
+
+static func distant_tree_canopy() -> SphereMesh:
+    # Simplified low-poly mesh for distant forest HLOD. Kept independent of
+    # full wind-animated canopies so only nearby vegetation pays shader cost.
+    if _distant_canopy == null:
+        _distant_canopy = SphereMesh.new()
+        _distant_canopy.radius = 1.0
+        _distant_canopy.height = 2.0
+        _distant_canopy.radial_segments = 5
+        _distant_canopy.rings = 2
+
+        var leaves := StandardMaterial3D.new()
+        leaves.albedo_color = Color(0.27, 0.42, 0.23)
+        leaves.roughness = 0.95
+        _distant_canopy.material = leaves
+    return _distant_canopy
 
 
 static func grass_blade() -> QuadMesh:
