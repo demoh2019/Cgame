@@ -30,8 +30,10 @@ func _ready() -> void:
 	floor_max_angle = deg_to_rad(45.0)
 	_create_capsule_if_missing()
 	_create_camera_if_missing()
-	is_flying = start_in_fly_mode
-	movement_mode_changed.emit(is_flying)
+	if start_in_fly_mode:
+		set_fly_mode(true)
+	else:
+		movement_mode_changed.emit(false)
 
 
 func _physics_process(delta: float) -> void:
