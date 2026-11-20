@@ -41,7 +41,7 @@ func _wait_loaded(stream: WorldPartition3D, cell: Vector2i) -> bool:
     return false
 
 
-func _wait_travel(travel: Node) -> bool:
+func _wait_travel(travel) -> bool:
     for i in range(MAX_FRAMES):
         if not travel.active:
             return true
@@ -73,7 +73,7 @@ func _run() -> void:
         _fail("initial observer cell not loaded")
         return
 
-    var travel := Travel.new()
+    var travel = Travel.new()
     root.add_child(travel)
     travel.configure(world, pawn, Callable(self, "_height"))
     travel.travel_completed.connect(_on_complete)
