@@ -61,7 +61,7 @@ func _run() -> void:
         if stream.is_cell_loaded(origin):
             break
         await physics_frame
-    if not stream.is_cell_loaded(origin):
+    if not stream.are_cells_loaded(origin, 0):
         _fail("spawn tile failed to load before physics timeout")
         return
 
