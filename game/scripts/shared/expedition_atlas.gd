@@ -35,6 +35,8 @@ static func objectives(you: Variant) -> Array[Dictionary]:
 	if not (you is Dictionary):
 		return result
 	var self_state: Dictionary = you
+	_add(result, self_state.get("death_recovery", {}), "recovery",
+		"LOST BACKPACK", "x", "z", true)
 	var boss: Variant = self_state.get("threat_scan", {})
 	if boss is Dictionary:
 		var threat: Dictionary = boss
@@ -63,10 +65,18 @@ static func objectives(you: Variant) -> Array[Dictionary]:
 		var group: Dictionary = party
 		_add(result, group.get("escort_caravan", {}), "escort",
 			"ESCORT COURIER", "dst_x", "dst_z")
+		_add(result, group.get("corpse_rescue", {}), "rescue",
+			"RECOVER TEAMMATE GEAR", "x", "z", true)
 		_add(result, group.get("rally", {}), "rally",
 			"PARTY RALLY", "x", "z", true)
-		_add(result, group.get("ping", {}), "ping",
-			"PARTY PING", "x", "z", true)
+		var party_ping: Dictionary = group.get("ping", {})
+		var ping_label := "PARTY PING"
+		if str(party_ping.get("kind", "")) == "survey" and (
+				str(party_ping.get("material", "")) in ["ore", "rock"]) and (
+				int(party_ping.get("tier", 0)) >= 2 and int(party_ping.get("tier", 0)) <= 4):
+			ping_label = "T%d %s PARTY VEIN" % [
+				int(party_ping["tier"]), str(party_ping["material"]).to_upper()]
+		_add(result, party_ping, "ping", ping_label, "x", "z", true)
 	return result
 
 

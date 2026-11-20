@@ -4,6 +4,7 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
+const CraftFromStash = preload("res://scripts/shared/craft_from_stash.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 
 const MAX_BATCHES := 50
@@ -27,7 +28,7 @@ static func matches(recipe_id: String, search: String) -> bool:
 ## Calculate a real transaction-safe maximum, including input stacks and
 ## output room AFTER consuming materials. Descending scan is deliberate:
 ## crafting 2 batches can free an input slot where crafting 1 cannot.
-static func max_batches(inventory, recipe_id: String) -> int:
+static func max_batches(inventory, recipe_id: String, bank = null) -> int:
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	if recipe.is_empty():
 		return 0
@@ -36,21 +37,32 @@ static func max_batches(inventory, recipe_id: String) -> int:
 		var needed: int = int(recipe["inputs"][input])
 		if needed <= 0:
 			return 0
-		upper = mini(upper, int(inventory.count(str(input))) / needed)
+		var available: int = int(inventory.count(str(input)))
+		if bank != null:
+			available += int(bank.count(str(input)))
+		upper = mini(upper, available / needed)
 	if upper < 1:
 		return 0
 	var data: Dictionary = inventory.to_dict()
 	for times in range(upper, 0, -1):
 		var trial = Inventory.new(inventory.slots.size())
 		trial.load_dict(data)
-		if Crafting.craft(trial, recipe_id, true, times, true) == Crafting.Result.OK:
+		var status: int
+		if bank != null:
+			var bank_copy = Inventory.new(bank.slots.size())
+			bank_copy.load_dict(bank.to_dict())
+			status = CraftFromStash.craft(trial, bank_copy, recipe_id, times)
+		else:
+			status = Crafting.craft(trial, recipe_id, true, times, true)
+		if status == Crafting.Result.OK:
 			return times
 	return 0
 
 
 ## "Available" means inventory and crafting tier permit the recipe.
 ## Station proximity, life, mount status and combat remain server-owned.
-static func entries(inventory, search: String, ready_only: bool, crafting_level: int) -> Array[Dictionary]:
+static func entries(inventory, search: String, ready_only: bool, crafting_level: int,
+		bank = null) -> Array[Dictionary]:
 	var found: Array[Dictionary] = []
 	for key in Defs.recipes():
 		var id: String = str(key)
@@ -58,7 +70,7 @@ static func entries(inventory, search: String, ready_only: bool, crafting_level:
 			continue
 		var recipe: Dictionary = Defs.recipes()[id]
 		var tier: int = maxi(1, Defs.tier_of(str(recipe["output"])))
-		var max_count: int = max_batches(inventory, id)
+		var max_count: int = max_batches(inventory, id, bank)
 		var locked: bool = tier > crafting_level
 		var ready: bool = max_count > 0 and not locked
 		if ready_only and not ready:

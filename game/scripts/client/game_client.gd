@@ -215,7 +215,8 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float, crou
 		"cargo_factor": factor, "speed_bonus": float(you.get("speed_bonus", 0.0)),
 		"injury_factor": Survival.fracture_speed_factor(float(you.get("fracture", 0.0))),
 		"tire_grip_seconds": float(you.get("tire_grip_seconds", 0.0)),
-		"bike_integrity": float(you.get("bike_integrity", 100.0))}
+		"bike_integrity": float(you.get("bike_integrity", 100.0)),
+		"weather_time": server_time}
 	predicted = Movement.step(world, predicted, input, delta)
 	if running:
 		predicted_stamina = maxf(0.0, predicted_stamina - Defs.SPRINT_STAMINA_PER_SECOND * delta)
@@ -274,6 +275,10 @@ func fish(baited: bool = false, storm_cast: bool = false) -> void:
 
 func craft(recipe: String, times: int = 1) -> void:
 	net.c_craft.rpc_id(1, recipe, times)
+
+
+func craft_from_stash(recipe: String, times: int = 1) -> void:
+	net.c_craft_from_stash.rpc_id(1, recipe, times)
 
 
 func salvage_gear(item_id: String) -> void:
@@ -371,6 +376,10 @@ func party_ready_answer(ready: bool) -> void:
 
 func party_standard() -> void:
 	net.c_party_standard.rpc_id(1)
+
+
+func party_corpse_rescue() -> void:
+	net.c_party_corpse_rescue.rpc_id(1)
 
 
 func party_rally() -> void:

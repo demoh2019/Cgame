@@ -23,6 +23,8 @@ const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
+const DeathRecovery = preload("res://scripts/shared/death_recovery.gd")
+const PartyCorpseRescue = preload("res://scripts/shared/party_corpse_rescue.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
@@ -49,8 +51,10 @@ const EquipmentPresets = preload("res://scripts/shared/equipment_presets.gd")
 const ExpeditionLoadout = preload("res://scripts/shared/expedition_loadout.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
+const CraftFromStash = preload("res://scripts/shared/craft_from_stash.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
 const FieldWhetstone = preload("res://scripts/shared/field_whetstone.gd")
+const MiningWedges = preload("res://scripts/shared/mining_wedges.gd")
 const FieldArmorPlate = preload("res://scripts/shared/field_armor_plate.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
@@ -60,6 +64,7 @@ const SiegeCharge = preload("res://scripts/shared/siege_charge.gd")
 const SiegeDefusal = preload("res://scripts/shared/siege_defusal.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
+const TrailBackpack = preload("res://scripts/shared/trail_backpack.gd")
 const CargoRattle = preload("res://scripts/shared/cargo_rattle.gd")
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
@@ -78,6 +83,7 @@ const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const GatheringNoise = preload("res://scripts/shared/gathering_noise.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
+const SurveySignal = preload("res://scripts/shared/survey_signal.gd")
 const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
@@ -90,6 +96,7 @@ const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const AcidNeutralizer = preload("res://scripts/shared/acid_neutralizer.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
 const GuardianIntercept = preload("res://scripts/shared/guardian_intercept.gd")
+const GuardianRetribution = preload("res://scripts/shared/guardian_retribution.gd")
 const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
 const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
@@ -102,9 +109,11 @@ const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
 const NightHorde = preload("res://scripts/shared/night_horde.gd")
 const HubRecall = preload("res://scripts/shared/hub_recall.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const StormMud = preload("res://scripts/shared/storm_mud.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const StormInsulator = preload("res://scripts/shared/storm_insulator.gd")
 const WetClothing = preload("res://scripts/shared/wet_clothing.gd")
+const WadingWetness = preload("res://scripts/shared/wading_wetness.gd")
 const WindChill = preload("res://scripts/shared/wind_chill.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const SporeSampling = preload("res://scripts/shared/spore_sampling.gd")
@@ -121,6 +130,7 @@ const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const RestedTraining = preload("res://scripts/shared/rested_training.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
+const StormproofBriquette = preload("res://scripts/shared/stormproof_briquette.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
 const StormTarpAnchors = preload("res://scripts/shared/storm_tarp_anchors.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
@@ -139,6 +149,7 @@ const RainHarvest = preload("res://scripts/shared/rain_harvest.gd")
 const FieldCanteen = preload("res://scripts/shared/field_canteen.gd")
 const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
+const CombatStress = preload("res://scripts/shared/combat_stress.gd")
 const PartyFeast = preload("res://scripts/shared/party_feast.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
@@ -200,11 +211,18 @@ class Player:
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
 	var feast_timer: float = 0.0 # Session-only prepared group meal cooldown.
+	var combat_stress: float = 0.0 # Session-only PvE pressure; not a permanent condition.
+	var stress_pressure: float = 0.0 # Last trusted nearby infected threat sample.
+	var stress_scan_seconds: float = 0.0 # Bound scanning to twice per second.
 	var guardian_timer: float = 0.0 # Session-only PvE frontline cooldown.
 	var guardian_brace: float = 0.0 # Short PvE-only defensive brace after a valid taunt.
 	var guard_link_target: int = -1 # Server-only chosen ally for one zombie melee hit.
 	var guard_link_seconds: float = 0.0 # Valid for at most 9 seconds.
 	var guard_link_cooldown: float = 0.0 # Session-only cast cooldown.
+	var guard_counter_target: int = -1 # Exact infected whose melee was intercepted.
+	var guard_counter_seconds: float = 0.0 # 4s to answer with normal melee.
+	var guard_counter_weapon: String = "" # Original real melee gear.
+	var guard_counter_party: int = 0 # Group valid at time of interception.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
 	var rain_cooldown: float = 0.0 # Persisted storm water collection cooldown.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
@@ -231,6 +249,7 @@ class Player:
 	var combat_energy: float = 100.0
 	var sharpened_weapon: String = "" # Prepared, owned melee weapon.
 	var sharpened_hits: int = 0 # Only confirmed ordinary infected contacts spend charges.
+	var wedge_charges: int = 0 # Three server-confirmed loud T2+ mine yields; persisted.
 	var plated_armor: String = "" # Protected armor ID, tied to carried equipped item.
 	var plated_hits: int = 0 # Three paid ordinary infected-melee mitigations.
 	var noise_radius: float = 0.0
@@ -241,6 +260,8 @@ class Player:
 	var recall_ready_at: float = 0.0
 	var crouching: bool = false # Ephemeral, server-authorized posture.
 	var mounted: bool = false # Session-only; never saved.
+	var bike_lamp_enabled: bool = true # Night visibility versus stealth (session-only).
+	var bike_lamp_last_toggle: float = -1.0 # Server-owned anti-spam timer.
 	var mount_cooldown: float = 0.0
 	var chain_wrap_seconds: float = 0.0 # Validated, persisted noise protection.
 	var bike_service_meters: float = 0.0 # Chain service measured from actual cycling.
@@ -451,6 +472,7 @@ func character_data(player: Player) -> Dictionary:
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 		"sharpened_weapon": player.sharpened_weapon if sharp_valid else "",
 		"sharpened_hits": player.sharpened_hits if sharp_valid else 0,
+		"wedge_charges": player.wedge_charges if MiningWedges.valid_state(player.wedge_charges) else 0,
 		"plated_armor": player.plated_armor if plate_valid else "",
 		"plated_hits": player.plated_hits if plate_valid else 0,
 	}
@@ -554,6 +576,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not FieldArmorPlate.valid_state(data.get("plated_armor", ""),
 			data.get("plated_hits", 0), parsed_bag["inventory"]):
+		return false
+	if not MiningWedges.valid_state(data.get("wedge_charges", 0)):
 		return false
 	if not (data.get("alive", true) is bool):
 		return false
@@ -676,6 +700,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.sharpened_hits = int(data.get("sharpened_hits", 0))
 	player.plated_armor = str(data.get("plated_armor", ""))
 	player.plated_hits = int(data.get("plated_hits", 0))
+	player.wedge_charges = int(data.get("wedge_charges", 0))
 	player.inventory = parsed_bag["inventory"]
 	player.stash = parsed_stash["inventory"]
 	player.kills = int(data.get("kills", 0))
@@ -767,12 +792,16 @@ func _spawn_player(player: Player) -> void:
 	player.position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
 	_apply_skill_bonuses(player)
 	player.survival.reset()
+	player.combat_stress = 0.0
+	player.stress_pressure = 0.0
+	player.stress_scan_seconds = 0.0
 	player.spore_exposed = false
 	player.defense_target = -1
 	player.defense_until = 0.0
 	player.guard_link_target = -1
 	player.guard_link_seconds = 0.0
 	player.guard_link_cooldown = 0.0
+	GuardianRetribution.clear(player)
 	var kept_gear: bool = player.keep_inventory_on_respawn
 	player.keep_inventory_on_respawn = false
 	if not kept_gear:
@@ -784,6 +813,7 @@ func _spawn_player(player: Player) -> void:
 	player.threat_scan = {} # Death cannot preserve a scouting advantage.
 	player.sharpened_weapon = ""
 	player.sharpened_hits = 0
+	player.wedge_charges = 0
 	player.plated_armor = ""
 	player.plated_hits = 0
 	player.mounted = false
@@ -922,6 +952,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 			"injury_factor": Survival.fracture_speed_factor(player.survival.fracture),
 			"tire_grip_seconds": player.tire_grip_seconds,
 			"bike_integrity": player.bike_integrity,
+			"weather_time": time,
 		}, allowed)
 		var moved: float = Vector2(player.position.x - before_move.x, player.position.z - before_move.z).length()
 		if moved > 0.0:
@@ -1151,7 +1182,8 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 	return {"ok": true, "seconds": total}
 
 
-func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
+func cmd_craft(peer_id: int, recipe_id: String, times: int = 1,
+		from_stash: bool = false) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
@@ -1159,6 +1191,10 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 		return {"ok": false, "reason": "mounted"}
 	if not player.recall.is_empty():
 		return {"ok": false, "reason": "recall_channeling"}
+	# Using account-protected items is an exclusive hub bank privilege,
+	# never available at rural benches, field outposts or wilderness fires.
+	if from_stash and not _market_at_hub(player):
+		return {"ok": false, "reason": "no_station"}
 	times = clampi(times, 1, 50)
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	if recipe.is_empty():
@@ -1171,7 +1207,10 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 		or territory.has_field_workbench(peer_id, players, parties, time))
 	var at_fire: bool = String(recipe["station"]) == "campfire" and FieldCampfire.has_warmth(
 			campfires, player.position, time)
-	var status: int = Crafting.craft(player.inventory, recipe_id, at_bench, times, at_fire)
+	var status: int = CraftFromStash.craft(
+		player.inventory, player.stash, recipe_id, times
+	) if from_stash else Crafting.craft(
+		player.inventory, recipe_id, at_bench, times, at_fire)
 	if status == Crafting.Result.OK:
 		player.progression.award_craft(recipe_tier, times)
 		_award(player, "crafting", 8.0 * float(recipe_tier) * float(times))
@@ -1180,10 +1219,15 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 		for batch in times:
 			if not input_ids.is_empty() and rng.randf() < player.skills.bonus("craft_refund"):
 				player.inventory.add(String(input_ids[rng.randi() % input_ids.size()]), 1)
+		player.inventory.unequip_missing()
 		player.dirty_inventory = true
+		if from_stash:
+			player.dirty_stash = true
 		player.dirty_character = true
-		return {"ok": true}
-	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status]}
+		return {"ok": true, "recipe": recipe_id, "times": times,
+			"from_stash": from_stash}
+	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status],
+		"from_stash": from_stash}
 
 
 ## Recycle unused equipment at the settlement workbench.
@@ -1744,6 +1788,12 @@ func cmd_party_ping(peer_id: int, x: float, z: float) -> Dictionary:
 	return parties.mark_ping(peer_id, Vector2(x, z), time)
 
 
+## No position, bag ID or payout is client-selected. Even a dead member
+## may ask their existing party to help recover lost equipment.
+func cmd_party_corpse_rescue(peer_id: int) -> Dictionary:
+	return PartyCorpseRescue.request(players.get(peer_id), parties, bags, time)
+
+
 func cmd_party_rally(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -1815,6 +1865,7 @@ func _party_state_for(peer_id: int) -> Dictionary:
 			roster.append({"id": int(id), "name": member.name,
 				"alive": _alive(member), "health": member.survival.health})
 	state["roster"] = roster
+	state["corpse_rescue"] = PartyCorpseRescue.shared(peer_id, players, parties, bags, time)
 	state["escort_caravan"] = CaravanEscort.shared_route(peer_id, players, parties)
 	var shared: Dictionary = state["escort_caravan"]
 	state["escort_progress"] = {}
@@ -3209,7 +3260,7 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
-	if player.mounted:
+	if player.mounted and item_id != BikeLantern.ITEM_ID:
 		return {"ok": false, "reason": "mounted"}
 	if not player.recall.is_empty():
 		return {"ok": false, "reason": "recall_channeling"}
@@ -3217,6 +3268,87 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"survey_signal":
+			if item_id != SurveySignal.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "survey_signal": true}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					player.skill_timer > 0.0 or not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "survey_signal": true}
+			var discovered: Dictionary = SurveySignal.candidate(
+				player, parties, depleted, time)
+			if not bool(discovered.get("ok", false)):
+				return {"ok": false, "reason": str(discovered.get("reason", "invalid_survey")),
+					"survey_signal": true}
+			# Charge only a valid group broadcast. Failed party validation does
+			# not spend the crafted kit or create a free shared map marker.
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "survey_signal": true}
+			var broadcast: Dictionary = SurveySignal.broadcast(
+				parties, player.id, discovered, time)
+			if not bool(broadcast.get("ok", false)):
+				player.inventory.add(item_id, 1)
+				return {"ok": false, "reason": str(broadcast.get("reason", "invalid_party")),
+					"survey_signal": true}
+			player.dirty_inventory = true
+			player.dirty_character = true
+			return {"ok": true, "survey_signal": true,
+				"tier": int(broadcast["tier"]), "material": str(broadcast["material"]),
+				"seconds": float(broadcast["seconds"])}
+		"bike_light":
+			if item_id != BikeLantern.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var lamp_reason: String = BikeLantern.toggle_reason(
+				player.inventory, time, player.bike_lamp_last_toggle)
+			if lamp_reason != "":
+				return {"ok": false, "reason": lamp_reason, "bike_lamp": true}
+			player.bike_lamp_enabled = not player.bike_lamp_enabled
+			player.bike_lamp_last_toggle = time
+			# Session preference has no inventory cost or new persistence field.
+			return {"ok": true, "bike_lamp": true,
+				"bike_lamp_enabled": player.bike_lamp_enabled,
+				"bike_lamp_lit": BikeLantern.lit(player.inventory, player.mounted,
+					_alive(player), WorldCycle.is_night(time), player.bike_lamp_enabled)}
+		"mining_wedges":
+			if item_id != MiningWedges.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "mining_wedges": true}
+			var wedge_reason: String = MiningWedges.use_reason(
+				player.inventory, player.wedge_charges)
+			if not wedge_reason.is_empty():
+				return {"ok": false, "reason": wedge_reason, "mining_wedges": true}
+			if player.attack_timer > 0.0 or player.skill_timer > 0.0 or (
+					player.combat_tag_until > time or not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "mining_wedges": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "mining_wedges": true}
+			player.wedge_charges = MiningWedges.CHARGES
+			player.dirty_inventory = true
+			player.dirty_character = true
+			return {"ok": true, "mining_wedges": true,
+				"charges": player.wedge_charges}
+		"fire_briquette":
+			if item_id != StormproofBriquette.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					player.skill_timer > 0.0) or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			var site: Dictionary = StormproofBriquette.nearest(campfires, player.position, time)
+			if not bool(site.get("ok", false)):
+				return site
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			var camp_id: int = int(site["id"])
+			var fire: Dictionary = campfires[camp_id]
+			fire["expires"] = minf(time + FieldCampfire.MAX_REMAINING_SECONDS,
+				float(fire["expires"]) + StormproofBriquette.FUEL_SECONDS)
+			fire["stormproof_until"] = time + StormproofBriquette.SHIELD_SECONDS
+			campfires[camp_id] = fire
+			player.dirty_inventory = true
+			player.dirty_character = true
+			events.append({"type": "campfire_stormproofed", "id": camp_id,
+				"x": fire["x"], "z": fire["z"]})
+			return {"ok": true, "id": camp_id,
+				"remaining": float(fire["expires"]) - time,
+				"stormproof_seconds": StormproofBriquette.SHIELD_SECONDS}
 		"tarp_anchor":
 			if item_id != StormTarpAnchors.ITEM_ID:
 				return {"ok": false, "reason": "not_usable", "tarp_anchor": true}
@@ -3785,6 +3917,14 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	if crit:
 		damage *= 1.5 + player.skills.bonus("crit_damage")
 	var hit := _find_hit(player, origin, direction, reach, kind == "ranged")
+	# An earned counterattack belongs to ONE infected, never another survivor.
+	# The first normal melee swing consumes it even if it misses or hits PvP.
+	var guard_counterstrike: bool = false
+	if not is_ranged and player.guard_counter_seconds > 0.0:
+		var guarded_target = zombies.get(int(hit["id"])) if not hit.is_empty() and \
+				str(hit["kind"]) == "zombie" else null
+		guard_counterstrike = GuardianRetribution.consume(
+			player, guarded_target, parties, world)
 	# The FIRST legal attack spends a server-earned counter, including misses.
 	var riposte: bool = false
 	if player.riposte_seconds > 0.0:
@@ -3829,10 +3969,14 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		if player.sharpened_hits == 0:
 			player.sharpened_weapon = ""
 		player.dirty_character = true
+	if guard_counterstrike:
+		damage = GuardianRetribution.amplify(damage)
+		events.append({"type": "guardian_retribution", "peer": peer_id,
+			"zombie": int(hit["id"])})
 	_damage_target(player, hit, damage, "ranged" if is_ranged else "melee")
 	return {"ok": true, "hit": true, "target": hit["kind"],
 		"crit": crit, "ambush": ambush, "riposte": riposte,
-		"sharpened": sharpened}
+		"sharpened": sharpened, "guardian_retribution": guard_counterstrike}
 
 
 ## Party frontline role: no client-authored targets, aggro, radius or damage.
@@ -3947,6 +4091,11 @@ func _try_guardian_intercept(ally: Player, infected, raw_damage: float) -> bool:
 	chosen.dirty_character = true
 	events.append({"type": "guardian_intercept", "peer": ally.id,
 		"by": chosen.id, "zombie": infected.id, "damage": taken})
+	# Only the confirmed, survived intercept can arm the response. The
+	# infected challenges its rescuer briefly, while the guardian earns one
+	# boosted BASIC melee swing against this exact infected within 4 seconds.
+	if _alive(chosen) and GuardianRetribution.arm(chosen, infected, parties, world):
+		infected.force_taunt(chosen.id, GuardianRetribution.TAUNT_SECONDS)
 	if not _alive(chosen):
 		_on_player_death(chosen, -infected.id)
 	return true
@@ -4889,12 +5038,16 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	_cancel_market_seller(victim.id)
 	_cancel_player_trade(victim.id, "dead")
 	victim.deaths += 1
+	victim.combat_stress = 0.0
+	victim.stress_pressure = 0.0
+	victim.stress_scan_seconds = 0.0
 	# A courier must survive their defense; a later respawn cannot reclaim it.
 	victim.caravan_defended = false
 	victim.dirty_character = true
 	victim.action = {}
 	victim.sharpened_weapon = ""
 	victim.sharpened_hits = 0
+	victim.wedge_charges = 0
 	victim.plated_armor = ""
 	victim.plated_hits = 0
 	victim.ruin_survey = {} # Dead scouts cannot retain private map beacons.
@@ -4904,6 +5057,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.guardian_brace = 0.0
 	victim.guard_link_target = -1
 	victim.guard_link_seconds = 0.0
+	GuardianRetribution.clear(victim)
 	for teammate in players.values():
 		if teammate.guard_link_target == victim.id:
 			teammate.guard_link_target = -1
@@ -4927,8 +5081,10 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	if drops_gear:
 		var everything: Dictionary = victim.inventory.take_everything()
 		var death_bag_id: int = _make_bag(victim.position, everything)
-		if death_bag_id >= 0 and not _is_safe(victim.position):
-			CorpseScent.mark(bags[death_bag_id], time)
+		if death_bag_id >= 0:
+			DeathRecovery.tag(bags[death_bag_id], victim)
+			if not _is_safe(victim.position):
+				CorpseScent.mark(bags[death_bag_id], time)
 	victim.respawn_timer = Defs.RESPAWN_SECONDS
 	victim.dirty_inventory = true
 	events.append({"type": "death", "peer": victim.id, "killer": killer, "full_loot": drops_gear, "zone": zone})
@@ -5171,6 +5327,14 @@ func _tick_players(delta: float) -> void:
 		player.guardian_timer = maxf(0.0, player.guardian_timer - maxf(0.0, delta))
 		player.guardian_brace = maxf(0.0, player.guardian_brace - maxf(0.0, delta))
 		player.guard_link_cooldown = maxf(0.0, player.guard_link_cooldown - maxf(0.0, delta))
+		player.guard_counter_seconds = maxf(0.0, player.guard_counter_seconds - maxf(0.0, delta))
+		if player.guard_counter_seconds <= 0.0 or not _alive(player) or player.mounted or \
+				parties.group_of(player.id) != player.guard_counter_party or \
+				player.inventory.weapon != player.guard_counter_weapon or \
+				not GuardianTaunt.melee_equipped(player.inventory) or \
+				not zombies.has(player.guard_counter_target) or \
+				not zombies[player.guard_counter_target].is_alive():
+			GuardianRetribution.clear(player)
 		player.guard_link_seconds = maxf(0.0, player.guard_link_seconds - maxf(0.0, delta))
 		if player.guard_link_seconds > 0.0 and not GuardianIntercept.can_guard(
 				player, players.get(player.guard_link_target), parties, world):
@@ -5227,11 +5391,35 @@ func _tick_players(delta: float) -> void:
 		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX,
 			player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta + energy_bonus +
 				RallyStandard.ENERGY_PER_SECOND * standard_seconds)
+		# Session-only stress from infected currently hunting THIS survivor.
+		# Sample rarely (not on every world tick) and never consider nearby
+		# neutral creatures, other players' PvP, or idle/investigating zombies.
+		player.stress_scan_seconds -= maxf(0.0, delta)
+		if player.stress_scan_seconds <= 0.0:
+			player.stress_scan_seconds = CombatStress.SCAN_SECONDS
+			player.stress_pressure = CombatStress.pressure(
+				zombies, player.id, player.position)
+		var in_sanctuary: bool = _is_safe(player.position)
+		var safe_rest: bool = in_sanctuary or FieldCampfire.has_warmth(
+			campfires, player.position, time) or PortableShelter.covers(
+			shelters, player.position, time)
+		var accompanied: bool = CombatStress.has_live_companion(
+			player.id, player.position, players, parties)
+		player.combat_stress = CombatStress.advance(
+			player.combat_stress, delta, player.stress_pressure,
+			in_sanctuary, safe_rest, accompanied)
+		var stamina_before_stress_tick: float = player.survival.stamina
 		var stamina_recovery_delay_before_tick: float = player.survival.stamina_recovery_delay
 		var had_bleeding: bool = player.survival.bleeding > 0.0
 		var had_fracture: bool = player.survival.fracture > 0.0
 		var had_scent_mask: bool = player.survival.scent_mask_seconds > 0.0
 		var damage: float = player.survival.tick(delta)
+		# Only ordinary passive stamina regen is damped. Purchased food,
+		# party standards, skills and explicit healing stay unchanged.
+		var passive_gain: float = maxf(0.0,
+			player.survival.stamina - stamina_before_stress_tick)
+		player.survival.stamina -= passive_gain * (
+			1.0 - CombatStress.regen_multiplier(player.combat_stress))
 		if damage > 0.0:
 			_dismount(player, true)
 		if had_scent_mask:
@@ -5267,6 +5455,11 @@ func _tick_players(delta: float) -> void:
 		var old_wetness: float = player.survival.wetness
 		player.survival.wetness = WetClothing.next_wetness(old_wetness, delta,
 			conditions, worn_armor, under_tarp, at_warm_fire)
+		# Walking into a shallow ocean/ford soaks clothes, even beneath a
+		# roof or while standing near a fire. Terrain is server-owned.
+		var water_depth: float = WadingWetness.depth_at(world, player.position)
+		player.survival.wetness = WadingWetness.after_weather(old_wetness,
+			player.survival.wetness, delta, water_depth)
 		if not is_equal_approx(old_wetness, player.survival.wetness):
 			player.dirty_character = true
 		# Average the old and new moisture when a large simulation tick
@@ -5395,7 +5588,20 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 		parties, time, world)
 	var ordinary_amount: int = amount
 	amount += outpost_bonus
+	# Only the actual server-started, in-range and skill/tool-qualified mine
+	# may spend a paid wedge charge. A full bag keeps all remaining charges.
+	var wedge_authenticated: bool = int(player.action.get("node", -1)) == int(node["id"]) and (
+		player.position.is_finite() and _distance_xz(player.position, node) <= Defs.REACH + 0.5 and
+		player.progression.can_gather(String(node["kind"]), int(node["tier"])) and
+		Defs.tier_of(player.inventory.best_tool("pickaxe")) >= int(node["tier"]))
+	var wedge_bonus: int = MiningWedges.bonus(String(node["kind"]), int(node["tier"]),
+		player.wedge_charges, player.inventory.free_space_for(item_id), amount,
+		wedge_authenticated)
+	amount += wedge_bonus
 	var left: int = player.inventory.add(item_id, amount)
+	var wedge_spent: bool = wedge_bonus > 0 and left == 0
+	if wedge_spent:
+		player.wedge_charges -= 1
 	# One optional medicinal plant per actual successful bush/berry harvest.
 	# The server reads biome and risk from the generated world itself. A full
 	# bag, an invalid habitat, and exhausted nodes cannot mint extra supplies.
@@ -5417,6 +5623,8 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	# infected hearing, chase leashes, safe zones and camouflage rules apply.
 	var harvest_noise: float = GatheringNoise.radius(String(node["kind"]),
 		player.crouching, amount - left)
+	harvest_noise = MiningWedges.harvest_noise(harvest_noise,
+		wedge_bonus if wedge_spent else 0)
 	if harvest_noise > 0.0:
 		player.noise_radius = maxf(player.noise_radius, harvest_noise)
 		player.noise_timer = maxf(player.noise_timer, GatheringNoise.SOUND_SECONDS)
@@ -5424,10 +5632,12 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	player.dirty_character = true
 	player.action = {}
 	depleted[int(node["id"])] = time + float(info["respawn"])
+	SurveySignal.clear_depleted(parties, int(node["id"]))
 	events.append({"type": "gathered", "peer": player.id, "item": item_id,
 		"amount": amount - left, "node": node["id"],
 		"herbs": herbs_added, "harvest_noise": harvest_noise,
-		"outpost_bonus": paid_outpost_bonus})
+		"outpost_bonus": paid_outpost_bonus,
+		"wedge_bonus": wedge_bonus if wedge_spent else 0})
 
 
 ## Rare dangerous-zone group boss. One live boss per simulation and a 10-minute
@@ -5872,7 +6082,7 @@ func _tick_zombies(delta: float) -> void:
 			"weather_sight": Weather.sight_multiplier(
 				Weather.conditions(world, player.position.x, player.position.z, time)),
 			"firelight": maxf(BikeLantern.reveal_radius(player.inventory, player.mounted,
-				_alive(player), WorldCycle.is_night(time)),
+				_alive(player), WorldCycle.is_night(time), player.bike_lamp_enabled),
 				maxf(CampfireThreat.reveal_radius(campfires,
 					player.position, time, WorldCycle.is_night(time)),
 					HandFlare.infected_radius(player.flare_seconds, _alive(player),
@@ -6335,7 +6545,8 @@ func _tick_world(delta: float) -> void:
 		# The normal fuel tick has already advanced the simulation clock.
 		var local_weather: Dictionary = Weather.conditions(world,
 			float(fire["x"]), float(fire["z"]), time)
-		var extra: float = FieldCampfire.storm_extra_fuel(delta, local_weather)
+		var storm_exposed: float = StormproofBriquette.exposed_seconds(delta, time, fire)
+		var extra: float = FieldCampfire.storm_extra_fuel(storm_exposed, local_weather)
 		if extra <= 0.0:
 			continue
 		fire["expires"] = maxf(time, float(fire["expires"]) - extra)
@@ -6381,7 +6592,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"flare_lit": HandFlare.lit(other.flare_seconds, _alive(other)),
 				"bike_panniers": BikeCargo.installed(other.inventory),
 				"bike_lamp_lit": BikeLantern.lit(other.inventory, other.mounted,
-					_alive(other), WorldCycle.is_night(time)),
+					_alive(other), WorldCycle.is_night(time), other.bike_lamp_enabled),
 				"weapon": other.inventory.weapon,
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
 				"guild": {"id": other.guild_id, "name": other.guild_name},
@@ -6506,13 +6717,17 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"raid_aggro": raid_aggro_state,
 			"caravan": player.caravan_view.duplicate(true),
 			"equipment_presets": player.equipment_presets.duplicate(true),
+			"death_recovery": DeathRecovery.public_mark(bags, player, time),
 			"caravan_defended": player.caravan_defended,
 			"guild": {"id": player.guild_id, "name": player.guild_name, "rank": player.guild_rank},
 			"guild_siege_wins": int(guild_siege_wins.get(player.guild_id, 0)),
 			"siege_wins": int(siege_contracts.victories.get(parties.group_of(peer_id), 0)),
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
-			"stamina": player.survival.stamina, "crouching": player.crouching,
+			"stamina": player.survival.stamina,
+			"combat_stress": player.combat_stress,
+			"combat_stress_regen": CombatStress.regen_multiplier(player.combat_stress),
+			"crouching": player.crouching,
 			"mounted": player.mounted, "mount_cooldown": player.mount_cooldown,
 			"smoke_cooldown": player.smoke_cooldown,
 			"smoke_concealed": FieldSmoke.inside(smoke_clouds, player.position, time),
@@ -6551,6 +6766,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"soft_sole_seconds": player.soft_sole_seconds,
 			"exposure": player.survival.exposure,
 			"wetness": player.survival.wetness,
+			"wading_depth_m": WadingWetness.depth_at(world, player.position),
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 			"tent_sheltered": PortableShelter.covers(shelters, player.position, time),
@@ -6577,11 +6793,14 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"sharpened_hits": player.sharpened_hits if FieldWhetstone.valid_state(
 				player.sharpened_weapon, player.sharpened_hits, player.inventory) else 0,
+			"mining_wedge_charges": player.wedge_charges if MiningWedges.valid_state(player.wedge_charges) else 0,
 			"plated_hits": player.plated_hits if FieldArmorPlate.valid_state(
 				player.plated_armor, player.plated_hits, player.inventory) else 0,
 			"guardian_cooldown": player.guardian_timer,
 			"guardian_intercept_cooldown": player.guard_link_cooldown,
 			"guardian_intercept_seconds": player.guard_link_seconds,
+			"guardian_counter_seconds": player.guard_counter_seconds,
+			"guardian_counter_target": player.guard_counter_target if player.guard_counter_seconds > 0.0 else -1,
 			"guardian_intercept_target": player.guard_link_target if player.guard_link_seconds > 0.0 else -1,
 			"guardian_guarded_seconds": guardian_guarded_seconds,
 			"guardian_guarded_by": guardian_guarded_by,
@@ -6618,14 +6837,17 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"regional_trade": RegionalTrade.public_offer(world, player.position),
 			"renown_next": Reputation.next_threshold(player.renown),
 			"on_road": RoadTravel.on_road(world, player.position),
+			"storm_mud_factor": StormMud.factor(world, player.position, time, player.mounted),
 			"carry_kg": player.inventory.total_weight(),
+			"trail_pack_kg": TrailBackpack.support_kg(player.inventory, player.mounted),
 			"cargo_factor": BikeCargo.movement_factor(player.inventory,
 				player.skills.bonus("carry_capacity"), player.mounted),
 			"bike_cargo_kg": BikeCargo.SUPPORTED_KG if player.mounted and BikeCargo.installed(player.inventory) else 0.0,
 			"bike_service_meters": player.bike_service_meters,
 			"bike_integrity": player.bike_integrity,
 			"bike_lamp_lit": BikeLantern.lit(player.inventory, player.mounted,
-				_alive(player), WorldCycle.is_night(time)),
+				_alive(player), WorldCycle.is_night(time), player.bike_lamp_enabled),
+			"bike_lamp_enabled": player.bike_lamp_enabled,
 			"max_health": player.survival.max_health,
 			"speed_bonus": player.skills.bonus("move_speed"), "carry_bonus": player.skills.bonus("carry_capacity"),
 		},

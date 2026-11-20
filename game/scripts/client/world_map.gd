@@ -146,6 +146,8 @@ func _sync_followed_objective() -> void:
 
 static func objective_color(key: String) -> Color:
 	match key:
+		"recovery":
+			return Color(1.0, 0.43, 0.20)
 		"threat":
 			return Color(1.0, 0.32, 0.45)
 		"prospect":
@@ -421,10 +423,15 @@ func _draw_navigation(objectives: Array[Dictionary], font: Font) -> void:
 		var target := Vector2(float(squad_ping.get("x", INF)), float(squad_ping.get("z", INF)))
 		if TravelNavigation.valid_destination(target, WorldGen.WORLD_RADIUS):
 			var marker: Vector2 = _to_screen(target.x, target.y)
-			var hue := Color(0.15, 0.7, 0.68)
+			# A shared mineral survey shows amber with the vein's material and tier; an ordinary ping is teal.
+			var survey: bool = str(squad_ping.get("kind", "")) == "survey"
+			var hue := Color(0.95, 0.65, 0.25) if survey else Color(0.15, 0.7, 0.68)
 			draw_circle(marker, 11.0, Color("#1e1a14"))
 			draw_colored_polygon(PackedVector2Array([marker + Vector2(0, -9), marker + Vector2(9, 0), marker + Vector2(0, 9), marker + Vector2(-9, 0)]), hue)
-			_halo_text(font, marker + Vector2(14, 4), "Party ping #%d  (%ds)" % [int(squad_ping.get("by", 0)), ceili(float(squad_ping.get("remaining", 0.0)))], 12, Color("#0f4f4c"), PAPER)
+			var caption := "Party ping #%d  (%ds)" % [int(squad_ping.get("by", 0)), ceili(float(squad_ping.get("remaining", 0.0)))]
+			if survey:
+				caption = "Party T%d %s vein  (%ds)" % [int(squad_ping.get("tier", 2)), str(squad_ping.get("material", "ore")).capitalize(), ceili(float(squad_ping.get("remaining", 0.0)))]
+			_halo_text(font, marker + Vector2(14, 4), caption, 12, Color("#6a3f0c") if survey else Color("#0f4f4c"), PAPER)
 	for objective in objectives:
 		var point: Vector2 = _to_screen(float(objective["x"]), float(objective["z"]))
 		var color: Color = objective_color(str(objective["key"]))

@@ -10,6 +10,7 @@ const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
+const CombatStress = preload("res://scripts/shared/combat_stress.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
@@ -47,6 +48,7 @@ var _craft_panel: PanelContainer
 var _craft_list: VBoxContainer
 var _craft_search: LineEdit
 var _craft_ready_only: CheckBox
+var _craft_use_stash: CheckBox
 var _craft_result_count: Label
 var _salvage_item: OptionButton
 var _death: Label
@@ -396,6 +398,18 @@ func _build() -> void:
 	prospect_button.tooltip_text = "Field craft: cloth, 2 scrap, stone. Spend only on a real T2+ vein; private 80s marker."
 	prospect_button.pressed.connect(func() -> void: client.use_item("prospecting_chart"))
 	inventory_box.add_child(prospect_button)
+	var group_survey_button := Button.new()
+	group_survey_button.name = "ShareMineralSurvey"
+	group_survey_button.text = "Share scouted vein with party (1 crafted signal)"
+	group_survey_button.tooltip_text = "First prospect a real T2+ node, then spend one field-made signal. Teammates receive a temporary amber mining waypoint."
+	group_survey_button.pressed.connect(func() -> void: client.use_item("surveyor_signal"))
+	inventory_box.add_child(group_survey_button)
+	var mining_wedges_button := Button.new()
+	mining_wedges_button.name = "EquipMiningWedges"
+	mining_wedges_button.text = "Prepare mining wedges (3 T2+ deposits)"
+	mining_wedges_button.tooltip_text = "Workbench craft: 1 T2 bar, 3 scrap, 2 stone. Requires a pickaxe. +2 ore/stone per eligible deposit, but mining noise rises to 42m."
+	mining_wedges_button.pressed.connect(func() -> void: client.use_item("mining_wedges"))
+	inventory_box.add_child(mining_wedges_button)
 	var chain_button := Button.new()
 	chain_button.name = "UseBikeChainWrap"
 	chain_button.text = "Quiet bike chain (180s; workbench craft)"
@@ -420,6 +434,12 @@ func _build() -> void:
 	frame_button.tooltip_text = "Craft a frame patch at a workbench. Dismount to repair a damaged or broken bicycle."
 	frame_button.pressed.connect(func() -> void: client.use_item("bike_frame_patch"))
 	inventory_box.add_child(frame_button)
+	var lamp_button := Button.new()
+	lamp_button.name = "ToggleBikeDynamoLamp"
+	lamp_button.text = "Switch bicycle night lamp ([; no item consumed)"
+	lamp_button.tooltip_text = "Trade 13m forward illumination for infected exposure (23m). Switch on/off while riding or on foot."
+	lamp_button.pressed.connect(func() -> void: client.use_item("bike_dynamo_lamp"))
+	inventory_box.add_child(lamp_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -719,6 +739,12 @@ func _build() -> void:
 	duel_cancel.text = "Decline / end"
 	duel_cancel.pressed.connect(func() -> void: client.duel_cancel())
 	duel_buttons.add_child(duel_cancel)
+	var rescue_button := Button.new()
+	rescue_button.name = "ShareLostGearWithParty"
+	rescue_button.text = "Ask party to recover dropped gear"
+	rescue_button.tooltip_text = "Opt-in: share your actual full-loot bag with teammates for up to 90 seconds. Loot remains public."
+	rescue_button.pressed.connect(func() -> void: client.party_corpse_rescue())
+	party_buttons.add_child(rescue_button)
 	var rally_button := Button.new()
 	rally_button.text = "Set rally"
 	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
@@ -1060,6 +1086,13 @@ func _build() -> void:
 		_craft_signature = ""
 		_refresh_crafting())
 	craft_controls.add_child(_craft_ready_only)
+	_craft_use_stash = CheckBox.new()
+	_craft_use_stash.text = "Use bank"
+	_craft_use_stash.tooltip_text = "Craft with carried + protected stash materials at the main HUB workbench only. Finished items enter your backpack. Cannot use at other villages or field stations."
+	_craft_use_stash.toggled.connect(func(_value: bool) -> void:
+		_craft_signature = ""
+		_refresh_crafting())
+	craft_controls.add_child(_craft_use_stash)
 	_craft_result_count = Label.new()
 	craft_box.add_child(_craft_result_count)
 	var scroll := ScrollContainer.new()
@@ -1220,6 +1253,10 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"gathered":
+			if int(event.get("peer", -1)) == client.peer_id and int(event.get("wedge_bonus", 0)) > 0:
+				say("Reinforced extraction: +%d %s, loud pickaxe work attracts infected (42m)." % [
+					int(event["wedge_bonus"]), str(event.get("item", "ore"))])
 		"caravan_escort_paid":
 			say("Convoy escort complete: +%d silver, Explorer XP and renown earned." % [
 				int(event.get("silver", 0))])
@@ -1384,6 +1421,9 @@ func _on_event(event: Dictionary) -> void:
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
 		"guardian_taunt":
 			say("Frontline guardian draws %d infected away from teammates!" % int(event.get("count", 0)))
+		"guardian_retribution":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("GUARDIAN COUNTERSTRIKE! +25% melee damage against the intercepted infected.")
 		"guardian_intercept":
 			if int(event.get("by", -1)) == client.peer_id:
 				say("GUARDIAN INTERCEPT: blocked infected melee for ally #%d; took %.1f damage." % [
@@ -1491,6 +1531,29 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and bool(data.get("survey_signal", false)):
+		if bool(data.get("ok", false)):
+			say("Party mineral signal: T%d %s deposit shared for %.0fs. Allies can navigate there." % [
+				int(data.get("tier", 2)), str(data.get("material", "ore")),
+				float(data.get("seconds", 0.0))])
+		else:
+			say("Party mineral signal: %s (signal not spent)." % str(
+				data.get("reason", "rejected")))
+		return
+	if kind == "corpse_rescue":
+		if bool(data.get("ok", false)):
+			say("RESCUE SIGNAL: lost backpack shared privately for %ds. Loot stays public." % [
+				ceili(float(data.get("seconds", 0.0)))])
+		else:
+			say("Rescue signal: %s (no position shared)." % str(
+				data.get("reason", "rejected")))
+		return
+	if kind == "use" and bool(data.get("mining_wedges", false)):
+		if bool(data.get("ok", false)):
+			say("Mining wedges fitted: %d T2+ ore/stone harvests grant +2 extra material. Noise 42m." % int(data.get("charges", 0)))
+		else:
+			say("Mining wedges: %s (kit not spent)." % str(data.get("reason", "rejected")))
+		return
 	if kind == "use" and bool(data.get("tarp_anchor", false)):
 		if bool(data.get("ok", false)):
 			say("Storm tarp anchored: %.0fs of shelter remain; exposure reduction 90%%." % float(data.get("remaining", 0.0)))
@@ -1502,6 +1565,27 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Siege defusal successful; one toolkit spent, wall safe.")
 		else:
 			say("Defusal: %s (kit not spent)." % str(data.get("reason", "rejected")))
+		return
+	if kind == "craft_stash":
+		if bool(data.get("ok", false)):
+			var made_id: String = str(data.get("recipe", ""))
+			var recipe: Dictionary = Defs.recipes().get(made_id, {})
+			say("Crafted from bank: %d × %s, materials debited safely." % [
+				int(data.get("times", 1)) * int(recipe.get("count", 1)),
+				str(Defs.item(str(recipe.get("output", ""))).get("name", made_id))])
+		else:
+			var errors := {
+				"dead": "unavailable while dead",
+				"mounted": "dismount first",
+				"recall_channeling": "finish recall first",
+				"no_station": "only at the hub workbench",
+				"unknown_recipe": "unknown recipe",
+				"need_skill": "crafting level too low",
+				"missing_inputs": "materials missing from both containers",
+				"no_space": "backpack has no room for the finished items",
+			}
+			say("Craft from bank: %s" % str(errors.get(
+				str(data.get("reason", "")), "rejected")))
 		return
 	if kind == "equipment_preset":
 		if bool(data.get("ok", false)):
@@ -1557,6 +1641,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				float(data.get("cooldown", 6.0))])
 		else:
 			say("Stagger finisher: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "use" and bool(data.get("bike_lamp", false)):
+		if bool(data.get("ok", false)):
+			say("Dynamo lamp %s. The beam attracts infected when riding at night." % (
+				"armed" if bool(data.get("bike_lamp_enabled", false)) else "switched off"))
+		else:
+			say("Dynamo lamp: " + str(data.get("reason", "rejected")) + " (no item spent)")
 		return
 	if kind == "use" and data.has("tire_grip_seconds"):
 		say("Off-road tire grips fitted: %.0fs of improved traction." % float(data["tire_grip_seconds"]))
@@ -2086,6 +2177,11 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	var combat_stress: float = float(client.you.get("combat_stress", 0.0))
+	if combat_stress >= CombatStress.HUD_THRESHOLD:
+		_info_label.text += "\nINFECTED PRESSURE: %d/100 | passive stamina recovery -%d%%. Regroup or find shelter." % [
+			roundi(combat_stress),
+			roundi(100.0 * (1.0 - float(client.you.get("combat_stress_regen", 1.0))))]
 	var intercept_active: float = float(client.you.get("guardian_intercept_seconds", 0.0))
 	var intercept_cooldown: float = float(client.you.get("guardian_intercept_cooldown", 0.0))
 	if intercept_active > 0.0:
@@ -2093,13 +2189,32 @@ func _process(_delta: float) -> void:
 			int(client.you.get("guardian_intercept_target", -1)), intercept_active]
 	elif intercept_cooldown > 0.0:
 		_info_label.text += "\nGuard link ready in %.0fs" % intercept_cooldown
+	var counter_window: float = float(client.you.get("guardian_counter_seconds", 0.0))
+	if counter_window > 0.0:
+		_info_label.text += "\nGUARD COUNTER READY: %.1fs — melee strike enemy #%d (+25%%)" % [
+			counter_window, int(client.you.get("guardian_counter_target", -1))]
 	var protected_for: float = float(client.you.get("guardian_guarded_seconds", 0.0))
 	if protected_for > 0.0:
 		_info_label.text += "\nPROTECTED by guardian #%d for %.1fs" % [
 			int(client.you.get("guardian_guarded_by", -1)), protected_for]
+	if float(client.you.get("trail_pack_kg", 0.0)) > 0.0:
+		_info_label.text += "\nTRAIL PACK: 14 kg on-foot support (full-loot; no extra slots)"
 	if float(client.you.get("cargo_factor", 1.0)) < 0.9999 and \
 			not bool(client.you.get("mounted", false)):
 		_info_label.text += "\nHEAVY CARGO: footsteps draw infected attention; crouch to stay quieter."
+	var dropped: Dictionary = client.you.get("death_recovery", {})
+	if not dropped.is_empty():
+		var destination := TravelNavigation.target(dropped, "x", "z")
+		var here := TravelNavigation.target(client.you, "x", "z")
+		var distance: int = TravelNavigation.distance_meters(here, destination)
+		if distance >= 0:
+			_info_label.text += "\nLOST BACKPACK: %dm %s | %.0fs until public loot expires (open map to track)" % [
+				distance, TravelNavigation.compass(here, destination),
+				float(dropped.get("remaining", 0.0))]
+	var mud_traction: float = float(client.you.get("storm_mud_factor", 1.0))
+	if mud_traction < 0.999:
+		_info_label.text += "\nSTORM MUD: ground travel -%.0f%% | roads reduce the penalty." % [
+			(1.0 - mud_traction) * 100.0]
 	if int(client.you.get("rested_xp_credit", 0)) > 0:
 		_info_label.text += "\nRESTED TRAINING: %d bonus XP left (paid rest at hub/fire)" % int(
 			client.you["rested_xp_credit"])
@@ -2142,6 +2257,9 @@ func _process(_delta: float) -> void:
 				_info_label.text += " — ease damage or let guardian hold!"
 		if bool(raid_aggro.get("taunted", false)):
 			_info_label.text += " | GUARDIAN TAUNT %.1fs" % float(raid_aggro.get("taunt_seconds", 0.0))
+	var wedge_left: int = int(client.you.get("mining_wedge_charges", 0))
+	if wedge_left > 0:
+		_info_label.text += "\nMINING WEDGES: %d T2+ vein bonuses left (+2 ore/stone, noise 42m)" % wedge_left
 	var insulation_left: float = float(client.you.get("storm_insulator_seconds", 0.0))
 	if insulation_left > 0.0:
 		_info_label.text += "\nSTORM INSULATION %.0fs | -60%% bolt damage" % insulation_left
@@ -2245,7 +2363,9 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nBIKE SERVICE: %.0f m | PgUp service on foot" % float(client.you.get("bike_service_meters", 0.0))
 		_info_label.text += "\nBIKE FRAME: %.0f%% | PgDn patch on foot" % float(client.you.get("bike_integrity", 100.0))
 		if client.inventory.count("bike_dynamo_lamp") > 0:
-			_info_label.text += "\nDYNAMO LAMP: %s | light reveals you to infected at night" % ("ON" if bool(client.you.get("bike_lamp_lit", false)) else "OFF")
+			_info_label.text += "\nDYNAMO LAMP: %s | [ toggle; lit bike attracts infected" % (
+				"ON (visible)" if bool(client.you.get("bike_lamp_lit", false)) else (
+				"ARMED (daylight/on foot)" if bool(client.you.get("bike_lamp_enabled", true)) else "MANUAL OFF"))
 	_info_label.text += "\nTRAIL BIKE: %s | F4 mount/dismount | remount %.0fs" % [
 		"RIDING" if bool(client.you.get("mounted", false)) else ("CARRIED" if client.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		float(client.you.get("mount_cooldown", 0.0))]
@@ -2301,6 +2421,9 @@ func _process(_delta: float) -> void:
 	if float(wind_chill.get("extra", 0.0)) > 0.0:
 		_info_label.text += "\nWIND CHILL: %.1f m/s | +%.0f%% cold exposure intensity" % [
 			float(wind_chill.get("speed", 0.0)), 100.0 * float(wind_chill["extra"])]
+	var wade: float = float(client.you.get("wading_depth_m", 0.0))
+	if wade > 0.0:
+		_info_label.text += "\nWADING: %.1f m deep | water soaks clothing even without rain" % wade
 	var wet: float = float(client.you.get("wetness", 0.0))
 	if wet > 0.0:
 		_info_label.text += "\nWET CLOTHING: %d%% | cold increases exposure; dry at a campfire" % roundi(wet)
@@ -2417,7 +2540,10 @@ func _process(_delta: float) -> void:
 	_party_frames.text = PartyFrames.describe(client.you.get("party", {}), client.peer_id)
 	_party_frames.visible = not _party_frames.text.is_empty()
 	_death.visible = not bool(client.you.get("alive", true))
-	_death.text = "YOU DIED\n%s" % ("All carried items dropped." if bool(client.you.get("last_death_full_loot", false)) else "Carried equipment retained.")
+	_death.text = "YOU DIED\n%s" % (
+		"All carried items dropped. Track your LOST BACKPACK on the map after respawning."
+		if bool(client.you.get("last_death_full_loot", false))
+		else "Carried equipment retained.")
 	if _inventory_panel.visible:
 		_refresh_inventory()
 		_refresh_trade_controls()
@@ -2801,8 +2927,10 @@ func _refresh_inventory() -> void:
 func _refresh_crafting() -> void:
 	# Every slot counts: changes to fish, ore, medicine etc must refresh recipes,
 	# not only the old special case of wood_1.
+	var use_bank: bool = _craft_use_stash.button_pressed
 	var signature := str(client.inventory.slots) + str(client.you.get("crafting_level", 1)) \
-		+ _craft_search.text + str(_craft_ready_only.button_pressed)
+		+ _craft_search.text + str(_craft_ready_only.button_pressed) \
+		+ str(use_bank) + (str(client.stash.slots) if use_bank else "")
 	if signature == _craft_signature:
 		return
 	_craft_signature = signature
@@ -2810,8 +2938,10 @@ func _refresh_crafting() -> void:
 		child.queue_free()
 	var entries: Array[Dictionary] = CraftingCatalog.entries(
 		client.inventory, _craft_search.text, _craft_ready_only.button_pressed,
-		int(client.you.get("crafting_level", 1)))
-	_craft_result_count.text = "%d recipes | Click to craft one, MAX for a material-and-space-safe batch (limit 50)." % entries.size()
+		int(client.you.get("crafting_level", 1)),
+		client.stash if use_bank else null)
+	_craft_result_count.text = "%d recipes | %s | MAX is a safe batch (limit 50)." % [
+		entries.size(), "Hub bank materials + backpack" if use_bank else "Backpack materials only"]
 	if entries.is_empty():
 		var empty := Label.new()
 		empty.text = "No matching recipes. Try fewer words or disable the filter."
@@ -2838,13 +2968,21 @@ func _refresh_crafting() -> void:
 		button.disabled = not ready
 		if not ready:
 			button.text += " [Lv%d]" % int(entry["tier"]) if bool(entry["skill_locked"]) else " [missing ingredients / space]"
-		button.pressed.connect(func() -> void: client.craft(recipe_id, 1))
+		button.pressed.connect(func() -> void:
+			if use_bank:
+				client.craft_from_stash(recipe_id, 1)
+			else:
+				client.craft(recipe_id, 1))
 		row.add_child(button)
 		var amount: int = int(entry["max_batches"])
 		if ready and amount > 1:
 			var max_button := Button.new()
 			max_button.text = "MAX x%d" % amount
 			max_button.tooltip_text = "Craft %d batches in one validated server request (no partial material consumption)." % amount
-			max_button.pressed.connect(func() -> void: client.craft(recipe_id, amount))
+			max_button.pressed.connect(func() -> void:
+				if use_bank:
+					client.craft_from_stash(recipe_id, amount)
+				else:
+					client.craft(recipe_id, amount))
 			row.add_child(max_button)
 		_craft_list.add_child(row)

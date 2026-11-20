@@ -377,6 +377,12 @@ static func _build_items() -> void:
 		"weight": 0.2, "value": 28})
 	_add_recipe("prospecting_chart", "prospecting_chart", 1,
 		{"cloth_1": 1, "scrap": 2, "stone_1": 1}, "", 3.0)
+	# A real chart can reveal a rare deposit to authenticated party members.
+	_add_item("surveyor_signal", {"name": "Cooperative Mineral Signal",
+		"kind": "survey_signal", "tier": 1, "stack": 10,
+		"weight": 0.3, "value": 29})
+	_add_recipe("surveyor_signal", "surveyor_signal", 1,
+		{"scrap": 2, "cloth_1": 1, "charcoal_filter": 1}, "", 3.0)
 	# Mining specialisation: three paid T2+ ore/rock bonuses, but louder work.
 	_add_item("mining_wedges", {"name": "Reinforced Mining Wedges",
 		"kind": "mining_wedges", "tier": 2, "stack": 5,
@@ -392,6 +398,11 @@ static func _build_items() -> void:
 	_add_recipe("storm_insulator", "storm_insulator", 1,
 		{"bar_2": 1, "cloth_2": 2, "scrap": 2}, "workbench", 5.0)
 	# Durable camp craft: owners may anchor one live field tarp once, never a permanent base.
+	# Shared field-fire survival: paid storm-resistant fuel, without permanent heating.
+	_add_item("stormproof_briquette", {"name": "Stormproof Ember Briquette",
+		"kind": "fire_briquette", "tier": 1, "stack": 5, "weight": 0.65, "value": 29})
+	_add_recipe("stormproof_briquette", "stormproof_briquette", 1,
+		{"wood_1": 3, "fiber_1": 2, "scrap": 1}, "", 3.0)
 	_add_item("storm_tarp_anchors", {"name": "Storm Tarp Anchor Kit",
 		"kind": "tarp_anchor", "tier": 2, "stack": 5, "weight": 1.2, "value": 65})
 	_add_recipe("storm_tarp_anchors", "storm_tarp_anchors", 1,
@@ -608,6 +619,13 @@ static func _build_items() -> void:
 		"tier": 1, "stack": 5, "weight": 0.3, "value": 24})
 	_add_recipe("bike_chain_wrap", "bike_chain_wrap", 1,
 		{"cloth_1": 2, "fiber_1": 2, "scrap": 2}, "workbench", 4.0)
+	# Physical T2 hiking pack distributes 14 kg on foot; full loot, no slots.
+	_add_item("trail_backpack_2", {"name": "Woven Trail Backpack T2",
+		"kind": "carry_pack", "tier": 2, "stack": 1,
+		"weight": 2.5, "value": 85})
+	_add_recipe("trail_backpack_2", "trail_backpack_2", 1,
+		{"cloth_2": 4, "fiber_2": 4, "plank_2": 1, "scrap": 2},
+		"workbench", 6.0)
 	# Tradeable, crafted saddle panniers support limited load only while mounted.
 	_add_item("bike_panniers", {"name": "Expedition Bike Panniers", "kind": "bike_cargo",
 		"tier": 2, "weight": 3.0, "value": 95})

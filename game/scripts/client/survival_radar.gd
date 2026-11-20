@@ -7,6 +7,8 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
 const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
+const DeathRecovery = preload("res://scripts/shared/death_recovery.gd")
+const PartyCorpseRescue = preload("res://scripts/shared/party_corpse_rescue.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
@@ -132,6 +134,18 @@ func current_threat_scan() -> Dictionary:
 	return {}
 
 
+## The remote server includes this destination only in the owner's "you"
+## snapshot. Offline mode resolves the same real tagged bag locally.
+func current_death_recovery() -> Dictionary:
+	if sim != null:
+		if not sim.players.has(actor_id):
+			return {}
+		return DeathRecovery.public_mark(sim.bags, sim.players[actor_id], sim.time)
+	if client != null:
+		return client.you.get("death_recovery", {}).duplicate(true)
+	return {}
+
+
 func current_rally() -> Dictionary:
 	if sim != null:
 		return sim.parties.state_for(actor_id, sim.time).get("rally", {}).duplicate(true)
@@ -141,6 +155,15 @@ func current_rally() -> Dictionary:
 
 
 ## Authenticated party ping, with the same isolation as leader rally.
+func current_party_corpse_rescue() -> Dictionary:
+	if sim != null:
+		return PartyCorpseRescue.shared(actor_id, sim.players,
+			sim.parties, sim.bags, sim.time)
+	if client != null:
+		return client.you.get("party", {}).get("corpse_rescue", {}).duplicate(true)
+	return {}
+
+
 func current_party_ping() -> Dictionary:
 	if sim != null:
 		return sim.parties.state_for(actor_id, sim.time).get("ping", {}).duplicate(true)
@@ -358,10 +381,20 @@ func _draw() -> void:
 		Color(0.71, 0.51, 1.0))
 	_draw_waypoint(origin, current_rally(), "x", "z",
 		Color(1.0, 0.60, 0.22))
-	# Teal = limited-time teammate map ping; remote pins stay as edge arrows.
-	_draw_waypoint(origin, current_party_ping(), "x", "z",
-		Color(0.20, 0.95, 0.90))
+	# A paid T2+ ore/stone party survey is amber; regular pings stay teal.
+	var party_ping: Dictionary = current_party_ping()
+	var party_pin_color := Color(0.20, 0.95, 0.90)
+	if str(party_ping.get("kind", "")) == "survey":
+		party_pin_color = Color(0.95, 0.65, 0.25)
+	_draw_waypoint(origin, party_ping, "x", "z", party_pin_color)
 
+	# Orange = your last still-unclaimed public full-loot death bag.
+	# The owner can follow it from afar without granting loot protection.
+	_draw_waypoint(origin, current_death_recovery(), "x", "z",
+		Color(1.0, 0.43, 0.20))
+	# Pink = explicit request from a current teammate, never a public corpse map.
+	_draw_waypoint(origin, current_party_corpse_rescue(), "x", "z",
+		Color(1.0, 0.54, 0.83))
 	# A spent scanner grants one short-lived private moving target pin.
 	_draw_waypoint(origin, current_threat_scan(), "x", "z",
 		Color(1.0, 0.32, 0.45))

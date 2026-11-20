@@ -9,6 +9,7 @@ const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeTerrain = preload("res://scripts/shared/bike_terrain.gd")
 const BikeIntegrity = preload("res://scripts/shared/bike_integrity.gd")
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
+const StormMud = preload("res://scripts/shared/storm_mud.gd")
 
 const MAX_DELTA := 0.1 # A longer step is clamped, so a lag spike cannot teleport a player.
 
@@ -57,6 +58,11 @@ static func step(world, position: Vector3, input: Dictionary, delta: float) -> V
 	else:
 		# Genuine road speed for walking and sprinting, but not crouched stealth.
 		speed *= RoadTravel.foot_factor(world, position, crouching)
+	# Existing test inputs without a replicated weather clock remain unchanged.
+	# Server derives this clock itself; clients predict from received time.
+	var weather_time: float = float(input.get("weather_time", NAN))
+	if is_finite(weather_time):
+		speed *= StormMud.factor(world, position, weather_time, mounted)
 	speed *= StealthStance.speed_factor(crouching)
 	return move(world, position, direction, speed, delta)
 

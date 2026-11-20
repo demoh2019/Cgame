@@ -5,7 +5,7 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 
-const ORDER := ["scout", "archer", "gunner", "medic"]
+const ORDER := ["scout", "archer", "gunner", "medic", "miner"]
 const TARGETS := {
 	"scout": {"water_bottle": 3, "canned_food": 3, "bandage": 4,
 		"field_antiseptic": 1, "field_splint": 1},
@@ -15,8 +15,10 @@ const TARGETS := {
 		"ammo_9mm": 48, "field_antiseptic": 1},
 	"medic": {"water_bottle": 3, "canned_food": 2, "bandage": 6,
 		"field_antiseptic": 3, "antibiotics": 2, "field_triage_pack": 1},
+	"miner": {"water_bottle": 3, "canned_food": 2, "bandage": 3,
+		"prospecting_chart": 2, "mining_wedges": 2, "field_antiseptic": 1},
 }
-const NAMES := {"scout": "Scout", "archer": "Archer", "gunner": "Gunner", "medic": "Medic"}
+const NAMES := {"scout": "Scout", "archer": "Archer", "gunner": "Gunner", "medic": "Medic", "miner": "Miner"}
 
 
 static func title(preset_id: String) -> String:

@@ -3,7 +3,7 @@ extends PanelContainer
 
 const ENTRIES := [
 	["MOVE AND FIGHT", [
-		["WASD", "move"], ["Shift", "sprint"], ["F4", "ride / dismount crafted bike (crafted night lamp auto lights)"], ["PgUp", "service bike drive on foot"], ["PgDn", "repair damaged bike frame"], ["Space", "dodge"], ["Mouse", "aim; left click attacks"], ["G", "weapon skill"],
+		["WASD", "move"], ["Shift", "sprint"], ["F4", "ride / dismount crafted bike"], ["[", "toggle crafted bike dynamo lamp: night light or stealth"], ["PgUp", "service bike drive on foot"], ["PgDn", "repair damaged bike frame"], ["Space", "dodge"], ["Mouse", "aim; left click attacks"], ["G", "weapon skill"],
 		["F1", "guardian taunt"], ["4", "next weapon"], ["5", "equip armor"], ["Wheel", "zoom"]]],
 	["GATHER AND CRAFT", [
 		["E", "gather (trees and mining attract infected) / loot"], ["C", "crafting window"], ["0", "quick-cook best fish"],
@@ -13,7 +13,7 @@ const ENTRIES := [
 		["F / R", "drink from a lake (filter prevents infection)"], [".", "frontier stim"], ["/", "scent salve (Shift: quiet sprint wraps)"], [";", "spore filter"], ["Z", "rest at the hub or a fire"]]],
 	["BUILD AND DEFEND", [
 		["U", "build barricade"], ["H", "repair"], ["Y", "upgrade"], ["X", "dismantle"], ["O", "light campfire"],
-		["9", "refuel fire"], ["-", "extinguish fire"], [",", "throw noise decoy"],
+		["9", "refuel fire (Shift: stormproof briquette)"], ["-", "extinguish fire"], [",", "throw noise decoy"],
 		["F5", "throw ember flask (PvE fire)"]]],
 	["TOWN", [
 		["N", "buy water"], ["V", "sell materials (Shift: fish)"], ["P", "accept contract (Shift: turn in, Ctrl: daily bounty)"],

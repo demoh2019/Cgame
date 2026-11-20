@@ -25,12 +25,15 @@ const Structures = preload("res://scripts/shared/structures.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
 const RoadTravel = preload("res://scripts/shared/road_travel.gd")
+const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const WadingWetness = preload("res://scripts/shared/wading_wetness.gd")
+const StormMud = preload("res://scripts/shared/storm_mud.gd")
 const WindChill = preload("res://scripts/shared/wind_chill.gd")
 const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
@@ -153,6 +156,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_vendor_sell", KEY_V)
 	_bind_key("survive_radar", KEY_M)
 	_bind_key("survive_mount", KEY_F4)
+	_bind_key("survive_bike_lamp", KEY_BRACKETLEFT)
 	_bind_key("survive_bike_service", KEY_PAGEUP)
 	_bind_key("survive_whetstone", KEY_END)
 	_bind_key("survive_armor_plate", KEY_INSERT)
@@ -753,7 +757,8 @@ func _physics_process(delta: float) -> void:
 	_last_bike_position = survivor.position
 	_bike_visual.set_panniers(survivor.inventory.count("bike_panniers") > 0)
 	_bike_visual.set_lamp(survivor.mounted and survivor.survival.alive and
-		WorldCycle.is_night(sim.time) and survivor.inventory.count("bike_dynamo_lamp") > 0)
+		survivor.bike_lamp_enabled and WorldCycle.is_night(sim.time) and
+		survivor.inventory.count("bike_dynamo_lamp") > 0)
 	_bike_visual.set_riding(survivor.mounted and survivor.survival.alive, bike_speed, delta)
 	_flare_visual.set_burning(survivor.survival.alive and survivor.flare_seconds > 0.0)
 	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
@@ -950,6 +955,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
 	elif event.is_action_pressed("survive_mount"):
 		_result("Trail bike", sim.cmd_toggle_mount(LOCAL_PLAYER_ID))
+	elif event.is_action_pressed("survive_bike_lamp"):
+		_result("Bike lamp", sim.cmd_use(LOCAL_PLAYER_ID, "bike_dynamo_lamp"))
 	elif event.is_action_pressed("survive_bike_service"):
 		_result("Drive service", sim.cmd_use(LOCAL_PLAYER_ID, "bike_service_kit"))
 	elif event.is_action_pressed("survive_whetstone"):
@@ -1046,11 +1053,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_result("Extinguish campfire", sim.cmd_extinguish_campfire(LOCAL_PLAYER_ID, fire_id))
 	elif event.is_action_pressed("survive_refuel"):
-		var fire_id: int = _nearest_campfire()
-		if fire_id == -1:
-			_feedback = "Refuel: no campfire within 3 metres."
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Weatherproof campfire", sim.cmd_use(LOCAL_PLAYER_ID, "stormproof_briquette"))
 		else:
-			_result("Refuel campfire", sim.cmd_refuel_campfire(LOCAL_PLAYER_ID, fire_id))
+			var fire_id: int = _nearest_campfire()
+			if fire_id == -1:
+				_feedback = "Refuel: no campfire within 3 metres."
+			else:
+				_result("Refuel campfire", sim.cmd_refuel_campfire(LOCAL_PLAYER_ID, fire_id))
 	elif event.is_action_pressed("survive_smoke"):
 		_result("Smoke charge", sim.cmd_use(LOCAL_PLAYER_ID, FieldSmoke.ITEM_ID))
 	elif event.is_action_pressed("survive_decoy"):
@@ -1179,9 +1189,11 @@ func _update_hud() -> void:
 			rows.append("%s:%d" % [str(slot["id"]), int(slot["count"])])
 	var levels: Dictionary = survivor.progression.levels()
 	var weight: float = survivor.inventory.total_weight()
-	var speed_pct: int = int(round(survivor.inventory.movement_factor() * 100.0))
+	var speed_pct: int = int(round(BikeCargo.movement_factor(survivor.inventory,
+		survivor.skills.bonus("carry_capacity"), survivor.mounted) * 100.0))
 	var risk: String = "SAFE HUB" if world.is_safe(position.x, position.z) else ZoneRisk.description(zone)
 	var weather: Dictionary = Weather.conditions(world, position.x, position.z, sim.time)
+	var rain_grip: float = StormMud.factor(world, position, sim.time, survivor.mounted)
 	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\n%s | World clock %.0fs\nHP %d HUNGER %d THIRST %d STAMINA %d INFECTION %d BLEEDING %d EXPOSURE %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs DODGE CD %.1fs WEAPON %s\nWEATHER %s %.0fC %s | HEAT PACK %ds%s\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Fish T%d Craft T%d Scavenge T%d\nWEAPON MASTERY Melee L%d Ranged L%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nCONTRACT %s\nINVENTORY %s" % [
 		"NIGHT - infected notice farther" if WorldCycle.is_night(sim.time) else "DAY", sim.time,
 		int(vitals.health), int(vitals.hunger), int(vitals.thirst), int(vitals.stamina),
@@ -1206,6 +1218,8 @@ func _update_hud() -> void:
 		_stats.text += "\nRESTED TRAINING: %d bonus XP left (Z to rest at camp)" % survivor.rested_xp_credit
 	if survivor.sharpened_hits > 0:
 		_stats.text += "\nSHARPENED: %d infected melee hits left (End)" % survivor.sharpened_hits
+	if survivor.wedge_charges > 0:
+		_stats.text += "\nMINING WEDGES: %d rich ore/stone harvests left (+2, loud)" % survivor.wedge_charges
 	if survivor.plated_hits > 0:
 		_stats.text += "\nARMOR PLATE: %d infected claw hits left (Insert)" % survivor.plated_hits
 	if not sim.lightning_pending.is_empty():
@@ -1234,10 +1248,12 @@ func _update_hud() -> void:
 		_stats.text += "\nBIKE SERVICE: %.0f m (PgUp applies kit on foot)" % survivor.bike_service_meters
 		_stats.text += "\nBIKE FRAME: %.0f%% (PgDn to patch on foot)" % survivor.bike_integrity
 		if survivor.inventory.count("bike_dynamo_lamp") > 0:
-			_stats.text += "\nDYNAMO LAMP: lights road at night, reveals rider to infected"
+			_stats.text += "\nDYNAMO LAMP: %s | [ toggles night light" % ("ARMED" if survivor.bike_lamp_enabled else "OFF")
 	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
 		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		survivor.mount_cooldown]
+	if not survivor.mounted and survivor.inventory.count("trail_backpack_2") > 0:
+		_stats.text += "\nTRAIL PACK: +14 kg on foot, still full-loot"
 	if survivor.mounted:
 		if survivor.inventory.count("bike_panniers") > 0:
 			_stats.text += "\nBIKE PANNIERS: 28 kg supported; dismount = full load"
@@ -1260,6 +1276,12 @@ func _update_hud() -> void:
 	if survivor.flare_seconds > 0.0:
 		_stats.text += "\nFLARE: %ds (F2) | infected notice up to 28m" % ceili(survivor.flare_seconds)
 	_stats.text += "\nWET CLOTHING: %d%% | dry under shelter or beside a lit campfire" % roundi(survivor.survival.wetness)
+	var wading: float = WadingWetness.depth_at(world, position)
+	if wading > 0.0:
+		_stats.text += "\nWADING: %.1f m deep | water soaks your clothing" % wading
+	if rain_grip < 0.999:
+		_stats.text += "\nSTORM MUD: ground travel -%.0f%% | follow roads for traction" % [
+			(1.0 - rain_grip) * 100.0]
 	if not sim.smoke_clouds.is_empty():
 		var smoke_wind: Vector2 = Weather.wind_at(world, position.x, position.z, sim.time)
 		_stats.text += "\nSMOKE WIND: %.1f m/s | smoke clouds drift with the wind" % smoke_wind.length()

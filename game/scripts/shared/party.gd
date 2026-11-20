@@ -469,6 +469,14 @@ func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 		shared_ping = {"by": int(ping["by"]),
 			"x": float(ping["x"]), "z": float(ping["z"]),
 			"remaining": maxf(0.0, float(ping["expires"]) - now)}
+		# Optional authenticated mineral signal metadata. The source node ID,
+		# absolute deadline and account identity always remain server-private.
+		if str(ping.get("source", "")) == "survey" and (
+				str(ping.get("material", "")) in ["ore", "rock"]) and (
+				int(ping.get("tier", 0)) >= 2 and int(ping.get("tier", 0)) <= 4):
+			shared_ping["kind"] = "survey"
+			shared_ping["material"] = str(ping["material"])
+			shared_ping["tier"] = int(ping["tier"])
 	var source_standard: Dictionary = group.get("standard", {})
 	var public_standard: Dictionary = {}
 	if not source_standard.is_empty() and now < float(source_standard["expires"]):

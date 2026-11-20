@@ -419,6 +419,14 @@ func c_gather(node_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_craft_from_stash(recipe: String, times: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "craft_stash",
+			sim.cmd_craft(peer, str(recipe), times, true))
+
+
+@rpc("any_peer", "reliable")
 func c_craft(recipe: String, times: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -705,6 +713,13 @@ func c_party_ping(x: float, z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "party_ping", sim.cmd_party_ping(peer, x, z))
+
+
+@rpc("any_peer", "reliable")
+func c_party_corpse_rescue() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "corpse_rescue", sim.cmd_party_corpse_rescue(peer))
 
 
 @rpc("any_peer", "reliable")
@@ -1058,6 +1073,9 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"guardian_taunt":
 			return _is_nearby(event, peer)
+		"guardian_retribution":
+			# The earned counterstrike and enemy ID are private to its guardian.
+			return event.get("peer", -1) == peer
 		"guardian_intercept":
 			# Share only with the protected ally and the real guardian.
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
