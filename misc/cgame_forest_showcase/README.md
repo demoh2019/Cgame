@@ -5,6 +5,7 @@ This directory is a **standalone playable reference project**, not a replacement
 ## Features integrated into this demo
 
 - Deterministic rolling terrain with vertex normals derived from an analytic heightfield and vertex-colored PBR material.
+- **Persistent home clearing:** native `pin_cell(Vector2i.ZERO)` retains a home hub even outside the unload radius, with a low-cost emissive beacon, a shadow-free OmniLight and a pinned-cell HUD counter. Removing a pin returns the cell to ordinary unload behavior (verified by the streaming smoke test).
 - **WorldPartition3D streaming:** 16 registered 32 m × 32 m cells reference the **same** packed forest scene; the engine shares the threaded resource request, instantiates around the camera (one cell/frame) and unloads distant cells with hysteresis. The fork also exposes an `observer_cell_changed` event for region-aware gameplay; the demo displays the current cell without polling player coordinates.
 - **Chunked GPU instancing:** each loaded cell generates up to 54 trees, 225 animated grass tufts, and 9 rocks using five or fewer MultiMesh draw groups, instead of one Node3D per instance. At most 3,600 grass tufts exist if all 16 cells are loaded.
 - Atmospheric procedural sky with the DirectionalLight3D sun, stable ambient sky radiance, cinematic AgX tone mapping, optional SSAO, SSIL, volumetric fog, and glowing collectible crystals.
@@ -37,7 +38,7 @@ With a **compiled Cgame binary** (the generic upstream editor lacks the fork's n
 /path/to/cgame --headless --path misc/cgame_forest_showcase --script res://tests/smoke_physics.gd
 ```
 
-`smoke_streaming.gd` checks async shared-cell load/unload/reload, deterministic per-cell instance transforms, negative grid coordinates, streaming obstacle collision and performance density. `smoke_saves.gd` uses a separate throwaway save path, checking round-trip, deduplication, invalid JSON and version rejection. `smoke_physics.gd` instantiates the real scene, queries static terrain collision and checks that a spawned character falls onto the terrain; it also checks that obstacles are constructed in streamed cells. These tests are **added, not claimed to have been executed**.
+`smoke_streaming.gd` checks persistent home-cell pinning and unpinning, async shared-cell load/unload/reload, deterministic per-cell instance transforms, negative grid coordinates, streaming obstacle collision and performance density. `smoke_saves.gd` uses a separate throwaway save path, checking round-trip, deduplication, invalid JSON and version rejection. `smoke_physics.gd` instantiates the real scene, queries static terrain collision and checks that a spawned character falls onto the terrain; it also checks that obstacles are constructed in streamed cells. These tests are **added, not claimed to have been executed**.
 
 ## Verification checklist
 
@@ -45,6 +46,7 @@ With a **compiled Cgame binary** (the generic upstream editor lacks the fork's n
 - [ ] Demo imports and scene starts with no errors on Cgame's Forward+ renderer.
 - [ ] Sky shader compiles on Vulkan and Metal (note: `sky()` has no early `return`).
 - [ ] Wind, grass instancing and sky render correctly on Apple M1.
+- [ ] The (0,0) home beacon remains loaded beyond the unload radius; unpinning it allows unloading, and pinning cannot exceed 128 cells.
 - [ ] Walking through cell boundaries updates the loaded-cell HUD, preserves terrain/foliage alignment, and unloads/reloads cells without flicker.
 - [ ] Verify capsule grounding, jumping, collision against trunks/rocks, world bounds, camera position and save/load after teleporting.
 - [ ] Run all three added headless smoke scripts on the compiled fork.
