@@ -2363,6 +2363,9 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and bool(data.get("ok", false)) and str(data.get("item", "")) == "murky_water":
+		say("Collected unboiled lake water. Boil with 1 wood at a lit campfire or the hub workbench.")
+		return
 	if kind == "use" and bool(data.get("survey_signal", false)):
 		if bool(data.get("ok", false)):
 			say("Party mineral signal: T%d %s deposit shared for %.0fs. Allies can navigate there." % [
