@@ -1684,19 +1684,20 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			match str(data.get("action", "")):
 				"accept":
 					var route: Dictionary = data.get("route", {})
-					say("NEW CARAVAN: deliver %dx %s to %s (X:%d Z:%d) for %d silver." % [
+					say("NEW CARAVAN: deliver %dx %s to %s (X:%d Z:%d) for %d silver; +20%% for verified night travel." % [
 						int(route.get("quantity", 0)), str(route.get("cargo", "")),
 						str(route.get("destination", "")), roundi(float(route.get("dst_x", 0.0))),
 						roundi(float(route.get("dst_z", 0.0))), int(route.get("silver", 0))])
 				"deliver":
 					var shares: Array = data.get("escorts", [])
 					var bonus: int = int(data.get("defense_bonus", 0))
+					var night_bonus: int = int(data.get("night_bonus", 0))
 					if shares.is_empty():
-						say("Caravan delivered: +%d silver (defense bonus +%d), Explorer XP." % [
-							int(data.get("silver", 0)), bonus])
+						say("Caravan delivered: +%d silver (defense +%d, night +%d), Explorer XP." % [
+							int(data.get("silver", 0)), bonus, night_bonus])
 					else:
-						say("Caravan delivered: +%d silver (defense +%d), paid %d escort(s) from base fare." % [
-							int(data.get("silver", 0)), bonus, shares.size()])
+						say("Caravan delivered: +%d silver (defense +%d, night +%d), paid %d escort(s) from base fare." % [
+							int(data.get("silver", 0)), bonus, night_bonus, shares.size()])
 				"abandon":
 					say("Caravan route cancelled; no goods taken.")
 		return
@@ -2174,6 +2175,14 @@ func _process(_delta: float) -> void:
 				int(job.get("silver", 0))]
 			if bool(client.you.get("caravan_defended", false)):
 				_caravan_status.text += " | DEFENDED +15% on delivery"
+			var night: Dictionary = client.you.get("caravan_night", {})
+			if not night.is_empty():
+				_caravan_status.text += " | NIGHT %d/%dm" % [
+					int(night.get("night_meters", 0)), int(night.get("required_meters", 0))]
+				if bool(night.get("qualified", false)):
+					_caravan_status.text += " (+%d silver earned)" % int(night.get("bonus_silver", 0))
+				else:
+					_caravan_status.text += " (+%d silver if completed)" % int(night.get("potential_bonus", 0))
 	_bars["health"].value = client.you["health"]
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
