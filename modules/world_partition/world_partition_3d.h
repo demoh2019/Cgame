@@ -49,6 +49,8 @@ class WorldPartition3D : public Node3D {
 	int max_instances_per_frame = 2;
 	int max_concurrent_requests = 8;
 	bool streaming_enabled = true;
+	Vector2i observer_cell;
+	bool observer_cell_valid = false;
 
 	HashMap<Vector2i, ObjectID> active_cells;
 	HashMap<Vector2i, String> pending_cells;
@@ -93,6 +95,8 @@ public:
 
 	void set_observer_path(const NodePath &p_path);
 	NodePath get_observer_path() const;
+	bool has_observer_cell() const;
+	Vector2i get_observer_cell() const;
 
 	void set_cell_scenes(const Dictionary &p_cells);
 	Dictionary get_cell_scenes() const;
