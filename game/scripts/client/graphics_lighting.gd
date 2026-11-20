@@ -24,6 +24,11 @@ static func settings(level: int, rendering_method: String) -> Dictionary:
 		# and building foundations without altering cascade coverage.
 		"shadow_bias": 0.04 if tier <= 1 else (0.034 if tier == 2 else 0.028),
 		"shadow_normal_bias": 1.2 if tier <= 1 else (1.0 if tier == 2 else 0.82),
+		# HDRP-like short-range contact shadows resolve small gaps at feet,
+		# stones and tree roots where cascaded shadow maps lose detail. They
+		# cost one native depth-based ray trace, so only premium Forward+ tiers.
+		"contact_shadows": rendering_method == "forward_plus" and tier >= 2,
+		"contact_shadow_blur": 0.9 if tier <= 2 else 0.55,
 		"volumetric_fog": bool(fog["enabled"]),
 		"volumetric_fog_length": float(fog["length"]),
 		"volumetric_fog_density": float(fog["base_density"]),
@@ -57,6 +62,13 @@ static func apply(sun: DirectionalLight3D, environment: Environment,
 		sun.shadow_blur = float(profile["shadow_blur"])
 		sun.shadow_bias = float(profile["shadow_bias"])
 		sun.shadow_normal_bias = float(profile["shadow_normal_bias"])
+		# The world uses one directional sun. Do not allocate a contact
+		# shadow pass for Performance/Balanced, Mobile or Compatibility.
+		# Live renderer changes also clear the previously enabled flag.
+		var contacts_enabled: bool = bool(profile["contact_shadows"])
+		if contacts_enabled:
+			sun.shadow_contact_shadows_blur = float(profile["contact_shadow_blur"])
+		sun.shadow_contact_shadows_allow = contacts_enabled
 	# The same atmospheric model is used by this quality selector and by
 	# the day/night weather rig. No second, conflicting fog controller.
 	CinematicFog.apply_profile(environment, sun,
