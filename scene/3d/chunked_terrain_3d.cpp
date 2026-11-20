@@ -373,8 +373,14 @@ void ChunkedTerrain3D::_update_chunks() {
 			const real_t pixel_height = viewport_size.y * viewport->get_scaling_3d_scale();
 			if (camera != nullptr && pixel_height > 0.0) {
 				if (camera->get_projection() == Camera3D::PROJECTION_ORTHOGONAL) {
-					projection_scale = pixel_height / MAX(camera->get_size(), real_t(0.001));
-				} else {
+					// The size property represents horizontal span for
+					// KEEP_WIDTH and vertical span for KEEP_HEIGHT.
+					// Preserve pixel error on widescreen, portrait and FSR.
+					projection_scale = orthographic_lod_pixel_scale(
+							viewport_size.x, viewport_size.y,
+							viewport->get_scaling_3d_scale(), camera->get_size(),
+							camera->get_keep_aspect_mode() == Camera3D::KEEP_WIDTH);
+				} else if (camera->get_projection() == Camera3D::PROJECTION_PERSPECTIVE) {
 					real_t vertical_fov = camera->get_fov();
 					if (camera->get_keep_aspect_mode() == Camera3D::KEEP_WIDTH && viewport_size.x > 0.0) {
 						vertical_fov = Projection::get_fovy(vertical_fov, viewport_size.y / viewport_size.x);
