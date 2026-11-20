@@ -357,6 +357,11 @@ static func _build_items() -> void:
 	_add_item("berries", {"name": "Berries", "kind": "food", "food": 12.0, "stack": 20, "value": 2})
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
+	# Workbench-made storm shock lining: a paid alternative to dodging bolts.
+	_add_item("storm_insulator", {"name": "Copper Storm Insulation Kit",
+		"kind": "storm_insulator", "tier": 2, "stack": 5, "weight": 0.7, "value": 55})
+	_add_recipe("storm_insulator", "storm_insulator", 1,
+		{"bar_2": 1, "cloth_2": 2, "scrap": 2}, "workbench", 5.0)
 	# Automatically consumes one filter when drinking directly from a lake.
 	_add_item("rain_tarp", {"name": "Expedition Rain Catcher", "kind": "rain_catcher",
 		"stack": 5, "weight": 1.1, "value": 24})

@@ -333,6 +333,12 @@ func _build() -> void:
 	canteen_button.tooltip_text = "Requires a crafted canteen, one carbon filter and the shared lake cooldown."
 	canteen_button.pressed.connect(func() -> void: client.refill_canteen())
 	inventory_box.add_child(canteen_button)
+	var storm_button := Button.new()
+	storm_button.name = "EquipStormInsulator"
+	storm_button.text = "Equip storm insulation (180s)"
+	storm_button.tooltip_text = "Workbench craft: 1 bar T2, 2 cloth T2, 2 scrap. Consumed kit reduces lightning damage 60%, not PvP/infected."
+	storm_button.pressed.connect(func() -> void: client.use_item("storm_insulator"))
+	inventory_box.add_child(storm_button)
 	var survey_button := Button.new()
 	survey_button.name = "RuinSurveyChart"
 	survey_button.text = "Survey dangerous ruins (F3; 1 crafted chart)"
@@ -1368,6 +1374,12 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and data.has("storm_insulator_seconds"):
+		say("Copper shock lining active for 180s: -60% lightning damage.")
+		return
+	if kind == "use" and bool(data.get("storm_insulator", false)):
+		say("Storm insulation: " + str(data.get("reason", "rejected")) + " (kit not spent)")
+		return
 	if kind == "use" and data.has("coating_seconds"):
 		say("Coated %s: +20%% vs regular/elite infected for %.0fs. Unequipping ends the effect." % [
 			str(data.get("coating_weapon", "melee weapon")),
@@ -1878,6 +1890,9 @@ func _process(_delta: float) -> void:
 			if recovery > 0.0:
 				_info_label.text += "\nRAID BOSS EXPOSED: %.1fs (+15%% PvE damage)" % recovery
 			break
+	var insulation_left: float = float(client.you.get("storm_insulator_seconds", 0.0))
+	if insulation_left > 0.0:
+		_info_label.text += "\nSTORM INSULATION %.0fs | -60%% bolt damage" % insulation_left
 	var bolt: Dictionary = client.lightning_telegraph
 	if not bolt.is_empty():
 		var warning_center := Vector2(float(bolt.get("x", 0.0)),

@@ -89,6 +89,7 @@ const NightHorde = preload("res://scripts/shared/night_horde.gd")
 const HubRecall = preload("res://scripts/shared/hub_recall.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
+const StormInsulator = preload("res://scripts/shared/storm_insulator.gd")
 const WetClothing = preload("res://scripts/shared/wet_clothing.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const SporeSampling = preload("res://scripts/shared/spore_sampling.gd")
@@ -182,6 +183,7 @@ class Player:
 	var rain_cooldown: float = 0.0 # Persisted storm water collection cooldown.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
 	var spore_filter_seconds: float = 0.0 # Paid temporary swamp respirator, persisted.
+	var storm_insulator_seconds: float = 0.0 # Persisted paid shock resistance.
 	var spore_sample_cooldown: float = 0.0 # Persistent harvest cooldown.
 	var meal_seconds: float = 0.0 # Remaining server-ticked cooked-fish recovery buff.
 	var meal_tier: int = 0 # Zero when no meal buff is active; never client-authored.
@@ -396,6 +398,7 @@ func character_data(player: Player) -> Dictionary:
 		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
 		"spore_filter_seconds": player.spore_filter_seconds,
+		"storm_insulator_seconds": player.storm_insulator_seconds,
 		"flare_seconds": player.flare_seconds,
 		"spore_sample_cooldown": player.spore_sample_cooldown,
 		"chain_wrap_seconds": player.chain_wrap_seconds,
@@ -472,6 +475,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("spore_filter_seconds", 0.0),
 			0.0, SporeHazard.FILTER_DURATION_SECONDS):
+		return false
+	if not SaveValidation.finite_number(data.get("storm_insulator_seconds", 0.0),
+			0.0, StormInsulator.DURATION_SECONDS):
 		return false
 	if not SaveValidation.finite_number(data.get("flare_seconds", 0.0),
 			0.0, HandFlare.BURN_SECONDS):
@@ -589,6 +595,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.rain_cooldown = float(data.get("rain_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
 	player.spore_filter_seconds = float(data.get("spore_filter_seconds", 0.0))
+	player.storm_insulator_seconds = float(data.get("storm_insulator_seconds", 0.0))
 	player.flare_seconds = float(data.get("flare_seconds", 0.0))
 	player.spore_sample_cooldown = float(data.get("spore_sample_cooldown", 0.0))
 	player.chain_wrap_seconds = float(data.get("chain_wrap_seconds", 0.0))
@@ -724,6 +731,7 @@ func _spawn_player(player: Player) -> void:
 	player.noise_timer = 0.0
 	player.smoke_cooldown = 0.0
 	player.flare_seconds = 0.0
+	player.storm_insulator_seconds = 0.0
 	player.crouching = false
 	player.dirty_inventory = true
 	events.append({"type": "spawn", "peer": player.id})
@@ -3105,6 +3113,16 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if not player.inventory.remove(item_id, 1):
 				return {"ok": false, "reason": "not_carried", "chain_wrap": true}
 			player.chain_wrap_seconds = BikeChain.DURATION_SECONDS
+		"storm_insulator":
+			if item_id != StormInsulator.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var insulation_reason: String = StormInsulator.apply_reason(
+				player.storm_insulator_seconds)
+			if insulation_reason != "":
+				return {"ok": false, "reason": insulation_reason, "storm_insulator": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "storm_insulator": true}
+			player.storm_insulator_seconds = StormInsulator.DURATION_SECONDS
 		"spore_filter":
 			if item_id != SporeHazard.FILTER_ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3180,6 +3198,8 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 		return {"ok": true, "chain_wrap_seconds": player.chain_wrap_seconds}
 	if item_id == BikeService.ITEM_ID:
 		return {"ok": true, "bike_service_meters": player.bike_service_meters}
+	if item_id == StormInsulator.ITEM_ID:
+		return {"ok": true, "storm_insulator_seconds": player.storm_insulator_seconds}
 	if item_id == BikeIntegrity.KIT_ID:
 		return {"ok": true, "bike_integrity": player.bike_integrity}
 	if item_id == HandFlare.ITEM_ID:
@@ -4344,6 +4364,7 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 ## Full-loot deaths occur in red/black. Green/yellow deaths retain gear.
 func _on_player_death(victim: Player, killer: int) -> void:
 	victim.flare_seconds = 0.0
+	victim.storm_insulator_seconds = 0.0
 	_cancel_recall(victim, "dead")
 	_abort_training(victim.id, "death")
 	_cancel_market_seller(victim.id)
@@ -4430,7 +4451,9 @@ func _tick_lightning() -> void:
 			if survivor.dodge_immunity > 0.0:
 				events.append({"type": "evaded", "peer": survivor.id, "zombie": -1})
 				continue
-			var taken: float = survivor.survival.hurt(StormLightning.DAMAGE)
+			var shock_damage: float = StormInsulator.lightning_damage(
+				StormLightning.DAMAGE, survivor.storm_insulator_seconds)
+			var taken: float = survivor.survival.hurt(shock_damage)
 			if taken > 0.0:
 				_dismount(survivor, true)
 				survivor.dirty_character = true
@@ -4560,6 +4583,10 @@ func _tick_players(delta: float) -> void:
 			maxf(0.0, delta), _alive(player))
 		if player.edge_coating_seconds <= 0.0:
 			player.edge_coating_weapon = ""
+		if player.storm_insulator_seconds > 0.0:
+			player.storm_insulator_seconds = StormInsulator.remaining(
+				player.storm_insulator_seconds, delta)
+			player.dirty_character = true
 		if player.flare_seconds > 0.0:
 			player.flare_seconds = HandFlare.remaining(player.flare_seconds, delta)
 			player.dirty_character = true
@@ -5890,6 +5917,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"smoke_cooldown": player.smoke_cooldown,
 			"smoke_concealed": FieldSmoke.inside(smoke_clouds, player.position, time),
 			"chain_wrap_seconds": player.chain_wrap_seconds,
+			"storm_insulator_seconds": player.storm_insulator_seconds,
 			"tire_grip_seconds": player.tire_grip_seconds,
 			"flash_cooldown": player.flash_cooldown,
 			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
