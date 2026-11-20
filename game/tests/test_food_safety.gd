@@ -128,6 +128,42 @@ func run(t) -> void:
 		"successful healing spends exactly one dose")
 	t.eq(p.survival.food_poisoning, 0.0, "herbal remedy cures a moderate illness")
 
+	t.current = "automatic and cooperative medicine treats actual food poisoning"
+	p.survival.food_poisoning = 34.0
+	p.inventory.add(FoodSafety.REMEDY_ITEM, 1)
+	var automatic: Dictionary = sim.cmd_quick_medicine(p.id)
+	t.check(bool(automatic.get("ok", false)), "smart medicine uses a real dose for poisoning")
+	t.eq(str(automatic.get("item", "")), FoodSafety.REMEDY_ITEM,
+		"server-selected auto treatment chooses the stomach remedy")
+	t.eq(p.survival.food_poisoning, 0.0, "auto treatment clears moderate poison")
+	var medic = sim.add_player(812, "Herbal Medic")
+	var companion = sim.add_player(813, "Fishing Companion")
+	var town: Vector3 = Vector3(0.0, world.height_at(0.0, 0.0), 0.0)
+	medic.position = town
+	companion.position = town
+	medic.inventory.add(FoodSafety.REMEDY_ITEM, 2)
+	companion.survival.food_poisoning = 50.0
+	t.eq(sim.cmd_party_aid(medic.id, companion.id, FoodSafety.REMEDY_ITEM).get("reason", ""),
+		"not_in_party", "strangers cannot cure each other")
+	t.check(bool(sim.cmd_party_invite(medic.id, companion.id).get("ok", false)),
+		"medic can invite a survivor nearby")
+	t.check(bool(sim.cmd_party_accept(companion.id).get("ok", false)),
+		"companion voluntarily joins party")
+	var aid: Dictionary = sim.cmd_party_aid(medic.id, companion.id, "auto")
+	t.check(bool(aid.get("ok", false)), "party auto-aid identifies food poisoning")
+	t.eq(str(aid.get("item", "")), FoodSafety.REMEDY_ITEM,
+		"party healer selects a carried stomach remedy")
+	t.near(float(aid.get("food_poison_treated", 0.0)), 50.0, 0.0001,
+		"party response reports verified sickness removed")
+	t.eq(companion.survival.food_poisoning, 0.0, "ill party member is cured")
+	t.eq(medic.inventory.count(FoodSafety.REMEDY_ITEM), 1,
+		"party medicine costs one real dose")
+	medic.party_aid_timer = 0.0
+	t.eq(sim.cmd_party_aid(medic.id, companion.id, FoodSafety.REMEDY_ITEM).get("reason", ""),
+		"no_effect", "healthy allies do not waste medicine")
+	t.eq(medic.inventory.count(FoodSafety.REMEDY_ITEM), 1,
+		"no-effect party aid preserves the second dose")
+
 	t.current = "higher-tier raw fish stacks symptoms, cooking never introduces poison"
 	p.survival.hunger = 20.0
 	p.survival.food_poisoning = 90.0
