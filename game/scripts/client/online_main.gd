@@ -38,6 +38,7 @@ const DamageDirection = preload("res://scripts/client/damage_direction.gd")
 const BloodDecals = preload("res://scripts/client/blood_decals.gd")
 const HoverOutline = preload("res://scripts/client/hover_outline.gd")
 const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
+const WetDrips = preload("res://scripts/client/wet_drips.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -122,6 +123,7 @@ var _ambient_birds
 var _fish_shoals
 var _dusk_bats
 var _breath
+var _wet_drips
 var _tumbleweeds
 var _damage_numbers
 var _damage_direction
@@ -1175,6 +1177,8 @@ func _on_welcomed() -> void:
 	_breath = BreathVapor.new()
 	_breath.model = avatar_model
 	add_child(_breath)
+	_wet_drips = WetDrips.new()
+	avatar.add_child(_wet_drips)
 
 
 func _generate_chunk(cell: Vector3i) -> Node:
@@ -1454,6 +1458,9 @@ func _update_time_of_day(delta: float) -> void:
 		snow_fraction = SnowVfx.snow_fraction(client.world.height_at(ground_at.x, ground_at.z))
 	effects.update_rain(camera.global_position + Vector3(0, -2.0, 0) if camera != null else Vector3.ZERO,
 		atmosphere.storm, snow_fraction)
+	if _wet_drips != null:
+		_wet_drips.update_view(0.0 if underground else atmosphere.storm,
+			underground or bool(weather.get("sheltered", false)), GraphicsQuality.level(), delta)
 	if underground and camera_fx != null:
 		camera_fx.cold = 0.0
 	if _breath != null and not underground and client != null and client.world != null and client.you.has("x"):
