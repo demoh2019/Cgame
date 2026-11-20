@@ -457,6 +457,7 @@ func _on_welcomed() -> void:
 	client.event_received.connect(func(event: Dictionary) -> void: audio.on_event(event, client.peer_id, client.world.height_at))
 	_raid_telegraph.clear()
 	client.event_received.connect(func(event: Dictionary) -> void: _raid_telegraph.consume(event, client.world))
+	client.snapshot_received.connect(func() -> void: _raid_telegraph.update_interrupt(client.raid_interrupt))
 	avatar = Node3D.new()
 	avatar_model = CharacterModel.new()
 	avatar_model.setup(Color(1.0, 0.95, 0.5) if not Assets.has_characters() else Color.WHITE, 2.0, 1.0, Assets.CHARACTER_NAMES[abs(hash(name_edit.text)) % Assets.CHARACTER_NAMES.size()], false)
