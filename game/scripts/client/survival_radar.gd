@@ -6,6 +6,7 @@ extends Control
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
+const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 
 const METERS_RADIUS := 72.0
 const REFRESH_INTERVAL := 0.2
@@ -114,6 +115,35 @@ func _paint_pin(at: Vector2, center_world: Vector2, shade: Color,
 		draw_circle(map_point(center_world, at, size), pixel_radius, shade)
 
 
+## Only a snapshot-visible, server-issued cone is rendered as a tactical wedge.
+## This is presentation only; the server independently resolves all hits.
+func _draw_raid_cone(origin: Vector2, attack: Dictionary) -> void:
+	if attack.is_empty():
+		return
+	for key in ["x", "z", "dx", "dz", "reach", "half_angle", "until"]:
+		if not attack.has(key) or not is_finite(float(attack[key])):
+			return
+	var strike_origin := Vector2(float(attack["x"]), float(attack["z"]))
+	var facing := Vector2(float(attack["dx"]), float(attack["dz"]))
+	var reach: float = float(attack["reach"])
+	var half_angle: float = float(attack["half_angle"])
+	if not strike_origin.is_finite() or not facing.is_finite() or \
+			absf(facing.length_squared() - 1.0) > 0.01 or \
+			reach <= 0.0 or reach > RaidCone.REACH or \
+			half_angle <= 0.0 or half_angle > RaidCone.HALF_ANGLE_DEGREES:
+		return
+	if not in_range(origin, strike_origin):
+		return
+	var arc_points := PackedVector2Array()
+	arc_points.append(map_point(origin, strike_origin, size))
+	for index in range(17):
+		var radians := deg_to_rad(-half_angle + float(index) * (half_angle * 2.0 / 16.0))
+		var tip: Vector2 = strike_origin + facing.rotated(radians) * reach
+		arc_points.append(map_point(origin, tip, size))
+	draw_colored_polygon(arc_points, Color(1.0, 0.25, 0.12, 0.23))
+	draw_polyline(arc_points, Color(1.0, 0.42, 0.16, 0.82), 1.4)
+
+
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.055, 0.077, 0.09, 0.91), true)
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.38, 0.48, 0.50, 0.9), false, 1.4)
@@ -178,6 +208,17 @@ func _draw() -> void:
 		for bag in client.bags.values():
 			_paint_pin(Vector2(float(bag["x"]), float(bag["z"])),
 				origin, Color(0.41, 0.93, 0.68), 3.0)
+
+	# Locked boss cleave: distinguish the dangerous sector from friendly markers.
+	var incoming_cone: Dictionary = {}
+	if sim != null and not sim.raid_pending_cone.is_empty():
+		incoming_cone = sim.raid_pending_cone.duplicate(true)
+		incoming_cone["reach"] = RaidCone.REACH
+		incoming_cone["half_angle"] = RaidCone.HALF_ANGLE_DEGREES
+	elif client != null:
+		incoming_cone = client.raid_cone_telegraph
+	if not incoming_cone.is_empty():
+		_draw_raid_cone(origin, incoming_cone)
 
 	## The party standard is visible to members as a field aura radius.
 	# No non-member coordinates are ever sent by the server.
