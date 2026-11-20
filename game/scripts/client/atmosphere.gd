@@ -170,6 +170,11 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_strength",
 		CloudShadowLut.shadow_strength(light_level, storm, _cloud_shadows_allowed))
 	_sky_refresh_interval = clampf(float(settings.get("sky_refresh_interval", 0.4)), 0.12, 2.0)
+	# The cubemap has always been refreshed at a bounded cadence. Reuse it
+	# for the visible low-end sky instead of recomputing panorama and stars
+	# for every background pixel each frame.
+	sky_material.set_shader_parameter("use_cached_radiance",
+		bool(settings.get("sky_use_cached_radiance", false)))
 	sun.shadow_enabled = _shadows_allowed
 	sun.directional_shadow_max_distance = float(settings["shadow_distance"])
 	environment.glow_enabled = bool(settings["glow"])
