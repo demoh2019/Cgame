@@ -34,6 +34,7 @@ const BreathVapor = preload("res://scripts/client/breath_vapor.gd")
 const Tumbleweeds = preload("res://scripts/client/tumbleweeds.gd")
 const DamageNumbers = preload("res://scripts/client/damage_numbers.gd")
 const OcclusionSilhouette = preload("res://scripts/client/occlusion_silhouette.gd")
+const DamageDirection = preload("res://scripts/client/damage_direction.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -120,6 +121,7 @@ var _dusk_bats
 var _breath
 var _tumbleweeds
 var _damage_numbers
+var _damage_direction
 var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
@@ -869,6 +871,11 @@ func _spawn_effects(event: Dictionary) -> void:
 	if str(event.get("type", "")) == "hit" and str(event.get("kind", "")) != "zombie" \
 			and int(event.get("id", -1)) == client.peer_id and avatar_model != null:
 		avatar_model.hit_flash(0.6 + float(event.get("damage", 0.0)) / 40.0)
+		if _damage_direction != null:
+			var by: int = int(event.get("by", -1))
+			var source: Dictionary = client.players.get(by, {}) if by > 0 else client.zombies.get(-by, {})
+			if by != -1 and source.has("x"):
+				_damage_direction.on_hit(Vector3(float(source["x"]), 0.0, float(source["z"])), float(event.get("damage", 0.0)))
 	physics_fx.on_event(event, at)
 	match event["type"]:
 		"hit":
@@ -1121,6 +1128,9 @@ func _on_welcomed() -> void:
 	add_child(_tumbleweeds)
 	_damage_numbers = DamageNumbers.new()
 	add_child(_damage_numbers)
+	_damage_direction = DamageDirection.new()
+	_damage_direction.camera = camera
+	add_child(_damage_direction)
 	audio = Audio.new()
 	add_child(audio)
 	# Thunder has its own bounded event queue and 3D emitter so storm
@@ -1447,6 +1457,8 @@ func _update_time_of_day(delta: float) -> void:
 		if _fish_shoals != null:
 			_fish_shoals.update_view(client.world, here, GraphicsQuality.level(),
 				WorldCycle.daylight(clock), delta, underground)
+		if _damage_direction != null:
+			_damage_direction.update_view(here, delta)
 		if _tumbleweeds != null:
 			_tumbleweeds.update_view(client.world, here, _visual_biome, _visual_weather_wind,
 				GraphicsQuality.level(), delta, underground)
