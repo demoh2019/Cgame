@@ -133,7 +133,8 @@ func _gui_input(event: InputEvent) -> void:
 	# The journal rows remain clickable even outside the terrain rectangle.
 	if click.button_index == MOUSE_BUTTON_LEFT and not click.shift_pressed:
 		for row in _objective_hitboxes:
-			if (row["rect"] as Rect2).has_point(click.position):
+			var row_bounds: Rect2 = row["rect"]
+			if row_bounds.has_point(click.position):
 				if select_objective(str(row["key"])):
 					accept_event()
 				return
@@ -357,13 +358,18 @@ func _draw() -> void:
 		draw_string(font, Vector2(30.0, list_y + 17.0),
 			"No active expedition goals", HORIZONTAL_ALIGNMENT_LEFT, -1, 12,
 			Color(0.70, 0.77, 0.80))
-	var hint := "Left: personal waypoint   Shift+Left: party ping   Right: clear"
+	var hint := "Click atlas goal: track   Left: waypoint   Shift+Left: party ping   Right: clear"
 	if waypoint.is_finite() and client.you.has("x") and client.you.has("z"):
 		var from_here := Vector2(float(client.you["x"]), float(client.you["z"]))
 		var distance := TravelNavigation.distance_meters(from_here, waypoint)
 		var bearing := TravelNavigation.compass(from_here, waypoint)
 		hint = "WAYPOINT: %d m %s   (Shift+Left: party ping; right: clear)" % [
 			distance, bearing]
+		if not followed_objective.is_empty():
+			var tracked: Dictionary = ExpeditionAtlas.find(objectives, followed_objective)
+			if not tracked.is_empty():
+				hint = "TRACKING %s: %d m %s   (Right: clear)" % [
+					str(tracked["label"]), distance, bearing]
 	draw_string_outline(font, Vector2(30, view.y - 25), hint,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, 4, Color.BLACK)
 	draw_string(font, Vector2(30, view.y - 25), hint,
