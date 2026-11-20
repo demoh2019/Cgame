@@ -1230,6 +1230,6 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
 			return event.get("id", -1) == peer or event.get("by", 0) == peer or _is_nearby(event, peer)
-		"lightning_warning", "lightning_struck", "attack", "siege_charge_armed", "siege_charge_disarmed", "siege_brace_placed", "siege_brace_absorbed", "siege_charge_detonated", "siege_charge_fizzled", "zombie_died", "armor_sunder", "finishing_strike", "decoy_thrown", "ember_thrown", "campfire_doused", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_interrupted", "raid_cone_warning", "raid_cone_struck", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
+		"lightning_warning", "lightning_struck", "attack", "siege_charge_armed", "siege_charge_disarmed", "siege_brace_placed", "siege_brace_absorbed", "siege_charge_detonated", "siege_charge_fizzled", "zombie_died", "armor_sunder", "finishing_strike", "decoy_thrown", "ember_thrown", "campfire_doused", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_interrupted", "raid_cone_warning", "raid_cone_struck", "raid_enraged", "raid_reinforcements", "raid_ward_changed", "raid_defeated", "raid_expired":
 			return _is_nearby(event, peer)
 	return false

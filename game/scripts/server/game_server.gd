@@ -115,6 +115,7 @@ const PartyShieldWall = preload("res://scripts/shared/party_shield_wall.gd")
 const GuardianRetribution = preload("res://scripts/shared/guardian_retribution.gd")
 const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
+const RaidWard = preload("res://scripts/shared/raid_ward.gd")
 const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
 const RaidRoundRobin = preload("res://scripts/shared/raid_round_robin.gd")
 const RaidNeedGreed = preload("res://scripts/shared/raid_need_greed.gd")
@@ -5440,6 +5441,8 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		# after an actual server-resolved slam; no PvP or other infected bonus.
 		if zombie.id == raid_boss_id:
 			damage = RaidRecovery.amplify(damage, zombie, raid_exposed_until, time)
+			# Current, living raid adds protect ONLY their own boss in PvE.
+			damage = RaidWard.absorb(damage, zombie, raid_boss_id, raid_minions, zombies)
 		# Only real, positive, server-applied hits can qualify for group XP.
 		if damage > 0.0 and zombie.is_alive() and (zombie.contributors.size() < 16 or zombie.contributors.has(attacker.id)):
 			var equipped: String = attacker.inventory.weapon
@@ -5616,6 +5619,16 @@ func _party_award_assists(killer: Player, zombie) -> void:
 
 func _on_zombie_death(zombie, killer: Player) -> void:
 	parties.clear_focus_target(zombie.id)
+	# Only a confirmed raid-minion death changes the current boss ward.
+	if zombie.id != raid_boss_id and raid_boss_id > 0 and raid_minions.has(zombie.id):
+		var current_boss = zombies.get(raid_boss_id)
+		if current_boss != null and current_boss.is_alive():
+			var remaining: int = RaidWard.living_count(current_boss,
+				raid_boss_id, raid_minions, zombies)
+			events.append({"type": "raid_ward_changed", "id": raid_boss_id,
+				"x": current_boss.position.x, "z": current_boss.position.z,
+				"guards": remaining,
+				"reduction_percent": RaidWard.reduction_percent(remaining)})
 	# A caravan is defended only after every originally summoned infected
 	# is confirmed dead, not when the wave disappears or its timer expires.
 	for wave in caravan_ambushes:
@@ -6523,9 +6536,12 @@ func _tick_raid_reinforcements(boss) -> void:
 		zombies[enemy_id] = minion
 		raid_minions.append(enemy_id)
 	raid_wave = phase
+	var active_guards: int = RaidWard.living_count(boss, raid_boss_id,
+		raid_minions, zombies)
 	events.append({"type": "raid_reinforcements", "id": boss.id,
 		"x": boss.position.x, "z": boss.position.z,
-		"phase": phase, "count": points.size()})
+		"phase": phase, "count": points.size(), "guards": active_guards,
+		"reduction_percent": RaidWard.reduction_percent(active_guards)})
 
 
 func _clear_raid_minions() -> void:
@@ -7410,6 +7426,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					"elite": zombie.elite, "raid_boss": zombie.raid_boss,
 					"raid_enraged": zombie.raid_enraged,
 					"raid_exposed_seconds": RaidRecovery.remaining(zombie, raid_exposed_until, time) if zombie.id == raid_boss_id else 0.0,
+					"raid_ward_guards": RaidWard.living_count(zombie, raid_boss_id, raid_minions, zombies) if zombie.id == raid_boss_id else 0,
+					"raid_ward_reduction": RaidWard.reduction_percent(RaidWard.living_count(zombie, raid_boss_id, raid_minions, zombies)) if zombie.id == raid_boss_id else 0,
 					"max_hp": float(zombie.data.get("health", zombie.health)),
 					"wound_phase": InfectedWounds.phase(zombie),
 					"snared_seconds": zombie.snared_seconds,
