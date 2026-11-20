@@ -356,6 +356,12 @@ func _build() -> void:
 	scanner_button.tooltip_text = "Workbench craft (3 scrap, T2 bar, filter). One successful scan privately marks a living raid boss or elite for 50s."
 	scanner_button.pressed.connect(func() -> void: client.use_item("field_threat_scanner"))
 	inventory_box.add_child(scanner_button)
+	var prospect_button := Button.new()
+	prospect_button.name = "UseProspectingChart"
+	prospect_button.text = "Prospect high-tier ore and stone (180m; 1 chart)"
+	prospect_button.tooltip_text = "Field craft: cloth, 2 scrap, stone. Spend only on a real T2+ vein; private 80s marker."
+	prospect_button.pressed.connect(func() -> void: client.use_item("prospecting_chart"))
+	inventory_box.add_child(prospect_button)
 	var chain_button := Button.new()
 	chain_button.name = "UseBikeChainWrap"
 	chain_button.text = "Quiet bike chain (180s; workbench craft)"
@@ -1413,6 +1419,16 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and bool(data.get("prospecting", false)):
+		if bool(data.get("ok", false)):
+			say("Prospecting: T%d %s at X:%d Z:%d — private 80s marker." % [
+				int(data.get("tier", 2)), str(data.get("kind", "rock")),
+				roundi(float(data.get("x", 0.0))),
+				roundi(float(data.get("z", 0.0)))])
+		else:
+			say("Prospecting: %s (chart not spent)." % str(
+				data.get("reason", "rejected")))
+		return
 	if kind == "use" and bool(data.get("threat_scan", false)):
 		if bool(data.get("ok", false)):
 			say("SCOUT: %s threat at X:%d Z:%d — private moving marker for %ds." % [
