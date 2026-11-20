@@ -37,7 +37,7 @@ func run(t) -> void:
 	t.eq(Budget.choose(rooms, 3, 0.0).size(), 0, "zero radius selects no rooms")
 	t.eq(Budget.choose(rooms, 1, 16.0)[0]["id"], 11, "nearest room wins without history")
 	t.eq(Budget.choose(rooms, 2, 16.0).size(), 2, "Ultra never selects more than pool size")
-	t.eq(Budget.choose(rooms, 1, 8.0).size(), 2 if false else 1, "selection respects capture radius")
+	t.eq(Budget.choose(rooms, 1, 8.0).size(), 1, "selection respects capture radius")
 	t.eq(Budget.choose(rooms, 2, 7.5).size(), 1, "distant rooms stay unselected")
 	var near_tie := [
 		{"id": 101, "distance_sq": 49.0},
