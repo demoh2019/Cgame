@@ -19,5 +19,7 @@ func _initialize() -> void:
 	assert(Foliage.sample_cell_positions(42, 0, 0, 1, 0.0, Vector2.ZERO, 0.0).is_empty())
 	var packed: PackedVector3Array = Foliage.sample_cell_positions(42, 2, 4, 999, 14.0, Vector2(28, 28), 0.0)
 	assert(packed.size() <= 64, "Density must be bounded for editor safety")
-	print("ChunkedFoliage3D: 9 groups of checks passed")
+	assert(Foliage.get_shared_trunk_mesh() == Foliage.get_shared_trunk_mesh())
+	assert(Foliage.get_shared_leaf_mesh() == Foliage.get_shared_leaf_mesh())
+	print("ChunkedFoliage3D: 11 groups of checks passed")
 	quit(0)
