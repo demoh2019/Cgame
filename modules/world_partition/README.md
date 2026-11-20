@@ -12,6 +12,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
+- **Independent bounded simulation activation:** loaded cells can retain visuals but pause script/AI simulation independently of LOD. Configure `simulation_radius` (-1 disables), `simulation_hysteresis_cells` (0–8) and `max_simulation_transitions_per_frame` (1–64). The native engine tracks per-cell activation, exposes `is_cell_simulation_active()` and `get_simulation_active_cell_count()`, emits `cell_simulation_changed`, and calls an optional scene-root `set_streaming_simulation_active(active)` **before** `_ready()` for initial state.
 - **Prioritized streaming sources:** runtime names carry priorities 0–3 (background, normal, important, urgent); after player and persistent hubs the native scheduler works high to low and alphabetical within each tier, all under existing instance/new-request budgets. Fast-travel scenes can finish before background quest preloads without competing for observer priority. Update a source via `set_streaming_source_priority()`.
 - **Nonblocking streaming-source completion:** `get_streaming_source_cell_count`, `get_streaming_source_loaded_cell_count`, `get_streaming_source_failed_cell_count`, `get_streaming_source_progress` and `is_streaming_source_ready` expose bounded readiness for already-registered destination cells. Unregistered/missing source centers fail closed, and ready requires a valid active observer and all relevant `Node3D` roots to be live.
 - **Live scene-root accessor:** `get_cell_instance(cell)` returns the active Node3D scene root or `null` without scanning all children or requesting a load. Useful for gameplay population, navigation and cell-local scripts. Never cache the returned scene root beyond an unload without `is_instance_valid()`.
@@ -53,6 +54,35 @@ func _physics_process(_delta: float) -> void:
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Independent AI/script simulation tiers
+
+`simulation_radius` is separate from `detail_radius` and `load_radius`. A cell can be **loaded** (rendering its distant mesh), have full or reduced **LOD**, and independently be **simulation-active** for AI and script effects. Setting `simulation_radius = -1` (default) preserves existing behavior. When enabled, the observer's inner radius activates simulation; an already-active cell keeps running for `simulation_hysteresis_cells` extra grid rings to avoid repeated start/stop as the player crosses a boundary. A pinned gameplay hub always stays active. Per-frame activations/deactivations of existing roots are capped by `max_simulation_transitions_per_frame`; the initial state is assigned when the cell is instantiated.
+
+The native map is usable from game managers even when the cell has no script callback:
+
+```gdscript
+world.simulation_radius = 1
+world.simulation_hysteresis_cells = 1
+world.max_simulation_transitions_per_frame = 2
+
+func _on_cell_simulation_changed(cell: Vector2i, active: bool) -> void:
+    if world.get_cell_instance(cell) != null:
+        encounter_director.set_cell_ai_enabled(cell, active)
+```
+
+An opted-in cell root can implement:
+
+```gdscript
+var streaming_simulation_active := true
+
+func set_streaming_simulation_active(active: bool) -> void:
+    streaming_simulation_active = active
+    if is_node_ready():
+        set_process(active)
+```
+
+Game code **must actually stop its own processes, animation updates, AI controllers or costly gameplay tasks**. `WorldPartition3D` publishes the state and calls the opt-in callback, but does **not** automatically disable collision shapes or `Node.process_mode` for arbitrary scene hierarchies, to avoid breaking rendering, static terrain or input. Visual LOD toggles do not activate distant AI. Call `get_simulation_active_cell_count()` for diagnostics, `is_cell_simulation_active(cell)` to gate NPC creation. The playable integration lives in `forest_encounters.gd` and `streamed_forest_cell.gd` with `smoke_simulation.gd` verifying near activation, retained geometry, hysteresis, pinned cells and budgeted transitions.
 
 ## Asynchronous source readiness and safe fast travel
 
@@ -143,7 +173,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 64 Doctest cases across `test_world_partition_3d.h` (28) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 65 Doctest cases across `test_world_partition_3d.h` (29) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -154,6 +184,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Simulation activation is opt-in per scene or game manager.** It never unloads geometry, removes physics bodies, or pauses arbitrary descendant scripts automatically. Callback scripts must tolerate calls before `_ready()` and execute their own activation logic. Hysteresis can intentionally keep some neighboring cells active even when outside the inner radius.
 - **Readiness is not an all-systems fence.** A `true` completion result means the relevant PackedScene roots exist in the live scene tree, not that they finished deferred physics initialization, navigation baking or GPU uploads. Games that stream collision/terrain separately must add their own activation checks.
 - **External source fanout is bounded:** at most 8 sources and radius 1; no custom shapes, priorities, source replication or automatic quest area generation. Additional source load requests can be delayed by high-priority camera/player work.
 - **Distance LOD hysteresis:** independently adjust the demotion boundary with `detail_hysteresis_cells`. It only changes levels of already-instantiated roots and does not increase the resource streaming radius; check that existing full-detail collision in the added ring is affordable.

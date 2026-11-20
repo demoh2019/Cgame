@@ -100,9 +100,9 @@ func _eligible(cell: Vector2i) -> bool:
         return false # The home clearing must remain safe.
     if streamer.get_cell_instance(cell) == null:
         return false
-    # Only near-detail scene roots are combat-ready. Remote quest preloads do
-    # not start physics enemies until the player approaches their cell.
-    if streamer.get_cell_detail_level(cell) != 0:
+    # Independent native simulation state, not the visual LOD tier. Disabling
+    # LOD for graphics must not wake AI across the whole loaded world.
+    if not streamer.is_cell_simulation_active(cell):
         return false
     var spawn: Vector3 = _spawn_position(cell)
     var planar: Vector2 = Vector2(spawn.x - player.global_position.x,
