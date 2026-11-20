@@ -138,4 +138,13 @@ class StreamedTerrainContracts(TestCase):
         assert "TerrainTileCache.lookup(cell)" in patch
         assert "TerrainTileCache.insert(cell, mesh, collision_shape)" in patch
         assert "_create_patch_nodes(cached[\"mesh\"], cached[\"shape\"])" in patch
+        shared = (ROOT / "scripts/forest_shared_assets.gd").read_text(encoding="utf-8")
+        assert "SharedAssets.ground_material()" in patch
+        assert "SharedAssets.tree_trunk()" in forest
+        assert "SharedAssets.tree_canopy()" in forest
+        assert "SharedAssets.grass_blade()" in forest
+        assert "SharedAssets.rock_mesh()" in forest
+        assert "static var _trunk: CylinderMesh" in shared
+        assert "static var _ground_material: StandardMaterial3D" in shared
+
 
