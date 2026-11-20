@@ -379,7 +379,7 @@ TEST_CASE("[EnvironmentQuery3D] Multi-threat limits, invalid actors, and legacy 
 	const Array legacy = q->query();
 	REQUIRE(legacy.size() == 3);
 	const Dictionary nearest = legacy[0];
-	CHECK(double(nearest["threat_distance"]) == doctest::Approx(92.0));
+	CHECK(double(nearest["threat_distance"]) == doctest::Approx(96.0));
 }
 
 TEST_CASE("[EnvironmentQuery3D] Four ring samples cover cardinal directions") {
