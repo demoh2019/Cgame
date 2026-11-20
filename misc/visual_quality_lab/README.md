@@ -257,3 +257,77 @@ Do not treat unloading scene nodes as persistent game state storage; use
 - Godot: https://docs.godotengine.org/en/4.6/tutorials/io/background_loading.html
 - Godot thread safety: https://docs.godotengine.org/en/4.6/tutorials/performance/thread_safe_apis.html
 - Unreal: https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine
+
+
+## Visual Quality Lab v9 — persistent world state for streamed cells
+
+Large worlds need **two independent lifecycles**: scene instances may unload to
+free rendering/physics resources, while state changed by the player must survive
+both streaming boundaries and a game restart. `WorldStateStore3D` is a reusable
+Godot scene-streaming component for exactly that use case. It extends the
+`WorldStreamer3D` used in v8 and immediately powers interactable forest beacons
+in the demo game.
+
+### Engine/scene API
+
+`addons/visual_quality/world_state_store.gd` provides a small protocol for any
+streamed `Node3D` root:
+
+- `save_stream_state() -> Dictionary` returns *changed* state, or `{}` for the
+  unchanged/default state.
+- `load_stream_state(state: Dictionary)` hydrates a newly instantiated cell.
+- Optional signal `stream_state_changed` tells the store to persist immediately.
+- Optional `get_stream_cell_coord() -> Vector2i` supports attaching the state
+  manager after the cells are already loaded.
+
+Set `store.streamer = streamer`, `store.world_id = "your_stable_world_id"`,
+and optionally `store.save_path = "user://world_v1.cfg"`; **add the store to
+ the scene tree before the streamer begins loading cells**. The streamer now
+emits `cell_about_to_unload(coord, cell)` while the live node still exists.
+The store captures the state there, before `remove_child()` / `queue_free()`.
+When a cell reappears, its state is restored after instantiation.
+
+Save files are versioned and keyed by world ID and stable integer grid cell
+coordinates (`x:z`), preventing accidentally reapplying one world's state to
+another. The store rejects Object/Resource/Node references in snapshots and
+only accepts bounded native primitive properties (bool, int, float, string,
+Vector2, Vector3, Color). It writes to `user://...tmp` and atomically renames
+that file over the prior save on success. Missing or incompatible saves are
+ignored rather than silently migrated. Every active cell is snapshotted on
+explicit save/exit; immediate changes are saved when notified by a cell.
+
+For larger online worlds, additional measures would be required: server-side
+ownership, validation, replication, migrations, conflict resolution, background
+save I/O, and checkpoint/backup management. This implementation is intentionally
+**local, single-player, and opt-in**; it does not rewrite Godot's C++ renderer.
+
+### Integrated demonstration
+
+Each streamed forest cell now has an **orange emissive beacon**. Walk near a
+beacon and press **G** to activate it; it turns **green**. The HUD displays
+"Saved cells". Walk beyond the forest cell's unload radius and return: that
+beacon will still be green after its `PackedScene` is recreated. Progress also
+survives restarting the demo. Press **8** or click "Reset forest beacons" to
+clear all stored beacon states, both currently active and unloaded. The
+previous light-shard quest (`F`), quality presets (1–3), day/night/weather
+(4–6), streaming toggle (7) and character locomotion remain available.
+
+### Verification
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+godot --headless --path . --script res://tests/test_world_state_store.gd
+godot --headless --path . --script res://tests/test_world_state_runtime.gd
+```
+
+The static suite passed **19/19** checks in the authoring environment.
+The two new GDScript suites test serialization, rejection of references,
+version/world isolation, activation, unload, rehydration and reset. They must
+be executed with Godot to validate runtime correctness. Target macOS Metal
+rendering and FPS also remain unverified while the linked Mac is offline.
+
+Architecture references:
+
+- [Godot: saving games](https://docs.godotengine.org/en/4.6/tutorials/io/saving_games.html)
+- [Godot: DirAccess atomic rename](https://docs.godotengine.org/en/4.6/classes/class_diraccess.html)
+- [Unreal: World Partition](https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine)
