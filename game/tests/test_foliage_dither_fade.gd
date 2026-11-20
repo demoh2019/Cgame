@@ -31,10 +31,10 @@ func run(t) -> void:
 		"decor with its own author range is not misclassified")
 	var source := BoxMesh.new()
 	source.material = StandardMaterial3D.new()
-	var tree_mesh: ArrayMesh = Foliage.swayed(source, "tree:aa_dither_test", 0.14)
+	var tree_mesh := Foliage.swayed(source, "tree:aa_dither_test", 0.14) as ArrayMesh
 	var tree_mat := tree_mesh.surface_get_material(0) as ShaderMaterial
 	t.eq(int(tree_mat.get_shader_parameter("fade_role")), 1, "GPU tree role is set on material")
-	var bush_mesh: ArrayMesh = Foliage.swayed(source, "bush", 0.12)
+	var bush_mesh := Foliage.swayed(source, "bush", 0.12) as ArrayMesh
 	var bush_mat := bush_mesh.surface_get_material(0) as ShaderMaterial
 	t.eq(int(bush_mat.get_shader_parameter("fade_role")), 2, "GPU bush role is set on material")
 	t.current = "opaque ordered dithering"
