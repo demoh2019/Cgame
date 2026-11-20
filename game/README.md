@@ -2791,3 +2791,51 @@ godot --headless --path game --script res://tests/run_all.gd
 
 Existing Godot gameplay scripting and networking already support
 this feature; no native engine patches were necessary.
+
+
+## Telegraphed directional raid cleave — sidestep the warlord
+
+The canonical multiplayer raid boss now periodically performs a
+**directional frontal cleave** alongside its existing circle slam and
+post-slam counterattack opportunity. Players must read the boss facing,
+sidestep or circle behind it rather than simply running away.
+
+- The raid server first selects a **living current target within 13 m**
+  and fixes the boss's world position and a normalized attack direction
+  for the entire **2.2-second telegraph**. Changing aggro during windup
+  does **not** secretly rotate the attack toward another player.
+- The sector extends **13 m**, **38 degrees to either side** of the
+  locked direction, and at most **3.5 m vertically**. An ordinary-phase
+  hit causes **24 base damage**; enrage increases it to **33**.
+  Existing armor, guardian brace, timed dodge invulnerability, death
+  handling and safe-zone rules remain authoritative.
+- Directional attacks have a **22-second cooldown** normally, dropping
+  to **15 seconds during enrage**. The server schedules either a
+  circular slam or a directional cleave, never both telegraphs at the
+  same time in normal play. The cone does **not** trigger the extra
+  damage vulnerability reserved for completed slam attacks.
+- Nearby multiplayer clients receive a bounded
+  `raid_cone_telegraph` containing the fixed origin, direction,
+  sector geometry and server deadline. The **tactical radar paints a
+  red sector**, and the HUD displays the remaining warning and whether
+  the local survivor stands inside it. Distant clients receive neither
+  the attack position nor the full raid event.
+- Pending strikes are session-only and are discarded if the boss dies,
+  retreats or the encounter is reset. Clients cannot spawn a strike,
+  select victims, alter damage or submit an aim direction.
+
+Files: `scripts/shared/raid_cone.gd`,
+`scripts/server/game_server.gd`, `scripts/shared/net.gd`,
+`scripts/client/game_client.gd`, `scripts/client/hud.gd` and
+`scripts/client/survival_radar.gd`. The new
+`tests/test_raid_cone.gd` is included in `tests/run_all.gd`
+and covers sector geometry, server authorization, locked aim, windup,
+dodge, cooldowns, enrage, interest-limited snapshots, PvE hit
+resolution and retreat cleanup.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+The engine's existing scene drawing, RPC, and physics coordinate APIs
+support this feature. No native engine changes were needed.
