@@ -146,5 +146,12 @@ class StreamedTerrainContracts(TestCase):
         assert "SharedAssets.rock_mesh()" in forest
         assert "static var _trunk: CylinderMesh" in shared
         assert "static var _ground_material: StandardMaterial3D" in shared
+        assert "world_partition.prefetch_distance = 2" in world
+        assert "world_partition.prefetch_direction = direction" in world
+        assert "_update_predictive_streaming()" in world
+        assert "prefetch_direction" in (
+            ROOT / "tests/smoke_prefetch.gd"
+        ).read_text(encoding="utf-8")
+
 
 
