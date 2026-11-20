@@ -139,6 +139,8 @@ func _draw_zombie_bars(view: Vector2) -> void:
 			tag = "PIN"
 		if float(zombie.get("sunder_seconds", 0.0)) > 0.0:
 			tag = "SUNDER" if tag == "" else tag + "+SND"
+		if bool(zombie.get("melee_blocked", false)):
+			tag = "BLOCKED" if tag == "" else tag + "+BLK"
 		var gait: String = str(zombie.get("wound_phase", ""))
 		if gait == "limping":
 			tag = "LIMP" if tag == "" else tag + "+LMP"

@@ -144,6 +144,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			base = Color(0.92, 0.2, 0.63)
 		elif bool(entity.get("elite", false)):
 			base = Color(0.98, 0.65, 0.18)
+		var blocked: bool = bool(entity.get("melee_blocked", false))
 		var staggered: bool = float(entity.get("stagger_seconds", 0.0)) > 0.0
 		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
 		var exposed: bool = float(entity.get("sunder_seconds", 0.0)) > 0.0
@@ -158,6 +159,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			tint = base.lerp(Color(0.74, 0.42, 0.95), 0.65)
 		if exposed:
 			tint = base.lerp(Color(0.96, 0.42, 0.14), 0.65)
+		if blocked:
+			tint = base.lerp(Color(0.94, 0.75, 0.38), 0.62)
 		if pinned:
 			tint = base.lerp(Color(1.0, 0.84, 0.25), 0.65)
 		if staggered:

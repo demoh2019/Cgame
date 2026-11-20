@@ -13,6 +13,7 @@ const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
 const InfectedResolve = preload("res://scripts/shared/infected_resolve.gd")
 const InfectedSight = preload("res://scripts/shared/infected_sight.gd")
+const InfectedMeleeCover = preload("res://scripts/shared/infected_melee_cover.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -43,6 +44,7 @@ var spit_center: Vector2 = Vector2.ZERO
 var stuck_time: float = 0.0
 var snared_seconds: float = 0.0 # Server-owned root; movement-only, not attack immunity.
 var stagger_seconds: float = 0.0 # Short PvE-only incapacitation from a confirmed heavy blow.
+var melee_blocked: bool = false # Server-observed solid cover between claw and target.
 var stagger_resolve_stacks: int = 0 # Number of effective successive server-side staggers.
 var stagger_resolve_seconds: float = 0.0 # Window before diminishing returns reset.
 var sunder_until: float = 0.0 # Server-time expiry of PvE armor weakness.
@@ -83,6 +85,7 @@ func is_alive() -> bool:
 func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator) -> Dictionary:
 	if state == State.DEAD:
 		return {}
+	melee_blocked = false
 	attack_timer = maxf(attack_timer - delta, 0.0)
 	snared_seconds = maxf(0.0, snared_seconds - maxf(0.0, delta))
 	stagger_resolve_seconds = InfectedResolve.remaining(stagger_resolve_seconds, delta)
@@ -163,11 +166,21 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 					return {"spit_warning": true, "x": target.x, "z": target.y}
 				return {}
 			if distance <= float(data["attack_range"]):
-				state = State.ATTACK
-				yaw = atan2(target.x - here.x, target.y - here.y)
-				if attack_timer <= 0.0:
-					attack_timer = float(data["attack_cooldown"])
-					result = {"hit": target_id, "damage": float(data["damage"])}
+				# A visible or previously alerted survivor is NOT vulnerable
+				# to claws through a constructed barricade or ruin wall.
+				# Stay in pursuit and use ordinary obstacle-bashing when
+				# movement is blocked; never spend the attack cooldown.
+				if not InfectedMeleeCover.clear_attack(
+						world, position, target_pos, raid_boss):
+					melee_blocked = true
+					state = State.CHASE
+					_move_toward(world, here, target, float(data["speed"]), delta)
+				else:
+					state = State.ATTACK
+					yaw = atan2(target.x - here.x, target.y - here.y)
+					if attack_timer <= 0.0:
+						attack_timer = float(data["attack_cooldown"])
+						result = {"hit": target_id, "damage": float(data["damage"])}
 			else:
 				state = State.CHASE
 				_move_toward(world, here, _flank_goal(here, target), float(data["speed"]), delta)
@@ -428,6 +441,7 @@ func take_damage(amount: float, attacker_id: int = -1) -> bool:
 	health = maxf(0.0, health - amount)
 	if health <= 0.0:
 		state = State.DEAD
+		melee_blocked = false
 		spit_pending = false
 		spit_seconds = 0.0
 		stagger_seconds = 0.0

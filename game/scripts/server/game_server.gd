@@ -69,6 +69,7 @@ const FieldArmorPlate = preload("res://scripts/shared/field_armor_plate.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
+const InfectedMeleeCover = preload("res://scripts/shared/infected_melee_cover.gd")
 const BarricadeBallistics = preload("res://scripts/shared/barricade_ballistics.gd")
 const SiegeCharge = preload("res://scripts/shared/siege_charge.gd")
 const SiegeDefusal = preload("res://scripts/shared/siege_defusal.gd")
@@ -6820,6 +6821,12 @@ func _tick_zombies(delta: float) -> void:
 		if result.has("hit"):
 			var victim: Player = players.get(result["hit"])
 			if victim != null and _alive(victim):
+				# Independently verify that server-resolved claws still have a
+				# clear path BEFORE parry, plates, intercept or wound effects.
+				# A last-moment obstruction cannot consume defensive resources.
+				if not InfectedMeleeCover.clear_attack(
+						world, zombie.position, victim.position, zombie.raid_boss):
+					continue
 				# An active dodge avoids infected wounds; normal PvP attacks still land.
 				if victim.dodge_immunity > 0.0:
 					events.append({"type": "evaded", "peer": victim.id, "zombie": zombie.id})
@@ -7352,6 +7359,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					"wound_phase": InfectedWounds.phase(zombie),
 					"snared_seconds": zombie.snared_seconds,
 					"stagger_seconds": zombie.stagger_seconds,
+					"melee_blocked": zombie.melee_blocked,
 					"resolve_stacks": zombie.stagger_resolve_stacks if zombie.stagger_resolve_seconds > 0.0 else 0,
 					"resolve_seconds": zombie.stagger_resolve_seconds,
 					"sunder_seconds": SunderMark.remaining(zombie, time)})
