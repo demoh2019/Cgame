@@ -3,6 +3,7 @@ extends Node
 ## and on every client (Godot needs that), and `role` decides which half of it does anything.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildSiegeLedger = preload("res://scripts/shared/guild_siege_ledger.gd")
@@ -1171,7 +1172,14 @@ func server_tick(delta: float) -> void:
 		var personal: Array = []
 		for event in all_events:
 			if _event_visible_to(event, peer):
-				personal.append(event)
+				# The impact is public nearby, but distant thunder should
+				# reveal only a coarse weather cell, not the player who
+				# caused a strike at their precise coordinates.
+				var delivered: Dictionary = event
+				if str(event.get("type", "")) == "lightning_struck":
+					delivered = _lightning_for_peer(event, peer)
+				if not delivered.is_empty():
+					personal.append(delivered)
 		if not personal.is_empty():
 			s_events.rpc_id(peer, personal)
 	snapshot_accumulator += delta
@@ -1181,6 +1189,35 @@ func server_tick(delta: float) -> void:
 			var snap: Dictionary = sim.snapshot_for(peer)
 			if not snap.is_empty():
 				s_snapshot.rpc_id(peer, snap)
+
+
+## Long-range thunder is atmospheric audio, not a remotely visible
+## combat/hazard marker. Exact strike coordinates stay within 90 m.
+## Distant listeners receive only a 256 m quantized weather cell and no
+## player IDs, damage, warning deadline or precise event radius.
+func _lightning_for_peer(event: Dictionary, peer: int) -> Dictionary:
+	if sim == null or str(event.get("type", "")) != "lightning_struck" \
+			or not event.has("x") or not event.has("z"):
+		return {}
+	var survivor = sim.players.get(peer)
+	if survivor == null or not survivor.position.is_finite():
+		return {}
+	var x: float = float(event["x"])
+	var z: float = float(event["z"])
+	if not is_finite(x) or not is_finite(z):
+		return {}
+	var receiver := Vector2(survivor.position.x, survivor.position.z)
+	var strike := Vector2(x, z)
+	var d2: float = receiver.distance_squared_to(strike)
+	if not is_finite(d2) or d2 > StormLightning.THUNDER_MAX_DISTANCE * \
+			StormLightning.THUNDER_MAX_DISTANCE:
+		return {}
+	if d2 <= Defs.INTEREST_RADIUS * Defs.INTEREST_RADIUS:
+		return event
+	var grid: float = StormLightning.THUNDER_COARSE_GRID
+	return {"type": "distant_thunder",
+		"x": float(roundi(x / grid)) * grid,
+		"z": float(roundi(z / grid)) * grid}
 
 
 ## Combat sounds and effects are only sent to players close enough to perceive them.
@@ -1266,6 +1303,8 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
 			return event.get("id", -1) == peer or event.get("by", 0) == peer or _is_nearby(event, peer)
-		"lightning_warning", "lightning_struck", "attack", "siege_charge_armed", "siege_charge_disarmed", "siege_brace_placed", "siege_brace_absorbed", "siege_charge_detonated", "siege_charge_fizzled", "zombie_died", "armor_sunder", "finishing_strike", "decoy_thrown", "ember_thrown", "campfire_doused", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_interrupted", "raid_cone_warning", "raid_cone_struck", "raid_enraged", "raid_reinforcements", "raid_ward_changed", "raid_defeated", "raid_expired":
+		"lightning_struck":
+			return not _lightning_for_peer(event, peer).is_empty()
+		"lightning_warning", "attack", "siege_charge_armed", "siege_charge_disarmed", "siege_brace_placed", "siege_brace_absorbed", "siege_charge_detonated", "siege_charge_fizzled", "zombie_died", "armor_sunder", "finishing_strike", "decoy_thrown", "ember_thrown", "campfire_doused", "spit_warning", "spit_impact", "siege_started", "raid_started", "raid_warning", "raid_slam", "raid_interrupted", "raid_cone_warning", "raid_cone_struck", "raid_enraged", "raid_reinforcements", "raid_ward_changed", "raid_defeated", "raid_expired":
 			return _is_nearby(event, peer)
 	return false
