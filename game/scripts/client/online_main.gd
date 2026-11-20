@@ -33,6 +33,7 @@ const DuskBats = preload("res://scripts/client/dusk_bats.gd")
 const BreathVapor = preload("res://scripts/client/breath_vapor.gd")
 const Tumbleweeds = preload("res://scripts/client/tumbleweeds.gd")
 const DamageNumbers = preload("res://scripts/client/damage_numbers.gd")
+const OcclusionSilhouette = preload("res://scripts/client/occlusion_silhouette.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -1135,6 +1136,8 @@ func _on_welcomed() -> void:
 	avatar_model = CharacterModel.new()
 	avatar_model.setup(Color(1.0, 0.95, 0.5) if not Assets.has_characters() else Color.WHITE, 2.0, 1.0, Assets.CHARACTER_NAMES[abs(hash(name_edit.text)) % Assets.CHARACTER_NAMES.size()], false, abs(hash(name_edit.text)) / Assets.CHARACTER_NAMES.size())
 	avatar.add_child(avatar_model)
+	# Diablo/PoE-style X-ray rim where buildings or trees hide your character.
+	OcclusionSilhouette.apply(avatar_model)
 	bike_visual = TrailBikeVisual.new()
 	bike_visual.name = "TrailBike"
 	avatar.add_child(bike_visual)
