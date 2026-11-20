@@ -248,6 +248,28 @@ func cancel_focus_by(peer_id: int) -> void:
 			group.erase("focus")
 
 
+## The current leader chooses how FUTURE raid boss bags are distributed.
+## Existing bags freeze their own mode and recipients at the confirmed kill.
+func set_loot_mode(peer_id: int, mode: String) -> Dictionary:
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return {"ok": false, "reason": "not_in_party"}
+	var group: Dictionary = groups[group_id]
+	if int(group["leader"]) != peer_id:
+		return {"ok": false, "reason": "leader_only"}
+	if mode != "free" and mode != "round_robin":
+		return {"ok": false, "reason": "invalid_mode"}
+	group["loot_mode"] = mode
+	return {"ok": true, "mode": mode}
+
+
+func loot_mode_for(peer_id: int) -> String:
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return "free"
+	return str(groups[group_id].get("loot_mode", "free"))
+
+
 func members_of(peer_id: int) -> Array:
 	var group_id: int = int(group_by_peer.get(peer_id, 0))
 	if group_id == 0 or not groups.has(group_id):
@@ -390,7 +412,8 @@ func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 	var group_id: int = group_of(peer_id)
 	if group_id == 0 or not groups.has(group_id):
 		return {"id": 0, "leader": 0, "members": [], "rally": {}, "standard": {},
-			"ready_check": {}, "focus": {}, "invite_from": int(invites.get(peer_id, {}).get("from", 0))}
+			"ready_check": {}, "focus": {}, "loot_mode": "free",
+			"invite_from": int(invites.get(peer_id, {}).get("from", 0))}
 	var group: Dictionary = groups[group_id]
 	var marker: Dictionary = group.get("rally", {})
 	var shared_marker := {}
@@ -426,4 +449,5 @@ func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 	return {"id": group_id, "leader": int(group["leader"]),
 		"members": (group["members"] as Array).duplicate(), "rally": shared_marker,
 		"standard": public_standard, "ready_check": public_ready, "focus": public_focus,
+		"loot_mode": str(group.get("loot_mode", "free")),
 		"invite_from": int(invites.get(peer_id, {}).get("from", 0))}
