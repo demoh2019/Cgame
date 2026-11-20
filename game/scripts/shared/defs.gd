@@ -606,6 +606,11 @@ static func _build_items() -> void:
 		"kind": "bike_frame_repair", "tier": 2, "stack": 5, "weight": 1.5, "value": 75})
 	_add_recipe("bike_frame_patch", "bike_frame_patch", 1,
 		{"bar_2": 2, "scrap": 4, "cloth_2": 2}, "workbench", 6.0)
+	# A permanently craftable bike lamp trades night vision for infected attention.
+	_add_item("bike_dynamo_lamp", {"name": "Trail Bike Dynamo Lantern",
+		"kind": "bike_light", "tier": 2, "weight": 1.0, "value": 90})
+	_add_recipe("bike_dynamo_lamp", "bike_dynamo_lamp", 1,
+		{"bar_2": 1, "scrap": 3, "cloth_2": 1}, "workbench", 7.0)
 	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
 	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
 		"tier": 2, "weight": 12.0, "value": 180})

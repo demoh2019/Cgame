@@ -2180,6 +2180,8 @@ func _process(_delta: float) -> void:
 	if client.inventory.count("salvage_bike") > 0:
 		_info_label.text += "\nBIKE SERVICE: %.0f m | PgUp service on foot" % float(client.you.get("bike_service_meters", 0.0))
 		_info_label.text += "\nBIKE FRAME: %.0f%% | PgDn patch on foot" % float(client.you.get("bike_integrity", 100.0))
+		if client.inventory.count("bike_dynamo_lamp") > 0:
+			_info_label.text += "\nDYNAMO LAMP: %s | light reveals you to infected at night" % ("ON" if bool(client.you.get("bike_lamp_lit", false)) else "OFF")
 	_info_label.text += "\nTRAIL BIKE: %s | F4 mount/dismount | remount %.0fs" % [
 		"RIDING" if bool(client.you.get("mounted", false)) else ("CARRIED" if client.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		float(client.you.get("mount_cooldown", 0.0))]

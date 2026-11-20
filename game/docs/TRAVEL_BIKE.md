@@ -96,6 +96,24 @@ owner-specific condition on the next server tick; a different acquired
 bike therefore starts intact. Losing the bike does not keep a phantom
 rideable item, and integrity never affects on-foot speed.
 
+## Dynamo lantern — light versus stealth
+
+Craft the tradeable Trail Bike Dynamo Lantern at a T2 workbench from one
+T2 bar, three scrap and one T2 cloth. Carry it with your Salvaged Trail Bike
+to illuminate a 13 m forward cone during night travel while mounted.
+It switches off automatically at dawn, on dismount, on death or when lost.
+No new hotkeys or engine modules are required: the same 3D model displays
+the headlight and emissive lens for the rider and nearby players.
+
+Illumination has a cost: idle infected can notice the lit survivor at up to
+23 m, independently of crouch/armor camouflage but still within the normal
+infected pursuit leash. Safe hubs and dead characters are protected by
+existing zombie-target rules. Server inventory ownership, mount state,
+survival and the shared world clock decide both AI light-reveal range and
+public/private light replication; clients never send a light claim.
+Night/day and inventory changes are reflected immediately in next snapshots.
+Owning the lamp does not increase speed or modify normal walking physics.
+
 ## Presentation
 
 The bicycle has a procedural low-poly 3D model: orange metal frame,
