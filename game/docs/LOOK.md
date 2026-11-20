@@ -96,3 +96,5 @@ the server to drop the connection, so it is not the default.
   FOV-based GDScript fallback; full details in `docs/SCREEN_SPACE_ATMOSPHERIC_MOTES.md`.
 
 * Shallow-water light transport and RD renderer correctness: `assets/shaders/water.gdshader` now adds subtle, physically inspired underwater solar scattering using the existing depth transmission and real cached sun direction. Native Godot `servers/rendering/renderer_rd/storage_rd/mesh_storage.cpp` fixes re-showing dirty hidden MultiMesh instances on `visible_instance_count = -1`. See `docs/ENGINE_MULTIMESH_WATER_SCATTERING.md`.
+
+* Ocean sun path and efficient weather fog: `assets/shaders/water.gdshader` produces subtle golden reflections from the existing animated wave normals using sky-cached sunlight, premium Forward+ only. `scripts/client/cinematic_fog.gd` sends a single fog transaction to our native `Environment.configure_weather_fog` when available; stock Godot falls back to the same property changes. See `docs/ATOMIC_WEATHER_FOG_OCEAN_GLITTER.md`.
