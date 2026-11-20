@@ -111,7 +111,8 @@ func run(t) -> void:
 		"unchanged world cell retains exact particle placements")
 	field.update_view(Vector3(45, 0, 3), "swamp", 0.0, 0.0,
 		Vector2.ZERO, 3, 0.25)
-	t.eq(field._generated_tiles, 18, "crossing a tile updates GPU instance positions once")
+	t.eq(field._generated_tiles, 12,
+		"crossing one tile samples only the three previously unseen world tiles")
 	t.eq(field._batch.instance_count, AmbientMotes.MAX_INSTANCES,
 		"Ultra never resizes or restarts the GPU mesh")
 	t.eq(field._batch.visible_instance_count, 252,
@@ -120,6 +121,10 @@ func run(t) -> void:
 		Vector2.ZERO, 3, 0.25)
 	t.eq(field._batch.get_instance_transform(0), anchor,
 		"returning to an old location reproduces identical positions")
+	t.eq(field._generated_tiles, 12,
+		"backtracking to cached tiles requires no new heightmap queries")
+	t.check(field._tile_cache.size() <= AmbientMotes.TILE_CACHE_LIMIT,
+		"CPU cache remains bounded while preserving recent tiles")
 	field.update_view(Vector3(2, 0, 2), "plains", 0.0, 0.0,
 		Vector2.ZERO, 3, 0.25)
 	t.check(not field._renderer.visible,
