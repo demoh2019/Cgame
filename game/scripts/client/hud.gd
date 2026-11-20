@@ -648,6 +648,12 @@ func _build() -> void:
 	parry_button.tooltip_text = "Hold real melee weapon; 20 stamina, 0.45s timing window, 4s cooldown. Front infected melee only."
 	parry_button.pressed.connect(func() -> void: client.parry())
 	inventory_box.add_child(parry_button)
+	var finisher_button := Button.new()
+	finisher_button.name = "StaggerFinisher"
+	finisher_button.text = "Finish staggered infected (Shift+G)"
+	finisher_button.tooltip_text = "Real melee weapon, 24 combat energy, stunned enemy in front, 6s cooldown."
+	finisher_button.pressed.connect(func() -> void: client.stagger_finisher())
+	inventory_box.add_child(finisher_button)
 	var fortify_button := Button.new()
 	fortify_button.name = "FortifyOutpost"
 	fortify_button.text = "Fortify controlled outpost (4m, wood + stone)"
@@ -1273,6 +1279,15 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "stagger_finisher":
+		if bool(data.get("ok", false)):
+			say("Stagger finisher: %d damage%s, %.0fs cooldown." % [
+				roundi(float(data.get("damage", 0.0))),
+				" (infected defeated!)" if bool(data.get("killed", false)) else "",
+				float(data.get("cooldown", 6.0))])
+		else:
+			say("Stagger finisher: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "use" and data.has("tire_grip_seconds"):
 		say("Off-road tire grips fitted: %.0fs of improved traction." % float(data["tire_grip_seconds"]))
 		return
@@ -1787,6 +1802,9 @@ func _process(_delta: float) -> void:
 	var grip_remaining: float = float(client.you.get("tire_grip_seconds", 0.0))
 	if grip_remaining > 0.0:
 		_info_label.text += "\nOFF-ROAD TIRES: %.0fs | less mud/sand/roots/rock drag" % grip_remaining
+	var finisher_left: float = float(client.you.get("finisher_cooldown", 0.0))
+	if finisher_left > 0.0:
+		_info_label.text += "\nFINISHER: %.1fs cooldown | Shift+G vs stunned infected" % finisher_left
 	var quiet_left: float = float(client.you.get("chain_wrap_seconds", 0.0))
 	if quiet_left > 0.0:
 		_info_label.text += "\nQUIET CHAIN: %.0fs | Bike noise 9m" % quiet_left
