@@ -345,9 +345,11 @@ func _refresh_hud() -> void:
         return
     var quality: String = "CINEMATIC" if high_quality else "PERFORMANCE"
     var scale: float = get_viewport().scaling_3d_scale
+    var gpu_ms: float = RenderingServer.viewport_get_measured_render_time_gpu(get_viewport().get_viewport_rid())
+    var gpu_text: String = "%.2f ms" % gpu_ms if gpu_ms > 0.0 else "N/A"
     hud.text = "AURORA FOREST  |  Cgame / Godot 4.8\n" \
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
-        + "3D scale: %.2f    FPS: %d" % [scale, Engine.get_frames_per_second()]
+        + "3D scale: %.2f    FPS: %d    GPU: %s" % [scale, Engine.get_frames_per_second(), gpu_text]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
