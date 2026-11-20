@@ -111,6 +111,7 @@ void WorldStreamer::_forget_dead_chunks() {
 	}
 	for (const Vector3i &cell : dead) {
 		loaded.erase(cell);
+		pending_visual_details.erase(cell);
 		emit_signal(SNAME("chunk_unloaded"), cell);
 	}
 }
@@ -122,6 +123,7 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell) {
 	}
 	Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(it->value));
 	loaded.remove(it);
+	pending_visual_details.erase(p_cell);
 	if (chunk) {
 		if (chunk->get_parent()) {
 			chunk->get_parent()->remove_child(chunk);
@@ -147,6 +149,12 @@ bool WorldStreamer::_adopt_chunk(const Vector3i &p_cell, Node *p_chunk) {
 	Node *parent = _get_parent_for_chunks();
 	parent->add_child(p_chunk);
 	loaded[p_cell] = p_chunk->get_instance_id();
+	// Track optional visual continuation without delaying authoritative world
+	// ownership or adding extra load requests. Ordinary chunks remain ready.
+	if (p_chunk->has_method(SNAME("has_pending_visual_detail")) &&
+			bool(p_chunk->call(SNAME("has_pending_visual_detail")))) {
+		pending_visual_details.insert(p_cell);
+	}
 	emit_signal(SNAME("chunk_loaded"), p_cell, p_chunk);
 	return true;
 }
@@ -383,6 +391,7 @@ void WorldStreamer::_reset_state() {
 	missing.clear();
 	failed.clear();
 	generate_queue.clear();
+	pending_visual_details.clear();
 	last_queued_view_direction = Vector3();
 	truncated_warned = false;
 	time_since_update = 1e9;
@@ -402,6 +411,7 @@ void WorldStreamer::_notification(int p_what) {
 			if (chunk_parent.is_empty()) {
 				// Chunks are our children and go away with us; just forget them.
 				loaded.clear();
+				pending_visual_details.clear();
 			} else {
 				_reset_state();
 			}
@@ -440,6 +450,14 @@ void WorldStreamer::_notification(int p_what) {
 			_run_generator_queue(frame_budget, frame_started_usec);
 		} break;
 	}
+}
+
+void WorldStreamer::mark_visual_details_ready(const Vector3i &p_cell) {
+	if (!pending_visual_details.has(p_cell)) {
+		return;
+	}
+	pending_visual_details.erase(p_cell);
+	emit_signal(SNAME("chunk_visual_details_ready"), p_cell);
 }
 
 void WorldStreamer::set_focus(const NodePath &p_focus) {
@@ -664,6 +682,8 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_loaded_count"), &WorldStreamer::get_loaded_count);
 	ClassDB::bind_method(D_METHOD("get_pending_count"), &WorldStreamer::get_pending_count);
 	ClassDB::bind_method(D_METHOD("get_queued_generation_count"), &WorldStreamer::get_queued_generation_count);
+	ClassDB::bind_method(D_METHOD("get_pending_visual_details_count"), &WorldStreamer::get_pending_visual_details_count);
+	ClassDB::bind_method(D_METHOD("mark_visual_details_ready", "cell"), &WorldStreamer::mark_visual_details_ready);
 	ClassDB::bind_method(D_METHOD("refresh", "retry"), &WorldStreamer::refresh, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("unload_all"), &WorldStreamer::unload_all);
 
@@ -689,6 +709,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "update_interval", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), "set_update_interval", "get_update_interval");
 
 	ADD_SIGNAL(MethodInfo("chunk_loaded", PropertyInfo(Variant::VECTOR3I, "cell"), PropertyInfo(Variant::OBJECT, "chunk", PROPERTY_HINT_RESOURCE_TYPE, "Node")));
+	ADD_SIGNAL(MethodInfo("chunk_visual_details_ready", PropertyInfo(Variant::VECTOR3I, "cell")));
 	ADD_SIGNAL(MethodInfo("chunk_unloaded", PropertyInfo(Variant::VECTOR3I, "cell")));
 	ADD_SIGNAL(MethodInfo("chunk_load_failed", PropertyInfo(Variant::VECTOR3I, "cell"), PropertyInfo(Variant::STRING, "path")));
 
