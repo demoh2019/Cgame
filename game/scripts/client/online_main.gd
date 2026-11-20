@@ -1323,6 +1323,7 @@ func _update_time_of_day(delta: float) -> void:
 		_visual_weather_wind = Weather.wind_at(client.world, here.x, here.z, clock)
 		_visual_biome = client.world.biome_at(here.x, here.z)
 		_wind_sample_left = 0.25
+	atmosphere.underground_view = underground
 	if underground:
 		# Below ground: no sky, no weather; the torches of the rooms and the light you carry.
 		atmosphere.update(0.0, -0.3, WorldCycle.phase(clock), false, delta, Vector2.ZERO)

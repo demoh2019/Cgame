@@ -16,10 +16,11 @@ static func target(daylight: float, sun_height: float, storm: float) -> Vector2:
 	return Vector2(clampf(temperature, -1.0, 1.0), clampf(tint, -1.0, 1.0))
 
 
-static func apply(env: Environment, daylight: float, sun_height: float, storm: float) -> void:
+static func apply(env: Environment, daylight: float, sun_height: float, storm: float, neutral: bool = false) -> void:
 	if env == null or not ("lens_white_temperature" in env):
 		return # Stock Godot or an engine build without native white balance.
-	var wb: Vector2 = target(daylight, sun_height, storm)
+	# Underground the torches set the mood: no moonlight cast, keep neutral.
+	var wb: Vector2 = Vector2.ZERO if neutral else target(daylight, sun_height, storm)
 	if absf(float(env.get("lens_white_temperature")) - wb.x) > 0.01:
 		env.set("lens_white_temperature", wb.x)
 	if absf(float(env.get("lens_white_tint")) - wb.y) > 0.01:

@@ -65,6 +65,7 @@ var _bloom_method := "gl_compatibility"
 var _visual_biome_settings: Dictionary = {}
 var light_level := 1.0 # The daylight of the last update, 0 at night and 1 at noon.
 var storm := 0.0 # 0..1, eased toward the target so the weather fades in and out.
+var underground_view := false # Set by the client: dungeons keep a neutral white balance.
 var _lightning_elapsed := LightningFlash.DURATION
 var _lightning_weight := 0.0
 var _lightning_quality := 1
@@ -315,7 +316,7 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	# Run the ACES-grade after atmospheric weather/fog, without replacing fog state.
 	CinematicColorGrade.apply(environment, daylight, sun_height, storm)
 	# Native white balance (engine fork): warm golden hour, cool moonlight.
-	GraphicsWhiteBalance.apply(environment, daylight, sun_height, storm)
+	GraphicsWhiteBalance.apply(environment, daylight, sun_height, storm, underground_view)
 	_bloom_elapsed += maxf(delta, 0.0)
 	if _bloom_elapsed >= BLOOM_INTERVAL:
 		_bloom_elapsed = fmod(_bloom_elapsed, BLOOM_INTERVAL)
