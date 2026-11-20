@@ -6,6 +6,7 @@ extends RefCounted
 const SETTINGS_PATH := "user://albion_after_graphics.cfg"
 const NAMES := ["Performance", "Balanced", "High", "Ultra"]
 const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
+const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
 static var _level: int = 1
@@ -111,6 +112,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 			env.glow_enabled = p["glow"]
 			env.ssao_enabled = bool(p["ssao"]) and method == "forward_plus"
 			env.ssil_enabled = bool(p["ssil"]) and method == "forward_plus"
+		# Keep the cinematic shadow/fog budget tied to the active renderer,
+		# not merely to the requested quality preset.
+		GraphicsLighting.apply(sun, env, _level, method)
 	if post_material != null:
 		post_material.set_shader_parameter("blur_quality", p["blur_quality"])
 		post_material.set_shader_parameter("blur_radius", p["blur_radius"])
