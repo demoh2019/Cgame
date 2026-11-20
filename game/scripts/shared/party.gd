@@ -176,6 +176,13 @@ func answer_ready_check(peer_id: int, is_ready: bool, now: float) -> Dictionary:
 	return {"ok": true, "ready": is_ready, "result": str(check["result"])}
 
 
+## Death immediately revokes raid readiness for the entire current group.
+func cancel_ready_check_for(peer_id: int) -> void:
+	var group_id: int = group_of(peer_id)
+	if group_id != 0 and groups.has(group_id):
+		groups[group_id].erase("ready_check")
+
+
 func members_of(peer_id: int) -> Array:
 	var group_id: int = int(group_by_peer.get(peer_id, 0))
 	if group_id == 0 or not groups.has(group_id):
