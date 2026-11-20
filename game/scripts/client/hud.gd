@@ -1283,6 +1283,9 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "attack" and bool(data.get("riposte", false)):
+		say("RIPOSTE! Perfect parry converted into a powerful counterstrike.")
+		return
 	if kind == "stagger_finisher":
 		if bool(data.get("ok", false)):
 			say("Stagger finisher: %d damage%s, %.0fs cooldown." % [
@@ -1756,6 +1759,9 @@ func _process(_delta: float) -> void:
 		var seconds: float = maxf(0.0, float(cone.get("until", client.server_time)) - client.server_time)
 		_info_label.text += "\nRAID CLEAVE %s %.1fs — sidestep now!" % [
 			"INCOMING" if threatened else "WARNING", seconds]
+	var counter_time: float = float(client.you.get("riposte_seconds", 0.0))
+	if counter_time > 0.0:
+		_info_label.text += "\nRIPOSTE %.1fs — strike the infected you parried!" % counter_time
 	var parry_ready: float = float(client.you.get("parry_window", 0.0))
 	if parry_ready > 0.0:
 		_info_label.text += "\nPARRY ACTIVE %.2fs — face incoming infected!" % parry_ready

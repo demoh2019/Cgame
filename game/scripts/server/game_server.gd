@@ -56,6 +56,7 @@ const BikeService = preload("res://scripts/shared/bike_service.gd")
 const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
+const ParryRiposte = preload("res://scripts/shared/parry_riposte.gd")
 const StaggerFinisher = preload("res://scripts/shared/stagger_finisher.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
@@ -185,6 +186,9 @@ class Player:
 	var dodge_immunity: float = 0.0
 	var parry_cooldown: float = 0.0 # Server-owned timed melee defense.
 	var parry_window: float = 0.0 # First valid infected melee consumes it.
+	var riposte_seconds: float = 0.0 # Earned, private, short-lived PvE counter.
+	var riposte_target_id: int = -1 # Exact attacking infected.
+	var riposte_weapon: String = "" # Equipped weapon at parry impact.
 	var finisher_cooldown: float = 0.0 # Server-owned, nonpersistent PvE execution timer.
 	var combat_energy: float = 100.0
 	var noise_radius: float = 0.0
@@ -685,6 +689,7 @@ func _spawn_player(player: Player) -> void:
 	player.dodge_immunity = 0.0
 	player.parry_cooldown = 0.0
 	player.parry_window = 0.0
+	ParryRiposte.clear(player)
 	player.finisher_cooldown = 0.0
 	player.party_aid_timer = 0.0
 	player.feast_timer = 0.0
@@ -3190,6 +3195,13 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	if crit:
 		damage *= 1.5 + player.skills.bonus("crit_damage")
 	var hit := _find_hit(player, origin, direction, reach, kind == "ranged")
+	# The FIRST legal attack spends a server-earned counter, including misses.
+	var riposte: bool = false
+	if player.riposte_seconds > 0.0:
+		if not is_ranged and not hit.is_empty() and str(hit["kind"]) == "zombie":
+			riposte = ParryRiposte.can_strike(player,
+				zombies.get(int(hit["id"])), weapon)
+		ParryRiposte.clear(player)
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": kind == "ranged", "x": player.position.x, "z": player.position.z})
 	if hit.is_empty():
 		var cover_hit: bool = is_ranged and _damage_ranged_cover(player,
@@ -3209,9 +3221,17 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 			damage *= factor
 			events.append({"type": "stealth_ambush", "peer": peer_id,
 				"zombie": int(hit["id"]), "multiplier": factor})
+	# Prevent multiplying reactive damage with random crits or stealth openers.
+	if riposte and not ambush:
+		if crit:
+			damage /= 1.5 + player.skills.bonus("crit_damage")
+			crit = false
+		damage *= ParryRiposte.DAMAGE_FACTOR
+	else:
+		riposte = false
 	_damage_target(player, hit, damage, "ranged" if is_ranged else "melee")
 	return {"ok": true, "hit": true, "target": hit["kind"],
-		"crit": crit, "ambush": ambush}
+		"crit": crit, "ambush": ambush, "riposte": riposte}
 
 
 ## Party frontline role: no client-authored targets, aggro, radius or damage.
@@ -3484,6 +3504,7 @@ func cmd_parry(peer_id: int) -> Dictionary:
 	player.survival.stamina_recovery_delay = Defs.STAMINA_RECOVERY_DELAY
 	player.parry_cooldown = MeleeParry.COOLDOWN_SECONDS
 	player.parry_window = MeleeParry.WINDOW_SECONDS
+	ParryRiposte.clear(player)
 	player.attack_timer = maxf(player.attack_timer, MeleeParry.ATTACK_LOCK)
 	player.action = {}
 	player.dirty_character = true
@@ -3520,6 +3541,7 @@ func cmd_dodge(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	player.dodge_timer = Evasion.COOLDOWN
 	player.dodge_immunity = Evasion.INVULNERABLE_TO_INFECTED
 	player.parry_window = 0.0 # An actual dodge cancels the remaining parry.
+	ParryRiposte.clear(player)
 	player.attack_timer = maxf(player.attack_timer, Evasion.ATTACK_LOCK)
 	player.action = {}
 	player.noise_radius = Defs.SPRINT_NOISE_RADIUS
@@ -4087,6 +4109,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.action = {}
 	victim.ruin_survey = {} # Dead scouts cannot retain private map beacons.
 	victim.dodge_immunity = 0.0
+	ParryRiposte.clear(victim)
 	victim.guardian_brace = 0.0
 	victim.spore_filter_seconds = 0.0
 	victim.chain_wrap_seconds = 0.0
@@ -4283,6 +4306,7 @@ func _tick_players(delta: float) -> void:
 		player.finisher_cooldown = maxf(0.0,
 			player.finisher_cooldown - maxf(0.0, delta))
 		player.parry_window = maxf(0.0, player.parry_window - maxf(0.0, delta))
+		ParryRiposte.tick(player, delta)
 		player.noise_timer = maxf(player.noise_timer - delta, 0.0)
 		if player.noise_timer <= 0.0:
 			player.noise_radius = 0.0
@@ -5012,6 +5036,7 @@ func _tick_zombies(delta: float) -> void:
 				if parried:
 					victim.parry_window = 0.0
 					zombie.attack_timer = maxf(zombie.attack_timer, MeleeParry.STAGGER_SECONDS)
+					ParryRiposte.arm(victim, zombie)
 					events.append({"type": "parried", "peer": victim.id, "zombie": zombie.id})
 				var armor_id: String = victim.inventory.armor
 				var armor_owned: bool = armor_id != "" and victim.inventory.count(armor_id) > 0
@@ -5598,6 +5623,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"guardian_brace": player.guardian_brace,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"parry_cooldown": player.parry_cooldown, "parry_window": player.parry_window,
+			"riposte_seconds": player.riposte_seconds,
 			"finisher_cooldown": player.finisher_cooldown,
 			"rest_cooldown": player.rest_cooldown,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
