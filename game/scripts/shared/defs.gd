@@ -349,6 +349,12 @@ static func _build_items() -> void:
 	_add_recipe("ammo_9mm", "ammo_9mm", 12,
 		{"scrap": 2, "bar_2": 1}, "workbench", 4.0)
 	_add_item("scrap", {"name": "Scrap Metal", "kind": "resource", "tier": 2, "stack": 100, "value": 3})
+	# Reusable scrap economy: one consumable pick unlocks a sealed compartment
+	# only when its owner searches an actual red/black ruin crate.
+	_add_item("lockpick_kit", {"name": "Improvised Lockpick Kit", "kind": "material",
+		"tier": 2, "stack": 10, "value": 24, "weight": 0.25})
+	_add_recipe("lockpick_kit", "lockpick_kit", 1,
+		{"scrap": 2, "bar_1": 1, "fiber_1": 2}, "workbench", 4.0)
 	# Crafted noise maker: brief diversion for stealth runs, not free aggro.
 	# A tactical consumable: gathering + scavenged scrap become a squad buff.
 	_add_item("field_standard", {"name": "Expedition Rally Standard",
