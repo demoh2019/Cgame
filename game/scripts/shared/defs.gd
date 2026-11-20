@@ -350,6 +350,11 @@ static func _build_items() -> void:
 		{"scrap": 2, "bar_2": 1}, "workbench", 4.0)
 	_add_item("scrap", {"name": "Scrap Metal", "kind": "resource", "tier": 2, "stack": 100, "value": 3})
 	# Crafted noise maker: brief diversion for stealth runs, not free aggro.
+	# A tactical consumable: gathering + scavenged scrap become a squad buff.
+	_add_item("field_standard", {"name": "Expedition Rally Standard",
+		"kind": "standard", "tier": 1, "stack": 3, "weight": 2.0, "value": 55})
+	_add_recipe("field_standard", "field_standard", 1,
+		{"plank_1": 2, "cloth_1": 2, "scrap": 1}, "workbench", 5.0)
 	_add_item("noise_decoy", {"name": "Clattering Decoy", "kind": "decoy",
 		"tier": 1, "stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("noise_decoy", "noise_decoy", 1,
