@@ -82,6 +82,7 @@ const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const GatheringNoise = preload("res://scripts/shared/gathering_noise.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
+const SurveySignal = preload("res://scripts/shared/survey_signal.gd")
 const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
@@ -3266,6 +3267,32 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"survey_signal":
+			if item_id != SurveySignal.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "survey_signal": true}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					player.skill_timer > 0.0 or not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "survey_signal": true}
+			var discovered: Dictionary = SurveySignal.candidate(
+				player, parties, depleted, time)
+			if not bool(discovered.get("ok", false)):
+				return {"ok": false, "reason": str(discovered.get("reason", "invalid_survey")),
+					"survey_signal": true}
+			# Charge only a valid group broadcast. Failed party validation does
+			# not spend the crafted kit or create a free shared map marker.
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "survey_signal": true}
+			var broadcast: Dictionary = SurveySignal.broadcast(
+				parties, player.id, discovered, time)
+			if not bool(broadcast.get("ok", false)):
+				player.inventory.add(item_id, 1)
+				return {"ok": false, "reason": str(broadcast.get("reason", "invalid_party")),
+					"survey_signal": true}
+			player.dirty_inventory = true
+			player.dirty_character = true
+			return {"ok": true, "survey_signal": true,
+				"tier": int(broadcast["tier"]), "material": str(broadcast["material"]),
+				"seconds": float(broadcast["seconds"])}
 		"bike_light":
 			if item_id != BikeLantern.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -5604,6 +5631,7 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	player.dirty_character = true
 	player.action = {}
 	depleted[int(node["id"])] = time + float(info["respawn"])
+	SurveySignal.clear_depleted(parties, int(node["id"]))
 	events.append({"type": "gathered", "peer": player.id, "item": item_id,
 		"amount": amount - left, "node": node["id"],
 		"herbs": herbs_added, "harvest_noise": harvest_noise,
