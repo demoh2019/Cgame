@@ -77,8 +77,25 @@ class VisualQualityPackageTests(unittest.TestCase):
         self.assertIn('_toggle_hour()', source)
         self.assertIn('_toggle_cycle()', source)
 
+    def test_foliage_culling_chunking_and_profiles(self):
+        foliage = (ROOT / 'addons/visual_quality/foliage_chunks.gd').read_text()
+        for feature in ('MultiMesh.new()', 'MultiMeshInstance3D.new()',
+                        'custom_aabb', 'visibility_range_end', 'visible_instance_count',
+                        'sample_cell_positions', 'cell_seed', 'set_quality',
+                        'safe_count * 5', 'RandomNumberGenerator.new()'):
+            self.assertIn(feature, foliage)
+        self.assertIn('ChunkedFoliage.new()', (ROOT / 'demo.gd').read_text())
+        self.assertIn('foliage.set_quality(profile)', (ROOT / 'demo.gd').read_text())
+
+    def test_demo_exploration_camera(self):
+        camera = (ROOT / 'addons/visual_quality/fly_camera.gd').read_text()
+        self.assertIn('extends Camera3D', camera)
+        self.assertIn('MOUSE_BUTTON_RIGHT', camera)
+        self.assertIn('direction.normalized()', camera)
+        self.assertIn('var camera: Camera3D = FlyCamera.new()', (ROOT / 'demo.gd').read_text())
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
