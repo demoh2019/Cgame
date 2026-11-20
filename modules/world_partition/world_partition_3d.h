@@ -45,6 +45,8 @@ class WorldPartition3D : public Node3D {
 	real_t cell_size = 128.0;
 	int load_radius = 1;
 	int unload_radius = 2;
+	Vector2i prefetch_direction;
+	int prefetch_distance = 0;
 	int max_new_requests_per_frame = 2;
 	int max_instances_per_frame = 2;
 	real_t max_instantiation_time_ms = 0.0;
@@ -81,6 +83,12 @@ public:
 
 	void set_unload_radius(int p_radius);
 	int get_unload_radius() const;
+
+	void set_prefetch_direction(const Vector2i &p_direction);
+	Vector2i get_prefetch_direction() const;
+
+	void set_prefetch_distance(int p_distance);
+	int get_prefetch_distance() const;
 
 	void set_max_new_requests_per_frame(int p_count);
 	int get_max_new_requests_per_frame() const;
