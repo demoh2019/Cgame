@@ -166,6 +166,72 @@ void cells_in_radius(const Vector3 &p_position, real_t p_radius, real_t p_cell_s
 	}
 }
 
+// Limit prediction to the streaming cell size: an outdated velocity hint
+// cannot pull the queue far past nearby terrain or increase resident memory.
+void prioritize_cells_for_motion(LocalVector<Vector3i> &r_cells, const Vector3 &p_focus,
+		const Vector3 &p_velocity, real_t p_lookahead_seconds, real_t p_max_prediction,
+		real_t p_cell_size, Axes p_axes) {
+	if (r_cells.size() < 2 || !p_focus.is_finite() || !p_velocity.is_finite() ||
+			!Math::is_finite(p_lookahead_seconds) || !(p_lookahead_seconds > 0.0) ||
+			!Math::is_finite(p_max_prediction) || !(p_max_prediction > 0.0) ||
+			!Math::is_finite(p_cell_size) || !(p_cell_size > 0.0)) {
+		return;
+	}
+	Vector3 prediction = p_velocity * MIN(p_lookahead_seconds, real_t(4.0));
+	if (p_axes == AXES_XZ) {
+		prediction.y = 0.0;
+	} else if (p_axes == AXES_XY) {
+		prediction.z = 0.0;
+	}
+	if (!prediction.is_finite() || prediction.length_squared() < real_t(0.01)) {
+		return;
+	}
+	const real_t ahead = MIN(p_max_prediction, p_cell_size);
+	if (prediction.length_squared() > ahead * ahead) {
+		prediction = prediction.normalized() * ahead;
+	}
+	const Vector3 future = p_focus + prediction;
+	if (!future.is_finite()) {
+		return;
+	}
+	const Vector3i focus_cell = world_to_cell(p_focus, p_cell_size, p_axes);
+	struct Priority {
+		Vector3i cell;
+		real_t score;
+		real_t now;
+		bool operator<(const Priority &p_other) const {
+			if (score != p_other.score) {
+				return score < p_other.score;
+			}
+			if (now != p_other.now) {
+				return now < p_other.now;
+			}
+			if (cell.x != p_other.cell.x) {
+				return cell.x < p_other.cell.x;
+			}
+			if (cell.y != p_other.cell.y) {
+				return cell.y < p_other.cell.y;
+			}
+			return cell.z < p_other.cell.z;
+		}
+	};
+	LocalVector<Priority> sorted;
+	sorted.reserve(r_cells.size());
+	for (const Vector3i &cell : r_cells) {
+		const real_t now = distance_to_cell(p_focus, cell, p_cell_size, p_axes);
+		const real_t later = distance_to_cell(future, cell, p_cell_size, p_axes);
+		// Keep the focus cell first. Other cells trade a small amount of
+		// nearest-first priority for content ahead of actual movement.
+		const real_t score = cell == focus_cell ? real_t(-1.0) : now * real_t(0.65) + later * real_t(0.35);
+		sorted.push_back({ cell, score, now });
+	}
+	SortArray<Priority> sorter;
+	sorter.sort(sorted.ptr(), sorted.size());
+	for (uint32_t i = 0; i < sorted.size(); i++) {
+		r_cells[i] = sorted[i].cell;
+	}
+}
+
 void cells_to_unload(const Vector3 &p_position, real_t p_unload_radius, real_t p_cell_size, Axes p_axes, const HashSet<Vector3i> &p_loaded, LocalVector<Vector3i> &r_cells) {
 	r_cells.clear();
 	ERR_FAIL_COND(!(p_cell_size > 0.0));
