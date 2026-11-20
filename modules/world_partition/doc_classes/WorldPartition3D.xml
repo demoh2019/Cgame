@@ -4,8 +4,9 @@
 		Streams 3D scene cells around a moving observer.
 	</brief_description>
 	<description>
-		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
+		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around a primary observer node and optional additional observers. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
+		Additional observers in [member additional_observer_paths] are useful for split-screen cameras, co-op players, cinematic cameras and manual prefetch nodes. Cells are kept when in range of any valid observer, while all observers share the same per-frame request and instance budgets. The primary observer takes priority, followed by additional observers in array order.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
@@ -32,6 +33,12 @@
 			<return type="void" />
 			<description>
 				Removes all registered cells and unloads instantiated cells.
+			</description>
+		</method>
+		<method name="get_additional_observer_paths" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns a copy of the additional observer paths; modifying this array does not change the streamer configuration.
 			</description>
 		</method>
 		<method name="get_cell_scene" qualifiers="const">
@@ -88,6 +95,13 @@
 				Unregisters [param cell] and unloads its existing instance.
 			</description>
 		</method>
+		<method name="set_additional_observer_paths">
+			<return type="void" />
+			<param index="0" name="paths" type="Array" />
+			<description>
+				Registers up to 16 extra [NodePath] observer references. Empty, duplicate, and non-[NodePath] entries are discarded. The observer paths are resolved relative to this node, and must point to living [Node3D] instances to affect streaming.
+			</description>
+		</method>
 		<method name="set_cell_scene">
 			<return type="void" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -104,6 +118,9 @@
 		</method>
 	</methods>
 	<members>
+		<member name="additional_observer_paths" type="Array" setter="set_additional_observer_paths" getter="get_additional_observer_paths" default="[]">
+			Additional [NodePath] streaming sources (max 16). Their load and unload neighborhoods are combined with [member observer_path], but resource and instantiation limits remain global to this node.
+		</member>
 		<member name="cell_scenes" type="Dictionary" setter="set_cell_scenes" getter="get_cell_scenes" default="{}">
 			Dictionary mapping [Vector2i] coordinates to [String] scene resource paths. Invalid keys and values are discarded.
 		</member>

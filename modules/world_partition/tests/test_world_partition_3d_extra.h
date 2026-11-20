@@ -45,6 +45,33 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Additional observers are normalized and getter is defensive") {
+	WorldPartition3D world;
+	Array input;
+	input.push_back(NodePath("../CameraA"));
+	input.push_back(NodePath("../CameraA"));
+	input.push_back(NodePath());
+	input.push_back(String("../StringIsNotNodePath"));
+	input.push_back(NodePath("../CameraB"));
+	world.set_additional_observer_paths(input);
+	const Array saved = world.get_additional_observer_paths();
+	REQUIRE(saved.size() == 2);
+	CHECK(saved[0] == NodePath("../CameraA"));
+	CHECK(saved[1] == NodePath("../CameraB"));
+	Array copy = saved;
+	copy.clear();
+	CHECK(world.get_additional_observer_paths().size() == 2);
+	Array too_many;
+	for (int i = 0; i < 17; i++) {
+		too_many.push_back(NodePath("../Camera" + itos(i)));
+	}
+	ERR_PRINT_OFF;
+	world.set_additional_observer_paths(too_many);
+	ERR_PRINT_ON;
+	CHECK(world.get_additional_observer_paths().size() == 2);
+}
+
+
 struct WorldFixture {
 	Node3D *observer = nullptr;
 	WorldPartition3D *world = nullptr;
@@ -521,6 +548,57 @@ TEST_CASE("[SceneTree][WorldPartition3D] Failed resources leave no user load tok
 		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
 	}
 	CHECK(ResourceLoader::load_threaded_get_status(missing_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Two observers stream and retain distant cells") {
+	const String path = make_cell_scene("two_sources");
+	{
+		WorldFixture fixture;
+		fixture.world->set_unload_radius(0);
+		Node3D *secondary = memnew(Node3D);
+		secondary->set_name("SecondaryStreamingObserver");
+		SceneTree::get_singleton()->get_root()->add_child(secondary);
+		secondary->set_position(Vector3(64, 0, 0));
+		Array additional;
+		additional.push_back(fixture.world->get_path_to(secondary));
+		fixture.world->set_additional_observer_paths(additional);
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->set_cell_scene(Vector2i(4, 0), path);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(4, 0)));
+		CHECK(fixture.world->get_loaded_cell_count() == 2);
+		fixture.observer->set_position(Vector3(128, 0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK(fixture.world->is_cell_loaded(Vector2i(4, 0)));
+		fixture.world->set_additional_observer_paths(Array());
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(4, 0)));
+		SceneTree::get_singleton()->get_root()->remove_child(secondary);
+		memdelete(secondary);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Additional observer works without primary observer") {
+	const String path = make_cell_scene("secondary_only");
+	{
+		WorldFixture fixture;
+		fixture.world->set_observer_path(NodePath());
+		Node3D *secondary = memnew(Node3D);
+		secondary->set_name("SecondaryOnlyObserver");
+		SceneTree::get_singleton()->get_root()->add_child(secondary);
+		secondary->set_position(Vector3(-32, 0, 16));
+		Array additional;
+		additional.push_back(fixture.world->get_path_to(secondary));
+		fixture.world->set_additional_observer_paths(additional);
+		fixture.world->set_cell_scene(Vector2i(-2, 1), path);
+		CHECK(wait_for_cell(fixture.world, Vector2i(-2, 1)));
+		CHECK(fixture.world->is_cell_loaded(Vector2i(-2, 1)));
+		SceneTree::get_singleton()->get_root()->remove_child(secondary);
+		memdelete(secondary);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
 TEST_CASE("[SceneTree][WorldPartition3D] No observer prevents resource requests") {

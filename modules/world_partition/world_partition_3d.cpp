@@ -45,6 +45,29 @@ bool WorldPartition3D::_within_radius(const Vector2i &p_cell, const Vector2i &p_
 	return dx >= -p_radius && dx <= p_radius && dz >= -p_radius && dz <= p_radius;
 }
 
+void WorldPartition3D::_append_source_center(const NodePath &p_path, Vector<Vector2i> &r_centers) const {
+	if (p_path.is_empty()) {
+		return;
+	}
+	Node3D *observer = Object::cast_to<Node3D>(get_node_or_null(p_path));
+	if (observer == nullptr) {
+		return;
+	}
+	const Vector2i center = local_position_to_cell(to_local(observer->get_global_position()));
+	if (!r_centers.has(center)) {
+		r_centers.push_back(center);
+	}
+}
+
+bool WorldPartition3D::_within_any_radius(const Vector2i &p_cell, const Vector<Vector2i> &p_centers, int p_radius) const {
+	for (const Vector2i &center : p_centers) {
+		if (_within_radius(p_cell, center, p_radius)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 String WorldPartition3D::_get_scene_path(const Vector2i &p_cell) const {
 	if (!cell_scenes.has(p_cell)) {
 		return String();
@@ -265,6 +288,25 @@ NodePath WorldPartition3D::get_observer_path() const {
 	return observer_path;
 }
 
+void WorldPartition3D::set_additional_observer_paths(const Array &p_paths) {
+	ERR_FAIL_COND_MSG(p_paths.size() > 16, "WorldPartition3D supports at most 16 additional observer paths.");
+	Array clean;
+	for (int i = 0; i < p_paths.size(); i++) {
+		if (p_paths[i].get_type() != Variant::NODE_PATH) {
+			continue;
+		}
+		const NodePath path = p_paths[i];
+		if (!path.is_empty() && !clean.has(path)) {
+			clean.push_back(path);
+		}
+	}
+	additional_observer_paths = clean;
+}
+
+Array WorldPartition3D::get_additional_observer_paths() const {
+	return additional_observer_paths.duplicate();
+}
+
 void WorldPartition3D::set_cell_scenes(const Dictionary &p_cells) {
 	Dictionary clean;
 	const Array keys = p_cells.keys();
@@ -356,23 +398,32 @@ Array WorldPartition3D::get_cells_in_radius(const Vector2i &p_center, int p_radi
 
 void WorldPartition3D::update_streaming() {
 	_poll_requests();
-	if (!streaming_enabled || !is_inside_tree() || observer_path.is_empty()) {
+	if (!streaming_enabled || !is_inside_tree()) {
 		_purge_unused_ready_scenes();
 		_refresh_processing();
 		return;
 	}
 
-	Node3D *observer = Object::cast_to<Node3D>(get_node_or_null(observer_path));
-	if (observer == nullptr) {
+	// The legacy primary source is first, followed by optional camera, co-op or
+	// prefetch sources. Multiple observers within one cell share a center.
+	Vector<Vector2i> centers;
+	_append_source_center(observer_path, centers);
+	for (int i = 0; i < additional_observer_paths.size(); i++) {
+		const NodePath path = additional_observer_paths[i];
+		_append_source_center(path, centers);
+	}
+	if (centers.is_empty()) {
+		// Preserve already loaded cells if all observer nodes disappear temporarily.
 		_purge_unused_ready_scenes();
+		if (observer_path.is_empty() && additional_observer_paths.is_empty()) {
+			_refresh_processing();
+		}
 		return;
 	}
 
-	const Vector2i center = local_position_to_cell(to_local(observer->get_global_position()));
-
 	Vector<Vector2i> unload;
 	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
-		if (!_within_radius(E.key, center, unload_radius) || ObjectDB::get_instance(E.value) == nullptr) {
+		if (!_within_any_radius(E.key, centers, unload_radius) || ObjectDB::get_instance(E.value) == nullptr) {
 			unload.push_back(E.key);
 		}
 	}
@@ -382,7 +433,7 @@ void WorldPartition3D::update_streaming() {
 
 	Vector<Vector2i> cancel;
 	for (const KeyValue<Vector2i, String> &E : pending_cells) {
-		if (!_within_radius(E.key, center, load_radius)) {
+		if (!_within_any_radius(E.key, centers, load_radius)) {
 			cancel.push_back(E.key);
 		}
 	}
@@ -392,59 +443,62 @@ void WorldPartition3D::update_streaming() {
 
 	int new_requests = max_new_requests_per_frame;
 	int instances = max_instances_per_frame;
-	// Visit nearer cells first and produce a deterministic order.
-	for (int radius = 0; radius <= load_radius; radius++) {
-		for (int dz = -radius; dz <= radius; dz++) {
-			for (int dx = -radius; dx <= radius; dx++) {
-				if (MAX(ABS(dx), ABS(dz)) != radius) {
-					continue;
-				}
-				const Vector2i cell = center + Vector2i(dx, dz);
-				if (active_cells.has(cell) || failed_cells.has(cell)) {
-					continue;
-				}
-				const String path = _get_scene_path(cell);
-				if (path.is_empty()) {
-					continue;
-				}
-				if (pending_cells.has(cell)) {
-					const Ref<PackedScene> *scene = ready_scenes.getptr(path);
-					if (scene != nullptr && instances > 0) {
-						if (!_instantiate_cell(cell, *scene)) {
-							failed_cells.insert(cell);
-						}
-						pending_cells.erase(cell);
-						instances--;
+	// All sources share request/instantiation budgets. Primary source wins ties.
+	for (const Vector2i &center : centers) {
+		// Visit nearer cells first and produce a deterministic order.
+		for (int radius = 0; radius <= load_radius; radius++) {
+			for (int dz = -radius; dz <= radius; dz++) {
+				for (int dx = -radius; dx <= radius; dx++) {
+					if (MAX(ABS(dx), ABS(dz)) != radius) {
+						continue;
 					}
-					continue;
-				}
-				if (ready_scenes.has(path)) {
-					pending_cells.insert(cell, path);
-					const Ref<PackedScene> *scene = ready_scenes.getptr(path);
-					if (instances > 0 && scene != nullptr) {
-						if (!_instantiate_cell(cell, *scene)) {
-							failed_cells.insert(cell);
-						}
-						pending_cells.erase(cell);
-						instances--;
+					const Vector2i cell = center + Vector2i(dx, dz);
+					if (active_cells.has(cell) || failed_cells.has(cell)) {
+						continue;
 					}
-					continue;
-				}
-				if (requested_paths.has(path)) {
-					pending_cells.insert(cell, path);
-					continue;
-				}
-				if (new_requests <= 0 || requested_paths.size() >= max_concurrent_requests) {
-					continue;
-				}
-				const Error err = ResourceLoader::load_threaded_request(path, "PackedScene");
-				if (err == OK) {
-					requested_paths.insert(path);
-					pending_cells.insert(cell, path);
-					new_requests--;
-				} else {
-					ERR_PRINT(vformat("WorldPartition3D: unable to request %s (%d).", path, int(err)));
-					failed_cells.insert(cell);
+					const String path = _get_scene_path(cell);
+					if (path.is_empty()) {
+						continue;
+					}
+					if (pending_cells.has(cell)) {
+						const Ref<PackedScene> *scene = ready_scenes.getptr(path);
+						if (scene != nullptr && instances > 0) {
+							if (!_instantiate_cell(cell, *scene)) {
+								failed_cells.insert(cell);
+							}
+							pending_cells.erase(cell);
+							instances--;
+						}
+						continue;
+					}
+					if (ready_scenes.has(path)) {
+						pending_cells.insert(cell, path);
+						const Ref<PackedScene> *scene = ready_scenes.getptr(path);
+						if (instances > 0 && scene != nullptr) {
+							if (!_instantiate_cell(cell, *scene)) {
+								failed_cells.insert(cell);
+							}
+							pending_cells.erase(cell);
+							instances--;
+						}
+						continue;
+					}
+					if (requested_paths.has(path)) {
+						pending_cells.insert(cell, path);
+						continue;
+					}
+					if (new_requests <= 0 || requested_paths.size() >= max_concurrent_requests) {
+						continue;
+					}
+					const Error err = ResourceLoader::load_threaded_request(path, "PackedScene");
+					if (err == OK) {
+						requested_paths.insert(path);
+						pending_cells.insert(cell, path);
+						new_requests--;
+					} else {
+						ERR_PRINT(vformat("WorldPartition3D: unable to request %s (%d).", path, int(err)));
+						failed_cells.insert(cell);
+					}
 				}
 			}
 		}
@@ -488,6 +542,8 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_streaming_enabled"), &WorldPartition3D::is_streaming_enabled);
 	ClassDB::bind_method(D_METHOD("set_observer_path", "path"), &WorldPartition3D::set_observer_path);
 	ClassDB::bind_method(D_METHOD("get_observer_path"), &WorldPartition3D::get_observer_path);
+	ClassDB::bind_method(D_METHOD("set_additional_observer_paths", "paths"), &WorldPartition3D::set_additional_observer_paths);
+	ClassDB::bind_method(D_METHOD("get_additional_observer_paths"), &WorldPartition3D::get_additional_observer_paths);
 	ClassDB::bind_method(D_METHOD("set_cell_scenes", "scenes"), &WorldPartition3D::set_cell_scenes);
 	ClassDB::bind_method(D_METHOD("get_cell_scenes"), &WorldPartition3D::get_cell_scenes);
 	ClassDB::bind_method(D_METHOD("set_cell_scene", "cell", "scene_path"), &WorldPartition3D::set_cell_scene);
@@ -509,6 +565,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_GROUP("Streaming", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "streaming_enabled"), "set_streaming_enabled", "is_streaming_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "observer_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Node3D"), "set_observer_path", "get_observer_path");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "additional_observer_paths"), "set_additional_observer_paths", "get_additional_observer_paths");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "load_radius", PROPERTY_HINT_RANGE, "0,32,1"), "set_load_radius", "get_load_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "unload_radius", PROPERTY_HINT_RANGE, "0,64,1"), "set_unload_radius", "get_unload_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_new_requests_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_new_requests_per_frame", "get_max_new_requests_per_frame");
