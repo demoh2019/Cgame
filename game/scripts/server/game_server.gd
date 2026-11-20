@@ -94,6 +94,7 @@ const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const AcidNeutralizer = preload("res://scripts/shared/acid_neutralizer.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
 const GuardianIntercept = preload("res://scripts/shared/guardian_intercept.gd")
+const GuardianRetribution = preload("res://scripts/shared/guardian_retribution.gd")
 const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
 const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
@@ -216,6 +217,10 @@ class Player:
 	var guard_link_target: int = -1 # Server-only chosen ally for one zombie melee hit.
 	var guard_link_seconds: float = 0.0 # Valid for at most 9 seconds.
 	var guard_link_cooldown: float = 0.0 # Session-only cast cooldown.
+	var guard_counter_target: int = -1 # Exact infected whose melee was intercepted.
+	var guard_counter_seconds: float = 0.0 # 4s to answer with normal melee.
+	var guard_counter_weapon: String = "" # Original real melee gear.
+	var guard_counter_party: int = 0 # Group valid at time of interception.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
 	var rain_cooldown: float = 0.0 # Persisted storm water collection cooldown.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
@@ -794,6 +799,7 @@ func _spawn_player(player: Player) -> void:
 	player.guard_link_target = -1
 	player.guard_link_seconds = 0.0
 	player.guard_link_cooldown = 0.0
+	GuardianRetribution.clear(player)
 	var kept_gear: bool = player.keep_inventory_on_respawn
 	player.keep_inventory_on_respawn = false
 	if not kept_gear:
@@ -3883,6 +3889,14 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	if crit:
 		damage *= 1.5 + player.skills.bonus("crit_damage")
 	var hit := _find_hit(player, origin, direction, reach, kind == "ranged")
+	# An earned counterattack belongs to ONE infected, never another survivor.
+	# The first normal melee swing consumes it even if it misses or hits PvP.
+	var guard_counterstrike: bool = false
+	if not is_ranged and player.guard_counter_seconds > 0.0:
+		var guarded_target = zombies.get(int(hit["id"])) if not hit.is_empty() and \
+				str(hit["kind"]) == "zombie" else null
+		guard_counterstrike = GuardianRetribution.consume(
+			player, guarded_target, parties, world)
 	# The FIRST legal attack spends a server-earned counter, including misses.
 	var riposte: bool = false
 	if player.riposte_seconds > 0.0:
@@ -3927,10 +3941,14 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		if player.sharpened_hits == 0:
 			player.sharpened_weapon = ""
 		player.dirty_character = true
+	if guard_counterstrike:
+		damage = GuardianRetribution.amplify(damage)
+		events.append({"type": "guardian_retribution", "peer": peer_id,
+			"zombie": int(hit["id"])})
 	_damage_target(player, hit, damage, "ranged" if is_ranged else "melee")
 	return {"ok": true, "hit": true, "target": hit["kind"],
 		"crit": crit, "ambush": ambush, "riposte": riposte,
-		"sharpened": sharpened}
+		"sharpened": sharpened, "guardian_retribution": guard_counterstrike}
 
 
 ## Party frontline role: no client-authored targets, aggro, radius or damage.
@@ -4045,6 +4063,11 @@ func _try_guardian_intercept(ally: Player, infected, raw_damage: float) -> bool:
 	chosen.dirty_character = true
 	events.append({"type": "guardian_intercept", "peer": ally.id,
 		"by": chosen.id, "zombie": infected.id, "damage": taken})
+	# Only the confirmed, survived intercept can arm the response. The
+	# infected challenges its rescuer briefly, while the guardian earns one
+	# boosted BASIC melee swing against this exact infected within 4 seconds.
+	if _alive(chosen) and GuardianRetribution.arm(chosen, infected, parties, world):
+		infected.force_taunt(chosen.id, GuardianRetribution.TAUNT_SECONDS)
 	if not _alive(chosen):
 		_on_player_death(chosen, -infected.id)
 	return true
@@ -5006,6 +5029,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.guardian_brace = 0.0
 	victim.guard_link_target = -1
 	victim.guard_link_seconds = 0.0
+	GuardianRetribution.clear(victim)
 	for teammate in players.values():
 		if teammate.guard_link_target == victim.id:
 			teammate.guard_link_target = -1
@@ -5275,6 +5299,14 @@ func _tick_players(delta: float) -> void:
 		player.guardian_timer = maxf(0.0, player.guardian_timer - maxf(0.0, delta))
 		player.guardian_brace = maxf(0.0, player.guardian_brace - maxf(0.0, delta))
 		player.guard_link_cooldown = maxf(0.0, player.guard_link_cooldown - maxf(0.0, delta))
+		player.guard_counter_seconds = maxf(0.0, player.guard_counter_seconds - maxf(0.0, delta))
+		if player.guard_counter_seconds <= 0.0 or not _alive(player) or player.mounted or \
+				parties.group_of(player.id) != player.guard_counter_party or \
+				player.inventory.weapon != player.guard_counter_weapon or \
+				not GuardianTaunt.melee_equipped(player.inventory) or \
+				not zombies.has(player.guard_counter_target) or \
+				not zombies[player.guard_counter_target].is_alive():
+			GuardianRetribution.clear(player)
 		player.guard_link_seconds = maxf(0.0, player.guard_link_seconds - maxf(0.0, delta))
 		if player.guard_link_seconds > 0.0 and not GuardianIntercept.can_guard(
 				player, players.get(player.guard_link_target), parties, world):
@@ -6738,6 +6770,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"guardian_cooldown": player.guardian_timer,
 			"guardian_intercept_cooldown": player.guard_link_cooldown,
 			"guardian_intercept_seconds": player.guard_link_seconds,
+			"guardian_counter_seconds": player.guard_counter_seconds,
+			"guardian_counter_target": player.guard_counter_target if player.guard_counter_seconds > 0.0 else -1,
 			"guardian_intercept_target": player.guard_link_target if player.guard_link_seconds > 0.0 else -1,
 			"guardian_guarded_seconds": guardian_guarded_seconds,
 			"guardian_guarded_by": guardian_guarded_by,
