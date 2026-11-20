@@ -149,6 +149,71 @@ TEST_CASE("[SceneTree][MultiMesh] Remove from a partial 2D visible prefix") {
 	CHECK(mm->get_instance_count() == 3);
 }
 
+TEST_CASE("[SceneTree][MultiMesh] Reactivate hidden 3D instance with full payload") {
+	Ref<MultiMesh> mm;
+	mm.instantiate();
+	mm->set_transform_format(MultiMesh::TRANSFORM_3D);
+	mm->set_use_colors(true);
+	mm->set_use_custom_data(true);
+	mm->set_instance_count(3);
+	mm->set_instance_transform(0, Transform3D(Basis(), Vector3(1, 0, 0)));
+	mm->set_instance_transform(1, Transform3D(Basis(), Vector3(2, 0, 0)));
+	mm->set_instance_transform(2, Transform3D(Basis(), Vector3(3, 0, 0)));
+	mm->set_instance_color(0, Color(1, 0, 0));
+	mm->set_instance_color(1, Color(0, 1, 0));
+	mm->set_instance_color(2, Color(0, 0, 1));
+	mm->set_instance_custom_data(0, Color(1, 0, 0));
+	mm->set_instance_custom_data(1, Color(0, 1, 0));
+	mm->set_instance_custom_data(2, Color(0, 0, 1));
+	mm->set_visible_instance_count(1);
+
+	CHECK(mm->activate_hidden_instance(2)); // Swap hidden #2 into first inactive #1.
+	CHECK(mm->get_visible_instance_count() == 2);
+	CHECK(mm->get_instance_count() == 3);
+	CHECK(mm->get_instance_transform(1).origin == Vector3(3, 0, 0));
+	CHECK(mm->get_instance_color(1) == Color(0, 0, 1));
+	CHECK(mm->get_instance_custom_data(1) == Color(0, 0, 1));
+	CHECK(mm->get_instance_transform(2).origin == Vector3(2, 0, 0));
+
+	ERR_PRINT_OFF;
+	CHECK_FALSE(mm->activate_hidden_instance(-1));
+	CHECK_FALSE(mm->activate_hidden_instance(0)); // Already visible.
+	CHECK_FALSE(mm->activate_hidden_instance(3));
+	ERR_PRINT_ON;
+	CHECK(mm->get_visible_instance_count() == 2);
+
+	CHECK(mm->activate_hidden_instance(2)); // First inactive slot.
+	CHECK(mm->get_visible_instance_count() == 3);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(mm->activate_hidden_instance(2)); // Fully visible.
+	ERR_PRINT_ON;
+	CHECK(mm->get_visible_instance_count() == 3);
+}
+
+TEST_CASE("[SceneTree][MultiMesh] Activate from zero-visible 2D prefix") {
+	Ref<MultiMesh> mm;
+	mm.instantiate();
+	mm->set_transform_format(MultiMesh::TRANSFORM_2D);
+	mm->set_instance_count(3);
+	mm->set_instance_transform_2d(0, Transform2D(0.0, Vector2(0, 0)));
+	mm->set_instance_transform_2d(1, Transform2D(0.0, Vector2(5, 6)));
+	mm->set_instance_transform_2d(2, Transform2D(0.0, Vector2(9, 10)));
+	mm->set_visible_instance_count(0);
+
+	CHECK(mm->activate_hidden_instance(2));
+	CHECK(mm->get_visible_instance_count() == 1);
+	CHECK(mm->get_instance_transform_2d(0).get_origin() == Vector2(9, 10));
+	CHECK(mm->get_instance_transform_2d(2).get_origin() == Vector2(0, 0));
+	CHECK(mm->remove_visible_instance(0));
+	CHECK(mm->get_visible_instance_count() == 0);
+
+	mm->set_visible_instance_count(-1);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(mm->activate_hidden_instance(0)); // -1 means all visible.
+	ERR_PRINT_ON;
+	CHECK(mm->get_visible_instance_count() == -1);
+}
+
 } // namespace TestMultiMeshSwapData
 
 #endif // _3D_DISABLED

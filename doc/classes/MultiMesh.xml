@@ -113,6 +113,16 @@
 				Sets the [Transform2D] for a specific instance.
 			</description>
 		</method>
+		<method name="activate_hidden_instance">
+			<return type="bool" />
+			<param index="0" name="hidden_instance" type="int" />
+			<description>
+				Reactivates one currently hidden MultiMesh instance without allocating a new buffer. It swaps the complete payload (transform, optional color and shader custom data) from [param hidden_instance] into the first hidden slot, then increases [member visible_instance_count] by one. The instance count is unchanged. It resets physics interpolation for moved slots.
+				If [member visible_instance_count] is [code]-1[/code], all instances are already visible and this call returns [code]false[/code]. The method also returns [code]false[/code] for indices outside the allocated buffer or indices that are already in the visible prefix, without modifying state.
+				An empty buffer has no hidden slots. Use [method remove_visible_instance] to free an active slot first or allocate a larger buffer using [member instance_count].
+				[b]Important:[/b] This is a low-level instance-pooling primitive. It does not restore a game entity's persistent ID, physics collision, or original transform automatically. Game code must track stable IDs and restore the desired payload to the chosen hidden instance before calling. When an instance is activated from a different hidden slot, hidden slot order changes.
+			</description>
+		</method>
 		<method name="remove_visible_instance">
 			<return type="bool" />
 			<param index="0" name="instance" type="int" />
