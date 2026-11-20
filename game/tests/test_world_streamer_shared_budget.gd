@@ -13,21 +13,19 @@ func _make_chunk(cell: Vector3i) -> Node:
 
 func run(t) -> void:
 	t.current = "single streaming count budget across refresh phases"
-	var tree := Engine.get_main_loop() as SceneTree
-	t.check(tree != null, "headless graphics tests provide a real scene tree")
-	if tree == null:
-		return
 	_calls.clear()
 	var streamer := WorldStreamer.new()
 	streamer.axes = WorldStreamer.AXES_XZ
 	streamer.cell_size = 16.0
+	streamer.focus_position = Vector3(0.5, 0.0, 0.5)
 	streamer.load_radius = 32.0
 	streamer.unload_radius = 44.0
 	streamer.max_instantiations_per_frame = 1
 	streamer.max_chunk_work_usec = 0 # Test count limit, independent of wall clock.
 	streamer.update_interval = 100.0 # Refresh explicitly, never in a background tick.
 	streamer.set_chunk_generator(Callable(self, "_make_chunk"))
-	tree.root.add_child(streamer)
+	# refresh() can generate procedural chunks on a detached streamer.
+	# This avoids a GPU/scene-tree dependency in the deterministic test.
 
 	streamer.refresh()
 	t.eq(_calls.size(), 1,
@@ -87,5 +85,4 @@ func run(t) -> void:
 	t.check(ui.contains("_world_streamer.get_loaded_count()"),
 		"FPS overlay displays actual resident world chunks")
 
-	tree.root.remove_child(streamer)
 	streamer.free()
