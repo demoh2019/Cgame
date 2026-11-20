@@ -47,7 +47,10 @@ static func settings(biome: String, daylight: float, sun_height: float,
 		amount = minf(0.072, base * (0.7 + morning * 0.72 + safe_storm * 0.62) *
 			(1.16 if tier == 3 else 0.86))
 	return {"enabled": active and amount > MIN_VISIBLE,
-		"density": amount, "tint": tint, "extent": extent}
+		"density": amount, "tint": tint, "extent": extent,
+		# One true 3D noise octave only on Ultra/Forward+. High uses the
+		# existing world-aligned 2D fog at unchanged sample cost.
+		"vapor_3d_detail": 0.55 if active and tier == 3 else 0.0}
 
 
 func setup() -> void:
@@ -91,6 +94,8 @@ func update_view(position: Vector3, biome: String, daylight: float,
 			return
 	if _last_quality != clampi(quality, 0, 3):
 		_volume.size = p["extent"]
+		_material.set_shader_parameter("vapor_3d_detail",
+			float(p["vapor_3d_detail"]))
 		_last_quality = clampi(quality, 0, 3)
 	_timer += maxf(0.0, delta) if is_finite(delta) else 0.0
 	var speed: float = minf(0.2, maxf(0.0, delta)) if is_finite(delta) else 0.0
@@ -103,7 +108,13 @@ func update_view(position: Vector3, biome: String, daylight: float,
 	var anchor := Vector3(roundf(position.x / ANCHOR_GRID) * ANCHOR_GRID,
 		position.y + 3.2,
 		roundf(position.z / ANCHOR_GRID) * ANCHOR_GRID)
-	if _volume.global_position.distance_squared_to(anchor) > 0.01:
+	# Native fork snaps XZ to the same 8 m world grid and rejects invalid
+	# positions; its early-return avoids redundant transform uploads. The
+	# stock Godot fallback preserves the old visuals and API behavior.
+	if _volume.has_method("set_snapped_world_anchor"):
+		_volume.call("set_snapped_world_anchor",
+			position + Vector3(0.0, 3.2, 0.0), ANCHOR_GRID, 0.10)
+	elif _volume.global_position.distance_squared_to(anchor) > 0.01:
 		_volume.global_position = anchor
 	_density = lerpf(_density, float(p["density"]),
 		1.0 - exp(-1.9 * elapsed))
