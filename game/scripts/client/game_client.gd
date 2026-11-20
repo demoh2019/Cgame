@@ -519,6 +519,12 @@ func guardian_taunt() -> void:
 	net.c_guardian_taunt.rpc_id(1)
 
 
+func guardian_intercept(ally_id: int) -> void:
+	# Only the ally ID is requested; real group, weapon, range, hit and
+	# damage are confirmed by the authoritative simulation.
+	net.c_guardian_intercept.rpc_id(1, ally_id)
+
+
 func parry() -> void:
 	# Facing and equipped weapon are rechecked by the authoritative server.
 	net.c_parry.rpc_id(1)
