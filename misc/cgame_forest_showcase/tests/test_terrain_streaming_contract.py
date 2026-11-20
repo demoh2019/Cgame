@@ -196,6 +196,10 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn('mesh = resources["terrain"]', manager)
         self.assertIn('canopies.configure(cell, resources["canopies"])', manager)
         self.assertIn('"cache": HLODCache.get_stats()', manager)
+        self.assertIn("MAX_BUILD_CPU_MS: float = 2.0", manager)
+        self.assertIn("built_this_frame == 0", manager)
+        self.assertIn('"last_rebuild_cpu_ms": _last_rebuild_cpu_ms', manager)
+
         self.assertIn("if cached_batch != null:", canopies)
         self.assertIn("multimesh = cached_batch", canopies)
         self.assertIn('far.get("cache",', world)
