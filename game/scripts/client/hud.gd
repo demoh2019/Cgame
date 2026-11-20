@@ -3,6 +3,7 @@ extends CanvasLayer
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
+const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
@@ -1133,6 +1134,10 @@ func _on_event(event: Dictionary) -> void:
 			say("RAID BOSS nearby! A mutant warlord entered the dangerous zone.")
 		"raid_enraged":
 			say("RAID PHASE TWO! The warlord is enraged. Dodge more frequent, stronger slams!")
+		"raid_cone_warning":
+			say("RAID CLEAVE in %.1fs! Move sideways out of the marked frontal sector." % float(event.get("seconds", 2.2)))
+		"raid_cone_struck":
+			say("Raid frontal cleave struck. Watch the boss's facing for the next sweep.")
 		"raid_warning":
 			say("RAID SLAM in %.1f seconds! Evade the marked %dm circle." % [
 				float(event.get("seconds", 2.0)), int(event.get("radius", 5))])
@@ -1623,6 +1628,17 @@ func _process(_delta: float) -> void:
 			if recovery > 0.0:
 				_info_label.text += "\nRAID BOSS EXPOSED: %.1fs (+15%% PvE damage)" % recovery
 			break
+	var cone: Dictionary = client.raid_cone_telegraph
+	if not cone.is_empty():
+		var center_cone := Vector3(float(cone.get("x", 0.0)),
+			float(cone.get("y", 0.0)), float(cone.get("z", 0.0)))
+		var aim_cone := Vector2(float(cone.get("dx", 0.0)), float(cone.get("dz", 0.0)))
+		var where := Vector3(float(client.you.get("x", 0.0)),
+			float(client.you.get("y", 0.0)), float(client.you.get("z", 0.0)))
+		var threatened: bool = RaidCone.in_sector(center_cone, aim_cone, where)
+		var seconds: float = maxf(0.0, float(cone.get("until", client.server_time)) - client.server_time)
+		_info_label.text += "\nRAID CLEAVE %s %.1fs — sidestep now!" % [
+			"INCOMING" if threatened else "WARNING", seconds]
 	var parry_ready: float = float(client.you.get("parry_window", 0.0))
 	if parry_ready > 0.0:
 		_info_label.text += "\nPARRY ACTIVE %.2fs — face incoming infected!" % parry_ready
