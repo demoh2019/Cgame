@@ -32,5 +32,23 @@ func _initialize() -> void:
 	instance.reset_quest()
 	assert(instance.collected_count() == 0)
 	instance.free()
-	print("ExplorationQuest3D: 16 verification groups passed")
+
+	# Save/load validation does not depend on a scene tree or a GPU renderer.
+	var first = Quest.new()
+	first.save_path = "user://visual_lab_quest_test.cfg"
+	first.positions = local_positions
+	assert(first.collect_shard(1))
+	var restored = Quest.new()
+	restored.save_path = first.save_path
+	restored.positions = local_positions
+	restored.load_progress()
+	assert(restored.collected_count() == 1)
+	assert(restored.collected_ids[0] == 1)
+	restored.world_seed += 1
+	restored.load_progress()
+	assert(restored.collected_count() == 0, "Different worlds must not share quest progress")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(first.save_path))
+	first.free()
+	restored.free()
+	print("ExplorationQuest3D: 21 verification groups passed")
 	quit(0)
