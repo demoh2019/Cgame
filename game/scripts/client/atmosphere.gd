@@ -7,6 +7,7 @@ const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
 const SunShadowQuality = preload("res://scripts/client/sun_shadow_quality.gd")
 const BiomeAtmosphere = preload("res://scripts/client/biome_atmosphere.gd")
 const SunShadowAtmosphere = preload("res://scripts/client/sun_shadow_atmosphere.gd")
+const GraphicsEyeAdaptation = preload("res://scripts/client/graphics_eye_adaptation.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
 ## Everything degrades gracefully on the compatibility renderer (SSAO and the like are simply ignored).
 
@@ -92,6 +93,9 @@ func _ready() -> void:
 	environment.volumetric_fog_enabled = false
 	world_environment = WorldEnvironment.new()
 	world_environment.environment = environment
+	# Initialize the camera resource disabled; the first graphics preset
+	# enables it only when the active backend really supports exposure.
+	GraphicsEyeAdaptation.apply(world_environment, 1, "gl_compatibility")
 	add_child(world_environment)
 	sun = DirectionalLight3D.new()
 	sun.shadow_enabled = true
@@ -200,6 +204,8 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	_cloud_shadows_allowed = bool(settings.get("cloud_shadows", true))
 	_shadow_filter_level = clampi(int(settings.get("quality_level", 1)), 0, 3)
 	_shadow_filter_seconds = SHADOW_FILTER_INTERVAL
+	GraphicsEyeAdaptation.apply(world_environment, _shadow_filter_level,
+		str(settings.get("rendering_method", "gl_compatibility")))
 	_fog_profile = CinematicFog.profile(
 		int(settings.get("quality_level", 1)), str(settings.get("rendering_method", "gl_compatibility")))
 	CinematicFog.apply_profile(environment, sun, _fog_profile)
