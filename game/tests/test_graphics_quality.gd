@@ -2,6 +2,7 @@ extends RefCounted
 ## Graphics presets stay bounded and keep expensive effects off on low-end hardware.
 
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
 
 func run(t) -> void:
@@ -27,3 +28,11 @@ func run(t) -> void:
 	t.check(int(low["grass_budget"]) < int(ultra["grass_budget"]), "grass generation is cheaper on Performance")
 	t.check(not bool(low["ssil"]) and bool(ultra["ssil"]), "indirect light is exclusive to Ultra")
 	GraphicsQuality.set_level(1, false)
+
+	t.current = "fallback terrain shader quality"
+	var fallback: String = ChunkView.GROUND_SHADER
+	t.check(fallback.contains("aa_terrain_detail_radius"), "procedural terrain uses the same detail radius as textured terrain")
+	t.check(fallback.contains("cloud_shadow(world_position.xz, TIME)"), "large-scale clouds are sampled in the vertex stage")
+	t.check(fallback.contains("vertex_cloud_shade"), "cloud shading reaches fragment through a varying")
+	t.check(fallback.contains("if (detail_fade > 0.001)"), "distant terrain skips unnecessary fine-noise work")
+	t.check(fallback.contains("strata = mix(mid, fbm("), "near rock detail fades smoothly to macro layers")
