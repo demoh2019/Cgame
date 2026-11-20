@@ -176,6 +176,9 @@
 		<member name="lod_distance" type="float" setter="set_lod_distance" getter="get_lod_distance" default="128.0">
 			Distance within which chunks have full detail. Each further level starts at twice the distance of the previous one. A chunk keeps its level a little past a boundary, so it does not flip back and forth.
 		</member>
+		<member name="lod_geometric_error_strength" type="float" setter="set_lod_geometric_error_strength" getter="get_lod_geometric_error_strength" default="0.0">
+			Optional weight (0 to 1) of a per-chunk geometric-error-based LOD adjustment. The engine measures the height deviation between the original mesh and a coarser triangulated mesh and caches it once for each visible chunk. Flat areas switch to lower-detail meshes earlier, while rough cliffs and mountain ridges retain silhouette geometry longer. The adjustment is capped and also affects the existing geomorph transition threshold. A value of [code]0[/code] preserves the original distance-only or screen-relative LOD behavior, without computing deviations. Collision, height queries, textures and per-chunk materials are unaffected.
+		</member>
 		<member name="lod_reference_fov" type="float" setter="set_lod_reference_fov" getter="get_lod_reference_fov" default="60.0">
 			Reference vertical perspective camera field of view in degrees for [member screen_space_lod_enabled]. At 720 pixels of viewport height and this vertical FOV, [member lod_distance] is unchanged. Higher pixel density or a narrower field of view keeps terrain detailed farther away. Ignored by orthographic cameras.
 		</member>
