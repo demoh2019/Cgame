@@ -13,6 +13,8 @@ void SkyScatteringLUT::_bind_methods() {
 			&SkyScatteringLUT::generate_lut, DEFVAL(128), DEFVAL(64), DEFVAL(2.0f));
 	ClassDB::bind_method(D_METHOD("sample_scattering", "view_elevation", "sun_elevation", "aerosol"),
 			&SkyScatteringLUT::sample_scattering, DEFVAL(2.0f));
+	ClassDB::bind_method(D_METHOD("sample_sun_transmittance", "sun_elevation", "aerosol"),
+			&SkyScatteringLUT::sample_sun_transmittance, DEFVAL(2.0f));
 }
 
 Ref<Image> SkyScatteringLUT::generate_lut(int p_width, int p_height, float p_aerosol) const {
@@ -38,6 +40,12 @@ Color SkyScatteringLUT::sample_scattering(float p_view_elevation, float p_sun_el
 	const SkyScatteringPolicy::Sample sample = SkyScatteringPolicy::sample(
 			p_view_elevation, p_sun_elevation, p_aerosol);
 	return Color(sample.r, sample.g, sample.b, sample.transmittance);
+}
+
+Color SkyScatteringLUT::sample_sun_transmittance(float p_sun_elevation, float p_aerosol) const {
+	const SkyScatteringPolicy::SunTransmittance t =
+			SkyScatteringPolicy::sun_transmittance(p_sun_elevation, p_aerosol);
+	return Color(t.r, t.g, t.b, 1.0f);
 }
 
 Ref<Image> SkyScatteringLUT::generate_cloud_lighting_lut(const Ref<Image> &p_density) const {

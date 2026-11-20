@@ -22,4 +22,7 @@ public:
 	// the 3D world's fog/atmospheric perspective with sky radiance without
 	// uploading pixels or reading GPU textures every frame.
 	Color sample_scattering(float p_view_elevation, float p_sun_elevation, float p_aerosol = 2.0f) const;
+	// Same optical path and extinction as the sky LUT; RGB is a daylight
+	// transmittance multiplier normalized to 1.0 at zenith.
+	Color sample_sun_transmittance(float p_sun_elevation, float p_aerosol = 2.0f) const;
 };

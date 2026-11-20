@@ -14,6 +14,14 @@ struct Sample {
 	float transmittance;
 };
 
+// Attenuation of the real directional sun on the ground, normalized to
+// zenith daylight. Reuse the exact extinction coefficients of sky radiance.
+struct SunTransmittance {
+	float r;
+	float g;
+	float b;
+};
+
 inline float clamp_finite(float v, float lo, float hi, float fallback) {
 	return std::isfinite(v) ? std::clamp(v, lo, hi) : fallback;
 }
@@ -22,6 +30,21 @@ inline float optical_path(float elevation) {
 	// Bounded curved-horizon approximation: never divides by horizon zero.
 	float sin_height = std::max(elevation, 0.0f) + 0.095f;
 	return std::min(12.0f, 1.0f / std::sqrt(0.012f + sin_height * sin_height));
+}
+
+inline SunTransmittance sun_transmittance(float sun_elevation, float aerosol) {
+	const float sun = clamp_finite(sun_elevation, 0.0f, 1.0f, 1.0f);
+	const float haze = clamp_finite(aerosol, 0.0f, 5.0f, 2.0f);
+	// Only the *additional* optical path from zenith attenuates: the
+	// artist's midday white point and exposure remain identical.
+	const float extra_path = std::max(optical_path(sun) - optical_path(1.0f), 0.0f);
+	const float red = 0.17f + 0.013f * haze;
+	const float green = 0.36f + 0.017f * haze;
+	const float blue = 0.68f + 0.020f * haze;
+	// The same .26 solar absorption as the sky LUT sample() below.
+	return { std::exp(-red * extra_path * 0.26f),
+		std::exp(-green * extra_path * 0.26f),
+		std::exp(-blue * extra_path * 0.26f) };
 }
 
 inline Sample sample(float view_elevation, float sun_elevation, float aerosol) {
