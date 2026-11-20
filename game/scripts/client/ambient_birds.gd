@@ -14,6 +14,7 @@ var _vel: PackedVector3Array = []
 var _active := 0
 var _home := Vector3.ZERO
 var _fade := 0.0
+var _native: Node3D # Engine Flock3D when available: the boids run in C++.
 
 
 ## How many birds to show: none at night, in storms or on Performance; Balanced gets a small flock.
@@ -71,6 +72,17 @@ func _init() -> void:
 		_pos[i] = Vector3(randf_range(-6, 6), randf_range(-2, 2), randf_range(-6, 6))
 		_vel[i] = Vector3(randf_range(-1, 1), 0.0, randf_range(-1, 1)).normalized() * SPEED
 		m.set_instance_custom_data(i, Color(randf(), randf(), 0.0, 0.0))
+	if ClassDB.class_exists("Flock3D"):
+		_native = ClassDB.instantiate("Flock3D") as Node3D
+		_native.set("multimesh", m)
+		_native.set("material_override", mat)
+		_native.set("cast_shadow", GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
+		_native.set("speed", SPEED)
+		_native.set("agent_scale", 1.4)
+		_native.set("active", false)
+		_native.visible = false
+		add_child(_native)
+		multimesh = null # The native child draws it; never draw the flock twice.
 
 
 static func _bird_mesh() -> ArrayMesh:
@@ -98,6 +110,9 @@ func update_view(player: Vector3, daylight: float, storm: float, level: int, del
 	if want > 0:
 		_active = want
 	_fade = move_toward(_fade, 1.0 if want > 0 else 0.0, delta * 0.3)
+	if _native != null:
+		_update_native(player, want)
+		return
 	if _active == 0 or _fade <= 0.0:
 		multimesh.visible_instance_count = 0
 		_active = 0 if _fade <= 0.0 else _active
@@ -121,3 +136,18 @@ func update_view(player: Vector3, daylight: float, storm: float, level: int, del
 		basis = basis.rotated(fwd, clampf(-f.dot(basis.x) * 0.08, -0.6, 0.6))
 		multimesh.set_instance_transform(i, Transform3D(basis.scaled(Vector3.ONE * 1.4), _home + _pos[i]))
 	multimesh.visible_instance_count = _active if _fade > 0.05 else 0
+
+
+func _update_native(player: Vector3, want: int) -> void:
+	if _fade <= 0.0:
+		_native.visible = false
+		_native.set("active", false)
+		_active = 0
+		return
+	if want > 0 and int(_native.get("agent_count")) != want:
+		_native.set("agent_count", want)
+	_native.visible = true
+	_native.set("active", true)
+	# Leaving (night/storm): the home climbs away so the flock flies off before hiding.
+	_native.set("home_offset", Vector3(0, 40, 0) if want == 0 else Vector3.ZERO)
+	_native.global_position = player + Vector3(0, ALTITUDE, 0)

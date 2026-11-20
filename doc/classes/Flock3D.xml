@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="Flock3D" inherits="MultiMeshInstance3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Native boids flock that animates the instances of its [MultiMesh].
+	</brief_description>
+	<description>
+		A flock of agents (birds, fish, bats, insects) steered by the classic boids rules: cohesion, alignment and separation, plus a soft home volume they orbit around. Like Unreal Engine's Niagara boids or Unity DOTS flocking, every agent is written straight into the [member MultiMeshInstance3D.multimesh] instance transforms, so a whole flock costs one draw call and no per-agent nodes or scripts.
+		The multimesh must use [constant MultiMesh.TRANSFORM_3D] and have at least [member agent_count] instances. Agent meshes should face +Z. Positions are local to this node, so moving the node moves the whole flock.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_agent_position" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns the local position of the agent at [param index].
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Advances the simulation by [param delta] seconds and updates the multimesh. Called automatically every frame while [member active] is [code]true[/code]; call it manually to drive the flock yourself.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="active" type="bool" setter="set_active" getter="is_active" default="true">
+			If [code]true[/code], the flock is simulated every frame while visible.
+		</member>
+		<member name="agent_count" type="int" setter="set_agent_count" getter="get_agent_count" default="16">
+			Number of simulated agents. Changing it scatters the flock again around [member home_offset].
+		</member>
+		<member name="agent_scale" type="float" setter="set_agent_scale" getter="get_agent_scale" default="1.0">
+			Uniform scale applied to every agent's transform.
+		</member>
+		<member name="alignment" type="float" setter="set_alignment" getter="get_alignment" default="0.5">
+			How strongly agents match the velocity of their neighbors.
+		</member>
+		<member name="bank" type="float" setter="set_bank" getter="get_bank" default="0.08">
+			How much agents roll into turns.
+		</member>
+		<member name="cohesion" type="float" setter="set_cohesion" getter="get_cohesion" default="0.35">
+			How strongly agents steer towards the center of their neighbors.
+		</member>
+		<member name="home_offset" type="Vector3" setter="set_home_offset" getter="get_home_offset" default="Vector3(0, 0, 0)">
+			Local center of the volume the flock circles around.
+		</member>
+		<member name="home_radius" type="float" setter="set_home_radius" getter="get_home_radius" default="18.0">
+			Agents farther than this from [member home_offset] are pulled straight back.
+		</member>
+		<member name="neighbor_radius" type="float" setter="set_neighbor_radius" getter="get_neighbor_radius" default="8.0">
+			Distance within which other agents count as neighbors.
+		</member>
+		<member name="orbit" type="float" setter="set_orbit" getter="get_orbit" default="1.2">
+			Tangential swirl around [member home_offset]. Negative values circle the other way.
+		</member>
+		<member name="separation" type="float" setter="set_separation" getter="get_separation" default="2.5">
+			How strongly agents avoid crowding each other.
+		</member>
+		<member name="separation_radius" type="float" setter="set_separation_radius" getter="get_separation_radius" default="1.6">
+			Distance below which agents push each other apart.
+		</member>
+		<member name="speed" type="float" setter="set_speed" getter="get_speed" default="6.0">
+			Cruise speed. Agents stay between 60% and 130% of it.
+		</member>
+	</members>
+</class>
