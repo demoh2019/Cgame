@@ -34,6 +34,7 @@
 #include "core/config/engine.h"
 #include "core/object/class_db.h"
 #include "core/templates/hash_set.h"
+#include "core/templates/local_vector.h"
 #include "core/templates/sort_array.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/3d/node_3d.h"
