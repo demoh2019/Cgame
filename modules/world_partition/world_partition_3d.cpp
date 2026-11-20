@@ -613,6 +613,15 @@ bool WorldPartition3D::register_navigation_agent(const String &p_name, Node3D *p
 	return true;
 }
 
+bool WorldPartition3D::unregister_navigation_agent_if_owner(const String &p_name, Node3D *p_agent) {
+	const NavigationAgentEntry *entry = navigation_agents.getptr(p_name);
+	if (entry == nullptr || p_agent == nullptr || entry->node_id != p_agent->get_instance_id()) {
+		return false;
+	}
+	navigation_agents.erase(p_name);
+	return true;
+}
+
 void WorldPartition3D::unregister_navigation_agent(const String &p_name) {
 	navigation_agents.erase(p_name);
 	// Do not clear existing frame reservations: deregister/re-register must not
@@ -1362,6 +1371,7 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_navigation_updates_per_physics_frame"), &WorldPartition3D::get_max_navigation_updates_per_physics_frame);
 	ClassDB::bind_method(D_METHOD("register_navigation_agent", "name", "agent", "priority"), &WorldPartition3D::register_navigation_agent, DEFVAL(1));
 	ClassDB::bind_method(D_METHOD("unregister_navigation_agent", "name"), &WorldPartition3D::unregister_navigation_agent);
+	ClassDB::bind_method(D_METHOD("unregister_navigation_agent_if_owner", "name", "agent"), &WorldPartition3D::unregister_navigation_agent_if_owner);
 	ClassDB::bind_method(D_METHOD("has_navigation_agent", "name"), &WorldPartition3D::has_navigation_agent);
 	ClassDB::bind_method(D_METHOD("get_navigation_agent_count"), &WorldPartition3D::get_navigation_agent_count);
 	ClassDB::bind_method(D_METHOD("set_navigation_agent_priority", "name", "priority"), &WorldPartition3D::set_navigation_agent_priority);
