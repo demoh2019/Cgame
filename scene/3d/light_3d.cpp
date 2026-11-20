@@ -39,6 +39,11 @@
 
 void Light3D::set_param(Param p_param, real_t p_value) {
 	ERR_FAIL_INDEX(p_param, PARAM_MAX);
+	// The first assignment must reach RenderingServer even when the value is zero.
+	if (param_initialized[p_param] && param[p_param] == p_value) {
+		return;
+	}
+	param_initialized[p_param] = true;
 	param[p_param] = p_value;
 
 	RS::get_singleton()->light_set_param(light, RSE::LightParam(p_param), p_value);
