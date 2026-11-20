@@ -11,6 +11,10 @@ uniform float clarity = 5.0;
 uniform float ripple_strength = 0.35;
 uniform float detail_fade_start = 65.0;
 uniform float detail_fade_end = 125.0;
+// Near-shore light filaments are enabled only on high-end presets and only in shallow water.
+uniform float shore_glimmer_strength = 0.0;
+uniform float shore_glimmer_fade_start = 28.0;
+uniform float shore_glimmer_fade_end = 62.0;
 
 varying vec3 world_position;
 
@@ -81,8 +85,12 @@ void fragment() {
 	scene.xyz /= scene.w;
 	float thickness = max(-scene.z + VERTEX.z, 0.0);
 
-	float depth_mix = clamp(thickness / clarity, 0.0, 1.0);
-	vec3 color = mix(shallow_color, deep_color, depth_mix);
+	// Beer-Lambert-inspired depth attenuation: red disappears first, then green.
+	// One exponential and a few ALU operations replace three expensive per-channel exponentials.
+	float transmission = exp(-thickness / max(clarity, 0.1));
+	vec3 spectral_transmission = vec3(transmission * transmission, transmission, sqrt(transmission));
+	float depth_mix = 1.0 - transmission;
+	vec3 color = deep_color + (shallow_color - deep_color) * spectral_transmission;
 	// Most ocean pixels have no shoreline. Avoid even coarse foam noise when
 	// the depth difference says foam cannot contribute to the final color.
 	float edge = 1.0 - smoothstep(0.0, 0.9, thickness);
@@ -103,8 +111,26 @@ void fragment() {
 		* smoothstep(0.2, 1.2, thickness);
 	foam = clamp(foam + storm_whitecaps, 0.0, 1.0);
 	color = mix(color * (1.0 - storm * 0.10), vec3(0.95, 0.98, 1.0), foam);
+	// Low-cost animated shallow-water glints. No screen-texture, extra render pass,
+	// caustic texture or per-pixel shoreline noise on Performance/Balanced.
+	float shore_glimmer = 0.0;
+	if (shore_glimmer_strength > 0.001 && thickness < 3.2) {
+		float near_fade = 1.0 - smoothstep(shore_glimmer_fade_start, shore_glimmer_fade_end,
+			distance(p, CAMERA_POSITION_WORLD.xz));
+		if (near_fade > 0.001) {
+			float strand_a = sin(p.x * 2.1 + sin(p.y * 1.3 + t * 0.65) + t * 0.45);
+			float strand_b = sin(p.y * 2.6 - p.x * 0.75 - t * 0.55);
+			float filaments = pow(max(strand_a * strand_b, 0.0), 7.0);
+			shore_glimmer = filaments * (1.0 - smoothstep(0.35, 3.2, thickness))
+				* near_fade * shore_glimmer_strength * (1.0 - foam);
+		}
+	}
+	color += vec3(0.06, 0.12, 0.11) * shore_glimmer;
 
-	float fresnel = pow(1.0 - clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0), 3.0);
+	// Schlick Fresnel for the 2%-reflective water/air interface, instead of
+	// a stylized cubic approximation that over-brightens front-facing water.
+	float ndotv = clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
+	float fresnel = 0.02 + 0.98 * pow(1.0 - ndotv, 5.0);
 	ALBEDO = color;
 	ALPHA = clamp(mix(0.28, 0.93, smoothstep(0.0, 2.5, thickness)) + foam * 0.5 + fresnel * 0.25, 0.0, 1.0);
 	ROUGHNESS = mix(0.06 + storm * 0.05, 0.4 + storm * 0.05, foam);
@@ -112,5 +138,6 @@ void fragment() {
 	METALLIC = 0.0;
 	EMISSION = vec3(0.01, 0.04, 0.05) * (1.0 - depth_mix)
 		+ vec3(0.08, 0.12, 0.16) * fresnel
-		+ vec3(0.015, 0.025, 0.028) * crest * (1.0 - foam);
+		+ vec3(0.015, 0.025, 0.028) * crest * (1.0 - foam)
+		+ vec3(0.07, 0.13, 0.12) * shore_glimmer;
 }
