@@ -99,6 +99,18 @@
 				Returns the instantiated [Node3D] scene root for [param cell], or [code]null[/code] if it is not loaded. Unlike scanning child nodes, this lookup uses the streamer's direct cell mapping. Use it from [signal cell_loaded] callbacks to configure only the newly instantiated cell.
 			</description>
 		</method>
+		<method name="get_last_streaming_update_ms" qualifiers="const">
+			<return type="float" />
+			<description>
+				CPU wall-clock time in milliseconds spent in the most recent [method update_streaming] call, including completed background-request polling and synchronous scene instantiation. This does not include later physics-server synchronization or rendering GPU work and is not a persistent per-frame average.
+			</description>
+		</method>
+		<method name="get_last_instantiation_attempt_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Number of cell-scene instantiation attempts performed in the most recent [method update_streaming] call. Includes unsuccessful attempts and never exceeds [member max_instances_per_frame]. This is reset to zero if an update runs without a valid streaming observer.
+			</description>
+		</method>
 		<method name="get_loaded_cells" qualifiers="const">
 			<return type="Array" />
 			<description>
