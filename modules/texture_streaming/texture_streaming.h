@@ -424,6 +424,9 @@ private:
 	uint8_t setting_max_lod = 3; // Worst quality mip level - 3 ≈ 128px for 8K texture
 	uint32_t setting_max_ops_per_second = 500; // 60 fps would be ~8 ops/frame
 	uint64_t setting_inactivity_decay_rate_ms = 5000; // Time per mip level of decay (ms)
+	// Runtime-controlled by the game's graphics preset. Atomic because feedback
+	// is processed on a worker while the graphics UI runs on the main thread.
+	std::atomic<uint8_t> detail_prefetch_mips{ 0 };
 	uint32_t setting_budget_mb_override = UINT32_MAX;
 	uint8_t setting_min_lod_override = UINT8_MAX;
 	uint8_t setting_max_lod_override = UINT8_MAX;
@@ -641,6 +644,15 @@ public:
 	uint64_t get_memory_budget_bytes_used();
 
 	// Properties
+	void set_detail_prefetch_mips(int p_mips) {
+		const uint8_t bounded = p_mips <= 0 ? 0 : (p_mips >= 2 ? 2 : uint8_t(p_mips));
+		detail_prefetch_mips.store(bounded, std::memory_order_relaxed);
+	}
+
+	int get_detail_prefetch_mips() const {
+		return int(detail_prefetch_mips.load(std::memory_order_relaxed));
+	}
+
 	void set_min_lod_override(int32_t p_mip) {
 		setting_min_lod_override = (p_mip >= int32_t(MIN_LOD_LEVEL) && p_mip <= int32_t(MAX_LOD_LEVEL)) ? uint8_t(p_mip) : UINT8_MAX;
 	}

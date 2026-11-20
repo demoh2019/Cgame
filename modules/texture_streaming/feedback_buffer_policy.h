@@ -69,6 +69,13 @@ inline uint8_t mip_from_coverage(float p_coverage, uint8_t p_mip_count) {
 	return uint8_t(exponent < max_mip ? exponent : max_mip);
 }
 
+// Predictive high-resolution mip residency: lower mip numbers are sharper.
+// This operates on the GPU feedback result before the existing memory budget
+// fitter. Saturating arithmetic prevents underflow for mip 0 and tiny textures.
+constexpr uint8_t prefetch_mip(uint8_t p_requested, uint8_t p_detail_prefetch_mips) {
+	return p_detail_prefetch_mips >= p_requested ? 0 : uint8_t(p_requested - p_detail_prefetch_mips);
+}
+
 // Do not repeatedly recreate a valid 4 KiB buffer when no materials exist.
 // Use 64-bit arithmetic so large material counts cannot wrap the comparison.
 constexpr bool needs_resize(uint32_t p_allocated_bytes, bool p_buffer_valid, uint32_t p_material_count) {

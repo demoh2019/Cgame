@@ -113,6 +113,11 @@ uint64_t TextureStreaming::get_memory_budget_bytes_used() {
 }
 
 void TextureStreaming::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("get_detail_prefetch_mips"), &TextureStreaming::get_detail_prefetch_mips);
+	ClassDB::bind_method(D_METHOD("set_detail_prefetch_mips", "mips"), &TextureStreaming::set_detail_prefetch_mips);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "detail_prefetch_mips", PROPERTY_HINT_RANGE, "0,2,1"),
+			"set_detail_prefetch_mips", "get_detail_prefetch_mips");
+
 	ClassDB::bind_method(D_METHOD("get_min_lod_override"), &TextureStreaming::get_min_lod_override);
 	ClassDB::bind_method(D_METHOD("set_min_lod_override", "min_lod"), &TextureStreaming::set_min_lod_override);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "min_lod_override", PROPERTY_HINT_RANGE, "-1,13,1"), "set_min_lod_override", "get_min_lod_override");
@@ -542,7 +547,12 @@ void TextureStreaming::_process_material_feedback_buffer(MaterialFeedbackBuffer 
 
 				// The exponent yields floor(log2) without a libm call.
 				// Saturate NaNs, infinities and out-of-range values safely.
-				const uint8_t clamped_mip = TextureStreamingFeedbackPolicy::mip_from_coverage(texel_coverage, state->get_mip_count());
+				// Prefetch the next sharper streamed mip on premium presets so
+				// camera movement/FSR2 reconstruction does not expose blurry tiles.
+				// The existing budget fitter can still choose a coarser mip.
+				const uint8_t clamped_mip = TextureStreamingFeedbackPolicy::prefetch_mip(
+						TextureStreamingFeedbackPolicy::mip_from_coverage(texel_coverage, state->get_mip_count()),
+						detail_prefetch_mips.load(std::memory_order_relaxed));
 
 				// Update feedback if this is a better (lower) mip level than previously recorded
 				// Lower mip = higher quality needed

@@ -100,7 +100,19 @@ void sky() {
 		float disc = smoothstep(0.9993, 0.9997, facing);
 		float glow = pow(max(facing, 0.0), 220.0) * 0.6 + pow(max(facing, 0.0), 14.0) * 0.12;
 		float visible = 1.0 - storm * 0.85;
-		color += sun_color * (disc * 2.5 + glow) * visible * mix(0.35, 1.0, daylight);
+		// The night directional light also drives the moon. Render a compact,
+		// cooler lunar disc with a broad ice-blue corona instead of leaving
+		// the daytime amber sun in the dark sky. Both share the cached
+		// sun_direction, so neither requires a new sky cubemap refresh.
+		float moon_visibility = 1.0 - smoothstep(0.05, 0.32, daylight);
+		color += sun_color * (disc * 2.5 + glow) * visible * (1.0 - moon_visibility);
+		if (moon_visibility > 0.001) {
+			float lunar_disc = smoothstep(0.99990, 0.999975, facing);
+			float lunar_halo = pow(max(facing, 0.0), 64.0) * 0.10
+				+ pow(max(facing, 0.0), 400.0) * 0.06;
+			color += sun_color * vec3(0.68, 0.82, 1.0)
+				* (lunar_disc * 1.65 + lunar_halo) * visible * moon_visibility;
+		}
 		// Single-scattering-inspired warm horizon halo reuses the existing glow term.
 		// No additional noise lookups or texture taps on low-end hardware.
 		float horizon_halo = 1.0 - smoothstep(0.04, 0.42, abs(up));

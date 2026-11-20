@@ -12,6 +12,7 @@ const GraphicsReflections = preload("res://scripts/client/graphics_reflections.g
 const GraphicsIndirectLighting = preload("res://scripts/client/graphics_indirect_lighting.gd")
 const WaterRefraction = preload("res://scripts/client/water_refraction.gd")
 const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
+const GraphicsTextureStreaming = preload("res://scripts/client/graphics_texture_streaming.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const Foliage = preload("res://scripts/client/foliage.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
@@ -154,6 +155,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# One shared sun atlas across the process. Only change its allocation when
 	# the resolved quality/backend budget differs; Auto may apply repeatedly.
 	GraphicsShadowAtlas.apply(_level, str(method))
+	# The engine-side streaming worker prefetches a sharper mip for moving
+	# cameras on High/Ultra, but only if the fork exposes its singleton.
+	GraphicsTextureStreaming.apply(_level, str(method))
 	if viewport != null:
 		# Texture-group anisotropic shader variants are already cached per tier.
 		# This viewport cap makes imported glTF PBR texture detail just as sharp.
