@@ -32,6 +32,7 @@
 
 TEST_FORCE_LINK(test_multimesh_visibility)
 
+#include "core/math/random_number_generator.h"
 #include "scene/resources/3d/primitive_meshes.h"
 #include "scene/resources/multimesh.h"
 
@@ -39,6 +40,77 @@ namespace TestMultiMeshVisibility {
 
 // The renderer's low-level regression additionally needs an RD-backed GPU
 // capture: this test exercises the public API with the mock rendering server.
+TEST_CASE("[SceneTree][MultiMesh] Seeded native buffer shuffle preserves full instance records") {
+	// A foliage tile uploads one packed buffer, then reveals a randomized prefix
+	// for screen-space density LOD. Swapping channels instead of full records
+	// would mix colors and transforms and produce visible artifacts.
+	Ref<MultiMesh> batch;
+	batch.instantiate();
+	batch->set_transform_format(MultiMesh::TRANSFORM_3D);
+	batch->set_use_colors(true);
+	batch->set_instance_count(64);
+	Vector<float> source;
+	source.resize(64 * 16);
+	{
+		float *w = source.ptrw();
+		for (int i = 0; i < source.size(); ++i) {
+			w[i] = float(i * 0.25);
+		}
+	}
+	const Vector<float> preserved = source;
+	const uint64_t seed = 2026;
+	const Vector<float> native = batch->shuffled_instance_buffer(source, seed);
+	CHECK(native == batch->shuffled_instance_buffer(source, seed));
+	CHECK(source == preserved);
+	CHECK(native.size() == source.size());
+	CHECK(native != source);
+
+	Ref<RandomNumberGenerator> random;
+	random.instantiate();
+	random->set_seed(seed);
+	Vector<float> expected = source;
+	float *w = expected.ptrw();
+	for (int i = 63; i > 0; --i) {
+		const int other = random->randi_range(0, i);
+		const int a = i * 16;
+		const int b = other * 16;
+		for (int channel = 0; channel < 16; ++channel) {
+			const float tmp = w[a + channel];
+			w[a + channel] = w[b + channel];
+			w[b + channel] = tmp;
+		}
+	}
+	CHECK(native == expected);
+
+	// No accidental edits when input does not match the declared GPU layout.
+	Vector<float> short_input;
+	short_input.resize(17);
+	CHECK(batch->shuffled_instance_buffer(short_input, seed) == short_input);
+	// Every packed layout is supported, not just Albion After grass.
+	batch->set_instance_count(0);
+	batch->set_use_custom_data(true);
+	batch->set_instance_count(4);
+	Vector<float> extended;
+	extended.resize(4 * 20);
+	{
+		float *ew = extended.ptrw();
+		for (int i = 0; i < extended.size(); ++i) {
+			ew[i] = float(i);
+		}
+	}
+	const Vector<float> shuffled_extended = batch->shuffled_instance_buffer(extended, 123);
+	CHECK(shuffled_extended.size() == extended.size());
+	// Each of the four 20-float records must remain intact.
+	for (int i = 0; i < 4; ++i) {
+		const int original = int(shuffled_extended[i * 20]) / 20;
+		CHECK(original >= 0);
+		CHECK(original < 4);
+		for (int j = 0; j < 20; ++j) {
+			CHECK(shuffled_extended[i * 20 + j] == extended[original * 20 + j]);
+		}
+	}
+}
+
 TEST_CASE("[SceneTree][MultiMesh] Reveal hidden instances with -1") {
 	Ref<MultiMesh> batch;
 	batch.instantiate();
