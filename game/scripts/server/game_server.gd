@@ -23,6 +23,7 @@ const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
+const DeathRecovery = preload("res://scripts/shared/death_recovery.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
@@ -4966,8 +4967,10 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	if drops_gear:
 		var everything: Dictionary = victim.inventory.take_everything()
 		var death_bag_id: int = _make_bag(victim.position, everything)
-		if death_bag_id >= 0 and not _is_safe(victim.position):
-			CorpseScent.mark(bags[death_bag_id], time)
+		if death_bag_id >= 0:
+			DeathRecovery.tag(bags[death_bag_id], victim)
+			if not _is_safe(victim.position):
+				CorpseScent.mark(bags[death_bag_id], time)
 	victim.respawn_timer = Defs.RESPAWN_SECONDS
 	victim.dirty_inventory = true
 	events.append({"type": "death", "peer": victim.id, "killer": killer, "full_loot": drops_gear, "zone": zone})
@@ -6561,6 +6564,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"raid_aggro": raid_aggro_state,
 			"caravan": player.caravan_view.duplicate(true),
 			"equipment_presets": player.equipment_presets.duplicate(true),
+			"death_recovery": DeathRecovery.public_mark(bags, player, time),
 			"caravan_defended": player.caravan_defended,
 			"guild": {"id": player.guild_id, "name": player.guild_name, "rank": player.guild_rank},
 			"guild_siege_wins": int(guild_siege_wins.get(player.guild_id, 0)),

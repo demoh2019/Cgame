@@ -2145,6 +2145,15 @@ func _process(_delta: float) -> void:
 	if float(client.you.get("cargo_factor", 1.0)) < 0.9999 and \
 			not bool(client.you.get("mounted", false)):
 		_info_label.text += "\nHEAVY CARGO: footsteps draw infected attention; crouch to stay quieter."
+	var dropped: Dictionary = client.you.get("death_recovery", {})
+	if not dropped.is_empty():
+		var destination := TravelNavigation.target(dropped, "x", "z")
+		var here := TravelNavigation.target(client.you, "x", "z")
+		var distance: int = TravelNavigation.distance_meters(here, destination)
+		if distance >= 0:
+			_info_label.text += "\nLOST BACKPACK: %dm %s | %.0fs until public loot expires (open map to track)" % [
+				distance, TravelNavigation.compass(here, destination),
+				float(dropped.get("remaining", 0.0))]
 	if int(client.you.get("rested_xp_credit", 0)) > 0:
 		_info_label.text += "\nRESTED TRAINING: %d bonus XP left (paid rest at hub/fire)" % int(
 			client.you["rested_xp_credit"])
@@ -2462,7 +2471,10 @@ func _process(_delta: float) -> void:
 	_party_frames.text = PartyFrames.describe(client.you.get("party", {}), client.peer_id)
 	_party_frames.visible = not _party_frames.text.is_empty()
 	_death.visible = not bool(client.you.get("alive", true))
-	_death.text = "YOU DIED\n%s" % ("All carried items dropped." if bool(client.you.get("last_death_full_loot", false)) else "Carried equipment retained.")
+	_death.text = "YOU DIED\n%s" % (
+		"All carried items dropped. Track your LOST BACKPACK on the map after respawning."
+		if bool(client.you.get("last_death_full_loot", false))
+		else "Carried equipment retained.")
 	if _inventory_panel.visible:
 		_refresh_inventory()
 		_refresh_trade_controls()
