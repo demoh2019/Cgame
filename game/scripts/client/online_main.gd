@@ -19,6 +19,9 @@ const Audio = preload("res://scripts/client/audio.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
+const OutpostView = preload("res://scripts/client/outpost_view.gd")
+const HelpPanel = preload("res://scripts/client/help_panel.gd")
+const Vendor = preload("res://scripts/shared/vendor.gd")
 const Effects = preload("res://scripts/client/effects.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const SkillsPanel = preload("res://scripts/client/skills_panel.gd")
@@ -42,6 +45,8 @@ var avatar: Node3D
 var avatar_model
 var audio
 var hub_view
+var outposts
+var help_panel
 var demo_phase := -1.0
 var demo_storm := false
 var atmosphere
@@ -374,6 +379,11 @@ func _on_welcomed() -> void:
 	skills_panel = SkillsPanel.new()
 	hud.add_child(skills_panel)
 	skills_panel.setup(client)
+	help_panel = HelpPanel.new()
+	hud.add_child(help_panel)
+	outposts = OutpostView.new()
+	add_child(outposts)
+	hud.say("F2 shows every control.")
 	UiTheme.apply(hud)
 	client.event_received.connect(_on_skill_event)
 	_setup_chat()
@@ -456,6 +466,7 @@ func _process(delta: float) -> void:
 		streamer.focus_position = position
 		_apply_world_state()
 	entities.update_from(client)
+	outposts.update_from(client)
 	_update_party_rally_marker()
 	# The camera glides after the player.
 	var target := position + CAMERA_OFFSET * _zoom
@@ -554,6 +565,48 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.keycode:
 			KEY_K:
 				skills_panel.toggle()
+			KEY_F2:
+				help_panel.toggle()
+			KEY_Q:
+				_interact()
+			KEY_1:
+				_quick_use("canned_food")
+			KEY_2:
+				_quick_use("water_bottle")
+			KEY_3:
+				_quick_use("bandage")
+			KEY_4:
+				_cycle_weapon()
+			KEY_5:
+				_quick_use("jacket_1")
+			KEY_6:
+				_quick_use("field_antiseptic")
+			KEY_7:
+				_quick_use("antibiotics")
+			KEY_8:
+				_quick_use("thermal_wrap")
+			KEY_PERIOD:
+				_quick_use("frontier_stim")
+			KEY_SLASH:
+				_quick_use("herbal_scent_mask")
+			KEY_R:
+				client.drink()
+			KEY_T:
+				client.fish(Input.is_key_pressed(KEY_SHIFT))
+			KEY_Z:
+				client.rest()
+			KEY_B:
+				hud.toggle_inventory()
+			KEY_N:
+				client.vendor("water_bottle", 1, true)
+			KEY_V:
+				var sell_id: String = Vendor.first_fish(client.inventory) if Input.is_key_pressed(KEY_SHIFT) else Vendor.first_sellable(client.inventory)
+				if sell_id.is_empty():
+					hud.say("Nothing to sell.")
+				else:
+					client.vendor(sell_id, 1, false)
+			KEY_P:
+				client.contract("daily_claim" if Input.is_key_pressed(KEY_CTRL) else ("claim" if Input.is_key_pressed(KEY_SHIFT) else "accept"))
 			KEY_ENTER, KEY_KP_ENTER:
 				if chat_edit != null:
 					chat_edit.visible = true
@@ -639,6 +692,28 @@ func _unhandled_input(event: InputEvent) -> void:
 			_zoom = clampf(_zoom + 0.1, 0.55, 1.8)
 
 
+## Uses or equips an item you carry; the server decides whether it works.
+func _quick_use(item_id: String) -> void:
+	if client.inventory.count(item_id) < 1:
+		hud.say("You do not carry %s." % str(Defs.item(item_id).get("name", item_id)))
+		return
+	client.use_item(item_id)
+
+
+## Equips the next weapon in the backpack (crafted spears and bows included).
+func _cycle_weapon() -> void:
+	var owned: Array[String] = []
+	for item_id in Defs.items():
+		if str(Defs.item(str(item_id)).get("kind", "")) == "weapon" and client.inventory.count(str(item_id)) > 0:
+			owned.append(str(item_id))
+	owned.sort()
+	if owned.is_empty():
+		hud.say("No weapon in the backpack.")
+		return
+	var current: int = owned.find(client.inventory.weapon)
+	client.use_item(owned[(current + 1) % owned.size()])
+
+
 func _interact() -> void:
 	var p: Vector3 = client.predicted
 	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
@@ -686,6 +761,15 @@ func _run_demo() -> void:
 			if _demo_frames == 120 and skills_panel != null:
 				skills_panel.toggle()
 				skills_panel._tabs.current_tab = 1
+		"outpost":
+			if _demo_frames == 40 and not client.outposts.is_empty():
+				var post: Dictionary = client.outposts[0]
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": float(post["x"]) - 9.0, "z": float(post["z"]) + 4.0})
+				_zoom = 1.7
+				_screenshot_frames = 560 # Shoot before the zombies out there finish the visitor.
+		"help":
+			if _demo_frames == 60:
+				help_panel.toggle()
 		"hub":
 			if _demo_frames == 40:
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": 14.0, "z": 6.0})

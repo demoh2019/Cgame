@@ -402,7 +402,10 @@ func _draw_quest_card(you: Dictionary, view: Vector2) -> void:
 		var parts := _wrap(text, width - 24.0, 12)
 		wrapped.append([entry[0], parts])
 		height += 18.0 + 15.0 * parts.size() + 6.0
-	height += 22.0 * alerts.size()
+	var alert_lines: Array = []
+	for alert in alerts:
+		alert_lines.append_array(_wrap(str(alert), width - 24.0, 12))
+	height += 15.0 * alert_lines.size() + 6.0
 	_card(Rect2(x, y, width, height))
 	var cursor := y + 22.0
 	for entry in wrapped:
@@ -412,9 +415,9 @@ func _draw_quest_card(you: Dictionary, view: Vector2) -> void:
 			_text(Vector2(x + 12.0, cursor), part, 12, INK)
 			cursor += 15.0
 		cursor += 6.0
-	for alert in alerts:
-		_text(Vector2(x + 12.0, cursor), alert, 12, Color(1.0, 0.55, 0.4))
-		cursor += 22.0
+	for line in alert_lines:
+		_text(Vector2(x + 12.0, cursor), line, 12, Color(1.0, 0.55, 0.4))
+		cursor += 15.0
 
 
 func _alerts() -> Array:
@@ -426,7 +429,7 @@ func _alerts() -> Array:
 	for line in source.text.split("\n"):
 		for marker in ["PvP COMBAT", "SELF-DEFENSE", "BLOOD SCENT", "WARDEN", "PARTY RALLY", "SCENT MASK", "FIELD STIM", "GHILLIE"]:
 			if line.begins_with(marker):
-				result.append(line.substr(0, 38))
+				result.append(line)
 				break
 	return result
 

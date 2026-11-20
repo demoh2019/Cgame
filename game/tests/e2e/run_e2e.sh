@@ -27,11 +27,12 @@ for pid in $SOLO $VICTIM $KILLER; do
 done
 # The skill tree run is alone on the server, so the other bots cannot interfere with its checks.
 run_bot Skiller skills || fail=1
+run_bot Feature features || fail=1
 kill $SERVER 2>/dev/null
 wait $SERVER 2>/dev/null
 # A bot that never ran (parse error, crash) must not count as a pass: demand its PASS line.
 grep -q "SERVER listening" "$LOG/server.log" || { echo "the server never started"; fail=1; }
-for name in Solo Victim Killer Skiller; do
+for name in Solo Victim Killer Skiller Feature; do
   if grep -q "^BOT $name PASS" "$LOG/$name.log"; then
     grep -E "^BOT $name" "$LOG/$name.log"
   else

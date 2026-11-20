@@ -164,6 +164,8 @@ func _run() -> void:
 			await until(func() -> bool: return false, 3.0)
 		"skills":
 			await _scenario_skills()
+		"features":
+			await _scenario_features()
 		"persist1":
 			await _scenario_persist1()
 		"persist2":
@@ -401,3 +403,102 @@ func _scenario_skills() -> void:
 	# Running bonus reaches the client for prediction.
 	debug("xp", {"skill": "athletics", "amount": 3000})
 	check(await until(func() -> bool: return client.you.get("speed_bonus", 0.0) > 0.02, 4.0), "the speed bonus reaches the client")
+
+
+## Every command of the game over the network, as the online client sends them. Each must be answered by the
+## server (a result of its kind arrives) and the ones that can succeed here must change the right state.
+func _scenario_features() -> void:
+	var answer := func(kind: String, action: Callable) -> Dictionary:
+		client.last_results.erase(kind)
+		action.call()
+		await until(func() -> bool: return client.last_results.has(kind), 3.0)
+		return client.last_results.get(kind, {})
+	# The spawn point is near the hub: the vendor, workbench and stash are in reach there.
+	for entry in [["canned_food", 4], ["water_bottle", 4], ["bandage", 3], ["field_antiseptic", 2], ["antibiotics", 2], ["thermal_wrap", 2], ["frontier_stim", 1], ["herbal_scent_mask", 1], ["jacket_1", 1], ["wood_1", 12], ["stone_1", 6], ["fiber_1", 6], ["silver", 300]]:
+		if Defs.is_item(entry[0]):
+			debug("give", {"item": entry[0], "count": entry[1]})
+	await until(func() -> bool: return client.inventory.count("silver") >= 300, 4.0)
+	check(client.inventory.count("silver") >= 300, "received the test items")
+	await teleport(11.5, 2.5)
+
+	# --- Quick uses ---
+	debug("hurt", {"amount": 50.0})
+	await until(func() -> bool: return client.you.get("health", 100.0) < 70.0, 3.0)
+	var before_bandage: int = client.inventory.count("bandage")
+	var used: Dictionary = await answer.call("use", func() -> void: client.use_item("bandage"))
+	check(bool(used.get("ok", false)), "a bandage heals a wounded survivor: %s" % str(used))
+	check(await until(func() -> bool: return client.inventory.count("bandage") == before_bandage - 1, 3.0), "and is consumed")
+	used = await answer.call("use", func() -> void: client.use_item("jacket_1"))
+	check(bool(used.get("ok", false)) and await until(func() -> bool: return client.you.get("armor", "") == "jacket_1", 3.0), "armor is worn: %s" % str(used))
+	used = await answer.call("use", func() -> void: client.use_item("canned_food"))
+	check(bool(used.get("ok", false)), "food can be eaten: %s" % str(used))
+	used = await answer.call("use", func() -> void: client.use_item("thermal_wrap"))
+	check(used.has("ok"), "a heat pack gets an answer: %s" % str(used))
+	used = await answer.call("use", func() -> void: client.use_item("frontier_stim"))
+	check(used.has("ok"), "a stimulant gets an answer: %s" % str(used))
+
+	# --- Town: vendor, contract, stash, rest, market ---
+	var silver: int = client.inventory.count("silver")
+	var bought: Dictionary = await answer.call("vendor", func() -> void: client.vendor("water_bottle", 1, true))
+	check(bool(bought.get("ok", false)), "the vendor sells water: %s" % str(bought))
+	check(await until(func() -> bool: return client.inventory.count("silver") < silver, 3.0), "and takes silver for it")
+	silver = client.inventory.count("silver")
+	var sold: Dictionary = await answer.call("vendor", func() -> void: client.vendor("stone_1", 1, false))
+	check(bool(sold.get("ok", false)), "the vendor buys materials: %s" % str(sold))
+	check(await until(func() -> bool: return client.inventory.count("silver") > silver, 3.0), "and pays for them")
+	var contract: Dictionary = await answer.call("contract", func() -> void: client.contract("accept"))
+	check(bool(contract.get("ok", false)), "a contract is accepted at the camp: %s" % str(contract))
+	check(await until(func() -> bool: return str(client.you.get("contract", {}).get("active", "")) != "", 3.0), "and shows in the journal")
+	var stashed: Dictionary = await answer.call("stash", func() -> void: client.move_stash("wood_1", 5, true))
+	check(bool(stashed.get("ok", false)), "wood goes into the protected stash: %s" % str(stashed))
+	check(await until(func() -> bool: return client.stash.count("wood_1") == 5, 3.0), "the stash holds it")
+	stashed = await answer.call("stash", func() -> void: client.move_stash("wood_1", 5, false))
+	check(bool(stashed.get("ok", false)) and await until(func() -> bool: return client.stash.count("wood_1") == 0, 3.0), "and gives it back: %s" % str(stashed))
+	var rested: Dictionary = await answer.call("rest", func() -> void: client.rest())
+	check(rested.has("ok"), "camp rest gets an answer: %s" % str(rested))
+	client.last_results.erase("market")
+	client.market_list()
+	check(await until(func() -> bool: return client.last_results.has("market"), 3.0), "the market lists its offers")
+	var listed: Dictionary = await answer.call("market", func() -> void: client.market_create("stone_1", 2, 7))
+	check(bool(listed.get("ok", false)), "a market offer can be posted: %s" % str(listed))
+
+	# --- Building, fire, decoy ---
+	await teleport(60.0, 60.0)
+	var built: Dictionary = await answer.call("build", func() -> void: client.build(Vector2(client.you["x"] + 2.5, client.you["z"])))
+	check(built.has("ok"), "a barricade request gets an answer: %s" % str(built))
+	var fire: Dictionary = await answer.call("campfire", func() -> void: client.light_campfire(Vector2(client.you["x"], client.you["z"] + 2.5)))
+	check(bool(fire.get("ok", false)), "a campfire is lit in the wild: %s" % str(fire))
+	check(await until(func() -> bool: return client.campfires.size() > 0, 3.0), "and appears in the snapshot")
+	var refuel: Dictionary = await answer.call("refuel", func() -> void: client.refuel_campfire(client.nearest_campfire(client.predicted)))
+	check(refuel.has("ok"), "a campfire can be refuelled: %s" % str(refuel))
+	var doused: Dictionary = await answer.call("extinguish", func() -> void: client.extinguish_campfire(client.nearest_campfire(client.predicted)))
+	check(doused.has("ok"), "and put out: %s" % str(doused))
+	debug("give", {"item": "noise_decoy", "count": 1})
+	var thrown: Dictionary = await answer.call("throw_decoy", func() -> void: client.throw_decoy(Vector2(0.0, 1.0)))
+	check(thrown.has("ok"), "a noise decoy gets an answer: %s" % str(thrown))
+
+	# --- Social ---
+	var invited: Dictionary = await answer.call("party", func() -> void: client.party_invite(client.peer_id))
+	check(not bool(invited.get("ok", true)), "you cannot invite yourself to a party")
+	var dueled: Dictionary = await answer.call("duel", func() -> void: client.duel_invite(client.peer_id, false))
+	check(not bool(dueled.get("ok", true)), "you cannot duel yourself")
+	var traded: Dictionary = await answer.call("trade", func() -> void: client.trade_invite(client.peer_id))
+	check(not bool(traded.get("ok", true)), "you cannot trade with yourself")
+	var queued: Dictionary = await answer.call("arena_queue", func() -> void: client.arena_queue_join())
+	check(queued.has("ok"), "the arena queue answers: %s" % str(queued))
+	client.arena_queue_leave()
+
+	# --- Outposts are part of the world snapshot ---
+	check(client.outposts.size() >= 1, "outposts are in the world (%d)" % client.outposts.size())
+	if client.outposts.size() >= 1:
+		var post: Dictionary = client.outposts[0]
+		var supplies: Dictionary = await answer.call("outpost_supplies", func() -> void: client.outpost_supplies(int(post["id"])))
+		check(supplies.has("ok") and not bool(supplies.get("ok", true)), "supplies of an uncaptured outpost cannot be taken: %s" % str(supplies))
+		var fortify: Dictionary = await answer.call("outpost_fortify", func() -> void: client.outpost_fortify(int(post["id"])))
+		check(fortify.has("ok") and not bool(fortify.get("ok", true)), "a neutral outpost cannot be fortified: %s" % str(fortify))
+
+	# --- Fishing (needs water) and the guardian taunt ---
+	var fished: Dictionary = await answer.call("fish", func() -> void: client.fish(false))
+	check(fished.has("ok"), "fishing gets an answer: %s" % str(fished))
+	var taunt: Dictionary = await answer.call("guardian_taunt", func() -> void: client.guardian_taunt())
+	check(taunt.has("ok"), "the guardian taunt gets an answer: %s" % str(taunt))

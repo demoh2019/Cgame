@@ -14,3 +14,9 @@
 * **F3** switches to the old full text readout (every number and timer) for debugging and for the many small status lines.
 
 `ui_theme.gd` styles the remaining windows (inventory, crafting, skills, chat).
+
+## Controls
+
+F2 shows every control (the same keys work in the local and the online client): 1-8 quick uses (food, water, bandage, next weapon, armor,
+antiseptic, antibiotics, heat pack), `.` stim, `/` scent salve, R or F lake water, T fishing, Z camp rest, N and V vendor, P contracts,
+B stash, Q or E interact. Siege outposts are drawn in the world with their owner's colour, capture ring and a label.

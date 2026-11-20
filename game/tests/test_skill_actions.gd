@@ -8,6 +8,7 @@ const GameServer = preload("res://scripts/server/game_server.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 const SkillsTest = preload("res://tests/test_skills.gd")
+const Gateway = preload("res://scripts/server/nakama_gateway.gd")
 
 
 func _ticks(server, seconds: float) -> void:
@@ -478,7 +479,7 @@ func _persistence(t, world) -> void:
 	p.survival.health = p.survival.max_health
 	var data: Dictionary = server.character_data(p)
 	t.check(data.has("skills"), "the character holds a skill sheet")
-	var through_json: Dictionary = JSON.parse_string(JSON.stringify(data))
+	var through_json: Dictionary = Gateway.whole_numbers_as_ints(JSON.parse_string(JSON.stringify(data)))
 	t.check(server.valid_character_data(through_json), "it survives JSON and validates")
 	var restored = server.add_player(101, "Restored", "uid-restored", through_json)
 	t.eq(restored.skills.xp, p.skills.xp, "xp restored")

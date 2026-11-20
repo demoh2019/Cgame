@@ -105,8 +105,32 @@ func load_character(user_id: String) -> Dictionary:
 	# into an empty object, which broke saved state that holds empty lists. Older records were stored raw.
 	if data.has("json"):
 		var document: Variant = JSON.parse_string(str(data["json"]))
-		return {"ok": true, "exists": true, "data": document if typeof(document) == TYPE_DICTIONARY else {}}
-	return {"ok": true, "exists": true, "data": data}
+		return {"ok": true, "exists": true, "data": whole_numbers_as_ints(document) if typeof(document) == TYPE_DICTIONARY else {}}
+	return {"ok": true, "exists": true, "data": whole_numbers_as_ints(data)}
+
+
+## JSON has one number type, so every whole number comes back as a float (3 -> 3.0). The game's save validators are strict
+## about integer fields (tests pin that a tier of 2.0 handed to a validator is refused), and storage cannot tell 2 from 2.0,
+## so a document read from storage gets its whole numbers turned back into integers once, here, before any validator
+## sees it. Fractions stay floats.
+static func whole_numbers_as_ints(value: Variant) -> Variant:
+	match typeof(value):
+		TYPE_DICTIONARY:
+			var result: Dictionary = {}
+			for key in value:
+				result[key] = whole_numbers_as_ints(value[key])
+			return result
+		TYPE_ARRAY:
+			var list: Array = []
+			for item in value:
+				list.append(whole_numbers_as_ints(item))
+			return list
+		TYPE_FLOAT:
+			var number: float = value
+			if is_finite(number) and number == floorf(number) and absf(number) < 9007199254740992.0:
+				return int(number)
+			return value
+	return value
 
 
 func save_character(user_id: String, data: Dictionary) -> bool:
