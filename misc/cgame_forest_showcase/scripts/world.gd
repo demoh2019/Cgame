@@ -154,6 +154,8 @@ func _create_streaming_world() -> void:
     player.set("streaming_world", world_partition)
     world_partition.cell_loaded.connect(_on_stream_cell_loaded)
     world_partition.cell_unloaded.connect(_on_stream_cell_unloaded)
+    world_partition.cell_physics_ready.connect(_on_stream_cell_physics_ready)
+    world_partition.cell_physics_unready.connect(_on_stream_cell_physics_unready)
     world_partition.observer_cell_changed.connect(_on_observer_cell_changed)
     world_partition.streaming_source_ready.connect(_on_streaming_source_ready)
     world_partition.streaming_source_unready.connect(_on_streaming_source_unready)
@@ -225,7 +227,7 @@ func _fast_travel() -> void:
     var target_cell: Vector2i = Vector2i.ZERO if going_home else OUTPOST_CELL
     var target: Vector2 = HOME_POSITION if going_home else OUTPOST_POSITION
 
-    if not world_partition.are_cells_loaded(target_cell, 0):
+    if not world_partition.are_cells_physics_ready(target_cell, 0):
         if not world_partition.pin_cell(target_cell):
             push_warning("Fast-travel destination is not available to stream.")
             return
@@ -233,23 +235,35 @@ func _fast_travel() -> void:
         _refresh_hud()
         return
 
-    # The scene-tree node can be instantiated before the PhysicsServer has
-    # performed its collision-world synchronization. Hold the target pinned
-    # for two physics-frame signals and recheck readiness before teleporting.
+    # The engine supplies a two-tick activation barrier; also perform an
+    # actual narrow collision query against the DESTINATION terrain body
+    # during a physics_frame before relocating the player.
     if not world_partition.pin_cell(target_cell):
         return
     _fast_travel_in_progress = true
     await get_tree().physics_frame
-    await get_tree().physics_frame
     if not is_inside_tree() or world_partition == null or player == null:
         _fast_travel_in_progress = false
         return
-    if not world_partition.are_cells_loaded(target_cell, 0):
+    if not world_partition.are_cells_physics_ready(target_cell, 0):
         _fast_travel_in_progress = false
         return
 
-    player.call("teleport_to_ground",
-        target.x, target.y, height_at(target.x, target.y))
+    var cell_node: Node3D = world_partition.get_cell_node(target_cell)
+    var terrain_body: StaticBody3D = cell_node.get_node_or_null(
+        "TerrainPatch/GroundCollision") as StaticBody3D if cell_node != null else null
+    var ground_height: float = height_at(target.x, target.y)
+    var ray := PhysicsRayQueryParameters3D.create(
+        Vector3(target.x, ground_height + 8.0, target.y),
+        Vector3(target.x, ground_height - 8.0, target.y))
+    ray.collision_mask = 1
+    var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(ray)
+    if terrain_body == null or hit.is_empty() or hit.get("collider") != terrain_body:
+        push_warning("Fast-travel destination has no confirmed terrain collision.")
+        _fast_travel_in_progress = false
+        return
+
+    player.call("teleport_to_ground", target.x, target.y, ground_height)
     world_partition.unpin_cell(target_cell)
     world_partition.prefetch_direction = Vector2i.ZERO
     world_partition.update_streaming()
@@ -315,12 +329,24 @@ func _on_stream_cell_unloaded(_cell: Vector2i) -> void:
     _refresh_player_stream_safety()
 
 
+func _on_stream_cell_physics_ready(_cell: Vector2i) -> void:
+    # Scene-tree readiness alone does not guarantee that the floor has had a
+    # physics integration tick. Enable the capsule only after the native
+    # streamer has crossed its two-tick scene activation barrier.
+    _refresh_player_stream_safety()
+    _refresh_hud()
+
+
+func _on_stream_cell_physics_unready(_cell: Vector2i) -> void:
+    _refresh_player_stream_safety()
+
+
 func _refresh_player_stream_safety() -> void:
     if player == null or world_partition == null:
         return
     var local: Vector3 = world_partition.to_local(player.global_position)
     var cell: Vector2i = world_partition.local_position_to_cell(local)
-    player.set("movement_enabled", world_partition.are_cells_loaded(cell, 0))
+    player.set("movement_enabled", world_partition.is_cell_physics_ready(cell))
 
 
 func _create_crystals() -> void:
@@ -475,6 +501,7 @@ func _refresh_hud() -> void:
     var gpu_ms: float = RenderingServer.viewport_get_measured_render_time_gpu(get_viewport().get_viewport_rid())
     var gpu_text: String = "%.2f ms" % gpu_ms if gpu_ms > 0.0 else "N/A"
     var loaded: int = world_partition.get_loaded_cell_count() if world_partition != null else 0
+    var physics_ready: int = world_partition.get_physics_ready_cell_count() if world_partition != null else 0
     var configured: int = world_partition.get_configured_cell_count() if world_partition != null else 0
     var pending: int = world_partition.get_pending_cell_count() if world_partition != null else 0
     var inflight: int = world_partition.get_inflight_request_count() if world_partition != null else 0
@@ -503,7 +530,7 @@ func _refresh_hud() -> void:
     hud.text = "AURORA FOREST  |  Cgame / Godot 4.8\n" \
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
-        + "Ячейки: %d/%d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pending, inflight, failed, current_region.x, current_region.y] \
+        + "Ячейки: %d/%d   физика: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, physics_ready, pending, inflight, failed, current_region.x, current_region.y] \
         + "Кэш земли: %d/%d   попадания: %d   промахи: %d\n" % [cache["entries"], cache["capacity"], cache["hits"], cache["misses"]] \
         + "Предзагрузка: X=%d Z=%d   впереди: %d ячейки\n" % [ahead.x, ahead.y, world_partition.prefetch_distance] \
         + "Дальний HLOD: %d плит / %d подготовлено, %d крон\n" % [far["visible"], far["allocated"], far["visible_canopies"]] \
