@@ -37,14 +37,7 @@ func _wait_for_cell(stream: WorldPartition3D, cell: Vector2i,
 
 
 func _get_active_cell_node(stream: WorldPartition3D, grid_cell: Vector2i) -> Node3D:
-    var expected: Vector3 = stream.cell_to_local_position(grid_cell)
-    for child in stream.get_children():
-        var node := child as Node3D
-        if node != null and not node.is_queued_for_deletion():
-            if node.position.distance_to(expected) < 0.01:
-                return node
-    return null
-
+    return stream.get_cell_node(grid_cell)
 
 func _run() -> void:
     TileCache.clear()
