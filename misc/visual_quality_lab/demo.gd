@@ -472,13 +472,27 @@ func _build_interaction_ui() -> void:
 	var ui: CanvasLayer = get_node("VisualQualityUI") as CanvasLayer
 	interaction_label = Label.new()
 	interaction_label.name = "WorldInteractionPrompt"
-	interaction_label.position = Vector2(18, 660)
+	interaction_label.anchor_left = 0.5
+	interaction_label.anchor_right = 1.0
+	interaction_label.anchor_top = 1.0
+	interaction_label.anchor_bottom = 1.0
+	interaction_label.offset_left = 12.0
+	interaction_label.offset_right = -18.0
+	interaction_label.offset_top = -84.0
+	interaction_label.offset_bottom = -50.0
 	interaction_label.add_theme_font_size_override("font_size", 19)
 	interaction_label.add_theme_color_override("font_color", Color(1.0, 0.94, 0.61))
 	ui.add_child(interaction_label)
 	interaction_result_label = Label.new()
 	interaction_result_label.name = "WorldInteractionFeedback"
-	interaction_result_label.position = Vector2(18, 692)
+	interaction_result_label.anchor_left = 0.5
+	interaction_result_label.anchor_right = 1.0
+	interaction_result_label.anchor_top = 1.0
+	interaction_result_label.anchor_bottom = 1.0
+	interaction_result_label.offset_left = 12.0
+	interaction_result_label.offset_right = -18.0
+	interaction_result_label.offset_top = -45.0
+	interaction_result_label.offset_bottom = -12.0
 	ui.add_child(interaction_result_label)
 	_on_interaction_focus_changed("", "")
 
