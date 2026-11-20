@@ -18,3 +18,16 @@ Benchmark representative scenes at native 720p and 1080p on the target devices; 
 Forward+ now uses FSR 2.2 at 0.59/0.77 scale for Performance/Balanced. Mobile uses FSR 1 spatial scaling; the default Compatibility renderer remains at native resolution, without unsupported temporal upscaling. High and Ultra use native resolution and their configured MSAA. Ultra optionally enables screen-space indirect lighting on Forward+ only.
 
 The quality presets also tune the existing procedural grass LOD pipeline: streaming radius, shared per-frame build budget, and shader fade range. Switching quality updates the visibility range of already generated grass tiles without regenerating meshes. Compatible renderers and distant foliage must be visually verified on actual GPU hardware.
+
+
+## Water shading budget
+
+The water shader uses **analytic slopes from two crossing wave trains** rather than sampling a three-octave noise function at three nearby pixels to calculate its normal. The existing `water_ripples` preset still selects the detail budget:
+
+- Performance (0.0): flat, inexpensive water normal and no animated foam noise; depth tint and Fresnel remain.
+- Balanced (0.22): animated analytic wave normals and one shoreline-foam noise lookup.
+- High/Ultra (0.35/0.48): the waves plus three microdetail-noise evaluations and up to two shore-foam noise evaluations.
+
+The previous full ripple path used up to **11 calls to `value_noise` per water pixel** (3 octaves × 3 normal samples + 2 foam samples); the new high-detail path uses up to **5**, and the mid-tier uses **1**. These counts describe shader work, **not** measured FPS. Changes also add subtle emissive wave-crest highlights while preserving the original shoreline depth transitions.
+
+For validation, capture the same water-heavy view and camera angle at the same time of day under each preset, warm up shader compilation, compare median/p95 GPU frame times, and inspect shallow-water foam and highlights during a storm and at dusk.
