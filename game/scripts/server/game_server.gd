@@ -14,6 +14,7 @@ const TrainingDuel = preload("res://scripts/shared/training_duel.gd")
 const ArenaRating = preload("res://scripts/shared/arena_rating.gd")
 const ArenaMatchmaking = preload("res://scripts/shared/arena_matchmaking.gd")
 const PvPHonor = preload("res://scripts/shared/pvp_honor.gd")
+const OutlawBounty = preload("res://scripts/shared/outlaw_bounty.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
 const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
@@ -2784,14 +2785,24 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 					events.append({"type": "infamy", "peer": attacker.id,
 						"score": attacker.pvp_infamy,
 						"outlaw": PvpInfamy.is_outlaw(attacker.pvp_infamy)})
+			var zone: int = world.zone_at(victim.position.x, victim.position.z)
 			var honor_result: Dictionary = PvPHonor.record(attacker, victim,
-				world.zone_at(victim.position.x, victim.position.z), time, pvp_honor_ledger)
+				zone, time, pvp_honor_ledger)
 			if bool(honor_result.get("ok", false)):
 				attacker.dirty_character = true
 				events.append({"type": "pvp_honor", "peer": attacker.id,
 					"earned": int(honor_result["awarded"]),
 					"honor": attacker.pvp_honor,
 					"rank": str(honor_result["rank"])})
+			# The honor ledger already enforces the stable-account victim
+			# cooldown. Never pay silver for replayed kills, guests or alts.
+			var bounty: int = OutlawBounty.reward_for_kill(attacker, victim, zone, honor_result)
+			if bounty > 0:
+				var overflow: Dictionary = _give_items(attacker, {"silver": bounty})
+				if not overflow.is_empty():
+					_make_bag(attacker.position, overflow, attacker.id)
+				events.append({"type": "outlaw_bounty", "peer": attacker.id,
+					"silver": bounty, "zone": zone})
 			_on_player_death(victim, attacker.id)
 
 
