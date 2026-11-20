@@ -45,6 +45,110 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Navigation corridor route includes edge-adjacent cells") {
+	WorldPartition3D world;
+	const Array route = world.get_cell_route(Vector2i(0, 0), Vector2i(3, 2));
+	REQUIRE(route.size() == 6);
+	CHECK(route[0] == Vector2i(0, 0));
+	CHECK(route[5] == Vector2i(3, 2));
+	for (int i = 1; i < route.size(); i++) {
+		const Vector2i a = route[i - 1];
+		const Vector2i b = route[i];
+		const int dx = ABS(a.x - b.x);
+		const int dz = ABS(a.y - b.y);
+		CHECK(dx + dz == 1);
+	}
+	const Array reverse = world.get_cell_route(Vector2i(3, 2), Vector2i(0, 0));
+	CHECK(reverse.size() == route.size());
+	CHECK(world.get_cell_route(Vector2i(4, 9), Vector2i(4, 9)).size() == 1);
+	const Array negatives = world.get_cell_route(Vector2i(-2, -3), Vector2i(-5, -3));
+	CHECK(negatives.size() == 4);
+	CHECK(negatives[3] == Vector2i(-5, -3));
+}
+
+TEST_CASE("[WorldPartition3D] Navigation corridor rejects oversized and extreme routes") {
+	WorldPartition3D world;
+	CHECK(world.get_cell_route(Vector2i(0, 0), Vector2i(63, 0)).size() == 64);
+	ERR_PRINT_OFF;
+	CHECK(world.get_cell_route(Vector2i(0, 0), Vector2i(64, 0)).is_empty());
+	CHECK(world.get_cell_route(Vector2i(-1000000000, -1000000000), Vector2i(1000000000, 1000000000)).is_empty());
+	ERR_PRINT_ON;
+	CHECK(world.get_cell_lease_count_total() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation corridor atomically acquires and releases cells") {
+	WorldPartition3D world;
+	Array route = world.get_cell_route(Vector2i(0, 0), Vector2i(2, 1));
+	Array tokens = world.acquire_cell_route(Vector2i(0, 0), Vector2i(2, 1));
+	REQUIRE(tokens.size() == route.size());
+	CHECK(world.get_cell_lease_count_total() == tokens.size());
+	for (int i = 0; i < route.size(); i++) {
+		CHECK(world.get_cell_lease_count(route[i]) == 1);
+	}
+	Array second = world.acquire_cell_route(Vector2i(0, 0), Vector2i(2, 1));
+	CHECK(second.size() == tokens.size());
+	CHECK(world.get_cell_lease_count(Vector2i(0, 0)) == 2);
+	CHECK(world.release_cell_route(tokens) == tokens.size());
+	CHECK(world.get_cell_lease_count(Vector2i(0, 0)) == 1);
+	CHECK(world.release_cell_route(tokens) == 0);
+	CHECK(world.release_cell_route(second) == second.size());
+	CHECK(world.get_cell_lease_count_total() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation corridor disabled layer fails without claiming tokens") {
+	WorldPartition3D world;
+	world.set_cell_layer(Vector2i(1, 0), "locked");
+	world.set_layer_enabled("locked", false);
+	CHECK(world.acquire_cell_route(Vector2i(0, 0), Vector2i(3, 0)).is_empty());
+	CHECK(world.get_cell_lease_count_total() == 0);
+	world.set_layer_enabled("locked", true);
+	Array tokens = world.acquire_cell_route(Vector2i(0, 0), Vector2i(3, 0));
+	REQUIRE(tokens.size() == 4);
+	CHECK(world.release_cell_route(tokens) == 4);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation corridor respects token capacity atomically") {
+	WorldPartition3D world;
+	Vector<int> reserved;
+	for (int i = 0; i < 254; i++) {
+		const int token = world.acquire_cell_lease(Vector2i(i, 9));
+		REQUIRE(token > 0);
+		reserved.push_back(token);
+	}
+	ERR_PRINT_OFF;
+	CHECK(world.acquire_cell_route(Vector2i(0, 0), Vector2i(3, 0)).is_empty());
+	ERR_PRINT_ON;
+	CHECK(world.get_cell_lease_count_total() == 254);
+	Array tokens = world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0));
+	REQUIRE(tokens.size() == 2);
+	CHECK(world.get_cell_lease_count_total() == 256);
+	CHECK(world.release_cell_route(tokens) == 2);
+	for (int token : reserved) {
+		CHECK(world.release_cell_lease(token));
+	}
+	CHECK(world.get_cell_lease_count_total() == 0);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Navigation corridor streams a distant target with no observer") {
+	const String path = make_cell_scene("corridor_prefetch");
+	{
+		WorldFixture fixture;
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->set_cell_scene(Vector2i(1, 0), path);
+		fixture.world->set_max_new_requests_per_frame(1);
+		const Array tokens = fixture.world->acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0));
+		REQUIRE(tokens.size() == 2);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(1, 0)));
+		CHECK(fixture.world->release_cell_route(tokens) == 2);
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(1, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
 TEST_CASE("[WorldPartition3D] Simulation diagnostics for missing cells return zero counts") {
 	WorldPartition3D world;
 	const Dictionary counts = world.get_cell_simulation_stats(Vector2i(999, -999));

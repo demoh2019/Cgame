@@ -135,6 +135,9 @@ public:
 	int get_cell_lease_count(const Vector2i &p_cell) const;
 	int get_cell_lease_count_total() const;
 	int get_leased_cell_count() const;
+	Array get_cell_route(const Vector2i &p_from, const Vector2i &p_to) const;
+	Array acquire_cell_route(const Vector2i &p_from, const Vector2i &p_to);
+	int release_cell_route(const Array &p_tokens);
 
 	void set_cell_layers(const Dictionary &p_layers);
 	Dictionary get_cell_layers() const;
