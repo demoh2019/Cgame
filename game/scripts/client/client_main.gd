@@ -21,6 +21,7 @@ const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const RainVfx = preload("res://scripts/client/rain_vfx.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
@@ -59,6 +60,7 @@ var _camera: Camera3D
 var _sun: DirectionalLight3D
 var _world_environment: Environment
 var _atmosphere # Script-backed Atmosphere instance; custom fields are not members of Node3D.
+var _rain_vfx: Node3D
 var _weather_next_update: float = -1.0
 var _weather_storming := false
 var _visual_weather_wind := Vector2.ZERO
@@ -106,6 +108,9 @@ func _ready() -> void:
 		_recipes.append(str(recipe_id))
 	_make_light_and_camera()
 	GraphicsQuality.apply(get_viewport(), _atmosphere, null)
+	_rain_vfx = RainVfx.create(str(RenderingServer.get_current_rendering_method()))
+	add_child(_rain_vfx)
+	RainVfx.apply_quality(_rain_vfx, GraphicsQuality.level())
 	_lightning_visual = LightningVisual.new()
 	_lightning_visual.name = "StormLightningWarning"
 	add_child(_lightning_visual)
@@ -799,6 +804,8 @@ func _physics_process(delta: float) -> void:
 	_flare_visual.set_burning(survivor.survival.alive and survivor.flare_seconds > 0.0)
 	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
 	_camera.look_at(survivor.position + Vector3(0, 0.7, 0), Vector3.UP)
+	# The offline preview has the same rain density and storm fade as online.
+	RainVfx.update(_rain_vfx, _camera.global_position + Vector3(0.0, -2.0, 0.0), _atmosphere.storm)
 	_stream_chunks()
 	if _bank_open and not _can_use_bank():
 		_bank_open = false
@@ -972,6 +979,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			event.keycode == KEY_F11 and event.ctrl_pressed:
 		GraphicsQuality.cycle()
 		GraphicsQuality.apply(get_viewport(), _atmosphere, null)
+		RainVfx.apply_quality(_rain_vfx, GraphicsQuality.level())
 		_feedback = "Graphics: %s (Ctrl+F11 to change)." % GraphicsQuality.get_name()
 		_update_hud()
 		get_viewport().set_input_as_handled()
