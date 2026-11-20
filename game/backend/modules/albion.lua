@@ -192,8 +192,13 @@ local SIEGE_RECEIPTS = "guild_siege_receipts"
 local MAX_SIEGE_WINS = 1000000
 
 local function require_guild_id(value)
+  -- UUID shape: 8-4-4-4-12 hexadecimal digits. A character class [] would
+  -- match only one character; keep the anchored five-part pattern explicit.
+  local uuid_pattern = "^" .. string.rep("%x", 8) .. "%-"
+    .. string.rep("%x", 4) .. "%-" .. string.rep("%x", 4) .. "%-"
+    .. string.rep("%x", 4) .. "%-" .. string.rep("%x", 12) .. "$"
   if type(value) ~= "string" or #value ~= 36
-    or not value:match("^[%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x]$") then
+    or not value:match(uuid_pattern) then
     error({ "invalid guild id", 3 })
   end
 end
