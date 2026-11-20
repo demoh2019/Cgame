@@ -10,6 +10,7 @@ const PROXY_SCENE := "res://scenes/cell_proxy.tscn"
 const FLY_SCRIPT := preload("res://scripts/free_fly.gd")
 const QUALITY_SCRIPT := preload("res://scripts/streaming_quality.gd")
 const CROSSFADE_SCRIPT := preload("res://scripts/hlod_crossfade_controller.gd")
+const MANIFEST_SCRIPT := preload("res://tools/hlod_bake_manifest.gd")
 
 var camera: Camera3D
 var prefetch_source: Node3D
@@ -20,6 +21,7 @@ var prefetch_enabled := true
 var proxies_enabled := true
 var hud_elapsed := 0.0
 var baked_proxy_cell_count := 0
+var baked_manifest: Dictionary = {}
 var quality_controller = QUALITY_SCRIPT.new()
 var crossfade_controller: CROSSFADE_SCRIPT
 
@@ -28,6 +30,14 @@ func _ready() -> void:
     if not ClassDB.class_exists("WorldPartition3D"):
         push_error("Cgame build with native world_partition module is required.")
         return
+    # The manifest is tied to the current detailed art, baking code and stride.
+    # No stale or corrupted proxy file should be registered by the streamer.
+    var manifest_file := MANIFEST_SCRIPT.MANIFEST_PATH
+    if FileAccess.file_exists(manifest_file):
+        var raw: Variant = JSON.parse_string(FileAccess.get_file_as_string(manifest_file))
+        if raw is Dictionary:
+            var stride: int = int(raw.get("stride", -1))
+            baked_manifest = MANIFEST_SCRIPT.read_valid_manifest(stride)
     distant = _make_streamer("DistantProxies", 4, 5, PROXY_SCENE, 1)
     detail = _make_streamer("DetailedCells", 1, 2, DETAIL_SCENE, 2)
     _apply_quality_profile()
@@ -60,10 +70,12 @@ func _make_streamer(name: String, radius: int, unload_radius: int, scene_path: S
         for z in range(-WORLD_HALF_EXTENT, WORLD_HALF_EXTENT + 1):
             var path := scene_path
             if scene_path == PROXY_SCENE:
-                var baked := "res://generated/forest_proxy_%d_%d.tscn" % [x, z]
-                if ResourceLoader.exists(baked, "PackedScene"):
-                    path = baked
-                    baked_proxy_cell_count += 1
+                var cell := Vector2i(x, z)
+                if MANIFEST_SCRIPT.is_cached_proxy_valid(cell, baked_manifest):
+                    var baked: String = MANIFEST_SCRIPT.proxy_path(cell)
+                    if ResourceLoader.exists(baked, "PackedScene"):
+                        path = baked
+                        baked_proxy_cell_count += 1
             cell_paths[Vector2i(x, z)] = path
     world.call("set_cell_scenes", cell_paths)
     return world

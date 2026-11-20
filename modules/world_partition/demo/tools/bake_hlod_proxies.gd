@@ -15,6 +15,7 @@ const DEFAULT_RADIUS := 6
 const DEFAULT_STRIDE := 8
 const MAX_RADIUS := 16
 const MAX_STRIDE := 64
+const Manifest = preload("res://tools/hlod_bake_manifest.gd")
 
 func _initialize() -> void:
     call_deferred("_build_all")
@@ -51,19 +52,63 @@ func _build_all() -> void:
         quit(2)
         return
 
+    var fingerprint: String = Manifest.source_fingerprint(stride)
+    if fingerprint.is_empty():
+        push_error("Cannot hash HLOD inputs; check source and baker files.")
+        quit(2)
+        return
+
+    var old_manifest: Dictionary = Manifest.read_valid_manifest(stride)
+    var old_cells: Dictionary = old_manifest.get("cells", {})
+    var new_cells: Dictionary = {}
     var baked := 0
+    var skipped := 0
     var kept_instances := 0
     for x in range(-radius, radius + 1):
         for z in range(-radius, radius + 1):
-            var count := _bake_cell(source_scene, Vector2i(x, z), stride)
+            var cell := Vector2i(x, z)
+            var cell_key: String = Manifest.cell_key(cell)
+            var proxy_path: String = Manifest.proxy_path(cell)
+
+            # Skip only when the content signature and exact saved bytes match.
+            if old_cells.has(cell_key) and Manifest.is_cached_proxy_valid(cell, old_manifest):
+                new_cells[cell_key] = old_cells[cell_key]
+                skipped += 1
+                continue
+
+            var count := _bake_cell(source_scene, cell, stride)
             if count < 0:
                 push_error("Proxy build failed for cell (%d, %d)" % [x, z])
                 quit(2)
                 return
+            var digest := FileAccess.get_sha256(proxy_path)
+            if digest.is_empty():
+                push_error("Cannot hash baked proxy: " + proxy_path)
+                quit(2)
+                return
+            new_cells[cell_key] = digest
             kept_instances += count
             baked += 1
 
-    print("HLOD proxy baking completed: %d cells, %d retained tree instances, stride %d" % [baked, kept_instances, stride])
+    # Commit the manifest last: partial builds cannot advertise new or stale
+    # cells as valid. Out-of-range generated files remain on disk but are not
+    # referenced, so runtime safely falls back to procedural scenes.
+    var manifest := {
+        "schema": Manifest.SCHEMA_VERSION,
+        "stride": stride,
+        "fingerprint": fingerprint,
+        "cells": new_cells,
+    }
+    var manifest_file := FileAccess.open(Manifest.MANIFEST_PATH, FileAccess.WRITE)
+    if manifest_file == null:
+        push_error("Cannot write HLOD manifest: " + Manifest.MANIFEST_PATH)
+        quit(2)
+        return
+    manifest_file.store_string(JSON.stringify(manifest, "\t", true) + "\n")
+    manifest_file.flush()
+    manifest_file.close()
+
+    print("HLOD proxy baking completed: Baked %d, skipped %d, newly kept instances %d, stride %d" % [baked, skipped, kept_instances, stride])
     quit(0)
 
 func _bake_cell(source_scene: PackedScene, cell: Vector2i, stride: int) -> int:
@@ -113,7 +158,7 @@ func _bake_cell(source_scene: PackedScene, cell: Vector2i, stride: int) -> int:
         result.free()
         return -1
 
-    var output_path := "%s/forest_proxy_%d_%d.tscn" % [OUTPUT_DIRECTORY, cell.x, cell.y]
+    var output_path: String = Manifest.proxy_path(cell)
     var save_result := ResourceSaver.save(packed, output_path)
     result.free()
     if save_result != OK:

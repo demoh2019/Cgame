@@ -2,11 +2,22 @@ extends SceneTree
 
 # Run after building at least a 3x3 region with --radius=1 --stride=8.
 const OUTPUT := "res://generated/forest_proxy_%d_%d.tscn"
+const Manifest = preload("res://tools/hlod_bake_manifest.gd")
 
 func _initialize() -> void:
     call_deferred("_check")
 
 func _check() -> void:
+    var manifest: Dictionary = Manifest.read_valid_manifest(8)
+    assert(not manifest.is_empty())
+    assert(manifest.get("schema") == 1)
+    assert(manifest.get("stride") == 8)
+    var manifest_cells: Dictionary = manifest.get("cells", {})
+    assert(manifest_cells.size() == 9)
+    assert(Manifest.is_cached_proxy_valid(Vector2i(0, 0), manifest))
+    assert(Manifest.is_cached_proxy_valid(Vector2i(1, 0), manifest))
+    assert(not Manifest.is_cached_proxy_valid(Vector2i(1000, 1000), manifest))
+
     var scene_a := load(OUTPUT % [0, 0]) as PackedScene
     var scene_b := load(OUTPUT % [1, 0]) as PackedScene
     assert(scene_a != null and scene_b != null)
