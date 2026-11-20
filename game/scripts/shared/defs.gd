@@ -354,6 +354,11 @@ static func _build_items() -> void:
 		"stack": 5, "weight": 0.5, "value": 22, "warmth": THERMAL_WRAP_SECONDS})
 	_add_recipe("thermal_wrap", "thermal_wrap", 1,
 		{"cloth_1": 1, "fiber_1": 2, "wood_1": 1}, "", 2.5)
+	# Craftable melee preparation uses existing Cgame script APIs.
+	_add_item("field_whetstone", {"name": "Salvaged Whetstone", "kind": "whetstone",
+		"tier": 1, "stack": 10, "weight": 0.35, "value": 18})
+	_add_recipe("field_whetstone", "field_whetstone", 1,
+		{"stone_1": 2, "scrap": 1}, "workbench", 3.0)
 	_add_item("berries", {"name": "Berries", "kind": "food", "food": 12.0, "stack": 20, "value": 2})
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})

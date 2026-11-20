@@ -651,6 +651,8 @@ func _update_prompt() -> void:
 		text += " | RIDING (F4 dismount)"
 	elif client.inventory.count("salvage_bike") > 0:
 		text += " | F4 ride bike"
+	if int(client.you.get("sharpened_hits", 0)) > 0:
+		text += " | SHARPENED: %d infected melee hits (PgDn)" % int(client.you["sharpened_hits"])
 	hud.set_prompt(text)
 
 
@@ -679,6 +681,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_PAGEUP:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.use_item("bike_service_kit")
+			KEY_PAGEDOWN:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					_quick_use("field_whetstone")
 			KEY_PAGEDOWN:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.use_item("bike_frame_patch")

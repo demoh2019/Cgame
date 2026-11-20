@@ -153,6 +153,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_radar", KEY_M)
 	_bind_key("survive_mount", KEY_F4)
 	_bind_key("survive_bike_service", KEY_PAGEUP)
+	_bind_key("survive_whetstone", KEY_PAGEDOWN)
 	_bind_key("survive_bike_repair", KEY_PAGEDOWN)
 	_bind_key("survive_survey", KEY_F3)
 	_bind_key("survive_bank", KEY_B)
@@ -947,6 +948,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Trail bike", sim.cmd_toggle_mount(LOCAL_PLAYER_ID))
 	elif event.is_action_pressed("survive_bike_service"):
 		_result("Drive service", sim.cmd_use(LOCAL_PLAYER_ID, "bike_service_kit"))
+	elif event.is_action_pressed("survive_whetstone"):
+		_result("Sharpen weapon", sim.cmd_use(LOCAL_PLAYER_ID, "field_whetstone"))
 	elif event.is_action_pressed("survive_bike_repair"):
 		_result("Frame repair", sim.cmd_use(LOCAL_PLAYER_ID, "bike_frame_patch"))
 	elif event.is_action_pressed("survive_survey"):
@@ -1192,6 +1195,8 @@ func _update_hud() -> void:
 	]
 	if survivor.rested_xp_credit > 0:
 		_stats.text += "\nRESTED TRAINING: %d bonus XP left (Z to rest at camp)" % survivor.rested_xp_credit
+	if survivor.sharpened_hits > 0:
+		_stats.text += "\nSHARPENED: %d infected melee hits left (PgDn)" % survivor.sharpened_hits
 	if not sim.lightning_pending.is_empty():
 		var strike: Dictionary = sim.lightning_pending
 		var danger_at := Vector2(float(strike["x"]), float(strike["z"]))

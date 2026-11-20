@@ -2943,3 +2943,21 @@ godot --headless --path game --script res://tests/run_all.gd
 
 This feature uses the project's current Godot scripts, RPCs and
 inventory implementation; no native engine modifications are necessary.
+
+## Salvaged Whetstone: classless melee preparation
+
+At the workbench craft a **Salvaged Whetstone** from **2 Stone T1 + 1 Scrap**.
+Equip any carried melee weapon and press **Page Down** in the offline or
+online client, outside combat. The next three **confirmed ordinary melee hits
+against infected** deal 15% more damage. Misses and player-versus-player
+attacks never receive or spend infected-only charges. Equipment active skills
+remain unchanged. Reapplying with unused charges is rejected without spending
+an item. Switching or losing the weapon, dying, or respawning cancels the
+preparation. The server owns the cost, damage and charges; the client only
+renders the remaining hit counter.
+
+Strict validation persists remaining charges and the tied weapon in existing
+version-1 character saves; older saves default to no preparation. A dedicated
+`game/tests/test_field_whetstone.gd` suite is included in `run_all.gd`.
+No native engine change is needed: this uses existing inventory, simulation
+and RPC infrastructure.

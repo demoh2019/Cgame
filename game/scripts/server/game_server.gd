@@ -45,6 +45,7 @@ const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
+const FieldWhetstone = preload("res://scripts/shared/field_whetstone.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
@@ -204,6 +205,8 @@ class Player:
 	var riposte_weapon: String = "" # Equipped weapon at parry impact.
 	var finisher_cooldown: float = 0.0 # Server-owned, nonpersistent PvE execution timer.
 	var combat_energy: float = 100.0
+	var sharpened_weapon: String = "" # Prepared, owned melee weapon.
+	var sharpened_hits: int = 0 # Only confirmed ordinary infected contacts spend charges.
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
 	var smoke_cooldown: float = 0.0 # Session-only temporary PvE obscurant.
@@ -372,6 +375,9 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 ## The part of a player that survives between sessions.
 func character_data(player: Player) -> Dictionary:
 	var alive := _alive(player)
+	# Never write invalid bonuses for sold or lost equipment.
+	var sharp_valid: bool = FieldWhetstone.valid_state(
+		player.sharpened_weapon, player.sharpened_hits, player.inventory)
 	return {
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
@@ -410,6 +416,8 @@ func character_data(player: Player) -> Dictionary:
 		"tire_grip_seconds": player.tire_grip_seconds,
 		"flash_cooldown": player.flash_cooldown,
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
+		"sharpened_weapon": player.sharpened_weapon if sharp_valid else "",
+		"sharpened_hits": player.sharpened_hits if sharp_valid else 0,
 	}
 
 
@@ -503,6 +511,9 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.finite_number(data.get("flash_cooldown", 0.0), 0.0, FlashCharge.COOLDOWN_SECONDS):
 		return false
 	if not HeartyMeal.valid_state(data.get("meal_seconds", 0.0), data.get("meal_tier", 0)):
+		return false
+	if not FieldWhetstone.valid_state(data.get("sharpened_weapon", ""),
+			data.get("sharpened_hits", 0), parsed_bag["inventory"]):
 		return false
 	if not (data.get("alive", true) is bool):
 		return false
@@ -611,6 +622,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.flash_cooldown = float(data.get("flash_cooldown", 0.0))
 	player.meal_seconds = float(data.get("meal_seconds", 0.0))
 	player.meal_tier = int(data.get("meal_tier", 0))
+	player.sharpened_weapon = str(data.get("sharpened_weapon", ""))
+	player.sharpened_hits = int(data.get("sharpened_hits", 0))
 	player.inventory = parsed_bag["inventory"]
 	player.stash = parsed_stash["inventory"]
 	player.kills = int(data.get("kills", 0))
@@ -709,6 +722,8 @@ func _spawn_player(player: Player) -> void:
 			player.inventory.add(id, STARTER_KIT[id])
 	player.action = {}
 	player.recall = {}
+	player.sharpened_weapon = ""
+	player.sharpened_hits = 0
 	player.mounted = false
 	player.mount_cooldown = 0.0
 	if not kept_gear:
@@ -3121,6 +3136,21 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if not player.inventory.remove(item_id, 1):
 				return {"ok": false, "reason": "not_carried"}
 			player.bike_integrity = BikeIntegrity.after_repair(player.bike_integrity)
+		"whetstone":
+			if item_id != FieldWhetstone.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var prepared_weapon: String = FieldWhetstone.melee_weapon(player.inventory)
+			if prepared_weapon.is_empty():
+				return {"ok": false, "reason": "need_melee"}
+			if player.attack_timer > 0.0 or player.skill_timer > 0.0 or (
+					player.combat_tag_until > time) or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			if player.sharpened_hits > 0 and player.sharpened_weapon == prepared_weapon:
+				return {"ok": false, "reason": "already_sharpened"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.sharpened_weapon = prepared_weapon
+			player.sharpened_hits = FieldWhetstone.HITS
 		"bike_service":
 			if item_id != BikeService.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3217,10 +3247,15 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if previous_weapon != player.inventory.weapon:
 				player.edge_coating_seconds = 0.0
 				player.edge_coating_weapon = ""
+				player.sharpened_weapon = ""
+				player.sharpened_hits = 0
 		_:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
 	player.dirty_character = true
+	if item_id == FieldWhetstone.ITEM_ID:
+		return {"ok": true, "weapon": player.sharpened_weapon,
+			"hits": player.sharpened_hits}
 	if item_id == BikeGrip.ITEM_ID:
 		return {"ok": true, "tire_grip_seconds": player.tire_grip_seconds}
 	if item_id == BikeChain.ITEM_ID:
@@ -3432,9 +3467,20 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		damage *= ParryRiposte.DAMAGE_FACTOR
 	else:
 		riposte = false
+	# Misses, player targets, ranged attacks and ghost gear cannot apply the bonus.
+	var sharpened: bool = not is_ranged and str(hit["kind"]) == "zombie" and (
+		FieldWhetstone.bonus_active(player.sharpened_weapon,
+			player.sharpened_hits, player.inventory, weapon))
+	if sharpened:
+		damage *= FieldWhetstone.DAMAGE_FACTOR
+		player.sharpened_hits -= 1
+		if player.sharpened_hits == 0:
+			player.sharpened_weapon = ""
+		player.dirty_character = true
 	_damage_target(player, hit, damage, "ranged" if is_ranged else "melee")
 	return {"ok": true, "hit": true, "target": hit["kind"],
-		"crit": crit, "ambush": ambush, "riposte": riposte}
+		"crit": crit, "ambush": ambush, "riposte": riposte,
+		"sharpened": sharpened}
 
 
 ## Party frontline role: no client-authored targets, aggro, radius or damage.
@@ -4405,6 +4451,8 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.deaths += 1
 	victim.dirty_character = true
 	victim.action = {}
+	victim.sharpened_weapon = ""
+	victim.sharpened_hits = 0
 	victim.ruin_survey = {} # Dead scouts cannot retain private map beacons.
 	victim.dodge_immunity = 0.0
 	ParryRiposte.clear(victim)
@@ -4647,6 +4695,11 @@ func _tick_players(delta: float) -> void:
 		var old_infamy: float = player.pvp_infamy
 		player.pvp_infamy = PvpInfamy.decay(old_infamy, delta)
 		if player.pvp_infamy < old_infamy:
+			player.dirty_character = true
+		if not FieldWhetstone.valid_state(player.sharpened_weapon,
+				player.sharpened_hits, player.inventory):
+			player.sharpened_weapon = ""
+			player.sharpened_hits = 0
 			player.dirty_character = true
 		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
 		player.party_aid_timer = maxf(0.0, player.party_aid_timer - maxf(0.0, delta))
@@ -5997,6 +6050,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"rain_cooldown": player.rain_cooldown,
 			"spore_sample_cooldown": player.spore_sample_cooldown,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
+			"sharpened_hits": player.sharpened_hits if FieldWhetstone.valid_state(
+				player.sharpened_weapon, player.sharpened_hits, player.inventory) else 0,
 			"guardian_cooldown": player.guardian_timer,
 			"warden_ward": WardenAura.active_for(player, players, parties, world),
 			"guardian_brace": player.guardian_brace,
