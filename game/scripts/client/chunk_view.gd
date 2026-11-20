@@ -134,8 +134,20 @@ var _grass_lod_elapsed := 0.0
 const GRASS_LOD_INTERVAL := 0.35 # Update a few times a second, not every render frame.
 static var _grass_frame := -1
 static var _grass_spent_usec := 0
-const GRASS_BUDGET_USEC := 2500 # Limit grass generation to about 2.5 ms per frame across all chunks.
-const GRASS_RANGE := 110.0
+## Runtime tuning keeps the grass LOD system intact while bounding draw distance and generation spikes.
+const GRASS_GROUP := "aa_grass_tiles"
+static var grass_budget_usec := 2500
+static var grass_range := 110.0
+static var grass_visibility_end := 82.0
+
+
+static func configure_grass(build_radius: float, budget_usec: int, fade_start: float, fade_end: float) -> void:
+	grass_range = build_radius
+	grass_budget_usec = budget_usec
+	grass_visibility_end = fade_end + 22.0
+	var material: ShaderMaterial = GrassField.material()
+	material.set_shader_parameter("fade_start", fade_start)
+	material.set_shader_parameter("fade_end", fade_end)
 var _world
 var _terrain
 var _groups: Dictionary = {} # kind -> {"multimesh": MultiMesh, "index": {node_id: i}, "transforms": [...]}
@@ -695,20 +707,22 @@ func _grow_grass() -> void:
 	if _grass_frame != frame:
 		_grass_frame = frame
 		_grass_spent_usec = 0
-	if _grass_spent_usec > GRASS_BUDGET_USEC:
+	if _grass_spent_usec > grass_budget_usec:
 		return # This frame's share of grass growing is used up; the rest comes next frame.
 	var camera := get_viewport().get_camera_3d()
 	if camera == null:
 		return
 	var center := global_position + Vector3(Defs.CHUNK_SIZE * 0.5, 0.0, Defs.CHUNK_SIZE * 0.5)
-	if Vector2(camera.global_position.x - center.x, camera.global_position.z - center.z).length() > GRASS_RANGE:
+	if Vector2(camera.global_position.x - center.x, camera.global_position.z - center.z).length() > grass_range:
 		return
-	while _grass_next_tile < GrassField.tile_count() and _grass_spent_usec <= GRASS_BUDGET_USEC:
+	while _grass_next_tile < GrassField.tile_count() and _grass_spent_usec <= grass_budget_usec:
 		var started := Time.get_ticks_usec()
 		var tile: MultiMeshInstance3D = GrassField.build_tile(_grass_source, _grass_next_tile)
 		_grass_next_tile += 1
 		if tile != null:
+			tile.visibility_range_end = grass_visibility_end
 			add_child(tile)
+			tile.add_to_group(GRASS_GROUP)
 			_grass_tiles.append(tile)
 		_grass_spent_usec += Time.get_ticks_usec() - started
 
