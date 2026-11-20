@@ -202,6 +202,7 @@ public:
 
 	void set_obstruction_amount(float p_amount);
 	float get_obstruction_amount() const;
+	float advance_obstruction_amount(float p_target, float p_delta, float p_attack_seconds = 0.08f, float p_release_seconds = 0.22f);
 
 	void set_attenuation_model(AttenuationModel p_model);
 	AttenuationModel get_attenuation_model() const;
