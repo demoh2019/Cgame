@@ -7,8 +7,10 @@ const CELL_SIZE := 128.0
 const WORLD_HALF_EXTENT := 6
 const HUB_CELL := Vector2i(0, 0)
 const ARENA_CELL := Vector2i(4, 2)
+const COMBAT_LAYER := "combat_event"
+const COMBAT_LAYER_CELLS := [Vector2i(4, 2), Vector2i(4, 3), Vector2i(5, 2), Vector2i(5, 3)]
 const SAVE_PATH := "user://cgame_demo_checkpoint.dat"
-const SAVE_VERSION := 1
+const SAVE_VERSION := 2
 const DETAIL_SCENE := "res://scenes/cell_detail.tscn"
 const PROXY_SCENE := "res://scenes/cell_proxy.tscn"
 const FLY_SCRIPT := preload("res://scripts/free_fly.gd")
@@ -54,7 +56,16 @@ func _ready() -> void:
     if not detail.has_method("snapshot_cell_states") or not detail.has_method("load_cell_states"):
         push_error("Cgame gameplay state streaming API required (snapshot_cell_states/load_cell_states).")
         return
-    # The quest hub remains active while the player explores other regions.
+    if not detail.has_method("set_cell_layers") or not detail.has_method("set_layer_enabled"):
+        push_error("Cgame WorldPartition3D runtime Data Layers API required.")
+        return
+    # The Combat Event is initially inactive even if a pinned gameplay cell
+    # or an observer overlaps its region. The quest hub stays available.
+    var combat_cells: Dictionary = {}
+    for cell in COMBAT_LAYER_CELLS:
+        combat_cells[cell] = COMBAT_LAYER
+    detail.call("set_cell_layers", combat_cells)
+    detail.call("set_layer_enabled", COMBAT_LAYER, false)
     detail.call("pin_cell", HUB_CELL)
     if not distant.has_method("get_cell_instance") or not detail.has_method("get_cell_instance"):
         push_error("Cgame get_cell_instance API required for proxy handoff.")
@@ -157,6 +168,14 @@ func _toggle_gameplay_pin(cell: Vector2i) -> void:
     else:
         detail.call("pin_cell", cell)
 
+func _toggle_combat_event() -> void:
+    if detail == null:
+        return
+    var enabled: bool = bool(detail.call("is_layer_enabled", COMBAT_LAYER))
+    detail.call("set_layer_enabled", COMBAT_LAYER, not enabled)
+    detail.call("update_streaming")
+    print("Combat Event layer: %s" % ("ACTIVE" if not enabled else "INACTIVE"))
+
 func _gameplay_cell_root(cell: Vector2i) -> Node3D:
     if detail == null:
         return null
@@ -175,7 +194,7 @@ func _win_arena_round() -> void:
     if root != null and root.has_method("win_arena_round"):
         root.call("win_arena_round")
     else:
-        push_warning("Combat Arena not ready; G pins its scene.")
+        push_warning("Combat Arena not ready; T enables the combat event and G pins its scene.")
 
 func _save_checkpoint() -> void:
     if detail == null or camera == null:
@@ -186,6 +205,7 @@ func _save_checkpoint() -> void:
         "version": SAVE_VERSION,
         "cell_states": snapshot,
         "pinned_cells": detail.call("get_pinned_cells"),
+        "layer_states": detail.call("get_layer_states"),
         "camera_transform": camera.global_transform,
     }
     var output := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -212,16 +232,18 @@ func _load_checkpoint() -> void:
     if record.get("version") != SAVE_VERSION:
         push_warning("Unsupported checkpoint version.")
         return
-    if not (record.get("cell_states") is Dictionary) or not (record.get("pinned_cells") is Array) or not (record.get("camera_transform") is Transform3D):
+    if not (record.get("cell_states") is Dictionary) or not (record.get("pinned_cells") is Array) or not (record.get("layer_states") is Dictionary) or not (record.get("camera_transform") is Transform3D):
         push_warning("Checkpoint fields are incomplete.")
         return
     var states: Dictionary = record["cell_states"]
     var pins: Array = record["pinned_cells"]
-    if states.size() > 4096 or pins.size() > 128:
+    var layers: Dictionary = record["layer_states"]
+    if states.size() > 4096 or pins.size() > 128 or layers.size() > 64:
         push_warning("Checkpoint exceeds scene-state or pin limits.")
         return
     # Snapshot contents are validated and cloned by the native engine.
     detail.call("load_cell_states", states)
+    detail.call("set_layer_states", layers)
     detail.call("set_pinned_cells", pins)
     camera.global_transform = record["camera_transform"]
     detail.call("update_streaming")
@@ -263,6 +285,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
             _toggle_gameplay_pin(HUB_CELL)
         KEY_G:
             _toggle_gameplay_pin(ARENA_CELL)
+        KEY_T:
+            _toggle_combat_event()
         KEY_C:
             _claim_hub_reward()
         KEY_B:
@@ -312,10 +336,11 @@ func _update_hud() -> void:
     var arena_pinned := detail != null and bool(detail.call("is_cell_pinned", ARENA_CELL))
     var hub_loaded := detail != null and bool(detail.call("is_cell_loaded", HUB_CELL))
     var arena_loaded := detail != null and bool(detail.call("is_cell_loaded", ARENA_CELL))
+    var combat_active := detail != null and bool(detail.call("is_layer_enabled", COMBAT_LAYER))
     var reward_claimed := bool(_stateful_progress(HUB_CELL, "reward_claimed", false))
     var arena_wins: int = int(_stateful_progress(ARENA_CELL, "arena_wins", 0))
     var state_count: int = int(detail.call("get_cell_state_count")) if detail != null else 0
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nT combat event layer: %s (4 cells)\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
@@ -326,6 +351,7 @@ func _update_hud() -> void:
         "loaded" if hub_loaded else "away",
         "ON" if arena_pinned else "OFF",
         "loaded" if arena_loaded else "away",
+        "ON" if combat_active else "OFF",
         "CLAIMED" if reward_claimed else "READY",
         arena_wins,
         state_count,
