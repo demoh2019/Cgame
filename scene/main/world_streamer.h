@@ -63,6 +63,9 @@ private:
 	real_t lookahead_seconds = 0.0;
 	int max_concurrent_loads = 4;
 	int max_instantiations_per_frame = 1;
+	// Soft main-thread time slice for procedural generation or scene
+	// activation (0 = count-only). Each individual chunk is indivisible.
+	int max_chunk_work_usec = 0;
 	double update_interval = 0.1;
 	String chunk_path_template;
 	Callable chunk_provider;
@@ -121,6 +124,8 @@ public:
 	int get_max_concurrent_loads() const { return max_concurrent_loads; }
 	void set_max_instantiations_per_frame(int p_count);
 	int get_max_instantiations_per_frame() const { return max_instantiations_per_frame; }
+	void set_max_chunk_work_usec(int p_usec);
+	int get_max_chunk_work_usec() const { return max_chunk_work_usec; }
 	void set_update_interval(double p_seconds);
 	double get_update_interval() const { return update_interval; }
 	void set_chunk_path_template(const String &p_template);
