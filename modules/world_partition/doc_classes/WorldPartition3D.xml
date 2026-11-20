@@ -79,6 +79,18 @@
 				Returns the number of cells that failed to load or instantiate. Failed cells are not retried until their configuration changes.
 			</description>
 		</method>
+		<method name="has_observer_cell" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] after the configured [member observer_path] has resolved to a [Node3D] and a streaming update has computed its cell.
+			</description>
+		</method>
+		<method name="get_observer_cell" qualifiers="const">
+			<return type="Vector2i" />
+			<description>
+				Returns the last observed cell in this node's local grid coordinates. Only meaningful when [method has_observer_cell] is [code]true[/code]. This result updates when the observer enters a new cell or its grid configuration changes.
+			</description>
+		</method>
 		<method name="get_loaded_cells" qualifiers="const">
 			<return type="Array" />
 			<description>
@@ -155,6 +167,12 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Emitted after a [PackedScene] is instantiated as a child of this node.
+			</description>
+		</signal>
+		<signal name="observer_cell_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted when the observer enters a different grid cell (including the first resolved cell after setting [member observer_path] or changing [member cell_size]). Use this to trigger cell-based game logic without checking the observer's position every frame.
 			</description>
 		</signal>
 		<signal name="cell_unloaded">
