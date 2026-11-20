@@ -160,6 +160,16 @@ const CRYSTALS := [
 	{"path": "loose/toon_style_-_crystal.glb", "node": "Crystal_001_Crystal_0", "kind": "height", "size": 1.8},
 	{"path": "loose/toon_style_-_crystal.glb", "node": "Crystal_002_Crystal_0", "kind": "height", "size": 1.6},
 ]
+# Ready-to-ship Kenney trees (CC0, self-contained glTF). They are fallback variants even without optional art packs.
+const BUILTIN_TREES := [
+	{"path": "res://assets/models/kenney_expanded/nature/tree-oak.glb", "kind": "height", "size": 9.0},
+	{"path": "res://assets/models/kenney_expanded/nature/tree-detailed.glb", "kind": "height", "size": 9.5},
+	{"path": "res://assets/models/kenney_expanded/nature/tree-pinedefaulta.glb", "kind": "height", "size": 10.0},
+	{"path": "res://assets/models/kenney_expanded/nature/tree-pineroundb.glb", "kind": "height", "size": 8.0},
+	{"path": "res://assets/models/kenney_expanded/nature/tree-default-fall.glb", "kind": "height", "size": 8.5},
+	{"path": "res://assets/models/kenney_expanded/nature/tree-pinetalla-detailed.glb", "kind": "height", "size": 11.0},
+]
+
 const DECOR_EXTRA := [
 	# What a thousand years leave on the ground, each where it belongs (see ChunkView.DECOR): branches, bark, roots and
 	# old logs around trees; scree around rocks; boulders as rare accents; painted flowers in the meadows.
@@ -190,6 +200,28 @@ const DECOR_EXTRA := [
 	{"path": "loose/flowers_pack_1.glb", "node": "Plane_036_lowPoly_flor1_003_0", "kind": "height", "size": 0.9, "biomes": ["plains", "forest"], "anchor": "meadow", "chance": 0.8, "per": [3, 6], "ring": [1.0, 5.0]},
 	{"path": "loose/flowers_pack_1.glb", "node": "Plane_022_lowPoly_flor25_0", "kind": "height", "size": 0.9, "biomes": ["plains"], "anchor": "meadow", "chance": 0.8, "per": [3, 6], "ring": [1.0, 5.0]},
 	{"path": "loose/flowers_pack_1.glb", "node": "Plane_001_lowPoly_flor21_0", "kind": "height", "size": 1.0, "biomes": ["plains", "forest"], "anchor": "meadow", "chance": 0.8, "per": [3, 6], "ring": [1.0, 5.0]},
+	# Kenney Nature Kit: flowers, mushrooms and woodland clutter. All sizes are in metres after baking.
+	{"path": "res://assets/models/kenney_expanded/nature/flower-purpleb.glb", "kind": "height", "size": 0.45, "biomes": ["forest", "plains"], "anchor": "meadow", "chance": 0.65, "per": [2, 4], "ring": [0.4, 5.0], "scale": [0.8, 1.2]},
+	{"path": "res://assets/models/kenney_expanded/nature/flower-redb.glb", "kind": "height", "size": 0.4, "biomes": ["plains", "forest"], "anchor": "meadow", "chance": 0.48, "per": [2, 3], "ring": [0.5, 4.5], "scale": [0.7, 1.3]},
+	{"path": "res://assets/models/kenney_expanded/nature/flower-yellowb.glb", "kind": "height", "size": 0.5, "biomes": ["plains", "forest"], "anchor": "meadow", "chance": 0.6, "per": [2, 4], "ring": [0.5, 5.5], "scale": [0.7, 1.2]},
+	{"path": "res://assets/models/kenney_expanded/nature/mushroom-redgroup.glb", "kind": "height", "size": 0.4, "biomes": ["forest", "swamp"], "anchor": "tree", "chance": 0.12, "per": [1, 2], "ring": [0.5, 2.3], "scale": [0.7, 1.2]},
+	{"path": "res://assets/models/kenney_expanded/nature/mushroom-tangroup.glb", "kind": "height", "size": 0.35, "biomes": ["forest", "swamp"], "anchor": "tree", "chance": 0.16, "per": [1, 2], "ring": [0.4, 2.0], "scale": [0.6, 1.3]},
+	{"path": "res://assets/models/kenney_expanded/nature/plant-bushdetailed.glb", "kind": "height", "size": 1.2, "biomes": ["forest", "plains", "swamp"], "anchor": "tree", "chance": 0.13, "per": [1, 2], "ring": [1.4, 4.0], "scale": [0.8, 1.3]},
+	{"path": "res://assets/models/kenney_expanded/nature/plant-bushlarge.glb", "kind": "height", "size": 1.5, "biomes": ["forest", "plains"], "anchor": "tree", "chance": 0.1, "per": [1, 1], "ring": [1.8, 4.5], "scale": [0.8, 1.2]},
+	{"path": "res://assets/models/kenney_expanded/nature/stump-old.glb", "kind": "height", "size": 0.75, "biomes": ["forest", "plains", "swamp"], "anchor": "tree", "chance": 0.09, "per": [1, 1], "ring": [3.0, 6.5], "scale": [0.7, 1.3]},
+	{"path": "res://assets/models/kenney_expanded/nature/log-stack.glb", "kind": "length", "size": 1.8, "biomes": ["forest", "plains"], "anchor": "tree", "chance": 0.04, "per": [1, 1], "ring": [4.0, 7.0], "scale": [0.8, 1.3]},
+	{"path": "res://assets/models/kenney_expanded/nature/campfire-stones.glb", "kind": "length", "size": 1.5, "biomes": ["forest", "plains"], "anchor": "rare", "chance": 0.05, "per": [1, 1], "ring": [0.0, 0.0], "scale": [0.8, 1.1]},
+	# Abandoned and zombie-infested ruins receive localized remnants, not uniform open-world scatter.
+	{"path": "res://assets/models/kenney_expanded/graveyard/gravestone-broken.glb", "kind": "height", "size": 0.9, "biomes": ["forest", "plains", "swamp"], "anchor": "ruin", "chance": 0.24, "per": [1, 2], "ring": [4.0, 9.0], "scale": [0.8, 1.3]},
+	{"path": "res://assets/models/kenney_expanded/graveyard/gravestone-cross-large.glb", "kind": "height", "size": 1.5, "biomes": ["forest", "plains"], "anchor": "ruin", "chance": 0.14, "per": [1, 1], "ring": [5.0, 9.0], "scale": [0.8, 1.2]},
+	{"path": "res://assets/models/kenney_expanded/graveyard/gravestone-round.glb", "kind": "height", "size": 0.85, "biomes": ["forest", "plains", "swamp"], "anchor": "ruin", "chance": 0.18, "per": [1, 1], "ring": [4.5, 8.0], "scale": [0.8, 1.2]},
+	{"path": "res://assets/models/kenney_expanded/graveyard/grave-border.glb", "kind": "length", "size": 1.8, "biomes": ["forest", "plains"], "anchor": "ruin", "chance": 0.1, "per": [1, 1], "ring": [4.0, 8.0], "scale": [0.9, 1.2]},
+	{"path": "res://assets/models/kenney_expanded/graveyard/coffin-old.glb", "kind": "length", "size": 1.6, "biomes": ["forest", "plains", "swamp"], "anchor": "ruin", "chance": 0.13, "per": [1, 1], "ring": [3.5, 7.0], "scale": [0.8, 1.2]},
+	{"path": "res://assets/models/kenney_expanded/graveyard/fence-damaged.glb", "kind": "length", "size": 2.5, "biomes": ["forest", "plains"], "anchor": "ruin", "chance": 0.14, "per": [1, 2], "ring": [5.0, 9.0], "scale": [0.9, 1.2]},
+	{"path": "res://assets/models/kenney_expanded/graveyard/bench-damaged.glb", "kind": "length", "size": 1.8, "biomes": ["forest", "plains"], "anchor": "ruin", "chance": 0.09, "per": [1, 1], "ring": [5.0, 8.0], "scale": [0.8, 1.2]},
+	{"path": "res://assets/models/kenney_expanded/graveyard/pine-fall.glb", "kind": "height", "size": 6.0, "biomes": ["forest", "swamp"], "anchor": "ruin", "chance": 0.05, "per": [1, 1], "ring": [7.0, 11.0], "scale": [0.7, 1.0]},
+	{"path": "res://assets/models/kenney_expanded/castle/siege-catapult-demolished.glb", "kind": "length", "size": 4.0, "biomes": ["plains", "forest"], "anchor": "ruin", "chance": 0.035, "per": [1, 1], "ring": [8.0, 13.0], "scale": [0.8, 1.2]},
+	{"path": "res://assets/models/kenney_expanded/castle/siege-ram-demolished.glb", "kind": "length", "size": 3.0, "biomes": ["plains", "forest"], "anchor": "ruin", "chance": 0.04, "per": [1, 1], "ring": [7.0, 12.0], "scale": [0.8, 1.2]},
 ]
 
 static var _cache: Dictionary = {}

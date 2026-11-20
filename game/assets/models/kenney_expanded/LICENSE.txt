@@ -1,0 +1,13 @@
+Kenney CC0 1.0 Universal - extended environment models
+=====================================================
+Original artist: Kenney (https://kenney.nl).
+Asset source: https://github.com/Hidencod/tge-assets
+Original license: https://creativecommons.org/publicdomain/zero/1.0/
+The source repository LICENSE declares all models and converted, embedded-texture GLB files CC0.
+
+Selected GLBs from the Nature Kit, Graveyard Kit, and Castle Kit.
+The meshes are shipped with their textures embedded in the GLB.
+They can be used, modified, and redistributed commercially without attribution.
+Credit Kenney when practical.
+
+Imported 2026-11-20. All file content matches the upstream Git blob SHAs.

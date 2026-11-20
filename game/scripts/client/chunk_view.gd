@@ -118,14 +118,14 @@ void fragment() {
 static var _ground_material: ShaderMaterial
 static var _textured_material: ShaderMaterial
 static var _textured_checked := false
-const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete"]
+const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
 const TERRAIN_DIR := "res://assets/textures/terrain/"
 # The colour each layer should average to: photos of real ground pulled toward the stylised palette of the models.
 const TERRAIN_TARGETS := [Color(0.24, 0.38, 0.14), Color(0.37, 0.41, 0.19), Color(0.28, 0.32, 0.15), Color(0.27, 0.29, 0.17),
 	Color(0.4, 0.38, 0.26), Color(0.36, 0.39, 0.29), Color(0.37, 0.41, 0.28), Color(0.66, 0.59, 0.44), Color(0.92, 0.94, 0.98),
-	Color(0.3, 0.3, 0.29), Color(0.35, 0.37, 0.3)]
+	Color(0.3, 0.3, 0.29), Color(0.35, 0.37, 0.3), Color(0.43, 0.32, 0.27), Color(0.35, 0.31, 0.24)]
 # Paved ground under sites (see ground.gdshader): kind -> [terrain layer, share of the site radius].
-const SITE_PAVING := {"city": [9, 0.8], "bunker": [10, 0.75], "depot": [10, 0.6], "dock": [10, 0.5]}
+const SITE_PAVING := {"city": [11, 0.8], "bunker": [10, 0.75], "depot": [10, 0.6], "dock": [12, 0.65]}
 const BIOME_TEXELS := 17 # Biome samples per chunk side (every 4 m), shared on the borders with the neighbours.
 
 var cell: Vector2i
@@ -403,7 +403,13 @@ func _mesh_for(kind: String) -> Mesh:
 				if painted != null:
 					return Foliage.swayed(painted, "painted:%d" % variant, 0.2)
 			if not _use_nature:
-				return Assets.tree_meshes()[variant % Assets.tree_meshes().size()]
+				var original_count: int = Assets.tree_meshes().size()
+				if variant >= original_count:
+					var tree_entry: Dictionary = ModelCatalog.BUILTIN_TREES[(variant - original_count) % ModelCatalog.BUILTIN_TREES.size()]
+					var extended_tree: Mesh = ModelCatalog.entry_mesh(tree_entry)
+					if extended_tree != null:
+						return Foliage.swayed(extended_tree, "kenney_expanded_tree:%d" % variant, 0.18)
+				return Assets.tree_meshes()[variant % original_count]
 		"rock":
 			if ModelCatalog.has_scanned_rocks():
 				picked = ModelCatalog.scanned_rock(variant)
@@ -479,6 +485,8 @@ func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> fl
 				if age < 0.25:
 					return rng.randf_range(0.6, 0.8)
 				return rng.randf_range(0.9, 1.3)
+			if variant >= Assets.tree_meshes().size():
+				return rng.randf_range(0.75, 1.25) # The expanded kit is already fitted to metre-scale trees.
 			return Assets.TREE_SCALE * rng.randf_range(0.85, 1.3)
 		"rock":
 			if ModelCatalog.has_scanned_rocks():
@@ -525,7 +533,7 @@ func _build_objects(data: Dictionary) -> void:
 	var origin := WorldGen.cell_origin(cell)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = WorldGen.mix(cell.x, cell.y, 99)
-	var tree_variants: int = Assets.tree_meshes().size()
+	var tree_variants: int = Assets.tree_meshes().size() + ModelCatalog.BUILTIN_TREES.size()
 	if _use_nature:
 		tree_variants = Assets.TREE_FILES.size() + (ModelCatalog.PAINTED_TREES.size() if ModelCatalog.has_painted_trees() else 0)
 	var rock_variants: int = Assets.ROCK_FILES.size() + (ModelCatalog.STONES.size() if ModelCatalog.has_stones() else 0)
@@ -595,7 +603,7 @@ func _build_objects(data: Dictionary) -> void:
 		add_child(instance)
 		_groups[kind] = {"multimesh": multimesh, "index": index, "transforms": transforms}
 	if _use_nature:
-		_build_decor(origin, rng, data["nodes"])
+		_build_decor(origin, rng, data)
 	_build_windmills(windmills, origin)
 	_build_signposts(origin)
 	_build_npcs(data.get("npcs", []))
@@ -883,7 +891,7 @@ func _anchored_spots(entry: Dictionary, anchors: Array, origin: Vector2, rng: Ra
 	return spots
 
 
-func _build_decor(origin: Vector2, rng: RandomNumberGenerator, nodes: Array = []) -> void:
+func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary) -> void:
 	if _raw_heights.size() == SAMPLES * SAMPLES and _biome_names.size() == BIOME_TEXELS * BIOME_TEXELS:
 		_grass_source = GrassField.Source.new(origin, _raw_heights, SAMPLES, _biome_names, BIOME_TEXELS, _road_data, _patches)
 		set_process(true)
@@ -893,14 +901,19 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, nodes: Array = []
 	# Nothing grows on the roads (they are 1 m wider here than the drawn dirt, so blades never lean onto it).
 	var road_pieces: Array = _world.roads.pieces_in_cell(cell) if _world.roads != null else []
 	var road_clear: float = WorldRoads.HALF_WIDTH + 1.0
-	var anchors := {"tree": [], "rock": [], "meadow": [], "rare": []}
-	for node in nodes:
+	var anchors := {"tree": [], "rock": [], "meadow": [], "rare": [], "ruin": []}
+	for node in data.get("nodes", []):
 		var at := Vector2(float(node["x"]), float(node["z"]))
 		match str(node["kind"]):
 			"tree":
 				anchors["tree"].append(at)
 			"rock", "ore":
 				anchors["rock"].append(at)
+	# Ruin decorations follow actual abandoned buildings, not ordinary settlements.
+	for structure in data.get("structures", []):
+		var structure_kind: String = str(structure.get("kind", ""))
+		if structure_kind == "ruin" or (bool(data.get("ruin", false)) and structure_kind in ["building", "wall"]):
+			anchors["ruin"].append(Vector2(float(structure["x"]), float(structure["z"])))
 	anchors["meadow"] = _meadow_centers(origin, anchors["tree"], road_pieces)
 	for k in 2:
 		anchors["rare"].append(origin + Vector2(rng.randf(), rng.randf()) * Defs.CHUNK_SIZE)
