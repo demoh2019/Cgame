@@ -36,11 +36,23 @@ static func apply(environment: Environment, level: int, rendering_method: String
 	if roughness_quality != _last_roughness_quality:
 		RenderingServer.environment_set_ssr_roughness_quality(roughness_quality)
 		_last_roughness_quality = roughness_quality
-	# Clear the prior setting on renderer fallback or when Auto chooses a cheaper tier.
-	environment.ssr_enabled = bool(profile["enabled"])
-	if not environment.ssr_enabled:
+	# Hi-Z rays are now guarded in the native shader; invalid rays yield
+	# no SSR so the existing sky/reflection probes fill those pixels.
+	# Skip redundant native Environment updates on repeated preset applies.
+	var enabled: bool = bool(profile["enabled"])
+	if environment.ssr_enabled != enabled:
+		environment.ssr_enabled = enabled
+	if not enabled:
 		return
-	environment.ssr_max_steps = int(profile["max_steps"])
-	environment.ssr_fade_in = float(profile["fade_in"])
-	environment.ssr_fade_out = float(profile["fade_out"])
-	environment.ssr_depth_tolerance = float(profile["depth_tolerance"])
+	var steps: int = int(profile["max_steps"])
+	if environment.ssr_max_steps != steps:
+		environment.ssr_max_steps = steps
+	var fade_in: float = float(profile["fade_in"])
+	if not is_equal_approx(environment.ssr_fade_in, fade_in):
+		environment.ssr_fade_in = fade_in
+	var fade_out: float = float(profile["fade_out"])
+	if not is_equal_approx(environment.ssr_fade_out, fade_out):
+		environment.ssr_fade_out = fade_out
+	var tolerance: float = float(profile["depth_tolerance"])
+	if not is_equal_approx(environment.ssr_depth_tolerance, tolerance):
+		environment.ssr_depth_tolerance = tolerance
