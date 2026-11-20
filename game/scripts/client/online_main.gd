@@ -1201,7 +1201,8 @@ func _process(delta: float) -> void:
 		camera.look_at(position + Vector3(0.0, 20.0, -60.0))
 	# Native far-only DOF tracks player zoom/photo orbit at a bounded rate.
 	# The character and nearby combat remain in focus; CanvasLayer HUD never
-	# participates in the 3D depth blur. No new post-processing pass.
+	# participates in 3D depth blur. Native DOF adds its own renderer cost,
+	# but we avoid a duplicate custom fullscreen blur shader.
 	_dof_elapsed += maxf(delta, 0.0)
 	if _dof_elapsed >= 0.35:
 		_dof_elapsed = fmod(_dof_elapsed, 0.35)
