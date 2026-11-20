@@ -1426,7 +1426,7 @@ func _on_event(event: Dictionary) -> void:
 				say("GUARDIAN COUNTERSTRIKE! +25% melee damage against the intercepted infected.")
 		"guardian_intercept":
 			if int(event.get("by", -1)) == client.peer_id:
-				say("GUARDIAN INTERCEPT: blocked infected melee for ally #%d; took %.1f damage." % [
+				say("GUARDIAN INTERCEPT: saved ally #%d (%.1f damage). Counter ready for 4s: strike the same infected!" % [
 					int(event.get("peer", -1)), float(event.get("damage", 0.0))])
 			elif int(event.get("peer", -1)) == client.peer_id:
 				say("GUARDIAN INTERCEPT: ally #%d took the infected hit for you!" % int(event.get("by", -1)))
