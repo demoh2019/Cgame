@@ -143,6 +143,9 @@
 		<member name="max_instances_per_frame" type="int" setter="set_max_instances_per_frame" getter="get_max_instances_per_frame" default="2">
 			Maximum number of loaded cell scenes instantiated per frame.
 		</member>
+		<member name="max_unloads_per_frame" type="int" setter="set_max_unloads_per_frame" getter="get_max_unloads_per_frame" default="32">
+			Maximum number of out-of-range cell scenes to queue for deletion in one streaming update, between 1 and 128. Remaining cells are considered on subsequent frames. Explicit clear/remove operations and disabling streaming unload immediately without this limit.
+		</member>
 		<member name="max_new_requests_per_frame" type="int" setter="set_max_new_requests_per_frame" getter="get_max_new_requests_per_frame" default="2">
 			Maximum number of new resource-load requests per frame.
 		</member>

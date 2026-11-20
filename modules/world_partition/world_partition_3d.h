@@ -49,6 +49,7 @@ class WorldPartition3D : public Node3D {
 	int unload_radius = 2;
 	int max_new_requests_per_frame = 2;
 	int max_instances_per_frame = 2;
+	int max_unloads_per_frame = 32;
 	int max_concurrent_requests = 8;
 	bool streaming_enabled = true;
 
@@ -88,6 +89,9 @@ public:
 
 	void set_max_instances_per_frame(int p_count);
 	int get_max_instances_per_frame() const;
+
+	void set_max_unloads_per_frame(int p_count);
+	int get_max_unloads_per_frame() const;
 
 	void set_max_concurrent_requests(int p_count);
 	int get_max_concurrent_requests() const;

@@ -9,9 +9,9 @@ const LOW_FPS := 48.0
 const RECOVERY_FPS := 58.0
 
 const PROFILES := [
-    {"name": "Performance", "detail_load": 1, "detail_unload": 2, "proxy_load": 2, "proxy_unload": 3, "detail_budget": 1, "proxy_budget": 1},
-    {"name": "Balanced", "detail_load": 1, "detail_unload": 2, "proxy_load": 4, "proxy_unload": 5, "detail_budget": 2, "proxy_budget": 1},
-    {"name": "Cinematic", "detail_load": 2, "detail_unload": 3, "proxy_load": 5, "proxy_unload": 6, "detail_budget": 3, "proxy_budget": 2},
+    {"name": "Performance", "detail_load": 1, "detail_unload": 2, "proxy_load": 2, "proxy_unload": 3, "detail_budget": 1, "proxy_budget": 1, "unload_budget": 8},
+    {"name": "Balanced", "detail_load": 1, "detail_unload": 2, "proxy_load": 4, "proxy_unload": 5, "detail_budget": 2, "proxy_budget": 1, "unload_budget": 16},
+    {"name": "Cinematic", "detail_load": 2, "detail_unload": 3, "proxy_load": 5, "proxy_unload": 6, "detail_budget": 3, "proxy_budget": 2, "unload_budget": 32},
 ]
 
 var level: int = 1

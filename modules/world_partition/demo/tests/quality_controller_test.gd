@@ -6,6 +6,7 @@ func _initialize() -> void:
     assert(controller.level == 1)
     var balanced: Dictionary = controller.get_profile()
     assert(balanced["proxy_load"] == 4)
+    assert(balanced["unload_budget"] == 16)
     balanced["proxy_load"] = 999
     assert(controller.get_profile()["proxy_load"] == 4)
 
@@ -33,5 +34,6 @@ func _initialize() -> void:
     assert(controller.level == 2)
     assert(not controller.set_level(2))
     assert(controller.get_profile()["detail_load"] == 2)
+    assert(controller.get_profile()["unload_budget"] == 32)
     assert(not controller.sample(-1.0, 45.0))
     quit()

@@ -1,0 +1,33 @@
+name: World Partition demo headless tests
+
+on:
+  pull_request:
+    paths:
+      - "modules/world_partition/demo/**"
+      - ".github/workflows/world-partition-demo-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gdscript-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            modules/world_partition/demo
+          sparse-checkout-cone-mode: true
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: false
+      - name: Import demo and verify GDScript parsing
+        run: godot --headless --path modules/world_partition/demo --import --quit
+      - name: Check quality controller hysteresis and unload budgets
+        run: godot --headless --path modules/world_partition/demo --script res://tests/quality_controller_test.gd
+      - name: Check HLOD blend transitions
+        run: godot --headless --path modules/world_partition/demo --script res://tests/hlod_blend_test.gd

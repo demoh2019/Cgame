@@ -45,6 +45,18 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Unload budget defaults and validates") {
+	WorldPartition3D world;
+	CHECK(world.get_max_unloads_per_frame() == 32);
+	world.set_max_unloads_per_frame(7);
+	CHECK(world.get_max_unloads_per_frame() == 7);
+	ERR_PRINT_OFF;
+	world.set_max_unloads_per_frame(0);
+	world.set_max_unloads_per_frame(129);
+	ERR_PRINT_ON;
+	CHECK(world.get_max_unloads_per_frame() == 7);
+}
+
 TEST_CASE("[WorldPartition3D] Unloaded cells have no accessible scene instance") {
 	WorldPartition3D world;
 	world.set_cell_scene(Vector2i(7, -3), "res://unloaded.tscn");
@@ -556,6 +568,32 @@ TEST_CASE("[SceneTree][WorldPartition3D] Failed resources leave no user load tok
 		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
 	}
 	CHECK(ResourceLoader::load_threaded_get_status(missing_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Unload budget spreads teleport cleanup over frames") {
+	const String path = make_cell_scene("budgeted_unload");
+	{
+		WorldFixture fixture;
+		fixture.world->set_load_radius(1);
+		fixture.world->set_unload_radius(2);
+		fixture.world->set_max_unloads_per_frame(1);
+		fixture.world->set_cell_scene(Vector2i(-1, 0), path);
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->set_cell_scene(Vector2i(1, 0), path);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(-1, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(1, 0)));
+		CHECK(fixture.world->get_loaded_cell_count() == 3);
+
+		fixture.observer->set_position(Vector3(160, 0, 0));
+		fixture.world->update_streaming();
+		CHECK(fixture.world->get_loaded_cell_count() == 2);
+		fixture.world->update_streaming();
+		CHECK(fixture.world->get_loaded_cell_count() == 1);
+		fixture.world->update_streaming();
+		CHECK(fixture.world->get_loaded_cell_count() == 0);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
 TEST_CASE("[SceneTree][WorldPartition3D] Cell instance lookup tracks streaming lifetime") {
