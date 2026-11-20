@@ -19,6 +19,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
+const MoonVisuals = preload("res://scripts/client/moon_visuals.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
@@ -240,7 +241,7 @@ func _update_world_light(delta: float = 0.0) -> void:
 		_visual_biome = world.biome_at(at.x, at.z)
 		_weather_next_update = seconds + 0.25
 	_atmosphere.update(WorldCycle.daylight(seconds), WorldCycle.sun_height(seconds),
-		WorldCycle.phase(seconds), _weather_storming, delta, _visual_weather_wind, _visual_biome)
+		WorldCycle.phase(seconds), _weather_storming, delta, _visual_weather_wind, _visual_biome, MoonVisuals.phase_at(seconds))
 
 
 func _mesh(box_size: Vector3, color: Color) -> MeshInstance3D:
