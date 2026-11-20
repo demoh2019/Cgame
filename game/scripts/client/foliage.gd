@@ -6,6 +6,7 @@ const SHADER_CODE := """
 shader_type spatial;
 render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
+#include "res://assets/shaders/specular_aa.gdshaderinc"
 global uniform float aa_weather_wetness;
 global uniform vec3 aa_vegetation_wind;
 // Shared quality knob: Performance = matte rain, Ultra = full PBR wet highlights.
@@ -114,6 +115,9 @@ void fragment() {
 	vec2 uv_dy = dFdy(UV);
 	float roughness = material_roughness;
 	float metallic = material_metallic;
+	// Used only by the optional roughness filter; tangent-space normal maps
+	// contribute to pixel variance without a second normal-map sample.
+	vec3 aa_filter_normal = normalize(NORMAL);
 	// As in distance-aware layered materials, stop sampling subpixel PBR maps.
 	// The same global budget governs terrain, vegetation and runtime graphics presets.
 	float pbr_detail = 1.0 - smoothstep(aa_terrain_detail_radius,
@@ -138,16 +142,22 @@ void fragment() {
 		// The tangent-space normal is meaningful only on imported surfaces with
 		// normal+tangent arrays. Do not pay a texture read for the distant LOD.
 		if (use_normal_map) {
-			NORMAL_MAP = textureGrad(normal_tex, UV, uv_dx, uv_dy).rgb;
+			vec3 normal_sample = textureGrad(normal_tex, UV, uv_dx, uv_dy).rgb;
+			NORMAL_MAP = normal_sample;
 			NORMAL_MAP_DEPTH = normal_strength * pbr_detail;
+			vec3 tangent_normal = normal_sample * 2.0 - 1.0;
+			float aa_normal_scale = clamp(normal_strength * pbr_detail, 0.0, 1.0);
+			aa_filter_normal = normalize(mix(vec3(0.0, 0.0, 1.0),
+				tangent_normal, aa_normal_scale));
 		}
 	}
 	float foliage_variation = cut_out ? plant_roughness : 1.0;
 	// Only inexpensive PBR parameters change in rain; optional PBR normal/
 	// ORM textures, artist alpha and batched geometry are preserved.
 	float wet_gloss = wet_foliage * clamp(aa_vegetation_wet_gloss, 0.0, 1.0);
-	ROUGHNESS = clamp(mix(roughness * foliage_variation,
+	float final_roughness = clamp(mix(roughness * foliage_variation,
 		cut_out ? 0.32 : 0.64, wet_gloss), 0.04, 1.0);
+	ROUGHNESS = filter_specular_roughness(final_roughness, aa_filter_normal);
 	METALLIC = clamp(metallic, 0.0, 1.0);
 	SPECULAR = clamp(mix(material_specular, 0.7, wet_gloss), 0.0, 1.0);
 	if (cut_out) {

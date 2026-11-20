@@ -7,6 +7,7 @@ global uniform float aa_terrain_detail_radius;
 global uniform int aa_terrain_layer_budget;
 global uniform float aa_cliff_normal_quality; // 0 on low-end, 0.7 High, 1 Ultra
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
+#include "res://assets/shaders/specular_aa.gdshaderinc"
 
 // Textured ground. Thirteen CC0 materials (Poly Haven) in two texture arrays:
 //   0 lush grass, 1 dry grass, 2 forest floor, 3 swamp mud, 4 road dirt, 5 cliff rock, 6 mountain rock, 7 sand, 8 snow,
@@ -341,8 +342,11 @@ void fragment() {
 	dry_roughness = mix(dry_roughness, 0.92, ruin_moss * 0.45);
 	// Wetness changes roughness, not the dielectric material's F0.
 	// Existing shallow puddles still produce very tight highlights.
-	ROUGHNESS = clamp(
+	float final_roughness = clamp(
 		mix(mix(dry_roughness, 0.28, wetness * 0.55), 0.08, puddle * 0.9),
 		0.045, 1.0);
+	// Resolve subpixel roughness on moving normal-mapped cliffs and wet ground
+	// without additional PBR texture fetches.
+	ROUGHNESS = filter_specular_roughness(final_roughness, bent);
 	SPECULAR = 0.5;
 }
