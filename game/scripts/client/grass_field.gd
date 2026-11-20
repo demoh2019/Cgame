@@ -49,19 +49,44 @@ varying float sheen;
 varying float grass_light_fade;
 varying vec3 tint;
 varying vec2 ground_xz;
-varying float species; // 0 fine, 1 broad, 2 seed stalk, 3 low leaf.
+varying float species; // 0 fine, 1 broad, 2 seed stalk, 3 low leaf, 4 feather grass, 5 flower stem.
+varying float flower_head; // 1 on the petals of a flowering stem.
+varying vec3 flower_color;
 varying float blade_rand;
 varying float dryness; // Per tuft, from the instance colour alpha.
 varying vec3 aa_world_grass_normal;
 void vertex() {
-	tipness = UV.y;
+	tipness = min(UV.y, 1.0);
+	flower_head = UV.y > 1.2 ? 1.0 : 0.0;
 	shade = UV.x; // Each blade has its own brightness.
 	tint = COLOR.rgb; // The MultiMesh instance colour (the Compatibility renderer does not pass custom data here).
-	species = floor(UV2.x * 4.0);
+	species = floor(UV2.x * 6.0);
 	blade_rand = UV2.y;
 	dryness = clamp(1.0 - COLOR.a, 0.0, 1.0);
 	vec3 root = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
 	ground_xz = root.xz;
+	// Flowers bloom in patches: a few meadow cells flower, each in one or two colours.
+	vec2 bloom_cell = floor(root.xz / 5.0);
+	float patch_roll = fract(sin(dot(bloom_cell, vec2(12.9898, 78.233))) * 43758.5453);
+	float tuft_roll = fract(sin(dot(root.xz, vec2(39.346, 11.135))) * 24634.6345);
+	bool flowering = patch_roll < 0.38 && tuft_roll < 0.75;
+	if (flower_head > 0.5 && !flowering) {
+		VERTEX = vec3(0.0); // No flower here: collapse the petals.
+	}
+	float hue_roll = fract(patch_roll * 7.13 + (tuft_roll > 0.6 ? 0.37 : 0.0));
+	if (hue_roll < 0.22) {
+		flower_color = vec3(0.92, 0.91, 0.84); // Daisy white.
+	} else if (hue_roll < 0.42) {
+		flower_color = vec3(0.95, 0.78, 0.16); // Buttercup yellow.
+	} else if (hue_roll < 0.58) {
+		flower_color = vec3(0.56, 0.36, 0.78); // Purple.
+	} else if (hue_roll < 0.72) {
+		flower_color = vec3(0.36, 0.5, 0.92); // Cornflower blue.
+	} else if (hue_roll < 0.86) {
+		flower_color = vec3(0.86, 0.22, 0.17); // Poppy red.
+	} else {
+		flower_color = vec3(0.93, 0.56, 0.7); // Pink.
+	}
 	float shrink = 1.0 - smoothstep(fade_start, fade_end, length(root.xz - CAMERA_POSITION_WORLD.xz));
 	grass_light_fade = shrink;
 	VERTEX.y *= shrink;
@@ -78,7 +103,7 @@ void vertex() {
 		// Windless weather must not evaluate 3 wave functions per grass vertex.
 		if (wind_power > 0.001) {
 			// Wind: steady ripples with larger gusts, strongest at the tips.
-			float k = UV.y * UV.y;
+			float k = tipness * tipness;
 			vec2 wind_dir = aa_vegetation_wind.xy;
 			vec2 crosswind = vec2(-wind_dir.y, wind_dir.x);
 			float wave = TIME * (1.0 + wind_power * 0.6)
@@ -103,7 +128,7 @@ void vertex() {
 			sheen = gust;
 		}
 		// Walkers press the blades down and aside; no cost while nothing is near (strength 0).
-		vec2 pressed = aa_plant_displacement(root.xz, UV.y * UV.y * shrink, TIME);
+		vec2 pressed = aa_plant_displacement(root.xz, tipness * tipness * shrink, TIME);
 		if (dot(pressed, pressed) > 0.00001) {
 			vec2 pressed_local = aa_wind_world_to_local_xz(pressed, MODEL_MATRIX);
 			VERTEX.x += pressed_local.x;
@@ -117,22 +142,29 @@ void vertex() {
 void fragment() {
 	// The root is the colour of the ground under it; the blade gets lighter and warmer toward the sunlit tip.
 	// Every blade differs a little: some yellower, some bluer, some darker.
-	vec3 base = tint * mix(vec3(0.9, 1.0, 0.86), vec3(1.1, 1.03, 0.88), blade_rand);
+	vec3 base = tint * mix(vec3(0.86, 1.0, 0.8), vec3(1.14, 1.04, 0.82), blade_rand);
 	if (species > 0.5 && species < 1.5) {
-		base *= vec3(0.82, 0.92, 0.84); // Broad leaves: deeper, bluer green.
-	} else if (species > 2.5) {
-		base *= vec3(0.9, 1.04, 0.8); // Low leaves: fresh, saturated.
+		base *= vec3(0.78, 0.9, 0.8); // Broad leaves: deeper, bluer green.
+	} else if (species > 2.5 && species < 3.5) {
+		base *= vec3(0.88, 1.05, 0.78); // Low leaves: fresh, saturated.
+	} else if (species > 3.5 && species < 4.5) {
+		base = mix(base, vec3(0.52, 0.5, 0.33), 0.45); // Feather grass: pale, silvery-straw.
 	}
-	vec3 tip = base * 1.32 + vec3(0.04, 0.045, 0.0);
+	// Real grass: tips catch light and turn slightly yellow-green, they do not go minty white.
+	vec3 tip = base * vec3(1.22, 1.16, 0.92) + vec3(0.03, 0.025, 0.0);
 	// Sun-bleached, dry tips on some blades of drier tufts; seed stalks end in a warm seed head.
 	float dry_tip = smoothstep(0.45, 1.0, tipness) * smoothstep(0.35, 0.9, dryness + blade_rand * 0.45);
 	tip = mix(tip, vec3(0.6, 0.53, 0.3), dry_tip * 0.85);
 	if (species > 1.5 && species < 2.5) {
 		tip = mix(tip, vec3(0.55, 0.45, 0.26), smoothstep(0.7, 1.0, tipness));
 	}
-	vec3 color = mix(base * 1.02, tip, smoothstep(0.0, 1.0, tipness));
-	color *= mix(0.86, 1.1, shade);
-	color *= mix(0.85, 1.0, smoothstep(0.0, 0.25, tipness)); // A little contact shade at the very bottom.
+	vec3 color = mix(base * 0.95, tip, smoothstep(0.0, 1.0, tipness));
+	color *= mix(0.84, 1.08, shade);
+	// Inside a tuft the lower blades are shaded by the upper ones: darker toward the root.
+	color *= mix(0.55, 1.0, smoothstep(0.0, 0.55, tipness));
+	if (flower_head > 0.5) {
+		color = flower_color * mix(0.85, 1.05, blade_rand);
+	}
 	color += vec3(0.04, 0.05, 0.015) * sheen * tipness;
 	// A richer wet-grass palette at no additional texture sampling cost.
 	float wet_grass = clamp(aa_weather_wetness, 0.0, 1.0);
@@ -166,11 +198,11 @@ static var _material: ShaderMaterial
 
 # Grass colour per biome (fresh, then dry); the lushness noise moves between them.
 const BIOME_GRASS := {
-	"forest": [Color(0.24, 0.37, 0.14), Color(0.31, 0.37, 0.16)],
-	"plains": [Color(0.26, 0.4, 0.15), Color(0.42, 0.44, 0.21)],
-	"swamp": [Color(0.22, 0.34, 0.14), Color(0.3, 0.36, 0.16)],
-	"beach": [Color(0.42, 0.45, 0.25), Color(0.52, 0.5, 0.3)],
-	"mountain": [Color(0.31, 0.39, 0.2), Color(0.39, 0.42, 0.24)],
+	"forest": [Color(0.17, 0.29, 0.09), Color(0.27, 0.32, 0.12)],
+	"plains": [Color(0.21, 0.34, 0.1), Color(0.4, 0.39, 0.17)],
+	"swamp": [Color(0.16, 0.27, 0.11), Color(0.25, 0.3, 0.13)],
+	"beach": [Color(0.4, 0.41, 0.22), Color(0.52, 0.48, 0.28)],
+	"mountain": [Color(0.25, 0.32, 0.15), Color(0.37, 0.38, 0.2)],
 }
 # How much of the ground each biome covers.
 const BIOME_DENSITY := {"forest": 0.95, "plains": 1.0, "swamp": 0.95, "beach": 0.25, "mountain": 0.6}
@@ -241,6 +273,9 @@ const SPECIES_FINE := 0
 const SPECIES_BROAD := 1
 const SPECIES_STALK := 2
 const SPECIES_LOW := 3
+const SPECIES_WISPY := 4 # Feather grass: very thin, pale, long and arching.
+const SPECIES_FLOWER := 5 # A stem with a flower head; the head only shows in flowering patches.
+const SPECIES_COUNT := 6.0
 
 
 ## One tuft: thin, curved blades of several species leaning outwards. UV.y runs from root (0) to tip (1).
@@ -263,12 +298,16 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 		var brightness := rng.randf()
 		var species := SPECIES_FINE
 		var roll := rng.randf()
-		if roll < 0.14:
+		if roll < 0.13:
 			species = SPECIES_BROAD
-		elif roll < 0.24:
+		elif roll < 0.21:
 			species = SPECIES_STALK
-		elif roll < 0.3:
+		elif roll < 0.27:
 			species = SPECIES_LOW
+		elif roll < 0.34:
+			species = SPECIES_WISPY
+		elif roll < 0.42:
+			species = SPECIES_FLOWER
 		var height := rng.randf_range(0.16, 0.44)
 		var lean := rng.randf_range(0.04, 0.2)
 		var width := rng.randf_range(0.012, 0.03)
@@ -286,6 +325,14 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 				lean = rng.randf_range(0.06, 0.12)
 				width = rng.randf_range(0.04, 0.06)
 				root = out * rng.randf_range(0.05, 0.3)
+			SPECIES_WISPY:
+				height = rng.randf_range(0.45, 0.68)
+				lean = rng.randf_range(0.22, 0.36) # Long, arching, feathery.
+				width = rng.randf_range(0.006, 0.011)
+			SPECIES_FLOWER:
+				height = rng.randf_range(0.3, 0.52)
+				lean = rng.randf_range(0.02, 0.07)
+				width = rng.randf_range(0.006, 0.01)
 		var blade_random := rng.randf()
 		var start := vertices.size()
 		# Root pair, middle pair, tip: the blade bends further out near the top.
@@ -296,9 +343,22 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 				[mid + side * width * 0.85, 0.55], [tip - side * width * 0.25, 1.0], [tip + side * width * 0.25, 1.0]]:
 			vertices.append(point[0])
 			uvs.append(Vector2(brightness, point[1]))
-			uv2s.append(Vector2((float(species) + 0.5) / 4.0, blade_random))
+			uv2s.append(Vector2((float(species) + 0.5) / SPECIES_COUNT, blade_random))
 			normals.append(Vector3.UP)
 		indices.append_array([start, start + 1, start + 2, start + 1, start + 3, start + 2, start + 2, start + 3, start + 4, start + 3, start + 5, start + 4])
+		if species == SPECIES_FLOWER:
+			# Two crossed petals quads at the tip (UV.y = 1.5 marks the head for the shader).
+			var head := tip + Vector3.UP * 0.015
+			var r := rng.randf_range(0.03, 0.05)
+			for axis in [side, out]:
+				var h0 := vertices.size()
+				for corner in [head - axis * r - Vector3.UP * r * 0.6, head + axis * r - Vector3.UP * r * 0.6,
+						head - axis * r + Vector3.UP * r * 0.6, head + axis * r + Vector3.UP * r * 0.6]:
+					vertices.append(corner)
+					uvs.append(Vector2(brightness, 1.5))
+					uv2s.append(Vector2((float(species) + 0.5) / SPECIES_COUNT, blade_random))
+					normals.append(Vector3.UP)
+				indices.append_array([h0, h0 + 1, h0 + 2, h0 + 1, h0 + 3, h0 + 2])
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
