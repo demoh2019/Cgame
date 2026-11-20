@@ -5113,11 +5113,19 @@ Viewport::Scaling3DMode Viewport::get_scaling_3d_mode() const {
 
 void Viewport::set_scaling_3d_scale(float p_scaling_3d_scale) {
 	ERR_MAIN_THREAD_GUARD;
-	// Clamp to reasonable values that are actually useful.
-	// Values above 2.0 don't serve a practical purpose since the viewport
+	// A broken dynamic-resolution sample must not enter render-buffer sizing
+	// or the log2 texture mip bias. Preserve the last valid scale.
+	if (!Math::is_finite(p_scaling_3d_scale)) {
+		return;
+	}
+	// Values above 2.0 don't serve a practical purpose as the viewport
 	// isn't displayed with mipmaps.
-	scaling_3d_scale = CLAMP(p_scaling_3d_scale, 0.1, 2.0);
-
+	p_scaling_3d_scale = CLAMP(p_scaling_3d_scale, 0.1f, 2.0f);
+	// Avoid reconfiguring GPU render buffers for an unchanged scale.
+	if (scaling_3d_scale == p_scaling_3d_scale) {
+		return;
+	}
+	scaling_3d_scale = p_scaling_3d_scale;
 	RS::get_singleton()->viewport_set_scaling_3d_scale(viewport, scaling_3d_scale);
 }
 

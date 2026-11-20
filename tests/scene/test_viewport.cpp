@@ -53,6 +53,24 @@ TEST_FORCE_LINK(test_viewport)
 
 namespace TestViewport {
 
+TEST_CASE("[SceneTree][Viewport] 3D resolution scale rejects invalid inputs") {
+	Window *root = SceneTree::get_singleton()->get_root();
+	const float original = root->get_scaling_3d_scale();
+
+	root->set_scaling_3d_scale(0.77f);
+	CHECK(root->get_scaling_3d_scale() == 0.77f);
+	root->set_scaling_3d_scale(std::numeric_limits<float>::quiet_NaN());
+	CHECK(root->get_scaling_3d_scale() == 0.77f);
+	root->set_scaling_3d_scale(std::numeric_limits<float>::infinity());
+	CHECK(root->get_scaling_3d_scale() == 0.77f);
+	root->set_scaling_3d_scale(-10.0f);
+	CHECK(root->get_scaling_3d_scale() == 0.1f);
+	root->set_scaling_3d_scale(10.0f);
+	CHECK(root->get_scaling_3d_scale() == 2.0f);
+
+	root->set_scaling_3d_scale(original);
+}
+
 TEST_CASE("[SceneTree][Viewport] FSR sharpness is finite and bounded") {
 	Window *root = SceneTree::get_singleton()->get_root();
 	const float original = root->get_fsr_sharpness();
