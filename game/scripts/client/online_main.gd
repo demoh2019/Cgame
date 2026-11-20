@@ -36,6 +36,7 @@ const DamageNumbers = preload("res://scripts/client/damage_numbers.gd")
 const OcclusionSilhouette = preload("res://scripts/client/occlusion_silhouette.gd")
 const DamageDirection = preload("res://scripts/client/damage_direction.gd")
 const BloodDecals = preload("res://scripts/client/blood_decals.gd")
+const HoverOutline = preload("res://scripts/client/hover_outline.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -124,6 +125,8 @@ var _tumbleweeds
 var _damage_numbers
 var _damage_direction
 var _blood_decals
+var _hover_outline = HoverOutline.new()
+var _hover_left := 0.0
 var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
@@ -1473,6 +1476,7 @@ func _update_time_of_day(delta: float) -> void:
 				WorldCycle.daylight(clock), delta, underground)
 		if _damage_direction != null:
 			_damage_direction.update_view(here, delta)
+		_update_hover_outline(delta)
 		if _tumbleweeds != null:
 			_tumbleweeds.update_view(client.world, here, _visual_biome, _visual_weather_wind,
 				GraphicsQuality.level(), delta, underground)
@@ -2207,3 +2211,22 @@ func _find_forest() -> Vector2:
 				if client.world.biome_at(center.x, center.y) == "forest" and not client.world.is_water(center.x, center.y):
 					return center
 	return Vector2(100, 100)
+
+
+## Outline the zombie, loot bag or player under the mouse (10 Hz pick).
+func _update_hover_outline(delta: float) -> void:
+	_hover_left -= delta
+	if _hover_left > 0.0:
+		return
+	_hover_left = 0.1
+	var viewport := get_viewport()
+	if entities == null or camera == null or viewport == null or not client.you.has("x") or _typing():
+		_hover_outline.set_target({})
+		return
+	var mouse := viewport.get_mouse_position()
+	var plane := Plane(Vector3.UP, client.predicted.y + 0.5)
+	var hit: Variant = plane.intersects_ray(camera.project_ray_origin(mouse), camera.project_ray_normal(mouse))
+	if hit == null:
+		_hover_outline.set_target({})
+		return
+	_hover_outline.set_target(entities.call("nearest_hoverable", hit, HoverOutline.PICK_RADIUS))

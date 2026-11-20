@@ -753,3 +753,22 @@ func play_hit(kind: String, id: int, heavy: bool = false) -> void:
 		var model = _nodes[key].get_node("Model")
 		if model.has_method("play_hit"):
 			model.play_hit(heavy)
+
+
+## Nearest zombie / loot bag / player node to a ground point (for hover outlines).
+func nearest_hoverable(point: Vector3, radius: float) -> Dictionary:
+	var best: Dictionary = {}
+	var best_d: float = radius * radius
+	for key in _nodes:
+		var kind: String = str(key).get_slice(":", 0)
+		if kind != "zombie" and kind != "bag" and kind != "player":
+			continue
+		var node := _nodes[key] as Node3D
+		if node == null or not node.visible:
+			continue
+		var p: Vector3 = node.global_position
+		var d: float = Vector2(p.x - point.x, p.z - point.z).length_squared()
+		if d < best_d:
+			best_d = d
+			best = {"node": node, "kind": kind}
+	return best
