@@ -4,6 +4,7 @@ extends RefCounted
 ## A deterministic CPU build runs once; the texture stays cached across chunks.
 const SIZE := 128
 const TILE_METERS := 1024.0
+const MAX_CLOUD_SPEED := 7.5 # m/s at full regional wind; clouds move over the existing large texture.
 const PERIODS := [8, 18, 36]
 const WEIGHTS := [0.56, 0.30, 0.14]
 const SEED := 220716
@@ -66,6 +67,27 @@ static func texture() -> ImageTexture:
 ## Normalized and scrolling UVs remain continuous across world/chunk borders.
 static func world_uv(position: Vector2, elapsed: float) -> Vector2:
 	return position / TILE_METERS + Vector2(elapsed * 0.0005, elapsed * 0.0003)
+
+
+## Integrate one wind-driven cloud position in metres. A wrapped offset avoids
+## precision loss over long sessions; one full 1024 m wrap is texture-periodic.
+## The actual cloud LUT is still built once, never resampled or regenerated.
+## The vector is already-smoothed vegetation wind: xy direction, z strength.
+static func advance_offset(previous: Vector2, wind: Vector3, delta: float) -> Vector2:
+	if not previous.is_finite():
+		return Vector2.ZERO
+	if not wind.is_finite() or not is_finite(delta) or delta <= 0.0:
+		return previous
+	var direction := Vector2(wind.x, wind.y).limit_length(1.0)
+	var speed: float = clampf(wind.z, 0.0, 1.0) * MAX_CLOUD_SPEED
+	var travel := direction * speed * minf(delta, 0.25)
+	return Vector2(fposmod(previous.x + travel.x, TILE_METERS),
+		fposmod(previous.y + travel.y, TILE_METERS))
+
+
+## Pure shader-equivalent UV helper for regression tests and debug views.
+static func wind_uv(position: Vector2, offset: Vector2) -> Vector2:
+	return (position + offset) / TILE_METERS
 
 
 static func shadow_strength(daylight: float, storm: float, enabled: bool = true) -> float:
