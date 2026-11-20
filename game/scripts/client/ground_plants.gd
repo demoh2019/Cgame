@@ -20,9 +20,9 @@ static var density_scale: float = 1.0
 # "files": explicit baked meshes (relative to baked/) for scanned props such as rocks and sticks.
 const SPECIES := {
 	# The grass carpet itself: the most common, everywhere, many variants, every size from short tufts to big clumps.
-	"grass_medium_01": {"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 720, "scale": [1.0, 4.0], "big": 0.12,
+	"grass_medium_01": {"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 800, "scale": [1.2, 4.4], "big": 0.2,
 		"cluster": false, "variants": 6, "distance": 60.0},
-	"grass_medium_02": {"biomes": ["plains", "forest", "swamp", "mountain"], "count": 300, "scale": [1.0, 3.6], "big": 0.15,
+	"grass_medium_02": {"biomes": ["plains", "forest", "swamp", "mountain"], "count": 340, "scale": [1.2, 4.0], "big": 0.2,
 		"cluster": false, "variants": 4, "distance": 60.0},
 	"dandelion_01": {"biomes": ["plains", "forest"], "count": 40, "scale": [1.1, 2.4], "cluster": true, "variants": 2},
 	"celandine_01": {"biomes": ["forest", "swamp", "plains"], "count": 34, "scale": [1.1, 2.4], "cluster": true, "variants": 2},
@@ -60,23 +60,40 @@ static func variants(species: String) -> Array:
 	return _manifest.get(species, [])
 
 
-static func mesh(file: String) -> Mesh:
-	if not _meshes.has(file):
+static func mesh(file: String, dry: bool = false) -> Mesh:
+	var key := file + ("|dry" if dry else "")
+	if not _meshes.has(key):
 		var loaded: Mesh = load(FOLDER + file) if ResourceLoader.exists(FOLDER + file) else null
-		_meshes[file] = _foliage_ready(loaded) if loaded != null and not file.begins_with("../") else loaded
-	return _meshes[file]
+		if loaded != null and not file.begins_with("../"):
+			var id: String = file.get_basename().rsplit("_", true, 1)[0]
+			loaded = _foliage_ready(loaded, _alpha_texture(id, dry))
+		_meshes[key] = loaded
+	return _meshes[key]
+
+
+## The RGBA diffuse built by tools/fetch_polyhaven_alpha.sh (the glTF's JPEG has no leaf mask).
+static func _alpha_texture(id: String, dry: bool) -> Texture2D:
+	var base := "res://assets/models/polyhaven/%s/textures/%s_" % [id, id]
+	var path := base + ("dry_alpha.png" if dry else "diff_alpha.png")
+	if not ResourceLoader.exists(path):
+		path = base + "diff_alpha.png"
+	return load(path) as Texture2D if ResourceLoader.exists(path) else null
 
 
 ## Scanned leaf cards need foliage shading: lit from both sides, light shining through,
 ## soft wrap diffuse, and a lower alpha cut so thin blades survive the distant mipmaps
 ## instead of crumbling into dark specks.
-static func _foliage_ready(source: Mesh) -> Mesh:
+static func _foliage_ready(source: Mesh, albedo_with_alpha: Texture2D) -> Mesh:
 	var copy: Mesh = source.duplicate()
 	for surface in copy.get_surface_count():
 		var material: Material = copy.surface_get_material(surface)
 		if not (material is BaseMaterial3D):
 			continue
 		var leaf: BaseMaterial3D = (material as BaseMaterial3D).duplicate()
+		if albedo_with_alpha != null:
+			# Real leaf mask: without it the black atlas background showed as black blade tips.
+			leaf.albedo_texture = albedo_with_alpha
+			leaf.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 		leaf.cull_mode = BaseMaterial3D.CULL_DISABLED
 		leaf.diffuse_mode = BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
 		leaf.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
@@ -119,7 +136,9 @@ static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: 
 		var first: int = rng.randi() % choices.size()
 		for v in per_tile:
 			var choice: Dictionary = choices[(first + v * 7) % choices.size()]
-			var plant_mesh: Mesh = mesh(str(choice["file"]))
+			# Some grass tiles carry the scanned dry colouring for natural straw-and-green variety.
+			var dry: bool = species.begins_with("grass_") and rng.randf() < 0.3
+			var plant_mesh: Mesh = mesh(str(choice["file"]), dry)
 			if plant_mesh == null:
 				continue
 			var wanted: int = int(round(float(info["count"]) / float(per_tile) * density_scale * rng.randf_range(0.6, 1.3)))
