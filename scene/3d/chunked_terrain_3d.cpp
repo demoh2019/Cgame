@@ -616,6 +616,35 @@ void ChunkedTerrain3D::set_normal_data(const PackedVector3Array &p_normals) {
 	_queue_rebuild();
 }
 
+
+PackedFloat32Array ChunkedTerrain3D::bake_horizon_visibility(const PackedFloat32Array &p_heights,
+		const Vector2i &p_dimensions, real_t p_spacing, int p_radius_steps) {
+	PackedFloat32Array result;
+	ERR_FAIL_COND_V_MSG(p_dimensions.x < 2 || p_dimensions.y < 2 ||
+			p_dimensions.x > 4096 || p_dimensions.y > 4096 ||
+			p_heights.size() != p_dimensions.x * p_dimensions.y ||
+			!Math::is_finite(p_spacing) || p_spacing <= 0.0 ||
+			p_radius_steps < 2 || p_radius_steps > 12,
+			result, "Invalid terrain horizon bake dimensions, spacing or radius.");
+	// Convert the script-facing PackedFloat32Array only once. This also
+	// supports real_t builds configured for double precision.
+	Vector<real_t> native_heights;
+	native_heights.resize(p_heights.size());
+	real_t *native = native_heights.ptrw();
+	for (int i = 0; i < p_heights.size(); i++) {
+		native[i] = p_heights[i];
+	}
+	const HeightField field{ native_heights.ptr(), p_dimensions.x, p_dimensions.y };
+	const Vector<real_t> visibility =
+			HeightmapTerrainGeometry::bake_horizon_visibility(field, p_spacing, p_radius_steps);
+	result.resize(visibility.size());
+	float *out = result.ptrw();
+	for (int i = 0; i < visibility.size(); i++) {
+		out[i] = float(visibility[i]);
+	}
+	return result;
+}
+
 void ChunkedTerrain3D::set_color_data(const PackedColorArray &p_colors) {
 	ERR_FAIL_COND_MSG(!p_colors.is_empty() && (data_width < 2 || data_depth < 2 ||
 			p_colors.size() != data_width * data_depth),
@@ -923,6 +952,9 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_height_data"), &ChunkedTerrain3D::get_height_data);
 	ClassDB::bind_method(D_METHOD("set_normal_data", "normals"), &ChunkedTerrain3D::set_normal_data);
 	ClassDB::bind_method(D_METHOD("get_normal_data"), &ChunkedTerrain3D::get_normal_data);
+	ClassDB::bind_static_method("ChunkedTerrain3D",
+			D_METHOD("bake_horizon_visibility", "heights", "dimensions", "spacing", "radius_steps"),
+			&ChunkedTerrain3D::bake_horizon_visibility, DEFVAL(6));
 	ClassDB::bind_method(D_METHOD("set_color_data", "colors"), &ChunkedTerrain3D::set_color_data);
 	ClassDB::bind_method(D_METHOD("get_color_data"), &ChunkedTerrain3D::get_color_data);
 	ClassDB::bind_method(D_METHOD("get_height_dimensions"), &ChunkedTerrain3D::get_height_dimensions);

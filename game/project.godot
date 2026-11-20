@@ -232,3 +232,9 @@ aa_terrain_curvature_strength={
 "type": "float",
 "value": 0.0
 }
+
+; CPU-baked terrain sky visibility is a high-tier optional vertex channel.
+aa_terrain_horizon_ao_strength={
+"type": "float",
+"value": 0.0
+}

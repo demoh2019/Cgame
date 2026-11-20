@@ -134,6 +134,10 @@ public:
 	// Optional row-major unit normals for the active height grid, including borders.
 	void set_normal_data(const PackedVector3Array &p_normals);
 	PackedVector3Array get_normal_data() const { return normal_data; }
+	// Native CPU horizon bake; callers can pass a padded height grid to
+	// keep independently streamed terrain chunks visually seamless.
+	static PackedFloat32Array bake_horizon_visibility(const PackedFloat32Array &p_heights,
+			const Vector2i &p_dimensions, real_t p_spacing, int p_radius_steps = 6);
 	void set_color_data(const PackedColorArray &p_colors);
 	PackedColorArray get_color_data() const { return color_data; }
 	Vector2i get_height_dimensions() const { return Vector2i(data_width, data_depth); }

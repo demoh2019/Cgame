@@ -384,4 +384,22 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Pixel error is runtime configurable wit
 	memdelete(terrain);
 }
 
+
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Native horizon AO API returns packed sky visibility") {
+	PackedFloat32Array heights;
+	heights.resize(25 * 25);
+	for (int z = 0; z < 25; z++) {
+		for (int x = 0; x < 25; x++) {
+			const real_t dx = real_t(x - 12);
+			const real_t dz = real_t(z - 12);
+			heights.set(z * 25 + x, float(real_t(0.3) * (dx * dx + dz * dz)));
+		}
+	}
+	const PackedFloat32Array sky = ChunkedTerrain3D::bake_horizon_visibility(
+			heights, Vector2i(25, 25), 2.0, 6);
+	REQUIRE(sky.size() == heights.size());
+	CHECK(sky[12 * 25 + 12] < real_t(0.95));
+	CHECK(sky[12 * 25 + 12] > real_t(0.10));
+}
+
 } // namespace TestChunkedTerrain3D
