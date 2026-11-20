@@ -16,4 +16,8 @@ protected:
 
 public:
 	Ref<Image> generate_lut(int p_width = 128, int p_height = 64, float p_aerosol = 2.0f) const;
+	// CPU-side match for the sky LUT's optical model. Useful to synchronize
+	// the 3D world's fog/atmospheric perspective with sky radiance without
+	// uploading pixels or reading GPU textures every frame.
+	Color sample_scattering(float p_view_elevation, float p_sun_elevation, float p_aerosol = 2.0f) const;
 };
