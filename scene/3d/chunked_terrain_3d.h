@@ -55,6 +55,7 @@ private:
 		RID meshes[MAX_LOD];
 		int lod = -1;
 		float morph = -1.0f; // Cache the last instance uniform; avoid redundant RD writes.
+		float geometric_error = -1.0f; // Lazily cached normalized height deviation.
 		bool visible = false;
 #ifndef PHYSICS_3D_DISABLED
 		RID body;
@@ -81,6 +82,7 @@ private:
 	bool lod_geomorph_enabled = false;
 	bool screen_space_lod_enabled = false;
 	real_t lod_reference_fov = 60.0;
+	real_t lod_geometric_error_strength = 0.0; // 0: legacy selection, 1: ruggedness bias.
 	real_t view_distance = 0.0;
 	real_t skirt_depth = 4.0;
 	Ref<Material> material;
@@ -155,6 +157,8 @@ public:
 	bool is_screen_space_lod_enabled() const { return screen_space_lod_enabled; }
 	void set_lod_reference_fov(real_t p_degrees);
 	real_t get_lod_reference_fov() const { return lod_reference_fov; }
+	void set_lod_geometric_error_strength(real_t p_strength);
+	real_t get_lod_geometric_error_strength() const { return lod_geometric_error_strength; }
 	void set_view_distance(real_t p_distance);
 	real_t get_view_distance() const { return view_distance; }
 	void set_skirt_depth(real_t p_depth);
