@@ -119,6 +119,7 @@ func run(t) -> void:
 	t.eq(server.snapshot_for(miner.id)["you"].get("mining_wedge_charges", -1),
 		Rules.CHARGES, "owner's status shows the server counter")
 	var rival = server.add_player(773, "Rival")
+	rival.position = miner.position
 	t.check(not server.snapshot_for(rival.id)["players"][0].has("mining_wedge_charges"),
 		"non-owner player snapshots never leak preparation state")
 
@@ -156,7 +157,6 @@ func run(t) -> void:
 	for i in range(3):
 		var node: Dictionary = deposits[i]
 		_place(miner, world, node)
-		var skill: String = Progression.resource_skill(str(node["kind"]))
 		t.check(miner.progression.can_gather(str(node["kind"]), int(node["tier"])),
 			"real tier-gated mining profession allows work")
 		var id: int = int(node["id"])
