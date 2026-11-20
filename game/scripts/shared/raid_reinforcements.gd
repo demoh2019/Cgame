@@ -21,7 +21,7 @@ const QUERY_MAX_DISTANCE := 64.0
 ## score as this deterministic stock-Godot fallback. No client-supplied
 ## candidate coordinates or RPCs enter this authoritative selection.
 static func rank_sites(candidates: Array[Vector2], threats: Array[Vector2],
-		center: Vector2) -> Array[Vector2]:
+		center: Vector2, prefer_native: bool = true) -> Array[Vector2]:
 	var ranked: Array[Vector2] = []
 	if not center.is_finite():
 		return ranked
@@ -39,7 +39,7 @@ static func rank_sites(candidates: Array[Vector2], threats: Array[Vector2],
 
 	# Cgame's multi-threat context is a native, capped Environment Query
 	# resource. The same ordering is available without the custom module.
-	if valid_threats.size() <= MAX_THREAT_CONTEXTS and ClassDB.class_exists("EnvironmentQuery3D"):
+	if prefer_native and valid_threats.size() <= MAX_THREAT_CONTEXTS and ClassDB.class_exists("EnvironmentQuery3D"):
 		var query: Object = ClassDB.instantiate("EnvironmentQuery3D")
 		if query != null and query.has_method("set_threat_positions"):
 			var positions := PackedVector3Array()
