@@ -32,6 +32,12 @@ small **gameplay-significance override**.
   mixers; ordinary distant IK remains culled.
 - Existing mixer phase staggering, max accumulated delta and callback mode
   restoration remain untouched.
+- The separate upper-body attack AnimationPlayer is registered as an additional mixer
+  so distant enemy attacks no longer run a second 60 Hz animation path by accident.
+  Its `manage_modifiers=false` registration ensures **only the primary body mixer**
+  controls the skeleton's IK modifiers, avoiding duplicate culling/restore races.
+- The priority quota is counted in **mixers**, not characters. A character with
+  both locomotion and an upper-body attack layer can consume two priority slots.
 
 A full-rate `advance()` does **not** increase simulation/network tick
 frequency, and cannot make a server hit occur earlier.
@@ -71,7 +77,9 @@ AnimationMixer owner and does not change game simulation.
 - `modules/gameplay_tags/tests/test_gameplay_tags.h`: native registered
   mixer hints and budget bounds.
 - `game/tests/test_combat_animation_priority.gd`: player-facing policy,
-  4-tier budgets, visual-authority separation, native API/fallback tests.
+  4-tier budgets, two-mixer ownership, visual-authority separation, native API/fallback tests.
+- `tests/modules/test_combat_animation_budget.py`: lightweight C++/game source
+  contracts run by `.github/workflows/combat-animation-budget.yml`.
 - `game/tests/run_graphics.gd` and `game/tests/run_all.gd` include the suite.
 
 Rebuild the custom Cgame engine and test a world boss with many zombies
