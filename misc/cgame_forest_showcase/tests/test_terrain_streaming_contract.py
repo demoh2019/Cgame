@@ -252,6 +252,52 @@ class StreamedTerrainContracts(TestCase):
         self.assertNotIn("StaticBody3D.new()", far)
         self.assertNotIn("CollisionShape3D.new()", far)
 
+    def test_native_manual_pin_streaming_contract(self) -> None:
+        """Engine pins, editor docs and playable fast travel stay in sync."""
+        repository = ROOT.parents[1]
+        header = (repository / "modules/world_partition/world_partition_3d.h").read_text(encoding="utf-8")
+        cpp = (repository / "modules/world_partition/world_partition_3d.cpp").read_text(encoding="utf-8")
+        xml = (repository / "modules/world_partition/doc_classes/WorldPartition3D.xml").read_text(encoding="utf-8")
+        native_tests = (repository / "modules/world_partition/tests/test_world_partition_3d.h").read_text(encoding="utf-8")
+        world = (ROOT / "scripts/world.gd").read_text(encoding="utf-8")
+        smoke = (ROOT / "tests/smoke_pinned_cells.gd").read_text(encoding="utf-8")
+        travel = (ROOT / "tests/smoke_fast_travel.gd").read_text(encoding="utf-8")
+
+        self.assertIn("static constexpr int MAX_PINNED_CELLS = 16;", header)
+        for method in ("pin_cell", "unpin_cell", "clear_pinned_cells",
+                       "is_cell_pinned", "get_pinned_cell_count"):
+            self.assertIn(method + "(", header)
+            self.assertIn("WorldPartition3D::" + method + "(", cpp)
+            self.assertIn('D_METHOD("' + method + '"', cpp)
+            self.assertIn('method name="' + method + '"', xml)
+
+        self.assertIn("_get_scene_path(p_cell).is_empty()", cpp)
+        self.assertIn("pinned_cells.size() >= MAX_PINNED_CELLS", cpp)
+        self.assertIn("pinned_cells.erase(p_cell)", cpp)
+        self.assertIn("pinned_cells.clear()", cpp)
+        self.assertIn("!pinned_cells.has(E.key)", cpp)
+        self.assertIn("Vector<Vector2i> pinned_snapshot;", cpp)
+        self.assertIn("if (pinned_cells.has(cell))", cpp)
+        self.assertLess(cpp.index("for (int radius = 0; radius <= load_radius; radius++)"),
+                        cpp.index("Vector<Vector2i> pinned_snapshot;"))
+        self.assertLess(cpp.index("Vector<Vector2i> pinned_snapshot;"),
+                        cpp.index("prefetch_coordinate(step, ahead)"))
+
+        self.assertIn("Pinned cells are registered bounded and lifecycle-safe", native_tests)
+        self.assertIn("Pinned remote cells load and unload independently", native_tests)
+        self.assertIn("OUTPOST_CELL: Vector2i = Vector2i(6, 6)", world)
+        self.assertIn("OUTPOST_POSITION: Vector2 = Vector2(208.0, 208.0)", world)
+        self.assertIn("KEY_F6:", world)
+        self.assertIn("KEY_F7:", world)
+        self.assertIn("world_partition.pin_cell(target_cell)", world)
+        self.assertIn("world_partition.are_cells_loaded(target_cell, 0)", world)
+        self.assertIn("world_partition.unpin_cell(target_cell)", world)
+        self.assertIn("world_partition.get_pinned_cell_count()", world)
+        self.assertIn("stream.pin_cell(remote)", smoke)
+        self.assertIn("stream.clear_pinned_cells()", smoke)
+        self.assertIn('world.call("_fast_travel")', travel)
+        self.assertIn("FastTravelOutpost", travel)
+
     def test_native_directional_prefetch_contract(self) -> None:
         """Spot-check the native engine integration as well as the GDScript client."""
         repository = ROOT.parents[1]
