@@ -40,3 +40,31 @@ static func record_hit(warning: Dictionary, boss, peer_id: int, party_id: int,
 	for amount in contributors.values():
 		total += float(amount)
 	return contributors.size() >= MIN_ATTACKERS and total >= REQUIRED_DAMAGE
+
+
+
+## Replicate only a bounded, anonymous damage tally. All parties can
+## see the empty objective; once somebody contributes, only their party
+## receives its progress. Never reveal peer IDs or private group IDs.
+static func public_progress(warning: Dictionary, now: float,
+		viewer_party_id: int) -> Dictionary:
+	if viewer_party_id <= 0 or warning.is_empty() or not is_finite(now):
+		return {}
+	var boss_id: int = int(warning.get("id", -1))
+	var deadline: float = float(warning.get("at", -1.0))
+	if boss_id <= 0 or not is_finite(deadline) or now >= deadline:
+		return {}
+	var owner_party: int = int(warning.get("party", 0))
+	if owner_party != 0 and owner_party != viewer_party_id:
+		return {}
+	var contributors: Dictionary = warning.get("contributors", {})
+	var damage: float = 0.0
+	for value in contributors.values():
+		var credit: float = float(value)
+		if not is_finite(credit) or credit < 0.0:
+			return {}
+		damage += minf(credit, CREDIT_PER_PLAYER)
+	return {"id": boss_id, "damage": clampi(roundi(damage), 0, int(REQUIRED_DAMAGE)),
+		"required": int(REQUIRED_DAMAGE),
+		"attackers": mini(contributors.size(), MAX_ATTACKERS),
+		"required_attackers": MIN_ATTACKERS}
