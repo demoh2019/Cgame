@@ -27,10 +27,10 @@ static func apply(sun: DirectionalLight3D, level: int, daylight: float,
 	if sun == null:
 		return
 	var p: Dictionary = profile(level, daylight, sun_height, storm)
+	# This controller owns ONLY penumbra width. SunShadowQuality owns
+	# directional shadow opacity at 5 Hz; two clocks writing the same
+	# property produced visible light/shadow flicker in changing weather.
 	# Quantization and the 4 Hz caller avoid per-frame renderer traffic.
 	var blur: float = roundf(float(p["blur"]) * 100.0) / 100.0
-	var opacity: float = roundf(float(p["opacity"]) * 100.0) / 100.0
 	if not is_equal_approx(sun.shadow_blur, blur):
 		sun.shadow_blur = blur
-	if not is_equal_approx(sun.shadow_opacity, opacity):
-		sun.shadow_opacity = opacity
