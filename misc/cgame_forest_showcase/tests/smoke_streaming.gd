@@ -35,6 +35,16 @@ func _wait_for_cell(stream: WorldPartition3D, cell: Vector2i,
     return false
 
 
+func _get_active_cell_node(stream: WorldPartition3D, grid_cell: Vector2i) -> Node3D:
+    var expected: Vector3 = stream.cell_to_local_position(grid_cell)
+    for child in stream.get_children():
+        var node := child as Node3D
+        if node != null and not node.is_queued_for_deletion():
+            if node.position.distance_to(expected) < 0.01:
+                return node
+    return null
+
+
 func _run() -> void:
     if not ResourceLoader.exists(CELL_SCENE_PATH):
         _fail("cell scene is missing")
@@ -72,7 +82,7 @@ func _run() -> void:
         _fail("observer_cell_changed did not emit for the first cell")
         return
 
-    var cell := stream.get_child(0) as Node3D
+    var cell := _get_active_cell_node(stream, origin)
     if cell == null or not cell.has_node("WindGrass"):
         _fail("streamed cell did not generate its instances")
         return
@@ -99,7 +109,10 @@ func _run() -> void:
     if not await _wait_for_cell(stream, origin, true):
         _fail("origin cell did not reload")
         return
-    var reloaded := stream.get_child(0) as Node3D
+    var reloaded := _get_active_cell_node(stream, origin)
+    if reloaded == null or not reloaded.has_node("WindGrass"):
+        _fail("reloaded cell root was not instantiated")
+        return
     var next_grass := reloaded.get_node("WindGrass") as MultiMeshInstance3D
     if next_grass.multimesh.get_instance_transform(0) != before:
         _fail("foliage layout changed across stream unload/reload")
