@@ -49,6 +49,10 @@ func _process(delta: float) -> void:
 		_count_clock = 0.0
 		_command_counts.clear()
 	if role == "server" and not shutting_down and gateway != null and gateway.enabled:
+		# Two-account deals settle in one backend transaction (see GameServer.pair_commits).
+		sim.pair_persistence = true
+		while not sim.pair_commits.is_empty():
+			_commit_pair(sim.pair_commits.pop_front())
 		_guild_refresh_clock += maxf(0.0, delta)
 		if _guild_refresh_clock >= GUILD_REFRESH_SECONDS and not _guild_refresh_running:
 			_guild_refresh_clock = 0.0
@@ -292,6 +296,46 @@ func _disconnect_later(peer: int) -> void:
 	await get_tree().create_timer(0.3).timeout # Let the refusal message get out first.
 	if multiplayer.get_peers().has(peer):
 		multiplayer.multiplayer_peer.disconnect_peer(peer)
+
+
+const PAIR_COMMIT_ATTEMPTS := 6
+
+
+## Saves both sides of a completed trade or market sale atomically (Nakama character_pair_save). Waits for any save
+## of either account in flight, holds both accounts' save slots so no single autosave interleaves, and retries with
+## the same transaction ID, which the backend recognises: a commit that did land is never applied twice. Releases the
+## two players' deal lock when confirmed; after the last failed attempt the snapshots fall back to the ordinary
+## pending saves and the lock is released too, so nobody is stuck.
+func _commit_pair(entry: Dictionary) -> void:
+	var tx: String = str(entry["tx"])
+	var first = sim.players.get(int(entry["a"]))
+	var second = sim.players.get(int(entry["b"]))
+	if first == null or second == null or first.user_id == "" or second.user_id == "" or first.user_id == second.user_id:
+		sim.release_pair_commit(tx) # Offline or guest characters: nothing durable to settle together.
+		return
+	var user_a: String = first.user_id
+	var user_b: String = second.user_id
+	while _saving.has(user_a) or _saving.has(user_b):
+		await get_tree().process_frame
+	_saving[user_a] = true
+	_saving[user_b] = true
+	# Snapshot after the deal; a later autosave of either account waits for this commit.
+	var data_a: Dictionary = sim.character_data(first)
+	var data_b: Dictionary = sim.character_data(second)
+	var committed := false
+	for attempt in PAIR_COMMIT_ATTEMPTS:
+		var result: Dictionary = await gateway.save_character_pair(user_a, data_a, user_b, data_b, tx)
+		if bool(result.get("ok", false)):
+			committed = true
+			break
+		await get_tree().create_timer(0.5 * float(attempt + 1)).timeout
+	_saving.erase(user_a)
+	_saving.erase(user_b)
+	if not committed:
+		_pending_saves[user_a] = data_a
+		_pending_saves[user_b] = data_b
+		push_warning("Deal %s could not be settled atomically; both characters are queued for retry." % tx)
+	sim.release_pair_commit(tx)
 
 
 ## Save writes are serialized by account: an older autosave cannot finish after logout.

@@ -337,6 +337,13 @@ var _acid_wall_last_hit: Dictionary = {} # Wall id -> last corrosion time; no ov
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
+# Atomic two-account settlement. When the network layer has a persistent backend it sets pair_persistence; every
+# completed player trade or market sale between two online players then queues one commit that saves BOTH characters
+# in a single backend transaction (Nakama character_pair_save, idempotent by transaction ID). Until that commit is
+# confirmed, both players are locked out of further trades and market deals, so a crash can never keep one half.
+var pair_persistence := false
+var pair_commits: Array = [] # [{a: peer, b: peer, tx: String}], drained by Net.
+var pair_locks: Dictionary = {} # peer -> transaction ID awaiting confirmation.
 var market_buy_requests: Dictionary = {} # Peer -> last request ID, arguments and result.
 var trade_by_player: Dictionary = {} # peer -> active trade
 var parties = Party.new() # Server-only session groups and short-lived invitations.
@@ -2119,9 +2126,35 @@ func _cancel_player_trade(peer_id: int, reason: String) -> void:
 		trade_by_player.erase(peer_id)
 
 
+## Queues the durable settlement of a two-player deal that has just been applied in memory.
+func _queue_pair_commit(peer_a: int, peer_b: int, kind: String) -> void:
+	if not pair_persistence:
+		return
+	var tx := "%s-%d-%s" % [kind, new_id(), Crypto.new().generate_random_bytes(6).hex_encode()]
+	pair_locks[peer_a] = tx
+	pair_locks[peer_b] = tx
+	pair_commits.append({"a": peer_a, "b": peer_b, "tx": tx})
+
+
+## The backend confirmed (or finally gave up on) a settlement: the two players may trade again.
+func release_pair_commit(tx: String) -> void:
+	for peer in pair_locks.keys():
+		if pair_locks[peer] == tx:
+			pair_locks.erase(peer)
+
+
+func _pair_locked(peer_ids: Array) -> bool:
+	for peer in peer_ids:
+		if pair_locks.has(int(peer)):
+			return true
+	return false
+
+
 func cmd_trade_invite(peer_id: int, target_id: int) -> Dictionary:
 	if peer_id == target_id or not players.has(peer_id) or not players.has(target_id):
 		return {"ok": false, "reason": "invalid_target"}
+	if _pair_locked([peer_id, target_id]):
+		return {"ok": false, "reason": "saving_previous_deal"}
 	if trade_by_player.has(peer_id) or trade_by_player.has(target_id):
 		return {"ok": false, "reason": "busy"}
 	if not _trade_available(peer_id, target_id):
@@ -2188,6 +2221,9 @@ func cmd_trade_accept(peer_id: int, trade_id: int, revision: int) -> Dictionary:
 	if not trade["accepted"][trade["a"]] or not trade["accepted"][trade["b"]]:
 		_announce_trade(trade, "accepted")
 		return {"ok": true, "completed": false, "revision": revision}
+	if _pair_locked([trade["a"], trade["b"]]):
+		trade["accepted"][peer_id] = false
+		return {"ok": false, "reason": "saving_previous_deal"}
 	var first: Player = players[int(trade["a"])]
 	var second: Player = players[int(trade["b"])]
 	var result: Dictionary = PlayerTrade.exchange(
@@ -2205,6 +2241,7 @@ func cmd_trade_accept(peer_id: int, trade_id: int, revision: int) -> Dictionary:
 	first.dirty_character = true
 	second.dirty_character = true
 	_close_trade(trade, "completed")
+	_queue_pair_commit(int(trade["a"]), int(trade["b"]), "trade")
 	return {"ok": true, "completed": true, "trade_id": trade_id}
 
 
@@ -2300,6 +2337,8 @@ func cmd_market_list(peer_id: int) -> Dictionary:
 
 
 func cmd_market_create(peer_id: int, item_id: String, quantity: int, unit_price: int) -> Dictionary:
+	if _pair_locked([peer_id]):
+		return {"ok": false, "reason": "saving_previous_deal"}
 	var seller: Player = players.get(peer_id)
 	if not _market_at_hub(seller):
 		return {"ok": false, "reason": "no_station"}
@@ -2377,6 +2416,8 @@ func _execute_market_buy(peer_id: int, listing_id: int, quantity: int) -> Dictio
 	if seller == null or not _market_at_hub(seller) or time >= float(listing["expires"]):
 		market_orders.erase(listing_id)
 		return {"ok": false, "reason": "seller_unavailable"}
+	if _pair_locked([peer_id, seller_id]):
+		return {"ok": false, "reason": "saving_previous_deal"}
 	# Synchronous on this server's simulation thread; no yield between the
 	# balance checks and the two-inventory commit.
 	var transaction: Dictionary = MarketBoard.purchase(buyer.inventory, seller.inventory, listing, quantity)
@@ -2388,6 +2429,7 @@ func _execute_market_buy(peer_id: int, listing_id: int, quantity: int) -> Dictio
 	for player in [buyer, seller]:
 		player.dirty_inventory = true
 		player.dirty_character = true
+	_queue_pair_commit(peer_id, seller_id, "market")
 	var receipt_id: int = new_id()
 	market_sales.append({
 		"id": receipt_id, "buyer": peer_id, "seller": seller_id,

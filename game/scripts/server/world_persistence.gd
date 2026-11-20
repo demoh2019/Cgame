@@ -41,14 +41,46 @@ static func capture(sim) -> Dictionary:
 		})
 	walls.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return int(a["id"]) < int(b["id"]))
-	return {"version": VERSION, "world_seed": int(sim.world.world_seed), "barricades": walls}
+	return {"version": VERSION, "world_seed": int(sim.world.world_seed), "barricades": walls,
+		"outposts": sim.territory.persistent_holds(sim.time)}
+
+
+## Guild holds of outposts: [{id, guild, name, remaining}]. Older checkpoints have none.
+static func _validate_holds(source: Variant, sim) -> Variant:
+	if typeof(source) != TYPE_ARRAY or source.size() > sim.territory.sites.size():
+		return null
+	var holds: Array = []
+	var seen: Dictionary = {}
+	for value in source:
+		if typeof(value) != TYPE_DICTIONARY or value.size() != 4:
+			return null
+		if not _bounded_int(value.get("id"), 1, 64) or sim.territory.site_by_id(int(value["id"])).is_empty():
+			return null
+		if seen.has(int(value["id"])):
+			return null
+		seen[int(value["id"])] = true
+		if typeof(value.get("guild")) != TYPE_STRING or typeof(value.get("name")) != TYPE_STRING:
+			return null
+		var guild: String = value["guild"]
+		var name: String = value["name"]
+		if guild.is_empty() or guild.length() > MAX_OWNER_LENGTH or guild != guild.strip_edges() or name.length() > MAX_OWNER_LENGTH:
+			return null
+		if not _bounded_float(value.get("remaining"), 0.0, sim.territory.HOLD_SECONDS):
+			return null
+		holds.append({"id": int(value["id"]), "guild": guild, "name": name, "remaining": float(value["remaining"])})
+	return holds
 
 
 ## Do all checks before adding a single blocker or modifying any active wall.
 ## Refuse a snapshot from another seed or terrain layout, including overlapping
 ## terrain obstacles, neighboring restored walls and impossible owner quotas.
 static func validate(data: Variant, sim) -> Dictionary:
-	if typeof(data) != TYPE_DICTIONARY or data.size() != 3:
+	if typeof(data) != TYPE_DICTIONARY or data.size() not in [3, 4]:
+		return {}
+	if data.size() == 4 and not data.has("outposts"):
+		return {}
+	var holds: Variant = _validate_holds(data.get("outposts", []), sim)
+	if holds == null:
 		return {}
 	if not _bounded_int(data.get("version"), VERSION, VERSION):
 		return {}
@@ -115,7 +147,7 @@ static func validate(data: Variant, sim) -> Dictionary:
 		owner_counts[uid] = next_count
 		walls.append({"id": id, "x": x, "z": z, "hp": float(value["hp"]),
 			"tier": tier, "owner_account": uid, "owner_guild": guild})
-	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls}
+	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls, "outposts": holds}
 
 
 static func restore(sim, data: Variant) -> bool:
@@ -136,6 +168,7 @@ static func restore(sim, data: Variant) -> bool:
 		}
 		sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 		sim._next_id = maxi(sim._next_id, id)
+	sim.territory.restore_holds(valid["outposts"], sim.time)
 	return true
 
 

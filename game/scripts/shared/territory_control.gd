@@ -52,14 +52,55 @@ func _init(world) -> void:
 				"breach_ready_at": 0.0, "watch_ready_at": 0.0,
 				"supplies_left": 0, "supply_epoch": 0, "provisioned_seconds": 0.0,
 				"supply_claims": {},
+				# Durable guild hold: a capture by a guild party keeps the site for that guild until the hold ends, even if
+				# the party disbands or the server restarts (WorldPersistence saves it).
+				"owner_guild": "", "owner_guild_name": "", "guild_until": 0.0,
 			})
 			break
+
+
+func _clear_guild_hold(site: Dictionary) -> void:
+	site["owner_guild"] = ""
+	site["owner_guild_name"] = ""
+	site["guild_until"] = 0.0
+
+
+## The guild holds that must survive a restart: [{id, guild, name, remaining}] (remaining in seconds of the hold).
+func persistent_holds(now: float) -> Array:
+	var holds: Array = []
+	for site in sites:
+		var guild: String = str(site.get("owner_guild", ""))
+		if guild.is_empty():
+			continue
+		var until: float = float(site["until"]) if int(site["owner"]) != 0 else float(site.get("guild_until", 0.0))
+		var remaining: float = until - now
+		if remaining > 1.0:
+			holds.append({"id": int(site["id"]), "guild": guild, "name": str(site.get("owner_guild_name", "")),
+				"remaining": minf(remaining, HOLD_SECONDS)})
+	return holds
+
+
+## Restores validated holds after a restart: each site is held by its guild, unmanned, for the time that was left.
+func restore_holds(holds: Array, now: float) -> void:
+	for hold in holds:
+		var site := site_by_id(int(hold["id"]))
+		if site.is_empty():
+			continue
+		site["owner"] = 0
+		site["owner_guild"] = str(hold["guild"])
+		site["owner_guild_name"] = str(hold.get("name", ""))
+		site["guild_until"] = now + float(hold["remaining"])
+		site["until"] = 0.0
 
 
 func public_state(now: float, players: Dictionary = {}, parties = null) -> Array:
 	var result: Array = []
 	for site in sites:
 		var clan: Dictionary = GuildTerritory.owner_banner(site, players, parties)
+		# An unmanned guild hold shows its guild; a manned site shows only the live, verified banner of its party, so
+		# leaving the guild or mixing guilds removes the banner at once.
+		if int(site["owner"]) == 0 and not str(site.get("owner_guild", "")).is_empty():
+			clan = {"id": str(site["owner_guild"]), "name": str(site.get("owner_guild_name", ""))}
 		result.append({
 			"id": int(site["id"]), "x": float(site["x"]), "z": float(site["z"]),
 			"owner": int(site["owner"]), "challenger": int(site["challenger"]),
@@ -68,7 +109,7 @@ func public_state(now: float, players: Dictionary = {}, parties = null) -> Array
 			"fortification": int(site["fortification"]),
 			"capture_target": capture_target(site),
 			"breach_cooldown": maxf(0.0, float(site.get("breach_ready_at", 0.0)) - now),
-			"expires_in": maxf(0.0, float(site["until"]) - now),
+			"expires_in": maxf(0.0, (float(site["until"]) if int(site["owner"]) != 0 else float(site.get("guild_until", 0.0))) - now),
 			"supplies_left": int(site.get("supplies_left", 0)),
 			"provisioned_seconds": float(site.get("provisioned_seconds", 0.0)),
 		})
@@ -134,6 +175,35 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 	var step: float = minf(delta, 0.25)
 	for site in sites:
 		var owner: int = int(site["owner"])
+		var guild: String = str(site.get("owner_guild", ""))
+		# The party that holds a guild site has disbanded (or logged out) but the guild's hold has time left: the site
+		# stays the guild's, unmanned, instead of falling.
+		if owner != 0 and not guild.is_empty() and not parties.groups.has(owner) and now < float(site["until"]):
+			site["owner"] = 0
+			site["guild_until"] = float(site["until"])
+			site["challenger"] = 0
+			site["progress"] = 0.0
+			changed.append({"type": "outpost_guild_held", "id": site["id"], "x": site["x"], "z": site["z"],
+				"guild": guild, "guild_name": str(site.get("owner_guild_name", ""))})
+			owner = 0
+		if owner == 0 and not guild.is_empty():
+			if now >= float(site.get("guild_until", 0.0)):
+				_clear_guild_hold(site)
+				changed.append({"type": "outpost_lost", "id": site["id"], "x": site["x"], "z": site["z"]})
+			else:
+				# Any party of the holding guild that arrives takes command again at once, for the rest of the hold.
+				var holders: Dictionary = _occupied_groups(site, players, parties)
+				for group in holders.keys():
+					if int(group) > 0 and parties.groups.has(int(group)) and \
+							str(GuildTerritory.party_banner(int(group), players, parties).get("id", "")) == guild:
+						site["owner"] = int(group)
+						site["until"] = float(site["guild_until"])
+						site["challenger"] = 0
+						site["progress"] = 0.0
+						changed.append({"type": "outpost_taken", "id": site["id"], "x": site["x"], "z": site["z"],
+							"owner": int(group), "reclaimed": true})
+						owner = int(group)
+						break
 		if owner != 0 and (not parties.groups.has(owner) or now >= float(site["until"])):
 			site["owner"] = 0
 			site["until"] = 0.0
@@ -143,6 +213,7 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 			site["supply_claims"] = {}
 			site["breach_ready_at"] = 0.0
 			site["watch_ready_at"] = 0.0
+			_clear_guild_hold(site)
 			changed.append({"type": "outpost_lost", "id": site["id"], "x": site["x"], "z": site["z"]})
 		var occupants: Dictionary = _occupied_groups(site, players, parties)
 		# Unlike a contested flag snapshot, this also detects unopposed
@@ -168,6 +239,11 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 		if float(site["progress"]) >= capture_target(site):
 			site["owner"] = group_id
 			site["until"] = now + HOLD_SECONDS
+			# A guild party claims the site for its guild (verified members only); a plain party holds it alone.
+			var banner: Dictionary = GuildTerritory.party_banner(group_id, players, parties)
+			site["owner_guild"] = str(banner.get("id", ""))
+			site["owner_guild_name"] = str(banner.get("name", ""))
+			site["guild_until"] = float(site["until"]) if not site["owner_guild"].is_empty() else 0.0
 			OutpostSupplies.initialize_capture(site)
 			site["provisioned_seconds"] = 0.0
 			site["fortification"] = 0 # Previous defenders lose their walls.

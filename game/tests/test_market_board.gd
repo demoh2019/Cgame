@@ -73,12 +73,14 @@ func run(t) -> void:
 	t.eq(full_seller.count("silver"), 100000, "seller receives net 1 silver at the cap")
 	t.eq(modest_buyer.count("silver"), 0, "buyer still pays full gross 2 silver")
 	t.eq(modest_buyer.count("wood_1"), 1, "buyer receives item exactly once")
-	full_seller.add("wood_1", 1)
+	# Two wood: selling one keeps the wood slot occupied, so the net proceeds really have nowhere to go (with a single
+	# wood the sale frees its slot and the silver legitimately fits there as a new stack).
+	full_seller.add("wood_1", 2)
 	modest_buyer.add("silver", 3)
 	var seller_before: Dictionary = full_seller.to_dict()
 	var buyer_before: Dictionary = modest_buyer.to_dict()
 	low_order["price"] = 3
-	t.eq(MarketBoard.purchase(modest_buyer, full_seller, low_order, 1)["reason"],
+	t.eq(MarketBoard.purchase(modest_buyer, full_seller, low_order, 1).get("reason", ""),
 		"no_space", "sale rejected when net proceeds would overflow seller's stack")
 	t.eq(full_seller.to_dict(), seller_before, "seller is unchanged after failed net settlement")
 	t.eq(modest_buyer.to_dict(), buyer_before, "buyer is unchanged after failed net settlement")

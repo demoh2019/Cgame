@@ -40,7 +40,7 @@ func _run() -> void:
 	var c := _make("c")
 	var room := "test-world-" + tag
 	for pair in [[a, "Alice" + tag], [b, "Bob" + tag], [c, "Carol" + tag]]:
-		var signed_in: Dictionary = await pair[0].sign_in("127.0.0.1", 7350, "social-%s-%s" % [tag, pair[1]], pair[1])
+		var signed_in: Dictionary = await pair[0].sign_in("127.0.0.1", _nakama_port(), "social-%s-%s" % [tag, pair[1]], pair[1])
 		check(signed_in["ok"], "%s signs in" % pair[1])
 		check(await pair[0].start_chat(room), "%s joins chat" % pair[1])
 	await a.say("hello world")
@@ -76,3 +76,8 @@ func _run() -> void:
 		social.shutdown()
 	print("NAKAMA SOCIAL TEST %s (%d checks)" % ["PASS" if failures.is_empty() else "FAIL", checks])
 	quit(0 if failures.is_empty() else 1)
+
+
+## The Nakama HTTP port: 7350 (game/backend/docker-compose.yml) unless NAKAMA_PORT points at another instance.
+func _nakama_port() -> int:
+	return int(OS.get_environment("NAKAMA_PORT")) if OS.get_environment("NAKAMA_PORT") != "" else 7350

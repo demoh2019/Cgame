@@ -11,6 +11,8 @@ const SUITES := [
 	"res://tests/test_road_travel.gd",
 	"res://tests/test_storm_mud.gd",
 	"res://tests/test_guardian_retribution.gd",
+	"res://tests/test_pair_settlement.gd",
+	"res://tests/test_guild_holds.gd",
 	"res://tests/test_world_discovery.gd",
 	"res://tests/test_inventory.gd",
 	"res://tests/test_equipment_presets.gd",

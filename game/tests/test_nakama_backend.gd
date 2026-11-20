@@ -24,7 +24,7 @@ func _initialize() -> void:
 func _run() -> void:
 	var gateway := Gateway.new()
 	root.add_child(gateway)
-	gateway.setup("127.0.0.1", 7350, "albion_after_key", "albion_http_key")
+	gateway.setup("127.0.0.1", _nakama_port(), "albion_after_key", "albion_http_key")
 	var player_client = gateway.client
 
 	var device := "test-device-%d" % Time.get_ticks_usec()
@@ -239,3 +239,8 @@ func _run() -> void:
 func _done() -> void:
 	print("NAKAMA TEST %s (%d checks)" % ["PASS" if failures.is_empty() else "FAIL", checks])
 	quit(0 if failures.is_empty() else 1)
+
+
+## The Nakama HTTP port: 7350 (game/backend/docker-compose.yml) unless NAKAMA_PORT points at another instance.
+func _nakama_port() -> int:
+	return int(OS.get_environment("NAKAMA_PORT")) if OS.get_environment("NAKAMA_PORT") != "" else 7350

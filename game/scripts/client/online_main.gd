@@ -29,6 +29,7 @@ const HelpPanel = preload("res://scripts/client/help_panel.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Effects = preload("res://scripts/client/effects.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
+const LocalServer = preload("res://scripts/client/local_server.gd")
 const SkillsPanel = preload("res://scripts/client/skills_panel.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 
@@ -68,6 +69,8 @@ var social
 var chat_edit: LineEdit
 var account := {} # Result of the Nakama sign-in, empty when playing without accounts.
 var connect_panel: PanelContainer
+var local_server := LocalServer.new()
+var _solo_attempts_left := 0
 var address_edit: LineEdit
 var name_edit: LineEdit
 var status_label: Label
@@ -86,6 +89,7 @@ var _demo_frames := 0 # Frames since the first snapshot arrived.
 
 func _exit_tree() -> void:
 	CharacterModel.clear_templates() # Cached survivor models live outside the tree.
+	local_server.stop() # A solo world ends with the game.
 
 
 func _ready() -> void:
@@ -286,12 +290,18 @@ func _build_connect_screen() -> void:
 			name_edit = edit
 		else:
 			address_edit = edit
+	var solo := Button.new()
+	solo.text = "Play solo"
+	solo.tooltip_text = "Runs the world on this computer (every system, saved between sessions) and joins it."
+	solo.custom_minimum_size = Vector2(0, 46)
+	solo.add_theme_font_size_override("font_size", 18)
+	solo.add_theme_stylebox_override("normal", UiTheme._box(Color(0.42, 0.33, 0.13, 0.95), 8, 1.5, UiTheme.GOLD, 6))
+	solo.add_theme_stylebox_override("hover", UiTheme._box(Color(0.55, 0.43, 0.17, 1.0), 8, 2.0, UiTheme.GOLD, 6))
+	solo.pressed.connect(_play_solo)
+	box.add_child(solo)
 	var button := Button.new()
-	button.text = "Enter the world"
-	button.custom_minimum_size = Vector2(0, 46)
-	button.add_theme_font_size_override("font_size", 18)
-	button.add_theme_stylebox_override("normal", UiTheme._box(Color(0.42, 0.33, 0.13, 0.95), 8, 1.5, UiTheme.GOLD, 6))
-	button.add_theme_stylebox_override("hover", UiTheme._box(Color(0.55, 0.43, 0.17, 1.0), 8, 2.0, UiTheme.GOLD, 6))
+	button.text = "Join server"
+	button.custom_minimum_size = Vector2(0, 40)
 	button.pressed.connect(_connect)
 	box.add_child(button)
 	status_label = Label.new()
@@ -326,34 +336,63 @@ func _connect() -> void:
 	var parts := address_edit.text.split(":")
 	var host := parts[0]
 	var port := int(parts[1]) if parts.size() > 1 else 24565
-	status_label.text = "Signing in..."
-	# Accounts come from Nakama on the same host. Without it we still join (servers can run offline).
-	social = Social.new()
-	add_child(social)
-	var nakama_port := int(OS.get_environment("NAKAMA_PORT")) if OS.get_environment("NAKAMA_PORT") != "" else 7350
-	account = await social.sign_in(host, nakama_port, _device_id() + ("-" + name_edit.text if OS.get_environment("MULTI_CLIENT") != "" else ""), name_edit.text)
-	if not account.get("ok", false):
-		account = {}
-	net = Net.new()
-	net.name = "Net"
-	net.role = "client"
-	get_tree().root.add_child.call_deferred(net) # RPC paths must match the server: /root/Net.
-	client = GameClient.new(net)
+	if net == null:
+		status_label.text = "Signing in..."
+		# Accounts come from Nakama on the same host. Without it we still join (servers can run offline).
+		social = Social.new()
+		add_child(social)
+		var nakama_port := int(OS.get_environment("NAKAMA_PORT")) if OS.get_environment("NAKAMA_PORT") != "" else 7350
+		account = await social.sign_in(host, nakama_port, _device_id() + ("-" + name_edit.text if OS.get_environment("MULTI_CLIENT") != "" else ""), name_edit.text)
+		if not account.get("ok", false):
+			account = {}
+		net = Net.new()
+		net.name = "Net"
+		net.role = "client"
+		get_tree().root.add_child.call_deferred(net) # RPC paths must match the server: /root/Net.
+		client = GameClient.new(net)
+		multiplayer.connected_to_server.connect(func() -> void:
+			status_label.text = "Joining..."
+			client.join(name_edit.text, account.get("token", ""), account.get("refresh", "")))
+		multiplayer.connection_failed.connect(_on_connection_failed)
+		multiplayer.server_disconnected.connect(func() -> void:
+			status_label.text = "Disconnected."
+			connect_panel.visible = true)
+		net.welcomed.connect(_on_welcomed)
+		net.join_refused.connect(func(reason: String) -> void: status_label.text = reason)
+	_open_peer(host, port)
+
+
+## The ENet connection alone, so a solo world that is still starting can be retried without signing in again.
+func _open_peer(host: String, port: int) -> void:
 	peer = ENetMultiplayerPeer.new()
 	if peer.create_client(host, port) != OK:
 		status_label.text = "Could not connect."
 		return
 	multiplayer.multiplayer_peer = peer
-	status_label.text = "Connecting..."
-	multiplayer.connected_to_server.connect(func() -> void:
-		status_label.text = "Joining..."
-		client.join(name_edit.text, account.get("token", ""), account.get("refresh", "")))
-	multiplayer.connection_failed.connect(func() -> void: status_label.text = "Connection failed.")
-	multiplayer.server_disconnected.connect(func() -> void:
-		status_label.text = "Disconnected."
-		connect_panel.visible = true)
-	net.welcomed.connect(_on_welcomed)
-	net.join_refused.connect(func(reason: String) -> void: status_label.text = reason)
+	status_label.text = "Connecting..." if _solo_attempts_left == 0 else "Starting your world..."
+
+
+func _on_connection_failed() -> void:
+	if _solo_attempts_left > 0 and local_server.is_running():
+		_solo_attempts_left -= 1
+		await get_tree().create_timer(1.5).timeout
+		var parts := address_edit.text.split(":")
+		_open_peer(parts[0], int(parts[1]))
+		return
+	status_label.text = "Connection failed."
+
+
+## Play solo: this machine runs the world (the real server, with Nakama saves when available) and you join it.
+func _play_solo() -> void:
+	var address: String = local_server.start()
+	if address.is_empty():
+		status_label.text = "Could not start a local world."
+		return
+	address_edit.text = address
+	_solo_attempts_left = 12
+	status_label.text = "Starting your world..."
+	await get_tree().create_timer(3.0).timeout # Let the server import and open its port.
+	_connect()
 
 
 ## Chopping and harvesting loops while the server says this player is gathering.

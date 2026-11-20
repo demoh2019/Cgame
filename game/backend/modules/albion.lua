@@ -98,8 +98,10 @@ local function character_pair_save(context, payload)
     error({ "invalid transaction ID", 3 })
   end
   local receipt_key = { collection = RECEIPTS, key = id }
-  local hash_a = nk.hmac_sha256_hash(request.data_a.json, "afterlands-pair-v1")
-  local hash_b = nk.hmac_sha256_hash(request.data_b.json, "afterlands-pair-v1")
+  -- Hex, not the raw digest: binary bytes do not survive the JSON storage value, and a mangled hash would turn every
+  -- honest replay of this transaction into a false "transaction_id_conflict".
+  local hash_a = nk.base16_encode(nk.hmac_sha256_hash(request.data_a.json, "afterlands-pair-v1"))
+  local hash_b = nk.base16_encode(nk.hmac_sha256_hash(request.data_b.json, "afterlands-pair-v1"))
 
   local function existing_receipt()
     local objects = nk.storage_read({ receipt_key })

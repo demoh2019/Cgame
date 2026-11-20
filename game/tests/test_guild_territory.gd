@@ -119,14 +119,17 @@ func run(t) -> void:
 	t.eq(GuildTerritory.owner_banner(site, server.players, server.parties), {},
 		"mixed-guild party never impersonates a single clan")
 	t.check(server.set_verified_guild(102, _guild(RAVENS)), "restore defender affiliation")
-	# Clearing the actual party invalidates the banner even before the next tick.
+	# Clearing the actual party invalidates the party's banner even before the next tick.
 	t.check(server.cmd_party_leave(102)["ok"], "defender's temporary party disbands")
 	t.eq(GuildTerritory.owner_banner(site, server.players, server.parties), {},
-		"disbanding the owner party immediately removes clan status")
+		"disbanding the owner party immediately removes that party's clan status")
+	# Durable guild ownership: the site belongs to the guild, not to one temporary party. Another verified party of
+	# the same guild standing on the point takes command for the rest of the hold.
 	_advance(server, 0.25)
-	t.eq(site["owner"], 0, "unowned flag is neutral after party disband")
-	t.eq(server.snapshot_for(101)["outposts"][0]["guild"], {},
-		"neutral outpost leaks no former owner guild information")
+	t.check(int(site["owner"]) != 0 and int(site["owner"]) != owner_party,
+		"another party of the holding guild takes command at once")
+	t.eq(str(site["owner_guild"]), RAVENS, "the guild keeps its hold")
+	t.eq(server.snapshot_for(101)["outposts"][0]["guild"]["id"], RAVENS, "the holding guild's banner flies again")
 
 	t.current = "guild banner remains session-only, never a stored character field"
 	t.check(not server.character_data(lead).has("guild"),
