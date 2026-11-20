@@ -483,7 +483,12 @@ void fragment() {
 		* aa_terrain_curvature_strength * detail_fade;
 	float ridge = clamp(COLOR.g, 0.0, 1.0)
 		* aa_terrain_curvature_strength * detail_fade;
-	AO = ground_contact * micro_shadow * (1.0 - cavity * 0.24);
+	// Wet puddles fill micro-cavities. Restore their reflection visibility
+	// gradually instead of feeding dry-stone occlusion into native GGX IBL.
+	// The same AO channel drives diffuse and Lagarde specular occlusion;
+	// contact shadows remain intact even on a smooth rain-wet surface.
+	float cavity_visibility = 1.0 - cavity * 0.24 * (1.0 - puddle * 0.85);
+	AO = clamp(ground_contact * micro_shadow * cavity_visibility, 0.0, 1.0);
 	ALBEDO = color * (1.0 - cavity * 0.095 + ridge * 0.035)
 		* mix(1.0, ground_contact, 0.12)
 		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), aa_vertex_cloud_shadow);
