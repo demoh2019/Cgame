@@ -31,6 +31,7 @@
 #include "multimesh.h"
 
 #include "core/object/class_db.h"
+#include "core/variant/array.h"
 #include "servers/rendering/rendering_server.h"
 
 #ifndef DISABLE_DEPRECATED
@@ -206,6 +207,69 @@ void MultiMesh::set_buffer(const Vector<float> &p_buffer) {
 	ERR_FAIL_COND_MSG(stride * instance_count != p_buffer.size(), "Cannot set a buffer on a Multimesh that is a different size from the Multimesh's existing buffer.");
 
 	RS::get_singleton()->multimesh_set_buffer(multimesh, p_buffer);
+}
+
+
+Vector<float> MultiMesh::pack_transform_buffer(const Array &p_transforms, const Vector<Color> &p_colors) const {
+	// This is a pure CPU operation: set_buffer() performs the single upload.
+	ERR_FAIL_COND_V_MSG(transform_format != TRANSFORM_3D, Vector<float>(), "Native transform packing requires a 3D MultiMesh.");
+	ERR_FAIL_COND_V_MSG(use_custom_data, Vector<float>(), "Native transform packing does not support custom instance data.");
+	ERR_FAIL_COND_V_MSG(p_transforms.size() != instance_count, Vector<float>(), "Transform count must match MultiMesh instance_count.");
+	ERR_FAIL_COND_V_MSG(p_colors.size() != (use_colors ? instance_count : 0), Vector<float>(),
+			"Color count must match colored instance_count, or be empty for untinted instances.");
+	for (int i = 0; i < instance_count; i++) {
+		ERR_FAIL_COND_V_MSG(p_transforms[i].get_type() != Variant::TRANSFORM3D, Vector<float>(),
+				"Every instance must supply a Transform3D.");
+	}
+
+	const int stride = use_colors ? 16 : 12;
+	Vector<float> packed;
+	packed.resize(instance_count * stride);
+	float *w = packed.ptrw();
+	for (int i = 0; i < instance_count; i++) {
+		const Transform3D t = p_transforms[i];
+		const Vector3 x = t.basis.get_column(0);
+		const Vector3 y = t.basis.get_column(1);
+		const Vector3 z = t.basis.get_column(2);
+		const int o = i * stride;
+		w[o + 0] = x.x;
+		w[o + 1] = y.x;
+		w[o + 2] = z.x;
+		w[o + 3] = t.origin.x;
+		w[o + 4] = x.y;
+		w[o + 5] = y.y;
+		w[o + 6] = z.y;
+		w[o + 7] = t.origin.y;
+		w[o + 8] = x.z;
+		w[o + 9] = y.z;
+		w[o + 10] = z.z;
+		w[o + 11] = t.origin.z;
+		if (use_colors) {
+			const Color &c = p_colors[i];
+			w[o + 12] = c.r;
+			w[o + 13] = c.g;
+			w[o + 14] = c.b;
+			w[o + 15] = c.a;
+		}
+	}
+	return packed;
+}
+
+AABB MultiMesh::transformed_mesh_bounds(const Array &p_transforms, real_t p_margin) const {
+	ERR_FAIL_COND_V_MSG(mesh.is_null() || p_transforms.is_empty(), AABB(),
+			"Mesh and at least one transform are required to calculate scenery bounds.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_margin) || p_margin < 0.0, AABB(), "Bounds margin must be finite and nonnegative.");
+	for (int i = 0; i < p_transforms.size(); i++) {
+		ERR_FAIL_COND_V_MSG(p_transforms[i].get_type() != Variant::TRANSFORM3D, AABB(), "Every instance must supply a Transform3D.");
+	}
+	const AABB mesh_bounds = mesh->get_aabb();
+	const Transform3D first = p_transforms[0];
+	AABB result = first.xform(mesh_bounds);
+	for (int i = 1; i < p_transforms.size(); i++) {
+		const Transform3D t = p_transforms[i];
+		result.merge_with(t.xform(mesh_bounds));
+	}
+	return result.grow(p_margin);
 }
 
 Vector<float> MultiMesh::get_buffer() const {
@@ -399,6 +463,8 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_aabb"), &MultiMesh::get_aabb);
 
 	ClassDB::bind_method(D_METHOD("get_buffer"), &MultiMesh::get_buffer);
+	ClassDB::bind_method(D_METHOD("pack_transform_buffer", "transforms", "colors"), &MultiMesh::pack_transform_buffer);
+	ClassDB::bind_method(D_METHOD("transformed_mesh_bounds", "transforms", "margin"), &MultiMesh::transformed_mesh_bounds);
 	ClassDB::bind_method(D_METHOD("set_buffer", "buffer"), &MultiMesh::set_buffer);
 
 	ClassDB::bind_method(D_METHOD("set_buffer_interpolated", "buffer_curr", "buffer_prev"), &MultiMesh::set_buffer_interpolated);
