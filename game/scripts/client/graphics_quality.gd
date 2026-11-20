@@ -66,19 +66,19 @@ static func profile(value: int) -> Dictionary:
 		0:
 			return {"shadows": false, "shadow_distance": 45.0, "msaa": Viewport.MSAA_DISABLED, "anisotropy": Viewport.ANISOTROPY_2X,
 				"blur_quality": 0, "blur_radius": 0.0, "glow": false, "ssao": false, "ssil": false, "cloud_shadows": false,
-				"scale": 0.59, "grass_radius": 66.0, "grass_budget": 1500, "grass_fade_start": 25.0, "grass_fade_end": 40.0, "terrain_detail_radius": 24.0, "ground_contact_strength": 0.0, "puddle_ripple_strength": 0.0, "mesh_lod_threshold": 4.0, "terrain_layer_budget": 2, "terrain_warp_strength": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "micro_occlusion": 0.0, "sharpen_strength": 0.0, "deband_strength": 0.0}
+				"scale": 0.59, "grass_radius": 66.0, "grass_budget": 1500, "grass_fade_start": 25.0, "grass_fade_end": 40.0, "terrain_detail_radius": 24.0, "ground_contact_strength": 0.0, "puddle_ripple_strength": 0.0, "mesh_lod_threshold": 4.0, "terrain_layer_budget": 2, "terrain_warp_strength": 0.0, "terrain_height_blend": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "micro_occlusion": 0.0, "sharpen_strength": 0.0, "deband_strength": 0.0}
 		1:
 			return {"shadows": true, "shadow_distance": 70.0, "msaa": Viewport.MSAA_DISABLED, "anisotropy": Viewport.ANISOTROPY_4X,
 				"blur_quality": 1, "blur_radius": 1.6, "glow": false, "ssao": false, "ssil": false, "cloud_shadows": true,
-				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "ground_contact_strength": 0.28, "puddle_ripple_strength": 0.22, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3, "terrain_warp_strength": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "sharpen_strength": 0.0, "deband_strength": 0.0}
+				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "ground_contact_strength": 0.28, "puddle_ripple_strength": 0.22, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3, "terrain_warp_strength": 0.0, "terrain_height_blend": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "sharpen_strength": 0.0, "deband_strength": 0.0}
 		2:
 			return {"shadows": true, "shadow_distance": 110.0, "msaa": Viewport.MSAA_2X, "anisotropy": Viewport.ANISOTROPY_8X,
 				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": true, "ssil": false, "cloud_shadows": true,
-				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0, "terrain_detail_radius": 68.0, "ground_contact_strength": 0.48, "puddle_ripple_strength": 0.65, "mesh_lod_threshold": 1.0, "terrain_layer_budget": 4, "terrain_warp_strength": 0.24, "cliff_normal_quality": 0.7, "specular_aa_strength": 0.18, "micro_occlusion": 0.55, "sharpen_strength": 0.14, "deband_strength": 0.8}
+				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0, "terrain_detail_radius": 68.0, "ground_contact_strength": 0.48, "puddle_ripple_strength": 0.65, "mesh_lod_threshold": 1.0, "terrain_layer_budget": 4, "terrain_warp_strength": 0.24, "terrain_height_blend": 0.48, "cliff_normal_quality": 0.7, "specular_aa_strength": 0.18, "micro_occlusion": 0.55, "sharpen_strength": 0.14, "deband_strength": 0.8}
 		_:
 			return {"shadows": true, "shadow_distance": 140.0, "msaa": Viewport.MSAA_4X, "anisotropy": Viewport.ANISOTROPY_16X,
 				"blur_quality": 2, "blur_radius": 3.0, "glow": true, "ssao": true, "ssil": true, "cloud_shadows": true,
-				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0, "terrain_detail_radius": 96.0, "ground_contact_strength": 0.7, "puddle_ripple_strength": 1.0, "mesh_lod_threshold": 0.75, "terrain_layer_budget": 13, "terrain_warp_strength": 0.42, "cliff_normal_quality": 1.0, "specular_aa_strength": 0.30, "micro_occlusion": 0.85, "sharpen_strength": 0.22, "deband_strength": 1.0}
+				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0, "terrain_detail_radius": 96.0, "ground_contact_strength": 0.7, "puddle_ripple_strength": 1.0, "mesh_lod_threshold": 0.75, "terrain_layer_budget": 13, "terrain_warp_strength": 0.42, "terrain_height_blend": 0.85, "cliff_normal_quality": 1.0, "specular_aa_strength": 0.30, "micro_occlusion": 0.85, "sharpen_strength": 0.22, "deband_strength": 1.0}
 
 
 ## Native manual High/Ultra can use a small focused detail boost. Forward+ adaptive
@@ -118,6 +118,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# High/Ultra break repetitive ground PBR tiles without duplicating textures.
 	RenderingServer.global_shader_parameter_set(&"aa_terrain_warp_strength",
 		float(p["terrain_warp_strength"]))
+	# High/Ultra height-aware material boundaries (terrain world noise is reused).
+	# One GPU scalar applies to every streamed chunk; no per-chunk uploads.
+	RenderingServer.global_shader_parameter_set(&"aa_terrain_height_blend",
+		float(p["terrain_height_blend"]))
 	# Only High/Ultra near cliffs sample three extra rock normal projections.
 	RenderingServer.global_shader_parameter_set(&"aa_cliff_normal_quality",
 		float(p["cliff_normal_quality"]))
