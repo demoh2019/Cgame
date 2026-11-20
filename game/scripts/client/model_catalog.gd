@@ -8,6 +8,7 @@ extends RefCounted
 const PACKS := "res://assets/packs/"
 const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
 const MeshPBR = preload("res://scripts/client/mesh_pbr_preservation.gd")
+const StoneMicrodetail = preload("res://scripts/client/graphics_stone_microdetail.gd")
 
 # kind: "footprint" (longest horizontal side), "height" or "length" (longest horizontal side too, for walls and fences).
 # tex: a texture to put on every surface (the Highlands FBX files carry no usable material); node: the object inside a collection.
@@ -332,7 +333,8 @@ static func bake(path: String, node_name: String, kind: String, size: float, tex
 		else:
 			# Preserve source roughness, metalness, normal maps and ORM textures.
 			# Keep dungeon's intentional hand-painted palette as a separate opt-in.
-			material = MeshPBR.material_for_bake(material, tangent_frame_valid, path.begins_with("dungeon/"))
+			material = MeshPBR.material_for_bake(material, tangent_frame_valid,
+				path.begins_with("dungeon/"), StoneMicrodetail.is_masonry_path(path))
 		baked.surface_set_material(surface, material)
 	root.free()
 	return baked

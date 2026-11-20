@@ -5,6 +5,8 @@ extends RefCounted
 ## by re-orthogonalization. The tangent fourth component is bitangent handedness.
 ## Compute this once on the CPU during cached mesh construction, never per frame.
 
+const StoneMicrodetail = preload("res://scripts/client/graphics_stone_microdetail.gd")
+
 
 ## Return true when a valid tangent frame remains after transformation.
 ## The caller owns the surface arrays; vertices are transformed separately.
@@ -60,7 +62,8 @@ static func transform_frame(arrays: Array, basis: Basis) -> bool:
 ## Preserve normal/ORM/albedo maps and physically based material parameters.
 ## Only disable normal mapping when the source geometry has no usable tangent frame.
 ## Materials are duplicated, so changing the baked mesh never modifies imported art.
-static func material_for_bake(source: Material, tangent_frame_valid: bool, dungeon_style: bool = false) -> Material:
+static func material_for_bake(source: Material, tangent_frame_valid: bool,
+		dungeon_style: bool = false, masonry_detail: bool = false) -> Material:
 	if not (source is BaseMaterial3D):
 		return source
 	var result := (source as BaseMaterial3D).duplicate() as BaseMaterial3D
@@ -75,4 +78,8 @@ static func material_for_bake(source: Material, tangent_frame_valid: bool, dunge
 		# Keep the established hand-painted dungeon palette as an explicit exception.
 		result.albedo_color = Color(0.68, 0.64, 0.58)
 		result.roughness = 1.0
+	# Native detail-normal layering is limited to true masonry with a valid
+	# tangent basis. Quality changes toggle this copied PBR material in place.
+	if masonry_detail:
+		StoneMicrodetail.register(result, tangent_frame_valid)
 	return result
