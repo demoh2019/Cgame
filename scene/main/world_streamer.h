@@ -57,6 +57,10 @@ private:
 	real_t cell_size = 64.0;
 	real_t load_radius = 128.0;
 	real_t unload_radius = 192.0;
+	// Optional hint only affects load order; current focus still controls
+	// residency and chunk generation. Disabled unless set by the game.
+	Vector3 velocity_hint;
+	real_t lookahead_seconds = 0.0;
 	int max_concurrent_loads = 4;
 	int max_instantiations_per_frame = 1;
 	double update_interval = 0.1;
@@ -109,6 +113,10 @@ public:
 	real_t get_load_radius() const { return load_radius; }
 	void set_unload_radius(real_t p_radius);
 	real_t get_unload_radius() const { return unload_radius; }
+	void set_velocity_hint(const Vector3 &p_velocity);
+	Vector3 get_velocity_hint() const { return velocity_hint; }
+	void set_lookahead_seconds(real_t p_seconds);
+	real_t get_lookahead_seconds() const { return lookahead_seconds; }
 	void set_max_concurrent_loads(int p_count);
 	int get_max_concurrent_loads() const { return max_concurrent_loads; }
 	void set_max_instantiations_per_frame(int p_count);
