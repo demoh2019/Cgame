@@ -167,6 +167,7 @@ const RainHarvest = preload("res://scripts/shared/rain_harvest.gd")
 const FieldCanteen = preload("res://scripts/shared/field_canteen.gd")
 const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
+const TrailRation = preload("res://scripts/shared/trail_ration.gd")
 const FoodSafety = preload("res://scripts/shared/food_safety.gd")
 const CombatStress = preload("res://scripts/shared/combat_stress.gd")
 const PartyFeast = preload("res://scripts/shared/party_feast.gd")
@@ -257,6 +258,8 @@ class Player:
 	var spore_sample_cooldown: float = 0.0 # Persistent harvest cooldown.
 	var meal_seconds: float = 0.0 # Remaining server-ticked cooked-fish recovery buff.
 	var meal_tier: int = 0 # Zero when no meal buff is active; never client-authored.
+	var ration_seconds: float = 0.0 # Item-paid, persisted reduced hunger drain.
+	var ration_tier: int = 0 # T1-T4 smoked fish; no stacked durations.
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
@@ -514,6 +517,7 @@ func character_data(player: Player) -> Dictionary:
 		"tire_grip_seconds": player.tire_grip_seconds,
 		"flash_cooldown": player.flash_cooldown,
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
+		"ration_seconds": player.ration_seconds, "ration_tier": player.ration_tier,
 		"sharpened_weapon": player.sharpened_weapon if sharp_valid else "",
 		"sharpened_hits": player.sharpened_hits if sharp_valid else 0,
 		"sighted_weapon": player.sighted_weapon if sight_valid else "",
@@ -621,6 +625,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.finite_number(data.get("flash_cooldown", 0.0), 0.0, FlashCharge.COOLDOWN_SECONDS):
 		return false
 	if not HeartyMeal.valid_state(data.get("meal_seconds", 0.0), data.get("meal_tier", 0)):
+		return false
+	if not TrailRation.valid_state(data.get("ration_seconds", 0.0), data.get("ration_tier", 0)):
 		return false
 	if not FieldWhetstone.valid_state(data.get("sharpened_weapon", ""),
 			data.get("sharpened_hits", 0), parsed_bag["inventory"]):
@@ -758,6 +764,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.flash_cooldown = float(data.get("flash_cooldown", 0.0))
 	player.meal_seconds = float(data.get("meal_seconds", 0.0))
 	player.meal_tier = int(data.get("meal_tier", 0))
+	player.ration_seconds = float(data.get("ration_seconds", 0.0))
+	player.ration_tier = int(data.get("ration_tier", 0))
 	player.sharpened_weapon = str(data.get("sharpened_weapon", ""))
 	player.sharpened_hits = int(data.get("sharpened_hits", 0))
 	player.sighted_weapon = str(data.get("sighted_weapon", ""))
@@ -908,6 +916,8 @@ func _spawn_player(player: Player) -> void:
 	player.guardian_brace = 0.0
 	player.meal_seconds = 0.0
 	player.meal_tier = 0
+	player.ration_seconds = 0.0
+	player.ration_tier = 0
 	player.combat_energy = Defs.COMBAT_ENERGY_MAX
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
@@ -4138,6 +4148,12 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if cooked_tier > 0:
 				player.meal_tier = cooked_tier
 				player.meal_seconds = HeartyMeal.duration(cooked_tier)
+			# Smoked fish only reduces hunger decay, not combat or wound damage.
+			var travel_tier: int = TrailRation.tier_for_food(item_id)
+			if travel_tier > 0 and (player.ration_seconds <= 0.0 or
+					travel_tier >= player.ration_tier):
+				player.ration_tier = travel_tier
+				player.ration_seconds = TrailRation.duration(travel_tier)
 			# One legitimate survival lesson per consumed item, not two for stew.
 			if was_hungry or was_thirsty:
 				_award(player, "survivalist", 3.0)
@@ -4187,6 +4203,9 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
 	player.dirty_character = true
+	if TrailRation.tier_for_food(item_id) > 0:
+		return {"ok": true, "trail_ration": true,
+			"tier": player.ration_tier, "seconds": player.ration_seconds}
 	if item_id == FoodSafety.REMEDY_ITEM:
 		return {"ok": true, "stomach_remedy": true,
 			"remaining": player.survival.food_poisoning}
@@ -5726,6 +5745,8 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	parties.clear_ping_by(victim.id)
 	victim.meal_seconds = 0.0
 	victim.meal_tier = 0
+	victim.ration_seconds = 0.0
+	victim.ration_tier = 0
 	victim.defense_target = -1
 	victim.defense_until = 0.0
 	var zone: int = world.zone_at(victim.position.x, victim.position.z)
@@ -6083,6 +6104,14 @@ func _tick_players(delta: float) -> void:
 			player.meal_tier = 0
 		if active_meal > 0.0:
 			player.dirty_character = true
+		var ration_active: float = TrailRation.active_seconds(player.ration_seconds, delta)
+		var hunger_factor: float = TrailRation.hunger_factor(
+			player.ration_tier, player.ration_seconds, delta)
+		player.ration_seconds = maxf(0.0, player.ration_seconds - maxf(0.0, delta))
+		if player.ration_seconds <= 0.0:
+			player.ration_tier = 0
+		if ration_active > 0.0:
+			player.dirty_character = true
 		var nourished: bool = player.survival.hunger > 20.0 and player.survival.thirst > 20.0
 		var energy_bonus: float = (
 			HeartyMeal.energy_per_second(meal_effect_tier) * active_meal) if nourished else 0.0
@@ -6119,7 +6148,11 @@ func _tick_players(delta: float) -> void:
 		var had_bleeding: bool = player.survival.bleeding > 0.0
 		var had_fracture: bool = player.survival.fracture > 0.0
 		var had_scent_mask: bool = player.survival.scent_mask_seconds > 0.0
+		# Apply only to survival; preserve trained hunger-rate skills afterwards.
+		var normal_hunger_mult: float = player.survival.hunger_mult
+		player.survival.hunger_mult = normal_hunger_mult * hunger_factor
 		var damage: float = player.survival.tick(delta)
+		player.survival.hunger_mult = normal_hunger_mult
 		if not is_equal_approx(player.survival.food_poisoning, had_food_poisoning):
 			player.dirty_character = true
 		# Only ordinary passive stamina regen is damped. Purchased food,
@@ -7523,6 +7556,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"tire_grip_seconds": player.tire_grip_seconds,
 			"flash_cooldown": player.flash_cooldown,
 			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
+			"ration_seconds": player.ration_seconds, "ration_tier": player.ration_tier,
 			"coating_seconds": player.edge_coating_seconds,
 			"coating_weapon": player.edge_coating_weapon,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
