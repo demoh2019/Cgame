@@ -35,6 +35,9 @@
 
 void Sky::set_radiance_size(RadianceSize p_size) {
 	ERR_FAIL_INDEX(p_size, RADIANCE_SIZE_MAX);
+	if (radiance_size == p_size) {
+		return; // Keep the current sky radiance allocation when quality is unchanged.
+	}
 
 	radiance_size = p_size;
 	static const int size[RADIANCE_SIZE_MAX] = {
@@ -48,6 +51,9 @@ Sky::RadianceSize Sky::get_radiance_size() const {
 }
 
 void Sky::set_process_mode(ProcessMode p_mode) {
+	if (mode == p_mode) {
+		return; // Avoid scheduling an identical sky update mode on the renderer.
+	}
 	mode = p_mode;
 	RS::get_singleton()->sky_set_mode(sky, RSE::SkyMode(mode));
 }
@@ -57,6 +63,9 @@ Sky::ProcessMode Sky::get_process_mode() const {
 }
 
 void Sky::set_material(const Ref<Material> &p_material) {
+	if (sky_material == p_material) {
+		return; // ShaderMaterial changes propagate independently through its RID.
+	}
 	sky_material = p_material;
 	RID material_rid;
 	if (sky_material.is_valid()) {
