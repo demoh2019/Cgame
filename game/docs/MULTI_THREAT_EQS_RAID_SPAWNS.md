@@ -80,6 +80,10 @@ Godot and older Cgame builds, a pure GDScript fallback uses the same
 nearest-distance score `min(nearest_distance / 64.0, 1.0)` and stable
 source-index tiebreaker. Candidate radius is bounded to 64 metres.
 
+The optional fourth `prefer_native=false` argument forces the pure
+GDScript reference for deterministic parity tests, even on a custom
+Cgame binary.
+
 This ensures servers and clients (or CI runners) running different
 engine versions can still verify raid placement. No randomness or
 dictionary iteration order participates in the scoring; inactive or
