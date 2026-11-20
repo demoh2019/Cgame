@@ -5,6 +5,7 @@ extends Node3D
 
 const Assets = preload("res://scripts/client/assets.gd")
 const RainGear = preload("res://scripts/client/character_rain_gear.gd")
+const Ragdoll = preload("res://scripts/client/ragdoll.gd")
 
 static var _tinted: Dictionary = {}
 
@@ -571,6 +572,27 @@ func set_weapon(item_id: String) -> void:
 		trail.position = Vector3(0.0, tip_height * 0.85, 0.0)
 		held.add_child(trail)
 		_swing_trail = trail
+
+
+## Hands the body to physics (zombie deaths): stops animation, builds ragdoll bodies,
+## starts simulation and shoves the torso by `push` (m/s). Null when the rig has no mannequin bones.
+func start_ragdoll(push: Vector3) -> PhysicalBoneSimulator3D:
+	if not pack_mode:
+		return null
+	var skeleton := _find_skeleton()
+	if skeleton == null:
+		return null
+	var simulator := Ragdoll.build(skeleton)
+	if simulator == null:
+		return null
+	_dead = true
+	if animator != null:
+		animator.pause() # Keep the last pose as the starting pose.
+	simulator.physical_bones_start_simulation()
+	for body in simulator.get_children():
+		if body is PhysicalBone3D:
+			(body as PhysicalBone3D).apply_central_impulse(push * (body as PhysicalBone3D).mass)
+	return simulator
 
 
 func _find_skeleton() -> Skeleton3D:

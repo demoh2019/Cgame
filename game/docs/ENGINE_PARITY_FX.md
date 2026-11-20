@@ -18,3 +18,14 @@ Remaining gaps worth considering later: physics ragdolls on death
 sounds.
 
 Tests: `tests/test_engine_parity_fx.gd`.
+
+## Ragdolls (Unity ragdoll joints / Unreal Physics Asset)
+
+`scripts/client/ragdoll.gd` builds `PhysicalBone3D` bodies at runtime from the
+mannequin bones a model has (pelvis, spine, head, arms, legs; cone joints,
+hinged elbows/knees). A killed infected falls as a ragdoll with a push away
+from its facing, onto a 9×9 m heightmap collider of the terrain under it (own
+collision layer, so nothing else is touched). Budget 0/3/6/12 corpses by
+quality; each settles 5 s then sinks into the ground and is freed. Rigs without
+mannequin bones and Low quality keep the old instant despawn.
+Tests: `tests/test_ragdoll.gd`.

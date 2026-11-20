@@ -10,6 +10,10 @@ const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const LootLabel = preload("res://scripts/shared/loot_label.gd")
+const Ragdoll = preload("res://scripts/client/ragdoll.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+var _world = null
+var _corpses: Array[Dictionary] = []
 
 const ZOMBIE_LOOK := {
 	"walker": {"tint": Color(0.62, 0.85, 0.55), "scale": 2.0, "walk": 0.8, "model": "Orc_Male"},
@@ -92,9 +96,11 @@ func update_from(client) -> void:
 	if not client.raid_telegraph.is_empty():
 		_touch("raid_warning:%d" % int(client.raid_telegraph["id"]),
 			"raid_warning", client.raid_telegraph, seen)
+	_world = client.world
 	for key in _nodes.keys():
 		if not seen.has(key):
-			_nodes[key].queue_free()
+			if not (key.begins_with("zombie:") and _try_ragdoll(_nodes[key])):
+				_nodes[key].queue_free()
 			_nodes.erase(key)
 			_targets.erase(key)
 			_history.erase(key)
@@ -509,7 +515,41 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 	return root
 
 
+## A zombie that just left the snapshot (killed) falls as a ragdoll instead of vanishing, within the tier budget.
+func _try_ragdoll(node: Node3D) -> bool:
+	if _world == null or _corpses.size() >= Ragdoll.budget(GraphicsQuality.level()):
+		return false
+	var model := node.get_node_or_null("Model")
+	if model == null or not model.has_method("start_ragdoll"):
+		return false
+	var push := -node.global_transform.basis.z * 2.5 + Vector3.UP * 1.2
+	if model.start_ragdoll(push) == null:
+		return false
+	for child in node.get_children():
+		if child != model and child is Node3D:
+			(child as Node3D).visible = false # Names, rings and markers go with the life.
+	var p := node.position
+	var ground := Ragdoll.ground_patch(p.x, float(_world.height_at(p.x, p.z)), p.z, _world.height_at)
+	add_child(ground)
+	_corpses.append({"node": node, "ground": ground, "age": 0.0})
+	return true
+
+
+func _update_corpses(delta: float) -> void:
+	for i in range(_corpses.size() - 1, -1, -1):
+		var corpse: Dictionary = _corpses[i]
+		corpse["age"] = float(corpse["age"]) + delta
+		if corpse["age"] > Ragdoll.SETTLE_SECONDS:
+			# The ground patch sinks and the body settles into the earth with it, then both go.
+			(corpse["ground"] as Node3D).position.y -= delta * 0.5
+		if corpse["age"] > Ragdoll.SETTLE_SECONDS + Ragdoll.SINK_SECONDS:
+			(corpse["node"] as Node).queue_free()
+			(corpse["ground"] as Node).queue_free()
+			_corpses.remove_at(i)
+
+
 func _process(delta: float) -> void:
+	_update_corpses(delta)
 	var blend := 1.0 - exp(-14.0 * delta)
 	if _render_time >= 0.0:
 		_render_time += delta
