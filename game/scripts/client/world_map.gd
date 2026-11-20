@@ -90,6 +90,8 @@ func _sync_followed_objective() -> void:
 
 static func objective_color(key: String) -> Color:
 	match key:
+		"recovery":
+			return Color(1.0, 0.43, 0.20)
 		"threat":
 			return Color(1.0, 0.32, 0.45)
 		"prospect":

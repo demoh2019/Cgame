@@ -35,6 +35,8 @@ static func objectives(you: Variant) -> Array[Dictionary]:
 	if not (you is Dictionary):
 		return result
 	var self_state: Dictionary = you
+	_add(result, self_state.get("death_recovery", {}), "recovery",
+		"LOST BACKPACK", "x", "z", true)
 	var boss: Variant = self_state.get("threat_scan", {})
 	if boss is Dictionary:
 		var threat: Dictionary = boss

@@ -7,6 +7,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const ProspectingChart = preload("res://scripts/shared/prospecting_chart.gd")
 const ThreatScan = preload("res://scripts/shared/field_threat_scanner.gd")
+const DeathRecovery = preload("res://scripts/shared/death_recovery.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
@@ -129,6 +130,18 @@ func current_threat_scan() -> Dictionary:
 			actor.position, sim.time)
 	if client != null:
 		return client.you.get("threat_scan", {}).duplicate(true)
+	return {}
+
+
+## The remote server includes this destination only in the owner's "you"
+## snapshot. Offline mode resolves the same real tagged bag locally.
+func current_death_recovery() -> Dictionary:
+	if sim != null:
+		if not sim.players.has(actor_id):
+			return {}
+		return DeathRecovery.public_mark(sim.bags, sim.players[actor_id], sim.time)
+	if client != null:
+		return client.you.get("death_recovery", {}).duplicate(true)
 	return {}
 
 
@@ -362,6 +375,10 @@ func _draw() -> void:
 	_draw_waypoint(origin, current_party_ping(), "x", "z",
 		Color(0.20, 0.95, 0.90))
 
+	# Orange = your last still-unclaimed public full-loot death bag.
+	# The owner can follow it from afar without granting loot protection.
+	_draw_waypoint(origin, current_death_recovery(), "x", "z",
+		Color(1.0, 0.43, 0.20))
 	# A spent scanner grants one short-lived private moving target pin.
 	_draw_waypoint(origin, current_threat_scan(), "x", "z",
 		Color(1.0, 0.32, 0.45))
