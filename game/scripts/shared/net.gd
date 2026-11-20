@@ -801,6 +801,14 @@ func c_party_feast(item_id: String) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_supply_request(need: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		_s_result.rpc_id(peer, "party_supply_request",
+			sim.cmd_party_supply_request(peer, need))
+
+
+@rpc("any_peer", "reliable")
 func c_party_aid(target_id: int, item_id: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -1140,6 +1148,18 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 				event, peer, sim.players, sim.parties)
 		"party_aid", "party_triage":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
+		"party_supply_request":
+			# Membership is checked when the event is delivered, not only
+			# when it was created: leaving a party revokes location access.
+			if sim == null:
+				return false
+			var source_id: int = int(event.get("peer", -1))
+			var group_id: int = int(event.get("group", 0))
+			return group_id > 0 and source_id != peer and \
+				sim.players.has(source_id) and sim.players.has(peer) and \
+				sim.parties.group_of(source_id) == group_id and \
+				sim.parties.group_of(peer) == group_id and \
+				sim.parties.members_of(source_id).has(peer)
 		"trade":
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"guardian_taunt":

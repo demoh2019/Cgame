@@ -27,6 +27,7 @@ const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const DeathRecovery = preload("res://scripts/shared/death_recovery.gd")
 const PartyCorpseRescue = preload("res://scripts/shared/party_corpse_rescue.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
+const PartySupplyRequest = preload("res://scripts/shared/party_supply_request.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const RestorationStaff = preload("res://scripts/shared/restoration_staff.gd")
 const HealingAggro = preload("res://scripts/shared/healing_aggro.gd")
@@ -218,6 +219,7 @@ class Player:
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
 	var party_aid_timer: float = 0.0 # Shared medical/provisions support cooldown.
+	var supply_request_last_at: float = -INF # Session-only anti-spam for supply distress signals.
 	var feast_timer: float = 0.0 # Session-only prepared group meal cooldown.
 	var combat_stress: float = 0.0 # Session-only PvE pressure; not a permanent condition.
 	var stress_pressure: float = 0.0 # Last trusted nearby infected threat sample.
@@ -1626,6 +1628,34 @@ func _record_party_healing_threat(medic: Player, patients: Array) -> void:
 		var generated: float = HealingAggro.threat_for(total_healed)
 		if generated > 0.0:
 			Threat.record(infected.threat, medic.id, generated)
+
+
+## A trusted survival check broadcasts only a genuine low-supply request
+## to the current party. The client supplies neither coordinates nor level.
+func cmd_party_supply_request(peer_id: int, need: String) -> Dictionary:
+	var requester: Player = players.get(peer_id)
+	if requester == null or not _alive(requester):
+		return {"ok": false, "reason": "dead"}
+	var group_id: int = parties.group_of(peer_id)
+	if group_id == 0 or parties.members_of(peer_id).size() < 2:
+		return {"ok": false, "reason": "not_in_party"}
+	if not PartySupplyRequest.valid_need(need):
+		return {"ok": false, "reason": "invalid_need"}
+	if not PartySupplyRequest.eligible(need, requester.survival.hunger, requester.survival.thirst):
+		return {"ok": false, "reason": "no_need"}
+	if not PartySupplyRequest.can_send(time, requester.supply_request_last_at):
+		return {"ok": false, "reason": "cooldown"}
+	if not requester.position.is_finite():
+		return {"ok": false, "reason": "invalid_position"}
+	var level: float = PartySupplyRequest.level(need,
+		requester.survival.hunger, requester.survival.thirst)
+	requester.supply_request_last_at = time
+	events.append({"type": "party_supply_request", "peer": peer_id,
+		"group": group_id, "name": requester.name, "need": need,
+		"level": roundi(level), "x": requester.position.x,
+		"z": requester.position.z})
+	return {"ok": true, "need": need, "level": roundi(level),
+		"seconds": PartySupplyRequest.COOLDOWN}
 
 
 ## Item-powered party medicine and provisions, resolved only on the server.

@@ -997,6 +997,18 @@ func _build() -> void:
 		else:
 			client.party_aid(target, str(aid_items.get_selected_metadata())))
 	aid_row.add_child(aid_button)
+	var supplies_row := HBoxContainer.new()
+	inventory_box.add_child(supplies_row)
+	var need_food := Button.new()
+	need_food.text = "Request food"
+	need_food.tooltip_text = "Ask your party for food only when hunger is 60 or lower. 30s shared signal cooldown."
+	need_food.pressed.connect(func() -> void: client.party_supply_request("food"))
+	supplies_row.add_child(need_food)
+	var need_water := Button.new()
+	need_water.text = "Request water"
+	need_water.tooltip_text = "Ask your party for water only when thirst is 60 or lower. 30s shared signal cooldown."
+	need_water.pressed.connect(func() -> void: client.party_supply_request("water"))
+	supplies_row.add_child(need_water)
 	var triage_button := Button.new()
 	triage_button.text = "Triage nearby allies"
 	triage_button.tooltip_text = "Spend one crafted pack to treat up to 3 nearby allies (5.5m, 18s cooldown). Infected fighting them may turn toward the medic."
@@ -2142,6 +2154,14 @@ func _on_event(event: Dictionary) -> void:
 				say("Triage care received: +%d HP, -%d bleeding." % [
 					roundi(float(event.get("heal", 0.0))),
 					roundi(float(event.get("bleeding_stopped", 0.0)))])
+		"party_supply_request":
+			if int(event.get("peer", -1)) != client.peer_id:
+				say("%s needs %s (%d/100)! Meet at x%d z%d and use Aid / Share." % [
+					str(event.get("name", "Party member")),
+					str(event.get("need", "supplies")).to_upper(),
+					int(event.get("level", 0)),
+					roundi(float(event.get("x", 0.0))),
+					roundi(float(event.get("z", 0.0)))])
 		"party_aid":
 			if int(event.get("peer", -1)) == client.peer_id:
 				if float(event.get("food", 0.0)) > 0.0 or float(event.get("drink", 0.0)) > 0.0:
@@ -2710,6 +2730,14 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				roundi(float(data.get("bleeding_stopped", 0.0)))])
 		else:
 			say("Triage denied: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "party_supply_request":
+		if bool(data.get("ok", false)):
+			say("Party request sent: need %s (%d/100). Next signal in %ds." % [
+				str(data.get("need", "")), int(data.get("level", 0)),
+				int(data.get("seconds", 30))])
+		else:
+			say("Party request denied: " + str(data.get("reason", "rejected")))
 		return
 	if kind == "party_aid":
 		if bool(data.get("ok", false)):

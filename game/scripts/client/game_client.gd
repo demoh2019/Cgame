@@ -365,6 +365,10 @@ func party_aid(target_id: int, item_id: String) -> void:
 	net.c_party_aid.rpc_id(1, target_id, item_id)
 
 
+func party_supply_request(need: String) -> void:
+	net.c_party_supply_request.rpc_id(1, need)
+
+
 func party_triage() -> void:
 	net.c_party_triage.rpc_id(1)
 
