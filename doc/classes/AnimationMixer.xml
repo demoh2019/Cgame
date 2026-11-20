@@ -44,6 +44,27 @@
 				Manually advance the animations by the specified time (in seconds).
 			</description>
 		</method>
+		<method name="advance_budgeted">
+			<return type="bool" />
+			<param index="0" name="delta" type="float" />
+			<param index="1" name="interval" type="float" />
+			<param index="2" name="max_catchup" type="float" default="0.5" />
+			<description>
+				Accumulates [param delta] seconds and calls [method advance] only when at least [param interval] seconds have accumulated. Returns [code]true[/code] if an animation evaluation took place. This is an opt-in animation update-rate optimization for distant characters, based on the approach of Unreal Engine animation update-rate optimization and Unity animation culling. The skipped animation time is included in the next evaluation up to [param max_catchup], which prevents large pose jumps after loading stalls. If the mixer is inactive or [member callback_mode_process] is not set to Manual, this method returns [code]false[/code] and clears its accumulator to avoid double updates. Invalid input is rejected. The effective catch-up cap is never less than [param interval]. Call [method reset_advance_budget] when changing LOD tiers or handing the animation back to automatic processing. This API does not change animation ticking unless explicitly called by a script.
+			</description>
+		</method>
+		<method name="get_advance_budget_accumulated" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the amount of time buffered by [method advance_budgeted] since the last animation update. Intended for profiling and debugging update-rate LOD.
+			</description>
+		</method>
+		<method name="reset_advance_budget">
+			<return type="void" />
+			<description>
+				Discards time accumulated by [method advance_budgeted] without modifying playback state or the current animation pose. Use this when switching animation LOD rates or taking control of a character's animation elsewhere.
+			</description>
+		</method>
 		<method name="capture">
 			<return type="void" />
 			<param index="0" name="name" type="StringName" />
