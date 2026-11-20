@@ -2469,8 +2469,16 @@ func _on_event(event: Dictionary) -> void:
 			say("PvP: +%d honor | %d total (%s)" % [int(event.get("earned", 0)),
 				int(event.get("honor", 0)), str(event.get("rank", "Wanderer"))])
 		"raid_reinforcements":
-			say("RAID PHASE %d! %d additional infected appeared." % [
-				int(event.get("phase", 1)), int(event.get("count", 0))])
+			say("RAID PHASE %d: %d new infected! WARD: %d guards, boss resists %d%% damage." % [
+				int(event.get("phase", 1)), int(event.get("count", 0)),
+				int(event.get("guards", 0)), int(event.get("reduction_percent", 0))])
+		"raid_ward_changed":
+			var guards: int = int(event.get("guards", 0))
+			if guards > 0:
+				say("RAID WARD: %d guards remain. Boss resists %d%% damage." % [
+					guards, int(event.get("reduction_percent", 0))])
+			else:
+				say("RAID WARD BROKEN! Boss now takes full damage.")
 		"scavenging":
 			if event.get("peer", -1) == client.peer_id:
 				say("+%d scavenging XP (rank %d)" % [
@@ -3372,6 +3380,10 @@ func _process(_delta: float) -> void:
 	# An exact server-derived recovery timer (not inferred from visual FX).
 	for enemy in client.zombies.values():
 		if bool(enemy.get("raid_boss", false)):
+			var ward_guards: int = int(enemy.get("raid_ward_guards", 0))
+			if ward_guards > 0:
+				_info_label.text += "\nRAID WARD: %d guards | -%d%% boss damage. Defeat adds!" % [
+					ward_guards, int(enemy.get("raid_ward_reduction", 0))]
 			var recovery: float = float(enemy.get("raid_exposed_seconds", 0.0))
 			if recovery > 0.0:
 				_info_label.text += "\nRAID BOSS EXPOSED: %.1fs (+15%% PvE damage)" % recovery
