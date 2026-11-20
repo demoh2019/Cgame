@@ -15,7 +15,7 @@ static func first_blocker_distance(world, origin: Vector2,
 	var candidates: Array = world.blockers_near(middle.x, middle.y, reach * 0.5 + 1.0)
 	var first: float = INF
 	for entry in candidates:
-		if not entry is Dictionary:
+		if not (entry is Dictionary):
 			continue
 		var blocker: Dictionary = entry
 		if not bool(blocker.get("blocks", true)):
