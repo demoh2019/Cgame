@@ -349,7 +349,7 @@ TEST_CASE("[EnvironmentQuery3D] Multi-threat clearance applies to every actor") 
 	q->set_min_threat_distance(3);
 	q->set_threat_positions({ Vector3(), Vector3(0, 100, 9) });
 	const PackedVector3Array result = q->query_positions();
-	CHECK(result == PackedVector3Array({ Vector3(0, 0, -7), Vector3(0, 0, 3) }));
+	CHECK(result == PackedVector3Array({ Vector3(0, 0, 3), Vector3(0, 0, -7) }));
 	q->set_min_threat_distance(2);
 	CHECK(q->query_positions().size() == 3);
 	q->set_use_threat(false);
