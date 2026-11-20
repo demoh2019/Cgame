@@ -69,7 +69,7 @@
 		<method name="get_queued_generation_count" qualifiers="const">
 			<return type="int" />
 			<description>
-				Returns the number of procedural cells waiting for the chunk generator callback. Unlike [method get_pending_count], which counts scene files loaded in background threads, this measures the main-thread generation backlog. The value can be displayed in a game performance overlay to diagnose world-streaming pop-in or CPU hitches. No additional assets or chunks are allocated by this query.
+				Returns the number of procedural cells waiting for the chunk generator callback. Unlike [method get_pending_count], which counts scene files loaded in background threads, this measures the main-thread generation backlog. Pending procedural cells are rebuilt from the current load area on each streaming update, so teleportation and rapid turns cannot accumulate an obsolete backlog. The value can be included in a game benchmark to diagnose world-streaming pop-in or CPU hitches. No additional assets or chunks are allocated by this query.
 			</description>
 		</method>
 		<method name="is_cell_loaded" qualifiers="const">
