@@ -4,11 +4,11 @@ extends RefCounted
 const SeamNormals = preload("res://scripts/client/terrain_seam_normals.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
-static func _height(x: float, z: float) -> float:
+func _height(x: float, z: float) -> float:
 	return 0.002 * x * x + 0.012 * z + 4.0
 
 
-static func _grid(origin: Vector2, count: int, step: float) -> PackedFloat32Array:
+func _grid(origin: Vector2, count: int, step: float) -> PackedFloat32Array:
 	var heights := PackedFloat32Array()
 	for z in count:
 		for x in count:
