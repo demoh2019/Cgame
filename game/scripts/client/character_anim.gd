@@ -3,6 +3,7 @@ extends RefCounted
 ## flinch, upper-body layering, animation LOD). The runtime driver is character_anim_modifier.gd.
 
 const UP := Vector3.UP
+const CombatAnimationPriority = preload("res://scripts/client/combat_animation_priority.gd")
 
 # --- Animation LOD / crowd budget (Unreal URO / Unity Animator Culling) --------------------------------------------------
 
@@ -198,6 +199,23 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 	for model in models:
 		distances.append(model.global_position.distance_to(cam))
 	var tiers := assign_tiers(distances, full_budget(quality))
+	# Stock Godot fallback: maintain full-rate poses (without procedural IK)
+	# for a bounded number of visible critical enemies. Native Cgame owns
+	# its own priority scheduler and must not be driven twice.
+	var preferred: Array[int] = []
+	for i in models.size():
+		var model = models[i]
+		if bool(model.get("external_anim_lod")) or not bool(
+				model.get_meta("aa_combat_animation_priority", false)):
+			continue
+		if float(distances[i]) < 90.0 and camera.is_position_in_frustum(
+				model.global_position + Vector3.UP):
+			preferred.append(i)
+	preferred.sort_custom(func(a: int, b: int) -> bool:
+		return float(distances[a]) < float(distances[b]))
+	var slots: int = mini(CombatAnimationPriority.slots(quality), preferred.size())
+	for j in slots:
+		tiers[preferred[j]] = mini(tiers[preferred[j]], 1)
 	for i in models.size():
 		var model = models[i]
 		if ground.is_valid() and not model.has_ground_source():
