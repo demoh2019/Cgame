@@ -29,6 +29,14 @@
 				Acquires an independent residency claim for a cell and returns its positive token, or 0 when the maximum 256 simultaneous tokens are in use. Multiple independent owners can acquire the same cell. Leases use normal asynchronous streaming budgets and cannot bypass disabled [member layer_states] or [member streaming_enabled]. Tokens belong to this WorldPartition3D instance and must be released explicitly.
 			</description>
 		</method>
+		<method name="acquire_cell_route">
+			<return type="Array" />
+			<param index="0" name="from_cell" type="Vector2i" />
+			<param index="1" name="to_cell" type="Vector2i" />
+			<description>
+				Atomically acquires one independent lease per cell in a four-connected route from [param from_cell] to [param to_cell], including both endpoints. Returns an [Array] of positive lease tokens in traversal order, or an empty Array when the route is too long, intersects an inactive Data Layer, or exceeds remaining token capacity. No partial leases are retained on failure. The maximum route length is 64 cells and every lease uses the normal streaming budgets. Route cells are a streaming corridor, not an obstacle-aware navigation path.
+			</description>
+		</method>
 		<method name="cell_to_local_position" qualifiers="const">
 			<return type="Vector3" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -111,6 +119,14 @@
 			<return type="int" />
 			<description>
 				Returns the total number of independent active lease tokens in this WorldPartition3D, limited to 256.
+			</description>
+		</method>
+		<method name="get_cell_route" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="from_cell" type="Vector2i" />
+			<param index="1" name="to_cell" type="Vector2i" />
+			<description>
+				Returns a deterministic array of adjacent [Vector2i] cells along a four-connected grid corridor, including both endpoints. The coordinate sequence is bounded to at most 64 cells; longer routes return an empty array. Each step is orthogonally adjacent, so a navigation agent never skips a whole intermediate cell during prefetch. This method does not acquire leases, validate scene registrations, bake navigation meshes or solve obstacle avoidance.
 			</description>
 		</method>
 		<method name="get_cell_scene" qualifiers="const">
@@ -251,6 +267,13 @@
 			<param index="0" name="lease_token" type="int" />
 			<description>
 				Releases exactly one independent owner token. Returns true once, or false for an unknown or previously released token. A cell still needed by another lease, manual pin or observer remains active. Without owners, it becomes eligible for normal unload even without any observer.
+			</description>
+		</method>
+		<method name="release_cell_route">
+			<return type="int" />
+			<param index="0" name="tokens" type="Array" />
+			<description>
+				Releases each valid integer lease token in [param tokens], returning the number actually released. Unknown tokens, duplicated tokens and unsupported array entries do not release another owner's lease. May be used to cancel an AI route or on node teardown; call only with tokens acquired from the intended WorldPartition3D instance.
 			</description>
 		</method>
 		<method name="remove_cell_scene">

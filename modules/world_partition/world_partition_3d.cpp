@@ -500,6 +500,74 @@ int WorldPartition3D::get_leased_cell_count() const {
 	return cell_lease_counts.size();
 }
 
+Array WorldPartition3D::get_cell_route(const Vector2i &p_from, const Vector2i &p_to) const {
+	// A four-connected straight grid corridor. It prefetches cells, not
+	// obstacle-aware path planning; NavigationServer3D computes actual paths.
+	// Limit allocations and work from untrusted or very distant coordinates.
+	const int64_t dx = int64_t(p_to.x) - int64_t(p_from.x);
+	const int64_t dz = int64_t(p_to.y) - int64_t(p_from.y);
+	const int64_t ax = dx < 0 ? -dx : dx;
+	const int64_t az = dz < 0 ? -dz : dz;
+	ERR_FAIL_COND_V_MSG(ax + az + 1 > 64, Array(), "WorldPartition3D route is limited to 64 cells; use shorter waypoints.");
+
+	Array cells;
+	Vector2i cell = p_from;
+	cells.push_back(cell);
+	const int step_x = dx > 0 ? 1 : -1;
+	const int step_z = dz > 0 ? 1 : -1;
+	int64_t ix = 0;
+	int64_t iz = 0;
+	while (ix < ax || iz < az) {
+		// Compare normalized progress without division; never skip an edge
+		// neighbor. The generated route is deterministic on all platforms.
+		if (ix >= ax || (iz < az && (2 * iz + 1) * ax < (2 * ix + 1) * az)) {
+			cell.y += step_z;
+			iz++;
+		} else {
+			cell.x += step_x;
+			ix++;
+		}
+		cells.push_back(cell);
+	}
+	return cells;
+}
+
+Array WorldPartition3D::acquire_cell_route(const Vector2i &p_from, const Vector2i &p_to) {
+	const Array cells = get_cell_route(p_from, p_to);
+	if (cells.is_empty()) {
+		return Array();
+	}
+	ERR_FAIL_COND_V_MSG(int64_t(cell_leases.size()) + cells.size() > 256, Array(), "WorldPartition3D route exceeds available lease token capacity.");
+	for (int i = 0; i < cells.size(); i++) {
+		const Vector2i cell = cells[i];
+		if (!_is_cell_layer_enabled(cell)) {
+			// A disabled gameplay layer is a hard gate; do not claim an
+			// untraversable route or partially retain its other cells.
+			return Array();
+		}
+	}
+	Array tokens;
+	for (int i = 0; i < cells.size(); i++) {
+		const int token = acquire_cell_lease(cells[i]);
+		if (token == 0) {
+			release_cell_route(tokens);
+			return Array();
+		}
+		tokens.push_back(token);
+	}
+	return tokens;
+}
+
+int WorldPartition3D::release_cell_route(const Array &p_tokens) {
+	int released = 0;
+	for (int i = 0; i < p_tokens.size(); i++) {
+		if (p_tokens[i].get_type() == Variant::INT && release_cell_lease(int(p_tokens[i]))) {
+			released++;
+		}
+	}
+	return released;
+}
+
 void WorldPartition3D::set_cell_layers(const Dictionary &p_layers) {
 	Dictionary clean;
 	const Array keys = p_layers.keys();
@@ -1024,6 +1092,9 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cell_lease_count", "cell"), &WorldPartition3D::get_cell_lease_count);
 	ClassDB::bind_method(D_METHOD("get_cell_lease_count_total"), &WorldPartition3D::get_cell_lease_count_total);
 	ClassDB::bind_method(D_METHOD("get_leased_cell_count"), &WorldPartition3D::get_leased_cell_count);
+	ClassDB::bind_method(D_METHOD("get_cell_route", "from_cell", "to_cell"), &WorldPartition3D::get_cell_route);
+	ClassDB::bind_method(D_METHOD("acquire_cell_route", "from_cell", "to_cell"), &WorldPartition3D::acquire_cell_route);
+	ClassDB::bind_method(D_METHOD("release_cell_route", "tokens"), &WorldPartition3D::release_cell_route);
 	ClassDB::bind_method(D_METHOD("set_cell_layers", "layers"), &WorldPartition3D::set_cell_layers);
 	ClassDB::bind_method(D_METHOD("get_cell_layers"), &WorldPartition3D::get_cell_layers);
 	ClassDB::bind_method(D_METHOD("set_cell_layer", "cell", "layer"), &WorldPartition3D::set_cell_layer);

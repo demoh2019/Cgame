@@ -8,6 +8,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Choose a `Node3D` observer, cell size, and square loading/unloading radii; negative coordinates are handled with floor division.
 - Add up to 16 extra observer paths for co-op, split-screen, cutscene cameras, portals and predictive prefetch (attach a Node3D in front of a moving character). All source locations share streaming budgets. Streaming scans nearest grid rings across sources, so another observer's central cell is considered before the primary observer's outer rings.
 - Assign cells to event-driven **Runtime Data Layers** via `cell_layers` and toggle them with `set_layer_enabled(name, bool)`. Disabled layers override even pinned and near-camera cells, but obey unload budgets. `layer_states` supports inspector editing and save-game snapshots; missing layer states default to enabled. Each cell has at most one layer, unlike Unreal's broader actor-layer model.
+- Preload a **four-connected navigation corridor** for streamed AI using `get_cell_route(from_cell, to_cell)`, `acquire_cell_route(from_cell, to_cell)` and `release_cell_route(tokens)`. Route acquisition atomically reserves at most 64 neighboring cells, fails on disabled Data Layers or an exhausted 256-token budget, and does not replace real NavigationServer3D pathfinding.
 - Retain cells independently for multiple gameplay systems using **reference-counted cell lease tokens**. `acquire_cell_lease(cell)` returns a token and `release_cell_lease(token)` releases only that owner's request. Limit: 256 active tokens; tokens are runtime-only and must be explicitly released. Query counts with `get_cell_lease_count`, `get_cell_lease_count_total` and `get_leased_cell_count`; `clear_cell_leases` releases all. The usual background request/instantiation budgets and inactive Data Layer gates still apply.
 - Keep up to 128 specific gameplay-critical cells resident with `pin_cell`, `unpin_cell` and `clear_pinned_cells`. The `pinned_cells` property also appears in the inspector and is serialized with the node for design-time always-loaded areas. Pins are prioritized before camera neighborhoods, but respect the same request and instance budgets. Use this for arenas, quest scenes, safe towns and checkpoints; runtime pins do not require an observer and do not create scene mappings.
 - Load scene resources asynchronously using Godot's `ResourceLoader.load_threaded_request` backend and poll without blocking while still in progress.
@@ -68,6 +69,43 @@ re-enabling streaming restores them. If you remove a cell mapping, pinning does
 not re-register the scene.
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Navigation corridor leases for streamed AI
+
+Large-world NPCs can traverse multiple `WorldPartition3D` cells without the
+camera visiting every cell. The engine exposes a deterministic,
+four-connected route between grid coordinates:
+
+```gdscript
+var cells: Array = world.get_cell_route(Vector2i(0, 0), Vector2i(1, 0))
+# [Vector2i(0, 0), Vector2i(1, 0)] — cells along a stream corridor.
+var tokens: Array = world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0))
+if tokens.size() == cells.size():
+    # Wait until the cells are loaded and the NavigationServer has synced.
+    # Then use NavigationAgent3D.get_next_path_position() each physics tick.
+    pass
+# The AI owner releases only its own corridor leases on exit or cancellation.
+world.release_cell_route(tokens)
+```
+
+The corridor includes both endpoints, moves through orthogonally adjacent
+cells, and contains at most **64 cells**. It is a prefetch/residency tool,
+**not** a navigation mesh, obstacle solver or final pathfinding algorithm.
+A route longer than the cap, one crossing any disabled Data Layer, or one
+that would exhaust the existing 256-leased-token limit fails atomically and
+returns an empty Array. Existing manual pins/leases of other owners are
+unaffected. No partial route is retained on failure. A scene missing a
+registered asset cannot load even if it holds a route lease.
+
+A path-following agent must wait for streamed `NavigationRegion3D` nodes
+and at least one subsequent physics synchronization before querying
+`NavigationServer3D`. Call `NavigationAgent3D.get_next_path_position()`
+each physics tick and release the returned tokens when the AI despawns.
+The engine intentionally does **not** serialize live lease tokens. A save
+file can store the AI's position and destination, from which its new route
+is acquired on load. Navigation across neighbors requires truly connecting
+scene navigation polygons; simply holding two leases does not connect
+disjoint polygons.
 
 ## Physics and navigation lifecycle for streamed cells
 
@@ -286,7 +324,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 91 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (70), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 97 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (76), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
