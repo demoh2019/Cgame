@@ -5,6 +5,7 @@ extends RefCounted
 ## prevents accepting fabricated item stacks, invalid positions or counters.
 
 const WorldPersistence = preload("res://scripts/server/world_persistence.gd")
+const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const VERSION := 1
 const MAX_BYTES := 262144
 
@@ -29,7 +30,8 @@ static func load_character(sim, path: String) -> Dictionary:
 		return {"ok": false, "reason": "different_world"}
 	if typeof(decoded.get("character")) != TYPE_DICTIONARY:
 		return {"ok": false, "reason": "invalid_character"}
-	var character: Dictionary = decoded["character"]
+	# JSON returns whole numbers as floats; turn them back before the strict validators see them (as Nakama loads do).
+	var character: Dictionary = SaveValidation.whole_numbers_as_ints(decoded["character"])
 	if not sim.valid_character_data(character):
 		return {"ok": false, "reason": "invalid_character"}
 	return {"ok": true, "exists": true, "character": character}
