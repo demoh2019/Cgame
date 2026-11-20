@@ -11,6 +11,7 @@ const CRYSTAL_TOTAL: int = 8
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var camera: Camera3D
+var player: CharacterBody3D
 var world_environment: Environment
 var hud: Label
 var hint: Label
@@ -30,6 +31,7 @@ func _ready() -> void:
     _create_environment()
     _create_sun()
     _create_terrain()
+    _create_world_boundaries()
     _create_crystals()
     _create_camera()
     _create_hud()
@@ -142,6 +144,41 @@ func _create_terrain() -> void:
     terrain.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
     add_child(terrain)
 
+    # Use exactly the same mesh for physical ground and visible terrain.
+    # Trimesh collision is appropriate for static terrain, never dynamic bodies.
+    var terrain_body := StaticBody3D.new()
+    terrain_body.name = "TerrainCollision"
+    terrain_body.collision_layer = 1
+    terrain_body.collision_mask = 0
+    var terrain_shape := CollisionShape3D.new()
+    terrain_shape.shape = mesh.create_trimesh_shape()
+    terrain_body.add_child(terrain_shape)
+    add_child(terrain_body)
+
+
+func _create_world_boundaries() -> void:
+    # Keep physics movement on the finite demo heightfield without teleporting.
+    var boundary := StaticBody3D.new()
+    boundary.name = "WorldBoundsCollision"
+    boundary.collision_layer = 1
+    boundary.collision_mask = 0
+    var half: float = WORLD_EXTENT + 0.4
+    var walls: Array[Vector3] = [
+        Vector3(-half, 2.0, 0.0),
+        Vector3(half, 2.0, 0.0),
+        Vector3(0.0, 2.0, -half),
+        Vector3(0.0, 2.0, half)
+    ]
+    for i in range(walls.size()):
+        var shape := BoxShape3D.new()
+        shape.size = Vector3(0.8, 16.0, WORLD_EXTENT * 2.0 + 2.0) if i < 2 \
+            else Vector3(WORLD_EXTENT * 2.0 + 2.0, 16.0, 0.8)
+        var collision := CollisionShape3D.new()
+        collision.shape = shape
+        collision.position = walls[i]
+        boundary.add_child(collision)
+    add_child(boundary)
+
 
 func _create_streaming_world() -> void:
     # Stream each 32m patch around the camera using the fork's native C++ module.
@@ -156,7 +193,7 @@ func _create_streaming_world() -> void:
     world_partition.max_instances_per_frame = 1
     world_partition.max_concurrent_requests = 4
     add_child(world_partition)
-    world_partition.observer_path = world_partition.get_path_to(camera)
+    world_partition.observer_path = world_partition.get_path_to(player)
     world_partition.cell_loaded.connect(_on_stream_cell_loaded)
 
     for cz in range(-2, 2):
@@ -210,15 +247,22 @@ func _create_crystals() -> void:
 
 
 func _create_camera() -> void:
+    # Physics body owns yaw and collision, camera owns only pitch.
+    # This follows the standard first-person controller hierarchy.
+    player = CharacterBody3D.new()
+    player.name = "ExplorerBody"
+    player.set_script(preload("res://scripts/explorer_character.gd"))
+    add_child(player)
+    player.call("teleport_to_ground", 0.0, 9.0, height_at(0.0, 9.0))
+
     camera = Camera3D.new()
-    camera.name = "Explorer"
+    camera.name = "ExplorerCamera"
     camera.fov = 72.0
     camera.far = 210.0
     camera.current = true
-    camera.position = Vector3(0.0, height_at(0.0, 9.0) + 2.1, 9.0)
+    camera.position = Vector3(0.0, 0.76, 0.0)
     camera.rotation_degrees.x = -9.0
-    add_child(camera)
-
+    player.add_child(camera)
 
 func _create_hud() -> void:
     var canvas := CanvasLayer.new()
@@ -236,7 +280,7 @@ func _create_hud() -> void:
     hint.position = Vector2(22, 166)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD / стрелки: движение  •  мышь: обзор (щелчок)  •  E: сбор\nF1: качество  •  F2: скорость  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
+    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
     canvas.add_child(hint)
 
 
@@ -289,33 +333,13 @@ func _process(delta: float) -> void:
         crystal.position.y = height_at(crystal.position.x, crystal.position.z) \
             + 1.2 + sin(elapsed * 1.7 + float(i)) * 0.23
 
-    if camera == null:
-        return
-    var direction := Vector3.ZERO
-    if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP):
-        direction -= camera.global_basis.z
-    if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN):
-        direction += camera.global_basis.z
-    if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
-        direction += camera.global_basis.x
-    if Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT):
-        direction -= camera.global_basis.x
-    direction.y = 0.0
-    if direction.length_squared() > 0.0001:
-        var speed: float = 8.5 if Input.is_physical_key_pressed(KEY_SHIFT) else 5.2
-        camera.position += direction.normalized() * speed * delta
-    camera.position.x = clampf(camera.position.x, -WORLD_EXTENT + 2.0, WORLD_EXTENT - 2.0)
-    camera.position.z = clampf(camera.position.z, -WORLD_EXTENT + 2.0, WORLD_EXTENT - 2.0)
-    camera.position.y = lerpf(camera.position.y,
-        height_at(camera.position.x, camera.position.z) + 2.1, minf(1.0, 8.0 * delta))
-
 
 func _unhandled_input(event: InputEvent) -> void:
     if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
         Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
         get_viewport().set_input_as_handled()
     elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-        camera.rotation.y -= event.relative.x * mouse_sensitivity
+        player.rotation.y -= event.relative.x * mouse_sensitivity
         camera.rotation.x = clampf(camera.rotation.x - event.relative.y * mouse_sensitivity, -1.42, 1.42)
         get_viewport().set_input_as_handled()
     elif event is InputEventKey and event.pressed and not event.echo:
@@ -338,8 +362,8 @@ func _unhandled_input(event: InputEvent) -> void:
 func _save_game() -> void:
     var saved: bool = GameSave.save_state({
         "relics": collected_ids,
-        "position_xz": [camera.position.x, camera.position.z],
-        "look": [camera.rotation.x, camera.rotation.y],
+        "position_xz": [player.position.x, player.position.z],
+        "look": [camera.rotation.x, player.rotation.y],
         "quality": high_quality
     })
     if saved and collected < CRYSTAL_TOTAL:
@@ -358,12 +382,11 @@ func _load_game() -> void:
     _create_crystals()
 
     var position: Vector2 = state["position_xz"]
-    camera.position.x = position.x
-    camera.position.z = position.y
-    camera.position.y = height_at(position.x, position.y) + 2.1
+    player.call("teleport_to_ground", position.x, position.y,
+        height_at(position.x, position.y))
     var look: Vector2 = state["look"]
     camera.rotation.x = look.x
-    camera.rotation.y = look.y
+    player.rotation.y = look.y
     high_quality = state["quality"]
     _refresh_hud()
 
@@ -374,8 +397,8 @@ func _collect_nearest() -> void:
     var nearest: Node3D = null
     var distance: float = 3.2
     for candidate in crystals:
-        var dist: float = Vector2(camera.position.x - candidate.position.x,
-            camera.position.z - candidate.position.z).length()
+        var dist: float = Vector2(player.global_position.x - candidate.position.x,
+            player.global_position.z - candidate.position.z).length()
         if dist < distance:
             distance = dist
             nearest = candidate
