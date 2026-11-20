@@ -679,7 +679,7 @@ void WorldPartition3D::_schedule_navigation_updates() {
 			stale.push_back(E.key);
 			continue;
 		}
-		if (!node->is_inside_tree() || !node->is_physics_processing()) {
+		if (!node->is_inside_tree() || !node->is_physics_processing() || !node->can_process()) {
 			continue;
 		}
 		const Vector2i cell = local_position_to_cell(to_local(node->get_global_position()));
@@ -733,7 +733,7 @@ bool WorldPartition3D::try_acquire_navigation_update(const String &p_name) {
 	}
 	NavigationAgentEntry *entry = navigation_agents.getptr(p_name);
 	Node3D *node = entry != nullptr ? Object::cast_to<Node3D>(ObjectDB::get_instance(entry->node_id)) : nullptr;
-	if (node == nullptr || node->is_queued_for_deletion() || !node->is_inside_tree() || !node->is_physics_processing()) {
+	if (node == nullptr || node->is_queued_for_deletion() || !node->is_inside_tree() || !node->is_physics_processing() || !node->can_process()) {
 		return false;
 	}
 	const Vector2i cell = local_position_to_cell(to_local(node->get_global_position()));
