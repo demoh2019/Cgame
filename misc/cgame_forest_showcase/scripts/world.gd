@@ -271,7 +271,7 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 230)
+    hint.position = Vector2(22, 254)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
     hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
@@ -308,6 +308,8 @@ func _refresh_hud() -> void:
     var pending: int = world_partition.get_pending_cell_count() if world_partition != null else 0
     var inflight: int = world_partition.get_inflight_request_count() if world_partition != null else 0
     var failed: int = world_partition.get_failed_cell_count() if world_partition != null else 0
+    var stream_ms: float = world_partition.get_last_streaming_update_ms() if world_partition != null else 0.0
+    var created_this_frame: int = world_partition.get_last_instantiation_attempt_count() if world_partition != null else 0
     var cache: Dictionary = TileCache.get_stats()
     var far: Dictionary = distant_terrain.call("get_stats") if distant_terrain != null else {"allocated": 0, "visible": 0, "visible_canopies": 0}
     var ahead: Vector2i = world_partition.prefetch_direction if world_partition != null else Vector2i.ZERO
@@ -317,7 +319,8 @@ func _refresh_hud() -> void:
         + "Ячейки: %d/%d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pending, inflight, failed, current_region.x, current_region.y] \
         + "Кэш земли: %d/%d   попадания: %d   промахи: %d\n" % [cache["entries"], cache["capacity"], cache["hits"], cache["misses"]] \
         + "Предзагрузка: X=%d Z=%d   впереди: %d ячейки\n" % [ahead.x, ahead.y, world_partition.prefetch_distance] \
-        + "Дальний HLOD: %d плит / %d подготовлено, %d крон" % [far["visible"], far["allocated"], far["visible_canopies"]]
+        + "Дальний HLOD: %d плит / %d подготовлено, %d крон\n" % [far["visible"], far["allocated"], far["visible_canopies"]] \
+        + "Стриминг CPU: %.2f ms   попыток создания: %d" % [stream_ms, created_this_frame]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
