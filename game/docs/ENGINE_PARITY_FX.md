@@ -148,3 +148,25 @@ quality, are client-only, and are edited in the Esc / gamepad-Menu settings wind
 
 Limits: only the polled movement actions are rebindable; one-shot hotkeys stay keycode-matched (see F2). The gamepad
 has no aim stick yet. In-world strings from `hud.say` stay English. Tests: `tests/test_ui_parity.gd`.
+
+## Physics and world interactivity (cosmetic, client only)
+
+Everything below lives on the client, is capped per `GraphicsQuality.level()` (0..3) and never touches
+server/simulation state. Entry point: `scripts/client/physics_world_fx.gd` (fed by `online_main.gd` events).
+Tests: `tests/test_physics_parity.gd`.
+
+| Feature | Unity | Unreal | Cgame |
+| --- | --- | --- | --- |
+| Barricade destruction into debris | fractured prefab + Rigidbody chunks | Chaos Destruction geometry collection | `physics_debris.gd` — `barricade_broken` bursts wood chunk `RigidBody3D`s (budget 0/10/24/48), own layer, one heightmap collider following the player, sleep then shrink away, pooled |
+| Spent casings | pooled Rigidbody particles | Niagara mesh particles with collision | `physics_debris.gd` — ranged `attack` ejects brass casings (0/0/10/24) |
+| Blast impulse field | `AddExplosionForce` | Radial Force / Physics Field | `physics_debris.gd` `blast()` — sphere query, quadratic falloff, pushes chunks and ragdoll `PhysicalBone3D` (`Ragdoll.LAYER`); driven by barricade break, flash/ember throws, knockback, infected deaths (`physics_world_fx.blast_for`) |
+| Buoyancy bobbing | Buoyancy scripts / Water system | Chaos buoyancy / Water plugin | chunks float (density 0.6) on a travelling swell, casings sink (`buoyancy_force`, `surface_height`) |
+| Debris budget & sleeping | Rigidbody sleep, object pools | Chaos sleep + pooling | oldest body recycled over the tier cap; asleep >1.5 s or older than 9 s retires |
+| Loot bag drop bounce | dropped Rigidbody + PhysicMaterial | physics actor spawn | `loot_drop_bounce.gd` — damped analytic bounce and landing squash on the bag mesh, wired in `entity_view._process` |
+| Grass/bush bend around player | interactive-grass shader | MPC grass interaction | `plant_interaction.gd` + `assets/shaders/plant_interaction.gdshaderinc` — global `aa_plant_bend` (x,z,radius,strength) used by `grass_field.gd` and `foliage.gd`; speed-scaled, radius 0/1.1/1.5/1.9 m |
+| Tree/bush shake on hit/harvest | wind zone + script | Foliage interaction | global `aa_plant_shake` with damped envelope; `gathered` shakes hardest |
+| Cloth banners | Cloth component | Chaos Cloth | `cloth_flag.gd` — outposts get a subdivided pole-pinned plane with a vertex-shader ripple, droop and wind lift from `aa_vegetation_wind` (segments 0/6/12/20; Low keeps the rigid flag) |
+| Swinging lanterns on chains | HingeJoint chain | Physics Constraint chain | `hanging_lantern.gd` — verlet chain pinned at the top, wind-driven, 0/3/5/8 links; one on every outpost pole |
+| Rope/cable sag | Obi/Rope packages | Cable Component | `hanging_lantern.rope_points` / `build_rope_mesh` — parabolic sag tube; guy rope on outpost poles |
+
+Not covered: skinned cloth on characters, soft bodies, fluid simulation.

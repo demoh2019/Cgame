@@ -12,6 +12,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const LootLabel = preload("res://scripts/shared/loot_label.gd")
 const Ragdoll = preload("res://scripts/client/ragdoll.gd")
 const CharacterAnim = preload("res://scripts/client/character_anim.gd")
+const LootDropBounce = preload("res://scripts/client/loot_drop_bounce.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 const AnimLod = preload("res://scripts/client/anim_lod.gd")
@@ -610,6 +611,8 @@ func _process(delta: float) -> void:
 		else:
 			node.position = sampled[0]
 			target["yaw"] = sampled[1]
+		if key.begins_with("bag"):
+			LootDropBounce.apply(node, delta, GraphicsQuality.level())
 		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")

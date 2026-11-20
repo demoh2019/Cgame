@@ -170,6 +170,16 @@ aa_vegetation_wind={
 "value": Vector3(0, 0, 0)
 }
 
+aa_plant_bend={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+aa_plant_shake={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
 aa_cliff_normal_quality={
 "type": "float",
 "value": 0.0

@@ -31,6 +31,7 @@ shader_type spatial;
 render_mode cull_disabled, diffuse_lambert_wrap, specular_disabled, shadows_disabled;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/vegetation_wind_space.gdshaderinc"
+#include "res://assets/shaders/plant_interaction.gdshaderinc"
 #include "res://assets/shaders/foliage_spectral_optics.gdshaderinc"
 global uniform float aa_weather_wetness;
 global uniform float aa_weather_rain;
@@ -91,6 +92,14 @@ void vertex() {
 					-normal_slope.x, 1.0, -normal_slope.y));
 			}
 			sheen = gust;
+		}
+		// Walkers press the blades down and aside; no cost while nothing is near (strength 0).
+		vec2 pressed = aa_plant_displacement(root.xz, UV.y * UV.y * shrink, TIME);
+		if (dot(pressed, pressed) > 0.00001) {
+			vec2 pressed_local = aa_wind_world_to_local_xz(pressed, MODEL_MATRIX);
+			VERTEX.x += pressed_local.x;
+			VERTEX.z += pressed_local.y;
+			VERTEX.y -= length(pressed) * 0.45;
 		}
 	}
 	// Lit like the ground it grows from, so the carpet and the soil read as one surface.

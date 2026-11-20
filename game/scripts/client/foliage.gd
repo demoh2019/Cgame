@@ -8,6 +8,7 @@ render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/specular_aa.gdshaderinc"
 #include "res://assets/shaders/vegetation_wind_space.gdshaderinc"
+#include "res://assets/shaders/plant_interaction.gdshaderinc"
 #include "res://assets/shaders/foliage_spectral_optics.gdshaderinc"
 global uniform float aa_weather_wetness;
 global uniform float aa_weather_rain;
@@ -124,6 +125,13 @@ void vertex() {
 			vec2 local_motion = aa_wind_world_to_local_xz(motion * amount, MODEL_MATRIX);
 			VERTEX.x += local_motion.x;
 			VERTEX.z += local_motion.y;
+		}
+		// Pushed-aside bushes and shaken (hit / harvested) plants; zero cost while nothing is active.
+		vec2 pushed = aa_plant_displacement(root, clamp(VERTEX.y / height_ref, 0.0, 1.0) * wind_lod, TIME);
+		if (dot(pushed, pushed) > 0.00001) {
+			vec2 pushed_local = aa_wind_world_to_local_xz(pushed, MODEL_MATRIX);
+			VERTEX.x += pushed_local.x;
+			VERTEX.z += pushed_local.y;
 		}
 	}
 }

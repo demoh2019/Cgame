@@ -3,6 +3,9 @@ extends Node3D
 ## radius, and a floating label with the fortification, the capture progress and any war in progress.
 
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
+const ClothFlag = preload("res://scripts/client/cloth_flag.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const HangingLantern = preload("res://scripts/client/hanging_lantern.gd")
 
 var _nodes: Dictionary = {} # site id -> Node3D
 
@@ -44,7 +47,9 @@ func _make(site: Dictionary, ground: float) -> Node3D:
 	flag.mesh = flag_mesh
 	flag.position = Vector3(1.3, 6.1, 0.0)
 	flag.material_override = StandardMaterial3D.new()
+	ClothFlag.upgrade(flag, GraphicsQuality.level()) # Wind-driven cloth; Low keeps the rigid flag.
 	root.add_child(flag)
+	_add_pole_fittings(root)
 	var ring := MeshInstance3D.new()
 	ring.name = "Ring"
 	var ring_mesh := TorusMesh.new()
@@ -111,10 +116,13 @@ func _refresh(root: Node3D, site: Dictionary, group_id: int) -> void:
 	var guild: Dictionary = site.get("guild", {})
 	if not guild.is_empty():
 		status += "  [%s]" % str(guild.get("tag", guild.get("name", "")))
-	var flag_material := (root.get_node("Flag") as MeshInstance3D).material_override as StandardMaterial3D
-	flag_material.albedo_color = color
-	flag_material.emission_enabled = true
-	flag_material.emission = color * 0.45
+	var flag_material = (root.get_node("Flag") as MeshInstance3D).material_override
+	if flag_material is ShaderMaterial:
+		ClothFlag.tint(flag_material, color)
+	else:
+		flag_material.albedo_color = color
+		flag_material.emission_enabled = true
+		flag_material.emission = color * 0.45
 	var ring_material := (root.get_node("Ring") as MeshInstance3D).material_override as StandardMaterial3D
 	ring_material.albedo_color = Color(color.r, color.g, color.b, 0.6)
 	var label := root.get_node("Label") as Label3D
@@ -124,3 +132,24 @@ func _refresh(root: Node3D, site: Dictionary, group_id: int) -> void:
 		"Field bench CONTESTED" if bool(site.get("contested", false)) else "Field bench: defending party/guild")
 	label.text = "OUTPOST #%d  Fort T%d\n%s\n%s" % [
 		int(site["id"]), int(site.get("fortification", 0)), status, field_bench + " | " + provision_text]
+
+
+## Swinging chain lanterns and a sagging guy rope on the banner pole (cosmetic; none on Low quality).
+func _add_pole_fittings(root: Node3D) -> void:
+	var level: int = GraphicsQuality.level()
+	if HangingLantern.link_count(level) <= 0:
+		return
+	var lantern := HangingLantern.new()
+	lantern.name = "PoleLantern"
+	lantern.position = Vector3(-0.35, 5.2, 0.0)
+	root.add_child(lantern)
+	lantern.setup(level, Color(1.0, 0.72, 0.35))
+	var rope := MeshInstance3D.new()
+	rope.name = "GuyRope"
+	rope.mesh = HangingLantern.build_rope_mesh(
+		HangingLantern.rope_points(Vector3(0, 6.7, 0), Vector3(3.6, 0.3, 1.6), 0.55, 10), 0.025)
+	var rope_material := StandardMaterial3D.new()
+	rope_material.albedo_color = Color(0.5, 0.4, 0.26)
+	rope.material_override = rope_material
+	rope.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(rope)

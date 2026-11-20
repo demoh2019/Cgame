@@ -52,6 +52,7 @@ const Effects = preload("res://scripts/client/effects.gd")
 const CombatVfx = preload("res://scripts/client/combat_vfx.gd")
 const ImpactDecals = preload("res://scripts/client/impact_decals.gd")
 const CameraPostFx = preload("res://scripts/client/camera_post_fx.gd")
+const PhysicsWorldFx = preload("res://scripts/client/physics_world_fx.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const TitleBanner = preload("res://scripts/client/title_banner.gd")
 const LocalServer = preload("res://scripts/client/local_server.gd")
@@ -106,6 +107,7 @@ var combat_vfx
 var _footprints: Node3D
 var decals
 var camera_fx
+var physics_fx
 var skills_panel
 var social
 var chat_edit: LineEdit
@@ -344,6 +346,8 @@ func _build_environment() -> void:
 	add_child(_footprints)
 	decals = ImpactDecals.new()
 	add_child(decals)
+	physics_fx = PhysicsWorldFx.new()
+	add_child(physics_fx)
 	# The finishing pass over the 3D view (tilt-shift, grading, vignette), drawn under every interface layer.
 	var post := CanvasLayer.new()
 	post.layer = -10
@@ -819,6 +823,7 @@ func _spawn_effects(event: Dictionary) -> void:
 		effects.ring(_last_cast_spot + Vector3(0, 0.05, 0), Color(0.85, 0.95, 1.0), 1.4, 0.7) # The fish breaks the surface.
 	combat_vfx.handle_event(event, here, at, client.world.biome_at(at.x, at.z))
 	camera_fx.on_event(event, client.peer_id, at.distance_to(here))
+	physics_fx.on_event(event, at)
 	match event["type"]:
 		"hit":
 			if str(event.get("kind", "")) == "zombie":
@@ -1049,6 +1054,7 @@ func _on_welcomed() -> void:
 	# fixed y value that can float above sloped terrain.
 	if _footprints != null:
 		_footprints.setup(client.world)
+	physics_fx.setup(client.world) # Debris, blasts and plant shakes need the terrain heightmap.
 	# One GPU MultiMesh for forest fireflies and floating pollen; placements
 	# follow terrain height, biome and the server-synchronised day cycle.
 	_ambient_motes = AmbientMotes.new()
@@ -1133,6 +1139,7 @@ func _process(delta: float) -> void:
 		return
 	client.decay_correction(delta)
 	var position: Vector3 = client.display_position()
+	physics_fx.update(delta, position)
 	if avatar != null:
 		avatar.position = position
 		# The body turns where it walks; it faces the cursor while fighting, aiming (right mouse) or working, so walking
