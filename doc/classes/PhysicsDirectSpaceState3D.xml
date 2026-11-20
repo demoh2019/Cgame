@@ -116,6 +116,15 @@
 				If the ray did not intersect anything, then an empty dictionary is returned instead.
 			</description>
 		</method>
+		<method name="intersect_rays">
+			<return type="Dictionary[]" />
+			<param index="0" name="queries" type="Array" />
+			<description>
+				Cgame extension: performs a bounded, ordered batch of independent [method intersect_ray] queries with a single GDScript-to-native call. Each element of [param queries] must be a non-null [PhysicsRayQueryParameters3D] object with finite ray endpoints. Each query preserves its own collision mask, excluded objects, collision-body/area switches, inside-hit rules and backface settings.
+				The resulting array has exactly the same length and order as [param queries]. Each element is a dictionary with the same fields as [method intersect_ray] when a surface is hit, or an empty dictionary on a miss. An empty input returns an empty array. The API limits calls to [b]32 rays per invocation[/b]; invalid or oversized inputs are rejected before any physics query and return an empty array.
+				[b]Note:[/b] Batched queries are still synchronous collision tests, not asynchronous or GPU-accelerated ray tracing. Call from the physics step when the space can safely be queried. The batch avoids repeated script/native method calls but does not bypass collision detection cost or physics locks. For a single ray, use [method intersect_ray].
+			</description>
+		</method>
 		<method name="intersect_ray_into">
 			<return type="bool" />
 			<param index="0" name="parameters" type="PhysicsRayQueryParameters3D" />
