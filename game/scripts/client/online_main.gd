@@ -1120,7 +1120,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_1:
 				_quick_use("canned_food")
 			KEY_2:
-				_quick_use("water_bottle")
+				_quick_use("empty_water_pouch" if Input.is_key_pressed(KEY_SHIFT) else "water_bottle")
 			KEY_3:
 				_quick_use("bandage")
 			KEY_4:
