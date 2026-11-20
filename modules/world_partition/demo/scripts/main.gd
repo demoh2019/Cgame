@@ -119,9 +119,12 @@ func _create_hud() -> void:
     _update_hud()
 
 func _unhandled_key_input(event: InputEvent) -> void:
-    if not event is InputEventKey or not event.pressed or event.echo:
+    if not (event is InputEventKey):
         return
-    match event.keycode:
+    var key := event as InputEventKey
+    if not key.pressed or key.echo:
+        return
+    match key.keycode:
         KEY_P:
             _set_prefetch(not prefetch_enabled)
         KEY_L:

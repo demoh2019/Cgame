@@ -25,7 +25,7 @@ func _ready() -> void:
     ground.position = Vector3(CELL_SIZE / 2.0, -0.07 if proxy else -0.03, CELL_SIZE / 2.0)
     add_child(ground)
 
-    var count: int = TREE_COUNT / PROXY_STRIDE if proxy else TREE_COUNT
+    var count: int = int(TREE_COUNT / PROXY_STRIDE) if proxy else TREE_COUNT
     var trunks := _build_multimesh(_trunk_mesh, count)
     var crowns := _build_multimesh(_crown_proxy_mesh if proxy else _crown_detail_mesh, count)
     var grid := Vector2i(roundi(position.x / CELL_SIZE), roundi(position.z / CELL_SIZE))
