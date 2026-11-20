@@ -4,6 +4,7 @@ extends RefCounted
 
 const SAVE_PATH: String = "user://aurora_forest_save_v1.json"
 const FORMAT_VERSION: int = 1
+const MAX_WORLD_COORDINATE: float = 510.0
 
 
 static func save_state(state: Dictionary, path: String = SAVE_PATH) -> bool:
@@ -51,8 +52,8 @@ static func load_state(max_relics: int, path: String = SAVE_PATH) -> Dictionary:
     if xy is Array and xy.size() == 2:
         if (typeof(xy[0]) == TYPE_FLOAT or typeof(xy[0]) == TYPE_INT) \
                 and (typeof(xy[1]) == TYPE_FLOAT or typeof(xy[1]) == TYPE_INT):
-            position.x = clampf(float(xy[0]), -62.0, 62.0)
-            position.y = clampf(float(xy[1]), -62.0, 62.0)
+            position.x = clampf(float(xy[0]), -MAX_WORLD_COORDINATE, MAX_WORLD_COORDINATE)
+            position.y = clampf(float(xy[1]), -MAX_WORLD_COORDINATE, MAX_WORLD_COORDINATE)
 
     var look := Vector2.ZERO
     var angles: Variant = raw.get("look", [])
