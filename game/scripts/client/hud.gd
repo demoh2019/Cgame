@@ -431,6 +431,28 @@ func _build() -> void:
 	pouch_button.tooltip_text = "Craft an empty pouch from cloth + fiber. Fill near lake water, then craft Boiled Water using 1 wood at a live campfire (or hub workbench). Raw water cannot be drunk."
 	pouch_button.pressed.connect(func() -> void: client.use_item("empty_water_pouch"))
 	inventory_box.add_child(pouch_button)
+	var raw_fish_button := Button.new()
+	raw_fish_button.name = "EatRawFish"
+	raw_fish_button.text = "Emergency food: eat raw fish (Alt+1, poisoning risk)"
+	raw_fish_button.tooltip_text = "Eat one carried T1-T4 raw fish for limited hunger recovery. Causes food poisoning; cook it for a safe meal instead."
+	raw_fish_button.pressed.connect(func() -> void:
+		var chosen := ""
+		for tier in range(1, 5):
+			var candidate: String = "raw_fish" if tier == 1 else "raw_fish_%d" % tier
+			if client.inventory.count(candidate) > 0:
+				chosen = candidate
+				break
+		if chosen == "":
+			say("No raw fish carried. Try fishing at the shore.")
+		else:
+			client.use_item(chosen))
+	inventory_box.add_child(raw_fish_button)
+	var stomach_button := Button.new()
+	stomach_button.name = "UseStomachRemedy"
+	stomach_button.text = "Treat food poisoning (Shift+F11; herbal remedy)"
+	stomach_button.tooltip_text = "Craft from 2 wild herbs, 1 charcoal filter and 1 clean water. Reduces food poisoning by 75 points; no effect if already healthy."
+	stomach_button.pressed.connect(func() -> void: client.use_item("herbal_gut_tonic"))
+	inventory_box.add_child(stomach_button)
 	var storm_button := Button.new()
 	storm_button.name = "EquipStormInsulator"
 	storm_button.text = "Equip storm insulation (180s)"
@@ -1489,6 +1511,7 @@ func _press_key(key: int) -> void:
 # "pct" shows the value as percent, "s" as seconds left, "hits" as charges, "" as a flag.
 const EFFECTS := [
 	["infection", "spore_culture", "Infection: grows until treated with antiseptic or antibiotics", true, "pct"],
+	["food_poisoning", "herbal_gut_tonic", "Food poisoning: extra thirst and gradual health loss. Use herbal stomach remedy.", true, "pct"],
 	["bleeding", "bandage", "Bleeding: bandage it", true, "pct"],
 	["fracture", "field_splint", "Fracture: slows you; a splint helps", true, "pct"],
 	["exposure", "thermal_wrap", "Cold: warm up at a fire, in shelter or with a heat pack", true, "pct"],
@@ -1579,7 +1602,7 @@ func _refresh_left_column() -> void:
 	for effect in EFFECTS:
 		var raw: Variant = you.get(effect[0], 0)
 		var value: float = 1.0 if raw is bool and raw else (float(raw) if (raw is float or raw is int) else 0.0)
-		if (effect[0] in ["infection", "bleeding", "fracture", "exposure"] and value < 0.5) or value <= 0.0:
+		if (effect[0] in ["infection", "food_poisoning", "bleeding", "fracture", "exposure"] and value < 0.5) or value <= 0.0:
 			continue
 		shown.append([effect, value])
 	var roster: Array = []
@@ -2423,6 +2446,12 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and bool(data.get("ate_raw_fish", false)):
+		say("Raw fish eaten! Food poisoning %d/100. Cook catches for safety; use a herbal stomach remedy." % int(data.get("severity", 0)))
+		return
+	if kind == "use" and bool(data.get("stomach_remedy", false)):
+		say("Stomach treatment applied. Food poisoning remaining: %d/100." % int(data.get("remaining", 0)))
+		return
 	if kind == "quick_medicine":
 		if bool(data.get("ok", false)):
 			var id: String = str(data.get("item", ""))
