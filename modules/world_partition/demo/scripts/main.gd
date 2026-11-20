@@ -188,7 +188,7 @@ func _sync_quest_arena_lease() -> void:
     # token independently without disrupting this gameplay guarantee.
     var hub_claimed := bool(_stateful_progress(HUB_CELL, "reward_claimed", false))
     var victories := int(_stateful_progress(ARENA_CELL, "arena_wins", 0))
-    var mission_active := hub_claimed and victories < 3
+    var mission_active := hub_claimed and victories < EVENT_RULES.CHAMPION_REQUIRED_WINS
     if mission_active and quest_arena_lease == 0:
         quest_arena_lease = int(detail.call("acquire_cell_lease", ARENA_CELL))
     elif not mission_active and quest_arena_lease != 0:
