@@ -96,6 +96,11 @@ static func active_skill(weapon_id: String) -> Dictionary:
 			"attack_lock": 0.9, "range": weapon_reach(weapon_id) + 1.0,
 			"pierce_targets": 3, "damage": weapon_damage(weapon_id) * 1.45,
 			"ranged": false}
+	if weapon_id.begins_with("machete_") and str(info.get("weapon", "")) == "melee":
+		return {"id": "cleaving_arc", "energy_cost": 28.0, "cooldown": 7.0,
+			"attack_lock": 1.0, "range": Defs.MELEE_RANGE + 0.8,
+			"cleave_targets": 3, "damage": weapon_damage(weapon_id) * 1.35,
+			"ranged": false}
 	if weapon_id.begins_with("club_") and str(info.get("weapon", "")) == "melee":
 		return {"id": "heavy_strike", "energy_cost": 30.0, "cooldown": 6.0,
 			"attack_lock": 0.95, "range": Defs.MELEE_RANGE + 0.6,

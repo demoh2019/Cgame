@@ -197,6 +197,15 @@ static func _build_items() -> void:
 			"reach": 3.5, "weight": 3.6, "value": 54 * t})
 		_add_recipe("spear_%d" % t, "spear_%d" % t, 1,
 			spear_inputs, "workbench", 6.0)
+		# Salvaged steel and tiered metalwork create a short-range sweeper:
+		# unlike a spear's narrow pierce, its skill can strike a small melee arc.
+		_add_item("machete_%d" % t, {"name": "Ruin Machete T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 13.0 + 8.0 * (t - 1), "cooldown": 0.8,
+			"weight": 2.8 + 0.2 * t, "value": 50 * t})
+		_add_recipe("machete_%d" % t, "machete_%d" % t, 1,
+			{"plank_%d" % t: 2, "bar_%d" % t: 2, "scrap": 1},
+			"workbench", 6.0)
 		# Lightweight classless archery: affordable arrows, limited distance and noise.
 		_add_item("bow_%d" % t, {"name": "Survival Bow T%d" % t,
 			"kind": "weapon", "weapon": "ranged", "tier": t,
@@ -292,10 +301,27 @@ static func _build_items() -> void:
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
 	# Automatically consumes one filter when drinking directly from a lake.
+	_add_item("rain_tarp", {"name": "Expedition Rain Catcher", "kind": "rain_catcher",
+		"stack": 5, "weight": 1.1, "value": 24})
+	_add_recipe("rain_tarp", "rain_tarp", 1,
+		{"cloth_1": 2, "fiber_1": 2, "plank_1": 1}, "", 3.0)
 	_add_item("charcoal_filter", {"name": "Field Water Filter", "kind": "material",
 		"stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("charcoal_filter", "charcoal_filter", 1,
 		{"cloth_1": 1, "wood_1": 1, "stone_1": 1}, "", 2.5)
+	# One paid 120-second expedition filter against ambient swamp infection.
+	# Does not mitigate bites, spitter acid, combat damage or PvP.
+	_add_item("spore_filter", {"name": "Expedition Spore Filter",
+		"kind": "spore_filter", "stack": 5, "weight": 0.35, "value": 35})
+	_add_recipe("spore_filter", "spore_filter", 1,
+		{"charcoal_filter": 1, "cloth_1": 2, "field_antiseptic": 1}, "", 3.0)
+	# Permanent T1 expedition tool; each bottled-water refill still consumes
+	# one carbon filter and a real timed stop at a natural shoreline.
+	_add_item("field_canteen", {"name": "Reusable Field Canteen",
+		"kind": "tool", "tool": "canteen", "tier": 1,
+		"stack": 1, "weight": 0.75, "value": 26})
+	_add_recipe("field_canteen", "field_canteen", 1,
+		{"cloth_1": 2, "fiber_1": 3, "wood_1": 1}, "", 4.0)
 	# Field-craftable salve hides only blood scent; no visual invisibility.
 	_add_item("herbal_scent_mask", {"name": "Herbal Scent Salve", "kind": "scent_mask",
 		"stack": 5, "weight": 0.2, "value": 18})
@@ -371,6 +397,11 @@ static func _build_items() -> void:
 		"tier": 2, "stack": 10, "value": 24, "weight": 0.25})
 	_add_recipe("lockpick_kit", "lockpick_kit", 1,
 		{"scrap": 2, "bar_1": 1, "fiber_1": 2}, "workbench", 4.0)
+	# T2 non-full-loot expedition return. PvP full-loot zones always deny it.
+	_add_item("return_charm", {"name": "Settler's Return Charm", "kind": "recall",
+		"tier": 2, "stack": 5, "value": 90, "weight": 0.15})
+	_add_recipe("return_charm", "return_charm", 1,
+		{"bar_2": 1, "cloth_2": 2, "silver": 30}, "workbench", 6.0)
 	# Crafted noise maker: brief diversion for stealth runs, not free aggro.
 	# A tactical consumable: gathering + scavenged scrap become a squad buff.
 	_add_item("field_standard", {"name": "Expedition Rally Standard",
@@ -386,6 +417,12 @@ static func _build_items() -> void:
 		"kind": "deployable", "tier": 1, "stack": 10, "weight": 0.9, "value": 28})
 	_add_recipe("infected_snare", "infected_snare", 1,
 		{"wood_1": 2, "fiber_1": 2, "scrap": 1}, "", 3.0)
+	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
+	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
+		"tier": 2, "weight": 12.0, "value": 180})
+	_add_recipe("salvage_bike", "salvage_bike", 1,
+		{"bar_2": 4, "plank_2": 3, "scrap": 5, "fiber_2": 4},
+		"workbench", 12.0)
 	_add_item("silver", {"name": "Silver", "kind": "currency", "stack": 100000, "value": 1})
 
 

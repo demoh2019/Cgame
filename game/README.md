@@ -24,6 +24,14 @@ The camera, environment, streaming terrain and entities use native Godot/Cgame
 rendering. This **local preview is not multiplayer**; remote networking and
 account persistence must be wired into this scene before claiming an MMO.
 
+New melee choice: **Ruin Machetes T1–T4** combine scavenged scrap with
+tier-matched planks and metal bars at the workbench. Equip one with **4**
+(which cycles owned weapons), then press **G** for Cleaving Arc: 28 combat
+energy, 7-second cooldown, up to three distinct enemies in a 3-metre
+forward melee cone. Spear thrusts keep their narrower piercing line.
+A miss still spends energy; safe-hub, party, and guild PvP protection
+remain authoritative. No native engine change is needed.
+
 Controls: WASD movement, Shift sprint, E gather, Q loot, F attack,
 Tab choose recipe, C craft, 1 food, 2 water, 3 bandage,
 4 equip club, 5 equip jacket, R drink from natural water.
@@ -2534,3 +2542,79 @@ cooldowns, stat caps, death cleanup, event privacy and visibility.
 
 Run `godot --headless --path game --script res://tests/run_all.gd`.
 No native Cgame engine additions were required for this mechanic.
+
+
+## Reusable field canteen: coastal freshwater collection
+
+The canonical `game/` now has a **Reusable Field Canteen** (T1 tool)
+crafted anywhere from **2 T1 cloth, 3 T1 fiber and 1 T1 wood**.
+The same carried canteen can refill indefinitely, but each clean
+bottle requires **a real carried charcoal filter** and access to the
+shore of a lake in the live world. Exactly one filter is exchanged
+for **one ordinary clean water bottle**; the canteen remains in
+inventory. Drinking bottled water later uses the existing safe
+`water_bottle` behavior, whereas unfiltered direct lake drinking
+continues to carry infection risk.
+
+The server runs the refill as an **atomic inventory transaction**:
+a temporary backpack copy pays one filter and receives one bottle,
+and only a fully fitting result is committed. If the bag is full,
+the action returns `no_space` and consumes nothing. The last
+filter's emptied stack may free the slot used by the new water.
+Missing tool/filter, invalid shoreline, death and spam cannot create
+water. No client chooses an output amount, position or filtration
+result, and no extra crafting or survival experience is minted.
+
+Refilling shares the existing **12-second lake drink cooldown**.
+It is ticked on the server and saved in version-one character
+records, so alternating between direct drinking and bottled refills
+or reconnecting cannot bypass the limit. Existing character saves
+work without any schema migration. The tool and clean water are
+ordinary inventory contents and persist with existing save and
+death-loot rules.
+
+**Local preview:** `R` drinks from a lake, `Shift+R` uses
+an alkali kit, **`Ctrl+R` fills the carried canteen**.
+
+**Multiplayer:** the inventory provides **Refill canteen at shore**
+and connected clients also support `Ctrl+R`. New authenticated
+`c_refill_canteen` RPC calls the server's
+`cmd_refill_canteen`; responses are delivered privately through the
+existing results path.
+
+Source: `scripts/shared/field_canteen.gd`, item and crafting
+definitions, `GameServer`, `Net`, local/online client, and HUD.
+New `game/tests/test_field_canteen.gd`, registered in
+`game/tests/run_all.gd`, covers crafting, atomic capacity checks,
+freshwater access, the persisted shared cooldown, legacy saves
+and replay-safe filter consumption. Existing Cgame engine APIs
+are sufficient: no native modifications are needed.
+
+
+## Raid party ready check (Lineage-style cooperation)
+
+The multiplayer party panel now has **Start ready check**, **I'm ready** and
+**Not ready** buttons. Only the group leader may start a 30-second check,
+and **every current party member** (including the leader) must explicitly
+confirm before the party is marked **all_ready**. One "Not ready" response
+ends the check immediately; a finished result remains visible for 10 seconds.
+The leader can start another check after an 8-second anti-spam cooldown.
+
+The dedicated server owns the clock, group roster and response identities.
+Clients cannot vote on behalf of another peer, reset an active deadline or
+expose votes to unrelated players. Changes in membership (including kick,
+leave, disconnection and accepting a new member) cancel old votes. Death also cancels readiness, and a check cannot start with a fallen teammate. These
+session-only confirmations do not move characters, grant items or launch
+combat; they are a coordination tool for voluntary raid starts.
+
+Implementation: `scripts/shared/party.gd`, `scripts/server/game_server.gd`,
+`scripts/shared/net.gd`, and the existing online client/HUD.
+Headless regressions in `tests/test_party_ready.gd` cover authentication,
+deadline behavior, privacy, anti-spam and roster changes. Run:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+Godot's existing RPC, timer and UI APIs are sufficient. No engine patch is
+needed for this feature.

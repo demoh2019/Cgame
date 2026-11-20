@@ -111,6 +111,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_snare", KEY_BACKSLASH)
 	_bind_key("survive_stim", KEY_PERIOD)
 	_bind_key("survive_scent_mask", KEY_SLASH)
+	_bind_key("survive_spore_filter", KEY_SEMICOLON)
 	_bind_key("survive_refuel", KEY_9)
 	_bind_key("survive_extinguish", KEY_MINUS)
 	_bind_key("survive_repair", KEY_H)
@@ -119,12 +120,14 @@ func _setup_actions() -> void:
 	_bind_key("survive_vendor_buy", KEY_N)
 	_bind_key("survive_vendor_sell", KEY_V)
 	_bind_key("survive_radar", KEY_M)
+	_bind_key("survive_mount", KEY_F4)
 	_bind_key("survive_bank", KEY_B)
 	_bind_key("survive_bank_next", KEY_J)
 	_bind_key("survive_bank_deposit", KEY_K)
 	_bind_key("survive_bank_withdraw", KEY_L)
 	_bind_key("survive_contract", KEY_P)
 	_bind_key("survive_rest", KEY_Z)
+	_bind_key("survive_recall", KEY_HOME)
 
 
 func _bind_key(action: StringName, key: Key) -> void:
@@ -757,14 +760,22 @@ func _unhandled_input(event: InputEvent) -> void:
 			_feedback = "No resource within reach."
 		else:
 			_result("Gather", sim.cmd_gather(LOCAL_PLAYER_ID, target["id"]))
+	elif event.is_action_pressed("survive_recall"):
+		_result("Return charm", sim.cmd_use(LOCAL_PLAYER_ID, "return_charm"))
 	elif event.is_action_pressed("survive_loot"):
 		var target := _nearest_loot()
 		if target.is_empty():
 			_feedback = "No nearby crate or loot bag."
 		else:
 			_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
+	elif event.is_action_pressed("survive_mount"):
+		_result("Trail bike", sim.cmd_toggle_mount(LOCAL_PLAYER_ID))
 	elif event.is_action_pressed("survive_attack"):
-		_result("Attack", sim.cmd_attack(LOCAL_PLAYER_ID, _facing.x, _facing.y))
+		var attack_result: Dictionary = sim.cmd_attack(
+			LOCAL_PLAYER_ID, _facing.x, _facing.y)
+		_result("Attack", attack_result)
+		if bool(attack_result.get("ambush", false)):
+			_feedback = "Silent ambush: +45% damage against unaware infected"
 	elif event.is_action_pressed("survive_skill"):
 		_result("Weapon Skill", sim.cmd_skill(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_dodge"):
@@ -806,8 +817,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Frontier stim", sim.cmd_use(LOCAL_PLAYER_ID, "frontier_stim"))
 	elif event.is_action_pressed("survive_scent_mask"):
 		_result("Apply herbal scent salve", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_scent_mask"))
+	elif event.is_action_pressed("survive_spore_filter"):
+		_result("Apply expedition spore filter", sim.cmd_use(LOCAL_PLAYER_ID, "spore_filter"))
 	elif event.is_action_pressed("survive_lake"):
-		if Input.is_key_pressed(KEY_SHIFT):
+		if Input.is_key_pressed(KEY_CTRL):
+			_result("Fill canteen", sim.cmd_refill_canteen(LOCAL_PLAYER_ID))
+		elif Input.is_key_pressed(KEY_SHIFT):
 			var result: Dictionary = sim.cmd_use(LOCAL_PLAYER_ID, "field_alkali_kit")
 			_result("Neutralize acid (%d pools)" % int(result.get("neutralized", 0)),
 				result)
@@ -922,7 +937,7 @@ func _update_hud() -> void:
 	var speed_pct: int = int(round(survivor.inventory.movement_factor() * 100.0))
 	var risk: String = "SAFE HUB" if world.is_safe(position.x, position.z) else ZoneRisk.description(zone)
 	var weather: Dictionary = Weather.conditions(world, position.x, position.z, sim.time)
-	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\n%s | World clock %.0fs\nHP %d HUNGER %d THIRST %d STAMINA %d INFECTION %d BLEEDING %d EXPOSURE %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs DODGE CD %.1fs WEAPON %s\nWEATHER %s %.0fC %s | HEAT PACK %ds\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Fish T%d Craft T%d Scavenge T%d\nWEAPON MASTERY Melee L%d Ranged L%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nCONTRACT %s\nINVENTORY %s" % [
+	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\n%s | World clock %.0fs\nHP %d HUNGER %d THIRST %d STAMINA %d INFECTION %d BLEEDING %d EXPOSURE %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs DODGE CD %.1fs WEAPON %s\nWEATHER %s %.0fC %s | HEAT PACK %ds%s\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Fish T%d Craft T%d Scavenge T%d\nWEAPON MASTERY Melee L%d Ranged L%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nCONTRACT %s\nINVENTORY %s" % [
 		"NIGHT - infected notice farther" if WorldCycle.is_night(sim.time) else "DAY", sim.time,
 		int(vitals.health), int(vitals.hunger), int(vitals.thirst), int(vitals.stamina),
 		int(vitals.infection), int(vitals.bleeding), int(vitals.exposure), survivor.kills,
@@ -931,6 +946,7 @@ func _update_hud() -> void:
 		str(weather.get("condition", "unknown")).capitalize(), float(weather.get("temperature_c", 0.0)),
 		"CAMPFIRE WARMTH" if sim.campfires.size() > 0 and FieldCampfire.has_warmth(sim.campfires, position, sim.time) else ("SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED"),
 		int(ceil(vitals.warmth_seconds)),
+		" | STORM COVER: infected sight -30%" if Weather.sight_multiplier(weather) < 1.0 else "",
 		Defs.ZONE_NAMES[zone], WorldGen.tier_for_zone(zone), risk, int(position.x), int(position.z), sim.zombies.size(),
 		int(levels["wood"]), int(levels["stone"]), int(levels["ore"]), int(levels["fiber"]),
 		int(levels.get("fishing", 1)),
@@ -939,6 +955,14 @@ func _update_hud() -> void:
 		weight, speed_pct, survivor.inventory.count("silver"),
 		Contracts.description(survivor.contract_state), ", ".join(rows)
 	]
+	if not survivor.recall.is_empty():
+		_stats.text += "\nRETURN CHARM: %.1fs — stay still" % maxf(
+			0.0, float(survivor.recall["until"]) - sim.time)
+	elif survivor.recall_ready_at > sim.time:
+		_stats.text += "\nRETURN CHARM COOLDOWN: %.0fs" % (survivor.recall_ready_at - sim.time)
+	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
+		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
+		survivor.mount_cooldown]
 	var equipped_ammo: String = str(Defs.item(survivor.inventory.weapon).get("ammo", ""))
 	if not equipped_ammo.is_empty():
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [
@@ -976,7 +1000,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer (3 pools)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback
@@ -985,6 +1009,7 @@ func _update_hud() -> void:
 	if not fishing_status.is_empty():
 		_instructions.text += "\n" + fishing_status
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
+	_instructions.text += "\nF4 ride / dismount crafted Trail Bike (workbench T2; no combat or gathering while riding)"
 	_instructions.text += "\nField snares active: %d | roots first non-boss infected for 3s" % sim.infected_snares.size()
 	var scent_radius: float = BloodScent.detection_radius(survivor.survival.bleeding,
 		survivor.survival.alive, world.is_safe(survivor.position.x, survivor.position.z),
@@ -995,6 +1020,8 @@ func _update_hud() -> void:
 		_instructions.text += "\nBLOOD SCENT: infected may track you from %d m; use first aid" % ceili(scent_radius)
 	_instructions.text += "\nZ rest at hub (2 wood + canned food + water), or by a lit field fire (cooked fish/ration + water; no nearby enemies); 90s cooldown, remaining %.0fs" % survivor.rest_cooldown
 	_instructions.text += "\nStimulant recharge: %.0fs" % survivor.stim_cooldown
+	if survivor.spore_filter_seconds > 0.0:
+		_instructions.text += "\nSPORE FILTER: %.0fs left; protects against airborne swamp spores" % survivor.spore_filter_seconds
 	_instructions.text += "\nPvP infamy: %d/100 | %s" % [
 		ceili(survivor.pvp_infamy), "OUTLAW" if PvpInfamy.is_outlaw(survivor.pvp_infamy) else "neutral"]
 	_update_bank_hud()

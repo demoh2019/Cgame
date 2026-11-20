@@ -7,6 +7,7 @@ const Movement = preload("res://scripts/shared/movement.gd")
 const Threat = preload("res://scripts/shared/threat.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
+const Weather = preload("res://scripts/shared/weather.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -206,7 +207,13 @@ func _select_target(players: Dictionary, here: Vector2) -> void:
 		# original independent detection ranges and active targets stay locked.
 		var visual_raw: float = float(info.get("visual_signature", 1.0))
 		var visual: float = 1.0 if not is_finite(visual_raw) else clampf(visual_raw, 0.35, 1.0)
-		var notice := minf(float(data["notice"]) * sight_multiplier * visual,
+		# Rain impairs only first sight acquisition. The authoritative
+		# weather factor cannot exceed ordinary vision or create invisibility.
+		var weather_raw: float = float(info.get("weather_sight", 1.0))
+		var weather_cover: float = 1.0
+		if is_finite(weather_raw):
+			weather_cover = clampf(weather_raw, Weather.STORM_SIGHT_MULTIPLIER, 1.0)
+		var notice := minf(float(data["notice"]) * sight_multiplier * visual * weather_cover,
 			float(data["lose"]) - 1.0)
 		var hearing := clampf(float(info.get("noise", 0.0)), 0.0, float(data["lose"]) - 1.0)
 		# Scent can improve discovery but never expands the pursuit leash,

@@ -594,6 +594,10 @@ func _update_prompt() -> void:
 	if not client.you.get("action", {}).is_empty():
 		var action: Dictionary = client.you["action"]
 		text = "Gathering... %d%%" % int(100.0 * (1.0 - float(action["remaining"]) / maxf(float(action["total"]), 0.01)))
+	if bool(client.you.get("mounted", false)):
+		text += " | RIDING (F4 dismount)"
+	elif client.inventory.count("salvage_bike") > 0:
+		text += " | F4 ride bike"
 	hud.set_prompt(text)
 
 
@@ -616,6 +620,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				help_panel.toggle()
 			KEY_J:
 				world_map.toggle()
+			KEY_F4:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.toggle_mount()
 			KEY_Q:
 				_interact()
 			KEY_1:
@@ -638,6 +645,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_quick_use("frontier_stim")
 			KEY_SLASH:
 				_quick_use("herbal_scent_mask")
+			KEY_SEMICOLON:
+				_quick_use("spore_filter")
 			KEY_R:
 				client.drink()
 			KEY_T:
@@ -664,6 +673,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				_interact()
 			KEY_F:
 				client.drink()
+			KEY_R:
+				if Input.is_key_pressed(KEY_CTRL) and not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.refill_canteen()
 			KEY_F1:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.guardian_taunt()

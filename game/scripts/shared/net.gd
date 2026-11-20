@@ -383,6 +383,13 @@ func c_input(seq: int, move_x: float, move_z: float, sprint: bool, yaw: float, d
 
 
 @rpc("any_peer", "reliable")
+func c_toggle_mount() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "mount", sim.cmd_toggle_mount(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_fish(baited: bool = false, storm_cast: bool = false) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -401,6 +408,13 @@ func c_craft(recipe: String, times: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "craft", sim.cmd_craft(peer, str(recipe), times))
+
+
+@rpc("any_peer", "reliable")
+func c_salvage_gear(item_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "salvage_gear", sim.cmd_salvage_gear(peer, str(item_id)))
 
 
 @rpc("any_peer", "reliable")
@@ -561,6 +575,20 @@ func c_party_leave() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "party", sim.cmd_party_leave(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_party_ready_start() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_ready", sim.cmd_party_ready_start(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_party_ready_answer(ready: bool) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_ready", sim.cmd_party_ready_answer(peer, ready))
 
 
 @rpc("any_peer", "reliable")
@@ -738,6 +766,20 @@ func c_loot(entity_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_refill_canteen() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "refill_canteen", sim.cmd_refill_canteen(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_collect_rain() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "collect_rain", sim.cmd_collect_rain(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_drink() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -839,7 +881,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"spawn", "zone", "gathered", "fished", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "duel", "arena_queue", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
+		"recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
 		"party_aid":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
