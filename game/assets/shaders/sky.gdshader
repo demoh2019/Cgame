@@ -253,6 +253,9 @@ void sky() {
 			color += aerosol_color * sunward * horizon_air * 0.42
 				* atmospheric_visibility * aerosol_scattering_strength;
 		}
+		// The same cached cloud field shades distant terrain and the upper sky.
+		// Do not use the camera position or built-in TIME: Godot would refresh
+		// sky radiance on every camera move/frame instead of the chosen cadence.
 		// Aurora is behind BOTH cirrus and volumetric cumulus, not painted on
 		// top of clouds. No new textures/sky passes/looped noise. The native
 		// radiance cubemap intentionally keeps its physical night IBL.
@@ -277,9 +280,109 @@ void sky() {
 				smoothstep(0.43, 0.72, up));
 			color += spectral * emission;
 		}
-		// The same cached cloud field shades distant terrain and the upper sky.
-		// Do not use the camera position or built-in TIME: Godot would refresh
-		// sky radiance on every camera move/frame instead of the chosen cadence.
+		if (cirrus_detail > 0 && cirrus_opacity > 0.001 && up > 0.08) {
+			// Project directions onto a fixed-height cloud plane. Avoid its
+			// horizon singularity and fade the layer out before the clamp.
+			vec2 cloud_uv = dir.xz * (0.18 / max(up, 0.16))
+				+ cirrus_wind_offset / 1024.0;
+			// The native RGBA field REPLACES the L8 lookup on premium
+			// renderers: no extra sky texture samples, just a few ALU ops.
+			vec4 cloud_profile;
+			if (has_cloud_lighting_lut && cloud_lighting_strength > 0.001) {
+				cloud_profile = texture(cloud_lighting_lut, cloud_uv);
+			} else {
+				cloud_profile = vec4(texture(cirrus_lut, cloud_uv).r, 0.5, 0.5, 1.0);
+			}
+			float cloud_shape = cloud_profile.r;
+			if (cirrus_detail > 1) {
+				// Ultra adds a second scale to break up broad cloud patches.
+				float filaments = texture(cirrus_lut,
+					cloud_uv * 2.4 + vec2(0.17, 0.43)).r;
+				cloud_shape *= mix(0.68, 1.08, filaments);
+			}
+			float cloud_alpha = clamp(cloud_shape * cirrus_opacity
+				* smoothstep(0.08, 0.32, up), 0.0, 0.65);
+			// Broad skylight and a directional warm edge from the existing sun.
+			vec3 lit_cloud = mix(vec3(0.76, 0.83, 0.92),
+				vec3(1.0, 0.61, 0.38), dusk * 0.82);
+			float forward_light = pow(max(facing, 0.0), 12.0);
+			lit_cloud += sun_color * (0.16 * forward_light * daylight);
+			if (has_cloud_lighting_lut && cloud_lighting_strength > 0.001
+					&& daylight > 0.025) {
+				// The encoded gradient gives a coarse cloud-facing normal,
+				// lit by the actual moving sun. Dense cores occlude skylight
+				// while sunward edges have a warm silver lining.
+				vec2 gradient = (cloud_profile.gb - vec2(0.5)) / 0.75;
+				vec3 cloud_normal = normalize(vec3(-gradient.x * 3.0, 1.0, -gradient.y * 3.0));
+				float incidence = max(dot(cloud_normal, normalize(sun_direction)), 0.0);
+				float ambient = mix(0.40, 0.91, cloud_profile.a);
+				float rim = min(length(gradient) * 3.0, 1.0)
+					* pow(max(facing, 0.0), 7.0);
+				vec3 sculpted_cloud = lit_cloud * (ambient + incidence * 0.38)
+					+ sun_color * rim * daylight * 0.45;
+				lit_cloud = mix(lit_cloud, sculpted_cloud, cloud_lighting_strength);
+			}
+			lit_cloud = mix(lit_cloud, storm_color, storm * 0.9);
+			// Nighttime cloud cover dims stars instead of glowing white.
+			vec3 dark_cloud = mix(night_horizon * 0.55, night_top * 0.8,
+				clamp(up, 0.0, 1.0));
+			vec3 cloud_color = mix(dark_cloud, lit_cloud, daylight);
+			color = mix(color, cloud_color, cloud_alpha * (1.0 - storm * 0.2));
+		}
+		if (volumetric_cloud_steps > 0 && up > 0.03) {
+			// March a flat slab (scaled units). Fixed-height projection keeps the result
+			// independent of camera position so sky radiance stays cached.
+			int steps = AT_CUBEMAP_PASS ? max(volumetric_cloud_steps / 2, 8) : volumetric_cloud_steps;
+			float coverage = clamp(volumetric_cloud_coverage + storm * 0.4, 0.0, 1.0);
+			float t0 = 1.0 / up;
+			float t1 = 1.6 / up;
+			float dt = (t1 - t0) / float(steps);
+			vec3 wind = vec3(cirrus_wind_offset.x, 0.0, cirrus_wind_offset.y) / 256.0
+				+ vec3(sky_time * 0.004, 0.0, sky_time * 0.0025);
+			vec3 sun_dir = normalize(sun_direction);
+			float cos_theta = dot(dir, sun_dir);
+			// Dual-lobe phase: forward silver lining + soft back scatter.
+			float phase = mix(hg_phase(cos_theta, 0.6), hg_phase(cos_theta, -0.25), 0.3) * 4.0 * PI;
+			vec3 sky_amb = mix(day_horizon, day_top, 0.5) * mix(1.0, 0.45, storm);
+			vec3 amb = mix(night_horizon * 0.6, sky_amb, daylight);
+			vec3 sun_l = sun_color * daylight * (1.0 - storm * 0.7);
+			sun_l = mix(sun_l, sun_l * dusk_color * 1.4, dusk * 0.6);
+			// Night/very dark storm clouds have no meaningful direct-light
+			// self-shadow to compute; preserve their ambient scattering.
+			bool cloud_sunlit = dot(sun_l, sun_l) > 0.0001;
+			float trans = 1.0;
+			vec3 scat = vec3(0.0);
+			float jitter = hash(dir * 431.0 + sky_time);
+			for (int i = 0; i < steps; i++) {
+				float t = t0 + (float(i) + jitter) * dt;
+				vec3 pos = dir * t;
+				float h = (pos.y - 1.0) / 0.6;
+				float d = cloud_density(pos * vec3(0.9, 1.6, 0.9) + wind, h, coverage);
+				if (d > 0.01) {
+					// Keep original three-sample self-shadow when illuminated.
+					// At night all direct-light taps can be skipped safely.
+					float ls = 0.0;
+					if (cloud_sunlit) {
+						for (int k = 1; k <= 3; k++) {
+							vec3 lp = pos + sun_dir * (0.08 * float(k));
+							ls += cloud_density(lp * vec3(0.9, 1.6, 0.9) + wind, (lp.y - 1.0) / 0.6, coverage);
+						}
+					}
+					float beer = exp(-ls * 1.6);
+					float powder = 1.0 - exp(-d * 4.0); // Beer-Powder (Schneider 2015)
+					vec3 lum = sun_l * beer * mix(1.0, powder, 0.5) * phase + amb * (0.35 + 0.5 * h);
+					float st = exp(-d * dt * 9.0);
+					scat += trans * lum * (1.0 - st);
+					trans *= st;
+					if (trans < 0.02) {
+						break;
+					}
+				}
+			}
+			float horizon_fade = smoothstep(0.03, 0.18, up);
+			trans = mix(1.0, trans, horizon_fade);
+			color = color * trans + scat * horizon_fade;
+		}
 		if (rainbow_strength > 0.001 && up > 0.0) {
 			// Angle from the antisolar point in degrees (Descartes' rainbow geometry).
 			float ang = degrees(acos(clamp(dot(dir, -normalize(sun_direction)), -1.0, 1.0)));
