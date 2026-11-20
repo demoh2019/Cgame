@@ -24,6 +24,10 @@ networked client and the local preview.
   from the inventory's Field actions or with **Shift+F11**. One dose
   reduces symptoms by 75 and is spent only if the survivor is poisoned.
   This is not a substitute for antibiotics against infected bites.
+  The existing **Ctrl+3 quick medicine** can select this remedy for an
+  actually poisoned survivor. A nearby party medic can also select it in
+  Aid or use automatic Aid on a poisoned teammate, with the usual party,
+  distance and cooldown restrictions. Neither path creates free medicine.
 
 Other existing keys remain unchanged: **1** canned ration, **Shift+1**
 camp fish stew, **F11** herbal poultice. Raw fish uses **Alt+1** instead
