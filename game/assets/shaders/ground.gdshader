@@ -7,6 +7,9 @@ global uniform float aa_puddle_ripple_strength;
 global uniform float aa_terrain_detail_radius;
 // Maximum number of PBR layers sampled per pixel (Ultra = all layers).
 global uniform int aa_terrain_layer_budget;
+// Low-cost world-space domain warping breaks terrain tiling at High and Ultra.
+// The inexpensive tiers use the exact previous mapping and shader reads.
+global uniform float aa_terrain_warp_strength;
 global uniform float aa_cliff_normal_quality; // 0 on low-end, 0.7 High, 1 Ultra
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/specular_aa.gdshaderinc"
@@ -117,6 +120,21 @@ void fragment() {
 	// noise or texture selection branch to keep cliff mipmapping stable.
 	vec2 lod_dx = dFdx(p / tile_meters);
 	vec2 lod_dy = dFdy(p / tile_meters);
+	// Texture-coordinate domain warp inspired by terrain anti-tiling materials.
+	// Reuse the two already computed spatially continuous noise fields:
+	// no new texture fetches, fbm loops, GPU passes or geometry changes.
+	// Keep road, biome, site and physics coordinates in unwarped world space.
+	vec2 material_p = p;
+	if (aa_terrain_warp_strength > 0.001) {
+		vec2 warp = vec2(mid - 0.44,
+			broad - 0.44 + (mid - 0.44) * 0.27);
+		warp *= tile_meters * clamp(aa_terrain_warp_strength, 0.0, 0.55);
+		material_p += warp;
+		// Preserve anisotropic mip filtering under continuous non-linear UV
+		// deformation. This global-uniform branch is uniform over the draw.
+		lod_dx += dFdx(warp / tile_meters);
+		lod_dy += dFdy(warp / tile_meters);
+	}
 	vec2 cliff_dx_zy = dFdx(world_position.zy / tile_meters);
 	vec2 cliff_dy_zy = dFdy(world_position.zy / tile_meters);
 	vec2 cliff_dx_xy = dFdx(world_position.xy / tile_meters);
@@ -309,8 +327,8 @@ void fragment() {
 				}
 			nn = vec3(0.0, 0.0, 1.0);
 		} else {
-			c = top_albedo(layer, p, mixer, detail_fade, lod_dx, lod_dy);
-			nn = top_normal(layer, p, detail_fade, lod_dx, lod_dy);
+			c = top_albedo(layer, material_p, mixer, detail_fade, lod_dx, lod_dy);
+			nn = top_normal(layer, material_p, detail_fade, lod_dx, lod_dy);
 		}
 		// Replace the approximate layer color with the actual PBR texture; the
 		// unselected layers still contribute their average palette color.
