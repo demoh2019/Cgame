@@ -253,6 +253,73 @@ class StreamedTerrainContracts(TestCase):
         self.assertNotIn("StaticBody3D.new()", far)
         self.assertNotIn("CollisionShape3D.new()", far)
 
+    def test_named_streaming_sources_engine_game_contract(self) -> None:
+        """Named runtime sources must stay wired through native API and game."""
+        repository = ROOT.parents[1]
+        header = (repository / "modules/world_partition/world_partition_3d.h").read_text(encoding="utf-8")
+        cpp = (repository / "modules/world_partition/world_partition_3d.cpp").read_text(encoding="utf-8")
+        xml = (repository / "modules/world_partition/doc_classes/WorldPartition3D.xml").read_text(encoding="utf-8")
+        cpp_tests = (repository / "modules/world_partition/tests/test_world_partition_3d.h").read_text(encoding="utf-8")
+        world = (ROOT / "scripts/world.gd").read_text(encoding="utf-8")
+        smoke = (ROOT / "tests/smoke_streaming_sources.gd").read_text(encoding="utf-8")
+        integrated = (ROOT / "tests/smoke_source_controls.gd").read_text(encoding="utf-8")
+
+        native_methods = (
+            "set_streaming_source",
+            "remove_streaming_source",
+            "clear_streaming_sources",
+            "get_streaming_source",
+            "get_streaming_source_names",
+            "get_streaming_source_count",
+            "is_streaming_source_ready",
+        )
+        for name in native_methods:
+            self.assertIn(name + "(", header)
+            self.assertIn("WorldPartition3D::" + name + "(", cpp)
+            self.assertIn('D_METHOD("' + name + '"', cpp)
+            self.assertIn('method name="' + name + '"', xml)
+
+        self.assertIn("MAX_STREAMING_SOURCES = 8;", header)
+        self.assertIn("p_unload_radius < p_load_radius", cpp)
+        self.assertIn("p_priority < 0 || p_priority > 100", cpp)
+        self.assertIn("is_source_cell(E.key, true)", cpp)
+        self.assertIn("is_source_cell(E.key, false)", cpp)
+        self.assertIn("Vector<StreamingSource> source_snapshot = streaming_sources", cpp)
+        self.assertIn("source_snapshot[j - 1].priority < item.priority", cpp)
+        self.assertIn("source_snapshot.write[j] = item", cpp)
+        self.assertIn("if (still_current)", cpp)
+        self.assertIn("void WorldPartition3D::_refresh_source_readiness()", cpp)
+        self.assertIn('SNAME("streaming_source_ready")', cpp)
+        self.assertIn('SNAME("streaming_source_unready")', cpp)
+        self.assertIn('signal name="streaming_source_ready"', xml)
+        self.assertIn('signal name="streaming_source_unready"', xml)
+        self.assertLess(
+            cpp.index("Vector<Vector2i> pinned_snapshot;"),
+            cpp.index("Vector<StreamingSource> source_snapshot = streaming_sources"),
+        )
+        self.assertLess(
+            cpp.index("Vector<StreamingSource> source_snapshot = streaming_sources"),
+            cpp.index("prefetch_coordinate(step, ahead)"),
+        )
+
+        self.assertIn("Named streaming sources validate radii priority", cpp_tests)
+        self.assertIn("Named source priority and readiness", cpp_tests)
+        self.assertIn("SURVEY_SOURCE: String = \"survey_drone\"", world)
+        self.assertIn("WATCHTOWER_SOURCE: String = \"watchtower\"", world)
+        self.assertIn("KEY_F8:", world)
+        self.assertIn("KEY_F10:", world)
+        self.assertIn("world_partition.set_streaming_source(", world)
+        self.assertIn("world_partition.remove_streaming_source(name)", world)
+        self.assertIn("streaming_source_ready.connect(_on_streaming_source_ready)", world)
+        self.assertIn("streaming_source_unready.connect(_on_streaming_source_unready)", world)
+        self.assertIn('source_ready_events += 1', world)
+        self.assertIn('source_unready_events += 1', world)
+        self.assertIn('world.set_streaming_source("survey", SURVEY, 1, 2, 80)', smoke)
+        self.assertIn('world.set_streaming_source("watchtower", TOWER, 0, 1, 25)', smoke)
+        self.assertIn('world.call("_toggle_streaming_source", SURVEY_NAME)', integrated)
+        self.assertIn('world.call("_toggle_streaming_source", TOWER_NAME)', integrated)
+        self.assertIn('label.text.contains("Источники: 2/8")', integrated)
+
     def test_native_manual_pin_streaming_contract(self) -> None:
         """Engine pins, editor docs and playable fast travel stay in sync."""
         repository = ROOT.parents[1]
