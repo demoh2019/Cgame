@@ -298,6 +298,16 @@ void fragment() {
 	float grey = dot(color, vec3(0.299, 0.587, 0.114));
 	color = mix(vec3(grey), color, 1.15);
 
+	// Subtle rain-aged moss on ruins, bunkers and abandoned timber.
+	// Reuse the existing biome/site weights and mid-frequency noise:
+	// there is no extra texture, fBM call or draw pass to shade this patina.
+	// Its weight vanishes continuously at the original paving boundaries.
+	float ruin_share = clamp((w[9] + w[10] + w[11] + w[12])
+		/ max(all_weight, 0.0001), 0.0, 1.0);
+	float ruin_moss = ruin_share * smoothstep(0.34, 0.72, mid)
+		* (1.0 - cliff) * (1.0 - clamp(w[8], 0.0, 1.0)) * 0.5;
+	color *= mix(vec3(1.0), vec3(0.75, 0.92, 0.73), ruin_moss);
+
 	// Normal map in world space: the ground is mapped from above, so x and z are the tangent axes.
 	vec3 tangent = normalize(vec3(1.0, 0.0, 0.0) - n * n.x);
 	vec3 bitangent = normalize(cross(n, tangent));
@@ -327,6 +337,8 @@ void fragment() {
 		+ w[8] * 0.94 + w[9] * 0.72 + w[10] * 0.83
 		+ w[11] * 0.78 + w[12] * 0.82) / max(all_weight, 0.0001);
 	dry_roughness = clamp(dry_roughness + (mid - 0.5) * 0.055, 0.55, 0.98);
+	// Moss is diffuse and rough; keep the smooth puddle override below intact.
+	dry_roughness = mix(dry_roughness, 0.92, ruin_moss * 0.45);
 	// Wetness changes roughness, not the dielectric material's F0.
 	// Existing shallow puddles still produce very tight highlights.
 	ROUGHNESS = clamp(
