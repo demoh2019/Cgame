@@ -1278,7 +1278,7 @@ func _update_hud() -> void:
 	_stats.text += "\nWET CLOTHING: %d%% | dry under shelter or beside a lit campfire" % roundi(survivor.survival.wetness)
 	var wading: float = WadingWetness.depth_at(world, position)
 	if wading > 0.0:
-		_stats.text += "\nWADING: %.1f m deep | water soaks your clothing" % wading
+		_stats.text += "\nWADING: %.1f m deep | slowed travel; deep water blocks sprint" % wading
 	if rain_grip < 0.999:
 		_stats.text += "\nSTORM MUD: ground travel -%.0f%% | follow roads for traction" % [
 			(1.0 - rain_grip) * 100.0]

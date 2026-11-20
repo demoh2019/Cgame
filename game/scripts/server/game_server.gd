@@ -114,6 +114,7 @@ const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const StormInsulator = preload("res://scripts/shared/storm_insulator.gd")
 const WetClothing = preload("res://scripts/shared/wet_clothing.gd")
 const WadingWetness = preload("res://scripts/shared/wading_wetness.gd")
+const WadingTravel = preload("res://scripts/shared/wading_travel.gd")
 const WindChill = preload("res://scripts/shared/wind_chill.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const SporeSampling = preload("res://scripts/shared/spore_sampling.gd")
@@ -945,7 +946,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 			# Supported weight vanishes immediately after dismount.
 			factor = BikeCargo.movement_factor(player.inventory,
 				player.skills.bonus("carry_capacity"), false)
-		var sprint_allowed: bool = sprint and not player.mounted and not player.crouching and moving and factor >= 0.9999 and player.survival.try_sprint(allowed)
+		var sprint_allowed: bool = sprint and not player.mounted and not player.crouching and moving and factor >= 0.9999 and WadingTravel.can_sprint(world, player.position) and player.survival.try_sprint(allowed)
 		player.position = Movement.step(world, player.position, {
 			"x": move_x, "z": move_z, "sprint": sprint_allowed, "mounted": player.mounted,
 			"crouch": player.crouching, "cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed"),
