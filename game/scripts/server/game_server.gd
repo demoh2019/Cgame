@@ -1772,6 +1772,11 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 				"remaining": recipient.wound_seal_seconds}
 		if source.mounted or recipient.mounted:
 			return {"ok": false, "reason": "mounted"}
+		# Real PvE pursuits matter even without a PvP combat tag. Reuse the
+		# trusted infected pressure scan; no client may declare safety.
+		if CombatStress.pressure(zombies, source.id, source.position) > 0.0 or \
+				CombatStress.pressure(zombies, recipient.id, recipient.position) > 0.0:
+			return {"ok": false, "reason": "in_combat"}
 		if source.combat_tag_until > time or recipient.combat_tag_until > time or \
 				source.attack_timer > 0.0 or recipient.attack_timer > 0.0 or \
 				source.skill_timer > 0.0 or recipient.skill_timer > 0.0 or \

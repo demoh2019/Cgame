@@ -18,7 +18,8 @@ All actions use existing authenticated networking and item/crafting systems.
 Medics can select **Antiseptic Wound Sealant** in the ordinary **Aid / Share**
 party action and apply one carried dose to a **living consenting party member**
 within 3.2 metres. This shares the existing 5-second party-aid cooldown.
-Both players must be out of combat and dismounted. A protected teammate cannot
+Both players must be out of combat and dismounted, including active server-observed
+infected pursuits within the combat-pressure radius. A protected teammate cannot
 receive a second dose until their current 90-second protection expires.
 Failed attempts never spend medicine. The action uses the existing
 authenticated party RPC, private medical events and the recipient's own

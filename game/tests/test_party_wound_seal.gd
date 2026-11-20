@@ -63,6 +63,12 @@ func run(t) -> void:
 	medic.inventory.add(WoundSealant.ITEM_ID, 3)
 
 	t.current = "server-owned dose, cooldown and private party notification"
+	ally.wound_seal_seconds = NAN
+	t.eq(sim.cmd_party_aid(medic.id, ally.id, WoundSealant.ITEM_ID).get("reason", ""),
+		"invalid_state", "corrupt recipient buff cannot charge an ally")
+	t.eq(medic.inventory.count(WoundSealant.ITEM_ID), 3,
+		"invalid state cannot consume an expensive dose")
+	ally.wound_seal_seconds = 0.0
 	var first: Dictionary = sim.cmd_party_aid(medic.id, ally.id, WoundSealant.ITEM_ID)
 	t.check(first.get("ok", false), "medic can prepare a nearby squad member")
 	t.eq(first.get("peer", -1), ally.id, "response identifies the actual patient")
@@ -129,8 +135,13 @@ func run(t) -> void:
 	ally.wound_seal_seconds = 0.0
 	medic.position = old_medic_position
 	medic.party_aid_timer = 0.0
+	t.eq(sim.cmd_party_aid(medic.id, ally.id, WoundSealant.ITEM_ID).get("reason", ""),
+		"in_combat", "a pursued teammate cannot be treated mid-fight")
+	t.eq(medic.inventory.count(WoundSealant.ITEM_ID), 2,
+		"failed battle preparation consumes no medicine")
+	sim.zombies.clear()
 	t.check(sim.cmd_party_aid(medic.id, ally.id, WoundSealant.ITEM_ID).get("ok", false),
-		"a fresh dose can be applied after protection expires")
+		"a fresh dose can be applied safely after protection expires")
 	t.eq(medic.inventory.count(WoundSealant.ITEM_ID), 1, "one new dose spent")
 	medic.party_aid_timer = 0.0
 	ally.survival.hurt(1000.0)
