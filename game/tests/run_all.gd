@@ -14,6 +14,7 @@ const SUITES := [
 	"res://tests/test_weather_surface_response.gd",
 	"res://tests/test_puddle_ripples.gd",
 	"res://tests/test_water_refraction.gd",
+	"res://tests/test_water_scattering.gd",
 	"res://tests/test_water_caustics.gd",
 	"res://tests/test_wind_driven_water.gd",
 	"res://tests/test_rain_vfx.gd",
