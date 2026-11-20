@@ -7,7 +7,7 @@ extends Node
 const WEATHER_CLEAR: int = 0
 const WEATHER_CLOUDY: int = 1
 const WEATHER_MIST: int = 2
-const WEATHER_NAMES: Array[String] = ["Ясно", "Облачно", "Туман"]
+const WEATHER_NAMES = ["Ясно", "Облачно", "Туман"]
 const REFRESH_INTERVAL: float = 0.50
 
 @export_range(1.0, 120.0, 1.0) var cycle_minutes: float = 16.0
