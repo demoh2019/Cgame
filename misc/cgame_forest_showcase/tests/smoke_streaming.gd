@@ -137,6 +137,27 @@ func _run() -> void:
         _fail("foliage layout changed across stream unload/reload")
         return
 
+    # Predict one negative-X cell before the stationary observer moves there.
+    # This checks real resource acquisition rather than only inspecting the
+    # forecast coordinate. The same shared scene path is used by both cells.
+    stream.predictive_lookahead_seconds = 2.0
+    stream.predictive_max_distance = 40.0
+    stream.predictive_velocity = Vector3(-16.0, 0.0, 0.0)
+    stream.update_streaming()
+    if not stream.has_predicted_cell() or stream.get_predicted_cell() != Vector2i(-1, 0):
+        _fail("native motion prediction did not select the cell ahead")
+        return
+    if not await _wait_for_cell(stream, Vector2i(-1, 0), true):
+        _fail("predicted cell was not prefetched before observer moved")
+        return
+    if stream.get_loaded_cell_count() != 2:
+        _fail("predictive streaming should retain origin and one future cell")
+        return
+    stream.predictive_lookahead_seconds = 0.0
+    if stream.has_predicted_cell():
+        _fail("prediction did not turn off")
+        return
+
     observer.position.x = -25.0
     var negative := Vector2i(-1, 0)
     # -25.0 belongs to cell -1 with a 32m cell width and has a registered scene.
@@ -158,5 +179,5 @@ func _run() -> void:
         _fail("observer transitions were not signaled reliably")
         return
 
-    print("Forest streaming smoke PASSED: persistent hub pins, deterministic reload, negative coordinates, observer signals and performance quality")
+    print("Forest streaming smoke PASSED: bounded motion prefetch, persistent hub pins, deterministic reload, negative coordinates and observer signals")
     quit(0)
