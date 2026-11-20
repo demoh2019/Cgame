@@ -58,6 +58,11 @@ aa_cloud_shadow_strength={
 "value": 0.0
 }
 
+aa_cloud_shadow_offset={
+"type": "vec2",
+"value": Vector2(0, 0)
+}
+
 aa_terrain_detail_radius={
 "type": "float",
 "value": 42.0
