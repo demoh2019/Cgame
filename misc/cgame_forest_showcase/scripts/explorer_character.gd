@@ -73,7 +73,12 @@ func _physics_process(delta: float) -> void:
     if horizontal_motion.length_squared() > 0.000001:
         var edge_offset: Vector3 = horizontal_motion.normalized() * (CAPSULE_RADIUS + 0.04)
         var upcoming: Vector3 = global_position + horizontal_motion + edge_offset
-        if not _position_has_terrain(upcoming):
+        var sideways: Vector3 = Vector3(-edge_offset.z, 0.0, edge_offset.x)
+        # Check the center and both capsule flanks so diagonal crossings
+        # cannot overlap an unloaded corner tile.
+        if not _position_has_terrain(upcoming) \
+                or not _position_has_terrain(upcoming + sideways) \
+                or not _position_has_terrain(upcoming - sideways):
             velocity.x = 0.0
             velocity.z = 0.0
 
