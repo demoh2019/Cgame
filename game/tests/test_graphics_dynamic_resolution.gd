@@ -34,7 +34,7 @@ func run(t) -> void:
 	t.check(not changed_gpu and c.at_ceiling(),
 		"CPU-bound scenes keep native tier scale when GPU has headroom")
 	changed_gpu = false
-	for i in 240:
+	for i in 480:
 		# 120 FPS CPU update, but 33 ms spent on actual GPU rendering.
 		changed_gpu = c.sample_frame(1.0 / 120.0, 33.0) or changed_gpu
 	t.check(changed_gpu and c.scale < 0.77,
