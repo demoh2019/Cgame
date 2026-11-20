@@ -7,6 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const WorldPersistence = preload("res://scripts/server/world_persistence.gd")
+const SoloCharacterStore = preload("res://scripts/server/solo_character_store.gd")
 const Net = preload("res://scripts/shared/net.gd")
 const GATEWAY_PATH := "res://scripts/server/nakama_gateway.gd"
 
@@ -20,6 +21,10 @@ var _max_tick_ms: float = 0.0
 var _quit_after: float = 0.0
 var _uptime: float = 0.0
 var _shutting_down := false
+var _solo_character_path: String = ""
+var _solo_stop_path: String = ""
+var _solo_save_clock: float = 0.0
+const SOLO_SAVE_INTERVAL := 20.0
 var _world_save_path: String = ""
 var _world_save_clock: float = 0.0
 var _saved_world_revision: int = 0
@@ -34,6 +39,8 @@ func _initialize() -> void:
 	var nakama_http_key := "albion_http_key"
 	var world_save_override: String = ""
 	var siege_outbox_override: String = ""
+	var solo_character_override: String = ""
+	var solo_stop_override: String = ""
 	var disable_world_save: bool = false
 	var args := OS.get_cmdline_user_args()
 	var i := 0
@@ -66,6 +73,20 @@ func _initialize() -> void:
 				world_save_override = args[i]
 			"--no-world-save":
 				disable_world_save = true
+			"--solo-character":
+				i += 1
+				if i >= args.size():
+					printerr("SERVER --solo-character needs a user:// path")
+					quit(2)
+					return
+				solo_character_override = args[i]
+			"--solo-stop":
+				i += 1
+				if i >= args.size():
+					printerr("SERVER --solo-stop needs a user:// path")
+					quit(2)
+					return
+				solo_stop_override = args[i]
 			"--siege-outbox":
 				i += 1
 				if i >= args.size():
@@ -78,6 +99,26 @@ func _initialize() -> void:
 		printerr("SERVER --siege-outbox requires --nakama")
 		quit(2)
 		return
+	if not solo_character_override.is_empty() and not nakama_address.is_empty():
+		printerr("SERVER local solo character and Nakama saves cannot be combined")
+		quit(2)
+		return
+	if not solo_character_override.is_empty() and solo_stop_override.is_empty():
+		printerr("SERVER --solo-character requires a graceful --solo-stop path")
+		quit(2)
+		return
+	if not solo_stop_override.is_empty():
+		if not WorldPersistence.valid_world_path(solo_stop_override):
+			printerr("SERVER invalid local stop signal path")
+			quit(2)
+			return
+		_solo_stop_path = solo_stop_override
+	if not solo_character_override.is_empty():
+		if not WorldPersistence.valid_world_path(solo_character_override):
+			printerr("SERVER invalid offline solo save path")
+			quit(2)
+			return
+		_solo_character_path = solo_character_override
 	Engine.physics_ticks_per_second = Defs.TICK_RATE
 	sim = GameServer.new(WorldGen.new(world_seed), world_seed)
 	if not disable_world_save:
@@ -98,6 +139,13 @@ func _initialize() -> void:
 	net.role = "server"
 	net.sim = sim
 	net.allow_debug = "--debug-commands" in args
+	if not _solo_character_path.is_empty():
+		var record: Dictionary = SoloCharacterStore.load_character(sim, _solo_character_path)
+		if not bool(record.get("ok", false)):
+			printerr("SERVER refused invalid offline solo character: " + str(record.get("reason", "unknown")))
+			quit(3)
+			return
+		net.solo_character_path = _solo_character_path
 	root.add_child(net)
 	if nakama_address != "":
 		if not ResourceLoader.exists(GATEWAY_PATH):
@@ -119,6 +167,10 @@ func _initialize() -> void:
 		print("SERVER siege outbox restored %d unacknowledged guild victories" %
 			net._siege_ledger_pending.size())
 	peer = ENetMultiplayerPeer.new()
+	if not _solo_stop_path.is_empty():
+		# A solo save slot must not be exposed as a public guest server.
+		peer.set_bind_ip("127.0.0.1")
+		max_clients = 1
 	var error := peer.create_server(port, max_clients)
 	if error != OK:
 		printerr("SERVER could not listen on port %d (error %d)" % [port, error])
@@ -135,8 +187,21 @@ func _initialize() -> void:
 func _physics_process(delta: float) -> bool:
 	if _shutting_down:
 		return false
+	if not _solo_stop_path.is_empty() and FileAccess.file_exists(_solo_stop_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(_solo_stop_path))
+		_shutting_down = true
+		call_deferred("_finish_shutdown")
+		return false
 	var started := Time.get_ticks_usec()
 	net.server_tick(delta)
+	if not _solo_character_path.is_empty() and not sim.players.is_empty():
+		_solo_save_clock += maxf(0.0, delta)
+		if _solo_save_clock >= SOLO_SAVE_INTERVAL:
+			_solo_save_clock = 0.0
+			var survivor = sim.players.values()[0]
+			if not SoloCharacterStore.save_character(sim, _solo_character_path,
+					sim.character_data(survivor)):
+				push_error("SERVER could not autosave the solo survivor.")
 	_world_save_clock += delta
 	if _world_save_path != "" and _world_save_clock >= WORLD_SAVE_INTERVAL:
 		_world_save_clock = 0.0

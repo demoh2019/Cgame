@@ -7,6 +7,7 @@ const CaravanEscort = preload("res://scripts/shared/caravan_escort.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildSiegeLedger = preload("res://scripts/shared/guild_siege_ledger.gd")
 const SiegeOutbox = preload("res://scripts/server/siege_outbox.gd")
+const SoloCharacterStore = preload("res://scripts/server/solo_character_store.gd")
 
 signal welcomed
 signal join_refused(reason: String)
@@ -22,6 +23,7 @@ var _count_clock: float = 0.0
 const MAX_COMMANDS_PER_SECOND := 80
 var snapshot_accumulator: float = 0.0
 var gateway # NakamaGateway, or null in offline mode.
+var solo_character_path: String = "" # Local loopback-only server, set by server_main.
 var user_to_peer: Dictionary = {}
 var _joining: Dictionary = {} # Peer -> true, until authentication and loading finish.
 var _joining_users: Dictionary = {} # Account -> peer; prevents overlapping sign-ins.
@@ -210,8 +212,22 @@ func c_join(player_name: String, token: String = "", refresh: String = "") -> vo
 	if sim.players.has(peer) or _joining.has(peer):
 		return
 	if gateway == null or not gateway.enabled:
-		# Offline mode: no accounts, nothing is saved.
-		sim.add_player(peer, str(player_name))
+		if not solo_character_path.is_empty():
+			# A local solo world must never accept two competing guest IDs.
+			if not sim.players.is_empty():
+				s_join_refused.rpc_id(peer, "Solo world already has a survivor.")
+				_disconnect_later(peer)
+				return
+			var loaded: Dictionary = SoloCharacterStore.load_character(sim, solo_character_path)
+			if not bool(loaded.get("ok", false)):
+				s_join_refused.rpc_id(peer, "Solo character save cannot be loaded.")
+				_disconnect_later(peer)
+				return
+			# This is a server-only local owner, never a client-provided ID.
+			sim.add_player(peer, str(player_name), "solo-local", loaded["character"])
+		else:
+			# Public offline guest servers retain their previous unsaved semantics.
+			sim.add_player(peer, str(player_name))
 		s_welcome.rpc_id(peer, sim.world.world_seed, Defs.TICK_RATE)
 		return
 	_joining[peer] = true
@@ -362,13 +378,17 @@ func leave(peer: int) -> bool:
 	# Ranked duel forfeits must be reflected in the final account save.
 	sim._abort_training(peer, "disconnected")
 	var data: Dictionary = sim.character_data(player)
+	var solo_saved := true
+	if not solo_character_path.is_empty():
+		solo_saved = SoloCharacterStore.save_character(sim, solo_character_path, data)
 	if user_id != "":
 		_departing_accounts[user_id] = true
 		if user_to_peer.get(user_id, -1) == peer:
 			user_to_peer.erase(user_id)
 	sim.remove_player(peer)
 	if user_id == "" or gateway == null or not gateway.enabled:
-		return true
+		_departing_accounts.erase(user_id)
+		return solo_saved
 	var ok: bool = await _save_serial(user_id, data)
 	if ok:
 		_pending_saves.erase(user_id)
