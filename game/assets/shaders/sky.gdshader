@@ -42,6 +42,11 @@ uniform sampler2D cirrus_lut : filter_linear, repeat_enable;
 uniform vec2 cirrus_wind_offset = vec2(0.0);
 uniform int cirrus_detail = 0;
 uniform float cirrus_opacity = 0.0;
+// Native cloud LUT: R density, G/B horizontal slopes, A soft self-shadow.
+// Prebaked once from the SAME field as moving ground cloud shadows.
+uniform sampler2D cloud_lighting_lut : filter_linear, repeat_enable;
+uniform bool has_cloud_lighting_lut = false;
+uniform float cloud_lighting_strength = 0.0;
 
 float hash(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -199,7 +204,15 @@ void sky() {
 			// horizon singularity and fade the layer out before the clamp.
 			vec2 cloud_uv = dir.xz * (0.18 / max(up, 0.16))
 				+ cirrus_wind_offset / 1024.0;
-			float cloud_shape = texture(cirrus_lut, cloud_uv).r;
+			// The native RGBA field REPLACES the L8 lookup on premium
+			// renderers: no extra sky texture samples, just a few ALU ops.
+			vec4 cloud_profile;
+			if (has_cloud_lighting_lut && cloud_lighting_strength > 0.001) {
+				cloud_profile = texture(cloud_lighting_lut, cloud_uv);
+			} else {
+				cloud_profile = vec4(texture(cirrus_lut, cloud_uv).r, 0.5, 0.5, 1.0);
+			}
+			float cloud_shape = cloud_profile.r;
 			if (cirrus_detail > 1) {
 				// Ultra adds a second scale to break up broad cloud patches.
 				float filaments = texture(cirrus_lut,
@@ -213,6 +226,21 @@ void sky() {
 				vec3(1.0, 0.61, 0.38), dusk * 0.82);
 			float forward_light = pow(max(facing, 0.0), 12.0);
 			lit_cloud += sun_color * (0.16 * forward_light * daylight);
+			if (has_cloud_lighting_lut && cloud_lighting_strength > 0.001
+					&& daylight > 0.025) {
+				// The encoded gradient gives a coarse cloud-facing normal,
+				// lit by the actual moving sun. Dense cores occlude skylight
+				// while sunward edges have a warm silver lining.
+				vec2 gradient = (cloud_profile.gb - vec2(0.5)) / 0.75;
+				vec3 cloud_normal = normalize(vec3(-gradient.x * 3.0, 1.0, -gradient.y * 3.0));
+				float incidence = max(dot(cloud_normal, normalize(sun_direction)), 0.0);
+				float ambient = mix(0.40, 0.91, cloud_profile.a);
+				float rim = min(length(gradient) * 3.0, 1.0)
+					* pow(max(facing, 0.0), 7.0);
+				vec3 sculpted_cloud = lit_cloud * (ambient + incidence * 0.38)
+					+ sun_color * rim * daylight * 0.45;
+				lit_cloud = mix(lit_cloud, sculpted_cloud, cloud_lighting_strength);
+			}
 			lit_cloud = mix(lit_cloud, storm_color, storm * 0.9);
 			// Nighttime cloud cover dims stars instead of glowing white.
 			vec3 dark_cloud = mix(night_horizon * 0.55, night_top * 0.8,
