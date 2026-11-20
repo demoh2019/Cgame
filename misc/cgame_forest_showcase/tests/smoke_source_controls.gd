@@ -42,6 +42,9 @@ func _run() -> void:
     if stream == null or player == null:
         _fail("world streamer or explorer is missing")
         return
+    if stream.get_configured_cell_count() != 1024:
+        _fail("bulk world-grid registration did not configure all 1024 cells")
+        return
     if world.get_node_or_null("SurveyDroneBeacon") == null \
             or world.get_node_or_null("WatchtowerBeacon") == null:
         _fail("remote source markers did not integrate into the game")
