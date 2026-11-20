@@ -10,6 +10,8 @@
 void SkyScatteringLUT::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("generate_lut", "width", "height", "aerosol"),
 			&SkyScatteringLUT::generate_lut, DEFVAL(128), DEFVAL(64), DEFVAL(2.0f));
+	ClassDB::bind_method(D_METHOD("sample_scattering", "view_elevation", "sun_elevation", "aerosol"),
+			&SkyScatteringLUT::sample_scattering, DEFVAL(2.0f));
 }
 
 Ref<Image> SkyScatteringLUT::generate_lut(int p_width, int p_height, float p_aerosol) const {
@@ -27,4 +29,12 @@ Ref<Image> SkyScatteringLUT::generate_lut(int p_width, int p_height, float p_aer
 		}
 	}
 	return lut;
+}
+
+Color SkyScatteringLUT::sample_scattering(float p_view_elevation, float p_sun_elevation, float p_aerosol) const {
+	// Identical spectrum and optical-depth policy as generate_lut(): fog
+	// receives the same sun-dependent scattering that the sky shader samples.
+	const SkyScatteringPolicy::Sample sample = SkyScatteringPolicy::sample(
+			p_view_elevation, p_sun_elevation, p_aerosol);
+	return Color(sample.r, sample.g, sample.b, sample.transmittance);
 }
