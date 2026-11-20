@@ -177,7 +177,12 @@ func _select_target(players: Dictionary, here: Vector2) -> void:
 		# Night makes infected more vigilant; cap new detection by pursuit leash.
 		# Hearing remains independent of night and is always authoritative.
 		var sight_multiplier := clampf(float(info.get("notice_multiplier", 1.0)), 1.0, 1.35)
-		var notice := minf(float(data["notice"]) * sight_multiplier, float(data["lose"]) - 1.0)
+		# Camouflage applies to sight only; noise and blood scent keep their
+		# original independent detection ranges and active targets stay locked.
+		var visual_raw: float = float(info.get("visual_signature", 1.0))
+		var visual: float = 1.0 if not is_finite(visual_raw) else clampf(visual_raw, 0.35, 1.0)
+		var notice := minf(float(data["notice"]) * sight_multiplier * visual,
+			float(data["lose"]) - 1.0)
 		var hearing := clampf(float(info.get("noise", 0.0)), 0.0, float(data["lose"]) - 1.0)
 		# Scent can improve discovery but never expands the pursuit leash,
 		# overrides combat threat or bypasses safe/dead player protections.

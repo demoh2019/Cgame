@@ -216,6 +216,17 @@ static func _build_items() -> void:
 			_add_recipe(storm_id, storm_id, 1,
 				{"cloth_%d" % t: 6, "fiber_%d" % t: 4},
 				"workbench", 6.0 + float(t))
+			# Lightweight stealth clothing: weak in combat but breaks visual
+			# acquisition by idle infected. Noise and blood scent are unchanged.
+			var ghillie_id: String = "ghillie_cloak_%d" % t
+			var sight_factor: float = 0.62 if t == 2 else (0.55 if t == 3 else 0.48)
+			_add_item(ghillie_id, {"name": "Ghillie Cloak T%d" % t,
+				"kind": "armor", "tier": t, "armor": 0.045 + 0.025 * float(t - 2),
+				"visual_signature": sight_factor, "weight": 2.2 + 0.15 * float(t),
+				"value": 65 * t})
+			_add_recipe(ghillie_id, ghillie_id, 1,
+				{"cloth_%d" % t: 4, "fiber_%d" % t: 6,
+				"plank_%d" % t: 1}, "workbench", 6.0 + float(t))
 	# Consumables.
 	# Shore fishing: scavenging food supports the classless artisan loop.
 	_add_item("fishing_rod", {"name": "Fishing Rod", "kind": "tool", "tool": "fishing",

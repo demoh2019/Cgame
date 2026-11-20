@@ -44,6 +44,7 @@ const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
+const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
@@ -2747,6 +2748,10 @@ func _tick_zombies(delta: float) -> void:
 		info[player.id] = {"position": player.position, "alive": _alive(player),
 			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
 			"notice_multiplier": WorldCycle.notice_multiplier(time),
+			"visual_signature": Camouflage.visual_signature(
+				player.inventory.armor, player.inventory.armor != "" and
+				player.inventory.count(player.inventory.armor) > 0,
+				player.noise_timer, _alive(player)),
 			# Only actual server wounds contribute; never trust client input.
 			"scent": BloodScent.detection_radius(player.survival.bleeding,
 				_alive(player), _is_safe(player.position))}
@@ -3029,6 +3034,10 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"rest_cooldown": player.rest_cooldown,
 			"party_aid_cooldown": player.party_aid_timer, "stim_cooldown": player.stim_cooldown,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
+			"visual_signature": Camouflage.visual_signature(
+				player.inventory.armor, player.inventory.armor != "" and
+				player.inventory.count(player.inventory.armor) > 0,
+				player.noise_timer, _alive(player)),
 			"last_death_full_loot": player.last_death_full_loot,
 			"is_night": WorldCycle.is_night(time),
 			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),

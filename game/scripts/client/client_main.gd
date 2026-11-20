@@ -4,6 +4,7 @@ extends Node3D
 ## call GameServer. Multiplayer transport will be wired to this presentation separately.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
@@ -851,6 +852,13 @@ func _update_hud() -> void:
 	_stats.text += "\nSTORM INSULATION %d%% | %s" % [
 		int(round(100.0 * Weather.protection(local_armor))),
 		str(Defs.item(local_armor).get("name", "No armor"))]
+	var visual: float = Camouflage.visual_signature(local_armor, not local_armor.is_empty(),
+		survivor.noise_timer, vitals.alive)
+	if visual < 0.999:
+		_stats.text += "\nCAMOUFLAGE: infected vision -%d%% (noise/blood still reveal you)" % [
+			int(round(100.0 * (1.0 - visual)))]
+	elif float(Defs.item(local_armor).get("visual_signature", 1.0)) < 1.0 and survivor.noise_timer > 0.0:
+		_stats.text += "\nCAMOUFLAGE BROKEN: your noise is attracting infected"
 	_stats.text += "\nUTC DAILY BOUNTY: " + DailyBounties.description(survivor.daily_bounty, DailyBounties.utc_day())
 	_stats.text += "\nSURVIVOR RENOWN %s %d / %d | Hub supply discount %d%%" % [
 		Reputation.title(survivor.renown), survivor.renown,

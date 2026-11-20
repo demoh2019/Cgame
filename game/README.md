@@ -2073,3 +2073,23 @@ definitions, `scripts/server/game_server.gd`, and both clients.
 Headless regression suite `game/tests/test_frontier_stim.gd` is
 registered in `game/tests/run_all.gd`. Native engine changes are not
 required for a fully server-owned, inventory-paid consumable.
+
+## Ghillie cloaks T2-T4: classless stealth against infected
+
+Craft **Ghillie Cloak T2–T4** at the workbench from tier-matched
+cloth (4), fiber (6) and one plank. The cloaks use the existing armor slot,
+crafting mastery, trading and full-loot system. They provide deliberately
+less damage reduction than combat jackets or stormcoats. No native engine
+API extension is required.
+
+**While quiet**, a T2/T3/T4 cloak reduces *visual* acquisition range of
+idle infected by 38%/45%/52%, before normal day/night adjustments.
+Running or firing a noisy weapon interrupts concealment until its audible
+effect expires. Blood scent from untreated wounds and pack/combat aggro
+are not negated; an already engaged enemy keeps chasing. The server
+derives the modifier strictly from still-carried equipped armor and its
+own sound timer, never from client requests. Both the online HUD and
+local 3D preview display concealment status; nearby enemies still use
+normal safe-zone and sight/hearing rules.
+
+Regressions: `game/tests/test_camouflage.gd` in the canonical suite.
