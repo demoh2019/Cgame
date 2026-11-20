@@ -16,6 +16,7 @@ const GrassField = preload("res://scripts/client/grass_field.gd")
 const GroundContactAO = preload("res://scripts/client/ground_contact_ao.gd")
 const TerrainSeamNormals = preload("res://scripts/client/terrain_seam_normals.gd")
 const TerrainCurvature = preload("res://scripts/client/terrain_curvature.gd")
+const TerrainHorizonAO = preload("res://scripts/client/terrain_horizon_ao.gd")
 const TerrainAnisotropy = preload("res://scripts/client/terrain_anisotropy.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
@@ -37,6 +38,7 @@ global uniform float aa_weather_rain;
 global uniform float aa_puddle_ripple_strength;
 global uniform float aa_ground_contact_strength;
 global uniform float aa_terrain_curvature_strength;
+global uniform float aa_terrain_horizon_ao_strength;
 global uniform float aa_terrain_detail_radius;
 instance uniform float aa_lod_morph = 0.0;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
@@ -170,8 +172,15 @@ void fragment() {
 		* aa_terrain_curvature_strength * detail_fade;
 	float ridge = clamp(COLOR.g, 0.0, 1.0)
 		* aa_terrain_curvature_strength * detail_fade;
-	AO = ground_contact * (1.0 - cavity * 0.24);
-	ALBEDO = color * (1.0 - cavity * 0.095 + ridge * 0.035)
+	// CPU-baked horizon openness is passed through the existing vertex B.
+	float sky_visibility = 1.0;
+	if (aa_terrain_horizon_ao_strength > 0.001) {
+		sky_visibility = mix(1.0, clamp(COLOR.b, 0.0, 1.0),
+			clamp(aa_terrain_horizon_ao_strength, 0.0, 1.0));
+	}
+	AO = ground_contact * (1.0 - cavity * 0.24) * sky_visibility;
+	ALBEDO = color * mix(1.0, sky_visibility, 0.10)
+		* (1.0 - cavity * 0.095 + ridge * 0.035)
 		* mix(1.0, ground_contact, 0.12)
 		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), vertex_cloud_shade);
 	// Match the same water caustic field even if 13-layer PBR assets are absent.
@@ -207,6 +216,7 @@ static var _textured_material: ShaderMaterial
 static var _textured_checked := false
 static var terrain_filter_quality := 1
 static var terrain_geomorph_enabled := false
+static var terrain_horizon_enabled := false
 static var terrain_screen_lod_quality := 1
 static var terrain_lod_pixel_error := 3.5
 static var terrain_error_lod_quality := 1
@@ -224,6 +234,9 @@ const BIOME_TEXELS := 17 # Biome samples per chunk side (every 4 m), shared on t
 var cell: Vector2i
 # Kept from building the terrain for the grass: raw heights, biome names, the road mask and the paved sites.
 var _raw_heights := PackedFloat32Array()
+var _base_curvature_colors := PackedColorArray()
+var _horizon_cached := PackedFloat32Array()
+var _horizon_state := -1
 var _biome_names := PackedStringArray()
 var _road_data := PackedByteArray()
 var _patches := PackedVector4Array()
@@ -261,6 +274,19 @@ static var grass_fade_end := GrassField.FADE_END
 
 ## Sampler quality follows the existing graphics preset without changing any
 ## world or texture data. New chunks use the cached shader of the chosen tier.
+## Expensive halo sampling is restricted to High/Ultra. Switches update
+## existing terrain vertices; no shader textures or new draw passes.
+static func configure_terrain_horizon(quality: int) -> void:
+	terrain_horizon_enabled = clampi(quality, 0, 3) >= 2
+
+
+static func apply_terrain_horizon(node: Node) -> void:
+	if node is ChunkedTerrain3D and node.is_in_group(TERRAIN_LOD_GROUP):
+		var owner: Node = node.get_parent()
+		if owner != null and owner.has_method("_refresh_terrain_horizon"):
+			owner.call("_refresh_terrain_horizon")
+
+
 static func configure_terrain_geomorph(quality: int) -> void:
 	terrain_geomorph_enabled = clampi(quality, 0, 3) >= 2
 
@@ -688,6 +714,37 @@ func _build_dungeon(origin: Vector2) -> void:
 			DungeonOcclusion.add_wall(wall_piece)
 
 
+## Cache native horizon AO on demand. All terrain LODs share the existing
+## vertex color stream (R cavity, G ridges, B sky visibility); lighting
+## quality switches never change collision or authoritative world state.
+func _refresh_terrain_horizon() -> void:
+	if _terrain == null:
+		return
+	var desired: int = 1 if terrain_horizon_enabled else 0
+	if _horizon_state == desired:
+		return
+	var origin: Vector2 = WorldGen.cell_origin(cell)
+	var spacing: float = Defs.CHUNK_SIZE / float(SAMPLES - 1)
+	var height_sampler := Callable(_world, "height_at")
+	if _base_curvature_colors.is_empty():
+		_base_curvature_colors = TerrainCurvature.build(
+			_raw_heights, origin, SAMPLES, spacing, height_sampler)
+	var colors: PackedColorArray = _base_curvature_colors
+	if terrain_horizon_enabled:
+		if _horizon_cached.is_empty():
+			_horizon_cached = TerrainHorizonAO.build(
+				_raw_heights, origin, SAMPLES, spacing, height_sampler,
+				HEIGHT_MIN, HEIGHT_MIN + HEIGHT_RANGE)
+		if _horizon_cached.size() == colors.size():
+			colors = _base_curvature_colors.duplicate()
+			for i in colors.size():
+				var pixel: Color = colors[i]
+				pixel.b = _horizon_cached[i]
+				colors[i] = pixel
+	_terrain.set_color_data(colors)
+	_horizon_state = desired
+
+
 func _build_terrain(origin: Vector2) -> void:
 	var heights := PackedFloat32Array()
 	heights.resize(SAMPLES * SAMPLES)
@@ -725,8 +782,7 @@ func _build_terrain(origin: Vector2) -> void:
 	# vertical lighting seams without an extra shader pass or texture.
 	_terrain.set_normal_data(TerrainSeamNormals.build(_raw_heights, origin,
 		SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "height_at")))
-	_terrain.set_color_data(TerrainCurvature.build(
-		_raw_heights, origin, SAMPLES, step, Callable(_world, "height_at")))
+	_refresh_terrain_horizon()
 	add_child(_terrain)
 	_terrain.add_to_group(TERRAIN_LOD_GROUP)
 	if _textured_material != null:
