@@ -50,6 +50,7 @@ func run(t) -> void:
 	t.check(server.cmd_party_accept(202).get("ok", false),
 		"recipient consents to the party")
 	medic.inventory.add("bandage", 4)
+	var initial_bandages: int = medic.inventory.count("bandage")
 	ally.survival.hurt(60.0)
 	var initial_xp: int = int(medic.skills.xp["medic"])
 	t.eq(server.cmd_party_aid(201, 203, "bandage").get("reason", ""), "not_in_party",
@@ -62,13 +63,15 @@ func run(t) -> void:
 		"novice bandage restores base health")
 	t.check(int(medic.skills.xp["medic"]) > initial_xp,
 		"server awards Medic XP for actual recovered HP")
-	t.eq(medic.inventory.count("bandage"), 3, "medicine spends exactly one item")
+	t.eq(medic.inventory.count("bandage"), initial_bandages - 1,
+		"medicine spends exactly one item even with starter supplies")
 	var trained_xp: int = int(medic.skills.xp["medic"])
 	t.eq(server.cmd_party_aid(201, 202, "bandage").get("reason", ""), "cooldown",
 		"replayed healing cannot bypass five-second timer")
 	t.eq(int(medic.skills.xp["medic"]), trained_xp,
 		"replayed request cannot farm XP")
-	t.eq(medic.inventory.count("bandage"), 3, "replay does not debit extra items")
+	t.eq(medic.inventory.count("bandage"), initial_bandages - 1,
+		"replay does not debit extra items")
 
 	t.current = "advanced medics improve normal and automatic party care"
 	medic.skills.add_xp("medic", float(Skills.xp_for_level(30)))
@@ -99,8 +102,11 @@ func run(t) -> void:
 		"providing water is not secretly treated as medical practice")
 	medic.party_aid_timer = 0.0
 	ally.survival.thirst = 100.0
+	var leftover_water: int = medic.inventory.count("water_bottle")
 	t.eq(server.cmd_party_aid(201, 202, "water_bottle").get("reason", ""),
-		"not_carried", "spent water cannot be replayed")
+		"no_effect", "fully hydrated allies cannot waste another bottle")
+	t.eq(medic.inventory.count("water_bottle"), leftover_water,
+		"rejected provision share keeps real starter supplies")
 	t.eq(int(medic.skills.xp["medic"]), xp_before_food, "failed share gives zero XP")
 
 	t.current = "triage heals actual allies with bounded shared medical mastery"
