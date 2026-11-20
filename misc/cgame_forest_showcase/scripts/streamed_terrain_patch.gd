@@ -72,8 +72,13 @@ func _build_patch() -> void:
     arrays[Mesh.ARRAY_TEX_UV] = uvs
     arrays[Mesh.ARRAY_INDEX] = indices
 
+    var lods: Dictionary = {
+        12.0: _build_lod_indices(2),
+        26.0: _build_lod_indices(4),
+        50.0: _build_lod_indices(8)
+    }
     var mesh := ArrayMesh.new()
-    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], lods)
     var material := StandardMaterial3D.new()
     material.vertex_color_use_as_albedo = true
     material.roughness = 0.97
@@ -102,3 +107,45 @@ func _build_patch() -> void:
     terrain_collision.position = Vector3(CELL_SIZE * 0.5, 0.0, CELL_SIZE * 0.5)
     body.add_child(terrain_collision)
     add_child(body)
+
+
+func _build_lod_indices(step: int) -> PackedInt32Array:
+    # Lower detail is expressed as alternative index buffers over the exact
+    # same vertex positions, UVs and analytic normals as the highest LOD.
+    # All four outer edges ALWAYS keep every 1m sample, even at low detail.
+    # This prevents T-junction cracks between neighboring terrain tiles that
+    # happen to use different automatic LODs.
+    var result := PackedInt32Array()
+    if step < 2 or step % 2 != 0 or SEGMENTS % step != 0:
+        return result
+
+    for z in range(0, SEGMENTS, step):
+        for x in range(0, SEGMENTS, step):
+            var perimeter := PackedInt32Array()
+
+            var top_steps: int = step if z == 0 else 1
+            for i in range(top_steps):
+                var offset: int = i if z == 0 else 0
+                perimeter.push_back(z * VERTICES_PER_SIDE + x + offset)
+
+            var right_steps: int = step if x + step == SEGMENTS else 1
+            for i in range(right_steps):
+                var offset: int = i if x + step == SEGMENTS else 0
+                perimeter.push_back((z + offset) * VERTICES_PER_SIDE + x + step)
+
+            var bottom_steps: int = step if z + step == SEGMENTS else 1
+            for i in range(bottom_steps):
+                var offset: int = i if z + step == SEGMENTS else 0
+                perimeter.push_back((z + step) * VERTICES_PER_SIDE + x + step - offset)
+
+            var left_steps: int = step if x == 0 else 1
+            for i in range(left_steps):
+                var offset: int = i if x == 0 else 0
+                perimeter.push_back((z + step - offset) * VERTICES_PER_SIDE + x)
+
+            var center: int = (z + step / 2) * VERTICES_PER_SIDE + x + step / 2
+            for i in range(perimeter.size()):
+                result.push_back(center)
+                result.push_back(perimeter[(i + 1) % perimeter.size()])
+                result.push_back(perimeter[i])
+    return result
