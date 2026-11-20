@@ -5,6 +5,8 @@ extends Node3D
 # Loaded detailed cells always hide the corresponding distant proxy.
 const CELL_SIZE := 128.0
 const WORLD_HALF_EXTENT := 6
+const HUB_CELL := Vector2i(0, 0)
+const ARENA_CELL := Vector2i(4, 2)
 const DETAIL_SCENE := "res://scenes/cell_detail.tscn"
 const PROXY_SCENE := "res://scenes/cell_proxy.tscn"
 const FLY_SCRIPT := preload("res://scripts/free_fly.gd")
@@ -44,6 +46,11 @@ func _ready() -> void:
     baked_validation_ms = Time.get_ticks_msec() - validation_start
     detail = _make_streamer("DetailedCells", 1, 2, DETAIL_SCENE, 2)
     _apply_quality_profile()
+    if not detail.has_method("pin_cell") or not detail.has_method("get_pinned_cell_count"):
+        push_error("Cgame pinned gameplay cells API required (pin_cell/get_pinned_cell_count).")
+        return
+    # The quest hub remains active while the player explores other regions.
+    detail.call("pin_cell", HUB_CELL)
     if not distant.has_method("get_cell_instance") or not detail.has_method("get_cell_instance"):
         push_error("Cgame get_cell_instance API required for proxy handoff.")
         return
@@ -137,6 +144,14 @@ func _set_prefetch(enabled: bool) -> void:
         var paths: Array = [detail.get_path_to(prefetch_source)] if enabled else []
         detail.call("set_additional_observer_paths", paths)
 
+func _toggle_gameplay_pin(cell: Vector2i) -> void:
+    if detail == null:
+        return
+    if bool(detail.call("is_cell_pinned", cell)):
+        detail.call("unpin_cell", cell)
+    else:
+        detail.call("pin_cell", cell)
+
 func _create_hud() -> void:
     var layer := CanvasLayer.new()
     add_child(layer)
@@ -158,6 +173,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
     match key.keycode:
         KEY_P:
             _set_prefetch(not prefetch_enabled)
+        KEY_H:
+            _toggle_gameplay_pin(HUB_CELL)
+        KEY_G:
+            _toggle_gameplay_pin(ARENA_CELL)
         KEY_L:
             proxies_enabled = not proxies_enabled
             if distant != null:
@@ -194,12 +213,22 @@ func _update_hud() -> void:
         return
     var detail_count: int = int(detail.call("get_loaded_cell_count")) if detail != null else 0
     var distant_count: int = int(distant.call("get_loaded_cell_count")) if distant != null else 0
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    var pin_count: int = int(detail.call("get_pinned_cell_count")) if detail != null else 0
+    var hub_pinned := detail != null and bool(detail.call("is_cell_pinned", HUB_CELL))
+    var arena_pinned := detail != null and bool(detail.call("is_cell_pinned", ARENA_CELL))
+    var hub_loaded := detail != null and bool(detail.call("is_cell_loaded", HUB_CELL))
+    var arena_loaded := detail != null and bool(detail.call("is_cell_loaded", ARENA_CELL))
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
         baked_proxy_cell_count,
         baked_validation_ms,
+        pin_count,
+        "ON" if hub_pinned else "OFF",
+        "loaded" if hub_loaded else "away",
+        "ON" if arena_pinned else "OFF",
+        "loaded" if arena_loaded else "away",
         str(quality_controller.get_profile()["name"]),
         "ON" if quality_controller.automatic else "OFF",
         "ON" if crossfade_controller != null and crossfade_controller.enabled else "OFF",

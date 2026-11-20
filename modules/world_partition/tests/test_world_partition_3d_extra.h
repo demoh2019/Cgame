@@ -45,6 +45,61 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Inspector pinned cell array filters duplicates and invalid values") {
+	WorldPartition3D world;
+	Array cells;
+	cells.push_back(Vector2i(3, -1));
+	cells.push_back(Vector2i(3, -1));
+	cells.push_back(String("not a cell"));
+	cells.push_back(Vector2i(0, 0));
+	world.set_pinned_cells(cells);
+	CHECK(world.get_pinned_cell_count() == 2);
+	const Array normalized = world.get_pinned_cells();
+	REQUIRE(normalized.size() == 2);
+	CHECK(normalized[0] == Vector2i(3, -1));
+	CHECK(normalized[1] == Vector2i(0, 0));
+	Array oversized;
+	for (int i = 0; i < 129; i++) {
+		oversized.push_back(Vector2i(i, 0));
+	}
+	ERR_PRINT_OFF;
+	world.set_pinned_cells(oversized);
+	ERR_PRINT_ON;
+	CHECK(world.get_pinned_cell_count() == 2);
+	world.set_pinned_cells(Array());
+	CHECK(world.get_pinned_cell_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Pinned cells are unique, ordered and capped") {
+	WorldPartition3D world;
+	CHECK(world.get_pinned_cell_count() == 0);
+	world.pin_cell(Vector2i(5, -2));
+	world.pin_cell(Vector2i(5, -2));
+	world.pin_cell(Vector2i(-1, 0));
+	CHECK(world.get_pinned_cell_count() == 2);
+	const Array pinned = world.get_pinned_cells();
+	REQUIRE(pinned.size() == 2);
+	CHECK(pinned[0] == Vector2i(5, -2));
+	CHECK(pinned[1] == Vector2i(-1, 0));
+	Array copy = pinned;
+	copy.clear();
+	CHECK(world.get_pinned_cell_count() == 2);
+	CHECK(world.is_cell_pinned(Vector2i(5, -2)));
+	world.unpin_cell(Vector2i(5, -2));
+	world.unpin_cell(Vector2i(5, -2));
+	CHECK_FALSE(world.is_cell_pinned(Vector2i(5, -2)));
+	world.clear_pinned_cells();
+	CHECK(world.get_pinned_cell_count() == 0);
+	for (int i = 0; i < 128; i++) {
+		world.pin_cell(Vector2i(i, 0));
+	}
+	ERR_PRINT_OFF;
+	world.pin_cell(Vector2i(999, 0));
+	ERR_PRINT_ON;
+	CHECK(world.get_pinned_cell_count() == 128);
+	CHECK_FALSE(world.is_cell_pinned(Vector2i(999, 0)));
+}
+
 TEST_CASE("[WorldPartition3D] Unload budget defaults and validates") {
 	WorldPartition3D world;
 	CHECK(world.get_max_unloads_per_frame() == 32);
@@ -568,6 +623,92 @@ TEST_CASE("[SceneTree][WorldPartition3D] Failed resources leave no user load tok
 		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
 	}
 	CHECK(ResourceLoader::load_threaded_get_status(missing_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Pin prevents unloading after observer moves away") {
+	const String path = make_cell_scene("persistent_hub");
+	{
+		WorldFixture fixture;
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->pin_cell(Vector2i(0, 0));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		fixture.observer->set_position(Vector3(256, 0, 0));
+		fixture.world->update_streaming();
+		CHECK(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		fixture.world->unpin_cell(Vector2i(0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] A pin can load a cell with no valid observer") {
+	const String path = make_cell_scene("pin_without_observer");
+	{
+		WorldFixture fixture;
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->set_cell_scene(Vector2i(-3, 4), path);
+		fixture.world->pin_cell(Vector2i(-3, 4));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(-3, 4)));
+		CHECK(fixture.world->is_cell_loaded(Vector2i(-3, 4)));
+		fixture.world->set_observer_path(fixture.world->get_path_to(fixture.observer));
+		fixture.world->clear_pinned_cells();
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(-3, 4)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Releasing the only pin unloads with no observer") {
+	const String path = make_cell_scene("last_pin_cleanup");
+	{
+		WorldFixture fixture;
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->set_cell_scene(Vector2i(6, -4), path);
+		fixture.world->pin_cell(Vector2i(6, -4));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(6, -4)));
+		fixture.world->unpin_cell(Vector2i(6, -4));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(6, -4)));
+		CHECK(fixture.world->get_pinned_cell_count() == 0);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Pinned request is prioritized before primary observer") {
+	const String near_path = make_cell_scene("pin_priority_near");
+	const String pin_path = make_cell_scene("pin_priority_far");
+	{
+		WorldFixture fixture;
+		fixture.world->set_max_new_requests_per_frame(1);
+		fixture.world->set_cell_scene(Vector2i(0, 0), near_path);
+		fixture.world->set_cell_scene(Vector2i(5, 0), pin_path);
+		fixture.world->pin_cell(Vector2i(5, 0));
+		fixture.world->update_streaming();
+		// The single-frame request budget is assigned to the pinned cell.
+		CHECK(ResourceLoader::load_threaded_get_status(pin_path) != ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		CHECK(ResourceLoader::load_threaded_get_status(near_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(5, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(near_path) == OK);
+	CHECK(DirAccess::remove_absolute(pin_path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Pins keep their registration while streaming is disabled") {
+	const String path = make_cell_scene("pause_pin");
+	{
+		WorldFixture fixture;
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->pin_cell(Vector2i(0, 0));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		fixture.world->set_streaming_enabled(false);
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK(fixture.world->is_cell_pinned(Vector2i(0, 0)));
+		fixture.world->set_streaming_enabled(true);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
 TEST_CASE("[SceneTree][WorldPartition3D] Unload budget spreads teleport cleanup over frames") {

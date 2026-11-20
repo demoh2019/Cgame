@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <class name="WorldPartition3D" inherits="Node3D" api_type="core" keywords="open world,streaming,partition,cell" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
 	<brief_description>
-		Streams 3D scene cells around a moving observer.
+		Streams 3D scene cells around observers and pinned gameplay locations.
 	</brief_description>
 	<description>
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around a primary observer node and optional additional observers. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
-		Additional observers in [member additional_observer_paths] are useful for split-screen cameras, co-op players, cinematic cameras and manual prefetch nodes. Cells are kept when in range of any valid observer, while all observers share the same per-frame request and instance budgets. The primary observer takes priority, followed by additional observers in array order.
+		Additional observers in [member additional_observer_paths] are useful for split-screen cameras, co-op players, cinematic cameras and manual prefetch nodes. Cells are kept when in range of any valid observer, while all observers share the same per-frame request and instance budgets. Pinned cells from [method pin_cell] take priority, followed by the nearest grid rings of all observers. Within the same ring the primary observer takes priority, followed by additional observers in array order.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
@@ -33,6 +33,12 @@
 			<return type="void" />
 			<description>
 				Removes all registered cells and unloads instantiated cells.
+			</description>
+		</method>
+		<method name="clear_pinned_cells">
+			<return type="void" />
+			<description>
+				Releases all runtime cell pins. Cells outside every observer's unload radius become eligible for normal budgeted unloading at the next update.
 			</description>
 		</method>
 		<method name="get_additional_observer_paths" qualifiers="const">
@@ -81,6 +87,18 @@
 				Returns the cell coordinates of currently instantiated scenes.
 			</description>
 		</method>
+		<method name="get_pinned_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of runtime pins, including pins not mapped to any registered scene.
+			</description>
+		</method>
+		<method name="get_pinned_cells" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns a new array of the pinned [Vector2i] coordinates in insertion order. No more than 128 cells may be pinned at once.
+			</description>
+		</method>
 		<method name="is_cell_loaded" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -88,11 +106,25 @@
 				Returns [code]true[/code] when the cell has a living instantiated scene.
 			</description>
 		</method>
+		<method name="is_cell_pinned" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] while a cell is pinned, even if it has no registered scene.
+			</description>
+		</method>
 		<method name="local_position_to_cell" qualifiers="const">
 			<return type="Vector2i" />
 			<param index="0" name="local_position" type="Vector3" />
 			<description>
 				Converts a local-space position to its grid coordinate using floor division. Negative positions belong to negative cells.
+			</description>
+		</method>
+		<method name="pin_cell">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Keeps a registered scene cell loaded independent of observer distance, including when no observer exists. Pins are prioritized before spatial requests, while the same threaded request and instantiation budgets apply. An unregistered coordinate is remembered but cannot load a scene until it is registered. Pinned cells do not bypass [member streaming_enabled]. Up to 128 distinct cells may be pinned.
 			</description>
 		</method>
 		<method name="remove_cell_scene">
@@ -115,6 +147,20 @@
 			<param index="1" name="scene_path" type="String" />
 			<description>
 				Registers a resource path for a cell. An empty path removes the mapping. Replacing a path unloads the previous cell.
+			</description>
+		</method>
+		<method name="set_pinned_cells">
+			<return type="void" />
+			<param index="0" name="cells" type="Array" />
+			<description>
+				Replaces the pinned cell coordinates, preserving the first occurrence of each [Vector2i]. Unsupported array entries are skipped. Arrays with more than 128 entries are rejected without changing existing pins. The normalized result is returned by [method get_pinned_cells].
+			</description>
+		</method>
+		<method name="unpin_cell">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Stops keeping this cell loaded independent of observer distance. Cells still within any observer's unload radius remain active; other cells are eligible for regular unload.
 			</description>
 		</method>
 		<method name="update_streaming">
@@ -143,14 +189,17 @@
 		<member name="max_instances_per_frame" type="int" setter="set_max_instances_per_frame" getter="get_max_instances_per_frame" default="2">
 			Maximum number of loaded cell scenes instantiated per frame.
 		</member>
-		<member name="max_unloads_per_frame" type="int" setter="set_max_unloads_per_frame" getter="get_max_unloads_per_frame" default="32">
-			Maximum number of out-of-range cell scenes to queue for deletion in one streaming update, between 1 and 128. Remaining cells are considered on subsequent frames. Explicit clear/remove operations and disabling streaming unload immediately without this limit.
-		</member>
 		<member name="max_new_requests_per_frame" type="int" setter="set_max_new_requests_per_frame" getter="get_max_new_requests_per_frame" default="2">
 			Maximum number of new resource-load requests per frame.
 		</member>
+		<member name="max_unloads_per_frame" type="int" setter="set_max_unloads_per_frame" getter="get_max_unloads_per_frame" default="32">
+			Maximum number of out-of-range cell scenes to queue for deletion in one streaming update, between 1 and 128. Remaining cells are considered on subsequent frames. Explicit clear/remove operations and disabling streaming unload immediately without this limit.
+		</member>
 		<member name="observer_path" type="NodePath" setter="set_observer_path" getter="get_observer_path" default="NodePath(&quot;&quot;)">
 			Path relative to this node pointing to a [Node3D] observer, such as a player or camera.
+		</member>
+		<member name="pinned_cells" type="Array" setter="set_pinned_cells" getter="get_pinned_cells" default="[]">
+			List of up to 128 pinned [Vector2i] cell coordinates, editable in the inspector and stored in the scene. Invalid non-[Vector2i] values and duplicates are omitted. Pinned registered scenes are kept loaded independently of observer distance, using the normal async request and scene instantiation budgets. Use [method pin_cell], [method unpin_cell] and [method clear_pinned_cells] to modify them at runtime.
 		</member>
 		<member name="streaming_enabled" type="bool" setter="set_streaming_enabled" getter="is_streaming_enabled" default="true">
 			Enables or disables streaming. Disabling unloads tracked instances and preserves cell registrations.
