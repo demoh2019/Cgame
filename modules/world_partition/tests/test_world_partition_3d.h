@@ -770,4 +770,71 @@ TEST_CASE("[WorldPartition3D] Physics collision tiers validate ranges and unknow
 	memdelete(world);
 }
 
+
+TEST_CASE("[WorldPartition3D] Navigation scheduler validates caps, ownership and priority") {
+	WorldPartition3D *world = memnew(WorldPartition3D);
+	Node3D *first = memnew(Node3D);
+	Node3D *replacement = memnew(Node3D);
+	CHECK(world->get_max_navigation_updates_per_physics_frame() == 2);
+	CHECK(world->get_navigation_agent_count() == 0);
+	CHECK(world->get_navigation_updates_used_this_frame() == 0);
+	CHECK_FALSE(world->has_navigation_agent("one"));
+	CHECK(world->get_navigation_agent_priority("one") == -1);
+	CHECK_FALSE(world->try_acquire_navigation_update("one")); // Not inside a tree.
+	world->set_max_navigation_updates_per_physics_frame(1);
+	CHECK(world->get_max_navigation_updates_per_physics_frame() == 1);
+	world->set_max_navigation_updates_per_physics_frame(64);
+	ERR_PRINT_OFF;
+	world->set_max_navigation_updates_per_physics_frame(0);
+	world->set_max_navigation_updates_per_physics_frame(65);
+	ERR_PRINT_ON;
+	CHECK(world->get_max_navigation_updates_per_physics_frame() == 64);
+
+	CHECK(world->register_navigation_agent("one", first));
+	CHECK(world->has_navigation_agent("one"));
+	CHECK(world->get_navigation_agent_priority("one") == 1);
+	CHECK_FALSE(world->register_navigation_agent("alias", first)); // A live node cannot spend two grants.
+	CHECK_FALSE(world->unregister_navigation_agent_if_owner("one", replacement));
+	CHECK(world->has_navigation_agent("one"));
+	CHECK(world->set_navigation_agent_priority("one", 3));
+	CHECK(world->get_navigation_agent_priority("one") == 3);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(world->register_navigation_agent("", first));
+	CHECK_FALSE(world->register_navigation_agent("invalid", nullptr));
+	CHECK_FALSE(world->register_navigation_agent("invalid", replacement, -1));
+	CHECK_FALSE(world->register_navigation_agent("invalid", replacement, 4));
+	CHECK_FALSE(world->set_navigation_agent_priority("one", -1));
+	CHECK_FALSE(world->set_navigation_agent_priority("one", 4));
+	ERR_PRINT_ON;
+	CHECK(world->get_navigation_agent_priority("one") == 3);
+	CHECK(world->register_navigation_agent("one", replacement, 2)); // Upsert a replacement owner.
+	CHECK_FALSE(world->unregister_navigation_agent_if_owner("one", first));
+	CHECK(world->unregister_navigation_agent_if_owner("one", replacement));
+	CHECK_FALSE(world->has_navigation_agent("one"));
+	CHECK(world->get_navigation_agent_priority("one") == -1);
+
+	Vector<Node3D *> nodes;
+	for (int i = 0; i < 128; i++) {
+		Node3D *agent = memnew(Node3D);
+		nodes.push_back(agent);
+		CHECK(world->register_navigation_agent("agent_" + itos(i), agent));
+	}
+	CHECK(world->get_navigation_agent_count() == 128);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(world->register_navigation_agent("overflow", first));
+	ERR_PRINT_ON;
+	CHECK(world->set_navigation_agent_priority("agent_0", 3));
+	CHECK(world->register_navigation_agent("agent_0", nodes[0], 2));
+	CHECK(world->get_navigation_agent_count() == 128);
+	world->unregister_navigation_agent("agent_0");
+	CHECK(world->get_navigation_agent_count() == 127);
+	world->unregister_navigation_agent("not_registered"); // Safe and idempotent.
+	for (Node3D *agent : nodes) {
+		memdelete(agent);
+	}
+	memdelete(first);
+	memdelete(replacement);
+	memdelete(world);
+}
+
 } // namespace TestWorldPartition3D
