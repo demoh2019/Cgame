@@ -74,7 +74,8 @@ func _ready() -> void:
 	environment.sky = sky
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-	# Filmic look: ACES tone mapping, a little glow and slightly lifted colors.
+	# Native renderer filmic default. High/Ultra will select the engine's AgX
+	# curve through GraphicsQuality, with no extra fullscreen postprocess.
 	environment.tonemap_mode = Environment.TONE_MAPPER_ACES
 	environment.tonemap_white = 6.0
 	environment.tonemap_exposure = 0.82

@@ -7,6 +7,7 @@ const SETTINGS_PATH := "user://albion_after_graphics.cfg"
 const NAMES := ["Performance", "Balanced", "High", "Ultra"]
 const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
+const GraphicsTonemapping = preload("res://scripts/client/graphics_tonemapping.gd")
 const GraphicsShadowAtlas = preload("res://scripts/client/graphics_shadow_atlas.gd")
 const GraphicsReflections = preload("res://scripts/client/graphics_reflections.gd")
 const GraphicsIndirectLighting = preload("res://scripts/client/graphics_indirect_lighting.gd")
@@ -205,6 +206,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Keep the cinematic shadow/fog budget tied to the active renderer,
 		# not merely to the requested quality preset.
 		GraphicsLighting.apply(sun, env, _level, method)
+		# Native AgX preserves sunrise/cloud highlight hues on supported
+		# Forward+ High/Ultra. Low-end remains on the established ACES curve.
+		GraphicsTonemapping.apply(env, _level, str(method))
 		# Hybrid sky + screen-space reflections on High/Ultra Forward+ only.
 		# Runtime changes (including Auto) also turn SSR off when required.
 		GraphicsReflections.apply(env, _level, method)

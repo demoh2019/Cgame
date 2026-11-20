@@ -1,6 +1,6 @@
 extends RefCounted
 ## Scene-referred cinematic grade, inspired by filmic Unreal/HDRP color pipelines.
-## Keep Godot's native ACES tonemapper: changing these Environment uniforms
+## Reuse the engine-native ACES/AgX tonemapper: changing Environment uniforms
 ## adds no fullscreen pass, LUT upload or material/mesh rebuild.
 ##
 ## Deliberately subtle: normal midday albedo remains recognisable, evening has

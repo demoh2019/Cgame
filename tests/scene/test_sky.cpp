@@ -36,6 +36,8 @@ TEST_FORCE_LINK(test_sky)
 
 #include "core/config/project_settings.h"
 #include "scene/resources/sky.h"
+#include "scene/resources/environment.h"
+#include "servers/rendering/rendering_server.h"
 
 namespace TestSky {
 
@@ -232,6 +234,40 @@ TEST_CASE("[SceneTree][Sky] RID generation") {
 	test_sky.instantiate();
 	// Check validity.
 	CHECK(!test_sky->get_rid().is_valid());
+}
+
+
+TEST_CASE("[SceneTree][Environment] Filmic AgX and ACES ignore invalid exposure inputs") {
+	// Environment needs a real RenderingServer RID, not just a math singleton.
+	if (RenderingServer::get_singleton() == nullptr) {
+		return;
+	}
+	Ref<Environment> scene_environment;
+	scene_environment.instantiate();
+
+	scene_environment->set_tonemapper(Environment::TONE_MAPPER_AGX);
+	CHECK(scene_environment->get_tonemapper() == Environment::TONE_MAPPER_AGX);
+	scene_environment->set_tonemap_exposure(0.91f);
+	CHECK(scene_environment->get_tonemap_exposure() == 0.91f);
+	scene_environment->set_tonemap_exposure(-2.0f);
+	CHECK(scene_environment->get_tonemap_exposure() == 0.91f);
+	scene_environment->set_tonemap_exposure(0.91f);
+	CHECK(scene_environment->get_tonemap_exposure() == 0.91f);
+
+	scene_environment->set_tonemap_agx_white(12.5f);
+	scene_environment->set_tonemap_agx_contrast(1.2f);
+	CHECK(scene_environment->get_tonemap_agx_white() == 12.5f);
+	CHECK(scene_environment->get_tonemap_agx_contrast() == 1.2f);
+	scene_environment->set_tonemap_agx_white(-5.0f);
+	scene_environment->set_tonemap_agx_contrast(-2.0f);
+	CHECK(scene_environment->get_tonemap_agx_white() == 12.5f);
+	CHECK(scene_environment->get_tonemap_agx_contrast() == 1.2f);
+
+	scene_environment->set_tonemapper(Environment::TONE_MAPPER_ACES);
+	scene_environment->set_tonemap_white(6.0f);
+	scene_environment->set_tonemap_white(-1.0f);
+	CHECK(scene_environment->get_tonemap_white() == 6.0f);
+	CHECK(scene_environment->get_tonemapper() == Environment::TONE_MAPPER_ACES);
 }
 
 } // namespace TestSky
