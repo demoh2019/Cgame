@@ -25,6 +25,7 @@ const SUITES := [
 	"res://tests/test_ragdoll.gd",
 	"res://tests/test_terrain_shader_lod.gd",
 	"res://tests/test_terrain_screen_lod.gd",
+	"res://tests/test_terrain_geometric_error_lod.gd",
 	"res://tests/test_terrain_geomorph.gd",
 	"res://tests/test_terrain_seam_normals.gd",
 	"res://tests/test_terrain_noise_lod.gd",
