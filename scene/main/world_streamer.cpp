@@ -312,8 +312,6 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 	}
 	for (const Vector3i &cell : ready_cells) {
 		const String path = loading[cell];
-		const real_t distance = have_focus ?
-				WorldStreamingGrid::distance_to_cell(position, cell, cell_size, _grid_axes()) : real_t(0.0);
 		const bool still_wanted = have_focus && _cell_requested(position, cell) && !loaded.has(cell);
 		if (!still_wanted) {
 			// The focus moved on while loading: release the result and drop it.
@@ -362,9 +360,9 @@ void WorldStreamer::_update_streaming() {
 	LocalVector<Vector3i> wanted;
 	bool truncated = false;
 	WorldStreamingGrid::cells_in_radius(position, load_radius, cell_size, _grid_axes(), wanted, WorldStreamingGrid::MAX_CELLS, &truncated);
-	// World Partition-style streaming source prediction: prioritize only
-	// cells that are already inside the real load radius. Never enlarge the
-	// resident set or unload cells based on estimated movement.
+	// Camera/motion hints reprioritize only the main focus cells; the
+	// optional explicit auxiliary source may add a separately bounded set.
+	// Predicted velocity never enlarges resident world memory.
 
 	WorldStreamingGrid::prioritize_cells_for_motion_and_view(wanted, position,
 			velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
