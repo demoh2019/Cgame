@@ -27,6 +27,12 @@ static func configure(quality: int) -> void:
 	_quality = clampi(quality, 0, PRESETS.size() - 1)
 
 
+## OpenGL Compatibility has a smaller simultaneous light budget than Forward+.
+static func effective_max(quality: int, backend: String) -> int:
+	var requested: int = int(settings(quality)["max_lights"])
+	return mini(requested, 8) if backend != "forward_plus" else requested
+
+
 ## Pure selector; "node" is intentionally opaque so unit tests need no GPU or scene.
 ## Equal-distance ties are stable within a session to avoid flickering light selection.
 static func nearest(candidates: Array, maximum: int, radius: float) -> Array:
@@ -73,7 +79,7 @@ func _process(delta: float) -> void:
 	var candidates: Array = []
 	var eye: Vector3 = camera.global_position
 	for node in get_tree().get_nodes_in_group(GROUP):
-		if not node is OmniLight3D:
+		if not (node is OmniLight3D):
 			continue
 		var light := node as OmniLight3D
 		if not is_instance_valid(light):
@@ -81,11 +87,12 @@ func _process(delta: float) -> void:
 		var dist_sq: float = eye.distance_squared_to(light.global_position)
 		if dist_sq < radius * radius:
 			candidates.append({"node": light, "distance_sq": dist_sq, "id": light.get_instance_id()})
-	var selected: Array = nearest(candidates, int(profile["max_lights"]), radius)
+	var renderer: String = str(RenderingServer.get_current_rendering_method())
+	var selected: Array = nearest(candidates, effective_max(_quality, renderer), radius)
 	var keep: Dictionary = {}
 	var seconds: float = float(Time.get_ticks_msec()) * 0.001
 	var updated: Array[OmniLight3D] = []
-	var allow_shadows: bool = RenderingServer.get_current_rendering_method() == "forward_plus"
+	var allow_shadows: bool = renderer == "forward_plus"
 	for entry in selected:
 		var light: OmniLight3D = entry["node"]
 		keep[light.get_instance_id()] = true
