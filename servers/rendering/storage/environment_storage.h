@@ -184,6 +184,7 @@ private:
 		float lens_chromatic_aberration = 0.0f;
 		float lens_film_grain = 0.0f;
 		float lens_flare = 0.0f;
+		float motion_blur = 0.0f;
 	};
 
 	mutable RID_Owner<Environment, true> environment_owner;
@@ -330,10 +331,11 @@ public:
 	RSE::EnvironmentSDFGIYScale environment_get_sdfgi_y_scale(RID p_env) const;
 
 	// Lens effects
-	void environment_set_lens_effects(RID p_env, float p_chromatic_aberration, float p_film_grain, float p_lens_flare);
+	void environment_set_lens_effects(RID p_env, float p_chromatic_aberration, float p_film_grain, float p_lens_flare, float p_motion_blur);
 	float environment_get_lens_chromatic_aberration(RID p_env) const;
 	float environment_get_lens_film_grain(RID p_env) const;
 	float environment_get_lens_flare(RID p_env) const;
+	float environment_get_motion_blur(RID p_env) const;
 
 	// Adjustment
 	void environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction);

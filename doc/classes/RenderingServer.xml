@@ -1414,8 +1414,9 @@
 			<param index="1" name="chromatic_aberration" type="float" />
 			<param index="2" name="film_grain" type="float" />
 			<param index="3" name="lens_flare" type="float" />
+			<param index="4" name="motion_blur" type="float" />
 			<description>
-				Sets the camera lens effects. See [member Environment.lens_chromatic_aberration], [member Environment.lens_film_grain] and [member Environment.lens_flare] for more details.
+				Sets the camera lens effects. See [member Environment.lens_chromatic_aberration], [member Environment.lens_film_grain], [member Environment.lens_flare] and [member Environment.motion_blur_amount] for more details.
 			</description>
 		</method>
 		<method name="environment_set_sdfgi">

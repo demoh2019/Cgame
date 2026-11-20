@@ -32,6 +32,7 @@
 
 #include "servers/rendering/renderer_rd/renderer_compositor_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
+#include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 
 using namespace RendererRD;
@@ -123,10 +124,11 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 
 	memset(&tonemap.push_constant, 0, sizeof(TonemapPushConstant));
 
-	if (p_settings.lens_chromatic_aberration > 0.0001f || p_settings.lens_film_grain > 0.0001f || (p_settings.use_glow && p_settings.lens_flare > 0.0001f)) {
+	const bool use_motion_blur = p_settings.motion_blur > 0.0001f && p_settings.velocity_texture.is_valid() && p_settings.view_count == 1;
+	if (p_settings.lens_chromatic_aberration > 0.0001f || p_settings.lens_film_grain > 0.0001f || (p_settings.use_glow && p_settings.lens_flare > 0.0001f) || use_motion_blur) {
 		tonemap.push_constant.flags |= TONEMAP_FLAG_USE_LENS_EFFECTS;
-		tonemap.push_constant.lens_chromatic_aberration = p_settings.lens_chromatic_aberration;
-		tonemap.push_constant.lens_film_grain = p_settings.lens_film_grain;
+		tonemap.push_constant.lens_aberration_grain = uint32_t(Math::make_half_float(p_settings.lens_chromatic_aberration)) | (uint32_t(Math::make_half_float(p_settings.lens_film_grain)) << 16);
+		tonemap.push_constant.motion_blur = use_motion_blur ? p_settings.motion_blur : 0.0f;
 		tonemap.push_constant.lens_flare = p_settings.use_glow ? p_settings.lens_flare : 0.0f;
 		// Wrap to keep float precision in the shader's hash on long sessions.
 		tonemap.push_constant.lens_time = Math::fmod(p_settings.lens_time, 1000.0f);
@@ -196,6 +198,12 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	u_exposure_texture.append_id(default_sampler);
 	u_exposure_texture.append_id(p_settings.exposure_texture);
 
+	RD::Uniform u_velocity_texture;
+	u_velocity_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+	u_velocity_texture.binding = 1;
+	u_velocity_texture.append_id(nearest_sampler);
+	u_velocity_texture.append_id(use_motion_blur ? p_settings.velocity_texture : TextureStorage::get_singleton()->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_BLACK));
+
 	RD::Uniform u_glow_texture;
 	u_glow_texture.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
 	u_glow_texture.binding = 0;
@@ -220,7 +228,7 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(p_dst_framebuffer);
 	RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, tonemap.pipelines[mode].get_render_pipeline(RD::INVALID_ID, RD::get_singleton()->framebuffer_get_format(p_dst_framebuffer), false, RD::get_singleton()->draw_list_get_current_pass()));
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 0, u_source_color), 0);
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 1, u_exposure_texture), 1);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 1, u_exposure_texture, u_velocity_texture), 1);
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 2, u_glow_texture, u_glow_map), 2);
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 3, u_color_correction_texture), 3);
 

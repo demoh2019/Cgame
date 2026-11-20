@@ -8,13 +8,16 @@ extends RefCounted
 static func settings(level: int, rendering_method: String) -> Dictionary:
 	var tier: int = clampi(level, 0, 3)
 	if rendering_method != "forward_plus" or tier < 2:
-		return {"chromatic_aberration": 0.0, "film_grain": 0.0, "lens_flare": 0.0}
+		return {"chromatic_aberration": 0.0, "film_grain": 0.0, "lens_flare": 0.0, "motion_blur": 0.0}
 	# Subtle on purpose: edge fringes and grain should be felt, not noticed.
 	return {
 		"chromatic_aberration": 0.35 if tier == 2 else 0.5,
 		"film_grain": 0.18 if tier == 2 else 0.24,
 		# UE-style image-based flare ghosts/halo from the bloom buffer (sun, lightning, fires).
 		"lens_flare": 0.45 if tier == 2 else 0.6,
+		# Per-pixel velocity blur (camera pans, running creatures, swinging weapons).
+		# A short "shutter" keeps the top-down diorama readable while turning fast.
+		"motion_blur": 0.3 if tier == 2 else 0.4,
 	}
 
 
@@ -26,3 +29,5 @@ static func apply(env: Environment, level: int, rendering_method: String) -> voi
 	env.set("lens_film_grain", float(profile["film_grain"]))
 	if "lens_flare" in env:
 		env.set("lens_flare", float(profile["lens_flare"]))
+	if "motion_blur_amount" in env:
+		env.set("motion_blur_amount", float(profile["motion_blur"]))

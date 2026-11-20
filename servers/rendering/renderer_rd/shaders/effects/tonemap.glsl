@@ -46,6 +46,7 @@ layout(location = 0) in vec2 uv_interp;
 
 layout(set = 0, binding = 0) uniform SAMPLER_FORMAT source_color;
 layout(set = 1, binding = 0) uniform sampler2D source_auto_exposure;
+layout(set = 1, binding = 1) uniform sampler2D source_velocity; // UV-space motion: previous minus current.
 layout(set = 2, binding = 0) uniform SAMPLER_FORMAT source_glow;
 layout(set = 2, binding = 1) uniform sampler2D glow_map; // TODO needs multiview support
 
@@ -86,8 +87,8 @@ layout(push_constant, std430) uniform Params {
 
 	vec4 tonemapper_params;
 
-	float lens_chromatic_aberration;
-	float lens_film_grain;
+	uint lens_aberration_grain; // x: chromatic aberration, y: film grain (packed halves).
+	float motion_blur;
 	float lens_time;
 	float lens_flare;
 }
@@ -885,13 +886,42 @@ void main() {
 #else
 	vec4 color = textureLod(source_color, uv_interp, 0.0f);
 #endif
+	vec2 lens_params = unpackHalf2x16(params.lens_aberration_grain);
+	bool motion_blurred = false;
+
+	// Per-pixel motion blur, as in Unreal Engine and Unity HDRP: the HDR scene color is
+	// gathered along the screen-space velocity of each pixel (camera and object motion).
+	// A per-pixel jitter hides sample stepping; long smears are clamped to stay readable.
+#ifndef USE_MULTIVIEW
+	if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && params.motion_blur > 0.0) {
+		vec2 velocity = textureLod(source_velocity, uv_interp, 0.0).xy * params.motion_blur;
+		float max_length = 48.0 * params.pixel_size.y;
+		float velocity_length = length(velocity);
+		if (velocity_length > max_length) {
+			velocity *= max_length / velocity_length;
+		}
+		if (dot(velocity / params.pixel_size, velocity / params.pixel_size) > 1.0) {
+			const int MOTION_BLUR_SAMPLES = 8;
+			float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5;
+			vec3 accum = color.rgb;
+			for (int i = 0; i < MOTION_BLUR_SAMPLES; i++) {
+				float t = (float(i) + 0.5 + jitter) / float(MOTION_BLUR_SAMPLES) - 0.5;
+				accum += textureLod(source_color, uv_interp + velocity * t, 0.0).rgb;
+			}
+			color.rgb = accum / float(MOTION_BLUR_SAMPLES + 1);
+			motion_blurred = true;
+		}
+	}
+#endif
+
 	// Lateral chromatic aberration (lens "fringing"), as in Unreal Engine and Unity HDRP:
 	// the red and blue channels are magnified differently towards the frame edges.
 	// Done on the HDR scene color before exposure so bright fringes stay physically energetic.
-	if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && params.lens_chromatic_aberration > 0.0) {
+	// Skipped on motion-blurred pixels: re-sampling R/B sharply would undo the blur.
+	if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && lens_params.x > 0.0 && !motion_blurred) {
 		vec2 from_center = uv_interp - 0.5;
 		// Quadratic falloff: perfectly sharp in the middle, strongest in the corners.
-		vec2 shift = from_center * dot(from_center, from_center) * params.lens_chromatic_aberration * 0.06;
+		vec2 shift = from_center * dot(from_center, from_center) * lens_params.x * 0.06;
 #ifdef USE_MULTIVIEW
 		color.r = textureLod(source_color, vec3(uv_interp - shift, ViewIndex), 0.0f).r;
 		color.b = textureLod(source_color, vec3(uv_interp + shift, ViewIndex), 0.0f).b;
@@ -998,13 +1028,13 @@ void main() {
 	// Film grain, as in Unreal Engine 5's filmic grain: animated, luminance-weighted noise
 	// that is strongest in mid-tones and fades in deep shadows and highlights like real film.
 	// It also masks residual banding in skies and fog.
-	if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && params.lens_film_grain > 0.0) {
+	if (bool(params.flags & FLAG_USE_LENS_EFFECTS) && lens_params.y > 0.0) {
 		vec3 p3 = fract(vec3(gl_FragCoord.xy, params.lens_time * 60.0) * vec3(0.1031, 0.1030, 0.0973));
 		p3 += dot(p3, p3.yxz + 33.33);
 		float grain = fract((p3.x + p3.y) * p3.z) - 0.5;
 		float luma = clamp(dot(color.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
 		float response = 4.0 * luma * (1.0 - luma); // Peaks in mid-tones.
-		color.rgb = max(color.rgb + grain * params.lens_film_grain * 0.12 * (0.25 + 0.75 * response), vec3(0.0));
+		color.rgb = max(color.rgb + grain * lens_params.y * 0.12 * (0.25 + 0.75 * response), vec3(0.0));
 	}
 
 	// Debanding should be done at the end of tonemapping, but before writing to the LDR buffer.

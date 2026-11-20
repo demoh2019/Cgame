@@ -896,12 +896,19 @@ RSE::EnvironmentSDFGIYScale RendererEnvironmentStorage::environment_get_sdfgi_y_
 
 // Lens effects
 
-void RendererEnvironmentStorage::environment_set_lens_effects(RID p_env, float p_chromatic_aberration, float p_film_grain, float p_lens_flare) {
+void RendererEnvironmentStorage::environment_set_lens_effects(RID p_env, float p_chromatic_aberration, float p_film_grain, float p_lens_flare, float p_motion_blur) {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL(env);
 	env->lens_chromatic_aberration = CLAMP(p_chromatic_aberration, 0.0f, 1.0f);
 	env->lens_film_grain = CLAMP(p_film_grain, 0.0f, 1.0f);
 	env->lens_flare = CLAMP(p_lens_flare, 0.0f, 4.0f);
+	env->motion_blur = CLAMP(p_motion_blur, 0.0f, 1.0f);
+}
+
+float RendererEnvironmentStorage::environment_get_motion_blur(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 0.0f);
+	return env->motion_blur;
 }
 
 float RendererEnvironmentStorage::environment_get_lens_flare(RID p_env) const {

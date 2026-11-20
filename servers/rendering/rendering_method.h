@@ -320,10 +320,11 @@ public:
 
 	virtual void environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction) = 0;
 
-	virtual void environment_set_lens_effects(RID p_env, float p_chromatic_aberration, float p_film_grain, float p_lens_flare) = 0;
+	virtual void environment_set_lens_effects(RID p_env, float p_chromatic_aberration, float p_film_grain, float p_lens_flare, float p_motion_blur) = 0;
 	virtual float environment_get_lens_chromatic_aberration(RID p_env) const = 0;
 	virtual float environment_get_lens_film_grain(RID p_env) const = 0;
 	virtual float environment_get_lens_flare(RID p_env) const = 0;
+	virtual float environment_get_motion_blur(RID p_env) const = 0;
 
 	virtual bool environment_get_adjustments_enabled(RID p_env) const = 0;
 	virtual float environment_get_adjustments_brightness(RID p_env) const = 0;

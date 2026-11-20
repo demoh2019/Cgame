@@ -594,8 +594,12 @@ bool RendererSceneRender::environment_get_adjustments_enabled(RID p_env) const {
 	return environment_storage.environment_get_adjustments_enabled(p_env);
 }
 
-void RendererSceneRender::environment_set_lens_effects(RID p_env, float p_chromatic_aberration, float p_film_grain, float p_lens_flare) {
-	environment_storage.environment_set_lens_effects(p_env, p_chromatic_aberration, p_film_grain, p_lens_flare);
+void RendererSceneRender::environment_set_lens_effects(RID p_env, float p_chromatic_aberration, float p_film_grain, float p_lens_flare, float p_motion_blur) {
+	environment_storage.environment_set_lens_effects(p_env, p_chromatic_aberration, p_film_grain, p_lens_flare, p_motion_blur);
+}
+
+float RendererSceneRender::environment_get_motion_blur(RID p_env) const {
+	return environment_storage.environment_get_motion_blur(p_env);
 }
 
 float RendererSceneRender::environment_get_lens_flare(RID p_env) const {

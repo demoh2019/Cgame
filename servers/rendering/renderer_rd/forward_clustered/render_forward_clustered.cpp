@@ -1818,6 +1818,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	// get info about our rendering effects
 	bool ce_needs_motion_vectors = _compositor_effects_has_flag(p_render_data, RSE::COMPOSITOR_EFFECT_FLAG_NEEDS_MOTION_VECTORS);
+	// Native motion blur samples the per-pixel velocity buffer in the tonemap pass.
+	bool using_motion_blur = p_render_data->reflection_probe.is_null() && is_environment(p_render_data->environment) && environment_get_motion_blur(p_render_data->environment) > 0.0f;
 	bool ce_needs_normal_roughness = _compositor_effects_has_flag(p_render_data, RSE::COMPOSITOR_EFFECT_FLAG_NEEDS_ROUGHNESS);
 	bool ce_needs_separate_specular = _compositor_effects_has_flag(p_render_data, RSE::COMPOSITOR_EFFECT_FLAG_NEEDS_SEPARATE_SPECULAR);
 
@@ -1898,7 +1900,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool motion_vectors_required;
 	if (using_debug_mvs) {
 		motion_vectors_required = true;
-	} else if (ce_needs_motion_vectors) {
+	} else if (ce_needs_motion_vectors || using_motion_blur) {
 		motion_vectors_required = true;
 	} else if (!is_reflection_probe && using_taa) {
 		motion_vectors_required = true;
@@ -2554,7 +2556,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		bool compositor_needs_resolved_depth = _compositor_effects_has_flag(p_render_data, RSE::COMPOSITOR_EFFECT_FLAG_ACCESS_RESOLVED_DEPTH, RSE::CompositorEffectCallbackType::COMPOSITOR_EFFECT_CALLBACK_TYPE_POST_TRANSPARENT);
 		bool using_dof = RSG::camera_attributes->camera_attributes_uses_dof(p_render_data->camera_attributes);
 		bool resolve_transparent_depth = (using_taa || using_upscaling || using_dof || compositor_needs_resolved_depth);
-		bool resolve_velocity_buffer = (using_taa || using_upscaling || ce_needs_motion_vectors) && rb->has_velocity_buffer(true);
+		bool resolve_velocity_buffer = (using_taa || using_upscaling || ce_needs_motion_vectors || using_motion_blur) && rb->has_velocity_buffer(true);
 
 		RENDER_TIMESTAMP("Resolve Color");
 		for (uint32_t v = 0; v < rb->get_view_count(); v++) {

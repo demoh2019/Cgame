@@ -124,8 +124,8 @@ private:
 
 		float tonemapper_params[4]; //  16 - 112
 
-		float lens_chromatic_aberration; //  4 - 116
-		float lens_film_grain; //  4 - 120
+		uint32_t lens_aberration_grain; //  4 - 116 (two packed half floats)
+		float motion_blur; //  4 - 120
 		float lens_time; //  4 - 124
 		float lens_flare; //  4 - 128
 	};
@@ -219,6 +219,8 @@ public:
 		float lens_film_grain = 0.0;
 		float lens_time = 0.0;
 		float lens_flare = 0.0;
+		float motion_blur = 0.0;
+		RID velocity_texture; // Optional; required only when motion_blur > 0.
 	};
 
 	void tonemapper(RID p_source_color, RID p_dst_framebuffer, const TonemapSettings &p_settings);
