@@ -48,6 +48,10 @@ environment/screen_space_reflection/half_size=true
 environment/ssao/half_size=true
 environment/ssil/half_size=true
 
+; Ultra uses two SDFGI cascades; half-res bounced lighting keeps the
+; optional compute workload within a realistic unified-memory GPU budget.
+global_illumination/gi/use_half_resolution=true
+
 ; Native sky IBL prefilter reduces high-roughness reflection aliasing.
 reflections/sky_reflections/ggx_samples=48
 reflections/sky_reflections/ggx_samples.mobile=16
