@@ -17,6 +17,7 @@ const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
+const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
@@ -479,7 +480,10 @@ func _build_dungeon(origin: Vector2) -> void:
 			_kit("column", Vector3(b.x, Dungeon.FLOOR_Y, b.y), 0.0, 0.9)
 		else:
 			# The kit's 4 m wall, kept below head height so the camera looks over it into the next room.
-			_kit("wall", Vector3(mid.x, Dungeon.FLOOR_Y, mid.y), yaw, Dungeon.TILE, 0.45)
+			var wall_piece := _kit("wall", Vector3(mid.x, Dungeon.FLOOR_Y, mid.y), yaw, Dungeon.TILE, 0.45)
+			# Only complete, opaque dungeon walls can hide other room geometry.
+			# The conservative software-occluder sits inside the visible wall mesh.
+			DungeonOcclusion.add_wall(wall_piece)
 
 
 func _build_terrain(origin: Vector2) -> void:
