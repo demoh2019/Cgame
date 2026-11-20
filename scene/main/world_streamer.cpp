@@ -298,6 +298,12 @@ void WorldStreamer::_update_streaming() {
 	LocalVector<Vector3i> wanted;
 	bool truncated = false;
 	WorldStreamingGrid::cells_in_radius(position, load_radius, cell_size, _grid_axes(), wanted, WorldStreamingGrid::MAX_CELLS, &truncated);
+	// World Partition-style streaming source prediction: prioritize only
+	// cells that are already inside the real load radius. Never enlarge the
+	// resident set or unload cells based on estimated movement.
+	WorldStreamingGrid::prioritize_cells_for_motion(wanted, position, velocity_hint,
+			lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
+			cell_size, _grid_axes());
 	if (truncated && !truncated_warned) {
 		truncated_warned = true;
 		WARN_PRINT(vformat("WorldStreamer: load_radius %s with cell_size %s covers more than %d cells; only the nearest are streamed. Increase cell_size or reduce load_radius.", rtos(load_radius), rtos(cell_size), WorldStreamingGrid::MAX_CELLS));
@@ -314,6 +320,11 @@ void WorldStreamer::_update_streaming() {
 				generate_queue.push_back(cell);
 			}
 		}
+		// Reprioritize already-queued work when the player turns. Rebuilding
+		// world chunks remains bounded to max_instantiations_per_frame.
+		WorldStreamingGrid::prioritize_cells_for_motion(generate_queue, position, velocity_hint,
+				lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
+				cell_size, _grid_axes());
 		return;
 	}
 
@@ -427,6 +438,21 @@ void WorldStreamer::set_unload_radius(real_t p_radius) {
 	unload_radius = MAX(p_radius, real_t(0.0));
 }
 
+void WorldStreamer::set_velocity_hint(const Vector3 &p_velocity) {
+	// Never let a corrupt network position poison cell priorities.
+	if (!p_velocity.is_finite()) {
+		return;
+	}
+	velocity_hint = p_velocity;
+}
+
+void WorldStreamer::set_lookahead_seconds(real_t p_seconds) {
+	if (!Math::is_finite(p_seconds)) {
+		return;
+	}
+	lookahead_seconds = CLAMP(p_seconds, real_t(0.0), real_t(4.0));
+}
+
 void WorldStreamer::set_max_concurrent_loads(int p_count) {
 	max_concurrent_loads = MAX(p_count, 1);
 }
@@ -525,6 +551,10 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_load_radius"), &WorldStreamer::get_load_radius);
 	ClassDB::bind_method(D_METHOD("set_unload_radius", "radius"), &WorldStreamer::set_unload_radius);
 	ClassDB::bind_method(D_METHOD("get_unload_radius"), &WorldStreamer::get_unload_radius);
+	ClassDB::bind_method(D_METHOD("set_velocity_hint", "velocity"), &WorldStreamer::set_velocity_hint);
+	ClassDB::bind_method(D_METHOD("get_velocity_hint"), &WorldStreamer::get_velocity_hint);
+	ClassDB::bind_method(D_METHOD("set_lookahead_seconds", "seconds"), &WorldStreamer::set_lookahead_seconds);
+	ClassDB::bind_method(D_METHOD("get_lookahead_seconds"), &WorldStreamer::get_lookahead_seconds);
 	ClassDB::bind_method(D_METHOD("set_max_concurrent_loads", "count"), &WorldStreamer::set_max_concurrent_loads);
 	ClassDB::bind_method(D_METHOD("get_max_concurrent_loads"), &WorldStreamer::get_max_concurrent_loads);
 	ClassDB::bind_method(D_METHOD("set_max_instantiations_per_frame", "count"), &WorldStreamer::set_max_instantiations_per_frame);
@@ -561,6 +591,8 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "1,100000,0.1,or_greater,suffix:m"), "set_cell_size", "get_cell_size");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "load_radius", PROPERTY_HINT_RANGE, "0,100000,0.1,or_greater,suffix:m"), "set_load_radius", "get_load_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "unload_radius", PROPERTY_HINT_RANGE, "0,100000,0.1,or_greater,suffix:m"), "set_unload_radius", "get_unload_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "velocity_hint", PROPERTY_HINT_NONE, "suffix:m/s"), "set_velocity_hint", "get_velocity_hint");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lookahead_seconds", PROPERTY_HINT_RANGE, "0,4,0.1,suffix:s"), "set_lookahead_seconds", "get_lookahead_seconds");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "chunk_path_template", PROPERTY_HINT_NONE, ""), "set_chunk_path_template", "get_chunk_path_template");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "chunk_parent", PROPERTY_HINT_NONE, ""), "set_chunk_parent", "get_chunk_parent");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "position_chunks"), "set_position_chunks", "get_position_chunks");
