@@ -27,6 +27,7 @@ const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const DeathRecovery = preload("res://scripts/shared/death_recovery.gd")
 const PartyCorpseRescue = preload("res://scripts/shared/party_corpse_rescue.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
+const CampProvisions = preload("res://scripts/shared/camp_provisions.gd")
 const QuickMedicine = preload("res://scripts/shared/quick_medicine.gd")
 const PartySupplyRequest = preload("res://scripts/shared/party_supply_request.gd")
 const PartyTriage = preload("res://scripts/shared/party_triage.gd")
@@ -1825,6 +1826,51 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 		"heal": healed, "cure": cured, "bleeding_stopped": staunched,
 		"fracture_treated": splinted, "food_poison_treated": poison_treated,
 		"food": fed, "drink": hydrated}
+
+
+## Transfer only known real provisions between living party allies by ONE
+## actual campfire. This reuses the aid cooldown and inventory save flags.
+func cmd_party_provision(peer_id: int, target_id: int, kind: String) -> Dictionary:
+	var giver: Player = players.get(peer_id)
+	var receiver: Player = players.get(target_id)
+	if giver == null or not _alive(giver):
+		return {"ok": false, "reason": "dead"}
+	if peer_id == target_id:
+		return {"ok": false, "reason": "self"}
+	if receiver == null:
+		return {"ok": false, "reason": "invalid_target"}
+	if not _alive(receiver):
+		return {"ok": false, "reason": "dead"}
+	var group: int = parties.group_of(peer_id)
+	if group <= 0 or parties.group_of(target_id) != group:
+		return {"ok": false, "reason": "not_in_party"}
+	if CampProvisions.package_items(kind).is_empty():
+		return {"ok": false, "reason": "invalid_package"}
+	if giver.mounted or receiver.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not giver.recall.is_empty() or not receiver.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	if giver.combat_tag_until > time or receiver.combat_tag_until > time:
+		return {"ok": false, "reason": "in_combat"}
+	if not PartyAid.can_reach(giver.position, receiver.position):
+		return {"ok": false, "reason": "too_far"}
+	if not CampProvisions.shared_fire(campfires, giver.position, receiver.position, time):
+		return {"ok": false, "reason": "no_fire"}
+	if giver.party_aid_timer > 0.0:
+		return {"ok": false, "reason": "cooldown", "remaining": giver.party_aid_timer}
+	var error: String = CampProvisions.transfer(giver.inventory, receiver.inventory, kind)
+	if error != "":
+		return {"ok": false, "reason": error}
+	giver.party_aid_timer = PartyAid.COOLDOWN
+	giver.dirty_inventory = true
+	giver.dirty_character = true
+	receiver.dirty_inventory = true
+	receiver.dirty_character = true
+	var items: Dictionary = CampProvisions.package_items(kind)
+	events.append({"type": "party_provision", "peer": target_id,
+		"by": peer_id, "kind": kind, "items": items})
+	return {"ok": true, "peer": target_id, "kind": kind,
+		"items": items, "cooldown": giver.party_aid_timer}
 
 
 ## One authenticated medic spends one crafted pack for up to three injured

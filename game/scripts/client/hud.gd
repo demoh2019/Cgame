@@ -745,6 +745,21 @@ func _build() -> void:
 	inventory_box.add_child(_party_status)
 	_party_target = OptionButton.new()
 	inventory_box.add_child(_party_target)
+	var provision_row := HBoxContainer.new()
+	inventory_box.add_child(provision_row)
+	for kind in ["food", "water", "kit", "stew"]:
+		var package_kind: String = kind
+		var provision_button := Button.new()
+		provision_button.name = "CampProvision" + package_kind.capitalize()
+		provision_button.text = "Give " + package_kind.capitalize()
+		provision_button.tooltip_text = "Give real supplies to the selected teammate at the same burning campfire (3.2m, shared aid cooldown)."
+		provision_button.pressed.connect(func() -> void:
+			var selected: int = _party_target.get_selected_id()
+			if selected < 0:
+				say("Choose a nearby party ally to provision.")
+			else:
+				client.party_provision(selected, package_kind))
+		provision_row.add_child(provision_button)
 	var party_buttons := HBoxContainer.new()
 	inventory_box.add_child(party_buttons)
 	var invite_member := Button.new()
@@ -2919,6 +2934,22 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Party rally active for 45 seconds. Only teammates see the marker.")
 		else:
 			say("Party rally: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "party_provision":
+		if bool(data.get("ok", false)):
+			say("Camp supplies delivered: %s (5s shared support cooldown)." % str(data.get("items", {})))
+		else:
+			var reasons := {
+				"not_in_party": "Select a current party member.",
+				"too_far": "Move within 3.2m of your teammate.",
+				"no_fire": "Both teammates need the same burning campfire.",
+				"missing_supplies": "Required food or water is not in your backpack.",
+				"no_space": "Teammate's backpack has no room.",
+				"cooldown": "Wait for your shared party aid timer.",
+				"in_combat": "Finish combat before resupplying.",
+			}
+			say("Camp supplies: " + str(reasons.get(
+				str(data.get("reason", "")), str(data.get("reason", "rejected")))))
 		return
 	if kind == "party":
 		if bool(data.get("ok", false)):
