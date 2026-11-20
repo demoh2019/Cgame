@@ -69,10 +69,35 @@ float vnoise(vec3 p) {
 
 // Cumulus density in a unit slab (h: 0 bottom .. 1 top). Rounded bottoms, wispy tops.
 float cloud_density(vec3 p, float h, float coverage) {
-	float base = vnoise(p) * 0.55 + vnoise(p * 2.03 + 3.1) * 0.28 + vnoise(p * 4.1 + 7.7) * 0.17;
+	// Conservative, zero-approximation density bound. If the largest
+	// possible contribution from the omitted octaves cannot reach the
+	// coverage threshold, the fully evaluated density is *exactly* zero.
+	// Follows Unreal cloud conservative-density skipping with no LUT/texture.
+	if (h <= 0.0 || h >= 1.0) {
+		return 0.0;
+	}
 	float profile = smoothstep(0.0, 0.18, h) * (1.0 - smoothstep(0.45, 1.0, h));
-	float d = clamp((base - (1.0 - coverage)) / max(coverage, 0.05), 0.0, 1.0) * profile;
-	// Erode edges with high-frequency detail (HZD "detail noise").
+	if (profile <= 0.0) {
+		return 0.0;
+	}
+	float cloud_threshold = 1.0 - coverage;
+	float broad = vnoise(p) * 0.55;
+	// Other two octaves contribute at most 0.28 + 0.17 = 0.45.
+	if (broad + 0.45 <= cloud_threshold) {
+		return 0.0;
+	}
+	float medium = vnoise(p * 2.03 + 3.1) * 0.28;
+	// The remaining fine octave cannot exceed 0.17.
+	if (broad + medium + 0.17 <= cloud_threshold) {
+		return 0.0;
+	}
+	float base = broad + medium + vnoise(p * 4.1 + 7.7) * 0.17;
+	if (base <= cloud_threshold) {
+		return 0.0;
+	}
+	float d = clamp((base - cloud_threshold) / max(coverage, 0.05), 0.0, 1.0) * profile;
+	// Expensive edge erosion is evaluated only inside actual cloud density.
+	// All four noises and coefficients are IDENTICAL to the previous look.
 	d -= vnoise(p * 9.0 + 1.3) * 0.18 * (1.0 - d);
 	return max(d, 0.0);
 }
@@ -294,6 +319,9 @@ void sky() {
 			vec3 amb = mix(night_horizon * 0.6, sky_amb, daylight);
 			vec3 sun_l = sun_color * daylight * (1.0 - storm * 0.7);
 			sun_l = mix(sun_l, sun_l * dusk_color * 1.4, dusk * 0.6);
+			// Night/very dark storm clouds have no meaningful direct-light
+			// self-shadow to compute; preserve their ambient scattering.
+			bool cloud_sunlit = dot(sun_l, sun_l) > 0.0001;
 			float trans = 1.0;
 			vec3 scat = vec3(0.0);
 			float jitter = hash(dir * 431.0 + sky_time);
@@ -303,11 +331,14 @@ void sky() {
 				float h = (pos.y - 1.0) / 0.6;
 				float d = cloud_density(pos * vec3(0.9, 1.6, 0.9) + wind, h, coverage);
 				if (d > 0.01) {
-					// Three short taps towards the sun for self-shadowing.
+					// Keep original three-sample self-shadow when illuminated.
+					// At night all direct-light taps can be skipped safely.
 					float ls = 0.0;
-					for (int k = 1; k <= 3; k++) {
-						vec3 lp = pos + sun_dir * (0.08 * float(k));
-						ls += cloud_density(lp * vec3(0.9, 1.6, 0.9) + wind, (lp.y - 1.0) / 0.6, coverage);
+					if (cloud_sunlit) {
+						for (int k = 1; k <= 3; k++) {
+							vec3 lp = pos + sun_dir * (0.08 * float(k));
+							ls += cloud_density(lp * vec3(0.9, 1.6, 0.9) + wind, (lp.y - 1.0) / 0.6, coverage);
+						}
 					}
 					float beer = exp(-ls * 1.6);
 					float powder = 1.0 - exp(-d * 4.0); // Beer-Powder (Schneider 2015)
