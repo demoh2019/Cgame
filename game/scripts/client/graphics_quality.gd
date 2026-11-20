@@ -4,6 +4,8 @@ extends RefCounted
 
 const SETTINGS_PATH := "user://albion_after_graphics.cfg"
 const NAMES := ["Performance", "Balanced", "High", "Ultra"]
+const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
+const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
 static var _level: int = 1
 static var _loaded: bool = false
@@ -58,8 +60,10 @@ static func profile(value: int) -> Dictionary:
 				"blur_quality": 2, "blur_radius": 3.0, "glow": true, "ssao": true}
 
 
-static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderMaterial) -> void:
+static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderMaterial, water: MeshInstance3D = null, streamer: Node = null) -> void:
 	var p := profile(_level)
+	# Preserve the existing antialiasing presets and layer in the world/vegetation budgets.
+	p.merge(VisualProfiles.settings(_level), true)
 	if viewport != null:
 		viewport.msaa_3d = p["msaa"]
 		# FXAA makes the lighter presets readable without MSAA's multisample cost.
@@ -74,6 +78,20 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 			env.glow_enabled = p["glow"]
 			# Godot ignores SSAO/glow on Compatibility; keep one profile system for Forward+.
 			env.ssao_enabled = p["ssao"]
+		if atmosphere.has_method("apply_graphics_profile"):
+			atmosphere.apply_graphics_profile(p)
+	ChunkView.configure_grass(float(p["grass_build_radius"]), int(p["grass_budget_usec"]),
+		float(p["grass_fade_start"]), float(p["grass_fade_end"]))
+	if viewport != null:
+		# Already-streamed tiles immediately obey the newly selected draw distance.
+		for tile in viewport.get_tree().get_nodes_in_group(ChunkView.GRASS_GROUP):
+			if tile is GeometryInstance3D:
+				(tile as GeometryInstance3D).visibility_range_end = ChunkView.grass_visibility_end
+	if water != null and water.material_override is ShaderMaterial:
+		(water.material_override as ShaderMaterial).set_shader_parameter("ripple_strength", float(p["water_ripples"]))
+	if streamer != null:
+		streamer.set("load_radius", float(p["chunk_radius"]))
+		streamer.set("unload_radius", float(p["chunk_unload"]))
 	if post_material != null:
 		post_material.set_shader_parameter("blur_quality", p["blur_quality"])
 		post_material.set_shader_parameter("blur_radius", p["blur_radius"])
