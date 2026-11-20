@@ -447,8 +447,8 @@ TEST_CASE("[SceneTree][WorldPartition3D] Supercover navigation corridor respects
 	CHECK(partition->get_navigation_route_cells(global_at(1, 1), global_at(2, 2), 0).is_empty());
 	CHECK(partition->get_navigation_route_cells(global_at(1, 1), global_at(2, 2), 257).is_empty());
 	ERR_PRINT_ON;
-	CHECK(partition->get_navigation_route_cells(Vector3(NAN, 0, 0), global_at(2, 2)).is_empty());
-	CHECK(partition->get_navigation_route_cells(global_at(2, 2), Vector3(INFINITY, 0, 0)).is_empty());
+	CHECK(partition->get_navigation_route_cells(Vector3(std::numeric_limits<real_t>::quiet_NaN(), 0, 0), global_at(2, 2)).is_empty());
+	CHECK(partition->get_navigation_route_cells(global_at(2, 2), Vector3(std::numeric_limits<real_t>::infinity(), 0, 0)).is_empty());
 	CHECK_FALSE(partition->is_navigation_route_ready(global_at(2, 9), global_at(70, 9)));
 	CHECK(partition->get_streamed_navigation_path(global_at(2, 9), global_at(70, 9)).is_empty());
 
