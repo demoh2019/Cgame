@@ -6,6 +6,7 @@
 	<description>
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
+		In addition to scene-tree [signal cell_loaded], [WorldPartition3D] exposes a two-physics-tick activation barrier via [signal cell_physics_ready] and [method is_cell_physics_ready]. Unlike waiting an arbitrary wall-clock time, this barrier stops during physics pause. It is a scheduling signal, not proof that the cell contains valid collision or navigation data.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
 		Runtime sources may also follow moving [Node3D] actors through [method set_streaming_source_node], automatically re-centering when those actors cross the grid.
 		Multiple runtime streaming sources can load independent remote regions with per-source radii and priorities, and report completion using [signal streaming_source_ready] and [method is_streaming_source_ready]. They share the request and instantiation budgets with the primary player observer.
@@ -230,6 +231,27 @@
 				[b]Note:[/b] This reports scene-tree readiness only. Physics server synchronization, navigation baking, shader compilation, and resource uploads may still require additional frames or application-level readiness checks.
 			</description>
 		</method>
+		<method name="is_cell_physics_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] only after a currently instantiated, non-deleting cell has passed two actual [code]_physics_process[/code] notifications since its scene was added. This is stricter than [method is_cell_loaded] but does not check the contents of the scene or guarantee that the PhysicsServer has a valid collision for a particular point. Gameplay can additionally raycast to a known [CollisionObject3D] before teleporting.
+			</description>
+		</method>
+		<method name="are_cells_physics_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" default="0" />
+			<description>
+				Returns [code]true[/code] if all cells in a square radius 0–32 around [param center] satisfy [method is_cell_physics_ready]. Unregistered, missing, unloaded or pending-physics cells make this false. Coordinate overflow is rejected.
+			</description>
+		</method>
+		<method name="get_physics_ready_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Number of loaded cells that passed the native two-physics-tick activation barrier. This can lag behind [method get_loaded_cell_count] by several engine physics ticks and resets on unload or disabled streaming.
+			</description>
+		</method>
 		<method name="is_cell_loaded" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -321,6 +343,18 @@
 			<param index="0" name="name" type="String" />
 			<description>
 				Emitted when a previously ready named source becomes incomplete or is removed or disabled. Callers should not treat this as a physics-server readiness signal.
+			</description>
+		</signal>
+		<signal name="cell_physics_ready">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted once for each loaded instance after its two-tick physics activation barrier. On unload and subsequent reload the cell must cross the barrier again. A server collider/path-query can still require a separate verification by gameplay code.
+			</description>
+		</signal>
+		<signal name="cell_physics_unready">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted once when a previously physics-ready cell is unloaded or disabled. This signal fires before [signal cell_unloaded], allowing gameplay to stop or deactivate dependent actors.
 			</description>
 		</signal>
 		<signal name="cell_loaded">
