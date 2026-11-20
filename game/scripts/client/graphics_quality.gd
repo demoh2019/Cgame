@@ -9,6 +9,7 @@ const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
 const GraphicsResolution = preload("res://scripts/client/graphics_resolution.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
+const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
 static var _level: int = 1
@@ -104,6 +105,8 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		float(world_profile["leaf_transmission"]))
 	# Shadow maps are budgeted independently from normal object visibility.
 	ShadowBudget.configure(world_profile)
+	# One global torch budget covers all streamed underground rooms.
+	DungeonLightBudget.configure(_level)
 	# The active backend can differ from ProjectSettings after a driver fallback.
 	var method := RenderingServer.get_current_rendering_method()
 	if viewport != null:
