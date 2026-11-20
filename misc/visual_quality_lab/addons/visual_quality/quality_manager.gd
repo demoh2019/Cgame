@@ -12,6 +12,9 @@ const DEFAULT_SAVE_PATH: String = "user://visual_quality_lab.cfg"
 @export var save_path: String = DEFAULT_SAVE_PATH
 @export var persist_settings: bool = true
 @export var restore_environment_on_exit: bool = true
+@export var manage_sky_radiance: bool = true
+## 512px sky radiance is expensive; only opt in for capable GPUs.
+@export var use_512_radiance_in_cinematic: bool = false
 
 var target_environment: Environment
 var adaptive_controller: AdaptiveResolution3D
@@ -22,6 +25,8 @@ var _old_ssao: bool = false
 var _old_ssil: bool = false
 var _old_ssr: bool = false
 var _has_old_environment: bool = false
+var _old_sky: Sky
+var _old_radiance_size: Sky.RadianceSize = Sky.RADIANCE_SIZE_256
 
 
 func _ready() -> void:
@@ -31,6 +36,9 @@ func _ready() -> void:
 		_old_ssil = target_environment.ssil_enabled
 		_old_ssr = target_environment.ssr_enabled
 		_has_old_environment = true
+		_old_sky = target_environment.sky
+		if _old_sky != null:
+			_old_radiance_size = _old_sky.radiance_size
 	load_settings()
 	apply_settings()
 
@@ -41,6 +49,8 @@ func _exit_tree() -> void:
 		target_environment.ssao_enabled = _old_ssao
 		target_environment.ssil_enabled = _old_ssil
 		target_environment.ssr_enabled = _old_ssr
+		if _old_sky != null and manage_sky_radiance:
+			_old_sky.radiance_size = _old_radiance_size
 
 
 static func validated_profile(value: Variant) -> int:
@@ -86,6 +96,15 @@ func apply_settings() -> void:
 		target_environment.ssao_enabled = current_profile >= Profile.BALANCED and forward_plus
 		target_environment.ssil_enabled = current_profile >= Profile.CINEMATIC and forward_plus
 		target_environment.ssr_enabled = current_profile >= Profile.CINEMATIC and forward_plus
+		if manage_sky_radiance and target_environment.sky != null:
+			var sky: Sky = target_environment.sky
+			match current_profile:
+				Profile.ECO:
+					sky.radiance_size = Sky.RADIANCE_SIZE_128
+				Profile.CINEMATIC:
+					sky.radiance_size = Sky.RADIANCE_SIZE_512 if use_512_radiance_in_cinematic else Sky.RADIANCE_SIZE_256
+				_:
+					sky.radiance_size = Sky.RADIANCE_SIZE_256
 	settings_changed.emit(current_profile, adaptive_enabled)
 
 
