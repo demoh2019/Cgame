@@ -683,6 +683,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F4:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.toggle_mount()
+			KEY_BRACKETLEFT:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.use_item("bike_dynamo_lamp")
 			KEY_PAGEUP:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.use_item("bike_service_kit")

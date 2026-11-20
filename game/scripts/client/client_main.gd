@@ -153,6 +153,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_vendor_sell", KEY_V)
 	_bind_key("survive_radar", KEY_M)
 	_bind_key("survive_mount", KEY_F4)
+	_bind_key("survive_bike_lamp", KEY_BRACKETLEFT)
 	_bind_key("survive_bike_service", KEY_PAGEUP)
 	_bind_key("survive_whetstone", KEY_END)
 	_bind_key("survive_armor_plate", KEY_INSERT)
@@ -753,7 +754,8 @@ func _physics_process(delta: float) -> void:
 	_last_bike_position = survivor.position
 	_bike_visual.set_panniers(survivor.inventory.count("bike_panniers") > 0)
 	_bike_visual.set_lamp(survivor.mounted and survivor.survival.alive and
-		WorldCycle.is_night(sim.time) and survivor.inventory.count("bike_dynamo_lamp") > 0)
+		survivor.bike_lamp_enabled and WorldCycle.is_night(sim.time) and
+		survivor.inventory.count("bike_dynamo_lamp") > 0)
 	_bike_visual.set_riding(survivor.mounted and survivor.survival.alive, bike_speed, delta)
 	_flare_visual.set_burning(survivor.survival.alive and survivor.flare_seconds > 0.0)
 	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
@@ -950,6 +952,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
 	elif event.is_action_pressed("survive_mount"):
 		_result("Trail bike", sim.cmd_toggle_mount(LOCAL_PLAYER_ID))
+	elif event.is_action_pressed("survive_bike_lamp"):
+		_result("Bike lamp", sim.cmd_use(LOCAL_PLAYER_ID, "bike_dynamo_lamp"))
 	elif event.is_action_pressed("survive_bike_service"):
 		_result("Drive service", sim.cmd_use(LOCAL_PLAYER_ID, "bike_service_kit"))
 	elif event.is_action_pressed("survive_whetstone"):
@@ -1234,7 +1238,7 @@ func _update_hud() -> void:
 		_stats.text += "\nBIKE SERVICE: %.0f m (PgUp applies kit on foot)" % survivor.bike_service_meters
 		_stats.text += "\nBIKE FRAME: %.0f%% (PgDn to patch on foot)" % survivor.bike_integrity
 		if survivor.inventory.count("bike_dynamo_lamp") > 0:
-			_stats.text += "\nDYNAMO LAMP: lights road at night, reveals rider to infected"
+			_stats.text += "\nDYNAMO LAMP: %s | [ toggles night light" % ("ARMED" if survivor.bike_lamp_enabled else "OFF")
 	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
 		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		survivor.mount_cooldown]

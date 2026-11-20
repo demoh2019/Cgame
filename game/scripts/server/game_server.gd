@@ -245,6 +245,8 @@ class Player:
 	var recall_ready_at: float = 0.0
 	var crouching: bool = false # Ephemeral, server-authorized posture.
 	var mounted: bool = false # Session-only; never saved.
+	var bike_lamp_enabled: bool = true # Night visibility versus stealth (session-only).
+	var bike_lamp_last_toggle: float = -1.0 # Server-owned anti-spam timer.
 	var mount_cooldown: float = 0.0
 	var chain_wrap_seconds: float = 0.0 # Validated, persisted noise protection.
 	var bike_service_meters: float = 0.0 # Chain service measured from actual cycling.
@@ -3231,7 +3233,7 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
-	if player.mounted:
+	if player.mounted and item_id != BikeLantern.ITEM_ID:
 		return {"ok": false, "reason": "mounted"}
 	if not player.recall.is_empty():
 		return {"ok": false, "reason": "recall_channeling"}
@@ -3239,6 +3241,20 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"bike_light":
+			if item_id != BikeLantern.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var lamp_reason: String = BikeLantern.toggle_reason(
+				player.inventory, time, player.bike_lamp_last_toggle)
+			if lamp_reason != "":
+				return {"ok": false, "reason": lamp_reason, "bike_lamp": true}
+			player.bike_lamp_enabled = not player.bike_lamp_enabled
+			player.bike_lamp_last_toggle = time
+			# Session preference has no inventory cost or new persistence field.
+			return {"ok": true, "bike_lamp": true,
+				"bike_lamp_enabled": player.bike_lamp_enabled,
+				"bike_lamp_lit": BikeLantern.lit(player.inventory, player.mounted,
+					_alive(player), WorldCycle.is_night(time), player.bike_lamp_enabled)}
 		"mining_wedges":
 			if item_id != MiningWedges.ITEM_ID:
 				return {"ok": false, "reason": "not_usable", "mining_wedges": true}
@@ -5930,7 +5946,7 @@ func _tick_zombies(delta: float) -> void:
 			"weather_sight": Weather.sight_multiplier(
 				Weather.conditions(world, player.position.x, player.position.z, time)),
 			"firelight": maxf(BikeLantern.reveal_radius(player.inventory, player.mounted,
-				_alive(player), WorldCycle.is_night(time)),
+				_alive(player), WorldCycle.is_night(time), player.bike_lamp_enabled),
 				maxf(CampfireThreat.reveal_radius(campfires,
 					player.position, time, WorldCycle.is_night(time)),
 					HandFlare.infected_radius(player.flare_seconds, _alive(player),
@@ -6439,7 +6455,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"flare_lit": HandFlare.lit(other.flare_seconds, _alive(other)),
 				"bike_panniers": BikeCargo.installed(other.inventory),
 				"bike_lamp_lit": BikeLantern.lit(other.inventory, other.mounted,
-					_alive(other), WorldCycle.is_night(time)),
+					_alive(other), WorldCycle.is_night(time), other.bike_lamp_enabled),
 				"weapon": other.inventory.weapon,
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
 				"guild": {"id": other.guild_id, "name": other.guild_name},
@@ -6685,7 +6701,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"bike_service_meters": player.bike_service_meters,
 			"bike_integrity": player.bike_integrity,
 			"bike_lamp_lit": BikeLantern.lit(player.inventory, player.mounted,
-				_alive(player), WorldCycle.is_night(time)),
+				_alive(player), WorldCycle.is_night(time), player.bike_lamp_enabled),
+			"bike_lamp_enabled": player.bike_lamp_enabled,
 			"max_health": player.survival.max_health,
 			"speed_bonus": player.skills.bonus("move_speed"), "carry_bonus": player.skills.bonus("carry_capacity"),
 		},

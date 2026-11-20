@@ -427,6 +427,12 @@ func _build() -> void:
 	frame_button.tooltip_text = "Craft a frame patch at a workbench. Dismount to repair a damaged or broken bicycle."
 	frame_button.pressed.connect(func() -> void: client.use_item("bike_frame_patch"))
 	inventory_box.add_child(frame_button)
+	var lamp_button := Button.new()
+	lamp_button.name = "ToggleBikeDynamoLamp"
+	lamp_button.text = "Switch bicycle night lamp ([; no item consumed)"
+	lamp_button.tooltip_text = "Trade 13m forward illumination for infected exposure (23m). Switch on/off while riding or on foot."
+	lamp_button.pressed.connect(func() -> void: client.use_item("bike_dynamo_lamp"))
+	inventory_box.add_child(lamp_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -1603,6 +1609,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Stagger finisher: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "use" and bool(data.get("bike_lamp", false)):
+		if bool(data.get("ok", false)):
+			say("Dynamo lamp %s. The beam attracts infected when riding at night." % (
+				"armed" if bool(data.get("bike_lamp_enabled", false)) else "switched off"))
+		else:
+			say("Dynamo lamp: " + str(data.get("reason", "rejected")) + " (no item spent)")
+		return
 	if kind == "use" and data.has("tire_grip_seconds"):
 		say("Off-road tire grips fitted: %.0fs of improved traction." % float(data["tire_grip_seconds"]))
 		return
@@ -2299,7 +2312,9 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nBIKE SERVICE: %.0f m | PgUp service on foot" % float(client.you.get("bike_service_meters", 0.0))
 		_info_label.text += "\nBIKE FRAME: %.0f%% | PgDn patch on foot" % float(client.you.get("bike_integrity", 100.0))
 		if client.inventory.count("bike_dynamo_lamp") > 0:
-			_info_label.text += "\nDYNAMO LAMP: %s | light reveals you to infected at night" % ("ON" if bool(client.you.get("bike_lamp_lit", false)) else "OFF")
+			_info_label.text += "\nDYNAMO LAMP: %s | [ toggle; lit bike attracts infected" % (
+				"ON (visible)" if bool(client.you.get("bike_lamp_lit", false)) else (
+				"ARMED (daylight/on foot)" if bool(client.you.get("bike_lamp_enabled", true)) else "MANUAL OFF"))
 	_info_label.text += "\nTRAIL BIKE: %s | F4 mount/dismount | remount %.0fs" % [
 		"RIDING" if bool(client.you.get("mounted", false)) else ("CARRIED" if client.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		float(client.you.get("mount_cooldown", 0.0))]
