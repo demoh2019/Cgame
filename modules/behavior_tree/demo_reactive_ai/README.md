@@ -65,10 +65,10 @@ Build and run the standard Godot test suite:
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 ./bin/godot.linuxbsd.editor.x86_64 --headless --test
-./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/behavior_tree/demo_reactive_ai --quit-after 20
+./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/behavior_tree/demo_reactive_ai --script res://tests/smoke_demo.gd
 ```
 
-The last command is a scene startup smoke check, not an interactive gameplay test.
+The last command runs an automated GDScript integration smoke check for wall occlusion, target acquisition and forgetting, behavior priorities and reset. Manual gameplay still needs testing.
 
 ## Scope
 
