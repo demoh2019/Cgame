@@ -1,6 +1,10 @@
 shader_type spatial;
 render_mode blend_mix, depth_draw_never, cull_back, diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
+// Sun vector/radiance are cached with the sky, so water never asks the CPU
+// to update a material per pixel or per streamed ocean mesh.
+global uniform vec3 aa_sun_to_light;
+global uniform vec3 aa_sun_radiance;
 // Shared smoothed regional weather wind, uploaded at 10 Hz by Atmosphere.
 // xy is the wind direction, z is normalized wind strength (0..1).
 global uniform vec3 aa_vegetation_wind;
@@ -18,6 +22,9 @@ uniform float refraction_fade_end = 74.0;
 uniform vec3 shallow_color : source_color = vec3(0.16, 0.5, 0.52);
 uniform vec3 deep_color : source_color = vec3(0.02, 0.15, 0.3);
 uniform float clarity = 5.0;
+// Single-scattering approximation for translucent shoreline water.
+// Performance sets zero, skipping all optical scattering work.
+uniform float shallow_scattering_strength = 0.0;
 uniform float ripple_strength = 0.35;
 // Optional near-camera wind-aligned wave response. Zero on low-end tiers.
 uniform float wind_wave_strength = 0.0;
@@ -158,6 +165,23 @@ void fragment() {
 		}
 	}
 	color += vec3(0.06, 0.12, 0.11) * shore_glimmer;
+	// Near-shore subsurface scattering: light penetrates the water, then
+	// escapes toward the camera. Reuse the Beer-Lambert transmission above:
+	// one scattering probability (1 - T²) times the surviving light (T).
+	// Unlike a ray-marched volume, this costs NO screen reads or extra exp().
+	if (shallow_scattering_strength > 0.001 && thickness > 0.08 && thickness < 8.0
+			&& aa_sun_radiance.y > 0.001) {
+		float single_scatter = (1.0 - transmission * transmission) * transmission;
+		float shoreline = 1.0 - smoothstep(4.2, 8.0, thickness);
+		vec3 to_eye = normalize(CAMERA_POSITION_WORLD - world_position);
+		// Forward scattering is brightest when sunlight enters along the
+		// viewing direction, but shallow ambient fill remains soft at noon.
+		float phase = 0.58 + 0.42 * pow(max(dot(to_eye,
+			normalize(aa_sun_to_light)), 0.0), 2.0);
+		vec3 spectral_scatter = vec3(0.06, 0.24, 0.22) * aa_sun_radiance;
+		color += spectral_scatter * (shallow_scattering_strength * single_scatter
+			* shoreline * phase * (1.0 - foam) * (1.0 - storm * 0.25));
+	}
 #ifdef WATER_REFRACTION
 	// Thin-water transmission with actual screen-space refraction:
 	// clipped geometry, depth discontinuities and screen edges fade to base
