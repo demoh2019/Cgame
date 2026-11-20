@@ -60,21 +60,21 @@ void vertex() {
 
 // Distant terrain keeps the existing broad-scale tiling, but skips nearby microdetail samples.
 // The blending weight tends smoothly to zero, avoiding hard texture LOD boundaries.
-vec3 top_albedo(float layer, vec2 p, float mixer, float detail_fade) {
-	vec3 far_tile = texture(albedo_layers, vec3(p / (tile_meters * 3.3) + 0.37, layer)).rgb;
+vec3 top_albedo(float layer, vec2 p, float mixer, float detail_fade, vec2 lod_dx, vec2 lod_dy) {
+	vec3 far_tile = textureGrad(albedo_layers, vec3(p / (tile_meters * 3.3) + 0.37, layer), lod_dx / 3.3, lod_dy / 3.3).rgb;
 	float near_weight = (1.0 - mixer) * detail_fade;
 	if (near_weight > 0.001) {
-		vec3 near_tile = texture(albedo_layers, vec3(p / tile_meters, layer)).rgb;
+		vec3 near_tile = textureGrad(albedo_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy).rgb;
 		far_tile = mix(far_tile, near_tile, near_weight);
 	}
 	return far_tile * layer_tint[int(layer)];
 }
 
-vec3 top_normal(float layer, vec2 p, float detail_fade) {
+vec3 top_normal(float layer, vec2 p, float detail_fade, vec2 lod_dx, vec2 lod_dy) {
 	// When far enough, even the normal map fetch is skipped: distant microrelief is subpixel.
 	vec3 normal = vec3(0.0, 0.0, 1.0);
 	if (detail_fade > 0.001) {
-		vec3 mapped = texture(normal_layers, vec3(p / tile_meters, layer)).rgb * 2.0 - 1.0;
+		vec3 mapped = textureGrad(normal_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy).rgb * 2.0 - 1.0;
 		normal = mix(normal, mapped, detail_fade);
 	}
 	return normal;
@@ -90,6 +90,9 @@ void fragment() {
 	float mixer = smoothstep(0.3, 0.7, value_noise(p * 0.05 + 11.0));
 	// View-dependent terrain shading LOD is continuous and independent of chunk boundaries.
 	// All visible biomes/roads remain authored by the original high fidelity blend.
+	// Gradients must be evaluated before any dynamic branch to keep mipmapping stable.
+	vec2 lod_dx = dFdx(p / tile_meters);
+	vec2 lod_dy = dFdy(p / tile_meters);
 	float camera_distance = distance(p, CAMERA_POSITION_WORLD.xz);
 	float detail_fade = 1.0 - smoothstep(aa_terrain_detail_radius,
 		aa_terrain_detail_radius + 24.0, camera_distance);
@@ -185,8 +188,8 @@ void fragment() {
 			c *= layer_tint[5];
 			nn = vec3(0.0, 0.0, 1.0);
 		} else {
-			c = top_albedo(layer, p, mixer, detail_fade);
-			nn = top_normal(layer, p, detail_fade);
+			c = top_albedo(layer, p, mixer, detail_fade, lod_dx, lod_dy);
+			nn = top_normal(layer, p, detail_fade, lod_dx, lod_dy);
 		}
 		color += c * w[i];
 		bump += nn * w[i];
