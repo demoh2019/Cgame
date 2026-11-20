@@ -584,6 +584,38 @@ static func under_object(x: float, z: float, footprints_in_tile: PackedVector3Ar
 	return false
 
 
+## Ground facts at a chunk-local point for other ground cover (scanned plants): same rules as the grass,
+## so plants never grow in water, on roads, on cliffs, in the hub plaza or out of objects.
+static func sample(source: Source, lx: float, lz: float) -> Dictionary:
+	var size: float = Defs.CHUNK_SIZE
+	var wx: float = source.origin.x + lx
+	var wz: float = source.origin.y + lz
+	if Vector2(wx, wz).length() < 21.0:
+		return {"ok": false}
+	if not source.road.is_empty() and source.road[mini(int(lz), int(size) - 1) * int(size) + mini(int(lx), int(size) - 1)] > 40:
+		return {"ok": false}
+	var samples: int = source.samples
+	var height_step: float = size / float(samples - 1)
+	var ix: int = mini(int(lx / height_step), samples - 2)
+	var iz: int = mini(int(lz / height_step), samples - 2)
+	var fx: float = lx / height_step - float(ix)
+	var fz: float = lz / height_step - float(iz)
+	var h00: float = source.heights[iz * samples + ix]
+	var h10: float = source.heights[iz * samples + ix + 1]
+	var h01: float = source.heights[(iz + 1) * samples + ix]
+	var h11: float = source.heights[(iz + 1) * samples + ix + 1]
+	var h: float = lerpf(lerpf(h00, h10, fx), lerpf(h01, h11, fx), fz)
+	if h < Defs.WATER_LEVEL + 0.35 or h > 86.0 or absf(h10 - h00) > 1.6 or absf(h01 - h00) > 1.6:
+		return {"ok": false}
+	if under_object(wx, wz, source.clear):
+		return {"ok": false}
+	var texels: int = source.texels
+	var biome: String = source.biomes[mini(int(lz / size * float(texels - 1) + 0.5), texels - 1) * texels + mini(int(lx / size * float(texels - 1) + 0.5), texels - 1)]
+	if h > 45.0:
+		biome = "mountain"
+	return {"ok": true, "h": h, "biome": biome}
+
+
 static func tile_count() -> int:
 	var side: int = int(Defs.CHUNK_SIZE / TILE)
 	return side * side

@@ -1,4 +1,5 @@
 extends RefCounted
+const GroundPlants = preload("res://scripts/client/ground_plants.gd")
 
 ## User-selectable visual fidelity. Both the Compatibility and Forward+ renderers remain supported.
 ## Keep the choice local to the client; it must never affect authoritative simulation.
@@ -340,6 +341,8 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	if viewport != null:
 		for terrain in viewport.get_tree().get_nodes_in_group(ChunkView.TERRAIN_GROUP):
 			ChunkView.apply_terrain_filter(terrain)
+	# Scanned ground plants: off on Low, sparser on Medium, densest on Ultra (applies to new tiles).
+	GroundPlants.density_scale = GroundPlants.quality_scale(_level)
 	# Reuse the game's existing 3-tier grass LOD; never rebuild world geometry on a preset switch.
 	ChunkView.configure_grass(float(world_profile["grass_build_radius"]), int(world_profile["grass_budget_usec"]),
 			float(world_profile["grass_fade_start"]), float(world_profile["grass_fade_end"]))

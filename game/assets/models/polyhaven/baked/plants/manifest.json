@@ -1,0 +1,480 @@
+{
+	"celandine_01": [
+		{
+			"file": "celandine_01_0.res",
+			"height": 0.185851633548737,
+			"width": 0.275726795196533
+		},
+		{
+			"file": "celandine_01_1.res",
+			"height": 0.144528329372406,
+			"width": 0.306658029556274
+		},
+		{
+			"file": "celandine_01_2.res",
+			"height": 0.175587370991707,
+			"width": 0.257147163152695
+		},
+		{
+			"file": "celandine_01_3.res",
+			"height": 0.149497896432877,
+			"width": 0.222927451133728
+		},
+		{
+			"file": "celandine_01_4.res",
+			"height": 0.123658187687397,
+			"width": 0.216305911540985
+		}
+	],
+	"dandelion_01": [
+		{
+			"file": "dandelion_01_0.res",
+			"height": 0.154077425599098,
+			"width": 0.257658392190933
+		},
+		{
+			"file": "dandelion_01_1.res",
+			"height": 0.104302629828453,
+			"width": 0.217961594462395
+		},
+		{
+			"file": "dandelion_01_2.res",
+			"height": 0.100940331816673,
+			"width": 0.169872522354126
+		},
+		{
+			"file": "dandelion_01_3.res",
+			"height": 0.0554395020008087,
+			"width": 0.1435367166996
+		},
+		{
+			"file": "dandelion_01_4.res",
+			"height": 0.0474725514650345,
+			"width": 0.213867902755737
+		}
+	],
+	"fern_02": [
+		{
+			"file": "fern_02_0.res",
+			"height": 0.427694708108902,
+			"width": 0.989747405052185
+		},
+		{
+			"file": "fern_02_1.res",
+			"height": 0.34902036190033,
+			"width": 0.874325811862946
+		},
+		{
+			"file": "fern_02_2.res",
+			"height": 0.286803543567657,
+			"width": 0.613421082496643
+		},
+		{
+			"file": "fern_02_3.res",
+			"height": 0.213087558746338,
+			"width": 0.593278288841248
+		}
+	],
+	"flower_empodium": [
+		{
+			"file": "flower_empodium_0.res",
+			"height": 0.2670718729496,
+			"width": 0.250765681266785
+		},
+		{
+			"file": "flower_empodium_1.res",
+			"height": 0.190517604351044,
+			"width": 0.204665407538414
+		},
+		{
+			"file": "flower_empodium_2.res",
+			"height": 0.178614258766174,
+			"width": 0.21688038110733
+		},
+		{
+			"file": "flower_empodium_3.res",
+			"height": 0.168004706501961,
+			"width": 0.194275498390198
+		},
+		{
+			"file": "flower_empodium_4.res",
+			"height": 0.146914809942245,
+			"width": 0.165964052081108
+		}
+	],
+	"flower_gazania": [
+		{
+			"file": "flower_gazania_0.res",
+			"height": 0.0445496402680874,
+			"width": 0.138228297233582
+		},
+		{
+			"file": "flower_gazania_1.res",
+			"height": 0.0480032525956631,
+			"width": 0.268358767032623
+		},
+		{
+			"file": "flower_gazania_2.res",
+			"height": 0.0685212910175323,
+			"width": 0.240856796503067
+		},
+		{
+			"file": "flower_gazania_3.res",
+			"height": 0.0997788161039352,
+			"width": 0.266376227140427
+		},
+		{
+			"file": "flower_gazania_4.res",
+			"height": 0.165538743138313,
+			"width": 0.337565541267395
+		},
+		{
+			"file": "flower_gazania_5.res",
+			"height": 0.124414131045341,
+			"width": 0.28839185833931
+		},
+		{
+			"file": "flower_gazania_6.res",
+			"height": 0.10992281883955,
+			"width": 0.312325924634933
+		},
+		{
+			"file": "flower_gazania_7.res",
+			"height": 0.107436075806618,
+			"width": 0.240857064723969
+		}
+	],
+	"flower_heliophila": [
+		{
+			"file": "flower_heliophila_0.res",
+			"height": 0.267182320356369,
+			"width": 0.336851418018341
+		}
+	],
+	"flower_stinkkruid": [
+		{
+			"file": "flower_stinkkruid_0.res",
+			"height": 0.173916801810265,
+			"width": 0.349874049425125
+		},
+		{
+			"file": "flower_stinkkruid_1.res",
+			"height": 0.149142175912857,
+			"width": 0.248654171824455
+		},
+		{
+			"file": "flower_stinkkruid_2.res",
+			"height": 0.147401466965675,
+			"width": 0.213788837194443
+		},
+		{
+			"file": "flower_stinkkruid_3.res",
+			"height": 0.125125393271446,
+			"width": 0.221244543790817
+		}
+	],
+	"flower_ursinia": [
+		{
+			"file": "flower_ursinia_0.res",
+			"height": 0.140706524252892,
+			"width": 0.425380349159241
+		},
+		{
+			"file": "flower_ursinia_1.res",
+			"height": 0.131267458200455,
+			"width": 0.277245163917542
+		},
+		{
+			"file": "flower_ursinia_2.res",
+			"height": 0.147762522101402,
+			"width": 0.260995388031006
+		},
+		{
+			"file": "flower_ursinia_3.res",
+			"height": 0.133074954152107,
+			"width": 0.186243295669556
+		},
+		{
+			"file": "flower_ursinia_4.res",
+			"height": 0.0743287354707718,
+			"width": 0.15730482339859
+		}
+	],
+	"grass_bermuda_01": [
+		{
+			"file": "grass_bermuda_01_0.res",
+			"height": 0.158255696296692,
+			"width": 1.68647634983063
+		}
+	],
+	"grass_medium_01": [
+		{
+			"file": "grass_medium_01_0.res",
+			"height": 0.140426680445671,
+			"width": 0.184840112924576
+		},
+		{
+			"file": "grass_medium_01_1.res",
+			"height": 0.113965258002281,
+			"width": 0.230594277381897
+		},
+		{
+			"file": "grass_medium_01_2.res",
+			"height": 0.140533864498138,
+			"width": 0.201028600335121
+		},
+		{
+			"file": "grass_medium_01_3.res",
+			"height": 0.28566300868988,
+			"width": 0.149948477745056
+		},
+		{
+			"file": "grass_medium_01_4.res",
+			"height": 0.322546392679214,
+			"width": 0.160956382751465
+		},
+		{
+			"file": "grass_medium_01_5.res",
+			"height": 0.236256182193756,
+			"width": 0.153030872344971
+		},
+		{
+			"file": "grass_medium_01_6.res",
+			"height": 0.0998952761292458,
+			"width": 0.189892113208771
+		},
+		{
+			"file": "grass_medium_01_7.res",
+			"height": 0.144635662436485,
+			"width": 0.202855467796326
+		},
+		{
+			"file": "grass_medium_01_8.res",
+			"height": 0.16859358549118,
+			"width": 0.22137787938118
+		},
+		{
+			"file": "grass_medium_01_9.res",
+			"height": 0.146688789129257,
+			"width": 0.248992443084717
+		},
+		{
+			"file": "grass_medium_01_10.res",
+			"height": 0.125079348683357,
+			"width": 0.275745153427124
+		},
+		{
+			"file": "grass_medium_01_11.res",
+			"height": 0.082388699054718,
+			"width": 0.0290037728846073
+		},
+		{
+			"file": "grass_medium_01_12.res",
+			"height": 0.11245334148407,
+			"width": 0.0737687572836876
+		},
+		{
+			"file": "grass_medium_01_13.res",
+			"height": 0.0602084808051586,
+			"width": 0.0343987345695496
+		},
+		{
+			"file": "grass_medium_01_14.res",
+			"height": 0.0478266850113869,
+			"width": 0.0885824784636497
+		},
+		{
+			"file": "grass_medium_01_15.res",
+			"height": 0.0494507886469364,
+			"width": 0.0852656364440918
+		},
+		{
+			"file": "grass_medium_01_16.res",
+			"height": 0.047074805945158,
+			"width": 0.0688901394605637
+		}
+	],
+	"grass_medium_02": [
+		{
+			"file": "grass_medium_02_0.res",
+			"height": 0.15693037211895,
+			"width": 0.119762413203716
+		},
+		{
+			"file": "grass_medium_02_1.res",
+			"height": 0.178004965186119,
+			"width": 0.199268370866776
+		},
+		{
+			"file": "grass_medium_02_2.res",
+			"height": 0.2316614985466,
+			"width": 0.261677145957947
+		},
+		{
+			"file": "grass_medium_02_3.res",
+			"height": 0.260376513004303,
+			"width": 0.361925721168518
+		},
+		{
+			"file": "grass_medium_02_4.res",
+			"height": 0.403236120939255,
+			"width": 0.433246552944183
+		}
+	],
+	"moss_01": [
+		{
+			"file": "moss_01_0.res",
+			"height": 0.0403679758310318,
+			"width": 0.215259999036789
+		}
+	],
+	"nettle_plant": [
+		{
+			"file": "nettle_plant_0.res",
+			"height": 0.131490781903267,
+			"width": 0.0890633016824722
+		},
+		{
+			"file": "nettle_plant_1.res",
+			"height": 0.10457506030798,
+			"width": 0.0661648362874985
+		},
+		{
+			"file": "nettle_plant_2.res",
+			"height": 0.0625660344958305,
+			"width": 0.0641925930976868
+		},
+		{
+			"file": "nettle_plant_3.res",
+			"height": 0.0217218585312366,
+			"width": 0.0597257018089294
+		},
+		{
+			"file": "nettle_plant_4.res",
+			"height": 0.216774925589561,
+			"width": 0.103591248393059
+		},
+		{
+			"file": "nettle_plant_5.res",
+			"height": 0.192728191614151,
+			"width": 0.0946834236383438
+		}
+	],
+	"periwinkle_plant": [
+		{
+			"file": "periwinkle_plant_0.res",
+			"height": 0.264967799186707,
+			"width": 0.184237897396088
+		},
+		{
+			"file": "periwinkle_plant_1.res",
+			"height": 0.159729689359665,
+			"width": 0.102940499782562
+		},
+		{
+			"file": "periwinkle_plant_2.res",
+			"height": 0.299941182136536,
+			"width": 0.16746312379837
+		},
+		{
+			"file": "periwinkle_plant_3.res",
+			"height": 0.392891198396683,
+			"width": 0.231136530637741
+		},
+		{
+			"file": "periwinkle_plant_4.res",
+			"height": 0.20579819381237,
+			"width": 0.140894427895546
+		},
+		{
+			"file": "periwinkle_plant_5.res",
+			"height": 0.382788389921188,
+			"width": 0.320745468139648
+		}
+	],
+	"shrub_02": [
+		{
+			"file": "shrub_02_0.res",
+			"height": 1.68897712230682,
+			"width": 1.64100694656372
+		},
+		{
+			"file": "shrub_02_1.res",
+			"height": 1.50631260871887,
+			"width": 1.27991688251495
+		},
+		{
+			"file": "shrub_02_2.res",
+			"height": 1.31476664543152,
+			"width": 2.28506231307983
+		},
+		{
+			"file": "shrub_02_3.res",
+			"height": 1.22923791408539,
+			"width": 1.09800398349762
+		}
+	],
+	"shrub_03": [
+		{
+			"file": "shrub_03_0.res",
+			"height": 0.402783811092377,
+			"width": 0.200623840093613
+		},
+		{
+			"file": "shrub_03_1.res",
+			"height": 0.352503836154938,
+			"width": 0.184303045272827
+		},
+		{
+			"file": "shrub_03_2.res",
+			"height": 0.304394781589508,
+			"width": 0.113155841827393
+		},
+		{
+			"file": "shrub_03_3.res",
+			"height": 0.255551218986511,
+			"width": 0.112772464752197
+		}
+	],
+	"shrub_04": [
+		{
+			"file": "shrub_04_0.res",
+			"height": 0.204930201172829,
+			"width": 0.562970578670502
+		}
+	],
+	"shrub_sorrel_01": [
+		{
+			"file": "shrub_sorrel_01_0.res",
+			"height": 0.0580036789178848,
+			"width": 0.352099359035492
+		}
+	],
+	"weed_plant_02": [
+		{
+			"file": "weed_plant_02_0.res",
+			"height": 0.0724576413631439,
+			"width": 0.290919423103333
+		},
+		{
+			"file": "weed_plant_02_1.res",
+			"height": 0.0676928460597992,
+			"width": 0.198536098003387
+		},
+		{
+			"file": "weed_plant_02_2.res",
+			"height": 0.0549237988889217,
+			"width": 0.143451482057571
+		},
+		{
+			"file": "weed_plant_02_3.res",
+			"height": 0.0389461331069469,
+			"width": 0.154065370559692
+		},
+		{
+			"file": "weed_plant_02_4.res",
+			"height": 0.0400792174041271,
+			"width": 0.119249939918518
+		}
+	]
+}

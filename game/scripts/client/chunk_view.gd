@@ -5,6 +5,7 @@ extends Node3D
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const GroundPlants = preload("res://scripts/client/ground_plants.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const Assets = preload("res://scripts/client/assets.gd")
@@ -1304,6 +1305,11 @@ func _grow_grass() -> void:
 			add_child(tile)
 			tile.add_to_group(GRASS_GROUP)
 			_grass_tiles.append(tile)
+		# Photoscanned plants of the same tile, drawn only up close.
+		var source = _grass_source
+		for plant in GroundPlants.build_tile(source.origin, _grass_next_tile - 1, int(Defs.CHUNK_SIZE / GroundPlants.TILE),
+				func(lx: float, lz: float) -> Dictionary: return GrassField.sample(source, lx, lz)):
+			add_child(plant)
 		_grass_spent_usec += Time.get_ticks_usec() - started
 
 

@@ -1,0 +1,2 @@
+Poly Haven (https://polyhaven.com) materials, CC0 1.0. 1k diffuse; normal (OpenGL), roughness and displacement shrunk to 512 px.
+Fetched by tools/fetch_polyhaven_textures.sh.

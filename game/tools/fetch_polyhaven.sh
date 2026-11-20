@@ -12,7 +12,12 @@ Barrel_01 barrel_03 barrel_stove metal_jerrycan metal_jerrycan_green old_militar
 old_tyre rusted_wheel_rim_01 concrete_road_barrier metal_trash_can trashbag propane_tank portable_generator street_lamp_01
 fire_hydrant wooden_picnic_table plastic_crate_01 cardboard_box_01 wooden_crate_02 worn_metal_rack tool_cart
 painted_wooden_bench rock_07 rock_09 namaqualand_boulder_04 tree_stump_02 dead_tree_trunk
-dry_branches_medium_01 bark_debris_01 dead_quiver_branch_01 dead_quiver_branch_02 dead_quiver_trunk root_cluster_01 pine_roots single_root namaqualand_boulders_01 namaqualand_rocks_01 namaqualand_stones_01 namaqualand_boulder_05 coast_rocks_01"
+dry_branches_medium_01 bark_debris_01 dead_quiver_branch_01 dead_quiver_branch_02 dead_quiver_trunk root_cluster_01 pine_roots single_root namaqualand_boulders_01 namaqualand_rocks_01 namaqualand_stones_01 namaqualand_boulder_05 coast_rocks_01
+grass_medium_01 grass_medium_02 grass_bermuda_01 dandelion_01 celandine_01 flower_heliophila nettle_plant
+weed_plant_02 shrub_sorrel_01 periwinkle_plant moss_01
+fern_02 shrub_01 shrub_02 shrub_03 shrub_04 flower_empodium flower_gazania flower_ursinia flower_stinkkruid"
+# Ground plants are seen up close in first person: keep their 1k textures.
+KEEP_1K="grass_medium_01 grass_medium_02 grass_bermuda_01 dandelion_01 celandine_01 flower_heliophila nettle_plant weed_plant_02 shrub_sorrel_01 periwinkle_plant moss_01 fern_02 shrub_01 shrub_02 shrub_03 shrub_04 flower_empodium flower_gazania flower_ursinia flower_stinkkruid"
 [ $# -gt 0 ] && MODELS="$*"
 for id in $MODELS; do
   folder="$HERE/assets/models/polyhaven/$id"
@@ -35,7 +40,7 @@ for rel, info in g.get("include", {}).items():
     fetch(info["url"], path)
 ' "$id" "$folder"
   # 512 px textures are plenty for props seen from the top-down camera.
-  if command -v sips >/dev/null; then
+  if command -v sips >/dev/null && [[ " $KEEP_1K " != *" $id "* ]]; then
     find "$folder" \( -name "*.jpg" -o -name "*.png" \) -exec sips -Z 512 {} \; >/dev/null
   fi
   echo "fetched $id"
