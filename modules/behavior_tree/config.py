@@ -7,7 +7,7 @@ def configure(env):
 
 
 def get_doc_classes():
-    return ["BehaviorTree", "AIVisualSensor2D"]
+    return ["BehaviorTree", "AIVisualSensor2D", "AIHearingSensor2D"]
 
 
 def get_doc_path():
