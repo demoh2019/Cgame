@@ -2,6 +2,7 @@ extends CanvasLayer
 ## All of the interface, built in code: vitals, zone, inventory, crafting and a message log.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
 const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
@@ -831,7 +832,7 @@ func _build() -> void:
 	market_title.text = "Survivor market - ONLINE listings (hub)"
 	inventory_box.add_child(market_title)
 	_market_status = Label.new()
-	_market_status.text = "Refresh to browse listings. Stock is checked on purchase."
+	_market_status.text = "Refresh to browse listings. %d%% seller tax on successful sales." % MarketBoard.SALE_TAX_PERCENT
 	inventory_box.add_child(_market_status)
 	_market_select = OptionButton.new()
 	_market_select.custom_minimum_size.x = 320.0
@@ -1622,6 +1623,11 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		elif str(data.get("action", "")) == "list":
 			_market_listings = data.get("orders", [])
 			_refresh_market_options()
+		elif str(data.get("action", "")) == "bought":
+			say("Market: bought %dx %s for %d silver (tax %d; seller receives %d)." % [
+				int(data.get("quantity", 0)), str(data.get("item", "")), int(data.get("total", 0)),
+				int(data.get("tax", 0)), int(data.get("seller_net", 0))])
+			client.market_list()
 		else:
 			say("Market: %s %s" % [str(data.get("action", "updated")), str(data.get("item", ""))])
 			client.market_list()

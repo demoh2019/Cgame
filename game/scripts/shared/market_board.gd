@@ -3,15 +3,26 @@ extends RefCounted
 ## nothing is reserved/debited until the buyer and seller complete an atomic exchange.
 ## This deliberately avoids orphaned escrow while cross-account durable commits
 ## are not yet provided by the Nakama persistence layer.
+##
+## Market sales burn a bounded seller-side commission as a silver sink.
+## Direct player barter remains untaxed.
 
 const Defs = preload("res://scripts/shared/defs.gd")
-const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
+const Inventory = preload("res://scripts/shared/inventory.gd")
 
 const MAX_QUANTITY := 40
 const MAX_UNIT_PRICE := 2000
 const MAX_LISTINGS := 80
 const MAX_PER_SELLER := 4
 const LISTING_LIFETIME := 1800.0
+const SALE_TAX_PERCENT := 3
+
+
+static func sale_tax(total: int) -> int:
+	# Seller always earns at least one silver, even for a 1-silver listing.
+	if total <= 1:
+		return 0
+	return mini(ceili(float(total) * float(SALE_TAX_PERCENT) / 100.0), total - 1)
 
 
 static func validate_listing(carried, item_id: String, quantity: int, unit_price: int) -> String:
@@ -26,9 +37,13 @@ static func validate_listing(carried, item_id: String, quantity: int, unit_price
 	return ""
 
 
-## Revalidate BOTH backpacks when a listing is purchased, never on the client.
-## Item and silver are moved together or no change is committed.
+## Revalidate BOTH backpacks at settlement. All item and silver transfers,
+## including the tax burn, happen on staged inventories and only commit together.
+## Unlike a gross-first barter transfer this also handles the silver-stack edge:
+## a seller may have room for net proceeds but not for the untaxed gross total.
 static func purchase(buyer, seller, listing: Dictionary, quantity: int) -> Dictionary:
+	if buyer == null or seller == null:
+		return {"ok": false, "reason": "invalid_participants"}
 	if buyer == seller:
 		return {"ok": false, "reason": "self_purchase"}
 	if quantity < 1 or quantity > int(listing.get("remaining", 0)):
@@ -40,7 +55,21 @@ static func purchase(buyer, seller, listing: Dictionary, quantity: int) -> Dicti
 	if quantity > MAX_QUANTITY or quantity > Defs.stack_size(item_id):
 		return {"ok": false, "reason": "invalid_quantity"}
 	var total: int = price * quantity # Bounded by 80,000 (below silver stack capacity).
-	var outcome: Dictionary = PlayerTrade.exchange(seller, buyer, {item_id: quantity}, {"silver": total})
-	if not outcome.get("ok", false):
-		return outcome
-	return {"ok": true, "item": item_id, "quantity": quantity, "total": total}
+	var tax: int = sale_tax(total)
+	var seller_net: int = total - tax
+	var staged_seller = Inventory.new(seller.slots.size())
+	var staged_buyer = Inventory.new(buyer.slots.size())
+	staged_seller.load_dict(seller.to_dict())
+	staged_buyer.load_dict(buyer.to_dict())
+	if not staged_seller.remove(item_id, quantity):
+		return {"ok": false, "reason": "missing_items"}
+	if not staged_buyer.remove("silver", total):
+		return {"ok": false, "reason": "missing_items"}
+	if staged_buyer.add(item_id, quantity) != 0 or staged_seller.add("silver", seller_net) != 0:
+		return {"ok": false, "reason": "no_space"}
+	staged_seller.unequip_missing()
+	staged_buyer.unequip_missing()
+	seller.load_dict(staged_seller.to_dict())
+	buyer.load_dict(staged_buyer.to_dict())
+	return {"ok": true, "item": item_id, "quantity": quantity,
+		"total": total, "tax": tax, "seller_net": seller_net}

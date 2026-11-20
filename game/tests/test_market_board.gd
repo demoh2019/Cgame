@@ -32,11 +32,20 @@ func run(t) -> void:
 	var paid := MarketBoard.purchase(buyer_inv, seller_inv, advert, 3)
 	t.check(paid["ok"], "atomic purchase succeeds")
 	t.eq(seller_inv.count("wood_1"), 7, "seller gives 3 wood")
-	t.eq(seller_inv.count("silver"), 21, "seller earns 21 silver")
+	t.eq(seller_inv.count("silver"), 20, "seller receives 20 after 1 silver tax")
 	t.eq(buyer_inv.count("wood_1"), 3, "buyer gets 3 wood")
 	t.eq(buyer_inv.count("silver"), 79, "buyer pays 21 silver")
 	t.eq(seller_inv.count("wood_1") + buyer_inv.count("wood_1"), 10, "wood conserved")
-	t.eq(seller_inv.count("silver") + buyer_inv.count("silver"), 100, "currency conserved")
+	t.eq(seller_inv.count("silver") + buyer_inv.count("silver"), 99,
+		"one market-tax silver is removed from circulation")
+	t.eq(paid["total"], 21, "buyer pays advertised gross amount")
+	t.eq(paid["tax"], 1, "commission rounds up to one silver")
+	t.eq(paid["seller_net"], 20, "seller receives gross less commission")
+	t.eq(MarketBoard.sale_tax(1), 0, "a one-silver trade still pays its seller")
+	t.eq(MarketBoard.sale_tax(2), 1, "minimum seller income is one silver")
+	t.eq(MarketBoard.sale_tax(33), 1, "tax rounds upward at three percent")
+	t.eq(MarketBoard.sale_tax(34), 2, "tax jumps only at correct boundary")
+	t.eq(MarketBoard.sale_tax(100), 3, "full percentage applied to larger trades")
 	var initial_a: Dictionary = seller_inv.to_dict()
 	var initial_b: Dictionary = buyer_inv.to_dict()
 	t.eq(MarketBoard.purchase(buyer_inv, seller_inv, advert, 8)["reason"], "missing_items",
@@ -51,6 +60,28 @@ func run(t) -> void:
 	t.eq(tiny_buyer.to_dict(), initial_b, "no silver deducted on full backpack")
 	t.eq(MarketBoard.purchase(seller_inv, seller_inv, advert, 1)["reason"], "self_purchase",
 		"self-purchase cannot manufacture currency")
+
+	t.current = "seller silver capacity and tax transaction rollback"
+	var full_seller := Inventory.new(2)
+	var modest_buyer := Inventory.new(2)
+	full_seller.add("wood_1", 1)
+	full_seller.add("silver", 99999)
+	modest_buyer.add("silver", 2)
+	var low_order: Dictionary = {"item": "wood_1", "price": 2, "remaining": 1}
+	t.check(MarketBoard.purchase(modest_buyer, full_seller, low_order, 1)["ok"],
+		"net settlement fits even when gross sale would overflow the seller's silver stack")
+	t.eq(full_seller.count("silver"), 100000, "seller receives net 1 silver at the cap")
+	t.eq(modest_buyer.count("silver"), 0, "buyer still pays full gross 2 silver")
+	t.eq(modest_buyer.count("wood_1"), 1, "buyer receives item exactly once")
+	full_seller.add("wood_1", 1)
+	modest_buyer.add("silver", 3)
+	var seller_before: Dictionary = full_seller.to_dict()
+	var buyer_before: Dictionary = modest_buyer.to_dict()
+	low_order["price"] = 3
+	t.eq(MarketBoard.purchase(modest_buyer, full_seller, low_order, 1)["reason"],
+		"no_space", "sale rejected when net proceeds would overflow seller's stack")
+	t.eq(full_seller.to_dict(), seller_before, "seller is unchanged after failed net settlement")
+	t.eq(modest_buyer.to_dict(), buyer_before, "buyer is unchanged after failed net settlement")
 
 	t.current = "server board, partial fills and replay"
 	var server := GameServer.new(WorldGen.new(17), 9)
@@ -87,9 +118,14 @@ func run(t) -> void:
 	t.eq(server.market_orders[listing_id]["remaining"], 6, "six units remain listed")
 	t.eq(seller.inventory.count("wood_1"), 8, "seller debited four units")
 	t.eq(buyer.inventory.count("wood_1"), 4, "buyer owns four units")
-	t.eq(seller.inventory.count("silver"), 20, "seller paid once")
+	t.eq(seller.inventory.count("silver"), 19, "seller paid once after tax")
 	t.eq(buyer.inventory.count("silver"), 80, "buyer spent twenty")
 	t.eq(server.market_sales.size(), 1, "one receipt in bounded session audit")
+	t.eq(first_sale["total"], 20, "buyer sees the agreed gross total")
+	t.eq(first_sale["tax"], 1, "receipt discloses charged seller commission")
+	t.eq(first_sale["seller_net"], 19, "receipt discloses net seller payout")
+	t.eq(server.market_sales[0]["tax"], 1, "market session audit records tax once")
+	t.eq(server.market_sales[0]["seller_net"], 19, "audit records net payout")
 	t.eq(server.cmd_market_buy(200, listing_id, 7, 2)["reason"], "invalid_quantity",
 		"cannot exceed remaining listing amount")
 	t.eq(server.cmd_market_buy(200, listing_id, 7, 2)["reason"], "invalid_quantity",
@@ -103,8 +139,12 @@ func run(t) -> void:
 	t.check(not server.market_orders.has(listing_id), "filled listing is removed")
 	t.eq(server.cmd_market_buy(200, listing_id, 1, 4)["reason"], "unknown_listing",
 		"replayed purchase cannot double-award items")
-	t.eq(seller.inventory.count("silver"), 50, "seller receives 50 silver total")
+	t.eq(seller.inventory.count("silver"), 48, "seller receives 48 after two market sales taxes")
 	t.eq(buyer.inventory.count("wood_1"), 10, "buyer gets 10 wood total")
+	t.eq(server.market_sales[1]["tax"], 1, "second partial fill is independently taxed")
+	t.eq(server.market_sales[1]["seller_net"], 29, "second sale pays 29 silver net")
+	t.eq(seller.inventory.count("silver") + buyer.inventory.count("silver"), 98,
+		"exactly 2 silver was burned across both market fills")
 	t.check(seller.dirty_inventory and buyer.dirty_inventory, "both inventories marked dirty")
 	t.check(seller.dirty_character and buyer.dirty_character, "both saves marked dirty")
 

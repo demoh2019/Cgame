@@ -2089,6 +2089,7 @@ func _execute_market_buy(peer_id: int, listing_id: int, quantity: int) -> Dictio
 		"id": receipt_id, "buyer": peer_id, "seller": seller_id,
 		"listing": listing_id, "item": listing["item"],
 		"quantity": quantity, "total": transaction["total"],
+		"tax": transaction["tax"], "seller_net": transaction["seller_net"],
 	})
 	if market_sales.size() > 128:
 		market_sales.pop_front()
@@ -2096,6 +2097,7 @@ func _execute_market_buy(peer_id: int, listing_id: int, quantity: int) -> Dictio
 		"ok": true, "action": "bought", "id": listing_id,
 		"receipt": receipt_id, "quantity": quantity,
 		"item": listing["item"], "total": transaction["total"],
+		"tax": transaction["tax"], "seller_net": transaction["seller_net"],
 	}
 
 
