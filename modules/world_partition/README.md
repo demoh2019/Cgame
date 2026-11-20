@@ -43,7 +43,7 @@ func _ready() -> void:
     world.set_cell_scene(Vector2i(-1, 0), "res://world/-1_0.tscn")
     world.set_cell_scene(Vector2i(10, -4), "res://world/distant_outpost.tscn")
     world.pin_cell(Vector2i(10, -4)) # now registered, load in background
-    world.set_streaming_source("survey", Vector2i(10, -4), 1, 2, 75) # register matching region scenes separately
+    world.set_streaming_source("survey", Vector2i(10, -4), 0, 1, 75) # radius 0 needs only the configured center cell
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
@@ -64,7 +64,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 59 Doctest cases across `test_world_partition_3d.h` (23) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 61 Doctest cases across `test_world_partition_3d.h` (25) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
