@@ -795,6 +795,13 @@ func c_skill(dir_x: float, dir_z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_parry() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "parry", sim.cmd_parry(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_dodge(dir_x: float, dir_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -924,7 +931,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"site_discovered", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
+		"site_discovered", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
 		"party_aid", "party_triage":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer

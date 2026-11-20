@@ -429,6 +429,11 @@ func guardian_taunt() -> void:
 	net.c_guardian_taunt.rpc_id(1)
 
 
+func parry() -> void:
+	# Facing and equipped weapon are rechecked by the authoritative server.
+	net.c_parry.rpc_id(1)
+
+
 func dodge(direction: Vector2) -> void:
 	# Server owns the travel distance and cooldown; reconciliation handles positioning.
 	net.c_dodge.rpc_id(1, direction.x, direction.y)

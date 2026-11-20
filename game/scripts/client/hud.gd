@@ -551,6 +551,12 @@ func _build() -> void:
 	guardian_button.tooltip_text = "Melee weapon, party, 25 combat energy, 20s cooldown; defend nearby allies"
 	guardian_button.pressed.connect(func() -> void: client.guardian_taunt())
 	inventory_box.add_child(guardian_button)
+	var parry_button := Button.new()
+	parry_button.name = "MeleeParry"
+	parry_button.text = "Parry incoming infected (F8)"
+	parry_button.tooltip_text = "Hold real melee weapon; 20 stamina, 0.45s timing window, 4s cooldown. Front infected melee only."
+	parry_button.pressed.connect(func() -> void: client.parry())
+	inventory_box.add_child(parry_button)
 	var fortify_button := Button.new()
 	fortify_button.name = "FortifyOutpost"
 	fortify_button.text = "Fortify controlled outpost (4m, wood + stone)"
@@ -955,6 +961,9 @@ func _on_event(event: Dictionary) -> void:
 				say("You died: %s" % ("full loot" if bool(event.get("full_loot", true)) else "gear retained"))
 			else:
 				say("A survivor was killed.")
+		"parried":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Parried infected attack! 70% less damage and wounds; enemy staggered.")
 		"stealth_ambush":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Silent ambush! +45% melee damage against unaware infected.")
@@ -1087,6 +1096,12 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "parry":
+		if bool(data.get("ok", false)):
+			say("Parry ready for 0.45s. Face the infected and time its strike!")
+		else:
+			say("Parry denied: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "survey_ruins":
 		if bool(data.get("ok", false)):
 			say("Ruin survey: T%d cache at X:%d Z:%d — private marker for 75s." % [
@@ -1422,6 +1437,11 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	var parry_ready: float = float(client.you.get("parry_window", 0.0))
+	if parry_ready > 0.0:
+		_info_label.text += "\nPARRY ACTIVE %.2fs — face incoming infected!" % parry_ready
+	elif float(client.you.get("parry_cooldown", 0.0)) > 0.0:
+		_info_label.text += "\nPARRY: %.1fs cooldown (F8)" % float(client.you["parry_cooldown"])
 	var guild: Dictionary = client.you.get("guild", {})
 	if str(guild.get("id", "")) != "":
 		var nearby_mates := 0

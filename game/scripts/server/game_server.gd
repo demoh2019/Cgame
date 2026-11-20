@@ -44,6 +44,7 @@ const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
+const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
@@ -153,6 +154,8 @@ class Player:
 	var skill_timer: float = 0.0
 	var dodge_timer: float = 0.0
 	var dodge_immunity: float = 0.0
+	var parry_cooldown: float = 0.0 # Server-owned timed melee defense.
+	var parry_window: float = 0.0 # First valid infected melee consumes it.
 	var combat_energy: float = 100.0
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
@@ -587,6 +590,8 @@ func _spawn_player(player: Player) -> void:
 	player.skill_timer = 0.0
 	player.dodge_timer = 0.0
 	player.dodge_immunity = 0.0
+	player.parry_cooldown = 0.0
+	player.parry_window = 0.0
 	player.party_aid_timer = 0.0
 	player.feast_timer = 0.0
 	player.guardian_timer = 0.0
@@ -2893,6 +2898,35 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 
 ## Classless evasion: no client-supplied distance, speed, stamina or invulnerability.
 ## Reuse swept-in-small-steps world collision and restrict zombie immunity to 0.30 s.
+## Timed, one-hit melee parry. Facing, ownership and the actual enemy strike
+## are evaluated on the authoritative server; no client target is accepted.
+func cmd_parry(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if player.parry_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown", "remaining": player.parry_cooldown}
+	if player.attack_timer > 0.0 or player.dodge_immunity > 0.0:
+		return {"ok": false, "reason": "attack_lock"}
+	if not MeleeParry.equipped(player.inventory):
+		return {"ok": false, "reason": "need_melee"}
+	if player.survival.hunger <= 5.0 or player.survival.thirst <= 5.0:
+		return {"ok": false, "reason": "exhausted"}
+	if player.survival.stamina < MeleeParry.STAMINA_COST:
+		return {"ok": false, "reason": "no_stamina"}
+	player.survival.stamina -= MeleeParry.STAMINA_COST
+	player.survival.stamina_recovery_delay = Defs.STAMINA_RECOVERY_DELAY
+	player.parry_cooldown = MeleeParry.COOLDOWN_SECONDS
+	player.parry_window = MeleeParry.WINDOW_SECONDS
+	player.attack_timer = maxf(player.attack_timer, MeleeParry.ATTACK_LOCK)
+	player.action = {}
+	player.dirty_character = true
+	return {"ok": true, "window": player.parry_window,
+		"cooldown": player.parry_cooldown, "stamina": player.survival.stamina}
+
+
 func cmd_dodge(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -2921,6 +2955,7 @@ func cmd_dodge(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	player.survival.stamina_recovery_delay = Defs.STAMINA_RECOVERY_DELAY
 	player.dodge_timer = Evasion.COOLDOWN
 	player.dodge_immunity = Evasion.INVULNERABLE_TO_INFECTED
+	player.parry_window = 0.0 # An actual dodge cancels the remaining parry.
 	player.attack_timer = maxf(player.attack_timer, Evasion.ATTACK_LOCK)
 	player.action = {}
 	player.noise_radius = Defs.SPRINT_NOISE_RADIUS
@@ -3593,6 +3628,8 @@ func _tick_players(delta: float) -> void:
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
 		player.dodge_timer = maxf(player.dodge_timer - delta, 0.0)
 		player.dodge_immunity = maxf(player.dodge_immunity - delta, 0.0)
+		player.parry_cooldown = maxf(0.0, player.parry_cooldown - maxf(0.0, delta))
+		player.parry_window = maxf(0.0, player.parry_window - maxf(0.0, delta))
 		player.noise_timer = maxf(player.noise_timer - delta, 0.0)
 		if player.noise_timer <= 0.0:
 			player.noise_radius = 0.0
@@ -4165,11 +4202,18 @@ func _tick_zombies(delta: float) -> void:
 				if victim.dodge_immunity > 0.0:
 					events.append({"type": "evaded", "peer": victim.id, "zombie": zombie.id})
 					continue
+				var parried: bool = MeleeParry.can_block(victim, zombie)
+				if parried:
+					victim.parry_window = 0.0
+					zombie.attack_timer = maxf(zombie.attack_timer, MeleeParry.STAGGER_SECONDS)
+					events.append({"type": "parried", "peer": victim.id, "zombie": zombie.id})
 				var armor_id: String = victim.inventory.armor
 				var armor_owned: bool = armor_id != "" and victim.inventory.count(armor_id) > 0
 				var damage: float = Combat.apply_armor(float(result["damage"]),
 					armor_id if armor_owned else "")
 				damage = _infected_damage_for(victim, damage)
+				if parried:
+					damage *= MeleeParry.DAMAGE_FACTOR
 				var applied: float = _hurt_player(victim, damage)
 				# Only real carried armor protects from infected secondary wounds.
 				# PvP bleeding continues to follow its ordinary rules.
@@ -4179,6 +4223,9 @@ func _tick_zombies(delta: float) -> void:
 				var wound_infection: float = Combat.infected_wound_amount(
 					float(Defs.ZOMBIE_INFECTION_PER_HIT.get(zombie.type, 0.0)),
 					armor_id, armor_owned, "infection")
+				if parried:
+					wound_bleeding *= MeleeParry.WOUND_FACTOR
+					wound_infection *= MeleeParry.WOUND_FACTOR
 				# Nearby living party guardians wearing BOTH earned relic pieces
 				# provide a single nonstacking PvE wound ward. PvP is untouched.
 				var warded: bool = WardenAura.active_for(victim, players, parties, world)
@@ -4189,6 +4236,8 @@ func _tick_zombies(delta: float) -> void:
 					events.append({"type": "bleeding", "peer": victim.id,
 						"severity": victim.survival.bleeding, "source": zombie.type})
 				var trauma: float = float(Defs.ZOMBIE_FRACTURE_PER_HIT.get(zombie.type, 0.0))
+				if parried:
+					trauma *= MeleeParry.WOUND_FACTOR
 				if applied > 0.0 and _alive(victim) and victim.survival.add_fracture(trauma):
 					victim.dirty_character = true
 					events.append({"type": "fracture", "peer": victim.id,
@@ -4637,6 +4686,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"warden_ward": WardenAura.active_for(player, players, parties, world),
 			"guardian_brace": player.guardian_brace,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
+			"parry_cooldown": player.parry_cooldown, "parry_window": player.parry_window,
 			"rest_cooldown": player.rest_cooldown,
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
 			"stim_cooldown": player.stim_cooldown,
