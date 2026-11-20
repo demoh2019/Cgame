@@ -26,6 +26,10 @@ uniform vec3 sun_color : source_color = vec3(1.0, 0.95, 0.82);
 uniform bool use_cached_radiance = false;
 // Natural sunlight scattering in thin atmospheric dust; no extra textures.
 uniform float aerosol_scattering_strength = 0.0;
+// Reuse the sun/moon directional light; phase is driven by authoritative
+// world days and uploaded with the existing incremental radiance cadence.
+uniform float moon_phase = 0.5;
+uniform float moon_detail_strength = 0.0;
 
 float hash(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -94,7 +98,53 @@ void sky() {
 		float disc = smoothstep(0.9993, 0.9997, facing);
 		float glow = pow(max(facing, 0.0), 220.0) * 0.6 + pow(max(facing, 0.0), 14.0) * 0.12;
 		float visible = 1.0 - storm * 0.85;
-		color += sun_color * (disc * 2.5 + glow) * visible * mix(0.35, 1.0, daylight);
+		// Dawn transitions from the lunar body into the sun: never paint the
+		// same hot solar disc at night as though it were a full white moon.
+		float day_disc = smoothstep(0.04, 0.20, daylight);
+		color += sun_color * (disc * 2.5 + glow) * visible * day_disc;
+
+		// Physically-inspired lunar phase without a texture/mesh/second light.
+		// Only execute the expensive surface detail inside a tiny cone around
+		// the night directional light; the entire rest of the sky skips it.
+		if (daylight < 0.20 && facing > 0.9992 && up > 0.0) {
+			vec3 lunar_direction = normalize(sun_direction);
+			vec3 stable_up = abs(lunar_direction.y) > 0.96
+				? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+			vec3 lunar_right = normalize(cross(stable_up, lunar_direction));
+			vec3 lunar_up = normalize(cross(lunar_direction, lunar_right));
+			vec2 lunar_uv = vec2(dot(dir, lunar_right), dot(dir, lunar_up)) / 0.012;
+			float lunar_radius = length(lunar_uv);
+			float pixel_width = clamp(length(fwidth(lunar_uv)) * 0.40, 0.012, 0.22);
+			float lunar_disc = 1.0 - smoothstep(1.0 - pixel_width,
+				1.0 + pixel_width, lunar_radius);
+			float angle = fract(moon_phase) * 2.0 * PI;
+			float terminator = cos(angle) * sqrt(max(1.0 - lunar_uv.y * lunar_uv.y, 0.0));
+			float side = moon_phase < 0.5 ? 1.0 : -1.0;
+			float lunar_light = smoothstep(-pixel_width, pixel_width,
+				side * lunar_uv.x - terminator);
+			float illuminated = 0.5 - 0.5 * cos(angle);
+			float crater_shading = 1.0;
+			if (moon_detail_strength > 0.001 && lunar_disc > 0.001) {
+				// Three broad maria, evaluated only on the moon disc. Soft craters
+				// preserve silhouette at zoom without requiring imported art.
+				vec2 crater_a = lunar_uv - vec2(-0.32, 0.24);
+				vec2 crater_b = lunar_uv - vec2(0.24, -0.31);
+				vec2 crater_c = lunar_uv - vec2(0.39, 0.27);
+				float maria = exp(-8.0 * dot(crater_a, crater_a)) * 0.21
+					+ exp(-13.0 * dot(crater_b, crater_b)) * 0.18
+					+ exp(-17.0 * dot(crater_c, crater_c)) * 0.12;
+				crater_shading -= maria * moon_detail_strength;
+			}
+			float lunar_visibility = (1.0 - day_disc) * (1.0 - storm * 0.85);
+			vec3 earthshine = vec3(0.04, 0.06, 0.12) * lunar_disc
+				* (1.0 - lunar_light) * (1.0 - illuminated * 0.7);
+			vec3 moon_surface = vec3(0.70, 0.77, 0.91) * lunar_disc
+				* lunar_light * crater_shading * 1.85;
+			float lunar_halo = pow(max(facing, 0.0), 1450.0)
+				* (0.04 + illuminated * 0.12);
+			color += (earthshine + moon_surface + vec3(0.30, 0.39, 0.61) * lunar_halo)
+				* lunar_visibility;
+		}
 		// Single-scattering-inspired warm horizon halo reuses the existing glow term.
 		// No additional noise lookups or texture taps on low-end hardware.
 		float horizon_halo = 1.0 - smoothstep(0.04, 0.42, abs(up));
