@@ -8,6 +8,7 @@ extends Node3D
 ## samples are separated by exactly one world unit (no physics-shape scaling).
 
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
+const TerrainTileCache = preload("res://scripts/terrain_tile_cache.gd")
 const CELL_SIZE: int = 32
 const SEGMENTS: int = 32
 const VERTICES_PER_SIDE: int = SEGMENTS + 1
@@ -22,6 +23,17 @@ func _ready() -> void:
 
 
 func _build_patch() -> void:
+    # The same PackedScene path creates independent tiles at different origins.
+    # Avoid regenerating 1,089 heights/normals and three LOD index arrays when
+    # revisiting a recent cell: resources are cached, Node3D instances are not.
+    var origin: Vector3 = global_position
+    var cell := Vector2i(roundi(origin.x / float(CELL_SIZE)),
+        roundi(origin.z / float(CELL_SIZE)))
+    var cached: Dictionary = TerrainTileCache.lookup(cell)
+    if not cached.is_empty():
+        _create_patch_nodes(cached["mesh"], cached["shape"])
+        return
+
     var vertices := PackedVector3Array()
     var normals := PackedVector3Array()
     var colors := PackedColorArray()
@@ -35,7 +47,6 @@ func _build_patch() -> void:
     uvs.resize(vertex_count)
     heights.resize(vertex_count)
 
-    var origin: Vector3 = global_position
     for z in range(VERTICES_PER_SIDE):
         for x in range(VERTICES_PER_SIDE):
             var idx: int = z * VERTICES_PER_SIDE + x
@@ -84,16 +95,21 @@ func _build_patch() -> void:
     material.roughness = 0.97
     mesh.surface_set_material(0, material)
 
+    var collision_shape := HeightMapShape3D.new()
+    collision_shape.map_width = VERTICES_PER_SIDE
+    collision_shape.map_depth = VERTICES_PER_SIDE
+    collision_shape.map_data = heights
+
+    TerrainTileCache.insert(cell, mesh, collision_shape)
+    _create_patch_nodes(mesh, collision_shape)
+
+
+func _create_patch_nodes(mesh: ArrayMesh, collision_shape: HeightMapShape3D) -> void:
     visual = MeshInstance3D.new()
     visual.name = "GroundMesh"
     visual.mesh = mesh
     visual.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
     add_child(visual)
-
-    var collision_shape := HeightMapShape3D.new()
-    collision_shape.map_width = VERTICES_PER_SIDE
-    collision_shape.map_depth = VERTICES_PER_SIDE
-    collision_shape.map_data = heights
 
     body = StaticBody3D.new()
     body.name = "GroundCollision"
