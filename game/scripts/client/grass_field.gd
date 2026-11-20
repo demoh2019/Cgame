@@ -461,6 +461,9 @@ static func footprints(chunk_data: Dictionary) -> PackedVector3Array:
 			if not (entity is Dictionary) or not entity.has("x") or not entity.has("z"):
 				continue
 			var radius: float = float(entity.get("radius", 0.0))
+			# Buildings, ruins and towers look wider than their round collision core.
+			if key == "structures" and str(entity.get("kind", "")) in ["building", "ruin", "monument", "tower", "windmill"]:
+				radius *= 1.45
 			if radius > 0.05 and is_finite(radius):
 				result.append(Vector3(float(entity["x"]), float(entity["z"]), minf(radius, 12.0)))
 	return result

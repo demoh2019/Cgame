@@ -1541,7 +1541,17 @@ func _anchored_spots(entry: Dictionary, anchors: Array, origin: Vector2, rng: Ra
 func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary) -> void:
 	if _raw_heights.size() == SAMPLES * SAMPLES and _biome_names.size() == BIOME_TEXELS * BIOME_TEXELS:
 		_grass_source = GrassField.Source.new(origin, _raw_heights, SAMPLES, _biome_names, BIOME_TEXELS, _road_data, _patches)
-		_grass_source.clear = GrassField.footprints(data)
+		# Objects of neighbouring chunks can overhang this one (a house on the border).
+		var chunk_rect := Rect2(origin, Vector2.ONE * Defs.CHUNK_SIZE)
+		var here_cell := WorldGen.cell_of(origin.x + 1.0, origin.y + 1.0)
+		var prints := PackedVector3Array()
+		for dx in range(-1, 2):
+			for dz in range(-1, 2):
+				var source_data: Dictionary = data if dx == 0 and dz == 0 else _world.chunk(Vector2i(here_cell.x + dx, here_cell.y + dz))
+				for f in GrassField.footprints(source_data):
+					if chunk_rect.grow(f.z).has_point(Vector2(f.x, f.y)):
+						prints.append(f)
+		_grass_source.clear = prints
 		set_process(true)
 	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
 	if center.length() < Defs.HUB_SAFE_RADIUS + 30.0:
