@@ -253,6 +253,35 @@
 				Counts loaded cells whose primary region has completed NavigationServer synchronization and physical readiness. Navigation data is revoked when cells unload, disabled regions become unready, or navigation maps detach.
 			</description>
 		</method>
+		<method name="get_navigation_route_cells" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="from_global" type="Vector3" />
+			<param index="1" name="to_global" type="Vector3" />
+			<param index="2" name="max_cells" type="int" default="64" />
+			<description>
+				Returns an ordered [Array] of [Vector2i] grid cells touched by a straight segment between two global 3D positions, in this partition's [b]local X/Z[/b] coordinate system. Uses conservative 2D supercover grid traversal: if a segment crosses a grid corner, both adjacent side cells are included so no potentially required streamed tile is skipped. The cell list does not check whether scenes are loaded. Returns an empty Array for non-finite/out-of-range positions, an unavailable scene tree, invalid [param max_cells] (1–256), or a corridor that exceeds the cell cap. It never silently truncates routes; use this to inspect the corridor before requesting more streaming sources or pins.
+			</description>
+		</method>
+		<method name="is_navigation_route_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="from_global" type="Vector3" />
+			<param index="1" name="to_global" type="Vector3" />
+			<param index="2" name="max_cells" type="int" default="64" />
+			<description>
+				Returns true when every grid cell conservatively intersected by the direct segment between [param from_global] and [param to_global] passes [method is_cell_navigation_ready]. This is a conservative streaming guard; it does not prove a traversable NavigationServer path exists, and diagonal paths touching cell corners may require both adjacent cells. Returns false for missing, disabled or unloaded regions and corridors over [param max_cells].
+			</description>
+		</method>
+		<method name="get_streamed_navigation_path" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<param index="0" name="from_global" type="Vector3" />
+			<param index="1" name="to_global" type="Vector3" />
+			<param index="2" name="optimize" type="bool" default="true" />
+			<param index="3" name="navigation_layers" type="int" default="1" />
+			<param index="4" name="max_cells" type="int" default="64" />
+			<description>
+				Requests a path from [NavigationServer3D] only after the straight-line streaming corridor is navigation-ready. It checks the server map has synchronized, rejects partial/disconnected paths whose first or final point is far from the requested endpoints, and verifies [b]every segment of the returned route[/b] against the same navigation-ready cell requirement. Returns an empty [PackedVector3Array] if any region is unavailable, a route exceeds the per-segment [param max_cells] cap, or the NavigationServer cannot reach the destination. This method does not load or pin cells, perform obstacle carving, or reserve a corridor for future frames; consumers must recheck readiness if regions stream out.
+			</description>
+		</method>
 		<method name="get_navigation_pending_cell_count" qualifiers="const">
 			<return type="int" />
 			<description>
