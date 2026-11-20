@@ -45,6 +45,7 @@ class WorldPartition3D : public Node3D {
 	NodePath observer_path;
 	Array additional_observer_paths;
 	Vector<Vector2i> pinned_cells;
+	bool unload_after_last_pin_removed = false;
 	real_t cell_size = 128.0;
 	int load_radius = 1;
 	int unload_radius = 2;

@@ -322,14 +322,21 @@ void WorldPartition3D::pin_cell(const Vector2i &p_cell) {
 	}
 	ERR_FAIL_COND_MSG(pinned_cells.size() >= 128, "WorldPartition3D supports at most 128 pinned cells.");
 	pinned_cells.push_back(p_cell);
+	unload_after_last_pin_removed = false;
 }
 
 void WorldPartition3D::unpin_cell(const Vector2i &p_cell) {
-	pinned_cells.erase(p_cell);
+	if (pinned_cells.has(p_cell)) {
+		pinned_cells.erase(p_cell);
+		unload_after_last_pin_removed = true;
+	}
 }
 
 void WorldPartition3D::clear_pinned_cells() {
-	pinned_cells.clear();
+	if (!pinned_cells.is_empty()) {
+		pinned_cells.clear();
+		unload_after_last_pin_removed = true;
+	}
 }
 
 bool WorldPartition3D::is_cell_pinned(const Vector2i &p_cell) const {
@@ -503,8 +510,13 @@ void WorldPartition3D::update_streaming() {
 		const NodePath path = additional_observer_paths[i];
 		_append_source_center(path, centers);
 	}
-	if (centers.is_empty() && pinned_cells.is_empty()) {
-		// Preserve already loaded cells if all observer nodes disappear temporarily.
+	if (!centers.is_empty()) {
+		// With a valid observer, ordinary distance-based eviction runs normally.
+		unload_after_last_pin_removed = false;
+	}
+	if (centers.is_empty() && pinned_cells.is_empty() && !unload_after_last_pin_removed) {
+		// Preserve cells if all observer nodes disappear temporarily without
+		// an explicit pin release (e.g., a brief scene-tree reparenting).
 		_purge_unused_ready_scenes();
 		if (observer_path.is_empty() && additional_observer_paths.is_empty()) {
 			_refresh_processing();
@@ -561,6 +573,9 @@ void WorldPartition3D::update_streaming() {
 		}
 	}
 	_purge_unused_ready_scenes();
+	if (centers.is_empty() && pinned_cells.is_empty() && active_cells.is_empty() && pending_cells.is_empty()) {
+		unload_after_last_pin_removed = false;
+	}
 }
 
 Node3D *WorldPartition3D::get_cell_instance(const Vector2i &p_cell) const {

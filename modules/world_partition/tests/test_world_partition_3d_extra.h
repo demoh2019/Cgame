@@ -634,6 +634,42 @@ TEST_CASE("[SceneTree][WorldPartition3D] A pin can load a cell with no valid obs
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
+TEST_CASE("[SceneTree][WorldPartition3D] Releasing the only pin unloads with no observer") {
+	const String path = make_cell_scene("last_pin_cleanup");
+	{
+		WorldFixture fixture;
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->set_cell_scene(Vector2i(6, -4), path);
+		fixture.world->pin_cell(Vector2i(6, -4));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(6, -4)));
+		fixture.world->unpin_cell(Vector2i(6, -4));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(6, -4)));
+		CHECK(fixture.world->get_pinned_cell_count() == 0);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Pinned request is prioritized before primary observer") {
+	const String near_path = make_cell_scene("pin_priority_near");
+	const String pin_path = make_cell_scene("pin_priority_far");
+	{
+		WorldFixture fixture;
+		fixture.world->set_max_new_requests_per_frame(1);
+		fixture.world->set_cell_scene(Vector2i(0, 0), near_path);
+		fixture.world->set_cell_scene(Vector2i(5, 0), pin_path);
+		fixture.world->pin_cell(Vector2i(5, 0));
+		fixture.world->update_streaming();
+		// The single-frame request budget is assigned to the pinned cell.
+		CHECK(ResourceLoader::load_threaded_get_status(pin_path) != ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		CHECK(ResourceLoader::load_threaded_get_status(near_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(5, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(near_path) == OK);
+	CHECK(DirAccess::remove_absolute(pin_path) == OK);
+}
+
 TEST_CASE("[SceneTree][WorldPartition3D] Pins keep their registration while streaming is disabled") {
 	const String path = make_cell_scene("pause_pin");
 	{

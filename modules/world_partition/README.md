@@ -53,7 +53,9 @@ assert(world.is_cell_pinned(Vector2i(0, 0)))
 world.unpin_cell(Vector2i(0, 0))
 ```
 
-Pinned cells load even if no observer is available. Calls are nonblocking; the
+Pinned cells load even if no observer is available. Releasing the last pin
+causes budgeted cleanup even when no observer exists; temporary loss of an
+observer alone still preserves loaded cells. Calls are nonblocking; the
 regular async resource-loader and per-frame instantiation budgets still apply.
 Pins are runtime-only and are not scene registrations or saved gameplay state.
 Disabling `streaming_enabled` unloads their scenes but preserves the pins, so
@@ -87,7 +89,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 70 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (49), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 72 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (51), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
