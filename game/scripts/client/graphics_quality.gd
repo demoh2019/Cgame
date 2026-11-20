@@ -7,6 +7,7 @@ const SETTINGS_PATH := "user://albion_after_graphics.cfg"
 const NAMES := ["Performance", "Balanced", "High", "Ultra"]
 const VisualProfiles = preload("res://scripts/client/graphics_profiles.gd")
 const GraphicsLighting = preload("res://scripts/client/graphics_lighting.gd")
+const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 
 static var _level: int = 1
@@ -71,6 +72,8 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 	# One global uniform adjusts every streamed terrain chunk; no resource reimport or per-chunk updates.
 	RenderingServer.global_shader_parameter_set(&"aa_terrain_detail_radius", float(p["terrain_detail_radius"]))
 	var world_profile: Dictionary = VisualProfiles.settings(_level)
+	# Shadow maps are budgeted independently from normal object visibility.
+	ShadowBudget.configure(world_profile)
 	# The active backend can differ from ProjectSettings after a driver fallback.
 	var method := RenderingServer.get_current_rendering_method()
 	if viewport != null:
