@@ -199,3 +199,61 @@ establish that rendering or physical simulation works on a target GPU.
 
 References: [Godot CharacterBody3D](https://docs.godotengine.org/en/4.6/classes/class_characterbody3d.html),
 [Unreal Character Movement](https://dev.epicgames.com/documentation/en-us/unreal-engine/movement-components-in-unreal-engine).
+
+## Visual Quality Lab v8 — engine-level scene streaming used by the game
+
+`addons/visual_quality/world_streamer.gd` adds a reusable `WorldStreamer3D`
+component based on Godot `ResourceLoader.load_threaded_request()` and
+`load_threaded_get_status()`. Assets are loaded in the background, while
+PackedScene instantiation and node attachment happen on the main thread.
+
+Cells can contain ordinary hand-authored scenes. Register them with
+`register_scene_cell(coord: Vector2i, path: String)`, and assign a player
+or camera `Node3D` to `source`. The optional scene-root method
+`configure_stream_cell(coord)` is called before the scene enters the tree.
+Connect `cell_loaded`, `cell_unloaded`, `asset_load_failed` signals for
+per-cell persistence and game systems. Scene resource paths are cached
+and only one in-flight asset request is allowed per unique path.
+
+Loading and unloading are constrained by configurable cell radii,
+nearest-first ordering, hysteresis (`unload_radius_cells` greater than
+`load_radius_cells`), operation budgets and a concurrency limit.
+These are operation budgets, not strict per-frame millisecond budgets.
+Three quality presets set load radii 1/2/3 cells and unload radii 2/3/4.
+
+### Demonstration
+
+The playable game registers **49 14-meter forest cells (7×7)** using the
+reusable `res://world/forest_cell.tscn`. Not all 49 are created at startup:
+as the player moves, nearby sections are instantiated and distant ones are
+removed. The HUD shows active/registered cells and in-flight assets.
+Press **7** to pause/resume streaming, and keys 1–3 to change radius
+and foliage density. The ground/collision stage now measures 112×112 m.
+Other features — physical player, quest, persistent progress, atmosphere
+and dynamic GPU-aware quality — remain integrated.
+
+`ChunkedFoliage3D` now caches shared trunk and canopy meshes/materials
+across streamed cells, while keeping per-cell independent MultiMesh
+transform buffers and culling.
+
+### Tests and limits
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+godot --headless --path . --script res://tests/test_world_streamer.gd
+godot --headless --path . --script res://tests/test_world_streamer_runtime.gd
+```
+
+16/16 static tests passed in the authoring environment. The runtime
+test checks threaded asset loading and unloading following source movement.
+Godot runtime and Apple Silicon/Metal validation remain outstanding until
+CI completes / the authorized Mac becomes available.
+
+This is a reusable engine addon and an integrated demo, **not** a modification
+of the Godot C++ scene streamer or automatic Unreal World Partition/HLOD.
+Do not treat unloading scene nodes as persistent game state storage; use
+`cell_unloaded` to capture relevant state in the host game.
+
+- Godot: https://docs.godotengine.org/en/4.6/tutorials/io/background_loading.html
+- Godot thread safety: https://docs.godotengine.org/en/4.6/tutorials/performance/thread_safe_apis.html
+- Unreal: https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine
