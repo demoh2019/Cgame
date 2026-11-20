@@ -6,10 +6,10 @@ const ENTRIES := [
 		["WASD", "move"], ["Shift", "sprint"], ["F4", "ride / dismount crafted bike"], ["[", "toggle crafted bike dynamo lamp: night light or stealth"], ["PgUp", "service bike drive on foot"], ["PgDn", "repair damaged bike frame"], ["Space", "dodge"], ["Mouse", "aim; left click attacks"], ["G", "weapon skill"],
 		["F1", "guardian taunt"], ["Delete", "prepare ranged sight kit"], ["End", "sharpen melee weapon"], ["4", "next weapon"], ["5", "equip armor"], ["Wheel", "zoom"]]],
 	["GATHER AND CRAFT", [
-		["E", "gather (trees and mining attract infected) / loot"], ["C", "crafting window"], ["0", "quick-cook best fish"],
+		["E", "gather (trees and mining attract infected) / loot"], ["C", "crafting window"], ["0", "quick-cook best fish"], ["Shift+0", "craft fish stew from fish, clean water and wood at a fire"],
 		["T", "cast fishing rod (Shift: baited)"], ["I / Tab", "inventory (click: use or equip; right click: stash)"], ["B", "stash (at the hub)"]]],
 	["SURVIVE", [
-		["1", "eat"], ["2", "drink bottle"], ["3", "bandage"], ["6", "antiseptic"], ["7", "antibiotics"], ["8", "heat pack"], ["F11", "herbal poultice"],
+		["1", "eat"], ["Shift+1", "eat fish stew: restores hunger and thirst"], ["2", "drink bottle"], ["3", "bandage"], ["6", "antiseptic"], ["7", "antibiotics"], ["8", "heat pack"], ["F11", "herbal poultice"],
 		["R", "drink from lake (untreated water risks infection)"], ["Ctrl+R", "fill canteen (charcoal filter)"],
 		["Ctrl+Shift+R", "boil water at lake and live fire (2 wood)"], [".", "frontier stim"], ["/", "scent salve (Shift: quiet sprint wraps)"], [";", "spore filter"], ["Z", "rest at the hub or a fire"]]],
 	["BUILD AND DEFEND", [

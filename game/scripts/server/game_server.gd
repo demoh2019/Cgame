@@ -3906,15 +3906,23 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			player.inventory.remove(item_id, 1)
 		"food":
 			var was_hungry: bool = player.survival.hunger <= SKILL_NOURISH_THRESHOLD
-			player.inventory.remove(item_id, 1)
-			player.survival.eat(float(data["food"]) * (1.0 + player.skills.bonus("food_power")))
-			# Prepared coastal meals grant a short, non-stacking recovery bonus.
-			# Canned food and berries only restore hunger as before.
+			var hydration: float = float(data.get("drink", 0.0))
+			var was_thirsty: bool = hydration > 0.0 and player.survival.thirst <= SKILL_NOURISH_THRESHOLD
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			var food_power: float = 1.0 + player.skills.bonus("food_power")
+			player.survival.eat(float(data["food"]) * food_power)
+			# Dual-purpose stew consumes one real item and replenishes both vitals.
+			# Ordinary food has no drink value, so its previous behavior is unchanged.
+			if hydration > 0.0:
+				player.survival.drink(hydration * food_power)
+			# Prepared fish or stew refreshes the same non-stacking recovery buff.
 			var cooked_tier: int = HeartyMeal.tier_for_food(item_id)
 			if cooked_tier > 0:
 				player.meal_tier = cooked_tier
 				player.meal_seconds = HeartyMeal.duration(cooked_tier)
-			if was_hungry: # Stuffing yourself while full teaches nothing.
+			# One legitimate survival lesson per consumed item, not two for stew.
+			if was_hungry or was_thirsty:
 				_award(player, "survivalist", 3.0)
 		"drink":
 			var was_thirsty: bool = player.survival.thirst <= SKILL_NOURISH_THRESHOLD

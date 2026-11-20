@@ -673,8 +673,19 @@ func _build() -> void:
 	inventory_box.add_child(spores_button)
 	var cook_button := Button.new()
 	cook_button.text = "0: Quick-cook best carried fish (fire or hub)"
-	cook_button.pressed.connect(quick_cook)
+	cook_button.pressed.connect(func() -> void: quick_cook(false))
 	inventory_box.add_child(cook_button)
+	var stew_cook_button := Button.new()
+	stew_cook_button.name = "QuickCookCampFishStew"
+	stew_cook_button.text = "Shift+0: Cook fish stew (fish + clean water + wood)"
+	stew_cook_button.tooltip_text = "At an active campfire or the hub workbench. Makes 1 meal for hunger and thirst."
+	stew_cook_button.pressed.connect(func() -> void: quick_cook(true))
+	inventory_box.add_child(stew_cook_button)
+	var stew_eat_button := Button.new()
+	stew_eat_button.name = "EatCampFishStew"
+	stew_eat_button.text = "Shift+1: Eat fish stew (+40 food, +38 water)"
+	stew_eat_button.pressed.connect(func() -> void: client.use_item(Defs.CAMP_FISH_STEW))
+	inventory_box.add_child(stew_eat_button)
 	var accept_contract := Button.new()
 	accept_contract.text = "Accept next mission"
 	accept_contract.pressed.connect(func() -> void: client.contract("accept"))
@@ -1236,7 +1247,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 ## Invoked from the online '0' key and inventory button.
-func quick_cook() -> void:
+func quick_cook(stew: bool = false) -> void:
+	if stew:
+		# Same server-side crafting rules as any manually selected campfire recipe.
+		client.craft(Defs.CAMP_FISH_STEW, 1)
+		return
 	var recipe_id: String = QuickCooking.best_recipe(
 		client.inventory, int(client.you.get("crafting_level", 1)))
 	if recipe_id.is_empty():
