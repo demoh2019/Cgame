@@ -8,6 +8,12 @@ uniform float firefly_strength : hint_range(0.0, 1.0) = 0.0;
 uniform float pollen_strength : hint_range(0.0, 1.0) = 0.0;
 uniform float fade_distance : hint_range(8.0, 80.0) = 42.0;
 uniform vec2 ambient_wind = vec2(0.0);
+// The native Camera3D measures a desired pixel diameter once per 0.25 s.
+// Each GPU instance follows its own depth, so pollen and fireflies remain
+// fine screen-space motes instead of gigantic 1 m additive glow cards.
+uniform float mote_world_size_at_reference = 0.15;
+uniform float mote_reference_depth = 20.0;
+uniform bool mote_orthographic = false;
 
 varying float mote_alpha;
 varying vec3 mote_tint;
@@ -39,11 +45,17 @@ void vertex() {
 		vec3(1.0, 0.89, 0.39), is_firefly);
 	mote_light = is_firefly;
 
-	// Quad's camera-facing orientation is calculated at four vertices,
-	// not for each fragment. Godot performs projection after this step.
+	// Fixed screen-pixel diameter with no second draw, noise texture or
+	// per-particle CPU update. Near and far quads change world-space size
+	// in the vertex stage, not the expensive fragment stage.
+	vec3 view_center = (VIEW_MATRIX * vec4(center, 1.0)).xyz;
+	float distance_ratio = mote_orthographic ? 1.0 :
+		clamp(-view_center.z / max(mote_reference_depth, 0.1), 0.25, 3.5);
+	float world_diameter = clamp(mote_world_size_at_reference * distance_ratio,
+		0.012, 0.40) * mix(0.76, 1.18, is_firefly);
 	vec3 world_vertex = center
-		+ INV_VIEW_MATRIX[0].xyz * VERTEX.x
-		+ INV_VIEW_MATRIX[1].xyz * VERTEX.y;
+		+ INV_VIEW_MATRIX[0].xyz * (VERTEX.x * world_diameter)
+		+ INV_VIEW_MATRIX[1].xyz * (VERTEX.y * world_diameter);
 	VERTEX = (VIEW_MATRIX * vec4(world_vertex, 1.0)).xyz;
 }
 
