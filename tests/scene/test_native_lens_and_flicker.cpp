@@ -81,6 +81,12 @@ TEST_CASE("[SceneTree][Light3D] Native flicker stays bounded and keeps the base 
 	CHECK(light->get_flicker() == 1.0f);
 	light->set_flicker(0.0f);
 	CHECK(light->get_flicker() == 0.0f);
+	light->set_flicker_color_shift(0.6f);
+	CHECK(light->get_flicker_color_shift() == doctest::Approx(0.6f));
+	light->set_flicker_color_shift(4.0f);
+	CHECK(light->get_flicker_color_shift() == 1.0f);
+	// Color shift never touches the stored light color.
+	CHECK(light->get_color() == Color(1, 1, 1));
 	memdelete(light);
 }
 

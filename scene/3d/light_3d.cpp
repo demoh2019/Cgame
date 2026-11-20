@@ -154,16 +154,18 @@ uint32_t Light3D::get_cull_mask() const {
 	return cull_mask;
 }
 
-void Light3D::set_color(const Color &p_color) {
-	color = p_color;
-
+Color Light3D::_get_render_color() const {
 	if (GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/use_physical_light_units")) {
 		Color combined = color.srgb_to_linear();
 		combined *= correlated_color.srgb_to_linear();
-		RS::get_singleton()->light_set_color(light, combined.linear_to_srgb());
-	} else {
-		RS::get_singleton()->light_set_color(light, color);
+		return combined.linear_to_srgb();
 	}
+	return color;
+}
+
+void Light3D::set_color(const Color &p_color) {
+	color = p_color;
+	RS::get_singleton()->light_set_color(light, _get_render_color());
 	// The gizmo color depends on the light color, so update it.
 	update_gizmos();
 }
@@ -379,7 +381,14 @@ void Light3D::_notification(int p_what) {
 			flicker_time += get_process_delta_time() * flicker_speed;
 			// Per-light phase from the instance ID so neighbouring torches never pulse in sync.
 			const float phase = float(get_instance_id() % 1024) * 0.618f;
-			RS::get_singleton()->light_set_param(light, RSE::LIGHT_PARAM_ENERGY, param[PARAM_ENERGY] * flicker_factor(flicker_time, flicker, phase));
+			const float factor = flicker_factor(flicker_time, flicker, phase);
+			RS::get_singleton()->light_set_param(light, RSE::LIGHT_PARAM_ENERGY, param[PARAM_ENERGY] * factor);
+			if (flicker_color_shift > 0.0f) {
+				// Dimming flames burn redder: shift green/blue down in proportion to the dip.
+				const float deficit = MAX(0.0f, 1.0f - factor) * flicker_color_shift;
+				const Color c = _get_render_color();
+				RS::get_singleton()->light_set_color(light, Color(c.r, c.g * (1.0f - deficit * 0.5f), c.b * (1.0f - deficit * 0.9f), c.a));
+			}
 		} break;
 	}
 }
@@ -399,6 +408,7 @@ void Light3D::_update_flicker_process() {
 	if (flicker <= 0.0f) {
 		// Restore the exact base energy when flicker is switched off.
 		RS::get_singleton()->light_set_param(light, RSE::LIGHT_PARAM_ENERGY, param[PARAM_ENERGY]);
+		RS::get_singleton()->light_set_color(light, _get_render_color());
 	}
 }
 
@@ -417,6 +427,17 @@ void Light3D::set_flicker_speed(float p_speed) {
 
 float Light3D::get_flicker_speed() const {
 	return flicker_speed;
+}
+
+void Light3D::set_flicker_color_shift(float p_shift) {
+	flicker_color_shift = CLAMP(p_shift, 0.0f, 1.0f);
+	if (flicker_color_shift <= 0.0f) {
+		RS::get_singleton()->light_set_color(light, _get_render_color());
+	}
+}
+
+float Light3D::get_flicker_color_shift() const {
+	return flicker_color_shift;
 }
 
 void Light3D::set_editor_only(bool p_editor_only) {
@@ -459,6 +480,8 @@ void Light3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_flicker"), &Light3D::get_flicker);
 	ClassDB::bind_method(D_METHOD("set_flicker_speed", "speed"), &Light3D::set_flicker_speed);
 	ClassDB::bind_method(D_METHOD("get_flicker_speed"), &Light3D::get_flicker_speed);
+	ClassDB::bind_method(D_METHOD("set_flicker_color_shift", "shift"), &Light3D::set_flicker_color_shift);
+	ClassDB::bind_method(D_METHOD("get_flicker_color_shift"), &Light3D::get_flicker_color_shift);
 	ClassDB::bind_method(D_METHOD("is_negative"), &Light3D::is_negative);
 
 	ClassDB::bind_method(D_METHOD("set_cull_mask", "cull_mask"), &Light3D::set_cull_mask);
@@ -513,6 +536,7 @@ void Light3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "light_negative"), "set_negative", "is_negative");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "light_flicker", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_flicker", "get_flicker");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "light_flicker_speed", PROPERTY_HINT_RANGE, "0,10,0.01"), "set_flicker_speed", "get_flicker_speed");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "light_flicker_color_shift", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_flicker_color_shift", "get_flicker_color_shift");
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "light_specular", PROPERTY_HINT_RANGE, "0,16,0.001,or_greater"), "set_param", "get_param", PARAM_SPECULAR);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "light_bake_mode", PROPERTY_HINT_ENUM, "Disabled,Static,Dynamic"), "set_bake_mode", "get_bake_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "light_cull_mask", PROPERTY_HINT_LAYERS_3D_RENDER), "set_cull_mask", "get_cull_mask");

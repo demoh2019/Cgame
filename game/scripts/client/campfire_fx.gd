@@ -56,6 +56,8 @@ func build(level: int, rendering_method: String) -> void:
 	if "light_flicker" in light:
 		light.set("light_flicker", 0.35)
 		light.set("light_flicker_speed", 1.2)
+		if "light_flicker_color_shift" in light:
+			light.set("light_flicker_color_shift", 0.6)
 	add_child(light)
 	if not rich:
 		return

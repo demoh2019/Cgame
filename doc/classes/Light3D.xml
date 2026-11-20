@@ -76,6 +76,9 @@
 		<member name="light_flicker" type="float" setter="set_flicker" getter="get_flicker" default="0.0">
 			Native flame-like flicker of the light's energy, like Source engine light styles or Unreal Engine flicker light functions. Layered, per-light-phased noise with occasional dips, computed in the engine each frame; [member light_energy] keeps its base value. [code]0.0[/code] disables it and costs nothing.
 		</member>
+		<member name="light_flicker_color_shift" type="float" setter="set_flicker_color_shift" getter="get_flicker_color_shift" default="0.0">
+			How much the light reddens as [member light_flicker] dims it, like a real flame that burns cooler when it dips. [code]0.0[/code] keeps [member light_color] constant.
+		</member>
 		<member name="light_flicker_speed" type="float" setter="set_flicker_speed" getter="get_flicker_speed" default="1.0">
 			Time scale of [member light_flicker]. Lower values give a slow, smouldering pulse; higher values a nervous, windy flame.
 		</member>

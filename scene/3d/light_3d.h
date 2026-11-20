@@ -92,6 +92,8 @@ private:
 	// the energy sent to the renderer; get_param(PARAM_ENERGY) keeps the base value.
 	float flicker = 0.0f;
 	float flicker_speed = 1.0f;
+	float flicker_color_shift = 0.0f;
+	Color _get_render_color() const;
 	double flicker_time = 0.0;
 	void _update_flicker_process();
 	// bind helpers
@@ -118,6 +120,8 @@ public:
 	float get_flicker() const;
 	void set_flicker_speed(float p_speed);
 	float get_flicker_speed() const;
+	void set_flicker_color_shift(float p_shift);
+	float get_flicker_color_shift() const;
 	static float flicker_factor(double p_time, float p_amount, float p_phase);
 	real_t get_param(Param p_param) const;
 
