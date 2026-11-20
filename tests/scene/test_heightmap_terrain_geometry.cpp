@@ -490,4 +490,32 @@ TEST_CASE("[HeightmapTerrain] Custom normal field drives geomorph target too") {
 			mesh.morph_normal_xyz[(5 + 1) * 3 + 2]);
 	CHECK(target.is_equal_approx((n10 + n01).normalized()));
 }
+
+TEST_CASE("[HeightmapTerrain] Geomorph normals clamp partial chunk borders") {
+	const Vector<real_t> data = make_field(20, 20, [](int x, int z) {
+		return real_t(x * x * 0.01 + z * 0.2);
+	});
+	const HeightField field = view(data, 20, 20);
+	Vector<Vector3> normal_grid;
+	normal_grid.resize(20 * 20);
+	for (int z = 0; z < 20; z++) {
+		for (int x = 0; x < 20; x++) {
+			normal_grid.write[z * 20 + x] = Vector3(real_t(-x) * 0.02, 1.0, -0.1).normalized();
+		}
+	}
+	Params params;
+	params.normal_override = normal_grid.ptr();
+	params.geomorph_coarse_stride = 4;
+	ChunkMesh partial;
+	REQUIRE(build_chunk(field, 16, 16, 16, 1, params, partial));
+	CHECK(partial.morph_normal_xyz.size() == partial.vertices.size() * 3);
+	for (int i = 0; i < partial.vertices.size(); i++) {
+		const Vector3 target(partial.morph_normal_xyz[i * 3],
+				partial.morph_normal_xyz[i * 3 + 1],
+				partial.morph_normal_xyz[i * 3 + 2]);
+		CHECK(target.is_finite());
+		CHECK(target.y > 0.0);
+	}
+}
+
 } // namespace TestHeightmapTerrainGeometry
