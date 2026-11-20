@@ -222,6 +222,17 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	# Starting at an already blocked cutoff would double-apply muffling.
 	player.attenuation_filter_cutoff_hz = AudioSpatial.source_cutoff(distance, false, _humidity)
 	player.attenuation_filter_db = -24.0
+	var initial_obstruction: float = 1.0 if occluded else 0.0
+	var unblocked_volume_db: float = player.volume_db
+	var unblocked_cutoff_hz: float = player.attenuation_filter_cutoff_hz
+	# The terrain test is already known at spawn. Muffle the FIRST audio
+	# buffer, not just the next 0.25 s obstruction-physics update.
+	if player.has_method("set_obstruction_amount"):
+		player.call("set_obstruction_amount", initial_obstruction)
+	elif occluded:
+		player.attenuation_filter_cutoff_hz = AudioSpatial.obstruction_cutoff(
+			unblocked_cutoff_hz, initial_obstruction)
+		player.volume_db = unblocked_volume_db + AudioSpatial.obstruction_db(initial_obstruction)
 	_ensure_concurrency()
 	if _concurrency != null and not bool(_concurrency.call("request_play", StringName(sound_name), player, position, _listener)):
 		player.free()
@@ -229,13 +240,14 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	add_child(player)
 	player.global_position = position
 	var record := {
-		"player": player, "name": sound_name, "audibility": loudness, "born": now,
-		"base_audibility": loudness, "terrain_blocked": occluded,
-		"obstruction": 0.0,
-		"target_obstruction": 1.0 if occluded else 0.0,
+		"player": player, "name": sound_name,
+		"audibility": loudness + AudioSpatial.obstruction_db(initial_obstruction),
+		"born": now, "base_audibility": loudness, "terrain_blocked": occluded,
+		"obstruction": initial_obstruction,
+		"target_obstruction": initial_obstruction,
 		"next_obstruction_check": 0.0,
-		"original_db": player.volume_db,
-		"original_cutoff": player.attenuation_filter_cutoff_hz
+		"original_db": unblocked_volume_db,
+		"original_cutoff": unblocked_cutoff_hz
 	}
 	_voices.append(record)
 	player.finished.connect(func() -> void:
