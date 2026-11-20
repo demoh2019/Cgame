@@ -1626,6 +1626,9 @@ func _on_event(event: Dictionary) -> void:
 		"parried":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Parried infected attack! 70% less damage and wounds; enemy staggered.")
+		"party_flank":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("COORDINATED FLANK! +%d%% melee damage while your ally holds the infected." % int(event.get("bonus", 18)))
 		"stealth_ambush":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Silent ambush! +45% melee damage against unaware infected.")
@@ -2469,6 +2472,10 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nINFECTED PRESSURE: %d/100 | passive stamina recovery -%d%%. Regroup or find shelter." % [
 			roundi(combat_stress),
 			roundi(100.0 * (1.0 - float(client.you.get("combat_stress_regen", 1.0))))]
+	var flank_hint: Dictionary = client.you.get("party_flank_hint", {})
+	if not flank_hint.is_empty():
+		_info_label.text += "\nFLANK OPEN: infected #%d (+%d%% basic melee) — stay behind while ally tanks" % [
+			int(flank_hint.get("zombie", -1)), int(flank_hint.get("bonus", 18))]
 	var intercept_active: float = float(client.you.get("guardian_intercept_seconds", 0.0))
 	var intercept_cooldown: float = float(client.you.get("guardian_intercept_cooldown", 0.0))
 	if intercept_active > 0.0:
