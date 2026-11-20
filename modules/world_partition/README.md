@@ -20,7 +20,8 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - **Explicit failure recovery:** `retry_failed_cells()` clears error suppression on demand after a broken asset/path is repaired. It does not retry failures every frame or change registered cell paths; call `update_streaming()` to trigger an immediate reattempt.
 - **CPU profiling:** `get_last_streaming_update_ms()` measures the latest update's wall-clock CPU time (polling and scene instantiation) and `get_last_instantiation_attempt_count()` reports attempted instantiations. These are diagnostics, not GPU time or physics-server completion guarantees.
 - **Direct cell scene lookup:** `get_cell_node(cell)` returns the loaded Node3D root (or `null`) using the native cell index. Call from `cell_loaded` to configure one cell without scanning all streamed children.
-- **Region readiness queries:** `are_cells_loaded(center, radius=0)` returns true only when every cell in the square is instantiated. Useful for spawn/teleport gates, AI activation and gameplay dependencies; scene instantiation does not guarantee downstream physics/asset upload readiness.
+- **Region readiness queries:** `are_cells_loaded(center, radius=0)` returns true only when every cell in the square is instantiated. It does not guarantee physics readiness or GPU upload completion.
+- **Native physics activation barrier:** `is_cell_physics_ready(cell)`, `are_cells_physics_ready(center, radius=0)`, `get_physics_ready_cell_count()` and `cell_physics_ready(cell)` / `cell_physics_unready(cell)` signals separate initial scene instantiation from later physics activation. A freshly instantiated scene enters a two-actual-physics-tick barrier (not wall time) before reporting physics-ready, which is revoked upon unload or disabled streaming and rearmed on reload/re-entry. Physics ticks are requested only while at least one cell is pending activation. This is a useful gate for AI/character enablement and fast-travel staging, but **it does not verify collider existence or navigation/PhysicsServer query results**: query an expected collider explicitly at the destination before a critical teleport.
 - **Observer grid events:** `has_observer_cell()`, `get_observer_cell()` and `observer_cell_changed(cell)` help gameplay react to crossing streaming cell boundaries without polling player coordinates. The first successful observer lookup emits this signal, as does a subsequent cell-size or observer-path change.
 - Avoid running streaming implicitly in the editor.
 
@@ -66,7 +67,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 64 Doctest cases across `test_world_partition_3d.h` (28) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 65 Doctest cases across `test_world_partition_3d.h` (29) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -81,7 +82,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 - **No automatic editor bake/partition yet.** Split source scenes and save each cell manually. Automated authoring and terrain/HLOD export are future integrations.
 - **No terrain sculpting, painting or foliage authoring in this module.** They can output regular cell `PackedScene` resources.
 - **No cancellation primitive for a running ResourceLoader request.** Moving the observer drops obsolete pending instances; the running resource request finishes and is then discarded.
-- **No per-cell physics/navmesh warmup guarantees or server-style streaming replication.** Instances use the regular scene tree.
+- **No automated PhysicsServer collision verification, navmesh baking or server-style streaming replication.** The new two-physics-tick barrier is a readiness heuristic based on actual physics notifications; actual collider and navigation readiness still require dedicated queries. Instances use the regular scene tree.
 - **Not virtual geometry, Nanite or texture streaming.** Those require separate rendering systems.
 - Cell scenes are currently addressed by full resource path; remapping paths during asset moves must be handled by tooling.
 - Errors from missing/corrupt scene resources are logged and the cell is not repeatedly re-requested until its registration/configuration changes.
