@@ -16,6 +16,7 @@ var infection: float = 0.0
 var bleeding: float = 0.0 # Wound severity 0..100, independent of infection.
 var exposure: float = 0.0 # 0..100 cumulative weather stress.
 var warmth_seconds: float = 0.0 # Remaining protection from a carried heat pack.
+var scent_mask_seconds: float = 0.0 # Temporary herb camouflage, server-owned.
 var stamina: float = Defs.MAX_STAMINA
 var stamina_recovery_delay: float = 0.0
 var alive: bool = true
@@ -44,6 +45,8 @@ func try_sprint(seconds: float) -> bool:
 func tick(delta: float) -> float:
 	if not alive:
 		return 0.0
+	# Mask duration follows authoritative survival simulation only.
+	scent_mask_seconds = maxf(0.0, scent_mask_seconds - maxf(0.0, delta))
 	hunger = maxf(hunger - Defs.HUNGER_PER_SECOND * hunger_mult * delta, 0.0)
 	thirst = maxf(thirst - Defs.THIRST_PER_SECOND * thirst_mult * delta, 0.0)
 	var resting := maxf(delta - stamina_recovery_delay, 0.0)
@@ -174,8 +177,9 @@ func reset() -> void:
 	bleeding = 0.0
 	exposure = 0.0
 	warmth_seconds = 0.0
+	scent_mask_seconds = 0.0
 	alive = true
 
 
 func to_dict() -> Dictionary:
-	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "bleeding": bleeding, "exposure": exposure, "warmth_seconds": warmth_seconds, "alive": alive}
+	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "bleeding": bleeding, "exposure": exposure, "warmth_seconds": warmth_seconds, "scent_mask_seconds": scent_mask_seconds, "alive": alive}

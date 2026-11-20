@@ -2154,3 +2154,42 @@ renown; no client can spawn or control this enemy.
 Regression checks are in `game/tests/test_acid_spitter.gd`, registered
 in the canonical headless runner. This uses Cgame's current AI, materials
 and networking APIs without requiring new C++-engine primitives.
+
+
+## Herbal scent salve — craftable survival stealth versus bleeding detection
+
+In the canonical `game/`, survivors can craft a **Herbal Scent Salve**
+from **2× T1 fiber + 1× T1 cloth + 1× clean water bottle**, anywhere in
+the field (no workbench required). A real carried salve can be applied
+for **120 seconds** of temporary camouflage.
+
+While active, the server suppresses *only the extra blood scent* that
+otherwise lets infected locate a badly bleeding survivor from farther
+away. Normal zombie visual range, gunshot/sprint hearing, existing
+combat aggro and pursuit leashes all remain in effect. The paste does
+not heal bleeding, stop infection, restore health or remove an existing
+zombie chase; bandages and medical aid remain important.
+
+The effect is strictly server-owned and inventory-paid. Repeated use
+while active returns `already_masked` without deducting a second
+salve. Its remaining duration is stored as `scent_mask_seconds` in the
+existing version-1 survivor save and validated as a finite number in
+the range 0–120 before any state mutation. Older character saves
+default to zero. Timer decreases only with game simulation and is
+cleared on character death and respawn.
+
+Local preview: **/** applies a carried salve; HUD shows active time and
+the actual post-mask blood detection radius. Online multiplayer:
+click the carried salve in inventory (existing authenticated
+`c_use` path); the owner's snapshot shows the remaining time and
+adjusted blood-scent risk without broadcasting private wounds or
+stealth duration to nearby clients.
+
+Implementation: `scripts/shared/field_scent_mask.gd`,
+`scripts/shared/blood_scent.gd`, `scripts/shared/survival.gd`,
+`scripts/server/game_server.gd`, item definitions and both clients.
+`game/tests/test_scent_mask.gd` is registered in the headless
+regression suite and covers field crafting, scent-versus-sight,
+paid-use replay, expiry, older saves, invalid durations and respawn.
+No engine-native extensions are necessary; the existing Cgame AI,
+crafting, character persistence and network primitives suffice.

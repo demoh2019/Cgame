@@ -12,8 +12,9 @@ const MAX_RANGE := 30.0
 
 ## Returns zero for treated, dead, protected or invalid survivors.
 ## The zombie brain further caps detection to the enemy's pursuit leash.
-static func detection_radius(bleeding: float, alive: bool = true, safe: bool = false) -> float:
-	if not alive or safe or not is_finite(bleeding) or bleeding <= MIN_BLEEDING:
+static func detection_radius(bleeding: float, alive: bool = true, safe: bool = false,
+		masked: bool = false) -> float:
+	if not alive or safe or masked or not is_finite(bleeding) or bleeding <= MIN_BLEEDING:
 		return 0.0
 	var severity: float = clampf(bleeding, 0.0, Defs.BLEEDING_MAX)
 	return minf(MAX_RANGE, BASE_RANGE + severity * RANGE_PER_BLEEDING)
