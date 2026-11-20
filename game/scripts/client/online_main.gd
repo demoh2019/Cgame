@@ -277,7 +277,7 @@ func _build_environment() -> void:
 	_grade_material.shader = load("res://assets/shaders/post_grade.gdshader")
 	grade.material = _grade_material
 	post.add_child(grade)
-	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material)
+	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
 
 
 func _build_connect_screen() -> void:
@@ -394,6 +394,25 @@ func _build_connect_screen() -> void:
 	solo_slot_info.add_theme_color_override("font_color", UiTheme.GOLD)
 	box.add_child(solo_slot_info)
 	_update_solo_slot_info()
+	var graphics_caption := Label.new()
+	graphics_caption.text = "Graphics quality (Ctrl+F11 in game)"
+	graphics_caption.add_theme_font_size_override("font_size", 14)
+	graphics_caption.add_theme_color_override("font_color", Color(0.95, 0.84, 0.66))
+	box.add_child(graphics_caption)
+	var quality_picker := OptionButton.new()
+	quality_picker.custom_minimum_size = Vector2(0, 40)
+	for state in ["normal", "hover", "pressed", "focus"]:
+		quality_picker.add_theme_stylebox_override(state, field_style if state != "hover" else field_focus)
+	quality_picker.add_theme_color_override("font_color", UiTheme.INK)
+	quality_picker.add_theme_color_override("font_hover_color", UiTheme.INK)
+	quality_picker.add_theme_color_override("font_pressed_color", UiTheme.INK)
+	for quality_level in GraphicsQuality.NAMES.size():
+		quality_picker.add_item(GraphicsQuality.NAMES[quality_level], quality_level)
+	quality_picker.select(GraphicsQuality.level())
+	quality_picker.item_selected.connect(func(index: int) -> void:
+		GraphicsQuality.set_level(quality_picker.get_item_id(index))
+		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer))
+	box.add_child(quality_picker)
 	var gap2 := Control.new()
 	gap2.custom_minimum_size = Vector2(0, 8)
 	box.add_child(gap2)
@@ -894,6 +913,8 @@ func _on_welcomed() -> void:
 	streamer.max_instantiations_per_frame = 1
 	streamer.set_chunk_generator(_generate_chunk)
 	add_child(streamer)
+	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
+	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
 	hub_view = HubView.new()
 	add_child(hub_view)
 	hub_view.build(client.world)
@@ -1162,7 +1183,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Ctrl+F11 cycles graphics quality without consuming the existing F11 medicine shortcut.
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
 		GraphicsQuality.cycle()
-		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material)
+		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
 		var message := "Graphics: %s (Ctrl+F11 to change)" % GraphicsQuality.get_name()
 		if hud != null:
 			hud.say(message)
