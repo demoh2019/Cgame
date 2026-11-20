@@ -150,6 +150,7 @@ var _air_time := 0.0
 var _fall_speed := 0.0
 var _last_y := 0.0
 var _splash_timer := 0.0
+var _dust_timer := 0.0
 var _unshaded: StandardMaterial3D
 
 
@@ -379,7 +380,19 @@ func _free_sparkle(p: Node) -> void:
 
 
 ## Per-frame: water splash/ripples when wading, and a landing dust puff after a fall. `ground_y` is terrain height.
-func update_player(position: Vector3, ground_y: float, speed: float, delta: float) -> void:
+## Kick-up dust colour for running feet; alpha 0 = no dust (wet or soft ground).
+static func run_dust_color(biome: String) -> Color:
+	match biome:
+		"plains":
+			return Color(0.66, 0.58, 0.44, 0.42)
+		"beach":
+			return Color(0.82, 0.76, 0.6, 0.38)
+		"mountain":
+			return Color(0.6, 0.6, 0.6, 0.35)
+	return Color(0, 0, 0, 0)
+
+
+func update_player(position: Vector3, ground_y: float, speed: float, delta: float, biome: String = "") -> void:
 	if _tier() == 0:
 		return
 	var feet_y := position.y
@@ -404,6 +417,13 @@ func update_player(position: Vector3, ground_y: float, speed: float, delta: floa
 			impact(surface + Vector3(0, 0.05, 0), "water", Vector3.UP)
 	else:
 		_splash_timer = 0.0
+		# RDR2-style kicked-up dust while running on dry ground.
+		var dust: Color = run_dust_color(biome)
+		if dust.a > 0.0 and speed > 4.0 and not airborne:
+			_dust_timer -= delta
+			if _dust_timer <= 0.0:
+				_dust_timer = clampf(0.36 - speed * 0.02, 0.18, 0.36)
+				_particles(Vector3(position.x, ground_y + 0.08, position.z), Vector3.UP, dust, 4, 0.9, 0.4, 0.12, 0.7, 70.0, false)
 
 
 func _process(delta: float) -> void:
