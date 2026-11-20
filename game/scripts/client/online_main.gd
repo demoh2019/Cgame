@@ -26,6 +26,7 @@ const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
+const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
 const WorldOverlay = preload("res://scripts/client/world_overlay.gd")
@@ -71,7 +72,8 @@ var demo_storm := false
 var atmosphere
 var _grade_material: ShaderMaterial
 var _auto_quality := GraphicsAutoQuality.new()
-var _auto_graphics := false
+var _adaptive_resolution := GraphicsDynamicResolution.new()
+var _auto_graphics := true
 var _quality_picker: OptionButton
 var effects
 var skills_panel
@@ -124,6 +126,7 @@ func _ready() -> void:
 		_auto_graphics = bool(graphics_config.get_value("rendering", "auto", false))
 	if _auto_graphics:
 		GraphicsQuality.set_level(_auto_quality.level, false)
+	_adaptive_resolution.configure(GraphicsQuality.level())
 	_build_environment()
 	_build_connect_screen()
 	var args := OS.get_cmdline_user_args()
@@ -287,7 +290,8 @@ func _build_environment() -> void:
 	_grade_material.shader = load("res://assets/shaders/post_grade.gdshader")
 	grade.material = _grade_material
 	post.add_child(grade)
-	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
+	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
+		streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics)
 
 
 func _build_connect_screen() -> void:
@@ -419,7 +423,7 @@ func _build_connect_screen() -> void:
 	quality_picker.add_theme_color_override("font_pressed_color", UiTheme.INK)
 	for quality_level in GraphicsQuality.NAMES.size():
 		quality_picker.add_item(GraphicsQuality.NAMES[quality_level], quality_level)
-	quality_picker.add_item("Auto (adapts to FPS)", GraphicsQuality.NAMES.size())
+	quality_picker.add_item("Auto (adaptive 3D + details)", GraphicsQuality.NAMES.size())
 	quality_picker.select(GraphicsQuality.NAMES.size() if _auto_graphics else GraphicsQuality.level())
 	quality_picker.item_selected.connect(func(index: int) -> void:
 		var selected: int = quality_picker.get_item_id(index)
@@ -429,7 +433,9 @@ func _build_connect_screen() -> void:
 			GraphicsQuality.set_level(_auto_quality.level, false)
 		else:
 			GraphicsQuality.set_level(selected)
-		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer))
+		_adaptive_resolution.configure(GraphicsQuality.level())
+		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
+			streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics))
 	box.add_child(quality_picker)
 	var gap2 := Control.new()
 	gap2.custom_minimum_size = Vector2(0, 8)
@@ -949,7 +955,8 @@ func _on_welcomed() -> void:
 	streamer.set_chunk_generator(_generate_chunk)
 	add_child(streamer)
 	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
-	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
+	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
+		streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics)
 	hub_view = HubView.new()
 	add_child(hub_view)
 	hub_view.build(client.world)
@@ -1005,10 +1012,20 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_frames += 1
-	# Auto mode watches sustained frame times only; manual quality remains fixed.
-	if _auto_graphics and client != null and client.welcomed and _auto_quality.sample_frame(delta):
-		GraphicsQuality.set_level(_auto_quality.level, false)
-		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
+	# Resize only the Forward+ 3D target before changing costly world LOD.
+	if _auto_graphics and client != null and client.welcomed:
+		var rd: bool = RenderingServer.get_current_rendering_method() == "forward_plus"
+		if rd and _adaptive_resolution.sample_frame(delta):
+			GraphicsQuality.apply_resolution(get_viewport(), _adaptive_resolution.scale, true)
+			_auto_quality.set_mode("auto")
+		var quality_limit: bool = not rd or (
+			(_adaptive_resolution.at_floor() and delta >= GraphicsAutoQuality.SLOW_FRAME) or
+			(_adaptive_resolution.at_ceiling() and delta <= GraphicsAutoQuality.FAST_FRAME))
+		if quality_limit and _auto_quality.sample_frame(delta):
+			GraphicsQuality.set_level(_auto_quality.level, false)
+			_adaptive_resolution.configure(GraphicsQuality.level())
+			GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
+				streamer, _adaptive_resolution.scale if rd else -1.0, rd)
 	if _demo == "title" and _screenshot_path != "" and _frames == 90: # The title screen alone (screenshots).
 		RenderingServer.force_draw()
 		get_viewport().get_texture().get_image().save_png(_screenshot_path)
@@ -1250,7 +1267,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
 		_set_auto_graphics(false)
 		GraphicsQuality.cycle()
-		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water, streamer)
+		_adaptive_resolution.configure(GraphicsQuality.level())
+		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
+		streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics)
 		if is_instance_valid(_quality_picker):
 			_quality_picker.select(GraphicsQuality.level())
 		var message := "Graphics: %s (Ctrl+F11 to change)" % GraphicsQuality.get_name()

@@ -1,0 +1,43 @@
+extends RefCounted
+## No-GPU validation of rendering backends, FSR2 and full-res fallback.
+const Resolution = preload("res://scripts/client/graphics_resolution.gd")
+const Quality = preload("res://scripts/client/graphics_quality.gd")
+
+
+func run(t) -> void:
+	t.current = "Forward+ temporal upscaling without duplicate AA"
+	var p: Dictionary = Resolution.plan("forward_plus", Quality.profile(1))
+	t.eq(p["mode"], Viewport.SCALING_3D_MODE_FSR2, "Balanced uses FSR2")
+	t.near(float(p["scale"]), 0.77, 0.0001, "Balanced native-upscale fraction")
+	t.eq(p["msaa"], Viewport.MSAA_DISABLED, "no redundant MSAA")
+	t.eq(p["screen_space_aa"], Viewport.SCREEN_SPACE_AA_DISABLED,
+		"FSR2 is its own antialiasing")
+	p = Resolution.plan("forward_plus", Quality.profile(3))
+	t.eq(p["mode"], Viewport.SCALING_3D_MODE_BILINEAR, "manual Ultra is native")
+	t.eq(p["msaa"], Viewport.MSAA_4X, "manual Ultra retains MSAA4")
+	p = Resolution.plan("forward_plus", Quality.profile(3), 0.86, true)
+	t.eq(p["mode"], Viewport.SCALING_3D_MODE_FSR2, "adaptive Ultra uses FSR2")
+	t.near(float(p["scale"]), 0.86, 0.0001, "adaptive GPU resolution")
+	t.eq(p["msaa"], Viewport.MSAA_DISABLED, "no MSAA cost in adaptive mode")
+	p = Resolution.plan("forward_plus", Quality.profile(3), 1.0, true)
+	t.eq(p["mode"], Viewport.SCALING_3D_MODE_FSR2, "native FSR2 temporal AA")
+	t.current = "unsupported renderer never gets invalid FSR2 calls"
+	for method in ["mobile", "gl_compatibility", "unknown"]:
+		p = Resolution.plan(method, Quality.profile(1), 0.5, true)
+		t.eq(p["mode"], Viewport.SCALING_3D_MODE_BILINEAR,
+			"only Forward+ can run FSR2")
+		t.near(float(p["scale"]), 1.0, 0.0001,
+			"no falsely advertised Compatibility resolution reduction")
+	p = Resolution.plan("forward_plus", Quality.profile(1), NAN, true)
+	t.near(float(p["scale"]), 0.77, 0.0001, "NaN falls back to preset")
+	p = Resolution.plan("forward_plus", Quality.profile(1), 99.0, true)
+	t.near(float(p["scale"]), 1.0, 0.0001, "scale bounded to native")
+	t.check(bool(Quality.profile(2)["ssao"]) and not bool(Quality.profile(2)["ssil"]),
+		"High has contact shadows without Ultra indirect light")
+	t.current = "desktop modern, legacy devices supported"
+	t.eq(ProjectSettings.get_setting("rendering/renderer/rendering_method"),
+		"forward_plus", "modern desktop default")
+	t.eq(ProjectSettings.get_setting("rendering/renderer/rendering_method.mobile"),
+		"gl_compatibility", "mobile compatibility")
+	t.eq(ProjectSettings.get_setting("rendering/renderer/rendering_method.web"),
+		"gl_compatibility", "web compatibility")

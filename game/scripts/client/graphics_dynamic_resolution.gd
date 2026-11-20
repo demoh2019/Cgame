@@ -1,0 +1,60 @@
+extends RefCounted
+## 3D pixel-budget scaler; hysteresis and warmup avoid per-frame GPU buffer
+## resizes. Quality presets remain an outer CPU/geometry fallback controller.
+const FLOORS := [0.52, 0.65, 0.82, 0.90]
+const CEILINGS := [0.59, 0.77, 1.0, 1.0]
+const SLOW_FRAME := 1.0 / 48.0
+const FAST_FRAME := 1.0 / 56.0
+const LOWER_AFTER := 2.2
+const RAISE_AFTER := 6.0
+const WARMUP := 1.0
+
+var level: int = 1
+var scale: float = 0.77
+var _warmup := 0.0
+var _slow := 0.0
+var _fast := 0.0
+
+
+func configure(value: int) -> void:
+	level = clampi(value, 0, FLOORS.size() - 1)
+	scale = float(CEILINGS[level])
+	_warmup = 0.0
+	_slow = 0.0
+	_fast = 0.0
+
+
+func at_floor() -> bool:
+	return scale <= float(FLOORS[level]) + 0.0001
+
+
+func at_ceiling() -> bool:
+	return scale >= float(CEILINGS[level]) - 0.0001
+
+
+func sample_frame(delta: float) -> bool:
+	if not is_finite(delta) or delta <= 0.0 or delta > 0.20:
+		return false
+	_warmup += delta
+	if _warmup < WARMUP:
+		return false
+	if delta >= SLOW_FRAME:
+		_slow += delta
+		_fast = 0.0
+		if _slow >= LOWER_AFTER:
+			_slow = 0.0
+			if not at_floor():
+				scale = roundf(maxf(float(FLOORS[level]), scale - 0.04) * 100.0) / 100.0
+				return true
+	elif delta <= FAST_FRAME:
+		_fast += delta
+		_slow = 0.0
+		if _fast >= RAISE_AFTER:
+			_fast = 0.0
+			if not at_ceiling():
+				scale = roundf(minf(float(CEILINGS[level]), scale + 0.03) * 100.0) / 100.0
+				return true
+	else:
+		_slow = 0.0
+		_fast = 0.0
+	return false
