@@ -306,7 +306,7 @@ func _draw() -> void:
 			float(squad_ping.get("z", INF)))
 		if TravelNavigation.valid_destination(target, WorldGen.WORLD_RADIUS):
 			var marker: Vector2 = _to_screen(target.x, target.y)
-			var hue := Color(0.2, 0.95, 0.9)
+			var hue := Color(0.95, 0.65, 0.25) if str(squad_ping.get("kind", "")) == "survey" else Color(0.2, 0.95, 0.9)
 			draw_circle(marker, 10.0, Color(0.02, 0.08, 0.1, 0.92))
 			draw_colored_polygon(PackedVector2Array([
 				marker + Vector2(0, -9), marker + Vector2(9, 0),
@@ -314,6 +314,11 @@ func _draw() -> void:
 			var caption := "PARTY PING #%d (%ds)" % [
 				int(squad_ping.get("by", 0)),
 				ceili(float(squad_ping.get("remaining", 0.0)))]
+			if str(squad_ping.get("kind", "")) == "survey":
+				caption = "PARTY T%d %s VEIN (%ds)" % [
+					int(squad_ping.get("tier", 2)),
+					str(squad_ping.get("material", "ore")).to_upper(),
+					ceili(float(squad_ping.get("remaining", 0.0)))]
 			draw_string_outline(font, marker + Vector2(13, -1),
 				caption, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color.BLACK)
 			draw_string(font, marker + Vector2(13, -1),
