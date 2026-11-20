@@ -558,7 +558,8 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 	}
 
 	for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
-		AudioServer::get_singleton()->set_playback_highshelf_params(playback, linear_attenuation, obstruction.cutoff_hz);
+		AudioServer::get_singleton()->set_playback_highshelf_params(playback,
+				linear_attenuation * obstruction.highshelf_gain, obstruction.cutoff_hz);
 	}
 
 	bus_volumes.clear();
