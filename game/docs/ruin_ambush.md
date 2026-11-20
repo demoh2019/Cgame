@@ -9,7 +9,10 @@ generated ID and world seed; clients never choose the result.
 The server spawns up to **two infected in red zones** or **three in black**,
 on collision-checked dry terrain at least **12 metres from living players**.
 Enemies use ordinary targeting, combat and loot, while the opener receives
-an immediate warning (online party members also get an alert). **Q** loots
+an immediate warning (online party members also get an alert). Defeating
+**every original summoned infected** before expiry sends a one-time
+\`Ruin secured\` confirmation to the opener and party; despawns and missing
+entities never count as victory. **Q** loots
 nearby caches in the solo preview and **E** interacts in the online client.
 
 A repeated request to an already-open cache cannot create another wave.
