@@ -70,6 +70,7 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 		node->queue_free();
 	}
 	active_cells.erase(p_cell);
+	_clear_navigation_cell(p_cell);
 	physics_pending_cells.erase(p_cell);
 	// Gameplay should disarm the associated AI/physics interactions before
 	// the scene root is deleted at the end of the frame.
@@ -171,6 +172,11 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	instance->set_position(instance->get_position() + cell_to_local_position(p_cell));
 	add_child(instance);
 	active_cells.insert(p_cell, instance->get_instance_id());
+	_clear_navigation_cell(p_cell);
+	Node *navigation_region = _find_navigation_region(instance);
+	if (navigation_region != nullptr) {
+		navigation_pending_regions.insert(p_cell, navigation_region->get_instance_id());
+	}
 	physics_ready_cells.erase(p_cell);
 	physics_pending_cells.insert(p_cell, physics_tick_counter + 2);
 	_refresh_processing();
@@ -349,9 +355,16 @@ void WorldPartition3D::_notification(int p_what) {
 		// its child scene instances were preserved outside the scene tree.
 		physics_pending_cells.clear();
 		physics_ready_cells.clear();
+		navigation_pending_regions.clear();
+		navigation_ready_regions.clear();
 		for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
-			if (ObjectDB::get_instance(E.value) != nullptr) {
+			Node3D *root = Object::cast_to<Node3D>(ObjectDB::get_instance(E.value));
+			if (root != nullptr) {
 				physics_pending_cells.insert(E.key, physics_tick_counter + 2);
+				Node *region = _find_navigation_region(root);
+				if (region != nullptr) {
+					navigation_pending_regions.insert(E.key, region->get_instance_id());
+				}
 			}
 		}
 		_refresh_processing();
@@ -366,6 +379,8 @@ void WorldPartition3D::_notification(int p_what) {
 		observer_cell_valid = false;
 		physics_pending_cells.clear();
 		physics_ready_cells.clear();
+		navigation_pending_regions.clear();
+		navigation_ready_regions.clear();
 	}
 }
 
@@ -1237,6 +1252,9 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_cell_physics_ready", "cell"), &WorldPartition3D::is_cell_physics_ready);
 	ClassDB::bind_method(D_METHOD("are_cells_physics_ready", "center", "radius"), &WorldPartition3D::are_cells_physics_ready, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_physics_ready_cell_count"), &WorldPartition3D::get_physics_ready_cell_count);
+	ClassDB::bind_method(D_METHOD("is_cell_navigation_ready", "cell"), &WorldPartition3D::is_cell_navigation_ready);
+	ClassDB::bind_method(D_METHOD("are_cells_navigation_ready", "center", "radius"), &WorldPartition3D::are_cells_navigation_ready, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("get_navigation_ready_cell_count"), &WorldPartition3D::get_navigation_ready_cell_count);
 	ClassDB::bind_method(D_METHOD("get_cell_node", "cell"), &WorldPartition3D::get_cell_node);
 	ClassDB::bind_method(D_METHOD("are_cells_loaded", "center", "radius"), &WorldPartition3D::are_cells_loaded, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_loaded_cell_count"), &WorldPartition3D::get_loaded_cell_count);
@@ -1266,6 +1284,8 @@ void WorldPartition3D::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_physics_ready", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_physics_unready", PropertyInfo(Variant::VECTOR2I, "cell")));
+	ADD_SIGNAL(MethodInfo("cell_navigation_ready", PropertyInfo(Variant::VECTOR2I, "cell")));
+	ADD_SIGNAL(MethodInfo("cell_navigation_unready", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_unloaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("observer_cell_changed", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("streaming_source_ready", PropertyInfo(Variant::STRING, "name")));
@@ -1283,6 +1303,8 @@ WorldPartition3D::~WorldPartition3D() {
 	active_cells.clear();
 	physics_pending_cells.clear();
 	physics_ready_cells.clear();
+	navigation_pending_regions.clear();
+	navigation_ready_regions.clear();
 	pending_cells.clear();
 	ready_scenes.clear();
 }
