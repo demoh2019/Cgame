@@ -8,6 +8,7 @@ const Threat = preload("res://scripts/shared/threat.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const WindHearing = preload("res://scripts/shared/wind_hearing.gd")
 const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
@@ -225,7 +226,12 @@ func _select_target(players: Dictionary, here: Vector2) -> void:
 			weather_cover = clampf(weather_raw, Weather.STORM_SIGHT_MULTIPLIER, 1.0)
 		var notice := minf(float(data["notice"]) * sight_multiplier * visual * weather_cover,
 			float(data["lose"]) - 1.0)
-		var hearing := clampf(float(info.get("noise", 0.0)), 0.0, float(data["lose"]) - 1.0)
+		# Server-provided wind shifts only first passive sound acquisition.
+		# Damage threat, taunts, sight and blood scent retain their own rules.
+		var local_wind: Variant = info.get("wind", Vector2.ZERO)
+		var wind: Vector2 = local_wind if local_wind is Vector2 else Vector2.ZERO
+		var hearing: float = WindHearing.radius(float(info.get("noise", 0.0)),
+			wind, Vector2(p.x, p.z), here, float(data["lose"]) - 1.0)
 		# Scent can improve discovery but never expands the pursuit leash,
 		# overrides combat threat or bypasses safe/dead player protections.
 		var scent_raw: float = float(info.get("scent", 0.0))
