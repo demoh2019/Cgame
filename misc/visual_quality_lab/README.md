@@ -452,3 +452,71 @@ Technical references:
 - https://docs.godotengine.org/en/stable/tutorials/navigation/navigation_optimizing_performance.html
 - https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-gameplay-in-unreal-engine
 - https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partitioned-navigation-mesh
+
+
+## Visual Quality Lab v12 — world telemetry and adaptive work budgets
+
+This version adds two **reusable GDScript engine extensions** and wires both
+into the playable open-world demo. They are designed to help diagnose and
+moderate CPU spikes from scene streaming and navigation, without conflating
+CPU work with a GPU-limited frame rate.
+
+### `WorldTelemetry3D`: bounded measurements and repeatable captures
+
+- Samples Godot `Performance` monitors every 0.5 seconds: FPS, CPU process
+  and physics times (in ms), object count; plus current loaded/pending world
+  cells, scene-streaming duration (microseconds), cells created/released per
+  streaming update and since project launch, AI interest-manager time and
+  sleeping NPC count.
+- Keeps **at most 240 records** in a circular buffer (configurable). Exposes
+  a CPU-time 95th percentile and returns defensive snapshot copies.
+- Press **0** to toggle the in-game profiling overlay. Press **P** to save
+  the recorded samples as CSV under
+  `user://visual_quality_world_telemetry.csv`. CSV writing is explicit,
+  not performed continuously in `_process()`. Only `user://` destinations
+  are allowed for the built-in exporter.
+
+### `WorldBudgetGovernor3D`: cooperative CPU pressure control
+
+- Every 0.8 seconds, consumes a new **CPU** sample. It lowers the per-update
+  scene-spawn count and the AI-interest update count only after **3 sustained
+  high-load windows**; it restores their counts after **5 sustained low-load
+  windows**. Between thresholds, counts remain unchanged to resist jitter.
+- The nominal target is **16.7 ms CPU**; the threshold and window lengths
+  are configurable. Eco, Balanced and Cinematic cap scene instantiation to
+  **1/2/4 cells** per streamer update and AI checks to **6/8/12 cells** per
+  interest pass. Streaming unloads are not throttled by the governor, to avoid
+  retaining distant scene instances unnecessarily.
+- Independently, `WorldStreamer3D` enforces a configurable **2,500 µs
+  cooperative budget** between scene instantiations. This is *not a hard
+  real-time limit*: a single expensive `PackedScene.instantiate()` cannot
+  be interrupted once begun.
+- Press **B** to toggle the automatic governor. Disabling it restores the
+  defaults for the active quality preset. The HUD shows current budgets.
+
+**Interpretation:** Godot `Performance.TIME_PROCESS` and
+`TIME_PHYSICS_PROCESS` are approximate engine-side monitors. They are not
+GPU timings or exact end-to-end frame-duration measurements, and their values
+can be affected by project configuration, vsync, frame limiting, profiler
+sampling and platform. The governor is an **experimental heuristic** until
+profiling has been completed on the target machine. Real verification must
+include Godot's built-in CPU/Visual profilers and device-specific GPU timings.
+
+### Validation
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -q
+godot --headless --path . --script res://tests/test_world_telemetry.gd
+godot --headless --path . --script res://tests/test_world_budget_governor.gd
+```
+
+The local Python static suite has **27/27 passing checks**. The two GDScript
+tests exercise ring-buffer ordering, P95, defensive reads, CSV output,
+hysteresis, clamped budgets and quality-mode recovery. They are also included
+in the CI workflow but have **not yet been executed in Godot** in this working
+environment, and Apple Silicon/Metal performance remains unverified.
+
+References:
+- https://docs.godotengine.org/en/4.6/classes/class_performance.html
+- https://docs.godotengine.org/en/4.6/tutorials/scripting/debug/the_profiler.html
+- https://dev.epicgames.com/documentation/en-us/unreal-engine/introduction-to-performance-profiling-and-configuration-in-unreal-engine
