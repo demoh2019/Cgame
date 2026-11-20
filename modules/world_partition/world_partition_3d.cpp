@@ -1061,11 +1061,15 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "detail_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_detail_radius", "get_detail_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "detail_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_detail_hysteresis_cells", "get_detail_hysteresis_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_detail_transitions_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_detail_transitions_per_frame", "get_max_detail_transitions_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "simulation_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_simulation_radius", "get_simulation_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "simulation_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_simulation_hysteresis_cells", "get_simulation_hysteresis_cells");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_simulation_transitions_per_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_simulation_transitions_per_frame", "get_max_simulation_transitions_per_frame");
 
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_unloaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("observer_cell_changed", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_detail_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::INT, "detail_level")));
+	ADD_SIGNAL(MethodInfo("cell_simulation_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::BOOL, "active")));
 }
 
 WorldPartition3D::~WorldPartition3D() {
@@ -1078,6 +1082,7 @@ WorldPartition3D::~WorldPartition3D() {
 	// Child nodes belong to Node; drop references without touching queued deletions.
 	active_cells.clear();
 	active_detail_levels.clear();
+	active_simulation_cells.clear();
 	pending_cells.clear();
 	ready_scenes.clear();
 	pinned_cells.clear();
