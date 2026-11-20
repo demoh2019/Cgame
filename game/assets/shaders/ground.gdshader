@@ -1,4 +1,5 @@
 shader_type spatial;
+global uniform float aa_weather_wetness;
 render_mode diffuse_burley, specular_schlick_ggx;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 
@@ -189,9 +190,19 @@ void fragment() {
 	vec3 bitangent = normalize(cross(n, tangent));
 	vec3 detail = normalize(vec3(bump.xy * normal_strength, max(bump.z, 0.2)));
 	vec3 bent = normalize(tangent * detail.x + bitangent * detail.y + n * detail.z);
+
+	// Wet earth absorbs light; shallow mud and worn pavement collect small smooth puddles.
+	// Reuse existing biome and noise weights instead of additional texture reads or noise octaves.
+	float wettable = clamp(w[3] + w[4] + w[7] * 0.65 + w[9] + w[10] + w[2] * 0.25, 0.0, 1.0);
+	float wetness = clamp(aa_weather_wetness, 0.0, 1.0) * (0.22 + 0.78 * wettable) * (1.0 - clamp(w[8], 0.0, 1.0));
+	float puddle = wetness * clamp(w[3] + w[4] + w[9] + w[10], 0.0, 1.0)
+		* smoothstep(0.52, 0.78, mid) * (1.0 - smoothstep(0.08, 0.25, slope));
+	bent = normalize(mix(bent, n, puddle * 0.75));
 	NORMAL = normalize((VIEW_MATRIX * vec4(bent, 0.0)).xyz);
 
+	color *= 1.0 - wetness * 0.18 - puddle * 0.12;
 	ALBEDO = apply_cloud_shadow(color, p, TIME);
-	ROUGHNESS = mix(0.92, 0.6, w[8]) - 0.15 * shore;
-	SPECULAR = 0.2;
+	float dry_roughness = mix(0.92, 0.6, w[8]) - 0.15 * shore;
+	ROUGHNESS = mix(mix(dry_roughness, 0.28, wetness * 0.55), 0.08, puddle * 0.9);
+	SPECULAR = min(0.9, 0.2 + wetness * 0.2 + puddle * 0.3);
 }
