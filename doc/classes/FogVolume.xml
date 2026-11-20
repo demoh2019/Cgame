@@ -11,6 +11,25 @@
 	<tutorials>
 		<link title="Volumetric fog and fog volumes">$DOCS_URL/tutorials/3d/volumetric_fog.html</link>
 	</tutorials>
+	<methods>
+		<method name="snap_world_anchor" qualifiers="static">
+			<return type="Vector3" />
+			<param index="0" name="world_position" type="Vector3" />
+			<param index="1" name="grid_step" type="float" />
+			<description>
+				Snaps the X and Z components of [param world_position] to a world-space grid of [param grid_step] meters, preserving its Y coordinate. This helps animated, player-following local mist stay stable between volumetric fog reprojection frames. Invalid grid values return the original position. No scene state is modified.
+			</description>
+		</method>
+		<method name="set_snapped_world_anchor">
+			<return type="bool" />
+			<param index="0" name="world_position" type="Vector3" />
+			<param index="1" name="grid_step" type="float" />
+			<param index="2" name="distance_epsilon" type="float" default="0.1" />
+			<description>
+				Moves this fog volume to the nearest world-space XZ grid anchor while keeping Y unchanged. Returns [code]true[/code] if the global transform actually changed, [code]false[/code] otherwise. An unchanged anchor within [param distance_epsilon] does not cause a rendering-server transform update. Invalid coordinates or nonpositive grid steps are rejected. Useful for small local [FogVolume]s attached to moving gameplay cameras; does not alter material density or introduce an extra rendering pass.
+			</description>
+		</method>
+	</methods>
 	<members>
 		<member name="material" type="Material" setter="set_material" getter="get_material">
 			The [Material] used by the [FogVolume]. Can be either a built-in [FogMaterial] or a custom [ShaderMaterial].
