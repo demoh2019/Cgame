@@ -13,6 +13,9 @@ const LootLabel = preload("res://scripts/shared/loot_label.gd")
 const Ragdoll = preload("res://scripts/client/ragdoll.gd")
 const CharacterAnim = preload("res://scripts/client/character_anim.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const EngineFeatures = preload("res://scripts/client/engine_features.gd")
+const AnimLod = preload("res://scripts/client/anim_lod.gd")
+var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
 var _world = null
 var _corpses: Array[Dictionary] = []
 
@@ -100,6 +103,7 @@ func update_from(client) -> void:
 	_world = client.world
 	for key in _nodes.keys():
 		if not seen.has(key):
+			_unregister_anim_lod(_nodes[key])
 			if not (key.begins_with("zombie:") and _try_ragdoll(_nodes[key])):
 				_nodes[key].queue_free()
 			_nodes.erase(key)
@@ -497,6 +501,11 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		model.setup(Color.WHITE if Assets.has_characters() else Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0, character, false, int(abs(int(entity["id"]))) / Assets.CHARACTER_NAMES.size())
 	model.set_wetness_step(_wetness_step)
 	root.add_child(model)
+	_register_anim_lod(model)
+	if kind == "zombie":
+		EngineFeatures.tag_node(root, ["Enemy.Infected.%s" % String(entity["type"]).capitalize()])
+	else:
+		EngineFeatures.tag_node(root, ["Player"])
 	if kind == "player":
 		var bike := TrailBikeVisual.new()
 		bike.name = "TrailBike"
@@ -514,6 +523,42 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 	label.position = Vector3(0, height + 0.5, 0)
 	root.add_child(label)
 	return root
+
+
+## Animation update-rate LOD for character animators: the native controller if the engine has it, else the script fallback.
+func _register_anim_lod(model: Node) -> void:
+	var animator: AnimationPlayer = model.get("animator")
+	if animator == null:
+		return
+	if _anim_lod == null:
+		var lod_scale := AnimLod.distance_scale(GraphicsQuality.level())
+		if EngineFeatures.has("AnimationLODController"):
+			_anim_lod = ClassDB.instantiate("AnimationLODController")
+			_anim_lod.near_distance = AnimLod.NEAR * lod_scale
+			_anim_lod.mid_distance = AnimLod.MID * lod_scale
+			_anim_lod.far_distance = AnimLod.FAR * lod_scale
+		else:
+			_anim_lod = AnimLod.new()
+			_anim_lod.scale_factor = lod_scale
+		_anim_lod.name = "AnimLod"
+		add_child(_anim_lod)
+	if _anim_lod is AnimLod:
+		_anim_lod.register(animator, model as Node3D)
+	else:
+		_anim_lod.register_mixer(animator) # Native: skips inactive/paused (ragdolled) animators itself.
+
+
+func _unregister_anim_lod(node: Node) -> void:
+	var model := node.get_node_or_null("Model")
+	if _anim_lod == null or model == null:
+		return
+	var animator: AnimationPlayer = model.get("animator")
+	if animator == null:
+		return
+	if _anim_lod is AnimLod:
+		_anim_lod.unregister(animator)
+	else:
+		_anim_lod.unregister_mixer(animator)
 
 
 ## A zombie that just left the snapshot (killed) falls as a ragdoll instead of vanishing, within the tier budget.

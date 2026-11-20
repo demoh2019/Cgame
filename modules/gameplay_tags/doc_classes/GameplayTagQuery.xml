@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GameplayTagQuery" inherits="Resource" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Declarative all/any/none test over a [GameplayTagContainer].
+	</brief_description>
+	<description>
+		A container matches when every tag in [member all_tags] matches, at least one tag in [member any_tags] matches (ignored when empty) and no tag in [member none_tags] matches. Hierarchy matching follows [member exact].
+	</description>
+	<methods>
+		<method name="matches" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="container" type="GameplayTagContainer" />
+			<description>Returns [code]true[/code] if [param container] satisfies the query. A [code]null[/code] container is treated as empty.</description>
+		</method>
+	</methods>
+	<members>
+		<member name="all_tags" type="PackedStringArray" setter="set_all_tags" getter="get_all_tags" default="PackedStringArray()">
+			Tags that must all match.
+		</member>
+		<member name="any_tags" type="PackedStringArray" setter="set_any_tags" getter="get_any_tags" default="PackedStringArray()">
+			At least one of these must match, unless empty.
+		</member>
+		<member name="exact" type="bool" setter="set_exact" getter="is_exact" default="false">
+			If [code]true[/code], parent tags are not matched.
+		</member>
+		<member name="none_tags" type="PackedStringArray" setter="set_none_tags" getter="get_none_tags" default="PackedStringArray()">
+			Tags that must not match.
+		</member>
+	</members>
+</class>

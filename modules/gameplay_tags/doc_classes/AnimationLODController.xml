@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AnimationLODController" inherits="Node" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Reduces animation update rate for distant or off-screen characters.
+	</brief_description>
+	<description>
+		Equivalent of Unreal's Animation Update Rate Optimization and Unity's Animator Culling Mode. Registered [AnimationMixer] nodes are switched to [constant AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL] and advanced every frame within [member near_distance] of the active [Camera3D], every 2nd frame within [member mid_distance], every 4th within [member far_distance] and not at all beyond that or when off-screen. Skipped delta is accumulated (capped by [member max_accumulated_delta]) so animation time stays correct. Distance is measured to the nearest [Node3D] ancestor of the mixer. Mixers that are not [member AnimationMixer.active] are not advanced. Original callback modes are restored on unregistering, disabling or leaving the tree.
+		Optionally disables [SkeletonModifier3D] nodes (IK) below the mixer's root node beyond [member modifier_cull_distance] or when culled.
+	</description>
+	<methods>
+		<method name="clear_mixers">
+			<return type="void" />
+			<description>Unregisters all mixers and restores their callback modes.</description>
+		</method>
+		<method name="get_mixer_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of registered mixers.</description>
+		</method>
+		<method name="register_mixer">
+			<return type="void" />
+			<param index="0" name="mixer" type="AnimationMixer" />
+			<description>Starts managing [param mixer] (an [AnimationPlayer] or [AnimationTree]).</description>
+		</method>
+		<method name="unregister_mixer">
+			<return type="void" />
+			<param index="0" name="mixer" type="AnimationMixer" />
+			<description>Stops managing [param mixer] and restores its callback mode and any disabled modifiers.</description>
+		</method>
+		<method name="update_interval" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="distance" type="float" />
+			<param index="1" name="visible" type="bool" />
+			<param index="2" name="near" type="float" />
+			<param index="3" name="mid" type="float" />
+			<param index="4" name="far" type="float" />
+			<description>Returns the frame interval: 1 below [param near], 2 below [param mid], 4 below [param far], and 0 (paused) otherwise or when [param visible] is [code]false[/code].</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cull_offscreen" type="bool" setter="set_cull_offscreen" getter="is_cull_offscreen" default="true">
+			If [code]true[/code], characters outside the camera frustum are paused.
+		</member>
+		<member name="enabled" type="bool" setter="set_enabled" getter="is_enabled" default="true">
+			Enables the controller. Disabling restores all mixers' original callback modes.
+		</member>
+		<member name="far_distance" type="float" setter="set_far_distance" getter="get_far_distance" default="70.0">
+			Below this distance mixers update every 4th frame; beyond it they are paused.
+		</member>
+		<member name="max_accumulated_delta" type="float" setter="set_max_accumulated_delta" getter="get_max_accumulated_delta" default="0.5">
+			Maximum accumulated delta in seconds passed to a single advance.
+		</member>
+		<member name="mid_distance" type="float" setter="set_mid_distance" getter="get_mid_distance" default="35.0">
+			Below this distance mixers update every 2nd frame.
+		</member>
+		<member name="modifier_cull_distance" type="float" setter="set_modifier_cull_distance" getter="get_modifier_cull_distance" default="40.0">
+			Beyond this distance (or when culled) [SkeletonModifier3D] nodes are disabled. Set to 0 to disable this feature.
+		</member>
+		<member name="near_distance" type="float" setter="set_near_distance" getter="get_near_distance" default="15.0">
+			Below this distance mixers update every frame.
+		</member>
+	</members>
+</class>

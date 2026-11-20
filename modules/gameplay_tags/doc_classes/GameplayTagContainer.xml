@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GameplayTagContainer" inherits="Resource" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		A set of hierarchical gameplay tags such as [code]Enemy.Infected.Elite[/code].
+	</brief_description>
+	<description>
+		Equivalent of Unreal's Gameplay Tag Container. Tags are dot-separated strings. A non-exact query matches a tag when the query equals it or is one of its parents on a [code].[/code] boundary, so a container holding [code]Enemy.Infected.Elite[/code] reports [code]has_tag("Enemy")[/code] as [code]true[/code] but [code]has_tag("Ene")[/code] as [code]false[/code].
+	</description>
+	<methods>
+		<method name="add_tag">
+			<return type="void" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Adds [param tag]. Empty tags and duplicates are ignored.</description>
+		</method>
+		<method name="add_tags">
+			<return type="void" />
+			<param index="0" name="tags" type="PackedStringArray" />
+			<description>Adds every tag in [param tags].</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>Removes all tags.</description>
+		</method>
+		<method name="get_tag_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of stored tags.</description>
+		</method>
+		<method name="has_all" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="tags" type="PackedStringArray" />
+			<param index="1" name="exact" type="bool" default="false" />
+			<description>Returns [code]true[/code] if every tag in [param tags] matches (see [method has_tag]). An empty array returns [code]true[/code].</description>
+		</method>
+		<method name="has_any" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="tags" type="PackedStringArray" />
+			<param index="1" name="exact" type="bool" default="false" />
+			<description>Returns [code]true[/code] if at least one tag in [param tags] matches (see [method has_tag]).</description>
+		</method>
+		<method name="has_tag" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="exact" type="bool" default="false" />
+			<description>Returns [code]true[/code] if a stored tag equals [param tag] or, when [param exact] is [code]false[/code], is a child of it.</description>
+		</method>
+		<method name="is_empty" qualifiers="const">
+			<return type="bool" />
+			<description>Returns [code]true[/code] if the container holds no tags.</description>
+		</method>
+		<method name="remove_tag">
+			<return type="void" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Removes the exactly equal [param tag], if present.</description>
+		</method>
+		<method name="tag_matches" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="query" type="StringName" />
+			<param index="2" name="exact" type="bool" default="false" />
+			<description>Returns [code]true[/code] if [param tag] equals [param query] or, when [param exact] is [code]false[/code], [param query] is a parent of [param tag] on a [code].[/code] boundary. Empty strings never match.</description>
+		</method>
+	</methods>
+	<members>
+		<member name="tags" type="PackedStringArray" setter="set_tags" getter="get_tags" default="PackedStringArray()">
+			The stored tags.
+		</member>
+	</members>
+</class>

@@ -26,6 +26,7 @@ const SUITES := [
 	"res://tests/test_footprint_decals.gd",
 	"res://tests/test_engine_parity_fx.gd",
 	"res://tests/test_ragdoll.gd",
+	"res://tests/test_anim_lod.gd",
 	"res://tests/test_vfx_parity.gd",
 	"res://tests/test_camera_post_parity.gd",
 	"res://tests/test_audio_parity.gd",
