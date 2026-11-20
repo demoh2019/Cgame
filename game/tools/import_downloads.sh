@@ -78,7 +78,7 @@ shrink_outfits() {
 # Music: Fantasy RPG Music Vol. 2 (its licence allows use in games, not passing the files on). The mp3 versions of the
 # tracks scripts/client/audio.gd plays by day, at night and in a fight.
 if extract "Fantasy RPG Music Vol. 2.zip" music; then
-  for track in "Light Ambient 1 (Loop)" "Light Ambient 2 (Loop)" "Light Ambient 3 (Loop)" "Night Ambient 2 (Loop)" "Night Ambient 3 (Loop)" "Action 1 (Loop)" "Action 2 (Loop)"; do
+  for track in "Light Ambient 1 (Loop)" "Light Ambient 2 (Loop)" "Light Ambient 3 (Loop)" "Night Ambient 2 (Loop)" "Night Ambient 3 (Loop)" "Action 1 (Loop)" "Action 2 (Loop)" Death Victory Complete; do
     cp "$TMP/music/mp3/$track.mp3" "$DEST/music/" || true
   done
 fi

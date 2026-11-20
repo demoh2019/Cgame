@@ -10,7 +10,8 @@ var _footsteps_wanted := false
 var enabled := true
 
 # Music (Fantasy RPG Music Vol. 2, imported into assets/packs/music by tools/import_downloads.sh; silent without it).
-# Two players crossfade between moods: calm by day, eerie at night, drums while fighting.
+# One AudioStreamInteractive (the engine's adaptive music) holds a clip per mood, calm by day, eerie at night, drums
+# while fighting, and crossfades between them itself when the mood changes.
 const MUSIC := {
 	"day": ["Light Ambient 1 (Loop)", "Light Ambient 2 (Loop)", "Light Ambient 3 (Loop)"],
 	"night": ["Night Ambient 2 (Loop)", "Night Ambient 3 (Loop)"],
@@ -18,8 +19,7 @@ const MUSIC := {
 }
 const MUSIC_DB := -17.0
 const COMBAT_SECONDS := 9.0 # Fighting music keeps going this long after the last blow.
-var _music: Array[AudioStreamPlayer] = []
-var _music_active := 0
+var _music: AudioStreamPlayer
 var _mood := ""
 var _daylight := 1.0
 var _combat_left := 0.0
@@ -39,11 +39,37 @@ func _ready() -> void:
 	if _steps.stream is AudioStreamOggVorbis:
 		(_steps.stream as AudioStreamOggVorbis).loop = true
 	_ambience.play()
-	for i in 2:
-		var player := AudioStreamPlayer.new()
-		player.volume_db = -80.0
-		add_child(player)
-		_music.append(player)
+	_music = AudioStreamPlayer.new()
+	_music.volume_db = MUSIC_DB
+	add_child(_music)
+	var adaptive := _adaptive_music()
+	if adaptive != null:
+		_music.stream = adaptive
+
+
+## The day, night and combat clips (one track each, picked at random), with a crossfade from any clip to any other:
+## two seconds between calm moods, one into a fight.
+func _adaptive_music() -> AudioStreamInteractive:
+	var moods: Array = MUSIC.keys()
+	var music := AudioStreamInteractive.new()
+	music.clip_count = moods.size()
+	for i in moods.size():
+		var tracks: Array = MUSIC[moods[i]]
+		var stream := music_track(String(tracks[randi() % tracks.size()]))
+		if stream == null:
+			return null
+		stream.bpm = 60.0 # So a beat is a second for the fade lengths below.
+		music.set_clip_name(i, moods[i])
+		music.set_clip_stream(i, stream)
+	music.add_transition(AudioStreamInteractive.CLIP_ANY, AudioStreamInteractive.CLIP_ANY,
+		AudioStreamInteractive.TRANSITION_FROM_TIME_IMMEDIATE, AudioStreamInteractive.TRANSITION_TO_TIME_START,
+		AudioStreamInteractive.FADE_CROSS, 2.0)
+	var combat: int = moods.find("combat")
+	music.add_transition(AudioStreamInteractive.CLIP_ANY, combat,
+		AudioStreamInteractive.TRANSITION_FROM_TIME_IMMEDIATE, AudioStreamInteractive.TRANSITION_TO_TIME_START,
+		AudioStreamInteractive.FADE_CROSS, 1.0)
+	music.initial_clip = moods.find("day")
+	return music
 
 
 static func music_track(track: String) -> AudioStream:
@@ -56,30 +82,40 @@ static func music_track(track: String) -> AudioStream:
 	return stream
 
 
-## Called every frame with the light level; picks the mood and fades toward it.
+## Called every frame with the light level; picks the mood and lets the adaptive stream fade to it.
 func update_music(daylight: float, delta: float) -> void:
 	_daylight = daylight
 	_combat_left = maxf(_combat_left - delta, 0.0)
+	if _music.stream == null:
+		return
+	if not enabled:
+		_music.stop()
+		_mood = ""
+		return
 	var mood := "combat" if _combat_left > 0.0 else ("day" if _daylight > 0.3 else "night")
-	if mood != _mood and enabled:
-		var tracks: Array = MUSIC[mood]
-		var stream := music_track(String(tracks[randi() % tracks.size()]))
-		if stream != null:
-			_mood = mood
-			_music_active = 1 - _music_active
-			_music[_music_active].stream = stream
-			_music[_music_active].volume_db = -40.0
-			_music[_music_active].play()
-	# Fade the new track in and the old one out over about two seconds (faster into a fight).
-	var rate: float = delta * (30.0 if _mood == "combat" else 14.0)
-	for i in _music.size():
-		var player := _music[i]
-		if not player.playing:
-			continue
-		var target: float = MUSIC_DB if (i == _music_active and enabled) else -60.0
-		player.volume_db = move_toward(player.volume_db, target, rate)
-		if player.volume_db <= -59.0 and i != _music_active:
-			player.stop()
+	if not _music.playing:
+		_music.play()
+		_mood = ""
+	if mood != _mood:
+		_mood = mood
+		var playback := _music.get_stream_playback() as AudioStreamPlaybackInteractive
+		if playback != null:
+			playback.switch_to_clip_by_name(mood)
+
+
+## A short musical phrase over everything (death, a level gained, a victory). Silent without the music pack.
+func play_sting(track: String, volume_db: float = -9.0) -> void:
+	if not enabled:
+		return
+	var path := Assets.PACKS + "music/" + track + ".mp3"
+	if not ResourceLoader.exists(path):
+		return
+	var player := AudioStreamPlayer.new()
+	player.stream = load(path)
+	player.volume_db = volume_db
+	add_child(player)
+	player.finished.connect(player.queue_free)
+	player.play()
 
 
 func mark_combat() -> void:
@@ -142,6 +178,16 @@ func on_event(event: Dictionary, local_peer: int, ground_height: Callable) -> vo
 				play_ui("enemy_attack", -4.0)
 		"zombie_died":
 			play_at("enemy_destroy", position, -2.0)
+		"barricade_broken", "snare_triggered":
+			play_at("break", position, -4.0)
+		"flash_thrown":
+			play_at("blaster_repeater", position, -6.0)
+		"knockback":
+			play_at("enemy_hurt", position, -8.0)
+		"restoration_pulse":
+			play_at("coin", position, -6.0)
+		"outpost_taken":
+			play_ui("weapon_change", -6.0)
 		"gathered":
 			play_ui("coin", -8.0)
 		"crate":
@@ -149,3 +195,9 @@ func on_event(event: Dictionary, local_peer: int, ground_height: Callable) -> vo
 		"death":
 			if event.get("peer", -1) == local_peer:
 				play_ui("fall", -2.0)
+				play_sting("Death")
+		"skill_up":
+			if event.get("peer", -1) == local_peer:
+				play_sting("Complete", -12.0)
+		"outpost_taken":
+			play_sting("Victory", -10.0)

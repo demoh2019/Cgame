@@ -140,8 +140,12 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		bike.set_lamp(bool(entity.get("bike_lamp_lit", false)))
 		bike.set_riding(bool(entity.get("mounted", false)) and bool(entity.get("alive", false)))
 		var player_model: Node3D = _nodes[key].get_node("Model")
-		player_model.scale = Vector3(1.0,
-			0.72 if bool(entity.get("crouching", false)) else 1.0, 1.0)
+		if player_model.pack_mode:
+			# Sneaking and riding are real poses; the weapon they carry is in their hand.
+			player_model.set_stance(bool(entity.get("crouching", false)), bool(entity.get("mounted", false)))
+			player_model.set_weapon(str(entity.get("weapon", "")))
+		else:
+			player_model.scale = Vector3(1.0, 0.72 if bool(entity.get("crouching", false)) else 1.0, 1.0)
 		if player_model.pack_mode:
 			player_model.set_dead(not bool(entity["alive"])) # A dead player lies down instead of vanishing.
 		else:
@@ -460,5 +464,28 @@ static func attack_animation(weapon_id: String, ranged: bool) -> String:
 	if ranged:
 		return "Pistol_Shoot"
 	if weapon_id == "":
-		return "Punch_Jab"
-	return "Sword_Regular_A"
+		return "Punch_Jab" if randf() < 0.55 else "Punch_Cross"
+	match CharacterModel.weapon_family(weapon_id):
+		"sledgehammer", "purifier_maul", "sunder_axe":
+			return "Sword_Regular_C" # Big overhead blows.
+		"spear":
+			return "Sword_Regular_B"
+		"restoration_staff":
+			return "Spell_Simple_Shoot"
+	return "Sword_Regular_A" if randf() < 0.5 else "Sword_Regular_B"
+
+
+## Any one-shot animation on a player or zombie drawn here.
+func play_action_on(kind: String, id: int, animation_name: String) -> void:
+	var key := "%s:%d" % [kind, id]
+	if _nodes.has(key) and _nodes[key].has_node("Model"):
+		_nodes[key].get_node("Model").play_action(animation_name, 1.2)
+
+
+## A flinch on whoever was struck.
+func play_hit(kind: String, id: int, heavy: bool = false) -> void:
+	var key := "%s:%d" % [kind, id]
+	if _nodes.has(key) and _nodes[key].has_node("Model"):
+		var model = _nodes[key].get_node("Model")
+		if model.has_method("play_hit"):
+			model.play_hit(heavy)

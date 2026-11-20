@@ -22,6 +22,9 @@ var _action_loop := ""
 var _oneshot := ""
 var _oneshot_left := 0.0
 var _dead := false
+var _crouching := false
+var _riding := false
+var _swimming := false
 
 
 ## `model_name` picks a character of the pack ("Orc_Male", "Elf_Female", ...); empty or an unavailable pack
@@ -299,6 +302,8 @@ func play_action(animation_name: String, speed_scale: float = 1.0) -> void:
 	if not pack_mode or animator == null or _dead or not animator.has_animation(animation_name):
 		return
 	_oneshot = animation_name
+	if _swing_trail != null and (animation_name.begins_with("Sword") or animation_name.begins_with("Melee")):
+		_swing_trail.set("emitting", true)
 	animator.play(animation_name, 0.08)
 	animator.speed_scale = speed_scale
 	_oneshot_left = animator.get_animation(animation_name).length / maxf(speed_scale, 0.1)
@@ -307,6 +312,111 @@ func play_action(animation_name: String, speed_scale: float = 1.0) -> void:
 ## A looping activity such as chopping; an empty name stops it.
 func set_action_loop(animation_name: String) -> void:
 	_action_loop = animation_name
+
+
+# --- Weapon in hand -------------------------------------------------------------------------------------------------
+
+# Weapon item (tier suffix dropped) -> model held in the right hand. KayKit Fantasy Weapons Bits (CC0) and the Kenney
+# blaster for the pistols. Tools held while gathering use the same table.
+const HELD_MODELS := {
+	"club": "kaykit:hammer_B", "spear": "kaykit:spear_A", "machete": "kaykit:sword_B", "sunder_axe": "kaykit:axe_A",
+	"dagger": "kaykit:dagger_A", "sledgehammer": "kaykit:hammer_C", "restoration_staff": "kaykit:staff_A",
+	"bow": "kaykit:bow_A_withString", "crossbow": "kaykit:bow_B_withString", "purifier_maul": "kaykit:hammer_A",
+	"axe": "kaykit:axe_B", "pistol": "kenney:blaster", "suppressed_pistol": "kenney:blaster",
+}
+# Scale of each model in the hand: the kit is about twice life size (a 1.8 m sword, a 3 m spear).
+const HELD_SCALES := {
+	"kaykit:hammer_B": 0.5, "kaykit:spear_A": 0.62, "kaykit:sword_B": 0.46, "kaykit:axe_A": 0.6, "kaykit:dagger_A": 0.5,
+	"kaykit:hammer_C": 0.7, "kaykit:staff_A": 0.62, "kaykit:bow_A_withString": 0.55, "kaykit:bow_B_withString": 0.5,
+	"kaykit:hammer_A": 0.55, "kaykit:axe_B": 0.55, "kenney:blaster": 0.32,
+}
+static var _held_scenes: Dictionary = {}
+var _held_id := ""
+var _swing_trail: Node3D # Trail3D (engine) at the blade's tip, lit only while a swing plays.
+var _hand: BoneAttachment3D
+
+
+## The weapon family of an item id: "machete_3" -> "machete".
+static func weapon_family(item_id: String) -> String:
+	var parts := item_id.rsplit("_", true, 1)
+	return parts[0] if parts.size() == 2 and parts[1].is_valid_int() else item_id
+
+
+## Shows the weapon (or tool) in the right hand; an empty or unknown id empties the hand. Cheap to call every frame.
+func set_weapon(item_id: String) -> void:
+	if not pack_mode or item_id == _held_id:
+		return
+	_held_id = item_id
+	if _hand == null:
+		var skeleton := _find_skeleton()
+		if skeleton == null or skeleton.find_bone("hand_r") < 0:
+			return
+		_hand = BoneAttachment3D.new()
+		_hand.bone_name = "hand_r"
+		skeleton.add_child(_hand)
+	for child in _hand.get_children():
+		child.queue_free()
+	var key: String = HELD_MODELS.get(weapon_family(item_id), "")
+	if key == "":
+		return
+	if not _held_scenes.has(key):
+		var path: String = ("res://assets/models/kaykit_weapons/%s.gltf" if key.begins_with("kaykit:") else "res://assets/kenney/fps/%s.glb") % key.get_slice(":", 1)
+		_held_scenes[key] = load(path) if ResourceLoader.exists(path) else null
+	var scene := _held_scenes[key] as PackedScene
+	if scene == null:
+		return
+	var held := scene.instantiate() as Node3D
+	# The grip sits in the palm and the blade or shaft leaves the fist along the hand bone's +Z (forward and up at rest,
+	# a ready stance); the hand bone's +Y runs along the fingers. A bow stands upright in the fist.
+	var size: float = float(HELD_SCALES.get(key, 0.5))
+	if key.begins_with("kenney:"):
+		held.transform = Transform3D(Basis(Vector3.RIGHT, -PI * 0.5).scaled(Vector3.ONE * size), Vector3(0.0, 0.09, 0.03))
+	elif key.contains("bow"):
+		held.transform = Transform3D(Basis(Vector3.UP, -PI * 0.5).scaled(Vector3.ONE * size), Vector3(0.0, 0.08, 0.0))
+	else:
+		held.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5).scaled(Vector3.ONE * size), Vector3(0.0, 0.08, 0.03))
+	_hand.add_child(held)
+	# A pale streak behind the tip of melee weapons while they swing (the fork's Trail3D).
+	_swing_trail = null
+	if ClassDB.class_exists("Trail3D") and key.begins_with("kaykit:") and not key.contains("bow"):
+		var tip_height: float = 0.0
+		for mesh_instance in held.find_children("*", "MeshInstance3D", true, false):
+			tip_height = maxf(tip_height, (mesh_instance as MeshInstance3D).get_aabb().end.y)
+		var trail: Node3D = ClassDB.instantiate("Trail3D")
+		trail.set("limit_mode", 0) # By time.
+		trail.set("lifetime", 0.1)
+		trail.set("width", 0.09 / size)
+		trail.set("mesh_alignment", 1) # Facing the camera: a thin streak, not a sheet.
+		trail.set("material_mode", 1) # Additive.
+		var fade := Gradient.new()
+		fade.colors = PackedColorArray([Color(1.0, 0.97, 0.88, 0.0), Color(1.0, 0.97, 0.88, 0.55)])
+		trail.set("color_gradient", fade)
+		trail.set("emitting", false)
+		trail.position = Vector3(0.0, tip_height * 0.85, 0.0)
+		held.add_child(trail)
+		_swing_trail = trail
+
+
+func _find_skeleton() -> Skeleton3D:
+	for child in get_children():
+		var found: Array = child.find_children("*", "Skeleton3D", true, false)
+		if not found.is_empty():
+			return found[0]
+	return null
+
+
+## Sneaking low or riding the bike: picked up by update_motion.
+func set_stance(crouching: bool, riding: bool, swimming: bool = false) -> void:
+	_crouching = crouching
+	_riding = riding
+	_swimming = swimming
+
+
+## A flinch when struck (not while already playing an action, dead, or riding).
+func play_hit(heavy: bool = false) -> void:
+	if not pack_mode or _dead or _riding or _oneshot != "":
+		return
+	play_action("Hit_Knockback" if heavy else ("Hit_Chest" if randf() < 0.6 else "Hit_Head"), 1.3)
 
 
 func set_dead(dead: bool) -> void:
@@ -334,6 +444,8 @@ func update_motion(delta: float) -> void:
 		if _oneshot_left > 0.0:
 			return
 		_oneshot = ""
+		if _swing_trail != null:
+			_swing_trail.set("emitting", false)
 	if _dead:
 		if animator.current_animation != "Death01":
 			animator.play("Death01", 0.1)
@@ -352,6 +464,15 @@ func update_motion(delta: float) -> void:
 				_play("Zombie_Walk_Fwd_Loop", clampf(speed / 1.1, 0.6, 2.2))
 		else:
 			_play("Zombie_Idle_Loop", 1.0)
+		return
+	if _riding:
+		_play("Driving_Loop", 1.0) # Seated, hands on the handlebars.
+		return
+	if _swimming:
+		_play("Swim_Fwd_Loop" if _moving else "Swim_Idle_Loop", 1.0)
+		return
+	if _crouching:
+		_play("Crouch_Fwd_Loop" if _moving else "Crouch_Idle_Loop", clampf(speed / 1.2, 0.6, 1.4) if _moving else 1.0)
 		return
 	if not _moving:
 		_play("Idle_Loop", 1.0)

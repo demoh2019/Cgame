@@ -177,6 +177,11 @@ func _build_environment() -> void:
 	_lightning_visual.name = "StormLightningWarning"
 	add_child(_lightning_visual)
 	camera.current = true
+	if camera.has_method("set_shake_max_offset"):
+		# Trauma shake (engine feature of this fork): small offsets for a top-down view, quick decay.
+		camera.set_shake_max_offset(Vector3(0.35, 0.25, 0.35))
+		camera.set_shake_max_rotation(0.02)
+		camera.set_shake_decay(1.6)
 	chunk_root = Node3D.new()
 	chunk_root.name = "Chunks"
 	add_child(chunk_root)
@@ -360,6 +365,12 @@ func _gather_animation() -> String:
 	return "TreeChopping_Loop" if node.get("kind", "") == "tree" else "Farm_Harvest"
 
 
+## Camera shake through the fork's built-in Camera3D trauma, which decays by itself.
+func _shake(amount: float) -> void:
+	if camera != null and camera.has_method("add_trauma"):
+		camera.add_trauma(amount)
+
+
 ## Particles for what just happened, at the place it happened.
 func _spawn_effects(event: Dictionary) -> void:
 	var here: Vector3 = client.display_position() + Vector3(0, 1.0, 0)
@@ -370,10 +381,48 @@ func _spawn_effects(event: Dictionary) -> void:
 		"hit":
 			if str(event.get("kind", "")) == "zombie":
 				effects.hit_zombie(at)
+				entities.play_hit("zombie", int(event.get("id", -1)), float(event.get("damage", 0.0)) >= 30.0)
+				if at.distance_to(here) < 4.0:
+					_shake(0.12) # Your own blow landing.
 			else:
 				effects.hit_player(at)
+				if int(event.get("id", -1)) == client.peer_id:
+					_shake(0.42) # You were hit.
+					if avatar_model != null:
+						avatar_model.play_hit(float(event.get("damage", 0.0)) >= 25.0)
+				else:
+					entities.play_hit("player", int(event.get("id", -1)))
 		"zombie_died":
 			effects.zombie_died(at)
+			if at.distance_to(here) < 6.0:
+				_shake(0.18)
+		"restoration_pulse":
+			effects.ring(at - Vector3(0, 1.0, 0), Color(0.4, 1.0, 0.55, 0.9), 6.0, 0.9)
+			effects.burst(at, Color(0.5, 1.0, 0.6), 22, 2.4, 0.9, 0.1, -1.5)
+		"knockback":
+			effects.burst(at - Vector3(0, 0.8, 0), Color(0.62, 0.55, 0.45), 16, 3.2, 0.5, 0.14, 4.0)
+			if at.distance_to(here) < 8.0:
+				_shake(0.15)
+		"pinning_bolt":
+			effects.ring(at - Vector3(0, 1.0, 0), Color(0.45, 0.75, 1.0, 0.9), 1.6, 0.5)
+		"flash_thrown":
+			effects.ring(at - Vector3(0, 1.0, 0), Color(1.0, 1.0, 0.9, 1.0), 7.0, 0.45)
+			effects.burst(at, Color(1.0, 1.0, 0.85), 30, 6.0, 0.35, 0.14, 0.0)
+			if at.distance_to(here) < 12.0:
+				_shake(0.25)
+		"ember_thrown":
+			effects.burst(at, Color(1.0, 0.55, 0.15), 26, 2.6, 1.0, 0.1, -0.5)
+		"decoy_thrown":
+			effects.ring(at - Vector3(0, 1.0, 0), Color(1.0, 0.85, 0.35, 0.8), 3.0, 0.8)
+		"snare_triggered":
+			effects.burst(at - Vector3(0, 0.6, 0), Color(0.5, 0.38, 0.22), 14, 2.0, 0.5, 0.1)
+		"barricade_broken":
+			effects.burst(at, Color(0.55, 0.38, 0.2), 34, 5.0, 0.9, 0.16, 9.0)
+			if at.distance_to(here) < 10.0:
+				_shake(0.3)
+		"outpost_taken", "siege_contract_result":
+			if at.distance_to(here) < 60.0:
+				effects.ring(at - Vector3(0, 1.0, 0), Color(1.0, 0.82, 0.35, 0.9), 14.0, 1.4)
 		"finishing_strike":
 			effects.burst(at, Color(0.95, 0.22, 0.38),
 				20, 4.3, 0.7, 0.12)
@@ -383,6 +432,8 @@ func _spawn_effects(event: Dictionary) -> void:
 		"attack":
 			if bool(event.get("ranged", false)):
 				effects.muzzle_flash(at + Vector3(0, 0.2, 0))
+				if int(event.get("peer", -1)) == client.peer_id:
+					_shake(0.1)
 		"gathered":
 			var item: String = str(event.get("item", ""))
 			var chips := Color(0.4, 0.7, 0.25)
@@ -407,6 +458,18 @@ func _on_skill_event(event: Dictionary) -> void:
 		else:
 			var other: Dictionary = client.players.get(int(event.get("peer", -1)), {})
 			entities.play_attack(int(event.get("peer", -1)), str(other.get("weapon", "")), bool(event.get("ranged", false)))
+	# Throws show an overhand throw on whoever threw; opening a crate shows the lid going up.
+	if event["type"] in ["flash_thrown", "ember_thrown", "decoy_thrown"]:
+		var thrower: int = int(event.get("peer", -1))
+		if thrower == client.peer_id and avatar_model != null:
+			avatar_model.play_action("OverhandThrow", 1.2)
+		else:
+			entities.play_action_on("player", thrower, "OverhandThrow")
+	elif event["type"] == "crate":
+		if int(event.get("peer", -1)) == client.peer_id and avatar_model != null:
+			avatar_model.play_action("Chest_Open", 1.3)
+		else:
+			entities.play_action_on("player", int(event.get("peer", -1)), "Chest_Open")
 	match event["type"]:
 		"finishing_strike":
 			if int(event.get("peer", -1)) == client.peer_id:
@@ -599,6 +662,10 @@ func _process(delta: float) -> void:
 		avatar.visible = bool(client.you.get("alive", true))
 		avatar_model.scale = Vector3(1.0,
 			0.72 if bool(client.you.get("crouching", false)) else 1.0, 1.0)
+		avatar_model.set_stance(bool(client.you.get("crouching", false)), bool(client.you.get("mounted", false)) and avatar.visible,
+			float(client.you.get("wading_depth_m", 0.0)) > 1.05)
+		# Chopping shows the axe; otherwise the equipped weapon is in hand.
+		avatar_model.set_weapon("axe_1" if _gather_animation() == "TreeChopping_Loop" else str(client.you.get("weapon", "")))
 		avatar_model.update_motion(delta)
 		avatar_model.set_dead(not bool(client.you.get("alive", true)))
 		avatar_model.set_action_loop(_gather_animation())
@@ -799,6 +866,20 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F10:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.place_fish_trap()
+			KEY_F6:
+				# Pitch a field tarp a few steps ahead (it used to be a button only).
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					var standing: Vector3 = client.display_position()
+					client.pitch_shelter(Vector2(standing.x, standing.z) + Vector2(sin(client.yaw), cos(client.yaw)) * 2.8)
+			KEY_F7:
+				var shelter_id: int = client.nearest_shelter(client.display_position())
+				if shelter_id < 0:
+					hud.say("No field tarp within reach.")
+				else:
+					client.pack_shelter(shelter_id)
+			KEY_HOME:
+				if not hud.is_menu_open():
+					client.use_item("return_charm")
 			KEY_F12:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var fish_trap_id: int = client.nearest_fish_trap(client.display_position())
@@ -843,7 +924,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				else:
 					client.drink()
 			KEY_T:
-				client.fish(Input.is_key_pressed(KEY_SHIFT))
+				if Input.is_key_pressed(KEY_ALT):
+					client.fish(false, true) # Storm cast.
+				else:
+					client.fish(Input.is_key_pressed(KEY_SHIFT))
 			KEY_Z:
 				client.rest()
 			KEY_B:

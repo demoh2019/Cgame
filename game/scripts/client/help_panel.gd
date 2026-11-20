@@ -14,10 +14,10 @@ const ENTRIES := [
 	["BUILD AND DEFEND", [
 		["U", "build barricade"], ["H", "repair"], ["Y", "upgrade"], ["X", "dismantle"], ["O", "light campfire"],
 		["9", "refuel fire (Shift: stormproof briquette)"], ["-", "extinguish fire"], [",", "throw noise decoy"],
-		["F5", "throw ember flask (PvE fire)"]]],
+		["F5", "throw ember flask (PvE fire)"], ["F6 / F7", "pitch / pack field tarp"], ["Home", "return charm"], ["Alt+T", "storm cast"]]],
 	["TOWN", [
 		["N", "buy water"], ["V", "sell materials (Shift: fish)"], ["P", "accept contract (Shift: turn in, Ctrl: daily bounty)"],
-		["K", "skills and perks"], ["J", "map: click personal; Shift+click party; right clears"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["F3", "full text readout"]]],
+		["K", "skills and perks"], ["J", "map: drag pans, wheel zooms, click waypoint, Shift+click party ping, right clears"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["F9", "full text readout"], ["F3", "survey ruins"]]],
 ]
 
 var _built := false

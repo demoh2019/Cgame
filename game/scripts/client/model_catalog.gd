@@ -92,6 +92,13 @@ const PROPS := [
 	{"path": "res://assets/models/polyhaven/baked/metal_rack.res", "kind": "height", "size": 1.9, "radius": 0.8},
 	{"path": "res://assets/models/polyhaven/baked/tool_cart.res", "kind": "height", "size": 1.0, "radius": 0.5},
 	{"path": "res://assets/models/polyhaven/baked/bench.res", "kind": "length", "size": 1.6, "radius": 0.6},
+	# Village pack, second look (indices 50-55): cooking, firewood, hay, a cart wheel, a drying hide, a chest.
+	{"path": "village/EA03_Prop_Container_Chest_02a.glb", "kind": "length", "size": 1.1, "radius": 0.5},
+	{"path": "village/EA_Items_House_cauldron_soup_01a.glb", "kind": "height", "size": 1.0, "radius": 0.6},
+	{"path": "village/EA03_Items_House_Firewood_01a.glb", "kind": "length", "size": 1.8, "radius": 0.8},
+	{"path": "village/EA03_Prop_Container_Bale_01a.glb", "kind": "length", "size": 1.6, "radius": 0.8},
+	{"path": "village/EA03_Prop_Village_Whell_01d.glb", "kind": "height", "size": 1.2, "radius": 0.4},
+	{"path": "village/EA03_Prop_Town_AnimalSkin_01b.glb", "kind": "height", "size": 1.8, "radius": 0.5},
 ]
 
 # Bits of ruin for cities and bunkers: broken walls, pillars, rubble. Blocking, big.

@@ -117,7 +117,7 @@ func run(t) -> void:
 			if world.is_safe(candidate.x, candidate.y) or world.is_water(candidate.x, candidate.y):
 				continue
 			if not Movement._is_free(world, candidate) or not Movement._is_free(
-					candidate + Vector2(1.0, 0.0)):
+					world, candidate + Vector2(1.0, 0.0)):
 				continue
 			site = candidate
 			found = true

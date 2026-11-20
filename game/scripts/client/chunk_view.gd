@@ -706,6 +706,8 @@ func _build_npcs(npcs: Array) -> void:
 		model.position = Vector3(float(npc["x"]), float(npc["y"]), float(npc["z"])) - Vector3(_world_origin().x, 0.0, _world_origin().y)
 		model.rotation.y = float(npc["yaw"])
 		model.play_fixed(str(npc["animation"]))
+		if str(npc["role"]) == "guard":
+			model.set_weapon("spear_1") # Settlement guards stand armed.
 		var label := Label3D.new()
 		label.text = "%s\n%s" % [npc["name"], npc["title"]]
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED

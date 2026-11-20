@@ -69,3 +69,21 @@ textures to 1024 px (normal maps 512 px): at full size, loading them mid-game st
 
 **Fantasy RPG Music Vol. 2** (its licence allows use in games, not redistribution) goes to `assets/packs/music/`: `audio.gd`
 crossfades calm tracks by day, night tracks after dusk and action tracks for nine seconds after you hit or are hit.
+
+## Weapons in hand (in the repository, CC0)
+
+`assets/models/kaykit_weapons/`: thirteen models from **KayKit Fantasy Weapons Bits** (Kay Lousberg, CC0). `character_model.gd`
+hangs the equipped weapon on the right hand bone (`BoneAttachment3D` on `hand_r`), for you, other players and armed settlement
+guards; the axe shows while chopping. `HELD_MODELS` maps weapon families to models (club, spear, machete, sunder axe, dagger,
+sledgehammer, restoration staff, bow, crossbow, purifier maul, axe; the pistols use the Kenney blaster) and `HELD_SCALES` sizes
+them, since the kit is about twice life size. Melee swings leave a short streak (the engine's `Trail3D`).
+
+## Engine features the game uses
+
+* **Camera3D trauma shake** (this fork): hits on you, your blows, nearby deaths, flashes and smashed barricades.
+* **AudioStreamInteractive**: the day, night and combat music is one adaptive stream that crossfades between its clips.
+* **Trail3D** (this fork): swing streaks on melee weapons.
+* **EnvironmentQuery3D** (this fork, on the server): a chasing pack spreads around its prey instead of queueing behind one
+  another (`zombie.gd` `_flank_goal`).
+* Animations of the Universal Animation Library now also used: crouching, riding, swimming in deep water, hit flinches,
+  sword and fist variations, overhand throws, opening crates, the staff cast.

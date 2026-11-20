@@ -162,7 +162,7 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 					result = {"hit": target_id, "damage": float(data["damage"])}
 			else:
 				state = State.CHASE
-				_move_toward(world, here, target, float(data["speed"]), delta)
+				_move_toward(world, here, _flank_goal(here, target), float(data["speed"]), delta)
 	return result
 
 
@@ -296,6 +296,32 @@ func investigate_decoy(site: Vector2) -> bool:
 	think_timer = 0.25
 	state = State.INVESTIGATE
 	return true
+
+
+const FLANK_FROM := 3.5 # Closer than this, an infected goes straight for its target.
+const FLANK_RANGE := 14.0
+const FLANK_RING := 2.4
+
+
+## Where a chasing infected heads: a pack surrounds its prey instead of queueing behind one another. The engine's
+## EnvironmentQuery3D lays a ring of points around the target and ranks them by how close they are to this infected;
+## each one takes a different point among the best by its id, so the pack spreads to the sides. Bosses and brutes
+## charge straight in, and so does everyone in the last few metres.
+func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
+	var distance := here.distance_to(target)
+	if raid_boss or type == "brute" or distance < FLANK_FROM or distance > FLANK_RANGE \
+			or not ClassDB.class_exists("EnvironmentQuery3D"):
+		return target
+	var query: Resource = ClassDB.instantiate("EnvironmentQuery3D")
+	query.set("origin", Vector3(here.x, 0.0, here.y))
+	query.set("candidates", EnvironmentQuery3D.sample_ring(Vector3(target.x, 0.0, target.y), FLANK_RING, 8, float(posmod(id, 8)) * 0.4))
+	query.set("horizontal_only", true)
+	query.set("max_results", 3)
+	var ranked: PackedVector3Array = query.call("query_positions")
+	if ranked.is_empty():
+		return target
+	var spot: Vector3 = ranked[posmod(id, ranked.size())]
+	return Vector2(spot.x, spot.z)
 
 
 func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: float) -> void:

@@ -1142,7 +1142,7 @@ func set_details_visible(shown: bool) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.physical_keycode == KEY_F3 and _skin != null:
+		if event.physical_keycode == KEY_F9 and _skin != null: # F3 is Survey ruins.
 			set_details_visible(not _skin.details_visible)
 		if event.physical_keycode == KEY_M and _radar != null:
 			_radar.visible = not _radar.visible
@@ -1252,7 +1252,44 @@ func say(text: String) -> void:
 
 
 func _on_event(event: Dictionary) -> void:
+	var my_group: int = int(client.you.get("party", {}).get("id", 0))
 	match event["type"]:
+		# Territory and sieges: the server tells everyone, so the world hears when an outpost falls.
+		"outpost_taken":
+			if my_group > 0 and int(event.get("owner", 0)) == my_group:
+				banner("OUTPOST CAPTURED", Color(0.45, 0.9, 0.5))
+			else:
+				say("An outpost has changed hands.")
+		"outpost_lost":
+			say("An outpost has fallen and stands unclaimed.")
+		"outpost_breached":
+			if my_group > 0 and int(event.get("by_group", 0)) != my_group:
+				banner("YOUR OUTPOST IS BREACHED (level %d)" % int(event.get("level", 0)), Color(0.95, 0.4, 0.3))
+		"outpost_fortified":
+			if my_group > 0 and int(event.get("owner", 0)) == my_group:
+				say("Outpost fortified to level %d." % int(event.get("level", 0)))
+		"outpost_provisioned":
+			if my_group > 0 and int(event.get("owner", 0)) == my_group:
+				say("Outpost provisioned: +%d min of supplies." % int(float(event.get("extended", 0.0)) / 60.0))
+		"siege_contract_declared":
+			if my_group > 0 and int(event.get("defender", 0)) == my_group:
+				banner("SIEGE DECLARED ON YOUR OUTPOST", Color(0.98, 0.55, 0.2))
+			elif my_group > 0 and int(event.get("attacker", 0)) == my_group:
+				banner("SIEGE DECLARED", Color(0.98, 0.75, 0.3))
+			else:
+				say("A siege has been declared somewhere on the island.")
+		"siege_contract_result":
+			var involved: bool = my_group > 0 and (int(event.get("attacker", 0)) == my_group or int(event.get("defender", 0)) == my_group)
+			if involved:
+				banner("SIEGE %s" % str(event.get("result", "over")).to_upper().replace("_", " "), Color(0.95, 0.78, 0.35))
+		# Combat feedback that used to show only as numbers.
+		"restoration_pulse":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Restoration pulse: %d ally%s treated." % [int(event.get("count", 0)), "" if int(event.get("count", 0)) == 1 else "s"])
+		"snare_triggered":
+			say("A snare caught an infected.")
+		"barricade_broken":
+			say("A barricade was smashed.")
 		"gathered":
 			if int(event.get("peer", -1)) == client.peer_id and int(event.get("wedge_bonus", 0)) > 0:
 				say("Reinforced extraction: +%d %s, loud pickaxe work attracts infected (42m)." % [

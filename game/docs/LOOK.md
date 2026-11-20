@@ -18,3 +18,11 @@ Screenshot a time of day: `... online_main.tscn -- --connect ... --demo forest -
 
 Forward+ (`--rendering-method forward_plus`) adds SSAO but made the first frames stall for 3-4 s here (shader compilation), long enough for
 the server to drop the connection, so it is not the default.
+
+* Living world: cloud shadows (`assets/shaders/cloud_shadow.gdshaderinc`) on the ground, grass and foliage; pollen, butterflies,
+  falling leaves and fireflies around the player (`effects.gd` `update_ambience`); moonlit nights; a diorama post pass under the
+  HUD (`assets/shaders/post_grade.gdshader`: tilt-shift, split toning, vignette).
+* Grass: `scripts/client/grass_field.gd`, a procedural carpet of thin blades in Voronoi patches of short, knee-high and tall
+  grass, grown tile by tile near the camera.
+* Feedback: banners for captured outposts and sieges, rings and bursts for restoration pulses, flashes, pinning bolts, knockback
+  and smashed barricades; music stings on death, level-ups and victories.

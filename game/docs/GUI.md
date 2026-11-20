@@ -11,7 +11,7 @@
 * **XP strip**: the skill you trained last, its level and progress, fading after a few seconds.
 * **Banner** for level ups and learned perks; the screen edges pulse red at low health and flash when you are hit.
 * **Log**: translucent card, messages fade after 14 s. Interaction prompt as a pill above the action bar.
-* **F3** switches to the old full text readout (every number and timer) for debugging and for the many small status lines.
+* **F9** switches to the old full text readout (every number and timer) for debugging and for the many small status lines.
 
 `ui_theme.gd` styles the remaining windows (inventory, crafting, skills, chat).
 

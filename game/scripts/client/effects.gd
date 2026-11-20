@@ -215,6 +215,31 @@ func update_rain(center: Vector3, intensity: float) -> void:
 	_rain.global_position = center + Vector3(0, 18.0, 0)
 
 
+## A flat ring on the ground that widens and fades: a pulse of healing, a shock wave, a flash.
+func ring(position: Vector3, color: Color, radius: float = 4.0, seconds: float = 0.7) -> void:
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.86
+	torus.outer_radius = 1.0
+	torus.rings = 32
+	torus.ring_segments = 6
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	material.albedo_color = color
+	torus.material = material
+	var instance := MeshInstance3D.new()
+	instance.mesh = torus
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(instance)
+	instance.global_position = position + Vector3(0, 0.15, 0)
+	instance.scale = Vector3(0.3, 0.05, 0.3)
+	var tween := create_tween().set_parallel(true)
+	tween.tween_property(instance, "scale", Vector3(radius, 0.05 * radius, radius), seconds).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tween.tween_property(material, "albedo_color:a", 0.0, seconds)
+	tween.chain().tween_callback(instance.queue_free)
+
+
 ## A puff of particles: `color` fades out, `speed` is the initial speed, `size` the particle size in meters.
 func burst(position: Vector3, color: Color, count: int = 14, speed: float = 3.0, lifetime: float = 0.6, size: float = 0.14, gravity: float = 7.0, up: float = 0.6) -> void:
 	var particles := CPUParticles3D.new()
