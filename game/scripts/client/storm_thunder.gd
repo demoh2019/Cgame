@@ -2,9 +2,10 @@ extends Node3D
 ## World-space, speed-of-sound thunder for authoritative lightning_struck
 ## events. The flash remains immediate; the sound wave arrives later.
 ## Unreal-style distance delay + 3D sound emitter, procedural/no asset pack.
+const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const SAMPLE_RATE := 22050
 const SAMPLE_SECONDS := 3.0
-const MAX_DISTANCE := 2400.0
+const MAX_DISTANCE := StormLightning.THUNDER_MAX_DISTANCE
 const MAX_PENDING := 4
 const MAX_VOICES := 2
 const REFERENCE_TEMPERATURE_C := 20.0
@@ -74,12 +75,13 @@ static func thunder_wave() -> AudioStreamWAV:
 	return wave
 
 
-## Only a genuine server-confirmed strike schedules thunder. A warning
-## never creates thunder and underground players hear no outdoor bolt.
+## Only a genuine server-confirmed strike (or its server-quantized
+## distant atmospheric echo) schedules thunder. A warning never generates
+## sound and underground listeners hear no outdoor impact.
 func on_strike(event: Dictionary, listener: Vector3, height_at: Callable,
 		underground: bool) -> bool:
 	if underground or not listener.is_finite() \
-			or str(event.get("type", "")) != "lightning_struck" \
+			or str(event.get("type", "")) not in ["lightning_struck", "distant_thunder"] \
 			or not event.has("x") or not event.has("z") \
 			or not height_at.is_valid():
 		return false
