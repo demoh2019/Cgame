@@ -14,6 +14,7 @@ const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
+const CraftingCatalog = preload("res://scripts/shared/crafting_catalog.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
@@ -41,6 +42,9 @@ var _inventory_grid: GridContainer
 var _stash_grid: GridContainer
 var _craft_panel: PanelContainer
 var _craft_list: VBoxContainer
+var _craft_search: LineEdit
+var _craft_ready_only: CheckBox
+var _craft_result_count: Label
 var _salvage_item: OptionButton
 var _death: Label
 var _equipped: Label
@@ -960,8 +964,27 @@ func _build() -> void:
 	var craft_title := Label.new()
 	craft_title.text = "Crafting (workbench in the hub or a village, or a held PvP outpost field bench)"
 	craft_box.add_child(craft_title)
+	var craft_controls := HBoxContainer.new()
+	craft_box.add_child(craft_controls)
+	_craft_search = LineEdit.new()
+	_craft_search.placeholder_text = "Find item or ingredients..."
+	_craft_search.custom_minimum_size = Vector2(230, 0)
+	_craft_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_craft_search.text_changed.connect(func(_value: String) -> void:
+		_craft_signature = ""
+		_refresh_crafting())
+	craft_controls.add_child(_craft_search)
+	_craft_ready_only = CheckBox.new()
+	_craft_ready_only.text = "Materials + level"
+	_craft_ready_only.tooltip_text = "Only recipes with enough ingredients, inventory room and crafting level. A workbench or campfire may still be needed."
+	_craft_ready_only.toggled.connect(func(_value: bool) -> void:
+		_craft_signature = ""
+		_refresh_crafting())
+	craft_controls.add_child(_craft_ready_only)
+	_craft_result_count = Label.new()
+	craft_box.add_child(_craft_result_count)
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(380, 380)
+	scroll.custom_minimum_size = Vector2(615, 380)
 	craft_box.add_child(scroll)
 	_craft_list = VBoxContainer.new()
 	scroll.add_child(_craft_list)
@@ -2531,31 +2554,52 @@ func _refresh_inventory() -> void:
 
 
 func _refresh_crafting() -> void:
-	var craftable: Array = Crafting.craftable(client.inventory)
-	var signature := str(craftable) + str(client.inventory.count("wood_1")) + str(client.you.get("crafting_level", 1))
+	# Every slot counts: changes to fish, ore, medicine etc must refresh recipes,
+	# not only the old special case of wood_1.
+	var signature := str(client.inventory.slots) + str(client.you.get("crafting_level", 1)) \
+		+ _craft_search.text + str(_craft_ready_only.button_pressed)
 	if signature == _craft_signature:
 		return
 	_craft_signature = signature
 	for child in _craft_list.get_children():
 		child.queue_free()
-	var ids: Array = Defs.recipes().keys()
-	ids.sort_custom(func(a: String, b: String) -> bool:
-		var ca := craftable.has(a)
-		var cb := craftable.has(b)
-		return (ca and not cb) or (ca == cb and a < b))
-	for id in ids:
-		var recipe: Dictionary = Defs.recipes()[id]
+	var entries: Array[Dictionary] = CraftingCatalog.entries(
+		client.inventory, _craft_search.text, _craft_ready_only.button_pressed,
+		int(client.you.get("crafting_level", 1)))
+	_craft_result_count.text = "%d recipes | Click to craft one, MAX for a material-and-space-safe batch (limit 50)." % entries.size()
+	if entries.is_empty():
+		var empty := Label.new()
+		empty.text = "No matching recipes. Try fewer words or disable the filter."
+		_craft_list.add_child(empty)
+	for entry in entries:
+		var recipe_id: String = str(entry["id"])
+		var recipe: Dictionary = Defs.recipes()[recipe_id]
 		var needs: Array[String] = []
 		for input in recipe["inputs"]:
-			needs.append("%dx %s" % [recipe["inputs"][input], Defs.item(input).get("name", input)])
+			needs.append("%dx %s" % [
+				int(recipe["inputs"][input]), str(Defs.item(str(input)).get("name", input))])
+		var row := HBoxContainer.new()
 		var button := Button.new()
-		var station_note := "  [bench]" if recipe["station"] == "workbench" else ("  [fire or bench]" if recipe["station"] == "campfire" else "")
-		button.text = "%s  <-  %s%s" % [Defs.item(recipe["output"]).get("name", recipe["output"]), ", ".join(needs), station_note]
+		var station: String = str(recipe["station"])
+		var station_note := " [bench]" if station == "workbench" else (
+			" [fire / bench]" if station == "campfire" else "")
+		button.text = "%s  <-  %s%s" % [
+			str(Defs.item(str(recipe["output"])).get("name", recipe["output"])),
+			", ".join(needs), station_note]
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		var required_tier: int = maxi(1, Defs.tier_of(String(recipe["output"])))
-		var skill_locked: bool = required_tier > int(client.you.get("crafting_level", 1))
-		button.disabled = not craftable.has(id) or skill_locked
-		if skill_locked:
-			button.text += "  [Craft Lv%d]" % required_tier
-		button.pressed.connect(func() -> void: client.craft(id, 1))
-		_craft_list.add_child(button)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.custom_minimum_size = Vector2(465, 0)
+		var ready: bool = bool(entry["ready"])
+		button.disabled = not ready
+		if not ready:
+			button.text += " [Lv%d]" % int(entry["tier"]) if bool(entry["skill_locked"]) else " [missing ingredients / space]"
+		button.pressed.connect(func() -> void: client.craft(recipe_id, 1))
+		row.add_child(button)
+		var amount: int = int(entry["max_batches"])
+		if ready and amount > 1:
+			var max_button := Button.new()
+			max_button.text = "MAX x%d" % amount
+			max_button.tooltip_text = "Craft %d batches in one validated server request (no partial material consumption)." % amount
+			max_button.pressed.connect(func() -> void: client.craft(recipe_id, amount))
+			row.add_child(max_button)
+		_craft_list.add_child(row)
