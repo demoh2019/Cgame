@@ -2588,7 +2588,7 @@ static double built_in_strtod(
 	// Treat the end of a split token exactly like the terminating NUL.
 	// The common unbounded path is resolved at compile time and remains
 	// unchanged; only split_floats() uses the extra range check.
-	const auto get_char = [p_limit](const C *p_pos) -> C {
+	const auto get_char = [&](const C *p_pos) -> C {
 		if constexpr (p_bounded) {
 			return p_pos < p_limit ? *p_pos : C(0);
 		}
