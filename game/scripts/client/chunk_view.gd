@@ -460,6 +460,7 @@ func _build_dungeon(origin: Vector2) -> void:
 			light.light_energy = 2.2
 			light.omni_range = 11.0
 			light.shadow_enabled = false # Keep nearby torch lighting affordable on Compatibility.
+			light.visible = false # Only the global camera-nearest light budget turns torches on.
 			light.position = torch_at + Vector3(0, 2.2, 1.2) - Vector3(origin.x, 0, origin.y)
 			light.set_meta("aa_flame_seed", float(room.x * 13 + room.y * 7))
 			light.add_to_group(DungeonLightBudget.GROUP)
