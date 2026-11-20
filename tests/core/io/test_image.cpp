@@ -1161,4 +1161,50 @@ TEST_CASE("[Image][Performance] Masked blits batch non-RGBA8 mask formats") {
 	}
 }
 
+TEST_CASE("[Image][Render] Independent alpha-coverage mipmaps keep thin leaves") {
+	Ref<Image> source = Image::create_empty(16, 16, false, Image::FORMAT_RGBA8);
+	REQUIRE(source.is_valid());
+	for (int y = 0; y < 16; ++y) {
+		for (int x = 0; x < 16; ++x) {
+			source->set_pixel(x, y, Color(0.2f, 0.7f, 0.2f, x % 4 == 0 ? 1.0f : 0.0f));
+		}
+	}
+	const Vector<uint8_t> original = source->get_data();
+	Ref<Image> standard = source->duplicate();
+	REQUIRE(standard.is_valid());
+	REQUIRE(standard->generate_mipmaps() == OK);
+	Ref<Image> filtered = source->create_alpha_coverage_mipmaps(0.5f);
+	REQUIRE(filtered.is_valid());
+	CHECK(!source->has_mipmaps());
+	CHECK(source->get_data() == original);
+	CHECK(filtered->has_mipmaps());
+	CHECK(filtered->get_mipmap_count() == standard->get_mipmap_count());
+	for (int64_t i = 0; i < original.size(); ++i) {
+		CHECK(filtered->get_data()[i] == original[i]);
+	}
+	const int64_t offset = filtered->get_mipmap_offset(1);
+	CHECK_MESSAGE(filtered->get_data()[offset + 3] > standard->get_data()[offset + 3],
+			"Coverage filtering should preserve thin leaves after mip reduction.");
+}
+
+TEST_CASE("[Image][Render] Asymmetric foliage alpha coverage has valid mip levels") {
+	Ref<Image> source = Image::create_empty(8, 8, false, Image::FORMAT_RGBA8);
+	REQUIRE(source.is_valid());
+	for (int y = 0; y < 8; ++y) {
+		for (int x = 0; x < 8; ++x) {
+			source->set_pixel(x, y, Color(0.3f, 0.5f, 0.1f, x <= y ? 1.0f : 0.0f));
+		}
+	}
+	Ref<Image> mip = source->create_alpha_coverage_mipmaps();
+	REQUIRE(mip.is_valid());
+	const Vector<uint8_t> data = mip->get_data();
+	const int64_t offset = mip->get_mipmap_offset(1);
+	int coverage = 0;
+	for (int i = 0; i < 16; ++i) {
+		coverage += data[offset + i * 4 + 3] > 127 ? 1 : 0;
+	}
+	CHECK(coverage > 0);
+	CHECK(coverage < 16);
+}
+
 } // namespace TestImage

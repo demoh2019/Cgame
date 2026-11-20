@@ -2199,7 +2199,9 @@ float Image::_alpha_test_coverage(const uint8_t *p_dst, uint32_t p_width, uint32
 
 	for (uint32_t y = 0; y < cell_h; y++) {
 		for (uint32_t x = 0; x < cell_w; x++) {
-			uint32_t i = y * cell_w + x;
+			// Alpha data uses full pixel-row pitch, not the number of cells.
+			// The previous stride shifted rows, biasing foliage coverage.
+			uint32_t i = y * p_width + x;
 
 			float alpha00 = CLAMP(_get_color_at_ofs(p_dst, i).a * p_alpha_scale, 0.0, 1.0);
 			float alpha10 = CLAMP(_get_color_at_ofs(p_dst, i + right_step).a * p_alpha_scale, 0.0, 1.0);
@@ -2260,6 +2262,22 @@ void Image::_scale_mipmap_alpha_bias(uint8_t *p_dst, uint32_t p_width, uint32_t 
 		c.a = CLAMP(c.a * p_scale + p_bias, 0.0f, 1.0f);
 		_set_color_at_ofs(p_dst, i, c);
 	}
+}
+
+Ref<Image> Image::create_alpha_coverage_mipmaps(float p_alpha_test_threshold) const {
+	ERR_FAIL_COND_V_MSG(is_compressed() || format != FORMAT_RGBA8,
+			Ref<Image>(), "Alpha coverage prefilter requires an uncompressed RGBA8 image.");
+	ERR_FAIL_COND_V_MSG(width < 2 || height < 2,
+			Ref<Image>(), "Alpha coverage prefilter requires at least 2x2 pixels.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_alpha_test_threshold) ||
+			p_alpha_test_threshold < 0.01f || p_alpha_test_threshold > 0.99f,
+			Ref<Image>(), "Alpha test threshold must be finite and between 0 and 1.");
+	// Asset sharing: do not modify the original pixels or its existing mips.
+	Ref<Image> output = duplicate();
+	ERR_FAIL_COND_V(output.is_null(), Ref<Image>());
+	output->clear_mipmaps();
+	ERR_FAIL_COND_V(output->generate_mipmaps(false, true, p_alpha_test_threshold) != OK, Ref<Image>());
+	return output;
 }
 
 Error Image::generate_mipmaps(bool p_renormalize, bool p_preserve_alpha_test_coverage, float p_alpha_test_threshold) {
@@ -4160,6 +4178,7 @@ void Image::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("flip_x"), &Image::flip_x);
 	ClassDB::bind_method(D_METHOD("flip_y"), &Image::flip_y);
 	ClassDB::bind_method(D_METHOD("generate_mipmaps", "renormalize", "preserve_alpha_test_coverage", "alpha_test_threshold"), &Image::generate_mipmaps, DEFVAL(false), DEFVAL(false), DEFVAL(0.5f));
+	ClassDB::bind_method(D_METHOD("create_alpha_coverage_mipmaps", "alpha_test_threshold"), &Image::create_alpha_coverage_mipmaps, DEFVAL(0.5f));
 	ClassDB::bind_method(D_METHOD("clear_mipmaps"), &Image::clear_mipmaps);
 
 #ifndef DISABLE_DEPRECATED

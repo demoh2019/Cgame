@@ -123,6 +123,13 @@
 				Copies [param src] image to this image.
 			</description>
 		</method>
+		<method name="create_alpha_coverage_mipmaps">
+			<return type="Image" />
+			<param index="0" name="alpha_test_threshold" type="float" default="0.5" />
+			<description>
+				Returns a separate [constant FORMAT_RGBA8] image whose mipmaps preserve the alpha-tested pixel coverage, useful for thin foliage and fences. Requires uncompressed [constant FORMAT_RGBA8] source data and a threshold from 0.01 to 0.99. Does not modify the original image or its previous mipmaps. Cache the output as an [ImageTexture] rather than regenerating it each frame.
+			</description>
+		</method>
 		<method name="create" qualifiers="static" deprecated="Use [method create_empty].">
 			<return type="Image" />
 			<param index="0" name="width" type="int" />

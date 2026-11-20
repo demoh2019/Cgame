@@ -375,6 +375,8 @@ public:
 
 	// Generate a mipmap chain of an image (creates an image 1/4 the size, with averaging of 4->1).
 	Error generate_mipmaps(bool p_renormalize = false, bool p_preserve_alpha_test_coverage = false, float p_alpha_test_threshold = 0.5);
+	// Return an independent cutout-alpha mipmap chain, leaving imported assets intact.
+	Ref<Image> create_alpha_coverage_mipmaps(float p_alpha_test_threshold = 0.5f) const;
 
 	Error generate_mipmap_roughness(RoughnessChannel p_roughness_channel, const Ref<Image> &p_normal_map);
 
