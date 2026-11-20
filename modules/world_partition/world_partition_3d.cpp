@@ -626,6 +626,14 @@ int WorldPartition3D::get_failed_cell_count() const {
 	return failed_cells.size();
 }
 
+void WorldPartition3D::retry_failed_cells() {
+	// Explicit recovery for transient IO/network/editor asset errors.
+	// Do not automatically retry failed cells every frame: permanent failures
+	// would otherwise generate continuous resource requests and log spam.
+	// The next update_streaming() call reschedules relevant registered cells.
+	failed_cells.clear();
+}
+
 real_t WorldPartition3D::get_last_streaming_update_ms() const {
 	return last_streaming_update_ms;
 }
@@ -678,6 +686,7 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_pending_cell_count"), &WorldPartition3D::get_pending_cell_count);
 	ClassDB::bind_method(D_METHOD("get_inflight_request_count"), &WorldPartition3D::get_inflight_request_count);
 	ClassDB::bind_method(D_METHOD("get_failed_cell_count"), &WorldPartition3D::get_failed_cell_count);
+	ClassDB::bind_method(D_METHOD("retry_failed_cells"), &WorldPartition3D::retry_failed_cells);
 	ClassDB::bind_method(D_METHOD("get_last_streaming_update_ms"), &WorldPartition3D::get_last_streaming_update_ms);
 	ClassDB::bind_method(D_METHOD("get_last_instantiation_attempt_count"), &WorldPartition3D::get_last_instantiation_attempt_count);
 
