@@ -41,7 +41,9 @@ class VisualQualityPackageTests(unittest.TestCase):
         self.assertIn('user://visual_quality_lab.cfg', script)
         for section in ('validated_profile', 'ConfigFile.new()', 'file.load',
                         'file.save', 'restore_environment_on_exit',
-                        'ssao_enabled', 'ssil_enabled', 'ssr_enabled'):
+                        'ssao_enabled', 'ssil_enabled', 'ssr_enabled',
+                        'Sky.RADIANCE_SIZE_128', 'Sky.RADIANCE_SIZE_256',
+                        'use_512_radiance_in_cinematic', '_old_radiance_size'):
             self.assertIn(section, script)
         self.assertNotIn('ProjectSettings.set_setting', script)
 
@@ -53,8 +55,30 @@ class VisualQualityPackageTests(unittest.TestCase):
         self.assertIn('set_adaptive_enabled', demo)
         self.assertIn('set_profile', demo)
 
+    def test_atmosphere_is_budgeted_and_has_restoration(self):
+        source = (ROOT / 'addons/visual_quality/atmosphere_controller.gd').read_text()
+        for feature in ('sunlight_factor', 'fog_density_for', 'update_interval_seconds',
+                        '_saved_shader_uniforms', '_exit_tree', 'atmosphere_changed',
+                        'maxf(update_interval_seconds, 0.25)', 'set_overcast',
+                        'sun.light_energy', 'environment.fog_density'):
+            self.assertIn(feature, source)
+
+    def test_visual_sky_supports_night_but_no_per_frame_time(self):
+        shader = (ROOT / 'addons/visual_quality/filmic_sky.gdshader').read_text()
+        for parameter in ('night_amount', 'night_color', 'stars_intensity',
+                          'AT_CUBEMAP_PASS', 'RADIANCE'):
+            self.assertIn(parameter, shader)
+        self.assertNotRegex(re.sub(r'//[^\n]*', '', shader), r'\bTIME\b')
+
+    def test_demo_exposes_weather_and_day_night(self):
+        source = (ROOT / 'demo.gd').read_text()
+        self.assertIn('atmosphere.atmosphere_changed.connect', source)
+        self.assertIn('_toggle_weather()', source)
+        self.assertIn('_toggle_hour()', source)
+        self.assertIn('_toggle_cycle()', source)
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
