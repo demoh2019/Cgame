@@ -18,6 +18,8 @@ var patrol_enabled := true
 var target_index := 1
 var completed_crossings := 0
 var navigation_sync_frames := 3
+var route_retry_cooldown := 0.0
+var path_retry_frames := 0
 var route_status := "Awaiting streamed corridor"
 
 func configure(p_streamer: Node3D) -> void:
@@ -69,7 +71,10 @@ func _reserve_route() -> void:
     if route_tokens.size() != 2:
         route_status = "Route blocked or token capacity reached"
         route_tokens.clear()
+        # Never spin on the native allocator every physics frame.
+        route_retry_cooldown = 0.75
         return
+    route_retry_cooldown = 0.0
     navigation_sync_frames = 3
     route_status = "Waiting for cell streaming"
 
@@ -87,16 +92,19 @@ func set_patrol_enabled(p_enabled: bool) -> void:
     patrol_enabled = p_enabled
     velocity = Vector3.ZERO
     if patrol_enabled:
+        route_retry_cooldown = 0.0
         _reserve_route()
     else:
         _release_route()
         route_status = "Patrol paused"
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
     if not patrol_enabled:
         return
     if route_tokens.is_empty():
-        _reserve_route()
+        route_retry_cooldown = maxf(0.0, route_retry_cooldown - delta)
+        if route_retry_cooldown <= 0.0:
+            _reserve_route()
         return
     if not is_instance_valid(streamer):
         return
@@ -125,7 +133,14 @@ func _physics_process(_delta: float) -> void:
     if navigation_agent.is_navigation_finished():
         route_status = "Waiting for a connected path"
         velocity = Vector3.ZERO
+        # Requery only once per 60 physics ticks when streamed regions
+        # were not connected yet, rather than reassigning every frame.
+        path_retry_frames += 1
+        if path_retry_frames >= 60:
+            navigation_agent.target_position = destination
+            path_retry_frames = 0
         return
+    path_retry_frames = 0
     var delta_to_next := next_position - global_position
     delta_to_next.y = 0.0
     if delta_to_next.length() < 0.05:
