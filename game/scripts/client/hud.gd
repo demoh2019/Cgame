@@ -432,6 +432,11 @@ func _build() -> void:
 	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
 	rally_button.pressed.connect(func() -> void: client.party_rally())
 	party_buttons.add_child(rally_button)
+	var standard_button := Button.new()
+	standard_button.text = "Raise standard"
+	standard_button.tooltip_text = "Party leader: use one crafted expedition standard outside town, with an ally nearby (+stamina/energy for 90s)."
+	standard_button.pressed.connect(func() -> void: client.party_standard())
+	party_buttons.add_child(standard_button)
 	var guardian_button := Button.new()
 	guardian_button.text = "Guardian taunt (F1)"
 	guardian_button.tooltip_text = "Melee weapon, party, 25 combat energy, 20s cooldown; defend nearby allies"
@@ -903,6 +908,12 @@ func _claim_nearest_outpost_cache() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "party_standard":
+		if bool(data.get("ok", false)):
+			say("Rally standard raised: nearby allies recover stamina and combat energy for 90 seconds.")
+		else:
+			say("Rally standard: " + str(data.get("reason", "denied")))
+		return
 	if kind == "arena_queue":
 		say("Arena queue: " + (str(data.get("status", "queued")) if bool(data.get("ok", false)) else str(data.get("reason", "denied"))))
 		return
@@ -1338,6 +1349,14 @@ func _refresh_party_controls() -> void:
 		_party_status.text += "\nCamp feast ready in %.1f s" % remaining_feast
 	if int(state.get("invite_from", 0)) > 0:
 		_party_status.text += "\nInvitation from " + str(state.get("invite_name", "Survivor"))
+	var standard: Dictionary = state.get("standard", {})
+	if not standard.is_empty():
+		_party_status.text += "\nRally standard: x%d z%d | %ds | +1.4 stamina/s, +0.8 energy/s" % [
+			int(standard["x"]), int(standard["z"]),
+			int(ceil(float(standard["remaining"])))]
+		var standard_cooldown: float = float(standard.get("cooldown", 0.0))
+		if standard_cooldown > 0.0:
+			_party_status.text += " | next in %ds" % int(ceil(standard_cooldown))
 	var rally: Dictionary = state.get("rally", {})
 	if not rally.is_empty():
 		_party_status.text += "\nRally: x%d z%d (%d seconds)" % [
