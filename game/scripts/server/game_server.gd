@@ -58,6 +58,7 @@ const Fishing = preload("res://scripts/shared/fishing.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
 const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
+const PartyFeast = preload("res://scripts/shared/party_feast.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
 const WORKBENCH_RANGE := 6.0
@@ -107,6 +108,7 @@ class Player:
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
+	var feast_timer: float = 0.0 # Session-only prepared group meal cooldown.
 	var guardian_timer: float = 0.0 # Session-only PvE frontline cooldown.
 	var guardian_brace: float = 0.0 # Short PvE-only defensive brace after a valid taunt.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
@@ -490,6 +492,7 @@ func _spawn_player(player: Player) -> void:
 	player.dodge_timer = 0.0
 	player.dodge_immunity = 0.0
 	player.party_aid_timer = 0.0
+	player.feast_timer = 0.0
 	player.guardian_timer = 0.0
 	player.guardian_brace = 0.0
 	player.meal_seconds = 0.0
@@ -862,6 +865,58 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 		"bleeding_stopped": staunched})
 	return {"ok": true, "peer": target_id, "item": item_id,
 		"heal": healed, "cure": cured, "bleeding_stopped": staunched}
+
+
+## Expedition support: one real cooked fish per eligible party member.
+## The client only picks a recipe, not recipient count, fire or bonus strength.
+func cmd_party_feast(peer_id: int, item_id: String) -> Dictionary:
+	var source: Player = players.get(peer_id)
+	if source == null or not _alive(source):
+		return {"ok": false, "reason": "dead"}
+	if source.feast_timer > 0.0:
+		return {"ok": false, "reason": "cooldown"}
+	var group: Array = parties.members_of(peer_id)
+	if group.size() < 2:
+		return {"ok": false, "reason": "not_in_party"}
+	var tier: int = PartyFeast.food_tier(item_id)
+	if tier <= 0:
+		return {"ok": false, "reason": "not_prepared_food"}
+	var fire: Dictionary = PartyFeast.camp_for(campfires, source.position, time)
+	if fire.is_empty():
+		return {"ok": false, "reason": "no_fire"}
+	var recipients: Array = []
+	for member_id in group:
+		var member: Player = players.get(int(member_id))
+		if member == null or not _alive(member):
+			continue
+		if not PartyFeast.near_fire(fire, member.position, time):
+			continue
+		# A low-tier feast must never overwrite a more powerful meal.
+		if member.meal_seconds > 0.0 and member.meal_tier > tier:
+			continue
+		recipients.append(member)
+	if recipients.size() < 2:
+		return {"ok": false, "reason": "no_companions"}
+	var portions: int = recipients.size()
+	if source.inventory.count(item_id) < portions:
+		return {"ok": false, "reason": "need_food", "portions": portions}
+	# This removal is atomic: no teammate is changed on any failed attempt.
+	if not source.inventory.remove(item_id, portions):
+		return {"ok": false, "reason": "need_food", "portions": portions}
+	var seconds: float = HeartyMeal.duration(tier)
+	for member in recipients:
+		member.survival.eat(float(Defs.item(item_id).get("food", 0.0)) *
+			(1.0 + member.skills.bonus("food_power")))
+		member.meal_tier = tier
+		member.meal_seconds = seconds
+		member.dirty_character = true
+		events.append({"type": "party_feast", "peer": member.id, "by": peer_id,
+			"tier": tier, "seconds": seconds})
+	source.feast_timer = PartyFeast.COOLDOWN
+	source.action = {}
+	source.dirty_inventory = true
+	source.dirty_character = true
+	return {"ok": true, "served": portions, "tier": tier, "seconds": seconds}
 
 
 func cmd_party_rally(peer_id: int) -> Dictionary:
@@ -2601,6 +2656,7 @@ func _tick_players(delta: float) -> void:
 			player.dirty_character = true
 		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
 		player.party_aid_timer = maxf(0.0, player.party_aid_timer - maxf(0.0, delta))
+		player.feast_timer = maxf(0.0, player.feast_timer - maxf(0.0, delta))
 		player.guardian_timer = maxf(0.0, player.guardian_timer - maxf(0.0, delta))
 		player.guardian_brace = maxf(0.0, player.guardian_brace - maxf(0.0, delta))
 		# A disconnected teammate or removed weapon cannot prolong protection.
@@ -3289,7 +3345,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"guardian_brace": player.guardian_brace,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"rest_cooldown": player.rest_cooldown,
-			"party_aid_cooldown": player.party_aid_timer, "stim_cooldown": player.stim_cooldown,
+			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
+			"stim_cooldown": player.stim_cooldown,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 			"visual_signature": Camouflage.visual_signature(
 				player.inventory.armor, player.inventory.armor != "" and
