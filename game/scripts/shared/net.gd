@@ -620,6 +620,13 @@ func c_party_standard() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_focus() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_focus", sim.cmd_party_focus(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_party_rally() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
