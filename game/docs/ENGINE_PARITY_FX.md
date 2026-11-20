@@ -53,3 +53,27 @@ helpers covered by `tests/test_vfx_parity.gd`.
 Not done: campfire heat shimmer/smoke flipbook and death dissolve shader (no
 campfire/loot-bag node hooks yet), and impacts at real ray-hit points (the
 server sends no hit position for ranged shots).
+
+## Camera and gameplay post-processing feel
+
+`scripts/client/camera_post_fx.gd` (node `CameraPostFx`, wired in `online_main.gd`)
+plus the overlay shader `assets/shaders/camera_post_fx.gdshader` (CanvasLayer -9,
+hidden entirely when no effect is active). Pure helpers are unit-tested in
+`tests/test_camera_post_parity.gd`.
+
+| Feature | Unity | Unreal | Notes |
+| --- | --- | --- | --- |
+| Hit-stop on heavy hits / kills | Time.timeScale dip | Global Time Dilation | 0.06-0.09 s real time at 8-12% speed; own hits only |
+| Damage red vignette | URP Volume Vignette (script-driven) | Post Process Vignette | scaled by damage, decays |
+| Low-health desaturation | Color Adjustments | Post Process Saturation | below 40 HP, bluish grey |
+| Heartbeat vignette | animated Vignette | animated Post Process | double-thump, faster at lower HP |
+| Chromatic aberration pulse on hit | Chromatic Aberration | Scene Fringe | Medium+ quality |
+| Radial motion blur at speed | Motion Blur / custom | Motion Blur | sprint or bike; taps 0/3/5/8 by tier |
+| FOV kick | Cinemachine Lens | Camera FOV curve | sprint +3.5, bike +6 |
+| Speed zoom pull-out | Cinemachine Framing Transposer | Spring Arm length | bike +12%, sprint +5% |
+| Camera look-ahead | Cinemachine Lookahead Time | Camera Lag / lookahead | capped 2.6 m, smoothed |
+| Death letterbox | Cinemachine letterbox / Timeline | Letterbox Cinematic | bars slide in while dead |
+| Photo mode | Cinemachine free-look | Photo mode / Debug camera | Ctrl+Alt+P: orbit (left drag), wheel zoom, HUD hidden, Esc exits |
+
+Already present and not duplicated: trauma camera shake, tilt-shift depth of
+field and vignette in `post_grade.gdshader`, mouse-wheel zoom with limits.

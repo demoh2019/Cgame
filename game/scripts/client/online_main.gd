@@ -48,6 +48,7 @@ const Vendor = preload("res://scripts/shared/vendor.gd")
 const Effects = preload("res://scripts/client/effects.gd")
 const CombatVfx = preload("res://scripts/client/combat_vfx.gd")
 const ImpactDecals = preload("res://scripts/client/impact_decals.gd")
+const CameraPostFx = preload("res://scripts/client/camera_post_fx.gd")
 const UiTheme = preload("res://scripts/client/ui_theme.gd")
 const TitleBanner = preload("res://scripts/client/title_banner.gd")
 const LocalServer = preload("res://scripts/client/local_server.gd")
@@ -100,6 +101,7 @@ var effects
 var combat_vfx
 var _footprints: Node3D
 var decals
+var camera_fx
 var skills_panel
 var social
 var chat_edit: LineEdit
@@ -347,6 +349,10 @@ func _build_environment() -> void:
 	_grade_material.shader = load("res://assets/shaders/post_grade.gdshader")
 	grade.material = _grade_material
 	post.add_child(grade)
+	camera_fx = CameraPostFx.new()
+	camera_fx.name = "CameraPostFx"
+	add_child(camera_fx)
+	camera_fx.setup(camera)
 	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
 		streamer, _adaptive_resolution.scale if _auto_graphics else -1.0, _auto_graphics)
 
@@ -806,6 +812,7 @@ func _spawn_effects(event: Dictionary) -> void:
 	if str(event.get("type", "")) == "fished" and int(event.get("peer", -1)) == client.peer_id and _last_cast_spot != Vector3.INF:
 		effects.ring(_last_cast_spot + Vector3(0, 0.05, 0), Color(0.85, 0.95, 1.0), 1.4, 0.7) # The fish breaks the surface.
 	combat_vfx.handle_event(event, here, at, client.world.biome_at(at.x, at.z))
+	camera_fx.on_event(event, client.peer_id, at.distance_to(here))
 	match event["type"]:
 		"hit":
 			if str(event.get("kind", "")) == "zombie":
@@ -993,6 +1000,7 @@ func _on_welcomed() -> void:
 	hud = Hud.new()
 	add_child(hud)
 	hud.setup(client)
+	camera_fx.hud = hud
 	hud.social = social
 	skills_panel = SkillsPanel.new()
 	hud.add_child(skills_panel)
@@ -1162,9 +1170,13 @@ func _process(delta: float) -> void:
 	_update_party_rally_marker()
 	_update_party_supply_marker()
 	# The camera glides after the player.
-	var target := position + CAMERA_OFFSET * _zoom
-	camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
-	camera.look_at(position + Vector3(0, 0.8, 0))
+	camera_fx.update(delta, client.you, _move_input, avatar_model.speed if avatar_model != null else 0.0, GraphicsQuality.level())
+	var target := position + CAMERA_OFFSET * _zoom * camera_fx.zoom_mul + camera_fx.look
+	if camera_fx.photo_active:
+		camera_fx.photo_camera(camera, position)
+	else:
+		camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
+		camera.look_at(position + Vector3(0, 0.8, 0) + camera_fx.look)
 	if _demo == "sky":
 		# A low view toward the horizon to show the sky (screenshots only).
 		camera.position = position + Vector3(0.0, 14.0, 6.0)
