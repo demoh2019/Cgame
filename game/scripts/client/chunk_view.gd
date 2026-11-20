@@ -13,6 +13,7 @@ const CharacterModel = preload("res://scripts/client/character_model.gd")
 const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
+const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 
@@ -704,8 +705,13 @@ func _build_objects(data: Dictionary) -> void:
 		by_kind.get_or_add(key, []).append(structure)
 	for prop in data.get("props", []):
 		by_kind.get_or_add("prop:%d" % int(prop["variant"]), []).append(prop)
-	for kind in by_kind:
-		var list: Array = by_kind[kind]
+	# Split repeated foliage into smaller visibility/LOD AABBs instead of treating
+	# every tree of a kind across 64 metres as one inseparable GPU instance group.
+	var batches: Dictionary = ObjectBatchGrid.partition(by_kind, origin, Defs.CHUNK_SIZE)
+	for batch_id in batches:
+		var batch: Dictionary = batches[batch_id]
+		var kind: String = batch["kind"]
+		var list: Array = batch["nodes"]
 		var multimesh := MultiMesh.new()
 		multimesh.transform_format = MultiMesh.TRANSFORM_3D
 		multimesh.use_colors = true
@@ -738,7 +744,7 @@ func _build_objects(data: Dictionary) -> void:
 			instance.material_override = _ore_material(multimesh.mesh)
 		register_scenery(instance, kind)
 		add_child(instance)
-		_groups[kind] = {"multimesh": multimesh, "index": index, "transforms": transforms}
+		_groups[batch_id] = {"multimesh": multimesh, "index": index, "transforms": transforms}
 	_build_decor(origin, rng, data)
 	_build_windmills(windmills, origin)
 	_build_signposts(origin)
