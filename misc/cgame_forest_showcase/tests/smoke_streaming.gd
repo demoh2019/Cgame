@@ -61,6 +61,10 @@ func _run() -> void:
     if cell == null or not cell.has_node("WindGrass"):
         _fail("streamed cell did not generate its instances")
         return
+    var obstacles := cell.get_node_or_null("FoliageCollisions") as StaticBody3D
+    if obstacles == null or obstacles.get_child_count() < 9:
+        _fail("streamed cell has no obstacle colliders")
+        return
     var grass := cell.get_node("WindGrass") as MultiMeshInstance3D
     if grass.multimesh.instance_count != 225:
         _fail("incorrect grass instance count")
