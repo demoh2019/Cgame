@@ -38,6 +38,9 @@ var collected: int = 0
 var high_quality: bool = true
 var mouse_sensitivity: float = 0.0018
 var _fast_travel_in_progress: bool = false
+var _fast_travel_target_cell: Vector2i = Vector2i.ZERO
+var _fast_travel_target_position: Vector2 = Vector2.ZERO
+var _fast_travel_verify_attempts: int = 0
 var source_ready_events: int = 0
 var source_unready_events: int = 0
 var last_source_event: String = "нет"
@@ -235,25 +238,37 @@ func _fast_travel() -> void:
         _refresh_hud()
         return
 
-    # The engine supplies a two-tick activation barrier; also perform an
-    # actual narrow collision query against the DESTINATION terrain body
-    # during a physics_frame before relocating the player.
+    # The engine supplies the two-tick activation barrier. The actual
+    # PhysicsServer collider verification is deferred to _physics_process(),
+    # where direct-space-state queries are safe with threaded physics.
     if not world_partition.pin_cell(target_cell):
         return
+    _fast_travel_target_cell = target_cell
+    _fast_travel_target_position = target
+    _fast_travel_verify_attempts = 0
     _fast_travel_in_progress = true
-    await get_tree().physics_frame
-    if not is_inside_tree() or world_partition == null or player == null:
-        _fast_travel_in_progress = false
+
+
+func _physics_process(_delta: float) -> void:
+    if not _fast_travel_in_progress:
         return
-    if not world_partition.are_cells_physics_ready(target_cell, 0):
+    if player == null or world_partition == null:
         _fast_travel_in_progress = false
         return
 
-    var cell_node: Node3D = world_partition.get_cell_node(target_cell)
+    # The target remains pinned during this bounded verification window.
+    if not world_partition.are_cells_physics_ready(_fast_travel_target_cell, 0):
+        _fast_travel_verify_attempts += 1
+        if _fast_travel_verify_attempts >= 90:
+            _cancel_fast_travel("Timed out waiting for destination physics.")
+        return
+
+    var cell_node: Node3D = world_partition.get_cell_node(_fast_travel_target_cell)
     var terrain_body: StaticBody3D = null
     if cell_node != null:
         terrain_body = cell_node.get_node_or_null(
             "TerrainPatch/GroundCollision") as StaticBody3D
+    var target: Vector2 = _fast_travel_target_position
     var ground_height: float = height_at(target.x, target.y)
     var ray := PhysicsRayQueryParameters3D.create(
         Vector3(target.x, ground_height + 8.0, target.y),
@@ -261,16 +276,26 @@ func _fast_travel() -> void:
     ray.collision_mask = 1
     var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(ray)
     if terrain_body == null or hit.is_empty() or hit.get("collider") != terrain_body:
-        push_warning("Fast-travel destination has no confirmed terrain collision.")
-        _fast_travel_in_progress = false
+        _fast_travel_verify_attempts += 1
+        if _fast_travel_verify_attempts >= 8:
+            _cancel_fast_travel("Destination heightfield collider was not found.")
         return
 
     player.call("teleport_to_ground", target.x, target.y, ground_height)
-    world_partition.unpin_cell(target_cell)
+    world_partition.unpin_cell(_fast_travel_target_cell)
     world_partition.prefetch_direction = Vector2i.ZERO
     world_partition.update_streaming()
-    _refresh_player_stream_safety()
     _fast_travel_in_progress = false
+    _refresh_player_stream_safety()
+    _refresh_hud()
+
+
+func _cancel_fast_travel(reason: String) -> void:
+    if world_partition != null:
+        world_partition.unpin_cell(_fast_travel_target_cell)
+        world_partition.update_streaming()
+    _fast_travel_in_progress = false
+    push_warning(reason)
     _refresh_hud()
 
 
