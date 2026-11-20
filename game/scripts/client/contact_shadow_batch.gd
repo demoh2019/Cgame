@@ -106,13 +106,29 @@ func _process(delta: float) -> void:
 		if not (member is Node3D):
 			continue
 		var model: Node3D = member as Node3D
+		# Local preview uses simple meshes centred above ground; real
+		# CharacterModels use an origin at their feet. Both share one batch.
+		var preview: bool = model.has_meta("aa_contact_shadow_ground_offset")
+		var point: Vector3 = model.global_position
+		var alive: bool = true
+		var submerged: bool = false
+		var riding: bool = false
+		if preview:
+			point.y -= float(model.get_meta("aa_contact_shadow_ground_offset"))
+			alive = bool(model.get_meta("aa_contact_shadow_alive", true))
+			submerged = bool(model.get_meta("aa_contact_shadow_submerged", false))
+			riding = bool(model.get_meta("aa_contact_shadow_riding", false))
+		else:
+			alive = not bool(model.get("_dead")) and int(model.get("_zombie_state")) != 4
+			submerged = bool(model.get("_swimming"))
+			riding = bool(model.get("_riding"))
 		actors.append({
-			"position": model.global_position,
+			"position": point,
 			"visible": model.is_visible_in_tree(),
-			"alive": not bool(model.get("_dead")) and int(model.get("_zombie_state")) != 4,
-			"submerged": bool(model.get("_swimming")),
+			"alive": alive,
+			"submerged": submerged,
 			"radius": float(model.get_meta("aa_contact_shadow_radius", 0.82)) *
-				(1.5 if bool(model.get("_riding")) else 1.0),
+				(1.5 if riding else 1.0),
 		})
 	var sunlight := 1.0
 	var storm := 0.0
