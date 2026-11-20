@@ -117,6 +117,11 @@ real_t Decal::get_normal_fade() const {
 }
 
 void Decal::set_modulate(Color p_modulate) {
+	// Pooled, fading decals often quantize alpha. Avoid redundant renderer
+	// messages for values already applied during this fade interval.
+	if (modulate == p_modulate) {
+		return;
+	}
 	modulate = p_modulate;
 	RS::get_singleton()->decal_set_modulate(decal, p_modulate);
 }
@@ -126,6 +131,9 @@ Color Decal::get_modulate() const {
 }
 
 void Decal::set_enable_distance_fade(bool p_enable) {
+	if (distance_fade_enabled == p_enable) {
+		return;
+	}
 	distance_fade_enabled = p_enable;
 	RS::get_singleton()->decal_set_distance_fade(decal, distance_fade_enabled, distance_fade_begin, distance_fade_length);
 	notify_property_list_changed();
@@ -136,6 +144,9 @@ bool Decal::is_distance_fade_enabled() const {
 }
 
 void Decal::set_distance_fade_begin(real_t p_distance) {
+	if (distance_fade_begin == p_distance) {
+		return;
+	}
 	distance_fade_begin = p_distance;
 	RS::get_singleton()->decal_set_distance_fade(decal, distance_fade_enabled, distance_fade_begin, distance_fade_length);
 }
@@ -145,6 +156,9 @@ real_t Decal::get_distance_fade_begin() const {
 }
 
 void Decal::set_distance_fade_length(real_t p_length) {
+	if (distance_fade_length == p_length) {
+		return;
+	}
 	distance_fade_length = p_length;
 	RS::get_singleton()->decal_set_distance_fade(decal, distance_fade_enabled, distance_fade_begin, distance_fade_length);
 }
