@@ -363,6 +363,10 @@ func party_focus() -> void:
 	net.c_party_focus.rpc_id(1)
 
 
+func party_loot_mode(mode: String) -> void:
+	net.c_party_loot_mode.rpc_id(1, mode)
+
+
 var _outpost_provision_request_id: int = 0
 
 
