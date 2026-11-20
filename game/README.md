@@ -2979,3 +2979,47 @@ the remaining charges. The exact armor ID and remaining hits are validated
 and saved with version-1 account data; older saves default to an empty plate.
 `game/tests/test_field_armor_plate.gd` exercises those invariants.
 No Godot/Cgame engine extension is needed.
+
+
+## Raid threat awareness for party roles
+
+During raid fights, the existing tank/guardian threat, healer threat
+and infected hate-list mechanics now feed a **read-only, party-private
+boss aggro advisory** on each nearby survivor's HUD.
+
+- Only a living, currently active raid boss can produce this status.
+  The receiving survivor must be a **living party member** in the
+  same dangerous zone and within **42 metres** of the boss, with a
+  vertical difference of at most **7 metres**. The group must have at
+  least two members and have already engaged the boss.
+- The HUD identifies the boss's current **actual target** if that
+  target belongs to the survivor's party. Another party's target ID
+  is never sent. When the guardian is the target, members see a
+  **TAUNT LOCK** countdown taken from the server's real forced-target
+  timer.
+- **Your threat, % of party peak** compares personal threat with the
+  highest actual party contribution to the boss's hate list.
+  Non-tanks also see the percentage of the **aggro-switch threshold**
+  required to pull the boss (the engine's existing 125% hysteresis).
+  A warning appears close to that threshold. Tanking abilities and
+  damage remain entirely server-authoritative.
+- Only the requesting player's private `you.raid_aggro` snapshot
+  contains this bounded advisory. Public `zombies` snapshots,
+  outsider views, enemy player views and disconnected accounts never
+  carry raw hate tables, account IDs or another group's targets.
+  Stale targets, dead raid bosses, distant participants and invalid
+  numerical threat values produce no misleading data.
+
+Files: `scripts/shared/raid_aggro_view.gd`,
+`scripts/server/game_server.gd`, `scripts/client/hud.gd`.
+Tests in `tests/test_raid_aggro_view.gd` are registered in the main
+`tests/run_all.gd` suite, covering private visibility, healer aggro,
+guardian forced targeting, 125% swap threshold, danger-zone and
+distance checks, corrupt values and boss-death cleanup.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+No native Godot engine changes are required: existing server authority
+and replicated private character state support this system.
