@@ -1181,7 +1181,19 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_Q:
 				_interact()
 			KEY_1:
-				_quick_use(Defs.CAMP_FISH_STEW if Input.is_key_pressed(KEY_SHIFT) else "canned_food")
+				if Input.is_key_pressed(KEY_ALT):
+					var raw_item := ""
+					for tier in range(1, 5):
+						var candidate: String = "raw_fish" if tier == 1 else "raw_fish_%d" % tier
+						if client.inventory.count(candidate) > 0:
+							raw_item = candidate
+							break
+					if raw_item != "":
+						_quick_use(raw_item)
+					else:
+						hud.say("No raw fish carried. Properly cooked food is safer.")
+				else:
+					_quick_use(Defs.CAMP_FISH_STEW if Input.is_key_pressed(KEY_SHIFT) else "canned_food")
 			KEY_2:
 				_quick_use("empty_water_pouch" if Input.is_key_pressed(KEY_SHIFT) else "water_bottle")
 			KEY_3:
@@ -1200,7 +1212,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_7:
 				_quick_use("antibiotics")
 			KEY_F11:
-				_quick_use("herbal_poultice")
+				_quick_use("herbal_gut_tonic" if Input.is_key_pressed(KEY_SHIFT) else "herbal_poultice")
 			KEY_8:
 				_quick_use("thermal_wrap")
 			KEY_PERIOD:
