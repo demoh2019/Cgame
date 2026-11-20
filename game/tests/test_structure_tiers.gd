@@ -126,6 +126,7 @@ func run(t) -> void:
 	t.check(not Persist.restore(GameServer.new(WorldGen.new(214), 315), bad), "fractional tier rejected")
 	var old_record: Dictionary = checkpoint.duplicate(true)
 	old_record["barricades"][0].erase("tier")
+	old_record["barricades"][0].erase("owner_guild")
 	old_record["barricades"][0]["hp"] = 100.0
 	var migrated = GameServer.new(WorldGen.new(214), 315)
 	t.check(Persist.restore(migrated, JSON.parse_string(JSON.stringify(old_record))), "legacy T1 checkpoint loads without tier key")

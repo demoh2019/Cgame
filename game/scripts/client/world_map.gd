@@ -5,6 +5,7 @@ extends Control
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
+const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
 
 const PIXELS := 256
 const SPAN := WorldGen.WORLD_RADIUS * 2.0 + 200.0
@@ -98,6 +99,10 @@ func _draw() -> void:
 		draw_arc(_to_screen(0.0, 0.0), radius, 0.0, TAU, 96, ZONE_COLORS[i], 1.5)
 	var edge: float = WorldGen.WORLD_RADIUS / SPAN * _panel_rect.size.x
 	draw_arc(_to_screen(0.0, 0.0), edge, 0.0, TAU, 128, Color(1, 1, 1, 0.25), 1.0)
+	# Seeded site positions are public; personal visited marks are not.
+	var visited: Dictionary = {}
+	for discovered_id in client.you.get("discovered_site_ids", []):
+		visited[int(discovered_id)] = true
 	# Sites.
 	var mouse: Vector2 = get_local_mouse_position()
 	_hover = {}
@@ -111,6 +116,8 @@ func _draw() -> void:
 		if bool(site["station"]):
 			draw_rect(Rect2(spot - Vector2.ONE * (size + 1.5), Vector2.ONE * (size + 1.5) * 2.0), Color(0, 0, 0, 0.7))
 		draw_rect(Rect2(spot - Vector2.ONE * size, Vector2.ONE * size * 2.0), color)
+		if visited.has(int(site["id"])):
+			draw_arc(spot, size + 3.0, 0.0, TAU, 16, Color(0.98, 0.92, 0.40), 1.8)
 		if bool(site["station"]) and (site["kind"] == "village" or site["kind"] == "outpost"):
 			draw_string_outline(font, spot + Vector2(8, 4), str(site["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, 4, Color(0, 0, 0, 0.9))
 			draw_string(font, spot + Vector2(8, 4), str(site["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.95))
@@ -134,8 +141,8 @@ func _draw() -> void:
 		var side_vec := Vector2(-heading.y, heading.x)
 		draw_colored_polygon(PackedVector2Array([me + heading * 9.0, me - heading * 6.0 + side_vec * 5.5, me - heading * 3.0, me - heading * 6.0 - side_vec * 5.5]), Color(0.3, 0.8, 1.0))
 	# Title, legend and the hovered place.
-	draw_string_outline(font, Vector2(30, 36), "THE ISLAND   %d places   (J closes)" % _sites.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 6, Color(0, 0, 0, 0.9))
-	draw_string(font, Vector2(30, 36), "THE ISLAND   %d places   (J closes)" % _sites.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.98, 0.85, 0.45))
+	draw_string_outline(font, Vector2(30, 36), "THE ISLAND   %d places · %d visited   (J closes)" % [_sites.size(), int(client.you.get("discovered_count", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 6, Color(0, 0, 0, 0.9))
+	draw_string(font, Vector2(30, 36), "THE ISLAND   %d places · %d visited   (J closes)" % [_sites.size(), int(client.you.get("discovered_count", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.98, 0.85, 0.45))
 	var legend_y := 90.0
 	for kind in KIND_COLORS:
 		draw_rect(Rect2(Vector2(30, legend_y - 9.0), Vector2(10, 10)), KIND_COLORS[kind])
@@ -145,9 +152,19 @@ func _draw() -> void:
 		draw_string(font, Vector2(30, legend_y + 10.0), "drawing the map %d%%" % int(100.0 * float(_next_row) / float(PIXELS)), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.6))
 	if not _hover.is_empty():
 		var distance: float = Vector2(float(_hover["x"]) - float(client.you.get("x", 0.0)), float(_hover["z"]) - float(client.you.get("z", 0.0))).length()
-		var lines: Array = [str(_hover["display"]), "%s zone   %s%s" % [str(Defs.ZONE_NAMES[int(_hover["zone"])]).capitalize(), "workbench and trader   " if bool(_hover["station"]) else "", "%d m away" % int(distance)]]
-		var box := Rect2(mouse + Vector2(16, 12), Vector2(260, 46))
+		var lines: Array = [str(_hover["display"]), "%s zone   %s%s   %s" % [
+			str(Defs.ZONE_NAMES[int(_hover["zone"])]).capitalize(),
+			"workbench and trader   " if bool(_hover["station"]) else "",
+			"%d m away" % int(distance),
+			"VISITED" if visited.has(int(_hover["id"])) else "UNEXPLORED"]]
+		var market: Dictionary = RegionalTrade.offer_for_site(_hover)
+		var box := Rect2(mouse + Vector2(16, 12), Vector2(295, 64 if not market.is_empty() else 46))
 		draw_rect(box, Color(0.04, 0.05, 0.08, 0.95))
 		draw_rect(box, Color(0.95, 0.78, 0.35, 0.8), false, 1.5)
 		draw_string(font, box.position + Vector2(10, 19), lines[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
 		draw_string(font, box.position + Vector2(10, 38), lines[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.8, 0.85, 0.95))
+		if not market.is_empty():
+			draw_string(font, box.position + Vector2(10, 55),
+				"Trade demand: %s +%d%%" % [str(market["category"]).capitalize(),
+					int(market["premium_percent"])], HORIZONTAL_ALIGNMENT_LEFT, -1, 12,
+				Color(1.0, 0.9, 0.5))

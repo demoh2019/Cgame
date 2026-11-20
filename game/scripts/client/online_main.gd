@@ -14,6 +14,8 @@ const RaidTelegraph = preload("res://scripts/client/raid_telegraph.gd")
 const Hud = preload("res://scripts/client/hud.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
+const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
+const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const HubView = preload("res://scripts/client/hub_view.gd")
 const Audio = preload("res://scripts/client/audio.gd")
 const Assets = preload("res://scripts/client/assets.gd")
@@ -44,6 +46,8 @@ var water: MeshInstance3D
 var hud
 var avatar: Node3D
 var avatar_model
+var bike_visual
+var flare_visual
 var audio
 var hub_view
 var outposts
@@ -435,6 +439,12 @@ func _on_welcomed() -> void:
 	avatar_model = CharacterModel.new()
 	avatar_model.setup(Color(1.0, 0.95, 0.5) if not Assets.has_characters() else Color.WHITE, 2.0, 1.0, Assets.CHARACTER_NAMES[abs(hash(name_edit.text)) % Assets.CHARACTER_NAMES.size()], false)
 	avatar.add_child(avatar_model)
+	bike_visual = TrailBikeVisual.new()
+	bike_visual.name = "TrailBike"
+	avatar.add_child(bike_visual)
+	flare_visual = HandFlareVisual.new()
+	flare_visual.name = "HandFlare"
+	avatar.add_child(flare_visual)
 	var label := Label3D.new()
 	label.text = name_edit.text
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -490,8 +500,13 @@ func _process(delta: float) -> void:
 		avatar_model.update_motion(delta)
 		avatar_model.set_dead(not bool(client.you.get("alive", true)))
 		avatar_model.set_action_loop(_gather_animation())
-		audio.set_footsteps(avatar_model._moving and avatar.visible)
-		effects.footsteps(position, avatar_model.speed, delta)
+		var riding: bool = bool(client.you.get("mounted", false)) and avatar.visible
+		bike_visual.set_panniers(client.inventory.count("bike_panniers") > 0)
+		bike_visual.set_riding(riding, avatar_model.speed, delta)
+		flare_visual.set_burning(avatar.visible and float(client.you.get("flare_seconds", 0.0)) > 0.0)
+		audio.set_footsteps(avatar_model._moving and avatar.visible and not riding)
+		if not riding:
+			effects.footsteps(position, avatar_model.speed, delta)
 	if streamer != null:
 		streamer.focus_position = position
 		_apply_world_state()
@@ -633,6 +648,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F4:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.toggle_mount()
+			KEY_F3:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.survey_ruins()
 			KEY_Q:
 				_interact()
 			KEY_1:
@@ -649,6 +667,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_quick_use("field_antiseptic")
 			KEY_7:
 				_quick_use("antibiotics")
+			KEY_F9:
+				_quick_use("herbal_poultice")
 			KEY_8:
 				_quick_use("thermal_wrap")
 			KEY_PERIOD:
@@ -658,7 +678,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_SEMICOLON:
 				_quick_use("spore_filter")
 			KEY_R:
-				client.drink()
+				if Input.is_key_pressed(KEY_CTRL):
+					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+						client.refill_canteen()
+				elif Input.is_key_pressed(KEY_SHIFT):
+					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+						_quick_use("field_alkali_kit")
+				else:
+					client.drink()
 			KEY_T:
 				client.fish(Input.is_key_pressed(KEY_SHIFT))
 			KEY_Z:
@@ -683,12 +710,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				_interact()
 			KEY_F:
 				client.drink()
-			KEY_R:
-				if Input.is_key_pressed(KEY_CTRL) and not hud.is_menu_open() and bool(client.you.get("alive", false)):
-					client.refill_canteen()
 			KEY_F1:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					client.guardian_taunt()
+			KEY_F8:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.parry()
+			KEY_F9:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.use_item("smoke_charge")
 			KEY_G:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var skill_direction: Vector2 = _aim_direction()

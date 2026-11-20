@@ -4,6 +4,7 @@ extends Control
 ## This Control never owns gameplay state or invents unobserved enemies.
 
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 
 const METERS_RADIUS := 72.0
 const REFRESH_INTERVAL := 0.2
@@ -152,6 +153,28 @@ func _draw() -> void:
 			draw_arc(map_position, 11.0 * scale, 0.0, TAU, 32,
 				Color(0.98, 0.72, 0.25, 0.68), 1.5)
 			_paint_pin(point, origin, Color(0.98, 0.72, 0.25), 5.1)
+
+	# This waypoint is private to the map owner, not revealed to other peers.
+	# Distant ruins are shown as an edge-pointing arrow until within 72m.
+	var active_survey: Dictionary = {}
+	if sim != null and sim.players.has(actor_id):
+		active_survey = RuinSurvey.public_mark(
+			sim.players[actor_id].ruin_survey, sim.time, sim.opened_crates)
+	elif client != null:
+		active_survey = client.you.get("ruin_survey", {})
+	if not active_survey.is_empty():
+		var destination := Vector2(float(active_survey["x"]), float(active_survey["z"]))
+		if destination.is_finite():
+			if in_range(origin, destination):
+				_paint_pin(destination, origin, Color(0.84, 0.38, 0.98), 6.0)
+			else:
+				var arrow_direction: Vector2 = (destination - origin).normalized()
+				var tip: Vector2 = center + arrow_direction * (circle_radius - 2.0)
+				var tangent := Vector2(-arrow_direction.y, arrow_direction.x)
+				var arrow := PackedVector2Array([
+					tip, tip - arrow_direction * 12.0 + tangent * 5.0,
+					tip - arrow_direction * 12.0 - tangent * 5.0])
+				draw_colored_polygon(arrow, Color(0.84, 0.38, 0.98))
 
 	# Local survivor always stays in the center of a player-following radar.
 	var yaw_value: float = current_yaw()

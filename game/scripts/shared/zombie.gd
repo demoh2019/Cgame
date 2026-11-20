@@ -322,6 +322,28 @@ func apply_stagger(seconds: float) -> bool:
 	return true
 
 
+## Physical impulse from a real server-confirmed melee hit. Elites have
+## extra mass, bosses are immovable, and trap-rooted infected stay anchored.
+## This cannot move a player, and collision is resolved by shared movement.
+func apply_knockback(world, attacker_position: Vector3, meters: float) -> float:
+	if not is_alive() or raid_boss or snared_seconds > 0.0:
+		return 0.0
+	if not position.is_finite() or not attacker_position.is_finite() 			or not is_finite(meters) or meters <= 0.0 or meters > 2.5:
+		return 0.0
+	var away := Vector2(position.x - attacker_position.x,
+		position.z - attacker_position.z)
+	if away.length_squared() <= 0.0025 or away.length_squared() > 36.0:
+		return 0.0
+	var before := Vector2(position.x, position.z)
+	var distance: float = meters * (0.5 if elite else 1.0)
+	position = Movement.sweep_displacement(world, position,
+		away.normalized() * distance, 2.5)
+	var displacement: float = before.distance_to(Vector2(position.x, position.z))
+	if displacement > 0.001:
+		stuck_time = 0.0
+	return displacement
+
+
 ## Server-only trap application; cannot target a boss or expired/dead zombie.
 func apply_snare(seconds: float) -> bool:
 	if not is_alive() or raid_boss or not is_finite(seconds) or seconds <= 0.0 or seconds > 3.0:

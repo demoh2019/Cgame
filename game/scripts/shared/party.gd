@@ -10,6 +10,7 @@ const ASSIST_RANGE := 28.0
 const ASSIST_WINDOW := 20.0
 const ASSIST_XP_RATE := 0.5
 const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
+const PartyFocus = preload("res://scripts/shared/party_focus.gd")
 # Party-only temporary rendezvous; server position, never client coordinates.
 const RALLY_SECONDS := 45.0
 const RALLY_COOLDOWN := 12.0
@@ -183,6 +184,70 @@ func cancel_ready_check_for(peer_id: int) -> void:
 		groups[group_id].erase("ready_check")
 
 
+## Only a leader may set a group-wide infected focus. The target ID has
+## already been chosen and validated against live zombies by GameServer.
+func focus_reason(peer_id: int, now: float) -> String:
+	if not is_finite(now):
+		return "invalid_time"
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return "not_in_party"
+	var group: Dictionary = groups[group_id]
+	if int(group["leader"]) != peer_id:
+		return "leader_only"
+	if group["members"].size() < 2:
+		return "need_party"
+	var active: Dictionary = group.get("focus", {})
+	if not active.is_empty() and now < float(active["expires"]):
+		return "already_active"
+	if now < float(group.get("focus_last_at", -INF)) + PartyFocus.COOLDOWN:
+		return "cooldown"
+	return ""
+
+
+func start_focus(peer_id: int, infected_id: int, now: float) -> Dictionary:
+	var reason: String = focus_reason(peer_id, now)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	if infected_id <= 0:
+		return {"ok": false, "reason": "invalid_target"}
+	var group: Dictionary = groups[group_of(peer_id)]
+	group["focus_last_at"] = now
+	group["focus"] = {"target": infected_id, "expires": now + PartyFocus.DURATION}
+	return {"ok": true, "target": infected_id, "seconds": PartyFocus.DURATION}
+
+
+## Called exclusively during authoritative infected damage resolution.
+func has_focus(peer_id: int, infected_id: int, now: float) -> bool:
+	if infected_id <= 0 or not is_finite(now):
+		return false
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return false
+	var group: Dictionary = groups[group_id]
+	if group["members"].size() < 2:
+		return false
+	var marker: Dictionary = group.get("focus", {})
+	return not marker.is_empty() and now < float(marker["expires"]) and \
+		int(marker["target"]) == infected_id
+
+
+func clear_focus_target(infected_id: int) -> void:
+	for group_id in groups.keys():
+		var group: Dictionary = groups[group_id]
+		if int(group.get("focus", {}).get("target", -1)) == infected_id:
+			group.erase("focus")
+
+
+## A fallen leader cannot keep issuing live tactical coordination.
+func cancel_focus_by(peer_id: int) -> void:
+	var group_id: int = group_of(peer_id)
+	if group_id != 0 and groups.has(group_id):
+		var group: Dictionary = groups[group_id]
+		if int(group["leader"]) == peer_id:
+			group.erase("focus")
+
+
 func members_of(peer_id: int) -> Array:
 	var group_id: int = int(group_by_peer.get(peer_id, 0))
 	if group_id == 0 or not groups.has(group_id):
@@ -241,8 +306,9 @@ func accept(target_id: int, now: float) -> Dictionary:
 		return {"ok": false, "reason": "party_full"}
 	group["members"].append(target_id)
 	group_by_peer[target_id] = group_id
-	# Membership changes invalidate old consent, including completed results.
+	# Membership changes invalidate prior consent and tactics.
 	group.erase("ready_check")
+	group.erase("focus")
 	return {"ok": true, "group": group_id, "leader": source}
 
 
@@ -262,6 +328,7 @@ func leave(peer_id: int) -> Dictionary:
 	members.erase(peer_id)
 	group_by_peer.erase(peer_id)
 	group.erase("ready_check")
+	group.erase("focus")
 	# An abandoned standard cannot buff former teammates or a new leader.
 	var raised: Dictionary = group.get("standard", {})
 	if not raised.is_empty() and int(raised.get("by", -1)) == peer_id:
@@ -314,13 +381,16 @@ func expire(now: float) -> void:
 		var active: Dictionary = group.get("ready_check", {})
 		if not active.is_empty() and now >= float(active["expires"]):
 			group.erase("ready_check")
+		var marker: Dictionary = group.get("focus", {})
+		if not marker.is_empty() and now >= float(marker["expires"]):
+			group.erase("focus")
 
 
 func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 	var group_id: int = group_of(peer_id)
 	if group_id == 0 or not groups.has(group_id):
 		return {"id": 0, "leader": 0, "members": [], "rally": {}, "standard": {},
-			"ready_check": {}, "invite_from": int(invites.get(peer_id, {}).get("from", 0))}
+			"ready_check": {}, "focus": {}, "invite_from": int(invites.get(peer_id, {}).get("from", 0))}
 	var group: Dictionary = groups[group_id]
 	var marker: Dictionary = group.get("rally", {})
 	var shared_marker := {}
@@ -348,7 +418,12 @@ func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 		public_ready = {"result": str(ready["result"]),
 			"remaining": maxf(0.0, float(ready["expires"]) - now),
 			"votes": visible_votes}
+	var public_focus: Dictionary = {}
+	var focus: Dictionary = group.get("focus", {})
+	if not focus.is_empty() and now < float(focus["expires"]):
+		public_focus = {"target": int(focus["target"]),
+			"remaining": maxf(0.0, float(focus["expires"]) - now)}
 	return {"id": group_id, "leader": int(group["leader"]),
 		"members": (group["members"] as Array).duplicate(), "rally": shared_marker,
-		"standard": public_standard, "ready_check": public_ready,
+		"standard": public_standard, "ready_check": public_ready, "focus": public_focus,
 		"invite_from": int(invites.get(peer_id, {}).get("from", 0))}

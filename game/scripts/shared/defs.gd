@@ -215,6 +215,18 @@ static func _build_items() -> void:
 		_add_recipe("sledgehammer_%d" % t, "sledgehammer_%d" % t, 1,
 			{"plank_%d" % t: 1, "bar_%d" % t: 3, "scrap": 2},
 			"workbench", 7.0)
+		# Classless field medicine: a low-damage weapon that supports nearby
+		# party allies through an energy-limited restorative ability.
+		_add_item("restoration_staff_%d" % t, {
+			"name": "Expedition Restoration Staff T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 5.0 + 3.0 * float(t - 1), "cooldown": 1.0,
+			"weight": 2.0 + 0.2 * t, "value": 62 * t})
+		_add_recipe("restoration_staff_%d" % t,
+			"restoration_staff_%d" % t, 1,
+			{"plank_%d" % t: 2, "cloth_%d" % t: 2,
+				"bar_%d" % t: 1, "field_antiseptic": 1},
+			"workbench", 7.0)
 		# Lightweight classless archery: affordable arrows, limited distance and noise.
 		_add_item("bow_%d" % t, {"name": "Survival Bow T%d" % t,
 			"kind": "weapon", "weapon": "ranged", "tier": t,
@@ -225,6 +237,18 @@ static func _build_items() -> void:
 		_add_recipe("bow_%d" % t, "bow_%d" % t, 1,
 			{"plank_%d" % t: 2, "fiber_%d" % t: 2,
 				"cloth_%d" % t: 1}, "workbench", 5.0)
+		# Mechanical crossbows trade fire rate and noise for powerful bolts.
+		# Their equipped skill pins infected in place, never PvP players.
+		_add_item("crossbow_%d" % t, {"name": "Salvage Crossbow T%d" % t,
+			"kind": "weapon", "weapon": "ranged", "tier": t,
+			"damage": 18.0 + 10.0 * float(t - 1), "cooldown": 1.55,
+			"range": 25.0, "ammo": "arrow",
+			"shot_noise_radius": 12.0, "shot_noise_seconds": 1.0,
+			"weight": 3.6 + 0.2 * float(t), "value": 60 * t})
+		_add_recipe("crossbow_%d" % t, "crossbow_%d" % t, 1,
+			{"plank_%d" % t: 2, "bar_%d" % t: 2,
+				"fiber_%d" % t: 2, "scrap": 1},
+			"workbench", 7.0)
 		# Armour: reduces incoming damage.
 		_add_item("jacket_%d" % t, {"name": "Jacket T%d" % t, "kind": "armor", "tier": t, "armor": 0.08 + 0.07 * (t - 1), "value": 35 * t})
 		_add_recipe("jacket_%d" % t, "jacket_%d" % t, 1, {"cloth_%d" % t: 4}, "workbench", 5.0)
@@ -336,6 +360,15 @@ static func _build_items() -> void:
 		"stack": 5, "weight": 0.2, "value": 18})
 	_add_recipe("herbal_scent_mask", "herbal_scent_mask", 1,
 		{"fiber_1": 2, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# Forest and swamp foraging yields tradeable medicinal plants. These are
+	# rarer than ordinary fiber/berries and have no independent client action.
+	_add_item("wild_herbs", {"name": "Wild Medicinal Herbs", "kind": "resource",
+		"tier": 1, "stack": 20, "weight": 0.15, "value": 8})
+	_add_item("herbal_poultice", {"name": "Field Herbal Poultice",
+		"kind": "medical", "tier": 1, "heal": 10.0, "cure": 18.0,
+		"stop_bleeding": true, "stack": 5, "weight": 0.30, "value": 30})
+	_add_recipe("herbal_poultice", "herbal_poultice", 1,
+		{"wild_herbs": 2, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
 	_add_item("field_splint", {"name": "Field Splint", "kind": "medical",
 		"fracture_treatment": 100.0, "stack": 5, "value": 24, "weight": 0.6})
 	_add_recipe("field_splint", "field_splint", 1,
@@ -347,6 +380,18 @@ static func _build_items() -> void:
 		"heal": 8.0, "cure": 40.0, "stop_bleeding": true, "stack": 5, "value": 20})
 	_add_recipe("field_antiseptic", "field_antiseptic", 1,
 		{"bandage": 1, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# Dangerous swamps produce rare cultures for an infection medicine.
+	_add_item("spore_sampler", {"name": "Sealed Spore Sample Kit", "kind": "sampler",
+		"tier": 1, "stack": 5, "weight": 0.4, "value": 30})
+	_add_recipe("spore_sampler", "spore_sampler", 1,
+		{"cloth_1": 2, "bar_1": 1, "charcoal_filter": 1}, "workbench", 4.0)
+	_add_item("spore_culture", {"name": "Hazardous Spore Culture", "kind": "resource",
+		"tier": 2, "stack": 20, "weight": 0.2, "value": 30})
+	_add_item("spore_antidote", {"name": "Distilled Swamp Antidote",
+		"kind": "medical", "tier": 2, "cure": 75.0, "stack": 5,
+		"weight": 0.25, "value": 85})
+	_add_recipe("spore_antidote", "spore_antidote", 1,
+		{"spore_culture": 2, "bandage": 1, "water_bottle": 1}, "workbench", 6.0)
 	# A single material-paid squad treatment; no free healing or item duplication.
 	_add_item("field_triage_pack", {"name": "Expedition Triage Pack",
 		"kind": "party_medical", "tier": 1, "stack": 5, "weight": 0.8, "value": 42})
@@ -422,6 +467,12 @@ static func _build_items() -> void:
 		"tier": 2, "stack": 10, "value": 24, "weight": 0.25})
 	_add_recipe("lockpick_kit", "lockpick_kit", 1,
 		{"scrap": 2, "bar_1": 1, "fiber_1": 2}, "workbench", 4.0)
+	# Consumable wilderness survey: reveals one still-unlooted high-risk
+	# ruin; actual loot and opponents stay server-owned and unchanged.
+	_add_item("ruin_survey_chart", {"name": "Ruin Survey Chart",
+		"kind": "material", "tier": 1, "stack": 10, "weight": 0.2, "value": 18})
+	_add_recipe("ruin_survey_chart", "ruin_survey_chart", 1,
+		{"cloth_1": 1, "fiber_1": 2, "scrap": 1}, "", 3.0)
 	# T2 non-full-loot expedition return. PvP full-loot zones always deny it.
 	_add_item("return_charm", {"name": "Settler's Return Charm", "kind": "recall",
 		"tier": 2, "stack": 5, "value": 90, "weight": 0.15})
@@ -433,15 +484,40 @@ static func _build_items() -> void:
 		"kind": "standard", "tier": 1, "stack": 3, "weight": 2.0, "value": 55})
 	_add_recipe("field_standard", "field_standard", 1,
 		{"plank_1": 2, "cloth_1": 2, "scrap": 1}, "workbench", 5.0)
+	_add_item("smoke_charge", {"name": "Improvised Smoke Charge",
+		"kind": "smoke_charge", "tier": 1, "stack": 10,
+		"value": 30, "weight": 0.35})
+	_add_recipe("smoke_charge", "smoke_charge", 1,
+		{"cloth_1": 2, "scrap": 1}, "workbench", 3.0)
+	# A moving emergency night light that sacrifices stealth for visibility.
+	_add_item("signal_flare", {"name": "Handheld Signal Flare", "kind": "hand_flare",
+		"tier": 1, "stack": 10, "weight": 0.25, "value": 22})
+	_add_recipe("signal_flare", "signal_flare", 1,
+		{"wood_1": 2, "cloth_1": 1, "scrap": 1}, "", 3.0)
 	_add_item("noise_decoy", {"name": "Clattering Decoy", "kind": "decoy",
 		"tier": 1, "stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("noise_decoy", "noise_decoy", 1,
 		{"wood_1": 2, "scrap": 1}, "", 2.5)
+	_add_item("flash_charge", {"name": "Improvised Flash Charge", "kind": "flash",
+		"tier": 2, "stack": 5, "weight": 0.5, "value": 42})
+	_add_recipe("flash_charge", "flash_charge", 1,
+		{"scrap": 2, "bar_2": 1, "cloth_1": 1, "stone_1": 1}, "workbench", 5.0)
 	# Defensive disposable wire snare; only the PvE server can trigger it.
 	_add_item("infected_snare", {"name": "Infected Tripwire Snare",
 		"kind": "deployable", "tier": 1, "stack": 10, "weight": 0.9, "value": 28})
 	_add_recipe("infected_snare", "infected_snare", 1,
 		{"wood_1": 2, "fiber_1": 2, "scrap": 1}, "", 3.0)
+	# Field-fitted chain wrap lowers the noise from an otherwise rattling bike.
+	_add_item("bike_chain_wrap", {"name": "Quiet Chain Wrap", "kind": "bike_wrap",
+		"tier": 1, "stack": 5, "weight": 0.3, "value": 24})
+	_add_recipe("bike_chain_wrap", "bike_chain_wrap", 1,
+		{"cloth_1": 2, "fiber_1": 2, "scrap": 2}, "workbench", 4.0)
+	# Tradeable, crafted saddle panniers support limited load only while mounted.
+	_add_item("bike_panniers", {"name": "Expedition Bike Panniers", "kind": "bike_cargo",
+		"tier": 2, "weight": 3.0, "value": 95})
+	_add_recipe("bike_panniers", "bike_panniers", 1,
+		{"cloth_2": 4, "plank_2": 2, "scrap": 3, "fiber_2": 3},
+		"workbench", 7.0)
 	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
 	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
 		"tier": 2, "weight": 12.0, "value": 180})

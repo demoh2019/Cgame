@@ -5,6 +5,9 @@ const COST := {"cloth_1": 2, "fiber_1": 2, "plank_1": 1}
 const DURATION := 240.0
 const COVER_RADIUS := 3.5
 const WEATHER_REDUCTION := 0.75
+# Only the vision of idle infected changes; not smell, noise, PvP, or attacks.
+const VISUAL_REDUCTION := 0.25
+const MIN_VISUAL := 0.35
 const MIN_SEPARATION := 4.0
 const CANOPY_RADIUS := 0.75
 const MAX_GLOBAL := 64
@@ -40,6 +43,25 @@ static func covers(shelters: Dictionary, position: Vector3, now: float) -> bool:
 		if here.distance_squared_to(site) <= COVER_RADIUS * COVER_RADIUS:
 			return true
 	return false
+
+
+## Quiet, crouching survivors receive cover only inside a live canvas tarp.
+static func camouflaged(shelters: Dictionary, position: Vector3, now: float,
+		crouching: bool, noise_seconds: float, alive: bool = true) -> bool:
+	if not alive or not crouching or not is_finite(noise_seconds) or noise_seconds < 0.0 or noise_seconds > 0.0:
+		return false
+	return covers(shelters, position, now)
+
+
+## Stack with stance and armor without ever providing complete invisibility.
+static func visual_signature(base: float, shelters: Dictionary, position: Vector3,
+		now: float, crouching: bool, noise_seconds: float, alive: bool = true) -> float:
+	if not is_finite(base):
+		return 1.0
+	var value: float = clampf(base, MIN_VISUAL, 1.0)
+	if camouflaged(shelters, position, now, crouching, noise_seconds, alive):
+		value *= 1.0 - VISUAL_REDUCTION
+	return clampf(value, MIN_VISUAL, 1.0)
 
 
 static func exposure_severity(severity: float, covered: bool) -> float:

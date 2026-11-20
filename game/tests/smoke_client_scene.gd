@@ -27,6 +27,7 @@ func _check() -> void:
 		ok = ok and InputMap.has_action("survive_fish")
 		ok = ok and game.get_node("HUD/Instructions").text.contains("T fish near shore")
 		ok = ok and game.get_node_or_null("Survivor") != null
+		ok = ok and game.get_node_or_null("Survivor/TrailBike") != null
 		ok = ok and game.get("_decoy_visuals") is Dictionary
 		ok = ok and game.get_node_or_null("SafeStash") != null
 		ok = ok and game.get("_recipes").has("axe_2")

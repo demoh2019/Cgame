@@ -5,6 +5,8 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
+const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
+const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const LootLabel = preload("res://scripts/shared/loot_label.gd")
 
@@ -36,8 +38,12 @@ func update_from(client) -> void:
 		_touch("barricade:%d" % id, "barricade", client.barricades[id], seen)
 	for id in client.campfires:
 		_touch("campfire:%d" % id, "campfire", client.campfires[id], seen)
+	for id in client.shelters:
+		_touch("shelter:%d" % id, "shelter", client.shelters[id], seen)
 	for id in client.decoys:
 		_touch("decoy:%d" % id, "decoy", client.decoys[id], seen)
+	for id in client.smoke_clouds:
+		_touch("smoke:%d" % id, "smoke", client.smoke_clouds[id], seen)
 	for id in client.infected_snares:
 		_touch("snare:%d" % id, "snare", client.infected_snares[id], seen)
 	if not client.raid_telegraph.is_empty():
@@ -67,6 +73,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 				str(entity["type"]), int(entity["hp"])]
 			if float(entity.get("stagger_seconds", 0.0)) > 0.0:
 				label.text += " [STAGGERED]"
+			elif float(entity.get("snared_seconds", 0.0)) > 0.0:
+				label.text += " [PINNED]"
 		elif kind == "player":
 			label.text = ("%s%s" % [
 				"OUTLAW " if bool(entity.get("outlaw", false)) else "", str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
@@ -103,10 +111,19 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		elif bool(entity.get("elite", false)):
 			base = Color(0.98, 0.65, 0.18)
 		var staggered: bool = float(entity.get("stagger_seconds", 0.0)) > 0.0
-		model.set_tint(base.lerp(Color(0.38, 0.8, 1.0), 0.7) if staggered else (
-			base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base))
+		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
+		var tint: Color = base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base
+		if pinned:
+			tint = base.lerp(Color(1.0, 0.84, 0.25), 0.65)
+		if staggered:
+			tint = base.lerp(Color(0.38, 0.8, 1.0), 0.7)
+		model.set_tint(tint)
 		model.set_zombie_state(int(entity["state"]))
 	if kind == "player":
+		_nodes[key].get_node("HandFlare").set_burning(bool(entity.get("flare_lit", false)) and bool(entity.get("alive", false)))
+		var bike = _nodes[key].get_node("TrailBike")
+		bike.set_panniers(bool(entity.get("bike_panniers", false)))
+		bike.set_riding(bool(entity.get("mounted", false)) and bool(entity.get("alive", false)))
 		var player_model: Node3D = _nodes[key].get_node("Model")
 		player_model.scale = Vector3(1.0,
 			0.72 if bool(entity.get("crouching", false)) else 1.0, 1.0)
@@ -178,6 +195,23 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		label.position.y = 0.7
 		root.add_child(label)
 		return root
+	if kind == "smoke":
+		var cloud := MeshInstance3D.new()
+		var shape := SphereMesh.new()
+		shape.radius = float(entity.get("radius", 4.5))
+		shape.height = 3.2
+		shape.radial_segments = 24
+		shape.rings = 12
+		cloud.mesh = shape
+		cloud.position.y = 1.6
+		var haze := StandardMaterial3D.new()
+		haze.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		haze.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		haze.albedo_color = Color(0.52, 0.57, 0.58, 0.28)
+		haze.cull_mode = BaseMaterial3D.CULL_DISABLED
+		cloud.material_override = haze
+		root.add_child(cloud)
+		return root
 	if kind == "decoy":
 		var clacker := MeshInstance3D.new()
 		var shape := CylinderMesh.new()
@@ -199,6 +233,30 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		label.pixel_size = 0.006
 		label.position.y = 1.0
 		root.add_child(label)
+		return root
+	if kind == "shelter":
+		var canopy := MeshInstance3D.new()
+		var roof := BoxMesh.new()
+		roof.size = Vector3(3.0, 0.12, 2.6)
+		canopy.mesh = roof
+		canopy.position.y = 1.8
+		var canvas := StandardMaterial3D.new()
+		canvas.albedo_color = Color(0.31, 0.42, 0.29)
+		canopy.material_override = canvas
+		root.add_child(canopy)
+		for dx in [-1.25, 1.25]:
+			for dz in [-1.08, 1.08]:
+				var pole := MeshInstance3D.new()
+				var pole_mesh := CylinderMesh.new()
+				pole_mesh.top_radius = 0.045
+				pole_mesh.bottom_radius = 0.06
+				pole_mesh.height = 1.75
+				pole.mesh = pole_mesh
+				pole.position = Vector3(dx, 0.89, dz)
+				var wood := StandardMaterial3D.new()
+				wood.albedo_color = Color(0.35, 0.24, 0.16)
+				pole.material_override = wood
+				root.add_child(pole)
 		return root
 	if kind == "campfire":
 		var wood := MeshInstance3D.new()
@@ -289,6 +347,13 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		var character: String = Assets.CHARACTER_NAMES[int(abs(int(entity["id"]))) % Assets.CHARACTER_NAMES.size()]
 		model.setup(Color.WHITE if Assets.has_characters() else Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0, character, false)
 	root.add_child(model)
+	if kind == "player":
+		var bike := TrailBikeVisual.new()
+		bike.name = "TrailBike"
+		root.add_child(bike)
+		var flare := HandFlareVisual.new()
+		flare.name = "HandFlare"
+		root.add_child(flare)
 	var label := Label3D.new()
 	label.name = "Label"
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -307,9 +372,14 @@ func _process(delta: float) -> void:
 		var node: Node3D = _nodes[key]
 		var target: Dictionary = _targets[key]
 		node.position = node.position.lerp(target["position"], blend)
-		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("snare") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
+		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
-			node.get_node("Model").update_motion(delta)
+			var model: Node3D = node.get_node("Model")
+			model.update_motion(delta)
+			if key.begins_with("player:"):
+				var bike = node.get_node("TrailBike")
+				if bike.visible:
+					bike.set_riding(true, model.speed, delta)
 
 
 ## A swing or a shot by another player.

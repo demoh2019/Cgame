@@ -6,6 +6,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
+const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
 
@@ -25,7 +26,9 @@ var players: Dictionary = {} # id -> entity from the latest snapshot
 var zombies: Dictionary = {}
 var barricades: Dictionary = {} # Nearby defenses from the server.
 var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
+var shelters: Dictionary = {} # Replicated temporary weather cover.
 var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
+var smoke_clouds: Dictionary = {} # Interest-limited, temporary visual smoke.
 var infected_snares: Dictionary = {} # Server-replicated temporary PvE traps.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
 var spit_zones: Dictionary = {} # Only the latest server-issued acid telegraphs.
@@ -107,9 +110,15 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	decoys.clear()
 	for entity in snapshot.get("decoys", []):
 		decoys[int(entity["id"])] = entity
+	smoke_clouds.clear()
+	for entity in snapshot.get("smoke_clouds", []):
+		smoke_clouds[int(entity["id"])] = entity
 	campfires.clear()
 	for entity in snapshot.get("campfires", []):
 		campfires[int(entity["id"])] = entity
+	shelters.clear()
+	for entity in snapshot.get("shelters", []):
+		shelters[int(entity["id"])] = entity
 	bags.clear()
 	for entity in snapshot["bags"]:
 		bags[entity["id"]] = entity
@@ -148,8 +157,10 @@ func _reconcile(snapshot: Dictionary) -> void:
 		var replay_input: Dictionary = entry["input"].duplicate()
 		var duration: float = float(entry["dt"])
 		var moving := Vector2(float(replay_input["x"]), float(replay_input["z"])).length_squared() > 0.00001
-		var running := bool(replay_input["sprint"]) and not bool(you.get("mounted", false)) and not bool(replay_input.get("crouch", false)) and moving and float(replay_input["cargo_factor"]) >= 0.9999
 		replay_input["mounted"] = bool(you.get("mounted", false))
+		replay_input["cargo_factor"] = BikeCargo.movement_factor(inventory,
+			float(you.get("carry_bonus", 0.0)), bool(replay_input["mounted"]))
+		var running := bool(replay_input["sprint"]) and not bool(replay_input["mounted"]) and not bool(replay_input.get("crouch", false)) and moving and float(replay_input["cargo_factor"]) >= 0.9999
 		running = running and Survival.can_sprint_with(energy, float(you.get("hunger", 100.0)),
 				float(you.get("thirst", 100.0)), duration)
 		running = running and float(you.get("fracture", 0.0)) <= 0.0
@@ -177,7 +188,8 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float, crou
 	_seq += 1
 	yaw = face_yaw
 	# Prediction uses the same weight calculation as the authoritative server.
-	var factor: float = inventory.movement_factor(float(you.get("carry_bonus", 0.0)))
+	var factor: float = BikeCargo.movement_factor(inventory,
+		float(you.get("carry_bonus", 0.0)), bool(you.get("mounted", false)))
 	var mounted: bool = bool(you.get("mounted", false)) and not crouch and factor >= 0.9999
 	var running := sprint and not mounted and not crouch and move.length_squared() > 0.00001 and factor >= 0.9999
 	running = running and Survival.can_sprint_with(predicted_stamina,
@@ -313,6 +325,10 @@ func party_rally() -> void:
 	net.c_party_rally.rpc_id(1)
 
 
+func party_focus() -> void:
+	net.c_party_focus.rpc_id(1)
+
+
 var _outpost_provision_request_id: int = 0
 
 
@@ -400,6 +416,10 @@ func rest() -> void:
 	net.c_rest.rpc_id(1)
 
 
+func caravan(action: String) -> void:
+	net.c_caravan.rpc_id(1, action)
+
+
 func contract(action: String) -> void:
 	net.c_contract.rpc_id(1, action)
 
@@ -419,6 +439,11 @@ func skill(direction: Vector2) -> void:
 func guardian_taunt() -> void:
 	# The server selects all targets; the client sends no enemy IDs.
 	net.c_guardian_taunt.rpc_id(1)
+
+
+func parry() -> void:
+	# Facing and equipped weapon are rechecked by the authoritative server.
+	net.c_parry.rpc_id(1)
 
 
 func dodge(direction: Vector2) -> void:
@@ -443,14 +468,46 @@ func refill_canteen() -> void:
 	net.c_refill_canteen.rpc_id(1)
 
 
+func survey_ruins() -> void:
+	net.c_survey_ruins.rpc_id(1)
+
+
 func place_infected_snare(point: Vector2) -> void:
 	if point.is_finite():
 		net.c_place_infected_snare.rpc_id(1, point.x, point.y)
 
 
+func throw_flash(direction: Vector2) -> void:
+	if direction.is_finite() and direction.length_squared() > 0.0001:
+		net.c_throw_flash.rpc_id(1, direction.normalized().x, direction.normalized().y)
+
+
 func throw_decoy(direction: Vector2) -> void:
 	if direction.is_finite() and direction.length_squared() > 0.0001:
 		net.c_throw_decoy.rpc_id(1, direction.normalized().x, direction.normalized().y)
+
+
+func pitch_shelter(point: Vector2) -> void:
+	if point.is_finite():
+		net.c_pitch_shelter.rpc_id(1, point.x, point.y)
+
+
+func pack_shelter(id: int) -> void:
+	net.c_pack_shelter.rpc_id(1, id)
+
+
+func nearest_shelter(point: Vector3, radius: float = 3.2) -> int:
+	if not point.is_finite():
+		return -1
+	var closest := -1
+	var distance: float = radius * radius
+	for shelter in shelters.values():
+		var d2: float = Vector2(point.x, point.z).distance_squared_to(
+			Vector2(float(shelter["x"]), float(shelter["z"])))
+		if d2 <= distance:
+			distance = d2
+			closest = int(shelter["id"])
+	return closest
 
 
 func light_campfire(point: Vector2) -> void:
@@ -497,6 +554,10 @@ func nearest_barricade(point: Vector3, radius: float = 3.0) -> int:
 			best = d
 			nearest = int(structure["id"])
 	return nearest
+
+
+func sample_spores() -> void:
+	net.c_sample_spores.rpc_id(1)
 
 
 func collect_rain() -> void:

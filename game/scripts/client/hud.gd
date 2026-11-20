@@ -26,6 +26,7 @@ var _vendor_water_button: Button
 var _vendor_food_button: Button
 var _radar
 var _contract_label: Label
+var _caravan_status: Label
 var _prompt: Label
 var _log: Label
 var _inventory_panel: PanelContainer
@@ -234,6 +235,25 @@ func _build() -> void:
 		var direction := Vector2(sin(client.yaw), cos(client.yaw))
 		client.light_campfire(Vector2(pos.x, pos.z) + direction * 2.8))
 	inventory_box.add_child(campfire_button)
+	var pitch_button := Button.new()
+	pitch_button.name = "PitchTarp"
+	pitch_button.text = "Pitch field tarp (2 cloth T1, 2 fiber T1, 1 plank T1)"
+	pitch_button.tooltip_text = "4 minutes of shared weather cover (-75% exposure), no PvP immunity."
+	pitch_button.pressed.connect(func() -> void:
+		var position: Vector3 = client.display_position()
+		var heading := Vector2(sin(client.yaw), cos(client.yaw))
+		client.pitch_shelter(Vector2(position.x, position.z) + heading * 2.8))
+	inventory_box.add_child(pitch_button)
+	var pack_button := Button.new()
+	pack_button.name = "PackTarp"
+	pack_button.text = "Pack nearest tarp (owner only; no refund)"
+	pack_button.pressed.connect(func() -> void:
+		var shelter_id: int = client.nearest_shelter(client.display_position())
+		if shelter_id < 0:
+			say("No field tarp within reach.")
+		else:
+			client.pack_shelter(shelter_id))
+	inventory_box.add_child(pack_button)
 	var decoy_button := Button.new()
 	decoy_button.name = "ThrowNoiseDecoy"
 	decoy_button.text = "Throw clattering decoy (,): 8s distraction"
@@ -242,6 +262,19 @@ func _build() -> void:
 		var heading := Vector2(sin(client.yaw), cos(client.yaw))
 		client.throw_decoy(heading))
 	inventory_box.add_child(decoy_button)
+	var flash_button := Button.new()
+	flash_button.name = "ThrowFlashCharge"
+	flash_button.text = "Throw flash charge (PvE interrupt)"
+	flash_button.tooltip_text = "8m throw, up to 4 infected at impact. Bosses immune. Loud; 12-second cooldown."
+	flash_button.pressed.connect(func() -> void:
+		client.throw_flash(Vector2(sin(client.yaw), cos(client.yaw))))
+	inventory_box.add_child(flash_button)
+	var smoke_button := Button.new()
+	smoke_button.name = "UseSmokeCharge"
+	smoke_button.text = "Smoke charge (F9): nine-second sight cover"
+	smoke_button.tooltip_text = "Consumes 1 crafted charge. Quiet survivors are less visible; no PvP or damage protection."
+	smoke_button.pressed.connect(func() -> void: client.use_item("smoke_charge"))
+	inventory_box.add_child(smoke_button)
 	var snare_button := Button.new()
 	snare_button.name = "PlaceInfectedSnare"
 	snare_button.text = "Place infected tripwire (\\): roots one infected"
@@ -263,6 +296,18 @@ func _build() -> void:
 	canteen_button.tooltip_text = "Requires a crafted canteen, one carbon filter and the shared lake cooldown."
 	canteen_button.pressed.connect(func() -> void: client.refill_canteen())
 	inventory_box.add_child(canteen_button)
+	var survey_button := Button.new()
+	survey_button.name = "RuinSurveyChart"
+	survey_button.text = "Survey dangerous ruins (F3; 1 crafted chart)"
+	survey_button.tooltip_text = "Mark nearest unopened red/black ruin within 190 m for 75s."
+	survey_button.pressed.connect(func() -> void: client.survey_ruins())
+	inventory_box.add_child(survey_button)
+	var chain_button := Button.new()
+	chain_button.name = "UseBikeChainWrap"
+	chain_button.text = "Quiet bike chain (180s; workbench craft)"
+	chain_button.tooltip_text = "Dismount and use 1 wrap: bike noise 27m -> 9m, gunshots unaffected."
+	chain_button.pressed.connect(func() -> void: client.use_item("bike_chain_wrap"))
+	inventory_box.add_child(chain_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -296,6 +341,12 @@ func _build() -> void:
 	_stash_grid.columns = 4
 	stash_scroll.add_child(_stash_grid)
 
+	var flare_button := Button.new()
+	flare_button.name = "UseSignalFlare"
+	flare_button.text = "Light signal flare: 120s (F10 offline)"
+	flare_button.tooltip_text = "Crafted fuel: night-only glow also alerts nearby infected."
+	flare_button.pressed.connect(func() -> void: client.use_item("signal_flare"))
+	inventory_box.add_child(flare_button)
 	var recall_button := Button.new()
 	recall_button.name = "UseReturnCharm"
 	recall_button.text = "Return charm: 8s channel (green/yellow only)"
@@ -346,6 +397,28 @@ func _build() -> void:
 			client.vendor(fish_id, 1, false))
 	vendor_buttons.add_child(sell_fish)
 
+	var caravan_heading := Label.new()
+	caravan_heading.text = "Caravan routes (village-to-village trading)"
+	inventory_box.add_child(caravan_heading)
+	_caravan_status = Label.new()
+	_caravan_status.text = "No active route. Find an NPC trader in a wilderness village or fort."
+	_caravan_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	inventory_box.add_child(_caravan_status)
+	var caravan_buttons := HBoxContainer.new()
+	inventory_box.add_child(caravan_buttons)
+	var accept_caravan := Button.new()
+	accept_caravan.text = "Take route"
+	accept_caravan.pressed.connect(func() -> void: client.caravan("accept"))
+	caravan_buttons.add_child(accept_caravan)
+	var deliver_caravan := Button.new()
+	deliver_caravan.text = "Deliver cargo"
+	deliver_caravan.pressed.connect(func() -> void: client.caravan("deliver"))
+	caravan_buttons.add_child(deliver_caravan)
+	var abandon_caravan := Button.new()
+	abandon_caravan.text = "Cancel route"
+	abandon_caravan.pressed.connect(func() -> void: client.caravan("abandon"))
+	caravan_buttons.add_child(abandon_caravan)
+
 	var contract_title := Label.new()
 	contract_title.text = "Camp contracts (hub only)"
 	inventory_box.add_child(contract_title)
@@ -373,6 +446,12 @@ func _build() -> void:
 	rain_button.tooltip_text = "Outdoors in a storm; swamps also consume 1 charcoal filter. 90s cooldown."
 	rain_button.pressed.connect(func() -> void: client.collect_rain())
 	inventory_box.add_child(rain_button)
+	var spores_button := Button.new()
+	spores_button.name = "CollectSporeCultures"
+	spores_button.text = "Sample swamp spores (1 kit -> 2 cultures)"
+	spores_button.tooltip_text = "Dangerous swamp only. Causes infection; 150s cooldown. Distill antidote at a workbench."
+	spores_button.pressed.connect(func() -> void: client.sample_spores())
+	inventory_box.add_child(spores_button)
 	var cook_button := Button.new()
 	cook_button.text = "0: Quick-cook best carried fish (fire or hub)"
 	cook_button.pressed.connect(quick_cook)
@@ -505,6 +584,11 @@ func _build() -> void:
 	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
 	rally_button.pressed.connect(func() -> void: client.party_rally())
 	party_buttons.add_child(rally_button)
+	var focus_button := Button.new()
+	focus_button.text = "Focus infected"
+	focus_button.tooltip_text = "Leader: mark the nearest living infected within 24m for 18s. Allies near that exact enemy deal +8% PvE damage; 28s cooldown."
+	focus_button.pressed.connect(func() -> void: client.party_focus())
+	inventory_box.add_child(focus_button)
 	var standard_button := Button.new()
 	standard_button.text = "Raise standard"
 	standard_button.tooltip_text = "Party leader: use one crafted expedition standard outside town, with an ally nearby (+stamina/energy for 90s)."
@@ -515,6 +599,12 @@ func _build() -> void:
 	guardian_button.tooltip_text = "Melee weapon, party, 25 combat energy, 20s cooldown; defend nearby allies"
 	guardian_button.pressed.connect(func() -> void: client.guardian_taunt())
 	inventory_box.add_child(guardian_button)
+	var parry_button := Button.new()
+	parry_button.name = "MeleeParry"
+	parry_button.text = "Parry incoming infected (F8)"
+	parry_button.tooltip_text = "Hold real melee weapon; 20 stamina, 0.45s timing window, 4s cooldown. Front infected melee only."
+	parry_button.pressed.connect(func() -> void: client.parry())
+	inventory_box.add_child(parry_button)
 	var fortify_button := Button.new()
 	fortify_button.name = "FortifyOutpost"
 	fortify_button.text = "Fortify controlled outpost (4m, wood + stone)"
@@ -836,6 +926,9 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"site_discovered":
+			say("DISCOVERED: %s · %d island landmarks visited! Explorer XP and renown earned." % [
+				str(event.get("name", "Unknown")), int(event.get("count", 0))])
 		"recall_started":
 			say("Return charm: stand still for 8 seconds; avoid infected.")
 		"recall_cancelled":
@@ -872,6 +965,11 @@ func _on_event(event: Dictionary) -> void:
 		"justice":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Lawful PvP victory (%s). No criminal infamy added." % str(event.get("reason", "defense")))
+		"barricade_shot":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("BARRICADE HIT: -%d HP (remaining %d)." % [
+					roundi(float(event.get("damage", 0.0))),
+					roundi(float(event.get("hp", 0.0)))])
 		"outlaw_bounty":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("OUTLAW BOUNTY: +%d silver for a wanted survivor." % int(event.get("silver", 0)))
@@ -916,6 +1014,9 @@ func _on_event(event: Dictionary) -> void:
 				say("You died: %s" % ("full loot" if bool(event.get("full_loot", true)) else "gear retained"))
 			else:
 				say("A survivor was killed.")
+		"parried":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Parried infected attack! 70% less damage and wounds; enemy staggered.")
 		"stealth_ambush":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Silent ambush! +45% melee damage against unaware infected.")
@@ -949,6 +1050,10 @@ func _on_event(event: Dictionary) -> void:
 		"evaded":
 			if event.get("peer", -1) == client.peer_id:
 				say("Evaded an infected attack!")
+		"outpost_watch":
+			say("WATCHTOWER ALERT: enemies at your fortified outpost #%d (X:%d Z:%d)! Rally defenders." % [
+				int(event.get("id", 0)), roundi(float(event.get("x", 0.0))),
+				roundi(float(event.get("z", 0.0)))])
 		"siege_started":
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
 		"guardian_taunt":
@@ -969,7 +1074,11 @@ func _on_event(event: Dictionary) -> void:
 			say("RAID SLAM in %.1f seconds! Evade the marked %dm circle." % [
 				float(event.get("seconds", 2.0)), int(event.get("radius", 5))])
 		"raid_slam":
-			say("Raid boss slam struck. Dodge or retreat from the next circle.")
+			var exposed: float = float(event.get("exposed_seconds", 0.0))
+			if exposed > 0.0:
+				say("RAID COUNTERATTACK! Boss exposed for %.1fs: +15%% damage. Strike now!" % exposed)
+			else:
+				say("Raid boss slam struck. Dodge or retreat from the next circle.")
 		"raid_defeated":
 			say("RAID VICTORY! The warlord dropped one shared loot bag.")
 		"raid_expired":
@@ -1044,6 +1153,68 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "caravan":
+		if not bool(data.get("ok", false)):
+			say("Caravan: " + str(data.get("reason", "unavailable")))
+		else:
+			match str(data.get("action", "")):
+				"accept":
+					var route: Dictionary = data.get("route", {})
+					say("NEW CARAVAN: deliver %dx %s to %s (X:%d Z:%d) for %d silver." % [
+						int(route.get("quantity", 0)), str(route.get("cargo", "")),
+						str(route.get("destination", "")), roundi(float(route.get("dst_x", 0.0))),
+						roundi(float(route.get("dst_z", 0.0))), int(route.get("silver", 0))])
+				"deliver":
+					say("Caravan delivered: +%d silver and explorer experience." % int(data.get("silver", 0)))
+				"abandon":
+					say("Caravan route cancelled; no goods taken.")
+		return
+	if kind == "throw_flash":
+		if bool(data.get("ok", false)):
+			say("Flash charge interrupted %d infected; blast attracts attention." % int(data.get("hits", 0)))
+		elif str(data.get("reason", "")) == "cooldown":
+			say("Flash charge ready in %ds" % ceili(float(data.get("remaining", 0.0))))
+		else:
+			say("Flash charge: " + str(data.get("reason", "rejected")) + " (kit not spent)")
+		return
+	if kind == "sample_spores":
+		if bool(data.get("ok", false)):
+			say("Spore sample: %d cultures collected; infection +%.1f." % [
+				int(data.get("count", 0)), float(data.get("infection", 0.0))])
+		elif str(data.get("reason", "")) == "cooldown":
+			say("Spore sampling: ready in %ds" % ceili(float(data.get("remaining", 0.0))))
+		else:
+			say("Spore sampling: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "use" and data.has("flare_seconds"):
+		say("Signal flare burning for 120s; infected and rival survivors see its light.")
+		return
+	if kind == "use" and str(data.get("reason", "")) in ["already_burning", "daylight"]:
+		say("Flare cannot ignite: %s (nothing consumed)." % str(data["reason"]))
+		return
+	if kind == "use" and data.has("smoke_seconds"):
+		say("Smoke deployed for nine seconds. Noise and blood scent still reveal you.")
+		return
+	if kind == "parry":
+		if bool(data.get("ok", false)):
+			say("Parry ready for 0.45s. Face the infected and time its strike!")
+		else:
+			say("Parry denied: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "survey_ruins":
+		if bool(data.get("ok", false)):
+			say("Ruin survey: T%d cache at X:%d Z:%d — private marker for 75s." % [
+				int(data.get("zone", 2)) + 1,
+				roundi(float(data.get("x", 0.0))), roundi(float(data.get("z", 0.0)))])
+		else:
+			say("Ruin survey: " + str(data.get("reason", "denied")) + " (chart not spent).")
+		return
+	if kind == "use" and data.has("chain_wrap_seconds"):
+		say("Quiet bike chain fitted: %.0fs quieter riding." % float(data["chain_wrap_seconds"]))
+		return
+	if kind == "use" and bool(data.get("chain_wrap", false)):
+		say("Bike chain wrap: " + str(data.get("reason", "rejected")) + " (no kit spent)")
+		return
 	if kind == "outpost_provision":
 		if bool(data.get("ok", false)):
 			say("Outpost supplied: +%ds hold time, %d deliveries left." % [
@@ -1075,6 +1246,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "use" and str(data.get("reason", "")) == "no_acid_nearby":
 		say("Alkali kit: no active acid nearby. Your supplies were not spent.")
+		return
+	if kind == "party_focus":
+		if bool(data.get("ok", false)):
+			say("Party focus: infected #%d marked for %d seconds (+8%% PvE damage)." % [
+				int(data.get("target", 0)), int(data.get("seconds", 18))])
+		else:
+			say("Party focus: " + str(data.get("reason", "rejected")))
 		return
 	if kind == "party_ready":
 		if not bool(data.get("ok", false)):
@@ -1192,6 +1370,18 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Refuel denied: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "shelter":
+		if bool(data.get("ok", false)):
+			say("Field tarp deployed: shared weather cover for 4 minutes.")
+		else:
+			say("Field tarp: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "pack_shelter":
+		if bool(data.get("ok", false)):
+			say("Field tarp packed; materials are not refunded.")
+		else:
+			say("Pack tarp: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "campfire":
 		if bool(data.get("ok", false)):
 			say("Campfire lit: shared warmth for 5 minutes.")
@@ -1266,6 +1456,9 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				"Bought" if data.get("buy", false) else "Sold",
 				int(data.get("quantity", 0)), str(data.get("item", "")),
 				int(data.get("silver_delta", 0))])
+			if int(data.get("regional_bonus", 0)) > 0:
+				say("Regional demand at %s: +%d silver per resource!" % [
+					str(data.get("settlement", "trader")), int(data["regional_bonus"])])
 		else:
 			var messages := {
 				"no_station": "Vendor: find a workbench (hub or village)",
@@ -1322,6 +1515,15 @@ func _process(_delta: float) -> void:
 	if client == null or not client.you.has("health"):
 		return
 	_refresh_vendor_price_labels()
+	if _caravan_status != null:
+		var job: Dictionary = client.you.get("caravan", {})
+		if job.is_empty():
+			_caravan_status.text = "No route. Take one at a village or fort merchant."
+		else:
+			_caravan_status.text = "Carry %dx %s to %s (X:%d, Z:%d) | %d silver" % [
+				int(job.get("quantity", 0)), str(job.get("cargo", "")),
+				str(job.get("destination", "")), roundi(float(job.get("dst_x", 0.0))),
+				roundi(float(job.get("dst_z", 0.0))), int(job.get("silver", 0))]
 	_bars["health"].value = client.you["health"]
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
@@ -1346,6 +1548,18 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	# An exact server-derived recovery timer (not inferred from visual FX).
+	for enemy in client.zombies.values():
+		if bool(enemy.get("raid_boss", false)):
+			var recovery: float = float(enemy.get("raid_exposed_seconds", 0.0))
+			if recovery > 0.0:
+				_info_label.text += "\nRAID BOSS EXPOSED: %.1fs (+15%% PvE damage)" % recovery
+			break
+	var parry_ready: float = float(client.you.get("parry_window", 0.0))
+	if parry_ready > 0.0:
+		_info_label.text += "\nPARRY ACTIVE %.2fs — face incoming infected!" % parry_ready
+	elif float(client.you.get("parry_cooldown", 0.0)) > 0.0:
+		_info_label.text += "\nPARRY: %.1fs cooldown (F8)" % float(client.you["parry_cooldown"])
 	var guild: Dictionary = client.you.get("guild", {})
 	if str(guild.get("id", "")) != "":
 		var nearby_mates := 0
@@ -1362,6 +1576,9 @@ func _process(_delta: float) -> void:
 	var rain_remaining: float = float(client.you.get("rain_cooldown", 0.0))
 	if rain_remaining > 0.0:
 		_info_label.text += "\nRAIN CATCHER: next harvest in %ds" % ceili(rain_remaining)
+	var spore_harvest_wait: float = float(client.you.get("spore_sample_cooldown", 0.0))
+	if spore_harvest_wait > 0.0:
+		_info_label.text += "\nSPORE SAMPLES: next in %ds" % ceili(spore_harvest_wait)
 	var spore_state: Dictionary = client.you.get("spore", {})
 	if bool(spore_state.get("active", false)):
 		_info_label.text += "\nSPORE SWAMP: +%.2f infection/s | Total protection %d%%" % [
@@ -1370,26 +1587,62 @@ func _process(_delta: float) -> void:
 	var spore_filter_left: float = float(client.you.get("spore_filter_seconds", 0.0))
 	if spore_filter_left > 0.0:
 		_info_label.text += "\nSPORE FILTER: %.0fs remaining (airborne spores only)" % spore_filter_left
+	var survey: Dictionary = client.you.get("ruin_survey", {})
+	if not survey.is_empty():
+		var destination := Vector2(float(survey["x"]), float(survey["z"]))
+		var from := Vector2(float(client.you.get("x", 0.0)), float(client.you.get("z", 0.0)))
+		_info_label.text += "\nRUIN CHART: X:%d Z:%d | %dm | %ds (F3)" % [
+			roundi(destination.x), roundi(destination.y),
+			roundi(from.distance_to(destination)), ceili(float(survey["remaining"]))]
+	var flash_wait: float = float(client.you.get("flash_cooldown", 0.0))
+	if flash_wait > 0.0:
+		_info_label.text += "\nFLASH CHARGE: ready in %ds" % ceili(flash_wait)
+	if bool(client.you.get("smoke_concealed", false)):
+		_info_label.text += "\nSMOKE: quiet sight cover, no PvP immunity"
+	var smoke_left: float = float(client.you.get("smoke_cooldown", 0.0))
+	if smoke_left > 0.0:
+		_info_label.text += "\nSMOKE: %ds recharge (F9)" % ceili(smoke_left)
+	var quiet_left: float = float(client.you.get("chain_wrap_seconds", 0.0))
+	if quiet_left > 0.0:
+		_info_label.text += "\nQUIET CHAIN: %.0fs | Bike noise 9m" % quiet_left
+	elif bool(client.you.get("mounted", false)):
+		_info_label.text += "\nBIKE NOISE: 27m while moving (infected can hear)"
+	var supported_kg: float = float(client.you.get("bike_cargo_kg", 0.0))
+	if supported_kg > 0.0:
+		_info_label.text += "\nBIKE PANNIERS: %.0f kg supported (on foot: full load)" % supported_kg
 	_info_label.text += "\nTRAIL BIKE: %s | F4 mount/dismount | remount %.0fs" % [
 		"RIDING" if bool(client.you.get("mounted", false)) else ("CARRIED" if client.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		float(client.you.get("mount_cooldown", 0.0))]
 	if bool(client.you.get("mounted", false)):
 		_info_label.text += "\nBIKE RATTLE: moving attracts infected within 27 m"
+		var bike_biome: String = client.world.biome_at(float(client.you.get("x", 0.0)),
+			float(client.you.get("z", 0.0)))
+		_info_label.text += "\nBIKE GROUND: %s | slope changes riding speed" % bike_biome.to_upper()
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
 		round(100.0 * float(client.you.get("weather_insulation", 0.0))))
+	if bool(client.you.get("tent_camouflaged", false)):
+		_info_label.text += "\nCANOPY CAMOUFLAGE: infected see 25% less; sound, scent and fire still reveal"
 	var visual: float = float(client.you.get("visual_signature", 1.0))
 	if bool(client.you.get("crouching", false)):
 		_info_label.text += "\nCROUCHED (Ctrl): slower, less visible to idle infected"
 	if visual < 0.999:
-		_info_label.text += "\nSTEALTH (STANCE / GEAR): infected visual range -%d%%" % [
+		_info_label.text += "\nSTEALTH (STANCE / GEAR / TARP): infected visual range -%d%%" % [
 			int(round(100.0 * (1.0 - visual)))]
 	_info_label.text += "\nCAMP RENOWN %s: %d / %d | NPC buy discount %d%%" % [
 		str(client.you.get("renown_rank", "Newcomer")),
 		int(client.you.get("renown", 0)), int(client.you.get("renown_next", 40)),
 		int(client.you.get("vendor_discount", 0))]
+	var regional_offer: Dictionary = client.you.get("regional_trade", {})
+	if not regional_offer.is_empty():
+		_info_label.text += "\nLOCAL TRADE: %s buys %s for +%d%% (raw resource sales)" % [
+			str(regional_offer["name"]), str(regional_offer["category"]).capitalize(),
+			int(regional_offer["premium_percent"])]
 	var mask_seconds: float = float(client.you.get("scent_mask_seconds", 0.0))
 	if mask_seconds > 0.0:
 		_info_label.text += "\nSCENT MASK: %.0fs remaining (vision and hearing unchanged)" % mask_seconds
+	var flare_time: float = float(client.you.get("flare_seconds", 0.0))
+	if flare_time > 0.0:
+		_info_label.text += "\nSIGNAL FLARE: %ds | night infected notice 28m" % ceili(flare_time)
 	var blood_range: float = float(client.you.get("blood_scent_radius", 0.0))
 	if blood_range > 0.0:
 		_info_label.text += "\nBLOOD SCENT: infected can sense the wound from %d m" % ceili(blood_range)
@@ -1401,7 +1654,9 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nWeather: %s %.0fC %s | Exposure %d/100 | Heat pack %ds" % [
 			str(weather.get("condition", "clear")).capitalize(),
 			float(weather.get("temperature_c", 0.0)),
-			"CAMPFIRE WARMTH" if bool(client.you.get("campfire_warm", false)) else ("SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED"),
+			"CAMPFIRE WARMTH" if bool(client.you.get("campfire_warm", false)) else (
+				"FIELD TARP (-75% WEATHER)" if bool(client.you.get("tent_sheltered", false)) else (
+				"SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED")),
 			int(client.you.get("exposure", 0.0)), int(ceil(float(client.you.get("warmth_seconds", 0.0))))
 		]
 	var storm_cover: float = float(client.you.get("weather_sight", 1.0))
@@ -1413,6 +1668,7 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nRETURN CHARM: channeling %ds — stand still" % ceili(return_seconds)
 	elif float(client.you.get("recall_cooldown", 0.0)) > 0.0:
 		_info_label.text += "\nRETURN CHARM cooldown: %ds" % ceili(float(client.you["recall_cooldown"]))
+	_info_label.text += "\nCARTOGRAPHY: %d landmarks mapped (J: island map)" % int(client.you.get("discovered_count", 0))
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	_contract_label.text += "\n" + str(client.you.get("daily_description", "Daily bounty pending server"))
@@ -1576,6 +1832,11 @@ func _refresh_party_controls() -> void:
 			var prefix: String = "[Leader] " if int(member["id"]) == int(state.get("leader", 0)) else ""
 			names.append("%s%s (%d HP)" % [prefix, str(member["name"]), int(member["health"])])
 		_party_status.text = "Party %d (%d/5): %s" % [group_id, roster.size(), ", ".join(names)]
+	var focus_state: Dictionary = state.get("focus", {})
+	if not focus_state.is_empty():
+		_party_status.text += "\nFocus infected #%d: %ds remaining (+8%% PvE damage)" % [
+			int(focus_state.get("target", -1)),
+			int(ceil(float(focus_state.get("remaining", 0.0))))]
 	var ready_state: Dictionary = state.get("ready_check", {})
 	if not ready_state.is_empty():
 		var votes: PackedStringArray = []

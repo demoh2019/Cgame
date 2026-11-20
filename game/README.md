@@ -2628,6 +2628,47 @@ Godot's existing RPC, timer and UI APIs are sufficient. No engine patch is
 needed for this feature.
 
 
+## Ruin survey charts — crafted cartography for hostile expeditions
+
+The canonical `game/` includes **Ruin Survey Charts**, a field-crafted
+consumable made from **1 T1 cloth, 2 T1 fiber, and 1 scrap**.
+Use a chart while alive, on foot, in the wilderness to discover the
+**nearest still-unlooted red/black-zone ruin crate within 190 metres**.
+The server searches only a bounded 7×7 neighborhood of actual
+seed-generated world chunks and checks authoritative opened-crate
+state. A successful search consumes **one real chart** and places a
+**private 75-second waypoint**. Failed searches (no chart, safe
+settlement, no eligible ruin, or an active waypoint) cost nothing.
+
+The chart is **not a teleport, loot grant, threat detector, shared party
+map or an automatic reward**: players must travel, survive the infected,
+and actually open the found crate under the usual scavenging/loot
+rules. Loot quality, rewards, PvP exposure and crate cooldowns are
+unchanged. Repeated survey requests cannot farm charts or markers.
+The waypoint disappears on expiration, crate opening or survivor
+death. It is session-only, does not enter character saves and is never
+replicated into other survivors' `you` snapshots—even if they stand
+beside the chart owner. Owner packets expose only the marker
+coordinates, zone and remaining time; internal crate IDs and
+absolute expiry clocks stay server-only.
+
+**Controls:** F3 surveys in both local preview and connected play,
+with a dedicated **Survey dangerous ruins** button in the online
+inventory. The online HUD shows waypoint coordinates, distance and
+remaining lifetime. The tactical radar renders a violet destination
+pin within 72 m or a violet edge arrow for distant targets, using
+the owner-only marker in both single-player and multiplayer.
+
+Implementation: `scripts/shared/ruin_survey.gd`, `defs.gd`,
+`scripts/server/game_server.gd`, authenticated
+`scripts/shared/net.gd`, both clients, HUD and radar.
+`game/tests/test_ruin_survey.gd` is registered in
+`tests/run_all.gd` for crafting cost, deterministic real crate
+discovery, open-crate filtering, privacy, anti-replay, death and expiry.
+Existing Godot world generation, RPC and UI APIs are sufficient;
+no C++ engine changes are required for this mechanic.
+
+
 ## Expedition triage packs — item-paid group field medicine
 
 A survivor group can now craft an **Expedition Triage Pack** at the
@@ -2668,3 +2709,85 @@ godot --headless --path game --script res://tests/run_all.gd
 
 Existing Cgame scripting, networking and UI APIs cover the mechanic;
 no native engine extension was required.
+
+
+## Tactical party focus: targeted infected coordination
+
+The multiplayer party panel includes **Focus infected**. A living party
+leader marks the **nearest living infected within 24 metres horizontally
+and 4 metres vertically**, for **18 seconds**. The dedicated server
+selects the target from its actual enemy state: the client cannot
+submit an infected ID, position, expiry or damage amount.
+
+- Current teammates see the target ID and remaining duration in their
+  private party snapshots. Unrelated survivors never receive the marker.
+- Party members within 24 metres and 4 metres vertically of the **exact
+  marked infected** deal **8% additional damage to that infected only**.
+  Enemy kills and mastery still use existing server-owned combat rules.
+  Players, other infected, distant party members, solo survivors and
+  expired marks receive **no damage increase**.
+- A new focus has a **28-second leader cooldown**. No nearby living
+  infected means no new focus or cooldown. An active focus cannot
+  be replaced until it expires.
+- The mark is removed when the infected is killed, when its timer expires,
+  the leader dies, or the party gains/loses a member. Cooldown remains
+  intact after early removal, preventing boss focus spam.
+
+Implementation: `scripts/shared/party_focus.gd`,
+`scripts/shared/party.gd`, `scripts/server/game_server.gd`,
+`scripts/shared/net.gd`, `scripts/client/game_client.gd` and
+`scripts/client/hud.gd`. Offline local preview cannot form a party;
+this is a multiplayer combat coordination feature.
+
+`tests/test_party_focus.gd` is registered in the headless suite and
+covers leadership, temporal expiry, membership changes, server target
+selection, private snapshots, range checks, and actual marked/unmarked
+damage. Run:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+Existing Godot/Cgame RPCs, RefCounted scripts and HUD widgets suffice;
+no native engine modifications were required.
+
+
+## Raid warlord armor recovery — tactical counterattack after a slam
+
+The existing party raid boss now has a short, fully server-authoritative
+**armor-exposure window after its telegraphed ground slam resolves**.
+This connects the warning-and-dodge survival loop to a cooperative MMO
+counterattack phase without introducing any client-powered ability.
+
+- In the first phase, the living boss is exposed for **4 seconds** after
+  the actual area attack resolves. Once enraged, exposure lasts only
+  **2.5 seconds**. These are not pauses or stuns: the boss can still
+  fight back, and avoiding the circle remains necessary.
+- During that window, real server-confirmed player hits against the
+  **one currently active raid boss** deal **15% more PvE damage**.
+  Ordinary infected, unrelated bosses, player-versus-player damage,
+  hits before the slam and attacks after expiry gain nothing.
+  Existing party focus is checked independently; all real damage still
+  passes through the normal combat, threat, XP and loot pipeline.
+- The server resets the temporary exposure on boss death, retreat,
+  missing boss cleanup and the next spawn. It is **session-only** and
+  cannot be restored by save files, requested by an RPC or fabricated
+  from client-supplied timestamps.
+- Nearby clients see the precise remaining time in the boss snapshot
+  as `raid_exposed_seconds`. The online HUD announces the counterattack
+  after the existing `raid_slam` event and shows a short exposure
+  countdown. The event remains interest-radius filtered: distant
+  players do not receive the raid location.
+
+Implementation: `scripts/shared/raid_recovery.gd`,
+`scripts/server/game_server.gd`, `scripts/client/hud.gd`.
+The new `tests/test_raid_recovery.gd` suite is registered in
+`tests/run_all.gd` and covers phase durations, telegraphs, combat,
+dead/normal infected, snapshot privacy, expiration, and death cleanup.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+Existing Godot gameplay scripting and networking already support
+this feature; no native engine patches were necessary.

@@ -411,6 +411,13 @@ func c_craft(recipe: String, times: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_survey_ruins() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "survey_ruins", sim.cmd_survey_ruins(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_salvage_gear(item_id: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -430,6 +437,13 @@ func c_place_infected_snare(x: float, z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "infected_snare", sim.cmd_place_infected_snare(peer, x, z))
+
+
+@rpc("any_peer", "reliable")
+func c_throw_flash(direction_x: float, direction_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "throw_flash", sim.cmd_throw_flash(peer, direction_x, direction_z))
 
 
 @rpc("any_peer", "reliable")
@@ -517,6 +531,13 @@ func c_outpost_supplies(site_id: int) -> void:
 	if _allowed(peer):
 		s_result.rpc_id(peer, "outpost_supplies",
 			sim.cmd_outpost_supplies(peer, site_id))
+
+
+@rpc("any_peer", "reliable")
+func c_caravan(action: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "caravan", sim.cmd_caravan(peer, str(action)))
 
 
 @rpc("any_peer", "reliable")
@@ -610,6 +631,13 @@ func c_party_standard() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "party_standard", sim.cmd_party_standard(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_party_focus() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_focus", sim.cmd_party_focus(peer))
 
 
 @rpc("any_peer", "reliable")
@@ -781,6 +809,13 @@ func c_skill(dir_x: float, dir_z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_parry() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "parry", sim.cmd_parry(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_dodge(dir_x: float, dir_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -799,6 +834,13 @@ func c_refill_canteen() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "refill_canteen", sim.cmd_refill_canteen(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_sample_spores() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "sample_spores", sim.cmd_sample_spores(peer))
 
 
 @rpc("any_peer", "reliable")
@@ -910,7 +952,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
+		"site_discovered", "recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "barricade_shot", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "parried", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
 		"party_aid", "party_triage":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
@@ -918,6 +960,11 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"guardian_taunt":
 			return _is_nearby(event, peer)
+		"outpost_watch":
+			# Private outpost distress signal: no remote enemy or third-party feed.
+			return sim != null and sim.territory.watch_recipient(peer,
+				int(event.get("id", -1)), int(event.get("owner", 0)),
+				sim.players, sim.parties, sim.time)
 		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_provisioned", "outpost_breached", \
 				"siege_contract_declared", "siege_contract_result":
 			return _is_nearby(event, peer)
