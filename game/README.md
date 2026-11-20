@@ -2889,3 +2889,57 @@ godot --headless --path game --script res://tests/run_all.gd
 
 The current Godot networking, inventory and UI APIs support the
 mechanic without changes to the native engine.
+
+
+## Raid trophy Need/Greed voting
+
+The multiplayer party leader can cycle the future raid loot mode through
+**Free → Round robin → Need/Greed**, without changing rewards that have
+already dropped. Free remains the default for old solo and group gameplay.
+
+For a raid boss killed by a party with at least **two actual combat
+contributors**, Need/Greed opens a **25-second private ballot** for the
+`infected_core` trophy stack in the **one existing shared reward bag**.
+Other drops (silver, metal bars, bandages) remain collectable immediately
+by the same eligible raid contributors.
+
+- Eligible survivors who took part in the boss fight each choose
+  **Need**, **Greed** or **Pass** once. Votes cannot be changed or replayed.
+  The server validates the authenticated sender, their account/session
+  identity, live position within 28 m, participation frozen at the
+  boss kill, the bag ID, the deadline and the selected action.
+- **Need** rolls win over all **Greed** rolls, even with a lower die
+  value. Within the winning category, the server chooses the highest
+  deterministic **d100** roll, with a stable identity tiebreaker.
+  Unsubmitted votes become Pass after 25 seconds; all completed votes
+  end the election immediately.
+- The winner gets the exclusive right to pick up the **original
+  Infected Core stack** before the normal 75-second raid entitlement
+  expires. The winner does not receive an item remotely; they must
+  reach the original bag and have sufficient backpack space.
+  If everyone passes, eligible contributors can claim the cores under
+  the existing raid reservation rules.
+- The server never makes extra bags, personal copies, or new items.
+  Only a normal successful pickup decrements the original bag inventory.
+  The legacy 75-second reservation still protects the bag from
+  outsiders; after it expires, all leftovers become public.
+- Network snapshots show a player only their own choice, total votes,
+  remaining duration, vote status, and whether **they** won.
+  Account/session tokens, full ballots and other players' rolls
+  remain server-only. Nearby eligible players see three vote buttons
+  and their result in the group/inventory panel.
+
+Implementation: `scripts/shared/raid_need_greed.gd`,
+`scripts/shared/party.gd`, `scripts/server/game_server.gd`,
+`scripts/shared/net.gd`, `scripts/client/game_client.gd`,
+`scripts/client/hud.gd`. New
+`tests/test_raid_need_greed.gd` covers authorization, Need > Greed,
+replay safety, private snapshots, bag-item conservation, mode freezing,
+all-pass release, deadline expiry and the existing free pickup mode.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+This feature uses the project's current Godot scripts, RPCs and
+inventory implementation; no native engine modifications are necessary.
