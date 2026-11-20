@@ -92,10 +92,10 @@ private:
 	Node *_get_parent_for_chunks() const;
 	void _forget_dead_chunks();
 	void _update_streaming();
-	void _poll_loading();
+	void _poll_loading(int &r_instantiation_budget);
 	bool _finalize_chunk(const Vector3i &p_cell, const String &p_path);
 	bool _adopt_chunk(const Vector3i &p_cell, Node *p_chunk);
-	void _run_generator_queue();
+	void _run_generator_queue(int &r_instantiation_budget);
 	void _unload_cell(const Vector3i &p_cell);
 	void _reset_state();
 
@@ -151,6 +151,9 @@ public:
 	TypedArray<Vector3i> get_loaded_cells() const;
 	int get_loaded_count() const { return int(loaded.size()); }
 	int get_pending_count() const { return int(loading.size()); }
+	// Procedural cells queue separately from threaded scene loads.
+	// Expose their backlog for streaming telemetry and adaptive game scheduling.
+	int get_queued_generation_count() const { return int(generate_queue.size()); }
 
 	// Re-evaluates immediately instead of waiting for the update interval. With `p_retry`, cells
 	// that were missing or failed are tried again.
