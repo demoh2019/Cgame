@@ -68,19 +68,19 @@ static func profile(value: int) -> Dictionary:
 		0:
 			return {"shadows": false, "shadow_distance": 45.0, "msaa": Viewport.MSAA_DISABLED, "anisotropy": Viewport.ANISOTROPY_2X,
 				"blur_quality": 0, "blur_radius": 0.0, "glow": false, "ssao": false, "ssil": false, "sdfgi": false, "cloud_shadows": false,
-				"scale": 0.59, "grass_radius": 66.0, "grass_budget": 1500, "grass_fade_start": 25.0, "grass_fade_end": 40.0, "terrain_detail_radius": 24.0, "terrain_pixel_error": 6.0, "ground_contact_strength": 0.0, "curvature_strength": 0.0, "puddle_ripple_strength": 0.0, "mesh_lod_threshold": 4.0, "terrain_layer_budget": 2, "terrain_warp_strength": 0.0, "terrain_height_blend": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "micro_occlusion": 0.0, "normal_variance_strength": 0.0, "wet_clearcoat": 0.0, "sharpen_strength": 0.0, "deband_strength": 0.0}
+				"scale": 0.59, "grass_radius": 66.0, "grass_budget": 1500, "grass_fade_start": 25.0, "grass_fade_end": 40.0, "terrain_detail_radius": 24.0, "horizon_ao_strength": 0.0, "terrain_pixel_error": 6.0, "ground_contact_strength": 0.0, "curvature_strength": 0.0, "puddle_ripple_strength": 0.0, "mesh_lod_threshold": 4.0, "terrain_layer_budget": 2, "terrain_warp_strength": 0.0, "terrain_height_blend": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "micro_occlusion": 0.0, "normal_variance_strength": 0.0, "wet_clearcoat": 0.0, "sharpen_strength": 0.0, "deband_strength": 0.0}
 		1:
 			return {"shadows": true, "shadow_distance": 70.0, "msaa": Viewport.MSAA_DISABLED, "anisotropy": Viewport.ANISOTROPY_4X,
 				"blur_quality": 1, "blur_radius": 1.6, "glow": false, "ssao": false, "ssil": false, "sdfgi": false, "cloud_shadows": true,
-				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "terrain_pixel_error": 3.5, "ground_contact_strength": 0.28, "curvature_strength": 0.30, "puddle_ripple_strength": 0.22, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3, "terrain_warp_strength": 0.0, "terrain_height_blend": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "micro_occlusion": 0.0, "normal_variance_strength": 0.0, "wet_clearcoat": 0.0, "sharpen_strength": 0.0, "deband_strength": 0.0}
+				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0, "horizon_ao_strength": 0.0, "terrain_pixel_error": 3.5, "ground_contact_strength": 0.28, "curvature_strength": 0.30, "puddle_ripple_strength": 0.22, "mesh_lod_threshold": 2.0, "terrain_layer_budget": 3, "terrain_warp_strength": 0.0, "terrain_height_blend": 0.0, "cliff_normal_quality": 0.0, "specular_aa_strength": 0.0, "micro_occlusion": 0.0, "normal_variance_strength": 0.0, "wet_clearcoat": 0.0, "sharpen_strength": 0.0, "deband_strength": 0.0}
 		2:
 			return {"shadows": true, "shadow_distance": 110.0, "msaa": Viewport.MSAA_2X, "anisotropy": Viewport.ANISOTROPY_8X,
 				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": true, "ssil": false, "sdfgi": false, "cloud_shadows": true,
-				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0, "terrain_detail_radius": 68.0, "terrain_pixel_error": 1.8, "ground_contact_strength": 0.48, "curvature_strength": 0.70, "puddle_ripple_strength": 0.65, "mesh_lod_threshold": 1.0, "terrain_layer_budget": 4, "terrain_warp_strength": 0.24, "terrain_height_blend": 0.48, "cliff_normal_quality": 0.7, "specular_aa_strength": 0.18, "micro_occlusion": 0.55, "normal_variance_strength": 0.55, "wet_clearcoat": 0.45, "sharpen_strength": 0.14, "deband_strength": 0.8}
+				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0, "terrain_detail_radius": 68.0, "horizon_ao_strength": 0.50, "terrain_pixel_error": 1.8, "ground_contact_strength": 0.48, "curvature_strength": 0.70, "puddle_ripple_strength": 0.65, "mesh_lod_threshold": 1.0, "terrain_layer_budget": 4, "terrain_warp_strength": 0.24, "terrain_height_blend": 0.48, "cliff_normal_quality": 0.7, "specular_aa_strength": 0.18, "micro_occlusion": 0.55, "normal_variance_strength": 0.55, "wet_clearcoat": 0.45, "sharpen_strength": 0.14, "deband_strength": 0.8}
 		_:
 			return {"shadows": true, "shadow_distance": 140.0, "msaa": Viewport.MSAA_4X, "anisotropy": Viewport.ANISOTROPY_16X,
 				"blur_quality": 2, "blur_radius": 3.0, "glow": true, "ssao": true, "ssil": false, "sdfgi": true, "cloud_shadows": true,
-				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0, "terrain_detail_radius": 96.0, "terrain_pixel_error": 0.9, "ground_contact_strength": 0.7, "curvature_strength": 1.0, "puddle_ripple_strength": 1.0, "mesh_lod_threshold": 0.75, "terrain_layer_budget": 13, "terrain_warp_strength": 0.42, "terrain_height_blend": 0.85, "cliff_normal_quality": 1.0, "specular_aa_strength": 0.30, "micro_occlusion": 0.85, "normal_variance_strength": 0.95, "wet_clearcoat": 0.65, "sharpen_strength": 0.22, "deband_strength": 1.0}
+				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0, "terrain_detail_radius": 96.0, "horizon_ao_strength": 0.80, "terrain_pixel_error": 0.9, "ground_contact_strength": 0.7, "curvature_strength": 1.0, "puddle_ripple_strength": 1.0, "mesh_lod_threshold": 0.75, "terrain_layer_budget": 13, "terrain_warp_strength": 0.42, "terrain_height_blend": 0.85, "cliff_normal_quality": 1.0, "specular_aa_strength": 0.30, "micro_occlusion": 0.85, "normal_variance_strength": 0.95, "wet_clearcoat": 0.65, "sharpen_strength": 0.22, "deband_strength": 1.0}
 
 
 ## Limit expensive SDFGI occlusion to Ultra dungeon spaces. Online scene
@@ -117,6 +117,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	RenderingServer.global_shader_parameter_set(&"aa_ground_contact_strength", float(p["ground_contact_strength"]))
 	RenderingServer.global_shader_parameter_set(&"aa_terrain_curvature_strength",
 		float(p["curvature_strength"]))
+	# Native CPU sky visibility reuses terrain vertex blue; no fragment samples.
+	RenderingServer.global_shader_parameter_set(&"aa_terrain_horizon_ao_strength",
+		float(p["horizon_ao_strength"]))
 	# HDRP-style normal-map micro-shadows: reuse existing sampled terrain
 	# normals, preserve SSAO lighting, no new textures or GPU passes.
 	RenderingServer.global_shader_parameter_set(&"aa_terrain_micro_occlusion",
@@ -266,12 +269,14 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# maps are kept in place when a preset is switched.
 	ChunkView.configure_terrain_filter(_level)
 	ChunkView.configure_terrain_geomorph(_level)
+	ChunkView.configure_terrain_horizon(_level)
 	ChunkView.configure_terrain_screen_lod(_level)
 	ChunkView.configure_terrain_pixel_error(float(p["terrain_pixel_error"]))
 	ChunkView.configure_terrain_error_lod(_level)
 	if viewport != null:
 		for lod_terrain in viewport.get_tree().get_nodes_in_group(ChunkView.TERRAIN_LOD_GROUP):
 			ChunkView.apply_terrain_geomorph(lod_terrain)
+			ChunkView.apply_terrain_horizon(lod_terrain)
 			ChunkView.apply_terrain_screen_lod(lod_terrain)
 			ChunkView.apply_terrain_pixel_error(lod_terrain)
 			ChunkView.apply_terrain_error_lod(lod_terrain)
