@@ -163,3 +163,14 @@ func _update_native(player: Vector3, want: int) -> void:
 	# Leaving (night/storm): the home climbs away so the flock flies off before hiding.
 	_native.set("home_offset", Vector3(0, 40, 0) if want == 0 else Vector3.ZERO)
 	_native.global_position = player + Vector3(0, ALTITUDE, 0)
+
+
+## Loud event nearby (explosion, lightning, gunfire): the flock bursts apart and climbs.
+func startle(point: Vector3) -> void:
+	if _native != null and _native.has_method("scatter_from"):
+		_native.call("scatter_from", point + Vector3(0, ALTITUDE, 0), 14.0, 40.0)
+		return
+	for i in _active:
+		var away: Vector3 = (_home + _pos[i]) - point
+		away.y = absf(away.y) + 6.0
+		_vel[i] += away.normalized() * 10.0

@@ -879,6 +879,8 @@ func _spawn_effects(event: Dictionary) -> void:
 	camera_fx.on_event(event, client.peer_id, at.distance_to(here))
 	if _damage_numbers != null:
 		_damage_numbers.on_event(event, at, client.peer_id)
+	if _ambient_birds != null and str(event.get("type", "")) in ["flash_thrown", "barricade_broken", "lightning_struck", "ember_thrown"]:
+		_ambient_birds.startle(at) # RDR2-style: loud events flush the birds overhead.
 	if _blood_decals != null and str(event.get("type", "")) == "lightning_struck" \
 			and BloodDecals.enabled(GraphicsQuality.level(), str(RenderingServer.get_current_rendering_method())):
 		_blood_decals.scorch(client.world, float(event.get("x", 0.0)), float(event.get("z", 0.0)), float(event.get("radius", 3.0)))
