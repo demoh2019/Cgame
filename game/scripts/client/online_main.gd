@@ -7,6 +7,7 @@ const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
+const MoonVisuals = preload("res://scripts/client/moon_visuals.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Net = preload("res://scripts/shared/net.gd")
@@ -1213,7 +1214,7 @@ func _update_time_of_day(delta: float) -> void:
 		environment.ambient_light_color = Color(0.45, 0.4, 0.34)
 		storming = false
 	else:
-		atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta, _visual_weather_wind, _visual_biome)
+		atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta, _visual_weather_wind, _visual_biome, MoonVisuals.phase_at(clock))
 	# Time-of-day and storm grading shares the existing full-screen post material.
 	# Uniform updates are bounded and do not allocate GPU textures or new passes.
 	_grade_elapsed += maxf(delta, 0.0)

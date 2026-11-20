@@ -7,6 +7,7 @@ const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
 const SunShadowQuality = preload("res://scripts/client/sun_shadow_quality.gd")
 const BiomeAtmosphere = preload("res://scripts/client/biome_atmosphere.gd")
 const SunShadowAtmosphere = preload("res://scripts/client/sun_shadow_atmosphere.gd")
+const MoonVisuals = preload("res://scripts/client/moon_visuals.gd")
 const LightningFlash = preload("res://scripts/client/graphics_lightning_flash.gd")
 const GraphicsEyeAdaptation = preload("res://scripts/client/graphics_eye_adaptation.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
@@ -121,7 +122,7 @@ func _ready() -> void:
 
 ## `daylight` 0..1 (0 night), `sun_height` -1..1, `phase` 0..1 around the day, `storming` whether it is stormy here.
 func update(daylight: float, sun_height: float, phase: float, storming: bool, delta: float,
-		wind: Vector2 = Vector2.ZERO, biome: String = "plains") -> void:
+		wind: Vector2 = Vector2.ZERO, biome: String = "plains", moon_phase: float = 0.5) -> void:
 	light_level = daylight
 	_last_sun_height = sun_height
 	storm = move_toward(storm, 1.0 if storming else 0.0, delta * 0.25)
@@ -161,6 +162,8 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		sun.light_color = Color(0.55, 0.66, 1.0)
 		sun.rotation = Vector3(-deg_to_rad(lerpf(8.0, 50.0, clampf(-sun_height, 0.0, 1.0))), deg_to_rad(215.0 + phase * 90.0), 0.0)
 		sun.light_energy = lerpf(0.12, 0.5, clampf(-sun_height * 2.0, 0.0, 1.0)) * (1.0 - storm * 0.6)
+		# Vary visual moonlight gently; keep the shared night ambient readable.
+		sun.light_energy *= MoonVisuals.directional_fill(moon_phase)
 		sun.shadow_enabled = _shadows_allowed
 	else:
 		sun.light_color = warm
@@ -182,6 +185,7 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		sky_material.set_shader_parameter("dusk", dusk)
 		sky_material.set_shader_parameter("storm", storm)
 		sky_material.set_shader_parameter("sky_time", _sky_seconds)
+		sky_material.set_shader_parameter("moon_phase", moon_phase)
 		# The sky panorama and sunlit terrain clouds follow the same wind.
 		# Each wrapped 1024 m axis equals a full repeat of the panorama U.
 		sky_material.set_shader_parameter("cloud_wind_rotation",
@@ -246,6 +250,9 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	# Sky haze is cached with the radiance map; no per-frame shader updates.
 	sky_material.set_shader_parameter("aerosol_scattering_strength",
 		clampf(float(settings.get("sky_scattering_strength", 0.0)), 0.0, 1.0))
+	# Tiny lunar surface shading only for the high-end graphics profiles.
+	sky_material.set_shader_parameter("moon_detail_strength",
+		clampf(float(settings.get("moon_detail_strength", 0.0)), 0.0, 1.0))
 	# Optional cloud layer is completely skipped on Performance. Ultra uses
 	# two filtered LUT taps; others use at most one, at sky refresh cadence.
 	sky_material.set_shader_parameter("cirrus_detail",
