@@ -33,6 +33,8 @@
 
 #include "core/config/engine.h"
 #include "core/object/class_db.h"
+#include "core/templates/hash_set.h"
+#include "core/templates/sort_array.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/3d/node_3d.h"
 #include "scene/3d/skeleton_modifier_3d.h"
@@ -52,6 +54,40 @@ int AnimationLODController::update_interval(real_t p_distance, bool p_visible, r
 		return 4;
 	}
 	return 0;
+}
+
+Vector<int> AnimationLODController::select_nearest_priority_indices(const Vector<real_t> &p_distances, int p_budget) {
+	struct Candidate {
+		real_t distance;
+		int index;
+		bool operator<(const Candidate &p_other) const {
+			if (distance != p_other.distance) {
+				return distance < p_other.distance;
+			}
+			return index < p_other.index; // Stable when actors are equally far.
+		}
+	};
+	Vector<int> result;
+	if (p_budget <= 0) {
+		return result;
+	}
+	LocalVector<Candidate> ordered;
+	for (int i = 0; i < p_distances.size(); i++) {
+		const real_t distance = p_distances[i];
+		if (Math::is_finite(distance) && distance >= real_t(0.0)) {
+			ordered.push_back({ distance, i });
+		}
+	}
+	if (ordered.size() > 1) {
+		SortArray<Candidate> sorter;
+		sorter.sort(ordered.ptr(), ordered.size());
+	}
+	const int count = MIN(p_budget, int(ordered.size()));
+	result.resize(count);
+	for (int i = 0; i < count; i++) {
+		result.write[i] = ordered[i].index;
+	}
+	return result;
 }
 
 void AnimationLODController::_restore_entry(Entry &r_entry) {
@@ -105,9 +141,50 @@ void AnimationLODController::_update(double p_delta) {
 		}
 	}
 
-	// Full-rate priority only applies to a bounded number of visible combatants.
-	// Simulation, hit detection and network authority are unaffected.
-	int urgent_slots = max_priority_mixers;
+	// Full-rate priority is reserved for the NEAREST visible critical threats,
+	// not whichever actor happened to register first after world streaming.
+	// Only marked mixers are considered here; crowd animation and server AI
+	// continue under their existing update budgets.
+	Vector<real_t> priority_distances;
+	Vector<ObjectID> priority_ids;
+	if (max_priority_mixers > 0) {
+		for (int i = 0; i < entries.size(); i++) {
+			const Entry &candidate = entries[i];
+			if (!candidate.high_priority) {
+				continue;
+			}
+			AnimationMixer *mixer = ObjectDB::get_instance<AnimationMixer>(candidate.mixer_id);
+			if (!mixer || !mixer->is_inside_tree() || !mixer->is_active()) {
+				continue;
+			}
+			Node3D *spatial = nullptr;
+			for (Node *n = mixer->get_parent(); n && !spatial; n = n->get_parent()) {
+				spatial = Object::cast_to<Node3D>(n);
+			}
+			real_t distance = 0.0;
+			bool visible = true;
+			if (spatial) {
+				const Vector3 pos = spatial->get_global_transform().origin;
+				visible = spatial->is_visible_in_tree();
+				if (camera) {
+					distance = camera_pos.distance_to(pos);
+					if (visible && cull_offscreen && distance > 3.0 &&
+							!camera->is_position_in_frustum(pos + Vector3(0, 1, 0))) {
+						visible = false;
+					}
+				}
+			}
+			if (update_interval(distance, visible, near_distance, mid_distance, far_distance) > 1) {
+				priority_distances.push_back(distance);
+				priority_ids.push_back(candidate.mixer_id);
+			}
+		}
+	}
+	HashSet<ObjectID> urgent_selected;
+	const Vector<int> selected = select_nearest_priority_indices(priority_distances, max_priority_mixers);
+	for (int i = 0; i < selected.size(); i++) {
+		urgent_selected.insert(priority_ids[selected[i]]);
+	}
 	for (int i = 0; i < entries.size();) {
 		Entry &entry = entries.write[i];
 		AnimationMixer *mixer = ObjectDB::get_instance<AnimationMixer>(entry.mixer_id);
@@ -144,10 +221,8 @@ void AnimationLODController::_update(double p_delta) {
 		// Raid and elite attack tells stay smooth even if distant crowd motion
 		// runs at half/quarter rate. Never animate invisible/far-away actors,
 		// and never exceed the per-frame priority budget.
-		const bool urgent = entry.high_priority && base_interval > 1 && urgent_slots > 0 && mixer->is_active();
-		if (urgent) {
-			urgent_slots--;
-		}
+		const bool urgent = entry.high_priority && base_interval > 1 &&
+				urgent_selected.has(entry.mixer_id) && mixer->is_active();
 		const bool want_modifier_cull = modifier_cull_distance > 0.0 &&
 				(!visible || (!urgent && distance > modifier_cull_distance));
 		if (entry.manage_modifiers) {
