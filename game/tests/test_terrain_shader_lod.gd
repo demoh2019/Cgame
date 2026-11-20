@@ -51,3 +51,33 @@ func run(t) -> void:
 	if controller != null:
 		t.check(controller.source_code.contains('global_shader_parameter_set(&"aa_terrain_detail_radius"'), "graphics preset changes update the terrain GPU global")
 		t.check(controller.source_code.contains('global_shader_parameter_set(&"aa_terrain_layer_budget"'), "quality switch applies the texture layer budget")
+
+	t.current = "paved terrain shader noise budget"
+	var ground: Shader = load("res://assets/shaders/ground.gdshader") as Shader
+	t.check(ground != null, "terrain shader with site optimization loads")
+	if ground != null:
+		var source: String = ground.code
+		t.check(source.contains("float reclaiming_moss = -1.0;"),
+			"overlapping paved sites share one moss-noise calculation")
+		t.check(source.contains("outer_radius = patch.z * 1.175"),
+			"outer conservative bound accounts for the maximum procedural edge deformation")
+		t.check(source.contains("dot(offset, offset) >= outer_radius * outer_radius"),
+			"off-site fragments reject patches before evaluating square root or noise")
+		t.check(source.contains("if (paved <= 0.0)"),
+			"site noise is skipped when distorted paving has zero influence")
+		t.check(source.contains("fbm(p * 0.11 + 5.0)"),
+			"site moss detail and the authored noise frequencies are preserved")
+		t.check(source.contains("w[int(patch.w)] += paved"),
+			"site layer weights still contribute to 13-layer landscape blending")
+	# fbm(p) is bounded by 0.5 + 0.25 + 0.125; its largest
+	# possible inward displacement is -0.5 * 0.35 = -0.175.
+	for moss_mid in [0.0, 0.1, 0.42, 0.6, 0.875]:
+		var d: float = 1.175
+		var old_paved: float = 1.0 - smoothstep(
+			0.7, 1.0, d + (moss_mid - 0.5) * 0.35)
+		t.near(old_paved, 0.0, 0.000001,
+			"conservative 1.175-radius cutoff never discards nonzero paving")
+	for radius in [1.0, 3.5, 18.0, 40.0]:
+		var border: float = radius * 1.175
+		t.check(border > radius and border / radius <= 1.175001,
+			"outer paving bound remains proportional for every valid site radius")
