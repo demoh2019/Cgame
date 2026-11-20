@@ -182,3 +182,8 @@ aa_terrain_micro_occlusion={
 "type": "float",
 "value": 0.0
 }
+
+aa_terrain_curvature_strength={
+"type": "float",
+"value": 0.0
+}
