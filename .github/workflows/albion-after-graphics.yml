@@ -8,6 +8,9 @@ on:
       - 'game/assets/shaders/**'
       - 'game/tests/**'
       - 'game/project.godot'
+      - 'servers/rendering/renderer_rd/shaders/effects/ssao_blur.glsl'
+      - 'servers/rendering/renderer_rd/shaders/effects/ssil_blur.glsl'
+      - 'tests/servers/rendering/test_ao_blur_bounds.py'
       - 'servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_resolve.glsl'
       - 'tests/servers/rendering/test_ssr_half_resolve.py'
       - '.github/workflows/albion-after-graphics.yml'
@@ -17,6 +20,9 @@ on:
       - 'game/assets/shaders/**'
       - 'game/tests/**'
       - 'game/project.godot'
+      - 'servers/rendering/renderer_rd/shaders/effects/ssao_blur.glsl'
+      - 'servers/rendering/renderer_rd/shaders/effects/ssil_blur.glsl'
+      - 'tests/servers/rendering/test_ao_blur_bounds.py'
       - 'servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_resolve.glsl'
       - 'tests/servers/rendering/test_ssr_half_resolve.py'
       - '.github/workflows/albion-after-graphics.yml'
@@ -48,6 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest tests/servers/rendering/test_ssr_half_resolve.py -v 2>&1 | tee ssr-engine-tests.log
+          python3 -m unittest tests/servers/rendering/test_ao_blur_bounds.py -v 2>&1 | tee ao-engine-tests.log
 
       - name: Install verified official Godot 4.7.2 editor
         shell: bash
@@ -85,3 +92,4 @@ jobs:
             graphics-import.log
             graphics-tests.log
             ssr-engine-tests.log
+            ao-engine-tests.log

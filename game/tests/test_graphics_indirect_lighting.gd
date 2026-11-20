@@ -2,9 +2,57 @@ extends RefCounted
 ## Renderer-aware SSAO and indirect lighting budgets with actual Godot resources.
 const Indirect = preload("res://scripts/client/graphics_indirect_lighting.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const Occlusion = preload("res://scripts/client/graphics_occlusion_quality.gd")
 
 
 func run(t) -> void:
+	t.current = "native screen-space AO quality and GPU filtering cost"
+	var p0: Dictionary = Occlusion.settings(0, "forward_plus")
+	var p2: Dictionary = Occlusion.settings(2, "forward_plus")
+	var p3: Dictionary = Occlusion.settings(3, "forward_plus")
+	t.eq(int(p0["quality"]), RenderingServer.ENV_SSAO_QUALITY_VERY_LOW,
+		"low end never schedules high quality AO gathering")
+	t.eq(int(p2["quality"]), RenderingServer.ENV_SSAO_QUALITY_MEDIUM,
+		"High keeps bounded medium native AO quality")
+	t.eq(int(p3["quality"]), RenderingServer.ENV_SSAO_QUALITY_HIGH,
+		"Ultra improves contact darkening around complex silhouettes")
+	t.check(bool(p3["half_size"]) and bool(p2["half_size"]),
+		"High/Ultra keep the native half resolution AO target")
+	t.eq(int(p3["blur_passes"]), 2,
+		"Ultra preserves existing blur passes, avoiding extra GPU dispatch")
+	for method in ["mobile", "gl_compatibility", ""]:
+		for tier in 4:
+			t.eq(int(Occlusion.settings(tier, method)["quality"]),
+				RenderingServer.ENV_SSAO_QUALITY_VERY_LOW,
+				"unsupported renderer cannot enable the premium screen-space AO quality")
+	t.eq(Occlusion.settings(-42, "forward_plus"),
+		Occlusion.settings(0, "forward_plus"),
+		"negative quality clamps to affordable AO policy")
+	t.eq(Occlusion.settings(42, "forward_plus"),
+		Occlusion.settings(3, "forward_plus"),
+		"oversized quality clamps to Ultra native AO budget")
+	t.check(Occlusion.needs_apply({}, p2),
+		"initial quality update submits the native backend plan")
+	t.check(not Occlusion.needs_apply(p2, p2.duplicate()),
+		"unchanged quality does not resend AO settings to the renderer")
+	t.check(Occlusion.needs_apply(p2, p3),
+		"switching to Ultra upgrades AO sampling")
+	t.check(RenderingServer.has_method("environment_set_ssao_quality"),
+		"custom Godot engine exposes standard native AO quality controls")
+	var ind_source: String = (Indirect as Script).source_code
+	t.check(ind_source.contains("GraphicsOcclusionQuality.apply(level, method)"),
+		"shared game-quality controller reaches native AO shader budget")
+	Occlusion.apply(2, "forward_plus")
+	t.eq(Occlusion._last_plan, p2,
+		"High installs its active native AO plan")
+	Occlusion.apply(3, "forward_plus")
+	t.eq(Occlusion._last_plan, p3,
+		"Ultra switches to a sharper native AO plan")
+	Occlusion.apply(0, "gl_compatibility")
+	t.eq(Occlusion._last_plan, Occlusion.settings(0, "gl_compatibility"),
+		"renderer fallback disables heavyweight AO sampling")
+	Occlusion.apply(1, "forward_plus")
+
 	t.current = "renderer-aware shadowing and distance-field GI tiers"
 	t.eq(Indirect.settings(-1, "forward_plus"), Indirect.settings(0, "forward_plus"),
 		"negative quality tier safely clamps")
