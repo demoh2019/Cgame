@@ -187,6 +187,9 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	# for every background pixel each frame.
 	sky_material.set_shader_parameter("use_cached_radiance",
 		bool(settings.get("sky_use_cached_radiance", false)))
+	# Sky haze is cached with the radiance map; no per-frame shader updates.
+	sky_material.set_shader_parameter("aerosol_scattering_strength",
+		clampf(float(settings.get("sky_scattering_strength", 0.0)), 0.0, 1.0))
 	sun.shadow_enabled = _shadows_allowed
 	sun.directional_shadow_max_distance = float(settings["shadow_distance"])
 	environment.glow_enabled = bool(settings["glow"])
