@@ -17,8 +17,11 @@ static var density_scale: float = 1.0
 
 # species: biomes, instances per 16 m tile at full density, scale range, clustered (flowers grow in patches).
 const SPECIES := {
-	"grass_medium_01": {"biomes": ["plains", "forest", "swamp", "mountain"], "count": 70, "scale": [1.6, 3.2], "cluster": false},
-	"grass_medium_02": {"biomes": ["plains", "forest", "swamp"], "count": 40, "scale": [1.4, 2.6], "cluster": false},
+	# The grass carpet itself (the old procedural blades are gone): many instances, several variants per tile.
+	"grass_medium_01": {"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 240, "scale": [1.6, 3.4], "cluster": false,
+		"variants": 4, "distance": 52.0},
+	"grass_medium_02": {"biomes": ["plains", "forest", "swamp", "mountain"], "count": 100, "scale": [1.4, 2.8], "cluster": false,
+		"variants": 3, "distance": 52.0},
 	"dandelion_01": {"biomes": ["plains", "forest"], "count": 22, "scale": [1.3, 2.0], "cluster": true},
 	"celandine_01": {"biomes": ["forest", "swamp", "plains"], "count": 18, "scale": [1.3, 2.0], "cluster": true},
 	"nettle_plant": {"biomes": ["forest", "swamp", "plains"], "count": 14, "scale": [2.6, 4.2], "cluster": true},
@@ -74,13 +77,25 @@ static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: 
 		var choices: Array = variants(species)
 		if choices.is_empty():
 			continue
-		var choice: Dictionary = choices[rng.randi() % choices.size()]
-		var plant_mesh: Mesh = mesh(str(choice["file"]))
-		if plant_mesh == null:
-			continue
-		var wanted: int = int(round(float(info["count"]) * density_scale * rng.randf_range(0.5, 1.4)))
-		if wanted <= 0:
-			continue
+		var per_tile: int = mini(int(info.get("variants", 1)), choices.size())
+		var first: int = rng.randi() % choices.size()
+		for v in per_tile:
+			var choice: Dictionary = choices[(first + v * 7) % choices.size()]
+			var plant_mesh: Mesh = mesh(str(choice["file"]))
+			if plant_mesh == null:
+				continue
+			var wanted: int = int(round(float(info["count"]) / float(per_tile) * density_scale * rng.randf_range(0.6, 1.3)))
+			if wanted <= 0:
+				continue
+			var instance: MultiMeshInstance3D = _scatter(species, info, plant_mesh, wanted, tile_x, tile_z, rng, sample)
+			if instance != null:
+				result.append(instance)
+	return result
+
+
+static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted: int, tile_x: float, tile_z: float,
+		rng: RandomNumberGenerator, sample: Callable) -> MultiMeshInstance3D:
+	if true:
 		var centers: Array = []
 		if bool(info["cluster"]):
 			for c in rng.randi_range(1, 3):
@@ -111,7 +126,7 @@ static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: 
 			low = minf(low, h)
 			high = maxf(high, h)
 		if transforms.is_empty():
-			continue
+			return null
 		var multimesh := MultiMesh.new()
 		multimesh.transform_format = MultiMesh.TRANSFORM_3D
 		multimesh.mesh = plant_mesh
@@ -122,10 +137,10 @@ static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: 
 		instance.name = "Plants_" + species
 		instance.multimesh = multimesh
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		instance.visibility_range_end = DRAW_DISTANCE
+		instance.visibility_range_end = float(info.get("distance", DRAW_DISTANCE))
 		instance.visibility_range_end_margin = 6.0
 		instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 		var top: float = plant_mesh.get_aabb().size.y * float(info["scale"][1]) + 0.5
 		instance.custom_aabb = AABB(Vector3(tile_x - 1.0, low - 0.3, tile_z - 1.0), Vector3(TILE + 2.0, high - low + top, TILE + 2.0))
-		result.append(instance)
-	return result
+		return instance
+	return null

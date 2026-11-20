@@ -1298,7 +1298,8 @@ func _grow_grass() -> void:
 		return
 	while _grass_next_tile < GrassField.tile_count() and _grass_spent_usec <= grass_budget_usec:
 		var started := Time.get_ticks_usec()
-		var tile: MultiMeshInstance3D = GrassField.build_tile(_grass_source, _grass_next_tile)
+		# The old procedural blade grass is retired; scanned plants (below) are the grass now.
+		var tile: MultiMeshInstance3D = null
 		_grass_next_tile += 1
 		if tile != null:
 			tile.visibility_range_end = grass_visibility_end

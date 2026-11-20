@@ -79,8 +79,9 @@ const JOBS := {
 # id: [triangle budget per variant, merge every part into one mesh, part names to skip]
 const PLANT_OUTPUT := "res://assets/models/polyhaven/baked/plants/"
 const PLANTS := {
-	"grass_medium_01": [900, false, []],
-	"grass_medium_02": [1000, false, []],
+	# Grass replaces the old procedural blades, so it is drawn by the thousand: keep it light.
+	"grass_medium_01": [300, false, []],
+	"grass_medium_02": [360, false, []],
 	"grass_bermuda_01": [941, true, []],
 	"dandelion_01": [1400, false, []],
 	"celandine_01": [1000, false, []],
