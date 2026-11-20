@@ -339,6 +339,25 @@ void prioritize_cells_for_motion_and_view(LocalVector<Vector3i> &r_cells, const 
 	}
 }
 
+bool should_refresh_for_view_turn(const Vector3 &p_last_view,
+		const Vector3 &p_current_view, real_t p_degrees) {
+	if (!p_last_view.is_finite() || !p_current_view.is_finite() ||
+			!Math::is_finite(p_degrees) || p_degrees <= real_t(0.0) ||
+			p_degrees > real_t(180.0)) {
+		return false;
+	}
+	const real_t last_squared = p_last_view.length_squared();
+	const real_t current_squared = p_current_view.length_squared();
+	if (last_squared < real_t(1e-6) || current_squared < real_t(1e-6)) {
+		return false;
+	}
+	// Cosine comparison avoids atan/acos on every streaming tick and accepts
+	// both normalized and arbitrary finite vectors safely.
+	const real_t cosine = CLAMP(p_last_view.dot(p_current_view) /
+			Math::sqrt(last_squared * current_squared), real_t(-1.0), real_t(1.0));
+	return cosine < Math::cos(Math::deg_to_rad(p_degrees));
+}
+
 void cells_to_unload(const Vector3 &p_position, real_t p_unload_radius, real_t p_cell_size, Axes p_axes, const HashSet<Vector3i> &p_loaded, LocalVector<Vector3i> &r_cells) {
 	r_cells.clear();
 	ERR_FAIL_COND(!(p_cell_size > 0.0));
