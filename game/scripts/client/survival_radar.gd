@@ -127,8 +127,7 @@ func current_threat_scan() -> Dictionary:
 		var actor = sim.players[actor_id]
 		if not actor.survival.alive:
 			return {}
-		return ThreatScan.public_mark(actor.threat_scan, sim.zombies,
-			actor.position, sim.time)
+		return sim.threat_scan_for(actor_id)
 	if client != null:
 		return client.you.get("threat_scan", {}).duplicate(true)
 	return {}
@@ -398,9 +397,10 @@ func _draw() -> void:
 	# Pink = explicit request from a current teammate, never a public corpse map.
 	_draw_waypoint(origin, current_party_corpse_rescue(), "x", "z",
 		Color(1.0, 0.54, 0.83))
-	# A spent scanner grants one short-lived private moving target pin.
-	_draw_waypoint(origin, current_threat_scan(), "x", "z",
-		Color(1.0, 0.32, 0.45))
+	# A paid moving threat pin is magenta when personal, cyan when shared by a party scout.
+	var scan_mark: Dictionary = current_threat_scan()
+	_draw_waypoint(origin, scan_mark, "x", "z",
+		Color(0.30, 0.78, 1.0) if scan_mark.has("shared_by") else Color(1.0, 0.32, 0.45))
 	# Copper = a private, paid high-tier ore/stone prospect; offscreen arrow included.
 	_draw_waypoint(origin, current_prospect_mark(), "x", "z",
 		Color(0.95, 0.62, 0.21))

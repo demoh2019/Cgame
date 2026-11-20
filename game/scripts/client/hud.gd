@@ -308,6 +308,12 @@ func _build() -> void:
 			client.salvage_gear(item_id))
 	salvage_row.add_child(salvage_button)
 	_action_sections.append([inventory_box.get_child_count(), "Field"])
+	var trauma_button := Button.new()
+	trauma_button.name = "UseExpeditionTraumaKit"
+	trauma_button.text = "Expedition trauma kit (Shift+3): treat mixed injuries"
+	trauma_button.tooltip_text = "Spend one crafted T2 kit: +38 HP, -15 infection, stop bleeding, -45 fracture. No treatment means no item consumed."
+	trauma_button.pressed.connect(func() -> void: client.use_item("expedition_trauma_kit"))
+	inventory_box.add_child(trauma_button)
 	var campfire_button := Button.new()
 	campfire_button.text = "Light field campfire (3 wood T1, 1 stone T1)"
 	campfire_button.tooltip_text = "Shared warmth for 5 minutes, outside the safe settlement"
@@ -412,6 +418,12 @@ func _build() -> void:
 	canteen_button.tooltip_text = "Requires a crafted canteen, one carbon filter and the shared lake cooldown."
 	canteen_button.pressed.connect(func() -> void: client.refill_canteen())
 	inventory_box.add_child(canteen_button)
+	var pouch_button := Button.new()
+	pouch_button.name = "FillRawWaterPouch"
+	pouch_button.text = "Fill crafted water pouch at shore (Shift+2)"
+	pouch_button.tooltip_text = "Craft an empty pouch from cloth + fiber. Fill near lake water, then craft Boiled Water using 1 wood at a live campfire (or hub workbench). Raw water cannot be drunk."
+	pouch_button.pressed.connect(func() -> void: client.use_item("empty_water_pouch"))
+	inventory_box.add_child(pouch_button)
 	var storm_button := Button.new()
 	storm_button.name = "EquipStormInsulator"
 	storm_button.text = "Equip storm insulation (180s)"
@@ -957,24 +969,25 @@ func _build() -> void:
 		else:
 			say("Party: select the member to remove"))
 	party_buttons.add_child(kick_member)
-	# Equipment-free support role, paid for with real carried medical items.
+	# Equipment-free field support; real medicine, food or water is consumed.
 	_action_sections.append([inventory_box.get_child_count(), "Party"])
 	var aid_row := HBoxContainer.new()
 	inventory_box.add_child(aid_row)
 	var aid_items := OptionButton.new()
-	for item_id in ["bandage", "field_antiseptic", "antibiotics", "purified_serum"]:
+	for item_id in ["bandage", "field_antiseptic", "expedition_trauma_kit", "antibiotics", "purified_serum",
+			"berries", "canned_food", "water_bottle"]:
 		if Defs.is_item(item_id):
 			var index: int = aid_items.item_count
 			aid_items.add_item(str(Defs.item(item_id).get("name", item_id)))
 			aid_items.set_item_metadata(index, item_id)
 	aid_row.add_child(aid_items)
 	var aid_button := Button.new()
-	aid_button.text = "Aid"
-	aid_button.tooltip_text = "Use one medical item to treat a nearby party member; 5s cooldown. Restored HP generates infected threat if your ally is in combat."
+	aid_button.text = "Aid / Share"
+	aid_button.tooltip_text = "Treat or feed a party member within 3.2m using your own medicine, berries, canned food or water. Shared 5s cooldown."
 	aid_button.pressed.connect(func() -> void:
 		var target: int = _party_target.get_selected_id()
 		if target < 0 or aid_items.selected < 0:
-			say("Aid: select a nearby party member and a medical item.")
+			say("Aid / Share: select a nearby party member and a carried supply.")
 		else:
 			client.party_aid(target, str(aid_items.get_selected_metadata())))
 	aid_row.add_child(aid_button)
@@ -2125,11 +2138,16 @@ func _on_event(event: Dictionary) -> void:
 					roundi(float(event.get("bleeding_stopped", 0.0)))])
 		"party_aid":
 			if int(event.get("peer", -1)) == client.peer_id:
-				say("Teammate treated you: +%d HP, -%d infection, -%d bleeding, -%d fracture." % [
-					roundi(float(event.get("heal", 0.0))),
-					roundi(float(event.get("cure", 0.0))),
-					roundi(float(event.get("bleeding_stopped", 0.0))),
-					roundi(float(event.get("fracture_treated", 0.0)))])
+				if float(event.get("food", 0.0)) > 0.0 or float(event.get("drink", 0.0)) > 0.0:
+					say("Teammate shared supplies: +%d hunger, +%d thirst." % [
+						roundi(float(event.get("food", 0.0))),
+						roundi(float(event.get("drink", 0.0)))])
+				else:
+					say("Teammate treated you: +%d HP, -%d infection, -%d bleeding, -%d fracture." % [
+						roundi(float(event.get("heal", 0.0))),
+						roundi(float(event.get("cure", 0.0))),
+						roundi(float(event.get("bleeding_stopped", 0.0))),
+						roundi(float(event.get("fracture_treated", 0.0)))])
 		"gathered":
 			var harvest_extra: int = int(event.get("outpost_bonus", 0))
 			say("+%d %s%s" % [event["amount"],
@@ -2427,11 +2445,12 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "use" and bool(data.get("threat_scan", false)):
 		if bool(data.get("ok", false)):
-			say("SCOUT: %s threat at X:%d Z:%d — private moving marker for %ds." % [
+			var audience := "shared with your current party" if bool(data.get("party_shared", false)) else "private"
+			say("SCOUT: %s threat at X:%d Z:%d — %s moving marker for %ds." % [
 				str(data.get("kind", "elite")).to_upper(),
 				roundi(float(data.get("x", 0.0))),
 				roundi(float(data.get("z", 0.0))),
-				int(data.get("seconds", 50))])
+				audience, int(data.get("seconds", 50))])
 		else:
 			say("Threat scanner: %s (device not spent)." % str(
 				data.get("reason", "rejected")))
@@ -2685,12 +2704,17 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "party_aid":
 		if bool(data.get("ok", false)):
-			say("Field aid: +%d HP, -%d infection, -%d bleeding." % [
-				roundi(float(data.get("heal", 0.0))),
-				roundi(float(data.get("cure", 0.0))),
-				roundi(float(data.get("bleeding_stopped", 0.0)))])
+			if float(data.get("food", 0.0)) > 0.0 or float(data.get("drink", 0.0)) > 0.0:
+				say("Supplies shared: +%d hunger, +%d thirst." % [
+					roundi(float(data.get("food", 0.0))),
+					roundi(float(data.get("drink", 0.0)))])
+			else:
+				say("Field aid: +%d HP, -%d infection, -%d bleeding." % [
+					roundi(float(data.get("heal", 0.0))),
+					roundi(float(data.get("cure", 0.0))),
+					roundi(float(data.get("bleeding_stopped", 0.0)))])
 		else:
-			say("Field aid denied: " + str(data.get("reason", "rejected")))
+			say("Field aid / share denied: " + str(data.get("reason", "rejected")))
 		return
 	if kind == "loot" and str(data.get("reason", "")) == "guards_alive":
 		say("Cache sealed: eliminate %d infected guards." % int(data.get("remaining", 0)))

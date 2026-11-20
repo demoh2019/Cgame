@@ -105,6 +105,26 @@ func run(t) -> void:
 	t.check(PartyFlank.qualifies(flanker, infected, sim.players, sim.parties, world),
 		"valid formation can resume after re-equipping a real weapon")
 
+	t.current = "equal confirmed server damage differs only by the flank bonus"
+	# Test the same GameServer damage pipeline with the same attacker,
+	# weapon and target type. The basic-melee flag is internal only.
+	var ordinary = _engaged(sim, world, tank.id, 310.0, 0.15)
+	var enhanced = _engaged(sim, world, tank.id, 310.0, 0.20)
+	var unboosted_health: float = ordinary.health
+	var boosted_health: float = enhanced.health
+	sim._damage_target(flanker, {"kind": "zombie", "id": ordinary.id}, 10.0, "melee")
+	sim._damage_target(flanker, {"kind": "zombie", "id": enhanced.id}, 10.0, "melee", true)
+	var base_loss: float = unboosted_health - ordinary.health
+	var boosted_loss: float = boosted_health - enhanced.health
+	t.check(base_loss > 0.0, "normal authoritative damage landed in control case")
+	t.near(boosted_loss / maxf(0.001, base_loss), 1.18, 0.02,
+		"an identical server melee damage path grants exactly 18 percent when flanking")
+	# The controlled hits are synthetic and must not obstruct the later
+	# fully authentic cmd_attack collision test.
+	sim.zombies.erase(ordinary.id)
+	sim.zombies.erase(enhanced.id)
+	sim.events.clear()
+
 	t.current = "only normal authoritative melee hit receives extra damage"
 	var initial_hp: float = infected.health
 	var strike: Dictionary = sim.cmd_attack(flanker.id, 1.0, 0.0)

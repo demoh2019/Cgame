@@ -560,8 +560,8 @@ func repair(id: int) -> void:
 	net.c_repair.rpc_id(1, id)
 
 
-func refill_canteen() -> void:
-	net.c_refill_canteen.rpc_id(1)
+func refill_canteen(boil: bool = false) -> void:
+	net.c_refill_canteen.rpc_id(1, boil)
 
 
 func survey_ruins() -> void:

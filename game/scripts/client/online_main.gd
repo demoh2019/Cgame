@@ -1183,9 +1183,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_1:
 				_quick_use("canned_food")
 			KEY_2:
-				_quick_use("water_bottle")
+				_quick_use("empty_water_pouch" if Input.is_key_pressed(KEY_SHIFT) else "water_bottle")
 			KEY_3:
-				_quick_use("bandage")
+				_quick_use("expedition_trauma_kit" if Input.is_key_pressed(KEY_SHIFT) else "bandage")
 			KEY_4:
 				_cycle_weapon()
 			KEY_5:
@@ -1208,7 +1208,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_R:
 				if Input.is_key_pressed(KEY_CTRL):
 					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
-						client.refill_canteen()
+						client.refill_canteen(Input.is_key_pressed(KEY_SHIFT))
 				elif Input.is_key_pressed(KEY_SHIFT):
 					if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 						_quick_use("field_alkali_kit")

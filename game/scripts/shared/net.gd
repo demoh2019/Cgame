@@ -1004,10 +1004,10 @@ func c_raid_skip_turn(entity_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
-func c_refill_canteen() -> void:
+func c_refill_canteen(boil: bool = false) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
-		s_result.rpc_id(peer, "refill_canteen", sim.cmd_refill_canteen(peer))
+		s_result.rpc_id(peer, "refill_canteen", sim.cmd_refill_canteen(peer, boil))
 
 
 @rpc("any_peer", "reliable")

@@ -15,6 +15,7 @@ const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
@@ -409,13 +410,25 @@ func _sync_zombies() -> void:
 		if not zombie.is_alive() or zombie.position.distance_to(survivor.position) > 72.0:
 			continue
 		active[zombie.id] = true
+		var base_tint := Color(0.98, 0.65, 0.18) if zombie.elite else (
+			Color(0.4, 0.9, 0.23) if zombie.type == "spitter" else Color(0.66, 0.37, 0.35))
 		if not _zombie_meshes.has(zombie.id):
 			var mesh := _mesh(
 				Vector3(1.05, 1.95, 1.05) if zombie.elite else Vector3(0.85, 1.6, 0.85),
-				Color(0.98, 0.65, 0.18) if zombie.elite else (
-					Color(0.4, 0.9, 0.23) if zombie.type == "spitter" else Color(0.66, 0.37, 0.35)))
+				base_tint)
+			# _mesh caches materials by color. Give each wounded infected its
+			# own material so an individual change cannot recolor its pack.
+			mesh.material_override = mesh.material_override.duplicate() as StandardMaterial3D
 			add_child(mesh)
 			_zombie_meshes[zombie.id] = mesh
+		var phase: String = InfectedWounds.phase(zombie)
+		var tint: Color = base_tint
+		if phase == "limping":
+			tint = base_tint.lerp(Color(0.54, 0.52, 0.66), 0.65)
+		elif phase == "frenzied":
+			tint = base_tint.lerp(Color(1.0, 0.19, 0.1), 0.78)
+		var material: StandardMaterial3D = _zombie_meshes[zombie.id].material_override
+		material.albedo_color = tint
 		_zombie_meshes[zombie.id].position = zombie.position + Vector3(0.0, 0.975 if zombie.elite else 0.8, 0.0)
 	for zombie_id in _zombie_meshes.keys():
 		if not active.has(zombie_id):
@@ -1010,9 +1023,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_food"):
 		_result("Eat", sim.cmd_use(LOCAL_PLAYER_ID, "canned_food"))
 	elif event.is_action_pressed("survive_water"):
-		_result("Drink", sim.cmd_use(LOCAL_PLAYER_ID, "water_bottle"))
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Collect unboiled water", sim.cmd_use(LOCAL_PLAYER_ID, "empty_water_pouch"))
+		else:
+			_result("Drink", sim.cmd_use(LOCAL_PLAYER_ID, "water_bottle"))
 	elif event.is_action_pressed("survive_bandage"):
-		_result("Heal", sim.cmd_use(LOCAL_PLAYER_ID, "bandage"))
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Expedition trauma kit", sim.cmd_use(LOCAL_PLAYER_ID, "expedition_trauma_kit"))
+		else:
+			_result("Heal", sim.cmd_use(LOCAL_PLAYER_ID, "bandage"))
 	elif event.is_action_pressed("survive_weapon"):
 		_cycle_owned_weapon()
 	elif event.is_action_pressed("survive_armor"):
@@ -1041,7 +1060,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Apply expedition spore filter", sim.cmd_use(LOCAL_PLAYER_ID, "spore_filter"))
 	elif event.is_action_pressed("survive_lake"):
 		if Input.is_key_pressed(KEY_CTRL):
-			_result("Fill canteen", sim.cmd_refill_canteen(LOCAL_PLAYER_ID))
+			var boil: bool = Input.is_key_pressed(KEY_SHIFT)
+			_result("Boil water" if boil else "Fill canteen",
+				sim.cmd_refill_canteen(LOCAL_PLAYER_ID, boil))
 		elif Input.is_key_pressed(KEY_SHIFT):
 			var result: Dictionary = sim.cmd_use(LOCAL_PLAYER_ID, "field_alkali_kit")
 			_result("Neutralize acid (%d pools)" % int(result.get("neutralized", 0)),
@@ -1345,7 +1366,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G skill / Shift+G finisher | Space dodge | F8 parry | F9 smoke | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic / Shift+6 coat melee 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | F2 signal flare / F10 net / F12 collect net | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G skill / Shift+G finisher | Space dodge | F8 parry | F9 smoke | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic / Shift+6 coat melee 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter) / Ctrl+Shift+R boil (2 wood, live fire)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | F2 signal flare / F10 net / F12 collect net | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback

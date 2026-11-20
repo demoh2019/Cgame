@@ -10,6 +10,7 @@ const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const WindHearing = preload("res://scripts/shared/wind_hearing.gd")
 const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
+const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -335,8 +336,10 @@ func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: floa
 	yaw = atan2(direction.x, direction.y)
 	var before := position
 	# Zombies use the same movement rules as players, so they are stopped by trees, rocks and deep water.
-	position = Movement.move(world, position, direction, speed, delta)
-	if before.distance_to(position) < speed * delta * 0.3:
+	# Damage-driven gait changes apply in every walking state, not to attacks.
+	var effective_speed: float = speed * InfectedWounds.speed_factor(self)
+	position = Movement.move(world, position, direction, effective_speed, delta)
+	if before.distance_to(position) < effective_speed * delta * 0.3:
 		stuck_time += delta
 	else:
 		stuck_time = 0.0
