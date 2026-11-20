@@ -537,6 +537,11 @@ func guardian_intercept(ally_id: int) -> void:
 	net.c_guardian_intercept.rpc_id(1, ally_id)
 
 
+func party_shield_wall() -> void:
+	# No targets, positions, durations or damage are accepted from the client.
+	net.c_party_shield_wall.rpc_id(1)
+
+
 func parry() -> void:
 	# Facing and equipped weapon are rechecked by the authoritative server.
 	net.c_parry.rpc_id(1)
