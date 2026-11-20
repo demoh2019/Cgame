@@ -37,6 +37,30 @@ TEST_FORCE_LINK(test_fog_volume)
 
 namespace TestFogVolume {
 
+TEST_CASE("[SceneTree][FogVolume] Stable world-grid anchoring for animated volumetric fog") {
+	// World grid anchoring is invariant to tiny camera motions and preserves
+	// vertical height: the moving ground plane is never snapped in Y.
+	const Vector3 input(14.4f, 3.2f, -11.3f);
+	const Vector3 expected(16.0f, 3.2f, -8.0f);
+	CHECK(FogVolume::snap_world_anchor(input, 8.0f) == expected);
+	CHECK(FogVolume::snap_world_anchor(Vector3(-14.4f, -2.5f, 11.3f), 8.0f) ==
+			Vector3(-16.0f, -2.5f, 8.0f));
+	CHECK(FogVolume::snap_world_anchor(expected, 8.0f) == expected);
+	CHECK(FogVolume::snap_world_anchor(input, 0.0f) == input);
+
+	FogVolume *volume = memnew(FogVolume);
+	CHECK(volume->set_snapped_world_anchor(input, 8.0f));
+	CHECK(volume->get_global_position() == expected);
+	// No redundant RenderingServer transform upload for the same cell.
+	CHECK_FALSE(volume->set_snapped_world_anchor(Vector3(14.6f, 3.2f, -11.1f), 8.0f));
+	CHECK(volume->get_global_position() == expected);
+	CHECK(volume->set_snapped_world_anchor(Vector3(24.2f, 3.2f, -11.1f), 8.0f));
+	CHECK(volume->get_global_position() == Vector3(24.0f, 3.2f, -8.0f));
+	// Existing fog volume size/culling bounds remain untouched by snapping.
+	CHECK(volume->get_aabb() == AABB(Vector3(-1.0f, -1.0f, -1.0f), Vector3(2.0f, 2.0f, 2.0f)));
+	memdelete(volume);
+}
+
 TEST_CASE("[SceneTree][FogVolume] Idempotent rendering resource setters") {
 	FogVolume *volume = memnew(FogVolume);
 	CHECK(volume->get_size() == Vector3(2.0f, 2.0f, 2.0f));
