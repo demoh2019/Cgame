@@ -19,6 +19,7 @@ const HEIGHT_RANGE := 220.0
 const GROUND_SHADER := """
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
+global uniform float aa_weather_wetness;
 
 // A painted-looking ground: smooth patches of lush and dry grass, dirt, sand at the shore, strata on slopes and
 // snow on the peaks, all from layered value noise so nothing repeats in a visible grid.
@@ -101,9 +102,16 @@ void fragment() {
 		color = mix(color, dirt_road, smoothstep(0.08, 0.55, road));
 	}
 
+	// Dirt darkens during rain; thin puddles gather on level roads without extra samples.
+	float wetness = clamp(aa_weather_wetness, 0.0, 1.0);
+	float wettable = max(road, 0.35 * (1.0 - smoothstep(0.08, 0.55, slope)));
+	float puddle = wetness * wettable * smoothstep(0.54, 0.77, mid)
+		* (1.0 - smoothstep(0.08, 0.25, slope));
+	color *= 1.0 - wetness * 0.12 - puddle * 0.13;
 	ALBEDO = color;
-	ROUGHNESS = mix(0.95, 0.75, shore);
-	SPECULAR = 0.15;
+	float dry_roughness = mix(0.95, 0.75, shore);
+	ROUGHNESS = mix(mix(dry_roughness, 0.24, wetness * 0.35), 0.08, puddle * 0.65);
+	SPECULAR = min(0.9, 0.15 + wetness * 0.12 + puddle * 0.3);
 }
 """
 
