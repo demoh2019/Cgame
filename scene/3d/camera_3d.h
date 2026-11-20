@@ -221,6 +221,10 @@ public:
 	real_t get_v_offset() const;
 
 	void add_trauma(real_t p_amount);
+	// Cosmetic impulse from a world event, evaluated at a separate listener
+	// position (player, not the elevated camera in an isometric game).
+	void add_spatial_trauma(const Vector3 &p_source, const Vector3 &p_listener,
+			real_t p_amount, real_t p_inner_radius, real_t p_outer_radius);
 	void set_trauma(real_t p_trauma);
 	real_t get_trauma() const;
 
