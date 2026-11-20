@@ -13,6 +13,12 @@ sprint stamina use. The server applies regular water, collision, encumbrance
 and fracture limits. Crouching cancels riding. Gathering, looting, crafting,
 consumables, melee/ranged attacks, weapon skills and dodge require dismounting.
 
+**Sound risk:** Rolling bikes produce a 27 m audible rattle, compared with
+21 m for sprinting. The noise fades 0.9 seconds after stopping. It is heard
+by the normal infected AI, while safe zones and NPC chase distances remain
+unchanged. Blocking obstacles, stationary riders, walking pedestrians and
+forged movement packets create no bike rattle.
+
 **Combat rules:** The server rejects mounting during combat, when over-encumbered,
 exhausted, injured or busy gathering. Real damage forces dismount and a 12s
 remount cooldown; voluntary dismount starts a 2s cooldown. Trading or dropping
@@ -28,4 +34,5 @@ prediction. Network movement packets never supply mount speed authority.
 `godot --headless --path game --script res://tests/run_all.gd`
 
 `game/tests/test_mounts.gd` checks crafting data, speed bounds, server
-ownership, combat restrictions, hit dismount, cooldown and save/load.
+ownership, combat restrictions, hit dismount, cooldown, acoustic aggro,
+idling, malformed movement and save/load.

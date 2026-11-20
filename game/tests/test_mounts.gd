@@ -6,6 +6,17 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
+const Zombie = preload("res://scripts/shared/zombie.gd")
+
+
+func _open_trail(world) -> Vector3:
+	for x in range(180, 361, 24):
+		for z in range(180, 361, 24):
+			var point := Vector3(float(x), world.height_at(float(x), float(z)), float(z))
+			if not world.is_safe(point.x, point.z) and Movement.step(world, point,
+					{"x": 1.0, "mounted": true}, 0.05).distance_to(point) > 0.1:
+				return point
+	return Vector3.INF
 
 
 func run(t) -> void:
@@ -68,3 +79,61 @@ func run(t) -> void:
 	var restored = sim.add_player(3, "Rejoined", "", save)
 	t.eq(restored.mounted, false, "relogin does not grant a bike")
 	t.eq(restored.inventory.count(Mounts.ITEM_ID), 0, "item loss persists")
+
+	t.current = "moving bike alerts infected through real hearing"
+	t.eq(Mounts.noise_for_distance(0.0), 0.0, "idling does not make bike rattle")
+	t.eq(Mounts.noise_for_distance(Mounts.MIN_NOISY_MOVEMENT), 0.0,
+		"collision jitter is not audible")
+	t.eq(Mounts.noise_for_distance(NAN), 0.0, "malformed distance is ignored")
+	t.eq(Mounts.noise_for_distance(INF), 0.0, "infinite distance is ignored")
+	t.eq(Mounts.noise_for_distance(0.2), Mounts.NOISE_RADIUS,
+		"real rolling produces a fixed server-owned hearing radius")
+	t.check(Mounts.NOISE_RADIUS > Defs.SPRINT_NOISE_RADIUS,
+		"faster bike is noisier than ordinary sprinting")
+	var trail: Vector3 = _open_trail(world)
+	t.check(trail.is_finite(), "generated world has a bike-traversable wilderness road")
+	if not trail.is_finite():
+		return
+	var courier = sim.add_player(60, "Road Courier")
+	courier.position = trail
+	courier.inventory.add(Mounts.ITEM_ID, 1)
+	t.check(sim.cmd_toggle_mount(courier.id).get("ok", false),
+		"real owned bike is usable outside combat")
+	sim._tick_players(0.05)
+	var origin: Vector3 = courier.position
+	sim.submit_input(courier.id, 1, 1.0, 0.0, false, 0.0, 0.05)
+	t.check(courier.position.distance_to(origin) > Mounts.MIN_NOISY_MOVEMENT,
+		"travel movement genuinely happened")
+	t.near(courier.noise_radius, Mounts.NOISE_RADIUS, 0.0001,
+		"server grants a bounded noisy rolling radius")
+	t.near(courier.noise_timer, Mounts.NOISE_SECONDS, 0.0001,
+		"noise persists for a short time only")
+	var spawn := Vector3(courier.position.x + 24.0,
+		world.height_at(courier.position.x + 24.0, courier.position.z),
+		courier.position.z)
+	var walker := Zombie.new(sim.new_id(), "walker", spawn)
+	sim.zombies[walker.id] = walker
+	sim._tick_zombies(0.05)
+	t.eq(walker.target_id, courier.id,
+		"server AI hears bike from outside a walker's normal sight range")
+	sim.zombies.clear() # Do not let an existing pursuer issue pack alerts.
+
+	t.current = "stopped riding does not emit indefinitely"
+	sim._tick_players(Mounts.NOISE_SECONDS + 0.05)
+	t.near(courier.noise_radius, 0.0, 0.0001, "bike rattle fades after idling")
+	t.near(courier.noise_timer, 0.0, 0.0001, "sound timer expires")
+	sim.submit_input(courier.id, 2, 0.0, 0.0, false, 0.0, 0.05)
+	t.eq(courier.noise_radius, 0.0, "stationary mounted input remains silent")
+	sim.submit_input(courier.id, 3, NAN, 0.0, false, 0.0, 0.05)
+	t.eq(courier.noise_radius, 0.0, "invalid input does not create ghost sounds")
+	t.eq(courier.last_input_seq, 2, "malformed packet never advances sequence")
+	var quiet := Zombie.new(sim.new_id(), "walker", spawn)
+	sim.zombies[quiet.id] = quiet
+	sim._tick_zombies(0.05)
+	t.eq(quiet.target_id, -1, "silent distant rider is not revealed to a fresh infected")
+	sim.zombies.clear()
+	t.check(sim.cmd_toggle_mount(courier.id).get("ok", false),
+		"voluntary dismount is still allowed")
+	sim._tick_players(Mounts.MANUAL_COOLDOWN + 0.1)
+	sim.submit_input(courier.id, 4, 1.0, 0.0, false, 0.0, 0.05)
+	t.eq(courier.noise_radius, 0.0, "on-foot walking cannot generate bike noise")

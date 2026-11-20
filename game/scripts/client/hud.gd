@@ -398,6 +398,12 @@ func _build() -> void:
 	claim_cache_button.text = "Collect nearest captured outpost supplies"
 	claim_cache_button.pressed.connect(_claim_nearest_outpost_cache)
 	inventory_box.add_child(claim_cache_button)
+	var delivery := Button.new()
+	delivery.name = "OutpostProvisions"
+	delivery.text = "Deliver supplies to outpost (+45s hold)"
+	delivery.tooltip_text = "Costs 2 canned food, 2 water bottles, 4 wood. Max 4 deliveries per capture, unavailable when contested."
+	delivery.pressed.connect(_deliver_nearest_outpost_provisions)
+	inventory_box.add_child(delivery)
 
 	var party_title := Label.new()
 	party_title.text = "Survivor party (nearby invites, up to 5 players)"
@@ -598,6 +604,11 @@ func _build() -> void:
 		else:
 			client.party_aid(target, str(aid_items.get_selected_metadata())))
 	aid_row.add_child(aid_button)
+	var triage_button := Button.new()
+	triage_button.text = "Triage nearby allies"
+	triage_button.tooltip_text = "Spend 1 crafted Expedition Triage Pack to treat up to 3 injured nearby party allies (5.5 m, 18s shared medical cooldown)."
+	triage_button.pressed.connect(func() -> void: client.party_triage())
+	inventory_box.add_child(triage_button)
 	# A cook supplies one real dish per present, eligible group member.
 	var feast_row := HBoxContainer.new()
 	inventory_box.add_child(feast_row)
@@ -864,6 +875,11 @@ func _on_event(event: Dictionary) -> void:
 		"outlaw_bounty":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("OUTLAW BOUNTY: +%d silver for a wanted survivor." % int(event.get("silver", 0)))
+		"party_triage":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Triage care received: +%d HP, -%d bleeding." % [
+					roundi(float(event.get("heal", 0.0))),
+					roundi(float(event.get("bleeding_stopped", 0.0)))])
 		"party_aid":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Teammate treated you: +%d HP, -%d infection, -%d bleeding, -%d fracture." % [
@@ -1010,7 +1026,31 @@ func _claim_nearest_outpost_cache() -> void:
 		client.outpost_supplies(nearest_id)
 
 
+func _deliver_nearest_outpost_provisions() -> void:
+	if client.you.is_empty():
+		return
+	var pos := Vector2(float(client.you.get("x", 0.0)), float(client.you.get("z", 0.0)))
+	var nearest := -1
+	var best := 4.01
+	for flag in client.outposts:
+		var distance := pos.distance_to(Vector2(float(flag["x"]), float(flag["z"])))
+		if distance < best:
+			best = distance
+			nearest = int(flag["id"])
+	if nearest < 0:
+		say("Supplies: move within 4 metres of your outpost.")
+	else:
+		client.outpost_provision(nearest)
+
+
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "outpost_provision":
+		if bool(data.get("ok", false)):
+			say("Outpost supplied: +%ds hold time, %d deliveries left." % [
+				int(data.get("extra_seconds", 0)), int(data.get("remaining_deliveries", 0))])
+		else:
+			say("Outpost supplies: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "use" and data.has("recall_cast"):
 		say("Return charm: casting for %d seconds." % int(data["recall_cast"]))
 		return
@@ -1083,6 +1123,14 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Outpost supplies collected! %d cache shares left. Inventory updated." % int(data.get("remaining", 0)))
 		else:
 			say("Outpost cache: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "party_triage":
+		if bool(data.get("ok", false)):
+			say("Triage: treated %d allies (+%d HP total, -%d bleeding)." % [
+				int(data.get("treated", 0)), roundi(float(data.get("heal", 0.0))),
+				roundi(float(data.get("bleeding_stopped", 0.0)))])
+		else:
+			say("Triage denied: " + str(data.get("reason", "rejected")))
 		return
 	if kind == "party_aid":
 		if bool(data.get("ok", false)):
@@ -1325,6 +1373,8 @@ func _process(_delta: float) -> void:
 	_info_label.text += "\nTRAIL BIKE: %s | F4 mount/dismount | remount %.0fs" % [
 		"RIDING" if bool(client.you.get("mounted", false)) else ("CARRIED" if client.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		float(client.you.get("mount_cooldown", 0.0))]
+	if bool(client.you.get("mounted", false)):
+		_info_label.text += "\nBIKE RATTLE: moving attracts infected within 27 m"
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
 		round(100.0 * float(client.you.get("weather_insulation", 0.0))))
 	var visual: float = float(client.you.get("visual_signature", 1.0))

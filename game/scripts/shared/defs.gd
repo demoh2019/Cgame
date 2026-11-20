@@ -206,6 +206,15 @@ static func _build_items() -> void:
 		_add_recipe("machete_%d" % t, "machete_%d" % t, 1,
 			{"plank_%d" % t: 2, "bar_%d" % t: 2, "scrap": 1},
 			"workbench", 6.0)
+		# Weighted metal head: slower than a club, but its equipment-granted
+		# blow can briefly stagger living infected (never raid bosses).
+		_add_item("sledgehammer_%d" % t, {"name": "Salvage Sledgehammer T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 16.0 + 10.0 * (t - 1), "cooldown": 1.1,
+			"weight": 5.0 + 0.35 * t, "value": 67 * t})
+		_add_recipe("sledgehammer_%d" % t, "sledgehammer_%d" % t, 1,
+			{"plank_%d" % t: 1, "bar_%d" % t: 3, "scrap": 2},
+			"workbench", 7.0)
 		# Lightweight classless archery: affordable arrows, limited distance and noise.
 		_add_item("bow_%d" % t, {"name": "Survival Bow T%d" % t,
 			"kind": "weapon", "weapon": "ranged", "tier": t,
@@ -338,6 +347,12 @@ static func _build_items() -> void:
 		"heal": 8.0, "cure": 40.0, "stop_bleeding": true, "stack": 5, "value": 20})
 	_add_recipe("field_antiseptic", "field_antiseptic", 1,
 		{"bandage": 1, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	# A single material-paid squad treatment; no free healing or item duplication.
+	_add_item("field_triage_pack", {"name": "Expedition Triage Pack",
+		"kind": "party_medical", "tier": 1, "stack": 5, "weight": 0.8, "value": 42})
+	_add_recipe("field_triage_pack", "field_triage_pack", 1,
+		{"bandage": 2, "field_antiseptic": 1, "cloth_1": 2, "water_bottle": 1},
+		"workbench", 5.0)
 	# Spitter counterplay: consumes real survival supplies instead of
 	# granting immunity to the initial splash or healing past wounds.
 	_add_item("field_alkali_kit", {"name": "Field Alkali Kit",
@@ -381,6 +396,16 @@ static func _build_items() -> void:
 		"workbench", 8.0)
 	# Days After loot: only found while scavenging ruins.
 	_add_item("pistol", {"name": "Pistol", "kind": "weapon", "weapon": "ranged", "tier": 3, "damage": 22.0, "cooldown": 0.45, "ammo": "ammo_9mm", "value": 150})
+	# Rebuild one scavenged pistol into a quieter but weaker exploration weapon.
+	# Reduced sound is server-owned and fed into existing infected hearing logic.
+	_add_item("suppressed_pistol", {"name": "Improvised Suppressed Pistol",
+		"kind": "weapon", "weapon": "ranged", "tier": 3,
+		"damage": 18.0, "cooldown": 0.7, "range": 32.0,
+		"ammo": "ammo_9mm", "shot_noise_radius": 12.0,
+		"shot_noise_seconds": 1.1, "weight": 3.3, "value": 260})
+	_add_recipe("suppressed_pistol", "suppressed_pistol", 1,
+		{"pistol": 1, "bar_3": 2, "cloth_3": 2, "scrap": 6},
+		"workbench", 10.0)
 	# Ranged fighting can be sustained through scavenging and T2 metalworking.
 	# Recipes use the existing authoritative bench and crafting mastery rules.
 	_add_item("arrow", {"name": "Wooden Arrows", "kind": "ammo",

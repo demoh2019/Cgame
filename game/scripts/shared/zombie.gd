@@ -37,6 +37,7 @@ var spit_seconds: float = 0.0
 var spit_center: Vector2 = Vector2.ZERO
 var stuck_time: float = 0.0
 var snared_seconds: float = 0.0 # Server-owned root; movement-only, not attack immunity.
+var stagger_seconds: float = 0.0 # Short PvE-only incapacitation from a confirmed heavy blow.
 var contributors: Dictionary = {} # Server: peer -> time + equipped weapon for PvE assist XP.
 var data: Dictionary
 var threat: Dictionary = {} # Bounded per-zombie server combat threat; not sent to clients.
@@ -81,6 +82,13 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 	if forced_target_seconds <= 0.0:
 		forced_target_id = -1
 	think_timer -= delta
+	# While staggered, infected cannot move, melee attack or finish a spit.
+	# All server-owned countdowns above still advance while incapacitated.
+	if stagger_seconds > 0.0:
+		stagger_seconds = maxf(0.0, stagger_seconds - maxf(0.0, delta))
+		if stagger_seconds <= 0.0:
+			think_timer = 0.0 # Reevaluate target after recovering.
+		return {}
 	var here := Vector2(position.x, position.z)
 	# Resolve a fixed warned location ONCE, even if the chosen target moved
 	# away. Actual player damage is decided later by GameServer.
@@ -300,6 +308,20 @@ func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: floa
 		stuck_time = 0.0
 
 
+## Server-confirmed melee crowd control. Neither client packets nor raid boss
+## damage can directly enter this path. Elites get half the usual duration.
+func apply_stagger(seconds: float) -> bool:
+	if not is_alive() or raid_boss or not is_finite(seconds) or seconds <= 0.0 or seconds > 1.5:
+		return false
+	var effective: float = seconds * (0.5 if elite else 1.0)
+	stagger_seconds = maxf(stagger_seconds, effective)
+	# Interrupt an in-flight acid windup so it cannot explode during stun.
+	spit_pending = false
+	spit_seconds = 0.0
+	stuck_time = 0.0
+	return true
+
+
 ## Server-only trap application; cannot target a boss or expired/dead zombie.
 func apply_snare(seconds: float) -> bool:
 	if not is_alive() or raid_boss or not is_finite(seconds) or seconds <= 0.0 or seconds > 3.0:
@@ -320,6 +342,7 @@ func take_damage(amount: float, attacker_id: int = -1) -> bool:
 		state = State.DEAD
 		spit_pending = false
 		spit_seconds = 0.0
+		stagger_seconds = 0.0
 		threat.clear()
 		return true
 	if state == State.IDLE or state == State.WANDER:

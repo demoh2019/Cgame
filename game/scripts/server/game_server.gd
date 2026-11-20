@@ -22,9 +22,11 @@ const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
+const PartyTriage = preload("res://scripts/shared/party_triage.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
 const SiegeContracts = preload("res://scripts/shared/siege_contracts.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
+const OutpostProvisions = preload("res://scripts/shared/outpost_provisions.gd")
 const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
@@ -53,6 +55,7 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
+const NightHorde = preload("res://scripts/shared/night_horde.gd")
 const HubRecall = preload("res://scripts/shared/hub_recall.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
@@ -65,6 +68,7 @@ const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
+const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const InfectedSnare = preload("res://scripts/shared/infected_snare.gd")
@@ -84,6 +88,7 @@ const TRADE_RANGE := 6.0
 const TRADE_TIMEOUT := 45.0
 const MARKET_MAX_REQUEST_ID := 2_147_483_647
 const FORTIFY_MAX_REQUEST_ID := 2_147_483_647
+const PROVISION_MAX_REQUEST_ID := 2_147_483_647
 const BREACH_MAX_REQUEST_ID := 2_147_483_647
 const SIEGE_DECLARE_MAX_REQUEST_ID := 2_147_483_647
 const ZOMBIE_ACTIVE_RADIUS := 130.0 # Zombies farther than this from every player are put to sleep.
@@ -181,6 +186,8 @@ var zombies: Dictionary = {} # zombie id -> Zombie
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned session clock.
+var next_horde_at: float = NightHorde.START_DELAY # Separate night event schedule.
+var night_horde: Dictionary = {} # Active IDs, expiry, tier, public event coordinates.
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
 var siege_last_by_wall: Dictionary = {} # Session timers only; no character persistence.
@@ -194,6 +201,7 @@ var raid_pending_slam: Dictionary = {} # World position & deadline are server-ow
 var raid_wave: int = 0 # Number of completed reinforcement phases.
 var raid_minions: Array[int] = [] # Raid-only infected are cleared with boss.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
+var shelters: Dictionary = {} # Public, temporary weather tarps; never checkpointed.
 var decoys: Dictionary = {} # Temporary physical sound lures; server-owned, never persisted.
 var infected_snares: Dictionary = {} # Temporary PvE tripwires, never checkpointed.
 var acid_pools: Dictionary = {} # Temporary nonpersistent corrosive terrain.
@@ -209,6 +217,7 @@ var territory # Session outposts generated from this world seed.
 var siege_contracts = SiegeContracts.new() # Session-only declared siege windows and honor.
 var guild_siege_wins: Dictionary = {} # Historical Nakama totals cached for connected guilds.
 var outpost_fortify_requests: Dictionary = {} # Peer -> last request and cached result.
+var outpost_provision_requests: Dictionary = {} # Peer -> last provision receipt.
 var outpost_breach_requests: Dictionary = {} # Peer -> last command and cached result.
 var training_invites: Dictionary = {} # Target peer -> verified invitation.
 var training_matches: Dictionary = {} # Both peer IDs reference the same session.
@@ -511,6 +520,7 @@ func remove_player(peer_id: int) -> void:
 			survivor.defense_until = 0.0
 	market_buy_requests.erase(peer_id)
 	outpost_fortify_requests.erase(peer_id)
+	outpost_provision_requests.erase(peer_id)
 	outpost_breach_requests.erase(peer_id)
 	siege_declare_requests.erase(peer_id)
 	_cancel_market_seller(peer_id)
@@ -655,6 +665,12 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		if sprint_allowed and player.position.distance_to(before_move) > 0.01:
 			player.noise_radius = maxf(player.noise_radius, Defs.SPRINT_NOISE_RADIUS)
 			player.noise_timer = maxf(player.noise_timer, Defs.SPRINT_NOISE_SECONDS)
+		# Never trust movement or noise from a client. The server measures
+		# actual travel after collision, and only an owned mount creates rattle.
+		var bike_noise: float = Mounts.noise_for_distance(moved) if player.mounted else 0.0
+		if bike_noise > 0.0:
+			player.noise_radius = maxf(player.noise_radius, bike_noise)
+			player.noise_timer = maxf(player.noise_timer, Mounts.NOISE_SECONDS)
 		# Walking away cancels gathering and shoreline fishing.
 		if not player.action.is_empty():
 			if player.action.has("fish"):
@@ -1127,6 +1143,67 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 		"fracture_treated": splinted}
 
 
+## One authenticated medic spends one crafted pack for up to three injured
+## current teammates. Target selection is never client-authored.
+func cmd_party_triage(peer_id: int) -> Dictionary:
+	var medic: Player = players.get(peer_id)
+	if medic == null or not _alive(medic):
+		return {"ok": false, "reason": "dead"}
+	var group: Array = parties.members_of(peer_id)
+	if group.size() < 2:
+		return {"ok": false, "reason": "not_in_party"}
+	if medic.party_aid_timer > 0.0:
+		return {"ok": false, "reason": "cooldown"}
+	if medic.inventory.count(PartyTriage.ITEM_ID) < 1:
+		return {"ok": false, "reason": "not_carried"}
+	var candidates: Array = []
+	for member_id in group:
+		var member_peer: int = int(member_id)
+		if member_peer == peer_id:
+			continue # The pack treats allies, not its bearer.
+		var ally: Player = players.get(member_peer)
+		if ally == null or not _alive(ally):
+			continue
+		if not PartyTriage.can_reach(medic.position, ally.position):
+			continue
+		var score: float = PartyTriage.urgency(ally.survival.health,
+			ally.survival.max_health, ally.survival.bleeding)
+		if score <= 0.0:
+			continue
+		candidates.append({"peer": member_peer, "score": score, "player": ally})
+	if candidates.is_empty():
+		return {"ok": false, "reason": "no_wounded_allies"}
+	# Prioritize urgent treatment and resolve equal wounds by peer ID.
+	candidates.sort_custom(func(a, b):
+		return float(a["score"]) > float(b["score"]) if float(a["score"]) != float(b["score"]) else int(a["peer"]) < int(b["peer"]))
+	# Spend only after all checks and the complete eligible roster are resolved.
+	if not medic.inventory.remove(PartyTriage.ITEM_ID, 1):
+		return {"ok": false, "reason": "not_carried"}
+	var treated: int = mini(candidates.size(), PartyTriage.MAX_RECIPIENTS)
+	var healed: float = 0.0
+	var bleeding_stopped: float = 0.0
+	for i in range(treated):
+		var recipient: Player = candidates[i]["player"]
+		var old_health: float = recipient.survival.health
+		var old_bleeding: float = recipient.survival.bleeding
+		recipient.survival.heal(PartyTriage.HEAL)
+		recipient.survival.bleeding = maxf(0.0,
+			recipient.survival.bleeding - PartyTriage.BLEEDING_TREATMENT)
+		var hp_gain: float = recipient.survival.health - old_health
+		var wound_care: float = old_bleeding - recipient.survival.bleeding
+		healed += hp_gain
+		bleeding_stopped += wound_care
+		recipient.dirty_character = true
+		events.append({"type": "party_triage", "peer": recipient.id, "by": peer_id,
+			"heal": hp_gain, "bleeding_stopped": wound_care})
+	medic.party_aid_timer = PartyTriage.COOLDOWN
+	medic.action = {}
+	medic.dirty_inventory = true
+	medic.dirty_character = true
+	return {"ok": true, "treated": treated, "heal": healed,
+		"bleeding_stopped": bleeding_stopped, "cooldown": PartyTriage.COOLDOWN}
+
+
 ## Expedition support: one real cooked fish per eligible party member.
 ## The client only picks a recipe, not recipient count, fire or bonus strength.
 func cmd_party_feast(peer_id: int, item_id: String) -> Dictionary:
@@ -1247,6 +1324,42 @@ func _party_state_for(peer_id: int) -> Dictionary:
 # --- Outpost fortification: server-authoritative supplies for siege defense. ----------
 # Every client command includes a monotonic request ID so an ambiguous response
 # cannot cause the same upgrade to spend the player's resources twice.
+## Bounded resource convoys. Monotonic request IDs cache the result of every
+## command, so duplicated network packets cannot spend or extend twice.
+func cmd_outpost_provision(peer_id: int, site_id: int, request_id: int) -> Dictionary:
+	if not players.has(peer_id):
+		return {"ok": false, "reason": "unknown_player"}
+	if request_id < 1 or request_id > PROVISION_MAX_REQUEST_ID:
+		return {"ok": false, "reason": "invalid_request_id"}
+	var last: Dictionary = outpost_provision_requests.get(peer_id, {})
+	if not last.is_empty():
+		if request_id < int(last["id"]):
+			return {"ok": false, "reason": "stale_request"}
+		if request_id == int(last["id"]):
+			if site_id != int(last["site"]):
+				return {"ok": false, "reason": "request_conflict"}
+			return (last["result"] as Dictionary).duplicate(true)
+	var player: Player = players[peer_id]
+	var result: Dictionary
+	if not _alive(player):
+		result = {"ok": false, "reason": "dead"}
+	else:
+		result = territory.deliver_provisions(site_id, player, players, parties, time)
+	if bool(result.get("ok", false)):
+		player.dirty_inventory = true
+		player.dirty_character = true
+		var flag: Dictionary = territory.site_by_id(site_id)
+		events.append({"type": "outpost_provisioned", "id": site_id,
+			"owner": flag["owner"], "x": flag["x"], "z": flag["z"],
+			"extended": OutpostProvisions.EXTRA_SECONDS,
+			"total": flag["provisioned_seconds"]})
+	result["request_id"] = request_id
+	outpost_provision_requests[peer_id] = {
+		"id": request_id, "site": site_id, "result": result.duplicate(true),
+	}
+	return result
+
+
 func cmd_outpost_fortify(peer_id: int, site_id: int, request_id: int) -> Dictionary:
 	if not players.has(peer_id):
 		return {"ok": false, "reason": "unknown_player"}
@@ -1944,6 +2057,67 @@ func cmd_throw_decoy(peer_id: int, direction_x: float, direction_z: float) -> Di
 	return {"ok": true, "id": id, "seconds": NoiseDecoy.DURATION}
 
 
+## Shared expedition tarp: weather reduction, not PvP protection.
+func cmd_pitch_shelter(peer_id: int, x: float, z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if shelters.size() >= PortableShelter.MAX_GLOBAL:
+		return {"ok": false, "reason": "world_limit"}
+	var owned := 0
+	for tarp in shelters.values():
+		if Structures.can_manage(tarp, peer_id, player.user_id):
+			owned += 1
+	if owned >= PortableShelter.MAX_PER_OWNER:
+		return {"ok": false, "reason": "owner_limit"}
+	var point := Vector2(x, z)
+	var origin := Vector2(player.position.x, player.position.z)
+	var reason: String = PortableShelter.valid_site(world, point, origin,
+		shelters, campfires)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	for other in players.values():
+		if _alive(other) and point.distance_to(
+				Vector2(other.position.x, other.position.z)) < (
+				PortableShelter.CANOPY_RADIUS + Defs.PLAYER_RADIUS + 0.15):
+			return {"ok": false, "reason": "blocked"}
+	for infected in zombies.values():
+		if infected.is_alive() and point.distance_to(
+				Vector2(infected.position.x, infected.position.z)) < (
+				PortableShelter.CANOPY_RADIUS + 0.7):
+			return {"ok": false, "reason": "blocked"}
+	if not player.inventory.has_all(PortableShelter.COST):
+		return {"ok": false, "reason": "missing_materials"}
+	for item_id in PortableShelter.COST:
+		player.inventory.remove(str(item_id), int(PortableShelter.COST[item_id]))
+	var id := new_id()
+	shelters[id] = {"id": id, "x": point.x, "y": world.height_at(x, z),
+		"z": point.y, "owner": peer_id, "owner_account": player.user_id,
+		"expires": time + PortableShelter.DURATION}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "id": id, "seconds": PortableShelter.DURATION}
+
+
+func cmd_pack_shelter(peer_id: int, shelter_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var tarp: Dictionary = shelters.get(shelter_id, {})
+	if tarp.is_empty() or float(tarp["expires"]) <= time:
+		return {"ok": false, "reason": "no_shelter"}
+	if not Structures.can_manage(tarp, peer_id, player.user_id):
+		return {"ok": false, "reason": "not_owner"}
+	if Vector2(player.position.x, player.position.z).distance_squared_to(
+			Vector2(float(tarp["x"]), float(tarp["z"]))) > (
+			PortableShelter.PACK_RANGE * PortableShelter.PACK_RANGE):
+		return {"ok": false, "reason": "out_of_range"}
+	shelters.erase(shelter_id)
+	return {"ok": true, "id": shelter_id}
+
+
 func cmd_light_campfire(peer_id: int, x: float, z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -2572,6 +2746,14 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		if count == 0:
 			first_target = str(hit["kind"])
 		_damage_target(player, hit, skilled_damage, "ranged" if ranged else "melee")
+		# PvE-only crowd control follows a real resolved hit. Never stun players,
+		# corpses or raid bosses, and never trust client-provided stun duration.
+		if hit["kind"] == "zombie" and skill.has("stagger_seconds"):
+			var infected = zombies.get(hit["id"])
+			if infected != null and infected.apply_stagger(float(skill["stagger_seconds"])):
+				events.append({"type": "stagger", "id": infected.id,
+					"seconds": infected.stagger_seconds,
+					"x": infected.position.x, "z": infected.position.z})
 		count += 1
 	if count == 0:
 		return {"ok": true, "hit": false, "hits": 0, "energy": player.combat_energy}
@@ -3102,6 +3284,19 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		if SupplyDrops.mark_cleared(cache, zombies):
 			events.append({"type": "supply_cleared", "id": int(cache["id"]),
 				"x": float(cache["x"]), "z": float(cache["z"])})
+	# Only death of the final real horde member can release the one-shot
+	# public trophy; a missing/despawned mob never counts as a victory.
+	if not night_horde.is_empty() and time < float(night_horde["expires"]):
+		var horde_ids: Array = night_horde["ids"]
+		if horde_ids.has(zombie.id) and NightHorde.fully_defeated(horde_ids, zombies):
+			var horde_zone: int = int(night_horde["zone"])
+			var reward_id: int = _make_bag(zombie.position, NightHorde.loot(horde_zone))
+			if reward_id >= 0:
+				bags[reward_id]["horde_cache"] = true
+				bags[reward_id]["expires"] = time + NightHorde.CACHE_DURATION
+				events.append({"type": "horde_cleared", "id": reward_id,
+					"x": zombie.position.x, "z": zombie.position.z, "tier": horde_zone + 1})
+			night_horde = {}
 	events.append({"type": "zombie_died", "id": zombie.id, "x": zombie.position.x, "z": zombie.position.z})
 
 
@@ -3295,6 +3490,8 @@ func _tick_players(delta: float) -> void:
 		var weather_severity: float = Weather.effective_severity(conditions, worn_armor)
 		if FieldCampfire.has_warmth(campfires, player.position, time):
 			weather_severity = 0.0
+		weather_severity = PortableShelter.exposure_severity(weather_severity,
+			PortableShelter.covers(shelters, player.position, time))
 		damage += player.survival.weather_tick(delta, weather_severity)
 		# The filter only protects for the portion of a tick it actually covers.
 		# An oversized server tick cannot extend the buff past its remaining time.
@@ -3930,6 +4127,8 @@ func _manage_zombie_population() -> void:
 			gone.append(zombie.id)
 		elif zombie.supply_cache_id >= 0 and bags.has(zombie.supply_cache_id):
 			continue # Guard stays loaded while its loot is alive: no lure-and-return exploit.
+		elif not night_horde.is_empty() and night_horde.get("ids", []).has(zombie.id):
+			continue # Prevent running away to unload an active horde and claim a win.
 		elif _nearest_player_distance(Vector2(zombie.position.x, zombie.position.z)) > ZOMBIE_ACTIVE_RADIUS:
 			gone.append(zombie.id)
 			if spawn_state.has(zombie.spawn_id):
@@ -4006,14 +4205,77 @@ func _spawn_supply_guards(site: Dictionary, bag_id: int) -> Array[int]:
 	return ids
 
 
+## One short-lived PvPvE hunt at a time. Spawn, expiry and the reward are
+## entirely owned by the simulation; no client can request or claim an event.
+func _tick_night_horde() -> void:
+	if not night_horde.is_empty():
+		if time >= float(night_horde["expires"]):
+			for id in night_horde["ids"]:
+				zombies.erase(int(id)) # Event-specific spawns have no respawn slot.
+			events.append({"type": "horde_expired", "x": float(night_horde["x"]),
+				"z": float(night_horde["z"])})
+			night_horde = {}
+			next_horde_at = maxf(next_horde_at, time + NightHorde.RETRY_SECONDS)
+		return
+	if time < next_horde_at or tick_count % NightHorde.CHECK_EVERY_TICKS != 0:
+		return
+	next_horde_at = time + NightHorde.RETRY_SECONDS
+	if not WorldCycle.is_night(time) or raid_boss_id >= 0 or \
+			zombies.size() >= NightHorde.MAX_ACTIVE_INFECTED:
+		return
+	var eligible: Array = []
+	for player in players.values():
+		if _alive(player) and player.position.is_finite() and \
+				ZoneRisk.full_loot(world.zone_at(player.position.x, player.position.z)):
+			eligible.append(player)
+	if eligible.is_empty():
+		return
+	var start: int = rng.randi_range(0, eligible.size() - 1)
+	var survivors: Array[Vector3] = []
+	for player in players.values():
+		if _alive(player) and player.position.is_finite():
+			survivors.append(player.position)
+	for shift in eligible.size():
+		var target: Player = eligible[(start + shift) % eligible.size()]
+		var available: int = NightHorde.MAX_ACTIVE_INFECTED - zombies.size()
+		var positions: Array[Dictionary] = NightHorde.sites(world, target.position,
+			survivors, zombies, available, rng.randi_range(0, NightHorde.ANGLES - 1))
+		if positions.size() < 2:
+			continue # No one-enemy "horde" or isolated, trivial trophy.
+		var ids: Array[int] = []
+		var visible: Dictionary = {target.id: {"position": target.position,
+			"alive": true, "safe": false}}
+		for spawn in positions:
+			var x: float = float(spawn["x"])
+			var z: float = float(spawn["z"])
+			var enemy_id: int = new_id()
+			var enemy = Zombie.new(enemy_id, str(spawn["kind"]),
+				Vector3(x, world.height_at(x, z), z), -1)
+			enemy.receive_pack_alert(target.id, visible)
+			zombies[enemy_id] = enemy
+			ids.append(enemy_id)
+		var zone: int = world.zone_at(target.position.x, target.position.z)
+		night_horde = {"ids": ids, "zone": zone,
+			"x": target.position.x, "z": target.position.z,
+			"expires": time + NightHorde.MAX_DURATION}
+		next_horde_at = time + NightHorde.COOLDOWN_SECONDS
+		events.append({"type": "horde_started", "x": target.position.x,
+			"z": target.position.z, "tier": zone + 1, "count": ids.size()})
+		return
+
+
 func _tick_world(delta: float) -> void:
 	for id in infected_snares.keys():
 		if time >= float(infected_snares[id]["expires"]):
 			infected_snares.erase(id)
 	_tick_supply_drop()
+	_tick_night_horde()
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):
 			decoys.erase(id)
+	for id in shelters.keys():
+		if time >= float(shelters[id]["expires"]):
+			shelters.erase(id)
 	for id in campfires.keys():
 		var fire: Dictionary = campfires[id]
 		if time >= float(fire["expires"]):
@@ -4079,7 +4341,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					"elite": zombie.elite, "raid_boss": zombie.raid_boss,
 					"raid_enraged": zombie.raid_enraged,
 					"max_hp": float(zombie.data.get("health", zombie.health)),
-					"snared_seconds": zombie.snared_seconds})
+					"snared_seconds": zombie.snared_seconds,
+					"stagger_seconds": zombie.stagger_seconds})
 	# Replicate only pending, living spit warnings within sight of this
 	# survivor. Client visual effects never authorize an actual hit.
 	var spit_zones: Array = []
@@ -4108,6 +4371,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			nearby_barricades.append(Structures.public_state(wall))
 	var nearby_campfires: Array = FieldCampfire.visible(campfires,
 			player.position, time, Defs.INTEREST_RADIUS)
+	var nearby_shelters: Array = PortableShelter.visible(shelters,
+			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_snares: Array = InfectedSnare.visible(
 		infected_snares, player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_decoys: Array = []
@@ -4126,6 +4391,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				bag_view["reserved_seconds"] = RaidLoot.remaining(bag, time)
 				bag_view["reserved"] = float(bag_view["reserved_seconds"]) > 0.0
 				bag_view["can_loot"] = RaidLoot.can_open(bag, player, time)
+			bag_view["horde_cache"] = bool(bag.get("horde_cache", false))
 			bag_view["supply_drop"] = bool(bag.get("supply_drop", false))
 			bag_view["guards_remaining"] = SupplyDrops.living_guards(bag, zombies)
 			if int(bag_view["guards_remaining"]) > 0:
@@ -4173,6 +4439,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"exposure": player.survival.exposure,
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
+			"tent_sheltered": PortableShelter.covers(shelters, player.position, time),
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
 			"weather_sight": Weather.sight_multiplier(
 				Weather.conditions(world, player.position.x, player.position.z, time)),
@@ -4223,6 +4490,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
 		"spit_zones": spit_zones, "acid_pools": nearby_acid_pools,
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
+		"shelters": nearby_shelters,
 		"decoys": nearby_decoys, "infected_snares": nearby_snares,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}

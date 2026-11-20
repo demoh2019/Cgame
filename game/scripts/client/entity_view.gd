@@ -65,6 +65,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 				"RAID BOSS " if bool(entity.get("raid_boss", false)) else (
 				"ELITE " if bool(entity.get("elite", false)) else "")),
 				str(entity["type"]), int(entity["hp"])]
+			if float(entity.get("stagger_seconds", 0.0)) > 0.0:
+				label.text += " [STAGGERED]"
 		elif kind == "player":
 			label.text = ("%s%s" % [
 				"OUTLAW " if bool(entity.get("outlaw", false)) else "", str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
@@ -100,7 +102,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			base = Color(0.92, 0.2, 0.63)
 		elif bool(entity.get("elite", false)):
 			base = Color(0.98, 0.65, 0.18)
-		model.set_tint(base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base)
+		var staggered: bool = float(entity.get("stagger_seconds", 0.0)) > 0.0
+		model.set_tint(base.lerp(Color(0.38, 0.8, 1.0), 0.7) if staggered else (
+			base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base))
 		model.set_zombie_state(int(entity["state"]))
 	if kind == "player":
 		var player_model: Node3D = _nodes[key].get_node("Model")

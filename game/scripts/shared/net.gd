@@ -441,6 +441,20 @@ func c_throw_decoy(direction_x: float, direction_z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_pitch_shelter(x: float, z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "shelter", sim.cmd_pitch_shelter(peer, x, z))
+
+
+@rpc("any_peer", "reliable")
+func c_pack_shelter(shelter_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "pack_shelter", sim.cmd_pack_shelter(peer, shelter_id))
+
+
+@rpc("any_peer", "reliable")
 func c_light_campfire(x: float, z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -620,10 +634,25 @@ func c_party_aid(target_id: int, item_id: String) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_triage() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_triage", sim.cmd_party_triage(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_party_kick(target_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "party", sim.cmd_party_kick(peer, target_id))
+
+
+@rpc("any_peer", "reliable")
+func c_outpost_provision(site_id: int, request_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "outpost_provision",
+			sim.cmd_outpost_provision(peer, site_id, request_id))
 
 
 ## Only the sender's authoritative party and backpack can reinforce a flag.
@@ -883,19 +912,21 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
 		"recall_started", "recall_cancelled", "recall_completed", "spawn", "zone", "gathered", "fished", "stealth_ambush", "storm_cast_lost", "crate", "mastery", "renown", "self_defense", "justice", "outlaw_bounty", "duel", "arena_queue", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk", "party_feast", "party_standard":
 			return event.get("peer", -1) == peer
-		"party_aid":
+		"party_aid", "party_triage":
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
 		"trade":
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"guardian_taunt":
 			return _is_nearby(event, peer)
-		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_breached", \
+		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_provisioned", "outpost_breached", \
 				"siege_contract_declared", "siege_contract_result":
 			return _is_nearby(event, peer)
 		"supply_drop":
 			return true # Public server-generated announcement.
 		"supply_cleared":
 			return _is_nearby(event, peer) # Only witnesses receive clearance coordinates.
+		"horde_started", "horde_cleared", "horde_expired":
+			return _is_nearby(event, peer) # Only local survivors can track this PvP encounter.
 		"death":
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":

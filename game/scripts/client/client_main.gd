@@ -963,6 +963,14 @@ func _update_hud() -> void:
 	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
 		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		survivor.mount_cooldown]
+	if not sim.night_horde.is_empty():
+		var remain: int = 0
+		for enemy_id in sim.night_horde.get("ids", []):
+			var member = sim.zombies.get(int(enemy_id))
+			if member != null and member.is_alive():
+				remain += 1
+		_stats.text += "\nNIGHT HORDE: %d infected remaining; %ds left to clear" % [
+			remain, ceili(maxf(0.0, float(sim.night_horde["expires"]) - sim.time))]
 	var equipped_ammo: String = str(Defs.item(survivor.inventory.weapon).get("ammo", ""))
 	if not equipped_ammo.is_empty():
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [
