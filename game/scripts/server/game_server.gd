@@ -16,6 +16,7 @@ const ArenaMatchmaking = preload("res://scripts/shared/arena_matchmaking.gd")
 const PvPHonor = preload("res://scripts/shared/pvp_honor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
+const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
@@ -1048,6 +1049,48 @@ func cmd_party_feast(peer_id: int, item_id: String) -> Dictionary:
 	source.dirty_inventory = true
 	source.dirty_character = true
 	return {"ok": true, "served": portions, "tier": tier, "seconds": seconds}
+
+
+## A real item-paid rally standard. Clients never set location, recipients,
+## recovery strength, or its deadline; all rules use the live server party.
+func cmd_party_standard(peer_id: int) -> Dictionary:
+	var leader: Player = players.get(peer_id)
+	if leader == null or not _alive(leader):
+		return {"ok": false, "reason": "dead"}
+	if not leader.position.is_finite():
+		return {"ok": false, "reason": "invalid_position"}
+	if _is_safe(leader.position):
+		return {"ok": false, "reason": "safe_hub"}
+	if world.is_water(leader.position.x, leader.position.z):
+		return {"ok": false, "reason": "in_water"}
+	var reason: String = parties.standard_reason(peer_id, leader.position, time)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	# Material-paid support only exists if at least one real living ally is nearby.
+	var companions: int = 0
+	for member_id in parties.members_of(peer_id):
+		if int(member_id) == peer_id:
+			continue
+		var member: Player = players.get(int(member_id))
+		if member != null and _alive(member) and RallyStandard.within_range(
+				leader.position, member.position):
+			companions += 1
+	if companions == 0:
+		return {"ok": false, "reason": "no_companions"}
+	if leader.inventory.count(RallyStandard.ITEM_ID) < 1:
+		return {"ok": false, "reason": "not_carried"}
+	if not leader.inventory.remove(RallyStandard.ITEM_ID, 1):
+		return {"ok": false, "reason": "not_carried"}
+	var result: Dictionary = parties.raise_standard(peer_id, leader.position, time)
+	# Invariant: the pure server-side preflight passed in this same method.
+	if not bool(result.get("ok", false)):
+		leader.inventory.add(RallyStandard.ITEM_ID, 1)
+		return result
+	leader.dirty_inventory = true
+	leader.dirty_character = true
+	events.append({"type": "party_standard", "peer": peer_id,
+		"seconds": RallyStandard.DURATION, "group": parties.group_of(peer_id)})
+	return result
 
 
 func cmd_party_rally(peer_id: int) -> Dictionary:
@@ -2781,6 +2824,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.action = {}
 	victim.dodge_immunity = 0.0
 	victim.guardian_brace = 0.0
+	parties.clear_standard_by(victim.id)
 	victim.meal_seconds = 0.0
 	victim.meal_tier = 0
 	victim.defense_target = -1
@@ -2867,8 +2911,17 @@ func _tick_players(delta: float) -> void:
 		var nourished: bool = player.survival.hunger > 20.0 and player.survival.thirst > 20.0
 		var energy_bonus: float = (
 			HeartyMeal.energy_per_second(meal_effect_tier) * active_meal) if nourished else 0.0
+		# Temporary field standard: only the actual group and present members
+		# may benefit. Source position and expiration come from the server.
+		var standard: Dictionary = parties.standard_at(player.id, player.position, time, delta)
+		var standard_seconds: float = 0.0
+		if nourished and not standard.is_empty():
+			standard_seconds = RallyStandard.bonus_seconds(time, delta,
+				float(standard["placed_at"]), float(standard["expires"]))
 		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX,
-			player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta + energy_bonus)
+			player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta + energy_bonus +
+				RallyStandard.ENERGY_PER_SECOND * standard_seconds)
+		var stamina_recovery_delay_before_tick: float = player.survival.stamina_recovery_delay
 		var had_bleeding: bool = player.survival.bleeding > 0.0
 		var had_fracture: bool = player.survival.fracture > 0.0
 		var had_scent_mask: bool = player.survival.scent_mask_seconds > 0.0
@@ -2879,6 +2932,15 @@ func _tick_players(delta: float) -> void:
 			player.survival.stamina = minf(Defs.MAX_STAMINA,
 				player.survival.stamina +
 					HeartyMeal.stamina_per_second(meal_effect_tier) * stamina_meal_seconds)
+		if standard_seconds > 0.0 and player.survival.fracture <= 0.0:
+			# Preserve sprint/dodge exhaustion delay rather than adding free stamina.
+			var rested_seconds: float = RallyStandard.bonus_seconds(time, delta,
+				float(standard["placed_at"]), float(standard["expires"]))
+			var ready_seconds: float = maxf(0.0,
+				rested_seconds - maxf(0.0, stamina_recovery_delay_before_tick))
+			if ready_seconds > 0.0:
+				player.survival.stamina = minf(Defs.MAX_STAMINA,
+					player.survival.stamina + RallyStandard.STAMINA_PER_SECOND * ready_seconds)
 		# Holding a contested PvP outpost grants a small local rally advantage.
 		# Only the server owns party identity, site control and stamina.
 		if player.survival.stamina_recovery_delay <= 0.0 and \
