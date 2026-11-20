@@ -310,5 +310,7 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 			sky.radiance_size = Sky.RADIANCE_SIZE_32
 		128:
 			sky.radiance_size = Sky.RADIANCE_SIZE_128
+		256:
+			sky.radiance_size = Sky.RADIANCE_SIZE_256
 		_:
 			sky.radiance_size = Sky.RADIANCE_SIZE_64
