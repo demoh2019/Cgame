@@ -63,6 +63,7 @@ const SUITES := [
 	"res://tests/test_cinematic_bloom.gd",
 	"res://tests/test_foliage_spectral_optics.gd",
 	"res://tests/test_scenery_pigment_instancing.gd",
+	"res://tests/test_native_multimesh_shuffle.gd",
 	"res://tests/test_graphics_auto_quality.gd",
 	"res://tests/test_combat_animation_priority.gd",
 	"res://tests/test_world_streamer_shared_budget.gd",
