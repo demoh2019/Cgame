@@ -255,6 +255,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# not declare a screen sampler, so it cannot force a buffer copy.
 		WaterRefraction.apply(water_shader, world_profile, _level, str(method))
 		water_shader.set_shader_parameter("ripple_strength", float(world_profile["water_ripples"]))
+		# Spectral light transported through clear, shallow water. Zero on
+		# Performance avoids the branch; even Ultra makes no extra texture reads.
+		water_shader.set_shader_parameter("shallow_scattering_strength",
+			float(world_profile["shallow_scattering_strength"]))
 		# Wind-driven water waves reuse the atmosphere's existing weather vector
 		# and the existing normal/whitecap calculations. No extra wave meshes.
 		water_shader.set_shader_parameter("wind_wave_strength",
