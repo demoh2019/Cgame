@@ -3246,3 +3246,67 @@ and bogus safe-zone tiers; kills cannot be replayed to generate more bags.
 
 Regression suite: `game/tests/test_raid_tempo.gd`, included in
 `game/tests/run_all.gd`. Tests require a Godot/Cgame runtime.
+
+
+## Guardian Shield Wall (party damage mitigation)
+
+Classless survivor guardians can now protect nearby teammates with a
+brief, active **Shield Wall** formation. Use the new **Shield Wall
+(party melee)** button beside Guardian Taunt and Guard Ally in the
+inventory/party combat controls. The shield is always activated
+through an authenticated RPC: clients never choose affected teammates,
+damage values, distances, or shield durations.
+
+- A living guardian on foot must belong to an actual party with
+  **at least one nearby living ally** in a dangerous zone and have an
+  **owned equipped melee weapon**. They spend **30 combat energy**
+  to create a nonpersistent **6-second** protective stance with a
+  **32-second** cooldown. Invalid attempts spend no energy.
+- Living nearby party allies within **5.5 metres**, on the same
+  danger-zone map and within **3 metres vertically**, take **22%
+  less physical damage** from ordinary infected melee attacks. A
+  raid boss's direct claw is mitigated by **12%** instead.
+  The guardian themselves receive **no additional reduction**:
+  existing personal Guardian Brace and single-hit Intercept continue
+  to cover their own defensive roles.
+- The shield is applied **after the existing equipped-gear mitigation,
+  Guardian Brace, timed Parry, and any legitimate field armor plate**.
+  It does not prevent infection, bleeding or fracture wounds by
+  itself. Those remain governed by the existing armor and
+  Warden Aura systems.
+- The server validates current party membership, real equipment,
+  living status, mounting, location, range, height and safety **at
+  every melee hit**. Moving away, changing gear, entering safety,
+  losing party membership or dying removes its benefit instantly.
+  Multiple active guardians can protect the same ally, but **only one
+  shield applies**: the nearest eligible guardian is selected, with
+  a stable peer-ID tie break. No multiplicative stacking.
+- This ability **never** runs from PvP damage, firearm damage, raid
+  cone/slam AoE, spitter acid, weather, hunger or infection ticks.
+  It produces no free healing, gear, rewards, or threat.
+- Each survivor's private `you.shield_wall_seconds`,
+  `you.shield_wall_cooldown`, `you.shield_wall_guarded_seconds`
+  and `you.shield_wall_guarded_by` snapshot drives a personal HUD
+  countdown. A real mitigated hit emits a
+  `party_shield_wall_block` event visible **only** to the guardian
+  and the protected ally. Nearby strangers receive no private
+  group status or mitigation events.
+- The live aura clears on death or respawn, but respawning does not
+  reset a pending cooldown. The state is session-only, not saved
+  to the character record.
+
+Implementation: `scripts/shared/party_shield_wall.gd`,
+`scripts/server/game_server.gd`, `scripts/shared/net.gd`,
+`scripts/client/game_client.gd` and `scripts/client/hud.gd`.
+Tests in `tests/test_party_shield_wall.gd` are registered in
+`tests/run_all.gd` and exercise actual zombie hits, energy,
+short cooldowns, nonstacking auras, safe zones, equipment, elevation,
+team membership, private network events, death/respawn and the lower
+raid reduction.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+This uses the game's existing GDScript combat, multiplayer RPCs and
+private state snapshots. It needs no native Godot engine changes.
