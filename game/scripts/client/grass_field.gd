@@ -11,6 +11,11 @@ const CLUMP_CELL := 3.2 # Size of the patches (Voronoi cells) that share a heigh
 const TILE := 16.0 # Each chunk is cut into tiles of this size, so the camera only draws the tiles it sees.
 const FADE_START := 44.0 # Horizontal distance from the camera where the blades begin to sink, and where they are gone.
 const FADE_END := 60.0
+# Geometry LOD reduces GPU vertex work without changing tuft placement or the close-up silhouette.
+# Hysteresis prevents distracting geometry switches when the camera moves near a boundary.
+const LOD_BLADES := [18, 9, 4]
+const LOD_SWITCH_DISTANCE := [24.0, 42.0]
+const LOD_HYSTERESIS := 3.0
 
 const SHADER_CODE := """
 shader_type spatial;
@@ -58,7 +63,7 @@ void fragment() {
 }
 """
 
-static var _mesh: ArrayMesh
+static var _meshes: Dictionary = {} # Blade count -> shared ArrayMesh; all tiles reuse three GPU meshes.
 static var _material: ShaderMaterial
 
 # Grass colour per biome (fresh, then dry); the lushness noise moves between them.
@@ -133,16 +138,17 @@ static func _value_noise(x: float, z: float) -> float:
 
 
 ## One tuft: eighteen thin, curved blades leaning outwards. UV.y runs from root (0) to tip (1).
-static func clump_mesh() -> ArrayMesh:
-	if _mesh != null:
-		return _mesh
+static func clump_mesh(blades: int = 18) -> ArrayMesh:
+	blades = maxi(blades, 1)
+	if _meshes.has(blades):
+		return _meshes[blades]
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7331
 	var vertices := PackedVector3Array()
 	var uvs := PackedVector2Array()
 	var normals := PackedVector3Array()
 	var indices := PackedInt32Array()
-	for blade in 18:
+	for blade in blades:
 		var angle := rng.randf() * TAU
 		var out := Vector3(cos(angle), 0.0, sin(angle))
 		var side := Vector3(-out.z, 0.0, out.x)
@@ -168,9 +174,21 @@ static func clump_mesh() -> ArrayMesh:
 	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
-	_mesh = ArrayMesh.new()
-	_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	return _mesh
+	var result := ArrayMesh.new()
+	result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_meshes[blades] = result
+	return result
+
+
+## Choose one of three blade counts using distance from a tile to the camera.
+## A 3 m dead zone avoids oscillating between mesh variants when the view moves.
+static func lod_for_distance(distance: float, previous: int = 0) -> int:
+	var tier: int = clampi(previous, 0, LOD_BLADES.size() - 1)
+	while tier < LOD_BLADES.size() - 1 and distance >= LOD_SWITCH_DISTANCE[tier] + LOD_HYSTERESIS:
+		tier += 1
+	while tier > 0 and distance <= LOD_SWITCH_DISTANCE[tier - 1] - LOD_HYSTERESIS:
+		tier -= 1
+	return tier
 
 
 static func material() -> ShaderMaterial:
