@@ -21,6 +21,7 @@ var _sky_refresh_interval := 0.4
 var _sky_refresh_elapsed := 2.0 # Force the first material upload.
 var _sky_seconds := 0.0
 var _vegetation_wind := Vector3.ZERO
+var _cloud_offset := Vector2.ZERO # Wrapped 1024 m high-cloud motion, shared by all surface materials.
 var _wind_publish_seconds := 0.1
 var _visual_biome_settings: Dictionary = {}
 var light_level := 1.0 # The daylight of the last update, 0 at night and 1 at noon.
@@ -40,6 +41,7 @@ func _ready() -> void:
 	# Initialize before the first streamed chunk compiles its materials.
 	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_map", CloudShadowLut.texture())
 	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_strength", 0.0)
+	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_offset", Vector2.ZERO)
 	environment = Environment.new()
 	environment.background_mode = Environment.BG_SKY
 	sky_material = ShaderMaterial.new()
@@ -109,10 +111,16 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	# Weather-synchronised GPU foliage: one packed upload, maximum 10 times a second.
 	_vegetation_wind = VegetationWind.smooth(
 		_vegetation_wind, VegetationWind.target(wind), delta)
+	# Integrate rather than multiply current wind by total scene time: the
+	# cloud field never jumps when regional gusts change direction.
+	_cloud_offset = CloudShadowLut.advance_offset(_cloud_offset, _vegetation_wind, delta)
 	_wind_publish_seconds += maxf(0.0, delta)
 	if _wind_publish_seconds >= 0.1:
 		_wind_publish_seconds = fmod(_wind_publish_seconds, 0.1)
 		RenderingServer.global_shader_parameter_set(&"aa_vegetation_wind", _vegetation_wind)
+		# One extra global at 10 Hz; every forest/field/road still shares
+		# a single cached R8 cloud shadow texture and one shader tap.
+		RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_offset", _cloud_offset)
 	sun.rotation = Vector3(-deg_to_rad(lerpf(6.0, 62.0, clampf(sun_height, 0.0, 1.0))), deg_to_rad(35.0 + phase * 90.0), 0.0)
 	# Low sun is orange, high sun is white; the moon is a weak blue light from the opposite direction.
 	var low_sun := 1.0 - clampf(sun_height * 2.2, 0.0, 1.0)
@@ -142,6 +150,10 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		sky_material.set_shader_parameter("dusk", dusk)
 		sky_material.set_shader_parameter("storm", storm)
 		sky_material.set_shader_parameter("sky_time", _sky_seconds)
+		# The sky panorama and sunlit terrain clouds follow the same wind.
+		# Each wrapped 1024 m axis equals a full repeat of the panorama U.
+		sky_material.set_shader_parameter("cloud_wind_rotation",
+			(_cloud_offset.x + _cloud_offset.y) / CloudShadowLut.TILE_METERS)
 		# DirectionalLight3D emits along -Z. Cache exactly that direction for the disc.
 		sky_material.set_shader_parameter("sun_direction", sun.global_transform.basis.z.normalized())
 		var light_color: Color = sun.light_color
