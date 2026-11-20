@@ -67,7 +67,7 @@ func get_status_text() -> String:
     var completed: int = streamer.get_streaming_source_loaded_cell_count(SOURCE_NAME)
     var total: int = streamer.get_streaming_source_cell_count(SOURCE_NAME)
     var activated: int = streamer.get_streaming_source_activated_cell_count(SOURCE_NAME)
-    return "Переход в %s: сцены %d/%d, физика %d/%d (%.0f%%) — F12: отмена" % [
+    return "Переход в %s: сцены %d/%d, активация %d/%d (%.0f%%) — F12: отмена" % [
         destination_name, completed, total, activated, total, get_progress() * 100.0]
 
 
