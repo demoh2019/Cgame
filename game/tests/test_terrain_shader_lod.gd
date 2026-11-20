@@ -99,3 +99,28 @@ func run(t) -> void:
 		var moss: float = paved_share * smoothstep(0.34, 0.72, old_mid) * 0.5
 		t.check(moss >= 0.0 and moss <= 0.5,
 			"urban moss tint is bounded and vanishes on unpaved ground")
+
+	t.current = "vertex-interpolated macro terrain shading"
+	if ground != null:
+		var source: String = ground.code
+		var vertex_start: int = source.find("void vertex()")
+		var fragment_start: int = source.find("void fragment()")
+		t.check(vertex_start >= 0 and fragment_start > vertex_start, "terrain shader has a vertex-to-fragment pipeline")
+		var vertex_code: String = source.substr(vertex_start, fragment_start - vertex_start)
+		var fragment_code: String = source.substr(fragment_start)
+		t.check(vertex_code.contains("aa_macro_broad = fbm(world_position.xz * 0.012);"),
+			"macro biome noise moves to the vertex stage")
+		t.check(not fragment_code.contains("fbm(p * 0.012)"),
+			"large terrain pixel count no longer repeats macro-noise octaves")
+		t.check(fragment_code.contains("float broad = aa_macro_broad;"),
+			"all existing biome, snow and weather weights share interpolated macro noise")
+		t.check(vertex_code.contains("aa_vertex_cloud_shadow = cloud_shadow(world_position.xz, TIME);"),
+			"large cloud shadows sample the same LUT in the vertex stage")
+		t.check(not fragment_code.contains("apply_cloud_shadow(color, p, TIME)"),
+			"landscape fragments skip the redundant cloud texture lookup")
+		t.check(fragment_code.contains("aa_vertex_cloud_shadow"),
+			"cloud color grading uses interpolated shadow strength")
+		t.check(fragment_code.contains("float mid = fbm(p * 0.07 + 3.0);"),
+			"mid-frequency soil detail remains pixel-accurate")
+		t.check(fragment_code.contains("textureGrad(normal_layers"),
+			"high-frequency normal detail remains supported")
