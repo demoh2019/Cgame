@@ -97,6 +97,15 @@
 				Returns the cell coordinates of currently instantiated scenes.
 			</description>
 		</method>
+		<method name="are_cells_loaded" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" default="0" />
+			<description>
+				Returns [code]true[/code] only when all cells in the square area around [param center] are currently instantiated. A radius of [code]0[/code] checks one cell, while a radius of [code]1[/code] checks nine. Missing, unregistered, failed, or still-loading cells make the result [code]false[/code]. The maximum radius is [code]32[/code]. Regions that would overflow integer cell coordinates return [code]false[/code].
+				[b]Note:[/b] This reports scene-tree readiness only. Physics server synchronization, navigation baking, shader compilation, and resource uploads may still require additional frames or application-level readiness checks.
+			</description>
+		</method>
 		<method name="is_cell_loaded" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="cell" type="Vector2i" />
