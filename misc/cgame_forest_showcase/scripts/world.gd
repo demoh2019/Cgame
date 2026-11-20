@@ -5,7 +5,6 @@ extends Node3D
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
 const GameSave = preload("res://scripts/game_save.gd")
 const WORLD_EXTENT: float = 64.0
-const GRID_SEGMENTS: int = 112
 const CHUNK_EDGE: float = 32.0
 const CRYSTAL_TOTAL: int = 8
 
@@ -31,7 +30,6 @@ func _ready() -> void:
     rng.seed = 913481
     _create_environment()
     _create_sun()
-    _create_terrain()
     _create_world_boundaries()
     _create_crystals()
     _create_camera()
@@ -89,73 +87,6 @@ func _create_sun() -> void:
     add_child(sun)
 
 
-func _create_terrain() -> void:
-    var vertices := PackedVector3Array()
-    var normals := PackedVector3Array()
-    var colors := PackedColorArray()
-    var uvs := PackedVector2Array()
-    var indices := PackedInt32Array()
-
-    var stride: int = GRID_SEGMENTS + 1
-    var step: float = WORLD_EXTENT * 2.0 / float(GRID_SEGMENTS)
-    for z in range(stride):
-        for x in range(stride):
-            var px: float = -WORLD_EXTENT + float(x) * step
-            var pz: float = -WORLD_EXTENT + float(z) * step
-            var y: float = height_at(px, pz)
-            var normal: Vector3 = _normal_at(px, pz)
-            vertices.push_back(Vector3(px, y, pz))
-            normals.push_back(normal)
-            uvs.push_back(Vector2(float(x), float(z)) * 0.08)
-            var slope: float = clampf(1.0 - normal.y, 0.0, 1.0)
-            var variation: float = 0.5 + 0.5 * sin(px * 0.12 + pz * 0.09)
-            var soil := Color(0.21, 0.20, 0.13)
-            var moss := Color(0.16, 0.27, 0.13)
-            colors.push_back(moss.lerp(soil, clampf(slope * 2.8 + variation * 0.12, 0.0, 1.0)))
-
-    for z in range(GRID_SEGMENTS):
-        for x in range(GRID_SEGMENTS):
-            var i: int = z * stride + x
-            # Counterclockwise winding from above (+Y); normal agrees with height derivative.
-            indices.push_back(i)
-            indices.push_back(i + stride)
-            indices.push_back(i + 1)
-            indices.push_back(i + 1)
-            indices.push_back(i + stride)
-            indices.push_back(i + stride + 1)
-
-    var arrays: Array = []
-    arrays.resize(Mesh.ARRAY_MAX)
-    arrays[Mesh.ARRAY_VERTEX] = vertices
-    arrays[Mesh.ARRAY_NORMAL] = normals
-    arrays[Mesh.ARRAY_COLOR] = colors
-    arrays[Mesh.ARRAY_TEX_UV] = uvs
-    arrays[Mesh.ARRAY_INDEX] = indices
-
-    var mesh := ArrayMesh.new()
-    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-    var material := StandardMaterial3D.new()
-    material.vertex_color_use_as_albedo = true
-    material.roughness = 0.97
-    mesh.surface_set_material(0, material)
-
-    var terrain := MeshInstance3D.new()
-    terrain.name = "Terrain_Heightfield"
-    terrain.mesh = mesh
-    terrain.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-    add_child(terrain)
-
-    # Use exactly the same mesh for physical ground and visible terrain.
-    # Trimesh collision is appropriate for static terrain, never dynamic bodies.
-    var terrain_body := StaticBody3D.new()
-    terrain_body.name = "TerrainCollision"
-    terrain_body.collision_layer = 1
-    terrain_body.collision_mask = 0
-    var terrain_shape := CollisionShape3D.new()
-    terrain_shape.shape = mesh.create_trimesh_shape()
-    terrain_body.add_child(terrain_shape)
-    add_child(terrain_body)
-
 
 func _create_world_boundaries() -> void:
     # Keep physics movement on the finite demo heightfield without teleporting.
@@ -195,7 +126,9 @@ func _create_streaming_world() -> void:
     world_partition.max_concurrent_requests = 4
     add_child(world_partition)
     world_partition.observer_path = world_partition.get_path_to(player)
+    player.set("streaming_world", world_partition)
     world_partition.cell_loaded.connect(_on_stream_cell_loaded)
+    world_partition.cell_unloaded.connect(_on_stream_cell_unloaded)
     world_partition.observer_cell_changed.connect(_on_observer_cell_changed)
 
     for cz in range(-2, 2):
@@ -206,17 +139,31 @@ func _create_streaming_world() -> void:
 
 
 func _on_observer_cell_changed(cell: Vector2i) -> void:
-    # Event-driven region updates: other gameplay systems can subscribe here.
     current_region = cell
+    _refresh_player_stream_safety()
     _refresh_hud()
 
 
 func _on_stream_cell_loaded(_cell: Vector2i) -> void:
-    # Apply the active graphics profile to newly instantiated streaming cells.
+    # Only loaded patches have heightfield physics; enable player when ready.
+    # Quality profiles are kept consistent through reloads.
     for node in world_partition.get_children():
         if node.has_method("set_high_quality"):
             node.call("set_high_quality", high_quality)
+    _refresh_player_stream_safety()
     _refresh_hud()
+
+
+func _on_stream_cell_unloaded(_cell: Vector2i) -> void:
+    _refresh_player_stream_safety()
+
+
+func _refresh_player_stream_safety() -> void:
+    if player == null or world_partition == null:
+        return
+    var local: Vector3 = world_partition.to_local(player.global_position)
+    var cell: Vector2i = world_partition.local_position_to_cell(local)
+    player.set("movement_enabled", world_partition.is_cell_loaded(cell))
 
 
 func _create_crystals() -> void:
@@ -261,6 +208,8 @@ func _create_camera() -> void:
     player.name = "ExplorerBody"
     player.set_script(preload("res://scripts/explorer_character.gd"))
     add_child(player)
+    # Freeze physics until the streamed spawn tile (including its collider) is ready.
+    player.set("movement_enabled", false)
     player.call("teleport_to_ground", 0.0, 9.0, height_at(0.0, 9.0))
 
     camera = Camera3D.new()
@@ -392,6 +341,9 @@ func _load_game() -> void:
     var position: Vector2 = state["position_xz"]
     player.call("teleport_to_ground", position.x, position.y,
         height_at(position.x, position.y))
+    # Prioritize the destination tile after a saved-game teleport.
+    world_partition.update_streaming()
+    _refresh_player_stream_safety()
     var look: Vector2 = state["look"]
     camera.rotation.x = look.x
     player.rotation.y = look.y
