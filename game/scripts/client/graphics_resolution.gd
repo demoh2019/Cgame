@@ -18,9 +18,21 @@ static func metalfx_min_scale(method: String, driver: String,
 		device: RenderingDevice) -> float:
 	if method != "forward_plus" or driver.to_lower() != "metal" or device == null:
 		return 0.0
-	var raw: int = device.limit_get(RenderingDevice.LIMIT_METALFX_TEMPORAL_SCALER_MIN_SCALE)
-	var limit: float = float(raw) / 1000000.0
-	return limit if is_finite(limit) and limit >= 0.3 and limit <= 1.0 else 0.0
+	# Native driver presence is insufficient: older Apple GPUs may lack the
+	# required temporal reconstruction capability entirely.
+	if not device.has_feature(RenderingDevice.SUPPORTS_METALFX_TEMPORAL):
+		return 0.0
+	var minimum: float = float(device.limit_get(
+		RenderingDevice.LIMIT_METALFX_TEMPORAL_SCALER_MIN_SCALE)) / 1000000.0
+	var maximum: float = float(device.limit_get(
+		RenderingDevice.LIMIT_METALFX_TEMPORAL_SCALER_MAX_SCALE)) / 1000000.0
+	# Input fractions are bounded by the real Metal device range. Reject
+	# incomplete capability reports instead of allocating invalid buffers.
+	if not is_finite(minimum) or not is_finite(maximum) or minimum < 0.3 \
+			or minimum > 1.0 or maximum < 1.0 or maximum > 2.0 \
+			or maximum < minimum:
+		return 0.0
+	return minimum
 
 
 static func runtime_metalfx_min_scale() -> float:
@@ -29,6 +41,18 @@ static func runtime_metalfx_min_scale() -> float:
 	var device: RenderingDevice = RenderingServer.get_rendering_device()
 	return metalfx_min_scale("forward_plus",
 		RenderingServer.get_current_rendering_driver_name(), device)
+
+
+## A temporal scaler must not silently override a preset's render-pixel
+## ceiling. Performance with a MetalFX 0.7x minimum and 0.59x budget
+## must use FSR2 at 0.59x, not force 0.7x (~41% more shaded pixels).
+static func metalfx_budget_floor(device_minimum: float, tier_ceiling: float) -> float:
+	if not is_finite(device_minimum) or not is_finite(tier_ceiling):
+		return 0.0
+	if device_minimum < 0.3 or device_minimum > 1.0 \
+			or tier_ceiling <= 0.0 or device_minimum > tier_ceiling + 0.00001:
+		return 0.0
+	return device_minimum
 
 
 static func plan(method: String, profile: Dictionary,
@@ -43,11 +67,14 @@ static func plan(method: String, profile: Dictionary,
 	# adaptive mode. Native MetalFX takes precedence only on supported Metal
 	# devices, with their actual minimum input scale, else FSR2 stays active.
 	if method == "forward_plus" and (adaptive or scale < 0.995):
-		var native_metal: bool = driver.to_lower() == "metal" and is_finite(metal_min_scale) and (
-			metal_min_scale >= 0.3 and metal_min_scale <= 1.0)
+		# Do not let the native scaler exceed this tier's fixed pixel budget.
+		# If no compatible device range exists, prefer FSR2 over extra pixels.
+		var minimum: float = metalfx_budget_floor(
+			metal_min_scale, float(profile.get("scale", 1.0)))
+		var native_metal: bool = driver.to_lower() == "metal" and minimum > 0.0
 		if native_metal:
 			return {"mode": Viewport.SCALING_3D_MODE_METALFX_TEMPORAL,
-				"scale": maxf(scale, metal_min_scale),
+				"scale": maxf(scale, minimum),
 				"msaa": Viewport.MSAA_DISABLED,
 				"fsr_sharpness": 0.2,
 				"screen_space_aa": Viewport.SCREEN_SPACE_AA_DISABLED}

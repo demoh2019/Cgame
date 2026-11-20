@@ -107,7 +107,11 @@ static func post_sharpen_strength(value: int, method: String, adaptive: bool) ->
 ## The same driver-aware policy is used for initial, manual and adaptive
 ## resolution changes, without relaunching or rebuilding world resources.
 static func metalfx_resolution_floor() -> float:
-	return GraphicsResolution.runtime_metalfx_min_scale()
+	# The same eligibility gate is used by the adaptive controller and by
+	# the actual render-mode plan. Never claim a floor above tier ceiling.
+	return GraphicsResolution.metalfx_budget_floor(
+		GraphicsResolution.runtime_metalfx_min_scale(),
+		float(profile(_level)["scale"]))
 
 
 static func apply_resolution(viewport: Viewport,

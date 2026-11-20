@@ -145,3 +145,40 @@ func run(t) -> void:
 		"res://scripts/client/online_main.gd")
 	t.check(multiplayer.contains("GraphicsQuality.metalfx_resolution_floor()"),
 		"online adaptive quality cannot repeatedly ask for unsupported MetalFX scales")
+
+
+	t.current = "MetalFX refuses a GPU minimum exceeding the preset pixel budget"
+	var cost_sensitive: Dictionary = Resolution.plan("forward_plus", Quality.profile(0),
+		0.59, true, "metal", 0.70)
+	t.eq(cost_sensitive["mode"], Viewport.SCALING_3D_MODE_FSR2,
+		"Performance uses FSR2 instead of exceeding its 0.59 native pixel budget")
+	t.near(float(cost_sensitive["scale"]), 0.59, 0.00001,
+		"Performance keeps its original shading resolution")
+	var barely_missed: Dictionary = Resolution.plan("forward_plus", Quality.profile(1),
+		0.70, true, "metal", 0.80)
+	t.eq(barely_missed["mode"], Viewport.SCALING_3D_MODE_FSR2,
+		"Balanced rejects MetalFX when its minimum exceeds 0.77")
+	var affordable: Dictionary = Resolution.plan("forward_plus", Quality.profile(1),
+		0.68, true, "metal", 0.70)
+	t.eq(affordable["mode"], Viewport.SCALING_3D_MODE_METALFX_TEMPORAL,
+		"Balanced accepts MetalFX when hardware minimum fits the tier ceiling")
+	t.near(float(affordable["scale"]), 0.70, 0.00001,
+		"selected native MetalFX honors its minimum fraction")
+	t.near(Resolution.metalfx_budget_floor(0.8, 0.77), 0.0, 0.00001,
+		"a minimum exceeding tier ceiling is explicitly ineligible")
+	t.near(Resolution.metalfx_budget_floor(0.7, 0.77), 0.7, 0.00001,
+		"a supported scaler retains its true hardware minimum")
+	for invalid_limit in [NAN, INF, -0.01, 0.0, 1.4]:
+		t.near(Resolution.metalfx_budget_floor(invalid_limit, 1.0),
+			0.0, 0.00001, "invalid GPU limits never enable native temporal")
+	var quality_source: String = (Quality as Script).source_code
+	t.check(quality_source.contains(
+		"GraphicsResolution.metalfx_budget_floor("),
+		"adaptive floor is derived from the exact same budget eligibility test")
+	var render_source: String = (Resolution as Script).source_code
+	t.check(render_source.contains(
+		"device.has_feature(RenderingDevice.SUPPORTS_METALFX_TEMPORAL)"),
+		"engine temporal capability is tested, not inferred from Metal driver name")
+	t.check(render_source.contains(
+		"RenderingDevice.LIMIT_METALFX_TEMPORAL_SCALER_MAX_SCALE"),
+		"device's upper input fraction is validated before selecting MetalFX")

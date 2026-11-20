@@ -81,3 +81,22 @@ func run(t) -> void:
 	c.configure(3, 0.91)
 	t.near(c.floor_scale, 0.91, 0.00001,
 		"Ultra retains full native detail above the GPU's minimum scale")
+
+
+	t.current = "unsupported MetalFX floor cannot trap Performance at its ceiling"
+	c.configure(0, 0.72)
+	t.near(c.floor_scale, 0.52, 0.00001,
+		"device minimum above Performance's 0.59 ceiling forces FSR2 budget")
+	var got_reduction := false
+	for i in 480:
+		got_reduction = c.sample_frame(1.0 / 30.0, 34.0) or got_reduction
+	t.check(got_reduction and c.at_floor(),
+		"prolonged GPU bottleneck can still recover 3D rendering performance")
+	t.near(c.scale, 0.52, 0.00001,
+		"FSR2 performance floor stays reachable after MetalFX rejection")
+	c.configure(1, 0.80)
+	t.near(c.floor_scale, 0.65, 0.00001,
+		"Balanced rejects an unsupported minimum above its 0.77 ceiling")
+	c.configure(1, 0.70)
+	t.near(c.floor_scale, 0.70, 0.00001,
+		"supported Balanced GPU retains MetalFX's actual safe floor")
