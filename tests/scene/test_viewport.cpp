@@ -32,6 +32,10 @@
 
 TEST_FORCE_LINK(test_viewport)
 
+#ifndef _3D_DISABLED
+#include "scene/3d/light_3d.h"
+#endif // _3D_DISABLED
+
 #include "core/object/callable_mp.h"
 #include "scene/2d/node_2d.h"
 #include "scene/gui/control.h"
@@ -52,6 +56,31 @@ TEST_FORCE_LINK(test_viewport)
 #endif // PHYSICS_2D_DISABLED
 
 namespace TestViewport {
+
+#ifndef _3D_DISABLED
+TEST_CASE("[SceneTree][Light3D] atmospheric shadow values are finite and bounded") {
+	DirectionalLight3D light;
+	light.set_param(Light3D::PARAM_SHADOW_OPACITY, 0.62);
+	CHECK(light.get_param(Light3D::PARAM_SHADOW_OPACITY) == 0.62);
+	light.set_param(Light3D::PARAM_SHADOW_OPACITY, std::numeric_limits<real_t>::quiet_NaN());
+	CHECK(light.get_param(Light3D::PARAM_SHADOW_OPACITY) == 0.62);
+	light.set_param(Light3D::PARAM_SHADOW_OPACITY, std::numeric_limits<real_t>::infinity());
+	CHECK(light.get_param(Light3D::PARAM_SHADOW_OPACITY) == 0.62);
+	light.set_param(Light3D::PARAM_SHADOW_OPACITY, -1.0);
+	CHECK(light.get_param(Light3D::PARAM_SHADOW_OPACITY) == 0.0);
+	light.set_param(Light3D::PARAM_SHADOW_OPACITY, 3.0);
+	CHECK(light.get_param(Light3D::PARAM_SHADOW_OPACITY) == 1.0);
+
+	light.set_param(Light3D::PARAM_SHADOW_BLUR, 1.4);
+	CHECK(light.get_param(Light3D::PARAM_SHADOW_BLUR) == 1.4);
+	light.set_param(Light3D::PARAM_SHADOW_BLUR, std::numeric_limits<real_t>::quiet_NaN());
+	CHECK(light.get_param(Light3D::PARAM_SHADOW_BLUR) == 1.4);
+	light.set_param(Light3D::PARAM_SHADOW_BLUR, -5.0);
+	CHECK(light.get_param(Light3D::PARAM_SHADOW_BLUR) == 0.0);
+	light.set_param(Light3D::PARAM_SHADOW_BLUR, 15.0);
+	CHECK(light.get_param(Light3D::PARAM_SHADOW_BLUR) == 10.0);
+}
+#endif // _3D_DISABLED
 
 TEST_CASE("[SceneTree][Viewport] mesh LOD rejects invalid screen thresholds") {
 	Window *root = SceneTree::get_singleton()->get_root();
