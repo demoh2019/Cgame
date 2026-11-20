@@ -6,6 +6,7 @@ signal travel_completed(destination: Vector3)
 signal travel_failed(reason: String)
 
 const SOURCE_NAME: String = "fast_travel"
+const STREAMING_PRIORITY: int = 3 # Urgent, but still behind observer/pinned cells.
 const TIMEOUT_SECONDS: float = 10.0
 
 var streamer: WorldPartition3D
@@ -33,7 +34,7 @@ func request_travel(place: Vector3, label: String = "точка") -> bool:
         return false
     if active:
         cancel_travel()
-    if not streamer.set_streaming_source(SOURCE_NAME, place, 0):
+    if not streamer.set_streaming_source(SOURCE_NAME, place, 0, STREAMING_PRIORITY):
         last_message = "Источник перехода не зарегистрирован"
         return false
 
