@@ -14,6 +14,7 @@ const SunShadowAtmosphere = preload("res://scripts/client/sun_shadow_atmosphere.
 const MoonVisuals = preload("res://scripts/client/moon_visuals.gd")
 const LightningFlash = preload("res://scripts/client/graphics_lightning_flash.gd")
 const GraphicsEyeAdaptation = preload("res://scripts/client/graphics_eye_adaptation.gd")
+const GraphicsCinematicDof = preload("res://scripts/client/graphics_cinematic_dof.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
 ## Everything degrades gracefully on the compatibility renderer (SSAO and the like are simply ignored).
 
@@ -311,6 +312,10 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	_lightning_quality = _shadow_filter_level
 	_shadow_filter_seconds = SHADOW_FILTER_INTERVAL
 	GraphicsEyeAdaptation.apply(world_environment, _shadow_filter_level,
+		str(settings.get("rendering_method", "gl_compatibility")))
+	# Eye adaptation and DOF use the SAME persistent practical camera resource.
+	# The exposure controller initializes first; DOF never overwrites its ISO.
+	GraphicsCinematicDof.apply(world_environment, _shadow_filter_level,
 		str(settings.get("rendering_method", "gl_compatibility")))
 	_fog_profile = CinematicFog.profile(
 		int(settings.get("quality_level", 1)), str(settings.get("rendering_method", "gl_compatibility")))
