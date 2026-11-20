@@ -9,6 +9,7 @@ const ALBEDO_LINEAR := "uniform sampler2DArray albedo_layers : source_color, fil
 const NORMAL_LINEAR := "uniform sampler2DArray normal_layers : hint_normal, filter_linear_mipmap, repeat_enable;"
 const ALBEDO_ANISO := "uniform sampler2DArray albedo_layers : source_color, filter_linear_mipmap_anisotropic, repeat_enable;"
 const NORMAL_ANISO := "uniform sampler2DArray normal_layers : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;"
+const WET_COAT_DEFINE := "\n#define AA_TERRAIN_WET_CLEARCOAT"
 
 # ShaderMaterial shader assignment can invalidate the material's parameter
 # cache. Preserve actual biome, road, paving, texture-array and tint data when
@@ -37,7 +38,10 @@ static func tier_for_quality(quality: int) -> int:
 static func code_for_tier(source: String, tier: int) -> String:
 	if tier <= 0 or not source.contains(ALBEDO_LINEAR):
 		return source
+	# High/Ultra use the cached anisotropic shader variants for a second
+	# wet-film PBR lobe. Low tiers retain the original BRDF byte-for-byte.
 	var code := source.replace(ALBEDO_LINEAR, ALBEDO_ANISO)
+	code = code.replace("shader_type spatial;", "shader_type spatial;" + WET_COAT_DEFINE)
 	if tier >= 2:
 		code = code.replace(NORMAL_LINEAR, NORMAL_ANISO)
 	return code

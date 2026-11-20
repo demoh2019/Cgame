@@ -202,3 +202,9 @@ aa_terrain_micro_occlusion={
 "type": "float",
 "value": 0.0
 }
+
+; Only high quality terrain variants evaluate the thin wet-film PBR layer.
+aa_terrain_wet_clearcoat={
+"type": "float",
+"value": 0.0
+}

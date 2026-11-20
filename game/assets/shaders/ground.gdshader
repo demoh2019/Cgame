@@ -8,6 +8,10 @@ instance uniform float aa_lod_morph = 0.0;
 // High/Ultra only: subtle self-occlusion from normal-map microrelief,
 // fused into existing PBR AO without any extra texture or screen pass.
 global uniform float aa_terrain_micro_occlusion;
+#ifdef AA_TERRAIN_WET_CLEARCOAT
+// Only premium terrain variants pay for a separate wet-film BRDF.
+global uniform float aa_terrain_wet_clearcoat;
+#endif
 global uniform float aa_puddle_ripple_strength;
 // Radius of full two-scale albedo and normal mapping; shared by all streamed chunks.
 global uniform float aa_terrain_detail_radius;
@@ -482,4 +486,16 @@ void fragment() {
 	// without additional PBR texture fetches.
 	ROUGHNESS = filter_specular_roughness(final_roughness, bent);
 	SPECULAR = 0.5;
+#ifdef AA_TERRAIN_WET_CLEARCOAT
+	// Thin water film adds a dielectric specular lobe above the porous
+	// ground. Reuse already available terrain weights and rain moisture;
+	// no new texture samples, fullscreen passes, or mesh geometry.
+	float hard_surface = clamp(w[4] + w[5] * 0.35 + w[6] * 0.25
+		+ w[9] + w[10] + w[11] + w[12] * 0.35, 0.0, 1.0);
+	float water_film = wetness * hard_surface * detail_fade
+		* (1.0 - clamp(w[8], 0.0, 1.0));
+	CLEARCOAT = clamp(water_film * aa_terrain_wet_clearcoat, 0.0, 0.65);
+	CLEARCOAT_ROUGHNESS = mix(0.22, 0.07,
+		clamp(puddle + wetness * 0.45, 0.0, 1.0));
+#endif
 }
