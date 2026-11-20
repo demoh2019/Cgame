@@ -68,6 +68,7 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 	}
 	active_cells.erase(p_cell);
 	active_detail_levels.erase(p_cell);
+	active_simulation_cells.erase(p_cell);
 	emit_signal(SNAME("cell_unloaded"), p_cell);
 }
 
@@ -165,6 +166,13 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 		const int level = observer_cell_valid ? _cell_detail_level(p_cell, observer_cell) : 0;
 		instance->call(SNAME("set_streaming_lod"), level);
 		active_detail_levels.insert(p_cell, level);
+	}
+	// Let script roots initialize activation state before _ready(), without
+	// imposing any scene-tree-wide process_mode changes on games that opt out.
+	const bool simulation_active = observer_cell_valid ? _cell_simulation_active(p_cell, observer_cell) : true;
+	active_simulation_cells.insert(p_cell, simulation_active);
+	if (instance->has_method(SNAME("set_streaming_simulation_active"))) {
+		instance->call(SNAME("set_streaming_simulation_active"), simulation_active);
 	}
 	add_child(instance);
 	active_cells.insert(p_cell, instance->get_instance_id());
@@ -351,6 +359,84 @@ void WorldPartition3D::_refresh_cell_detail(const Vector2i &p_center) {
 		emit_signal(SNAME("cell_detail_changed"), E.key, next_level);
 		budget--;
 	}
+}
+
+bool WorldPartition3D::_cell_simulation_active(const Vector2i &p_cell, const Vector2i &p_center, bool p_previously_active) const {
+	if (simulation_radius < 0 || pinned_cells.has(p_cell) || _within_radius(p_cell, p_center, simulation_radius)) {
+		return true;
+	}
+	// Extra margin applies only to already-active cells. Inactive cells
+	// enter simulation strictly within the inner radius.
+	return p_previously_active && _within_radius(p_cell, p_center, simulation_radius + simulation_hysteresis_cells);
+}
+
+void WorldPartition3D::_refresh_cell_simulation(const Vector2i &p_center) {
+	int budget = max_simulation_transitions_per_frame;
+	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
+		if (budget <= 0) {
+			break;
+		}
+		bool *previous = active_simulation_cells.getptr(E.key);
+		if (previous == nullptr) {
+			continue;
+		}
+		const bool next = _cell_simulation_active(E.key, p_center, *previous);
+		if (*previous == next) {
+			continue;
+		}
+		Node3D *node = Object::cast_to<Node3D>(ObjectDB::get_instance(E.value));
+		if (node == nullptr || node->is_queued_for_deletion()) {
+			continue;
+		}
+		*previous = next;
+		if (node->has_method(SNAME("set_streaming_simulation_active"))) {
+			node->call(SNAME("set_streaming_simulation_active"), next);
+		}
+		emit_signal(SNAME("cell_simulation_changed"), E.key, next);
+		budget--;
+	}
+}
+
+void WorldPartition3D::set_simulation_radius(int p_radius) {
+	ERR_FAIL_COND_MSG(p_radius < -1 || p_radius > 32, "WorldPartition3D simulation_radius must be -1 (disabled) or 0 to 32.");
+	simulation_radius = p_radius;
+}
+
+int WorldPartition3D::get_simulation_radius() const {
+	return simulation_radius;
+}
+
+void WorldPartition3D::set_simulation_hysteresis_cells(int p_cells) {
+	ERR_FAIL_COND_MSG(p_cells < 0 || p_cells > 8, "WorldPartition3D simulation_hysteresis_cells must be between 0 and 8.");
+	simulation_hysteresis_cells = p_cells;
+}
+
+int WorldPartition3D::get_simulation_hysteresis_cells() const {
+	return simulation_hysteresis_cells;
+}
+
+void WorldPartition3D::set_max_simulation_transitions_per_frame(int p_count) {
+	ERR_FAIL_COND_MSG(p_count < 1 || p_count > 64, "WorldPartition3D simulation transition budget must be between 1 and 64.");
+	max_simulation_transitions_per_frame = p_count;
+}
+
+int WorldPartition3D::get_max_simulation_transitions_per_frame() const {
+	return max_simulation_transitions_per_frame;
+}
+
+bool WorldPartition3D::is_cell_simulation_active(const Vector2i &p_cell) const {
+	const bool *active = active_simulation_cells.getptr(p_cell);
+	return active != nullptr && *active && get_cell_instance(p_cell) != nullptr;
+}
+
+int WorldPartition3D::get_simulation_active_cell_count() const {
+	int result = 0;
+	for (const KeyValue<Vector2i, bool> &E : active_simulation_cells) {
+		if (E.value && get_cell_instance(E.key) != nullptr) {
+			result++;
+		}
+	}
+	return result;
 }
 
 void WorldPartition3D::set_observer_path(const NodePath &p_path) {
@@ -828,6 +914,7 @@ void WorldPartition3D::update_streaming() {
 		_request_cell(predicted_cell, new_requests, instances);
 	}
 	_refresh_cell_detail(center);
+	_refresh_cell_simulation(center);
 	_purge_unused_ready_scenes();
 	if (observer_cell_changed) {
 		emit_signal(SNAME("observer_cell_changed"), observer_cell);
@@ -898,6 +985,14 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_detail_transitions_per_frame"), &WorldPartition3D::get_max_detail_transitions_per_frame);
 	ClassDB::bind_method(D_METHOD("get_cell_detail_level", "cell"), &WorldPartition3D::get_cell_detail_level);
 	ClassDB::bind_method(D_METHOD("get_distant_cell_count"), &WorldPartition3D::get_distant_cell_count);
+	ClassDB::bind_method(D_METHOD("set_simulation_radius", "radius"), &WorldPartition3D::set_simulation_radius);
+	ClassDB::bind_method(D_METHOD("get_simulation_radius"), &WorldPartition3D::get_simulation_radius);
+	ClassDB::bind_method(D_METHOD("set_simulation_hysteresis_cells", "cells"), &WorldPartition3D::set_simulation_hysteresis_cells);
+	ClassDB::bind_method(D_METHOD("get_simulation_hysteresis_cells"), &WorldPartition3D::get_simulation_hysteresis_cells);
+	ClassDB::bind_method(D_METHOD("set_max_simulation_transitions_per_frame", "count"), &WorldPartition3D::set_max_simulation_transitions_per_frame);
+	ClassDB::bind_method(D_METHOD("get_max_simulation_transitions_per_frame"), &WorldPartition3D::get_max_simulation_transitions_per_frame);
+	ClassDB::bind_method(D_METHOD("is_cell_simulation_active", "cell"), &WorldPartition3D::is_cell_simulation_active);
+	ClassDB::bind_method(D_METHOD("get_simulation_active_cell_count"), &WorldPartition3D::get_simulation_active_cell_count);
 	ClassDB::bind_method(D_METHOD("set_observer_path", "path"), &WorldPartition3D::set_observer_path);
 	ClassDB::bind_method(D_METHOD("get_observer_path"), &WorldPartition3D::get_observer_path);
 	ClassDB::bind_method(D_METHOD("set_predictive_velocity", "velocity"), &WorldPartition3D::set_predictive_velocity);
