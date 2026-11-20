@@ -7,6 +7,8 @@ const AtmosphereController = preload("res://addons/visual_quality/atmosphere_con
 const WorldStreamer = preload("res://addons/visual_quality/world_streamer.gd")
 const WorldStateStore = preload("res://addons/visual_quality/world_state_store.gd")
 const AIInterest = preload("res://addons/visual_quality/ai_interest_manager.gd")
+const Telemetry = preload("res://addons/visual_quality/world_telemetry.gd")
+const BudgetGovernor = preload("res://addons/visual_quality/world_budget_governor.gd")
 const CharacterController = preload("res://addons/visual_quality/character_controller.gd")
 const ExplorationQuest = preload("res://addons/visual_quality/exploration_quest.gd")
 
@@ -18,6 +20,10 @@ var world_state: WorldStateStore3D
 var world_state_label: Label
 var ai_simulation_enabled: bool = true
 var ai_interest: WorldAIInterestManager3D
+var telemetry: WorldTelemetry3D
+var governor: WorldBudgetGovernor3D
+var telemetry_label: Label
+var last_export_result: String = ""
 var player_character: VisualLabCharacter3D
 var movement_label: Label
 var quest: ExplorationQuest3D
@@ -74,6 +80,19 @@ func _ready() -> void:
 	ai_interest.player = player_character
 	add_child(ai_interest)
 	ai_interest.set_quality_profile(manager.current_profile)
+	telemetry = Telemetry.new()
+	telemetry.name = "WorldTelemetry3D"
+	telemetry.streamer = streamer
+	telemetry.ai_interest = ai_interest
+	telemetry.snapshot_captured.connect(_update_telemetry_ui)
+	add_child(telemetry)
+	governor = BudgetGovernor.new()
+	governor.name = "WorldBudgetGovernor3D"
+	governor.streamer = streamer
+	governor.ai_interest = ai_interest
+	governor.telemetry = telemetry
+	add_child(governor)
+	governor.set_quality_profile(manager.current_profile)
 	_build_graphics_ui()
 	_update_graphics_ui(manager.current_profile, manager.adaptive_enabled)
 	atmosphere = AtmosphereController.new()
@@ -96,6 +115,7 @@ func _ready() -> void:
 	_build_quest_ui()
 	_build_movement_ui()
 	_build_world_state_ui()
+	_build_telemetry_ui()
 	_on_quest_progress(quest.collected_count(), quest.positions.size())
 	_on_quest_hint(quest.current_hint())
 
@@ -108,6 +128,8 @@ func _update_foliage_quality(profile: int, _adaptive: bool) -> void:
 		streamer.set_quality_profile(profile)
 	if is_instance_valid(ai_interest):
 		ai_interest.set_quality_profile(profile)
+	if is_instance_valid(governor):
+		governor.set_quality_profile(profile)
 
 
 func _on_streamed_cell_loaded(_coord: Vector2i, cell: Node3D) -> void:
@@ -155,6 +177,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_reset_world_beacons()
 			KEY_9:
 				_toggle_ai_simulation()
+			KEY_0:
+				_toggle_telemetry_ui()
+			KEY_P:
+				_export_telemetry_csv()
+			KEY_B:
+				_toggle_budget_governor()
 
 
 func _build_graphics_ui() -> void:
@@ -361,6 +389,50 @@ func _count_npc_behaviors() -> Vector2i:
 			if npc.behavior == StreamedPatrolNPC3D.Behavior.ALERT:
 				alerted_npcs += 1
 	return Vector2i(active_npcs, alerted_npcs)
+
+
+func _build_telemetry_ui() -> void:
+	var ui: CanvasLayer = get_node("VisualQualityUI") as CanvasLayer
+	telemetry_label = Label.new()
+	telemetry_label.name = "WorldTelemetryHUD"
+	telemetry_label.position = Vector2(18, 510)
+	telemetry_label.add_theme_font_size_override("font_size", 14)
+	telemetry_label.add_theme_color_override("font_color", Color(0.86, 0.92, 0.54))
+	ui.add_child(telemetry_label)
+	_update_telemetry_ui(telemetry.sample_now())
+
+
+func _update_telemetry_ui(snapshot: Dictionary) -> void:
+	if not is_instance_valid(telemetry_label) or not is_instance_valid(governor):
+		return
+	telemetry_label.text = "World profiler | 0 HUD | P Export CSV | B Auto budget: %s\nCPU avg: %.2f ms | CPU p95: %.2f ms | Physics: %.2f ms\nStreaming: %d us | spawned %d / unloaded %d | AI: %d us\nBudgets: %d spawns / %d AI cells | snapshots: %d\n%s" % [
+		"ON" if governor.automatic_enabled else "OFF",
+		float(snapshot.get("cpu_ms", 0.0)), telemetry.get_cpu_p95_ms(),
+		float(snapshot.get("physics_ms", 0.0)),
+		int(snapshot.get("streamer_us", 0)), int(snapshot.get("spawned", 0)),
+		int(snapshot.get("unloaded", 0)), int(snapshot.get("ai_us", 0)),
+		governor.current_spawn_budget(), governor.current_ai_budget(),
+		telemetry.sample_count(), last_export_result
+	]
+
+
+func _toggle_telemetry_ui() -> void:
+	if is_instance_valid(telemetry_label):
+		telemetry_label.visible = not telemetry_label.visible
+
+
+func _export_telemetry_csv() -> void:
+	if not is_instance_valid(telemetry):
+		return
+	var code: Error = telemetry.export_csv()
+	last_export_result = "CSV: %s" % (telemetry.csv_path if code == OK else "export failed (%d)" % code)
+	_update_telemetry_ui(telemetry.get_latest())
+
+
+func _toggle_budget_governor() -> void:
+	if is_instance_valid(governor):
+		governor.set_automatic_enabled(not governor.automatic_enabled)
+		_update_telemetry_ui(telemetry.get_latest())
 
 
 func _build_world() -> void:
