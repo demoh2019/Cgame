@@ -658,6 +658,11 @@ func _update_prompt() -> void:
 		text += " | ARMOR PLATE: %d claw hits (Ins)" % int(client.you["plated_hits"])
 	if float(client.you.get("soft_sole_seconds", 0.0)) > 0.0:
 		text += " | QUIET SPRINT: %.0fs (Shift+/)" % float(client.you["soft_sole_seconds"])
+	var nearby_fire_id: int = client.nearest_campfire(client.display_position())
+	if nearby_fire_id >= 0 and client.campfires.has(nearby_fire_id):
+		var protection: float = float(client.campfires[nearby_fire_id].get("stormproof_seconds", 0.0))
+		if protection > 0.0:
+			text += " | STORMPROOF FIRE: %.0fs" % protection
 	hud.set_prompt(text)
 
 
@@ -815,12 +820,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					hud.quick_cook()
 			KEY_9:
-				if bool(client.you.get("alive", false)):
-					var fire_id: int = client.nearest_campfire(client.display_position())
-					if fire_id == -1:
-						hud.say("No burning campfire within 3 metres.")
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					if Input.is_key_pressed(KEY_SHIFT):
+						_quick_use("stormproof_briquette")
 					else:
-						client.refuel_campfire(fire_id)
+						var fire_id: int = client.nearest_campfire(client.display_position())
+						if fire_id == -1:
+							hud.say("No burning campfire within 3 metres.")
+						else:
+							client.refuel_campfire(fire_id)
 			KEY_I, KEY_TAB:
 				hud.toggle_inventory()
 			KEY_C:

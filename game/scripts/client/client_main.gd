@@ -1051,11 +1051,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_result("Extinguish campfire", sim.cmd_extinguish_campfire(LOCAL_PLAYER_ID, fire_id))
 	elif event.is_action_pressed("survive_refuel"):
-		var fire_id: int = _nearest_campfire()
-		if fire_id == -1:
-			_feedback = "Refuel: no campfire within 3 metres."
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Weatherproof campfire", sim.cmd_use(LOCAL_PLAYER_ID, "stormproof_briquette"))
 		else:
-			_result("Refuel campfire", sim.cmd_refuel_campfire(LOCAL_PLAYER_ID, fire_id))
+			var fire_id: int = _nearest_campfire()
+			if fire_id == -1:
+				_feedback = "Refuel: no campfire within 3 metres."
+			else:
+				_result("Refuel campfire", sim.cmd_refuel_campfire(LOCAL_PLAYER_ID, fire_id))
 	elif event.is_action_pressed("survive_smoke"):
 		_result("Smoke charge", sim.cmd_use(LOCAL_PLAYER_ID, FieldSmoke.ITEM_ID))
 	elif event.is_action_pressed("survive_decoy"):

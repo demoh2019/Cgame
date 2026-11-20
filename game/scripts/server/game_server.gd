@@ -125,6 +125,7 @@ const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const RestedTraining = preload("res://scripts/shared/rested_training.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
+const StormproofBriquette = preload("res://scripts/shared/stormproof_briquette.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
 const StormTarpAnchors = preload("res://scripts/shared/storm_tarp_anchors.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
@@ -3274,6 +3275,30 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			player.dirty_character = true
 			return {"ok": true, "mining_wedges": true,
 				"charges": player.wedge_charges}
+		"fire_briquette":
+			if item_id != StormproofBriquette.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
+					player.skill_timer > 0.0) or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat"}
+			var site: Dictionary = StormproofBriquette.nearest(campfires, player.position, time)
+			if not bool(site.get("ok", false)):
+				return site
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			var camp_id: int = int(site["id"])
+			var fire: Dictionary = campfires[camp_id]
+			fire["expires"] = minf(time + FieldCampfire.MAX_REMAINING_SECONDS,
+				float(fire["expires"]) + StormproofBriquette.FUEL_SECONDS)
+			fire["stormproof_until"] = time + StormproofBriquette.SHIELD_SECONDS
+			campfires[camp_id] = fire
+			player.dirty_inventory = true
+			player.dirty_character = true
+			events.append({"type": "campfire_stormproofed", "id": camp_id,
+				"x": fire["x"], "z": fire["z"]})
+			return {"ok": true, "id": camp_id,
+				"remaining": float(fire["expires"]) - time,
+				"stormproof_seconds": StormproofBriquette.SHIELD_SECONDS}
 		"tarp_anchor":
 			if item_id != StormTarpAnchors.ITEM_ID:
 				return {"ok": false, "reason": "not_usable", "tarp_anchor": true}
@@ -6411,7 +6436,8 @@ func _tick_world(delta: float) -> void:
 		# The normal fuel tick has already advanced the simulation clock.
 		var local_weather: Dictionary = Weather.conditions(world,
 			float(fire["x"]), float(fire["z"]), time)
-		var extra: float = FieldCampfire.storm_extra_fuel(delta, local_weather)
+		var storm_exposed: float = StormproofBriquette.exposed_seconds(delta, time, fire)
+		var extra: float = FieldCampfire.storm_extra_fuel(storm_exposed, local_weather)
 		if extra <= 0.0:
 			continue
 		fire["expires"] = maxf(time, float(fire["expires"]) - extra)
