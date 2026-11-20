@@ -124,6 +124,7 @@ public:
 
 	void update_streaming();
 	bool is_cell_loaded(const Vector2i &p_cell) const;
+	Node3D *get_cell_node(const Vector2i &p_cell) const;
 	bool are_cells_loaded(const Vector2i &p_center, int p_radius = 0) const;
 	int get_loaded_cell_count() const;
 	Array get_loaded_cells() const;
