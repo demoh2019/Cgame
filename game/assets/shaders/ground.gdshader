@@ -154,16 +154,33 @@ void fragment() {
 		w[i] *= 1.0 - snow;
 	}
 	w[8] = snow;
-	// Old pavement of ruined cities and bunkers: a ragged edge, and grass coming up through it in patches.
+	// Paved sites keep their original mossy borders, but the expensive
+	// three-octave reclaiming-noise field is needed only inside those borders.
+	// Several overlapping sites share exactly the same noise sample per pixel.
+	float reclaiming_moss = -1.0;
 	for (int k = 0; k < 4; k++) {
 		vec4 patch = site_patches[k];
-		if (patch.z <= 0.0) {
+		if (patch.z <= 0.0 || cliff >= 1.0) {
 			continue;
 		}
-		float d = length(p - patch.xy) / patch.z;
+		vec2 offset = p - patch.xy;
+		// mid is a sum of three value-noise octaves (range [0, 0.875]).
+		// Its greatest inward boundary offset is -0.175. Therefore paved
+		// equals zero beyond 1.175 * radius, even with edge distortion.
+		// Squared distance avoids a square root for most terrain pixels.
+		float outer_radius = patch.z * 1.175;
+		if (dot(offset, offset) >= outer_radius * outer_radius) {
+			continue;
+		}
+		float d = length(offset) / patch.z;
 		float paved = 1.0 - smoothstep(0.7, 1.0, d + (mid - 0.5) * 0.35);
-		// Grass has taken back much of it: whole drifts of green, and moss everywhere else.
-		paved *= 1.0 - 0.9 * smoothstep(0.42, 0.68, fbm(p * 0.11 + 5.0)) * (1.0 - cliff);
+		if (paved <= 0.0) {
+			continue;
+		}
+		if (reclaiming_moss < 0.0) {
+			reclaiming_moss = smoothstep(0.42, 0.68, fbm(p * 0.11 + 5.0));
+		}
+		paved *= 1.0 - 0.9 * reclaiming_moss * (1.0 - cliff);
 		paved *= 0.85;
 		paved *= 1.0 - cliff;
 		for (int i = 0; i < 13; i++) {
