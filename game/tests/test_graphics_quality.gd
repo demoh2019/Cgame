@@ -1,34 +1,20 @@
 extends RefCounted
-## The budget controller is deterministic given frame durations: no GPU required for its decision tests.
+## Graphics presets stay bounded and keep expensive effects off on low-end hardware.
 
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 
 
 func run(t) -> void:
-	var quality := GraphicsQuality.new()
-	t.current = "graphics presets"
-	t.eq(quality.mode, "auto", "automatic quality is the default")
-	t.eq(quality.level, 1, "start with balanced vegetation")
-	t.eq(quality.preset()["grass_end"], 60.0, "default grass view distance")
-	t.check(not quality.set_mode("ultra-unavailable"), "unknown preset is rejected")
-	t.check(quality.set_mode("quality"), "manual quality preset can be selected")
-	t.eq(quality.level, 2, "quality increases the detail budget")
-	t.check(quality.set_mode("performance"), "manual performance preset can be selected")
-	t.eq(quality.level, 0, "performance reduces the detail budget")
-	for frame in 240:
-		t.check(not quality.sample_frame(1.0 / 15.0), "manual mode does not auto-switch") if frame == 0 else quality.sample_frame(1.0 / 15.0)
-	t.eq(quality.level, 0, "manual setting survives low FPS")
-	t.check(quality.set_mode("auto"), "auto mode can be selected")
-	t.current = "adaptive hysteresis"
-	var changed := false
-	for frame in 150:
-		changed = quality.sample_frame(1.0 / 30.0) or changed
-	t.check(changed, "sustained 30 FPS reduces detail")
-	t.eq(quality.level, 0, "low FPS selects performance")
-	t.check(not quality.sample_frame(1.0), "single long stall is ignored")
-	t.eq(quality.level, 0, "one stall does not change quality")
-	changed = false
-	for frame in 1320:
-		changed = quality.sample_frame(1.0 / 60.0) or changed
-	t.check(changed, "sustained good FPS eventually recovers detail")
-	t.check(quality.level >= 1, "recovered settings are at least balanced")
+	t.current = "graphics preset bounds"
+	t.eq(GraphicsQuality.profile(-1), GraphicsQuality.profile(0), "below range clamps to Performance")
+	t.eq(GraphicsQuality.profile(99), GraphicsQuality.profile(3), "above range clamps to Ultra")
+	t.check(not GraphicsQuality.profile(0)["shadows"], "Performance omits shadow maps")
+	t.check(GraphicsQuality.profile(0)["blur_quality"] == 0, "Performance uses one screen sample")
+	t.check(GraphicsQuality.profile(1)["blur_quality"] == 1, "Balanced uses five screen samples")
+	t.check(GraphicsQuality.profile(2)["blur_quality"] == 2, "High retains the nine-sample diorama")
+	t.check(GraphicsQuality.profile(3)["shadow_distance"] > GraphicsQuality.profile(1)["shadow_distance"], "Ultra draws distant shadows")
+	t.check(GraphicsQuality.profile(3)["msaa"] != GraphicsQuality.profile(1)["msaa"], "Ultra enables MSAA")
+	GraphicsQuality.set_level(99, false)
+	t.eq(GraphicsQuality.level(), 3, "setting level is clamped")
+	t.eq(GraphicsQuality.get_name(), "Ultra", "level has a display name")
+	GraphicsQuality.set_level(1, false)

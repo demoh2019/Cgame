@@ -134,7 +134,7 @@ var _grass_lod_elapsed := 0.0
 const GRASS_LOD_INTERVAL := 0.35 # Update a few times a second, not every render frame.
 static var _grass_frame := -1
 static var _grass_spent_usec := 0
-const GRASS_BUDGET_USEC := 10000 # At most about 10 ms of grass growing per frame, across all chunks.
+const GRASS_BUDGET_USEC := 2500 # Limit grass generation to about 2.5 ms per frame across all chunks.
 const GRASS_RANGE := 110.0
 var _world
 var _terrain

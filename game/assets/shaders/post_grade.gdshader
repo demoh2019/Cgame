@@ -9,24 +9,29 @@ uniform float focus_width = 0.24;
 uniform float blur_radius = 2.6; // In pixels at the very edge.
 uniform float vignette = 0.28;
 uniform float grade = 1.0;
+uniform int blur_quality = 1; // 0: no blur, 1: 4 extra samples, 2: 8 extra samples.
 
 void fragment() {
 	vec2 uv = SCREEN_UV;
 	float away = smoothstep(focus_width, focus_width + 0.32, abs(uv.y - focus_center));
 	vec3 color = texture(screen, uv).rgb;
-	if (away > 0.01) {
-		// Eight taps on a ring, wider the further from the focus band.
+	if (away > 0.01 && blur_quality > 0) {
+		// Four taps for balanced hardware; four more for the high-quality diorama look.
 		vec2 r = SCREEN_PIXEL_SIZE * blur_radius * away;
 		vec3 sum = color;
 		sum += texture(screen, uv + vec2(r.x, 0.0)).rgb;
 		sum += texture(screen, uv - vec2(r.x, 0.0)).rgb;
 		sum += texture(screen, uv + vec2(0.0, r.y)).rgb;
 		sum += texture(screen, uv - vec2(0.0, r.y)).rgb;
-		sum += texture(screen, uv + r * 0.7).rgb;
-		sum += texture(screen, uv - r * 0.7).rgb;
-		sum += texture(screen, uv + vec2(r.x, -r.y) * 0.7).rgb;
-		sum += texture(screen, uv + vec2(-r.x, r.y) * 0.7).rgb;
-		color = sum / 9.0;
+		if (blur_quality > 1) {
+			sum += texture(screen, uv + r * 0.7).rgb;
+			sum += texture(screen, uv - r * 0.7).rgb;
+			sum += texture(screen, uv + vec2(r.x, -r.y) * 0.7).rgb;
+			sum += texture(screen, uv + vec2(-r.x, r.y) * 0.7).rgb;
+			color = sum / 9.0;
+		} else {
+			color = sum / 5.0;
+		}
 	}
 	// Split toning: shadows lean blue-teal, highlights lean warm gold.
 	float luma = dot(color, vec3(0.299, 0.587, 0.114));

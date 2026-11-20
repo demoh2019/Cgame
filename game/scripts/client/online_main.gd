@@ -23,6 +23,7 @@ const Audio = preload("res://scripts/client/audio.gd")
 const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
 const WorldOverlay = preload("res://scripts/client/world_overlay.gd")
@@ -66,6 +67,7 @@ var help_panel
 var demo_phase := -1.0
 var demo_storm := false
 var atmosphere
+var _grade_material: ShaderMaterial
 var effects
 var skills_panel
 var social
@@ -111,6 +113,7 @@ func _exit_tree() -> void:
 
 func _ready() -> void:
 	Engine.physics_ticks_per_second = 30
+	GraphicsQuality.load_preference()
 	_build_environment()
 	_build_connect_screen()
 	var args := OS.get_cmdline_user_args()
@@ -270,10 +273,11 @@ func _build_environment() -> void:
 	var grade := ColorRect.new()
 	grade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	grade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var grade_material := ShaderMaterial.new()
-	grade_material.shader = load("res://assets/shaders/post_grade.gdshader")
-	grade.material = grade_material
+	_grade_material = ShaderMaterial.new()
+	_grade_material.shader = load("res://assets/shaders/post_grade.gdshader")
+	grade.material = _grade_material
 	post.add_child(grade)
+	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material)
 
 
 func _build_connect_screen() -> void:
@@ -1155,6 +1159,17 @@ func _near_water(p: Vector3) -> bool:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Ctrl+F11 cycles graphics quality without consuming the existing F11 medicine shortcut.
+	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
+		GraphicsQuality.cycle()
+		GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material)
+		var message := "Graphics: %s (Ctrl+F11 to change)" % GraphicsQuality.get_name()
+		if hud != null:
+			hud.say(message)
+		else:
+			print(message)
+		get_viewport().set_input_as_handled()
+		return
 	if client == null or not client.welcomed or hud == null:
 		return
 	if event is InputEventKey and event.pressed and not event.echo and not _typing():
