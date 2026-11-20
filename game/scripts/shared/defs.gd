@@ -512,6 +512,13 @@ static func _build_items() -> void:
 	_add_recipe("ember_flask", "ember_flask", 1,
 		{"bar_2": 1, "cloth_1": 2, "wood_1": 3, "scrap": 1},
 		"workbench", 5.5)
+	# Risk-zone base sieges use a real short-fused workbench-made consumable.
+	# The server chooses the adjacent rival barricade; players cannot aim at IDs.
+	_add_item("siege_charge", {"name": "Improvised Siege Charge",
+		"kind": "siege_charge", "tier": 3, "stack": 5, "weight": 1.4, "value": 125})
+	_add_recipe("siege_charge", "siege_charge", 1,
+		{"bar_3": 2, "scrap": 8, "cloth_2": 2, "stone_2": 2},
+		"workbench", 9.0)
 	# Defensive disposable wire snare; only the PvE server can trigger it.
 	_add_item("infected_snare", {"name": "Infected Tripwire Snare",
 		"kind": "deployable", "tier": 1, "stack": 10, "weight": 0.9, "value": 28})
