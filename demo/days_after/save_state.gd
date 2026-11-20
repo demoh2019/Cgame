@@ -3,6 +3,7 @@ extends RefCounted
 ## Future online servers must own authoritative progression and inventory.
 
 const VERSION := 1
+const CONTRACTS = preload("res://contract_rules.gd")
 const SAVE_PATH := "user://days_after_player.json"
 const MAX_ITEMS := 1000000
 const MAX_XP := 100000000
@@ -29,6 +30,7 @@ static func snapshot(player: Node3D) -> Dictionary:
             "weapon": str(player.get("equipped_weapon")),
             "armor": str(player.get("equipped_armor"))
         },
+        "contracts": (player.get("contract_state") as Dictionary).duplicate(true),
         "position": [location.x, location.y, location.z]
     }
 
@@ -61,6 +63,9 @@ static func validate_snapshot(data: Variant) -> bool:
     var experience: Variant = data.get("experience")
     var equipped: Variant = data.get("equipped")
     var position: Variant = data.get("position")
+    # v1 files written before contracts existed remain loadable.
+    if not CONTRACTS.validate_state(data.get("contracts", CONTRACTS.empty_state())):
+        return false
     if not (stats is Dictionary) or not (experience is Dictionary) or not (equipped is Dictionary):
         return false
     if not _valid_stack_map(inventory, MAX_ITEMS):
@@ -112,6 +117,7 @@ static func apply_snapshot(player: Node3D, data: Variant) -> bool:
     player.set("equipped_tool", str(equipped["tool"]))
     player.set("equipped_weapon", str(equipped["weapon"]))
     player.set("equipped_armor", str(equipped["armor"]))
+    player.set("contract_state", (data.get("contracts", CONTRACTS.empty_state()) as Dictionary).duplicate(true))
     player.global_position = Vector3(float(coordinates[0]), float(coordinates[1]), float(coordinates[2]))
     return true
 
