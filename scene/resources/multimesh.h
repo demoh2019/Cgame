@@ -123,6 +123,8 @@ public:
 	int remove_visible_instances(const PackedInt32Array &p_instances);
 	// Swap a hidden slot into the end of the visible prefix and reveal it.
 	bool activate_hidden_instance(int p_hidden_instance);
+	// Validate and activate original hidden indices in ascending order, preserving payloads.
+	int activate_hidden_instances(const PackedInt32Array &p_hidden_instances);
 
 	void reset_instance_physics_interpolation(int p_instance);
 	void reset_instances_physics_interpolation();
