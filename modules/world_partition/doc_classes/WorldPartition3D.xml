@@ -6,7 +6,7 @@
 	<description>
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
-		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
+		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries. For persistent camps or quest hubs, use [method pin_cell] and [method unpin_cell] to override distance-based unloading. At most 128 registered cells may be pinned; a disabled streamer still unloads all cells.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
 		var partition := WorldPartition3D.new()
@@ -53,6 +53,18 @@
 			<return type="int" />
 			<description>
 				Returns the number of registered scene paths, whether loaded or unloaded.
+			</description>
+		</method>
+		<method name="get_pinned_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many registered cells are explicitly pinned to remain loaded, up to 128.
+			</description>
+		</method>
+		<method name="get_pinned_cells" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns an unordered snapshot of pinned [Vector2i] coordinates. Modifying the returned array does not modify the partition.
 			</description>
 		</method>
 		<method name="get_loaded_cell_count" qualifiers="const">
@@ -104,6 +116,20 @@
 				Returns [code]true[/code] when the cell has a living instantiated scene.
 			</description>
 		</method>
+		<method name="is_cell_pinned" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns whether [param cell] is explicitly retained independent of the observer distance.
+			</description>
+		</method>
+		<method name="pin_cell">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Keeps the registered scene at [param cell] active even when outside [member unload_radius]. Returns [code]true[/code] only for a newly added pin. Unregistered coordinates and requests past the 128-cell limit are rejected. Pinned cells still obey normal loading/instantiation budgets. Pins are not serialized as a property: restore them in gameplay code after loading a world.
+			</description>
+		</method>
 		<method name="local_position_to_cell" qualifiers="const">
 			<return type="Vector2i" />
 			<param index="0" name="local_position" type="Vector3" />
@@ -124,6 +150,13 @@
 			<param index="1" name="scene_path" type="String" />
 			<description>
 				Registers a resource path for a cell. An empty path removes the mapping. Replacing a path unloads the previous cell.
+			</description>
+		</method>
+		<method name="unpin_cell">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Releases a pin. The cell becomes eligible for normal radius-based unloading on the next streaming update; a cell inside the observer radius stays loaded.
 			</description>
 		</method>
 		<method name="update_streaming">
