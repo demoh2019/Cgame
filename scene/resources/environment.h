@@ -326,6 +326,9 @@ public:
 	// SDFGI
 	// Update runtime GI budget in a single RenderingServer transaction.
 	void configure_sdfgi(bool p_enabled, int p_cascades, float p_min_cell_size, bool p_read_sky_light, float p_bounce_feedback, float p_energy);
+	// One atomic renderer update for scene-aware leak protection; avoids
+	// unnecessary GPU reconfiguration while the player remains in one region.
+	void configure_sdfgi_visibility(bool p_occlusion, bool p_read_sky_light, float p_normal_bias, float p_probe_bias);
 	void set_sdfgi_enabled(bool p_enabled);
 	bool is_sdfgi_enabled() const;
 	void set_sdfgi_cascades(int p_cascades);
