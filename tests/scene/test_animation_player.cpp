@@ -81,6 +81,56 @@ static AnimationPlayer *create_player_with_animations() {
 	return player;
 }
 
+TEST_CASE("[SceneTree][AnimationPlayer] Native budgeted animation advances preserve elapsed time") {
+	AnimationPlayer *player = create_player_with_animations();
+	player->set_callback_mode_process(AnimationMixer::ANIMATION_CALLBACK_MODE_PROCESS_MANUAL);
+	player->play("first");
+
+	CHECK_FALSE(player->advance_budgeted(0.03, 0.10));
+	CHECK(player->get_advance_budget_accumulated() == doctest::Approx(0.03));
+	CHECK_FALSE(player->advance_budgeted(0.03, 0.10));
+	CHECK(player->get_advance_budget_accumulated() == doctest::Approx(0.06));
+	CHECK(player->advance_budgeted(0.04, 0.10));
+	CHECK(player->get_advance_budget_accumulated() == doctest::Approx(0.0));
+	CHECK(player->get_current_animation_position() == doctest::Approx(0.10));
+
+	// When the camera or quality changes, reset pending fractional time:
+	// the next animation update starts at the newly selected cadence.
+	CHECK_FALSE(player->advance_budgeted(0.03, 0.10));
+	player->reset_advance_budget();
+	CHECK(player->get_advance_budget_accumulated() == doctest::Approx(0.0));
+
+	// A loading stall is bounded: do not replay seconds of attack events.
+	CHECK(player->advance_budgeted(8.0, 0.10, 0.20));
+	CHECK(player->get_advance_budget_accumulated() == doctest::Approx(0.0));
+	CHECK(player->get_current_animation_position() <= 0.30 + 0.0001);
+
+	// A manual scheduler cannot drive a mixer which is ticked by the engine.
+	player->set_callback_mode_process(AnimationMixer::ANIMATION_CALLBACK_MODE_PROCESS_IDLE);
+	CHECK_FALSE(player->advance_budgeted(0.12, 0.10));
+	CHECK(player->get_advance_budget_accumulated() == doctest::Approx(0.0));
+	memdelete(player);
+}
+
+TEST_CASE("[SceneTree][AnimationPlayer] Budgeted animation can be safely disabled") {
+	AnimationPlayer *player = create_player_with_animations();
+	player->set_callback_mode_process(AnimationMixer::ANIMATION_CALLBACK_MODE_PROCESS_MANUAL);
+	player->play("first");
+	CHECK_FALSE(player->advance_budgeted(0.04, 0.10));
+	player->set_active(false);
+	CHECK_FALSE(player->advance_budgeted(0.30, 0.10));
+	CHECK(player->get_advance_budget_accumulated() == doctest::Approx(0.0));
+	player->set_active(true);
+	CHECK_FALSE(player->advance_budgeted(0.04, 0.10));
+	ERR_PRINT_OFF;
+	CHECK_FALSE(player->advance_budgeted(-0.1, 0.10));
+	CHECK_FALSE(player->advance_budgeted(0.1, 0.0));
+	CHECK_FALSE(player->advance_budgeted(Math::INF, 0.10));
+	ERR_PRINT_ON;
+	CHECK(player->get_advance_budget_accumulated() == doctest::Approx(0.04));
+	memdelete(player);
+}
+
 TEST_CASE("[SceneTree][AnimationPlayer] Finishing an animation clears its active state") {
 	AnimationPlayer *player = create_player_with_animations();
 	player->play("first");
