@@ -58,6 +58,11 @@ class WorldPartition3D : public Node3D {
 	int simulation_radius = -1; // -1 keeps all streamed scenes simulation-active.
 	int simulation_hysteresis_cells = 1;
 	int max_simulation_transitions_per_frame = 2;
+	// Independent collision tier. Opt-in scene roots change their physics
+	// collision filter; the engine never alters arbitrary descendants.
+	int physics_radius = -1; // Backward-compatible: all loaded cells active.
+	int physics_hysteresis_cells = 1;
+	int max_physics_transitions_per_frame = 2;
 	// Minimum completed engine physics ticks before a newly-instantiated scene
 	// can pass the optional gameplay activation readiness check (0 to 8).
 	int min_physics_frames_after_load = 2;
@@ -74,6 +79,8 @@ class WorldPartition3D : public Node3D {
 	HashMap<Vector2i, uint64_t> cell_creation_physics_frames;
 	HashMap<Vector2i, int> active_detail_levels; // Only scene roots that opt into set_streaming_lod().
 	HashMap<Vector2i, bool> active_simulation_cells; // All loaded cells; optional root callback.
+	HashMap<Vector2i, bool> active_physics_cells; // Independent collision activation tier.
+	HashMap<Vector2i, uint64_t> physics_enabled_frames; // First frame physics was enabled, for safe travel.
 	HashMap<Vector2i, String> pending_cells;
 	HashSet<String> requested_paths;
 	HashMap<String, Ref<PackedScene>> ready_scenes;
@@ -104,6 +111,9 @@ class WorldPartition3D : public Node3D {
 	void _refresh_cell_detail(const Vector2i &p_center);
 	bool _cell_simulation_active(const Vector2i &p_cell, const Vector2i &p_center, bool p_previously_active = false) const;
 	void _refresh_cell_simulation(const Vector2i &p_center);
+	bool _cell_physics_active(const Vector2i &p_cell, const Vector2i &p_center, bool p_previously_active = false) const;
+	void _refresh_cell_physics(const Vector2i &p_center);
+	bool _is_cell_required_by_important_source(const Vector2i &p_cell) const;
 	void _purge_unused_ready_scenes();
 	bool _instantiate_cell(const Vector2i &p_cell, const Ref<PackedScene> &p_scene);
 	void _refresh_processing();
@@ -151,6 +161,17 @@ public:
 	int get_max_simulation_transitions_per_frame() const;
 	bool is_cell_simulation_active(const Vector2i &p_cell) const;
 	int get_simulation_active_cell_count() const;
+
+	void set_physics_radius(int p_radius);
+	int get_physics_radius() const;
+	void set_physics_hysteresis_cells(int p_cells);
+	int get_physics_hysteresis_cells() const;
+	void set_max_physics_transitions_per_frame(int p_count);
+	int get_max_physics_transitions_per_frame() const;
+	bool is_cell_physics_active(const Vector2i &p_cell) const;
+	int get_physics_active_cell_count() const;
+	bool is_cell_physics_ready(const Vector2i &p_cell) const;
+	bool is_streaming_source_physics_ready(const String &p_name) const;
 
 	void set_observer_path(const NodePath &p_path);
 	NodePath get_observer_path() const;
