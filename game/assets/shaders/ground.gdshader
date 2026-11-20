@@ -3,6 +3,8 @@ render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
 // Radius of full two-scale albedo and normal mapping; shared by all streamed chunks.
 global uniform float aa_terrain_detail_radius;
+// Maximum number of PBR layers sampled per pixel (Ultra = all layers).
+global uniform int aa_terrain_layer_budget;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 
 // Textured ground. Thirteen CC0 materials (Poly Haven) in two texture arrays:
@@ -23,6 +25,8 @@ uniform float tile_meters = 6.0;
 uniform float normal_strength = 0.8;
 // Per-layer multiplier that moves the photo's average colour to the game's palette (computed on load).
 uniform vec3 layer_tint[13];
+// Average color of each material: cheap residual retains all biome transitions when texture taps are limited.
+uniform vec3 layer_average[13];
 // Paved ground of the sites near this chunk: x, z, radius, layer (radius 0: unused). Weeds take back the cracks.
 uniform vec4 site_patches[4];
 
@@ -93,6 +97,11 @@ void fragment() {
 	// Gradients must be evaluated before any dynamic branch to keep mipmapping stable.
 	vec2 lod_dx = dFdx(p / tile_meters);
 	vec2 lod_dy = dFdy(p / tile_meters);
+	// Explicit derivatives must be evaluated outside branch-dependent cliff samples.
+	vec2 cliff_dx_zy = dFdx(world_position.zy / tile_meters);
+	vec2 cliff_dy_zy = dFdy(world_position.zy / tile_meters);
+	vec2 cliff_dx_xy = dFdx(world_position.xy / tile_meters);
+	vec2 cliff_dy_xy = dFdy(world_position.xy / tile_meters);
 	float camera_distance = distance(p, CAMERA_POSITION_WORLD.xz);
 	float detail_fade = 1.0 - smoothstep(aa_terrain_detail_radius,
 		aa_terrain_detail_radius + 24.0, camera_distance);
@@ -168,35 +177,81 @@ void fragment() {
 	}
 	w[4] += road;
 
-	vec3 color = vec3(0.0);
-	vec3 bump = vec3(0.0, 0.0, 0.0);
-	float total = 0.0;
+	// Four ranked slots are enough for Performance/Balanced/High. Ultra bypasses ranking
+	// and keeps all 13 materials, including tiny biome transitions.
+	int layer_budget = aa_terrain_layer_budget >= 13 ? 13 : clamp(aa_terrain_layer_budget, 1, 4);
+	int selected_ids[4] = {-1, -1, -1, -1};
+	float selected_weights[4] = {0.0, 0.0, 0.0, 0.0};
+	vec3 macro_color = vec3(0.0);
+	float all_weight = 0.0;
 	for (int i = 0; i < 13; i++) {
-		if (w[i] < 0.02) {
+		float weight = w[i];
+		if (weight < 0.02) {
+			continue;
+		}
+		// Unlike truncating to N layers and re-normalizing, this fallback preserves
+		// a smooth approximation to small grass, dirt and shoreline contributions.
+		macro_color += layer_average[i] * weight;
+		all_weight += weight;
+		if (layer_budget >= 13) {
+			continue;
+		}
+		// The branch is uniform across a draw: no random texture-fetch count per pixel.
+		for (int slot = 0; slot < 4; slot++) {
+			if (weight > selected_weights[slot]) {
+				for (int shift = 3; shift > slot; shift--) {
+					selected_weights[shift] = selected_weights[shift - 1];
+					selected_ids[shift] = selected_ids[shift - 1];
+				}
+				selected_weights[slot] = weight;
+				selected_ids[slot] = i;
+				break;
+			}
+		}
+	}
+	vec3 color = macro_color;
+	vec3 bump = vec3(0.0);
+	float sampled_weight = 0.0;
+	for (int slot = 0; slot < 13; slot++) {
+		if (slot >= layer_budget) {
+			break;
+		}
+		int i = slot;
+		if (layer_budget < 13) {
+			i = selected_ids[slot];
+		}
+		if (i < 0 || w[i] < 0.02) {
 			continue;
 		}
 		float layer = float(i);
 		vec3 c;
 		vec3 nn;
 		if (i == 5) {
-			// Triplanar cliff rock.
+			// Cliffs keep their triplanar mapping; explicit gradients avoid invalid
+			// implicit mip derivatives after a texture-layer selection branch.
 			vec3 blend = pow(abs(n), vec3(4.0));
-			blend /= (blend.x + blend.y + blend.z);
-			c = texture(albedo_layers, vec3(world_position.zy / tile_meters, layer)).rgb * blend.x
-				+ texture(albedo_layers, vec3(p / tile_meters, layer)).rgb * blend.y
-				+ texture(albedo_layers, vec3(world_position.xy / tile_meters, layer)).rgb * blend.z;
+			blend /= max(blend.x + blend.y + blend.z, 0.0001);
+			c = textureGrad(albedo_layers, vec3(world_position.zy / tile_meters, layer), cliff_dx_zy, cliff_dy_zy).rgb * blend.x
+				+ textureGrad(albedo_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy).rgb * blend.y
+				+ textureGrad(albedo_layers, vec3(world_position.xy / tile_meters, layer), cliff_dx_xy, cliff_dy_xy).rgb * blend.z;
 			c *= layer_tint[5];
 			nn = vec3(0.0, 0.0, 1.0);
 		} else {
 			c = top_albedo(layer, p, mixer, detail_fade, lod_dx, lod_dy);
 			nn = top_normal(layer, p, detail_fade, lod_dx, lod_dy);
 		}
-		color += c * w[i];
+		// Replace the approximate layer color with the actual PBR texture; the
+		// unselected layers still contribute their average palette color.
+		color += (c - layer_average[i]) * w[i];
 		bump += nn * w[i];
-		total += w[i];
+		sampled_weight += w[i];
 	}
-	color /= max(total, 0.0001);
-	bump /= max(total, 0.0001);
+	color /= max(all_weight, 0.0001);
+	if (sampled_weight > 0.001) {
+		bump /= sampled_weight;
+	} else {
+		bump = vec3(0.0, 0.0, 1.0);
+	}
 
 	// Large-scale light and colour variation, a little darker where the shore is wet.
 	color *= 0.86 + 0.28 * broad;

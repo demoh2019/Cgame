@@ -43,3 +43,8 @@ aa_terrain_detail_radius={
 "type": "float",
 "value": 42.0
 }
+
+aa_terrain_layer_budget={
+"type": "int",
+"value": 3
+}
