@@ -60,6 +60,24 @@ TEST_CASE("[SceneTree][MultiMeshInstance3D] Nearest 3D instance query honors rad
 	CHECK(node->find_nearest_visible_instance(Vector3(14, 0, 6), 0.5) == -1);
 	CHECK(node->find_nearest_visible_instance(Vector3(19, 0, 5), 0) == 2);
 
+	PackedInt32Array within = node->find_visible_instances_in_radius(Vector3(14, 0, 5), 4);
+	REQUIRE(within.size() == 2);
+	CHECK(within[0] == 0);
+	CHECK(within[1] == 1);
+	CHECK(node->find_visible_instances_in_radius(Vector3(14, 0, 5), 0).size() == 1);
+	CHECK(node->find_visible_instances_in_radius(Vector3(19, 0, 5), 0).size() == 1);
+
+	multimesh->set_visible_instance_count(2);
+	CHECK(node->find_visible_instances_in_radius(Vector3(19, 0, 5), 1).is_empty());
+	multimesh->set_visible_instance_count(0);
+	CHECK(node->find_visible_instances_in_radius(Vector3(14, 0, 5), 100).is_empty());
+	multimesh->set_visible_instance_count(-1);
+	CHECK(node->find_visible_instances_in_radius(Vector3(19, 0, 5), 0).size() == 1);
+
+	ERR_PRINT_OFF;
+	CHECK(node->find_visible_instances_in_radius(Vector3(), -1).is_empty());
+	ERR_PRINT_ON;
+
 	multimesh->set_visible_instance_count(2);
 	CHECK(node->find_nearest_visible_instance(Vector3(19, 0, 5), 2) == -1);
 	CHECK(node->find_nearest_visible_instance(Vector3(14, 0, 5), 0.1) == 1);
@@ -69,7 +87,7 @@ TEST_CASE("[SceneTree][MultiMeshInstance3D] Nearest 3D instance query honors rad
 	CHECK(node->find_nearest_visible_instance(Vector3(19, 0, 5), 0) == 2);
 
 	ERR_PRINT_OFF;
-	CHECK(node->find_nearest_visible_instance(Vector3.ZERO, -1) == -1);
+	CHECK(node->find_nearest_visible_instance(Vector3(), -1) == -1);
 	ERR_PRINT_ON;
 	node->queue_free();
 }
@@ -77,7 +95,8 @@ TEST_CASE("[SceneTree][MultiMeshInstance3D] Nearest 3D instance query honors rad
 TEST_CASE("[SceneTree][MultiMeshInstance3D] Missing MultiMesh cannot be queried") {
 	MultiMeshInstance3D *node = memnew(MultiMeshInstance3D);
 	SceneTree::get_singleton()->get_root()->add_child(node);
-	CHECK(node->find_nearest_visible_instance(Vector3.ZERO, 100) == -1);
+	CHECK(node->find_nearest_visible_instance(Vector3(), 100) == -1);
+	CHECK(node->find_visible_instances_in_radius(Vector3(), 100).is_empty());
 	node->queue_free();
 }
 

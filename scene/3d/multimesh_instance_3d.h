@@ -56,6 +56,8 @@ public:
 
 	// O(N) query for interaction with visible 3D instance origins in world space.
 	int find_nearest_visible_instance(const Vector3 &p_world_position, real_t p_max_distance) const;
+	// Linear search over visible instances; world-space origins, not bounds.
+	PackedInt32Array find_visible_instances_in_radius(const Vector3 &p_world_position, real_t p_max_distance) const;
 
 	Array get_meshes() const;
 
