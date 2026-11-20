@@ -14,6 +14,7 @@ const ModelCatalog = preload("res://scripts/client/model_catalog.gd")
 const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
+const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
 const HEIGHT_MIN := -45.0
@@ -170,6 +171,8 @@ static var _grass_frame := -1
 static var _grass_spent_usec := 0
 ## Runtime tuning keeps the grass LOD system intact while bounding draw distance and generation spikes.
 const GRASS_GROUP := "aa_grass_tiles"
+const SCENERY_GROUP := "aa_scenery_multimeshes"
+static var scenery_quality := 1
 static var grass_budget_usec := 2500
 static var grass_range := 110.0
 static var grass_visibility_end := 82.0
@@ -182,6 +185,27 @@ static func configure_grass(build_radius: float, budget_usec: int, fade_start: f
 	var material: ShaderMaterial = GrassField.material()
 	material.set_shader_parameter("fade_start", fade_start)
 	material.set_shader_parameter("fade_end", fade_end)
+## Streamed instances inherit user quality; existing instances change only
+## when the preset changes, not each frame.
+static func configure_scenery(quality: int) -> void:
+	scenery_quality = clampi(quality, 0, 3)
+
+
+static func apply_scenery_detail(instance: MultiMeshInstance3D) -> void:
+	if instance == null or not instance.has_meta("aa_scenery_kind"):
+		return
+	SceneryLod.apply(instance, str(instance.get_meta("aa_scenery_kind")),
+		scenery_quality, float(instance.get_meta("aa_scenery_distance", 0.0)))
+
+
+static func register_scenery(instance: MultiMeshInstance3D, kind: String,
+		base_distance: float = 0.0) -> void:
+	instance.set_meta("aa_scenery_kind", kind)
+	instance.set_meta("aa_scenery_distance", base_distance)
+	instance.add_to_group(SCENERY_GROUP)
+	apply_scenery_detail(instance)
+
+
 var _world
 var _terrain
 var _groups: Dictionary = {} # kind -> {"multimesh": MultiMesh, "index": {node_id: i}, "transforms": [...]}
@@ -712,6 +736,7 @@ func _build_objects(data: Dictionary) -> void:
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if (kind.begins_with("tree:") or kind.begins_with("building:") or kind.begins_with("wall") or kind.begins_with("tower") or kind.begins_with("ruin:") or kind.begins_with("monument:")) else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if _use_nature and kind.begins_with("ore:") and crystal_count == 0:
 			instance.material_override = _ore_material(multimesh.mesh)
+		register_scenery(instance, kind)
 		add_child(instance)
 		_groups[kind] = {"multimesh": multimesh, "index": index, "transforms": transforms}
 	_build_decor(origin, rng, data)
@@ -1050,7 +1075,8 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 				var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
 				transforms.append(Transform3D(basis, Vector3(at.x - origin.x, _world.height_at(at.x, at.y) - 0.02, at.y - origin.y)))
 			# Dense vegetation is split into camera-cullable cells, sparse props remain one draw call.
-			SceneryBatches.add(self, mesh, transforms, float(entry["range"]), file.begins_with("Bush"))
+			for decor_batch in SceneryBatches.add(self, mesh, transforms, float(entry["range"]), file.begins_with("Bush")):
+				register_scenery(decor_batch, "decor:" + file, float(entry["range"]))
 	# Logs, branches, roots, scree and the odd standing stone, each where it belongs.
 	for entry in ModelCatalog.available("decor", ModelCatalog.DECOR_EXTRA):
 		var extra_mesh: Mesh = ModelCatalog.entry_mesh(entry)
@@ -1079,7 +1105,8 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).rotated(Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)).normalized(), rng.randf_range(0.0, 0.12))
 			basis = basis.scaled(Vector3.ONE * float(placed[i][1]))
 			transforms.append(Transform3D(basis, Vector3(where.x - origin.x, _world.height_at(where.x, where.y) - 0.06 * float(placed[i][1]), where.y - origin.y)))
-		SceneryBatches.add(self, extra_mesh, transforms, 140.0)
+		for extra_batch in SceneryBatches.add(self, extra_mesh, transforms, 140.0):
+			register_scenery(extra_batch, "decor:extra", 140.0)
 
 
 ## Hides depleted nodes and opened crates. `hidden_ids` is the set of ids the server says are gone.
