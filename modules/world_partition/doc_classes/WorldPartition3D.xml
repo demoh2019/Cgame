@@ -23,6 +23,13 @@
 		Streaming is disabled while editing a scene; the node processes automatically while the game runs. Call [method update_streaming] if an immediate update is required after moving the observer.
 	</description>
 	<methods>
+		<method name="get_cell_instance" qualifiers="const">
+			<return type="Node3D" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the currently instantiated [Node3D] root for [param cell], or [code]null[/code] if no live instance exists (including after it is queued for deletion). Use this to attach cell-specific gameplay, read biome metadata, or inspect the scene root without scanning all children. The returned object is owned by the streamer and may be freed by the next streaming update. Never cache it without an instance-validity check. Does not trigger a load.
+			</description>
+		</method>
 		<method name="set_streaming_source">
 			<return type="bool" />
 			<param index="0" name="name" type="String" />
