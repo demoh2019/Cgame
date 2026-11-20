@@ -397,6 +397,11 @@ static func _build_items() -> void:
 		"tier": 2, "stack": 10, "value": 24, "weight": 0.25})
 	_add_recipe("lockpick_kit", "lockpick_kit", 1,
 		{"scrap": 2, "bar_1": 1, "fiber_1": 2}, "workbench", 4.0)
+	# T2 non-full-loot expedition return. PvP full-loot zones always deny it.
+	_add_item("return_charm", {"name": "Settler's Return Charm", "kind": "recall",
+		"tier": 2, "stack": 5, "value": 90, "weight": 0.15})
+	_add_recipe("return_charm", "return_charm", 1,
+		{"bar_2": 1, "cloth_2": 2, "silver": 30}, "workbench", 6.0)
 	# Crafted noise maker: brief diversion for stealth runs, not free aggro.
 	# A tactical consumable: gathering + scavenged scrap become a squad buff.
 	_add_item("field_standard", {"name": "Expedition Rally Standard",

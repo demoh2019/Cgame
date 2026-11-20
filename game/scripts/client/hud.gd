@@ -296,6 +296,12 @@ func _build() -> void:
 	_stash_grid.columns = 4
 	stash_scroll.add_child(_stash_grid)
 
+	var recall_button := Button.new()
+	recall_button.name = "UseReturnCharm"
+	recall_button.text = "Return charm: 8s channel (green/yellow only)"
+	recall_button.tooltip_text = "Craft at workbench. Movement, combat or nearby infected cancels without spending."
+	recall_button.pressed.connect(func() -> void: client.use_item("return_charm"))
+	inventory_box.add_child(recall_button)
 	var rest_button := Button.new()
 	rest_button.text = "Rest: safe hub or a lit field campfire"
 	rest_button.tooltip_text = "Hub: 2 wood + canned food + water. Fire: cooked fish/canned ration + water, no nearby threats; 90s cooldown."
@@ -813,6 +819,12 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"recall_started":
+			say("Return charm: stand still for 8 seconds; avoid infected.")
+		"recall_cancelled":
+			say("Return interrupted (%s); charm preserved." % str(event.get("reason", "cancelled")))
+		"recall_completed":
+			say("Returned to the safe hub. One charm consumed.")
 		"party_feast":
 			if int(event.get("peer", -1)) == client.peer_id and int(event.get("by", -1)) != client.peer_id:
 				say("A teammate shared a T%d cooked meal. Recovery boosted for %ds." % [
@@ -993,6 +1005,13 @@ func _claim_nearest_outpost_cache() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and data.has("recall_cast"):
+		say("Return charm: casting for %d seconds." % int(data["recall_cast"]))
+		return
+	if kind == "use" and str(data.get("reason", "")) in ["full_loot_zone", "already_home",
+			"cooldown", "infected_nearby", "in_combat", "recall_channeling", "in_duel"]:
+		say("Cannot recall: %s (no charm spent)." % str(data["reason"]))
+		return
 	if kind == "collect_rain":
 		if bool(data.get("ok", false)):
 			say("Stormwater collected: %d clean bottles%s." % [
@@ -1330,6 +1349,11 @@ func _process(_delta: float) -> void:
 	if is_finite(storm_cover) and storm_cover < 1.0:
 		_info_label.text += "\nSTORM COVER: infected sight -%d%% (sound, scent & fire still reveal)" % [
 			int(round(100.0 * (1.0 - clampf(storm_cover, 0.0, 1.0))))]
+	var return_seconds: float = float(client.you.get("recall_seconds", 0.0))
+	if return_seconds > 0.0:
+		_info_label.text += "\nRETURN CHARM: channeling %ds — stand still" % ceili(return_seconds)
+	elif float(client.you.get("recall_cooldown", 0.0)) > 0.0:
+		_info_label.text += "\nRETURN CHARM cooldown: %ds" % ceili(float(client.you["recall_cooldown"]))
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	_contract_label.text += "\n" + str(client.you.get("daily_description", "Daily bounty pending server"))

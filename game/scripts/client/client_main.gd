@@ -126,6 +126,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_bank_withdraw", KEY_L)
 	_bind_key("survive_contract", KEY_P)
 	_bind_key("survive_rest", KEY_Z)
+	_bind_key("survive_recall", KEY_HOME)
 
 
 func _bind_key(action: StringName, key: Key) -> void:
@@ -758,6 +759,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_feedback = "No resource within reach."
 		else:
 			_result("Gather", sim.cmd_gather(LOCAL_PLAYER_ID, target["id"]))
+	elif event.is_action_pressed("survive_recall"):
+		_result("Return charm", sim.cmd_use(LOCAL_PLAYER_ID, "return_charm"))
 	elif event.is_action_pressed("survive_loot"):
 		var target := _nearest_loot()
 		if target.is_empty():
@@ -949,6 +952,11 @@ func _update_hud() -> void:
 		weight, speed_pct, survivor.inventory.count("silver"),
 		Contracts.description(survivor.contract_state), ", ".join(rows)
 	]
+	if not survivor.recall.is_empty():
+		_stats.text += "\nRETURN CHARM: %.1fs — stay still" % maxf(
+			0.0, float(survivor.recall["until"]) - sim.time)
+	elif survivor.recall_ready_at > sim.time:
+		_stats.text += "\nRETURN CHARM COOLDOWN: %.0fs" % (survivor.recall_ready_at - sim.time)
 	var equipped_ammo: String = str(Defs.item(survivor.inventory.weapon).get("ammo", ""))
 	if not equipped_ammo.is_empty():
 		_stats.text += "\nARROWS / AMMO: %s ×%d" % [

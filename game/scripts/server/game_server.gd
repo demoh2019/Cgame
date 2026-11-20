@@ -52,6 +52,7 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
+const HubRecall = preload("res://scripts/shared/hub_recall.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
@@ -142,6 +143,8 @@ class Player:
 	var combat_energy: float = 100.0
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
+	var recall: Dictionary = {} # Ephemeral channel, no character persistence.
+	var recall_ready_at: float = 0.0
 	var crouching: bool = false # Ephemeral, server-authorized posture.
 	var decoy_timer: float = 0.0 # Anti-spam timer; no persistent character data.
 	var action: Dictionary = {} # Current gathering or fishing: {"remaining": s, "total": s, ...}
@@ -542,6 +545,7 @@ func _spawn_player(player: Player) -> void:
 		for id in STARTER_KIT:
 			player.inventory.add(id, STARTER_KIT[id])
 	player.action = {}
+	player.recall = {}
 	player.attack_timer = 0.0
 	player.skill_timer = 0.0
 	player.dodge_timer = 0.0
@@ -596,6 +600,11 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 			"injury_factor": Survival.fracture_speed_factor(player.survival.fracture),
 		}, allowed)
 		var moved: float = Vector2(player.position.x - before_move.x, player.position.z - before_move.z).length()
+		if not player.recall.is_empty():
+			var origin: Vector3 = player.recall["origin"]
+			if Vector2(player.position.x, player.position.z).distance_to(
+					Vector2(origin.x, origin.z)) > HubRecall.MAX_MOVEMENT:
+				_cancel_recall(player, "moved")
 		# Distance on foot trains athletics (running) and explorer (any travel); never more than the
 		# server itself moved the player.
 		if moved > 0.0:
@@ -629,6 +638,8 @@ func cmd_fish(peer_id: int, baited: bool = false, storm_cast: bool = false) -> D
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
 	if not player.action.is_empty():
 		return {"ok": false, "reason": "busy"}
 	if time < player.fish_next_at:
@@ -658,6 +669,8 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
 	var node := _find_node(node_id)
 	if node.is_empty():
 		return {"ok": false, "reason": "no_such_node"}
@@ -691,6 +704,8 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
 	times = clampi(times, 1, 50)
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	if recipe.is_empty():
@@ -2141,10 +2156,24 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
 	var data := Defs.item(item_id)
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"recall":
+			if item_id != HubRecall.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			if training_matches.has(peer_id) or arena_queue.has(peer_id):
+				return {"ok": false, "reason": "in_duel"}
+			var reason: String = HubRecall.start_reason(world, player, zombies, time)
+			if reason != "":
+				return {"ok": false, "reason": reason}
+			player.recall = {"origin": player.position, "until": time + HubRecall.CHANNEL_SECONDS,
+				"health": player.survival.health}
+			events.append({"type": "recall_started", "peer": peer_id})
+			return {"ok": true, "recall_cast": HubRecall.CHANNEL_SECONDS}
 		"acid_neutralizer":
 			if item_id != AcidNeutralizer.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -2670,6 +2699,7 @@ func _hurt_player(victim: Player, raw_damage: float) -> float:
 	var reduced: float = raw_damage * (1.0 - victim.skills.bonus("damage_reduction"))
 	var applied: float = victim.survival.hurt(reduced)
 	if applied > 0.0:
+		_cancel_recall(victim, "hurt")
 		_award(victim, "toughness", minf(applied * 0.4, 6.0))
 	return applied
 
@@ -3014,6 +3044,7 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 
 ## Full-loot deaths occur in red/black. Green/yellow deaths retain gear.
 func _on_player_death(victim: Player, killer: int) -> void:
+	_cancel_recall(victim, "dead")
 	_abort_training(victim.id, "death")
 	_cancel_market_seller(victim.id)
 	_cancel_player_trade(victim.id, "dead")
@@ -3064,7 +3095,43 @@ func tick(delta: float) -> void:
 	_tick_raid_encounter()
 	_tick_zombies(delta)
 	_tick_acid_pools()
+	_tick_recalls()
 	_tick_world(delta)
+
+
+## Completion occurs after all AI, melee, infection and acid damage in tick().
+func _cancel_recall(player: Player, reason: String) -> void:
+	if player.recall.is_empty():
+		return
+	player.recall = {}
+	events.append({"type": "recall_cancelled", "peer": player.id, "reason": reason})
+
+
+func _tick_recalls() -> void:
+	for player in players.values():
+		if player.recall.is_empty():
+			continue
+		var reason: String = HubRecall.cancel_reason(world, player, zombies, time)
+		if training_matches.has(player.id) or arena_queue.has(player.id):
+			reason = "in_duel"
+		if reason != "":
+			_cancel_recall(player, reason)
+			continue
+		if time < float(player.recall.get("until", INF)):
+			continue
+		var at: Vector3 = HubRecall.destination(world)
+		if not at.is_finite():
+			_cancel_recall(player, "no_safe_destination")
+			continue
+		if not player.inventory.remove(HubRecall.ITEM_ID, 1):
+			_cancel_recall(player, "not_carried")
+			continue
+		player.position = at
+		player.recall = {}
+		player.recall_ready_at = time + HubRecall.COOLDOWN_SECONDS
+		player.dirty_inventory = true
+		player.dirty_character = true
+		events.append({"type": "recall_completed", "peer": player.id})
 
 
 func _tick_players(delta: float) -> void:
@@ -4012,6 +4079,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),
 			"combat_tag_seconds": CombatLogout.remaining(player.combat_tag_until, time),
+			"recall_seconds": maxf(0.0, float(player.recall.get("until", time)) - time) if not player.recall.is_empty() else 0.0,
+			"recall_cooldown": maxf(0.0, player.recall_ready_at - time),
 			"duel": _training_snapshot(peer_id),
 			"arena_queue": _arena_queue_state(peer_id),
 			"self_defense_seconds": PvpInfamy.defense_remaining(
