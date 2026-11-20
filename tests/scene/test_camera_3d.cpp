@@ -432,6 +432,35 @@ TEST_CASE("[SceneTree][Camera3D] Project ray") {
 	memdelete(mock_viewport);
 }
 
+TEST_CASE("[SceneTree][Camera3D] Atomic cinematic far DOF preserves exposure") {
+	Ref<CameraAttributesPractical> settings = memnew(CameraAttributesPractical);
+	CHECK_FALSE(settings->is_dof_blur_far_enabled());
+	CHECK_FALSE(settings->is_dof_blur_near_enabled());
+
+	settings->set_exposure_sensitivity(160.0f);
+	settings->set_dof_blur_near_enabled(true);
+	settings->configure_cinematic_dof(true, 64.0f, 36.0f, 0.14f);
+	CHECK(settings->is_dof_blur_far_enabled());
+	CHECK_FALSE(settings->is_dof_blur_near_enabled());
+	CHECK(settings->get_dof_blur_far_distance() == doctest::Approx(64.0f));
+	CHECK(settings->get_dof_blur_far_transition() == doctest::Approx(36.0f));
+	CHECK(settings->get_dof_blur_amount() == doctest::Approx(0.14f));
+	CHECK(settings->get_exposure_sensitivity() == doctest::Approx(160.0f));
+
+	// Identical profiles return without a second backend dispatch.
+	settings->configure_cinematic_dof(true, 64.0f, 36.0f, 0.14f);
+	CHECK(settings->get_dof_blur_far_distance() == doctest::Approx(64.0f));
+	settings->configure_cinematic_dof(true, -25.0f, -8.0f, 5.0f);
+	CHECK(settings->get_dof_blur_far_distance() == doctest::Approx(0.01f));
+	CHECK(settings->get_dof_blur_far_transition() == doctest::Approx(0.01f));
+	CHECK(settings->get_dof_blur_amount() == doctest::Approx(1.0f));
+
+	settings->configure_cinematic_dof(false, 52.0f, 42.0f, 0.0f);
+	CHECK_FALSE(settings->is_dof_blur_far_enabled());
+	CHECK_FALSE(settings->is_dof_blur_near_enabled());
+	CHECK(settings->get_exposure_sensitivity() == doctest::Approx(160.0f));
+}
+
 } // namespace TestCamera3D
 
 #endif // _3D_DISABLED
