@@ -41,12 +41,16 @@ occlusion_culling/use_occlusion_culling=true
 
 ; SSR is reserved for High/Ultra Forward+; render its rays at half resolution to
 ; control bandwidth and preserve budget for world geometry and vegetation.
-rendering/environment/screen_space_reflection/half_size=true
+environment/screen_space_reflection/half_size=true
 
 ; SSAO / SSIL add contact depth and diffuse bounce only for Forward+ High/Ultra.
 ; Half-resolution ray buffers are reconstructed by Godot, avoiding full-res cost.
-rendering/environment/ssao/half_size=true
-rendering/environment/ssil/half_size=true
+environment/ssao/half_size=true
+environment/ssil/half_size=true
+
+; Native sky IBL prefilter reduces high-roughness reflection aliasing.
+reflections/sky_reflections/ggx_samples=48
+reflections/sky_reflections/ggx_samples.mobile=16
 
 renderer/rendering_method="forward_plus"
 renderer/rendering_method.mobile="gl_compatibility"
