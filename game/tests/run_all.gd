@@ -32,6 +32,7 @@ const SUITES := [
 	"res://tests/test_graphics_auto_quality.gd",
 	"res://tests/test_graphics_detail.gd",
 	"res://tests/test_dungeon_light_budget.gd",
+	"res://tests/test_dungeon_occlusion.gd",
 	"res://tests/test_shadow_budget.gd",
 	"res://tests/test_object_batch_grid.gd",
 	"res://tests/test_foliage_wind_weather.gd",
