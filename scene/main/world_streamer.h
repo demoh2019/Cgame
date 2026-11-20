@@ -92,10 +92,10 @@ private:
 	Node *_get_parent_for_chunks() const;
 	void _forget_dead_chunks();
 	void _update_streaming();
-	void _poll_loading(int &r_instantiation_budget);
+	void _poll_loading(int &r_instantiation_budget, uint64_t p_frame_started_usec);
 	bool _finalize_chunk(const Vector3i &p_cell, const String &p_path);
 	bool _adopt_chunk(const Vector3i &p_cell, Node *p_chunk);
-	void _run_generator_queue(int &r_instantiation_budget);
+	void _run_generator_queue(int &r_instantiation_budget, uint64_t p_frame_started_usec);
 	void _unload_cell(const Vector3i &p_cell);
 	void _reset_state();
 
