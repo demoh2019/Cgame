@@ -177,6 +177,11 @@ public:
 	virtual Transform3D get_camera_transform() const;
 	virtual Projection get_camera_projection() const;
 
+	// Projected vertical pixel density of a 1-meter feature at a world point.
+	// Perspective/frustum use camera-space depth; orthogonal is constant.
+	// This is a geometry LOD hint (before viewport 3D resolution scaling).
+	real_t get_pixels_per_meter_at_position(const Vector3 &p_world_pos) const;
+
 	virtual Vector3 project_ray_normal(const Point2 &p_pos) const;
 	virtual Vector3 project_ray_origin(const Point2 &p_pos) const;
 	virtual Vector3 project_local_ray_normal(const Point2 &p_pos) const;
