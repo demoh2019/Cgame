@@ -2,6 +2,7 @@ extends RefCounted
 ## A player's vital statistics and the rules that change them over time.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const FoodSafety = preload("res://scripts/shared/food_safety.gd")
 
 var health: float = Defs.MAX_HEALTH
 # Skill bonuses set by the server; the defaults are the base game.
@@ -13,6 +14,7 @@ var stamina_regen_mult: float = 1.0
 var hunger: float = 100.0 # 100 is full.
 var thirst: float = 100.0
 var infection: float = 0.0
+var food_poisoning: float = 0.0 # Raw fish risk, persists across reconnects.
 var bleeding: float = 0.0 # Wound severity 0..100, independent of infection.
 var fracture: float = 0.0 # Persistent blunt injury, prevents sprint.
 var exposure: float = 0.0 # 0..100 cumulative weather stress.
@@ -51,6 +53,9 @@ func tick(delta: float) -> float:
 	scent_mask_seconds = maxf(0.0, scent_mask_seconds - maxf(0.0, delta))
 	hunger = maxf(hunger - Defs.HUNGER_PER_SECOND * hunger_mult * delta, 0.0)
 	thirst = maxf(thirst - Defs.THIRST_PER_SECOND * thirst_mult * delta, 0.0)
+	var food_effect: Dictionary = FoodSafety.progress(food_poisoning, delta)
+	food_poisoning = float(food_effect["remaining"])
+	thirst = maxf(0.0, thirst - float(food_effect["extra_thirst"]))
 	var resting := maxf(delta - stamina_recovery_delay, 0.0)
 	stamina_recovery_delay = maxf(0.0, stamina_recovery_delay - delta)
 	if resting > 0.0:
@@ -60,7 +65,7 @@ func tick(delta: float) -> float:
 	if infection > 0.0:
 		infection = minf(Defs.INFECTION_MAX,
 			infection + Defs.INFECTION_GROWTH_PER_SECOND * maxf(0.0, delta))
-	var damage := 0.0
+	var damage := float(food_effect["damage"])
 	if bleeding > 0.0:
 		# Integrate the decaying severity so large ticks cannot cause damage
 		# after a wound would already have clotted.
@@ -131,6 +136,21 @@ func drink(amount: float) -> void:
 	thirst = minf(thirst + amount, 100.0)
 
 
+func add_food_poisoning(amount: float) -> bool:
+	if not alive or not is_finite(amount) or amount <= 0.0:
+		return false
+	var prior: float = food_poisoning
+	food_poisoning = minf(FoodSafety.MAX_SEVERITY, food_poisoning + amount)
+	return food_poisoning > prior
+
+
+func treat_food_poisoning(amount: float) -> bool:
+	if not alive or not is_finite(amount) or amount <= 0.0 or food_poisoning <= 0.0:
+		return false
+	food_poisoning = maxf(0.0, food_poisoning - amount)
+	return true
+
+
 func add_infection(amount: float) -> bool:
 	if not alive or not is_finite(amount) or amount <= 0.0:
 		return false
@@ -197,6 +217,7 @@ func reset() -> void:
 	stamina = Defs.MAX_STAMINA
 	stamina_recovery_delay = 0.0
 	infection = 0.0
+	food_poisoning = 0.0
 	bleeding = 0.0
 	fracture = 0.0
 	exposure = 0.0
@@ -207,4 +228,4 @@ func reset() -> void:
 
 
 func to_dict() -> Dictionary:
-	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "bleeding": bleeding, "fracture": fracture, "exposure": exposure, "wetness": wetness, "warmth_seconds": warmth_seconds, "scent_mask_seconds": scent_mask_seconds, "alive": alive}
+	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "food_poisoning": food_poisoning, "bleeding": bleeding, "fracture": fracture, "exposure": exposure, "wetness": wetness, "warmth_seconds": warmth_seconds, "scent_mask_seconds": scent_mask_seconds, "alive": alive}
