@@ -171,6 +171,15 @@ func run(t) -> void:
 	t.eq(mob_c.target_id, tank.id, "third eligible infected selected")
 	t.eq(mob_d.target_id, medic.id, "fourth infected stays engaged with the medic")
 
+	t.current = "actual party healing generates a real eligible medic hate entry"
+	var healed_enemy = _enemy(sim, world, 313.8, tank.id)
+	var before_healing_hate: float = float(healed_enemy.threat.get(medic.id, 0.0))
+	sim._record_party_healing_threat(medic, [{"recipient": tank, "healed": 20.0}])
+	t.check(float(healed_enemy.threat.get(medic.id, 0.0)) > before_healing_hate,
+		"the normal healing-aggression pipeline raises medic hate on a real enemy")
+	t.check(MedicCover.can_redirect(healed_enemy, medic, tank, world),
+		"medic can call for cover when healing draws hate, even if the infected still targets the patient")
+
 	t.current = "death, equipment loss and cooldown time prevent extra transfers"
 	medic.medic_cover_cooldown = 0.0
 	medic.inventory.remove("restoration_staff_1", 1)
