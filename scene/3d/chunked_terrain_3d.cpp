@@ -234,9 +234,18 @@ void ChunkedTerrain3D::_ensure_mesh(Chunk &r_chunk, int p_lod) {
 	if (!mesh.morph_uv2.is_empty()) {
 		arrays[RSE::ARRAY_TEX_UV2] = mesh.morph_uv2;
 	}
+	// The normal target is streamed only on geomorph-enabled high-quality
+	// meshes. Custom0 RGB_FLOAT avoids quantizing steep-cliff normals.
+	BitField<RSE::ArrayFormat> custom_format;
+	if (!mesh.morph_normal_xyz.is_empty()) {
+		arrays[RSE::ARRAY_CUSTOM0] = mesh.morph_normal_xyz;
+		custom_format = static_cast<RSE::ArrayFormat>(
+				uint64_t(RSE::ARRAY_CUSTOM_RGB_FLOAT) << RSE::ARRAY_FORMAT_CUSTOM0_SHIFT);
+	}
 	arrays[RSE::ARRAY_INDEX] = mesh.indices;
 	const RID mesh_rid = rs->mesh_create();
-	rs->mesh_add_surface_from_arrays(mesh_rid, RSE::PRIMITIVE_TRIANGLES, arrays);
+	rs->mesh_add_surface_from_arrays(mesh_rid, RSE::PRIMITIVE_TRIANGLES,
+			arrays, Array(), Dictionary(), custom_format);
 	if (material.is_valid()) {
 		rs->mesh_surface_set_material(mesh_rid, 0, material->get_rid());
 	}

@@ -31,3 +31,16 @@ func run(t) -> void:
 		"fallback painted material renders identical geometry")
 	t.check((Quality as Script).source_code.contains("ChunkView.apply_terrain_geomorph"),
 		"graphics settings reconfigure live chunks without a scene reload")
+
+	t.current = "morph interpolates coarse vertex normals"
+	var fallback: String = ChunkView.GROUND_SHADER
+	t.check(fallback.contains("NORMAL = normalize(mix(NORMAL, CUSTOM0.xyz, morph));"),
+		"Compatibility material blends source and coarse normals alongside heights")
+	t.check(fallback.contains("if (morph > 0.001)"),
+		"low-end terrain skips morph-normal work")
+	if ground != null:
+		t.check(ground.code.contains("NORMAL = normalize(mix(NORMAL, CUSTOM0.xyz, morph));"),
+			"PBR ground shares the same smooth lighting transition")
+		t.check(ground.code.contains("VERTEX.y = mix(VERTEX.y, UV2.x, morph);"),
+			"vertex height and normal use the same pixel-error geomorph weight")
+

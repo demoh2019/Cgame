@@ -79,6 +79,9 @@ struct ChunkMesh {
 	// UV2.x = height on next coarser LOD, UV2.y = interior morph mask.
 	// Empty for the default/low-end non-geomorph path.
 	PackedVector2Array morph_uv2;
+	// Custom0 RGB32F stores the normal of the NEXT coarse triangulated
+	// surface. Allocated only for morph-enabled LOD meshes on High/Ultra.
+	PackedFloat32Array morph_normal_xyz;
 	PackedInt32Array indices;
 	AABB bounds;
 };
