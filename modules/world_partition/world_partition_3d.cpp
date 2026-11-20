@@ -470,6 +470,7 @@ Dictionary WorldPartition3D::get_streaming_source(const String &p_name) const {
 			result["unload_radius"] = source.unload_radius;
 			result["priority"] = source.priority;
 			result["ready"] = is_streaming_source_ready(p_name);
+			result["progress"] = get_streaming_source_progress(p_name);
 			return result;
 		}
 	}
@@ -499,6 +500,29 @@ bool WorldPartition3D::is_streaming_source_ready(const String &p_name) const {
 		}
 	}
 	return false;
+}
+
+real_t WorldPartition3D::get_streaming_source_progress(const String &p_name) const {
+	if (!streaming_enabled || !is_inside_tree()) {
+		return 0.0;
+	}
+	for (const StreamingSource &source : streaming_sources) {
+		if (source.name != p_name) {
+			continue;
+		}
+		int loaded = 0;
+		const int width = source.load_radius * 2 + 1;
+		for (int dz = -source.load_radius; dz <= source.load_radius; dz++) {
+			for (int dx = -source.load_radius; dx <= source.load_radius; dx++) {
+				const Vector2i cell(source.center.x + dx, source.center.y + dz);
+				if (is_cell_loaded(cell)) {
+					loaded++;
+				}
+			}
+		}
+		return real_t(loaded) / real_t(width * width);
+	}
+	return 0.0;
 }
 
 void WorldPartition3D::_refresh_source_readiness() {
@@ -925,6 +949,7 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_streaming_source_names"), &WorldPartition3D::get_streaming_source_names);
 	ClassDB::bind_method(D_METHOD("get_streaming_source_count"), &WorldPartition3D::get_streaming_source_count);
 	ClassDB::bind_method(D_METHOD("is_streaming_source_ready", "name"), &WorldPartition3D::is_streaming_source_ready);
+	ClassDB::bind_method(D_METHOD("get_streaming_source_progress", "name"), &WorldPartition3D::get_streaming_source_progress);
 	ClassDB::bind_method(D_METHOD("local_position_to_cell", "local_position"), &WorldPartition3D::local_position_to_cell);
 	ClassDB::bind_method(D_METHOD("cell_to_local_position", "cell"), &WorldPartition3D::cell_to_local_position);
 	ClassDB::bind_method(D_METHOD("get_cells_in_radius", "center", "radius"), &WorldPartition3D::get_cells_in_radius);
