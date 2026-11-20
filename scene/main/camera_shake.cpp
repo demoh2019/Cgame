@@ -55,6 +55,32 @@ real_t CameraShake::noise(double p_x, uint32_t p_channel) {
 	return Math::lerp(shake_lattice(cell, p_channel), shake_lattice(cell + 1, p_channel), u);
 }
 
+real_t CameraShake::spatial_falloff(const Vector3 &p_listener, const Vector3 &p_source,
+		real_t p_inner_radius, real_t p_outer_radius) {
+	// Cosmetic network events may contain invalid coordinates. Reject rather
+	// than allowing a NaN/Inf sample to propagate into the camera transform.
+	if (!p_listener.is_finite() || !p_source.is_finite() ||
+			!Math::is_finite(p_inner_radius) || !Math::is_finite(p_outer_radius) ||
+			p_inner_radius < real_t(0.0) || !(p_outer_radius > p_inner_radius)) {
+		return real_t(0.0);
+	}
+	const Vector3 delta = p_listener - p_source;
+	if (!delta.is_finite()) {
+		return real_t(0.0);
+	}
+	const real_t distance = delta.length();
+	if (!Math::is_finite(distance) || distance >= p_outer_radius) {
+		return real_t(0.0);
+	}
+	if (distance <= p_inner_radius) {
+		return real_t(1.0);
+	}
+	const real_t t = CLAMP((distance - p_inner_radius) / (p_outer_radius - p_inner_radius), real_t(0.0), real_t(1.0));
+	// Smoothstep's zero slope at each radius prevents a visible camera jerk
+	// when an explosion crosses a threshold or a player starts moving away.
+	return real_t(1.0) - t * t * (real_t(3.0) - real_t(2.0) * t);
+}
+
 bool CameraShake::advance(double p_delta, real_t p_decay, real_t p_frequency) {
 	if (!(trauma > real_t(0.0))) {
 		return false;
