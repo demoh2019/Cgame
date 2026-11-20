@@ -129,6 +129,14 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 			if tile is MultiMeshInstance3D:
 				tile.visibility_range_end = ChunkView.grass_visibility_end
 
+	# Following HLOD practice, imported mesh LOD bias and distant decor
+	# culling scale with quality. Existing GPU batches are updated in place.
+	ChunkView.configure_scenery(_level)
+	if viewport != null:
+		for batch in viewport.get_tree().get_nodes_in_group(ChunkView.SCENERY_GROUP):
+			if batch is MultiMeshInstance3D:
+				ChunkView.apply_scenery_detail(batch)
+
 	# The graphics profiles also control water detail and how many terrain chunks are streamed.
 	if water != null and water.material_override is ShaderMaterial:
 		(water.material_override as ShaderMaterial).set_shader_parameter("ripple_strength", float(world_profile["water_ripples"]))
