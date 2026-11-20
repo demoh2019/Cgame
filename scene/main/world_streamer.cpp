@@ -252,8 +252,11 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 		emit_signal(SNAME("chunk_load_failed"), cell, path);
 	}
 
-	// Nearest first, and only a few instantiations per frame to avoid hitches.
-	for (uint32_t i = 1; i < ready.size(); i++) { // Insertion sort: the list is tiny.
+	// Finished threaded scenes must use the same forward-biased priority as
+	// pending procedural cells. Otherwise a fast-moving player waits for
+	// already-ready *behind-camera* scenes before nearby forward scenes.
+	// First keep nearest-first ordering for stationary/invalid motion hints.
+	for (uint32_t i = 1; i < ready.size(); i++) { // Insertion sort: max_concurrent_loads is small.
 		Ready item = ready[i];
 		int32_t j = int32_t(i) - 1;
 		while (j >= 0 && ready[j].distance > item.distance) {
@@ -262,12 +265,24 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 		}
 		ready[j + 1] = item;
 	}
+	LocalVector<Vector3i> ready_cells;
+	ready_cells.reserve(ready.size());
 	for (const Ready &item : ready) {
-		const String path = loading[item.cell];
-		const bool still_wanted = have_focus && item.distance <= request_radius && !loaded.has(item.cell);
+		ready_cells.push_back(item.cell);
+	}
+	if (have_focus) {
+		WorldStreamingGrid::prioritize_cells_for_motion(ready_cells, position, velocity_hint,
+				lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
+				cell_size, _grid_axes());
+	}
+	for (const Vector3i &cell : ready_cells) {
+		const String path = loading[cell];
+		const real_t distance = have_focus ?
+				WorldStreamingGrid::distance_to_cell(position, cell, cell_size, _grid_axes()) : real_t(0.0);
+		const bool still_wanted = have_focus && distance <= request_radius && !loaded.has(cell);
 		if (!still_wanted) {
 			// The focus moved on while loading: release the result and drop it.
-			loading.erase(item.cell);
+			loading.erase(cell);
 			ResourceLoader::load_threaded_get(path);
 			continue;
 		}
@@ -276,10 +291,10 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 			continue; // Keep loaded resources ready for the next frame.
 		}
 		r_instantiation_budget--;
-		loading.erase(item.cell);
-		if (!_finalize_chunk(item.cell, path)) {
-			failed.insert(item.cell);
-			emit_signal(SNAME("chunk_load_failed"), item.cell, path);
+		loading.erase(cell);
+		if (!_finalize_chunk(cell, path)) {
+			failed.insert(cell);
+			emit_signal(SNAME("chunk_load_failed"), cell, path);
 		}
 	}
 }
@@ -318,21 +333,17 @@ void WorldStreamer::_update_streaming() {
 	}
 
 	if (chunk_generator.is_valid()) {
-		// Rebuild the queue: nearest wanted cells that are neither loaded nor queued yet.
-		HashSet<Vector3i> queued;
-		for (const Vector3i &cell : generate_queue) {
-			queued.insert(cell);
-		}
+		// Reconcile the pending queue against the *current* load radius,
+		// rather than retaining cells from previous player positions.
+		// The wanted cells are unique, already sorted by movement priority,
+		// and bounded by MAX_CELLS. Rebuilding also prevents old work from
+		// delaying new terrain after teleports or fast camera turns.
+		generate_queue.clear();
 		for (const Vector3i &cell : wanted) {
-			if (!loaded.has(cell) && !queued.has(cell) && !missing.has(cell) && !failed.has(cell)) {
+			if (!loaded.has(cell) && !missing.has(cell) && !failed.has(cell)) {
 				generate_queue.push_back(cell);
 			}
 		}
-		// Reprioritize already-queued work when the player turns. Rebuilding
-		// world chunks remains bounded to max_instantiations_per_frame.
-		WorldStreamingGrid::prioritize_cells_for_motion(generate_queue, position, velocity_hint,
-				lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
-				cell_size, _grid_axes());
 		return;
 	}
 
