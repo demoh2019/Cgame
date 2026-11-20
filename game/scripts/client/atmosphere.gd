@@ -24,6 +24,7 @@ var sky_material: ShaderMaterial
 var world_environment: WorldEnvironment
 var sky: Sky
 var _atmospheric_lut: Texture2D
+var _cloud_lighting_lut: Texture2D
 var _sky_scattering_generator: Object
 var _sky_horizon_optical := Color(0.0, 0.0, 0.0, 1.0)
 var _atmospheric_lut_strength := 0.0
@@ -82,6 +83,8 @@ func _ready() -> void:
 	sky_material.shader = load("res://assets/shaders/sky.gdshader")
 	# Reuse the same R8 LUT already bound to terrain and vegetation shadows.
 	sky_material.set_shader_parameter("cirrus_lut", CloudShadowLut.texture())
+	# Valid texture fallback avoids null samplers while native code is absent.
+	sky_material.set_shader_parameter("cloud_lighting_lut", CloudShadowLut.texture())
 	var panorama := load("res://assets/textures/sky/day_sky.jpg") as Texture2D
 	sky_material.set_shader_parameter("has_panorama", panorama != null)
 	if panorama != null:
@@ -353,6 +356,26 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 		clampi(int(settings.get("cirrus_detail", 0)), 0, 2))
 	sky_material.set_shader_parameter("cirrus_opacity",
 		clampf(float(settings.get("cirrus_opacity", 0.0)), 0.0, 0.65))
+	# One-time cloud-shape bake from the exact R8 texture shading our
+	# ground. No per-frame recompute and no new cloud noise field.
+	var cloud_strength: float = clampf(
+		float(settings.get("cloud_lighting_strength", 0.0)), 0.0, 1.0)
+	if str(settings.get("rendering_method", "")) != "forward_plus":
+		cloud_strength = 0.0
+	if cloud_strength > 0.001 and _cloud_lighting_lut == null \
+			and ClassDB.class_exists("SkyScatteringLUT"):
+		var generator: Object = _sky_scattering_generator
+		if generator == null:
+			generator = ClassDB.instantiate("SkyScatteringLUT")
+		if generator != null and generator.has_method("generate_cloud_lighting_lut"):
+			var cloud_image := generator.call(
+				"generate_cloud_lighting_lut", CloudShadowLut.build_image()) as Image
+			if cloud_image != null:
+				_cloud_lighting_lut = ImageTexture.create_from_image(cloud_image)
+				sky_material.set_shader_parameter("cloud_lighting_lut", _cloud_lighting_lut)
+	sky_material.set_shader_parameter("has_cloud_lighting_lut",
+		_cloud_lighting_lut != null and cloud_strength > 0.001)
+	sky_material.set_shader_parameter("cloud_lighting_strength", cloud_strength)
 	sun.shadow_enabled = _shadows_allowed
 	sun.directional_shadow_max_distance = float(settings["shadow_distance"])
 	# Renderer-aware PCSS is configured once per quality switch. Balanced and
