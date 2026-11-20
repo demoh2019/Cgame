@@ -816,6 +816,13 @@ func c_party_aid(target_id: int, item_id: String) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_medic_cover() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "medic_cover", sim.cmd_medic_cover(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_party_triage() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -1154,7 +1161,8 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 		"caravan_ambushed":
 			return sim != null and CaravanEscort.can_receive_alert(
 				event, peer, sim.players, sim.parties)
-		"party_aid", "party_triage":
+		"party_aid", "party_triage", "medic_cover":
+			# Only the caster and actual defender see aggro handoffs.
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
 		"party_supply_request":
 			# Membership is checked when the event is delivered, not only
