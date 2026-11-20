@@ -2,6 +2,7 @@ extends Node3D
 
 const CloudShadowLut = preload("res://scripts/client/cloud_shadow_lut.gd")
 const SkyRainbow = preload("res://scripts/client/sky_rainbow.gd")
+const SkyAurora = preload("res://scripts/client/sky_aurora.gd")
 const SkyFogHarmony = preload("res://scripts/client/sky_fog_harmony.gd")
 const WaterCaustics = preload("res://scripts/client/water_caustics.gd")
 const Moisture = preload("res://scripts/client/weather_surface_memory.gd")
@@ -268,6 +269,8 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 		# Rainbow while a storm clears (RDR2/Ghost of Tsushima style), else exactly 0.
 		sky_material.set_shader_parameter("rainbow_strength",
 			SkyRainbow.strength(storm, storming, daylight, sun_height))
+		sky_material.set_shader_parameter("aurora_strength",
+			SkyAurora.strength(_shadow_filter_level, daylight, storm))
 		sky_material.set_shader_parameter("sky_time", _sky_seconds)
 		sky_material.set_shader_parameter("moon_phase", moon_phase)
 		# The sky panorama and sunlit terrain clouds follow the same wind.
