@@ -28,10 +28,6 @@ aa_weather_wetness={
 "type": "float",
 "value": 0.0
 }
-aa_vegetation_wet_gloss={
-"type": "float",
-"value": 0.35
-}
 
 aa_cloud_shadow_map={
 "type": "sampler2D",
@@ -46,4 +42,9 @@ aa_cloud_shadow_strength={
 aa_terrain_detail_radius={
 "type": "float",
 "value": 42.0
+}
+
+aa_terrain_layer_budget={
+"type": "int",
+"value": 3
 }
