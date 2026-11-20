@@ -15,6 +15,7 @@ const PvPHonor = preload("res://scripts/shared/pvp_honor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
 const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
+const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
@@ -962,6 +963,8 @@ func _execute_outpost_breach(peer_id: int, site_id: int) -> Dictionary:
 	var site: Dictionary = territory.site_by_id(site_id)
 	if site.is_empty():
 		return {"ok": false, "reason": "unknown_outpost"}
+	if GuildTerritory.same_owner_guild(site, player, players, parties):
+		return {"ok": false, "reason": "guild_ally"}
 	var attacker_group: int = parties.group_of(peer_id)
 	var occupied: Dictionary = territory._occupied_groups(site, players, parties)
 	var ally_count: int = int(occupied.get(attacker_group, 0)) if attacker_group > 0 else 0
@@ -1007,6 +1010,8 @@ func _execute_siege_declare(peer_id: int, site_id: int) -> Dictionary:
 	var site: Dictionary = territory.site_by_id(site_id)
 	if site.is_empty():
 		return {"ok": false, "reason": "unknown_outpost"}
+	if GuildTerritory.same_owner_guild(site, player, players, parties):
+		return {"ok": false, "reason": "guild_ally"}
 	var group_id: int = parties.group_of(peer_id)
 	var is_leader: bool = group_id > 0 and parties.groups.has(group_id) \
 		and int(parties.groups[group_id]["leader"]) == peer_id
@@ -2645,7 +2650,7 @@ func _tick_players(delta: float) -> void:
 		# Only the server owns party identity, site control and stamina.
 		if player.survival.stamina_recovery_delay <= 0.0 and \
 				player.survival.hunger > 20.0 and player.survival.thirst > 20.0 and \
-				territory.has_rally_bonus(player.id, player.position, parties, time):
+				territory.has_rally_bonus(player.id, player.position, parties, time, players):
 			player.survival.stamina = minf(Defs.MAX_STAMINA,
 				player.survival.stamina + TerritoryControl.RALLY_STAMINA_PER_SECOND * delta)
 		var conditions: Dictionary = Weather.conditions(world, player.position.x, player.position.z, time)
@@ -3249,7 +3254,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		used_crates.append(id)
 	var snapshot := {
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
-		"outposts": siege_contracts.public_state(territory.public_state(time), time),
+		"outposts": siege_contracts.public_state(territory.public_state(time, players, parties), time),
 		"you": {
 			"party": _party_state_for(peer_id),
 			"guild": {"id": player.guild_id, "name": player.guild_name, "rank": player.guild_rank},

@@ -8,6 +8,7 @@ const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
 const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const OutpostSupplies = preload("res://scripts/shared/outpost_supplies.gd")
+const GuildTerritory = preload("res://scripts/shared/guild_territory.gd")
 
 const MAX_SITES := 3
 const CAPTURE_RADIUS := 12.0
@@ -51,12 +52,14 @@ func _init(world) -> void:
 			break
 
 
-func public_state(now: float) -> Array:
+func public_state(now: float, players: Dictionary = {}, parties = null) -> Array:
 	var result: Array = []
 	for site in sites:
+		var clan: Dictionary = GuildTerritory.owner_banner(site, players, parties)
 		result.append({
 			"id": int(site["id"]), "x": float(site["x"]), "z": float(site["z"]),
 			"owner": int(site["owner"]), "challenger": int(site["challenger"]),
+			"guild": clan,
 			"progress": float(site["progress"]), "contested": bool(site["contested"]),
 			"fortification": int(site["fortification"]),
 			"capture_target": capture_target(site),
@@ -95,7 +98,7 @@ func _occupied_groups(site: Dictionary, players: Dictionary, parties) -> Diction
 			continue
 		if point.distance_squared_to(Vector2(player.position.x, player.position.z)) > CAPTURE_RADIUS * CAPTURE_RADIUS:
 			continue
-		var group_id: int = parties.group_of(player.id)
+		var group_id: int = GuildTerritory.occupancy_side(site, player, players, parties)
 		active[group_id] = int(active.get(group_id, 0)) + 1
 	return active
 
@@ -168,14 +171,21 @@ func claim_supplies(site_id: int, player, players: Dictionary, parties,
 	return {"ok": false, "reason": "no_such_site"}
 
 
-func has_rally_bonus(peer_id: int, position: Vector3, parties, now: float) -> bool:
+func has_rally_bonus(peer_id: int, position: Vector3, parties, now: float,
+		players: Dictionary = {}) -> bool:
 	if not position.is_finite():
 		return false
 	var group_id: int = parties.group_of(peer_id)
-	if group_id == 0 or not parties.groups.has(group_id):
-		return false
+	var player = players.get(peer_id)
 	for site in sites:
-		if int(site["owner"]) == group_id and now < float(site["until"]) and \
-				Vector2(position.x, position.z).distance_squared_to(Vector2(site["x"], site["z"])) <= RALLY_RADIUS * RALLY_RADIUS:
+		var owner: int = int(site["owner"])
+		if owner <= 0 or not parties.groups.has(owner) or now >= float(site["until"]):
+			continue
+		var my_party: bool = group_id > 0 and group_id == owner
+		var my_clan: bool = GuildTerritory.same_owner_guild(site, player, players, parties)
+		if not my_party and not my_clan:
+			continue
+		if Vector2(position.x, position.z).distance_squared_to(
+				Vector2(site["x"], site["z"])) <= RALLY_RADIUS * RALLY_RADIUS:
 			return true
 	return false

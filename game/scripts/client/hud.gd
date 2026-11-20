@@ -1021,6 +1021,12 @@ func _process(_delta: float) -> void:
 		var group_id: int = int(client.you.get("party", {}).get("id", 0))
 		var owner: int = int(closest["owner"])
 		var status: String = "Neutral" if owner == 0 else ("YOURS" if owner == group_id and group_id != 0 else "Party %d" % owner)
+		var owning_clan: Dictionary = closest.get("guild", {})
+		if not owning_clan.is_empty():
+			var my_clan: Dictionary = client.you.get("guild", {})
+			if str(my_clan.get("id", "")) != "" and str(my_clan.get("id", "")) == str(owning_clan["id"]):
+				status = "CLAN ALLY" if group_id != owner else "CLAN DEFENDERS"
+			status += " | Clan: %s" % str(owning_clan["name"])
 		if bool(closest["contested"]):
 			status += " | CONTESTED"
 		elif int(closest["challenger"]) != 0:

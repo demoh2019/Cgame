@@ -2193,3 +2193,43 @@ regression suite and covers field crafting, scent-versus-sight,
 paid-use replay, expiry, older saves, invalid durations and respawn.
 No engine-native extensions are necessary; the existing Cgame AI,
 crafting, character persistence and network primitives suffice.
+
+
+## Verified guild banners for contested outposts
+
+Outposts are now marked with a **live Nakama-verified guild banner** when
+their current owning party contains at least two online members and **every
+member** belongs to the *same* verified guild. Mixed parties, guests,
+unverified memberships, missing party rosters and neutral flags never show
+a guild banner. Guild IDs and names are derived on the server from trusted
+player sessions; they cannot be set by an ENet request or loaded from an
+untrusted character save. The outpost snapshot exposes only the public
+guild name and ID, never a player's account ID or guild administration
+rank. The closest-outpost HUD displays the clan name and shows *CLAN ALLY*
+for fellow guild members who are in another temporary party.
+
+During ownership, nearby guild members are counted on the owning party's
+defensive side, so allied parties no longer falsely **contest** the flag.
+Verified guildmates can also receive the existing small, 18-metre stamina
+rally bonus even when not in the owner's temporary group. Guild members
+cannot spend siege declaration materials to declare war on their clan's
+outpost, or expend breaching materials against its fortifications.
+Hostile parties and unaffiliated guests retain all existing PvP rules.
+
+No guild advantages are permanently cached in world state: banners and
+permissions are recomputed from the **current** online party roster on
+each server update. Changing/leaving a guild, disbanding a party or
+losing the point removes its banner and allied privileges. Since group
+memberships are refreshed by the existing Nakama server integration,
+changes are reflected after refresh (up to 45 seconds) or reconnect.
+Capture and siege windows otherwise continue to use the established
+party mechanics.
+
+This is the integration layer toward **persistent guild-based ownership**,
+not a claim that outposts or victories survive a server restart. Durable
+Nakama ownership, distributed locks, guild treasury and crash-safe
+siege results must be added before claiming persistent castle wars.
+Implementation: `scripts/shared/guild_territory.gd` and
+`territory_control.gd`; regression checks in
+`tests/test_guild_territory.gd` through `tests/run_all.gd`.
+No native Cgame engine change was needed.
