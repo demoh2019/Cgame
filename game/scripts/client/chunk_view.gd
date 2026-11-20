@@ -193,6 +193,11 @@ var _grass_last_scale := -1.0
 var _grass_last_tile_count := -1
 const GRASS_LOD_INTERVAL := 0.35 # Update a few times a second, not every render frame.
 var _shadow_casters: Array[Dictionary] = [] # Instanced geometry with true bounds and visual role.
+# All shadows are static until a quality change or streamed caster changes.
+# Store the last actual scan, not the last interval tick.
+var _shadow_last_eye := Vector2.INF
+var _shadow_last_revision := -1
+var _shadow_last_count := -1
 var _shadow_timer := 0.0
 const SHADOW_INTERVAL := 0.5
 static var _grass_frame := -1
@@ -971,6 +976,13 @@ func _update_shadow_casters() -> void:
 	if view_camera == null:
 		return
 	var eye: Vector3 = view_camera.global_position
+	var eye_xz := Vector2(eye.x, eye.z)
+	if not ShadowBudget.needs_refresh(_shadow_last_eye, _shadow_last_revision,
+			_shadow_last_count, eye_xz, _shadow_casters.size()):
+		return
+	_shadow_last_eye = eye_xz
+	_shadow_last_revision = ShadowBudget.revision()
+	_shadow_last_count = _shadow_casters.size()
 	for entry in _shadow_casters:
 		var caster: MultiMeshInstance3D = entry["node"]
 		if not is_instance_valid(caster):
