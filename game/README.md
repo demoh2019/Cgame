@@ -2465,3 +2465,42 @@ record validation, append order, duplicate rejection, acknowledgement
 restarts, seed isolation and corruption fail-closed behavior. Nakama
 integration tests continue checking receipt idempotence. No native Cgame
 engine API was missing.
+
+
+## Expedition rally standard — crafted group combat recovery
+
+A party leader can now craft an **Expedition Rally Standard** at a workbench
+using **2 plank T1, 2 cloth T1 and 1 scavenged scrap**. Outside the protected
+settlement, the leader can raise the standard using the **Raise standard**
+button in the online party panel while at least one living ally is nearby.
+
+- Deployment consumes exactly **one carried standard**, only after the
+  server confirms accepted party leadership, dry land, nearby teammates,
+  no active standard, and deployment cooldown. It cannot be placed for free
+  or from an arbitrary client-supplied coordinate.
+- For **90 seconds**, current group members within **11 m horizontally**
+  and **3 m vertically** gain **+1.4 stamina/second** and **+0.8 combat
+  energy/second** on top of existing regeneration. Hunger or thirst at
+  20 or below blocks the additional recovery. Sprint/dodge stamina delay
+  and fractures prevent additional standard stamina restoration.
+  Recovery cannot exceed the normal stamina/combat-energy caps.
+- The leader must wait **120 seconds** between standard placements.
+  A dead or departed leader immediately cancels the standard.
+  The effect disappears on expiry and when the party disbands; it is
+  temporary session state, not a permanently persisted ability.
+- Only actual party members receive the standard location in their
+  authenticated snapshots. The online party HUD displays its remaining
+  duration and the north-up tactical radar draws its position and radius;
+  outsiders cannot see this private marker or receive its recovery.
+- Server tick integration clamps recovery to the real active portion
+  of each tick, avoiding overpayment when a temporary marker expires.
+
+Gameplay is implemented in `scripts/shared/rally_standard.gd`,
+`scripts/shared/party.gd` and the authoritative game server,
+using existing crafting, network, party HUD and radar systems.
+`tests/test_rally_standard.gd` is registered in `tests/run_all.gd`
+and checks ingredient costs, consent, placement, XP-safe recovery,
+cooldowns, stat caps, death cleanup, event privacy and visibility.
+
+Run `godot --headless --path game --script res://tests/run_all.gd`.
+No native Cgame engine additions were required for this mechanic.
