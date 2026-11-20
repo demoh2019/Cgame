@@ -87,6 +87,52 @@ Vector3 sample_normal_bilinear(const HeightField &p_field, real_t p_x, real_t p_
 	return (n00.lerp(n10, fx).lerp(n01.lerp(n11, fx), fz)).normalized();
 }
 
+real_t chunk_lod_deviation(const HeightField &p_field, int p_x0, int p_z0,
+		int p_quads, int p_coarse_stride) {
+	if (!p_field.is_valid() || p_quads < 2 || p_coarse_stride < 2 ||
+			p_quads % p_coarse_stride != 0 || p_x0 < 0 || p_z0 < 0 ||
+			p_x0 >= p_field.width - 1 || p_z0 >= p_field.depth - 1) {
+		return 0.0;
+	}
+	real_t largest = 0.0;
+	// Compare each fine-grid vertex to the exact TWO-triangle coarse mesh.
+	// Bilinear interpolation would incorrectly report zero on nonplanar quads.
+	// HeightField::get clamps the partial chunk at the map boundary, as
+	// build_chunk() does. Calculated once and cached by ChunkedTerrain3D.
+	for (int z = 0; z <= p_quads; z++) {
+		const int coarse_z = MIN((z / p_coarse_stride) * p_coarse_stride, p_quads - p_coarse_stride);
+		const real_t fz = real_t(z - coarse_z) / real_t(p_coarse_stride);
+		for (int x = 0; x <= p_quads; x++) {
+			const int coarse_x = MIN((x / p_coarse_stride) * p_coarse_stride, p_quads - p_coarse_stride);
+			const real_t fx = real_t(x - coarse_x) / real_t(p_coarse_stride);
+			const real_t h00 = p_field.get(p_x0 + coarse_x, p_z0 + coarse_z);
+			const real_t h10 = p_field.get(p_x0 + coarse_x + p_coarse_stride, p_z0 + coarse_z);
+			const real_t h01 = p_field.get(p_x0 + coarse_x, p_z0 + coarse_z + p_coarse_stride);
+			const real_t h11 = p_field.get(p_x0 + coarse_x + p_coarse_stride, p_z0 + coarse_z + p_coarse_stride);
+			const real_t coarse_height = fx + fz <= real_t(1.0) ?
+					h00 + (h10 - h00) * fx + (h01 - h00) * fz :
+					h11 + (h01 - h11) * (real_t(1.0) - fx) + (h10 - h11) * (real_t(1.0) - fz);
+			const real_t exact_height = p_field.get(p_x0 + x, p_z0 + z);
+			const real_t difference = Math::abs(exact_height - coarse_height);
+			if (Math::is_finite(difference)) {
+				largest = MAX(largest, difference);
+			}
+		}
+	}
+	return largest;
+}
+
+real_t geometric_error_lod_bias(real_t p_deviation_meters, real_t p_strength) {
+	if (!Math::is_finite(p_deviation_meters) || !Math::is_finite(p_strength)) {
+		return 1.0;
+	}
+	const real_t strength = CLAMP(p_strength, real_t(0.0), real_t(1.0));
+	const real_t terrain_factor = CLAMP(real_t(0.72) +
+			MAX(p_deviation_meters, real_t(0.0)) * real_t(0.22),
+			real_t(0.72), real_t(1.65));
+	return Math::lerp(real_t(1.0), terrain_factor, strength);
+}
+
 void chunk_height_range(const HeightField &p_field, int p_x0, int p_z0, int p_quads, real_t &r_min, real_t &r_max) {
 	r_min = Math::INF;
 	r_max = -Math::INF;
