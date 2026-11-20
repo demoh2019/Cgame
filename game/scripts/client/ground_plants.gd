@@ -16,28 +16,36 @@ const TILE := 16.0
 static var density_scale: float = 1.0
 
 # species: biomes, instances per 16 m tile at full density, scale range, clustered (flowers grow in patches).
+# "size": [min, max] scale with a long tail ("big": share of instances drawn from [max, max * 1.8]).
+# "files": explicit baked meshes (relative to baked/) for scanned props such as rocks and sticks.
 const SPECIES := {
-	# The grass carpet itself (the old procedural blades are gone): many instances, several variants per tile.
-	"grass_medium_01": {"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 240, "scale": [1.6, 3.4], "cluster": false,
-		"variants": 4, "distance": 52.0},
-	"grass_medium_02": {"biomes": ["plains", "forest", "swamp", "mountain"], "count": 100, "scale": [1.4, 2.8], "cluster": false,
-		"variants": 3, "distance": 52.0},
-	"dandelion_01": {"biomes": ["plains", "forest"], "count": 22, "scale": [1.3, 2.0], "cluster": true},
-	"celandine_01": {"biomes": ["forest", "swamp", "plains"], "count": 18, "scale": [1.3, 2.0], "cluster": true},
-	"nettle_plant": {"biomes": ["forest", "swamp", "plains"], "count": 14, "scale": [2.6, 4.2], "cluster": true},
-	"weed_plant_02": {"biomes": ["plains", "beach", "mountain", "forest"], "count": 20, "scale": [1.4, 2.4], "cluster": false},
-	"periwinkle_plant": {"biomes": ["forest", "swamp"], "count": 14, "scale": [1.3, 2.0], "cluster": true},
-	"shrub_sorrel_01": {"biomes": ["forest", "plains", "swamp"], "count": 16, "scale": [1.6, 2.6], "cluster": true},
-	"moss_01": {"biomes": ["forest", "swamp", "mountain"], "count": 26, "scale": [2.0, 4.0], "cluster": false},
-	"fern_02": {"biomes": ["forest", "swamp"], "count": 10, "scale": [0.9, 1.6], "cluster": true},
-	"shrub_02": {"biomes": ["forest", "plains", "swamp"], "count": 2, "scale": [0.7, 1.1], "cluster": false},
-	"shrub_03": {"biomes": ["plains", "forest", "mountain"], "count": 8, "scale": [1.4, 2.4], "cluster": false},
-	"shrub_04": {"biomes": ["plains", "beach", "mountain"], "count": 5, "scale": [1.0, 1.8], "cluster": false},
-	"flower_empodium": {"biomes": ["plains"], "count": 14, "scale": [1.2, 1.8], "cluster": true},
-	"flower_gazania": {"biomes": ["plains", "beach"], "count": 14, "scale": [1.2, 1.9], "cluster": true},
-	"flower_ursinia": {"biomes": ["plains"], "count": 14, "scale": [1.2, 1.8], "cluster": true},
-	"flower_stinkkruid": {"biomes": ["plains", "beach"], "count": 10, "scale": [1.2, 1.8], "cluster": true},
-	"flower_heliophila": {"biomes": ["plains"], "count": 8, "scale": [1.0, 1.6], "cluster": true},
+	# The grass carpet itself: the most common, everywhere, many variants, every size from short tufts to big clumps.
+	"grass_medium_01": {"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 720, "scale": [1.0, 4.0], "big": 0.12,
+		"cluster": false, "variants": 6, "distance": 60.0},
+	"grass_medium_02": {"biomes": ["plains", "forest", "swamp", "mountain"], "count": 300, "scale": [1.0, 3.6], "big": 0.15,
+		"cluster": false, "variants": 4, "distance": 60.0},
+	"dandelion_01": {"biomes": ["plains", "forest"], "count": 40, "scale": [1.1, 2.4], "cluster": true, "variants": 2},
+	"celandine_01": {"biomes": ["forest", "swamp", "plains"], "count": 34, "scale": [1.1, 2.4], "cluster": true, "variants": 2},
+	"nettle_plant": {"biomes": ["forest", "swamp", "plains"], "count": 30, "scale": [2.4, 5.5], "big": 0.15, "cluster": true, "variants": 2},
+	"weed_plant_02": {"biomes": ["plains", "beach", "mountain", "forest"], "count": 40, "scale": [1.2, 3.0], "cluster": false, "variants": 2},
+	"periwinkle_plant": {"biomes": ["forest", "swamp"], "count": 30, "scale": [1.1, 2.4], "cluster": true, "variants": 2},
+	"shrub_sorrel_01": {"biomes": ["forest", "plains", "swamp"], "count": 30, "scale": [1.4, 3.2], "cluster": true},
+	"moss_01": {"biomes": ["forest", "swamp", "mountain"], "count": 50, "scale": [2.0, 5.0], "cluster": false},
+	"fern_02": {"biomes": ["forest", "swamp"], "count": 22, "scale": [0.7, 2.0], "big": 0.15, "cluster": true, "variants": 2},
+	"shrub_02": {"biomes": ["forest", "plains", "swamp"], "count": 5, "scale": [0.5, 1.2], "big": 0.2, "cluster": false, "variants": 2},
+	"shrub_03": {"biomes": ["plains", "forest", "mountain"], "count": 18, "scale": [1.2, 3.2], "cluster": false, "variants": 2},
+	"shrub_04": {"biomes": ["plains", "beach", "mountain"], "count": 10, "scale": [0.8, 2.4], "cluster": false},
+	"flower_empodium": {"biomes": ["plains"], "count": 26, "scale": [1.1, 2.0], "cluster": true, "variants": 2},
+	"flower_gazania": {"biomes": ["plains", "beach"], "count": 26, "scale": [1.1, 2.2], "cluster": true, "variants": 2},
+	"flower_ursinia": {"biomes": ["plains"], "count": 26, "scale": [1.1, 2.0], "cluster": true, "variants": 2},
+	"flower_stinkkruid": {"biomes": ["plains", "beach"], "count": 18, "scale": [1.1, 2.0], "cluster": true},
+	"flower_heliophila": {"biomes": ["plains"], "count": 14, "scale": [0.9, 1.8], "cluster": true},
+	# Scanned stones, sticks, branches, bark and roots lying in the grass, every size.
+	"stones": {"files": ["rock_7.res", "rock_9.res", "mossy_rock_1.res", "mossy_rock_3.res", "mossy_rock_5.res", "stone_scatter.res"],
+		"biomes": ["plains", "forest", "swamp", "mountain", "beach"], "count": 22, "scale": [0.12, 0.7], "big": 0.1, "cluster": false,
+		"variants": 3, "distance": 70.0},
+	"wood": {"files": ["stick_1.res", "stick_2.res", "branches.res", "bark_debris.res", "single_root.res"],
+		"biomes": ["forest", "swamp", "plains"], "count": 16, "scale": [0.3, 1.1], "cluster": false, "variants": 3, "distance": 45.0},
 }
 
 static var _manifest: Dictionary = {}
@@ -74,7 +82,12 @@ static func build_tile(origin: Vector2, tile: int, tiles_per_side: int, sample: 
 	rng.seed = WorldGen.mix(int(origin.x), int(origin.y), 4421, tile)
 	for species in SPECIES:
 		var info: Dictionary = SPECIES[species]
-		var choices: Array = variants(species)
+		var choices: Array = []
+		if info.has("files"):
+			for file in info["files"]:
+				choices.append({"file": "../" + str(file)})
+		else:
+			choices = variants(species)
 		if choices.is_empty():
 			continue
 		var per_tile: int = mini(int(info.get("variants", 1)), choices.size())
@@ -119,7 +132,9 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 			var here: Dictionary = sample.call(lx, lz)
 			if not bool(here.get("ok", false)) or not (str(here["biome"]) in info["biomes"]):
 				continue
-			var s: float = rng.randf_range(float(info["scale"][0]), float(info["scale"][1]))
+			var s: float = lerpf(float(info["scale"][0]), float(info["scale"][1]), pow(rng.randf(), 1.6))
+			if rng.randf() < float(info.get("big", 0.0)):
+				s = float(info["scale"][1]) * rng.randf_range(1.0, 1.8) # The odd huge clump or boulder.
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.85, 1.15), s))
 			var h: float = float(here["h"])
 			transforms.append(Transform3D(basis, Vector3(lx, h - 0.03, lz)))
@@ -138,9 +153,8 @@ static func _scatter(species: String, info: Dictionary, plant_mesh: Mesh, wanted
 		instance.multimesh = multimesh
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		instance.visibility_range_end = float(info.get("distance", DRAW_DISTANCE))
-		instance.visibility_range_end_margin = 6.0
-		instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
-		var top: float = plant_mesh.get_aabb().size.y * float(info["scale"][1]) + 0.5
+		# No fade: a fading range forces the whole multimesh into the slow transparent pass.
+		var top: float = plant_mesh.get_aabb().size.y * float(info["scale"][1]) * 1.8 + 0.5
 		instance.custom_aabb = AABB(Vector3(tile_x - 1.0, low - 0.3, tile_z - 1.0), Vector3(TILE + 2.0, high - low + top, TILE + 2.0))
 		return instance
 	return null

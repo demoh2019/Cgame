@@ -128,6 +128,7 @@ func _bake_plants() -> int:
 			if mesh == null:
 				continue
 			_center_on_root(mesh)
+			mesh = _with_lods(mesh)
 			var file: String = "%s_%d.res" % [id, variants.size()]
 			if ResourceSaver.save(mesh, PLANT_OUTPUT + file, ResourceSaver.FLAG_COMPRESS) == OK:
 				var box: AABB = mesh.get_aabb()
@@ -137,6 +138,16 @@ func _bake_plants() -> int:
 	var out := FileAccess.open(PLANT_OUTPUT + "manifest.json", FileAccess.WRITE)
 	out.store_string(JSON.stringify(manifest, "\t"))
 	return failures
+
+
+## Adds automatic LODs (meshoptimizer) so distant plants draw a fraction of their triangles.
+func _with_lods(mesh: ArrayMesh) -> ArrayMesh:
+	var importer := ImporterMesh.new()
+	for surface in mesh.get_surface_count():
+		importer.add_surface(Mesh.PRIMITIVE_TRIANGLES, mesh.surface_get_arrays(surface), [], {}, mesh.surface_get_material(surface))
+	importer.generate_lods(25.0, 60.0, [])
+	var result: ArrayMesh = importer.get_mesh()
+	return result if result != null else mesh
 
 
 ## Moves the mesh so its footprint is centred on the origin and its lowest point sits at y = 0.
