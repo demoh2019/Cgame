@@ -32,4 +32,22 @@ inline float hearing_radius(float p_source_radius, float p_wind_radius, bool p_b
 	const float radius = std::max(p_wind_radius, 0.0f);
 	return p_blocked ? radius * transmission(p_source_radius) : radius;
 }
+// Lightweight speed-of-sound propagation delay for lightning/thunder.
+// 331.3 + 0.606*T [m/s] approximates dry air over a bounded temperature
+// range. The listener sees the flash at once, but hears the impact later.
+// -1 is a sentinel for invalid/out-of-range events, never "play now".
+constexpr float THUNDER_MAX_DISTANCE_M = 2400.0f;
+constexpr float THUNDER_MIN_TEMPERATURE_C = -40.0f;
+constexpr float THUNDER_MAX_TEMPERATURE_C = 60.0f;
+
+inline float sound_delay_seconds(float p_distance_m, float p_temperature_c = 20.0f) {
+	if (!std::isfinite(p_distance_m) || !std::isfinite(p_temperature_c) ||
+			p_distance_m < 0.0f || p_distance_m > THUNDER_MAX_DISTANCE_M ||
+			p_temperature_c < THUNDER_MIN_TEMPERATURE_C ||
+			p_temperature_c > THUNDER_MAX_TEMPERATURE_C) {
+		return -1.0f;
+	}
+	const float meters_per_second = 331.3f + 0.606f * p_temperature_c;
+	return p_distance_m / meters_per_second;
+}
 } // namespace SoundPropagationPolicy
