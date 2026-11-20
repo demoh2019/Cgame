@@ -105,6 +105,9 @@ void AnimationLODController::_update(double p_delta) {
 		}
 	}
 
+	// Full-rate priority only applies to a bounded number of visible combatants.
+	// Simulation, hit detection and network authority are unaffected.
+	int urgent_slots = max_priority_mixers;
 	for (int i = 0; i < entries.size();) {
 		Entry &entry = entries.write[i];
 		AnimationMixer *mixer = ObjectDB::get_instance<AnimationMixer>(entry.mixer_id);
@@ -137,10 +140,19 @@ void AnimationLODController::_update(double p_delta) {
 			}
 		}
 
-		const bool want_modifier_cull = modifier_cull_distance > 0.0 && (!visible || distance > modifier_cull_distance);
+		const int base_interval = update_interval(distance, visible, near_distance, mid_distance, far_distance);
+		// Raid and elite attack tells stay smooth even if distant crowd motion
+		// runs at half/quarter rate. Never animate invisible/far-away actors,
+		// and never exceed the per-frame priority budget.
+		const bool urgent = entry.high_priority && base_interval > 1 && urgent_slots > 0;
+		if (urgent) {
+			urgent_slots--;
+		}
+		const bool want_modifier_cull = modifier_cull_distance > 0.0 &&
+				(!visible || (!urgent && distance > modifier_cull_distance));
 		_set_modifiers_culled(entry, mixer, want_modifier_cull);
 
-		const int interval = update_interval(distance, visible, near_distance, mid_distance, far_distance);
+		const int interval = urgent ? 1 : base_interval;
 		if (interval == 0) {
 			continue; // Paused; keep animation state untouched.
 		}
@@ -214,6 +226,30 @@ void AnimationLODController::unregister_mixer(AnimationMixer *p_mixer) {
 	}
 }
 
+void AnimationLODController::set_mixer_high_priority(AnimationMixer *p_mixer, bool p_priority) {
+	ERR_FAIL_NULL(p_mixer);
+	const ObjectID id = p_mixer->get_instance_id();
+	for (int i = 0; i < entries.size(); i++) {
+		if (entries[i].mixer_id == id) {
+			entries.write[i].high_priority = p_priority;
+			return;
+		}
+	}
+}
+
+bool AnimationLODController::is_mixer_high_priority(AnimationMixer *p_mixer) const {
+	if (!p_mixer) {
+		return false;
+	}
+	const ObjectID id = p_mixer->get_instance_id();
+	for (int i = 0; i < entries.size(); i++) {
+		if (entries[i].mixer_id == id) {
+			return entries[i].high_priority;
+		}
+	}
+	return false;
+}
+
 void AnimationLODController::clear_mixers() {
 	for (int i = 0; i < entries.size(); i++) {
 		_restore_entry(entries.write[i]);
@@ -245,6 +281,10 @@ void AnimationLODController::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("unregister_mixer", "mixer"), &AnimationLODController::unregister_mixer);
 	ClassDB::bind_method(D_METHOD("clear_mixers"), &AnimationLODController::clear_mixers);
 	ClassDB::bind_method(D_METHOD("get_mixer_count"), &AnimationLODController::get_mixer_count);
+	ClassDB::bind_method(D_METHOD("set_mixer_high_priority", "mixer", "priority"), &AnimationLODController::set_mixer_high_priority);
+	ClassDB::bind_method(D_METHOD("is_mixer_high_priority", "mixer"), &AnimationLODController::is_mixer_high_priority);
+	ClassDB::bind_method(D_METHOD("set_max_priority_mixers", "count"), &AnimationLODController::set_max_priority_mixers);
+	ClassDB::bind_method(D_METHOD("get_max_priority_mixers"), &AnimationLODController::get_max_priority_mixers);
 
 	ClassDB::bind_method(D_METHOD("set_enabled", "enabled"), &AnimationLODController::set_enabled);
 	ClassDB::bind_method(D_METHOD("is_enabled"), &AnimationLODController::is_enabled);
@@ -268,4 +308,5 @@ void AnimationLODController::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "modifier_cull_distance", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:m"), "set_modifier_cull_distance", "get_modifier_cull_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cull_offscreen"), "set_cull_offscreen", "is_cull_offscreen");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_accumulated_delta", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), "set_max_accumulated_delta", "get_max_accumulated_delta");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_priority_mixers", PROPERTY_HINT_RANGE, "0,32,1"), "set_max_priority_mixers", "get_max_priority_mixers");
 }
