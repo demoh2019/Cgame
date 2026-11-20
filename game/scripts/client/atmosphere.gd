@@ -1,6 +1,7 @@
 extends Node3D
 
 const CloudShadowLut = preload("res://scripts/client/cloud_shadow_lut.gd")
+const SkyFogHarmony = preload("res://scripts/client/sky_fog_harmony.gd")
 const WaterCaustics = preload("res://scripts/client/water_caustics.gd")
 const CinematicColorGrade = preload("res://scripts/client/cinematic_color_grade.gd")
 const VegetationWind = preload("res://scripts/client/vegetation_wind.gd")
@@ -20,6 +21,9 @@ var sky_material: ShaderMaterial
 var world_environment: WorldEnvironment
 var sky: Sky
 var _atmospheric_lut: Texture2D
+var _sky_scattering_generator: Object
+var _sky_horizon_optical := Color(0.0, 0.0, 0.0, 1.0)
+var _atmospheric_lut_strength := 0.0
 var _shadows_allowed := true
 var _cloud_shadows_allowed := true
 var _shadow_elapsed := 0.20 # At most five shadow-opacity updates per second.
@@ -195,6 +199,13 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	if _sky_refresh_elapsed >= _sky_refresh_interval:
 		_sky_refresh_elapsed = fmod(_sky_refresh_elapsed, _sky_refresh_interval)
 		sky_material.set_shader_parameter("solar_elevation", clampf(sun_height, -0.15, 1.0))
+		# Use the same native spectral model as the sky LUT for distant-world fog.
+		# This CPU sample runs only at the existing sky radiance refresh cadence.
+		if _sky_scattering_generator != null and _atmospheric_lut != null:
+			var optical: Variant = _sky_scattering_generator.call(
+				"sample_scattering", 0.04, clampf(sun_height, -0.15, 1.0), 2.0)
+			if optical is Color:
+				_sky_horizon_optical = optical
 		sky_material.set_shader_parameter("daylight", daylight)
 		sky_material.set_shader_parameter("dusk", dusk)
 		sky_material.set_shader_parameter("storm", storm)
@@ -223,11 +234,17 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	environment.ambient_light_color = Color(0.3, 0.38, 0.62)
 	environment.ambient_light_sky_contribution = lerpf(0.1, 1.0, smoothstep(0.0, 0.45, daylight))
 	environment.ambient_light_energy = lerpf(0.75, 0.8, daylight) * (1.0 - storm * 0.25)
-	environment.fog_light_color = horizon.lerp(Color(0.5, 0.52, 0.56), storm * 0.5)
+	# Harmonize distant terrain haze with the optically-scattered sky.
+	# Existing low-end and stock-Godot paths remain bit-for-bit unchanged.
+	var fog_horizon: Color = horizon
+	if _atmospheric_lut != null and _atmospheric_lut_strength > 0.001:
+		fog_horizon = SkyFogHarmony.blend(horizon, _sky_horizon_optical,
+			_atmospheric_lut_strength, daylight, storm)
+	environment.fog_light_color = fog_horizon.lerp(Color(0.5, 0.52, 0.56), storm * 0.5)
 	environment.fog_density = lerpf(0.0016, 0.0042, storm)
 	_visual_biome_settings = BiomeAtmosphere.advance(_visual_biome_settings, biome, delta)
 	CinematicFog.apply_weather(environment, daylight, sun_height, storm,
-		_fog_profile, horizon, _visual_biome_settings)
+		_fog_profile, fog_horizon, _visual_biome_settings)
 	# Run the ACES-grade after atmospheric weather/fog, without replacing fog state.
 	CinematicColorGrade.apply(environment, daylight, sun_height, storm)
 	# Render only: two short flashes from the real lightning_struck event.
@@ -278,10 +295,11 @@ func apply_graphics_profile(settings: Dictionary) -> void:
 	# Native HDR Rayleigh/Mie-inspired LUT is created once, only on High/Ultra.
 	# Stock Godot and Compatibility retain the original panoramic sky.
 	var lut_strength: float = clampf(float(settings.get("atmospheric_lut_strength", 0.0)), 0.0, 1.0)
+	_atmospheric_lut_strength = lut_strength
 	if lut_strength > 0.001 and _atmospheric_lut == null and ClassDB.class_exists("SkyScatteringLUT"):
-		var generator: Object = ClassDB.instantiate("SkyScatteringLUT")
-		if generator != null and generator.has_method("generate_lut"):
-			var lut_image := generator.call("generate_lut", 128, 64, 2.0) as Image
+		_sky_scattering_generator = ClassDB.instantiate("SkyScatteringLUT")
+		if _sky_scattering_generator != null and _sky_scattering_generator.has_method("generate_lut"):
+			var lut_image := _sky_scattering_generator.call("generate_lut", 128, 64, 2.0) as Image
 			if lut_image != null:
 				_atmospheric_lut = ImageTexture.create_from_image(lut_image)
 				sky_material.set_shader_parameter("atmospheric_lut", _atmospheric_lut)
