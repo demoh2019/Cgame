@@ -102,6 +102,7 @@ func _physics_process(_delta: float) -> void:
         return
     if not bool(streamer.call("is_cell_loaded", CELL_FROM)) or not bool(streamer.call("is_cell_loaded", CELL_TO)):
         route_status = "Waiting for both navigation cells"
+        navigation_sync_frames = 3
         velocity = Vector3.ZERO
         return
 
@@ -118,13 +119,13 @@ func _physics_process(_delta: float) -> void:
         destination = WAYPOINTS[target_index]
         navigation_agent.target_position = destination
 
+    # Update the agent's internal path first. Querying is_navigation_finished
+    # before the navigation update can leave a newly targeted agent stranded.
+    var next_position := navigation_agent.get_next_path_position()
     if navigation_agent.is_navigation_finished():
         route_status = "Waiting for a connected path"
         velocity = Vector3.ZERO
         return
-
-    # Must call exactly once each physics frame while following the path.
-    var next_position := navigation_agent.get_next_path_position()
     var delta_to_next := next_position - global_position
     delta_to_next.y = 0.0
     if delta_to_next.length() < 0.05:
@@ -146,10 +147,11 @@ func capture_patrol_state() -> Dictionary:
 
 func restore_patrol_state(state: Dictionary) -> void:
     var saved_position: Variant = state.get("position")
-    if saved_position is Vector3 and (saved_position as Vector3).is_finite():
+    if saved_position is Vector3:
         # Keep corrupt save data inside the intended two-cell demonstration.
         var point: Vector3 = saved_position
-        global_position = Vector3(clampf(point.x, 8.0, 246.0), 0.1, clampf(point.z, 8.0, 120.0))
+        if point.is_finite():
+            global_position = Vector3(clampf(point.x, 8.0, 246.0), 0.1, clampf(point.z, 8.0, 120.0))
     target_index = clampi(int(state.get("target_index", 1)), 0, 1)
     completed_crossings = clampi(int(state.get("completed_crossings", 0)), 0, 1000000000)
     set_patrol_enabled(bool(state.get("enabled", true)))
