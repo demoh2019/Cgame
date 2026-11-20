@@ -23,6 +23,7 @@ const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
+const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
@@ -1097,6 +1098,8 @@ func _update_hud() -> void:
 		_stats.text += "\nRUIN CHART: X:%d Z:%d | %dm | %ds (F3)" % [
 			roundi(dest.x), roundi(dest.y), roundi(Vector2(position.x, position.z).distance_to(dest)),
 			ceili(float(map_point["remaining"]))]
+	if RoadTravel.on_road(world, position):
+		_stats.text += "\nDIRT ROAD: +8%% foot pace; stable bicycle grip"
 	_stats.text += "\nTRAIL BIKE: %s | remount %.1fs (F4)" % [
 		"RIDING" if survivor.mounted else ("CARRIED" if survivor.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		survivor.mount_cooldown]

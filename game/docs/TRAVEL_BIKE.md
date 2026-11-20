@@ -19,8 +19,7 @@ and roots slow riding to 90%, loose mountain stones to 78%, beach sand to 72%,
 and muddy swamps to 56% before gradient penalties. Uphill slopes reduce
 forward speed to a safe minimum, while descents offer at most an 8% boost.
 These values come exclusively from the deterministic world seed and travel
-direction, never a claimed client biome. On-foot speed is unchanged.
-Invalid/nonfinite movement values cannot grant free speed.
+direction, never a claimed client biome. On foot, a genuine dirt road boosts normal/sprint travel by 8%; crouched stealth stays unchanged.\nThe road surface also improves bike grip in mud, forests and sand, without bypassing slope or collision caps.\nOnly the world-seeded segment graph determines road coverage, and the shared movement logic keeps network prediction aligned.\nInvalid/nonfinite movement values cannot grant free speed.
 
 **Sound risk:** Rolling bikes produce a 27 m audible rattle, compared with
 21 m for sprinting. The noise fades 0.9 seconds after stopping. It is heard

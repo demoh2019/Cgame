@@ -2,6 +2,7 @@ extends RefCounted
 ## Terrain-aware bicycle handling. Used by the SAME movement code on the
 ## authoritative server and predictive clients. No client-supplied grip values.
 
+const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const SAMPLE_DISTANCE := 2.0
 const MIN_TRACTION := 0.40
 const MAX_TRACTION := 1.08
@@ -30,7 +31,9 @@ static func surface_factor(biome: String) -> float:
 static func speed_factor(world, position: Vector3, direction: Vector2) -> float:
 	if not position.is_finite() or not direction.is_finite():
 		return 1.0
-	var surface: float = surface_factor(world.biome_at(position.x, position.z))
+	var surface: float = RoadTravel.bike_surface(
+		surface_factor(world.biome_at(position.x, position.z)),
+		RoadTravel.coverage(world, position))
 	if direction.length_squared() < 0.000001:
 		return surface
 	var heading: Vector2 = direction.normalized()

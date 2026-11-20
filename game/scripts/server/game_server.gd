@@ -46,6 +46,7 @@ const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
 const BarricadeBallistics = preload("res://scripts/shared/barricade_ballistics.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
+const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 const BikeChain = preload("res://scripts/shared/bike_chain.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
@@ -5029,6 +5030,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"vendor_discount": Reputation.discount_percent(player.renown),
 			"regional_trade": RegionalTrade.public_offer(world, player.position),
 			"renown_next": Reputation.next_threshold(player.renown),
+			"on_road": RoadTravel.on_road(world, player.position),
 			"carry_kg": player.inventory.total_weight(),
 			"cargo_factor": BikeCargo.movement_factor(player.inventory,
 				player.skills.bonus("carry_capacity"), player.mounted),

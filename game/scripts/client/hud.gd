@@ -1678,6 +1678,8 @@ func _process(_delta: float) -> void:
 	var supported_kg: float = float(client.you.get("bike_cargo_kg", 0.0))
 	if supported_kg > 0.0:
 		_info_label.text += "\nBIKE PANNIERS: %.0f kg supported (on foot: full load)" % supported_kg
+	if bool(client.you.get("on_road", false)):
+		_info_label.text += "\nDIRT ROAD: +8% foot pace, stronger bicycle grip"
 	_info_label.text += "\nTRAIL BIKE: %s | F4 mount/dismount | remount %.0fs" % [
 		"RIDING" if bool(client.you.get("mounted", false)) else ("CARRIED" if client.inventory.count("salvage_bike") > 0 else "NOT OWNED"),
 		float(client.you.get("mount_cooldown", 0.0))]

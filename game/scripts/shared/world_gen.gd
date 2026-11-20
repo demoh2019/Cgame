@@ -20,7 +20,7 @@ var _level_rx: int = 1 << 30
 var _level_rz: int = 1 << 30
 var _levellers: Array = []
 var poi_building := false # While sites are being found, terrain is read without their levelling.
-var roads # Dirt roads between the places (scenery for the client): see world_roads.gd.
+var roads # Seeded roads shared by renderer and movement physics.
 var poi # Villages, camps, forts, ruined cities and the rest: see world_poi.gd.
 const CACHE_LIMIT := 256
 
@@ -42,6 +42,10 @@ func _init(p_seed: int = 1337) -> void:
 	_moisture = _make_noise(p_seed + 404, 0.0026, 2)
 	poi = WorldPoi.new(self)
 	roads = WorldRoads.new(self)
+
+## Renderer and authoritative locomotion query exactly the same road graph.
+func road_coverage_at(x: float, z: float) -> float:
+	return roads.coverage_at(x, z)
 
 
 static func _make_noise(p_seed: int, frequency: float, octaves: int) -> FastNoiseLite:

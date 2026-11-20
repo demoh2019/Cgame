@@ -7,6 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeTerrain = preload("res://scripts/shared/bike_terrain.gd")
+const RoadTravel = preload("res://scripts/shared/road_travel.gd")
 
 const MAX_DELTA := 0.1 # A longer step is clamped, so a lag spike cannot teleport a player.
 
@@ -49,6 +50,9 @@ static func step(world, position: Vector3, input: Dictionary, delta: float) -> V
 	if mounted:
 		# Surface, uphill drag and limited downhill boost are deterministic for both peers.
 		speed *= BikeTerrain.speed_factor(world, position, direction)
+	else:
+		# Genuine road speed for walking and sprinting, but not crouched stealth.
+		speed *= RoadTravel.foot_factor(world, position, crouching)
 	speed *= StealthStance.speed_factor(crouching)
 	return move(world, position, direction, speed, delta)
 
