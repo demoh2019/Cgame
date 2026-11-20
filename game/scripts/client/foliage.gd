@@ -76,6 +76,8 @@ void fragment() {
 }
 """
 
+const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
+
 static var _shader: Shader
 static var _cache: Dictionary = {}
 
@@ -94,7 +96,7 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 	var height := maxf(source.get_aabb().size.y, 0.1)
 	for surface in source.get_surface_count():
 		var arrays := source.surface_get_arrays(surface)
-		copy.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		copy.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], MeshLOD.copy_lods(source, surface))
 		var base := source.surface_get_material(surface)
 		if base is BaseMaterial3D:
 			var standard := base as BaseMaterial3D
