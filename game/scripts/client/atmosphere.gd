@@ -149,8 +149,9 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	light_level = daylight
 	_last_sun_height = sun_height
 	storm = move_toward(storm, 1.0 if storming else 0.0, delta * 0.25)
-	# Clouds and the solar altitude change directional contrast. The native
-	# shadow opacity updates sparingly, independent of the existing cascades.
+	# Single-writer directional shadow contrast: SunShadowQuality updates
+	# opacity at 5 Hz. SunShadowAtmosphere separately adjusts only blur at
+	# 4 Hz, never overwriting the lighting response to clouds or dusk.
 	if _shadows_allowed:
 		_shadow_elapsed += maxf(delta, 0.0)
 		if _shadow_elapsed >= 0.20:
