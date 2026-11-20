@@ -94,10 +94,15 @@ void WorldPartition3D::_capture_cell_state(const Vector2i &p_cell, Node *p_insta
 		return;
 	}
 	const Dictionary state = result;
+	const Dictionary previous = get_cell_state(p_cell);
 	if (state.is_empty()) {
 		saved_cell_states.erase(p_cell);
 	} else {
 		saved_cell_states.insert(p_cell, state.duplicate(true));
+	}
+	const Dictionary updated = get_cell_state(p_cell);
+	if (previous != updated) {
+		emit_signal(SNAME("cell_state_changed"), p_cell, updated);
 	}
 }
 
@@ -454,6 +459,7 @@ void WorldPartition3D::clear_cell_layer(const Vector2i &p_cell) {
 }
 
 void WorldPartition3D::set_layer_states(const Dictionary &p_states) {
+	const Dictionary before = layer_states.duplicate();
 	Dictionary clean;
 	const Array keys = p_states.keys();
 	for (int i = 0; i < keys.size(); i++) {
@@ -465,6 +471,24 @@ void WorldPartition3D::set_layer_states(const Dictionary &p_states) {
 	}
 	layer_states = clean;
 	layer_update_needed = true;
+	// Bulk save-game imports emit one event per changed effective layer,
+	// including enabled-by-default layers whose explicit false entry vanished.
+	const Array previous_names = before.keys();
+	for (int i = 0; i < previous_names.size(); i++) {
+		const String name = previous_names[i];
+		const bool was_enabled = before[name];
+		const bool now_enabled = is_layer_enabled(name);
+		if (was_enabled != now_enabled) {
+			emit_signal(SNAME("layer_state_changed"), name, now_enabled);
+		}
+	}
+	const Array names = clean.keys();
+	for (int i = 0; i < names.size(); i++) {
+		const String name = names[i];
+		if (!before.has(name) && !bool(clean[name])) {
+			emit_signal(SNAME("layer_state_changed"), name, false);
+		}
+	}
 }
 
 Dictionary WorldPartition3D::get_layer_states() const {
@@ -478,6 +502,7 @@ void WorldPartition3D::set_layer_enabled(const String &p_layer, bool p_enabled) 
 	}
 	layer_states[p_layer] = p_enabled;
 	layer_update_needed = true;
+	emit_signal(SNAME("layer_state_changed"), p_layer, p_enabled);
 }
 
 bool WorldPartition3D::is_layer_enabled(const String &p_layer) const {
@@ -631,6 +656,7 @@ void WorldPartition3D::_stream_candidate_cell(const Vector2i &p_cell, int &r_new
 }
 
 void WorldPartition3D::set_cell_state(const Vector2i &p_cell, const Dictionary &p_state) {
+	const Dictionary previous = get_cell_state(p_cell);
 	if (p_state.is_empty()) {
 		saved_cell_states.erase(p_cell);
 	} else {
@@ -642,6 +668,10 @@ void WorldPartition3D::set_cell_state(const Vector2i &p_cell, const Dictionary &
 		instance->call(SNAME("restore_streaming_state"), Dictionary());
 	} else {
 		_restore_cell_state(p_cell, instance);
+	}
+	const Dictionary updated = get_cell_state(p_cell);
+	if (previous != updated) {
+		emit_signal(SNAME("cell_state_changed"), p_cell, updated);
 	}
 }
 
@@ -909,6 +939,8 @@ void WorldPartition3D::_bind_methods() {
 
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_unloaded", PropertyInfo(Variant::VECTOR2I, "cell")));
+	ADD_SIGNAL(MethodInfo("cell_state_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::DICTIONARY, "state")));
+	ADD_SIGNAL(MethodInfo("layer_state_changed", PropertyInfo(Variant::STRING, "layer"), PropertyInfo(Variant::BOOL, "enabled")));
 }
 
 WorldPartition3D::~WorldPartition3D() {
