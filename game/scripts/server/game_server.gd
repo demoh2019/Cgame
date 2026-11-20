@@ -55,6 +55,7 @@ const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const FieldScentMask = preload("res://scripts/shared/field_scent_mask.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
+const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
@@ -134,6 +135,7 @@ class Player:
 	var combat_energy: float = 100.0
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
+	var crouching: bool = false # Ephemeral, server-authorized posture.
 	var decoy_timer: float = 0.0 # Anti-spam timer; no persistent character data.
 	var action: Dictionary = {} # Current gathering or fishing: {"remaining": s, "total": s, ...}
 	var fish_next_at: float = 0.0
@@ -537,6 +539,7 @@ func _spawn_player(player: Player) -> void:
 	player.combat_energy = Defs.COMBAT_ENERGY_MAX
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
+	player.crouching = false
 	player.dirty_inventory = true
 	events.append({"type": "spawn", "peer": player.id})
 
@@ -553,7 +556,7 @@ func _is_safe(position: Vector3) -> bool:
 
 ## A movement input measured by the client. `dt` is how long the client says it moved. The server
 ## accepts at most as much movement time as real time has passed, so a modified client cannot speed up.
-func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: bool, yaw: float, dt: float) -> void:
+func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: bool, yaw: float, dt: float, crouch: bool = false) -> void:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player) or seq <= player.last_input_seq:
 		return
@@ -565,14 +568,15 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 	player.input_budget -= allowed
 	player.yaw = yaw
 	if allowed > 0.0:
+		player.crouching = crouch # Only input within the server time budget applies.
 		# No client-supplied cargo, stamina or sound radius: server owns all three.
 		var before_move: Vector3 = player.position
 		var factor: float = player.inventory.movement_factor(player.skills.bonus("carry_capacity"))
 		var moving := move_x * move_x + move_z * move_z > 0.00001
-		var sprint_allowed: bool = sprint and moving and factor >= 0.9999 and player.survival.try_sprint(allowed)
+		var sprint_allowed: bool = sprint and not player.crouching and moving and factor >= 0.9999 and player.survival.try_sprint(allowed)
 		player.position = Movement.step(world, player.position, {
 			"x": move_x, "z": move_z, "sprint": sprint_allowed,
-			"cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed"),
+			"crouch": player.crouching, "cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed"),
 			"injury_factor": Survival.fracture_speed_factor(player.survival.fracture),
 		}, allowed)
 		var moved: float = Vector2(player.position.x - before_move.x, player.position.z - before_move.z).length()
@@ -3430,10 +3434,12 @@ func _tick_zombies(delta: float) -> void:
 			"notice_multiplier": WorldCycle.notice_multiplier(time),
 			"firelight": CampfireThreat.reveal_radius(campfires, player.position,
 				time, WorldCycle.is_night(time)),
-			"visual_signature": Camouflage.visual_signature(
-				player.inventory.armor, player.inventory.armor != "" and
-				player.inventory.count(player.inventory.armor) > 0,
-				player.noise_timer, _alive(player)),
+			"visual_signature": StealthStance.visual_signature(
+				Camouflage.visual_signature(player.inventory.armor,
+					player.inventory.armor != "" and
+					player.inventory.count(player.inventory.armor) > 0,
+					player.noise_timer, _alive(player)),
+				player.crouching, player.noise_timer, _alive(player)),
 			# Only actual server wounds contribute; never trust client input.
 			"scent": BloodScent.detection_radius(player.survival.bleeding,
 				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival))}
@@ -3760,7 +3766,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		var p: Vector3 = other.position
 		if here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
 			nearby_players.append({"id": other.id, "name": other.name, "x": p.x, "y": p.y, "z": p.z, "yaw": other.yaw,
-				"alive": _alive(other), "weapon": other.inventory.weapon,
+				"alive": _alive(other), "crouching": other.crouching,
+				"weapon": other.inventory.weapon,
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
 				"guild": {"id": other.guild_id, "name": other.guild_name},
 				"pvp_rank": PvPHonor.rank(other.pvp_honor),
@@ -3841,7 +3848,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"siege_wins": int(siege_contracts.victories.get(parties.group_of(peer_id), 0)),
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
-			"stamina": player.survival.stamina,
+			"stamina": player.survival.stamina, "crouching": player.crouching,
 			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),
@@ -3879,10 +3886,12 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
 			"stim_cooldown": player.stim_cooldown,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
-			"visual_signature": Camouflage.visual_signature(
-				player.inventory.armor, player.inventory.armor != "" and
-				player.inventory.count(player.inventory.armor) > 0,
-				player.noise_timer, _alive(player)),
+			"visual_signature": StealthStance.visual_signature(
+				Camouflage.visual_signature(player.inventory.armor,
+					player.inventory.armor != "" and
+					player.inventory.count(player.inventory.armor) > 0,
+					player.noise_timer, _alive(player)),
+				player.crouching, player.noise_timer, _alive(player)),
 			"last_death_full_loot": player.last_death_full_loot,
 			"is_night": WorldCycle.is_night(time),
 			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),

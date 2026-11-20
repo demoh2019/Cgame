@@ -104,6 +104,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		model.set_zombie_state(int(entity["state"]))
 	if kind == "player":
 		var player_model: Node3D = _nodes[key].get_node("Model")
+		player_model.scale = Vector3(1.0,
+			0.72 if bool(entity.get("crouching", false)) else 1.0, 1.0)
 		if player_model.pack_mode:
 			player_model.set_dead(not bool(entity["alive"])) # A dead player lies down instead of vanishing.
 		else:

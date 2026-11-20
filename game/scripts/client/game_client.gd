@@ -148,7 +148,7 @@ func _reconcile(snapshot: Dictionary) -> void:
 		var replay_input: Dictionary = entry["input"].duplicate()
 		var duration: float = float(entry["dt"])
 		var moving := Vector2(float(replay_input["x"]), float(replay_input["z"])).length_squared() > 0.00001
-		var running := bool(replay_input["sprint"]) and moving and float(replay_input["cargo_factor"]) >= 0.9999
+		var running := bool(replay_input["sprint"]) and not bool(replay_input.get("crouch", false)) and moving and float(replay_input["cargo_factor"]) >= 0.9999
 		running = running and Survival.can_sprint_with(energy, float(you.get("hunger", 100.0)),
 				float(you.get("thirst", 100.0)), duration)
 		running = running and float(you.get("fracture", 0.0)) <= 0.0
@@ -170,18 +170,18 @@ func _reconcile(snapshot: Dictionary) -> void:
 
 
 ## Moves the local player and tells the server. Call once per physics frame.
-func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float) -> void:
+func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float, crouch: bool = false) -> void:
 	if world == null or not you.has("x") or not bool(you.get("alive", true)):
 		return
 	_seq += 1
 	yaw = face_yaw
 	# Prediction uses the same weight calculation as the authoritative server.
 	var factor: float = inventory.movement_factor(float(you.get("carry_bonus", 0.0)))
-	var running := sprint and move.length_squared() > 0.00001 and factor >= 0.9999
+	var running := sprint and not crouch and move.length_squared() > 0.00001 and factor >= 0.9999
 	running = running and Survival.can_sprint_with(predicted_stamina,
 			float(you.get("hunger", 100.0)), float(you.get("thirst", 100.0)), delta)
 	running = running and float(you.get("fracture", 0.0)) <= 0.0
-	var input := {"x": move.x, "z": move.y, "sprint": running,
+	var input := {"x": move.x, "z": move.y, "sprint": running, "crouch": crouch,
 		"cargo_factor": factor, "speed_bonus": float(you.get("speed_bonus", 0.0)),
 		"injury_factor": Survival.fracture_speed_factor(float(you.get("fracture", 0.0)))}
 	predicted = Movement.step(world, predicted, input, delta)
@@ -192,7 +192,7 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float) -> v
 	_pending.append({"seq": _seq, "input": input, "dt": delta})
 	if _pending.size() > 120:
 		_pending.pop_front()
-	net.c_input.rpc_id(1, _seq, move.x, move.y, sprint, face_yaw, delta)
+	net.c_input.rpc_id(1, _seq, move.x, move.y, sprint, face_yaw, delta, crouch)
 
 
 func decay_correction(delta: float) -> void:

@@ -7,6 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
+const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
@@ -85,6 +86,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_left", KEY_A)
 	_bind_key("survive_right", KEY_D)
 	_bind_key("survive_sprint", KEY_SHIFT)
+	_bind_key("survive_crouch", KEY_CTRL)
 	_bind_key("survive_gather", KEY_E)
 	_bind_key("survive_fish", KEY_T)
 	_bind_key("survive_loot", KEY_Q)
@@ -571,8 +573,10 @@ func _physics_process(delta: float) -> void:
 		_facing = movement.normalized()
 	_sequence += 1
 	sim.submit_input(LOCAL_PLAYER_ID, _sequence, movement.x, movement.y,
-			Input.is_action_pressed("survive_sprint"), atan2(_facing.x, _facing.y), delta)
+			Input.is_action_pressed("survive_sprint"), atan2(_facing.x, _facing.y), delta,
+			Input.is_action_pressed("survive_crouch"))
 	_avatar.position = survivor.position + Vector3(0, 0.85, 0)
+	_avatar.scale = Vector3(1.0, 0.72 if survivor.crouching else 1.0, 1.0)
 	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
 	_camera.look_at(survivor.position + Vector3(0, 0.7, 0), Vector3.UP)
 	_stream_chunks()
@@ -951,10 +955,12 @@ func _update_hud() -> void:
 	_stats.text += "\nSTORM INSULATION %d%% | %s" % [
 		int(round(100.0 * Weather.protection(local_armor))),
 		str(Defs.item(local_armor).get("name", "No armor"))]
-	var visual: float = Camouflage.visual_signature(local_armor, not local_armor.is_empty(),
-		survivor.noise_timer, vitals.alive)
+	var visual: float = StealthStance.visual_signature(
+		Camouflage.visual_signature(local_armor, not local_armor.is_empty(),
+			survivor.noise_timer, vitals.alive),
+		survivor.crouching, survivor.noise_timer, vitals.alive)
 	if visual < 0.999:
-		_stats.text += "\nCAMOUFLAGE: infected vision -%d%% (noise/blood still reveal you)" % [
+		_stats.text += "\nSTEALTH STANCE / GEAR: infected vision -%d%% (noise/blood still reveal you)" % [
 			int(round(100.0 * (1.0 - visual)))]
 	elif float(Defs.item(local_armor).get("visual_signature", 1.0)) < 1.0 and survivor.noise_timer > 0.0:
 		_stats.text += "\nCAMOUFLAGE BROKEN: your noise is attracting infected"
@@ -970,7 +976,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer (3 pools)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer (3 pools)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback

@@ -376,10 +376,10 @@ func shutdown() -> bool:
 	return all_saved
 
 @rpc("any_peer", "unreliable_ordered")
-func c_input(seq: int, move_x: float, move_z: float, sprint: bool, yaw: float, dt: float) -> void:
+func c_input(seq: int, move_x: float, move_z: float, sprint: bool, yaw: float, dt: float, crouch: bool = false) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
-		sim.submit_input(peer, seq, move_x, move_z, sprint, yaw, dt)
+		sim.submit_input(peer, seq, move_x, move_z, sprint, yaw, dt, crouch)
 
 
 @rpc("any_peer", "reliable")

@@ -1201,8 +1201,10 @@ func _process(_delta: float) -> void:
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
 		round(100.0 * float(client.you.get("weather_insulation", 0.0))))
 	var visual: float = float(client.you.get("visual_signature", 1.0))
+	if bool(client.you.get("crouching", false)):
+		_info_label.text += "\nCROUCHED (Ctrl): slower, less visible to idle infected"
 	if visual < 0.999:
-		_info_label.text += "\nGHILLIE CAMOUFLAGE: infected visual range -%d%%" % [
+		_info_label.text += "\nSTEALTH (STANCE / GEAR): infected visual range -%d%%" % [
 			int(round(100.0 * (1.0 - visual)))]
 	_info_label.text += "\nCAMP RENOWN %s: %d / %d | NPC buy discount %d%%" % [
 		str(client.you.get("renown_rank", "Newcomer")),

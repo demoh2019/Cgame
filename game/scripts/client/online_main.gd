@@ -432,14 +432,16 @@ func _physics_process(delta: float) -> void:
 	var alive: bool = bool(client.you.get("alive", true))
 	var move := Vector2.ZERO
 	var sprint := false
+	var crouch := false
 	if alive and not _typing():
 		move.x = Input.get_axis("ui_left", "ui_right") + float(Input.is_key_pressed(KEY_D)) - float(Input.is_key_pressed(KEY_A))
 		move.y = Input.get_axis("ui_up", "ui_down") + float(Input.is_key_pressed(KEY_S)) - float(Input.is_key_pressed(KEY_W))
 		sprint = Input.is_key_pressed(KEY_SHIFT)
+		crouch = Input.is_key_pressed(KEY_CTRL)
 	move = move.limit_length(1.0)
 	var aim := _aim_direction()
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
-	client.send_input(move, sprint, yaw, delta)
+	client.send_input(move, sprint, yaw, delta, crouch)
 	if alive and not hud.is_menu_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
 		client.attack(aim)
 		_attack_cooldown = 0.18
@@ -455,6 +457,8 @@ func _process(delta: float) -> void:
 		avatar.position = position
 		avatar.rotation.y = lerp_angle(avatar.rotation.y, client.yaw, 1.0 - exp(-16.0 * delta))
 		avatar.visible = bool(client.you.get("alive", true))
+		avatar_model.scale = Vector3(1.0,
+			0.72 if bool(client.you.get("crouching", false)) else 1.0, 1.0)
 		avatar_model.update_motion(delta)
 		avatar_model.set_dead(not bool(client.you.get("alive", true)))
 		avatar_model.set_action_loop(_gather_animation())
