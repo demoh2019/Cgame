@@ -30,17 +30,25 @@ static func copy_lods(mesh: Mesh, surface: int, world_scale: float = 1.0) -> Dic
 		var encoded: PackedByteArray = lod.get("index_data", PackedByteArray())
 		if encoded.is_empty() or encoded.size() % stride != 0:
 			continue
-		var indices := PackedInt32Array()
-		indices.resize(encoded.size() / stride)
-		var valid := true
-		for i in indices.size():
-			var offset := i * stride
-			var index: int = int(encoded.decode_u16(offset)) if stride == 2 else int(encoded.decode_u32(offset))
-			if index >= count or index < 0:
-				valid = false
-				break
-			indices[i] = index
-		if valid and indices.size() >= 3 and indices.size() % 3 == 0:
+		var indices: PackedInt32Array = decode_indices(encoded, stride, count)
+		if indices.size() >= 3 and indices.size() % 3 == 0:
 			var edge_length: float = float(lod["edge_length"]) * maxf(absf(world_scale), 0.0001)
 			result[edge_length] = indices
+	return result
+
+## Index data uses 16-bit storage for small meshes and 32-bit for large meshes.
+## Refuse malformed buffers instead of introducing out-of-range triangles.
+static func decode_indices(encoded: PackedByteArray, stride: int, vertex_count: int) -> PackedInt32Array:
+	var result := PackedInt32Array()
+	if vertex_count <= 0 or (stride != 2 and stride != 4):
+		return result
+	if encoded.is_empty() or encoded.size() % stride != 0:
+		return result
+	result.resize(int(encoded.size() / stride))
+	for i in result.size():
+		var offset: int = i * stride
+		var index: int = int(encoded.decode_u16(offset)) if stride == 2 else int(encoded.decode_u32(offset))
+		if index >= vertex_count or index < 0:
+			return PackedInt32Array()
+		result[i] = index
 	return result
