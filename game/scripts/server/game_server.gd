@@ -159,6 +159,7 @@ const RainHarvest = preload("res://scripts/shared/rain_harvest.gd")
 const FieldCanteen = preload("res://scripts/shared/field_canteen.gd")
 const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
+const FoodSafety = preload("res://scripts/shared/food_safety.gd")
 const CombatStress = preload("res://scripts/shared/combat_stress.gd")
 const PartyFeast = preload("res://scripts/shared/party_feast.gd")
 
@@ -461,6 +462,7 @@ func character_data(player: Player) -> Dictionary:
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 		"stamina": player.survival.stamina, "infection": player.survival.infection,
+		"food_poisoning": player.survival.food_poisoning,
 		"bleeding": player.survival.bleeding, "fracture": player.survival.fracture,
 		"exposure": player.survival.exposure, "wetness": player.survival.wetness,
 		"warmth_seconds": player.survival.warmth_seconds,
@@ -538,6 +540,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.finite_number(data.get("stamina", Defs.MAX_STAMINA), 0.0, Defs.MAX_STAMINA):
 		return false
 	if not SaveValidation.finite_number(data.get("infection", 0.0), 0.0, Defs.INFECTION_MAX):
+		return false
+	if not FoodSafety.valid_severity(data.get("food_poisoning", 0.0)):
 		return false
 	if not SaveValidation.finite_number(data.get("bleeding", 0.0), 0.0, Defs.BLEEDING_MAX):
 		return false
@@ -628,6 +632,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	survival.stamina = float(data.get("stamina", Defs.MAX_STAMINA))
 	# Older version-1 saves without infection remain compatible.
 	survival.infection = float(data.get("infection", 0.0))
+	survival.food_poisoning = float(data.get("food_poisoning", 0.0))
 	# Legacy version-1 accounts predate the persistent wound mechanic.
 	survival.bleeding = float(data.get("bleeding", 0.0))
 	survival.fracture = float(data.get("fracture", 0.0)) # Legacy v1 defaults to healthy.
@@ -3423,6 +3428,24 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"resource":
+			# Existing fish remain tradeable/craftable resources, but can be
+			# eaten raw when desperate. Never accept arbitrary resources as food.
+			var raw_tier: int = FoodSafety.raw_fish_tier(item_id)
+			if raw_tier == 0 or not bool(data.get("unsafe_food", false)):
+				return {"ok": false, "reason": "not_usable"}
+			if not FoodSafety.can_eat_raw(player.survival.hunger):
+				return {"ok": false, "reason": "not_hungry"}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.survival.eat(FoodSafety.raw_hunger(raw_tier))
+			player.survival.add_food_poisoning(FoodSafety.raw_poison(raw_tier))
+			player.dirty_inventory = true
+			player.dirty_character = true
+			events.append({"type": "food_poisoning", "peer": peer_id,
+				"severity": player.survival.food_poisoning})
+			return {"ok": true, "ate_raw_fish": true,
+				"severity": player.survival.food_poisoning}
 		"water_pouch":
 			if item_id != "empty_water_pouch":
 				return {"ok": false, "reason": "not_usable"}
@@ -3935,10 +3958,12 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			var curing: float = float(data.get("cure", 0.0))
 			var staunch: bool = bool(data.get("stop_bleeding", false))
 			var splint: float = float(data.get("fracture_treatment", 0.0))
+			var stomach: float = float(data.get("food_poison_treatment", 0.0))
 			if (healing <= 0.0 or player.survival.health >= player.survival.max_health) and (
 					curing <= 0.0 or player.survival.infection <= 0.0) and (
 					not staunch or player.survival.bleeding <= 0.0) and (
-					splint <= 0.0 or player.survival.fracture <= 0.0):
+					splint <= 0.0 or player.survival.fracture <= 0.0) and (
+					stomach <= 0.0 or player.survival.food_poisoning <= 0.0):
 				return {"ok": false, "reason": "no_effect"}
 			player.inventory.remove(item_id, 1)
 			player.survival.heal(healing * (1.0 + player.skills.bonus("heal_power")))
@@ -3946,6 +3971,7 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			if staunch:
 				player.survival.stop_bleeding()
 			player.survival.treat_fracture(splint)
+			player.survival.treat_food_poisoning(stomach)
 			_award(player, "medic", 6.0)
 		"head", "cape", "hands", "feet":
 			player.inventory.equip(item_id) # Worn pieces: a hood, a cloak, gloves, boots.
@@ -7212,7 +7238,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"prospect_mark": ProspectingChart.public_mark(
 				player.prospect_mark, time, depleted) if _alive(player) else {},
 			"threat_scan": threat_scan_for(peer_id),
-			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
+			"infection": player.survival.infection,
+			"food_poisoning": player.survival.food_poisoning,
+			"bleeding": player.survival.bleeding,
 			"fracture": player.survival.fracture,
 			"blood_scent_radius": BloodScent.detection_radius(player.survival.bleeding,
 				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival)),
