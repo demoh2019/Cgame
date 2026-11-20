@@ -181,7 +181,6 @@ func _reconcile(snapshot: Dictionary) -> void:
 		running = running and Survival.can_sprint_with(energy, float(you.get("hunger", 100.0)),
 				float(you.get("thirst", 100.0)), duration)
 		running = running and float(you.get("fracture", 0.0)) <= 0.0
-	running = running and WadingTravel.can_sprint(world, predicted)
 		running = running and WadingTravel.can_sprint(world, replayed)
 		replay_input["sprint"] = running
 		replay_input["injury_factor"] = Survival.fracture_speed_factor(float(you.get("fracture", 0.0)))
@@ -214,6 +213,7 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float, crou
 	running = running and Survival.can_sprint_with(predicted_stamina,
 			float(you.get("hunger", 100.0)), float(you.get("thirst", 100.0)), delta)
 	running = running and float(you.get("fracture", 0.0)) <= 0.0
+	running = running and WadingTravel.can_sprint(world, predicted)
 	var input := {"x": move.x, "z": move.y, "sprint": running, "mounted": mounted, "crouch": crouch,
 		"cargo_factor": factor, "speed_bonus": float(you.get("speed_bonus", 0.0)),
 		"injury_factor": Survival.fracture_speed_factor(float(you.get("fracture", 0.0))),
