@@ -164,6 +164,7 @@ const SUITES := [
 	"res://tests/test_daily_bounties.gd",
 	"res://tests/test_reputation.gd",
 	"res://tests/test_survival_radar.gd",
+	"res://tests/test_travel_navigation.gd",
 	"res://tests/test_save_validation.gd",
 ]
 

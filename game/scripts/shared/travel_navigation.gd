@@ -1,0 +1,61 @@
+extends RefCounted
+## A north-up, purely visual compass for the user's own caravan and party
+## rally. Never selects or accepts targets from other survivors' snapshots.
+
+const LABELS := ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+
+
+static func target(data: Variant, x_key: String, z_key: String) -> Vector2:
+	if not (data is Dictionary):
+		return Vector2(INF, INF)
+	var record: Dictionary = data
+	if not record.has(x_key) or not record.has(z_key):
+		return Vector2(INF, INF)
+	var x: Variant = record[x_key]
+	var z: Variant = record[z_key]
+	if not (x is float or x is int) or not (z is float or z is int):
+		return Vector2(INF, INF)
+	var point := Vector2(float(x), float(z))
+	return point if point.is_finite() else Vector2(INF, INF)
+
+
+static func distance_meters(origin: Vector2, destination: Vector2) -> int:
+	if not origin.is_finite() or not destination.is_finite():
+		return -1
+	return maxi(0, roundi(origin.distance_to(destination)))
+
+
+static func compass(origin: Vector2, destination: Vector2) -> String:
+	if not origin.is_finite() or not destination.is_finite():
+		return ""
+	var delta: Vector2 = destination - origin
+	if delta.length_squared() <= 4.0:
+		return "ARRIVED"
+	# World coordinates use -Z as north and +X as east.
+	var angle: float = atan2(delta.x, -delta.y)
+	return str(LABELS[wrapi(roundi(angle / (PI / 4.0)), 0, 8)])
+
+
+## Projection returns one point inside a radar if the marker is near;
+## otherwise returns a clipped edge pointer in the direction of the marker.
+## No geometry is produced for missing/malformed private waypoint data.
+static func project(origin: Vector2, destination: Vector2, map_size: Vector2,
+		world_radius: float = 72.0, inset: float = 0.44) -> Dictionary:
+	if not origin.is_finite() or not destination.is_finite() or \
+			not map_size.is_finite() or map_size.x <= 0.0 or map_size.y <= 0.0 or \
+			not is_finite(world_radius) or world_radius <= 0.0 or \
+			not is_finite(inset) or inset <= 0.0 or inset > 0.48:
+		return {}
+	var vector: Vector2 = destination - origin
+	var distance: float = vector.length()
+	if not is_finite(distance):
+		return {}
+	var map_center: Vector2 = map_size * 0.5
+	var pixel_radius: float = minf(map_size.x, map_size.y) * inset
+	var inside: bool = distance <= world_radius
+	var marker: Vector2
+	if inside:
+		marker = map_center + vector * pixel_radius / world_radius
+	else:
+		marker = map_center + vector / distance * maxf(0.0, pixel_radius - 2.0)
+	return {"point": marker, "inside": inside, "distance": distance}

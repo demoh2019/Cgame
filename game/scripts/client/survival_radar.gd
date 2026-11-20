@@ -5,6 +5,7 @@ extends Control
 
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
+const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 
 const METERS_RADIUS := 72.0
 const REFRESH_INTERVAL := 0.2
@@ -65,6 +66,46 @@ func current_yaw() -> float:
 	if client != null:
 		return float(client.you.get("yaw", 0.0))
 	return 0.0
+
+
+## Only a local actor or the local private network snapshot may supply
+## waypoint coordinates. Other players' snapshots never carry these fields.
+func current_caravan() -> Dictionary:
+	if sim != null:
+		if sim.players.has(actor_id):
+			return sim.players[actor_id].caravan_view.duplicate(true)
+		return {}
+	if client != null:
+		return client.you.get("caravan", {}).duplicate(true)
+	return {}
+
+
+func current_rally() -> Dictionary:
+	if sim != null:
+		return sim.parties.state_for(actor_id, sim.time).get("rally", {}).duplicate(true)
+	if client != null:
+		return client.you.get("party", {}).get("rally", {}).duplicate(true)
+	return {}
+
+
+## Draw an in-range beacon or an offscreen edge arrow in one shared style.
+func _draw_waypoint(origin: Vector2, info: Dictionary, x_key: String,
+		z_key: String, color: Color) -> void:
+	var destination: Vector2 = TravelNavigation.target(info, x_key, z_key)
+	var guide: Dictionary = TravelNavigation.project(origin, destination, size,
+		METERS_RADIUS, MAP_INSET)
+	if guide.is_empty():
+		return
+	var point: Vector2 = guide["point"]
+	if bool(guide["inside"]):
+		draw_arc(point, 7.5, 0.0, TAU, 24, color, 1.5)
+		draw_circle(point, 4.7, color)
+	else:
+		var heading: Vector2 = (destination - origin).normalized()
+		var side := Vector2(-heading.y, heading.x)
+		draw_colored_polygon(PackedVector2Array([
+			point, point - heading * 12.0 + side * 5.5,
+			point - heading * 12.0 - side * 5.5]), color)
 
 
 func _paint_pin(at: Vector2, center_world: Vector2, shade: Color,
@@ -175,6 +216,13 @@ func _draw() -> void:
 					tip, tip - arrow_direction * 12.0 + tangent * 5.0,
 					tip - arrow_direction * 12.0 - tangent * 5.0])
 				draw_colored_polygon(arrow, Color(0.84, 0.38, 0.98))
+
+	# Teal = private caravan destination; amber = temporary party-only rally.
+	# A remote target stays visible as an edge arrow until it is reached.
+	_draw_waypoint(origin, current_caravan(), "dst_x", "dst_z",
+		Color(0.28, 0.92, 0.92))
+	_draw_waypoint(origin, current_rally(), "x", "z",
+		Color(1.0, 0.60, 0.22))
 
 	# Local survivor always stays in the center of a player-following radar.
 	var yaw_value: float = current_yaw()

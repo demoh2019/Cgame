@@ -15,6 +15,7 @@ const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
+const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const PartyFrames = preload("res://scripts/client/party_frames.gd")
 const HudSkin = preload("res://scripts/client/hud_skin.gd")
 
@@ -1582,10 +1583,15 @@ func _process(_delta: float) -> void:
 		if job.is_empty():
 			_caravan_status.text = "No route. Take one at a village or fort merchant."
 		else:
-			_caravan_status.text = "Carry %dx %s to %s (X:%d, Z:%d) | %d silver" % [
+			var here := TravelNavigation.target(client.you, "x", "z")
+			var destination := TravelNavigation.target(job, "dst_x", "dst_z")
+			var remaining: int = TravelNavigation.distance_meters(here, destination)
+			var heading: String = TravelNavigation.compass(here, destination)
+			var direction_text := "%dm %s" % [remaining, heading] if remaining >= 0 else "position unavailable"
+			_caravan_status.text = "Carry %dx %s to %s | %s | %d silver" % [
 				int(job.get("quantity", 0)), str(job.get("cargo", "")),
-				str(job.get("destination", "")), roundi(float(job.get("dst_x", 0.0))),
-				roundi(float(job.get("dst_z", 0.0))), int(job.get("silver", 0))]
+				str(job.get("destination", "")), direction_text,
+				int(job.get("silver", 0))]
 	_bars["health"].value = client.you["health"]
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
