@@ -202,7 +202,7 @@
 			Material of the terrain. Texture coordinates run from [code]0[/code] to [code]1[/code] over the whole terrain; use a [ShaderMaterial] to splat textures by height or slope.
 		</member>
 		<member name="screen_space_lod_enabled" type="bool" setter="set_screen_space_lod_enabled" getter="is_screen_space_lod_enabled" default="false">
-			If [code]true[/code], rescale distance-based terrain mesh LOD by viewport pixel height and perspective field of view, inspired by screen-size LOD systems in Unreal Engine and Unity. The multiplier is limited to [code]0.6[/code]–[code]1.65[/code]. Disabled by default to preserve existing scenes; cached meshes, collision, skirts, smooth LOD morphing and culling remain unchanged.
+			If [code]true[/code], rescale distance-based terrain mesh LOD by the internal 3D resolution after viewport scaling and by perspective field of view, inspired by screen-size LOD systems in Unreal Engine and Unity. Dynamic 3D resolution and FSR affect geometry detail because the internal 3D pixel height is used instead of only the output window size. The multiplier is limited to [code]0.6[/code]–[code]1.65[/code]. Disabled by default to preserve existing scenes; cached meshes, collision, skirts, smooth LOD morphing and culling remain unchanged.
 		</member>
 		<member name="size" type="Vector2" setter="set_size" getter="get_size" default="Vector2(1024, 1024)">
 			Width (x) and depth (z) of the terrain in meters. The distance between samples follows from this and the number of samples.
