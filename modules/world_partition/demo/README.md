@@ -14,31 +14,44 @@ detailed cells and lightweight distant proxies with no additional engine rendere
 - The full detail layer uses 160 trees per cell; the proxy layer uses 20 and a
   simpler canopy mesh. This reduces scene and geometry complexity away from the camera.
 - Both layers remain independently budgeted, to limit new instances per frame.
-- \`WorldPartition3D.get_cell_instance(Vector2i)\` is used on cell_loaded/cell_unloaded
+- `WorldPartition3D.get_cell_instance(Vector2i)` is used on cell_loaded/cell_unloaded
   to hide proxies wherever detailed scenes have finished loading.
 - Optional additional observer attached 180 m in front of camera prefetches
   detailed cells when PR #919 is included.
 
 ## Run
 
-Build the Cgame fork with \`world_partition\` enabled and open this directory
+Build the Cgame fork with `world_partition` enabled and open this directory
 as a Godot project:
 
-\`\`\`sh
+```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 ./bin/godot.linuxbsd.editor.x86_64 --editor --path modules/world_partition/demo
-\`\`\`
+```
 
 The project uses Compatibility renderer so it can be inspected on low-end GPUs;
 near/far proxy handoff is implemented without renderer-specific effects.
 
 WASD to fly, Space/Ctrl for up/down, Shift for speed, P to toggle forward prefetch,
 L to toggle distant proxy scenes, R to retry failed resource loads.
-HUD displays FPS and number of loaded detail/proxy cells.
+HUD displays FPS, detail/proxy cell counts, the active quality preset and auto mode.
+
+The optional adaptive quality controller monitors a 3-second time-weighted FPS
+window. Under 48 FPS it reduces streaming distance/instantiation budgets, and
+at 58+ FPS it increases them after a 10-second cooldown. The modes are
+Performance (proxy radius 2), Balanced (4) and Cinematic (5). Switch with
+keys 1/2/3 (manual), or Q (automatic toggle). This is an intentionally simple
+demo controller, not a measured production GPU or frametime feedback system.
+
+Quality controller assertions (after importing the project):
+
+```sh
+./bin/godot.linuxbsd.editor.x86_64 --headless --path modules/world_partition/demo --script res://tests/quality_controller_test.gd
+```
 
 ## Limitations / validation
 
-- Native \`get_cell_instance()\` is required for proxy handoff; this branch includes it.
+- Native `get_cell_instance()` is required for proxy handoff; this branch includes it.
 - This is not the user's actual game project. The example lives in the engine
   source repository so it can be copied into a real Godot game once its source is available.
 - Repeated procedural forest art is illustrative and does not include physics,
