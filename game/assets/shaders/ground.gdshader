@@ -5,6 +5,7 @@ global uniform float aa_weather_wetness;
 global uniform float aa_terrain_detail_radius;
 // Maximum number of PBR layers sampled per pixel (Ultra = all layers).
 global uniform int aa_terrain_layer_budget;
+global uniform float aa_cliff_normal_quality; // 0 on low-end, 0.7 High, 1 Ultra
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 
 // Textured ground. Thirteen CC0 materials (Poly Haven) in two texture arrays:
@@ -211,6 +212,7 @@ void fragment() {
 	}
 	vec3 color = macro_color;
 	vec3 bump = vec3(0.0);
+	vec3 cliff_world_normal = n;
 	float sampled_weight = 0.0;
 	for (int slot = 0; slot < 13; slot++) {
 		if (slot >= layer_budget) {
@@ -235,6 +237,25 @@ void fragment() {
 				+ textureGrad(albedo_layers, vec3(p / tile_meters, layer), lod_dx, lod_dy).rgb * blend.y
 				+ textureGrad(albedo_layers, vec3(world_position.xy / tile_meters, layer), cliff_dx_xy, cliff_dy_xy).rgb * blend.z;
 			c *= layer_tint[5];
+			// High/Ultra cliff relief: triplanar normal mapping with stable
+			// explicit texture gradients. No extra samples on low settings
+			// or distant/subpixel terrain.
+			if (aa_cliff_normal_quality > 0.001 && detail_fade > 0.001) {
+				vec3 nx = textureGrad(normal_layers,
+					vec3(world_position.zy / tile_meters, layer),
+					cliff_dx_zy, cliff_dy_zy).rgb * 2.0 - 1.0;
+				vec3 ny = textureGrad(normal_layers,
+					vec3(p / tile_meters, layer),
+					lod_dx, lod_dy).rgb * 2.0 - 1.0;
+				vec3 nz = textureGrad(normal_layers,
+					vec3(world_position.xy / tile_meters, layer),
+					cliff_dx_xy, cliff_dy_xy).rgb * 2.0 - 1.0;
+				vec3 along_x = normalize(vec3(sign(n.x) * nx.z, nx.y, nx.x));
+				vec3 along_y = normalize(vec3(ny.x, sign(n.y) * ny.z, ny.y));
+				vec3 along_z = normalize(vec3(nz.x, nz.y, sign(n.z) * nz.z));
+				cliff_world_normal = normalize(
+					along_x * blend.x + along_y * blend.y + along_z * blend.z);
+			}
 			nn = vec3(0.0, 0.0, 1.0);
 		} else {
 			c = top_albedo(layer, p, mixer, detail_fade, lod_dx, lod_dy);
@@ -265,6 +286,10 @@ void fragment() {
 	vec3 bitangent = normalize(cross(n, tangent));
 	vec3 detail = normalize(vec3(bump.xy * normal_strength, max(bump.z, 0.2)));
 	vec3 bent = normalize(tangent * detail.x + bitangent * detail.y + n * detail.z);
+	// The cliff relief never bleeds into a grassy or paved transition.
+	float cliff_mix = clamp(w[5] / max(all_weight, 0.0001), 0.0, 1.0)
+		* clamp(aa_cliff_normal_quality, 0.0, 1.0) * detail_fade;
+	bent = normalize(mix(bent, cliff_world_normal, cliff_mix));
 
 	// Wet earth absorbs light; shallow mud and worn pavement collect small smooth puddles.
 	// Reuse existing biome and noise weights instead of additional texture reads or noise octaves.
@@ -277,7 +302,18 @@ void fragment() {
 
 	color *= 1.0 - wetness * 0.18 - puddle * 0.12;
 	ALBEDO = apply_cloud_shadow(color, p, TIME);
-	float dry_roughness = mix(0.92, 0.6, w[8]) - 0.15 * shore;
-	ROUGHNESS = mix(mix(dry_roughness, 0.28, wetness * 0.55), 0.08, puddle * 0.9);
-	SPECULAR = min(0.9, 0.2 + wetness * 0.2 + puddle * 0.3);
+	// A physically plausible microfacet roughness for each existing layer.
+	// This reuses the 13 biome weights (no extra textures or VRAM).
+	float dry_roughness = (
+		w[0] * 0.91 + w[1] * 0.94 + w[2] * 0.88 + w[3] * 0.86
+		+ w[4] * 0.89 + w[5] * 0.73 + w[6] * 0.77 + w[7] * 0.93
+		+ w[8] * 0.94 + w[9] * 0.72 + w[10] * 0.83
+		+ w[11] * 0.78 + w[12] * 0.82) / max(all_weight, 0.0001);
+	dry_roughness = clamp(dry_roughness + (mid - 0.5) * 0.055, 0.55, 0.98);
+	// Wetness changes roughness, not the dielectric material's F0.
+	// Existing shallow puddles still produce very tight highlights.
+	ROUGHNESS = clamp(
+		mix(mix(dry_roughness, 0.28, wetness * 0.55), 0.08, puddle * 0.9),
+		0.045, 1.0);
+	SPECULAR = 0.5;
 }

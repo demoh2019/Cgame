@@ -64,3 +64,8 @@ aa_vegetation_wind={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
+
+aa_cliff_normal_quality={
+"type": "float",
+"value": 0.0
+}
