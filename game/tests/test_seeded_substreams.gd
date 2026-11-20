@@ -83,6 +83,16 @@ func run(t) -> void:
 	t.check(a._pos != different._pos, "different world seed changes decorative bird layout")
 	t.check(a._vel != different._vel, "different world seed changes decorative flight velocities")
 	t.check(a._pos.size() == Birds.MAX_BIRDS, "flock geometry budget remains unchanged")
+	if a._native != null and a._native.has_method("get_simulation_seed"):
+		var expected_seed: int = Streams.seed_for(4141, Birds.STREAM_NATIVE_FLOCK)
+		t.eq(int(a._native.call("get_simulation_seed")), expected_seed,
+			"Cgame's real C++ boids simulation uses its own world-derived substream")
+		t.eq(int(b._native.call("get_simulation_seed")), expected_seed,
+			"identical worlds seed the native flock identically")
+		t.eq(a._native.call("get_agent_position", 0), b._native.call("get_agent_position", 0),
+			"the native Flock3D simulation, not just script buffers, is reproducible")
+		t.check(a._native.call("get_agent_position", 0) != different._native.call("get_agent_position", 0),
+			"different world seed changes native boids' actual starting positions")
 	a.free()
 	b.free()
 	different.free()
