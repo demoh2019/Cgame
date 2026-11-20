@@ -36,6 +36,8 @@ func update_from(client) -> void:
 		_touch("barricade:%d" % id, "barricade", client.barricades[id], seen)
 	for id in client.campfires:
 		_touch("campfire:%d" % id, "campfire", client.campfires[id], seen)
+	for id in client.shelters:
+		_touch("shelter:%d" % id, "shelter", client.shelters[id], seen)
 	for id in client.decoys:
 		_touch("decoy:%d" % id, "decoy", client.decoys[id], seen)
 	for id in client.infected_snares:
@@ -200,6 +202,30 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		label.position.y = 1.0
 		root.add_child(label)
 		return root
+	if kind == "shelter":
+		var canopy := MeshInstance3D.new()
+		var roof := BoxMesh.new()
+		roof.size = Vector3(3.0, 0.12, 2.6)
+		canopy.mesh = roof
+		canopy.position.y = 1.8
+		var canvas := StandardMaterial3D.new()
+		canvas.albedo_color = Color(0.31, 0.42, 0.29)
+		canopy.material_override = canvas
+		root.add_child(canopy)
+		for dx in [-1.25, 1.25]:
+			for dz in [-1.08, 1.08]:
+				var pole := MeshInstance3D.new()
+				var pole_mesh := CylinderMesh.new()
+				pole_mesh.top_radius = 0.045
+				pole_mesh.bottom_radius = 0.06
+				pole_mesh.height = 1.75
+				pole.mesh = pole_mesh
+				pole.position = Vector3(dx, 0.89, dz)
+				var wood := StandardMaterial3D.new()
+				wood.albedo_color = Color(0.35, 0.24, 0.16)
+				pole.material_override = wood
+				root.add_child(pole)
+		return root
 	if kind == "campfire":
 		var wood := MeshInstance3D.new()
 		var wood_mesh := CylinderMesh.new()
@@ -307,7 +333,7 @@ func _process(delta: float) -> void:
 		var node: Node3D = _nodes[key]
 		var target: Dictionary = _targets[key]
 		node.position = node.position.lerp(target["position"], blend)
-		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("snare") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
+		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("snare") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			node.get_node("Model").update_motion(delta)
 

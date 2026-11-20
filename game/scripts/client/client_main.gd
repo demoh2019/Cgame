@@ -25,6 +25,7 @@ const Reputation = preload("res://scripts/shared/reputation.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
+const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
 const LOCAL_PLAYER_ID := 2
 const TERRAIN_STEP := 8.0
 
@@ -56,6 +57,7 @@ var _spit_warning_meshes: Dictionary = {}
 var _acid_pool_meshes: Dictionary = {}
 var _barricade_bodies: Dictionary = {}
 var _campfire_visuals: Dictionary = {}
+var _shelter_visuals: Dictionary = {}
 var _decoy_visuals: Dictionary = {}
 var _materials: Dictionary = {}
 var _last_center: Vector2i = Vector2i(999999, 999999)
@@ -107,6 +109,8 @@ func _setup_actions() -> void:
 	_bind_key("survive_lake", KEY_R)
 	_bind_key("survive_build", KEY_U)
 	_bind_key("survive_campfire", KEY_O)
+	_bind_key("survive_shelter", KEY_F6)
+	_bind_key("survive_pack_shelter", KEY_F7)
 	_bind_key("survive_decoy", KEY_COMMA)
 	_bind_key("survive_snare", KEY_BACKSLASH)
 	_bind_key("survive_stim", KEY_PERIOD)
@@ -507,6 +511,34 @@ func _sync_campfires() -> void:
 			_campfire_visuals.erase(id)
 
 
+func _sync_shelters() -> void:
+	var active: Dictionary = {}
+	for id in sim.shelters:
+		var tarp: Dictionary = sim.shelters[id]
+		var point := Vector3(float(tarp["x"]), float(tarp["y"]), float(tarp["z"]))
+		if survivor.position.distance_to(point) > 95.0:
+			continue
+		active[id] = true
+		if not _shelter_visuals.has(id):
+			var node := Node3D.new()
+			node.name = "Tarp_%d" % int(id)
+			var roof := _mesh(Vector3(3.0, 0.13, 2.6), Color(0.31, 0.42, 0.29))
+			roof.position.y = 1.8
+			node.add_child(roof)
+			for dx in [-1.25, 1.25]:
+				for dz in [-1.08, 1.08]:
+					var pole := _mesh(Vector3(0.1, 1.75, 0.1), Color(0.35, 0.24, 0.16))
+					pole.position = Vector3(dx, 0.89, dz)
+					node.add_child(pole)
+			add_child(node)
+			_shelter_visuals[id] = node
+		_shelter_visuals[id].position = point
+	for id in _shelter_visuals.keys():
+		if not active.has(id):
+			_shelter_visuals[id].queue_free()
+			_shelter_visuals.erase(id)
+
+
 func _sync_decoys() -> void:
 	var visible: Dictionary = {}
 	for id in sim.decoys:
@@ -595,6 +627,7 @@ func _physics_process(delta: float) -> void:
 	_sync_acid_pools()
 	_sync_barricades()
 	_sync_campfires()
+	_sync_shelters()
 	_sync_decoys()
 	_hud_clock += delta
 	if _hud_clock > 0.15:
@@ -846,6 +879,22 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_snare"):
 		var site := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
 		_result("Place infected snare", sim.cmd_place_infected_snare(LOCAL_PLAYER_ID, site.x, site.y))
+	elif event.is_action_pressed("survive_shelter"):
+		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
+		_result("Pitch tarp", sim.cmd_pitch_shelter(LOCAL_PLAYER_ID, point.x, point.y))
+	elif event.is_action_pressed("survive_pack_shelter"):
+		var nearest := -1
+		var closest := PortableShelter.PACK_RANGE * PortableShelter.PACK_RANGE
+		for tarp in sim.shelters.values():
+			var d2: float = Vector2(survivor.position.x, survivor.position.z).distance_squared_to(
+				Vector2(float(tarp["x"]), float(tarp["z"])))
+			if d2 <= closest:
+				closest = d2
+				nearest = int(tarp["id"])
+		if nearest < 0:
+			_feedback = "No nearby tarp to pack."
+		else:
+			_result("Pack tarp", sim.cmd_pack_shelter(LOCAL_PLAYER_ID, nearest))
 	elif event.is_action_pressed("survive_campfire"):
 		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
 		var fire_result: Dictionary = sim.cmd_light_campfire(LOCAL_PLAYER_ID, point.x, point.y)
@@ -944,7 +993,9 @@ func _update_hud() -> void:
 		int(survivor.combat_energy), int(Defs.COMBAT_ENERGY_MAX), survivor.skill_timer, survivor.dodge_timer,
 		survivor.inventory.weapon if not survivor.inventory.weapon.is_empty() else "unarmed",
 		str(weather.get("condition", "unknown")).capitalize(), float(weather.get("temperature_c", 0.0)),
-		"CAMPFIRE WARMTH" if sim.campfires.size() > 0 and FieldCampfire.has_warmth(sim.campfires, position, sim.time) else ("SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED"),
+		"CAMPFIRE WARMTH" if FieldCampfire.has_warmth(sim.campfires, position, sim.time) else (
+			"FIELD TARP" if PortableShelter.covers(sim.shelters, position, sim.time) else (
+			"SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED")),
 		int(ceil(vitals.warmth_seconds)),
 		" | STORM COVER: infected sight -30%" if Weather.sight_multiplier(weather) < 1.0 else "",
 		Defs.ZONE_NAMES[zone], WorldGen.tier_for_zone(zone), risk, int(position.x), int(position.z), sim.zombies.size(),
@@ -1008,7 +1059,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | Ctrl crouch | F6 tarp | F7 pack tarp | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | \\ infected snare | . stimulant | / scent salve | ; spore filter | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake / Shift+R acid neutralizer / Ctrl+R fill canteen (1 filter)\nN buy water / V sell materials / Shift+V sell fish | T fish / Shift+T baited fish near shore | P accept / Shift+P turn in / Ctrl+P daily bounty (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback

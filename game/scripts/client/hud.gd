@@ -234,6 +234,25 @@ func _build() -> void:
 		var direction := Vector2(sin(client.yaw), cos(client.yaw))
 		client.light_campfire(Vector2(pos.x, pos.z) + direction * 2.8))
 	inventory_box.add_child(campfire_button)
+	var pitch_button := Button.new()
+	pitch_button.name = "PitchTarp"
+	pitch_button.text = "Pitch field tarp (2 cloth T1, 2 fiber T1, 1 plank T1)"
+	pitch_button.tooltip_text = "4 minutes of shared weather cover (-75% exposure), no PvP immunity."
+	pitch_button.pressed.connect(func() -> void:
+		var position: Vector3 = client.display_position()
+		var heading := Vector2(sin(client.yaw), cos(client.yaw))
+		client.pitch_shelter(Vector2(position.x, position.z) + heading * 2.8))
+	inventory_box.add_child(pitch_button)
+	var pack_button := Button.new()
+	pack_button.name = "PackTarp"
+	pack_button.text = "Pack nearest tarp (owner only; no refund)"
+	pack_button.pressed.connect(func() -> void:
+		var shelter_id: int = client.nearest_shelter(client.display_position())
+		if shelter_id < 0:
+			say("No field tarp within reach.")
+		else:
+			client.pack_shelter(shelter_id))
+	inventory_box.add_child(pack_button)
 	var decoy_button := Button.new()
 	decoy_button.name = "ThrowNoiseDecoy"
 	decoy_button.text = "Throw clattering decoy (,): 8s distraction"
@@ -1192,6 +1211,18 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		else:
 			say("Refuel denied: " + str(data.get("reason", "rejected")))
 		return
+	if kind == "shelter":
+		if bool(data.get("ok", false)):
+			say("Field tarp deployed: shared weather cover for 4 minutes.")
+		else:
+			say("Field tarp: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "pack_shelter":
+		if bool(data.get("ok", false)):
+			say("Field tarp packed; materials are not refunded.")
+		else:
+			say("Pack tarp: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "campfire":
 		if bool(data.get("ok", false)):
 			say("Campfire lit: shared warmth for 5 minutes.")
@@ -1401,7 +1432,9 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nWeather: %s %.0fC %s | Exposure %d/100 | Heat pack %ds" % [
 			str(weather.get("condition", "clear")).capitalize(),
 			float(weather.get("temperature_c", 0.0)),
-			"CAMPFIRE WARMTH" if bool(client.you.get("campfire_warm", false)) else ("SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED"),
+			"CAMPFIRE WARMTH" if bool(client.you.get("campfire_warm", false)) else (
+				"FIELD TARP (-75% WEATHER)" if bool(client.you.get("tent_sheltered", false)) else (
+				"SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED")),
 			int(client.you.get("exposure", 0.0)), int(ceil(float(client.you.get("warmth_seconds", 0.0))))
 		]
 	var storm_cover: float = float(client.you.get("weather_sight", 1.0))

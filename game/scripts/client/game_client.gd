@@ -25,6 +25,7 @@ var players: Dictionary = {} # id -> entity from the latest snapshot
 var zombies: Dictionary = {}
 var barricades: Dictionary = {} # Nearby defenses from the server.
 var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
+var shelters: Dictionary = {} # Replicated temporary weather cover.
 var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
 var infected_snares: Dictionary = {} # Server-replicated temporary PvE traps.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
@@ -110,6 +111,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	campfires.clear()
 	for entity in snapshot.get("campfires", []):
 		campfires[int(entity["id"])] = entity
+	shelters.clear()
+	for entity in snapshot.get("shelters", []):
+		shelters[int(entity["id"])] = entity
 	bags.clear()
 	for entity in snapshot["bags"]:
 		bags[entity["id"]] = entity
@@ -451,6 +455,29 @@ func place_infected_snare(point: Vector2) -> void:
 func throw_decoy(direction: Vector2) -> void:
 	if direction.is_finite() and direction.length_squared() > 0.0001:
 		net.c_throw_decoy.rpc_id(1, direction.normalized().x, direction.normalized().y)
+
+
+func pitch_shelter(point: Vector2) -> void:
+	if point.is_finite():
+		net.c_pitch_shelter.rpc_id(1, point.x, point.y)
+
+
+func pack_shelter(id: int) -> void:
+	net.c_pack_shelter.rpc_id(1, id)
+
+
+func nearest_shelter(point: Vector3, radius: float = 3.2) -> int:
+	if not point.is_finite():
+		return -1
+	var closest := -1
+	var distance: float = radius * radius
+	for shelter in shelters.values():
+		var d2: float = Vector2(point.x, point.z).distance_squared_to(
+			Vector2(float(shelter["x"]), float(shelter["z"])))
+		if d2 <= distance:
+			distance = d2
+			closest = int(shelter["id"])
+	return closest
 
 
 func light_campfire(point: Vector2) -> void:
