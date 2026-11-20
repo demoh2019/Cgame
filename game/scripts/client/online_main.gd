@@ -30,6 +30,7 @@ const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const GraphicsColorGrade = preload("res://scripts/client/graphics_color_grade.gd")
 const RenderBenchmark = preload("res://scripts/client/render_benchmark.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
+const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
 const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
@@ -270,6 +271,10 @@ func _build_environment() -> void:
 	var dungeon_lights := DungeonLightBudget.new()
 	dungeon_lights.name = "DungeonLightBudget"
 	add_child(dungeon_lights)
+	# A tiny shared probe pool captures the nearest dungeon room once, not per frame.
+	var dungeon_reflections := DungeonReflectionBudget.new()
+	dungeon_reflections.name = "DungeonReflectionBudget"
+	add_child(dungeon_reflections)
 	if camera.has_method("set_shake_max_offset"):
 		# Trauma shake (engine feature of this fork): small offsets for a top-down view, quick decay.
 		camera.set_shake_max_offset(Vector3(0.35, 0.25, 0.35))
