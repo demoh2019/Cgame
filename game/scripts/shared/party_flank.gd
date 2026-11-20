@@ -3,6 +3,7 @@ extends RefCounted
 ## The infected must be fighting a DIFFERENT, close, living party member.
 ## No client commands, attacker-chosen targets, persistence or PvP effects.
 const Defs = preload("res://scripts/shared/defs.gd")
+const Zombie = preload("res://scripts/shared/zombie.gd")
 
 const MAX_MELEE_DISTANCE := 3.2
 const MAX_TANK_DISTANCE := 10.0
@@ -17,6 +18,9 @@ static func qualifies(attacker, infected, players: Dictionary, parties, world) -
 			not attacker.survival.alive or not infected.is_alive() or \
 			attacker.mounted or not attacker.position.is_finite() or \
 			not infected.position.is_finite():
+		return false
+	# Stale or synthetic target IDs on idle infected do not form a fight.
+	if infected.state != Zombie.State.CHASE and infected.state != Zombie.State.ATTACK:
 		return false
 	var weapon_id: String = attacker.inventory.weapon
 	if weapon_id.is_empty() or attacker.inventory.count(weapon_id) < 1 or \
