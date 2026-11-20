@@ -436,6 +436,25 @@ TEST_CASE("[SceneTree][WorldPartition3D] Supercover navigation corridor respects
 	CHECK(diagonal[3] == Vector2i(1, 1));
 	CHECK(diagonal[6] == Vector2i(2, 2));
 
+	// Exact grid-edge trajectories conservatively require the TWO tiles
+	// on each side of the edge. Test without transform-rounding noise.
+	partition->set_rotation(Vector3());
+	partition->set_position(Vector3());
+	const Array vertical_edge = partition->get_navigation_route_cells(global_at(32, 1), global_at(32, 70));
+	REQUIRE(vertical_edge.size() == 6);
+	CHECK(vertical_edge[0] == Vector2i(1, 0));
+	CHECK(vertical_edge[1] == Vector2i(0, 0));
+	CHECK(vertical_edge[4] == Vector2i(1, 2));
+	CHECK(vertical_edge[5] == Vector2i(0, 2));
+	const Array horizontal_edge = partition->get_navigation_route_cells(global_at(1, 32), global_at(70, 32));
+	REQUIRE(horizontal_edge.size() == 6);
+	CHECK(horizontal_edge[0] == Vector2i(0, 1));
+	CHECK(horizontal_edge[1] == Vector2i(0, 0));
+	CHECK(horizontal_edge[5] == Vector2i(2, 0));
+	const Array corner = partition->get_navigation_route_cells(global_at(32, 32), global_at(32, 32));
+	CHECK(corner.size() == 4);
+	CHECK(partition->get_navigation_route_cells(global_at(32, 1), global_at(32, 70), 5).is_empty());
+
 	const Array same_cell = partition->get_navigation_route_cells(global_at(3, 4), global_at(20, 20), 1);
 	REQUIRE(same_cell.size() == 1);
 	CHECK(same_cell[0] == Vector2i(0, 0));
