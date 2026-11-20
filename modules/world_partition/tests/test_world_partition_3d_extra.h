@@ -45,6 +45,79 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Cell state setters and getters isolate nested dictionaries") {
+	WorldPartition3D world;
+	Dictionary nested;
+	nested["claimed"] = false;
+	Dictionary initial;
+	initial["quest"] = nested;
+	world.set_cell_state(Vector2i(2, -3), initial);
+	CHECK(world.has_cell_state(Vector2i(2, -3)));
+	CHECK(world.get_cell_state_count() == 1);
+
+	// Caller changes never mutate the streamer's saved copy.
+	nested["claimed"] = true;
+	Dictionary saved = world.get_cell_state(Vector2i(2, -3));
+	Dictionary saved_quest = saved["quest"];
+	CHECK(saved_quest["claimed"] == false);
+	saved_quest["claimed"] = true;
+	Dictionary again = world.get_cell_state(Vector2i(2, -3));
+	Dictionary restored_quest = again["quest"];
+	CHECK(restored_quest["claimed"] == false);
+
+	world.set_cell_state(Vector2i(2, -3), Dictionary());
+	CHECK_FALSE(world.has_cell_state(Vector2i(2, -3)));
+	CHECK(world.get_cell_state(Vector2i(99, 99)).is_empty());
+	CHECK(world.get_cell_state_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Snapshots transfer cell state and reject unsupported entries") {
+	WorldPartition3D source;
+	Dictionary hub;
+	hub["reward_claimed"] = true;
+	hub["visits"] = 7;
+	source.set_cell_state(Vector2i(0, 0), hub);
+	Dictionary arena;
+	arena["wins"] = 3;
+	source.set_cell_state(Vector2i(4, 2), arena);
+	Dictionary snapshot = source.snapshot_cell_states();
+	CHECK(snapshot.size() == 2);
+	Dictionary invalid;
+	invalid["bad string key"] = arena;
+	invalid[Vector2i(10, 10)] = String("not a dictionary");
+	invalid[Vector2i(0, 0)] = snapshot[Vector2i(0, 0)];
+	invalid[Vector2i(4, 2)] = snapshot[Vector2i(4, 2)];
+	WorldPartition3D destination;
+	destination.load_cell_states(invalid);
+	CHECK(destination.get_cell_state_count() == 2);
+	CHECK(destination.get_cell_state(Vector2i(0, 0))["reward_claimed"] == true);
+	CHECK(destination.get_cell_state(Vector2i(4, 2))["wins"] == 3);
+	invalid.clear();
+	CHECK(destination.get_cell_state_count() == 2);
+	destination.load_cell_states(Dictionary());
+	CHECK(destination.get_cell_state_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Cell data survives scene mapping removal and pin changes") {
+	WorldPartition3D world;
+	const Vector2i hub(0, 0);
+	Dictionary state;
+	state["unlocked"] = true;
+	world.set_cell_scene(hub, "res://test_scene.tscn");
+	world.pin_cell(hub);
+	world.set_cell_state(hub, state);
+	world.remove_cell_scene(hub);
+	CHECK(world.has_cell_state(hub));
+	CHECK(world.is_cell_pinned(hub));
+	world.unpin_cell(hub);
+	world.erase_cell_state(hub);
+	CHECK_FALSE(world.has_cell_state(hub));
+	world.set_cell_state(Vector2i(3, 3), state);
+	world.set_cell_state(Vector2i(4, 4), state);
+	world.clear_cell_states();
+	CHECK(world.get_cell_state_count() == 0);
+}
+
 TEST_CASE("[WorldPartition3D] Inspector pinned cell array filters duplicates and invalid values") {
 	WorldPartition3D world;
 	Array cells;
