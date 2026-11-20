@@ -56,11 +56,14 @@ being rendered at fixed sea level. The field reuses the same one draw
 call at every zoom level.
 
 **CPU throttling:** visual weather/quality uniforms and grid position
-are evaluated at most **4 times per second**. A new 3×3 grid and
-up to 252 positions are generated only when crossing 42 m of world
-space *and* the field is visible. There is no background actor process,
-network traffic or persistent save state. Model heights are queried
-only when changing tile, not on every GPU frame.
+are evaluated at most **4 times per second**. The 3×3 GPU grid
+repositions when crossing a 42 m world tile, but a bounded **18-tile
+CPU cache** retains deterministic heights and particle seeds. A single
+tile move samples only **three newly entered tiles** (84 motes maximum);
+returning immediately to a cached location repeats **zero** heightmap
+queries. Individual GPU transforms are updated only on a tile crossing,
+never every rendered frame. There is no background actor process,
+network traffic or persistent save state.
 
 | Profile | Motes per tile | Max GPU instances | Fade distance |
 | --- | ---: | ---: | ---: |
