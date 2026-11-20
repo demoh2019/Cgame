@@ -112,9 +112,13 @@ func _process(delta: float) -> void:
 		# torches. Reuses one tiny image for the entire streamed dungeon.
 		DungeonTorchCookie.apply(light, _quality, renderer, cast)
 		# Use engine-side distance fade so border lights also disappear gradually.
-		light.distance_fade_enabled = true
-		light.distance_fade_begin = maxf(0.0, radius - FADE_DISTANCE)
-		light.distance_fade_length = FADE_DISTANCE
+		if not light.distance_fade_enabled:
+			light.distance_fade_enabled = true
+		var fade_begin: float = maxf(0.0, radius - FADE_DISTANCE)
+		if light.distance_fade_begin != fade_begin:
+			light.distance_fade_begin = fade_begin
+		if light.distance_fade_length != FADE_DISTANCE:
+			light.distance_fade_length = FADE_DISTANCE
 		light.visible = true
 		updated.append(light)
 	for light in _active:
