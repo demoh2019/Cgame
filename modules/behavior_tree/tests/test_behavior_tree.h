@@ -493,4 +493,89 @@ TEST_CASE("[BehaviorTree] Independent agents can run the same nested tree") {
 	CHECK(two->get_blackboard_value("done") == true);
 }
 
+
+TEST_CASE("[BehaviorTree] Reactive sequence rechecks its guard and aborts a running wait") {
+	Ref<BehaviorTree> bt;
+	bt.instantiate();
+	Array actions;
+	actions.push_back(make_condition("target_visible", true));
+	actions.push_back(make_wait(2));
+	actions.push_back(make_set("action", "attack"));
+	REQUIRE(bt->set_tree(make_composite("reactive_sequence", actions)));
+	bt->set_blackboard_value("target_visible", true);
+	CHECK(bt->tick() == BehaviorTree::RUNNING);
+	bt->set_blackboard_value("target_visible", false);
+	CHECK(bt->tick() == BehaviorTree::FAILURE);
+	CHECK_FALSE(bt->has_blackboard_value("action"));
+	bt->set_blackboard_value("target_visible", true);
+	CHECK(bt->tick() == BehaviorTree::RUNNING); // The wait starts again.
+	CHECK(bt->tick() == BehaviorTree::RUNNING);
+	CHECK(bt->tick() == BehaviorTree::SUCCESS);
+	CHECK(bt->get_blackboard_value("action") == "attack");
+}
+
+TEST_CASE("[BehaviorTree] Reactive selector preempts lower priority branches") {
+	Ref<BehaviorTree> bt;
+	bt.instantiate();
+	Array retreat;
+	retreat.push_back(make_condition("low_health", true));
+	retreat.push_back(make_wait(2));
+	retreat.push_back(make_set("action", "retreat"));
+	Array attack;
+	attack.push_back(make_condition("target_visible", true));
+	attack.push_back(make_wait(3));
+	attack.push_back(make_set("action", "attack"));
+	Array priorities;
+	priorities.push_back(make_composite("reactive_sequence", retreat));
+	priorities.push_back(make_composite("reactive_sequence", attack));
+	priorities.push_back(make_set("action", "patrol"));
+	REQUIRE(bt->set_tree(make_composite("reactive_selector", priorities)));
+
+	bt->set_blackboard_value("low_health", false);
+	bt->set_blackboard_value("target_visible", true);
+	CHECK(bt->tick() == BehaviorTree::RUNNING); // Attack wait: 3 left.
+	CHECK(bt->tick() == BehaviorTree::RUNNING); // Attack wait: 2 left.
+	bt->set_blackboard_value("low_health", true);
+	CHECK(bt->tick() == BehaviorTree::RUNNING); // Retreat takes priority; attack is aborted.
+	bt->set_blackboard_value("low_health", false);
+	CHECK(bt->tick() == BehaviorTree::RUNNING); // Attack wait restarts: 3 left.
+	CHECK(bt->tick() == BehaviorTree::RUNNING);
+	CHECK(bt->tick() == BehaviorTree::RUNNING);
+	CHECK(bt->tick() == BehaviorTree::SUCCESS);
+	CHECK(bt->get_blackboard_value("action") == "attack");
+
+	bt->set_blackboard_value("target_visible", false);
+	CHECK(bt->tick() == BehaviorTree::SUCCESS);
+	CHECK(bt->get_blackboard_value("action") == "patrol");
+}
+
+TEST_CASE("[BehaviorTree] Reactive selector can preempt a running branch with immediate success") {
+	Ref<BehaviorTree> bt;
+	bt.instantiate();
+	Array priorities;
+	priorities.push_back(make_condition("emergency", true));
+	priorities.push_back(make_wait(2));
+	REQUIRE(bt->set_tree(make_composite("reactive_selector", priorities)));
+	CHECK(bt->tick() == BehaviorTree::RUNNING);
+	bt->set_blackboard_value("emergency", true);
+	CHECK(bt->tick() == BehaviorTree::SUCCESS);
+	bt->set_blackboard_value("emergency", false);
+	CHECK(bt->tick() == BehaviorTree::RUNNING); // The interrupted wait starts fresh.
+	CHECK(bt->tick() == BehaviorTree::RUNNING);
+	CHECK(bt->tick() == BehaviorTree::SUCCESS);
+}
+
+TEST_CASE("[BehaviorTree] Reactive composites enforce the standard child limits") {
+	Ref<BehaviorTree> bt;
+	bt.instantiate();
+	ERR_PRINT_OFF;
+	CHECK_FALSE(bt->set_tree(make_composite("reactive_sequence", Array())));
+	CHECK_FALSE(bt->set_tree(make_composite("reactive_selector", Array())));
+	Array invalid_children;
+	invalid_children.push_back(make_wait(0));
+	invalid_children.push_back(123);
+	CHECK_FALSE(bt->set_tree(make_composite("reactive_selector", invalid_children)));
+	ERR_PRINT_ON;
+}
+
 } // namespace TestBehaviorTree
