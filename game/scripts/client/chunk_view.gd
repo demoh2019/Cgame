@@ -15,6 +15,7 @@ const WorldRoads = preload("res://scripts/shared/world_roads.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
+const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
@@ -168,6 +169,9 @@ var _grass_next_tile := 0
 var _grass_tiles: Array[MultiMeshInstance3D] = []
 var _grass_lod_elapsed := 0.0
 const GRASS_LOD_INTERVAL := 0.35 # Update a few times a second, not every render frame.
+var _shadow_casters: Array[Dictionary] = [] # Instanced geometry with true bounds and visual role.
+var _shadow_timer := 0.0
+const SHADOW_INTERVAL := 0.5
 static var _grass_frame := -1
 static var _grass_spent_usec := 0
 ## Runtime tuning keeps the grass LOD system intact while bounding draw distance and generation spikes.
@@ -744,6 +748,10 @@ func _build_objects(data: Dictionary) -> void:
 			instance.material_override = _ore_material(multimesh.mesh)
 		register_scenery(instance, kind)
 		add_child(instance)
+		if instance.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON and multimesh.mesh != null:
+			# The nearest tree in a MultiMesh group matters more than the chunk centre.
+			_shadow_casters.append({"node": instance, "role": "tree" if kind.begins_with("tree:") else "structure",
+				"bounds": SceneryBatches.bounds_for(multimesh.mesh, transforms)})
 		_groups[batch_id] = {"multimesh": multimesh, "index": index, "transforms": transforms}
 	_build_decor(origin, rng, data)
 	_build_windmills(windmills, origin)
@@ -854,6 +862,10 @@ func _process(delta: float) -> void:
 	if _grass_lod_elapsed >= GRASS_LOD_INTERVAL:
 		_grass_lod_elapsed = 0.0
 		_update_grass_lods()
+	_shadow_timer += delta
+	if _shadow_timer >= SHADOW_INTERVAL:
+		_shadow_timer = 0.0
+		_update_shadow_casters()
 	for sail in _sails:
 		(sail["node"] as Node3D).rotate_object_local(sail["axis"], sail["speed"] * delta)
 
@@ -883,6 +895,28 @@ func _grow_grass() -> void:
 			tile.add_to_group(GRASS_GROUP)
 			_grass_tiles.append(tile)
 		_grass_spent_usec += Time.get_ticks_usec() - started
+
+
+## Keep silhouettes while trimming shadow-map rasterization. Updates are limited to
+## twice a second and use the true world-space batch bounds (including group edges).
+func _update_shadow_casters() -> void:
+	if _shadow_casters.is_empty():
+		return
+	var view_camera: Camera3D = get_viewport().get_camera_3d()
+	if view_camera == null:
+		return
+	var eye: Vector3 = view_camera.global_position
+	for entry in _shadow_casters:
+		var caster: MultiMeshInstance3D = entry["node"]
+		if not is_instance_valid(caster):
+			continue
+		var local_bounds: AABB = entry["bounds"]
+		var world_bounds: AABB = caster.global_transform * local_bounds
+		var distance: float = ShadowBudget.distance_to_bounds_xz(eye, world_bounds)
+		var active: bool = caster.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		var desired: bool = ShadowBudget.should_cast(str(entry["role"]), distance, active)
+		if desired != active:
+			caster.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if desired else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 ## Three cached grass meshes (18 / 9 / 4 blades) keep detailed nearby grass.
@@ -1083,6 +1117,8 @@ func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary)
 			# Dense vegetation is split into camera-cullable cells, sparse props remain one draw call.
 			for decor_batch in SceneryBatches.add(self, mesh, transforms, float(entry["range"]), file.begins_with("Bush")):
 				register_scenery(decor_batch, "decor:" + file, float(entry["range"]))
+				if file.begins_with("Bush"):
+					_shadow_casters.append({"node": decor_batch, "role": "bush", "bounds": decor_batch.custom_aabb})
 	# Logs, branches, roots, scree and the odd standing stone, each where it belongs.
 	for entry in ModelCatalog.available("decor", ModelCatalog.DECOR_EXTRA):
 		var extra_mesh: Mesh = ModelCatalog.entry_mesh(entry)
