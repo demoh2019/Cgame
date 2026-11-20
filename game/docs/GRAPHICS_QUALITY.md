@@ -69,3 +69,18 @@ Based on Unreal Landscape layer blending and Unity Terrain Layers, the Poly Have
 The shader chooses the dominant weighted layers before making costly array texture fetches. Their PBR albedo and normal detail is sampled exactly as before; Ultra samples the entire blend for maximum visual fidelity. Cliff triplanar samples now use explicit gradients, preventing unstable mip selection within the conditional blending path. The new integer global `aa_terrain_layer_budget` is shared by all streamed terrain chunks and updated by the existing quality selector.
 
 The palette approximation trades off subtle texture detail in weakly weighted layers on lower presets. It does not reduce the full weight calculation, so improvements must be confirmed with a GPU profile and 1% lows rather than assumed. Benchmark wooded trails, shorelines, ruined towns and cliffs at equal camera distance and weather; compare Ultra versus High to check blend quality and ensure there are no visible seams when ranked layers change.
+
+
+## Imported foliage PBR preservation
+
+The wind-animated nature kit now copies each imported `BaseMaterial3D` surface's **roughness, metallic, specular and opt-in vertex color** to its runtime `ShaderMaterial` instead of replacing all surfaces with a fixed roughness. For authored texture maps, the shader additionally preserves:
+
+- `StandardMaterial3D` roughness and metallic texture channels (including non-red channel packing).
+- `ORMMaterial3D` occlusion/roughness/metallic packing, sampled from a single texture as R/G/B.
+- Normal maps and their strength, **only when the source surface has normals and tangents**; a missing tangent stream falls back to the imported vertex normal to avoid dark/invalid shading.
+
+Expensive normal-map sampling fades to zero between the per-preset `aa_terrain_detail_radius` and that distance plus 24 metres. Explicit texture derivatives are computed ahead of the conditional samples to keep mip levels stable. The existing wind, storm wetness, alpha scissor, cloud-shadow alignment and MultiMesh color variation are retained. No gameplay collision, world seed or networking behavior changes.
+
+This applies the same principle as layered HDRP materials: retain authored PBR response without paying full microdetail cost at a distance. It is **not** a clone of Unreal's Nanite or Unity HDRP. Validate dense trees and bushes, scanned nature meshes and fallback assets in daylight, wet weather and at night, and compare GPU frame-time percentiles on actual hardware. The source tests check texture bindings and channel masks but cannot replace a rendered screenshot or GPU benchmark.
+
+Tests: `godot --headless --path game --script res://tests/run_all.gd`, including `test_foliage_wind_lod.gd`.
