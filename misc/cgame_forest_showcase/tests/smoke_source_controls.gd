@@ -52,6 +52,12 @@ func _run() -> void:
 
     # A savegame may load a distant player position: always normalize the
     # observer to the home clearing without writing that save back to disk.
+    # Pause the autonomous drone for deterministic priority/ready ordering.
+    # Moving-actor behavior has a separate dedicated regression.
+    world.set("survey_drone_paused", true)
+    var drone := world.get_node_or_null("SurveyDroneBeacon") as Node3D
+    drone.position.x = -144.0
+    drone.position.z = 144.0
     player.call("teleport_to_ground", 0.0, 9.0,
         world.call("height_at", 0.0, 9.0))
     stream.update_streaming()
@@ -64,7 +70,8 @@ func _run() -> void:
     var survey: Dictionary = stream.get_streaming_source(SURVEY_NAME)
     var tower: Dictionary = stream.get_streaming_source(TOWER_NAME)
     if survey.get("center") != SURVEY or survey.get("load_radius") != 1 \
-            or survey.get("priority") != 80:
+            or survey.get("priority") != 80 \
+            or survey.get("node_path") != stream.get_path_to(drone):
         _fail("survey source config does not match the game controls")
         return
     if tower.get("center") != TOWER or tower.get("load_radius") != 0 \
