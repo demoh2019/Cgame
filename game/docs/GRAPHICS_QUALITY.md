@@ -180,3 +180,20 @@ The playable open world now uses a single `MultiMesh` billboard field for subtle
 The engine fork now fixes the RenderDevice MultiMesh transition from a limited visible instance count back to `-1` (all instances). This ensures GPU regions modified while hidden are reuploaded when revealed, and prevents `-1` from being used as an invalid unsigned count in indirect draw commands. The atmospheric particle batch uses this native all-visible path on Ultra; lower tiers retain fixed instance budgets without GPU buffer reallocation.
 
 The ocean shader now reuses Beer–Lambert transmission for **depth-based single-scattering color in shallow water**, with the sun color/direction shared by the real sky update. Profile strengths are 0 / 0.13 / 0.38 / 0.72 for Performance / Balanced / High / Ultra, without additional screen reads or exponential operations. The existing expensive screen refraction still runs only on Forward+ High/Ultra. See [ENGINE_MULTIMESH_WATER_SCATTERING.md](ENGINE_MULTIMESH_WATER_SCATTERING.md) for the engine C++ patch, native tests, optics detail and GPU verification protocol.
+
+## Native Forward+ wet footprints and snow-imprint PBR detail
+
+The playable local and network clients now use a single pooled native Godot
+`Decal` renderer for surface-aligned shoeprints on damp swamp/mud and
+mountain snow. Performance and Balanced have no extra projector cost;
+High caps the pool at **16** and Ultra at **32** decals. The game reuses
+three small procedurally generated RGBA/mipmapped maps (mud, snow,
+and a normal map on Ultra), queries exact terrain height under each
+step, and excludes swimming, biking, cliffs, underground interiors
+and teleporting actors. Existing tracks fade naturally after the rain
+stops, rather than disappearing on a biome/weather transition.
+
+The forked engine's `scene/3d/decal.cpp` skips redundant modulate and
+distance-fade RenderingServer submissions, a general optimization
+for any pooled fading decal. See [footprint_decals.md](footprint_decals.md)
+for renderer gates, native tests and GPU profiling.
