@@ -103,7 +103,9 @@ func _process(delta: float) -> void:
 		light.light_energy = 2.2 * power
 		# Only the closest one/two torches cast expensive realtime shadows,
 		# and only on Forward+. Compatibility remains shadowless for local lights.
-		var cast: bool = allow_shadows and updated.size() < int(profile["shadow_lights"]) and power > 0.25 and distance <= DungeonTorchCookie.shadow_distance(_quality)
+		var cast: bool = allow_shadows and \
+			updated.size() < int(profile["shadow_lights"]) and power > 0.25 and \
+			distance <= DungeonTorchCookie.shadow_distance(_quality)
 		if light.shadow_enabled != cast:
 			light.shadow_enabled = cast
 		# Godot native 360-degree cookie is bound only to already-shadowed
