@@ -81,6 +81,14 @@ private:
 	int lod_count = 4;
 	real_t lod_distance = 128.0;
 	real_t lod_pixel_error = 0.0; // Zero keeps the existing distance-based selector.
+	// Soft *shared per-process frame* CPU time slice for lazy LOD mesh builds.
+	// Zero retains eager mesh generation for old scenes and tools.
+	uint32_t mesh_build_budget_usec = 0;
+	int pending_mesh_build_count = 0;
+	static uint64_t shared_mesh_budget_frame;
+	static uint64_t shared_mesh_budget_start_usec;
+	static uint32_t shared_mesh_builds_this_frame;
+	static uint32_t shared_mesh_budget_usec;
 	bool lod_geomorph_enabled = false;
 	bool screen_space_lod_enabled = false;
 	real_t lod_reference_fov = 60.0;
@@ -117,7 +125,7 @@ private:
 	void _ensure_mesh(Chunk &r_chunk, int p_lod);
 	void _ensure_collision(Chunk &r_chunk);
 	void _update_transforms();
-	void _update_chunks();
+	void _update_chunks(bool p_ignore_mesh_budget = false);
 	bool _get_viewer_position(Vector3 &r_position) const;
 
 protected:
@@ -157,6 +165,9 @@ public:
 	int get_lod_count() const { return lod_count; }
 	void set_lod_distance(real_t p_distance);
 	void set_lod_pixel_error(real_t p_pixels);
+	void set_mesh_build_budget_usec(int p_usec);
+	int get_mesh_build_budget_usec() const { return int(mesh_build_budget_usec); }
+	int get_pending_mesh_build_count() const { return pending_mesh_build_count; }
 	real_t get_lod_pixel_error() const { return lod_pixel_error; }
 	void set_lod_geomorph_enabled(bool p_enabled);
 	bool is_lod_geomorph_enabled() const { return lod_geomorph_enabled; }

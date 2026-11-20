@@ -33,6 +33,7 @@
 TEST_FORCE_LINK(test_chunked_terrain_3d)
 
 #include "scene/3d/chunked_terrain_3d.h"
+#include "scene/3d/terrain_streaming_budget_policy.h"
 #include "scene/3d/node_3d.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
@@ -400,6 +401,41 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Native horizon AO API returns packed sk
 	REQUIRE(sky.size() == heights.size());
 	CHECK(sky[12 * 25 + 12] < real_t(0.95));
 	CHECK(sky[12 * 25 + 12] > real_t(0.10));
+}
+
+
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Time-sliced mesh streaming is starvation safe") {
+	using TerrainStreamingBudgetPolicy::may_build;
+	CHECK(may_build(500000, 0, 42)); // Legacy eager mode.
+	CHECK(may_build(500000, 1000, 0)); // Always permit the first mesh.
+	CHECK(may_build(999, 1000, 1));
+	CHECK_FALSE(may_build(1000, 1000, 1));
+	CHECK_FALSE(may_build(4000, 1000, 5));
+
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
+	CHECK(terrain->get_mesh_build_budget_usec() == 0);
+	terrain->set_mesh_build_budget_usec(-10);
+	CHECK(terrain->get_mesh_build_budget_usec() == 0);
+	terrain->set_mesh_build_budget_usec(30000);
+	CHECK(terrain->get_mesh_build_budget_usec() == 20000);
+	terrain->set_mesh_build_budget_usec(1);
+	CHECK(terrain->get_mesh_build_budget_usec() == 1);
+
+	SceneTree::get_singleton()->get_root()->add_child(terrain);
+	CHECK(terrain->get_chunk_count() == 4);
+	// First native mesh is allowed even if one 32x32 build exceeds 1 us.
+	// Other uncached meshes remain queued, not permanently discarded.
+	CHECK(terrain->get_pending_mesh_build_count() > 0);
+	CHECK(terrain->get_visible_chunk_count() < 4);
+	// Tools and explicit teleports retain their synchronous override.
+	terrain->force_update();
+	CHECK(terrain->get_pending_mesh_build_count() == 0);
+	CHECK(terrain->get_visible_chunk_count() == 4);
+	// Disabling the limiter does not rebuild meshes or affect world heights.
+	terrain->set_mesh_build_budget_usec(0);
+	CHECK(terrain->get_height_dimensions() == Vector2i(65, 65));
+	CHECK(terrain->get_chunk_count() == 4);
+	memdelete(terrain);
 }
 
 } // namespace TestChunkedTerrain3D

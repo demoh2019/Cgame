@@ -107,6 +107,18 @@
 				Returns the unit surface normal at the x and z of [param world_position].
 			</description>
 		</method>
+		<method name="get_mesh_build_budget_usec" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the opt-in CPU time slice in microseconds for uncached terrain mesh builds. Zero uses immediate mesh generation.
+			</description>
+		</method>
+		<method name="get_pending_mesh_build_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many required LOD meshes were deferred during the last automatic terrain update. The engine retries these meshes on subsequent frames, without waiting for [member update_interval]. Useful for diagnosing world-streaming hitches.
+			</description>
+		</method>
 		<method name="get_lod_pixel_error" qualifiers="const">
 			<return type="float" />
 			<description>
@@ -124,6 +136,13 @@
 			<param index="0" name="world_position" type="Vector3" />
 			<description>
 				Returns [code]true[/code] if the x and z of [param world_position] lie over the terrain.
+			</description>
+		</method>
+		<method name="set_mesh_build_budget_usec">
+			<return type="void" />
+			<param index="0" name="microseconds" type="int" />
+			<description>
+				Sets the soft per-process-frame mesh generation budget (0 to 20000 microseconds) shared by [ChunkedTerrain3D] instances on the main thread. The first uncached mesh in a frame is always allowed to complete even when it exceeds the budget, guaranteeing progress. Existing visible LOD meshes remain rendered while a replacement is deferred. A value of [code]0[/code] restores the legacy synchronous behavior; [method force_update] bypasses this automatic streaming limit.
 			</description>
 		</method>
 		<method name="set_lod_pixel_error">
@@ -195,6 +214,9 @@
 		</member>
 		<member name="lod_count" type="int" setter="set_lod_count" getter="get_lod_count" default="4">
 			Number of levels of detail. Level 0 is full detail and each further level has half the resolution.
+		</member>
+		<member name="mesh_build_budget_usec" type="int" setter="set_mesh_build_budget_usec" getter="get_mesh_build_budget_usec" default="0">
+			Main-thread CPU budget, in microseconds, for newly generated heightfield LOD meshes. When positive, generation is time-sliced over multiple process frames; the current visible LOD remains in use while a new one is built. This is a soft budget, not a hard deadline, because one mesh cannot be interrupted halfway through building. Nodes share the same per-frame clock, so the limit applies to the terrain streamer rather than separately multiplying for every loaded world chunk. The default of zero retains existing Godot scene behavior.
 		</member>
 		<member name="lod_pixel_error" type="float" setter="set_lod_pixel_error" getter="get_lod_pixel_error" default="0.0">
 			Maximum screen-space geometric deviation in pixels before a terrain chunk switches to a higher-detail mesh. Zero uses the original distance-based algorithm.
