@@ -20,7 +20,7 @@ var prefetch_enabled := true
 var proxies_enabled := true
 var hud_elapsed := 0.0
 var quality_controller = QUALITY_SCRIPT.new()
-var crossfade_controller: Node
+var crossfade_controller: CROSSFADE_SCRIPT
 
 func _ready() -> void:
     _create_lighting_and_camera()
@@ -140,9 +140,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
             if crossfade_controller != null:
                 crossfade_controller.set_transition_enabled(not crossfade_controller.enabled)
         KEY_R:
+            var retry_available := false
             for partition in [detail, distant]:
                 if partition != null and partition.has_method("retry_failed_cells"):
                     partition.call("retry_failed_cells")
+                    retry_available = true
+            if not retry_available:
+                push_warning("Retry requires the native WorldPartition3D telemetry API from PR #916.")
         KEY_Q:
             quality_controller.automatic = not quality_controller.automatic
             quality_controller.reset_sampling()
