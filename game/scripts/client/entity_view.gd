@@ -12,6 +12,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const LootLabel = preload("res://scripts/shared/loot_label.gd")
 const Ragdoll = preload("res://scripts/client/ragdoll.gd")
 const CharacterAnim = preload("res://scripts/client/character_anim.gd")
+const SnapshotSmoothing = preload("res://scripts/client/network_snapshot_smoothing.gd")
 const LootDropBounce = preload("res://scripts/client/loot_drop_bounce.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const EngineFeatures = preload("res://scripts/client/engine_features.gd")
@@ -676,7 +677,15 @@ func _sample(key: String) -> Array:
 		if _render_time >= float(older[0]):
 			var span: float = maxf(float(newer[0]) - float(older[0]), 0.001)
 			var k: float = clampf((_render_time - float(older[0])) / span, 0.0, 1.0)
-			return [(older[1] as Vector3).lerp(newer[1], k), lerp_angle(float(older[2]), float(newer[2]), k)]
+			# Bounded Hermite reconstructs smooth visual speed from the
+			# two neighboring server snapshots. Teleports and missing
+			# timestamps keep the original safe linear behavior.
+			var previous: Array = history[i - 2] if i >= 2 else []
+			var following: Array = history[i + 1] if i + 1 < history.size() else []
+			var host: Node3D = _nodes.get(key) as Node3D
+			var position: Vector3 = SnapshotSmoothing.sample_position(
+				previous, older, newer, following, k, host)
+			return [position, lerp_angle(float(older[2]), float(newer[2]), k)]
 	return [history[-1][1], history[-1][2]]
 
 
