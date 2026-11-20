@@ -49,11 +49,17 @@ varying float sheen;
 varying float grass_light_fade;
 varying vec3 tint;
 varying vec2 ground_xz;
+varying float species; // 0 fine, 1 broad, 2 seed stalk, 3 low leaf.
+varying float blade_rand;
+varying float dryness; // Per tuft, from the instance colour alpha.
 varying vec3 aa_world_grass_normal;
 void vertex() {
 	tipness = UV.y;
 	shade = UV.x; // Each blade has its own brightness.
 	tint = COLOR.rgb; // The MultiMesh instance colour (the Compatibility renderer does not pass custom data here).
+	species = floor(UV2.x * 4.0);
+	blade_rand = UV2.y;
+	dryness = clamp(1.0 - COLOR.a, 0.0, 1.0);
 	vec3 root = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
 	ground_xz = root.xz;
 	float shrink = 1.0 - smoothstep(fade_start, fade_end, length(root.xz - CAMERA_POSITION_WORLD.xz));
@@ -110,8 +116,21 @@ void vertex() {
 }
 void fragment() {
 	// The root is the colour of the ground under it; the blade gets lighter and warmer toward the sunlit tip.
-	vec3 tip = tint * 1.32 + vec3(0.04, 0.045, 0.0);
-	vec3 color = mix(tint * 1.02, tip, smoothstep(0.0, 1.0, tipness));
+	// Every blade differs a little: some yellower, some bluer, some darker.
+	vec3 base = tint * mix(vec3(0.9, 1.0, 0.86), vec3(1.1, 1.03, 0.88), blade_rand);
+	if (species > 0.5 && species < 1.5) {
+		base *= vec3(0.82, 0.92, 0.84); // Broad leaves: deeper, bluer green.
+	} else if (species > 2.5) {
+		base *= vec3(0.9, 1.04, 0.8); // Low leaves: fresh, saturated.
+	}
+	vec3 tip = base * 1.32 + vec3(0.04, 0.045, 0.0);
+	// Sun-bleached, dry tips on some blades of drier tufts; seed stalks end in a warm seed head.
+	float dry_tip = smoothstep(0.45, 1.0, tipness) * smoothstep(0.35, 0.9, dryness + blade_rand * 0.45);
+	tip = mix(tip, vec3(0.6, 0.53, 0.3), dry_tip * 0.85);
+	if (species > 1.5 && species < 2.5) {
+		tip = mix(tip, vec3(0.55, 0.45, 0.26), smoothstep(0.7, 1.0, tipness));
+	}
+	vec3 color = mix(base * 1.02, tip, smoothstep(0.0, 1.0, tipness));
 	color *= mix(0.86, 1.1, shade);
 	color *= mix(0.85, 1.0, smoothstep(0.0, 0.25, tipness)); // A little contact shade at the very bottom.
 	color += vec3(0.04, 0.05, 0.015) * sheen * tipness;
@@ -216,7 +235,15 @@ static func _value_noise(x: float, z: float) -> float:
 	return lerpf(lerpf(a, b, fx), lerpf(c, d, fx), fz)
 
 
-## One tuft: eighteen thin, curved blades leaning outwards. UV.y runs from root (0) to tip (1).
+## Blade species inside one tuft (UV2.x = species / 4): fine grass, broad sedge-like leaves,
+## tall seed stalks and low clover-like leaves. UV2.y is a per-blade random for colour.
+const SPECIES_FINE := 0
+const SPECIES_BROAD := 1
+const SPECIES_STALK := 2
+const SPECIES_LOW := 3
+
+
+## One tuft: thin, curved blades of several species leaning outwards. UV.y runs from root (0) to tip (1).
 static func clump_mesh(blades: int = 18) -> ArrayMesh:
 	blades = maxi(blades, 1)
 	if _meshes.has(blades):
@@ -225,6 +252,7 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 	rng.seed = 7331
 	var vertices := PackedVector3Array()
 	var uvs := PackedVector2Array()
+	var uv2s := PackedVector2Array()
 	var normals := PackedVector3Array()
 	var indices := PackedInt32Array()
 	for blade in blades:
@@ -233,9 +261,32 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 		var side := Vector3(-out.z, 0.0, out.x)
 		var root := out * rng.randf_range(0.0, 0.34)
 		var brightness := rng.randf()
-		var height := rng.randf_range(0.18, 0.42)
-		var lean := rng.randf_range(0.05, 0.17)
-		var width := rng.randf_range(0.022, 0.034)
+		var species := SPECIES_FINE
+		var roll := rng.randf()
+		if roll < 0.14:
+			species = SPECIES_BROAD
+		elif roll < 0.24:
+			species = SPECIES_STALK
+		elif roll < 0.3:
+			species = SPECIES_LOW
+		var height := rng.randf_range(0.16, 0.44)
+		var lean := rng.randf_range(0.04, 0.2)
+		var width := rng.randf_range(0.012, 0.03)
+		match species:
+			SPECIES_BROAD:
+				height = rng.randf_range(0.14, 0.32)
+				lean = rng.randf_range(0.12, 0.26) # Broad leaves flop outwards.
+				width = rng.randf_range(0.038, 0.062)
+			SPECIES_STALK:
+				height = rng.randf_range(0.48, 0.72)
+				lean = rng.randf_range(0.02, 0.08) # Stiff, nearly upright.
+				width = rng.randf_range(0.008, 0.014)
+			SPECIES_LOW:
+				height = rng.randf_range(0.05, 0.1)
+				lean = rng.randf_range(0.06, 0.12)
+				width = rng.randf_range(0.04, 0.06)
+				root = out * rng.randf_range(0.05, 0.3)
+		var blade_random := rng.randf()
 		var start := vertices.size()
 		# Root pair, middle pair, tip: the blade bends further out near the top.
 		var mid := root + out * lean * 0.35 + Vector3.UP * height * 0.55
@@ -245,6 +296,7 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 				[mid + side * width * 0.85, 0.55], [tip - side * width * 0.25, 1.0], [tip + side * width * 0.25, 1.0]]:
 			vertices.append(point[0])
 			uvs.append(Vector2(brightness, point[1]))
+			uv2s.append(Vector2((float(species) + 0.5) / 4.0, blade_random))
 			normals.append(Vector3.UP)
 		indices.append_array([start, start + 1, start + 2, start + 1, start + 3, start + 2, start + 2, start + 3, start + 4, start + 3, start + 5, start + 4])
 	var arrays := []
@@ -252,6 +304,7 @@ static func clump_mesh(blades: int = 18) -> ArrayMesh:
 	arrays[Mesh.ARRAY_VERTEX] = vertices
 	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2s
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var result := ArrayMesh.new()
 	result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
@@ -515,8 +568,20 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 			var to_center: Vector2 = Vector2(wx, wz) - clumps.centers[clump]
 			scale *= lerpf(1.0, 0.7, clampf(to_center.length() / (CLUMP_CELL * 0.8), 0.0, 1.0))
 			tint = tint.lerp(tint * Color(1.08, 1.1, 0.92), clumps.hues[clump] * 0.6)
-			# Taller, not wider: only the height follows the size, so tall tufts stay made of thin blades.
-			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(rng.randf_range(0.9, 1.15), scale, rng.randf_range(0.9, 1.15)))
+			# A few tufts of a different shade: dark, blue-green or straw-yellow.
+			var accent: float = rng.randf()
+			if accent < 0.07:
+				tint = tint * Color(0.78, 0.86, 0.8)
+			elif accent < 0.12:
+				tint = tint * Color(0.86, 1.0, 1.05)
+			elif accent < 0.18:
+				tint = tint.lerp(Color(0.5, 0.47, 0.25), 0.35)
+			# Drier where the ground is less lush and on beaches/mountains; per tuft.
+			var dry: float = clampf((1.0 - lush) * 0.7 + rng.randf() * 0.45 - 0.15
+				+ (0.25 if biome == "beach" or biome == "mountain" else 0.0), 0.0, 1.0)
+			# Width varies on its own: some tufts spread wide and low, others are narrow.
+			var spread: float = rng.randf_range(0.75, 1.4)
+			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(spread * rng.randf_range(0.9, 1.1), scale, spread * rng.randf_range(0.9, 1.1)))
 			var at: int = count * 16
 			buffer[at] = basis.x.x
 			buffer[at + 1] = basis.y.x
@@ -533,7 +598,7 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 			buffer[at + 12] = tint.r
 			buffer[at + 13] = tint.g
 			buffer[at + 14] = tint.b
-			buffer[at + 15] = 1.0
+			buffer[at + 15] = 1.0 - dry # Alpha carries dryness to the shader.
 			count += 1
 			low = minf(low, h)
 			high = maxf(high, h)
