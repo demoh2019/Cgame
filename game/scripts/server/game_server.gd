@@ -4012,6 +4012,9 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
 	player.dirty_character = true
+	if item_id == FoodSafety.REMEDY_ITEM:
+		return {"ok": true, "stomach_remedy": true,
+			"remaining": player.survival.food_poisoning}
 	if item_id == ProspectingChart.ITEM_ID:
 		var detected: Dictionary = ProspectingChart.public_mark(
 			player.prospect_mark, time, depleted)
