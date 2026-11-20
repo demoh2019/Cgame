@@ -126,3 +126,8 @@ aa_foliage_bush_cull={
 "type": "float",
 "value": 104.0
 }
+
+aa_ground_contact_strength={
+"type": "float",
+"value": 0.28
+}

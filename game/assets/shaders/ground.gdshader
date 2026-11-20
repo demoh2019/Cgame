@@ -1,6 +1,7 @@
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
+global uniform float aa_ground_contact_strength;
 global uniform float aa_puddle_ripple_strength;
 // Radius of full two-scale albedo and normal mapping; shared by all streamed chunks.
 global uniform float aa_terrain_detail_radius;
@@ -22,6 +23,7 @@ uniform sampler2DArray albedo_layers : source_color, filter_linear_mipmap, repea
 uniform sampler2DArray normal_layers : hint_normal, filter_linear_mipmap, repeat_enable;
 uniform sampler2D biome_map : hint_default_black, filter_linear, repeat_disable; // r forest, g swamp, b plains
 uniform sampler2D road_mask : hint_default_black, filter_linear, repeat_disable;
+uniform sampler2D contact_map : hint_default_white, filter_linear, repeat_disable;
 uniform vec2 chunk_origin = vec2(0.0);
 uniform float chunk_size = 64.0;
 uniform float biome_texels = 17.0;
@@ -361,7 +363,18 @@ void fragment() {
 	color *= 1.0 - wetness * 0.18 - puddle * 0.12;
 	// Same tint as apply_cloud_shadow(), now with one interpolated scalar per
 	// vertex instead of an additional cloud-map lookup for every fragment.
-	ALBEDO = color * mix(vec3(1.0), vec3(0.58, 0.63, 0.74), aa_vertex_cloud_shadow);
+	// Baked per-chunk ground contact AO, enabled only near the camera.
+	// White L8 mask = no shadow. Performance skips the texture read.
+	float ground_contact = 1.0;
+	if (aa_ground_contact_strength > 0.001 && detail_fade > 0.001) {
+		float contact_sample = texture(contact_map,
+			clamp(local, vec2(0.0), vec2(1.0))).r;
+		ground_contact = 1.0 - (1.0 - contact_sample)
+			* aa_ground_contact_strength * detail_fade;
+	}
+	AO = ground_contact;
+	ALBEDO = color * mix(1.0, ground_contact, 0.12)
+		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), aa_vertex_cloud_shadow);
 	// A physically plausible microfacet roughness for each existing layer.
 	// This reuses the 13 biome weights (no extra textures or VRAM).
 	float dry_roughness = (
