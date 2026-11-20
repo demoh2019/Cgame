@@ -6,6 +6,8 @@ extends Node3D
 const TILE_SIZE := 42.0
 const GRID_SIDE := 3
 const CELL_COUNT := GRID_SIDE * GRID_SIDE
+const MoteScreenSpace = preload("res://scripts/client/mote_screen_space.gd")
+
 const MAX_PER_TILE := 28
 const MAX_INSTANCES := CELL_COUNT * MAX_PER_TILE
 const UPDATE_INTERVAL := 0.25
@@ -136,6 +138,42 @@ func update_view(center: Vector3, biome: String, daylight: float,
 	_material.set_shader_parameter("pollen_strength", float(state["pollen"]))
 	_material.set_shader_parameter("fade_distance", float(state["radius"]))
 	_material.set_shader_parameter("ambient_wind", wind.limit_length(10.0))
+	_update_screen_pixel_size(center, level)
+
+
+## The fork's native camera projects a fixed pixel diameter back into world
+## units. A stock Godot build uses the same FOV/orthographic math in GDScript.
+## This runs at most 4 times/s regardless of the number of motes, and the
+## shader performs the per-particle depth correction on the GPU.
+func _update_screen_pixel_size(center: Vector3, quality: int) -> void:
+	var view_camera: Camera3D = get_viewport().get_camera_3d()
+	if view_camera == null:
+		return
+	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
+	var render_scale: float = 1.0
+	if get_viewport().scaling_3d_mode == Viewport.SCALING_3D_MODE_FSR2:
+		render_scale = clampf(get_viewport().scaling_3d_scale, 0.5, 1.0)
+	var target: float = MoteScreenSpace.target_pixels(quality, render_scale)
+	var reference_point: Vector3 = center + Vector3.UP * 2.0
+	var reference_depth: float = -(
+		view_camera.get_camera_transform().affine_inverse() * reference_point).z
+	var diameter: float = 0.0
+	if view_camera.has_method("get_world_size_for_pixel_diameter_at_position"):
+		diameter = float(view_camera.call(
+			"get_world_size_for_pixel_diameter_at_position", reference_point, target))
+	if diameter <= 0.0:
+		diameter = MoteScreenSpace.fallback_world_diameter(
+			target, viewport_size, view_camera.fov, view_camera.size,
+			view_camera.keep_aspect == Camera3D.KEEP_WIDTH,
+			view_camera.projection == Camera3D.PROJECTION_ORTHOGONAL,
+			reference_depth)
+	diameter = MoteScreenSpace.safe_diameter(diameter)
+	if diameter <= 0.0:
+		return
+	_material.set_shader_parameter("mote_world_size_at_reference", diameter)
+	_material.set_shader_parameter("mote_reference_depth", maxf(reference_depth, 0.1))
+	_material.set_shader_parameter("mote_orthographic",
+		view_camera.projection == Camera3D.PROJECTION_ORTHOGONAL)
 
 
 ## One heightmap query per new mote only. Returning across a chunk boundary
