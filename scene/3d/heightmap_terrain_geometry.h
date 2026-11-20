@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/math/aabb.h"
+#include "core/math/color.h"
 #include "core/math/vector2.h"
 #include "core/math/vector3.h"
 #include "core/variant/variant.h"
@@ -61,6 +62,9 @@ struct Params {
 	// Optional source-grid normals, shared across LODs and terrain node borders.
 	// Kept by ChunkedTerrain3D; nullptr preserves the original height differences.
 	const Vector3 *normal_override = nullptr;
+	// Optional terrain tint/cavity vertex colors in the source grid.
+	// nullptr allocates no vertex-color buffer on older/low-end terrains.
+	const Color *color_override = nullptr;
 	// World position of sample (0, 0). Lets the terrain be centered on its node.
 	Vector2 origin;
 	// Depth of the vertical skirt that hides cracks between chunks of different detail.
@@ -70,6 +74,7 @@ struct Params {
 struct ChunkMesh {
 	PackedVector3Array vertices;
 	PackedVector3Array normals;
+	PackedColorArray colors;
 	PackedVector2Array uvs;
 	PackedInt32Array indices;
 	AABB bounds;
