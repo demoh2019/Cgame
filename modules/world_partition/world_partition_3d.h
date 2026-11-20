@@ -100,7 +100,7 @@ class WorldPartition3D : public Node3D {
 	void _update_physics_readiness();
 	void _update_navigation_readiness();
 	void _clear_navigation_cell(const Vector2i &p_cell);
-	Node * _find_navigation_region(Node *p_root) const;
+	Node *_find_navigation_region(Node *p_root) const;
 	void _refresh_source_readiness();
 	void _update_streaming_source_positions();
 	void _notification(int p_what);
