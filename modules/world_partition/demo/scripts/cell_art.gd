@@ -9,10 +9,12 @@ const TREE_COUNT := 160
 const PROXY_STRIDE := 8
 const QUEST_HUB := Vector2i(0, 0)
 const COMBAT_ARENA := Vector2i(4, 2)
+const CHAMPION_SHRINE := Vector2i(5, 3)
 
 var cell_coords: Vector2i = Vector2i(9999, 9999)
 var hub_reward_claimed := false
 var arena_wins := 0
+var champion_reward_claimed := false
 
 static var _trunk_mesh: CylinderMesh
 static var _crown_detail_mesh: SphereMesh
@@ -61,9 +63,13 @@ func _ready() -> void:
 
     # Gameplay landmarks belong to detailed scenes only. The demo's native
     # pinning API allows the hub and event arena to remain resident offscreen.
-    if not proxy and (grid == QUEST_HUB or grid == COMBAT_ARENA):
-        _add_gameplay_landmark(grid == QUEST_HUB)
-        _refresh_landmark()
+    if not proxy:
+        if grid == QUEST_HUB or grid == COMBAT_ARENA:
+            _add_gameplay_landmark(grid == QUEST_HUB)
+            _refresh_landmark()
+        elif grid == CHAMPION_SHRINE:
+            _add_champion_shrine()
+            _refresh_landmark()
 
 # The native WorldPartition3D streamer invokes these optional scene-root hooks.
 # Only gameplay cells retain state; uninteresting procedural foliage returns {}.
@@ -74,6 +80,8 @@ func capture_streaming_state() -> Dictionary:
         return {"reward_claimed": hub_reward_claimed}
     if cell_coords == COMBAT_ARENA:
         return {"arena_wins": arena_wins}
+    if cell_coords == CHAMPION_SHRINE:
+        return {"champion_reward_claimed": champion_reward_claimed}
     return {}
 
 func restore_streaming_state(state: Dictionary) -> void:
@@ -81,6 +89,8 @@ func restore_streaming_state(state: Dictionary) -> void:
         hub_reward_claimed = bool(state.get("reward_claimed", false))
     elif cell_coords == COMBAT_ARENA:
         arena_wins = maxi(0, int(state.get("arena_wins", 0)))
+    elif cell_coords == CHAMPION_SHRINE:
+        champion_reward_claimed = bool(state.get("champion_reward_claimed", false))
     _refresh_landmark()
 
 func claim_hub_reward() -> bool:
@@ -97,6 +107,13 @@ func win_arena_round() -> int:
     _refresh_landmark()
     return arena_wins
 
+func claim_champion_reward() -> bool:
+    if proxy or cell_coords != CHAMPION_SHRINE or champion_reward_claimed:
+        return false
+    champion_reward_claimed = true
+    _refresh_landmark()
+    return true
+
 func _refresh_landmark() -> void:
     if cell_coords == QUEST_HUB:
         var label := get_node_or_null("QuestHub/StateLabel") as Label3D
@@ -106,6 +123,37 @@ func _refresh_landmark() -> void:
         var label := get_node_or_null("CombatArena/StateLabel") as Label3D
         if label != null:
             label.text = "ARENA WINS: %d  [B]" % arena_wins
+    elif cell_coords == CHAMPION_SHRINE:
+        var label := get_node_or_null("ChampionShrine/StateLabel") as Label3D
+        if label != null:
+            label.text = "CHAMPION REWARD CLAIMED" if champion_reward_claimed else "CHAMPION REWARD  [V]"
+
+func _add_champion_shrine() -> void:
+    var anchor := Node3D.new()
+    anchor.name = "ChampionShrine"
+    anchor.position = Vector3(CELL_SIZE * 0.5, 0.0, CELL_SIZE * 0.5)
+    add_child(anchor)
+    var monument := MeshInstance3D.new()
+    monument.name = "Monument"
+    var shape := CylinderMesh.new()
+    shape.height = 16.0
+    shape.top_radius = 0.9
+    shape.bottom_radius = 2.5
+    var material := StandardMaterial3D.new()
+    material.albedo_color = Color(0.55, 0.20, 0.93)
+    material.emission_enabled = true
+    material.emission = material.albedo_color
+    material.emission_energy_multiplier = 1.8
+    shape.material = material
+    monument.mesh = shape
+    monument.position.y = 8.0
+    anchor.add_child(monument)
+    var nameplate := Label3D.new()
+    nameplate.name = "StateLabel"
+    nameplate.font_size = 64
+    nameplate.pixel_size = 0.01
+    nameplate.position.y = 19.0
+    anchor.add_child(nameplate)
 
 func _add_gameplay_landmark(is_hub: bool) -> void:
     var anchor := Node3D.new()

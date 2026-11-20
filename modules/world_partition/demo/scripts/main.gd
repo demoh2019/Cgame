@@ -7,8 +7,10 @@ const CELL_SIZE := 128.0
 const WORLD_HALF_EXTENT := 6
 const HUB_CELL := Vector2i(0, 0)
 const ARENA_CELL := Vector2i(4, 2)
+const CHAMPION_CELL := Vector2i(5, 3)
+const CHAMPION_LAYER := "champion_event"
 const COMBAT_LAYER := "combat_event"
-const COMBAT_LAYER_CELLS := [Vector2i(4, 2), Vector2i(4, 3), Vector2i(5, 2), Vector2i(5, 3)]
+const COMBAT_LAYER_CELLS := [Vector2i(4, 2), Vector2i(4, 3), Vector2i(5, 2)]
 const SAVE_PATH := "user://cgame_demo_checkpoint.dat"
 const SAVE_VERSION := 2
 const DETAIL_SCENE := "res://scenes/cell_detail.tscn"
@@ -17,6 +19,7 @@ const FLY_SCRIPT := preload("res://scripts/free_fly.gd")
 const QUALITY_SCRIPT := preload("res://scripts/streaming_quality.gd")
 const CROSSFADE_SCRIPT := preload("res://scripts/hlod_crossfade_controller.gd")
 const MANIFEST_SCRIPT := preload("res://tools/hlod_bake_manifest.gd")
+const EVENT_RULES := preload("res://scripts/world_event_rules.gd")
 
 var camera: Camera3D
 var prefetch_source: Node3D
@@ -29,6 +32,7 @@ var hud_elapsed := 0.0
 var baked_proxy_cell_count := 0
 var baked_validation_ms := 0
 var baked_manifest: Dictionary = {}
+var last_gameplay_event := "Claim the hub reward with C to unlock combat."
 var quality_controller = QUALITY_SCRIPT.new()
 var crossfade_controller: CROSSFADE_SCRIPT
 
@@ -64,8 +68,12 @@ func _ready() -> void:
     var combat_cells: Dictionary = {}
     for cell in COMBAT_LAYER_CELLS:
         combat_cells[cell] = COMBAT_LAYER
+    combat_cells[CHAMPION_CELL] = CHAMPION_LAYER
     detail.call("set_cell_layers", combat_cells)
     detail.call("set_layer_enabled", COMBAT_LAYER, false)
+    detail.call("set_layer_enabled", CHAMPION_LAYER, false)
+    detail.connect("cell_state_changed", Callable(self, "_on_cell_state_changed"))
+    detail.connect("layer_state_changed", Callable(self, "_on_layer_state_changed"))
     detail.call("pin_cell", HUB_CELL)
     if not distant.has_method("get_cell_instance") or not detail.has_method("get_cell_instance"):
         push_error("Cgame get_cell_instance API required for proxy handoff.")
@@ -176,6 +184,21 @@ func _toggle_combat_event() -> void:
     detail.call("update_streaming")
     print("Combat Event layer: %s" % ("ACTIVE" if not enabled else "INACTIVE"))
 
+func _on_cell_state_changed(cell: Vector2i, state: Dictionary) -> void:
+    var action: Dictionary = EVENT_RULES.next_event(cell, state)
+    if action.is_empty() or detail == null:
+        return
+    var layer: String = str(action["layer"])
+    # Idempotent: repeated snapshots/unloads never re-trigger the quest.
+    if not bool(detail.call("is_layer_enabled", layer)):
+        detail.call("set_layer_enabled", layer, true)
+        last_gameplay_event = str(action["message"])
+        print(last_gameplay_event)
+
+func _on_layer_state_changed(layer: String, enabled: bool) -> void:
+    # Driven by native C++ notifications, not a per-frame layer poll.
+    print("World event: %s %s" % [layer, "activated" if enabled else "deactivated"])
+
 func _gameplay_cell_root(cell: Vector2i) -> Node3D:
     if detail == null:
         return null
@@ -185,7 +208,7 @@ func _claim_hub_reward() -> void:
     var root := _gameplay_cell_root(HUB_CELL)
     if root != null and root.has_method("claim_hub_reward"):
         if bool(root.call("claim_hub_reward")):
-            print("Quest reward claimed. It now survives streaming.")
+            detail.call("set_cell_state", HUB_CELL, root.call("capture_streaming_state"))
     else:
         push_warning("Quest Hub not ready; H pins its scene.")
 
@@ -193,8 +216,18 @@ func _win_arena_round() -> void:
     var root := _gameplay_cell_root(ARENA_CELL)
     if root != null and root.has_method("win_arena_round"):
         root.call("win_arena_round")
+        detail.call("set_cell_state", ARENA_CELL, root.call("capture_streaming_state"))
     else:
         push_warning("Combat Arena not ready; T enables the combat event and G pins its scene.")
+
+func _claim_champion_reward() -> void:
+    var root := _gameplay_cell_root(CHAMPION_CELL)
+    if root != null and root.has_method("claim_champion_reward"):
+        if bool(root.call("claim_champion_reward")):
+            detail.call("set_cell_state", CHAMPION_CELL, root.call("capture_streaming_state"))
+            last_gameplay_event = "Champion shrine: unique reward claimed"
+    else:
+        push_warning("Champion shrine not loaded. Win three arena rounds, then approach (5,3).")
 
 func _save_checkpoint() -> void:
     if detail == null or camera == null:
@@ -291,6 +324,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
             _claim_hub_reward()
         KEY_B:
             _win_arena_round()
+        KEY_V:
+            _claim_champion_reward()
         KEY_K:
             _save_checkpoint()
         KEY_J:
@@ -337,10 +372,12 @@ func _update_hud() -> void:
     var hub_loaded := detail != null and bool(detail.call("is_cell_loaded", HUB_CELL))
     var arena_loaded := detail != null and bool(detail.call("is_cell_loaded", ARENA_CELL))
     var combat_active := detail != null and bool(detail.call("is_layer_enabled", COMBAT_LAYER))
+    var champion_active := detail != null and bool(detail.call("is_layer_enabled", CHAMPION_LAYER))
+    var champion_claimed := bool(_stateful_progress(CHAMPION_CELL, "champion_reward_claimed", false))
     var reward_claimed := bool(_stateful_progress(HUB_CELL, "reward_claimed", false))
     var arena_wins: int = int(_stateful_progress(ARENA_CELL, "arena_wins", 0))
     var state_count: int = int(detail.call("get_cell_state_count")) if detail != null else 0
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nT combat event layer: %s (4 cells)\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
@@ -352,6 +389,9 @@ func _update_hud() -> void:
         "ON" if arena_pinned else "OFF",
         "loaded" if arena_loaded else "away",
         "ON" if combat_active else "OFF",
+        "ON" if champion_active else "OFF",
+        "CLAIMED" if champion_claimed else "READY",
+        last_gameplay_event,
         "CLAIMED" if reward_claimed else "READY",
         arena_wins,
         state_count,

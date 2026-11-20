@@ -45,6 +45,33 @@
 
 namespace TestWorldPartition3DExtra {
 
+TEST_CASE("[WorldPartition3D] Reactive world signals are exposed to scripts") {
+	WorldPartition3D world;
+	CHECK(world.has_signal(SNAME("cell_state_changed")));
+	CHECK(world.has_signal(SNAME("layer_state_changed")));
+	CHECK(world.has_signal(SNAME("cell_loaded")));
+	CHECK(world.has_signal(SNAME("cell_unloaded")));
+}
+
+TEST_CASE("[WorldPartition3D] Layer events retain default enabled semantics") {
+	WorldPartition3D world;
+	CHECK(world.is_layer_enabled("quest"));
+	world.set_layer_enabled("quest", true);
+	CHECK(world.is_layer_enabled("quest"));
+	world.set_layer_enabled("quest", false);
+	CHECK_FALSE(world.is_layer_enabled("quest"));
+	world.set_layer_enabled("quest", false);
+	CHECK_FALSE(world.is_layer_enabled("quest"));
+	Dictionary imported;
+	imported["quest"] = false;
+	imported["arena"] = true;
+	world.set_layer_states(imported);
+	CHECK_FALSE(world.is_layer_enabled("quest"));
+	CHECK(world.is_layer_enabled("arena"));
+	world.set_layer_states(Dictionary());
+	CHECK(world.is_layer_enabled("quest"));
+}
+
 TEST_CASE("[WorldPartition3D] Layer dictionaries normalize keys and protect getters") {
 	WorldPartition3D world;
 	Dictionary membership;

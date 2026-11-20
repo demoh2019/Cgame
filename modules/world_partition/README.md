@@ -67,6 +67,44 @@ not re-register the scene.
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
 
+## Reactive streaming signals
+
+The core streamer now broadcasts these native Godot signals to subscribers:
+
+- `layer_state_changed(layer: String, enabled: bool)`: an effective runtime
+  layer transition from `set_layer_enabled()` or `set_layer_states()`.
+  Layer states default to enabled, so redundant toggles produce no event.
+- `cell_state_changed(cell: Vector2i, state: Dictionary)`: a genuinely changed
+  cached state from `set_cell_state()`, scene-root capture on unload or the
+  snapshot of a still-active cell. The payload is a defensive deep copy.
+  Bulk `load_cell_states()` replaces saved state and restores active cells
+  without emitting a separate event for each imported cell.
+
+```gdscript
+# Connect once to the native node; gameplay can respond without frame polling.
+world.layer_state_changed.connect(_on_layer_state_changed)
+world.cell_state_changed.connect(_on_cell_state_changed)
+
+func _on_cell_state_changed(cell: Vector2i, state: Dictionary) -> void:
+    if cell == Vector2i(0, 0) and state.get("reward_claimed", false):
+        world.set_layer_enabled("combat_event", true)
+
+func _on_layer_state_changed(layer: String, enabled: bool) -> void:
+    print("World layer event: ", layer, " enabled: ", enabled)
+
+# Explicit gameplay mutations should publish their new serialized state.
+var hub: Node3D = world.get_cell_instance(Vector2i(0, 0))
+if hub != null and hub.has_method("capture_streaming_state"):
+    world.set_cell_state(Vector2i(0, 0), hub.call("capture_streaming_state"))
+```
+
+The signal is not a global bus and does not observe every property of every
+`Node`. For immediate notification, gameplay writes its changed state through
+`set_cell_state()`. Otherwise it is captured when the cell unloads or the
+game saves a snapshot. This avoids per-frame tree scans, but event listeners
+should remain cheap and should not recursively trigger conflicting world
+mutations.
+
 ## Runtime Data Layers (gameplay events)
 
 Use `cell_layers` (a [Vector2i → String] dictionary) and `layer_states`
@@ -174,7 +212,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 79 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (58), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 81 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (60), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
