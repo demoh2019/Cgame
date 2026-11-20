@@ -253,6 +253,15 @@ int WorldPartition3D::get_max_instances_per_frame() const {
 	return max_instances_per_frame;
 }
 
+void WorldPartition3D::set_max_unloads_per_frame(int p_count) {
+	ERR_FAIL_COND_MSG(p_count < 1 || p_count > 128, "WorldPartition3D unload budget must be between 1 and 128.");
+	max_unloads_per_frame = p_count;
+}
+
+int WorldPartition3D::get_max_unloads_per_frame() const {
+	return max_unloads_per_frame;
+}
+
 void WorldPartition3D::set_max_concurrent_requests(int p_count) {
 	ERR_FAIL_COND_MSG(p_count < 1 || p_count > 128, "WorldPartition3D maximum concurrent requests must be between 1 and 128.");
 	max_concurrent_requests = p_count;
@@ -427,8 +436,15 @@ void WorldPartition3D::update_streaming() {
 			unload.push_back(E.key);
 		}
 	}
+	// Spreading large unload bursts across frames avoids deleting hundreds of
+	// scene hierarchies after a teleport. Explicit clears still unload all cells.
+	int removed = 0;
 	for (const Vector2i &cell : unload) {
+		if (removed >= max_unloads_per_frame) {
+			break;
+		}
 		_unload_cell(cell);
+		removed++;
 	}
 
 	Vector<Vector2i> cancel;
@@ -545,6 +561,8 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_new_requests_per_frame"), &WorldPartition3D::get_max_new_requests_per_frame);
 	ClassDB::bind_method(D_METHOD("set_max_instances_per_frame", "count"), &WorldPartition3D::set_max_instances_per_frame);
 	ClassDB::bind_method(D_METHOD("get_max_instances_per_frame"), &WorldPartition3D::get_max_instances_per_frame);
+	ClassDB::bind_method(D_METHOD("set_max_unloads_per_frame", "count"), &WorldPartition3D::set_max_unloads_per_frame);
+	ClassDB::bind_method(D_METHOD("get_max_unloads_per_frame"), &WorldPartition3D::get_max_unloads_per_frame);
 	ClassDB::bind_method(D_METHOD("set_max_concurrent_requests", "count"), &WorldPartition3D::set_max_concurrent_requests);
 	ClassDB::bind_method(D_METHOD("get_max_concurrent_requests"), &WorldPartition3D::get_max_concurrent_requests);
 	ClassDB::bind_method(D_METHOD("set_streaming_enabled", "enabled"), &WorldPartition3D::set_streaming_enabled);
@@ -580,6 +598,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "unload_radius", PROPERTY_HINT_RANGE, "0,64,1"), "set_unload_radius", "get_unload_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_new_requests_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_new_requests_per_frame", "get_max_new_requests_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instances_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_instances_per_frame", "get_max_instances_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unloads_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_unloads_per_frame", "get_max_unloads_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_requests", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_concurrent_requests", "get_max_concurrent_requests");
 
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
