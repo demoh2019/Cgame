@@ -45,7 +45,7 @@ static func at_resolution_limit(rd: bool, at_floor: bool, at_ceiling: bool,
 	var demand: float = GraphicsDynamicResolution.render_frame_seconds(
 		delta, measured_gpu_ms)
 	return (at_floor and demand >= SLOW_FRAME) or (
-		at_ceiling and demand <= FAST_FRAME)
+		at_ceiling and demand <= FAST_FRAME and delta <= FAST_FRAME)
 
 
 ## GPU timestamps are optional; Compatibility/headless falls back to frame
@@ -64,7 +64,9 @@ func sample_frame(delta: float, measured_gpu_ms: float = 0.0) -> bool:
 			if level > 0:
 				level -= 1
 				return true
-	elif demand <= FAST_FRAME:
+	elif demand <= FAST_FRAME and delta <= FAST_FRAME:
+		# A fast GPU does not justify loading more CPU-heavy scenery while
+		# simulation, navigation or network serialization is the bottleneck.
 		_fast_seconds += delta
 		_slow_seconds = 0.0
 		if _fast_seconds >= UPGRADE_AFTER:

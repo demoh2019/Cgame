@@ -44,8 +44,10 @@ func run(t) -> void:
 		"slow GPU at minimum resolution can lower scenery quality")
 	t.check(not GraphicsAutoQuality.at_resolution_limit(true, true, false, 0.04, 7.0),
 		"slow CPU with fast GPU never forces a graphics downgrade")
-	t.check(GraphicsAutoQuality.at_resolution_limit(true, false, true, 0.04, 7.0),
-		"GPU spare capacity can restore high detail even when CPU-bound")
+	t.check(not GraphicsAutoQuality.at_resolution_limit(true, false, true, 0.04, 7.0),
+		"CPU-heavy scene does not add more scenery despite fast GPU")
+	t.check(GraphicsAutoQuality.at_resolution_limit(true, false, true, 1.0 / 60.0, 7.0),
+		"when CPU and GPU are both fast, extra visual detail may be restored")
 	t.check(not GraphicsAutoQuality.at_resolution_limit(true, false, true, 1.0 / 120.0, 33.0),
 		"GPU-heavy frame does not increase quality due to fast script timing")
 	t.check(GraphicsAutoQuality.at_resolution_limit(false, false, false, 0.04),
@@ -58,17 +60,17 @@ func run(t) -> void:
 		"sustained GPU load reduces world detail despite fast CPU updates")
 	gpu_bound = GraphicsAutoQuality.new()
 	changed_gpu = false
-	for i in 240:
+	for i in 180:
 		# 25 FPS CPU-bound simulation and 7 ms GPU; preserve Balanced.
 		changed_gpu = gpu_bound.sample_frame(1.0 / 25.0, 7.0) or changed_gpu
 	t.check(not changed_gpu and gpu_bound.level == 1,
 		"slow gameplay threads cannot steal visually affordable GPU detail")
 	gpu_bound = GraphicsAutoQuality.new()
 	changed_gpu = false
-	for i in 260:
-		changed_gpu = gpu_bound.sample_frame(1.0 / 25.0, 7.0) or changed_gpu
+	for i in 560:
+		changed_gpu = gpu_bound.sample_frame(1.0 / 60.0, 7.0) or changed_gpu
 	t.check(changed_gpu and gpu_bound.level == 2,
-		"sustained GPU headroom may upgrade even with CPU-bound simulation")
+		"healthy CPU and GPU budgets can restore higher world fidelity")
 	gpu_bound = GraphicsAutoQuality.new()
 	for dt in [NAN, INF, -1.0, 0.0, 0.3]:
 		t.check(not gpu_bound.sample_frame(dt, 38.0),
