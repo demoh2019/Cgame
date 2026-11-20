@@ -301,6 +301,10 @@ static func _build_items() -> void:
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
 	# Automatically consumes one filter when drinking directly from a lake.
+	_add_item("rain_tarp", {"name": "Expedition Rain Catcher", "kind": "rain_catcher",
+		"stack": 5, "weight": 1.1, "value": 24})
+	_add_recipe("rain_tarp", "rain_tarp", 1,
+		{"cloth_1": 2, "fiber_1": 2, "plank_1": 1}, "", 3.0)
 	_add_item("charcoal_filter", {"name": "Field Water Filter", "kind": "material",
 		"stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("charcoal_filter", "charcoal_filter", 1,

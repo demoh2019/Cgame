@@ -361,6 +361,12 @@ func _build() -> void:
 	storm_button.tooltip_text = "During real storms in full-loot regions; canceled if weather changes. No bait used."
 	storm_button.pressed.connect(func() -> void: client.fish(false, true))
 	inventory_box.add_child(storm_button)
+	var rain_button := Button.new()
+	rain_button.name = "CollectStormWater"
+	rain_button.text = "Collect rainwater (1 crafted tarp -> 2 bottles)"
+	rain_button.tooltip_text = "Outdoors in a storm; swamps also consume 1 charcoal filter. 90s cooldown."
+	rain_button.pressed.connect(func() -> void: client.collect_rain())
+	inventory_box.add_child(rain_button)
 	var cook_button := Button.new()
 	cook_button.text = "0: Quick-cook best carried fish (fire or hub)"
 	cook_button.pressed.connect(quick_cook)
@@ -987,6 +993,18 @@ func _claim_nearest_outpost_cache() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "collect_rain":
+		if bool(data.get("ok", false)):
+			say("Stormwater collected: %d clean bottles%s." % [
+				int(data.get("count", 0)),
+				" (filtered swamp rain)" if bool(data.get("filtered", false)) else ""])
+		else:
+			var reason: String = str(data.get("reason", "rejected"))
+			if reason == "cooldown":
+				say("Rain catcher: ready in %ds" % ceili(float(data.get("remaining", 0.0))))
+			else:
+				say("Rain catcher: " + reason)
+		return
 	if kind == "use" and data.has("neutralized"):
 		say("Alkali kit: cleared %d active acid pools nearby." % int(data["neutralized"]))
 		return
@@ -1268,6 +1286,9 @@ func _process(_delta: float) -> void:
 		_info_label.text += " | Historic clan siege wins: %d" % int(client.you.get("guild_siege_wins", 0))
 	if bool(client.you.get("warden_ward", false)):
 		_info_label.text += "\nWARDEN'S WARD: -15% infected wounds (nearby relic ally)"
+	var rain_remaining: float = float(client.you.get("rain_cooldown", 0.0))
+	if rain_remaining > 0.0:
+		_info_label.text += "\nRAIN CATCHER: next harvest in %ds" % ceili(rain_remaining)
 	var spore_state: Dictionary = client.you.get("spore", {})
 	if bool(spore_state.get("active", false)):
 		_info_label.text += "\nSPORE SWAMP: +%.2f infection/s | Suit filter %d%%" % [

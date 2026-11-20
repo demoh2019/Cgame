@@ -766,6 +766,13 @@ func c_refill_canteen() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_collect_rain() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "collect_rain", sim.cmd_collect_rain(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_drink() -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

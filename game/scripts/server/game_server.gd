@@ -70,6 +70,7 @@ const Fishing = preload("res://scripts/shared/fishing.gd")
 const FishingBait = preload("res://scripts/shared/fishing_bait.gd")
 const StormFishing = preload("res://scripts/shared/storm_fishing.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
+const RainHarvest = preload("res://scripts/shared/rain_harvest.gd")
 const FieldCanteen = preload("res://scripts/shared/field_canteen.gd")
 const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
@@ -127,6 +128,7 @@ class Player:
 	var guardian_timer: float = 0.0 # Session-only PvE frontline cooldown.
 	var guardian_brace: float = 0.0 # Short PvE-only defensive brace after a valid taunt.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
+	var rain_cooldown: float = 0.0 # Persisted storm water collection cooldown.
 	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
 	var meal_seconds: float = 0.0 # Remaining server-ticked cooked-fish recovery buff.
 	var meal_tier: int = 0 # Zero when no meal buff is active; never client-authored.
@@ -295,6 +297,7 @@ func character_data(player: Player) -> Dictionary:
 		"daily_bounty": player.daily_bounty.duplicate(true),
 		"renown": player.renown,
 		"rest_cooldown": player.rest_cooldown, "lake_drink_cooldown": player.lake_drink_cooldown,
+		"rain_cooldown": player.rain_cooldown,
 		"stim_cooldown": player.stim_cooldown,
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 	}
@@ -356,6 +359,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.finite_number(data.get("rest_cooldown", 0.0), 0.0, CampRest.COOLDOWN):
 		return false
 	if not SaveValidation.finite_number(data.get("lake_drink_cooldown", 0.0), 0.0, FieldWater.COOLDOWN_SECONDS):
+		return false
+	if not SaveValidation.finite_number(data.get("rain_cooldown", 0.0), 0.0, RainHarvest.COOLDOWN_SECONDS):
 		return false
 	if not SaveValidation.finite_number(data.get("stim_cooldown", 0.0), 0.0, FrontierStim.COOLDOWN):
 		return false
@@ -432,6 +437,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.arena_losses = int(data.get("arena_losses", 0))
 	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
 	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
+	player.rain_cooldown = float(data.get("rain_cooldown", 0.0))
 	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
 	player.meal_seconds = float(data.get("meal_seconds", 0.0))
 	player.meal_tier = int(data.get("meal_tier", 0))
@@ -2211,6 +2217,31 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	return {"ok": true}
 
 
+## Convert a crafted tarp into clean bottled stormwater. The server decides
+## climate, terrain, swamp contamination, costs and output, never the client.
+func cmd_collect_rain(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.rain_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown",
+			"remaining": player.rain_cooldown}
+	var reason: String = RainHarvest.site_reason(world, player.position, time)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	var needs_filter: bool = RainHarvest.needs_filter(world, player.position)
+	var result: Dictionary = RainHarvest.transact(player.inventory, needs_filter)
+	if not bool(result.get("ok", false)):
+		return result
+	player.rain_cooldown = RainHarvest.COOLDOWN_SECONDS
+	player.dirty_inventory = true
+	player.dirty_character = true
+	events.append({"type": "rain_collected", "peer": player.id,
+		"count": RainHarvest.WATER_COUNT, "filtered": needs_filter})
+	return {"ok": true, "count": RainHarvest.WATER_COUNT,
+		"filtered": needs_filter, "cooldown": player.rain_cooldown}
+
+
 ## Lake water hydrates but can infect: clean bottles remain a risk-free alternative.
 ## Filtration is item-paid, never a free client flag or cure.
 ## Bottle clean water at an actual shore; the canteen stays in inventory,
@@ -3026,6 +3057,7 @@ func _tick_players(delta: float) -> void:
 				not GuardianTaunt.melee_equipped(player.inventory)):
 			player.guardian_brace = 0.0
 		player.lake_drink_cooldown = maxf(0.0, player.lake_drink_cooldown - maxf(0.0, delta))
+		player.rain_cooldown = maxf(0.0, player.rain_cooldown - maxf(0.0, delta))
 		player.stim_cooldown = maxf(0.0, player.stim_cooldown - maxf(0.0, delta))
 		player.decoy_timer = maxf(0.0, player.decoy_timer - maxf(0.0, delta))
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
@@ -3967,6 +3999,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"weather_insulation": Weather.protection(
 				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else ""),
 			"lake_drink_cooldown": player.lake_drink_cooldown,
+			"rain_cooldown": player.rain_cooldown,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"guardian_cooldown": player.guardian_timer,
 			"warden_ward": WardenAura.active_for(player, players, parties, world),
