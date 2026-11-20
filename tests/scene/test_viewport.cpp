@@ -80,6 +80,27 @@ TEST_CASE("[SceneTree][Light3D] atmospheric shadow values are finite and bounded
 	light.set_param(Light3D::PARAM_SHADOW_BLUR, 15.0);
 	CHECK(light.get_param(Light3D::PARAM_SHADOW_BLUR) == 10.0);
 }
+TEST_CASE("[SceneTree][Light3D] contact shadow filtering is finite and stable") {
+	DirectionalLight3D light;
+	light.set_allow_contact_shadows(false);
+	CHECK_FALSE(light.get_allow_contact_shadows());
+	light.set_allow_contact_shadows(false);
+	CHECK_FALSE(light.get_allow_contact_shadows());
+	light.set_allow_contact_shadows(true);
+	CHECK(light.get_allow_contact_shadows());
+
+	light.set_param(Light3D::PARAM_CONTACT_SHADOW_BLUR, 0.55);
+	CHECK(light.get_param(Light3D::PARAM_CONTACT_SHADOW_BLUR) == 0.55);
+	light.set_param(Light3D::PARAM_CONTACT_SHADOW_BLUR, std::numeric_limits<real_t>::quiet_NaN());
+	CHECK(light.get_param(Light3D::PARAM_CONTACT_SHADOW_BLUR) == 0.55);
+	light.set_param(Light3D::PARAM_CONTACT_SHADOW_BLUR, std::numeric_limits<real_t>::infinity());
+	CHECK(light.get_param(Light3D::PARAM_CONTACT_SHADOW_BLUR) == 0.55);
+	light.set_param(Light3D::PARAM_CONTACT_SHADOW_BLUR, -1.0);
+	CHECK(light.get_param(Light3D::PARAM_CONTACT_SHADOW_BLUR) == 0.0);
+	light.set_param(Light3D::PARAM_CONTACT_SHADOW_BLUR, 11.0);
+	CHECK(light.get_param(Light3D::PARAM_CONTACT_SHADOW_BLUR) == 10.0);
+}
+
 #endif // _3D_DISABLED
 
 TEST_CASE("[SceneTree][Viewport] mesh LOD rejects invalid screen thresholds") {
