@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "light_3d.h"
+#include "practical_shadow_cascade_policy.h"
 
 #include "core/config/engine.h"
 #include "core/config/project_settings.h"
@@ -599,6 +600,35 @@ DirectionalLight3D::ShadowMode DirectionalLight3D::get_shadow_mode() const {
 	return shadow_mode;
 }
 
+bool DirectionalLight3D::configure_practical_shadow_cascades(float p_near, float p_far, float p_lambda) {
+	// The orthographic shadow mode has no cascade boundaries to distribute.
+	if (shadow_mode == SHADOW_ORTHOGONAL) {
+		return false;
+	}
+	const int count = shadow_mode == SHADOW_PARALLEL_4_SPLITS ? 4 : 2;
+	const PracticalShadowCascades::Splits s =
+			PracticalShadowCascades::compute(p_near, p_far, p_lambda, count);
+	if (!s.valid) {
+		return false;
+	}
+	// Godot stores normalized split distances. Change only what materially
+	// differs from the current state; avoid redundant shadow RID updates.
+	if (Math::abs(get_param(PARAM_SHADOW_SPLIT_1_OFFSET) - s.one) >= 0.0005f) {
+		set_param(PARAM_SHADOW_SPLIT_1_OFFSET, s.one);
+	}
+	if (count == 4) {
+		if (Math::abs(get_param(PARAM_SHADOW_SPLIT_2_OFFSET) - s.two) >= 0.0005f) {
+			set_param(PARAM_SHADOW_SPLIT_2_OFFSET, s.two);
+		}
+		if (Math::abs(get_param(PARAM_SHADOW_SPLIT_3_OFFSET) - s.three) >= 0.0005f) {
+			set_param(PARAM_SHADOW_SPLIT_3_OFFSET, s.three);
+		}
+	}
+	// True means the plan is valid, not necessarily that it required updates:
+	// repeated preset applications must NOT revert to old static splits.
+	return true;
+}
+
 void DirectionalLight3D::set_blend_splits(bool p_enable) {
 	blend_splits = p_enable;
 	RS::get_singleton()->light_directional_set_blend_splits(light, p_enable);
@@ -640,6 +670,7 @@ void DirectionalLight3D::_validate_property(PropertyInfo &p_property) const {
 }
 
 void DirectionalLight3D::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("configure_practical_shadow_cascades", "near_plane", "far_plane", "lambda"), &DirectionalLight3D::configure_practical_shadow_cascades);
 	ClassDB::bind_method(D_METHOD("set_shadow_mode", "mode"), &DirectionalLight3D::set_shadow_mode);
 	ClassDB::bind_method(D_METHOD("get_shadow_mode"), &DirectionalLight3D::get_shadow_mode);
 
