@@ -42,12 +42,15 @@ void vertex() {
 void fragment() {
 	float t = TIME;
 	vec2 p = world_position.xz;
-	float e = 0.25;
-	float h = ripples(p, t);
-	float dx = ripples(p + vec2(e, 0.0), t) - h;
-	float dz = ripples(p + vec2(0.0, e), t) - h;
-	vec3 world_normal = normalize(vec3(-dx * ripple_strength / e, 1.0, -dz * ripple_strength / e));
-	NORMAL = normalize((VIEW_MATRIX * vec4(world_normal, 0.0)).xyz);
+	// Low-end presets omit layered animated normal noise but retain depth and Fresnel sheen.
+	if (ripple_strength > 0.001) {
+		float e = 0.25;
+		float h = ripples(p, t);
+		float dx = ripples(p + vec2(e, 0.0), t) - h;
+		float dz = ripples(p + vec2(0.0, e), t) - h;
+		vec3 world_normal = normalize(vec3(-dx * ripple_strength / e, 1.0, -dz * ripple_strength / e));
+		NORMAL = normalize((VIEW_MATRIX * vec4(world_normal, 0.0)).xyz);
+	}
 
 	float depth = textureLod(depth_tex, SCREEN_UV, 0.0).r;
 #if CURRENT_RENDERER == RENDERER_COMPATIBILITY
@@ -63,7 +66,10 @@ void fragment() {
 	vec3 color = mix(shallow_color, deep_color, depth_mix);
 	// Foam where the water gets thin, broken up by moving noise.
 	float edge = 1.0 - smoothstep(0.0, 0.9, thickness);
-	float foam_noise = value_noise(p * 3.2 + vec2(t * 0.2, -t * 0.15)) * 0.6 + value_noise(p * 7.0 - vec2(t * 0.3)) * 0.4;
+	float foam_noise = 0.6;
+	if (ripple_strength > 0.001) {
+		foam_noise = value_noise(p * 3.2 + vec2(t * 0.2, -t * 0.15)) * 0.6 + value_noise(p * 7.0 - vec2(t * 0.3)) * 0.4;
+	}
 	float foam = smoothstep(0.35, 0.75, foam_noise + edge * 0.9 - 0.55) * edge;
 	color = mix(color, vec3(0.95, 0.98, 1.0), foam);
 
