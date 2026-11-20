@@ -4,10 +4,13 @@ const ResolutionController = preload("res://addons/visual_quality/adaptive_resol
 const FilmicSky = preload("res://addons/visual_quality/filmic_sky.gdshader")
 const QualityManager = preload("res://addons/visual_quality/quality_manager.gd")
 const AtmosphereController = preload("res://addons/visual_quality/atmosphere_controller.gd")
+const ChunkedFoliage = preload("res://addons/visual_quality/foliage_chunks.gd")
+const FlyCamera = preload("res://addons/visual_quality/fly_camera.gd")
 
 var controller: AdaptiveResolution3D
 var manager: VisualQualityManager
 var atmosphere: AtmosphereController3D
+var foliage: ChunkedFoliage3D
 var sun_light: DirectionalLight3D
 var weather_label: Label
 var cycle_button: Button
@@ -31,7 +34,12 @@ func _ready() -> void:
 	manager.adaptive_controller = controller
 	manager.target_environment = world_environment
 	manager.settings_changed.connect(_update_graphics_ui)
+	manager.settings_changed.connect(_update_foliage_quality)
 	add_child(manager)
+	foliage = ChunkedFoliage.new()
+	foliage.name = "ChunkedFoliage3D"
+	add_child(foliage)
+	foliage.set_quality(manager.current_profile)
 	_build_graphics_ui()
 	_update_graphics_ui(manager.current_profile, manager.adaptive_enabled)
 	atmosphere = AtmosphereController.new()
@@ -46,9 +54,14 @@ func _ready() -> void:
 	_update_atmosphere_ui(atmosphere.hour, atmosphere.overcast)
 
 
+func _update_foliage_quality(profile: int, _adaptive: bool) -> void:
+	if is_instance_valid(foliage):
+		foliage.set_quality(profile)
+
+
 func _process(delta: float) -> void:
 	if status_label != null:
-		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s" % [
+		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Q/E height | Shift sprint | hold RMB + drag to look" % [
 			Engine.get_frames_per_second(), get_viewport().scaling_3d_scale,
 			RenderingServer.get_current_rendering_method()
 		]
@@ -166,7 +179,7 @@ func _build_world() -> void:
 
 	var floor: MeshInstance3D = MeshInstance3D.new()
 	var plane: PlaneMesh = PlaneMesh.new()
-	plane.size = Vector2(40, 40)
+	plane.size = Vector2(85, 85)
 	floor.mesh = plane
 	var floor_material: StandardMaterial3D = StandardMaterial3D.new()
 	floor_material.albedo_color = Color(0.15, 0.22, 0.24)
@@ -188,7 +201,7 @@ func _build_world() -> void:
 		object.material_override = material
 		add_child(object)
 
-	var camera: Camera3D = Camera3D.new()
+	var camera: Camera3D = FlyCamera.new()
 	camera.position = Vector3(0.0, 6.5, 19.5)
 	camera.fov = 64.0
 	add_child(camera)
