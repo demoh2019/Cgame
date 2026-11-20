@@ -94,3 +94,7 @@ This shader-level approximation uses the existing leaf albedo, tint, alpha-cutou
 A shared float `aa_leaf_transmission` is set by the existing quality profiles: **0.0 (Performance), 0.28 (Balanced), 0.48 (High), 0.68 (Ultra)**. The zero-strength Performance branch skips the leaf-mask calculation. The approximation uses Godot's built-in backlighting rather than full volumetric/subsurface scattering; it must be checked at dawn/dusk, in dense forests and in storms, on Forward+ and Compatibility backends.
 
 For actual performance validation, compare GPU median/p95 frame time on representative forest views at identical time-of-day and leaf density. Counts of texture samples alone do not establish FPS gains.
+
+## Cinematic, renderer-aware volumetric lighting
+
+The live day/night/weather rig now creates a cheap low-level **height fog** on every renderer (including default Compatibility) and adds short-range, physically based **volumetric sunlight scattering** only on Forward+ High (48 m) and Ultra (72 m). Lower tiers and renderer fallbacks never allocate the volumetric pass. Density is clamped, smoothly animated with storms and low sun, and temporal reprojection is tuned to reduce ghosting. The existing shadow-cascade module uses the same shared fog policy instead of overriding its settings. See [CINEMATIC_FOG_RENDERING.md](CINEMATIC_FOG_RENDERING.md) for GPU budgets, testing and limitations.
