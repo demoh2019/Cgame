@@ -58,6 +58,7 @@ const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const FieldScentMask = preload("res://scripts/shared/field_scent_mask.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
 const StealthStance = preload("res://scripts/shared/stealth_stance.gd")
+const StealthAmbush = preload("res://scripts/shared/stealth_ambush.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const FieldRest = preload("res://scripts/shared/field_rest.gd")
@@ -2307,8 +2308,23 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": kind == "ranged", "x": player.position.x, "z": player.position.z})
 	if hit.is_empty():
 		return {"ok": true, "hit": false}
+	# Only server-confirmed ordinary melee PvE attacks may ambush.
+	var ambush: bool = false
+	if not is_ranged and str(hit["kind"]) == "zombie":
+		var factor: float = StealthAmbush.multiplier(
+			player, zombies.get(int(hit["id"])), weapon)
+		if factor > 1.0:
+			ambush = true
+			# Avoid combining the opener with a random critical hit.
+			if crit:
+				damage /= 1.5 + player.skills.bonus("crit_damage")
+				crit = false
+			damage *= factor
+			events.append({"type": "stealth_ambush", "peer": peer_id,
+				"zombie": int(hit["id"]), "multiplier": factor})
 	_damage_target(player, hit, damage, "ranged" if is_ranged else "melee")
-	return {"ok": true, "hit": true, "target": hit["kind"], "crit": crit}
+	return {"ok": true, "hit": true, "target": hit["kind"],
+		"crit": crit, "ambush": ambush}
 
 
 ## Party frontline role: no client-authored targets, aggro, radius or damage.

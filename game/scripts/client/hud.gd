@@ -861,6 +861,9 @@ func _on_event(event: Dictionary) -> void:
 				say("You died: %s" % ("full loot" if bool(event.get("full_loot", true)) else "gear retained"))
 			else:
 				say("A survivor was killed.")
+		"stealth_ambush":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Silent ambush! +45% melee damage against unaware infected.")
 		"hit":
 			if event.get("id", -1) == client.peer_id and event.get("kind", "") == "player":
 				say("-%d health" % int(event["damage"]))

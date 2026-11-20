@@ -764,7 +764,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
 	elif event.is_action_pressed("survive_attack"):
-		_result("Attack", sim.cmd_attack(LOCAL_PLAYER_ID, _facing.x, _facing.y))
+		var attack_result: Dictionary = sim.cmd_attack(
+			LOCAL_PLAYER_ID, _facing.x, _facing.y)
+		_result("Attack", attack_result)
+		if bool(attack_result.get("ambush", false)):
+			_feedback = "Silent ambush: +45% damage against unaware infected"
 	elif event.is_action_pressed("survive_skill"):
 		_result("Weapon Skill", sim.cmd_skill(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_dodge"):
