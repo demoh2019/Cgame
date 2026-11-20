@@ -285,7 +285,9 @@ func _build_world() -> void:
 		if i % 2 == 0:
 			object.mesh = SphereMesh.new()
 		else:
-			object.mesh = BoxMesh.new()
+			var box_mesh: BoxMesh = BoxMesh.new()
+			box_mesh.size = Vector3.ONE * 2.0
+			object.mesh = box_mesh
 		object.position = Vector3(float(i - 4) * 2.15 + 1.0, 1.1, 0.0)
 		var material: StandardMaterial3D = StandardMaterial3D.new()
 		material.albedo_color = Color.from_hsv(float(i) / 8.0, 0.65, 0.85)
