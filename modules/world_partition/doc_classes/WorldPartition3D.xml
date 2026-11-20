@@ -7,7 +7,7 @@
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work. Optional predictive streaming can preload one cell ahead of the observer using [member predictive_velocity], [member predictive_lookahead_seconds], and [member predictive_max_distance]. Current cells and pinned hubs always take priority over speculative work.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries. For persistent camps or quest hubs, use [method pin_cell] and [method unpin_cell] to override distance-based unloading. At most 128 registered cells may be pinned; a disabled streamer still unloads all cells.
-		Optionally set [member detail_radius] to enable near/distant scene-detail callbacks. A cell root script must implement [code]set_streaming_lod(level)[/code], where 0 means near detail and 1 means distant. The engine invokes this method before the new root enters the tree (so its [code]_ready()[/code] can generate only the required content), and again when an existing cell changes tier. Changes are bounded by [member max_detail_transitions_per_frame]. Pinned cells always receive level 0. This does not generate simplified meshes automatically; the scene script must provide both representations.
+		Optionally set [member detail_radius] to enable near/distant scene-detail callbacks. A cell root script must implement [code]set_streaming_lod(level)[/code], where 0 means near detail and 1 means distant. The engine invokes this method before the new root enters the tree (so its [code]_ready()[/code] can generate only the required content), and again when an existing cell changes tier. Changes are bounded by [member max_detail_transitions_per_frame]. Optionally increase [member detail_hysteresis_cells] to suppress LOD oscillation while the observer moves around grid boundaries. Pinned cells always receive level 0. This does not generate simplified meshes automatically; the scene script must provide both representations.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
 		var partition := WorldPartition3D.new()
@@ -22,6 +22,19 @@
 		Streaming is disabled while editing a scene; the node processes automatically while the game runs. Call [method update_streaming] if an immediate update is required after moving the observer.
 	</description>
 	<methods>
+		<method name="set_detail_hysteresis_cells">
+			<return type="void" />
+			<param index="0" name="cells" type="int" />
+			<description>
+				Sets the extra number of cell rings (0 to 8) an already-full-detail cell can remain in level 0 before being demoted. New cells and distant-to-near promotions still use [member detail_radius]. Zero restores the original single threshold.
+			</description>
+		</method>
+		<method name="get_detail_hysteresis_cells" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of extra rings used exclusively when demoting a previously-near cell.
+			</description>
+		</method>
 		<method name="set_detail_radius">
 			<return type="void" />
 			<param index="0" name="radius" type="int" />
@@ -258,6 +271,9 @@
 		</method>
 	</methods>
 	<members>
+		<member name="detail_hysteresis_cells" type="int" setter="set_detail_hysteresis_cells" getter="get_detail_hysteresis_cells" default="0">
+			Extra cell rings tolerated before an already-near loaded scene is downgraded to distant detail. A far scene upgrades only inside [member detail_radius], reducing back-and-forth regeneration near cell boundaries. The default is 0 for backward compatibility; maximum 8. New cells always use [member detail_radius] without hysteresis.
+		</member>
 		<member name="detail_radius" type="int" setter="set_detail_radius" getter="get_detail_radius" default="-1">
 			Full-detail neighborhood radius, from -1 (disabled) through 32. Within that radius (and for pinned cells), scene roots receive detail level 0. Outside, loaded compatible scene roots receive level 1.
 		</member>
