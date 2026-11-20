@@ -1602,13 +1602,25 @@ void RendererViewport::viewport_set_measure_render_time(RID p_viewport, bool p_e
 	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
 	ERR_FAIL_NULL(viewport);
 
+	if (viewport->measure_render_time == p_enable) {
+		return;
+	}
 	viewport->measure_render_time = p_enable;
+	// Delayed GPU timestamp queries from the previous mode are not a valid
+	// new sample. Restarting Auto must wait for a complete new frame pair.
+	viewport->time_cpu_begin = 0;
+	viewport->time_cpu_end = 0;
+	viewport->time_gpu_begin = 0;
+	viewport->time_gpu_end = 0;
 }
 
 float RendererViewport::viewport_get_measured_render_time_cpu(RID p_viewport) const {
 	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
 	ERR_FAIL_NULL_V(viewport, 0);
 
+	if (!viewport->measure_render_time || viewport->time_cpu_end <= viewport->time_cpu_begin) {
+		return 0.0f;
+	}
 	return double(viewport->time_cpu_end - viewport->time_cpu_begin) / 1000.0;
 }
 
@@ -1616,7 +1628,14 @@ float RendererViewport::viewport_get_measured_render_time_gpu(RID p_viewport) co
 	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
 	ERR_FAIL_NULL_V(viewport, 0);
 
-	return double((viewport->time_gpu_end - viewport->time_gpu_begin) / 1000) / 1000.0;
+	// Missing, disabled or out-of-order timestamp queries must return zero.
+	// Unsigned subtraction of end < begin previously produced a huge fake
+	// GPU stall, incorrectly lowering the game's auto graphics quality.
+	if (!viewport->measure_render_time || viewport->time_gpu_end <= viewport->time_gpu_begin) {
+		return 0.0f;
+	}
+	// GPU timestamp units are nanoseconds; the public API expects ms.
+	return double(viewport->time_gpu_end - viewport->time_gpu_begin) / 1000000.0;
 }
 
 void RendererViewport::viewport_set_snap_2d_transforms_to_pixel(RID p_viewport, bool p_enabled) {
