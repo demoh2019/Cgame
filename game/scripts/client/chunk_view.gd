@@ -37,6 +37,8 @@ global uniform float aa_weather_rain;
 global uniform float aa_puddle_ripple_strength;
 global uniform float aa_ground_contact_strength;
 global uniform float aa_terrain_curvature_strength;
+ // GPU receives the baked horizon from existing terrain COLOR.b; no lookup.
+ global uniform float aa_terrain_horizon_ao_strength;
 global uniform float aa_terrain_detail_radius;
 instance uniform float aa_lod_morph = 0.0;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
@@ -170,8 +172,15 @@ void fragment() {
 		* aa_terrain_curvature_strength * detail_fade;
 	float ridge = clamp(COLOR.g, 0.0, 1.0)
 		* aa_terrain_curvature_strength * detail_fade;
-	AO = ground_contact * (1.0 - cavity * 0.24);
-	ALBEDO = color * (1.0 - cavity * 0.095 + ridge * 0.035)
+	// Native baked terrain horizon AO needs no extra 2D textures.
+	float sky_visibility = 1.0;
+	if (aa_terrain_horizon_ao_strength > 0.001) {
+		sky_visibility = mix(1.0, clamp(COLOR.b, 0.0, 1.0),
+			clamp(aa_terrain_horizon_ao_strength, 0.0, 1.0));
+	}
+	AO = ground_contact * (1.0 - cavity * 0.24) * sky_visibility;
+	ALBEDO = color * mix(1.0, sky_visibility, 0.10)
+		* (1.0 - cavity * 0.095 + ridge * 0.035)
 		* mix(1.0, ground_contact, 0.12)
 		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), vertex_cloud_shade);
 	// Match the same water caustic field even if 13-layer PBR assets are absent.
