@@ -57,6 +57,33 @@ func run(t) -> void:
 		z.think(world, players, 0.1, rng)
 	t.check(z.state != Zombie.State.CHASE, "safe hub prevents aggression despite gunshots")
 
+	t.current = "native EQS tactical waypoint cache for large infected groups"
+	var flanker := Zombie.new(220, "walker", Vector3.ZERO)
+	var prey := Vector2(10.0, 0.0)
+	var flank_first: Vector2 = flanker._flank_goal(Vector2.ZERO, prey)
+	if ClassDB.class_exists("EnvironmentQuery3D"):
+		t.near(flank_first.distance_to(prey), Zombie.FLANK_RING, 0.001,
+			"native top-3 flanking keeps a deterministic circle around survivor")
+		var owned_query: Resource = flanker._flank_query
+		t.check(owned_query != null, "one native query resource is cached per infected")
+		t.eq(flanker._flank_goal(Vector2(0.4, 0.0), Vector2(10.4, 0.0)),
+			flank_first, "small positional changes retain a stable flank point")
+		t.check(flanker._flank_query == owned_query,
+			"repeated movement does not allocate new native query resources")
+		var moved_prey := Vector2(12.0, 0.0)
+		t.near(flanker._flank_goal(Vector2.ZERO, moved_prey).distance_to(moved_prey),
+			Zombie.FLANK_RING, 0.001, "significant prey movement invalidates cached flank")
+		flanker._flank_replan_remaining = 0.0
+		t.check(flanker._flank_goal(Vector2.ZERO, moved_prey).is_finite(),
+			"expired tactical cache replans to finite point")
+		t.check(flanker._flank_query == owned_query,
+			"expired cache still reuses the same native query")
+	else:
+		t.eq(flank_first, prey, "stock Godot directly chases without native EQS")
+	t.eq(flanker._flank_goal(Vector2.ZERO, Vector2(2.0, 0.0)),
+		Vector2(2.0, 0.0), "close melee pursuit bypasses expensive flank scoring")
+	t.eq(flanker._flank_goal(Vector2.ZERO, Vector2(60.0, 0.0)),
+		Vector2(60.0, 0.0), "distant pursuit bypasses flank scoring")
 	t.current = "runner is faster"
 	var runner := Zombie.new(3, "runner", Vector3(0, ground, 0))
 	var walker := Zombie.new(4, "walker", Vector3(0, ground, 0))

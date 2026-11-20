@@ -18,6 +18,11 @@
 			<return type="PackedVector3Array" />
 			<description>Returns ranked points without score details.</description>
 		</method>
+		<method name="query_top_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<param index="0" name="count" type="int" />
+			<description>Returns 1–64 top-ranked positions in O(N*K) time and O(K) scratch storage, without creating result dictionaries or sorting the full candidate set. Uses identical filters, scores, stable source-index ties, and [member max_results] as [method query].</description>
+		</method>
 		<method name="sample_ring" qualifiers="static">
 			<return type="PackedVector3Array" />
 			<param index="0" name="center" type="Vector3" />

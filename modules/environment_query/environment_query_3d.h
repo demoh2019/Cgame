@@ -91,6 +91,8 @@ public:
 	// threat_distance. Descending score, ties broken by input index.
 	Array query() const;
 	PackedVector3Array query_positions() const;
+	// Bounded allocation-free-of-metadata stable top-K for frequent AI queries.
+	PackedVector3Array query_top_positions(int p_count) const;
 
 	// Generates candidates on the XZ plane. Count/size are bounded to avoid
 	// accidentally allocating millions of points in the editor.
