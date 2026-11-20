@@ -60,6 +60,11 @@ private:
 	ProcessMode mode = PROCESS_MODE_AUTOMATIC;
 	RadianceSize radiance_size = RADIANCE_SIZE_256;
 	Ref<Material> sky_material;
+	// RenderingServer resources do not necessarily share the C++ defaults.
+	// Upload once, then skip identical quality values on subsequent calls.
+	bool radiance_uploaded = false;
+	bool process_mode_uploaded = false;
+	bool material_uploaded = false;
 
 protected:
 	static void _bind_methods();
@@ -70,6 +75,10 @@ public:
 
 	void set_process_mode(ProcessMode p_mode);
 	ProcessMode get_process_mode() const;
+
+	// Quality tiers can apply both settings without redundant sky-cubemap
+	// allocations or process-mode changes on unchanged presets.
+	void configure_render_budget(RadianceSize p_size, ProcessMode p_mode);
 
 	void set_material(const Ref<Material> &p_material);
 	Ref<Material> get_material() const;
