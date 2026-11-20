@@ -254,6 +254,8 @@ const MeshLOD = preload("res://scripts/client/mesh_lod_preservation.gd")
 static var _shader: Shader
 static var _msaa_cutout_shader: Shader
 static var _coverage_enabled := false
+static var _alpha_mips_enabled := false
+static var _coverage_texture_cache: Dictionary = {} # One optimized texture per source+cutoff.
 static var _cache: Dictionary = {}
 
 
@@ -298,6 +300,76 @@ static func configure_antialiasing(enabled: bool) -> void:
 
 
 
+
+
+## Alpha coverage mipmaps keep small leaves and thin branches visible
+## after minification. FSR2 benefits too: this is independent of MSAA.
+static func alpha_mipmaps_enabled(quality: int, method: String) -> bool:
+	return quality >= 2 and method == "forward_plus"
+
+
+static func _coverage_texture(source: Texture2D, threshold: float) -> Texture2D:
+	if source == null or not _alpha_mips_enabled:
+		return source
+	# Limit the one-time CPU bake and GPU memory use on Apple Silicon.
+	# Large atlas images preserve the original streaming/import path.
+	if source.get_width() < 2 or source.get_height() < 2 or \
+			source.get_width() > 1024 or source.get_height() > 1024:
+		return source
+	var cutoff: float = clampf(threshold, 0.05, 0.95)
+	var key: String = str(source.get_instance_id()) + ":" + str(roundi(cutoff * 1000.0))
+	if _coverage_texture_cache.has(key):
+		return _coverage_texture_cache[key] as Texture2D
+	var pixels: Image = source.get_image()
+	if pixels == null:
+		_coverage_texture_cache[key] = source
+		return source
+	if pixels.is_compressed() and pixels.decompress() != OK:
+		_coverage_texture_cache[key] = source
+		return source
+	if pixels.get_format() != Image.FORMAT_RGBA8:
+		pixels.convert(Image.FORMAT_RGBA8)
+	if pixels.has_mipmaps():
+		pixels.clear_mipmaps()
+	if pixels.detect_alpha() == Image.ALPHA_NONE:
+		_coverage_texture_cache[key] = source
+		return source
+	var optimized: Image
+	if pixels.has_method("create_alpha_coverage_mipmaps"):
+		optimized = pixels.call("create_alpha_coverage_mipmaps", cutoff) as Image
+	else:
+		# Stock Godot uses the legacy coverage generator. The Cgame engine
+		# fixes its asymmetric alpha row-stride and clones source data.
+		optimized = pixels if pixels.generate_mipmaps(false, true, cutoff) == OK else null
+	var result: Texture2D = ImageTexture.create_from_image(optimized) if optimized != null else source
+	_coverage_texture_cache[key] = result
+	return result
+
+
+static func _update_alpha_mip_surface(material: ShaderMaterial) -> void:
+	if not material.has_meta("aa_cutout_original_texture"):
+		return
+	var original: Texture2D = material.get_meta("aa_cutout_original_texture") as Texture2D
+	var cutoff: float = float(material.get_meta("aa_cutout_threshold", 0.5))
+	var desired: Texture2D = _coverage_texture(original, cutoff)
+	if material.get_shader_parameter("albedo_tex") != desired:
+		material.set_shader_parameter("albedo_tex", desired)
+
+
+## Quality changes only update cached materials, never mesh geometries.
+static func configure_alpha_mipmaps(quality: int, method: String) -> void:
+	var desired: bool = alpha_mipmaps_enabled(quality, method)
+	if _alpha_mips_enabled == desired:
+		return
+	_alpha_mips_enabled = desired
+	for mesh in _cache.values():
+		if not mesh is ArrayMesh:
+			continue
+		var geometry := mesh as ArrayMesh
+		for surface in geometry.get_surface_count():
+			var material := geometry.surface_get_material(surface) as ShaderMaterial
+			if material != null:
+				_update_alpha_mip_surface(material)
 
 
 ## StandardMaterial3D can pack roughness and metallic in arbitrary channels.
@@ -383,10 +455,18 @@ static func swayed(source: Mesh, key: String, sway: float, tinted: bool = false)
 			# The kit's twisted-tree leaves (also on Bush_Common) are autumn red; this world is green, so the shader turns
 			# them green (red and green swapped keeps the shape and shading of the leaves).
 			material.set_shader_parameter("red_to_green", texture != null and texture.resource_path.ends_with("Leaves_TwistedTree_C.png"))
+			var threshold: float = standard.alpha_scissor_threshold if \
+				standard.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR else 0.5
 			if texture != null:
-				material.set_shader_parameter("albedo_tex", texture)
+				if cut:
+					# Keep source texture for exact restoration on Balanced.
+					material.set_meta("aa_cutout_original_texture", texture)
+					material.set_meta("aa_cutout_threshold", threshold)
+					material.set_shader_parameter("albedo_tex", _coverage_texture(texture, threshold))
+				else:
+					material.set_shader_parameter("albedo_tex", texture)
 			material.set_shader_parameter("cut_out", cut)
-			material.set_shader_parameter("scissor", standard.alpha_scissor_threshold if standard.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR else 0.5)
+			material.set_shader_parameter("scissor", threshold)
 			copy.surface_set_material(surface, material)
 		elif base != null:
 			copy.surface_set_material(surface, base)

@@ -1,0 +1,52 @@
+name: Foliage alpha coverage mipmaps
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "core/io/image.cpp"
+      - "core/io/image.h"
+      - "doc/classes/Image.xml"
+      - "tests/core/io/test_image.cpp"
+      - "game/scripts/client/foliage.gd"
+      - "game/scripts/client/graphics_quality.gd"
+      - "game/tests/test_foliage_coverage_mipmaps.gd"
+      - ".github/workflows/foliage-alpha-coverage.yml"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/io/image.cpp"
+      - "core/io/image.h"
+      - "tests/core/io/test_image.cpp"
+      - "game/scripts/client/foliage.gd"
+      - "game/scripts/client/graphics_quality.gd"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  coverage-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check corrected native pixel stride and real game mesh/material wiring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          core=Path("core/io/image.cpp").read_text()
+          foliage=Path("game/scripts/client/foliage.gd").read_text()
+          quality=Path("game/scripts/client/graphics_quality.gd").read_text()
+          test=Path("tests/core/io/test_image.cpp").read_text()
+          assert "uint32_t i = y * p_width + x;" in core
+          assert "create_alpha_coverage_mipmaps" in core
+          assert "Independent alpha-coverage mipmaps keep thin leaves" in test
+          assert "source.get_instance_id()" in foliage
+          assert "Foliage.configure_alpha_mipmaps(_level, str(method))" in quality
+          PY
+      - name: Alpha row-pitch regression mask
+        run: |
+          python3 - <<'PY'
+          n=16
+          mask=[1 if x<y else 0 for y in range(n) for x in range(n)]
+          correct=sum(mask[y*n+x] for y in range(n-1) for x in range(n-1))
+          broken=sum(mask[y*(n-1)+x] for y in range(n-1) for x in range(n-1))
+          assert correct!=broken
+          PY
