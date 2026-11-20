@@ -147,6 +147,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# shoreline transparency, Fresnel or the physically lit reflections.
 		water_shader.set_shader_parameter("detail_fade_start", float(world_profile["water_detail_start"]))
 		water_shader.set_shader_parameter("detail_fade_end", float(world_profile["water_detail_end"]))
+		water_shader.set_shader_parameter("shore_glimmer_strength", float(world_profile["shore_glimmer_strength"]))
+		water_shader.set_shader_parameter("shore_glimmer_fade_start", float(world_profile["shore_glimmer_start"]))
+		water_shader.set_shader_parameter("shore_glimmer_fade_end", float(world_profile["shore_glimmer_end"]))
 	if streamer != null:
 		streamer.set("load_radius", float(world_profile["chunk_radius"]))
 		streamer.set("unload_radius", float(world_profile["chunk_unload"]))
