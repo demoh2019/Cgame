@@ -382,7 +382,7 @@ func _build() -> void:
 
 	var flare_button := Button.new()
 	flare_button.name = "UseSignalFlare"
-	flare_button.text = "Light signal flare: 120s (F10 offline)"
+	flare_button.text = "Light signal flare: 120s (F2 offline)"
 	flare_button.tooltip_text = "Crafted fuel: night-only glow also alerts nearby infected."
 	flare_button.pressed.connect(func() -> void: client.use_item("signal_flare"))
 	inventory_box.add_child(flare_button)
