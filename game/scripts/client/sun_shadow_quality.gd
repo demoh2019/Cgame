@@ -20,6 +20,10 @@ static func settings(level: int, rendering_method: String) -> Dictionary:
 ## low sun, moonlight and thick cloud cover all cast weaker shadows.
 ## This does not change shadow-map count, cascade distance or quality.
 static func opacity(daylight: float, sun_height: float, storm: float) -> float:
+	# Ignore corrupt/undefined weather samples instead of forwarding NaN
+	# through the lighting pipeline. Keep existing moonlight contrast.
+	if not is_finite(daylight) or not is_finite(sun_height) or not is_finite(storm):
+		return 0.58
 	var day: float = clampf(daylight, 0.0, 1.0)
 	var cloud: float = clampf(storm, 0.0, 1.0)
 	var altitude: float = smoothstep(0.0, 0.55, clampf(sun_height, 0.0, 1.0))
