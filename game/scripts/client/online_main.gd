@@ -75,6 +75,7 @@ var demo_phase := -1.0
 var demo_storm := false
 var _wind_sample_left := 0.0
 var _visual_weather_wind := Vector2.ZERO
+var _visual_biome := "plains"
 var atmosphere
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
@@ -1152,10 +1153,12 @@ func _update_time_of_day(delta: float) -> void:
 	_wind_sample_left -= maxf(delta, 0.0)
 	if underground:
 		_visual_weather_wind = Vector2.ZERO
+		_visual_biome = "plains"
 		_wind_sample_left = 0.0
 	elif _wind_sample_left <= 0.0 and client != null and client.world != null and client.you.has("x"):
 		var here: Vector3 = client.display_position()
 		_visual_weather_wind = Weather.wind_at(client.world, here.x, here.z, clock)
+		_visual_biome = client.world.biome_at(here.x, here.z)
 		_wind_sample_left = 0.25
 	if underground:
 		# Below ground: no sky, no weather; the torches of the rooms and the light you carry.
@@ -1165,7 +1168,7 @@ func _update_time_of_day(delta: float) -> void:
 		environment.ambient_light_color = Color(0.45, 0.4, 0.34)
 		storming = false
 	else:
-		atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta, _visual_weather_wind)
+		atmosphere.update(WorldCycle.daylight(clock), WorldCycle.sun_height(clock), WorldCycle.phase(clock), storming, delta, _visual_weather_wind, _visual_biome)
 	# Time-of-day and storm grading shares the existing full-screen post material.
 	# Uniform updates are bounded and do not allocate GPU textures or new passes.
 	_grade_elapsed += maxf(delta, 0.0)

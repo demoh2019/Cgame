@@ -74,13 +74,24 @@ static func apply_profile(env: Environment, sun: DirectionalLight3D,
 ## A single fast height-fog pass on Compatibility; the optional Forward+
 ## fog combines with it only in a short, limited range.
 static func apply_weather(env: Environment, daylight: float, sun_height: float,
-		storm: float, settings: Dictionary, horizon: Color) -> void:
+		storm: float, settings: Dictionary, horizon: Color,
+		biome: Dictionary = {}) -> void:
 	if env == null:
 		return
 	var frame: Dictionary = weather(daylight, sun_height, storm, settings)
 	env.fog_height = 2.6
-	env.fog_height_density = float(frame["height_density"])
+	# The biomes modify the existing height and froxel fog, never add a pass.
+	var height_scale: float = clampf(float(biome.get("height_factor", 1.0)), 0.55, 1.45)
+	var volume_scale: float = clampf(float(biome.get("volume_factor", 1.0)), 0.65, 1.25)
+	var tint_amount: float = clampf(float(biome.get("tint_amount", 0.0)), 0.0, 0.22) * clampf(daylight, 0.0, 1.0)
+	var tint: Color = biome.get("tint", horizon)
+	env.fog_height_density = minf(float(frame["height_density"]) * height_scale, MAX_HEIGHT_DENSITY)
 	env.fog_sun_scatter = float(frame["sun_scatter"])
+	# Atmosphere sets the sky-derived base color first; this is a subtle
+	# daylight tint that does not accumulate between successive frames.
+	if not biome.is_empty():
+		env.fog_light_color = env.fog_light_color.lerp(tint, tint_amount)
 	if bool(settings.get("enabled", false)):
-		env.volumetric_fog_density = float(frame["volume_density"])
-		env.volumetric_fog_albedo = horizon.lerp(Color(0.66, 0.7, 0.73), 0.18)
+		env.volumetric_fog_density = minf(
+			float(frame["volume_density"]) * volume_scale, MAX_VOLUME_DENSITY)
+		env.volumetric_fog_albedo = horizon.lerp(Color(0.66, 0.7, 0.73), 0.18).lerp(tint, tint_amount)
