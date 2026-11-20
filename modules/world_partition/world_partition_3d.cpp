@@ -217,6 +217,24 @@ int WorldPartition3D::get_unload_radius() const {
 	return unload_radius;
 }
 
+void WorldPartition3D::set_prefetch_direction(const Vector2i &p_direction) {
+	ERR_FAIL_COND_MSG(ABS(p_direction.x) > 1 || ABS(p_direction.y) > 1, "WorldPartition3D prefetch_direction components must be -1, 0 or 1.");
+	prefetch_direction = p_direction;
+}
+
+Vector2i WorldPartition3D::get_prefetch_direction() const {
+	return prefetch_direction;
+}
+
+void WorldPartition3D::set_prefetch_distance(int p_distance) {
+	ERR_FAIL_COND_MSG(p_distance < 0 || p_distance > 4, "WorldPartition3D prefetch_distance must be between 0 and 4 cells.");
+	prefetch_distance = p_distance;
+}
+
+int WorldPartition3D::get_prefetch_distance() const {
+	return prefetch_distance;
+}
+
 void WorldPartition3D::set_max_new_requests_per_frame(int p_count) {
 	ERR_FAIL_COND_MSG(p_count < 1 || p_count > 128, "WorldPartition3D request budget must be between 1 and 128.");
 	max_new_requests_per_frame = p_count;
@@ -395,13 +413,37 @@ void WorldPartition3D::update_streaming() {
 	}
 
 	const Vector2i center = local_position_to_cell(to_local(observer->get_global_position()));
+	// Predictive prefetch is an extra directional corridor, never a replacement
+	// for the square around the observer. Overflow-safe 64-bit arithmetic also
+	// handles grids near the limits of signed Vector2i coordinates.
+	const auto prefetch_coordinate = [&](int p_step, Vector2i &r_cell) -> bool {
+		const int64_t x = int64_t(center.x) + int64_t(prefetch_direction.x) * p_step;
+		const int64_t z = int64_t(center.y) + int64_t(prefetch_direction.y) * p_step;
+		if (x < INT32_MIN || x > INT32_MAX || z < INT32_MIN || z > INT32_MAX) {
+			return false;
+		}
+		r_cell = Vector2i(int32_t(x), int32_t(z));
+		return true;
+	};
+	const auto is_prefetch_cell = [&](const Vector2i &p_cell) -> bool {
+		if (prefetch_direction == Vector2i()) {
+			return false;
+		}
+		for (int step = 1; step <= prefetch_distance; step++) {
+			Vector2i candidate;
+			if (prefetch_coordinate(step, candidate) && candidate == p_cell) {
+				return true;
+			}
+		}
+		return false;
+	};
 	const bool observer_cell_changed = !observer_cell_valid || observer_cell != center;
 	observer_cell = center;
 	observer_cell_valid = true;
 
 	Vector<Vector2i> unload;
 	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
-		if (!_within_radius(E.key, center, unload_radius) || ObjectDB::get_instance(E.value) == nullptr) {
+		if ((!_within_radius(E.key, center, unload_radius) && !is_prefetch_cell(E.key)) || ObjectDB::get_instance(E.value) == nullptr) {
 			unload.push_back(E.key);
 		}
 	}
@@ -411,7 +453,7 @@ void WorldPartition3D::update_streaming() {
 
 	Vector<Vector2i> cancel;
 	for (const KeyValue<Vector2i, String> &E : pending_cells) {
-		if (!_within_radius(E.key, center, load_radius)) {
+		if (!_within_radius(E.key, center, load_radius) && !is_prefetch_cell(E.key)) {
 			cancel.push_back(E.key);
 		}
 	}
@@ -430,62 +472,84 @@ void WorldPartition3D::update_streaming() {
 		return instances > 0 && (max_instantiation_time_ms <= 0.0 || attempted_instances == 0 ||
 				(Time::get_singleton()->get_ticks_usec() - start_usec) < uint64_t(max_instantiation_time_ms * 1000.0));
 	};
-	// Visit nearer cells first and produce a deterministic order.
+	// Observer cells always get priority; the corridor is visited only after
+	// the normal load radius. Both passes share the exact same resource, scene
+	// instantiation and wall-time budgets.
+	const auto visit_cell = [&](const Vector2i &cell) {
+		if (active_cells.has(cell) || failed_cells.has(cell)) {
+			return;
+		}
+		const String path = _get_scene_path(cell);
+		if (path.is_empty()) {
+			return;
+		}
+		if (pending_cells.has(cell)) {
+			const Ref<PackedScene> *scene = ready_scenes.getptr(path);
+			if (scene != nullptr && can_instantiate()) {
+				if (!_instantiate_cell(cell, *scene)) {
+					failed_cells.insert(cell);
+				}
+				pending_cells.erase(cell);
+				instances--;
+				attempted_instances++;
+			}
+			return;
+		}
+		if (ready_scenes.has(path)) {
+			pending_cells.insert(cell, path);
+			const Ref<PackedScene> *scene = ready_scenes.getptr(path);
+			if (scene != nullptr && can_instantiate()) {
+				if (!_instantiate_cell(cell, *scene)) {
+					failed_cells.insert(cell);
+				}
+				pending_cells.erase(cell);
+				instances--;
+				attempted_instances++;
+			}
+			return;
+		}
+		if (requested_paths.has(path)) {
+			pending_cells.insert(cell, path);
+			return;
+		}
+		if (new_requests <= 0 || requested_paths.size() >= max_concurrent_requests) {
+			return;
+		}
+		const Error err = ResourceLoader::load_threaded_request(path, "PackedScene");
+		if (err == OK) {
+			requested_paths.insert(path);
+			pending_cells.insert(cell, path);
+			new_requests--;
+		} else {
+			ERR_PRINT(vformat("WorldPartition3D: unable to request %s (%d).", path, int(err)));
+			failed_cells.insert(cell);
+		}
+	};
+
+	// Near-first and deterministic for the current observer cell.
 	for (int radius = 0; radius <= load_radius; radius++) {
 		for (int dz = -radius; dz <= radius; dz++) {
 			for (int dx = -radius; dx <= radius; dx++) {
 				if (MAX(ABS(dx), ABS(dz)) != radius) {
 					continue;
 				}
-				const Vector2i cell = center + Vector2i(dx, dz);
-				if (active_cells.has(cell) || failed_cells.has(cell)) {
+				const int64_t x = int64_t(center.x) + dx;
+				const int64_t z = int64_t(center.y) + dz;
+				if (x < INT32_MIN || x > INT32_MAX || z < INT32_MIN || z > INT32_MAX) {
 					continue;
 				}
-				const String path = _get_scene_path(cell);
-				if (path.is_empty()) {
-					continue;
-				}
-				if (pending_cells.has(cell)) {
-					const Ref<PackedScene> *scene = ready_scenes.getptr(path);
-					if (scene != nullptr && can_instantiate()) {
-						if (!_instantiate_cell(cell, *scene)) {
-							failed_cells.insert(cell);
-						}
-						pending_cells.erase(cell);
-						instances--;
-						attempted_instances++;
-					}
-					continue;
-				}
-				if (ready_scenes.has(path)) {
-					pending_cells.insert(cell, path);
-					const Ref<PackedScene> *scene = ready_scenes.getptr(path);
-					if (scene != nullptr && can_instantiate()) {
-						if (!_instantiate_cell(cell, *scene)) {
-							failed_cells.insert(cell);
-						}
-						pending_cells.erase(cell);
-						instances--;
-						attempted_instances++;
-					}
-					continue;
-				}
-				if (requested_paths.has(path)) {
-					pending_cells.insert(cell, path);
-					continue;
-				}
-				if (new_requests <= 0 || requested_paths.size() >= max_concurrent_requests) {
-					continue;
-				}
-				const Error err = ResourceLoader::load_threaded_request(path, "PackedScene");
-				if (err == OK) {
-					requested_paths.insert(path);
-					pending_cells.insert(cell, path);
-					new_requests--;
-				} else {
-					ERR_PRINT(vformat("WorldPartition3D: unable to request %s (%d).", path, int(err)));
-					failed_cells.insert(cell);
-				}
+				visit_cell(Vector2i(int32_t(x), int32_t(z)));
+			}
+		}
+	}
+
+	// Optional direction-aware corridor, including cells beyond load_radius.
+	// No duplicate requests occur: the core path checks active/pending cells.
+	if (prefetch_direction != Vector2i()) {
+		for (int step = 1; step <= prefetch_distance; step++) {
+			Vector2i ahead;
+			if (prefetch_coordinate(step, ahead) && !_within_radius(ahead, center, load_radius)) {
+				visit_cell(ahead);
 			}
 		}
 	}
@@ -555,6 +619,10 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_load_radius"), &WorldPartition3D::get_load_radius);
 	ClassDB::bind_method(D_METHOD("set_unload_radius", "radius"), &WorldPartition3D::set_unload_radius);
 	ClassDB::bind_method(D_METHOD("get_unload_radius"), &WorldPartition3D::get_unload_radius);
+	ClassDB::bind_method(D_METHOD("set_prefetch_direction", "direction"), &WorldPartition3D::set_prefetch_direction);
+	ClassDB::bind_method(D_METHOD("get_prefetch_direction"), &WorldPartition3D::get_prefetch_direction);
+	ClassDB::bind_method(D_METHOD("set_prefetch_distance", "distance"), &WorldPartition3D::set_prefetch_distance);
+	ClassDB::bind_method(D_METHOD("get_prefetch_distance"), &WorldPartition3D::get_prefetch_distance);
 	ClassDB::bind_method(D_METHOD("set_max_new_requests_per_frame", "count"), &WorldPartition3D::set_max_new_requests_per_frame);
 	ClassDB::bind_method(D_METHOD("get_max_new_requests_per_frame"), &WorldPartition3D::get_max_new_requests_per_frame);
 	ClassDB::bind_method(D_METHOD("set_max_instances_per_frame", "count"), &WorldPartition3D::set_max_instances_per_frame);
@@ -596,6 +664,8 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "observer_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Node3D"), "set_observer_path", "get_observer_path");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "load_radius", PROPERTY_HINT_RANGE, "0,32,1"), "set_load_radius", "get_load_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "unload_radius", PROPERTY_HINT_RANGE, "0,64,1"), "set_unload_radius", "get_unload_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2I, "prefetch_direction"), "set_prefetch_direction", "get_prefetch_direction");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "prefetch_distance", PROPERTY_HINT_RANGE, "0,4,1"), "set_prefetch_distance", "get_prefetch_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_new_requests_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_new_requests_per_frame", "get_max_new_requests_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instances_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_instances_per_frame", "get_max_instances_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_instantiation_time_ms", PROPERTY_HINT_RANGE, "0,100,0.1,suffix:ms"), "set_max_instantiation_time_ms", "get_max_instantiation_time_ms");
