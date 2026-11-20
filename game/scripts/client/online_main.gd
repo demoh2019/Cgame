@@ -1251,6 +1251,10 @@ func _update_time_of_day(delta: float) -> void:
 	# provide opportunities to hide other rooms behind them.
 	DungeonOcclusion.update_viewport(get_viewport(), GraphicsQuality.level(),
 		str(RenderingServer.get_current_rendering_method()), underground)
+	# A compact scene-aware leak policy for native SDFGI: extra occlusion rays
+	# are useful inside enclosed ruins but waste GPU time in open landscapes.
+	# Setter is cached and runs only when underground/graphics tier changes.
+	GraphicsQuality.update_dynamic_sdfgi(environment, underground)
 	# Stable 256m regional wind is only sampled four times per second.
 	_wind_sample_left -= maxf(delta, 0.0)
 	if underground:
