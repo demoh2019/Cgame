@@ -111,6 +111,7 @@ const SUITES := [
 	"res://tests/test_herbal_foraging.gd",
 	"res://tests/test_gathering_noise.gd",
 	"res://tests/test_ruin_survey.gd",
+	"res://tests/test_ruin_ambush.gd",
 	"res://tests/test_prospecting_chart.gd",
 	"res://tests/test_survey_signal.gd",
 	"res://tests/test_stamina.gd",
