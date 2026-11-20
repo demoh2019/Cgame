@@ -6,6 +6,7 @@ const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 
 
 func run(t) -> void:
+	test_milky_way(t)
 	t.current = "renderer and biome gated aurora quality budgets"
 	t.near(SkyAurora.strength(3, 0.0, 0.0), 0.65, 0.0001,
 		"Ultra keeps bright but bounded aurora at a clear mountain night")

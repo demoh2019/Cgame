@@ -23,4 +23,8 @@ static func milky_way_strength(level: int, daylight: float, storm: float, moon_p
 	if level < 2:
 		return 0.0
 	var moon_glare: float = 1.0 - 0.6 * clampf(1.0 - absf(moon_phase - 0.5) * 2.0, 0.0, 1.0)
-	return strength(level, daylight, storm) * moon_glare
+	if not is_finite(daylight) or not is_finite(storm):
+		return 0.0
+	var night: float = 1.0 - smoothstep(0.04, 0.3, clampf(daylight, 0.0, 1.0))
+	var clear: float = 1.0 - smoothstep(0.1, 0.6, clampf(storm, 0.0, 1.0))
+	return night * clear * moon_glare
