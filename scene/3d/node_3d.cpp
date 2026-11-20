@@ -1411,6 +1411,61 @@ bool Node3D::_property_get_revert(const StringName &p_name, Variant &r_property)
 	return true;
 }
 
+Vector3 Node3D::interpolate_network_snapshot(const Vector3 &p_from, const Vector3 &p_to,
+		const Vector3 &p_from_velocity, const Vector3 &p_to_velocity,
+		real_t p_snapshot_delta, real_t p_fraction) const {
+	// Client-render-only reconstruction of replicated poses, not physics
+	// prediction. Inputs are untrusted network snapshots; do not propagate
+	// NaNs into global transforms and broadphase/culling AABBs.
+	const bool good_from = Math::is_finite(p_from.x) && Math::is_finite(p_from.y) && Math::is_finite(p_from.z);
+	const bool good_to = Math::is_finite(p_to.x) && Math::is_finite(p_to.y) && Math::is_finite(p_to.z);
+	if (!good_from || !good_to) {
+		return good_to ? p_to : (good_from ? p_from : Vector3());
+	}
+	const real_t t = CLAMP(Math::is_finite(p_fraction) ? p_fraction : real_t(0.0),
+			real_t(0.0), real_t(1.0));
+	if (t <= real_t(0.0)) {
+		return p_from;
+	}
+	if (t >= real_t(1.0)) {
+		return p_to;
+	}
+	// Teleports, missing timestamps and delayed packets must not create an
+	// attractive but false trajectory through a mountain or a locked door.
+	if (!Math::is_finite(p_snapshot_delta) || p_snapshot_delta <= real_t(0.00001) ||
+			p_snapshot_delta > real_t(0.5) ||
+			p_from.distance_squared_to(p_to) > real_t(64.0) ||
+			!Math::is_finite(p_from_velocity.x) || !Math::is_finite(p_from_velocity.y) ||
+			!Math::is_finite(p_from_velocity.z) || !Math::is_finite(p_to_velocity.x) ||
+			!Math::is_finite(p_to_velocity.y) || !Math::is_finite(p_to_velocity.z)) {
+		return p_from.lerp(p_to, t);
+	}
+	// Monotone cubic Hermite per component. Tangent-to-secant ratios are
+	// restricted to [0, 3]; turning actors cannot overshoot endpoints and
+	// jitter around obstacles. Identical secant velocities yield linear
+	// interpolation exactly, preserving two-snapshot legacy behavior.
+	const real_t t2 = t * t;
+	const real_t t3 = t2 * t;
+	const real_t h00 = real_t(2.0) * t3 - real_t(3.0) * t2 + real_t(1.0);
+	const real_t h10 = t3 - real_t(2.0) * t2 + t;
+	const real_t h01 = real_t(-2.0) * t3 + real_t(3.0) * t2;
+	const real_t h11 = t3 - t2;
+	auto axis = [&](real_t a, real_t b, real_t va, real_t vb) {
+		const real_t chord = b - a;
+		if (Math::abs(chord) <= CMP_EPSILON) {
+			return a;
+		}
+		const real_t m0 = chord * CLAMP(va * p_snapshot_delta / chord, real_t(0.0), real_t(3.0));
+		const real_t m1 = chord * CLAMP(vb * p_snapshot_delta / chord, real_t(0.0), real_t(3.0));
+		const real_t result = h00 * a + h10 * m0 + h01 * b + h11 * m1;
+		return CLAMP(result, MIN(a, b), MAX(a, b));
+	};
+	return Vector3(
+			axis(p_from.x, p_to.x, p_from_velocity.x, p_to_velocity.x),
+			axis(p_from.y, p_to.y, p_from_velocity.y, p_to_velocity.y),
+			axis(p_from.z, p_to.z, p_from_velocity.z, p_to_velocity.z));
+}
+
 void Node3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_transform", "local"), &Node3D::set_transform);
 	ClassDB::bind_method(D_METHOD("get_transform"), &Node3D::get_transform);
@@ -1436,6 +1491,7 @@ void Node3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_global_transform_interpolated"), &Node3D::get_global_transform_interpolated);
 	ClassDB::bind_method(D_METHOD("set_global_position", "position"), &Node3D::set_global_position);
 	ClassDB::bind_method(D_METHOD("get_global_position"), &Node3D::get_global_position);
+	ClassDB::bind_method(D_METHOD("interpolate_network_snapshot", "from", "to", "from_velocity", "to_velocity", "snapshot_delta", "fraction"), &Node3D::interpolate_network_snapshot);
 	ClassDB::bind_method(D_METHOD("set_global_basis", "basis"), &Node3D::set_global_basis);
 	ClassDB::bind_method(D_METHOD("get_global_basis"), &Node3D::get_global_basis);
 	ClassDB::bind_method(D_METHOD("set_global_rotation", "euler_radians"), &Node3D::set_global_rotation);
