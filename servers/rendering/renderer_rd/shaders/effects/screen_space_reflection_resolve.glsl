@@ -41,11 +41,21 @@ void get_sample(float depth, vec3 normal, float roughness, ivec2 pixel_pos,
 	float mip_level = texelFetch(source_mip_level, safe_pixel, 0).x * 14.0;
 	color = textureLod(source_color, uv, mip_level);
 
-	// Invert the tone mapping we applied in the main trace pass.
+	// Input RGB is tone-compressed radiance premultiplied by hit
+	// confidence. Invalid rays should not become black reflections.
+	float confidence = clamp(color.a, 0.0, 1.0);
+	if (confidence <= 0.0001) {
+		color = vec4(0.0);
+		weight = 0.0;
+		return;
+	}
 	const vec3 rec709_luminance_weights = vec3(0.2126, 0.7152, 0.0722);
-	// Very bright prefiltered reflection texels can approach luma=1.
-	// Avoid Inf/NaN energy spikes when undoing the trace tonemap.
-	color.rgb /= max(1.0 - dot(color.rgb, rec709_luminance_weights), 0.01);
+	// Unpremultiply before inverting the HDR transform; otherwise
+	// partial-confidence edges lose energy and shift reflection color.
+	vec3 straight_tonemapped = color.rgb / confidence;
+	float tone_denom = max(1.0 - dot(straight_tonemapped, rec709_luminance_weights), 0.01);
+	color.rgb = (straight_tonemapped / tone_denom) * confidence;
+	color.a = confidence;
 
 	const float DEPTH_FACTOR = 2048.0;
 	const float NORMAL_FACTOR = 32.0;
@@ -60,7 +70,10 @@ void get_sample(float depth, vec3 normal, float roughness, ivec2 pixel_pos,
 	float roughness_diff = abs(roughness - sample_roughness);
 	float weight_roughness = exp(-roughness_diff * ROUGHNESS_FACTOR);
 
-	weight = weight_depth * weight_normal * weight_roughness;
+	// Prioritize genuine SSR hits within the same four-tap footprint;
+	// preserve alpha so the existing sky/probe path fills ray misses.
+	float confidence_weight = smoothstep(0.02, 0.45, confidence);
+	weight = weight_depth * weight_normal * weight_roughness * confidence_weight;
 }
 
 void main() {

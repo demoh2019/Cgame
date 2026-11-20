@@ -343,11 +343,14 @@ void main() {
 		}
 
 		if (validity > 0.0) {
-			color = vec4(textureLod(source_last_frame, reprojected_pos.xy, 0).xyz, 1.0) * validity;
-
-			// Tone map the SSR color to have smoother roughness filtering across samples with varying luminance.
+			// Encode STRAIGHT radiance in the bounded HDR domain first,
+			// then premultiply by hit confidence. Encoding premultiplied
+			// input made light brightness depend on SSR hit validity.
+			vec3 hit_radiance = textureLod(source_last_frame, reprojected_pos.xy, 0).xyz;
 			const vec3 rec709_luminance_weights = vec3(0.2126, 0.7152, 0.0722);
-			color.rgb /= 1.0 + dot(color.rgb, rec709_luminance_weights);
+			float hit_luminance = max(dot(hit_radiance, rec709_luminance_weights), 0.0);
+			vec3 toned_radiance = hit_radiance / (1.0 + hit_luminance);
+			color = vec4(toned_radiance * validity, validity);
 		}
 
 		if (roughness > 0.001) {

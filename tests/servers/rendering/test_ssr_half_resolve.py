@@ -15,6 +15,33 @@ SHADER = (
     Path(__file__).resolve().parents[3]
     / "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_resolve.glsl"
 )
+TRACE_SHADER = (
+    Path(__file__).resolve().parents[3]
+    / "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection.glsl"
+)
+
+REC709 = (0.2126, 0.7152, 0.0722)
+
+
+def encode_hit(rgb, confidence):
+    """Mirror native tone compression then alpha premultiplication."""
+    luma = sum(c * w for c, w in zip(rgb, REC709))
+    return tuple(c / (1.0 + max(luma, 0.0)) * confidence for c in rgb)
+
+
+def decode_hit(encoded, confidence):
+    """Unpremultiply tone domain before inverse HDR mapping."""
+    if confidence <= 0.0001:
+        return (0.0, 0.0, 0.0)
+    straight = tuple(c / confidence for c in encoded)
+    denom = max(1.0 - sum(c * w for c, w in zip(straight, REC709)), 0.01)
+    return tuple(c / denom * confidence for c in straight)
+
+
+def confidence_weight(alpha):
+    """Smoothstep weighting of valid SSR hits inside a bilateral footprint."""
+    x = max(0.0, min((alpha - 0.02) / (0.45 - 0.02), 1.0))
+    return x * x * (3.0 - 2.0 * x)
 
 
 def footprint(full_size, half_size, pixel):
@@ -102,11 +129,54 @@ class HalfResolutionSSRResolveTests(unittest.TestCase):
 
     def test_inverse_tonemap_guards_fp16_energy(self):
         self.assertIn(
-            "max(1.0 - dot(color.rgb, rec709_luminance_weights), 0.01)",
+            "max(1.0 - dot(straight_tonemapped, rec709_luminance_weights), 0.01)",
             self.source,
         )
         for luma in (0.0, 0.25, 0.8, 0.99, 1.0, 1.01):
             self.assertTrue(math.isfinite(1.0 / max(1.0 - luma, 0.01)))
+
+    def test_trace_premultiplies_after_hdr_compression(self):
+        source = TRACE_SHADER.read_text(encoding="utf-8")
+        self.assertIn("vec3 toned_radiance = hit_radiance / (1.0 + hit_luminance);", source)
+        self.assertIn("color = vec4(toned_radiance * validity, validity);", source)
+        self.assertNotIn("color.rgb /= 1.0 + dot(color.rgb", source)
+
+    def test_resolve_uses_hit_confidence_not_black_pixels(self):
+        self.assertIn("float confidence = clamp(color.a, 0.0, 1.0);", self.source)
+        self.assertIn("if (confidence <= 0.0001)", self.source)
+        self.assertIn("vec3 straight_tonemapped = color.rgb / confidence;", self.source)
+        self.assertIn("color.rgb = (straight_tonemapped / tone_denom) * confidence;", self.source)
+        self.assertIn("float confidence_weight = smoothstep(0.02, 0.45, confidence);", self.source)
+        self.assertIn("weight_depth * weight_normal * weight_roughness * confidence_weight", self.source)
+
+    def test_partial_alpha_hdr_roundtrip(self):
+        for rgb in ((0.0, 0.0, 0.0), (0.7, 0.2, 0.1),
+                    (2.0, 6.0, 1.0), (16.0, 4.0, 2.0)):
+            for a in (0.005, 0.05, 0.15, 0.4, 0.75, 1.0):
+                encoded = encode_hit(rgb, a)
+                result = decode_hit(encoded, a)
+                for value, original in zip(result, rgb):
+                    self.assertAlmostEqual(value, original * a, delta=1e-6)
+
+    def test_zero_hit_is_never_a_black_reflection(self):
+        for a in (0.0, 0.00001, 0.0001):
+            self.assertEqual(decode_hit((0.0, 0.0, 0.0), a), (0.0, 0.0, 0.0))
+        self.assertEqual(confidence_weight(0.0), 0.0)
+        self.assertEqual(confidence_weight(1.0), 1.0)
+        previous = -1.0
+        for i in range(101):
+            value = confidence_weight(i / 100.0)
+            self.assertTrue(0.0 <= value <= 1.0)
+            self.assertGreaterEqual(value, previous)
+            previous = value
+
+    def test_sunset_highlight_hue_remains_stable_at_ray_edges(self):
+        rgb = (9.0, 2.0, 0.4)
+        for a in (0.01, 0.12, 0.34, 1.0):
+            result = decode_hit(encode_hit(rgb, a), a)
+            self.assertAlmostEqual(result[0] / result[1], rgb[0] / rgb[1], places=6)
+            self.assertAlmostEqual(result[1] / result[2], rgb[1] / rgb[2], places=6)
+            self.assertTrue(all(math.isfinite(v) for v in result))
 
 
 if __name__ == "__main__":
