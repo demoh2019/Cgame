@@ -6,6 +6,7 @@
 	<description>
 		Equivalent of Unreal's Animation Update Rate Optimization and Unity's Animator Culling Mode. Registered [AnimationMixer] nodes are switched to [constant AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL] and advanced every frame within [member near_distance] of the active [Camera3D], every 2nd frame within [member mid_distance], every 4th within [member far_distance] and not at all beyond that or when off-screen. Skipped delta is accumulated (capped by [member max_accumulated_delta]) so animation time stays correct. Distance is measured to the nearest [Node3D] ancestor of the mixer. Mixers that are not [member AnimationMixer.active] are not advanced. Original callback modes are restored on unregistering, disabling or leaving the tree.
 		Optionally disables [SkeletonModifier3D] nodes (IK) below the mixer's root node beyond [member modifier_cull_distance] or when culled.
+		Use [method set_mixer_high_priority] to keep an important visible combat animation (raid boss telegraph or elite attack) at full rate even when it would otherwise update every 2nd or 4th frame. At most [member max_priority_mixers] such mixers are promoted during each frame; off-screen or out-of-range mixers remain culled. Prioritized visible mixers retain their SkeletonModifier3D updates. This affects presentation only; the game server must continue running gameplay, hit detection, and attack timing at its normal authoritative tick rate.
 	</description>
 	<methods>
 		<method name="clear_mixers">
@@ -16,10 +17,21 @@
 			<return type="int" />
 			<description>Returns the number of registered mixers.</description>
 		</method>
+		<method name="is_mixer_high_priority" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="mixer" type="AnimationMixer" />
+			<description>Returns the current combat-priority flag for a registered mixer, or [code]false[/code] if it is not registered.</description>
+		</method>
 		<method name="register_mixer">
 			<return type="void" />
 			<param index="0" name="mixer" type="AnimationMixer" />
 			<description>Starts managing [param mixer] (an [AnimationPlayer] or [AnimationTree]).</description>
+		</method>
+		<method name="set_mixer_high_priority">
+			<return type="void" />
+			<param index="0" name="mixer" type="AnimationMixer" />
+			<param index="1" name="priority" type="bool" />
+			<description>Marks a registered mixer as eligible for one full-rate visible combat animation slot. Repeated calls with identical values do not allocate mixers or trigger renderer work. Call this when a critical combat telegraph starts or stops; it does not alter hit detection or AI scheduling.</description>
 		</method>
 		<method name="unregister_mixer">
 			<return type="void" />
@@ -48,6 +60,9 @@
 		</member>
 		<member name="max_accumulated_delta" type="float" setter="set_max_accumulated_delta" getter="get_max_accumulated_delta" default="0.5">
 			Maximum accumulated delta in seconds passed to a single advance.
+		</member>
+		<member name="max_priority_mixers" type="int" setter="set_max_priority_mixers" getter="get_max_priority_mixers" default="8">
+			Maximum number of visible high-priority mixers that can be promoted from half/quarter rate to full rate during a frame, clamped to 0–32. A value of 0 retains regular LOD even for marked mixers. Priority does not wake up off-screen or out-of-range actors.
 		</member>
 		<member name="mid_distance" type="float" setter="set_mid_distance" getter="get_mid_distance" default="35.0">
 			Below this distance mixers update every 2nd frame.
