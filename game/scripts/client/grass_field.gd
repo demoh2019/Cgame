@@ -30,6 +30,7 @@ const SHADER_CODE := """
 shader_type spatial;
 render_mode cull_disabled, diffuse_lambert_wrap, specular_disabled, shadows_disabled;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
+global uniform float aa_weather_wetness;
 uniform float fade_start = 44.0;
 uniform float fade_end = 60.0;
 varying float tipness;
@@ -55,8 +56,9 @@ void vertex() {
 		float wave = TIME * 1.6 + root.x * 0.31 + root.z * 0.27;
 		float gust = sin(TIME * 0.7 + root.x * 0.045 + root.z * 0.03) * 0.5 + 0.5;
 		gust *= gust;
-		VERTEX.x += (sin(wave) * 0.035 + gust * 0.11) * k * shrink;
-		VERTEX.z += (cos(wave * 0.8) * 0.03 + gust * 0.05) * k * shrink;
+		float storm_wind = 1.0 + clamp(aa_weather_wetness, 0.0, 1.0) * 0.45;
+		VERTEX.x += (sin(wave) * 0.035 + gust * 0.11) * k * shrink * storm_wind;
+		VERTEX.z += (cos(wave * 0.8) * 0.03 + gust * 0.05) * k * shrink * storm_wind;
 		sheen = gust;
 	}
 	// Lit like the ground it grows from, so the carpet and the soil read as one surface.
@@ -69,7 +71,9 @@ void fragment() {
 	color *= mix(0.86, 1.1, shade);
 	color *= mix(0.85, 1.0, smoothstep(0.0, 0.25, tipness)); // A little contact shade at the very bottom.
 	color += vec3(0.04, 0.05, 0.015) * sheen * tipness;
-	ALBEDO = apply_cloud_shadow(color, ground_xz, TIME);
+	// A richer wet-grass palette at no additional texture sampling cost.
+	float wet_grass = clamp(aa_weather_wetness, 0.0, 1.0);
+	ALBEDO = apply_cloud_shadow(color * (1.0 - wet_grass * 0.16), ground_xz, TIME);
 	ROUGHNESS = 0.85;
 	// Always lit from above, whichever side of the blade we see: with two-sided blades the engine would otherwise flip
 	// the normal of every back face downward and half the meadow would turn black.
