@@ -939,3 +939,33 @@ func update_motion(delta: float) -> void:
 		_play("Jog_Fwd_Loop", clampf(speed / 4.0, 0.6, 1.5))
 	else:
 		_play("Sprint_Loop", clampf(speed / 6.5, 0.7, 1.5))
+
+
+## Diablo IV / Hades-style hit flash: every material of this character pops to
+## a white emissive glow and fades out in ~0.14 s. Reuses the per-character
+## material duplicates, so other characters are never affected.
+func hit_flash(strength: float = 1.0) -> void:
+	if _materials.is_empty():
+		return
+	var energy: float = 2.4 * clampf(strength, 0.3, 1.5)
+	for material in _materials:
+		if material == null:
+			continue
+		material.emission_enabled = true
+		material.emission = Color(1.0, 0.96, 0.9)
+		material.emission_energy_multiplier = energy
+	var tween := create_tween()
+	tween.tween_method(_set_flash_energy, energy, 0.0, 0.14).set_ease(Tween.EASE_OUT)
+	tween.tween_callback(_end_flash)
+
+
+func _set_flash_energy(value: float) -> void:
+	for material in _materials:
+		if material != null:
+			material.emission_energy_multiplier = value
+
+
+func _end_flash() -> void:
+	for material in _materials:
+		if material != null:
+			material.emission_enabled = false

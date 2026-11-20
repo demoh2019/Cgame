@@ -37,6 +37,7 @@ var _targets: Dictionary = {} # "kind:id" -> {"position": Vector3, "yaw": float}
 var _history: Dictionary = {} # "player:id" / "zombie:id" -> [[server time, position, yaw], ...] oldest first
 var _wetness_step: int = 0
 var _snapshot_time := 0.0
+var _last_hp: Dictionary = {} # "player:id" / "zombie:id" -> last seen HP, for hit flashes.
 var _render_time := -1.0
 const INTERPOLATION_DELAY := 0.12 # A little more than one snapshot interval (10 per second).
 const TELEPORT_DISTANCE := 8.0
@@ -114,6 +115,7 @@ func update_from(client) -> void:
 			_nodes.erase(key)
 			_targets.erase(key)
 			_history.erase(key)
+			_last_hp.erase(key)
 
 
 func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> void:
@@ -123,6 +125,15 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		add_child(_nodes[key])
 		_nodes[key].position = Vector3(entity["x"], entity["y"], entity["z"])
 	_targets[key] = {"position": Vector3(entity["x"], entity["y"], entity["z"]), "yaw": float(entity.get("yaw", 0.0))}
+	if (kind == "player" or kind == "zombie") and entity.has("hp"):
+		var hp: float = float(entity["hp"])
+		var before: float = float(_last_hp.get(key, hp))
+		_last_hp[key] = hp
+		if hp < before and hp > 0.0:
+			var hit_model := (_nodes[key] as Node3D).get_node_or_null("Model")
+			if hit_model != null and hit_model.has_method("hit_flash"):
+				# Bigger hits flash brighter (fraction of the pre-hit HP).
+				hit_model.hit_flash(0.5 + (before - hp) / maxf(before, 1.0) * 2.0)
 	if kind == "player" or kind == "zombie":
 		# Moving things keep a short history on the server clock; they are drawn a little in the past, between two
 		# real samples, so uneven packet arrival does not show as stutter.
