@@ -51,6 +51,7 @@ const RuinSurvey = preload("res://scripts/shared/ruin_survey.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
+const RaidRecovery = preload("res://scripts/shared/raid_recovery.gd")
 const AcidSpitter = preload("res://scripts/shared/acid_spitter.gd")
 const AcidNeutralizer = preload("res://scripts/shared/acid_neutralizer.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
@@ -212,6 +213,7 @@ var last_raid_spawn_time: float = -1000000.0
 var raid_started_at: float = 0.0
 var raid_next_slam_at: float = 0.0
 var raid_pending_slam: Dictionary = {} # World position & deadline are server-owned.
+var raid_exposed_until: float = 0.0 # Post-slam PvE counterattack window, never persisted.
 var raid_wave: int = 0 # Number of completed reinforcement phases.
 var raid_minions: Array[int] = [] # Raid-only infected are cleared with boss.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
@@ -3317,6 +3319,10 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		damage = PartyFocus.damage(damage, zombie.is_alive() and _alive(attacker) and
 			PartyFocus.in_range(attacker.position, zombie.position) and
 			parties.has_focus(attacker.id, zombie.id, time))
+		# Boss armor recovery is applied only to the current live raid boss,
+		# after an actual server-resolved slam; no PvP or other infected bonus.
+		if zombie.id == raid_boss_id:
+			damage = RaidRecovery.amplify(damage, zombie, raid_exposed_until, time)
 		# Only real, positive, server-applied hits can qualify for group XP.
 		if damage > 0.0 and zombie.is_alive() and (zombie.contributors.size() < 16 or zombie.contributors.has(attacker.id)):
 			var equipped: String = attacker.inventory.weapon
@@ -3491,6 +3497,7 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 			loot[item_id] = int(loot.get(item_id, 0)) + int(RaidEncounter.treasure(zone)[item_id])
 		raid_boss_id = -1
 		raid_pending_slam = {}
+		raid_exposed_until = 0.0
 		_clear_raid_minions()
 		raid_wave = 0
 		events.append({"type": "raid_defeated", "id": zombie.id,
@@ -3886,6 +3893,7 @@ func _tick_raid_encounter() -> void:
 		if boss == null or not boss.is_alive():
 			raid_boss_id = -1
 			raid_pending_slam = {}
+			raid_exposed_until = 0.0
 			_clear_raid_minions()
 			raid_wave = 0
 			return
@@ -3897,6 +3905,7 @@ func _tick_raid_encounter() -> void:
 				"x": at.x, "z": at.y})
 			raid_boss_id = -1
 			raid_pending_slam = {}
+			raid_exposed_until = 0.0
 			_clear_raid_minions()
 			raid_wave = 0
 			return
@@ -3952,6 +3961,7 @@ func _tick_raid_encounter() -> void:
 	raid_wave = 0
 	raid_minions.clear()
 	raid_started_at = time
+	raid_exposed_until = 0.0
 	last_raid_spawn_time = time
 	raid_next_slam_at = time + 9.0
 	events.append({"type": "raid_started", "id": spawn_id,
@@ -4011,6 +4021,11 @@ func _resolve_raid_slam(boss_id: int, center: Vector2) -> void:
 	var boss = zombies.get(boss_id)
 	if boss == null or not boss.is_alive() or not boss.raid_boss:
 		return
+	# This bonus starts after the real telegraph has resolved, even when
+	# every survivor dodged. An unrelated infected cannot trigger it.
+	var exposed_seconds: float = RaidRecovery.window_seconds(boss) if boss_id == raid_boss_id else 0.0
+	if exposed_seconds > 0.0:
+		raid_exposed_until = time + exposed_seconds
 	for survivor in players.values():
 		if not _alive(survivor) or _is_safe(survivor.position) \
 				or world.zone_at(survivor.position.x, survivor.position.z) < RaidEncounter.MIN_ZONE \
@@ -4030,7 +4045,8 @@ func _resolve_raid_slam(boss_id: int, center: Vector2) -> void:
 			_on_player_death(survivor, -boss_id)
 	events.append({"type": "raid_slam", "id": boss_id,
 		"x": center.x, "z": center.y,
-		"radius": RaidEncounter.SLAM_RADIUS})
+		"radius": RaidEncounter.SLAM_RADIUS,
+		"exposed_seconds": exposed_seconds})
 
 
 ## Night-only server raids on defended survivors. Neither clients nor
@@ -4617,6 +4633,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			nearby_zombies.append({"id": zombie.id, "type": zombie.type, "x": p.x, "y": p.y, "z": p.z, "yaw": zombie.yaw, "hp": zombie.health, "state": zombie.state,
 					"elite": zombie.elite, "raid_boss": zombie.raid_boss,
 					"raid_enraged": zombie.raid_enraged,
+					"raid_exposed_seconds": RaidRecovery.remaining(zombie, raid_exposed_until, time) if zombie.id == raid_boss_id else 0.0,
 					"max_hp": float(zombie.data.get("health", zombie.health)),
 					"snared_seconds": zombie.snared_seconds,
 					"stagger_seconds": zombie.stagger_seconds})
