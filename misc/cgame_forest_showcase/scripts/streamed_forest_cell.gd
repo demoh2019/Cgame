@@ -11,6 +11,7 @@ const ROCK_COUNT: int = 9
 
 var rng := RandomNumberGenerator.new()
 var grass: MultiMeshInstance3D
+var obstacles: StaticBody3D
 var high_quality: bool = true
 
 
@@ -18,6 +19,14 @@ func _ready() -> void:
     var cell_x: int = int(round(global_position.x / CELL_SIZE))
     var cell_z: int = int(round(global_position.z / CELL_SIZE))
     rng.seed = 913481 + cell_x * 73856093 + cell_z * 19349663
+
+    # A single static body groups primitive collision shapes for this cell.
+    # The engine unloads these shapes together with the visual vegetation.
+    obstacles = StaticBody3D.new()
+    obstacles.name = "FoliageCollisions"
+    obstacles.collision_layer = 1
+    obstacles.collision_mask = 0
+    add_child(obstacles)
     _spawn_trees()
     _spawn_grass()
     _spawn_rocks()
@@ -71,6 +80,17 @@ func _spawn_trees() -> void:
         custom.push_back(Color(rng.randf(), rng.randf(), rng.randf(), 1.0))
     _spawn_instances("TreeTrunks", trunk_mesh, trunks, custom, true, false)
     _spawn_instances("WindCanopies", foliage_mesh, crowns, custom, true, false)
+    # MultiMesh is draw-only; collision shapes must be authored separately.
+    # Keep capsule-based player collision cheap with primitive cylinders.
+    for trunk_transform in trunks:
+        var scale: float = trunk_transform.basis.y.length()
+        var cylinder := CylinderShape3D.new()
+        cylinder.radius = 0.32 * scale
+        cylinder.height = 3.8 * scale
+        var collision := CollisionShape3D.new()
+        collision.shape = cylinder
+        collision.position = trunk_transform.origin
+        obstacles.add_child(collision)
 
 
 func _spawn_grass() -> void:
@@ -116,6 +136,15 @@ func _spawn_rocks() -> void:
             Vector3(px, _world_height(px, pz) + scale * 0.15, pz)))
         custom.push_back(Color.WHITE)
     _spawn_instances("Stones", rock, transforms, custom, true, false)
+    for rock_transform in transforms:
+        var scale: float = rock_transform.basis.z.length()
+        var stone_shape := BoxShape3D.new()
+        stone_shape.size = Vector3(scale * 1.9, scale * 0.55, scale * 1.5)
+        var collision := CollisionShape3D.new()
+        collision.shape = stone_shape
+        collision.transform = Transform3D(rock_transform.basis.orthonormalized(),
+            rock_transform.origin)
+        obstacles.add_child(collision)
 
 
 func _spawn_instances(label: String, mesh: Mesh,
