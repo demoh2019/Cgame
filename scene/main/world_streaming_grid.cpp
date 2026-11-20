@@ -238,6 +238,107 @@ void prioritize_cells_for_motion(LocalVector<Vector3i> &r_cells, const Vector3 &
 	}
 }
 
+// Unreal-style view-weighted streaming sources, generalized for XZ, XY and
+// XYZ grids. Membership stays within the original player-centered radius.
+// One sort combines actual distance, capped movement prediction and a
+// conservative camera-forward bonus. This replaces (not adds) a sort.
+void prioritize_cells_for_motion_and_view(LocalVector<Vector3i> &r_cells, const Vector3 &p_focus,
+		const Vector3 &p_velocity, real_t p_lookahead_seconds, real_t p_max_prediction,
+		const Vector3 &p_view_direction, real_t p_view_weight, real_t p_cell_size, Axes p_axes) {
+	if (r_cells.size() < 2 || !p_focus.is_finite() || !Math::is_finite(p_cell_size) ||
+			!(p_cell_size > 0.0)) {
+		return;
+	}
+	if (!p_view_direction.is_finite() || !Math::is_finite(p_view_weight) ||
+			p_view_weight <= 0.0) {
+		prioritize_cells_for_motion(r_cells, p_focus, p_velocity,
+				p_lookahead_seconds, p_max_prediction, p_cell_size, p_axes);
+		return;
+	}
+	Vector3 view = p_view_direction;
+	if (p_axes == AXES_XZ) {
+		view.y = 0.0;
+	} else if (p_axes == AXES_XY) {
+		view.z = 0.0;
+	}
+	if (view.length_squared() < real_t(0.0001)) {
+		prioritize_cells_for_motion(r_cells, p_focus, p_velocity,
+				p_lookahead_seconds, p_max_prediction, p_cell_size, p_axes);
+		return;
+	}
+	view.normalize();
+	const real_t strength = CLAMP(p_view_weight, real_t(0.0), real_t(1.0));
+	Vector3 prediction;
+	if (p_velocity.is_finite() && Math::is_finite(p_lookahead_seconds) &&
+			Math::is_finite(p_max_prediction) && p_lookahead_seconds > 0.0 &&
+			p_max_prediction > 0.0) {
+		prediction = p_velocity * MIN(p_lookahead_seconds, real_t(4.0));
+		if (p_axes == AXES_XZ) {
+			prediction.y = 0.0;
+		} else if (p_axes == AXES_XY) {
+			prediction.z = 0.0;
+		}
+		if (prediction.is_finite()) {
+			const real_t cap = MIN(p_max_prediction, p_cell_size);
+			if (prediction.length_squared() > cap * cap) {
+				prediction = prediction.normalized() * cap;
+			}
+		} else {
+			prediction = Vector3();
+		}
+	}
+	const Vector3 predicted_focus = p_focus + prediction;
+	const Vector3i focus_cell = world_to_cell(p_focus, p_cell_size, p_axes);
+	struct RankedCell {
+		Vector3i cell;
+		real_t score;
+		real_t now;
+		bool operator<(const RankedCell &p_other) const {
+			if (score != p_other.score) {
+				return score < p_other.score;
+			}
+			if (now != p_other.now) {
+				return now < p_other.now;
+			}
+			if (cell.x != p_other.cell.x) {
+				return cell.x < p_other.cell.x;
+			}
+			if (cell.y != p_other.cell.y) {
+				return cell.y < p_other.cell.y;
+			}
+			return cell.z < p_other.cell.z;
+		}
+	};
+	LocalVector<RankedCell> sorted;
+	sorted.reserve(r_cells.size());
+	for (const Vector3i &cell : r_cells) {
+		const real_t now = distance_to_cell(p_focus, cell, p_cell_size, p_axes);
+		const real_t later = distance_to_cell(predicted_focus, cell, p_cell_size, p_axes);
+		Vector3 toward = cell_center(cell, p_cell_size, p_axes) - p_focus;
+		if (p_axes == AXES_XZ) {
+			toward.y = 0.0;
+		} else if (p_axes == AXES_XY) {
+			toward.z = 0.0;
+		}
+		real_t facing = 0.0;
+		if (toward.length_squared() > real_t(0.0001)) {
+			facing = MAX(toward.normalized().dot(view), real_t(0.0));
+		}
+		// At most 28% of one cell of forward bias, and at most 40%
+		// of the cell's current distance. No starvation or missing chunk
+		// suddenly jumping ahead of the cell directly beneath the player.
+		const real_t bonus = MIN(p_cell_size * real_t(0.28), now * real_t(0.4)) * facing * strength;
+		const real_t priority = cell == focus_cell ? real_t(-1.0) :
+				(now * real_t(0.65) + later * real_t(0.35) - bonus);
+		sorted.push_back({ cell, priority, now });
+	}
+	SortArray<RankedCell> sorter;
+	sorter.sort(sorted.ptr(), sorted.size());
+	for (uint32_t i = 0; i < sorted.size(); i++) {
+		r_cells[i] = sorted[i].cell;
+	}
+}
+
 void cells_to_unload(const Vector3 &p_position, real_t p_unload_radius, real_t p_cell_size, Axes p_axes, const HashSet<Vector3i> &p_loaded, LocalVector<Vector3i> &r_cells) {
 	r_cells.clear();
 	ERR_FAIL_COND(!(p_cell_size > 0.0));
