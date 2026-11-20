@@ -3367,3 +3367,27 @@ godot --headless --path game --script res://tests/run_all.gd
 
 No native engine changes needed; this uses authoritative current
 GDScript combat, group rosters and reliable multiplayer RPCs.
+
+
+## Raid guard ward: team coordination during boss waves
+
+The existing dangerous-zone boss receives temporary protection from **living
+server-spawned raid reinforcements**. Every actual surviving raid guard reduces
+incoming boss damage by **12%**, with a strict **24% cap**; killing guards
+restores normal boss damage. The mechanic works during both one-time waves,
+and any survivors from wave one still count after wave two begins. The server
+derives guard identities and health itself; neither client actions nor normal
+zombies can forge this protection. It is removed on boss victory or timeout.
+
+Nearby online clients see the number of remaining guards and mitigation in the
+existing raid HUD, derived from the authoritative enemy snapshot. The local
+preview also shows this information when the boss is nearby. New
+`raid_ward_changed` events announce real guard deaths only within the
+existing interest radius. No new RPC, save migration, or engine-level API is
+required. The combat, snapshot, event-filtering, and replay tests live in
+`game/tests/test_raid_ward.gd`, included in `game/tests/run_all.gd`.
+
+Run the test suite using:
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
