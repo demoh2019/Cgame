@@ -115,6 +115,30 @@ class StreamedTerrainContracts(TestCase):
             self.assertEqual(boundary, border)
             self.assertEqual(sum(count == 1 for count in edge_use.values()), CELLS * 4)
 
+    def test_native_directional_prefetch_contract(self) -> None:
+        """Spot-check the native engine integration as well as the GDScript client."""
+        repository = ROOT.parents[1]
+        cpp = (repository / "modules/world_partition/world_partition_3d.cpp").read_text(encoding="utf-8")
+        header = (repository / "modules/world_partition/world_partition_3d.h").read_text(encoding="utf-8")
+        xml = (repository / "modules/world_partition/doc_classes/WorldPartition3D.xml").read_text(encoding="utf-8")
+        native_tests = (repository / "modules/world_partition/tests/test_world_partition_3d.h").read_text(encoding="utf-8")
+
+        for method in ("set_prefetch_direction", "get_prefetch_direction",
+                       "set_prefetch_distance", "get_prefetch_distance"):
+            self.assertIn(method, cpp)
+            self.assertIn(method, header)
+        self.assertIn('member name="prefetch_direction"', xml)
+        self.assertIn('member name="prefetch_distance"', xml)
+        self.assertIn("Directional corridor prefetch prioritizes observer", native_tests)
+        self.assertIn("int prefetch_distance = 0;", header)
+        self.assertIn("prefetch_direction == Vector2i()", cpp)
+        self.assertIn("!is_prefetch_cell(E.key)", cpp)
+        self.assertIn("prefetch_coordinate(step, ahead)", cpp)
+        self.assertLess(cpp.index("for (int radius = 0; radius <= load_radius; radius++)"),
+                        cpp.index("prefetch_coordinate(step, ahead)"))
+        self.assertIn("int64_t(center.x) + int64_t(prefetch_direction.x) * p_step", cpp)
+        self.assertIn("can_instantiate()", cpp)
+
     def test_source_contracts_are_still_wired(self) -> None:
         patch = (ROOT / "scripts/streamed_terrain_patch.gd").read_text(encoding="utf-8")
         forest = (ROOT / "scripts/streamed_forest_cell.gd").read_text(encoding="utf-8")
