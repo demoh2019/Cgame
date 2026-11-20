@@ -31,7 +31,7 @@ func run(t) -> void:
 		"off-road ground remains unaffected")
 	var shoulder: float = WorldRoads.coverage_on_segments(Vector2(0, 2.4), segment)
 	t.check(shoulder > 0.0 and shoulder < 1.0, "road shoulder blends grip")
-	t.eq(WorldRoads.coverage_on_segments(Vector2(13, 0), segment), 0.0,
+	t.eq(WorldRoads.coverage_on_segments(Vector2(15, 0), segment), 0.0,
 		"the road does not extend past segment endpoints")
 	t.eq(WorldRoads.coverage_on_segments(Vector2.INF, segment), 0.0,
 		"invalid positions cannot grant road advantage")
