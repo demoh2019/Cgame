@@ -110,6 +110,8 @@ func run(t) -> void:
 	StreamingPolicy.apply_view(streamer, viewing_camera, 3)
 	t.near(streamer.view_priority, 0.80, 0.0001,
 			"Ultra view quality reaches the native engine")
+	t.near(streamer.fast_view_refresh_degrees, 30.0, 0.0001,
+			"Ultra opts into fast camera turn streaming refresh")
 	t.check(streamer.view_direction.is_equal_approx(forward),
 			"native streamer uses the actual camera direction")
 	var old_direction: Vector3 = streamer.view_direction
@@ -122,10 +124,31 @@ func run(t) -> void:
 			"standing player can turn camera to reprioritize scenery")
 	t.near(streamer.view_priority, 0.66, 0.0001,
 			"High quality selects bounded camera bias")
+	t.near(streamer.fast_view_refresh_degrees, 35.0, 0.0001,
+			"High quality rescans on a camera turn of 35 degrees")
 	StreamingPolicy.apply_view(streamer, null, 0)
+	t.near(streamer.fast_view_refresh_degrees, 60.0, 0.0001,
+			"Performance uses less frequent fast turn refreshes")
 	t.check(streamer.view_direction.is_zero_approx(),
 			"removing camera falls back to original motion lookahead")
 	viewing_camera.free()
+
+		t.current = "fast camera-turn streaming respects old scene defaults"
+	var old_world := WorldStreamer.new()
+	t.near(old_world.fast_view_refresh_degrees, 0.0, 0.0001,
+			"custom engine scenes keep legacy update cadence by default")
+	old_world.fast_view_refresh_degrees = 999.0
+	t.near(old_world.fast_view_refresh_degrees, 180.0, 0.0001,
+			"unbounded camera refresh thresholds are clamped")
+	old_world.fast_view_refresh_degrees = -5.0
+	t.near(old_world.fast_view_refresh_degrees, 0.0, 0.0001,
+			"zero disables expensive early streaming reorders")
+	old_world.free()
+	t.check(StreamingPolicy.fast_turn_angle(3) < StreamingPolicy.fast_turn_angle(0),
+			"high fidelity prioritizes responsiveness on sudden turns")
+	var policy_source: String = (StreamingPolicy as Script).source_code
+	t.check(policy_source.contains("streamer.fast_view_refresh_degrees = degrees"),
+			"online camera policy configures the native priority fast-path")
 
 	t.current = "actual UI and network game consume the native scene queue"
 	var online := FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
