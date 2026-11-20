@@ -17,6 +17,7 @@ const ChunkView = preload("res://scripts/client/chunk_view.gd")
 const EntityView = preload("res://scripts/client/entity_view.gd")
 const RaidTelegraph = preload("res://scripts/client/raid_telegraph.gd")
 const LightningVisual = preload("res://scripts/client/storm_lightning_visual.gd")
+const StormThunder = preload("res://scripts/client/storm_thunder.gd")
 const Hud = preload("res://scripts/client/hud.gd")
 const UiAccessibilityLayer = preload("res://scripts/client/ui_accessibility_layer.gd")
 const UiAccess = preload("res://scripts/client/ui_access.gd")
@@ -91,6 +92,7 @@ var avatar_model
 var bike_visual
 var flare_visual
 var audio
+var _storm_thunder: Node3D
 var hub_view
 var outposts
 var world_map
@@ -837,6 +839,12 @@ func _spawn_effects(event: Dictionary) -> void:
 	var at := here
 	if event.has("x") and event.has("z"):
 		at = Vector3(event["x"], client.world.height_at(event["x"], event["z"]) + 1.0, event["z"])
+	# Trigger from the server-confirmed impact only. Accessibility flash
+	# settings do not silence thunder; underground areas remain sheltered.
+	if str(event.get("type", "")) == "lightning_struck" and _storm_thunder != null \
+			and client != null and client.world != null:
+		_storm_thunder.on_strike(event, here, client.world.height_at,
+			Dungeon.is_underground(float(client.you.get("x", 0.0))))
 	if str(event.get("type", "")) == "fish_hooked" and int(event.get("peer", -1)) == client.peer_id and _last_cast_spot != Vector3.INF:
 		effects.ring(_last_cast_spot + Vector3(0, 0.05, 0), Color(1.0, 1.0, 1.0), 0.8, 0.4)
 		_shake(0.12)
@@ -1089,6 +1097,11 @@ func _on_welcomed() -> void:
 	add_child(_ambient_birds)
 	audio = Audio.new()
 	add_child(audio)
+	# Thunder has its own bounded event queue and 3D emitter so storm
+	# arrival never steals slots from short combat and movement sounds.
+	_storm_thunder = StormThunder.new()
+	_storm_thunder.name = "PhysicalLightningThunder"
+	add_child(_storm_thunder)
 	client.event_received.connect(func(event: Dictionary) -> void: audio.on_event(event, client.peer_id, client.world.height_at))
 	_raid_telegraph.clear()
 	client.event_received.connect(func(event: Dictionary) -> void: _raid_telegraph.consume(event, client.world))
