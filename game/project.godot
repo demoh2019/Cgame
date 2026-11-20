@@ -19,6 +19,10 @@ common/physics_ticks_per_second=30
 
 [rendering]
 
+; SSR is reserved for High/Ultra Forward+; render its rays at half resolution to
+; control bandwidth and preserve budget for world geometry and vegetation.
+rendering/environment/screen_space_reflection/half_size=true
+
 renderer/rendering_method="forward_plus"
 renderer/rendering_method.mobile="gl_compatibility"
 renderer/rendering_method.web="gl_compatibility"
