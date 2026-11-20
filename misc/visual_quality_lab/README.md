@@ -331,3 +331,68 @@ Architecture references:
 - [Godot: saving games](https://docs.godotengine.org/en/4.6/tutorials/io/saving_games.html)
 - [Godot: DirAccess atomic rename](https://docs.godotengine.org/en/4.6/classes/class_diraccess.html)
 - [Unreal: World Partition](https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine)
+
+
+## Visual Quality Lab v10 — streamed navigation and persistent NPCs
+
+The open-world engine extension now streams **navigation regions and AI
+characters together with the forest cell scenes**. The demo spawns one blue
+patrol NPC in each loaded cell. The NPC follows a four-way deterministic patrol
+using Godot's `NavigationAgent3D` and becomes orange / ALERT when the player
+enters its 4.5 m awareness radius. It returns to patrol after the player
+passes 7 m away (hysteresis avoids state oscillation). NPCs do not attack; this
+is a navigation and behavior prototype, not a combat system.
+
+### Reusable engine components
+
+- `addons/visual_quality/navigation_tile.gd` (`StreamedNavigationTile3D`):
+  a minimal `NavigationRegion3D` adapter with a one-polygon planar tile.
+  When an authored/pre-baked `NavigationMesh` is supplied, automatic flat
+  generation is skipped. Region nodes disappear with the streamed cell.
+- `addons/visual_quality/streamed_patrol_npc.gd` (`StreamedPatrolNPC3D`):
+  physical `CharacterBody3D`, one `NavigationAgent3D`, path following at physics
+  cadence, decision/sensing cadence of 0.9/0.55/0.35 s for Eco/Balanced/
+  Cinematic. Avoidance RVO is disabled by default to avoid cost with many agents.
+  The agent waits for navigation-server map synchronization before querying a
+  route and calls `get_next_path_position()` every physics tick when active.
+- `world/forest_cell.gd` now creates both navigation region and NPC after the
+  cell is instantiated. It passes the existing player's node as the NPC's
+  awareness target and connects quality controls to the NPC decision interval.
+- `WorldStateStore3D` from v9 now also persists per-cell NPC patrol index and
+  bounded local position. Only primitive properties are serialized; transient
+  node, navigation agent, and player references are never stored. This state
+  is captured when a cell unloads and restored when that cell respawns.
+
+**In-game diagnostic:** the HUD shows active NPC count and number alerted.
+Press **9** to pause/resume NPC AI across loaded cells. New cells inherit the
+current global AI setting. All earlier player/quest/streaming controls remain.
+
+### Limitations and profiling
+
+The sample's planar tiles only cover a flat surface. They **do not account for
+central stage props or tree trunks**. For an actual level with complex geometry,
+replace each tile's flat mesh with a baked NavigationMesh that avoids obstacles,
+and test cross-cell region connectivity. For larger NPC populations, add interest
+management, temporal throttling of the physics navigation updates, animation
+LOD, appropriate RVO agent policies, and actual CPU/GPU profiling. No C++
+engine core files were changed, and this addon is not a replacement for Unreal
+World Partitioned NavMesh.
+
+### Tests
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+godot --headless --path . --script res://tests/test_streamed_navigation.gd
+godot --headless --path . --script res://tests/test_streamed_navigation_runtime.gd
+```
+
+The Python suite has **21 passing static/package tests**; GDScript and Godot
+runtime testing **still require a working Godot binary and Apple Metal target
+hardware**, neither available in this execution environment. The PR CI includes
+both GDScript tests but has not yet reported a passing run.
+
+Technical references:
+- https://docs.godotengine.org/en/stable/classes/class_navigationagent3d.html
+- https://docs.godotengine.org/en/stable/tutorials/navigation/navigation_using_navigationmeshes.html
+- https://docs.godotengine.org/en/stable/tutorials/navigation/navigation_optimizing_performance.html
+- https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partitioned-navigation-mesh-in-unreal-engine
