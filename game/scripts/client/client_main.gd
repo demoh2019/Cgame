@@ -759,6 +759,14 @@ func _physics_process(delta: float) -> void:
 		if str(game_event.get("type", "")) == "camp_alarm" and (
 				int(game_event.get("peer", -1)) == LOCAL_PLAYER_ID):
 			_feedback = "CAMP ALERT: %d infected near your fire! Prepare defenses." % int(game_event.get("count", 0))
+		elif str(game_event.get("type", "")) == "ruin_ambush" and \
+				int(game_event.get("peer", -1)) == LOCAL_PLAYER_ID:
+			_feedback = "RUIN AMBUSH! %d infected awakened. Fight or retreat!" % [
+				int(game_event.get("count", 0))]
+		elif str(game_event.get("type", "")) == "ruin_ambush_cleared" and \
+				int(game_event.get("peer", -1)) == LOCAL_PLAYER_ID:
+			_feedback = "RUIN SECURED! All %d awakened infected defeated." % [
+				int(game_event.get("count", 0))]
 	if sim.siege_waves_started > _last_siege_notification:
 		_last_siege_notification = sim.siege_waves_started
 		_feedback = "Night siege! Infected are approaching a nearby barricade."
@@ -980,18 +988,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			if target.is_empty():
 				_feedback = "No nearby crate or loot bag."
 			else:
-				var before_events: int = sim.events.size()
-				var opened: Dictionary = sim.cmd_loot(LOCAL_PLAYER_ID, target["id"])
-				_result("Loot", opened)
-				# The local preview runs the same authoritative simulation but
-				# has no network event handler. Show only newly emitted warnings.
-				for index in range(before_events, sim.events.size()):
-					var notice: Dictionary = sim.events[index]
-					if str(notice.get("type", "")) == "ruin_ambush" and \
-							int(notice.get("peer", -1)) == LOCAL_PLAYER_ID:
-						_feedback = "RUIN AMBUSH! %d infected awakened. Fight or retreat!" % [
-							int(notice.get("count", 0))]
-						_update_hud()
+				_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
 	elif event.is_action_pressed("survive_mount"):
 		_result("Trail bike", sim.cmd_toggle_mount(LOCAL_PLAYER_ID))
 	elif event.is_action_pressed("survive_bike_lamp"):
