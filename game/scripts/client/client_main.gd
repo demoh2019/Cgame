@@ -1026,9 +1026,21 @@ func _unhandled_input(event: InputEvent) -> void:
 			else:
 				_result("Quick cook", sim.cmd_craft(LOCAL_PLAYER_ID, cook_recipe))
 	elif event.is_action_pressed("survive_food"):
-		_result("Eat stew" if Input.is_key_pressed(KEY_SHIFT) else "Eat",
-			sim.cmd_use(LOCAL_PLAYER_ID,
-				Defs.CAMP_FISH_STEW if Input.is_key_pressed(KEY_SHIFT) else "canned_food"))
+		if Input.is_key_pressed(KEY_ALT):
+			var raw_item := ""
+			for tier in range(1, 5):
+				var candidate: String = "raw_fish" if tier == 1 else "raw_fish_%d" % tier
+				if survivor.inventory.count(candidate) > 0:
+					raw_item = candidate
+					break
+			if raw_item == "":
+				_feedback = "No raw fish carried. Properly cooked food is safer."
+			else:
+				_result("Raw fish (food poisoning risk)", sim.cmd_use(LOCAL_PLAYER_ID, raw_item))
+		else:
+			_result("Eat stew" if Input.is_key_pressed(KEY_SHIFT) else "Eat",
+				sim.cmd_use(LOCAL_PLAYER_ID,
+					Defs.CAMP_FISH_STEW if Input.is_key_pressed(KEY_SHIFT) else "canned_food"))
 	elif event.is_action_pressed("survive_water"):
 		if Input.is_key_pressed(KEY_SHIFT):
 			_result("Collect unboiled water", sim.cmd_use(LOCAL_PLAYER_ID, "empty_water_pouch"))
@@ -1055,7 +1067,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_antibiotics"):
 		_result("Antibiotics", sim.cmd_use(LOCAL_PLAYER_ID, "antibiotics"))
 	elif event.is_action_pressed("survive_poultice"):
-		_result("Herbal poultice", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_poultice"))
+		if Input.is_key_pressed(KEY_SHIFT):
+			_result("Food poisoning treatment", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_gut_tonic"))
+		else:
+			_result("Herbal poultice", sim.cmd_use(LOCAL_PLAYER_ID, "herbal_poultice"))
 	elif event.is_action_pressed("survive_warmth"):
 		_result("Heat pack", sim.cmd_use(LOCAL_PLAYER_ID, "thermal_wrap"))
 	elif event.is_action_pressed("survive_flare"):
