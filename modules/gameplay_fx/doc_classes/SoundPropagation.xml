@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SoundPropagation" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic sound propagation budget for authoritative AI hearing.
+	</brief_description>
+	<description>
+		Calculates the range of a server-issued sound event after wind and geometric obstruction. Quiet sources (such as footsteps) lose more hearing range behind an obstacle than louder sources (such as shots). This class deliberately does not perform physics queries or modify the audio mixer. Use the same world geometry as projectiles and enemy visibility to decide whether an obstruction exists, and call [method effective_radius] only when the sound lies near the detection boundary. An engine build without this module can use the equivalent GDScript policy.
+	</description>
+	<methods>
+		<method name="effective_radius" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="source_radius" type="float" />
+			<param index="1" name="wind_radius" type="float" />
+			<param index="2" name="blocked" type="bool" />
+			<description>
+				Returns the hearing range, in meters, from an original server-owned source radius and an already wind-adjusted range (including pursuit leash). If [param blocked] is [code]true[/code], attenuates quiet sounds to 62% and loud sounds to at most 80%. An open path keeps the wind-adjusted range. Invalid or silent inputs return zero. This method never expands the detection range.
+			</description>
+		</method>
+	</methods>
+</class>
