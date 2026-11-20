@@ -57,6 +57,19 @@ static func living_guards(bag: Dictionary, infected: Dictionary) -> int:
 	return remaining
 
 
+## Release is one-shot and only after the LAST real escort is defeated.
+## The public cache remains available to any survivor; no killer owns it.
+## The original escort count prevents unguarded caches from faking an event.
+static func mark_cleared(bag: Dictionary, infected: Dictionary) -> bool:
+	if not bool(bag.get("supply_drop", false)) or bool(bag.get("clear_announced", false)):
+		return false
+	var ids: Array = bag.get("supply_guard_ids", [])
+	if ids.is_empty() or living_guards(bag, infected) != 0:
+		return false
+	bag["clear_announced"] = true
+	return true
+
+
 # Each crate is a small PvE encounter as well as a public PvP objective.
 # Escorts are ordinary session zombies: no extra private rewards and no respawn.
 const Movement = preload("res://scripts/shared/movement.gd")

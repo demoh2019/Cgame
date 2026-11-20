@@ -635,6 +635,8 @@ func _nearest_loot() -> Dictionary:
 func _result(action: String, data: Dictionary) -> void:
 	if bool(data.get("ok", false)):
 		_feedback = "%s: SUCCESS" % action
+	elif str(data.get("reason", "")) == "guards_alive":
+		_feedback = "Supply crate guarded: defeat %d infected before looting." % int(data.get("remaining", 0))
 	else:
 		_feedback = "%s: %s" % [action, str(data.get("reason", "failed"))]
 	_update_hud()

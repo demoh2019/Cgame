@@ -318,6 +318,9 @@ func _on_skill_event(event: Dictionary) -> void:
 			hud.say("SUPPLY DROP (T%d) at %.0f, %.0f — %d infected guards!" % [
 				int(event.get("tier", 3)), float(event.get("x", 0)),
 				float(event.get("z", 0)), guard_count])
+		"supply_cleared":
+			hud.say("SUPPLY CLEARED at %.0f, %.0f! The crate is public — collect it before rival parties!" % [
+				float(event.get("x", 0)), float(event.get("z", 0))])
 
 
 func _setup_chat() -> void:

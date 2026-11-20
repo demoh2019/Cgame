@@ -110,6 +110,6 @@ func run(t) -> void:
 			SupplyDrops.MIN_SURVIVOR_DISTANCE - 0.01,
 			"no escort spawns directly onto a survivor")
 		t.eq(world.zone_at(spot.x, spot.y), 2, "escorts stay inside same risk zone")
-	t.eq(sim._spawn_supply_guards({"x": NAN, "z": 0.0, "zone": 2}), 0,
+	t.eq(sim._spawn_supply_guards({"x": NAN, "z": 0.0, "zone": 2}, -1).size(), 0,
 		"invalid server drop site cannot create additional escorts")
 	t.eq(sim.zombies.size(), guard_count, "invalid attempt creates no zombies")

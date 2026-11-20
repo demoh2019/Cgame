@@ -2839,6 +2839,13 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		RaidLoot.reserve(bags[loot_bag_id], eligible, time)
 	if spawn_state.has(zombie.spawn_id):
 		spawn_state[zombie.spawn_id] = {"zombie": -1, "next": time + (240.0 if zone < 2 else 360.0)}
+	# The client must learn when ALL original guards are down. A per-cache
+	# latch prevents duplicate "clear" events on corpse reprocessing.
+	if zombie.supply_cache_id >= 0 and bags.has(zombie.supply_cache_id):
+		var cache: Dictionary = bags[zombie.supply_cache_id]
+		if SupplyDrops.mark_cleared(cache, zombies):
+			events.append({"type": "supply_cleared", "id": int(cache["id"]),
+				"x": float(cache["x"]), "z": float(cache["z"])})
 	events.append({"type": "zombie_died", "id": zombie.id, "x": zombie.position.x, "z": zombie.position.z})
 
 

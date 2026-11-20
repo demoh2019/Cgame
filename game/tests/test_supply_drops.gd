@@ -66,10 +66,16 @@ func run(t) -> void:
 		"public cache expires after a bounded interval")
 	var view: Dictionary = server.snapshot_for(93)
 	var found := false
+	var visible_guards := 0
 	for visible in view["bags"]:
 		if int(visible["id"]) == bag_id:
-			found = bool(visible.get("supply_drop", false)) and bool(visible["can_loot"])
-	t.check(found, "nearby clients see a clearly marked, lootable supply crate")
+			found = bool(visible.get("supply_drop", false))
+			visible_guards = int(visible.get("guards_remaining", 0))
+			t.eq(bool(visible["can_loot"]), visible_guards == 0,
+				"cache is locked only while its original guards survive")
+	t.check(found, "nearby clients see a clearly marked supply crate")
+	t.eq(visible_guards, SupplyDrops.living_guards(bag, server.zombies),
+		"snapshot guard count is server-authoritative")
 	t.eq(LootLabel.for_bag({"supply_drop": true}), "SUPPLY DROP - public",
 		"the world label distinguishes supply from ordinary death loot")
 
@@ -80,6 +86,14 @@ func run(t) -> void:
 	t.check(announced, "a world announcement is emitted after server creation")
 
 	player.position = Vector3(float(bag["x"]), float(bag["y"]), float(bag["z"]))
+	# The existing world objective requires defeating the escort first.
+	if visible_guards > 0:
+		t.eq(server.cmd_loot(93, bag_id).get("reason"), "guards_alive",
+			"attempting to loot a guarded crate is denied")
+	for id in bag.get("supply_guard_ids", []):
+		var infected = server.zombies.get(int(id))
+		if infected != null:
+			infected.take_damage(100000.0)
 	var result: Dictionary = server.cmd_loot(93, bag_id)
 	t.check(bool(result.get("ok", false)), "the legitimate nearby player can loot it")
 	t.check(not server.bags.has(bag_id), "a fully looted supply cache is removed")

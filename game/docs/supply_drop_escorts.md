@@ -10,3 +10,10 @@ Every ten minutes, the existing server may create one public T3/T4 loot cache ne
 - Online clients receive the global drop coordinates, tier, and the number of infected guards in their HUD message.
 
 Test: `godot --headless --path game --script res://tests/run_all.gd`. See `test_supply_guards.gd` for geometry, capacity, and server integration checks.
+
+
+## Clearance notification
+
+When the final original escort dies to confirmed server combat, the crate automatically becomes claimable by **any** nearby survivor. The server emits one local `supply_cleared` event with the cache ID and public coordinates. The multiplayer HUD tells nearby rivals that the public cache is now available.
+
+A per-bag clearance latch prevents repeated notifications, including reprocessed deaths. Ordinary bags, unguarded crates, and removed caches emit no clearance event. The server never sends escort IDs or a killer's identity to spectators. Tests cover this, plus compatibility repairs for the earlier supply-drop test suites.

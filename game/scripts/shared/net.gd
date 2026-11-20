@@ -852,6 +852,8 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return _is_nearby(event, peer)
 		"supply_drop":
 			return true # Public server-generated announcement.
+		"supply_cleared":
+			return _is_nearby(event, peer) # Only witnesses receive clearance coordinates.
 		"death":
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
