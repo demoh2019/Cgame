@@ -43,6 +43,8 @@ var _fast_travel_target_position: Vector2 = Vector2.ZERO
 var _fast_travel_verify_attempts: int = 0
 var source_ready_events: int = 0
 var source_unready_events: int = 0
+var navigation_ready_events: int = 0
+var navigation_unready_events: int = 0
 var last_source_event: String = "нет"
 var survey_drone: Node3D
 var survey_drone_paused: bool = false
@@ -159,6 +161,8 @@ func _create_streaming_world() -> void:
     world_partition.cell_unloaded.connect(_on_stream_cell_unloaded)
     world_partition.cell_physics_ready.connect(_on_stream_cell_physics_ready)
     world_partition.cell_physics_unready.connect(_on_stream_cell_physics_unready)
+    world_partition.cell_navigation_ready.connect(_on_stream_cell_navigation_ready)
+    world_partition.cell_navigation_unready.connect(_on_stream_cell_navigation_unready)
     world_partition.observer_cell_changed.connect(_on_observer_cell_changed)
     world_partition.streaming_source_ready.connect(_on_streaming_source_ready)
     world_partition.streaming_source_unready.connect(_on_streaming_source_unready)
@@ -369,6 +373,16 @@ func _on_stream_cell_physics_unready(_cell: Vector2i) -> void:
     _refresh_player_stream_safety()
 
 
+func _on_stream_cell_navigation_ready(_cell: Vector2i) -> void:
+    navigation_ready_events += 1
+    _refresh_hud()
+
+
+func _on_stream_cell_navigation_unready(_cell: Vector2i) -> void:
+    navigation_unready_events += 1
+    _refresh_hud()
+
+
 func _refresh_player_stream_safety() -> void:
     if player == null or world_partition == null:
         return
@@ -496,7 +510,7 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 410)
+    hint.position = Vector2(22, 455)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
     hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: сброс кэшей  •  F4: повтор загрузки  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор\nF6: закрепить маяк  •  F7: подготовить и переместиться к маяку/домой\nF8: движущийся дрон  •  F10: источник башни  •  F11: пауза дрона"
@@ -530,6 +544,20 @@ func _refresh_hud() -> void:
     var gpu_text: String = "%.2f ms" % gpu_ms if gpu_ms > 0.0 else "N/A"
     var loaded: int = world_partition.get_loaded_cell_count() if world_partition != null else 0
     var physics_ready: int = world_partition.get_physics_ready_cell_count() if world_partition != null else 0
+    var navigation_ready: int = world_partition.get_navigation_ready_cell_count() if world_partition != null else 0
+    var navigation_pending: int = world_partition.get_navigation_pending_cell_count() if world_partition != null else 0
+    var npc_total: int = 0
+    var npc_active: int = 0
+    if world_partition != null:
+        for cell in world_partition.get_loaded_cells():
+            var tile: Node3D = world_partition.get_cell_node(cell)
+            if tile == null:
+                continue
+            var npc := tile.get_node_or_null("ForestPatrol")
+            if npc != null:
+                npc_total += 1
+                if bool(npc.get("navigation_active")):
+                    npc_active += 1
     var configured: int = world_partition.get_configured_cell_count() if world_partition != null else 0
     var pending: int = world_partition.get_pending_cell_count() if world_partition != null else 0
     var inflight: int = world_partition.get_inflight_request_count() if world_partition != null else 0
@@ -541,6 +569,8 @@ func _refresh_hud() -> void:
     var watch_info: Dictionary = world_partition.get_streaming_source(WATCHTOWER_SOURCE) if world_partition != null else {}
     var survey_progress: float = world_partition.get_streaming_source_progress(SURVEY_SOURCE) if world_partition != null else 0.0
     var watch_progress: float = world_partition.get_streaming_source_progress(WATCHTOWER_SOURCE) if world_partition != null else 0.0
+    var survey_nav_progress: float = world_partition.get_streaming_source_navigation_progress(SURVEY_SOURCE) if world_partition != null else 0.0
+    var watch_nav_progress: float = world_partition.get_streaming_source_navigation_progress(WATCHTOWER_SOURCE) if world_partition != null else 0.0
     var survey_status: String = ("ГОТОВ" if world_partition.is_streaming_source_ready(SURVEY_SOURCE) else "ЗАГРУЗКА %d%%" % roundi(survey_progress * 100.0)) if not survey_info.is_empty() else "ВЫКЛ"
     var watch_status: String = ("ГОТОВ" if world_partition.is_streaming_source_ready(WATCHTOWER_SOURCE) else "ЗАГРУЗКА %d%%" % roundi(watch_progress * 100.0)) if not watch_info.is_empty() else "ВЫКЛ"
     var outpost_ready: bool = world_partition.is_cell_loaded(OUTPOST_CELL) if world_partition != null else false
@@ -559,6 +589,7 @@ func _refresh_hud() -> void:
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   физика: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, physics_ready, pending, inflight, failed, current_region.x, current_region.y] \
+        + "Навигация: %d готово / %d ожидают   NPC: %d/%d активны\n" % [navigation_ready, navigation_pending, npc_active, npc_total] \
         + "Кэш земли: %d/%d   попадания: %d   промахи: %d\n" % [cache["entries"], cache["capacity"], cache["hits"], cache["misses"]] \
         + "Предзагрузка: X=%d Z=%d   впереди: %d ячейки\n" % [ahead.x, ahead.y, world_partition.prefetch_distance] \
         + "Дальний HLOD: %d плит / %d подготовлено, %d крон\n" % [far["visible"], far["allocated"], far["visible_canopies"]] \
@@ -568,6 +599,7 @@ func _refresh_hud() -> void:
         + "Закреплено: %d/16   маяк: %s   дом: %s\n" % [pinned, outpost_status, "ГОТОВ" if home_ready else "НЕТ"] \
         + "Источники: %d/8   разведка: %s   башня: %s\n" % [named_sources, survey_status, watch_status] \
         + "Дрон X=%d Z=%d   %s\n" % [survey_center.x, survey_center.y, "ПАУЗА" if survey_drone_paused else "ДВИЖЕТСЯ"] \
+        + "Навигация зон: разведка %d%%   башня %d%%   события: %d / %d\n" % [roundi(survey_nav_progress * 100.0), roundi(watch_nav_progress * 100.0), navigation_ready_events, navigation_unready_events] \
         + "События источников: готово %d / потеряно %d   %s" % [source_ready_events, source_unready_events, last_source_event]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
