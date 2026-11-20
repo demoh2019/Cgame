@@ -99,10 +99,29 @@ func _run() -> void:
     if grass.multimesh.visible_instance_count != 112:
         _fail("performance quality profile did not reduce grass density")
         return
+    if not cell.has_node("PinnedHomeBeacon/HubLight"):
+        _fail("persistent hub beacon is missing")
+        return
+    if not stream.pin_cell(origin) or not stream.is_cell_pinned(origin):
+        _fail("native pinned-cell API did not register the home hub")
+        return
+    if stream.get_pinned_cell_count() != 1:
+        _fail("pinned-cell count incorrect")
+        return
 
     observer.position.x = 100.0
+    # Walk outside the unload radius: pinned gameplay hubs must persist.
+    for i in range(5):
+        await process_frame
+    if not stream.is_cell_loaded(origin):
+        _fail("pinned hub unexpectedly unloaded outside observation radius")
+        return
+    stream.unpin_cell(origin)
+    if stream.is_cell_pinned(origin) or stream.get_pinned_cell_count() != 0:
+        _fail("unpin did not release the hub")
+        return
     if not await _wait_for_cell(stream, origin, false):
-        _fail("distant cell did not unload")
+        _fail("un-pinned distant cell did not unload")
         return
 
     observer.position.x = 0.0
@@ -139,5 +158,5 @@ func _run() -> void:
         _fail("observer transitions were not signaled reliably")
         return
 
-    print("Forest streaming smoke PASSED: deterministic shared-cell reload, negative coordinates, observer signals and performance quality")
+    print("Forest streaming smoke PASSED: persistent hub pins, deterministic reload, negative coordinates, observer signals and performance quality")
     quit(0)
