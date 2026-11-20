@@ -360,7 +360,7 @@ func _refresh_hud() -> void:
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   закреплено: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pinned, pending, inflight, failed, current_region.x, current_region.y] \
-        + "Упреждающая загрузка: %s   LOD дальних: %d   F3/F4: сравнение\\n" % [predicted_text, distant] \\
+        + "Упреждающая загрузка: %s   LOD дальних: %d   F3/F4: сравнение\n" % [predicted_text, distant] \
         + "Атмосфера: %02d:%02d  %s  %s (F6/F7/F8)" % [int(atmosphere_clock.day_hours), int(fmod(atmosphere_clock.day_hours, 1.0) * 60.0), atmosphere_clock.get_weather_name(), "ПАУЗА" if atmosphere_clock.paused else "цикл"]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
