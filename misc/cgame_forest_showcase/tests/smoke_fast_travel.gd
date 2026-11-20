@@ -78,6 +78,11 @@ func _run() -> void:
         await physics_frame
 
     world.call("_fast_travel")
+    if not bool(world.get("_fast_travel_in_progress")):
+        _fail("ready destination was not held through physics synchronization")
+        return
+    for i in range(3):
+        await physics_frame
     var at_outpost := Vector2(player.global_position.x, player.global_position.z)
     if at_outpost.distance_to(OUTPOST_POS) > 0.1:
         _fail("F7 did not teleport to the fully loaded outpost")
@@ -101,9 +106,17 @@ func _run() -> void:
     for i in range(3):
         await physics_frame
     world.call("_fast_travel")
+    if not bool(world.get("_fast_travel_in_progress")):
+        _fail("return journey skipped physics synchronization")
+        return
+    for i in range(3):
+        await physics_frame
     var returned := Vector2(player.global_position.x, player.global_position.z)
     if returned.distance_to(HOME_POS) > 0.1:
         _fail("return fast travel did not restore home position")
+        return
+    if bool(world.get("_fast_travel_in_progress")):
+        _fail("fast-travel operation remained active after arrival")
         return
     if stream.get_pinned_cell_count() != 0:
         _fail("fast travel leaked destination residency pins")
