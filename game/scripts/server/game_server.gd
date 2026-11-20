@@ -7042,6 +7042,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 					"wound_phase": InfectedWounds.phase(zombie),
 					"snared_seconds": zombie.snared_seconds,
 					"stagger_seconds": zombie.stagger_seconds,
+					"resolve_stacks": zombie.stagger_resolve_stacks if zombie.stagger_resolve_seconds > 0.0 else 0,
+					"resolve_seconds": zombie.stagger_resolve_seconds,
 					"sunder_seconds": SunderMark.remaining(zombie, time)})
 	# Replicate only pending, living spit warnings within sight of this
 	# survivor. Client visual effects never authorize an actual hit.

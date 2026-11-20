@@ -11,6 +11,7 @@ const Weather = preload("res://scripts/shared/weather.gd")
 const WindHearing = preload("res://scripts/shared/wind_hearing.gd")
 const SunderMark = preload("res://scripts/shared/sunder_mark.gd")
 const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
+const InfectedResolve = preload("res://scripts/shared/infected_resolve.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -41,6 +42,8 @@ var spit_center: Vector2 = Vector2.ZERO
 var stuck_time: float = 0.0
 var snared_seconds: float = 0.0 # Server-owned root; movement-only, not attack immunity.
 var stagger_seconds: float = 0.0 # Short PvE-only incapacitation from a confirmed heavy blow.
+var stagger_resolve_stacks: int = 0 # Number of effective successive server-side staggers.
+var stagger_resolve_seconds: float = 0.0 # Window before diminishing returns reset.
 var sunder_until: float = 0.0 # Server-time expiry of PvE armor weakness.
 var contributors: Dictionary = {} # Server: peer -> time + equipped weapon for PvE assist XP.
 var data: Dictionary
@@ -81,6 +84,9 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 		return {}
 	attack_timer = maxf(attack_timer - delta, 0.0)
 	snared_seconds = maxf(0.0, snared_seconds - maxf(0.0, delta))
+	stagger_resolve_seconds = InfectedResolve.remaining(stagger_resolve_seconds, delta)
+	if stagger_resolve_seconds <= 0.0:
+		stagger_resolve_stacks = 0
 	Threat.decay(threat, delta)
 	forced_target_seconds = maxf(0.0, forced_target_seconds - delta)
 	if forced_target_seconds <= 0.0:
@@ -345,14 +351,19 @@ func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: floa
 		stuck_time = 0.0
 
 
-## Server-confirmed melee crowd control. Neither client packets nor raid boss
-## damage can directly enter this path. Elites get half the usual duration.
+## Confirmed crowd control gets weaker on repeated successful applications.
+## Failed attempts cannot build immunity, refresh timers or cancel acid windups.
 func apply_stagger(seconds: float) -> bool:
-	if not is_alive() or raid_boss or not is_finite(seconds) or seconds <= 0.0 or seconds > 1.5:
+	if not is_alive() or raid_boss:
 		return false
-	var effective: float = seconds * (0.5 if elite else 1.0)
-	stagger_seconds = maxf(stagger_seconds, effective)
-	# Interrupt an in-flight acid windup so it cannot explode during stun.
+	var stacks: int = stagger_resolve_stacks if stagger_resolve_seconds > 0.0 else 0
+	var effective: float = InfectedResolve.duration(seconds, stacks, elite)
+	if effective <= stagger_seconds:
+		return false
+	stagger_seconds = effective
+	stagger_resolve_stacks = mini(stacks + 1, InfectedResolve.MAX_STACKS)
+	stagger_resolve_seconds = InfectedResolve.RESET_SECONDS
+	# An effective stun interrupts an in-flight acid windup.
 	spit_pending = false
 	spit_seconds = 0.0
 	stuck_time = 0.0
@@ -411,6 +422,8 @@ func take_damage(amount: float, attacker_id: int = -1) -> bool:
 		spit_pending = false
 		spit_seconds = 0.0
 		stagger_seconds = 0.0
+		stagger_resolve_stacks = 0
+		stagger_resolve_seconds = 0.0
 		sunder_until = 0.0
 		threat.clear()
 		return true
