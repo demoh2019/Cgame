@@ -1937,8 +1937,13 @@ func _refresh_party_controls() -> void:
 			_party_status.text += " | next in %ds" % int(ceil(standard_cooldown))
 	var rally: Dictionary = state.get("rally", {})
 	if not rally.is_empty():
-		_party_status.text += "\nRally: x%d z%d (%d seconds)" % [
-			int(rally["x"]), int(rally["z"]), int(ceil(float(rally["remaining"])))]
+		var from_position := TravelNavigation.target(client.you, "x", "z")
+		var rally_position := TravelNavigation.target(rally, "x", "z")
+		var distance: int = TravelNavigation.distance_meters(from_position, rally_position)
+		var heading: String = TravelNavigation.compass(from_position, rally_position)
+		var guidance: String = "%dm %s" % [distance, heading] if distance >= 0 else "location unavailable"
+		_party_status.text += "\nRally: %s | %d seconds" % [
+			guidance, int(ceil(float(rally["remaining"])))]
 	var nearby: Array = []
 	for peer in client.players.values():
 		nearby.append([int(peer["id"]), str(peer.get("name", "Survivor"))])

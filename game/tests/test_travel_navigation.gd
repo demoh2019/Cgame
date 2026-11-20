@@ -54,6 +54,9 @@ func run(t) -> void:
 	var sim := GameServer.new(world, 205)
 	var leader = sim.add_player(701, "Navigator")
 	var ally = sim.add_player(702, "Escort")
+	# Authoritative invites require actual proximity: random spawns are
+	# intentionally not relied on by this deterministic regression.
+	ally.position = leader.position + Vector3(1.0, 0.0, 0.0)
 	sim.add_player(703, "Stranger")
 	var route := {"dst_id": 12, "dst_x": 500.0, "dst_z": -250.0}
 	leader.caravan_view = route.duplicate()

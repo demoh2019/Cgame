@@ -9,6 +9,8 @@ north-up survival radar now shows two additional waypoints:
   destination; inside 72 m, a ring and dot show the exact target.
 - **Amber** — your party leader's live, temporary rendezvous point. It has
   the same near/far marker behavior; only members of that party see it.
+- The party panel also shows **live rally distance and compass bearing**
+  until the leader's private 45-second rendezvous marker expires.
 - The caravan panel now shows **remaining straight-line distance** in
   meters and a true eight-point compass heading (N, NE, E, SE, S, SW,
   W, NW) next to the required cargo, destination name and payout.
