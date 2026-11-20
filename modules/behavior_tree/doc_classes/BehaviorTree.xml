@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <class name="BehaviorTree" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
-	<brief_description>Small deterministic behavior-tree runtime with sequence, selector, inverter, condition, set and wait nodes.</brief_description>
+	<brief_description>Small deterministic behavior-tree runtime with memory and reactive composites, conditions and actions.</brief_description>
 	<description>
-		BehaviorTree evaluates a nested Dictionary description. Each BehaviorTree instance owns its execution memory and blackboard, so separate agents should instantiate separate trees. The runtime supports six node types: [code]sequence[/code], [code]selector[/code], [code]inverter[/code], [code]condition[/code], [code]set[/code], and [code]wait[/code]. It does not yet contain a visual graph editor, GDScript callback tasks or an editor inspector.
+		BehaviorTree evaluates a nested Dictionary description. Each BehaviorTree instance owns its execution memory and blackboard, so separate agents should instantiate separate trees. The runtime supports [code]sequence[/code], [code]selector[/code], [code]reactive_sequence[/code], [code]reactive_selector[/code], [code]inverter[/code], [code]condition[/code], [code]set[/code], and [code]wait[/code]. Memory composites resume their running child; reactive composites restart evaluation at their first child on every tick to respond to changed priorities or conditions. Switching away from a running child cancels its saved execution state (including nested waits), but does not roll back blackboard writes. It does not yet contain a visual graph editor, GDScript callback tasks or an editor inspector.
 	</description>
 	<tutorials>
 	</tutorials>
@@ -10,7 +10,7 @@
 		<method name="set_tree">
 			<return type="bool" />
 			<param index="0" name="description" type="Dictionary" />
-			<description>Validates and deep-copies a nested node Dictionary. Returns false without replacing the previous tree on malformed data. A sequence or selector has a non-empty [code]children[/code] Array, an inverter has one [code]child[/code], condition uses [code]key[/code] and [code]equals[/code], set uses [code]key[/code] and [code]value[/code], and wait uses a nonnegative [code]ticks[/code] integer.</description>
+			<description>Validates and deep-copies a nested node Dictionary. Returns false without replacing the previous tree on malformed data. A sequence, selector, reactive_sequence or reactive_selector has a non-empty [code]children[/code] Array, an inverter has one [code]child[/code], condition uses [code]key[/code] and [code]equals[/code], set uses [code]key[/code] and [code]value[/code], and wait uses a nonnegative [code]ticks[/code] integer.</description>
 		</method>
 		<method name="get_tree" qualifiers="const">
 			<return type="Dictionary" />
