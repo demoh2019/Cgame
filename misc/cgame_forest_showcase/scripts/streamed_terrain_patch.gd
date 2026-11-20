@@ -143,7 +143,8 @@ func _build_lod_indices(step: int) -> PackedInt32Array:
                 var offset: int = i if x == 0 else 0
                 perimeter.push_back((z + step - offset) * VERTICES_PER_SIDE + x)
 
-            var center: int = (z + step / 2) * VERTICES_PER_SIDE + x + step / 2
+            var half_step: int = step >> 1
+            var center: int = (z + half_step) * VERTICES_PER_SIDE + x + half_step
             for i in range(perimeter.size()):
                 result.push_back(center)
                 result.push_back(perimeter[(i + 1) % perimeter.size()])
