@@ -87,6 +87,63 @@ Vector3 sample_normal_bilinear(const HeightField &p_field, real_t p_x, real_t p_
 	return (n00.lerp(n10, fx).lerp(n01.lerp(n11, fx), fz)).normalized();
 }
 
+
+Vector<real_t> bake_horizon_visibility(const HeightField &p_field, real_t p_spacing, int p_radius_steps) {
+	Vector<real_t> visibility;
+	if (!p_field.is_valid() || !Math::is_finite(p_spacing) || p_spacing <= 0.0 ||
+			p_radius_steps < 2 || p_radius_steps > 12) {
+		return visibility;
+	}
+	visibility.resize(p_field.width * p_field.depth);
+	real_t *out = visibility.ptrw();
+	// Equal azimuthal samples of the skylight hemisphere, with fixed rays.
+	constexpr int directions[8][2] = {
+		{ 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+		{ 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 }
+	};
+	for (int z = 0; z < p_field.depth; z++) {
+		for (int x = 0; x < p_field.width; x++) {
+			const real_t center = p_field.get(x, z);
+			real_t sky = 0.0;
+			for (int dir = 0; dir < 8; dir++) {
+				const int dx = directions[dir][0];
+				const int dz = directions[dir][1];
+				const real_t ray_step = p_spacing * ((dx != 0 && dz != 0) ?
+						real_t(1.4142135623730951) : real_t(1.0));
+				const int local_x = x + dx;
+				const int local_z = z + dz;
+				if (local_x < 0 || local_x >= p_field.width ||
+						local_z < 0 || local_z >= p_field.depth) {
+					sky += 1.0; // An absent height halo must not cast a wall.
+					continue;
+				}
+				// Remove the local tangent-plane slope; even an infinite
+				// sloped plain still sees the full nearby sky hemisphere.
+				const real_t local_slope = MAX(
+						(p_field.get(local_x, local_z) - center) / ray_step,
+						real_t(0.0));
+				real_t excess_horizon = 0.0;
+				for (int step = 2; step <= p_radius_steps; step++) {
+					const int sx = x + dx * step;
+					const int sz = z + dz * step;
+					if (sx < 0 || sx >= p_field.width ||
+							sz < 0 || sz >= p_field.depth) {
+						break;
+					}
+					const real_t slope = (p_field.get(sx, sz) - center) /
+							(real_t(step) * ray_step);
+					excess_horizon = MAX(excess_horizon, slope - local_slope);
+				}
+				// cos^2(horizon angle): a Lambert-weighted share of sky.
+				sky += real_t(1.0) /
+						(real_t(1.0) + excess_horizon * excess_horizon);
+			}
+			out[z * p_field.width + x] = CLAMP(sky * real_t(0.125), real_t(0.0), real_t(1.0));
+		}
+	}
+	return visibility;
+}
+
 real_t chunk_lod_deviation(const HeightField &p_field, int p_x0, int p_z0,
 		int p_quads, int p_coarse_stride) {
 	if (!p_field.is_valid() || p_quads < 2 || p_coarse_stride < 2 ||

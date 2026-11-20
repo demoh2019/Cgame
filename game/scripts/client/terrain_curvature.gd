@@ -5,7 +5,7 @@ extends RefCounted
 ## work, no extra texture, and identical edge colors at neighboring chunks.
 
 
-## R = concave cavity (indirect shade), G = convex ridge (soft warm lift).
+## R = concave cavity, G = convex ridge, B = baked open sky (1 = unoccluded).
 ## The material still owns the actual sun shadows, clouds, PBR and roughness.
 static func build(heights: PackedFloat32Array, origin: Vector2,
 		side: int, spacing: float, world_height: Callable) -> PackedColorArray:
@@ -33,5 +33,5 @@ static func build(heights: PackedFloat32Array, origin: Vector2,
 			var curvature: float = (left + right + near + far - 4.0 * center) 					* inv_spacing_squared
 			var cavity: float = smoothstep(0.015, 0.32, maxf(0.0, curvature))
 			var ridge: float = smoothstep(0.015, 0.42, maxf(0.0, -curvature))
-			colors[index] = Color(cavity, ridge, 0.0, 1.0)
+			colors[index] = Color(cavity, ridge, 1.0, 1.0) # B=1: unobstructed sky by default.
 	return colors

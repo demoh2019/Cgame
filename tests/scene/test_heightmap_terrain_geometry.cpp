@@ -518,4 +518,27 @@ TEST_CASE("[HeightmapTerrain] Geomorph normals clamp partial chunk borders") {
 	}
 }
 
+
+TEST_CASE("[HeightmapTerrain] Sky horizon AO preserves planes and darkens valleys") {
+	const Vector<real_t> plane = make_field(25, 25, [](int x, int z) {
+		return real_t(x * 0.17 + z * 0.13);
+	});
+	const Vector<real_t> plane_sky = bake_horizon_visibility(view(plane, 25, 25), 2.0, 6);
+	REQUIRE(plane_sky.size() == 625);
+	CHECK(plane_sky[12 * 25 + 12] == doctest::Approx(1.0).epsilon(1e-5));
+	const Vector<real_t> valley = make_field(25, 25, [](int x, int z) {
+		const real_t dx = real_t(x - 12);
+		const real_t dz = real_t(z - 12);
+		return real_t(0.34) * (dx * dx + dz * dz);
+	});
+	const Vector<real_t> valley_sky = bake_horizon_visibility(view(valley, 25, 25), 2.0, 6);
+	REQUIRE(valley_sky.size() == 625);
+	CHECK(valley_sky[12 * 25 + 12] < real_t(0.95));
+	CHECK(valley_sky[12 * 25 + 12] > real_t(0.10));
+	CHECK(valley_sky[0] >= real_t(0.0));
+	CHECK(valley_sky[0] <= real_t(1.0));
+	CHECK(bake_horizon_visibility(view(valley, 25, 25), 0.0, 6).is_empty());
+	CHECK(bake_horizon_visibility(view(valley, 25, 25), 2.0, 1).is_empty());
+}
+
 } // namespace TestHeightmapTerrainGeometry

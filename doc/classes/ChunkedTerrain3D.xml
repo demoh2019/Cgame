@@ -28,6 +28,16 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="bake_horizon_visibility" qualifiers="static">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="heights" type="PackedFloat32Array" />
+			<param index="1" name="dimensions" type="Vector2i" />
+			<param index="2" name="spacing" type="float" />
+			<param index="3" name="radius_steps" type="int" default="6" />
+			<description>
+				Calculates CPU-baked heightfield sky visibility (0 to 1) from eight azimuths, subtracting the local surface slope to avoid darkening a uniformly tilted plane. The output contains one value per input height and can be stored in the blue channel of [method set_color_data]. For seamless borders between independently streamed terrain nodes, pass a height grid padded by at least [param radius_steps] samples on each side, then crop the returned result to the interior. Supply row-major heights matching [param dimensions], positive finite [param spacing] and [param radius_steps] from 2 through 12. Does not allocate textures or add render passes.
+			</description>
+		</method>
 		<method name="clear_height_data">
 			<return type="void" />
 			<description>
