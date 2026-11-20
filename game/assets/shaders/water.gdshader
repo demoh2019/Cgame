@@ -8,6 +8,8 @@ uniform vec3 shallow_color : source_color = vec3(0.16, 0.5, 0.52);
 uniform vec3 deep_color : source_color = vec3(0.02, 0.15, 0.3);
 uniform float clarity = 5.0;
 uniform float ripple_strength = 0.35;
+uniform float detail_fade_start = 65.0;
+uniform float detail_fade_end = 125.0;
 
 varying vec3 world_position;
 
@@ -39,17 +41,24 @@ void fragment() {
 	// pixel positions. Two opposing wave trains preserve motion and sun glints.
 	// High/Ultra add fine noise only where their visual budget allows it.
 	float crest = 0.0;
+	// Only high-quality fine noise needs camera distance. Balanced/Performance
+	// skip this calculation and all expensive high-frequency noise octaves.
+	float detail_fade = 0.0;
+	if (ripple_strength > 0.30) {
+		detail_fade = 1.0 - smoothstep(detail_fade_start, detail_fade_end,
+			distance(p, CAMERA_POSITION_WORLD.xz));
+	}
 	if (ripple_strength > 0.001) {
 		float wave_a = dot(p, vec2(0.85, 0.52)) * 1.6 + t * 0.8;
 		float wave_b = dot(p, vec2(-0.42, 0.91)) * 3.2 - t * 1.2;
 		vec2 slope = vec2(0.85, 0.52) * cos(wave_a) * 0.065
 			+ vec2(-0.42, 0.91) * cos(wave_b) * 0.04;
-		if (ripple_strength > 0.30) {
+		if (ripple_strength > 0.30 && detail_fade > 0.001) {
 			vec2 flow = p * 0.65 + vec2(t * 0.07, -t * 0.06);
 			float e = 0.3;
 			float h = value_noise(flow);
 			slope += vec2(value_noise(flow + vec2(e, 0.0)) - h,
-				value_noise(flow + vec2(0.0, e)) - h) * (0.13 / e);
+				value_noise(flow + vec2(0.0, e)) - h) * (0.13 / e) * detail_fade;
 		}
 		vec3 world_normal = normalize(vec3(-slope.x * ripple_strength * 2.5, 1.0,
 			-slope.y * ripple_strength * 2.5));
@@ -69,16 +78,21 @@ void fragment() {
 
 	float depth_mix = clamp(thickness / clarity, 0.0, 1.0);
 	vec3 color = mix(shallow_color, deep_color, depth_mix);
-	// Foam where the water gets thin, broken up by moving noise.
+	// Most ocean pixels have no shoreline. Avoid even coarse foam noise when
+	// the depth difference says foam cannot contribute to the final color.
 	float edge = 1.0 - smoothstep(0.0, 0.9, thickness);
-	float foam_noise = 0.6;
-	if (ripple_strength > 0.001) {
-		foam_noise = value_noise(p * 3.2 + vec2(t * 0.2, -t * 0.15));
-		if (ripple_strength > 0.30) {
-			foam_noise = mix(foam_noise, value_noise(p * 7.0 - vec2(t * 0.3)), 0.4);
+	float foam = 0.0;
+	if (edge > 0.001) {
+		float foam_noise = 0.6;
+		if (ripple_strength > 0.001) {
+			foam_noise = value_noise(p * 3.2 + vec2(t * 0.2, -t * 0.15));
+			if (ripple_strength > 0.30 && detail_fade > 0.001) {
+				foam_noise = mix(foam_noise,
+					value_noise(p * 7.0 - vec2(t * 0.3)), 0.4 * detail_fade);
+			}
 		}
+		foam = smoothstep(0.35, 0.75, foam_noise + edge * 0.9 - 0.55) * edge;
 	}
-	float foam = smoothstep(0.35, 0.75, foam_noise + edge * 0.9 - 0.55) * edge;
 	color = mix(color, vec3(0.95, 0.98, 1.0), foam);
 
 	float fresnel = pow(1.0 - clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0), 3.0);

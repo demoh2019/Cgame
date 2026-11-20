@@ -139,7 +139,12 @@ static func apply(viewport: Viewport, atmosphere: Node3D, post_material: ShaderM
 
 	# The graphics profiles also control water detail and how many terrain chunks are streamed.
 	if water != null and water.material_override is ShaderMaterial:
-		(water.material_override as ShaderMaterial).set_shader_parameter("ripple_strength", float(world_profile["water_ripples"]))
+		var water_shader := water.material_override as ShaderMaterial
+		water_shader.set_shader_parameter("ripple_strength", float(world_profile["water_ripples"]))
+		# Only high-frequency ocean detail is faded, not the large waves,
+		# shoreline transparency, Fresnel or the physically lit reflections.
+		water_shader.set_shader_parameter("detail_fade_start", float(world_profile["water_detail_start"]))
+		water_shader.set_shader_parameter("detail_fade_end", float(world_profile["water_detail_end"]))
 	if streamer != null:
 		streamer.set("load_radius", float(world_profile["chunk_radius"]))
 		streamer.set("unload_radius", float(world_profile["chunk_unload"]))
