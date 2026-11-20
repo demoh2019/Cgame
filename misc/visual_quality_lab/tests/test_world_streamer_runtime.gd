@@ -30,7 +30,7 @@ func _run() -> void:
 		if manager.active_cell_count() > 0:
 			loaded = true
 			break
-		await process_frame
+		await create_timer(0.01).timeout
 	assert(loaded, "The player cell must stream in from the threaded PackedScene")
 	assert(manager.active_cell_count() == 1, "Spawn budget and radius must be enforced")
 	assert(manager.get_active_cell(Vector2i.ZERO) != null)
