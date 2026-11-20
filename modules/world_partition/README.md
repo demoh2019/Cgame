@@ -13,6 +13,8 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Instantiate `Node3D` cell roots on the main thread, preserving their authored transform and applying the cell origin.
 - Cap new requests, simultaneous outstanding requests, instantiation work and out-of-range scene unloads per frame. `max_unloads_per_frame` (default 32) smooths out mass cleanup after teleports; manual clear/remove or disabling streaming always unloads immediately.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
+- Preserve per-cell gameplay progress with optional scene-root callbacks `capture_streaming_state() -> Dictionary` and `restore_streaming_state(state: Dictionary)`. The native streamer captures state when a cell unloads and restores it when the scene re-enters, after `_ready()`.
+- Export and import **deep-copied** runtime state with `snapshot_cell_states()` / `load_cell_states(Dictionary)`; read or edit single cells with `get_cell_state`, `set_cell_state`, `has_cell_state`, `erase_cell_state`, `clear_cell_states` and `get_cell_state_count`. State remains cached when scene registrations are removed, until explicitly erased, and is not automatically written to disk.
 - Query currently instantiated cell scene roots with `get_cell_instance(cell)` for safe per-cell visual proxy control. The method returns `null` after unload instead of a stale pointer.
 - Avoid running streaming implicitly in the editor.
 
@@ -64,6 +66,54 @@ not re-register the scene.
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
 
+## Streaming gameplay state and save files
+
+`WorldPartition3D` provides an opt-in lifecycle contract for a scene's
+root `Node3D`, in addition to spatial streaming and pinning:
+
+```gdscript
+# On the cell scene root (for example, an opened treasure chest):
+var opened := false
+
+func capture_streaming_state() -> Dictionary:
+    return {"opened": opened}
+
+func restore_streaming_state(state: Dictionary) -> void:
+    opened = bool(state.get("opened", false))
+    # Update visuals after the scene has finished _ready().
+```
+
+The engine automatically captures state immediately before queueing the
+loaded cell for deletion and restores the cached data after the next
+`PackedScene` instantiation, before emitting `cell_loaded`.
+A cell whose root does not implement these methods streams as before.
+Empty state dictionaries remove any previous cached value.
+
+For checkpoint saves, ask the engine to capture still-loaded cells:
+
+```gdscript
+var file := FileAccess.open("user://world.save", FileAccess.WRITE)
+file.store_var({
+    "version": 1,
+    "cell_states": world.snapshot_cell_states(),
+    "pins": world.get_pinned_cells(),
+})
+file.close()
+
+var input := FileAccess.open("user://world.save", FileAccess.READ)
+var checkpoint: Variant = input.get_var(false) # Never deserialize objects.
+if checkpoint is Dictionary and checkpoint.get("version") == 1:
+    world.load_cell_states(checkpoint.get("cell_states", {}))
+    world.set_pinned_cells(checkpoint.get("pins", []))
+```
+
+The state cache is in memory until the game explicitly writes it. Use only
+save-compatible Variant types (numbers, strings, vectors, arrays and
+dictionaries), not Node/Object references. Production saves should validate
+the file, schema and size, use temporary-file/atomic replacement and account
+for game-version migrations. These APIs do not serialize physics engines,
+navigation agents or arbitrary child nodes automatically.
+
 ## Offline HLOD proxy authoring example
 
 The built-in demo at `modules/world_partition/demo/` includes a headless
@@ -89,7 +139,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 73 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (52), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 76 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (55), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"

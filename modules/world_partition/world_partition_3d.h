@@ -60,11 +60,14 @@ class WorldPartition3D : public Node3D {
 	HashSet<String> requested_paths;
 	HashMap<String, Ref<PackedScene>> ready_scenes;
 	HashSet<Vector2i> failed_cells;
+	HashMap<Vector2i, Dictionary> saved_cell_states;
 
 	static bool _within_radius(const Vector2i &p_cell, const Vector2i &p_center, int p_radius);
 	void _append_source_center(const NodePath &p_path, Vector<Vector2i> &r_centers) const;
 	bool _within_any_radius(const Vector2i &p_cell, const Vector<Vector2i> &p_centers, int p_radius) const;
 	String _get_scene_path(const Vector2i &p_cell) const;
+	void _capture_cell_state(const Vector2i &p_cell, Node *p_instance);
+	void _restore_cell_state(const Vector2i &p_cell, Node *p_instance);
 	void _unload_cell(const Vector2i &p_cell);
 	void _clear_active_cells();
 	void _poll_requests();
@@ -115,6 +118,15 @@ public:
 	bool is_cell_pinned(const Vector2i &p_cell) const;
 	Array get_pinned_cells() const;
 	int get_pinned_cell_count() const;
+
+	void set_cell_state(const Vector2i &p_cell, const Dictionary &p_state);
+	Dictionary get_cell_state(const Vector2i &p_cell) const;
+	bool has_cell_state(const Vector2i &p_cell) const;
+	void erase_cell_state(const Vector2i &p_cell);
+	void clear_cell_states();
+	Dictionary snapshot_cell_states();
+	void load_cell_states(const Dictionary &p_states);
+	int get_cell_state_count() const;
 
 	void set_cell_scenes(const Dictionary &p_cells);
 	Dictionary get_cell_scenes() const;

@@ -7,7 +7,7 @@
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around a primary observer node and optional additional observers. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
 		Additional observers in [member additional_observer_paths] are useful for split-screen cameras, co-op players, cinematic cameras and manual prefetch nodes. Cells are kept when in range of any valid observer, while all observers share the same per-frame request and instance budgets. Pinned cells from [method pin_cell] take priority, followed by the nearest grid rings of all observers. Within the same ring the primary observer takes priority, followed by additional observers in array order.
-		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
+		Loaded scene roots may optionally implement [code]capture_streaming_state()[/code] and [code]restore_streaming_state(state)[/code]. The streamer captures the former when unloading a cell and applies the latter after instantiation. [method snapshot_cell_states] and [method load_cell_states] provide a save-game bridge; they do not themselves write disk files. The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
 		var partition := WorldPartition3D.new()
@@ -35,10 +35,23 @@
 				Removes all registered cells and unloads instantiated cells.
 			</description>
 		</method>
+		<method name="clear_cell_states">
+			<return type="void" />
+			<description>
+				Removes all cached runtime state dictionaries. Does not change scene registrations, pins or already loaded scene objects. If those objects are unloaded later, their optional capture callback may repopulate state.
+			</description>
+		</method>
 		<method name="clear_pinned_cells">
 			<return type="void" />
 			<description>
 				Releases all runtime cell pins. Cells outside every observer's unload radius become eligible for normal budgeted unloading at the next update.
+			</description>
+		</method>
+		<method name="erase_cell_state">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Discards the cached gameplay state for a single cell without unloading its scene.
 			</description>
 		</method>
 		<method name="get_additional_observer_paths" qualifiers="const">
@@ -59,6 +72,19 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Returns the registered scene path or an empty string if none exists.
+			</description>
+		</method>
+		<method name="get_cell_state" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns a deep copy of the stored gameplay state for a cell, or an empty dictionary if none is stored. This does not invoke capture on active scenes; use [method snapshot_cell_states] to gather their latest state.
+			</description>
+		</method>
+		<method name="get_cell_state_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cells with nonempty cached gameplay state.
 			</description>
 		</method>
 		<method name="get_cells_in_radius" qualifiers="const">
@@ -99,6 +125,13 @@
 				Returns a new array of the pinned [Vector2i] coordinates in insertion order. No more than 128 cells may be pinned at once.
 			</description>
 		</method>
+		<method name="has_cell_state" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] if a nonempty gameplay state is cached for the cell.
+			</description>
+		</method>
 		<method name="is_cell_loaded" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -111,6 +144,13 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Returns [code]true[/code] while a cell is pinned, even if it has no registered scene.
+			</description>
+		</method>
+		<method name="load_cell_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces the entire state cache with valid [Vector2i] to [Dictionary] mappings, ignoring other entries. Passes deep copies into active scene roots that implement [code]restore_streaming_state(state)[/code]. Empty dictionaries are ignored. Caller is responsible for validating save files before invoking this method.
 			</description>
 		</method>
 		<method name="local_position_to_cell" qualifiers="const">
@@ -149,11 +189,25 @@
 				Registers a resource path for a cell. An empty path removes the mapping. Replacing a path unloads the previous cell.
 			</description>
 		</method>
+		<method name="set_cell_state">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="state" type="Dictionary" />
+			<description>
+				Stores a deep copy of [param state] for a cell. An empty dictionary erases a previous cached state. For an active scene root with a [code]restore_streaming_state(state)[/code] method, a copy is applied immediately.
+			</description>
+		</method>
 		<method name="set_pinned_cells">
 			<return type="void" />
 			<param index="0" name="cells" type="Array" />
 			<description>
 				Replaces the pinned cell coordinates, preserving the first occurrence of each [Vector2i]. Unsupported array entries are skipped. Arrays with more than 128 entries are rejected without changing existing pins. The normalized result is returned by [method get_pinned_cells].
+			</description>
+		</method>
+		<method name="snapshot_cell_states">
+			<return type="Dictionary" />
+			<description>
+				Captures the latest state of active cell roots implementing [code]capture_streaming_state()[/code], then returns a deep-copy [Dictionary] of [Vector2i] keys to state dictionaries. Returns only nonempty states. Compatible with [code]FileAccess.store_var(snapshot)[/code] and [code]FileAccess.get_var(false)[/code] when values are serializable Variants without objects. Does not save a file automatically.
 			</description>
 		</method>
 		<method name="unpin_cell">
