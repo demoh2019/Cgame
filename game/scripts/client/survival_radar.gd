@@ -137,6 +137,22 @@ func _draw() -> void:
 			_paint_pin(Vector2(float(bag["x"]), float(bag["z"])),
 				origin, Color(0.41, 0.93, 0.68), 3.0)
 
+	## The party standard is visible to members as a field aura radius.
+	# No non-member coordinates are ever sent by the server.
+	var current_standard: Dictionary = {}
+	if sim != null and sim.players.has(actor_id):
+		current_standard = sim.parties.state_for(actor_id, sim.time).get("standard", {})
+	elif client != null:
+		current_standard = client.you.get("party", {}).get("standard", {})
+	if not current_standard.is_empty():
+		var point := Vector2(float(current_standard["x"]), float(current_standard["z"]))
+		if in_range(origin, point):
+			var map_position: Vector2 = map_point(origin, point, size)
+			var scale: float = minf(size.x, size.y) * MAP_INSET / METERS_RADIUS
+			draw_arc(map_position, 11.0 * scale, 0.0, TAU, 32,
+				Color(0.98, 0.72, 0.25, 0.68), 1.5)
+			_paint_pin(point, origin, Color(0.98, 0.72, 0.25), 5.1)
+
 	# Local survivor always stays in the center of a player-following radar.
 	var yaw_value: float = current_yaw()
 	var facing := Vector2(sin(yaw_value), cos(yaw_value))
