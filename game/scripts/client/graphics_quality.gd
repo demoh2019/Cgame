@@ -82,6 +82,13 @@ static func profile(value: int) -> Dictionary:
 				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0, "terrain_detail_radius": 96.0, "terrain_pixel_error": 0.9, "ground_contact_strength": 0.7, "curvature_strength": 1.0, "puddle_ripple_strength": 1.0, "mesh_lod_threshold": 0.75, "terrain_layer_budget": 13, "terrain_warp_strength": 0.42, "terrain_height_blend": 0.85, "cliff_normal_quality": 1.0, "specular_aa_strength": 0.30, "micro_occlusion": 0.85, "normal_variance_strength": 0.95, "wet_clearcoat": 0.65, "sharpen_strength": 0.22, "deband_strength": 1.0}
 
 
+## Limit expensive SDFGI occlusion to Ultra dungeon spaces. Online scene
+## calls this at its existing weather tick, with idempotent GPU updates.
+static func update_dynamic_sdfgi(environment: Environment, underground: bool) -> void:
+	GraphicsIndirectLighting.update_visibility(environment, _level,
+		str(RenderingServer.get_current_rendering_method()), underground)
+
+
 ## Native manual High/Ultra can use a small focused detail boost. Forward+ adaptive
 ## FSR2 already performs image reconstruction; never sharpen that output twice.
 static func post_sharpen_strength(value: int, method: String, adaptive: bool) -> float:
