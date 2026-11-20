@@ -80,6 +80,7 @@ const SUITES := [
 	"res://tests/test_dungeon_light_budget.gd",
 	"res://tests/test_dungeon_torch_cookie.gd",
 	"res://tests/test_dungeon_reflections.gd",
+	"res://tests/test_outdoor_reflection_budget.gd",
 	"res://tests/test_dungeon_occlusion.gd",
 	"res://tests/test_shadow_budget.gd",
 	"res://tests/test_shadow_refresh_cache.gd",
