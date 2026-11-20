@@ -97,3 +97,25 @@ not regress. This change **does not claim an FPS gain without benchmarks**.
 
 Custom engine compilation/runtime is not available in this editing
 environment; the new tests must be run on a compiled build.
+
+## Immediate camera-turn queue refresh (engine + game)
+
+The customized Godot engine already uses movement and camera hints to prioritize world-chunk generation. However, the original `WorldStreamer` queue was rebuilt at a fixed interval (150 ms in the online game), even after a rapid camera turn. Finished asynchronous scene files also used motion-only priority, unlike procedural chunks.
+
+The engine now optionally refreshes its streaming queue when camera heading changes significantly from the heading **used for the last queue rebuild**, instead of comparing only consecutive frames. It checks the cosine of the turn angle (no expensive `acos`) and refreshes no more often than once every **50 ms**, limiting repeated sorting and scene probing. When it finds a significant turn, it rebuilds the existing candidate set in view-aware order *before* the normal queue drain. The same camera + movement priority is now used to integrate finished asynchronously loaded scenes, rather than only to schedule procedural generation.
+
+New `WorldStreamer.fast_view_refresh_degrees` property defaults to **0** (the old behavior). In Albion After the existing `WorldStreamingPolicy.apply_view()` calls set it automatically for the current quality:
+
+| Graphics profile | Fast turn threshold |
+| --- | ---: |
+| Performance | 60° |
+| Balanced | 45° |
+| High | 35° |
+| Ultra | 30° |
+
+Lower thresholds improve response to smaller camera cuts; higher thresholds reduce CPU work on slower hardware. No new world cells are added, the loaded set is still bounded by the original player-centered `load_radius` / `unload_radius`, and the existing combined per-frame `max_instantiations_per_frame` / `max_chunk_work_usec` limits are unchanged. A normal camera orbit with no large change continues using the original update interval.
+
+**Testing:** Native C++ `test_open_world.cpp` checks bounded input, no refresh on tiny camera movement, deterministic 90°/180° detection, and an actual streamed procedural queue switching from east to west before its 8-second normal update interval. Godot's `test_world_streamer_shared_budget.gd` verifies per-tier parameters, legacy defaults, camera-policy integration, and runtime property validation. A source-level Python test checks that both finished threaded scenes and procedural queue refresh share the native scheduling policy.
+
+Rebuild the custom Godot engine, then capture a rapid first-person 180° camera turn while standing still and measure queued-cell latency and p95/p99 CPU frame time. Compare High/Ultra against the old 150 ms refresh cadence, and verify no extra chunks or memory growth. This update has not been compiled or profiled on actual hardware in the current session.
+
