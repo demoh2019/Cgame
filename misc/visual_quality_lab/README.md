@@ -151,8 +151,51 @@ Instead of limiting the example to a graphics showcase, the demo now includes a 
 
 The reusable module is `addons/visual_quality/exploration_quest.gd` (`ExplorationQuest3D`). It validates pickups on the game side, prevents duplicate collection, and saves collected IDs to `user://visual_quality_quest_v1.cfg` with version, seed, and item-count checks. The quest uses no network services, accounts, premium currency, telemetry, or copyrighted content. It is a **local single-player prototype** (not a multiplayer-authoritative reward system), and does not claim to be an entire RPG.
 
-To use the quest in another game, create an `ExplorationQuest3D` node, assign its `player` to a camera/player `Node3D` *before adding it to the scene*, and optionally connect `progress_changed`, `pickup_hint_changed`, and `quest_finished` to your own UI and world systems. The world-space placements assume a flat floor around local Y=0; replace `generate_positions()` with terrain-sampling for uneven worlds. `get_viewport().get_camera_3d()` is used only in the demo integration.
+To use the quest in another game, create an `ExplorationQuest3D` node, assign its `player` to a camera/player `Node3D` *before adding it to the scene*, and optionally connect `progress_changed`, `pickup_hint_changed`, and `quest_finished` to your own UI and world systems. The world-space placements assume a flat floor around local Y=0; replace `generate_positions()` with terrain-sampling for uneven worlds. The demo assigns the physical player's eye-level Camera3D as its pickup reference.
 
 New regression script: `res://tests/test_exploration_quest.gd`, covering deterministic spawn layout, bounds, pickup proximity, duplicate prevention, reset and state validation. CI runs this test as part of the Godot headless suite. **Actual Godot execution and Apple Metal rendering remain unverified while the CI job is queued and the authorized Mac is offline.**
 
 Source pattern: [Godot user:// data paths](https://docs.godotengine.org/en/stable/tutorials/io/data_paths.html), [Godot ConfigFile](https://docs.godotengine.org/en/stable/classes/class_configfile.html).
+
+
+## Visual Quality Lab v7 — first-person physical movement
+
+The prototype now defaults to a **real `CharacterBody3D`** instead of the
+free-floating renderer camera. Its capsule collides with a real static floor
+and stage obstacles, while the camera is at eye height. Unlike visual-only
+movement, the controller handles slopes, floor snap, gravity, jumping,
+acceleration, braking, sprinting, and air control in `_physics_process()`.
+It offers forgiving **jump buffering** (0.12s) and **coyote time** (0.12s)
+without repeated bunny-hopping when the jump key is held. This follows the
+same separation of ground/air movement as modern character-movement systems.
+
+**Controls:** WASD walk, Space jump, Shift sprint, RMB drag to look, V to
+switch between collision-aware walking and optional free flight. In flight,
+Q/E move down/up. F picks up nearby shards; R resets the quest. All weather,
+quality and graphics UI controls from v6 remain usable. A new HUD indicator
+shows WALK or FLY. The old `fly_camera.gd` remains bundled only for API
+compatibility; the demo now uses `character_controller.gd`.
+
+To integrate into an existing 3D game, instantiate `VisualLabCharacter3D`
+(or attach `character_controller.gd` to a `CharacterBody3D`) and give it a
+collision-enabled level. If the player node has no collision/camera child,
+the script creates a capsule and eye-level camera automatically. This is a
+local single-player controller, not a full multiplayer predicted movement
+component or animation rig. The demo does not yet implement terrain-aware
+shard placement or physical tree-trunk collisions.
+
+### Verification commands
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+godot --headless --path . --script res://tests/test_character.gd
+godot --headless --path . --script res://tests/test_character_physics.gd
+godot --headless --path . --quit-after 60
+```
+
+The Godot physics test spawns a real static floor, drops the player capsule,
+checks landing, and checks walk/fly toggling. Python static checks do not
+establish that rendering or physical simulation works on a target GPU.
+
+References: [Godot CharacterBody3D](https://docs.godotengine.org/en/4.6/classes/class_characterbody3d.html),
+[Unreal Character Movement](https://dev.epicgames.com/documentation/en-us/unreal-engine/movement-components-in-unreal-engine).
