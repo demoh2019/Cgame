@@ -45,15 +45,20 @@ void vertex() {
 	ground_xz = root.xz;
 	float shrink = 1.0 - smoothstep(fade_start, fade_end, length(root.xz - CAMERA_POSITION_WORLD.xz));
 	VERTEX.y *= shrink;
-	// Wind: a steady ripple plus broad gusts rolling across the meadow. A gust bends the tips and makes them catch the
-	// light, so the wind shows as lighter waves running over the grass.
-	float k = UV.y * UV.y;
-	float wave = TIME * 1.6 + root.x * 0.31 + root.z * 0.27;
-	float gust = sin(TIME * 0.7 + root.x * 0.045 + root.z * 0.03) * 0.5 + 0.5;
-	gust = gust * gust;
-	VERTEX.x += (sin(wave) * 0.035 + gust * 0.11) * k * shrink;
-	VERTEX.z += (cos(wave * 0.8) * 0.03 + gust * 0.05) * k * shrink;
-	sheen = gust;
+	// Blades already sunk into the ground should not evaluate several wind trigonometric
+	// waves per vertex. This matters because MultiMesh tiles are still alive in the
+	// culling margin outside the shader fade range.
+	sheen = 0.0;
+	if (shrink > 0.001) {
+		// Wind: steady ripples with larger gusts, strongest at the tips.
+		float k = UV.y * UV.y;
+		float wave = TIME * 1.6 + root.x * 0.31 + root.z * 0.27;
+		float gust = sin(TIME * 0.7 + root.x * 0.045 + root.z * 0.03) * 0.5 + 0.5;
+		gust *= gust;
+		VERTEX.x += (sin(wave) * 0.035 + gust * 0.11) * k * shrink;
+		VERTEX.z += (cos(wave * 0.8) * 0.03 + gust * 0.05) * k * shrink;
+		sheen = gust;
+	}
 	// Lit like the ground it grows from, so the carpet and the soil read as one surface.
 	NORMAL = vec3(0.0, 1.0, 0.0);
 }
