@@ -267,6 +267,39 @@ int select_lod(real_t p_distance, real_t p_base_distance, int p_lod_count, int p
 	return lod;
 }
 
+// Interpolate the normals of the three actual coarse triangle vertices.
+// A derivative of the fine heightfield would light the morphed triangles
+// incorrectly; matching the *coarse* vertex normals prevents a lighting pop
+// when the geometry switches from the fine mesh to the next coarse LOD.
+static Vector3 sample_coarse_morph_normal(const HeightField &p_field, const Params &p_params,
+		int p_x0, int p_z0, int p_local_x, int p_local_z, int p_coarse_stride) {
+	const int left = (p_local_x / p_coarse_stride) * p_coarse_stride;
+	const int top = (p_local_z / p_coarse_stride) * p_coarse_stride;
+	const real_t fx = real_t(p_local_x - left) / real_t(p_coarse_stride);
+	const real_t fz = real_t(p_local_z - top) / real_t(p_coarse_stride);
+	// Edge chunks can contain vertices beyond the height array. Clamp
+	// source-grid normals just as HeightField::get clamps height lookups,
+	// including the case where the caller supplied a raw normal_override.
+	auto normal_at = [&](int local_x, int local_z) -> Vector3 {
+		const int sx = MIN(p_x0 + local_x, p_field.width - 1);
+		const int sz = MIN(p_z0 + local_z, p_field.depth - 1);
+		return sample_normal(p_field, sx, sz, p_params);
+	};
+	const Vector3 n00 = normal_at(left, top);
+	if (fx == 0.0 && fz == 0.0) {
+		// Coarse-grid vertices already use the exact same normal at both LODs.
+		return n00;
+	}
+	const Vector3 n10 = normal_at(left + p_coarse_stride, top);
+	const Vector3 n01 = normal_at(left, top + p_coarse_stride);
+	if (fx + fz <= real_t(1.0)) {
+		return (n00 + (n10 - n00) * fx + (n01 - n00) * fz).normalized();
+	}
+	const Vector3 n11 = normal_at(left + p_coarse_stride, top + p_coarse_stride);
+	return (n11 + (n01 - n11) * (real_t(1.0) - fx) +
+			(n10 - n11) * (real_t(1.0) - fz)).normalized();
+}
+
 bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, int p_stride, const Params &p_params, ChunkMesh &r_mesh) {
 	r_mesh = ChunkMesh();
 	if (!p_field.is_valid() || p_quads < 1 || p_stride < 1 || (p_quads % p_stride) != 0) {
@@ -293,8 +326,10 @@ bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, in
 			p_params.geomorph_coarse_stride <= p_quads;
 	if (geomorph) {
 		r_mesh.morph_uv2.resize(body_vertices + skirt_vertices);
+		r_mesh.morph_normal_xyz.resize((body_vertices + skirt_vertices) * 3);
 	}
 	Vector2 *morph_uv = geomorph ? r_mesh.morph_uv2.ptrw() : nullptr;
+	float *morph_normal = geomorph ? r_mesh.morph_normal_xyz.ptrw() : nullptr;
 	Vector3 *vertex = r_mesh.vertices.ptrw();
 	Vector3 *normal = r_mesh.normals.ptrw();
 	Color *colors = p_params.color_override != nullptr ? r_mesh.colors.ptrw() : nullptr;
@@ -321,6 +356,13 @@ bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, in
 						[&](int px, int pz) { return float(p_field.get(px, pz)); });
 				morph_uv[index] = Vector2(target * p_params.height_scale + p_params.height_offset,
 						TerrainGeomorphPolicy::interior_mask(i * p_stride, j * p_stride, p_quads));
+				// Normals are interpolated from the exact coarse triangle as
+				// the height morph. Source normal overrides remain supported.
+				const Vector3 coarse_normal = sample_coarse_morph_normal(p_field, p_params,
+						p_x0, p_z0, i * p_stride, j * p_stride, p_params.geomorph_coarse_stride);
+				morph_normal[index * 3] = float(coarse_normal.x);
+				morph_normal[index * 3 + 1] = float(coarse_normal.y);
+				morph_normal[index * 3 + 2] = float(coarse_normal.z);
 			}
 			min_y = MIN(min_y, y);
 			max_y = MAX(max_y, y);
@@ -356,6 +398,12 @@ bool build_chunk(const HeightField &p_field, int p_x0, int p_z0, int p_quads, in
 			uv[skirt_start[e] + k] = uv[source];
 			if (geomorph) {
 				morph_uv[skirt_start[e] + k] = Vector2(vertex[skirt_start[e] + k].y, 0.0);
+				// Skirts are never morphed; copying avoids invalid attribute
+				// memory while keeping the additional vertex buffer aligned.
+				const int output = skirt_start[e] + k;
+				morph_normal[output * 3] = morph_normal[source * 3];
+				morph_normal[output * 3 + 1] = morph_normal[source * 3 + 1];
+				morph_normal[output * 3 + 2] = morph_normal[source * 3 + 2];
 			}
 		}
 	}

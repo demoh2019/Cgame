@@ -78,7 +78,14 @@ float fbm(vec2 p) {
 }
 
 void vertex() {
-	VERTEX.y = mix(VERTEX.y, UV2.x, aa_lod_morph * UV2.y);
+	float morph = clamp(aa_lod_morph * UV2.y, 0.0, 1.0);
+	VERTEX.y = mix(VERTEX.y, UV2.x, morph);
+	if (morph > 0.001) {
+		// Custom0 contains the next LOD's *coarse vertex normals*. Light
+		// shading now follows the same triangle transition as vertex height.
+		// Performance/Balanced omit this stream; their morph is always zero.
+		NORMAL = normalize(mix(NORMAL, CUSTOM0.xyz, morph));
+	}
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	// Macro shadows change slowly in world space: evaluating them per vertex avoids

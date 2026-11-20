@@ -425,4 +425,97 @@ TEST_CASE("[HeightmapTerrain] Orthographic pixel LOD respects aspect and renderi
 	CHECK(orthographic_lod_pixel_scale(1920, 1080, -1, 16, true) == doctest::Approx(0));
 }
 
+
+TEST_CASE("[HeightmapTerrain] Geomorph normal target matches the next coarse LOD") {
+	const Vector<real_t> relief = make_field(17, 17, [](int x, int z) {
+		return real_t(Math::sin(real_t(x) * 0.65) * 2.0 + Math::cos(real_t(z) * 0.4));
+	});
+	const HeightField field = view(relief, 17, 17);
+	Params params;
+	params.spacing = Vector2(2.0, 2.0);
+	params.geomorph_coarse_stride = 2;
+	ChunkMesh fine;
+	REQUIRE(build_chunk(field, 0, 0, 16, 1, params, fine));
+	const int side = 17;
+	CHECK(fine.morph_normal_xyz.size() == fine.vertices.size() * 3);
+	auto read_target = [&](int index) -> Vector3 {
+		return Vector3(fine.morph_normal_xyz[index * 3],
+				fine.morph_normal_xyz[index * 3 + 1],
+				fine.morph_normal_xyz[index * 3 + 2]);
+	};
+	// At coarse-grid vertices, both LODs must have exactly the same normal.
+	for (int z = 0; z < 17; z += 2) {
+		for (int x = 0; x < 17; x += 2) {
+			const int index = z * side + x;
+			CHECK(read_target(index).is_equal_approx(fine.normals[index]));
+		}
+	}
+	// At (1,1), the mesh diagonal interpolates coarse (2,0) and (0,2).
+	const Vector3 n10 = sample_normal(field, 2, 0, params);
+	const Vector3 n01 = sample_normal(field, 0, 2, params);
+	const Vector3 expected = ((n10 + n01) * real_t(0.5)).normalized();
+	CHECK(read_target(side + 1).is_equal_approx(expected));
+	CHECK(read_target(side + 1).is_normalized());
+	CHECK_FALSE(read_target(side + 1).is_equal_approx(fine.normals[side + 1]));
+	// Skirts carry their source normals, but their UV2 mask is always zero.
+	CHECK(read_target(side * side).is_equal_approx(read_target(0)));
+	CHECK(fine.morph_uv2[side * side].y == doctest::Approx(0.0));
+	// The coarsest level has no target LOD and pays no extra vertex memory.
+	params.geomorph_coarse_stride = 0;
+	ChunkMesh fallback;
+	REQUIRE(build_chunk(field, 0, 0, 16, 4, params, fallback));
+	CHECK(fallback.morph_uv2.is_empty());
+	CHECK(fallback.morph_normal_xyz.is_empty());
+}
+
+TEST_CASE("[HeightmapTerrain] Custom normal field drives geomorph target too") {
+	const Vector<real_t> data = make_field(5, 5, [](int x, int z) { return real_t(x + z); });
+	const HeightField field = view(data, 5, 5);
+	Vector<Vector3> supplied;
+	supplied.resize(25);
+	for (int z = 0; z < 5; z++) {
+		for (int x = 0; x < 5; x++) {
+			supplied.write[z * 5 + x] = Vector3(real_t(-x) * 0.07, 1.0, real_t(z) * 0.03).normalized();
+		}
+	}
+	Params params;
+	params.normal_override = supplied.ptr();
+	params.geomorph_coarse_stride = 2;
+	ChunkMesh mesh;
+	REQUIRE(build_chunk(field, 0, 0, 4, 1, params, mesh));
+	const Vector3 n10 = supplied[2]; // (2, 0)
+	const Vector3 n01 = supplied[2 * 5]; // (0, 2)
+	const Vector3 target(mesh.morph_normal_xyz[(5 + 1) * 3],
+			mesh.morph_normal_xyz[(5 + 1) * 3 + 1],
+			mesh.morph_normal_xyz[(5 + 1) * 3 + 2]);
+	CHECK(target.is_equal_approx((n10 + n01).normalized()));
+}
+
+TEST_CASE("[HeightmapTerrain] Geomorph normals clamp partial chunk borders") {
+	const Vector<real_t> data = make_field(20, 20, [](int x, int z) {
+		return real_t(x * x * 0.01 + z * 0.2);
+	});
+	const HeightField field = view(data, 20, 20);
+	Vector<Vector3> normal_grid;
+	normal_grid.resize(20 * 20);
+	for (int z = 0; z < 20; z++) {
+		for (int x = 0; x < 20; x++) {
+			normal_grid.write[z * 20 + x] = Vector3(real_t(-x) * 0.02, 1.0, -0.1).normalized();
+		}
+	}
+	Params params;
+	params.normal_override = normal_grid.ptr();
+	params.geomorph_coarse_stride = 4;
+	ChunkMesh partial;
+	REQUIRE(build_chunk(field, 16, 16, 16, 1, params, partial));
+	CHECK(partial.morph_normal_xyz.size() == partial.vertices.size() * 3);
+	for (int i = 0; i < partial.vertices.size(); i++) {
+		const Vector3 target(partial.morph_normal_xyz[i * 3],
+				partial.morph_normal_xyz[i * 3 + 1],
+				partial.morph_normal_xyz[i * 3 + 2]);
+		CHECK(target.is_finite());
+		CHECK(target.y > 0.0);
+	}
+}
+
 } // namespace TestHeightmapTerrainGeometry
