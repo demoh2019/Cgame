@@ -192,10 +192,18 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 			(_cloud_offset.x + _cloud_offset.y) / CloudShadowLut.TILE_METERS)
 		# Sky cloud detail and terrain clouds share the same integrated wind.
 		sky_material.set_shader_parameter("cirrus_wind_offset", _cloud_offset)
-		# DirectionalLight3D emits along -Z. Cache exactly that direction for the disc.
-		sky_material.set_shader_parameter("sun_direction", sun.global_transform.basis.z.normalized())
+		# DirectionalLight3D emits along -Z. Cache the world-space vector
+		# TOWARD the sun, then reuse it in the shallow-water light transport.
+		var to_sun: Vector3 = sun.global_transform.basis.z.normalized()
+		sky_material.set_shader_parameter("sun_direction", to_sun)
 		var light_color: Color = sun.light_color
-		sky_material.set_shader_parameter("sun_color", Vector3(light_color.r, light_color.g, light_color.b) * sun.light_energy)
+		var solar_radiance := Vector3(light_color.r, light_color.g, light_color.b) * sun.light_energy
+		sky_material.set_shader_parameter("sun_color", solar_radiance)
+		# Water uses this shared solar state, refreshed with the sky cache.
+		# At night, moon fill must not masquerade as direct solar scattering.
+		RenderingServer.global_shader_parameter_set(&"aa_sun_to_light", to_sun)
+		RenderingServer.global_shader_parameter_set(&"aa_sun_radiance",
+			solar_radiance * smoothstep(0.02, 0.28, daylight))
 	# Moonlit nights: the black night sky gives no ambient light, so a cool blue fill takes over as the light goes, and the
 	# world stays readable in deep blue instead of turning to pitch black.
 	environment.ambient_light_color = Color(0.3, 0.38, 0.62)
