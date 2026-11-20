@@ -14,6 +14,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Optionally cap successive main-thread instantiations with `max_instantiation_time_ms` (default 0 = disabled). The first ready cell always loads, preventing starvation; a single expensive `_ready()` may still exceed the soft budget.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
+- **Direct cell scene lookup:** `get_cell_node(cell)` returns the loaded Node3D root (or `null`) using the native cell index. Call from `cell_loaded` to configure one cell without scanning all streamed children.
 - **Region readiness queries:** `are_cells_loaded(center, radius=0)` returns true only when every cell in the square is instantiated. Useful for spawn/teleport gates, AI activation and gameplay dependencies; scene instantiation does not guarantee downstream physics/asset upload readiness.
 - **Observer grid events:** `has_observer_cell()`, `get_observer_cell()` and `observer_cell_changed(cell)` help gameplay react to crossing streaming cell boundaries without polling player coordinates. The first successful observer lookup emits this signal, as does a subsequent cell-size or observer-path change.
 - Avoid running streaming implicitly in the editor.
