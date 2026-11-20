@@ -34,6 +34,7 @@ render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
 global uniform float aa_puddle_ripple_strength;
 global uniform float aa_ground_contact_strength;
+global uniform float aa_terrain_curvature_strength;
 global uniform float aa_terrain_detail_radius;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/puddle_ripples.gdshaderinc"
@@ -154,8 +155,15 @@ void fragment() {
 		ground_contact = 1.0 - (1.0 - contact_sample)
 			* aa_ground_contact_strength * detail_fade;
 	}
-	AO = ground_contact;
-	ALBEDO = color * mix(1.0, ground_contact, 0.12)
+	// Match the curvature contribution of the textured material even when
+	// optional PBR texture packs are missing (no extra texture reads).
+	float cavity = clamp(COLOR.r, 0.0, 1.0)
+		* aa_terrain_curvature_strength * detail_fade;
+	float ridge = clamp(COLOR.g, 0.0, 1.0)
+		* aa_terrain_curvature_strength * detail_fade;
+	AO = ground_contact * (1.0 - cavity * 0.24);
+	ALBEDO = color * (1.0 - cavity * 0.095 + ridge * 0.035)
+		* mix(1.0, ground_contact, 0.12)
 		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), vertex_cloud_shade);
 	// Match the same water caustic field even if 13-layer PBR assets are absent.
 	// Low-end graphics uniformly skip the shader math on Compatibility.
