@@ -8,6 +8,7 @@ const SUITES := [
 	"res://tests/test_graphics_lightning_flash.gd",
 	"res://tests/test_sky_lighting_budget.gd",
 	"res://tests/test_rain_vfx.gd",
+	"res://tests/test_graphics_lens_rain.gd",
 	"res://tests/test_footprint_decals.gd",
 	"res://tests/test_puddle_ripples.gd",
 	"res://tests/test_terrain_height_blend.gd",

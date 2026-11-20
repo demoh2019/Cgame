@@ -34,6 +34,7 @@ const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const RainGear = preload("res://scripts/client/character_rain_gear.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const GraphicsColorGrade = preload("res://scripts/client/graphics_color_grade.gd")
+const GraphicsLensRain = preload("res://scripts/client/graphics_lens_rain.gd")
 const RenderBenchmark = preload("res://scripts/client/render_benchmark.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
@@ -1267,6 +1268,12 @@ func _update_time_of_day(delta: float) -> void:
 		_grade_elapsed = fmod(_grade_elapsed, 0.20)
 		GraphicsColorGrade.apply(_grade_material, WorldCycle.daylight(clock),
 			WorldCycle.sun_height(clock), atmosphere.storm, underground)
+		# Storm lens droplets share the same post material and 5 Hz update.
+		# No extra CanvasLayer or fullscreen back-buffer copy is created.
+		GraphicsLensRain.apply(_grade_material, atmosphere.storm,
+			GraphicsQuality.level(), str(RenderingServer.get_current_rendering_method()),
+			_visual_weather_wind, underground,
+			bool(weather.get("sheltered", false)) and not demo_storm)
 	_set_carried_light(underground)
 	if audio != null:
 		audio.update_music(WorldCycle.daylight(clock), delta)

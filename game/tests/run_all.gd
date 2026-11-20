@@ -40,6 +40,7 @@ const SUITES := [
 	"res://tests/test_graphics_resolution.gd",
 	"res://tests/test_graphics_texture_streaming.gd",
 	"res://tests/test_postprocess_sharpen.gd",
+	"res://tests/test_graphics_lens_rain.gd",
 	"res://tests/test_postprocess_deband.gd",
 	"res://tests/test_cinematic_color_grade.gd",
 	"res://tests/test_cinematic_bloom.gd",
