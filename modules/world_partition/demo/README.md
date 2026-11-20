@@ -33,6 +33,7 @@ detailed cells and lightweight distant proxies with no additional engine rendere
 - `WorldPartition3D.max_unloads_per_frame` limits mass scene deletion after
   teleports. Quality modes apply unload budgets of 8/16/32 cells per frame.
 - Press F to toggle crossfading at runtime for side-by-side FPS profiling.
+- New native `WorldPartition3D.pin_cell()` keeps gameplay-important areas loaded. The scene starts with the **Quest Hub** at cell (0, 0) pinned, regardless of the moving camera. Press **H** to release/re-pin it, or **G** to pin/release the **Combat Arena** at (4, 2). Both landmarks have an emissive marker in their detailed cell scene. The HUD shows the pin count and residency status.
 - Optional additional observer attached 180 m in front of camera prefetches
   detailed cells when PR #919 is included.
 
@@ -79,8 +80,9 @@ The project uses Compatibility renderer so it can be inspected on low-end GPUs;
 near/far proxy handoff is implemented without renderer-specific effects.
 
 WASD to fly, Space/Ctrl for up/down, Shift for speed, P to toggle forward prefetch,
-L to toggle distant proxy scenes, F to toggle near/far crossfade, R to retry
-failed resource loads when the telemetry/retry API from PR #916 is present.
+L to toggle distant proxy scenes, F to toggle near/far crossfade,
+H to keep/release the Quest Hub, G to keep/release the Combat Arena,
+R to retry failed resource loads when the telemetry/retry API from PR #916 is present.
 Without that engine API, R displays a warning instead of silently doing nothing.
 HUD displays FPS, detail/proxy cell counts, the active quality preset and auto mode.
 
@@ -102,7 +104,8 @@ Quality controller assertions (after importing the project):
 
 ## Limitations / validation
 
-- Native `get_cell_instance()` is required for proxy handoff; this branch includes it.
+- Native `get_cell_instance()` is required for proxy handoff and `pin_cell()` is required for the gameplay residency controls; this stacked branch includes both.
+- Pinning is **not** scene-state persistence or save-game serialization: it prevents distance-based unloading while active. It still respects the native streaming budgets, so it does not synchronously load the scene.
 - This is not the user's actual game project. The example lives in the engine
   source repository so it can be copied into a real Godot game once its source is available.
 - The manifest checks are designed for integrity and content invalidation,

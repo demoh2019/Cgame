@@ -52,6 +52,40 @@ func _ready() -> void:
     _add_instances("Trunks", trunks)
     _add_instances("Canopies", crowns)
 
+    # Gameplay landmarks belong to detailed scenes only. The demo's native
+    # pinning API allows the hub and event arena to remain resident offscreen.
+    if not proxy and (grid == Vector2i(0, 0) or grid == Vector2i(4, 2)):
+        _add_gameplay_landmark(grid == Vector2i(0, 0))
+
+func _add_gameplay_landmark(is_hub: bool) -> void:
+    var anchor := Node3D.new()
+    anchor.name = "QuestHub" if is_hub else "CombatArena"
+    anchor.position = Vector3(CELL_SIZE * 0.5, 0.0, CELL_SIZE * 0.5)
+    add_child(anchor)
+
+    var column := MeshInstance3D.new()
+    column.name = "Landmark"
+    var shape := CylinderMesh.new()
+    shape.top_radius = 0.7
+    shape.bottom_radius = 1.4
+    shape.height = 12.0
+    var material := StandardMaterial3D.new()
+    material.albedo_color = Color(0.08, 0.75, 0.44) if is_hub else Color(0.85, 0.21, 0.12)
+    material.emission_enabled = true
+    material.emission = material.albedo_color
+    material.emission_energy_multiplier = 1.5
+    shape.material = material
+    column.mesh = shape
+    column.position.y = 6.0
+    anchor.add_child(column)
+
+    var nameplate := Label3D.new()
+    nameplate.text = "QUEST HUB  [H]" if is_hub else "COMBAT ARENA  [G]"
+    nameplate.font_size = 64
+    nameplate.pixel_size = 0.01
+    nameplate.position.y = 14.0
+    anchor.add_child(nameplate)
+
 func _build_multimesh(mesh: Mesh, count: int) -> MultiMesh:
     var mm := MultiMesh.new()
     mm.transform_format = MultiMesh.TRANSFORM_3D
