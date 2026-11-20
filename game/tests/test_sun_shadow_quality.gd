@@ -44,6 +44,12 @@ func run(t) -> void:
 		"invalid negative daylight and storm clamp")
 	t.near(SunShadows.opacity(20.0, 0.9, 15.0), storm, 0.0001,
 		"over-range daylight and storm clamp")
+	t.near(SunShadows.opacity(NAN, 0.8, 0.0), 0.58, 0.0001,
+		"invalid daylight never injects NaN into native shadows")
+	t.near(SunShadows.opacity(0.5, INF, 0.2), 0.58, 0.0001,
+		"invalid sun elevation keeps a finite shadow contrast")
+	t.near(SunShadows.opacity(0.5, 0.8, NAN), 0.58, 0.0001,
+		"undefined weather cannot poison the lighting pipeline")
 	for amount in 11:
 		var alpha: float = SunShadows.opacity(0.55, 0.30, float(amount) / 10.0)
 		t.check(alpha >= 0.08 and alpha <= 0.96,
