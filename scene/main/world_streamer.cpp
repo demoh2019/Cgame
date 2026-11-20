@@ -33,6 +33,7 @@
 #include "core/config/engine.h"
 #include "core/io/resource_loader.h"
 #include "core/object/class_db.h"
+#include "core/os/os.h"
 #include "scene/2d/node_2d.h"
 #include "scene/3d/node_3d.h"
 #include "scene/resources/packed_scene.h"
@@ -170,16 +171,25 @@ void WorldStreamer::_run_generator_queue() {
 	}
 	Vector3 position;
 	const bool have_focus = _get_focus_position(position);
-	const real_t keep_radius = MAX(unload_radius, load_radius);
+	// Queued work must still be within the *load* radius. The larger unload
+	// radius is only for keeping existing cells alive after moving away.
+	const real_t request_radius = load_radius;
+	const uint64_t started_usec = OS::get_singleton()->get_ticks_usec();
 	int budget = MAX(max_instantiations_per_frame, 1);
 	uint32_t consumed = 0;
 	while (consumed < generate_queue.size() && budget > 0) {
+		// A single generator call cannot be interrupted. After at least one
+		// chunk, stop before the next one if this frame's CPU budget ran out.
+		if (max_chunk_work_usec > 0 && budget < MAX(max_instantiations_per_frame, 1) &&
+				OS::get_singleton()->get_ticks_usec() - started_usec >= uint64_t(max_chunk_work_usec)) {
+			break;
+		}
 		const Vector3i cell = generate_queue[consumed++];
 		if (loaded.has(cell)) {
 			continue;
 		}
 		// The focus may have moved on while the cell waited in the queue.
-		if (!have_focus || WorldStreamingGrid::distance_to_cell(position, cell, cell_size, _grid_axes()) > keep_radius) {
+		if (!have_focus || WorldStreamingGrid::distance_to_cell(position, cell, cell_size, _grid_axes()) > request_radius) {
 			continue;
 		}
 		budget--;
@@ -214,13 +224,12 @@ void WorldStreamer::_run_generator_queue() {
 }
 
 void WorldStreamer::_poll_loading() {
-	_run_generator_queue();
 	if (loading.is_empty()) {
 		return;
 	}
 	Vector3 position;
 	const bool have_focus = _get_focus_position(position);
-	const real_t keep_radius = MAX(unload_radius, load_radius);
+	const real_t request_radius = load_radius;
 
 	struct Ready {
 		Vector3i cell;
@@ -255,17 +264,19 @@ void WorldStreamer::_poll_loading() {
 		ready[j + 1] = item;
 	}
 	int budget = MAX(max_instantiations_per_frame, 1);
+	const uint64_t started_usec = OS::get_singleton()->get_ticks_usec();
 	for (const Ready &item : ready) {
 		const String path = loading[item.cell];
-		const bool still_wanted = have_focus && item.distance <= keep_radius && !loaded.has(item.cell);
+		const bool still_wanted = have_focus && item.distance <= request_radius && !loaded.has(item.cell);
 		if (!still_wanted) {
 			// The focus moved on while loading: release the result and drop it.
 			loading.erase(item.cell);
 			ResourceLoader::load_threaded_get(path);
 			continue;
 		}
-		if (budget <= 0) {
-			continue; // Stays ready for the next frame.
+		if (budget <= 0 || (max_chunk_work_usec > 0 && budget < MAX(max_instantiations_per_frame, 1) &&
+				OS::get_singleton()->get_ticks_usec() - started_usec >= uint64_t(max_chunk_work_usec))) {
+			continue; // Keep loaded resources ready for the next frame.
 		}
 		budget--;
 		loading.erase(item.cell);
@@ -399,8 +410,11 @@ void WorldStreamer::_notification(int p_what) {
 			if (time_since_update >= update_interval) {
 				time_since_update = 0.0;
 				_update_streaming();
-				_run_generator_queue(); // New cells are built in the same frame they were queued.
 			}
+			// Exactly one queue drain per frame. Previously _poll_loading() and
+			// this path both ran procedural generation on update frames, doubling
+			// max_instantiations_per_frame and causing occasional frame spikes.
+			_run_generator_queue();
 		} break;
 	}
 }
@@ -459,6 +473,11 @@ void WorldStreamer::set_max_concurrent_loads(int p_count) {
 
 void WorldStreamer::set_max_instantiations_per_frame(int p_count) {
 	max_instantiations_per_frame = MAX(p_count, 1);
+}
+
+void WorldStreamer::set_max_chunk_work_usec(int p_usec) {
+	// 0 disables the wall-clock cap; the per-frame count still applies.
+	max_chunk_work_usec = CLAMP(p_usec, 0, 1000000);
 }
 
 void WorldStreamer::set_update_interval(double p_seconds) {
@@ -559,6 +578,8 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_concurrent_loads"), &WorldStreamer::get_max_concurrent_loads);
 	ClassDB::bind_method(D_METHOD("set_max_instantiations_per_frame", "count"), &WorldStreamer::set_max_instantiations_per_frame);
 	ClassDB::bind_method(D_METHOD("get_max_instantiations_per_frame"), &WorldStreamer::get_max_instantiations_per_frame);
+	ClassDB::bind_method(D_METHOD("set_max_chunk_work_usec", "microseconds"), &WorldStreamer::set_max_chunk_work_usec);
+	ClassDB::bind_method(D_METHOD("get_max_chunk_work_usec"), &WorldStreamer::get_max_chunk_work_usec);
 	ClassDB::bind_method(D_METHOD("set_update_interval", "seconds"), &WorldStreamer::set_update_interval);
 	ClassDB::bind_method(D_METHOD("get_update_interval"), &WorldStreamer::get_update_interval);
 	ClassDB::bind_method(D_METHOD("set_chunk_path_template", "template"), &WorldStreamer::set_chunk_path_template);
@@ -599,6 +620,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_GROUP("Budget", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_loads", PROPERTY_HINT_RANGE, "1,64,1,or_greater"), "set_max_concurrent_loads", "get_max_concurrent_loads");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instantiations_per_frame", PROPERTY_HINT_RANGE, "1,16,1,or_greater"), "set_max_instantiations_per_frame", "get_max_instantiations_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_chunk_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_chunk_work_usec", "get_max_chunk_work_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "update_interval", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), "set_update_interval", "get_update_interval");
 
 	ADD_SIGNAL(MethodInfo("chunk_loaded", PropertyInfo(Variant::VECTOR3I, "cell"), PropertyInfo(Variant::OBJECT, "chunk", PROPERTY_HINT_RESOURCE_TYPE, "Node")));
