@@ -21,11 +21,14 @@ const GROUND_SHADER := """
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
+global uniform float aa_terrain_detail_radius;
+#include "res://assets/shaders/cloud_shadow.gdshaderinc"
 
 // A painted-looking ground: smooth patches of lush and dry grass, dirt, sand at the shore, strata on slopes and
 // snow on the peaks, all from layered value noise so nothing repeats in a visible grid.
 varying vec3 world_position;
 varying vec3 world_normal;
+varying float vertex_cloud_shade;
 // Roads of this chunk: a 1 m per pixel mask of the chunk (white = road). Chunks without roads keep the black default.
 uniform sampler2D road_mask : hint_default_black, filter_linear, repeat_disable;
 uniform vec2 chunk_origin = vec2(0.0);
@@ -58,6 +61,9 @@ float fbm(vec2 p) {
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	// Macro shadows change slowly in world space: evaluating them per vertex avoids
+	// three noise passes per terrain pixel on OpenGL Compatibility.
+	vertex_cloud_shade = cloud_shadow(world_position.xz, TIME);
 }
 
 void fragment() {
@@ -66,8 +72,17 @@ void fragment() {
 	float slope = 1.0 - clamp(world_normal.y, 0.0, 1.0);
 	float broad = fbm(p * 0.012);
 	float mid = fbm(p * 0.09 + 3.0);
-	float fine = value_noise(p * 3.1);
-	float speck = value_noise(p * 11.0);
+	// High-frequency noise is subpixel at a distance. Match textured terrain's
+	// detail radius, fade gently, and skip both noise evaluations far away.
+	float distance_to_camera = distance(p, CAMERA_POSITION_WORLD.xz);
+	float detail_fade = 1.0 - smoothstep(aa_terrain_detail_radius,
+			aa_terrain_detail_radius + 24.0, distance_to_camera);
+	float fine = 0.5;
+	float speck = 0.5;
+	if (detail_fade > 0.001) {
+		fine = mix(0.5, value_noise(p * 3.1), detail_fade);
+		speck = mix(0.5, value_noise(p * 11.0), detail_fade);
+	}
 
 	vec3 lush = vec3(0.14, 0.34, 0.1);
 	vec3 dry = vec3(0.4, 0.42, 0.18);
@@ -78,7 +93,12 @@ void fragment() {
 	vec3 dirt = vec3(0.34, 0.25, 0.16) * (0.8 + 0.4 * mid);
 	vec3 sand = vec3(0.62, 0.55, 0.38) * (0.92 + 0.12 * fine);
 	vec3 rock = vec3(0.45, 0.42, 0.4);
-	float strata = fbm(vec2(p.x * 0.18 + p.y * 0.14, h * 1.6));
+	// Coarse strata remain visible in the distance; four fine noise octaves are
+	// only evaluated near the player. This preserves mountain silhouette.
+	float strata = mid;
+	if (detail_fade > 0.001) {
+		strata = mix(mid, fbm(vec2(p.x * 0.18 + p.y * 0.14, h * 1.6)), detail_fade);
+	}
 	rock *= 0.65 + 0.7 * strata;
 	vec3 snow = vec3(0.94, 0.96, 1.0);
 
@@ -109,9 +129,13 @@ void fragment() {
 	float puddle = wetness * wettable * smoothstep(0.54, 0.77, mid)
 		* (1.0 - smoothstep(0.08, 0.25, slope));
 	color *= 1.0 - wetness * 0.12 - puddle * 0.13;
-	ALBEDO = color;
+	// Shared moving cloud cover, interpolated across terrain vertices for low GPU cost.
+	ALBEDO = color * mix(vec3(1.0), vec3(0.58, 0.63, 0.74), vertex_cloud_shade);
 	float dry_roughness = mix(0.95, 0.75, shore);
-	ROUGHNESS = mix(mix(dry_roughness, 0.24, wetness * 0.35), 0.08, puddle * 0.65);
+	// Reuse the near-camera fine noise for subtle dry soil roughness variation;
+	// no extra texture samples, and wet puddles stay glossy.
+	ROUGHNESS = clamp(mix(mix(dry_roughness + (fine - 0.5) * 0.12 * detail_fade, 0.24, wetness * 0.35),
+			0.08, puddle * 0.65), 0.08, 1.0);
 	SPECULAR = min(0.9, 0.15 + wetness * 0.12 + puddle * 0.3);
 }
 """
