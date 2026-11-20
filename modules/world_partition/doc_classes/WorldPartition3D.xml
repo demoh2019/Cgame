@@ -7,6 +7,7 @@
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
+		Optional directional prefetch can warm additional cells in front of a moving observer. The forward corridor is separate from normal loading, and it uses the same asynchronous resource loading and per-frame instantiation budgets. Use [member prefetch_direction] (grid X/Z components) and [member prefetch_distance].
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
 		var partition := WorldPartition3D.new()
@@ -163,6 +164,12 @@
 		</member>
 		<member name="max_new_requests_per_frame" type="int" setter="set_max_new_requests_per_frame" getter="get_max_new_requests_per_frame" default="2">
 			Maximum number of new resource-load requests per frame.
+		</member>
+		<member name="prefetch_direction" type="Vector2i" setter="set_prefetch_direction" getter="get_prefetch_direction" default="Vector2i(0, 0)">
+			Optional horizontal prefetch direction in grid cells. X and Y components must each be -1, 0 or 1 (the Y component corresponds to the world's Z axis). A zero vector disables predictive prefetch. Use [member prefetch_distance] to control how many cells ahead are requested.
+		</member>
+		<member name="prefetch_distance" type="int" setter="set_prefetch_distance" getter="get_prefetch_distance" default="0">
+			Number of cells ahead of the observer to additionally prefetch, along [member prefetch_direction]. Valid range: 0 to 4; 0 disables directional prefetch. The observer's normal [member load_radius] area is always prioritized, with prefetch cells processed only afterward. Prefetch cells remain alive while the configured direction includes them even if they are outside the regular [member unload_radius].
 		</member>
 		<member name="observer_path" type="NodePath" setter="set_observer_path" getter="get_observer_path" default="NodePath(&quot;&quot;)">
 			Path relative to this node pointing to a [Node3D] observer, such as a player or camera.
