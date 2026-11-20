@@ -112,7 +112,7 @@ func run(t) -> void:
 		"height material boundaries do not shimmer with time or camera pan")
 
 	t.current = "conservative 13-layer weight proof with protected road"
-	var maps: Array[Array] = [
+	var maps: Array = [
 		[0.55, 0.0, 0.35, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0,
 			0.0, 0.0, 0.0, 0.0],
 		[0.0, 0.0, 0.0, 0.45, 0.0, 0.0, 0.0, 0.55, 0.0,
