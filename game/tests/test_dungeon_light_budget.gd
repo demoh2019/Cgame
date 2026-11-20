@@ -22,6 +22,10 @@ func run(t) -> void:
 	t.eq(int(balanced["shadow_lights"]), 0, "Balanced avoids torch shadow maps")
 	t.eq(int(high["shadow_lights"]), 1, "High allows one cinematic torch shadow")
 	t.eq(int(ultra["shadow_lights"]), 2, "Ultra allows two cinematic torch shadows")
+	t.eq(DungeonLightBudget.effective_max(3, "gl_compatibility"), 8,
+		"Compatibility caps local torches at eight")
+	t.eq(DungeonLightBudget.effective_max(3, "forward_plus"), 16,
+		"Forward+ retains Ultra clustered-light count")
 	low["max_lights"] = 100000
 	t.check(int(DungeonLightBudget.settings(0)["max_lights"]) < 10,
 		"callers cannot mutate the profile constants")
