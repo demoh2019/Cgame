@@ -19,6 +19,7 @@ const EngineFeatures = preload("res://scripts/client/engine_features.gd")
 const AnimLod = preload("res://scripts/client/anim_lod.gd")
 const CombatAnimationPriority = preload("res://scripts/client/combat_animation_priority.gd")
 const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
+const LootBeam = preload("res://scripts/client/loot_beam.gd")
 var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
 var _priority_quality: int = -1
 var _world = null
@@ -173,6 +174,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		elif kind == "bag":
 			label.text = LootLabel.for_bag(entity)
 			label.visible = not label.text.is_empty()
+	if kind == "bag":
+		LootBeam.update(_nodes[key], entity)
 	if kind == "bag":
 		# Gold = available to your party, grey = reserved, brown = public.
 		var loot_mesh: MeshInstance3D = _nodes[key].get_child(0)
@@ -488,6 +491,7 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		label.position.y = 1.3
 		label.visible = false
 		root.add_child(label)
+		root.add_child(LootBeam.make())
 		return root
 	var model := CharacterModel.new()
 	model.name = "Model"
