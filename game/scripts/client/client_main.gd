@@ -244,6 +244,10 @@ func _make_light_and_camera() -> void:
 func _update_world_light(delta: float = 0.0) -> void:
 	if _atmosphere == null or sim == null or world == null:
 		return
+	# The solo client shares the multiplayer GI visibility policy, including
+	# releasing expensive occlusion when returning to the open landscape.
+	GraphicsQuality.update_dynamic_sdfgi(_world_environment,
+		survivor != null and Dungeon.is_underground(survivor.position.x))
 	var seconds: float = sim.time
 	if seconds >= _weather_next_update:
 		var at: Vector3 = survivor.position if survivor != null else Vector3.ZERO
