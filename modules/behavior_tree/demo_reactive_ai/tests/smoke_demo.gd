@@ -13,9 +13,10 @@ func _run_checks() -> void:
         _fail("Demo scene could not be loaded")
         return
 
-    var demo: Node2D = packed.instantiate()
+    var demo: Variant = packed.instantiate()
     root.add_child(demo)
     demo.set_physics_process(false)
+    await physics_frame
     await physics_frame
 
     if demo.sensor == null or demo.brain == null:
