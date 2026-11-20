@@ -15,7 +15,7 @@ static func pick(inventory, survivor) -> String:
 		return ""
 	if not is_finite(survivor.health) or not is_finite(survivor.max_health) or \
 			not is_finite(survivor.infection) or not is_finite(survivor.bleeding) or \
-			not is_finite(survivor.fracture):
+			not is_finite(survivor.fracture) or not is_finite(survivor.food_poisoning):
 		return ""
 	var missing: float = maxf(0.0, survivor.max_health - survivor.health)
 	var picked := ""
@@ -42,6 +42,10 @@ static func pick(inventory, survivor) -> String:
 			"spore_antidote", "antibiotics"])
 	if not picked.is_empty():
 		return picked
+	# Food poisoning is independent of infected-bite infection: its medicine
+	# must never be chosen for wound care, nor wasted on negligible symptoms.
+	if survivor.food_poisoning >= 10.0 and inventory.count("herbal_gut_tonic") > 0:
+		return "herbal_gut_tonic"
 	if missing >= 18.0:
 		picked = _first_carried(inventory,
 			["bandage", "herbal_poultice", "purified_serum", "field_antiseptic"])
