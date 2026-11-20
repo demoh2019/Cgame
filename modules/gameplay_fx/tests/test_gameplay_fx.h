@@ -132,4 +132,42 @@ TEST_CASE("[GameplayFX] RadialForceField3D::impulse_direction") {
 	CHECK(biased.x > 0.0f);
 }
 
+TEST_CASE("[GameplayFX] RadialForceField3D shielding and mass-independent velocity change") {
+	typedef RadialForceField3D R;
+	R *field = memnew(R);
+	CHECK(field->get_occlusion_mask() == 0);
+	CHECK(field->is_mass_independent() == false);
+	CHECK(field->get_max_occlusion_rays() == 24);
+	CHECK(field->get_occlusion_attenuation() == doctest::Approx(0.25f));
+
+	field->set_occlusion_mask(0x3u);
+	CHECK(field->get_occlusion_mask() == 0x3u);
+	field->set_occlusion_attenuation(2.0f);
+	CHECK(field->get_occlusion_attenuation() == doctest::Approx(1.0f));
+	field->set_occlusion_attenuation(-1.0f);
+	CHECK(field->get_occlusion_attenuation() == doctest::Approx(0.0f));
+	field->set_occlusion_attenuation(0.25f);
+	field->set_max_occlusion_rays(999);
+	CHECK(field->get_max_occlusion_rays() == 64);
+	field->set_max_occlusion_rays(-4);
+	CHECK(field->get_max_occlusion_rays() == 1);
+	field->set_max_occlusion_rays(24);
+	field->set_mass_independent(true);
+	CHECK(field->is_mass_independent());
+
+	CHECK(R::occlusion_scale(false, 0.25f) == doctest::Approx(1.0f));
+	CHECK(R::occlusion_scale(true, 0.25f) == doctest::Approx(0.25f));
+	CHECK(R::occlusion_scale(true, -1.0f) == doctest::Approx(0.0f));
+	CHECK(R::occlusion_scale(true, 2.0f) == doctest::Approx(1.0f));
+	CHECK(R::impulse_magnitude(12.0f, 0.5f, 1.0f, false) == doctest::Approx(6.0f));
+	CHECK(R::impulse_magnitude(12.0f, 0.5f, 8.0f, false) == doctest::Approx(6.0f));
+	CHECK(R::impulse_magnitude(12.0f, 0.5f, 1.0f, true) == doctest::Approx(6.0f));
+	CHECK(R::impulse_magnitude(12.0f, 0.5f, 8.0f, true) == doctest::Approx(48.0f));
+	// Constant delta-v across masses; both bodies see the same speed change
+	// even though their applied physical impulses have different magnitudes.
+	CHECK(R::impulse_magnitude(12.0f, 0.5f, 8.0f, true) / 8.0f ==
+			doctest::Approx(R::impulse_magnitude(12.0f, 0.5f, 1.0f, true)));
+	memdelete(field);
+}
+
 } // namespace TestGameplayFX
