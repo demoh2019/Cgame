@@ -109,6 +109,29 @@ func _run() -> void:
     if origin_vertices.size() != 1089:
         _fail("terrain patch should contain 33 x 33 vertices")
         return
+    var previous_count: int = 2048
+    for step in [2, 4, 8]:
+        var lod: PackedInt32Array = patch.call("_build_lod_indices", int(step))
+        if lod.is_empty() or lod.size() % 3 != 0:
+            _fail("terrain LOD index buffer is missing or malformed at step %d" % step)
+            return
+        if lod.size() / 3 >= previous_count:
+            _fail("terrain LOD does not reduce triangle count at step %d" % step)
+            return
+        previous_count = int(lod.size() / 3)
+        var boundary_indices: Dictionary = {}
+        for index in lod:
+            if index < 0 or index >= origin_vertices.size():
+                _fail("terrain LOD points outside the vertex buffer at step %d" % step)
+                return
+            boundary_indices[index] = true
+        for edge_i in range(33):
+            if not boundary_indices.has(edge_i) \
+                    or not boundary_indices.has(32 * 33 + edge_i) \
+                    or not boundary_indices.has(edge_i * 33) \
+                    or not boundary_indices.has(edge_i * 33 + 32):
+                _fail("terrain LOD dropped a border vertex, causing a seam at step %d" % step)
+                return
 
     var obstacles := cell.get_node_or_null("FoliageCollisions") as StaticBody3D
     if obstacles == null or obstacles.get_child_count() < 9:
@@ -186,5 +209,5 @@ func _run() -> void:
         _fail("observer transitions were not signaled reliably")
         return
 
-    print("Forest streaming smoke PASSED: deterministic terrain seams, heightmap colliders, reload, observer signals and quality")
+    print("Forest streaming smoke PASSED: terrain seams, safe LOD borders, heightmap colliders, reload and observer signals")
     quit(0)
