@@ -213,6 +213,35 @@ float CameraAttributesPractical::get_dof_blur_amount() const {
 	return dof_blur_amount;
 }
 
+void CameraAttributesPractical::configure_cinematic_dof(bool p_enabled,
+		float p_far_distance, float p_far_transition, float p_amount) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_far_distance) ||
+					!Math::is_finite(p_far_transition) || !Math::is_finite(p_amount),
+			"Cinematic DOF settings must be finite.");
+	// Positive transitions avoid unbounded physically-scaled bokeh blur. The
+	// game opts into subtle far-only focus, never foreground/UI defocus.
+	const float distance = CLAMP(p_far_distance, 0.01f, 8192.0f);
+	const float transition = CLAMP(p_far_transition, 0.01f, 8192.0f);
+	const float amount = CLAMP(p_amount, 0.0f, 1.0f);
+	if (dof_blur_far_enabled == p_enabled && !dof_blur_near_enabled &&
+			Math::is_equal_approx(dof_blur_far_distance, distance) &&
+			Math::is_equal_approx(dof_blur_far_transition, transition) &&
+			Math::is_equal_approx(dof_blur_amount, amount)) {
+		return; // No redundant RenderingServer dispatch.
+	}
+	const bool visibility_changed = dof_blur_far_enabled != p_enabled ||
+			dof_blur_near_enabled;
+	dof_blur_far_enabled = p_enabled;
+	dof_blur_far_distance = distance;
+	dof_blur_far_transition = transition;
+	dof_blur_amount = amount;
+	dof_blur_near_enabled = false;
+	_update_dof_blur(); // One atomic backend update, preserves auto exposure.
+	if (visibility_changed) {
+		notify_property_list_changed();
+	}
+}
+
 void CameraAttributesPractical::_update_dof_blur() {
 	RS::get_singleton()->camera_attributes_set_dof_blur(
 			get_rid(),
@@ -286,6 +315,9 @@ void CameraAttributesPractical::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_dof_blur_near_transition"), &CameraAttributesPractical::get_dof_blur_near_transition);
 	ClassDB::bind_method(D_METHOD("set_dof_blur_amount", "amount"), &CameraAttributesPractical::set_dof_blur_amount);
 	ClassDB::bind_method(D_METHOD("get_dof_blur_amount"), &CameraAttributesPractical::get_dof_blur_amount);
+	// A single update avoids 3-4 unnecessary DOF backend uploads when a
+	// dynamic camera smoothly changes focus or runtime quality.
+	ClassDB::bind_method(D_METHOD("configure_cinematic_dof", "enabled", "far_distance", "far_transition", "amount"), &CameraAttributesPractical::configure_cinematic_dof);
 
 	ClassDB::bind_method(D_METHOD("set_auto_exposure_max_sensitivity", "max_sensitivity"), &CameraAttributesPractical::set_auto_exposure_max_sensitivity);
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_max_sensitivity"), &CameraAttributesPractical::get_auto_exposure_max_sensitivity);
