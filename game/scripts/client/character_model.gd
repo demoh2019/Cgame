@@ -523,6 +523,12 @@ func set_anim_lod(tier: int) -> void:
 		if _layer != null:
 			_layer.callback_mode_process = mode
 	_lod_accum = 0.0
+	# A preset or distance-LOD transition must not replay the time collected
+	# under the previous animation rate. Native and stock paths stay aligned.
+	if animator.has_method("reset_advance_budget"):
+		animator.call("reset_advance_budget")
+	if _layer != null and _layer.has_method("reset_advance_budget"):
+		_layer.call("reset_advance_budget")
 	if _procedural != null and not _dead:
 		_procedural.set("foot_ik", tier == 0 and not _native_feet) # Native FootPlacementModifier3D wins when present.
 		_procedural.set("look_at_enabled", tier == 0)
@@ -552,12 +558,22 @@ func _tick_procedural(delta: float) -> void:
 			_swing_trail.set("emitting", false)
 	var interval := Anim.lod_interval(_lod_tier)
 	if interval > 0.0 and not external_anim_lod:
-		_lod_accum += delta
-		if _lod_accum >= interval:
-			animator.advance(_lod_accum)
+		if animator.has_method("advance_budgeted"):
+			# The custom Godot fork handles catchup/intervals without
+			# script-side per-character allocations, preserving native
+			# AnimationPlayer playback and layered upper-body tracks.
+			animator.call("advance_budgeted", delta, interval, 0.5)
 			if _layer != null:
-				_layer.advance(_lod_accum)
-			_lod_accum = 0.0
+				_layer.call("advance_budgeted", delta, interval, 0.5)
+		else:
+			# Stock Godot fallback; cap long loading stalls like the native
+			# path so teleporting/loading cannot fast-forward attack clips.
+			_lod_accum = minf(_lod_accum + maxf(delta, 0.0), 0.5)
+			if _lod_accum >= interval:
+				animator.advance(_lod_accum)
+				if _layer != null:
+					_layer.advance(_lod_accum)
+				_lod_accum = 0.0
 
 
 ## Plays an action clip on the upper body only; the legs keep their locomotion clip.
