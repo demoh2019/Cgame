@@ -80,6 +80,12 @@ func run(t) -> void:
 	t.check((GraphicsReflections as Script).source_code.contains(
 		"RenderingServer.environment_set_ssr_roughness_quality(roughness_quality)"),
 		"native engine SSR roughness filter is actually called on tier changes")
+	t.check((GraphicsReflections as Script).source_code.contains(
+		"if environment.ssr_enabled != enabled:"),
+		"shared live graphics controller skips unchanged native SSR state")
+	t.check((GraphicsReflections as Script).source_code.contains(
+		"if not is_equal_approx(environment.ssr_fade_out, fade_out):"),
+		"native reflection fade is not resent every frame")
 	t.check(graphics_script.source_code.contains("GraphicsReflections.apply(env, _level, method)"),
 		"the actual graphics selector shares SSR policy with live and local scenes")
 	var atmosphere := load("res://scripts/client/atmosphere.gd") as Script

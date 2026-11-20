@@ -46,3 +46,25 @@ Source-contract tests are not equivalent to compiling GLSL for Metal
 or to a visual frame capture. Validate GPU P95 and image stability in
 the same moving-camera scene on M1 Metal and Vulkan before claiming
 measured runtime gains.
+
+## Confidence-aware HDR filtering
+
+Engine SSR now tone-compresses **straight** HDR radiance before
+premultiplication by ray confidence. The half-resolution bilateral
+reconstruction unpremultiplies in the encoded domain, reverses the
+HDR curve and then premultiplies again. A smooth confidence weight
+suppresses black/invalid screen-ray samples at reflection boundaries.
+This preserves warm highlight hue and avoids overly dark borders
+where the sky/ReflectionProbe must fill missing reflection data.
+
+Existing four-tap depth/normal/roughness upsampling, half-size
+textures, roughness fade, ray caps and screen-edge fallback remain;
+no additional GPU samples, passes, textures or temporal buffers.
+The already-integrated in-game GraphicsReflections profile maintains
+28/48 ray steps on High/Ultra and no SSR on low-end renderers.
+
+`test_ssr_half_resolve.py` adds numerical tests for partial-confidence
+HDR round-trips, invalid hits and warm highlight ratios. These are
+registered in the pre-existing native+Godot graphics CI workflow.
+Actual Vulkan/Metal shader compilation and comparative captures
+remain required before claiming visual or FPS benchmarks.
