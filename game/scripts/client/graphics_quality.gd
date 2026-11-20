@@ -250,10 +250,12 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	ChunkView.configure_terrain_filter(_level)
 	ChunkView.configure_terrain_geomorph(_level)
 	ChunkView.configure_terrain_screen_lod(_level)
+	ChunkView.configure_terrain_error_lod(_level)
 	if viewport != null:
 		for lod_terrain in viewport.get_tree().get_nodes_in_group(ChunkView.TERRAIN_LOD_GROUP):
 			ChunkView.apply_terrain_geomorph(lod_terrain)
 			ChunkView.apply_terrain_screen_lod(lod_terrain)
+			ChunkView.apply_terrain_error_lod(lod_terrain)
 	if viewport != null:
 		for terrain in viewport.get_tree().get_nodes_in_group(ChunkView.TERRAIN_GROUP):
 			ChunkView.apply_terrain_filter(terrain)
