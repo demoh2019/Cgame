@@ -53,7 +53,9 @@ jobs:
             res://tests/test_foliage.gd \
             res://tests/test_exploration_quest.gd \
             res://tests/test_character.gd \
-            res://tests/test_character_physics.gd; do
+            res://tests/test_character_physics.gd \
+            res://tests/test_world_streamer.gd \
+            res://tests/test_world_streamer_runtime.gd; do
             /tmp/godot-bin/Godot_v4.6.3-stable_linux.x86_64 --headless --path . --script "$script"
           done
 
