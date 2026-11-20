@@ -33,3 +33,5 @@ the server to drop the connection, so it is not the default.
 
 * Cloud-shadow LUT: `scripts/client/cloud_shadow_lut.gd` bakes one seamless grayscale texture for coherent moving sun shadows on terrain, grass and trees. `atmosphere.gd` suppresses expensive cloud shading at night and in Performance mode.
 * Scenery draw-range/mesh LOD: `scripts/client/scenery_lod.gd` and `chunk_view.gd` adjust visual culling and imported mesh LOD bias by graphics quality without hiding settlement landmarks or changing server gameplay. See `docs/CLOUD_HLOD_2026_11.md`.
+
+* Camera-scale atmospheric fog: `scripts/client/cinematic_fog.gd` adds an inexpensive sea-level height haze to all supported renderers, and bounded physically based Forward+ volumetric shafts on High/Ultra. The same engine-native `Atmosphere` and `GraphicsLighting` now share one time-of-day, storm and quality budget; see `docs/CINEMATIC_FOG_RENDERING.md`.
