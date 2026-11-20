@@ -41,6 +41,13 @@ vec2 compute_cell_count(int level) {
 	return vec2(cell_count_x, cell_count_y);
 }
 
+// Stable Hi-Z cell traversal for horizontal and vertical screen rays.
+// Retain the signed travel direction but never divide by zero.
+vec2 ssr_safe_ray_xy(vec2 v) {
+	return mix(vec2(-1.0), vec2(1.0), greaterThanEqual(v, vec2(0.0))) *
+			max(abs(v), vec2(0.000001));
+}
+
 float linearize_depth(float depth) {
 	vec4 pos = vec4(0.0, 0.0, depth, 1.0);
 	pos = scene_data.inv_projection[params.view_index] * pos;
@@ -158,6 +165,12 @@ void main() {
 
 		// Clip to near plane. Add a small bias so we don't go to infinity.
 		if (end_pos.z > 0.0) {
+			// A grazing near-plane ray cannot be clipped by dividing by Z.
+			if (abs(ray_dir.z) < 0.000001) {
+				imageStore(output_color, pixel_pos, vec4(0.0));
+				imageStore(output_mip_level, pixel_pos, vec4(0.0));
+				return;
+			}
 			end_pos -= ray_dir / ray_dir.z * (end_pos.z + 0.00001);
 		}
 
@@ -166,13 +179,24 @@ void main() {
 		// Normalize Z to -1.0 or +1.0 and do parametric T tracing as suggested here:
 		// https://hacksoflife.blogspot.com/2020/10/a-tip-for-hiz-ssr-parametric-t-tracing.html
 		vec3 screen_ray_dir = screen_end_pos - screen_pos;
-		screen_ray_dir /= abs(screen_ray_dir.z);
+		// Invalid directions or zero-depth projected rays cannot produce
+		// meaningful Hi-Z hits. Keep the original sky/probe fallback.
+		float depth_delta = abs(screen_ray_dir.z);
+		if (any(isnan(screen_ray_dir)) || any(isinf(screen_ray_dir)) ||
+				depth_delta <= 0.000001 ||
+				dot(screen_ray_dir.xy, screen_ray_dir.xy) <= 0.000000000001) {
+			imageStore(output_color, pixel_pos, vec4(0.0));
+			imageStore(output_mip_level, pixel_pos, vec4(0.0));
+			return;
+		}
+		screen_ray_dir /= depth_delta;
+		vec2 ray_xy_divisor = ssr_safe_ray_xy(screen_ray_dir.xy);
 
 		bool facing_camera = screen_ray_dir.z >= 0.0;
 
 		// Find the screen edge point where we will stop tracing.
-		vec2 t0 = (vec2(0.0) - screen_pos.xy) / screen_ray_dir.xy;
-		vec2 t1 = (vec2(1.0) - screen_pos.xy) / screen_ray_dir.xy;
+		vec2 t0 = (vec2(0.0) - screen_pos.xy) / ray_xy_divisor;
+		vec2 t1 = (vec2(1.0) - screen_pos.xy) / ray_xy_divisor;
 		vec2 t2 = max(t0, t1);
 		float t_max = min(t2.x, t2.y);
 
@@ -187,7 +211,7 @@ void main() {
 			vec2 cell_index = floor(screen_pos.xy * params.screen_size);
 			vec2 new_cell_index = cell_index + clamp(cell_step, vec2(0.0), vec2(1.0));
 			vec2 new_cell_pos = (new_cell_index / params.screen_size) + cell_step * 0.000001;
-			vec2 pos_t = (new_cell_pos - screen_pos.xy) / screen_ray_dir.xy;
+			vec2 pos_t = (new_cell_pos - screen_pos.xy) / ray_xy_divisor;
 			float edge_t = min(pos_t.x, pos_t.y);
 
 			t = edge_t;
@@ -203,7 +227,7 @@ void main() {
 
 			vec2 new_cell_index = cell_index + clamp(cell_step, vec2(0.0), vec2(1.0));
 			vec2 new_cell_pos = (new_cell_index / cell_count) + cell_step * 0.000001;
-			vec2 pos_t = (new_cell_pos - screen_pos.xy) / screen_ray_dir.xy;
+			vec2 pos_t = (new_cell_pos - screen_pos.xy) / ray_xy_divisor;
 			float edge_t = min(pos_t.x, pos_t.y);
 
 			bool hit = facing_camera ? (t <= depth_t) : (depth_t <= edge_t);

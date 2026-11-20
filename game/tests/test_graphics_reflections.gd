@@ -87,3 +87,31 @@ func run(t) -> void:
 	if atmosphere != null:
 		t.check(atmosphere.source_code.contains("Environment.REFLECTION_SOURCE_SKY"),
 			"SSR has existing sky/reflection radiance for off-screen surfaces")
+
+
+	t.current = "guarded SSR rays and idempotent native quality updates"
+	var checked_env := Environment.new()
+	GraphicsReflections.apply(checked_env, 3, "forward_plus")
+	var previous_state: Array = [
+		checked_env.ssr_enabled, checked_env.ssr_max_steps,
+		checked_env.ssr_fade_in, checked_env.ssr_fade_out,
+		checked_env.ssr_depth_tolerance]
+	GraphicsReflections.apply(checked_env, 3, "forward_plus")
+	t.eq([
+		checked_env.ssr_enabled, checked_env.ssr_max_steps,
+		checked_env.ssr_fade_in, checked_env.ssr_fade_out,
+		checked_env.ssr_depth_tolerance], previous_state,
+		"re-applying Ultra preserves all native reflection settings")
+	GraphicsReflections.apply(checked_env, 1, "forward_plus")
+	t.check(not checked_env.ssr_enabled,
+		"Balanced immediately disables the expensive ray pass")
+	GraphicsReflections.apply(checked_env, 2, "forward_plus")
+	t.check(checked_env.ssr_enabled and checked_env.ssr_max_steps == 28,
+		"switching to High retains 28 protected SSR steps")
+	var reflection_code: String = (GraphicsReflections as Script).source_code
+	t.check(reflection_code.contains("if environment.ssr_enabled != enabled:"),
+		"identical enable state never triggers duplicate native updates")
+	t.check(reflection_code.contains("if environment.ssr_max_steps != steps:")
+		and reflection_code.contains(
+			"if not is_equal_approx(environment.ssr_depth_tolerance, tolerance):"),
+		"unchanged ray length and tolerance never trigger duplicate setters")
