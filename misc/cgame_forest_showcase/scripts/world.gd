@@ -510,7 +510,7 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 455)
+    hint.position = Vector2(22, 481)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
     hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: сброс кэшей  •  F4: повтор загрузки  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор\nF6: закрепить маяк  •  F7: подготовить и переместиться к маяку/домой\nF8: движущийся дрон  •  F10: источник башни  •  F11: пауза дрона"
@@ -548,6 +548,8 @@ func _refresh_hud() -> void:
     var navigation_pending: int = world_partition.get_navigation_pending_cell_count() if world_partition != null else 0
     var npc_total: int = 0
     var npc_active: int = 0
+    var npc_intercell_routes: int = 0
+    var npc_avoidance_updates: int = 0
     if world_partition != null:
         for cell in world_partition.get_loaded_cells():
             var tile: Node3D = world_partition.get_cell_node(cell)
@@ -556,6 +558,8 @@ func _refresh_hud() -> void:
             var npc := tile.get_node_or_null("ForestPatrol")
             if npc != null:
                 npc_total += 1
+                npc_intercell_routes += int(npc.get("intercell_route_count"))
+                npc_avoidance_updates += int(npc.get("avoidance_velocity_updates"))
                 if bool(npc.get("navigation_active")):
                     npc_active += 1
     var configured: int = world_partition.get_configured_cell_count() if world_partition != null else 0
@@ -590,6 +594,7 @@ func _refresh_hud() -> void:
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   физика: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, physics_ready, pending, inflight, failed, current_region.x, current_region.y] \
         + "Навигация: %d готово / %d ожидают   NPC: %d/%d активны\n" % [navigation_ready, navigation_pending, npc_active, npc_total] \
+        + "Маршруты NPC: %d межъячеечных   avoidance: %d обновлений\n" % [npc_intercell_routes, npc_avoidance_updates] \
         + "Кэш земли: %d/%d   попадания: %d   промахи: %d\n" % [cache["entries"], cache["capacity"], cache["hits"], cache["misses"]] \
         + "Предзагрузка: X=%d Z=%d   впереди: %d ячейки\n" % [ahead.x, ahead.y, world_partition.prefetch_distance] \
         + "Дальний HLOD: %d плит / %d подготовлено, %d крон\n" % [far["visible"], far["allocated"], far["visible_canopies"]] \
