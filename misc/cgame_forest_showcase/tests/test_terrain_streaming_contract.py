@@ -128,6 +128,9 @@ class StreamedTerrainContracts(TestCase):
         assert "_create_terrain()" not in world
         assert "world_partition.are_cells_loaded(cell, 0)" in world
         assert "_position_has_terrain" in player
+        assert "WORLD_CELLS_PER_SIDE: int = 32" in world
+        assert "WORLD_EXTENT: float = 512.0" in world
+
         cache = (ROOT / "scripts/terrain_tile_cache.gd").read_text(encoding="utf-8")
         assert "MAX_CACHED_TILES: int = 12" in cache
         assert "_lru.erase(cell)" in cache
