@@ -250,8 +250,10 @@ func _fast_travel() -> void:
         return
 
     var cell_node: Node3D = world_partition.get_cell_node(target_cell)
-    var terrain_body: StaticBody3D = cell_node.get_node_or_null(
-        "TerrainPatch/GroundCollision") as StaticBody3D if cell_node != null else null
+    var terrain_body: StaticBody3D = null
+    if cell_node != null:
+        terrain_body = cell_node.get_node_or_null(
+            "TerrainPatch/GroundCollision") as StaticBody3D
     var ground_height: float = height_at(target.x, target.y)
     var ray := PhysicsRayQueryParameters3D.create(
         Vector3(target.x, ground_height + 8.0, target.y),
