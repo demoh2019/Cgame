@@ -64,6 +64,7 @@ var _rain_vfx: Node3D
 var _weather_next_update: float = -1.0
 var _weather_storming := false
 var _visual_weather_wind := Vector2.ZERO
+var _visual_biome := "plains"
 var _avatar: MeshInstance3D
 var _bike_visual
 var _flare_visual
@@ -224,9 +225,10 @@ func _update_world_light(delta: float = 0.0) -> void:
 		var weather: Dictionary = Weather.conditions(world, at.x, at.z, seconds)
 		_weather_storming = str(weather.get("condition", "")) == "storm"
 		_visual_weather_wind = Weather.wind_at(world, at.x, at.z, seconds)
+		_visual_biome = world.biome_at(at.x, at.z)
 		_weather_next_update = seconds + 0.25
 	_atmosphere.update(WorldCycle.daylight(seconds), WorldCycle.sun_height(seconds),
-		WorldCycle.phase(seconds), _weather_storming, delta, _visual_weather_wind)
+		WorldCycle.phase(seconds), _weather_storming, delta, _visual_weather_wind, _visual_biome)
 
 
 func _mesh(box_size: Vector3, color: Color) -> MeshInstance3D:

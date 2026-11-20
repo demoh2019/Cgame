@@ -4,6 +4,7 @@ const CloudShadowLut = preload("res://scripts/client/cloud_shadow_lut.gd")
 const CinematicColorGrade = preload("res://scripts/client/cinematic_color_grade.gd")
 const VegetationWind = preload("res://scripts/client/vegetation_wind.gd")
 const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
+const BiomeAtmosphere = preload("res://scripts/client/biome_atmosphere.gd")
 ## Sky, sun, light, fog, tone mapping and post effects, driven by the time of day and the weather.
 ## Everything degrades gracefully on the compatibility renderer (SSAO and the like are simply ignored).
 
@@ -21,6 +22,7 @@ var _sky_refresh_elapsed := 2.0 # Force the first material upload.
 var _sky_seconds := 0.0
 var _vegetation_wind := Vector3.ZERO
 var _wind_publish_seconds := 0.1
+var _visual_biome_settings: Dictionary = {}
 var light_level := 1.0 # The daylight of the last update, 0 at night and 1 at noon.
 var storm := 0.0 # 0..1, eased toward the target so the weather fades in and out.
 
@@ -97,7 +99,7 @@ func _ready() -> void:
 
 ## `daylight` 0..1 (0 night), `sun_height` -1..1, `phase` 0..1 around the day, `storming` whether it is stormy here.
 func update(daylight: float, sun_height: float, phase: float, storming: bool, delta: float,
-		wind: Vector2 = Vector2.ZERO) -> void:
+		wind: Vector2 = Vector2.ZERO, biome: String = "plains") -> void:
 	light_level = daylight
 	storm = move_toward(storm, 1.0 if storming else 0.0, delta * 0.25)
 	RenderingServer.global_shader_parameter_set(&"aa_cloud_shadow_strength",
@@ -151,8 +153,9 @@ func update(daylight: float, sun_height: float, phase: float, storming: bool, de
 	environment.ambient_light_energy = lerpf(0.75, 0.8, daylight) * (1.0 - storm * 0.25)
 	environment.fog_light_color = horizon.lerp(Color(0.5, 0.52, 0.56), storm * 0.5)
 	environment.fog_density = lerpf(0.0016, 0.0042, storm)
+	_visual_biome_settings = BiomeAtmosphere.advance(_visual_biome_settings, biome, delta)
 	CinematicFog.apply_weather(environment, daylight, sun_height, storm,
-		_fog_profile, horizon)
+		_fog_profile, horizon, _visual_biome_settings)
 	# Run the ACES-grade after atmospheric weather/fog, without replacing fog state.
 	CinematicColorGrade.apply(environment, daylight, sun_height, storm)
 
