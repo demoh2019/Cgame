@@ -11,6 +11,7 @@ const SUITES := [
 	"res://tests/test_imported_mesh_lod.gd",
 	"res://tests/test_mesh_pbr_preservation.gd",
 	"res://tests/test_graphics_stone_microdetail.gd",
+	"res://tests/test_native_detail_normal_blend.gd",
 	"res://tests/test_graphics_stone_parallax.gd",
 	"res://tests/test_character_rain_gear.gd",
 	"res://tests/test_skin_subsurface.gd",
