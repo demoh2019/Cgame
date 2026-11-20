@@ -33,6 +33,7 @@
 
 #include "../animation_lod_controller.h"
 #include "../gameplay_tag_container.h"
+#include "scene/animation/animation_player.h"
 
 #include "tests/test_macros.h"
 
@@ -119,6 +120,37 @@ TEST_CASE("[AnimationLODController] update_interval") {
 	CHECK(AnimationLODController::update_interval(70, true, 15, 35, 70) == 0);
 	CHECK(AnimationLODController::update_interval(200, true, 15, 35, 70) == 0);
 	CHECK(AnimationLODController::update_interval(1, false, 15, 35, 70) == 0);
+}
+
+TEST_CASE("[AnimationLODController] priority budget and reversible urgent mixers") {
+	AnimationLODController *lod = memnew(AnimationLODController);
+	AnimationPlayer *mixer = memnew(AnimationPlayer);
+
+	CHECK(lod->get_max_priority_mixers() == 8);
+	lod->set_max_priority_mixers(-50);
+	CHECK(lod->get_max_priority_mixers() == 0);
+	lod->set_max_priority_mixers(500);
+	CHECK(lod->get_max_priority_mixers() == 32);
+	lod->set_max_priority_mixers(4);
+	CHECK(lod->get_max_priority_mixers() == 4);
+
+	CHECK_FALSE(lod->is_mixer_high_priority(mixer));
+	lod->register_mixer(mixer);
+	CHECK(lod->get_mixer_count() == 1);
+	CHECK_FALSE(lod->is_mixer_high_priority(mixer));
+	lod->set_mixer_high_priority(mixer, true);
+	CHECK(lod->is_mixer_high_priority(mixer));
+	lod->set_mixer_high_priority(mixer, true); // A repeated network snapshot is a no-op.
+	CHECK(lod->get_mixer_count() == 1);
+	lod->set_mixer_high_priority(mixer, false);
+	CHECK_FALSE(lod->is_mixer_high_priority(mixer));
+	lod->set_mixer_high_priority(mixer, true);
+	lod->unregister_mixer(mixer);
+	CHECK(lod->get_mixer_count() == 0);
+	CHECK_FALSE(lod->is_mixer_high_priority(mixer));
+
+	memdelete(mixer);
+	memdelete(lod);
 }
 
 } // namespace TestGameplayTags
