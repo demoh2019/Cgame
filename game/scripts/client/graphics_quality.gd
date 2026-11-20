@@ -126,6 +126,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# Thin leaf transmission is a single PBR backlight term; no new material copies.
 	RenderingServer.global_shader_parameter_set(&"aa_leaf_transmission",
 		float(world_profile["leaf_transmission"]))
+	# Cheap direct-light transmission on grass tips; never rebuild existing
+	# MultiMesh tiles on a quality change.
+	RenderingServer.global_shader_parameter_set(&"aa_grass_transmission",
+		float(world_profile["grass_transmission"]))
 	# Crown AO scales down as genuine shadow maps and SSAO become available.
 	RenderingServer.global_shader_parameter_set(&"aa_canopy_occlusion",
 		float(world_profile["canopy_occlusion"]))

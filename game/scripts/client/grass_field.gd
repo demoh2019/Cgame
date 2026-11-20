@@ -32,11 +32,14 @@ render_mode cull_disabled, diffuse_lambert_wrap, specular_disabled, shadows_disa
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 global uniform float aa_weather_wetness;
 global uniform vec3 aa_vegetation_wind;
+// One renderer-wide intensity controls thin-blade backlighting for all grass tiles.
+global uniform float aa_grass_transmission;
 uniform float fade_start = 44.0;
 uniform float fade_end = 60.0;
 varying float tipness;
 varying float shade;
 varying float sheen;
+varying float grass_light_fade;
 varying vec3 tint;
 varying vec2 ground_xz;
 void vertex() {
@@ -46,6 +49,7 @@ void vertex() {
 	vec3 root = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
 	ground_xz = root.xz;
 	float shrink = 1.0 - smoothstep(fade_start, fade_end, length(root.xz - CAMERA_POSITION_WORLD.xz));
+	grass_light_fade = shrink;
 	VERTEX.y *= shrink;
 	// Blades already sunk into the ground should not evaluate several wind trigonometric
 	// waves per vertex. This matters because MultiMesh tiles are still alive in the
@@ -82,6 +86,15 @@ void fragment() {
 	// A richer wet-grass palette at no additional texture sampling cost.
 	float wet_grass = clamp(aa_weather_wetness, 0.0, 1.0);
 	ALBEDO = apply_cloud_shadow(color * (1.0 - wet_grass * 0.16), ground_xz, TIME);
+	// Approximate light transmission through thin grass, analogous to two-sided
+	// foliage shading. BACKLIGHT uses actual scene lights rather than emission.
+	// No extra texture reads, noise octaves, material copies or transparent pass.
+	BACKLIGHT = vec3(0.0);
+	if (aa_grass_transmission > 0.001 && grass_light_fade > 0.001) {
+		float leaf_tip_mask = smoothstep(0.18, 0.92, tipness);
+		BACKLIGHT = color * leaf_tip_mask * aa_grass_transmission
+			* grass_light_fade * (1.0 - wet_grass * 0.16);
+	}
 	ROUGHNESS = 0.85;
 	// Always lit from above, whichever side of the blade we see: with two-sided blades the engine would otherwise flip
 	// the normal of every back face downward and half the meadow would turn black.
