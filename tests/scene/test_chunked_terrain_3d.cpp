@@ -131,6 +131,20 @@ TEST_CASE("[SceneTree][ChunkedTerrain3D] Screen-space terrain LOD is opt-in") {
 	memdelete(terrain);
 }
 
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Geometric-error LOD is optional") {
+	ChunkedTerrain3D *terrain = make_terrain(33, 64.0, 10.0);
+	CHECK(terrain->get_lod_geometric_error_strength() == doctest::Approx(0.0));
+	CHECK(terrain->is_collision_enabled());
+	terrain->set_lod_geometric_error_strength(0.75);
+	CHECK(terrain->get_lod_geometric_error_strength() == doctest::Approx(0.75));
+	terrain->set_lod_geometric_error_strength(5.0);
+	CHECK(terrain->get_lod_geometric_error_strength() == doctest::Approx(1.0));
+	terrain->set_lod_geometric_error_strength(-2.0);
+	CHECK(terrain->get_lod_geometric_error_strength() == doctest::Approx(0.0));
+	CHECK(terrain->is_collision_enabled());
+	memdelete(terrain);
+}
+
 TEST_CASE("[SceneTree][ChunkedTerrain3D] The node's transform moves the terrain") {
 	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
 	SceneTree::get_singleton()->get_root()->add_child(terrain);
