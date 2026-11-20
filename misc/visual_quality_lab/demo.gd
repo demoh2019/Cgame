@@ -15,6 +15,7 @@ var atmosphere: AtmosphereController3D
 var streamer: WorldStreamer3D
 var world_state: WorldStateStore3D
 var world_state_label: Label
+var ai_simulation_enabled: bool = true
 var player_character: VisualLabCharacter3D
 var movement_label: Label
 var quest: ExplorationQuest3D
@@ -102,15 +103,19 @@ func _update_foliage_quality(profile: int, _adaptive: bool) -> void:
 func _on_streamed_cell_loaded(_coord: Vector2i, cell: Node3D) -> void:
 	if cell.has_method("set_quality"):
 		cell.call("set_quality", manager.current_profile)
+	if cell.has_method("set_ai_enabled"):
+		cell.call("set_ai_enabled", ai_simulation_enabled)
 
 
 func _process(delta: float) -> void:
 	if status_label != null:
-		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Space jump | Shift sprint | RMB look | V fly\nWorld cells: %d/%d | Pending assets: %d | 7 Streaming: %s" % [
+		var npc_counts: Vector2i = _count_npc_behaviors()
+		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Space jump | Shift sprint | RMB look | V fly\nWorld cells: %d/%d | Pending assets: %d | 7 Streaming: %s\nNPCs: %d | Alerted: %d | 9 AI: %s" % [
 			Engine.get_frames_per_second(), get_viewport().scaling_3d_scale,
 			RenderingServer.get_current_rendering_method(),
 			streamer.active_cell_count(), streamer.registered_cell_count(),
-			streamer.pending_asset_count(), "ON" if streamer.streaming_enabled else "OFF"
+			streamer.pending_asset_count(), "ON" if streamer.streaming_enabled else "OFF",
+			npc_counts.x, npc_counts.y, "ON" if ai_simulation_enabled else "OFF"
 		]
 
 
@@ -137,6 +142,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_try_activate_world_beacon()
 			KEY_8:
 				_reset_world_beacons()
+			KEY_9:
+				_toggle_ai_simulation()
 
 
 func _build_graphics_ui() -> void:
@@ -322,6 +329,29 @@ func _on_world_state_saved(_path: String, _count: int) -> void:
 func _update_world_state_ui() -> void:
 	if is_instance_valid(world_state_label) and is_instance_valid(world_state):
 		world_state_label.text = "G: Activate a nearby orange beacon  |  Saved cells: %d" % world_state.saved_cell_count()
+
+
+func _toggle_ai_simulation() -> void:
+	ai_simulation_enabled = not ai_simulation_enabled
+	for cell in streamer.get_active_cells():
+		if cell.has_method("set_ai_enabled"):
+			cell.call("set_ai_enabled", ai_simulation_enabled)
+
+
+func _count_npc_behaviors() -> Vector2i:
+	var active_npcs: int = 0
+	var alerted_npcs: int = 0
+	if not is_instance_valid(streamer):
+		return Vector2i.ZERO
+	for cell in streamer.get_active_cells():
+		if not cell.has_method("get_active_npc"):
+			continue
+		var npc: StreamedPatrolNPC3D = cell.call("get_active_npc")
+		if is_instance_valid(npc):
+			active_npcs += 1
+			if npc.behavior == StreamedPatrolNPC3D.Behavior.ALERT:
+				alerted_npcs += 1
+	return Vector2i(active_npcs, alerted_npcs)
 
 
 func _build_world() -> void:
