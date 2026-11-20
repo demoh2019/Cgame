@@ -473,4 +473,77 @@ TEST_CASE("[WorldPartition3D] Pins obey a bounded 128-cell memory budget") {
 	memdelete(partition);
 }
 
+
+TEST_CASE("[WorldPartition3D] Predictive settings reject invalid values and cap speed") {
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	CHECK(partition->get_predictive_lookahead_seconds() == 0.0);
+	CHECK(partition->get_predictive_max_distance() == 32.0);
+	CHECK_FALSE(partition->has_predicted_cell());
+	partition->set_predictive_lookahead_seconds(2.0);
+	partition->set_predictive_max_distance(24.0);
+	partition->set_predictive_velocity(Vector3(4.0, 0.0, -8.0));
+	ERR_PRINT_OFF;
+	partition->set_predictive_lookahead_seconds(-1.0);
+	partition->set_predictive_lookahead_seconds(6.0);
+	partition->set_predictive_max_distance(-1.0);
+	partition->set_predictive_max_distance(129.0);
+	partition->set_predictive_velocity(Vector3(std::numeric_limits<real_t>::infinity(), 0.0, 0.0));
+	ERR_PRINT_ON;
+	CHECK(partition->get_predictive_lookahead_seconds() == 2.0);
+	CHECK(partition->get_predictive_max_distance() == 24.0);
+	CHECK(partition->get_predictive_velocity() == Vector3(4.0, 0.0, -8.0));
+	partition->set_predictive_velocity(Vector3(1024.0, 0.0, 0.0));
+	CHECK(Math::is_equal_approx(partition->get_predictive_velocity().x, 512.0));
+	partition->set_predictive_lookahead_seconds(0.0);
+	CHECK_FALSE(partition->has_predicted_cell());
+	memdelete(partition);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Prediction loads a future cell before observer moves") {
+	Node3D *template_root = memnew(Node3D);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	REQUIRE(packed->pack(template_root) == OK);
+	memdelete(template_root);
+
+	const String path = "user://world_partition_predictive_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	REQUIRE(ResourceSaver::save(packed, path) == OK);
+
+	Node3D *observer = memnew(Node3D);
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	SceneTree::get_singleton()->get_root()->add_child(observer);
+	SceneTree::get_singleton()->get_root()->add_child(partition);
+	partition->set_cell_size(16.0);
+	partition->set_load_radius(0);
+	partition->set_unload_radius(0);
+	partition->set_observer_path(partition->get_path_to(observer));
+	partition->set_cell_scene(Vector2i(0, 0), path);
+	partition->set_cell_scene(Vector2i(1, 0), path);
+	partition->set_predictive_lookahead_seconds(1.0);
+	partition->set_predictive_max_distance(16.0);
+	partition->set_predictive_velocity(Vector3(16.0, 0.0, 0.0));
+
+	for (int i = 0; i < 2000 && partition->get_loaded_cell_count() != 2; i++) {
+		partition->update_streaming();
+		OS::get_singleton()->delay_usec(1000);
+	}
+	CHECK(partition->has_predicted_cell());
+	CHECK(partition->get_predicted_cell() == Vector2i(1, 0));
+	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
+	CHECK(partition->is_cell_loaded(Vector2i(1, 0)));
+	CHECK(partition->get_loaded_cell_count() == 2);
+
+	partition->set_predictive_lookahead_seconds(0.0);
+	partition->update_streaming();
+	CHECK_FALSE(partition->has_predicted_cell());
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(1, 0)));
+	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
+
+	SceneTree::get_singleton()->get_root()->remove_child(partition);
+	SceneTree::get_singleton()->get_root()->remove_child(observer);
+	memdelete(partition);
+	memdelete(observer);
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
 } // namespace TestWorldPartition3D

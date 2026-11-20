@@ -178,6 +178,7 @@ void WorldPartition3D::_notification(int p_what) {
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		// A future re-entry should report the first resolved observer cell.
 		observer_cell_valid = false;
+		predicted_cell_valid = false;
 	}
 }
 
@@ -252,6 +253,7 @@ void WorldPartition3D::set_streaming_enabled(bool p_enabled) {
 		_clear_active_cells();
 		pending_cells.clear();
 		failed_cells.clear();
+		predicted_cell_valid = false;
 		_purge_unused_ready_scenes();
 	}
 	_refresh_processing();
@@ -267,10 +269,55 @@ void WorldPartition3D::set_observer_path(const NodePath &p_path) {
 	}
 	observer_path = p_path;
 	observer_cell_valid = false;
+	predicted_cell_valid = false;
 }
 
 NodePath WorldPartition3D::get_observer_path() const {
 	return observer_path;
+}
+
+void WorldPartition3D::set_predictive_velocity(const Vector3 &p_velocity) {
+	ERR_FAIL_COND_MSG(!p_velocity.is_finite(), "WorldPartition3D predictive_velocity must have finite components.");
+	// Keep calculations bounded even if game code supplies pathological velocities.
+	const real_t speed = p_velocity.length();
+	ERR_FAIL_COND_MSG(!Math::is_finite(speed), "WorldPartition3D predictive_velocity magnitude must be finite.");
+	predictive_velocity = speed > 512.0 ? p_velocity * (512.0 / speed) : p_velocity;
+}
+
+Vector3 WorldPartition3D::get_predictive_velocity() const {
+	return predictive_velocity;
+}
+
+void WorldPartition3D::set_predictive_lookahead_seconds(real_t p_seconds) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_seconds) || p_seconds < 0.0 || p_seconds > 5.0, "WorldPartition3D lookahead must be between 0 and 5 seconds.");
+	predictive_lookahead_seconds = p_seconds;
+	if (p_seconds == 0.0) {
+		predicted_cell_valid = false;
+	}
+}
+
+real_t WorldPartition3D::get_predictive_lookahead_seconds() const {
+	return predictive_lookahead_seconds;
+}
+
+void WorldPartition3D::set_predictive_max_distance(real_t p_distance) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_distance) || p_distance < 0.0 || p_distance > 128.0, "WorldPartition3D maximum prediction distance must be between 0 and 128 world units.");
+	predictive_max_distance = p_distance;
+	if (p_distance == 0.0) {
+		predicted_cell_valid = false;
+	}
+}
+
+real_t WorldPartition3D::get_predictive_max_distance() const {
+	return predictive_max_distance;
+}
+
+bool WorldPartition3D::has_predicted_cell() const {
+	return predicted_cell_valid;
+}
+
+Vector2i WorldPartition3D::get_predicted_cell() const {
+	return predicted_cell_valid ? predicted_cell : Vector2i();
 }
 
 bool WorldPartition3D::has_observer_cell() const {
@@ -465,6 +512,7 @@ void WorldPartition3D::_request_cell(const Vector2i &p_cell, int &r_new_requests
 void WorldPartition3D::update_streaming() {
 	_poll_requests();
 	if (!streaming_enabled || !is_inside_tree() || observer_path.is_empty()) {
+		predicted_cell_valid = false;
 		_purge_unused_ready_scenes();
 		_refresh_processing();
 		return;
@@ -472,6 +520,7 @@ void WorldPartition3D::update_streaming() {
 
 	Node3D *observer = Object::cast_to<Node3D>(get_node_or_null(observer_path));
 	if (observer == nullptr) {
+		predicted_cell_valid = false;
 		_purge_unused_ready_scenes();
 		return;
 	}
@@ -481,9 +530,28 @@ void WorldPartition3D::update_streaming() {
 	observer_cell = center;
 	observer_cell_valid = true;
 
+	// Predict a single future cell after the observer's normal demand radius.
+	// Feed velocity via set_predictive_velocity() in world space. The built-in
+	// distance and time bounds avoid unbounded speculative memory growth.
+	predicted_cell_valid = false;
+	if (predictive_lookahead_seconds > 0.0 && predictive_max_distance > 0.0 && predictive_velocity.length_squared() > 0.01) {
+		Vector3 offset = predictive_velocity * predictive_lookahead_seconds;
+		const real_t distance = offset.length();
+		if (Math::is_finite(distance) && distance > 0.0) {
+			if (distance > predictive_max_distance) {
+				offset *= predictive_max_distance / distance;
+			}
+			const Vector3 predicted_global = observer->get_global_position() + offset;
+			if (predicted_global.is_finite()) {
+				predicted_cell = local_position_to_cell(to_local(predicted_global));
+				predicted_cell_valid = predicted_cell != center;
+			}
+		}
+	}
+
 	Vector<Vector2i> unload;
 	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
-		if ((!pinned_cells.has(E.key) && !_within_radius(E.key, center, unload_radius)) || ObjectDB::get_instance(E.value) == nullptr) {
+		if ((!pinned_cells.has(E.key) && !(predicted_cell_valid && E.key == predicted_cell) && !_within_radius(E.key, center, unload_radius)) || ObjectDB::get_instance(E.value) == nullptr) {
 			unload.push_back(E.key);
 		}
 	}
@@ -493,7 +561,7 @@ void WorldPartition3D::update_streaming() {
 
 	Vector<Vector2i> cancel;
 	for (const KeyValue<Vector2i, String> &E : pending_cells) {
-		if (!pinned_cells.has(E.key) && !_within_radius(E.key, center, load_radius)) {
+		if (!pinned_cells.has(E.key) && !(predicted_cell_valid && E.key == predicted_cell) && !_within_radius(E.key, center, load_radius)) {
 			cancel.push_back(E.key);
 		}
 	}
@@ -521,6 +589,10 @@ void WorldPartition3D::update_streaming() {
 		if (!_within_radius(cell, center, load_radius)) {
 			_request_cell(cell, new_requests, instances);
 		}
+	}
+	// Lowest priority: one forecast cell, after visible and pinned cells.
+	if (predicted_cell_valid && !_within_radius(predicted_cell, center, load_radius)) {
+		_request_cell(predicted_cell, new_requests, instances);
 	}
 	_purge_unused_ready_scenes();
 	if (observer_cell_changed) {
@@ -576,6 +648,14 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_streaming_enabled"), &WorldPartition3D::is_streaming_enabled);
 	ClassDB::bind_method(D_METHOD("set_observer_path", "path"), &WorldPartition3D::set_observer_path);
 	ClassDB::bind_method(D_METHOD("get_observer_path"), &WorldPartition3D::get_observer_path);
+	ClassDB::bind_method(D_METHOD("set_predictive_velocity", "velocity"), &WorldPartition3D::set_predictive_velocity);
+	ClassDB::bind_method(D_METHOD("get_predictive_velocity"), &WorldPartition3D::get_predictive_velocity);
+	ClassDB::bind_method(D_METHOD("set_predictive_lookahead_seconds", "seconds"), &WorldPartition3D::set_predictive_lookahead_seconds);
+	ClassDB::bind_method(D_METHOD("get_predictive_lookahead_seconds"), &WorldPartition3D::get_predictive_lookahead_seconds);
+	ClassDB::bind_method(D_METHOD("set_predictive_max_distance", "distance"), &WorldPartition3D::set_predictive_max_distance);
+	ClassDB::bind_method(D_METHOD("get_predictive_max_distance"), &WorldPartition3D::get_predictive_max_distance);
+	ClassDB::bind_method(D_METHOD("has_predicted_cell"), &WorldPartition3D::has_predicted_cell);
+	ClassDB::bind_method(D_METHOD("get_predicted_cell"), &WorldPartition3D::get_predicted_cell);
 	ClassDB::bind_method(D_METHOD("has_observer_cell"), &WorldPartition3D::has_observer_cell);
 	ClassDB::bind_method(D_METHOD("get_observer_cell"), &WorldPartition3D::get_observer_cell);
 	ClassDB::bind_method(D_METHOD("set_cell_scenes", "scenes"), &WorldPartition3D::set_cell_scenes);
@@ -607,6 +687,10 @@ void WorldPartition3D::_bind_methods() {
 	ADD_GROUP("Streaming", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "streaming_enabled"), "set_streaming_enabled", "is_streaming_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "observer_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Node3D"), "set_observer_path", "get_observer_path");
+	ADD_GROUP("Predictive Prefetch", "predictive_");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "predictive_velocity"), "set_predictive_velocity", "get_predictive_velocity");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "predictive_lookahead_seconds", PROPERTY_HINT_RANGE, "0,5,0.1,suffix:s"), "set_predictive_lookahead_seconds", "get_predictive_lookahead_seconds");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "predictive_max_distance", PROPERTY_HINT_RANGE, "0,128,1,suffix:m"), "set_predictive_max_distance", "get_predictive_max_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "load_radius", PROPERTY_HINT_RANGE, "0,32,1"), "set_load_radius", "get_load_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "unload_radius", PROPERTY_HINT_RANGE, "0,64,1"), "set_unload_radius", "get_unload_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_new_requests_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_new_requests_per_frame", "get_max_new_requests_per_frame");

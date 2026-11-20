@@ -24,6 +24,7 @@ var elapsed: float = 0.0
 var hud_elapsed: float = 0.0
 var collected: int = 0
 var high_quality: bool = true
+var predictive_streaming: bool = true
 var mouse_sensitivity: float = 0.0018
 
 
@@ -193,6 +194,9 @@ func _create_streaming_world() -> void:
     world_partition.max_new_requests_per_frame = 2
     world_partition.max_instances_per_frame = 1
     world_partition.max_concurrent_requests = 4
+    # Preload one likely next cell while sprinting, after normal visible requests.
+    world_partition.predictive_lookahead_seconds = 2.5
+    world_partition.predictive_max_distance = 28.0
     add_child(world_partition)
     world_partition.observer_path = world_partition.get_path_to(player)
     world_partition.cell_loaded.connect(_on_stream_cell_loaded)
@@ -291,7 +295,7 @@ func _create_hud() -> void:
     hint.position = Vector2(22, 166)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
+    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: упреждение  •  F5/F9: сохранение  •  Esc: курсор"
     canvas.add_child(hint)
 
 
@@ -324,12 +328,25 @@ func _refresh_hud() -> void:
     var inflight: int = world_partition.get_inflight_request_count() if world_partition != null else 0
     var failed: int = world_partition.get_failed_cell_count() if world_partition != null else 0
     var pinned: int = world_partition.get_pinned_cell_count() if world_partition != null else 0
+    var predicted_text: String = "OFF" if not predictive_streaming else "—"
+    if world_partition != null and world_partition.has_predicted_cell():
+        var next_cell: Vector2i = world_partition.get_predicted_cell()
+        predicted_text = "%d,%d" % [next_cell.x, next_cell.y]
     hud.text = "AURORA FOREST  |  Cgame / Godot 4.8\n" \
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
-        + "Ячейки: %d/%d   закреплено: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d" % [loaded, configured, pinned, pending, inflight, failed, current_region.x, current_region.y]
+        + "Ячейки: %d/%d   закреплено: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pinned, pending, inflight, failed, current_region.x, current_region.y] \
+        + "Упреждающая загрузка: %s   (F3: вкл./выкл.)" % predicted_text
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
+
+
+func _physics_process(_delta: float) -> void:
+    # Player movement is calculated by CharacterBody3D in the physics step.
+    # The streamer receives the world-space velocity from the preceding step.
+    # For non-physics observers, the same API can be driven by gameplay code.
+    if world_partition != null and player != null:
+        world_partition.predictive_velocity = player.velocity
 
 
 func _process(delta: float) -> void:
@@ -362,6 +379,11 @@ func _unhandled_input(event: InputEvent) -> void:
                 _apply_quality(true)
             KEY_F2:
                 _apply_quality(false)
+            KEY_F3:
+                predictive_streaming = not predictive_streaming
+                if world_partition != null:
+                    world_partition.predictive_lookahead_seconds = 2.5 if predictive_streaming else 0.0
+                _refresh_hud()
             KEY_F5:
                 _save_game()
             KEY_F9:

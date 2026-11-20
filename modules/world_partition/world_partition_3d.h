@@ -49,6 +49,12 @@ class WorldPartition3D : public Node3D {
 	int max_instances_per_frame = 2;
 	int max_concurrent_requests = 8;
 	bool streaming_enabled = true;
+	// Optional, bounded future-cell streaming source; velocity is in world units/second.
+	Vector3 predictive_velocity;
+	real_t predictive_lookahead_seconds = 0.0;
+	real_t predictive_max_distance = 32.0;
+	Vector2i predicted_cell;
+	bool predicted_cell_valid = false;
 	Vector2i observer_cell;
 	bool observer_cell_valid = false;
 
@@ -99,6 +105,16 @@ public:
 
 	void set_observer_path(const NodePath &p_path);
 	NodePath get_observer_path() const;
+
+	void set_predictive_velocity(const Vector3 &p_velocity);
+	Vector3 get_predictive_velocity() const;
+	void set_predictive_lookahead_seconds(real_t p_seconds);
+	real_t get_predictive_lookahead_seconds() const;
+	void set_predictive_max_distance(real_t p_distance);
+	real_t get_predictive_max_distance() const;
+	bool has_predicted_cell() const;
+	Vector2i get_predicted_cell() const;
+
 	bool has_observer_cell() const;
 	Vector2i get_observer_cell() const;
 

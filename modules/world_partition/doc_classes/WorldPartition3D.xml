@@ -5,7 +5,7 @@
 	</brief_description>
 	<description>
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
-		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
+		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work. Optional predictive streaming can preload one cell ahead of the observer using [member predictive_velocity], [member predictive_lookahead_seconds], and [member predictive_max_distance]. Current cells and pinned hubs always take priority over speculative work.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries. For persistent camps or quest hubs, use [method pin_cell] and [method unpin_cell] to override distance-based unloading. At most 128 registered cells may be pinned; a disabled streamer still unloads all cells.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
@@ -21,6 +21,57 @@
 		Streaming is disabled while editing a scene; the node processes automatically while the game runs. Call [method update_streaming] if an immediate update is required after moving the observer.
 	</description>
 	<methods>
+		<method name="get_predictive_lookahead_seconds" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the configured projection horizon in seconds.
+			</description>
+		</method>
+		<method name="get_predictive_max_distance" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the maximum future-cell displacement in world units.
+			</description>
+		</method>
+		<method name="get_predictive_velocity" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the supplied world-space velocity in units per second.
+			</description>
+		</method>
+		<method name="get_predicted_cell" qualifiers="const">
+			<return type="Vector2i" />
+			<description>
+				Returns the latest future cell, or (0, 0) if none. Call [method has_predicted_cell] first.
+			</description>
+		</method>
+		<method name="has_predicted_cell" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when prediction targets a different cell. Does not guarantee a registered or loaded scene.
+			</description>
+		</method>
+		<method name="set_predictive_velocity">
+			<return type="void" />
+			<param index="0" name="velocity" type="Vector3" />
+			<description>
+				Sets the world-space observer velocity. Non-finite values are rejected and speed is capped at 512 units/second. Game code should update this at physics cadence.
+			</description>
+		</method>
+		<method name="set_predictive_lookahead_seconds">
+			<return type="void" />
+			<param index="0" name="seconds" type="float" />
+			<description>
+				Sets the prediction horizon in the range 0 to 5 seconds. Zero disables prefetch.
+			</description>
+		</method>
+		<method name="set_predictive_max_distance">
+			<return type="void" />
+			<param index="0" name="distance" type="float" />
+			<description>
+				Sets the cap on speculative displacement in the range 0 to 128 world units. Zero disables prefetch.
+			</description>
+		</method>
 		<method name="cell_to_local_position" qualifiers="const">
 			<return type="Vector3" />
 			<param index="0" name="cell" type="Vector2i" />
@@ -187,6 +238,15 @@
 		</member>
 		<member name="observer_path" type="NodePath" setter="set_observer_path" getter="get_observer_path" default="NodePath(&quot;&quot;)">
 			Path relative to this node pointing to a [Node3D] observer, such as a player or camera.
+		</member>
+		<member name="predictive_velocity" type="Vector3" setter="set_predictive_velocity" getter="get_predictive_velocity" default="Vector3(0, 0, 0)">
+			World-space velocity for speculative streaming; supply it from the active moving character in gameplay code.
+		</member>
+		<member name="predictive_lookahead_seconds" type="float" setter="set_predictive_lookahead_seconds" getter="get_predictive_lookahead_seconds" default="0.0">
+			Forecast horizon from 0 to 5 seconds. The default of zero disables prefetch.
+		</member>
+		<member name="predictive_max_distance" type="float" setter="set_predictive_max_distance" getter="get_predictive_max_distance" default="32.0">
+			Maximum future-cell displacement (0 to 128 world units). One additional cell at most is speculatively loaded.
 		</member>
 		<member name="streaming_enabled" type="bool" setter="set_streaming_enabled" getter="is_streaming_enabled" default="true">
 			Enables or disables streaming. Disabling unloads tracked instances and preserves cell registrations.
