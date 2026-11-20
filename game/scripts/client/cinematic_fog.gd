@@ -7,13 +7,13 @@ const MAX_HEIGHT_DENSITY := 0.0040
 const MAX_VOLUME_DENSITY := 0.0200
 const PROFILES := [
 	{"length": 0.0, "base_density": 0.0, "detail_spread": 2.0,
-		"reprojection": 0.0, "height_scale": 0.55, "froxel_size": 0, "froxel_depth": 0},
+		"reprojection": 0.0, "height_scale": 0.55, "froxel_size": 0, "froxel_depth": 0, "gi_inject": 0.0},
 	{"length": 0.0, "base_density": 0.0, "detail_spread": 2.0,
-		"reprojection": 0.0, "height_scale": 0.85, "froxel_size": 0, "froxel_depth": 0},
+		"reprojection": 0.0, "height_scale": 0.85, "froxel_size": 0, "froxel_depth": 0, "gi_inject": 0.0},
 	{"length": 48.0, "base_density": 0.0060, "detail_spread": 2.35,
-		"reprojection": 0.66, "height_scale": 0.85, "froxel_size": 112, "froxel_depth": 96},
+		"reprojection": 0.66, "height_scale": 0.85, "froxel_size": 112, "froxel_depth": 96, "gi_inject": 0.0},
 	{"length": 72.0, "base_density": 0.0080, "detail_spread": 2.55,
-		"reprojection": 0.74, "height_scale": 1.0, "froxel_size": 160, "froxel_depth": 128},
+		"reprojection": 0.74, "height_scale": 1.0, "froxel_size": 160, "froxel_depth": 128, "gi_inject": 0.24},
 ]
 
 
@@ -21,6 +21,9 @@ static func profile(quality: int, method: String) -> Dictionary:
 	var settings: Dictionary = PROFILES[clampi(quality, 0, 3)].duplicate(true)
 	# Godot's expensive volumetric pass exists only on Forward+.
 	settings["enabled"] = method == "forward_plus" and quality >= 2
+	# GI voxel sampling must never run on fallback renderers.
+	if not bool(settings["enabled"]):
+		settings["gi_inject"] = 0.0
 	return settings
 
 
@@ -72,10 +75,19 @@ static func apply_profile(env: Environment, sun: DirectionalLight3D,
 		env.volumetric_fog_temporal_reprojection_enabled = true
 		env.volumetric_fog_temporal_reprojection_amount = float(settings["reprojection"])
 		env.volumetric_fog_sky_affect = 0.25
-		# The game's sky provides light already; injecting GI is unnecessary.
-		env.volumetric_fog_gi_inject = 0.0
+		# On Ultra, let the already-enabled SDFGI field softly illuminate the
+		# same froxel volume. No second fog volume, screen pass, or probe capture.
+		# High and unsupported renderers avoid even sampling the GI textures.
+		# Guard against a missing/uninitialized GI field on scene startup.
+		var gi_weight: float = clampf(float(settings.get("gi_inject", 0.0)), 0.0, 0.4) if env.sdfgi_enabled else 0.0
+		if absf(env.volumetric_fog_gi_inject - gi_weight) > 0.0001:
+			env.volumetric_fog_gi_inject = gi_weight
 		env.volumetric_fog_ambient_inject = 0.0
 	else:
+		# A live Ultra -> High/Compatibility switch must remove the previous
+		# SDFGI light contribution immediately, not leave stale fog brightness.
+		if env.volumetric_fog_gi_inject != 0.0:
+			env.volumetric_fog_gi_inject = 0.0
 		env.volumetric_fog_density = 0.0
 	if sun != null:
 		sun.light_volumetric_fog_energy = 0.8 if enabled else 0.0
