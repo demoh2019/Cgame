@@ -4053,6 +4053,17 @@ func _tick_acid_pools() -> void:
 				_on_player_death(survivor, -int(pool["source"]))
 
 
+## Single source of truth for infected sight and owner HUD replication.
+func _visual_signature_for(player: Player) -> float:
+	var armor_id: String = player.inventory.armor
+	var owns: bool = armor_id != "" and player.inventory.count(armor_id) > 0
+	var stance: float = StealthStance.visual_signature(
+		Camouflage.visual_signature(armor_id, owns, player.noise_timer, _alive(player)),
+		player.crouching, player.noise_timer, _alive(player))
+	return PortableShelter.visual_signature(stance, shelters, player.position, time,
+		player.crouching, player.noise_timer, _alive(player))
+
+
 func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
 	for player in players.values():
@@ -4063,12 +4074,7 @@ func _tick_zombies(delta: float) -> void:
 				Weather.conditions(world, player.position.x, player.position.z, time)),
 			"firelight": CampfireThreat.reveal_radius(campfires, player.position,
 				time, WorldCycle.is_night(time)),
-			"visual_signature": StealthStance.visual_signature(
-				Camouflage.visual_signature(player.inventory.armor,
-					player.inventory.armor != "" and
-					player.inventory.count(player.inventory.armor) > 0,
-					player.noise_timer, _alive(player)),
-				player.crouching, player.noise_timer, _alive(player)),
+			"visual_signature": _visual_signature_for(player),
 			# Only actual server wounds contribute; never trust client input.
 			"scent": BloodScent.detection_radius(player.survival.bleeding,
 				_alive(player), _is_safe(player.position), FieldScentMask.active(player.survival))}
@@ -4575,6 +4581,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 			"tent_sheltered": PortableShelter.covers(shelters, player.position, time),
+			"tent_camouflaged": PortableShelter.camouflaged(shelters, player.position,
+				time, player.crouching, player.noise_timer, _alive(player)),
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
 			"weather_sight": Weather.sight_multiplier(
 				Weather.conditions(world, player.position.x, player.position.z, time)),
@@ -4595,12 +4603,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"party_aid_cooldown": player.party_aid_timer, "party_feast_cooldown": player.feast_timer,
 			"stim_cooldown": player.stim_cooldown,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
-			"visual_signature": StealthStance.visual_signature(
-				Camouflage.visual_signature(player.inventory.armor,
-					player.inventory.armor != "" and
-					player.inventory.count(player.inventory.armor) > 0,
-					player.noise_timer, _alive(player)),
-				player.crouching, player.noise_timer, _alive(player)),
+			"visual_signature": _visual_signature_for(player),
 			"last_death_full_loot": player.last_death_full_loot,
 			"is_night": WorldCycle.is_night(time),
 			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),

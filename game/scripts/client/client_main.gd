@@ -1069,12 +1069,12 @@ func _update_hud() -> void:
 	_stats.text += "\nSTORM INSULATION %d%% | %s" % [
 		int(round(100.0 * Weather.protection(local_armor))),
 		str(Defs.item(local_armor).get("name", "No armor"))]
-	var visual: float = StealthStance.visual_signature(
-		Camouflage.visual_signature(local_armor, not local_armor.is_empty(),
-			survivor.noise_timer, vitals.alive),
-		survivor.crouching, survivor.noise_timer, vitals.alive)
+	var visual: float = sim._visual_signature_for(survivor)
+	if PortableShelter.camouflaged(sim.shelters, survivor.position, sim.time,
+			survivor.crouching, survivor.noise_timer, vitals.alive):
+		_stats.text += "\nCANOPY CAMOUFLAGE: -25% infected sight; sound and scent still reveal"
 	if visual < 0.999:
-		_stats.text += "\nSTEALTH STANCE / GEAR: infected vision -%d%% (noise/blood still reveal you)" % [
+		_stats.text += "\nSTEALTH STANCE / GEAR / TARP: infected vision -%d%% (noise/blood still reveal you)" % [
 			int(round(100.0 * (1.0 - visual)))]
 	elif float(Defs.item(local_armor).get("visual_signature", 1.0)) < 1.0 and survivor.noise_timer > 0.0:
 		_stats.text += "\nCAMOUFLAGE BROKEN: your noise is attracting infected"

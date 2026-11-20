@@ -3,6 +3,7 @@ extends RefCounted
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
+const Zombie = preload("res://scripts/shared/zombie.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const Persist = preload("res://scripts/server/world_persistence.gd")
 const BarricadeTest = preload("res://tests/test_barricades.gd")
@@ -70,6 +71,84 @@ func run(t) -> void:
 		"no protection at a distance")
 	t.eq(PortableShelter.exposure_severity(INF, true), 0.0,
 		"malformed weather cannot make infinite exposure")
+
+	t.current = "quiet crouched canopy lowers sight but not smell or hearing"
+	var base: float = 0.60
+	owner.crouching = true
+	owner.noise_timer = 0.0
+	t.near(PortableShelter.visual_signature(base, sim.shelters,
+		owner.position, sim.time, true, 0.0), 0.45, 0.0001,
+		"fabric shelter multiplies real crouch signature by 75 percent")
+	t.near(PortableShelter.visual_signature(0.35, sim.shelters,
+		owner.position, sim.time, true, 0.0), 0.35, 0.0001,
+		"strong gear cannot become completely invisible")
+	t.near(PortableShelter.visual_signature(base, sim.shelters,
+		owner.position, sim.time, false, 0.0), base, 0.0001,
+		"standing cancels canopy stealth")
+	t.near(PortableShelter.visual_signature(base, sim.shelters,
+		owner.position, sim.time, true, 1.0), base, 0.0001,
+		"noisy survivors receive no fabric camouflage")
+	t.near(PortableShelter.visual_signature(base, sim.shelters,
+		owner.position, sim.time, true, INF), base, 0.0001,
+		"invalid sound timer does not generate stealth")
+	t.near(PortableShelter.visual_signature(base, sim.shelters,
+		Vector3.INF, sim.time, true, 0.0), base, 0.0001,
+		"invalid locations are not concealed")
+	t.near(PortableShelter.visual_signature(base, sim.shelters,
+		owner.position, sim.time, true, 0.0, false), base, 0.0001,
+		"dead survivors cannot be concealed")
+	t.eq(PortableShelter.visual_signature(NAN, sim.shelters,
+		owner.position, sim.time, true, 0.0), 1.0,
+		"nonfinite signature always resolves to full exposure")
+	var owner_state: Dictionary = sim.snapshot_for(owner.id)["you"]
+	t.check(owner_state["tent_camouflaged"],
+		"server replicates active canopy only to an eligible player")
+	t.near(float(owner_state["visual_signature"]), 0.45, 0.0001,
+		"NPC detection and client snapshot use identical vision rules")
+	t.check(not sim.snapshot_for(neighbor.id)["you"]["tent_camouflaged"],
+		"standing neighbor is not hidden despite sharing weather protection")
+	owner.survival.bleeding = 35.0
+	t.check(float(sim.snapshot_for(owner.id)["you"]["blood_scent_radius"]) > 0.0,
+		"bleeding attracts infected even under canvas")
+	owner.survival.bleeding = 0.0
+
+	# Check genuine infected sight acquisition without using server debug flags.
+	var zombie_at := _at(world, spot + Vector2(8.5, 0.0))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 42
+	var plain := Zombie.new(sim.new_id(), "walker", zombie_at)
+	plain.think(world, {owner.id: {"position": owner.position, "alive": true,
+		"safe": false, "visual_signature": base, "noise": 0.0, "scent": 0.0}}, 0.1, rng)
+	t.eq(plain.target_id, owner.id, "walker spots ordinary crouching at 8.5 metres")
+	var hidden := Zombie.new(sim.new_id(), "walker", zombie_at)
+	hidden.think(world, {owner.id: {"position": owner.position, "alive": true,
+		"safe": false, "visual_signature": sim._visual_signature_for(owner),
+		"noise": 0.0, "scent": 0.0}}, 0.1, rng)
+	t.eq(hidden.target_id, -1, "camouflaged player escapes initial distant detection")
+	var heard := Zombie.new(sim.new_id(), "walker", zombie_at)
+	heard.think(world, {owner.id: {"position": owner.position, "alive": true,
+		"safe": false, "visual_signature": sim._visual_signature_for(owner),
+		"noise": 18.0, "scent": 0.0}}, 0.1, rng)
+	t.eq(heard.target_id, owner.id, "audible target is still detected")
+	var scented := Zombie.new(sim.new_id(), "walker", zombie_at)
+	scented.think(world, {owner.id: {"position": owner.position, "alive": true,
+		"safe": false, "visual_signature": sim._visual_signature_for(owner),
+		"noise": 0.0, "scent": 18.0}}, 0.1, rng)
+	t.eq(scented.target_id, owner.id, "blood scent bypasses visual cover")
+	var lit := Zombie.new(sim.new_id(), "walker", zombie_at)
+	lit.think(world, {owner.id: {"position": owner.position, "alive": true,
+		"safe": false, "visual_signature": sim._visual_signature_for(owner),
+		"noise": 0.0, "scent": 0.0, "firelight": 18.0}}, 0.1, rng)
+	t.eq(lit.target_id, owner.id, "campfire light bypasses canopy cover")
+	owner.noise_timer = 1.0
+	t.check(not sim.snapshot_for(owner.id)["you"]["tent_camouflaged"],
+		"loud activity immediately removes canopy bonus")
+	owner.noise_timer = 0.0
+	sim.shelters[id]["expires"] = sim.time
+	t.check(not sim.snapshot_for(owner.id)["you"]["tent_camouflaged"],
+		"expired shelter cannot grant camouflage before cleanup")
+	sim.shelters[id]["expires"] = sim.time + PortableShelter.DURATION
+	owner.crouching = false
 	t.current = "real server exposure scales during a storm"
 	var storm_time := -1.0
 	for phase in range(160):
