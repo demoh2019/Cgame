@@ -493,6 +493,10 @@ static func _build_items() -> void:
 		"tier": 1, "stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("noise_decoy", "noise_decoy", 1,
 		{"wood_1": 2, "scrap": 1}, "", 2.5)
+	_add_item("flash_charge", {"name": "Improvised Flash Charge", "kind": "flash",
+		"tier": 2, "stack": 5, "weight": 0.5, "value": 42})
+	_add_recipe("flash_charge", "flash_charge", 1,
+		{"scrap": 2, "bar_2": 1, "cloth_1": 1, "stone_1": 1}, "workbench", 5.0)
 	# Defensive disposable wire snare; only the PvE server can trigger it.
 	_add_item("infected_snare", {"name": "Infected Tripwire Snare",
 		"kind": "deployable", "tier": 1, "stack": 10, "weight": 0.9, "value": 28})

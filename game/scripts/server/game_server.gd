@@ -84,6 +84,7 @@ const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const PortableShelter = preload("res://scripts/shared/portable_shelter.gd")
 const CampfireThreat = preload("res://scripts/shared/campfire_threat.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
+const FlashCharge = preload("res://scripts/shared/flash_charge.gd")
 const InfectedSnare = preload("res://scripts/shared/infected_snare.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const FishingBait = preload("res://scripts/shared/fishing_bait.gd")
@@ -174,6 +175,7 @@ class Player:
 	var mount_cooldown: float = 0.0
 	var chain_wrap_seconds: float = 0.0 # Validated, persisted noise protection.
 	var decoy_timer: float = 0.0 # Anti-spam timer; no persistent character data.
+	var flash_cooldown: float = 0.0 # Persistent item-paid tactical cooldown.
 	var ruin_survey: Dictionary = {} # One owner-only temporary expedition waypoint.
 	var action: Dictionary = {} # Current gathering or fishing: {"remaining": s, "total": s, ...}
 	var fish_next_at: float = 0.0
@@ -341,6 +343,7 @@ func character_data(player: Player) -> Dictionary:
 		"spore_filter_seconds": player.spore_filter_seconds,
 		"spore_sample_cooldown": player.spore_sample_cooldown,
 		"chain_wrap_seconds": player.chain_wrap_seconds,
+		"flash_cooldown": player.flash_cooldown,
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 	}
 
@@ -414,6 +417,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("chain_wrap_seconds", 0.0),
 			0.0, BikeChain.DURATION_SECONDS):
+		return false
+	if not SaveValidation.finite_number(data.get("flash_cooldown", 0.0), 0.0, FlashCharge.COOLDOWN_SECONDS):
 		return false
 	if not HeartyMeal.valid_state(data.get("meal_seconds", 0.0), data.get("meal_tier", 0)):
 		return false
@@ -499,6 +504,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.spore_filter_seconds = float(data.get("spore_filter_seconds", 0.0))
 	player.spore_sample_cooldown = float(data.get("spore_sample_cooldown", 0.0))
 	player.chain_wrap_seconds = float(data.get("chain_wrap_seconds", 0.0))
+	player.flash_cooldown = float(data.get("flash_cooldown", 0.0))
 	player.meal_seconds = float(data.get("meal_seconds", 0.0))
 	player.meal_tier = int(data.get("meal_tier", 0))
 	player.inventory = parsed_bag["inventory"]
@@ -2131,6 +2137,47 @@ func cmd_place_infected_snare(peer_id: int, x: float, z: float) -> Dictionary:
 	return {"ok": true, "id": id, "seconds": InfectedSnare.DURATION}
 
 
+## A one-shot, inventory-paid, obstacle-checked PvE interrupt. Never trust
+## player-supplied impact positions, affected zombie IDs, or target counts.
+func cmd_throw_flash(peer_id: int, direction_x: float, direction_z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.mounted:
+		return {"ok": false, "reason": "mounted"}
+	if not player.recall.is_empty():
+		return {"ok": false, "reason": "recall_channeling"}
+	if not player.action.is_empty():
+		return {"ok": false, "reason": "busy"}
+	if player.flash_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown", "remaining": player.flash_cooldown}
+	var site: Dictionary = FlashCharge.landing(world, player.position,
+		Vector2(direction_x, direction_z))
+	if site.is_empty():
+		return {"ok": false, "reason": "invalid_landing"}
+	var candidates: Array = FlashCharge.targets(world, site, zombies)
+	if candidates.is_empty():
+		return {"ok": false, "reason": "no_targets"}
+	if player.inventory.count(FlashCharge.ITEM_ID) < 1 or not player.inventory.remove(
+			FlashCharge.ITEM_ID, 1):
+		return {"ok": false, "reason": "not_carried"}
+	var interrupted: int = 0
+	for infected in candidates:
+		if infected.apply_stagger(FlashCharge.STAGGER_SECONDS):
+			interrupted += 1
+			events.append({"type": "stagger", "id": infected.id,
+				"seconds": infected.stagger_seconds,
+				"x": infected.position.x, "z": infected.position.z})
+	player.flash_cooldown = FlashCharge.COOLDOWN_SECONDS
+	player.noise_radius = maxf(player.noise_radius, FlashCharge.PLAYER_NOISE_RADIUS)
+	player.noise_timer = maxf(player.noise_timer, FlashCharge.NOISE_SECONDS)
+	player.dirty_inventory = true
+	player.dirty_character = true
+	events.append({"type": "flash_thrown", "peer": peer_id,
+		"x": site["x"], "z": site["z"], "hits": interrupted})
+	return {"ok": true, "hits": interrupted, "cooldown": player.flash_cooldown}
+
+
 func cmd_throw_decoy(peer_id: int, direction_x: float, direction_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -3741,6 +3788,7 @@ func _tick_players(delta: float) -> void:
 		player.spore_sample_cooldown = maxf(0.0, player.spore_sample_cooldown - maxf(0.0, delta))
 		player.stim_cooldown = maxf(0.0, player.stim_cooldown - maxf(0.0, delta))
 		player.decoy_timer = maxf(0.0, player.decoy_timer - maxf(0.0, delta))
+		player.flash_cooldown = maxf(0.0, player.flash_cooldown - maxf(0.0, delta))
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
 		player.dodge_timer = maxf(player.dodge_timer - delta, 0.0)
@@ -4790,6 +4838,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"smoke_cooldown": player.smoke_cooldown,
 			"smoke_concealed": FieldSmoke.inside(smoke_clouds, player.position, time),
 			"chain_wrap_seconds": player.chain_wrap_seconds,
+			"flash_cooldown": player.flash_cooldown,
 			"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),

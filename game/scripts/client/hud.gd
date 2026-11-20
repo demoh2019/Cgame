@@ -261,6 +261,13 @@ func _build() -> void:
 		var heading := Vector2(sin(client.yaw), cos(client.yaw))
 		client.throw_decoy(heading))
 	inventory_box.add_child(decoy_button)
+	var flash_button := Button.new()
+	flash_button.name = "ThrowFlashCharge"
+	flash_button.text = "Throw flash charge (PvE interrupt)"
+	flash_button.tooltip_text = "8m throw, up to 4 infected at impact. Bosses immune. Loud; 12-second cooldown."
+	flash_button.pressed.connect(func() -> void:
+		client.throw_flash(Vector2(sin(client.yaw), cos(client.yaw))))
+	inventory_box.add_child(flash_button)
 	var smoke_button := Button.new()
 	smoke_button.name = "UseSmokeCharge"
 	smoke_button.text = "Smoke charge (F9): nine-second sight cover"
@@ -1112,6 +1119,14 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "throw_flash":
+		if bool(data.get("ok", false)):
+			say("Flash charge interrupted %d infected; blast attracts attention." % int(data.get("hits", 0)))
+		elif str(data.get("reason", "")) == "cooldown":
+			say("Flash charge ready in %ds" % ceili(float(data.get("remaining", 0.0))))
+		else:
+			say("Flash charge: " + str(data.get("reason", "rejected")) + " (kit not spent)")
+		return
 	if kind == "sample_spores":
 		if bool(data.get("ok", false)):
 			say("Spore sample: %d cultures collected; infection +%.1f." % [
@@ -1514,6 +1529,9 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nRUIN CHART: X:%d Z:%d | %dm | %ds (F3)" % [
 			roundi(destination.x), roundi(destination.y),
 			roundi(from.distance_to(destination)), ceili(float(survey["remaining"]))]
+	var flash_wait: float = float(client.you.get("flash_cooldown", 0.0))
+	if flash_wait > 0.0:
+		_info_label.text += "\nFLASH CHARGE: ready in %ds" % ceili(flash_wait)
 	if bool(client.you.get("smoke_concealed", false)):
 		_info_label.text += "\nSMOKE: quiet sight cover, no PvP immunity"
 	var smoke_left: float = float(client.you.get("smoke_cooldown", 0.0))

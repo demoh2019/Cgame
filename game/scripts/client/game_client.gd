@@ -473,6 +473,11 @@ func place_infected_snare(point: Vector2) -> void:
 		net.c_place_infected_snare.rpc_id(1, point.x, point.y)
 
 
+func throw_flash(direction: Vector2) -> void:
+	if direction.is_finite() and direction.length_squared() > 0.0001:
+		net.c_throw_flash.rpc_id(1, direction.normalized().x, direction.normalized().y)
+
+
 func throw_decoy(direction: Vector2) -> void:
 	if direction.is_finite() and direction.length_squared() > 0.0001:
 		net.c_throw_decoy.rpc_id(1, direction.normalized().x, direction.normalized().y)
