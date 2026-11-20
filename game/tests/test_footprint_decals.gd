@@ -95,6 +95,20 @@ func run(t) -> void:
 	for i in range(Tracks.HIGH_MARKS, footprints._decals.size()):
 		t.check(not footprints._decals[i].visible,
 			"lowering Ultra to High immediately culls excess decals")
+	# Weather transitions stop new footprints; they must NOT wipe out
+	# previously stamped ground marks at the exact end of the rain.
+	footprints.update_track(Vector3(0.0, 2.0, 61.0), false,
+		1.0 / 30.0, 0.0, "plains", 2, "forward_plus")
+	var drying_marks := 0
+	for mark in footprints._decals:
+		if mark.visible:
+			drying_marks += 1
+	t.check(drying_marks > 0, "existing wet prints persist when the storm ends")
+	footprints._seconds += Tracks.DURATION
+	footprints.update_track(Vector3(0.0, 2.0, 61.0), false,
+		0.25, 0.0, "plains", 2, "forward_plus")
+	for mark in footprints._decals:
+		t.check(not mark.visible, "old imprints disappear only after their lifetime")
 	footprints.clear_marks()
 	for decal in footprints._decals:
 		t.check(not decal.visible, "clearing hides all old projectors")
