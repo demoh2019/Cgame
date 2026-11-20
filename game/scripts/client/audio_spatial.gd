@@ -24,6 +24,22 @@ static func source_cutoff(distance: float, occluded: bool, humidity: float = 0.0
 	return cutoff
 
 
+## Matches the native AudioOcclusionPolicy's per-source log-frequency
+## response when the game runs on a standard Godot build.
+static func obstruction_cutoff(base_cutoff: float, amount: float) -> float:
+	var cutoff: float = clampf(base_cutoff if is_finite(base_cutoff) else 5000.0,
+		20.0, OPEN_CUTOFF)
+	var weight: float = clampf(amount if is_finite(amount) else 0.0, 0.0, 1.0)
+	if weight <= 0.0:
+		return cutoff
+	return exp(lerpf(log(cutoff), log(minf(cutoff, MUFFLED_CUTOFF)), weight))
+
+
+static func obstruction_db(amount: float) -> float:
+	var weight: float = clampf(amount if is_finite(amount) else 0.0, 0.0, 1.0)
+	return -8.0 * weight
+
+
 ## Bus low-pass target for the listener: muffled underground, slightly dulled in a storm.
 static func listener_cutoff(underground: bool, storm: float) -> float:
 	if underground:
