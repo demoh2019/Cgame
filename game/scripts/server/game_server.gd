@@ -1642,6 +1642,14 @@ func cmd_party_standard(peer_id: int) -> Dictionary:
 	return result
 
 
+## Secure, ephemeral tactical marker; movement and rewards are unaffected.
+func cmd_party_ping(peer_id: int, x: float, z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	return parties.mark_ping(peer_id, Vector2(x, z), time)
+
+
 func cmd_party_rally(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -4536,6 +4544,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	parties.clear_standard_by(victim.id)
 	parties.cancel_ready_check_for(victim.id)
 	parties.cancel_focus_by(victim.id)
+	parties.clear_ping_by(victim.id)
 	victim.meal_seconds = 0.0
 	victim.meal_tier = 0
 	victim.defense_target = -1

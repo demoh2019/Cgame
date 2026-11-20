@@ -184,6 +184,7 @@ const SUITES := [
 	"res://tests/test_outpost_breach.gd",
 	"res://tests/test_siege_contracts.gd",
 	"res://tests/test_party_rally.gd",
+	"res://tests/test_party_map_ping.gd",
 	"res://tests/test_rally_standard.gd",
 	"res://tests/test_party_combat_safety.gd",
 	"res://tests/test_verified_guild_pvp.gd",

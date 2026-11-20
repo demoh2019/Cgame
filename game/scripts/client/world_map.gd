@@ -74,7 +74,14 @@ func _gui_input(event: InputEvent) -> void:
 		MOUSE_BUTTON_LEFT:
 			var destination: Vector2 = TravelNavigation.world_from_map(
 				click.position, _panel_rect, SPAN, WorldGen.WORLD_RADIUS)
-			if set_waypoint(destination):
+			if not TravelNavigation.valid_destination(destination, WorldGen.WORLD_RADIUS):
+				return
+			if click.shift_pressed:
+				# Coordinates and party access are validated by the server.
+				if client != null:
+					client.party_ping(destination)
+				accept_event()
+			elif set_waypoint(destination):
 				accept_event()
 		MOUSE_BUTTON_RIGHT:
 			clear_waypoint()
@@ -209,6 +216,25 @@ func _draw() -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color.BLACK)
 		draw_string(font, pin + Vector2(11, 4), "WAYPOINT",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.9, 0.5))
+	# Teal team ping comes only from this player's authenticated party snapshot.
+	var squad_ping: Dictionary = client.you.get("party", {}).get("ping", {})
+	if not squad_ping.is_empty():
+		var target := Vector2(float(squad_ping.get("x", INF)),
+			float(squad_ping.get("z", INF)))
+		if TravelNavigation.valid_destination(target, WorldGen.WORLD_RADIUS):
+			var marker: Vector2 = _to_screen(target.x, target.y)
+			var hue := Color(0.2, 0.95, 0.9)
+			draw_circle(marker, 10.0, Color(0.02, 0.08, 0.1, 0.92))
+			draw_colored_polygon(PackedVector2Array([
+				marker + Vector2(0, -9), marker + Vector2(9, 0),
+				marker + Vector2(0, 9), marker + Vector2(-9, 0)]), hue)
+			var caption := "PARTY PING #%d (%ds)" % [
+				int(squad_ping.get("by", 0)),
+				ceili(float(squad_ping.get("remaining", 0.0)))]
+			draw_string_outline(font, marker + Vector2(13, -1),
+				caption, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color.BLACK)
+			draw_string(font, marker + Vector2(13, -1),
+				caption, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, hue)
 	# Title, legend and the hovered place.
 	draw_string_outline(font, Vector2(30, 36), "THE ISLAND   %d places · %d visited   (J closes)" % [_sites.size(), int(client.you.get("discovered_count", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 6, Color(0, 0, 0, 0.9))
 	draw_string(font, Vector2(30, 36), "THE ISLAND   %d places · %d visited   (J closes)" % [_sites.size(), int(client.you.get("discovered_count", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.98, 0.85, 0.45))
@@ -217,12 +243,12 @@ func _draw() -> void:
 		draw_rect(Rect2(Vector2(30, legend_y - 9.0), Vector2(10, 10)), KIND_COLORS[kind])
 		draw_string(font, Vector2(46, legend_y), str(WorldPoi.KINDS[kind]["title"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.9, 0.93, 1.0))
 		legend_y += 20.0
-	var hint := "Left click: waypoint   Right click: clear"
+	var hint := "Left: personal waypoint   Shift+Left: party ping   Right: clear"
 	if waypoint.is_finite() and client.you.has("x") and client.you.has("z"):
 		var from_here := Vector2(float(client.you["x"]), float(client.you["z"]))
 		var distance := TravelNavigation.distance_meters(from_here, waypoint)
 		var bearing := TravelNavigation.compass(from_here, waypoint)
-		hint = "PERSONAL WAYPOINT: %d m %s   (left click moves / right click clears)" % [
+		hint = "WAYPOINT: %d m %s   (Shift+Left: party ping; right: clear)" % [
 			distance, bearing]
 	draw_string_outline(font, Vector2(30, view.y - 25), hint,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, 4, Color.BLACK)

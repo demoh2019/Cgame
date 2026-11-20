@@ -365,6 +365,11 @@ func party_rally() -> void:
 	net.c_party_rally.rpc_id(1)
 
 
+func party_ping(point: Vector2) -> void:
+	if point.is_finite():
+		net.c_party_ping.rpc_id(1, point.x, point.y)
+
+
 func party_focus() -> void:
 	net.c_party_focus.rpc_id(1)
 

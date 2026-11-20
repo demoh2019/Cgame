@@ -11,9 +11,13 @@ const ASSIST_WINDOW := 20.0
 const ASSIST_XP_RATE := 0.5
 const RallyStandard = preload("res://scripts/shared/rally_standard.gd")
 const PartyFocus = preload("res://scripts/shared/party_focus.gd")
+const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
+const WorldGen = preload("res://scripts/shared/world_gen.gd")
 # Party-only temporary rendezvous; server position, never client coordinates.
 const RALLY_SECONDS := 45.0
 const RALLY_COOLDOWN := 12.0
+const PING_SECONDS := 30.0
+const PING_COOLDOWN := 6.0 # One group-wide rate limit, regardless of party size.
 const READY_SECONDS := 30.0
 const READY_RESULT_SECONDS := 10.0
 const READY_COOLDOWN := 8.0
@@ -58,6 +62,36 @@ func mark_rally(peer_id: int, position: Vector3, now: float) -> Dictionary:
 		"expires": now + RALLY_SECONDS,
 	}
 	return {"ok": true, "seconds": RALLY_SECONDS}
+
+
+## A member's temporary map mark is kept only in authenticated party state.
+## No world discovery or rewards; a single shared ping expires after 30s.
+func mark_ping(peer_id: int, point: Vector2, now: float) -> Dictionary:
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return {"ok": false, "reason": "not_in_party"}
+	var group: Dictionary = groups[group_id]
+	if group["members"].size() < 2 or not group["members"].has(peer_id):
+		return {"ok": false, "reason": "need_party"}
+	if not is_finite(now) or not TravelNavigation.valid_destination(
+			point, WorldGen.WORLD_RADIUS):
+		return {"ok": false, "reason": "invalid_position"}
+	if now < float(group.get("ping_last_at", -INF)) + PING_COOLDOWN:
+		return {"ok": false, "reason": "cooldown"}
+	group["ping_last_at"] = now
+	group["ping"] = {"by": peer_id, "x": point.x, "z": point.y,
+		"expires": now + PING_SECONDS}
+	return {"ok": true, "seconds": PING_SECONDS}
+
+
+## Leaving, death or disband should not leave a stale squad instruction.
+func clear_ping_by(peer_id: int) -> void:
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return
+	var group: Dictionary = groups[group_id]
+	if int(group.get("ping", {}).get("by", -1)) == peer_id:
+		group.erase("ping")
 
 
 ## Validate a free-standing tactical marker before taking a real crafted item.
@@ -351,6 +385,9 @@ func leave(peer_id: int) -> Dictionary:
 	group_by_peer.erase(peer_id)
 	group.erase("ready_check")
 	group.erase("focus")
+	# A departing player's map ping cannot survive the party transition.
+	if int(group.get("ping", {}).get("by", -1)) == peer_id:
+		group.erase("ping")
 	# An abandoned standard cannot buff former teammates or a new leader.
 	var raised: Dictionary = group.get("standard", {})
 	if not raised.is_empty() and int(raised.get("by", -1)) == peer_id:
@@ -406,12 +443,15 @@ func expire(now: float) -> void:
 		var marker: Dictionary = group.get("focus", {})
 		if not marker.is_empty() and now >= float(marker["expires"]):
 			group.erase("focus")
+		var active_ping: Dictionary = group.get("ping", {})
+		if not active_ping.is_empty() and now >= float(active_ping["expires"]):
+			group.erase("ping")
 
 
 func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 	var group_id: int = group_of(peer_id)
 	if group_id == 0 or not groups.has(group_id):
-		return {"id": 0, "leader": 0, "members": [], "rally": {}, "standard": {},
+		return {"id": 0, "leader": 0, "members": [], "rally": {}, "ping": {}, "standard": {},
 			"ready_check": {}, "focus": {}, "loot_mode": "free",
 			"invite_from": int(invites.get(peer_id, {}).get("from", 0))}
 	var group: Dictionary = groups[group_id]
@@ -422,6 +462,13 @@ func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 		shared_marker = {"x": float(marker["x"]), "y": float(marker["y"]),
 			"z": float(marker["z"]),
 			"remaining": maxf(0.0, float(marker["expires"]) - now)}
+	var shared_ping: Dictionary = {}
+	var ping: Dictionary = group.get("ping", {})
+	if not ping.is_empty() and now < float(ping["expires"]) and \
+			group["members"].has(int(ping["by"])):
+		shared_ping = {"by": int(ping["by"]),
+			"x": float(ping["x"]), "z": float(ping["z"]),
+			"remaining": maxf(0.0, float(ping["expires"]) - now)}
 	var source_standard: Dictionary = group.get("standard", {})
 	var public_standard: Dictionary = {}
 	if not source_standard.is_empty() and now < float(source_standard["expires"]):
@@ -448,6 +495,7 @@ func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 			"remaining": maxf(0.0, float(focus["expires"]) - now)}
 	return {"id": group_id, "leader": int(group["leader"]),
 		"members": (group["members"] as Array).duplicate(), "rally": shared_marker,
+		"ping": shared_ping,
 		"standard": public_standard, "ready_check": public_ready, "focus": public_focus,
 		"loot_mode": str(group.get("loot_mode", "free")),
 		"invite_from": int(invites.get(peer_id, {}).get("from", 0))}

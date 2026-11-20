@@ -17,7 +17,7 @@ const ENTRIES := [
 		["F5", "throw ember flask (PvE fire)"]]],
 	["TOWN", [
 		["N", "buy water"], ["V", "sell materials (Shift: fish)"], ["P", "accept contract (Shift: turn in, Ctrl: daily bounty)"],
-		["K", "skills and perks"], ["J", "island map (left click: waypoint, right: clear)"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["F3", "full text readout"]]],
+		["K", "skills and perks"], ["J", "map: click personal; Shift+click party; right clears"], ["Enter", "chat"], ["M", "radar"], ["F2", "this help"], ["F3", "full text readout"]]],
 ]
 
 var _built := false

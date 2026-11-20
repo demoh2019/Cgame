@@ -124,6 +124,15 @@ func current_rally() -> Dictionary:
 	return {}
 
 
+## Authenticated party ping, with the same isolation as leader rally.
+func current_party_ping() -> Dictionary:
+	if sim != null:
+		return sim.parties.state_for(actor_id, sim.time).get("ping", {}).duplicate(true)
+	if client != null:
+		return client.you.get("party", {}).get("ping", {}).duplicate(true)
+	return {}
+
+
 ## Draw an in-range beacon or an offscreen edge arrow in one shared style.
 func _draw_waypoint(origin: Vector2, info: Dictionary, x_key: String,
 		z_key: String, color: Color) -> void:
@@ -333,6 +342,9 @@ func _draw() -> void:
 		Color(0.71, 0.51, 1.0))
 	_draw_waypoint(origin, current_rally(), "x", "z",
 		Color(1.0, 0.60, 0.22))
+	# Teal = limited-time teammate map ping; remote pins stay as edge arrows.
+	_draw_waypoint(origin, current_party_ping(), "x", "z",
+		Color(0.20, 0.95, 0.90))
 
 	# A spent scanner grants one short-lived private moving target pin.
 	_draw_waypoint(origin, current_threat_scan(), "x", "z",
