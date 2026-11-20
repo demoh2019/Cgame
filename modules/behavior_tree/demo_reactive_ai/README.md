@@ -20,16 +20,16 @@ The demo builds this tree using native nodes:
 reactive_selector
 ├── reactive_sequence
 │   ├── condition: low_health == true
-│   ├── wait: 2 ticks
-│   └── set: action = retreat
+│   ├── set: action = retreat
+│   └── wait: 2 ticks
 ├── reactive_sequence
 │   ├── condition: player_visible == true
-│   ├── wait: 2 ticks
-│   └── set: action = chase
+│   ├── set: action = chase
+│   └── wait: 2 ticks
 └── set: action = patrol
 ```
 
-Unlike the existing memory-based selector/sequence, reactive composites revisit higher-priority conditions every tick. If health becomes low while the pursuit branch is running, retreat preempts it; the abandoned wait state is cleared. If visibility is lost, a pursuit wait is canceled instead of eventually executing an attack. The `wait` unit is **AI ticks** (here, 0.2 seconds each), not wall-clock seconds.
+Unlike the existing memory-based selector/sequence, reactive composites revisit higher-priority conditions every tick. If health becomes low while the pursuit branch is running, retreat preempts it; the abandoned wait state is cleared. If visibility is lost, the pursuit wait is canceled and the NPC switches back to patrol. Actions are written to the blackboard before each wait, so movement remains continuous while a branch reports RUNNING. The `wait` unit is **AI ticks** (here, 0.2 seconds each), not wall-clock seconds.
 
 To compare with the previous behavior, change the two composite types in `main.gd` to `selector` and `sequence`, rebuild/restart and observe that conditions can remain stale while a wait is RUNNING.
 
