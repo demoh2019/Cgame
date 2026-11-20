@@ -390,6 +390,20 @@ func c_toggle_mount() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_place_fish_trap() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "place_fish_trap", sim.cmd_place_fish_trap(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_collect_fish_trap(trap_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "collect_fish_trap", sim.cmd_collect_fish_trap(peer, trap_id))
+
+
+@rpc("any_peer", "reliable")
 func c_fish(baited: bool = false, storm_cast: bool = false) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

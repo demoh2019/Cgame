@@ -30,6 +30,7 @@ var shelters: Dictionary = {} # Replicated temporary weather cover.
 var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
 var smoke_clouds: Dictionary = {} # Interest-limited, temporary visual smoke.
 var infected_snares: Dictionary = {} # Server-replicated temporary PvE traps.
+var fish_traps: Dictionary = {} # Anonymous public, server-owned shoreline nets.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
 var raid_cone_telegraph: Dictionary = {} # Interest-limited server-authored cleave sector.
 var spit_zones: Dictionary = {} # Only the latest server-issued acid telegraphs.
@@ -109,6 +110,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	infected_snares.clear()
 	for entity in snapshot.get("infected_snares", []):
 		infected_snares[int(entity["id"])] = entity
+	fish_traps.clear()
+	for entity in snapshot.get("fish_traps", []):
+		fish_traps[int(entity["id"])] = entity
 	decoys.clear()
 	for entity in snapshot.get("decoys", []):
 		decoys[int(entity["id"])] = entity
@@ -230,6 +234,28 @@ func join(player_name: String, token: String = "", refresh: String = "") -> void
 
 func gather(node_id: int) -> void:
 	net.c_gather.rpc_id(1, node_id)
+
+
+func place_fish_trap() -> void:
+	net.c_place_fish_trap.rpc_id(1)
+
+
+func collect_fish_trap(trap_id: int) -> void:
+	net.c_collect_fish_trap.rpc_id(1, trap_id)
+
+
+func nearest_fish_trap(position: Vector3, radius: float = 4.5) -> int:
+	var nearest := -1
+	var best: float = radius * radius
+	if not position.is_finite():
+		return nearest
+	for trap in fish_traps.values():
+		var distance: float = Vector2(position.x, position.z).distance_squared_to(
+			Vector2(float(trap["x"]), float(trap["z"])))
+		if distance <= best:
+			nearest = int(trap["id"])
+			best = distance
+	return nearest
 
 
 func fish(baited: bool = false, storm_cast: bool = false) -> void:

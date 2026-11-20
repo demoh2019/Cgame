@@ -46,6 +46,8 @@ func update_from(client) -> void:
 		_touch("smoke:%d" % id, "smoke", client.smoke_clouds[id], seen)
 	for id in client.infected_snares:
 		_touch("snare:%d" % id, "snare", client.infected_snares[id], seen)
+	for id in client.fish_traps:
+		_touch("fish_trap:%d" % id, "fish_trap", client.fish_traps[id], seen)
 	if not client.raid_telegraph.is_empty():
 		_touch("raid_warning:%d" % int(client.raid_telegraph["id"]),
 			"raid_warning", client.raid_telegraph, seen)
@@ -65,7 +67,11 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 	_targets[key] = {"position": Vector3(entity["x"], entity["y"], entity["z"]), "yaw": float(entity.get("yaw", 0.0))}
 	var label: Label3D = _nodes[key].get_node_or_null("Label")
 	if label != null:
-		if kind == "zombie":
+		if kind == "fish_trap":
+			label.text = "FISH NET T%d | %s" % [
+				int(entity.get("tier", 1)), "READY" if bool(entity.get("ready", false)) else
+				("%ds" % ceili(float(entity.get("ready_in", 0.0))))]
+		elif kind == "zombie":
 			label.visible = false # The overlay draws a health bar instead (world_overlay.gd).
 			label.text = "%s%s  %d" % [
 				"ENRAGED RAID BOSS " if bool(entity.get("raid_enraged", false)) else (
@@ -176,6 +182,35 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		material.albedo_color = Color(0.6, 0.45, 0.27)
 		barricade.material_override = material
 		root.add_child(barricade)
+		return root
+	if kind == "fish_trap":
+		var bobber := MeshInstance3D.new()
+		var shape := CylinderMesh.new()
+		shape.top_radius = 0.42
+		shape.bottom_radius = 0.45
+		shape.height = 0.22
+		bobber.mesh = shape
+		bobber.position.y = 0.12
+		var orange := StandardMaterial3D.new()
+		orange.albedo_color = Color(0.83, 0.49, 0.15)
+		bobber.material_override = orange
+		root.add_child(bobber)
+		var net := MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(1.12, 0.07, 1.12)
+		net.mesh = mesh
+		net.position.y = 0.015
+		var gray := StandardMaterial3D.new()
+		gray.albedo_color = Color(0.30, 0.36, 0.25)
+		net.material_override = gray
+		root.add_child(net)
+		var label := Label3D.new()
+		label.name = "Label"
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.font_size = 18
+		label.pixel_size = 0.007
+		label.position.y = 1.0
+		root.add_child(label)
 		return root
 	if kind == "snare":
 		var tripwire := MeshInstance3D.new()
@@ -373,7 +408,7 @@ func _process(delta: float) -> void:
 		var node: Node3D = _nodes[key]
 		var target: Dictionary = _targets[key]
 		node.position = node.position.lerp(target["position"], blend)
-		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
+		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
 			model.update_motion(delta)
