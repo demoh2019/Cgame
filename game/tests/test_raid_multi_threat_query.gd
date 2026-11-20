@@ -42,6 +42,11 @@ func run(t) -> void:
 		Vector2(0, -10), Vector2(1, 0), Vector2(-1, 0), Vector2(0, 10)]
 	t.eq(Reinforcements.rank_sites(candidates, players, Vector2.ZERO), expected,
 		"farthest point from its nearest player is selected before a crowded one")
+	t.eq(Reinforcements.rank_sites(candidates, players, Vector2.ZERO, false), expected,
+		"portable GDScript fallback chooses exactly the same safe points")
+	t.eq(Reinforcements.rank_sites(candidates, players, Vector2.ZERO),
+		Reinforcements.rank_sites(candidates, players, Vector2.ZERO, false),
+		"native and portable ranking have identical candidate order")
 	t.eq(Reinforcements.rank_sites(candidates, reversed, Vector2.ZERO), expected,
 		"switching player insertion order does not affect rankings")
 	t.eq(Reinforcements.rank_sites(candidates, empty, Vector2.ZERO), candidates,
