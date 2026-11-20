@@ -265,4 +265,36 @@ TEST_CASE("[HeightmapTerrain] Chunk height range includes the far border samples
 	CHECK(high == doctest::Approx(7.0));
 }
 
+TEST_CASE("[HeightmapTerrain] External normals follow LOD vertices and skirts") {
+	const Vector<real_t> data = make_field(17, 17, [](int x, int z) { return real_t(x * x + z); });
+	const HeightField field = view(data, 17, 17);
+	Vector<Vector3> supplied;
+	supplied.resize(17 * 17);
+	for (int z = 0; z < 17; z++) {
+		for (int x = 0; x < 17; x++) {
+			supplied.write[z * 17 + x] = Vector3(real_t(-x) * 0.02, 1.0, real_t(-z) * 0.01).normalized();
+		}
+	}
+	Params params;
+	params.normal_override = supplied.ptr();
+	ChunkMesh near_mesh;
+	ChunkMesh far_mesh;
+	REQUIRE(build_chunk(field, 0, 0, 16, 1, params, near_mesh));
+	REQUIRE(build_chunk(field, 0, 0, 16, 4, params, far_mesh));
+	for (int z = 0; z < 17; z++) {
+		for (int x = 0; x < 17; x++) {
+			CHECK(near_mesh.normals[z * 17 + x].is_equal_approx(supplied[z * 17 + x]));
+		}
+	}
+	for (int z = 0; z < 5; z++) {
+		for (int x = 0; x < 5; x++) {
+			CHECK(far_mesh.normals[z * 5 + x].is_equal_approx(supplied[(z * 4) * 17 + x * 4]));
+		}
+	}
+	// The four skirt strips copy the corresponding top-edge normal.
+	CHECK(far_mesh.normals[25].is_equal_approx(far_mesh.normals[0]));
+	CHECK(far_mesh.normals[25 + 5].is_equal_approx(far_mesh.normals[20]));
+	CHECK(sample_normal_bilinear(field, 0.0, 8.0, params).is_equal_approx(supplied[8 * 17]));
+}
+
 } // namespace TestHeightmapTerrainGeometry

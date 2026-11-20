@@ -51,6 +51,7 @@ HeightmapTerrainGeometry::Params ChunkedTerrain3D::_params() const {
 	params.spacing = Vector2(size.x / real_t(width - 1), size.y / real_t(depth - 1));
 	params.height_scale = height_scale;
 	params.height_offset = height_offset;
+	params.normal_override = normal_data.size() == width * depth ? normal_data.ptr() : nullptr;
 	params.origin = centered ? -size * real_t(0.5) : Vector2();
 	params.skirt_depth = skirt_depth;
 	return params;
@@ -68,6 +69,8 @@ void ChunkedTerrain3D::_load_from_texture() {
 	if (data_from_script) {
 		return;
 	}
+	// Texture-backed height maps retain their original generated normals.
+	normal_data.clear();
 	height_data.clear();
 	data_width = 0;
 	data_depth = 0;
@@ -431,6 +434,8 @@ void ChunkedTerrain3D::set_height_data(const PackedFloat32Array &p_heights, cons
 	ERR_FAIL_COND_MSG(p_dimensions.x < 2 || p_dimensions.y < 2, "ChunkedTerrain3D needs at least 2 x 2 height samples.");
 	ERR_FAIL_COND_MSG(p_heights.size() != p_dimensions.x * p_dimensions.y, "ChunkedTerrain3D height data size does not match the dimensions.");
 	data_from_script = true;
+	// Any new height samples invalidate externally supplied slopes.
+	normal_data.clear();
 	data_width = p_dimensions.x;
 	data_depth = p_dimensions.y;
 	height_data.resize(p_heights.size());
@@ -438,6 +443,25 @@ void ChunkedTerrain3D::set_height_data(const PackedFloat32Array &p_heights, cons
 	const float *in = p_heights.ptr();
 	for (int i = 0; i < p_heights.size(); i++) {
 		out[i] = in[i];
+	}
+	built = false;
+	_queue_rebuild();
+}
+
+void ChunkedTerrain3D::set_normal_data(const PackedVector3Array &p_normals) {
+	ERR_FAIL_COND_MSG(!p_normals.is_empty() && (data_width < 2 || data_depth < 2 ||
+			p_normals.size() != data_width * data_depth),
+			"ChunkedTerrain3D custom normals must match the active height-data dimensions.");
+	// Validate before assignment so a bad external array never damages the
+	// previous normal field. Normalize once on upload, not per-vertex or frame.
+	for (const Vector3 &normal : p_normals) {
+		ERR_FAIL_COND_MSG(!normal.is_finite() || normal.length_squared() < real_t(1e-12),
+				"ChunkedTerrain3D normals must be finite and nonzero.");
+	}
+	normal_data.resize(p_normals.size());
+	Vector3 *out = normal_data.ptrw();
+	for (int i = 0; i < p_normals.size(); i++) {
+		out[i] = p_normals[i].normalized();
 	}
 	built = false;
 	_queue_rebuild();
@@ -455,6 +479,7 @@ PackedFloat32Array ChunkedTerrain3D::get_height_data() const {
 
 void ChunkedTerrain3D::clear_height_data() {
 	data_from_script = false;
+	normal_data.clear();
 	built = false;
 	_queue_rebuild();
 }
@@ -674,6 +699,8 @@ void ChunkedTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_heightmap"), &ChunkedTerrain3D::get_heightmap);
 	ClassDB::bind_method(D_METHOD("set_height_data", "heights", "dimensions"), &ChunkedTerrain3D::set_height_data);
 	ClassDB::bind_method(D_METHOD("get_height_data"), &ChunkedTerrain3D::get_height_data);
+	ClassDB::bind_method(D_METHOD("set_normal_data", "normals"), &ChunkedTerrain3D::set_normal_data);
+	ClassDB::bind_method(D_METHOD("get_normal_data"), &ChunkedTerrain3D::get_normal_data);
 	ClassDB::bind_method(D_METHOD("get_height_dimensions"), &ChunkedTerrain3D::get_height_dimensions);
 	ClassDB::bind_method(D_METHOD("clear_height_data"), &ChunkedTerrain3D::clear_height_data);
 	ClassDB::bind_method(D_METHOD("set_size", "size"), &ChunkedTerrain3D::set_size);

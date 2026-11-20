@@ -64,6 +64,7 @@ private:
 
 	Ref<Texture2D> heightmap;
 	Vector<real_t> height_data; // Active samples, from set_height_data() or the heightmap.
+	PackedVector3Array normal_data; // Optional externally sampled, seam-continuous vertex normals.
 	bool data_from_script = false;
 	int data_width = 0;
 	int data_depth = 0;
@@ -118,6 +119,9 @@ public:
 	// from noise. Replaces the heightmap texture until clear_height_data() is called.
 	void set_height_data(const PackedFloat32Array &p_heights, const Vector2i &p_dimensions);
 	PackedFloat32Array get_height_data() const;
+	// Optional row-major unit normals for the active height grid, including borders.
+	void set_normal_data(const PackedVector3Array &p_normals);
+	PackedVector3Array get_normal_data() const { return normal_data; }
 	Vector2i get_height_dimensions() const { return Vector2i(data_width, data_depth); }
 	void clear_height_data();
 
