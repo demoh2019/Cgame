@@ -665,6 +665,12 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		if sprint_allowed and player.position.distance_to(before_move) > 0.01:
 			player.noise_radius = maxf(player.noise_radius, Defs.SPRINT_NOISE_RADIUS)
 			player.noise_timer = maxf(player.noise_timer, Defs.SPRINT_NOISE_SECONDS)
+		# Never trust movement or noise from a client. The server measures
+		# actual travel after collision, and only an owned mount creates rattle.
+		var bike_noise: float = Mounts.noise_for_distance(moved) if player.mounted else 0.0
+		if bike_noise > 0.0:
+			player.noise_radius = maxf(player.noise_radius, bike_noise)
+			player.noise_timer = maxf(player.noise_timer, Mounts.NOISE_SECONDS)
 		# Walking away cancels gathering and shoreline fishing.
 		if not player.action.is_empty():
 			if player.action.has("fish"):
