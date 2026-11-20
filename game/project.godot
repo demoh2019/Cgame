@@ -19,6 +19,10 @@ common/physics_ticks_per_second=30
 
 [rendering]
 
+; Software occluders are generated only from solid dungeon walls, while the
+; viewport disables the extra CPU work in the open world.
+occlusion_culling/use_occlusion_culling=true
+
 ; SSR is reserved for High/Ultra Forward+; render its rays at half resolution to
 ; control bandwidth and preserve budget for world geometry and vegetation.
 rendering/environment/screen_space_reflection/half_size=true
