@@ -92,6 +92,26 @@ class StreamingBudgetContractTests(unittest.TestCase):
         self.assertIn("sorter.sort(sorted.ptr(), sorted.size());", motion)
         self.assertNotIn("!(p_lookahead_seconds > 0.0)", motion)
 
+
+    def test_completed_threaded_scenes_use_the_same_camera_priority(self):
+        ready = self.cpp.split("void WorldStreamer::_poll_loading(", 1)[1]
+        ready = ready.split("void WorldStreamer::_update_streaming()", 1)[0]
+        self.assertIn("prioritize_cells_for_motion_and_view(ready_cells", ready)
+        self.assertIn("view_direction, view_priority, cell_size, _grid_axes()", ready)
+        # The native streamer still uses just one shared integration budget.
+        self.assertIn("r_instantiation_budget--;", ready)
+
+    def test_fast_turn_refresh_remains_opt_in_and_budget_safe(self):
+        self.assertIn("real_t fast_view_refresh_degrees = 0.0;", self.header)
+        self.assertIn("last_queued_view_direction = view_direction;", self.cpp)
+        tick = self.cpp.split("case NOTIFICATION_INTERNAL_PROCESS:", 1)[1]
+        tick = tick.split("} break;", 1)[0]
+        self.assertIn("should_refresh_for_view_turn(", tick)
+        self.assertIn("time_since_update >= 0.05", tick)
+        self.assertIn("time_since_update >= update_interval || early", tick)
+        self.assertIn("_run_generator_queue(frame_budget, frame_started_usec);", tick)
+        self.assertNotIn("_run_generator_queue(frame_budget, frame_started_usec);\n\t\t\t_run_generator_queue", tick)
+
     def test_bike_prediction_only_changes_priority(self):
         self.assertIn("const RIDING_LOOKAHEAD := 3.0", self.policy)
         self.assertIn("const WALK_LOOKAHEAD := 2.0", self.policy)
