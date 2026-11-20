@@ -15,6 +15,12 @@ var _leaf_instances: Array[MultiMeshInstance3D] = []
 var _generated_root: Node3D
 var _quality: int = 1
 
+## Reuse geometry and materials across streamed world cells. Individual
+## MultiMeshes still keep unique transforms, but underlying meshes do not
+## need rebuilding and uploading for each tile.
+static var _shared_trunk_mesh: CylinderMesh
+static var _shared_leaf_mesh: SphereMesh
+
 
 func _ready() -> void:
 	if spawn_on_ready:
@@ -32,24 +38,8 @@ func rebuild() -> void:
 	add_child(_generated_root)
 	if trees_per_chunk <= 0:
 		return
-	var trunk_mesh: CylinderMesh = CylinderMesh.new()
-	trunk_mesh.top_radius = 0.10
-	trunk_mesh.bottom_radius = 0.19
-	trunk_mesh.height = 2.0
-	trunk_mesh.radial_segments = 6
-	var trunk_material: StandardMaterial3D = StandardMaterial3D.new()
-	trunk_material.albedo_color = Color(0.29, 0.17, 0.095)
-	trunk_material.roughness = 1.0
-	trunk_mesh.material = trunk_material
-	var leaf_mesh: SphereMesh = SphereMesh.new()
-	leaf_mesh.radius = 0.88
-	leaf_mesh.height = 1.76
-	leaf_mesh.radial_segments = 8
-	leaf_mesh.rings = 4
-	var leaf_material: StandardMaterial3D = StandardMaterial3D.new()
-	leaf_material.albedo_color = Color(0.07, 0.27, 0.17)
-	leaf_material.roughness = 0.92
-	leaf_mesh.material = leaf_material
+	var trunk_mesh: CylinderMesh = get_shared_trunk_mesh()
+	var leaf_mesh: SphereMesh = get_shared_leaf_mesh()
 	for z in range(chunks_per_axis):
 		for x in range(chunks_per_axis):
 			var half: float = float(chunks_per_axis - 1) * 0.5
@@ -95,6 +85,36 @@ func rebuild() -> void:
 			_trunk_instances.append(trunks_node)
 			_leaf_instances.append(leaves_node)
 	set_quality(_quality)
+
+
+static func get_shared_trunk_mesh() -> CylinderMesh:
+	if _shared_trunk_mesh == null:
+		var mesh: CylinderMesh = CylinderMesh.new()
+		mesh.top_radius = 0.10
+		mesh.bottom_radius = 0.19
+		mesh.height = 2.0
+		mesh.radial_segments = 6
+		var material: StandardMaterial3D = StandardMaterial3D.new()
+		material.albedo_color = Color(0.29, 0.17, 0.095)
+		material.roughness = 1.0
+		mesh.material = material
+		_shared_trunk_mesh = mesh
+	return _shared_trunk_mesh
+
+
+static func get_shared_leaf_mesh() -> SphereMesh:
+	if _shared_leaf_mesh == null:
+		var mesh: SphereMesh = SphereMesh.new()
+		mesh.radius = 0.88
+		mesh.height = 1.76
+		mesh.radial_segments = 8
+		mesh.rings = 4
+		var material: StandardMaterial3D = StandardMaterial3D.new()
+		material.albedo_color = Color(0.07, 0.27, 0.17)
+		material.roughness = 0.92
+		mesh.material = material
+		_shared_leaf_mesh = mesh
+	return _shared_leaf_mesh
 
 
 func set_quality(profile: int) -> void:
