@@ -74,6 +74,7 @@ const SUITES := [
 	"res://tests/test_grass_lod.gd",
 	"res://tests/test_camera_pixel_density.gd",
 	"res://tests/test_grass_transmission.gd",
+	"res://tests/test_foliage_spectral_optics.gd",
 	"res://tests/test_scenery_batches.gd",
 	"res://tests/test_world_roads.gd",
 	"res://tests/test_road_travel.gd",

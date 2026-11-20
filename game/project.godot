@@ -130,6 +130,12 @@ aa_leaf_transmission={
 "value": 0.28
 }
 
+; Expensive per-pixel leaf optical tint defaults off until premium quality.
+aa_leaf_optics_quality={
+"type": "float",
+"value": 0.0
+}
+
 aa_grass_transmission={
 "type": "float",
 "value": 0.0

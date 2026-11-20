@@ -8,12 +8,15 @@ render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
 #include "res://assets/shaders/cloud_shadow.gdshaderinc"
 #include "res://assets/shaders/specular_aa.gdshaderinc"
 #include "res://assets/shaders/vegetation_wind_space.gdshaderinc"
+#include "res://assets/shaders/foliage_spectral_optics.gdshaderinc"
 global uniform float aa_weather_wetness;
 global uniform vec3 aa_vegetation_wind;
 // Shared quality knob: Performance = matte rain, Ultra = full PBR wet highlights.
 global uniform float aa_vegetation_wet_gloss;
 // Screen-independent, inexpensive thin-leaf backlight. Performance turns it off.
 global uniform float aa_leaf_transmission;
+// High/Ultra: cheap Beer-Lambert-like leaf pigments, shared with grass.
+global uniform float aa_leaf_optics_quality;
 // Shared ambient self-occlusion budget for dense tree crowns.
 global uniform float aa_canopy_occlusion;
 // Shared tree/bush visibility limits match the actual scene HLOD profiles.
@@ -151,7 +154,16 @@ void fragment() {
 		// Bright green tissue transmits more light than dark veins. Reuse the
 		// existing albedo sample; no additional PBR texture lookups.
 		float leaf_mask = smoothstep(0.12, 0.78, dot(t.rgb, vec3(0.23, 0.68, 0.09)));
-		BACKLIGHT = t.rgb * instance_tint * hue * leaf_mask
+		// Denser green veins, thin tops and dry pigments transmit different
+		// wavelengths. Compute only on premium quality cut-out leaves.
+		vec3 spectral = vec3(1.0);
+		if (aa_leaf_optics_quality > 0.001) {
+			float thickness = mix(1.18, 0.65, leaf_mask)
+				* mix(1.13, 0.90, canopy_height);
+			spectral = aa_foliage_spectral_filter(t.rgb, thickness,
+				aa_leaf_optics_quality);
+		}
+		BACKLIGHT = t.rgb * instance_tint * hue * leaf_mask * spectral
 			* aa_leaf_transmission * (1.0 - wet_foliage * 0.18);
 	}
 	// Both sides of a blade are lit as if they faced the viewer: otherwise half the grass turns black.
