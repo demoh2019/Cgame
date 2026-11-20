@@ -44,3 +44,30 @@ func run(t) -> void:
 	t.check(fallback.contains("vertex_cloud_shade"), "cloud shading reaches fragment through a varying")
 	t.check(fallback.contains("if (detail_fade > 0.001)"), "distant terrain skips unnecessary fine-noise work")
 	t.check(fallback.contains("strata = mix(mid, fbm("), "near rock detail fades smoothly to macro layers")
+
+	t.current = "terrain screen-space geometric error"
+	var prior_error := 1e6
+	for quality in GraphicsQuality.NAMES.size():
+		var config: Dictionary = GraphicsQuality.profile(quality)
+		var pixels: float = float(config.get("terrain_pixel_error", -1.0))
+		t.check(pixels > 0.0 and pixels < prior_error,
+			"higher graphics fidelity reduces terrain geometric error on %s" % GraphicsQuality.NAMES[quality])
+		prior_error = pixels
+	t.eq(ChunkView.TERRAIN_LOD_GROUP, "aa_terrain_pixel_lod",
+		"the geometry LOD preset reaches all streamed terrain materials")
+	var terrain := ChunkedTerrain3D.new()
+	ChunkView.configure_terrain_pixel_error(2.25)
+	terrain.add_to_group(ChunkView.TERRAIN_LOD_GROUP)
+	ChunkView.apply_terrain_pixel_error(terrain)
+	t.near(terrain.lod_pixel_error, 2.25, 0.0001,
+		"native engine receives the active pixel-error threshold")
+	terrain.free()
+	var chunk_code: GDScript = load("res://scripts/client/chunk_view.gd") as GDScript
+	t.check(chunk_code != null and chunk_code.source_code.contains(
+		"_terrain.lod_pixel_error = terrain_lod_pixel_error"),
+		"newly streamed chunks inherit pixel-error LOD without a separate rebuild")
+	var quality_code: GDScript = load("res://scripts/client/graphics_quality.gd") as GDScript
+	t.check(quality_code != null and quality_code.source_code.contains(
+		"ChunkView.apply_terrain_pixel_error(terrain)"),
+		"runtime preset switch updates already-streamed terrain chunks")
+	ChunkView.configure_terrain_pixel_error(float(GraphicsQuality.profile(1)["terrain_pixel_error"]))

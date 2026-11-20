@@ -189,6 +189,7 @@ static var _ground_material: ShaderMaterial
 static var _textured_material: ShaderMaterial
 static var _textured_checked := false
 static var terrain_filter_quality := 1
+static var terrain_lod_pixel_error := 3.5
 const TERRAIN_LAYERS := ["lush", "dry", "forest", "swamp", "road", "cliff", "mountain", "sand", "snow", "asphalt", "concrete", "brick", "plank"]
 const TERRAIN_DIR := "res://assets/textures/terrain/"
 # The colour each layer should average to: photos of real ground pulled toward the stylised palette of the models.
@@ -229,6 +230,7 @@ static var _grass_spent_usec := 0
 ## Runtime tuning keeps the grass LOD system intact while bounding draw distance and generation spikes.
 const GRASS_GROUP := "aa_grass_tiles"
 const TERRAIN_GROUP := "aa_textured_terrain"
+const TERRAIN_LOD_GROUP := "aa_terrain_pixel_lod"
 const SCENERY_GROUP := "aa_scenery_multimeshes"
 static var scenery_quality := 1
 static var grass_budget_usec := 2500
@@ -239,6 +241,17 @@ static var grass_fade_end := GrassField.FADE_END
 
 ## Sampler quality follows the existing graphics preset without changing any
 ## world or texture data. New chunks use the cached shader of the chosen tier.
+## Geometry-aware terrain selection is independent from PBR materials.
+## Both painted fallback and textured chunks receive this native engine value.
+static func configure_terrain_pixel_error(pixels: float) -> void:
+	terrain_lod_pixel_error = maxf(pixels, 0.0)
+
+
+static func apply_terrain_pixel_error(terrain: Node) -> void:
+	if terrain is ChunkedTerrain3D and terrain.is_in_group(TERRAIN_LOD_GROUP):
+		terrain.lod_pixel_error = terrain_lod_pixel_error
+
+
 static func configure_terrain_filter(quality: int) -> void:
 	terrain_filter_quality = clampi(quality, 0, 3)
 	if _textured_material != null:
@@ -584,6 +597,8 @@ func _build_terrain(origin: Vector2) -> void:
 	_terrain.chunk_quads = 16
 	_terrain.lod_count = 3
 	_terrain.lod_distance = 70.0
+	_terrain.lod_pixel_error = terrain_lod_pixel_error
+	_terrain.add_to_group(TERRAIN_LOD_GROUP)
 	_terrain.skirt_depth = 3.0
 	_terrain.collision_enabled = false # The server decides where players can stand.
 	_terrain.cast_shadows = false
