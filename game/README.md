@@ -2291,3 +2291,36 @@ Tests: `game/tests/test_fishing_bait.gd`, included in `run_all.gd`,
 for crafting, tier caps, inventory capacity, paid rewards, experience
 and interrupted casts. No C++ engine change is needed for this
 server-authoritative feature.
+
+
+## Shared camp feast — classless party expedition preparation
+
+A survivor party can now turn existing **fishing, prepared coastal dishes,
+campfires and classless meal buffs** into a cooperative pre-raid meal.
+In the online party/inventory panel select **Cooked Fish T1–T4** and press
+**Share cooked meal**.
+
+- The cook and at least **one other living, accepted party member** must
+  stand within the same **lit field campfire** (5 m horizontally, 2.5 m
+  vertically). Remote, dead, unrelated and former members are excluded.
+- The cook must **carry one cooked fish per eligible recipient**, including
+  themselves. The server counts recipients, verifies stock, and removes
+  all portions atomically before changing anyone's hunger or buffs.
+  If even one portion is missing, no item or character state changes.
+- Each served party member gets normal cooked-fish nutrition and the
+  established **120–210 second T1–T4 recovery effect**. A weaker dish
+  cannot overwrite an ally's stronger active buff.
+- There is a **20-second per-cook server cooldown**. The buff itself is
+  persistent through relogs, expires on server ticks and is cleared by
+  death, exactly as with individual cooked meals. The feast cooldown is
+  session-only and resets on respawn.
+- The multiplayer party panel shows the feast cooldown and privately
+  notifies each recipient. No client may supply the fire position,
+  party membership, amount of food, or magnitude/duration of the buff.
+
+Code: `scripts/shared/party_feast.gd`, `scripts/server/game_server.gd`,
+`scripts/shared/net.gd` and the online client/HUD. Tests:
+`tests/test_party_feast.gd` in the shared
+`godot --headless --path game --script res://tests/run_all.gd` runner.
+The Cgame engine already supplies the necessary multiplayer and world
+simulation APIs; no native engine changes were needed.
