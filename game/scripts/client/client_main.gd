@@ -427,6 +427,8 @@ func _sync_zombies() -> void:
 			tint = base_tint.lerp(Color(0.54, 0.52, 0.66), 0.65)
 		elif phase == "frenzied":
 			tint = base_tint.lerp(Color(1.0, 0.19, 0.1), 0.78)
+		elif zombie.stagger_resolve_stacks >= 2 and zombie.stagger_resolve_seconds > 0.0:
+			tint = base_tint.lerp(Color(0.74, 0.42, 0.95), 0.65)
 		var material: StandardMaterial3D = _zombie_meshes[zombie.id].material_override
 		material.albedo_color = tint
 		_zombie_meshes[zombie.id].position = zombie.position + Vector3(0.0, 0.975 if zombie.elite else 0.8, 0.0)
