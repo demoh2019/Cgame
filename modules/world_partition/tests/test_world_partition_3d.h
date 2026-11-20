@@ -327,6 +327,12 @@ TEST_CASE("[SceneTree][WorldPartition3D] Actor-driven streaming follows Node3D m
 	SceneTree::get_singleton()->get_root()->add_child(drone);
 	SceneTree::get_singleton()->get_root()->add_child(partition);
 	partition->set_cell_size(16);
+	// The actor is in global space; WorldPartition3D may be translated and
+	// rotated, so follow must first convert to partition-local coordinates.
+	partition->set_position(Vector3(100, 0, 25));
+	partition->set_rotation(Vector3(0, Math::PI / 2, 0));
+	observer->set_global_position(partition->to_global(Vector3()));
+	drone->set_global_position(partition->to_global(Vector3(48, 0, 0)));
 	partition->set_load_radius(0);
 	partition->set_unload_radius(0);
 	partition->set_max_instances_per_frame(1);
@@ -356,7 +362,7 @@ TEST_CASE("[SceneTree][WorldPartition3D] Actor-driven streaming follows Node3D m
 	CHECK(partition->is_streaming_source_ready("drone"));
 	CHECK(partition->get_streaming_source_progress("drone") == 1.0);
 
-	drone->set_position(Vector3(96, 0, 0));
+	drone->set_global_position(partition->to_global(Vector3(96, 0, 0)));
 	partition->update_streaming();
 	CHECK_FALSE(partition->is_cell_loaded(Vector2i(3, 0)));
 	CHECK(partition->get_streaming_source("drone")["center"] == Vector2i(6, 0));
