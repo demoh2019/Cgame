@@ -59,6 +59,13 @@ func run(t) -> void:
 		"coating fades with distance, weather and excludes snow")
 	t.check(not base_code.contains("clearcoat_texture"),
 		"no new coat texture, VRAM, or screen pass is required")
+	t.check(base_code.contains("water_film *= (0.86 + cavity * 0.14)")
+		and base_code.contains("ruin_moss * 0.45"),
+		"wet reflections collect in worn recesses and preserve porous moss")
+	t.check(base_code.contains("water_film *= 1.0 - smoothstep(0.20, 0.70, slope)"),
+		"sloped surfaces cannot reflect as much as waterlogged roads")
+	t.check(base_code.contains("CLEARCOAT_ROUGHNESS = filter_specular_roughness"),
+		"water-film specular highlights reuse the engine's roughness antialiasing")
 
 	t.current = "cached shader variants and live material state"
 	var plain: Shader = Anisotropy.shader_for_quality(0)
