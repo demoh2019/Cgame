@@ -21,6 +21,7 @@ const CombatAnimationPriority = preload("res://scripts/client/combat_animation_p
 const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
 const LootBeam = preload("res://scripts/client/loot_beam.gd")
 const CorpseBurn = preload("res://scripts/client/corpse_burn.gd")
+const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
 var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
 var _priority_quality: int = -1
 var _world = null
@@ -494,6 +495,7 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		root.add_child(label)
 		root.add_child(LootBeam.make())
 		return root
+	root.add_child(BlobShadow.make(BlobShadow.wanted(bool(GraphicsQuality.profile(GraphicsQuality.level())["shadows"]))))
 	var model := CharacterModel.new()
 	model.name = "Model"
 	var height := 2.0

@@ -51,6 +51,7 @@ const SUITES := [
 	"res://tests/test_damage_direction.gd",
 	"res://tests/test_blood_decals.gd",
 	"res://tests/test_hover_outline.gd",
+	"res://tests/test_blob_shadow.gd",
 	"res://tests/test_terrain_sdfgi.gd",
 	"res://tests/test_cinematic_bloom.gd",
 	"res://tests/test_foliage_spectral_optics.gd",

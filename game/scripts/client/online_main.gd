@@ -37,6 +37,7 @@ const OcclusionSilhouette = preload("res://scripts/client/occlusion_silhouette.g
 const DamageDirection = preload("res://scripts/client/damage_direction.gd")
 const BloodDecals = preload("res://scripts/client/blood_decals.gd")
 const HoverOutline = preload("res://scripts/client/hover_outline.gd")
+const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -1161,6 +1162,7 @@ func _on_welcomed() -> void:
 	avatar.add_child(avatar_model)
 	# Diablo/PoE-style X-ray rim where buildings or trees hide your character.
 	OcclusionSilhouette.apply(avatar_model)
+	avatar.add_child(BlobShadow.make(BlobShadow.wanted(bool(GraphicsQuality.profile(GraphicsQuality.level())["shadows"]))))
 	bike_visual = TrailBikeVisual.new()
 	bike_visual.name = "TrailBike"
 	avatar.add_child(bike_visual)

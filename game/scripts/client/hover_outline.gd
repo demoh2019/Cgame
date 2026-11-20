@@ -36,7 +36,7 @@ static func _set_overlay(node: Node, material: Material) -> void:
 	for found in node.find_children("*", "GeometryInstance3D", true, false):
 		# Never steal an overlay another system owns (X-ray silhouette, corpse burn).
 		var g := found as GeometryInstance3D
-		if g is Label3D or g is SpriteBase3D or g.name == &"LootBeam":
+		if g is Label3D or g is SpriteBase3D or g.name == &"LootBeam" or g.name == &"BlobShadow":
 			continue # Text, sprites and light columns have no hull to outline.
 		if material == null:
 			if g.material_overlay != null and g.material_overlay.get_meta("hover_outline", false):

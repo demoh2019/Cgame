@@ -12,6 +12,7 @@ const GraphicsLens = preload("res://scripts/client/graphics_lens.gd")
 const GraphicsShadowAtlas = preload("res://scripts/client/graphics_shadow_atlas.gd")
 const GraphicsContactShadows = preload("res://scripts/client/graphics_contact_shadows.gd")
 const GraphicsSunShafts = preload("res://scripts/client/graphics_sun_shafts.gd")
+const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
 const GraphicsReflections = preload("res://scripts/client/graphics_reflections.gd")
 const GraphicsIndirectLighting = preload("res://scripts/client/graphics_indirect_lighting.gd")
 const WaterRefraction = preload("res://scripts/client/water_refraction.gd")
@@ -239,6 +240,9 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# Far leaf alpha coverage uses cached native mip levels even with FSR2.
 	# Low-end renderers retain their original imported texture allocations.
 	Foliage.configure_alpha_mipmaps(_level, str(method))
+	# Round contact blobs stand in for sun shadows on Performance.
+	if viewport != null and viewport.is_inside_tree():
+		viewport.get_tree().call_group(BlobShadow.GROUP, "set_visible", BlobShadow.wanted(bool(p["shadows"])))
 	var native_vignette := false
 	var lens_env: Environment = null
 	if atmosphere != null:
