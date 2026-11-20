@@ -16,6 +16,7 @@
 		add_child(streamer)
 		[/codeblock]
 		Cells without a scene file are skipped silently, so the world may have holes (oceans, unfinished areas). Unload radius larger than the load radius gives hysteresis: a player pacing along a cell border does not make chunks flicker in and out.
+		To reduce visible pop-in when the player runs or rides, optionally set [member velocity_hint] and [member lookahead_seconds]. The streamer orders already-eligible cells toward a bounded predicted position, but the actual focus and load/unload radii still determine residency. No extra cells are loaded, and [member max_instantiations_per_frame] still limits main-thread work.
 		[b]Large worlds:[/b] when the chunks live under a [Node3D] set as [member chunk_parent] that is moved by [FloatingOrigin3D], the focus position is measured in that node's local space, so the grid stays in absolute world coordinates while the origin shifts.
 	</description>
 	<tutorials>
@@ -129,6 +130,9 @@
 		<member name="focus_position" type="Vector3" setter="set_focus_position" getter="get_focus_position" default="Vector3(0, 0, 0)">
 			Position used when no [member focus] node is set. Update it from a script for custom streaming points.
 		</member>
+		<member name="lookahead_seconds" type="float" setter="set_lookahead_seconds" getter="get_lookahead_seconds" default="0.0">
+			How many seconds ahead movement-based streaming should prioritize chunk requests. The value is clamped to [code]0.0[/code] through [code]4.0[/code]. Default [code]0.0[/code] keeps legacy distance-only streaming. Prediction is further limited to one cell width and 40% of [member load_radius]. It never enlarges the set of loaded cells.
+		</member>
 		<member name="load_radius" type="float" setter="set_load_radius" getter="get_load_radius" default="128.0">
 			Cells closer than this distance (measured to the cell's box) to the focus are loaded.
 		</member>
@@ -143,6 +147,9 @@
 		</member>
 		<member name="unload_radius" type="float" setter="set_unload_radius" getter="get_unload_radius" default="192.0">
 			Loaded cells farther than this distance from the focus are freed. Values below [member load_radius] are treated as equal to it.
+		</member>
+		<member name="velocity_hint" type="Vector3" setter="set_velocity_hint" getter="get_velocity_hint" default="Vector3(0, 0, 0)">
+			Estimated velocity of the player or camera, in metres per second, used only to prioritize chunks within [member load_radius]. The ignored grid axis is discarded. Non-finite hints are rejected, while zero velocity preserves nearest-first loading. Update this when the character moves; reset it after a teleport or network correction.
 		</member>
 		<member name="update_interval" type="float" setter="set_update_interval" getter="get_update_interval" default="0.1">
 			Time in seconds between two evaluations of which cells to load and unload. Checking a few times per second is enough; [code]0[/code] checks every frame.
