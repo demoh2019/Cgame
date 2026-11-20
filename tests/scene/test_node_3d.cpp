@@ -54,7 +54,7 @@ static void free_root_node(Node3D *p_node) {
 TEST_CASE("[SceneTree][Node3D] Network snapshots use bounded Hermite interpolation") {
 	Node3D *actor = memnew(Node3D);
 	const Vector3 a(0.0, 1.0, -2.0);
-	const Vector3 b(10.0, 3.0, 2.0);
+	const Vector3 b(4.0, 3.0, 2.0);
 	const Vector3 chord = (b - a) / real_t(0.1);
 
 	// Two known snapshots are identical to the old linear path, including
