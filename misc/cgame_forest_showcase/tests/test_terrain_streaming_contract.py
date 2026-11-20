@@ -351,6 +351,88 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn('hud.text.contains("Дрон X=0 Z=4")', moving)
 
 
+    def test_streamed_navigation_and_agent_contract(self) -> None:
+        """Native NavServer readiness must match the actual procedural game."""
+        repository = ROOT.parents[1]
+        header = (repository / "modules/world_partition/world_partition_3d.h").read_text(encoding="utf-8")
+        cpp = (repository / "modules/world_partition/world_partition_3d.cpp").read_text(encoding="utf-8")
+        xml = (repository / "modules/world_partition/doc_classes/WorldPartition3D.xml").read_text(encoding="utf-8")
+        native_test = (repository / "modules/world_partition/tests/test_world_partition_3d.h").read_text(encoding="utf-8")
+        forest = (ROOT / "scripts/streamed_forest_cell.gd").read_text(encoding="utf-8")
+        nav_patch = (ROOT / "scripts/streamed_navigation_patch.gd").read_text(encoding="utf-8")
+        agent = (ROOT / "scripts/streamed_patrol_agent.gd").read_text(encoding="utf-8")
+        world = (ROOT / "scripts/world.gd").read_text(encoding="utf-8")
+        smoke = (ROOT / "tests/smoke_navigation_streaming.gd").read_text(encoding="utf-8")
+
+        native_api = (
+            "is_cell_navigation_ready", "are_cells_navigation_ready",
+            "get_navigation_ready_cell_count", "get_navigation_pending_cell_count",
+            "is_streaming_source_navigation_ready",
+            "get_streaming_source_navigation_progress",
+        )
+        for method in native_api:
+            self.assertIn(method + "(", header)
+            self.assertIn("WorldPartition3D::" + method + "(", cpp)
+            self.assertIn('D_METHOD("' + method + '"', cpp)
+            self.assertIn('method name="' + method + '"', xml)
+
+        self.assertIn("navigation_pending_regions;", header)
+        self.assertIn("navigation_ready_regions;", header)
+        self.assertIn("NavigationServer3D::get_singleton()", cpp)
+        self.assertIn("region_get_iteration_id(region_rid) > 0", cpp)
+        self.assertIn("map_get_iteration_id(map) > 0", cpp)
+        self.assertIn("region_get_map(region_rid) == map", cpp)
+        self.assertIn("region_get_enabled(region_rid)", cpp)
+        self.assertIn("is_cell_physics_ready(p_cell)", cpp)
+        self.assertIn("navigation_pending_regions.insert(p_cell", cpp)
+        self.assertIn("navigation_pending_regions.erase(p_cell)", cpp)
+        self.assertIn("navigation_ready_regions.erase(p_cell)", cpp)
+        self.assertIn("navigation_pending_regions.insert(cell, region_id)", cpp)
+        self.assertIn('SNAME("cell_navigation_ready")', cpp)
+        self.assertIn('SNAME("cell_navigation_unready")', cpp)
+        self.assertIn('signal name="cell_navigation_ready"', xml)
+        self.assertIn('signal name="cell_navigation_unready"', xml)
+        self.assertIn("Instantiated cells without navigation remain nav-unready", native_test)
+
+        self.assertIn('const NavigationPatch = preload("res://scripts/streamed_navigation_patch.gd")', forest)
+        self.assertIn('const ForestPatrol = preload("res://scripts/streamed_patrol_agent.gd")', forest)
+        self.assertIn('navigation.name = "GroundNavigation"', forest)
+        self.assertIn('_spawn_patrol(cell_x, cell_z)', forest)
+        self.assertIn("TerrainHeight.height_at(world_x, world_z)", nav_patch)
+        self.assertIn("const STEP: int = 4", nav_patch)
+        self.assertIn("const SAMPLE_COUNT: int = EDGE / STEP + 1", nav_patch)
+        self.assertIn("nav.vertices = vertices", nav_patch)
+        self.assertIn("nav.add_polygon(PackedInt32Array([", nav_patch)
+        self.assertIn("navigation_mesh = nav", nav_patch)
+        self.assertIn("extends CharacterBody3D", agent)
+        self.assertIn("NavigationAgent3D.new()", agent)
+        self.assertIn("streaming_world.is_cell_navigation_ready(owning_cell)", agent)
+        self.assertIn("navigator.get_next_path_position()", agent)
+        self.assertIn("move_and_slide()", agent)
+        self.assertIn('world_partition.get_streaming_source_navigation_progress(SURVEY_SOURCE)', world)
+        self.assertIn('world_partition.get_navigation_ready_cell_count()', world)
+        self.assertIn("cell_navigation_ready.connect(_on_stream_cell_navigation_ready)", world)
+        self.assertIn("cell_navigation_unready.connect(_on_stream_cell_navigation_unready)", world)
+        self.assertIn('NavigationServer3D.region_get_iteration_id(region_rid)', smoke)
+        self.assertIn('NavigationServer3D.map_get_path(', smoke)
+        self.assertIn('nav_a.enabled = false', smoke)
+        self.assertIn('nav_a.enabled = true', smoke)
+        self.assertIn('west_world.is_equal_approx(east_world)', smoke)
+
+    def test_navigation_tile_edge_geometry(self) -> None:
+        """Independent 4m nav grid model: 81 vertices, 128 triangles, no seam."""
+        side = 9
+        step = 4
+        samples = [(x * step, z * step) for z in range(side) for x in range(side)]
+        self.assertEqual(len(samples), 81)
+        self.assertEqual((side - 1) * (side - 1) * 2, 128)
+        for tile_z in (-8, 0, 7):
+            for tile_x in (-4, 0, 8):
+                for z in range(side):
+                    west = tile_sample(tile_x, tile_z, 32, z * 4)[0]
+                    east = tile_sample(tile_x + 1, tile_z, 0, z * 4)[0]
+                    self.assertAlmostEqual(west, east, places=10)
+
     def test_native_physics_activation_and_gameplay_contract(self) -> None:
         """Two real physics ticks gate scene activation and game collisions."""
         repository = ROOT.parents[1]
