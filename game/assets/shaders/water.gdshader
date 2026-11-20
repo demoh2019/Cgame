@@ -28,13 +28,6 @@ float value_noise(vec2 p) {
 	return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
-float ripples(vec2 p, float t) {
-	float h = value_noise(p * 0.45 + vec2(t * 0.06, t * 0.035)) * 0.55;
-	h += value_noise(p * 1.1 + vec2(-t * 0.09, t * 0.07)) * 0.3;
-	h += value_noise(p * 2.7 + vec2(t * 0.15, -t * 0.12)) * 0.15;
-	return h;
-}
-
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
@@ -42,14 +35,26 @@ void vertex() {
 void fragment() {
 	float t = TIME;
 	vec2 p = world_position.xz;
-	// Low-end presets omit layered animated normal noise but retain depth and Fresnel sheen.
+	// Analytic wave slopes avoid recomputing three octaves of noise at three nearby
+	// pixel positions. Two opposing wave trains preserve motion and sun glints.
+	// High/Ultra add fine noise only where their visual budget allows it.
+	float crest = 0.0;
 	if (ripple_strength > 0.001) {
-		float e = 0.25;
-		float h = ripples(p, t);
-		float dx = ripples(p + vec2(e, 0.0), t) - h;
-		float dz = ripples(p + vec2(0.0, e), t) - h;
-		vec3 world_normal = normalize(vec3(-dx * ripple_strength / e, 1.0, -dz * ripple_strength / e));
+		float wave_a = dot(p, vec2(0.85, 0.52)) * 1.6 + t * 0.8;
+		float wave_b = dot(p, vec2(-0.42, 0.91)) * 3.2 - t * 1.2;
+		vec2 slope = vec2(0.85, 0.52) * cos(wave_a) * 0.065
+			+ vec2(-0.42, 0.91) * cos(wave_b) * 0.04;
+		if (ripple_strength > 0.30) {
+			vec2 flow = p * 0.65 + vec2(t * 0.07, -t * 0.06);
+			float e = 0.3;
+			float h = value_noise(flow);
+			slope += vec2(value_noise(flow + vec2(e, 0.0)) - h,
+				value_noise(flow + vec2(0.0, e)) - h) * (0.13 / e);
+		}
+		vec3 world_normal = normalize(vec3(-slope.x * ripple_strength * 2.5, 1.0,
+			-slope.y * ripple_strength * 2.5));
 		NORMAL = normalize((VIEW_MATRIX * vec4(world_normal, 0.0)).xyz);
+		crest = smoothstep(0.04, 0.11, length(slope));
 	}
 
 	float depth = textureLod(depth_tex, SCREEN_UV, 0.0).r;
@@ -68,7 +73,10 @@ void fragment() {
 	float edge = 1.0 - smoothstep(0.0, 0.9, thickness);
 	float foam_noise = 0.6;
 	if (ripple_strength > 0.001) {
-		foam_noise = value_noise(p * 3.2 + vec2(t * 0.2, -t * 0.15)) * 0.6 + value_noise(p * 7.0 - vec2(t * 0.3)) * 0.4;
+		foam_noise = value_noise(p * 3.2 + vec2(t * 0.2, -t * 0.15));
+		if (ripple_strength > 0.30) {
+			foam_noise = mix(foam_noise, value_noise(p * 7.0 - vec2(t * 0.3)), 0.4);
+		}
 	}
 	float foam = smoothstep(0.35, 0.75, foam_noise + edge * 0.9 - 0.55) * edge;
 	color = mix(color, vec3(0.95, 0.98, 1.0), foam);
@@ -79,5 +87,7 @@ void fragment() {
 	ROUGHNESS = mix(0.06, 0.4, foam);
 	SPECULAR = 0.7;
 	METALLIC = 0.0;
-	EMISSION = vec3(0.01, 0.04, 0.05) * (1.0 - depth_mix) + vec3(0.08, 0.12, 0.16) * fresnel;
+	EMISSION = vec3(0.01, 0.04, 0.05) * (1.0 - depth_mix)
+		+ vec3(0.08, 0.12, 0.16) * fresnel
+		+ vec3(0.015, 0.025, 0.028) * crest * (1.0 - foam);
 }
