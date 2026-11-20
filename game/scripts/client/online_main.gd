@@ -56,6 +56,7 @@ const HelpPanel = preload("res://scripts/client/help_panel.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Effects = preload("res://scripts/client/effects.gd")
 const CombatVfx = preload("res://scripts/client/combat_vfx.gd")
+const CombatCameraFeedback = preload("res://scripts/client/combat_camera_feedback.gd")
 const ImpactDecals = preload("res://scripts/client/impact_decals.gd")
 const CameraPostFx = preload("res://scripts/client/camera_post_fx.gd")
 const PhysicsWorldFx = preload("res://scripts/client/physics_world_fx.gd")
@@ -849,8 +850,7 @@ func _spawn_effects(event: Dictionary) -> void:
 				effects.hit_zombie(at)
 				decals.splat(at, Color(0.3, 0.42, 0.12, 0.85), 0.8)
 				entities.play_hit("zombie", int(event.get("id", -1)), float(event.get("damage", 0.0)) >= 30.0)
-				if at.distance_to(here) < 4.0:
-					_shake(0.12) # Your own blow landing.
+				CombatCameraFeedback.apply(camera, "hit_zombie", at, here, UiSettings.shake_scale())
 			else:
 				effects.hit_player(at)
 				decals.splat(at, Color(0.45, 0.04, 0.04, 0.85), 0.7)
@@ -863,22 +863,19 @@ func _spawn_effects(event: Dictionary) -> void:
 		"zombie_died":
 			effects.zombie_died(at)
 			decals.splat(at, Color(0.25, 0.35, 0.1, 0.9), 1.6)
-			if at.distance_to(here) < 6.0:
-				_shake(0.18)
+			CombatCameraFeedback.apply(camera, "zombie_died", at, here, UiSettings.shake_scale())
 		"restoration_pulse":
 			effects.ring(at - Vector3(0, 1.0, 0), Color(0.4, 1.0, 0.55, 0.9), 6.0, 0.9)
 			effects.burst(at, Color(0.5, 1.0, 0.6), 22, 2.4, 0.9, 0.1, -1.5)
 		"knockback":
 			effects.burst(at - Vector3(0, 0.8, 0), Color(0.62, 0.55, 0.45), 16, 3.2, 0.5, 0.14, 4.0)
-			if at.distance_to(here) < 8.0:
-				_shake(0.15)
+			CombatCameraFeedback.apply(camera, "knockback", at, here, UiSettings.shake_scale())
 		"pinning_bolt":
 			effects.ring(at - Vector3(0, 1.0, 0), Color(0.45, 0.75, 1.0, 0.9), 1.6, 0.5)
 		"flash_thrown":
 			effects.ring(at - Vector3(0, 1.0, 0), Color(1.0, 1.0, 0.9, 1.0), 7.0, 0.45)
 			effects.burst(at, Color(1.0, 1.0, 0.85), 30, 6.0, 0.35, 0.14, 0.0)
-			if at.distance_to(here) < 12.0:
-				_shake(0.25)
+			CombatCameraFeedback.apply(camera, "flash_thrown", at, here, UiSettings.shake_scale())
 		"ember_thrown":
 			effects.burst(at, Color(1.0, 0.55, 0.15), 26, 2.6, 1.0, 0.1, -0.5)
 		"decoy_thrown":
@@ -887,8 +884,7 @@ func _spawn_effects(event: Dictionary) -> void:
 			effects.burst(at - Vector3(0, 0.6, 0), Color(0.5, 0.38, 0.22), 14, 2.0, 0.5, 0.1)
 		"barricade_broken":
 			effects.burst(at, Color(0.55, 0.38, 0.2), 34, 5.0, 0.9, 0.16, 9.0)
-			if at.distance_to(here) < 10.0:
-				_shake(0.3)
+			CombatCameraFeedback.apply(camera, "barricade_broken", at, here, UiSettings.shake_scale())
 		"outpost_taken", "siege_contract_result":
 			if at.distance_to(here) < 60.0:
 				effects.ring(at - Vector3(0, 1.0, 0), Color(1.0, 0.82, 0.35, 0.9), 14.0, 1.4)
