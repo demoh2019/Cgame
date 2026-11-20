@@ -580,6 +580,13 @@ static func _build_items() -> void:
 	_add_recipe("siege_charge", "siege_charge", 1,
 		{"bar_3": 2, "scrap": 8, "cloth_2": 2, "stone_2": 2},
 		"workbench", 9.0)
+	# Physical workbench-made countermeasure, one kit per successful defusal.
+	_add_item("siege_defusal_kit", {"name": "Field Siege Defusal Kit",
+		"kind": "siege_defusal", "tier": 2, "stack": 5,
+		"weight": 0.75, "value": 65})
+	_add_recipe("siege_defusal_kit", "siege_defusal_kit", 1,
+		{"bar_2": 1, "scrap": 4, "cloth_2": 1, "fiber_2": 1},
+		"workbench", 5.0)
 	# Defensive disposable wire snare; only the PvE server can trigger it.
 	_add_item("infected_snare", {"name": "Infected Tripwire Snare",
 		"kind": "deployable", "tier": 1, "stack": 10, "weight": 0.9, "value": 28})

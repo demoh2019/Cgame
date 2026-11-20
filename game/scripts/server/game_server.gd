@@ -57,6 +57,7 @@ const Movement = preload("res://scripts/shared/movement.gd")
 const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
 const BarricadeBallistics = preload("res://scripts/shared/barricade_ballistics.gd")
 const SiegeCharge = preload("res://scripts/shared/siege_charge.gd")
+const SiegeDefusal = preload("res://scripts/shared/siege_defusal.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const CargoRattle = preload("res://scripts/shared/cargo_rattle.gd")
@@ -3255,6 +3256,27 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			player.edge_coating_weapon = player.inventory.weapon
 			player.edge_coating_seconds = AntisepticEdge.SECONDS
 			player.action = {}
+		"siege_defusal":
+			if item_id != SiegeDefusal.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "defusal": true}
+			if not player.action.is_empty():
+				return {"ok": false, "reason": "busy", "defusal": true}
+			var choice: Dictionary = SiegeDefusal.nearest(world, player,
+				siege_charges, barricades, time)
+			if not bool(choice.get("ok", false)):
+				choice["defusal"] = true
+				return choice
+			# Verify everything before consuming the actual crafted tool.
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "defusal": true}
+			siege_charges.erase(int(choice["id"]))
+			player.dirty_inventory = true
+			player.dirty_character = true
+			events.append({"type": "siege_charge_disarmed",
+				"id": int(choice["id"]), "x": float(choice["x"]),
+				"z": float(choice["z"])})
+			return {"ok": true, "defusal": true,
+				"id": int(choice["id"]), "wall": int(choice["wall"])}
 		"siege_charge":
 			if item_id != SiegeCharge.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}

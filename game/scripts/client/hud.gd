@@ -322,6 +322,13 @@ func _build() -> void:
 	smoke_button.tooltip_text = "Consumes 1 crafted charge. Quiet survivors are less visible; no PvP or damage protection."
 	smoke_button.pressed.connect(func() -> void: client.use_item("smoke_charge"))
 	inventory_box.add_child(smoke_button)
+	var defusal_button := Button.new()
+	defusal_button.name = "DisarmSiegeCharge"
+	defusal_button.text = "Disarm siege charge (T2 defusal kit)"
+	defusal_button.tooltip_text = "Only the wall owner. Requires crafted toolkit and 3m reach before the four-second fuse expires."
+	defusal_button.pressed.connect(func() -> void:
+		client.use_item("siege_defusal_kit"))
+	inventory_box.add_child(defusal_button)
 	var snare_button := Button.new()
 	snare_button.name = "PlaceInfectedSnare"
 	snare_button.text = "Place infected tripwire (\\): roots one infected"
@@ -1341,8 +1348,12 @@ func _on_event(event: Dictionary) -> void:
 				int(event.get("id", 0)), roundi(float(event.get("x", 0.0))),
 				roundi(float(event.get("z", 0.0)))])
 		"siege_charge_armed":
-			say("SIEGE CHARGE ARMED! Enemy wall will explode in %.0f seconds." %
-				float(event.get("seconds", 4.0)))
+			say("SIEGE CHARGE X:%d Z:%d! %.0fs to detonation; wall owner can defuse within 3m." % [
+				roundi(float(event.get("x", 0.0))),
+				roundi(float(event.get("z", 0.0))),
+				float(event.get("seconds", 4.0))])
+		"siege_charge_disarmed":
+			say("SIEGE DEFUSED! A defending survivor removed the live charge.")
 		"siege_charge_detonated":
 			if bool(event.get("broken", false)):
 				say("SIEGE BREACH! Enemy barricade destroyed.")
@@ -1457,6 +1468,12 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "use" and bool(data.get("defusal", false)):
+		if bool(data.get("ok", false)):
+			say("Siege defusal successful; one toolkit spent, wall safe.")
+		else:
+			say("Defusal: %s (kit not spent)." % str(data.get("reason", "rejected")))
+		return
 	if kind == "equipment_preset":
 		if bool(data.get("ok", false)):
 			say("Gear set %d: %s." % [
