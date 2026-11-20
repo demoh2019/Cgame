@@ -326,7 +326,7 @@ float quick_hash(vec2 pos) {
 // across world surfaces; TAA still advances a temporal phase when active.
 // The quantized 2x2-texel tile avoids the noisy zero-area hash derivative.
 mat2 directional_shadow_rotation(texture2D shadow, vec2 shadow_uv, float taa_frame_count) {
-	vec2 texels = vec2(textureSize(shadow, 0));
+	vec2 texels = vec2(textureSize(sampler2D(shadow, SAMPLER_LINEAR_CLAMP), 0));
 	vec2 stable_cell = floor(shadow_uv * texels * 0.5);
 	float angle = quick_hash(stable_cell + vec2(taa_frame_count * 5.588238)) * (2.0 * M_PI);
 	float sn = sin(angle);

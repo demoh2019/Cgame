@@ -215,8 +215,8 @@ aa_ground_contact_strength={
 "value": 0.28
 }
 
-// The default render quality keeps micro-occlusion off until High/Ultra is selected.
-// The terrain shader reuses its existing sampled PBR normals (zero extra taps).
+; The default render quality keeps micro-occlusion off until High/Ultra is selected.
+; The terrain shader reuses its existing sampled PBR normals (zero extra taps).
 aa_terrain_micro_occlusion={
 "type": "float",
 "value": 0.0
