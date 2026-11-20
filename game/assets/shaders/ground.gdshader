@@ -8,6 +8,11 @@ instance uniform float aa_lod_morph = 0.0;
 // High/Ultra only: subtle self-occlusion from normal-map microrelief,
 // fused into existing PBR AO without any extra texture or screen pass.
 global uniform float aa_terrain_micro_occlusion;
+// Optional High/Ultra PBR second reflection lobe. The compile-time variant
+// omits its GPU work entirely on Performance/Balanced and GL-safe presets.
+#ifdef AA_TERRAIN_WET_CLEARCOAT
+global uniform float aa_terrain_wet_clearcoat;
+#endif
 // World-height curvature stored in native vertex colors, not a texture.
 global uniform float aa_terrain_curvature_strength;
 global uniform float aa_puddle_ripple_strength;
@@ -489,4 +494,23 @@ void fragment() {
 	// without additional PBR texture fetches.
 	ROUGHNESS = filter_specular_roughness(final_roughness, bent);
 	SPECULAR = 0.5;
+#ifdef AA_TERRAIN_WET_CLEARCOAT
+	// A thin liquid film contributes a second, smooth dielectric reflection
+	// on top of porous rock and paving. Reuse existing sampled biome weights,
+	// weather and curvature instead of fetching new mask/normal textures.
+	float hard_surface = clamp(w[4] + w[5] * 0.35 + w[6] * 0.25
+		+ w[9] + w[10] + w[11] + w[12] * 0.35, 0.0, 1.0);
+	float water_film = wetness * hard_surface * detail_fade
+		* (1.0 - clamp(w[8], 0.0, 1.0));
+	// Rain gathers in worn recessed stone, but moss remains porous/matte.
+	water_film *= (0.86 + cavity * 0.14) * (1.0 - ruin_moss * 0.45);
+	// Steep walls shed moisture instead of reflecting like horizontal asphalt.
+	water_film *= 1.0 - smoothstep(0.20, 0.70, slope) * 0.30;
+	CLEARCOAT = clamp(water_film * aa_terrain_wet_clearcoat, 0.0, 0.65);
+	float film_roughness = mix(0.22, 0.07,
+		clamp(puddle + wetness * 0.45, 0.0, 1.0));
+	// Apply the existing native normal-variance filter to the clearcoat lobe,
+	// avoiding scintillating pinpoint reflections at FSR2 output resolution.
+	CLEARCOAT_ROUGHNESS = filter_specular_roughness(film_roughness, bent);
+#endif
 }
