@@ -1430,7 +1430,7 @@ func _update_time_of_day(delta: float) -> void:
 				GraphicsQuality.level(), delta)
 		if _ambient_birds != null:
 			_ambient_birds.update_view(here, WorldCycle.daylight(clock), atmosphere.storm,
-				GraphicsQuality.level(), delta, underground)
+				GraphicsQuality.level(), delta, underground, _visual_biome)
 		if _fish_shoals != null:
 			_fish_shoals.update_view(client.world, here, GraphicsQuality.level(),
 				WorldCycle.daylight(clock), delta, underground)

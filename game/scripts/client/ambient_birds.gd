@@ -65,6 +65,7 @@ func _init() -> void:
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var mat := ShaderMaterial.new()
 	mat.shader = FLAP_SHADER
+	mat.set_shader_parameter("body_color", plumage(""))
 	material_override = mat
 	_pos.resize(MAX_BIRDS)
 	_vel.resize(MAX_BIRDS)
@@ -105,7 +106,18 @@ static func _bird_mesh() -> ArrayMesh:
 	return mesh
 
 
-func update_view(player: Vector3, daylight: float, storm: float, level: int, delta: float, underground: bool) -> void:
+## Gull-white over coasts and water, dark corvids inland.
+static func plumage(biome: String) -> Color:
+	return Color(0.86, 0.87, 0.88) if biome == "beach" or biome == "water" else Color(0.08, 0.08, 0.09)
+
+
+func update_view(player: Vector3, daylight: float, storm: float, level: int, delta: float, underground: bool, biome: String = "") -> void:
+	var mat := material_override as ShaderMaterial
+	if mat != null and biome != "":
+		var target: Color = plumage(biome)
+		var current: Color = mat.get_shader_parameter("body_color")
+		if not current.is_equal_approx(target):
+			mat.set_shader_parameter("body_color", current.lerp(target, clampf(delta * 0.5, 0.0, 1.0)))
 	var want: int = 0 if underground else flock_size(level, daylight, storm)
 	if want > 0:
 		_active = want
