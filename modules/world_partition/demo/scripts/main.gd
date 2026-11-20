@@ -19,6 +19,7 @@ var hud: Label
 var prefetch_enabled := true
 var proxies_enabled := true
 var hud_elapsed := 0.0
+var baked_proxy_cell_count := 0
 var quality_controller = QUALITY_SCRIPT.new()
 var crossfade_controller: CROSSFADE_SCRIPT
 
@@ -52,9 +53,19 @@ func _make_streamer(name: String, radius: int, unload_radius: int, scene_path: S
     world.set("max_new_requests_per_frame", budget)
     world.set("max_concurrent_requests", 6)
     world.set("observer_path", world.get_path_to(camera))
+    # Register the complete grid in one native call rather than invoking
+    # ClassDB 169 times; this also keeps initialization deterministic.
+    var cell_paths: Dictionary = {}
     for x in range(-WORLD_HALF_EXTENT, WORLD_HALF_EXTENT + 1):
         for z in range(-WORLD_HALF_EXTENT, WORLD_HALF_EXTENT + 1):
-            world.call("set_cell_scene", Vector2i(x, z), scene_path)
+            var path := scene_path
+            if scene_path == PROXY_SCENE:
+                var baked := "res://generated/forest_proxy_%d_%d.tscn" % [x, z]
+                if ResourceLoader.exists(baked, "PackedScene"):
+                    path = baked
+                    baked_proxy_cell_count += 1
+            cell_paths[Vector2i(x, z)] = path
+    world.call("set_cell_scenes", cell_paths)
     return world
 
 func _apply_quality_profile() -> void:
@@ -168,10 +179,11 @@ func _update_hud() -> void:
         return
     var detail_count: int = int(detail.call("get_loaded_cell_count")) if detail != null else 0
     var distant_count: int = int(distant.call("get_loaded_cell_count")) if distant != null else 0
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nOffline baked proxies: %d / 169 registered cells\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
+        baked_proxy_cell_count,
         str(quality_controller.get_profile()["name"]),
         "ON" if quality_controller.automatic else "OFF",
         "ON" if crossfade_controller != null and crossfade_controller.enabled else "OFF",
