@@ -86,5 +86,13 @@ the server to drop the connection, so it is not the default.
 * Camera-scale atmospheric fog: `scripts/client/cinematic_fog.gd` adds an inexpensive sea-level height haze to all supported renderers, and bounded physically based Forward+ volumetric shafts on High/Ultra. The same engine-native `Atmosphere` and `GraphicsLighting` now share one time-of-day, storm and quality budget; see `docs/CINEMATIC_FOG_RENDERING.md`.
 
 * Instanced atmospheric detail: `scripts/client/ambient_motes.gd` and `assets/shaders/ambient_motes.gdshader` render light-catching pollen in clear daylight and golden forest/swamp fireflies at night, with weather, regional wind, stable seeded world tiles and four GPU-quality budgets. A single MultiMesh handles all visible motes in both clients. See `docs/ATMOSPHERIC_MOTES.md`.
+* Screen-pixel atmospheric motes: the Cgame engine adds
+  `Camera3D.get_world_size_for_pixel_diameter_at_position()`. `AmbientMotes`
+  calibrates one world-to-pixel size every 0.25 seconds, then its existing GPU
+  shader scales every pollen/firefly quad with depth to retain a narrow 3–4 px
+  cinematic halo across camera zoom. FSR2 retains at least 1.75 internal pixels
+  and extreme sizes are bounded. This replaces the former 1-meter glow cards
+  without extra particles, draw calls or textures. Stock Godot keeps the
+  FOV-based GDScript fallback; full details in `docs/SCREEN_SPACE_ATMOSPHERIC_MOTES.md`.
 
 * Shallow-water light transport and RD renderer correctness: `assets/shaders/water.gdshader` now adds subtle, physically inspired underwater solar scattering using the existing depth transmission and real cached sun direction. Native Godot `servers/rendering/renderer_rd/storage_rd/mesh_storage.cpp` fixes re-showing dirty hidden MultiMesh instances on `visible_instance_count = -1`. See `docs/ENGINE_MULTIMESH_WATER_SCATTERING.md`.
