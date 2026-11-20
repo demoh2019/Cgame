@@ -115,8 +115,8 @@ func run(t) -> void:
 		"crossing one tile samples only the three previously unseen world tiles")
 	t.eq(field._batch.instance_count, AmbientMotes.MAX_INSTANCES,
 		"Ultra never resizes or restarts the GPU mesh")
-	t.eq(field._batch.visible_instance_count, 252,
-		"Ultra fills its bounded 3x3 procedural field")
+	t.eq(field._batch.visible_instance_count, -1,
+		"Ultra uses native show-all mode for all 252 preallocated instances")
 	field.update_view(Vector3(2, 0, 2), "swamp", 0.0, 0.0,
 		Vector2.ZERO, 3, 0.25)
 	t.eq(field._batch.get_instance_transform(0), anchor,
@@ -125,6 +125,14 @@ func run(t) -> void:
 		"backtracking to cached tiles requires no new heightmap queries")
 	t.check(field._tile_cache.size() <= AmbientMotes.TILE_CACHE_LIMIT,
 		"CPU cache remains bounded while preserving recent tiles")
+	field.update_view(Vector3(2, 0, 2), "swamp", 0.0, 0.0,
+		Vector2.ZERO, 1, 0.25)
+	t.eq(field._batch.visible_instance_count, 72,
+		"downgrading Ultra hides distant GPU instances")
+	field.update_view(Vector3(2, 0, 2), "swamp", 0.0, 0.0,
+		Vector2.ZERO, 3, 0.25)
+	t.eq(field._batch.visible_instance_count, -1,
+		"restoring Ultra reveals even instances updated while hidden")
 	field.update_view(Vector3(2, 0, 2), "plains", 0.0, 0.0,
 		Vector2.ZERO, 3, 0.25)
 	t.check(not field._renderer.visible,
