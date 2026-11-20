@@ -131,7 +131,7 @@ func _update_hint() -> void:
 			if distance <= pickup_distance:
 				result = "Press F to collect light shard (%0.1f m)" % distance
 			else:
-				result = "Nearest light shard: %0.0f m away. Fly with WASD + Q/E." % distance
+				result = "Nearest light shard: %0.0f m away. Move with WASD. Jump Space; V toggles flight." % distance
 	if result != _last_hint:
 		_last_hint = result
 		pickup_hint_changed.emit(result)
