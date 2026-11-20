@@ -72,6 +72,30 @@ trading or storing the bike does not transfer the paid service credit. Legacy
 characters have zero service distance. Network packets cannot request wear
 or noise radii; the authoritative server consumes only observed travel.
 
+## Frame integrity and field repairs
+
+The bike has a persistent, server-owned 100-point frame integrity value
+separate from chain service, tire grips and cargo bags. Actual riding
+distance causes gradual frame wear (more in mud, sand and mountains), while
+being hit and forcibly dismounted removes 20 points. At less than 60 points
+the riding pace is 86% of normal; below 25 it is 72%. A completely broken
+frame cannot be ridden, but the bike remains in inventory and can be fixed.
+
+A T2 workbench crafts a tradeable Salvaged Bike Frame Patch using 2 T2
+bars, 4 scrap and 2 T2 cloth. Each patch used while dismounted restores up
+to 45 integrity, capped at 100. Using a patch on an intact bike is
+rejected without spending materials. On the local and online client, use
+Page Down, or use the repair button in the online inventory. Server
+snapshots carry only the server's current integrity; movement prediction
+uses it, but client movement packets cannot author condition, hit damage
+or repair output. The repair is a normal authenticated inventory command.
+
+On login, a previously damaged bike keeps its condition. Legacy save files
+without an integrity field default to 100. Discarding the bike resets its
+owner-specific condition on the next server tick; a different acquired
+bike therefore starts intact. Losing the bike does not keep a phantom
+rideable item, and integrity never affects on-foot speed.
+
 ## Presentation
 
 The bicycle has a procedural low-poly 3D model: orange metal frame,

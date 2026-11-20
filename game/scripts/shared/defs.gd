@@ -573,6 +573,11 @@ static func _build_items() -> void:
 		"kind": "bike_service", "tier": 1, "stack": 5, "weight": 0.8, "value": 35})
 	_add_recipe("bike_service_kit", "bike_service_kit", 1,
 		{"bar_1": 1, "scrap": 2, "cloth_1": 1}, "workbench", 4.0)
+	# Repairable bicycle frame: a patch restores 45 integrity points while dismounted.
+	_add_item("bike_frame_patch", {"name": "Salvaged Bike Frame Patch",
+		"kind": "bike_frame_repair", "tier": 2, "stack": 5, "weight": 1.5, "value": 75})
+	_add_recipe("bike_frame_patch", "bike_frame_patch", 1,
+		{"bar_2": 2, "scrap": 4, "cloth_2": 2}, "workbench", 6.0)
 	# Crafted travel vehicle; ownership and cooldowns are checked by the server.
 	_add_item("salvage_bike", {"name": "Salvaged Trail Bike", "kind": "mount",
 		"tier": 2, "weight": 12.0, "value": 180})
