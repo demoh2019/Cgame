@@ -78,6 +78,41 @@ TEST_CASE("[SceneTree][Flock3D] Strays are pulled home and the flock stays bound
 	memdelete(flock);
 }
 
+TEST_CASE("[SceneTree][Flock3D] Seeded flock resets reproducibly across quality and scene changes") {
+	Flock3D *first = memnew(Flock3D);
+	Flock3D *second = memnew(Flock3D);
+	const uint64_t seed = UINT64_C(0x8f526e51b7b8a28e);
+	first->set_simulation_seed(seed);
+	second->set_simulation_seed(seed);
+	CHECK(first->get_simulation_seed() == seed);
+	CHECK(second->get_simulation_seed() == seed);
+	first->set_agent_count(8);
+	second->set_agent_count(8);
+	for (int i = 0; i < 8; i++) {
+		CHECK(first->get_agent_position(i).is_equal_approx(second->get_agent_position(i)));
+	}
+
+	// Native Flock3D is reset by NOTIFICATION_READY and quality changes;
+	// reusing the same seed must not depend on any previous random draws.
+	const Vector3 before = first->get_agent_position(0);
+	first->set_agent_count(12);
+	first->set_agent_count(8);
+	CHECK(first->get_agent_position(0).is_equal_approx(before));
+	for (int i = 0; i < 8; i++) {
+		CHECK(first->get_agent_position(i).is_equal_approx(second->get_agent_position(i)));
+	}
+
+	// A different world seed changes the simulated flock (not just its
+	// MultiMesh wing phases or unused GDScript position buffers).
+	second->set_simulation_seed(seed + 1);
+	CHECK(!first->get_agent_position(0).is_equal_approx(second->get_agent_position(0)));
+	second->set_simulation_seed(seed);
+	CHECK(first->get_agent_position(0).is_equal_approx(second->get_agent_position(0)));
+
+	memdelete(first);
+	memdelete(second);
+}
+
 } // namespace TestFlock3D
 
 #endif // _3D_DISABLED
