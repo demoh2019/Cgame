@@ -50,19 +50,19 @@ static func profile(value: int) -> Dictionary:
 	match clampi(value, 0, NAMES.size() - 1):
 		0:
 			return {"shadows": false, "shadow_distance": 45.0, "msaa": Viewport.MSAA_DISABLED,
-				"blur_quality": 0, "blur_radius": 0.0, "glow": false, "ssao": false, "ssil": false,
+				"blur_quality": 0, "blur_radius": 0.0, "glow": false, "ssao": false, "ssil": false, "cloud_shadows": false,
 				"scale": 0.59, "grass_radius": 66.0, "grass_budget": 1500, "grass_fade_start": 25.0, "grass_fade_end": 40.0, "terrain_detail_radius": 24.0}
 		1:
 			return {"shadows": true, "shadow_distance": 70.0, "msaa": Viewport.MSAA_DISABLED,
-				"blur_quality": 1, "blur_radius": 1.6, "glow": false, "ssao": false, "ssil": false,
+				"blur_quality": 1, "blur_radius": 1.6, "glow": false, "ssao": false, "ssil": false, "cloud_shadows": true,
 				"scale": 0.77, "grass_radius": 90.0, "grass_budget": 2200, "grass_fade_start": 40.0, "grass_fade_end": 60.0, "terrain_detail_radius": 42.0}
 		2:
 			return {"shadows": true, "shadow_distance": 110.0, "msaa": Viewport.MSAA_2X,
-				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": false, "ssil": false,
+				"blur_quality": 2, "blur_radius": 2.6, "glow": true, "ssao": false, "ssil": false, "cloud_shadows": true,
 				"scale": 1.0, "grass_radius": 116.0, "grass_budget": 3000, "grass_fade_start": 54.0, "grass_fade_end": 80.0, "terrain_detail_radius": 68.0}
 		_:
 			return {"shadows": true, "shadow_distance": 140.0, "msaa": Viewport.MSAA_4X,
-				"blur_quality": 2, "blur_radius": 3.0, "glow": true, "ssao": true, "ssil": true,
+				"blur_quality": 2, "blur_radius": 3.0, "glow": true, "ssao": true, "ssil": true, "cloud_shadows": true,
 				"scale": 1.0, "grass_radius": 140.0, "grass_budget": 4000, "grass_fade_start": 66.0, "grass_fade_end": 94.0, "terrain_detail_radius": 96.0}
 
 
