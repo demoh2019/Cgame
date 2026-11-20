@@ -330,6 +330,12 @@ func _build() -> void:
 	smoke_button.tooltip_text = "Consumes 1 crafted charge. Quiet survivors are less visible; no PvP or damage protection."
 	smoke_button.pressed.connect(func() -> void: client.use_item("smoke_charge"))
 	inventory_box.add_child(smoke_button)
+	var brace_button := Button.new()
+	brace_button.name = "PrepareSiegeBlastBrace"
+	brace_button.text = "Brace nearby owned wall (one siege blast)"
+	brace_button.tooltip_text = "T2 crafted workbench kit: absorb 55% of one charge before the raid, 3m range, 180s."
+	brace_button.pressed.connect(func() -> void: client.use_item("siege_blast_brace"))
+	inventory_box.add_child(brace_button)
 	var defusal_button := Button.new()
 	defusal_button.name = "DisarmSiegeCharge"
 	defusal_button.text = "Disarm siege charge (T2 defusal kit)"
@@ -1408,6 +1414,11 @@ func _on_event(event: Dictionary) -> void:
 				float(event.get("seconds", 4.0))])
 		"siege_charge_disarmed":
 			say("SIEGE DEFUSED! A defending survivor removed the live charge.")
+		"siege_brace_placed":
+			say("SIEGE BRACE: wall prepared for one blast (180 seconds).")
+		"siege_brace_absorbed":
+			say("SIEGE BRACE BROKE! %.0f raw blast damage absorbed." % float(
+				event.get("raw_absorbed", 0.0)))
 		"siege_charge_detonated":
 			if bool(event.get("broken", false)):
 				say("SIEGE BREACH! Enemy barricade destroyed.")
@@ -1563,6 +1574,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Storm tarp anchored: %.0fs of shelter remain; exposure reduction 90%%." % float(data.get("remaining", 0.0)))
 		else:
 			say("Tarp anchors: " + str(data.get("reason", "rejected")) + " (kit not spent)")
+		return
+	if kind == "use" and bool(data.get("siege_brace", false)):
+		if bool(data.get("ok", false)):
+			say("Siege brace fitted: 55%% of next blast absorbed for up to %ds." % int(
+				data.get("seconds", 0)))
+		else:
+			say("Siege brace: %s (no kit spent)." % str(data.get("reason", "rejected")))
 		return
 	if kind == "use" and bool(data.get("defusal", false)):
 		if bool(data.get("ok", false)):

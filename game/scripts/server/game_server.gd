@@ -63,6 +63,7 @@ const RangedCover = preload("res://scripts/shared/ranged_cover.gd")
 const BarricadeBallistics = preload("res://scripts/shared/barricade_ballistics.gd")
 const SiegeCharge = preload("res://scripts/shared/siege_charge.gd")
 const SiegeDefusal = preload("res://scripts/shared/siege_defusal.gd")
+const SiegeBlastBrace = preload("res://scripts/shared/siege_blast_brace.gd")
 const Mounts = preload("res://scripts/shared/mounts.gd")
 const BikeCargo = preload("res://scripts/shared/bike_cargo.gd")
 const TrailBackpack = preload("res://scripts/shared/trail_backpack.gd")
@@ -312,6 +313,7 @@ var caravan_escort_progress: Dictionary = {} # Session-only verified co-travel f
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {}
 var siege_charges: Dictionary = {} # Armed, paid PvP devices: transient world state only.
+var siege_braces: Dictionary = {} # Temporary one-hit barricade shields; never saved.
 var siege_last_by_wall: Dictionary = {} # Session timers only; no character persistence.
 var last_siege_time: float = -1000000.0
 var siege_waves_started: int = 0 # Server-owned structures; authenticated walls may persist.
@@ -3218,6 +3220,7 @@ func cmd_dismantle(peer_id: int, id: int) -> Dictionary:
 	barricades.erase(id)
 	_acid_wall_last_hit.erase(id)
 	siege_last_by_wall.erase(id)
+	siege_braces.erase(id)
 	world_structure_revision += 1
 	world.remove_dynamic_blocker(id)
 	player.dirty_inventory = true
@@ -3238,6 +3241,7 @@ func damage_barricade(id: int, damage: float) -> bool:
 		barricades.erase(id)
 		_acid_wall_last_hit.erase(id)
 		siege_last_by_wall.erase(id)
+		siege_braces.erase(id)
 		world.remove_dynamic_blocker(id)
 		events.append({"type": "barricade_broken", "id": id})
 		return true
@@ -3440,6 +3444,27 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			player.edge_coating_weapon = player.inventory.weapon
 			player.edge_coating_seconds = AntisepticEdge.SECONDS
 			player.action = {}
+		"siege_brace":
+			if item_id != SiegeBlastBrace.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "siege_brace": true}
+			if player.combat_tag_until > time or player.attack_timer > 0.0 or 					player.skill_timer > 0.0 or not player.action.is_empty():
+				return {"ok": false, "reason": "in_combat", "siege_brace": true}
+			var preparation: Dictionary = SiegeBlastBrace.nearest(world, player,
+				barricades, siege_braces, siege_charges, time)
+			if not bool(preparation.get("ok", false)):
+				preparation["siege_brace"] = true
+				return preparation
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "siege_brace": true}
+			var wall_id: int = int(preparation["wall"])
+			siege_braces[wall_id] = time + SiegeBlastBrace.DURATION
+			player.dirty_inventory = true
+			player.dirty_character = true
+			world_structure_revision += 1
+			events.append({"type": "siege_brace_placed",
+				"x": float(preparation["x"]), "z": float(preparation["z"])})
+			return {"ok": true, "siege_brace": true, "wall": wall_id,
+				"seconds": SiegeBlastBrace.DURATION}
 		"siege_defusal":
 			if item_id != SiegeDefusal.ITEM_ID:
 				return {"ok": false, "reason": "not_usable", "defusal": true}
@@ -5243,7 +5268,12 @@ func _tick_siege_charges() -> void:
 			continue
 		var wall_id: int = int(charge["wall"])
 		var prior_hp: float = float(barricades[wall_id]["hp"])
-		var broken: bool = damage_barricade(wall_id, SiegeCharge.DAMAGE)
+		var protection: Dictionary = SiegeBlastBrace.absorb(siege_braces,
+			wall_id, SiegeCharge.DAMAGE, time)
+		var broken: bool = damage_barricade(wall_id, float(protection["damage"]))
+		if float(protection["absorbed"]) > 0.0:
+			events.append({"type": "siege_brace_absorbed",
+				"x": x, "z": z, "raw_absorbed": float(protection["absorbed"])})
 		var hp: float = 0.0 if broken else float(barricades[wall_id]["hp"])
 		events.append({"type": "siege_charge_detonated", "id": charge_id,
 			"x": x, "z": z, "wall": wall_id, "hp": hp,
@@ -6618,6 +6648,7 @@ func _tick_world(delta: float) -> void:
 	for id in bags.keys():
 		if time >= float(bags[id]["expires"]):
 			bags.erase(id)
+	SiegeBlastBrace.sweep(siege_braces, barricades, time)
 
 
 ## Returns the events since the last call and forgets them.
@@ -6696,7 +6727,10 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var nearby_barricades: Array = []
 	for wall in barricades.values():
 		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
-			nearby_barricades.append(Structures.public_state(wall))
+			var public_wall: Dictionary = Structures.public_state(wall)
+			public_wall["blast_brace_seconds"] = maxf(0.0,
+				float(siege_braces.get(int(wall["id"]), time)) - time)
+			nearby_barricades.append(public_wall)
 	var nearby_campfires: Array = FieldCampfire.visible(campfires,
 			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_shelters: Array = PortableShelter.visible(shelters,

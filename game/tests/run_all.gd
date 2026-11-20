@@ -86,6 +86,7 @@ const SUITES := [
 	"res://tests/test_barricade_ballistics.gd",
 	"res://tests/test_siege_charge.gd",
 	"res://tests/test_siege_defusal.gd",
+	"res://tests/test_siege_blast_brace.gd",
 	"res://tests/test_suppressed_pistol.gd",
 	"res://tests/test_purifier_maul.gd",
 	"res://tests/test_antiseptic_edge.gd",
