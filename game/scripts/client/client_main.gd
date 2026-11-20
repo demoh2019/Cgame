@@ -13,6 +13,7 @@ const FieldSmoke = preload("res://scripts/shared/field_smoke.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
+const TrailRation = preload("res://scripts/shared/trail_ration.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const InfectedWounds = preload("res://scripts/shared/infected_wounds.gd")
@@ -1033,7 +1034,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not _recipes.is_empty():
 			_result("Craft", sim.cmd_craft(LOCAL_PLAYER_ID, _recipes[_recipe_index]))
 	elif event.is_action_pressed("survive_quick_cook"):
-		if Input.is_key_pressed(KEY_SHIFT):
+		if Input.is_key_pressed(KEY_ALT):
+			var smoke_recipe: String = TrailRation.best_recipe(
+				survivor.inventory, survivor.progression.crafting_level())
+			if smoke_recipe.is_empty():
+				_feedback = "Smoking: need fish, 2 matching wood, 1 fiber and skill."
+			else:
+				_result("Smoke trail fish", sim.cmd_craft(LOCAL_PLAYER_ID, smoke_recipe))
+		elif Input.is_key_pressed(KEY_SHIFT):
 			_result("Cook fish stew", sim.cmd_craft(LOCAL_PLAYER_ID, Defs.CAMP_FISH_STEW))
 		else:
 			var cook_recipe: String = QuickCooking.best_recipe(
