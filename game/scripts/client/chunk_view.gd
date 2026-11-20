@@ -380,6 +380,8 @@ func build(p_world, p_cell: Vector2i) -> void:
 	_use_village = Assets.has_village()
 	_world = p_world
 	cell = p_cell
+	# Stagger 0.5-second shadow checks across neighboring chunks to avoid update spikes.
+	_shadow_timer = float(posmod(cell.x * 37 + cell.y * 19, 50)) * 0.01
 	var origin := WorldGen.cell_origin(cell)
 	if Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
 		_build_dungeon(origin)
