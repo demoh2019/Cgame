@@ -22,6 +22,7 @@ const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
+const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const RainVfx = preload("res://scripts/client/rain_vfx.gd")
 const HandFlareVisual = preload("res://scripts/client/hand_flare_visual.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
@@ -62,6 +63,7 @@ var _sun: DirectionalLight3D
 var _world_environment: Environment
 var _atmosphere # Script-backed Atmosphere instance; custom fields are not members of Node3D.
 var _rain_vfx: Node3D
+var _ambient_motes
 var _weather_next_update: float = -1.0
 var _weather_storming := false
 var _visual_weather_wind := Vector2.ZERO
@@ -109,6 +111,10 @@ func _ready() -> void:
 	for recipe_id in recipe_ids:
 		_recipes.append(str(recipe_id))
 	_make_light_and_camera()
+	# Reuse the online mode\x27s one-draw night fireflies and sunlit pollen.
+	_ambient_motes = AmbientMotes.new()
+	_ambient_motes.setup(world)
+	add_child(_ambient_motes)
 	# The solo scene shares the same single-draw soft grounding shadows.
 	var ground_shadows := ContactShadowBatch.new()
 	ground_shadows.name = "GroundContactShadows"
@@ -794,6 +800,9 @@ func _physics_process(delta: float) -> void:
 		_last_siege_notification = sim.siege_waves_started
 		_feedback = "Night siege! Infected are approaching a nearby barricade."
 	_update_world_light(delta)
+	_ambient_motes.update_view(survivor.position, _visual_biome,
+		_atmosphere.light_level, _atmosphere.storm, _visual_weather_wind,
+		GraphicsQuality.level(), delta)
 	_lightning_visual.set_warning(sim.lightning_pending)
 	var movement := Input.get_vector("survive_left", "survive_right", "survive_up", "survive_down")
 	if movement.length_squared() > 0.001:
