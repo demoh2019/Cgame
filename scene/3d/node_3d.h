@@ -267,6 +267,11 @@ public:
 	Vector3 get_scale() const;
 
 	Vector3 get_global_position() const;
+	// Visual-only, monotonic cubic snapshot interpolation for simulated
+	// proxies. Endpoints are authoritative; no scene/physics state changes.
+	Vector3 interpolate_network_snapshot(const Vector3 &p_from, const Vector3 &p_to,
+			const Vector3 &p_from_velocity, const Vector3 &p_to_velocity,
+			real_t p_snapshot_delta, real_t p_fraction) const;
 	Basis get_global_basis() const;
 	Vector3 get_global_rotation() const;
 	Vector3 get_global_rotation_degrees() const;
