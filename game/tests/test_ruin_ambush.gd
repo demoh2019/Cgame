@@ -77,7 +77,7 @@ func run(t) -> void:
 	t.eq(RuinAmbush.available(saturated, {}), 0,
 		"active wave limit prevents chain-spawn abuse")
 	var near_limit: Dictionary = {}
-	for i in RuinAmbush.MAX_ACTIVE_INFECTED - 1:
+	for i in range(RuinAmbush.MAX_ACTIVE_INFECTED - 1):
 		near_limit[i] = true
 	t.eq(RuinAmbush.available([], near_limit), 1,
 		"only one more infected can spawn at the global cap")
