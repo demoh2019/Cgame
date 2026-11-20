@@ -1660,7 +1660,7 @@ func _build_extra_decor_entry(entry: Dictionary) -> void:
 		for k in group:
 			var around: Vector2 = at + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(0.8, 2.6) * main_scale
 			if around.x < origin.x or around.y < origin.y or around.x >= origin.x + Defs.CHUNK_SIZE or around.y >= origin.y + Defs.CHUNK_SIZE or _world.is_water(around.x, around.y):
-				return
+				continue
 			placed.append([around, main_scale * rng.randf_range(0.25, 0.6)])
 	if placed.is_empty():
 		return
