@@ -283,8 +283,43 @@ class VisualQualityPackageTests(unittest.TestCase):
             self.assertIn(token, streamer)
         self.assertLess(streamer.index('var started_usec: int = Time.get_ticks_usec()'), streamer.index('_poll_background_loads()'))
 
+    def test_streaming_planner_is_predictive_bounded_and_deterministic(self):
+        planner = (ROOT / 'addons/visual_quality/world_streaming_planner.gd').read_text()
+        for key in ('class_name WorldStreamingPlanner3D', 'predict_cell',
+                    'build_load_queue', 'required.sort_custom',
+                    'speculative.sort_custom', 'safe_keep', 'max_prefetch',
+                    'max_lead_cells', 'is_speculative', 'cell_for_position'):
+            self.assertIn(key, planner)
+        self.assertLess(planner.index('required.sort_custom'), planner.index('speculative.sort_custom'))
+
+    def test_streamer_profiles_cells_and_integrates_lookahead(self):
+        streamer = (ROOT / 'addons/visual_quality/world_streamer.gd').read_text()
+        for key in ('StreamingPlanner.build_load_queue', 'StreamingPlanner.predict_cell',
+                    'velocity_local', 'last_predicted_cell', 'total_prefetched_count',
+                    'last_prefetched_count', '_record_cell_timing',
+                    'get_cell_profile', 'get_slowest_cells',
+                    'max_profiled_cells', 'peak_spawn_us', 'is_cell_registered'):
+            self.assertIn(key, streamer)
+        self.assertLess(streamer.index('cell_loaded.emit(coord, node)'),
+                        streamer.index('_record_cell_timing(coord, true'))
+
+    def test_streaming_profiler_overlay_and_csv_connected_to_game(self):
+        inspector = (ROOT / 'addons/visual_quality/world_streaming_inspector.gd').read_text()
+        telemetry = (ROOT / 'addons/visual_quality/world_telemetry.gd').read_text()
+        demo = (ROOT / 'demo.gd').read_text()
+        for key in ('class_name WorldStreamingInspector3D', 'get_slowest_cells',
+                    'export_hotspot_csv', 'FileAccess.WRITE',
+                    'hotspot_csv_path.begins_with("user://")',
+                    'get_active_cell', 'last_predicted_cell'):
+            self.assertIn(key, inspector)
+        for key in ('hottest_cell_us', 'total_prefetched', 'profiled_cells'):
+            self.assertIn(key, telemetry)
+        for key in ('StreamingInspector.new()', 'streaming_inspector.streamer = streamer',
+                    'KEY_K', 'KEY_L', 'export_hotspot_csv()'):
+            self.assertIn(key, demo)
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd', 'test_streaming_planner.gd', 'test_streaming_cell_profiler.gd', 'test_predictive_streaming_runtime.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
