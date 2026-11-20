@@ -270,7 +270,7 @@ func eject_casing(at: Vector3, facing_yaw: float) -> bool:
 func blast(center: Vector3, radius: float, impulse: float) -> void:
 	if radius > 0.0 and impulse > 0.0 and center.is_finite() and is_inside_tree() \
 			and EngineFeatures.radial_push(self, center, radius, impulse, 0.6, LAYER | Ragdoll.LAYER,
-				BLAST_WALL_MASK, BLAST_WALL_ATTENUATION, true):
+				BLAST_WALL_MASK, BLAST_WALL_ATTENUATION, true, 2):
 		return
 	if radius > 0.0 and impulse > 0.0 and center.is_finite() and _blasts.size() < 8:
 		_blasts.append([center, radius, impulse])
