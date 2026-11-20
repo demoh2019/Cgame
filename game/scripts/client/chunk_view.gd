@@ -186,6 +186,9 @@ var _grass_source
 var _grass_next_tile := 0
 var _grass_tiles: Array[MultiMeshInstance3D] = []
 var _grass_lod_elapsed := 0.0
+var _grass_last_eye := Vector2.ZERO
+var _grass_last_scale := -1.0
+var _grass_last_tile_count := -1
 const GRASS_LOD_INTERVAL := 0.35 # Update a few times a second, not every render frame.
 var _shadow_casters: Array[Dictionary] = [] # Instanced geometry with true bounds and visual role.
 var _shadow_timer := 0.0
@@ -989,6 +992,12 @@ func _update_grass_lods() -> void:
 	# detail only up to 15% beyond the active grass fade-range budget.
 	var screen_scale: float = minf(1.15, GrassField.screen_lod_scale(screen_height, vertical_fov))
 	var range_scale: float = maxf(grass_fade_end / GrassField.FADE_END, 0.1) * screen_scale
+	if not GrassField.needs_lod_refresh(_grass_last_eye, _grass_last_scale,
+			_grass_last_tile_count, camera_xz, range_scale, _grass_tiles.size()):
+		return
+	_grass_last_eye = camera_xz
+	_grass_last_scale = range_scale
+	_grass_last_tile_count = _grass_tiles.size()
 	for tile in _grass_tiles:
 		var tile_center: Vector3 = to_global(tile.custom_aabb.position + tile.custom_aabb.size * 0.5)
 		var distance: float = camera_xz.distance_to(Vector2(tile_center.x, tile_center.z))
