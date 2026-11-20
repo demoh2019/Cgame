@@ -174,6 +174,43 @@ class StreamedTerrainContracts(TestCase):
         self.assertIn("HLODTestManager", smoke)
         self.assertNotIn("StaticBody3D.new()", manager)
 
+    def test_distant_canopy_placement_contract(self) -> None:
+        """Keep far/near deterministic forest generation locked together."""
+        near = (ROOT / "scripts/streamed_forest_cell.gd").read_text(encoding="utf-8")
+        far = (ROOT / "scripts/distant_forest_canopies.gd").read_text(encoding="utf-8")
+        shared = (ROOT / "scripts/forest_shared_assets.gd").read_text(encoding="utf-8")
+        manager = (ROOT / "scripts/distant_terrain_hlod.gd").read_text(encoding="utf-8")
+        smoke = (ROOT / "tests/smoke_distant_hlod.gd").read_text(encoding="utf-8")
+
+        for literal in (
+            "TREE_COUNT: int = 54",
+            "rng.randf_range(1.0, CELL_SIZE - 1.0)",
+            "Vector2(wx, wz - 9.0).length() < 8.0",
+            "rng.randf_range(0.70, 1.5)",
+            "Basis(Vector3.UP, rng.randf_range(-PI, PI))",
+            "scale * 4.15",
+            "scale * 2.0, scale * 1.75, scale * 2.0",
+        ):
+            self.assertIn(literal, near)
+            self.assertIn(literal, far)
+
+        self.assertIn("rng.seed = 913481 + cell_x * 73856093 + cell_z * 19349663", near)
+        self.assertIn("rng.seed = 913481 + cell.x * 73856093 + cell.y * 19349663", far)
+        self.assertIn("Color(rng.randf(), rng.randf(), rng.randf(), 1.0)", near)
+        self.assertIn("var r: float = rng.randf()", far)
+        self.assertIn("var g: float = rng.randf()", far)
+        self.assertIn("var b: float = rng.randf()", far)
+        self.assertIn("batch.use_colors = true", far)
+        self.assertIn("batch.instance_count = transforms.size()", far)
+        self.assertIn("batch.mesh = SharedAssets.distant_tree_canopy()", far)
+        self.assertIn("radial_segments = 5", shared)
+        self.assertIn("rings = 2", shared)
+        self.assertIn("proxy.add_child(canopies)", manager)
+        self.assertIn("visible_canopies", manager)
+        self.assertIn("low.is_equal_approx(high)", smoke)
+        self.assertNotIn("StaticBody3D.new()", far)
+        self.assertNotIn("CollisionShape3D.new()", far)
+
     def test_native_directional_prefetch_contract(self) -> None:
         """Spot-check the native engine integration as well as the GDScript client."""
         repository = ROOT.parents[1]
