@@ -1,4 +1,6 @@
 extends RefCounted
+
+const CinematicFog = preload("res://scripts/client/cinematic_fog.gd")
 ## Renderer-aware lighting budgets for Albion After.
 ## The same presets drive the online world and local playable preview.
 ## No gameplay state, world seed, server packets or character saves are affected.
@@ -8,7 +10,7 @@ extends RefCounted
 ## more draw work; reserve it for Ultra and stay at two splits on High.
 static func settings(level: int, rendering_method: String) -> Dictionary:
 	var tier: int = clampi(level, 0, 3)
-	var forward_plus: bool = rendering_method == "forward_plus"
+	var fog: Dictionary = CinematicFog.profile(tier, rendering_method)
 	var cascades: int = 0 if tier == 0 else (4 if tier == 3 else 2)
 	return {
 		"shadow_cascades": cascades,
@@ -17,10 +19,10 @@ static func settings(level: int, rendering_method: String) -> Dictionary:
 		"shadow_split_2": 0.29,
 		"shadow_split_3": 0.54,
 		"shadow_blur": 1.0 if tier <= 1 else (1.1 if tier == 2 else 1.25),
-		"volumetric_fog": forward_plus and tier == 3,
-		"volumetric_fog_length": 78.0,
-		"volumetric_fog_density": 0.014,
-		"volumetric_fog_anisotropy": 0.42,
+		"volumetric_fog": bool(fog["enabled"]),
+		"volumetric_fog_length": float(fog["length"]),
+		"volumetric_fog_density": float(fog["base_density"]),
+		"volumetric_fog_anisotropy": 0.38,
 	}
 
 
@@ -41,10 +43,7 @@ static func apply(sun: DirectionalLight3D, environment: Environment,
 		sun.directional_shadow_split_2 = float(profile["shadow_split_2"])
 		sun.directional_shadow_split_3 = float(profile["shadow_split_3"])
 		sun.shadow_blur = float(profile["shadow_blur"])
-	if environment != null:
-		environment.volumetric_fog_enabled = bool(profile["volumetric_fog"])
-		if bool(profile["volumetric_fog"]):
-			environment.volumetric_fog_length = float(profile["volumetric_fog_length"])
-			environment.volumetric_fog_density = float(profile["volumetric_fog_density"])
-			environment.volumetric_fog_anisotropy = float(profile["volumetric_fog_anisotropy"])
-			environment.volumetric_fog_albedo = Color(0.79, 0.84, 0.93)
+	# The same atmospheric model is used by this quality selector and by
+	# the day/night weather rig. No second, conflicting fog controller.
+	CinematicFog.apply_profile(environment, sun,
+		CinematicFog.profile(level, rendering_method))
