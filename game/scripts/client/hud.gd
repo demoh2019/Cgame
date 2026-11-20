@@ -810,6 +810,12 @@ func _on_event(event: Dictionary) -> void:
 		"infection":
 			if event.get("peer", -1) == client.peer_id:
 				say("Infected wound: severity %d. Use antiseptic or antibiotics." % int(event.get("severity", 0)))
+		"spore_enter":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("SPORE SWAMP: airborne infection! Wear a sealed expedition suit or leave.")
+		"spore_exit":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Clean air: escaped the infected spores.")
 		"bleeding":
 			if event.get("peer", -1) == client.peer_id:
 				say("Bleeding wound: %d/100. Use a bandage or antiseptic." % int(event.get("severity", 0)))
@@ -1142,6 +1148,11 @@ func _process(_delta: float) -> void:
 		_info_label.text += " | Historic clan siege wins: %d" % int(client.you.get("guild_siege_wins", 0))
 	if bool(client.you.get("warden_ward", false)):
 		_info_label.text += "\nWARDEN'S WARD: -15% infected wounds (nearby relic ally)"
+	var spore_state: Dictionary = client.you.get("spore", {})
+	if bool(spore_state.get("active", false)):
+		_info_label.text += "\nSPORE SWAMP: +%.2f infection/s | Suit filter %d%%" % [
+			float(spore_state.get("rate", 0.0)),
+			int(round(100.0 * float(spore_state.get("protection", 0.0))))]
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
 		round(100.0 * float(client.you.get("weather_insulation", 0.0))))
 	var visual: float = float(client.you.get("visual_signature", 1.0))

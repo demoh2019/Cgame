@@ -50,6 +50,7 @@ const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const SporeHazard = preload("res://scripts/shared/spore_hazard.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const FieldScentMask = preload("res://scripts/shared/field_scent_mask.gd")
 const Camouflage = preload("res://scripts/shared/camouflage.gd")
@@ -149,6 +150,7 @@ class Player:
 	var arena_wins: int = 0
 	var arena_losses: int = 0
 	var zone_notice: int = -1
+	var spore_exposed: bool = false # Session-only enter/exit warning state.
 	var dirty_inventory: bool = true
 	var dirty_stash: bool = true
 	var user_id: String = "" # Nakama account, empty in offline mode.
@@ -510,6 +512,7 @@ func _spawn_player(player: Player) -> void:
 	player.position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
 	_apply_skill_bonuses(player)
 	player.survival.reset()
+	player.spore_exposed = false
 	player.defense_target = -1
 	player.defense_until = 0.0
 	var kept_gear: bool = player.keep_inventory_on_respawn
@@ -2957,6 +2960,15 @@ func _tick_players(delta: float) -> void:
 		if FieldCampfire.has_warmth(campfires, player.position, time):
 			weather_severity = 0.0
 		damage += player.survival.weather_tick(delta, weather_severity)
+		# Only the server knows the terrain, time and actually carried sealed suit.
+		var spores: Dictionary = SporeHazard.status(world, player.position, time, worn_armor)
+		var in_spores: bool = bool(spores["active"])
+		if in_spores != player.spore_exposed:
+			player.spore_exposed = in_spores
+			events.append({"type": "spore_enter" if in_spores else "spore_exit",
+				"peer": player.id, "rate": float(spores["rate"])})
+		if in_spores and player.survival.add_infection(float(spores["rate"]) * maxf(0.0, delta)):
+			player.dirty_character = true
 		if player.survival.exposure > 0.0 or player.survival.warmth_seconds > 0.0:
 			player.dirty_character = true
 		if player.survival.infection > 0.0 or had_bleeding or had_fracture or damage > 0.0:
@@ -3776,6 +3788,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
+			"spore": SporeHazard.status(world, player.position, time,
+				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else ""),
 			"weather_insulation": Weather.protection(
 				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else ""),
 			"lake_drink_cooldown": player.lake_drink_cooldown,

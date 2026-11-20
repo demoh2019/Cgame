@@ -222,6 +222,16 @@ static func _build_items() -> void:
 			_add_recipe(storm_id, storm_id, 1,
 				{"cloth_%d" % t: 6, "fiber_%d" % t: 4},
 				"workbench", 6.0 + float(t))
+			# The sealed suit trades PvP armor and warmth for environmental protection.
+			var sealed_id: String = "sealed_suit_%d" % t
+			var spore_resistance: float = 0.65 + 0.1 * float(t - 2)
+			_add_item(sealed_id, {"name": "Sealed Expedition Suit T%d" % t,
+				"kind": "armor", "tier": t, "armor": 0.04 + 0.015 * float(t - 2),
+				"spore_resistance": spore_resistance, "insulation": 0.25,
+				"weight": 4.0 + 0.4 * float(t - 2), "value": 68 * t})
+			_add_recipe(sealed_id, sealed_id, 1,
+				{"cloth_%d" % t: 5, "bar_%d" % t: 2,
+					"fiber_%d" % t: 3}, "workbench", 6.0 + float(t))
 			# Lightweight stealth clothing: weak in combat but breaks visual
 			# acquisition by idle infected. Noise and blood scent are unchanged.
 			var ghillie_id: String = "ghillie_cloak_%d" % t

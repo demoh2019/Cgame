@@ -376,6 +376,14 @@ func _draw_top_strip(you: Dictionary, view: Vector2) -> void:
 	else:
 		_icon_sun(icon_center, 20, Color(1.0, 0.82, 0.3))
 	_text(info_rect.position + Vector2(34, 18), info, 13, INK)
+	# Keep the danger readable even when the detailed F3 HUD is hidden.
+	var spore_state: Dictionary = you.get("spore", {})
+	if bool(spore_state.get("active", false)):
+		var warning: String = "INFECTED SPORES  +%.2f/s   FILTER %d%%" % [
+			float(spore_state.get("rate", 0.0)),
+			int(round(100.0 * float(spore_state.get("protection", 0.0))))]
+		_text(Vector2(view.x * 0.5 - 180.0, 107.0), warning, 13,
+			Color(1.0, 0.55, 0.32), HORIZONTAL_ALIGNMENT_CENTER, 360.0)
 	var fps_text := "%d fps" % Engine.get_frames_per_second()
 	_text(Vector2(view.x * 0.5 - 40.0, 86.0), fps_text, 10, Color(1, 1, 1, 0.35), HORIZONTAL_ALIGNMENT_CENTER, 80.0)
 

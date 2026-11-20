@@ -26,6 +26,7 @@ const SUITES := [
 	"res://tests/test_scent_mask.gd",
 	"res://tests/test_camouflage.gd",
 	"res://tests/test_weather.gd",
+	"res://tests/test_spore_hazard.gd",
 	"res://tests/test_stormcoats.gd",
 	"res://tests/test_field_water.gd",
 	"res://tests/test_thermal_wrap.gd",
