@@ -35,6 +35,7 @@
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 #include "core/object/object.h"
+#include "core/os/time.h"
 #include "scene/main/node.h"
 
 #include <cstdint>
@@ -234,6 +235,15 @@ int WorldPartition3D::get_max_instances_per_frame() const {
 	return max_instances_per_frame;
 }
 
+void WorldPartition3D::set_max_instantiation_time_ms(real_t p_milliseconds) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_milliseconds) || p_milliseconds < 0.0 || p_milliseconds > 100.0, "WorldPartition3D instantiation time budget must be between 0 and 100 milliseconds.");
+	max_instantiation_time_ms = p_milliseconds;
+}
+
+real_t WorldPartition3D::get_max_instantiation_time_ms() const {
+	return max_instantiation_time_ms;
+}
+
 void WorldPartition3D::set_max_concurrent_requests(int p_count) {
 	ERR_FAIL_COND_MSG(p_count < 1 || p_count > 128, "WorldPartition3D maximum concurrent requests must be between 1 and 128.");
 	max_concurrent_requests = p_count;
@@ -411,6 +421,15 @@ void WorldPartition3D::update_streaming() {
 
 	int new_requests = max_new_requests_per_frame;
 	int instances = max_instances_per_frame;
+	int attempted_instances = 0;
+	const uint64_t start_usec = Time::get_singleton()->get_ticks_usec();
+	// The soft wall-time budget prevents a sequence of expensive scene _ready()
+	// calls from consuming a large frame. Always allow the first ready cell to
+	// instantiate, so tiny budgets cannot starve streaming entirely.
+	const auto can_instantiate = [&]() {
+		return instances > 0 && (max_instantiation_time_ms <= 0.0 || attempted_instances == 0 ||
+				(Time::get_singleton()->get_ticks_usec() - start_usec) < uint64_t(max_instantiation_time_ms * 1000.0));
+	};
 	// Visit nearer cells first and produce a deterministic order.
 	for (int radius = 0; radius <= load_radius; radius++) {
 		for (int dz = -radius; dz <= radius; dz++) {
@@ -428,24 +447,26 @@ void WorldPartition3D::update_streaming() {
 				}
 				if (pending_cells.has(cell)) {
 					const Ref<PackedScene> *scene = ready_scenes.getptr(path);
-					if (scene != nullptr && instances > 0) {
+					if (scene != nullptr && can_instantiate()) {
 						if (!_instantiate_cell(cell, *scene)) {
 							failed_cells.insert(cell);
 						}
 						pending_cells.erase(cell);
 						instances--;
+						attempted_instances++;
 					}
 					continue;
 				}
 				if (ready_scenes.has(path)) {
 					pending_cells.insert(cell, path);
 					const Ref<PackedScene> *scene = ready_scenes.getptr(path);
-					if (instances > 0 && scene != nullptr) {
+					if (scene != nullptr && can_instantiate()) {
 						if (!_instantiate_cell(cell, *scene)) {
 							failed_cells.insert(cell);
 						}
 						pending_cells.erase(cell);
 						instances--;
+						attempted_instances++;
 					}
 					continue;
 				}
@@ -538,6 +559,8 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_new_requests_per_frame"), &WorldPartition3D::get_max_new_requests_per_frame);
 	ClassDB::bind_method(D_METHOD("set_max_instances_per_frame", "count"), &WorldPartition3D::set_max_instances_per_frame);
 	ClassDB::bind_method(D_METHOD("get_max_instances_per_frame"), &WorldPartition3D::get_max_instances_per_frame);
+	ClassDB::bind_method(D_METHOD("set_max_instantiation_time_ms", "milliseconds"), &WorldPartition3D::set_max_instantiation_time_ms);
+	ClassDB::bind_method(D_METHOD("get_max_instantiation_time_ms"), &WorldPartition3D::get_max_instantiation_time_ms);
 	ClassDB::bind_method(D_METHOD("set_max_concurrent_requests", "count"), &WorldPartition3D::set_max_concurrent_requests);
 	ClassDB::bind_method(D_METHOD("get_max_concurrent_requests"), &WorldPartition3D::get_max_concurrent_requests);
 	ClassDB::bind_method(D_METHOD("set_streaming_enabled", "enabled"), &WorldPartition3D::set_streaming_enabled);
@@ -575,6 +598,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "unload_radius", PROPERTY_HINT_RANGE, "0,64,1"), "set_unload_radius", "get_unload_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_new_requests_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_new_requests_per_frame", "get_max_new_requests_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instances_per_frame", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_instances_per_frame", "get_max_instances_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_instantiation_time_ms", PROPERTY_HINT_RANGE, "0,100,0.1,suffix:ms"), "set_max_instantiation_time_ms", "get_max_instantiation_time_ms");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_requests", PROPERTY_HINT_RANGE, "1,128,1"), "set_max_concurrent_requests", "get_max_concurrent_requests");
 
 	ADD_SIGNAL(MethodInfo("cell_loaded", PropertyInfo(Variant::VECTOR2I, "cell")));
