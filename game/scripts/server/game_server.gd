@@ -51,6 +51,7 @@ const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const GearSalvage = preload("res://scripts/shared/gear_salvage.gd")
 const FieldWhetstone = preload("res://scripts/shared/field_whetstone.gd")
+const MiningWedges = preload("res://scripts/shared/mining_wedges.gd")
 const FieldArmorPlate = preload("res://scripts/shared/field_armor_plate.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
@@ -231,6 +232,7 @@ class Player:
 	var combat_energy: float = 100.0
 	var sharpened_weapon: String = "" # Prepared, owned melee weapon.
 	var sharpened_hits: int = 0 # Only confirmed ordinary infected contacts spend charges.
+	var wedge_charges: int = 0 # Three server-confirmed loud T2+ mine yields; persisted.
 	var plated_armor: String = "" # Protected armor ID, tied to carried equipped item.
 	var plated_hits: int = 0 # Three paid ordinary infected-melee mitigations.
 	var noise_radius: float = 0.0
@@ -451,6 +453,7 @@ func character_data(player: Player) -> Dictionary:
 		"meal_seconds": player.meal_seconds, "meal_tier": player.meal_tier,
 		"sharpened_weapon": player.sharpened_weapon if sharp_valid else "",
 		"sharpened_hits": player.sharpened_hits if sharp_valid else 0,
+		"wedge_charges": player.wedge_charges if MiningWedges.valid_state(player.wedge_charges) else 0,
 		"plated_armor": player.plated_armor if plate_valid else "",
 		"plated_hits": player.plated_hits if plate_valid else 0,
 	}
@@ -554,6 +557,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not FieldArmorPlate.valid_state(data.get("plated_armor", ""),
 			data.get("plated_hits", 0), parsed_bag["inventory"]):
+		return false
+	if not MiningWedges.valid_state(data.get("wedge_charges", 0)):
 		return false
 	if not (data.get("alive", true) is bool):
 		return false
@@ -676,6 +681,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.sharpened_hits = int(data.get("sharpened_hits", 0))
 	player.plated_armor = str(data.get("plated_armor", ""))
 	player.plated_hits = int(data.get("plated_hits", 0))
+	player.wedge_charges = int(data.get("wedge_charges", 0))
 	player.inventory = parsed_bag["inventory"]
 	player.stash = parsed_stash["inventory"]
 	player.kills = int(data.get("kills", 0))
@@ -784,6 +790,7 @@ func _spawn_player(player: Player) -> void:
 	player.threat_scan = {} # Death cannot preserve a scouting advantage.
 	player.sharpened_weapon = ""
 	player.sharpened_hits = 0
+	player.wedge_charges = 0
 	player.plated_armor = ""
 	player.plated_hits = 0
 	player.mounted = false
@@ -3217,6 +3224,23 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"mining_wedges":
+			if item_id != MiningWedges.ITEM_ID:
+				return {"ok": false, "reason": "not_usable", "mining_wedges": true}
+			var wedge_reason: String = MiningWedges.use_reason(
+				player.inventory, player.wedge_charges)
+			if not wedge_reason.is_empty():
+				return {"ok": false, "reason": wedge_reason, "mining_wedges": true}
+			if player.attack_timer > 0.0 or player.skill_timer > 0.0 or (
+					player.combat_tag_until > time or not player.action.is_empty()):
+				return {"ok": false, "reason": "in_combat", "mining_wedges": true}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried", "mining_wedges": true}
+			player.wedge_charges = MiningWedges.CHARGES
+			player.dirty_inventory = true
+			player.dirty_character = true
+			return {"ok": true, "mining_wedges": true,
+				"charges": player.wedge_charges}
 		"tarp_anchor":
 			if item_id != StormTarpAnchors.ITEM_ID:
 				return {"ok": false, "reason": "not_usable", "tarp_anchor": true}
@@ -4895,6 +4919,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.action = {}
 	victim.sharpened_weapon = ""
 	victim.sharpened_hits = 0
+	victim.wedge_charges = 0
 	victim.plated_armor = ""
 	victim.plated_hits = 0
 	victim.ruin_survey = {} # Dead scouts cannot retain private map beacons.
@@ -5395,7 +5420,20 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 		parties, time, world)
 	var ordinary_amount: int = amount
 	amount += outpost_bonus
+	# Only the actual server-started, in-range and skill/tool-qualified mine
+	# may spend a paid wedge charge. A full bag keeps all remaining charges.
+	var wedge_authenticated: bool = int(player.action.get("node", -1)) == int(node["id"]) and (
+		player.position.is_finite() and _distance_xz(player.position, node) <= Defs.REACH + 0.5 and
+		player.progression.can_gather(String(node["kind"]), int(node["tier"])) and
+		Defs.tier_of(player.inventory.best_tool("pickaxe")) >= int(node["tier"]))
+	var wedge_bonus: int = MiningWedges.bonus(String(node["kind"]), int(node["tier"]),
+		player.wedge_charges, player.inventory.free_space_for(item_id), amount,
+		wedge_authenticated)
+	amount += wedge_bonus
 	var left: int = player.inventory.add(item_id, amount)
+	var wedge_spent: bool = wedge_bonus > 0 and left == 0
+	if wedge_spent:
+		player.wedge_charges -= 1
 	# One optional medicinal plant per actual successful bush/berry harvest.
 	# The server reads biome and risk from the generated world itself. A full
 	# bag, an invalid habitat, and exhausted nodes cannot mint extra supplies.
@@ -5417,6 +5455,8 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	# infected hearing, chase leashes, safe zones and camouflage rules apply.
 	var harvest_noise: float = GatheringNoise.radius(String(node["kind"]),
 		player.crouching, amount - left)
+	harvest_noise = MiningWedges.harvest_noise(harvest_noise,
+		wedge_bonus if wedge_spent else 0)
 	if harvest_noise > 0.0:
 		player.noise_radius = maxf(player.noise_radius, harvest_noise)
 		player.noise_timer = maxf(player.noise_timer, GatheringNoise.SOUND_SECONDS)
@@ -5427,7 +5467,8 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	events.append({"type": "gathered", "peer": player.id, "item": item_id,
 		"amount": amount - left, "node": node["id"],
 		"herbs": herbs_added, "harvest_noise": harvest_noise,
-		"outpost_bonus": paid_outpost_bonus})
+		"outpost_bonus": paid_outpost_bonus,
+		"wedge_bonus": wedge_bonus if wedge_spent else 0})
 
 
 ## Rare dangerous-zone group boss. One live boss per simulation and a 10-minute
@@ -6577,6 +6618,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"sharpened_hits": player.sharpened_hits if FieldWhetstone.valid_state(
 				player.sharpened_weapon, player.sharpened_hits, player.inventory) else 0,
+			"mining_wedge_charges": player.wedge_charges if MiningWedges.valid_state(player.wedge_charges) else 0,
 			"plated_hits": player.plated_hits if FieldArmorPlate.valid_state(
 				player.plated_armor, player.plated_hits, player.inventory) else 0,
 			"guardian_cooldown": player.guardian_timer,
