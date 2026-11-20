@@ -212,7 +212,7 @@ class Player:
 	var daily_bounty: Dictionary = {} # Account-persisted UTC daily bounty, never set by clients.
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var discovered_sites: Dictionary = {} # Personal authenticated landmark journal.
-	var threat_scan: Dictionary = {} # Session-only, paid private tracking of one infected.
+	var threat_scan: Dictionary = {} # Paid, session-only tracking; optional roster-bound party intel.
 	var prospect_mark: Dictionary = {} # One paid, session-only resource waypoint.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var rested_xp_credit: int = 0 # Paid rest creates a capped, persistent training XP reserve.
@@ -3367,35 +3367,6 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
-		"water_pouch":
-			if item_id != "empty_water_pouch":
-				return {"ok": false, "reason": "not_usable"}
-			# Reuse the persisted lake cooldown: switching between drinking,
-			# filtered refills and pouch collection cannot bypass shore limits.
-			if player.lake_drink_cooldown > 0.0:
-				return {"ok": false, "reason": "cooldown",
-					"remaining": player.lake_drink_cooldown}
-			if player.combat_tag_until > time or player.attack_timer > 0.0 or (
-					player.skill_timer > 0.0 or not player.action.is_empty()):
-				return {"ok": false, "reason": "in_combat"}
-			if not FieldWater.can_access_lake(world, player.position):
-				return {"ok": false, "reason": "no_water"}
-			# Inventory swap is atomic, including a full bag whose last pouch
-			# frees the only possible slot for the dirty water.
-			var saved_slots: Dictionary = player.inventory.to_dict()
-			if not player.inventory.remove(item_id, 1):
-				return {"ok": false, "reason": "not_carried"}
-			if player.inventory.free_space_for("murky_water") < 1:
-				player.inventory.load_dict(saved_slots)
-				return {"ok": false, "reason": "no_space"}
-			if player.inventory.add("murky_water", 1) != 0:
-				player.inventory.load_dict(saved_slots)
-				return {"ok": false, "reason": "no_space"}
-			player.lake_drink_cooldown = FieldWater.COOLDOWN_SECONDS
-			player.dirty_inventory = true
-			player.dirty_character = true
-			return {"ok": true, "item": "murky_water", "count": 1,
-				"cooldown": player.lake_drink_cooldown}
 		"survey_signal":
 			if item_id != SurveySignal.ITEM_ID:
 				return {"ok": false, "reason": "not_usable", "survey_signal": true}
@@ -3539,8 +3510,13 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 					"threat_scan": true}
 			if not player.inventory.remove(item_id, 1):
 				return {"ok": false, "reason": "not_carried", "threat_scan": true}
+			var scan_members: Array = parties.members_of(peer_id)
+			scan_members.sort()
+			var scan_group: int = parties.group_of(peer_id) if scan_members.size() >= 2 else 0
 			player.threat_scan = {"target": int(target["target"]),
-				"expires": time + ThreatScan.MARK_SECONDS}
+				"expires": time + ThreatScan.MARK_SECONDS,
+				"group": scan_group,
+				"members": scan_members if scan_group > 0 else []}
 		"weapon_coating":
 			if item_id != AntisepticEdge.ITEM_ID:
 				return {"ok": false, "reason": "not_usable"}
@@ -3899,6 +3875,7 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 		var found: Dictionary = ThreatScan.public_mark(
 			player.threat_scan, zombies, player.position, time)
 		return {"ok": true, "threat_scan": true,
+			"party_shared": int(player.threat_scan.get("group", 0)) > 0,
 			"kind": found.get("kind", "elite"),
 			"x": float(found.get("x", 0.0)), "z": float(found.get("z", 0.0)),
 			"seconds": ThreatScan.MARK_SECONDS}
@@ -6781,6 +6758,42 @@ func drain_events() -> Array:
 
 # --- Snapshots --------------------------------------------------------------------------------------------------
 
+## Resolves paid scouting intel for the viewer. A party may relay the
+## original scout's signal only while its exact live roster is unchanged.
+## The client never supplies a target, source, position, or party membership.
+func threat_scan_for(peer_id: int) -> Dictionary:
+	var viewer: Player = players.get(peer_id)
+	if viewer == null or not _alive(viewer):
+		return {}
+	var personal: Dictionary = ThreatScan.public_mark(
+		viewer.threat_scan, zombies, viewer.position, time)
+	if not personal.is_empty():
+		return personal
+	var group_id: int = parties.group_of(peer_id)
+	if group_id <= 0:
+		return {}
+	var members: Array = parties.members_of(peer_id)
+	members.sort()
+	if members.size() < 2:
+		return {}
+	for member_id in members:
+		if int(member_id) == peer_id:
+			continue
+		var scout: Player = players.get(int(member_id))
+		if scout == null or not _alive(scout):
+			continue
+		var state: Dictionary = scout.threat_scan
+		if int(state.get("group", 0)) != group_id or state.get("members", []) != members:
+			continue
+		var shared: Dictionary = ThreatScan.public_mark(
+			state, zombies, viewer.position, time)
+		if shared.is_empty():
+			continue
+		shared["shared_by"] = scout.id
+		return shared
+	return {}
+
+
 ## What one player is allowed to know: their own full state and nearby entities.
 func snapshot_for(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
@@ -6977,8 +6990,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"ruin_survey": RuinSurvey.public_mark(player.ruin_survey, time, opened_crates),
 			"prospect_mark": ProspectingChart.public_mark(
 				player.prospect_mark, time, depleted) if _alive(player) else {},
-			"threat_scan": ThreatScan.public_mark(
-				player.threat_scan, zombies, player.position, time) if _alive(player) else {},
+			"threat_scan": threat_scan_for(peer_id),
 			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
 			"fracture": player.survival.fracture,
 			"blood_scent_radius": BloodScent.detection_radius(player.survival.bleeding,

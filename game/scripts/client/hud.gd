@@ -2427,11 +2427,12 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "use" and bool(data.get("threat_scan", false)):
 		if bool(data.get("ok", false)):
-			say("SCOUT: %s threat at X:%d Z:%d — private moving marker for %ds." % [
+			var audience := "shared with your current party" if bool(data.get("party_shared", false)) else "private"
+			say("SCOUT: %s threat at X:%d Z:%d — %s moving marker for %ds." % [
 				str(data.get("kind", "elite")).to_upper(),
 				roundi(float(data.get("x", 0.0))),
 				roundi(float(data.get("z", 0.0))),
-				int(data.get("seconds", 50))])
+				audience, int(data.get("seconds", 50))])
 		else:
 			say("Threat scanner: %s (device not spent)." % str(
 				data.get("reason", "rejected")))
