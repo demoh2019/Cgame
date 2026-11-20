@@ -43,12 +43,32 @@ This follows Godot's recommendation to split MultiMeshes by spatial proximity be
 [Unreal HLOD](https://dev.epicgames.com/documentation/unreal-engine/hierarchical-level-of-detail-in-unreal-engine) |
 [Unity LOD Groups](https://docs.unity.com/en-us/engine/6000.0/manual/analysis/graphics-performance-profiling/simplifying-distant-meshes-with-level-of-detail-lod/class-lodgroup)
 
+## Global dungeon light budget (Unity/Unreal-style local light prioritization)
+
+Each procedural dungeon room has an atmospheric warm torch, but loading many rooms at once should **not** register every torch as an active GPU light. `dungeon_light_budget.gd` is a single scene-level manager shared across all streamed chunks:
+
+- Streamed `OmniLight3D` torches enter the `aa_dungeon_torches` group **invisible**. The manager checks candidate distance every 0.13 seconds, selects the nearest lights globally, and turns only the selected ones on. Unselected or unloaded lights contribute no GPU work.
+- The light's energy fades smoothly as it approaches the visibility radius. Two low-frequency sine waves create subtle fire flicker without per-frame CPU randomization. Light distance fade is enabled as an additional GPU-side transition.
+- On **Forward+** only, High may have one dynamic-shadow torch and Ultra two; lower-quality presets and Compatibility have no local shadow maps. The main directional light and gameplay lighting remain separate.
+- No world-generation IDs, server packets, dungeon layout or hitboxes are altered. In contrast to baked lightmaps this works with the procedurally streamed world.
+
+| Profile | Active torch lights (global cap) | Range around camera | Local shadow casters |
+| --- | ---: | ---: | ---: |
+| Performance | 3 | 28 m | 0 |
+| Balanced | 6 | 44 m | 0 |
+| High | 10 | 62 m | 1 (Forward+) |
+| Ultra | 16 | 84 m | 2 (Forward+) |
+
+`test_dungeon_light_budget.gd` verifies pure nearest-light selection, limits, soft fade, and shadow budgets. Verify both **bright/dark dungeon readability** and **P95 GPU and CPU frame times** in heavily streamed underground halls before accepting the effect.
+
+Reference: [Godot 3D lights and shadows](https://docs.godotengine.org/en/stable/tutorials/3d/lights_and_shadows.html); [Unity URP Forward+ additional lights](https://docs.unity3d.com/Packages/com.unity.render-pipelines.universal@15.0/manual/rendering/forward-plus-rendering-path.html).
+
 ## Performance acceptance before shipping
 
 1. On the **same machine, same resolution, same weather and position** (settlement, dense forest, ruined city, storm), capture P50/P95/P99 frame time and peak memory, not just average FPS.
 2. Compare preset switches on Compatibility and Forward+, checking sunset sun-disc alignment, shadow stability, water, grass culling and HUD sharpness. Profile GPU and CPU separately.
 3. Verify that a low-end preset changes GPU work enough to improve **measured** latency, not merely estimated vertex counts.
 4. Ensure asset licensing before importing additional meshes/textures. The game already has graceful fallbacks for absent packs.
-5. Run `godot --headless --path game --script res://tests/run_all.gd` with the custom engine fork. The suite includes `test_graphics_quality.gd`, `test_graphics_detail.gd`, `test_object_batch_grid.gd` and `test_sky_lighting_budget.gd`.
+5. Run `godot --headless --path game --script res://tests/run_all.gd` with the custom engine fork. The suite includes `test_graphics_quality.gd`, `test_graphics_detail.gd`, `test_object_batch_grid.gd`, `test_dungeon_light_budget.gd` and `test_sky_lighting_budget.gd`.
 
 **Status:** code-level integration and source invariants are checked. GPU frame time and appearance **must be validated** with an actual build of the custom engine; do not treat profile targets as measured benchmarks.
