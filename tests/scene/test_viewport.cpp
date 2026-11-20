@@ -34,6 +34,7 @@ TEST_FORCE_LINK(test_viewport)
 
 #ifndef _3D_DISABLED
 #include "scene/3d/light_3d.h"
+#include "scene/resources/environment.h"
 #endif // _3D_DISABLED
 
 #include "core/object/callable_mp.h"
@@ -99,6 +100,33 @@ TEST_CASE("[SceneTree][Light3D] contact shadow filtering is finite and stable") 
 	CHECK(light.get_param(Light3D::PARAM_CONTACT_SHADOW_BLUR) == 0.0);
 	light.set_param(Light3D::PARAM_CONTACT_SHADOW_BLUR, 11.0);
 	CHECK(light.get_param(Light3D::PARAM_CONTACT_SHADOW_BLUR) == 10.0);
+}
+
+TEST_CASE("[SceneTree][Environment] atomic SSIL tier switching") {
+	Ref<Environment> environment;
+	environment.instantiate();
+	CHECK_FALSE(environment->is_ssil_enabled());
+
+	environment->configure_ssil(true, 2.0f, 0.38f, 0.96f, 1.0f);
+	CHECK(environment->is_ssil_enabled());
+	CHECK(environment->get_ssil_radius() == 2.0f);
+	CHECK(environment->get_ssil_intensity() == 0.38f);
+	CHECK(environment->get_ssil_sharpness() == 0.96f);
+	CHECK(environment->get_ssil_normal_rejection() == 1.0f);
+
+	// Reapplying an automatic quality tier must not alter the GI budget.
+	environment->configure_ssil(true, 2.0f, 0.38f, 0.96f, 1.0f);
+	CHECK(environment->is_ssil_enabled());
+	CHECK(environment->get_ssil_radius() == 2.0f);
+
+	// The High-to-Ultra transition releases screen-space bounce before
+	// the distance-field GI path takes over.
+	environment->configure_ssil(false, 2.0f, 0.38f, 0.96f, 1.0f);
+	CHECK_FALSE(environment->is_ssil_enabled());
+	environment->configure_ssil(true, 1.0f, 0.25f, 0.94f, 1.0f);
+	CHECK(environment->is_ssil_enabled());
+	CHECK(environment->get_ssil_radius() == 1.0f);
+	CHECK(environment->get_ssil_intensity() == 0.25f);
 }
 
 #endif // _3D_DISABLED
