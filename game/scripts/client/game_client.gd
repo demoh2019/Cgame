@@ -474,6 +474,11 @@ func skill(direction: Vector2) -> void:
 	net.c_skill.rpc_id(1, direction.x, direction.y)
 
 
+func stagger_finisher() -> void:
+	# Server picks the real stunned target; clients send no target ID.
+	net.c_stagger_finisher.rpc_id(1)
+
+
 func guardian_taunt() -> void:
 	# The server selects all targets; the client sends no enemy IDs.
 	net.c_guardian_taunt.rpc_id(1)

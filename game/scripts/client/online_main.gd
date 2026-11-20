@@ -753,10 +753,13 @@ func _unhandled_input(event: InputEvent) -> void:
 					client.use_item("smoke_charge")
 			KEY_G:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
-					var skill_direction: Vector2 = _aim_direction()
-					if skill_direction == Vector2.ZERO:
-						skill_direction = Vector2(sin(client.yaw), cos(client.yaw))
-					client.skill(skill_direction)
+					if Input.is_key_pressed(KEY_SHIFT):
+						client.stagger_finisher()
+					else:
+						var skill_direction: Vector2 = _aim_direction()
+						if skill_direction == Vector2.ZERO:
+							skill_direction = Vector2(sin(client.yaw), cos(client.yaw))
+						client.skill(skill_direction)
 			KEY_SPACE:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					# Move-direction dodge, or current aim/facing when stationary.
