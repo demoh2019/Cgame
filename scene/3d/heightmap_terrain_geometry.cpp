@@ -106,6 +106,68 @@ int lod_stride(int p_lod, int p_quads) {
 	return MAX(stride, 1);
 }
 
+
+real_t chunk_lod_max_error(const HeightField &p_field, int p_x0, int p_z0, int p_quads, int p_stride) {
+	if (!p_field.is_valid() || p_quads < 1 || p_stride <= 1 ||
+			(p_quads % p_stride) != 0 || p_x0 < 0 || p_z0 < 0 ||
+			p_x0 >= p_field.width - 1 || p_z0 >= p_field.depth - 1) {
+		return 0.0;
+	}
+	const int end_x = MIN(p_x0 + p_quads, p_field.width - 1);
+	const int end_z = MIN(p_z0 + p_quads, p_field.depth - 1);
+	real_t maximum_error = 0.0;
+	for (int z = p_z0; z <= end_z; z++) {
+		const int coarse_z = p_z0 + ((z - p_z0) / p_stride) * p_stride;
+		const int next_z = MIN(coarse_z + p_stride, end_z);
+		const real_t fz = next_z > coarse_z ? real_t(z - coarse_z) / real_t(next_z - coarse_z) : real_t(0.0);
+		for (int x = p_x0; x <= end_x; x++) {
+			const int coarse_x = p_x0 + ((x - p_x0) / p_stride) * p_stride;
+			const int next_x = MIN(coarse_x + p_stride, end_x);
+			const real_t fx = next_x > coarse_x ? real_t(x - coarse_x) / real_t(next_x - coarse_x) : real_t(0.0);
+			const real_t h00 = p_field.get(coarse_x, coarse_z);
+			const real_t h10 = p_field.get(next_x, coarse_z);
+			const real_t h01 = p_field.get(coarse_x, next_z);
+			const real_t h11 = p_field.get(next_x, next_z);
+			// Match sample_height() and build_chunk(): split every quad along
+			// the diagonal connecting its (+x,0) and (0,+z) corners.
+			const real_t estimated = fx + fz <= real_t(1.0)
+					? h00 + (h10 - h00) * fx + (h01 - h00) * fz
+					: h11 + (h01 - h11) * (real_t(1.0) - fx) + (h10 - h11) * (real_t(1.0) - fz);
+			maximum_error = MAX(maximum_error, Math::abs(p_field.get(x, z) - estimated));
+		}
+	}
+	return maximum_error;
+}
+
+int select_lod_by_pixel_error(const real_t *p_errors, int p_lod_count,
+		real_t p_distance, real_t p_projection_scale, real_t p_pixel_error, int p_current) {
+	const int max_lod = CLAMP(p_lod_count - 1, 0, 7);
+	if (p_errors == nullptr || !Math::is_finite(p_distance) ||
+			!Math::is_finite(p_projection_scale) || !Math::is_finite(p_pixel_error) ||
+			p_pixel_error <= 0.0 || p_projection_scale <= 0.0) {
+		return 0;
+	}
+	const real_t factor = p_projection_scale / MAX(p_distance, real_t(1.0));
+	int chosen = 0;
+	for (int level = max_lod; level >= 1; level--) {
+		if (p_errors[level] * factor <= p_pixel_error) {
+			chosen = level;
+			break;
+		}
+	}
+	if (p_current >= 0 && p_current <= max_lod && p_current != chosen) {
+		// Keep an existing LOD inside a ten-percent hysteresis band.
+		if (chosen < p_current) {
+			if (p_errors[p_current] * factor <= p_pixel_error * real_t(1.1)) {
+				return p_current;
+			}
+		} else if (p_errors[chosen] * factor > p_pixel_error * real_t(0.9)) {
+			return p_current;
+		}
+	}
+	return chosen;
+}
+
 int select_lod(real_t p_distance, real_t p_base_distance, int p_lod_count, int p_current) {
 	const int max_lod = MAX(p_lod_count, 1) - 1;
 	if (!(p_base_distance > 0.0) || !Math::is_finite(p_distance)) {
