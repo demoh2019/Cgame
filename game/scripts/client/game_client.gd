@@ -377,6 +377,11 @@ func party_triage() -> void:
 	net.c_party_triage.rpc_id(1)
 
 
+func medic_cover() -> void:
+	# Selects no enemy or ally: server chooses the legitimate nearest guardian.
+	net.c_medic_cover.rpc_id(1)
+
+
 func party_ready_start() -> void:
 	net.c_party_ready_start.rpc_id(1)
 
