@@ -32,6 +32,11 @@ inline float coarse_sample(int p_local_x, int p_local_z, int p_origin_x, int p_o
 	const float fx = float(p_local_x % p_coarse_stride) / float(p_coarse_stride);
 	const float fz = float(p_local_z % p_coarse_stride) / float(p_coarse_stride);
 	const float h00 = p_sample(left, top);
+	// Every vertex shared with the next coarser grid already has the exact
+	// target height. Skip the three other lookups for these common vertices.
+	if (p_local_x % p_coarse_stride == 0 && p_local_z % p_coarse_stride == 0) {
+		return h00;
+	}
 	const float h10 = p_sample(left + p_coarse_stride, top);
 	const float h01 = p_sample(left, top + p_coarse_stride);
 	const float h11 = p_sample(left + p_coarse_stride, top + p_coarse_stride);

@@ -21,7 +21,8 @@ int main() {
 	// Fine-grid sample at the centre of a coarse quad interpolates the same
 	// diagonal as the new coarse mesh: no topology pop when switching.
 	const float heights[3][3] = {{0, 2, 4}, {6, 8, 10}, {12, 14, 16}};
-	auto sample = [&](int x, int z) -> float { return heights[z][x]; };
+	// The production HeightField clamps at its edges; match that contract.
+	auto sample = [&](int x, int z) -> float { return heights[std::min(z, 2)][std::min(x, 2)]; };
 	assert(std::abs(coarse_sample(1, 0, 0, 0, 2, sample) - 2.0f) < 0.0001f); // h10=4 -> 2
 	assert(std::abs(coarse_sample(1, 1, 0, 0, 2, sample) - 8.0f) < 0.0001f);
 	assert(std::abs(coarse_sample(2, 2, 0, 0, 2, sample) - 16.0f) < 0.0001f);
