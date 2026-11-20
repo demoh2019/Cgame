@@ -171,24 +171,30 @@ void cells_in_radius(const Vector3 &p_position, real_t p_radius, real_t p_cell_s
 void prioritize_cells_for_motion(LocalVector<Vector3i> &r_cells, const Vector3 &p_focus,
 		const Vector3 &p_velocity, real_t p_lookahead_seconds, real_t p_max_prediction,
 		real_t p_cell_size, Axes p_axes) {
-	if (r_cells.size() < 2 || !p_focus.is_finite() || !p_velocity.is_finite() ||
-			!Math::is_finite(p_lookahead_seconds) || !(p_lookahead_seconds > 0.0) ||
-			!Math::is_finite(p_max_prediction) || !(p_max_prediction > 0.0) ||
+	// Always restore nearest-first ordering when motion prediction stops.
+	// A queued chunk may have been prioritized during a previous bike ride;
+	// simply returning on zero velocity would leave that stale order in place.
+	if (r_cells.size() < 2 || !p_focus.is_finite() ||
 			!Math::is_finite(p_cell_size) || !(p_cell_size > 0.0)) {
 		return;
 	}
-	Vector3 prediction = p_velocity * MIN(p_lookahead_seconds, real_t(4.0));
-	if (p_axes == AXES_XZ) {
-		prediction.y = 0.0;
-	} else if (p_axes == AXES_XY) {
-		prediction.z = 0.0;
-	}
-	if (!prediction.is_finite() || prediction.length_squared() < real_t(0.01)) {
-		return;
-	}
-	const real_t ahead = MIN(p_max_prediction, p_cell_size);
-	if (prediction.length_squared() > ahead * ahead) {
-		prediction = prediction.normalized() * ahead;
+	Vector3 prediction;
+	if (p_velocity.is_finite() && Math::is_finite(p_lookahead_seconds) && p_lookahead_seconds > 0.0 &&
+			Math::is_finite(p_max_prediction) && p_max_prediction > 0.0) {
+		prediction = p_velocity * MIN(p_lookahead_seconds, real_t(4.0));
+		if (p_axes == AXES_XZ) {
+			prediction.y = 0.0;
+		} else if (p_axes == AXES_XY) {
+			prediction.z = 0.0;
+		}
+		if (!prediction.is_finite() || prediction.length_squared() < real_t(0.01)) {
+			prediction = Vector3();
+		} else {
+			const real_t ahead = MIN(p_max_prediction, p_cell_size);
+			if (prediction.length_squared() > ahead * ahead) {
+				prediction = prediction.normalized() * ahead;
+			}
+		}
 	}
 	const Vector3 future = p_focus + prediction;
 	if (!future.is_finite()) {
