@@ -2,6 +2,7 @@ extends RefCounted
 ## Deterministic grade for renderer-independent tests.
 
 const FilmGrade = preload("res://scripts/client/graphics_color_grade.gd")
+const GraphicsTonemapping = preload("res://scripts/client/graphics_tonemapping.gd")
 
 
 func run(t) -> void:
@@ -69,3 +70,53 @@ func run(t) -> void:
 			"live scene applies palette through its existing material")
 		t.check(game.source_code.contains("_grade_elapsed >= 0.20"),
 			"grade uniforms update at a bounded rate")
+
+
+	t.current = "native engine AgX cinematic lighting integration"
+	var filmic: Script = GraphicsTonemapping
+	t.check(filmic != null, "tonemap selector script is available")
+	if filmic != null:
+		var fast: Dictionary = GraphicsTonemapping.settings(0, "forward_plus")
+		var mid: Dictionary = GraphicsTonemapping.settings(1, "forward_plus")
+		var high: Dictionary = GraphicsTonemapping.settings(2, "forward_plus")
+		var ultra: Dictionary = GraphicsTonemapping.settings(3, "forward_plus")
+		t.eq(int(fast["mode"]), Environment.TONE_MAPPER_ACES,
+			"Performance preserves established ACES baseline")
+		t.eq(int(mid["mode"]), Environment.TONE_MAPPER_ACES,
+			"Balanced avoids AgX curve overhead")
+		t.eq(int(high["mode"]), Environment.TONE_MAPPER_AGX,
+			"Forward+ High uses the engine-native highlight rolloff")
+		t.eq(int(ultra["mode"]), Environment.TONE_MAPPER_AGX,
+			"Forward+ Ultra uses the full AgX output transform")
+		t.check(float(high["agx_white"]) < float(ultra["agx_white"]),
+			"Ultra retains a wider unclipped cinematic highlight range")
+		t.check(float(high["agx_contrast"]) <= float(ultra["agx_contrast"]),
+			"higher tier adds gentle midtone contrast without more GPU passes")
+		for method in ["gl_compatibility", "mobile", ""]:
+			for tier in 4:
+				t.eq(int(GraphicsTonemapping.settings(tier, method)["mode"]),
+					Environment.TONE_MAPPER_ACES,
+					"non-Forward+ renderer keeps the compatible filmic mode")
+		t.eq(GraphicsTonemapping.settings(-4, "forward_plus"),
+			GraphicsTonemapping.settings(0, "forward_plus"),
+			"negative quality clamps to Performance")
+		t.eq(GraphicsTonemapping.settings(44, "forward_plus"),
+			GraphicsTonemapping.settings(3, "forward_plus"),
+			"oversized quality clamps to Ultra")
+		var env := Environment.new()
+		GraphicsTonemapping.apply(env, 3, "forward_plus")
+		t.eq(env.tonemap_mode, Environment.TONE_MAPPER_AGX,
+			"the real renderer Environment is switched to AgX")
+		t.near(env.tonemap_agx_white, 16.29, 0.001,
+			"native AgX uses the Ultra cinematic shoulder")
+		t.near(env.tonemap_agx_contrast, 1.26, 0.001,
+			"native AgX contrast is applied")
+		GraphicsTonemapping.apply(env, 1, "gl_compatibility")
+		t.eq(env.tonemap_mode, Environment.TONE_MAPPER_ACES,
+			"renderer fallback restores ACES without shader recompilation")
+		t.near(env.tonemap_white, 6.0, 0.001,
+			"ACES restoration preserves the game's existing white point")
+		GraphicsTonemapping.apply(null, 2, "forward_plus")
+		t.check((load("res://scripts/client/graphics_quality.gd") as Script).source_code.contains(
+			"GraphicsTonemapping.apply(env, _level, str(method))"),
+			"online and offline quality changes both use the tone mapper")

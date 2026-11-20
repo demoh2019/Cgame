@@ -32,6 +32,7 @@
 
 #include "core/config/engine.h"
 #include "core/config/project_settings.h"
+#include "core/math/math_funcs.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
@@ -205,6 +206,9 @@ void Environment::_update_ambient_light() {
 // Tonemap
 
 void Environment::set_tonemapper(ToneMapper p_tone_mapper) {
+	if (tone_mapper == p_tone_mapper) {
+		return; // The same look must not invalidate the render state.
+	}
 	tone_mapper = p_tone_mapper;
 	_update_tonemap();
 	notify_property_list_changed();
@@ -215,6 +219,11 @@ Environment::ToneMapper Environment::get_tonemapper() const {
 }
 
 void Environment::set_tonemap_exposure(float p_exposure) {
+	// Gameplay-driven sunlight and weather can update exposure frequently.
+	// Never upload a redundant value or invalid luminance multiplier to the GPU.
+	if (!Math::is_finite(p_exposure) || p_exposure < 0.0f || tonemap_exposure == p_exposure) {
+		return;
+	}
 	tonemap_exposure = p_exposure;
 	_update_tonemap();
 }
@@ -224,6 +233,9 @@ float Environment::get_tonemap_exposure() const {
 }
 
 void Environment::set_tonemap_white(float p_white) {
+	if (!Math::is_finite(p_white) || p_white <= 0.0f || tonemap_white == p_white) {
+		return;
+	}
 	tonemap_white = p_white;
 	_update_tonemap();
 }
@@ -233,8 +245,14 @@ float Environment::get_tonemap_white() const {
 }
 
 void Environment::set_tonemap_agx_white(float p_white) {
+	if (!Math::is_finite(p_white) || p_white <= 0.0f || tonemap_agx_white == p_white) {
+		return;
+	}
 	tonemap_agx_white = p_white;
-	_update_tonemap();
+	// White affects the packed tonemap parameters; update only when AgX is active.
+	if (tone_mapper == TONE_MAPPER_AGX) {
+		_update_tonemap();
+	}
 }
 
 float Environment::get_tonemap_agx_white() const {
@@ -242,6 +260,9 @@ float Environment::get_tonemap_agx_white() const {
 }
 
 void Environment::set_tonemap_agx_contrast(float p_agx_contrast) {
+	if (!Math::is_finite(p_agx_contrast) || p_agx_contrast <= 0.0f || tonemap_agx_contrast == p_agx_contrast) {
+		return;
+	}
 	tonemap_agx_contrast = p_agx_contrast;
 	RS::get_singleton()->environment_set_tonemap_agx_contrast(environment, p_agx_contrast);
 }
