@@ -25,6 +25,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
 const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
@@ -256,6 +257,11 @@ func _build_environment() -> void:
 	_lightning_visual.name = "StormLightningWarning"
 	add_child(_lightning_visual)
 	camera.current = true
+	# Only one light manager for every streamed underground room.
+	# Nearest torches glow and flicker; distant torches contribute no GPU light passes.
+	var dungeon_lights := DungeonLightBudget.new()
+	dungeon_lights.name = "DungeonLightBudget"
+	add_child(dungeon_lights)
 	if camera.has_method("set_shake_max_offset"):
 		# Trauma shake (engine feature of this fork): small offsets for a top-down view, quick decay.
 		camera.set_shake_max_offset(Vector3(0.35, 0.25, 0.35))
