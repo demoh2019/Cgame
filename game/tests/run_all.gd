@@ -188,6 +188,7 @@ const SUITES := [
 	"res://tests/test_hub_recall.gd",
 	"res://tests/test_storm_stealth.gd",
 	"res://tests/test_wind_hearing.gd",
+	"res://tests/test_infected_acoustic_cover.gd",
 	"res://tests/test_spore_hazard.gd",
 	"res://tests/test_spore_sampling.gd",
 	"res://tests/test_spore_filter.gd",
