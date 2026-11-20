@@ -17,6 +17,7 @@ var world_environment: Environment
 var hud: Label
 var hint: Label
 var world_partition: WorldPartition3D
+var distant_terrain: Node3D
 var current_region: Vector2i = Vector2i.ZERO
 var crystals: Array[Node3D] = []
 var collected_ids: Array[int] = []
@@ -37,6 +38,7 @@ func _ready() -> void:
     _create_camera()
     _create_hud()
     _create_streaming_world()
+    _create_distant_terrain()
     _load_game()
     _apply_quality(high_quality)
     _refresh_hud()
@@ -162,6 +164,17 @@ func _update_predictive_streaming() -> void:
         world_partition.prefetch_direction = direction
 
 
+func _create_distant_terrain() -> void:
+    # Lightweight distant visual proxies run alongside WorldPartition3D,
+    # without retaining distant collision shapes or procedural foliage nodes.
+    distant_terrain = Node3D.new()
+    distant_terrain.name = "DistantTerrainHLOD"
+    distant_terrain.set_script(preload("res://scripts/distant_terrain_hlod.gd"))
+    distant_terrain.set("streaming_world", world_partition)
+    distant_terrain.set("observer", player)
+    add_child(distant_terrain)
+
+
 func _on_observer_cell_changed(cell: Vector2i) -> void:
     current_region = cell
     _refresh_player_stream_safety()
@@ -258,7 +271,7 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 208)
+    hint.position = Vector2(22, 230)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
     hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор"
@@ -270,6 +283,8 @@ func _apply_quality(high: bool) -> void:
     world_environment.ssao_enabled = high
     world_environment.ssil_enabled = high
     world_environment.volumetric_fog_enabled = high
+    if distant_terrain != null:
+        distant_terrain.call("set_high_quality", high)
     if world_partition != null:
         for node in world_partition.get_children():
             if node.has_method("set_high_quality"):
@@ -294,13 +309,15 @@ func _refresh_hud() -> void:
     var inflight: int = world_partition.get_inflight_request_count() if world_partition != null else 0
     var failed: int = world_partition.get_failed_cell_count() if world_partition != null else 0
     var cache: Dictionary = TileCache.get_stats()
+    var far: Dictionary = distant_terrain.call("get_stats") if distant_terrain != null else {"allocated": 0, "visible": 0}
     var ahead: Vector2i = world_partition.prefetch_direction if world_partition != null else Vector2i.ZERO
     hud.text = "AURORA FOREST  |  Cgame / Godot 4.8\n" \
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pending, inflight, failed, current_region.x, current_region.y] \
         + "Кэш земли: %d/%d   попадания: %d   промахи: %d\n" % [cache["entries"], cache["capacity"], cache["hits"], cache["misses"]] \
-        + "Предзагрузка: X=%d Z=%d   впереди: %d ячейки" % [ahead.x, ahead.y, world_partition.prefetch_distance]
+        + "Предзагрузка: X=%d Z=%d   впереди: %d ячейки\n" % [ahead.x, ahead.y, world_partition.prefetch_distance] \
+        + "Дальний HLOD: %d видимых / %d подготовлено" % [far["visible"], far["allocated"]]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
 
