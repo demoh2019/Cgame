@@ -32,6 +32,7 @@ const FishShoals = preload("res://scripts/client/fish_shoals.gd")
 const DuskBats = preload("res://scripts/client/dusk_bats.gd")
 const BreathVapor = preload("res://scripts/client/breath_vapor.gd")
 const Tumbleweeds = preload("res://scripts/client/tumbleweeds.gd")
+const DamageNumbers = preload("res://scripts/client/damage_numbers.gd")
 const GroundMist = preload("res://scripts/client/ground_mist.gd")
 const FootprintDecals = preload("res://scripts/client/footprint_decals.gd")
 const TrailBikeVisual = preload("res://scripts/client/trail_bike_visual.gd")
@@ -117,6 +118,7 @@ var _fish_shoals
 var _dusk_bats
 var _breath
 var _tumbleweeds
+var _damage_numbers
 var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
@@ -860,6 +862,8 @@ func _spawn_effects(event: Dictionary) -> void:
 		effects.ring(_last_cast_spot + Vector3(0, 0.05, 0), Color(0.85, 0.95, 1.0), 1.4, 0.7) # The fish breaks the surface.
 	combat_vfx.handle_event(event, here, at, client.world.biome_at(at.x, at.z))
 	camera_fx.on_event(event, client.peer_id, at.distance_to(here))
+	if _damage_numbers != null:
+		_damage_numbers.on_event(event, at, client.peer_id)
 	# Hit flash on your own character too (remote ones flash from snapshot HP).
 	if str(event.get("type", "")) == "hit" and str(event.get("kind", "")) != "zombie" \
 			and int(event.get("id", -1)) == client.peer_id and avatar_model != null:
@@ -1114,6 +1118,8 @@ func _on_welcomed() -> void:
 	add_child(_dusk_bats)
 	_tumbleweeds = Tumbleweeds.new()
 	add_child(_tumbleweeds)
+	_damage_numbers = DamageNumbers.new()
+	add_child(_damage_numbers)
 	audio = Audio.new()
 	add_child(audio)
 	# Thunder has its own bounded event queue and 3D emitter so storm
