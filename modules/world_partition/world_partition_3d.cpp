@@ -70,6 +70,8 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 	cell_creation_physics_frames.erase(p_cell);
 	active_detail_levels.erase(p_cell);
 	active_simulation_cells.erase(p_cell);
+	active_physics_cells.erase(p_cell);
+	physics_enabled_frames.erase(p_cell);
 	emit_signal(SNAME("cell_unloaded"), p_cell);
 }
 
@@ -174,6 +176,16 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	active_simulation_cells.insert(p_cell, simulation_active);
 	if (instance->has_method(SNAME("set_streaming_simulation_active"))) {
 		instance->call(SNAME("set_streaming_simulation_active"), simulation_active);
+	}
+	// Initial physics state is known before _ready(): procedurally authored
+	// colliders can start filtered out without an activation flash.
+	const bool physics_active = observer_cell_valid ? _cell_physics_active(p_cell, observer_cell) : true;
+	active_physics_cells.insert(p_cell, physics_active);
+	if (physics_active) {
+		physics_enabled_frames.insert(p_cell, Engine::get_singleton()->get_physics_frames());
+	}
+	if (instance->has_method(SNAME("set_streaming_physics_active"))) {
+		instance->call(SNAME("set_streaming_physics_active"), physics_active);
 	}
 	add_child(instance);
 	active_cells.insert(p_cell, instance->get_instance_id());
@@ -326,7 +338,7 @@ int WorldPartition3D::get_distant_cell_count() const {
 int WorldPartition3D::_cell_detail_level(const Vector2i &p_cell, const Vector2i &p_center, int p_previous_level) const {
 	// Pinned gameplay locations always retain full detail. New cells have no
 	// previous state and are classified using the unexpanded inner radius.
-	if (detail_radius < 0 || pinned_cells.has(p_cell) || _within_radius(p_cell, p_center, detail_radius)) {
+	if (detail_radius < 0 || pinned_cells.has(p_cell) || _is_cell_required_by_important_source(p_cell) || _within_radius(p_cell, p_center, detail_radius)) {
 		return 0;
 	}
 	// Only an already-near cell enjoys the wider demotion threshold.
@@ -439,6 +451,139 @@ int WorldPartition3D::get_simulation_active_cell_count() const {
 		}
 	}
 	return result;
+}
+
+bool WorldPartition3D::_is_cell_required_by_important_source(const Vector2i &p_cell) const {
+	for (const KeyValue<String, StreamingSource> &E : streaming_sources) {
+		if (E.value.priority < 2) {
+			continue; // Ordinary quest preload must not awaken distant collision.
+		}
+		const Vector2i center = local_position_to_cell(to_local(E.value.global_position));
+		if (_within_radius(p_cell, center, E.value.radius)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool WorldPartition3D::_cell_physics_active(const Vector2i &p_cell, const Vector2i &p_center, bool p_previously_active) const {
+	if (physics_radius < 0 || pinned_cells.has(p_cell) || _is_cell_required_by_important_source(p_cell) || _within_radius(p_cell, p_center, physics_radius)) {
+		return true;
+	}
+	return p_previously_active && _within_radius(p_cell, p_center, physics_radius + physics_hysteresis_cells);
+}
+
+void WorldPartition3D::_refresh_cell_physics(const Vector2i &p_center) {
+	int budget = max_physics_transitions_per_frame;
+	for (const KeyValue<Vector2i, ObjectID> &E : active_cells) {
+		if (budget <= 0) {
+			break;
+		}
+		bool *previous = active_physics_cells.getptr(E.key);
+		if (previous == nullptr) {
+			continue;
+		}
+		const bool next = _cell_physics_active(E.key, p_center, *previous);
+		if (*previous == next) {
+			continue;
+		}
+		Node3D *root = Object::cast_to<Node3D>(ObjectDB::get_instance(E.value));
+		if (root == nullptr || root->is_queued_for_deletion()) {
+			continue;
+		}
+		*previous = next;
+		if (next) {
+			physics_enabled_frames.insert(E.key, Engine::get_singleton()->get_physics_frames());
+		} else {
+			physics_enabled_frames.erase(E.key);
+		}
+		if (root->has_method(SNAME("set_streaming_physics_active"))) {
+			root->call(SNAME("set_streaming_physics_active"), next);
+		}
+		emit_signal(SNAME("cell_physics_changed"), E.key, next);
+		budget--;
+	}
+}
+
+void WorldPartition3D::set_physics_radius(int p_radius) {
+	ERR_FAIL_COND_MSG(p_radius < -1 || p_radius > 32, "WorldPartition3D physics_radius must be -1 (disabled) or 0 to 32.");
+	physics_radius = p_radius;
+}
+
+int WorldPartition3D::get_physics_radius() const {
+	return physics_radius;
+}
+
+void WorldPartition3D::set_physics_hysteresis_cells(int p_cells) {
+	ERR_FAIL_COND_MSG(p_cells < 0 || p_cells > 8, "WorldPartition3D physics_hysteresis_cells must be between 0 and 8.");
+	physics_hysteresis_cells = p_cells;
+}
+
+int WorldPartition3D::get_physics_hysteresis_cells() const {
+	return physics_hysteresis_cells;
+}
+
+void WorldPartition3D::set_max_physics_transitions_per_frame(int p_count) {
+	ERR_FAIL_COND_MSG(p_count < 1 || p_count > 64, "WorldPartition3D physics transition budget must be between 1 and 64.");
+	max_physics_transitions_per_frame = p_count;
+}
+
+int WorldPartition3D::get_max_physics_transitions_per_frame() const {
+	return max_physics_transitions_per_frame;
+}
+
+bool WorldPartition3D::is_cell_physics_active(const Vector2i &p_cell) const {
+	const bool *active = active_physics_cells.getptr(p_cell);
+	return active != nullptr && *active && get_cell_instance(p_cell) != nullptr;
+}
+
+int WorldPartition3D::get_physics_active_cell_count() const {
+	int result = 0;
+	for (const KeyValue<Vector2i, bool> &E : active_physics_cells) {
+		if (E.value && get_cell_instance(E.key) != nullptr) {
+			result++;
+		}
+	}
+	return result;
+}
+
+bool WorldPartition3D::is_cell_physics_ready(const Vector2i &p_cell) const {
+	if (!is_cell_physics_active(p_cell)) {
+		return false;
+	}
+	const uint64_t *enabled_frame = physics_enabled_frames.getptr(p_cell);
+	if (enabled_frame == nullptr || Engine::get_singleton()->get_physics_frames() <= *enabled_frame) {
+		return false; // At least one completed physics step since enabling.
+	}
+	Node3D *root = get_cell_instance(p_cell);
+	if (root == nullptr) {
+		return false;
+	}
+	if (root->has_method(SNAME("is_streaming_physics_ready"))) {
+		const Variant result = root->call(SNAME("is_streaming_physics_ready"));
+		return result.get_type() == Variant::BOOL && bool(result);
+	}
+	return true;
+}
+
+bool WorldPartition3D::is_streaming_source_physics_ready(const String &p_name) const {
+	if (!is_streaming_source_ready(p_name)) {
+		return false;
+	}
+	const StreamingSource *source = streaming_sources.getptr(p_name);
+	if (source == nullptr) {
+		return false;
+	}
+	const Vector2i center = local_position_to_cell(to_local(source->global_position));
+	for (int dz = -source->radius; dz <= source->radius; dz++) {
+		for (int dx = -source->radius; dx <= source->radius; dx++) {
+			const Vector2i cell = center + Vector2i(dx, dz);
+			if (!_get_scene_path(cell).is_empty() && !is_cell_physics_ready(cell)) {
+				return false;
+			}
+		}
+	}
+	return true;
 }
 
 void WorldPartition3D::set_observer_path(const NodePath &p_path) {
@@ -953,6 +1098,7 @@ void WorldPartition3D::update_streaming() {
 	}
 	_refresh_cell_detail(center);
 	_refresh_cell_simulation(center);
+	_refresh_cell_physics(center);
 	_purge_unused_ready_scenes();
 	if (observer_cell_changed) {
 		emit_signal(SNAME("observer_cell_changed"), observer_cell);
@@ -1059,6 +1205,16 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_simulation_transitions_per_frame"), &WorldPartition3D::get_max_simulation_transitions_per_frame);
 	ClassDB::bind_method(D_METHOD("is_cell_simulation_active", "cell"), &WorldPartition3D::is_cell_simulation_active);
 	ClassDB::bind_method(D_METHOD("get_simulation_active_cell_count"), &WorldPartition3D::get_simulation_active_cell_count);
+	ClassDB::bind_method(D_METHOD("set_physics_radius", "radius"), &WorldPartition3D::set_physics_radius);
+	ClassDB::bind_method(D_METHOD("get_physics_radius"), &WorldPartition3D::get_physics_radius);
+	ClassDB::bind_method(D_METHOD("set_physics_hysteresis_cells", "cells"), &WorldPartition3D::set_physics_hysteresis_cells);
+	ClassDB::bind_method(D_METHOD("get_physics_hysteresis_cells"), &WorldPartition3D::get_physics_hysteresis_cells);
+	ClassDB::bind_method(D_METHOD("set_max_physics_transitions_per_frame", "count"), &WorldPartition3D::set_max_physics_transitions_per_frame);
+	ClassDB::bind_method(D_METHOD("get_max_physics_transitions_per_frame"), &WorldPartition3D::get_max_physics_transitions_per_frame);
+	ClassDB::bind_method(D_METHOD("is_cell_physics_active", "cell"), &WorldPartition3D::is_cell_physics_active);
+	ClassDB::bind_method(D_METHOD("get_physics_active_cell_count"), &WorldPartition3D::get_physics_active_cell_count);
+	ClassDB::bind_method(D_METHOD("is_cell_physics_ready", "cell"), &WorldPartition3D::is_cell_physics_ready);
+	ClassDB::bind_method(D_METHOD("is_streaming_source_physics_ready", "name"), &WorldPartition3D::is_streaming_source_physics_ready);
 	ClassDB::bind_method(D_METHOD("set_observer_path", "path"), &WorldPartition3D::set_observer_path);
 	ClassDB::bind_method(D_METHOD("get_observer_path"), &WorldPartition3D::get_observer_path);
 	ClassDB::bind_method(D_METHOD("set_predictive_velocity", "velocity"), &WorldPartition3D::set_predictive_velocity);
@@ -1136,6 +1292,10 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "simulation_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_simulation_radius", "get_simulation_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "simulation_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_simulation_hysteresis_cells", "get_simulation_hysteresis_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_simulation_transitions_per_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_simulation_transitions_per_frame", "get_max_simulation_transitions_per_frame");
+	ADD_GROUP("Cell Physics", "");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "physics_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_physics_radius", "get_physics_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "physics_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_physics_hysteresis_cells", "get_physics_hysteresis_cells");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_physics_transitions_per_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_physics_transitions_per_frame", "get_max_physics_transitions_per_frame");
 	ADD_GROUP("Cell Activation", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "min_physics_frames_after_load", PROPERTY_HINT_RANGE, "0,8,1"), "set_min_physics_frames_after_load", "get_min_physics_frames_after_load");
 
@@ -1144,6 +1304,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("observer_cell_changed", PropertyInfo(Variant::VECTOR2I, "cell")));
 	ADD_SIGNAL(MethodInfo("cell_detail_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::INT, "detail_level")));
 	ADD_SIGNAL(MethodInfo("cell_simulation_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::BOOL, "active")));
+	ADD_SIGNAL(MethodInfo("cell_physics_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::BOOL, "active")));
 }
 
 WorldPartition3D::~WorldPartition3D() {
@@ -1158,6 +1319,8 @@ WorldPartition3D::~WorldPartition3D() {
 	cell_creation_physics_frames.clear();
 	active_detail_levels.clear();
 	active_simulation_cells.clear();
+	active_physics_cells.clear();
+	physics_enabled_frames.clear();
 	pending_cells.clear();
 	ready_scenes.clear();
 	pinned_cells.clear();

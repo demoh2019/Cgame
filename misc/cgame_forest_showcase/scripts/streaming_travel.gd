@@ -67,8 +67,10 @@ func get_status_text() -> String:
     var completed: int = streamer.get_streaming_source_loaded_cell_count(SOURCE_NAME)
     var total: int = streamer.get_streaming_source_cell_count(SOURCE_NAME)
     var activated: int = streamer.get_streaming_source_activated_cell_count(SOURCE_NAME)
-    return "Переход в %s: сцены %d/%d, активация %d/%d (%.0f%%) — F12: отмена" % [
-        destination_name, completed, total, activated, total, get_progress() * 100.0]
+    var physics_ready: bool = streamer.is_streaming_source_physics_ready(SOURCE_NAME)
+    return "Переход в %s: сцены %d/%d, активация %d/%d (%.0f%%), коллизии: %s — F12: отмена" % [
+        destination_name, completed, total, activated, total, get_progress() * 100.0,
+        "ГОТОВО" if physics_ready else "ОЖИДАНИЕ"]
 
 
 func cancel_travel() -> void:
@@ -83,7 +85,8 @@ func _process(delta: float) -> void:
         _finish(false, "Переход прерван: мир или игрок удалён")
         return
 
-    if streamer.is_streaming_source_activation_ready(SOURCE_NAME):
+    if (streamer.is_streaming_source_activation_ready(SOURCE_NAME)
+            and streamer.is_streaming_source_physics_ready(SOURCE_NAME)):
         # Revalidate the destination and player on the same frame as travel.
         # The demo terrain is one persistent collision mesh (not a streamed
         # terrain system), so this places the pawn above guaranteed ground.

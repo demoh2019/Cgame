@@ -19,6 +19,7 @@ var obstacles: StaticBody3D
 var high_quality: bool = true
 var streaming_lod: int = 0
 var streaming_simulation_active: bool = true
+var streaming_physics_active: bool = true
 var beacon_time: float = 0.0
 var cell_seed: int = 0
 var cell_x: int = 0
@@ -39,6 +40,23 @@ func set_streaming_simulation_active(active: bool) -> void:
     streaming_simulation_active = active
     if is_node_ready():
         _update_simulation_processing()
+
+
+func set_streaming_physics_active(active: bool) -> void:
+    # Called by native WorldPartition3D before _ready() and again for tier
+    # transitions. Keep authored collision shapes but remove their gameplay
+    # layer while dormant; distant foliage and trees remain visible.
+    streaming_physics_active = active
+    if is_instance_valid(obstacles):
+        obstacles.collision_layer = 1 if active else 0
+
+
+func is_streaming_physics_ready() -> bool:
+    # Remote urgent travel requires a populated near-detail scene and active
+    # obstacle body. The separate terrain heightfield is always resident.
+    return is_node_ready() and streaming_physics_active and streaming_lod == 0 \
+        and is_instance_valid(obstacles) and obstacles.collision_layer == 1 \
+        and obstacles.get_child_count() > 0
 
 
 func is_streaming_activation_ready() -> bool:
@@ -86,7 +104,7 @@ func _rebuild_lod() -> void:
     if streaming_lod == 0:
         obstacles = StaticBody3D.new()
         obstacles.name = "FoliageCollisions"
-        obstacles.collision_layer = 1
+        obstacles.collision_layer = 1 if streaming_physics_active else 0
         obstacles.collision_mask = 0
         add_child(obstacles)
 

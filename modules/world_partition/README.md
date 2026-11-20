@@ -12,6 +12,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
+- **Independent native physics streaming tier:** per-cell `physics_radius` (-1 all-loaded legacy), `physics_hysteresis_cells` (0–8) and `max_physics_transitions_per_frame` (1–64). Loaded visuals and AI simulation stay separate. An opt-in root `set_streaming_physics_active(active)` filters its authored colliders; `cell_physics_changed`, `is_cell_physics_active()`, `get_physics_active_cell_count()` expose state. Important/urgent streaming sources and pinned hubs force destination cells to full visual LOD and active physics, while background quest preload remains cheap. `is_streaming_source_physics_ready(name)` requires an additional physics tick and optional scene predicate before travel.
 - **Physics-frame scene activation fence:** every instantiated cell records its creation physics frame. `min_physics_frames_after_load` (0–8, default 2) delays an additional **activation** state. An optional root method `is_streaming_activation_ready() -> bool` can veto activation until game-specific collision/navmesh/terrain setup is complete. Query `is_cell_activation_ready(cell)`, `is_streaming_source_activation_ready(name)`, source activated-cell counts, and activation progress separately from loaded scene roots; unloading/reloading always resets the fence.
 - **Independent bounded simulation activation:** loaded cells can retain visuals but pause script/AI simulation independently of LOD. Configure `simulation_radius` (-1 disables), `simulation_hysteresis_cells` (0–8) and `max_simulation_transitions_per_frame` (1–64). The native engine tracks per-cell activation, exposes `is_cell_simulation_active()` and `get_simulation_active_cell_count()`, emits `cell_simulation_changed`, and calls an optional scene-root `set_streaming_simulation_active(active)` **before** `_ready()` for initial state.
 - **Prioritized streaming sources:** runtime names carry priorities 0–3 (background, normal, important, urgent); after player and persistent hubs the native scheduler works high to low and alphabetical within each tier, all under existing instance/new-request budgets. Fast-travel scenes can finish before background quest preloads without competing for observer priority. Update a source via `set_streaming_source_priority()`.
@@ -55,6 +56,32 @@ func _physics_process(_delta: float) -> void:
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Independent collision streaming tiers
+
+Spatial collision activity is not the same as loaded geometry, visual LOD, or AI simulation activity. The physics policy has its own bounded, optional tier:
+
+```gdscript
+world.physics_radius = 1
+world.physics_hysteresis_cells = 1
+world.max_physics_transitions_per_frame = 2
+world.cell_physics_changed.connect(_on_cell_physics_changed)
+```
+
+An opted-in cell scene root can implement `set_streaming_physics_active(active)` to set an appropriate collision layer or defer shape disabling safely. The native module sets the initial state **before** the scene's `_ready()`; it also emits `cell_physics_changed` after subsequent budgeted transitions. Pinned hubs stay physics-active. For important/urgent (priority 2/3) streaming sources, the scheduler forces active physics and full-detail LOD in destination cells **even outside the normal physics radius**. This permits the normal nearby terrain to stay responsive while distant fast travel preloads and activates its arrival colliders. Ordinary/background sources (0/1) do not force distant physics.
+
+`is_cell_physics_ready(cell)` requires a live physics-active scene plus at least one completed engine physics frame since activation. A root may further implement `is_streaming_physics_ready() -> bool` to verify the actual properties or collision resources on its own scene. `is_streaming_source_physics_ready(name)` checks that every registered scene in the named source passes this fence; use it **alongside** `is_streaming_source_activation_ready(name)` before fast travel. This is deliberately not a claim that arbitrary server physics/mesh/navmesh/GPU resources are synchronized.
+
+```gdscript
+func set_streaming_physics_active(active: bool) -> void:
+    # Example only: keep visual meshes visible but filter their obstacle body.
+    $FoliageCollisions.collision_layer = 1 if active else 0
+
+func is_streaming_physics_ready() -> bool:
+    return $FoliageCollisions.collision_layer == 1
+```
+
+**Scope:** Cgame does not automatically pause physics bodies or deactivate arbitrary scene descendants. Foliage in Aurora Forest keeps its collider shapes allocated but disables their collision layer, reducing physics query/collision participation — **not necessarily physics shape memory or CPU frame time**. The new `smoke_physics_tiers.gd` checks native activation, a live PhysicsServer raycast, urgent source behavior, full LOD, source removal, pinned hubs and the default opt-out behavior.
 
 ## Independent AI/script simulation tiers
 
@@ -203,7 +230,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 66 Doctest cases across `test_world_partition_3d.h` (30) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 67 Doctest cases across `test_world_partition_3d.h` (31) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -214,6 +241,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Independent collision filtering is opt-in.** Only scene roots implementing `set_streaming_physics_active(active)` actually change collision properties. The engine's state does not automatically remove shapes from broadphase or reduce shape memory. Urgent sources can temporarily force near LOD and more expensive colliders even far from the observer, within existing transition budgets.
 - **Scene activation is a gameplay fence, not an engine-wide physics promise.** The physics frame counter establishes a minimum age. Only a scene author's opt-in predicate can verify domain-specific readiness; a bug or omission in it cannot be detected by the engine. Streaming and physics activation remain decoupled from any GPU upload/texture residency.
 - **Simulation activation is opt-in per scene or game manager.** It never unloads geometry, removes physics bodies, or pauses arbitrary descendant scripts automatically. Callback scripts must tolerate calls before `_ready()` and execute their own activation logic. Hysteresis can intentionally keep some neighboring cells active even when outside the inner radius.
 - **Readiness is not an all-systems fence.** A `true` completion result means the relevant PackedScene roots exist in the live scene tree, not that they finished deferred physics initialization, navigation baking or GPU uploads. Games that stream collision/terrain separately must add their own activation checks.

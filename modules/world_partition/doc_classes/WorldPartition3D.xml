@@ -7,7 +7,7 @@
 		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work. Optional predictive streaming can preload one cell ahead of the observer using [member predictive_velocity], [member predictive_lookahead_seconds], and [member predictive_max_distance]. Current cells and pinned hubs always take priority over speculative work. [method set_streaming_source] registers up to 8 named world-space sources (radius 0 or 1 cell) for mission targets, cameras and portals. They run after observer cells and pinned hubs, before the speculative velocity forecast, using the same asynchronous work budgets. Each source has a priority 0 through 3; urgent sources are scheduled before background sources without starving immediate observer work. Equal priorities use stable alphabetical ordering by name. For fast travel, use [method get_streaming_source_progress] and [method is_streaming_source_ready] to wait non-blockingly for registered destination scenes to instantiate; do not assume the source is ready immediately after registration. They are runtime-only, not persistent pins.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries. For persistent camps or quest hubs, use [method pin_cell] and [method unpin_cell] to override distance-based unloading. At most 128 registered cells may be pinned; a disabled streamer still unloads all cells.
-		To stage gameplay transitions, [method is_streaming_source_activation_ready] requires live source roots, [member min_physics_frames_after_load] elapsed engine physics ticks and any scene-defined [code]is_streaming_activation_ready()[/code] check. This is intentionally stricter than [method is_streaming_source_ready], which requires only live scene roots. It cannot guarantee arbitrary physics/navmesh/GPU readiness unless your scene implements the relevant check. Optionally set [member simulation_radius] to gate AI/script activity independently from graphics. An opt-in scene root implements [code]set_streaming_simulation_active(active)[/code] and can pause its own processing; game systems may query [method is_cell_simulation_active] or subscribe to [signal cell_simulation_changed]. Activation is not automatic tree-wide pausing. Changes to existing loaded cells are limited by [member max_simulation_transitions_per_frame], and [member simulation_hysteresis_cells] reduces oscillations. Optionally set [member detail_radius] to enable near/distant scene-detail callbacks. A cell root script must implement [code]set_streaming_lod(level)[/code], where 0 means near detail and 1 means distant. The engine invokes this method before the new root enters the tree (so its [code]_ready()[/code] can generate only the required content), and again when an existing cell changes tier. Changes are bounded by [member max_detail_transitions_per_frame]. Optionally increase [member detail_hysteresis_cells] to suppress LOD oscillation while the observer moves around grid boundaries. Pinned cells always receive level 0. This does not generate simplified meshes automatically; the scene script must provide both representations.
+		To activate collision separately from simulation and visuals, set [member physics_radius], [member physics_hysteresis_cells] and [member max_physics_transitions_per_frame]. Pinned cells and important/urgent sources automatically request full-detail physics while ordinary preloads remain dormant. Scene roots opt into [code]set_streaming_physics_active(active)[/code]. Use [method is_streaming_source_physics_ready] to wait for collision activation after a physics tick; a scene can additionally implement [code]is_streaming_physics_ready()[/code] to validate its own colliders. This policy never automatically disables collision in other nodes. To stage gameplay transitions, [method is_streaming_source_activation_ready] requires live source roots, [member min_physics_frames_after_load] elapsed engine physics ticks and any scene-defined [code]is_streaming_activation_ready()[/code] check. This is intentionally stricter than [method is_streaming_source_ready], which requires only live scene roots. It cannot guarantee arbitrary physics/navmesh/GPU readiness unless your scene implements the relevant check. Optionally set [member simulation_radius] to gate AI/script activity independently from graphics. An opt-in scene root implements [code]set_streaming_simulation_active(active)[/code] and can pause its own processing; game systems may query [method is_cell_simulation_active] or subscribe to [signal cell_simulation_changed]. Activation is not automatic tree-wide pausing. Changes to existing loaded cells are limited by [member max_simulation_transitions_per_frame], and [member simulation_hysteresis_cells] reduces oscillations. Optionally set [member detail_radius] to enable near/distant scene-detail callbacks. A cell root script must implement [code]set_streaming_lod(level)[/code], where 0 means near detail and 1 means distant. The engine invokes this method before the new root enters the tree (so its [code]_ready()[/code] can generate only the required content), and again when an existing cell changes tier. Changes are bounded by [member max_detail_transitions_per_frame]. Optionally increase [member detail_hysteresis_cells] to suppress LOD oscillation while the observer moves around grid boundaries. Pinned cells always receive level 0. This does not generate simplified meshes automatically; the scene script must provide both representations.
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
 		var partition := WorldPartition3D.new()
@@ -23,6 +23,72 @@
 		Streaming is disabled while editing a scene; the node processes automatically while the game runs. Call [method update_streaming] if an immediate update is required after moving the observer.
 	</description>
 	<methods>
+		<method name="set_physics_radius">
+			<return type="void" />
+			<param index="0" name="radius" type="int" />
+			<description>
+				Sets the independent cell collision radius (-1: disabled/all loaded physics active; 0 to 32: distance-based activation). Priority 2/3 sources and pinned hubs override distance. The engine calls an optional [code]set_streaming_physics_active(active)[/code] on scene roots; it does not automatically alter arbitrary collision objects.
+			</description>
+		</method>
+		<method name="get_physics_radius" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the independent physics active radius. -1 keeps all loaded cells active, preserving previous behavior.
+			</description>
+		</method>
+		<method name="set_physics_hysteresis_cells">
+			<return type="void" />
+			<param index="0" name="cells" type="int" />
+			<description>
+				Sets 0 to 8 additional cell rings where previously active physics can remain active before deactivating. Pinned and important source cells always stay active.
+			</description>
+		</method>
+		<method name="get_physics_hysteresis_cells" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the additional hysteresis rings for active collision cells.
+			</description>
+		</method>
+		<method name="set_max_physics_transitions_per_frame">
+			<return type="void" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Limits physics activation changes for already-loaded cells to 1 to 64 per frame. Initial state is set before scene [code]_ready()[/code] and does not count against this limit.
+			</description>
+		</method>
+		<method name="get_max_physics_transitions_per_frame" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the per-frame physics tier transition budget.
+			</description>
+		</method>
+		<method name="is_cell_physics_active" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the native physics activation policy for an existing live cell, false for unloaded cells. A true value alone does not prove collider properties have changed; scene root scripts must implement [code]set_streaming_physics_active(active)[/code] to filter their own collision.
+			</description>
+		</method>
+		<method name="get_physics_active_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of live loaded cells the engine currently marks physics-active; used for monitoring spatial collision budgets.
+			</description>
+		</method>
+		<method name="is_cell_physics_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns true only after a live cell is marked physics-active, at least one physics tick has elapsed since it was enabled, and an optional scene root [code]is_streaming_physics_ready()[/code] returns Boolean [code]true[/code]. This is an opt-in gameplay readiness check, not a universal physics-server synchronization guarantee.
+			</description>
+		</method>
+		<method name="is_streaming_source_physics_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Requires a named source with registered center, all its registered scene roots loaded, every root's native physics tier active and each cell passing [method is_cell_physics_ready]. Use together with [method is_streaming_source_activation_ready] for urgent fast travel. Background priority 0 and normal priority 1 sources do not automatically activate remote physics.
+			</description>
+		</method>
 		<method name="set_min_physics_frames_after_load">
 			<return type="void" />
 			<param index="0" name="frames" type="int" />
@@ -465,6 +531,15 @@
 		</method>
 	</methods>
 	<members>
+		<member name="physics_radius" type="int" setter="set_physics_radius" getter="get_physics_radius" default="-1">
+			Independent collision policy radius in cell rings, -1 (all loaded active, default) or 0 to 32. Pinned hubs and priorities 2 or 3 streaming sources force active collision and full visual LOD. Scene roots implement [code]set_streaming_physics_active(active)[/code] to actually filter colliders. Background sources do not force physics.
+		</member>
+		<member name="physics_hysteresis_cells" type="int" setter="set_physics_hysteresis_cells" getter="get_physics_hysteresis_cells" default="1">
+			0 to 8 extra rings tolerated before an already-active collision scene is deactivated. New inactive cells activate within [member physics_radius], pinned hubs, or important sources.
+		</member>
+		<member name="max_physics_transitions_per_frame" type="int" setter="set_max_physics_transitions_per_frame" getter="get_max_physics_transitions_per_frame" default="2">
+			1 to 64 maximum physics enable/disable transitions across already-loaded cells per update. Initial state is assigned before scene [code]_ready()[/code].
+		</member>
 		<member name="min_physics_frames_after_load" type="int" setter="set_min_physics_frames_after_load" getter="get_min_physics_frames_after_load" default="2">
 			Minimum number of completed physics ticks after loading a cell before it may pass the optional activation readiness check. Valid range 0 to 8. Scenes can implement [code]is_streaming_activation_ready()[/code] to gate their own colliders, navmesh or gameplay setup. The counter resets when a cell is unloaded and later instantiated again. This does not guarantee that all engine physics or rendering servers have synchronized.
 		</member>
@@ -524,6 +599,13 @@
 		</member>
 	</members>
 	<signals>
+		<signal name="cell_physics_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="active" type="bool" />
+			<description>
+				Emitted when a previously loaded cell changes native collision activation state. Newly loaded scenes instead receive [code]set_streaming_physics_active(active)[/code] before [code]_ready()[/code].
+			</description>
+		</signal>
 		<signal name="cell_simulation_changed">
 			<param index="0" name="cell" type="Vector2i" />
 			<param index="1" name="active" type="bool" />

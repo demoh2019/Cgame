@@ -228,6 +228,11 @@ func _create_streaming_world() -> void:
     world_partition.simulation_radius = 1
     world_partition.simulation_hysteresis_cells = 1
     world_partition.max_simulation_transitions_per_frame = 2
+    # Stream full visual cells farther than their foliage collision radius.
+    # Priority-2/3 sources activate destination collision before teleport.
+    world_partition.physics_radius = 1
+    world_partition.physics_hysteresis_cells = 1
+    world_partition.max_physics_transitions_per_frame = 2
     world_partition.min_physics_frames_after_load = 2 # Allow a physics tick barrier before F10/F11 travel.
     world_partition.max_new_requests_per_frame = 2
     world_partition.max_instances_per_frame = 1
@@ -240,6 +245,7 @@ func _create_streaming_world() -> void:
     world_partition.cell_loaded.connect(_on_stream_cell_loaded)
     world_partition.cell_detail_changed.connect(_on_cell_detail_changed)
     world_partition.cell_simulation_changed.connect(_on_cell_simulation_changed)
+    world_partition.cell_physics_changed.connect(_on_cell_physics_changed)
     world_partition.observer_cell_changed.connect(_on_observer_cell_changed)
 
     for cz in range(-2, 2):
@@ -261,6 +267,10 @@ func _on_cell_detail_changed(_cell: Vector2i, _detail_level: int) -> void:
 func _on_cell_simulation_changed(_cell: Vector2i, _active: bool) -> void:
     if encounters != null:
         encounters.call("refresh_encounters")
+    _refresh_hud()
+
+
+func _on_cell_physics_changed(_cell: Vector2i, _active: bool) -> void:
     _refresh_hud()
 
 
@@ -515,6 +525,7 @@ func _refresh_hud() -> void:
     var pinned: int = world_partition.get_pinned_cell_count() if world_partition != null else 0
     var distant: int = world_partition.get_distant_cell_count() if world_partition != null else 0
     var simulated: int = world_partition.get_simulation_active_cell_count() if world_partition != null else 0
+    var collidable: int = world_partition.get_physics_active_cell_count() if world_partition != null else 0
     var quest_text: String = _quest_hud_text()
     var enemy_count: int = encounters.call("get_alive_count") if encounters != null else 0
     var travel_text: String = travel_controller.get_status_text() if travel_controller != null and travel_controller.active else "F10: к реликвии  F11: в лагерь"
@@ -526,7 +537,7 @@ func _refresh_hud() -> void:
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   закреплено: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pinned, pending, inflight, failed, current_region.x, current_region.y] \
-        + "Упреждающая загрузка: %s   LOD дальних: %d   симуляция: %d   F3/F4: сравнение\n" % [predicted_text, distant, simulated] \
+        + "Упреждающая загрузка: %s   LOD дальних: %d   симуляция: %d   коллизии: %d   F3/F4: сравнение\n" % [predicted_text, distant, simulated, collidable] \
         + "Атмосфера: %02d:%02d  %s  %s (F6/F7/F8)\n" % [int(atmosphere_clock.day_hours), int(fmod(atmosphere_clock.day_hours, 1.0) * 60.0), atmosphere_clock.get_weather_name(), "ПАУЗА" if atmosphere_clock.paused else "цикл"] \
         + quest_text + "\n" \
         + "Здоровье: %d/100   Противники: %d   побеждено: %d   F/ЛКМ: удар\n" % [player_health, enemy_count, defeated_mobs.size()] \
