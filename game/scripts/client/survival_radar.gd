@@ -381,9 +381,12 @@ func _draw() -> void:
 		Color(0.71, 0.51, 1.0))
 	_draw_waypoint(origin, current_rally(), "x", "z",
 		Color(1.0, 0.60, 0.22))
-	# Teal = limited-time teammate map ping; remote pins stay as edge arrows.
-	_draw_waypoint(origin, current_party_ping(), "x", "z",
-		Color(0.20, 0.95, 0.90))
+	# A paid T2+ ore/stone party survey is amber; regular pings stay teal.
+	var party_ping: Dictionary = current_party_ping()
+	var party_pin_color := Color(0.20, 0.95, 0.90)
+	if str(party_ping.get("kind", "")) == "survey":
+		party_pin_color = Color(0.95, 0.65, 0.25)
+	_draw_waypoint(origin, party_ping, "x", "z", party_pin_color)
 
 	# Orange = your last still-unclaimed public full-loot death bag.
 	# The owner can follow it from afar without granting loot protection.
