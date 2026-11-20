@@ -17,6 +17,7 @@ const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
 const ShadowBudget = preload("res://scripts/client/shadow_budget.gd")
 const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd")
+const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 
@@ -453,6 +454,14 @@ func _build_dungeon(origin: Vector2) -> void:
 				if cell_rect.has_point(tile):
 					_kit("floor_tile_large" if (i + j + room.x) % 3 != 0 else "floor_tile_large_rocks", Vector3(tile.x, Dungeon.FLOOR_Y, tile.y), 0.0)
 		if cell_rect.has_point(center):
+			# A cheap marker for the shared room reflection pool; no per-room
+			# cubemap is created until the player approaches on High/Ultra.
+			var room_anchor := Node3D.new()
+			room_anchor.name = "RoomReflectionAnchor"
+			room_anchor.position = Vector3(center.x - origin.x,
+				Dungeon.FLOOR_Y + 1.8, center.y - origin.y)
+			room_anchor.add_to_group(DungeonReflectionBudget.GROUP)
+			add_child(room_anchor)
 			# A torch on the north wall lights the room.
 			var torch_at := Vector3(center.x, Dungeon.FLOOR_Y, center.y - Dungeon.ROOM * 0.5 + 0.4)
 			_kit("torch_mounted", torch_at + Vector3(0, 1.4, 0), 0.0, 0.5)
