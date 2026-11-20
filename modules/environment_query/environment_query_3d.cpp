@@ -66,6 +66,7 @@ static double point_distance(const Vector3 &p_a, const Vector3 &p_b, bool p_hori
 // Shared evaluation keeps full and bounded query ranking exactly equivalent.
 static bool score_candidate(const Vector3 &p_point, int p_index,
 		const Vector3 &p_origin, const Vector3 &p_threat_position,
+		const PackedVector3Array &p_threat_positions,
 		bool p_use_threat, bool p_horizontal_only, double p_min_distance,
 		double p_max_distance, double p_desired_distance,
 		double p_distance_weight, double p_safety_weight,
@@ -79,7 +80,21 @@ static bool score_candidate(const Vector3 &p_point, int p_index,
 	}
 	double threat_distance = -1.0;
 	if (p_use_threat) {
-		threat_distance = point_distance(p_threat_position, p_point, p_horizontal_only);
+		if (p_threat_positions.is_empty()) {
+			// Legacy single-context behavior remains byte-for-byte compatible.
+			threat_distance = point_distance(p_threat_position, p_point, p_horizontal_only);
+		} else {
+			// Multi-context queries use the nearest threat, never the average.
+			// This guarantees a safe score against *every* relevant player.
+			threat_distance = Math_INF;
+			for (int threat = 0; threat < p_threat_positions.size(); threat++) {
+				const double d = point_distance(p_threat_positions[threat], p_point, p_horizontal_only);
+				if (!Math::is_finite(d)) {
+					return false;
+				}
+				threat_distance = MIN(threat_distance, d);
+			}
+		}
 		if (!Math::is_finite(threat_distance) || threat_distance < p_min_threat_distance) {
 			return false;
 		}
@@ -108,6 +123,8 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_origin"), &EnvironmentQuery3D::get_origin);
 	ClassDB::bind_method(D_METHOD("set_threat_position", "position"), &EnvironmentQuery3D::set_threat_position);
 	ClassDB::bind_method(D_METHOD("get_threat_position"), &EnvironmentQuery3D::get_threat_position);
+	ClassDB::bind_method(D_METHOD("set_threat_positions", "positions"), &EnvironmentQuery3D::set_threat_positions);
+	ClassDB::bind_method(D_METHOD("get_threat_positions"), &EnvironmentQuery3D::get_threat_positions);
 	ClassDB::bind_method(D_METHOD("set_use_threat", "enabled"), &EnvironmentQuery3D::set_use_threat);
 	ClassDB::bind_method(D_METHOD("is_using_threat"), &EnvironmentQuery3D::is_using_threat);
 	ClassDB::bind_method(D_METHOD("set_horizontal_only", "enabled"), &EnvironmentQuery3D::set_horizontal_only);
@@ -142,6 +159,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ADD_GROUP("Threat Safety", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_threat"), "set_use_threat", "is_using_threat");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "threat_position"), "set_threat_position", "get_threat_position");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "threat_positions"), "set_threat_positions", "get_threat_positions");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_threat_distance", PROPERTY_HINT_RANGE, "0,10000,0.1,or_greater,suffix:m"), "set_min_threat_distance", "get_min_threat_distance");
 	ADD_GROUP("Scoring", "");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "distance_weight", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), "set_distance_weight", "get_distance_weight");
@@ -163,6 +181,15 @@ void EnvironmentQuery3D::set_origin(const Vector3 &p_origin) {
 void EnvironmentQuery3D::set_threat_position(const Vector3 &p_position) {
 	ERR_FAIL_COND_MSG(!p_position.is_finite(), "EnvironmentQuery3D.threat_position must contain finite coordinates.");
 	threat_position = p_position;
+	emit_changed();
+}
+
+void EnvironmentQuery3D::set_threat_positions(const PackedVector3Array &p_positions) {
+	ERR_FAIL_COND_MSG(p_positions.size() > 32, "EnvironmentQuery3D supports at most 32 threat contexts.");
+	for (int i = 0; i < p_positions.size(); i++) {
+		ERR_FAIL_COND_MSG(!p_positions[i].is_finite(), "EnvironmentQuery3D threat contexts must contain finite coordinates.");
+	}
+	threat_positions = p_positions;
 	emit_changed();
 }
 
@@ -216,7 +243,7 @@ Array EnvironmentQuery3D::query() const {
 	Vector<QueryHit> hits;
 	for (int i = 0; i < candidates.size(); i++) {
 		QueryHit hit;
-		if (score_candidate(candidates[i], i, origin, threat_position,
+		if (score_candidate(candidates[i], i, origin, threat_position, threat_positions,
 					use_threat, horizontal_only, min_distance, max_distance,
 					desired_distance, distance_weight, safety_weight,
 					min_threat_distance, hit)) {
@@ -265,7 +292,7 @@ PackedVector3Array EnvironmentQuery3D::query_top_positions(int p_count) const {
 	HitComparator better;
 	for (int i = 0; i < candidates.size(); i++) {
 		QueryHit hit;
-		if (!score_candidate(candidates[i], i, origin, threat_position,
+		if (!score_candidate(candidates[i], i, origin, threat_position, threat_positions,
 					use_threat, horizontal_only, min_distance, max_distance,
 					desired_distance, distance_weight, safety_weight,
 					min_threat_distance, hit)) {
