@@ -9,6 +9,7 @@ const DETAIL_SCENE := "res://scenes/cell_detail.tscn"
 const PROXY_SCENE := "res://scenes/cell_proxy.tscn"
 const FLY_SCRIPT := preload("res://scripts/free_fly.gd")
 const QUALITY_SCRIPT := preload("res://scripts/streaming_quality.gd")
+const CROSSFADE_SCRIPT := preload("res://scripts/hlod_crossfade_controller.gd")
 
 var camera: Camera3D
 var prefetch_source: Node3D
@@ -19,6 +20,7 @@ var prefetch_enabled := true
 var proxies_enabled := true
 var hud_elapsed := 0.0
 var quality_controller = QUALITY_SCRIPT.new()
+var crossfade_controller: Node
 
 func _ready() -> void:
     _create_lighting_and_camera()
@@ -31,9 +33,11 @@ func _ready() -> void:
     if not distant.has_method("get_cell_instance") or not detail.has_method("get_cell_instance"):
         push_error("Cgame get_cell_instance API required for proxy handoff.")
         return
-    distant.connect("cell_loaded", Callable(self, "_on_proxy_loaded"))
-    detail.connect("cell_loaded", Callable(self, "_on_detail_loaded"))
-    detail.connect("cell_unloaded", Callable(self, "_on_detail_unloaded"))
+    crossfade_controller = CROSSFADE_SCRIPT.new()
+    crossfade_controller.near_streamer = detail
+    crossfade_controller.far_streamer = distant
+    crossfade_controller.target_camera = camera
+    add_child(crossfade_controller)
     _set_prefetch(true)
     _create_hud()
 
@@ -65,6 +69,8 @@ func _apply_quality_profile() -> void:
     detail.set("max_instances_per_frame", int(profile["detail_budget"]))
     distant.set("max_new_requests_per_frame", int(profile["proxy_budget"]))
     distant.set("max_instances_per_frame", int(profile["proxy_budget"]))
+    detail.set("max_unloads_per_frame", int(profile["unload_budget"]))
+    distant.set("max_unloads_per_frame", int(profile["unload_budget"]))
 
 func _create_lighting_and_camera() -> void:
     var env := Environment.new()
@@ -105,23 +111,6 @@ func _set_prefetch(enabled: bool) -> void:
         var paths: Array = [detail.get_path_to(prefetch_source)] if enabled else []
         detail.call("set_additional_observer_paths", paths)
 
-func _on_detail_loaded(cell: Vector2i) -> void:
-    _set_proxy_visible(cell, false)
-
-func _on_detail_unloaded(cell: Vector2i) -> void:
-    _set_proxy_visible(cell, true)
-
-func _on_proxy_loaded(cell: Vector2i) -> void:
-    if detail != null:
-        _set_proxy_visible(cell, not detail.call("is_cell_loaded", cell))
-
-func _set_proxy_visible(cell: Vector2i, show: bool) -> void:
-    if distant == null or not distant.has_method("get_cell_instance"):
-        return
-    var proxy_instance := distant.call("get_cell_instance", cell) as Node3D
-    if is_instance_valid(proxy_instance):
-        proxy_instance.visible = show
-
 func _create_hud() -> void:
     var layer := CanvasLayer.new()
     add_child(layer)
@@ -147,6 +136,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
             proxies_enabled = not proxies_enabled
             if distant != null:
                 distant.set("streaming_enabled", proxies_enabled)
+        KEY_F:
+            if crossfade_controller != null:
+                crossfade_controller.set_transition_enabled(not crossfade_controller.enabled)
         KEY_R:
             for partition in [detail, distant]:
                 if partition != null and partition.has_method("retry_failed_cells"):
@@ -172,12 +164,13 @@ func _update_hud() -> void:
         return
     var detail_count: int = int(detail.call("get_loaded_cell_count")) if detail != null else 0
     var distant_count: int = int(distant.call("get_loaded_cell_count")) if distant != null else 0
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nQuality: %s  Q auto: %s  1/2/3 manual quality\nWASD fly  Space/Ctrl vertical  Shift fast  Esc mouse\nP prefetch: %s   L proxies: %s   R retry" % [
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
         str(quality_controller.get_profile()["name"]),
         "ON" if quality_controller.automatic else "OFF",
+        "ON" if crossfade_controller != null and crossfade_controller.enabled else "OFF",
         "ON" if prefetch_enabled else "OFF",
         "ON" if proxies_enabled else "OFF",
     ]
