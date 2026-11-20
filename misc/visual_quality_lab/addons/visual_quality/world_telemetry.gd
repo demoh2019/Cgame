@@ -40,6 +40,8 @@ func sample_now() -> Dictionary:
 		"streamer_us": 0,
 		"spawned": 0,
 		"unloaded": 0,
+		"total_spawned": 0,
+		"total_unloaded": 0,
 		"ai_us": 0,
 		"sleeping_npcs": 0,
 		"objects": int(Performance.get_monitor(Performance.OBJECT_COUNT))
@@ -50,6 +52,8 @@ func sample_now() -> Dictionary:
 		row["streamer_us"] = streamer.last_update_micros
 		row["spawned"] = streamer.last_spawned_count
 		row["unloaded"] = streamer.last_unloaded_count
+		row["total_spawned"] = streamer.total_spawned_count
+		row["total_unloaded"] = streamer.total_unloaded_count
 	if is_instance_valid(ai_interest):
 		row["ai_us"] = ai_interest.last_update_micros
 		row["sleeping_npcs"] = ai_interest.sleeping_npc_count()
@@ -103,7 +107,7 @@ func export_csv() -> Error:
 	var columns: PackedStringArray = PackedStringArray([
 		"elapsed_ms", "fps", "process_ms", "physics_ms", "cpu_ms",
 		"active_cells", "pending_assets", "streamer_us", "spawned",
-		"unloaded", "ai_us", "sleeping_npcs", "objects"
+		"unloaded", "total_spawned", "total_unloaded", "ai_us", "sleeping_npcs", "objects"
 	])
 	file.store_csv_line(columns)
 	for item in get_samples_oldest_first():
@@ -123,7 +127,9 @@ func clear() -> void:
 static func percentile_nearest_rank(values: Array[float], fraction: float) -> float:
 	if values.is_empty():
 		return 0.0
-	var sorted_values: Array[float] = values.duplicate()
+	var sorted_values: Array[float] = []
+	for number in values:
+		sorted_values.append(number)
 	sorted_values.sort()
 	var rank: int = clampi(ceili(clampf(fraction, 0.0, 1.0) * sorted_values.size()) - 1,
 		0, sorted_values.size() - 1)
