@@ -58,6 +58,20 @@ func run(t) -> void:
 	t.eq(GrassField.lod_for_distance(-1.0, 2), 2,
 		"invalid distance conservatively preserves the previous LOD")
 
+	t.current = "camera-stable LOD update budget"
+	t.check(GrassField.needs_lod_refresh(Vector2.ZERO, -1.0, -1,
+		Vector2.ZERO, 1.0, 0), "first update always initializes the cache")
+	t.check(not GrassField.needs_lod_refresh(Vector2.ZERO, 1.0, 10,
+		Vector2.ZERO, 1.0, 10), "a stationary camera skips repeated tile scans")
+	t.check(not GrassField.needs_lod_refresh(Vector2.ZERO, 1.0, 10,
+		Vector2(0.2, 0.0), 1.0, 10), "tiny camera jitter does not trigger LOD work")
+	t.check(GrassField.needs_lod_refresh(Vector2.ZERO, 1.0, 10,
+		Vector2(0.25, 0.0), 1.0, 10), "a real camera move updates LOD")
+	t.check(GrassField.needs_lod_refresh(Vector2.ZERO, 1.0, 10,
+		Vector2.ZERO, 1.1, 10), "FOV or quality changes invalidate LOD")
+	t.check(GrassField.needs_lod_refresh(Vector2.ZERO, 1.0, 10,
+		Vector2.ZERO, 1.0, 11), "new grass tiles invalidate stationary camera cache")
+
 	t.current = "quality-relative density"
 	t.check(GrassField.visible_count_for_distance(1000, 34.0, 1.5)
 		> GrassField.visible_count_for_distance(1000, 34.0),
