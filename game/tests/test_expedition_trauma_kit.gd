@@ -41,6 +41,18 @@ func run(t) -> void:
 	t.current = "trauma kit: no-waste self-care, mixed injuries and persistence"
 	var world := WorldGen.new(621)
 	var server := GameServer.new(world, 621)
+	var crafter = server.add_player(623, "Field Artisan")
+	crafter.position = Vector3(9.0, world.height_at(9.0, 0.0), 0.0)
+	for ingredient in recipe["inputs"]:
+		crafter.inventory.add(str(ingredient), int(recipe["inputs"][ingredient]))
+	t.eq(server.cmd_craft(crafter.id, ITEM_ID).get("reason", ""), "need_skill",
+		"tier-two crafting mastery is validated on the server")
+	t.eq(crafter.inventory.count("field_splint"), 1,
+		"denied novice craft leaves ingredients intact")
+	crafter.progression.crafting_xp = 100
+	t.check(bool(server.cmd_craft(crafter.id, ITEM_ID).get("ok", false)),
+		"trained artisan crafts at the real server workbench")
+	t.eq(crafter.inventory.count(ITEM_ID), 1, "server grants one crafted kit")
 	var medic = server.add_player(621, "Expedition Medic")
 	t.eq(server.cmd_use(medic.id, ITEM_ID).get("reason", ""), "not_carried",
 		"no free healing from absent kit")
@@ -102,3 +114,8 @@ func run(t) -> void:
 	medic.party_aid_timer = 0.0
 	t.eq(server.cmd_party_aid(medic.id, patient.id, ITEM_ID).get("reason", ""),
 		"not_carried", "consumed kit cannot be reused")
+	medic.inventory.add(ITEM_ID, 1)
+	patient.survival.health = patient.survival.max_health
+	t.eq(server.cmd_party_aid(medic.id, patient.id, ITEM_ID).get("reason", ""),
+		"no_effect", "healthy party members cannot waste shared medicine")
+	t.eq(medic.inventory.count(ITEM_ID), 1, "no-effect ally care preserves kit")
