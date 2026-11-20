@@ -11,6 +11,7 @@ const StormLightning = preload("res://scripts/shared/storm_lightning.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const CorpseScent = preload("res://scripts/shared/corpse_scent.gd")
 const HeartyMeal = preload("res://scripts/shared/hearty_meal.gd")
+const TrailRation = preload("res://scripts/shared/trail_ration.gd")
 const CombatStress = preload("res://scripts/shared/combat_stress.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
@@ -714,6 +715,18 @@ func _build() -> void:
 	stew_eat_button.text = "Shift+1: Eat fish stew (+40 food, +38 water)"
 	stew_eat_button.pressed.connect(func() -> void: client.use_item(Defs.CAMP_FISH_STEW))
 	inventory_box.add_child(stew_eat_button)
+	var smoked_craft := Button.new()
+	smoked_craft.name = "QuickSmokeTrailFish"
+	smoked_craft.text = "Alt+0: Smoke highest craftable fish (2 wood + 1 fiber)"
+	smoked_craft.tooltip_text = "A lit campfire or hub workbench is required. Smoked fish T1-T4 is safe travel food and reduces hunger use for a short time."
+	smoked_craft.pressed.connect(quick_smoke)
+	inventory_box.add_child(smoked_craft)
+	var smoked_eat := Button.new()
+	smoked_eat.name = "EatSmokedTrailFish"
+	smoked_eat.text = "Eat best carried smoked fish: travel hunger protection"
+	smoked_eat.tooltip_text = "Consumes one real smoked ration. Tier 1-4 reduces natural hunger loss for 210-390 seconds. It does not increase combat power."
+	smoked_eat.pressed.connect(eat_smoked)
+	inventory_box.add_child(smoked_eat)
 	var accept_contract := Button.new()
 	accept_contract.text = "Accept next mission"
 	accept_contract.pressed.connect(func() -> void: client.contract("accept"))
@@ -1309,6 +1322,24 @@ func quick_cook(stew: bool = false) -> void:
 		client.craft(recipe_id, 1)
 
 
+func quick_smoke() -> void:
+	var recipe: String = TrailRation.best_recipe(
+		client.inventory, int(client.you.get("crafting_level", 1)))
+	if recipe.is_empty():
+		say("Smoking fish needs raw fish, 2 matching wood and 1 fiber, plus crafting mastery.")
+	else:
+		client.craft(recipe, 1)
+
+
+func eat_smoked() -> void:
+	for tier in range(Defs.MAX_TIER, 0, -1):
+		var item_id: String = "smoked_fish" if tier == 1 else "smoked_fish_%d" % tier
+		if client.inventory.count(item_id) > 0:
+			client.use_item(item_id)
+			return
+	say("No smoked fish carried. Cook some at a campfire first.")
+
+
 func toggle_inventory() -> void:
 	_inventory_panel.visible = not _inventory_panel.visible
 	_actions_panel.visible = _inventory_panel.visible and not _craft_panel.visible
@@ -1544,6 +1575,7 @@ const EFFECTS := [
 	["exposure", "thermal_wrap", "Cold: warm up at a fire, in shelter or with a heat pack", true, "pct"],
 	["combat_tag_seconds", "machete", "In combat: logging out now drops your gear in full-loot zones", true, "s"],
 	["meal_seconds", "cooked_fish", "Hearty meal: better regeneration", false, "s"],
+	["ration_seconds", "smoked_fish", "Smoked travel ration: slower hunger drain", false, "s"],
 	["coating_seconds", "antiseptic_edge_oil", "Antiseptic edge oil on your weapon", false, "s"],
 	["sharpened_hits", "field_whetstone", "Sharpened weapon", false, "hits"],
 	["sighted_hits", "field_sighting_kit", "Sighted weapon", false, "hits"],
@@ -2497,6 +2529,10 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Survival supplies: no suitable safe ration or drink, or not needed yet.")
 		else:
 			say("Survival supplies: %s (no items spent)." % str(data.get("reason", "rejected")))
+		return
+	if kind == "use" and bool(data.get("trail_ration", false)):
+		say("Smoked fish consumed. Trail ration T%d: hunger use reduced for %.0fs." % [
+			int(data.get("tier", 1)), float(data.get("seconds", 0.0))])
 		return
 	if kind == "use" and bool(data.get("ate_raw_fish", false)):
 		say("Raw fish eaten! Food poisoning %d/100. Cook catches for safety; use a herbal stomach remedy." % int(data.get("severity", 0)))
@@ -3626,6 +3662,11 @@ func _process(_delta: float) -> void:
 		_equipped.text += "\nPrepared meal T%d: %.0fs | +%.1f stamina/s, +%.2f energy/s" % [
 			meal_tier, meal_left, HeartyMeal.stamina_per_second(meal_tier),
 			HeartyMeal.energy_per_second(meal_tier)]
+	var ration_left: float = float(client.you.get("ration_seconds", 0.0))
+	var ration_tier: int = int(client.you.get("ration_tier", 0))
+	if ration_left > 0.0 and ration_tier > 0:
+		_equipped.text += "\nTrail ration T%d: %.0fs | %.0f%% less hunger drain" % [
+			ration_tier, ration_left, TrailRation.hunger_savings(ration_tier) * 100.0]
 	_refresh_left_column()
 	_party_frames.text = PartyFrames.describe(client.you.get("party", {}), client.peer_id)
 	_party_frames.visible = not _party_frames.text.is_empty()
