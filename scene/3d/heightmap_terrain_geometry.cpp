@@ -106,6 +106,21 @@ int lod_stride(int p_lod, int p_quads) {
 	return MAX(stride, 1);
 }
 
+real_t screen_lod_multiplier(real_t p_view_height, real_t p_vertical_fov, real_t p_reference_fov) {
+	// Screen-relative detail: high pixel density and narrow FOV keep more
+	// triangle detail, but limits protect vertex throughput on large monitors.
+	if (!Math::is_finite(p_view_height) || !Math::is_finite(p_vertical_fov) ||
+			!Math::is_finite(p_reference_fov) || p_view_height <= 0.0 ||
+			p_vertical_fov <= 1.0 || p_vertical_fov >= 179.0 ||
+			p_reference_fov <= 1.0 || p_reference_fov >= 179.0) {
+		return 1.0;
+	}
+	const real_t fov = Math::tan(Math::deg_to_rad(p_vertical_fov * real_t(0.5)));
+	const real_t reference = Math::tan(Math::deg_to_rad(p_reference_fov * real_t(0.5)));
+	return CLAMP((p_view_height / real_t(720.0)) * reference / fov,
+			real_t(0.6), real_t(1.65));
+}
+
 int select_lod(real_t p_distance, real_t p_base_distance, int p_lod_count, int p_current) {
 	const int max_lod = MAX(p_lod_count, 1) - 1;
 	if (!(p_base_distance > 0.0) || !Math::is_finite(p_distance)) {
