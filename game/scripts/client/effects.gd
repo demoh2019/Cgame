@@ -1,9 +1,12 @@
 extends Node3D
+const RainVfx = preload("res://scripts/client/rain_vfx.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+
 ## Short-lived particle effects (hits, deaths, pickups, level ups, dust), the rain that follows the camera, and the life
 ## of the wilds around the player: pollen drifting in the sun, butterflies, leaves falling in the forest, fireflies at night.
 
-var _rain: CPUParticles3D
-var _rain_amount := 0.0
+var _rain: Node3D
+var _rain_quality := -1
 var _dust_timer := 0.0
 var _pollen: CPUParticles3D
 var _butterflies: CPUParticles3D
@@ -30,30 +33,11 @@ void fragment() {
 
 
 func _ready() -> void:
-	_rain = CPUParticles3D.new()
-	_rain.amount = 700
-	_rain.lifetime = 0.9
-	_rain.preprocess = 0.9
-	_rain.emitting = false
-	_rain.local_coords = false
-	_rain.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	_rain.emission_box_extents = Vector3(26.0, 0.5, 26.0)
-	_rain.direction = Vector3(0.12, -1.0, 0.05)
-	_rain.spread = 3.0
-	_rain.gravity = Vector3.ZERO
-	_rain.initial_velocity_min = 30.0
-	_rain.initial_velocity_max = 38.0
-	var streak := BoxMesh.new()
-	streak.size = Vector3(0.012, 0.9, 0.012)
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.75, 0.82, 0.92, 0.5)
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	streak.material = material
-	_rain.mesh = streak
+	# Niagara / Unity VFX-style scalability: only one precipitation emitter
+	# follows the camera; GPU on modern renderers, bounded CPU on older GL.
+	_rain = RainVfx.create(str(RenderingServer.get_current_rendering_method()))
 	add_child(_rain)
 	_build_ambience()
-
 
 ## A soft round dot, white with an alpha falloff, for pollen and fireflies.
 static func _dot_texture() -> ImageTexture:
@@ -210,9 +194,15 @@ func update_ambience(ground: Vector3, daylight: float, storm: float, biome: Stri
 
 ## Rain around `center` while `intensity` > 0.
 func update_rain(center: Vector3, intensity: float) -> void:
-	_rain_amount = intensity
-	_rain.emitting = intensity > 0.05
-	_rain.global_position = center + Vector3(0, 18.0, 0)
+	# The quality tier is changed rarely; GPU amount_ratio varies smoothly
+	# with weather and does not restart an active storm emitter.
+	if _rain == null:
+		return
+	var tier: int = GraphicsQuality.level()
+	if tier != _rain_quality:
+		RainVfx.apply_quality(_rain, tier)
+		_rain_quality = tier
+	RainVfx.update(_rain, center, intensity)
 
 
 ## A flat ring on the ground that widens and fades: a pulse of healing, a shock wave, a flash.
