@@ -1161,6 +1161,8 @@ func cmd_fish(peer_id: int, baited: bool = false, storm_cast: bool = false) -> D
 		return {"ok": false, "reason": "mounted"}
 	if not player.recall.is_empty():
 		return {"ok": false, "reason": "recall_channeling"}
+	if bool(player.action.get("fish", false)):
+		return _hook_fish(player) # Casting again while the line is out strikes at a bite.
 	if not player.action.is_empty():
 		return {"ok": false, "reason": "busy"}
 	if time < player.fish_next_at:
@@ -1179,11 +1181,24 @@ func cmd_fish(peer_id: int, baited: bool = false, storm_cast: bool = false) -> D
 	player.action = {"fish": true, "cast_x": player.position.x, "cast_z": player.position.z,
 		"tier": int(eligibility["tier"]), "catch_id": str(eligibility["item"]),
 		"baited": baited, "storm_cast": storm_cast,
-		"remaining": cast_seconds, "total": cast_seconds}
+		"remaining": cast_seconds, "total": cast_seconds,
+		"bite_at": Fishing.bite_at(cast_seconds, rng.randf()), "hooked": false, "struck": false}
 	player.fish_next_at = time + cast_seconds + Fishing.COOLDOWN_SECONDS
 	return {"ok": true, "seconds": cast_seconds,
 		"tier": int(eligibility["tier"]), "item": str(eligibility["item"]),
 		"baited": baited, "storm_cast": storm_cast}
+
+
+## One strike per cast: inside the bite window it hooks the fish (a bigger catch), outside it the fish slips away.
+func _hook_fish(player: Player) -> Dictionary:
+	if bool(player.action.get("struck", false)):
+		return {"ok": false, "reason": "already_struck"}
+	player.action["struck"] = true
+	if Fishing.biting(float(player.action.get("remaining", 0.0)), float(player.action.get("bite_at", -1.0))):
+		player.action["hooked"] = true
+		events.append({"type": "fish_hooked", "peer": player.id})
+		return {"ok": true, "hooked": true}
+	return {"ok": false, "reason": "no_bite"}
 
 
 func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
@@ -3820,6 +3835,8 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 				player.survival.stop_bleeding()
 			player.survival.treat_fracture(splint)
 			_award(player, "medic", 6.0)
+		"head", "cape", "hands", "feet":
+			player.inventory.equip(item_id) # Worn pieces: a hood, a cloak, gloves, boots.
 		"weapon", "armor":
 			var previous_weapon: String = player.inventory.weapon
 			var previous_armor: String = player.inventory.armor
@@ -4218,8 +4235,7 @@ func _try_guardian_intercept(ally: Player, infected, raw_damage: float) -> bool:
 	chosen.guard_link_seconds = 0.0
 	var armor_id: String = chosen.inventory.armor
 	var equipped: bool = armor_id != "" and chosen.inventory.count(armor_id) > 0
-	var damage: float = Combat.apply_armor(GuardianIntercept.damage(raw_damage),
-		armor_id if equipped else "")
+	var damage: float = Combat.apply_gear(GuardianIntercept.damage(raw_damage), chosen.inventory)
 	damage = _infected_damage_for(chosen, damage)
 	var taken: float = _hurt_player(chosen, damage)
 	chosen.dirty_character = true
@@ -4971,7 +4987,7 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 		if TrainingDuel.active_for(training_matches, world, attacker, victim, time):
 			# Nonlethal combat. No PvP points, infamy, deaths, item loss, XP,
 			# bleeding or combat logout penalty can originate from sparring.
-			var strike: float = maxf(0.0, Combat.apply_armor(damage, victim.inventory.armor))
+			var strike: float = maxf(0.0, Combat.apply_gear(damage, victim.inventory))
 			strike *= 1.0 - clampf(victim.skills.bonus("damage_reduction"), 0.0, 0.4)
 			var previous: float = victim.survival.health
 			var applied: float = victim.survival.hurt(minf(strike, maxf(0.0, previous - 1.0)))
@@ -4991,7 +5007,7 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: St
 				world.zone_at(victim.position.x, victim.position.z)):
 			return
 		_award(attacker, "marksman" if source == "ranged" else "melee", 1.0 + damage / 6.0)
-		var final_damage: float = Combat.apply_armor(damage, victim.inventory.armor)
+		var final_damage: float = Combat.apply_gear(damage, victim.inventory)
 		var applied: float = _hurt_player(victim, final_damage)
 		if applied > 0.0:
 			# Both participants are combat-tagged from actual server-applied PvP
@@ -5700,12 +5716,13 @@ func _finish_fishing(player: Player) -> void:
 	var tier: int = int(player.action.get("tier", 1))
 	var requested_bait: bool = bool(player.action.get("baited", false))
 	var storm_cast: bool = bool(player.action.get("storm_cast", false))
+	var hooked: bool = bool(player.action.get("hooked", false))
 	player.action = {}
 	if item_id != Fishing.catch_item(tier):
 		return # Never trust an inconsistent pending action.
 	if storm_cast and (requested_bait or not StormFishing.qualifies(world, player.position, time)):
 		return # Never reward a forged or expired storm action.
-	var amount: int = 1 + (1 if rng.randf() < 0.35 else 0)
+	var amount: int = 1 + (1 if rng.randf() < 0.35 else 0) + (Fishing.HOOK_BONUS if hooked else 0)
 	# Risk rewards and consumable bait cannot stack.
 	var storm_bonus: int = StormFishing.bonus_for(
 		player.inventory, item_id, amount) if storm_cast else 0
@@ -5721,7 +5738,7 @@ func _finish_fishing(player: Player) -> void:
 		player.dirty_character = true
 	events.append({"type": "fished", "peer": player.id, "item": item_id,
 		"amount": added, "tier": tier, "bait_used": bait_used,
-		"storm_cast": storm_cast, "storm_bonus": storm_bonus})
+		"storm_cast": storm_cast, "storm_bonus": storm_bonus, "hooked": hooked})
 
 
 func _finish_gather(player: Player, node: Dictionary) -> void:
@@ -5968,7 +5985,7 @@ func _resolve_raid_cone(strike: Dictionary) -> void:
 		if survivor.dodge_immunity > 0.0:
 			events.append({"type": "evaded", "peer": survivor.id, "zombie": boss_id})
 			continue
-		var damage: float = Combat.apply_armor(RaidCone.damage(boss), survivor.inventory.armor)
+		var damage: float = Combat.apply_gear(RaidCone.damage(boss), survivor.inventory)
 		damage = _infected_damage_for(survivor, damage)
 		var taken: float = survivor.survival.hurt(damage)
 		if taken > 0.0:
@@ -5999,7 +6016,7 @@ func _resolve_raid_slam(boss_id: int, center: Vector2) -> void:
 		if survivor.dodge_immunity > 0.0:
 			events.append({"type": "evaded", "peer": survivor.id, "zombie": boss_id})
 			continue
-		var damage: float = Combat.apply_armor(RaidEncounter.slam_damage(boss), survivor.inventory.armor)
+		var damage: float = Combat.apply_gear(RaidEncounter.slam_damage(boss), survivor.inventory)
 		damage = _infected_damage_for(survivor, damage)
 		var taken: float = survivor.survival.hurt(damage)
 		if taken > 0.0:
@@ -6074,8 +6091,7 @@ func _resolve_spit_impact(zombie, center: Vector2) -> void:
 			continue
 		var armor_id: String = survivor.inventory.armor
 		var owned: bool = armor_id != "" and survivor.inventory.count(armor_id) > 0
-		var impact: float = Combat.apply_armor(float(zombie.data["damage"]),
-			armor_id if owned else "")
+		var impact: float = Combat.apply_gear(float(zombie.data["damage"]), survivor.inventory)
 		impact = _infected_damage_for(survivor, impact)
 		var applied: float = _hurt_player(survivor, impact)
 		if applied > 0.0 and _alive(survivor):
@@ -6140,8 +6156,7 @@ func _tick_acid_pools() -> void:
 				continue
 			var armor_id: String = survivor.inventory.armor
 			var owned: bool = armor_id != "" and survivor.inventory.count(armor_id) > 0
-			var impact: float = Combat.apply_armor(AcidSpitter.POOL_DAMAGE,
-				armor_id if owned else "")
+			var impact: float = Combat.apply_gear(AcidSpitter.POOL_DAMAGE, survivor.inventory)
 			impact = _infected_damage_for(survivor, impact)
 			var applied: float = _hurt_player(survivor, impact)
 			_acid_last_hit[survivor.id] = time
@@ -6299,8 +6314,7 @@ func _tick_zombies(delta: float) -> void:
 					events.append({"type": "parried", "peer": victim.id, "zombie": zombie.id})
 				var armor_id: String = victim.inventory.armor
 				var armor_owned: bool = armor_id != "" and victim.inventory.count(armor_id) > 0
-				var damage: float = Combat.apply_armor(float(result["damage"]),
-					armor_id if armor_owned else "")
+				var damage: float = Combat.apply_gear(float(result["damage"]), victim.inventory)
 				damage = _infected_damage_for(victim, damage)
 				if parried:
 					damage *= MeleeParry.DAMAGE_FACTOR
@@ -6744,6 +6758,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 				"bike_lamp_lit": BikeLantern.lit(other.inventory, other.mounted,
 					_alive(other), WorldCycle.is_night(time), other.bike_lamp_enabled),
 				"weapon": other.inventory.weapon,
+				"gear": other.inventory.gear.duplicate(), # Worn pieces show on the character for everyone.
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
 				"guild": {"id": other.guild_id, "name": other.guild_name},
 				"pvp_rank": PvPHonor.rank(other.pvp_honor),

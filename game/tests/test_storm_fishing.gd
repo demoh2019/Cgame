@@ -99,7 +99,7 @@ func run(t) -> void:
 	t.near(float(start.get("seconds", 0.0)), StormFishing.CAST_SECONDS, 0.001, "8s timer")
 	t.check(bool(fisher.action.get("storm_cast", false)), "server owns the pending mode")
 	t.eq(fisher.inventory.count("raw_fish"), 0, "no immediate fish")
-	t.eq(sim.cmd_fish(81, false, true).get("reason", ""), "busy", "no double casts")
+	t.eq(sim.cmd_fish(81, false, true).get("reason", ""), "no_bite", "no double casts: a second press is only a strike")
 	var xp_before: int = int(fisher.progression.gathering_xp["fishing"])
 	for i in range(85):
 		sim.time += 0.1

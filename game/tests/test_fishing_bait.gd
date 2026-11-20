@@ -121,7 +121,7 @@ func run(t) -> void:
 	t.eq(player.inventory.count(FishingBait.ITEM_ID), 2, "start does not spend bait")
 	t.eq(player.inventory.count("raw_fish"), 0, "start does not give instant fish")
 	t.eq(player.action.get("baited", false), true, "authoritative action remembers bait request")
-	t.eq(sim.cmd_fish(player.id, true).get("reason", ""), "busy",
+	t.eq(sim.cmd_fish(player.id, true).get("reason", ""), "no_bite",
 		"duplicate cast request cannot schedule another reward")
 	var before_xp: int = int(player.progression.gathering_xp["fishing"])
 	for i in range(55):

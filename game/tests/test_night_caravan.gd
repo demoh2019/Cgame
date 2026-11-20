@@ -246,3 +246,4 @@ func run(t) -> void:
 		"death wipes all unclaimed night premium progress")
 	t.eq(server.cmd_caravan(823, "abandon").get("reason"), "dead",
 		"dead courier cannot interact with an NPC trader"
+)

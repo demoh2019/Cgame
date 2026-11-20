@@ -16,6 +16,14 @@ static func apply_armor(damage: float, armor_id: String) -> float:
 	return damage * (1.0 - clampf(reduction, 0.0, 0.8))
 
 
+## Damage after everything worn: body armor plus hood, cloak, gloves and boots, at most 80% blocked.
+static func apply_gear(damage: float, inventory) -> float:
+	var reduction := 0.0
+	for piece in inventory.worn():
+		reduction += float(Defs.item(str(piece)).get("armor", 0.0))
+	return damage * (1.0 - clampf(reduction, 0.0, 0.8))
+
+
 ## Equipment-specific secondary wound resistance. Used only when the
 ## server has confirmed a real infected hit against the wearer, and after
 ## verifying the armor is still physically in their inventory.

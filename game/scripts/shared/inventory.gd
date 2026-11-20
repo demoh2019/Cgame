@@ -8,6 +8,9 @@ const TrailBackpack = preload("res://scripts/shared/trail_backpack.gd")
 var slots: Array = [] # Each is {} or {"id": String, "count": int}.
 var weapon: String = ""
 var armor: String = ""
+# Worn pieces besides the body armor: slot -> item id. Each slot takes items of the kind with the same name.
+const GEAR_SLOTS := ["head", "cape", "hands", "feet"]
+var gear: Dictionary = {}
 
 
 func _init(p_slots: int = Defs.INVENTORY_SLOTS) -> void:
@@ -118,7 +121,26 @@ func equip(id: String) -> bool:
 		"armor":
 			armor = id
 			return true
+		"head", "cape", "hands", "feet":
+			gear[str(data["kind"])] = id
+			return true
 	return false
+
+
+## Everything worn for protection: the body armor and the pieces in the gear slots.
+func worn() -> Array:
+	var pieces: Array = []
+	if armor != "" and count(armor) > 0:
+		pieces.append(armor)
+	for slot in GEAR_SLOTS:
+		var piece: String = str(gear.get(slot, ""))
+		if piece != "" and count(piece) > 0: # Only what is still carried protects.
+			pieces.append(piece)
+	return pieces
+
+
+func is_equipped(id: String) -> bool:
+	return id != "" and (id == weapon or id == armor or gear.values().has(id))
 
 
 func unequip_missing() -> void:
@@ -127,6 +149,9 @@ func unequip_missing() -> void:
 		weapon = ""
 	if armor != "" and count(armor) < 1:
 		armor = ""
+	for slot in gear.keys():
+		if count(str(gear[slot])) < 1:
+			gear.erase(slot)
 
 
 ## Best tool of a kind that is carried (the highest tier).
@@ -152,14 +177,16 @@ func take_everything() -> Dictionary:
 			slots[i] = {}
 	weapon = ""
 	armor = ""
+	gear = {}
 	return result
 
 
 func to_dict() -> Dictionary:
-	return {"slots": slots.duplicate(true), "weapon": weapon, "armor": armor}
+	return {"slots": slots.duplicate(true), "weapon": weapon, "armor": armor, "gear": gear.duplicate()}
 
 
 func load_dict(data: Dictionary) -> void:
 	slots = data.get("slots", []).duplicate(true)
 	weapon = data.get("weapon", "")
 	armor = data.get("armor", "")
+	gear = (data.get("gear", {}) as Dictionary).duplicate() if data.get("gear", {}) is Dictionary else {}

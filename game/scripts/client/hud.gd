@@ -49,8 +49,25 @@ var _preset_labels: Array[Label] = []
 var _action_sections: Array = [[0, "Gear"]]
 var _inventory_summary: Label
 var _inventory_tabs: TabContainer
+var social # Nakama chat, guilds and friends (online_main sets it; null or signed out when playing offline).
+var _left_column: VBoxContainer # "+", buffs and the party under the portrait.
+var _buff_row: HFlowContainer
+var _party_list: VBoxContainer
+var _left_signature := ""
+var _social_panel: PanelContainer
+var _social_tabs: TabContainer
+var _guild_status: Label
+var _guild_results: VBoxContainer
+var _friend_list: VBoxContainer
 var _actions_panel: PanelContainer
 var _doll: GridContainer # Equipment sockets of the bag window.
+var _inventory_scroll: ScrollContainer
+# Item categories shown in the bag and the workshop (side buttons switch them; all on = everything).
+const ITEM_CATEGORIES := [["weapons", "Weapons", "machete"], ["gear", "Armor and clothes", "jacket"],
+	["supplies", "Food, water and medicine", "canned_food"], ["materials", "Resources and materials", "wood"],
+	["other", "Tools and everything else", "scrap"]]
+var _bag_filter := {"weapons": true, "gear": true, "supplies": true, "materials": true, "other": true}
+var _craft_filter := {"weapons": true, "gear": true, "supplies": true, "materials": true, "other": true}
 var _doll_info: VBoxContainer
 var _quick_slots := {"food": "", "potion": ""} # Client-side quick use picks, saved in user://quick_slots.cfg.
 var _drag_role := "" # The doll socket the dragged item fits, lit while dragging.
@@ -135,6 +152,7 @@ func _build() -> void:
 	radar.offset_bottom = -16.0
 	_radar = radar
 	_build_menu_bar()
+	_build_left_column()
 
 	var top_left := VBoxContainer.new()
 	top_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1188,6 +1206,9 @@ func toggle_inventory() -> void:
 	_inventory_panel.visible = not _inventory_panel.visible
 	_actions_panel.visible = _inventory_panel.visible and not _craft_panel.visible
 	if _inventory_panel.visible:
+		var view: Vector2 = get_viewport().get_visible_rect().size
+		var content: Vector2 = _inventory_scroll.get_child(0).get_combined_minimum_size()
+		_inventory_scroll.custom_minimum_size = Vector2(content.x + 14.0, view.y - 84.0 - 112.0 - 32.0)
 		_dock(_inventory_panel, false)
 		_dock(_actions_panel, true)
 		client.market_list()
@@ -1209,6 +1230,8 @@ func _dock(panel: Control, left: bool) -> void:
 ## short list instead of a hundred buttons in a row.
 func _arrange_inventory_window() -> void:
 	var box: VBoxContainer = _inventory_panel.get_child(0)
+	# The section marks are positions in this list as built: take it before anything moves out of it.
+	var built: Array = box.get_children()
 	_inventory_panel.remove_child(box)
 	var window := VBoxContainer.new()
 	window.add_theme_constant_override("separation", 8)
@@ -1255,7 +1278,16 @@ func _arrange_inventory_window() -> void:
 		window.add_child(moved)
 		for inner in moved.get_children():
 			(inner as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_inventory_panel.add_child(window)
+	# The bag scrolls when the screen is shorter than everything in it (toggle_inventory sizes it to the screen).
+	_inventory_scroll = ScrollContainer.new()
+	_inventory_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	window.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_inventory_scroll.add_child(window)
+	var bag_row := HBoxContainer.new()
+	bag_row.add_theme_constant_override("separation", 8)
+	bag_row.add_child(_category_bar(_bag_filter, func() -> void: _inventory_signature = ""))
+	bag_row.add_child(_inventory_scroll)
+	_inventory_panel.add_child(bag_row)
 
 	# The actions, in build order, split at the section marks into tabs, in their own window on the left.
 	_actions_panel = PanelContainer.new()
@@ -1272,7 +1304,7 @@ func _arrange_inventory_window() -> void:
 	_inventory_tabs = tabs
 	actions.add_child(tabs)
 	var pages: Dictionary = {}
-	var children: Array = box.get_children()
+	var children: Array = built
 	var section := 0
 	for index in children.size():
 		while section + 1 < _action_sections.size() and index >= int(_action_sections[section + 1][0]):
@@ -1309,6 +1341,12 @@ func _arrange_inventory_window() -> void:
 	var craft_header := _window_header("Workshop", "Survivor's", toggle_crafting)
 	craft_box.add_child(craft_header)
 	craft_box.move_child(craft_header, 0)
+	_craft_panel.remove_child(craft_box)
+	var craft_row := HBoxContainer.new()
+	craft_row.add_theme_constant_override("separation", 8)
+	craft_row.add_child(_category_bar(_craft_filter, func() -> void: _craft_signature = ""))
+	craft_row.add_child(craft_box)
+	_craft_panel.add_child(craft_row)
 
 
 ## A window title: small owner line over a large name, a close button on the right.
@@ -1389,6 +1427,492 @@ func _press_key(key: int) -> void:
 		Input.parse_input_event(event)
 
 
+# Effects on you, as round icons under the portrait: [snapshot key, icon, name, debuff, how the number reads].
+# "pct" shows the value as percent, "s" as seconds left, "hits" as charges, "" as a flag.
+const EFFECTS := [
+	["infection", "spore_culture", "Infection: grows until treated with antiseptic or antibiotics", true, "pct"],
+	["bleeding", "bandage", "Bleeding: bandage it", true, "pct"],
+	["fracture", "field_splint", "Fracture: slows you; a splint helps", true, "pct"],
+	["exposure", "thermal_wrap", "Cold: warm up at a fire, in shelter or with a heat pack", true, "pct"],
+	["combat_tag_seconds", "machete", "In combat: logging out now drops your gear in full-loot zones", true, "s"],
+	["meal_seconds", "cooked_fish", "Hearty meal: better regeneration", false, "s"],
+	["coating_seconds", "antiseptic_edge_oil", "Antiseptic edge oil on your weapon", false, "s"],
+	["sharpened_hits", "field_whetstone", "Sharpened weapon", false, "hits"],
+	["sighted_hits", "field_sighting_kit", "Sighted weapon", false, "hits"],
+	["plated_hits", "field_armor_plate", "Armor plate", false, "hits"],
+	["scent_mask_seconds", "herbal_scent_mask", "Scent salve: the infected smell you less", false, "s"],
+	["soft_sole_seconds", "soft_sole_wraps", "Soft soles: quieter steps", false, "s"],
+	["spore_filter_seconds", "spore_filter", "Spore filter", false, "s"],
+	["storm_insulator_seconds", "storm_insulator", "Storm insulation", false, "s"],
+	["chain_wrap_seconds", "bike_chain_wrap", "Quiet bike chain", false, "s"],
+	["tire_grip_seconds", "trail_tire_grips", "Tire grips", false, "s"],
+	["flare_seconds", "signal_flare", "Signal flare burning", false, "s"],
+	["warmth_seconds", "stormproof_briquette", "Warm", false, "s"],
+	["tent_sheltered", "storm_tarp_anchors", "Sheltered under a tarp", false, ""],
+	["rested_xp_credit", "return_charm", "Rested: bonus training", false, ""],
+	["warden_ward", "warden_jacket", "Warden's ward", false, ""],
+	["guardian_guarded_seconds", "siege_blast_brace", "Guarded by an ally", false, "s"],
+	["recall_seconds", "return_charm", "Returning to the settlement", false, "s"],
+]
+
+
+## The column under the portrait: the "+" for the community window and your buffs and debuffs on one row, the party
+## below it. The quest card follows under it (hud_skin.gd reads where this column ends).
+func _build_left_column() -> void:
+	_left_column = VBoxContainer.new()
+	_left_column.name = "LeftColumn"
+	_left_column.position = Vector2(40, 102)
+	_left_column.add_theme_constant_override("separation", 8)
+	_left_column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_left_column)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_left_column.add_child(row)
+	var plus := Button.new()
+	plus.text = "+"
+	plus.tooltip_text = "Community: group, guild, friends"
+	plus.custom_minimum_size = Vector2(28, 28)
+	plus.focus_mode = Control.FOCUS_NONE
+	plus.add_theme_font_size_override("font_size", 20)
+	plus.add_theme_color_override("font_color", UiTheme.GOLD)
+	for state in ["normal", "hover", "pressed"]:
+		var round := StyleBoxFlat.new()
+		round.anti_aliasing = true
+		round.bg_color = Color(0.3, 0.2, 0.12) if state == "normal" else (Color(0.42, 0.29, 0.17) if state == "hover" else UiTheme.ACCENT)
+		round.set_corner_radius_all(14)
+		round.set_border_width_all(2)
+		round.border_color = Color(0.72, 0.55, 0.3)
+		round.content_margin_top = -5
+		button_shadow(round)
+		plus.add_theme_stylebox_override(state, round)
+	plus.pressed.connect(toggle_social)
+	row.add_child(plus)
+	# The effects sit right under the health and energy bars, as in the portrait frames of online RPGs.
+	_buff_row = HFlowContainer.new()
+	_buff_row.name = "Effects"
+	_buff_row.position = Vector2(96, 78)
+	_buff_row.size = Vector2(230, 26)
+	_buff_row.add_theme_constant_override("h_separation", 4)
+	_buff_row.add_theme_constant_override("v_separation", 4)
+	_buff_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_buff_row)
+	_party_list = VBoxContainer.new()
+	_party_list.add_theme_constant_override("separation", 4)
+	_party_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_left_column.add_child(_party_list)
+
+
+static func button_shadow(style: StyleBoxFlat) -> void:
+	style.shadow_color = Color(0, 0, 0, 0.4)
+	style.shadow_size = 3
+	style.shadow_offset = Vector2(0, 2)
+
+
+## Rebuilds the buffs and the party when they change (numbers in whole seconds, so about once a second at most).
+func _refresh_left_column() -> void:
+	if _left_column == null:
+		return
+	var you: Dictionary = client.you
+	var shown: Array = []
+	# Food and water always lead the row; they turn red when running out.
+	shown.append([["hunger", "canned_food", "Food: eat before it runs out", float(you.get("hunger", 100.0)) < 20.0, "pct"], float(you.get("hunger", 100.0))])
+	shown.append([["thirst", "water_bottle", "Water: drink at a lake or from a bottle", float(you.get("thirst", 100.0)) < 20.0, "pct"], float(you.get("thirst", 100.0))])
+	for effect in EFFECTS:
+		var raw: Variant = you.get(effect[0], 0)
+		var value: float = 1.0 if raw is bool and raw else (float(raw) if (raw is float or raw is int) else 0.0)
+		if (effect[0] in ["infection", "bleeding", "fracture", "exposure"] and value < 0.5) or value <= 0.0:
+			continue
+		shown.append([effect, value])
+	var roster: Array = []
+	var party: Variant = you.get("party", {})
+	if party is Dictionary and int(party.get("id", 0)) > 0 and party.get("roster", []) is Array:
+		roster = party["roster"]
+	var signature := ""
+	for entry in shown:
+		signature += "%s:%d," % [entry[0][0], int(entry[1])]
+	signature += "|" + str(roster) + "|" + str(party.get("leader", 0) if party is Dictionary else 0)
+	if signature != _left_signature:
+		_left_signature = signature
+		for child in _buff_row.get_children():
+			child.queue_free()
+		for entry in shown:
+			_buff_row.add_child(_effect_icon(entry[0], entry[1]))
+		for child in _party_list.get_children():
+			child.queue_free()
+		for member in roster.slice(0, PartyFrames.MAX_VISIBLE_MEMBERS):
+			if member is Dictionary:
+				_party_list.add_child(_party_member_row(member, int(party.get("leader", 0))))
+	if _skin != null:
+		_skin._vitals_bottom = maxf(_buff_row.position.y + _buff_row.get_combined_minimum_size().y,
+			_left_column.position.y + _left_column.get_combined_minimum_size().y)
+
+
+func _effect_icon(effect: Array, value: float) -> Control:
+	var debuff: bool = effect[3]
+	var holder := Panel.new()
+	holder.custom_minimum_size = Vector2(26, 26)
+	var round := StyleBoxFlat.new()
+	round.anti_aliasing = true
+	round.bg_color = Color(0.32, 0.08, 0.07, 0.92) if debuff else Color(0.12, 0.2, 0.1, 0.92)
+	if not debuff and effect[0] in ["hunger", "thirst"]:
+		round.bg_color = Color(0.16, 0.11, 0.07, 0.92)
+	round.set_corner_radius_all(13)
+	round.set_border_width_all(2)
+	round.border_color = Color(0.95, 0.35, 0.3) if debuff else (Color(0.72, 0.55, 0.3) if effect[0] in ["hunger", "thirst"] else Color(0.55, 0.85, 0.4))
+	holder.add_theme_stylebox_override("panel", round)
+	var unit: String = effect[4]
+	var amount := ""
+	match unit:
+		"pct":
+			amount = str(int(value)) if effect[0] in ["hunger", "thirst"] else "%d%%" % int(value)
+		"s":
+			amount = "%ds" % ceili(value) if value < 100.0 else "%dm" % ceili(value / 60.0)
+		"hits":
+			amount = str(int(value))
+	holder.tooltip_text = str(effect[2]) + ("  (%s)" % amount if amount != "" else "")
+	var art := TextureRect.new()
+	art.texture = ItemIcons.icon(str(effect[1]))
+	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 5)
+	art.modulate = Color(1.0, 0.9, 0.86) if debuff else Color(0.95, 0.98, 0.9)
+	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.add_child(art)
+	if amount != "":
+		var label := Label.new()
+		label.text = amount
+		label.add_theme_font_size_override("font_size", 9)
+		label.add_theme_constant_override("outline_size", 3)
+		label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+		label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, -2)
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		holder.add_child(label)
+	return holder
+
+
+## One party member under the "+": a round marker (gold for the leader), the name and a health bar.
+func _party_member_row(member: Dictionary, leader: int) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	var alive: bool = bool(member.get("alive", false))
+	var marker := Panel.new()
+	marker.custom_minimum_size = Vector2(26, 26)
+	var round := StyleBoxFlat.new()
+	round.anti_aliasing = true
+	round.bg_color = Color(0.3, 0.24, 0.18) if alive else Color(0.25, 0.25, 0.25)
+	round.set_corner_radius_all(13)
+	round.set_border_width_all(2)
+	round.border_color = UiTheme.GOLD if int(member.get("id", -1)) == leader else Color(0.72, 0.55, 0.3)
+	marker.add_theme_stylebox_override("panel", round)
+	var face := TextureRect.new()
+	face.texture = load("res://assets/icons/ui/portrait.svg")
+	face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	face.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 4)
+	face.modulate = Color(0.95, 0.88, 0.74)
+	marker.add_child(face)
+	row.add_child(marker)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 1)
+	var name_label := Label.new()
+	var name_text: String = str(member.get("name", "Survivor")).substr(0, PartyFrames.MAX_NAME_CHARS)
+	name_label.text = ("★ " if int(member.get("id", -1)) == leader else "") + name_text + ("  (you)" if int(member.get("id", -1)) == client.peer_id else "") + ("" if alive else "  DOWN")
+	name_label.add_theme_font_size_override("font_size", 12)
+	column.add_child(name_label)
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(150, 7)
+	bar.show_percentage = false
+	bar.max_value = 100.0
+	var health: float = float(member.get("health", 0.0))
+	bar.value = clampf(health if is_finite(health) else 0.0, 0.0, 100.0) if alive else 0.0
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color(0.8, 0.2, 0.16)
+	fill.set_corner_radius_all(3)
+	bar.add_theme_stylebox_override("fill", fill)
+	var back := StyleBoxFlat.new()
+	back.bg_color = Color(0.08, 0.05, 0.03, 0.85)
+	back.set_corner_radius_all(3)
+	bar.add_theme_stylebox_override("background", back)
+	column.add_child(bar)
+	row.add_child(column)
+	return row
+
+
+# --- Community window ("+"): group, guild, friends -----------------------------------------------------------------
+
+func toggle_social() -> void:
+	if _social_panel == null:
+		_build_social_window()
+	_social_panel.visible = not _social_panel.visible
+	if _social_panel.visible:
+		_actions_panel.visible = false
+		_craft_panel.visible = false
+		_dock(_social_panel, true)
+		_refresh_guild_tab()
+		_refresh_friends()
+
+
+func _build_social_window() -> void:
+	_social_panel = PanelContainer.new()
+	_social_panel.name = "CommunityWindow"
+	_social_panel.theme = UiTheme.paper_theme()
+	_social_panel.visible = false
+	add_child(_social_panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	_social_panel.add_child(box)
+	box.add_child(_window_header("Community", "Survivor's", toggle_social))
+	_social_tabs = TabContainer.new()
+	_social_tabs.custom_minimum_size = Vector2(430, 520)
+	box.add_child(_social_tabs)
+	# Group: the party actions move here from the actions window.
+	var party_page: Node = _inventory_tabs.get_node_or_null("Party") if _inventory_tabs != null else null
+	if party_page != null:
+		_inventory_tabs.remove_child(party_page)
+		party_page.name = "Group"
+		_social_tabs.add_child(party_page)
+	# Guild: finder, create, members, leave.
+	var guild_scroll := ScrollContainer.new()
+	guild_scroll.name = "Guild"
+	guild_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var guild := VBoxContainer.new()
+	guild.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	guild.add_theme_constant_override("separation", 8)
+	guild_scroll.add_child(guild)
+	_social_tabs.add_child(guild_scroll)
+	_guild_status = Label.new()
+	_guild_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	guild.add_child(_guild_status)
+	var guild_actions := HBoxContainer.new()
+	var members := Button.new()
+	members.text = "Members"
+	members.pressed.connect(_show_guild_members)
+	guild_actions.add_child(members)
+	var leave := Button.new()
+	leave.text = "Leave guild"
+	leave.pressed.connect(func() -> void:
+		if _social_ready():
+			await social.leave_guild()
+			_refresh_guild_tab())
+	guild_actions.add_child(leave)
+	guild.add_child(guild_actions)
+	guild.add_child(_section_label("FIND A GUILD", "Search by the start of the name; empty lists every guild."))
+	var search_row := HBoxContainer.new()
+	var search := LineEdit.new()
+	search.placeholder_text = "Guild name..."
+	search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	search_row.add_child(search)
+	var find := Button.new()
+	find.text = "Search"
+	find.pressed.connect(func() -> void: _search_guilds(search.text))
+	search.text_submitted.connect(func(text: String) -> void: _search_guilds(text))
+	search_row.add_child(find)
+	guild.add_child(search_row)
+	_guild_results = VBoxContainer.new()
+	_guild_results.add_theme_constant_override("separation", 4)
+	guild.add_child(_guild_results)
+	guild.add_child(_section_label("FOUND A GUILD", "Three letters or more."))
+	var create_row := HBoxContainer.new()
+	var new_name := LineEdit.new()
+	new_name.placeholder_text = "New guild name"
+	new_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	create_row.add_child(new_name)
+	var create := Button.new()
+	create.text = "Create"
+	create.pressed.connect(func() -> void:
+		if not _social_ready():
+			return
+		var result: Dictionary = await social.create_guild(new_name.text)
+		say("Guild created." if result.get("ok", false) else "Guild: %s" % str(result.get("reason", "failed")))
+		_refresh_guild_tab())
+	create_row.add_child(create)
+	guild.add_child(create_row)
+	# Friends: list and requests.
+	var friends_scroll := ScrollContainer.new()
+	friends_scroll.name = "Friends"
+	friends_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var friends := VBoxContainer.new()
+	friends.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	friends.add_theme_constant_override("separation", 8)
+	friends_scroll.add_child(friends)
+	_social_tabs.add_child(friends_scroll)
+	var add_row := HBoxContainer.new()
+	var friend_name := LineEdit.new()
+	friend_name.placeholder_text = "Player name"
+	friend_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_row.add_child(friend_name)
+	var add := Button.new()
+	add.text = "Add friend"
+	add.pressed.connect(func() -> void:
+		if not _social_ready():
+			return
+		var result: Dictionary = await social.add_friend(friend_name.text)
+		say("Friend request sent." if result.get("ok", false) else "Friends: %s" % str(result.get("reason", "failed")))
+		_refresh_friends())
+	add_row.add_child(add)
+	friends.add_child(add_row)
+	_friend_list = VBoxContainer.new()
+	_friend_list.add_theme_constant_override("separation", 4)
+	friends.add_child(_friend_list)
+	_social_tabs.current_tab = 0
+
+
+## Guilds and friends live in the online account; offline play has neither.
+func _social_ready() -> bool:
+	if social == null or social.session == null or social.session.is_exception():
+		say("Guilds and friends need the online account (a Nakama server).")
+		return false
+	return true
+
+
+func _refresh_guild_tab() -> void:
+	if _guild_status == null:
+		return
+	if social == null or social.session == null:
+		_guild_status.text = "Offline: guilds and friends need the online account (a Nakama server)."
+		return
+	_guild_status.text = "Your guild: %s" % str(social.guild.get("name", "none")) if not social.guild.is_empty() else "You are not in a guild yet. Find one below or found your own."
+
+
+func _search_guilds(prefix: String) -> void:
+	if not _social_ready():
+		return
+	for child in _guild_results.get_children():
+		child.queue_free()
+	var found: Array = await social.list_guilds(prefix.strip_edges())
+	if found.is_empty():
+		var none := Label.new()
+		none.text = "No guild found."
+		_guild_results.add_child(none)
+	for entry in found:
+		var row := HBoxContainer.new()
+		var label := Label.new()
+		label.text = "%s   ·   %d members%s" % [str(entry["name"]), int(entry["members"]), "" if bool(entry["open"]) else "   ·   invite only"]
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		var join := Button.new()
+		join.text = "Join"
+		join.disabled = not social.guild.is_empty()
+		var guild_id: String = str(entry["id"])
+		join.pressed.connect(func() -> void:
+			var result: Dictionary = await social.join_guild(guild_id)
+			say("Joined the guild." if result.get("ok", false) else "Guild: %s" % str(result.get("reason", "request sent")))
+			_refresh_guild_tab())
+		row.add_child(join)
+		_guild_results.add_child(row)
+
+
+func _show_guild_members() -> void:
+	if not _social_ready():
+		return
+	var names: Array = await social.guild_members()
+	say("Guild members: %s" % (", ".join(names) if not names.is_empty() else "none"))
+
+
+func _refresh_friends() -> void:
+	if _friend_list == null:
+		return
+	for child in _friend_list.get_children():
+		child.queue_free()
+	if social == null or social.session == null:
+		var offline := Label.new()
+		offline.text = "Offline: friends need the online account."
+		_friend_list.add_child(offline)
+		return
+	var friends: Array = await social.list_friends()
+	if friends.is_empty():
+		var none := Label.new()
+		none.text = "No friends yet. Add someone by name above."
+		_friend_list.add_child(none)
+	for entry in friends:
+		var label := Label.new()
+		var state: String = ["", "  (request sent)", "  (wants to be friends: add them back)", "  (blocked)"][clampi(int(entry["state"]), 0, 3)]
+		label.text = "%s %s%s" % ["●" if bool(entry["online"]) else "○", str(entry["name"]), state]
+		label.add_theme_color_override("font_color", Color(0.2, 0.5, 0.15) if bool(entry["online"]) else UiTheme.INK_SOFT)
+		_friend_list.add_child(label)
+
+
+## The category an item belongs to, for the side buttons.
+static func _item_category(item_id: String) -> String:
+	match str(Defs.item(item_id).get("kind", "")):
+		"weapon", "ammo":
+			return "weapons"
+		"armor", "head", "cape", "hands", "feet", "armor_plate", "carry_pack":
+			return "gear"
+		"food", "drink", "medical", "party_medical", "stimulant":
+			return "supplies"
+		"resource", "material", "currency":
+			return "materials"
+	return "other"
+
+
+static func _filter_all(filter: Dictionary) -> bool:
+	for key in filter:
+		if not bool(filter[key]):
+			return false
+	return true
+
+
+## A column of round toggle buttons on the side of a window: "All" and one per item category. Several can be on at once;
+## "All" turns every category on, and off again when all already are.
+func _category_bar(filter: Dictionary, changed: Callable) -> VBoxContainer:
+	var bar := VBoxContainer.new()
+	bar.add_theme_constant_override("separation", 6)
+	var buttons: Dictionary = {}
+	var all := _category_button("res://assets/icons/ui/menu_inventory.svg", "All items (click again to clear)")
+	bar.add_child(all)
+	for entry in ITEM_CATEGORIES:
+		var button := _category_button(ItemIcons.DIR + str(entry[2]) + ".svg", str(entry[1]))
+		buttons[entry[0]] = button
+		bar.add_child(button)
+	var sync := func() -> void:
+		all.set_pressed_no_signal(_filter_all(filter))
+		for key in buttons:
+			(buttons[key] as Button).set_pressed_no_signal(bool(filter[key]))
+	all.pressed.connect(func() -> void:
+		var everything: bool = not _filter_all(filter)
+		for key in filter:
+			filter[key] = everything
+		sync.call()
+		changed.call())
+	for key in buttons:
+		var category: String = key
+		(buttons[key] as Button).pressed.connect(func() -> void:
+			filter[category] = not bool(filter[category])
+			sync.call()
+			changed.call())
+	sync.call()
+	return bar
+
+
+func _category_button(icon_path: String, tip: String) -> Button:
+	var button := Button.new()
+	button.toggle_mode = true
+	button.custom_minimum_size = Vector2(40, 40)
+	button.tooltip_text = tip
+	button.focus_mode = Control.FOCUS_NONE
+	button.icon = load(icon_path) if ResourceLoader.exists(icon_path) else null
+	button.expand_icon = true
+	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	for state in ["normal", "hover", "pressed", "hover_pressed"]:
+		var round := StyleBoxFlat.new()
+		round.anti_aliasing = true
+		var on: bool = state.contains("pressed")
+		round.bg_color = Color(0.5, 0.17, 0.12) if on else Color(0.72, 0.62, 0.47)
+		if state.begins_with("hover"):
+			round.bg_color = round.bg_color.lightened(0.12)
+		round.set_corner_radius_all(20)
+		round.set_border_width_all(2)
+		round.border_color = UiTheme.GOLD if on else Color(UiTheme.WOOD.r, UiTheme.WOOD.g, UiTheme.WOOD.b, 0.5)
+		round.set_content_margin_all(8)
+		button.add_theme_stylebox_override(state, round)
+	for state in ["icon_normal_color", "icon_hover_color", "icon_focus_color"]:
+		button.add_theme_color_override(state, Color(UiTheme.WOOD.r, UiTheme.WOOD.g, UiTheme.WOOD.b, 0.75))
+	for state in ["icon_pressed_color", "icon_hover_pressed_color"]:
+		button.add_theme_color_override(state, Color(1.0, 0.94, 0.82))
+	return button
+
+
 ## A heading with a small hint under it.
 func _section_label(text: String, hint: String) -> Control:
 	var column := VBoxContainer.new()
@@ -1415,7 +1939,22 @@ func _rule() -> Control:
 
 
 func _style_action_page(page: VBoxContainer) -> void:
+	# A row with more buttons than fit becomes a grid of four columns, so no label is cut off.
 	for child in page.get_children():
+		if child is HBoxContainer and child.get_children().filter(func(n: Node) -> bool: return n is Button).size() > 4:
+			var grid := GridContainer.new()
+			grid.columns = 4
+			grid.name = child.name
+			var at: int = child.get_index()
+			for inner in child.get_children():
+				child.remove_child(inner)
+				grid.add_child(inner)
+			page.add_child(grid)
+			page.move_child(grid, at)
+			child.queue_free()
+	for child in page.get_children():
+		if child.is_queued_for_deletion():
+			continue
 		if child is Label:
 			var label := child as Label
 			label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1452,7 +1991,8 @@ func toggle_crafting() -> void:
 
 
 func is_menu_open() -> bool:
-	return _inventory_panel.visible or _craft_panel.visible or (_actions_panel != null and _actions_panel.visible)
+	return _inventory_panel.visible or _craft_panel.visible or (_actions_panel != null and _actions_panel.visible) \
+		or (_social_panel != null and _social_panel.visible)
 
 
 func set_prompt(text: String) -> void:
@@ -2259,6 +2799,12 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Camp rest: " + str(data.get("reason", "rejected")))
 		return
 	if kind == "fish":
+		if bool(data.get("hooked", false)):
+			say("Fishing: hooked! A bigger catch is coming in.")
+			return
+		if str(data.get("reason", "")) in ["no_bite", "already_struck"]:
+			say("Fishing: %s" % ("too early or too late, the fish slipped away" if str(data["reason"]) == "no_bite" else "you already struck"))
+			return
 		if bool(data.get("ok", false)):
 			var fish_id: String = str(data.get("item", "raw_fish"))
 			say("Fishing: %scasting for %s (%d s)..." % [
@@ -2824,6 +3370,7 @@ func _process(_delta: float) -> void:
 		_equipped.text += "\nPrepared meal T%d: %.0fs | +%.1f stamina/s, +%.2f energy/s" % [
 			meal_tier, meal_left, HeartyMeal.stamina_per_second(meal_tier),
 			HeartyMeal.energy_per_second(meal_tier)]
+	_refresh_left_column()
 	_party_frames.text = PartyFrames.describe(client.you.get("party", {}), client.peer_id)
 	_party_frames.visible = not _party_frames.text.is_empty()
 	_death.visible = not bool(client.you.get("alive", true))
@@ -3136,7 +3683,7 @@ static func _kind_tile(kind: String) -> Color:
 	match kind:
 		"weapon", "ammo":
 			return Color(0.56, 0.2, 0.16)
-		"armor", "armor_plate", "carry_pack", "siege_brace":
+		"armor", "armor_plate", "carry_pack", "siege_brace", "head", "cape", "hands", "feet":
 			return Color(0.22, 0.32, 0.5)
 		"medical", "party_medical", "stimulant":
 			return Color(0.6, 0.26, 0.32)
@@ -3171,7 +3718,7 @@ func _refresh_presets() -> void:
 
 func _refresh_inventory() -> void:
 	_refresh_presets()
-	var signature := str(client.inventory.to_dict()) + "|" + str(client.stash.to_dict())
+	var signature := str(client.inventory.to_dict()) + "|" + str(client.stash.to_dict()) + str(_bag_filter) + str(_quick_slots)
 	if signature == _inventory_signature:
 		return
 	_inventory_signature = signature
@@ -3201,13 +3748,17 @@ func _refresh_inventory() -> void:
 	for child in _inventory_grid.get_children():
 		child.queue_free()
 	var used := 0
+	var showing_all: bool = _filter_all(_bag_filter)
 	for slot in client.inventory.slots:
 		if slot.is_empty():
-			_inventory_grid.add_child(_item_card("", 0, false, Vector2(64, 64)))
+			if showing_all: # A filtered view lists only the matching items.
+				_inventory_grid.add_child(_item_card("", 0, false, Vector2(64, 64)))
 			continue
 		used += 1
 		var item_id: String = slot["id"]
-		var equipped: bool = item_id == client.inventory.weapon or item_id == client.inventory.armor
+		if not bool(_bag_filter.get(_item_category(item_id), true)):
+			continue
+		var equipped: bool = client.inventory.is_equipped(item_id)
 		var info: Dictionary = Defs.item(item_id)
 		var card := _item_card(item_id, int(slot["count"]), equipped, Vector2(64, 64))
 		card.tooltip_text = "%s\n%s  ·  Tier %d%s\n\nDouble click or drag to a lit slot: equip\nRight click: put one in the stash" % [
@@ -3228,6 +3779,8 @@ func _refresh_inventory() -> void:
 			continue
 		stashed += 1
 		var item_id: String = slot["id"]
+		if not bool(_bag_filter.get(_item_category(item_id), true)):
+			continue
 		var card := _item_card(item_id, int(slot["count"]), false, Vector2(54, 54))
 		card.tooltip_text = "%s  x%d\nClick: take one out (at a workbench)" % [Defs.item(item_id).get("name", item_id), int(slot["count"])]
 		card.pressed.connect(func() -> void: client.move_stash(item_id, 1, false))
@@ -3301,8 +3854,10 @@ func _card_badge(text: String, color: Color, corner: int) -> Label:
 
 
 # The equipment sockets of the paper doll: [role, caption, ghost icon item].
-const DOLL_SLOTS := [["weapon", "Weapon", "club"], ["armor", "Armor", "jacket"], ["bag", "Bag", "trail_backpack"],
-	["food", "Food", "canned_food"], ["potion", "Potion", "bandage"], ["mount", "Mount", "salvage_bike"]]
+const DOLL_SLOTS := [["bag", "Bag", "trail_backpack"], ["head", "Head", "hood_1"], ["cape", "Cape", "cloak_1"],
+	["weapon", "Weapon", "club"], ["armor", "Armor", "jacket"], ["hands", "Hands", "gloves_1"],
+	["food", "Food", "canned_food"], ["feet", "Feet", "boots_1"], ["potion", "Potion", "bandage"],
+	["", "", ""], ["mount", "Mount", "salvage_bike"], ["", "", ""]]
 
 
 ## Which doll socket an item belongs in ("" for none): weapons and armor are worn, a carry pack and a bike count while
@@ -3313,6 +3868,8 @@ static func _doll_role(item_id: String) -> String:
 			return "weapon"
 		"armor":
 			return "armor"
+		"head", "cape", "hands", "feet":
+			return str(Defs.item(item_id).get("kind", ""))
 		"carry_pack":
 			return "bag"
 		"mount":
@@ -3331,6 +3888,9 @@ func _doll_item(role: String) -> String:
 			return client.inventory.weapon
 		"armor":
 			return client.inventory.armor
+		"head", "cape", "hands", "feet":
+			var worn: String = str(client.inventory.gear.get(role, ""))
+			return worn if client.inventory.count(worn) > 0 else ""
 		"food", "potion":
 			var picked: String = str(_quick_slots[role])
 			return picked if picked != "" and client.inventory.count(picked) > 0 else ""
@@ -3347,6 +3907,11 @@ func _refresh_equipment() -> void:
 		child.queue_free()
 	for entry in DOLL_SLOTS:
 		var role: String = entry[0]
+		if role == "":
+			var gap := Control.new()
+			gap.custom_minimum_size = Vector2(62, 62)
+			_doll.add_child(gap)
+			continue
 		var item_id: String = _doll_item(role)
 		var count: int = client.inventory.count(item_id) if role in ["food", "potion"] and item_id != "" else 0
 		var card := _item_card(item_id, count, false, Vector2(62, 62))
@@ -3419,9 +3984,9 @@ func _refresh_equipment() -> void:
 ## Equip or assign an item, as dropping it on its socket or double clicking it does.
 func _put_in_doll(item_id: String) -> void:
 	match _doll_role(item_id):
-		"weapon", "armor":
-			if item_id != client.inventory.weapon and item_id != client.inventory.armor:
-				client.use_item(item_id) # The server equips weapons and armor on use.
+		"weapon", "armor", "head", "cape", "hands", "feet":
+			if not client.inventory.is_equipped(item_id):
+				client.use_item(item_id) # The server equips worn items on use.
 		"food", "potion":
 			_set_quick_slot(_doll_role(item_id), item_id)
 		"bag", "mount":
@@ -3481,7 +4046,7 @@ func _refresh_crafting() -> void:
 	var use_bank: bool = _craft_use_stash.button_pressed
 	var signature := str(client.inventory.slots) + str(client.you.get("crafting_level", 1)) \
 		+ _craft_search.text + str(_craft_ready_only.button_pressed) \
-		+ str(use_bank) + (str(client.stash.slots) if use_bank else "")
+		+ str(use_bank) + (str(client.stash.slots) if use_bank else "") + str(_craft_filter)
 	if signature == _craft_signature:
 		return
 	_craft_signature = signature
@@ -3491,6 +4056,8 @@ func _refresh_crafting() -> void:
 		client.inventory, _craft_search.text, _craft_ready_only.button_pressed,
 		int(client.you.get("crafting_level", 1)),
 		client.stash if use_bank else null)
+	entries.assign(entries.filter(func(entry: Dictionary) -> bool:
+		return bool(_craft_filter.get(_item_category(str(Defs.recipes()[str(entry["id"])]["output"])), true))))
 	_craft_result_count.text = "%d recipes | %s | MAX is a safe batch (limit 50)." % [
 		entries.size(), "Hub bank materials + backpack" if use_bank else "Backpack materials only"]
 	if entries.is_empty():

@@ -338,55 +338,53 @@ func _draw_vitals(you: Dictionary) -> void:
 		statuses.append(["FRACTURE %d%%" % int(fracture), Color(0.95, 0.65, 0.3), "bolt"])
 	if exposure > 0.5:
 		statuses.append(["COLD %d%%" % int(exposure), Color(0.5, 0.82, 0.98), "flake"])
-	# The portrait medallion with the skill progress around it and the level on a small badge.
-	var portrait := Vector2(66, 64)
+	# One compact unit in the manner of online RPG unit frames: the round portrait, a parchment name plate with notched
+	# ends, and right under it a dark frame with thin health and energy bars carrying their numbers.
+	var portrait := Vector2(54, 54)
 	var fraction: float = clampf(health / maximum, 0.0, 1.0)
-	var pulse: float = 0.5 + 0.5 * sin(_time * 7.0) if fraction < 0.3 else 0.0
-	_medallion(portrait, 50.0, Color(0.36, 0.3, 0.26).lerp(Color(0.55, 0.16, 0.14), pulse * 0.6), BRONZE)
-	draw_arc(portrait, 48.5, -PI * 0.5, -PI * 0.5 + TAU * clampf(_skill_progress_total(), 0.0, 1.0), 64, Color(1.0, 0.82, 0.4), 4.0, true)
-	_glyph("res://assets/icons/ui/portrait.svg", portrait + Vector2(0, 2), 62.0, Color(0.95, 0.88, 0.74))
-	var badge := portrait + Vector2(-36, 34)
-	draw_circle(badge, 17.0, WOOD)
-	draw_circle(badge, 14.5, Color(0.16, 0.11, 0.07))
-	draw_arc(badge, 15.5, 0, TAU, 32, BRONZE, 2.0, true)
-	_text(badge + Vector2(-17, 6), str(_total_level()), 16, GOLD, HORIZONTAL_ALIGNMENT_CENTER, 34)
-	# Name plate on parchment, then the bars.
-	var left := 122.0
-	var plate := Rect2(Vector2(left - 14.0, 18), Vector2(232, 26))
-	_box("nameplate", PARCHMENT, 6, 2.0, WOOD, 0).draw(get_canvas_item(), plate)
+	var left := 92.0
+	var right := 316.0
+	# The bar frame first, so the portrait ring overlaps its left end.
+	var frame := Rect2(Vector2(left - 14.0, 36), Vector2(right - left + 18.0, 36))
+	_box("barframe", Color(0.13, 0.09, 0.06, 0.94), 7, 2.0, Color(0.55, 0.42, 0.24)).draw(get_canvas_item(), frame)
+	# Name plate: parchment with notched ends.
+	var plate_top := 10.0
+	var plate_h := 24.0
+	var plate := PackedVector2Array([Vector2(left - 6.0, plate_top), Vector2(right, plate_top), Vector2(right - 8.0, plate_top + plate_h * 0.5),
+		Vector2(right, plate_top + plate_h), Vector2(left - 6.0, plate_top + plate_h)])
+	draw_colored_polygon(plate, PARCHMENT)
+	var outline := plate.duplicate()
+	outline.append(plate[0])
+	draw_polyline(outline, WOOD, 2.0, true)
 	var title: String = "Survivor"
 	if "player_name" in client:
 		title = str(client.player_name)
-	draw_string(_font, plate.position + Vector2(0, 19), title, HORIZONTAL_ALIGNMENT_CENTER, plate.size.x, 15, INK_DARK)
+	draw_string(_font, Vector2(left + 4.0, plate_top + 17.0), title, HORIZONTAL_ALIGNMENT_CENTER, right - left - 20.0, 14, INK_DARK)
+	# Health (with a light trail of recent damage) and energy.
 	var shown: float = _ease("health", fraction, 9.0)
 	_trail_health = move_toward(_trail_health, fraction, get_process_delta_time() * 0.18) if fraction < _trail_health else fraction
-	var health_color := Color(0.78, 0.16, 0.14).lerp(Color(0.86, 0.24, 0.18), clampf(fraction, 0.0, 1.0))
-	_framed_bar(Rect2(Vector2(left - 14.0, 48), Vector2(232, 20)), shown, health_color, _trail_health,
-		"%d / %d" % [mini(roundi(health), roundi(maximum)), roundi(maximum)])
-	var stamina: float = clampf(float(you.get("stamina", Defs.MAX_STAMINA)) / Defs.MAX_STAMINA, 0.0, 1.0)
+	_framed_bar(Rect2(Vector2(left, 40), Vector2(right - left, 14)), shown, Color(0.78, 0.16, 0.13), _trail_health,
+		"%d / %d" % [mini(roundi(health), roundi(maximum)), roundi(maximum)], 11)
 	var energy: float = clampf(float(you.get("combat_energy", Defs.COMBAT_ENERGY_MAX)) / Defs.COMBAT_ENERGY_MAX, 0.0, 1.0)
-	_framed_bar(Rect2(Vector2(left - 14.0, 71), Vector2(232, 12)), _ease("energy", energy, 12.0), Color(0.24, 0.5, 0.92), -1.0,
+	_framed_bar(Rect2(Vector2(left, 56), Vector2(right - left, 12)), _ease("energy", energy, 12.0), Color(0.22, 0.46, 0.88), -1.0,
 		"%d / %d" % [roundi(energy * Defs.COMBAT_ENERGY_MAX), roundi(Defs.COMBAT_ENERGY_MAX)], 10)
-	_framed_bar(Rect2(Vector2(left - 14.0, 86), Vector2(232, 7)), _ease("stamina", stamina, 12.0), Color(0.5, 0.82, 0.32), -1.0, "", 0)
-	# Food and water as big numbers with their icons, as in survival games; red when running out.
-	var hunger: float = clampf(float(you["hunger"]) / 100.0, 0.0, 1.0)
-	var thirst: float = clampf(float(you["thirst"]) / 100.0, 0.0, 1.0)
-	var food_color := Color(0.98, 0.72, 0.36) if hunger > 0.2 else Color(1.0, 0.35, 0.28)
-	var water_color := Color(0.5, 0.75, 1.0) if thirst > 0.2 else Color(1.0, 0.35, 0.28)
-	_glyph("res://assets/icons/ui/stat_food.svg", Vector2(left, 112), 22.0, food_color)
-	_text(Vector2(left + 14.0, 120), str(roundi(hunger * 100.0)), 19, food_color)
-	_glyph("res://assets/icons/ui/stat_water.svg", Vector2(left + 66.0, 112), 20.0, water_color)
-	_text(Vector2(left + 79.0, 120), str(roundi(thirst * 100.0)), 19, water_color)
-	var weapon_name: String = "Fists"
-	if str(you.get("weapon", "")) != "":
-		weapon_name = str(Defs.item(str(you["weapon"])).get("name", you["weapon"]))
-	_text(Vector2(left + 128.0, 109), weapon_name, 11, DIM)
-	_text(Vector2(left + 128.0, 123), "%d kills" % int(you.get("kills", 0)), 11, DIM)
-	var x := 16.0
-	_vitals_bottom = 140.0
-	for status in statuses:
-		x += _chip(Vector2(x, 132.0), status[0], status[1], status[2])
-		_vitals_bottom = 166.0
+	# Stamina only shows while it is being spent: a thin green line along the bottom of the frame.
+	var stamina: float = clampf(float(you.get("stamina", Defs.MAX_STAMINA)) / Defs.MAX_STAMINA, 0.0, 1.0)
+	var stamina_shown: float = _ease("stamina", stamina, 12.0)
+	if stamina_shown < 0.995:
+		draw_rect(Rect2(Vector2(left, 69.5), Vector2((right - left) * stamina_shown, 2.0)), Color(0.55, 0.88, 0.35))
+	# The portrait on top: low health makes it pulse red; the gold arc is the progress to the next level.
+	var pulse: float = 0.5 + 0.5 * sin(_time * 7.0) if fraction < 0.3 else 0.0
+	_medallion(portrait, 44.0, Color(0.36, 0.3, 0.26).lerp(Color(0.55, 0.16, 0.14), pulse * 0.6), BRONZE)
+	draw_arc(portrait, 42.5, -PI * 0.5, -PI * 0.5 + TAU * clampf(_skill_progress_total(), 0.0, 1.0), 64, Color(1.0, 0.82, 0.4), 3.0, true)
+	_glyph("res://assets/icons/ui/portrait.svg", portrait + Vector2(0, 2), 54.0, Color(0.95, 0.88, 0.74))
+	var badge := portrait + Vector2(30, 30)
+	draw_circle(badge, 13.0, WOOD)
+	draw_circle(badge, 11.0, Color(0.16, 0.11, 0.07))
+	draw_arc(badge, 11.5, 0, TAU, 32, BRONZE, 1.5, true)
+	_text(badge + Vector2(-13, 5), str(_total_level()), 13, GOLD, HORIZONTAL_ALIGNMENT_CENTER, 26)
+	# Conditions show as round icons under the portrait (hud.gd, the effects row), which also sets _vitals_bottom.
+	statuses.clear()
 
 
 ## A bar in a dark wooden frame with a light trail of recent damage and its numbers on it.

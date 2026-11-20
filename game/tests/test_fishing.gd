@@ -39,7 +39,7 @@ func run(t) -> void:
 	if not bool(cast.get("ok", false)):
 		return
 	t.check(player.action.has("fish"), "server starts timed fishing action")
-	t.eq(sim.cmd_fish(541).get("reason", ""), "busy", "cannot double-cast while fishing")
+	t.eq(sim.cmd_fish(541).get("reason", ""), "no_bite", "a second cast while fishing is only a strike, never a second line")
 	t.eq(player.inventory.count("raw_fish"), 0, "no instant fish is awarded")
 
 	t.current = "server owns timing, catch and experience"

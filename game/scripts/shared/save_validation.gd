@@ -60,6 +60,19 @@ static func parse_inventory(raw: Variant, expected_slots: int, allow_equipment: 
 			inventory.weapon = equipped
 		else:
 			inventory.armor = equipped
+	# Worn pieces (older saves have none): only known slots, each holding a carried item of that slot's kind.
+	var raw_gear: Variant = raw.get("gear", {})
+	if not (raw_gear is Dictionary):
+		return {}
+	for slot_name in raw_gear:
+		var worn: Variant = raw_gear[slot_name]
+		if not (slot_name is String) or not Inventory.GEAR_SLOTS.has(slot_name) or not (worn is String):
+			return {}
+		if worn.is_empty():
+			continue
+		if not allow_equipment or inventory.count(worn) < 1 or str(Defs.item(worn).get("kind", "")) != slot_name:
+			return {}
+		inventory.gear[slot_name] = worn
 	return {"inventory": inventory}
 
 

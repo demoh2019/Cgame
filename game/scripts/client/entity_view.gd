@@ -144,6 +144,7 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			# Sneaking and riding are real poses; the weapon they carry is in their hand.
 			player_model.set_stance(bool(entity.get("crouching", false)), bool(entity.get("mounted", false)))
 			player_model.set_weapon(str(entity.get("weapon", "")))
+			player_model.set_gear(entity.get("gear", {}) if entity.get("gear", {}) is Dictionary else {})
 		else:
 			player_model.scale = Vector3(1.0, 0.72 if bool(entity.get("crouching", false)) else 1.0, 1.0)
 		if player_model.pack_mode:

@@ -155,6 +155,33 @@ func guild_members() -> Array:
 	return names
 
 
+## Friends, from Nakama: [{"name", "online", "state"}], where state 0 = friends, 1 = you invited them, 2 = they invited
+## you, 3 = blocked.
+func list_friends() -> Array:
+	var friends: Array = []
+	if session == null or session.is_exception():
+		return friends
+	var result = await client.list_friends_async(session, null, 100)
+	if result == null or result.is_exception():
+		return friends
+	for entry in result.friends:
+		friends.append({"name": entry.user.username, "online": bool(entry.user.online), "state": int(entry.state)})
+	return friends
+
+
+## Sends a friend request (or accepts theirs) by player name.
+func add_friend(username: String) -> Dictionary:
+	username = username.strip_edges()
+	if username.is_empty():
+		return {"ok": false, "reason": "no name"}
+	if session == null or session.is_exception():
+		return {"ok": false, "reason": "offline"}
+	var result = await client.add_friends_async(session, null, PackedStringArray([username]))
+	if result.is_exception():
+		return {"ok": false, "reason": result.get_exception().message}
+	return {"ok": true}
+
+
 func shutdown() -> void:
 	if socket != null:
 		socket.close()

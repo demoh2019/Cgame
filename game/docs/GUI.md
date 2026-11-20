@@ -18,15 +18,24 @@ main action) and keeps text over the world light. Item icons: `item_icons.gd` (g
 
 ## Layout (in the manner of classic online RPGs)
 
-* **Portrait** (top left): a round medallion with the skill progress around it and the level badge, the name plate, red
-  health and blue energy bars with numbers, a thin stamina bar, food and water as big numbers. The quest card sits below.
+* **Unit frame** (top left): a round portrait (skill progress ring, level badge), a parchment name plate with notched ends,
+  and thin red health and blue energy bars with their numbers in a dark frame; a green line shows stamina while it is spent.
+* **Effects row** under the bars: round icons for food and water (red when low), debuffs (red rim: infection, bleeding,
+  fracture, cold, in combat) and buffs (green rim: meal, oils, whetstone, plate, salves, filters, flare, warmth, shelter...),
+  each with seconds, charges or percent and a tooltip.
+* **"+"** under the portrait opens the **Community** window (Group, Guild, Friends); party members are listed under the "+".
+  Guild: find by name and join, found a guild, members, leave. Friends: add by name, online status, pending requests.
+  Guilds and friends need the online account (Nakama); offline play says so.
 * **Menu buttons** (top right): inventory, workshop, skills, map, controls; each presses the window's own hotkey.
-* **Ability buttons** (bottom centre): round buttons with the held weapon's icon, the skill, dodge, drink and use; the key on
-  a small disc, the ammo or energy cost on a badge, cooldowns as a dark sweep.
-* **Minimap** (bottom right): a round plaque.
-* **Windows dock to the sides**: the bag on the right (equipped weapon and armor, the backpack grid, the stash), the actions
-  (tabs Gear, Field, Trade, Party, Combat) or the workshop on the left. Item slots are tiles coloured by kind (weapons red,
-  armor blue, medicine rose, food green, materials brown) with the tier as a Roman numeral and the count in a corner.
+* **Ability buttons** (bottom centre), **minimap** (bottom right, round plaque), quest card under the left column.
+* **Bag** (right): paper doll with Bag, Head, Cape / Weapon, Armor, Hands / Food, Feet, Potion / Mount, silver and load;
+  backpack grid and stash. Double click or drag an item onto its socket (it lights up while dragging) to wear or assign it.
+  Food and Potion are quick slots (click to use, right click to clear). Side buttons filter by category (All, Weapons,
+  Gear, Supplies, Materials, Other); several can be on, All toggles every category.
+* **Actions** (left, tabs Gear, Field, Trade, Combat) and the **Workshop** (left, recipe rows with the product tile and the
+  ingredients' have/need; the same category side buttons).
+* **Worn gear**: hood (head), cloak (cape), gloves (hands), boots (feet), four tiers each, crafted at a workbench; every
+  worn piece adds protection on top of the body armor (80% at most). Hood, cloak and boots show on the character.
 * **Title screen**: the sign-in card is a hanging red banner with the title, the fields and a red PLAY SOLO button.
 
 ## Controls

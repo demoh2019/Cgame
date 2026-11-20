@@ -12,6 +12,24 @@ const CATCH_ID := "raw_fish"
 const WATER_DISTANCES := [2.0, 2.8, 3.6]
 const WATER_SAMPLES := 16
 const MAX_CATCH := 2
+# The bite: at a random moment of the cast (counted as seconds still left) the bobber dips for BITE_WINDOW seconds;
+# casting again inside that window hooks the fish for HOOK_BONUS more. Too early or too late, the fish slips away
+# (the cast still pays as an ordinary one). The server rolls the moment; the client only shows it.
+const BITE_WINDOW := 0.9
+const BITE_EARLIEST := 1.2 # Seconds after the cast starts.
+const BITE_LATEST_LEFT := 1.4 # Seconds left at the latest bite, so the window always fits in the cast.
+const HOOK_BONUS := 1
+
+
+## Seconds left on the cast when the fish bites, from a roll in 0..1.
+static func bite_at(cast_seconds: float, roll: float) -> float:
+	var latest: float = maxf(cast_seconds - BITE_EARLIEST, BITE_LATEST_LEFT)
+	return lerpf(BITE_LATEST_LEFT, latest, clampf(roll, 0.0, 1.0))
+
+
+## Whether `remaining` seconds left on the cast fall inside the bite window.
+static func biting(remaining: float, bite_left: float) -> bool:
+	return remaining <= bite_left and remaining > bite_left - BITE_WINDOW
 
 
 static func water_near(world, position: Vector3) -> Vector2:

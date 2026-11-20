@@ -40,7 +40,7 @@ static func transact(inventory: Inventory, item_id: String) -> Dictionary:
 	if inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	# Protect currently equipped items. The player must switch equipment.
-	if item_id == inventory.weapon or item_id == inventory.armor:
+	if inventory.is_equipped(item_id):
 		return {"ok": false, "reason": "equipped"}
 	var materials: Dictionary = materials_for(item_id)
 	if materials.is_empty():

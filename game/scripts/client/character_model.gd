@@ -25,6 +25,8 @@ var _dead := false
 var _crouching := false
 var _riding := false
 var _swimming := false
+var _sex := "" # "Male" or "Female" for the clothed survivors, which can show worn gear.
+var _gear_shown: Dictionary = {} # Gear slot -> item id currently drawn on the body.
 
 
 ## `model_name` picks a character of the pack ("Orc_Male", "Elf_Female", ...); empty or an unavailable pack
@@ -206,6 +208,7 @@ static func _build_survivor(sex: String, look: Array, hair_color: Color) -> Node
 func _setup_pack(tint: Color, scale_factor: float, model_name: String, look_seed: int = 0) -> void:
 	pack_mode = true
 	var sex := survivor_sex(model_name)
+	_sex = sex
 	var model: Node3D
 	if sex != "" and not (_zombie and model_name == "Orc_Female"):
 		model = _setup_survivor(tint, scale_factor, sex, look_seed)
@@ -342,6 +345,98 @@ static func weapon_family(item_id: String) -> String:
 	return parts[0] if parts.size() == 2 and parts[1].is_valid_int() else item_id
 
 
+# Outfit pieces that show a worn item of a gear slot, by sex (the kit has no gloves; those show only in the bag).
+const GEAR_PARTS := {
+	"head": {"Male": "Male_Ranger_Head_Hood", "Female": "Female_Ranger_Head_Hood"},
+	"cape": {"Male": "Male_Ranger_Acc_Pauldron", "Female": "Female_Ranger_Acc_Pauldrons"},
+	"feet": {"Male": "Male_Ranger_Feet_Boots", "Female": "Female_Ranger_Feet"},
+}
+
+
+## Puts the worn hood, cloak (shoulder mantle) and boots on the survivor's body; a hood hides the hair, boots replace the
+## outfit's own shoes. Only clothed survivors can show gear.
+func set_gear(gear: Dictionary) -> void:
+	if not pack_mode or _sex == "" or _zombie:
+		return
+	var skeleton := _find_skeleton()
+	if skeleton == null:
+		return
+	for slot in GEAR_PARTS:
+		var item_id: String = str(gear.get(slot, ""))
+		if str(_gear_shown.get(slot, "")) == item_id:
+			continue
+		_gear_shown[slot] = item_id
+		for old in skeleton.find_children("Gear_%s*" % slot, "MeshInstance3D", false, false):
+			old.queue_free()
+		if item_id != "":
+			var scene := load(Assets.PACKS + "outfits/%s.gltf" % GEAR_PARTS[slot][_sex]) as PackedScene
+			if scene != null:
+				var piece := scene.instantiate()
+				for found in piece.find_children("*", "MeshInstance3D", true, false):
+					var mesh_instance := found as MeshInstance3D
+					mesh_instance.get_parent().remove_child(mesh_instance)
+					mesh_instance.owner = null
+					mesh_instance.name = "Gear_%s_%s" % [slot, mesh_instance.name]
+					skeleton.add_child(mesh_instance)
+					mesh_instance.skeleton = mesh_instance.get_path_to(skeleton)
+				piece.free()
+		# What the worn piece covers is hidden: the hair under a hood, the shoes inside boots.
+		for found in skeleton.get_children():
+			var instance := found as MeshInstance3D
+			if instance == null:
+				continue
+			var name_text := String(instance.name)
+			if slot == "head" and (name_text.contains("Hair") or name_text.contains("Eyebrow")) and not name_text.contains("Beard") and not name_text.begins_with("Gear_"):
+				instance.visible = item_id == ""
+			if slot == "feet" and name_text.begins_with("Outfit_") and name_text.contains("Feet"):
+				instance.visible = item_id == ""
+
+
+## The tip of the rod in hand, or INF when there is none.
+func rod_tip() -> Vector3:
+	if _hand == null:
+		return Vector3.INF
+	var tip := _hand.find_child("Tip", true, false) as Node3D
+	return tip.global_position if tip != null else Vector3.INF
+
+
+## A fishing rod: a tapered pole of about two metres, held forward and up out of the fist, with a cork grip.
+static func _fishing_rod() -> Node3D:
+	var rod := Node3D.new()
+	rod.name = "FishingRod"
+	var pole := MeshInstance3D.new()
+	var shape := CylinderMesh.new()
+	shape.top_radius = 0.006
+	shape.bottom_radius = 0.018
+	shape.height = 2.1
+	shape.radial_segments = 6
+	var wood := StandardMaterial3D.new()
+	wood.albedo_color = Color(0.32, 0.22, 0.13)
+	wood.roughness = 0.7
+	shape.material = wood
+	pole.mesh = shape
+	pole.position = Vector3(0, 1.0, 0)
+	rod.add_child(pole)
+	var tip := Marker3D.new()
+	tip.name = "Tip" # The line of the cast hangs from here.
+	tip.position = Vector3(0, 2.05, 0)
+	rod.add_child(tip)
+	var grip := MeshInstance3D.new()
+	var cork := CylinderMesh.new()
+	cork.top_radius = 0.024
+	cork.bottom_radius = 0.024
+	cork.height = 0.28
+	var cork_material := StandardMaterial3D.new()
+	cork_material.albedo_color = Color(0.62, 0.48, 0.32)
+	cork.material = cork_material
+	grip.mesh = cork
+	grip.position = Vector3(0, 0.05, 0)
+	rod.add_child(grip)
+	# Out of the fist and leaning well forward over the water (the held pose keeps the forearm upright).
+	rod.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5 + 0.85), Vector3(0.0, 0.08, 0.03))
+	return rod
+
+
 ## Shows the weapon (or tool) in the right hand; an empty or unknown id empties the hand. Cheap to call every frame.
 func set_weapon(item_id: String) -> void:
 	if not pack_mode or item_id == _held_id:
@@ -356,6 +451,10 @@ func set_weapon(item_id: String) -> void:
 		skeleton.add_child(_hand)
 	for child in _hand.get_children():
 		child.queue_free()
+	if item_id == "fishing_rod":
+		_hand.add_child(_fishing_rod()) # The kits have no rod: a thin tapered pole, built once per hand.
+		_swing_trail = null
+		return
 	var key: String = HELD_MODELS.get(weapon_family(item_id), "")
 	if key == "":
 		return
@@ -474,11 +573,13 @@ func update_motion(delta: float) -> void:
 	if _crouching:
 		_play("Crouch_Fwd_Loop" if _moving else "Crouch_Idle_Loop", clampf(speed / 1.2, 0.6, 1.4) if _moving else 1.0)
 		return
+	# Each clip plays at the rate its stride matches the ground speed (walk about 1.6 m/s, jog 4 m/s, sprint 6.5 m/s
+	# at rate 1), with wide limits so slow cargo walks and fast bike-free sprints do not slide.
 	if not _moving:
 		_play("Idle_Loop", 1.0)
-	elif speed < 2.2:
-		_play("Walk_Loop", clampf(speed / 1.5, 0.6, 1.5))
-	elif speed < 5.4:
-		_play("Jog_Fwd_Loop", clampf(speed / 3.6, 0.7, 1.6))
+	elif speed < 2.6:
+		_play("Walk_Loop", clampf(speed / 1.6, 0.45, 1.7))
+	elif speed < 5.6:
+		_play("Jog_Fwd_Loop", clampf(speed / 4.0, 0.6, 1.5))
 	else:
-		_play("Sprint_Loop", clampf(speed / 6.5, 0.8, 1.4))
+		_play("Sprint_Loop", clampf(speed / 6.5, 0.7, 1.5))

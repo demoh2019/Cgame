@@ -33,7 +33,7 @@ static func kind_color(kind: String) -> Color:
 	match kind:
 		"weapon", "ammo":
 			return Color(0.98, 0.84, 0.62)
-		"armor", "armor_plate", "carry_pack", "siege_brace":
+		"armor", "armor_plate", "carry_pack", "siege_brace", "head", "cape", "hands", "feet":
 			return Color(0.72, 0.84, 1.0)
 		"medical", "party_medical", "stimulant":
 			return Color(1.0, 0.62, 0.6)

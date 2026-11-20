@@ -3,6 +3,7 @@ extends Node3D
 ## network state and what is drawn.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
@@ -81,6 +82,12 @@ var name_edit: LineEdit
 var status_label: Label
 var _zoom := 1.0
 var _attack_cooldown := 0.0
+var _move_input := Vector2.ZERO # This frame's movement keys, for facing the way you walk.
+var _last_attack_msec := -100000
+var _fishing_line: MeshInstance3D # Line from the rod tip to the bobber while fishing.
+var _bobber: MeshInstance3D
+var _bobber_spot := Vector3.INF
+var _last_cast_spot := Vector3.INF # Kept after the cast ends, for the splash of the catch.
 var _party_rally_marker: Node3D
 var _raid_telegraph: Node3D
 var _lightning_visual: Node3D
@@ -483,8 +490,76 @@ func _gather_animation() -> String:
 	var action: Dictionary = client.you.get("action", {})
 	if action.is_empty():
 		return ""
+	if action.has("fish"):
+		return "Idle_Torch_Loop" # The rod held out over the water.
 	var node: Dictionary = client.node_by_id(int(action.get("node", 0)), client.predicted)
 	return "TreeChopping_Loop" if node.get("kind", "") == "tree" else "Farm_Harvest"
+
+
+## While a cast runs: a line from the rod tip to a bobber on the water that rides the waves and dips when a fish bites
+## (the last second of the cast); a splash ring when it ends with a catch.
+func _update_fishing_line(_delta: float) -> void:
+	var action: Dictionary = client.you.get("action", {})
+	var fishing: bool = action.has("fish") and avatar.visible
+	if not fishing:
+		if _fishing_line != null:
+			_fishing_line.visible = false
+			_bobber.visible = false
+		_bobber_spot = Vector3.INF
+		return
+	if _fishing_line == null:
+		_fishing_line = MeshInstance3D.new()
+		_fishing_line.mesh = ImmediateMesh.new()
+		var thread := StandardMaterial3D.new()
+		thread.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		thread.albedo_color = Color(0.92, 0.92, 0.88, 0.85)
+		thread.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_fishing_line.material_override = thread
+		add_child(_fishing_line)
+		_bobber = MeshInstance3D.new()
+		var ball := SphereMesh.new()
+		ball.radius = 0.07
+		ball.height = 0.14
+		var paint := StandardMaterial3D.new()
+		paint.albedo_color = Color(0.9, 0.15, 0.1)
+		ball.material = paint
+		_bobber.mesh = ball
+		add_child(_bobber)
+	var here: Vector3 = avatar.global_position
+	if _bobber_spot == Vector3.INF:
+		# The water the cast reaches: straight ahead if it is water, else the nearest water around, 2 to 3.6 m out.
+		var forward := Vector2(sin(avatar.rotation.y), cos(avatar.rotation.y))
+		var best := Vector2(here.x, here.z) + forward * 3.0
+		if not client.world.is_water(best.x, best.y):
+			for i in 16:
+				var probe := Vector2(here.x, here.z) + Vector2.from_angle(float(i) * TAU / 16.0) * 3.0
+				if client.world.is_water(probe.x, probe.y):
+					best = probe
+					break
+		_bobber_spot = Vector3(best.x, Defs.WATER_LEVEL, best.y)
+		_last_cast_spot = _bobber_spot
+	var remaining: float = float(action.get("remaining", 1.0))
+	var bite_left: float = float(action.get("bite_at", -10.0))
+	var bite: bool = remaining <= bite_left and remaining > bite_left - Fishing.BITE_WINDOW and not bool(action.get("struck", false))
+	var hooked: bool = bool(action.get("hooked", false))
+	var time: float = Time.get_ticks_msec() / 1000.0
+	var bob: Vector3 = _bobber_spot + Vector3(0, 0.03 * sin(time * 2.4) - (0.12 + 0.05 * sin(time * 30.0) if bite else 0.0), 0)
+	if hooked: # The fish has it under and pulls toward the shore.
+		bob = _bobber_spot.lerp(Vector3(here.x, Defs.WATER_LEVEL, here.z), 0.25) - Vector3(0, 0.25, 0)
+	_bobber.visible = true
+	_bobber.global_position = bob
+	var forward3 := Vector3(sin(avatar.rotation.y), 0, cos(avatar.rotation.y))
+	var tip: Vector3 = avatar_model.rod_tip()
+	if tip == Vector3.INF:
+		tip = here + Vector3(0, 2.0, 0) + forward3 * 1.4
+	var mesh := _fishing_line.mesh as ImmediateMesh
+	mesh.clear_surfaces()
+	mesh.surface_begin(Mesh.PRIMITIVE_LINE_STRIP)
+	for i in 9: # A slight sag between tip and bobber.
+		var k: float = float(i) / 8.0
+		mesh.surface_add_vertex(tip.lerp(bob, k) - Vector3(0, sin(k * PI) * 0.35, 0))
+	mesh.surface_end()
+	_fishing_line.visible = true
 
 
 ## Camera shake through the fork's built-in Camera3D trauma, which decays by itself.
@@ -499,6 +574,11 @@ func _spawn_effects(event: Dictionary) -> void:
 	var at := here
 	if event.has("x") and event.has("z"):
 		at = Vector3(event["x"], client.world.height_at(event["x"], event["z"]) + 1.0, event["z"])
+	if str(event.get("type", "")) == "fish_hooked" and int(event.get("peer", -1)) == client.peer_id and _last_cast_spot != Vector3.INF:
+		effects.ring(_last_cast_spot + Vector3(0, 0.05, 0), Color(1.0, 1.0, 1.0), 0.8, 0.4)
+		_shake(0.12)
+	if str(event.get("type", "")) == "fished" and int(event.get("peer", -1)) == client.peer_id and _last_cast_spot != Vector3.INF:
+		effects.ring(_last_cast_spot + Vector3(0, 0.05, 0), Color(0.85, 0.95, 1.0), 1.4, 0.7) # The fish breaks the surface.
 	match event["type"]:
 		"hit":
 			if str(event.get("kind", "")) == "zombie":
@@ -683,6 +763,7 @@ func _on_welcomed() -> void:
 	hud = Hud.new()
 	add_child(hud)
 	hud.setup(client)
+	hud.social = social
 	skills_panel = SkillsPanel.new()
 	hud.add_child(skills_panel)
 	skills_panel.setup(client)
@@ -756,12 +837,14 @@ func _physics_process(delta: float) -> void:
 		sprint = Input.is_key_pressed(KEY_SHIFT)
 		crouch = Input.is_key_pressed(KEY_CTRL)
 	move = move.limit_length(1.0)
+	_move_input = move
 	var aim := _aim_direction()
 	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
 	client.send_input(move, sprint, yaw, delta, crouch)
 	if alive and not hud.is_menu_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
 		client.attack(aim)
 		_attack_cooldown = 0.18
+		_last_attack_msec = Time.get_ticks_msec()
 
 
 func _process(delta: float) -> void:
@@ -776,14 +859,28 @@ func _process(delta: float) -> void:
 	var position: Vector3 = client.display_position()
 	if avatar != null:
 		avatar.position = position
-		avatar.rotation.y = lerp_angle(avatar.rotation.y, client.yaw, 1.0 - exp(-16.0 * delta))
+		# The body turns where it walks; it faces the cursor while fighting, aiming (right mouse) or working, so walking
+		# away from the cursor is a turn and a walk, not a moonwalk.
+		var facing: float = client.yaw
+		var busy: bool = not client.you.get("action", {}).is_empty() or Time.get_ticks_msec() - _last_attack_msec < 900 \
+			or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+		if not busy and _move_input.length() > 0.1:
+			facing = atan2(_move_input.x, _move_input.y)
+		elif not busy:
+			facing = avatar.rotation.y
+		avatar.rotation.y = lerp_angle(avatar.rotation.y, facing, 1.0 - exp(-12.0 * delta))
 		avatar.visible = bool(client.you.get("alive", true))
-		avatar_model.scale = Vector3(1.0,
-			0.72 if bool(client.you.get("crouching", false)) else 1.0, 1.0)
 		avatar_model.set_stance(bool(client.you.get("crouching", false)), bool(client.you.get("mounted", false)) and avatar.visible,
 			float(client.you.get("wading_depth_m", 0.0)) > 1.05)
 		# Chopping shows the axe; otherwise the equipped weapon is in hand.
-		avatar_model.set_weapon("axe_1" if _gather_animation() == "TreeChopping_Loop" else str(client.you.get("weapon", "")))
+		var in_hand: String = str(client.you.get("weapon", ""))
+		if _gather_animation() == "TreeChopping_Loop":
+			in_hand = "axe_1"
+		elif client.you.get("action", {}).has("fish"):
+			in_hand = "fishing_rod"
+		avatar_model.set_weapon(in_hand)
+		_update_fishing_line(delta)
+		avatar_model.set_gear(client.inventory.gear)
 		avatar_model.update_motion(delta)
 		avatar_model.set_dead(not bool(client.you.get("alive", true)))
 		avatar_model.set_action_loop(_gather_animation())
@@ -916,7 +1013,15 @@ func _update_prompt() -> void:
 		text = "[F] Drink"
 	if not client.you.get("action", {}).is_empty():
 		var action: Dictionary = client.you["action"]
-		text = "Gathering... %d%%" % int(100.0 * (1.0 - float(action["remaining"]) / maxf(float(action["total"]), 0.01)))
+		var progress: int = int(100.0 * (1.0 - float(action["remaining"]) / maxf(float(action.get("total", action["remaining"])), 0.01)))
+		text = ("Fishing... %d%%  (moving reels in)" if action.has("fish") else "Gathering... %d%%") % progress
+		if action.has("fish"):
+			var left: float = float(action.get("remaining", 0.0))
+			var bite_left: float = float(action.get("bite_at", -10.0))
+			if bool(action.get("hooked", false)):
+				text = "Hooked! Reeling in... %d%%" % progress
+			elif left <= bite_left and left > bite_left - Fishing.BITE_WINDOW and not bool(action.get("struck", false)):
+				text = "BITE!  Press T to strike"
 	if bool(client.you.get("mounted", false)):
 		text += " | RIDING (F4 dismount)"
 	elif client.inventory.count("salvage_bike") > 0:
@@ -1269,11 +1374,11 @@ func _run_demo() -> void:
 				_screenshot_frames = 480
 		"inventory":
 			if _demo_frames == 30:
-				for entry in [["club_2", 1], ["pistol", 1], ["ammo_9mm", 24], ["jacket_2", 1], ["axe_2", 1], ["canned_food", 4], ["water_bottle", 3], ["bandage", 5], ["wood_3", 12], ["ore_4", 6], ["silver", 240]]:
+				for entry in [["club_2", 1], ["pistol", 1], ["ammo_9mm", 24], ["jacket_2", 1], ["axe_2", 1], ["canned_food", 4], ["water_bottle", 3], ["bandage", 5], ["wood_3", 12], ["ore_4", 6], ["silver", 240], ["hood_2", 1], ["cloak_3", 1], ["gloves_2", 1], ["boots_2", 1]]:
 					net_ref.c_debug.rpc_id(1, "give", {"item": entry[0], "count": entry[1]})
 			if _demo_frames == 70:
-				client.use_item("club_2")
-				client.use_item("jacket_2")
+				for worn in ["club_2", "jacket_2", "hood_2", "cloak_3", "gloves_2", "boots_2"]:
+					client.use_item(worn)
 			if _demo_frames == 110:
 				hud.toggle_inventory()
 				# CGAME_DEMO_TAB=n opens another tab of the window for its screenshot.
@@ -1281,9 +1386,43 @@ func _run_demo() -> void:
 					hud._inventory_tabs.current_tab = int(OS.get_environment("CGAME_DEMO_TAB"))
 				if OS.get_environment("CGAME_DEMO_CRAFT") == "1":
 					hud.toggle_crafting()
+				if OS.get_environment("CGAME_DEMO_SOCIAL") == "1": # The community window instead of the bag.
+					hud.toggle_inventory()
+					hud.toggle_social()
+				if OS.get_environment("CGAME_DEMO_FILTER") == "1": # Only gear in the bag and the workshop.
+					for key in hud._bag_filter:
+						hud._bag_filter[key] = key == "gear"
+						hud._craft_filter[key] = key == "gear"
 				if OS.get_environment("CGAME_DEMO_QUICK") == "1": # Fill the quick-use sockets as a double click would.
 					hud._put_in_doll("canned_food")
 					hud._put_in_doll("bandage")
+		"fish":
+			if _demo_frames == 30:
+				net_ref.c_debug.rpc_id(1, "give", {"item": "fishing_rod", "count": 1})
+				var shore := _open_shore()
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": shore.x, "z": shore.y})
+			if _demo_frames == 70:
+				# Step to the water's edge: dry ground with water about three metres out.
+				var here := Vector2(client.predicted.x, client.predicted.z)
+				for radius in range(0, 60, 2):
+					var found := false
+					for step in 24:
+						var spot := here + Vector2.from_angle(float(step) * TAU / 24.0) * float(radius)
+						if client.world.is_water(spot.x, spot.y):
+							continue
+						for look in 16:
+							var probe := spot + Vector2.from_angle(float(look) * TAU / 16.0) * 3.0
+							if client.world.is_water(probe.x, probe.y):
+								net_ref.c_debug.rpc_id(1, "teleport", {"x": spot.x, "z": spot.y})
+								found = true
+								break
+						if found:
+							break
+					if found:
+						break
+			if _demo_frames == 110:
+				client.fish()
+				_screenshot_frames = 640 # Shoot while the cast is out.
 		"sky":
 			if _demo_frames == 40:
 				var vista := _open_shore()

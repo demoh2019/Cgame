@@ -63,6 +63,7 @@ const ITEM_KIND_WEIGHT := {
 	"resource": 1.25, "material": 0.8, "tool": 2.5, "weapon": 3.0,
 	"armor": 4.0, "food": 0.4, "drink": 0.7, "medical": 0.2,
 	"ammo": 0.05, "currency": 0.0,
+	"head": 1.0, "cape": 1.2, "hands": 0.5, "feet": 1.2,
 }
 const STASH_SLOTS := 48 # Account-bound safe-settlement storage; never dropped on death.
 const RESPAWN_SECONDS := 4.0
@@ -272,6 +273,15 @@ static func _build_items() -> void:
 		# Armour: reduces incoming damage.
 		_add_item("jacket_%d" % t, {"name": "Jacket T%d" % t, "kind": "armor", "tier": t, "armor": 0.08 + 0.07 * (t - 1), "value": 35 * t})
 		_add_recipe("jacket_%d" % t, "jacket_%d" % t, 1, {"cloth_%d" % t: 4}, "workbench", 5.0)
+		# Worn pieces for the other gear slots: each adds a little protection on top of the body armor.
+		_add_item("hood_%d" % t, {"name": "Survivor Hood T%d" % t, "kind": "head", "tier": t, "armor": 0.03 + 0.02 * (t - 1), "value": 18 * t})
+		_add_recipe("hood_%d" % t, "hood_%d" % t, 1, {"cloth_%d" % t: 2}, "workbench", 4.0)
+		_add_item("cloak_%d" % t, {"name": "Travel Cloak T%d" % t, "kind": "cape", "tier": t, "armor": 0.02 + 0.015 * (t - 1), "value": 20 * t})
+		_add_recipe("cloak_%d" % t, "cloak_%d" % t, 1, {"cloth_%d" % t: 3}, "workbench", 4.0)
+		_add_item("gloves_%d" % t, {"name": "Work Gloves T%d" % t, "kind": "hands", "tier": t, "armor": 0.02 + 0.015 * (t - 1), "value": 16 * t})
+		_add_recipe("gloves_%d" % t, "gloves_%d" % t, 1, {"cloth_%d" % t: 1, "bar_%d" % t: 1}, "workbench", 4.0)
+		_add_item("boots_%d" % t, {"name": "Trail Boots T%d" % t, "kind": "feet", "tier": t, "armor": 0.03 + 0.02 * (t - 1), "value": 20 * t})
+		_add_recipe("boots_%d" % t, "boots_%d" % t, 1, {"cloth_%d" % t: 2, "bar_%d" % t: 1}, "workbench", 4.0)
 		# Environmental armor for expedition gatherers: better insulation than
 		# combat jackets, but weaker against attacks of the same tier.
 		if t >= 2:
