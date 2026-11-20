@@ -424,6 +424,7 @@ func _on_welcomed() -> void:
 	world_map = WorldMap.new()
 	hud.add_child(world_map)
 	world_map.setup(client)
+	world_map.personal_waypoint_changed.connect(hud._radar.set_personal_waypoint)
 	overlay = WorldOverlay.new()
 	overlay.name = "WorldOverlay"
 	hud.add_child(overlay)

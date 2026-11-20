@@ -36,6 +36,25 @@ static func compass(origin: Vector2, destination: Vector2) -> String:
 	return str(LABELS[wrapi(roundi(angle / (PI / 4.0)), 0, 8)])
 
 
+## Convert a local pointer in the full-island map into a private waypoint.
+## Invalid/off-island clicks are rejected instead of producing a fake route.
+static func valid_destination(destination: Vector2, world_radius: float) -> bool:
+	return destination.is_finite() and is_finite(world_radius) and world_radius > 0.0 and \
+		destination.length_squared() <= world_radius * world_radius
+
+
+static func world_from_map(pointer: Vector2, bounds: Rect2, span: float,
+		world_radius: float) -> Vector2:
+	if not pointer.is_finite() or not bounds.position.is_finite() or \
+			not bounds.size.is_finite() or bounds.size.x <= 0.0 or bounds.size.y <= 0.0 or \
+			not is_finite(span) or span <= 0.0 or \
+			not is_finite(world_radius) or world_radius <= 0.0 or \
+			not bounds.has_point(pointer):
+		return Vector2(INF, INF)
+	var destination: Vector2 = ((pointer - bounds.position) / bounds.size - Vector2(0.5, 0.5)) * span
+	return destination if valid_destination(destination, world_radius) else Vector2(INF, INF)
+
+
 ## Projection returns one point inside a radar if the marker is near;
 ## otherwise returns a clipped edge pointer in the direction of the marker.
 ## No geometry is produced for missing/malformed private waypoint data.

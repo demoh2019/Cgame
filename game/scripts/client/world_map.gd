@@ -6,6 +6,9 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
+const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
+
+signal personal_waypoint_changed(point: Vector2)
 
 const PIXELS := 256
 const SPAN := WorldGen.WORLD_RADIUS * 2.0 + 200.0
@@ -24,6 +27,7 @@ var _next_row := 0
 var _sites: Array = []
 var _hover := {}
 var _panel_rect := Rect2()
+var waypoint: Vector2 = Vector2(INF, INF)
 
 
 func setup(p_client) -> void:
@@ -42,6 +46,39 @@ func toggle() -> void:
 		for rx in range(-14, 14):
 			for rz in range(-14, 14):
 				_sites.append_array(client.world.poi.sites_in_region(rx, rz))
+
+
+## Player-owned navigation only. No RPC and no server-side location leak.
+func set_waypoint(point: Vector2) -> bool:
+	if not TravelNavigation.valid_destination(point, WorldGen.WORLD_RADIUS):
+		return false
+	waypoint = point
+	personal_waypoint_changed.emit(waypoint)
+	queue_redraw()
+	return true
+
+
+func clear_waypoint() -> void:
+	waypoint = Vector2(INF, INF)
+	personal_waypoint_changed.emit(waypoint)
+	queue_redraw()
+
+
+func _gui_input(event: InputEvent) -> void:
+	if not visible or not (event is InputEventMouseButton):
+		return
+	var click := event as InputEventMouseButton
+	if not click.pressed or not _panel_rect.has_point(click.position):
+		return
+	match click.button_index:
+		MOUSE_BUTTON_LEFT:
+			var destination: Vector2 = TravelNavigation.world_from_map(
+				click.position, _panel_rect, SPAN, WorldGen.WORLD_RADIUS)
+			if set_waypoint(destination):
+				accept_event()
+		MOUSE_BUTTON_RIGHT:
+			clear_waypoint()
+			accept_event()
 
 
 func _process(_delta: float) -> void:
@@ -159,6 +196,19 @@ func _draw() -> void:
 		var heading: Vector2 = Vector2(sin(client.yaw), cos(client.yaw))
 		var side_vec := Vector2(-heading.y, heading.x)
 		draw_colored_polygon(PackedVector2Array([me + heading * 9.0, me - heading * 6.0 + side_vec * 5.5, me - heading * 3.0, me - heading * 6.0 - side_vec * 5.5]), Color(0.3, 0.8, 1.0))
+	# Personal travel pin, drawn above sites. Only the local UI knows this point.
+	if waypoint.is_finite():
+		var pin: Vector2 = _to_screen(waypoint.x, waypoint.y)
+		if client.you.has("x") and client.you.has("z"):
+			draw_line(_to_screen(float(client.you["x"]), float(client.you["z"])),
+				pin, Color(1.0, 0.86, 0.35, 0.55), 1.6, true)
+		draw_circle(pin, 8.0, Color(0.0, 0.0, 0.0, 0.85))
+		draw_arc(pin, 7.0, 0.0, TAU, 24, Color(1.0, 0.85, 0.3), 2.0)
+		draw_circle(pin, 3.0, Color(1.0, 0.85, 0.3))
+		draw_string_outline(font, pin + Vector2(11, 4), "WAYPOINT",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color.BLACK)
+		draw_string(font, pin + Vector2(11, 4), "WAYPOINT",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.9, 0.5))
 	# Title, legend and the hovered place.
 	draw_string_outline(font, Vector2(30, 36), "THE ISLAND   %d places · %d visited   (J closes)" % [_sites.size(), int(client.you.get("discovered_count", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 6, Color(0, 0, 0, 0.9))
 	draw_string(font, Vector2(30, 36), "THE ISLAND   %d places · %d visited   (J closes)" % [_sites.size(), int(client.you.get("discovered_count", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.98, 0.85, 0.45))
@@ -167,6 +217,17 @@ func _draw() -> void:
 		draw_rect(Rect2(Vector2(30, legend_y - 9.0), Vector2(10, 10)), KIND_COLORS[kind])
 		draw_string(font, Vector2(46, legend_y), str(WorldPoi.KINDS[kind]["title"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.9, 0.93, 1.0))
 		legend_y += 20.0
+	var hint := "Left click: waypoint   Right click: clear"
+	if waypoint.is_finite() and client.you.has("x") and client.you.has("z"):
+		var from_here := Vector2(float(client.you["x"]), float(client.you["z"]))
+		var distance := TravelNavigation.distance_meters(from_here, waypoint)
+		var bearing := TravelNavigation.compass(from_here, waypoint)
+		hint = "PERSONAL WAYPOINT: %d m %s   (left click moves / right click clears)" % [
+			distance, bearing]
+	draw_string_outline(font, Vector2(30, view.y - 25), hint,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, 4, Color.BLACK)
+	draw_string(font, Vector2(30, view.y - 25), hint,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1.0, 0.85, 0.4))
 	if _next_row < PIXELS:
 		draw_string(font, Vector2(30, legend_y + 10.0), "drawing the map %d%%" % int(100.0 * float(_next_row) / float(PIXELS)), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.6))
 	if not _hover.is_empty():

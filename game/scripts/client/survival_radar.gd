@@ -17,6 +17,7 @@ var world
 var sim
 var client
 var actor_id: int = 0
+var personal_waypoint: Vector2 = Vector2(INF, INF)
 var _elapsed: float = 0.0
 
 
@@ -35,6 +36,13 @@ static func in_range(origin: Vector2, target: Vector2,
 		meters > 0.0 and origin.is_finite() and target.is_finite()
 		and origin.distance_squared_to(target) <= meters * meters
 	)
+
+
+## Strictly local, unreplicated map click destination.
+func set_personal_waypoint(point: Vector2) -> void:
+	personal_waypoint = point if TravelNavigation.valid_destination(
+		point, WorldGen.WORLD_RADIUS) else Vector2(INF, INF)
+	queue_redraw()
 
 
 func _ready() -> void:
@@ -306,6 +314,10 @@ func _draw() -> void:
 					tip - arrow_direction * 12.0 - tangent * 5.0])
 				draw_colored_polygon(arrow, Color(0.84, 0.38, 0.98))
 
+	# Gold = personal map click. Does not appear in other players' snapshots.
+	if personal_waypoint.is_finite():
+		_draw_waypoint(origin, {"x": personal_waypoint.x, "z": personal_waypoint.y},
+			"x", "z", Color(1.0, 0.86, 0.3))
 	# Teal = private caravan destination; amber = temporary party-only rally.
 	# A remote target stays visible as an edge arrow until it is reached.
 	_draw_waypoint(origin, current_caravan(), "dst_x", "dst_z",
