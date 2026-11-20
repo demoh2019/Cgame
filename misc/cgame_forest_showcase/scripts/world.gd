@@ -41,6 +41,8 @@ var _fast_travel_in_progress: bool = false
 var source_ready_events: int = 0
 var source_unready_events: int = 0
 var last_source_event: String = "нет"
+var survey_drone: Node3D
+var survey_drone_paused: bool = false
 
 
 func _ready() -> void:
@@ -262,10 +264,12 @@ func _toggle_streaming_source(name: String) -> void:
     if not world_partition.get_streaming_source(name).is_empty():
         world_partition.remove_streaming_source(name)
     elif name == SURVEY_SOURCE:
-        # This background camera covers a 3x3 remote region, with 5x5
-        # hysteresis and higher priority than the watchtower's single cell.
-        if not world_partition.set_streaming_source(
-                SURVEY_SOURCE, SURVEY_CELL, 1, 2, 80):
+        # Moving Node3D streaming source: the C++ engine follows the drone
+        # automatically. No per-frame GDScript grid update calls are needed.
+        if survey_drone == null:
+            return
+        if not world_partition.set_streaming_source_node(
+                SURVEY_SOURCE, world_partition.get_path_to(survey_drone), 1, 2, 80):
             push_warning("The survey streaming source could not be registered.")
             return
     elif name == WATCHTOWER_SOURCE:
@@ -379,6 +383,7 @@ func _create_outpost_beacon() -> void:
 
 func _create_streaming_source_markers() -> void:
     _add_source_marker("SurveyDroneBeacon", SURVEY_POSITION, Color(0.24, 0.90, 0.78))
+    survey_drone = get_node_or_null("SurveyDroneBeacon") as Node3D
     _add_source_marker("WatchtowerBeacon", WATCHTOWER_POSITION, Color(1.0, 0.60, 0.20))
 
 
@@ -436,10 +441,10 @@ func _create_hud() -> void:
     hud.add_theme_constant_override("shadow_offset_y", 2)
     canvas.add_child(hud)
     hint = Label.new()
-    hint.position = Vector2(22, 382)
+    hint.position = Vector2(22, 410)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: сброс кэшей  •  F4: повтор загрузки  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор\nF6: закрепить маяк  •  F7: подготовить и переместиться к маяку/домой\nF8: источник разведки  •  F10: источник башни"
+    hint.text = "WASD/стрелки: движение  •  мышь: обзор  •  Shift: бег  •  Space: прыжок  •  E: сбор\nF1: качество  •  F2: скорость  •  F3: сброс кэшей  •  F4: повтор загрузки  •  F5: сохранить  •  F9: загрузить  •  Esc: курсор\nF6: закрепить маяк  •  F7: подготовить и переместиться к маяку/домой\nF8: движущийся дрон  •  F10: источник башни  •  F11: пауза дрона"
     canvas.add_child(hint)
 
 
@@ -476,6 +481,7 @@ func _refresh_hud() -> void:
     var pinned: int = world_partition.get_pinned_cell_count() if world_partition != null else 0
     var named_sources: int = world_partition.get_streaming_source_count() if world_partition != null else 0
     var survey_info: Dictionary = world_partition.get_streaming_source(SURVEY_SOURCE) if world_partition != null else {}
+    var survey_center: Vector2i = survey_info.get("center", SURVEY_CELL)
     var watch_info: Dictionary = world_partition.get_streaming_source(WATCHTOWER_SOURCE) if world_partition != null else {}
     var survey_progress: float = world_partition.get_streaming_source_progress(SURVEY_SOURCE) if world_partition != null else 0.0
     var watch_progress: float = world_partition.get_streaming_source_progress(WATCHTOWER_SOURCE) if world_partition != null else 0.0
@@ -505,6 +511,7 @@ func _refresh_hud() -> void:
         + "Генерация HLOD CPU: %.2f ms   мягкий бюджет: 2.0 ms\n" % hlod_cpu_ms \
         + "Закреплено: %d/16   маяк: %s   дом: %s\n" % [pinned, outpost_status, "ГОТОВ" if home_ready else "НЕТ"] \
         + "Источники: %d/8   разведка: %s   башня: %s\n" % [named_sources, survey_status, watch_status] \
+        + "Дрон X=%d Z=%d   %s\n" % [survey_center.x, survey_center.y, "ПАУЗА" if survey_drone_paused else "ДВИЖЕТСЯ"] \
         + "События источников: готово %d / потеряно %d   %s" % [source_ready_events, source_unready_events, last_source_event]
     if collected >= CRYSTAL_TOTAL:
         hint.text = "Все реликвии найдены! Лес снова сияет. Нажми F1/F2, чтобы сравнить рендеринг."
@@ -513,6 +520,15 @@ func _refresh_hud() -> void:
 func _process(delta: float) -> void:
     elapsed += delta
     hud_elapsed += delta
+    # Demonstrate an actor-driven WorldPartition3D streaming source.
+    # Its global position moves continuously; the native streamer turns it
+    # into grid coordinates and tracks new cells without user code polling.
+    if survey_drone != null and not survey_drone_paused:
+        var flight_time: float = elapsed * 0.23
+        var drone_x: float = SURVEY_POSITION.x + sin(flight_time) * 56.0
+        var drone_z: float = SURVEY_POSITION.y + (1.0 - cos(flight_time)) * 20.0
+        survey_drone.position = Vector3(drone_x,
+            height_at(drone_x, drone_z) + 8.0, drone_z)
     if hud_elapsed >= 0.25:
         hud_elapsed = 0.0
         _update_predictive_streaming()
@@ -567,6 +583,9 @@ func _unhandled_input(event: InputEvent) -> void:
                 _apply_quality(high_quality)
             KEY_F10:
                 _toggle_streaming_source(WATCHTOWER_SOURCE)
+            KEY_F11:
+                survey_drone_paused = not survey_drone_paused
+                _refresh_hud()
             KEY_E:
                 _collect_nearest()
 
