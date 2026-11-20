@@ -30,11 +30,11 @@ func run(t) -> void:
 	multimesh.use_colors = true
 	multimesh.instance_count = 64
 	if multimesh.has_method("shuffled_instance_buffer"):
-		var actual: PackedFloat32Array = multimesh.shuffled_instance_buffer(original, 2026)
+		var actual: PackedFloat32Array = multimesh.call("shuffled_instance_buffer", original, 2026)
 		t.eq(actual, expected, "native packed shuffle exactly matches GDScript PCG")
 		t.eq(original[0], 0.0, "native call does not mutate the input data")
 		var mismatch := PackedFloat32Array([10.0, 11.0, 12.0])
-		t.eq(multimesh.shuffled_instance_buffer(mismatch, 2026), mismatch,
+		t.eq(multimesh.call("shuffled_instance_buffer", mismatch, 2026), mismatch,
 			"invalid record layouts cannot produce corrupt GPU instance buffers")
 	else:
 		var fallback: PackedFloat32Array = original.duplicate()
@@ -45,7 +45,7 @@ func run(t) -> void:
 	var source: String = (GrassField as Script).source_code
 	t.check(source.contains('multimesh.has_method("shuffled_instance_buffer")'),
 		"live tile creation enables the C++ fast path on the Cgame engine")
-	t.check(source.contains("buffer = multimesh.shuffled_instance_buffer(buffer, shuffle_seed)"),
+	t.check(source.contains('buffer = multimesh.call("shuffled_instance_buffer", buffer, shuffle_seed)'),
 		"native instance records are returned for the same GPU buffer upload")
 	t.check(source.contains("shuffle_instances(buffer, count, shuffle_seed)"),
 		"stock Godot preserves the original spatial distribution")
