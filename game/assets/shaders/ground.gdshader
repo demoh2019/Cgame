@@ -8,10 +8,8 @@ instance uniform float aa_lod_morph = 0.0;
 // High/Ultra only: subtle self-occlusion from normal-map microrelief,
 // fused into existing PBR AO without any extra texture or screen pass.
 global uniform float aa_terrain_micro_occlusion;
-#ifdef AA_TERRAIN_WET_CLEARCOAT
-// Only premium terrain variants pay for a separate wet-film BRDF.
-global uniform float aa_terrain_wet_clearcoat;
-#endif
+// World-height curvature stored in native vertex colors, not a texture.
+global uniform float aa_terrain_curvature_strength;
 global uniform float aa_puddle_ripple_strength;
 // Radius of full two-scale albedo and normal mapping; shared by all streamed chunks.
 global uniform float aa_terrain_detail_radius;
@@ -457,8 +455,13 @@ void fragment() {
 	float micro_shadow = 1.0 - min(0.18,
 		micro_cavity * 0.32 * aa_terrain_micro_occlusion * detail_fade
 		* (1.0 - puddle * 0.85));
-	AO = ground_contact * micro_shadow;
-	ALBEDO = color * mix(1.0, ground_contact, 0.12)
+	float cavity = clamp(COLOR.r, 0.0, 1.0)
+		* aa_terrain_curvature_strength * detail_fade;
+	float ridge = clamp(COLOR.g, 0.0, 1.0)
+		* aa_terrain_curvature_strength * detail_fade;
+	AO = ground_contact * micro_shadow * (1.0 - cavity * 0.24);
+	ALBEDO = color * (1.0 - cavity * 0.095 + ridge * 0.035)
+		* mix(1.0, ground_contact, 0.12)
 		* mix(vec3(1.0), vec3(0.58, 0.63, 0.74), aa_vertex_cloud_shadow);
 	// Sunlight focused by moving shallow waves only on submerged near-field
 	// terrain. High/Ultra Forward+ only; keeps the existing PBR normal/ORM,
@@ -486,16 +489,4 @@ void fragment() {
 	// without additional PBR texture fetches.
 	ROUGHNESS = filter_specular_roughness(final_roughness, bent);
 	SPECULAR = 0.5;
-#ifdef AA_TERRAIN_WET_CLEARCOAT
-	// Thin water film adds a dielectric specular lobe above the porous
-	// ground. Reuse already available terrain weights and rain moisture;
-	// no new texture samples, fullscreen passes, or mesh geometry.
-	float hard_surface = clamp(w[4] + w[5] * 0.35 + w[6] * 0.25
-		+ w[9] + w[10] + w[11] + w[12] * 0.35, 0.0, 1.0);
-	float water_film = wetness * hard_surface * detail_fade
-		* (1.0 - clamp(w[8], 0.0, 1.0));
-	CLEARCOAT = clamp(water_film * aa_terrain_wet_clearcoat, 0.0, 0.65);
-	CLEARCOAT_ROUGHNESS = mix(0.22, 0.07,
-		clamp(puddle + wetness * 0.45, 0.0, 1.0));
-#endif
 }
