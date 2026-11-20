@@ -99,9 +99,11 @@ func run(t) -> void:
 	var leader = sim.add_player(101, "Scout")
 	var ally = sim.add_player(102, "Archer")
 	var stranger = sim.add_player(103, "Wanderer")
-	leader.position = _at(world, 210.0, 210.0)
-	ally.position = _at(world, 211.0, 210.0)
-	stranger.position = _at(world, 212.0, 210.0)
+	# Fix a common ground plane so procedural height differences cannot
+	# accidentally disqualify an otherwise nearby infected in this unit test.
+	leader.position = Vector3(210.0, 5.0, 210.0)
+	ally.position = Vector3(211.0, 5.0, 210.0)
+	stranger.position = Vector3(212.0, 5.0, 210.0)
 	sim.zombies.clear() # Deterministic enemy set, no procedural encounters.
 	t.check(sim.cmd_party_invite(101, 102).get("ok", false), "nearby invite authorized")
 	t.check(sim.cmd_party_accept(102).get("ok", false), "teammate joined")
@@ -111,9 +113,9 @@ func run(t) -> void:
 		"outsider is excluded by the server")
 	t.eq(sim.cmd_party_focus(101).get("reason", ""), "no_infected_nearby",
 		"no target means no focus or cooldown")
-	var near_enemy = Zombie.new(sim.new_id(), "walker", _at(world, 214.0, 210.0))
-	var far_enemy = Zombie.new(sim.new_id(), "walker", _at(world, 230.0, 210.0))
-	var dead_enemy = Zombie.new(sim.new_id(), "walker", _at(world, 211.0, 210.0))
+	var near_enemy = Zombie.new(sim.new_id(), "walker", Vector3(214.0, 5.0, 210.0))
+	var far_enemy = Zombie.new(sim.new_id(), "walker", Vector3(230.0, 5.0, 210.0))
+	var dead_enemy = Zombie.new(sim.new_id(), "walker", Vector3(211.0, 5.0, 210.0))
 	dead_enemy.take_damage(1000.0, 101)
 	sim.zombies[near_enemy.id] = near_enemy
 	sim.zombies[far_enemy.id] = far_enemy
@@ -145,6 +147,12 @@ func run(t) -> void:
 	sim._damage_target(ally, {"kind": "zombie", "id": near_enemy.id}, 5.0)
 	t.near(old_health - near_enemy.health, 5.0, 0.001,
 		"expired focus grants no further damage")
+	sim.time = PartyFocus.COOLDOWN + 1.0
+	t.check(sim.cmd_party_focus(101).get("ok", false),
+		"leader can focus the next encounter after cooldown")
+	sim._damage_target(ally, {"kind": "zombie", "id": near_enemy.id}, 100.0)
+	t.eq(sim.snapshot_for(102)["you"]["party"]["focus"], {},
+		"focus kill clears it from the group snapshot")
 	var net := Net.new()
 	net.role = "server"
 	net.sim = sim
