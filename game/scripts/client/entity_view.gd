@@ -294,7 +294,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
 		var exposed: bool = float(entity.get("sunder_seconds", 0.0)) > 0.0
 		var wound_phase: String = str(entity.get("wound_phase", ""))
-		var resolve: bool = int(entity.get("resolve_stacks", 0)) >= 2 and float(entity.get("resolve_seconds", 0.0)) > 0.0
+		var fallback_resolve: int = int(entity.get("resolve_stacks", 0)) if float(entity.get("resolve_seconds", 0.0)) > 0.0 else 0
+		var resolve: bool = EngineFeatures.runtime_stack_count(_nodes[key],
+			"Runtime.Status.Resolve", fallback_resolve) >= 2
 		var tint: Color = base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base
 		if wound_phase == "limping":
 			tint = base.lerp(Color(0.54, 0.52, 0.66), 0.65)
