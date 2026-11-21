@@ -33,6 +33,13 @@ bool GameplayEffectTimeline::_valid_stacks(int p_stacks) {
 	return p_stacks > 0 && p_stacks <= MAX_STACKS;
 }
 
+bool GameplayEffectTimeline::_tag_matches(const String &p_active, const String &p_requirement) {
+	// Match exact or a dot-delimited child, never a lookalike string prefix.
+	return p_active == p_requirement ||
+			(p_active.length() > p_requirement.length() && p_active.begins_with(p_requirement) &&
+					p_active[p_requirement.length()] == '.');
+}
+
 bool GameplayEffectTimeline::set_effect(const StringName &p_tag, double p_seconds, int p_stacks) {
 	if (!_valid_tag(p_tag) || !_valid_duration(p_seconds) || !_valid_stacks(p_stacks)) {
 		return false;
@@ -86,6 +93,48 @@ bool GameplayEffectTimeline::apply_effect(const StringName &p_tag, double p_seco
 		} break;
 	}
 	return true;
+}
+
+bool GameplayEffectTimeline::apply_effect_with_tag_requirements(const StringName &p_tag, double p_seconds,
+		const PackedStringArray &p_active_tags, const PackedStringArray &p_required_tags,
+		const PackedStringArray &p_blocked_tags, int p_stacks, int p_stack_limit, ReapplyPolicy p_policy) {
+	// All checks occur before any modification (including periodic pulse phase).
+	// Bounded cardinalities guard against untrusted giant query inputs.
+	if (p_active_tags.size() > MAX_ACTIVE_TAG_CONTEXTS ||
+			p_required_tags.size() > MAX_TAG_REQUIREMENTS || p_blocked_tags.size() > MAX_TAG_REQUIREMENTS) {
+		return false;
+	}
+	for (const String &active : p_active_tags) {
+		if (!_valid_tag(StringName(active))) {
+			return false;
+		}
+	}
+	for (const String &required : p_required_tags) {
+		if (!_valid_tag(StringName(required))) {
+			return false;
+		}
+		bool found = false;
+		for (const String &active : p_active_tags) {
+			if (_tag_matches(active, required)) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			return false; // All required tags must be present.
+		}
+	}
+	for (const String &blocked : p_blocked_tags) {
+		if (!_valid_tag(StringName(blocked))) {
+			return false;
+		}
+		for (const String &active : p_active_tags) {
+			if (_tag_matches(active, blocked)) {
+				return false; // Any blocked tag prevents application.
+			}
+		}
+	}
+	return apply_effect(p_tag, p_seconds, p_stacks, p_stack_limit, p_policy);
 }
 
 bool GameplayEffectTimeline::set_periodic(const StringName &p_tag, double p_period, bool p_reset_on_reapply) {
@@ -428,6 +477,9 @@ bool GameplayEffectTimeline::has_effect(const StringName &p_tag) const {
 void GameplayEffectTimeline::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_effect", "tag", "seconds", "stacks"), &GameplayEffectTimeline::set_effect, DEFVAL(1));
 	ClassDB::bind_method(D_METHOD("apply_effect", "tag", "seconds", "stacks", "stack_limit", "policy"), &GameplayEffectTimeline::apply_effect, DEFVAL(1), DEFVAL(MAX_STACKS), DEFVAL(REAPPLY_REFRESH));
+	ClassDB::bind_method(D_METHOD("apply_effect_with_tag_requirements", "tag", "seconds", "active_tags", "required_tags", "blocked_tags", "stacks", "stack_limit", "policy"),
+			&GameplayEffectTimeline::apply_effect_with_tag_requirements, DEFVAL(PackedStringArray()), DEFVAL(PackedStringArray()),
+			DEFVAL(1), DEFVAL(MAX_STACKS), DEFVAL(REAPPLY_REFRESH));
 	ClassDB::bind_method(D_METHOD("set_periodic", "tag", "period", "reset_on_reapply"), &GameplayEffectTimeline::set_periodic, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("get_periodic", "tag"), &GameplayEffectTimeline::get_periodic);
 	ClassDB::bind_method(D_METHOD("take_periodic_pulses"), &GameplayEffectTimeline::take_periodic_pulses);
