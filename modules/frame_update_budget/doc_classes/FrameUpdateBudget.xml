@@ -3,7 +3,7 @@
 	<brief_description>A bounded frame-rate scheduler for optional, main-thread gameplay presentation tasks.</brief_description>
 	<description>
 		Register up to 64 named lanes, call [method begin_frame] once per rendering frame, then call [method consume] for each lane that needs an update. A nonzero result is the elapsed time since that lane's last update, capped at 0.16 seconds. The caller performs the actual update on the main thread. This class never touches a [SceneTree], starts threads or executes callbacks.
-		Each quality tier (0 through 3) has a target frequency and a maximum number of updates per frame. Slow frames reduce the slot budget. Optional microsecond CPU budgets additionally defer regular work after the caller reports enough consumed time; they are soft limits because an individual update cannot be interrupted once started. Forced updates and quality changes bypass the slot limit so visibility changes are immediate. Due lanes are reserved at the start of a frame by accumulated time, with a rotating tiebreaker; this avoids starving late-called effects when the update budget is smaller than the number of registered lanes.
+		Each quality tier (0 through 3) has a target frequency and a maximum number of updates per frame. [method set_lane_rate_scale] tunes individual lane frequencies independently of the global tier. Slow frames reduce the slot budget. Optional microsecond CPU budgets additionally defer regular work after the caller reports enough consumed time; they are soft limits because an individual update cannot be interrupted once started. Forced updates and quality changes bypass the slot limit so visibility changes are immediate. Due lanes are reserved at the start of a frame by accumulated time, with a rotating tiebreaker; this avoids starving late-called effects when the update budget is smaller than the number of registered lanes.
 	</description>
 	<methods>
 		<method name="register_lane">
@@ -24,6 +24,17 @@
 			<param index="0" name="quality_rates" type="PackedFloat64Array" />
 			<param index="1" name="quality_slots" type="PackedInt32Array" />
 			<description>Atomically updates four positive target frequencies (up to 240 Hz) and four update budgets (1 to 64).</description>
+		</method>
+		<method name="set_lane_rate_scale">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<param index="1" name="scale" type="float" />
+			<description>Set a registered lane's relative update frequency between 0.75 and 2.0 (inclusive). For example, a scale of 1.5 allows an effect to become due earlier than the quality-tier baseline; 0.75 lowers its update rate. Invalid, unknown or nonfinite inputs return false without changing the lane. Changes take effect on the next [method begin_frame] and do not bypass the slot/CPU budgets.</description>
+		</method>
+		<method name="get_lane_rate_scale" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="lane" type="StringName" />
+			<description>Returns the registered lane's frequency multiplier (default 1.0), or -1.0 for an unknown lane. The profile survives [method reset].</description>
 		</method>
 		<method name="begin_frame">
 			<return type="void" />
