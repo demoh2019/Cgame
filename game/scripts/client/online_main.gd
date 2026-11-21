@@ -1400,6 +1400,12 @@ func _on_welcomed() -> void:
 			Performance.add_custom_monitor(simulation_monitor,
 				Callable(streamer, "get_simulation_active_count"))
 			_ambient_monitors.append(simulation_monitor)
+	if streamer.has_method("get_tick_throttled_count"):
+		var tick_monitor: StringName = &"Albion/StreamCosmeticTickThrottled"
+		if not Performance.has_custom_monitor(tick_monitor):
+			Performance.add_custom_monitor(tick_monitor,
+				Callable(streamer, "get_tick_throttled_count"))
+			_ambient_monitors.append(tick_monitor)
 	if streamer.has_method("get_chunk_cache_hit_count"):
 		for monitor in [
 			[&"Albion/StreamCacheRetained", Callable(streamer, "get_cached_chunk_count")],
