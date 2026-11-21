@@ -62,6 +62,7 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const GraphicsTextureStreaming = preload("res://scripts/client/graphics_texture_streaming.gd")
 const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
 const AMBIENT_CPU_BUDGET_US := [900, 1500, 2500, 4000] # Quality tiers, main-thread cosmetics only.
 const GraphicsCinematicDof = preload("res://scripts/client/graphics_cinematic_dof.gd")
@@ -304,6 +305,10 @@ func _ready() -> void:
 				Performance.add_custom_monitor(lane_monitor,
 					Callable(_ambient_budget, "get_lane_last_frame_cost_us").bind(StringName(lane)))
 				_ambient_monitors.append(lane_monitor)
+	# Unreal STAT STREAMING-style diagnostics for the live game. These
+	# callbacks only load atomics and are removed in _exit_tree with other
+	# Albion monitors; older engines register nothing.
+	_ambient_monitors.append_array(GraphicsTextureStreaming.register_profiler_monitors())
 	GraphicsQuality.load_preference()
 	_access = UiAccessibilityLayer.new() # Loads settings, language and key bindings; must precede the menus below.
 	add_child(_access)

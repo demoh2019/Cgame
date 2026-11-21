@@ -30,6 +30,7 @@
 
 #include "texture_streaming.h"
 #include "feedback_buffer_policy.h"
+#include "streaming_stats_policy.h"
 
 #include "core/config/project_settings.h"
 #include "core/math/math_funcs.h"
@@ -134,6 +135,12 @@ void TextureStreaming::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "memory_budget_mb_override", PROPERTY_HINT_RANGE, "0,65535,1"), "set_memory_budget_mb_override", "get_memory_budget_mb_override");
 
 	ClassDB::bind_method(D_METHOD("get_memory_budget_bytes_used"), &TextureStreaming::get_memory_budget_bytes_used);
+	ClassDB::bind_method(D_METHOD("get_streaming_texture_count"), &TextureStreaming::get_streaming_texture_count);
+	ClassDB::bind_method(D_METHOD("get_streaming_pending_count"), &TextureStreaming::get_streaming_pending_count);
+	ClassDB::bind_method(D_METHOD("get_streaming_budget_reduction_steps"), &TextureStreaming::get_streaming_budget_reduction_steps);
+	ClassDB::bind_method(D_METHOD("get_streaming_requested_bytes"), &TextureStreaming::get_streaming_requested_bytes);
+	ClassDB::bind_method(D_METHOD("get_streaming_fitted_bytes"), &TextureStreaming::get_streaming_fitted_bytes);
+	ClassDB::bind_method(D_METHOD("get_streaming_budget_bytes"), &TextureStreaming::get_streaming_budget_bytes);
 
 	ClassDB::bind_method(D_METHOD("flush_texture_streaming"), &TextureStreaming::flush_texture_streaming);
 
@@ -337,6 +344,14 @@ void TextureStreaming::_stop_streaming() {
 
 	feedback_buffer_thread.wait_to_finish();
 	texture_reload_thread.wait_to_finish();
+	// The worker has stopped; do not leave stale last-frame diagnostics
+	// visible in a reinitialized or stopped streamer.
+	streaming_texture_count.store(0, std::memory_order_relaxed);
+	streaming_pending_count.store(0, std::memory_order_relaxed);
+	streaming_budget_reduction_steps.store(0, std::memory_order_relaxed);
+	streaming_requested_bytes.store(0, std::memory_order_relaxed);
+	streaming_fitted_bytes.store(0, std::memory_order_relaxed);
+	streaming_budget_bytes.store(0, std::memory_order_relaxed);
 
 	// Clean up feedback buffer pool. The MaterialFeedbackBuffer destructor
 	// schedules RD resource cleanup on the render thread via call_on_render_thread.
@@ -692,6 +707,7 @@ void TextureStreaming::_feedback_buffer_process(uint64_t p_ticks_msec) {
 
 	// Phase 2: Budget fitting - iteratively reduce textures until within memory budget.
 	uint64_t assigned_bytes = total_requested_bytes;
+	uint32_t budget_reduction_steps = 0;
 	const uint64_t budget_bytes = setting_budget_enabled ? uint64_t(_get_memory_budget_mb()) * 1024ull * 1024ull : 0;
 	// Adapt only speculative sharper-mip prefetch. The existing memory fitter
 	// retains final authority over fit_mip, I/O queues and total pool usage.
@@ -747,6 +763,7 @@ void TextureStreaming::_feedback_buffer_process(uint64_t p_ticks_msec) {
 
 				ERR_FAIL_COND(new_bytes > previous_bytes);
 				assigned_bytes -= (previous_bytes - new_bytes);
+				budget_reduction_steps += TextureStreamingStatsPolicy::budget_reduction_steps(previous_mip, increased_mip);
 
 				// Re-insert candidate if still reducible.
 				if (best->target_mip < best->max_lod) {
@@ -765,6 +782,7 @@ void TextureStreaming::_feedback_buffer_process(uint64_t p_ticks_msec) {
 
 	// Phase 3: Apply fitted mip levels and queue reloads on the I/O thread.
 	uint64_t memory = 0;
+	uint32_t pending_count = 0;
 	for (uint32_t i = 0; i < fit_candidates.size(); i++) {
 		FitCandidate &candidate = fit_candidates[i];
 		StreamingState *state = candidate.state;
@@ -784,7 +802,11 @@ void TextureStreaming::_feedback_buffer_process(uint64_t p_ticks_msec) {
 
 		// Queue a reload if the current mip still differs from fit_mip.
 		// Use candidate.target_mip directly — this thread is the sole writer of fit_mip.
-		if (cur != candidate.target_mip) {
+		if (TextureStreamingStatsPolicy::needs_reload(cur, candidate.target_mip)) {
+			// This is the number of textures not yet at the fitted mip,
+			// including queued, executing and multi-step reloads. It is not
+			// the number of active I/O requests or actual disk bytes.
+			++pending_count;
 			uint8_t old_pending = state->pending_reload_mip.exchange(candidate.target_mip, std::memory_order_relaxed);
 			if (old_pending == INVALID_MIP) {
 				io_command_queue.push_internal("_do_texture_reload", this, &TextureStreaming::_do_texture_reload, candidate.state_rid);
@@ -793,6 +815,15 @@ void TextureStreaming::_feedback_buffer_process(uint64_t p_ticks_msec) {
 	}
 
 	texture_streaming_total_memory.store(memory, std::memory_order_relaxed);
+	// All counters describe this worker's last completed fitting pass.
+	// Atomic readouts are intentionally approximate across concurrent polls,
+	// never protected by a lock or computed by scanning object storage.
+	streaming_texture_count.store(uint32_t(fit_candidates.size()), std::memory_order_relaxed);
+	streaming_pending_count.store(pending_count, std::memory_order_relaxed);
+	streaming_budget_reduction_steps.store(budget_reduction_steps, std::memory_order_relaxed);
+	streaming_requested_bytes.store(total_requested_bytes, std::memory_order_relaxed);
+	streaming_fitted_bytes.store(assigned_bytes, std::memory_order_relaxed);
+	streaming_budget_bytes.store(budget_bytes, std::memory_order_relaxed);
 }
 
 void TextureStreaming::_texture_reload_thread_func(void *p_udata) {
