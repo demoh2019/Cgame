@@ -52,6 +52,36 @@ older builds and stock Godot use a matching deterministic GDScript
 fallback. The planner never makes its own frustum tests. It is not a
 full time-measured Animation Budget Allocator or a GPU visibility test.
 
+## Stable full-IK budget under camera movement
+
+`plan_visible_tiers_stable(distances, priority_flags, visible_flags,
+retained_full_flags, full_budget, priority_budget, hysteresis=1.5)` extends
+the native visible-crowd planner with **explicit, caller-owned temporal
+retention**. Actors that held one of the expensive procedural IK slots last
+frame get up to 1.5m of ranking advantage against similarly close peers.
+A substantially closer newcomer can still win. The existing <=22m gate
+and camera-visibility mask apply **before** retention, so invisible or distant
+old owners immediately relinquish their slot. Ties use original actor order;
+combat-priority slots are ranked independently by actual distance.
+
+Unlike a fixed hold timer, this is stateless and reproducible for identical
+input arrays. Bounds: 16,384 actors, 256 slots, retention mask length equal to
+distances, finite hysteresis 0..8m. Zero hysteresis or an all-zero retention
+mask produces exactly the previous `plan_visible_tiers` outputs.
+Invalid masks/arguments return an empty array, with no partial state.
+
+Albion After stores only the previous full-IK yes/no bit on each actual
+`CharacterModel`. New or recycled models reset that bit. Its per-frame
+`apply_crowd` pass feeds camera visibility, the retained mask, and the new
+native API, updating the hint only when the assigned tier changes. Stock
+Godot and older Cgame engines execute an equivalent script fallback.
+This is a *presentation* optimisation: no server tick, authoritative
+combat, physics, networking, or mixer playback correctness is changed.
+
+The approach follows Unreal's Animation Budget Allocator **state-change
+throttling** idea, not Unreal's proprietary code:
+https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine
+
 ## Safety and portability
 
 - At most 16,384 actors; priority flags must match distances 1:1.
