@@ -1,12 +1,14 @@
 extends Node3D
 ## Optional visual-only LOD. No gameplay colliders, interaction or AI are culled.
-## Native SignificanceBudgetPlanner on Cgame, deterministic stock Godot fallback.
+## Native view-cone SignificanceBudgetPlanner on Cgame, stock Godot fallback.
 
 const FRAGMENT_COUNT: int = 96
 const VISIBLE_BUDGET: int = 18
 const MAX_DISTANCE: float = 26.0
 const HYSTERESIS: float = 2.0
 const UPDATE_INTERVAL: float = 0.2
+const VIEW_HALF_ANGLE: float = 75.0
+const NEAR_KEEP_RADIUS: float = 5.5
 
 var _viewer: Node3D
 var _planner: Object
@@ -15,6 +17,7 @@ var _positions := PackedVector3Array()
 var _priorities := PackedByteArray()
 var _ids := PackedInt64Array()
 var _retained_ids := PackedInt64Array()
+var _selected_indices := PackedInt32Array()
 var _elapsed: float = 0.0
 
 
@@ -59,18 +62,54 @@ func _process(delta: float) -> void:
         force_refresh()
 
 
+func _get_view_state() -> Dictionary:
+    var origin: Vector3 = to_local(_viewer.global_position)
+    var world_forward: Vector3 = -_viewer.global_transform.basis.z
+    var camera := _viewer.get_node_or_null("Camera3D") as Camera3D
+    if camera != null:
+        origin = to_local(camera.global_position)
+        world_forward = -camera.global_transform.basis.z
+    var forward: Vector3 = (
+        to_local(to_global(origin) + world_forward) - origin).normalized()
+    return {"origin": origin, "forward": forward}
+
+
+func get_view_state() -> Dictionary:
+    if not is_instance_valid(_viewer):
+        return {}
+    return _get_view_state()
+
+
+func get_source_positions() -> PackedVector3Array:
+    return _positions.duplicate()
+
+
+func get_selected_indices() -> PackedInt32Array:
+    return _selected_indices.duplicate()
+
+
+func get_view_cone_parameters() -> Vector3:
+    return Vector3(VIEW_HALF_ANGLE, NEAR_KEEP_RADIUS, MAX_DISTANCE)
+
+
+func _select_native(viewer_position: Vector3, direction: Vector3) -> PackedInt32Array:
+    return _planner.call("select_world_priority_stable_cone", _positions,
+        viewer_position, direction, _priorities, _ids, _retained_ids,
+        VISIBLE_BUDGET, MAX_DISTANCE, HYSTERESIS, VIEW_HALF_ANGLE, NEAR_KEEP_RADIUS)
+
+
 func force_refresh() -> void:
     if not is_instance_valid(_viewer) or _fragments.is_empty():
         return
-    var viewer_position := to_local(_viewer.global_position)
+    var view: Dictionary = _get_view_state()
+    var viewer_position: Vector3 = view["origin"]
+    var direction: Vector3 = view["forward"]
     var selected := PackedInt32Array()
-    if _planner != null and _planner.has_method("select_world_priority_stable"):
-        selected = _planner.call("select_world_priority_stable", _positions,
-            PackedVector3Array([viewer_position]), _priorities, _ids, _retained_ids,
-            VISIBLE_BUDGET, MAX_DISTANCE, HYSTERESIS)
+    if _planner != null and _planner.has_method("select_world_priority_stable_cone"):
+        selected = _select_native(viewer_position, direction)
     else:
-        selected = _select_fallback(viewer_position)
-
+        selected = _select_fallback(viewer_position, direction)
+    _selected_indices = selected.duplicate()
     var next_retained := PackedInt64Array()
     var enabled := {}
     for index in selected:
@@ -82,11 +121,19 @@ func force_refresh() -> void:
         _fragments[index].visible = enabled.has(index)
 
 
-func _select_fallback(viewer_position: Vector3) -> PackedInt32Array:
+func _select_fallback(viewer_position: Vector3, direction: Vector3) -> PackedInt32Array:
     var ranked: Array[Dictionary] = []
+    var cos_limit: float = cos(deg_to_rad(VIEW_HALF_ANGLE))
+    var normalized: Vector3 = direction.normalized()
+    var near_squared: float = NEAR_KEEP_RADIUS * NEAR_KEEP_RADIUS
     for index in range(_fragments.size()):
-        var distance := _positions[index].distance_to(viewer_position)
+        var offset: Vector3 = _positions[index] - viewer_position
+        var distance_squared: float = offset.length_squared()
+        var distance: float = sqrt(distance_squared)
         if distance > MAX_DISTANCE:
+            continue
+        if distance_squared > near_squared and (
+                offset.dot(normalized) / distance < cos_limit):
             continue
         ranked.append({
             "index": index,
@@ -108,6 +155,18 @@ func _select_fallback(viewer_position: Vector3) -> PackedInt32Array:
     for rank in range(mini(VISIBLE_BUDGET, ranked.size())):
         output.push_back(int(ranked[rank]["index"]))
     return output
+
+
+func verify_native_fallback_parity() -> bool:
+    if not is_instance_valid(_viewer):
+        return false
+    var state: Dictionary = _get_view_state()
+    var origin: Vector3 = state["origin"]
+    var forward: Vector3 = state["forward"]
+    var fallback: PackedInt32Array = _select_fallback(origin, forward)
+    if _planner == null or not _planner.has_method("select_world_priority_stable_cone"):
+        return _selected_indices == fallback
+    return _select_native(origin, forward) == fallback
 
 
 func get_visible_count() -> int:
