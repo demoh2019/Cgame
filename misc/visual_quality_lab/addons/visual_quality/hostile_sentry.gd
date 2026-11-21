@@ -9,10 +9,12 @@ signal sentry_attacked_player(amount: float)
 
 const Attributes = preload("res://addons/visual_quality/attribute_component.gd")
 const Combatant = preload("res://addons/visual_quality/combat_component.gd")
+const Visibility = preload("res://addons/visual_quality/combat_visibility.gd")
 
 @export_range(1.0, 7.0, 0.1) var attack_range: float = 2.8
 @export_range(1.0, 50.0, 1.0) var attack_damage: float = 9.0
 @export_range(0.5, 5.0, 0.1) var attack_interval: float = 1.7
+@export_flags_3d_physics var cover_collision_mask: int = 1
 
 var player: Node3D
 var player_combatant: WorldCombatant3D
@@ -52,6 +54,10 @@ func _physics_process(delta: float) -> void:
 	if not player_combatant.is_alive():
 		return
 	if global_position.distance_squared_to(player.global_position) > attack_range * attack_range:
+		return
+	# The same physical cover blocks both player hits and hostile attacks.
+	if not Visibility.has_clear_path(get_world_3d(), global_position + Vector3.UP * 1.15,
+			player.global_position + Vector3.UP * 1.15, self, player, cover_collision_mask):
 		return
 	var dealt: float = player_combatant.receive_damage(attack_damage,
 		WorldCombatant3D.TEAM_HOSTILE)
