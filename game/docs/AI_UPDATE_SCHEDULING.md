@@ -14,6 +14,10 @@ The server previously ran repeated `Zombie._select_target()` reevaluations in lo
 
 The scheduler's tick index comes from the authoritative `GameServer.tick_count`. Its hashed slot is reproducible across platforms and does not advance `RandomNumberGenerator`, which matters for server replay and consistent tests. The scheduler is independent of wall-clock time and is not a hard CPU budget or a worker-thread system.
 
+## Compatibility with simulation LOD
+
+The concurrently developed `AISimulationLOD2D` remains active. It controls the passive target-scan interval (near, medium, or far) according to viewer distance. **AIUpdateScheduler** operates later: when a scan timer becomes eligible during a very large encounter, it assigns that scan to a deterministic frame phase. Thus these systems are complementary, not replacements. The first passive LOD delay and all existing urgent combat overrides are preserved.
+
 ## Inspect the real server
 
 The diagnostic `GameServer.get_ai_schedule_stats()` method returns a detached Dictionary:
