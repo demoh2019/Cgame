@@ -155,6 +155,27 @@ func run(t) -> void:
         "perception snapshot exposes remaining memory lifetimes")
 
 
+    t.current = "Chase recovery can investigate a second confirmed sound"
+    var secondary_memory := NativeSenses.new()
+    secondary_memory.record_confirmed_sound(Vector2.ZERO, Vector2(4, 0), 20.0, 11)
+    secondary_memory.advance_time(2.0)
+    secondary_memory.record_confirmed_sound(Vector2.ZERO, Vector2(16, 0), 20.0, 12)
+    secondary_memory.advance_time(1.6)
+    if secondary_memory.has_native_history() and secondary_memory.has_native_hearing():
+        var searching := Zombie.new(974, "walker", Vector3(0.0, height, 0.0))
+        searching._native_senses = secondary_memory
+        searching.target_id = 41
+        searching.state = Zombie.State.CHASE
+        searching.think_timer = 1.0
+        searching.last_known_target = Vector2(-30, 0)
+        searching.think(world, {41: {"position": Vector3(1000.0, height, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}}, 0.1, rng)
+        t.eq(searching.target_id, -1, "lost chase releases the distant combat target")
+        t.eq(searching.state, Zombie.State.INVESTIGATE,
+            "a lost target triggers investigation rather than a new attack")
+        t.eq(searching.last_known_target, Vector2(16, 0),
+            "search uses the remaining authoritative secondary sound location")
+
     t.current = "Optional per-infected AI profiling is disabled by default"
     t.check(not bool(infected.get_ai_profile_snapshot().get("enabled", false)),
         "ordinary infected do not allocate native timing counters")
