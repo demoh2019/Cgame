@@ -29,6 +29,9 @@ var brain := BehaviorTreeRunner.new()
 var sensor := AIVisualSensor2D.new()
 var hearing := AIHearingSensor2D.new()
 var navigation := AStarGrid2D.new()
+var update_scheduler := AIUpdateScheduler.new()
+var navigation_profiler := AIExecutionProfiler.new()
+var ai_tick_index := 0
 var navigation_path := PackedVector2Array()
 var navigation_index := 0
 var navigation_goal_cell := Vector2i(-1, -1)
@@ -48,6 +51,8 @@ func _ready() -> void:
     hearing.hearing_radius = 800.0
     hearing.memory_duration = 3.5
     _build_navigation_grid()
+    update_scheduler.slots_per_cycle = 4
+    navigation_profiler.enabled = true
 
     # A real StaticBody2D blocks physics ray queries, even though player and
     # enemy are represented by lightweight procedural circles in this demo.
@@ -142,6 +147,7 @@ func _physics_process(delta: float) -> void:
     ai_timer += delta
     if ai_timer >= AI_TICK_SECONDS:
         ai_timer -= AI_TICK_SECONDS
+        ai_tick_index += 1
         # World physics determines LOS; the reusable C++ sensor evaluates the
         # current FOV, range hysteresis, and last-known-position memory.
         sensor.observe(enemy_position, enemy_forward, player_position, _has_line_of_sight(), AI_TICK_SECONDS)
@@ -250,16 +256,23 @@ func _navigation_path(from_point: Vector2, goal: Vector2) -> PackedVector2Array:
 
 func _navigation_motion(goal: Vector2, distance_per_frame: float) -> Vector2:
     var goal_cell := _cell_for_world(goal)
-    if current_action != navigation_action or goal_cell != navigation_goal_cell:
+    # Always replan when switching actions. During pursuit, moving targets
+    # are refreshed on the NPC's stable slot instead of every grid-cell move.
+    # The cached route is safe to follow while the next refresh is pending.
+    var forced_replan := current_action != navigation_action or navigation_path.is_empty()
+    if forced_replan or (goal_cell != navigation_goal_cell
+            and update_scheduler.is_due(93, ai_tick_index)):
         navigation_action = current_action
         navigation_goal_cell = goal_cell
+        navigation_profiler.begin_sample(&"navigation_repath")
         navigation_path = _navigation_path(enemy_position, goal)
+        navigation_profiler.end_sample(&"navigation_repath")
         navigation_index = 0
     if navigation_path.is_empty():
         return Vector2.ZERO
     while navigation_index < navigation_path.size() and enemy_position.distance_to(navigation_path[navigation_index]) < 7.0:
         navigation_index += 1
-    var destination := goal if navigation_index >= navigation_path.size() else navigation_path[navigation_index]
+    var destination := navigation_path[navigation_path.size() - 1] if navigation_index >= navigation_path.size() else navigation_path[navigation_index]
     return enemy_position.direction_to(destination) * minf(distance_per_frame, enemy_position.distance_to(destination))
 
 
@@ -315,6 +328,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
         current_action = "patrol"
         last_status = BehaviorTreeTask.RUNNING
         last_debug_snapshot = {}
+        ai_tick_index = 0
+        navigation_profiler.reset()
         brain.reset_profile()
         last_profile_snapshot = brain.get_profile_snapshot()
         ai_timer = 0.0
@@ -347,6 +362,13 @@ func _update_hud() -> void:
         int(decision.get("count", 0)),
         float(decision.get("mean_usec", 0.0)),
         int(decision.get("max_usec", 0))
+    ]
+    var path_rows: Dictionary = navigation_profiler.get_snapshot().get("categories", {})
+    var path_cost: Dictionary = path_rows.get("navigation_repath", {})
+    hud.text += "\nScheduled A* repaths: %d | Mean path query: %.1f us | Next slot in %d ticks" % [
+        int(path_cost.get("count", 0)),
+        float(path_cost.get("mean_usec", 0.0)),
+        update_scheduler.ticks_until_due(93, ai_tick_index)
     ]
 
 
