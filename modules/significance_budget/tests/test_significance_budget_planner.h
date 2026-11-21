@@ -165,6 +165,32 @@ TEST_CASE("[SignificanceBudget] category caps protect critical VFX during crowd 
 	CHECK(distances[0] == 2.0);
 }
 
+TEST_CASE("[SignificanceBudget] frustum-aware effects honor strict priority and caps") {
+	Ref<SignificanceBudgetPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 5.0, 8.0, 1.0, 2.0, 11.0 };
+	const PackedByteArray priorities = { 1, 1, 2, 1, 3 };
+	const PackedByteArray categories = { 0, 0, 1, 0, 1 };
+	const PackedByteArray visible = { 0, 1, 0, 1, 1 };
+	const PackedInt32Array caps = { 2, 1, 0, 0 };
+	const PackedInt32Array selected = { 2, 3, 1 };
+	CHECK(planner->select_effects_visible(distances, priorities, categories, visible,
+			caps, 3, 10.0) == selected);
+	CHECK(planner->select_effects_visible(distances, priorities, categories, visible,
+			caps, 0, 10.0).is_empty());
+	const PackedInt32Array near_only = { 2 };
+	CHECK(planner->select_effects_visible(distances, priorities, categories, visible,
+			caps, 3, 1.0) == near_only);
+	CHECK(planner->select_effects_visible(distances, priorities, categories, { 1, 1 },
+			caps, 3, 10.0).is_empty());
+	CHECK(planner->select_effects_visible(distances, priorities, categories,
+			{ 0, 1, 2, 1, 1 }, caps, 3, 10.0).is_empty());
+	CHECK(planner->select_effects_visible(distances, priorities, categories, visible,
+			{ 2, -1, 0, 0 }, 3, 10.0).is_empty());
+	CHECK(planner->select_effects_visible({ Math::NaN }, { 1 }, { 0 }, { 1 },
+			caps, 1, 10.0).is_empty());
+}
+
 TEST_CASE("[SignificanceBudget] invalid category input is rejected atomically") {
 	Ref<SignificanceBudgetPlanner> planner;
 	planner.instantiate();

@@ -287,12 +287,16 @@ func flush_bursts() -> void:
 	var distances := PackedFloat64Array()
 	var priorities := PackedByteArray()
 	var categories := PackedByteArray()
+	var visible := PackedByteArray()
 	for effect in _pending_bursts:
 		distances.append(viewer.distance_to(effect["position"]) if camera != null else 0.0)
 		priorities.append(int(effect["priority"]))
 		categories.append(int(effect["group"]))
-	var chosen: PackedInt32Array = FxPolicy.select_indices(
-		distances, priorities, categories, GraphicsQuality.level(), _native_fx_budget)
+		# No camera during headless tests means all candidates are equivalent
+		# on visibility. Do not cull a critical event merely for being behind us.
+		visible.append(1 if camera == null or camera.is_position_in_frustum(effect["position"]) else 0)
+	var chosen: PackedInt32Array = FxPolicy.select_visible_indices(
+		distances, priorities, categories, visible, GraphicsQuality.level(), _native_fx_budget)
 	var actual: int = 0
 	for index in chosen:
 		if _emit_burst(_pending_bursts[index]):

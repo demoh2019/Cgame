@@ -52,3 +52,19 @@ https://dev.epicgames.com/documentation/en-us/unreal-engine/performance-budgetin
 Albion After uses it for its 32 visible infected health bars. Retention reduces HUD churn as same-priority zombies move and never lets a previously visible ordinary enemy obscure a higher-priority boss or elite. Stock Godot follows the same algorithm. No server AI, combat, replication or actual 3D actor culling is changed.
 
 Unreal Significance Manager: https://dev.epicgames.com/documentation/en-us/unreal-engine/significance-manager-in-unreal-engine
+
+## Frustum-prioritized presentation (on-screen VFX)
+
+`select_effects_visible(distances, priorities, categories, visible, category_caps,
+budget, max_distance)` extends the Niagara-inspired type-budget planner with a
+0/1 camera-frustum hint. Priority tier remains the primary key; only effects
+of equal priority prefer on-screen emitters, then distance and stable input
+order. Per-category quotas, hard range, bounds and fail-closed validation are
+preserved. This is *frustum admission*, not GPU occlusion culling.
+
+Albion After's `effects.gd` now feeds `Camera3D.is_position_in_frustum()`
+for each pending cosmetic burst and uses the native selector when available.
+`fx_scalability_policy.gd` has matching pure GDScript behavior on stock
+Godot or older Cgame binaries. Gameplay, audio, server state and networking
+are not affected. The user-visible impact requires profiling in a running
+scene; no FPS improvement is claimed.
