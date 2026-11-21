@@ -61,8 +61,9 @@ static func register_profiler_monitors() -> Array[StringName]:
 	var server: Object = Engine.get_singleton("TextureStreaming")
 	if server == null:
 		return registered
-	for monitor_name: StringName in PROFILER_METRICS:
-		var method_name: StringName = PROFILER_METRICS[monitor_name]
+	for name in PROFILER_METRICS:
+		var monitor_name: StringName = StringName(name)
+		var method_name: StringName = PROFILER_METRICS[name]
 		if server.has_method(method_name) and not Performance.has_custom_monitor(monitor_name):
 			Performance.add_custom_monitor(monitor_name, Callable(server, method_name))
 			registered.append(monitor_name)
