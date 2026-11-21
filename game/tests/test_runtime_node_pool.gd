@@ -114,7 +114,7 @@ func run(t) -> void:
 		budget_native.free()
 
 
-static func _check_budgeted_residency(t, resident: Node, packed: PackedScene, mode: String) -> void:
+static func _check_budgeted_residency(t, resident, packed: PackedScene, mode: String) -> void:
 	resident.template = packed
 	resident.max_idle = 6
 	resident.max_active = 2
