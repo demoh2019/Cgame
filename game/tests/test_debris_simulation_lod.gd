@@ -70,6 +70,15 @@ func run(t) -> void:
 	t.check(body.freeze, "far body is removed from active physics integration")
 	t.eq(body.get_meta("sim_lod"), 1, "frozen body remembers its tier")
 	t.eq(debris.active_count(), 1, "frozen mesh remains visible in the pool")
+	debris.blast(Vector3(30, 0, 0), 5.0, 4.0)
+	t.check(not body.freeze, "nearby blast wakes frozen cosmetic debris")
+	# Isolated headless node has no physics world; avoid executing ray queries.
+	debris._blasts.clear()
+	debris._physics_process(1.0 / 60.0)
+	t.check(not body.freeze, "short grace preserves visible explosion motion")
+	debris._clock += Debris.BLAST_WAKE_GRACE
+	debris._physics_process(1.0 / 60.0)
+	t.check(body.freeze, "after blast grace the distance LOD freezes again")
 	debris.set_viewer_position(Vector3(7, 0, 0))
 	debris._physics_process(1.0 / 60.0)
 	t.check(body.freeze, "approach inside hysteresis holds frozen state")

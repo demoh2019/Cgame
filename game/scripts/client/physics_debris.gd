@@ -28,6 +28,7 @@ const BLAST_MAX_OCCLUSION_RAYS := 24 # One extra ray per body, bounded.
 const SIMULATE_RADIUS := 24.0
 const RETIRE_RADIUS := 56.0
 const SIMULATION_HYSTERESIS := 2.0
+const BLAST_WAKE_GRACE := 0.40 # Keep blast-affected frozen pieces temporarily live.
 
 var _height_at := Callable()
 var _is_water := Callable()
@@ -252,6 +253,7 @@ func _acquire(kind: String, size: Vector3) -> RigidBody3D:
 	body.set_meta("asleep", 0.0)
 	body.set_meta("retiring", -1.0)
 	body.set_meta("sim_lod", 0)
+	body.set_meta("blast_wake_until", 0.0)
 	body.visible = true
 	body.freeze = false
 	body.sleeping = false
@@ -320,12 +322,23 @@ func eject_casing(at: Vector3, facing_yaw: float) -> bool:
 ## The one place blasts push debris and ragdolls (physics_world_fx feeds it): the engine's
 ## RadialForceField3D when compiled in, else the script sphere query below — never both.
 func blast(center: Vector3, radius: float, impulse: float) -> void:
+	if not center.is_finite() or not is_finite(radius) or not is_finite(impulse) \
+			or radius <= 0.0 or impulse <= 0.0:
+		return
 	# Do not spend overlap/raycast work for entirely irrelevant explosions.
 	# The padding keeps any blast sphere that reaches the active area.
-	if center.is_finite() and is_finite(radius) and radius >= 0.0 \
-			and not _within_relevance(center, radius):
+	if not _within_relevance(center, radius):
 		return
-	if radius > 0.0 and impulse > 0.0 and center.is_finite() and is_inside_tree() \
+	# A frozen rigid body ignores an otherwise valid blast field. Wake the
+	# affected cosmetic pieces, then grant a short physics grace period.
+	var radius_squared: float = radius * radius
+	for body in _bodies:
+		if body.freeze and body.global_position.distance_squared_to(center) <= radius_squared:
+			body.freeze = false
+			body.sleeping = false
+			body.set_meta("sim_lod", 0)
+			body.set_meta("blast_wake_until", _clock + BLAST_WAKE_GRACE)
+	if is_inside_tree() \
 			and EngineFeatures.radial_push(self, center, radius, impulse, 0.6, LAYER | Ragdoll.LAYER,
 				BLAST_WALL_MASK, BLAST_WALL_ATTENUATION, true, 2):
 		return
@@ -404,6 +417,8 @@ func _physics_process(delta: float) -> void:
 			var previous_lod: int = int(body.get_meta("sim_lod", 0))
 			var distance: float = _viewer_position.distance_to(body.global_position)
 			var tier: int = _classify_lod(distance, in_water, previous_lod)
+			if tier == 1 and _clock < float(body.get_meta("blast_wake_until", 0.0)):
+				tier = 0
 			if tier == 2:
 				_retire(body)
 				continue
