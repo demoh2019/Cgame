@@ -823,6 +823,7 @@ func _process(delta: float) -> void:
 			target["yaw"] = sampled[1]
 		if key.begins_with("bag"):
 			LootDropBounce.apply(node, delta, GraphicsQuality.level())
+			_float_on_water(node)
 		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("plot") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
@@ -1038,3 +1039,17 @@ func telegraph(id: int, seconds: float, charge: bool) -> void:
 	tween.tween_property(mark, "scale", Vector3.ONE * 1.4, maxf(seconds, 0.1) * 0.5).set_trans(Tween.TRANS_BACK)
 	tween.tween_property(mark, "modulate:a", 0.0, maxf(seconds, 0.1) * 0.5)
 	tween.tween_callback(mark.queue_free)
+
+
+## Buoyancy: loot dropped into the sea, a river or a lake floats and bobs on the surface.
+func _float_on_water(node: Node3D) -> void:
+	if _world == null:
+		return
+	var p: Vector3 = node.position
+	var surface: float = _world.water_level_at(p.x, p.z)
+	if _world.ground_at(p.x, p.z) >= surface:
+		return
+	var t: float = Time.get_ticks_msec() * 0.001 + p.x * 0.13
+	node.position.y = surface + 0.08 + sin(t * 1.7) * 0.07
+	node.rotation.x = sin(t * 1.3) * 0.12
+	node.rotation.z = cos(t * 1.1) * 0.12

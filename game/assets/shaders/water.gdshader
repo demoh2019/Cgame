@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode blend_mix, depth_draw_never, cull_back, diffuse_burley, specular_schlick_ggx;
+render_mode blend_mix, depth_draw_never, cull_disabled, diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
 global uniform float aa_weather_rain;
 // Sun vector/radiance are cached with the sky, so water never asks the CPU
@@ -51,6 +51,19 @@ uniform float shore_glimmer_fade_start = 28.0;
 uniform float shore_glimmer_fade_end = 62.0;
 
 varying vec3 world_position;
+varying vec2 gerstner_slope;
+varying float gerstner_crest;
+
+// Open-sea swell (Gerstner waves). Zero on rivers and lakes (their own material instances).
+uniform float gerstner_amplitude = 0.0;
+// Island depth map (R = metres of water under the sea level, 0 on land), covering shore_map_rect:
+// waves shrink and steepen into surf where the sea gets shallow.
+uniform sampler2D shore_map : filter_linear, repeat_disable;
+uniform vec4 shore_map_rect = vec4(-3200.0, -3200.0, 6400.0, 6400.0);
+uniform float has_shore_map = 0.0;
+// Underside of the surface, seen while diving.
+uniform vec3 underside_color : source_color = vec3(0.03, 0.2, 0.24);
+uniform vec3 snell_window_color : source_color = vec3(0.55, 0.78, 0.82);
 
 float hash21(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
@@ -69,8 +82,43 @@ float value_noise(vec2 p) {
 	return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
+// One Gerstner wave: direction, wavelength (m), steepness Q, speed scale. Adds displacement and slope.
+void gerstner(vec2 dir, float wavelength, float steepness, float amp, vec2 p, float t,
+		inout vec3 offset, inout vec2 slope) {
+	float k = 6.2831853 / wavelength;
+	float c = sqrt(9.81 / k);
+	float a = steepness / k * amp * 0.28; // Calm ~0.5 m swell, ~1.3 m in a storm.
+	float f = k * (dot(dir, p) - c * t);
+	offset.xz += dir * a * cos(f);
+	offset.y += a * sin(f);
+	slope += dir * k * a * cos(f);
+}
+
 void vertex() {
 	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	gerstner_slope = vec2(0.0);
+	gerstner_crest = 0.0;
+	if (gerstner_amplitude > 0.001) {
+		vec2 p = world_position.xz;
+		float shallow = 1.0;
+		if (has_shore_map > 0.5) {
+			float depth = texture(shore_map, (p - shore_map_rect.xy) / shore_map_rect.zw).r;
+			shallow = smoothstep(0.4, 7.0, depth);
+		}
+		float storm = clamp(aa_weather_rain, 0.0, 1.0);
+		vec2 wind = length(aa_vegetation_wind.xy) > 0.01 ? normalize(aa_vegetation_wind.xy) : vec2(0.8, 0.6);
+		float power = gerstner_amplitude * (0.6 + 0.8 * clamp(aa_vegetation_wind.z, 0.0, 1.0) + storm * 1.2) * (0.25 + 0.75 * shallow);
+		vec3 offset = vec3(0.0);
+		vec2 slope = vec2(0.0);
+		gerstner(wind, 41.0, 0.32, power, p, TIME, offset, slope);
+		gerstner(normalize(wind + vec2(0.45, -0.3)), 23.0, 0.28, power, p, TIME * 1.07, offset, slope);
+		gerstner(normalize(wind + vec2(-0.5, 0.35)), 13.0, 0.24, power, p, TIME * 0.93, offset, slope);
+		gerstner(normalize(vec2(-wind.y, wind.x) + wind), 7.0, 0.18, power, p, TIME * 1.11, offset, slope);
+		VERTEX += (inverse(mat3(MODEL_MATRIX)) * offset);
+		world_position += offset;
+		gerstner_slope = slope;
+		gerstner_crest = clamp(offset.y * 0.9 / max(power, 0.05), 0.0, 1.0);
+	}
 #ifdef WATER_REFRACTION
 	// Horizontal water plane: provide a stable world-aligned tangent frame.
 	// Imported meshes need no tangent data and low-end variants skip it.
@@ -80,6 +128,18 @@ void vertex() {
 }
 
 void fragment() {
+	if (!FRONT_FACING) {
+		// Looking up from below: dark teal water, and the bright Snell's window straight overhead where
+		// the sky shows through; beyond ~48 degrees the surface reflects the depths (total internal reflection).
+		vec3 view_world = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
+		float up = clamp(-view_world.y, 0.0, 1.0); // VIEW points at the camera, which is below.
+		float window = smoothstep(0.62, 0.78, up);
+		float ripple = value_noise(world_position.xz * 0.8 + vec2(TIME * 0.3, TIME * -0.2));
+		ALBEDO = vec3(0.0);
+		EMISSION = mix(underside_color, snell_window_color * (0.8 + 0.4 * ripple), window);
+		ALPHA = mix(0.92, 0.55, window);
+		ROUGHNESS = 0.2;
+	} else {
 	float t = TIME;
 	vec2 p = world_position.xz;
 	float storm = clamp(aa_weather_rain, 0.0, 1.0);
@@ -127,6 +187,7 @@ void fragment() {
 		}
 		// Amplify the existing waves rather than adding costly new noise samples.
 		slope *= storm_wave_strength;
+		slope += gerstner_slope * 0.6; // Swell from the Gerstner waves (normals follow the displaced surface).
 #ifdef WATER_REFRACTION
 		refract_slope = slope;
 #endif
@@ -137,7 +198,7 @@ void fragment() {
 		// Reuse the exact normal driving lit waves and refraction.
 		wave_world_normal = world_normal;
 #endif
-		crest = smoothstep(0.04, 0.11, length(slope));
+		crest = max(smoothstep(0.04, 0.11, length(slope)), smoothstep(0.75, 1.0, gerstner_crest) * 0.8);
 	}
 
 	float depth = textureLod(depth_tex, SCREEN_UV, 0.0).r;
@@ -366,4 +427,5 @@ void fragment() {
 	float transmission_weight = refraction_mix * (1.0 - ALPHA) / max(ALPHA, 0.20);
 	EMISSION += refraction_delta * transmission_weight;
 #endif
+	} // front face
 }

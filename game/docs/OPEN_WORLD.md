@@ -59,11 +59,11 @@ How the game world is built: `WorldGen.height_at` (shared, deterministic, server
 | Spline Rivers | **PRESENT (batch 1)** | Chaikin-smoothed polylines; ribbon meshes per chunk in `ChunkView._build_rivers_and_bridges` |
 | Lake Generation | **PRESENT (batch 1)** | rivers trapped in hollows or circling flats pool into carved lakes (`world_rivers.gd`), drawn as water discs |
 | Ocean Generation | PARTIAL | sea plane following the player; island edge sinks into it |
-| Ocean Simulation | MISSING | shader waves only |
-| Shoreline Simulation | PARTIAL | depth-based shore foam/surf in `water.gdshader` (now also along rivers and lakes) |
-| Water Buoyancy | PARTIAL | swimming/diving logic; no rigid-body buoyancy |
+| Ocean Simulation | **PRESENT (batch 3)** | `water.gdshader` vertex Gerstner swell (4 wave trains around the weather wind, stronger in wind and rain) on a radial LOD sea mesh (`sea_surface.gd`: dense rings near the camera, 900 m out); normals and whitecaps follow the swell |
+| Shoreline Simulation | **PRESENT (batch 3)** | island depth map (`sea_surface.gd`, 256² over 6.4 km, filled a few rows per frame) shrinks the swell over shallows; depth-buffer surf and foam on every shore, river and lake |
+| Water Buoyancy | PARTIAL (batch 3) | swimming/diving; loot dropped in water floats and bobs (`EntityView._float_on_water`). No rigid-body buoyancy or boats |
 | Water Refraction / Caustics | PRESENT | `water_refraction.gd`, `water_caustics.gdshaderinc` |
-| Underwater Rendering | PARTIAL | tint + fog; no view of the surface from below |
+| Underwater Rendering | **PRESENT (batch 3)** | the surface is drawn from below (`water.gdshader` back faces): dark teal ceiling with a bright Snell's window overhead and moving ripples, plus underwater fog |
 | Underwater Fog | **PRESENT (batch 1)** | `online_main._apply_underwater_fog`: dense blue-green environment fog that thickens with depth, in the sea, rivers and lakes |
 
 ## Roads, splines, biomes, vegetation
@@ -91,6 +91,5 @@ How the game world is built: `WorldGen.height_at` (shared, deterministic, server
 
 ## Next batches (by player-visible value)
 
-1. Ocean simulation (Gerstner waves with mesh LOD) and a view of the surface from below.
-2. Vegetation physics (trees that sway/fall when hit), buoyancy for dropped loot and boats.
-3. Data Layers (seasonal/event content toggles) and a streaming profiler panel.
+1. Vegetation physics (trees that sway/fall when hit), rigid-body buoyancy and boats.
+2. Data Layers (seasonal/event content toggles) and a streaming profiler panel.

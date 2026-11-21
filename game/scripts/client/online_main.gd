@@ -6,6 +6,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WoundFx = preload("res://scripts/client/wound_fx.gd")
 const BrawlMeter = preload("res://scripts/client/brawl_meter.gd")
 const FarField = preload("res://scripts/client/far_field.gd")
+const SeaSurface = preload("res://scripts/client/sea_surface.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -218,6 +219,7 @@ var _third_person_near := 0.05
 var _fp_body_refresh := 0.0
 var _brawl_meter: Control
 var _far_field: Node3D
+var _sea # SeaSurface: depth map for shore-aware swell.
 var _last_charge: Dictionary = {} # peer -> charge of their latest swing (for power-hit gore).
 var _underwater_tint: ColorRect # Blue murk while the camera is below the surface.
 var _breath_label: Label # Air left while diving.
@@ -514,11 +516,12 @@ func _build_environment() -> void:
 	add_child(ground_shadows)
 	# The sea: one big plane that follows the player.
 	water = MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(1600, 1600)
-	water.mesh = plane
+	water.mesh = SeaSurface.build_mesh() # Radial LOD rings: Gerstner swell needs vertices.
+	_sea = SeaSurface.new()
 	var water_material := ShaderMaterial.new()
 	water_material.shader = load("res://assets/shaders/water.gdshader")
+	water_material.set_shader_parameter("gerstner_amplitude", 1.0)
+	water_material.set_shader_parameter("shore_map_rect", Vector4(-SeaSurface.MAP_EXTENT * 0.5, -SeaSurface.MAP_EXTENT * 0.5, SeaSurface.MAP_EXTENT, SeaSurface.MAP_EXTENT))
 	water.material_override = water_material
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	water.position.y = Defs.WATER_LEVEL - 0.35
@@ -1898,6 +1901,10 @@ func _process(delta: float) -> void:
 			camera_fx.photo_active)
 	water.position.x = position.x
 	water.position.z = position.z
+	if _sea != null and _sea.texture == null and client.world != null and _sea.step_depth_map(client.world):
+		var sea_material := water.material_override as ShaderMaterial
+		sea_material.set_shader_parameter("shore_map", _sea.texture)
+		sea_material.set_shader_parameter("has_shore_map", 1.0)
 	_update_time_of_day(delta)
 	_track_places(delta)
 	_update_prompt()
