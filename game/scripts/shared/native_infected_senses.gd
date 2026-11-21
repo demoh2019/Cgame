@@ -154,6 +154,31 @@ func best_confirmed_stimulus_in_radius(sense: int, center: Vector2, radius: floa
 ## A server-authoritative source became invalid (disconnect, death, safe hub).
 ## Only forget its identified history entries; do not reset other survivors'
 ## perceptions or fabricate fresh events. Older binaries safely do nothing.
+## Actor-scoped read of a previously authorized sound/sight, bounded to our
+## present pursuit leash. It neither senses a new event nor sets a target.
+## On older forks use the source-aware, bounded history snapshot; on stock
+## Godot there is no extra memory to query.
+func best_confirmed_stimulus_for_source_in_radius(
+        sense: int, source_id: int, center: Vector2, radius: float) -> Dictionary:
+    if _history == null or source_id < 0 or sense < 0 or sense > 2 \
+            or not center.is_finite() or not is_finite(radius) \
+            or radius < 0.0 or radius > 1000000.0:
+        return {}
+    if _history.has_method("get_best_for_source_in_radius"):
+        return _history.get_best_for_source_in_radius(sense, source_id, center, radius)
+    # Identified sources have at most one live record in each sense.
+    # This fallback is only queried during loss of chase, not each frame.
+    var squared_radius: float = radius * radius
+    for entry_data in _history.get_recent(64):
+        var entry: Dictionary = entry_data
+        if int(entry.get("sense", -1)) != sense or int(entry.get("source_id", -1)) != source_id:
+            continue
+        var position: Vector2 = entry.get("position", Vector2.INF)
+        if position.is_finite() and center.distance_squared_to(position) <= squared_radius:
+            return entry
+    return {}
+
+
 func forget_confirmed_source(source_id: int, sense: int = -1) -> int:
     if source_id < 0 or (sense != -1 and (sense < 0 or sense > 2)):
         return 0
