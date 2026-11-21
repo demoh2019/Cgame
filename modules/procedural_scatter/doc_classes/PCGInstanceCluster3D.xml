@@ -29,5 +29,14 @@
 				Partitions a fixed set of 3D positions into deterministic spatial clusters, first attempting [param cell_size]. When that grid has more occupied cells than [param max_clusters], doubles cell size along each axis and tries again, for at most [param max_coarsen_passes] retries (0 to 8). Returns the first valid set of clusters, preserving original source indices and encounter order. This avoids replacing a slightly over-budget fine grid with one large batch. At the maximum 10,000-unit cell size or retry limit, falls back to one unsplit batch if still over budget; never drops instances. Validates all inputs atomically. Existing [method partition_indices] retains its fixed-cell behavior.
 			</description>
 		</method>
+		<method name="compute_cluster_bounds" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="clusters" type="Array" />
+			<param index="2" name="margin" type="float" default="0.0" />
+			<description>
+				Calculates a tight point-only [AABB] for each group of source indices, preserving group order. Pass the output of [method partition_indices] or [method partition_indices_adaptive] for a valid complete and disjoint partition. Every source position must be referenced exactly once across nonempty [PackedInt32Array] groups; duplicate, missing, negative and out-of-range indices, malformed types, nonfinite/out-of-bounds positions and invalid margins atomically reject the entire batch with an empty array. A valid zero-point input with zero groups yields an empty result. Limits: 65,536 finite positions with every coordinate within +/-10,000,000, up to 256 clusters, and a finite uniform expansion margin in the range 0 through 10,000. This method only computes point-center bounds; the caller must account for rotated/scaled mesh geometry separately when defining the renderer's conservative custom AABB. Designed as deterministic HLOD and procedural-streaming anchor metadata. Work is linear in points plus indices, and does not access scenes, graphics, physics, or random generators.
+			</description>
+		</method>
 	</methods>
 </class>

@@ -85,6 +85,8 @@ Array build_bounded_clusters(const PackedVector3Array &p_positions,
 } // namespace
 
 void PCGInstanceCluster3D::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("compute_cluster_bounds", "positions", "clusters", "margin"),
+			&PCGInstanceCluster3D::compute_cluster_bounds, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("partition_indices", "positions", "cell_size", "min_split_count", "max_clusters"),
 			&PCGInstanceCluster3D::partition_indices, DEFVAL(32.0), DEFVAL(48), DEFVAL(MAX_CLUSTERS));
 	ClassDB::bind_method(D_METHOD("partition_indices_adaptive", "positions", "cell_size", "min_split_count", "max_clusters", "max_coarsen_passes"),
@@ -138,4 +140,75 @@ Array PCGInstanceCluster3D::partition_indices_adaptive(const PackedVector3Array 
 	}
 	// Preserve all instances when even the largest permitted grid overflows.
 	return single_cluster(count);
+}
+
+Array PCGInstanceCluster3D::compute_cluster_bounds(const PackedVector3Array &p_positions,
+		const Array &p_clusters, double p_margin) const {
+	Array result;
+	const int count = p_positions.size();
+	if (count > MAX_INSTANCES || p_clusters.size() > MAX_CLUSTERS ||
+			!Math::is_finite(p_margin) || p_margin < 0.0 ||
+			p_margin > MAX_CELL_SIZE ||
+			(count == 0) != p_clusters.is_empty()) {
+		return result;
+	}
+	// Fail atomically on malformed points, even if a broken cluster
+	// partition never references them.
+	for (const Vector3 &point : p_positions) {
+		if (!point.is_finite() ||
+				Math::abs(double(point.x)) > MAX_COORDINATE ||
+				Math::abs(double(point.y)) > MAX_COORDINATE ||
+				Math::abs(double(point.z)) > MAX_COORDINATE) {
+			return Array();
+		}
+	}
+	if (count == 0) {
+		return result; // Valid empty partition; no AABBs.
+	}
+	PackedByteArray seen;
+	seen.resize(count);
+	seen.fill(0);
+	// Build into a private list and publish only if every source index
+	// occurs exactly once across ALL groups (no drops or duplicates).
+	Vector<AABB> bounds;
+	int visited = 0;
+	for (int cluster_index = 0; cluster_index < p_clusters.size(); ++cluster_index) {
+		const Variant item = p_clusters[cluster_index];
+		if (item.get_type() != Variant::PACKED_INT32_ARRAY) {
+			return Array();
+		}
+		const PackedInt32Array indices = item;
+		if (indices.is_empty()) {
+			return Array();
+		}
+		const int first = indices[0];
+		if (first < 0 || first >= count || seen[first] != 0) {
+			return Array();
+		}
+		Vector3 min_point = p_positions[first];
+		Vector3 max_point = min_point;
+		for (int i = 0; i < indices.size(); ++i) {
+			const int index = indices[i];
+			if (index < 0 || index >= count || seen[index] != 0) {
+				return Array();
+			}
+			seen.set(index, 1);
+			++visited;
+			const Vector3 point = p_positions[index];
+			min_point.x = MIN(min_point.x, point.x);
+			min_point.y = MIN(min_point.y, point.y);
+			min_point.z = MIN(min_point.z, point.z);
+			max_point.x = MAX(max_point.x, point.x);
+			max_point.y = MAX(max_point.y, point.y);
+			max_point.z = MAX(max_point.z, point.z);
+		}
+		bounds.push_back(AABB(min_point, max_point - min_point).grow(real_t(p_margin)));
+	}
+	if (visited != count) {
+		return Array();
+	}
+	for (const AABB &bounds_for_cluster : bounds) {
+		result.push_back(bounds_for_cluster);
+	}
+	return result;
 }

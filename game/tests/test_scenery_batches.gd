@@ -1,6 +1,7 @@
 extends RefCounted
 ## Regression checks for conservative MultiMesh spatial-culling batches.
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
+const DensityLod = preload("res://scripts/client/scenery_density_lod.gd")
 
 
 func run(t) -> void:
@@ -74,6 +75,57 @@ func run(t) -> void:
 		t.check(instance.custom_aabb.size.y < 6.0,
 			"vertical MultiMesh bounds do not span unrelated cliff elevations")
 	stacked_parent.free()
+
+	t.current = "native cluster anchors for HLOD and foliage projected sizing"
+	var anchor_groups: Array = [
+		PackedInt32Array([0, 2]), PackedInt32Array([1, 3])]
+	var anchor_points := PackedVector3Array([
+		Vector3(-2, 0, -1), Vector3(0, 80, 2),
+		Vector3(2, 2, 5), Vector3(5, 82, 9)])
+	var native_bounds: Array = SceneryBatches.cluster_point_bounds(
+		anchor_points, anchor_groups)
+	var fallback_bounds: Array = SceneryBatches.cluster_point_bounds(
+		anchor_points, anchor_groups, 0.0, false)
+	t.eq(native_bounds, fallback_bounds,
+		"native cluster anchor bounds exactly match portable fallback")
+	t.eq(native_bounds.size(), 2, "two independently bounded altitude layers")
+	if native_bounds.size() == 2:
+		var ground: AABB = native_bounds[0]
+		var high: AABB = native_bounds[1]
+		t.eq(ground.position, Vector3(-2, 0, -1),
+			"anchor bounds preserve negative XYZ")
+		t.eq(ground.size, Vector3(4, 2, 6),
+			"anchor bounds tightly enclose the lower level")
+		t.eq(high.position, Vector3(0, 80, 2),
+			"anchor bounds track a separate upper level")
+		t.check(ground.get_end().y < high.position.y,
+			"native HLOD anchor bounds do not span separate elevations")
+	var corrupt: Array = [
+		PackedInt32Array([0, 1]), PackedInt32Array([1, 2, 3])]
+	t.eq(SceneryBatches.cluster_point_bounds(anchor_points, corrupt).size(), 0,
+		"duplicate source indices invalidate all native anchor boxes")
+	t.eq(SceneryBatches.cluster_point_bounds(anchor_points, corrupt, 0.0, false).size(), 0,
+		"fallback also rejects duplicate clusters")
+	t.eq(SceneryBatches.cluster_point_bounds(anchor_points,
+		[PackedInt32Array([0, 1])]).size(), 0,
+		"missing cluster members never yield partial bounds")
+	t.eq(SceneryBatches.cluster_point_bounds(anchor_points, anchor_groups, -1.0).size(), 0,
+		"invalid margin is rejected")
+	var found_anchor_meta := 0
+	for batch in nodes:
+		var anchor_meta: Variant = batch.get_meta("aa_pcg_anchor_bounds", null)
+		t.check(anchor_meta is AABB,
+			"real Albion scenery has native point-only cluster anchor metadata")
+		if anchor_meta is AABB:
+			var instance_anchors: AABB = anchor_meta
+			var center: Vector3 = DensityLod._anchor_center(batch)
+			t.check(center.distance_to(batch.to_global(instance_anchors.get_center())) < 0.00001,
+				"projected foliage LOD reads native anchor center")
+			t.check(batch.custom_aabb.has_point(instance_anchors.get_center()),
+				"render bounds remain conservative around every anchor")
+			found_anchor_meta += 1
+	t.eq(found_anchor_meta, nodes.size(),
+		"each real GPU batch has independently addressable native anchor metadata")
 
 	t.current = "native cluster draw-call limit and invalid input safety"
 	var widespread := PackedVector3Array()

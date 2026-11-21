@@ -221,6 +221,17 @@ static func plan_projected_visible_counts(counts: PackedInt32Array,
 		quality, near_pixels, far_pixels)
 
 
+## An instance's authored origin cluster is a more stable LOD anchor
+## than the renderer's AABB for meshes with offset pivots or tall geometry.
+## Renderer culling *always* retains its full conservative custom_aabb.
+static func _anchor_center(node: MultiMeshInstance3D) -> Vector3:
+	var anchors: Variant = node.get_meta("aa_pcg_anchor_bounds", null)
+	if anchors is AABB:
+		var exact: AABB = anchors
+		return node.to_global(exact.get_center())
+	return node.to_global(node.custom_aabb.get_center())
+
+
 ## Compute the camera's vertical projection scale once, then send up to 4096
 ## plants to native C++ in one batch. Old-engine/unsupported camera projection
 ## paths retain the previous distance planner.
@@ -268,7 +279,7 @@ static func update_instances_projected(instances: Array[MultiMeshInstance3D],
 		if node == null or not is_instance_valid(node) or node.multimesh == null or \
 				not node.is_inside_tree() or not bool(node.get_meta("aa_density_scalable", false)):
 			continue
-		var center: Vector3 = node.to_global(node.custom_aabb.get_center())
+		var center: Vector3 = _anchor_center(node)
 		var diameter: float = float(node.get_meta("aa_density_mesh_diameter", 0.0))
 		if not center.is_finite() or not is_finite(diameter) or diameter <= 0.0:
 			continue
@@ -335,7 +346,7 @@ static func update_instances(instances: Array[MultiMeshInstance3D],
 		if node == null or not is_instance_valid(node) or node.multimesh == null or \
 				not node.is_inside_tree() or not bool(node.get_meta("aa_density_scalable", false)):
 			continue
-		var center: Vector3 = node.to_global(node.custom_aabb.get_center())
+		var center: Vector3 = _anchor_center(node)
 		if not center.is_finite():
 			continue
 		valid.append(node)

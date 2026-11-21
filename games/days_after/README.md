@@ -302,35 +302,18 @@ Unreal Nanite or screen-size-aware GPU instance culling. Max draw
 batches rise from three to six; profile a built game on target
 hardware before claiming better frame time.
 
+## Exact native PCG trail cluster bounds
 
-## Deterministic point transforms for procedural vegetation
+The `TrailMarkers` cosmetic `MultiMeshInstance3D` now computes
+tight point-origin AABBs from the native engine's
+`PCGInstanceCluster3D.compute_cluster_bounds()`. Unlike large
+whole-scene fallback bounds, this records the actual visible stone
+anchors. The renderer gets a conservative **0.75-m expanded** AABB,
+which safely includes the rotated 0.52 × 0.055 × 0.72-m box stones.
+The one-MultiMesh design and collision-free trail remain unchanged.
 
-Days After's six mesh/LOD foliage batches now obtain the underlying
-per-plant yaw and nonuniform size from native
-`PCGPointTransform3D.generate_transforms()`. The accepted point's
-original **grid-cell stable ID** seeds three independent hashes:
-a full-revolution possible yaw, X/Z scaling between 0.82 and 1.18
-and vertical scaling between 0.88 and 1.16. These are then combined
-with the existing per-variant geometric proportions.
+A pure GDScript fallback gives the same result on stock Godot.
+`trail_frames_smoke_test.gd` validates tight native/fallback
+bounds, full source coverage, and padded draw bounds; the native
+`PCGInstanceCluster3D` engine tests reject corrupt index groups.
 
-The transform array is created **once per authored foliage regeneration**
-and reused when near/far `MultiMesh` groups are rebuilt. Changing
-camera distance does not reroll, move, add or remove plants, and
-reordering the source array does not affect the ID-specific look.
-The same original PCG exclusion volumes, path-density mask, 160
-instance cap and survivor gameplay remain intact.
-
-The new engine class is data-only; stock Godot runs the deterministic
-GDScript equivalent in `pcg_point_transforms.gd`. Tests check both
-implementations' matrix parity, stable rotations/scales across ID
-reordering, and the actual live six-mesh render transforms through
-LOD changes and regeneration.
-
-```sh
-godot --headless --path games/days_after --script res://pcg_point_transforms_smoke_test.gd
-godot --headless --path games/days_after --script res://smoke_test.gd
-```
-
-This is stable procedural visual variation inspired by Unreal PCG
-Transform Points, not GPU-driven instance culling, automatic proxy
-generation, or a measured frame-time speedup.

@@ -548,53 +548,39 @@ var groups := planner.partition_variant_lods(variant_ids, tiers, 3)
 
 Reference: [Unreal Instanced Static Mesh Component](https://dev.epicgames.com/documentation/en-us/unreal-engine/instanced-static-mesh-component-in-unreal-engine).
 
+## HLOD-style exact cluster point bounds
 
-## Native PCG Transform Points — stable-ID procedural rotation and scale
-
-`PCGPointTransform3D.generate_transforms()` adds an engine-native,
-reusable subset of Unreal's [PCG Transform Points node](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
-It varies Y-axis rotation and uniform horizontal / independent
-vertical scale for an already accepted set of points. Crucially,
-random streams are computed from **stable point IDs**, not source
-array indices, global RNG state or MultiMesh slot order:
+`PCGInstanceCluster3D.compute_cluster_bounds(positions, index_groups,
+margin=0.0)` computes an ordered array of **tight per-cluster AABBs**
+after an existing fixed or adaptive 3D partition. This supplies
+lightweight anchor metadata for runtime procedural streaming and LOD,
+inspired by the coarse spatial clusters in Unreal Engine HISM.
 
 ```gdscript
-var generator := PCGPointTransform3D.new()
-var transforms := generator.generate_transforms(
-    PackedVector3Array([Vector3(2, 0, 3), Vector3(8, 0, 6)]),
-    PackedInt64Array([101, 102]),
-    42019, TAU, 0.82, 1.18, 0.88, 1.16)
-# Two Transform3D values with *unchanged origins*.
+var pcg := PCGInstanceCluster3D.new()
+var groups := pcg.partition_indices_adaptive(points, 32.0, 48, 256)
+var anchor_aabbs: Array = pcg.compute_cluster_bounds(points, groups)
 ```
 
-- Independent salted unsigned 32-bit avalanche streams drive yaw,
-  X/Z size and Y size. Yaw lies in +/- half of `max_yaw`
-  (default a full revolution); X and Z scales are identical;
-  vertical scale is sampled independently. Values are reproducible
-  across calls, reordering and grouping of input points.
-- At most 16,384 matching positions/IDs, coordinates finite within
-  +/-10,000,000, seed/IDs between 0 and 2,147,483,647; yaw finite
-  between 0 and TAU, all scale bounds finite between 0.01 and 10,
-  with minimum not greater than maximum. An invalid late point,
-  ID or setting rejects the **whole** array. Empty valid input gives
-  an empty array. Work is O(points).
-- Pure CPU data transform: no point translation, scene edits, material,
-  physics or GPU APIs, engine RNG changes or new camera/LOD planning.
-  Not full Unreal Transform Points: translation jitter, arbitrary
-  orientation, local-space hierarchies and PCG graph authoring remain
-  separate features.
-- Days After caches source-index-aligned `Transform3D` results before
-  assigning points to its six near/far, multi-mesh GPU batches. Every
-  LOD rebuild reuses those cached transforms. This replaces an earlier
-  rotation based on transient `source_index * 0.41`, and makes visual
-  shape stable under source reordering/partitioning.
-- `games/days_after/pcg_point_transforms.gd` is a stock-Godot fallback
-  with matching unsigned 32-bit hashing. New C++ doctests and a
-  headless GDScript policy runner check native/fallback parity,
-  stable ID duplicates/reordering, deterministic reruns, scale
-  bounds, identity settings, invalid tail rows and the 16K limit.
+- All source positions are validated first, including points never
+  referenced by malformed groups. Every index must occur **exactly
+  once**, and all groups must be nonempty PackedInt32Arrays. Duplicate,
+  dropped, negative and out-of-range indices reject the entire result.
+- Supports up to 65,536 points and 256 clusters, positions with finite
+  XYZ coordinates within ±10 million, and a 0–10,000 finite margin.
+  Empty positions + empty groups are valid and return zero AABBs.
+- Deterministic, one linear pass over cluster memberships; no scene,
+  physics, rendering or RNG access. Conservative whole-mesh render
+  bounds are **different** from point anchors: a rotated/scaled mesh
+  may extend outside its origin AABB.
+- Albion After uses the output as persistent `aa_pcg_anchor_bounds`
+  metadata on real `MultiMeshInstance3D` scenery groups. Its
+  distance/projected-size LOD planner now uses those original instance
+  anchors, while `custom_aabb` continues using full transformed
+  mesh geometry for safe renderer culling.
+- Days After uses the same API on its path stones, with a matching
+  stock-Godot fallback and 0.75-m geometry padding for
+  `MultiMeshInstance3D.custom_aabb`; gameplay colliders are unchanged.
 
-The game retains its existing 160-instance cap, three authored foliage
-types, 6 LOD batches, exclusions and all gameplay. No measured FPS
-improvement is claimed; this adds deterministic variation, not draw
-call reduction.
+Reference: [Unreal Engine ISM and HISM components](https://dev.epicgames.com/documentation/en-us/unreal-engine/instanced-static-mesh-component-in-unreal-engine).
+

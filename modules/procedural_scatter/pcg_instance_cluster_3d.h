@@ -24,6 +24,12 @@ public:
 	static constexpr double MIN_CELL_SIZE = 0.5;
 	static constexpr double MAX_CELL_SIZE = 10000.0;
 
+	// Build exact point-only bounds for complete, disjoint index groups.
+	// One pass with strict atomic validation; useful as HLOD/streaming
+	// anchors. Mesh geometry/rotation must use separate render bounds.
+	Array compute_cluster_bounds(const PackedVector3Array &p_positions,
+			const Array &p_clusters, double p_margin = 0.0) const;
+
 	Array partition_indices(const PackedVector3Array &p_positions, double p_cell_size = 32.0,
 			int p_min_split_count = 48, int p_max_clusters = MAX_CLUSTERS) const;
 
