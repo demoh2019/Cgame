@@ -1,0 +1,31 @@
+extends SceneTree
+
+const Tile = preload("res://addons/visual_quality/navigation_tile.gd")
+const NPC = preload("res://addons/visual_quality/streamed_patrol_npc.gd")
+
+
+func _initialize() -> void:
+	var mesh: NavigationMesh = Tile.make_flat_tile(14.0)
+	assert(mesh.get_polygon_count() == 1)
+	assert(mesh.vertices.size() == 4)
+	assert(is_equal_approx(mesh.vertices[0].x, -7.0))
+	assert(is_equal_approx(mesh.vertices[2].z, 7.0))
+	assert(Tile.make_flat_tile(0.0).get_polygon_count() == 0)
+	assert(NPC.patrol_point(0, 4.0, 0) == Vector3(-4, 0, -4))
+	assert(NPC.patrol_point(1, 4.0, 0) == Vector3(4, 0, -4))
+	assert(NPC.patrol_point(2, 4.0, 0) == Vector3(4, 0, 4))
+	assert(NPC.patrol_point(4, 4.0, 0) == NPC.patrol_point(0, 4.0, 0))
+	assert(NPC.patrol_point(0, 4.0, 1) != NPC.patrol_point(0, 4.0, 0))
+	assert(NPC.should_alert(false, 10.0, 4.5, 7.0))
+	assert(not NPC.should_alert(false, 25.0, 4.5, 7.0))
+	assert(NPC.should_alert(true, 25.0, 4.5, 7.0))
+	assert(not NPC.should_alert(true, 64.0, 4.5, 7.0))
+	var npc = NPC.new()
+	npc.import_npc_state({"npc_position": Vector3(100, 0, -100), "npc_patrol": 10})
+	assert(is_equal_approx(npc.position.x, npc.patrol_extent))
+	assert(is_equal_approx(npc.position.z, -npc.patrol_extent))
+	assert(npc.patrol_index == 3)
+	assert(not npc.export_npc_state().has("player"))
+	npc.free()
+	print("StreamedNavigation: 19 checks passed")
+	quit(0)
