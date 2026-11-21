@@ -55,6 +55,7 @@
 #ifdef TOOLS_ENABLED
 #include "tests/test_gdscript_editor_reload.h"
 #endif
+#include "tests/test_static_variable_debugger.h"
 #endif
 
 #include "core/io/file_access.h"
