@@ -50,6 +50,39 @@ func run(t) -> void:
 	t.eq(Director.respite_seconds(NAN, 0, 1.0), 0.0,
 		"nonfinite timers cannot escape the guard")
 
+	t.current = "native encounter pacing and stock Godot parity"
+	var native_budget: bool = Director.has_native_budget()
+	t.eq(native_budget, ClassDB.class_exists("AIEncounterBudget"),
+		"native budget policy is available only in the custom Cgame editor")
+	for total in [0, 1, 140, 149, 150, 151]:
+		for nearby in [-1, 0, 7, 8, 11, 12, 19, 20, 21]:
+			for health in [-1.0, 0.0, 0.30, 0.50, 0.55, 0.8, 1.0, 2.0]:
+				for zone in [-2, 0, 1, 2, 3, 5]:
+					t.eq(Director.spawn_budget(total, nearby, health, zone),
+						Director.spawn_budget(total, nearby, health, zone, false),
+						"native admission matches authoritative reference at boundaries")
+				for base_delay in [0.0, 90.0, 120.0]:
+					t.near(Director.respite_seconds(base_delay, nearby, health),
+						Director.respite_seconds(base_delay, nearby, health, false), 0.0001,
+						"native recovery never diverges from stock Godot")
+	t.eq(Director.spawn_budget(0, 0, INF, 3), 0,
+		"positive infinity cannot be interpreted as a valid health fraction")
+	t.eq(Director.spawn_budget(0, 0, -INF, 3), 0,
+		"negative infinity cannot create a wave")
+	t.eq(Director.respite_seconds(90.0, 8, INF), 0.0,
+		"nonfinite recovery input fails closed")
+	if native_budget:
+		var policy: Object = ClassDB.instantiate("AIEncounterBudget")
+		t.check(bool(policy.call("configure_limits", 300, 4, 6, 12, 3, 7, 4)),
+			"encounter policy may be retuned atomically for other games")
+		t.eq(int(policy.call("get_spawn_budget", 0, 0, 1.0, 4)), 7,
+			"configured zone progression is used by native policy")
+		t.eq(int(policy.call("get_spawn_budget", 0, 6, 1.0, 4)), 2,
+			"configured local pressure limits cannot be bypassed")
+		t.eq(int(policy.call("get_spawn_budget", 0, 12, 1.0, 4)), 0,
+			"hard density cap works even for customized encounter policies")
+		policy.free()
+
 	t.current = "nearby infected: only living neighbors count"
 	var enemies: Dictionary = {}
 	enemies[1] = Zombie.new(1, "walker", Vector3(2.0, 0.0, 0.0))

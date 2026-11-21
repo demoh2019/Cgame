@@ -31,6 +31,7 @@ def get_doc_classes():
         "AIActionCooldowns",
         "AISimulationLOD2D",
         "AIUpdateScheduler",
+        "AIEncounterBudget",
         "AIThreatTable2D",
     ]
 
