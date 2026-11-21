@@ -97,4 +97,86 @@ TEST_CASE("[PCGSurfaceFilter3D] bounded output and normal scale invariance") {
 	CHECK(limited[2] == 2);
 }
 
+TEST_CASE("[PCGSurfaceFilter3D] surface alignment respects authored yaw scale and tilt cap") {
+	Ref<PCGSurfaceFilter3D> filter;
+	filter.instantiate();
+	Array transforms;
+	PackedVector3Array normals;
+	const Transform3D flat(Basis(Vector3::UP, 0.3).scaled(Vector3(1.5, 1.5, 1.5)),
+			Vector3(7.0, 13.0, -2.0));
+	const Transform3D inclined(Basis(Vector3::UP, 0.7).scaled(Vector3(2.0, 2.0, 2.0)),
+			Vector3(11.0, 15.0, -8.0));
+	transforms.push_back(flat);
+	transforms.push_back(inclined);
+	normals.push_back(Vector3::UP);
+	normals.push_back(Vector3(0.0, 0.70710678, 0.70710678)); // 45-degree slope.
+
+	const Array aligned = filter->align_transforms(transforms, normals, 30.0);
+	REQUIRE(aligned.size() == 2);
+	const Transform3D first = aligned[0];
+	const Transform3D second = aligned[1];
+	CHECK(first == flat);
+	CHECK(second.origin == inclined.origin);
+	CHECK(Math::is_equal_approx(second.basis.x.length(), 2.0));
+	CHECK(Math::is_equal_approx(second.basis.y.length(), 2.0));
+	CHECK(Math::is_equal_approx(second.basis.z.length(), 2.0));
+	CHECK(Math::is_equal_approx(double(second.basis.y.normalized().y), Math::cos(Math::deg_to_rad(30.0))));
+	CHECK(second.basis.y.normalized().z > 0.0);
+	// Left-multiplying the tilt keeps the original authored orientation of
+	// the local X and Z axes relative to the selected new up-axis.
+	const Transform3D original_again = transforms[1];
+	CHECK(original_again == inclined);
+	CHECK(filter->align_transforms(transforms, normals, 30.0) == aligned);
+	CHECK(filter->align_transforms(transforms, normals, 0.0) == transforms);
+}
+
+TEST_CASE("[PCGSurfaceFilter3D] surface alignment clamps vertical terrain safely") {
+	Ref<PCGSurfaceFilter3D> filter;
+	filter.instantiate();
+	Array transforms;
+	transforms.push_back(Transform3D());
+	PackedVector3Array normals;
+	normals.push_back(Vector3(2, 0, 0)); // Unnormalized, exactly vertical.
+	const Array aligned = filter->align_transforms(transforms, normals, 20.0);
+	REQUIRE(aligned.size() == 1);
+	const Transform3D result = aligned[0];
+	CHECK(Math::is_equal_approx(double(result.basis.y.normalized().y), Math::cos(Math::deg_to_rad(20.0))));
+	CHECK(result.basis.y.x > 0);
+	CHECK(result.origin == Vector3());
+	CHECK(filter->align_transforms(Array(), PackedVector3Array()).is_empty());
+}
+
+TEST_CASE("[PCGSurfaceFilter3D] malformed surface alignment buffers fail atomically") {
+	Ref<PCGSurfaceFilter3D> filter;
+	filter.instantiate();
+	Array transforms;
+	transforms.push_back(Transform3D());
+	transforms.push_back(Transform3D());
+	PackedVector3Array normals;
+	normals.push_back(Vector3::UP);
+	normals.push_back(Vector3::UP);
+	CHECK(filter->align_transforms(transforms, PackedVector3Array()).is_empty());
+	CHECK(filter->align_transforms(transforms, normals, -1.0).is_empty());
+	CHECK(filter->align_transforms(transforms, normals, 91.0).is_empty());
+	CHECK(filter->align_transforms(transforms, normals, Math::NaN).is_empty());
+	CHECK(filter->align_transforms(transforms, normals, Math::INF).is_empty());
+	normals.set(1, Vector3());
+	CHECK(filter->align_transforms(transforms, normals).is_empty());
+	normals.set(1, Vector3(0, -1, 0));
+	CHECK(filter->align_transforms(transforms, normals).is_empty());
+	normals.set(1, Vector3(Math::NaN, 1, 0));
+	CHECK(filter->align_transforms(transforms, normals).is_empty());
+	normals.set(1, Vector3::UP);
+	transforms[1] = 12; // Non-transform variants are not silently coerced.
+	CHECK(filter->align_transforms(transforms, normals).is_empty());
+	transforms[1] = Transform3D(Basis(), Vector3(10000001, 0, 0));
+	CHECK(filter->align_transforms(transforms, normals).is_empty());
+	transforms[1] = Transform3D();
+	for (int i = transforms.size(); i < 16385; ++i) {
+		transforms.push_back(Transform3D());
+		normals.push_back(Vector3::UP);
+	}
+	CHECK(filter->align_transforms(transforms, normals).is_empty());
+}
+
 } // namespace TestPCGSurfaceFilter3D
