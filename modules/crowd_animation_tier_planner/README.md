@@ -40,7 +40,7 @@ animation is frozen and no game-authoritative simulation is touched.
 
 In Albion After, `CharacterAnim.apply_crowd` derives visibility from
 `Camera3D.is_position_in_frustum` and `model.is_visible_in_tree`.
-Actors closer than 8 metres are conservatively considered visible
+Actors closer than 3 metres are conservatively considered visible
 whenever their model is visible, avoiding false negatives near screen
 edges. Visible combat telegraphs keep their own independently bounded
 priority pool. The next camera update immediately reassigns available
