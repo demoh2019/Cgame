@@ -1172,6 +1172,50 @@ Dictionary Geometry2D::get_closest_point_on_segments(const Vector2 &p_point, con
 }
 
 
+
+Vector<Vector2> Geometry2D::heightfield_gradients(const Vector<float> &p_heights, const Vector2i &p_size, real_t p_cell_spacing) {
+	Vector<Vector2> result;
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
+			"Heightfield gradient dimensions must be between 1 and 2048 per axis.");
+	const int width = p_size.x;
+	const int height = p_size.y;
+	const int count = width * height;
+	ERR_FAIL_COND_V_MSG(p_heights.size() != count, result, "Heightfield data must have width * height entries.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_cell_spacing) || p_cell_spacing <= 0.0, result,
+			"Heightfield cell spacing must be positive and finite.");
+	const real_t half_inverse_spacing = 0.5 / p_cell_spacing;
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(half_inverse_spacing), result,
+			"Inverse heightfield spacing must be representable.");
+	const float *heights = p_heights.ptr();
+	for (int i = 0; i < count; i++) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(heights[i]), result, "Heightfield samples must be finite.");
+	}
+	ERR_FAIL_COND_V_MSG(result.resize(count) != OK, Vector<Vector2>(), "Could not allocate heightfield gradients.");
+	Vector2 *gradients = result.ptrw();
+	// Each output is (dheight/dx, dheight/dy) in metres per world unit.
+	// Clamp neighbor indices to the edge exactly as the atlas _h() helper
+	// does. For borders this makes the central difference a half-slope;
+	// it avoids fetching any unavailable heights outside the sampled tile.
+	for (int y = 0; y < height; y++) {
+		const int north = MAX(y - 1, 0) * width;
+		const int south = MIN(y + 1, height - 1) * width;
+		const int row = y * width;
+		for (int x = 0; x < width; x++) {
+			const int west = MAX(x - 1, 0);
+			const int east = MIN(x + 1, width - 1);
+			const real_t dx = (real_t(heights[row + east]) - real_t(heights[row + west])) * half_inverse_spacing;
+			const real_t dy = (real_t(heights[south + x]) - real_t(heights[north + x])) * half_inverse_spacing;
+			ERR_FAIL_COND_V_MSG(!Math::is_finite(dx) || !Math::is_finite(dy), Vector<Vector2>(),
+					"Heightfield gradient overflowed the numeric range.");
+			const Vector2 slope(dx, dy);
+			ERR_FAIL_COND_V_MSG(!slope.is_finite(), Vector<Vector2>(),
+					"Heightfield gradient cannot be represented as Vector2.");
+			gradients[row + x] = slope;
+		}
+	}
+	return result;
+}
+
 PackedByteArray Geometry2D::distance_transform_8(const PackedByteArray &p_mask, const Vector2i &p_size, int p_max_distance) {
 	PackedByteArray result;
 	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
@@ -1487,6 +1531,7 @@ void Geometry2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("prune_points_min_distance", "points", "min_distance", "max_kept"), &Geometry2D::prune_points_min_distance, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("rasterize_segments_mask", "segment_endpoints", "size", "half_width", "softness"), &Geometry2D::rasterize_segments_mask);
 	ClassDB::bind_method(D_METHOD("distance_transform_8", "mask", "size", "max_distance"), &Geometry2D::distance_transform_8);
+	ClassDB::bind_method(D_METHOD("heightfield_gradients", "heights", "size", "cell_spacing"), &Geometry2D::heightfield_gradients);
 
 	ClassDB::bind_method(D_METHOD("point_is_inside_triangle", "point", "a", "b", "c"), &Geometry2D::point_is_inside_triangle);
 
