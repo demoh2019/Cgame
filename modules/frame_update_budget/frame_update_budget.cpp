@@ -18,6 +18,8 @@ void FrameUpdateBudget::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_frame_time_budget_us"), &FrameUpdateBudget::get_frame_time_budget_us);
 	ClassDB::bind_method(D_METHOD("record_cost", "lane", "elapsed_us"), &FrameUpdateBudget::record_cost);
 	ClassDB::bind_method(D_METHOD("set_lane_importance", "lane", "importance"), &FrameUpdateBudget::set_lane_importance);
+	ClassDB::bind_method(D_METHOD("set_lane_rate_scale", "lane", "scale"), &FrameUpdateBudget::set_lane_rate_scale);
+	ClassDB::bind_method(D_METHOD("get_lane_rate_scale", "lane"), &FrameUpdateBudget::get_lane_rate_scale);
 	ClassDB::bind_method(D_METHOD("get_lane_importance", "lane"), &FrameUpdateBudget::get_lane_importance);
 	ClassDB::bind_method(D_METHOD("get_lane_estimated_cost_us", "lane"), &FrameUpdateBudget::get_lane_estimated_cost_us);
 	ClassDB::bind_method(D_METHOD("get_reserved_estimated_cost_us"), &FrameUpdateBudget::get_reserved_estimated_cost_us);
@@ -120,6 +122,28 @@ bool FrameUpdateBudget::set_lane_importance(const StringName &p_lane, double p_i
 	return false;
 }
 
+bool FrameUpdateBudget::set_lane_rate_scale(const StringName &p_lane, double p_scale) {
+	if (!Math::is_finite(p_scale) || p_scale < 0.75 || p_scale > 2.0) {
+		return false;
+	}
+	for (int i = 0; i < lanes.size(); i++) {
+		if (lanes[i].name == p_lane) {
+			lanes.write[i].rate_scale = p_scale;
+			return true;
+		}
+	}
+	return false;
+}
+
+double FrameUpdateBudget::get_lane_rate_scale(const StringName &p_lane) const {
+	for (int i = 0; i < lanes.size(); i++) {
+		if (lanes[i].name == p_lane) {
+			return lanes[i].rate_scale;
+		}
+	}
+	return -1.0;
+}
+
 double FrameUpdateBudget::get_lane_importance(const StringName &p_lane) const {
 	for (int i = 0; i < lanes.size(); i++) {
 		if (lanes[i].name == p_lane) {
@@ -171,7 +195,6 @@ void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 	if (!Math::is_finite(p_delta) || p_delta <= 0.0) {
 		return;
 	}
-	const double interval = 1.0 / rates[quality];
 	for (int slot = 0; slot < budget; slot++) {
 		int best = -1;
 		double best_priority = -1.0;
@@ -188,6 +211,7 @@ void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 					continue;
 				}
 				const Lane &lane = lanes[index];
+				const double interval = 1.0 / (rates[quality] * lane.rate_scale);
 				const double elapsed = MIN(lane.elapsed + p_delta, max_step);
 				if (elapsed + 0.000001 < interval) {
 					continue;
@@ -217,6 +241,7 @@ void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 				reserved_estimated_cost_us + lanes[best].estimated_cost_us);
 	}
 	for (int i = 0; i < lanes.size(); i++) {
+		const double interval = 1.0 / (rates[quality] * lanes[i].rate_scale);
 		const double elapsed = MIN(lanes[i].elapsed + p_delta, max_step);
 		if (elapsed + 0.000001 >= interval && !reserved_lanes.has(i)) {
 			lanes.write[i].overdue_frames = MIN(120, lanes[i].overdue_frames + 1);
@@ -248,7 +273,7 @@ double FrameUpdateBudget::consume(const StringName &p_lane, double p_delta, bool
 		return elapsed;
 	}
 	lane.elapsed = elapsed;
-	const double interval = 1.0 / rates[MAX(quality, 0)];
+	const double interval = 1.0 / (rates[MAX(quality, 0)] * lane.rate_scale);
 	if (elapsed + 0.000001 < interval || spent >= budget || !reserved_lanes.has(index) ||
 			(frame_time_budget_us > 0 && frame_cost_us >= frame_time_budget_us)) {
 		last_skipped++;
