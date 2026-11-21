@@ -30,6 +30,7 @@
 
 #include "behavior_tree.h"
 
+#include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 
 void BehaviorTreeTask::_bind_methods() {
@@ -292,6 +293,86 @@ BehaviorTreeTask::Status BehaviorTreeBlackboardCheck::execute(const Dictionary &
 	return p_blackboard[key] == expected_value ? SUCCESS : FAILURE;
 }
 
+void BehaviorTreeBlackboardCompare::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_key", "key"), &BehaviorTreeBlackboardCompare::set_key);
+	ClassDB::bind_method(D_METHOD("get_key"), &BehaviorTreeBlackboardCompare::get_key);
+	ClassDB::bind_method(D_METHOD("set_other_key", "key"), &BehaviorTreeBlackboardCompare::set_other_key);
+	ClassDB::bind_method(D_METHOD("get_other_key"), &BehaviorTreeBlackboardCompare::get_other_key);
+	ClassDB::bind_method(D_METHOD("set_value", "value"), &BehaviorTreeBlackboardCompare::set_value);
+	ClassDB::bind_method(D_METHOD("get_value"), &BehaviorTreeBlackboardCompare::get_value);
+	ClassDB::bind_method(D_METHOD("set_comparison", "comparison"), &BehaviorTreeBlackboardCompare::set_comparison);
+	ClassDB::bind_method(D_METHOD("get_comparison"), &BehaviorTreeBlackboardCompare::get_comparison);
+	ClassDB::bind_method(D_METHOD("set_use_other_key", "enabled"), &BehaviorTreeBlackboardCompare::set_use_other_key);
+	ClassDB::bind_method(D_METHOD("is_using_other_key"), &BehaviorTreeBlackboardCompare::is_using_other_key);
+
+	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "key"), "set_key", "get_key");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "comparison", PROPERTY_HINT_ENUM, "Equal,Not Equal,Less,Less or Equal,Greater,Greater or Equal,Exists,Not Exists"), "set_comparison", "get_comparison");
+	ADD_PROPERTY(PropertyInfo(Variant::NIL, "value", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_NIL_IS_VARIANT), "set_value", "get_value");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_other_key"), "set_use_other_key", "is_using_other_key");
+	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "other_key"), "set_other_key", "get_other_key");
+
+	BIND_ENUM_CONSTANT(EQUAL);
+	BIND_ENUM_CONSTANT(NOT_EQUAL);
+	BIND_ENUM_CONSTANT(LESS);
+	BIND_ENUM_CONSTANT(LESS_OR_EQUAL);
+	BIND_ENUM_CONSTANT(GREATER);
+	BIND_ENUM_CONSTANT(GREATER_OR_EQUAL);
+	BIND_ENUM_CONSTANT(EXISTS);
+	BIND_ENUM_CONSTANT(NOT_EXISTS);
+}
+
+void BehaviorTreeBlackboardCompare::set_comparison(Comparison p_comparison) {
+	ERR_FAIL_COND_MSG(p_comparison < EQUAL || p_comparison > NOT_EXISTS, "Invalid blackboard comparison.");
+	comparison = p_comparison;
+	emit_changed();
+}
+
+BehaviorTreeTask::Status BehaviorTreeBlackboardCompare::execute(const Dictionary &p_blackboard, Dictionary &, const String &, double) {
+	if (key.is_empty()) {
+		return FAILURE;
+	}
+	if (comparison == EXISTS) {
+		return p_blackboard.has(key) ? SUCCESS : FAILURE;
+	}
+	if (comparison == NOT_EXISTS) {
+		return p_blackboard.has(key) ? FAILURE : SUCCESS;
+	}
+	if (!p_blackboard.has(key) || (use_other_key && (other_key.is_empty() || !p_blackboard.has(other_key)))) {
+		return FAILURE;
+	}
+	const Variant left = p_blackboard[key];
+	const Variant right = use_other_key ? p_blackboard[other_key] : value;
+
+	if (comparison == EQUAL) {
+		return left == right ? SUCCESS : FAILURE;
+	}
+	if (comparison == NOT_EQUAL) {
+		return left != right ? SUCCESS : FAILURE;
+	}
+
+	// Only numeric ordering is defined here. Never coerce arbitrary strings,
+	// objects, dictionaries or null into numbers for AI decision making.
+	const bool left_numeric = left.get_type() == Variant::INT || left.get_type() == Variant::FLOAT;
+	const bool right_numeric = right.get_type() == Variant::INT || right.get_type() == Variant::FLOAT;
+	if (!left_numeric || !right_numeric) {
+		return FAILURE;
+	}
+	const double a = (double)left;
+	const double b = (double)right;
+	if (!Math::is_finite(a) || !Math::is_finite(b)) {
+		return FAILURE;
+	}
+	bool matched = false;
+	switch (comparison) {
+		case LESS: matched = a < b; break;
+		case LESS_OR_EQUAL: matched = a <= b; break;
+		case GREATER: matched = a > b; break;
+		case GREATER_OR_EQUAL: matched = a >= b; break;
+		default: return FAILURE;
+	}
+	return matched ? SUCCESS : FAILURE;
+}
+
 void BehaviorTreeBlackboardSet::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_key", "key"), &BehaviorTreeBlackboardSet::set_key);
 	ClassDB::bind_method(D_METHOD("get_key"), &BehaviorTreeBlackboardSet::get_key);
@@ -345,6 +426,7 @@ void BehaviorTreeRunner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reset"), &BehaviorTreeRunner::reset);
 	ClassDB::bind_method(D_METHOD("is_finished"), &BehaviorTreeRunner::is_finished);
 	ClassDB::bind_method(D_METHOD("get_last_status"), &BehaviorTreeRunner::get_last_status);
+	ClassDB::bind_method(D_METHOD("get_debug_snapshot"), &BehaviorTreeRunner::get_debug_snapshot);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "root_task", PROPERTY_HINT_RESOURCE_TYPE, "BehaviorTreeTask"), "set_root_task", "get_root_task");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "blackboard"), "set_blackboard", "get_blackboard");
@@ -386,6 +468,20 @@ BehaviorTreeTask::Status BehaviorTreeRunner::tick(double p_delta) {
 		emit_signal(SNAME("tree_finished"), int(last_status));
 	}
 	return last_status;
+}
+
+Dictionary BehaviorTreeRunner::get_debug_snapshot() const {
+	Dictionary result;
+	result["status"] = int(last_status);
+	result["finished"] = finished;
+	result["auto_tick"] = auto_tick;
+	result["root_task_class"] = root_task.is_valid() ? String(root_task->get_class()) : String();
+	// Snapshots are made on demand, without bookkeeping on each tick.
+	// Nested Dictionaries/Arrays are cloned; Object values still share references.
+	// The inspection API is read-only by contract for such Object values.
+	result["blackboard"] = blackboard.duplicate(true);
+	result["execution_memory"] = execution_memory.duplicate(true);
+	return result;
 }
 
 void BehaviorTreeRunner::reset() {

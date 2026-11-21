@@ -16,6 +16,12 @@ The authoritative zombie simulation in `game/scripts/shared/zombie.gd` now recog
 
 The executable sandbox `modules/behavior_tree/demo_reactive_ai/` demonstrates the resource tree API and how it combines with native senses and 2D `AStarGrid2D`.
 
+## Server-only AI diagnostics
+
+`native_infected_senses.gd` exposes an on-demand `get_debug_snapshot()` with the availability and expiry of native sight/sound memories and their last confirmed positions. The canonical zombie class offers `get_ai_debug_snapshot()` with its current state, target ID and nested perception snapshot. The engine's `BehaviorTreeRunner.get_debug_snapshot()` returns detached copies of its Blackboard and execution-memory state for tools. These values are intended for local debugging and server operators and **must not be broadcast to ordinary multiplayer clients**, since they can reveal a hidden player's position or identity.
+
+The engine also provides `BehaviorTreeBlackboardCompare`: a Resource guard supporting equality, numeric ordering, existence checks and optional comparison to a second Blackboard key. The accompanying playable AI sandbox uses it for the native low-health retreat threshold without modifying the main game's authoritative infected targeting logic.
+
 ## Validation
 
 New automated `game/tests/test_native_infected_senses.gd` is listed in the canonical `game/tests/run_all.gd`. It verifies fallback behavior, temporary sense memory, accepted sound events and safe-zone immunity. Native C++ tests cover perception rules and reactive preemption; sandbox integration scripts cover actual LOS and obstacle A* navigation.

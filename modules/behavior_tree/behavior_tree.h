@@ -156,6 +156,48 @@ public:
 	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
 };
 
+/** Configurable Blackboard condition, with optional second-key operand. */
+class BehaviorTreeBlackboardCompare : public BehaviorTreeTask {
+	GDCLASS(BehaviorTreeBlackboardCompare, BehaviorTreeTask);
+
+public:
+	enum Comparison {
+		EQUAL,
+		NOT_EQUAL,
+		LESS,
+		LESS_OR_EQUAL,
+		GREATER,
+		GREATER_OR_EQUAL,
+		EXISTS,
+		NOT_EXISTS,
+	};
+
+private:
+	StringName key;
+	StringName other_key;
+	Variant value;
+	Comparison comparison = EQUAL;
+	bool use_other_key = false;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_key(const StringName &p_key) { key = p_key; emit_changed(); }
+	StringName get_key() const { return key; }
+	void set_other_key(const StringName &p_key) { other_key = p_key; emit_changed(); }
+	StringName get_other_key() const { return other_key; }
+	void set_value(const Variant &p_value) { value = p_value; emit_changed(); }
+	Variant get_value() const { return value; }
+	void set_comparison(Comparison p_comparison);
+	Comparison get_comparison() const { return comparison; }
+	void set_use_other_key(bool p_enable) { use_other_key = p_enable; emit_changed(); }
+	bool is_using_other_key() const { return use_other_key; }
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
+VARIANT_ENUM_CAST(BehaviorTreeBlackboardCompare::Comparison);
+
 /** Built-in leaf that writes a blackboard value. */
 class BehaviorTreeBlackboardSet : public BehaviorTreeTask {
 	GDCLASS(BehaviorTreeBlackboardSet, BehaviorTreeTask);
@@ -214,6 +256,8 @@ public:
 	void reset();
 	bool is_finished() const { return finished; }
 	BehaviorTreeTask::Status get_last_status() const { return last_status; }
+	// On-demand diagnostic view; nested containers are copied, Objects stay shared.
+	Dictionary get_debug_snapshot() const;
 
 	BehaviorTreeRunner();
 };

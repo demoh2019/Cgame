@@ -88,6 +88,21 @@ func become_elite() -> void:
 	behavior = "hunter" # Champions never let go of their prey.
 
 
+## Server-side diagnostic query. Never include this in public game snapshots:
+## it exposes AI target identity and last perceived target locations.
+func get_ai_debug_snapshot() -> Dictionary:
+    return {
+        "zombie_id": id,
+        "type": type,
+        "state": state,
+        "target_id": target_id,
+        "health": health,
+        "last_known_target": last_known_target,
+        "investigate_seconds": investigate_time,
+        "perception": _native_senses.get_debug_snapshot() if _native_senses != null else {},
+    }
+
+
 func is_alive() -> bool:
 	return state != State.DEAD
 

@@ -64,6 +64,19 @@ func run(t) -> void:
                 "native cache stores the detected survivor position")
     t.eq(infected.target_id, 41,
         "native sensing does not change the existing authoritative target decision")
+    var server_debug: Dictionary = infected.get_ai_debug_snapshot()
+    t.eq(server_debug.get("zombie_id"), 972,
+        "server diagnostic identifies the infected being inspected")
+    t.eq(server_debug.get("target_id"), 41,
+        "server diagnostic reports actual AI target")
+    t.check(server_debug.has("perception"),
+        "server diagnostic includes a non-mutating native perception view")
+    var native_debug: Dictionary = senses.get_debug_snapshot()
+    t.eq(native_debug.get("native_hearing"), senses.has_native_hearing(),
+        "native sensing reports its true capability")
+    t.check(native_debug.has("sight_memory_seconds") and native_debug.has("sound_memory_seconds"),
+        "perception snapshot exposes remaining memory lifetimes")
+
 
     t.current = "Safe-zone players never create native hearing stimulus"
     var protected := Zombie.new(973, "walker", Vector3(0.0, height, 0.0))

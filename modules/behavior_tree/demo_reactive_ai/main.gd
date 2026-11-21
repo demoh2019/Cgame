@@ -23,6 +23,7 @@ var patrol_direction := -1.0
 var ai_timer := 0.0
 var current_action := "patrol"
 var last_status := BehaviorTreeTask.RUNNING
+var last_debug_snapshot: Dictionary = {}
 var brain := BehaviorTreeRunner.new()
 var sensor := AIVisualSensor2D.new()
 var hearing := AIHearingSensor2D.new()
@@ -65,7 +66,7 @@ func _ready() -> void:
     # This fork's develop branch uses Resource-backed BehaviorTreeTask nodes,
     # not Dictionary-defined trees. Keep each runner's memory independent.
     var priorities := BehaviorTreeReactiveSelector.new()
-    priorities.add_task(_make_behavior("low_health", "retreat"))
+    priorities.add_task(_make_guarded_behavior(_make_health_guard(), "retreat"))
     priorities.add_task(_make_behavior("target_visible", "chase"))
     priorities.add_task(_make_behavior("target_remembered", "investigate"))
     priorities.add_task(_make_behavior("sound_remembered", "investigate_sound"))
@@ -96,9 +97,22 @@ func _make_action(action_name: String) -> BehaviorTreeBlackboardSet:
     return action_task
 
 
+func _make_health_guard() -> BehaviorTreeBlackboardCompare:
+    var check := BehaviorTreeBlackboardCompare.new()
+    check.key = &"health"
+    check.use_other_key = true
+    check.other_key = &"retreat_at_or_below"
+    check.comparison = BehaviorTreeBlackboardCompare.LESS_OR_EQUAL
+    return check
+
+
 func _make_behavior(flag: StringName, action_name: String) -> BehaviorTreeReactiveSequence:
+    return _make_guarded_behavior(_make_condition(flag), action_name)
+
+
+func _make_guarded_behavior(guard: BehaviorTreeTask, action_name: String) -> BehaviorTreeReactiveSequence:
     var sequence := BehaviorTreeReactiveSequence.new()
-    sequence.add_task(_make_condition(flag))
+    sequence.add_task(guard)
     sequence.add_task(_make_action(action_name))
     var hold := BehaviorTreeWait.new()
     hold.duration = 1.0
@@ -135,7 +149,8 @@ func _physics_process(delta: float) -> void:
         if brain.is_finished():
             brain.reset()
         brain.set_blackboard({
-            "low_health": enemy_health <= 30,
+            "health": enemy_health,
+            "retreat_at_or_below": 30,
             "target_visible": sensor.is_target_visible(),
             "target_remembered": sensor.has_target_memory(),
             "last_known_position": sensor.get_last_known_position(),
@@ -144,6 +159,7 @@ func _physics_process(delta: float) -> void:
             "action": current_action
         })
         last_status = brain.tick(AI_TICK_SECONDS)
+        last_debug_snapshot = brain.get_debug_snapshot()
         current_action = str(brain.get_blackboard().get("action", "patrol"))
 
     var enemy_motion := Vector2.ZERO
@@ -291,6 +307,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
         patrol_direction = -1.0
         current_action = "patrol"
         last_status = BehaviorTreeTask.RUNNING
+        last_debug_snapshot = {}
         ai_timer = 0.0
         sensor.reset()
         hearing.reset()
@@ -311,6 +328,9 @@ func _update_hud() -> void:
     hud.text = "SIGHT + HEARING + A* NAVIGATION | Arrows: move | F: shout | Space: hit | R: reset\n"
     hud.text += "Enemy HP: %d | AI: %s | Tree: %s | Visible: %s\n" % [enemy_health, current_action, status_text, str(sensor.is_target_visible())]
     hud.text += "Sight: %.1fs | Sound: %.1fs | Gray wall blocks LOS | Yellow X = last seen position" % [sensor.get_memory_remaining(), hearing.get_memory_remaining()]
+    # Update diagnostic snapshots only at logical AI ticks, not render frames.
+    var cursors: Dictionary = last_debug_snapshot.get("execution_memory", {})
+    hud.text += "\nNative Blackboard guard: HP <= %d | Running node memories: %d" % [30, cursors.size()]
 
 
 func _draw() -> void:

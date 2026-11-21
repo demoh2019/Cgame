@@ -54,7 +54,8 @@ func _run_checks() -> void:
         _fail("Hearing did not retain sound memory")
         return
 
-    _set_flag(demo.brain, "low_health", false)
+    _set_flag(demo.brain, "health", 100)
+    _set_flag(demo.brain, "retreat_at_or_below", 30)
     _set_flag(demo.brain, "target_visible", false)
     _set_flag(demo.brain, "target_remembered", false)
     _set_flag(demo.brain, "sound_remembered", true)
@@ -70,7 +71,7 @@ func _run_checks() -> void:
         _fail("Vision should interrupt sound investigation")
         return
 
-    _set_flag(demo.brain, "low_health", true)
+    _set_flag(demo.brain, "health", 20)
     demo.brain.tick(0.2)
     if demo.brain.get_blackboard().get("action") != "retreat":
         _fail("Emergency retreat should interrupt vision and hearing")
