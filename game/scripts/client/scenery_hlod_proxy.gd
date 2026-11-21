@@ -134,7 +134,7 @@ static func attach_proxy(parent: Node3D, transforms: Array[Transform3D],
 	node.visible = false
 	node.set_meta("aa_hlod_proxy", true)
 	node.set_meta("aa_hlod_source_count", transforms.size())
-	node.set_meta("aa_hlod_triangle_count", combined.get_faces().size() / 3)
+	node.set_meta("aa_hlod_triangle_count", combined.surface_get_array_len(0) / 3)
 	parent.add_child(node)
 	return node
 
