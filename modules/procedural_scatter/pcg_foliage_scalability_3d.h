@@ -26,4 +26,13 @@ public:
 	PackedInt32Array plan_visible_counts(const PackedInt32Array &p_counts,
 			const PackedFloat32Array &p_distances, int p_quality,
 			double p_near_distance = 18.0, double p_far_distance = 125.0) const;
+
+	// Reversible, bounded temporal density stabilization. Previous visible
+	// counts use -1 as "uninitialized or changed quality tier". Only same-tier
+	// visual counts within p_deadband instances are retained. No instance
+	// transforms, GPU buffer, scene nodes, RNG or persistent engine state.
+	PackedInt32Array plan_visible_counts_stable(const PackedInt32Array &p_counts,
+			const PackedFloat32Array &p_distances, const PackedInt32Array &p_previous_counts,
+			int p_quality, int p_deadband = 2,
+			double p_near_distance = 18.0, double p_far_distance = 125.0) const;
 };

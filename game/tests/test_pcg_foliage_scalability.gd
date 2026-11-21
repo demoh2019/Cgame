@@ -59,6 +59,70 @@ func run(t) -> void:
 		1, 18.0, 125.0, false).size(), 0,
 		"nonfinite late camera distances fail atomically")
 
+	t.current = "Unreal foliage density and LOD hysteresis: stable visual prefixes"
+	var historic := PackedInt32Array([68, 68, 0, -1])
+	var to_draw := FoliageBudget.plan_visible_counts_stable(
+		PackedInt32Array([100, 100, 0, 10]),
+		PackedFloat32Array([18.0, 30.0, 50.0, 18.0]),
+		historic, 1, 2, 18.0, 125.0, false)
+	t.eq(to_draw, PackedInt32Array([68, 68, 0, 7]),
+		"small density changes are held, but newly streamed foliage initializes normally")
+	t.eq(FoliageBudget.plan_visible_counts_stable(
+		PackedInt32Array([100]), PackedFloat32Array([30.0]),
+		PackedInt32Array([-1]), 1, 2, 18.0, 125.0, false)[0], 67,
+		"unknown previous density does not get an artificial hold")
+	t.eq(FoliageBudget.plan_visible_counts_stable(
+		PackedInt32Array([100]), PackedFloat32Array([30.0]),
+		PackedInt32Array([68]), 1, 0, 18.0, 125.0, false)[0], 67,
+		"zero deadband recovers exact previous stateless planner")
+	t.eq(FoliageBudget.plan_visible_counts_stable(
+		PackedInt32Array([10]), PackedFloat32Array([125.0]),
+		PackedInt32Array([-1]), 0, 2, 18.0, 125.0, false)[0], 2,
+		"quality changes can immediately restore the Performance target")
+	t.eq(FoliageBudget.plan_visible_counts_stable(
+		PackedInt32Array([10]), PackedFloat32Array([125.0]),
+		PackedInt32Array([-1]), 3, 2, 18.0, 125.0, false)[0], 10,
+		"Ultra immediately restores all authored flower instances")
+	t.eq(FoliageBudget.plan_visible_counts_stable(
+		PackedInt32Array([100, 10]), PackedFloat32Array([18.0, 18.0]),
+		PackedInt32Array([68, 11]), 1, 2, 18.0, 125.0, false).size(), 0,
+		"invalid late prior counts reject the entire density group")
+	t.eq(FoliageBudget.plan_visible_counts_stable(
+		PackedInt32Array([100]), PackedFloat32Array([NAN]),
+		PackedInt32Array([68]), 1, 2, 18.0, 125.0, false).size(), 0,
+		"nonfinite distance cannot poison native or GDScript density")
+	t.eq(FoliageBudget.plan_visible_counts_stable(
+		PackedInt32Array([100]), PackedFloat32Array([18.0]),
+		PackedInt32Array([68]), 1, 9, 18.0, 125.0, false).size(), 0,
+		"huge count hysteresis is rejected to prevent permanent visual density")
+	# Seeded native/fallback parity, if the loaded engine supports the new API.
+	if ClassDB.class_exists("PCGFoliageScalability3D"):
+		var stable_native: Object = ClassDB.instantiate("PCGFoliageScalability3D")
+		t.check(stable_native.has_method("plan_visible_counts_stable"),
+			"new native engine exports bounded temporal PCG foliage planner")
+		if stable_native.has_method("plan_visible_counts_stable"):
+			var stable_rng := RandomNumberGenerator.new()
+			stable_rng.seed = 940113
+			for quality in 4:
+				for sample in 20:
+					var batch_counts := PackedInt32Array()
+					var batch_distances := PackedFloat32Array()
+					var batch_previous := PackedInt32Array()
+					for item in 32:
+						var c: int = stable_rng.randi_range(0, 300)
+						batch_counts.append(c)
+						batch_distances.append(stable_rng.randf_range(0.0, 280.0))
+						batch_previous.append(
+							-1 if item % 4 == 0 else stable_rng.randi_range(0, c))
+					t.eq(stable_native.call("plan_visible_counts_stable",
+						batch_counts, batch_distances, batch_previous, quality, 2,
+						18.0, 125.0),
+						FoliageBudget.plan_visible_counts_stable(
+							batch_counts, batch_distances, batch_previous, quality,
+							2, 18.0, 125.0, false),
+						"native/fallback temporal foliage parity tier %d sample %d" %
+							[quality, sample])
+
 	t.current = "GPU visibility count adjusts without changing mesh instance buffers"
 	var mesh := BoxMesh.new()
 	var parent := Node3D.new()
@@ -86,6 +150,33 @@ func run(t) -> void:
 			"switching back to Ultra restores all foliage")
 		t.eq(node.multimesh.get_instance_transform(1).origin.x, 8.0,
 			"all authored transforms remain in the same buffer")
+		t.current = "real foliage MultiMesh count hysteresis and quality reset"
+		FoliageBudget._apply_plan(only_node, PackedInt32Array([10]),
+			PackedFloat32Array([18.0]), 1, false)
+		t.eq(node.multimesh.visible_instance_count, 7,
+			"Balanced initially shows seven of ten authored flowers")
+		t.eq(int(node.get_meta(FoliageBudget.LAST_QUALITY_META)), 1,
+			"visual density history tracks only the previous graphics quality")
+		FoliageBudget._apply_plan(only_node, PackedInt32Array([10]),
+			PackedFloat32Array([71.5]), 1, false)
+		t.eq(node.multimesh.visible_instance_count, 7,
+			"small camera motion cannot repeatedly pop one or two flowers")
+		FoliageBudget._apply_plan(only_node, PackedInt32Array([10]),
+			PackedFloat32Array([125.0]), 1, false)
+		t.eq(node.multimesh.visible_instance_count, 4,
+			"larger moves escape the count deadband without reuploading buffers")
+		FoliageBudget._apply_plan(only_node, PackedInt32Array([10]),
+			PackedFloat32Array([125.0]), 0, false)
+		t.eq(node.multimesh.visible_instance_count, 2,
+			"Performance quality immediately applies 20% far foliage density")
+		FoliageBudget._apply_plan(only_node, PackedInt32Array([10]),
+			PackedFloat32Array([125.0]), 3, false)
+		t.eq(node.multimesh.visible_instance_count, 10,
+			"switch to Ultra fully restores every original visual instance")
+		t.eq(node.multimesh.instance_count, 10,
+			"temporal density filtering never rebuilds the MultiMesh")
+		t.eq(node.multimesh.get_instance_transform(1).origin.x, 8.0,
+			"reordered spatial prefixes remain unchanged by density history")
 	parent.free()
 	t.eq(sources, before, "game instancing never edits procedural positions")
 
