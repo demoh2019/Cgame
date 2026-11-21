@@ -87,3 +87,43 @@ func run(t) -> void:
 	t.eq(server.events.size(), events_before, "suppressed wave emits no fake incident")
 	t.near(server.next_incident_at, 1000.0 + WorldIncidents.RETRY_SECONDS, 0.001,
 		"rejected wave retries later instead of checking every tick")
+
+	# The Cgame class is registered only in custom engine builds.
+	if ClassDB.class_exists("AdaptiveTickGovernor"):
+		t.current = "native Cgame governor / GDScript parity"
+		var native = ClassDB.instantiate("AdaptiveTickGovernor")
+		t.check(native != null, "Cgame native tick governor exists")
+		var script := Governor.new()
+		var durations: Array[int] = []
+		for i in 202:
+			durations.append(i * 1000)
+		durations.append_array([60000] * 60)
+		durations.append_array([38000] * 20)
+		durations.append_array([10000] * 100)
+		durations.append_array([60000] * 300)
+		for i in durations.size():
+			var count: int = 0 if i == 55 else 1
+			native.observe_tick(durations[i], count)
+			script.observe_tick(durations[i], count)
+			if i % 20 == 0 or i == durations.size() - 1:
+				var actual: Dictionary = native.snapshot()
+				var expected: Dictionary = script.snapshot()
+				for key in ["sample_count", "total_ticks", "tick_p95_ms",
+						"last_window_p95_ms", "tick_max_ms",
+						"incident_spawn_cap", "adaptive_enabled"]:
+					t.eq(actual[key], expected[key],
+						"native/script telemetry parity %s at sample %d" % [key, i])
+				t.eq(native.get_budget_units(), script.get_budget_units(),
+					"native and fallback agree on optional-work budget")
+		t.eq(native.samples_oldest_first().size(), script.history_count(),
+			"native and fallback retain same bounded ring size")
+		var ordered_native: PackedFloat64Array = native.samples_oldest_first()
+		var ordered_script: Array[float] = script.samples_oldest_first()
+		for i in ordered_native.size():
+			t.near(ordered_native[i], ordered_script[i], 0.000001,
+				"native ring history ordering at sample %d" % i)
+		native.set_enabled(false)
+		script.set_enabled(false)
+		t.eq(native.get_budget_units(), script.get_budget_units(),
+			"manual mode restores vanilla encounter limit")
+		t.check(native.snapshot()["native_backend"], "native diagnostics identify backend")
