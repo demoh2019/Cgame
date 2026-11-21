@@ -2,6 +2,8 @@ extends RefCounted
 ## Headless numeric parity tests for native and stock-Godot crowd tier planning.
 
 const CharacterAnim = preload("res://scripts/client/character_anim.gd")
+const CharacterModel = preload("res://scripts/client/character_model.gd")
+const CharacterAnimModifier = preload("res://scripts/client/character_anim_modifier.gd")
 
 
 func run(t) -> void:
@@ -358,3 +360,56 @@ func run(t) -> void:
 						sampled_retained, sampled_costs, cost_limit, 1.5)
 					t.eq(native_result, fallback_cap, "native/script work cap parity %d/%d" % [
 						sample, cost_limit])
+
+
+	t.current = "measured native FootPlacement IK cost joins scripted animation budget"
+	var empty_actor = CharacterModel.new()
+	t.eq(empty_actor.estimated_full_pose_cost_us(), 0,
+		"an unsampled character reports zero and uses the planner's existing estimate")
+	var scripted_pose = CharacterAnimModifier.new()
+	scripted_pose.estimated_full_pose_us = 120
+	empty_actor._procedural = scripted_pose
+	t.eq(empty_actor.estimated_full_pose_cost_us(), 120,
+		"stock Godot retains the existing measured scripted animation cost")
+	scripted_pose.estimated_full_pose_us = 100001
+	t.eq(empty_actor.estimated_full_pose_cost_us(), 100000,
+		"combined pose CPU estimate saturates at the native planner's sample limit")
+	scripted_pose.estimated_full_pose_us = 120
+	var live_native = null
+	if ClassDB.class_exists("FootPlacementModifier3D"):
+		live_native = ClassDB.instantiate("FootPlacementModifier3D")
+		if live_native != null and live_native.has_method("get_estimated_process_cost_us"):
+			t.check(live_native.has_method("get_last_process_cost_us") and
+				live_native.has_method("get_process_sample_count") and
+				live_native.has_method("set_profiling_enabled"),
+				"Cgame exposes optional native FootPlacement work-unit telemetry")
+			live_native.call("set_profiling_enabled", true)
+			t.eq(live_native.call("get_estimated_process_cost_us"), 0,
+				"native unsampled IK cost is zero until an actual solve")
+			t.eq(live_native.call("get_process_sample_count"), 0,
+				"enabling native profiling does not fabricate samples")
+			empty_actor._native_foot_modifier = live_native as Node
+			t.eq(empty_actor.estimated_full_pose_cost_us(), 120,
+				"script and unsampled native estimates combine without double counting")
+			live_native.call("set_profiling_enabled", false)
+			t.eq(live_native.call("get_last_process_cost_us"), 0,
+				"disabling profiling clears stale native samples")
+	empty_actor._native_foot_modifier = null
+	empty_actor._procedural = null
+	if live_native != null:
+		live_native.free()
+	scripted_pose.free()
+	empty_actor.free()
+
+	var model_source_native: String = FileAccess.get_file_as_string(
+		"res://scripts/client/character_model.gd")
+	var crowd_source_native: String = FileAccess.get_file_as_string(
+		"res://scripts/client/character_anim.gd")
+	t.check(model_source_native.contains("func estimated_full_pose_cost_us()") and
+		model_source_native.contains('get_estimated_process_cost_us') and
+		crowd_source_native.contains("full_pose_cost_us.append(model.estimated_full_pose_cost_us())"),
+		"Albion crowd runtime feeds the native+script CPU estimate into the existing cost gate")
+	t.check(model_source_native.contains('set("active", tier == 0 and not _dead)') and
+		model_source_native.contains('set("active", _lod_tier == 0 and not _dead)') and
+		model_source_native.contains('_native_foot_modifier = null'),
+		"native IK tier gates, deferred enable and model reuse are all handled")

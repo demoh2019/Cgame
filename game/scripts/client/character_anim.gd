@@ -411,8 +411,10 @@ static func apply_crowd(models: Array, camera: Camera3D, quality: int, ground: C
 		visible_mask.append(1 if visible else 0)
 		retained_full_mask.append(1 if bool(model.get_meta("aa_full_ik_retained", false)) else 0)
 		retained_combat_mask.append(1 if bool(model.get_meta("aa_combat_pose_retained", false)) else 0)
-		var modifier: Object = model.get("_procedural")
-		full_pose_cost_us.append(int(modifier.get("estimated_full_pose_us")) if modifier != null else 0)
+		# A native FootPlacementModifier3D measures its own terrain/IK work.
+		# The model combines that with scripted breathing/look-at cost; stock
+		# Godot has no native foot sample, so only the script cost is used.
+		full_pose_cost_us.append(model.estimated_full_pose_cost_us())
 		# Combat urgency is visual-only, and the native mixer controller
 		# already handles critical poses when external_anim_lod is enabled.
 		var critical: bool = not bool(model.get("external_anim_lod")) \

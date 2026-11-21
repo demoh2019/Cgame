@@ -151,6 +151,40 @@ TEST_CASE("[SceneTree][FootPlacementModifier3D] leg properties") {
 	memdelete(mod);
 }
 
+
+TEST_CASE("[SceneTree][FootPlacementModifier3D] measured work-unit telemetry is opt-in and bounded") {
+	FootPlacementModifier3D *modifier = memnew(FootPlacementModifier3D);
+	CHECK_FALSE(modifier->is_profiling_enabled());
+	CHECK(modifier->get_last_process_cost_us() == 0);
+	CHECK(modifier->get_estimated_process_cost_us() == 0);
+	CHECK(modifier->get_process_sample_count() == 0);
+
+	// Pure EMA math is independently testable without a skeleton, renderer,
+	// realtime clock or unreliable performance test thresholds.
+	CHECK(FootPlacementModifier3D::smooth_process_cost_us(0, 100) == 100);
+	CHECK(FootPlacementModifier3D::smooth_process_cost_us(400, 100) == 325);
+	CHECK(FootPlacementModifier3D::smooth_process_cost_us(325, 100) == 269);
+	CHECK(FootPlacementModifier3D::smooth_process_cost_us(100000, 100000) == 100000);
+	CHECK(FootPlacementModifier3D::smooth_process_cost_us(1, 1) == 1);
+	ERR_PRINT_OFF
+	CHECK(FootPlacementModifier3D::smooth_process_cost_us(-1, 100) == -1);
+	CHECK(FootPlacementModifier3D::smooth_process_cost_us(0, 0) == -1);
+	CHECK(FootPlacementModifier3D::smooth_process_cost_us(0, 100001) == -1);
+	CHECK(FootPlacementModifier3D::smooth_process_cost_us(100001, 1) == -1);
+	ERR_PRINT_ON
+
+	modifier->set_profiling_enabled(true);
+	CHECK(modifier->is_profiling_enabled());
+	CHECK(modifier->get_process_sample_count() == 0); // Unexecuted work remains unsampled.
+	modifier->reset_process_telemetry();
+	CHECK(modifier->get_last_process_cost_us() == 0);
+	CHECK(modifier->get_estimated_process_cost_us() == 0);
+	modifier->set_profiling_enabled(false);
+	CHECK_FALSE(modifier->is_profiling_enabled());
+	CHECK(modifier->get_process_sample_count() == 0);
+	memdelete(modifier);
+}
+
 } // namespace TestFootPlacementModifier3D
 
 #endif // _3D_DISABLED

@@ -47,6 +47,41 @@ animation (standard SkeletonModifier3D order, place them as children of the `Ske
   `_world.height_at` (= `client.world.height_at`). Distance gating is not done at creation time; the animation LOD
   system can additionally toggle `active` for far models.
 
+## Native foot placement profiling and crowd pose LOD
+
+Cgame's `FootPlacementModifier3D` now has optional, opt-in CPU telemetry:
+`profiling_enabled` (default off), `get_last_process_cost_us()`,
+`get_estimated_process_cost_us()`, `get_process_sample_count()`,
+`reset_process_telemetry()` and static `smooth_process_cost_us()`.
+The timer encompasses the **actual native FootPlacement update**, including
+ground callbacks / raycasts, leg solving, and foot normal queries. It does
+*not* cover GPU skinning, the AnimationMixer or the game server. The output
+is bounded to 1–100,000 µs and smoothed with an integer 1/4 EMA, suitable
+for planning, not a guaranteed frame deadline. Invalid/missing/no-op samples
+never claim zero cost for a completed update. Profiling is off unless an
+owner explicitly enables it.
+
+The Albion After `CharacterModel.enable_foot_placement()` path enables
+profiling only on supporting Cgame builds, caches the live modifier node,
+and sets native `active` according to the **same tier-0 full procedural IK**
+budget already applied to the scripted `CharacterAnimModifier`. Tier 1
+keeps base animation at full rate without optional Foot Placement; tiers
+2–4 additionally follow their existing reduced AnimationMixer rates.
+Native IK is also turned off for ragdolls and reconfigured/reused models
+cannot accidentally inherit stale modifier references.
+
+The game exposes `CharacterModel.estimated_full_pose_cost_us()`, combining
+the measured scripted full-pose cost with native FootPlacement cost when
+that native getter exists. `CharacterAnim.apply_crowd()` feeds the combined
+estimate to the existing cost-only tier-0 limiter after visibility, distance,
+IK retention and combat-pose retention have been selected. The estimate is
+saturated at 100,000 µs. Older Cgame builds simply omit native cost
+telemetry, while stock Godot uses scripted IK/fallback budgeting.
+
+The timing API intentionally measures **only FootPlacement**, not all
+skeletal animation. Animation Budget Allocator concepts:
+https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine
+
 ## Verify after rebuild
 
 1. Build the editor, run `tests/scene/test_foot_placement_modifier_3d.cpp` (`--test --test-case="*FootPlacement*"`).

@@ -17,6 +17,7 @@ var animator: AnimationPlayer
 var pack_mode := false
 var external_anim_lod := false # True when the native AnimationLODController advances `animator`.
 var _native_feet := false # True when the engine FootPlacementModifier3D plants the feet.
+var _native_foot_modifier: Node = null # Cached to avoid per-frame skeleton hierarchy walks.
 var _materials: Array[StandardMaterial3D] = []
 var _wet_surfaces: Array[Dictionary] = [] # Live outfit/gear surfaces and their original materials.
 var _wet_surface_keys: Dictionary = {}
@@ -62,6 +63,12 @@ var _gear_shown: Dictionary = {} # Gear slot -> item id currently drawn on the b
 func setup(tint: Color, scale_factor: float, walk_speed: float = 1.0, model_name: String = "", zombie: bool = false, look_seed: int = 0) -> void:
 	_walk_speed = walk_speed
 	_zombie = zombie
+	# A reused character never inherits a freed skeleton or previous leg solver.
+	# Deactivate the old one before detaching its cached reference.
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):
+		_native_foot_modifier.set("active", false)
+	_native_feet = false
+	_native_foot_modifier = null
 	# A pooled/reconfigured model must never inherit its predecessor's IK slot.
 	set_meta("aa_full_ik_retained", false)
 	set_meta("aa_combat_pose_retained", false) # Pooled models cannot carry another actor's combat history.
@@ -534,6 +541,11 @@ func set_anim_lod(tier: int) -> void:
 		animator.call("reset_advance_budget")
 	if _layer != null and _layer.has_method("reset_advance_budget"):
 		_layer.call("reset_advance_budget")
+	# The native foot solver must obey the SAME visual-only IK tier as the
+	# scripted modifier; otherwise it runs expensive terrain callbacks even
+	# when crowd budgeting has already demoted this actor.
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):
+		_native_foot_modifier.set("active", tier == 0 and not _dead)
 	if _procedural != null and not _dead:
 		_procedural.set("foot_ik", tier == 0 and not _native_feet) # Native FootPlacementModifier3D wins when present.
 		_procedural.set("look_at_enabled", tier == 0)
@@ -544,6 +556,19 @@ func set_anim_lod(tier: int) -> void:
 
 func anim_lod_tier() -> int:
 	return _lod_tier
+
+
+## The next frame's optional full-pose admission estimate combines the real
+## script modifier duration and native FootPlacement duration when available.
+## The native timer covers terrain queries + leg solving, not GPU skinning or
+## core animation playback. Older engines simply report zero native samples.
+func estimated_full_pose_cost_us() -> int:
+	var script_us: int = int(_procedural.get("estimated_full_pose_us")) if _procedural != null else 0
+	var native_us: int = 0
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier) and \
+			_native_foot_modifier.has_method("get_estimated_process_cost_us"):
+		native_us = int(_native_foot_modifier.call("get_estimated_process_cost_us"))
+	return clampi(maxi(script_us, 0) + maxi(native_us, 0), 0, 100000)
 
 
 func _track_yaw(delta: float) -> void:
@@ -817,8 +842,14 @@ func enable_foot_placement(height_at: Callable) -> bool:
 		return false
 	var existing := skeleton.get_node_or_null("FootPlacement")
 	if existing != null:
+		_native_foot_modifier = existing
+		_native_feet = true
 		existing.set("ground_height_callback", height_at)
-		existing.set("active", true)
+		if existing.has_method("set_profiling_enabled"):
+			existing.call("set_profiling_enabled", true)
+		existing.set("active", _lod_tier == 0 and not _dead)
+		if _procedural != null:
+			_procedural.set("foot_ik", false)
 		return true
 	var modifier = ClassDB.instantiate("FootPlacementModifier3D")
 	if modifier == null:
@@ -830,14 +861,23 @@ func enable_foot_placement(height_at: Callable) -> bool:
 	modifier.set("max_foot_angle", deg_to_rad(35.0))
 	modifier.call("add_leg", "thigh_l", "calf_l", "foot_l", 0.0)
 	modifier.call("add_leg", "thigh_r", "calf_r", "foot_r", 0.0)
+	# The profiler is optional on older Cgame builds. Avoid measuring on
+	# projects not explicitly opting in.
+	if modifier.has_method("set_profiling_enabled"):
+		modifier.call("set_profiling_enabled", true)
 	skeleton.add_child(modifier)
+	_native_foot_modifier = modifier as Node
 	_native_feet = true
+	modifier.set("active", _lod_tier == 0 and not _dead)
 	if _procedural != null:
 		_procedural.set("foot_ik", false) # One leg solver per skeleton.
 	return true
 
 
 func disable_foot_placement() -> void:
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):
+		_native_foot_modifier.set("active", false)
+		return
 	var skeleton := _find_skeleton()
 	if skeleton == null:
 		return
