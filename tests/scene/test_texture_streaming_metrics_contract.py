@@ -100,7 +100,7 @@ class TextureStreamingMetricsContract(unittest.TestCase):
         documentation = (MOD / "README.md").read_text()
         self.assertIn("Unreal STAT STREAMING-style", documentation)
         self.assertIn("0 means budget fitting is disabled", documentation)
-        self.assertIn("Atomic", documentation.lower().capitalize())
+        self.assertIn("atomic", documentation.lower())
 
 
 if __name__ == "__main__":
