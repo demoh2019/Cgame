@@ -58,6 +58,15 @@ private:
 	real_t cell_size = 64.0;
 	real_t load_radius = 128.0;
 	real_t unload_radius = 192.0;
+	// Opt-in startup World Partition-style loading area ramp. Fractions
+	// describe 2D area or 3D volume, NOT radial distance. Existing loaded
+	// cells keep the configured unload hysteresis during the ramp.
+	real_t loading_range_area_fraction = 1.0;
+	real_t loading_ramp_initial_fraction = 1.0;
+	real_t loading_ramp_delay = 0.0;
+	real_t loading_ramp_duration = 0.0;
+	real_t loading_ramp_elapsed = 0.0;
+	bool loading_ramp_active = false;
 	// Optional hint only affects load order; current focus still controls
 	// residency and chunk generation. Disabled unless set by the game.
 	Vector3 velocity_hint;
@@ -221,6 +230,15 @@ public:
 	real_t get_load_radius() const { return load_radius; }
 	void set_unload_radius(real_t p_radius);
 	real_t get_unload_radius() const { return unload_radius; }
+	// Explicit opt-in, progressive load-queue expansion. Full configured
+	// load_radius and unload_radius are unchanged; slow frames cannot make
+	// the player's currently loaded cells disappear.
+	void begin_loading_range_ramp(real_t p_initial_area_fraction, real_t p_delay_seconds, real_t p_duration_seconds);
+	void advance_loading_range_ramp(real_t p_delta_seconds);
+	void cancel_loading_range_ramp();
+	bool is_loading_range_ramping() const { return loading_ramp_active; }
+	real_t get_loading_range_area_percent() const { return loading_range_area_fraction * real_t(100.0); }
+	real_t get_effective_load_radius() const;
 	void set_velocity_hint(const Vector3 &p_velocity);
 	Vector3 get_velocity_hint() const { return velocity_hint; }
 	void set_lookahead_seconds(real_t p_seconds);

@@ -6,6 +6,7 @@ const TestCase = preload("res://tests/test_case.gd")
 const SUITES := [
 	"res://tests/test_world_streamer_backpressure.gd",
 	"res://tests/test_world_streamer_shared_budget.gd",
+	"res://tests/test_world_streamer_loading_range_ramp.gd",
 	"res://tests/test_world_streamer_retry.gd",
 ]
 

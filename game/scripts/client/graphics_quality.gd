@@ -62,6 +62,17 @@ static func unload_time_budget_for_quality(value: int) -> int:
 	return [400, 650, 900, 1200][clampi(value, 0, 3)]
 
 
+## Startup only: Unreal World Partition-style area ramp. Preserve a safe
+## nearby terrain area and gradually request the configured full range.
+## Fractions scale area, not distance, on our 2D XZ streaming grid.
+static func startup_streaming_area_for_quality(value: int) -> float:
+	return [0.36, 0.49, 0.64, 0.81][clampi(value, 0, 3)]
+
+
+static func startup_streaming_ramp_duration(value: int) -> float:
+	return [3.0, 3.5, 4.0, 4.5][clampi(value, 0, 3)]
+
+
 ## Cosmetic streaming only: scripts far from the camera update at a
 ## budgeted interval instead of running expensive visual work every frame.
 ## This is separate from the even farther complete simulation-pause radius.
