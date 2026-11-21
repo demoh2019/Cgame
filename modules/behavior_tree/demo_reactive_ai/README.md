@@ -10,6 +10,8 @@ A self-contained 2D sandbox for this fork's **resource-backed** behavior-tree ru
 
 Move the blue survivor with **arrow keys**, press **F** to shout, **Space** near the infected to attack, **P** to enable/disable and reset AI CPU profiling, **R** to restart. The demo enables profiling initially so the bottom HUD line displays average/max behavior-tree decision time in microseconds. All other game NPCs default to unprofiled operation. Movement emits quieter footsteps. The wall blocks sight and attenuates sound. The NPC follows paths around the wall, remembers the player's last visible position, and investigates the last heard sound.
 
+Navigation replans are immediately triggered when switching actions; while chasing a moving target, A* refreshes on the NPC's designated one-in-four AI tick. HUD shows how many real path queries ran, their mean CPU time and the ticks until the next slot. The canonical game uses the same scheduler for large infected groups; see `game/docs/AI_UPDATE_SCHEDULING.md`.
+
 The game uses:
 - `BehaviorTreeRunner` (Node) with `BehaviorTreeReactiveSelector` and `BehaviorTreeReactiveSequence` (Resource tasks);
 - `BehaviorTreeBlackboardCheck`, `BehaviorTreeBlackboardCompare`, `BehaviorTreeBlackboardSet`, and `BehaviorTreeWait` (time-based waits);
