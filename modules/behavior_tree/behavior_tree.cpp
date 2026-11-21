@@ -477,7 +477,8 @@ Dictionary BehaviorTreeRunner::get_debug_snapshot() const {
 	result["auto_tick"] = auto_tick;
 	result["root_task_class"] = root_task.is_valid() ? String(root_task->get_class()) : String();
 	// Snapshots are made on demand, without bookkeeping on each tick.
-	// A deep clone prevents an inspector/script from modifying the live tree.
+	// Nested Dictionaries/Arrays are cloned; Object values still share references.
+	// The inspection API is read-only by contract for such Object values.
 	result["blackboard"] = blackboard.duplicate(true);
 	result["execution_memory"] = execution_memory.duplicate(true);
 	return result;
