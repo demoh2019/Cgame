@@ -250,3 +250,64 @@ func run(t) -> void:
 				if lane == "dust_devils":
 					heavy_count += 1
 	t.check(heavy_count >= 1, "old expensive lane is eventually scheduled")
+
+	t.current = "per-lane rate and cost-significance parity"
+	t.near(AmbientTickBudget.rate_scale_for_importance(0.25), 0.75, 0.000001,
+		"low significance limits cosmetic update frequency")
+	t.near(AmbientTickBudget.rate_scale_for_importance(1.0), 1.0, 0.000001,
+		"default importance preserves baseline rate")
+	t.near(AmbientTickBudget.rate_scale_for_importance(4.0), 1.5, 0.000001,
+		"high significance increases cosmetic frequency")
+	t.eq(AmbientTickBudget.rate_scale_for_importance(INF), 1.0,
+		"nonfinite importance cannot corrupt a lane's rate")
+	var rate_script := AmbientTickBudget.new()
+	t.eq(rate_script.get_lane_rate_scale("dragonflies"), 1.0, "default lane frequency")
+	t.check(rate_script.set_lane_rate_scale("dragonflies", 1.5), "valid rate accepted")
+	t.check(not rate_script.set_lane_rate_scale("dragonflies", 0.5), "out-of-range rate rejected")
+	t.check(not rate_script.set_lane_rate_scale("dragonflies", NAN), "NaN rate rejected")
+	t.check(not rate_script.set_lane_rate_scale("missing", 1.0), "unknown lane rejected")
+	t.eq(rate_script.get_lane_rate_scale("dragonflies"), 1.5, "rejected update keeps prior value")
+	t.eq(rate_script.get_lane_rate_scale("missing"), -1.0, "unknown lane sentinel")
+	rate_script.reset()
+	t.eq(rate_script.get_lane_rate_scale("dragonflies"), 1.5, "rate configuration survives reset")
+
+	var rate_native: Object = null
+	if ClassDB.class_exists("FrameUpdateBudget"):
+		var candidate_rates: Object = ClassDB.instantiate("FrameUpdateBudget")
+		if candidate_rates != null and candidate_rates.has_method("set_lane_rate_scale"):
+			rate_native = candidate_rates
+			for lane in AmbientTickBudget.LANES:
+				t.check(bool(rate_native.call("register_lane", StringName(lane))),
+					"native rate-aware lane %s registered" % lane)
+	var rate_weights: Dictionary = AmbientTickBudget.suggested_importance(0.8, false, false)
+	var rate_counts: Dictionary = {}
+	for lane in AmbientTickBudget.LANES:
+		var importance: float = float(rate_weights[lane])
+		var multiplier: float = AmbientTickBudget.rate_scale_for_importance(importance)
+		rate_counts[lane] = 0
+		t.check(rate_script.set_lane_importance(lane, importance), "script importance %s" % lane)
+		t.check(rate_script.set_lane_rate_scale(lane, multiplier), "script rate %s" % lane)
+		if rate_native != null:
+			t.check(bool(rate_native.call("set_lane_importance", StringName(lane), importance)),
+				"native importance %s" % lane)
+			t.check(bool(rate_native.call("set_lane_rate_scale", StringName(lane), multiplier)),
+				"native rate %s" % lane)
+	var rate_call_order: Array[String] = ["dust_devils", "dragonflies", "tumbleweeds", "dusk_bats"]
+	for frame in range(241):
+		rate_script.begin_frame(1.0 / 60.0, 1)
+		if rate_native != null:
+			rate_native.call("begin_frame", 1.0 / 60.0, 1)
+		for lane in rate_call_order:
+			var scripted_delta: float = rate_script.consume(lane, 1.0 / 60.0)
+			if rate_native != null:
+				t.near(float(rate_native.call("consume", StringName(lane), 1.0 / 60.0)),
+					scripted_delta, 0.0000001,
+					"native/script significance and rate parity frame %d lane %s" % [frame, lane])
+			if frame > 0 and scripted_delta > 0.0:
+				rate_counts[lane] = int(rate_counts[lane]) + 1
+		if frame > 0:
+			t.check(rate_script.last_frame_counts().x <= 2, "quality 1 never exceeds two slots")
+	t.check(int(rate_counts["dragonflies"]) > int(rate_counts["dusk_bats"]) + 5,
+		"sunlit insects update more frequently than daytime bats")
+	for lane in AmbientTickBudget.LANES:
+		t.check(int(rate_counts[lane]) >= 20, "%s still gets regular updates" % lane)
