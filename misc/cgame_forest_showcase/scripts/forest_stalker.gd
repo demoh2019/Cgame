@@ -17,6 +17,7 @@ const NAVIGATION_PRIORITY: int = 2
 const AVOIDANCE_CHECK_DISTANCE: float = 2.7
 const AVOIDANCE_ANGLE: float = 0.75
 const AVOIDANCE_EYE_HEIGHT: float = 0.45
+const NAVMESH_REQUERY_FRAMES: int = 12
 
 var encounter_id: String = ""
 var target: Node3D
@@ -24,6 +25,12 @@ var streamer: WorldPartition3D
 var steering_direction: Vector3 = Vector3.ZERO
 var steering_updates: int = 0 # Diagnostics: actual CPU steering recalculations.
 var avoidance_turns: int = 0 # Number of recalculations that saw a blocking collider.
+var navmesh_path_queries: int = 0
+var navmesh_path_successes: int = 0
+var last_navmesh_query_frame: int = -10000
+var navmesh_waypoint: Vector3 = Vector3.ZERO
+var navmesh_goal: Vector3 = Vector3.ZERO
+var navmesh_path_valid: bool = false
 var home_position: Vector3
 var health: int = MAX_HEALTH
 var active: bool = false
@@ -105,9 +112,48 @@ func _steering_ray_blocked(from: Vector3, direction: Vector3) -> bool:
     return not hit.is_empty() and hit.get("collider") != target
 
 
-func _recompute_steering(desired_direction: Vector3) -> Vector3:
+func _navmesh_direction(goal: Vector3, fallback: Vector3) -> Vector3:
+    # NavigationServer queries are issued only after a native physics-frame
+    # steering grant and at most once per NPC per 12 physics ticks.
+    if not is_instance_valid(streamer):
+        return fallback
+    var from_cell: Vector2i = streamer.local_position_to_cell(
+        streamer.to_local(global_position))
+    var to_cell: Vector2i = streamer.local_position_to_cell(
+        streamer.to_local(goal))
+    if (not streamer.is_cell_navigation_ready(from_cell)
+            or not streamer.is_cell_navigation_ready(to_cell)):
+        navmesh_path_valid = false
+        return fallback
+    var frame: int = Engine.get_physics_frames()
+    if (frame - last_navmesh_query_frame >= NAVMESH_REQUERY_FRAMES
+            or goal.distance_squared_to(navmesh_goal) > 16.0):
+        last_navmesh_query_frame = frame
+        navmesh_goal = goal
+        navmesh_path_valid = false
+        navmesh_path_queries += 1
+        var route: PackedVector3Array = NavigationServer3D.map_get_path(
+            get_world_3d().navigation_map, global_position, goal, true, 1)
+        if route.size() >= 2 and route[route.size() - 1].distance_to(goal) <= 4.0:
+            for waypoint in route:
+                var to_waypoint: Vector3 = waypoint - global_position
+                to_waypoint.y = 0.0
+                if to_waypoint.length_squared() > 0.7:
+                    navmesh_waypoint = waypoint
+                    navmesh_path_valid = true
+                    navmesh_path_successes += 1
+                    break
+    if navmesh_path_valid:
+        var towards: Vector3 = navmesh_waypoint - global_position
+        towards.y = 0.0
+        if towards.length_squared() > 0.2:
+            return towards.normalized()
+    return fallback
+
+
+func _recompute_steering(desired_direction: Vector3, goal: Vector3) -> Vector3:
     steering_updates += 1
-    var direction: Vector3 = desired_direction.normalized()
+    var direction: Vector3 = _navmesh_direction(goal, desired_direction).normalized()
     if direction == Vector3.ZERO:
         return direction
     var origin: Vector3 = global_position + Vector3.UP * AVOIDANCE_EYE_HEIGHT
@@ -170,12 +216,15 @@ func _physics_process(delta: float) -> void:
     away_from_home.y = 0.0
 
     var walk_direction := Vector3.ZERO
+    var movement_goal: Vector3 = target.global_position
     if away_from_home.length() > LEASH_DISTANCE:
         walk_direction = away_from_home.normalized()
+        movement_goal = home_position
     elif player_distance < AGGRO_DISTANCE and player_distance > ATTACK_DISTANCE * 0.9:
         walk_direction = player_vector.normalized()
     elif player_distance >= AGGRO_DISTANCE and away_from_home.length() > 1.5:
         walk_direction = away_from_home.normalized()
+        movement_goal = home_position
 
     # Moving enemies receive a higher scheduling tier than stationary
     # combatants; idle actors do not waste the first priority slots.
@@ -189,9 +238,9 @@ func _physics_process(delta: float) -> void:
     if walk_direction.length_squared() < 0.001:
         steering_direction = Vector3.ZERO
     elif not is_instance_valid(streamer):
-        steering_direction = _recompute_steering(walk_direction)
+        steering_direction = _recompute_steering(walk_direction, movement_goal)
     elif streamer.try_acquire_navigation_update(encounter_id):
-        steering_direction = _recompute_steering(walk_direction)
+        steering_direction = _recompute_steering(walk_direction, movement_goal)
 
     velocity.x = move_toward(velocity.x, steering_direction.x * WALK_SPEED, delta * 14.0)
     velocity.z = move_toward(velocity.z, steering_direction.z * WALK_SPEED, delta * 14.0)
