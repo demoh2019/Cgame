@@ -141,7 +141,9 @@ TEST_CASE("[PCGSpatialFilter3D] scaled 5x5x5 bucket boundaries and all-or-nothin
 	CHECK(filter->filter_indices_scaled(crossing, big, Math::INF).is_empty());
 	CHECK(filter->filter_indices_scaled(crossing, big, 1.0, -1).is_empty());
 	CHECK(filter->filter_indices_scaled(crossing, big, 1.0, 4097).is_empty());
-	CHECK(filter->filter_indices_scaled(crossing, { 2.0f, Math::NaN, 1.0f }, 1.0).is_empty());
+	PackedFloat32Array invalid_scales = big;
+	invalid_scales.set(1, Math::NaN);
+	CHECK(filter->filter_indices_scaled(crossing, invalid_scales, 1.0).is_empty());
 	CHECK(filter->filter_indices_scaled(crossing, { 2.0f, 0.49f, 1.0f }, 1.0).is_empty());
 	CHECK(filter->filter_indices_scaled(crossing, { 2.0f, 2.01f, 1.0f }, 1.0).is_empty());
 	const PackedVector3Array invalid = { Vector3(0, 0, 0), Vector3(0, Math::NaN, 0) };
