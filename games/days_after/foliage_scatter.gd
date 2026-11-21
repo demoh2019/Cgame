@@ -7,6 +7,10 @@ const GRID_SIZE: int = 25
 const MAX_INSTANCES: int = 160
 const MIN_SPACING: float = 2.1
 const WeightedVariants = preload("res://pcg_weighted_variants.gd")
+const LODPlan = preload("res://pcg_instance_lod.gd")
+const LOD_SWITCH_DISTANCE := 24.0
+const LOD_HYSTERESIS := 3.0
+const LOD_REFRESH_SECONDS := 0.25
 const VARIANT_WEIGHTS = [6.0, 3.0, 1.0]
 const VARIANT_SEED := 81419
 const VARIANT_COLORS := [
@@ -68,6 +72,84 @@ var _selected_positions := PackedVector3Array()
 var _selected_variants := PackedInt32Array()
 var _selected_stable_ids := PackedInt64Array()
 var _variant_batches: Array = []
+var _lod_tiers := PackedInt32Array()
+var _lod_buckets: Array = []
+var _lod_meshes: Array = []
+var _lod_materials: Array = []
+var _lod_viewer: Node3D = null
+var _last_lod_viewer := Vector3(0.0, 0.15, 3.0)
+var _lod_elapsed := 0.0
+
+
+## Optional viewer drives low-frequency per-instance LOD changes. Does not
+## regenerate PCG points or reroll any weighted visual decisions.
+func set_viewer(viewer: Node3D) -> void:
+    _lod_viewer = viewer
+    if viewer != null and is_inside_tree():
+        force_lod_refresh(viewer.global_position)
+
+
+func _process(delta: float) -> void:
+    if _lod_viewer == null or not is_instance_valid(_lod_viewer):
+        return
+    _lod_elapsed += delta
+    if _lod_elapsed < LOD_REFRESH_SECONDS:
+        return
+    _lod_elapsed = 0.0
+    var viewer_pos: Vector3 = _lod_viewer.global_position
+    if viewer_pos.is_finite() and viewer_pos.distance_squared_to(_last_lod_viewer) >= 0.25:
+        _refresh_lod(viewer_pos, false)
+
+
+## Tests and editor tools can force a snapshot from any world-space viewer.
+func force_lod_refresh(viewer_position: Vector3) -> bool:
+    return _refresh_lod(viewer_position, true)
+
+
+func get_lod_tiers() -> PackedInt32Array:
+    return _lod_tiers.duplicate()
+
+
+func get_lod_renderer(variant: int, lod: int) -> MultiMeshInstance3D:
+    if variant < 0 or variant >= VARIANT_WEIGHTS.size():
+        return null
+    if lod == 0:
+        return get_variant_renderer(variant)
+    if lod != 1:
+        return null
+    return get_node_or_null("PCGMeshVariant%dLOD1" % variant) as MultiMeshInstance3D
+
+
+func get_lod_source_indices(variant: int, lod: int) -> PackedInt32Array:
+    var index: int = variant * 2 + lod
+    if lod < 0 or lod > 1 or variant < 0 or variant >= VARIANT_WEIGHTS.size() or \
+            index >= _lod_buckets.size():
+        return PackedInt32Array()
+    var indices: PackedInt32Array = _lod_buckets[index]
+    return indices.duplicate()
+
+
+func get_lod_batch_sizes() -> PackedInt32Array:
+    var counts := PackedInt32Array()
+    for group in _lod_buckets:
+        var indices: PackedInt32Array = group
+        counts.push_back(indices.size())
+    return counts
+
+
+func verify_lod_native_fallback_parity() -> bool:
+    if _lod_tiers.size() != _selected_positions.size():
+        return false
+    var native: PackedInt32Array = LODPlan.plan_instance_lods(
+        _selected_positions, _last_lod_viewer, _lod_tiers,
+        LOD_SWITCH_DISTANCE, LOD_HYSTERESIS)
+    var fallback: PackedInt32Array = LODPlan.plan_instance_lods(
+        _selected_positions, _last_lod_viewer, _lod_tiers,
+        LOD_SWITCH_DISTANCE, LOD_HYSTERESIS, false)
+    return native == fallback and native == _lod_tiers and \
+        _lod_buckets == LODPlan.partition_variant_lods(
+            _selected_variants, _lod_tiers, VARIANT_WEIGHTS.size(), false)
+
 
 
 ## Parent MultiMeshInstance3D is variant zero for backward-compatible paths.
@@ -101,9 +183,10 @@ func get_variant_source_indices(variant: int) -> PackedInt32Array:
 func get_rendered_instance_count() -> int:
     var total := 0
     for variant in range(VARIANT_WEIGHTS.size()):
-        var renderer: MultiMeshInstance3D = get_variant_renderer(variant)
-        if renderer != null and renderer.multimesh != null:
-            total += renderer.multimesh.instance_count
+        for lod in 2:
+            var renderer: MultiMeshInstance3D = get_lod_renderer(variant, lod)
+            if renderer != null and renderer.multimesh != null:
+                total += renderer.multimesh.instance_count
     return total
 
 
@@ -487,26 +570,80 @@ func regenerate() -> void:
         _variant_batches = WeightedVariants.partition_indices(
             _selected_variants, VARIANT_WEIGHTS.size(), false)
 
-    var material := StandardMaterial3D.new()
-    material.albedo_color = Color.WHITE
-    material.vertex_color_use_as_albedo = true
-    material.roughness = 1.0
-    for variant in range(VARIANT_WEIGHTS.size()):
-        var renderer: MultiMeshInstance3D = get_variant_renderer(variant)
-        if renderer == null:
-            renderer = MultiMeshInstance3D.new()
-            renderer.name = "PCGMeshVariant%d" % variant
-            renderer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-            add_child(renderer)
+    # PCG selection is intentionally complete before any LOD work. Changing
+    # viewer never re-samples a position, density mask or stable variant ID.
+    _lod_tiers.clear()
+    var viewer_position: Vector3 = _lod_viewer.global_position if \
+        _lod_viewer != null and is_instance_valid(_lod_viewer) else Vector3(0.0, 0.15, 3.0)
+    _refresh_lod(viewer_position, true)
 
-        # Distinct actual primitive geometry, not just resized boxes:
-        # broad green blades, narrow conical reeds, straw seed-heads.
-        var geometry: PrimitiveMesh
+
+func _refresh_lod(viewer_position: Vector3, force: bool) -> bool:
+    if not viewer_position.is_finite() or _selected_variants.size() != _selected_positions.size():
+        return false
+    var planned: PackedInt32Array = LODPlan.plan_instance_lods(
+        _selected_positions, viewer_position, _lod_tiers,
+        LOD_SWITCH_DISTANCE, LOD_HYSTERESIS)
+    if planned.size() != _selected_positions.size():
+        return false
+    _last_lod_viewer = viewer_position
+    if not force and planned == _lod_tiers:
+        return false
+
+    var groups: Array = LODPlan.partition_variant_lods(
+        _selected_variants, planned, VARIANT_WEIGHTS.size())
+    if groups.size() != VARIANT_WEIGHTS.size() * 2:
+        return false
+    var visited := PackedInt32Array()
+    visited.resize(_selected_positions.size())
+    for group in groups:
+        var indices: PackedInt32Array = group
+        for source_index in indices:
+            if source_index < 0 or source_index >= visited.size():
+                return false
+            visited[source_index] += 1
+    for count in visited:
+        if count != 1:
+            return false
+    _lod_tiers = planned
+    _lod_buckets = groups
+    _build_lod_renderers()
+    return true
+
+
+func _get_lod_mesh(variant: int, lod: int) -> PrimitiveMesh:
+    # Cache the six small meshes and their materials across camera movement.
+    if _lod_meshes.is_empty():
+        for i in range(VARIANT_WEIGHTS.size() * 2):
+            _lod_meshes.append(null)
+    var key: int = variant * 2 + lod
+    if _lod_meshes[key] != null:
+        return _lod_meshes[key]
+
+    if _lod_materials.is_empty():
+        for i in 2:
+            var material := StandardMaterial3D.new()
+            material.albedo_color = Color.WHITE
+            material.vertex_color_use_as_albedo = true
+            material.roughness = 1.0
+            if i == 1:
+                material.cull_mode = BaseMaterial3D.CULL_DISABLED
+                material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+            _lod_materials.append(material)
+
+    var geometry: PrimitiveMesh
+    if lod == 1:
+        # Two-triangle camera-facing vegetation proxy for every source mesh.
+        var proxy := QuadMesh.new()
+        proxy.size = [Vector2(0.12, 0.44), Vector2(0.18, 0.54),
+            Vector2(0.19, 0.34)][variant]
+        geometry = proxy
+    else:
         match variant:
             0:
-                var green := BoxMesh.new()
-                green.size = Vector3(0.10, 0.44, 0.10)
-                geometry = green
+                var blade := BoxMesh.new()
+                blade.size = Vector3(0.10, 0.44, 0.10)
+                geometry = blade
             1:
                 var reed := CylinderMesh.new()
                 reed.top_radius = 0.018
@@ -521,25 +658,38 @@ func regenerate() -> void:
                 straw.radial_segments = 6
                 straw.rings = 3
                 geometry = straw
-        geometry.material = material
+    geometry.material = _lod_materials[lod]
+    _lod_meshes[key] = geometry
+    return geometry
 
-        var indices: PackedInt32Array = _variant_batches[variant]
-        var batch := MultiMesh.new()
-        batch.transform_format = MultiMesh.TRANSFORM_3D
-        batch.use_colors = true
-        batch.mesh = geometry
-        batch.instance_count = indices.size()
-        for local_index in range(indices.size()):
-            var source_index: int = indices[local_index]
-            # Use the original source index so regeneration/rebucketing
-            # never affects orientation or the selected world position.
-            var orientation := Basis(Vector3.UP, float(source_index) * 0.41)
-            var width_scale: float = [0.8, 1.0, 1.15][variant]
-            var height_scale: float = [0.90, 0.78, 0.63][variant]
-            orientation = orientation.scaled(Vector3(width_scale,
-                height_scale + 0.08 * float(source_index % 5), width_scale))
-            batch.set_instance_transform(local_index,
-                Transform3D(orientation, _selected_positions[source_index]))
-            batch.set_instance_color(local_index, VARIANT_COLORS[variant])
-        renderer.multimesh = batch
-        renderer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+func _build_lod_renderers() -> void:
+    # Six stable GPU component slots, not per-point scene nodes. An empty
+    # mesh/tier combination remains an empty MultiMesh with its resource.
+    for variant in range(VARIANT_WEIGHTS.size()):
+        for lod in 2:
+            var renderer: MultiMeshInstance3D = get_lod_renderer(variant, lod)
+            if renderer == null:
+                renderer = MultiMeshInstance3D.new()
+                renderer.name = ("PCGMeshVariant%dLOD1" % variant) if lod == 1 \
+                    else ("PCGMeshVariant%d" % variant)
+                renderer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+                add_child(renderer)
+            var indices: PackedInt32Array = _lod_buckets[variant * 2 + lod]
+            var batch := MultiMesh.new()
+            batch.transform_format = MultiMesh.TRANSFORM_3D
+            batch.use_colors = true
+            batch.mesh = _get_lod_mesh(variant, lod)
+            batch.instance_count = indices.size()
+            for local_index in indices.size():
+                var source_index: int = indices[local_index]
+                var orientation := Basis(Vector3.UP, float(source_index) * 0.41)
+                var width_scale: float = [0.8, 1.0, 1.15][variant]
+                var height_scale: float = [0.90, 0.78, 0.63][variant]
+                orientation = orientation.scaled(Vector3(width_scale,
+                    height_scale + 0.08 * float(source_index % 5), width_scale))
+                batch.set_instance_transform(local_index, Transform3D(
+                    orientation, _selected_positions[source_index]))
+                batch.set_instance_color(local_index, VARIANT_COLORS[variant])
+            renderer.multimesh = batch
+            renderer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
