@@ -306,7 +306,19 @@ static func hit_feedback_strength(node: Node, base_strength: float) -> float:
 		timeline = node.get_meta("effect_timeline", null) as Object
 	if timeline != null and timeline.has_method("apply_effect") and timeline.has_method("get_stacks"):
 		var tag := StringName("Local.Visual.RecentHit")
-		if bool(timeline.call("apply_effect", tag, 0.22, 1, 4, 0)):
+		var applied := false
+		var tag_container: Object = node.get_meta("tags", null) as Object
+		if timeline.has_method("apply_effect_with_tag_requirements") and tag_container != null \
+				and tag_container.has_method("get_tags"):
+			# Native GAS-style target requirements: avoid stacking visual hit
+			# cues on a server-confirmed dead actor. No combat logic runs here.
+			var active_tags: PackedStringArray = tag_container.call("get_tags")
+			applied = bool(timeline.call("apply_effect_with_tag_requirements",
+				tag, 0.22, active_tags, PackedStringArray(["Runtime.Life.Alive"]),
+				PackedStringArray(["Runtime.Life.Dead", "Runtime.Status.Immune.Hit"]), 1, 4, 0))
+		else:
+			applied = bool(timeline.call("apply_effect", tag, 0.22, 1, 4, 0))
+		if applied:
 			var hits: int = int(timeline.call("get_stacks", tag))
 			return base_strength * scale * (1.0 + 0.12 * float(clampi(hits, 1, 4) - 1))
 	return base_strength * scale

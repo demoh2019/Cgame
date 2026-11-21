@@ -28,6 +28,8 @@ public:
 	static constexpr double MAX_DURATION = 604800.0;
 	static constexpr double MIN_PERIOD = 0.05;
 	static constexpr int MAX_PENDING_PULSES = 32;
+	static constexpr int MAX_ACTIVE_TAG_CONTEXTS = 128;
+	static constexpr int MAX_TAG_REQUIREMENTS = 32;
 
 private:
 	struct Effect {
@@ -44,6 +46,7 @@ private:
 	static bool _valid_tag(const StringName &p_tag);
 	static bool _valid_duration(double p_seconds);
 	static bool _valid_stacks(int p_stacks);
+	static bool _tag_matches(const String &p_active, const String &p_requirement);
 
 protected:
 	static void _bind_methods();
@@ -51,6 +54,14 @@ protected:
 public:
 	bool set_effect(const StringName &p_tag, double p_seconds, int p_stacks = 1);
 	bool apply_effect(const StringName &p_tag, double p_seconds, int p_stacks = 1, int p_stack_limit = MAX_STACKS, ReapplyPolicy p_policy = REAPPLY_REFRESH);
+	// Unreal GAS-style target-tag admission gate; this is a non-allocating
+	// validation step before calling the existing reapply/stack policy.
+	// Caller is responsible for providing trusted current target tags.
+	bool apply_effect_with_tag_requirements(const StringName &p_tag, double p_seconds,
+			const PackedStringArray &p_active_tags,
+			const PackedStringArray &p_required_tags = PackedStringArray(),
+			const PackedStringArray &p_blocked_tags = PackedStringArray(),
+			int p_stacks = 1, int p_stack_limit = MAX_STACKS, ReapplyPolicy p_policy = REAPPLY_REFRESH);
 	// A zero period disables periodic execution; changing the period resets phase.
 	// If enabled, reapply may either restart the period or preserve elapsed phase.
 	bool set_periodic(const StringName &p_tag, double p_period, bool p_reset_on_reapply = true);

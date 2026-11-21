@@ -73,6 +73,29 @@ func run(t) -> void:
 			var second: float = Features.hit_feedback_strength(actor, 1.0)
 			t.near(first, 1.0, 0.001, "first hit intensity unchanged")
 			t.check(second > first, "consecutive hits increase cosmetic intensity")
+			if timeline.has_method("apply_effect_with_tag_requirements"):
+				t.current = "native target tag requirements prevent hit stacking on dead or immune actors"
+				timeline.call("remove_effect", StringName("Local.Visual.RecentHit"))
+				zombie["hp"] = 0.0
+				Features.sync_runtime_tags(actor, "zombie", zombie)
+				t.near(Features.hit_feedback_strength(actor, 1.0), 1.0, 0.001,
+					"dead actor returns neutral cosmetic response")
+				t.eq(int(timeline.call("get_stacks", StringName("Local.Visual.RecentHit"))), 0,
+					"dead actor cannot accumulate recent-hit effect")
+				zombie["hp"] = 20.0
+				Features.sync_runtime_tags(actor, "zombie", zombie)
+				var container: Object = actor.get_meta("tags", null) as Object
+				if container != null:
+					container.call("add_tag", StringName("Runtime.Status.Immune.Hit"))
+					t.near(Features.hit_feedback_strength(actor, 1.0), 1.0, 0.001,
+						"immunity prevents recent-hit visual stacking")
+					t.eq(int(timeline.call("get_stacks", StringName("Local.Visual.RecentHit"))), 0,
+						"immunity does not mutate timeline")
+					container.call("remove_tag", StringName("Runtime.Status.Immune.Hit"))
+				t.near(Features.hit_feedback_strength(actor, 1.0), 1.0, 0.001,
+					"living actor starts new recent-hit chain")
+				t.eq(int(timeline.call("get_stacks", StringName("Local.Visual.RecentHit"))), 1,
+					"valid tag requirements allow live target hit effect")
 			Features.tick_runtime_effects(actor, 0.4)
 			t.near(Features.runtime_effect_remaining(actor, "Local.Visual.Hit"), 1.6, 0.001,
 				"independent visual timer advances")

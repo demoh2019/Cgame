@@ -195,6 +195,59 @@ TEST_CASE("[GameplayFX] timeline reapply, explicit tick and expiry") {
 	CHECK(timeline->tick(1.5).size() == 1);
 	CHECK(timeline->is_empty());
 }
+TEST_CASE("[GameplayFX] timeline target-tag requirements and immunity are atomic") {
+	Ref<GameplayEffectTimeline> timeline;
+	timeline.instantiate();
+	const PackedStringArray alive = { "Runtime.Life.Alive", "Status.Fire.Resistant" };
+	const PackedStringArray required = { "Runtime.Life" };
+	const PackedStringArray blocked = { "Runtime.Life.Dead", "Status.Immune" };
+	CHECK(timeline->apply_effect_with_tag_requirements("Local.Visual.Hit", 2.0, alive, required, blocked, 1, 4));
+	CHECK(timeline->get_stacks("Local.Visual.Hit") == 1);
+	CHECK(timeline->set_periodic("Local.Visual.Hit", 0.5, false));
+	CHECK(timeline->tick(0.2).is_empty());
+	const Dictionary baseline = timeline->get_snapshot();
+
+	// Parent requirements match descendants, but partial word prefixes never match.
+	CHECK_FALSE(timeline->apply_effect_with_tag_requirements("Local.Visual.Hit", 3.0,
+			{ "Runtime.Life.Dead" }, { "Runtime.Life.Alive" }, blocked, 1, 4));
+	CHECK_FALSE(timeline->apply_effect_with_tag_requirements("Local.Visual.Hit", 3.0,
+			{ "Runtime.Life.Alive", "Status.Immune.Poison" }, required, blocked, 1, 4));
+	CHECK_FALSE(timeline->apply_effect_with_tag_requirements("Local.Visual.Hit", 3.0,
+			alive, { "Status.Frozen" }, blocked, 1, 4));
+	CHECK_FALSE(timeline->apply_effect_with_tag_requirements("Local.Visual.Hit", 3.0,
+			{ "Runtime.Life.Deadly" }, { "Runtime.Life.Dead" }, {}, 1, 4));
+	CHECK_FALSE(timeline->apply_effect_with_tag_requirements("Local.Visual.Hit", 3.0,
+			{ "Runtime..Life.Alive" }, required, blocked, 1, 4));
+	CHECK_FALSE(timeline->apply_effect_with_tag_requirements("Local.Visual.Hit", 3.0,
+			alive, { "" }, blocked, 1, 4));
+	CHECK_FALSE(timeline->apply_effect_with_tag_requirements("Local.Visual.Hit", 3.0,
+			alive, required, { "Status..Bad" }, 1, 4));
+	CHECK_FALSE(timeline->apply_effect_with_tag_requirements("Local.Visual.Hit", Math::NaN,
+			alive, required, blocked, 1, 4));
+	CHECK(timeline->get_snapshot() == baseline);
+	CHECK(timeline->get_stacks("Local.Visual.Hit") == 1);
+	CHECK(timeline->tick(0.3).is_empty()); // Failed applications leave phase unchanged.
+	CHECK(int(timeline->take_periodic_pulses().get(StringName("Local.Visual.Hit"), 0)) == 1);
+
+	// Distinct source prefixes are not mistaken for blocked hierarchy.
+	CHECK(timeline->apply_effect_with_tag_requirements("Local.Visual.Hit", 1.0,
+			{ "Runtime.Life.Alive", "Status.ImmuneExtra" }, required, blocked, 1, 4));
+	CHECK(timeline->get_stacks("Local.Visual.Hit") == 2);
+	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(1.0));
+	PackedStringArray excessive;
+	for (int i = 0; i < GameplayEffectTimeline::MAX_ACTIVE_TAG_CONTEXTS + 1; i++) {
+		excessive.push_back("Runtime.Life.Alive");
+	}
+	CHECK_FALSE(timeline->apply_effect_with_tag_requirements("Extra.Hit", 1.0, excessive, required, blocked));
+	excessive.clear();
+	for (int i = 0; i < GameplayEffectTimeline::MAX_TAG_REQUIREMENTS + 1; i++) {
+		excessive.push_back("Runtime.Life");
+	}
+	CHECK_FALSE(timeline->apply_effect_with_tag_requirements("Extra.Hit", 1.0, alive, excessive, blocked));
+	CHECK_FALSE(timeline->apply_effect_with_tag_requirements("Extra.Hit", 1.0, alive, required, excessive));
+	CHECK_FALSE(timeline->has_effect("Extra.Hit"));
+}
+
 TEST_CASE("[GameplayFX] timeline atomic snapshot rollback and validation") {
 	Ref<GameplayEffectTimeline> timeline;
 	timeline.instantiate();
