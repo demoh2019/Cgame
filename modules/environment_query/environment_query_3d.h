@@ -99,6 +99,10 @@ public:
 	// Rank candidates once, then greedily choose spatially separated points.
 	// Stable score/index order, max_results output cap; optional horizontal spacing.
 	PackedVector3Array query_spread_positions(int p_count, double p_min_separation) const;
+	// Exclude pre-occupied positions, then greedily choose separated goals.
+	// Up to 128 finite avoidance contexts; zero clearance disables the filter.
+	PackedVector3Array query_spread_positions_avoiding(int p_count, double p_min_separation,
+			const PackedVector3Array &p_occupied_positions, double p_clearance) const;
 
 	// Generates candidates on the XZ plane. Count/size are bounded to avoid
 	// accidentally allocating millions of points in the editor.
