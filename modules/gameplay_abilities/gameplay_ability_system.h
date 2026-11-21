@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/object/ref_counted.h"
+#include "core/variant/binder_common.h"
 #include "core/variant/dictionary.h"
 #include "core/variant/variant.h"
 
