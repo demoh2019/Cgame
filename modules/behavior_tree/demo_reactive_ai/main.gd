@@ -580,8 +580,9 @@ func _refresh_trace_tree_panel() -> void:
         trace_hotspots_label.text = "Latest CPU hotspot: no completed nodes"
     else:
         var hottest: Dictionary = hotspots[0]
-        trace_hotspots_label.text = "Latest CPU hotspot: %s (%d μs, inclusive)" % [
-            str(hottest.get("path", "?")), int(hottest.get("duration_usec", 0))]
+        trace_hotspots_label.text = "Latest CPU hotspot: %s | self %d μs / total %d μs" % [
+            str(hottest.get("path", "?")), int(hottest.get("self_usec", 0)),
+            int(hottest.get("duration_usec", 0))]
 
 
 func _update_hud() -> void:
