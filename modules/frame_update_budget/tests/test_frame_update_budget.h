@@ -122,4 +122,42 @@ TEST_CASE("[FrameUpdateBudget] Reserved slots are single-use and force refresh b
 	CHECK(b->last_frame_counts().x == 2);
 }
 
+TEST_CASE("[FrameUpdateBudget] Recorded CPU microseconds bound optional work") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane(StringName("first")));
+	CHECK(b->register_lane(StringName("second")));
+	CHECK(b->get_frame_time_budget_us() == 2500);
+	CHECK(b->set_frame_time_budget_us(250));
+	CHECK_FALSE(b->set_frame_time_budget_us(-1));
+	CHECK_FALSE(b->set_frame_time_budget_us(1000001));
+	CHECK(b->get_frame_time_budget_us() == 250);
+	CHECK_FALSE(b->record_cost(StringName("unregistered"), 100));
+	CHECK_FALSE(b->record_cost(StringName("first"), -1));
+	CHECK_FALSE(b->record_cost(StringName("first"), 10000001));
+
+	b->begin_frame(0.01, 3);
+	CHECK(b->consume(StringName("first"), 0.01) > 0.0);
+	CHECK(b->consume(StringName("second"), 0.01) > 0.0);
+	CHECK(b->record_cost(StringName("first"), 350));
+	CHECK(b->current_frame_cost_us() == 350);
+	b->begin_frame(0.1, 3);
+	CHECK(b->last_frame_cost_us() == 350);
+	CHECK(b->current_frame_cost_us() == 0);
+	CHECK(b->consume(StringName("first"), 0.1) > 0.0);
+	CHECK(b->record_cost(StringName("first"), 300));
+	CHECK(b->consume(StringName("second"), 0.1) == 0.0);
+	// Scene visibility transitions may still force a refresh when over budget.
+	CHECK(b->consume(StringName("second"), 0.1, true) > 0.0);
+
+	CHECK(b->set_frame_time_budget_us(0));
+	b->begin_frame(0.1, 3);
+	CHECK(b->record_cost(StringName("first"), 10000));
+	CHECK(b->consume(StringName("second"), 0.1) > 0.0);
+	b->reset();
+	CHECK(b->current_frame_cost_us() == 0);
+	CHECK(b->last_frame_cost_us() == 0);
+	CHECK(b->get_frame_time_budget_us() == 0);
+}
+
 } // namespace TestFrameUpdateBudget
