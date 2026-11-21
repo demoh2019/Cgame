@@ -37,6 +37,401 @@ TEST_FORCE_LINK(test_geometry_2d)
 
 namespace TestGeometry2D {
 
+
+
+TEST_CASE("[CoreBind] Geometry2D padded terrain curvature color baking") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	Vector<float> samples;
+	samples.resize(25);
+	for (int y = 0; y < 5; y++) {
+		for (int x = 0; x < 5; x++) {
+			const real_t wx = x - 1;
+			const real_t wz = y - 1;
+			samples.set(y * 5 + x, float(0.2 * (wx * wx + wz * wz)));
+		}
+	}
+	const Vector<Color> cavity = api->bake_heightfield_curvature_colors(samples, Vector2i(3, 3), 1.0);
+	REQUIRE(cavity.size() == 9);
+	for (int i = 0; i < cavity.size(); i++) {
+		CHECK(cavity[i].r == doctest::Approx(1.0));
+		CHECK(cavity[i].g == doctest::Approx(0.0));
+		CHECK(cavity[i].b == doctest::Approx(1.0));
+		CHECK(cavity[i].a == doctest::Approx(1.0));
+	}
+	CHECK(samples[12] == doctest::Approx(0.4f)); // Input unchanged.
+	Vector<float> negative = samples;
+	for (int i = 0; i < negative.size(); i++) {
+		negative.set(i, -negative[i]);
+	}
+	Vector<Color> ridge = api->bake_heightfield_curvature_colors(negative, Vector2i(3, 3), 1.0);
+	REQUIRE(ridge.size() == 9);
+	CHECK(ridge[4].r == doctest::Approx(0.0));
+	CHECK(ridge[4].g == doctest::Approx(1.0));
+	const Vector<Color> spaced = api->bake_heightfield_curvature_colors(samples, Vector2i(3, 3), 2.0);
+	REQUIRE(spaced.size() == 9);
+	CHECK(spaced[4].r > 0.0);
+	CHECK(spaced[4].r < 1.0); // Curvature is scaled by inverse spacing squared.
+
+	Vector<float> flat;
+	flat.resize(20); // 2x3 interior plus a 1-pixel border: 4 x 5.
+	for (int i = 0; i < flat.size(); i++) {
+		flat.set(i, 12.0f);
+	}
+	Vector<Color> zero = api->bake_heightfield_curvature_colors(flat, Vector2i(2, 3), 1.0);
+	REQUIRE(zero.size() == 6);
+	for (int i = 0; i < zero.size(); i++) {
+		CHECK(zero[i].r == doctest::Approx(0.0));
+		CHECK(zero[i].g == doctest::Approx(0.0));
+	}
+	ERR_PRINT_OFF;
+	CHECK(api->bake_heightfield_curvature_colors(samples, Vector2i(4, 3), 1.0).is_empty());
+	CHECK(api->bake_heightfield_curvature_colors(samples, Vector2i(0, 3), 1.0).is_empty());
+	CHECK(api->bake_heightfield_curvature_colors(samples, Vector2i(3, 3), -1.0).is_empty());
+	CHECK(api->bake_heightfield_curvature_colors(samples, Vector2i(3, 3), 1.0, 0.5, 0.5).is_empty());
+	Vector<float> invalid = samples;
+	invalid.set(0, Math::INF);
+	CHECK(api->bake_heightfield_curvature_colors(invalid, Vector2i(3, 3), 1.0).is_empty());
+	ERR_PRINT_ON;
+}
+
+TEST_CASE("[CoreBind] Geometry2D heightfield gradients match central differences") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	Vector<float> heights;
+	heights.resize(12);
+	for (int y = 0; y < 3; y++) {
+		for (int x = 0; x < 4; x++) {
+			heights.set(y * 4 + x, float(2 * x + 3 * y));
+		}
+	}
+	Vector<Vector2> gradients = api->heightfield_gradients(heights, Vector2i(4, 3), 1.0);
+	REQUIRE(gradients.size() == 12);
+	CHECK(gradients[1 * 4 + 1].is_equal_approx(Vector2(2, 3)));
+	CHECK(gradients[1 * 4 + 0].is_equal_approx(Vector2(1, 3)));
+	CHECK(gradients[1 * 4 + 3].is_equal_approx(Vector2(1, 3)));
+	CHECK(gradients[0 * 4 + 1].is_equal_approx(Vector2(2, 1.5)));
+	CHECK(gradients[2 * 4 + 1].is_equal_approx(Vector2(2, 1.5)));
+	CHECK(gradients[0].is_equal_approx(Vector2(1, 1.5)));
+	CHECK(heights[5] == 5.0f); // Never mutate the source samples.
+
+	gradients = api->heightfield_gradients(heights, Vector2i(4, 3), 2.0);
+	REQUIRE(gradients.size() == 12);
+	CHECK(gradients[5].is_equal_approx(Vector2(1.0, 1.5)));
+
+	Vector<float> one;
+	one.push_back(42.0f);
+	gradients = api->heightfield_gradients(one, Vector2i(1, 1), 3.0);
+	REQUIRE(gradients.size() == 1);
+	CHECK(gradients[0] == Vector2());
+
+	Vector<float> flat;
+	flat.resize(8);
+	for (int i = 0; i < 8; i++) {
+		flat.set(i, 14.0f);
+	}
+	gradients = api->heightfield_gradients(flat, Vector2i(2, 4), 1.0);
+	REQUIRE(gradients.size() == 8);
+	for (int i = 0; i < 8; i++) {
+		CHECK(gradients[i] == Vector2());
+	}
+	ERR_PRINT_OFF;
+	CHECK(api->heightfield_gradients(heights, Vector2i(3, 3), 1.0).is_empty());
+	CHECK(api->heightfield_gradients(heights, Vector2i(0, 3), 1.0).is_empty());
+	CHECK(api->heightfield_gradients(heights, Vector2i(2049, 1), 1.0).is_empty());
+	CHECK(api->heightfield_gradients(heights, Vector2i(4, 3), 0.0).is_empty());
+	CHECK(api->heightfield_gradients(heights, Vector2i(4, 3), -1.0).is_empty());
+	Vector<float> invalid = heights;
+	invalid.set(2, Math::INF);
+	CHECK(api->heightfield_gradients(invalid, Vector2i(4, 3), 1.0).is_empty());
+	ERR_PRINT_ON;
+}
+
+
+
+TEST_CASE("[CoreBind] Geometry2D wrapped scalar grid batch sampling") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	Vector<float> grid;
+	grid.push_back(0.0f);
+	grid.push_back(1.0f);
+	grid.push_back(2.0f);
+	grid.push_back(3.0f);
+	Vector<Vector2> uvs;
+	uvs.push_back(Vector2(0.0, 0.0));
+	uvs.push_back(Vector2(0.25, 0.25));
+	uvs.push_back(Vector2(0.5, 0.5));
+	uvs.push_back(Vector2(0.75, 0.75));
+	uvs.push_back(Vector2(1.25, -0.75));
+	uvs.push_back(Vector2(-2.0, 3.0));
+	Vector<float> samples = api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), uvs);
+	REQUIRE(samples.size() == uvs.size());
+	CHECK(samples[0] == doctest::Approx(0.0));
+	CHECK(samples[1] == doctest::Approx(1.5));
+	CHECK(samples[2] == doctest::Approx(3.0));
+	CHECK(samples[3] == doctest::Approx(1.5));
+	CHECK(samples[4] == doctest::Approx(samples[1]));
+	CHECK(samples[5] == doctest::Approx(0.0));
+
+	Vector<Vector2> skew;
+	skew.push_back(Vector2(0.125, 0.25)); // Ordinary U fraction = 0.25.
+	Vector<float> linear = api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), skew, false);
+	Vector<float> eased = api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), skew, true);
+	REQUIRE(linear.size() == 1);
+	REQUIRE(eased.size() == 1);
+	CHECK(linear[0] == doctest::Approx(1.25));
+	CHECK(eased[0] == doctest::Approx(1.15625));
+	CHECK(grid[0] == doctest::Approx(0.0));
+	CHECK(grid[3] == doctest::Approx(3.0));
+
+	Vector<float> one;
+	one.push_back(0.7f);
+	Vector<float> single = api->sample_scalar_grid_wrapped(one, Vector2i(1, 1), uvs);
+	REQUIRE(single.size() == uvs.size());
+	for (int i = 0; i < single.size(); i++) {
+		CHECK(single[i] == doctest::Approx(0.7f));
+	}
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), Vector<Vector2>()).is_empty());
+	ERR_PRINT_OFF;
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(3, 2), uvs).is_empty());
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(0, 2), uvs).is_empty());
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(2049, 1), uvs).is_empty());
+	Vector<float> bad_grid = grid;
+	bad_grid.set(2, Math::INF);
+	CHECK(api->sample_scalar_grid_wrapped(bad_grid, Vector2i(2, 2), uvs).is_empty());
+	Vector<Vector2> bad_uv = uvs;
+	bad_uv.push_back(Vector2(Math::NaN, 0.0));
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), bad_uv).is_empty());
+	Vector<Vector2> oversized;
+	oversized.resize(65537);
+	CHECK(api->sample_scalar_grid_wrapped(grid, Vector2i(2, 2), oversized).is_empty());
+	ERR_PRINT_ON;
+}
+
+TEST_CASE("[CoreBind] Geometry2D grayscale mask max-filter morphology") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	const Vector2i size(6, 4);
+	PackedByteArray input;
+	input.resize(size.x * size.y);
+	input.set(1 * size.x + 2, 220);
+	input.set(3 * size.x + 5, 70);
+	const PackedByteArray source = input;
+
+	PackedByteArray filtered = api->max_filter_mask(input, size, 1);
+	REQUIRE(filtered.size() == input.size());
+	CHECK(filtered[0] == 0);
+	CHECK(filtered[1 * size.x + 2] == 220);
+	CHECK(filtered[0 * size.x + 1] == 220);
+	CHECK(filtered[2 * size.x + 3] == 220);
+	CHECK(filtered[3 * size.x + 5] == 70);
+	CHECK(filtered[3 * size.x + 4] == 70);
+	CHECK(filtered[2 * size.x + 4] == 70);
+	CHECK(input == source); // The operation never mutates the supplied mask.
+
+	// Exhaustive 2D brute-force oracle on a rectangular, non-binary mask.
+	for (int radius = 0; radius <= 4; radius++) {
+		filtered = api->max_filter_mask(input, size, radius);
+		REQUIRE(filtered.size() == input.size());
+		for (int y = 0; y < size.y; y++) {
+			for (int x = 0; x < size.x; x++) {
+				uint8_t expected = 0;
+				for (int oy = MAX(0, y - radius); oy <= MIN(size.y - 1, y + radius); oy++) {
+					for (int ox = MAX(0, x - radius); ox <= MIN(size.x - 1, x + radius); ox++) {
+						expected = MAX(expected, input[oy * size.x + ox]);
+					}
+				}
+				CHECK(filtered[y * size.x + x] == expected);
+			}
+		}
+	}
+
+	PackedByteArray all_zero;
+	all_zero.resize(8);
+	filtered = api->max_filter_mask(all_zero, Vector2i(2, 4), 64);
+	REQUIRE(filtered.size() == 8);
+	for (int i = 0; i < 8; i++) {
+		CHECK(filtered[i] == 0);
+	}
+	PackedByteArray one;
+	one.push_back(127);
+	filtered = api->max_filter_mask(one, Vector2i(1, 1), 64);
+	REQUIRE(filtered.size() == 1);
+	CHECK(filtered[0] == 127);
+
+	ERR_PRINT_OFF;
+	CHECK(api->max_filter_mask(input, Vector2i(5, 4), 1).is_empty());
+	CHECK(api->max_filter_mask(input, Vector2i(0, 4), 1).is_empty());
+	CHECK(api->max_filter_mask(input, Vector2i(2049, 4), 1).is_empty());
+	CHECK(api->max_filter_mask(input, size, -1).is_empty());
+	CHECK(api->max_filter_mask(input, size, 65).is_empty());
+	ERR_PRINT_ON;
+}
+
+TEST_CASE("[CoreBind] Geometry2D binary 8-connected distance transform") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+
+	PackedByteArray mask;
+	mask.resize(25);
+	mask.set(12, 255); // Single feature at the centre of a 5x5 grid.
+	PackedByteArray distances = api->distance_transform_8(mask, Vector2i(5, 5), 2);
+	REQUIRE(distances.size() == 25);
+	for (int y = 0; y < 5; y++) {
+		for (int x = 0; x < 5; x++) {
+			CHECK(distances[y * 5 + x] == MAX(Math::abs(x - 2), Math::abs(y - 2)));
+		}
+	}
+	CHECK(mask[12] == 255); // Input is never modified.
+	CHECK(mask[0] == 0);
+
+	distances = api->distance_transform_8(mask, Vector2i(5, 5), 1);
+	REQUIRE(distances.size() == 25);
+	CHECK(distances[0] == 255); // Beyond radius, not a saturated distance.
+	CHECK(distances[1 * 5 + 1] == 1);
+	CHECK(distances[2 * 5 + 2] == 0);
+	distances = api->distance_transform_8(mask, Vector2i(5, 5), 0);
+	REQUIRE(distances.size() == 25);
+	CHECK(distances[12] == 0);
+	CHECK(distances[11] == 255);
+
+	PackedByteArray empty_features;
+	empty_features.resize(6);
+	distances = api->distance_transform_8(empty_features, Vector2i(3, 2), 4);
+	REQUIRE(distances.size() == 6);
+	for (int i = 0; i < 6; i++) {
+		CHECK(distances[i] == 255);
+	}
+	PackedByteArray every_feature;
+	every_feature.resize(6);
+	for (int i = 0; i < 6; i++) {
+		every_feature.set(i, 1);
+	}
+	distances = api->distance_transform_8(every_feature, Vector2i(3, 2), 4);
+	REQUIRE(distances.size() == 6);
+	for (int i = 0; i < 6; i++) {
+		CHECK(distances[i] == 0);
+	}
+
+	ERR_PRINT_OFF;
+	CHECK(api->distance_transform_8(mask, Vector2i(4, 5), 2).is_empty());
+	CHECK(api->distance_transform_8(mask, Vector2i(0, 5), 2).is_empty());
+	CHECK(api->distance_transform_8(mask, Vector2i(2049, 5), 2).is_empty());
+	CHECK(api->distance_transform_8(mask, Vector2i(5, 5), -1).is_empty());
+	CHECK(api->distance_transform_8(mask, Vector2i(5, 5), 255).is_empty());
+	ERR_PRINT_ON;
+}
+
+
+TEST_CASE("[CoreBind] Geometry2D deterministic point self-pruning") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	PackedVector2Array points;
+	points.push_back(Vector2(0, 0));
+	points.push_back(Vector2(0.5, 0));
+	points.push_back(Vector2(1, 0));
+	points.push_back(Vector2(1, 0));
+	points.push_back(Vector2(1, 1));
+	points.push_back(Vector2(-1, -1));
+	PackedInt32Array keep = api->prune_points_min_distance(points, 1.0);
+	REQUIRE(keep.size() == 4);
+	CHECK(keep[0] == 0);
+	CHECK(keep[1] == 2); // Exactly one unit is allowed.
+	CHECK(keep[2] == 4);
+	CHECK(keep[3] == 5);
+	CHECK(api->prune_points_min_distance(points, 1.0, 2).size() == 2);
+	CHECK(api->prune_points_min_distance(points, 1.0, 0).is_empty());
+	CHECK(api->prune_points_min_distance(points, 0.0).size() == 6);
+	CHECK(api->prune_points_min_distance(PackedVector2Array(), 1.0).is_empty());
+
+	// Two accepted points can share a grid cell if they occupy opposite
+	// corners: later candidates must still test *both* points.
+	PackedVector2Array cells;
+	cells.push_back(Vector2(0.01, 0.01));
+	cells.push_back(Vector2(0.95, 0.95));
+	cells.push_back(Vector2(0.99, 0.99));
+	keep = api->prune_points_min_distance(cells, 1.0);
+	REQUIRE(keep.size() == 2);
+	CHECK(keep[0] == 0);
+	CHECK(keep[1] == 1);
+
+	// Very large coordinate/cell ratios safely select using the direct path.
+	PackedVector2Array extreme;
+	extreme.push_back(Vector2(100000000.0, 200000000.0));
+	extreme.push_back(Vector2(100000010.0, 200000000.0));
+	keep = api->prune_points_min_distance(extreme, 1.0);
+	CHECK(keep.size() == 2);
+
+	ERR_PRINT_OFF;
+	CHECK(api->prune_points_min_distance(points, -1.0).is_empty());
+	CHECK(api->prune_points_min_distance(points, 1.0, -2).is_empty());
+	CHECK(api->prune_points_min_distance(points, 1.0, 8193).is_empty());
+	PackedVector2Array oversized;
+	oversized.resize(8193);
+	CHECK(api->prune_points_min_distance(oversized, 1.0).is_empty());
+	PackedVector2Array invalid;
+	invalid.push_back(Vector2(0, 0));
+	invalid.push_back(Vector2(Math::INF, 0));
+	CHECK(api->prune_points_min_distance(invalid, 1.0).is_empty());
+	ERR_PRINT_ON;
+}
+
+TEST_CASE("[CoreBind] Geometry2D batched nearest neighbors are stable and bounded") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	PackedVector2Array points;
+	points.push_back(Vector2(0, 0));
+	points.push_back(Vector2(2, 0));
+	points.push_back(Vector2(-2, 0));
+	points.push_back(Vector2(0, 4));
+	points.push_back(Vector2(50, 50));
+
+	TypedArray<PackedInt32Array> neighbors = api->get_nearest_neighbors(points, 2, (real_t)4.1);
+	REQUIRE(neighbors.size() == 5);
+	PackedInt32Array first = neighbors[0];
+	REQUIRE(first.size() == 2);
+	CHECK(first[0] == 1); // Equal distances choose lower input index.
+	CHECK(first[1] == 2);
+	PackedInt32Array second = neighbors[1];
+	REQUIRE(second.size() == 2);
+	CHECK(second[0] == 0);
+	CHECK(second[1] == 2);
+	PackedInt32Array third = neighbors[3];
+	REQUIRE(third.size() == 1);
+	CHECK(third[0] == 0);
+	PackedInt32Array isolated = neighbors[4];
+	CHECK(isolated.is_empty());
+
+	// Exact-radius inclusion and equal-coordinate neighbors at distinct indices.
+	PackedVector2Array duplicate_points;
+	duplicate_points.push_back(Vector2(1, 1));
+	duplicate_points.push_back(Vector2(1, 1));
+	duplicate_points.push_back(Vector2(2, 1));
+	neighbors = api->get_nearest_neighbors(duplicate_points, 2, (real_t)0.0);
+	REQUIRE(neighbors.size() == 3);
+	first = neighbors[0];
+	REQUIRE(first.size() == 1);
+	CHECK(first[0] == 1);
+	isolated = neighbors[2];
+	CHECK(isolated.is_empty());
+
+	neighbors = api->get_nearest_neighbors(points, 0, (real_t)5.0);
+	REQUIRE(neighbors.size() == 5);
+	for (int i = 0; i < 5; i++) {
+		PackedInt32Array item = neighbors[i];
+		CHECK(item.is_empty());
+	}
+	CHECK(api->get_nearest_neighbors(PackedVector2Array(), 4, (real_t)100.0).is_empty());
+
+	ERR_PRINT_OFF;
+	CHECK(api->get_nearest_neighbors(points, 33, (real_t)5.0).is_empty());
+	CHECK(api->get_nearest_neighbors(points, 2, (real_t)-1.0).is_empty());
+	PackedVector2Array oversized;
+	oversized.resize(4097);
+	CHECK(api->get_nearest_neighbors(oversized, 2, (real_t)5.0).is_empty());
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[CoreBind] Geometry2D nearest point among independent segments") {
 	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
 	REQUIRE(api != nullptr);

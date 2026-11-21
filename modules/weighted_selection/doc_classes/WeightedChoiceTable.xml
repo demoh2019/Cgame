@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeightedChoiceTable" inherits="Resource" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		A reusable, bounded discrete probability table with deterministic index sampling.
+	</brief_description>
+	<description>
+		Configures between 1 and 4096 nonnegative, finite weights with a positive total of at most 1e12. Zero-weight outcomes are never selected. Validation is atomic: malformed weights keep the last valid table. One externally supplied draw in [code][0, 1)[/code] selects the matching weighted index in logarithmic time, without allocating per-sample arrays or advancing the global RNG. Call [code]sample_unit(rng.randf())[/code] to use a seeded [RandomNumberGenerator] so gameplay replays consume the same single draw. Relative weights determine probabilities. This Resource is not cryptographically secure, and [method sample_unit] is read-only.
+	</description>
+	<methods>
+		<method name="configure">
+			<return type="bool" />
+			<param index="0" name="weights" type="PackedFloat64Array" />
+			<description>Atomically replaces the table. Rejects empty, all-zero, negative, nonfinite, oversized, and excessive-total inputs without changing the previous table.</description>
+		</method>
+		<method name="sample_unit" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="unit" type="float" />
+			<description>Returns an outcome index for a finite uniform draw in [code][0, 1)[/code], or -1 if input/table is invalid. Boundary values select the next nonzero bucket.</description>
+		</method>
+		<method name="sample_many" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="units" type="PackedFloat64Array" />
+			<description>Maps at most 65536 valid draws to ordered indices; invalid input returns an empty array without partial sampling. Does not consume any RNG state.</description>
+		</method>
+		<method name="get_probability" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="index" type="int" />
+			<description>Returns the normalized probability for an index, or 0 for an invalid index or unconfigured table.</description>
+		</method>
+		<method name="get_total_weight" qualifiers="const">
+			<return type="float" />
+			<description>Returns the sum of weights for the configured table.</description>
+		</method>
+		<method name="get_option_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the configured outcome count.</description>
+		</method>
+		<method name="is_configured" qualifiers="const">
+			<return type="bool" />
+			<description>Returns true when a valid positive-total distribution is available.</description>
+		</method>
+	</methods>
+	<members>
+		<member name="weights" type="PackedFloat64Array" setter="set_weights" getter="get_weights" default="PackedFloat64Array()">
+			Relative outcome weights. Setter ignores malformed input; use [method configure] for a success/failure result.
+		</member>
+	</members>
+</class>

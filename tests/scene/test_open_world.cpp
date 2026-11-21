@@ -242,6 +242,48 @@ TEST_CASE("[WorldStreaming] Camera-aware priority favors visible chunks without 
 	}
 }
 
+TEST_CASE("[WorldStreaming] Camera FOV cone reprioritizes work but never changes residency") {
+	const Vector3 focus(5, 0, 5);
+	LocalVector<Vector3i> wide;
+	cells_in_radius(focus, 55.0, 10.0, AXES_XZ, wide);
+	LocalVector<Vector3i> narrowed;
+	LocalVector<Vector3i> legacy;
+	for (const Vector3i &cell : wide) {
+		narrowed.push_back(cell);
+		legacy.push_back(cell);
+	}
+	REQUIRE(wide.size() > 20);
+	prioritize_cells_for_motion_and_view(wide, focus, Vector3(), 0.0, 10.0,
+			Vector3(1, 0, 0), 0.8, 10.0, AXES_XZ, 180.0);
+	prioritize_cells_for_motion_and_view(narrowed, focus, Vector3(), 0.0, 10.0,
+			Vector3(1, 0, 0), 0.8, 10.0, AXES_XZ, 35.0);
+	prioritize_cells_for_motion_and_view(legacy, focus, Vector3(), 0.0, 10.0,
+			Vector3(1, 0, 0), 0.8, 10.0, AXES_XZ);
+	CHECK(wide.size() == narrowed.size());
+	CHECK(wide[0] == Vector3i(0, 0, 0));
+	CHECK(narrowed[0] == Vector3i(0, 0, 0));
+	int wide_diagonal = -1;
+	int narrow_diagonal = -1;
+	for (uint32_t i = 0; i < wide.size(); ++i) {
+		CHECK(wide[i] == legacy[i]); // Default preserves the old full-hemisphere policy.
+		if (wide[i] == Vector3i(1, 0, 1)) {
+			wide_diagonal = int(i);
+		}
+		if (narrowed[i] == Vector3i(1, 0, 1)) {
+			narrow_diagonal = int(i);
+		}
+		int occurrences = 0;
+		for (const Vector3i &other : narrowed) {
+			occurrences += int(wide[i] == other);
+		}
+		CHECK(occurrences == 1);
+	}
+	REQUIRE(wide_diagonal >= 0);
+	REQUIRE(narrow_diagonal >= 0);
+	CHECK(narrow_diagonal > wide_diagonal); // The off-cone diagonal loses its view bonus.
+}
+
+
 TEST_CASE("[WorldStreaming] Camera priority hint validates and clamps") {
 	WorldStreamer *streamer = memnew(WorldStreamer);
 	CHECK(streamer->get_view_priority() == doctest::Approx(0.0));
@@ -251,6 +293,15 @@ TEST_CASE("[WorldStreaming] Camera priority hint validates and clamps") {
 	const Vector3 direction = streamer->get_view_direction();
 	streamer->set_view_direction(Vector3(Math::INF, 0, 0));
 	CHECK(streamer->get_view_direction() == direction);
+	CHECK(streamer->get_view_cone_half_angle_degrees() == doctest::Approx(180.0));
+	streamer->set_view_cone_half_angle_degrees(57.0);
+	CHECK(streamer->get_view_cone_half_angle_degrees() == doctest::Approx(57.0));
+	streamer->set_view_cone_half_angle_degrees(Math::INF);
+	CHECK(streamer->get_view_cone_half_angle_degrees() == doctest::Approx(57.0));
+	streamer->set_view_cone_half_angle_degrees(-50.0);
+	CHECK(streamer->get_view_cone_half_angle_degrees() == doctest::Approx(1.0));
+	streamer->set_view_cone_half_angle_degrees(500.0);
+	CHECK(streamer->get_view_cone_half_angle_degrees() == doctest::Approx(180.0));
 	streamer->set_view_priority(0.8);
 	CHECK(streamer->get_view_priority() == doctest::Approx(0.8));
 	streamer->set_view_priority(Math::INF);

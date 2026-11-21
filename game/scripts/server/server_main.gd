@@ -13,12 +13,14 @@ const SoloCharacterStore = preload("res://scripts/server/solo_character_store.gd
 const Net = preload("res://scripts/shared/net.gd")
 const GATEWAY_PATH := "res://scripts/server/nakama_gateway.gd"
 
+const DataLayers = preload("res://scripts/shared/data_layers.gd")
+var layers_override = null # --layers winter,festival | none; null = follow the calendar.
 var net
 var sim
 var peer: ENetMultiplayerPeer
 var _clock: float = 0.0
 var _stats_clock: float = 0.0
-var _tick_governor = ServerTickGovernor.new()
+var _tick_governor = ClassDB.instantiate("AdaptiveTickGovernor") if ClassDB.class_exists("AdaptiveTickGovernor") else ServerTickGovernor.new()
 var _ticks: int = 0
 var _max_tick_ms: float = 0.0
 var _quit_after: float = 0.0
@@ -77,6 +79,10 @@ func _initialize() -> void:
 				world_save_override = args[i]
 			"--no-world-save":
 				disable_world_save = true
+			"--layers":
+				i += 1
+				if i < args.size():
+					layers_override = DataLayers.parse_override(args[i])
 			"--fixed-incidents":
 				adaptive_incidents = false
 			"--solo-character":
@@ -128,7 +134,8 @@ func _initialize() -> void:
 	Engine.physics_ticks_per_second = Defs.TICK_RATE
 	_tick_governor.set_enabled(adaptive_incidents)
 	sim = GameServer.new(WorldGen.new(world_seed), world_seed)
-	sim.incident_spawn_cap = _tick_governor.spawn_cap
+	sim.data_layers_override = layers_override
+	sim.incident_spawn_cap = _tick_governor.get_budget_units()
 	if not disable_world_save:
 		_world_save_path = world_save_override if not world_save_override.is_empty() else "user://albion_after_world_%d.json" % world_seed
 		if not WorldPersistence.valid_world_path(_world_save_path):
@@ -174,6 +181,11 @@ func _initialize() -> void:
 			return
 		print("SERVER siege outbox restored %d unacknowledged guild victories" %
 			net._siege_ledger_pending.size())
+		var trade_journal_path: String = "user://albion_after_trade_journal_%d.json" % world_seed
+		if not net.configure_trade_journal(trade_journal_path):
+			printerr("SERVER refused invalid or inaccessible trade journal: " + trade_journal_path)
+			quit(3)
+			return
 	peer = ENetMultiplayerPeer.new()
 	if not _solo_stop_path.is_empty():
 		# A solo save slot must not be exposed as a public guest server.
@@ -207,7 +219,7 @@ func _physics_process(delta: float) -> bool:
 	# Measure authoritative simulation/network work separately from optional
 	# disk saves; never skip movement, AI, combat or persistence ticks.
 	_tick_governor.observe_tick(Time.get_ticks_usec() - started, sim.players.size())
-	sim.incident_spawn_cap = _tick_governor.spawn_cap
+	sim.incident_spawn_cap = _tick_governor.get_budget_units()
 	if not _solo_character_path.is_empty() and not sim.players.is_empty():
 		_solo_save_clock += maxf(0.0, delta)
 		if _solo_save_clock >= SOLO_SAVE_INTERVAL:

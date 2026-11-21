@@ -11,18 +11,99 @@ const MAX_EXTRA := 0.17
 const EXTRA_MULTIPLIER := 1.35
 const PEAK_RELEASE_PER_SECOND := 0.04
 const DELAY_RELEASE_PER_SECOND := 0.03
+const MAX_RECOVERY_GUARD_PACKETS := 32
 
 var delay := BASE_DELAY
 var _peak_jitter := 0.0
 var _last_server_time := -1.0
 var _last_arrival_time := -1.0
+var _base_delay := BASE_DELAY
+var _max_delay := MAX_DELAY
+var _expected_step := EXPECTED_SNAPSHOT_STEP
+var _accepted_packets := 0
+var _ignored_packets := 0
+var _resets := 0
+var _network_gaps := 0
+var _recovery_guard_packets := 0
+var _recovery_hold_remaining := 0
+var _estimated_missing_snapshots := 0
+var _burst_loss_events := 0
 
 
-func reset() -> void:
-	delay = BASE_DELAY
+func configure(base_delay: float, max_delay: float, expected_snapshot_step: float) -> bool:
+	if not is_finite(base_delay) or not is_finite(max_delay) \
+			or not is_finite(expected_snapshot_step) \
+			or base_delay < 0.01 or base_delay > 1.0 \
+			or max_delay < base_delay or max_delay > 1.0 \
+			or expected_snapshot_step < 0.01 or expected_snapshot_step > 1.0:
+		return false
+	_base_delay = base_delay
+	_max_delay = max_delay
+	_expected_step = expected_snapshot_step
+	reset()
+	return true
+
+
+func _reset_timing() -> void:
+	delay = _base_delay
 	_peak_jitter = 0.0
 	_last_server_time = -1.0
 	_last_arrival_time = -1.0
+	_recovery_hold_remaining = 0
+
+
+func get_stats() -> Dictionary:
+	return {
+		"delay": delay,
+		"peak_jitter": _peak_jitter,
+		"accepted_packets": _accepted_packets,
+		"ignored_packets": _ignored_packets,
+		"resets": _resets,
+		"network_gaps": _network_gaps,
+		"recovery_guard_packets": _recovery_guard_packets,
+		"recovery_hold_remaining": _recovery_hold_remaining,
+		"estimated_missing_snapshots": _estimated_missing_snapshots,
+		"burst_loss_events": _burst_loss_events,
+		"expected_snapshot_step": _expected_step,
+		"native_backend": false,
+	}
+
+
+
+func reset() -> void:
+	_reset_timing()
+	_accepted_packets = 0
+	_ignored_packets = 0
+	_resets = 0
+	_network_gaps = 0
+	_estimated_missing_snapshots = 0
+	_burst_loss_events = 0
+
+
+## Changes visual jitter decay only; zero preserves existing behavior.
+## Configuration survives reset, but a pending recovery guard is cleared.
+func set_recovery_guard_packets(packets: int) -> bool:
+	if packets < 0 or packets > MAX_RECOVERY_GUARD_PACKETS:
+		return false
+	_recovery_guard_packets = packets
+	_recovery_hold_remaining = 0
+	return true
+
+
+func get_recovery_guard_packets() -> int:
+	return _recovery_guard_packets
+
+
+func get_recovery_hold_remaining() -> int:
+	return _recovery_hold_remaining
+
+
+func get_estimated_missing_snapshots() -> int:
+	return _estimated_missing_snapshots
+
+
+func get_burst_loss_events() -> int:
+	return _burst_loss_events
 
 
 ## Call on the same main thread as EntityView.update_from. Repeated reads of
@@ -30,39 +111,59 @@ func reset() -> void:
 func observe(server_time: float, local_arrival_time: float) -> float:
 	if not is_finite(server_time) or not is_finite(local_arrival_time) \
 			or server_time < 0.0 or local_arrival_time < 0.0:
+		_ignored_packets += 1
 		return delay
 	# A frame loop may see the same snapshot thousands of times while
 	# disconnected; this is NOT an arrival event even after several seconds.
 	if _last_server_time >= 0.0 and server_time <= _last_server_time \
 			and server_time >= _last_server_time - 0.5:
+		_ignored_packets += 1
 		return delay
 	if _last_server_time < 0.0 or server_time < _last_server_time - 0.5 \
 			or local_arrival_time < _last_arrival_time \
 			or local_arrival_time - _last_arrival_time > 2.0:
-		reset()
+		if _last_server_time >= 0.0:
+			_resets += 1
+		_reset_timing()
 		_last_server_time = server_time
 		_last_arrival_time = local_arrival_time
+		_accepted_packets += 1
 		return delay
 	if server_time <= _last_server_time:
+		_ignored_packets += 1
 		return delay
 	var server_span: float = server_time - _last_server_time
 	var arrival_span: float = local_arrival_time - _last_arrival_time
 	_last_server_time = server_time
 	_last_arrival_time = local_arrival_time
+	_accepted_packets += 1
 	if server_span > MAX_NETWORK_GAP:
 		# Reconnect or background pause: do not drag huge stale jitter tails.
 		_peak_jitter = 0.0
-		delay = BASE_DELAY
+		delay = _base_delay
+		_recovery_hold_remaining = 0 # Discard old burst state on reconnect gap.
+		_network_gaps += 1
 		return delay
 	# Late network arrival and missing server ticks both need more historical
 	# snapshots. A subsequent packet arriving early cannot cancel the spike.
 	var late: float = maxf(0.0, arrival_span - server_span)
-	var skipped: float = maxf(0.0, server_span - EXPECTED_SNAPSHOT_STEP)
+	var skipped: float = maxf(0.0, server_span - _expected_step)
+	# Snapshot timestamps permit only an estimate of missing packets.
+	# Avoid counting merely delayed arrivals with continuous server times.
+	var missing: int = clampi(int(floor(server_span / _expected_step + 0.5)) - 1, 0, 32)
+	if missing > 0:
+		_estimated_missing_snapshots = mini(1000000000,
+			_estimated_missing_snapshots + missing)
+		_burst_loss_events = mini(1000000000, _burst_loss_events + 1)
+		_recovery_hold_remaining = _recovery_guard_packets
 	var extra: float = minf(MAX_EXTRA, maxf(late, skipped))
-	_peak_jitter = maxf(extra, maxf(0.0,
-		_peak_jitter - arrival_span * PEAK_RELEASE_PER_SECOND))
-	var target: float = clampf(BASE_DELAY + _peak_jitter * EXTRA_MULTIPLIER,
-		BASE_DELAY, MAX_DELAY)
+	var hold: bool = missing == 0 and _recovery_hold_remaining > 0
+	var release: float = 0.0 if hold else arrival_span * PEAK_RELEASE_PER_SECOND
+	_peak_jitter = maxf(extra, maxf(0.0, _peak_jitter - release))
+	if hold:
+		_recovery_hold_remaining -= 1
+	var target: float = clampf(_base_delay + _peak_jitter * EXTRA_MULTIPLIER,
+		_base_delay, _max_delay)
 	if target > delay:
 		delay = target
 	else:

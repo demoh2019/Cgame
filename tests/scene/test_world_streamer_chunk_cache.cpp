@@ -1,0 +1,66 @@
+/**************************************************************************/
+/*  test_world_streamer_chunk_cache.cpp                                    */
+/**************************************************************************/
+
+#include "tests/test_macros.h"
+
+TEST_FORCE_LINK(test_world_streamer_chunk_cache)
+
+#include "scene/main/world_streamer.h"
+
+namespace TestWorldStreamerChunkCache {
+
+TEST_CASE("[WorldStreamer] Procedural chunk cache is opt-in and bounded") {
+	WorldStreamer *streamer = memnew(WorldStreamer);
+	CHECK(streamer->get_max_cached_chunks() == 0);
+	CHECK(streamer->get_max_cached_chunk_bytes() == 0);
+	CHECK(streamer->get_cached_chunk_bytes() == 0);
+	CHECK(streamer->get_max_cached_expirations_per_frame() == 0);
+	CHECK(streamer->get_max_cached_expiration_work_usec() == 0);
+	CHECK(streamer->get_last_cached_expiration_count() == 0);
+	CHECK(streamer->get_last_deferred_cached_expiration_count() == 0);
+	CHECK(streamer->get_last_cached_expiration_work_usec() == 0);
+	streamer->set_max_cached_expirations_per_frame(-7);
+	CHECK(streamer->get_max_cached_expirations_per_frame() == 0);
+	streamer->set_max_cached_expirations_per_frame(99);
+	CHECK(streamer->get_max_cached_expirations_per_frame() == 16);
+	streamer->set_max_cached_expirations_per_frame(2);
+	CHECK(streamer->get_max_cached_expirations_per_frame() == 2);
+	streamer->set_max_cached_expiration_work_usec(-5);
+	CHECK(streamer->get_max_cached_expiration_work_usec() == 0);
+	streamer->set_max_cached_expiration_work_usec(9999999);
+	CHECK(streamer->get_max_cached_expiration_work_usec() == 1000000);
+	streamer->set_max_cached_expiration_work_usec(350);
+	CHECK(streamer->get_max_cached_expiration_work_usec() == 350);
+	CHECK(streamer->get_cached_chunk_retention_seconds() == real_t(0.0));
+	CHECK(streamer->get_chunk_cache_expiration_count() == 0);
+	streamer->advance_cached_chunk_retention(100.0);
+	CHECK(streamer->get_chunk_cache_expiration_count() == 0);
+	streamer->set_cached_chunk_retention_seconds(-1.0);
+	CHECK(streamer->get_cached_chunk_retention_seconds() == real_t(0.0));
+	streamer->set_cached_chunk_retention_seconds(150.0);
+	CHECK(streamer->get_cached_chunk_retention_seconds() == real_t(120.0));
+	streamer->set_cached_chunk_retention_seconds(2.0);
+	CHECK(streamer->get_cached_chunk_retention_seconds() == real_t(2.0));
+	CHECK(streamer->get_cached_chunk_count() == 0);
+	CHECK(streamer->get_chunk_cache_hit_count() == 0);
+	CHECK(streamer->get_chunk_cache_eviction_count() == 0);
+
+	streamer->set_max_cached_chunk_bytes(-100);
+	CHECK(streamer->get_max_cached_chunk_bytes() == 0);
+	streamer->set_max_cached_chunk_bytes(9999999999LL);
+	CHECK(streamer->get_max_cached_chunk_bytes() == 268435456);
+	streamer->set_max_cached_chunk_bytes(8 * 1048576);
+	CHECK(streamer->get_max_cached_chunk_bytes() == 8 * 1048576);
+	streamer->set_max_cached_chunks(500);
+	CHECK(streamer->get_max_cached_chunks() == 16);
+	streamer->set_max_cached_chunks(-1);
+	CHECK(streamer->get_max_cached_chunks() == 0);
+	CHECK(streamer->get_cached_chunk_count() == 0);
+	streamer->clear_cached_chunks();
+	CHECK(streamer->get_chunk_cache_hit_count() == 0);
+	CHECK(streamer->get_chunk_cache_eviction_count() == 0);
+	memdelete(streamer);
+}
+
+} // namespace TestWorldStreamerChunkCache

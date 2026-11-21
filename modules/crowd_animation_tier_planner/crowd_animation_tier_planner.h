@@ -30,4 +30,51 @@ public:
 	PackedInt32Array plan_tiers_stable(const PackedFloat64Array &p_distances,
 			const PackedByteArray &p_priority_flags, const PackedInt32Array &p_previous_tiers,
 			int p_full_budget, int p_priority_budget, double p_hysteresis_meters) const;
+	// Optional per-frame visibility culling for costly procedural IK.
+	// Non-visible actors never claim full-rate or priority slots and receive
+	// at least tier 2 (30 Hz). All-visible calls match plan_tiers exactly.
+	// The caller determines visibility; this class never touches the scene.
+	PackedInt32Array plan_visible_tiers(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priority_flags, const PackedByteArray &p_visible_flags,
+			int p_full_budget, int p_priority_budget) const;
+
+	// Optional temporal retention for visible, near (<22m) IK users.
+	// p_retained_full_flags is a per-actor hint from the preceding frame:
+	// retained actors compete using max(0, distance - hysteresis), but only
+	// while still visible/eligible. Priority combat slots use real distance.
+	// No scene state, clock or actor references are kept by the planner.
+	PackedInt32Array plan_visible_tiers_stable(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priority_flags, const PackedByteArray &p_visible_flags,
+			const PackedByteArray &p_retained_full_flags, int p_full_budget,
+			int p_priority_budget, double p_hysteresis = 1.5) const;
+
+	// Independent retention for IK and on-screen combat-critical full-rate
+	// poses. Neither budget nor the 22/90m hard radius is relaxed.
+	PackedInt32Array plan_visible_tiers_temporal(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priority_flags, const PackedByteArray &p_visible_flags,
+			const PackedByteArray &p_retained_full_flags,
+			const PackedByteArray &p_retained_priority_flags, int p_full_budget,
+			int p_priority_budget, double p_full_hysteresis,
+			double p_priority_hysteresis) const;
+	// Compose a measured-cost cap with ANY previously chosen full-IK tiers.
+	// Doesn't re-rank full or combat pools; non-IK tiers are immutable.
+	// Cost 0 = initial 100us estimate; time budget 0 disables this cap.
+	PackedInt32Array cap_full_pose_cost(const PackedInt32Array &p_tiers,
+			const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_retained_full_flags,
+			const PackedInt32Array &p_full_pose_cost_us,
+			int p_full_pose_budget_us, double p_hysteresis = 1.5) const;
+
+	// Post-planner, group-fair full-IK CPU admission. Four typed groups
+	// (IDs 0..3) split a soft optional budget by their active weights.
+	// Unspent reservations spill to other current tier-0 winners; never
+	// promotes a nonwinner or changes combat full-rate tiers.
+	PackedInt32Array cap_full_pose_cost_grouped(const PackedInt32Array &p_tiers,
+			const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_retained_full_flags,
+			const PackedInt32Array &p_full_pose_cost_us,
+			const PackedByteArray &p_group_ids,
+			const PackedFloat64Array &p_group_weights,
+			int p_full_pose_budget_us, double p_hysteresis = 1.5) const;
+
 };

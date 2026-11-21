@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GameplayEffectApplicationGate" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Data-driven Gameplay Effect application requirements and hierarchical tag immunity.
+	</brief_description>
+	<description>
+		Inspired by Unreal Gameplay Effect Components, this server-safe gate checks required and blocked target tags before an effect may apply. An effect rule also applies to its descendants: [code]Effect.CrowdControl[/code] governs [code]Effect.CrowdControl.Stagger[/code] and [code]Effect.CrowdControl.Snare[/code]. Target tags also match hierarchically: a target with [code]Rank.RaidBoss.Enraged[/code] matches a blocked [code]Rank.RaidBoss[/code]. All matching ancestor and exact rules must pass. An unknown effect fails closed. Rules do not cause damage, change attributes, mutate status, or grant authority. The caller still performs gameplay and replication. Up to 64 rules, 16 required/blocked tags per rule, and 64 tags per evaluation.
+	</description>
+	<methods>
+		<method name="set_rule">
+			<return type="bool" />
+			<param index="0" name="effect" type="StringName" />
+			<param index="1" name="required" type="PackedStringArray" />
+			<param index="2" name="blocked" type="PackedStringArray" />
+			<description>Adds or replaces a rule. Checks tag syntax, duplicate conditions and capacity before committing.</description>
+		</method>
+		<method name="remove_rule">
+			<return type="bool" />
+			<param index="0" name="effect" type="StringName" />
+			<description>Removes one exact rule and returns whether it existed.</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>Clears all rules.</description>
+		</method>
+		<method name="can_apply" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="effect" type="StringName" />
+			<param index="1" name="target_tags" type="PackedStringArray" />
+			<description>Returns true only if the effect matches a registered rule and all applicable ancestor and exact requirements pass.</description>
+		</method>
+		<method name="get_failure_reason" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="effect" type="StringName" />
+			<param index="1" name="target_tags" type="PackedStringArray" />
+			<description>Returns allowed, unknown_effect, invalid_tags, missing_required or blocked. Useful for server logs and diagnostics.</description>
+		</method>
+		<method name="get_snapshot" qualifiers="const">
+			<return type="Dictionary" />
+			<description>Returns a standalone snapshot mapping effect tags to required and blocked PackedStringArrays.</description>
+		</method>
+		<method name="replace_snapshot">
+			<return type="bool" />
+			<param index="0" name="snapshot" type="Dictionary" />
+			<description>Atomically replaces the rule set after validating all tag types, conditions, duplicates and capacity. Invalid updates do not mutate current rules.</description>
+		</method>
+		<method name="get_rule_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of registered effect rules.</description>
+		</method>
+	</methods>
+</class>

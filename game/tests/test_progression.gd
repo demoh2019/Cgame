@@ -58,7 +58,10 @@ func run(t) -> void:
 	t.eq(player.inventory.count("plank_2"), 3, "blocked craft preserves components")
 	player.progression.award_craft(1, 4)
 	t.check(server.cmd_craft(101, "club_2")["ok"], "T2 craft unlocks at level 2")
-	t.eq(player.inventory.count("club_2"), 1, "crafted item exists")
+	var crafted := 0
+	for quality in range(1, Defs.MAX_QUALITY + 1):
+		crafted += player.inventory.count(Defs.with_quality("club_2", quality))
+	t.eq(crafted, 1, "crafted item exists (any quality roll)")
 	t.check(player.progression.crafting_xp > 100, "successful craft grants experience")
 	var snapshot: Dictionary = server.character_data(player)
 	t.check(snapshot.has("progression"), "persistent character stores progression")

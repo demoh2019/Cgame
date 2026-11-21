@@ -1,0 +1,93 @@
+name: Native GPU dynamic resolution panic and Albion
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/dynamic_resolution_panic/**'
+      - 'game/scripts/client/graphics_dynamic_resolution.gd'
+      - 'game/scripts/client/graphics_resolution_panic.gd'
+      - 'game/tests/test_graphics_resolution_panic.gd'
+      - 'game/tests/run_dynamic_resolution_panic.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_dynamic_resolution_panic_contract.py'
+      - '.github/workflows/native-dynamic-resolution-panic.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/dynamic_resolution_panic/**'
+      - 'game/scripts/client/graphics_dynamic_resolution.gd'
+      - 'game/scripts/client/graphics_resolution_panic.gd'
+      - 'game/tests/test_graphics_resolution_panic.gd'
+      - 'game/tests/run_dynamic_resolution_panic.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_dynamic_resolution_panic_contract.py'
+      - '.github/workflows/native-dynamic-resolution-panic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate source wiring
+        run: python3 -m unittest tests/scene/test_dynamic_resolution_panic_contract.py -v
+
+  native-game:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native GPU panic unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*DynamicResolutionPanicPolicy*" --no-colors 2>&1 | tee panic-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' panic-native.log; then exit 1; fi
+      - name: Import Albion After
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee panic-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' panic-import.log; then exit 1; fi
+      - name: Native and fallback gameplay regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_dynamic_resolution_panic.gd 2>&1 | tee panic-game.log
+          grep -E '^GPU PANIC TOTAL: [0-9]+ checks, 0 failures$' panic-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' panic-game.log; then exit 1; fi
+      - name: Full Albion After headless regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 600s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee panic-full.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' panic-full.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' panic-full.log; then exit 1; fi
+      - name: Upload regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-dynamic-resolution-panic
+          if-no-files-found: ignore
+          path: |
+            panic-native.log
+            panic-import.log
+            panic-game.log
+            panic-full.log

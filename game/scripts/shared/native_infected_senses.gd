@@ -117,6 +117,76 @@ func best_confirmed_stimulus(sense: int) -> Dictionary:
     return _history.get_best(sense)
 
 
+## Unreal-style perception range query over *previously approved* stimuli.
+## This filters stale remote locations during chase recovery without sensing
+## any new player, changing target selection, or exposing server-only memory.
+func best_confirmed_stimulus_in_radius(sense: int, center: Vector2, radius: float) -> Dictionary:
+    if _history == null or not center.is_finite() or not is_finite(radius) or radius < 0.0:
+        return {}
+    if _history.has_method("get_best_in_radius"):
+        return _history.get_best_in_radius(sense, center, radius)
+    # Older Cgame binaries: preserve correct filtering with a bounded, rare
+    # GDScript fallback. Stock Godot still returns an empty Dictionary.
+    var selected: Dictionary = {}
+    var best_score := -1.0
+    for entry_data in _history.get_recent(64):
+        var entry: Dictionary = entry_data
+        if int(entry.get("sense", -1)) != sense:
+            continue
+        var position: Vector2 = entry.get("position", Vector2.INF)
+        if not position.is_finite() or position.distance_squared_to(center) > radius * radius:
+            continue
+        var score: float = float(entry.get("score", -1.0))
+        if score > best_score:
+            best_score = score
+            selected = entry
+        elif score == best_score and not selected.is_empty():
+            var source_id: int = int(entry.get("source_id", -1))
+            var previous_id: int = int(selected.get("source_id", -1))
+            var previous_position: Vector2 = selected.get("position", Vector2.INF)
+            if source_id < previous_id or (source_id == previous_id and (
+                    position.x < previous_position.x or (
+                    position.x == previous_position.x and position.y < previous_position.y))):
+                selected = entry
+    return selected
+
+
+## Actor-scoped read of a previously authorized sound/sight, bounded to our
+## present pursuit leash. It neither senses a new event nor sets a target.
+## On older forks use the source-aware, bounded history snapshot; on stock
+## Godot there is no extra memory to query.
+func best_confirmed_stimulus_for_source_in_radius(
+        sense: int, source_id: int, center: Vector2, radius: float) -> Dictionary:
+    if _history == null or source_id < 0 or sense < 0 or sense > 2 \
+            or not center.is_finite() or not is_finite(radius) \
+            or radius < 0.0 or radius > 1000000.0:
+        return {}
+    if _history.has_method("get_best_for_source_in_radius"):
+        return _history.get_best_for_source_in_radius(sense, source_id, center, radius)
+    # Identified sources have at most one live record in each sense.
+    # This fallback is only queried during loss of chase, not each frame.
+    var squared_radius: float = radius * radius
+    for entry_data in _history.get_recent(64):
+        var entry: Dictionary = entry_data
+        if int(entry.get("sense", -1)) != sense or int(entry.get("source_id", -1)) != source_id:
+            continue
+        var position: Vector2 = entry.get("position", Vector2.INF)
+        if position.is_finite() and center.distance_squared_to(position) <= squared_radius:
+            return entry
+    return {}
+
+
+## A server-authoritative source became invalid (disconnect, death, safe hub).
+## Only forget its identified history entries; do not reset other survivors'
+## perceptions or fabricate fresh events. Older binaries safely do nothing.
+func forget_confirmed_source(source_id: int, sense: int = -1) -> int:
+    if source_id < 0 or (sense != -1 and (sense < 0 or sense > 2)):
+        return 0
+    if _history == null or not _history.has_method("forget_source"):
+        return 0
+    return int(_history.forget_source(source_id, sense))
+
+
 func get_recent_confirmed_stimuli(limit: int = 8) -> Array:
     if _history == null:
         return []

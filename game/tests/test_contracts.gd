@@ -43,6 +43,7 @@ func run(t) -> void:
 
 	t.current = "hub authorization and resource delivery"
 	var server := GameServer.new(WorldGen.new(42), 9)
+	server.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var player = server.add_player(91, "Quest Survivor")
 	player.position = Vector3(120.0, server.world.height_at(120.0, 120.0), 120.0)
 	t.eq(server.cmd_contract(91, "accept")["reason"], "no_station",

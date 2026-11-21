@@ -56,8 +56,8 @@ func run(t) -> void:
 		"no more than three new wall checks occur per physics frame")
 	t.check(source.contains("OBSTRUCTION_RECHECK_SECONDS := 0.25"),
 		"long sounds refresh their geometry only on a coarse interval")
-	t.check(source.contains("state.intersect_ray(ray)"),
-		"physical barricades and walls block the direct sound path")
+	t.check(source.contains("AudioSpatial.trace_rays(state, probe_queries)"),
+		"physical barricades and walls are traced in one bounded native batch")
 	t.check(source.contains('record["terrain_blocked"]'),
 		"existing heightfield terrain obstruction remains active")
 	t.check(source.contains('player.call("set_obstruction_amount", amount)'),

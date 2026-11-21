@@ -81,6 +81,28 @@ func run(t) -> void:
 	t.check(snapshot["candidate_checks"] < snapshot["queries"] * many.size(),
 		"spatial candidates are pruned relative to full scans")
 
+
+	t.current = "packet-batched proximity: exact order, strict bounds and counters"
+	var batch_grid := PresenceGrid.new()
+	batch_grid.rebuild(single)
+	var probe_points := PackedVector2Array([
+		Vector2(-64.0, -1.0), Vector2(-52.0, -1.0),
+		Vector2(-52.01, -1.0), Vector2(NAN, 0.0),
+		Vector2(700.0, 700.0)])
+	var strict_results: PackedByteArray = batch_grid.any_within_batch(probe_points, 12.0, false)
+	t.eq(strict_results, PackedByteArray([1, 0, 1, 0, 0]),
+		"script batch matches strict 12m proximity in input order")
+	t.eq(batch_grid.snapshot()["queries"], 4, "invalid point does not count as a scalar probe")
+	t.eq(batch_grid.snapshot()["batch_calls"], 1, "one batch call counted")
+	var inclusive_results: PackedByteArray = batch_grid.any_within_batch(probe_points, 12.0)
+	t.eq(inclusive_results, PackedByteArray([1, 1, 1, 0, 0]),
+		"inclusive query retains exactly 12m")
+	t.eq(batch_grid.any_within_batch(PackedVector2Array(), 130.0).size(), 0,
+		"empty batch returns empty flags")
+	t.eq(batch_grid.snapshot()["batch_calls"], 3, "empty batch still counts as a call")
+	batch_grid.rebuild(single)
+	t.eq(batch_grid.snapshot()["batch_calls"], 0, "rebuild resets batch diagnostics")
+
 	t.current = "GameServer uses freshly rebuilt presence for zombie retention"
 	var server := GameServer.new(WorldGen.new(11121), 11121)
 	var survivor = server.add_player(314, "GridTester")
@@ -92,11 +114,32 @@ func run(t) -> void:
 	server.zombies[distant.id] = distant
 	server._manage_zombie_population()
 	t.check(server.zombies.has(near.id), "nearby living infected remains loaded")
+	t.eq(server.last_population_query_stats["batch_calls"], 1,
+		"server issues one batched proximity pass even in small sessions")
 	t.check(not server.zombies.has(distant.id), "distant infected is unloaded")
 	t.eq(server.last_population_query_stats["alive_players"], 1,
 		"server population maintenance built exact active player snapshot")
 	t.check(server.last_population_query_stats["queries"] >= 2,
 		"server uses index in real unload decisions")
+
+	t.current = "batched zombie retention respects protected guardians and active hordes"
+	var guarded := Zombie.new(9003, "walker", Vector3(-1000.0, 0.0, -1000.0))
+	guarded.supply_cache_id = 811
+	server.bags[811] = {"items": []}
+	var horde_member := Zombie.new(9004, "walker", Vector3(-1300.0, 0.0, -1300.0))
+	server.night_horde = {"ids": [horde_member.id]}
+	server.zombies[guarded.id] = guarded
+	server.zombies[horde_member.id] = horde_member
+	server._manage_zombie_population()
+	t.check(server.zombies.has(guarded.id), "loot guardian cannot unload while bag exists")
+	t.check(server.zombies.has(horde_member.id), "night-horde member cannot unload")
+	t.eq(server.last_population_query_stats["batch_calls"], 1,
+		"protected entities do not cause additional batch invocations")
+	server.bags.erase(guarded.supply_cache_id)
+	server.night_horde = {}
+	server._manage_zombie_population()
+	t.check(not server.zombies.has(guarded.id), "expired loot protection allows unload")
+	t.check(not server.zombies.has(horde_member.id), "ended horde allows unload")
 	survivor.position = Vector3(700.0, 0.0, 700.0)
 	server._manage_zombie_population()
 	t.check(not server.zombies.has(near.id), "next pass reflects player relocation")
@@ -130,6 +173,22 @@ func run(t) -> void:
 						_brute(valid_points, point, radius, inclusive),
 						"native broadphase agrees with brute force at case %d" % index)
 		t.check(native.snapshot()["bucket_lookups"] > 0, "native indexed lookups counted")
+		var parity_points := PackedVector2Array()
+		for i in range(60):
+			parity_points.append(Vector2(random_parity.randf_range(-1800.0, 1800.0),
+				random_parity.randf_range(-1800.0, 1800.0)))
+		parity_points.append(Vector2(NAN, 0))
+		var parity_script := PresenceGrid.new()
+		parity_script.rebuild(many)
+		for radius in [0.0, 12.0, 64.0, 130.0, 256.0, 1000000.0]:
+			for inclusive in [true, false]:
+				var native_batch: PackedByteArray = native.any_within_batch(
+					parity_points, radius, inclusive)
+				var script_batch: PackedByteArray = parity_script.any_within_batch(
+					parity_points, radius, inclusive)
+				t.eq(native_batch, script_batch,
+					"native/script batch parity at radius %s and inclusive %s" % [radius, inclusive])
+		t.eq(native.snapshot()["batch_calls"], 12, "native counted per-call batches")
 		var old_buckets: int = native.snapshot()["bucket_lookups"]
 		t.check(native.any_within(Vector2.ZERO, 1000000.0), "native large radius exact fallback")
 		t.eq(native.snapshot()["bucket_lookups"], old_buckets,

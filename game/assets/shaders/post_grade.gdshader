@@ -20,6 +20,8 @@ uniform float deband_strength = 0.0; // Disabled on Performance/Balanced.
 // Raindrops share the existing screen-reading post pass. In clear weather,
 // low quality and Compatibility, the uniform fast-path avoids all droplet work.
 uniform float lens_rain_strength = 0.0;
+// Brown-Conrady barrel distortion (k1), normalised so the corners stay on screen.
+uniform float lens_distortion = 0.0;
 uniform vec2 lens_rain_wind = vec2(0.0);
 
 
@@ -32,6 +34,13 @@ float lens_drop_hash(vec2 seed) {
 
 void fragment() {
 	vec2 uv = SCREEN_UV;
+	if (abs(lens_distortion) > 0.0001) {
+		vec2 c = uv - 0.5;
+		float aspect = SCREEN_PIXEL_SIZE.y / SCREEN_PIXEL_SIZE.x;
+		vec2 p = vec2(c.x * aspect, c.y);
+		float corner = 0.25 * (aspect * aspect + 1.0);
+		uv = 0.5 + c * (1.0 + lens_distortion * dot(p, p)) / (1.0 + lens_distortion * corner);
+	}
 	float away = smoothstep(focus_width, focus_width + 0.32, abs(uv.y - focus_center));
 	vec3 color = texture(screen, uv).rgb;
 	if (away > 0.01 && blur_quality > 0) {

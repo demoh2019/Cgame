@@ -122,6 +122,44 @@ func run(t) -> void:
         t.eq(history_senses.get_recent_confirmed_stimuli().size(), 0,
             "stock Godot has no additional native stimulus data")
 
+    t.current = "Spatial perception queries never pick a stronger sound outside the leash"
+    var bounded := NativeSenses.new()
+    # The far sound is closer to its own validated listener and therefore
+    # scores higher globally; spatial filtering must consider the near event.
+    bounded.record_confirmed_sound(Vector2(70, 0), Vector2(70, 0), 100.0, 12)
+    bounded.record_confirmed_sound(Vector2.ZERO, Vector2(4, 0), 100.0, 11)
+    if bounded.has_native_history() and bounded.has_native_hearing():
+        t.eq(bounded.best_confirmed_stimulus(1).get("source_id"), 12,
+            "global ranking still prefers the strongest accepted noise")
+        t.eq(bounded.best_confirmed_stimulus_in_radius(1, Vector2.ZERO, 15.0).get("source_id"), 11,
+            "only the confirmed noise inside the NPC leash is eligible")
+        t.check(bounded.best_confirmed_stimulus_in_radius(1, Vector2.ZERO, 3.9).is_empty(),
+            "out-of-range sounds are never used as investigation goals")
+        t.eq(bounded.get_recent_confirmed_stimuli().size(), 2,
+            "bounded read-only query does not remove or age history")
+    else:
+        t.check(bounded.best_confirmed_stimulus_in_radius(1, Vector2.ZERO, 15.0).is_empty(),
+            "stock Godot continues without optional native stimulus memory")
+
+    t.current = "Source invalidation preserves unrelated authoritative perceptions"
+    var source_senses := NativeSenses.new()
+    source_senses.record_confirmed_sound(Vector2.ZERO, Vector2(4, 0), 30.0, 41)
+    source_senses.record_confirmed_sound(Vector2.ZERO, Vector2(6, 0), 30.0, 42)
+    if source_senses.has_native_history() and source_senses._history.has_method("forget_source"):
+        t.eq(source_senses.forget_confirmed_source(41), 1,
+            "forgetting a known player removes its own previously accepted sound")
+        t.eq(source_senses.get_recent_confirmed_stimuli().size(), 1,
+            "other approved survivor sounds stay recorded")
+        t.eq(source_senses.best_confirmed_stimulus(1).get("source_id"), 42,
+            "surviving source is available for an independent later investigation")
+        t.eq(source_senses.forget_confirmed_source(41), 0,
+            "forgetting a source twice is idempotent")
+        t.eq(source_senses.forget_confirmed_source(-1), 0,
+            "anonymous stimuli cannot be removed by fake source identifiers")
+    else:
+        t.eq(source_senses.forget_confirmed_source(41), 0,
+            "older binaries leave native history unchanged rather than resetting others")
+
     t.current = "Existing authoritative zombie hearing populates native memory"
     var height: float = WorldGen.HUB_HEIGHT
     var world := WorldGen.new(42)
@@ -155,6 +193,78 @@ func run(t) -> void:
         "perception snapshot exposes remaining memory lifetimes")
 
 
+    t.current = "Invalid active targets forget only their own source history"
+    var invalid_target := Zombie.new(978, "walker", Vector3(0.0, height, 0.0))
+    invalid_target._native_senses = NativeSenses.new()
+    invalid_target._native_senses.record_confirmed_sound(Vector2.ZERO, Vector2(3, 0), 30.0, 41)
+    invalid_target._native_senses.record_confirmed_sound(Vector2.ZERO, Vector2(8, 0), 30.0, 42)
+    invalid_target.target_id = 41
+    invalid_target.state = Zombie.State.CHASE
+    invalid_target.think_timer = 1.0 # Skip acquisition: test actual chase invalidation.
+    invalid_target.think(world, {41: {"position": Vector3(3.0, height, 0.0),
+        "alive": true, "safe": true}}, 0.1, rng)
+    t.eq(invalid_target.target_id, -1, "safe player is no longer a combat target")
+    t.eq(invalid_target.state, Zombie.State.IDLE, "existing safe-zone behavior is preserved")
+    if invalid_target._native_senses.has_native_history() and invalid_target._native_senses._history.has_method("forget_source"):
+        t.eq(invalid_target._native_senses.get_recent_confirmed_stimuli().size(), 1,
+            "invalidated player identity is forgotten without clearing a valid source")
+        t.eq(invalid_target._native_senses.best_confirmed_stimulus(1).get("source_id"), 42,
+            "retained source survives the invalidation and can age independently")
+    var disconnected := Zombie.new(979, "walker", Vector3(0.0, height, 0.0))
+    disconnected._native_senses = NativeSenses.new()
+    disconnected._native_senses.record_confirmed_sound(Vector2.ZERO, Vector2(3, 0), 30.0, 41)
+    disconnected.target_id = 41
+    disconnected.state = Zombie.State.CHASE
+    disconnected.think_timer = 1.0
+    disconnected.think(world, {}, 0.1, rng)
+    t.eq(disconnected.target_id, -1, "disconnected players release active targets")
+    if disconnected._native_senses.has_native_history() and disconnected._native_senses._history.has_method("forget_source"):
+        t.check(disconnected._native_senses.get_recent_confirmed_stimuli().is_empty(),
+            "disconnected source cannot persist as a later history candidate")
+
+    t.current = "Per-actor sound memory anchors a lost chase to its own confirmed source"
+    var individual := NativeSenses.new()
+    individual.record_confirmed_sound(Vector2(12, 0), Vector2(12, 0), 20.0, 77)
+    individual.record_confirmed_sound(Vector2.ZERO, Vector2(5, 0), 20.0, 41)
+    if individual.has_native_history() and individual.has_native_hearing():
+        t.eq(individual.best_confirmed_stimulus(1).get("source_id"), 77,
+            "global noise ranking still prefers the stronger other survivor")
+        t.eq(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, 41, Vector2.ZERO, 5.0).get("position"), Vector2(5, 0),
+            "source-filtered query returns the chased player's own accepted noise at the boundary")
+        t.check(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, 41, Vector2.ZERO, 4.99).is_empty(),
+            "source-filtered queries cannot search beyond the present leash")
+        t.check(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, 999, Vector2.ZERO, 30.0).is_empty(),
+            "an unheard source has no authoritative memory to return")
+        t.check(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, -1, Vector2.ZERO, 30.0).is_empty(),
+            "anonymous stimuli are not impersonated as known actor memories")
+        t.eq(individual.get_recent_confirmed_stimuli().size(), 2,
+            "source queries never mutate live memory")
+        var target_lost := Zombie.new(981, "walker", Vector3(0.0, height, 0.0))
+        target_lost._native_senses = individual
+        target_lost.target_id = 41
+        target_lost.state = Zombie.State.CHASE
+        target_lost.think_timer = 1.0
+        target_lost.last_known_target = Vector2(-30, 0)
+        target_lost.think(world, {41: {"position": Vector3(1000.0, height, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}}, 0.1, rng)
+        t.eq(target_lost.target_id, -1, "distant escaped target releases combat aggro")
+        t.eq(target_lost.state, Zombie.State.INVESTIGATE,
+            "source-specific memory can only guide investigation, not targeting")
+        t.eq(target_lost.last_known_target, Vector2(5, 0),
+            "investigation remembers the actual target instead of the louder third party")
+        individual.advance_time(4.0)
+        t.check(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, 41, Vector2.ZERO, 30.0).is_empty(),
+            "expired sound events cannot be used as actor-specific tracking")
+    else:
+        t.check(individual.best_confirmed_stimulus_for_source_in_radius(
+            1, 41, Vector2.ZERO, 20.0).is_empty(),
+            "stock Godot preserves the existing no-native-memory behavior")
+
     t.current = "Chase recovery can investigate a second confirmed sound"
     var secondary_memory := NativeSenses.new()
     secondary_memory.record_confirmed_sound(Vector2.ZERO, Vector2(4, 0), 20.0, 11)
@@ -175,6 +285,124 @@ func run(t) -> void:
             "a lost target triggers investigation rather than a new attack")
         t.eq(searching.last_known_target, Vector2(16, 0),
             "search uses the remaining authoritative secondary sound location")
+
+    t.current = "Optional per-infected native decision trace captures real authoritative scans"
+    var traced := Zombie.new(975, "walker", Vector3(0.0, height, 0.0))
+    var untraced := Zombie.new(976, "walker", Vector3(0.0, height, 0.0))
+    t.check(not bool(traced.get_ai_trace_snapshot().get("enabled", false)),
+        "ordinary zombies do not allocate or enable tracing")
+    var native_trace: bool = ClassDB.class_exists("AIBehaviorTrace")
+    t.eq(traced.enable_ai_trace(true), native_trace,
+        "native server trace can be opted in only when class exists")
+    var trace_players := {41: {"position": Vector3(12.0, height, 0.0),
+        "alive": true, "safe": false, "noise": Defs.SPRINT_NOISE_RADIUS}}
+    traced.think(world, trace_players, 0.1, rng)
+    untraced.think(world, trace_players, 0.1, rng)
+    t.eq(traced.target_id, untraced.target_id,
+        "enabling diagnostics never changes target selection")
+    if native_trace:
+        var trace_debug: Dictionary = traced.get_ai_debug_snapshot()
+        var trace_snapshot: Dictionary = trace_debug.get("trace", {})
+        t.check(bool(trace_snapshot.get("enabled", false)),
+            "native server diagnostic exposes opt-in execution trace")
+        var steps: Array = trace_snapshot.get("steps", [])
+        t.eq(steps.size(), 1, "the actual target-selection pass records one stage")
+        if steps.size() == 1:
+            var stage: Dictionary = steps[0]
+            t.eq(stage.get("path"), "target_selection",
+                "trace identifies the exact server AI phase")
+            t.eq(stage.get("task_class"), "ZombieTargetSelection",
+                "trace names the authoritative implementation")
+            t.eq(int(stage.get("status", -1)), 0,
+                "successful authorized target selection records success")
+            t.check(int(stage.get("duration_usec", -1)) >= 0,
+                "server trace reports nonnegative decision CPU microseconds")
+        t.check(not bool(untraced.get_ai_trace_snapshot().get("enabled", false)),
+            "other NPCs remain untraced independently")
+        t.eq(traced.get_ai_trace_history_frames().size(), 1,
+            "opted-in NPC remembers its first authoritative decision tick")
+        traced.think_timer = 0.0
+        traced.think(world, trace_players, 0.1, rng)
+        t.eq(traced.get_ai_trace_history_frames().size(), 2,
+            "second server decision creates the next replay frame")
+        t.check(not traced.get_ai_slowest_trace_nodes(1).is_empty(),
+            "on-demand native server hotspots include real target-selection work")
+        var changed: Array = traced.get_ai_trace_history_frames(true)
+        t.check(not changed.is_empty(),
+            "server can request meaningful decision changes without CPU jitter")
+        # The bounded replay buffer must never grow with server uptime.
+        for extra_tick in 10:
+            traced.think_timer = 2.0 # Avoid making a new selection unnecessarily.
+            traced.think(world, trace_players, 0.01, rng)
+        t.eq(traced.get_ai_trace_history_frames().size(), 8,
+            "server history is capped at eight ticks for one opted-in NPC")
+        var server_history_debug: Dictionary = traced.get_ai_debug_snapshot()
+        t.check(server_history_debug.has("trace_history") and
+            server_history_debug.has("slowest_ai_phases"),
+            "server-only debug output exposes bounded replay and CPU hotspots")
+        t.eq(untraced.get_ai_trace_history_frames().size(), 0,
+            "untraced NPCs do not allocate per-tick histories")
+        # The latest frame in the ring was intentionally idle. Trigger one
+        # real selection before checking the visual "executed" highlight.
+        traced.think_timer = 0.0
+        traced.think(world, trace_players, 0.1, rng)
+        var traced_visual: Dictionary = traced.get_ai_state_visual_snapshot()
+        var traced_visual_nodes: Array = traced_visual.get("nodes", [])
+        if traced_visual_nodes.size() == 8:
+            var selection_record: Dictionary = traced_visual_nodes[7]
+            t.check(bool(selection_record.get("executed", false)),
+                "visual inspector highlights an actually traced selection pass")
+            t.eq(int(selection_record.get("status", -1)), 0,
+                "visual inspector copies the native success status")
+        t.check(traced.enable_ai_trace(false), "server can disable and release tracing")
+        traced.think_timer = 0.0
+        traced.think(world, trace_players, 0.1, rng)
+        t.check(not bool(traced.get_ai_trace_snapshot().get("enabled", false)),
+            "disabled server traces remain empty")
+        t.eq(traced.get_ai_trace_history_frames().size(), 0,
+            "disabling tracing releases all replay history")
+    else:
+        t.check(traced.get_ai_trace_snapshot().get("steps", []).is_empty(),
+            "stock Godot has a safe empty trace fallback")
+        t.check(traced.get_ai_trace_history_frames().is_empty(),
+            "stock Godot safely returns no native replay history")
+        t.check(traced.get_ai_slowest_trace_nodes().is_empty(),
+            "stock Godot safely returns no native CPU hotspot reports")
+
+    t.current = "Server AI inspector renders real zombie state machine without leaking clients"
+    var visual: Dictionary = traced.get_ai_state_visual_snapshot()
+    var visual_nodes: Array = visual.get("nodes", [])
+    t.eq(int(visual.get("node_count", -1)), 8,
+        "server state-machine inspector exposes root, six states and target selection")
+    t.eq(visual_nodes.size(), 8, "the inspector node count matches the returned hierarchy")
+    if visual_nodes.size() == 8:
+        var visual_root: Dictionary = visual_nodes[0]
+        t.eq(visual_root.get("task_class"), "ZombieStateMachine",
+            "server diagnostics correctly identify the state machine, not a behavior tree")
+        t.eq(visual_root.get("path"), "root", "hierarchy has a stable root path")
+        var active_count := 0
+        for index in range(1, 7):
+            var state_record: Dictionary = visual_nodes[index]
+            if bool(state_record.get("executed", false)):
+                active_count += 1
+                t.eq(index - 1, traced.state,
+                    "only the actual current infected state is highlighted")
+                t.eq(int(state_record.get("status", -1)), 2,
+                    "the alive active zombie state is running")
+        t.eq(active_count, 1, "exactly one authoritative AI state is currently active")
+        var scanned: Dictionary = visual_nodes[7]
+        t.eq(scanned.get("path"), "root/6",
+            "target selection is exposed as its own diagnostic phase")
+        t.check(not bool(scanned.get("executed", false)),
+            "disabled native tracing leaves target selection visibly unvisited")
+    var visual_debug: Dictionary = traced.get_ai_debug_snapshot().get("visual_tree", {})
+    t.eq(int(visual_debug.get("node_count", -1)), visual_nodes.size(),
+        "existing server diagnostics embed the same private inspector hierarchy")
+    var resting_visual: Dictionary = untraced.get_ai_state_visual_snapshot()
+    t.check(not bool(resting_visual.get("trace_enabled", false)),
+        "inspector does not enable native tracing for unrelated game NPCs")
+    # Inspector data is produced on demand; no client network packet or
+    # automatic per-frame state collection is introduced.
 
     t.current = "Optional per-infected AI profiling is disabled by default"
     t.check(not bool(infected.get_ai_profile_snapshot().get("enabled", false)),

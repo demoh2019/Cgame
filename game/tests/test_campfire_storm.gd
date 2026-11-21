@@ -77,4 +77,8 @@ func run(t) -> void:
 	t.check(sim.campfires.has(id), "fire survives an ordinary clear-weather tick")
 	t.near(float(sim.campfires[id]["expires"]) - sim.time, 2.0,
 		0.001, "clear weather cannot consume extra fuel")
-	t.eq(sim.events.size(), 0, "no false storm notification")
+	var storm_events := 0
+	for event in sim.events:
+		if str(event.get("type", "")) == "campfire_doused":
+			storm_events += 1
+	t.eq(storm_events, 0, "no false storm notification (other world events may still happen)")

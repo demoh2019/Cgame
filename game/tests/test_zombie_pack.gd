@@ -3,6 +3,7 @@ extends RefCounted
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
+const PackNeighborSelection = preload("res://scripts/shared/pack_neighbor_selection.gd")
 
 
 func run(t) -> void:
@@ -69,8 +70,9 @@ func run(t) -> void:
 	t.eq(near.target_id, 88, "adjacent cell receiver joins pack")
 	t.eq(outside.target_id, -1, "candidate outside source radius remains asleep")
 	t.eq(tail.target_id, -1, "newly recruited zombie never chain-wakes its neighbors")
-	t.eq(bool(pack.last_pack_query_stats.get("native", false)), native_grid_available,
-		"native broadphase only runs on compatible engine builds")
+	var nearest_native: bool = native_grid_available and ClassDB.class_has_method("AIProximityGrid2D", "query_nearest_batch")
+	t.eq(bool(pack.last_pack_query_stats.get("native", false)), nearest_native,
+		"native closest-K broadphase only runs on compatible engine builds")
 	t.eq(int(pack.last_pack_query_stats.get("population", 0)), 4,
 		"server diagnostic covers authoritative infected cohort")
 	var fallback_pack := GameServer.new(WorldGen.new(22), 22)
@@ -88,6 +90,64 @@ func run(t) -> void:
 	t.eq(old_outside.target_id, outside.target_id, "script fallback excludes the same distant actor")
 	t.check(not bool(fallback_pack.last_pack_query_stats.get("native", false)),
 		"old engine safely falls back to script broadphase")
+
+	t.current = "nearest-K pack selection and dense crowd fanout"
+	var sample := PackedVector2Array([
+		Vector2.ZERO, Vector2(5, 0), Vector2(-5, 0),
+		Vector2(1, 0), Vector2(2, 0), Vector2(3, 0), Vector2(-1, 0)])
+	var candidate_ids: Array[int] = [5, 1, 6, 2, 4, 3]
+	var chosen: PackedInt32Array = PackNeighborSelection.choose(sample, 0, candidate_ids, 18.0, 2)
+	t.eq(chosen, PackedInt32Array([3, 6]), "script selects closest neighbors, independent of candidate order")
+	t.eq(PackNeighborSelection.choose(sample, 0, candidate_ids, 18.0, 1),
+		PackedInt32Array([3]), "equal-distance ties favor first input index")
+	t.check(PackNeighborSelection.choose(sample, 0, candidate_ids, 18.0, 0).is_empty(),
+		"invalid neighbor cap is rejected")
+	if nearest_native:
+		var query: Object = ClassDB.instantiate("AIProximityGrid2D")
+		var source_ids := PackedInt32Array([0])
+		var native_chosen: Array = query.query_nearest_batch(sample, source_ids, 18.0, 18.0, 2)
+		t.eq(native_chosen[0], chosen, "native nearest neighbors equal script ranking")
+
+	var dense := GameServer.new(WorldGen.new(22), 45)
+	var leader := Zombie.new(dense.new_id(), "walker", Vector3(220, 0, 210))
+	leader.target_id = 88
+	leader.state = Zombie.State.CHASE
+	dense.zombies[leader.id] = leader
+	var followers: Dictionary = {}
+	for distance in range(18, 0, -1): # Deliberately register farthest first.
+		var npc := Zombie.new(dense.new_id(), "walker", Vector3(220.0 + distance, 0, 210))
+		dense.zombies[npc.id] = npc
+		followers[distance] = npc
+	var authorized_dense := {88: {"position": Vector3(220, 0, 210), "alive": true, "safe": false}}
+	dense._alert_infected_pack(authorized_dense)
+	t.eq(int(dense.last_pack_query_stats.get("max_alerts", -1)),
+		GameServer.ZOMBIE_PACK_MAX_ALERTS, "server enforces documented per-source cap")
+	t.eq(int(dense.last_pack_query_stats.get("alerts_sent", -1)),
+		GameServer.ZOMBIE_PACK_MAX_ALERTS, "at most nearest twelve NPCs are recruited")
+	for distance in range(1, 19):
+		t.eq(followers[distance].target_id,
+			88 if distance <= GameServer.ZOMBIE_PACK_MAX_ALERTS else -1,
+			"only closest allies awaken at distance %d" % distance)
+	t.eq(bool(dense.last_pack_query_stats.get("native", false)), nearest_native,
+		"engine/fallback paths report correct execution mode")
+
+	var dense_fallback := GameServer.new(WorldGen.new(22), 45)
+	dense_fallback._pack_spatial_grid = RefCounted.new() # Older engine without nearest query.
+	var old_leader := Zombie.new(dense_fallback.new_id(), "walker", Vector3(220, 0, 210))
+	old_leader.target_id = 88
+	old_leader.state = Zombie.State.CHASE
+	dense_fallback.zombies[old_leader.id] = old_leader
+	var old_followers: Dictionary = {}
+	for distance in range(18, 0, -1):
+		var npc := Zombie.new(dense_fallback.new_id(), "walker", Vector3(220.0 + distance, 0, 210))
+		dense_fallback.zombies[npc.id] = npc
+		old_followers[distance] = npc
+	dense_fallback._alert_infected_pack(authorized_dense)
+	for distance in range(1, 19):
+		t.eq(old_followers[distance].target_id, followers[distance].target_id,
+			"old binary retains identical dense-pack targeting at distance %d" % distance)
+	t.eq(dense_fallback.last_pack_query_stats["alerts_sent"],
+		dense.last_pack_query_stats["alerts_sent"], "native and stock paths produce equal fanout")
 
 	t.current = "safe hub and expired target"
 	var protected = server.add_player(71, "Safe")

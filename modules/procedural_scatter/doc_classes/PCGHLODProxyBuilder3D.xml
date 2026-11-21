@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGHLODProxyBuilder3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Builds a single low-polygon proxy mesh from several procedural 3D static decorations.
+	</brief_description>
+	<description>
+		An Unreal HLOD-inspired, bounded CPU geometry reduction utility. Creates an [ArrayMesh] with one triangle surface containing a faceted octahedral silhouette for each sampled source. This replaces detailed static decorations at far view distances with one merged 3D geometry resource, without modifying the source geometry or gameplay objects. Each sampled source contributes exactly 8 triangles/24 vertices to the proxy, and the entire result has one surface. It does not merge PBR materials or texture atlases, generate Nanite clusters, build occlusion data, or automatically switch near/far scene nodes. Callers must supply per-instance local bounds and transforms, choose a shared material for the distant surface, and perform visibility-range or hysteretic LOD switching.
+	</description>
+	<methods>
+		<method name="build_octahedral_proxy" qualifiers="const">
+			<return type="ArrayMesh" />
+			<param index="0" name="transforms" type="Array" />
+			<param index="1" name="local_centers" type="PackedVector3Array" />
+			<param index="2" name="local_half_extents" type="PackedVector3Array" />
+			<param index="3" name="max_proxy_instances" type="int" default="512" />
+			<description>
+				Builds one [ArrayMesh] surface by transforming eight flat-shaded triangles per selected decoration using its complete [Transform3D], local mesh-bounds center and positive local AABB half-extents. Evenly samples source instances if there are more than [param max_proxy_instances] (at most 512). Samples are selected deterministically in original source order without RNG, avoiding material duplication and reducing far-distance vertex/draw-call costs. Local transforms, yaw/scale, object positions, source buffers and scene tree are not changed.
+				Limits: 1 through 8192 input transforms, matching finite centers/half-extents, world positions within +/-10000000, local centers/half-extents within +/-10000, strictly positive extents and basis axis lengths from 0.0001 through 1000. [param max_proxy_instances] is 1 through 512. All inputs are validated before generating geometry, including samples which would later be discarded. Invalid or empty input returns [code]null[/code], never a partial proxy mesh. Only appropriate for background static silhouettes such as distant stones; avoid geometry with gameplay collision or intricate silhouettes.
+			</description>
+		</method>
+	</methods>
+</class>

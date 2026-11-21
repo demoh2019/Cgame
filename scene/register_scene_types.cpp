@@ -98,6 +98,9 @@
 #include "scene/gui/tree.h"
 #include "scene/gui/video_stream_player.h"
 #include "scene/gui/virtual_joystick.h"
+#include "scene/main/adaptive_network_jitter_buffer.h"
+#include "scene/main/audio_voice_admission_planner.h"
+#include "scene/main/adaptive_tick_governor.h"
 #include "scene/main/canvas_item.h"
 #include "scene/main/canvas_layer.h"
 #include "scene/main/debug_draw.h"
@@ -108,6 +111,8 @@
 #include "scene/main/resource_preloader.h"
 #include "scene/main/scene_node_pool.h"
 #include "scene/main/spatial_point_grid_2d.h"
+#include "scene/main/spatial_point_grid_3d.h"
+#include "scene/main/spatial_relevancy_grid_2d.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/shader_globals_override.h"
 #include "scene/main/status_indicator.h"
@@ -488,8 +493,13 @@ void register_scene_types() {
 	GDREGISTER_CLASS(Timer);
 	GDREGISTER_CLASS(CanvasLayer);
 	GDREGISTER_CLASS(ResourcePreloader);
+	GDREGISTER_CLASS(AdaptiveTickGovernor);
+	GDREGISTER_CLASS(AdaptiveNetworkJitterBuffer);
+	GDREGISTER_CLASS(AudioVoiceAdmissionPlanner);
 	GDREGISTER_CLASS(SceneNodePool);
 	GDREGISTER_CLASS(SpatialPointGrid2D);
+	GDREGISTER_CLASS(SpatialPointGrid3D);
+	GDREGISTER_CLASS(SpatialRelevancyGrid2D);
 	GDREGISTER_CLASS(Window);
 
 	GDREGISTER_CLASS(StatusIndicator);

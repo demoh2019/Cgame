@@ -68,6 +68,7 @@ func run(t) -> void:
 	t.current = "server validates actual equipment, group and patient"
 	var world := WorldGen.new(1198)
 	var server := GameServer.new(world, 1198)
+	server.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var healer = server.add_player(701, "Restorer")
 	var first = server.add_player(702, "Wounded")
 	var second = server.add_player(703, "Critical")

@@ -1,0 +1,76 @@
+name: Native ability cooldown tracker and Albion HUD parity
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/gameplay_cooldown_tracker.*'
+      - 'modules/gameplay_fx/doc_classes/GameplayCooldownTracker.xml'
+      - 'modules/gameplay_fx/register_types.cpp'
+      - 'modules/gameplay_fx/config.py'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'game/scripts/client/ability_bar.gd'
+      - 'game/scripts/client/ability_cooldowns.gd'
+      - 'game/tests/test_native_ability_cooldowns.gd'
+      - 'game/tests/run_native_ability_cooldowns.gd'
+      - '.github/workflows/native-ability-cooldowns.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/gameplay_cooldown_tracker.*'
+      - 'modules/gameplay_fx/doc_classes/GameplayCooldownTracker.xml'
+      - 'modules/gameplay_fx/register_types.cpp'
+      - 'modules/gameplay_fx/config.py'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'game/scripts/client/ability_bar.gd'
+      - 'game/scripts/client/ability_cooldowns.gd'
+      - 'game/tests/test_native_ability_cooldowns.gd'
+      - 'game/tests/run_native_ability_cooldowns.gd'
+      - '.github/workflows/native-ability-cooldowns.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cooldowns:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native cooldown doctest
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*CooldownTracker*" 2>&1 | tee native-cooldown.log
+      - name: Import Albion After GDScript and assets
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee cooldown-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' cooldown-import.log; then exit 1; fi
+      - name: Run real game native/fallback cooldown parity tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_native_ability_cooldowns.gd 2>&1 | tee cooldown-game.log
+          grep -E '^ABILITY COOLDOWNS TOTAL: [0-9]+ checks, 0 failures$' cooldown-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' cooldown-game.log; then exit 1; fi
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cooldown-tracker-logs
+          if-no-files-found: ignore
+          path: |
+            native-cooldown.log
+            cooldown-import.log
+            cooldown-game.log

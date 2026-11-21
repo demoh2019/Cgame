@@ -48,6 +48,7 @@ void SpatialPointGrid2D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("rebuild", "positions"), &SpatialPointGrid2D::rebuild);
 	ClassDB::bind_method(D_METHOD("any_within", "point", "radius", "inclusive"), &SpatialPointGrid2D::any_within, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("any_within_batch", "points", "radius", "inclusive"), &SpatialPointGrid2D::any_within_batch, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("snapshot"), &SpatialPointGrid2D::snapshot);
 	ClassDB::bind_method(D_METHOD("get_point_count"), &SpatialPointGrid2D::get_point_count);
 	ClassDB::bind_method(D_METHOD("clear"), &SpatialPointGrid2D::clear);
@@ -121,6 +122,7 @@ void SpatialPointGrid2D::rebuild(const TypedArray<Vector2> &p_positions) {
 	positions.clear();
 	cells.clear();
 	queries = 0;
+	batch_calls = 0;
 	candidate_checks = 0;
 	bucket_lookups = 0;
 	for (int i = 0; i < p_positions.size(); i++) {
@@ -137,6 +139,7 @@ void SpatialPointGrid2D::clear() {
 	cells.clear();
 	indexed_mode = false;
 	queries = 0;
+	batch_calls = 0;
 	candidate_checks = 0;
 	bucket_lookups = 0;
 }
@@ -186,11 +189,27 @@ bool SpatialPointGrid2D::any_within(const Vector2 &p_point, real_t p_radius, boo
 	return false;
 }
 
+PackedByteArray SpatialPointGrid2D::any_within_batch(const PackedVector2Array &p_points, real_t p_radius, bool p_inclusive) {
+	// The existing scalar function is the single source of radius semantics,
+	// including invalid positions, strict boundaries and large-radius fallback.
+	// No special case for empty batches: stats still account for the API call.
+	batch_calls++;
+	PackedByteArray result;
+	result.resize(p_points.size());
+	const Vector2 *points = p_points.ptr();
+	uint8_t *flags = result.ptrw();
+	for (int i = 0; i < p_points.size(); i++) {
+		flags[i] = any_within(points[i], p_radius, p_inclusive) ? uint8_t(1) : uint8_t(0);
+	}
+	return result;
+}
+
 Dictionary SpatialPointGrid2D::snapshot() const {
 	Dictionary stats;
 	stats["alive_players"] = positions.size();
 	stats["occupied_cells"] = cells.size();
 	stats["queries"] = queries;
+	stats["batch_calls"] = batch_calls;
 	stats["candidate_checks"] = candidate_checks;
 	stats["bucket_lookups"] = bucket_lookups;
 	stats["indexed_mode"] = indexed_mode;

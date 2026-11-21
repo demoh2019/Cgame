@@ -1,4 +1,5 @@
 extends Node3D
+const CharacterShading = preload("res://scripts/client/character_shading.gd")
 ## An animated character. With the downloaded packs it is a Quaternius Fantasy Races character playing the
 ## Universal Animation Library (idle, walk, jog, sprint, attacks, chopping, harvesting, zombie walk, death);
 ## without them it is the small Kenney robot with its idle and walk animations.
@@ -17,6 +18,7 @@ var animator: AnimationPlayer
 var pack_mode := false
 var external_anim_lod := false # True when the native AnimationLODController advances `animator`.
 var _native_feet := false # True when the engine FootPlacementModifier3D plants the feet.
+var _native_foot_modifier: Node = null # Cached to avoid per-frame skeleton hierarchy walks.
 var _materials: Array[StandardMaterial3D] = []
 var _wet_surfaces: Array[Dictionary] = [] # Live outfit/gear surfaces and their original materials.
 var _wet_surface_keys: Dictionary = {}
@@ -39,9 +41,14 @@ var _last_yaw := INF
 var _yaw_rate := 0.0
 var _lod_tier := 0
 var _lod_accum := 0.0
+var _status_pulse_tween: Tween
+var _hit_flash_tween: Tween
 
 # Pack mode state.
 var _zombie := false
+# Caller-controlled visual IK work group (0 player, 1 infected,
+# 2 elite/boss, 3 future cinematic characters). No gameplay authority.
+var animation_budget_group: int = 0
 var _zombie_state := 0 # Zombie.State: 0 idle, 1 wander, 2 chase, 3 attack, 4 dead.
 var _action_loop := ""
 var _oneshot := ""
@@ -60,6 +67,16 @@ var _gear_shown: Dictionary = {} # Gear slot -> item id currently drawn on the b
 func setup(tint: Color, scale_factor: float, walk_speed: float = 1.0, model_name: String = "", zombie: bool = false, look_seed: int = 0) -> void:
 	_walk_speed = walk_speed
 	_zombie = zombie
+	animation_budget_group = 1 if zombie else 0
+	# A reused character never inherits a freed skeleton or previous leg solver.
+	# Deactivate the old one before detaching its cached reference.
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):
+		_native_foot_modifier.set("active", false)
+	_native_feet = false
+	_native_foot_modifier = null
+	# A pooled/reconfigured model must never inherit its predecessor's IK slot.
+	set_meta("aa_full_ik_retained", false)
+	set_meta("aa_combat_pose_retained", false) # Pooled models cannot carry another actor's combat history.
 	# One GPU batch provides soft floor contact where real shadows are disabled.
 	# Register the actual live actor model, never model-template resources.
 	add_to_group("aa_grounded_characters")
@@ -234,6 +251,8 @@ static func _build_survivor(sex: String, look: Array, hair_color: Color) -> Node
 			var dyed := base.duplicate() as BaseMaterial3D
 			dyed.albedo_color = hair_color
 			instance.set_surface_override_material(0, dyed)
+	# Strand-anisotropic hair, cloth sheen and wet eyes on High/Ultra.
+	CharacterShading.enhance_model(skeleton)
 	return model
 
 
@@ -487,6 +506,11 @@ func _setup_procedural(model: Node3D) -> void:
 	var modifier := AnimModifier.new()
 	modifier.name = "ProceduralAnim"
 	modifier.body = self
+	# Opt into engine-wide SkeletonModifier work-unit profiling only on
+	# supported Cgame builds. The script-local stopwatch remains as fallback.
+	if modifier.has_method("set_modifier_profiling_enabled"):
+		modifier.use_engine_profile_timing = true
+		modifier.call("set_modifier_profiling_enabled", _lod_tier == 0 and not _dead)
 	(skeleton[0] as Skeleton3D).add_child(modifier)
 	_procedural = modifier
 	_layer = AnimationPlayer.new()
@@ -529,6 +553,17 @@ func set_anim_lod(tier: int) -> void:
 		animator.call("reset_advance_budget")
 	if _layer != null and _layer.has_method("reset_advance_budget"):
 		_layer.call("reset_advance_budget")
+	# The native foot solver must obey the SAME visual-only IK tier as the
+	# scripted modifier; otherwise it runs expensive terrain callbacks even
+	# when crowd budgeting has already demoted this actor.
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):
+		var full_native_ik: bool = tier == 0 and not _dead
+		_native_foot_modifier.set("active", tier == 0 and not _dead)
+		if _native_foot_modifier.has_method("set_modifier_profiling_enabled"):
+			_native_foot_modifier.call("set_modifier_profiling_enabled", full_native_ik)
+	if _procedural != null:
+		if _procedural.has_method("set_modifier_profiling_enabled"):
+			_procedural.call("set_modifier_profiling_enabled", tier == 0 and not _dead)
 	if _procedural != null and not _dead:
 		_procedural.set("foot_ik", tier == 0 and not _native_feet) # Native FootPlacementModifier3D wins when present.
 		_procedural.set("look_at_enabled", tier == 0)
@@ -539,6 +574,49 @@ func set_anim_lod(tier: int) -> void:
 
 func anim_lod_tier() -> int:
 	return _lod_tier
+
+
+## The next frame's optional full-pose admission estimate combines the real
+## script modifier duration and native FootPlacement duration when available.
+## The native timer covers terrain queries + leg solving, not GPU skinning or
+## core animation playback. Older engines simply report zero native samples.
+func estimated_full_pose_cost_us() -> int:
+	var script_us: int = int(_procedural.get("estimated_full_pose_us")) if _procedural != null else 0
+	# Use native SkeletonModifier measurements only after a real completed
+	# sample, not just because the method exists. Never sum both clocks
+	# from the same modifier.
+	if _procedural != null and _procedural.has_method("get_modifier_profile_sample_count") and \
+			int(_procedural.call("get_modifier_profile_sample_count")) > 0:
+		script_us = int(_procedural.call("get_modifier_estimated_update_us"))
+	var native_us: int = 0
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):
+		if _native_foot_modifier.has_method("get_modifier_profile_sample_count") and \
+				int(_native_foot_modifier.call("get_modifier_profile_sample_count")) > 0:
+			native_us = int(_native_foot_modifier.call("get_modifier_estimated_update_us"))
+		elif _native_foot_modifier.has_method("get_estimated_process_cost_us"):
+			# Older Cgame engines expose only the FootPlacement-specific clock.
+			native_us = int(_native_foot_modifier.call("get_estimated_process_cost_us"))
+	return clampi(maxi(script_us, 0) + maxi(native_us, 0), 0, 100000)
+
+
+## Developer diagnostics: last and EMA update costs, by actual modifier.
+## No scene walks, timers, or allocations are made until explicitly called.
+func animation_modifier_profile() -> Dictionary:
+	var result := {}
+	if _procedural != null and _procedural.has_method("get_modifier_profile_sample_count"):
+		result["script"] = {
+			"last_us": _procedural.call("get_modifier_last_update_us"),
+			"estimated_us": _procedural.call("get_modifier_estimated_update_us"),
+			"samples": _procedural.call("get_modifier_profile_sample_count")
+		}
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier) and \
+			_native_foot_modifier.has_method("get_modifier_profile_sample_count"):
+		result["foot_placement"] = {
+			"last_us": _native_foot_modifier.call("get_modifier_last_update_us"),
+			"estimated_us": _native_foot_modifier.call("get_modifier_estimated_update_us"),
+			"samples": _native_foot_modifier.call("get_modifier_profile_sample_count")
+		}
+	return result
 
 
 func _track_yaw(delta: float) -> void:
@@ -812,8 +890,20 @@ func enable_foot_placement(height_at: Callable) -> bool:
 		return false
 	var existing := skeleton.get_node_or_null("FootPlacement")
 	if existing != null:
+		_native_foot_modifier = existing
+		_native_feet = true
 		existing.set("ground_height_callback", height_at)
-		existing.set("active", true)
+		if existing.has_method("set_modifier_profiling_enabled"):
+			# The shared wrapper measures this whole native pass; the old
+			# FootPlacement-specific clock must not run at the same time.
+			existing.call("set_modifier_profiling_enabled", _lod_tier == 0 and not _dead)
+			if existing.has_method("set_profiling_enabled"):
+				existing.call("set_profiling_enabled", false)
+		elif existing.has_method("set_profiling_enabled"):
+			existing.call("set_profiling_enabled", true)
+		existing.set("active", _lod_tier == 0 and not _dead)
+		if _procedural != null:
+			_procedural.set("foot_ik", false)
 		return true
 	var modifier = ClassDB.instantiate("FootPlacementModifier3D")
 	if modifier == null:
@@ -825,14 +915,25 @@ func enable_foot_placement(height_at: Callable) -> bool:
 	modifier.set("max_foot_angle", deg_to_rad(35.0))
 	modifier.call("add_leg", "thigh_l", "calf_l", "foot_l", 0.0)
 	modifier.call("add_leg", "thigh_r", "calf_r", "foot_r", 0.0)
+	# The profiler is optional on older Cgame builds. Avoid measuring on
+	# projects not explicitly opting in.
+	if modifier.has_method("set_modifier_profiling_enabled"):
+		modifier.call("set_modifier_profiling_enabled", _lod_tier == 0 and not _dead)
+	elif modifier.has_method("set_profiling_enabled"):
+		modifier.call("set_profiling_enabled", true)
 	skeleton.add_child(modifier)
+	_native_foot_modifier = modifier as Node
 	_native_feet = true
+	modifier.set("active", _lod_tier == 0 and not _dead)
 	if _procedural != null:
 		_procedural.set("foot_ik", false) # One leg solver per skeleton.
 	return true
 
 
 func disable_foot_placement() -> void:
+	if _native_foot_modifier != null and is_instance_valid(_native_foot_modifier):
+		_native_foot_modifier.set("active", false)
+		return
 	var skeleton := _find_skeleton()
 	if skeleton == null:
 		return
@@ -945,9 +1046,31 @@ func update_motion(delta: float) -> void:
 ## Diablo IV / Hades-style hit flash: every material of this character pops to
 ## a white emissive glow and fades out in ~0.14 s. Reuses the per-character
 ## material duplicates, so other characters are never affected.
+## Subtle emission cue for a periodic status effect. A real hit always wins.
+## The periodic scheduler coalesces pulses before calling this method.
+func status_pulse(color: Color) -> void:
+	if _materials.is_empty() or not is_inside_tree():
+		return
+	if _status_pulse_tween != null and _status_pulse_tween.is_running():
+		return
+	if _hit_flash_tween != null and _hit_flash_tween.is_running():
+		return # Never reduce or recolor a genuine damage flash.
+	for material in _materials:
+		if material == null:
+			continue
+		material.emission_enabled = true
+		material.emission = color
+		material.emission_energy_multiplier = 0.95
+	_status_pulse_tween = create_tween()
+	_status_pulse_tween.tween_method(_set_flash_energy, 0.95, 0.0, 0.22).set_ease(Tween.EASE_OUT)
+	_status_pulse_tween.tween_callback(_end_flash)
+
+
 func hit_flash(strength: float = 1.0) -> void:
 	if _materials.is_empty():
 		return
+	if _status_pulse_tween != null and _status_pulse_tween.is_running():
+		_status_pulse_tween.kill()
 	var energy: float = 2.4 * clampf(strength, 0.3, 1.5)
 	for material in _materials:
 		if material == null:
@@ -955,9 +1078,11 @@ func hit_flash(strength: float = 1.0) -> void:
 		material.emission_enabled = true
 		material.emission = Color(1.0, 0.96, 0.9)
 		material.emission_energy_multiplier = energy
-	var tween := create_tween()
-	tween.tween_method(_set_flash_energy, energy, 0.0, 0.14).set_ease(Tween.EASE_OUT)
-	tween.tween_callback(_end_flash)
+	if _hit_flash_tween != null and _hit_flash_tween.is_running():
+		_hit_flash_tween.kill()
+	_hit_flash_tween = create_tween()
+	_hit_flash_tween.tween_method(_set_flash_energy, energy, 0.0, 0.14).set_ease(Tween.EASE_OUT)
+	_hit_flash_tween.tween_callback(_end_flash)
 
 
 func _set_flash_energy(value: float) -> void:

@@ -1,0 +1,76 @@
+name: Native effect application rules and Albion server parity
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/gameplay_effect_application_gate.*'
+      - 'modules/gameplay_fx/doc_classes/GameplayEffectApplicationGate.xml'
+      - 'modules/gameplay_fx/config.py'
+      - 'modules/gameplay_fx/register_types.cpp'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'game/scripts/shared/effect_application_rules.gd'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_effect_application_rules.gd'
+      - 'game/tests/run_effect_application_rules.gd'
+      - '.github/workflows/native-effect-application-rules.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/gameplay_effect_application_gate.*'
+      - 'modules/gameplay_fx/doc_classes/GameplayEffectApplicationGate.xml'
+      - 'modules/gameplay_fx/config.py'
+      - 'modules/gameplay_fx/register_types.cpp'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'game/scripts/shared/effect_application_rules.gd'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_effect_application_rules.gd'
+      - 'game/tests/run_effect_application_rules.gd'
+      - '.github/workflows/native-effect-application-rules.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  effect-rules:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native Gameplay Effect immunity regressions
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*application gate*" 2>&1 | tee rules-native.log
+      - name: Import Albion After assets and scripts
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee rules-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' rules-import.log; then exit 1; fi
+      - name: Run native and stock parity on server zombie rules
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_effect_application_rules.gd 2>&1 | tee rules-game.log
+          grep -E '^EFFECT APPLICATION RULES TOTAL: [0-9]+ checks, 0 failures$' rules-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' rules-game.log; then exit 1; fi
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-effect-application-rules-logs
+          if-no-files-found: ignore
+          path: |
+            rules-native.log
+            rules-import.log
+            rules-game.log
