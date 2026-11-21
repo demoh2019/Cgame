@@ -58,7 +58,7 @@ bool AIExecutionProfiler::record_sample(const StringName &p_category, int64_t p_
 		return false;
 	}
 	ERR_FAIL_COND_V_MSG(p_duration_usec < 0 || p_duration_usec > MAX_SAMPLE_USEC, false, "AI profiling sample duration is outside the valid range.");
-	ERR_FAIL_COND_V_MSG(!samples.has(p_category) && samples.size() >= MAX_CATEGORIES, false, "Too many named AI profiling categories.");
+	ERR_FAIL_COND_V_MSG(!samples.has(p_category) && !active_starts.has(p_category) && samples.size() + active_starts.size() >= MAX_CATEGORIES, false, "Too many named AI profiling categories.");
 
 	Dictionary entry = samples.get(p_category, Dictionary());
 	const int64_t count = entry.get("count", int64_t(0));
