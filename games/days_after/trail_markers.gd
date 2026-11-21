@@ -11,6 +11,7 @@ var _waypoints := PackedVector3Array()
 var _raw_samples := PackedVector3Array()
 var _raw_frames: Array = []
 var _selected_positions := PackedVector3Array()
+var _anchor_bounds := AABB()
 var _exclusion_mins := PackedVector3Array()
 var _exclusion_maxs := PackedVector3Array()
 
@@ -40,6 +41,41 @@ func get_raw_frames() -> Array:
 
 func get_selected_positions() -> PackedVector3Array:
     return _selected_positions.duplicate()
+
+
+## Native partition metadata yields a point-only AABB; it is expanded for
+## the physical stone mesh before it becomes the renderer's custom AABB.
+func get_anchor_bounds() -> AABB:
+    return _anchor_bounds
+
+
+func _compute_anchor_bounds(points: PackedVector3Array, prefer_native: bool = true) -> AABB:
+    if points.is_empty():
+        return AABB()
+    var ids := PackedInt32Array()
+    for i in points.size():
+        ids.append(i)
+    if prefer_native and ClassDB.class_exists("PCGInstanceCluster3D"):
+        var planner: Object = ClassDB.instantiate("PCGInstanceCluster3D")
+        if planner != null and planner.has_method("compute_cluster_bounds"):
+            var native_bounds: Array = planner.call("compute_cluster_bounds",
+                points, [ids], 0.0)
+            if native_bounds.size() == 1:
+                var result: AABB = native_bounds[0]
+                return result
+    var bounds := AABB(points[0], Vector3.ZERO)
+    for i in range(1, points.size()):
+        bounds = bounds.expand(points[i])
+    return bounds
+
+
+func verify_anchor_bounds_parity() -> bool:
+    var native: AABB = _compute_anchor_bounds(_selected_positions)
+    var fallback: AABB = _compute_anchor_bounds(_selected_positions, false)
+    return (native.position.distance_to(fallback.position) < 0.0001
+        and native.size.distance_to(fallback.size) < 0.0001
+        and native.position.distance_to(_anchor_bounds.position) < 0.0001
+        and native.size.distance_to(_anchor_bounds.size) < 0.0001)
 
 
 func _sample_fallback() -> PackedVector3Array:
@@ -188,4 +224,9 @@ func regenerate() -> void:
         batch.set_instance_transform(i, Transform3D(
             frame.basis, frame.origin + Vector3(0.0, 0.045, 0.0)))
     multimesh = batch
+    _anchor_bounds = _compute_anchor_bounds(_selected_positions)
+    # The rendered mesh is <= 0.52 x 0.055 x 0.72 m; 0.75 m padding
+    # conservatively encloses every rotated/tilted stone transform.
+    if not _selected_positions.is_empty():
+        custom_aabb = _anchor_bounds.grow(0.75)
     cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

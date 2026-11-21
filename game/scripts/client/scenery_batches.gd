@@ -136,6 +136,57 @@ static func partition_indices_adaptive_3d(points: PackedVector3Array,
 		points, cell_size, min_split_count, max_clusters, max_coarsen_passes)
 
 
+## Bounds for already-computed index groups; original point positions are
+## the LOD/streaming anchors. This is NOT mesh geometry or renderer bounds.
+## Native C++ does an exact-cover validation; stock Godot mirrors it.
+static func cluster_point_bounds(points: PackedVector3Array, groups: Array,
+        margin: float = 0.0, prefer_native: bool = true) -> Array:
+    var result: Array = []
+    if prefer_native and ClassDB.class_exists("PCGInstanceCluster3D"):
+        if _cluster_native == null or not _cluster_native.has_method("compute_cluster_bounds"):
+            var instance: Object = ClassDB.instantiate("PCGInstanceCluster3D")
+            if instance != null and instance.has_method("compute_cluster_bounds"):
+                _cluster_native = instance
+        if _cluster_native != null and _cluster_native.has_method("compute_cluster_bounds"):
+            return _cluster_native.call("compute_cluster_bounds", points, groups, margin)
+    if (points.size() > MAX_SCENERY_INSTANCES or groups.size() > MAX_SCENERY_CLUSTERS
+            or not is_finite(margin) or margin < 0.0 or margin > 10000.0
+            or (points.is_empty() != groups.is_empty())):
+        return result
+    for p in points:
+        if not p.is_finite() or absf(p.x) > 10000000.0 or \
+                absf(p.y) > 10000000.0 or absf(p.z) > 10000000.0:
+            return []
+    if points.is_empty():
+        return result
+    var visited := PackedByteArray()
+    visited.resize(points.size())
+    visited.fill(0)
+    var count: int = 0
+    for group_variant in groups:
+        if not (group_variant is PackedInt32Array):
+            return []
+        var indices: PackedInt32Array = group_variant
+        if indices.is_empty():
+            return []
+        var lower := Vector3(INF, INF, INF)
+        var upper := Vector3(-INF, -INF, -INF)
+        for index in indices:
+            if index < 0 or index >= points.size() or visited[index] != 0:
+                return []
+            visited[index] = 1
+            count += 1
+            var p: Vector3 = points[index]
+            lower = Vector3(minf(lower.x, p.x), minf(lower.y, p.y),
+                minf(lower.z, p.z))
+            upper = Vector3(maxf(upper.x, p.x), maxf(upper.y, p.y),
+                maxf(upper.z, p.z))
+        result.append(AABB(lower, upper - lower).grow(margin))
+    if count != points.size():
+        return []
+    return result
+
+
 ## Native 3D spatial cells yield tighter cullable MultiMesh bounds on steep
 ## terrain; flat ground still produces the same stable 32 m XY-plane tiles.
 ## Every instance appears in exactly one batch, preserving its original order.
@@ -894,6 +945,18 @@ static func add(parent: Node3D, mesh: Mesh, transforms: Array[Transform3D], draw
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
 		instance.custom_aabb = bounds_for_instance(multimesh, mesh, ordered)
+		# Native PCG cluster anchor bounds describe where *instances* live,
+		# excluding offsets in an imported mesh's local AABB. This improves
+		# projected foliage LOD decisions without shrinking render AABBs.
+		var anchor_points := PackedVector3Array()
+		var all_indices := PackedInt32Array()
+		for i in ordered.size():
+			anchor_points.append(ordered[i].origin)
+			all_indices.append(i)
+		var anchor_bounds: Array = cluster_point_bounds(
+			anchor_points, [all_indices], 0.0)
+		if anchor_bounds.size() == 1:
+			instance.set_meta("aa_pcg_anchor_bounds", anchor_bounds[0])
 		if density_scalable:
 			instance.set_meta("aa_density_scalable", true)
 			# Cache a representative mesh diameter only once, including authored

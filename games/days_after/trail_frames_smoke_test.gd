@@ -73,6 +73,32 @@ func _smoke() -> void:
         failures += 1
 
     var visible: PackedVector3Array = trail.get_selected_positions()
+    if not trail.verify_anchor_bounds_parity():
+        push_error("PCG TRAIL FRAME: native cluster anchor AABB differs from GDScript")
+        failures += 1
+    var point_bounds: AABB = trail.get_anchor_bounds()
+    if visible.size() > 0:
+        var source_union := AABB(visible[0], Vector3.ZERO)
+        for stone in visible:
+            source_union = source_union.expand(stone)
+            if (stone.x < point_bounds.position.x - 0.0001
+                    or stone.y < point_bounds.position.y - 0.0001
+                    or stone.z < point_bounds.position.z - 0.0001
+                    or stone.x > point_bounds.end.x + 0.0001
+                    or stone.y > point_bounds.end.y + 0.0001
+                    or stone.z > point_bounds.end.z + 0.0001):
+                push_error("PCG TRAIL FRAME: native anchor bounds lost a source stone")
+                failures += 1
+                break
+        if point_bounds.position.distance_to(source_union.position) > 0.0001 or (
+                point_bounds.size.distance_to(source_union.size) > 0.0001):
+            push_error("PCG TRAIL FRAME: source AABB was not tightly bounded")
+            failures += 1
+        if trail.custom_aabb.position.distance_to(point_bounds.grow(0.75).position) > 0.0001 or (
+                trail.custom_aabb.size.distance_to(point_bounds.grow(0.75).size) > 0.0001):
+            push_error("PCG TRAIL FRAME: draw AABB is not padded around native anchors")
+            failures += 1
+
     if trail.multimesh == null or trail.multimesh.instance_count != visible.size():
         push_error("PCG TRAIL FRAME: one MultiMesh instance was not created per visible marker")
         failures += 1

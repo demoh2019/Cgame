@@ -167,4 +167,112 @@ TEST_CASE("[PCGInstanceCluster3D] adaptive retries and invalid inputs are strict
 	CHECK(planner->partition_indices_adaptive(positions).is_empty());
 }
 
+TEST_CASE("[PCGInstanceCluster3D] anchor bounds are exact, ordered and 3D height-aware") {
+	Ref<PCGInstanceCluster3D> planner;
+	planner.instantiate();
+	const PackedVector3Array points = {
+		Vector3(-4, 0, -3), Vector3(4, 2, 2),
+		Vector3(0, 75, 0), Vector3(2, 76, 5)
+	};
+	const Array clusters = {
+		PackedInt32Array({ 0, 1 }), PackedInt32Array({ 2, 3 })
+	};
+	const Array bounds = planner->compute_cluster_bounds(points, clusters);
+	REQUIRE(bounds.size() == 2);
+	const AABB low = bounds[0];
+	const AABB high = bounds[1];
+	CHECK(low.position == Vector3(-4, 0, -3));
+	CHECK(low.size == Vector3(8, 2, 5));
+	CHECK(high.position == Vector3(0, 75, 0));
+	CHECK(high.size == Vector3(2, 1, 5));
+	CHECK(low.get_end().y < high.position.y);
+	CHECK(planner->compute_cluster_bounds(points, clusters) == bounds);
+	const Array padded = planner->compute_cluster_bounds(points, clusters, 0.6);
+	REQUIRE(padded.size() == 2);
+	const AABB padded_low = padded[0];
+	CHECK(padded_low.position.distance_to(Vector3(-4.6, -0.6, -3.6)) < 0.00001);
+	CHECK(padded_low.size.distance_to(Vector3(9.2, 3.2, 6.2)) < 0.00001);
+	CHECK(points[0] == Vector3(-4, 0, -3)); // Caller-owned points unchanged.
+}
+
+TEST_CASE("[PCGInstanceCluster3D] computed bounds match adaptive clustering and cover all points") {
+	Ref<PCGInstanceCluster3D> planner;
+	planner.instantiate();
+	PackedVector3Array points;
+	for (int i = 0; i < 80; ++i) {
+		points.push_back(Vector3(i * 33.0, i % 2 == 0 ? 0.0 : 75.0, i % 5));
+	}
+	const Array groups = planner->partition_indices_adaptive(points, 32.0, 48, 5);
+	REQUIRE(groups.size() > 1);
+	const Array bounds = planner->compute_cluster_bounds(points, groups, 0.25);
+	REQUIRE(bounds.size() == groups.size());
+	int visited = 0;
+	for (int g = 0; g < groups.size(); ++g) {
+		const AABB group_bounds = bounds[g];
+		const PackedInt32Array ids = groups[g];
+		for (int index : ids) {
+			CHECK(group_bounds.has_point(points[index]));
+			++visited;
+		}
+	}
+	CHECK(visited == points.size());
+	const Array single = planner->compute_cluster_bounds(points,
+			planner->partition_indices(points, 32.0, 48, 1));
+	REQUIRE(single.size() == 1);
+	const AABB aggregate = single[0];
+	CHECK(aggregate.position == points[0]);
+	CHECK(aggregate.get_end().x == points[79].x);
+	CHECK(aggregate.position.y <= points[0].y);
+	CHECK(aggregate.get_end().y >= points[79].y);
+}
+
+TEST_CASE("[PCGInstanceCluster3D] cluster bounds validate complete exact-cover partitions") {
+	Ref<PCGInstanceCluster3D> planner;
+	planner.instantiate();
+	const PackedVector3Array points = {
+		Vector3(0, 0, 0), Vector3(2, 0, 1), Vector3(4, 0, 2)
+	};
+	const Array groups = {
+		PackedInt32Array({ 0, 2 }), PackedInt32Array({ 1 })
+	};
+	CHECK(planner->compute_cluster_bounds({}, {}).is_empty());
+	CHECK(planner->compute_cluster_bounds(points, groups).size() == 2);
+	CHECK(planner->compute_cluster_bounds(points, {}).is_empty());
+	CHECK(planner->compute_cluster_bounds({}, groups).is_empty());
+	CHECK(planner->compute_cluster_bounds(points, { PackedInt32Array({ 0, 1 }) }).is_empty());
+	CHECK(planner->compute_cluster_bounds(points,
+			{ PackedInt32Array({ 0, 1, 1, 2 }) }).is_empty());
+	CHECK(planner->compute_cluster_bounds(points,
+			{ PackedInt32Array({ 0, 1 }), PackedInt32Array({ 1, 2 }) }).is_empty());
+	CHECK(planner->compute_cluster_bounds(points,
+			{ PackedInt32Array({ 0, 1, 3 }) }).is_empty());
+	CHECK(planner->compute_cluster_bounds(points,
+			{ PackedInt32Array({ -1, 0, 1, 2 }) }).is_empty());
+	CHECK(planner->compute_cluster_bounds(points,
+			{ PackedInt32Array({ 0, 1, 2 }), PackedInt32Array() }).is_empty());
+	CHECK(planner->compute_cluster_bounds(points, { 7, groups[0] }).is_empty());
+	CHECK(planner->compute_cluster_bounds(points, groups, -1.0).is_empty());
+	CHECK(planner->compute_cluster_bounds(points, groups, Math::NaN).is_empty());
+	CHECK(planner->compute_cluster_bounds(points, groups, 10001.0).is_empty());
+	const PackedVector3Array bad_point = {
+		Vector3(0, 0, 0), Vector3(Math::INF, 0, 1), Vector3(4, 0, 2)
+	};
+	CHECK(planner->compute_cluster_bounds(bad_point, groups).is_empty());
+	const PackedVector3Array out_of_range = {
+		Vector3(0, 0, 0), Vector3(2, 0, 1), Vector3(0, 0, 10000001)
+	};
+	CHECK(planner->compute_cluster_bounds(out_of_range, groups).is_empty());
+	PackedVector3Array huge;
+	huge.resize(65537);
+	CHECK(planner->compute_cluster_bounds(huge, {}).is_empty());
+	// Limit 256 clusters even when individual groups are otherwise well-formed.
+	PackedVector3Array many_points;
+	Array many_groups;
+	for (int i = 0; i < 257; ++i) {
+		many_points.push_back(Vector3(i, 0, 0));
+		many_groups.push_back(PackedInt32Array({ i }));
+	}
+	CHECK(planner->compute_cluster_bounds(many_points, many_groups).is_empty());
+}
+
 } // namespace TestPCGInstanceCluster3D
