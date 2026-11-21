@@ -313,7 +313,7 @@ func flush_bursts() -> void:
 		"dropped": _pending_bursts.size() - actual,
 		"planned_particles": planned_particles,
 		"particle_budget": FxPolicy.particle_budget_for(GraphicsQuality.level()),
-		"native": _native_fx_budget != null,
+		"native": _native_fx_budget != null and _native_fx_budget.has_method("select_effects_visible_costed"),
 	}
 	_pending_bursts.clear()
 
