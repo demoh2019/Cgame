@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AIBehaviorTrace" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Bounded, opt-in timeline of individual AI task executions within one simulation tick.</brief_description>
+	<description>
+		Stores the order that tasks are entered, their tree path, class, returned status and inclusive CPU duration in microseconds. The owner explicitly calls [method begin_tick] to clear old records, [method begin_step] when entering a task and [method end_step] when it finishes. [BehaviorTreeRunner] instruments its entire native Resource tree when [member BehaviorTreeRunner.trace_enabled] is enabled.
+		A trace retains only the most recent tick. The capacity is configurable from 1 to 256 task entries (default 128), and excess entries increment a truncation counter. Disabled runners never construct trace records or call the timing clock. Shared tree Resources do not share trace state, because each runner owns its trace. A custom script task invoked through the native wrapper is recorded as one step, but internal GDScript operations are not instrumented.
+		Values in [method get_snapshot] are detached. The trace exposes task decisions and possibly sensitive names/paths: do not replicate internal AI traces or Blackboard contents to untrusted game clients. This is an execution history and lightweight profiler, not a graphical Godot editor panel, background sampling service, or guarantee that wall-clock execution is independent of frame scheduling.
+	</description>
+	<methods>
+		<method name="set_max_steps"><return type="void" /><param index="0" name="max_steps" type="int" /><description>Sets the number of recorded task entries per tick to 1–256. Changing the capacity clears current state.</description></method>
+		<method name="get_max_steps" qualifiers="const"><return type="int" /><description>Returns the current step limit, initially 128.</description></method>
+		<method name="begin_tick"><return type="void" /><description>Starts a new logical AI tick, clearing the previous timeline and incrementing the internal tick index.</description></method>
+		<method name="begin_step"><return type="int" /><param index="0" name="path" type="String" /><param index="1" name="task_class" type="String" /><description>Registers a new task entry in pre-order and returns its token, or -1 if the tick is at capacity. Paths and class names must be nonempty and bounded.</description></method>
+		<method name="end_step"><return type="bool" /><param index="0" name="token" type="int" /><param index="1" name="status" type="int" enum="BehaviorTreeTask.Status" /><description>Finalizes the entry with SUCCESS, FAILURE or RUNNING and elapsed microseconds. Returns false for an unknown/already-finished token or invalid status.</description></method>
+		<method name="get_snapshot" qualifiers="const"><return type="Dictionary" /><description>Returns a detached Dictionary with tick_index, max_steps, truncated and steps. Every step Dictionary has path, task_class, depth, status and duration_usec. Before its matching end_step, status is -1. CPU duration is inclusive of child execution.</description></method>
+		<method name="reset"><return type="void" /><description>Clears entries, truncation count and tick index without changing the configured capacity.</description></method>
+	</methods>
+	<members>
+		<member name="max_steps" type="int" default="128">Maximum number of task entries retained in a single tick.</member>
+	</members>
+</class>
