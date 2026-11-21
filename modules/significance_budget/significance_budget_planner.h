@@ -42,6 +42,12 @@ public:
 			const PackedByteArray &p_visible, const PackedInt32Array &p_category_caps,
 			int p_budget, double p_max_distance) const;
 
+	// Native Niagara-style effect budgets with per-category visible ranges.
+	PackedInt32Array select_effects_visible_ranged(const PackedFloat64Array &p_distances,
+			const PackedByteArray &p_priorities, const PackedByteArray &p_categories,
+			const PackedByteArray &p_visible, const PackedInt32Array &p_category_caps,
+			const PackedFloat64Array &p_category_ranges, int p_budget) const;
+
 	// Priority-tier ranking with stable ID retention: only peers in the same
 	// priority tier compete via distance hysteresis, never bosses vs normals.
 	PackedInt32Array select_top_priority_stable(const PackedFloat64Array &p_distances,
