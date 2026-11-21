@@ -367,6 +367,49 @@ void WorldStreamer::_update_streaming() {
 	WorldStreamingGrid::prioritize_cells_for_motion_and_view(wanted, position,
 			velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
 			view_direction, view_priority, cell_size, _grid_axes());
+	// Route hints only REORDER cells already selected for player residency.
+	// Route pathfinding is performed by gameplay (AStarGrid2D), not by
+	// this per-frame engine scheduler. The player's own cell stays first.
+	if (route_hint_cells.size() > 1 && route_hint_cells[0] == world_to_cell(position)) {
+		HashSet<Vector3i> candidates;
+		for (const Vector3i &cell : wanted) {
+			candidates.insert(cell);
+		}
+		HashSet<Vector3i> selected;
+		LocalVector<Vector3i> route;
+		for (const Vector3i &cell : route_hint_cells) {
+			if (cell != route_hint_cells[0] && candidates.has(cell) && !selected.has(cell)) {
+				selected.insert(cell);
+				route.push_back(cell);
+			}
+		}
+		if (!route.is_empty() && candidates.has(route_hint_cells[0])) {
+			LocalVector<Vector3i> normal;
+			for (const Vector3i &cell : wanted) {
+				if (cell != route_hint_cells[0] && !selected.has(cell)) {
+					normal.push_back(cell);
+				}
+			}
+			LocalVector<Vector3i> reordered;
+			reordered.reserve(wanted.size());
+			reordered.push_back(route_hint_cells[0]);
+			uint32_t route_index = 0;
+			uint32_t normal_index = 0;
+			while (route_index < route.size() || normal_index < normal.size()) {
+				if (route_index < route.size()) {
+					reordered.push_back(route[route_index++]);
+				}
+				// Never starve non-route chunks: at least two regular cells
+				// can run between successive route promotions.
+				for (int n = 0; n < 2 && normal_index < normal.size(); n++) {
+					reordered.push_back(normal[normal_index++]);
+				}
+			}
+			if (reordered.size() == wanted.size()) {
+				wanted = reordered;
+			}
+		}
+	}
 	// A nearby cinematic/waypoint target may contribute a handful of extra
 	// cells outside the player sphere. Never sacrifice the bounded player
 	// set; interleave at most one auxiliary cell per three primary cells,
