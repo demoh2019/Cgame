@@ -62,6 +62,11 @@ static func unload_time_budget_for_quality(value: int) -> int:
 	return [400, 650, 900, 1200][clampi(value, 0, 3)]
 
 
+## Conservative detached cosmetic scene cache estimate, not physical RAM.
+static func streamed_chunk_cache_bytes_for_quality(value: int) -> int:
+	return [8, 16, 24, 32][clampi(value, 0, 3)] * 1048576
+
+
 ## Startup only: Unreal World Partition-style area ramp. Preserve a safe
 ## nearby terrain area and gradually request the configured full range.
 ## Fractions scale area, not distance, on our 2D XZ streaming grid.
@@ -431,6 +436,11 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 			var unload_limit: int = unload_budget_for_quality(_level)
 			if int(streamer.call("get_max_unloads_per_update")) != unload_limit:
 				streamer.call("set_max_unloads_per_update", unload_limit)
+		# Runtime quality changes immediately trim detached cosmetic cache.
+		if streamer.has_method("set_max_cached_chunk_bytes"):
+			var cache_bytes: int = streamed_chunk_cache_bytes_for_quality(_level)
+			if int(streamer.call("get_max_cached_chunk_bytes")) != cache_bytes:
+				streamer.call("set_max_cached_chunk_bytes", cache_bytes)
 		# One expensive scene detach must not consume a whole frame of
 		# subsequent cleanup. Older native builds remain fully compatible.
 		if streamer.has_method("set_max_unload_work_usec"):

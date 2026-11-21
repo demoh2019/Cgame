@@ -162,6 +162,10 @@
 				Returns the loaded chunk of [param cell], or [code]null[/code] if that cell is not loaded.
 			</description>
 		</method>
+		<method name="get_cached_chunk_bytes" qualifiers="const">
+			<return type="int" />
+			<description>Total game-reported estimated bytes retained in detached cached procedural chunks, excluding shared assets, pending frees and runtime GPU allocation. Count-only legacy entries contribute zero. Not actual measured RAM/VRAM.</description>
+		</method>
 		<method name="get_cached_chunk_count" qualifiers="const">
 			<return type="int" />
 			<description>Number of detached, cached procedural scene roots. These do not count toward [method get_loaded_count] and cannot be returned by [method get_chunk].</description>
@@ -367,6 +371,9 @@
 		</member>
 		<member name="max_concurrent_loads" type="int" setter="set_max_concurrent_loads" getter="get_max_concurrent_loads" default="4">
 			Maximum number of chunks loading in the background at the same time.
+		</member>
+		<member name="max_cached_chunk_bytes" type="int" setter="set_max_cached_chunk_bytes" getter="get_max_cached_chunk_bytes" default="0">
+			Optional estimated memory budget for detached procedural scene roots, clamped to 0–268435456 bytes (256 MiB). Zero preserves original count-only caching. A positive value requires each opted-in chunk to implement [code]get_streaming_cache_cost_bytes() -&gt; int[/code] and return a positive estimate no greater than the cap. Unknown, invalid and oversized values decline caching; overbudget caches evict oldest unrequested roots first. These gameplay estimates do not guarantee physical RAM/VRAM, include shared assets or track pending queued frees. Decreasing the budget immediately trims detached roots and never touches active/authoritative world residency.
 		</member>
 		<member name="max_cached_chunks" type="int" setter="set_max_cached_chunks" getter="get_max_cached_chunks" default="0">
 			Opt-in bounded cache for unloaded, procedural Node roots that implement [code]can_cache_streaming_chunk() -&gt; bool[/code] and explicitly return [code]true[/code]. Zero preserves normal unload-and-free behavior; values are clamped to 0–16 complete scene roots. Cached roots are detached and do not render or simulate, but still retain memory. Least-recent entries are evicted first, but cells requested again by the current focus/source take precedence over nonrequested cached cells. Returning to the exact cell reattaches through the ordinary budgeted load path and optionally invokes [code]on_streaming_cache_restored()[/code] after adoption. Cached roots are cleared on grid/parent/generator changes, manual unload and destruction; only immutable client visuals should opt in. Not for authoritative entities, physics, quest state, or network-owned objects.

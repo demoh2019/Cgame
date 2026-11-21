@@ -154,9 +154,12 @@ private:
 	struct CachedChunk {
 		ObjectID node_id;
 		uint64_t age = 0;
+		int64_t estimated_bytes = 0;
 	};
 	HashMap<Vector3i, CachedChunk> cached_chunks;
 	int max_cached_chunks = 0; // Zero preserves legacy free-on-unload.
+	int64_t max_cached_chunk_bytes = 0;
+	int64_t cached_chunk_bytes = 0;
 	uint64_t cache_clock = 0;
 	int cache_hits = 0;
 	int cache_evictions = 0;
@@ -345,6 +348,9 @@ public:
 	// Cached chunks never count as loaded and reinsertion is still frame-budgeted.
 	void set_max_cached_chunks(int p_count);
 	int get_max_cached_chunks() const { return max_cached_chunks; }
+	void set_max_cached_chunk_bytes(int64_t p_bytes);
+	int64_t get_max_cached_chunk_bytes() const { return max_cached_chunk_bytes; }
+	int64_t get_cached_chunk_bytes() const { return cached_chunk_bytes; }
 	int get_cached_chunk_count() const { return int(cached_chunks.size()); }
 	int get_chunk_cache_hit_count() const { return cache_hits; }
 	int get_chunk_cache_eviction_count() const { return cache_evictions; }

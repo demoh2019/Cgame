@@ -1323,6 +1323,22 @@ func can_cache_streaming_chunk() -> bool:
 	return true
 
 
+## Conservative cached-scene estimate. Shared shader/texture assets are
+## excluded to avoid double counting; this does not measure RAM or VRAM.
+func get_streaming_cache_cost_bytes() -> int:
+	var bytes: int = 8 * 1048576
+	bytes += _raw_heights.size() * 4
+	bytes += _base_curvature_colors.size() * 16
+	bytes += _horizon_cached.size() * 4
+	bytes += _road_data.size()
+	bytes += _patches.size() * 16
+	bytes += _grass_tiles.size() * 262144
+	bytes += _groups.size() * 1048576
+	bytes += _decor_tasks.size() * 256
+	bytes += get_child_count() * 16384
+	return maxi(1, bytes)
+
+
 ## Reattached scenes never rerun _ready(). Restore deferred decor queue
 ## membership and force grass/shadow LOD checks near the new camera position.
 func on_streaming_cache_restored() -> void:
