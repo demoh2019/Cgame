@@ -3423,3 +3423,16 @@ Run the test suite using:
 ```sh
 godot --headless --path game --script res://tests/run_all.gd
 ```
+
+## Native directional EQS tactical flanking
+
+On Cgame builds with the optional `EnvironmentQuery3D` direction-dot filter,
+regular infected rank flanking points on the sides or far side of a moving
+survivor rather than choosing the nearest oncoming point. The test is
+independent of the movement origin, uses the XZ plane, and is computed only on
+an existing cached tactical replan. This is a server-owned position decision;
+it does not add client commands or change attack validation. Legacy binaries
+use their previous ring scoring; stock Godot still uses direct chase.
+
+Regression: `game/tests/test_zombie_ai.gd` and
+`tests/scene/test_environment_query_3d.cpp`.
