@@ -7,7 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 
 const CHECK_EVERY_TICKS := 20
 const START_DELAY := 480.0
-const COOLDOWN_SECONDS := 780.0
+const COOLDOWN_SECONDS := 480.0
 const RETRY_SECONDS := 60.0
 const MAX_DURATION := 300.0
 const CACHE_DURATION := 240.0

@@ -92,6 +92,7 @@ const ParryRiposte = preload("res://scripts/shared/parry_riposte.gd")
 const StaggerFinisher = preload("res://scripts/shared/stagger_finisher.gd")
 const ArcaneAbilities = preload("res://scripts/shared/arcane_abilities.gd")
 const Swimming = preload("res://scripts/shared/swimming.gd")
+const WorldIncidents = preload("res://scripts/shared/world_incidents.gd")
 const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
@@ -339,6 +340,7 @@ var zombies: Dictionary = {} # zombie id -> Zombie
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var next_supply_drop_at: float = SupplyDrops.INTERVAL_SECONDS # Server-owned session clock.
+var next_incident_at: float = 45.0 # First random world incident soon after start.
 var next_horde_at: float = NightHorde.START_DELAY # Separate night event schedule.
 var night_horde: Dictionary = {} # Active IDs, expiry, tier, public event coordinates.
 var caravan_ambushes: Array[Dictionary] = [] # Bounded server waves with expiry.
@@ -7375,6 +7377,56 @@ func _nearest_player_distance(point: Vector2) -> float:
 
 
 ## Periodic server-owned public caches in dangerous PvP zones.
+## Random incidents near a survivor outside safe ground: a horde drawn toward them, a guarded
+## survivors' cache, or a screamer with an escort. All spawns are server-owned and capped.
+func _tick_world_incidents() -> void:
+	if time < next_incident_at:
+		return
+	next_incident_at = time + WorldIncidents.RETRY_SECONDS
+	if zombies.size() >= WorldIncidents.MAX_ACTIVE_INFECTED:
+		return
+	var candidates: Array = []
+	for player in players.values():
+		if _alive(player) and player.position.is_finite() and not _is_safe(player.position):
+			candidates.append(player)
+	if candidates.is_empty():
+		return
+	var target: Player = candidates[rng.randi_range(0, candidates.size() - 1)]
+	var site: Dictionary = WorldIncidents.site_near(world, target.position, rng)
+	if site.is_empty():
+		return
+	var kind: String = WorldIncidents.pick_kind(rng)
+	var zone: int = int(site["zone"])
+	var center := Vector2(float(site["x"]), float(site["z"]))
+	var lure := Vector2(target.position.x, target.position.z)
+	var bag_id := -1
+	if kind == "cache":
+		var loot: Dictionary = Combat.crate_loot(zone, rng)
+		loot["silver"] = int(loot.get("silver", 0)) + rng.randi_range(10, 25) * (zone + 1)
+		bag_id = _make_bag(Vector3(center.x, float(site["y"]), center.y), loot)
+		lure = center # Guards hold the cache instead of hunting.
+	var spawned := 0
+	for type in WorldIncidents.roster(kind, zone, rng):
+		if zombies.size() >= WorldIncidents.MAX_ACTIVE_INFECTED:
+			break
+		var spot: Vector2 = center + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(1.5, 7.0)
+		if world.is_water(spot.x, spot.y):
+			continue
+		var enemy_id: int = new_id()
+		var enemy = Zombie.new(enemy_id, str(type), Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y), -1)
+		enemy.investigate_decoy(lure)
+		enemy.investigate_time = 30.0 if kind != "cache" else 600.0
+		if bag_id >= 0:
+			enemy.supply_cache_id = bag_id
+		zombies[enemy_id] = enemy
+		spawned += 1
+	if spawned == 0 and bag_id < 0:
+		return
+	next_incident_at = time + WorldIncidents.next_delay(rng)
+	events.append({"type": "incident", "kind": kind, "x": center.x, "z": center.y,
+		"count": spawned, "zone": zone, "peer": target.id})
+
+
 func _tick_supply_drop() -> void:
 	if time < next_supply_drop_at:
 		return
@@ -7558,6 +7610,7 @@ func _tick_world(delta: float) -> void:
 	_tick_supply_drop()
 	_tick_night_horde()
 	_tick_caravan_ambush()
+	_tick_world_incidents()
 	_tick_ruin_ambush()
 	for id in decoys.keys():
 		if time >= float(decoys[id]["expires"]):

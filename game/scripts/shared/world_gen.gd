@@ -310,18 +310,22 @@ func _add_hostiles(cell: Vector2i, origin: Vector2, zone: int, ruin: bool, spawn
 		for i in hrng.randi_range(2, 4) + zone:
 			picks.append(["crawler" if hrng.randf() < 0.5 else "walker", center + _jitter(hrng, 22.0)])
 	elif zone == 0:
-		for i in hrng.randi_range(0, 2):
+		for i in hrng.randi_range(1, 4):
 			picks.append(["walker", origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
+		if hrng.randf() < 0.2:
+			var green_nest := origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE
+			for i in hrng.randi_range(3, 5):
+				picks.append(["crawler", green_nest + _jitter(hrng, 5.0)])
 	else:
-		if hrng.randf() < 0.3 + 0.1 * zone:
+		if hrng.randf() < 0.45 + 0.1 * zone:
 			var nest := origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE
 			for i in hrng.randi_range(4, 6) + zone:
 				picks.append(["crawler", nest + _jitter(hrng, 6.0)])
-		if hrng.randf() < 0.15 + 0.1 * zone:
+		if hrng.randf() < 0.25 + 0.1 * zone:
 			picks.append(["stalker", origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
-		if hrng.randf() < 0.1 + 0.05 * zone:
+		if hrng.randf() < 0.18 + 0.05 * zone:
 			picks.append(["howler", origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
-		for i in hrng.randi_range(1, 2 + zone):
+		for i in hrng.randi_range(2, 4 + zone):
 			picks.append([_pick_zombie(zone, hrng), origin + Vector2(hrng.randf(), hrng.randf()) * Defs.CHUNK_SIZE])
 	var k := 0
 	for pick in picks:
@@ -336,6 +340,70 @@ func _add_hostiles(cell: Vector2i, origin: Vector2, zone: int, ruin: bool, spawn
 
 static func _jitter(rng: RandomNumberGenerator, radius: float) -> Vector2:
 	return Vector2(rng.randf_range(-radius, radius), rng.randf_range(-radius, radius))
+
+
+## Lone wilderness outposts between the settlements: a trapper's shack, a watchtower, or a cluster
+## of ruins, often with a loot crate and some clutter. Collidable structures shared by server and
+## client; own random stream (ids 850-899), so everything else in the chunk keeps its place.
+const OUTPOST_ID_BASE := 850
+const OUTPOST_CHANCE := 0.22
+
+
+func _add_outposts(cell: Vector2i, origin: Vector2, zone: int, ruin: bool, structures: Array, crates: Array,
+		props: Array, sites: Array) -> void:
+	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if ruin or center.length() < Defs.HUB_SAFE_RADIUS + 80.0 or Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
+		return
+	var orng := RandomNumberGenerator.new()
+	orng.seed = mix(cell.x, cell.y, world_seed, 131)
+	if orng.randf() > OUTPOST_CHANCE:
+		return
+	var at := origin + Vector2(orng.randf_range(14.0, 50.0), orng.randf_range(14.0, 50.0))
+	if is_water(at.x, at.y) or is_safe(at.x, at.y) or normal_at(at.x, at.y).y < 0.85:
+		return
+	for site in sites:
+		if at.distance_to(Vector2(float(site["x"]), float(site["z"]))) < float(site["radius"]) + 25.0:
+			return
+	var index := OUTPOST_ID_BASE
+	var kind_roll := orng.randf()
+	var yaw := orng.randf() * TAU
+	if kind_roll < 0.4:
+		# Trapper's shack.
+		structures.append({"id": entity_id(cell, index), "kind": "building", "variant": orng.randi_range(0, BUILDING_VARIANTS - 1),
+			"scale": BUILDING_SCALE, "x": at.x, "z": at.y, "y": height_at(at.x, at.y), "yaw": yaw,
+			"radius": BUILDING_SCALE * 0.62, "blocks": true})
+		index += 1
+	elif kind_roll < 0.7:
+		# Watchtower.
+		structures.append({"id": entity_id(cell, index), "kind": "tower", "variant": orng.randi_range(0, WorldPoi.TOWER_VARIANTS - 1),
+			"scale": 5.0 * orng.randf_range(0.8, 1.1), "x": at.x, "z": at.y, "y": height_at(at.x, at.y), "yaw": 0.0,
+			"radius": 2.4, "blocks": true})
+		index += 1
+	else:
+		# Overgrown ruins: a few broken walls and remains.
+		for r in orng.randi_range(2, 4):
+			var p := at + Vector2.from_angle(orng.randf() * TAU) * orng.randf_range(3.0, 9.0)
+			if is_water(p.x, p.y):
+				continue
+			var variant := orng.randi_range(0, WorldPoi.RUIN_RADII.size() - 1)
+			structures.append({"id": entity_id(cell, index), "kind": "ruin", "variant": variant, "scale": 1.0,
+				"x": p.x, "z": p.y, "y": height_at(p.x, p.y), "yaw": orng.randf() * TAU,
+				"radius": WorldPoi.RUIN_RADII[variant], "blocks": true})
+			index += 1
+	# Clutter and, often, a crate to scavenge.
+	for c in orng.randi_range(2, 4):
+		var p := at + Vector2.from_angle(orng.randf() * TAU) * orng.randf_range(4.5, 8.0)
+		if is_water(p.x, p.y):
+			continue
+		var variant := orng.randi_range(0, mini(8, WorldPoi.PROP_RADII.size() - 1))
+		props.append({"id": entity_id(cell, index), "kind": "prop", "variant": variant, "x": p.x, "z": p.y, "y": height_at(p.x, p.y),
+			"yaw": orng.randf() * TAU, "scale": 1.5, "radius": WorldPoi.PROP_RADII[variant], "blocks": true})
+		index += 1
+	if orng.randf() < 0.65:
+		var p := at + Vector2.from_angle(orng.randf() * TAU) * orng.randf_range(4.0, 6.0)
+		if not is_water(p.x, p.y):
+			crates.append({"id": entity_id(cell, index), "kind": "crate", "tier": tier_for_zone(zone),
+				"x": p.x, "z": p.y, "y": height_at(p.x, p.y), "radius": 0.6, "blocks": true})
 
 
 ## Extra trees in groves, so forests read as forests: a few grove centres per chunk with trees
@@ -564,6 +632,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	_add_sunken_caches(cell, origin, zone, crates)
 	_add_hostiles(cell, origin, zone, ruin, spawns)
 	_add_groves(cell, origin, tier, nodes, sites)
+	_add_outposts(cell, origin, zone, ruin, structures, crates, props, sites)
 	return {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
 
 

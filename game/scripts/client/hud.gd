@@ -2205,6 +2205,19 @@ func _on_event(event: Dictionary) -> void:
 			if involved:
 				banner("SIEGE %s" % str(event.get("result", "over")).to_upper().replace("_", " "), Color(0.95, 0.78, 0.35))
 		# Combat feedback that used to show only as numbers.
+		"incident":
+			var spot := Vector2(float(event.get("x", 0.0)), float(event.get("z", 0.0)))
+			var me := Vector2(client.predicted.x, client.predicted.z)
+			var offset: Vector2 = spot - me
+			if offset.length() <= 160.0:
+				var bearing: String = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][int(round(fposmod(atan2(offset.x, -offset.y), TAU) / (TAU / 8.0))) % 8]
+				match str(event.get("kind", "")):
+					"horde":
+						banner("A HORDE IS MOVING IN — %s, %d m" % [bearing, int(offset.length())], Color(1.0, 0.5, 0.35))
+					"cache":
+						banner("SURVIVORS' CACHE SPOTTED — %s, %d m (guarded)" % [bearing, int(offset.length())], Color(0.95, 0.82, 0.4))
+					"screamer":
+						banner("A SCREAMER STALKS NEARBY — %s, %d m" % [bearing, int(offset.length())], Color(0.85, 0.65, 1.0))
 		"howl":
 			var heard_from := Vector2(float(event.get("x", 0.0)), float(event.get("z", 0.0)))
 			var me := Vector2(client.predicted.x, client.predicted.z)

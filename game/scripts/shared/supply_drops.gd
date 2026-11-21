@@ -5,7 +5,7 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 
-const INTERVAL_SECONDS := 600.0
+const INTERVAL_SECONDS := 300.0
 const RETRY_SECONDS := 60.0
 const LIFETIME_SECONDS := 420.0
 const MIN_DISTANCE := 32.0
