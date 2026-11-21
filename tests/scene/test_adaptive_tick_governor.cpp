@@ -50,7 +50,7 @@ TEST_CASE("[AdaptiveTickGovernor] Bounded samples and nearest-rank telemetry") {
 	CHECK(ordered[0] == doctest::Approx(2.0));
 	CHECK(ordered[199] == doctest::Approx(201.0));
 	CHECK(double(governor->snapshot()["tick_max_ms"]) == doctest::Approx(201.0));
-	CHECK(double(governor->snapshot()["tick_p95_ms"]) == doctest::Approx(192.0));
+	CHECK(double(governor->snapshot()["tick_p95_ms"]) == doctest::Approx(191.0));
 	CHECK(governor->snapshot()["native_backend"] == true);
 	governor->reset();
 	CHECK(governor->get_history_count() == 0);
