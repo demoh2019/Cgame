@@ -152,6 +152,21 @@ TEST_CASE("[AIVisualSensor2D] Invalid configuration leaves previous values intac
 	CHECK_FALSE(sensor->is_target_visible());
 }
 
+TEST_CASE("[AIVisualSensor2D] Unobserved target memory expires after time passes") {
+	Ref<AIVisualSensor2D> sensor;
+	sensor.instantiate();
+	sensor->set_memory_duration(1.0);
+	sensor->observe(Vector2(), Vector2(1, 0), Vector2(20, 0), true, 0.1);
+	CHECK(sensor->is_target_visible());
+	sensor->advance_time(0.3);
+	CHECK_FALSE(sensor->is_target_visible());
+	CHECK(sensor->has_target_memory());
+	CHECK(sensor->get_last_known_position() == Vector2(20, 0));
+	sensor->advance_time(0.7);
+	CHECK_FALSE(sensor->has_target_memory());
+	CHECK(sensor->get_memory_remaining() == real_t(0.0));
+}
+
 TEST_CASE("[AIVisualSensor2D] Sensors do not share target memory") {
 	Ref<AIVisualSensor2D> a;
 	a.instantiate();
