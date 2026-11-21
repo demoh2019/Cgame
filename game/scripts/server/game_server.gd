@@ -4,7 +4,7 @@ extends RefCounted
 ## reads snapshots out of it, so the whole game can be tested by calling it directly.
 
 const LagCompensation = preload("res://scripts/server/lag_compensation.gd")
-const HTNPlanner = preload("res://scripts/shared/htn_planner.gd")
+const HTNPlanner = preload("res://scripts/native/htn_planner.gd") # Native CgameHTNPlanner when built in.
 const InfectedRaidDomain = preload("res://scripts/shared/infected_raid_domain.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")

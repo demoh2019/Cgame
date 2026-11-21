@@ -17,7 +17,7 @@ const InfectedSight = preload("res://scripts/shared/infected_sight.gd")
 const InfectedMeleeCover = preload("res://scripts/shared/infected_melee_cover.gd")
 const NativeSenses = preload("res://scripts/shared/native_infected_senses.gd")
 const EffectRules = preload("res://scripts/shared/effect_application_rules.gd")
-const InfectedTargetUtility = preload("res://scripts/shared/infected_target_utility.gd")
+const InfectedTargetUtility = preload("res://scripts/native/infected_target_utility.gd") # Native CgameUtilityAI when built in.
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 

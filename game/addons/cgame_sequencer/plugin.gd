@@ -11,8 +11,6 @@ var _panel: Control = null
 
 
 func _enter_tree() -> void:
-	if not CinematicSequence.is_tool():
-		push_warning("cgame_sequencer: cinematic_sequence.gd is not @tool; editing inside the editor is limited.")
 	_panel = SequencerPanel.new()
 	_panel.custom_minimum_size = Vector2(0, 260)
 	add_control_to_bottom_panel(_panel, "Sequencer")
