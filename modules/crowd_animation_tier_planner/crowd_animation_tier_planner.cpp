@@ -65,18 +65,25 @@ void CrowdAnimationTierPlanner::_bind_methods() {
 			&CrowdAnimationTierPlanner::plan_tiers);
 	ClassDB::bind_method(D_METHOD("plan_visible_tiers", "distances", "priority_flags", "visible_flags", "full_budget", "priority_budget"),
 			&CrowdAnimationTierPlanner::plan_visible_tiers);
+	ClassDB::bind_method(D_METHOD("plan_visible_tiers_stable", "distances", "priority_flags", "visible_flags", "retained_full_flags", "full_budget", "priority_budget", "hysteresis"),
+			&CrowdAnimationTierPlanner::plan_visible_tiers_stable, DEFVAL(1.5));
 }
 
 // Shared budget planner: no second sorting pass and no additional per-actor
 // visibility metadata for legacy callers. Pure data; no scene-tree queries.
 static PackedInt32Array plan_tiers_internal(
 		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
-		const PackedByteArray *p_visible_flags, int p_full_budget, int p_priority_budget) {
+		const PackedByteArray *p_visible_flags, const PackedByteArray *p_retained_full_flags,
+		int p_full_budget, int p_priority_budget, double p_hysteresis) {
 	PackedInt32Array output;
 	const int count = p_distances.size();
 	ERR_FAIL_COND_V_MSG(count != p_priority_flags.size(), output, "Distance and priority arrays must match.");
 	ERR_FAIL_COND_V_MSG(p_visible_flags != nullptr && p_visible_flags->size() != count, output,
 			"Visibility flags must match crowd distances.");
+	ERR_FAIL_COND_V_MSG(p_retained_full_flags != nullptr && p_retained_full_flags->size() != count, output,
+			"Retained full-IK flags must match crowd distances.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_hysteresis) || p_hysteresis < 0.0 || p_hysteresis > 8.0, output,
+			"Full-IK retention hysteresis must be finite and within 0..8 metres.");
 	ERR_FAIL_COND_V_MSG(count > 16384, output, "Crowd tier planning is limited to 16384 actors.");
 	ERR_FAIL_COND_V_MSG(p_full_budget < 0 || p_full_budget > 256 ||
 					p_priority_budget < 0 || p_priority_budget > 256,
@@ -102,7 +109,11 @@ static PackedInt32Array plan_tiers_internal(
 		}
 		const RankedCandidate candidate = { distance, i };
 		if (tier == 0) {
-			insert_top(nearest_full, candidate, p_full_budget);
+			// Only within the original 22m threshold: retention never makes
+			// hidden or out-of-range characters eligible for expensive IK.
+			const bool retained = p_retained_full_flags != nullptr && (*p_retained_full_flags)[i] != 0;
+			const RankedCandidate ik_candidate = { MAX(0.0, distance - (retained ? p_hysteresis : 0.0)), i };
+			insert_top(nearest_full, ik_candidate, p_full_budget);
 		}
 		if (p_priority_flags[i] != 0 && distance < 90.0) {
 			insert_top(nearest_critical, candidate, p_priority_budget);
@@ -122,11 +133,19 @@ static PackedInt32Array plan_tiers_internal(
 PackedInt32Array CrowdAnimationTierPlanner::plan_tiers(
 		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
 		int p_full_budget, int p_priority_budget) const {
-	return plan_tiers_internal(p_distances, p_priority_flags, nullptr, p_full_budget, p_priority_budget);
+	return plan_tiers_internal(p_distances, p_priority_flags, nullptr, nullptr, p_full_budget, p_priority_budget, 0.0);
 }
 
 PackedInt32Array CrowdAnimationTierPlanner::plan_visible_tiers(
 		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
 		const PackedByteArray &p_visible_flags, int p_full_budget, int p_priority_budget) const {
-	return plan_tiers_internal(p_distances, p_priority_flags, &p_visible_flags, p_full_budget, p_priority_budget);
+	return plan_tiers_internal(p_distances, p_priority_flags, &p_visible_flags, nullptr, p_full_budget, p_priority_budget, 0.0);
+}
+
+PackedInt32Array CrowdAnimationTierPlanner::plan_visible_tiers_stable(
+		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
+		const PackedByteArray &p_visible_flags, const PackedByteArray &p_retained_full_flags,
+		int p_full_budget, int p_priority_budget, double p_hysteresis) const {
+	return plan_tiers_internal(p_distances, p_priority_flags, &p_visible_flags, &p_retained_full_flags,
+			p_full_budget, p_priority_budget, p_hysteresis);
 }
