@@ -28,24 +28,24 @@ func sign_in(host: String, port: int, device_id: String, username: String) -> Di
 	add_child(nakama)
 	client = nakama.create_client("albion_after_key", host, port, "http", 6, NakamaLogger.LOG_LEVEL.ERROR)
 	session = await client.authenticate_device_async(device_id, username, true)
-	if session.is_exception():
-		return {"ok": false, "reason": session.get_exception().message}
+	if _failed(session):
+		return {"ok": false, "reason": _reason(session)}
 	return {"ok": true, "token": session.token, "refresh": session.refresh_token, "username": session.username, "user_id": session.user_id}
 
 
 func start_chat(room_name: String = "world") -> bool:
-	if session == null or session.is_exception():
+	if session == null or _failed(session):
 		return false
 	_world_room = room_name
 	socket = nakama.create_socket_from(client)
 	var result = await socket.connect_async(session)
-	if result.is_exception():
+	if _failed(result):
 		return false
 	connected = true
 	socket.received_channel_message.connect(_on_message)
 	socket.closed.connect(func() -> void: connected = false)
 	var channel = await socket.join_chat_async(room_name, CHANNEL_ROOM, false, false)
-	if channel.is_exception():
+	if _failed(channel):
 		return false
 	world_channel_id = channel.id
 	await refresh_guild()
@@ -70,7 +70,7 @@ func say(text: String) -> bool:
 	if not connected or world_channel_id == "" or text == "":
 		return false
 	var ack = await socket.write_chat_message_async(world_channel_id, {"msg": text})
-	return not ack.is_exception()
+	return not _failed(ack)
 
 
 func say_guild(text: String) -> bool:
@@ -78,7 +78,7 @@ func say_guild(text: String) -> bool:
 	if not connected or guild_channel_id == "" or text == "":
 		return false
 	var ack = await socket.write_chat_message_async(guild_channel_id, {"msg": text})
-	return not ack.is_exception()
+	return not _failed(ack)
 
 
 # --- Guilds -----------------------------------------------------------------------------------------------------
@@ -89,7 +89,7 @@ func refresh_guild() -> void:
 		await socket.leave_chat_async(guild_channel_id)
 	guild_channel_id = ""
 	var groups = await client.list_user_groups_async(session, session.user_id)
-	if not groups.is_exception():
+	if not _failed(groups):
 		for entry in groups.user_groups:
 			# State 0 = superadmin, 1 = admin, 2 = member; 3 = join request still pending.
 			if int(entry.state) <= 2:
@@ -97,7 +97,7 @@ func refresh_guild() -> void:
 				break
 	if not guild.is_empty() and connected:
 		var channel = await socket.join_chat_async(guild["id"], CHANNEL_GROUP, false, false)
-		if not channel.is_exception():
+		if not _failed(channel):
 			guild_channel_id = channel.id
 	guild_changed.emit()
 
@@ -109,8 +109,8 @@ func create_guild(guild_name: String) -> Dictionary:
 	if not guild.is_empty():
 		return {"ok": false, "reason": "already in a guild"}
 	var group = await client.create_group_async(session, guild_name, "", null, null, true, 100)
-	if group.is_exception():
-		return {"ok": false, "reason": group.get_exception().message}
+	if _failed(group):
+		return {"ok": false, "reason": _reason(group)}
 	await refresh_guild()
 	return {"ok": true, "id": group.id}
 
@@ -118,7 +118,7 @@ func create_guild(guild_name: String) -> Dictionary:
 func list_guilds(prefix: String = "") -> Array:
 	var result = await client.list_groups_async(session, prefix + "%" if prefix != "" else null, 20)
 	var guilds: Array = []
-	if result.is_exception():
+	if _failed(result):
 		return guilds
 	for g in result.groups:
 		guilds.append({"id": g.id, "name": g.name, "members": int(g.edge_count), "open": g.open})
@@ -129,8 +129,8 @@ func join_guild(group_id: String) -> Dictionary:
 	if not guild.is_empty():
 		return {"ok": false, "reason": "already in a guild"}
 	var result = await client.join_group_async(session, group_id)
-	if result.is_exception():
-		return {"ok": false, "reason": result.get_exception().message}
+	if _failed(result):
+		return {"ok": false, "reason": _reason(result)}
 	await refresh_guild()
 	return {"ok": not guild.is_empty()}
 
@@ -140,7 +140,7 @@ func leave_guild() -> bool:
 		return false
 	var result = await client.leave_group_async(session, guild["id"])
 	await refresh_guild()
-	return not result.is_exception()
+	return not _failed(result)
 
 
 func guild_members() -> Array:
@@ -148,7 +148,7 @@ func guild_members() -> Array:
 	if guild.is_empty():
 		return names
 	var members = await client.list_group_users_async(session, guild["id"])
-	if members.is_exception():
+	if _failed(members):
 		return names
 	for entry in members.group_users:
 		names.append(entry.user.username)
@@ -159,10 +159,10 @@ func guild_members() -> Array:
 ## you, 3 = blocked.
 func list_friends() -> Array:
 	var friends: Array = []
-	if session == null or session.is_exception():
+	if session == null or _failed(session):
 		return friends
 	var result = await client.list_friends_async(session, null, 100)
-	if result == null or result.is_exception():
+	if result == null or _failed(result):
 		return friends
 	for entry in result.friends:
 		friends.append({"name": entry.user.username, "online": bool(entry.user.online), "state": int(entry.state)})
@@ -174,14 +174,32 @@ func add_friend(username: String) -> Dictionary:
 	username = username.strip_edges()
 	if username.is_empty():
 		return {"ok": false, "reason": "no name"}
-	if session == null or session.is_exception():
+	if session == null or _failed(session):
 		return {"ok": false, "reason": "offline"}
 	var result = await client.add_friends_async(session, null, PackedStringArray([username]))
-	if result.is_exception():
-		return {"ok": false, "reason": result.get_exception().message}
+	if _failed(result):
+		return {"ok": false, "reason": _reason(result)}
 	return {"ok": true}
 
 
 func shutdown() -> void:
 	if socket != null:
 		socket.close()
+
+
+## Nakama calls return a result object, but some addon paths hand back a bare error code (int)
+## or null; treat anything that is not a successful result object as a failure.
+static func _failed(result) -> bool:
+	if result == null:
+		return true
+	if result is int:
+		return result != OK
+	if result is Object and result.has_method("is_exception"):
+		return result.is_exception()
+	return false
+
+
+static func _reason(result) -> String:
+	if result is Object and result.has_method("get_exception") and result.get_exception() != null:
+		return str(result.get_exception().message)
+	return "error %s" % str(result)
