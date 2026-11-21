@@ -174,6 +174,90 @@ TEST_CASE("[SceneTree][MultiMesh] Sparse visual state batch rejects invalid inpu
 	CHECK_FALSE(no_colors->is_using_colors());
 }
 
+TEST_CASE("[SceneTree][MultiMesh] Full state batch moves instanced workers and shader payload together") {
+	Ref<MultiMesh> mm;
+	mm.instantiate();
+	mm->set_transform_format(MultiMesh::TRANSFORM_3D);
+	mm->set_use_colors(true);
+	mm->set_use_custom_data(true);
+	mm->set_instance_count(4);
+	mm->set_visible_instance_count(2);
+	PackedInt32Array indices;
+	indices.push_back(3);
+	indices.push_back(0);
+	TypedArray<Transform3D> transforms;
+	transforms.push_back(Transform3D(Basis(), Vector3(9, 0, 1)));
+	transforms.push_back(Transform3D(Basis(), Vector3(2, 0, 4)));
+	PackedColorArray colors;
+	colors.push_back(Color(0.25, 0.5, 0.75, 1));
+	colors.push_back(Color(1, 0, 0, 1));
+	PackedColorArray custom;
+	custom.push_back(Color(1, 0, 0.5, 1));
+	custom.push_back(Color(0.5, 1, 0, 1));
+	CHECK(mm->set_instance_full_states_batch(indices, transforms, colors, custom));
+	CHECK(mm->get_instance_transform(3).origin == Vector3(9, 0, 1));
+	CHECK(mm->get_instance_transform(0).origin == Vector3(2, 0, 4));
+	CHECK(mm->get_instance_color(3) == colors[0]);
+	CHECK(mm->get_instance_color(0) == colors[1]);
+	CHECK(mm->get_instance_custom_data(3) == custom[0]);
+	CHECK(mm->get_instance_custom_data(0) == custom[1]);
+	CHECK(mm->get_visible_instance_count() == 2);
+	CHECK(mm->get_instance_count() == 4);
+
+	PackedInt32Array empty;
+	TypedArray<Transform3D> empty_transforms;
+	PackedColorArray empty_colors;
+	CHECK(mm->set_instance_full_states_batch(empty, empty_transforms, empty_colors, empty_colors));
+}
+
+TEST_CASE("[SceneTree][MultiMesh] Full state batches validate all payloads before mutation") {
+	Ref<MultiMesh> mm;
+	mm.instantiate();
+	mm->set_transform_format(MultiMesh::TRANSFORM_3D);
+	mm->set_use_colors(true);
+	mm->set_use_custom_data(true);
+	mm->set_instance_count(3);
+	mm->set_instance_transform(0, Transform3D(Basis(), Vector3(1, 2, 3)));
+	mm->set_instance_color(0, Color(0, 0, 1, 1));
+	mm->set_instance_custom_data(0, Color(0.25, 0.5, 0.75, 1));
+	PackedInt32Array duplicates;
+	duplicates.push_back(0);
+	duplicates.push_back(0);
+	PackedInt32Array outside;
+	outside.push_back(0);
+	outside.push_back(3);
+	PackedInt32Array one;
+	one.push_back(0);
+	TypedArray<Transform3D> values;
+	values.push_back(Transform3D(Basis(), Vector3(3, 0, 0)));
+	values.push_back(Transform3D(Basis(), Vector3(7, 0, 0)));
+	PackedColorArray colors;
+	colors.push_back(Color(1, 0, 0, 1));
+	colors.push_back(Color(0, 1, 0, 1));
+	PackedColorArray custom;
+	custom.push_back(Color(1, 0, 0, 1));
+	custom.push_back(Color(0, 1, 0, 1));
+
+	ERR_PRINT_OFF;
+	CHECK_FALSE(mm->set_instance_full_states_batch(duplicates, values, colors, custom));
+	CHECK_FALSE(mm->set_instance_full_states_batch(outside, values, colors, custom));
+	CHECK_FALSE(mm->set_instance_full_states_batch(one, values, colors, custom));
+	ERR_PRINT_ON;
+	CHECK(mm->get_instance_transform(0).origin == Vector3(1, 2, 3));
+	CHECK(mm->get_instance_color(0) == Color(0, 0, 1, 1));
+	CHECK(mm->get_instance_custom_data(0) == Color(0.25, 0.5, 0.75, 1));
+
+	Ref<MultiMesh> no_data;
+	no_data.instantiate();
+	no_data->set_transform_format(MultiMesh::TRANSFORM_3D);
+	no_data->set_use_colors(true);
+	no_data->set_instance_count(3);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(no_data->set_instance_full_states_batch(one, values, colors, custom));
+	ERR_PRINT_ON;
+	CHECK_FALSE(no_data->is_using_custom_data());
+}
+
 } // namespace TestMultiMeshTransformBatches
 
 #endif // _3D_DISABLED

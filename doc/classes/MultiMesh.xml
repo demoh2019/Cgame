@@ -97,6 +97,18 @@
 				This custom instance data has to be manually accessed in your custom shader using [code]INSTANCE_CUSTOM[/code].
 			</description>
 		</method>
+		<method name="set_instance_full_states_batch">
+			<return type="bool" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<param index="1" name="transforms" type="Array[Transform3D]" />
+			<param index="2" name="colors" type="PackedColorArray" />
+			<param index="3" name="custom_data" type="PackedColorArray" />
+			<description>
+				Updates the [Transform3D], vertex color and 4-channel custom shader data for each selected 3D MultiMesh instance in one GDScript call. Suitable for pooled workers, moving resource props and entity state indicators.
+				Requires [enum TRANSFORM_3D], [member use_colors] and [member use_custom_data]. All four arrays must have identical lengths. Indices may be unsorted and may reference hidden slots but must be unique and in range. All transform, RGBA and custom-data components must be finite. Input is validated in full [b]before[/b] the first renderer update. Invalid input returns [code]false[/code] without changing any instance; an empty valid batch returns [code]true[/code].
+				The method does not change visibility, allocation, entity identity, collision or physics state. It reduces scripting overhead but makes [b]three[/b] RenderingServer updates for each instance (transform, color and custom data). It is not one GPU upload or a complete entity-component system. For dense updates consider [method set_buffer].
+			</description>
+		</method>
 		<method name="set_instance_visual_states_batch">
 			<return type="bool" />
 			<param index="0" name="indices" type="PackedInt32Array" />
