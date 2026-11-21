@@ -12,6 +12,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
+- **Selective bounded LRU route cache:** `find_cell_path()` now caches shortest cardinal routes **and empty results**, up to `max_cell_path_cache_entries` (0–128, default 64). Exact endpoint/loaded-only keys, defensive Array copying, deterministic LRU eviction and cache hit/miss diagnostics avoid redundant breadth-first searches for repeated quest HUD and region routing queries. Registration edits invalidate both kinds; live scene load/unload only invalidates loaded-only entries, preserving non-live route caches when the camera moves.
 - **Deterministic bounded cross-cell routing:** `find_cell_path(from, to, loaded_only=false)` returns the shortest cardinal corridor of registered `Vector2i` world cells, respecting missing topology and optionally restricting the route to already-instantiated scene roots. Synchronous breadth-first expansion is capped at 512 visited cells (overflow-safe 32-bit coordinates) to prevent runaway CPU. This complements, but does not replace, a baked navigation mesh or obstacle-safe surface paths.
 - **Immutable partial NavMesh obstacle updates:** `patch_navigation_tile(previous, resolution, previous_blockers, blockers, agent_radius, max_slope_degrees)` compares old/new circular footprints, including duplicates and reordering, and re-tests only grid triangles intersecting changed blocker influence. Unaffected triangles reuse the old walkability mask; exact polygon indices/order match a fresh full build, and unchanged footprint sets return the same cached NavigationMesh. `get_last_navigation_tile_retested_triangle_count()` quantifies geometric work (512 full tests on a 16×16 tile versus a small local subset for a barricade). Invalid topology safely falls back to a full build.
 - **Native bounded dynamic NavMesh dirty scheduler:** `mark_cell_navigation_dirty(cell)` coalesces repeated edits for live opted-in cells and dispatches `rebuild_streaming_navigation_mesh() -> bool` under `max_navigation_rebuilds_per_physics_frame` (1–16, default 1). Uses nearest-first deterministic ordering, max 128 queued cells, no duplicate rebuild grants per physics frame, a two-tick readiness fence and `cell_navigation_mesh_rebuilt` signal. Per-cell revisions and a monotonic world NavMesh generation invalidate stale NPC paths on changes.
@@ -62,6 +63,26 @@ func _physics_process(_delta: float) -> void:
 ```
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Bounded cached cell routing and selective invalidation
+
+Repeated `WorldPartition3D.find_cell_path(from, to, loaded_only=false)` queries now reuse a **bounded native LRU route cache** rather than rerunning up to 512-cell breadth-first searches for unchanged endpoints. The cache key preserves both complete signed `Vector2i` endpoint coordinates and the `loaded_only` option; no lossy hash of grid positions or reversed-path approximation is used. The default size is 64 routes per world, adjustable from 0 (disabled) to 128. Results include empty/unreachable paths, since repeatedly searching an unchanged disconnected corridor is wasteful.
+
+```gdscript
+world.max_cell_path_cache_entries = 64
+var route: Array = world.find_cell_path(start_cell, quest_cell)
+# Quest HUD can call this repeatedly while player stays in the same cell:
+var same_route: Array = world.find_cell_path(start_cell, quest_cell)
+print("Cache hits/misses/entries: ",
+    world.get_cell_path_cache_hit_count(), "/",
+    world.get_cell_path_cache_miss_count(), "/",
+    world.get_cell_path_cache_entry_count())
+world.clear_cell_path_cache() # Also resets diagnostic counters.
+```
+
+Eviction is least-recently-used, with stable key tie-breaking. Every result returned to GDScript is an **independent Array**: appending/removing/editing a route cannot poison the internal cached path. Registration topology changes through `set_cell_scene(s)`, `remove_cell_scene` or `clear_cell_scenes` invalidate **all** cached routes. Ordinary scene loading/unloading invalidates **only loaded-only routes** and leaves registered-topology paths cached, so moving the observer does not cause unnecessary quest pathfinding. A cached positive loaded-only route also rechecks its live roots before reuse, catching roots independently queued for deletion. The cache does not mistake a visually registered cell for a walkable NavMesh and does not cache `NavigationServer3D.map_get_path()` answers. NavMesh obstacle edits do not change the registered-cell graph and therefore need not invalidate this high-level cache; those changes already update the separate native `navigation_mesh_generation` used by NPCs.
+
+`get_cell_path_cache_hit_count()` and `get_cell_path_cache_miss_count()` are cumulative, saturating signed-32-bit counters. Capacity changes discard entries, and `clear_cell_path_cache()` explicitly resets entries and metrics. `smoke_cell_route_cache.gd` tests actual forest loading, reuse, copy isolation, selective unload invalidation and invalidation of negative routes; the native Doctest covers LRU order, disabled cache, invalid cache size and graph changes. This is main-thread request coalescing **not** async pathfinding.
 
 ## Safe registered-cell routing
 
@@ -391,7 +412,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 73 Doctest cases across `test_world_partition_3d.h` (37) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 74 Doctest cases across `test_world_partition_3d.h` (38) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -402,6 +423,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Cell route caches store topological, not physical routes.** A cached registered-cell corridor is not a NavMesh-safe or collision-free path. Cache keys distinguish loaded-only from configured routes; dynamic NavMesh updates still require NPC-level path replanning. Caching is deliberately bounded to 128 entries and returns defensive Array copies.
 - **Incremental obstacle patches require an unchanged terrain grid and navigation policy.** Each previous NavigationMesh and blocker snapshot must refer to the same geometry, resolution, radius and slope parameters. The algorithm validates cached polygon topology and changed blocker locations, but cannot prove arbitrary user changes to terrain samples or server-side region transforms. It scans cached polygon masks and triangle bounds on the main thread; the diagnostic counter only measures geometric re-evaluations, not CPU milliseconds.
 - **Dynamic NavMesh updates are main-thread and scene-owned.** Dirty rebuild limits are explicit per physics frame, but each permitted NavMesh creation can still cost CPU. The native module does not mutate third-party obstacles, force NavigationServer synchronization or guarantee the connectivity of a rebuilt mesh. Failed scene callbacks keep the tile unready.
 - **Native terrain tile filtering is conservative, not full Recast baking.** Per-cell 16×16 tiles reject steep triangles and obstacles approximated as expanded discs; hole cutting is coarse (whole triangles), there is no vertical clearance, off-mesh linkage or automatic dynamic obstacle rebake. Terrain-tile seam connectivity still depends on authored free corridors and Godot physics-server synchronization.
