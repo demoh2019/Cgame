@@ -206,6 +206,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_cone", "center", "direction", "inner_radius", "outer_radius", "ring_count", "points_per_ring", "cone_degrees", "include_center"), &EnvironmentQuery3D::sample_cone, DEFVAL(90.0), DEFVAL(false));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_grid", "center", "half_extents", "spacing", "max_points"), &EnvironmentQuery3D::sample_grid, DEFVAL(4096));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_oriented_grid", "center", "forward", "half_extents", "spacing", "max_points"), &EnvironmentQuery3D::sample_oriented_grid, DEFVAL(4096));
+	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_fibonacci_annulus", "center", "inner_radius", "outer_radius", "count", "phase"), &EnvironmentQuery3D::sample_fibonacci_annulus, DEFVAL(0.0));
 
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "candidates"), "set_candidates", "get_candidates");
 	ADD_GROUP("Distance Filter", "");
@@ -603,6 +604,36 @@ PackedVector3Array EnvironmentQuery3D::sample_oriented_grid(const Vector3 &p_cen
 			ERR_FAIL_COND_V_MSG(!point.is_finite(), PackedVector3Array(), "Oriented grid sample coordinates must be finite.");
 			ptr[z * count_x + x] = point;
 		}
+	}
+	return output;
+}
+
+// Bounded, area-uniform radial candidates analogous to a procedural scatter
+// sampler. Square-radius interpolation avoids the center clustering produced
+// by linear radius interpolation; golden-angle rotation reduces axial spokes.
+// Gameplay remains responsible for all terrain, occupancy and nav validation.
+PackedVector3Array EnvironmentQuery3D::sample_fibonacci_annulus(const Vector3 &p_center, double p_inner_radius, double p_outer_radius, int p_count, double p_phase) {
+	PackedVector3Array output;
+	ERR_FAIL_COND_V_MSG(!p_center.is_finite() || !Math::is_finite(p_inner_radius) ||
+			!Math::is_finite(p_outer_radius) || p_inner_radius < 0.0 ||
+			p_outer_radius < p_inner_radius, output,
+			"Fibonacci annulus requires finite center and radii, 0 <= inner <= outer.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_phase) || p_count < 1 || p_count > 65536,
+			output, "Fibonacci annulus phase must be finite and point count 1..65536.");
+	const double min_square = p_inner_radius * p_inner_radius;
+	const double max_square = p_outer_radius * p_outer_radius;
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(max_square), output, "Fibonacci annulus radii are too large to sample safely.");
+	// Explicit constant for stable cross-platform gameplay reference results.
+	constexpr double GOLDEN_ANGLE = 2.39996322972865332;
+	output.resize(p_count);
+	Vector3 *ptr = output.ptrw();
+	for (int index = 0; index < p_count; index++) {
+		const double fraction = (double(index) + 0.5) / double(p_count);
+		const double radius = Math::sqrt(min_square + (max_square - min_square) * fraction);
+		const double angle = p_phase + GOLDEN_ANGLE * double(index);
+		const Vector3 point = p_center + Vector3(Math::cos(angle) * radius, 0.0, Math::sin(angle) * radius);
+		ERR_FAIL_COND_V_MSG(!point.is_finite(), PackedVector3Array(), "Fibonacci annulus generated a nonfinite point.");
+		ptr[index] = point;
 	}
 	return output;
 }
