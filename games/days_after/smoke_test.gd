@@ -96,6 +96,52 @@ func _smoke() -> void:
         push_error("Missing exclusion-aware instanced foliage")
         ok = false
     else:
+        var polygon_factors: PackedFloat32Array = foliage.call("get_polygon_factors")
+        var polygon_inside: PackedFloat32Array = foliage.call(
+            "get_polygon_factors", true, true)
+        var polygon_points: PackedVector3Array = foliage.call("get_ruin_clearing_polygon")
+        var polygon_zeros: int = 0
+        var polygon_transition: int = 0
+        var polygon_outside: int = 0
+        if polygon_factors.size() != 625 or polygon_inside.size() != 625 or polygon_points.size() != 6:
+            push_error("PCG polygon biome mask lost its candidate or contour data")
+            ok = false
+        else:
+            for i in polygon_factors.size():
+                var f: float = polygon_factors[i]
+                if f < 0.0 or f > 1.0 or absf(f + polygon_inside[i] - 1.0) > 0.00002:
+                    push_error("PCG polygon mask factor out of range or invert mismatch")
+                    ok = false
+                    break
+                if f == 0.0:
+                    polygon_zeros += 1
+                elif f == 1.0:
+                    polygon_outside += 1
+                else:
+                    polygon_transition += 1
+            if polygon_zeros < 10 or polygon_transition < 20 or polygon_outside < 500:
+                push_error("PCG polygon clearing is not visibly distinct from the biome")
+                ok = false
+            if not bool(foliage.call("verify_polygon_native_fallback_parity")):
+                push_error("Native polygon mask differs from the GDScript reference")
+                ok = false
+        # Reconstruct authored XZ polygon inclusion separately from the
+        # PCG mask, and ensure no accepted grass remains in the cleared yard.
+        var final_plants: PackedVector3Array = foliage.call("get_selected_positions")
+        for plant in final_plants:
+            var contains: bool = false
+            for edge in range(polygon_points.size()):
+                var a: Vector3 = polygon_points[edge]
+                var b: Vector3 = polygon_points[(edge + 1) % polygon_points.size()]
+                if ((a.z > plant.z) != (b.z > plant.z)
+                        and plant.x < a.x + (plant.z - a.z) *
+                            (b.x - a.x) / (b.z - a.z)):
+                    contains = not contains
+            if contains:
+                push_error("PCG polygon clearing allowed foliage inside ruin yard")
+                ok = false
+                break
+
         var positions: PackedVector3Array = foliage.call("get_selected_positions")
         var weighted: PackedInt32Array = foliage.call("get_selected_variants")
         var stable_ids: PackedInt64Array = foliage.call("get_selected_stable_ids")

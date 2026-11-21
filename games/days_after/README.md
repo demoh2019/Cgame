@@ -351,3 +351,21 @@ on changes; it does **not** claim GPU-driven culling, true
 hierarchical cluster LOD or measured FPS gains. Its purpose is
 to eliminate redundant `MultiMesh` resource/instance uploads for
 unchanged groups, not to reduce instance counts or draw calls.
+
+## Procedural irregular ruin-yard clearing
+
+The western ruin approach uses a hand-authored six-point polygon
+instead of an oversized round or rectangular vegetation exclusion.
+Cgame's native `PCGPolygonMask3D` clears grass **inside** the ruin
+yard and softly restores the original biome density within a 3.5 m
+exterior band. The resulting density factors are multiplied with
+the existing curved-trail mask before stable seeded per-cell PCG
+sampling. No new draw calls, collision objects or extra physics
+queries are created.
+
+The same mask supports inverse mode for authoring grassland/flower
+patches inside enclosed outlines. Stock Godot executes an equivalent
+GDScript calculation; `smoke_test.gd` checks C++/script agreement,
+positive interior/transition/outside coverage, invert parity and
+zero accepted plants in the cleared polygon. Grass stable IDs,
+weighted variants, mesh LOD and survival mechanics are preserved.
