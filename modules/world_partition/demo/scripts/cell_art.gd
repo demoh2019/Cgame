@@ -75,10 +75,50 @@ func _ready() -> void:
     if not proxy:
         if grid == QUEST_HUB or grid == COMBAT_ARENA:
             _add_gameplay_landmark(grid == QUEST_HUB)
+            _create_persistent_crate()
             _refresh_landmark()
         elif grid == CHAMPION_SHRINE:
             _add_champion_shrine()
             _refresh_landmark()
+
+func _create_persistent_crate() -> void:
+    # WorldPartition3D persists only opt-in RigidBody3D descendants.
+    # This is a real dynamic PhysicsServer3D object, not a visual transform.
+    var crate := RigidBody3D.new()
+    crate.name = "StreamingCrate"
+    crate.set_meta("streaming_persistent", true)
+    crate.mass = 4.0
+    crate.position = Vector3(CELL_SIZE * 0.5 + 9.0, 3.5, CELL_SIZE * 0.5)
+    crate.linear_damp = 0.25
+    crate.angular_damp = 0.2
+    add_child(crate)
+
+    var collision := CollisionShape3D.new()
+    collision.name = "CrateCollision"
+    var shape := BoxShape3D.new()
+    shape.size = Vector3(2.0, 2.0, 2.0)
+    collision.shape = shape
+    crate.add_child(collision)
+
+    var visual := MeshInstance3D.new()
+    visual.name = "CrateVisual"
+    var mesh := BoxMesh.new()
+    mesh.size = shape.size
+    var material := StandardMaterial3D.new()
+    material.albedo_color = Color(0.93, 0.57, 0.15)
+    material.metallic = 0.25
+    material.roughness = 0.5
+    mesh.material = material
+    visual.mesh = mesh
+    crate.add_child(visual)
+
+func kick_persistent_crate() -> bool:
+    var crate := get_node_or_null("StreamingCrate") as RigidBody3D
+    if crate == null:
+        return false
+    crate.sleeping = false
+    crate.apply_central_impulse(Vector3(15.0, 11.0, 5.0))
+    return true
 
 func _create_streamed_simulation_components() -> void:
     # Collision is deliberately coarse, not generated from all 160 tree meshes.
