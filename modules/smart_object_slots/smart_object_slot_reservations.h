@@ -8,6 +8,7 @@
 #pragma once
 
 #include "core/object/ref_counted.h"
+#include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
 #include "core/variant/variant.h"
 
@@ -30,7 +31,12 @@ private:
 		double remaining = 0.0;
 	};
 	Vector<Claim> claims;
+	// Native server hot path: indexed slot and actor lookup. Both indices
+	// follow swap-removals; at most MAX_ACTIVE_CLAIMS entries are stored.
+	HashMap<int64_t, int> slot_indices;
+	HashMap<int64_t, int> actor_indices;
 
+	void _erase_claim(int p_index);
 	int _find_slot(int64_t p_slot_id) const;
 	int _find_actor(int64_t p_actor_id) const;
 
@@ -49,5 +55,7 @@ public:
 	void advance_time(double p_delta);
 	void clear();
 	int64_t get_owner(int64_t p_slot_id) const;
+	// 0 if absent, otherwise the slot currently leased by this actor.
+	int64_t get_actor_slot(int64_t p_actor_id) const;
 	int get_claim_count() const { return claims.size(); }
 };

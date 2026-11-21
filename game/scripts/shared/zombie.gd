@@ -663,6 +663,7 @@ var _flank_here_cached := Vector2.INF
 var _flank_target_cached := Vector2.INF
 var _flank_replan_remaining := 0.0
 var _flank_target_id_cached: int = -1
+var _flank_slot_id_cached: int = 0 # Validate cached goal against current server lease.
 var flank_reservations: Variant = null # Shared server-owned smart-object lease pool.
 
 
@@ -680,7 +681,12 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 	if _flank_replan_remaining > 0.0 and _flank_target_id_cached == target_id and \
 			here.distance_squared_to(_flank_here_cached) <= 3.24 and \
 			target.distance_squared_to(_flank_target_cached) <= 1.0:
-		return _flank_goal_cached
+		# New engine/portable pools expose current ownership. After an expiring
+		# lease or server-driven release, do not follow an unowned cached slot.
+		# Older native binaries retain their original cache behavior.
+		if flank_reservations == null or not flank_reservations.has_method("get_actor_slot") \
+				or int(flank_reservations.get_actor_slot(id)) == _flank_slot_id_cached:
+			return _flank_goal_cached
 	if _flank_query == null:
 		_flank_query = ClassDB.instantiate("EnvironmentQuery3D")
 		_flank_query.set("horizontal_only", true)
@@ -711,6 +717,7 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 	if ranked.is_empty():
 		return target
 	var spot: Vector3 = ranked[posmod(id, ranked.size())]
+	var claimed_slot: int = 0
 	if use_smart_slots:
 		var slot_ids := PackedInt64Array()
 		for candidate in ranked:
@@ -729,6 +736,8 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		if claimed_index < 0 or claimed_index >= ring.size():
 			return target
 		spot = ring[claimed_index]
+		claimed_slot = claimed
+	_flank_slot_id_cached = claimed_slot
 	_flank_goal_cached = Vector2(spot.x, spot.z)
 	_flank_here_cached = here
 	_flank_target_cached = target
