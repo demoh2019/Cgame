@@ -66,6 +66,8 @@ private:
 	// These hints reorder eligible work, never grow the resident set.
 	Vector3 view_direction;
 	real_t view_priority = 0.0;
+	// 180 degrees preserves the historical heading-only streaming order.
+	real_t view_cone_half_angle_degrees = 180.0;
 	// Optional secondary streaming source for cinematic targets or nearby
 	// waypoints. Its radius and distance from focus are both bounded, so
 	// arbitrarily distant map pins cannot load remote chunks into memory.
@@ -94,6 +96,11 @@ private:
 	// Opt-in bounded per-refresh unloads. Zero preserves historical immediate
 	// release of every distant cell; positive counts defer the rest.
 	int max_unloads_per_update = 0;
+	// Optional soft wall-clock cap for scheduled unloads, measured in
+	// microseconds. Zero retains count-only scheduling; legacy unlimited
+	// unloads and explicit reset/teardown are never time-sliced.
+	int max_unload_work_usec = 0;
+	int64_t last_unload_work_usec = 0;
 	int last_unload_count = 0;
 	int last_deferred_unload_count = 0;
 	// Soft main-thread time slice for procedural generation or scene
@@ -221,6 +228,8 @@ public:
 	void set_view_direction(const Vector3 &p_direction);
 	Vector3 get_view_direction() const { return view_direction; }
 	void set_view_priority(real_t p_weight);
+	void set_view_cone_half_angle_degrees(real_t p_degrees);
+	real_t get_view_cone_half_angle_degrees() const { return view_cone_half_angle_degrees; }
 	void set_fast_view_refresh_degrees(real_t p_degrees);
 	real_t get_fast_view_refresh_degrees() const { return fast_view_refresh_degrees; }
 	real_t get_view_priority() const { return view_priority; }
@@ -252,6 +261,9 @@ public:
 	void set_max_instantiations_per_frame(int p_count);
 	void set_max_unloads_per_update(int p_count);
 	int get_max_unloads_per_update() const { return max_unloads_per_update; }
+	void set_max_unload_work_usec(int p_usec);
+	int get_max_unload_work_usec() const { return max_unload_work_usec; }
+	int64_t get_last_unload_work_usec() const { return last_unload_work_usec; }
 	int get_last_unload_count() const { return last_unload_count; }
 	int get_last_deferred_unload_count() const { return last_deferred_unload_count; }
 	int get_max_instantiations_per_frame() const { return max_instantiations_per_frame; }

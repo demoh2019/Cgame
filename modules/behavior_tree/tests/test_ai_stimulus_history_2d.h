@@ -193,4 +193,58 @@ TEST_CASE("[AIStimulusHistory2D] Reset and per-listener isolation") {
 	CHECK(one->get_capacity() == 16);
 }
 
+TEST_CASE("[AIStimulusHistory2D] Radius query filters before ranking and includes the boundary") {
+	Ref<AIStimulusHistory2D> history;
+	history.instantiate();
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(30, 0), 1.0, 5.0, 10));
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(3, 4), 0.4, 5.0, 11));
+	CHECK(history->get_best(AIStimulusHistory2D::SOUND)["source_id"] == 10);
+	Dictionary nearby = history->get_best_in_radius(AIStimulusHistory2D::SOUND, Vector2(), 5.0);
+	CHECK(nearby["source_id"] == 11);
+	CHECK(nearby["position"] == Vector2(3, 4));
+	CHECK(history->get_best_in_radius(AIStimulusHistory2D::SOUND, Vector2(), 4.99).is_empty());
+	CHECK(history->get_best_in_radius(AIStimulusHistory2D::SIGHT, Vector2(), 5.0).is_empty());
+	CHECK(history->get_event_count() == 2);
+	nearby["source_id"] = 888;
+	CHECK(history->get_best_in_radius(AIStimulusHistory2D::SOUND, Vector2(), 5.0)["source_id"] == 11);
+	history->advance_time(5.0);
+	CHECK(history->get_best_in_radius(AIStimulusHistory2D::SOUND, Vector2(), 5.0).is_empty());
+}
+
+TEST_CASE("[AIStimulusHistory2D] Radius query validates inputs and keeps deterministic ties") {
+	Ref<AIStimulusHistory2D> history;
+	history.instantiate();
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(2, 0), 0.7, 5.0, 8));
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(1, 0), 0.7, 5.0, 4));
+	CHECK(history->get_best_in_radius(AIStimulusHistory2D::SOUND, Vector2(), 2.0)["source_id"] == 4);
+	CHECK(history->get_best_in_radius(AIStimulusHistory2D::SOUND, Vector2(1, 0), 0.0)["source_id"] == 4);
+	ERR_PRINT_OFF;
+	CHECK(history->get_best_in_radius(AIStimulusHistory2D::SOUND, Vector2(), -1.0).is_empty());
+	CHECK(history->get_best_in_radius(AIStimulusHistory2D::SOUND, Vector2(), Math::INF).is_empty());
+	CHECK(history->get_best_in_radius(AIStimulusHistory2D::SOUND, Vector2(Math::NaN, 0), 10.0).is_empty());
+	CHECK(history->get_best_in_radius(-1, Vector2(), 5.0).is_empty());
+	ERR_PRINT_ON;
+	CHECK(history->get_event_count() == 2);
+}
+
+TEST_CASE("[AIStimulusHistory2D] Repeated newest-source refresh preserves unrelated ages") {
+	Ref<AIStimulusHistory2D> history;
+	history.instantiate();
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(1, 0), 0.3, 4.0, 1));
+	REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(2, 0), 0.7, 4.0, 2));
+	history->advance_time(1.0);
+	for (int i = 0; i < 20; i++) {
+		REQUIRE(history->record_stimulus(AIStimulusHistory2D::SOUND, Vector2(2 + i, 0), 0.7, 4.0, 2));
+	}
+	CHECK(history->get_event_count() == 2);
+	const Array recent = history->get_recent(2);
+	const Dictionary newest = recent[0];
+	const Dictionary older = recent[1];
+	CHECK(newest["source_id"] == 2);
+	CHECK(newest["position"] == Vector2(21, 0));
+	CHECK(newest["remaining_seconds"] == real_t(4.0));
+	CHECK(older["source_id"] == 1);
+	CHECK(older["remaining_seconds"] == real_t(3.0));
+}
+
 } // namespace TestAIStimulusHistory2D

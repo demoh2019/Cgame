@@ -383,7 +383,8 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 						# A separately confirmed, more recent sound can remain valid
 						# after the strongest ranked sound has expired. This never
 						# changes target_id, creates LOS or overrides safe-zone rules.
-						var remembered_sound: Dictionary = _native_senses.best_confirmed_stimulus(1)
+						var remembered_sound: Dictionary = _native_senses.best_confirmed_stimulus_in_radius(
+							1, here, float(data["lose"]))
 						if not remembered_sound.is_empty():
 							last_known_target = remembered_sound["position"]
 				investigate_time = HUNTER_SEARCH_SECONDS if behavior == "hunter" else INVESTIGATE_SECONDS
@@ -688,6 +689,10 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		_flank_query.set("direction_origin", Vector3(target.x, 0.0, target.y))
 		_flank_query.set("direction_axis", Vector3(target.x - here.x, 0.0, target.y - here.y))
 		_flank_query.set("min_direction_dot", -0.25)
+		# Angular EQS band: prefer side slots, not straight through the survivor.
+		# Older engine binaries retain the original one-sided cone.
+		if _flank_query.has_method("set_max_direction_dot"):
+			_flank_query.set("max_direction_dot", 0.75)
 		_flank_query.set("use_direction", true)
 	# Every agent targeting the same survivor now sees the SAME eight ring
 	# slots. The server leases distinct slots; old builds without a shared pool

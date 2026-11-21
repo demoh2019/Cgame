@@ -61,11 +61,24 @@ bool AIStimulusHistory2D::record_stimulus(int p_sense, const Vector2 &p_position
 	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_ttl_seconds) || p_ttl_seconds <= 0.0 || p_ttl_seconds > 60.0, false, "Stimulus duration must be in (0,60].");
 	ERR_FAIL_COND_V_MSG(p_source_id < -1, false, "Stimulus source ID must be -1 or nonnegative.");
 
-	// Repeated confirmed signals refresh a known source's memory instead of
-	// displacing other survivors with duplicates on every server AI tick.
+	Stimulus stimulus;
+	stimulus.sense = Sense(p_sense);
+	stimulus.source_id = p_source_id;
+	stimulus.position = p_position;
+	stimulus.strength = p_strength;
+	stimulus.ttl = p_ttl_seconds;
+	stimulus.remaining = p_ttl_seconds;
+
+	// The common hot path is a repeated server-confirmed observation from
+	// the newest source. Refresh it in place without a Vector erase/append.
+	// Older sources still move to the end to preserve bounded LRU ordering.
 	if (p_source_id >= 0) {
 		for (int i = events.size() - 1; i >= 0; --i) {
 			if (events[i].sense == p_sense && events[i].source_id == p_source_id) {
+				if (i == events.size() - 1) {
+					events.write[i] = stimulus;
+					return true;
+				}
 				events.remove_at(i);
 				break;
 			}
@@ -74,13 +87,6 @@ bool AIStimulusHistory2D::record_stimulus(int p_sense, const Vector2 &p_position
 	if (events.size() >= capacity) {
 		events.remove_at(0);
 	}
-	Stimulus stimulus;
-	stimulus.sense = Sense(p_sense);
-	stimulus.source_id = p_source_id;
-	stimulus.position = p_position;
-	stimulus.strength = p_strength;
-	stimulus.ttl = p_ttl_seconds;
-	stimulus.remaining = p_ttl_seconds;
 	events.push_back(stimulus);
 	return true;
 }
@@ -98,6 +104,19 @@ void AIStimulusHistory2D::advance_time(real_t p_delta) {
 }
 
 Dictionary AIStimulusHistory2D::get_best(int p_sense) const {
+	return get_best_filtered(p_sense, nullptr, 0.0);
+}
+
+Dictionary AIStimulusHistory2D::get_best_in_radius(int p_sense, const Vector2 &p_center, real_t p_radius) const {
+	// Keep invalid spatial queries side-effect-free. A generous finite cap
+	// prevents pathological squared-distance overflow on float builds.
+	if (!p_center.is_finite() || !Math::is_finite(p_radius) || p_radius < 0.0 || p_radius > 1000000.0) {
+		return Dictionary();
+	}
+	return get_best_filtered(p_sense, &p_center, p_radius * p_radius);
+}
+
+Dictionary AIStimulusHistory2D::get_best_filtered(int p_sense, const Vector2 *p_center, real_t p_radius_squared) const {
 	if (p_sense < SIGHT || p_sense > DAMAGE) {
 		return Dictionary();
 	}
@@ -105,12 +124,12 @@ Dictionary AIStimulusHistory2D::get_best(int p_sense) const {
 	real_t best_score = real_t(-1.0);
 	for (int i = 0; i < events.size(); ++i) {
 		const Stimulus &candidate = events[i];
-		if (candidate.sense != p_sense) {
+		if (candidate.sense != p_sense ||
+				(p_center != nullptr && candidate.position.distance_squared_to(*p_center) > p_radius_squared)) {
 			continue;
 		}
 		const real_t score = candidate.strength * (candidate.remaining / candidate.ttl);
-		// The tie-breaker is independent of insertion/dictionary order.
-		// Prefer a lower stable source ID, then lexicographic 2D location.
+		// Preserve the legacy deterministic tie break after spatial filtering.
 		const bool preferred_tie = best != nullptr && score == best_score &&
 				(candidate.source_id < best->source_id ||
 						(candidate.source_id == best->source_id &&
@@ -144,6 +163,7 @@ void AIStimulusHistory2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_time", "delta"), &AIStimulusHistory2D::advance_time);
 	ClassDB::bind_method(D_METHOD("get_event_count"), &AIStimulusHistory2D::get_event_count);
 	ClassDB::bind_method(D_METHOD("get_best", "sense"), &AIStimulusHistory2D::get_best);
+	ClassDB::bind_method(D_METHOD("get_best_in_radius", "sense", "center", "radius"), &AIStimulusHistory2D::get_best_in_radius);
 	ClassDB::bind_method(D_METHOD("get_recent", "limit"), &AIStimulusHistory2D::get_recent, DEFVAL(8));
 	ClassDB::bind_method(D_METHOD("reset"), &AIStimulusHistory2D::reset);
 

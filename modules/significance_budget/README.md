@@ -69,6 +69,22 @@ Godot or older Cgame binaries. Gameplay, audio, server state and networking
 are not affected. The user-visible impact requires profiling in a running
 scene; no FPS improvement is claimed.
 
+## Stable significance for multiple observers
+
+`select_world_priority_stable(positions, viewers, priorities, ids, retained_ids,
+budget, max_distance, hysteresis=0.0)` ranks at most 16,384 world-space
+candidates from up to 16 viewers, using strict priority tiers followed by
+nearest-viewer distance, bounded retention hysteresis and stable positive ID.
+It has deterministic ties, up to 128 slots, and a hard inclusive range that
+retention cannot extend. The pure native algorithm performs O(N × (V + K))
+work with a bounded top-K insertion rather than sorting the entire crowd.
+
+The playable Albion After client uses it for its three nearest POI compass
+markers; an 8m retention bonus reduces flickering as sites exchange order.
+All marker urgency values are zero to preserve nearest-site semantics.
+The game keeps the original entered-site and 650m exclusions and includes
+stock Godot fallback parity tests. No measured performance claim is made.
+
 ## Dual-budget Niagara-style admission (particle work)
 
 `select_effects_visible_costed(distances, priorities, categories, visible,

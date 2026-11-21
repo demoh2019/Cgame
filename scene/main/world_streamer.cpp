@@ -906,7 +906,7 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 	if (have_focus) {
 		WorldStreamingGrid::prioritize_cells_for_motion_and_view(ready_cells, position,
 				velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
-				view_direction, view_priority, cell_size, _grid_axes());
+				view_direction, view_priority, cell_size, _grid_axes(), view_cone_half_angle_degrees);
 	}
 	for (const Vector3i &cell : ready_cells) {
 		const String path = loading[cell];
@@ -933,6 +933,7 @@ void WorldStreamer::_poll_loading(int &r_instantiation_budget, uint64_t p_frame_
 }
 
 void WorldStreamer::_update_streaming() {
+	last_unload_work_usec = 0;
 	last_unload_count = 0;
 	last_deferred_unload_count = 0;
 	_forget_dead_chunks();
@@ -974,12 +975,13 @@ void WorldStreamer::_update_streaming() {
 		}
 		const int count = int(expired.size());
 		const int grant = MIN(count, get_effective_unloads_per_update());
-		last_unload_count = grant;
-		last_deferred_unload_count = count - grant;
-		if (grant == count) {
+		const uint64_t unload_started_usec = count > 0 ? OS::get_singleton()->get_ticks_usec() : 0;
+		if (grant == count && max_unload_work_usec == 0) {
+			// Preserve the fast path when no time-slicing is requested.
 			for (const Vector3i &cell : expired) {
 				_unload_cell(cell);
 			}
+			last_unload_count = count;
 		} else {
 			// With a budget, unload farthest first. Avoid sorting the entire
 			// resident grid after teleports: select at most 64 distant cells,
@@ -987,6 +989,12 @@ void WorldStreamer::_update_streaming() {
 			// Stable coordinate ties make tests/replays deterministic.
 			HashSet<Vector3i> selected;
 			for (int i = 0; i < grant; ++i) {
+				// Check after the first complete removal. A chunk's scene-tree
+				// detach and signals are indivisible and may exceed the soft cap.
+				if (i > 0 && max_unload_work_usec > 0 &&
+						OS::get_singleton()->get_ticks_usec() - unload_started_usec >= uint64_t(max_unload_work_usec)) {
+					break;
+				}
 				bool found = false;
 				Vector3i best;
 				real_t best_distance = 0.0;
@@ -1008,7 +1016,12 @@ void WorldStreamer::_update_streaming() {
 				}
 				selected.insert(best);
 				_unload_cell(best);
+				++last_unload_count;
 			}
+		}
+		last_deferred_unload_count = count - last_unload_count;
+		if (count > 0) {
+			last_unload_work_usec = OS::get_singleton()->get_ticks_usec() - unload_started_usec;
 		}
 	}
 
@@ -1024,7 +1037,7 @@ void WorldStreamer::_update_streaming() {
 
 	WorldStreamingGrid::prioritize_cells_for_motion_and_view(wanted, position,
 			velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
-			view_direction, view_priority, cell_size, _grid_axes());
+			view_direction, view_priority, cell_size, _grid_axes(), view_cone_half_angle_degrees);
 	// Route hints only REORDER cells already selected for player residency.
 	// Route pathfinding is performed by gameplay (AStarGrid2D), not by
 	// this per-frame engine scheduler. The player's own cell stays first.
@@ -1171,6 +1184,7 @@ void WorldStreamer::_reset_state() {
 	cache_ineligible_nodes.clear();
 	last_unload_count = 0;
 	last_deferred_unload_count = 0;
+	last_unload_work_usec = 0;
 	simulation_inactive_count = 0;
 	last_queued_view_direction = Vector3();
 	truncated_warned = false;
@@ -1410,6 +1424,13 @@ void WorldStreamer::set_view_priority(real_t p_weight) {
 	view_priority = safe;
 }
 
+void WorldStreamer::set_view_cone_half_angle_degrees(real_t p_degrees) {
+	if (!Math::is_finite(p_degrees)) {
+		return;
+	}
+	view_cone_half_angle_degrees = CLAMP(p_degrees, real_t(1.0), real_t(180.0));
+}
+
 void WorldStreamer::set_fast_view_refresh_degrees(real_t p_degrees) {
 	if (!Math::is_finite(p_degrees)) {
 		return;
@@ -1434,6 +1455,10 @@ void WorldStreamer::set_max_unloads_per_update(int p_count) {
 	// Removing a restrictive budget should flush obsolete cells at the next
 	// scheduler pass without requiring an explicit refresh from gameplay.
 	time_since_update = MAX(time_since_update, update_interval);
+}
+
+void WorldStreamer::set_max_unload_work_usec(int p_usec) {
+	max_unload_work_usec = CLAMP(p_usec, 0, 1000000);
 }
 
 void WorldStreamer::set_max_chunk_work_usec(int p_usec) {
@@ -1600,6 +1625,7 @@ void WorldStreamer::refresh(bool p_retry) {
 void WorldStreamer::unload_all() {
 	last_unload_count = 0;
 	last_deferred_unload_count = 0;
+	last_unload_work_usec = 0;
 	clear_cached_chunks(); // Manual reset always releases memory, not just scene residency.
 	LocalVector<Vector3i> cells;
 	for (const KeyValue<Vector3i, ObjectID> &entry : loaded) {
@@ -1631,6 +1657,8 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_view_direction"), &WorldStreamer::get_view_direction);
 	ClassDB::bind_method(D_METHOD("set_view_priority", "weight"), &WorldStreamer::set_view_priority);
 	ClassDB::bind_method(D_METHOD("get_view_priority"), &WorldStreamer::get_view_priority);
+	ClassDB::bind_method(D_METHOD("set_view_cone_half_angle_degrees", "degrees"), &WorldStreamer::set_view_cone_half_angle_degrees);
+	ClassDB::bind_method(D_METHOD("get_view_cone_half_angle_degrees"), &WorldStreamer::get_view_cone_half_angle_degrees);
 	ClassDB::bind_method(D_METHOD("set_auxiliary_source", "position", "radius"), &WorldStreamer::set_auxiliary_source);
 	ClassDB::bind_method(D_METHOD("clear_auxiliary_source"), &WorldStreamer::clear_auxiliary_source);
 	ClassDB::bind_method(D_METHOD("has_auxiliary_source"), &WorldStreamer::has_auxiliary_source);
@@ -1652,6 +1680,9 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_instantiations_per_frame"), &WorldStreamer::get_max_instantiations_per_frame);
 	ClassDB::bind_method(D_METHOD("set_max_unloads_per_update", "count"), &WorldStreamer::set_max_unloads_per_update);
 	ClassDB::bind_method(D_METHOD("get_max_unloads_per_update"), &WorldStreamer::get_max_unloads_per_update);
+	ClassDB::bind_method(D_METHOD("set_max_unload_work_usec", "microseconds"), &WorldStreamer::set_max_unload_work_usec);
+	ClassDB::bind_method(D_METHOD("get_max_unload_work_usec"), &WorldStreamer::get_max_unload_work_usec);
+	ClassDB::bind_method(D_METHOD("get_last_unload_work_usec"), &WorldStreamer::get_last_unload_work_usec);
 	ClassDB::bind_method(D_METHOD("get_last_unload_count"), &WorldStreamer::get_last_unload_count);
 	ClassDB::bind_method(D_METHOD("get_last_deferred_unload_count"), &WorldStreamer::get_last_deferred_unload_count);
 	ClassDB::bind_method(D_METHOD("set_max_chunk_work_usec", "microseconds"), &WorldStreamer::set_max_chunk_work_usec);
@@ -1739,6 +1770,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lookahead_seconds", PROPERTY_HINT_RANGE, "0,4,0.1,suffix:s"), "set_lookahead_seconds", "get_lookahead_seconds");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "view_direction", PROPERTY_HINT_NONE), "set_view_direction", "get_view_direction");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "view_priority", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_view_priority", "get_view_priority");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "view_cone_half_angle_degrees", PROPERTY_HINT_RANGE, "1,180,1,suffix:°"), "set_view_cone_half_angle_degrees", "get_view_cone_half_angle_degrees");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fast_view_refresh_degrees", PROPERTY_HINT_RANGE, "0,180,1,suffix:°"), "set_fast_view_refresh_degrees", "get_fast_view_refresh_degrees");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "chunk_path_template", PROPERTY_HINT_NONE, ""), "set_chunk_path_template", "get_chunk_path_template");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "chunk_parent", PROPERTY_HINT_NONE, ""), "set_chunk_parent", "get_chunk_parent");
@@ -1757,6 +1789,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_chunks", PROPERTY_HINT_RANGE, "0,16,1"), "set_max_cached_chunks", "get_max_cached_chunks");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instantiations_per_frame", PROPERTY_HINT_RANGE, "1,16,1,or_greater"), "set_max_instantiations_per_frame", "get_max_instantiations_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unloads_per_update", PROPERTY_HINT_RANGE, "0,64,1"), "set_max_unloads_per_update", "get_max_unloads_per_update");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unload_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_unload_work_usec", "get_max_unload_work_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_chunk_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_chunk_work_usec", "get_max_chunk_work_usec");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "update_interval", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), "set_update_interval", "get_update_interval");
 	ADD_GROUP("Recovery", "");

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGSpatialFilter3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Height-aware, deterministic 3D spatial thinning of procedural points.
+	</brief_description>
+	<description>
+		Returns indices of 3D candidate points separated by at least the specified full Euclidean distance, preserving input order. Uses a spatial hash checking up to 27 neighboring cells. Unlike 2D XZ filtering, objects on stacked platforms and cliff terraces can coexist. It consumes no randomness, changes no candidates, and creates no scene nodes. Accepts at most 16,384 finite candidates with coordinates within +/- 10,000,000. Minimum spacing is zero or 0.05 through 10,000; output capacity is 0 through 4,096. Invalid input rejects the entire batch.
+	</description>
+	<methods>
+		<method name="filter_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="candidates" type="PackedVector3Array" />
+			<param index="1" name="min_spacing" type="float" />
+			<param index="2" name="max_selected" type="int" default="4096" />
+			<description>
+				Returns original candidate indices in stable order. Exact minimum distance is inclusive; zero spacing returns the first max_selected indices. Validation occurs before selection, so no partial output is produced.
+			</description>
+		</method>
+	</methods>
+</class>

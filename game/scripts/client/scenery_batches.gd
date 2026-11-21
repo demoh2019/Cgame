@@ -116,6 +116,93 @@ static func thin_cosmetic_transforms(transforms: Array[Transform3D],
 	return result
 
 
+
+## Height-aware PCG selection for stacked cliffs/terraces. On stock Godot
+## the fallback uses the same deterministic greedy 3D spatial hash.
+static var _pcg_native_3d: Object = null
+static var _pcg_checked_3d := false
+
+
+static func _pcg_filter_3d_fallback(candidates: PackedVector3Array,
+		min_spacing: float, max_selected: int = PCG_MAX_SELECTED) -> PackedInt32Array:
+	var result := PackedInt32Array()
+	if candidates.size() > PCG_MAX_CANDIDATES or max_selected < 0 or \
+			max_selected > PCG_MAX_SELECTED or not is_finite(min_spacing) or \
+			min_spacing < 0.0 or min_spacing > 10000.0 or \
+			(min_spacing > 0.0 and min_spacing < 0.05):
+		return result
+	# Invalid late points must not produce partially placed decoration.
+	for p in candidates:
+		if not p.is_finite() or absf(p.x) > 10000000.0 or \
+				absf(p.y) > 10000000.0 or absf(p.z) > 10000000.0:
+			return result
+	if min_spacing == 0.0:
+		for i in mini(max_selected, candidates.size()):
+			result.append(i)
+		return result
+	var cells: Dictionary = {}
+	var distance_sq: float = min_spacing * min_spacing
+	for i in candidates.size():
+		if result.size() >= max_selected:
+			break
+		var p: Vector3 = candidates[i]
+		var cell := Vector3i(floori(p.x / min_spacing), floori(p.y / min_spacing),
+			floori(p.z / min_spacing))
+		var blocked := false
+		for z in range(-1, 2):
+			for y in range(-1, 2):
+				for x in range(-1, 2):
+					for index in cells.get(cell + Vector3i(x, y, z), []):
+						if p.distance_squared_to(candidates[index]) < distance_sq:
+							blocked = true
+							break
+					if blocked:
+						break
+				if blocked:
+					break
+			if blocked:
+				break
+		if blocked:
+			continue
+		result.append(i)
+		var indices: Array = cells.get(cell, [])
+		indices.append(i)
+		cells[cell] = indices
+	return result
+
+
+static func pcg_filter_indices_3d(candidates: PackedVector3Array,
+		min_spacing: float, max_selected: int = PCG_MAX_SELECTED,
+		prefer_native: bool = true) -> PackedInt32Array:
+	if prefer_native:
+		if not _pcg_checked_3d:
+			_pcg_checked_3d = true
+			if ClassDB.class_exists("PCGSpatialFilter3D"):
+				var instance: Object = ClassDB.instantiate("PCGSpatialFilter3D")
+				if instance != null and instance.has_method("filter_indices"):
+					_pcg_native_3d = instance
+		if _pcg_native_3d != null:
+			return _pcg_native_3d.call("filter_indices", candidates, min_spacing, max_selected)
+	return _pcg_filter_3d_fallback(candidates, min_spacing, max_selected)
+
+
+## Called after seeded transforms are generated, so thinning never changes
+## the random stream for neighboring chunks or later decoration categories.
+static func thin_cosmetic_transforms_3d(transforms: Array[Transform3D],
+		min_spacing: float, prefer_native: bool = true) -> Array[Transform3D]:
+	if min_spacing <= 0.0 or transforms.is_empty() or transforms.size() > PCG_MAX_CANDIDATES:
+		return transforms
+	var points := PackedVector3Array()
+	for transform in transforms:
+		points.append(transform.origin)
+	var chosen: PackedInt32Array = pcg_filter_indices_3d(
+		points, min_spacing, PCG_MAX_SELECTED, prefer_native)
+	var result: Array[Transform3D] = []
+	for index in chosen:
+		result.append(transforms[index])
+	return result
+
+
 ## Custom bounds are in the parent's local coordinates, matching MultiMesh transforms.
 ## Include full mesh extents and rotation; using only placement centers could clip trees.
 static func bounds_for(mesh: Mesh, transforms: Array) -> AABB:

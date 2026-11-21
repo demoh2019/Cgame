@@ -244,7 +244,8 @@ void prioritize_cells_for_motion(LocalVector<Vector3i> &r_cells, const Vector3 &
 // conservative camera-forward bonus. This replaces (not adds) a sort.
 void prioritize_cells_for_motion_and_view(LocalVector<Vector3i> &r_cells, const Vector3 &p_focus,
 		const Vector3 &p_velocity, real_t p_lookahead_seconds, real_t p_max_prediction,
-		const Vector3 &p_view_direction, real_t p_view_weight, real_t p_cell_size, Axes p_axes) {
+		const Vector3 &p_view_direction, real_t p_view_weight, real_t p_cell_size, Axes p_axes,
+		real_t p_view_cone_half_angle_degrees) {
 	if (r_cells.size() < 2 || !p_focus.is_finite() || !Math::is_finite(p_cell_size) ||
 			!(p_cell_size > 0.0)) {
 		return;
@@ -268,6 +269,12 @@ void prioritize_cells_for_motion_and_view(LocalVector<Vector3i> &r_cells, const 
 	}
 	view.normalize();
 	const real_t strength = CLAMP(p_view_weight, real_t(0.0), real_t(1.0));
+	// Opt-in cone attenuates the camera bonus outside the actual view. The
+	// default 180-degree half-angle retains the old direction-only ranking.
+	const bool narrow_cone = Math::is_finite(p_view_cone_half_angle_degrees) &&
+			p_view_cone_half_angle_degrees < real_t(180.0);
+	const real_t cone_cosine = narrow_cone ? Math::cos(Math::deg_to_rad(
+			CLAMP(p_view_cone_half_angle_degrees, real_t(1.0), real_t(180.0)))) : real_t(-1.0);
 	Vector3 prediction;
 	if (p_velocity.is_finite() && Math::is_finite(p_lookahead_seconds) &&
 			Math::is_finite(p_max_prediction) && p_lookahead_seconds > 0.0 &&
@@ -322,7 +329,14 @@ void prioritize_cells_for_motion_and_view(LocalVector<Vector3i> &r_cells, const 
 		}
 		real_t facing = 0.0;
 		if (toward.length_squared() > real_t(0.0001)) {
-			facing = MAX(toward.normalized().dot(view), real_t(0.0));
+			const real_t alignment = toward.normalized().dot(view);
+			facing = MAX(alignment, real_t(0.0));
+			if (narrow_cone) {
+				// Smoothly reduce the bonus near the cone boundary; never
+				// reprioritize back-facing cells or change residency.
+				facing *= CLAMP((alignment - cone_cosine) / (real_t(1.0) - cone_cosine),
+						real_t(0.0), real_t(1.0));
+			}
 		}
 		// At most 28% of one cell of forward bias, and at most 40%
 		// of the cell's current distance. No starvation or missing chunk

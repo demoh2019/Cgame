@@ -111,11 +111,52 @@ static func select_zombie_bar_indices_stable(distances: PackedFloat64Array,
 	return indices
 
 
+## Pure cosmetic POI relevance: native multi-viewer selector with stock-Godot parity.
+static func select_world_marker_indices(positions: PackedVector3Array,
+		viewers: PackedVector3Array, priorities: PackedByteArray,
+		ids: PackedInt64Array, retained_ids: PackedInt64Array,
+		budget: int = MARKER_COUNT, max_distance: float = MARKER_RANGE,
+		hysteresis: float = 8.0, allow_native: bool = true) -> PackedInt32Array:
+	var empty := PackedInt32Array()
+	if positions.size() != priorities.size() or positions.size() != ids.size() \
+			or positions.size() > 16384 or viewers.is_empty() or viewers.size() > 16 \
+			or retained_ids.size() > 128 or budget < 0 or budget > 128 \
+			or not is_finite(max_distance) or max_distance < 0.0 or max_distance > 1000000.0 \
+			or not is_finite(hysteresis) or hysteresis < 0.0 or hysteresis > max_distance:
+		return empty
+	for viewer in viewers:
+		if not viewer.is_finite():
+			return empty
+	for position in positions:
+		if not position.is_finite():
+			return empty
+	if allow_native:
+		if not _significance_checked:
+			_significance_checked = true
+			if ClassDB.class_exists("SignificanceBudgetPlanner"):
+				_significance_planner = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if _significance_planner != null and _significance_planner.has_method("select_world_priority_stable"):
+			return _significance_planner.call("select_world_priority_stable",
+				positions, viewers, priorities, ids, retained_ids, budget, max_distance, hysteresis)
+	var distances := PackedFloat64Array()
+	for position in positions:
+		var nearest_squared := INF
+		for viewer in viewers:
+			var distance_squared: float = position.distance_squared_to(viewer)
+			if not is_finite(distance_squared):
+				return empty
+			nearest_squared = minf(nearest_squared, distance_squared)
+		distances.append(sqrt(nearest_squared))
+	return select_zombie_bar_indices_stable(distances, priorities, ids, retained_ids,
+		budget, max_distance, hysteresis, false)
+
+
 var client
 var camera: Camera3D
 var _font: Font
 var _floaters: Array = [] # {"pos": Vector3, "text": String, "color": Color, "age": float, "size": int}
 var _markers: Array = []
+var _marker_retained_ids := PackedInt64Array() # Last displayed site IDs.
 var _marker_timer := 0.0
 var _zombie_bar_retained_ids := PackedInt64Array() # Last rendered server IDs, not array indices.
 
@@ -176,14 +217,26 @@ func _update_markers() -> void:
 	var here := Vector2(float(client.you["x"]), float(client.you["z"]))
 	var known: Array = client.you.get("discovered_site_ids", [])
 	var found: Array = []
+	var positions := PackedVector3Array()
+	var priorities := PackedByteArray()
+	var ids := PackedInt64Array()
 	for site in client.world.poi.sites_near(here.x, here.y, MARKER_RANGE):
 		var spot := Vector2(float(site["x"]), float(site["z"]))
 		var distance: float = here.distance_to(spot)
 		if distance < float(site["radius"]) or distance > MARKER_RANGE:
 			continue
 		found.append({"site": site, "distance": distance, "known": known.has(int(site["id"]))})
-	found.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a["distance"]) < float(b["distance"]))
-	_markers = found.slice(0, MARKER_COUNT)
+		positions.append(Vector3(spot.x, 0.0, spot.y))
+		priorities.append(0) # Preserve the previous nearest-place ranking.
+		ids.append(int(site["id"]) + 1) # Generated POI indices are zero-based.
+	var chosen := select_world_marker_indices(positions,
+		PackedVector3Array([Vector3(here.x, 0.0, here.y)]),
+		priorities, ids, _marker_retained_ids)
+	var next_retained := PackedInt64Array()
+	for selected in chosen:
+		_markers.append(found[selected])
+		next_retained.append(ids[selected])
+	_marker_retained_ids = next_retained
 
 
 func _draw() -> void:
