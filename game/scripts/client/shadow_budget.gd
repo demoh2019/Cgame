@@ -161,7 +161,7 @@ static func _select_shadow_fallback(bounds_min: PackedVector3Array,
 		var distance: float = sqrt(dx * dx + dz * dz)
 		var active: bool = current[i] == 1
 		var allowed: float = maxf(0.0, radii[role] +
-			(HYSTERESIS if active else -HYSTERESIS))
+			(hysteresis if active else -hysteresis))
 		if distance > allowed:
 			continue
 		eligible.append({"index": i, "role": role,
