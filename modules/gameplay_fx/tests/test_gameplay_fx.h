@@ -914,4 +914,82 @@ TEST_CASE("[GameplayFX] CueQueue never evicts lifecycle-only saturation or equal
 }
 
 
+TEST_CASE("[GameplayFX] stack policy Resolve diminishing returns and strict reapply") {
+	Ref<GameplayEffectStackPolicy> policy;
+	policy.instantiate();
+	PackedFloat32Array factors;
+	factors.push_back(1.0f);
+	factors.push_back(0.65f);
+	factors.push_back(0.4f);
+	CHECK(policy->configure(3, factors, GameplayEffectStackPolicy::OVERFLOW_CLAMP, GameplayEffectStackPolicy::REAPPLY_IF_STRONGER));
+	CHECK(policy->calculate_magnitude(1.5, 0) == doctest::Approx(1.5));
+	CHECK(policy->calculate_magnitude(1.5, 1) == doctest::Approx(0.975).epsilon(0.00001));
+	CHECK(policy->calculate_magnitude(1.5, 2) == doctest::Approx(0.6).epsilon(0.00001));
+	CHECK(policy->calculate_magnitude(1.5, 99) == doctest::Approx(0.6).epsilon(0.00001));
+	CHECK(policy->calculate_magnitude(1.5, 0, 0.5) == doctest::Approx(0.75));
+	Dictionary first = policy->preview_application(1.5, 0, 0.0);
+	CHECK(bool(first["accepted"]));
+	CHECK(int(first["stacks"]) == 1);
+	CHECK(double(first["remaining"]) == doctest::Approx(1.5));
+	Dictionary reject = policy->preview_application(1.5, 1, 1.5);
+	CHECK_FALSE(bool(reject["accepted"]));
+	CHECK(int(reject["stacks"]) == 1);
+	CHECK(String(reject["reason"]) == "weaker");
+	Dictionary next = policy->preview_application(1.5, 1, 0.5);
+	CHECK(bool(next["accepted"]));
+	CHECK(int(next["stacks"]) == 2);
+	CHECK(double(next["remaining"]) == doctest::Approx(0.975).epsilon(0.00001));
+	Dictionary saturated = policy->preview_application(1.5, 3, 0.1);
+	CHECK(bool(saturated["accepted"]));
+	CHECK(bool(saturated["overflow"]));
+	CHECK(int(saturated["stacks"]) == 3);
+	CHECK(double(saturated["remaining"]) == doctest::Approx(0.6).epsilon(0.00001));
+}
+
+TEST_CASE("[GameplayFX] stack policy overflow, reapply modes, rollback and malformed input") {
+	Ref<GameplayEffectStackPolicy> policy;
+	policy.instantiate();
+	PackedFloat32Array factors;
+	factors.push_back(1.0f);
+	factors.push_back(0.75f);
+	CHECK(policy->configure(2, factors, GameplayEffectStackPolicy::OVERFLOW_REJECT, GameplayEffectStackPolicy::REAPPLY_REFRESH));
+	CHECK_FALSE(bool(policy->preview_application(3.0, 2, 0.0)["accepted"]));
+	CHECK(bool(policy->preview_application(3.0, 1, 2.0)["accepted"]));
+	CHECK(policy->configure(2, factors, GameplayEffectStackPolicy::OVERFLOW_RESET, GameplayEffectStackPolicy::REAPPLY_EXTEND));
+	Dictionary reset = policy->preview_application(4.0, 2, 1.0);
+	CHECK(bool(reset["accepted"]));
+	CHECK(bool(reset["overflow"]));
+	CHECK(int(reset["stacks"]) == 1);
+	CHECK(double(reset["remaining"]) == doctest::Approx(5.0));
+	CHECK(policy->configure(2, factors, GameplayEffectStackPolicy::OVERFLOW_CLAMP, GameplayEffectStackPolicy::REAPPLY_KEEP));
+	CHECK_FALSE(bool(policy->preview_application(2.0, 1, 0.4)["accepted"]));
+	CHECK(bool(policy->preview_application(2.0, 1, 0.0)["accepted"]));
+
+	Dictionary saved = policy->get_config();
+	Ref<GameplayEffectStackPolicy> restored;
+	restored.instantiate();
+	CHECK(restored->replace_config(saved));
+	CHECK(restored->get_max_stacks() == 2);
+	CHECK(restored->get_reapply_policy() == GameplayEffectStackPolicy::REAPPLY_KEEP);
+	Dictionary malformed = saved.duplicate(true);
+	PackedFloat32Array bad = factors;
+	bad.set(1, Math::NaN);
+	malformed["stack_factors"] = bad;
+	CHECK_FALSE(restored->replace_config(malformed));
+	malformed = saved.duplicate(true);
+	malformed["max_stacks"] = int64_t(4294967298LL);
+	CHECK_FALSE(restored->replace_config(malformed));
+	CHECK(restored->get_max_stacks() == 2);
+	CHECK(restored->get_reapply_policy() == GameplayEffectStackPolicy::REAPPLY_KEEP);
+	CHECK_FALSE(restored->configure(0, factors));
+	CHECK_FALSE(restored->configure(33, factors));
+	CHECK_FALSE(restored->configure(1, factors));
+	CHECK_FALSE(restored->configure(2, factors, 99));
+	CHECK(restored->calculate_magnitude(Math::NaN, 0) == 0.0);
+	CHECK(restored->calculate_magnitude(1.0, 0, Math::INF) == 0.0);
+	CHECK_FALSE(bool(restored->preview_application(1.0, 0, -1.0)["accepted"]));
+	CHECK_FALSE(bool(restored->preview_application(1.0, -1, 0.0)["accepted"]));
+	CHECK(restored->get_max_stacks() == 2);
+}
+
 } // namespace TestGameplayFX

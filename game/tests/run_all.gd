@@ -341,6 +341,7 @@ const SUITES := [
 	"res://tests/test_native_infected_senses.gd",
 	"res://tests/test_infected_wounds.gd",
 	"res://tests/test_infected_resolve.gd",
+	"res://tests/test_gameplay_effect_stack_policy.gd",
 	"res://tests/test_infected_sight.gd",
 	"res://tests/test_infected_melee_cover.gd",
 	"res://tests/test_acid_spitter.gd",
