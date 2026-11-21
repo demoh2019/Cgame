@@ -146,9 +146,9 @@ TEST_CASE("[AdaptiveNetworkJitterBuffer] Optional loss recovery retains reserve 
 	CHECK(b->get_recovery_guard_packets() == 0);
 	b->reset();
 	b->observe(1.0, 10.0);
-	b->observe(1.2, 10.2);
+	const double unguarded_burst_delay = b->observe(1.2, 10.2);
 	CHECK(b->get_recovery_hold_remaining() == 0);
-	CHECK(b->observe(1.3, 10.3) < b->get_stats().get("peak_jitter", 0.0));
+	CHECK(b->observe(1.3, 10.3) < unguarded_burst_delay);
 }
 
 } // namespace TestAdaptiveNetworkJitterBuffer
