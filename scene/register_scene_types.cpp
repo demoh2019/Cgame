@@ -228,6 +228,7 @@
 #endif // NAVIGATION_2D_DISABLED
 
 #ifndef _3D_DISABLED
+#include "scene/3d/adaptive_resolution_3d.h"
 #include "scene/3d/aim_modifier_3d.h"
 #include "scene/3d/audio_listener_3d.h"
 #include "scene/3d/audio_stream_player_3d.h"
@@ -650,6 +651,7 @@ void register_scene_types() {
 
 #ifndef _3D_DISABLED
 	GDREGISTER_CLASS(Node3D);
+	GDREGISTER_CLASS(AdaptiveResolution3D);
 	GDREGISTER_ABSTRACT_CLASS(Node3DGizmo);
 	GDREGISTER_CLASS(Skin);
 	GDREGISTER_ABSTRACT_CLASS(SkinReference);
