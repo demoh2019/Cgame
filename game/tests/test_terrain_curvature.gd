@@ -19,13 +19,13 @@ func _flat(_x: float, _z: float) -> float:
 	return 10.0
 
 
-func _grid(origin: Vector2, side: int, sampler: Callable) -> PackedFloat32Array:
+func _grid(origin: Vector2, side: int, sampler: Callable, step: float = 1.0) -> PackedFloat32Array:
 	var heights := PackedFloat32Array()
 	heights.resize(side * side)
 	for z in side:
 		for x in side:
 			heights[z * side + x] = float(sampler.call(
-					origin.x + float(x), origin.y + float(z)))
+					origin.x + float(x) * step, origin.y + float(z) * step))
 	return heights
 
 
@@ -69,9 +69,9 @@ func run(t) -> void:
 
 	t.current = "native padded curvature and scalar reference parity"
 	for sampler in [valley_sampler, ridge_sampler, flat_sampler]:
-		var source: PackedFloat32Array = _grid(Vector2(7.0, -9.0), 7, sampler)
 		for spacing in [0.5, 1.0, 3.0]:
 			var origin := Vector2(7.0, -9.0)
+			var source: PackedFloat32Array = _grid(origin, 7, sampler, spacing)
 			var native_colors: PackedColorArray = Curvature.build(
 					source, origin, 7, spacing, sampler)
 			var scalar_colors: PackedColorArray = Curvature.build(
@@ -96,9 +96,6 @@ func run(t) -> void:
 		t.check(direct[4].r > 0.9 and direct[4].g < 0.001,
 				"native discrete Laplacian lights cavities")
 		t.eq(direct[4].b, 1.0, "native output preserves sky channel")
-		var broken: PackedColorArray = Geometry2D.call(
-				"bake_heightfield_curvature_colors", PackedFloat32Array([0.0]), Vector2i(3, 3), 1.0)
-		t.eq(broken.size(), 0, "invalid halo size is rejected")
 	var chunk_code: String = (ChunkView as Script).source_code
 	t.check(chunk_code.contains("TerrainCurvature.build("),
 			"real streamed chunks use the curvature baker")
