@@ -65,6 +65,48 @@ func run(t) -> void:
 		t.near(float(result.get("t", -1.0)), 0.4, 0.00001, "nearest segment interpolation")
 		t.check(Geometry2D.call("get_closest_point_on_segments", Vector2.ZERO, PackedVector2Array()).is_empty(), "empty segments return no hit")
 
+	t.current = "road mask native rasterization parity"
+	var mask_segments: Array = [
+		[Vector2(1.0, 2.5), Vector2(13.0, 2.5)],
+		[Vector2(6.5, -4.0), Vector2(6.5, 12.0)],
+		[Vector2(11.5, 9.5), Vector2(11.5, 9.5)],
+		[Vector2(-8.0, 8.5), Vector2(4.0, 8.5)]
+	]
+	var scalar_mask: PackedByteArray = WorldRoads.rasterize_mask(mask_segments, Vector2.ZERO, 16, 2.1, 1.2, true)
+	var render_mask: PackedByteArray = WorldRoads.rasterize_mask(mask_segments, Vector2.ZERO, 16, 2.1, 1.2)
+	t.eq(render_mask.size(), 16 * 16, "native/scalar road masks have the expected texture length")
+	t.eq(int(render_mask[2 * 16 + 4]), 255, "road center fills its pixel")
+	t.eq(int(render_mask[9 * 16 + 11]), 255, "zero-length segment paints a round cap")
+	var maximum_difference := 0
+	for i in scalar_mask.size():
+		maximum_difference = maxi(maximum_difference, absi(int(render_mask[i]) - int(scalar_mask[i])))
+	t.check(maximum_difference <= 1, "native road mask agrees with scalar rasterization within L8 quantization")
+	var empty_mask: PackedByteArray = WorldRoads.rasterize_mask([], Vector2.ZERO, 8)
+	t.eq(empty_mask.size(), 64, "empty segment input returns a blank mask")
+	t.check(empty_mask.count(0) == 64, "empty segment mask remains transparent")
+
+	# Real road cells verify world-to-local offset and boundary clipping.
+	var checked_cells := 0
+	for cx in range(-5, 6):
+		for cz in range(-5, 6):
+			var test_cell := Vector2i(cx, cz)
+			var local_pieces: Array = world.roads.pieces_in_cell(test_cell)
+			if local_pieces.is_empty():
+				continue
+			var local_origin: Vector2 = Vector2(test_cell) * Defs.CHUNK_SIZE
+			var scalar: PackedByteArray = WorldRoads.rasterize_mask(local_pieces, local_origin, 16, 2.1, 1.2, true)
+			var rendered: PackedByteArray = WorldRoads.rasterize_mask(local_pieces, local_origin, 16, 2.1, 1.2)
+			var max_error := 0
+			for j in scalar.size():
+				max_error = maxi(max_error, absi(int(scalar[j]) - int(rendered[j])))
+			t.check(max_error <= 1, "chunk road mask native/fallback parity")
+			checked_cells += 1
+			if checked_cells >= 6:
+				break
+		if checked_cells >= 6:
+			break
+	t.check(checked_cells >= 3, "real road mask parity checks sampled road cells")
+
 	var again := WorldGen.new(1337)
 	t.eq(again.roads.all_roads().size(), roads.size(), "the same seed lays the same roads")
 

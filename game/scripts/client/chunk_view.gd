@@ -710,34 +710,9 @@ func _road_texture(origin: Vector2) -> ImageTexture:
 	if pieces.is_empty():
 		return null
 	var size: int = int(Defs.CHUNK_SIZE)
-	var data := PackedByteArray()
-	data.resize(size * size)
-	var half: float = WorldRoads.HALF_WIDTH
-	var soft: float = 1.2
-	for piece in pieces:
-		var a: Vector2 = piece[0] - origin
-		var b: Vector2 = piece[1] - origin
-		var reach: float = half + soft
-		var x0: int = maxi(0, floori(minf(a.x, b.x) - reach))
-		var x1: int = mini(size - 1, ceili(maxf(a.x, b.x) + reach))
-		var y0: int = maxi(0, floori(minf(a.y, b.y) - reach))
-		var y1: int = mini(size - 1, ceili(maxf(a.y, b.y) + reach))
-		var ab: Vector2 = b - a
-		var length_squared: float = maxf(ab.length_squared(), 0.0001)
-		for py in range(y0, y1 + 1):
-			for px in range(x0, x1 + 1):
-				var point := Vector2(float(px) + 0.5, float(py) + 0.5)
-				var t_along: float = clampf((point - a).dot(ab) / length_squared, 0.0, 1.0)
-				var distance: float = point.distance_to(a + ab * t_along)
-				if distance >= reach:
-					continue
-				var value: int = int(255.0 * clampf((reach - distance) / soft, 0.0, 1.0))
-				var index: int = py * size + px
-				if value > data[index]:
-					data[index] = value
+	var data: PackedByteArray = WorldRoads.rasterize_mask(pieces, origin, size)
 	_road_data = data
 	return ImageTexture.create_from_image(Image.create_from_data(size, size, false, Image.FORMAT_L8, data))
-
 
 func build(p_world, p_cell: Vector2i) -> void:
 	_use_nature = Assets.has_nature()

@@ -74,6 +74,46 @@ TEST_CASE("[CoreBind] Geometry2D nearest point among independent segments") {
 	CHECK(api->get_closest_point_on_segments(Vector2(0, 0), PackedVector2Array()).is_empty());
 }
 
+TEST_CASE("[CoreBind] Geometry2D rasterize segment masks including feather and intersections") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+
+	PackedVector2Array lines;
+	lines.push_back(Vector2(1, 2.5));
+	lines.push_back(Vector2(3, 2.5));
+	PackedByteArray mask = api->rasterize_segments_mask(lines, Vector2i(5, 5), 0.5, 1.0);
+	REQUIRE_EQ(mask.size(), 25);
+	CHECK(mask[2 * 5 + 2] == 255); // Pixel center on segment.
+	CHECK(mask[1 * 5 + 2] == 127); // One pixel away: 50% falloff, truncated to L8.
+	CHECK(mask[2 * 5 + 0] == 127); // Endpoint cap.
+	CHECK(mask[0 * 5 + 0] == 0);   // Outside the mask footprint.
+
+	// A crossing segment must take the maximum, not add brightness.
+	lines.push_back(Vector2(2.5, 0));
+	lines.push_back(Vector2(2.5, 4));
+	mask = api->rasterize_segments_mask(lines, Vector2i(5, 5), 0.5, 1.0);
+	CHECK(mask[0 * 5 + 2] == 255);
+	CHECK(mask[1 * 5 + 2] == 255);
+	CHECK(mask[2 * 5 + 2] == 255);
+
+	// Both a zero-length segment and a segment outside the image are well defined.
+	PackedVector2Array points;
+	points.push_back(Vector2(1.5, 1.5));
+	points.push_back(Vector2(1.5, 1.5));
+	points.push_back(Vector2(-100, -100));
+	points.push_back(Vector2(-90, -90));
+	mask = api->rasterize_segments_mask(points, Vector2i(4, 3), 0.0, 1.0);
+	REQUIRE_EQ(mask.size(), 12);
+	CHECK(mask[1 * 4 + 1] == 255);
+	CHECK(mask[2 * 4 + 3] == 0);
+
+	mask = api->rasterize_segments_mask(PackedVector2Array(), Vector2i(3, 2), 1.0, 1.0);
+	REQUIRE_EQ(mask.size(), 6);
+	for (int i = 0; i < mask.size(); i++) {
+		CHECK(mask[i] == 0);
+	}
+}
+
 TEST_CASE("[Geometry2D] Point in circle") {
 	CHECK(Geometry2D::is_point_in_circle(Vector2(0, 0), Vector2(0, 0), 1.0));
 
