@@ -232,6 +232,10 @@ func run(t) -> void:
             "server-only debug output exposes bounded replay and CPU hotspots")
         t.eq(untraced.get_ai_trace_history_frames().size(), 0,
             "untraced NPCs do not allocate per-tick histories")
+        # The latest frame in the ring was intentionally idle. Trigger one
+        # real selection before checking the visual "executed" highlight.
+        traced.think_timer = 0.0
+        traced.think(world, trace_players, 0.1, rng)
         var traced_visual: Dictionary = traced.get_ai_state_visual_snapshot()
         var traced_visual_nodes: Array = traced_visual.get("nodes", [])
         if traced_visual_nodes.size() == 8:
