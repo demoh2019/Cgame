@@ -49,6 +49,8 @@ class RankedStimulusContract(unittest.TestCase):
         self.assertIn('for event in _native_senses.get_ranked_confirmed_stimuli(1, 8)', zombie)
         self.assertIn("_investigated_sound_sites.size() < 2", zombie)
         self.assertIn('here.distance_to(candidate) > float(data["lose"])', zombie)
+        self.assertIn("world.is_safe(candidate.x, candidate.y)", zombie)
+        self.assertIn("world.is_water(candidate.x, candidate.y)", zombie)
         self.assertIn('_investigated_sound_sites.clear()', zombie)
         self.assertIn('t.current = "Ranked history can guide one bounded follow-up investigation"', (TESTS / "test_native_infected_senses.gd").read_text())
         self.assertIn("RANKED PERCEPTION TOTAL:", runner)

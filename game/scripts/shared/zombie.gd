@@ -300,7 +300,9 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 					for event in _native_senses.get_ranked_confirmed_stimuli(1, 8):
 						var candidate: Variant = event.get("position", Vector2.INF)
 						if not (candidate is Vector2) or not candidate.is_finite() or \
-								here.distance_to(candidate) > float(data["lose"]):
+								here.distance_to(candidate) > float(data["lose"]) or \
+								world.is_safe(candidate.x, candidate.y) or \
+								world.is_water(candidate.x, candidate.y):
 							continue
 						var visited := false
 						for earlier in _investigated_sound_sites:
@@ -308,7 +310,7 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 								visited = true
 								break
 						if not visited:
-							next_sound = candidate
+							next_sound = candidate as Vector2
 							break
 				if next_sound.is_finite():
 					last_known_target = next_sound

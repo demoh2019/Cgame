@@ -120,3 +120,5 @@ older Cgame retain their prior single-position behavior.
 Inspect `NativeInfectedSenses.get_debug_snapshot()["ranked_sound_stimuli"]`
 only on a trusted server: source IDs/last perceived positions are sensitive
 AI information and must never be broadcast to untrusted players.
+
+A follow-up memory point is rechecked against the current server safe-zone and water rules before selection; an old sound is never permission to enter the protected hub.

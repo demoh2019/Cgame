@@ -357,3 +357,5 @@ history coordinates and ranked source IDs remain server-side only.
 
 This is a minimal memory and search extension, not Unreal's complete
 automatic perception subsystem.
+
+Follow-up locations are also screened against the current authoritative safe-zone and water checks before the server chooses to investigate them.
