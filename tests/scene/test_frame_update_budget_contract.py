@@ -41,6 +41,10 @@ class TestFrameBudgetContract(unittest.TestCase):
         self.assertIn("p_force || quality_changed", src)
         self.assertIn("for (int i = 0; i < 4; i++)", src)
         self.assertIn("Vector<Lane>", header)
+        self.assertIn("Vector<int> reserved_lanes", header)
+        self.assertIn("tie_start", src)
+        self.assertIn("reserved_lanes.has(index)", src)
+        self.assertIn("reserved_lanes.remove_at", src)
         self.assertNotIn("SceneTree", src)
         self.assertNotIn("Thread::", src)
 
@@ -54,6 +58,10 @@ class TestFrameBudgetContract(unittest.TestCase):
         self.assertIn("AmbientTickBudget.new()", main)
         self.assertIn('ClassDB.class_exists("FrameUpdateBudget")', tests)
         self.assertIn("test_ambient_tick_budget.gd", runner)
+        self.assertIn("_reserved", fallback)
+        self.assertIn("_tie_start", fallback)
+        self.assertIn("_reserved.erase(lane)", fallback)
+        self.assertIn("fair ambient slots across fixed-order cosmetic systems", tests)
         for lane in ('dragonflies', 'dust_devils', 'tumbleweeds', 'dusk_bats'):
             self.assertIn('_ambient_budget.consume("%s"' % lane, main)
             self.assertIn('"%s"' % lane, fallback)

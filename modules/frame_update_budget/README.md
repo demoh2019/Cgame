@@ -33,3 +33,19 @@ Static contracts: `python3 -m unittest tests/scene/test_frame_update_budget_cont
 A passing source contract does not mean the native module has compiled.
 Build the custom Godot editor and run native tests before calling it
 production-verified.
+
+## Fairness and starvation protection
+
+The scheduler reserves due slots at `begin_frame()`, using the largest
+accumulated time first and rotating tie priority each frame. This prevents
+the fixed order of `consume()` calls in Albion After from permanently
+giving the low-tier one-slot budget to dust devils while starving bats,
+dragonflies and tumbleweeds. The caller still controls when work runs;
+`FrameUpdateBudget` never executes callbacks or changes simulation logic.
+
+- Only lanes whose projected time exceeds the profile interval are eligible.
+- One regular reservation per lane per frame; `force` and quality transitions
+  still bypass the cap for immediate world/visibility changes.
+- Deterministic bounded scan over at most 64 lanes and 64 slots.
+- The stock-Godot fallback `ambient_tick_budget.gd` implements the same
+  selection order, and regression tests compare every returned update delta.

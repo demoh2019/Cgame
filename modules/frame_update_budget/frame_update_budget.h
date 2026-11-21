@@ -24,6 +24,10 @@ class FrameUpdateBudget : public RefCounted {
 	};
 
 	Vector<Lane> lanes;
+	// Reserved due lanes are selected at frame start before caller order can bias
+	// the scarce per-frame slots. The rotating tie breaker prevents starvation.
+	Vector<int> reserved_lanes;
+	int tie_start = 0;
 	double rates[4] = { 12.0, 18.0, 30.0, 60.0 };
 	int slots[4] = { 1, 2, 3, 4 };
 	double max_step = 0.16;

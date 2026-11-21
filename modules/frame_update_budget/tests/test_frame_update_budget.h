@@ -63,4 +63,63 @@ TEST_CASE("[FrameUpdateBudget] Profile changes are atomic") {
 	CHECK(budget->consume(StringName("vfx"), 0.01) > 0.0);
 }
 
+
+TEST_CASE("[FrameUpdateBudget] Oldest-due reservations prevent lane starvation") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	const StringName lanes[] = { StringName("dragonflies"), StringName("dust_devils"), StringName("tumbleweeds"), StringName("dusk_bats") };
+	for (int i = 0; i < 4; i++) {
+		CHECK(b->register_lane(lanes[i]));
+	}
+	int counts[4] = { 0, 0, 0, 0 };
+	// Begin with an immediate profile refresh for all lanes, like the game.
+	b->begin_frame(1.0 / 60.0, 0);
+	for (int i = 0; i < 4; i++) {
+		CHECK(b->consume(lanes[i], 1.0 / 60.0) > 0.0);
+	}
+	const int call_order[] = { 1, 0, 2, 3 }; // Gameplay invokes dust devils first.
+	for (int frame = 0; frame < 240; frame++) {
+		b->begin_frame(1.0 / 60.0, 0);
+		for (int i = 0; i < 4; i++) {
+			const int lane = call_order[i];
+			if (b->consume(lanes[lane], 1.0 / 60.0) > 0.0) {
+				counts[lane]++;
+			}
+		}
+		CHECK(b->last_frame_counts().x <= 1); // Low-tier CPU cap.
+	}
+	int min_count = counts[0];
+	int max_count = counts[0];
+	for (int i = 0; i < 4; i++) {
+		CHECK(counts[i] >= 40); // At most one update per lane per ~5 frames.
+		min_count = MIN(min_count, counts[i]);
+		max_count = MAX(max_count, counts[i]);
+	}
+	CHECK(max_count - min_count <= 2); // No lane wins by registration/call order.
+}
+
+TEST_CASE("[FrameUpdateBudget] Reserved slots are single-use and force refresh bypasses them") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("first"));
+	CHECK(b->register_lane("second"));
+	b->begin_frame(0.01, 0); // Initial quality change allows both.
+	CHECK(b->consume("first", 0.01) > 0.0);
+	CHECK(b->consume("second", 0.01) > 0.0);
+	b->begin_frame(0.1, 0); // Only one regular lane is allowed.
+	int regular = 0;
+	if (b->consume("first", 0.1) > 0.0) {
+		regular++;
+	}
+	if (b->consume("first", 0.1) > 0.0) {
+		regular++; // A second call must not reuse the first reservation.
+	}
+	if (b->consume("second", 0.1) > 0.0) {
+		regular++;
+	}
+	CHECK(regular == 1);
+	CHECK(b->consume("second", 0.1, true) > 0.0);
+	CHECK(b->last_frame_counts().x == 2);
+}
+
 } // namespace TestFrameUpdateBudget
