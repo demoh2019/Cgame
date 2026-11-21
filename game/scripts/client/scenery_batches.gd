@@ -201,13 +201,17 @@ static func _pcg_surface_filter_fallback(positions: PackedVector3Array,
 			return PackedInt32Array()
 	if max_selected == 0:
 		return indices
+	# Cosine thresholds are shared across points: no per-candidate acos().
+	# Exact zero/vertical endpoints remain inclusive.
+	var min_up_dot: float = 0.0 if max_slope_deg == 90.0 else cos(deg_to_rad(max_slope_deg))
+	var max_up_dot: float = 1.0 if min_slope_deg == 0.0 else cos(deg_to_rad(min_slope_deg))
 	for i in positions.size():
 		var p: Vector3 = positions[i]
 		if p.y < min_height or p.y > max_height:
 			continue
 		var n: Vector3 = normals[i]
-		var angle: float = rad_to_deg(acos(clampf(n.y / n.length(), -1.0, 1.0)))
-		if angle < min_slope_deg or angle > max_slope_deg:
+		var up_dot: float = n.y / n.length()
+		if up_dot < min_up_dot or up_dot > max_up_dot:
 			continue
 		indices.append(i)
 		if indices.size() >= max_selected:
