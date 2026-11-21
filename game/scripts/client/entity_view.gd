@@ -294,7 +294,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
 		var exposed: bool = float(entity.get("sunder_seconds", 0.0)) > 0.0
 		var wound_phase: String = str(entity.get("wound_phase", ""))
-		var resolve: bool = int(entity.get("resolve_stacks", 0)) >= 2 and float(entity.get("resolve_seconds", 0.0)) > 0.0
+		var fallback_resolve: int = int(entity.get("resolve_stacks", 0)) if float(entity.get("resolve_seconds", 0.0)) > 0.0 else 0
+		var resolve: bool = EngineFeatures.runtime_stack_count(_nodes[key],
+			"Runtime.Status.Resolve", fallback_resolve) >= 2
 		var tint: Color = base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base
 		if wound_phase == "limping":
 			tint = base.lerp(Color(0.54, 0.52, 0.66), 0.65)
@@ -310,8 +312,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			tint = base.lerp(Color(1.0, 0.84, 0.25), 0.65)
 		if staggered:
 			tint = base.lerp(Color(0.38, 0.8, 1.0), 0.7)
-		# Multiple simultaneous server-owned crowd-control effects receive
-		# a small contrasting overlay, without changing existing status priorities.
+		# Two concurrent server-owned crowd control effects are visible even
+		# when a stronger per-effect tint already applies.
 		if EngineFeatures.zombie_control_count(_nodes[key], entity) >= 2:
 			tint = tint.lerp(Color(0.97, 0.28, 0.88), 0.22)
 		model.set_tint(tint)

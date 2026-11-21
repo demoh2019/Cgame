@@ -140,6 +140,52 @@ public:
 	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
 };
 
+/** Single-child decorator with resource-safe cycle detection and runner-local state. */
+class BehaviorTreeDecorator : public BehaviorTreeTask {
+	GDCLASS(BehaviorTreeDecorator, BehaviorTreeTask);
+
+	Ref<BehaviorTreeTask> task;
+
+protected:
+	static void _bind_methods();
+	static void clear_branch_memory(Dictionary &r_memory, const String &p_path);
+
+public:
+	void set_task(const Ref<BehaviorTreeTask> &p_task);
+	Ref<BehaviorTreeTask> get_task() const { return task; }
+	virtual bool contains_task(const BehaviorTreeTask *p_target, int p_depth = 0) const override;
+};
+
+/** Fails and aborts the child if it does not finish before a time limit. */
+class BehaviorTreeTimeout : public BehaviorTreeDecorator {
+	GDCLASS(BehaviorTreeTimeout, BehaviorTreeDecorator);
+
+	double duration = 1.0;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_duration(double p_duration);
+	double get_duration() const { return duration; }
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
+/** Rejects a child for a cooldown window after that child succeeds. */
+class BehaviorTreeCooldown : public BehaviorTreeDecorator {
+	GDCLASS(BehaviorTreeCooldown, BehaviorTreeDecorator);
+
+	double duration = 1.0;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_duration(double p_duration);
+	double get_duration() const { return duration; }
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
 /** Built-in leaf that checks a blackboard value. */
 class BehaviorTreeBlackboardCheck : public BehaviorTreeTask {
 	GDCLASS(BehaviorTreeBlackboardCheck, BehaviorTreeTask);

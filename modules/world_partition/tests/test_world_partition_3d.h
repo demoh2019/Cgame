@@ -1108,4 +1108,79 @@ TEST_CASE("[WorldPartition3D] Incremental NavMesh patches exactly match full til
 	memdelete(partition);
 }
 
+
+TEST_CASE("[WorldPartition3D] Bounded cell route cache handles topology, negative results, defensive copies and LRU") {
+	WorldPartition3D *world = memnew(WorldPartition3D);
+	CHECK(world->get_max_cell_path_cache_entries() == 64);
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
+	CHECK(world->get_cell_path_cache_hit_count() == 0);
+	CHECK(world->get_cell_path_cache_miss_count() == 0);
+	CHECK(world->find_cell_path(Vector2i(), Vector2i()).is_empty());
+	CHECK(world->get_cell_path_cache_miss_count() == 1);
+	CHECK(world->find_cell_path(Vector2i(), Vector2i()).is_empty());
+	CHECK(world->get_cell_path_cache_hit_count() == 1); // Cache empty routes too.
+	CHECK(world->get_cell_path_cache_entry_count() == 1);
+
+	const String scene = "res://tests/cell_route_cache_placeholder.tscn";
+	world->set_cell_scene(Vector2i(0, 0), scene);
+	world->set_cell_scene(Vector2i(1, 0), scene);
+	world->set_cell_scene(Vector2i(2, 0), scene);
+	CHECK(world->get_cell_path_cache_entry_count() == 0); // Registration invalidates all.
+	Array first = world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0));
+	REQUIRE(first.size() == 3);
+	CHECK(world->get_cell_path_cache_miss_count() == 2);
+	first[1] = Vector2i(99, 99); // Never allow returned Array to corrupt the cache.
+	Array second = world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0));
+	REQUIRE(second.size() == 3);
+	CHECK(second[1] == Vector2i(1, 0));
+	CHECK(world->get_cell_path_cache_hit_count() == 2);
+	second.clear();
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0)).size() == 3);
+
+	// Loaded-only negative routes have a different key from registered topology.
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0), true).is_empty());
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0), true).is_empty());
+	CHECK(world->get_cell_path_cache_entry_count() == 2);
+	world->remove_cell_scene(Vector2i(1, 0));
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0)).is_empty());
+	world->set_cell_scene(Vector2i(1, 0), scene);
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0)).size() == 3);
+
+	// The LRU cache keeps only two keys and evicts the least recently used,
+	// including negative routes. Exact coordinates and directional keys differ.
+	world->set_max_cell_path_cache_entries(2);
+	world->clear_cell_path_cache();
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
+	CHECK(world->get_cell_path_cache_hit_count() == 0);
+	CHECK(world->get_cell_path_cache_miss_count() == 0);
+	world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0)); // A: miss.
+	world->find_cell_path(Vector2i(1, 0), Vector2i(2, 0)); // B: miss.
+	CHECK(world->get_cell_path_cache_miss_count() == 2);
+	world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0)); // A: hit.
+	CHECK(world->get_cell_path_cache_hit_count() == 1);
+	world->find_cell_path(Vector2i(2, 0), Vector2i(0, 0)); // C: miss, B evicted.
+	CHECK(world->get_cell_path_cache_entry_count() == 2);
+	world->find_cell_path(Vector2i(1, 0), Vector2i(2, 0)); // B: miss.
+	CHECK(world->get_cell_path_cache_miss_count() == 4);
+
+	world->set_max_cell_path_cache_entries(0); // Disable caching entirely.
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
+	const int previous_misses = world->get_cell_path_cache_miss_count();
+	world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0));
+	world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0));
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
+	CHECK(world->get_cell_path_cache_miss_count() == previous_misses + 2);
+	world->set_max_cell_path_cache_entries(128);
+	CHECK(world->get_max_cell_path_cache_entries() == 128);
+	ERR_PRINT_OFF;
+	world->set_max_cell_path_cache_entries(-1);
+	world->set_max_cell_path_cache_entries(129);
+	ERR_PRINT_ON;
+	CHECK(world->get_max_cell_path_cache_entries() == 128);
+	world->clear_cell_scenes();
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
+	memdelete(world);
+}
+
 } // namespace TestWorldPartition3D

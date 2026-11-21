@@ -93,4 +93,39 @@ func run(t) -> void:
 	else:
 		t.check(not EngineFeatures.runtime_has(actor, "Runtime.Life.Dead"), "stock Godot skips native tags")
 		t.check(EngineFeatures.runtime_has(actor, "Runtime.Status.Staggered", true), "fallback remains functional")
+	if ClassDB.class_exists("GameplayTagStackContainer"):
+		t.current = "native counted runtime effects"
+		infected["resolve_stacks"] = 3
+		infected["resolve_seconds"] = 5.0
+		EngineFeatures.sync_runtime_tags(actor, "zombie", infected)
+		t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve"), 3,
+			"native count reflects authoritative resolve stacks")
+		var native_stacks: Object = actor.get_meta("tag_stacks") as Object
+		t.check(native_stacks != null, "counted tag container attached to rendered actor")
+		if native_stacks != null:
+			t.eq(int(native_stacks.call("get_stack_count", StringName("Runtime.Status"), false)), 5,
+				"parent status query sums active descendant stacks")
+		infected["resolve_seconds"] = 0.0
+		EngineFeatures.sync_runtime_tags(actor, "zombie", infected)
+		t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve"), 0,
+			"expired resolve stacks disappear on the following snapshot")
+		if native_stacks != null and native_stacks.has_method("replace_stack_branch"):
+			t.current = "independent client effects survive runtime snapshots"
+			t.check(bool(native_stacks.call("add_stacks", StringName("Local.Preview.Bleeding"), 2)),
+				"create independent local effect")
+			infected["resolve_seconds"] = 4.0
+			EngineFeatures.sync_runtime_tags(actor, "zombie", infected)
+			t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve"), 3,
+				"runtime branch still refreshes")
+			t.eq(int(native_stacks.call("get_stack_count", StringName("Local.Preview.Bleeding"), true)), 2,
+				"local bleeding survives runtime refresh")
+			infected["resolve_seconds"] = 0.0
+			EngineFeatures.sync_runtime_tags(actor, "zombie", infected)
+			t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve"), 0,
+				"expired runtime stack cleared")
+			t.eq(int(native_stacks.call("get_stack_count", StringName("Local.Preview.Bleeding"), true)), 2,
+				"local branch still intact after expiry")
+	else:
+		t.eq(EngineFeatures.runtime_stack_count(actor, "Runtime.Status.Resolve", 3), 3,
+			"stock Godot retains snapshot fallback for resolve presentation")
 	actor.free()

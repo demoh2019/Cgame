@@ -7,7 +7,7 @@ def configure(env):
 
 
 def get_doc_classes():
-    return ["GameplayTagContainer", "GameplayTagQuery", "AnimationLODController"]
+    return ["GameplayTagContainer", "GameplayTagQuery", "GameplayTagStackContainer", "AnimationLODController"]
 
 
 def get_doc_path():

@@ -12,6 +12,8 @@ Move the blue survivor with **arrow keys**, press **F** to shout, **Space** near
 
 Navigation replans are immediately triggered when switching actions; while chasing a moving target, A* refreshes on the NPC's designated one-in-four AI tick. HUD shows how many real path queries ran, their mean CPU time and the ticks until the next slot. The canonical game uses the same scheduler for large infected groups; see `game/docs/AI_UPDATE_SCHEDULING.md`.
 
+The native `BehaviorTreeTimeout` enforces a 0.8-second deadline on a 2-second audio investigation task, allowing patrol fallback if that task cannot finish. Pressing **F** uses an `AIActionCooldowns` instance to prevent shout-spam; the HUD displays its remaining time. In the canonical multiplayer game, the same native action gate prevents a howler from creating repeated pack alerts when it acquires different survivors in rapid succession.
+
 The game uses:
 - `BehaviorTreeRunner` (Node) with `BehaviorTreeReactiveSelector` and `BehaviorTreeReactiveSequence` (Resource tasks);
 - `BehaviorTreeBlackboardCheck`, `BehaviorTreeBlackboardCompare`, `BehaviorTreeBlackboardSet`, and `BehaviorTreeWait` (time-based waits);

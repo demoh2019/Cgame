@@ -1339,8 +1339,26 @@ func _on_welcomed() -> void:
 	# The engine ensures that both streaming update paths share one drain.
 	streamer.max_instantiations_per_frame = 3
 	streamer.max_chunk_work_usec = 2500
+	# Slow-frame backpressure is an opt-in extension. Older Godot forks
+	# retain their unchanged fixed streaming budgets.
+	if "adaptive_chunk_budget_enabled" in streamer:
+		streamer.adaptive_chunk_budget_enabled = true
 	streamer.set_chunk_generator(_generate_chunk)
 	add_child(streamer)
+	# Read-only, engine-sourced telemetry: stream backpressure, real main-
+	# thread chunk work and the currently effective CPU/count limits.
+	if streamer.has_method("get_last_frame_chunk_work_usec"):
+		for monitor in [
+			[&"Albion/StreamChunkCPUus", Callable(streamer, "get_last_frame_chunk_work_usec")],
+			[&"Albion/StreamChunkAttempts", Callable(streamer, "get_last_frame_chunk_attempt_count")],
+			[&"Albion/StreamPressurePct", Callable(streamer, "get_streaming_frame_pressure_percent")],
+			[&"Albion/StreamEffectiveSlots", Callable(streamer, "get_effective_instantiations_per_frame")],
+			[&"Albion/StreamEffectiveCPUus", Callable(streamer, "get_effective_chunk_work_usec")],
+		]:
+			var monitor_name: StringName = monitor[0]
+			if not Performance.has_custom_monitor(monitor_name):
+				Performance.add_custom_monitor(monitor_name, monitor[1])
+				_ambient_monitors.append(monitor_name)
 	_access.set_world_streamer(streamer)
 	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
 	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,

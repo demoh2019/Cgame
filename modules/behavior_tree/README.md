@@ -5,6 +5,30 @@ behavior tree system for gameplay AI. It is not a visual graph editor yet.
 When enabled, all resources are available in the scene inspector and in
 GDScript. The module has no third-party runtime dependencies.
 
+## Native timed decorators and action cooldowns
+
+Cgame now provides `BehaviorTreeDecorator` as the cycle-safe single-child Resource foundation, plus two reusable task decorators familiar from Unreal Engine Behavior Trees and Godot LimboAI.
+
+- `BehaviorTreeTimeout` limits a child to a configurable number of simulated seconds. At or after its deadline, it returns `FAILURE` and clears the entire running child subtree without affecting siblings.
+- `BehaviorTreeCooldown` triggers a cooldown only after its child returns `SUCCESS`. During the lockout it returns `FAILURE` without calling the child. A `RUNNING` or failing child does not start its cooldown. The timer is **runner branch-scoped**: preemption or runner reset erases it.
+- `AIActionCooldowns` is a separate native per-agent RefCounted event gate for named **gameplay actions** across tree restarts. `try_trigger("pack_howl", 6.0)` admits one event and rejects additional attempts until `advance_time(delta)` expires its timer. There is no wall-clock dependency or global state, and each instance holds at most 16 action keys.
+
+```gdscript
+var timed_search := BehaviorTreeTimeout.new()
+timed_search.duration = 0.8
+var search_task := BehaviorTreeWait.new()
+search_task.duration = 2.0
+timed_search.task = search_task
+# Insert timed_search as a child of a BehaviorTreeSequence/Selector.
+
+var actions := AIActionCooldowns.new()
+if actions.try_trigger(&"pack_howl", 6.0):
+    notify_nearby_allies()
+actions.advance_time(server_delta)
+```
+
+Albion After integrates the event gate into the *authoritative howler pack alert*, and the playable behavior-tree demo uses Timeout on audio investigations and action cooldowns on the player's shout. On stock Godot, Albion After keeps its prior one-howl-per-target behavior; the standalone native demo requires Cgame.
+
 ## Included resources
 
 - `BehaviorTreeSequence`: run children in order, stop at the first failure,
@@ -219,3 +243,37 @@ damage validation, safe-zone authority and network synchronization remain
 entirely game-owned. No native threat data is sent to ordinary clients.
 
 See `game/docs/NATIVE_AI_THREAT_TABLE.md`.
+
+## Bounded native 2D pack proximity grid
+
+`AIProximityGrid2D.query_radius_batch(positions, source_indices, radius, cell_size)`
+builds one temporary spatial hash for the supplied 2D point cohort and returns
+one `PackedInt32Array` of neighbor indices per source (ascending input index,
+excluding the source itself). Inputs may use negative coordinates, exact radius
+boundary hits are included, and repeated source IDs give repeated results.
+With `cell_size >= radius`, only nine cells need inspection per source.
+The native method performs the geometric broadphase only, never physics/LOS,
+combat authority, server targets, or autonomous movement.
+
+The method limits positions to **8192**, sources to **1024**, radius to
+**0–256** and cell size to **max(1,radius)–256**, with finite bounded world
+coordinates and valid indices. Invalid requests return an empty result
+without partially updated state.
+
+Albion After's `GameServer._alert_infected_pack()` uses this native
+broadphase for its established **18-metre** pack-awareness system. Only
+alive infected enter the snapshot; current server-authorized chase sources
+are frozen before delivering notices. `Zombie.receive_pack_alert()`
+continues enforcing valid player targets, safe zones, territory and pursuit
+leash. Newly awakened neighbors do not become senders in the same pass.
+The stock-Godot/older-Cgame path keeps the original 3×3 GDScript buckets,
+so **no game protocol or save format changes** are needed.
+
+Native tests cover negative cells, exact boundaries, deterministic order,
+duplicate sources and malformed input. Gameplay tests check native/brute
+force parity, one-pass alerts and old-fork fallback. As with all spatial
+broadphases, profile actual crowded worlds to confirm the allocation and
+CPU overhead justifies the reduction in script loops.
+
+References: spatial partitioning used in Unity-style entity proximity
+workflows and Unreal Engine Mass crowd processing; no code copied.

@@ -980,6 +980,70 @@ Vector2 Geometry2D::get_closest_point_to_segment_uncapped(const Vector2 &p_point
 	return ::Geometry2D::get_closest_point_to_segment_uncapped(p_point, p_a, p_b);
 }
 
+
+TypedArray<PackedInt32Array> Geometry2D::get_nearest_neighbors(const PackedVector2Array &p_points, int p_neighbor_count, real_t p_max_distance) {
+	TypedArray<PackedInt32Array> result;
+	ERR_FAIL_COND_V_MSG(p_points.size() > 4096, result, "Nearest-neighbor batches allow at most 4096 points.");
+	ERR_FAIL_COND_V_MSG(p_neighbor_count < 0 || p_neighbor_count > 32, result, "Neighbor count must be between 0 and 32.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_max_distance) || p_max_distance < 0.0, result,
+			"Maximum neighbor distance must be finite and nonnegative.");
+	const real_t maximum_squared = p_max_distance * p_max_distance;
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(maximum_squared), result, "Squared maximum distance must be finite.");
+
+	const int count = p_points.size();
+	const Vector2 *points = p_points.ptr();
+	for (int i = 0; i < count; i++) {
+		ERR_FAIL_COND_V_MSG(!points[i].is_finite(), result, "Nearest-neighbor point coordinates must be finite.");
+	}
+
+	result.resize(count);
+	const int k = MIN(p_neighbor_count, MAX(0, count - 1));
+	// Only k candidates are retained for each point, never a full N-by-N
+	// distance matrix. The closest distances are sorted, ties by input index.
+	Vector<int> indices;
+	Vector<real_t> distances;
+	indices.resize(k);
+	distances.resize(k);
+	int *index_buffer = indices.ptrw();
+	real_t *distance_buffer = distances.ptrw();
+	for (int i = 0; i < count; i++) {
+		int found = 0;
+		for (int j = 0; j < count; j++) {
+			if (i == j) {
+				continue;
+			}
+			const real_t squared = points[i].distance_squared_to(points[j]);
+			if (!Math::is_finite(squared) || squared > maximum_squared) {
+				continue;
+			}
+			int insertion = 0;
+			while (insertion < found && (distance_buffer[insertion] < squared ||
+							(distance_buffer[insertion] == squared && index_buffer[insertion] < j))) {
+				insertion++;
+			}
+			if (insertion == k) {
+				continue;
+			}
+			const int new_found = MIN(found + 1, k);
+			for (int move = new_found - 1; move > insertion; move--) {
+				index_buffer[move] = index_buffer[move - 1];
+				distance_buffer[move] = distance_buffer[move - 1];
+			}
+			index_buffer[insertion] = j;
+			distance_buffer[insertion] = squared;
+			found = new_found;
+		}
+		PackedInt32Array neighbors;
+		neighbors.resize(found);
+		int32_t *output = neighbors.ptrw();
+		for (int j = 0; j < found; j++) {
+			output[j] = index_buffer[j];
+		}
+		result.set(i, neighbors);
+	}
+	return result;
+}
+
 Dictionary Geometry2D::get_closest_point_on_segments(const Vector2 &p_point, const PackedVector2Array &p_segment_endpoints) {
 	Dictionary result;
 	ERR_FAIL_COND_V_MSG(!p_point.is_finite(), result, "Query point must have finite coordinates.");
@@ -1268,6 +1332,7 @@ void Geometry2D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_closest_point_to_segment_uncapped", "point", "s1", "s2"), &Geometry2D::get_closest_point_to_segment_uncapped);
 	ClassDB::bind_method(D_METHOD("get_closest_point_on_segments", "point", "segment_endpoints"), &Geometry2D::get_closest_point_on_segments);
+	ClassDB::bind_method(D_METHOD("get_nearest_neighbors", "points", "neighbor_count", "max_distance"), &Geometry2D::get_nearest_neighbors);
 	ClassDB::bind_method(D_METHOD("rasterize_segments_mask", "segment_endpoints", "size", "half_width", "softness"), &Geometry2D::rasterize_segments_mask);
 
 	ClassDB::bind_method(D_METHOD("point_is_inside_triangle", "point", "a", "b", "c"), &Geometry2D::point_is_inside_triangle);

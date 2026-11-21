@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AIActionCooldowns" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Per-agent named action cooldowns advanced using authoritative simulation time.</brief_description>
+	<description>
+		A small, reusable RefCounted ledger for rare gameplay events such as pack howls, warnings and ability announcements. The game calls [method try_trigger] after validating that an event is authorized; a successful call starts its cooldown. Repeat calls with the same key fail until [method advance_time] expires the timer. At most 16 action keys are active per instance; expired entries are erased. There are no wall clocks or global state, so different NPCs do not share cooldowns.
+		The canonical Albion After server uses it to rate-limit group howls when a verified infected rapidly switches between targets. Ordinary player attack cooldowns remain server-owned by existing gameplay code. A disabled or missing native class on stock Godot does not change existing game behavior.
+	</description>
+	<methods>
+		<method name="try_trigger"><return type="bool" /><param index="0" name="action" type="StringName" /><param index="1" name="duration" type="float" /><description>Returns true if a nonempty action is ready, starting a cooldown of 0–3600 finite seconds. Returns false when a countdown is active or the active-key capacity is exhausted. A zero-second trigger succeeds without storing an entry.</description></method>
+		<method name="advance_time"><return type="void" /><param index="0" name="delta" type="float" /><description>Advances all active cooldowns by a nonnegative finite simulation delta and removes expired entries.</description></method>
+		<method name="get_remaining" qualifiers="const"><return type="float" /><param index="0" name="action" type="StringName" /><description>Returns remaining cooldown seconds or zero when the action is ready.</description></method>
+		<method name="get_snapshot" qualifiers="const"><return type="Dictionary" /><description>Returns a detached, plain-data Dictionary of action keys and remaining seconds. This is on-demand diagnostic data.</description></method>
+		<method name="reset"><return type="void" /><description>Clears all action timers without changing any external game state.</description></method>
+	</methods>
+</class>
