@@ -92,6 +92,20 @@
 			<return type="float" />
 			<description>Returns 0 to 100 for the measured render-frame backpressure. Only updated on the streamer's internal process when adaptivity is enabled.</description>
 		</method>
+		<method name="should_defer_predicted_chunk_work" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="budget_usec" type="int" />
+			<param index="1" name="previous_attempts" type="int" />
+			<param index="2" name="spent_usec" type="int" />
+			<param index="3" name="predicted_next_usec" type="int" />
+			<description>Pure admission helper: returns true only when a second or later scene work unit would exceed a positive shared CPU budget based on prior measured time plus the forecast. Unknown estimates, disabled budgets and first attempts always return false.</description>
+		</method>
+		<method name="update_chunk_work_estimate" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="previous_usec" type="int" />
+			<param index="1" name="sample_usec" type="int" />
+			<description>Pure bounded quarter-rate exponential moving average for measured per-chunk main-thread CPU microseconds. Returns the previous estimate for a zero/negative sample and clamps positive estimates to 1000000. The engine records separate procedural and threaded-finalization forecasts.</description>
+		</method>
 		<method name="get_estimated_generator_work_usec" qualifiers="const">
 			<return type="int" />
 			<description>Observed moving-average main-thread microseconds for procedural generation and node adoption, clamped to 1000000. No prediction until at least one positive sample. Resets when the generator or streaming grid changes.</description>

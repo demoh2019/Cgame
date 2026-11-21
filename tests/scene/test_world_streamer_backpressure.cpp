@@ -78,4 +78,33 @@ TEST_CASE("[WorldStreamer] Adaptive backpressure is opt-in and reversible") {
 	memdelete(streamer);
 }
 
+TEST_CASE("[WorldStreamer] Predictive cell admission is opt-in and bounded") {
+	WorldStreamer *s = memnew(WorldStreamer);
+	CHECK_FALSE(s->is_predictive_chunk_work_budget_enabled());
+	CHECK(s->get_estimated_generator_work_usec() == 0);
+	CHECK(s->get_estimated_finalization_work_usec() == 0);
+	CHECK(s->get_last_predicted_deferred_chunk_count() == 0);
+	s->set_predictive_chunk_work_budget_enabled(true);
+	CHECK(s->is_predictive_chunk_work_budget_enabled());
+	s->set_max_chunk_work_usec(2500);
+	CHECK_FALSE(WorldStreamer::should_defer_predicted_chunk_work(2500, 0, 2000, 2000));
+	CHECK_FALSE(WorldStreamer::should_defer_predicted_chunk_work(0, 1, 2000, 2000));
+	CHECK_FALSE(WorldStreamer::should_defer_predicted_chunk_work(2500, 1, 400, 0));
+	CHECK_FALSE(WorldStreamer::should_defer_predicted_chunk_work(2500, 1, 400, 1800));
+	CHECK(WorldStreamer::should_defer_predicted_chunk_work(2500, 1, 1600, 1200));
+	CHECK(WorldStreamer::should_defer_predicted_chunk_work(2500, 1, 2500, 1));
+	CHECK(WorldStreamer::should_defer_predicted_chunk_work(2500, 1, 999999999999LL, 999999999999LL));
+	CHECK(WorldStreamer::update_chunk_work_estimate(0, 1600) == 1600);
+	CHECK(WorldStreamer::update_chunk_work_estimate(1600, 800) == 1400);
+	CHECK(WorldStreamer::update_chunk_work_estimate(1400, 0) == 1400);
+	CHECK(WorldStreamer::update_chunk_work_estimate(0, 100000000) == 1000000);
+	CHECK(WorldStreamer::update_chunk_work_estimate(-100, -30) == 0);
+	CHECK(WorldStreamer::update_chunk_work_estimate(100000000, 100000000) == 1000000);
+	s->set_chunk_generator(Callable()); // Changing the callback clears learned generator costs.
+	CHECK(s->get_estimated_generator_work_usec() == 0);
+	s->set_predictive_chunk_work_budget_enabled(false);
+	CHECK_FALSE(s->is_predictive_chunk_work_budget_enabled());
+	memdelete(s);
+}
+
 } // namespace TestWorldStreamerBackpressure
