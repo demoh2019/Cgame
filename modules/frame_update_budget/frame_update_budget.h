@@ -29,6 +29,7 @@ class FrameUpdateBudget : public RefCounted {
 	double max_step = 0.16;
 	int quality = -1;
 	bool quality_changed = true;
+	bool profile_dirty = false;
 	int budget = 1;
 	int spent = 0;
 	double pressure = 0.0;
