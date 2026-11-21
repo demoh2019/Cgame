@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameDynamicCarver" inherits="RefCounted" api_type="core" keywords="carve,obstacle,navmesh,tile cache,navigation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Budgeted dynamic obstacle carving over tiled walkable polygons, integrated with [NavigationServer3D] obstacles and bake carving.
+	</brief_description>
+	<description>
+		[CgameDynamicCarver] keeps a grid of tiles, each holding convex walkable polygons in the X/Z plane (polygons are [Vector2] with X and Z). Obstacles (polygons or circles, grown by the agent radius) are subtracted from the tiles they touch. Adding or removing an obstacle only marks tiles as dirty; [method update] re-carves a limited number of them per call, which spreads the cost over frames like a tile cache. Re-carved tiles are reported through [method consume_changed_tiles] so that AI can repath, and [method path_affected] tells whether a path crosses a changed tile.
+		Obstacle shapes are either a [PackedVector2Array] polygon or a [Dictionary] [code]{"center": Vector2, "radius": float, "segments": int}[/code].
+		Engine integration:
+		- [method set_server_map] mirrors obstacles as [NavigationServer3D] obstacles for avoidance.
+		- [method export_obstructions] adds obstacles as carving projected obstructions to a [NavigationMeshSourceGeometryData3D], exactly like a [NavigationObstacle3D] with [member NavigationObstacle3D.affect_navigation_mesh] and [member NavigationObstacle3D.carve_navigation_mesh], so a native tile rebake removes them from the baked mesh.
+		- [method set_rebake_callable] is invoked for every tile re-carved, which is the place to queue a native tile rebake under the same per-call budget.
+		[codeblock]
+		var carver := CgameDynamicCarver.new()
+		carver.setup(Rect2(0, 0, 200, 200), 20.0, 0.5)
+		carver.add_obstacle("barricade", PackedVector2Array([Vector2(50, 50), Vector2(60, 50), Vector2(60, 70), Vector2(50, 70)]))
+		func _physics_process(_delta):
+		    if carver.update(4) &gt; 0:
+		        for tile in carver.consume_changed_tiles():
+		            repath_agents_in(tile)
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="add_obstacle">
+			<return type="void" />
+			<param index="0" name="id" type="Variant" />
+			<param index="1" name="shape" type="Variant" />
+			<description>
+				Adds an obstacle identified by [param id], replacing an existing obstacle with the same id. The tiles it touches are queued for re-carving. Shapes with fewer than 3 vertices are ignored.
+			</description>
+		</method>
+		<method name="consume_changed_tiles">
+			<return type="Array[Vector2i]" />
+			<description>
+				Returns the tiles re-carved since the last call and clears the list.
+			</description>
+		</method>
+		<method name="export_obstructions" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="source_geometry" type="NavigationMeshSourceGeometryData3D" />
+			<param index="1" name="elevation" type="float" />
+			<param index="2" name="height" type="float" />
+			<param index="3" name="rect" type="Rect2" default="Rect2(0, 0, 0, 0)" />
+			<description>
+				Adds the carvers of every obstacle (those intersecting [param rect] when it has an area) to [param source_geometry] as projected obstructions with carving enabled and returns how many were added.
+			</description>
+		</method>
+		<method name="find_path" qualifiers="const">
+			<return type="PackedVector2Array" />
+			<param index="0" name="from" type="Vector2" />
+			<param index="1" name="to" type="Vector2" />
+			<description>
+				Searches the carved polygons with A* and pulls the result straight with the funnel algorithm. Returns an empty array when either point is blocked or the destination is unreachable.
+			</description>
+		</method>
+		<method name="get_agent_radius" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the agent radius obstacles are grown by.
+			</description>
+		</method>
+		<method name="get_bounds" qualifiers="const">
+			<return type="Rect2" />
+			<description>
+				Returns the area covered by the tile grid.
+			</description>
+		</method>
+		<method name="get_obstacle_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of registered obstacles.
+			</description>
+		</method>
+		<method name="get_rebake_callable" qualifiers="const">
+			<return type="Callable" />
+			<description>
+				Returns the callable set by [method set_rebake_callable].
+			</description>
+		</method>
+		<method name="get_server_map" qualifiers="const">
+			<return type="RID" />
+			<description>
+				Returns the [NavigationServer3D] map obstacles are mirrored on, or an invalid [RID].
+			</description>
+		</method>
+		<method name="get_server_obstacle_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many obstacles currently have a [NavigationServer3D] obstacle.
+			</description>
+		</method>
+		<method name="get_tile_size" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the tile edge length.
+			</description>
+		</method>
+		<method name="get_tiles_rebuilt_total" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many tiles were re-carved since [method setup] or [method set_walkable].
+			</description>
+		</method>
+		<method name="get_version" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns a counter that increases for every [method update] call that re-carved at least one tile.
+			</description>
+		</method>
+		<method name="has_obstacle" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="Variant" />
+			<description>
+				Returns [code]true[/code] if an obstacle with [param id] exists.
+			</description>
+		</method>
+		<method name="is_convex" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="polygon" type="PackedVector2Array" />
+			<description>
+				Returns [code]true[/code] if [param polygon] is convex (collinear vertices are tolerated).
+			</description>
+		</method>
+		<method name="is_walkable" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="point" type="Vector2" />
+			<description>
+				Returns [code]true[/code] if [param point] lies on (or on the border of) a carved walkable polygon. Pending changes are not reflected until [method update] ran.
+			</description>
+		</method>
+		<method name="on_destroyed">
+			<return type="bool" />
+			<param index="0" name="id" type="Variant" />
+			<description>
+				Destruction hook: the obstacle stops blocking the navigation. Equivalent to [method remove_obstacle].
+			</description>
+		</method>
+		<method name="path_affected" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="path" type="PackedVector2Array" />
+			<param index="1" name="changed" type="Array[Vector2i]" />
+			<description>
+				Returns [code]true[/code] if any segment of [param path] passes through one of the [param changed] tiles.
+			</description>
+		</method>
+		<method name="pending_tiles" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many tiles wait to be re-carved.
+			</description>
+		</method>
+		<method name="polygons_in_tile" qualifiers="const">
+			<return type="Array[PackedVector2Array]" />
+			<param index="0" name="tile" type="Vector2i" />
+			<description>
+				Returns the convex walkable polygons of [param tile] as of the last re-carving.
+			</description>
+		</method>
+		<method name="remove_obstacle">
+			<return type="bool" />
+			<param index="0" name="id" type="Variant" />
+			<description>
+				Removes an obstacle and queues the tiles it touched. Returns [code]false[/code] if the id is unknown.
+			</description>
+		</method>
+		<method name="set_rebake_callable">
+			<return type="void" />
+			<param index="0" name="callable" type="Callable" />
+			<description>
+				Sets a callable invoked as [code]callable(tile: Vector2i, tile_rect: Rect2)[/code] for every tile re-carved by [method update].
+			</description>
+		</method>
+		<method name="set_server_map">
+			<return type="void" />
+			<param index="0" name="map" type="RID" />
+			<param index="1" name="y" type="float" default="0.0" />
+			<param index="2" name="height" type="float" default="2.0" />
+			<description>
+				Mirrors all current and future obstacles as [NavigationServer3D] obstacles on [param map] at height [param y] with the given [param height]. Pass an invalid [RID] to stop. Nothing is created when the server is a dummy.
+			</description>
+		</method>
+		<method name="set_walkable">
+			<return type="void" />
+			<param index="0" name="polygons" type="Array" />
+			<description>
+				Restricts walkable space to the given polygons (an array of [PackedVector2Array]) clipped into the tiles and re-carves everything.
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="bounds" type="Rect2" />
+			<param index="1" name="tile_size" type="float" />
+			<param index="2" name="agent_radius" type="float" />
+			<description>
+				Creates a fully walkable tile grid covering [param bounds]. Existing obstacles are kept and applied. [param tile_size] is at least 1 and [param agent_radius] at least 0.
+			</description>
+		</method>
+		<method name="tile_count" qualifiers="const">
+			<return type="Vector2i" />
+			<description>
+				Returns the grid size in tiles.
+			</description>
+		</method>
+		<method name="tile_of" qualifiers="const">
+			<return type="Vector2i" />
+			<param index="0" name="point" type="Vector2" />
+			<description>
+				Returns the tile containing [param point]. May be outside the grid.
+			</description>
+		</method>
+		<method name="tile_version" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="tile" type="Vector2i" />
+			<description>
+				Returns how often [param tile] was re-carved since the grid was set up.
+			</description>
+		</method>
+		<method name="update">
+			<return type="int" />
+			<param index="0" name="max_tiles_per_call" type="int" default="4" />
+			<description>
+				Re-carves up to [param max_tiles_per_call] dirty tiles (all of them when it is 0 or less) and returns how many were rebuilt.
+			</description>
+		</method>
+	</methods>
+</class>

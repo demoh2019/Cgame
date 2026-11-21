@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameNavmeshBaker" inherits="RefCounted" api_type="core" keywords="navmesh,bake,recast,tile,navigation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Bakes navigation tiles from triangle soups through [NavigationServer3D] (Recast).
+	</brief_description>
+	<description>
+		[CgameNavmeshBaker] is a thin wrapper around Godot's own navigation mesh bake pipeline ([method NavigationServer3D.bake_from_source_geometry_data] and its asynchronous variant). It accepts a triangle soup, bakes it tile by tile and returns each tile both as a [NavigationMesh] and in a 2D polygon format:
+		[codeblock]
+		{
+		    "origin": Vector2,                       # tile corner (X, Z)
+		    "size": float,                           # tile edge length
+		    "polygons": Array[PackedVector2Array],   # convex, positive shoelace area, clipped to the tile
+		    "heights": Array[PackedFloat32Array],    # world Y per polygon vertex
+		    "navigation_mesh": NavigationMesh,
+		    "baked": bool,                           # false when no real NavigationServer3D was available
+		}
+		[/codeblock]
+		The configuration keys are: [code]cell_size[/code], [code]cell_height[/code], [code]agent_height[/code], [code]agent_radius[/code], [code]agent_max_climb[/code], [code]agent_max_slope_deg[/code], [code]region_min_area[/code] (in voxels), [code]max_verts_per_poly[/code], [code]tile_size[/code] and [code]max_simplification_error[/code]. They are mapped onto the matching [NavigationMesh] properties.
+		Every tile is baked with an overscan of the agent radius plus three cells, then clipped to the exact tile rectangle, so erosion and ledges behave identically on both sides of a tile edge and neighbouring tiles share border edges.
+		Triangles use counter-clockwise winding seen from above (+Y normal) for walkable surfaces by default. Without a functioning [NavigationServer3D] (for example with the dummy server) baking returns empty tiles with [code]baked[/code] set to [code]false[/code]; the conversion methods work regardless.
+		[b]Note:[/b] The asynchronous bake callbacks reference this object. Keep a reference until [method poll] reports completion.
+	</description>
+	<methods>
+		<method name="bake_async">
+			<return type="int" />
+			<param index="0" name="triangles" type="PackedVector3Array" />
+			<param index="1" name="world_bounds" type="AABB" />
+			<description>
+				Splits [param world_bounds] into tiles and starts baking each one with [method NavigationServer3D.bake_from_source_geometry_data_async]. Returns a job id for [method poll].
+			</description>
+		</method>
+		<method name="bake_tile">
+			<return type="Dictionary" />
+			<param index="0" name="triangles" type="PackedVector3Array" />
+			<param index="1" name="tile_bounds" type="AABB" />
+			<description>
+				Bakes one tile synchronously. If [code]tile_bounds.size.y[/code] is not positive, the vertical range is derived from the triangles.
+			</description>
+		</method>
+		<method name="bake_tiles">
+			<return type="Array" />
+			<param index="0" name="triangles" type="PackedVector3Array" />
+			<param index="1" name="world_bounds" type="AABB" />
+			<description>
+				Bakes every tile returned by [method tile_rects] synchronously and returns the tile dictionaries in row-major order.
+			</description>
+		</method>
+		<method name="can_bake" qualifiers="static">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when a functioning (non dummy) [NavigationServer3D] is available to bake tiles.
+			</description>
+		</method>
+		<method name="configure">
+			<return type="void" />
+			<param index="0" name="values" type="Dictionary" />
+			<description>
+				Merges [param values] into the configuration. Unspecified keys keep their defaults.
+			</description>
+		</method>
+		<method name="get_config" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the current configuration.
+			</description>
+		</method>
+		<method name="make_navigation_mesh" qualifiers="const">
+			<return type="NavigationMesh" />
+			<description>
+				Returns a new [NavigationMesh] with the configuration mapped onto its bake properties (monotone partitioning, [code]region_min_size[/code] as the square root of [code]region_min_area[/code]).
+			</description>
+		</method>
+		<method name="make_source_geometry" qualifiers="static">
+			<return type="NavigationMeshSourceGeometryData3D" />
+			<param index="0" name="triangles" type="PackedVector3Array" />
+			<param index="1" name="godot_winding" type="bool" default="false" />
+			<description>
+				Creates source geometry from a triangle soup. By default counter-clockwise triangles seen from above are walkable; with [param godot_winding] set, Godot's clockwise front faces are expected instead (the behaviour of [method NavigationMeshSourceGeometryData3D.add_faces]).
+			</description>
+		</method>
+		<method name="navigation_mesh_to_tile" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="navigation_mesh" type="NavigationMesh" />
+			<param index="1" name="tile_bounds" type="AABB" />
+			<description>
+				Converts a baked [NavigationMesh] to the 2D tile format: polygons are normalised to positive shoelace area, clipped to [param tile_bounds] in X/Z and degenerate polygons are dropped. Needs no navigation server.
+			</description>
+		</method>
+		<method name="poll">
+			<return type="Dictionary" />
+			<param index="0" name="job" type="int" />
+			<description>
+				Returns [code]{"done": bool, "tiles": Array[Dictionary]}[/code] for a job from [method bake_async]. Tiles are in row-major order (X fastest) and only filled once done. An unknown or already collected job is reported as done with no tiles.
+			</description>
+		</method>
+		<method name="tile_rects" qualifiers="const">
+			<return type="Array[AABB]" />
+			<param index="0" name="world_bounds" type="AABB" />
+			<description>
+				Returns the [code]tile_size[/code] rectangles covering [param world_bounds] in row-major order (X fastest).
+			</description>
+		</method>
+		<method name="tile_to_navigation_mesh" qualifiers="const">
+			<return type="NavigationMesh" />
+			<param index="0" name="tile" type="Dictionary" />
+			<description>
+				Builds a [NavigationMesh] (shared vertices, polygons clockwise seen from above) from a tile dictionary.
+			</description>
+		</method>
+	</methods>
+</class>

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameOffMeshLinkGenerator" inherits="RefCounted" api_type="core" keywords="off-mesh,link,jump,drop,navigation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Generates drop, jump and gap links from a heightfield and can create them as [NavigationServer3D] links.
+	</brief_description>
+	<description>
+		[CgameOffMeshLinkGenerator] finds traversals a walkable grid cannot express: ledge drops, small climbs and short gaps. Each result is a [Dictionary] with the keys [code]from[/code] ([Vector2i]), [code]to[/code] ([Vector2i]), [code]kind[/code] ([String]) and [code]bidirectional[/code] ([bool]).
+		Link kinds:
+		- [code]"drop"[/code]: one-way ledge down between adjacent walkable cells (height gap above [code]walk_step[/code], up to [code]max_drop[/code]).
+		- [code]"jump"[/code]: bidirectional small climb between adjacent walkable cells (gap above [code]walk_step[/code], up to [code]max_jump_up[/code]).
+		- [code]"gap"[/code]: bidirectional hop over 1 to [code]max_gap[/code] unwalkable cells between walkable cells of similar height.
+		Cells are scanned row by row towards +X and +Y, so the order is deterministic and every pair appears once.
+		[method create_links_on_map] turns links into [NavigationServer3D] links, the same primitive [NavigationLink3D] uses. Links created by an instance are freed when [method clear_map_links] is called or the instance is destroyed.
+	</description>
+	<methods>
+		<method name="clear_map_links">
+			<return type="void" />
+			<description>
+				Frees every [NavigationServer3D] link created by [method create_links_on_map].
+			</description>
+		</method>
+		<method name="create_links_on_map">
+			<return type="int" />
+			<param index="0" name="map" type="RID" />
+			<param index="1" name="origin_xz" type="Vector2" />
+			<param index="2" name="cell_size" type="float" />
+			<param index="3" name="links" type="Array" default="[]" />
+			<param index="4" name="navigation_layers" type="int" default="1" />
+			<param index="5" name="enter_cost" type="float" default="0.0" />
+			<param index="6" name="travel_cost" type="float" default="1.0" />
+			<description>
+				Creates a [NavigationServer3D] link on [param map] for every entry of [param links] (the links from the last generation when empty) and returns how many were created. Cell centres are mapped to world space with [param origin_xz] and [param cell_size]; heights come from the last generated heightfield. Returns 0 when the map is invalid or the server is a dummy.
+			</description>
+		</method>
+		<method name="generate">
+			<return type="Array" />
+			<param index="0" name="width" type="int" />
+			<param index="1" name="height" type="int" />
+			<param index="2" name="height_at" type="Callable" />
+			<param index="3" name="walkable" type="Callable" />
+			<param index="4" name="max_drop" type="float" default="3.0" />
+			<param index="5" name="max_jump_up" type="float" default="1.2" />
+			<param index="6" name="max_gap" type="int" default="2" />
+			<param index="7" name="walk_step" type="float" default="0.5" />
+			<description>
+				Samples [code]height_at(x, y) -> float[/code] and [code]walkable(x, y) -> bool[/code] for every cell and generates links. Returns an empty array for invalid input.
+			</description>
+		</method>
+		<method name="generate_from_arrays">
+			<return type="Array" />
+			<param index="0" name="width" type="int" />
+			<param index="1" name="height" type="int" />
+			<param index="2" name="heights" type="PackedFloat32Array" />
+			<param index="3" name="walkable" type="PackedByteArray" />
+			<param index="4" name="max_drop" type="float" default="3.0" />
+			<param index="5" name="max_jump_up" type="float" default="1.2" />
+			<param index="6" name="max_gap" type="int" default="2" />
+			<param index="7" name="walk_step" type="float" default="0.5" />
+			<description>
+				Same as [method generate], but reads row-major [param heights] and [param walkable] arrays of [code]width * height[/code] elements instead of calling callables.
+			</description>
+		</method>
+		<method name="get_last_links" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the links produced by the most recent generation.
+			</description>
+		</method>
+		<method name="get_map_link_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many [NavigationServer3D] links this generator currently owns.
+			</description>
+		</method>
+		<method name="link_world_positions" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="link" type="Dictionary" />
+			<param index="1" name="origin_xz" type="Vector2" />
+			<param index="2" name="cell_size" type="float" />
+			<description>
+				Returns [code]{"start": Vector3, "end": Vector3}[/code], the world-space cell centres of [param link] at the heights of the last generated heightfield.
+			</description>
+		</method>
+	</methods>
+</class>

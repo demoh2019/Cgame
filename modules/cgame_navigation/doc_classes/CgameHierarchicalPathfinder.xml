@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameHierarchicalPathfinder" inherits="RefCounted" api_type="core" keywords="hpa,pathfinding,hierarchical,navigation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		HPA*-style hierarchical pathfinding over a walkability grid, with a planner that chains [NavigationServer3D] paths across regions.
+	</brief_description>
+	<description>
+		[CgameHierarchicalPathfinder] cuts a 4-connected walkability grid into square clusters, places entrance nodes on shared cluster borders and searches the resulting abstract graph with A* before refining the route to grid cells (Botea et al., "Near Optimal Hierarchical Path-Finding"). Paths are always valid but are not guaranteed to be the globally shortest ones.
+		It is meant for coarse, long-distance planning across streamed regions: the grid describes which parts of the world can be crossed, while the detailed navigation mesh is handled by [NavigationServer3D] (Recast/Detour). [method plan_on_map] connects both worlds by walking the coarse corridor and issuing one [method NavigationServer3D.map_get_path] query per region.
+		When a cell changes, call [method set_cell_walkable] (or [method invalidate_cluster] after changing what the walkable callable returns); only that cluster and its border entrances are rebuilt.
+		[codeblock]
+		var pf := CgameHierarchicalPathfinder.new()
+		pf.build(256, 256, 16, func(x, y): return not blocked.has(Vector2i(x, y)))
+		pf.set_world_mapping(Vector2(-512.0, -512.0), 4.0)
+		var waypoints := pf.plan_on_map(map_rid, from, to, 64.0)
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="build">
+			<return type="void" />
+			<param index="0" name="width" type="int" />
+			<param index="1" name="height" type="int" />
+			<param index="2" name="cluster_size" type="int" />
+			<param index="3" name="walkable" type="Callable" />
+			<description>
+				Builds the cluster hierarchy for a grid of [param width] x [param height] cells. [param walkable] is called as [code]walkable(x: int, y: int) -> bool[/code] once per cell. [param cluster_size] is clamped to at least 2. The callable is kept and queried again by [method invalidate_cluster].
+			</description>
+		</method>
+		<method name="build_from_grid">
+			<return type="void" />
+			<param index="0" name="width" type="int" />
+			<param index="1" name="height" type="int" />
+			<param index="2" name="cluster_size" type="int" />
+			<param index="3" name="cells" type="PackedByteArray" />
+			<description>
+				Builds the hierarchy from a row-major array of [code]width * height[/code] bytes, where a non-zero byte marks a walkable cell. Does not use callables, so it is the fastest way to build and is safe to call from threads that do not own scripts.
+			</description>
+		</method>
+		<method name="cell_to_world" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="y" type="float" default="0.0" />
+			<description>
+				Returns the world position of the centre of [param cell] using the mapping from [method set_world_mapping], with the given [param y] height.
+			</description>
+		</method>
+		<method name="find_path">
+			<return type="PackedVector2Array" />
+			<param index="0" name="start" type="Vector2i" />
+			<param index="1" name="goal" type="Vector2i" />
+			<description>
+				Finds a 4-connected path of grid cells from [param start] to [param goal], both included. Each element holds the cell coordinates as a [Vector2]. Returns an empty array when either cell is blocked or outside the grid, or when the goal is unreachable.
+			</description>
+		</method>
+		<method name="get_cache_hits" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many times a cached abstract route (same start and goal cluster pair) was reused by [method find_path].
+			</description>
+		</method>
+		<method name="get_cluster_size" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the cluster edge length in cells.
+			</description>
+		</method>
+		<method name="get_height" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the grid height in cells.
+			</description>
+		</method>
+		<method name="get_width" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the grid width in cells.
+			</description>
+		</method>
+		<method name="invalidate_cluster">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Rebuilds the cluster containing [param cell] and the entrances it shares with its neighbours. If the pathfinder was built with a callable, the cluster's cells are re-read from it first. Cells outside the grid are ignored.
+			</description>
+		</method>
+		<method name="is_cell_walkable" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] if [param cell] is inside the grid and walkable.
+			</description>
+		</method>
+		<method name="node_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of live abstract nodes (entrances). Useful for tests and debug overlays.
+			</description>
+		</method>
+		<method name="plan_on_map">
+			<return type="PackedVector3Array" />
+			<param index="0" name="map" type="RID" />
+			<param index="1" name="from" type="Vector3" />
+			<param index="2" name="to" type="Vector3" />
+			<param index="3" name="region_size" type="float" />
+			<param index="4" name="navigation_layers" type="int" default="1" />
+			<description>
+				Plans a route on a [NavigationServer3D] map. The coarse route comes from [method plan_waypoints]; intermediate waypoints are snapped with [method NavigationServer3D.map_get_closest_point] and consecutive waypoints are connected with [method NavigationServer3D.map_get_path]. The segments are concatenated without duplicated joints.
+				Returns an empty array when the map is invalid, when the [NavigationServer3D] is a dummy server, when the coarse plan is unreachable, or when any segment query fails.
+			</description>
+		</method>
+		<method name="plan_waypoints">
+			<return type="PackedVector3Array" />
+			<param index="0" name="from" type="Vector3" />
+			<param index="1" name="to" type="Vector3" />
+			<param index="2" name="region_size" type="float" />
+			<description>
+				Returns coarse world-space waypoints from [param from] to [param to], one for each time the grid path enters a new square region of [param region_size] world units. The first and last elements are [param from] and [param to]. When the end points are outside the grid (or no grid was built) the line between them is subdivided evenly instead. Returns an empty array when the coarse grid path is unreachable.
+			</description>
+		</method>
+		<method name="set_cell_walkable">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="walkable" type="bool" />
+			<description>
+				Changes the walkability of a single cell and rebuilds only its cluster.
+			</description>
+		</method>
+		<method name="set_world_mapping">
+			<return type="void" />
+			<param index="0" name="origin_xz" type="Vector2" />
+			<param index="1" name="cell_size" type="float" />
+			<description>
+				Defines how grid cells map to world space: cell [code](0, 0)[/code] starts at [param origin_xz] (X and Z) and each cell is [param cell_size] units wide.
+			</description>
+		</method>
+		<method name="world_to_cell" qualifiers="const">
+			<return type="Vector2i" />
+			<param index="0" name="world" type="Vector3" />
+			<description>
+				Returns the grid cell containing the X and Z coordinates of [param world]. The result can be outside the grid.
+			</description>
+		</method>
+	</methods>
+</class>
