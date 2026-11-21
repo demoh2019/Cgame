@@ -18,7 +18,7 @@
 			<param index="6" name="vertical_min" type="float" default="0.85" />
 			<param index="7" name="vertical_max" type="float" default="1.15" />
 			<description>
-				Returns one Transform3D per source position. The position is unchanged; yaw is selected from [-max_yaw/2, max_yaw/2], horizontal scale affects X and Z equally, and vertical scale affects Y independently. Three salted 32-bit avalanche hashes use the point's stable ID and seed; reordered inputs with the same IDs retain identical yaw and scale. Coordinates must be finite and within +/-10000000, IDs and seed must be within [0, 2147483647], arrays must match and contain at most 16384 points. Max yaw must be finite in [0, 2*pi]; scale range endpoints finite in [0.01, 10] with min <= max. Invalid input yields an empty Array without partial output. Valid empty inputs also yield empty. Does not alter placement, physics, scene objects, global RNG, or GPU resources.
+				Returns one Transform3D per source position. The position is unchanged; yaw is selected from [-max_yaw/2, max_yaw/2], horizontal scale affects X and Z equally, and vertical scale affects Y independently. Three salted 32-bit avalanche hashes use the point's stable ID and seed; reordered inputs with the same IDs retain identical yaw and scale. Coordinates must be finite and within +/-10000000, IDs and seed must be within [0, 2147483647], arrays must match and contain at most 16384 points. Max yaw must be finite in [0, 2*pi]; scale range endpoints finite in [0.01, 10] with minimum not exceeding maximum. Invalid input yields an empty Array without partial output. Valid empty inputs also yield empty. Does not alter placement, physics, scene objects, global RNG, or GPU resources.
 			</description>
 		</method>
 	</methods>
