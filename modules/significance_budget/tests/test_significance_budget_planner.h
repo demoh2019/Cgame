@@ -155,12 +155,12 @@ TEST_CASE("[SignificanceBudget] category caps protect critical VFX during crowd 
 	const PackedByteArray priorities = { 0, 0, 1, 3, 2, 3, 2, 2 };
 	const PackedByteArray categories = { 0, 0, 1, 3, 2, 3, 2, 2 };
 	const PackedInt32Array caps = { 1, 2, 2, 1 };
-	CHECK(planner->select_effects(distances, priorities, categories, caps, 5, 100.0) ==
-			PackedInt32Array{ 3, 6, 7, 2, 1 });
-	CHECK(planner->select_effects(distances, priorities, categories, caps, 2, 100.0) ==
-			PackedInt32Array{ 3, 6 });
-	CHECK(planner->select_effects(distances, priorities, categories, caps, 8, 1.0) ==
-			PackedInt32Array{ 6, 1 });
+	const PackedInt32Array expected = { 3, 6, 7, 2, 1 };
+	const PackedInt32Array minimal = { 3, 6 };
+	const PackedInt32Array edge = { 6, 1 };
+	CHECK(planner->select_effects(distances, priorities, categories, caps, 5, 100.0) == expected);
+	CHECK(planner->select_effects(distances, priorities, categories, caps, 2, 100.0) == minimal);
+	CHECK(planner->select_effects(distances, priorities, categories, caps, 8, 1.0) == edge);
 	CHECK(planner->select_effects(distances, priorities, categories, caps, 0, 100.0).is_empty());
 	CHECK(distances[0] == 2.0);
 }

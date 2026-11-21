@@ -5,10 +5,10 @@ extends RefCounted
 const MAX_DISTANCE := 140.0
 const FRAME_BUDGET := [8, 12, 18, 24]
 const CAPS := [
-	PackedInt32Array([1, 4, 5, 4]),
-	PackedInt32Array([2, 6, 8, 6]),
-	PackedInt32Array([3, 10, 12, 8]),
-	PackedInt32Array([4, 12, 16, 12]),
+	[1, 4, 5, 4],
+	[2, 6, 8, 6],
+	[3, 10, 12, 8],
+	[4, 12, 16, 12],
 ]
 
 
@@ -17,7 +17,7 @@ static func budget_for(quality: int) -> int:
 
 
 static func caps_for(quality: int) -> PackedInt32Array:
-	return CAPS[clampi(quality, 0, 3)].duplicate()
+	return PackedInt32Array(CAPS[clampi(quality, 0, 3)])
 
 
 static func select_indices(distances: PackedFloat64Array,
