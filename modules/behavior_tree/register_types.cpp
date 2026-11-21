@@ -52,6 +52,7 @@
 #include "tests/test_timed_behavior_tree.h"
 #include "tests/test_blackboard_compare.h"
 #include "tests/test_ai_execution_profiler.h"
+#include "tests/test_ai_behavior_trace.h"
 #include "tests/test_ai_simulation_lod_2d.h"
 #include "tests/test_ai_update_scheduler.h"
 #include "tests/test_ai_proximity_grid_2d.h"
