@@ -29,8 +29,8 @@ static func active_flags(level: int, biome: String, wind: Vector2,
 
 static func scales_for_flags(flags: int) -> Dictionary:
 	return {
-		"dragonflies": ACTIVE_RATE if flags & DRAGONFLIES else INACTIVE_RATE,
-		"dust_devils": ACTIVE_RATE if flags & DUST_DEVILS else INACTIVE_RATE,
-		"tumbleweeds": ACTIVE_RATE if flags & TUMBLEWEEDS else INACTIVE_RATE,
-		"dusk_bats": ACTIVE_RATE if flags & DUSK_BATS else INACTIVE_RATE,
+		"dragonflies": ACTIVE_RATE if (flags & DRAGONFLIES) != 0 else INACTIVE_RATE,
+		"dust_devils": ACTIVE_RATE if (flags & DUST_DEVILS) != 0 else INACTIVE_RATE,
+		"tumbleweeds": ACTIVE_RATE if (flags & TUMBLEWEEDS) != 0 else INACTIVE_RATE,
+		"dusk_bats": ACTIVE_RATE if (flags & DUSK_BATS) != 0 else INACTIVE_RATE,
 	}
