@@ -1406,6 +1406,18 @@ func _on_welcomed() -> void:
 			if not Performance.has_custom_monitor(monitor_name):
 				Performance.add_custom_monitor(monitor_name, monitor[1])
 				_ambient_monitors.append(monitor_name)
+	# The engine reports how many stale visual cells were retired versus
+	# deferred by this quality-tier unload budget. Counters only update
+	# during real streaming refreshes, not from a HUD polling loop.
+	if streamer.has_method("get_last_deferred_unload_count"):
+		for monitor in [
+			[&"Albion/StreamUnloadedLastUpdate", Callable(streamer, "get_last_unload_count")],
+			[&"Albion/StreamUnloadsDeferred", Callable(streamer, "get_last_deferred_unload_count")],
+		]:
+			var monitor_name: StringName = monitor[0]
+			if not Performance.has_custom_monitor(monitor_name):
+				Performance.add_custom_monitor(monitor_name, monitor[1])
+				_ambient_monitors.append(monitor_name)
 	_access.set_world_streamer(streamer)
 	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
 	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
