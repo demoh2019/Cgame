@@ -39,6 +39,62 @@ namespace TestGeometry2D {
 
 
 
+TEST_CASE("[CoreBind] Geometry2D padded terrain curvature color baking") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	Vector<float> samples;
+	samples.resize(25);
+	for (int y = 0; y < 5; y++) {
+		for (int x = 0; x < 5; x++) {
+			const real_t wx = x - 1;
+			const real_t wz = y - 1;
+			samples.set(y * 5 + x, float(0.2 * (wx * wx + wz * wz)));
+		}
+	}
+	const Vector<Color> cavity = api->bake_heightfield_curvature_colors(samples, Vector2i(3, 3), 1.0);
+	REQUIRE(cavity.size() == 9);
+	for (int i = 0; i < cavity.size(); i++) {
+		CHECK(cavity[i].r == doctest::Approx(1.0));
+		CHECK(cavity[i].g == doctest::Approx(0.0));
+		CHECK(cavity[i].b == doctest::Approx(1.0));
+		CHECK(cavity[i].a == doctest::Approx(1.0));
+	}
+	CHECK(samples[12] == doctest::Approx(0.4f)); // Input unchanged.
+	Vector<float> negative = samples;
+	for (int i = 0; i < negative.size(); i++) {
+		negative.set(i, -negative[i]);
+	}
+	Vector<Color> ridge = api->bake_heightfield_curvature_colors(negative, Vector2i(3, 3), 1.0);
+	REQUIRE(ridge.size() == 9);
+	CHECK(ridge[4].r == doctest::Approx(0.0));
+	CHECK(ridge[4].g == doctest::Approx(1.0));
+	const Vector<Color> spaced = api->bake_heightfield_curvature_colors(samples, Vector2i(3, 3), 2.0);
+	REQUIRE(spaced.size() == 9);
+	CHECK(spaced[4].r > 0.0);
+	CHECK(spaced[4].r < 1.0); // Curvature is scaled by inverse spacing squared.
+
+	Vector<float> flat;
+	flat.resize(20); // 2x3 interior plus a 1-pixel border: 4 x 5.
+	for (int i = 0; i < flat.size(); i++) {
+		flat.set(i, 12.0f);
+	}
+	Vector<Color> zero = api->bake_heightfield_curvature_colors(flat, Vector2i(2, 3), 1.0);
+	REQUIRE(zero.size() == 6);
+	for (int i = 0; i < zero.size(); i++) {
+		CHECK(zero[i].r == doctest::Approx(0.0));
+		CHECK(zero[i].g == doctest::Approx(0.0));
+	}
+	ERR_PRINT_OFF;
+	CHECK(api->bake_heightfield_curvature_colors(samples, Vector2i(4, 3), 1.0).is_empty());
+	CHECK(api->bake_heightfield_curvature_colors(samples, Vector2i(0, 3), 1.0).is_empty());
+	CHECK(api->bake_heightfield_curvature_colors(samples, Vector2i(3, 3), -1.0).is_empty());
+	CHECK(api->bake_heightfield_curvature_colors(samples, Vector2i(3, 3), 1.0, 0.5, 0.5).is_empty());
+	Vector<float> invalid = samples;
+	invalid.set(0, Math_INF);
+	CHECK(api->bake_heightfield_curvature_colors(invalid, Vector2i(3, 3), 1.0).is_empty());
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[CoreBind] Geometry2D heightfield gradients match central differences") {
 	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
 	REQUIRE(api != nullptr);

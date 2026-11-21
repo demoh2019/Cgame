@@ -346,6 +346,8 @@ public:
 	PackedByteArray rasterize_segments_mask(const PackedVector2Array &p_segment_endpoints, const Vector2i &p_size, real_t p_half_width, real_t p_softness);
 	PackedByteArray distance_transform_8(const PackedByteArray &p_mask, const Vector2i &p_size, int p_max_distance);
 	Vector<Vector2> heightfield_gradients(const Vector<float> &p_heights, const Vector2i &p_size, real_t p_cell_spacing);
+	Vector<Color> bake_heightfield_curvature_colors(const Vector<float> &p_padded_heights, const Vector2i &p_size, real_t p_cell_spacing,
+			real_t p_cavity_start = 0.015, real_t p_cavity_end = 0.32, real_t p_ridge_start = 0.015, real_t p_ridge_end = 0.42);
 	bool point_is_inside_triangle(const Vector2 &p_s, const Vector2 &p_a, const Vector2 &p_b, const Vector2 &p_c) const;
 
 	bool is_point_in_circle(const Vector2 &p_point, const Vector2 &p_circle_pos, real_t p_circle_radius);

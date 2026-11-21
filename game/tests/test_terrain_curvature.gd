@@ -67,6 +67,42 @@ func run(t) -> void:
 	t.eq(Curvature.build(valley_heights, Vector2.ZERO, 3, 0.0,
 			valley_sampler).size(), 0, "zero spacing is rejected")
 
+	t.current = "native padded curvature and scalar reference parity"
+	for sampler in [valley_sampler, ridge_sampler, flat_sampler]:
+		var source: PackedFloat32Array = _grid(Vector2(7.0, -9.0), 7, sampler)
+		for spacing in [0.5, 1.0, 3.0]:
+			var origin := Vector2(7.0, -9.0)
+			var native_colors: PackedColorArray = Curvature.build(
+					source, origin, 7, spacing, sampler)
+			var scalar_colors: PackedColorArray = Curvature.build(
+					source, origin, 7, spacing, sampler, true)
+			t.eq(native_colors.size(), 49, "curvature bakes all streamed vertices")
+			t.eq(native_colors.size(), scalar_colors.size(), "scalar and native dimensions agree")
+			for i in native_colors.size():
+				t.check(native_colors[i].is_equal_approx(scalar_colors[i]),
+						"native cavity/ridge channels match scalar within float tolerance")
+	t.current = "direct engine curvature API"
+	if Geometry2D.has_method("bake_heightfield_curvature_colors"):
+		var padded := PackedFloat32Array()
+		padded.resize(25)
+		for z in 5:
+			for x in 5:
+				var wx := float(x - 1)
+				var wz := float(z - 1)
+				padded[z * 5 + x] = 0.2 * (wx * wx + wz * wz)
+		var direct: PackedColorArray = Geometry2D.call(
+				"bake_heightfield_curvature_colors", padded, Vector2i(3, 3), 1.0)
+		t.eq(direct.size(), 9, "native API accepts a one-cell height halo")
+		t.check(direct[4].r > 0.9 and direct[4].g < 0.001,
+				"native discrete Laplacian lights cavities")
+		t.eq(direct[4].b, 1.0, "native output preserves sky channel")
+		var broken: PackedColorArray = Geometry2D.call(
+				"bake_heightfield_curvature_colors", PackedFloat32Array([0.0]), Vector2i(3, 3), 1.0)
+		t.eq(broken.size(), 0, "invalid halo size is rejected")
+	var chunk_code: String = (ChunkView as Script).source_code
+	t.check(chunk_code.contains("TerrainCurvature.build("),
+			"real streamed chunks use the curvature baker")
+
 	t.current = "native Godot terrain engine exports the new vertex attribute"
 	var terrain := ChunkedTerrain3D.new()
 	terrain.set_height_data(valley_heights, Vector2i(3, 3))

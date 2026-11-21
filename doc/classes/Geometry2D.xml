@@ -94,6 +94,20 @@
 				Returns an empty dictionary for an empty set, an odd number of endpoints, a nonfinite coordinate or more than 32768 segments. Values are checked before any search. This is a linear CPU search; callers handling many queries should partition segments spatially.
 			</description>
 		</method>
+		<method name="bake_heightfield_curvature_colors">
+			<return type="PackedColorArray" />
+			<param index="0" name="padded_heights" type="PackedFloat32Array" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="cell_spacing" type="float" />
+			<param index="3" name="cavity_start" type="float" default="0.015" />
+			<param index="4" name="cavity_end" type="float" default="0.32" />
+			<param index="5" name="ridge_start" type="float" default="0.015" />
+			<param index="6" name="ridge_end" type="float" default="0.42" />
+			<description>
+				Cgame extension: bakes terrain cavity (red) and ridge (green) color attributes for a regular heightfield, with blue and alpha set to 1.0. The input [param padded_heights] is row-major with dimensions [code](size.x + 2) * (size.y + 2)[/code]; it must contain exactly one sample of terrain height around each edge of the unpadded output. The four padded corner samples are accepted but never used. For output pixel [code](x, y)[/code], the discrete four-neighbor Laplacian is [code](left + right + up + down - 4 * center) / (cell_spacing * cell_spacing)[/code]. Positive curvature means cavities and negative curvature means ridges. Curvature is converted to two independent [code]smoothstep[/code] ramps using the four optional threshold parameters, all in world-height units per squared world distance. Supplying the true neighboring height samples at chunk boundaries avoids color seams between streamed landscape cells.
+				Output dimensions must be 1–2046 per axis, input heights must be finite and sized correctly, spacing and inverse squared spacing must be positive and representable, and ramp intervals must be finite, increasing and nonnegative. An invalid input yields an empty array. Only CPU colors are returned; upload them separately with [method ChunkedTerrain3D.set_color_data] or another mesh API. This is a reusable curvature attribute baker, not a GPU distance field or screen-space AO effect.
+			</description>
+		</method>
 		<method name="heightfield_gradients">
 			<return type="PackedVector2Array" />
 			<param index="0" name="heights" type="PackedFloat32Array" />

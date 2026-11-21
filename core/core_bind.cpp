@@ -1173,6 +1173,55 @@ Dictionary Geometry2D::get_closest_point_on_segments(const Vector2 &p_point, con
 
 
 
+Vector<Color> Geometry2D::bake_heightfield_curvature_colors(const Vector<float> &p_padded_heights, const Vector2i &p_size,
+		real_t p_cell_spacing, real_t p_cavity_start, real_t p_cavity_end, real_t p_ridge_start, real_t p_ridge_end) {
+	Vector<Color> result;
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2046 || p_size.y > 2046, result,
+			"Curvature output dimensions must be between 1 and 2046 per axis.");
+	const int width = p_size.x + 2;
+	const int height = p_size.y + 2;
+	ERR_FAIL_COND_V_MSG(p_padded_heights.size() != width * height, result,
+			"Curvature input must contain a one-sample border around the output heightfield.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_cell_spacing) || p_cell_spacing <= 0.0, result,
+			"Curvature cell spacing must be positive and finite.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_cavity_start) || !Math::is_finite(p_cavity_end) ||
+					!Math::is_finite(p_ridge_start) || !Math::is_finite(p_ridge_end) ||
+					p_cavity_start < 0.0 || p_ridge_start < 0.0 ||
+					p_cavity_end <= p_cavity_start || p_ridge_end <= p_ridge_start,
+			result, "Curvature cavity/ridge ranges must be finite, increasing and nonnegative.");
+	const real_t inverse_spacing = 1.0 / p_cell_spacing;
+	const real_t inverse_spacing_squared = inverse_spacing * inverse_spacing;
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(inverse_spacing_squared) || inverse_spacing_squared <= 0.0,
+			result, "Curvature inverse squared cell spacing must be finite and positive.");
+	const float *heights = p_padded_heights.ptr();
+	for (int i = 0; i < p_padded_heights.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(heights[i]), result, "Curvature height samples must be finite.");
+	}
+	ERR_FAIL_COND_V_MSG(result.resize(p_size.x * p_size.y) != OK, Vector<Color>(), "Could not allocate curvature colors.");
+	Color *colors = result.ptrw();
+	// Zero at the start of each ramp and one at its end. The smoothstep
+	// curve matches GDScript smoothstep on the same packed float inputs.
+	const auto ramp = [](real_t p_value, real_t p_start, real_t p_end) -> real_t {
+		const real_t t = CLAMP((p_value - p_start) / (p_end - p_start), real_t(0.0), real_t(1.0));
+		return t * t * (3.0 - 2.0 * t);
+	};
+	for (int y = 0; y < p_size.y; y++) {
+		const int middle = (y + 1) * width + 1;
+		const int output_row = y * p_size.x;
+		for (int x = 0; x < p_size.x; x++) {
+			const int i = middle + x;
+			const real_t curvature = (real_t(heights[i - 1]) + real_t(heights[i + 1]) +
+							real_t(heights[i - width]) + real_t(heights[i + width]) -
+							real_t(4.0) * real_t(heights[i])) * inverse_spacing_squared;
+			ERR_FAIL_COND_V_MSG(!Math::is_finite(curvature), Vector<Color>(), "Curvature value overflowed.");
+			const real_t cavity = ramp(MAX(real_t(0.0), curvature), p_cavity_start, p_cavity_end);
+			const real_t ridge = ramp(MAX(real_t(0.0), -curvature), p_ridge_start, p_ridge_end);
+			colors[output_row + x] = Color(cavity, ridge, 1.0, 1.0);
+		}
+	}
+	return result;
+}
+
 Vector<Vector2> Geometry2D::heightfield_gradients(const Vector<float> &p_heights, const Vector2i &p_size, real_t p_cell_spacing) {
 	Vector<Vector2> result;
 	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
@@ -1532,6 +1581,8 @@ void Geometry2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("rasterize_segments_mask", "segment_endpoints", "size", "half_width", "softness"), &Geometry2D::rasterize_segments_mask);
 	ClassDB::bind_method(D_METHOD("distance_transform_8", "mask", "size", "max_distance"), &Geometry2D::distance_transform_8);
 	ClassDB::bind_method(D_METHOD("heightfield_gradients", "heights", "size", "cell_spacing"), &Geometry2D::heightfield_gradients);
+	ClassDB::bind_method(D_METHOD("bake_heightfield_curvature_colors", "padded_heights", "size", "cell_spacing", "cavity_start", "cavity_end", "ridge_start", "ridge_end"),
+			&Geometry2D::bake_heightfield_curvature_colors, DEFVAL(0.015), DEFVAL(0.32), DEFVAL(0.015), DEFVAL(0.42));
 
 	ClassDB::bind_method(D_METHOD("point_is_inside_triangle", "point", "a", "b", "c"), &Geometry2D::point_is_inside_triangle);
 
