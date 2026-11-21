@@ -47,7 +47,10 @@ func sample() -> Dictionary:
 	var old_counts: Dictionary = _previous.get("classes", {})
 	var changes := {}
 	for name in TRACKED_CLASSES:
-		changes[name] = int(counts.get(name, 0)) - int(old_counts.get(name, 0)) 			if had_previous else 0
+		if had_previous:
+			changes[name] = int(counts.get(name, 0)) - int(old_counts.get(name, 0))
+		else:
+			changes[name] = 0
 	var total: int = int(result["total"])
 	var previous_total: int = int(_previous.get("total", total))
 	_previous = result.duplicate(true)
