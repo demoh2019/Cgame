@@ -1,0 +1,97 @@
+name: Native ranked AI stimuli and Albion multi-noise investigation
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_stimulus_history_2d.*'
+      - 'modules/behavior_tree/tests/test_ai_stimulus_history_2d.h'
+      - 'modules/behavior_tree/doc_classes/AIStimulusHistory2D.xml'
+      - 'game/scripts/shared/native_infected_senses.gd'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_native_infected_senses.gd'
+      - 'game/tests/run_ranked_infected_perception.gd'
+      - 'tests/scene/test_ai_stimulus_ranked_contract.py'
+      - '.github/workflows/native-ranked-ai-stimuli.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/behavior_tree/ai_stimulus_history_2d.*'
+      - 'modules/behavior_tree/tests/test_ai_stimulus_history_2d.h'
+      - 'game/scripts/shared/native_infected_senses.gd'
+      - 'game/scripts/shared/zombie.gd'
+      - 'game/tests/test_native_infected_senses.gd'
+      - 'game/tests/run_ranked_infected_perception.gd'
+      - 'tests/scene/test_ai_stimulus_ranked_contract.py'
+      - '.github/workflows/native-ranked-ai-stimuli.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ranked-source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            modules/behavior_tree/ai_stimulus_history_2d.h
+            modules/behavior_tree/ai_stimulus_history_2d.cpp
+            modules/behavior_tree/doc_classes/AIStimulusHistory2D.xml
+            game/scripts/shared/native_infected_senses.gd
+            game/scripts/shared/zombie.gd
+            game/scripts/shared/net.gd
+            game/tests/test_native_infected_senses.gd
+            game/tests/run_ranked_infected_perception.gd
+            tests/scene/test_ai_stimulus_ranked_contract.py
+          sparse-checkout-cone-mode: false
+      - name: Verify ranked memory source and reference model
+        run: python3 -m unittest tests/scene/test_ai_stimulus_ranked_contract.py -v
+
+  native-and-game:
+    needs: ranked-source-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native ranked stimulus memory doctest
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[AIStimulusHistory2D]*" 2>&1 | tee ranked-stimulus-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' ranked-stimulus-native.log; then exit 1; fi
+      - name: Import Albion After and validate scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee ranked-stimulus-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' ranked-stimulus-import.log; then exit 1; fi
+      - name: Ranked memory server gameplay integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_ranked_infected_perception.gd 2>&1 | tee ranked-stimulus-game.log
+          grep -E '^RANKED PERCEPTION TOTAL: [0-9]+ checks, 0 failures$' ranked-stimulus-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' ranked-stimulus-game.log; then exit 1; fi
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ranked-ai-stimulus-results
+          if-no-files-found: ignore
+          path: |
+            ranked-stimulus-native.log
+            ranked-stimulus-import.log
+            ranked-stimulus-game.log
