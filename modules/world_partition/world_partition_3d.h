@@ -32,6 +32,7 @@
 
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
+#include "core/templates/vector.h"
 #include "core/variant/array.h"
 #include "scene/3d/node_3d.h"
 #include "scene/resources/packed_scene.h"
@@ -51,6 +52,9 @@ class WorldPartition3D : public Node3D {
 	int unload_radius = 2;
 	int max_new_requests_per_frame = 2;
 	int max_instances_per_frame = 2;
+	// Distance-based unloads are spread over frames so a teleport does not
+	// free hundreds of scene hierarchies in one tick.
+	int max_unloads_per_frame = 32;
 	int max_concurrent_requests = 8;
 	bool streaming_enabled = true;
 	int detail_radius = -1; // -1 disables dynamic detail levels.
@@ -106,8 +110,36 @@ class WorldPartition3D : public Node3D {
 	HashMap<String, Ref<PackedScene>> ready_scenes;
 	HashSet<Vector2i> failed_cells;
 	// Explicitly retained gameplay cells (camps, quest hubs), independent of camera distance.
-	HashSet<Vector2i> pinned_cells;
+	// Insertion-ordered so earlier pins are streamed first (deterministic priority).
+	Vector<Vector2i> pinned_cells;
 	static constexpr int MAX_PINNED_CELLS = 128;
+
+	// Independent reference-counted residency claims (quest, AI route, cutscene
+	// owners). A cell stays loaded while any pin or lease claims it.
+	HashMap<int, Vector2i> cell_leases;
+	HashMap<Vector2i, int> cell_lease_counts;
+	int next_cell_lease_token = 1;
+	static constexpr int MAX_CELL_LEASES = 256;
+	// Set when a claim is released so cells held only by that claim are
+	// re-evaluated even if no observer exists.
+	bool unload_after_claim_released = false;
+
+	// Runtime data layers: named gameplay layers gate whole cells.
+	Dictionary cell_layers; // Vector2i -> String
+	Dictionary layer_states; // String -> bool, absent means enabled.
+	bool layer_update_needed = false;
+
+	// Gameplay persistence, opt-in per scene root / node.
+	bool persist_rigid_bodies = false;
+	bool persist_streaming_objects = false;
+	HashMap<Vector2i, Dictionary> saved_cell_states;
+	HashMap<Vector2i, Dictionary> saved_cell_physics_states;
+	HashMap<Vector2i, Dictionary> saved_cell_object_states;
+
+	// Explicit gameplay navigation gates (not distance tiers).
+	Dictionary navigation_cell_states; // Vector2i -> false; absent means enabled.
+	Dictionary navigation_link_states; // Vector2i -> { link path -> false }.
+	Dictionary route_connection_links; // Vector2i -> { Vector2i -> link path }.
 
 	// Additional runtime loading sources: quest objectives, cameras, portals.
 	// Bounded in count and radius so misconfigured gameplay cannot fan out.
@@ -157,6 +189,23 @@ class WorldPartition3D : public Node3D {
 	String _get_scene_path(const Vector2i &p_cell) const;
 	bool _is_cell_required_by_source(const Vector2i &p_cell, int p_extra_radius) const;
 	int _count_source_cells(const String &p_name, int p_kind) const; // 0 registered, 1 active, 2 failed.
+	bool _has_residency_claim(const Vector2i &p_cell) const;
+	bool _is_cell_layer_enabled(const Vector2i &p_cell) const;
+	void _notify_cell_activating(const Vector2i &p_cell, Node *p_instance);
+	void _notify_cell_deactivating(const Vector2i &p_cell, Node *p_instance);
+	void _capture_cell_state(const Vector2i &p_cell, Node *p_instance);
+	void _restore_cell_state(const Vector2i &p_cell, Node *p_instance);
+	static bool _valid_body_state(const Dictionary &p_state);
+	static bool _valid_body_path(const String &p_path);
+	static bool _valid_object_state(const Dictionary &p_state);
+	void _capture_cell_physics_state(const Vector2i &p_cell, Node *p_instance);
+	void _restore_cell_physics_state(const Vector2i &p_cell, Node *p_instance);
+	void _capture_cell_object_states(const Vector2i &p_cell, Node *p_instance);
+	void _restore_cell_object_states(const Vector2i &p_cell, Node *p_instance, bool p_reset_missing);
+	void _apply_cell_navigation_state(const Vector2i &p_cell, Node *p_instance);
+	void _apply_loaded_navigation_link(const Vector2i &p_cell, const String &p_link_path, bool p_enabled);
+	void _apply_cell_navigation_links(const Vector2i &p_cell, Node *p_instance);
+	bool _is_route_connection_open(const Vector2i &p_from, const Vector2i &p_to) const;
 	void _unload_cell(const Vector2i &p_cell);
 	void _clear_active_cells();
 	void _poll_requests();
@@ -194,6 +243,9 @@ public:
 
 	void set_max_instances_per_frame(int p_count);
 	int get_max_instances_per_frame() const;
+
+	void set_max_unloads_per_frame(int p_count);
+	int get_max_unloads_per_frame() const;
 
 	void set_max_concurrent_requests(int p_count);
 	int get_max_concurrent_requests() const;
@@ -300,9 +352,78 @@ public:
 
 	bool pin_cell(const Vector2i &p_cell);
 	void unpin_cell(const Vector2i &p_cell);
+	void set_pinned_cells(const Array &p_cells);
+	void clear_pinned_cells();
 	bool is_cell_pinned(const Vector2i &p_cell) const;
 	Array get_pinned_cells() const;
 	int get_pinned_cell_count() const;
+
+	// Reference-counted residency leases. Tokens are never recycled while active.
+	int acquire_cell_lease(const Vector2i &p_cell);
+	bool release_cell_lease(int p_lease_token);
+	void clear_cell_leases();
+	int get_cell_lease_count(const Vector2i &p_cell) const;
+	int get_cell_lease_count_total() const;
+	int get_leased_cell_count() const;
+	// Straight four-connected corridor (<= 64 cells); prefetch only, not obstacle-aware.
+	Array get_cell_route(const Vector2i &p_from, const Vector2i &p_to) const;
+	Array acquire_cell_route(const Vector2i &p_from, const Vector2i &p_to);
+	int release_cell_route(const Array &p_tokens);
+
+	void set_cell_layers(const Dictionary &p_layers);
+	Dictionary get_cell_layers() const;
+	void set_cell_layer(const Vector2i &p_cell, const String &p_layer);
+	String get_cell_layer(const Vector2i &p_cell) const;
+	void clear_cell_layer(const Vector2i &p_cell);
+	void set_layer_states(const Dictionary &p_states);
+	Dictionary get_layer_states() const;
+	void set_layer_enabled(const String &p_layer, bool p_enabled);
+	bool is_layer_enabled(const String &p_layer) const;
+	bool is_cell_layer_enabled(const Vector2i &p_cell) const;
+
+	void set_cell_navigation_enabled(const Vector2i &p_cell, bool p_enabled);
+	bool is_cell_navigation_enabled(const Vector2i &p_cell) const;
+	void set_navigation_cell_states(const Dictionary &p_states);
+	Dictionary get_navigation_cell_states() const;
+	int get_disabled_navigation_cell_count() const;
+
+	void set_cell_navigation_link_enabled(const Vector2i &p_cell, const String &p_link_path, bool p_enabled);
+	bool is_cell_navigation_link_enabled(const Vector2i &p_cell, const String &p_link_path) const;
+	void set_navigation_link_states(const Dictionary &p_states);
+	Dictionary get_navigation_link_states() const;
+	int get_disabled_navigation_link_count() const;
+	void set_route_connection_link(const Vector2i &p_from, const Vector2i &p_to, const String &p_link_path);
+	void clear_route_connection_link(const Vector2i &p_from, const Vector2i &p_to);
+	String get_route_connection_link(const Vector2i &p_from, const Vector2i &p_to) const;
+
+	void set_cell_state(const Vector2i &p_cell, const Dictionary &p_state);
+	Dictionary get_cell_state(const Vector2i &p_cell) const;
+	bool has_cell_state(const Vector2i &p_cell) const;
+	void erase_cell_state(const Vector2i &p_cell);
+	void clear_cell_states();
+	Dictionary snapshot_cell_states();
+	void load_cell_states(const Dictionary &p_states);
+	int get_cell_state_count() const;
+
+	void set_persist_rigid_bodies(bool p_enabled);
+	bool is_persisting_rigid_bodies() const;
+	Dictionary get_cell_physics_state(const Vector2i &p_cell) const;
+	Dictionary snapshot_cell_physics_states();
+	void load_cell_physics_states(const Dictionary &p_states);
+	void clear_cell_physics_states();
+	int get_cell_physics_state_count() const;
+
+	void set_persist_streaming_objects(bool p_enabled);
+	bool is_persisting_streaming_objects() const;
+	Dictionary get_cell_object_states(const Vector2i &p_cell) const;
+	Dictionary capture_cell_object_states(const Vector2i &p_cell);
+	Dictionary snapshot_cell_object_states();
+	void load_cell_object_states(const Dictionary &p_states);
+	void clear_cell_object_states();
+	int get_cell_object_state_count() const;
+
+	Dictionary get_cell_simulation_stats(const Vector2i &p_cell) const;
+	void retry_failed_cells();
 
 	bool set_streaming_source(const String &p_name, const Vector3 &p_global_position, int p_radius = 0, int p_priority = 1);
 	bool set_streaming_source_priority(const String &p_name, int p_priority);
