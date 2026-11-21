@@ -9,6 +9,8 @@
 #include "core/object/class_db.h"
 #include "core/templates/vector.h"
 
+#include <cstdint>
+
 namespace {
 
 struct RankedCandidate {
