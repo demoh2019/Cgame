@@ -73,8 +73,8 @@ func run(t) -> void:
 		"remaining stale chunks are deferred instead of being dropped at once")
 	t.eq(streamer.get_loaded_count(), count - 2,
 		"deferred cells remain in the regular resident set until next update")
-	t.eq(events.size(), 2, "only two native unload signals fire")
-	for removed in events:
+	t.eq(_unload_events.size(), 2, "only two native unload signals fire")
+	for removed in _unload_events:
 		var removed_distance: float = _distance_to_cell(destination, removed, 16.0)
 		for resident in streamer.get_loaded_cells():
 			t.check(removed_distance + 0.0001 >= _distance_to_cell(destination, resident, 16.0),
