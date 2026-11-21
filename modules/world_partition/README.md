@@ -410,9 +410,484 @@ For persistent hubs use `world.get_pinned_cell_count()` and `world.get_pinned_ce
 
 These counters describe the current state, not a prediction of future memory or throughput. One background resource request may serve multiple pending cells with the same PackedScene path. See `misc/cgame_forest_showcase` for a playable, deterministic 16-cell demonstration and headless reload test.
 
+## Gameplay residency, persistence and navigation gates
+
+The sections below describe gameplay-facing APIs layered on the streaming
+sources, pins and navigation tiers above. Residency claims (pins, leases and
+route leases) are served before observer rings and work without a valid
+observer; runtime data layers always win over claims. Streaming sources
+(`set_streaming_source()`) remain the way to add cameras, co-op players or
+prefetch targets, and sources of the same priority are scheduled nearest ring
+first so no source starves another under a small request budget. Distance
+unloads are limited by `max_unloads_per_frame` (default 32);
+`retry_failed_cells()` clears failure markers for an explicit retry.
+
+## Fine-grained NavigationLink3D gates for streamed AI
+
+Cell-wide navigation gating disables every walkable region of a scene.
+For a door, bridge or isolated transition between two regions, use an
+authored `NavigationLink3D` instead. Godot's navigation server can include
+or exclude a link without rebuilding a navigation mesh or unloading a cell.
+
+The link must be a real child of the source cell scene. Name it consistently
+and register the required edge **once during scene setup**:
+
+```gdscript
+world.set_route_connection_link(Vector2i(0, 0), Vector2i(1, 0), "PatrolBridgeLink")
+
+# A switch only controls this one bridge, not either cell's nav region:
+world.set_cell_navigation_link_enabled(Vector2i(0, 0), "PatrolBridgeLink", false)
+assert(world.is_cell_navigation_enabled(Vector2i(1, 0)))
+assert(world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0)).is_empty())
+
+# Once opened, the AI may reserve both cells again:
+world.set_cell_navigation_link_enabled(Vector2i(0, 0), "PatrolBridgeLink", true)
+var tokens := world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0))
+world.release_cell_route(tokens)
+```
+
+`get_route_connection_link(from_cell, to_cell)` queries a registered edge;
+`clear_route_connection_link` unregisters it. Each required link is
+associated with its **source** cell, but its availability gates travel in
+either direction across that edge. Multiple independent route owners are
+still protected by token-based leases, and no partial allocations occur if
+a required link is closed.
+
+`get_navigation_link_states()` returns a safe, deep-copy checkpoint map;
+`set_navigation_link_states()` restores it, applying changes to loaded
+links and preserving overrides for temporarily unloaded cells. A default
+unlisted path is open. Only disabled entries are stored, limited to 4096
+cells and 128 link paths per cell, and unsafe NodePaths are rejected.
+Subscribe to `cell_navigation_link_state_changed(cell, path, enabled)`
+to release stale paths and reacquire routes as topology changes. Configuration
+of *which* cell edge requires *which* link belongs to the authored level
+setup, not to the saved runtime gate states.
+
+The demo includes two walkable patrol islands on navigation layer **2**,
+which are separated by an 8-meter gap in mesh coordinates. A manually
+authored `PatrolBridgeLink` provides the sole navigation connection.
+The surrounding procedural world uses navigation layer **1** and remains
+accessible even when the patrol bridge is closed. The player controls the
+bridge using the `PatrolGate` interactable switch (E). NavigationAgent3D
+queries layer 2 and has custom physical movement across this short bridge
+because an off-mesh navigation link specifies a route, **not automatic
+movement for a CharacterBody3D**.
+
+This is fine-grained link connectivity, not a dynamic navmesh bake, crowd
+simulation, agent obstacle avoidance, or general multi-floor topology
+solver. Links must connect authored regions within the navigation server's
+link-connection radius and are synchronized on subsequent physics frames.
+Changes to a link's path or scene hierarchy need a save migration.
+
+## Dynamic navigation cell gates and AI route invalidation
+
+Individual cells can stop contributing their navigation regions to
+`NavigationServer3D` without unloading their graphics, physics bodies,
+interactive objects or existing stream leases. This is useful for puzzle
+gates, changing terrain, doors and quest-controlled navigation access:
+
+```gdscript
+world.set_cell_navigation_enabled(Vector2i(1, 0), false)
+assert(not world.is_cell_navigation_enabled(Vector2i(1, 0)))
+assert(world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0)).is_empty())
+
+# When the player opens the gate, the route may be reserved again.
+world.set_cell_navigation_enabled(Vector2i(1, 0), true)
+var corridor_tokens: Array = world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0))
+world.release_cell_route(corridor_tokens)
+```
+
+The native streamer updates every `NavigationRegion3D` descendant of
+the specified loaded cell and emits
+`cell_navigation_state_changed(cell, enabled)` only on effective
+transitions. A navigation-disabled scene stays resident if its camera,
+pin, or independent lease still requires it. Existing owners' leases
+are **not revoked**; AI systems should subscribe to the signal, stop
+movement, release their own corridor tokens and reacquire them once
+the gate reopens. `acquire_cell_route` checks both runtime Data Layers
+and navigation gates atomically, with no partial token allocations.
+
+The `navigation_cell_states` inspector property, along with
+`get_navigation_cell_states()` and `set_navigation_cell_states()`,
+allows a game to save and import disabled cells. Only explicit
+disabled values are stored, and missing entries default to enabled.
+Bulk imports apply to loaded regions and notify subscribers when a gate
+changes. A cell is also brought to its effective navigation state after
+the scene's `streaming_activated()` callback and before
+`cell_activated` subscribers run.
+
+**Scope:** this is a coarse per-cell navigation switch, not geometric
+obstacle carving, navmesh runtime baking or edge-specific gates. The
+whole navigation region of the cell is disabled, even when only one
+door has changed. The current implementation sets all loaded
+`NavigationRegion3D` descendants to the effective cell state; custom
+region-level enable flags are not preserved independently. For an
+individual door, use authored `NavigationLink3D` or geometry-specific
+navigation updates in a more advanced system. Godot synchronizes
+navigation server changes on later physics frames, and existing agent
+paths do not automatically reroute; consumers must invalidate/requery
+their path before moving across the changed map.
+
+## Per-object interactive state without scene-root boilerplate
+
+An interactive chest, lever, door or puzzle mechanism can live under any
+streamed cell root as a reusable child component. Instead of teaching the
+root scene about each child, mark the object with the Godot node group
+`streaming_stateful` and implement two small callbacks:
+
+```gdscript
+# In the object's script:
+func _ready() -> void:
+    add_to_group("streaming_stateful")
+
+func capture_streaming_object_state() -> Dictionary:
+    return {"opened": opened, "uses": use_count}
+
+func restore_streaming_object_state(state: Dictionary) -> void:
+    opened = bool(state.get("opened", false))
+    use_count = int(state.get("uses", 0))
+    update_appearance()
+```
+
+The native `WorldPartition3D` opt-in property `persist_streaming_objects`
+defaults to false. Enable it on the detailed scene streamer, and use:
+
+```gdscript
+world.persist_streaming_objects = true
+# Immediately after a player opens a chest:
+world.capture_cell_object_states(Vector2i(0, 0))
+# Save all still-loaded and previously streamed out interactive objects:
+var object_states: Dictionary = world.snapshot_cell_object_states()
+# Rehydrate during checkpoint load (missing objects reset to defaults):
+world.load_cell_object_states(object_states)
+```
+
+The engine traverses **only a loaded cell's subtree** for group members,
+not all world nodes. Each recorded object is keyed by a stable
+scene-relative NodePath string and can be reused in any cell. Unload captures
+children before the cell's deactivation callback; load restores them after
+the cell root's `_ready()` and gameplay/physics state restoration, before
+`streaming_activated()`. Manual capture fires
+`cell_object_state_changed(cell, states)` only when a real change occurs.
+Cache getters return deep copies.
+
+For safe and bounded file persistence, an imported record can have at most
+32 fields and each cell at most 128 objects. Supported values are null,
+bool, int, finite float, short String (max 1024 chars), Vector2/3 and
+integer vector types; nested dictionaries, Arrays, Object references and
+RIDs are rejected. NodePath keys must remain relative and cannot escape
+the loaded root. This supports small interactive flags and counters, not a
+complete arbitrary graph serializer. Changes to authored node hierarchy
+can invalidate path-based save records; for production migrations, keep
+stable node names or translate saved paths by game schema version.
+
+These are *three independent cache domains*: gameplay root-state
+(`snapshot_cell_states()`), RigidBody3D motion
+(`snapshot_cell_physics_states()`) and child-interactable state
+(`snapshot_cell_object_states()`). A game may opt into any subset.
+
+## Opt-in RigidBody3D streaming persistence
+
+The engine can retain dynamic physics objects in streamed scenes without
+requiring each game to write custom callbacks for every body. This is
+independent of `capture_streaming_state()` for quest or gameplay data.
+
+```gdscript
+# Streamer's inspector flag, or from game setup:
+world.persist_rigid_bodies = true
+
+# In the authored cell root, during _ready() or scene construction:
+$StreamingCrate.set_meta("streaming_persistent", true)
+
+# Before saving a checkpoint, capture even still-resident bodies:
+var states: Dictionary = world.snapshot_cell_physics_states()
+var file := FileAccess.open("user://physics.save", FileAccess.WRITE)
+file.store_var(states, false)
+file.close()
+
+# After reading it with get_var(false) and validating the save header:
+world.load_cell_physics_states(states)
+```
+
+For each marked `RigidBody3D`, the engine stores its stable **scene-relative
+NodePath**, local `Transform3D`, linear/angular velocities, sleeping and
+freeze flags. Capture occurs *before* a scene's
+`streaming_deactivating(cell)` callback, which may stop or freeze simulated
+objects, and restoration occurs *after* the scene's `_ready()` and
+`restore_streaming_state()`, before `streaming_activated()`. If a node is
+renamed or removed in a later game version, its old record is ignored.
+
+`get_cell_physics_state(cell)` inspects one cell,
+`get_cell_physics_state_count()` reports cached cells, and
+`clear_cell_physics_states()` clears the cache. Getters and snapshots return
+deep copies. Import rejects unsupported types, nonfinite transforms and
+velocities, unsafe relative paths and body states with missing fields.
+Only marked nodes are ever restored, with a maximum of 128 records per
+cell. Missing imports leave currently loaded rigid bodies untouched.
+
+This is **opt-in, in-memory physics persistence**, not a full physics
+snapshot/rollback system: it does not preserve collision contacts, forces,
+constraints/joints, arbitrary scripts, server RIDs or determinism across
+different physics engines. Moving a live RigidBody3D transform or velocity
+repeatedly can produce unstable physical behavior; the engine applies stored
+state only during scene re-instantiation or explicit save loading. Saved
+values can be affected by physics steps between the last snapshot and unload,
+so a final save should capture at a well-defined point in the game loop.
+Real productions should use versioned, bounded, atomic checkpoint files.
+
+## Navigation corridor leases for streamed AI
+
+Large-world NPCs can traverse multiple `WorldPartition3D` cells without the
+camera visiting every cell. The engine exposes a deterministic,
+four-connected route between grid coordinates:
+
+```gdscript
+var cells: Array = world.get_cell_route(Vector2i(0, 0), Vector2i(1, 0))
+# [Vector2i(0, 0), Vector2i(1, 0)] — cells along a stream corridor.
+var tokens: Array = world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0))
+if tokens.size() == cells.size():
+    # Wait until the cells are loaded and the NavigationServer has synced.
+    # Then use NavigationAgent3D.get_next_path_position() each physics tick.
+    pass
+# The AI owner releases only its own corridor leases on exit or cancellation.
+world.release_cell_route(tokens)
+```
+
+The corridor includes both endpoints, moves through orthogonally adjacent
+cells, and contains at most **64 cells**. It is a prefetch/residency tool,
+**not** a navigation mesh, obstacle solver or final pathfinding algorithm.
+A route longer than the cap, one crossing any disabled Data Layer, or one
+that would exhaust the existing 256-leased-token limit fails atomically and
+returns an empty Array. Existing manual pins/leases of other owners are
+unaffected. No partial route is retained on failure. A scene missing a
+registered asset cannot load even if it holds a route lease.
+
+A path-following agent must wait for streamed `NavigationRegion3D` nodes
+and at least one subsequent physics synchronization before querying
+`NavigationServer3D`. Call `NavigationAgent3D.get_next_path_position()`
+each physics tick and release the returned tokens when the AI despawns.
+The engine intentionally does **not** serialize live lease tokens. A save
+file can store the AI's position and destination, from which its new route
+is acquired on load. Navigation across neighbors requires truly connecting
+scene navigation polygons; simply holding two leases does not connect
+disjoint polygons.
+
+## Physics and navigation lifecycle for streamed cells
+
+Detailed cell scenes may contain `StaticBody3D`, `CollisionShape3D`,
+`NavigationRegion3D`, agents and other physics/navigation scene nodes.
+Only the registered near-detail cells are instantiated, so Godot's servers
+receive no distant cell physics/nav resources unless you explicitly put
+such resources inside a proxy scene.
+
+Add optional callbacks to the root `Node3D` of any streamed `PackedScene`:
+
+```gdscript
+func streaming_activated(cell: Vector2i) -> void:
+    # Runs after _ready() and restore_streaming_state(), but the server will
+    # not expose the new navigation region until a later physics frame.
+    $WalkableRegion.enabled = true
+    $TerrainPhysics/GroundShape.disabled = false
+
+func streaming_deactivating(cell: Vector2i) -> void:
+    # Runs before capture_streaming_state() and before queue_free() is deferred.
+    $WalkableRegion.enabled = false
+    $TerrainPhysics/GroundShape.disabled = true
+```
+
+A scene need not implement either callback. The engine also broadcasts
+`cell_activated(cell)` and `cell_deactivating(cell)` in that same order,
+in addition to the established `cell_loaded` and `cell_unloaded` signals.
+Use them for cross-scene services such as detaching an AI director,
+removing external physics references, or deferring path queries. A
+navigation-server query must await a physics frame after the region enters
+the scene tree; the example demo waits for two physics frames.
+
+`get_cell_simulation_stats(cell)` returns a dictionary with
+`collision_objects`, `collision_shapes` and `navigation_regions`
+counts. Unloaded cells return zeros. The query recursively traverses one
+loaded cell's nodes **on demand** rather than adding work to every
+`WorldPartition3D` streaming tick. It counts nodes, not simulated
+contacts, server processing time or finalized navmesh quality.
+
+This implementation does not automatically pause every arbitrary
+`RigidBody3D` or save its physics velocity; author custom root callbacks
+for your game's simulation lifecycle. It also does not build a tiled
+navigation graph; navigation mesh content is provided by the scene author.
+
+## Reference-counted runtime cell leases
+
+Manual `pin_cell()` is idempotent and cannot distinguish competing
+owners. For a quest, cutscene or combat system that must independently retain
+the same cell, use positive lease handles:
+
+```gdscript
+var quest_token: int = world.acquire_cell_lease(Vector2i(4, 2))
+var cutscene_token: int = world.acquire_cell_lease(Vector2i(4, 2))
+assert(world.get_cell_lease_count(Vector2i(4, 2)) == 2)
+
+# Quest finishes: the cutscene's claim continues to keep this cell loaded.
+assert(world.release_cell_lease(quest_token))
+assert(world.get_cell_lease_count(Vector2i(4, 2)) == 1)
+
+# The cutscene finishes: normal distance-based unloading can resume.
+assert(world.release_cell_lease(cutscene_token))
+assert(not world.release_cell_lease(cutscene_token)) # No double release.
+```
+
+Tokens are local to their `WorldPartition3D` instance, not persistent
+resource IDs. The engine holds at most 256 active tokens. A disabled layer
+prevents loading and unloads a leased scene, but does not invalidate the
+lease; reactivation can stream it again. Existing observer and pinned-cell
+residency works independently, and all requests use the same budgets.
+Leases survive scene mapping replacement but cannot resurrect an
+unregistered asset. When loading a game save, systems must reacquire the
+leases they still need; raw lease tokens must not be serialized as progress.
+
+## Reactive streaming signals
+
+The core streamer now broadcasts these native Godot signals to subscribers:
+
+- `layer_state_changed(layer: String, enabled: bool)`: an effective runtime
+  layer transition from `set_layer_enabled()` or `set_layer_states()`.
+  Layer states default to enabled, so redundant toggles produce no event.
+- `cell_state_changed(cell: Vector2i, state: Dictionary)`: a genuinely changed
+  cached state from `set_cell_state()`, scene-root capture on unload or the
+  snapshot of a still-active cell. The payload is a defensive deep copy.
+  Bulk `load_cell_states()` replaces saved state and restores active cells
+  without emitting a separate event for each imported cell.
+
+```gdscript
+# Connect once to the native node; gameplay can respond without frame polling.
+world.layer_state_changed.connect(_on_layer_state_changed)
+world.cell_state_changed.connect(_on_cell_state_changed)
+
+func _on_cell_state_changed(cell: Vector2i, state: Dictionary) -> void:
+    if cell == Vector2i(0, 0) and state.get("reward_claimed", false):
+        world.set_layer_enabled("combat_event", true)
+
+func _on_layer_state_changed(layer: String, enabled: bool) -> void:
+    print("World layer event: ", layer, " enabled: ", enabled)
+
+# Explicit gameplay mutations should publish their new serialized state.
+var hub: Node3D = world.get_cell_instance(Vector2i(0, 0))
+if hub != null and hub.has_method("capture_streaming_state"):
+    world.set_cell_state(Vector2i(0, 0), hub.call("capture_streaming_state"))
+```
+
+The signal is not a global bus and does not observe every property of every
+`Node`. For immediate notification, gameplay writes its changed state through
+`set_cell_state()`. Otherwise it is captured when the cell unloads or the
+game saves a snapshot. This avoids per-frame tree scans, but event listeners
+should remain cheap and should not recursively trigger conflicting world
+mutations.
+
+## Runtime Data Layers (gameplay events)
+
+Use `cell_layers` (a [Vector2i → String] dictionary) and `layer_states`
+(a [String → bool] dictionary) to control scene activation independently of
+distance, streaming sources and pinned-cell residency. The properties are
+exposed in the Godot inspector and persisted in scenes.
+
+```gdscript
+# An inactive combat quest has no active arena scene, even if it is pinned:
+world.set_cell_layer(Vector2i(4, 2), "combat")
+world.set_layer_enabled("combat", false)
+world.pin_cell(Vector2i(4, 2))
+# On quest activation, the cell streams in using the regular budgets:
+world.set_layer_enabled("combat", true)
+world.update_streaming()  # Optional explicit tick; the node also processes.
+# Persist activation states with the checkpoint along with cell state/pins.
+var states: Dictionary = world.get_layer_states()
+world.set_layer_states(states)
+```
+
+Layer deactivation stops new requests and instantiations, cancels pending cell
+mappings and queues existing loaded scenes for budgeted unload. The
+`capture_streaming_state()` callback runs during unload and is applied when
+the layer is activated and the cell is loaded again. Removing a layer
+assignment makes the cell eligible immediately, while deleting a saved
+activation state makes that layer enabled by default.
+
+A layer is only a runtime loading *gate*, not a separate renderer,
+visibility-only switch or general multi-layer boolean-expression system.
+One cell is assigned at most one named layer; default unassigned cells are
+always enabled. Layers on two separate `WorldPartition3D` nodes are
+independent. For large numbers of cells, stagger activation and profile
+`max_instances_per_frame` and `max_unloads_per_frame`.
+
+## Streaming gameplay state and save files
+
+`WorldPartition3D` provides an opt-in lifecycle contract for a scene's
+root `Node3D`, in addition to spatial streaming and pinning:
+
+```gdscript
+# On the cell scene root (for example, an opened treasure chest):
+var opened := false
+
+func capture_streaming_state() -> Dictionary:
+    return {"opened": opened}
+
+func restore_streaming_state(state: Dictionary) -> void:
+    opened = bool(state.get("opened", false))
+    # Update visuals after the scene has finished _ready().
+```
+
+The engine automatically captures state immediately before queueing the
+loaded cell for deletion and restores the cached data after the next
+`PackedScene` instantiation, before emitting `cell_loaded`.
+A cell whose root does not implement these methods streams as before.
+Empty state dictionaries remove any previous cached value.
+
+For checkpoint saves, ask the engine to capture still-loaded cells:
+
+```gdscript
+var file := FileAccess.open("user://world.save", FileAccess.WRITE)
+file.store_var({
+    "version": 1,
+    "cell_states": world.snapshot_cell_states(),
+    "pins": world.get_pinned_cells(),
+})
+file.close()
+
+var input := FileAccess.open("user://world.save", FileAccess.READ)
+var checkpoint: Variant = input.get_var(false) # Never deserialize objects.
+if checkpoint is Dictionary and checkpoint.get("version") == 1:
+    world.load_cell_states(checkpoint.get("cell_states", {}))
+    world.set_pinned_cells(checkpoint.get("pins", []))
+```
+
+The state cache is in memory until the game explicitly writes it. Use only
+save-compatible Variant types (numbers, strings, vectors, arrays and
+dictionaries), not Node/Object references. Production saves should validate
+the file, schema and size, use temporary-file/atomic replacement and account
+for game-version migrations. These APIs do not serialize physics engines,
+navigation agents or arbitrary child nodes automatically.
+
+## Offline HLOD proxy authoring example
+
+The built-in demo at `modules/world_partition/demo/` includes a headless
+content-generation tool: `tools/bake_hlod_proxies.gd`. It instantiates the
+example detailed forest at each cell origin, subsamples MultiMesh transforms,
+uses simpler canopy geometry, and writes packed proxy scenes to
+`res://generated/forest_proxy_X_Z.tscn`. The game prefers these saved scenes,
+falling back to dynamic proxy generation where an asset is missing.
+
+```sh
+# Runs with a stock Godot editor, before compiling this Cgame fork.
+godot --headless --path modules/world_partition/demo --import --quit
+godot --headless --path modules/world_partition/demo \
+  --script res://tools/bake_hlod_proxies.gd -- --radius=6 --stride=8
+godot --headless --path modules/world_partition/demo \
+  --script res://tests/hlod_bake_test.gd
+```
+
+This is a **demo-specific offline foliage/mesh subsampler**, not an editor
+plugin that automatically merges arbitrary authored scenes, bakes texture
+
 ## Tests
 
-The module includes 74 Doctest cases across `test_world_partition_3d.h` (38) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 129 Doctest cases across `test_world_partition_3d.h` (38) and `test_world_partition_3d_extra.h` (91), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
