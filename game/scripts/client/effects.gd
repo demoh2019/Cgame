@@ -269,10 +269,32 @@ func _process(_delta: float) -> void:
 	if _burst_pool_budgeted and is_instance_valid(_burst_pool):
 		# At most 1-2 PackedScene instantiations or frees per render frame.
 		# Active particle emitters count toward this target and finish naturally.
-		_burst_pool.call("maintain_residency",
-			FxPolicy.pool_resident_target(GraphicsQuality.level()),
-			FxPolicy.pool_changes_per_frame(GraphicsQuality.level()))
+		var level: int = GraphicsQuality.level()
+		if _burst_pool.has_method("get_last_maintenance_work_usec"):
+			_burst_pool.call("maintain_residency",
+				FxPolicy.pool_resident_target(level),
+				FxPolicy.pool_changes_per_frame(level),
+				FxPolicy.pool_work_usec(level))
+		else:
+			# Older native forks still accept only count-budgeted maintenance.
+			_burst_pool.call("maintain_residency",
+				FxPolicy.pool_resident_target(level),
+				FxPolicy.pool_changes_per_frame(level))
 	flush_bursts()
+
+
+## Profiling exposes the actual main-thread residency work and remaining
+## idle cache actions, not particle simulation or GPU rendering time.
+func get_pool_maintenance_work_usec() -> int:
+	if not is_instance_valid(_burst_pool) or not _burst_pool.has_method("get_last_maintenance_work_usec"):
+		return 0
+	return int(_burst_pool.call("get_last_maintenance_work_usec"))
+
+
+func get_pool_maintenance_pending_count() -> int:
+	if not is_instance_valid(_burst_pool) or not _burst_pool.has_method("get_last_maintenance_pending_count"):
+		return 0
+	return int(_burst_pool.call("get_last_maintenance_pending_count"))
 
 
 func pending_burst_count() -> int:

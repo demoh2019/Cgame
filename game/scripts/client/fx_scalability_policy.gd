@@ -8,6 +8,8 @@ const FRAME_BUDGET := [8, 12, 18, 24]
 ## Idle cache can shrink gradually after reducing the graphics quality.
 const POOL_RESIDENT_TARGET := [2, 4, 8, 12]
 const POOL_CHANGES_PER_FRAME := [1, 1, 2, 2]
+## Soft per-frame CPU microsecond time slice for idle VFX node maintenance.
+const POOL_WORK_USEC := [250, 400, 600, 900]
 
 
 static func pool_resident_target(quality: int) -> int:
@@ -16,6 +18,12 @@ static func pool_resident_target(quality: int) -> int:
 
 static func pool_changes_per_frame(quality: int) -> int:
 	return POOL_CHANGES_PER_FRAME[clampi(quality, 0, 3)]
+
+
+static func pool_work_usec(quality: int) -> int:
+	return POOL_WORK_USEC[clampi(quality, 0, 3)]
+
+
 const CAPS := [
 	[1, 4, 5, 4],
 	[2, 6, 8, 6],

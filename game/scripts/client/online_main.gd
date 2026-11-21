@@ -504,6 +504,16 @@ func _build_environment() -> void:
 	add_child(water)
 	effects = Effects.new()
 	add_child(effects)
+	# Report real main-thread PackedScene cache work separately from
+	# particle simulation and combat CPU. Both native/script pools expose it.
+	for monitor in [
+		[&"Albion/VFXPoolMaintenanceCPUus", Callable(effects, "get_pool_maintenance_work_usec")],
+		[&"Albion/VFXPoolMaintenancePending", Callable(effects, "get_pool_maintenance_pending_count")],
+	]:
+		var pool_monitor_name: StringName = monitor[0]
+		if not Performance.has_custom_monitor(pool_monitor_name):
+			Performance.add_custom_monitor(pool_monitor_name, monitor[1])
+			_ambient_monitors.append(pool_monitor_name)
 	combat_vfx = CombatVfx.new()
 	add_child(combat_vfx)
 	_footprints = FootprintDecals.new()

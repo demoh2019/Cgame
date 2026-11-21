@@ -189,4 +189,56 @@ TEST_CASE("[SceneNodePool] Incremental residency honors per-frame budget and pro
 }
 
 
+TEST_CASE("[SceneNodePool] CPU-sliced residency preserves active leases and exposes pending work") {
+	Ref<PackedScene> scene;
+	scene.instantiate();
+	Node *prototype = memnew(Node);
+	REQUIRE(scene->pack(prototype) == OK);
+	memdelete(prototype);
+
+	CHECK_FALSE(SceneNodePool::should_stop_maintenance(0, 3, 100));
+	CHECK_FALSE(SceneNodePool::should_stop_maintenance(1, 0, 100));
+	CHECK_FALSE(SceneNodePool::should_stop_maintenance(100, 1, 99));
+	CHECK(SceneNodePool::should_stop_maintenance(100, 1, 100));
+	CHECK(SceneNodePool::should_stop_maintenance(100, 2, 200));
+
+	SceneNodePool pool;
+	pool.set_template_scene(scene);
+	pool.set_max_idle(6);
+	CHECK(pool.get_last_maintenance_change_count() == 0);
+	CHECK(pool.get_last_maintenance_pending_count() == 0);
+	CHECK(pool.get_last_maintenance_work_usec() == 0);
+	CHECK(pool.maintain_residency(6, 2, -1) == 0);
+	CHECK(pool.maintain_residency(6, 2, 1000001) == 0);
+	CHECK(pool.get_idle_count() == 0);
+	const int first = pool.maintain_residency(6, 2, 1);
+	CHECK(first >= 1);
+	CHECK(first <= 2);
+	CHECK(pool.get_last_maintenance_change_count() == first);
+	CHECK(pool.get_last_maintenance_pending_count() == 6 - first);
+	CHECK(pool.get_last_maintenance_work_usec() >= 0);
+	CHECK(int(pool.get_stats()["maintenance_pending"]) == 6 - first);
+	while (pool.get_idle_count() < 6) {
+		CHECK(pool.maintain_residency(6, 2, 0) > 0);
+	}
+	CHECK(pool.get_last_maintenance_pending_count() == 0);
+	Node *host = memnew(Node);
+	Node *checked_out = pool.acquire(host);
+	REQUIRE(checked_out != nullptr);
+	const int retired = pool.maintain_residency(0, 2, 1);
+	CHECK(retired <= -1);
+	CHECK(retired >= -2);
+	CHECK(pool.get_active_count() == 1);
+	CHECK(pool.get_last_maintenance_change_count() == retired);
+	CHECK(pool.get_last_maintenance_pending_count() == pool.get_idle_count());
+	CHECK(pool.release(checked_out));
+	while (pool.get_idle_count() > 0) {
+		CHECK(pool.maintain_residency(0, 2, 0) < 0);
+	}
+	CHECK(pool.get_last_maintenance_pending_count() == 0);
+	CHECK(pool.maintain_residency(0, 2, 0) == 0);
+	CHECK(pool.get_last_maintenance_change_count() == 0);
+	memdelete(host);
+}
+
 } // namespace TestSceneNodePool
