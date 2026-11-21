@@ -49,6 +49,13 @@ static func level() -> int:
 	return _level
 
 
+## Per-refresh limit for releasing old *visual* chunks after teleports.
+## High quality can tolerate more teardown work per streaming tick; lower
+## presets pace detach/cleanup more aggressively to avoid frame spikes.
+static func unload_budget_for_quality(value: int) -> int:
+	return [12, 20, 32, 48][clampi(value, 0, 3)]
+
+
 static func get_name() -> String:
 	return NAMES[_level]
 
@@ -389,3 +396,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	if streamer != null:
 		streamer.set("load_radius", float(world_profile["chunk_radius"]))
 		streamer.set("unload_radius", float(world_profile["chunk_unload"]))
+		# Unreal-style bounded deactivation of far procedural scenery.
+		# The fork method is opt-in; stock Godot and older engine builds
+		# retain the existing unlimited unload path.
+		if streamer.has_method("set_max_unloads_per_update"):
+			var unload_limit: int = unload_budget_for_quality(_level)
+			if int(streamer.call("get_max_unloads_per_update")) != unload_limit:
+				streamer.call("set_max_unloads_per_update", unload_limit)
