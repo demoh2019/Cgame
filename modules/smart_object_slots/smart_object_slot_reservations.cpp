@@ -11,21 +11,29 @@
 #include "core/object/class_db.h"
 
 int SmartObjectSlotReservations::_find_slot(int64_t p_slot_id) const {
-	for (int i = 0; i < claims.size(); ++i) {
-		if (claims[i].slot_id == p_slot_id) {
-			return i;
-		}
-	}
-	return -1;
+	const int *index = slot_indices.getptr(p_slot_id);
+	return index != nullptr ? *index : -1;
 }
 
 int SmartObjectSlotReservations::_find_actor(int64_t p_actor_id) const {
-	for (int i = 0; i < claims.size(); ++i) {
-		if (claims[i].actor_id == p_actor_id) {
-			return i;
-		}
+	const int *index = actor_indices.getptr(p_actor_id);
+	return index != nullptr ? *index : -1;
+}
+
+// Swap-remove: removing a dead/expired actor never shifts the remaining
+// claim array or requires rebuilding indices for the whole infected pack.
+void SmartObjectSlotReservations::_erase_claim(int p_index) {
+	const int last = claims.size() - 1;
+	const Claim removed = claims[p_index];
+	slot_indices.erase(removed.slot_id);
+	actor_indices.erase(removed.actor_id);
+	if (p_index != last) {
+		const Claim moved = claims[last];
+		claims.write[p_index] = moved;
+		slot_indices[moved.slot_id] = p_index;
+		actor_indices[moved.actor_id] = p_index;
 	}
-	return -1;
+	claims.resize(last);
 }
 
 int64_t SmartObjectSlotReservations::try_claim_first(const PackedInt64Array &p_slot_ids,
@@ -66,8 +74,10 @@ int64_t SmartObjectSlotReservations::try_claim_first(const PackedInt64Array &p_s
 		}
 		if (owned >= 0) {
 			Claim &existing = claims.write[owned];
+			slot_indices.erase(existing.slot_id);
 			existing.slot_id = slot;
 			existing.remaining = p_lease_seconds;
+			slot_indices[slot] = owned;
 			return slot;
 		}
 		if (claims.size() >= MAX_ACTIVE_CLAIMS) {
@@ -77,7 +87,10 @@ int64_t SmartObjectSlotReservations::try_claim_first(const PackedInt64Array &p_s
 		claim.slot_id = slot;
 		claim.actor_id = p_actor_id;
 		claim.remaining = p_lease_seconds;
+		const int index = claims.size();
 		claims.push_back(claim);
+		slot_indices[slot] = index;
+		actor_indices[p_actor_id] = index;
 		return slot;
 	}
 	return 0; // Fully occupied: the caller may take a default AI action.
@@ -91,7 +104,7 @@ bool SmartObjectSlotReservations::release_slot(int64_t p_slot_id, int64_t p_acto
 	if (index < 0 || claims[index].actor_id != p_actor_id) {
 		return false;
 	}
-	claims.remove_at(index);
+	_erase_claim(index);
 	return true;
 }
 
@@ -99,14 +112,12 @@ int SmartObjectSlotReservations::release_actor(int64_t p_actor_id) {
 	if (p_actor_id <= 0) {
 		return 0;
 	}
-	int count = 0;
-	for (int i = claims.size() - 1; i >= 0; --i) {
-		if (claims[i].actor_id == p_actor_id) {
-			claims.remove_at(i);
-			++count;
-		}
+	const int index = _find_actor(p_actor_id);
+	if (index < 0) {
+		return 0;
 	}
-	return count;
+	_erase_claim(index);
+	return 1; // One reservation per actor is an enforced invariant.
 }
 
 void SmartObjectSlotReservations::advance_time(double p_delta) {
@@ -115,7 +126,7 @@ void SmartObjectSlotReservations::advance_time(double p_delta) {
 	}
 	for (int i = claims.size() - 1; i >= 0; --i) {
 		if (claims[i].remaining <= p_delta) {
-			claims.remove_at(i);
+			_erase_claim(i);
 		} else {
 			claims.write[i].remaining -= p_delta;
 		}
@@ -124,11 +135,18 @@ void SmartObjectSlotReservations::advance_time(double p_delta) {
 
 void SmartObjectSlotReservations::clear() {
 	claims.clear();
+	slot_indices.clear();
+	actor_indices.clear();
 }
 
 int64_t SmartObjectSlotReservations::get_owner(int64_t p_slot_id) const {
 	const int index = _find_slot(p_slot_id);
 	return index < 0 ? 0 : claims[index].actor_id;
+}
+
+int64_t SmartObjectSlotReservations::get_actor_slot(int64_t p_actor_id) const {
+	const int index = _find_actor(p_actor_id);
+	return index < 0 ? 0 : claims[index].slot_id;
 }
 
 void SmartObjectSlotReservations::_bind_methods() {
@@ -143,6 +161,8 @@ void SmartObjectSlotReservations::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear"), &SmartObjectSlotReservations::clear);
 	ClassDB::bind_method(D_METHOD("get_owner", "slot_id"),
 			&SmartObjectSlotReservations::get_owner);
+	ClassDB::bind_method(D_METHOD("get_actor_slot", "actor_id"),
+			&SmartObjectSlotReservations::get_actor_slot);
 	ClassDB::bind_method(D_METHOD("get_claim_count"),
 			&SmartObjectSlotReservations::get_claim_count);
 }
