@@ -86,6 +86,23 @@ func run(t) -> void:
         t.eq(selected[9], 1, "lost slot is admitted despite regular quota")
         t.eq(selected.count(1), 3, "urgent work does not displace ordinary work")
 
+    t.current = "Large-crowd server enables incremental EQS only when natively supported"
+    var stepper_supported: bool = ClassDB.class_exists("EnvironmentQuery3D") and \
+        ClassDB.instantiate("EnvironmentQuery3D").has_method("begin_incremental_top_positions")
+    var step_server := GameServer.new(WorldGen.new(714), 714)
+    for index in range(64):
+        var step_mob := Zombie.new(99000 + index, "walker",
+            Vector3(100.0 + index, WorldGen.HUB_HEIGHT, 100.0))
+        step_server.zombies[step_mob.id] = step_mob
+    step_server._budget_eqs_replans(step_server.zombies.values(), 0.05)
+    for mob in step_server.zombies.values():
+        t.eq(mob.flank_incremental_enabled, stepper_supported,
+            "real server opts every large-cohort infected into native incremental work")
+    step_server.zombies.clear()
+    step_server._budget_eqs_replans([], 0.05)
+    t.check(not step_server.get_eqs_replan_stats()["enabled"],
+        "empty cohort disables the time-sliced work flag")
+
     t.current = "EQS throttling never defers pursuit or overwrites an old lease"
     var gated := Zombie.new(867, "walker", Vector3.ZERO)
     gated.flank_replan_allowed = false

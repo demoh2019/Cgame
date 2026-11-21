@@ -210,6 +210,14 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_top_positions", "count"), &EnvironmentQuery3D::query_top_positions);
 	ClassDB::bind_method(D_METHOD("query_random_best_positions", "best_percent", "seed"), &EnvironmentQuery3D::query_random_best_positions);
 	ClassDB::bind_method(D_METHOD("query_top_indices", "count"), &EnvironmentQuery3D::query_top_indices);
+	ClassDB::bind_method(D_METHOD("begin_incremental_top_positions", "count"), &EnvironmentQuery3D::begin_incremental_top_positions);
+	ClassDB::bind_method(D_METHOD("step_incremental_top_positions", "candidate_budget"), &EnvironmentQuery3D::step_incremental_top_positions);
+	ClassDB::bind_method(D_METHOD("is_incremental_top_complete"), &EnvironmentQuery3D::is_incremental_top_complete);
+	ClassDB::bind_method(D_METHOD("get_incremental_processed_count"), &EnvironmentQuery3D::get_incremental_processed_count);
+	ClassDB::bind_method(D_METHOD("get_incremental_top_indices"), &EnvironmentQuery3D::get_incremental_top_indices);
+	ClassDB::bind_method(D_METHOD("get_incremental_top_positions"), &EnvironmentQuery3D::get_incremental_top_positions);
+	ClassDB::bind_method(D_METHOD("get_incremental_random_best_positions", "best_percent", "seed"), &EnvironmentQuery3D::get_incremental_random_best_positions);
+	ClassDB::bind_method(D_METHOD("cancel_incremental_top_positions"), &EnvironmentQuery3D::cancel_incremental_top_positions);
 	ClassDB::bind_method(D_METHOD("query_spread_positions", "count", "min_separation"), &EnvironmentQuery3D::query_spread_positions);
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_ring", "center", "radius", "count", "phase"), &EnvironmentQuery3D::sample_ring, DEFVAL(0.0));
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_donut", "center", "inner_radius", "outer_radius", "ring_count", "points_per_ring", "phase", "spiral"), &EnvironmentQuery3D::sample_donut, DEFVAL(0.0), DEFVAL(false));
@@ -486,6 +494,149 @@ PackedInt32Array EnvironmentQuery3D::query_top_indices(int p_count) const {
 	int32_t *write = output.ptrw();
 	for (int i = 0; i < best.size(); i++) {
 		write[i] = best[i].index;
+	}
+	return output;
+}
+
+// One synchronous step scores no more than caller-approved candidates. The
+// immutable query snapshot allows safely continuing a multi-frame query even
+// when the original resource is later reconfigured or its candidates replaced.
+void EnvironmentQuery3D::cancel_incremental_top_positions() {
+	incremental_snapshot.unref();
+	incremental_best.clear();
+	incremental_cursor = 0;
+	incremental_limit = 0;
+	incremental_done = false;
+}
+
+bool EnvironmentQuery3D::begin_incremental_top_positions(int p_count) {
+	cancel_incremental_top_positions();
+	ERR_FAIL_COND_V_MSG(p_count < 1 || p_count > 64, false, "Incremental top-K count must be between 1 and 64.");
+	Ref<EnvironmentQuery3D> snapshot;
+	snapshot.instantiate();
+	snapshot->candidates = candidates;
+	snapshot->origin = origin;
+	snapshot->threat_position = threat_position;
+	snapshot->threat_positions = threat_positions;
+	snapshot->exclusion_positions = exclusion_positions;
+	snapshot->min_exclusion_distance = min_exclusion_distance;
+	snapshot->use_direction = use_direction;
+	snapshot->direction_origin = direction_origin;
+	snapshot->direction_axis = direction_axis;
+	snapshot->min_direction_dot = min_direction_dot;
+	snapshot->max_direction_dot = max_direction_dot;
+	snapshot->use_threat = use_threat;
+	snapshot->horizontal_only = horizontal_only;
+	snapshot->min_distance = min_distance;
+	snapshot->max_distance = max_distance;
+	snapshot->max_vertical_difference = max_vertical_difference;
+	snapshot->desired_distance = desired_distance;
+	snapshot->distance_weight = distance_weight;
+	snapshot->safety_weight = safety_weight;
+	snapshot->min_threat_distance = min_threat_distance;
+	snapshot->max_results = max_results;
+	incremental_limit = max_results == 0 ? p_count : MIN(p_count, max_results);
+	incremental_snapshot = snapshot;
+	incremental_done = candidates.is_empty() || !origin.is_finite() ||
+			(use_threat && !threat_position.is_finite()) || min_distance > max_distance;
+	return true;
+}
+
+bool EnvironmentQuery3D::step_incremental_top_positions(int p_budget) {
+	ERR_FAIL_COND_V_MSG(incremental_snapshot.is_null(), false, "No incremental EQS query has been started.");
+	ERR_FAIL_COND_V_MSG(p_budget < 1 || p_budget > 4096, false, "Incremental EQS candidate budget must be 1..4096.");
+	if (incremental_done) {
+		return true;
+	}
+	const EnvironmentQuery3D *snapshot = incremental_snapshot.ptr();
+	const int stop = incremental_cursor + MIN(p_budget, snapshot->candidates.size() - incremental_cursor);
+	for (; incremental_cursor < stop; incremental_cursor++) {
+		QueryHit hit;
+		if (!score_candidate(snapshot->candidates[incremental_cursor], incremental_cursor,
+					snapshot->origin, snapshot->threat_position, snapshot->threat_positions,
+					snapshot->exclusion_positions, snapshot->min_exclusion_distance,
+					snapshot->use_direction, snapshot->direction_origin, snapshot->direction_axis,
+					snapshot->min_direction_dot, snapshot->max_direction_dot, snapshot->use_threat,
+					snapshot->horizontal_only, snapshot->min_distance, snapshot->max_distance,
+					snapshot->max_vertical_difference, snapshot->desired_distance,
+					snapshot->distance_weight, snapshot->safety_weight, snapshot->min_threat_distance, hit)) {
+			continue;
+		}
+		IncrementalHit item;
+		item.index = hit.index;
+		item.score = hit.score;
+		int at = 0;
+		while (at < incremental_best.size()) {
+			const IncrementalHit &other = incremental_best[at];
+			if (item.score > other.score || (item.score == other.score && item.index < other.index)) {
+				break;
+			}
+			at++;
+		}
+		if (at < incremental_limit) {
+			incremental_best.insert(at, item);
+			if (incremental_best.size() > incremental_limit) {
+				incremental_best.resize(incremental_limit);
+			}
+		}
+	}
+	incremental_done = incremental_cursor == snapshot->candidates.size();
+	return incremental_done;
+}
+
+PackedInt32Array EnvironmentQuery3D::get_incremental_top_indices() const {
+	PackedInt32Array result;
+	if (!is_incremental_top_complete()) {
+		return result;
+	}
+	result.resize(incremental_best.size());
+	int32_t *write = result.ptrw();
+	for (int i = 0; i < incremental_best.size(); i++) {
+		write[i] = incremental_best[i].index;
+	}
+	return result;
+}
+
+PackedVector3Array EnvironmentQuery3D::get_incremental_top_positions() const {
+	PackedVector3Array result;
+	if (!is_incremental_top_complete()) {
+		return result;
+	}
+	result.resize(incremental_best.size());
+	Vector3 *write = result.ptrw();
+	for (int i = 0; i < incremental_best.size(); i++) {
+		write[i] = incremental_snapshot->candidates[incremental_best[i].index];
+	}
+	return result;
+}
+
+// A seeded Random Best result from fully scored, retained top-K items.
+// All expensive scoring already occurred in prior bounded work steps.
+// If K contains every valid candidate this exactly matches the full
+// one-shot Random Best 5%/25% selection, including duplicate indices.
+PackedVector3Array EnvironmentQuery3D::get_incremental_random_best_positions(int p_best_percent, int64_t p_seed) const {
+	PackedVector3Array output;
+	ERR_FAIL_COND_V_MSG(p_best_percent < 0 || p_best_percent > 100,
+			output, "Incremental random-best percent must be 0..100.");
+	if (!is_incremental_top_complete() || incremental_best.is_empty()) {
+		return output;
+	}
+	const double cutoff = incremental_best[0].score * (1.0 - double(p_best_percent) / 100.0);
+	uint64_t chosen_key = 0;
+	int chosen_index = -1;
+	for (int i = 0; i < incremental_best.size(); i++) {
+		const IncrementalHit &hit = incremental_best[i];
+		if (hit.score < cutoff) {
+			continue;
+		}
+		const uint64_t key = query_random_key(uint64_t(p_seed), uint64_t(hit.index));
+		if (chosen_index < 0 || key > chosen_key || (key == chosen_key && hit.index < chosen_index)) {
+			chosen_key = key;
+			chosen_index = hit.index;
+		}
+	}
+	if (chosen_index >= 0) {
+		output.push_back(incremental_snapshot->candidates[chosen_index]);
 	}
 	return output;
 }

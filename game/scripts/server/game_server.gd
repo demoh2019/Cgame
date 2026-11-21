@@ -8201,6 +8201,7 @@ func _try_trigger_infected_snare(zombie, trap_id: int) -> bool:
 func _budget_eqs_replans(cohort: Array, delta: float) -> void:
 	for agent in cohort:
 		agent.flank_replan_allowed = true
+		agent.flank_incremental_enabled = false
 	var enabled: bool = cohort.size() >= AI_EQS_REPLAN_MIN_POPULATION and \
 			cohort.size() <= 4096 and tick_count >= 0 and \
 			ClassDB.class_exists("EnvironmentQuery3D") and \
@@ -8209,6 +8210,13 @@ func _budget_eqs_replans(cohort: Array, delta: float) -> void:
 		last_eqs_replan_stats = {"enabled": false, "population": cohort.size(),
 			"eligible": 0, "granted": 0, "deferred": 0, "urgent": 0}
 		return
+	# Every active AI query in this large cohort is stepped, never evaluated
+	# to completion, on its assigned scheduling phase. Older engines simply
+	# follow the preexisting synchronous path.
+	var incremental_available: bool = ClassDB.class_has_method(
+		"EnvironmentQuery3D", "begin_incremental_top_positions")
+	for agent in cohort:
+		agent.flank_incremental_enabled = incremental_available
 	var eligible: Array = []
 	var urgent := PackedByteArray()
 	for agent in cohort:
