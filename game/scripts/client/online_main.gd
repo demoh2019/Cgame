@@ -89,6 +89,7 @@ const FrameHitchAnalyzer = preload("res://scripts/client/frame_hitch_analyzer.gd
 const TraceCapture = preload("res://scripts/shared/trace_capture.gd")
 const SeaFftDetail = preload("res://scripts/client/sea_fft_detail.gd")
 const BarricadeDebris = preload("res://scripts/client/barricade_debris.gd")
+const PerfOverlay = preload("res://scripts/client/perf_overlay.gd")
 const VfxPresets = preload("res://scripts/client/vfx_presets.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
@@ -185,6 +186,7 @@ var _vram_budget := GraphicsVramBudget.new()
 var _hitch_analyzer := FrameHitchAnalyzer.new()
 var _trace := TraceCapture.new()
 var _trace_path := ""
+var _perf: CanvasLayer
 var _adaptive_resolution := GraphicsDynamicResolution.new()
 var _auto_graphics := true
 var _quality_picker: OptionButton
@@ -481,6 +483,11 @@ func _build_environment() -> void:
 	camera.look_at(Vector3.ZERO)
 	# Compile every spatial shader pipeline during loading, not mid-fight.
 	ShaderWarmup.start(camera)
+	_perf = PerfOverlay.new()
+	_perf.name = "PerfOverlay"
+	add_child(_perf)
+	_perf.set("trace", _trace)
+	_perf.set("loaded_cells_source", func() -> int: return streamer.get_loaded_count() if streamer != null else 0)
 	_make_party_rally_marker()
 	_make_party_supply_marker()
 	_raid_telegraph = RaidTelegraph.new()
@@ -2513,6 +2520,17 @@ func _update_first_person_mouse() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Unified perf panel (UE stat unit / Insights live view): Ctrl+Shift+F3 toggles,
+	# Ctrl+Shift+F4 cycles compact/full/graphs. Consumed before the gameplay F-keys.
+	if _perf != null and event is InputEventKey and event.pressed and not event.echo \
+			and event.ctrl_pressed and event.shift_pressed \
+			and (event.keycode == KEY_F3 or event.keycode == KEY_F4):
+		if event.keycode == KEY_F3:
+			_perf.toggle()
+		else:
+			_perf.cycle_mode()
+		get_viewport().set_input_as_handled()
+		return
 	# Unreal MemReport-style on-demand inspection of streamed visual objects.
 	# Debug builds only; one ObjectDB scan per explicit keystroke and ZERO
 	# scanning in normal gameplay. Ctrl+Shift+F10 cannot trigger the ordinary
