@@ -6,9 +6,18 @@ extends MultiMeshInstance3D
 const GRID_SIZE: int = 25
 const MAX_INSTANCES: int = 160
 const MIN_SPACING: float = 2.1
-const DensityRemap = preload("res://pcg_density_policy.gd")
 const DENSITY_SEED: int = 90421
 const DENSITY_MODULUS: int = 2147483647
+const TRAIL_INNER_RADIUS: float = 1.8
+const TRAIL_OUTER_RADIUS: float = 6.0
+# Editable waypoint polyline: a curved walkable route from outskirts to ruins.
+const TRAIL_POINTS = [
+    Vector3(7.0, 0.0, 26.0),
+    Vector3(4.0, 0.0, 13.0),
+    Vector3(0.0, 0.0, 3.0),
+    Vector3(-2.0, 0.0, -12.0),
+    Vector3(-7.0, 0.0, -26.0),
+]
 const ZONE_CENTERS = [
     Vector3(0.0, 0.0, 3.0),    # Player spawn
     Vector3(-2.0, 0.0, -3.0),  # Water scavenging cluster
@@ -42,25 +51,6 @@ const BOX_MAXS = [
 ]
 
 var _selected_positions := PackedVector3Array()
-var _density_ceiling: float = 1.0
-
-
-## Presentation-only density cap for low-detail runtime foliage.
-## Native PCG spatial filtering and 31-bit stable-ID sampling remain
-## authoritative for the actual placement. The remap affects values only.
-func set_density_ceiling(value: float) -> bool:
-    if not is_finite(value) or value < 0.0 or value > 1.0:
-        return false
-    if _density_ceiling == value:
-        return true
-    _density_ceiling = value
-    if is_inside_tree():
-        regenerate()
-    return true
-
-
-func get_density_ceiling() -> float:
-    return _density_ceiling
 
 
 func _ready() -> void:
@@ -95,7 +85,69 @@ func _make_ids() -> PackedInt32Array:
     return stable_ids
 
 
-func _make_densities() -> PackedFloat32Array:
+func get_trail_points() -> PackedVector3Array:
+    return PackedVector3Array(TRAIL_POINTS)
+
+
+func get_trail_inner_radius() -> float:
+    return TRAIL_INNER_RADIUS
+
+
+func get_trail_outer_radius() -> float:
+    return TRAIL_OUTER_RADIUS
+
+
+func _sample_trail_fallback(positions: PackedVector3Array) -> PackedFloat32Array:
+    var path := get_trail_points()
+    var factors := PackedFloat32Array()
+    for point in positions:
+        var nearest_squared: float = INF
+        for segment in range(path.size() - 1):
+            var a: Vector3 = path[segment]
+            var b: Vector3 = path[segment + 1]
+            var dx: float = b.x - a.x
+            var dz: float = b.z - a.z
+            var length_squared: float = dx * dx + dz * dz
+            var along: float = 0.0
+            if length_squared > 0.0:
+                along = clampf(((point.x - a.x) * dx +
+                    (point.z - a.z) * dz) / length_squared, 0.0, 1.0)
+            var off_x: float = point.x - (a.x + along * dx)
+            var off_z: float = point.z - (a.z + along * dz)
+            nearest_squared = minf(nearest_squared, off_x * off_x + off_z * off_z)
+        if nearest_squared <= TRAIL_INNER_RADIUS * TRAIL_INNER_RADIUS:
+            factors.push_back(0.0)
+        elif nearest_squared >= TRAIL_OUTER_RADIUS * TRAIL_OUTER_RADIUS:
+            factors.push_back(1.0)
+        else:
+            var t: float = (sqrt(nearest_squared) - TRAIL_INNER_RADIUS) / (
+                TRAIL_OUTER_RADIUS - TRAIL_INNER_RADIUS)
+            factors.push_back(t * t * (3.0 - 2.0 * t))
+    return factors
+
+
+func get_trail_factors(prefer_native: bool = true) -> PackedFloat32Array:
+    var positions := _make_candidates()
+    if prefer_native and ClassDB.class_exists("PCGPathFalloff3D"):
+        var path_filter: Object = ClassDB.instantiate("PCGPathFalloff3D")
+        if path_filter != null and path_filter.has_method("sample_factors"):
+            return path_filter.call("sample_factors", positions,
+                get_trail_points(), TRAIL_INNER_RADIUS, TRAIL_OUTER_RADIUS)
+    return _sample_trail_fallback(positions)
+
+
+func verify_trail_native_fallback_parity() -> bool:
+    var native_mask: PackedFloat32Array = get_trail_factors()
+    var fallback_mask: PackedFloat32Array = get_trail_factors(false)
+    if native_mask.size() != fallback_mask.size():
+        return false
+    for i in range(native_mask.size()):
+        if absf(native_mask[i] - fallback_mask[i]) > 0.00002:
+            return false
+    return true
+
+
+func _make_densities(prefer_native: bool = true) -> PackedFloat32Array:
     var densities := PackedFloat32Array()
     for index in range(GRID_SIZE * GRID_SIZE):
         var cell: int = (index * 137) % (GRID_SIZE * GRID_SIZE)
@@ -111,12 +163,12 @@ func _make_densities() -> PackedFloat32Array:
         elif x < 8:
             density = 0.74
         densities.push_back(density)
-    # Unreal PCG Density Remap-inspired quality control: the authored
-    # 0.13/0.46/0.74/0.94 regional mask stays unchanged at the default 1.0.
-    # This pass runs before the existing PCGSpatialFilter3D stable-ID sampler.
-    var remapped: PackedFloat32Array = DensityRemap.remap_densities(
-        densities, 0.0, 1.0, 0.0, _density_ceiling)
-    return remapped if remapped.size() == densities.size() else densities
+    # Feed this smooth trail-distance mask into the seeded native density
+    # sampler; no per-instance physics or extra renderer draw calls.
+    var trail_factors: PackedFloat32Array = get_trail_factors(prefer_native)
+    for i in range(densities.size()):
+        densities.set(i, densities[i] * trail_factors[i])
+    return densities
 
 
 func get_density_values() -> PackedFloat32Array:
@@ -201,7 +253,7 @@ func _select_indices(candidates: PackedVector3Array,
         centers: PackedVector3Array, radii: PackedFloat64Array,
         box_mins: PackedVector3Array, box_maxs: PackedVector3Array,
         prefer_native: bool = true) -> PackedInt32Array:
-    var densities := _make_densities()
+    var densities := _make_densities(prefer_native)
     var stable_ids := _make_ids()
     if prefer_native and ClassDB.class_exists("PCGSpatialFilter3D"):
         var filter: Object = ClassDB.instantiate("PCGSpatialFilter3D")
@@ -250,7 +302,8 @@ func verify_native_fallback_parity() -> bool:
     var radii := get_exclusion_radii()
     var box_mins := get_exclusion_box_mins()
     var box_maxs := get_exclusion_box_maxs()
-    return (_select_indices(candidates, centers, radii, box_mins, box_maxs)
+    return (verify_trail_native_fallback_parity()
+        and _select_indices(candidates, centers, radii, box_mins, box_maxs)
         == _select_indices(candidates, centers, radii, box_mins, box_maxs, false))
 
 

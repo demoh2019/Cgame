@@ -134,37 +134,47 @@ regeneration, and native/fallback parity.
 Upstream reference:
 [Unreal PCG Framework Node Reference](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
 
+## Native path-to-density mask (PCGPathFalloff3D)
 
-## Attribute-only Density Remap and Stable-ID Selection
+The new `PCGPathFalloff3D` engine resource computes a deterministic
+**horizontal polyline distance falloff** as a `PackedFloat32Array`:
 
-The new reusable `PCGDensitySelector` engine class complements (and **does
-not replace**) the existing `PCGSpatialFilter3D.filter_indices_density()`
-spatial sampler:
+```gdscript
+var path_filter := PCGPathFalloff3D.new()
+var trail_points := PackedVector3Array([
+    Vector3(7, 0, 26), Vector3(0, 0, 3), Vector3(-7, 0, -26)])
+var mask := path_filter.sample_factors(candidate_positions, trail_points, 1.8, 6.0)
+for i in range(densities.size()):
+    densities[i] *= mask[i]
+# Then use PCGSpatialFilter3D.filter_indices_density() and
+# filter_indices_excluding_volumes() to finish spawning vegetation.
+```
 
-- `remap_densities(densities, input_min=0, input_max=1,
-  output_min=0, output_max=1, clamp_input=true)` transforms author-defined
-  point density masks before the spatial phase, with inverse output ranges
-  and finite all-or-nothing validation. Up to 16,384 packed values.
-- `select_indices(densities, stable_ids, seed=0, max_selected=4096)`
-  offers an **attribute-only** probability selector for non-spatial PCG
-  streams (or for feeding a later spatial node). Each selection is based on
-  a 32-bit avalanche hash of its stable ID and seed, not the global RNG.
-  With no output truncation, reordering source points does not change which
-  IDs are kept. Stable IDs must be integers in [0,2147483647], densities
-  finite in [0,1], seed nonnegative; invalid data fails closed.
+- Points **within or on** the inner radius return factor 0 (no plants).
+  Points **on or beyond** the outer radius return factor 1. Between them,
+  cubic smoothstep yields a continuously graded density transition
+  with zero slope at both edges.
+- A polyline with 1–256 finite bounded points is evaluated in XZ.
+  A one-point path behaves like a circle; repeated/zero-length
+  segments work. Heights are validated but do not affect horizontal
+  trail clearance.
+- At most 16,384 candidate points; all coordinates in +/-10,000,000;
+  radii must be ordered, finite and within 0–10,000. Invalid input
+  rejects the whole batch without partial output. No RNG, scene
+  mutation, physics call or renderer interaction.
+- O(candidates × path_segments) bounded work; no temporary per-point
+  scene objects or spatial index rebuild. For very long paths, split
+  into spatially bounded tiles/chunks. No claim of faster frame times
+  without engine profiling.
+- Native unit tests cover smooth boundaries and derivatives, corners
+  and endpoints, height invariance, degenerate/point paths, invalid
+  arrays and maximum input size.
 
-The existing spatial selector continues using its original 31-bit hash,
-spacing and sphere/box exclusion semantics. The two native selection
-algorithms are *independent* alternatives, not drop-in compatible random
-streams. Both algorithms remain deterministic within their own API.
+The **Days After** playable scene applies this mask to its stable
+seeded grass density before sphere/AABB rejection and instance
+spacing, producing a gently curved walkable route through the ruins.
+The game also has a pure-GDScript implementation for older Godot
+builds, with parity and gameplay smoke coverage.
 
-Days After now calls `PCGDensitySelector.remap_densities()` in the live
-foliage generation path to apply an adjustable cosmetic quality ceiling
-over the already-authored four-region biome density mask; the downstream
-`PCGSpatialFilter3D.filter_indices_density()` and exclusion routines
-are unchanged. The new `pcg_density_policy.gd` provides stock-Godot
-fallback parity for the generic remap and attribute-only selector.
-Regression tests cover native/fallback parity, remap boundaries, seeded
-stable IDs, and reversible density changes in the playable game.
-
-Reference: [Unreal PCG Density Remap nodes](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
+Based on the *distance to spline* and *density remapping* concepts
+in [Unreal Engine PCG framework node reference](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
