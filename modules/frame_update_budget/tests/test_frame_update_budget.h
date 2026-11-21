@@ -3,6 +3,8 @@
 #include "../frame_update_budget.h"
 #include "tests/test_macros.h"
 
+#include <limits>
+
 namespace TestFrameUpdateBudget {
 
 TEST_CASE("[FrameUpdateBudget] Lane lifecycle and validation") {
@@ -30,7 +32,7 @@ TEST_CASE("[FrameUpdateBudget] Quality, pressure and bounded updates") {
 	CHECK(budget->consume(StringName("a"), 1.0 / 60.0) == 0.0);
 	CHECK(budget->consume(StringName("b"), 1.0 / 60.0) == 0.0);
 	CHECK(budget->consume(StringName("absent"), 0.1) == 0.0);
-	CHECK(budget->consume(StringName("a"), Math_INF) == 0.0);
+	CHECK(budget->consume(StringName("a"), std::numeric_limits<double>::infinity()) == 0.0);
 	for (int i = 0; i < 12; i++) {
 		budget->begin_frame(0.05, 3);
 		budget->consume(StringName("a"), 0.05);
