@@ -261,8 +261,16 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				state = State.INVESTIGATE
 				# When the target was heard but not seen recently, investigate the
 				# verified sound instead of its magically updated current location.
-				if _native_senses != null and not _native_senses.remembers_sight() and _native_senses.remembers_sound():
-					last_known_target = _native_senses.last_heard_position()
+				if _native_senses != null and not _native_senses.remembers_sight():
+					if _native_senses.remembers_sound():
+						last_known_target = _native_senses.last_heard_position()
+					else:
+						# A separately confirmed, more recent sound can remain valid
+						# after the strongest ranked sound has expired. This never
+						# changes target_id, creates LOS or overrides safe-zone rules.
+						var remembered_sound: Dictionary = _native_senses.best_confirmed_stimulus(1)
+						if not remembered_sound.is_empty():
+							last_known_target = remembered_sound["position"]
 				investigate_time = HUNTER_SEARCH_SECONDS if behavior == "hunter" else INVESTIGATE_SECONDS
 				return {}
 			if behavior == "territorial" and not _in_territory(target) and forced_target_seconds <= 0.0:
@@ -289,7 +297,7 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 					if ClassDB.class_exists("AIVisualSensor2D"):
 						if _native_senses == null:
 							_native_senses = NativeSenses.new()
-						_native_senses.record_confirmed_sight(here, target, float(data["lose"]), clear, 0.0)
+						_native_senses.record_confirmed_sight(here, target, float(data["lose"]), clear, 0.0, target_id)
 						if _native_senses.remembers_sight():
 							last_known_target = _native_senses.last_seen_position()
 				if unseen_seconds > HUNTER_MEMORY_SECONDS:
@@ -454,7 +462,7 @@ func _select_target(world, players: Dictionary, here: Vector2) -> float:
 					_native_senses = NativeSenses.new()
 				# Recording cannot override cover, wind, safe zone, or combat
 				# rules: all of them have already passed their normal checks.
-				_native_senses.record_confirmed_sound(here, Vector2(p.x, p.z), hearing)
+				_native_senses.record_confirmed_sound(here, Vector2(p.x, p.z), hearing, int(peer_id))
 		var nonvisual: bool = heard or distance <= scent
 		var potentially_visible: bool = distance <= maxf(notice, firelight)
 		if distance < best_distance and (peer_id == target_id or nonvisual or
