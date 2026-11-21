@@ -95,3 +95,11 @@ projected screen bounds before native priority ranking. At most 32 bars
 are drawn; no combat, enemy simulation or networking is affected.
 Headless game regression tests cover two-viewer ranking, retention and
 invalid input. No performance gains are claimed without runtime profiling.
+
+## Niagara-style category-specific VFX range admission
+
+`select_effects_visible_ranged(distances, priorities, categories, visible, category_caps, category_ranges, budget)` uses four finite inclusive visibility radii instead of a single shared global radius. Far-away dust cannot occupy slots intended for closer effects; critical milestones retain a long range. Priority, camera visibility preference, per-category quotas, total budget, deterministic tie ordering and fail-closed validation remain unchanged. This is opt-in and leaves the existing global-range API intact.
+
+Albion After integrates the API in its real `effects.gd` burst queue, with separate quality-tier ranges and native/stock-Godot fallback parity. It affects visual-only effects, not server authority, damage, network state or audio. No unmeasured FPS improvements are claimed.
+
+Unreal reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/performance-budgeting-using-effect-types-in-niagara-for-unreal-engine
