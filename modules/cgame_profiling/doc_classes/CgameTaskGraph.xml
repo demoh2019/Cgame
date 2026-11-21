@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameTaskGraph" inherits="RefCounted" api_type="core" keywords="task,job,dependency,scheduler,thread" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Dependency-aware task graph executed on the [WorkerThreadPool].
+	</brief_description>
+	<description>
+		[CgameTaskGraph] schedules named tasks with dependency edges. [method run] executes the graph in deterministic waves: each wave contains every pending task whose dependencies are done, pooled tasks of a wave run in parallel on the [WorkerThreadPool], and tasks added with [code]thread_safe = false[/code] run on the calling thread while the rest of the wave executes.
+		A task fails when its callable returns [code]false[/code], returns a [Dictionary] with an [code]"error"[/code] key, or cannot be called. A failed task cancels all of its transitive dependants; independent branches still run.
+		Per-task timing feeds [method critical_path] and [method to_dot]. When [CgameTrace] is enabled, each task appears as a scope and dependencies are drawn as flow arrows.
+		[codeblock]
+		var graph := CgameTaskGraph.new()
+		graph.add_task("load", load_assets)
+		graph.add_task("build", build_world, PackedStringArray(["load"]))
+		var report := graph.run()
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_dependency">
+			<return type="bool" />
+			<param index="0" name="task" type="String" />
+			<param index="1" name="dep" type="String" />
+			<description>
+				Adds an extra dependency edge. Returns [code]false[/code] if either task is unknown or the edge would create a cycle.
+			</description>
+		</method>
+		<method name="add_task">
+			<return type="String" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="callable" type="Callable" />
+			<param index="2" name="deps" type="PackedStringArray" default="PackedStringArray()" />
+			<param index="3" name="thread_safe" type="bool" default="true" />
+			<description>
+				Registers a task and returns its name, or an empty string if the name is empty or duplicate or the dependencies would form a cycle (the task is not added then). Dependencies may name tasks that are added later; [method validate] reports names that never appear.
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes all tasks.
+			</description>
+		</method>
+		<method name="critical_path" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the longest dependency chain by measured duration. Tasks that have not run count as 1 ms.
+			</description>
+		</method>
+		<method name="critical_path_ms" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the summed duration of [method critical_path] in milliseconds.
+			</description>
+		</method>
+		<method name="error_of" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the failure message of a task, or an empty string.
+			</description>
+		</method>
+		<method name="get_last_total_ms" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the wall time of the last [method run] in milliseconds.
+			</description>
+		</method>
+		<method name="get_task_names" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns all task names in insertion order.
+			</description>
+		</method>
+		<method name="get_wave_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of waves of the last [method run].
+			</description>
+		</method>
+		<method name="has_task" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns [code]true[/code] if a task with this name exists.
+			</description>
+		</method>
+		<method name="result_of" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the value returned by the task callable, or [code]null[/code].
+			</description>
+		</method>
+		<method name="results" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns all results keyed by task name, inserted in topological order.
+			</description>
+		</method>
+		<method name="run">
+			<return type="Dictionary" />
+			<description>
+				Executes the graph and returns [code]{ok, order, failed, cancelled, waves, total_ms, error}[/code]. Returns [code]ok = false[/code] with an [code]error[/code] message when a dependency is unknown or a cycle exists.
+			</description>
+		</method>
+		<method name="state_of" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns a [enum TaskState] value, or [code]-1[/code] for unknown tasks.
+			</description>
+		</method>
+		<method name="task_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of tasks.
+			</description>
+		</method>
+		<method name="timing" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns [code]{start_us, end_us, duration_ms, wave, thread_id, thread_safe}[/code] for a task, or an empty dictionary if it is unknown.
+			</description>
+		</method>
+		<method name="to_dot" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the graph in Graphviz DOT format. Critical path nodes and edges are red, failed tasks are filled, cancelled tasks are dashed.
+			</description>
+		</method>
+		<method name="topological_order" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns a deterministic topological order (ties broken by insertion order).
+			</description>
+		</method>
+		<method name="validate" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns one message per dependency that names an unknown task.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="trace_enabled" type="bool" setter="set_trace_enabled" getter="is_trace_enabled" default="true">
+			If [code]true[/code], task scopes and dependency flows are recorded in [CgameTrace] while it is enabled.
+		</member>
+	</members>
+	<constants>
+		<constant name="PENDING" value="0" enum="TaskState">
+			The task has not run.
+		</constant>
+		<constant name="DONE" value="1" enum="TaskState">
+			The task completed successfully.
+		</constant>
+		<constant name="FAILED" value="2" enum="TaskState">
+			The task failed.
+		</constant>
+		<constant name="CANCELLED" value="3" enum="TaskState">
+			The task was skipped because a dependency failed or was cancelled.
+		</constant>
+	</constants>
+</class>

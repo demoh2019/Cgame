@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameShaderStallAnalyzer" inherits="RefCounted" api_type="core" keywords="shader,pipeline,compilation,stutter" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Correlates frame-time spikes with pipeline compilation.
+	</brief_description>
+	<description>
+		[CgameShaderStallAnalyzer] decides which slow frames were caused by shader/pipeline compilation and ranks the materials that were first drawn in those frames. A frame is a spike when it takes longer than the larger of [code]baseline * spike_factor[/code] and [code]baseline + min_extra_ms[/code], where the baseline is the median frame time. Spikes without compilations are reported as unrelated.
+		Frames can be fed manually with [method feed] and [method feed_cumulative], or sampled natively: after [method start_auto_sampling] the engine reads the [RenderingServer] pipeline compilation counters and the frame time once per main loop iteration. Report newly drawn materials with [method note_material].
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="analyze" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns [code]{baseline_ms, stalls, unrelated_spikes, culprits}[/code]. Each stall has [code]index[/code], [code]ms[/code], [code]extra_ms[/code], [code]compiles[/code] and [code]culprits[/code]; each culprit has [code]material[/code], [code]stalls[/code] and [code]total_extra_ms[/code], sorted by total extra time.
+			</description>
+		</method>
+		<method name="baseline_ms" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the median frame time in milliseconds.
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes all recorded frames and pending materials.
+			</description>
+		</method>
+		<method name="feed">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="ms" type="float" />
+			<param index="2" name="compiles" type="int" />
+			<param index="3" name="first_drawn_materials" type="PackedStringArray" default="PackedStringArray()" />
+			<description>
+				Records a frame. [param compiles] is the number of pipelines compiled during it.
+			</description>
+		</method>
+		<method name="feed_cumulative">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<param index="1" name="ms" type="float" />
+			<param index="2" name="total_compiles" type="int" />
+			<param index="3" name="first_drawn_materials" type="PackedStringArray" default="PackedStringArray()" />
+			<description>
+				Like [method feed], but takes a cumulative compilation counter and computes the per-frame delta. The first call establishes the baseline.
+			</description>
+		</method>
+		<method name="frame_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of recorded frames.
+			</description>
+		</method>
+		<method name="is_auto_sampling" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while native per-frame sampling is active.
+			</description>
+		</method>
+		<method name="live_compile_total" qualifiers="static">
+			<return type="int" />
+			<description>
+				Returns the sum of the [RenderingServer] pipeline compilation counters, or [code]0[/code] when no rendering server exists.
+			</description>
+		</method>
+		<method name="note_material">
+			<return type="void" />
+			<param index="0" name="material" type="String" />
+			<description>
+				Records a material that was first drawn this frame. The next automatic sample consumes it. Safe to call from any thread.
+			</description>
+		</method>
+		<method name="start_auto_sampling">
+			<return type="void" />
+			<description>
+				Starts sampling compilation counters and frame time at the end of every main loop iteration.
+			</description>
+		</method>
+		<method name="stop_auto_sampling">
+			<return type="void" />
+			<description>
+				Stops native sampling. It also stops when the analyzer is freed.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="max_samples" type="int" setter="set_max_samples" getter="get_max_samples" default="4096">
+			Maximum number of frames kept while sampling automatically.
+		</member>
+		<member name="min_extra_ms" type="float" setter="set_min_extra_ms" getter="get_min_extra_ms" default="4.0">
+			Minimum frame time above the baseline for a spike.
+		</member>
+		<member name="spike_factor" type="float" setter="set_spike_factor" getter="get_spike_factor" default="2.0">
+			Frame times above the baseline multiplied by this factor are spikes.
+		</member>
+	</members>
+</class>

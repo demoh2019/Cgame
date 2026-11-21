@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgamePerfCapture" inherits="RefCounted" api_type="core" keywords="capture,regression,benchmark,leak" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Versioned performance capture format with regression comparison.
+	</brief_description>
+	<description>
+		A capture is a plain [Dictionary] with the keys [code]magic[/code] ([code]"cgperf"[/code]), [code]version[/code], [code]label[/code], [code]created_unix[/code], [code]environment[/code], [code]scenario[/code] and the array sections [code]frames[/code], [code]trace_events[/code], [code]counters[/code], [code]memory_samples[/code], [code]streaming_events[/code] and [code]network_packets[/code]. [method write] stores it as a binary variant or as JSON when the path ends with [code].json[/code]; [method read] detects the format.
+		The comparison helpers are noise aware: [method compare_runs] takes the median of repeated runs and widens the allowed regression by a share of the run-to-run spread, [method compare_subsystems] compares per-scope average frame cost between two captures and [method memory_leak_trend] fits a line through memory samples of a soak run.
+		All methods are static.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_event" qualifiers="static">
+			<return type="void" />
+			<param index="0" name="capture" type="Dictionary" />
+			<param index="1" name="section" type="String" />
+			<param index="2" name="event" type="Dictionary" />
+			<description>
+				Appends [param event] to an array section of [param capture]. Unknown sections are ignored.
+			</description>
+		</method>
+		<method name="add_frame" qualifiers="static">
+			<return type="void" />
+			<param index="0" name="capture" type="Dictionary" />
+			<param index="1" name="index" type="int" />
+			<param index="2" name="ms" type="float" />
+			<param index="3" name="scopes" type="Dictionary" default="{}" />
+			<param index="4" name="counters" type="Dictionary" default="{}" />
+			<description>
+				Appends a frame record to [param capture].
+			</description>
+		</method>
+		<method name="capture_environment" qualifiers="static">
+			<return type="Dictionary" />
+			<description>
+				Returns engine version, OS, processor, core count, video adapter, rendering method and build type.
+			</description>
+		</method>
+		<method name="capture_from_trace" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="label" type="String" default="&quot;&quot;" />
+			<description>
+				Creates a capture whose [code]frames[/code] are taken from [CgameTrace].
+			</description>
+		</method>
+		<method name="compare_runs" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="baseline" type="Dictionary" />
+			<param index="1" name="current" type="Dictionary" />
+			<param index="2" name="thresholds" type="Dictionary" default="{}" />
+			<description>
+				Compares the metrics [code]frame_time_p50[/code], [code]frame_time_p95[/code], [code]frame_time_p99[/code], [code]memory_peak[/code], [code]draw_calls[/code] and [code]shader_compiles[/code]. Each side is either a flat metric dictionary or [code]{"runs": [flat dictionaries]}[/code]. [param thresholds] maps a metric (or [code]"default"[/code], 10 percent) to the allowed increase in percent; [code]"noise_factor"[/code] (default 0.5) is the share of the run spread added to the limit. Returns [code]{metrics, regressions, ok}[/code].
+			</description>
+		</method>
+		<method name="compare_subsystems" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="baseline_capture" type="Dictionary" />
+			<param index="1" name="current_capture" type="Dictionary" />
+			<param index="2" name="threshold_pct" type="float" default="10.0" />
+			<description>
+				Returns the scopes whose average per-frame cost grew by more than [param threshold_pct] between the two captures, worst first, with the keys [code]scope[/code], [code]baseline_avg[/code], [code]current_avg[/code] and [code]pct[/code].
+			</description>
+		</method>
+		<method name="frame_times" qualifiers="static">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="capture" type="Dictionary" />
+			<description>
+				Returns the frame times in milliseconds.
+			</description>
+		</method>
+		<method name="load_json" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Loads a JSON dictionary, or returns an empty dictionary if the file is missing or invalid.
+			</description>
+		</method>
+		<method name="memory_leak_trend" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="samples" type="PackedFloat32Array" />
+			<param index="1" name="min_growth_pct" type="float" default="5.0" />
+			<param index="2" name="min_r2" type="float" default="0.8" />
+			<description>
+				Fits a least-squares line through [param samples]. Returns [code]{slope, r2, growth_pct, samples, leak}[/code]; [code]leak[/code] is [code]true[/code] when the slope is positive, the fit reaches [param min_r2] and the total growth reaches [param min_growth_pct] of the mean.
+			</description>
+		</method>
+		<method name="merge" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="base" type="Dictionary" />
+			<param index="1" name="extra" type="Dictionary" />
+			<description>
+				Returns a new capture with the array sections concatenated and the frames sorted by index. Environment keys and the scenario of [param base] win.
+			</description>
+		</method>
+		<method name="new_capture" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="label" type="String" default="&quot;&quot;" />
+			<description>
+				Creates an empty capture of the current format version.
+			</description>
+		</method>
+		<method name="read" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Reads a capture. Returns an empty dictionary if the file is missing, unreadable or not a capture.
+			</description>
+		</method>
+		<method name="save_json" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="path" type="String" />
+			<param index="1" name="data" type="Dictionary" />
+			<description>
+				Writes [param data] as indented JSON.
+			</description>
+		</method>
+		<method name="validate" qualifiers="static">
+			<return type="PackedStringArray" />
+			<param index="0" name="capture" type="Dictionary" />
+			<description>
+				Returns human-readable problems; an empty array means the capture is valid.
+			</description>
+		</method>
+		<method name="write" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="path" type="String" />
+			<param index="1" name="capture" type="Dictionary" />
+			<param index="2" name="as_json" type="bool" default="false" />
+			<description>
+				Writes [param capture] to [param path]. Returns [code]false[/code] if the file cannot be written.
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="VERSION" value="1">
+			The capture format version written by this engine.
+		</constant>
+	</constants>
+</class>

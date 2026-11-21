@@ -60,6 +60,7 @@ private:
 	uint32_t _frame_delay = 0;
 	uint64_t _frame_ticks = 0;
 	double _process_step = 0;
+	void (*_frame_hook)(uint64_t, uint64_t) = nullptr;
 
 	int ips = 60;
 	int user_ips = 60;
@@ -139,6 +140,11 @@ public:
 	uint64_t get_process_frames() const { return _process_frames; }
 	bool is_in_physics_frame() const { return _in_physics; }
 	uint64_t get_frame_ticks() const { return _frame_ticks; }
+
+	// Native end-of-main-loop-iteration hook (main thread). Used by profiling modules; chain the previous hook when installing.
+	typedef void (*FrameHook)(uint64_t p_process_frame, uint64_t p_frame_ticks_usec);
+	void set_frame_hook(FrameHook p_hook) { _frame_hook = p_hook; }
+	FrameHook get_frame_hook() const { return _frame_hook; }
 	double get_process_step() const { return _process_step; }
 	double get_physics_interpolation_fraction() const { return _physics_interpolation_fraction; }
 

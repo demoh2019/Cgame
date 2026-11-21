@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameProfiledMutex" inherits="RefCounted" api_type="core" keywords="lock,contention,mutex,profiling" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Recursive mutex that records lock contention statistics.
+	</brief_description>
+	<description>
+		[CgameProfiledMutex] behaves like [Mutex] (it can be locked repeatedly by one thread) and records the number of acquisitions, contended acquisitions, wait time, hold time and the last owner thread. Mutexes created with [method create] join a global registry that [method report] lists sorted by total wait time. When [CgameTrace] is enabled, contended waits show up as [code]wait:name[/code] scopes in the category [code]lock[/code].
+		[method sync_point] times arbitrary blocking calls such as GPU read-backs and flags those slower than a threshold, which exposes CPU/GPU synchronization stalls.
+		[b]Note:[/b] Like [Mutex], a [CgameProfiledMutex] must not be destroyed while locked.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="clear_registry" qualifiers="static">
+			<return type="void" />
+			<description>
+				Removes all mutexes from the registry and clears the recorded sync points. The mutexes themselves keep working.
+			</description>
+		</method>
+		<method name="create" qualifiers="static">
+			<return type="CgameProfiledMutex" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Creates a named mutex and adds it to the registry.
+			</description>
+		</method>
+		<method name="get_long_sync_threshold_ms" qualifiers="static">
+			<return type="float" />
+			<description>
+				Returns the duration in milliseconds from which a sync point counts as long.
+			</description>
+		</method>
+		<method name="lock">
+			<return type="void" />
+			<description>
+				Locks the mutex, blocking if another thread holds it, and records wait time when contended.
+			</description>
+		</method>
+		<method name="long_syncs" qualifiers="static">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the names of sync points that exceeded the long-sync threshold at least once.
+			</description>
+		</method>
+		<method name="report" qualifiers="static">
+			<return type="Array" />
+			<description>
+				Returns [method stats] of every registered mutex, sorted by total wait time (then by hold time).
+			</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>
+				Resets the statistics of this mutex.
+			</description>
+		</method>
+		<method name="set_long_sync_threshold_ms" qualifiers="static">
+			<return type="void" />
+			<param index="0" name="ms" type="float" />
+			<description>
+				Sets the duration in milliseconds from which a sync point counts as long. The default is [code]2.0[/code].
+			</description>
+		</method>
+		<method name="stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns [code]{name, acquisitions, contended, total_wait_ms, max_wait_ms, total_hold_ms, max_hold_ms, owner_thread_id}[/code].
+			</description>
+		</method>
+		<method name="sync_point" qualifiers="static">
+			<return type="Variant" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="callable" type="Callable" />
+			<description>
+				Calls [param callable], records its duration under [param name] and returns its result.
+			</description>
+		</method>
+		<method name="sync_report" qualifiers="static">
+			<return type="Array" />
+			<description>
+				Returns [code]{name, count, total_ms, max_ms, long_count}[/code] for every recorded sync point, sorted by total time.
+			</description>
+		</method>
+		<method name="try_lock">
+			<return type="bool" />
+			<description>
+				Locks the mutex if it is free and returns [code]true[/code]; returns [code]false[/code] immediately otherwise.
+			</description>
+		</method>
+		<method name="unlock">
+			<return type="void" />
+			<description>
+				Unlocks the mutex and records the hold time when the outermost lock is released.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="name" type="String" setter="set_name" getter="get_name" default="&quot;&quot;">
+			Display name used in reports and trace scopes.
+		</member>
+	</members>
+</class>

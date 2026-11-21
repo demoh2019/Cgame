@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameCPUBudget" inherits="RefCounted" api_type="core" keywords="budget,frame time,scheduler" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Splits a per-frame CPU time budget between registered systems.
+	</brief_description>
+	<description>
+		Systems register a [code]priority[/code], a guaranteed [code]min_ms[/code] and a [code]desired_ms[/code] cap. [method allocate] first grants every system its minimum (scaled down proportionally if the minima alone exceed the budget), then shares the remainder by priority using water-filling: a system never receives more than its demand and the surplus is redistributed.
+		A system's demand is its [code]desired_ms[/code] until usage is reported with [method report_usage]; afterwards it is the exponentially smoothed usage multiplied by [member headroom], clamped to [code][min_ms, desired_ms][/code]. Idle systems therefore yield time to busy ones.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="allocate">
+			<return type="Dictionary" />
+			<param index="0" name="frame_budget_ms" type="float" />
+			<description>
+				Splits [param frame_budget_ms] and returns the allocation in milliseconds keyed by system name. The result is remembered for [method allocation_ms] and [method over_budget].
+			</description>
+		</method>
+		<method name="allocation_ms" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the share granted by the last [method allocate] call.
+			</description>
+		</method>
+		<method name="demand_ms" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the current demand of a system after adaptation.
+			</description>
+		</method>
+		<method name="over_budget" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the systems whose smoothed usage exceeds their last allocation, worst overshoot first.
+			</description>
+		</method>
+		<method name="register_system">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="priority" type="float" />
+			<param index="2" name="min_ms" type="float" />
+			<param index="3" name="desired_ms" type="float" />
+			<description>
+				Registers or replaces a system. [param desired_ms] is raised to at least [param min_ms].
+			</description>
+		</method>
+		<method name="report_usage">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="ms" type="float" />
+			<description>
+				Feeds measured usage of a system into its smoothed estimate.
+			</description>
+		</method>
+		<method name="smoothed_usage_ms" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the smoothed usage of a system, or [code]0[/code] if none was reported.
+			</description>
+		</method>
+		<method name="system_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of registered systems.
+			</description>
+		</method>
+		<method name="unregister_system">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Removes a system and its allocation.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="headroom" type="float" setter="set_headroom" getter="get_headroom" default="1.25">
+			Multiplier applied to smoothed usage to compute demand.
+		</member>
+		<member name="smoothing" type="float" setter="set_smoothing" getter="get_smoothing" default="0.2">
+			Weight of a new sample in the exponential moving average of usage, between [code]0[/code] and [code]1[/code].
+		</member>
+	</members>
+</class>

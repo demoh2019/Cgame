@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameTrace" inherits="Object" api_type="core" keywords="profiling,trace,perfetto,chrome tracing" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Low-overhead trace capture with Chrome / Perfetto JSON export.
+	</brief_description>
+	<description>
+		[CgameTrace] records scopes, counters, instant events, flow arrows and frame markers into per-thread ring buffers. Each buffer is written by exactly one thread without locks or allocations, so recording from many threads (including [WorkerThreadPool] tasks) does not serialize them. While [member enabled] is [code]false[/code] every recording call returns after a single atomic load.
+		Scopes are stored as complete events when they end, so a ring buffer that overwrites old events can never leave an orphaned begin/end pair. [member max_events] is the per-thread capacity and applies to threads that record their first event after it was changed.
+		Frame markers are inserted automatically once per main loop iteration while [member auto_frame_markers] is enabled. Each marker closes a per-frame aggregate (scope microseconds and last counter values) that feeds [method frame_stats], [method frames] and [CgameHitchCorrelator].
+		The JSON produced by [method export_chrome_json] can be opened in [code]chrome://tracing[/code] or [code]ui.perfetto.dev[/code].
+		From C++ use the [code]CGAME_TRACE_SCOPE(name)[/code], [code]CGAME_TRACE_COUNTER(name, value)[/code] and [code]CGAME_TRACE_INSTANT(name)[/code] macros from [code]modules/cgame_profiling/cgame_trace.h[/code]. Names passed to the macros must be string literals.
+		[codeblock]
+		CgameTrace.enabled = true
+		CgameTrace.begin("ai")
+		# ...
+		CgameTrace.end()
+		CgameTrace.save("user://trace.json")
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="begin">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="category" type="String" default="&quot;game&quot;" />
+			<description>
+				Opens a scope on the calling thread. Scopes nest; close each one with [method end].
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Discards all recorded events and frame records. Thread names are kept.
+			</description>
+		</method>
+		<method name="compare" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="baseline" type="Dictionary" />
+			<param index="1" name="current" type="Dictionary" />
+			<param index="2" name="threshold_pct" type="float" default="10.0" />
+			<description>
+				Compares two [method frame_stats] results and returns the scopes whose average per-frame cost grew by more than [param threshold_pct] percent, worst first, as dictionaries with the keys [code]scope[/code], [code]baseline_avg[/code], [code]current_avg[/code] and [code]pct[/code]. Scopes that are new or have a zero baseline are skipped.
+			</description>
+		</method>
+		<method name="counter">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="value" type="float" />
+			<description>
+				Records a counter sample. The last value per frame is stored in the frame record.
+			</description>
+		</method>
+		<method name="end">
+			<return type="void" />
+			<description>
+				Closes the innermost open scope of the calling thread. Does nothing when no scope is open or tracing is disabled.
+			</description>
+		</method>
+		<method name="event_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of events currently held in all thread buffers.
+			</description>
+		</method>
+		<method name="export_chrome_json" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the captured events as Chrome Trace Event Format JSON, ordered chronologically with enclosing scopes before the scopes they contain.
+			</description>
+		</method>
+		<method name="flow_end">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="name" type="String" />
+			<description>
+				Ends the flow arrow started with [method flow_start] using the same [param id], typically on the consuming thread.
+			</description>
+		</method>
+		<method name="flow_start">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<param index="1" name="name" type="String" />
+			<description>
+				Starts a flow arrow (for example a task hand-off between threads).
+			</description>
+		</method>
+		<method name="frame_marker">
+			<return type="void" />
+			<param index="0" name="frame_index" type="int" />
+			<description>
+				Marks a frame boundary and closes the per-frame aggregates. The first marker only establishes the baseline. Called automatically every main loop iteration when [member auto_frame_markers] is [code]true[/code].
+			</description>
+		</method>
+		<method name="frame_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns [code]{"frames": n, "scopes": {name: {"total", "avg", "max"}}}[/code] with all values in microseconds over the retained frame records.
+			</description>
+		</method>
+		<method name="frames" qualifiers="const">
+			<return type="Dictionary[]" />
+			<description>
+				Returns the retained frame records as dictionaries with the keys [code]index[/code], [code]ms[/code], [code]scopes[/code] (microseconds per scope) and [code]counters[/code]. This is the input format of [method CgameHitchCorrelator.correlate].
+			</description>
+		</method>
+		<method name="instant">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="args" type="Dictionary" default="{}" />
+			<description>
+				Records a point-in-time event with optional JSON-serializable [param args].
+			</description>
+		</method>
+		<method name="load_stats_json" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Loads statistics saved with [method save_stats_json]. Returns an empty dictionary when the file is missing or malformed.
+			</description>
+		</method>
+		<method name="measure">
+			<return type="Variant" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="callable" type="Callable" />
+			<param index="2" name="category" type="String" default="&quot;game&quot;" />
+			<description>
+				Runs [param callable] inside a scope and returns its result.
+			</description>
+		</method>
+		<method name="save" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Writes [method export_chrome_json] to [param path]. Returns [code]false[/code] if the file cannot be opened.
+			</description>
+		</method>
+		<method name="save_stats_json" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Writes [method frame_stats] as JSON to [param path]. Returns [code]false[/code] if the file cannot be opened.
+			</description>
+		</method>
+		<method name="set_thread_name">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Names the calling thread in the exported trace.
+			</description>
+		</method>
+		<method name="thread_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of threads that own a trace buffer.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="auto_frame_markers" type="bool" setter="set_auto_frame_markers" getter="is_auto_frame_markers" default="true">
+			If [code]true[/code], the engine inserts a frame marker at the end of every main loop iteration while tracing is enabled.
+		</member>
+		<member name="enabled" type="bool" setter="set_enabled" getter="is_enabled" default="false">
+			Master switch. While [code]false[/code] all recording calls are no-ops.
+		</member>
+		<member name="max_events" type="int" setter="set_max_events" getter="get_max_events" default="16384">
+			Ring buffer capacity in events per thread (rounded up to a power of two). The oldest events are overwritten. Applies to threads that record their first event after the change.
+		</member>
+		<member name="max_frames" type="int" setter="set_max_frames" getter="get_max_frames" default="4096">
+			Number of frame records kept for [method frame_stats] and [method frames].
+		</member>
+	</members>
+</class>

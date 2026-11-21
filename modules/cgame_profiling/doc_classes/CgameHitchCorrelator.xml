@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameHitchCorrelator" inherits="RefCounted" api_type="core" keywords="hitch,stutter,frame time" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Explains frame hitches by scope growth and by the engine counter that moved with them.
+	</brief_description>
+	<description>
+		[CgameHitchCorrelator] offers two complementary analyses.
+		The static [method correlate] works offline on frame records (for example from [method CgameTrace.frames]): for every frame slower than a threshold it lists the scopes that grew most versus the rolling median of the preceding 60 frames and the counters that jumped.
+		The instance method [method sample] works live: feed it the frame delta and the dictionary from [method read_counters] every frame. A frame much slower than the recent median is attributed to pipeline compilation, world streaming, VRAM growth or plain CPU cost.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="cause" qualifiers="static">
+			<return type="String" />
+			<param index="0" name="before" type="Dictionary" />
+			<param index="1" name="after" type="Dictionary" />
+			<description>
+				Classifies the change between two [method read_counters] results as [code]"shader_compile"[/code], [code]"streaming"[/code], [code]"vram"[/code] (growth above 64 MiB) or [code]"cpu"[/code].
+			</description>
+		</method>
+		<method name="correlate" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="frames" type="Array" />
+			<param index="1" name="threshold_ms" type="float" />
+			<description>
+				Analyzes frame dictionaries with the keys [code]ms[/code], [code]scopes[/code] (microseconds per scope) and [code]counters[/code]. Returns one dictionary per hitch frame with [code]index[/code], [code]ms[/code], [code]baseline_ms[/code], [code]culprits[/code] (up to three scopes with [code]scope[/code], [code]usec[/code], [code]median_usec[/code], [code]growth_usec[/code]) and [code]counters[/code] (with [code]name[/code], [code]value[/code], [code]median[/code]).
+			</description>
+		</method>
+		<method name="describe" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns a one-line summary of the hitch counts per cause.
+			</description>
+		</method>
+		<method name="median" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the median frame delta of the non-hitch frames seen by [method sample], in seconds.
+			</description>
+		</method>
+		<method name="read_counters" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="loaded_cells" type="int" default="0" />
+			<description>
+				Reads the cheap engine counters used by [method sample]: [code]compiles[/code] (sum of the [RenderingServer] pipeline compilation counters), [code]cells[/code] (the given [param loaded_cells]) and [code]vram[/code] (video memory in bytes).
+			</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>
+				Clears hitches, counts and the baseline.
+			</description>
+		</method>
+		<method name="sample">
+			<return type="Dictionary" />
+			<param index="0" name="delta" type="float" />
+			<param index="1" name="counters" type="Dictionary" />
+			<param index="2" name="now" type="float" default="0.0" />
+			<description>
+				Feeds one frame. Returns [code]{time, ms, median_ms, cause}[/code] when the frame was a hitch, otherwise an empty dictionary. A hitch needs at least 30 baseline frames and a delta of at least 50 ms and 2.5 times the median. Hitch frames never enter the baseline.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="counts" type="Dictionary" setter="" getter="get_counts">
+			Number of hitches per cause.
+		</member>
+		<member name="hitches" type="Dictionary[]" setter="" getter="get_hitches">
+			The most recent hitch records returned by [method sample] (at most 32).
+		</member>
+	</members>
+</class>
