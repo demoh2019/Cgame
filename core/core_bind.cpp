@@ -46,6 +46,7 @@
 #include "core/os/os.h"
 #include "core/os/process_id.h"
 #include "core/os/thread_safe.h"
+#include "core/templates/hash_map.h"
 #include "core/variant/typed_array.h"
 
 namespace CoreBind {
@@ -980,6 +981,152 @@ Vector2 Geometry2D::get_closest_point_to_segment_uncapped(const Vector2 &p_point
 	return ::Geometry2D::get_closest_point_to_segment_uncapped(p_point, p_a, p_b);
 }
 
+
+PackedInt32Array Geometry2D::prune_points_min_distance(const PackedVector2Array &p_points, real_t p_min_distance, int p_max_kept) {
+	PackedInt32Array result;
+	ERR_FAIL_COND_V_MSG(p_points.size() > 8192, result, "A point-pruning batch may contain at most 8192 points.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_min_distance) || p_min_distance < 0.0, result,
+			"Minimum point separation must be finite and nonnegative.");
+	ERR_FAIL_COND_V_MSG(p_max_kept < -1 || p_max_kept > 8192, result,
+			"Maximum kept point count must be -1 or between 0 and 8192.");
+	const real_t min_distance_squared = p_min_distance * p_min_distance;
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(min_distance_squared), result,
+			"Squared minimum point separation must remain finite.");
+	const int count = p_points.size();
+	const Vector2 *points = p_points.ptr();
+	// Reject the entire batch before selecting any indices.
+	for (int i = 0; i < count; i++) {
+		ERR_FAIL_COND_V_MSG(!points[i].is_finite(), result, "Point coordinates must be finite.");
+	}
+	const int limit = p_max_kept < 0 ? count : MIN(p_max_kept, count);
+	if (limit == 0 || count == 0) {
+		return result;
+	}
+	// Each cell has side length min_distance. Multiple accepted points may
+	// occupy one cell near its opposite corners, so store index lists and
+	// examine all nine neighboring cells (rather than a single occupant).
+	// Extreme coordinate/radius ratios use an exact linear fallback to
+	// avoid unsafe float-to-int conversion; ordinary world tiles use the grid.
+	bool use_grid = p_min_distance > 0.0;
+	if (use_grid) {
+		for (int i = 0; i < count; i++) {
+			const real_t grid_x = points[i].x / p_min_distance;
+			const real_t grid_y = points[i].y / p_min_distance;
+			if (!Math::is_finite(grid_x) || !Math::is_finite(grid_y) ||
+					Math::abs(grid_x) > 1000000.0 || Math::abs(grid_y) > 1000000.0) {
+				use_grid = false;
+				break;
+			}
+		}
+	}
+	HashMap<Vector2i, Vector<int>> cells;
+	Vector<int> kept;
+	for (int i = 0; i < count && kept.size() < limit; i++) {
+		bool valid = true;
+		Vector2i cell;
+		if (use_grid) {
+			cell = Vector2i(Math::floor(points[i].x / p_min_distance), Math::floor(points[i].y / p_min_distance));
+			for (int y = -1; y <= 1 && valid; y++) {
+				for (int x = -1; x <= 1 && valid; x++) {
+					const Vector<int> *bucket = cells.getptr(cell + Vector2i(x, y));
+					if (bucket == nullptr) {
+						continue;
+					}
+					for (int index : *bucket) {
+						const real_t squared = points[i].distance_squared_to(points[index]);
+						if (squared < min_distance_squared) {
+							valid = false;
+							break;
+						}
+					}
+				}
+			}
+		} else if (p_min_distance > 0.0) {
+			for (int index : kept) {
+				if (points[i].distance_squared_to(points[index]) < min_distance_squared) {
+					valid = false;
+					break;
+				}
+			}
+		}
+		if (valid) {
+			kept.push_back(i);
+			if (use_grid) {
+				cells[cell].push_back(i);
+			}
+		}
+	}
+	ERR_FAIL_COND_V_MSG(result.resize(kept.size()) != OK, PackedInt32Array(), "Could not allocate selected point indices.");
+	int32_t *out = result.ptrw();
+	for (int i = 0; i < kept.size(); i++) {
+		out[i] = kept[i];
+	}
+	return result;
+}
+
+TypedArray<PackedInt32Array> Geometry2D::get_nearest_neighbors(const PackedVector2Array &p_points, int p_neighbor_count, real_t p_max_distance) {
+	TypedArray<PackedInt32Array> result;
+	ERR_FAIL_COND_V_MSG(p_points.size() > 4096, result, "Nearest-neighbor batches allow at most 4096 points.");
+	ERR_FAIL_COND_V_MSG(p_neighbor_count < 0 || p_neighbor_count > 32, result, "Neighbor count must be between 0 and 32.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_max_distance) || p_max_distance < 0.0, result,
+			"Maximum neighbor distance must be finite and nonnegative.");
+	const real_t maximum_squared = p_max_distance * p_max_distance;
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(maximum_squared), result, "Squared maximum distance must be finite.");
+
+	const int count = p_points.size();
+	const Vector2 *points = p_points.ptr();
+	for (int i = 0; i < count; i++) {
+		ERR_FAIL_COND_V_MSG(!points[i].is_finite(), result, "Nearest-neighbor point coordinates must be finite.");
+	}
+
+	result.resize(count);
+	const int k = MIN(p_neighbor_count, MAX(0, count - 1));
+	// Only k candidates are retained for each point, never a full N-by-N
+	// distance matrix. The closest distances are sorted, ties by input index.
+	Vector<int> indices;
+	Vector<real_t> distances;
+	indices.resize(k);
+	distances.resize(k);
+	int *index_buffer = indices.ptrw();
+	real_t *distance_buffer = distances.ptrw();
+	for (int i = 0; i < count; i++) {
+		int found = 0;
+		for (int j = 0; j < count; j++) {
+			if (i == j) {
+				continue;
+			}
+			const real_t squared = points[i].distance_squared_to(points[j]);
+			if (!Math::is_finite(squared) || squared > maximum_squared) {
+				continue;
+			}
+			int insertion = 0;
+			while (insertion < found && (distance_buffer[insertion] < squared ||
+							(distance_buffer[insertion] == squared && index_buffer[insertion] < j))) {
+				insertion++;
+			}
+			if (insertion == k) {
+				continue;
+			}
+			const int new_found = MIN(found + 1, k);
+			for (int move = new_found - 1; move > insertion; move--) {
+				index_buffer[move] = index_buffer[move - 1];
+				distance_buffer[move] = distance_buffer[move - 1];
+			}
+			index_buffer[insertion] = j;
+			distance_buffer[insertion] = squared;
+			found = new_found;
+		}
+		PackedInt32Array neighbors;
+		neighbors.resize(found);
+		int32_t *output = neighbors.ptrw();
+		for (int j = 0; j < found; j++) {
+			output[j] = index_buffer[j];
+		}
+		result.set(i, neighbors);
+	}
+	return result;
+}
+
 Dictionary Geometry2D::get_closest_point_on_segments(const Vector2 &p_point, const PackedVector2Array &p_segment_endpoints) {
 	Dictionary result;
 	ERR_FAIL_COND_V_MSG(!p_point.is_finite(), result, "Query point must have finite coordinates.");
@@ -1021,6 +1168,285 @@ Dictionary Geometry2D::get_closest_point_on_segments(const Vector2 &p_point, con
 	result["distance"] = Math::sqrt(best_distance_squared);
 	result["segment_index"] = best_segment;
 	result["t"] = best_t;
+	return result;
+}
+
+
+
+Vector<Color> Geometry2D::bake_heightfield_curvature_colors(const Vector<float> &p_padded_heights, const Vector2i &p_size,
+		real_t p_cell_spacing, real_t p_cavity_start, real_t p_cavity_end, real_t p_ridge_start, real_t p_ridge_end) {
+	Vector<Color> result;
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2046 || p_size.y > 2046, result,
+			"Curvature output dimensions must be between 1 and 2046 per axis.");
+	const int width = p_size.x + 2;
+	const int height = p_size.y + 2;
+	ERR_FAIL_COND_V_MSG(p_padded_heights.size() != width * height, result,
+			"Curvature input must contain a one-sample border around the output heightfield.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_cell_spacing) || p_cell_spacing <= 0.0, result,
+			"Curvature cell spacing must be positive and finite.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_cavity_start) || !Math::is_finite(p_cavity_end) ||
+					!Math::is_finite(p_ridge_start) || !Math::is_finite(p_ridge_end) ||
+					p_cavity_start < 0.0 || p_ridge_start < 0.0 ||
+					p_cavity_end <= p_cavity_start || p_ridge_end <= p_ridge_start,
+			result, "Curvature cavity/ridge ranges must be finite, increasing and nonnegative.");
+	const real_t inverse_spacing = 1.0 / p_cell_spacing;
+	const real_t inverse_spacing_squared = inverse_spacing * inverse_spacing;
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(inverse_spacing_squared) || inverse_spacing_squared <= 0.0,
+			result, "Curvature inverse squared cell spacing must be finite and positive.");
+	const float *heights = p_padded_heights.ptr();
+	for (int i = 0; i < p_padded_heights.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(heights[i]), result, "Curvature height samples must be finite.");
+	}
+	ERR_FAIL_COND_V_MSG(result.resize(p_size.x * p_size.y) != OK, Vector<Color>(), "Could not allocate curvature colors.");
+	Color *colors = result.ptrw();
+	// Zero at the start of each ramp and one at its end. The smoothstep
+	// curve matches GDScript smoothstep on the same packed float inputs.
+	const auto ramp = [](real_t p_value, real_t p_start, real_t p_end) -> real_t {
+		const real_t t = CLAMP((p_value - p_start) / (p_end - p_start), real_t(0.0), real_t(1.0));
+		return t * t * (3.0 - 2.0 * t);
+	};
+	for (int y = 0; y < p_size.y; y++) {
+		const int middle = (y + 1) * width + 1;
+		const int output_row = y * p_size.x;
+		for (int x = 0; x < p_size.x; x++) {
+			const int i = middle + x;
+			const real_t curvature = (real_t(heights[i - 1]) + real_t(heights[i + 1]) +
+							real_t(heights[i - width]) + real_t(heights[i + width]) -
+							real_t(4.0) * real_t(heights[i])) * inverse_spacing_squared;
+			ERR_FAIL_COND_V_MSG(!Math::is_finite(curvature), Vector<Color>(), "Curvature value overflowed.");
+			const real_t cavity = ramp(MAX(real_t(0.0), curvature), p_cavity_start, p_cavity_end);
+			const real_t ridge = ramp(MAX(real_t(0.0), -curvature), p_ridge_start, p_ridge_end);
+			colors[output_row + x] = Color(cavity, ridge, 1.0, 1.0);
+		}
+	}
+	return result;
+}
+
+
+Vector<float> Geometry2D::sample_scalar_grid_wrapped(const Vector<float> &p_grid, const Vector2i &p_size,
+		const Vector<Vector2> &p_uvs, bool p_smooth) {
+	Vector<float> result;
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
+			"Wrapped grid dimensions must be between 1 and 2048 per axis.");
+	ERR_FAIL_COND_V_MSG(p_grid.size() != p_size.x * p_size.y, result, "Wrapped grid must contain width * height values.");
+	ERR_FAIL_COND_V_MSG(p_uvs.size() > 65536, result, "Wrapped grid sample queries must not exceed 65536.");
+	const float *grid = p_grid.ptr();
+	for (int i = 0; i < p_grid.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(grid[i]), result, "Wrapped grid values must be finite.");
+	}
+	const Vector2 *uvs = p_uvs.ptr();
+	for (int i = 0; i < p_uvs.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!uvs[i].is_finite(), result, "Wrapped sample UVs must be finite.");
+	}
+	if (p_uvs.is_empty()) {
+		return result;
+	}
+	ERR_FAIL_COND_V_MSG(result.resize(p_uvs.size()) != OK, Vector<float>(), "Could not allocate wrapped grid samples.");
+	float *out = result.ptrw();
+	const int width = p_size.x;
+	const int height = p_size.y;
+	// Normalized UVs repeat every integer tile. Reducing modulo one before
+	// converting to texel positions avoids unsafe integer casts for large UVs.
+	for (int i = 0; i < p_uvs.size(); i++) {
+		const real_t sx = Math::fposmod(uvs[i].x, real_t(1.0)) * width;
+		const real_t sy = Math::fposmod(uvs[i].y, real_t(1.0)) * height;
+		const int x0 = CLAMP(int(Math::floor(sx)), 0, width - 1);
+		const int y0 = CLAMP(int(Math::floor(sy)), 0, height - 1);
+		const int x1 = x0 + 1 == width ? 0 : x0 + 1;
+		const int y1 = y0 + 1 == height ? 0 : y0 + 1;
+		real_t tx = sx - x0;
+		real_t ty = sy - y0;
+		if (p_smooth) {
+			tx = tx * tx * (3.0 - 2.0 * tx);
+			ty = ty * ty * (3.0 - 2.0 * ty);
+		}
+		const real_t a = Math::lerp(real_t(grid[y0 * width + x0]), real_t(grid[y0 * width + x1]), tx);
+		const real_t b = Math::lerp(real_t(grid[y1 * width + x0]), real_t(grid[y1 * width + x1]), tx);
+		const real_t value = Math::lerp(a, b, ty);
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(value), Vector<float>(), "Wrapped grid sample became nonfinite.");
+		out[i] = float(value);
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(out[i]), Vector<float>(), "Wrapped grid sample overflowed packed float range.");
+	}
+	return result;
+}
+
+Vector<Vector2> Geometry2D::heightfield_gradients(const Vector<float> &p_heights, const Vector2i &p_size, real_t p_cell_spacing) {
+	Vector<Vector2> result;
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
+			"Heightfield gradient dimensions must be between 1 and 2048 per axis.");
+	const int width = p_size.x;
+	const int height = p_size.y;
+	const int count = width * height;
+	ERR_FAIL_COND_V_MSG(p_heights.size() != count, result, "Heightfield data must have width * height entries.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_cell_spacing) || p_cell_spacing <= 0.0, result,
+			"Heightfield cell spacing must be positive and finite.");
+	const real_t half_inverse_spacing = 0.5 / p_cell_spacing;
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(half_inverse_spacing), result,
+			"Inverse heightfield spacing must be representable.");
+	const float *heights = p_heights.ptr();
+	for (int i = 0; i < count; i++) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(heights[i]), result, "Heightfield samples must be finite.");
+	}
+	ERR_FAIL_COND_V_MSG(result.resize(count) != OK, Vector<Vector2>(), "Could not allocate heightfield gradients.");
+	Vector2 *gradients = result.ptrw();
+	// Each output is (dheight/dx, dheight/dy) in metres per world unit.
+	// Clamp neighbor indices to the edge exactly as the atlas _h() helper
+	// does. For borders this makes the central difference a half-slope;
+	// it avoids fetching any unavailable heights outside the sampled tile.
+	for (int y = 0; y < height; y++) {
+		const int north = MAX(y - 1, 0) * width;
+		const int south = MIN(y + 1, height - 1) * width;
+		const int row = y * width;
+		for (int x = 0; x < width; x++) {
+			const int west = MAX(x - 1, 0);
+			const int east = MIN(x + 1, width - 1);
+			const real_t dx = (real_t(heights[row + east]) - real_t(heights[row + west])) * half_inverse_spacing;
+			const real_t dy = (real_t(heights[south + x]) - real_t(heights[north + x])) * half_inverse_spacing;
+			ERR_FAIL_COND_V_MSG(!Math::is_finite(dx) || !Math::is_finite(dy), Vector<Vector2>(),
+					"Heightfield gradient overflowed the numeric range.");
+			const Vector2 slope(dx, dy);
+			ERR_FAIL_COND_V_MSG(!slope.is_finite(), Vector<Vector2>(),
+					"Heightfield gradient cannot be represented as Vector2.");
+			gradients[row + x] = slope;
+		}
+	}
+	return result;
+}
+
+
+PackedByteArray Geometry2D::max_filter_mask(const PackedByteArray &p_mask, const Vector2i &p_size, int p_radius) {
+	PackedByteArray result;
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
+			"Max-filter mask dimensions must be between 1 and 2048 pixels per axis.");
+	ERR_FAIL_COND_V_MSG(p_radius < 0 || p_radius > 64, result, "Max-filter radius must be between 0 and 64 pixels.");
+	const int width = p_size.x;
+	const int height = p_size.y;
+	const int count = width * height;
+	ERR_FAIL_COND_V_MSG(p_mask.size() != count, result, "Max-filter mask must contain width * height bytes.");
+	if (p_radius == 0) {
+		return p_mask; // Copy-on-write: the caller's input remains unmodified.
+	}
+	// Two separable maximum-filter passes. A monotone deque stores only
+	// indices from the current row/column, giving O(width * height) work
+	// independent of the filter radius (unlike a per-pixel 2D kernel).
+	Vector<uint8_t> horizontal;
+	ERR_FAIL_COND_V_MSG(horizontal.resize(count) != OK, result, "Could not allocate horizontal max-filter scratch.");
+	ERR_FAIL_COND_V_MSG(result.resize(count) != OK, PackedByteArray(), "Could not allocate max-filter output.");
+	Vector<int> queue;
+	ERR_FAIL_COND_V_MSG(queue.resize(MAX(width, height)) != OK, PackedByteArray(), "Could not allocate max-filter deque.");
+	int *indices = queue.ptrw();
+	const uint8_t *input = p_mask.ptr();
+	uint8_t *intermediate = horizontal.ptrw();
+	uint8_t *output = result.ptrw();
+
+	for (int y = 0; y < height; y++) {
+		const int row = y * width;
+		int front = 0;
+		int back = 0;
+		int next = 0;
+		for (int x = 0; x < width; x++) {
+			const int right = MIN(width - 1, x + p_radius);
+			while (next <= right) {
+				const uint8_t value = input[row + next];
+				while (back > front && input[row + indices[back - 1]] <= value) {
+					back--;
+				}
+				indices[back++] = next++;
+			}
+			const int left = MAX(0, x - p_radius);
+			while (front < back && indices[front] < left) {
+				front++;
+			}
+			intermediate[row + x] = input[row + indices[front]];
+		}
+	}
+	for (int x = 0; x < width; x++) {
+		int front = 0;
+		int back = 0;
+		int next = 0;
+		for (int y = 0; y < height; y++) {
+			const int bottom = MIN(height - 1, y + p_radius);
+			while (next <= bottom) {
+				const uint8_t value = intermediate[next * width + x];
+				while (back > front && intermediate[indices[back - 1] * width + x] <= value) {
+					back--;
+				}
+				indices[back++] = next++;
+			}
+			const int top = MAX(0, y - p_radius);
+			while (front < back && indices[front] < top) {
+				front++;
+			}
+			output[y * width + x] = intermediate[indices[front] * width + x];
+		}
+	}
+	return result;
+}
+
+PackedByteArray Geometry2D::distance_transform_8(const PackedByteArray &p_mask, const Vector2i &p_size, int p_max_distance) {
+	PackedByteArray result;
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
+			"Distance-transform dimensions must be between 1 and 2048 pixels per axis.");
+	ERR_FAIL_COND_V_MSG(p_max_distance < 0 || p_max_distance > 254, result,
+			"Distance-transform maximum radius must be between 0 and 254 pixels.");
+	const int width = p_size.x;
+	const int height = p_size.y;
+	const int count = width * height;
+	ERR_FAIL_COND_V_MSG(p_mask.size() != count, result, "Distance-transform mask size must equal width * height.");
+	ERR_FAIL_COND_V_MSG(result.resize(count) != OK, PackedByteArray(), "Could not allocate the distance field.");
+
+	const uint8_t *mask = p_mask.ptr();
+	uint8_t *distances = result.ptrw();
+	for (int i = 0; i < count; i++) {
+		distances[i] = mask[i] == 0 ? 255 : 0;
+	}
+	// Exact chessboard / Chebyshev distance on an 8-connected integer grid.
+	// Two raster passes propagate all possible shortest 8-neighbor paths.
+	// Value 255 is reserved for cells farther than p_max_distance.
+	const auto relax = [distances, p_max_distance](int p_index, int p_neighbor) {
+		if (distances[p_neighbor] < p_max_distance) {
+			const uint8_t candidate = distances[p_neighbor] + 1;
+			if (candidate < distances[p_index]) {
+				distances[p_index] = candidate;
+			}
+		}
+	};
+	for (int y = 0; y < height; y++) {
+		const int row = y * width;
+		for (int x = 0; x < width; x++) {
+			const int index = row + x;
+			if (x > 0) {
+				relax(index, index - 1);
+			}
+			if (y > 0) {
+				if (x > 0) {
+					relax(index, index - width - 1);
+				}
+				relax(index, index - width);
+				if (x + 1 < width) {
+					relax(index, index - width + 1);
+				}
+			}
+		}
+	}
+	for (int y = height - 1; y >= 0; y--) {
+		const int row = y * width;
+		for (int x = width - 1; x >= 0; x--) {
+			const int index = row + x;
+			if (x + 1 < width) {
+				relax(index, index + 1);
+			}
+			if (y + 1 < height) {
+				if (x + 1 < width) {
+					relax(index, index + width + 1);
+				}
+				relax(index, index + width);
+				if (x > 0) {
+					relax(index, index + width - 1);
+				}
+			}
+		}
+	}
 	return result;
 }
 
@@ -1268,7 +1694,15 @@ void Geometry2D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_closest_point_to_segment_uncapped", "point", "s1", "s2"), &Geometry2D::get_closest_point_to_segment_uncapped);
 	ClassDB::bind_method(D_METHOD("get_closest_point_on_segments", "point", "segment_endpoints"), &Geometry2D::get_closest_point_on_segments);
+	ClassDB::bind_method(D_METHOD("get_nearest_neighbors", "points", "neighbor_count", "max_distance"), &Geometry2D::get_nearest_neighbors);
+	ClassDB::bind_method(D_METHOD("prune_points_min_distance", "points", "min_distance", "max_kept"), &Geometry2D::prune_points_min_distance, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("rasterize_segments_mask", "segment_endpoints", "size", "half_width", "softness"), &Geometry2D::rasterize_segments_mask);
+	ClassDB::bind_method(D_METHOD("distance_transform_8", "mask", "size", "max_distance"), &Geometry2D::distance_transform_8);
+	ClassDB::bind_method(D_METHOD("max_filter_mask", "mask", "size", "radius"), &Geometry2D::max_filter_mask);
+	ClassDB::bind_method(D_METHOD("heightfield_gradients", "heights", "size", "cell_spacing"), &Geometry2D::heightfield_gradients);
+	ClassDB::bind_method(D_METHOD("sample_scalar_grid_wrapped", "grid", "size", "uvs", "smooth"), &Geometry2D::sample_scalar_grid_wrapped, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("bake_heightfield_curvature_colors", "padded_heights", "size", "cell_spacing", "cavity_start", "cavity_end", "ridge_start", "ridge_end"),
+			&Geometry2D::bake_heightfield_curvature_colors, DEFVAL(0.015), DEFVAL(0.32), DEFVAL(0.015), DEFVAL(0.42));
 
 	ClassDB::bind_method(D_METHOD("point_is_inside_triangle", "point", "a", "b", "c"), &Geometry2D::point_is_inside_triangle);
 

@@ -58,6 +58,7 @@ void Gradient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_color", "point"), &Gradient::get_color);
 
 	ClassDB::bind_method(D_METHOD("sample", "offset"), &Gradient::get_color_at_offset);
+	ClassDB::bind_method(D_METHOD("sample_batch", "offsets"), &Gradient::sample_batch);
 
 	ClassDB::bind_method(D_METHOD("get_point_count"), &Gradient::get_point_count);
 
@@ -88,6 +89,24 @@ void Gradient::_bind_methods() {
 	BIND_ENUM_CONSTANT(GRADIENT_COLOR_SPACE_SRGB);
 	BIND_ENUM_CONSTANT(GRADIENT_COLOR_SPACE_LINEAR_SRGB);
 	BIND_ENUM_CONSTANT(GRADIENT_COLOR_SPACE_OKLAB);
+}
+
+Vector<Color> Gradient::sample_batch(const Vector<float> &p_offsets) {
+	Vector<Color> colors;
+	ERR_FAIL_COND_V_MSG(p_offsets.size() > 65536, colors,
+			"Gradient sample batches are limited to 65536 offsets.");
+	const float *offsets = p_offsets.ptr();
+	// Validate before sampling, so a bad offset never partially evaluates the batch.
+	for (int i = 0; i < p_offsets.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(offsets[i]), colors,
+				"Gradient sample offsets must be finite.");
+	}
+	ERR_FAIL_COND_V(colors.resize(p_offsets.size()) != OK, Vector<Color>());
+	Color *output = colors.ptrw();
+	for (int i = 0; i < p_offsets.size(); i++) {
+		output[i] = get_color_at_offset(offsets[i]);
+	}
+	return colors;
 }
 
 void Gradient::_validate_property(PropertyInfo &p_property) const {

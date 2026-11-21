@@ -33,6 +33,7 @@
 
 #include "animation_lod_controller.h"
 #include "gameplay_tag_container.h"
+#include "gameplay_tag_stack_container.h"
 
 #include "core/object/class_db.h"
 
@@ -41,6 +42,7 @@ void initialize_gameplay_tags_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 	GDREGISTER_CLASS(GameplayTagContainer);
+	GDREGISTER_CLASS(GameplayTagStackContainer);
 	GDREGISTER_CLASS(GameplayTagQuery);
 	GDREGISTER_CLASS(AnimationLODController);
 }

@@ -8,7 +8,58 @@ const SupplyDrops = preload("res://scripts/shared/supply_drops.gd")
 const LootLabel = preload("res://scripts/shared/loot_label.gd")
 
 
+class GridOnlyDangerWorld:
+	extends RefCounted
+	var center := Vector2(250.0, 200.0)
+	var only_site := Vector2(238.0, 188.0)
+	func zone_at(_x: float, _z: float) -> int:
+		return 2
+	func is_safe(_x: float, _z: float) -> bool:
+		return false
+	func is_water(x: float, z: float) -> bool:
+		var p := Vector2(x, z)
+		return p.distance_to(center) > 0.01 and p.distance_to(only_site) > 0.01
+	func normal_at(_x: float, _z: float) -> Vector3:
+		return Vector3.UP
+	func height_at(_x: float, _z: float) -> float:
+		return 3.0
+	func blockers_near(_x: float, _z: float, _r: float) -> Array:
+		return []
+
+
 func run(t) -> void:
+	t.current = "EQS oriented fallback grid for public cache guards"
+	var test_center := Vector2(250.0, 200.0)
+	var test_survivors: Array[Vector3] = [Vector3(250, 3, 190), Vector3(260, 3, 200)]
+	var scripted_grid: PackedVector2Array = SupplyDrops.guard_grid_candidates(
+		test_center, test_survivors, false)
+	var native_grid: PackedVector2Array = SupplyDrops.guard_grid_candidates(
+		test_center, test_survivors, true)
+	t.eq(scripted_grid.size(), native_grid.size(),
+		"native and portable oriented grid have the same eligible site count")
+	t.check(scripted_grid.size() > 0 and scripted_grid.size() <= SupplyDrops.GUARD_GRID_SAMPLES,
+		"guard backup candidate pool is strictly bounded")
+	for i in scripted_grid.size():
+		t.check(native_grid[i].distance_to(scripted_grid[i]) < 0.001,
+			"native rotated grid agrees with portable coordinate generation")
+		t.check(native_grid[i].distance_to(test_center) >= SupplyDrops.GUARD_RADII[0] - 0.001,
+			"backup guards cannot spawn on top of the cache")
+	t.eq(SupplyDrops.guard_grid_candidates(Vector2.INF, test_survivors).size(), 0,
+		"nonfinite cache centers reject all grid generation")
+	var only_grid_world := GridOnlyDangerWorld.new()
+	var guarded: Array[Dictionary] = SupplyDrops.guard_sites(only_grid_world,
+		{"x": 250.0, "z": 200.0, "zone": 2}, [], {}, 1)
+	t.eq(guarded.size(), 1,
+		"server selects a valid grid fallback when all 48 radial guard sites are blocked")
+	if guarded.size() == 1:
+		t.check(Vector2(float(guarded[0]["x"]), float(guarded[0]["z"])).distance_to(
+			only_grid_world.only_site) < 0.001,
+			"grid rescue location passes through the same terrain validation")
+	only_grid_world.only_site = Vector2(250.0, 200.0)
+	t.eq(SupplyDrops.guard_sites(only_grid_world,
+		{"x": 250.0, "z": 200.0, "zone": 2}, [], {}, 1).size(), 0,
+		"backup grid still refuses points inside the loot cache")
+
 	t.current = "supply drop reward bounds"
 	var loot_rng := RandomNumberGenerator.new()
 	loot_rng.seed = 37

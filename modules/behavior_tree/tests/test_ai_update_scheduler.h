@@ -137,4 +137,53 @@ TEST_CASE("[AIUpdateScheduler] Invalid slot counts preserve the previous configu
 			(scheduler->ticks_until_due(9223372036854775807LL, 9223372036854775807LL) == 0));
 }
 
+
+TEST_CASE("[AIUpdateScheduler] Packed mask matches individual phases for signed and repeated IDs") {
+	Ref<AIUpdateScheduler> scheduler;
+	scheduler.instantiate();
+	scheduler->set_slots_per_cycle(7);
+	PackedInt64Array ids;
+	for (int64_t id = -150; id < 150; id++) {
+		ids.push_back(id);
+	}
+	ids.push_back(-150);
+	ids.push_back(9223372036854775807LL);
+	for (int64_t tick = 0; tick < 30; tick++) {
+		const PackedByteArray mask = scheduler->get_due_mask(ids, tick);
+		CHECK(mask.size() == ids.size());
+		for (int i = 0; i < ids.size(); i++) {
+			CHECK(mask[i] <= 1);
+			CHECK(mask[i] == (scheduler->is_due(ids[i], tick) ? 1 : 0));
+		}
+		CHECK(mask[0] == mask[300]); // Repeated ID keeps the same phase.
+	}
+	CHECK(scheduler->get_due_mask(ids, -1).is_empty());
+	CHECK(scheduler->get_slots_per_cycle() == 7);
+}
+
+TEST_CASE("[AIUpdateScheduler] Batch limits and one-slot cohorts have safe behavior") {
+	Ref<AIUpdateScheduler> scheduler;
+	scheduler.instantiate();
+	PackedInt64Array empty;
+	CHECK(scheduler->get_due_mask(empty, 0).is_empty());
+	PackedInt64Array full;
+	for (int i = 0; i < 4096; i++) {
+		full.push_back(i);
+	}
+	CHECK(scheduler->get_due_mask(full, 0).size() == 4096);
+	full.push_back(4096);
+	CHECK(scheduler->get_due_mask(full, 0).is_empty());
+	// Existing scalar API still works when a caller elects the fallback.
+	CHECK(scheduler->is_due(4096, scheduler->get_agent_slot(4096)));
+	scheduler->set_slots_per_cycle(1);
+	PackedInt64Array sample;
+	sample.push_back(-1);
+	sample.push_back(42);
+	const PackedByteArray every_tick = scheduler->get_due_mask(sample, 999);
+	CHECK(every_tick.size() == 2);
+	CHECK(every_tick[0] == 1);
+	CHECK(every_tick[1] == 1);
+	CHECK(scheduler->is_due(42, 999, true)); // Urgent scalar path unchanged.
+}
+
 } // namespace TestAIUpdateScheduler

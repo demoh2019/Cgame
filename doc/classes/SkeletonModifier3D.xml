@@ -43,6 +43,38 @@
 				Called when bone names and indices need to be validated, such as when entering the scene tree or changing skeleton.
 			</description>
 		</method>
+		<method name="get_modifier_estimated_update_us" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the bounded quarter-weight exponential moving average of this modifier's completed processing time, in microseconds, or 0 if no measurement has been taken. Only [method _process_modification_with_delta] and native [code]_process_modification[/code] work is measured, not the [signal modification_processed] listeners, surrounding [Skeleton3D] processing, [AnimationMixer], or GPU skinning. The average is retained while profiling is disabled to help budget tier-0 IK re-entry.
+			</description>
+		</method>
+		<method name="get_modifier_last_update_us" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the most recently completed modifier update duration, in microseconds (clamped to 1–100000), or 0 before the first measurement.
+			</description>
+		</method>
+		<method name="get_modifier_profile_sample_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of profiled modifier updates, saturated at one million. Updates skipped because [member active] is disabled or the modifier is outside the scene tree are not measured.
+			</description>
+		</method>
+		<method name="reset_modifier_profile">
+			<return type="void" />
+			<description>
+				Clears this modifier's last duration, average and sample count. Does not change [member modifier_profiling_enabled], its animation state, or its skeleton.
+			</description>
+		</method>
+		<method name="smooth_modifier_cost_us" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="previous_us" type="int" />
+			<param index="1" name="sample_us" type="int" />
+			<description>
+				Pure bounded integer sample smoother. The first sample is used unmodified when [param previous_us] is 0; later estimates equal integer division of [code](3 * previous_us + sample_us + 2) / 4[/code]. Valid ranges: previous 0–100000us and sample 1–100000us; invalid inputs return -1. Useful for verifying or reproducing profiling estimates without a running 3D scene.
+			</description>
+		</method>
 		<method name="get_skeleton" qualifiers="const">
 			<return type="Skeleton3D" />
 			<description>
@@ -53,6 +85,9 @@
 	<members>
 		<member name="active" type="bool" setter="set_active" getter="is_active" default="true">
 			If [code]true[/code], the [SkeletonModifier3D] will be processing.
+		</member>
+		<member name="modifier_profiling_enabled" type="bool" setter="set_modifier_profiling_enabled" getter="is_modifier_profiling_enabled" default="false">
+			When enabled, measures each active modifier callback using two microsecond clock reads. Off by default, so unprofiled modifiers pay no clock cost. Applies equally to native and script-defined modifiers. Toggling this property preserves the previous measurement; call [method reset_modifier_profile] to clear it. This is a local CPU work-unit estimate, not a hard deadline or a replacement for a full animation profiler.
 		</member>
 		<member name="influence" type="float" setter="set_influence" getter="get_influence" default="1.0">
 			Sets the influence of the modification.

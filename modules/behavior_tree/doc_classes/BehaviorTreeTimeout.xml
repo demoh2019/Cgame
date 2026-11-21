@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeTimeout" inherits="BehaviorTreeDecorator" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Fails and aborts a long-running behavior tree task at a simulation-time limit.</brief_description>
+	<description>
+		The decorator evaluates its child while the elapsed [method BehaviorTreeRunner.tick] delta is strictly less than [member duration]. If the deadline is reached, it returns [constant BehaviorTreeTask.FAILURE] and clears the running child subtree's memory, allowing a reactive parent to choose an alternative behavior. If the child succeeds or fails earlier, its status is returned unchanged and all memory beneath this decorator is cleared.
+		A duration of zero always fails immediately, including for instant-success children. The caller must tick the branch to advance time; these are deterministic simulation seconds, not system-clock or background time. A branch interruption or [method BehaviorTreeRunner.reset] discards elapsed state. A missing child fails safely.
+	</description>
+	<methods>
+		<method name="set_duration"><return type="void" /><param index="0" name="duration" type="float" /><description>Sets a finite nonnegative deadline in seconds.</description></method>
+		<method name="get_duration" qualifiers="const"><return type="float" /><description>Returns the simulation-time limit in seconds.</description></method>
+	</methods>
+	<members>
+		<member name="duration" type="float" default="1.0">Deadline in simulated seconds for this occurrence of the wrapped task.</member>
+	</members>
+</class>

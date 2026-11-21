@@ -56,6 +56,7 @@ func _gathering(t, world) -> void:
 		if node.is_empty():
 			continue
 		_put(server, 10, node["x"] - 1.5, node["z"])
+		server.zombies.clear() # This checks skill training, not survival: keep infected out of the way.
 		var before := _xp(p, kinds[kind])
 		var started: Dictionary = server.cmd_gather(10, node["id"])
 		t.check(started["ok"], "%s can be gathered by hand: %s" % [kind, str(started)])

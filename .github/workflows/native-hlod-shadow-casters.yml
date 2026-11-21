@@ -1,0 +1,70 @@
+name: Native HLOD shadow-caster budgets and Albion parity
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/significance_budget/**'
+      - 'game/scripts/client/shadow_budget.gd'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_shadow_budget.gd'
+      - 'game/tests/test_hlod_shadow_casters.gd'
+      - 'game/tests/run_hlod_shadow_casters.gd'
+      - '.github/workflows/native-hlod-shadow-casters.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/significance_budget/**'
+      - 'game/scripts/client/shadow_budget.gd'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_shadow_budget.gd'
+      - 'game/tests/test_hlod_shadow_casters.gd'
+      - 'game/tests/run_hlod_shadow_casters.gd'
+      - '.github/workflows/native-hlod-shadow-casters.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hlod-shadow:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Run native shadow significance regressions
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*SignificanceBudget*" --no-colors 2>&1 | tee hlod-native.log
+      - name: Import Albion After resources and scripts
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee hlod-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' hlod-import.log; then exit 1; fi
+      - name: Run native and stock HLOD shadow parity
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_hlod_shadow_casters.gd 2>&1 | tee hlod-game.log
+          grep -E '^HLOD SHADOW TOTAL: [0-9]+ checks, 0 failures$' hlod-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' hlod-game.log; then exit 1; fi
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-hlod-shadow-casters
+          if-no-files-found: ignore
+          path: |
+            hlod-native.log
+            hlod-import.log
+            hlod-game.log

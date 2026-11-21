@@ -24,9 +24,12 @@ class FrameUpdateBudget : public RefCounted {
 		double importance = 1.0;
 		double rate_scale = 1.0; // Frequency multiplier; 1.0 keeps the tier baseline.
 		int64_t estimated_cost_us = 0;
+		int64_t frame_cost_us = 0; // CPU microseconds reported during this frame.
+		int64_t previous_frame_cost_us = 0; // Completed-frame sample; zero if idle.
 		int overdue_frames = 0;
 		bool enabled = true;
 		bool refresh_pending = false; // Re-enable requires one immediate scene refresh.
+		int max_deferred_frames = 0; // Opt-in soft deadline; 0 preserves default scheduling.
 	};
 
 	Vector<Lane> lanes;
@@ -73,8 +76,12 @@ public:
 	// Distinct from importance (scheduling priority): sets when a lane is due.
 	bool set_lane_rate_scale(const StringName &p_lane, double p_scale);
 	double get_lane_rate_scale(const StringName &p_lane) const;
+	bool set_lane_max_deferred_frames(const StringName &p_lane, int p_frames);
+	int get_lane_max_deferred_frames(const StringName &p_lane) const;
+	int get_deadline_overdue_lane_count() const;
 	double get_lane_importance(const StringName &p_lane) const;
 	int64_t get_lane_estimated_cost_us(const StringName &p_lane) const;
+	int64_t get_lane_last_frame_cost_us(const StringName &p_lane) const;
 	int64_t get_reserved_estimated_cost_us() const { return reserved_estimated_cost_us; }
 	int64_t current_frame_cost_us() const { return frame_cost_us; }
 	int64_t last_frame_cost_us() const { return previous_frame_cost_us; }

@@ -23,8 +23,12 @@ void FrameUpdateBudget::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_lane_importance", "lane", "importance"), &FrameUpdateBudget::set_lane_importance);
 	ClassDB::bind_method(D_METHOD("set_lane_rate_scale", "lane", "scale"), &FrameUpdateBudget::set_lane_rate_scale);
 	ClassDB::bind_method(D_METHOD("get_lane_rate_scale", "lane"), &FrameUpdateBudget::get_lane_rate_scale);
+	ClassDB::bind_method(D_METHOD("set_lane_max_deferred_frames", "lane", "frames"), &FrameUpdateBudget::set_lane_max_deferred_frames);
+	ClassDB::bind_method(D_METHOD("get_lane_max_deferred_frames", "lane"), &FrameUpdateBudget::get_lane_max_deferred_frames);
+	ClassDB::bind_method(D_METHOD("get_deadline_overdue_lane_count"), &FrameUpdateBudget::get_deadline_overdue_lane_count);
 	ClassDB::bind_method(D_METHOD("get_lane_importance", "lane"), &FrameUpdateBudget::get_lane_importance);
 	ClassDB::bind_method(D_METHOD("get_lane_estimated_cost_us", "lane"), &FrameUpdateBudget::get_lane_estimated_cost_us);
+	ClassDB::bind_method(D_METHOD("get_lane_last_frame_cost_us", "lane"), &FrameUpdateBudget::get_lane_last_frame_cost_us);
 	ClassDB::bind_method(D_METHOD("get_reserved_estimated_cost_us"), &FrameUpdateBudget::get_reserved_estimated_cost_us);
 	ClassDB::bind_method(D_METHOD("current_frame_cost_us"), &FrameUpdateBudget::current_frame_cost_us);
 	ClassDB::bind_method(D_METHOD("last_frame_cost_us"), &FrameUpdateBudget::last_frame_cost_us);
@@ -146,6 +150,7 @@ bool FrameUpdateBudget::record_cost(const StringName &p_lane, int64_t p_elapsed_
 					(3 * lane.estimated_cost_us + p_elapsed_us + 2) / 4;
 		}
 		frame_cost_us = MIN(int64_t(1000000000), frame_cost_us + p_elapsed_us);
+		lane.frame_cost_us = MIN(int64_t(1000000000), lane.frame_cost_us + p_elapsed_us);
 		return true;
 	}
 	return false;
@@ -177,6 +182,39 @@ bool FrameUpdateBudget::set_lane_rate_scale(const StringName &p_lane, double p_s
 	return false;
 }
 
+bool FrameUpdateBudget::set_lane_max_deferred_frames(const StringName &p_lane, int p_frames) {
+	if (p_frames < 0 || p_frames > 120) {
+		return false;
+	}
+	for (int i = 0; i < lanes.size(); i++) {
+		if (lanes[i].name == p_lane) {
+			lanes.write[i].max_deferred_frames = p_frames;
+			return true;
+		}
+	}
+	return false;
+}
+
+int FrameUpdateBudget::get_lane_max_deferred_frames(const StringName &p_lane) const {
+	for (int i = 0; i < lanes.size(); i++) {
+		if (lanes[i].name == p_lane) {
+			return lanes[i].max_deferred_frames;
+		}
+	}
+	return -1;
+}
+
+int FrameUpdateBudget::get_deadline_overdue_lane_count() const {
+	int overdue = 0;
+	for (int i = 0; i < lanes.size(); i++) {
+		const Lane &lane = lanes[i];
+		if (lane.max_deferred_frames > 0 && lane.overdue_frames >= lane.max_deferred_frames) {
+			overdue++;
+		}
+	}
+	return overdue;
+}
+
 double FrameUpdateBudget::get_lane_rate_scale(const StringName &p_lane) const {
 	for (int i = 0; i < lanes.size(); i++) {
 		if (lanes[i].name == p_lane) {
@@ -204,6 +242,15 @@ int64_t FrameUpdateBudget::get_lane_estimated_cost_us(const StringName &p_lane) 
 	return -1;
 }
 
+int64_t FrameUpdateBudget::get_lane_last_frame_cost_us(const StringName &p_lane) const {
+	for (int i = 0; i < lanes.size(); i++) {
+		if (lanes[i].name == p_lane) {
+			return lanes[i].previous_frame_cost_us;
+		}
+	}
+	return -1;
+}
+
 void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 	const int next_quality = CLAMP(p_quality, 0, 3);
 	quality_changed = profile_dirty || next_quality != quality;
@@ -212,6 +259,12 @@ void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 	spent = 0;
 	previous_frame_cost_us = frame_cost_us;
 	frame_cost_us = 0;
+	// Rotate the at-most-64 completed CPU samples without heap allocations.
+	for (int i = 0; i < lanes.size(); i++) {
+		Lane &lane = lanes.write[i];
+		lane.previous_frame_cost_us = lane.frame_cost_us;
+		lane.frame_cost_us = 0;
+	}
 	last_updated = 0;
 	last_skipped = 0;
 	reserved_estimated_cost_us = 0;
@@ -268,10 +321,17 @@ void FrameUpdateBudget::begin_frame(double p_delta, int p_quality) {
 				// Overdue lanes get an occasional opportunity regardless of
 				// their predicted cost; runtime measured cost still gates
 				// subsequent ordinary updates for the current frame.
-				if (pass == 0 && forecast_exceeds_budget && lane.overdue_frames < 48) {
+				const bool deadline_due = lane.max_deferred_frames > 0 &&
+						lane.overdue_frames >= lane.max_deferred_frames;
+				if (pass == 0 && forecast_exceeds_budget && lane.overdue_frames < 48 && !deadline_due) {
 					continue;
 				}
-				const double priority = elapsed * lane.importance +
+				// An explicit soft deadline gives a due lane first chance
+				// at a scarce slot even if its learned CPU cost is high.
+				// The global slot/CPU budgets still gate normal execution.
+				const double priority = (deadline_due ?
+								1000.0 + double(lane.overdue_frames - lane.max_deferred_frames) * 0.1 : 0.0) +
+						elapsed * lane.importance +
 						double(MIN(lane.overdue_frames, 120)) * 0.012;
 				if (priority > best_priority + 0.000000000001) {
 					best = index;
@@ -358,6 +418,8 @@ void FrameUpdateBudget::reset() {
 		lanes.write[i].elapsed = 0.0;
 		lanes.write[i].overdue_frames = 0;
 		lanes.write[i].refresh_pending = false;
+		lanes.write[i].frame_cost_us = 0;
+		lanes.write[i].previous_frame_cost_us = 0;
 	}
 	quality = -1;
 	quality_changed = true;

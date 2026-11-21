@@ -8,6 +8,8 @@
 		Candidates outside [member min_distance] and [member max_distance] are excluded. When [member use_threat] is enabled, candidates closer than [member min_threat_distance] to [member threat_position] are also excluded.
 		Remaining points receive a distance score based on proximity to [member desired_distance] and, optionally, a safety score based on their distance to the threat. Both scores are scaled by [member distance_weight] and [member safety_weight].
 		When [member threat_positions] is nonempty and [member use_threat] is enabled, the query uses a bounded set of threat contexts instead of [member threat_position], with every candidate scored and filtered against its [b]nearest[/b] threat. This makes multi-actor safe-position queries possible without repeating a separate full query for each actor (similar to multi-location EQS contexts). If the array is empty, legacy single-threat behavior is unchanged. The context array is limited to 32 finite positions to bound worst-case CPU work. If threat filtering is disabled, both threat properties are ignored. Results are sorted by descending score with original input index as a deterministic tiebreaker. [member max_results] can limit the output count.
+		Optional [member max_vertical_difference] rejects candidates beyond the supplied world-space height threshold even with XZ-only distance, before scoring. The caller supplies candidate heights; no terrain data is read automatically.
+		Optional [member use_direction] enables a dot-product directional test from [member direction_origin] along [member direction_axis]. Candidates with direction dot outside the inclusive [member min_direction_dot] to [member max_direction_dot] range are discarded before scoring. The default maximum of 1.0 preserves the original one-sided cone. [member horizontal_only] projects the axis and displacement onto XZ. Undefined zero-length directions are rejected; disable the filter to preserve legacy behavior. This is a deterministic geometric test analogous to directional EQS tests, not a physics raycast.
 		Optional [member exclusion_positions] and [member min_exclusion_distance] reject candidates that are too close to up to 128 known world-space occupancy centers, using full 3D or XZ distance according to [member horizontal_only]. These positions must be collected by gameplay; the engine does not detect occupants itself.
 		This resource does not perform line-of-sight, physics, automatic occupancy discovery or navigation queries. Validate candidate reachability with [NavigationServer3D] or [PhysicsDirectSpaceState3D] as needed.
 	</description>
@@ -27,10 +29,80 @@
 			<param index="1" name="min_separation" type="float" />
 			<description>Returns up to [param count] ranked positions while requiring pairwise separation greater than or equal to [param min_separation]. Scores all candidates first, then greedily selects from the stable score/index order; a rejected nearby candidate does not count toward the requested limit. Uses XZ-only spacing when [member horizontal_only] is true and respects [member max_results]. Count must be 1–64 and separation finite and nonnegative. No navigation or geometry validation is performed.</description>
 		</method>
+		<method name="query_random_best_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<param index="0" name="best_percent" type="int" />
+			<param index="1" name="seed" type="int" />
+			<description>Deterministically selects at most one position, analogous to Unreal EQS's Single Random Item from Best 5% or 25% run modes. First find the maximum score among candidates passing all the same distance, height, directional, threat and occupancy tests as [method query], then uniformly mix [param seed] with each eligible source index and select the strongest hash. Eligible positions must score at least [code]best_score * (1 - best_percent / 100)[/code]. [param best_percent] must be 0–100; 0 accepts only maximum-scoring ties, 100 accepts every valid candidate. Returns an empty array for invalid percent or when no position passes the tests. The chosen point is stable for the same seed, candidate order and query parameters, without consuming gameplay RNG. The result is limited to 0 or 1 element regardless of [member max_results]. Complexity is O(N) scoring with two passes and O(1) scratch storage; it performs no physics or navigation checks.</description>
+		</method>
+		<method name="begin_incremental_top_positions">
+			<return type="bool" />
+			<param index="0" name="count" type="int" />
+			<description>Begin a time-sliceable top-K EQS query with 1–64 results. Captures the current candidates, scoring parameters, filters, result limit and context as a stable internal snapshot. Starts over if another incremental query is already active. The snapshot is transient and not serialized. Returns false for an invalid result count.</description>
+		</method>
+		<method name="step_incremental_top_positions">
+			<return type="bool" />
+			<param index="0" name="candidate_budget" type="int" />
+			<description>Scores at most [param candidate_budget] unvisited snapshot candidates (1–4096), preserving the exact stable score/index ordering of [method query_top_indices]. Returns true only when the entire query is complete; false indicates more work is needed or an invalid call. May be invoked in different physics frames by the game. This is a candidate-count budget rather than a millisecond timer.</description>
+		</method>
+		<method name="step_incremental_top_positions_timed">
+			<return type="bool" />
+			<param index="0" name="time_budget_us" type="int" />
+			<param index="1" name="max_candidates" type="int" />
+			<description>Evaluate a resumable EQS query using the monotonic engine timer. Process at least one and at most [param max_candidates] candidate items, stopping between items when the elapsed time reaches [param time_budget_us]. The time budget is a [b]soft limit[/b]; one expensive item can exceed it. Time limit must be 1–1000000 microseconds and candidate cap 1–4096. Return true when the query completes; results stay hidden until then. Uses the same scorer, filters and stable source indices as [method step_incremental_top_positions], with no background threads.</description>
+		</method>
+		<method name="get_incremental_last_step_candidates" qualifiers="const">
+			<return type="int" />
+			<description>Number of candidate items processed by the most recent valid incremental step. Resets on a new query, cancellation or subsequent valid step.</description>
+		</method>
+		<method name="get_incremental_last_step_us" qualifiers="const">
+			<return type="int" />
+			<description>Measured microseconds spent inside the most recent incremental scoring step, using the engine monotonic timer. The value includes scoring and time-check overhead, but not gameplay scripting outside the native call. Resets on cancellation and restart.</description>
+		</method>
+		<method name="suggest_incremental_step_size" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="time_budget_us" type="int" />
+			<param index="1" name="max_candidates" type="int" />
+			<description>Recommend a next-step candidate cap from the observed cumulative microseconds per candidate, reserving 20 percent of the time budget. Before timings are available, begin with at most three candidates. Returns between 1 and [param max_candidates] for valid bounds (1–1000000 us, 1–4096 candidates) or 0 on invalid input. The recommendation is advisory: [method step_incremental_top_positions_timed] still checks the actual clock. Device performance affects the suggested batch count, never the eventual ranked result.</description>
+		</method>
+		<method name="is_incremental_top_complete" qualifiers="const">
+			<return type="bool" />
+			<description>True when the current incremental EQS query has evaluated every source candidate. No incomplete results are exposed.</description>
+		</method>
+		<method name="get_incremental_processed_count" qualifiers="const">
+			<return type="int" />
+			<description>Number of source candidate items examined in the current incremental query (including those rejected by filters). Resets to zero on restart or cancellation.</description>
+		</method>
+		<method name="get_incremental_top_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>Returns the ranked original candidate indices for the completed incremental query, including distinct source identities for duplicate world coordinates. Empty while incomplete or cancelled. Equivalent to [method query_top_indices] on the context snapshot.</description>
+		</method>
+		<method name="get_incremental_top_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>Returns ranked candidate coordinates after the incremental query completes, using the stored snapshot even when the original query parameters have changed. Empty while incomplete or cancelled. Equivalent to [method query_top_positions] on the context snapshot.</description>
+		</method>
+		<method name="get_incremental_random_best_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<param index="0" name="best_percent" type="int" />
+			<param index="1" name="seed" type="int" />
+			<description>Chooses one deterministic Random Best position among the [b]retained[/b] fully scored incremental top-K items, without scoring a source candidate again. When the requested top-K contains every eligible candidate (and [member max_results] does not truncate it), this exactly matches [method query_random_best_positions] for the same query snapshot, seed and percentage. Returns empty until completion, on invalid percentage or when no candidate passes.</description>
+		</method>
+		<method name="cancel_incremental_top_positions">
+			<return type="void" />
+			<description>Discard incremental progress, ranked candidates and the frozen query context. Safe to call repeatedly. Does not alter any normal EQS query parameters.</description>
+		</method>
 		<method name="query_top_positions" qualifiers="const">
 			<return type="PackedVector3Array" />
 			<param index="0" name="count" type="int" />
 			<description>Returns 1–64 top-ranked positions in O(N*K) time and O(K) scratch storage, without creating result dictionaries or sorting the full candidate set. Uses identical filters, scores, stable source-index ties, and [member max_results] as [method query].</description>
+		</method>
+		<method name="schedule_query_mask" qualifiers="static">
+			<return type="PackedByteArray" />
+			<param index="0" name="agent_count" type="int" />
+			<param index="1" name="tick" type="int" />
+			<param index="2" name="regular_budget" type="int" />
+			<param index="3" name="urgent" type="PackedByteArray" default="PackedByteArray()" />
+			<description>Builds a deterministic work-admission mask for an [b]ordered, stable cohort[/b] of AI requests, inspired by the time-sliced EQS manager in Unreal Engine. Returns exactly [param agent_count] bytes, with 1 meaning the caller may perform an EQS query this tick. Regular requests are admitted through a rotating contiguous window of up to [param regular_budget] slots (0–64); [param urgent] flags may additionally bypass this regular quota to prevent stuck ownership recovery. The urgent mask must be empty or contain exactly one 0/1 byte for each agent. Accepts 0–4096 agents and nonnegative ticks; invalid input returns an empty array. No game time, callbacks, threads, physics, navmesh or scene access occurs. The caller owns the stable ordering, decides urgency and must continue updating gameplay simulation even when a query is deferred. This budgets [i]query count[/i], not CPU microseconds, and does not incrementally execute a single long query.</description>
 		</method>
 		<method name="sample_ring" qualifiers="static">
 			<return type="PackedVector3Array" />
@@ -39,6 +111,47 @@
 			<param index="2" name="count" type="int" />
 			<param index="3" name="phase" type="float" default="0.0" />
 			<description>Generates [param count] evenly spaced positions in the XZ plane, starting at [param phase] radians. Counts of 1 to 4096 are supported. The input center remains unchanged.</description>
+		</method>
+		<method name="sample_donut" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="inner_radius" type="float" />
+			<param index="2" name="outer_radius" type="float" />
+			<param index="3" name="ring_count" type="int" />
+			<param index="4" name="points_per_ring" type="int" />
+			<param index="5" name="phase" type="float" default="0.0" />
+			<param index="6" name="spiral" type="bool" default="false" />
+			<description>Produces deterministic, concentric candidate rings on the XZ plane from [param inner_radius] to [param outer_radius], inclusive. A single ring uses the outer radius. [param phase] rotates every ring; when [param spiral] is true, successive rings receive a small additional offset to avoid radial spokes. Points are emitted inner-to-outer, then angle order. Accepts 1–256 rings and 1–4096 points per ring, with at most 65536 points in total; invalid or nonfinite parameters return an empty array. Geometry generation alone does not project points onto a NavMesh, test collision, or validate terrain.</description>
+		</method>
+		<method name="sample_cone" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="direction" type="Vector3" />
+			<param index="2" name="inner_radius" type="float" />
+			<param index="3" name="outer_radius" type="float" />
+			<param index="4" name="ring_count" type="int" />
+			<param index="5" name="points_per_ring" type="int" />
+			<param index="6" name="cone_degrees" type="float" default="90.0" />
+			<param index="7" name="include_center" type="bool" default="false" />
+			<description>Generates concentric rays within an oriented XZ-plane sector, analogous to Unreal EQS Points: Cone. [param cone_degrees] is the [b]full[/b] aperture from 0 to 360 degrees. Each ring is generated from left edge to right edge; one ray is centered on [param direction], and a single ring uses the outer radius. [param include_center] prepends the context location once. Input direction requires a nonzero XZ projection, all positions and radii must be finite, radii must satisfy 0 &lt;= inner_radius &lt;= outer_radius, and counts must be 1–256 rings and 1–4096 rays per ring, at most 65536 total points. Invalid inputs return no points. This is geometric candidate generation, not visibility tracing, physics or navigation projection.</description>
+		</method>
+		<method name="sample_oriented_grid" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="forward" type="Vector3" />
+			<param index="2" name="half_extents" type="Vector2" />
+			<param index="3" name="spacing" type="float" />
+			<param index="4" name="max_points" type="int" default="4096" />
+			<description>Generates a deterministic rectangular grid on the XZ plane rotated so local +Z points along the XZ projection of [param forward] and local +X is perpendicular to the right. As in [method sample_grid], [param half_extents] controls the local X/Z size and points are emitted in row-major order. Positive finite spacing, finite center/direction/extents, a nonzero horizontal forward vector, nonnegative extents, and a maximum allocation of 65536 points are required. Invalid inputs return an empty array. Does not test pathfinding, physics, terrain or actor occupancy.</description>
+		</method>
+		<method name="sample_fibonacci_annulus" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="inner_radius" type="float" />
+			<param index="2" name="outer_radius" type="float" />
+			<param index="3" name="count" type="int" />
+			<param index="4" name="phase" type="float" default="0.0" />
+			<description>Generates deterministic XZ candidates distributed approximately uniformly in [b]area[/b] between the inclusive [param inner_radius] and [param outer_radius], with a golden-angle angular sequence and an optional starting [param phase] in radians. Unlike evenly spaced concentric rings, the samples do not align in spokes, and a single call covers the entire annulus. Candidates keep the center's Y coordinate. Counts must be 1–65536, radii must be finite, nonnegative, ordered and small enough to square without overflow, and phase/center must be finite; invalid inputs return an empty array. This is geometric sampling only: it does not validate navigation, collision, terrain or actor occupancy.</description>
 		</method>
 		<method name="sample_grid" qualifiers="static">
 			<return type="PackedVector3Array" />
@@ -54,8 +167,14 @@
 		<member name="origin" type="Vector3" default="Vector3(0, 0, 0)">World-space origin from which distances are measured.</member>
 		<member name="min_distance" type="float" default="0.0">Minimum distance from [member origin] inclusive.</member>
 		<member name="max_distance" type="float" default="100.0">Maximum distance from [member origin] inclusive.</member>
+		<member name="max_vertical_difference" type="float" default="0.0">Optional maximum absolute world-space Y difference between [member origin] and the candidate, inclusive. Zero disables this test. It is independent of [member horizontal_only] and applies to all query modes. Negative/non-finite updates are rejected without changing the previous value. Callers must supply terrain-projected candidates; this does not sample terrain, check slope, or perform navmesh pathfinding.</member>
 		<member name="desired_distance" type="float" default="0.0">Preferred travel distance from [member origin].</member>
 		<member name="horizontal_only" type="bool" default="false">Use XZ distance instead of full 3D distance, useful for ground AI.</member>
+		<member name="use_direction" type="bool" default="false">Enable an optional direction dot-product filter before scoring. All query modes share this filter.</member>
+		<member name="direction_origin" type="Vector3" default="Vector3(0, 0, 0)">Independent world-space origin for directional evaluation; must be finite.</member>
+		<member name="direction_axis" type="Vector3" default="Vector3(1, 0, 0)">Finite nonzero forward vector for the direction filter, normalized during evaluation. In [member horizontal_only] mode its XZ projection must also be nonzero to accept candidates.</member>
+		<member name="min_direction_dot" type="float" default="-1.0">Inclusive minimum cosine/dot in [-1, 1] between the forward axis and direction from [member direction_origin] to the candidate. Must be no greater than [member max_direction_dot]. Zero allows the front hemisphere including the sides; one allows only directly forward positions. Invalid updates are rejected.</member>
+		<member name="max_direction_dot" type="float" default="1.0">Inclusive maximum cosine/dot in [-1, 1]. Restrict this below 1 to exclude straight-ahead positions and form an angular band (e.g. -0.25 to 0.75 for lateral flanking). Must be at least [member min_direction_dot]. Nonfinite, out-of-range and inverted updates preserve the prior value.</member>
 		<member name="use_threat" type="bool" default="false">Enable filtering and scoring against [member threat_position].</member>
 		<member name="threat_position" type="Vector3" default="Vector3(0, 0, 0)">World-space location of a single threat, used when [member threat_positions] is empty.</member>
 		<member name="threat_positions" type="PackedVector3Array" default="PackedVector3Array()">Optional multi-actor threat contexts. A candidate's [code]threat_distance[/code], [member min_threat_distance] filtering and [member safety_weight] score all use the distance to the [i]nearest[/i] context point. Coordinates must be finite and the array is limited to 32 entries; invalid updates are rejected without modifying the previous array. An empty array uses [member threat_position] instead. [member horizontal_only] also applies to these distances. Requires [member use_threat] to be enabled.</member>
@@ -65,5 +184,6 @@
 		<member name="distance_weight" type="float" default="1.0">Nonnegative weight for desired-distance score.</member>
 		<member name="safety_weight" type="float" default="0.0">Nonnegative weight for threat-distance score when threat filtering is enabled.</member>
 		<member name="max_results" type="int" default="0">Maximum ranked results to return; 0 means unlimited.</member>
+		<member name="candidate_bonuses" type="PackedFloat32Array" default="PackedFloat32Array()">Optional per-candidate tactical score offsets in the range -1 to 1. The array must be empty or match [member candidates] in size. An empty array adds zero to every score. Offsets are applied [b]after[/b] all safety and distance filters and cannot make a rejected point eligible. Changing the candidate count clears existing offsets. All ranking APIs use the same offsets and stable index tie breaking.</member>
 	</members>
 </class>

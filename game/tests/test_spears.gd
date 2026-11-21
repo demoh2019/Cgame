@@ -65,6 +65,7 @@ func run(t) -> void:
 	t.current = "authoritative game craft requires profession and workstation"
 	var world := WorldGen.new(510)
 	var server := GameServer.new(world, 510)
+	server.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var player = server.add_player(510, "SpearBearer")
 	player.inventory = Inventory.new()
 	player.inventory.add("plank_1", 2)

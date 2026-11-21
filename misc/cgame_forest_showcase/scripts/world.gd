@@ -217,6 +217,9 @@ func _create_streaming_world() -> void:
     world_partition = WorldPartition3D.new()
     world_partition.name = "WorldPartition_32m"
     world_partition.cell_size = CHUNK_EDGE
+    # Quest heading queries the same grid corridor on repeated HUD updates.
+    # Native LRU stores registered topology paths independently of live cells.
+    world_partition.max_cell_path_cache_entries = 64
     # Two rings of streamed cells: full-detail near, low-cost silhouettes far.
     world_partition.load_radius = 2
     world_partition.unload_radius = 3
@@ -576,9 +579,13 @@ func _refresh_hud() -> void:
     var collidable: int = world_partition.get_physics_active_cell_count() if world_partition != null else 0
     var nav_regions: int = world_partition.get_navigation_active_cell_count() if world_partition != null else 0
     var nav_dirty: int = world_partition.get_navigation_dirty_cell_count() if world_partition != null else 0
+    var nav_triangles: int = world_partition.get_last_navigation_tile_retested_triangle_count() if world_partition != null else 0
     var nav_updates: int = world_partition.get_navigation_updates_used_this_frame() if world_partition != null else 0
     var nav_budget: int = world_partition.max_navigation_updates_per_physics_frame if world_partition != null else 0
     var quest_text: String = _quest_hud_text()
+    var path_hits: int = world_partition.get_cell_path_cache_hit_count() if world_partition != null else 0
+    var path_misses: int = world_partition.get_cell_path_cache_miss_count() if world_partition != null else 0
+    var path_entries: int = world_partition.get_cell_path_cache_entry_count() if world_partition != null else 0
     var enemy_count: int = encounters.call("get_alive_count") if encounters != null else 0
     var travel_text: String = travel_controller.get_status_text() if travel_controller != null and travel_controller.active else "F10: к реликвии  F11: в лагерь"
     var predicted_text: String = "OFF" if not predictive_streaming else "—"
@@ -589,9 +596,10 @@ func _refresh_hud() -> void:
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   закреплено: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pinned, pending, inflight, failed, current_region.x, current_region.y] \
-        + "Упреждающая загрузка: %s   LOD дальних: %d   симуляция: %d   коллизии: %d   NavMesh: %d   пересборка: %d   навигация: %d/%d\n" % [predicted_text, distant, simulated, collidable, nav_regions, nav_dirty, nav_updates, nav_budget] \
+        + "Упреждающая загрузка: %s   LOD дальних: %d   симуляция: %d   коллизии: %d   NavMesh: %d   пересборка: %d   треугольники: %d/512   навигация: %d/%d\n" % [predicted_text, distant, simulated, collidable, nav_regions, nav_dirty, nav_triangles, nav_updates, nav_budget] \
         + "Атмосфера: %02d:%02d  %s  %s (F6/F7/F8)\n" % [int(atmosphere_clock.day_hours), int(fmod(atmosphere_clock.day_hours, 1.0) * 60.0), atmosphere_clock.get_weather_name(), "ПАУЗА" if atmosphere_clock.paused else "цикл"] \
         + quest_text + "\n" \
+        + "Кеш секторов: попадания %d   поиски %d   записи %d/64\n" % [path_hits, path_misses, path_entries] \
         + "Здоровье: %d/100   Противники: %d   побеждено: %d   F/ЛКМ: удар\n" % [player_health, enemy_count, defeated_mobs.size()] \
         + travel_text
     if collected >= CRYSTAL_TOTAL:

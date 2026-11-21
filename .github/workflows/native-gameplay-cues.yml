@@ -1,0 +1,78 @@
+name: Native Gameplay Cues and Albion status VFX parity
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/gameplay_cue_queue.*'
+      - 'modules/gameplay_fx/doc_classes/GameplayCueQueue.xml'
+      - 'modules/gameplay_fx/config.py'
+      - 'modules/gameplay_fx/register_types.cpp'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'game/scripts/client/gameplay_cues.gd'
+      - 'game/scripts/client/engine_features.gd'
+      - 'game/scripts/client/entity_view.gd'
+      - 'game/tests/test_gameplay_cues.gd'
+      - 'game/tests/run_gameplay_cues.gd'
+      - '.github/workflows/native-gameplay-cues.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/gameplay_cue_queue.*'
+      - 'modules/gameplay_fx/doc_classes/GameplayCueQueue.xml'
+      - 'modules/gameplay_fx/config.py'
+      - 'modules/gameplay_fx/register_types.cpp'
+      - 'modules/gameplay_fx/tests/test_gameplay_fx.h'
+      - 'game/scripts/client/gameplay_cues.gd'
+      - 'game/scripts/client/engine_features.gd'
+      - 'game/scripts/client/entity_view.gd'
+      - 'game/tests/test_gameplay_cues.gd'
+      - 'game/tests/run_gameplay_cues.gd'
+      - '.github/workflows/native-gameplay-cues.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cues:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Run native CueQueue regression tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*CueQueue*" 2>&1 | tee cues-native.log
+      - name: Import Albion After resources and GDScript
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee cues-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' cues-import.log; then exit 1; fi
+      - name: Run native/stock status VFX parity
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_gameplay_cues.gd 2>&1 | tee cues-game.log
+          grep -E '^GAMEPLAY CUES TOTAL: [0-9]+ checks, 0 failures$' cues-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' cues-game.log; then exit 1; fi
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-gameplay-cues-logs
+          if-no-files-found: ignore
+          path: |
+            cues-native.log
+            cues-import.log
+            cues-game.log

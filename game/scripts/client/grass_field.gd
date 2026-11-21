@@ -4,6 +4,7 @@ extends RefCounted
 ## and near the edge of the view the blades sink into the ground instead of popping. Client-only: nothing blocks anyone.
 
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const RoadMaskMaxFilter = preload("res://scripts/client/road_mask_max_filter.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 
 const SPACING := 0.55 # Metres between tuft candidates (jittered): dense enough that the soil barely shows.
@@ -205,6 +206,7 @@ void fragment() {
 }
 """
 
+static var rivers = null # world.rivers (world_rivers.gd), set by the client: nothing grows in rivers or lakes.
 static var _meshes: Dictionary = {} # Blade count -> shared ArrayMesh; all tiles reuse three GPU meshes.
 static var _material: ShaderMaterial
 
@@ -541,6 +543,7 @@ class Source:
 	var biomes: PackedStringArray
 	var texels: int
 	var road: PackedByteArray
+	var road_clearance := PackedByteArray() # Expanded mask for vegetation only.
 	var patches: PackedVector4Array
 	var clumps: Clumps
 	var clear := PackedVector3Array() # (x, z, radius) of world objects nothing grows through.
@@ -553,6 +556,11 @@ class Source:
 		biomes = p_biomes
 		texels = p_texels
 		road = p_road
+		# The visible road mask is unchanged. Only cosmetic vegetation uses
+		# the expanded 2 m shoulder, baked once when a chunk is streamed.
+		if not road.is_empty():
+			var side: int = int(Defs.CHUNK_SIZE)
+			road_clearance = RoadMaskMaxFilter.compute(road, Vector2i(side, side), 2)
 		patches = p_patches
 		clumps = Clumps.new(origin, Defs.CHUNK_SIZE)
 
@@ -592,7 +600,8 @@ static func sample(source: Source, lx: float, lz: float) -> Dictionary:
 	var wz: float = source.origin.y + lz
 	if Vector2(wx, wz).length() < 21.0:
 		return {"ok": false}
-	if not source.road.is_empty() and source.road[mini(int(lz), int(size) - 1) * int(size) + mini(int(lx), int(size) - 1)] > 40:
+	var exclusion: PackedByteArray = source.road_clearance if not source.road_clearance.is_empty() else source.road
+	if not exclusion.is_empty() and exclusion[mini(int(lz), int(size) - 1) * int(size) + mini(int(lx), int(size) - 1)] > 40:
 		return {"ok": false}
 	var samples: int = source.samples
 	var height_step: float = size / float(samples - 1)
@@ -606,6 +615,8 @@ static func sample(source: Source, lx: float, lz: float) -> Dictionary:
 	var h11: float = source.heights[(iz + 1) * samples + ix + 1]
 	var h: float = lerpf(lerpf(h00, h10, fx), lerpf(h01, h11, fx), fz)
 	if h < Defs.WATER_LEVEL + 0.35 or h > 86.0 or absf(h10 - h00) > 1.6 or absf(h01 - h00) > 1.6:
+		return {"ok": false}
+	if _in_river(wx, wz, h):
 		return {"ok": false}
 	if under_object(wx, wz, source.clear):
 		return {"ok": false}
@@ -656,8 +667,14 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 			if Vector2(wx, wz).length() < 21.0:
 				continue # The hub plaza.
 			# Old tracks are overgrown too, only thinner, so they still read as a way through.
-			var on_road: bool = not source.road.is_empty() and source.road[mini(int(lz), int(size) - 1) * int(size) + mini(int(lx), int(size) - 1)] > 40
+			var pixel: int = mini(int(lz), int(size) - 1) * int(size) + mini(int(lx), int(size) - 1)
+			var on_road: bool = not source.road.is_empty() and source.road[pixel] > 40
 			if on_road and rng.randf() > 0.12:
+				continue
+			# Keep some grass at the softened track shoulder, but suppress
+			# clumps that would overhang the visible road's edge.
+			var on_shoulder: bool = not source.road_clearance.is_empty() and source.road_clearance[pixel] > 40
+			if not on_road and on_shoulder and rng.randf() > 0.35:
 				continue
 			# Nothing grows out of a crate, log pile, ruin wall or rock.
 			if not tile_clear.is_empty() and under_object(wx, wz, tile_clear):
@@ -674,7 +691,7 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 			var h01: float = heights[(iz + 1) * samples + ix]
 			var h11: float = heights[(iz + 1) * samples + ix + 1]
 			var h: float = lerpf(lerpf(h00, h10, fx), lerpf(h01, h11, fx), fz)
-			if h < Defs.WATER_LEVEL + 0.35 or h > 86.0:
+			if h < Defs.WATER_LEVEL + 0.35 or h > 86.0 or _in_river(wx, wz, h):
 				continue
 			# Steep ground (cliffs) stays bare rock.
 			if absf(h10 - h00) > 1.6 or absf(h01 - h00) > 1.6:
@@ -772,3 +789,13 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 	instance.visibility_range_end = FADE_END + 22.0
 	instance.custom_aabb = AABB(Vector3(tile_x, low - 0.2, tile_z), Vector3(TILE, high - low + 1.4, TILE))
 	return instance
+
+
+## Wet river or lake bed here (cheap: chunks without rivers skip the test).
+static func _in_river(wx: float, wz: float, h: float) -> bool:
+	if rivers == null:
+		return false
+	var cell := Vector2i(floori(wx / 64.0), floori(wz / 64.0))
+	if rivers.segments_in_cell(cell).is_empty() and rivers.lakes_in_cell(cell).is_empty():
+		return false
+	return rivers.surface_at(wx, wz) > h - 0.3

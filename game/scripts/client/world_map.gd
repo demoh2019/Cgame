@@ -13,6 +13,10 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
+const GradientBatch = preload("res://scripts/client/gradient_batch.gd")
+const ImageBatch = preload("res://scripts/client/image_batch.gd")
+const MaskDistanceField = preload("res://scripts/client/mask_distance_field.gd")
+const HeightfieldGradients = preload("res://scripts/client/heightfield_gradients.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const ExpeditionAtlas = preload("res://scripts/shared/expedition_atlas.gd")
 
@@ -47,11 +51,17 @@ const RING_COLORS := [Color("#d9b44a"), Color("#d98a3a"), Color("#c0503a")]
 const RING_NAMES := ["SAFE LANDS", "BORDERLANDS", "WILDS"]
 
 var client
+## Assigned by online_main after the native streamer exists. Optional on
+## stock Godot/older Cgame binaries, so map markers remain fully usable.
+var world_streamer: WorldStreamer
 var _image: Image
+var _water_gradient: Gradient
 var _texture: ImageTexture
 var _heights := PackedFloat32Array()
 var _biomes := PackedByteArray()
 var _lush := PackedFloat32Array()
+var _shore_distances := PackedByteArray()
+var _height_slopes := PackedVector2Array()
 var _sampled_rows := 0
 var _painted_rows := 0
 var _sites: Array = []
@@ -76,12 +86,15 @@ func setup(p_client) -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	set_anchors_preset(Control.PRESET_FULL_RECT)
+	_water_gradient = GradientBatch.make_gradient(WATER_SHALLOW, WATER_DEEP)
 	_image = Image.create(PIXELS, PIXELS, false, Image.FORMAT_RGB8)
 	_image.fill(PAPER_DARK)
 	_texture = ImageTexture.create_from_image(_image)
 	_heights.resize(PIXELS * PIXELS)
 	_biomes.resize(PIXELS * PIXELS)
 	_lush.resize(PIXELS * PIXELS)
+	_shore_distances = PackedByteArray()
+	_height_slopes = PackedVector2Array()
 	var serif := SystemFont.new()
 	serif.font_names = PackedStringArray(["Georgia", "Palatino", "Book Antiqua", "Times New Roman", "Liberation Serif", "serif"])
 	serif.font_weight = 600
@@ -241,6 +254,16 @@ func _process(delta: float) -> void:
 		_sampled_rows += 1
 		rows -= 1
 	if _sampled_rows == PIXELS and _painted_rows < PIXELS:
+		# Compute the entire eight-connected coast distance field once, after
+		# the last height sample but before drawing the first chart row.
+		if _shore_distances.is_empty():
+			_shore_distances = MaskDistanceField.from_heights(
+					_heights, Vector2i(PIXELS, PIXELS), Defs.WATER_LEVEL - 0.4, 7)
+		# Landscape gradients are also generated once after sampling. Reuse
+		# their dx/dy for all hillshade pixels instead of repeated _h reads.
+		if _height_slopes.is_empty():
+			_height_slopes = HeightfieldGradients.compute(
+					_heights, Vector2i(PIXELS, PIXELS), step)
 		var painted := 0
 		while painted < PAINT_ROWS_PER_FRAME and _painted_rows < PIXELS:
 			_paint_row(_painted_rows)
@@ -258,26 +281,42 @@ func _is_water(x: int, y: int) -> bool:
 	return _h(x, y) < Defs.WATER_LEVEL - 0.4
 
 
-## Pixels from this water pixel to the nearest land (up to 7), sampled along eight directions.
+## Nearest coastline in eight-connected raster pixels (Chebyshev metric).
+## 255 means no land within the seven-pixel coastline search radius.
 func _shore_distance(x: int, y: int) -> int:
-	for radius in range(1, 8):
-		for direction in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 1), Vector2i(-1, 1), Vector2i(1, -1), Vector2i(-1, -1)]:
-			if not _is_water(x + direction.x * radius, y + direction.y * radius):
-				return radius
-	return 99
+	if _shore_distances.size() != PIXELS * PIXELS:
+		return 255
+	return _shore_distances[clampi(y, 0, PIXELS - 1) * PIXELS + clampi(x, 0, PIXELS - 1)]
 
 
 func _paint_row(row: int) -> void:
-	var cell: float = SPAN / float(PIXELS)
 	var zenith := deg_to_rad(45.0)
 	var azimuth := deg_to_rad(135.0) # 315° compass (north-west) in maths angles.
+	# Compute coast/depth samples once, then evaluate the entire water-color ramp
+	# in one native call instead of per-pixel script/native calls.
+	var water_offsets := PackedFloat32Array()
+	var water_shores := PackedInt32Array()
+	water_shores.resize(PIXELS)
+	for column in PIXELS:
+		var water_height: float = _h(column, row)
+		if water_height < Defs.WATER_LEVEL - 0.4:
+			var shore: int = _shore_distance(column, row)
+			var depth: float = clampf(-water_height / 40.0, 0.0, 1.0)
+			water_shores[column] = shore
+			water_offsets.append(clampf(maxf(depth, float(shore) / 7.0), 0.0, 1.0))
+	var water_colors := PackedColorArray()
+	if not water_offsets.is_empty():
+		water_colors = GradientBatch.sample_many(_water_gradient, water_offsets)
+	var water_index := 0
+	var row_colors := PackedColorArray()
+	row_colors.resize(PIXELS)
 	for column in PIXELS:
 		var h: float = _h(column, row)
 		var color: Color
 		if h < Defs.WATER_LEVEL - 0.4:
-			var shore: int = _shore_distance(column, row)
-			var depth: float = clampf(-h / 40.0, 0.0, 1.0)
-			color = WATER_SHALLOW.lerp(WATER_DEEP, clampf(maxf(depth, float(shore) / 7.0), 0.0, 1.0))
+			var shore: int = water_shores[column]
+			color = water_colors[water_index]
+			water_index += 1
 			if shore == 3:
 				color = color.lerp(RIPPLE, 0.35)
 			elif shore == 6:
@@ -289,9 +328,11 @@ func _paint_row(row: int) -> void:
 				color = color.lerp(STEPPE, clampf(0.75 - _lush[row * PIXELS + column] * 1.1, 0.0, 0.8))
 			if h > 90.0:
 				color = color.lerp(SNOW, clampf((h - 90.0) / 30.0, 0.0, 1.0))
-			# Hillshade (Horn-style central differences), exaggerated ×3 so hills read on a small map.
-			var dzdx: float = (_h(column + 1, row) - _h(column - 1, row)) / (2.0 * cell)
-			var dzdy: float = (_h(column, row + 1) - _h(column, row - 1)) / (2.0 * cell)
+			# Precomputed central-difference slope, exaggerated ×3 to keep
+			# the parchment hillshade art direction on this small chart.
+			var gradient: Vector2 = _height_slopes[row * PIXELS + column]
+			var dzdx: float = gradient.x
+			var dzdy: float = gradient.y
 			var slope: float = atan(3.0 * sqrt(dzdx * dzdx + dzdy * dzdy))
 			var aspect: float = atan2(dzdy, -dzdx)
 			var shade: float = maxf(cos(zenith) * cos(slope) + sin(zenith) * sin(slope) * cos(azimuth - aspect), 0.0)
@@ -309,7 +350,8 @@ func _paint_row(row: int) -> void:
 		color = color.lerp(color * PAPER, 0.25)
 		var grain: float = float(WorldGen.mix(column, row, 5, 9) % 1000) / 1000.0
 		color = color * (0.96 + grain * 0.08)
-		_image.set_pixel(column, row, color)
+		row_colors[column] = color
+	ImageBatch.set_row(_image, row, row_colors)
 
 
 # --- View -----------------------------------------------------------------------------------------------------------
@@ -466,6 +508,33 @@ func _draw_navigation(objectives: Array[Dictionary], font: Font) -> void:
 
 
 ## The expedition atlas: this player's goals as clickable rows, and how far the waypoint is.
+## World Partition-style source completion is read-only: do not request
+## chunks from map draw or display distant pins as loaded.
+static func waypoint_streaming_caption(p_streamer: WorldStreamer,
+		p_waypoint: Vector2, p_player: Vector2) -> String:
+	if p_streamer == null or not p_waypoint.is_finite() or not p_player.is_finite():
+		return ""
+	if not p_streamer.has_method("is_auxiliary_source_ready") or \
+			not p_streamer.has_method("get_auxiliary_source_progress") or \
+			not p_streamer.has_method("get_auxiliary_source_failed_count"):
+		return ""
+	if not p_streamer.has_auxiliary_source():
+		return ""
+	if p_player.distance_to(p_waypoint) > p_streamer.load_radius + p_streamer.cell_size:
+		return ""
+	var source: Vector3 = p_streamer.get_auxiliary_source_position()
+	if Vector2(source.x, source.z).distance_to(p_waypoint) > 0.05:
+		return "" # Stale source from the previous private waypoint.
+	if p_streamer.get_auxiliary_source_failed_count() > 0:
+		return "Scenery prefetch: retrying"
+	if p_streamer.is_auxiliary_source_ready(true):
+		return "Scenery prefetch: ready"
+	if p_streamer.is_auxiliary_source_ready():
+		return "Terrain ready; details finish on approach"
+	return "Scenery prefetch: %d%%" % floori(
+		clampf(p_streamer.get_auxiliary_source_progress(true), 0.0, 1.0) * 100.0)
+
+
 func _draw_atlas(objectives: Array[Dictionary], font: Font, view: Vector2) -> void:
 	_objective_hitboxes.clear()
 	var top: float = 76.0 + 46.0 + float(KIND_COLORS.size()) * 24.0 + 92.0 + 16.0
@@ -510,6 +579,13 @@ func _draw_atlas(objectives: Array[Dictionary], font: Font, view: Vector2) -> vo
 				hint = "Following %s: %d m %s   (Right click: clear)" % [str(tracked["label"]), distance, bearing]
 	var width: float = font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
 	_halo_text(font, Vector2(_frame.get_center().x - width * 0.5, view.y - 16.0), hint, 14, Color("#e8c46a"), Color(0.07, 0.06, 0.05), 4)
+	if waypoint.is_finite() and client.you.has("x") and client.you.has("z"):
+		var caption: String = waypoint_streaming_caption(world_streamer, waypoint,
+			Vector2(float(client.you["x"]), float(client.you["z"])))
+		if not caption.is_empty():
+			var caption_width: float = font.get_string_size(caption, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+			_halo_text(font, Vector2(_frame.get_center().x - caption_width * 0.5, view.y - 38.0),
+				caption, 12, Color("#9cd8cd"), Color(0.07, 0.06, 0.05), 3)
 
 
 func _draw_vignette() -> void:

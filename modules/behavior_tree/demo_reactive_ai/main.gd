@@ -25,12 +25,15 @@ var current_action := "patrol"
 var last_status := BehaviorTreeTask.RUNNING
 var last_debug_snapshot: Dictionary = {}
 var last_profile_snapshot: Dictionary = {}
+var last_trace_snapshot: Dictionary = {}
 var brain := BehaviorTreeRunner.new()
 var sensor := AIVisualSensor2D.new()
 var hearing := AIHearingSensor2D.new()
+var stimulus_history := AIStimulusHistory2D.new()
 var navigation := AStarGrid2D.new()
 var update_scheduler := AIUpdateScheduler.new()
 var navigation_profiler := AIExecutionProfiler.new()
+var player_action_cooldowns := AIActionCooldowns.new()
 var last_navigation_profile: Dictionary = {}
 var ai_tick_index := 0
 var navigation_path := PackedVector2Array()
@@ -42,6 +45,13 @@ var pending_shout := false
 var noise_visual_timer := 0.0
 var last_noise_position := Vector2.ZERO
 var hud: Label
+var trace_panel: PanelContainer
+var trace_tree: Tree
+var trace_title: Label
+var trace_history_label: Label
+var trace_hotspots_label: Label
+var trace_replay_tick: int = -1 # -1 follows the latest live AI tick.
+var trace_changes_only: bool = false
 
 
 func _ready() -> void:
@@ -76,11 +86,13 @@ func _ready() -> void:
     priorities.add_task(_make_guarded_behavior(_make_health_guard(), "retreat"))
     priorities.add_task(_make_behavior("target_visible", "chase"))
     priorities.add_task(_make_behavior("target_remembered", "investigate"))
-    priorities.add_task(_make_behavior("sound_remembered", "investigate_sound"))
+    priorities.add_task(_make_timed_sound_investigation())
     priorities.add_task(_make_action("patrol"))
     brain.root_task = priorities
     brain.auto_tick = false
     brain.profiling_enabled = true  # Demo opt-in; gameplay uses disabled-by-default runners.
+    brain.trace_enabled = true  # Per-node inspector, independently toggled with T.
+    brain.set_trace_history_capacity(16) # Explicitly opt into a bounded replay buffer.
     add_child(brain)
 
     hud = Label.new()
@@ -88,6 +100,7 @@ func _ready() -> void:
     hud.add_theme_font_size_override("font_size", 17)
     hud.add_theme_color_override("font_color", Color(0.92, 0.94, 1.0))
     add_child(hud)
+    _build_trace_tree_panel()
     _update_hud()
 
 
@@ -118,6 +131,20 @@ func _make_behavior(flag: StringName, action_name: String) -> BehaviorTreeReacti
     return _make_guarded_behavior(_make_condition(flag), action_name)
 
 
+func _make_timed_sound_investigation() -> BehaviorTreeReactiveSequence:
+    # A sound investigation has a deterministic hard task deadline, so a
+    # stuck running child cannot retain the NPC indefinitely.
+    var branch := _make_behavior(&"sound_remembered", "investigate_sound")
+    var timeout := BehaviorTreeTimeout.new()
+    timeout.duration = 0.8
+    var search := BehaviorTreeWait.new()
+    search.duration = 2.0
+    timeout.task = search
+    branch.remove_task(branch.get_task_count() - 1)
+    branch.add_task(timeout)
+    return branch
+
+
 func _make_guarded_behavior(guard: BehaviorTreeTask, action_name: String) -> BehaviorTreeReactiveSequence:
     var sequence := BehaviorTreeReactiveSequence.new()
     sequence.add_task(guard)
@@ -129,6 +156,7 @@ func _make_guarded_behavior(guard: BehaviorTreeTask, action_name: String) -> Beh
 
 
 func _physics_process(delta: float) -> void:
+    player_action_cooldowns.advance_time(delta)
     var movement := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
     var motion := movement * PLAYER_SPEED * delta
     player_position = _move_around_wall(player_position, motion, PLAYER_RADIUS)
@@ -143,7 +171,8 @@ func _physics_process(delta: float) -> void:
         footstep_timer = 0.0
     if pending_shout:
         pending_shout = false
-        _report_player_noise(1.0)
+        if player_action_cooldowns.try_trigger(&"shout", 0.8):
+            _report_player_noise(1.0)
 
     ai_timer += delta
     if ai_timer >= AI_TICK_SECONDS:
@@ -151,7 +180,12 @@ func _physics_process(delta: float) -> void:
         ai_tick_index += 1
         # World physics determines LOS; the reusable C++ sensor evaluates the
         # current FOV, range hysteresis, and last-known-position memory.
+        stimulus_history.advance_time(AI_TICK_SECONDS)
         sensor.observe(enemy_position, enemy_forward, player_position, _has_line_of_sight(), AI_TICK_SECONDS)
+        if sensor.is_target_visible():
+            # Record a source only after native FOV, range and physics LOS.
+            stimulus_history.record_stimulus(AIStimulusHistory2D.SIGHT,
+                player_position, 1.0, sensor.memory_duration, 1)
         hearing.advance_time(AI_TICK_SECONDS)
         # A completed runner is explicitly restarted: resource-based runners
         # cache SUCCESS/FAILURE until reset, unlike the previous Dict runtime.
@@ -170,6 +204,8 @@ func _physics_process(delta: float) -> void:
         last_status = brain.tick(AI_TICK_SECONDS)
         last_debug_snapshot = brain.get_debug_snapshot()
         last_profile_snapshot = brain.get_profile_snapshot()
+        last_trace_snapshot = brain.get_trace_snapshot()
+        _refresh_trace_tree_panel()
         current_action = str(brain.get_blackboard().get("action", "patrol"))
 
     var enemy_motion := Vector2.ZERO
@@ -283,6 +319,9 @@ func _report_player_noise(loudness: float) -> bool:
     # the signal; a separate AIHearingSensor2D handles distance and memory.
     var attenuation := 0.8 if not _has_line_of_sight() else 1.0
     var heard: bool = hearing.report_noise(enemy_position, player_position, loudness, attenuation)
+    if heard:
+        stimulus_history.record_stimulus(AIStimulusHistory2D.SOUND,
+            player_position, clampf(loudness, 0.01, 1.0), hearing.memory_duration, 1)
     last_noise_position = player_position
     noise_visual_timer = 0.6
     return heard
@@ -324,6 +363,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
         last_navigation_profile = {}
         brain.reset_profile()
         last_profile_snapshot = brain.get_profile_snapshot()
+    elif event.keycode == KEY_T:
+        trace_replay_tick = -1
+        brain.trace_enabled = not brain.is_trace_enabled()
+        last_trace_snapshot = brain.get_trace_snapshot()
+        _refresh_trace_tree_panel()
     elif event.keycode == KEY_R:
         enemy_health = 100
         player_position = Vector2(160, 350)
@@ -338,10 +382,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
         last_navigation_profile = {}
         brain.reset_profile()
         last_profile_snapshot = brain.get_profile_snapshot()
+        brain.reset_trace()
+        trace_replay_tick = -1
+        last_trace_snapshot = brain.get_trace_snapshot()
+        _refresh_trace_tree_panel()
         ai_timer = 0.0
         sensor.reset()
         hearing.reset()
+        stimulus_history.reset()
         brain.reset()
+        player_action_cooldowns.reset()
         brain.set_blackboard({})
         navigation_path = PackedVector2Array()
         navigation_goal_cell = Vector2i(-1, -1)
@@ -351,11 +401,195 @@ func _unhandled_key_input(event: InputEvent) -> void:
         noise_visual_timer = 0.0
 
 
+func _build_trace_tree_panel() -> void:
+    # An actual hierarchical Tree, updated at the 5Hz AI decision cadence.
+    # Debug-only UI: no extra tree walks on ordinary production game NPCs.
+    trace_panel = PanelContainer.new()
+    trace_panel.position = Vector2(575, 60)
+    trace_panel.size = Vector2(372, 495)
+    var background := StyleBoxFlat.new()
+    background.bg_color = Color(0.065, 0.085, 0.14, 0.94)
+    background.border_color = Color(0.43, 0.55, 0.72)
+    background.set_border_width_all(1)
+    trace_panel.add_theme_stylebox_override("panel", background)
+    add_child(trace_panel)
+
+    var vertical := VBoxContainer.new()
+    trace_panel.add_child(vertical)
+    trace_title = Label.new()
+    trace_title.text = "LIVE BEHAVIOR TREE"
+    trace_title.add_theme_font_size_override("font_size", 15)
+    vertical.add_child(trace_title)
+
+    var replay_controls := HBoxContainer.new()
+    var prev_button := Button.new()
+    prev_button.text = "◀ Prev"
+    prev_button.pressed.connect(_replay_previous)
+    replay_controls.add_child(prev_button)
+    var next_button := Button.new()
+    next_button.text = "Next ▶"
+    next_button.pressed.connect(_replay_next)
+    replay_controls.add_child(next_button)
+    var live_button := Button.new()
+    live_button.text = "Live"
+    live_button.pressed.connect(_replay_live)
+    replay_controls.add_child(live_button)
+    vertical.add_child(replay_controls)
+
+    var changes_box := CheckBox.new()
+    changes_box.text = "Changed decisions only"
+    changes_box.toggled.connect(_set_replay_changes_only)
+    vertical.add_child(changes_box)
+
+    trace_history_label = Label.new()
+    vertical.add_child(trace_history_label)
+
+    trace_tree = Tree.new()
+    trace_tree.columns = 3
+    trace_tree.hide_root = true
+    trace_tree.column_titles_visible = true
+    trace_tree.set_column_title(0, "Task")
+    trace_tree.set_column_title(1, "State")
+    trace_tree.set_column_title(2, "μs")
+    trace_tree.set_column_expand(0, true)
+    trace_tree.set_column_expand(1, false)
+    trace_tree.set_column_custom_minimum_width(1, 77)
+    trace_tree.set_column_expand(2, false)
+    trace_tree.set_column_custom_minimum_width(2, 49)
+    trace_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    vertical.add_child(trace_tree)
+    trace_hotspots_label = Label.new()
+    vertical.add_child(trace_hotspots_label)
+    _refresh_trace_tree_panel()
+
+
+func _replay_previous() -> void:
+    _move_trace_replay(-1)
+
+
+func _replay_next() -> void:
+    _move_trace_replay(1)
+
+
+func _replay_live() -> void:
+    trace_replay_tick = -1
+    _refresh_trace_tree_panel()
+
+
+func _set_replay_changes_only(enabled: bool) -> void:
+    trace_changes_only = enabled
+    trace_replay_tick = -1
+    _refresh_trace_tree_panel()
+
+
+func _move_trace_replay(direction: int) -> void:
+    var frames: Array = brain.get_trace_history_frames(trace_changes_only)
+    if frames.is_empty():
+        return
+    var index := frames.size() - 1
+    if trace_replay_tick >= 0:
+        var found := false
+        for i in frames.size():
+            var frame: Dictionary = frames[i]
+            if int(frame.get("tick_index", -1)) == trace_replay_tick:
+                index = i
+                found = true
+                break
+        if not found:
+            trace_replay_tick = -1
+    index += direction
+    if index >= frames.size():
+        trace_replay_tick = -1 # Step forward returns to live mode.
+    else:
+        index = maxi(0, index)
+        var chosen: Dictionary = frames[index]
+        trace_replay_tick = int(chosen.get("tick_index", -1))
+    _refresh_trace_tree_panel()
+
+
+func _refresh_trace_tree_panel() -> void:
+    if trace_tree == null:
+        return
+    trace_panel.visible = brain.is_trace_enabled()
+    if not trace_panel.visible:
+        return
+    var snapshot: Dictionary = brain.get_tree_snapshot()
+    var nodes: Array = snapshot.get("nodes", [])
+    var frames: Array = brain.get_trace_history_frames(trace_changes_only)
+    var selected_frame: Dictionary = {}
+    if trace_replay_tick >= 0:
+        for raw_frame in frames:
+            var frame: Dictionary = raw_frame
+            if int(frame.get("tick_index", -1)) == trace_replay_tick:
+                selected_frame = frame
+                break
+        if selected_frame.is_empty():
+            trace_replay_tick = -1 # Old frame was evicted from ring buffer.
+
+    var replay_steps: Dictionary = {}
+    if trace_replay_tick >= 0:
+        for raw_step in selected_frame.get("steps", []):
+            var step: Dictionary = raw_step
+            replay_steps[str(step.get("path", ""))] = step
+
+    var displaying_tick := int(snapshot.get("tick_index", 0))
+    if trace_replay_tick >= 0:
+        displaying_tick = trace_replay_tick
+    trace_title.text = "AI TREE %s | tick %d | %d nodes" % [
+        "REPLAY" if trace_replay_tick >= 0 else "LIVE", displaying_tick, nodes.size()]
+    trace_history_label.text = "History: %d/%d ticks%s" % [
+        frames.size(), brain.get_trace_history_capacity(),
+        " | changed-only" if trace_changes_only else ""]
+
+    trace_tree.clear()
+    var invisible_root := trace_tree.create_item()
+    var paths: Dictionary = {}
+    for raw in nodes:
+        var node: Dictionary = raw
+        var path: String = str(node.get("path", ""))
+        var parent: TreeItem = paths.get(path.get_base_dir(), invisible_root)
+        var item: TreeItem = trace_tree.create_item(parent)
+        paths[path] = item
+        item.set_metadata(0, path)
+        item.set_text(0, str(node.get("task_class", "Task")).trim_prefix("BehaviorTree"))
+        var status := int(node.get("status", -1))
+        var executed := bool(node.get("executed", false))
+        var usec := int(node.get("duration_usec", 0))
+        if trace_replay_tick >= 0:
+            var record: Dictionary = replay_steps.get(path, {})
+            status = int(record.get("status", -1))
+            executed = not record.is_empty()
+            usec = int(record.get("duration_usec", 0))
+        match status:
+            BehaviorTreeTask.SUCCESS:
+                item.set_text(1, "SUCCESS")
+                item.set_custom_color(1, Color(0.48, 0.92, 0.55))
+            BehaviorTreeTask.FAILURE:
+                item.set_text(1, "FAILURE")
+                item.set_custom_color(1, Color(1.0, 0.46, 0.43))
+            BehaviorTreeTask.RUNNING:
+                item.set_text(1, "RUNNING")
+                item.set_custom_color(1, Color(1.0, 0.78, 0.35))
+            _:
+                item.set_text(1, "NOT RUN")
+                item.set_custom_color(1, Color(0.59, 0.64, 0.72))
+        item.set_text(2, str(usec) if executed else "—")
+
+    var hotspots: Array = brain.get_slowest_trace_nodes(1)
+    if hotspots.is_empty():
+        trace_hotspots_label.text = "Latest CPU hotspot: no completed nodes"
+    else:
+        var hottest: Dictionary = hotspots[0]
+        trace_hotspots_label.text = "Latest CPU hotspot: %s | self %d μs / total %d μs" % [
+            str(hottest.get("path", "?")), int(hottest.get("self_usec", 0)),
+            int(hottest.get("duration_usec", 0))]
+
+
 func _update_hud() -> void:
     if hud == null:
         return
     var status_text := "RUNNING" if last_status == BehaviorTreeTask.RUNNING else ("SUCCESS" if last_status == BehaviorTreeTask.SUCCESS else "FAILURE")
-    hud.text = "SIGHT + HEARING + A* NAVIGATION | Arrows: move | F: shout | Space: hit | P: profile | R: reset\n"
+    hud.text = "SIGHT + HEARING + A* NAVIGATION | Arrows: move | F: shout | Space: hit | P: profile | T: trace | R: reset\n"
     hud.text += "Enemy HP: %d | AI: %s | Tree: %s | Visible: %s\n" % [enemy_health, current_action, status_text, str(sensor.is_target_visible())]
     hud.text += "Sight: %.1fs | Sound: %.1fs | Gray wall blocks LOS | Yellow X = last seen position" % [sensor.get_memory_remaining(), hearing.get_memory_remaining()]
     # Update diagnostic snapshots only at logical AI ticks, not render frames.
@@ -369,8 +603,24 @@ func _update_hud() -> void:
         float(decision.get("mean_usec", 0.0)),
         int(decision.get("max_usec", 0))
     ]
+    var trace_steps: Array = last_trace_snapshot.get("steps", [])
+    var traced_leaf := "none"
+    var traced_status := "-"
+    for trace_entry in trace_steps:
+        var step: Dictionary = trace_entry
+        if int(step.get("status", -1)) == BehaviorTreeTask.RUNNING:
+            traced_leaf = str(step.get("path", ""))
+            traced_status = "RUNNING"
+    hud.text += "\nNode trace: %s | Steps: %d | Active: %s (%s)" % [
+        "ON" if brain.is_trace_enabled() else "OFF",
+        trace_steps.size(),
+        traced_leaf,
+        traced_status
+    ]
+    hud.text += "\nNative shout gate: %.1fs | Sound investigation time limit: 0.8s" % player_action_cooldowns.get_remaining(&"shout")
     var path_rows: Dictionary = last_navigation_profile.get("categories", {})
     var path_cost: Dictionary = path_rows.get("navigation_repath", {})
+    hud.text += "\nRemembered sights/sounds: %d | Multi-source history bounded to %d" % [stimulus_history.get_event_count(), stimulus_history.capacity]
     hud.text += "\nScheduled A* repaths: %d | Mean path query: %.1f us | Next slot in %d ticks" % [
         int(path_cost.get("count", 0)),
         float(path_cost.get("mean_usec", 0.0)),

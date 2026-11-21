@@ -76,7 +76,8 @@ void prioritize_cells_for_motion(LocalVector<Vector3i> &r_cells, const Vector3 &
 // hints reduce to the original motion-only priority.
 void prioritize_cells_for_motion_and_view(LocalVector<Vector3i> &r_cells, const Vector3 &p_focus,
 		const Vector3 &p_velocity, real_t p_lookahead_seconds, real_t p_max_prediction,
-		const Vector3 &p_view_direction, real_t p_view_weight, real_t p_cell_size, Axes p_axes);
+		const Vector3 &p_view_direction, real_t p_view_weight, real_t p_cell_size, Axes p_axes,
+		real_t p_view_cone_half_angle_degrees = 180.0);
 
 // Opt-in fast camera-turn refresh decision. Vectors are view headings from
 // the last queue rebuild and the current camera; invalid/zero hints do not

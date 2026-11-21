@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GameplayEffectTimeline" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Explicit-clock runtime for timed, stackable gameplay effects.
+	</brief_description>
+	<description>
+		A reusable timeline of exact gameplay tags with positive stack counts and remaining durations. Optional periodic callbacks are accumulated in constant time and capped at 32 per tag between drains; they never directly apply damage. Bare authoritative snapshots preserve an existing periodic phase for matching effects, while full snapshots also serialize period, next_period and reset_on_reapply. Advance time through [method tick]; it never reads wall-clock time. Reapplications support refresh, extend and keep-duration policies inspired by Unreal Gameplay Effects. One timeline supports at most 256 effects, 65535 stacks per effect and durations up to seven days. Invalid or non-finite values fail without partial state changes. In multiplayer projects only an authoritative simulation may decide gameplay outcomes; client-side use should remain visual.
+	</description>
+	<methods>
+		<method name="apply_effect">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="seconds" type="float" />
+			<param index="2" name="stacks" type="int" default="1" />
+			<param index="3" name="stack_limit" type="int" default="65535" />
+			<param index="4" name="policy" type="int" enum="GameplayEffectTimeline.ReapplyPolicy" default="0" />
+			<description>Adds stacks and applies the requested duration policy. Returns false without altering state if inputs are invalid.</description>
+		</method>
+		<method name="apply_effect_with_tag_requirements">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="seconds" type="float" />
+			<param index="2" name="active_tags" type="PackedStringArray" />
+			<param index="3" name="required_tags" type="PackedStringArray" default="PackedStringArray()" />
+			<param index="4" name="blocked_tags" type="PackedStringArray" default="PackedStringArray()" />
+			<param index="5" name="stacks" type="int" default="1" />
+			<param index="6" name="stack_limit" type="int" default="65535" />
+			<param index="7" name="policy" type="int" enum="GameplayEffectTimeline.ReapplyPolicy" default="0" />
+			<description>Unreal GAS-inspired target-tag admission checks before applying or reapplying the effect. Every required tag must match at least one active tag; any blocked tag rejects the operation. Matches are exact or dot-delimited descendants, not string prefixes (for example Status.Immune blocks Status.Immune.Fire, but not Status.ImmuneExtra). All inputs are validated before changing timers, stacks or periodic phases. Supports at most 128 active tags and 32 tags per requirement list. Empty requirement arrays permit all otherwise valid contexts. The caller must supply trusted current target tags when using this for authoritative gameplay; this helper does not grant authority or perform replication. Uses the same duration, stack and reapply policies as [method apply_effect].</description>
+		</method>
+		<method name="set_effect">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="seconds" type="float" />
+			<param index="2" name="stacks" type="int" default="1" />
+			<description>Sets an exact effect or removes it if the duration is zero.</description>
+		</method>
+		<method name="reconcile_effect_branch">
+			<return type="bool" />
+			<param index="0" name="branch" type="StringName" />
+			<param index="1" name="effects" type="Dictionary" />
+			<description>Reconciles an authoritative replicated effect branch while preserving already accumulated periodic pulses for continuing effects whose period and next-period phase have not changed. Uses exactly the same validation, branch isolation, stack/duration update, periodic phase preservation and all-or-nothing limits as [method replace_effect_branch]. Missing or zero-duration effects, newly created effects, disabled or rephased intervals discard old pulses only within the updated branch; all pending pulses from other branches survive. Invalid snapshots do not change timers, phases, stacks or pending pulses. An empty dictionary clears only that branch. Unlike [method replace_effect_branch], an unchanged or duration-only network snapshot cannot erase queued periodic cosmetic feedback before it is drained. The caller controls server authority and timing; this method does not execute damage or any gameplay callback.</description>
+		</method>
+		<method name="replace_effect_branch">
+			<return type="bool" />
+			<param index="0" name="branch" type="StringName" />
+			<param index="1" name="effects" type="Dictionary" />
+			<description>Atomically replaces only effects equal to or below the dotted tag [param branch]. Preserves independent durations, stacking, periodic phases and queued pulses in other branches. Effect values have the same schema and validation as [method replace_snapshot], including optional [code]period[/code], [code]next_period[/code], and [code]reset_on_reapply[/code]. A zero remaining duration removes that tag. Invalid entries, out-of-branch tags, normalized aliases, and snapshots exceeding the global cap are rejected without mutation. Pending pulses in the authoritative branch are discarded when a valid replacement commits; all unrelated pending pulses survive. An empty dictionary clears only that branch.</description>
+		</method>
+		<method name="replace_snapshot">
+			<return type="bool" />
+			<param index="0" name="effects" type="Dictionary" />
+			<description>Atomically replaces the active effects from a dictionary mapping tags to dictionaries with remaining (seconds) and stacks (positive int). A duration of zero removes the effect.</description>
+		</method>
+		<method name="get_snapshot" qualifiers="const">
+			<return type="Dictionary" />
+			<description>Returns independent dictionaries of all active effects, safe to edit without changing the timeline.</description>
+		</method>
+		<method name="set_periodic">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="period" type="float" />
+			<param index="2" name="reset_on_reapply" type="bool" default="true" />
+			<description>Configures repeated pulses for an existing effect. Periods must be between 0.05 seconds and seven days, or zero to disable. Changing the interval resets its phase. If reset_on_reapply is true, a successful apply_effect restarts the next pulse countdown.</description>
+		</method>
+		<method name="get_periodic" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Returns an exact effect's current period, or zero if missing or disabled.</description>
+		</method>
+		<method name="take_periodic_pulses">
+			<return type="Dictionary" />
+			<description>Returns and clears coalesced periodic trigger counts, keyed by exact tag. Each count is capped at 32 to avoid bursts after long frames. The caller chooses whether to show a visual or apply a server-authorized rule.</description>
+		</method>
+		<method name="tick_and_take_periodic_pulses">
+			<return type="Dictionary" />
+			<param index="0" name="delta" type="float" />
+			<description>Runs the same simulation, stack duration expiry, periodic phase advancement and per-tag capped pulse coalescing as [method tick], and returns/drains [method take_periodic_pulses] in one native call. Intended for per-actor cosmetic rendering loops that do not need the expired tag array. Unlike [method tick], does not construct a temporary [PackedStringArray] of expired tags. Existing pending pulses are drained even if delta is nonfinite or nonpositive, matching a separate tick followed by take_periodic_pulses. Positive finite deltas still expire effects at their normal times. Does not apply damage, execute gameplay effects or alter multiplayer authority. The legacy methods remain available when expiry tags are required.</description>
+		</method>
+		<method name="tick">
+			<return type="PackedStringArray" />
+			<param index="0" name="delta" type="float" />
+			<description>Advances by a finite positive delta; returns exact tags expiring during the tick in insertion order.</description>
+		</method>
+		<method name="get_remaining" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Returns exact effect remaining seconds, or zero.</description>
+		</method>
+		<method name="get_stacks" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Returns exact effect stacks, or zero.</description>
+		</method>
+		<method name="has_effect" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Whether the exact tag has an active effect.</description>
+		</method>
+		<method name="remove_effect">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Removes an exact effect. Returns false if absent.</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>Clears all effects.</description>
+		</method>
+		<method name="get_effect_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns number of live effects.</description>
+		</method>
+		<method name="is_empty" qualifiers="const">
+			<return type="bool" />
+			<description>True when no effects are active.</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="REAPPLY_REFRESH" value="0" enum="ReapplyPolicy">Reset countdown to newly applied duration.</constant>
+		<constant name="REAPPLY_EXTEND" value="1" enum="ReapplyPolicy">Extend current countdown, capped at seven days.</constant>
+		<constant name="REAPPLY_KEEP" value="2" enum="ReapplyPolicy">Preserve countdown while adding stacks.</constant>
+	</constants>
+</class>

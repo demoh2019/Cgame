@@ -71,6 +71,7 @@ func run(t) -> void:
 	t.current = "server owns cooking, buffs, owner HUD and survival ticking"
 	var world := WorldGen.new(209)
 	var sim := GameServer.new(world, 209)
+	sim.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var p = sim.add_player(235, "Trail Cook")
 	p.position = Vector3(140.0, world.height_at(140.0, 140.0), 140.0)
 	p.inventory.add("raw_fish", 2)

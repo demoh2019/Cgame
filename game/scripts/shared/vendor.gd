@@ -14,6 +14,10 @@ const BUY_PRICES := {
 	"water_bottle": 12,
 	"canned_food": 18,
 	"bandage": 16,
+	# Homestead farming seeds (plant them on personal plots in the green zone).
+	"carrot_seeds": 6,
+	"potato_seeds": 8,
+	"wheat_seeds": 8,
 }
 
 const SELL_PRICES := {

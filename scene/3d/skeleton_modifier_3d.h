@@ -33,6 +33,8 @@
 #include "scene/3d/node_3d.h"
 #include "scene/3d/skeleton_3d.h"
 
+#include <cstdint>
+
 class SkeletonModifier3D : public Node3D {
 	GDCLASS(SkeletonModifier3D, Node3D);
 
@@ -89,6 +91,13 @@ protected:
 	bool active = true;
 	real_t influence = 1.0;
 
+	// Opt-in shared update profiling. The normal animation hot path never
+	// reads the clock when profiling is disabled.
+	bool modifier_profiling_enabled = false;
+	int modifier_last_update_us = 0;
+	int modifier_estimated_update_us = 0;
+	int modifier_profile_sample_count = 0;
+
 	// Cache them for the performance reason since finding node with NodePath is slow.
 	ObjectID skeleton_id;
 
@@ -128,6 +137,18 @@ public:
 	Skeleton3D *get_skeleton() const;
 
 	void process_modification(double p_delta);
+
+	// Measures all native and GDScript _process_modification work, excluding
+	// downstream signal dispatch and animation mixer / GPU processing.
+	// Disable does not erase the last full-pose cost estimate; it must
+	// remain useful when this actor is temporarily reduced to tier 1.
+	void set_modifier_profiling_enabled(bool p_enabled);
+	bool is_modifier_profiling_enabled() const { return modifier_profiling_enabled; }
+	void reset_modifier_profile();
+	int get_modifier_last_update_us() const { return modifier_last_update_us; }
+	int get_modifier_estimated_update_us() const { return modifier_estimated_update_us; }
+	int get_modifier_profile_sample_count() const { return modifier_profile_sample_count; }
+	static int smooth_modifier_cost_us(int p_previous_us, int p_sample_us);
 
 	// Utility APIs.
 	static Vector3 get_vector_from_bone_axis(BoneAxis p_axis);

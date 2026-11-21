@@ -68,14 +68,14 @@ func run(t) -> void:
 		policy_code.contains("return true"),
 		"nearest-first native selection receives genuine attacker pose candidates")
 	var anim_code: String = (CharacterAnim as Script).source_code
-	t.check(anim_code.contains("var preferred: Array[int] = []"),
-		"stock Godot uses the existing LOD driver without a second animator owner")
+	t.check(anim_code.contains("var priority_mask := PackedByteArray()"),
+		"stock Godot sends visual urgency to the single crowd tier planner")
 	t.check(anim_code.contains("camera.is_position_in_frustum("),
 		"stock fallback only spends urgent slots on visible combatants")
-	t.check(anim_code.contains("preferred.sort_custom("),
-		"nearest critical enemy receives scarce animation priority first")
-	t.check(anim_code.contains("tiers[preferred[j]] = mini(tiers[preferred[j]], 1)"),
-		"fallback promotes only a bounded amount of visual work, with no IK cost")
+	t.check(anim_code.contains("order.sort_custom("),
+		"numeric fallback sorts by camera distance and deterministic actor index")
+	t.check(anim_code.contains("tiers[index] = mini(tiers[index], 1)"),
+		"fallback promotes combat poses to full-rate only, without extra IK cost")
 
 	t.current = "native Cgame mixer priority API is reversible and clamped"
 	if not ClassDB.class_exists("AnimationLODController"):

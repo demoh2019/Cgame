@@ -70,6 +70,7 @@ func run(t) -> void:
 	t.current = "server-authorized crafting and ammunition"
 	var world := WorldGen.new(781)
 	var server := GameServer.new(world, 781)
+	server.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var hunter = server.add_player(901, "CrossbowHunter")
 	hunter.inventory = Inventory.new()
 	hunter.inventory.add("plank_1", 2)

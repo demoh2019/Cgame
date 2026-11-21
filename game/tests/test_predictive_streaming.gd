@@ -2,6 +2,8 @@ extends RefCounted
 ## Verify native WorldStreamer movement priority without loading assets or a world.
 ## Predictive streaming changes scheduling only, never authoritative world state.
 
+const WorldStreamingPolicy = preload("res://scripts/client/world_streaming_policy.gd")
+
 func run(t) -> void:
 	t.current = "native world partition movement budget"
 	var streamer := WorldStreamer.new()
@@ -37,6 +39,31 @@ func run(t) -> void:
 	streamer.max_chunk_work_usec = 1500000
 	t.eq(streamer.max_chunk_work_usec, 1000000,
 		"extreme CPU time budget is capped to one second")
+	t.current = "native camera cone and cinematic compatibility"
+	t.near(streamer.view_cone_half_angle_degrees, 180.0, 0.0001,
+		"legacy WorldStreamer leaves view cone unbounded")
+	streamer.view_cone_half_angle_degrees = 52.0
+	t.near(streamer.view_cone_half_angle_degrees, 52.0, 0.0001,
+		"game can set native horizontal camera cone")
+	streamer.view_cone_half_angle_degrees = INF
+	t.near(streamer.view_cone_half_angle_degrees, 52.0, 0.0001,
+		"corrupt camera FOV cannot poison scheduling")
+	streamer.view_cone_half_angle_degrees = 360.0
+	t.near(streamer.view_cone_half_angle_degrees, 180.0, 0.0001,
+		"native view cone is bounded")
+	t.near(WorldStreamingPolicy.horizontal_cone_half_angle(60.0, 16.0 / 9.0, false),
+		42.0, 0.001, "horizontal FOV for keep-width camera includes view margin")
+	t.check(WorldStreamingPolicy.horizontal_cone_half_angle(60.0, 16.0 / 9.0, true) > 42.0,
+		"keep-height perspective derives wider horizontal field on widescreen")
+	t.near(WorldStreamingPolicy.horizontal_cone_half_angle(INF, 16.0 / 9.0, true),
+		180.0, 0.001, "invalid projection falls back to the old heading-only mode")
+	WorldStreamingPolicy.apply_view(streamer, null, 2)
+	t.near(streamer.view_cone_half_angle_degrees, 180.0, 0.001,
+		"missing camera never restricts the queue")
+	var policy_source: String = FileAccess.get_file_as_string(
+		"res://scripts/client/world_streaming_policy.gd")
+	t.check(policy_source.contains("streamer.view_cone_half_angle_degrees = half_angle"),
+		"live view policy forwards perspective camera FOV into native engine")
 	streamer.free()
 
 	t.current = "actual online game integration and teleport safety"

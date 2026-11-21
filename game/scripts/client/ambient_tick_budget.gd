@@ -13,6 +13,7 @@ var _importance: Dictionary = {}
 var _rate_scale: Dictionary = {} # Frequency, not scheduling importance.
 var _disabled: Dictionary = {}
 var _refresh_pending: Dictionary = {}
+var _max_deferred_frames: Dictionary = {} # Opt-in soft deadlines.
 var _estimates: Dictionary = {}
 var _overdue: Dictionary = {}
 var _reserved_estimate_us: int = 0
@@ -26,6 +27,8 @@ var _pressure: float = 0.0
 var _time_budget_us: int = 2500
 var _frame_cost_us: int = 0
 var _previous_frame_cost_us: int = 0
+var _lane_frame_cost_us: Dictionary = {}
+var _lane_previous_frame_cost_us: Dictionary = {}
 var _updated_total: int = 0
 var _skipped_total: int = 0
 var _last_updated: int = 0
@@ -66,6 +69,10 @@ func begin_frame(delta: float, quality: int) -> void:
 	_quality = safe_quality
 	_previous_frame_cost_us = _frame_cost_us
 	_frame_cost_us = 0
+	# Mirror the native fixed-size frame rotation without a dictionary copy.
+	for lane in LANES:
+		_lane_previous_frame_cost_us[lane] = int(_lane_frame_cost_us.get(lane, 0))
+		_lane_frame_cost_us[lane] = 0
 	_spent = 0
 	_last_updated = 0
 	_last_skipped = 0
@@ -108,9 +115,12 @@ func begin_frame(delta: float, quality: int) -> void:
 				var age: int = int(_overdue.get(lane, 0))
 				var exceeds: bool = _time_budget_us > 0 and estimated > 0 \
 					and _reserved_estimate_us + estimated > _time_budget_us
-				if cost_pass == 0 and exceeds and age < 48:
+				var deadline: int = int(_max_deferred_frames.get(lane, 0))
+				var deadline_due: bool = deadline > 0 and age >= deadline
+				if cost_pass == 0 and exceeds and age < 48 and not deadline_due:
 					continue
-				var priority: float = due * float(_importance.get(lane, 1.0)) \
+				# Deadline promotion changes reservation priority, not slots.
+				var priority: float = (1000.0 + float(age - deadline) * 0.1 if deadline_due else 0.0) + due * float(_importance.get(lane, 1.0)) \
 					+ float(mini(age, 120)) * 0.012
 				if priority > best_priority + 0.000000000001:
 					pick = lane
@@ -174,6 +184,8 @@ func reset() -> void:
 	_pressure = 0.0
 	_frame_cost_us = 0
 	_previous_frame_cost_us = 0
+	_lane_frame_cost_us.clear()
+	_lane_previous_frame_cost_us.clear()
 	_budget = 1
 	_spent = 0
 	_last_updated = 0
@@ -224,6 +236,8 @@ func record_cost(lane: String, elapsed_us: int) -> bool:
 		_estimates[lane] = elapsed_us if previous == 0 else \
 			int((3 * previous + elapsed_us + 2) / 4)
 	_frame_cost_us = mini(1000000000, _frame_cost_us + elapsed_us)
+	_lane_frame_cost_us[lane] = mini(1000000000,
+		int(_lane_frame_cost_us.get(lane, 0)) + elapsed_us)
 	return true
 
 
@@ -242,6 +256,28 @@ func get_lane_rate_scale(lane: String) -> float:
 	return float(_rate_scale.get(lane, 1.0))
 
 
+## A soft deferral deadline only changes which already-due lane is reserved.
+## Zero disables it; global per-frame slots and measured CPU caps stay intact.
+func set_lane_max_deferred_frames(lane: String, frames: int) -> bool:
+	if not LANES.has(lane) or frames < 0 or frames > 120:
+		return false
+	_max_deferred_frames[lane] = frames
+	return true
+
+
+func get_lane_max_deferred_frames(lane: String) -> int:
+	return int(_max_deferred_frames.get(lane, 0)) if LANES.has(lane) else -1
+
+
+func get_deadline_overdue_lane_count() -> int:
+	var count: int = 0
+	for lane in LANES:
+		var deadline: int = int(_max_deferred_frames.get(lane, 0))
+		if deadline > 0 and int(_overdue.get(lane, 0)) >= deadline:
+			count += 1
+	return count
+
+
 ## Deterministic mapping of existing scene importance to a conservative rate.
 ## 0.25 -> 0.75x, 1.0 -> 1.0x, 4.0 -> 1.5x. No per-frame allocations.
 static func rate_scale_for_importance(importance: float) -> float:
@@ -251,6 +287,11 @@ static func rate_scale_for_importance(importance: float) -> float:
 	if safe <= 1.0:
 		return 0.75 + (safe - 0.25) / 3.0
 	return 1.0 + (safe - 1.0) / 6.0
+
+
+## Only currently significant ambient effects receive a short deadline.
+static func deadline_frames_for_importance(importance: float) -> int:
+	return 8 if is_finite(importance) and importance >= 2.0 else 0
 
 
 func set_lane_importance(lane: String, importance: float) -> bool:
@@ -263,6 +304,11 @@ func set_lane_importance(lane: String, importance: float) -> bool:
 
 func get_lane_importance(lane: String) -> float:
 	return float(_importance.get(lane, 1.0)) if LANES.has(lane) else -1.0
+
+
+## Caller-measured CPU microseconds from the previous completed frame.
+func get_lane_last_frame_cost_us(lane: String) -> int:
+	return int(_lane_previous_frame_cost_us.get(lane, 0)) if LANES.has(lane) else -1
 
 
 func get_lane_estimated_cost_us(lane: String) -> int:

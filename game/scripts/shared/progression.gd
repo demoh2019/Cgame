@@ -19,6 +19,14 @@ var gathering_xp: Dictionary = {"wood": 0, "stone": 0, "ore": 0, "fiber": 0, "fi
 var crafting_xp: int = 0
 var combat_xp: Dictionary = {"melee": 0, "ranged": 0}
 var scavenging_xp: int = 0
+# Albion Destiny Board-style weapon line mastery: fame per weapon family ("spear", "club"...).
+var weapon_fame: Dictionary = {}
+# Albion-style focus points: a daily crafting budget (see return_rate.gd). New characters start full.
+var focus: float = 10000.0
+const MASTERY_MAX_LEVEL := 100
+const MASTERY_FAME_SCALE := 20.0 # level = sqrt(fame / 20): L10 = 2k fame, L100 = 200k fame.
+const MASTERY_IP_PER_LEVEL := 2 # Albion: specialization raises the item power of that line.
+const MASTERY_ULTIMATE_PER_LEVEL := 0.002 # Weapon ultimate (E) scales with line mastery.
 
 
 static func resource_skill(kind: String) -> String:
@@ -98,6 +106,10 @@ func award_combat(weapon_id: String, earned_xp: int) -> int:
 	var skill := combat_skill_for_weapon(weapon_id)
 	if skill == "" or earned_xp <= 0:
 		return 0
+	# The same fight also builds mastery of this specific weapon line.
+	var family: String = weapon_family(weapon_id)
+	if family != "":
+		weapon_fame[family] = mini(MAX_XP, int(weapon_fame.get(family, 0)) + mini(earned_xp, 1000))
 	var old_xp: int = int(combat_xp[skill])
 	combat_xp[skill] = mini(MAX_XP, old_xp + mini(earned_xp, 1000))
 	return int(combat_xp[skill]) - old_xp
@@ -126,7 +138,7 @@ func levels() -> Dictionary:
 func to_dict() -> Dictionary:
 	return {"gathering": gathering_xp.duplicate(true),
 		"crafting": crafting_xp, "combat": combat_xp.duplicate(true),
-		"scavenging": scavenging_xp}
+		"scavenging": scavenging_xp, "weapon_fame": weapon_fame.duplicate(), "focus": focus}
 
 
 static func _valid_xp(value: Variant) -> bool:
@@ -175,4 +187,48 @@ func load_dict(data: Variant) -> bool:
 	crafting_xp = int(data["crafting"])
 	combat_xp = clean_combat
 	scavenging_xp = int(scavenging_raw)
+	load_weapon_fame(data.get("weapon_fame", {}))
+	var saved_focus: Variant = data.get("focus", 10000.0)
+	if (saved_focus is float or saved_focus is int) and is_finite(float(saved_focus)):
+		focus = clampf(float(saved_focus), 0.0, 10000.0)
 	return true
+
+
+## Weapon line of an item: "spear_3@2+4" -> "spear"; "pistol" -> "pistol". "" for non-weapons.
+static func weapon_family(weapon_id: String) -> String:
+	if weapon_id == "" or str(Defs.item(weapon_id).get("kind", "")) != "weapon":
+		return ""
+	var plain: String = Defs.unenchanted_id(weapon_id)
+	var cut: int = plain.rfind("_")
+	if cut > 0 and plain.substr(cut + 1).is_valid_int():
+		return plain.substr(0, cut)
+	return plain
+
+
+static func mastery_level_for_fame(fame: int) -> int:
+	return clampi(int(floor(sqrt(maxf(0.0, float(fame)) / MASTERY_FAME_SCALE))), 0, MASTERY_MAX_LEVEL)
+
+
+func weapon_mastery_level(weapon_id: String) -> int:
+	var family: String = weapon_family(weapon_id)
+	return 0 if family == "" else mastery_level_for_fame(int(weapon_fame.get(family, 0)))
+
+
+## Restores saved mastery; malformed entries are skipped (older saves have none).
+func load_weapon_fame(raw: Variant) -> void:
+	weapon_fame = {}
+	if not (raw is Dictionary):
+		return
+	for family in raw:
+		if family is String and family.length() <= 40 and _valid_xp(raw[family]):
+			weapon_fame[family] = int(raw[family])
+
+
+## Extra item power from mastering this weapon's line (+2 IP per level, +200 at L100).
+func mastery_item_power(weapon_id: String) -> int:
+	return weapon_mastery_level(weapon_id) * MASTERY_IP_PER_LEVEL
+
+
+## Multiplier for the weapon ultimate's damage from line mastery (up to +20%).
+func mastery_ultimate_multiplier(weapon_id: String) -> float:
+	return 1.0 + float(weapon_mastery_level(weapon_id)) * MASTERY_ULTIMATE_PER_LEVEL

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGPolygonMask3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic smooth density factors inside and around a simple closed XZ polygon.
+	</brief_description>
+	<description>
+		Evaluates a hand-authored 3D polygon on the horizontal XZ plane. Density is zero inside or directly on the polygon, increases with a cubic smoothstep as a point travels outside the polygon boundary and reaches one at the feather distance. Reverse the factors to restrict procedural placement to the polygon instead. The Y coordinate is ignored for distance but must be finite. Both clockwise and counterclockwise contours work, including concave polygons. The last vertex connects to the first implicitly; do not repeat the first vertex at the end.
+		The polygon must be simple: self-intersecting, self-touching, zero-length edges and zero-area contours are rejected. Input caps: up to 16,384 candidate positions and 3–256 contour vertices, with finite XYZ within +/-10,000,000, and finite feather_distance within 0–10,000. A zero feather distance creates a hard boundary. Invalid input returns an empty array without partial data. Validation performs an O(vertices squared) bounded simplicity check, then sampling uses an expanded bounding box and O(candidates × vertices) edge distances and even-odd containment. No physics queries, scene objects, mesh allocations or global RNG are used.
+		Inspired by polygon/spline-area density masks in Unreal Engine PCG. This is not a polygon-Boolean or general 3D volume tool; it only generates per-point factors for a caller-owned density or biome pipeline.
+	</description>
+	<methods>
+		<method name="sample_factors" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="polygon" type="PackedVector3Array" />
+			<param index="2" name="feather_distance" type="float" default="0.0" />
+			<param index="3" name="invert" type="bool" default="false" />
+			<description>
+				Returns factors in source-point order, zero inside the polygon (including the outline), rising to one outside the contour across feather_distance. If invert is true, each factor is replaced by one minus itself, retaining interior density. At feather_distance zero, the edge is a strict 0/1 boundary. Smoothstep interpolation has zero derivative at its endpoints. Polygon crossing uses the even-odd rule and includes boundary points as inside; a contour with self-intersections is rejected. Input data is never edited, and invalid requests return an empty array rather than partially masking scene content.
+			</description>
+		</method>
+	</methods>
+</class>

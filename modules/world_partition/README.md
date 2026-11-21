@@ -12,7 +12,9 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Cap new requests, simultaneous outstanding requests, and instantiation work per frame.
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
+- **Selective bounded LRU route cache:** `find_cell_path()` now caches shortest cardinal routes **and empty results**, up to `max_cell_path_cache_entries` (0–128, default 64). Exact endpoint/loaded-only keys, defensive Array copying, deterministic LRU eviction and cache hit/miss diagnostics avoid redundant breadth-first searches for repeated quest HUD and region routing queries. Registration edits invalidate both kinds; live scene load/unload only invalidates loaded-only entries, preserving non-live route caches when the camera moves.
 - **Deterministic bounded cross-cell routing:** `find_cell_path(from, to, loaded_only=false)` returns the shortest cardinal corridor of registered `Vector2i` world cells, respecting missing topology and optionally restricting the route to already-instantiated scene roots. Synchronous breadth-first expansion is capped at 512 visited cells (overflow-safe 32-bit coordinates) to prevent runaway CPU. This complements, but does not replace, a baked navigation mesh or obstacle-safe surface paths.
+- **Immutable partial NavMesh obstacle updates:** `patch_navigation_tile(previous, resolution, previous_blockers, blockers, agent_radius, max_slope_degrees)` compares old/new circular footprints, including duplicates and reordering, and re-tests only grid triangles intersecting changed blocker influence. Unaffected triangles reuse the old walkability mask; exact polygon indices/order match a fresh full build, and unchanged footprint sets return the same cached NavigationMesh. `get_last_navigation_tile_retested_triangle_count()` quantifies geometric work (512 full tests on a 16×16 tile versus a small local subset for a barricade). Invalid topology safely falls back to a full build.
 - **Native bounded dynamic NavMesh dirty scheduler:** `mark_cell_navigation_dirty(cell)` coalesces repeated edits for live opted-in cells and dispatches `rebuild_streaming_navigation_mesh() -> bool` under `max_navigation_rebuilds_per_physics_frame` (1–16, default 1). Uses nearest-first deterministic ordering, max 128 queued cells, no duplicate rebuild grants per physics frame, a two-tick readiness fence and `cell_navigation_mesh_rebuilt` signal. Per-cell revisions and a monotonic world NavMesh generation invalidate stale NPC paths on changes.
 - **Native slope- and obstacle-aware navigation tile generation:** `build_navigation_tile(vertices, resolution, blockers, agent_radius, max_slope_degrees)` builds deterministic walkable NavigationMesh triangles from sampled terrain, rejects excessive slopes and intersects full triangles against circular obstacle footprints expanded by NPC radius. Hard limits: 2..32 cells per tile axis, at most 256 blockers, 2048 triangles, finite positions, validated radii and slope. No Recast bake or implicit physics-server mutation.
 - **Independent streamed NavigationRegion3D tier:** `navigation_radius` (-1 all loaded active/default, 0–32 near observer), `navigation_hysteresis_cells` (0–8), `max_navigation_transitions_per_frame` (1–64), native `cell_navigation_changed` signal, ready and count APIs. Pinned hubs and important/urgent sources can activate navigation outside player radius. Optional scene callback `set_streaming_navigation_active(active)` enables actual authored NavigationRegion3D tiles; `is_streaming_navigation_ready()` reports their state after two physics-frame sync ticks.
@@ -62,6 +64,26 @@ func _physics_process(_delta: float) -> void:
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
 
+## Bounded cached cell routing and selective invalidation
+
+Repeated `WorldPartition3D.find_cell_path(from, to, loaded_only=false)` queries now reuse a **bounded native LRU route cache** rather than rerunning up to 512-cell breadth-first searches for unchanged endpoints. The cache key preserves both complete signed `Vector2i` endpoint coordinates and the `loaded_only` option; no lossy hash of grid positions or reversed-path approximation is used. The default size is 64 routes per world, adjustable from 0 (disabled) to 128. Results include empty/unreachable paths, since repeatedly searching an unchanged disconnected corridor is wasteful.
+
+```gdscript
+world.max_cell_path_cache_entries = 64
+var route: Array = world.find_cell_path(start_cell, quest_cell)
+# Quest HUD can call this repeatedly while player stays in the same cell:
+var same_route: Array = world.find_cell_path(start_cell, quest_cell)
+print("Cache hits/misses/entries: ",
+    world.get_cell_path_cache_hit_count(), "/",
+    world.get_cell_path_cache_miss_count(), "/",
+    world.get_cell_path_cache_entry_count())
+world.clear_cell_path_cache() # Also resets diagnostic counters.
+```
+
+Eviction is least-recently-used, with stable key tie-breaking. Every result returned to GDScript is an **independent Array**: appending/removing/editing a route cannot poison the internal cached path. Registration topology changes through `set_cell_scene(s)`, `remove_cell_scene` or `clear_cell_scenes` invalidate **all** cached routes. Ordinary scene loading/unloading invalidates **only loaded-only routes** and leaves registered-topology paths cached, so moving the observer does not cause unnecessary quest pathfinding. A cached positive loaded-only route also rechecks its live roots before reuse, catching roots independently queued for deletion. The cache does not mistake a visually registered cell for a walkable NavMesh and does not cache `NavigationServer3D.map_get_path()` answers. NavMesh obstacle edits do not change the registered-cell graph and therefore need not invalidate this high-level cache; those changes already update the separate native `navigation_mesh_generation` used by NPCs.
+
+`get_cell_path_cache_hit_count()` and `get_cell_path_cache_miss_count()` are cumulative, saturating signed-32-bit counters. Capacity changes discard entries, and `clear_cell_path_cache()` explicitly resets entries and metrics. `smoke_cell_route_cache.gd` tests actual forest loading, reuse, copy isolation, selective unload invalidation and invalidation of negative routes; the native Doctest covers LRU order, disabled cache, invalid cache size and graph changes. This is main-thread request coalescing **not** async pathfinding.
+
 ## Safe registered-cell routing
 
 `WorldPartition3D.find_cell_path(from, to, loaded_only=false)` returns a deterministic shortest sequence of adjacent configured cells, from start through destination. Each step moves one X/Z cell (no diagonal corner-cutting); disconnected gaps are avoided. It is useful for streaming-area quest arrows, broad NPC region plans, and detecting disconnected world topology.
@@ -82,6 +104,33 @@ var safe_loaded_corridor: Array = world.find_cell_path(origin_cell, target_cell,
 The search checks only registered scene paths, **not** terrain collisions, slope, water, NavMesh edges or active navigation region connectivity. `loaded_only=true` additionally requires each route cell to have a live instantiated root; it is still not a gameplay/physics-ready guarantee. To prevent unbounded CPU spikes, breadth-first search is capped at 512 visited cells, returning an empty route if the goal cannot be found within that limit. Equal shortest paths use deterministic neighbor order `+X, +Z, -X, -Z`, and coordinate math is overflow-safe.
 
 The Aurora Forest quest compass uses this native topological path to point toward intermediate registered cells for distant relics rather than blindly pointing through gaps. `smoke_cell_routes.gd` and the native Doctest verify gaps, shortcuts, disconnected regions and the loaded-only option. A full hierarchy/portal graph and true navigation mesh corridor are separate future capabilities.
+
+## Incremental navigation tile updates with obstacle snapshots
+
+`WorldPartition3D.patch_navigation_tile(previous, resolution, previous_blockers, blockers, agent_radius=0.45, max_slope_degrees=45.0)` is a **native C++ incremental geometry filter**. It accepts a cached `NavigationMesh` built by the same WorldPartition3D terrain-grid builder, plus the complete old and new blocker sets. This avoids re-testing all triangles when only one barricade is added, moved or removed.
+
+```gdscript
+# From an opted-in streamed cell scene root, called by the existing bounded
+# navigation dirty-cell scheduler:
+var current: PackedVector3Array = get_current_tree_rock_and_barricade_footprints()
+var updated: NavigationMesh = partition.patch_navigation_tile(
+    previous_mesh, 16, saved_footprints, current, 0.45, 42.0)
+if updated != null and updated.get_polygon_count() > 0:
+    if updated != previous_mesh:
+        $StreamingNavigationRegion.navigation_mesh = updated
+    previous_mesh = updated
+    saved_footprints = current.duplicate()
+    print("Nav triangles re-tested: ",
+        partition.get_last_navigation_tile_retested_triangle_count())
+```
+
+The engine compares blocker coordinates as an exact **multiset**, so merely changing their order does not waste NavMesh work and two identical obstacles still count separately. Added/removed footprints are automatically expanded by the NPC radius and combined into a conservative dirty rectangle. Polygons wholly outside the changed bounds preserve their existing pass/fail result; overlapping triangles use the **same** slope and triangle/disc clearance predicate as `build_navigation_tile()`. Both methods enumerate triangles in identical grid order, so the resulting vertex and polygon arrays are exactly the same as a full rebuild (given unchanged terrain samples, radius and slope rules). The native builder also validates cached polygon topology and falls back to a full, safe rebuild if it detects a malformed old grid. A no-change patch returns the original resource without modifying the navigation server.
+
+For a 16×16 forest tile, full regeneration filters **512 triangles** every time; a local obstacle change typically filters just a few dozen. `get_last_navigation_tile_retested_triangle_count()` reports the last number of *geometric filter evaluations*, not measured milliseconds or total CPU cost. Incremental patching still scans bounded cached polygon metadata and candidate triangles; no claim of an asynchronous worker or a guaranteed frame-time improvement is made. Limits remain 32×32 quads, at most 256 old and 256 new blockers, finite positions/radii, and the original 0–8 agent radius / 0–89-degree slope bounds. If terrain height, resolution, agent radius or slope policy changes, **build a fresh full tile** and reset the obstacle snapshot.
+
+Aurora Forest caches the complete blocker snapshot on each streamed scene root and uses the incremental API on the existing `rebuild_streaming_navigation_mesh()` callback. The physical B-key barricade toggles collision and triggers the native dirty scheduler, but now NavMesh regeneration does **not** resample all analytic ground heights or re-check unaffected tree/rock triangles. The root persists, and previously loaded regions still use the two-physics-frame NavigationServer readiness fence. `smoke_incremental_navmesh.gd` verifies exact polygon-array equivalence for add/move/remove, no-change/reordered cache hits and localized filter counts; `smoke_dynamic_navmesh.gd` verifies the real live barricade uses the patch rather than silently falling back to a full rebuild.
+
+This approach is analogous in purpose to localized dirty navigation updates in Unreal, but it is a small deterministic grid algorithm, **not** Unreal Recast or Godot's runtime Recast/NavMeshGenerator, and is still synchronous under the native one-tile-per-physics-frame queue.
 
 ## Dynamic navigation obstacle updates with bounded rebuild work
 
@@ -363,7 +412,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 72 Doctest cases across `test_world_partition_3d.h` (36) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 74 Doctest cases across `test_world_partition_3d.h` (38) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -374,6 +423,8 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Cell route caches store topological, not physical routes.** A cached registered-cell corridor is not a NavMesh-safe or collision-free path. Cache keys distinguish loaded-only from configured routes; dynamic NavMesh updates still require NPC-level path replanning. Caching is deliberately bounded to 128 entries and returns defensive Array copies.
+- **Incremental obstacle patches require an unchanged terrain grid and navigation policy.** Each previous NavigationMesh and blocker snapshot must refer to the same geometry, resolution, radius and slope parameters. The algorithm validates cached polygon topology and changed blocker locations, but cannot prove arbitrary user changes to terrain samples or server-side region transforms. It scans cached polygon masks and triangle bounds on the main thread; the diagnostic counter only measures geometric re-evaluations, not CPU milliseconds.
 - **Dynamic NavMesh updates are main-thread and scene-owned.** Dirty rebuild limits are explicit per physics frame, but each permitted NavMesh creation can still cost CPU. The native module does not mutate third-party obstacles, force NavigationServer synchronization or guarantee the connectivity of a rebuilt mesh. Failed scene callbacks keep the tile unready.
 - **Native terrain tile filtering is conservative, not full Recast baking.** Per-cell 16×16 tiles reject steep triangles and obstacles approximated as expanded discs; hole cutting is coarse (whole triangles), there is no vertical clearance, off-mesh linkage or automatic dynamic obstacle rebake. Terrain-tile seam connectivity still depends on authored free corridors and Godot physics-server synchronization.
 - **Cell routing is topological, not physical.** `find_cell_path` is a bounded shortest 4-neighbor route of registered PackedScene cells; it does not confirm walkability across individual objects or NavMesh edges, and an empty result can also mean the 512-cell search limit was reached.

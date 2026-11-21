@@ -52,6 +52,24 @@ BehaviorTreeTask::Status BehaviorTreeTask::execute(const Dictionary &p_blackboar
 	return FAILURE;
 }
 
+BehaviorTreeTask::Status BehaviorTreeTask::execute_traced(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+	// A single cheap Dictionary key test for normal non-debug gameplay;
+	// only explicitly traced runners read clocks or construct step records.
+	if (!r_memory.has(SNAME("__bt_trace_sink"))) {
+		return execute(p_blackboard, r_memory, p_path, p_delta);
+	}
+	Ref<AIBehaviorTrace> trace = r_memory.get(SNAME("__bt_trace_sink"), Variant());
+	if (trace.is_null()) {
+		return execute(p_blackboard, r_memory, p_path, p_delta);
+	}
+	const int token = trace->begin_step(p_path, String(get_class()));
+	const Status status = execute(p_blackboard, r_memory, p_path, p_delta);
+	if (token >= 0) {
+		trace->end_step(token, int(status));
+	}
+	return status;
+}
+
 bool BehaviorTreeTask::contains_task(const BehaviorTreeTask *p_target, int p_depth) const {
 	return this == p_target || p_depth >= 64;
 }
@@ -153,7 +171,7 @@ BehaviorTreeTask::Status BehaviorTreeSequence::execute(const Dictionary &p_black
 			clear_memory(r_memory, p_path);
 			return FAILURE;
 		}
-		const Status status = task->execute(p_blackboard, r_memory, p_path + "/" + itos(index), p_delta);
+		const Status status = task->execute_traced(p_blackboard, r_memory, p_path + "/" + itos(index), p_delta);
 		if (status == RUNNING) {
 			r_memory[p_path] = index;
 			return RUNNING;
@@ -180,7 +198,7 @@ BehaviorTreeTask::Status BehaviorTreeSelector::execute(const Dictionary &p_black
 			clear_memory(r_memory, p_path);
 			return FAILURE;
 		}
-		const Status status = task->execute(p_blackboard, r_memory, p_path + "/" + itos(index), p_delta);
+		const Status status = task->execute_traced(p_blackboard, r_memory, p_path + "/" + itos(index), p_delta);
 		if (status == RUNNING) {
 			r_memory[p_path] = index;
 			return RUNNING;
@@ -203,7 +221,7 @@ BehaviorTreeTask::Status BehaviorTreeReactiveSequence::execute(const Dictionary 
 			clear_memory(r_memory, p_path);
 			return FAILURE;
 		}
-		const Status status = task->execute(p_blackboard, r_memory, p_path + "/" + itos(i), p_delta);
+		const Status status = task->execute_traced(p_blackboard, r_memory, p_path + "/" + itos(i), p_delta);
 		if (status == RUNNING) {
 			if (previous_running >= 0 && previous_running != i) {
 				clear_memory(r_memory, p_path + "/" + itos(previous_running));
@@ -229,7 +247,7 @@ BehaviorTreeTask::Status BehaviorTreeReactiveSelector::execute(const Dictionary 
 			clear_memory(r_memory, p_path);
 			return FAILURE;
 		}
-		const Status status = task->execute(p_blackboard, r_memory, p_path + "/" + itos(i), p_delta);
+		const Status status = task->execute_traced(p_blackboard, r_memory, p_path + "/" + itos(i), p_delta);
 		if (status == RUNNING) {
 			if (previous_running >= 0 && previous_running != i) {
 				clear_memory(r_memory, p_path + "/" + itos(previous_running));
@@ -266,7 +284,7 @@ BehaviorTreeTask::Status BehaviorTreeInverter::execute(const Dictionary &p_black
 	if (task.is_null()) {
 		return FAILURE;
 	}
-	const Status status = task->execute(p_blackboard, r_memory, p_path + "/0", p_delta);
+	const Status status = task->execute_traced(p_blackboard, r_memory, p_path + "/0", p_delta);
 	if (status == SUCCESS) {
 		return FAILURE;
 	}
@@ -274,6 +292,108 @@ BehaviorTreeTask::Status BehaviorTreeInverter::execute(const Dictionary &p_black
 		return SUCCESS;
 	}
 	return RUNNING;
+}
+
+void BehaviorTreeDecorator::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_task", "task"), &BehaviorTreeDecorator::set_task);
+	ClassDB::bind_method(D_METHOD("get_task"), &BehaviorTreeDecorator::get_task);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "task", PROPERTY_HINT_RESOURCE_TYPE, "BehaviorTreeTask"), "set_task", "get_task");
+}
+
+void BehaviorTreeDecorator::set_task(const Ref<BehaviorTreeTask> &p_task) {
+	ERR_FAIL_COND_MSG(p_task.is_valid() && p_task->contains_task(this), "A decorator cannot contain itself through a descendant.");
+	task = p_task;
+	emit_changed();
+}
+
+bool BehaviorTreeDecorator::contains_task(const BehaviorTreeTask *p_target, int p_depth) const {
+	const Ref<BehaviorTreeTask> child = task;
+	return BehaviorTreeTask::contains_task(p_target, p_depth) ||
+			(child.is_valid() && child->contains_task(p_target, p_depth + 1));
+}
+
+void BehaviorTreeDecorator::clear_branch_memory(Dictionary &r_memory, const String &p_path) {
+	// Forget only this decorator and its descendants; never touch sibling
+	// instances of the same shared Resource used elsewhere in a tree.
+	const Array keys = r_memory.keys();
+	for (int i = 0; i < keys.size(); ++i) {
+		const String key = keys[i];
+		if (key == p_path || key.begins_with(p_path + "/")) {
+			r_memory.erase(key);
+		}
+	}
+}
+
+void BehaviorTreeTimeout::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_duration", "duration"), &BehaviorTreeTimeout::set_duration);
+	ClassDB::bind_method(D_METHOD("get_duration"), &BehaviorTreeTimeout::get_duration);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "duration", PROPERTY_HINT_RANGE, "0,3600,0.01,or_greater,suffix:s"), "set_duration", "get_duration");
+}
+
+void BehaviorTreeTimeout::set_duration(double p_duration) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_duration) || p_duration < 0.0, "BehaviorTreeTimeout.duration must be finite and nonnegative.");
+	duration = p_duration;
+	emit_changed();
+}
+
+BehaviorTreeTask::Status BehaviorTreeTimeout::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+	const Ref<BehaviorTreeTask> child = get_task();
+	if (child.is_null()) {
+		clear_branch_memory(r_memory, p_path);
+		return FAILURE;
+	}
+	const double safe_delta = Math::is_finite(p_delta) ? MAX(0.0, p_delta) : 0.0;
+	const double elapsed = double(r_memory.get(p_path, 0.0)) + safe_delta;
+	// A deadline at exactly duration expires before evaluating the child;
+	// a zero-second limit always fails, including for instant children.
+	if (elapsed >= duration) {
+		clear_branch_memory(r_memory, p_path);
+		return FAILURE;
+	}
+	const Status status = child->execute_traced(p_blackboard, r_memory, p_path + "/0", safe_delta);
+	if (status == RUNNING) {
+		r_memory[p_path] = elapsed;
+	} else {
+		clear_branch_memory(r_memory, p_path);
+	}
+	return status;
+}
+
+void BehaviorTreeCooldown::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_duration", "duration"), &BehaviorTreeCooldown::set_duration);
+	ClassDB::bind_method(D_METHOD("get_duration"), &BehaviorTreeCooldown::get_duration);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "duration", PROPERTY_HINT_RANGE, "0,3600,0.01,or_greater,suffix:s"), "set_duration", "get_duration");
+}
+
+void BehaviorTreeCooldown::set_duration(double p_duration) {
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_duration) || p_duration < 0.0, "BehaviorTreeCooldown.duration must be finite and nonnegative.");
+	duration = p_duration;
+	emit_changed();
+}
+
+BehaviorTreeTask::Status BehaviorTreeCooldown::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+	const Ref<BehaviorTreeTask> child = get_task();
+	if (child.is_null()) {
+		clear_branch_memory(r_memory, p_path);
+		return FAILURE;
+	}
+	const double safe_delta = Math::is_finite(p_delta) ? MAX(0.0, p_delta) : 0.0;
+	if (r_memory.has(p_path)) {
+		const double remaining = MAX(0.0, double(r_memory[p_path]) - safe_delta);
+		if (remaining > 0.0) {
+			r_memory[p_path] = remaining;
+			return FAILURE;
+		}
+		r_memory.erase(p_path);
+	}
+	const Status status = child->execute_traced(p_blackboard, r_memory, p_path + "/0", safe_delta);
+	if (status != RUNNING) {
+		clear_branch_memory(r_memory, p_path);
+		if (status == SUCCESS && duration > 0.0) {
+			r_memory[p_path] = duration;
+		}
+	}
+	return status;
 }
 
 void BehaviorTreeBlackboardCheck::_bind_methods() {
@@ -431,11 +551,21 @@ void BehaviorTreeRunner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_profiling_enabled"), &BehaviorTreeRunner::is_profiling_enabled);
 	ClassDB::bind_method(D_METHOD("get_profile_snapshot"), &BehaviorTreeRunner::get_profile_snapshot);
 	ClassDB::bind_method(D_METHOD("reset_profile"), &BehaviorTreeRunner::reset_profile);
+	ClassDB::bind_method(D_METHOD("set_trace_enabled", "enabled"), &BehaviorTreeRunner::set_trace_enabled);
+	ClassDB::bind_method(D_METHOD("is_trace_enabled"), &BehaviorTreeRunner::is_trace_enabled);
+	ClassDB::bind_method(D_METHOD("get_trace_snapshot"), &BehaviorTreeRunner::get_trace_snapshot);
+	ClassDB::bind_method(D_METHOD("get_tree_snapshot"), &BehaviorTreeRunner::get_tree_snapshot);
+	ClassDB::bind_method(D_METHOD("reset_trace"), &BehaviorTreeRunner::reset_trace);
+	ClassDB::bind_method(D_METHOD("set_trace_history_capacity", "capacity"), &BehaviorTreeRunner::set_trace_history_capacity);
+	ClassDB::bind_method(D_METHOD("get_trace_history_capacity"), &BehaviorTreeRunner::get_trace_history_capacity);
+	ClassDB::bind_method(D_METHOD("get_trace_history_frames", "changes_only"), &BehaviorTreeRunner::get_trace_history_frames, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("get_slowest_trace_nodes", "limit"), &BehaviorTreeRunner::get_slowest_trace_nodes, DEFVAL(8));
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "root_task", PROPERTY_HINT_RESOURCE_TYPE, "BehaviorTreeTask"), "set_root_task", "get_root_task");
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "blackboard"), "set_blackboard", "get_blackboard");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_tick"), "set_auto_tick", "is_auto_tick_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "profiling_enabled"), "set_profiling_enabled", "is_profiling_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "trace_enabled"), "set_trace_enabled", "is_trace_enabled");
 	ADD_SIGNAL(MethodInfo("tree_finished", PropertyInfo(Variant::INT, "status", PROPERTY_HINT_ENUM, "Success,Failure,Running")));
 }
 
@@ -472,7 +602,16 @@ BehaviorTreeTask::Status BehaviorTreeRunner::tick(double p_delta) {
 	if (profiling) {
 		execution_profiler->begin_sample(SNAME("behavior_tree"));
 	}
-	last_status = root_task->execute(blackboard, execution_memory, "root", p_delta);
+	if (trace_enabled && execution_trace.is_valid()) {
+		execution_trace->begin_tick();
+		execution_memory[SNAME("__bt_trace_sink")] = execution_trace;
+	}
+	last_status = root_task->execute_traced(blackboard, execution_memory, "root", p_delta);
+	// The context is transient: it never survives in normal execution memory
+	// nor appears in snapshots or serialized game state.
+	if (trace_enabled) {
+		execution_memory.erase(SNAME("__bt_trace_sink"));
+	}
 	if (profiling) {
 		execution_profiler->end_sample(SNAME("behavior_tree"));
 	}
@@ -495,6 +634,7 @@ Dictionary BehaviorTreeRunner::get_debug_snapshot() const {
 	// The inspection API is read-only by contract for such Object values.
 	result["blackboard"] = blackboard.duplicate(true);
 	result["execution_memory"] = execution_memory.duplicate(true);
+	result["trace"] = get_trace_snapshot();
 	return result;
 }
 
@@ -527,6 +667,146 @@ void BehaviorTreeRunner::reset_profile() {
 	if (execution_profiler.is_valid()) {
 		execution_profiler->reset();
 	}
+}
+
+void BehaviorTreeRunner::set_trace_enabled(bool p_enabled) {
+	if (p_enabled && execution_trace.is_null()) {
+		execution_trace.instantiate();
+	}
+	trace_enabled = p_enabled;
+	if (!trace_enabled && execution_trace.is_valid()) {
+		execution_trace->reset();
+	}
+}
+
+Dictionary BehaviorTreeRunner::get_trace_snapshot() const {
+	Dictionary snapshot;
+	if (execution_trace.is_valid()) {
+		snapshot = execution_trace->get_snapshot();
+	} else {
+		snapshot["tick_index"] = int64_t(0);
+		snapshot["max_steps"] = 128;
+		snapshot["truncated"] = 0;
+		snapshot["steps"] = Array();
+	}
+	snapshot["enabled"] = trace_enabled;
+	return snapshot;
+}
+
+// Snapshot construction is on demand: no graph traversal during normal NPC
+// ticks. One entry per Resource occurrence, including paths never executed in
+// the latest tick. Guarded against overdeep and oversized custom graphs.
+static void _append_behavior_tree_node(const Ref<BehaviorTreeTask> &p_task, const String &p_path, int p_depth,
+		Array &r_nodes, const Dictionary &p_trace_by_path, bool &r_truncated) {
+	if (p_task.is_null() || r_truncated) {
+		return;
+	}
+	if (r_nodes.size() >= 256 || p_depth > 64) {
+		r_truncated = true;
+		return;
+	}
+	Dictionary node;
+	node["path"] = p_path;
+	node["task_class"] = String(p_task->get_class());
+	node["depth"] = p_depth;
+	node["executed"] = false;
+	node["status"] = -1;
+	node["duration_usec"] = int64_t(0);
+	if (p_trace_by_path.has(p_path)) {
+		const Dictionary step = p_trace_by_path[p_path];
+		node["executed"] = true;
+		node["status"] = step.get("status", -1);
+		node["duration_usec"] = step.get("duration_usec", int64_t(0));
+	}
+	r_nodes.push_back(node);
+
+	const Ref<BehaviorTreeComposite> composite = p_task;
+	if (composite.is_valid()) {
+		for (int index = 0; index < composite->get_task_count(); ++index) {
+			_append_behavior_tree_node(composite->get_task(index),
+					p_path + "/" + itos(index), p_depth + 1, r_nodes, p_trace_by_path, r_truncated);
+			if (r_truncated) {
+				break;
+			}
+		}
+	} else {
+		Ref<BehaviorTreeTask> child;
+		const Ref<BehaviorTreeDecorator> decorator = p_task;
+		if (decorator.is_valid()) {
+			child = decorator->get_task();
+		} else {
+			const Ref<BehaviorTreeInverter> inverter = p_task;
+			if (inverter.is_valid()) {
+				child = inverter->get_task();
+			}
+		}
+		if (child.is_valid()) {
+			_append_behavior_tree_node(child, p_path + "/0", p_depth + 1, r_nodes, p_trace_by_path, r_truncated);
+		}
+	}
+}
+
+Dictionary BehaviorTreeRunner::get_tree_snapshot() const {
+	Dictionary result;
+	Array nodes;
+	Dictionary trace_by_path;
+	int64_t trace_tick = 0;
+	int trace_truncated = 0;
+	if (trace_enabled && execution_trace.is_valid()) {
+		const Dictionary trace = execution_trace->get_snapshot();
+		trace_tick = trace.get("tick_index", int64_t(0));
+		trace_truncated = trace.get("truncated", 0);
+		const Array steps = trace.get("steps", Array());
+		for (int i = 0; i < steps.size(); ++i) {
+			const Dictionary step = steps[i];
+			trace_by_path[step.get("path", String())] = step;
+		}
+	}
+	bool graph_truncated = false;
+	if (root_task.is_valid()) {
+		_append_behavior_tree_node(root_task, "root", 0, nodes, trace_by_path, graph_truncated);
+	}
+	result["nodes"] = nodes;
+	result["node_count"] = nodes.size();
+	result["truncated"] = graph_truncated;
+	result["trace_truncated"] = trace_truncated;
+	result["trace_enabled"] = trace_enabled;
+	result["tick_index"] = trace_tick;
+	return result;
+}
+
+void BehaviorTreeRunner::reset_trace() {
+	if (execution_trace.is_valid()) {
+		execution_trace->reset();
+	}
+}
+
+void BehaviorTreeRunner::set_trace_history_capacity(int p_capacity) {
+	ERR_FAIL_COND_MSG(p_capacity < 0 || p_capacity > 32, "BehaviorTree trace history capacity must be in [0,32].");
+	if (p_capacity > 0 && execution_trace.is_null()) {
+		execution_trace.instantiate();
+	}
+	if (execution_trace.is_valid()) {
+		execution_trace->set_history_capacity(p_capacity);
+	}
+}
+
+int BehaviorTreeRunner::get_trace_history_capacity() const {
+	return execution_trace.is_valid() ? execution_trace->get_history_capacity() : 0;
+}
+
+Array BehaviorTreeRunner::get_trace_history_frames(bool p_changes_only) const {
+	if (!trace_enabled || execution_trace.is_null()) {
+		return Array();
+	}
+	return execution_trace->get_history_frames(p_changes_only);
+}
+
+Array BehaviorTreeRunner::get_slowest_trace_nodes(int p_limit) const {
+	if (!trace_enabled || execution_trace.is_null()) {
+		return Array();
+	}
+	return execution_trace->get_slowest_nodes(p_limit);
 }
 
 void BehaviorTreeRunner::reset() {

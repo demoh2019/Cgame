@@ -40,6 +40,7 @@ func run(t) -> void:
 	t.current = "real server crafting and inventory material conservation"
 	var world := WorldGen.new(311)
 	var sim := GameServer.new(world, 311)
+	sim.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var smith = sim.add_player(411, "Cold Weather Tailor")
 	smith.position = _at(world, 9.0, 0.0)
 	for tier in range(2, Defs.MAX_TIER + 1):

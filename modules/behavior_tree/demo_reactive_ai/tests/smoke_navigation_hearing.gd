@@ -79,6 +79,16 @@ func _run_checks() -> void:
     if not demo.hearing.has_sound_memory():
         _fail("Hearing did not retain sound memory")
         return
+    var history_best: Dictionary = demo.stimulus_history.get_best(AIStimulusHistory2D.SOUND)
+    if history_best.get("position", Vector2.INF) != Vector2(160, 350):
+        _fail("Confirmed audible noise must enter the new native history")
+        return
+    if int(history_best.get("source_id", -1)) != 1:
+        _fail("Source-aware history must retain the demo survivor ID")
+        return
+    if demo.stimulus_history.get_event_count() != 1:
+        _fail("Demo hearing must not duplicate the confirmed sound")
+        return
 
     _set_flag(demo.brain, "health", 100)
     _set_flag(demo.brain, "retreat_at_or_below", 30)
@@ -101,6 +111,11 @@ func _run_checks() -> void:
     demo.brain.tick(0.2)
     if demo.brain.get_blackboard().get("action") != "retreat":
         _fail("Emergency retreat should interrupt vision and hearing")
+        return
+
+    demo.stimulus_history.advance_time(4.0)
+    if demo.stimulus_history.get_event_count() != 0:
+        _fail("Time-limited stimulus history must evict old sound events")
         return
 
     demo.hearing.reset()

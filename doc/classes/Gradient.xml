@@ -52,6 +52,14 @@
 				[b]Note:[/b] This method mirrors all points around the middle of the gradient, which may produce unexpected results when [member interpolation_mode] is set to [constant GRADIENT_INTERPOLATE_CONSTANT].
 			</description>
 		</method>
+		<method name="sample_batch">
+			<return type="PackedColorArray" />
+			<param index="0" name="offsets" type="PackedFloat32Array" />
+			<description>
+				Cgame extension: evaluates many gradient offsets in one call and returns one [Color] per input in the same order. Every result is equivalent to [method sample] with that offset and the gradient's current interpolation mode and color space (including constant and Oklab). Offsets outside [code]0.0[/code] to [code]1.0[/code] preserve [method sample]'s endpoint behavior. Repeated or unsorted offsets are allowed. Empty input returns an empty array.
+				For predictable work and memory use, a batch may contain at most 65536 offsets; all offsets must be finite. Invalid input returns an empty [PackedColorArray] and reports an error. The gradient resource and its configured points are not modified by sampling (apart from the usual lazy sorting performed by [method sample]).
+			</description>
+		</method>
 		<method name="sample">
 			<return type="Color" />
 			<param index="0" name="offset" type="float" />

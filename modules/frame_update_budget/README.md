@@ -154,3 +154,18 @@ The already-existing entrance/exit forced refresh hides or restores effects,
 and a native/fallback feature check preserves support for older Cgame builds.
 Engine C++ tests and `test_ambient_tick_budget.gd` cover the active count,
 forced cleanup, no backlog, resume refresh and native/script parity.
+## Per-lane CPU profiling (Unreal-style subsystem stats)
+
+`get_lane_last_frame_cost_us(lane)` reports the completed previous frame's
+caller-measured CPU time for one lane (0 when idle, -1 for an unknown lane).
+Multiple `record_cost` calls in the same frame accumulate with saturation,
+while `begin_frame` rotates samples and `reset` clears them. This does not
+change scheduling decisions, CPU budgets or any authoritative game logic.
+At most 64 registered lanes are touched per frame; no allocations or GPU
+readbacks occur in the native data path.
+
+Albion After registers four additional profiler counters under
+`Albion/AmbientCPUus/<lane>` for dust devils, dragonflies, tumbleweeds and
+dusk bats. They use a matching stock-Godot fallback, and older custom engine
+binaries simply omit these counters. This exposes which system caused a CPU
+spike without confusing estimated work with actual per-lane measurements.
