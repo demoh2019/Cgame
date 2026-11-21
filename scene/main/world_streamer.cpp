@@ -346,27 +346,38 @@ double WorldStreamer::advance_chunk_pressure(double p_pressure, double p_frame_d
 	return previous;
 }
 
-int WorldStreamer::get_effective_instantiations_per_frame() const {
-	const int configured = MAX(max_instantiations_per_frame, 1);
-	if (!adaptive_chunk_budget_enabled) {
-		return configured;
-	}
-	const int reduction = streaming_frame_pressure >= 0.8 ? 2 :
-			(streaming_frame_pressure >= 0.4 ? 1 : 0);
+int WorldStreamer::calculate_adaptive_instantiation_slots(int p_configured, double p_pressure) {
+	const int configured = MAX(p_configured, 1);
+	const double pressure = Math::is_finite(p_pressure) ? CLAMP(p_pressure, 0.0, 1.0) : 0.0;
+	const int reduction = pressure >= 0.8 ? 2 : (pressure >= 0.4 ? 1 : 0);
 	return MAX(1, configured - reduction);
 }
 
+int WorldStreamer::calculate_adaptive_chunk_work_usec(int p_configured, double p_pressure) {
+	const int configured = CLAMP(p_configured, 0, 1000000);
+	if (configured == 0) {
+		return 0;
+	}
+	const double pressure = Math::is_finite(p_pressure) ? CLAMP(p_pressure, 0.0, 1.0) : 0.0;
+	if (pressure >= 0.8) {
+		return MIN(configured, MAX(250, configured / 2));
+	}
+	if (pressure >= 0.4) {
+		return MIN(configured, MAX(250, (configured * 3) / 4));
+	}
+	return configured;
+}
+
+int WorldStreamer::get_effective_instantiations_per_frame() const {
+	return adaptive_chunk_budget_enabled ?
+			calculate_adaptive_instantiation_slots(max_instantiations_per_frame, streaming_frame_pressure) :
+			MAX(max_instantiations_per_frame, 1);
+}
+
 int WorldStreamer::get_effective_chunk_work_usec() const {
-	if (!adaptive_chunk_budget_enabled || max_chunk_work_usec <= 0) {
-		return max_chunk_work_usec;
-	}
-	if (streaming_frame_pressure >= 0.8) {
-		return MIN(max_chunk_work_usec, MAX(250, max_chunk_work_usec / 2));
-	}
-	if (streaming_frame_pressure >= 0.4) {
-		return MIN(max_chunk_work_usec, MAX(250, (max_chunk_work_usec * 3) / 4));
-	}
-	return max_chunk_work_usec;
+	return adaptive_chunk_budget_enabled ?
+			calculate_adaptive_chunk_work_usec(max_chunk_work_usec, streaming_frame_pressure) :
+			max_chunk_work_usec;
 }
 
 // Generates queued cells on the main thread, a bounded number per call.
@@ -1029,6 +1040,8 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_adaptive_chunk_budget_enabled", "enabled"), &WorldStreamer::set_adaptive_chunk_budget_enabled);
 	ClassDB::bind_method(D_METHOD("is_adaptive_chunk_budget_enabled"), &WorldStreamer::is_adaptive_chunk_budget_enabled);
 	ClassDB::bind_static_method("WorldStreamer", D_METHOD("advance_chunk_pressure", "pressure", "frame_delta"), &WorldStreamer::advance_chunk_pressure);
+	ClassDB::bind_static_method("WorldStreamer", D_METHOD("calculate_adaptive_instantiation_slots", "configured", "pressure"), &WorldStreamer::calculate_adaptive_instantiation_slots);
+	ClassDB::bind_static_method("WorldStreamer", D_METHOD("calculate_adaptive_chunk_work_usec", "configured", "pressure"), &WorldStreamer::calculate_adaptive_chunk_work_usec);
 	ClassDB::bind_method(D_METHOD("get_effective_chunk_work_usec"), &WorldStreamer::get_effective_chunk_work_usec);
 	ClassDB::bind_method(D_METHOD("get_effective_instantiations_per_frame"), &WorldStreamer::get_effective_instantiations_per_frame);
 	ClassDB::bind_method(D_METHOD("get_streaming_frame_pressure_percent"), &WorldStreamer::get_streaming_frame_pressure_percent);
