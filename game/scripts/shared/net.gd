@@ -1325,10 +1325,16 @@ func server_tick(delta: float) -> void:
 	snapshot_accumulator += delta
 	if snapshot_accumulator >= 1.0 / float(Defs.SNAPSHOT_RATE):
 		snapshot_accumulator = 0.0
+		# One spatial index build for all viewers, not one per connection.
+		# Conditional calls retain compatibility with simulated Net fixtures.
+		if sim.has_method("prepare_snapshot_interest"):
+			sim.prepare_snapshot_interest()
 		for peer in sim.players:
 			var snap: Dictionary = sim.snapshot_for(peer)
 			if not snap.is_empty():
 				s_snapshot.rpc_id(peer, snap)
+		if sim.has_method("finish_snapshot_interest"):
+			sim.finish_snapshot_interest()
 
 
 ## Long-range thunder is atmospheric audio, not a remotely visible
