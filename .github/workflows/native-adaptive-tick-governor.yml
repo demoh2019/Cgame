@@ -1,0 +1,67 @@
+name: Cgame native AdaptiveTickGovernor + Albion After server regressions
+
+on:
+  pull_request:
+    paths:
+      - 'scene/main/adaptive_tick_governor.*'
+      - 'scene/register_scene_types.cpp'
+      - 'tests/scene/test_adaptive_tick_governor.cpp'
+      - 'game/scripts/server/server_main.gd'
+      - 'game/scripts/server/server_tick_governor.gd'
+      - 'game/tests/test_server_tick_governor.gd'
+      - '.github/workflows/native-adaptive-tick-governor.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/main/adaptive_tick_governor.*'
+      - 'scene/register_scene_types.cpp'
+      - 'tests/scene/test_adaptive_tick_governor.cpp'
+      - 'game/scripts/server/server_main.gd'
+      - 'game/scripts/server/server_tick_governor.gd'
+      - 'game/tests/test_server_tick_governor.gd'
+      - '.github/workflows/native-adaptive-tick-governor.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-server-budget:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Compile Cgame editor with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Run native governor unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          timeout 180s "$BIN" --headless --test --test-case="[AdaptiveTickGovernor]*" --no-colors 2>&1 | tee native-governor-tests.log
+      - name: Import and test canonical Albion After
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee native-governor-import.log
+          timeout 360s "$BIN" --headless --path game --script res://tests/run_all.gd 2>&1 | tee native-governor-game-tests.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' native-governor-game-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' native-governor-import.log native-governor-game-tests.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-governor-test-logs
+          if-no-files-found: ignore
+          path: |
+            native-governor-tests.log
+            native-governor-import.log
+            native-governor-game-tests.log

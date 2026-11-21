@@ -30,8 +30,16 @@
 
 #include "register_types.h"
 
+#include "ai_action_cooldowns.h"
 #include "ai_execution_profiler.h"
+#include "ai_encounter_budget.h"
+#include "ai_behavior_trace.h"
+#include "ai_proximity_grid_2d.h"
 #include "ai_hearing_sensor_2d.h"
+#include "ai_stimulus_history_2d.h"
+#include "ai_simulation_lod_2d.h"
+#include "ai_update_scheduler.h"
+#include "ai_threat_table_2d.h"
 #include "ai_visual_sensor_2d.h"
 #include "behavior_tree.h"
 
@@ -40,9 +48,19 @@
 #ifdef TESTS_ENABLED
 #include "tests/test_ai_visual_sensor_2d.h"
 #include "tests/test_ai_hearing_sensor_2d.h"
+#include "tests/test_ai_stimulus_history_2d.h"
 #include "tests/test_reactive_behavior_tree.h"
+#include "tests/test_timed_behavior_tree.h"
 #include "tests/test_blackboard_compare.h"
 #include "tests/test_ai_execution_profiler.h"
+#include "tests/test_ai_encounter_budget.h"
+#include "tests/test_ai_behavior_trace.h"
+#include "tests/test_ai_trace_history.h"
+#include "tests/test_behavior_tree_inspector.h"
+#include "tests/test_ai_simulation_lod_2d.h"
+#include "tests/test_ai_update_scheduler.h"
+#include "tests/test_ai_proximity_grid_2d.h"
+#include "tests/test_ai_threat_table_2d.h"
 #endif
 
 void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
@@ -57,6 +75,9 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(BehaviorTreeReactiveSequence);
 	GDREGISTER_CLASS(BehaviorTreeReactiveSelector);
 	GDREGISTER_CLASS(BehaviorTreeInverter);
+	GDREGISTER_VIRTUAL_CLASS(BehaviorTreeDecorator);
+	GDREGISTER_CLASS(BehaviorTreeTimeout);
+	GDREGISTER_CLASS(BehaviorTreeCooldown);
 	GDREGISTER_CLASS(BehaviorTreeBlackboardCheck);
 	GDREGISTER_CLASS(BehaviorTreeBlackboardCompare);
 	GDREGISTER_CLASS(BehaviorTreeBlackboardSet);
@@ -64,7 +85,15 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(BehaviorTreeRunner);
 	GDREGISTER_CLASS(AIVisualSensor2D);
 	GDREGISTER_CLASS(AIHearingSensor2D);
+	GDREGISTER_CLASS(AIStimulusHistory2D);
 	GDREGISTER_CLASS(AIExecutionProfiler);
+	GDREGISTER_CLASS(AIBehaviorTrace);
+	GDREGISTER_CLASS(AIActionCooldowns);
+	GDREGISTER_CLASS(AISimulationLOD2D);
+	GDREGISTER_CLASS(AIUpdateScheduler);
+	GDREGISTER_CLASS(AIEncounterBudget);
+	GDREGISTER_CLASS(AIProximityGrid2D);
+	GDREGISTER_CLASS(AIThreatTable2D);
 }
 
 void uninitialize_behavior_tree_module(ModuleInitializationLevel) {

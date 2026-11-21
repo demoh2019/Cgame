@@ -1,0 +1,78 @@
+name: Native directional camera impact and Albion After combat feedback
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'scene/3d/camera_3d.cpp'
+      - 'scene/3d/camera_3d.h'
+      - 'doc/classes/Camera3D.xml'
+      - 'tests/scene/test_camera_shake.cpp'
+      - 'tests/scene/test_directional_camera_impulse_contract.py'
+      - 'game/scripts/client/combat_camera_feedback.gd'
+      - 'game/tests/test_combat_camera_feedback.gd'
+      - 'game/docs/directional_camera_impulses.md'
+      - '.github/workflows/native-camera-directional-impulses.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/3d/camera_3d.cpp'
+      - 'scene/3d/camera_3d.h'
+      - 'doc/classes/Camera3D.xml'
+      - 'tests/scene/test_camera_shake.cpp'
+      - 'tests/scene/test_directional_camera_impulse_contract.py'
+      - 'game/scripts/client/combat_camera_feedback.gd'
+      - 'game/tests/test_combat_camera_feedback.gd'
+      - 'game/docs/directional_camera_impulses.md'
+      - '.github/workflows/native-camera-directional-impulses.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  engine-game-camera:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Directional camera engine and game source contracts
+        run: python3 -m unittest tests/scene/test_directional_camera_impulse_contract.py -v
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native camera shake and directional impact doctests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[CameraShake]*" --no-colors 2>&1 | tee native-camera-shake.log
+          timeout 240s "$BIN" --headless --test --test-case="*Directional *" --no-colors 2>&1 | tee native-directional-camera.log
+      - name: Import Albion After and validate scripts
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee camera-game-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' camera-game-import.log; then exit 1; fi
+      - name: Albion After combat camera regression
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_one.gd -- test_combat_camera_feedback 2>&1 | tee camera-game-test.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' camera-game-test.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' camera-game-test.log; then exit 1; fi
+      - name: Upload native and game logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-directional-camera-logs
+          if-no-files-found: ignore
+          path: |
+            native-camera-shake.log
+            native-directional-camera.log
+            camera-game-import.log
+            camera-game-test.log

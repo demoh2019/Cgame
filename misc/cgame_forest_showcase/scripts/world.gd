@@ -217,6 +217,9 @@ func _create_streaming_world() -> void:
     world_partition = WorldPartition3D.new()
     world_partition.name = "WorldPartition_32m"
     world_partition.cell_size = CHUNK_EDGE
+    # Quest heading queries the same grid corridor on repeated HUD updates.
+    # Native LRU stores registered topology paths independently of live cells.
+    world_partition.max_cell_path_cache_entries = 64
     # Two rings of streamed cells: full-detail near, low-cost silhouettes far.
     world_partition.load_radius = 2
     world_partition.unload_radius = 3
@@ -238,6 +241,7 @@ func _create_streaming_world() -> void:
     world_partition.navigation_radius = 1
     world_partition.navigation_hysteresis_cells = 1
     world_partition.max_navigation_transitions_per_frame = 2
+    world_partition.max_navigation_rebuilds_per_physics_frame = 1
     world_partition.max_navigation_updates_per_physics_frame = 2 # At most two expensive NPC steering recalculations per tick.
     world_partition.min_physics_frames_after_load = 2 # Allow a physics tick barrier before F10/F11 travel.
     world_partition.max_new_requests_per_frame = 2
@@ -253,6 +257,7 @@ func _create_streaming_world() -> void:
     world_partition.cell_simulation_changed.connect(_on_cell_simulation_changed)
     world_partition.cell_physics_changed.connect(_on_cell_physics_changed)
     world_partition.cell_navigation_changed.connect(_on_cell_navigation_changed)
+    world_partition.cell_navigation_mesh_rebuilt.connect(_on_cell_navigation_mesh_rebuilt)
     world_partition.observer_cell_changed.connect(_on_observer_cell_changed)
 
     for cz in range(-2, 2):
@@ -284,6 +289,25 @@ func _on_cell_physics_changed(_cell: Vector2i, _active: bool) -> void:
 func _on_cell_navigation_changed(_cell: Vector2i, _active: bool) -> void:
     if encounters != null:
         encounters.call("refresh_encounters")
+    _refresh_hud()
+
+
+func _on_cell_navigation_mesh_rebuilt(_cell: Vector2i, _revision: int) -> void:
+    _refresh_hud()
+
+
+func _toggle_barricade() -> void:
+    if world_partition == null or player == null:
+        return
+    var cell: Vector2i = world_partition.local_position_to_cell(
+        world_partition.to_local(player.global_position))
+    var root_cell: Node3D = world_partition.get_cell_instance(cell)
+    if root_cell == null or not root_cell.has_method("toggle_dynamic_barricade"):
+        return
+    # An obstacle appears on the ground four meters ahead of the character.
+    var ahead: Vector3 = player.global_position - player.global_transform.basis.z * 4.0
+    ahead.y = height_at(ahead.x, ahead.z)
+    root_cell.call("toggle_dynamic_barricade", ahead)
     _refresh_hud()
 
 
@@ -517,7 +541,7 @@ func _create_hud() -> void:
     hint.position = Vector2(22, 310)
     hint.add_theme_font_size_override("font_size", 15)
     hint.add_theme_color_override("font_color", Color(0.76, 0.85, 0.77))
-    hint.text = "WASD/стрелки: ходьба  •  Shift: бег  •  Space: прыжок  •  E: реликвия\nF/ЛКМ: удар  •  F1/F2: графика  •  F3: упреждение  •  F4: LOD  •  F5/F9: сохранение\nF6: погода  •  F7: пауза дня  •  F8: +3 часа\nF10: к реликвии  •  F11: в лагерь  •  F12: отмена перехода  •  Esc: курсор"
+    hint.text = "WASD/стрелки: ходьба  •  Shift: бег  •  Space: прыжок  •  E: реликвия\nF/ЛКМ: удар  •  F1/F2: графика  •  F3: упреждение  •  F4: LOD  •  F5/F9: сохранение\nB: построить/убрать баррикаду  •  F6: погода  •  F7: пауза дня  •  F8: +3 часа\nF10: к реликвии  •  F11: в лагерь  •  F12: отмена перехода  •  Esc: курсор"
     canvas.add_child(hint)
 
 
@@ -554,9 +578,14 @@ func _refresh_hud() -> void:
     var simulated: int = world_partition.get_simulation_active_cell_count() if world_partition != null else 0
     var collidable: int = world_partition.get_physics_active_cell_count() if world_partition != null else 0
     var nav_regions: int = world_partition.get_navigation_active_cell_count() if world_partition != null else 0
+    var nav_dirty: int = world_partition.get_navigation_dirty_cell_count() if world_partition != null else 0
+    var nav_triangles: int = world_partition.get_last_navigation_tile_retested_triangle_count() if world_partition != null else 0
     var nav_updates: int = world_partition.get_navigation_updates_used_this_frame() if world_partition != null else 0
     var nav_budget: int = world_partition.max_navigation_updates_per_physics_frame if world_partition != null else 0
     var quest_text: String = _quest_hud_text()
+    var path_hits: int = world_partition.get_cell_path_cache_hit_count() if world_partition != null else 0
+    var path_misses: int = world_partition.get_cell_path_cache_miss_count() if world_partition != null else 0
+    var path_entries: int = world_partition.get_cell_path_cache_entry_count() if world_partition != null else 0
     var enemy_count: int = encounters.call("get_alive_count") if encounters != null else 0
     var travel_text: String = travel_controller.get_status_text() if travel_controller != null and travel_controller.active else "F10: к реликвии  F11: в лагерь"
     var predicted_text: String = "OFF" if not predictive_streaming else "—"
@@ -567,9 +596,10 @@ func _refresh_hud() -> void:
         + "Реликвии: %d / %d    Профиль: %s\n" % [collected, CRYSTAL_TOTAL, quality] \
         + "3D scale: %.2f    FPS: %d    GPU: %s\n" % [scale, Engine.get_frames_per_second(), gpu_text] \
         + "Ячейки: %d/%d   закреплено: %d   очередь: %d   запросы: %d   ошибки: %d   область: %d,%d\n" % [loaded, configured, pinned, pending, inflight, failed, current_region.x, current_region.y] \
-        + "Упреждающая загрузка: %s   LOD дальних: %d   симуляция: %d   коллизии: %d   NavMesh: %d   навигация: %d/%d   F3/F4: сравнение\n" % [predicted_text, distant, simulated, collidable, nav_regions, nav_updates, nav_budget] \
+        + "Упреждающая загрузка: %s   LOD дальних: %d   симуляция: %d   коллизии: %d   NavMesh: %d   пересборка: %d   треугольники: %d/512   навигация: %d/%d\n" % [predicted_text, distant, simulated, collidable, nav_regions, nav_dirty, nav_triangles, nav_updates, nav_budget] \
         + "Атмосфера: %02d:%02d  %s  %s (F6/F7/F8)\n" % [int(atmosphere_clock.day_hours), int(fmod(atmosphere_clock.day_hours, 1.0) * 60.0), atmosphere_clock.get_weather_name(), "ПАУЗА" if atmosphere_clock.paused else "цикл"] \
         + quest_text + "\n" \
+        + "Кеш секторов: попадания %d   поиски %d   записи %d/64\n" % [path_hits, path_misses, path_entries] \
         + "Здоровье: %d/100   Противники: %d   побеждено: %d   F/ЛКМ: удар\n" % [player_health, enemy_count, defeated_mobs.size()] \
         + travel_text
     if collected >= CRYSTAL_TOTAL:
@@ -640,6 +670,8 @@ func _unhandled_input(event: InputEvent) -> void:
             KEY_F8:
                 atmosphere_clock.skip_hours(3.0)
                 _refresh_hud()
+            KEY_B:
+                _toggle_barricade()
             KEY_F9:
                 _load_game()
                 _apply_quality(high_quality)

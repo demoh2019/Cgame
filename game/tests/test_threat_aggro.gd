@@ -49,6 +49,68 @@ func run(t) -> void:
 	t.eq(Threat.pick(table, players, origin, 30.0), -1, "leash prevents cross-map target tracking")
 	t.eq(table.size(), 0, "distant target removed from memory")
 
+
+	t.current = "Equal threat ties are deterministic and preserve current aggro"
+	var tie_players: Dictionary = _info(Vector3(6, 0, 0), Vector3(7, 0, 0))
+	var a_first := {1: 10.0, 2: 10.0}
+	var b_first := {2: 10.0, 1: 10.0}
+	t.eq(Threat.pick(a_first, tie_players, Vector2.ZERO, 30.0), 1,
+		"equal hate chooses smaller peer ID regardless of insertion order")
+	t.eq(Threat.pick(b_first, tie_players, Vector2.ZERO, 30.0), 1,
+		"reversed insertion order gives the same server target")
+	t.eq(Threat.pick(a_first, tie_players, Vector2.ZERO, 30.0, 2), 2,
+		"equal hate does not cause an active target to flap")
+	var reverse_full: Dictionary = {5: 10.0, 4: 10.0, 3: 10.0, 2: 10.0, 1: 10.0}
+	t.check(Threat.record(reverse_full, 9, 11.0),
+		"a stronger new attacker displaces the weakest stored hate")
+	t.check(not reverse_full.has(1) and reverse_full.has(2),
+		"equal weakest scores always evict lowest peer ID")
+
+	t.current = "Native engine threat arithmetic retains the game API"
+	var native_threat_available: bool = ClassDB.class_exists("AIThreatTable2D")
+	t.eq(Threat.has_native(), native_threat_available,
+		"native threat capability is negotiated without requiring Cgame")
+	var expired: Dictionary = {1: 0.2, 2: 1.5}
+	Threat.decay(expired, 1.0)
+	t.check(not expired.has(1), "decay removes exhausted threat")
+	t.near(float(expired.get(2, 0.0)), 0.75, 0.00001,
+		"both engine and stock Godot age threat by the same amount")
+	var broken: Dictionary = {1: 4.0, 2: NAN}
+	Threat.decay(broken, 0.1)
+	t.check(not broken.has(2), "malformed recorded threat cannot poison the table")
+	t.check(broken.has(1), "malformed peer entries do not erase valid attackers")
+
+	t.current = "native/fallback per-target threat attenuation"
+	var retained: Dictionary = {1: 80.0, 2: 10.0}
+	t.check(Threat.scale(retained, 1, 0.35), "existing threat can be reduced")
+	t.near(float(retained[1]), 28.0, 0.00001, "medic cover retains exactly 35 percent")
+	t.eq(float(retained[2]), 10.0, "other attacker is unchanged")
+	t.check(not Threat.scale(retained, 3, 0.5), "missing peer cannot gain aggro")
+	for bad_factor in [NAN, INF, -0.1, 1.1]:
+		t.check(not Threat.scale(retained, 1, bad_factor),
+			"invalid retention must be rejected")
+	t.near(float(retained[1]), 28.0, 0.00001,
+		"invalid retention never modifies threat")
+	t.check(Threat.scale(retained, 1, 1.0), "identity retention is supported")
+	t.check(Threat.scale(retained, 1, 0.0), "zero retention clears this target")
+	t.check(not retained.has(1), "zero retention does not leave a ghost target")
+	t.eq(float(retained[2]), 10.0, "other combatants still own their threat")
+	var malformed_retention: Dictionary = {1: NAN, 2: 10.0}
+	t.check(not Threat.scale(malformed_retention, 1, 0.5),
+		"malformed stored threat is rejected")
+	t.check(not malformed_retention.has(1) and malformed_retention.has(2),
+		"only the malformed peer is removed")
+	if native_threat_available:
+		var native_tracker: Object = ClassDB.instantiate("AIThreatTable2D")
+		# An older Cgame runtime can expose the class without this added method.
+		# The game adapter then uses the stock-Godot path until it is rebuilt.
+		if native_tracker != null and native_tracker.has_method("scale"):
+			var raw_native: Dictionary = {1: 80.0, 2: 10.0}
+			t.check(native_tracker.scale(raw_native, 1, 0.35),
+				"new engine method is script-callable")
+			t.near(float(raw_native[1]), 28.0, 0.00001,
+				"native engine matches the fallback's retention")
+
 	t.current = "real damage creates zombie aggro"
 	var world := WorldGen.new(39)
 	var server := GameServer.new(world, 39)

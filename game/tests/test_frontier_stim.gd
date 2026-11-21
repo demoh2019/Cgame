@@ -29,6 +29,7 @@ func run(t) -> void:
 
 	var world := WorldGen.new(109)
 	var server := GameServer.new(world, 109)
+	server.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var p = server.add_player(417, "Expedition survivor")
 	t.eq(server.cmd_use(p.id, FrontierStim.ITEM_ID)["reason"], "not_carried",
 		"empty inventory cannot trigger a free stamina or energy refill")
@@ -135,7 +136,8 @@ func run(t) -> void:
 	t.near(p.stim_cooldown, stored, 0.0001,
 		"death and respawn do not refresh the limited combat consumable")
 	p.inventory.add(FrontierStim.ITEM_ID, 1)
+	var doses_before: int = p.inventory.count(FrontierStim.ITEM_ID) # Safe-zone deaths keep the backpack.
 	t.eq(server.cmd_use(p.id, FrontierStim.ITEM_ID)["reason"], "cooldown",
 		"freshly respawned survivor still cannot use an old active cooldown")
-	t.eq(p.inventory.count(FrontierStim.ITEM_ID), 1,
+	t.eq(p.inventory.count(FrontierStim.ITEM_ID), doses_before,
 		"blocked respawn use leaves the fresh dose untouched")

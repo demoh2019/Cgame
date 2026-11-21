@@ -160,4 +160,181 @@ TEST_CASE("[FrameUpdateBudget] Recorded CPU microseconds bound optional work") {
 	CHECK(b->get_frame_time_budget_us() == 0);
 }
 
+TEST_CASE("[FrameUpdateBudget] Cost estimates converge and importance is validated") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("expensive"));
+	CHECK(b->register_lane("cheap"));
+	CHECK_FALSE(b->set_lane_importance("missing", 1.0));
+	CHECK_FALSE(b->set_lane_importance("expensive", 0.0));
+	CHECK_FALSE(b->set_lane_importance("expensive", 4.01));
+	CHECK_FALSE(b->set_lane_importance("expensive", std::numeric_limits<double>::infinity()));
+	CHECK(b->set_lane_importance("expensive", 0.25));
+	CHECK(b->set_lane_importance("cheap", 4.0));
+	CHECK(b->get_lane_importance("expensive") == 0.25);
+	CHECK(b->get_lane_importance("cheap") == 4.0);
+	CHECK(b->get_lane_importance("missing") < 0.0);
+	CHECK(b->get_lane_estimated_cost_us("expensive") == 0);
+	CHECK(b->get_lane_estimated_cost_us("missing") < 0);
+	CHECK(b->record_cost("expensive", 800));
+	CHECK(b->get_lane_estimated_cost_us("expensive") == 800);
+	CHECK(b->record_cost("expensive", 400));
+	CHECK(b->get_lane_estimated_cost_us("expensive") == 700);
+	CHECK(b->record_cost("expensive", 0));
+	CHECK(b->get_lane_estimated_cost_us("expensive") == 700);
+	b->reset();
+	CHECK(b->get_lane_importance("cheap") == 4.0);
+	CHECK(b->get_lane_estimated_cost_us("expensive") == 700);
+}
+
+TEST_CASE("[FrameUpdateBudget] Learned costs reserve affordable lanes first") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("heavy"));
+	CHECK(b->register_lane("light"));
+	CHECK(b->set_frame_time_budget_us(500));
+	CHECK(b->set_lane_importance("heavy", 0.25));
+	CHECK(b->set_lane_importance("light", 4.0));
+	b->begin_frame(0.01, 0);
+	CHECK(b->consume("heavy", 0.01) > 0.0);
+	CHECK(b->consume("light", 0.01) > 0.0);
+	CHECK(b->record_cost("heavy", 1500));
+	CHECK(b->record_cost("light", 100));
+	b->begin_frame(0.1, 0);
+	CHECK(b->get_reserved_estimated_cost_us() == 100);
+	CHECK(b->consume("heavy", 0.1) == 0.0);
+	CHECK(b->consume("light", 0.1) > 0.0);
+	CHECK(b->record_cost("light", 100));
+
+	int heavy_updates = 0;
+	for (int frame = 0; frame < 120; frame++) {
+		b->begin_frame(0.1, 0);
+		if (b->consume("heavy", 0.1) > 0.0) {
+			heavy_updates++;
+			CHECK(b->record_cost("heavy", 1500));
+		}
+		if (b->consume("light", 0.1) > 0.0) {
+			CHECK(b->record_cost("light", 100));
+		}
+	}
+	CHECK(heavy_updates >= 1); // Expensive lanes cannot starve permanently.
+	CHECK(b->get_lane_estimated_cost_us("heavy") == 1500);
+}
+
+
+TEST_CASE("[FrameUpdateBudget] Lane rates reject invalid values and preserve importance") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane(StringName("visible")));
+	CHECK(b->get_lane_rate_scale(StringName("visible")) == 1.0);
+	CHECK(b->set_lane_importance(StringName("visible"), 3.0));
+	CHECK(b->set_lane_rate_scale(StringName("visible"), 1.5));
+	CHECK(b->get_lane_importance(StringName("visible")) == 3.0);
+	CHECK(b->get_lane_rate_scale(StringName("visible")) == 1.5);
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("visible"), 0.5));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("visible"), 2.1));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("visible"), std::numeric_limits<double>::infinity()));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("visible"), std::numeric_limits<double>::quiet_NaN()));
+	CHECK_FALSE(b->set_lane_rate_scale(StringName("missing"), 1.0));
+	CHECK(b->get_lane_rate_scale(StringName("missing")) == -1.0);
+	CHECK(b->get_lane_rate_scale(StringName("visible")) == 1.5);
+	b->reset();
+	CHECK(b->get_lane_rate_scale(StringName("visible")) == 1.5);
+	CHECK(b->unregister_lane(StringName("visible")));
+	CHECK(b->get_lane_rate_scale(StringName("visible")) == -1.0);
+}
+
+TEST_CASE("[FrameUpdateBudget] Faster lanes tick more frequently with bounded CPU slots") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane(StringName("visible")));
+	CHECK(b->register_lane(StringName("hidden")));
+	CHECK(b->set_lane_rate_scale(StringName("visible"), 1.5));
+	CHECK(b->set_lane_rate_scale(StringName("hidden"), 0.75));
+	b->begin_frame(1.0 / 60.0, 0);
+	CHECK(b->consume(StringName("visible"), 1.0 / 60.0) > 0.0);
+	CHECK(b->consume(StringName("hidden"), 1.0 / 60.0) > 0.0);
+	int visible_updates = 0;
+	int hidden_updates = 0;
+	for (int frame = 0; frame < 240; frame++) {
+		b->begin_frame(1.0 / 60.0, 0);
+		// Fixed call order puts the less relevant system first.
+		if (b->consume(StringName("hidden"), 1.0 / 60.0) > 0.0) {
+			hidden_updates++;
+		}
+		if (b->consume(StringName("visible"), 1.0 / 60.0) > 0.0) {
+			visible_updates++;
+		}
+		CHECK(b->last_frame_counts().x <= 1); // One low-quality update per frame.
+	}
+	CHECK(visible_updates > hidden_updates);
+	CHECK(visible_updates >= 50);
+	CHECK(hidden_updates >= 25); // Even de-prioritized lanes make progress.
+}
+
+
+TEST_CASE("[FrameUpdateBudget] Per-lane completed-frame CPU samples are isolated") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("dust_devils"));
+	CHECK(b->register_lane("dragonflies"));
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0);
+	CHECK(b->get_lane_last_frame_cost_us("unknown") == -1);
+	b->begin_frame(0.01, 3);
+	CHECK(b->record_cost("dust_devils", 120));
+	CHECK(b->record_cost("dust_devils", 45));
+	CHECK(b->record_cost("dragonflies", 70));
+	CHECK_FALSE(b->record_cost("missing", 100));
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0); // No partial frame leakage.
+	b->begin_frame(0.01, 3);
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 165);
+	CHECK(b->get_lane_last_frame_cost_us("dragonflies") == 70);
+	CHECK(b->last_frame_cost_us() == 235);
+	b->begin_frame(0.01, 3);
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0); // Idle samples clear.
+	CHECK(b->get_lane_last_frame_cost_us("dragonflies") == 0);
+	CHECK(b->record_cost("dust_devils", 999));
+	b->reset();
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0);
+	CHECK(b->unregister_lane("dust_devils"));
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == -1);
+}
+
+TEST_CASE("[FrameUpdateBudget] Soft deferral deadline promotes costly work") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("heavy"));
+	CHECK(b->register_lane("light"));
+	CHECK(b->get_lane_max_deferred_frames("heavy") == 0);
+	CHECK(b->get_lane_max_deferred_frames("unknown") == -1);
+	CHECK_FALSE(b->set_lane_max_deferred_frames("unknown", 2));
+	CHECK_FALSE(b->set_lane_max_deferred_frames("heavy", -1));
+	CHECK_FALSE(b->set_lane_max_deferred_frames("heavy", 121));
+	CHECK(b->set_lane_max_deferred_frames("heavy", 2));
+	CHECK(b->set_lane_importance("heavy", 0.25));
+	CHECK(b->set_lane_importance("light", 4.0));
+	CHECK(b->set_frame_time_budget_us(200));
+	b->begin_frame(0.01, 0);
+	CHECK(b->consume("heavy", 0.01) > 0.0);
+	CHECK(b->consume("light", 0.01) > 0.0);
+	CHECK(b->record_cost("heavy", 1500));
+	CHECK(b->record_cost("light", 80));
+	for (int frame = 0; frame < 2; frame++) {
+		b->begin_frame(0.1, 0);
+		CHECK(b->consume("heavy", 0.1) == 0.0);
+		CHECK(b->consume("light", 0.1) > 0.0);
+		CHECK(b->record_cost("light", 80));
+	}
+	CHECK(b->get_deadline_overdue_lane_count() == 1);
+	b->begin_frame(0.1, 0);
+	CHECK(b->get_reserved_estimated_cost_us() == 1500);
+	CHECK(b->consume("light", 0.1) == 0.0);
+	CHECK(b->consume("heavy", 0.1) > 0.0);
+	CHECK(b->get_deadline_overdue_lane_count() == 0);
+	CHECK(b->last_frame_counts().x == 1);
+	b->reset();
+	CHECK(b->get_lane_max_deferred_frames("heavy") == 2);
+	CHECK(b->get_deadline_overdue_lane_count() == 0);
+}
+
 } // namespace TestFrameUpdateBudget

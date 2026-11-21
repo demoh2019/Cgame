@@ -12,6 +12,14 @@ def get_doc_classes():
         "SoundConcurrencyManager",
         "SoundPropagation",
         "RadialForceField3D",
+        "GameplayEffectTimeline",
+        "GameplayAttributeSet",
+        "GameplayCooldownTracker",
+        "GameplayCueQueue",
+        "GameplayEffectApplicationGate",
+        "GameplayEffectStackPolicy",
+        "AudioDuckMix",
+        "AudioMixSnapshotController",
     ]
 
 

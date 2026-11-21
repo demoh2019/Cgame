@@ -5,6 +5,12 @@ extends Node3D
 const Defs = preload("res://scripts/shared/defs.gd")
 const WoundFx = preload("res://scripts/client/wound_fx.gd")
 const BrawlMeter = preload("res://scripts/client/brawl_meter.gd")
+const FarField = preload("res://scripts/client/far_field.gd")
+const PcgWorldDressing = preload("res://scripts/client/pcg_world_dressing.gd")
+const SeaSurface = preload("res://scripts/client/sea_surface.gd")
+const Buoyancy = preload("res://scripts/client/buoyancy.gd")
+const RaftVisual = preload("res://scripts/client/raft_visual.gd")
+const StreamingProfiler = preload("res://scripts/client/streaming_profiler.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
@@ -30,6 +36,7 @@ const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const FirstPersonView = preload("res://scripts/client/first_person_view.gd")
 const FirstPersonViewmodel = preload("res://scripts/client/first_person_viewmodel.gd")
+const NetTimeouts = preload("res://scripts/shared/net_timeouts.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const AmbientBirds = preload("res://scripts/client/ambient_birds.gd")
@@ -44,6 +51,7 @@ const DamageDirection = preload("res://scripts/client/damage_direction.gd")
 const BloodDecals = preload("res://scripts/client/blood_decals.gd")
 const HoverOutline = preload("res://scripts/client/hover_outline.gd")
 const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
+const AbilityBar = preload("res://scripts/client/ability_bar.gd")
 const WetDrips = preload("res://scripts/client/wet_drips.gd")
 const ZombieFlies = preload("res://scripts/client/zombie_flies.gd")
 const Dragonflies = preload("res://scripts/client/dragonflies.gd")
@@ -60,6 +68,8 @@ const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const Atmosphere = preload("res://scripts/client/atmosphere.gd")
 const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
+const GraphicsTextureStreaming = preload("res://scripts/client/graphics_texture_streaming.gd")
+const ObjectPopulationProfiler = preload("res://scripts/client/object_population_profiler.gd")
 const AmbientTickBudget = preload("res://scripts/client/ambient_tick_budget.gd")
 const AMBIENT_CPU_BUDGET_US := [900, 1500, 2500, 4000] # Quality tiers, main-thread cosmetics only.
 const GraphicsCinematicDof = preload("res://scripts/client/graphics_cinematic_dof.gd")
@@ -73,6 +83,15 @@ const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd
 const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
 const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection_budget.gd")
 const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
+const GraphicsVramBudget = preload("res://scripts/client/graphics_vram_budget.gd")
+const ShaderWarmup = preload("res://scripts/client/shader_warmup.gd")
+const FrameHitchAnalyzer = preload("res://scripts/client/frame_hitch_analyzer.gd")
+const TraceCapture = preload("res://scripts/shared/trace_capture.gd")
+const SeaFftDetail = preload("res://scripts/client/sea_fft_detail.gd")
+const BarricadeDebris = preload("res://scripts/client/barricade_debris.gd")
+const PerfOverlay = preload("res://scripts/client/perf_overlay.gd")
+const RtEffects = preload("res://scripts/client/rt_effects.gd")
+const VfxPresets = preload("res://scripts/client/vfx_presets.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
@@ -105,6 +124,7 @@ var streamer: WorldStreamer
 # corrected player motion and resets on teleport/network resync.
 var _stream_previous_position := Vector3.ZERO
 var _stream_has_previous_position := false
+var _world_streaming_status_elapsed := 0.0
 var _stream_velocity := Vector3.ZERO
 var chunk_root: Node3D
 var entities: Node3D
@@ -136,8 +156,13 @@ var _visual_biome := "plains"
 var atmosphere
 var _ambient_motes
 var _ambient_budget: Variant = AmbientTickBudget.new()
+var _ambient_rates_supported: bool = false
+var _ambient_rate_cache: Dictionary = {}
+var _ambient_deadline_supported: bool = false
+var _ambient_deadline_cache: Dictionary = {}
 var _ambient_was_underground := false
 var _ambient_monitors: Array[StringName] = []
+var _object_population_profiler: RefCounted = null # Only created on the debug hotkey.
 var _ambient_birds
 var _fish_shoals
 var _dusk_bats
@@ -158,6 +183,11 @@ var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
 var _auto_quality := GraphicsAutoQuality.new()
+var _vram_budget := GraphicsVramBudget.new()
+var _hitch_analyzer := FrameHitchAnalyzer.new()
+var _trace := TraceCapture.new()
+var _trace_path := ""
+var _perf: CanvasLayer
 var _adaptive_resolution := GraphicsDynamicResolution.new()
 var _auto_graphics := true
 var _quality_picker: OptionButton
@@ -201,6 +231,11 @@ var _own_attack_time := -10.0 # Engine ticks (s) of your last attack, for zombie
 var _third_person_near := 0.05
 var _fp_body_refresh := 0.0
 var _brawl_meter: Control
+var _far_field: Node3D
+var _raft_visual: Node3D
+var _profiler: Control # World streaming profiler (Ctrl+F3).
+var _pcg_dressing: Node3D # Engine PCG graphs: roadside props, ground clutter, ruin debris (null without the module).
+var _sea # SeaSurface: depth map for shore-aware swell.
 var _last_charge: Dictionary = {} # peer -> charge of their latest swing (for power-hit gore).
 var _underwater_tint: ColorRect # Blue murk while the camera is below the surface.
 var _breath_label: Label # Air left while diving.
@@ -236,6 +271,8 @@ var _demo_frames := 0 # Frames since the first snapshot arrived.
 
 
 func _exit_tree() -> void:
+	if _trace.enabled and _trace_path != "":
+		_trace.save(_trace_path)
 	for monitor_name in _ambient_monitors:
 		Performance.remove_custom_monitor(monitor_name)
 	_ambient_monitors.clear()
@@ -254,13 +291,18 @@ func _ready() -> void:
 		var native_budget: Object = EngineFeatures.make("FrameUpdateBudget")
 		if native_budget != null and native_budget.has_method("record_cost") \
 				and native_budget.has_method("set_frame_time_budget_us") \
-				and native_budget.has_method("last_frame_cost_us"):
+				and native_budget.has_method("last_frame_cost_us") \
+				and native_budget.has_method("set_lane_importance") \
+				and native_budget.has_method("get_reserved_estimated_cost_us"):
 			var registered_all := true
 			for lane in AmbientTickBudget.LANES:
 				if not bool(native_budget.call("register_lane", StringName(lane))):
 					registered_all = false
 			if registered_all:
 				_ambient_budget = native_budget
+	# Older custom binaries keep their existing importance/cost scheduler.
+	_ambient_rates_supported = _ambient_budget.has_method("set_lane_rate_scale")
+	_ambient_deadline_supported = _ambient_budget.has_method("set_lane_max_deferred_frames")
 	# Client-side cosmetic update budget, exposed to Godot's built-in profiler.
 	for monitor in [
 		[&"Albion/AmbientUpdates", Callable(_ambient_budget, "updated_total")],
@@ -269,11 +311,33 @@ func _ready() -> void:
 		[&"Albion/AmbientPressurePct", Callable(_ambient_budget, "pressure_percent")],
 		[&"Albion/AmbientCPUus", Callable(_ambient_budget, "last_frame_cost_us")],
 		[&"Albion/AmbientCPUBudgetus", Callable(_ambient_budget, "get_frame_time_budget_us")],
+		[&"Albion/AmbientPlannedCPUus", Callable(_ambient_budget, "get_reserved_estimated_cost_us")],
 	]:
 		var monitor_name: StringName = monitor[0]
 		if not Performance.has_custom_monitor(monitor_name):
 			Performance.add_custom_monitor(monitor_name, monitor[1])
 			_ambient_monitors.append(monitor_name)
+	# Count visually significant lanes currently beyond their soft deferral
+	# deadlines; this is independent of FPS/CPU pressure measurements.
+	if _ambient_budget.has_method("get_deadline_overdue_lane_count"):
+		var overdue_monitor: StringName = &"Albion/AmbientDeadlineOverdue"
+		if not Performance.has_custom_monitor(overdue_monitor):
+			Performance.add_custom_monitor(overdue_monitor,
+				Callable(_ambient_budget, "get_deadline_overdue_lane_count"))
+			_ambient_monitors.append(overdue_monitor)
+	# Optional per-subsystem CPU stats. Older custom native builds keep their
+	# existing aggregate monitors without requiring the new method.
+	if _ambient_budget.has_method("get_lane_last_frame_cost_us"):
+		for lane in AmbientTickBudget.LANES:
+			var lane_monitor := StringName("Albion/AmbientCPUus/" + lane)
+			if not Performance.has_custom_monitor(lane_monitor):
+				Performance.add_custom_monitor(lane_monitor,
+					Callable(_ambient_budget, "get_lane_last_frame_cost_us").bind(StringName(lane)))
+				_ambient_monitors.append(lane_monitor)
+	# Unreal STAT STREAMING-style diagnostics for the live game. These
+	# callbacks only load atomics and are removed in _exit_tree with other
+	# Albion monitors; older engines register nothing.
+	_ambient_monitors.append_array(GraphicsTextureStreaming.register_profiler_monitors())
 	GraphicsQuality.load_preference()
 	_access = UiAccessibilityLayer.new() # Loads settings, language and key bindings; must precede the menus below.
 	add_child(_access)
@@ -299,6 +363,11 @@ func _ready() -> void:
 			"--name":
 				i += 1
 				player_name = args[i]
+			"--trace":
+				# Insights-style capture; open the JSON in chrome://tracing or ui.perfetto.dev.
+				i += 1
+				_trace_path = args[i]
+				_trace.enabled = true
 			"--screenshot":
 				i += 1
 				_screenshot_path = args[i]
@@ -413,6 +482,22 @@ func _build_environment() -> void:
 	camera.position = CAMERA_OFFSET * 3.0
 	add_child(camera)
 	camera.look_at(Vector3.ZERO)
+	# Compile every spatial shader pipeline during loading, not mid-fight.
+	ShaderWarmup.start(camera)
+	_perf = PerfOverlay.new()
+	_perf.name = "PerfOverlay"
+	add_child(_perf)
+	_perf.set("trace", _trace)
+	_perf.set("loaded_cells_source", func() -> int: return streamer.get_loaded_count() if streamer != null else 0)
+	# Hardware ray-traced sun shadows + AO (ray query): Ultra only, and only where the GPU
+	# reports SUPPORTS_RAY_QUERY on Forward+. attach() is a no-op everywhere else.
+	if GraphicsQuality.level() >= 3:
+		var rt := RtEffects.new()
+		rt.name = "RayTracedEffects"
+		add_child(rt)
+		rt.quality = GraphicsQuality.level()
+		if not rt.attach(camera, self, sun, str(RenderingServer.get_current_rendering_method())):
+			rt.queue_free()
 	_make_party_rally_marker()
 	_make_party_supply_marker()
 	_raid_telegraph = RaidTelegraph.new()
@@ -450,6 +535,16 @@ func _build_environment() -> void:
 	add_child(chunk_root)
 	entities = EntityView.new()
 	add_child(entities)
+	# Measure local visual interpolation recovery separately from server
+	# tick rate and actual network transport loss.
+	for network_monitor in [
+		[&"Albion/NetworkEstimatedMissingSnapshots", Callable(entities, "network_missing_snapshot_estimate")],
+		[&"Albion/NetworkRecoveryHoldRemaining", Callable(entities, "network_recovery_hold_remaining")],
+	]:
+		var network_monitor_name: StringName = network_monitor[0]
+		if not Performance.has_custom_monitor(network_monitor_name):
+			Performance.add_custom_monitor(network_monitor_name, network_monitor[1])
+			_ambient_monitors.append(network_monitor_name)
 	# One GPU draw grounds local/remote players, infected and streamed NPCs.
 	# This avoids a separate transparent shadow MeshInstance for every actor.
 	var ground_shadows := ContactShadowBatch.new()
@@ -458,17 +553,33 @@ func _build_environment() -> void:
 	add_child(ground_shadows)
 	# The sea: one big plane that follows the player.
 	water = MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(1600, 1600)
-	water.mesh = plane
+	water.mesh = SeaSurface.build_mesh() # Radial LOD rings: Gerstner swell needs vertices.
+	_sea = SeaSurface.new()
 	var water_material := ShaderMaterial.new()
 	water_material.shader = load("res://assets/shaders/water.gdshader")
+	water_material.set_shader_parameter("gerstner_amplitude", 1.0)
+	water_material.set_shader_parameter("shore_map_rect", Vector4(-SeaSurface.MAP_EXTENT * 0.5, -SeaSurface.MAP_EXTENT * 0.5, SeaSurface.MAP_EXTENT, SeaSurface.MAP_EXTENT))
 	water.material_override = water_material
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	water.position.y = Defs.WATER_LEVEL - 0.35
 	add_child(water)
+	# FFT chop on the swell (High/Ultra); follows quality presets on its own.
+	var sea_fft := SeaFftDetail.new()
+	sea_fft.name = "SeaFftDetail"
+	add_child(sea_fft)
+	sea_fft.setup(water_material, GraphicsQuality.level(), 1337)
 	effects = Effects.new()
 	add_child(effects)
+	# Report real main-thread PackedScene cache work separately from
+	# particle simulation and combat CPU. Both native/script pools expose it.
+	for monitor in [
+		[&"Albion/VFXPoolMaintenanceCPUus", Callable(effects, "get_pool_maintenance_work_usec")],
+		[&"Albion/VFXPoolMaintenancePending", Callable(effects, "get_pool_maintenance_pending_count")],
+	]:
+		var pool_monitor_name: StringName = monitor[0]
+		if not Performance.has_custom_monitor(pool_monitor_name):
+			Performance.add_custom_monitor(pool_monitor_name, monitor[1])
+			_ambient_monitors.append(pool_monitor_name)
 	combat_vfx = CombatVfx.new()
 	add_child(combat_vfx)
 	_footprints = FootprintDecals.new()
@@ -744,6 +855,7 @@ func _connect() -> void:
 		get_tree().root.add_child.call_deferred(net) # RPC paths must match the server: /root/Net.
 		client = GameClient.new(net)
 		multiplayer.connected_to_server.connect(func() -> void:
+			NetTimeouts.apply(peer, 1) # Loading the world must not time the link out.
 			status_label.text = "Joining..."
 			client.join(name_edit.text, account.get("token", ""), account.get("refresh", "")))
 		multiplayer.connection_failed.connect(_on_connection_failed)
@@ -1038,6 +1150,11 @@ func _spawn_effects(event: Dictionary) -> void:
 		_damage_numbers.on_event(event, at, client.peer_id)
 	if _ambient_birds != null and str(event.get("type", "")) in ["flash_thrown", "barricade_broken", "lightning_struck", "ember_thrown"]:
 		_ambient_birds.startle(at) # RDR2-style: loud events flush the birds overhead.
+	# VFX-graph sparks bounce off the ground and leave embers where they land.
+	if str(event.get("type", "")) == "lightning_struck":
+		var strike := Vector3(float(event.get("x", 0.0)), 0.0, float(event.get("z", 0.0)))
+		strike.y = client.world.height_at(strike.x, strike.z)
+		VfxPresets.spawn(self, VfxPresets.lightning_sparks(GraphicsQuality.level()), strike, int(strike.x * 31.0 + strike.z))
 	if _blood_decals != null and str(event.get("type", "")) == "lightning_struck" \
 			and BloodDecals.enabled(GraphicsQuality.level(), str(RenderingServer.get_current_rendering_method())):
 		_blood_decals.scorch(client.world, float(event.get("x", 0.0)), float(event.get("z", 0.0)), float(event.get("radius", 3.0)))
@@ -1061,6 +1178,11 @@ func _spawn_effects(event: Dictionary) -> void:
 		var peer_info: Dictionary = client.players.get(int(event.get("peer", -1)), {})
 		var weapon_id: String = str(client.inventory.weapon) if int(event.get("peer", -1)) == client.peer_id else str(peer_info.get("weapon", ""))
 		_wound_fx.finisher(entities.model_of("zombie", int(event.get("zombie", -1))), weapon_id, true)
+	if str(event.get("type", "")) == "gathered" and streamer != null:
+		for cell in streamer.get_loaded_cells():
+			var chunk = streamer.get_chunk(cell)
+			if chunk != null and chunk.has_method("shake"):
+				chunk.shake(int(event.get("node", -1)))
 	if str(event.get("type", "")) == "pounce_warning":
 		entities.telegraph(int(event.get("id", -1)), float(event.get("seconds", 0.5)), str(event.get("kind", "")) == "charge")
 	if str(event.get("type", "")) == "knocked_down" and int(event.get("peer", -1)) == client.peer_id:
@@ -1137,6 +1259,8 @@ func _spawn_effects(event: Dictionary) -> void:
 			effects.burst(at - Vector3(0, 0.6, 0), Color(0.5, 0.38, 0.22), 14, 2.0, 0.5, 0.1)
 		"barricade_broken":
 			effects.burst(at, Color(0.55, 0.38, 0.2), 34, 5.0, 0.9, 0.16, 9.0)
+			# Physical Voronoi debris near the camera; far walls keep only the burst.
+			BarricadeDebris.spawn(self, at, here)
 			CombatCameraFeedback.apply(camera, "barricade_broken", at, here, UiSettings.shake_scale())
 		"outpost_taken", "siege_contract_result":
 			if at.distance_to(here) < 60.0:
@@ -1173,9 +1297,14 @@ func _on_skill_event(event: Dictionary) -> void:
 		if int(event.get("peer", -1)) == client.peer_id:
 			var mine: String = str(client.you.get("weapon", ""))
 			avatar_model.play_action(EntityView.attack_animation(mine, bool(event.get("ranged", false))))
+			var own_dir: Variant = event.get("dir", Vector2.ZERO)
+			if own_dir is Vector2 and not bool(event.get("ranged", false)):
+				entities.warp_model(avatar_model, avatar_model.global_position, mine, own_dir)
 		else:
 			var other: Dictionary = client.players.get(int(event.get("peer", -1)), {})
-			entities.play_attack(int(event.get("peer", -1)), str(other.get("weapon", "")), bool(event.get("ranged", false)))
+			var swing_dir: Variant = event.get("dir", Vector2.ZERO)
+			entities.play_attack(int(event.get("peer", -1)), str(other.get("weapon", "")), bool(event.get("ranged", false)),
+				swing_dir if swing_dir is Vector2 else Vector2.ZERO)
 	# Throws show an overhand throw on whoever threw; opening a crate shows the lid going up.
 	if event["type"] in ["flash_thrown", "ember_thrown", "decoy_thrown"]:
 		var thrower: int = int(event.get("peer", -1))
@@ -1285,6 +1414,20 @@ func _on_welcomed() -> void:
 	add_child(hud)
 	hud.setup(client)
 	camera_fx.hud = hud
+	# Albion-style gear ability bar above the bottom HUD edge.
+	var ability_bar := AbilityBar.new()
+	ability_bar.name = "AbilityBar"
+	ability_bar.client = client
+	ability_bar.aim = _aim_direction
+	ability_bar.anchor_left = 0.5
+	ability_bar.anchor_right = 0.5
+	ability_bar.anchor_top = 1.0
+	ability_bar.anchor_bottom = 1.0
+	ability_bar.offset_left = -310.0
+	ability_bar.offset_right = 310.0
+	ability_bar.offset_top = -168.0
+	ability_bar.offset_bottom = -124.0
+	hud.add_child(ability_bar)
 	_access.setup(client, camera, func() -> bool: return _build_mode or hud.is_menu_open() or _typing())
 	hud.social = social
 	skills_panel = SkillsPanel.new()
@@ -1308,6 +1451,19 @@ func _on_welcomed() -> void:
 	client.event_received.connect(_on_skill_event)
 	client.event_received.connect(_first_person_hit_marker) # Crosshair hit flash and held-item swing in first person.
 	_setup_chat()
+	# Distant landscape beyond the streamed chunks: far terrain ring + impostor forests.
+	_far_field = FarField.new()
+	_far_field.name = "FarField"
+	add_child(_far_field)
+	_far_field.setup(client.world)
+	var buoyancy = Buoyancy.new()
+	buoyancy.name = "Buoyancy"
+	buoyancy.world = client.world
+	add_child(buoyancy)
+	_pcg_dressing = PcgWorldDressing.new()
+	_pcg_dressing.name = "PcgDressing"
+	add_child(_pcg_dressing)
+	_pcg_dressing.setup(client.world)
 	# Streaming: chunks are built from the seed as the player walks.
 	streamer = WorldStreamer.new()
 	streamer.cell_size = Defs.CHUNK_SIZE
@@ -1315,6 +1471,17 @@ func _on_welcomed() -> void:
 	streamer.load_radius = 150.0
 	streamer.unload_radius = 220.0
 	streamer.update_interval = 0.15
+	# Unreal-style independent simulation tier: keep far terrain and props
+	# loaded, but pause ChunkView's grass/decor/shadow/windmill CPU updates.
+	# Only client cosmetics opt in; networking and collision stay untouched.
+	if "simulation_radius" in streamer:
+		streamer.simulation_radius = 110.0
+		streamer.simulation_hysteresis = 20.0
+		streamer.max_simulation_transitions_per_update = 4
+	# Unreal-style reduced cosmetic tick rate for distant but still active
+	# scene chunks. GraphicsQuality.apply supplies radius/interval per preset.
+	if "tick_throttle_radius" in streamer:
+		streamer.max_tick_throttle_transitions_per_update = 4
 	# Recover from transient generator/resource failures without an unbounded retry loop.
 	# A null chunk remains an intentionally empty world cell.
 	# Older engine builds lack the retry API; skip it instead of erroring.
@@ -1322,6 +1489,11 @@ func _on_welcomed() -> void:
 		streamer.max_auto_retries = 2
 		streamer.retry_initial_delay = 0.5
 		streamer.retry_max_delay = 3.0
+		# Spread correlated failures across updates instead of retrying an
+		# entire damaged procedural region on the same client frame.
+		if streamer.has_method("set_retry_delay_spread"):
+			streamer.set_retry_delay_spread(0.30)
+			streamer.set_max_retry_releases_per_update(2)
 	# Prioritize content ahead of actual movement while keeping the same
 	# resident-world radius and unload hysteresis.
 	streamer.lookahead_seconds = 2.0
@@ -1330,8 +1502,156 @@ func _on_welcomed() -> void:
 	# The engine ensures that both streaming update paths share one drain.
 	streamer.max_instantiations_per_frame = 3
 	streamer.max_chunk_work_usec = 2500
+	# Learn per-cell generator/finalization CPU cost and avoid scheduling a
+	# second predicted-expensive cosmetic chunk inside the same frame.
+	# A first chunk always runs; collisions/server simulation are unaffected.
+	if streamer.has_method("set_predictive_chunk_work_budget_enabled"):
+		streamer.set_predictive_chunk_work_budget_enabled(true)
+	# Retain only 1-2 immutable *client visual* chunks after unload; reattaching
+	# them when the player backtracks avoids regenerating their terrain/props.
+	# Hard native cap + per-node opt-in; no server entities or physics cached.
+	if "max_cached_chunks" in streamer:
+		streamer.max_cached_chunks = 2 if GraphicsQuality.level() >= 2 else 1
+	if streamer.has_method("set_max_cached_chunk_bytes"):
+		streamer.set_max_cached_chunk_bytes(
+			GraphicsQuality.streamed_chunk_cache_bytes_for_quality(GraphicsQuality.level()))
+	if streamer.has_method("set_cached_chunk_retention_seconds"):
+		streamer.set_cached_chunk_retention_seconds(
+			GraphicsQuality.streamed_chunk_cache_retention_for_quality(GraphicsQuality.level()))
+	if streamer.has_method("set_max_cached_expirations_per_frame"):
+		streamer.set_max_cached_expirations_per_frame(
+			GraphicsQuality.streamed_cache_expirations_for_quality(GraphicsQuality.level()))
+		streamer.set_max_cached_expiration_work_usec(
+			GraphicsQuality.streamed_cache_expiration_usec_for_quality(GraphicsQuality.level()))
+	# Slow-frame backpressure is an opt-in extension. Older Godot forks
+	# retain their unchanged fixed streaming budgets.
+	if "adaptive_chunk_budget_enabled" in streamer:
+		streamer.adaptive_chunk_budget_enabled = true
+	# Stage the initial *cosmetic* world area from nearby terrain outward.
+	# No authority/physics/quest streaming is deferred by this client-only
+	# startup ramp. Older engine builds retain their immediate full radius.
+	if streamer.has_method("begin_loading_range_ramp"):
+		streamer.begin_loading_range_ramp(
+			GraphicsQuality.startup_streaming_area_for_quality(GraphicsQuality.level()),
+			0.4, GraphicsQuality.startup_streaming_ramp_duration(GraphicsQuality.level()))
 	streamer.set_chunk_generator(_generate_chunk)
 	add_child(streamer)
+	# The map can now show native streaming-source readiness without any
+	# gameplay RPC, scene creation, or extra work when the map is closed.
+	world_map.world_streamer = streamer
+	# Game-time, read-only startup ramp telemetry (100% once complete).
+	if streamer.has_method("get_loading_range_area_percent"):
+		var loading_area_monitor: StringName = &"Albion/StreamLoadAreaPct"
+		if not Performance.has_custom_monitor(loading_area_monitor):
+			Performance.add_custom_monitor(loading_area_monitor,
+				Callable(streamer, "get_loading_range_area_percent"))
+			_ambient_monitors.append(loading_area_monitor)
+	# Retries respect the normal generation/activation budgets; these
+	# counters expose waiting failures and admission pressure separately.
+	if streamer.has_method("get_last_retry_deferred_count"):
+		for monitor in [
+			[&"Albion/StreamRetryPending", Callable(streamer, "get_retry_pending_count")],
+			[&"Albion/StreamRetryReleased", Callable(streamer, "get_last_retry_release_count")],
+			[&"Albion/StreamRetryDeferred", Callable(streamer, "get_last_retry_deferred_count")],
+		]:
+			var retry_monitor_name: StringName = monitor[0]
+			if not Performance.has_custom_monitor(retry_monitor_name):
+				Performance.add_custom_monitor(retry_monitor_name, monitor[1])
+				_ambient_monitors.append(retry_monitor_name)
+	# Native forecast telemetry is intentionally distinct from measured CPU.
+	if streamer.has_method("get_last_predicted_deferred_chunk_count"):
+		for monitor in [
+			[&"Albion/StreamGeneratorPredictedCPUus", Callable(streamer, "get_estimated_generator_work_usec")],
+			[&"Albion/StreamFinalizePredictedCPUus", Callable(streamer, "get_estimated_finalization_work_usec")],
+			[&"Albion/StreamPredictiveDeferred", Callable(streamer, "get_last_predicted_deferred_chunk_count")],
+		]:
+			var monitor_name: StringName = monitor[0]
+			if not Performance.has_custom_monitor(monitor_name):
+				Performance.add_custom_monitor(monitor_name, monitor[1])
+				_ambient_monitors.append(monitor_name)
+	# Read-only, engine-sourced telemetry: stream backpressure, real main-
+	# thread chunk work and the currently effective CPU/count limits.
+	if streamer.has_method("get_last_frame_chunk_work_usec"):
+		for monitor in [
+			[&"Albion/StreamChunkCPUus", Callable(streamer, "get_last_frame_chunk_work_usec")],
+			[&"Albion/StreamChunkAttempts", Callable(streamer, "get_last_frame_chunk_attempt_count")],
+			[&"Albion/StreamPressurePct", Callable(streamer, "get_streaming_frame_pressure_percent")],
+			[&"Albion/StreamEffectiveSlots", Callable(streamer, "get_effective_instantiations_per_frame")],
+			[&"Albion/StreamEffectiveCPUus", Callable(streamer, "get_effective_chunk_work_usec")],
+		]:
+			var monitor_name: StringName = monitor[0]
+			if not Performance.has_custom_monitor(monitor_name):
+				Performance.add_custom_monitor(monitor_name, monitor[1])
+				_ambient_monitors.append(monitor_name)
+	if streamer.has_method("get_simulation_active_count"):
+		var simulation_monitor: StringName = &"Albion/StreamSimulationActive"
+		if not Performance.has_custom_monitor(simulation_monitor):
+			Performance.add_custom_monitor(simulation_monitor,
+				Callable(streamer, "get_simulation_active_count"))
+			_ambient_monitors.append(simulation_monitor)
+	if streamer.has_method("get_tick_throttled_count"):
+		var tick_monitor: StringName = &"Albion/StreamCosmeticTickThrottled"
+		if not Performance.has_custom_monitor(tick_monitor):
+			Performance.add_custom_monitor(tick_monitor,
+				Callable(streamer, "get_tick_throttled_count"))
+			_ambient_monitors.append(tick_monitor)
+	if streamer.has_method("get_chunk_cache_hit_count"):
+		for monitor in [
+			[&"Albion/StreamCacheRetained", Callable(streamer, "get_cached_chunk_count")],
+			[&"Albion/StreamCacheHits", Callable(streamer, "get_chunk_cache_hit_count")],
+			[&"Albion/StreamCacheEvictions", Callable(streamer, "get_chunk_cache_eviction_count")],
+		]:
+			var monitor_name: StringName = monitor[0]
+			if not Performance.has_custom_monitor(monitor_name):
+				Performance.add_custom_monitor(monitor_name, monitor[1])
+				_ambient_monitors.append(monitor_name)
+	if streamer.has_method("get_cached_chunk_bytes"):
+		var cache_bytes_monitor: StringName = &"Albion/StreamCacheEstimatedBytes"
+		if not Performance.has_custom_monitor(cache_bytes_monitor):
+			Performance.add_custom_monitor(cache_bytes_monitor,
+				Callable(streamer, "get_cached_chunk_bytes"))
+			_ambient_monitors.append(cache_bytes_monitor)
+	if streamer.has_method("get_chunk_cache_expiration_count"):
+		var cache_expiry_monitor: StringName = &"Albion/StreamCacheExpired"
+		if not Performance.has_custom_monitor(cache_expiry_monitor):
+			Performance.add_custom_monitor(cache_expiry_monitor,
+				Callable(streamer, "get_chunk_cache_expiration_count"))
+			_ambient_monitors.append(cache_expiry_monitor)
+	if streamer.has_method("get_last_cached_expiration_work_usec"):
+		for monitor in [
+			[&"Albion/StreamCacheExpiryCPUus", Callable(streamer, "get_last_cached_expiration_work_usec")],
+			[&"Albion/StreamCacheExpiryDeferred", Callable(streamer, "get_last_deferred_cached_expiration_count")],
+		]:
+			var monitor_name: StringName = monitor[0]
+			if not Performance.has_custom_monitor(monitor_name):
+				Performance.add_custom_monitor(monitor_name, monitor[1])
+				_ambient_monitors.append(monitor_name)
+	# The engine reports how many stale visual cells were retired versus
+	# deferred by this quality-tier unload budget. Counters only update
+	# during real streaming refreshes, not from a HUD polling loop.
+	if streamer.has_method("get_last_deferred_unload_count"):
+		for monitor in [
+			[&"Albion/StreamUnloadedLastUpdate", Callable(streamer, "get_last_unload_count")],
+			[&"Albion/StreamUnloadsDeferred", Callable(streamer, "get_last_deferred_unload_count")],
+		]:
+			var monitor_name: StringName = monitor[0]
+			if not Performance.has_custom_monitor(monitor_name):
+				Performance.add_custom_monitor(monitor_name, monitor[1])
+				_ambient_monitors.append(monitor_name)
+	# Wall-clock retirements include synchronous chunk unload callbacks.
+	if streamer.has_method("get_last_unload_work_usec"):
+		var unload_cpu_monitor: StringName = &"Albion/StreamUnloadCPUus"
+		if not Performance.has_custom_monitor(unload_cpu_monitor):
+			Performance.add_custom_monitor(unload_cpu_monitor,
+				Callable(streamer, "get_last_unload_work_usec"))
+			_ambient_monitors.append(unload_cpu_monitor)
+	# Engine-driven effective visual cleanup budget, exposed in the game profiler.
+	if streamer.has_method("get_effective_unloads_per_update"):
+		var unload_monitor: StringName = &"Albion/StreamEffectiveUnloads"
+		if not Performance.has_custom_monitor(unload_monitor):
+			Performance.add_custom_monitor(unload_monitor,
+				Callable(streamer, "get_effective_unloads_per_update"))
+			_ambient_monitors.append(unload_monitor)
 	_access.set_world_streamer(streamer)
 	# Streamer is created after the initial renderer setup; apply its draw-distance budget now.
 	GraphicsQuality.apply(get_viewport(), atmosphere, _grade_material, water,
@@ -1381,6 +1701,12 @@ func _on_welcomed() -> void:
 	add_child(_damage_direction)
 	audio = Audio.new()
 	add_child(audio)
+	# Engine/stock audio voice-steal hold protects new combat audio attacks.
+	var audio_hold_monitor: StringName = &"Albion/AudioVoiceHoldRejects"
+	if not Performance.has_custom_monitor(audio_hold_monitor):
+		Performance.add_custom_monitor(audio_hold_monitor,
+			Callable(audio, "get_voice_hold_rejections"))
+		_ambient_monitors.append(audio_hold_monitor)
 	# Thunder has its own bounded event queue and 3D emitter so storm
 	# arrival never steals slots from short combat and movement sounds.
 	_storm_thunder = StormThunder.new()
@@ -1466,6 +1792,18 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_frames += 1
+	# Attribute frame hitches to shader compiles, streaming or VRAM growth.
+	var hitch: Dictionary = _hitch_analyzer.sample(delta, FrameHitchAnalyzer.read_counters(
+		streamer.get_loaded_count() if streamer != null else 0), Time.get_ticks_msec() / 1000.0)
+	if _trace.enabled:
+		_trace.frame_marker(_frames)
+		_trace.counter("frame_ms", delta * 1000.0)
+		_trace.counter("draw_calls", Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+		_trace.counter("pipeline_compiles", float(int(FrameHitchAnalyzer.read_counters().get("compiles", 0))))
+		if not hitch.is_empty():
+			_trace.instant("hitch", hitch)
+	if not hitch.is_empty():
+		print_verbose("CLIENT hitch %.0f ms (median %.1f ms): %s" % [hitch["ms"], hitch["median_ms"], hitch["cause"]])
 	# Resize only the Forward+ 3D target before changing costly world LOD.
 	if _auto_graphics and client != null and client.welcomed:
 		var rd: bool = RenderingServer.get_current_rendering_method() == "forward_plus"
@@ -1478,7 +1816,13 @@ func _process(delta: float) -> void:
 			_auto_quality.set_mode("auto")
 		var quality_limit: bool = GraphicsAutoQuality.at_resolution_limit(
 			rd, _adaptive_resolution.at_floor(), _adaptive_resolution.at_ceiling(), delta, gpu_ms)
-		if quality_limit and _auto_quality.sample_frame(delta, gpu_ms):
+		var step_down: bool = quality_limit and _auto_quality.sample_frame(delta, gpu_ms)
+		# GPU memory pressure steps down too, before the driver starts paging textures.
+		if not step_down and _auto_quality.mode == "auto" and _vram_budget.sample(
+				GraphicsVramBudget.used_bytes(), _auto_quality.level, delta):
+			_auto_quality.level -= 1
+			step_down = true
+		if step_down:
 			GraphicsQuality.set_level(_auto_quality.level, false)
 			_adaptive_resolution.configure(GraphicsQuality.level(),
 		GraphicsQuality.metalfx_resolution_floor())
@@ -1534,6 +1878,11 @@ func _process(delta: float) -> void:
 		bike_visual.set_panniers(client.inventory.count("bike_panniers") > 0)
 		bike_visual.set_lamp(bool(client.you.get("bike_lamp_lit", false)))
 		bike_visual.set_riding(riding, avatar_model.speed, delta)
+		if _raft_visual == null:
+			_raft_visual = RaftVisual.new()
+			avatar.add_child(_raft_visual)
+			_raft_visual.position.y = 0.05
+		_raft_visual.set_rafting(bool(client.you.get("rafting", false)) and avatar.visible)
 		flare_visual.set_burning(avatar.visible and float(client.you.get("flare_seconds", 0.0)) > 0.0)
 		audio.set_footsteps(avatar_model._moving and avatar.visible and not riding)
 		if not riding:
@@ -1541,6 +1890,11 @@ func _process(delta: float) -> void:
 			combat_vfx.update_player(position, client.world.height_at(position.x, position.z), avatar_model.speed, delta, _visual_biome)
 	if streamer != null:
 		streamer.focus_position = position
+		if _far_field != null:
+			_far_field.update(position)
+		_apply_data_layers(delta)
+		if _pcg_dressing != null:
+			_pcg_dressing.update(position, delta)
 		# Cheap, local movement hint for native chunk queue ordering. Server
 		# correction and teleports never prefetch in an unrelated direction.
 		var moved: Vector3 = position - _stream_previous_position
@@ -1556,6 +1910,13 @@ func _process(delta: float) -> void:
 		streamer.velocity_hint = _stream_velocity
 		# Longer forward streaming on the bike; idle/teleport uses exact nearby cells.
 		WorldStreamingPolicy.apply(streamer, bool(client.you.get("mounted", false)), _stream_velocity)
+		# A single bounded native grid query twice per second, not once per frame.
+		# Terrain remains server-independent; this is a client visual readiness cue.
+		_world_streaming_status_elapsed += maxf(delta, 0.0)
+		if _world_streaming_status_elapsed >= 0.5:
+			_world_streaming_status_elapsed = fmod(_world_streaming_status_elapsed, 0.5)
+			if hud != null:
+				hud.world_streaming_notice = WorldStreamingPolicy.focus_loading_notice(streamer)
 		# The private map marker only prefetches when near the player; the
 		# native engine keeps extra cells bounded and never streams distant
 		# objectives. No network RPC or simulation change is involved.
@@ -1588,7 +1949,7 @@ func _process(delta: float) -> void:
 		if _land_time >= 0.35:
 			_land_time = -1.0
 	if _crosshair != null:
-		_crosshair.visible = _first_person and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+		_crosshair.visible = _first_person and (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED or _screenshot_path != "")
 		if _crosshair.visible:
 			_hit_marker = move_toward(_hit_marker, 0.0, delta * 4.0)
 			FirstPersonView.layout_crosshair(_crosshair, FirstPersonView.crosshair_spread(
@@ -1622,6 +1983,10 @@ func _process(delta: float) -> void:
 			camera_fx.photo_active)
 	water.position.x = position.x
 	water.position.z = position.z
+	if _sea != null and _sea.texture == null and client.world != null and _sea.step_depth_map(client.world):
+		var sea_material := water.material_override as ShaderMaterial
+		sea_material.set_shader_parameter("shore_map", _sea.texture)
+		sea_material.set_shader_parameter("has_shore_map", 1.0)
 	_update_time_of_day(delta)
 	_track_places(delta)
 	_update_prompt()
@@ -1674,6 +2039,27 @@ func _update_time_of_day(delta: float) -> void:
 	# still update every frame. Force an immediate refresh across dungeon edges.
 	var ambient_quality: int = GraphicsQuality.level()
 	_ambient_budget.set_frame_time_budget_us(AMBIENT_CPU_BUDGET_US[ambient_quality])
+	# Scene significance controls optional effects; encounter/physics/AI never
+	# enter this scheduler. Importance is updated before lane reservations.
+	var cosmetic_importance: Dictionary = AmbientTickBudget.suggested_importance(
+		WorldCycle.daylight(clock), storming, underground)
+	for lane in cosmetic_importance:
+		var significance: float = float(cosmetic_importance[lane])
+		_ambient_budget.set_lane_importance(lane, significance)
+		# Adapt desired frequency only when relevance changes. Cost forecasts,
+		# finite frame slots, and starvation aging stay managed in the engine.
+		if _ambient_rates_supported:
+			var rate_scale: float = AmbientTickBudget.rate_scale_for_importance(significance)
+			if float(_ambient_rate_cache.get(lane, -1.0)) != rate_scale:
+				if bool(_ambient_budget.call("set_lane_rate_scale", lane, rate_scale)):
+					_ambient_rate_cache[lane] = rate_scale
+		# Updating only on significance-class transitions avoids per-frame
+		# setter calls and keeps low-importance underground work cheap.
+		if _ambient_deadline_supported:
+			var deadline_frames: int = AmbientTickBudget.deadline_frames_for_importance(significance)
+			if int(_ambient_deadline_cache.get(lane, -1)) != deadline_frames:
+				if bool(_ambient_budget.call("set_lane_max_deferred_frames", lane, deadline_frames)):
+					_ambient_deadline_cache[lane] = deadline_frames
 	_ambient_budget.begin_frame(delta, ambient_quality)
 	var ambient_force: bool = underground != _ambient_was_underground
 	_ambient_was_underground = underground
@@ -2006,7 +2392,12 @@ func _update_underwater() -> void:
 		_breath_label.add_theme_color_override("font_outline_color", Color.BLACK)
 		_breath_label.add_theme_constant_override("outline_size", 6)
 		hud.add_child(_breath_label)
-	_underwater_tint.visible = camera.global_position.y < Defs.WATER_LEVEL - 0.05
+	var eye: Vector3 = camera.global_position
+	var surface: float = client.world.water_level_at(eye.x, eye.z) if client != null and client.world != null else Defs.WATER_LEVEL
+	var under: bool = eye.y < surface - 0.05
+	_underwater_tint.visible = under
+	_underwater_tint.color.a = 0.28 # Thin: the real murk is the fog below.
+	_apply_underwater_fog(under, surface - eye.y)
 	var breath: float = float(client.you.get("breath", 100.0))
 	var diving: bool = bool(client.you.get("diving", false))
 	_breath_label.visible = diving or breath < 99.5
@@ -2139,6 +2530,33 @@ func _update_first_person_mouse() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Unified perf panel (UE stat unit / Insights live view): Ctrl+Shift+F3 toggles,
+	# Ctrl+Shift+F4 cycles compact/full/graphs. Consumed before the gameplay F-keys.
+	if _perf != null and event is InputEventKey and event.pressed and not event.echo \
+			and event.ctrl_pressed and event.shift_pressed \
+			and (event.keycode == KEY_F3 or event.keycode == KEY_F4):
+		if event.keycode == KEY_F3:
+			_perf.toggle()
+		else:
+			_perf.cycle_mode()
+		get_viewport().set_input_as_handled()
+		return
+	# Unreal MemReport-style on-demand inspection of streamed visual objects.
+	# Debug builds only; one ObjectDB scan per explicit keystroke and ZERO
+	# scanning in normal gameplay. Ctrl+Shift+F10 cannot trigger the ordinary
+	# F10 fish-trap action, because it is intercepted here and consumed.
+	if OS.is_debug_build() and event is InputEventKey and event.pressed and \
+			not event.echo and event.ctrl_pressed and event.shift_pressed and \
+			event.keycode == KEY_F10:
+		if _object_population_profiler == null:
+			_object_population_profiler = ObjectPopulationProfiler.new()
+		var object_sample: Dictionary = _object_population_profiler.sample()
+		var census_text: String = ObjectPopulationProfiler.format_report(object_sample)
+		print(census_text)
+		if hud != null:
+			hud.say(census_text)
+		get_viewport().set_input_as_handled()
+		return
 	if _first_person and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var look: Vector2 = FirstPersonView.apply_look_scaled(_fp_yaw, _fp_pitch, event.relative,
 			FirstPersonView.look_sensitivity(float(UiSettings.get_value("mouse_sensitivity")), bool(UiSettings.get_value("invert_y"))))
@@ -2149,6 +2567,25 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	# Ctrl+F11 cycles graphics quality without consuming the existing F11 medicine shortcut.
+	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F3:
+		if _profiler == null:
+			_profiler = StreamingProfiler.new()
+			_profiler.streamer = streamer
+			_profiler.client = client
+			_profiler.far_field = _far_field
+			_profiler.sea = _sea
+			hud.add_child(_profiler)
+		_profiler.visible = not _profiler.visible
+		get_viewport().set_input_as_handled()
+		return
+	# Ctrl+Shift+F9: PCG debugging — crosses at every procedurally placed point, coloured by asset.
+	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.shift_pressed \
+			and event.keycode == KEY_F9 and _pcg_dressing != null:
+		_pcg_dressing.set_debug_draw(not PcgWorldDressing.debug_draw)
+		if hud != null:
+			hud.say("PCG debug points: %s" % ("on" if PcgWorldDressing.debug_draw else "off"))
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed and event.keycode == KEY_F11:
 		_set_auto_graphics(false)
 		GraphicsQuality.cycle()
@@ -2173,6 +2610,19 @@ func _unhandled_input(event: InputEvent) -> void:
 			hud.say(volume_message)
 			get_viewport().set_input_as_handled()
 			return
+	# Albion-style ability bar: Alt+G weapon ultimate, Alt+H chest, Alt+J helmet, Alt+K boots.
+	if event is InputEventKey and event.pressed and not event.echo and event.alt_pressed and not _typing() \
+			and event.keycode in [KEY_G, KEY_H, KEY_J, KEY_K]:
+		if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+			if event.keycode == KEY_G:
+				var ult_direction: Vector2 = _aim_direction()
+				if ult_direction == Vector2.ZERO:
+					ult_direction = Vector2(sin(client.yaw), cos(client.yaw))
+				client.skill_ultimate(ult_direction)
+			else:
+				client.gear_skill({KEY_H: "armor", KEY_J: "head", KEY_K: "feet"}[event.keycode])
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo and not _typing():
 		match event.keycode:
 			KEY_K:
@@ -2554,7 +3004,14 @@ func _run_demo() -> void:
 	_demo_frames += 1
 	var net_ref = net
 	match _demo:
-		"ruins":
+		"first_person":
+			# Held weapon, crosshair and a swing caught mid-motion (use with --first-person --screenshot).
+			if _demo_frames == 30:
+				net_ref.c_debug.rpc_id(1, "give", {"item": "machete_2", "count": 1})
+			if _demo_frames == 60:
+				_cycle_weapon() # Same as pressing 4: equips the next owned weapon.
+			if _demo_frames == 300 or _demo_frames == 694:
+				client.attack(FirstPersonView.forward(_fp_yaw))
 			if _demo_frames == 40:
 				var site := _find_ruin()
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": site.x - 16.0, "z": site.y + 10.0})
@@ -2799,6 +3256,7 @@ func _run_demo() -> void:
 				print("CLIENT streaming: loaded=%d queued=%d threaded=%d visual=%d" % [
 					streamer.get_loaded_count(), streamer.get_queued_generation_count(),
 					streamer.get_pending_count(), streamer.get_pending_visual_details_count()])
+			print("CLIENT " + _hitch_analyzer.describe())
 			print("CLIENT screenshot saved: ", _screenshot_path)
 			get_tree().quit()
 
@@ -2908,9 +3366,23 @@ func _wound_on_zombie(event: Dictionary) -> void:
 		origin = Vector3(float(attacker.get("x", chest.x + 1.0)), chest.y + 0.2, float(attacker.get("z", chest.z)))
 		var aim: Vector3 = chest + Vector3(randf_range(-0.25, 0.25), randf_range(-0.6, 0.45), randf_range(-0.25, 0.25))
 		direction = (aim - origin).normalized()
-	_wound_fx.on_hit(model, origin, direction, float(event.get("damage", 0.0)),
+	var spectacular: bool = _wound_fx.on_hit(model, origin, direction, float(event.get("damage", 0.0)),
 		bool(event.get("ranged", false)), bool(event.get("fatal", false)), true, str(event.get("weapon", "")),
 		float(_last_charge.get(by, 0.0)))
+	if audio != null and not bool(event.get("ranged", false)):
+		audio.play_gore(false, model.global_position + Vector3.UP * 1.2, -8.0 + minf(float(event.get("damage", 0.0)) * 0.1, 4.0))
+	if audio != null and spectacular:
+		audio.play_gore(true, model.global_position + Vector3.UP * 1.0, -2.0)
+	if spectacular and by == client.peer_id and camera_fx != null:
+		camera_fx._start_stop(Vector2(0.32, 0.3)) # A beat of slow motion on a brutal blow.
+	if bool(event.get("fatal", false)) and _blood_decals != null \
+			and BloodDecals.enabled(GraphicsQuality.level(), str(RenderingServer.get_current_rendering_method())):
+		# The pool spreads under the body over a few seconds.
+		var spot: Vector3 = model.global_position
+		for step in 3:
+			get_tree().create_timer(0.8 + step * 1.4).timeout.connect(func() -> void:
+				if _blood_decals != null:
+					_blood_decals.splat(client.world, spot.x + randf_range(-0.2, 0.2), spot.z + randf_range(-0.2, 0.2), false, 25.0 + step * 20.0))
 
 
 ## How far the current melee wind-up has charged, 0..1.
@@ -2928,3 +3400,53 @@ func _melee_equipped() -> bool:
 func _look_direction() -> Vector2:
 	var aim: Vector2 = _aim_direction()
 	return aim if aim != Vector2.ZERO else Vector2(sin(client.yaw), cos(client.yaw))
+
+
+var _dry_fog: Dictionary = {}
+
+## Underwater, the environment fog turns dense and green-blue and thickens with depth;
+## back at the surface the weather's own fog settings return.
+func _apply_underwater_fog(under: bool, depth: float) -> void:
+	if atmosphere == null or not (atmosphere.world_environment is WorldEnvironment):
+		return
+	var env: Environment = (atmosphere.world_environment as WorldEnvironment).environment
+	if env == null:
+		return
+	if under:
+		if _dry_fog.is_empty():
+			_dry_fog = {"enabled": env.fog_enabled, "density": env.fog_density, "color": env.fog_light_color,
+				"sky": env.fog_sky_affect, "energy": env.fog_light_energy}
+		env.fog_enabled = true
+		env.fog_light_color = Color(0.05, 0.24, 0.28)
+		env.fog_light_energy = clampf(1.0 - depth * 0.08, 0.35, 1.0)
+		env.fog_density = clampf(0.09 + depth * 0.02, 0.09, 0.3)
+		env.fog_sky_affect = 1.0
+	elif not _dry_fog.is_empty():
+		env.fog_enabled = _dry_fog["enabled"]
+		env.fog_density = _dry_fog["density"]
+		env.fog_light_color = _dry_fog["color"]
+		env.fog_sky_affect = _dry_fog["sky"]
+		env.fog_light_energy = _dry_fog["energy"]
+		_dry_fog = {}
+
+
+# --- Data Layers: follow the server's list (winter snow, festival decor) -------------------------------
+
+var _layers_applied: Array = []
+var _snow_cover := 0.0
+
+
+func _apply_data_layers(delta: float) -> void:
+	var layers: Array = client.you.get("data_layers", [])
+	if layers != _layers_applied:
+		_layers_applied = layers.duplicate()
+		ChunkView.active_layers = _layers_applied
+		for cell in streamer.get_loaded_cells():
+			var chunk = streamer.get_chunk(cell)
+			if chunk != null and chunk.has_method("set_data_layers"):
+				chunk.set_data_layers(_layers_applied)
+	# Snow settles and melts over ~20 s rather than popping.
+	var target: float = 1.0 if _layers_applied.has("winter") else 0.0
+	if not is_equal_approx(_snow_cover, target):
+		_snow_cover = move_toward(_snow_cover, target, delta / 20.0)
+		RenderingServer.global_shader_parameter_set("aa_snow_cover", _snow_cover)

@@ -15,6 +15,9 @@ def get_doc_classes():
         "BehaviorTreeReactiveSequence",
         "BehaviorTreeReactiveSelector",
         "BehaviorTreeInverter",
+        "BehaviorTreeDecorator",
+        "BehaviorTreeTimeout",
+        "BehaviorTreeCooldown",
         "BehaviorTreeBlackboardCheck",
         "BehaviorTreeBlackboardCompare",
         "BehaviorTreeBlackboardSet",
@@ -22,7 +25,14 @@ def get_doc_classes():
         "BehaviorTreeRunner",
         "AIVisualSensor2D",
         "AIHearingSensor2D",
+        "AIStimulusHistory2D",
         "AIExecutionProfiler",
+        "AIBehaviorTrace",
+        "AIActionCooldowns",
+        "AISimulationLOD2D",
+        "AIUpdateScheduler",
+        "AIEncounterBudget",
+        "AIThreatTable2D",
     ]
 
 

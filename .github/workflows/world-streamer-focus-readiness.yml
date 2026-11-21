@@ -1,0 +1,74 @@
+name: WorldStreamer primary focus readiness and Albion HUD
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'scene/main/world_streamer.*'
+      - 'doc/classes/WorldStreamer.xml'
+      - 'tests/scene/test_world_streamer_focus_readiness.cpp'
+      - 'game/scripts/client/world_streaming_policy.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/scripts/client/hud.gd'
+      - 'game/tests/test_world_streaming_focus_status.gd'
+      - 'game/tests/run_world_streaming_focus_status.gd'
+      - '.github/workflows/world-streamer-focus-readiness.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/main/world_streamer.*'
+      - 'doc/classes/WorldStreamer.xml'
+      - 'tests/scene/test_world_streamer_focus_readiness.cpp'
+      - 'game/scripts/client/world_streaming_policy.gd'
+      - 'game/scripts/client/online_main.gd'
+      - 'game/scripts/client/hud.gd'
+      - 'game/tests/test_world_streaming_focus_status.gd'
+      - 'game/tests/run_world_streaming_focus_status.gd'
+      - '.github/workflows/world-streamer-focus-readiness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focus-readiness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native focus streaming regression
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*focus completion*" 2>&1 | tee focus-native.log
+      - name: Parse Albion After scripts
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee focus-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' focus-import.log; then exit 1; fi
+      - name: Albion streaming telemetry parity
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path game --script res://tests/run_world_streaming_focus_status.gd 2>&1 | tee focus-game.log
+          grep -E '^FOCUS STREAMING TOTAL: [0-9]+ checks, 0 failures$' focus-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' focus-game.log; then exit 1; fi
+      - name: Attach diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-streamer-focus-readiness-logs
+          if-no-files-found: ignore
+          path: |
+            focus-native.log
+            focus-import.log
+            focus-game.log

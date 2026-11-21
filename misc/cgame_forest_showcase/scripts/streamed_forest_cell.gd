@@ -24,7 +24,17 @@ var streaming_physics_active: bool = true
 var streaming_navigation_active: bool = true
 var navigation_region: NavigationRegion3D
 var navigation_mesh_cache: NavigationMesh
+var navigation_mesh_blocker_snapshot: PackedVector3Array = PackedVector3Array()
+var navigation_patch_count: int = 0
+var navigation_last_retested_triangles: int = 0
 var navigation_blockers: PackedVector3Array = PackedVector3Array()
+# One gameplay-built barricade per loaded forest cell. It updates navigation
+# through the native dirty-tile queue, without reloading or rebuilding foliage.
+const BARRICADE_RADIUS: float = 1.42
+var barricade_active: bool = false
+var barricade_local_position: Vector3 = Vector3.ZERO
+var barricade_body: StaticBody3D
+var navigation_rebuilds: int = 0
 var beacon_time: float = 0.0
 var cell_seed: int = 0
 var cell_x: int = 0
@@ -54,6 +64,8 @@ func set_streaming_physics_active(active: bool) -> void:
     streaming_physics_active = active
     if is_instance_valid(obstacles):
         obstacles.collision_layer = 1 if active else 0
+    if is_instance_valid(barricade_body):
+        barricade_body.collision_layer = 1 if active else 0
 
 
 func set_streaming_navigation_active(active: bool) -> void:
@@ -62,6 +74,112 @@ func set_streaming_navigation_active(active: bool) -> void:
     streaming_navigation_active = active
     if is_node_ready():
         _sync_navigation_region()
+
+
+func _current_navigation_blockers() -> PackedVector3Array:
+    var footprints: PackedVector3Array = navigation_blockers.duplicate()
+    if barricade_active:
+        footprints.append(Vector3(
+            barricade_local_position.x, barricade_local_position.z, BARRICADE_RADIUS))
+    return footprints
+
+
+func _build_current_navigation_mesh() -> NavigationMesh:
+    var current: PackedVector3Array = _current_navigation_blockers()
+    var partition := get_parent() as WorldPartition3D
+    var built: NavigationMesh = ForestNavigationMesh.build_tile(
+        global_position, partition, current)
+    if built != null:
+        navigation_mesh_blocker_snapshot = current
+        navigation_last_retested_triangles = (
+            partition.get_last_navigation_tile_retested_triangle_count()
+            if partition != null else 0)
+    return built
+
+
+func rebuild_streaming_navigation_mesh() -> bool:
+    # Opt-in callback used by WorldPartition3D's limited dirty-tile scheduler.
+    # Publish a NEW NavMesh resource, not a mutation of the old server mesh.
+    if (not is_node_ready() or streaming_lod != 0 or not streaming_navigation_active
+            or not is_instance_valid(navigation_region) or not navigation_region.enabled):
+        return false
+    var partition := get_parent() as WorldPartition3D
+    var current: PackedVector3Array = _current_navigation_blockers()
+    var incremental: bool = partition != null and navigation_mesh_cache != null
+    var refreshed: NavigationMesh
+    if incremental:
+        refreshed = ForestNavigationMesh.patch_tile(
+            global_position, partition, navigation_mesh_cache,
+            navigation_mesh_blocker_snapshot, current)
+    else:
+        refreshed = ForestNavigationMesh.build_tile(global_position, partition, current)
+    if refreshed == null or refreshed.get_polygon_count() == 0:
+        return false
+    # Do not re-publish the resource if old/new blocker multisets are equal.
+    if refreshed != navigation_mesh_cache:
+        navigation_region.navigation_mesh = refreshed
+    navigation_mesh_cache = refreshed
+    navigation_mesh_blocker_snapshot = current
+    navigation_last_retested_triangles = (
+        partition.get_last_navigation_tile_retested_triangle_count()
+        if partition != null else 0)
+    if incremental:
+        navigation_patch_count += 1
+    navigation_rebuilds += 1
+    return true
+
+
+func _create_barricade_visual() -> void:
+    if not barricade_active or streaming_lod != 0 or is_instance_valid(barricade_body):
+        return
+    barricade_body = StaticBody3D.new()
+    barricade_body.name = "DynamicBarricade"
+    barricade_body.collision_layer = 1 if streaming_physics_active else 0
+    barricade_body.collision_mask = 0
+    barricade_body.position = barricade_local_position
+    var box := BoxShape3D.new()
+    box.size = Vector3(2.0, 1.6, 2.0)
+    var collider := CollisionShape3D.new()
+    collider.shape = box
+    barricade_body.add_child(collider)
+    var crate := MeshInstance3D.new()
+    crate.name = "BarricadeCrate"
+    var mesh := BoxMesh.new()
+    mesh.size = box.size
+    crate.mesh = mesh
+    var material := StandardMaterial3D.new()
+    material.albedo_color = Color(0.52, 0.31, 0.12)
+    material.roughness = 0.85
+    crate.material_override = material
+    barricade_body.add_child(crate)
+    add_child(barricade_body)
+
+
+func toggle_dynamic_barricade(at_world: Vector3) -> bool:
+    if not is_node_ready() or streaming_lod != 0:
+        return false
+    if not barricade_active and not at_world.is_finite():
+        return false
+    var partition := get_parent() as WorldPartition3D
+    if partition == null or not partition.mark_cell_navigation_dirty(Vector2i(cell_x, cell_z)):
+        return false # Never change collision without scheduling a NavMesh update.
+    if barricade_active:
+        barricade_active = false
+        if is_instance_valid(barricade_body):
+            # Remove from the scene tree immediately; deferred free alone
+            # could leave an obsolete collision body until end of frame.
+            remove_child(barricade_body)
+            barricade_body.queue_free()
+            barricade_body = null
+    else:
+        var local: Vector3 = to_local(at_world)
+        local.x = clampf(local.x, 3.0, CELL_SIZE - 3.0)
+        local.z = clampf(local.z, 3.0, CELL_SIZE - 3.0)
+        local.y = _world_height(local.x, local.z) + 0.8
+        barricade_local_position = local
+        barricade_active = true
+        _create_barricade_visual()
+    return true
 
 
 func _sync_navigation_region() -> void:
@@ -74,8 +192,9 @@ func _sync_navigation_region() -> void:
     if not is_instance_valid(navigation_region):
         # Cached once per loaded cell; regenerated only on unload/reload.
         if navigation_mesh_cache == null:
-            navigation_mesh_cache = ForestNavigationMesh.build_tile(
-                global_position, get_parent() as WorldPartition3D, navigation_blockers)
+            navigation_mesh_cache = _build_current_navigation_mesh()
+        if navigation_mesh_cache == null or navigation_mesh_cache.get_polygon_count() == 0:
+            return
         navigation_region = NavigationRegion3D.new()
         navigation_region.name = "StreamingNavigationRegion"
         navigation_region.use_edge_connections = true
@@ -147,7 +266,9 @@ func _rebuild_lod() -> void:
     grass = null
     obstacles = null
     navigation_region = null # Old region is queued for removal with the LOD.
+    barricade_body = null # Preserve state while regenerating the cell's LOD.
     navigation_mesh_cache = null # Invalidate if authored obstacle geometry changes.
+    navigation_mesh_blocker_snapshot.clear() # Old snapshot cannot outlive a LOD rebuild.
     navigation_blockers.clear()
     rng.seed = cell_seed
 
@@ -167,6 +288,7 @@ func _rebuild_lod() -> void:
         if cell_x == 0 and cell_z == 0:
             _spawn_home_beacon()
     set_high_quality(high_quality)
+    _create_barricade_visual()
     _sync_navigation_region()
 
 

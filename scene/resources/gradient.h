@@ -148,6 +148,9 @@ public:
 	void set_interpolation_color_space(Gradient::ColorSpace p_color_space);
 	ColorSpace get_interpolation_color_space();
 
+	// Sample multiple offsets with one script/native call. Preserves all scalar interpolation modes.
+	Vector<Color> sample_batch(const Vector<float> &p_offsets);
+
 	_FORCE_INLINE_ Color get_color_at_offset(float p_offset) {
 		if (points.is_empty()) {
 			return Color(0, 0, 0, 1);

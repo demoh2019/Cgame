@@ -68,6 +68,7 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 		node->queue_free();
 	}
 	active_cells.erase(p_cell);
+	_invalidate_cell_path_cache(false);
 	cell_creation_physics_frames.erase(p_cell);
 	active_detail_levels.erase(p_cell);
 	active_simulation_cells.erase(p_cell);
@@ -75,6 +76,9 @@ void WorldPartition3D::_unload_cell(const Vector2i &p_cell) {
 	physics_enabled_frames.erase(p_cell);
 	active_navigation_cells.erase(p_cell);
 	navigation_enabled_frames.erase(p_cell);
+	navigation_dirty_cells.erase(p_cell);
+	navigation_mesh_revisions.erase(p_cell);
+	navigation_mesh_generation++;
 	emit_signal(SNAME("cell_unloaded"), p_cell);
 }
 
@@ -194,6 +198,7 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	// tier is active, with no momentary server registration in a dormant cell.
 	const bool navigation_active = observer_cell_valid ? _cell_navigation_active(p_cell, observer_cell) : true;
 	active_navigation_cells.insert(p_cell, navigation_active);
+	navigation_mesh_revisions.insert(p_cell, 0);
 	if (navigation_active) {
 		navigation_enabled_frames.insert(p_cell, Engine::get_singleton()->get_physics_frames());
 	}
@@ -202,6 +207,8 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 	}
 	add_child(instance);
 	active_cells.insert(p_cell, instance->get_instance_id());
+	_invalidate_cell_path_cache(false);
+	navigation_mesh_generation++;
 	cell_creation_physics_frames.insert(p_cell, Engine::get_singleton()->get_physics_frames());
 	emit_signal(SNAME("cell_loaded"), p_cell);
 	return true;
@@ -223,6 +230,7 @@ void WorldPartition3D::_notification(int p_what) {
 		observer_cell_valid = false;
 		predicted_cell_valid = false;
 		navigation_schedule_valid = false;
+		last_navigation_rebuild_frame = UINT64_MAX;
 		navigation_selected.clear();
 		navigation_consumed.clear();
 	}
@@ -636,6 +644,7 @@ void WorldPartition3D::_refresh_cell_navigation(const Vector2i &p_center) {
 		if (root->has_method(SNAME("set_streaming_navigation_active"))) {
 			root->call(SNAME("set_streaming_navigation_active"), next);
 		}
+		navigation_mesh_generation++;
 		emit_signal(SNAME("cell_navigation_changed"), E.key, next);
 		budget--;
 	}
@@ -684,8 +693,8 @@ int WorldPartition3D::get_navigation_active_cell_count() const {
 }
 
 bool WorldPartition3D::is_cell_navigation_ready(const Vector2i &p_cell) const {
-	if (!is_cell_navigation_active(p_cell)) {
-		return false;
+	if (!is_cell_navigation_active(p_cell) || navigation_dirty_cells.has(p_cell)) {
+		return false; // Dirty tile is not safe for path reuse or fast travel.
 	}
 	const uint64_t *enabled_frame = navigation_enabled_frames.getptr(p_cell);
 	if (enabled_frame == nullptr) {
@@ -724,6 +733,99 @@ bool WorldPartition3D::is_streaming_source_navigation_ready(const String &p_name
 		}
 	}
 	return true;
+}
+
+void WorldPartition3D::set_max_navigation_rebuilds_per_physics_frame(int p_count) {
+	ERR_FAIL_COND_MSG(p_count < 1 || p_count > 16, "WorldPartition3D navigation mesh rebuild budget must be 1 to 16.");
+	max_navigation_rebuilds_per_physics_frame = p_count;
+}
+
+int WorldPartition3D::get_max_navigation_rebuilds_per_physics_frame() const {
+	return max_navigation_rebuilds_per_physics_frame;
+}
+
+bool WorldPartition3D::mark_cell_navigation_dirty(const Vector2i &p_cell) {
+	Node3D *root = get_cell_instance(p_cell);
+	if (!streaming_enabled || root == nullptr || !root->has_method(SNAME("rebuild_streaming_navigation_mesh"))) {
+		return false; // Opt-in scenes only; do not queue unloaded/stale regions.
+	}
+	if (navigation_dirty_cells.has(p_cell)) {
+		return true; // Coalesce repeated changes to the same navigation tile.
+	}
+	if (navigation_dirty_cells.size() >= MAX_DIRTY_NAVIGATION_CELLS) {
+		return false;
+	}
+	navigation_dirty_cells.insert(p_cell);
+	navigation_mesh_generation++; // Invalidate cached routes immediately, not only after rebuild.
+	return true;
+}
+
+int WorldPartition3D::get_navigation_dirty_cell_count() const {
+	return navigation_dirty_cells.size();
+}
+
+int WorldPartition3D::get_cell_navigation_revision(const Vector2i &p_cell) const {
+	const int *revision = navigation_mesh_revisions.getptr(p_cell);
+	return revision != nullptr && get_cell_instance(p_cell) != nullptr ? *revision : -1;
+}
+
+int64_t WorldPartition3D::get_navigation_mesh_generation() const {
+	return navigation_mesh_generation;
+}
+
+void WorldPartition3D::_refresh_dirty_navigation_cells(const Vector2i &p_center) {
+	if (navigation_dirty_cells.is_empty()) {
+		return;
+	}
+	const uint64_t frame = Engine::get_singleton()->get_physics_frames();
+	if (last_navigation_rebuild_frame == frame) {
+		return; // Re-entrant update_streaming() calls cannot bypass the budget.
+	}
+	last_navigation_rebuild_frame = frame;
+	HashSet<Vector2i> attempted;
+	for (int attempt = 0; attempt < max_navigation_rebuilds_per_physics_frame; attempt++) {
+		bool found = false;
+		Vector2i best;
+		uint64_t best_distance = UINT64_MAX;
+		for (const Vector2i &cell : navigation_dirty_cells) {
+			if (attempted.has(cell) || !is_cell_navigation_active(cell)) {
+				continue;
+			}
+			Node3D *root = get_cell_instance(cell);
+			if (root == nullptr || !root->has_method(SNAME("rebuild_streaming_navigation_mesh"))) {
+				continue;
+			}
+			const int64_t dx = int64_t(cell.x) - int64_t(p_center.x);
+			const int64_t dz = int64_t(cell.y) - int64_t(p_center.y);
+			const uint64_t distance = uint64_t(dx < 0 ? -dx : dx) + uint64_t(dz < 0 ? -dz : dz);
+			if (!found || distance < best_distance ||
+					(distance == best_distance && (cell.x < best.x || (cell.x == best.x && cell.y < best.y)))) {
+				found = true;
+				best = cell;
+				best_distance = distance;
+			}
+		}
+		if (!found) {
+			return;
+		}
+		attempted.insert(best);
+		Node3D *root = get_cell_instance(best);
+		if (root == nullptr) {
+			continue;
+		}
+		const Variant result = root->call(SNAME("rebuild_streaming_navigation_mesh"));
+		if (result.get_type() != Variant::BOOL || !bool(result)) {
+			continue; // Keep dirty; retry next physics frame, always fail closed.
+		}
+		navigation_dirty_cells.erase(best);
+		navigation_enabled_frames.insert(best, frame);
+		navigation_mesh_generation++;
+		int *revision = navigation_mesh_revisions.getptr(best);
+		if (revision != nullptr && *revision < INT32_MAX) {
+			(*revision)++;
+			emit_signal(SNAME("cell_navigation_mesh_rebuilt"), best, *revision);
+		}
+	}
 }
 
 void WorldPartition3D::set_max_navigation_updates_per_physics_frame(int p_count) {
@@ -978,7 +1080,45 @@ static bool _world_partition_triangle_overlaps_disc(const Vector2 &a, const Vect
 			_world_partition_point_segment_distance_squared(center, c, a) <= radius_squared;
 }
 
+// Shared with both the complete builder and incremental replacement:
+// their slope and circle-clearance behavior must stay bit-for-bit identical.
+static bool _world_partition_navigation_triangle_allowed(const PackedVector3Array &p_vertices, const int p_indices[3], const PackedVector3Array &p_blockers, real_t p_agent_radius, real_t p_minimum_up) {
+	const Vector3 &v0 = p_vertices[p_indices[0]];
+	const Vector3 &v1 = p_vertices[p_indices[1]];
+	const Vector3 &v2 = p_vertices[p_indices[2]];
+	const Vector3 normal = (v1 - v0).cross(v2 - v0);
+	const real_t length = normal.length();
+	if (length <= CMP_EPSILON || normal.y < length * p_minimum_up) {
+		return false;
+	}
+	const Vector2 p0(v0.x, v0.z);
+	const Vector2 p1(v1.x, v1.z);
+	const Vector2 p2(v2.x, v2.z);
+	const real_t min_x = MIN(p0.x, MIN(p1.x, p2.x));
+	const real_t max_x = MAX(p0.x, MAX(p1.x, p2.x));
+	const real_t min_z = MIN(p0.y, MIN(p1.y, p2.y));
+	const real_t max_z = MAX(p0.y, MAX(p1.y, p2.y));
+	for (int i = 0; i < p_blockers.size(); i++) {
+		const Vector3 &blocker = p_blockers[i];
+		const real_t radius = blocker.z + p_agent_radius;
+		if (blocker.x < min_x - radius || blocker.x > max_x + radius || blocker.y < min_z - radius || blocker.y > max_z + radius) {
+			continue;
+		}
+		if (_world_partition_triangle_overlaps_disc(p0, p1, p2, Vector2(blocker.x, blocker.y), radius)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static uint64_t _world_partition_triangle_id(int p_a, int p_b, int p_c) {
+	// Resolution is at most 32, thus all vertex indices are smaller than
+	// 1089 < 2^11. Keep all three ordered indices in an exact 64-bit key.
+	return (uint64_t(p_a) << 22) | (uint64_t(p_b) << 11) | uint64_t(p_c);
+}
+
 Ref<NavigationMesh> WorldPartition3D::build_navigation_tile(const PackedVector3Array &p_vertices, int p_resolution, const PackedVector3Array &p_blockers, real_t p_agent_radius, real_t p_max_slope_degrees) const {
+	last_navigation_tile_retested_triangles = 0;
 	ERR_FAIL_COND_V_MSG(p_resolution < 2 || p_resolution > MAX_NAVMESH_TILE_RESOLUTION, Ref<NavigationMesh>(), "Navigation tile resolution must be 2 to 32.");
 	const int stride = p_resolution + 1;
 	ERR_FAIL_COND_V_MSG(p_vertices.size() != stride * stride, Ref<NavigationMesh>(), "Navigation tile vertices must contain (resolution+1)^2 samples in Z-major, then X-major order.");
@@ -1004,35 +1144,8 @@ Ref<NavigationMesh> WorldPartition3D::build_navigation_tile(const PackedVector3A
 			const int triangles[2][3] = { { a, c, b }, { b, c, d } };
 			for (int triangle_index = 0; triangle_index < 2; triangle_index++) {
 				const int *indexes = triangles[triangle_index];
-				const Vector3 &v0 = p_vertices[indexes[0]];
-				const Vector3 &v1 = p_vertices[indexes[1]];
-				const Vector3 &v2 = p_vertices[indexes[2]];
-				const Vector3 normal = (v1 - v0).cross(v2 - v0);
-				const real_t length = normal.length();
-				if (length <= CMP_EPSILON || normal.y < length * minimum_up) {
-					continue; // Degenerate, upside-down or too steep.
-				}
-				const Vector2 p0(v0.x, v0.z);
-				const Vector2 p1(v1.x, v1.z);
-				const Vector2 p2(v2.x, v2.z);
-				const real_t min_x = MIN(p0.x, MIN(p1.x, p2.x));
-				const real_t max_x = MAX(p0.x, MAX(p1.x, p2.x));
-				const real_t min_z = MIN(p0.y, MIN(p1.y, p2.y));
-				const real_t max_z = MAX(p0.y, MAX(p1.y, p2.y));
-				bool blocked = false;
-				for (int i = 0; i < p_blockers.size(); i++) {
-					const Vector3 &blocker = p_blockers[i];
-					const real_t radius = blocker.z + p_agent_radius;
-					if (blocker.x < min_x - radius || blocker.x > max_x + radius || blocker.y < min_z - radius || blocker.y > max_z + radius) {
-						continue;
-					}
-					const Vector2 center(blocker.x, blocker.y);
-					if (_world_partition_triangle_overlaps_disc(p0, p1, p2, center, radius)) {
-						blocked = true;
-						break;
-					}
-				}
-				if (!blocked) {
+				last_navigation_tile_retested_triangles++;
+				if (_world_partition_navigation_triangle_allowed(p_vertices, indexes, p_blockers, p_agent_radius, minimum_up)) {
 					Vector<int> polygon;
 					polygon.push_back(indexes[0]);
 					polygon.push_back(indexes[1]);
@@ -1045,7 +1158,262 @@ Ref<NavigationMesh> WorldPartition3D::build_navigation_tile(const PackedVector3A
 	return navigation_mesh;
 }
 
+Ref<NavigationMesh> WorldPartition3D::patch_navigation_tile(const Ref<NavigationMesh> &p_previous, int p_resolution, const PackedVector3Array &p_previous_blockers, const PackedVector3Array &p_blockers, real_t p_agent_radius, real_t p_max_slope_degrees) const {
+	last_navigation_tile_retested_triangles = 0;
+	ERR_FAIL_COND_V_MSG(p_previous.is_null(), Ref<NavigationMesh>(), "An incremental patch requires a prior valid NavigationMesh.");
+	ERR_FAIL_COND_V_MSG(p_resolution < 2 || p_resolution > MAX_NAVMESH_TILE_RESOLUTION, Ref<NavigationMesh>(), "Navigation tile patch resolution must be 2 to 32.");
+	ERR_FAIL_COND_V_MSG(p_previous_blockers.size() > MAX_NAVMESH_TILE_BLOCKERS || p_blockers.size() > MAX_NAVMESH_TILE_BLOCKERS, Ref<NavigationMesh>(), "Navigation tile patch accepts at most 256 old and 256 new blockers.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_agent_radius) || p_agent_radius < 0.0 || p_agent_radius > 8.0, Ref<NavigationMesh>(), "Navigation tile patch agent radius must be 0 to 8.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_max_slope_degrees) || p_max_slope_degrees < 0.0 || p_max_slope_degrees > 89.0, Ref<NavigationMesh>(), "Navigation tile patch slope must be 0 to 89 degrees.");
+	const int stride = p_resolution + 1;
+	const PackedVector3Array vertices = p_previous->get_vertices();
+	ERR_FAIL_COND_V_MSG(vertices.size() != stride * stride, Ref<NavigationMesh>(), "Previous NavigationMesh vertex count does not match the requested tile resolution.");
+	for (int i = 0; i < vertices.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!vertices[i].is_finite(), Ref<NavigationMesh>(), "Previous NavMesh contains non-finite terrain vertices.");
+	}
+	for (int i = 0; i < p_previous_blockers.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!p_previous_blockers[i].is_finite() || p_previous_blockers[i].z < 0.0 || p_previous_blockers[i].z > 16.0, Ref<NavigationMesh>(), "Previous blocker must have finite coordinates and radius 0 to 16.");
+	}
+	for (int i = 0; i < p_blockers.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!p_blockers[i].is_finite() || p_blockers[i].z < 0.0 || p_blockers[i].z > 16.0, Ref<NavigationMesh>(), "New blocker must have finite coordinates and radius 0 to 16.");
+	}
+
+	// The caller must provide the same terrain, agent radius and slope policy
+	// as the original build. Validate the original topology before reusing it.
+	// A foreign or malformed mesh is safely rebuilt in full, not trusted.
+	HashSet<uint64_t> existing_triangles;
+	const int polygon_count = p_previous->get_polygon_count();
+	if (polygon_count > 2 * p_resolution * p_resolution) {
+		return build_navigation_tile(vertices, p_resolution, p_blockers, p_agent_radius, p_max_slope_degrees);
+	}
+	for (int i = 0; i < polygon_count; i++) {
+		const Vector<int> polygon = p_previous->get_polygon(i);
+		if (polygon.size() != 3) {
+			return build_navigation_tile(vertices, p_resolution, p_blockers, p_agent_radius, p_max_slope_degrees);
+		}
+		const int first = polygon[0];
+		const int second = polygon[1];
+		const int third = polygon[2];
+		if (first < 0 || first >= vertices.size() || second < 0 || second >= vertices.size() || third < 0 || third >= vertices.size()) {
+			return build_navigation_tile(vertices, p_resolution, p_blockers, p_agent_radius, p_max_slope_degrees);
+		}
+		const int row = first / stride;
+		const int column = first % stride;
+		const bool upper_triangle = row < p_resolution && column < p_resolution && second == first + stride && third == first + 1;
+		const bool lower_triangle = row < p_resolution && column > 0 && second == first + stride - 1 && third == first + stride;
+		const uint64_t id = _world_partition_triangle_id(first, second, third);
+		if ((!upper_triangle && !lower_triangle) || existing_triangles.has(id)) {
+			return build_navigation_tile(vertices, p_resolution, p_blockers, p_agent_radius, p_max_slope_degrees);
+		}
+		existing_triangles.insert(id);
+	}
+
+	// Match blockers as a multiset so order changes alone are cache hits and
+	// duplicate footprints are tracked accurately. Bound worst case to 256^2.
+	HashSet<int> consumed_new;
+	real_t min_x = std::numeric_limits<real_t>::max();
+	real_t min_z = std::numeric_limits<real_t>::max();
+	real_t max_x = -std::numeric_limits<real_t>::max();
+	real_t max_z = -std::numeric_limits<real_t>::max();
+	bool changed = false;
+	auto add_dirty_footprint = [&](const Vector3 &p_blocker) {
+		const real_t radius = p_blocker.z + p_agent_radius;
+		min_x = MIN(min_x, p_blocker.x - radius);
+		min_z = MIN(min_z, p_blocker.y - radius);
+		max_x = MAX(max_x, p_blocker.x + radius);
+		max_z = MAX(max_z, p_blocker.y + radius);
+		changed = true;
+	};
+	for (int old_i = 0; old_i < p_previous_blockers.size(); old_i++) {
+		bool matched = false;
+		for (int new_i = 0; new_i < p_blockers.size(); new_i++) {
+			if (!consumed_new.has(new_i) && p_previous_blockers[old_i] == p_blockers[new_i]) {
+				consumed_new.insert(new_i);
+				matched = true;
+				break;
+			}
+		}
+		if (!matched) {
+			add_dirty_footprint(p_previous_blockers[old_i]);
+		}
+	}
+	for (int new_i = 0; new_i < p_blockers.size(); new_i++) {
+		if (!consumed_new.has(new_i)) {
+			add_dirty_footprint(p_blockers[new_i]);
+		}
+	}
+	if (!changed) {
+		// Immutable cache hit: caller can retain the same NavigationMesh Ref.
+		return p_previous;
+	}
+	if (!Math::is_finite(min_x) || !Math::is_finite(min_z) || !Math::is_finite(max_x) || !Math::is_finite(max_z)) {
+		return build_navigation_tile(vertices, p_resolution, p_blockers, p_agent_radius, p_max_slope_degrees);
+	}
+
+	// Reconstruct polygons in canonical grid order. Triangles wholly outside
+	// the changed region reuse the old walkability mask with zero geometry
+	// tests, while overlapping triangles use the same filter as a full bake.
+	Ref<NavigationMesh> refreshed;
+	refreshed.instantiate();
+	refreshed->set_vertices(vertices);
+	const real_t min_up = Math::cos(Math::deg_to_rad(p_max_slope_degrees));
+	for (int z = 0; z < p_resolution; z++) {
+		for (int x = 0; x < p_resolution; x++) {
+			const int a = z * stride + x;
+			const int b = a + 1;
+			const int c = a + stride;
+			const int d = c + 1;
+			const int triangles[2][3] = { { a, c, b }, { b, c, d } };
+			for (int t = 0; t < 2; t++) {
+				const int *indices = triangles[t];
+				const Vector3 &v0 = vertices[indices[0]];
+				const Vector3 &v1 = vertices[indices[1]];
+				const Vector3 &v2 = vertices[indices[2]];
+				const real_t triangle_min_x = MIN(v0.x, MIN(v1.x, v2.x));
+				const real_t triangle_max_x = MAX(v0.x, MAX(v1.x, v2.x));
+				const real_t triangle_min_z = MIN(v0.z, MIN(v1.z, v2.z));
+				const real_t triangle_max_z = MAX(v0.z, MAX(v1.z, v2.z));
+				const bool touches_change = !(triangle_max_x < min_x || triangle_min_x > max_x || triangle_max_z < min_z || triangle_min_z > max_z);
+				bool keep = false;
+				if (touches_change) {
+					last_navigation_tile_retested_triangles++;
+					keep = _world_partition_navigation_triangle_allowed(vertices, indices, p_blockers, p_agent_radius, min_up);
+				} else {
+					keep = existing_triangles.has(_world_partition_triangle_id(indices[0], indices[1], indices[2]));
+				}
+				if (keep) {
+					Vector<int> polygon;
+					polygon.push_back(indices[0]);
+					polygon.push_back(indices[1]);
+					polygon.push_back(indices[2]);
+					refreshed->add_polygon(polygon);
+				}
+			}
+		}
+	}
+	return refreshed;
+}
+
+int WorldPartition3D::get_last_navigation_tile_retested_triangle_count() const {
+	return last_navigation_tile_retested_triangles;
+}
+
+void WorldPartition3D::_invalidate_cell_path_cache(bool p_registered_topology) {
+	if (p_registered_topology) {
+		cell_registration_revision++;
+		cell_path_cache.clear(); // Registered paths and live-only paths both changed.
+		return;
+	}
+	cell_loading_revision++;
+	// Loading or unloading changes only paths constrained to live scene roots.
+	// Keep configured-graph routes valid for the quest compass and planners.
+	Vector<String> stale;
+	for (const KeyValue<String, CellPathCacheEntry> &E : cell_path_cache) {
+		if (E.value.loaded_only) {
+			stale.push_back(E.key);
+		}
+	}
+	for (const String &key : stale) {
+		cell_path_cache.erase(key);
+	}
+}
+
+void WorldPartition3D::set_max_cell_path_cache_entries(int p_count) {
+	ERR_FAIL_COND_MSG(p_count < 0 || p_count > MAX_CELL_PATH_CACHE_ENTRIES, "Cell route cache size must be 0 to 128.");
+	if (max_cell_path_cache_entries != p_count) {
+		max_cell_path_cache_entries = p_count;
+		cell_path_cache.clear(); // Reject stale evictions after a capacity change.
+	}
+}
+
+int WorldPartition3D::get_max_cell_path_cache_entries() const {
+	return max_cell_path_cache_entries;
+}
+
+int WorldPartition3D::get_cell_path_cache_entry_count() const {
+	return cell_path_cache.size();
+}
+
+int WorldPartition3D::get_cell_path_cache_hit_count() const {
+	return cell_path_cache_hits;
+}
+
+int WorldPartition3D::get_cell_path_cache_miss_count() const {
+	return cell_path_cache_misses;
+}
+
+void WorldPartition3D::clear_cell_path_cache() {
+	cell_path_cache.clear();
+	cell_path_cache_hits = 0;
+	cell_path_cache_misses = 0;
+	cell_path_cache_serial = 0;
+}
+
 Array WorldPartition3D::find_cell_path(const Vector2i &p_from, const Vector2i &p_to, bool p_loaded_only) const {
+	// Full signed coordinates + the loaded-only flag form a collision-free
+	// identity. Never key on a 32-bit hash alone (different maps can collide).
+	const String key = vformat("%d,%d;%d,%d;%d", p_from.x, p_from.y, p_to.x, p_to.y, int(p_loaded_only));
+	if (max_cell_path_cache_entries > 0) {
+		CellPathCacheEntry *cached = cell_path_cache.getptr(key);
+		if (cached != nullptr) {
+			bool valid = cached->registration_revision == cell_registration_revision &&
+					(!p_loaded_only || cached->loaded_revision == cell_loading_revision);
+			if (valid && p_loaded_only) {
+				// User scripts may queue_free a child scene without asking the native
+				// streamer. Do not return a cached live route through that root.
+				for (int i = 0; i < cached->route.size(); i++) {
+					const Vector2i route_cell = cached->route[i];
+					if (get_cell_instance(route_cell) == nullptr) {
+						valid = false;
+						break;
+					}
+				}
+			}
+			if (valid) {
+				cached->last_access = ++cell_path_cache_serial;
+				if (cell_path_cache_hits < INT32_MAX) {
+					cell_path_cache_hits++;
+				}
+				// Godot Array is reference-counted. Never share the internal cached
+				// Array with scripts, which are free to append/erase/reorder cells.
+				return cached->route.duplicate();
+			}
+			cell_path_cache.erase(key);
+		}
+	}
+	if (cell_path_cache_misses < INT32_MAX) {
+		cell_path_cache_misses++;
+	}
+	const Array route = _find_cell_path_uncached(p_from, p_to, p_loaded_only);
+	if (max_cell_path_cache_entries > 0) {
+		if (cell_path_cache.size() >= max_cell_path_cache_entries) {
+			bool found = false;
+			String oldest_key;
+			uint64_t oldest_access = UINT64_MAX;
+			for (const KeyValue<String, CellPathCacheEntry> &E : cell_path_cache) {
+				if (!found || E.value.last_access < oldest_access ||
+						(E.value.last_access == oldest_access && E.key < oldest_key)) {
+					found = true;
+					oldest_key = E.key;
+					oldest_access = E.value.last_access;
+				}
+			}
+			if (found) {
+				cell_path_cache.erase(oldest_key);
+			}
+		}
+		CellPathCacheEntry fresh;
+		fresh.route = route.duplicate();
+		fresh.registration_revision = cell_registration_revision;
+		fresh.loaded_revision = cell_loading_revision;
+		fresh.last_access = ++cell_path_cache_serial;
+		fresh.loaded_only = p_loaded_only;
+		cell_path_cache.insert(key, fresh);
+	}
+	return route;
+}
+
+Array WorldPartition3D::_find_cell_path_uncached(const Vector2i &p_from, const Vector2i &p_to, bool p_loaded_only) const {
 	Array result;
 	// A valid route must begin and end on registered cells, including singleton
 	// paths. A 'loaded only' route cannot cross a queued-for-free scene root.
@@ -1126,6 +1494,7 @@ void WorldPartition3D::set_cell_scenes(const Dictionary &p_cells) {
 	pending_cells.clear();
 	failed_cells.clear();
 	cell_scenes = clean;
+	_invalidate_cell_path_cache(true);
 	// Keep pins for retained registrations; prevent stale pins from keeping
 	// a future replacement scene loaded under the same grid coordinate.
 	Vector<Vector2i> stale_pins;
@@ -1156,6 +1525,7 @@ void WorldPartition3D::set_cell_scene(const Vector2i &p_cell, const String &p_sc
 	pending_cells.erase(p_cell);
 	failed_cells.erase(p_cell);
 	cell_scenes[p_cell] = p_scene_path;
+	_invalidate_cell_path_cache(true);
 	_purge_unused_ready_scenes();
 }
 
@@ -1168,6 +1538,7 @@ void WorldPartition3D::remove_cell_scene(const Vector2i &p_cell) {
 	pending_cells.erase(p_cell);
 	failed_cells.erase(p_cell);
 	cell_scenes.erase(p_cell);
+	_invalidate_cell_path_cache(true);
 	pinned_cells.erase(p_cell);
 	_purge_unused_ready_scenes();
 }
@@ -1177,6 +1548,7 @@ void WorldPartition3D::clear_cell_scenes() {
 	pending_cells.clear();
 	failed_cells.clear();
 	cell_scenes.clear();
+	_invalidate_cell_path_cache(true);
 	pinned_cells.clear();
 	_purge_unused_ready_scenes();
 }
@@ -1561,6 +1933,7 @@ void WorldPartition3D::update_streaming() {
 	_refresh_cell_simulation(center);
 	_refresh_cell_physics(center);
 	_refresh_cell_navigation(center);
+	_refresh_dirty_navigation_cells(center);
 	_purge_unused_ready_scenes();
 	if (observer_cell_changed) {
 		emit_signal(SNAME("observer_cell_changed"), observer_cell);
@@ -1687,6 +2060,12 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_navigation_active_cell_count"), &WorldPartition3D::get_navigation_active_cell_count);
 	ClassDB::bind_method(D_METHOD("is_cell_navigation_ready", "cell"), &WorldPartition3D::is_cell_navigation_ready);
 	ClassDB::bind_method(D_METHOD("is_streaming_source_navigation_ready", "name"), &WorldPartition3D::is_streaming_source_navigation_ready);
+	ClassDB::bind_method(D_METHOD("set_max_navigation_rebuilds_per_physics_frame", "count"), &WorldPartition3D::set_max_navigation_rebuilds_per_physics_frame);
+	ClassDB::bind_method(D_METHOD("get_max_navigation_rebuilds_per_physics_frame"), &WorldPartition3D::get_max_navigation_rebuilds_per_physics_frame);
+	ClassDB::bind_method(D_METHOD("mark_cell_navigation_dirty", "cell"), &WorldPartition3D::mark_cell_navigation_dirty);
+	ClassDB::bind_method(D_METHOD("get_navigation_dirty_cell_count"), &WorldPartition3D::get_navigation_dirty_cell_count);
+	ClassDB::bind_method(D_METHOD("get_cell_navigation_revision", "cell"), &WorldPartition3D::get_cell_navigation_revision);
+	ClassDB::bind_method(D_METHOD("get_navigation_mesh_generation"), &WorldPartition3D::get_navigation_mesh_generation);
 	ClassDB::bind_method(D_METHOD("set_max_navigation_updates_per_physics_frame", "count"), &WorldPartition3D::set_max_navigation_updates_per_physics_frame);
 	ClassDB::bind_method(D_METHOD("get_max_navigation_updates_per_physics_frame"), &WorldPartition3D::get_max_navigation_updates_per_physics_frame);
 	ClassDB::bind_method(D_METHOD("register_navigation_agent", "name", "agent", "priority"), &WorldPartition3D::register_navigation_agent, DEFVAL(1));
@@ -1718,7 +2097,15 @@ void WorldPartition3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_cell_scenes"), &WorldPartition3D::clear_cell_scenes);
 	ClassDB::bind_method(D_METHOD("get_configured_cell_count"), &WorldPartition3D::get_configured_cell_count);
 	ClassDB::bind_method(D_METHOD("find_cell_path", "from", "to", "loaded_only"), &WorldPartition3D::find_cell_path, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("set_max_cell_path_cache_entries", "count"), &WorldPartition3D::set_max_cell_path_cache_entries);
+	ClassDB::bind_method(D_METHOD("get_max_cell_path_cache_entries"), &WorldPartition3D::get_max_cell_path_cache_entries);
+	ClassDB::bind_method(D_METHOD("get_cell_path_cache_entry_count"), &WorldPartition3D::get_cell_path_cache_entry_count);
+	ClassDB::bind_method(D_METHOD("get_cell_path_cache_hit_count"), &WorldPartition3D::get_cell_path_cache_hit_count);
+	ClassDB::bind_method(D_METHOD("get_cell_path_cache_miss_count"), &WorldPartition3D::get_cell_path_cache_miss_count);
+	ClassDB::bind_method(D_METHOD("clear_cell_path_cache"), &WorldPartition3D::clear_cell_path_cache);
 	ClassDB::bind_method(D_METHOD("build_navigation_tile", "vertices", "resolution", "blockers", "agent_radius", "max_slope_degrees"), &WorldPartition3D::build_navigation_tile, DEFVAL(0.45), DEFVAL(45.0));
+	ClassDB::bind_method(D_METHOD("patch_navigation_tile", "previous", "resolution", "previous_blockers", "blockers", "agent_radius", "max_slope_degrees"), &WorldPartition3D::patch_navigation_tile, DEFVAL(0.45), DEFVAL(45.0));
+	ClassDB::bind_method(D_METHOD("get_last_navigation_tile_retested_triangle_count"), &WorldPartition3D::get_last_navigation_tile_retested_triangle_count);
 	ClassDB::bind_method(D_METHOD("pin_cell", "cell"), &WorldPartition3D::pin_cell);
 	ClassDB::bind_method(D_METHOD("unpin_cell", "cell"), &WorldPartition3D::unpin_cell);
 	ClassDB::bind_method(D_METHOD("is_cell_pinned", "cell"), &WorldPartition3D::is_cell_pinned);
@@ -1781,10 +2168,13 @@ void WorldPartition3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "physics_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_physics_radius", "get_physics_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "physics_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_physics_hysteresis_cells", "get_physics_hysteresis_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_physics_transitions_per_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_physics_transitions_per_frame", "get_max_physics_transitions_per_frame");
+	ADD_GROUP("Cell Route Cache", "");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cell_path_cache_entries", PROPERTY_HINT_RANGE, "0,128,1"), "set_max_cell_path_cache_entries", "get_max_cell_path_cache_entries");
 	ADD_GROUP("Navigation Regions", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "navigation_radius", PROPERTY_HINT_RANGE, "-1,32,1"), "set_navigation_radius", "get_navigation_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "navigation_hysteresis_cells", PROPERTY_HINT_RANGE, "0,8,1"), "set_navigation_hysteresis_cells", "get_navigation_hysteresis_cells");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_navigation_transitions_per_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_navigation_transitions_per_frame", "get_max_navigation_transitions_per_frame");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_navigation_rebuilds_per_physics_frame", PROPERTY_HINT_RANGE, "1,16,1"), "set_max_navigation_rebuilds_per_physics_frame", "get_max_navigation_rebuilds_per_physics_frame");
 	ADD_GROUP("Navigation Scheduling", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_navigation_updates_per_physics_frame", PROPERTY_HINT_RANGE, "1,64,1"), "set_max_navigation_updates_per_physics_frame", "get_max_navigation_updates_per_physics_frame");
 	ADD_GROUP("Cell Activation", "");
@@ -1797,6 +2187,7 @@ void WorldPartition3D::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("cell_simulation_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::BOOL, "active")));
 	ADD_SIGNAL(MethodInfo("cell_physics_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::BOOL, "active")));
 	ADD_SIGNAL(MethodInfo("cell_navigation_changed", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::BOOL, "active")));
+	ADD_SIGNAL(MethodInfo("cell_navigation_mesh_rebuilt", PropertyInfo(Variant::VECTOR2I, "cell"), PropertyInfo(Variant::INT, "revision")));
 }
 
 WorldPartition3D::~WorldPartition3D() {
@@ -1815,6 +2206,8 @@ WorldPartition3D::~WorldPartition3D() {
 	physics_enabled_frames.clear();
 	active_navigation_cells.clear();
 	navigation_enabled_frames.clear();
+	navigation_dirty_cells.clear();
+	navigation_mesh_revisions.clear();
 	pending_cells.clear();
 	ready_scenes.clear();
 	pinned_cells.clear();

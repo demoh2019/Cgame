@@ -540,6 +540,11 @@ TEST_CASE("[SceneTree][WorldPartition3D] Prediction loads a future cell before o
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->is_cell_loaded(Vector2i(1, 0)));
 	CHECK(partition->get_loaded_cell_count() == 2);
+	CHECK(partition->get_cell_navigation_revision(Vector2i(0, 0)) == 0);
+	CHECK(partition->get_cell_navigation_revision(Vector2i(1, 0)) == 0);
+	CHECK_FALSE(partition->mark_cell_navigation_dirty(Vector2i(0, 0))); // Plain scene root has no rebuild callback.
+	CHECK(partition->get_navigation_dirty_cell_count() == 0);
+	CHECK(partition->get_navigation_mesh_generation() >= 2);
 	CHECK(partition->is_cell_physics_active(Vector2i(0, 0)));
 	CHECK(partition->is_cell_physics_active(Vector2i(1, 0)));
 	CHECK(partition->get_physics_active_cell_count() == 2);
@@ -978,6 +983,203 @@ TEST_CASE("[WorldPartition3D] Native navigation tiles filter slopes and radius-a
 	CHECK(world->build_navigation_tile(flat, 4, no_blockers, 9.0).is_null());
 	CHECK(world->build_navigation_tile(flat, 4, no_blockers, 0.45, 90.0).is_null());
 	ERR_PRINT_ON;
+	memdelete(world);
+}
+
+
+TEST_CASE("[WorldPartition3D] Dynamic NavMesh dirty tile scheduling validates budgets and safe lifecycle") {
+	WorldPartition3D *world = memnew(WorldPartition3D);
+	CHECK(world->get_max_navigation_rebuilds_per_physics_frame() == 1);
+	CHECK(world->get_navigation_dirty_cell_count() == 0);
+	CHECK(world->get_cell_navigation_revision(Vector2i()) == -1);
+	CHECK(world->get_navigation_mesh_generation() == 0);
+	CHECK_FALSE(world->mark_cell_navigation_dirty(Vector2i())); // No live opted-in scene.
+	CHECK(world->get_navigation_dirty_cell_count() == 0);
+	world->set_max_navigation_rebuilds_per_physics_frame(2);
+	CHECK(world->get_max_navigation_rebuilds_per_physics_frame() == 2);
+	world->set_max_navigation_rebuilds_per_physics_frame(16);
+	CHECK(world->get_max_navigation_rebuilds_per_physics_frame() == 16);
+	ERR_PRINT_OFF;
+	world->set_max_navigation_rebuilds_per_physics_frame(0);
+	world->set_max_navigation_rebuilds_per_physics_frame(17);
+	ERR_PRINT_ON;
+	CHECK(world->get_max_navigation_rebuilds_per_physics_frame() == 16);
+	world->set_max_navigation_rebuilds_per_physics_frame(1);
+	CHECK(world->get_max_navigation_rebuilds_per_physics_frame() == 1);
+	memdelete(world);
+}
+
+
+TEST_CASE("[WorldPartition3D] Incremental NavMesh patches exactly match full tile after obstacle edits") {
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	PackedVector3Array vertices;
+	for (int z = 0; z <= 16; z++) {
+		for (int x = 0; x <= 16; x++) {
+			vertices.push_back(Vector3(2 * x, 0, 2 * z));
+		}
+	}
+	auto same_polygons = [](const Ref<NavigationMesh> &a, const Ref<NavigationMesh> &b) -> bool {
+		if (a.is_null() || b.is_null() || a->get_polygon_count() != b->get_polygon_count() || a->get_vertices() != b->get_vertices()) {
+			return false;
+		}
+		for (int i = 0; i < a->get_polygon_count(); i++) {
+			if (a->get_polygon(i) != b->get_polygon(i)) {
+				return false;
+			}
+		}
+		return true;
+	};
+
+	PackedVector3Array static_blockers;
+	static_blockers.push_back(Vector3(5, 5, 0.6));
+	static_blockers.push_back(Vector3(27, 25, 0.8));
+	Ref<NavigationMesh> baseline = partition->build_navigation_tile(vertices, 16, static_blockers, 0.45, 42.0);
+	REQUIRE(baseline.is_valid());
+	CHECK(partition->get_last_navigation_tile_retested_triangle_count() == 512);
+	PackedVector3Array placed = static_blockers;
+	placed.push_back(Vector3(16, 16, 1.42));
+	Ref<NavigationMesh> patched = partition->patch_navigation_tile(baseline, 16, static_blockers, placed, 0.45, 42.0);
+	REQUIRE(patched.is_valid());
+	const int addition_checks = partition->get_last_navigation_tile_retested_triangle_count();
+	CHECK(addition_checks > 0);
+	CHECK(addition_checks < 512);
+	Ref<NavigationMesh> full_placed = partition->build_navigation_tile(vertices, 16, placed, 0.45, 42.0);
+	CHECK(same_polygons(patched, full_placed)); // Canonical triangle order, not count alone.
+
+	Ref<NavigationMesh> cache_hit = partition->patch_navigation_tile(patched, 16, placed, placed, 0.45, 42.0);
+	CHECK(cache_hit.ptr() == patched.ptr());
+	CHECK(partition->get_last_navigation_tile_retested_triangle_count() == 0);
+	PackedVector3Array reordered = placed;
+	reordered.set(0, placed[2]);
+	reordered.set(2, placed[0]);
+	cache_hit = partition->patch_navigation_tile(patched, 16, placed, reordered, 0.45, 42.0);
+	CHECK(cache_hit.ptr() == patched.ptr()); // Blocker order does not change physics.
+	CHECK(partition->get_last_navigation_tile_retested_triangle_count() == 0);
+
+	PackedVector3Array moved = static_blockers;
+	moved.push_back(Vector3(19, 12, 1.42));
+	Ref<NavigationMesh> moved_patch = partition->patch_navigation_tile(patched, 16, placed, moved, 0.45, 42.0);
+	REQUIRE(moved_patch.is_valid());
+	const int movement_checks = partition->get_last_navigation_tile_retested_triangle_count();
+	CHECK(movement_checks > addition_checks); // Old and new influence regions must both be visited.
+	CHECK(movement_checks < 512);
+	Ref<NavigationMesh> moved_full = partition->build_navigation_tile(vertices, 16, moved, 0.45, 42.0);
+	CHECK(same_polygons(moved_patch, moved_full));
+
+	Ref<NavigationMesh> removed = partition->patch_navigation_tile(moved_patch, 16, moved, static_blockers, 0.45, 42.0);
+	REQUIRE(removed.is_valid());
+	CHECK(same_polygons(removed, baseline)); // Removal restores original triangle graph.
+	CHECK(partition->get_last_navigation_tile_retested_triangle_count() > 0);
+
+	PackedVector3Array repeated = static_blockers;
+	repeated.push_back(Vector3(16, 16, 1.42));
+	repeated.push_back(Vector3(16, 16, 1.42));
+	Ref<NavigationMesh> repeated_full = partition->build_navigation_tile(vertices, 16, repeated, 0.45, 42.0);
+	Ref<NavigationMesh> repeated_patch = partition->patch_navigation_tile(baseline, 16, static_blockers, repeated, 0.45, 42.0);
+	CHECK(same_polygons(repeated_patch, repeated_full));
+	repeated.resize(repeated.size() - 1);
+	// Remove exactly one duplicate and retain the other.
+	PackedVector3Array double_barrier = repeated;
+	double_barrier.push_back(Vector3(16, 16, 1.42));
+	Ref<NavigationMesh> single_patch = partition->patch_navigation_tile(repeated_patch, 16, double_barrier, repeated, 0.45, 42.0);
+	Ref<NavigationMesh> single_full = partition->build_navigation_tile(vertices, 16, repeated, 0.45, 42.0);
+	CHECK(same_polygons(single_patch, single_full));
+
+	Ref<NavigationMesh> invalid_previous;
+	ERR_PRINT_OFF;
+	CHECK(partition->patch_navigation_tile(invalid_previous, 16, static_blockers, placed).is_null());
+	CHECK(partition->patch_navigation_tile(baseline, 33, static_blockers, placed).is_null());
+	PackedVector3Array bad_new = placed;
+	bad_new.push_back(Vector3(0, 0, -1));
+	CHECK(partition->patch_navigation_tile(baseline, 16, static_blockers, bad_new).is_null());
+	ERR_PRINT_ON;
+
+	Ref<NavigationMesh> malformed;
+	malformed.instantiate();
+	malformed->set_vertices(vertices);
+	Vector<int> bogus_triangle;
+	bogus_triangle.push_back(0);
+	bogus_triangle.push_back(1);
+	bogus_triangle.push_back(2);
+	malformed->add_polygon(bogus_triangle);
+	Ref<NavigationMesh> fallback = partition->patch_navigation_tile(malformed, 16, static_blockers, placed, 0.45, 42.0);
+	CHECK(same_polygons(fallback, full_placed)); // Malformed cached topology is not reused.
+	CHECK(partition->get_last_navigation_tile_retested_triangle_count() == 512);
+	memdelete(partition);
+}
+
+
+TEST_CASE("[WorldPartition3D] Bounded cell route cache handles topology, negative results, defensive copies and LRU") {
+	WorldPartition3D *world = memnew(WorldPartition3D);
+	CHECK(world->get_max_cell_path_cache_entries() == 64);
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
+	CHECK(world->get_cell_path_cache_hit_count() == 0);
+	CHECK(world->get_cell_path_cache_miss_count() == 0);
+	CHECK(world->find_cell_path(Vector2i(), Vector2i()).is_empty());
+	CHECK(world->get_cell_path_cache_miss_count() == 1);
+	CHECK(world->find_cell_path(Vector2i(), Vector2i()).is_empty());
+	CHECK(world->get_cell_path_cache_hit_count() == 1); // Cache empty routes too.
+	CHECK(world->get_cell_path_cache_entry_count() == 1);
+
+	const String scene = "res://tests/cell_route_cache_placeholder.tscn";
+	world->set_cell_scene(Vector2i(0, 0), scene);
+	world->set_cell_scene(Vector2i(1, 0), scene);
+	world->set_cell_scene(Vector2i(2, 0), scene);
+	CHECK(world->get_cell_path_cache_entry_count() == 0); // Registration invalidates all.
+	Array first = world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0));
+	REQUIRE(first.size() == 3);
+	CHECK(world->get_cell_path_cache_miss_count() == 2);
+	first[1] = Vector2i(99, 99); // Never allow returned Array to corrupt the cache.
+	Array second = world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0));
+	REQUIRE(second.size() == 3);
+	CHECK(second[1] == Vector2i(1, 0));
+	CHECK(world->get_cell_path_cache_hit_count() == 2);
+	second.clear();
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0)).size() == 3);
+
+	// Loaded-only negative routes have a different key from registered topology.
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0), true).is_empty());
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0), true).is_empty());
+	CHECK(world->get_cell_path_cache_entry_count() == 2);
+	world->remove_cell_scene(Vector2i(1, 0));
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0)).is_empty());
+	world->set_cell_scene(Vector2i(1, 0), scene);
+	CHECK(world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0)).size() == 3);
+
+	// The LRU cache keeps only two keys and evicts the least recently used,
+	// including negative routes. Exact coordinates and directional keys differ.
+	world->set_max_cell_path_cache_entries(2);
+	world->clear_cell_path_cache();
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
+	CHECK(world->get_cell_path_cache_hit_count() == 0);
+	CHECK(world->get_cell_path_cache_miss_count() == 0);
+	world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0)); // A: miss.
+	world->find_cell_path(Vector2i(1, 0), Vector2i(2, 0)); // B: miss.
+	CHECK(world->get_cell_path_cache_miss_count() == 2);
+	world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0)); // A: hit.
+	CHECK(world->get_cell_path_cache_hit_count() == 1);
+	world->find_cell_path(Vector2i(2, 0), Vector2i(0, 0)); // C: miss, B evicted.
+	CHECK(world->get_cell_path_cache_entry_count() == 2);
+	world->find_cell_path(Vector2i(1, 0), Vector2i(2, 0)); // B: miss.
+	CHECK(world->get_cell_path_cache_miss_count() == 4);
+
+	world->set_max_cell_path_cache_entries(0); // Disable caching entirely.
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
+	const int previous_misses = world->get_cell_path_cache_miss_count();
+	world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0));
+	world->find_cell_path(Vector2i(0, 0), Vector2i(2, 0));
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
+	CHECK(world->get_cell_path_cache_miss_count() == previous_misses + 2);
+	world->set_max_cell_path_cache_entries(128);
+	CHECK(world->get_max_cell_path_cache_entries() == 128);
+	ERR_PRINT_OFF;
+	world->set_max_cell_path_cache_entries(-1);
+	world->set_max_cell_path_cache_entries(129);
+	ERR_PRINT_ON;
+	CHECK(world->get_max_cell_path_cache_entries() == 128);
+	world->clear_cell_scenes();
+	CHECK(world->get_cell_path_cache_entry_count() == 0);
 	memdelete(world);
 }
 

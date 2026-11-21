@@ -611,6 +611,15 @@
 				[b]Note:[/b] On grayscale image formats, only the red channel of [param color] is used (and alpha if relevant). The green and blue channels are ignored.
 			</description>
 		</method>
+		<method name="set_pixels_rect">
+			<return type="void" />
+			<param index="0" name="rect" type="Rect2i" />
+			<param index="1" name="colors" type="PackedColorArray" />
+			<description>
+				Cgame extension: writes a fully contained rectangular block of pixels from [param colors] into the image in row-major order (left to right, top to bottom). [param colors] must contain exactly [code]rect.size.x * rect.size.y[/code] entries. The rectangle must have positive size and fit completely inside the image; partially out-of-bounds rectangles are rejected rather than clipped. For invalid input, an empty or compressed image, the method reports an error and leaves the image unchanged.
+				Uses the same format conversion as [method set_pixel], including grayscale, 8-bit and HDR formats. As with [method set_pixel], this updates CPU image data only, not an existing GPU [ImageTexture]; call [method ImageTexture.update] after writing if needed. Mipmaps are not regenerated automatically. Batch writes avoid repeated GDScript-to-native calls when generating procedural maps, masks and textures.
+			</description>
+		</method>
 		<method name="set_pixelv">
 			<return type="void" />
 			<param index="0" name="point" type="Vector2i" />

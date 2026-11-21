@@ -76,6 +76,11 @@ func set_enabled(value: bool) -> void:
 		spawn_cap = MAX_SPAWN_CAP
 
 
+## Shared read-only budget API with Cgame's native AdaptiveTickGovernor.
+func get_budget_units() -> int:
+	return spawn_cap
+
+
 func history_count() -> int:
 	return _history.size()
 

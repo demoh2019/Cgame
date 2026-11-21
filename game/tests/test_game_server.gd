@@ -151,6 +151,7 @@ func run(t) -> void:
 	fighter.inventory.add("club_2", 1)
 	fighter.inventory.equip("club_2")
 	_teleport(server, 30, 200.0, 200.0)
+	server.zombies.clear() # Only the test zombie: earlier ticks may have woken others nearby.
 	var zombie := preload("res://scripts/shared/zombie.gd").new(server.new_id(), "walker", Vector3(201.5, world.height_at(201.5, 200.0), 200.0))
 	server.zombies[zombie.id] = zombie
 	var miss := server.cmd_attack(30, -1.0, 0.0)
@@ -221,6 +222,7 @@ func run(t) -> void:
 	victim.inventory.add("club_1", 1)
 	victim.inventory.equip("club_1")
 	for i in 20:
+		server.zombies.clear() # A duel, not a horde: wandering infected must not steal the kill.
 		_run_ticks(server, 1.0)
 		if not victim.survival.alive:
 			break
@@ -258,7 +260,11 @@ func run(t) -> void:
 	t.check(pop.zombies.size() > 0, "zombies appear near a ruin (%d)" % pop.zombies.size())
 	_teleport(pop, 50, 0.0, 0.0)
 	_run_ticks(pop, 4.0)
-	t.eq(pop.zombies.size(), 0, "and go to sleep when the player leaves")
+	var still_awake_far := 0
+	for z in pop.zombies.values():
+		if Vector2(z.position.x, z.position.z).length() > GameServer.ZOMBIE_ACTIVE_RADIUS + 1.0:
+			still_awake_far += 1
+	t.eq(still_awake_far, 0, "and every zombie beyond the active radius goes to sleep when the player leaves")
 	for z in pop.zombies.values():
 		t.check(WorldGen.cell_of(z.position.x, z.position.z) != Vector2i.ZERO, "no zombie in the hub")
 

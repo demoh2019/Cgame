@@ -59,3 +59,69 @@ func run(t) -> void:
 		"lighting cuts off outside influence radius")
 	t.eq(DungeonLightBudget.intensity(2.0, 0.0, 12.0, 1.7, 0.11), 0.0,
 		"invalid influence radius never lights anything")
+
+	t.current = "stable significance torch slots and native parity"
+	var close: Array = [
+		{"id": 9, "distance_sq": 25.0},
+		{"id": 5, "distance_sq": 36.0},
+		{"id": 4, "distance_sq": 36.0},
+		{"id": 12, "distance_sq": 196.0},
+	]
+	var base: Array = DungeonLightBudget.stable_nearest(close, 2, 10.0)
+	t.eq(base.size(), 2, "bounded light slots")
+	t.eq(int(base[0]["id"]), 9, "nearest wins without retained lights")
+	t.eq(int(base[1]["id"]), 4, "stable ID resolves equal distance")
+	var kept: Array = DungeonLightBudget.stable_nearest(close, 2, 10.0, [5], 2.0)
+	t.eq(int(kept[0]["id"]), 5, "recently selected light resists tiny camera movement")
+	t.eq(int(kept[1]["id"]), 9, "next nearest still receives slot")
+	var outside: Array = DungeonLightBudget.stable_nearest(close, 2, 10.0, [12], 10.0)
+	t.eq(int(outside[0]["id"]), 9, "out-of-range retained light is excluded")
+	t.eq(DungeonLightBudget.stable_nearest(close, 0, 10.0, [5]).size(), 0,
+		"zero budget remains disabled")
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var native: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if native != null and native.has_method("select_top_stable"):
+			for previous in [[], [5], [12], [4, 5]]:
+				var scripted: Array = DungeonLightBudget.stable_nearest(close, 2, 10.0, previous, 2.0)
+				var natively: Array = DungeonLightBudget.stable_nearest(close, 2, 10.0, previous, 2.0, native)
+				t.eq(natively, scripted, "native/script selection parity for retained %s" % [previous])
+			var invalid := PackedFloat64Array([2.0, INF])
+			var valid_ids := PackedInt64Array([10, 12])
+			t.check((native.call("select_top_stable", invalid, valid_ids, PackedInt64Array(),
+				2, 10.0, 2.0) as PackedInt32Array).is_empty(), "native rejects malformed batch")
+
+	t.current = "multiple local observers share ID-stable cosmetic torch slots"
+	var world_candidates: Array = [
+		{"id": 9, "position": Vector3(9, 0, 0)},
+		{"id": 5, "position": Vector3(98, 0, 0)},
+		{"id": 4, "position": Vector3(-9, 0, 0)},
+		{"id": 12, "position": Vector3(50, 0, 0)},
+	]
+	var eyes := PackedVector3Array([Vector3.ZERO, Vector3(100, 0, 0)])
+	var world_base: Array = DungeonLightBudget.stable_world(world_candidates, eyes, 2, 10.0)
+	t.eq(world_base.size(), 2, "global cap applies across both local observers")
+	t.eq(int(world_base[0]["id"]), 5, "second observer contributes nearby light")
+	t.eq(int(world_base[1]["id"]), 4, "stable ID resolves equal world distances")
+	t.eq(float(world_base[0]["distance_sq"]), 4.0, "nearest observer owns distance")
+	var world_retained: Array = DungeonLightBudget.stable_world(
+		world_candidates, eyes, 2, 10.0, [9], 8.0)
+	t.eq(int(world_retained[0]["id"]), 9, "retention avoids camera seam flicker")
+	t.eq(int(world_retained[1]["id"]), 5, "second observer still gets light slot")
+	t.eq(int(DungeonLightBudget.stable_world(
+		world_candidates, eyes, 2, 10.0, [12], 10.0)[0]["id"]), 5,
+		"out of range torch cannot be retained")
+	t.eq(DungeonLightBudget.stable_world(world_candidates, PackedVector3Array(),
+		2, 10.0).size(), 0, "zero viewers rejects light admission")
+	t.eq(DungeonLightBudget.stable_world(world_candidates, eyes, 0, 10.0).size(),
+		0, "zero budget disables cosmetic torches")
+	t.check(not world_candidates[0].has("distance_sq"), "input descriptors remain immutable")
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var native_world: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if native_world != null and native_world.has_method("select_world_priority_stable"):
+			for previous in [[], [9], [12], [4, 5]]:
+				var fallback: Array = DungeonLightBudget.stable_world(
+					world_candidates, eyes, 2, 10.0, previous, 8.0)
+				var optimized: Array = DungeonLightBudget.stable_world(
+					world_candidates, eyes, 2, 10.0, previous, 8.0, native_world)
+				t.eq(optimized, fallback,
+					"native multi-viewer and stock Godot fallback parity %s" % [previous])

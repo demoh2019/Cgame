@@ -1,0 +1,91 @@
+name: Native crowd animation tier planning
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/crowd_animation_tier_planner/**'
+      - 'tests/scene/test_crowd_animation_tier_planner.cpp'
+      - 'tests/scene/test_crowd_animation_tier_contract.py'
+      - 'game/scripts/client/character_anim.gd'
+      - 'game/tests/test_crowd_animation_tier_planner.gd'
+      - 'game/tests/run_crowd_tiers.gd'
+      - 'game/tests/run_all.gd'
+      - '.github/workflows/native-crowd-animation-tiers.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/crowd_animation_tier_planner/**'
+      - 'tests/scene/test_crowd_animation_tier_planner.cpp'
+      - 'tests/scene/test_crowd_animation_tier_contract.py'
+      - 'game/scripts/client/character_anim.gd'
+      - 'game/tests/test_crowd_animation_tier_planner.gd'
+      - 'game/tests/run_crowd_tiers.gd'
+      - '.github/workflows/native-crowd-animation-tiers.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            modules/crowd_animation_tier_planner
+            tests/scene/test_crowd_animation_tier_planner.cpp
+            tests/scene/test_crowd_animation_tier_contract.py
+            game/scripts/client/character_anim.gd
+            game/tests/test_crowd_animation_tier_planner.gd
+            game/tests/run_all.gd
+          sparse-checkout-cone-mode: false
+      - name: Validate native and game contract
+        run: python3 -m unittest tests/scene/test_crowd_animation_tier_contract.py -v
+
+  native-and-game:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native C++ planner regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[CrowdAnimationTierPlanner]*" 2>&1 | tee crowd-native-tests.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' crowd-native-tests.log; then exit 1; fi
+      - name: Import Albion After
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee crowd-import.log
+      - name: Game numeric native/fallback parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_crowd_tiers.gd 2>&1 | tee crowd-game-tests.log
+          grep -E '^CROWD TIERS TOTAL: [0-9]+ checks, 0 failures$' crowd-game-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' crowd-game-tests.log; then exit 1; fi
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crowd-tier-regression
+          if-no-files-found: ignore
+          path: |
+            crowd-native-tests.log
+            crowd-import.log
+            crowd-game-tests.log

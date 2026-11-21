@@ -31,6 +31,12 @@
 			<param index="1" name="exact" type="bool" default="false" />
 			<description>Returns [code]true[/code] if every tag in [param tags] matches (see [method has_tag]). An empty array returns [code]true[/code].</description>
 		</method>
+		<method name="count_matching_queries" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="queries" type="PackedStringArray" />
+			<param index="1" name="exact" type="bool" default="false" />
+			<description>Counts distinct nonempty query tags that match this container, respecting [param exact] and dotted hierarchy boundaries. Repeated query strings count once. A parent query and child query are independently matched conditions. Does not count raw stored tags or effect stacks. Empty input returns zero.</description>
+		</method>
 		<method name="has_any" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="tags" type="PackedStringArray" />

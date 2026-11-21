@@ -33,6 +33,7 @@ func run(t) -> void:
 	t.current = "server consumes raw fish exactly once and applies thirst-risk tradeoff"
 	var world := WorldGen.new(521)
 	var sim := GameServer.new(world, 521)
+	sim.craft_quality_enabled = false # This suite checks the item itself, not quality rolls.
 	var p = sim.add_player(811, "Hungry Scout")
 	t.eq(sim.cmd_use(p.id, "raw_fish").get("reason", ""), "not_carried",
 		"imaginary fish cannot be consumed")
