@@ -7,6 +7,7 @@ const ReverbZones = preload("res://scripts/client/reverb_zones.gd")
 const AudioMix = preload("res://scripts/client/audio_mix.gd")
 const AudioSurfaces = preload("res://scripts/client/audio_surfaces.gd")
 const AudioVoices = preload("res://scripts/client/audio_voices.gd")
+const AudioVirtualVoices = preload("res://scripts/client/audio_virtual_voices.gd")
 const AudioSpatial = preload("res://scripts/client/audio_spatial.gd")
 const AudioDucking = preload("res://scripts/client/audio_ducking.gd")
 const AudioMixSnapshots = preload("res://scripts/client/audio_mix_snapshots.gd")
@@ -23,6 +24,7 @@ var _sfx_lowpass := -1
 var _rain: AudioStreamPlayer
 var _wind: AudioStreamPlayer
 var _voices: Array = [] # Active 3D sources, including bounded obstacle probes.
+var _virtual_voices := AudioVirtualVoices.new() # Refused long sounds, still advancing in time.
 # Unreal-style sound obstruction checks: only static geometry on layer 1,
 # no per-frame physics casts for every active sound.
 const OBSTRUCTION_RAYS_PER_TICK := 3
@@ -238,7 +240,7 @@ func get_voice_hold_rejections() -> int:
 	return _voice_hold_rejections
 
 
-func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> void:
+func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0, from_position: float = 0.0) -> void:
 	if not enabled:
 		return
 	var stream := Assets.sound(sound_name)
@@ -260,6 +262,8 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 		# This comparison is evaluated only on rejection, not the hot play path.
 		if AudioVoices.prioritized_victim(snapshot, sound_name, loudness, priority) >= 0:
 			_voice_hold_rejections += 1
+			# Long sounds go virtual: time keeps running and they resume when a voice frees.
+			_virtual_voices.add(sound_name, position, volume_db, now - from_position, stream.get_length())
 		return
 	var player := AudioStreamPlayer3D.new()
 	player.stream = stream
@@ -312,8 +316,18 @@ func play_at(sound_name: String, position: Vector3, volume_db: float = 0.0) -> v
 	_voices.append(record)
 	player.finished.connect(func() -> void:
 		_voices.erase(record)
-		player.queue_free())
-	player.play()
+		player.queue_free()
+		_promote_virtual_voice.call_deferred())
+	player.play(maxf(0.0, from_position))
+
+
+## A real voice just freed: bring back the loudest virtual voice at its current offset.
+func _promote_virtual_voice() -> void:
+	if _virtual_voices.voices.is_empty():
+		return
+	var entry: Dictionary = _virtual_voices.promote(Time.get_ticks_msec() / 1000.0, _listener)
+	if not entry.is_empty():
+		play_at(str(entry["name"]), entry["position"], float(entry["volume_db"]), float(entry["offset"]))
 
 
 ## Scene physics is read only during physics ticks. This detects wooden

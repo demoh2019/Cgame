@@ -1255,9 +1255,14 @@ func _on_skill_event(event: Dictionary) -> void:
 		if int(event.get("peer", -1)) == client.peer_id:
 			var mine: String = str(client.you.get("weapon", ""))
 			avatar_model.play_action(EntityView.attack_animation(mine, bool(event.get("ranged", false))))
+			var own_dir: Variant = event.get("dir", Vector2.ZERO)
+			if own_dir is Vector2 and not bool(event.get("ranged", false)):
+				entities.warp_model(avatar_model, avatar_model.global_position, mine, own_dir)
 		else:
 			var other: Dictionary = client.players.get(int(event.get("peer", -1)), {})
-			entities.play_attack(int(event.get("peer", -1)), str(other.get("weapon", "")), bool(event.get("ranged", false)))
+			var swing_dir: Variant = event.get("dir", Vector2.ZERO)
+			entities.play_attack(int(event.get("peer", -1)), str(other.get("weapon", "")), bool(event.get("ranged", false)),
+				swing_dir if swing_dir is Vector2 else Vector2.ZERO)
 	# Throws show an overhand throw on whoever threw; opening a crate shows the lid going up.
 	if event["type"] in ["flash_thrown", "ember_thrown", "decoy_thrown"]:
 		var thrower: int = int(event.get("peer", -1))

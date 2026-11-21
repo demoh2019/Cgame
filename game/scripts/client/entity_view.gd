@@ -26,6 +26,8 @@ const LootBeam = preload("res://scripts/client/loot_beam.gd")
 const CorpseBurn = preload("res://scripts/client/corpse_burn.gd")
 const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
 const FarmPlotVisual = preload("res://scripts/client/farm_plot_visual.gd")
+const MotionWarp = preload("res://scripts/client/motion_warp.gd")
+const Combat = preload("res://scripts/shared/combat.gd")
 var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
 var _priority_quality: int = -1
 var _world = null
@@ -896,10 +898,29 @@ func _sample(key: String) -> Array:
 
 
 ## A swing or a shot by another player.
-func play_attack(peer_id: int, weapon_id: String, ranged: bool) -> void:
+func play_attack(peer_id: int, weapon_id: String, ranged: bool, direction: Vector2 = Vector2.ZERO) -> void:
 	var key := "player:%d" % peer_id
 	if _nodes.has(key):
-		_nodes[key].get_node("Model").play_action(attack_animation(weapon_id, ranged))
+		var model: Node3D = _nodes[key].get_node("Model")
+		model.play_action(attack_animation(weapon_id, ranged))
+		if not ranged and direction != Vector2.ZERO:
+			warp_model(model, (_nodes[key] as Node3D).global_position, weapon_id, direction, key)
+
+
+## Motion warping: the swinging model glides toward the enemy in front of it.
+func warp_model(model: Node3D, origin: Vector3, weapon_id: String, direction: Vector2, key: String = "") -> void:
+	if model == null:
+		return
+	var targets: Array = []
+	for other_key in _nodes:
+		if other_key == key or not (str(other_key).begins_with("zombie:") or str(other_key).begins_with("player:")):
+			continue
+		var other := _nodes[other_key] as Node3D
+		if other != null and other.visible:
+			targets.append(other.global_position)
+	var warp: Dictionary = MotionWarp.solve(origin, direction, Combat.weapon_reach(weapon_id), targets)
+	if not warp.is_empty():
+		MotionWarp.play(model, warp["offset"])
 
 
 ## Which animation a weapon uses.
