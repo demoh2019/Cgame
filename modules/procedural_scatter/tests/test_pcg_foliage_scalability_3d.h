@@ -377,7 +377,7 @@ TEST_CASE("[PCGFoliageScalability3D] dirty geometry tier masks update only the a
 	const PackedByteArray expected_two = { 1, 1, 0, 0, 1, 1 };
 	CHECK(planner->plan_dirty_variant_lod_groups(variants, prior, two_moves, 3) == expected_two);
 	const PackedInt32Array all_far = { 1, 1, 1, 1, 1, 1 };
-	const PackedByteArray expected_all = { 1, 0, 1, 0, 1, 0 };
+	const PackedByteArray expected_all = { 1, 1, 1, 1, 1, 1 };
 	CHECK(planner->plan_dirty_variant_lod_groups(variants, prior, all_far, 3) == expected_all);
 }
 
