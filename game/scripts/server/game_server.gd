@@ -386,6 +386,10 @@ const AI_CROWD_SEPARATION_RADIUS := 2.5
 const AI_CROWD_LOOKAHEAD_SECONDS := 0.75 # Mass-style desired-velocity anticipation.
 var _crowd_separation_enabled: bool = false
 var last_crowd_separation_stats: Dictionary = {"enabled": false, "population": 0, "sources": 0}
+# EQS-style nearest cue query: one native spatial index for 3 passive senses.
+const AI_CUE_NATIVE_MIN_NPCS := 32
+const AI_CUE_NATIVE_MIN_SOURCES := 4
+var last_ai_cue_query_stats: Dictionary = {"native": false, "channel": "", "sources": 0, "cues": 0}
 # Cross-set Mass/Chaos-style native broadphase for PvE snares; script owns exact hits.
 const AI_SNARE_BROADPHASE_MIN_NPCS := 32
 const AI_SNARE_BROADPHASE_MIN_TRAPS := 8
@@ -8529,11 +8533,73 @@ func _tick_zombies(delta: float) -> void:
 
 ## Shares target awareness inside a bounded 2D neighborhood. Bucket lookup
 ## avoids checking every zombie against every other zombie in crowded ruins.
+## Reuses one stateless C++ EQS nearest-target query for noise, corpse scent
+## and night firelight. World cues are already server-filtered (including TTL).
+## The result selects a candidate only; Zombie.investigate_decoy still owns
+## state, territory/leash, combat priority and final behavior.
+func get_ai_cue_query_stats() -> Dictionary:
+	return last_ai_cue_query_stats.duplicate(true)
+
+
+func _try_native_ai_cues(index: Dictionary, radius: float, channel: String) -> bool:
+	last_ai_cue_query_stats = {"native": false, "channel": channel,
+		"sources": 0, "cues": 0}
+	if zombies.size() < AI_CUE_NATIVE_MIN_NPCS or zombies.size() > 4096:
+		return false
+	var cues: Array = []
+	for bucket in index.values():
+		cues.append_array(bucket)
+	if cues.size() < AI_CUE_NATIVE_MIN_SOURCES or cues.size() > 8192:
+		return false
+	if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
+		_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
+	if _pack_spatial_grid == null or not _pack_spatial_grid.has_method("query_cross_nearest_batch"):
+		return false
+	var targets := PackedVector2Array()
+	var target_ids := PackedInt64Array()
+	for cue in cues:
+		var x: float = float(cue["x"])
+		var z: float = float(cue["z"])
+		if not is_finite(x) or not is_finite(z):
+			return false
+		targets.append(Vector2(x, z))
+		target_ids.append(int(cue["id"]))
+	var agents: Array = []
+	var sources := PackedVector2Array()
+	for infected in zombies.values():
+		if not infected.is_alive() or infected.raid_boss or not infected.position.is_finite():
+			continue
+		agents.append(infected)
+		sources.append(Vector2(infected.position.x, infected.position.z))
+	if sources.is_empty():
+		return true # No eligible source may acquire a cue.
+	var nearest: PackedInt32Array = _pack_spatial_grid.query_cross_nearest_batch(
+		sources, targets, target_ids, radius, radius)
+	if nearest.size() != sources.size():
+		return false
+	# Validate all indices before any zombie is allowed to react: invalid
+	# native results cannot cause a partially applied cue followed by fallback.
+	for index_id in nearest:
+		if index_id < -1 or index_id >= cues.size():
+			return false
+	for i in range(agents.size()):
+		var candidate_index: int = nearest[i]
+		if candidate_index == -1:
+			continue
+		var cue: Dictionary = cues[candidate_index]
+		agents[i].investigate_decoy(Vector2(float(cue["x"]), float(cue["z"])))
+	last_ai_cue_query_stats = {"native": true, "channel": channel,
+		"sources": sources.size(), "cues": cues.size()}
+	return true
+
+
 func _alert_noise_decoys() -> void:
 	# One spatial index per four-times-per-second hearing pass, rather than
 	# an O(infected * all lures) loop. Never give a decoy active player aggro.
 	var buckets: Dictionary = NoiseDecoy.sound_buckets(decoys, time)
 	if buckets.is_empty():
+		return
+	if _try_native_ai_cues(buckets, NoiseDecoy.HEARING_RADIUS, "noise"):
 		return
 	for infected in zombies.values():
 		if not infected.is_alive() or infected.raid_boss:
@@ -8548,6 +8614,8 @@ func _alert_corpse_scents() -> void:
 	var scent_index: Dictionary = CorpseScent.buckets(bags, time)
 	if scent_index.is_empty():
 		return
+	if _try_native_ai_cues(scent_index, CorpseScent.RADIUS, "corpse"):
+		return
 	for infected in zombies.values():
 		if not infected.is_alive() or infected.raid_boss:
 			continue
@@ -8560,6 +8628,8 @@ func _alert_corpse_scents() -> void:
 func _alert_campfire_lights() -> void:
 	var buckets: Dictionary = CampfireThreat.light_buckets(campfires, time, true)
 	if buckets.is_empty():
+		return
+	if _try_native_ai_cues(buckets, CampfireThreat.LURE_RADIUS, "campfire"):
 		return
 	for infected in zombies.values():
 		if not infected.is_alive() or infected.raid_boss:
