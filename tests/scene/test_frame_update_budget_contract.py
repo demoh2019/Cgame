@@ -28,6 +28,7 @@ class TestFrameBudgetContract(unittest.TestCase):
             "current_budget", "pressure_percent", "last_frame_counts",
             "set_frame_time_budget_us", "get_frame_time_budget_us", "record_cost",
             "current_frame_cost_us", "last_frame_cost_us",
+            "set_lane_rate_scale", "get_lane_rate_scale",
         ):
             self.assertIn(name, names)
 
@@ -52,6 +53,11 @@ class TestFrameBudgetContract(unittest.TestCase):
         self.assertIn("frame_cost_us = MIN(int64_t(1000000000)", src)
         self.assertIn("p_elapsed_us < 0 || p_elapsed_us > 10000000", src)
         self.assertIn("int64_t frame_time_budget_us = 2500", header)
+        self.assertIn("double rate_scale = 1.0", header)
+        self.assertIn("Math::is_finite(p_scale)", src)
+        self.assertIn("p_scale < 0.75 || p_scale > 2.0", src)
+        self.assertIn("1.0 / (rates[quality] * lanes[index].rate_scale)", src)
+        self.assertIn("1.0 / (rates[MAX(quality, 0)] * lane.rate_scale)", src)
         self.assertNotIn("SceneTree", src)
         self.assertNotIn("Thread::", src)
 
@@ -80,6 +86,17 @@ class TestFrameBudgetContract(unittest.TestCase):
         self.assertEqual(main.count("_ambient_budget.record_cost"), 4)
         self.assertIn("set_frame_time_budget_us", fallback)
         self.assertIn("last_frame_cost_us", fallback)
+        self.assertIn("set_lane_rate_scale", fallback)
+        self.assertIn("get_lane_rate_scale", fallback)
+        self.assertIn("_rate_scale.get(lane, 1.0)", fallback)
+        self.assertIn('ambient_rate_profile.gd', main)
+        self.assertIn('_update_ambient_significance', main)
+        self.assertIn('_ambient_rates_supported', main)
+        self.assertIn('Native/script significance parity', tests)
+        profile = (GAME / "ambient_rate_profile.gd").read_text()
+        for tag in ("DRAGONFLIES", "DUST_DEVILS", "TUMBLEWEEDS", "DUSK_BATS"):
+            self.assertIn(tag, profile)
+        self.assertIn('level >= 1 and biome == "plains"', profile)
         self.assertIn("soft CPU time budget and native compatibility", tests)
 
 
