@@ -47,7 +47,8 @@ static func record(entries: Dictionary, peer_id: int, damage: float) -> bool:
 ## Reduce a single actor's existing server-authoritative threat.
 ## Never fabricates new aggro. The fallback works on ordinary Godot.
 static func scale(entries: Dictionary, peer_id: int, factor: float) -> bool:
-	if has_native():
+	# Older Cgame binaries may expose the threat class without this method.
+	if has_native() and _native.has_method("scale"):
 		return bool(_native.scale(entries, peer_id, factor))
 	if peer_id <= 0 or not is_finite(factor) or factor < 0.0 or factor > 1.0:
 		return false
