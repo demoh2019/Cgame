@@ -12,7 +12,7 @@ const INTEREST_RADIUS := 90.0 # Entities farther than this from a player are not
 const HUB_SAFE_RADIUS := 45.0 # Nobody can be hurt inside it.
 const ZONE_RADII := [260.0, 620.0, 1050.0] # Green ends at 260 m, yellow at 620 m, red at 1050 m, then black.
 const ZONE_NAMES := ["green", "yellow", "red", "black"]
-const MAX_TIER := 4
+const MAX_TIER := 8 # T1-T3 in green/yellow/red, T4-T8 deeper and deeper into the black zone.
 const CAMP_FISH_STEW := "camp_fish_stew" # Clean fish-and-water camp meal.
 
 # --- Player tuning -------------------------------------------------------------------------------
@@ -146,6 +146,15 @@ static func carry_speed_factor(weight_kg: float) -> float:
 
 static func tier_of(id: String) -> int:
 	return int(item(id).get("tier", 0))
+
+
+## Resource tier at a distance from the hub: the black zone keeps getting richer outward.
+const BLACK_TIER_STEP := 450.0
+static func tier_for_distance(distance: float) -> int:
+	var zone: int = zone_index_for_distance(distance)
+	if zone < ZONE_RADII.size():
+		return zone + 1
+	return clampi(4 + int((distance - float(ZONE_RADII[-1])) / BLACK_TIER_STEP), 4, MAX_TIER)
 
 
 static func zone_index_for_distance(distance: float) -> int:
@@ -315,7 +324,7 @@ static func _build_items() -> void:
 				"workbench", 6.0 + float(t))
 			# The sealed suit trades PvP armor and warmth for environmental protection.
 			var sealed_id: String = "sealed_suit_%d" % t
-			var spore_resistance: float = 0.65 + 0.1 * float(t - 2)
+			var spore_resistance: float = minf(0.95, 0.65 + 0.1 * float(t - 2))
 			_add_item(sealed_id, {"name": "Sealed Expedition Suit T%d" % t,
 				"kind": "armor", "tier": t, "armor": 0.04 + 0.015 * float(t - 2),
 				"spore_resistance": spore_resistance, "insulation": 0.25,

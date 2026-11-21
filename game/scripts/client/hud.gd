@@ -2524,6 +2524,9 @@ func _on_event(event: Dictionary) -> void:
 					int(event.get("xp", 0)), int(event.get("level", 1))])
 		"crate":
 			say("You search the crate...")
+		"market_sale":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Market: sold %dx %s, +%d silver." % [int(event.get("quantity", 0)), str(Defs.item(str(event.get("item", ""))).get("name", event.get("item", ""))), int(event.get("net", 0))])
 		"lockpick":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Lockpick consumed: sealed T%d compartment salvaged!" % int(event.get("tier", 3)))
@@ -3183,6 +3186,10 @@ func _on_result(kind: String, data: Dictionary) -> void:
 				say("Market: " + str(data.get("reason", "rejected")))
 		elif str(data.get("action", "")) == "list":
 			_market_listings = data.get("orders", [])
+			if int(data.get("collected_silver", 0)) > 0 or int(data.get("collected_items", 0)) > 0:
+				say("Market: collected %d silver and %d returned items." % [int(data.get("collected_silver", 0)), int(data.get("collected_items", 0))])
+			if int(data.get("pending_silver", 0)) > 0:
+				say("Market: %d silver waits for backpack space." % int(data.get("pending_silver", 0)))
 			_refresh_market_options()
 		elif str(data.get("action", "")) == "bought":
 			say("Market: bought %dx %s for %d silver (tax %d; seller receives %d)." % [
@@ -4026,7 +4033,8 @@ func _refresh_trade_controls() -> void:
 		]
 
 
-const TIER_COLORS := [Color(0.62, 0.64, 0.68), Color(0.62, 0.64, 0.68), Color(0.36, 0.82, 0.42), Color(0.36, 0.62, 1.0), Color(0.78, 0.42, 1.0)]
+const TIER_COLORS := [Color(0.62, 0.64, 0.68), Color(0.62, 0.64, 0.68), Color(0.36, 0.82, 0.42), Color(0.36, 0.62, 1.0), Color(0.78, 0.42, 1.0),
+	Color(1.0, 0.78, 0.25), Color(1.0, 0.52, 0.22), Color(0.95, 0.28, 0.28), Color(0.96, 0.96, 0.98)]
 
 
 ## A short tag for the kind of item, shown in its slot.
@@ -4214,7 +4222,7 @@ func _item_card(item_id: String, count: int, equipped: bool, size: Vector2) -> B
 		card.add_child(art)
 	var tier: int = Defs.tier_of(item_id)
 	if tier >= 1 and item_id.rfind("_") > 0 and item_id.substr(item_id.rfind("_") + 1).is_valid_int():
-		card.add_child(_card_badge(["", "I", "II", "III", "IV", "V"][clampi(tier, 0, 5)], TIER_COLORS[clampi(tier, 0, TIER_COLORS.size() - 1)], Control.PRESET_TOP_LEFT))
+		card.add_child(_card_badge(["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII"][clampi(tier, 0, 8)], TIER_COLORS[clampi(tier, 0, TIER_COLORS.size() - 1)], Control.PRESET_TOP_LEFT))
 	if count > 1:
 		card.add_child(_card_badge(_short_count(count), Color(1, 1, 1), Control.PRESET_BOTTOM_RIGHT))
 	if equipped:

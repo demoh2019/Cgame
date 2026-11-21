@@ -484,7 +484,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 		return _dungeon_chunk(cell, origin)
 	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
 	var zone := zone_at(center.x, center.y)
-	var tier := tier_for_zone(zone)
+	var tier := Defs.tier_for_distance(center.length()) if zone >= Defs.ZONE_RADII.size() else tier_for_zone(zone)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = mix(cell.x, cell.y, world_seed, 11)
 
