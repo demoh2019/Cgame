@@ -51,7 +51,7 @@ TEST_CASE("[DecalVisibilityAdmission3D] expanding decals cannot become less visi
 					100.0, 720.0, 60.0, 4.0);
 			const bool large = c->should_spawn(camera, Vector3(0, 0, distance),
 					diameter + 0.1, 100.0, 720.0, 60.0, 4.0);
-			CHECK_FALSE(small && !large);
+			CHECK_FALSE((small && !large));
 		}
 	}
 }

@@ -93,7 +93,7 @@ TEST_CASE("[SceneTree][PhysicsDirectSpaceState3D] Batch rays preserve order, mas
 	CHECK(third.is_empty());
 	CHECK(Vector3(first["position"]).is_equal_approx(Vector3(5, 1, 0)));
 	CHECK(Vector3(first["normal"]).is_equal_approx(Vector3(0, 1, 0)));
-	CHECK(first.has("collider") && first.has("shape") && first.has("rid") && first.has("collider_id") && first.has("face_index"));
+	CHECK((first.has("collider") && first.has("shape") && first.has("rid") && first.has("collider_id") && first.has("face_index")));
 
 	const Dictionary single = space.call(SNAME("intersect_ray"), wall);
 	CHECK(Vector3(first["position"]).is_equal_approx(Vector3(single["position"])));
