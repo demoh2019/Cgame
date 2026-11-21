@@ -70,3 +70,32 @@ static func choose_variants(stable_ids: PackedInt64Array,
         if _native != null:
             return _native.call("choose_variants", stable_ids, weights, seed)
     return _choose_fallback(stable_ids, weights, seed)
+
+
+## Partition one variant assignment per source point into exact per-mesh
+## source-index groups. Empty variants still produce an empty group; invalid
+## tail values reject the entire request rather than dropping some meshes.
+static func partition_indices(variants: PackedInt32Array,
+        variant_count: int, prefer_native: bool = true) -> Array:
+    var result: Array = []
+    if variant_count < 1 or variant_count > MAX_VARIANTS or \
+            variants.size() > MAX_POINTS:
+        return result
+    for variant in variants:
+        if variant < 0 or variant >= variant_count:
+            return result
+    if prefer_native:
+        if not _native_checked:
+            # Initializes the same optional native selector already used by
+            # choose_variants() without constructing new native objects.
+            choose_variants(PackedInt64Array(), PackedFloat32Array([1.0]))
+        if _native != null and _native.has_method("partition_indices"):
+            return _native.call("partition_indices", variants, variant_count)
+    for variant in variant_count:
+        result.append(PackedInt32Array())
+    for i in variants.size():
+        var variant: int = variants[i]
+        var indices: PackedInt32Array = result[variant]
+        indices.append(i)
+        result[variant] = indices
+    return result
