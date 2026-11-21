@@ -12,6 +12,9 @@ var yaw_rate := 0.0
 var move_speed := 0.0
 var foot_ik := true
 var look_at_enabled := true
+## EMA of the optional full-pose SkeletonModifier script pass only; this
+## excludes animation mixer, GPU skinning and native FootPlacement costs.
+var estimated_full_pose_us: int = 0
 
 var _bones: Dictionary = {} # lower-case name -> index
 var _resolved := false
@@ -81,6 +84,10 @@ func _process_modification_with_delta(delta: float) -> void:
 	var skeleton := get_skeleton()
 	if skeleton == null or body == null or not body.is_inside_tree():
 		return
+	# Sample only the expensive full-pose path (not every tier-1 skeleton).
+	# The estimate remains available when the next frame demotes this actor.
+	var measure_pose: bool = look_at_enabled
+	var pose_started_us: int = Time.get_ticks_usec() if measure_pose else 0
 	_restore(skeleton)
 	if not _resolved:
 		_resolve(skeleton)
@@ -119,6 +126,13 @@ func _process_modification_with_delta(delta: float) -> void:
 	if _look.length() > 0.002:
 		_rotate_world(skeleton, bone("neck_01"), Anim.look_rotation(basis, _look * 0.4))
 		_rotate_world(skeleton, bone("head"), Anim.look_rotation(basis, _look * 0.6))
+
+	if measure_pose:
+		var elapsed_us: int = clampi(Time.get_ticks_usec() - pose_started_us, 1, 100000)
+		# A quarter-weight bounded EWMA avoids reallocating full-IK slots
+		# just because one terrain query happened to be unusually slow.
+		estimated_full_pose_us = elapsed_us if estimated_full_pose_us == 0 else \
+			(3 * estimated_full_pose_us + elapsed_us + 2) / 4
 
 
 func _foot_ik(skeleton: Skeleton3D, delta: float) -> void:
