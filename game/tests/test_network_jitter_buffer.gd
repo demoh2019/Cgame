@@ -85,6 +85,13 @@ func run(t) -> void:
 		"three genuine arrivals exhaust the loss recovery guard")
 	t.check(buffer.observe(1.6, 10.6) < loss_delay,
 		"normal delay recovery resumes as soon as protection expires")
+	buffer.observe(1.8, 10.8)
+	t.eq(buffer.get_recovery_hold_remaining(), 3,
+		"a second missing server tick re-arms the recovery hold")
+	t.eq(buffer.get_estimated_missing_snapshots(), 2,
+		"estimated total missing timestamps accumulates after another gap")
+	t.eq(buffer.get_burst_loss_events(), 2,
+		"two separate skipped-cadence gaps are visible in diagnostics")
 	buffer.reset()
 	t.eq(buffer.get_recovery_guard_packets(), 3,
 		"reset clears burst history but preserves opt-in policy")

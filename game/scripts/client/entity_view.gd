@@ -139,11 +139,15 @@ func network_jitter_stats() -> Dictionary:
 ## Native/script read-only counters used by the online profiler.
 ## Scalar getters avoid allocating a full stats Dictionary per sample.
 func network_missing_snapshot_estimate() -> int:
-	return int(_snapshot_buffer.get_estimated_missing_snapshots()) if _snapshot_buffer.has_method("get_estimated_missing_snapshots") else 0
+	if not _snapshot_buffer.has_method("get_estimated_missing_snapshots"):
+		return 0
+	return int(_snapshot_buffer.get_estimated_missing_snapshots())
 
 
 func network_recovery_hold_remaining() -> int:
-	return int(_snapshot_buffer.get_recovery_hold_remaining()) if _snapshot_buffer.has_method("get_recovery_hold_remaining") else 0
+	if not _snapshot_buffer.has_method("get_recovery_hold_remaining"):
+		return 0
+	return int(_snapshot_buffer.get_recovery_hold_remaining())
 
 
 func update_from(client) -> void:

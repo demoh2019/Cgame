@@ -101,6 +101,7 @@ TEST_CASE("[AdaptiveNetworkJitterBuffer] Configurable rates and invalid profiles
 	CHECK(double(buffer->get_stats()["expected_snapshot_step"]) == doctest::Approx(0.05));
 	CHECK(bool(buffer->get_stats()["native_backend"]));
 }
+
 TEST_CASE("[AdaptiveNetworkJitterBuffer] Optional loss recovery retains reserve for stable packets") {
 	Ref<AdaptiveNetworkJitterBuffer> b;
 	b.instantiate();
@@ -127,6 +128,10 @@ TEST_CASE("[AdaptiveNetworkJitterBuffer] Optional loss recovery retains reserve 
 	CHECK(int64_t(b->get_burst_loss_events()) == 1);
 	CHECK(int64_t(b->get_stats()["recovery_guard_packets"]) == 3);
 	CHECK(int64_t(b->get_stats()["recovery_hold_remaining"]) == 0);
+	b->observe(1.8, 10.8); // Another missing tick re-arms protection.
+	CHECK(b->get_recovery_hold_remaining() == 3);
+	CHECK(b->get_estimated_missing_snapshots() == 2);
+	CHECK(b->get_burst_loss_events() == 2);
 
 	b->reset();
 	CHECK(b->get_recovery_guard_packets() == 3); // Reset leaves policy enabled.
