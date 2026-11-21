@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VFXBindings" inherits="RefCounted" api_type="core" keywords="vfx,events,bindings,cues,gameplay" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Maps gameplay events to VFX presets, graphs and sequences.
+	</brief_description>
+	<description>
+		[VFXBindings] is a data registry from event types ([code]"hit"[/code], [code]"lightning_struck"[/code], ...) to effects. Spawning is delegated to a [Callable] with the signature [code]spawn(effect: String, position: Vector3, params: Dictionary)[/code], which keeps the registry independent of how effects are created. Typically the callable calls [method VFXPresets.spawn].
+		A binding spec supports these keys: [code]effect[/code] (name passed to the spawn callable), [code]sequence[/code] (name of a registered sequence), [code]offset[/code] ([Vector3]), [code]min_interval[/code] (throttle in seconds, measured by [method tick]) and [code]params[/code]. Each parameter is either a constant or a mapping [code]{"from": payload_key, "scale": 1.0, "offset": 0.0, "default": 0.0, "min": ..., "max": ...}[/code] resolved against the event payload.
+		Events from the gameplay_fx module can be fed in with [method handle_cue_events], which takes the array returned by [code]GameplayCueQueue.take_events()[/code].
+		[codeblock]
+		var bindings := VFXBindings.new()
+		bindings.register_binding("lightning_struck", {"effect": "lightning_sparks", "params": {"level": {"from": "quality", "default": 2}}})
+		bindings.handle({"type": "lightning_struck", "position": pos, "payload": {"quality": 3}}, spawn_callable)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes all bindings, sequences, running sequences and throttle history, and resets the clock.
+			</description>
+		</method>
+		<method name="get_active_sequence_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of sequences started by [method handle] that have not finished.
+			</description>
+		</method>
+		<method name="get_binding_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the total number of registered binding specs.
+			</description>
+		</method>
+		<method name="get_clock" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the time accumulated by [method tick].
+			</description>
+		</method>
+		<method name="handle">
+			<return type="int" />
+			<param index="0" name="event" type="Dictionary" />
+			<param index="1" name="spawn" type="Callable" />
+			<description>
+				Dispatches [param event] ([code]{"type": String, "position": Vector3, "payload": Dictionary}[/code]; without [code]payload[/code] the event itself is the payload). Returns how many effects or sequences were started.
+			</description>
+		</method>
+		<method name="handle_cue_events">
+			<return type="int" />
+			<param index="0" name="cue_events" type="Array" />
+			<param index="1" name="spawn" type="Callable" />
+			<param index="2" name="position" type="Vector3" default="Vector3(0, 0, 0)" />
+			<description>
+				Feeds events drained from a [code]GameplayCueQueue[/code] into [method handle]. Each cue [code]{tag, event, stacks, magnitude, priority, count}[/code] is dispatched as an event whose type is the cue tag for [code]"started"[/code] and [code]"executed"[/code] cues, or [code]"&lt;tag&gt;:stopped"[/code] for [code]"stopped"[/code] cues; [code]"updated"[/code] cues are skipped. The cue fields are the payload and [param position] is the event position. Returns the number of effects started.
+			</description>
+		</method>
+		<method name="has_binding" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="event_type" type="String" />
+			<description>
+				Returns [code]true[/code] if at least one binding is registered for [param event_type].
+			</description>
+		</method>
+		<method name="make_sequence" qualifiers="const">
+			<return type="VFXSequence" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="spawn" type="Callable" />
+			<param index="2" name="origin" type="Vector3" default="Vector3(0, 0, 0)" />
+			<param index="3" name="params" type="Dictionary" default="{}" />
+			<description>
+				Creates a [VFXSequence] from the registered sequence [param name], or returns [code]null[/code] if it does not exist.
+			</description>
+		</method>
+		<method name="map_params" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="mapping" type="Dictionary" />
+			<param index="1" name="payload" type="Dictionary" />
+			<description>
+				Resolves a parameter [param mapping] against [param payload]. Numeric values are scaled, offset and clamped; other values pass through.
+			</description>
+		</method>
+		<method name="register_binding">
+			<return type="void" />
+			<param index="0" name="event_type" type="String" />
+			<param index="1" name="spec" type="Dictionary" />
+			<description>
+				Adds a binding spec for [param event_type]. Several specs may share one event type.
+			</description>
+		</method>
+		<method name="register_sequence">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="entries" type="Array" />
+			<description>
+				Registers a sequence. Entries are [code]{"t": float, "effect": String, "offset": Vector3, "params": Dictionary}[/code].
+			</description>
+		</method>
+		<method name="tick">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<description>
+				Advances the clock used for [code]min_interval[/code] and all sequences started by [method handle]; finished sequences are dropped.
+			</description>
+		</method>
+	</methods>
+</class>

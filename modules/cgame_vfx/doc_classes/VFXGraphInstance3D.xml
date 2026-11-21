@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VFXGraphInstance3D" inherits="Node3D" api_type="core" keywords="vfx,particles,graph,niagara,multimesh,gpu" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Plays a [VFXGraphAsset] with a native CPU simulation (optional GPU compute update) and MultiMesh billboard rendering.
+	</brief_description>
+	<description>
+		[VFXGraphInstance3D] simulates every emitter of its [member asset] in this node's local space and draws each emitter as one MultiMesh of billboard quads submitted directly to the [RenderingServer]. Particle state is stored as structure-of-arrays and all spawn and update modules, collision and death event routing between emitters, and per-module timing run natively.
+		[codeblock]
+		var fx := VFXGraphInstance3D.new()
+		fx.asset = VFXGraphAsset.create_from_dictionary(VFXPresets.lightning_sparks(3))
+		fx.one_shot = true
+		fx.budget_category = "combat"
+		add_child(fx)
+		fx.global_position = hit_position
+		[/codeblock]
+		The simulation is deterministic for a given [member random_seed] and step sequence. With [member use_gpu] enabled the update, integration and plane stages of every emitter run in a generated compute shader on a shared local [RenderingDevice]; spawn stages and death routing stay on the CPU. When no compute device exists (headless, dummy or Compatibility renderer) or compilation fails, the identical algorithm runs on the CPU. Because the GPU kernel uses an analytic "lite" curl noise, [code]curl_noise[/code] emitters switch to that curl as soon as [member use_gpu] is set, on CPU fallback too, so both paths match.
+		If [member budget_category] is not empty, the effect asks the [VFXBudgetServer] singleton for admission using the sum of its emitter capacities. A rejected effect never starts ([signal rejected]); an evicted effect stops and finishes.
+		The node frees itself after [signal finished] when [member one_shot] is enabled.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_attribute" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="emitter" type="String" />
+			<param index="1" name="attribute" type="String" />
+			<description>
+				Returns a copy of one attribute of the live particles of [param emitter]: [code]"position"[/code] and [code]"velocity"[/code] ([PackedVector3Array]), [code]"color"[/code] ([PackedColorArray]), [code]"size"[/code], [code]"age"[/code], [code]"lifetime"[/code] or a custom attribute name ([PackedFloat32Array]). Returns [code]null[/code] for unknown names.
+			</description>
+		</method>
+		<method name="get_budget_id" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the id granted by [VFXBudgetServer], or 0 if no budget slot is held.
+			</description>
+		</method>
+		<method name="get_emitter_names" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the names of the emitters of the running simulation.
+			</description>
+		</method>
+		<method name="get_emitter_particle_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="emitter" type="String" />
+			<description>
+				Returns the number of live particles of [param emitter].
+			</description>
+		</method>
+		<method name="get_gpu_path" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns [code]"gpu"[/code] if the last update ran on the compute device, [code]"cpu"[/code] if it ran or fell back to the CPU, and [code]"none"[/code] if no update has run yet.
+			</description>
+		</method>
+		<method name="get_particle_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of live particles across all emitters.
+			</description>
+		</method>
+		<method name="get_profile" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns accumulated microseconds per module, keyed [code]"&lt;emitter&gt;/&lt;stage&gt;/&lt;index&gt;:&lt;type&gt;"[/code], for example [code]"sparks/update/0:gravity"[/code]. GPU updates are accounted under [code]"&lt;emitter&gt;/gpu_kernel"[/code].
+			</description>
+		</method>
+		<method name="is_finished" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] once every emitter has finished emitting and no particles remain.
+			</description>
+		</method>
+		<method name="is_gpu_active" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the last update ran on the compute device.
+			</description>
+		</method>
+		<method name="is_playing" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while the simulation is running.
+			</description>
+		</method>
+		<method name="play">
+			<return type="bool" />
+			<description>
+				Validates the asset, rebuilds the simulation from [member random_seed], requests budget and starts playing. Returns [code]false[/code] if there is no asset, the graph is invalid or the budget server rejected the effect.
+			</description>
+		</method>
+		<method name="reset_profile">
+			<return type="void" />
+			<description>
+				Clears the accumulated module timings.
+			</description>
+		</method>
+		<method name="restart">
+			<return type="bool" />
+			<description>
+				Alias of [method play]: discards the current state and starts over.
+			</description>
+		</method>
+		<method name="setup">
+			<return type="bool" />
+			<param index="0" name="graph" type="Dictionary" />
+			<param index="1" name="seed" type="int" default="1" />
+			<description>
+				Wraps [param graph] into a [VFXGraphAsset], assigns [param seed] to [member random_seed] and calls [method play].
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Advances the simulation by [param delta] seconds and refreshes the MultiMeshes. Called automatically every frame while playing; call it manually for deterministic stepping.
+			</description>
+		</method>
+		<method name="stop">
+			<return type="void" />
+			<description>
+				Stops the effect, frees all particles and render resources and releases the budget slot.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="asset" type="VFXGraphAsset" setter="set_asset" getter="get_asset">
+			The graph to play.
+		</member>
+		<member name="autostart" type="bool" setter="set_autostart" getter="is_autostart" default="true">
+			If [code]true[/code], [method play] is called when the node enters the tree at runtime (never in the editor).
+		</member>
+		<member name="budget_category" type="String" setter="set_budget_category" getter="get_budget_category" default="&quot;&quot;">
+			Category used to request admission from [VFXBudgetServer]. If empty, the effect is not budgeted.
+		</member>
+		<member name="budget_particles" type="int" setter="set_budget_particles" getter="get_budget_particles" default="-1">
+			Maximum number of live particles across all emitters of this node. [code]-1[/code] means unlimited.
+		</member>
+		<member name="budget_priority" type="float" setter="set_budget_priority" getter="get_budget_priority" default="1.0">
+			Priority used for [VFXBudgetServer] admission and eviction. Higher values are kept longer.
+		</member>
+		<member name="one_shot" type="bool" setter="set_one_shot" getter="is_one_shot" default="false">
+			If [code]true[/code], the node frees itself once the effect finished.
+		</member>
+		<member name="random_seed" type="int" setter="set_random_seed" getter="get_random_seed" default="1">
+			Seed of the deterministic random generators of all emitters.
+		</member>
+		<member name="time_scale" type="float" setter="set_time_scale" getter="get_time_scale" default="1.0">
+			Multiplier applied to the process delta.
+		</member>
+		<member name="use_gpu" type="bool" setter="set_use_gpu" getter="is_using_gpu" default="false">
+			If [code]true[/code], the update stage runs in a generated compute shader when a compute capable [RenderingDevice] is available. See the class description for details.
+		</member>
+	</members>
+	<signals>
+		<signal name="finished">
+			<description>
+				Emitted when all emitters finished and no particles remain, or when the effect was evicted by [VFXBudgetServer].
+			</description>
+		</signal>
+		<signal name="rejected">
+			<description>
+				Emitted when [VFXBudgetServer] did not admit the effect in [method play].
+			</description>
+		</signal>
+	</signals>
+</class>

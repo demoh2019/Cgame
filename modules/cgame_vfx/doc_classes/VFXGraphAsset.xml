@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VFXGraphAsset" inherits="Resource" api_type="core" keywords="vfx,particles,graph,niagara,emitter" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Data-driven particle effect description consumed by [VFXGraphInstance3D].
+	</brief_description>
+	<description>
+		A [VFXGraphAsset] stores a Niagara-style effect as plain data: a [Dictionary] of emitters, each with spawn modules, update modules, custom attributes and event routing. The same format is understood by the GDScript reference runtime, so existing graph dictionaries can be wrapped without changes.
+		[codeblock]
+		{
+		    "emitters": {
+		        "sparks": {
+		            "max_particles": 64,
+		            "duration": 0.0,
+		            "attributes": {"heat": 0.5},
+		            "spawn": [
+		                {"type": "spawn_burst", "count": 64},
+		                {"type": "lifetime_random", "min": 0.6, "max": 1.3},
+		                {"type": "initial_velocity", "direction": Vector3.UP, "spread": 70.0, "speed_min": 4.0, "speed_max": 11.0},
+		            ],
+		            "update": [
+		                {"type": "gravity", "gravity": Vector3(0, -14, 0)},
+		                {"type": "collide_plane", "normal": Vector3.UP, "restitution": 0.35, "on_event": {"emitter": "embers", "count": 1}},
+		            ],
+		            "events": {"death": {"emitter": "embers", "count": 2, "inherit_velocity": 0.5}},
+		        },
+		        "embers": {"max_particles": 128, "spawn": [{"type": "lifetime_random", "min": 0.4, "max": 0.9}], "update": []},
+		    }
+		}
+		[/codeblock]
+		[b]Spawn modules:[/b] [code]spawn_rate[/code] (rate), [code]spawn_burst[/code] (time, count), [code]initial_position_sphere[/code] (radius, center, surface), [code]initial_position_box[/code] (size, center), [code]initial_position_cone[/code] (axis, angle, height, center), [code]initial_velocity[/code] (direction, spread, speed or speed_min/speed_max, radial), [code]lifetime_random[/code] (min, max), [code]initial_color[/code] (color, color_b), [code]initial_size[/code] (min, max), [code]initial_attribute[/code] (attribute, min, max).
+		[b]Update modules:[/b] [code]gravity[/code] (gravity), [code]drag[/code] (drag), [code]curl_noise[/code] (strength, frequency, scroll), [code]vortex[/code] (center, axis, strength, pull), [code]attractor[/code] (position, strength, radius), [code]color_over_life[/code] (stops of [code][offset, Color][/code], or a [Gradient] under [code]gradient[/code]), [code]size_over_life[/code] (stops of [code][offset, float][/code]), [code]collide_plane[/code] (normal, offset, restitution, friction, on_event) and [code]kill_below_plane[/code] (normal, offset). The two plane modules run after position integration.
+		[b]Emitter keys:[/b] [code]max_particles[/code], [code]duration[/code] (0 means unlimited emission), [code]attributes[/code], [code]spawn[/code], [code]update[/code], [code]events[/code] ([code]death[/code] and [code]collision[/code] specs), [code]blend[/code] ([code]"alpha"[/code] or [code]"add"[/code]), [code]texture[/code] ([Texture2D]) and [code]bounds[/code] (half extent of the culling box used by the renderer).
+		An event spec is [code]{"emitter": name, "count": n, "inherit_velocity": 0..1}[/code] or an array of them. A bare emitter dictionary (without [code]"emitters"[/code]) is accepted and treated as an emitter named [code]"main"[/code].
+		Use [method validate] to get readable errors before playing a graph.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="create_from_dictionary" qualifiers="static">
+			<return type="VFXGraphAsset" />
+			<param index="0" name="graph" type="Dictionary" />
+			<description>
+				Creates an asset holding a copy of [param graph].
+			</description>
+		</method>
+		<method name="get_emitter" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the definition of the emitter [param name], or an empty dictionary if it does not exist.
+			</description>
+		</method>
+		<method name="get_emitter_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of emitters.
+			</description>
+		</method>
+		<method name="get_emitter_names" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the emitter names in definition order.
+			</description>
+		</method>
+		<method name="get_module_names" qualifiers="static">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the names of every supported spawn and update module.
+			</description>
+		</method>
+		<method name="get_system" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the normalized system dictionary ([code]{"emitters": {...}}[/code]); a bare emitter dictionary is wrapped as emitter [code]"main"[/code].
+			</description>
+		</method>
+		<method name="get_total_max_particles" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the sum of [code]max_particles[/code] over all emitters. This is the cost reported to [VFXBudgetServer].
+			</description>
+		</method>
+		<method name="has_emitter" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns [code]true[/code] if an emitter called [param name] exists.
+			</description>
+		</method>
+		<method name="has_particles" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the total particle capacity is greater than zero.
+			</description>
+		</method>
+		<method name="is_valid" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if [method validate] reports no errors.
+			</description>
+		</method>
+		<method name="validate" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Checks the graph and returns one human-readable message per problem: unknown module types, modules in the wrong stage, parameters with the wrong type, unsorted or malformed stops, undeclared attributes and event specs that reference unknown emitters. An empty array means the graph is valid.
+			</description>
+		</method>
+		<method name="validate_graph" qualifiers="static">
+			<return type="PackedStringArray" />
+			<param index="0" name="graph" type="Dictionary" />
+			<description>
+				Same as [method validate] for an arbitrary graph dictionary.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="graph" type="Dictionary" setter="set_graph" getter="get_graph" default="{}">
+			The graph dictionary. Assigning it stores a deep copy of the containers; resources such as [Gradient] or [Texture2D] are shared.
+		</member>
+	</members>
+</class>

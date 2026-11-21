@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VFXBudgetServer" inherits="Object" api_type="core" keywords="vfx,particles,budget,quality,lod" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Global effect and particle budget scaled by quality tier.
+	</brief_description>
+	<description>
+		[VFXBudgetServer] is available as the engine singleton [code]VFXBudgetServer[/code]. It limits how many effects and particles may be alive at once, per category and globally, and scales those limits by a quality [member tier].
+		A request is admitted when it fits all caps. Otherwise it may evict live effects of lower value, where value is the priority divided by [code]1 + distance * distance_falloff[/code]. Evicted effects are reported through [signal evicted]. Requests farther from the camera than [method get_max_distance] are always rejected.
+		Default categories (limits are [code]max_effects / max_particles[/code] for the Medium tier): [code]combat[/code] 24 / 2400, [code]ambient[/code] 16 / 1600, [code]weather[/code] 6 / 3000, [code]environment[/code] 12 / 2000 and [code]ui[/code] 8 / 400. Unknown categories get 8 / 800. The tier scales limits by 0.4 (Low), 1.0 (Medium), 1.75 (High) and 3.0 (Ultra).
+		[VFXGraphInstance3D] talks to this server automatically when its [member VFXGraphInstance3D.budget_category] is set.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Forgets all live effects without emitting [signal evicted].
+			</description>
+		</method>
+		<method name="get_active_effects" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="category" type="String" default="&quot;&quot;" />
+			<description>
+				Returns the number of live effects in [param category], or in total if it is empty.
+			</description>
+		</method>
+		<method name="get_active_particles" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="category" type="String" default="&quot;&quot;" />
+			<description>
+				Returns the particle cost of live effects in [param category], or in total if it is empty.
+			</description>
+		</method>
+		<method name="get_last_id" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the id granted by the last [method request_id] call (0 if it was rejected).
+			</description>
+		</method>
+		<method name="get_max_distance" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the maximum camera distance accepted for the current tier (40, 70, 110 or 160).
+			</description>
+		</method>
+		<method name="get_max_effects" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="category" type="String" />
+			<description>
+				Returns the effect cap of [param category] for the current tier.
+			</description>
+		</method>
+		<method name="get_max_particles" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="category" type="String" />
+			<description>
+				Returns the particle cap of [param category] for the current tier.
+			</description>
+		</method>
+		<method name="get_max_total_particles" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the global particle cap for the current tier ([member global_particle_base] times the tier scale).
+			</description>
+		</method>
+		<method name="get_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns [code]accepted[/code], [code]rejected[/code], [code]evicted[/code], [code]released[/code], [code]active_effects[/code], [code]active_particles[/code] and [code]tier[/code].
+			</description>
+		</method>
+		<method name="has_category" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="category" type="String" />
+			<description>
+				Returns [code]true[/code] if [param category] has explicit limits.
+			</description>
+		</method>
+		<method name="is_live" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Returns [code]true[/code] if the effect [param id] is still admitted.
+			</description>
+		</method>
+		<method name="release">
+			<return type="void" />
+			<param index="0" name="id" type="int" />
+			<description>
+				Releases the slot of effect [param id]. Unknown ids are ignored.
+			</description>
+		</method>
+		<method name="request">
+			<return type="bool" />
+			<param index="0" name="category" type="String" />
+			<param index="1" name="cost" type="int" />
+			<param index="2" name="priority" type="float" />
+			<param index="3" name="position" type="Vector3" />
+			<param index="4" name="camera_position" type="Vector3" />
+			<description>
+				Like [method request_id] but only returns whether the effect was admitted. Use [method get_last_id] to fetch the id.
+			</description>
+		</method>
+		<method name="request_id">
+			<return type="int" />
+			<param index="0" name="category" type="String" />
+			<param index="1" name="cost" type="int" />
+			<param index="2" name="priority" type="float" />
+			<param index="3" name="position" type="Vector3" />
+			<param index="4" name="camera_position" type="Vector3" />
+			<description>
+				Requests a slot for an effect that costs [param cost] particles. Returns the effect id (greater than 0) or 0 if rejected. Lower value effects may be evicted to make room.
+			</description>
+		</method>
+		<method name="reset_stats">
+			<return type="void" />
+			<description>
+				Resets the counters reported by [method get_stats].
+			</description>
+		</method>
+		<method name="set_category_limits">
+			<return type="void" />
+			<param index="0" name="category" type="String" />
+			<param index="1" name="max_effects" type="int" />
+			<param index="2" name="max_particles" type="int" />
+			<description>
+				Adds or overrides a category. The values are Medium tier numbers; other tiers scale them.
+			</description>
+		</method>
+		<method name="value_of" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="priority" type="float" />
+			<param index="1" name="position" type="Vector3" />
+			<param index="2" name="camera_position" type="Vector3" />
+			<description>
+				Returns the keep-value of an effect: [param priority] discounted by the distance to the camera.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="distance_falloff" type="float" setter="set_distance_falloff" getter="get_distance_falloff" default="0.05">
+			How quickly the value of an effect drops with camera distance.
+		</member>
+		<member name="global_particle_base" type="int" setter="set_global_particle_base" getter="get_global_particle_base" default="6000">
+			Global particle cap at the Medium tier.
+		</member>
+		<member name="tier" type="int" setter="set_tier" getter="get_tier" enum="VFXBudgetServer.Tier" default="1">
+			Active quality tier.
+		</member>
+	</members>
+	<signals>
+		<signal name="evicted">
+			<param index="0" name="id" type="int" />
+			<param index="1" name="category" type="String" />
+			<description>
+				Emitted when a live effect was evicted to make room for a more valuable request.
+			</description>
+		</signal>
+	</signals>
+	<constants>
+		<constant name="TIER_LOW" value="0" enum="Tier">
+			Lowest quality: limits are scaled by 0.4.
+		</constant>
+		<constant name="TIER_MEDIUM" value="1" enum="Tier">
+			Default quality: limits are used as authored.
+		</constant>
+		<constant name="TIER_HIGH" value="2" enum="Tier">
+			Limits are scaled by 1.75.
+		</constant>
+		<constant name="TIER_ULTRA" value="3" enum="Tier">
+			Limits are scaled by 3.0.
+		</constant>
+	</constants>
+</class>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VFXPresets" inherits="RefCounted" api_type="core" keywords="vfx,particles,preset" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Ready-made gameplay effects authored as VFX graph dictionaries.
+	</brief_description>
+	<description>
+		[VFXPresets] bundles effects as pure data (see [VFXGraphAsset]) together with a helper that spawns a self-freeing [VFXGraphInstance3D]. All members are static.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_spark_count" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns the spark count for a graphics [param level] (clamped to 0..3): 0, 40, 70 or 110.
+			</description>
+		</method>
+		<method name="lightning_sparks" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns a lightning ground strike graph: white-hot [code]sparks[/code] that bounce off the ground plane and spawn short-lived [code]embers[/code] on every impact through collision event routing. Level 0 yields an effect without particles.
+			</description>
+		</method>
+		<method name="spawn" qualifiers="static">
+			<return type="VFXGraphInstance3D" />
+			<param index="0" name="parent" type="Node3D" />
+			<param index="1" name="asset" type="Variant" />
+			<param index="2" name="at" type="Vector3" />
+			<param index="3" name="seed" type="int" />
+			<description>
+				Adds a one-shot [VFXGraphInstance3D] playing [param asset] (a graph [Dictionary] or a [VFXGraphAsset]) to [param parent] at the world position [param at]. Returns [code]null[/code] if [param parent] is [code]null[/code], [param at] is not finite or the asset has no particle capacity.
+			</description>
+		</method>
+	</methods>
+</class>
