@@ -394,7 +394,7 @@ class VisualQualityPackageTests(unittest.TestCase):
         self.assertLess(body.index('if int(updated.get(output_id, 0)) >'),
                         body.index('updated[output_id] ='))
         self.assertIn('if updated.is_empty():', source)
-        self.assertIn('if not _persist_or_rollback(before, _claimed_sources):', source)
+        self.assertIn('if not _persist_or_rollback(before, _claimed_sources, before_equipped):', source)
 
     def test_inventory_rewards_crafting_and_ui_are_in_playable_demo(self):
         quest = (ROOT / 'addons/visual_quality/exploration_quest.gd').read_text()
@@ -414,8 +414,56 @@ class VisualQualityPackageTests(unittest.TestCase):
             self.assertIn(marker, demo)
         self.assertLess(demo.index('add_child(inventory)'), demo.index('add_child(streamer)'))
 
+    def test_v16_attribute_and_ability_services(self):
+        stats = (ROOT / 'addons/visual_quality/attribute_component.gd').read_text()
+        abilities = (ROOT / 'addons/visual_quality/ability_component.gd').read_text()
+        for token in ('class_name WorldAttributes3D', 'set_equipment', 'remove_equipment',
+                      'get_stat', 'validate_modifiers', 'apply_timed_effect',
+                      'effect_remaining', 'try_spend_stamina', 'regen_delay_after_use',
+                      'vitals_snapshot', 'restore_vitals', 'apply_damage', 'heal'):
+            self.assertIn(token, stats)
+        for token in ('class_name WorldAbilitySystem3D', 'cooldowns_snapshot',
+                      'stamina_cost', 'can_activate', 'apply_timed_effect',
+                      'try_spend_stamina', 'ability_activated.emit', 'dash', 'focus'):
+            self.assertIn(token, abilities)
+        activation = abilities.split('func activate(ability_id: String) -> bool:', 1)[1]
+        self.assertLess(activation.index('if not can_activate(ability_id):'),
+                        activation.index('_cooldowns[ability_id] ='))
+
+    def test_v16_equipment_is_persistent_and_inventory_compatible(self):
+        items = (ROOT / 'addons/visual_quality/item_catalog.gd').read_text()
+        inventory = (ROOT / 'addons/visual_quality/inventory_component.gd').read_text()
+        for token in ('trail_boots', 'equipment_slot', 'equipment_modifiers',
+                      '"feet"', '"utility"'):
+            self.assertIn(token, items)
+        for token in ('signal equipment_changed', 'equip_item', 'unequip_slot',
+                      'get_equipped_item', 'equipped_snapshot', '"equipped", _equipped',
+                      'config.get_value("inventory", "equipped", {})',
+                      'get_count(item_id) <= 0', 'old_equipped'):
+            self.assertIn(token, inventory)
+        self.assertIn('Catalog.equipment_slot(item_id) != slot', inventory)
+
+    def test_v16_player_and_game_use_attributes_equipment_and_skills(self):
+        character = (ROOT / 'addons/visual_quality/character_controller.gd').read_text()
+        demo = (ROOT / 'demo.gd').read_text()
+        for token in ('attributes: WorldAttributes3D', 'attributes.try_spend_stamina',
+                      'attributes.get_stat("move_speed")', 'walk_speed * speed_modifier'):
+            self.assertIn(token, character)
+        for token in ('Attributes.new()', 'Abilities.new()',
+                      'inventory.equipment_changed.connect', 'ItemCatalog.equipment_modifiers',
+                      'player_character.attributes = player_attributes',
+                      'player_abilities.activate(ability_id)', 'KEY_X', 'KEY_Z',
+                      'KEY_Y', 'KEY_U', 'trail_boots', '_toggle_trail_boots',
+                      'get_equipped_item("utility")'):
+            self.assertIn(token, demo)
+
+    def test_v16_godot_regression_suites_registered(self):
+        for name in ('test_attributes.gd', 'test_abilities.gd', 'test_equipment.gd',
+                     'test_equipment_persistence.gd'):
+            self.assertTrue((ROOT / 'tests' / name).is_file())
+
     def test_headless_regression_suites_present(self):
-        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd', 'test_streaming_planner.gd', 'test_streaming_cell_profiler.gd', 'test_predictive_streaming_runtime.gd', 'test_world_interaction.gd', 'test_world_interaction_runtime.gd', 'test_inventory_component.gd', 'test_inventory_crafting.gd', 'test_inventory_persistence.gd', 'test_inventory_gameplay.gd'):
+        for filename in ('test_adaptive_resolution.gd', 'test_quality_manager.gd', 'test_atmosphere.gd', 'test_foliage.gd', 'test_exploration_quest.gd', 'test_character.gd', 'test_character_physics.gd', 'test_world_streamer.gd', 'test_world_streamer_runtime.gd', 'test_world_state_store.gd', 'test_world_state_runtime.gd', 'test_streamed_navigation.gd', 'test_streamed_navigation_runtime.gd', 'test_navigation_obstacles.gd', 'test_ai_interest.gd', 'test_navigation_obstacles_runtime.gd', 'test_world_telemetry.gd', 'test_world_budget_governor.gd', 'test_streaming_planner.gd', 'test_streaming_cell_profiler.gd', 'test_predictive_streaming_runtime.gd', 'test_world_interaction.gd', 'test_world_interaction_runtime.gd', 'test_inventory_component.gd', 'test_inventory_crafting.gd', 'test_inventory_persistence.gd', 'test_inventory_gameplay.gd', 'test_attributes.gd', 'test_abilities.gd', 'test_equipment.gd', 'test_equipment_persistence.gd'):
             text = (ROOT / 'tests' / filename).read_text()
             self.assertIn('extends SceneTree', text)
             self.assertIn('assert(', text)
