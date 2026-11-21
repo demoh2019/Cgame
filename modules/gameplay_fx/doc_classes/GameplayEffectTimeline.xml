@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GameplayEffectTimeline" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Explicit-clock runtime for timed, stackable gameplay effects.
+	</brief_description>
+	<description>
+		A reusable timeline of exact gameplay tags with positive stack counts and remaining durations. Advance time through [method tick]; it never reads wall-clock time. Reapplications support refresh, extend and keep-duration policies inspired by Unreal Gameplay Effects. One timeline supports at most 256 effects, 65535 stacks per effect and durations up to seven days. Invalid or non-finite values fail without partial state changes. In multiplayer projects only an authoritative simulation may decide gameplay outcomes; client-side use should remain visual.
+	</description>
+	<methods>
+		<method name="apply_effect">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="seconds" type="float" />
+			<param index="2" name="stacks" type="int" default="1" />
+			<param index="3" name="stack_limit" type="int" default="65535" />
+			<param index="4" name="policy" type="int" enum="GameplayEffectTimeline.ReapplyPolicy" default="0" />
+			<description>Adds stacks and applies the requested duration policy. Returns false without altering state if inputs are invalid.</description>
+		</method>
+		<method name="set_effect">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<param index="1" name="seconds" type="float" />
+			<param index="2" name="stacks" type="int" default="1" />
+			<description>Sets an exact effect or removes it if the duration is zero.</description>
+		</method>
+		<method name="replace_snapshot">
+			<return type="bool" />
+			<param index="0" name="effects" type="Dictionary" />
+			<description>Atomically replaces the active effects from a dictionary mapping tags to dictionaries with remaining (seconds) and stacks (positive int). A duration of zero removes the effect.</description>
+		</method>
+		<method name="get_snapshot" qualifiers="const">
+			<return type="Dictionary" />
+			<description>Returns independent dictionaries of all active effects, safe to edit without changing the timeline.</description>
+		</method>
+		<method name="tick">
+			<return type="PackedStringArray" />
+			<param index="0" name="delta" type="float" />
+			<description>Advances by a finite positive delta; returns exact tags expiring during the tick in insertion order.</description>
+		</method>
+		<method name="get_remaining" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Returns exact effect remaining seconds, or zero.</description>
+		</method>
+		<method name="get_stacks" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Returns exact effect stacks, or zero.</description>
+		</method>
+		<method name="has_effect" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Whether the exact tag has an active effect.</description>
+		</method>
+		<method name="remove_effect">
+			<return type="bool" />
+			<param index="0" name="tag" type="StringName" />
+			<description>Removes an exact effect. Returns false if absent.</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>Clears all effects.</description>
+		</method>
+		<method name="get_effect_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns number of live effects.</description>
+		</method>
+		<method name="is_empty" qualifiers="const">
+			<return type="bool" />
+			<description>True when no effects are active.</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="REAPPLY_REFRESH" value="0" enum="ReapplyPolicy">Reset countdown to newly applied duration.</constant>
+		<constant name="REAPPLY_EXTEND" value="1" enum="ReapplyPolicy">Extend current countdown, capped at seven days.</constant>
+		<constant name="REAPPLY_KEEP" value="2" enum="ReapplyPolicy">Preserve countdown while adding stacks.</constant>
+	</constants>
+</class>

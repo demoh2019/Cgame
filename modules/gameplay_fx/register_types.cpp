@@ -29,6 +29,7 @@
 /**************************************************************************/
 #include "register_types.h"
 
+#include "gameplay_effect_timeline.h"
 #include "radial_force_field_3d.h"
 #include "sound_concurrency.h"
 #include "sound_propagation.h"
@@ -43,6 +44,7 @@ void initialize_gameplay_fx_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SoundConcurrencyManager);
 	GDREGISTER_CLASS(SoundPropagation);
 	GDREGISTER_CLASS(RadialForceField3D);
+	GDREGISTER_CLASS(GameplayEffectTimeline);
 }
 
 void uninitialize_gameplay_fx_module(ModuleInitializationLevel) {
