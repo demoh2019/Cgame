@@ -8,6 +8,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Choose a `Node3D` observer, cell size, and square loading/unloading radii; negative coordinates are handled with floor division.
 - Add up to 16 extra observer paths for co-op, split-screen, cutscene cameras, portals and predictive prefetch (attach a Node3D in front of a moving character). All source locations share streaming budgets. Streaming scans nearest grid rings across sources, so another observer's central cell is considered before the primary observer's outer rings.
 - Assign cells to event-driven **Runtime Data Layers** via `cell_layers` and toggle them with `set_layer_enabled(name, bool)`. Disabled layers override even pinned and near-camera cells, but obey unload budgets. `layer_states` supports inspector editing and save-game snapshots; missing layer states default to enabled. Each cell has at most one layer, unlike Unreal's broader actor-layer model.
+- **Gate precise NavigationLink3D transitions** without disabling neighboring navigation regions: the new `set_cell_navigation_link_enabled`, `get_navigation_link_states`, and `set_route_connection_link` APIs control authored off-mesh links on individual cell edges. `acquire_cell_route` rejects disabled required links atomically. Persistent state and reactive `cell_navigation_link_state_changed` are independent of coarse navigation cell gates.
 - **Control streamed navigation at runtime:** `set_cell_navigation_enabled(cell, bool)` enables/disables loaded `NavigationRegion3D` nodes without unloading physics/visuals; `set_navigation_cell_states`, `get_navigation_cell_states` support checkpoint state and `cell_navigation_state_changed` notifies path-following AI. Disabled gates prevent new corridor reservations without invalidating existing leases.
 - Preload a **four-connected navigation corridor** for streamed AI using `get_cell_route(from_cell, to_cell)`, `acquire_cell_route(from_cell, to_cell)` and `release_cell_route(tokens)`. Route acquisition atomically reserves at most 64 neighboring cells, fails on disabled Data Layers or an exhausted 256-token budget, and does not replace real NavigationServer3D pathfinding.
 - Retain cells independently for multiple gameplay systems using **reference-counted cell lease tokens**. `acquire_cell_lease(cell)` returns a token and `release_cell_lease(token)` releases only that owner's request. Limit: 256 active tokens; tokens are runtime-only and must be explicitly released. Query counts with `get_cell_lease_count`, `get_cell_lease_count_total` and `get_leased_cell_count`; `clear_cell_leases` releases all. The usual background request/instantiation budgets and inactive Data Layer gates still apply.
@@ -72,6 +73,63 @@ re-enabling streaming restores them. If you remove a cell mapping, pinning does
 not re-register the scene.
 
 Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to its cell: cell `(-1, 0)` starts at local `(-128, 0, 0)` with default cell size. The observer is transformed into the world partition node's local space, so moving/rotating the WorldPartition3D node works.
+
+## Fine-grained NavigationLink3D gates for streamed AI
+
+Cell-wide navigation gating disables every walkable region of a scene.
+For a door, bridge or isolated transition between two regions, use an
+authored `NavigationLink3D` instead. Godot's navigation server can include
+or exclude a link without rebuilding a navigation mesh or unloading a cell.
+
+The link must be a real child of the source cell scene. Name it consistently
+and register the required edge **once during scene setup**:
+
+```gdscript
+world.set_route_connection_link(Vector2i(0, 0), Vector2i(1, 0), "PatrolBridgeLink")
+
+# A switch only controls this one bridge, not either cell's nav region:
+world.set_cell_navigation_link_enabled(Vector2i(0, 0), "PatrolBridgeLink", false)
+assert(world.is_cell_navigation_enabled(Vector2i(1, 0)))
+assert(world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0)).is_empty())
+
+# Once opened, the AI may reserve both cells again:
+world.set_cell_navigation_link_enabled(Vector2i(0, 0), "PatrolBridgeLink", true)
+var tokens := world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0))
+world.release_cell_route(tokens)
+```
+
+`get_route_connection_link(from_cell, to_cell)` queries a registered edge;
+`clear_route_connection_link` unregisters it. Each required link is
+associated with its **source** cell, but its availability gates travel in
+either direction across that edge. Multiple independent route owners are
+still protected by token-based leases, and no partial allocations occur if
+a required link is closed.
+
+`get_navigation_link_states()` returns a safe, deep-copy checkpoint map;
+`set_navigation_link_states()` restores it, applying changes to loaded
+links and preserving overrides for temporarily unloaded cells. A default
+unlisted path is open. Only disabled entries are stored, limited to 4096
+cells and 128 link paths per cell, and unsafe NodePaths are rejected.
+Subscribe to `cell_navigation_link_state_changed(cell, path, enabled)`
+to release stale paths and reacquire routes as topology changes. Configuration
+of *which* cell edge requires *which* link belongs to the authored level
+setup, not to the saved runtime gate states.
+
+The demo includes two walkable patrol islands on navigation layer **2**,
+which are separated by an 8-meter gap in mesh coordinates. A manually
+authored `PatrolBridgeLink` provides the sole navigation connection.
+The surrounding procedural world uses navigation layer **1** and remains
+accessible even when the patrol bridge is closed. The player controls the
+bridge using the `PatrolGate` interactable switch (E). NavigationAgent3D
+queries layer 2 and has custom physical movement across this short bridge
+because an off-mesh navigation link specifies a route, **not automatic
+movement for a CharacterBody3D**.
+
+This is fine-grained link connectivity, not a dynamic navmesh bake, crowd
+simulation, agent obstacle avoidance, or general multi-floor topology
+solver. Links must connect authored regions within the navigation server's
+link-connection radius and are synchronized on subsequent physics frames.
+Changes to a link's path or scene hierarchy need a save migration.
 
 ## Dynamic navigation cell gates and AI route invalidation
 
@@ -483,7 +541,7 @@ performance on the intended hardware still require validation.
 
 ## Tests
 
-The module includes 109 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (88), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 113 Doctest cases across `test_world_partition_3d.h` (21) and `test_world_partition_3d_extra.h` (92), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"

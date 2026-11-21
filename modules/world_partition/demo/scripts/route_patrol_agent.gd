@@ -55,13 +55,15 @@ func _ready() -> void:
     navigation_agent.name = "PathFollower"
     navigation_agent.path_desired_distance = 1.25
     navigation_agent.target_desired_distance = ARRIVAL_DISTANCE
-    navigation_agent.navigation_layers = 1
+    navigation_agent.navigation_layers = 2
     add_child(navigation_agent)
 
     if global_position == Vector3.ZERO:
         global_position = WAYPOINTS[0]
     if is_instance_valid(streamer) and streamer.has_signal("cell_navigation_state_changed"):
         streamer.connect("cell_navigation_state_changed", Callable(self, "_on_navigation_gate_changed"))
+    if is_instance_valid(streamer) and streamer.has_signal("cell_navigation_link_state_changed"):
+        streamer.connect("cell_navigation_link_state_changed", Callable(self, "_on_navigation_link_changed"))
     _reserve_route()
 
 func _on_navigation_gate_changed(cell: Vector2i, enabled: bool) -> void:
@@ -71,6 +73,19 @@ func _on_navigation_gate_changed(cell: Vector2i, enabled: bool) -> void:
         _release_route()
         velocity = Vector3.ZERO
         route_status = "Navigation gate closed"
+        route_retry_cooldown = 0.75
+        navigation_sync_frames = 3
+    elif patrol_enabled:
+        route_retry_cooldown = 0.0
+        _reserve_route()
+
+func _on_navigation_link_changed(cell: Vector2i, link_path: String, enabled: bool) -> void:
+    if cell != CELL_FROM or link_path != "PatrolBridgeLink":
+        return
+    if not enabled:
+        _release_route()
+        velocity = Vector3.ZERO
+        route_status = "Bridge closed, waiting for switch"
         route_retry_cooldown = 0.75
         navigation_sync_frames = 3
     elif patrol_enabled:
@@ -126,6 +141,9 @@ func _physics_process(delta: float) -> void:
     if not bool(streamer.call("is_cell_navigation_enabled", CELL_FROM)) or not bool(streamer.call("is_cell_navigation_enabled", CELL_TO)):
         _on_navigation_gate_changed(CELL_TO, false)
         return
+    if not bool(streamer.call("is_cell_navigation_link_enabled", CELL_FROM, "PatrolBridgeLink")):
+        _on_navigation_link_changed(CELL_FROM, "PatrolBridgeLink", false)
+        return
     if not bool(streamer.call("is_cell_loaded", CELL_FROM)) or not bool(streamer.call("is_cell_loaded", CELL_TO)):
         route_status = "Waiting for both navigation cells"
         navigation_sync_frames = 3
@@ -144,6 +162,16 @@ func _physics_process(delta: float) -> void:
         completed_crossings += 1
         destination = WAYPOINTS[target_index]
         navigation_agent.target_position = destination
+
+    # A NavigationLink3D is an off-mesh traversal instruction, not automatic
+    # CharacterBody3D movement. Walk deliberately across the authored short
+    # bridge span instead of relying on the nav server to move the body.
+    if global_position.x >= 121.0 and global_position.x <= 135.0:
+        var across := 1.0 if destination.x > global_position.x else -1.0
+        velocity = Vector3(across * WALK_SPEED, 0.0, 0.0)
+        move_and_slide()
+        route_status = "Traversing active navigation bridge"
+        return
 
     # Update the agent's internal path first. Querying is_navigation_finished
     # before the navigation update can leave a newly targeted agent stranded.

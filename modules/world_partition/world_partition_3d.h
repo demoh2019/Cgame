@@ -45,6 +45,8 @@ class WorldPartition3D : public Node3D {
 	Dictionary cell_layers;
 	Dictionary layer_states;
 	Dictionary navigation_cell_states;
+	Dictionary navigation_link_states;
+	Dictionary route_connection_links;
 	bool layer_update_needed = false;
 	NodePath observer_path;
 	Array additional_observer_paths;
@@ -80,6 +82,9 @@ class WorldPartition3D : public Node3D {
 	String _get_scene_path(const Vector2i &p_cell) const;
 	bool _is_cell_layer_enabled(const Vector2i &p_cell) const;
 	void _apply_cell_navigation_state(const Vector2i &p_cell, Node *p_instance);
+	void _apply_loaded_navigation_link(const Vector2i &p_cell, const String &p_link_path, bool p_enabled);
+	void _apply_cell_navigation_links(const Vector2i &p_cell, Node *p_instance);
+	bool _is_route_connection_open(const Vector2i &p_from, const Vector2i &p_to) const;
 	void _notify_cell_activating(const Vector2i &p_cell, Node *p_instance);
 	void _notify_cell_deactivating(const Vector2i &p_cell, Node *p_instance);
 	void _capture_cell_state(const Vector2i &p_cell, Node *p_instance);
@@ -168,6 +173,15 @@ public:
 	void set_navigation_cell_states(const Dictionary &p_states);
 	Dictionary get_navigation_cell_states() const;
 	int get_disabled_navigation_cell_count() const;
+
+	void set_cell_navigation_link_enabled(const Vector2i &p_cell, const String &p_link_path, bool p_enabled);
+	bool is_cell_navigation_link_enabled(const Vector2i &p_cell, const String &p_link_path) const;
+	void set_navigation_link_states(const Dictionary &p_states);
+	Dictionary get_navigation_link_states() const;
+	int get_disabled_navigation_link_count() const;
+	void set_route_connection_link(const Vector2i &p_from, const Vector2i &p_to, const String &p_link_path);
+	void clear_route_connection_link(const Vector2i &p_from, const Vector2i &p_to);
+	String get_route_connection_link(const Vector2i &p_from, const Vector2i &p_to) const;
 
 	void set_cell_state(const Vector2i &p_cell, const Dictionary &p_state);
 	Dictionary get_cell_state(const Vector2i &p_cell) const;

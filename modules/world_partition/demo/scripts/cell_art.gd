@@ -26,6 +26,8 @@ static var _crown_proxy_mesh: SphereMesh
 static var _ground_mesh: PlaneMesh
 static var _collision_shape_resource: BoxShape3D
 static var _flat_navigation_mesh: NavigationMesh
+static var _patrol_hub_navigation_mesh: NavigationMesh
+static var _patrol_pass_navigation_mesh: NavigationMesh
 static var _trunk_material: StandardMaterial3D
 static var _leaf_material: StandardMaterial3D
 static var _ground_material: StandardMaterial3D
@@ -71,6 +73,8 @@ func _ready() -> void:
     # HLOD proxy scenes are intentionally visual-only, including prebaked ones.
     if not proxy:
         _create_streamed_simulation_components()
+        if grid == QUEST_HUB or grid == PATROL_PASS:
+            _create_patrol_navigation_track(grid)
 
     # Gameplay landmarks belong to detailed scenes only. The demo's native
     # pinning API allows the hub and event arena to remain resident offscreen.
@@ -157,6 +161,32 @@ func kick_persistent_crate() -> bool:
     crate.sleeping = false
     crate.apply_central_impulse(Vector3(15.0, 11.0, 5.0))
     return true
+
+func _create_patrol_navigation_track(grid: Vector2i) -> void:
+    # A narrow, purpose-authored patrol navigation layer. Its two islands
+    # are NOT connected by ordinary mesh edges; only the streamed bridge
+    # NavigationLink3D joins them. The normal walkable world stays layer 1.
+    var track := NavigationRegion3D.new()
+    track.name = "PatrolTrack"
+    track.navigation_layers = 2
+    track.navigation_mesh = (
+        _patrol_hub_navigation_mesh if grid == QUEST_HUB
+        else _patrol_pass_navigation_mesh
+    )
+    add_child(track)
+    if grid != QUEST_HUB:
+        return
+
+    var bridge := NavigationLink3D.new()
+    bridge.name = "PatrolBridgeLink"
+    bridge.navigation_layers = 2
+    bridge.bidirectional = true
+    bridge.start_position = Vector3(123.0, 0.0, 64.0)
+    # End is expressed relative to hub root and reaches into neighbor
+    # (1,0), where the walkable strip begins at global x=132.
+    bridge.end_position = Vector3(133.0, 0.0, 64.0)
+    bridge.enabled = true
+    add_child(bridge)
 
 func _create_streamed_simulation_components() -> void:
     # Collision is deliberately coarse, not generated from all 160 tree meshes.
@@ -376,6 +406,21 @@ func _ensure_shared_resources() -> void:
         Vector3(0, 0, CELL_SIZE),
     ])
     _flat_navigation_mesh.add_polygon(PackedInt32Array([0, 3, 2, 1]))
+
+    # Two isolated patrol-only navigation polygons, separated by an 8m
+    # world-space gap. Changing the link affects only navigation layer 2.
+    _patrol_hub_navigation_mesh = NavigationMesh.new()
+    _patrol_hub_navigation_mesh.vertices = PackedVector3Array([
+        Vector3(106.0, 0, 58.0), Vector3(124.0, 0, 58.0),
+        Vector3(124.0, 0, 70.0), Vector3(106.0, 0, 70.0),
+    ])
+    _patrol_hub_navigation_mesh.add_polygon(PackedInt32Array([0, 3, 2, 1]))
+    _patrol_pass_navigation_mesh = NavigationMesh.new()
+    _patrol_pass_navigation_mesh.vertices = PackedVector3Array([
+        Vector3(4.0, 0, 58.0), Vector3(24.0, 0, 58.0),
+        Vector3(24.0, 0, 70.0), Vector3(4.0, 0, 70.0),
+    ])
+    _patrol_pass_navigation_mesh.add_polygon(PackedInt32Array([0, 3, 2, 1]))
 
     _ground_mesh = PlaneMesh.new()
     _ground_mesh.size = Vector2(CELL_SIZE, CELL_SIZE)

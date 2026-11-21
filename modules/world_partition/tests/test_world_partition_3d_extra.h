@@ -39,6 +39,7 @@
 #include "scene/main/scene_tree.h"
 #include "scene/3d/physics/rigid_body_3d.h"
 #include "scene/3d/navigation/navigation_region_3d.h"
+#include "scene/3d/navigation/navigation_link_3d.h"
 #include "scene/main/window.h"
 #include "tests/test_macros.h"
 
@@ -260,6 +261,104 @@ TEST_CASE("[SceneTree][WorldPartition3D] Bulk physics snapshot applies to loaded
 		CHECK(body->is_sleeping());
 		Dictionary saved = fixture.world->get_cell_physics_state(cell);
 		CHECK(saved.size() == 1);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[WorldPartition3D] Named navigation link states are opt-in and defensively copied") {
+	WorldPartition3D world;
+	const Vector2i hub(0, 0);
+	CHECK(world.is_cell_navigation_link_enabled(hub, "BridgeLink"));
+	CHECK(world.get_disabled_navigation_link_count() == 0);
+	world.set_cell_navigation_link_enabled(hub, "BridgeLink", false);
+	CHECK_FALSE(world.is_cell_navigation_link_enabled(hub, "BridgeLink"));
+	CHECK(world.get_disabled_navigation_link_count() == 1);
+	Dictionary saved = world.get_navigation_link_states();
+	Dictionary cell_state = saved[hub];
+	cell_state["BridgeLink"] = true;
+	CHECK_FALSE(world.is_cell_navigation_link_enabled(hub, "BridgeLink"));
+	world.set_cell_navigation_link_enabled(hub, "BridgeLink", false); // Idempotent.
+	CHECK(world.get_disabled_navigation_link_count() == 1);
+	world.set_cell_navigation_link_enabled(hub, "BridgeLink", true);
+	CHECK(world.get_navigation_link_states().is_empty());
+	CHECK(world.get_disabled_navigation_link_count() == 0);
+	CHECK(world.has_signal(SNAME("cell_navigation_link_state_changed")));
+}
+
+TEST_CASE("[WorldPartition3D] Navigation link imports reject unsafe records and support bulk reset") {
+	WorldPartition3D world;
+	const Vector2i cell(0, 0);
+	Dictionary fields;
+	fields["BridgeLink"] = false;
+	fields["../Outside"] = false;
+	fields["/root/Outside"] = false;
+	fields["BridgeLink:enabled"] = false;
+	fields["InvalidBool"] = "false";
+	fields["EnabledByDefault"] = true;
+	Dictionary input;
+	input[cell] = fields;
+	input["not a Vector2i"] = fields;
+	world.set_navigation_link_states(input);
+	CHECK(world.get_disabled_navigation_link_count() == 1);
+	CHECK_FALSE(world.is_cell_navigation_link_enabled(cell, "BridgeLink"));
+	CHECK(world.is_cell_navigation_link_enabled(cell, "EnabledByDefault"));
+	world.set_navigation_link_states(Dictionary());
+	CHECK(world.is_cell_navigation_link_enabled(cell, "BridgeLink"));
+	CHECK(world.get_disabled_navigation_link_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Route edge definitions block both directions atomically") {
+	WorldPartition3D world;
+	const Vector2i left(0, 0);
+	const Vector2i right(1, 0);
+	world.set_route_connection_link(left, right, "BridgeLink");
+	CHECK(world.get_route_connection_link(left, right) == "BridgeLink");
+	CHECK(world.get_route_connection_link(right, left).is_empty());
+	world.set_cell_navigation_link_enabled(left, "BridgeLink", false);
+	CHECK(world.acquire_cell_route(left, right).is_empty());
+	CHECK(world.acquire_cell_route(right, left).is_empty());
+	CHECK(world.get_cell_lease_count_total() == 0);
+	world.set_cell_navigation_link_enabled(left, "BridgeLink", true);
+	Array route = world.acquire_cell_route(left, right);
+	REQUIRE(route.size() == 2);
+	CHECK(world.release_cell_route(route) == 2);
+	world.set_cell_navigation_link_enabled(left, "BridgeLink", false);
+	world.clear_route_connection_link(left, right);
+	CHECK(world.get_route_connection_link(left, right).is_empty());
+	route = world.acquire_cell_route(left, right);
+	REQUIRE(route.size() == 2);
+	CHECK(world.release_cell_route(route) == 2);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Streamed NavigationLink3D respects persistent gate through unload") {
+	const String path = make_nav_link_cell_scene("bridge_reload");
+	{
+		WorldFixture fixture;
+		const Vector2i cell(0, 0);
+		fixture.world->set_cell_scene(cell, path);
+		fixture.world->set_cell_navigation_link_enabled(cell, "BridgeLink", false);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *root = fixture.world->get_cell_instance(cell);
+		REQUIRE(root != nullptr);
+		NavigationLink3D *link = Object::cast_to<NavigationLink3D>(root->get_node_or_null(NodePath("BridgeLink")));
+		REQUIRE(link != nullptr);
+		CHECK_FALSE(link->is_enabled());
+		CHECK(link->is_bidirectional());
+		fixture.world->set_cell_navigation_link_enabled(cell, "BridgeLink", true);
+		CHECK(link->is_enabled());
+		fixture.world->set_cell_navigation_link_enabled(cell, "BridgeLink", false);
+		fixture.observer->set_position(Vector3(1280, 0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
+		fixture.observer->set_position(Vector3(0, 0, 0));
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *again = fixture.world->get_cell_instance(cell);
+		REQUIRE(again != nullptr);
+		NavigationLink3D *restored = Object::cast_to<NavigationLink3D>(again->get_node_or_null(NodePath("BridgeLink")));
+		REQUIRE(restored != nullptr);
+		CHECK_FALSE(restored->is_enabled());
+		fixture.world->set_navigation_link_states(Dictionary());
+		CHECK(restored->is_enabled());
 	}
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
@@ -956,6 +1055,25 @@ static String make_cell_scene(const String &p_id, const Vector3 &p_authored_offs
 	const String file_name = "user://partition_extra_" + p_id + "_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
 	CHECK(ResourceSaver::save(packed, file_name) == OK);
 	return file_name;
+}
+
+static String make_nav_link_cell_scene(const String &p_id) {
+	Node3D *root = memnew(Node3D);
+	root->set_name("LinkCell");
+	NavigationLink3D *link = memnew(NavigationLink3D);
+	link->set_name("BridgeLink");
+	link->set_start_position(Vector3(7, 0, 7));
+	link->set_end_position(Vector3(21, 0, 7));
+	link->set_bidirectional(true);
+	root->add_child(link);
+	link->set_owner(root);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	CHECK(packed->pack(root) == OK);
+	memdelete(root);
+	const String path = "user://partition_navigation_link_" + p_id + "_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	CHECK(ResourceSaver::save(packed, path) == OK);
+	return path;
 }
 
 static String make_nav_gate_cell_scene(const String &p_id) {
