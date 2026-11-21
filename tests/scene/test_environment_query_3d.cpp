@@ -793,6 +793,51 @@ TEST_CASE("[EnvironmentQuery3D] Oriented grid validates input and enforces memor
 	CHECK(EnvironmentQuery3D::sample_oriented_grid(Vector3(), Vector3(0, 0, 1), Vector2(127.5, 127.5), 1, 65536).size() == 65536);
 }
 
+TEST_CASE("[EnvironmentQuery3D] Fibonacci annulus samples bounded area-uniform rings deterministically") {
+	const Vector3 center(10, 3, 20);
+	const PackedVector3Array samples = EnvironmentQuery3D::sample_fibonacci_annulus(center, 2.0, 6.0, 4);
+	REQUIRE(samples.size() == 4);
+	CHECK(samples == EnvironmentQuery3D::sample_fibonacci_annulus(center, 2.0, 6.0, 4));
+	for (int i = 0; i < 4; i++) {
+		const Vector3 point = samples[i];
+		CHECK(point.y == center.y);
+		const double radius_square = (point.x - center.x) * (point.x - center.x) + (point.z - center.z) * (point.z - center.z);
+		CHECK(radius_square == doctest::Approx(4.0 + 32.0 * (double(i) + 0.5) / 4.0).epsilon(0.0001));
+	}
+	CHECK(samples[0].is_equal_approx(Vector3(10 + Math::sqrt(8.0), 3, 20)));
+	const PackedVector3Array rotated = EnvironmentQuery3D::sample_fibonacci_annulus(center, 2.0, 6.0, 4, Math::PI / 2.0);
+	REQUIRE(rotated.size() == 4);
+	CHECK(rotated[0].is_equal_approx(center + Vector3(0, 0, Math::sqrt(8.0))));
+	CHECK(!samples[1].is_equal_approx(samples[0])); // No duplicate radial spokes.
+}
+
+TEST_CASE("[EnvironmentQuery3D] Fibonacci annulus accepts zero-radius and thin annuli") {
+	const Vector3 center(10, 7, 20);
+	const PackedVector3Array zero = EnvironmentQuery3D::sample_fibonacci_annulus(center, 0.0, 0.0, 3);
+	REQUIRE(zero.size() == 3);
+	CHECK(zero[0] == center);
+	CHECK(zero[2] == center);
+	const PackedVector3Array thin = EnvironmentQuery3D::sample_fibonacci_annulus(center, 4.0, 4.0, 13);
+	REQUIRE(thin.size() == 13);
+	for (const Vector3 &point : thin) {
+		CHECK(Math::is_equal_approx((point - center).length(), 4.0));
+	}
+}
+
+TEST_CASE("[EnvironmentQuery3D] Fibonacci annulus rejects invalid geometry before allocation") {
+	ERR_PRINT_OFF
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(INF, 0, 0), 1, 4, 8).is_empty());
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), -1, 4, 8).is_empty());
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 5, 4, 8).is_empty());
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, INF, 8).is_empty());
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, 4, 8, NaN).is_empty());
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, 4, 0).is_empty());
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, 4, 65537).is_empty());
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, 1e250, 8).is_empty());
+	ERR_PRINT_ON
+	CHECK(EnvironmentQuery3D::sample_fibonacci_annulus(Vector3(), 1, 4, 65536).size() == 65536);
+}
+
 TEST_CASE("[EnvironmentQuery3D] Evaluation does not mutate input candidates") {
 	PackedVector3Array points = { Vector3(7, 0, 0), Vector3(1, 0, 0) };
 	Ref<EnvironmentQuery3D> q = make_query(points);

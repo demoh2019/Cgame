@@ -138,4 +138,7 @@ public:
 	// Context-relative XZ grid: local +Z follows the input forward direction.
 	// Pure geometry, with bounded allocation and deterministic row-major order.
 	static PackedVector3Array sample_oriented_grid(const Vector3 &p_center, const Vector3 &p_forward, const Vector2 &p_half_extents, double p_spacing, int p_max_points = 4096);
+	// Deterministic area-uniform annulus candidates with a golden-angle phase.
+	// O(count), 1..65536 bounded points; never queries the scene or navigation.
+	static PackedVector3Array sample_fibonacci_annulus(const Vector3 &p_center, double p_inner_radius, double p_outer_radius, int p_count, double p_phase = 0.0);
 };
