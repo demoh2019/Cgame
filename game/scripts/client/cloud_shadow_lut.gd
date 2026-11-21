@@ -2,6 +2,7 @@ extends RefCounted
 ## One small, seamless cloud-opacity lookup for terrain, grass and foliage.
 ## This replaces repeated multi-octave hash/sine noise at every rendered pixel.
 ## A deterministic CPU build runs once; the texture stays cached across chunks.
+const ImageBatch = preload("res://scripts/client/image_batch.gd")
 const SIZE := 128
 const TILE_METERS := 1024.0
 const MAX_CLOUD_SPEED := 7.5 # m/s at full regional wind; clouds move over the existing large texture.
@@ -44,6 +45,8 @@ static func build_image() -> Image:
 		layers.append(grid)
 	var result := Image.create(SIZE, SIZE, false, Image.FORMAT_L8)
 	for y in SIZE:
+		var row_colors := PackedColorArray()
+		row_colors.resize(SIZE)
 		for x in SIZE:
 			# Pixel centres are consistent with bilinear texture sampling. Each
 			# source octave wraps, so adjacent cloud tiles have no hard seams.
@@ -53,7 +56,8 @@ static func build_image() -> Image:
 			for layer in PERIODS.size():
 				value += WEIGHTS[layer] * _sample(layers[layer], PERIODS[layer], u, v)
 			var shadow: float = smoothstep(0.46, 0.70, value)
-			result.set_pixel(x, y, Color(shadow, shadow, shadow))
+			row_colors[x] = Color(shadow, shadow, shadow)
+		ImageBatch.set_row(result, y, row_colors)
 	_image = result
 	return _image
 

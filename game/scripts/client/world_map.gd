@@ -14,6 +14,7 @@ const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
 const GradientBatch = preload("res://scripts/client/gradient_batch.gd")
+const ImageBatch = preload("res://scripts/client/image_batch.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const ExpeditionAtlas = preload("res://scripts/shared/expedition_atlas.gd")
 
@@ -290,6 +291,8 @@ func _paint_row(row: int) -> void:
 	if not water_offsets.is_empty():
 		water_colors = GradientBatch.sample_many(_water_gradient, water_offsets)
 	var water_index := 0
+	var row_colors := PackedColorArray()
+	row_colors.resize(PIXELS)
 	for column in PIXELS:
 		var h: float = _h(column, row)
 		var color: Color
@@ -328,7 +331,8 @@ func _paint_row(row: int) -> void:
 		color = color.lerp(color * PAPER, 0.25)
 		var grain: float = float(WorldGen.mix(column, row, 5, 9) % 1000) / 1000.0
 		color = color * (0.96 + grain * 0.08)
-		_image.set_pixel(column, row, color)
+		row_colors[column] = color
+	ImageBatch.set_row(_image, row, row_colors)
 
 
 # --- View -----------------------------------------------------------------------------------------------------------
