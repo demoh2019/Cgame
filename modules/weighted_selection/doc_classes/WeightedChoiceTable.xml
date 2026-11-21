@@ -22,6 +22,12 @@
 			<param index="0" name="units" type="PackedFloat64Array" />
 			<description>Maps at most 65536 valid draws to ordered indices; invalid input returns an empty array without partial sampling. Does not consume any RNG state.</description>
 		</method>
+		<method name="sample_excluding" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="unit" type="float" />
+			<param index="1" name="excluded" type="PackedInt32Array" />
+			<description>Samples the remaining relative weights after excluding the supplied indices. Returns -1 for invalid draws, out-of-range exclusions and exhaustion. Duplicate exclusions are allowed and zero-weight outcomes are never selected. No RNG state or table state is changed. Runs in O(option count + exclusion count).</description>
+		</method>
 		<method name="get_probability" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="index" type="int" />

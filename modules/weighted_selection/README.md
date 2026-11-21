@@ -18,3 +18,17 @@ var category = choice.sample_unit(rng.randf()) # exactly one RNG draw
 - Native doctests under `tests/`, plus regression checks in `game/tests/test_survival_combat.gd`.
 
 **Caution:** This is a probability sampler, not a secure RNG. Gameplay randomness should come from the game server's own `RandomNumberGenerator`, not client-provided draws.
+
+## Weighted draws without replacement
+
+Call `sample_excluding(unit, excluded_indices)` to select from currently
+available weights. This follows Unreal Sound Cue Random Node's
+**Randomize Without Replacement** idea without making the Resource stateful:
+the caller owns playback history and resets it after exhausting its positive
+options. Work is bounded at O(options + exclusions), with up to 4096 options.
+Invalid draws or excluded indices, and exhausted distributions, return -1.
+Duplicate exclusions are accepted. Old `sample_unit` and `sample_many`
+behavior remains unchanged.
+
+Albion After uses it for non-repeating flesh/bone audio clip selection, with
+matching GDScript fallback on official Godot. This affects cosmetics only.

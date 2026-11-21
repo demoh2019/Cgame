@@ -90,6 +90,49 @@ PackedInt32Array WeightedChoiceTable::sample_many(const PackedFloat64Array &p_un
 	return result;
 }
 
+int WeightedChoiceTable::sample_excluding(double p_unit, const PackedInt32Array &p_excluded) const {
+	if (!is_configured() || !Math::is_finite(p_unit) || p_unit < 0.0 || p_unit >= 1.0) {
+		return -1;
+	}
+	// O(N + exclusions), bounded by MAX_OPTIONS. Validate before sampling.
+	Vector<uint8_t> excluded;
+	excluded.resize(weights.size());
+	for (int i = 0; i < excluded.size(); ++i) {
+		excluded.write[i] = 0;
+	}
+	for (int i = 0; i < p_excluded.size(); ++i) {
+		const int index = p_excluded[i];
+		if (index < 0 || index >= weights.size()) {
+			return -1;
+		}
+		excluded.write[index] = 1; // Duplicate exclusions are idempotent.
+	}
+	double remaining = 0.0;
+	for (int i = 0; i < weights.size(); ++i) {
+		if (!excluded[i]) {
+			remaining += weights[i];
+		}
+	}
+	if (remaining <= 0.0) {
+		return -1;
+	}
+	const double target = p_unit * remaining;
+	double sum = 0.0;
+	int last_valid = -1;
+	for (int i = 0; i < weights.size(); ++i) {
+		if (excluded[i] || weights[i] <= 0.0) {
+			continue;
+		}
+		last_valid = i;
+		sum += weights[i];
+		if (target < sum) {
+			return i;
+		}
+	}
+	// Preserve the last positive bucket when multiplication rounds to total.
+	return last_valid;
+}
+
 double WeightedChoiceTable::get_probability(int p_index) const {
 	if (!is_configured() || p_index < 0 || p_index >= weights.size()) {
 		return 0.0;
@@ -103,6 +146,7 @@ void WeightedChoiceTable::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_weights"), &WeightedChoiceTable::get_weights);
 	ClassDB::bind_method(D_METHOD("sample_unit", "unit"), &WeightedChoiceTable::sample_unit);
 	ClassDB::bind_method(D_METHOD("sample_many", "units"), &WeightedChoiceTable::sample_many);
+	ClassDB::bind_method(D_METHOD("sample_excluding", "unit", "excluded"), &WeightedChoiceTable::sample_excluding);
 	ClassDB::bind_method(D_METHOD("get_option_count"), &WeightedChoiceTable::get_option_count);
 	ClassDB::bind_method(D_METHOD("get_total_weight"), &WeightedChoiceTable::get_total_weight);
 	ClassDB::bind_method(D_METHOD("get_probability", "index"), &WeightedChoiceTable::get_probability);
