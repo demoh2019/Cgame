@@ -93,4 +93,98 @@ TEST_CASE("[PCGFoliageScalability3D] atomic validation and bounded cluster count
 	CHECK(planned[4095] >= 1);
 }
 
+TEST_CASE("[PCGFoliageScalability3D] screen-space foliage depends on projected pixels") {
+	Ref<PCGFoliageScalability3D> budget;
+	budget.instantiate();
+	const PackedInt32Array counts = { 100, 100, 100, 100, 0 };
+	const PackedVector3Array centers = {
+		Vector3(0, 0, -11), Vector3(0, 0, -20),
+		Vector3(0, 0, -110), Vector3(0, 0, 10),
+		Vector3(0, 0, -20)
+	};
+	const PackedFloat32Array mesh_diameters = { 1, 1, 1, 1, 1 };
+	const Vector3 camera = Vector3();
+	const Vector3 forward = Vector3(0, 0, -1);
+	const PackedInt32Array performance = { 42, 31, 20, 100, 0 };
+	CHECK(budget->plan_projected_visible_counts(counts, centers, mesh_diameters,
+			camera, forward, 220.0, false, 0) == performance);
+	const PackedInt32Array balanced = { 68, 55, 42, 100, 0 };
+	CHECK(budget->plan_projected_visible_counts(counts, centers, mesh_diameters,
+			camera, forward, 220.0, false, 1) == balanced);
+	CHECK(budget->plan_projected_visible_counts(counts, centers, mesh_diameters,
+			camera, forward, 220.0, false, 3) == counts);
+	// Orthographic scale is independent of perspective depth.
+	const PackedInt32Array ortho = { 31, 31, 31, 100, 0 };
+	CHECK(budget->plan_projected_visible_counts(counts, centers, mesh_diameters,
+			camera, forward, 11.0, true, 0) == ortho);
+	// Higher pixel resolution or narrower FOV increases preserved detail.
+	const PackedInt32Array zoomed = budget->plan_projected_visible_counts(
+			counts, centers, mesh_diameters, camera, forward, 440.0, false, 0);
+	REQUIRE(zoomed.size() == counts.size());
+	CHECK(zoomed[0] >= performance[0]);
+	CHECK(zoomed[1] >= performance[1]);
+	CHECK(zoomed[2] >= performance[2]);
+	// Behind-camera nodes are left at full count, never culled manually.
+	CHECK(performance[3] == counts[3]);
+	CHECK(budget->plan_projected_visible_counts(counts, centers, mesh_diameters,
+			camera, forward, 220.0, false, 0) == performance);
+}
+
+TEST_CASE("[PCGFoliageScalability3D] screen-space validation rejects invalid late groups") {
+	Ref<PCGFoliageScalability3D> budget;
+	budget.instantiate();
+	const PackedInt32Array counts = { 10, 20 };
+	const PackedVector3Array centers = { Vector3(0, 0, -10), Vector3(0, 0, -20) };
+	const PackedFloat32Array diameters = { 1, 2 };
+	const Vector3 forward(0, 0, -1);
+	CHECK(budget->plan_projected_visible_counts(counts, centers, { 1 },
+			Vector3(), forward, 220, false, 0).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts, {}, diameters,
+			Vector3(), forward, 220, false, 0).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
+			Vector3(), Vector3(), 220, false, 0).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
+			Vector3(Math::NaN, 0, 0), forward, 220, false, 0).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
+			Vector3(), forward, Math::NaN, false, 0).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
+			Vector3(), forward, 0, false, 0).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
+			Vector3(), forward, 220, false, -1).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
+			Vector3(), forward, 220, false, 4).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
+			Vector3(), forward, 220, false, 0, 2, 2).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts, centers, diameters,
+			Vector3(), forward, 220, false, 0, 20, -1).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts,
+			{ Vector3(0, 0, -10), Vector3(Math::INF, 0, -20) }, diameters,
+			Vector3(), forward, 220, false, 0).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts, centers,
+			{ 1, Math::NaN }, Vector3(), forward, 220, false, 0).is_empty());
+	CHECK(budget->plan_projected_visible_counts(counts, centers,
+			{ 1, -1 }, Vector3(), forward, 220, false, 0).is_empty());
+	CHECK(budget->plan_projected_visible_counts({ 10, 65537 }, centers, diameters,
+			Vector3(), forward, 220, false, 0).is_empty());
+	PackedInt32Array many_counts;
+	PackedVector3Array many_centers;
+	PackedFloat32Array many_diameters;
+	for (int i = 0; i < 4097; ++i) {
+		many_counts.push_back(50);
+		many_centers.push_back(Vector3(0, 0, -10));
+		many_diameters.push_back(1);
+	}
+	CHECK(budget->plan_projected_visible_counts(many_counts, many_centers,
+			many_diameters, Vector3(), forward, 220, false, 0).is_empty());
+	many_counts.resize(4096);
+	many_centers.resize(4096);
+	many_diameters.resize(4096);
+	const PackedInt32Array bounded = budget->plan_projected_visible_counts(
+			many_counts, many_centers, many_diameters,
+			Vector3(), forward, 220, false, 0);
+	REQUIRE(bounded.size() == 4096);
+	CHECK(bounded[0] == 21);
+	CHECK(bounded[4095] == 21);
+}
+
 } // namespace TestPCGFoliageScalability3D
