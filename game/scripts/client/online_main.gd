@@ -2468,7 +2468,8 @@ func _run_demo() -> void:
 				if _demo_house_plan.is_empty():
 					_demo_house_done_at = _demo_frames
 			if _demo_house_done_at > 0 and _demo_frames == _demo_house_done_at + 30:
-				net_ref.c_debug.rpc_id(1, "teleport", {"x": client.predicted.x - 9.0, "z": client.predicted.z - 10.0})
+				# Stand north of the cabin so the camera (looking north) frames it below the survivor.
+				net_ref.c_debug.rpc_id(1, "teleport", {"x": client.predicted.x, "z": client.predicted.z - 7.0})
 		"campfire":
 			# Grass crush check: a campfire lit just ahead, seen from first person (needs --debug-commands).
 			if _demo_frames == 40:
