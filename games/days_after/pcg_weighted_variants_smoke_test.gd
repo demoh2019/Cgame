@@ -82,10 +82,11 @@ func _initialize() -> void:
     _check(native_groups == fallback_groups and native_groups.size() == 4,
         "native/fallback PCG mesh batches disagree", failures)
     if native_groups.size() == 4:
+        var empty_bucket: PackedInt32Array = native_groups[3]
         _check(native_groups[0] == PackedInt32Array([1, 4]) and
             native_groups[1] == PackedInt32Array([2, 6]) and
             native_groups[2] == PackedInt32Array([0, 3, 5, 7]) and
-            (native_groups[3] as PackedInt32Array).is_empty(),
+            empty_bucket.is_empty(),
             "PCG mesh buckets are not stable and ordered", failures)
 
     var chosen_groups: Array = Weighted.partition_indices(output, 3)
