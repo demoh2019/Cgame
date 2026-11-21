@@ -1,0 +1,81 @@
+name: Native Camera3D batched screen-space LOD and Albion grass
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'scene/3d/camera_3d.h'
+      - 'scene/3d/camera_3d.cpp'
+      - 'doc/classes/Camera3D.xml'
+      - 'tests/scene/test_camera_3d.cpp'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_camera_pixel_density.gd'
+      - 'game/tests/test_grass_lod.gd'
+      - 'game/docs/camera_bulk_screen_lod.md'
+      - 'tests/scene/test_camera_bulk_screen_lod_contract.py'
+      - '.github/workflows/native-camera-bulk-screen-lod.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/3d/camera_3d.h'
+      - 'scene/3d/camera_3d.cpp'
+      - 'doc/classes/Camera3D.xml'
+      - 'tests/scene/test_camera_3d.cpp'
+      - 'game/scripts/client/chunk_view.gd'
+      - 'game/tests/test_camera_pixel_density.gd'
+      - 'game/tests/test_grass_lod.gd'
+      - 'game/docs/camera_bulk_screen_lod.md'
+      - 'tests/scene/test_camera_bulk_screen_lod_contract.py'
+      - '.github/workflows/native-camera-bulk-screen-lod.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  camera-bulk-lod:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Verify native camera batch and real grass integration contracts
+        run: python3 -m unittest tests/scene/test_camera_bulk_screen_lod_contract.py -v
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Camera3D batch perspective, frustum and 4096-point native doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*Batched*" --no-colors 2>&1 | tee camera-bulk-lod-native.log
+      - name: Albion After import and GDScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee camera-bulk-lod-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' camera-bulk-lod-import.log; then exit 1; fi
+      - name: Albion grass screen coverage and geometry LOD parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_one.gd -- test_camera_pixel_density test_grass_lod 2>&1 | tee camera-bulk-lod-game.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' camera-bulk-lod-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' camera-bulk-lod-game.log; then exit 1; fi
+      - name: Upload Cgame camera and Albion grass regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-camera-bulk-screen-lod-logs
+          if-no-files-found: ignore
+          path: |
+            camera-bulk-lod-native.log
+            camera-bulk-lod-import.log
+            camera-bulk-lod-game.log

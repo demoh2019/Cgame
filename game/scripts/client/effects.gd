@@ -17,7 +17,8 @@ var _pollen: CPUParticles3D
 var _butterflies: CPUParticles3D
 var _leaves: CPUParticles3D
 var _fireflies: CPUParticles3D
-var _burst_pool # Cgame RuntimeNodePool instance
+var _burst_pool # Native SceneNodePool or stock-compatible script fallback.
+var _burst_pool_budgeted := false
 var _native_fx_budget: Object = null
 var _pending_bursts: Array[Dictionary] = []
 var last_fx_budget_stats: Dictionary = {"requested": 0, "rendered": 0, "dropped": 0, "native": false}
@@ -56,6 +57,10 @@ func _ready() -> void:
 	_burst_pool.prewarm_count = 12
 	_burst_pool.max_idle = 24
 	_burst_pool.max_active = 48
+	# Avoid instantiating the whole emitter cache in one _ready() callback.
+	# Older native engine builds keep their legacy prewarm behavior.
+	_burst_pool_budgeted = _burst_pool.has_method("maintain_residency")
+	_burst_pool.prewarm_on_ready = not _burst_pool_budgeted
 	add_child(_burst_pool)
 	if ClassDB.class_exists("SignificanceBudgetPlanner"):
 		var planner: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
@@ -261,7 +266,35 @@ func ring(position: Vector3, color: Color, radius: float = 4.0, seconds: float =
 ## Frame-gather visual descriptors before acquiring pooled particle nodes.
 ## Damage, audio, network event delivery and server authority are unaffected.
 func _process(_delta: float) -> void:
+	if _burst_pool_budgeted and is_instance_valid(_burst_pool):
+		# At most 1-2 PackedScene instantiations or frees per render frame.
+		# Active particle emitters count toward this target and finish naturally.
+		var level: int = GraphicsQuality.level()
+		if _burst_pool.has_method("get_last_maintenance_work_usec"):
+			_burst_pool.call("maintain_residency",
+				FxPolicy.pool_resident_target(level),
+				FxPolicy.pool_changes_per_frame(level),
+				FxPolicy.pool_work_usec(level))
+		else:
+			# Older native forks still accept only count-budgeted maintenance.
+			_burst_pool.call("maintain_residency",
+				FxPolicy.pool_resident_target(level),
+				FxPolicy.pool_changes_per_frame(level))
 	flush_bursts()
+
+
+## Profiling exposes the actual main-thread residency work and remaining
+## idle cache actions, not particle simulation or GPU rendering time.
+func get_pool_maintenance_work_usec() -> int:
+	if not is_instance_valid(_burst_pool) or not _burst_pool.has_method("get_last_maintenance_work_usec"):
+		return 0
+	return int(_burst_pool.call("get_last_maintenance_work_usec"))
+
+
+func get_pool_maintenance_pending_count() -> int:
+	if not is_instance_valid(_burst_pool) or not _burst_pool.has_method("get_last_maintenance_pending_count"):
+		return 0
+	return int(_burst_pool.call("get_last_maintenance_pending_count"))
 
 
 func pending_burst_count() -> int:
@@ -276,12 +309,18 @@ func flush_bursts() -> void:
 	var distances := PackedFloat64Array()
 	var priorities := PackedByteArray()
 	var categories := PackedByteArray()
+	var visible := PackedByteArray()
 	for effect in _pending_bursts:
 		distances.append(viewer.distance_to(effect["position"]) if camera != null else 0.0)
 		priorities.append(int(effect["priority"]))
 		categories.append(int(effect["group"]))
-	var chosen: PackedInt32Array = FxPolicy.select_indices(
-		distances, priorities, categories, GraphicsQuality.level(), _native_fx_budget)
+		# No camera during headless tests means all candidates are equivalent
+		# on visibility. Do not cull a critical event merely for being behind us.
+		visible.append(1 if camera == null or camera.is_position_in_frustum(effect["position"]) else 0)
+	# Niagara-style soft type minimums protect hit and combat feedback from
+	# dense ambient particle storms without exceeding the global VFX budget.
+	var chosen: PackedInt32Array = FxPolicy.select_visible_fair_indices(
+		distances, priorities, categories, visible, GraphicsQuality.level(), _native_fx_budget)
 	var actual: int = 0
 	for index in chosen:
 		if _emit_burst(_pending_bursts[index]):

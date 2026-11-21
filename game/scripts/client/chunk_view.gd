@@ -21,6 +21,7 @@ const TerrainHorizonAO = preload("res://scripts/client/terrain_horizon_ao.gd")
 const TerrainAnisotropy = preload("res://scripts/client/terrain_anisotropy.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
+const ImpostorField = preload("res://scripts/client/impostor_field.gd")
 const ResourceMultiMeshUpdates = preload("res://scripts/client/multimesh_resource_updates.gd")
 const ResourceInstanceInitializer = preload("res://scripts/client/resource_instance_initializer.gd")
 const DecorStreamingPolicy = preload("res://scripts/client/decor_streaming_policy.gd")
@@ -30,6 +31,8 @@ const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection
 const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection_budget.gd")
 const DungeonOcclusion = preload("res://scripts/client/dungeon_occlusion.gd")
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
+const SceneryDensityLod = preload("res://scripts/client/scenery_density_lod.gd")
+const SceneryHlodProxy = preload("res://scripts/client/scenery_hlod_proxy.gd")
 const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
@@ -270,6 +273,19 @@ static var _decor_pending: Array[WeakRef] = []
 static var _decor_last_frame := -1
 static var decor_budget_usec := 1500
 var _grass_tiles: Array[MultiMeshInstance3D] = []
+## Density-scalable decorative flowers/grass only; no gameplay nodes.
+var _density_scenery_batches: Array[MultiMeshInstance3D] = []
+## Chunk-local cosmetic pebbles: several near MultiMesh variants share
+## one low-poly, single-surface HLOD mesh in the distance.
+var _hlod_stone_sources: Array[MultiMeshInstance3D] = []
+var _hlod_stone_transforms: Array[Transform3D] = []
+var _hlod_stone_centers := PackedVector3Array()
+var _hlod_stone_extents := PackedVector3Array()
+var _hlod_stone_overflow := false
+var _hlod_stone_proxy: MeshInstance3D = null
+var _hlod_stone_far := false
+var _density_lod_elapsed := 0.0
+const DENSITY_LOD_INTERVAL := 0.6
 var _grass_lod_elapsed := 0.0
 var _grass_last_eye := Vector2.ZERO
 var _grass_last_scale := -1.0
@@ -719,6 +735,7 @@ func build(p_world, p_cell: Vector2i) -> void:
 	_use_village = Assets.has_village()
 	_world = p_world
 	cell = p_cell
+	GrassField.rivers = _world.rivers
 	# Stagger 0.5-second shadow checks across neighboring chunks to avoid update spikes.
 	_shadow_timer = float(posmod(cell.x * 37 + cell.y * 19, 50)) * 0.01
 	var origin := WorldGen.cell_origin(cell)
@@ -727,9 +744,12 @@ func build(p_world, p_cell: Vector2i) -> void:
 		_build_objects(_world.chunk(cell)) # The chests.
 		return
 	_build_terrain(origin)
+	_build_rivers_and_bridges(origin)
 	var data: Dictionary = _world.chunk(cell)
 	_build_objects(data)
 	_add_outdoor_reflection_anchors(origin, data)
+	_layer_sites = data.get("pois", [])
+	set_data_layers(active_layers)
 
 
 ## Only the containing chunk creates a cheap site marker, never a GPU probe.
@@ -860,7 +880,7 @@ func _refresh_terrain_horizon() -> void:
 		return
 	var origin: Vector2 = WorldGen.cell_origin(cell)
 	var spacing: float = Defs.CHUNK_SIZE / float(SAMPLES - 1)
-	var height_sampler := Callable(_world, "height_at")
+	var height_sampler := Callable(_world, "ground_at")
 	if _base_curvature_colors.is_empty():
 		_base_curvature_colors = TerrainCurvature.build(
 			_raw_heights, origin, SAMPLES, spacing, height_sampler)
@@ -886,7 +906,7 @@ func _build_terrain(origin: Vector2) -> void:
 	var step := Defs.CHUNK_SIZE / float(SAMPLES - 1)
 	for j in SAMPLES:
 		for i in SAMPLES:
-			var h: float = _world.height_at(origin.x + i * step, origin.y + j * step)
+			var h: float = _world.ground_at(origin.x + i * step, origin.y + j * step)
 			heights[j * SAMPLES + i] = clampf((h - HEIGHT_MIN) / HEIGHT_RANGE, 0.0, 1.0)
 			_raw_heights.append(h)
 	_terrain = ChunkedTerrain3D.new()
@@ -919,7 +939,7 @@ func _build_terrain(origin: Vector2) -> void:
 	# the current chunk. Their shared world-space derivative removes bright
 	# vertical lighting seams without an extra shader pass or texture.
 	_terrain.set_normal_data(TerrainSeamNormals.build(_raw_heights, origin,
-		SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "height_at")))
+		SAMPLES, step, HEIGHT_MIN, HEIGHT_RANGE, Callable(_world, "ground_at")))
 	_refresh_terrain_horizon()
 	add_child(_terrain)
 	_terrain.add_to_group(TERRAIN_LOD_GROUP)
@@ -1193,7 +1213,7 @@ func _build_objects(data: Dictionary) -> void:
 			# The nearest tree in a MultiMesh group matters more than the chunk centre.
 			_shadow_casters.append({"node": instance, "role": "tree" if kind.begins_with("tree:") else "structure",
 				"bounds": SceneryBatches.bounds_for(multimesh.mesh, transforms)})
-		_groups[batch_id] = {"multimesh": multimesh, "index": index, "transforms": transforms}
+		_groups[batch_id] = {"multimesh": multimesh, "index": index, "transforms": transforms, "tree": kind.begins_with("tree:")}
 	_build_decor(origin, rng, data)
 	_build_windmills(windmills, origin)
 	_build_signposts(origin)
@@ -1300,6 +1320,21 @@ func _build_windmills(windmills: Array, origin: Vector2) -> void:
 ## WorldStreamer only requests cosmetic simulation changes. Terrain, collision,
 ## loot, and server-authoritative entities remain resident and unchanged.
 var _streaming_simulation_active := true
+var _streaming_tick_interval := 0.0
+var _streaming_tick_accumulated := 0.0
+
+
+## Native WorldStreamer can request a reduced cosmetic tick frequency for
+## distant but still simulation-active chunks. Physics/network/gameplay are
+## not controlled by this scene. Zero restores full frame-rate processing.
+func set_streaming_tick_interval(seconds: float) -> void:
+	if not is_finite(seconds):
+		return
+	var clamped: float = clampf(seconds, 0.0, 1.0)
+	if is_equal_approx(clamped, _streaming_tick_interval):
+		return
+	_streaming_tick_interval = clamped
+	_streaming_tick_accumulated = clamped
 
 
 ## Only immutable client-generated scenery may use WorldStreamer's optional
@@ -1308,13 +1343,35 @@ func can_cache_streaming_chunk() -> bool:
 	return true
 
 
+## Conservative cached-scene estimate. Shared shader/texture assets are
+## excluded to avoid double counting; this does not measure RAM or VRAM.
+func get_streaming_cache_cost_bytes() -> int:
+	var bytes: int = 8 * 1048576
+	bytes += _raw_heights.size() * 4
+	bytes += _base_curvature_colors.size() * 16
+	bytes += _horizon_cached.size() * 4
+	bytes += _road_data.size()
+	bytes += _patches.size() * 16
+	bytes += _grass_tiles.size() * 262144
+	bytes += _groups.size() * 1048576
+	bytes += _decor_tasks.size() * 256
+	if _hlod_stone_proxy != null and is_instance_valid(_hlod_stone_proxy) and \
+			_hlod_stone_proxy.mesh != null:
+		# Conservative estimate for static faceted vertex+normal buffer.
+		bytes += _hlod_stone_proxy.mesh.surface_get_array_len(0) * 32
+	bytes += get_child_count() * 16384
+	return maxi(1, bytes)
+
+
 ## Reattached scenes never rerun _ready(). Restore deferred decor queue
 ## membership and force grass/shadow LOD checks near the new camera position.
 func on_streaming_cache_restored() -> void:
 	_grass_lod_elapsed = GRASS_LOD_INTERVAL
 	_grass_last_eye = Vector2.INF
+	_density_lod_elapsed = DENSITY_LOD_INTERVAL
 	_shadow_timer = SHADOW_INTERVAL
 	_shadow_last_eye = Vector2.INF
+	_streaming_tick_accumulated = _streaming_tick_interval
 	if _decor_next < _decor_tasks.size():
 		var queued := false
 		for reference in _decor_pending:
@@ -1326,29 +1383,111 @@ func on_streaming_cache_restored() -> void:
 	set_process(_streaming_simulation_active)
 
 
+## Surface-only decorative processing; the engine may suspend this named
+## layer when the observer enters a dungeon. Meshes, terrain collisions and
+## real server entities remain resident and unaffected.
+func get_streaming_simulation_layer() -> StringName:
+	return &"SurfaceCosmetics"
+
+
 func set_streaming_simulation_active(active: bool) -> void:
 	if _streaming_simulation_active == active:
 		return
 	_streaming_simulation_active = active
 	set_process(active)
 	if active:
-		# Re-evaluate blades immediately on the first near-field update.
+		# Re-evaluate blades and cosmetic rate immediately after LOD recovery.
 		_grass_lod_elapsed = GRASS_LOD_INTERVAL
+		_density_lod_elapsed = DENSITY_LOD_INTERVAL
+		_streaming_tick_accumulated = _streaming_tick_interval
 
 
 func _process(delta: float) -> void:
+	if not _shaking.is_empty() or not _falling.is_empty() or _state_seen_pending != _state_seen:
+		_animate_vegetation(delta)
+	# A cheap accumulator skips expensive per-chunk grass/decor/shadow work.
+	# Accumulated elapsed time keeps windmill rotation speed correct.
+	# The near tier (interval = 0) remains exactly the original code path.
+	if _streaming_tick_interval > 0.0:
+		_streaming_tick_accumulated += delta
+		if _streaming_tick_accumulated < _streaming_tick_interval:
+			return
+		delta = _streaming_tick_accumulated
+		_streaming_tick_accumulated = 0.0
 	_service_decor(self)
 	_grow_grass()
 	_grass_lod_elapsed += delta
 	if _grass_lod_elapsed >= GRASS_LOD_INTERVAL:
 		_grass_lod_elapsed = 0.0
 		_update_grass_lods()
+	_density_lod_elapsed += delta
+	if _density_lod_elapsed >= DENSITY_LOD_INTERVAL:
+		_density_lod_elapsed = 0.0
+		_update_decor_density_lods()
+		_update_hlod_stones()
 	_shadow_timer += delta
 	if _shadow_timer >= SHADOW_INTERVAL:
 		_shadow_timer = 0.0
 		_update_shadow_casters()
 	for sail in _sails:
 		(sail["node"] as Node3D).rotate_object_local(sail["axis"], sail["speed"] * delta)
+
+
+## Update only visual foliage instance counts: no GPU buffer rebuilds, scene
+## removals or changes to collectible/interactive world resources.
+func _update_decor_density_lods() -> void:
+	if _density_scenery_batches.is_empty():
+		return
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	SceneryDensityLod.update_instances_projected(_density_scenery_batches,
+		camera, scenery_quality)
+
+
+## HLOD replaces multiple decorative pebble MultiMeshes with one coarse
+## ArrayMesh at long range. A single stable 0.6-second update is shared with
+## foliage scalability; original transforms are retained for near-camera use.
+func _update_hlod_stones() -> void:
+	if _hlod_stone_proxy == null or not is_instance_valid(_hlod_stone_proxy):
+		return
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var proxy_center: Vector3 = _hlod_stone_proxy.to_global(
+		_hlod_stone_proxy.get_aabb().get_center())
+	var distance: float = camera.global_position.distance_to(proxy_center)
+	var near_range: float = SceneryLod.range_for(
+		"decor:Pebble", scenery_quality, 80.0)
+	_hlod_stone_far = SceneryHlodProxy.switch_visible(
+		_hlod_stone_sources, _hlod_stone_proxy, distance,
+		near_range, _hlod_stone_far)
+
+
+## A proxy is built after all seeded stone categories are complete. Its
+## geometry is static and consists of at most 384 low-poly octahedra; there
+## are no per-frame mesh rebuilds, physics bodies, or gameplay mutations.
+func _finalize_hlod_stones() -> void:
+	if _hlod_stone_proxy != null:
+		return
+	if _hlod_stone_overflow or _hlod_stone_sources.size() < 2 or \
+			_hlod_stone_transforms.size() < SceneryHlodProxy.MIN_SOURCE_INSTANCES:
+		# Preserve original stone batches, but drop unnecessary temporary
+		# copies if a chunk cannot form a useful common far proxy.
+		_hlod_stone_transforms.clear()
+		_hlod_stone_centers.clear()
+		_hlod_stone_extents.clear()
+		return
+	_hlod_stone_proxy = SceneryHlodProxy.attach_proxy(
+		self, _hlod_stone_transforms, _hlod_stone_centers,
+		_hlod_stone_extents, 384)
+	if _hlod_stone_proxy != null:
+		_update_hlod_stones()
+	# Proxy and GPU batches own their geometry from now on; clear temporary
+	# large transform arrays even if proxy generation fails validation.
+	_hlod_stone_transforms.clear()
+	_hlod_stone_centers.clear()
+	_hlod_stone_extents.clear()
 
 
 ## Weak-reference global queue. Newly near-camera chunks take precedence, and
@@ -1456,16 +1595,34 @@ func _update_shadow_casters() -> void:
 	_shadow_last_eye = eye_xz
 	_shadow_last_revision = ShadowBudget.revision()
 	_shadow_last_count = _shadow_casters.size()
+	# Feed real transformed AABB footprints to one bounded native HLOD plan.
+	# GPU geometry stays instanced; only participating sun shadow casters change.
+	var bounds_min := PackedVector3Array()
+	var bounds_max := PackedVector3Array()
+	var roles := PackedByteArray()
+	var active_flags := PackedByteArray()
+	var valid_nodes: Array[MultiMeshInstance3D] = []
 	for entry in _shadow_casters:
 		var caster: MultiMeshInstance3D = entry["node"]
 		if not is_instance_valid(caster):
 			continue
 		var local_bounds: AABB = entry["bounds"]
 		var world_bounds: AABB = caster.global_transform * local_bounds
-		var distance: float = ShadowBudget.distance_to_bounds_xz(eye, world_bounds)
-		var active: bool = caster.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-		var desired: bool = ShadowBudget.should_cast(str(entry["role"]), distance, active)
-		if desired != active:
+		bounds_min.append(world_bounds.position)
+		bounds_max.append(world_bounds.end)
+		roles.append(ShadowBudget.role_index(str(entry["role"])))
+		active_flags.append(1 if caster.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON else 0)
+		valid_nodes.append(caster)
+	var selected: PackedInt32Array = ShadowBudget.select_shadow_casters(
+		bounds_min, bounds_max, roles, active_flags, eye,
+		ShadowBudget.cap_for_quality(scenery_quality))
+	var chosen: Dictionary = {}
+	for index in selected:
+		chosen[index] = true
+	for i in valid_nodes.size():
+		var caster: MultiMeshInstance3D = valid_nodes[i]
+		var desired: bool = chosen.has(i)
+		if desired != (active_flags[i] == 1):
 			caster.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if desired else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
@@ -1522,12 +1679,29 @@ func _update_grass_lods() -> void:
 	_grass_last_tile_count = _grass_tiles.size()
 	_grass_last_camera_y = view_camera.global_position.y
 	_grass_last_camera_forward = camera_forward
-	for tile in _grass_tiles:
-		var tile_center: Vector3 = to_global(tile.custom_aabb.position + tile.custom_aabb.size * 0.5)
+	# Unreal screen-size LOD-style native batch query: ONE projection matrix
+	# and ONE inverse camera transform for all tile centres. The old engine
+	# and stock Godot fallback retain the same original scalar calculation.
+	# Do not allocate any batch if an unchanged camera skipped this refresh.
+	var tile_centers := PackedVector3Array()
+	var batch_density := PackedFloat64Array()
+	var batch_supported: bool = native_projection and _grass_tiles.size() <= 4096 and \
+		view_camera.has_method("get_pixels_per_meter_at_positions")
+	if batch_supported:
+		for tile in _grass_tiles:
+			tile_centers.append(to_global(tile.custom_aabb.position + tile.custom_aabb.size * 0.5))
+		batch_density = view_camera.call("get_pixels_per_meter_at_positions", tile_centers)
+	# The native API rejects corrupted late points atomically. A missing or
+	# invalid result must never partially update the tile LOD group.
+	var batch_ready: bool = batch_supported and batch_density.size() == _grass_tiles.size()
+	for i in _grass_tiles.size():
+		var tile: MultiMeshInstance3D = _grass_tiles[i]
+		var tile_center: Vector3 = tile_centers[i] if batch_ready else \
+			to_global(tile.custom_aabb.position + tile.custom_aabb.size * 0.5)
 		var distance: float = camera_xz.distance_to(Vector2(tile_center.x, tile_center.z))
 		if native_projection:
-			var pixels_per_meter: float = float(view_camera.call(
-				"get_pixels_per_meter_at_position", tile_center)) * render_scale
+			var pixels_per_meter: float = (float(batch_density[i]) if batch_ready else \
+				float(view_camera.call("get_pixels_per_meter_at_position", tile_center))) * render_scale
 			distance = GrassField.projected_lod_distance(
 				distance, pixels_per_meter, raw_focal_ratio)
 		var previous: int = int(tile.get_meta("blade_lod", 0))
@@ -1591,19 +1765,19 @@ static func _ore_material(mesh: Mesh) -> Material:
 #   "rare":   a few single accents per chunk (boulders, a standing stone).
 # chance: share of anchors that get any; per: [min, max] pieces at such an anchor; ring: [min, max] metres from it.
 const DECOR := [
-	{"file": "Fern_1", "anchor": "tree", "chance": 0.55, "per": [1, 4], "ring": [0.8, 3.6], "scale": [0.6, 1.7], "biomes": ["forest", "swamp", "plains"], "range": 110.0},
-	{"file": "Bush_Common", "anchor": "tree", "chance": 0.3, "per": [1, 2], "ring": [1.4, 3.8], "scale": [0.8, 1.6], "biomes": ["forest", "plains", "swamp"], "range": 170.0},
-	{"file": "Plant_1_Big", "anchor": "tree", "chance": 0.08, "per": [1, 1], "ring": [1.0, 3.0], "scale": [0.8, 1.2], "biomes": ["forest", "swamp"], "range": 130.0},
-	{"file": "Mushroom_Common", "anchor": "tree", "chance": 0.22, "per": [1, 3], "ring": [0.5, 1.6], "scale": [0.7, 1.6], "biomes": ["forest", "swamp"], "range": 70.0},
-	{"file": "Mushroom_Laetiporus", "anchor": "tree", "chance": 0.08, "per": [1, 2], "ring": [0.4, 1.0], "scale": [0.8, 1.4], "biomes": ["forest", "swamp"], "range": 70.0},
-	{"file": "Pebble_Round_1", "anchor": "rock", "chance": 0.8, "per": [2, 6], "ring": [0.9, 2.8], "scale": [0.4, 2.2], "biomes": ["forest", "plains", "beach", "mountain", "swamp"], "range": 80.0},
-	{"file": "Pebble_Square_2", "anchor": "rock", "chance": 0.5, "per": [1, 3], "ring": [1.0, 3.0], "scale": [0.6, 1.8], "biomes": ["plains", "beach", "mountain"], "range": 80.0},
-	{"file": "Flower_3_Group", "anchor": "meadow", "chance": 1.0, "per": [10, 18], "ring": [0.0, 4.5], "scale": [0.8, 1.3], "biomes": ["plains", "forest"], "range": 95.0},
-	{"file": "Flower_4_Group", "anchor": "meadow", "chance": 0.8, "per": [8, 14], "ring": [0.0, 4.0], "scale": [0.8, 1.3], "biomes": ["plains"], "range": 95.0},
-	{"file": "Flower_3_Single", "anchor": "meadow", "chance": 1.0, "per": [8, 14], "ring": [1.5, 6.5], "scale": [0.8, 1.4], "biomes": ["plains", "forest", "beach"], "range": 70.0},
-	{"file": "Flower_4_Single", "anchor": "meadow", "chance": 0.8, "per": [6, 12], "ring": [1.5, 6.5], "scale": [0.8, 1.4], "biomes": ["plains"], "range": 70.0},
-	{"file": "Bush_Common_Flowers", "anchor": "meadow", "chance": 0.6, "per": [1, 2], "ring": [4.0, 7.0], "scale": [0.8, 1.4], "biomes": ["forest", "plains"], "range": 170.0},
-	{"file": "Grass_Wispy_Tall", "anchor": "meadow", "chance": 0.7, "per": [4, 8], "ring": [3.0, 7.5], "scale": [0.8, 2.0], "biomes": ["plains", "swamp", "beach"], "range": 95.0},
+	{"file": "Fern_1", "anchor": "tree", "chance": 0.55, "per": [1, 4], "ring": [0.8, 3.6], "scale": [0.6, 1.7], "biomes": ["forest", "swamp", "plains"], "range": 110.0, "max_surface_slope": 42.0, "max_surface_height": 96.0},
+	{"file": "Bush_Common", "anchor": "tree", "chance": 0.3, "per": [1, 2], "ring": [1.4, 3.8], "scale": [0.8, 1.6], "biomes": ["forest", "plains", "swamp"], "range": 170.0, "max_surface_slope": 35.0, "max_surface_height": 96.0},
+	{"file": "Plant_1_Big", "anchor": "tree", "chance": 0.08, "per": [1, 1], "ring": [1.0, 3.0], "scale": [0.8, 1.2], "biomes": ["forest", "swamp"], "range": 130.0, "max_surface_slope": 40.0, "max_surface_height": 96.0},
+	{"file": "Mushroom_Common", "anchor": "tree", "chance": 0.22, "per": [1, 3], "ring": [0.5, 1.6], "scale": [0.7, 1.6], "biomes": ["forest", "swamp"], "range": 70.0, "max_surface_slope": 42.0, "max_surface_height": 100.0},
+	{"file": "Mushroom_Laetiporus", "anchor": "tree", "chance": 0.08, "per": [1, 2], "ring": [0.4, 1.0], "scale": [0.8, 1.4], "biomes": ["forest", "swamp"], "range": 70.0, "max_surface_slope": 42.0, "max_surface_height": 100.0},
+	{"file": "Pebble_Round_1", "anchor": "rock", "chance": 0.8, "per": [2, 6], "ring": [0.9, 2.8], "scale": [0.4, 2.2], "biomes": ["forest", "plains", "beach", "mountain", "swamp"], "range": 80.0, "max_surface_tilt": 35.0},
+	{"file": "Pebble_Square_2", "anchor": "rock", "chance": 0.5, "per": [1, 3], "ring": [1.0, 3.0], "scale": [0.6, 1.8], "biomes": ["plains", "beach", "mountain"], "range": 80.0, "max_surface_tilt": 35.0},
+	{"file": "Flower_3_Group", "anchor": "meadow", "chance": 1.0, "per": [10, 18], "ring": [0.0, 4.5], "scale": [0.8, 1.3], "biomes": ["plains", "forest"], "range": 95.0, "max_surface_slope": 30.0, "max_surface_height": 92.0},
+	{"file": "Flower_4_Group", "anchor": "meadow", "chance": 0.8, "per": [8, 14], "ring": [0.0, 4.0], "scale": [0.8, 1.3], "biomes": ["plains"], "range": 95.0, "max_surface_slope": 30.0, "max_surface_height": 92.0},
+	{"file": "Flower_3_Single", "anchor": "meadow", "chance": 1.0, "per": [8, 14], "ring": [1.5, 6.5], "scale": [0.8, 1.4], "biomes": ["plains", "forest", "beach"], "range": 70.0, "max_surface_slope": 30.0, "max_surface_height": 92.0},
+	{"file": "Flower_4_Single", "anchor": "meadow", "chance": 0.8, "per": [6, 12], "ring": [1.5, 6.5], "scale": [0.8, 1.4], "biomes": ["plains"], "range": 70.0, "max_surface_slope": 30.0, "max_surface_height": 92.0},
+	{"file": "Bush_Common_Flowers", "anchor": "meadow", "chance": 0.6, "per": [1, 2], "ring": [4.0, 7.0], "scale": [0.8, 1.4], "biomes": ["forest", "plains"], "range": 170.0, "max_surface_slope": 35.0, "max_surface_height": 96.0},
+	{"file": "Grass_Wispy_Tall", "anchor": "meadow", "chance": 0.7, "per": [4, 8], "ring": [3.0, 7.5], "scale": [0.8, 2.0], "biomes": ["plains", "swamp", "beach"], "range": 95.0, "max_surface_slope": 38.0, "max_surface_height": 96.0},
 	{"file": "Petal_1", "anchor": "meadow", "chance": 0.6, "per": [3, 6], "ring": [0.0, 3.5], "scale": [0.8, 1.6], "biomes": ["plains", "forest"], "range": 50.0},
 ]
 const MEADOWS_PER_CHUNK := 3
@@ -1665,10 +1839,14 @@ func _anchored_spots(entry: Dictionary, anchors: Array, origin: Vector2, rng: Ra
 			var at: Vector2 = anchor + Vector2.from_angle(rng.randf() * TAU) * lerpf(float(ring[0]), float(ring[1]), rng.randf())
 			if at.x < origin.x or at.y < origin.y or at.x >= origin.x + Defs.CHUNK_SIZE or at.y >= origin.y + Defs.CHUNK_SIZE:
 				continue
-			if _world.is_water(at.x, at.y) or not (_world.biome_at(at.x, at.y) in entry["biomes"]) or _on_road(road_pieces, at, road_clear):
+			if _world.is_water(at.x, at.y) or not (_world.biome_at(at.x, at.y) in entry["biomes"]):
 				continue
 			spots.append(at)
-	return spots
+	# All seeded candidate draws are complete before the native batch
+	# corridor filter. The old strict road boundary remains unchanged and
+	# no other chunk categories or authoritative game systems are affected.
+	return SceneryBatches.filter_cosmetic_spots_outside_roads(
+		spots, road_pieces, road_clear)
 
 
 func _build_decor(origin: Vector2, rng: RandomNumberGenerator, data: Dictionary) -> void:
@@ -1743,6 +1921,7 @@ func _build_next_decor_entry() -> void:
 	else:
 		_build_extra_decor_entry(task["entry"])
 	if _decor_next >= _decor_tasks.size():
+		_finalize_hlod_stones()
 		var streamer := get_parent() as WorldStreamer
 		if streamer != null:
 			streamer.mark_visual_details_ready(Vector3i(cell.x, 0, cell.y))
@@ -1775,13 +1954,80 @@ func _build_nature_decor_entry(entry: Dictionary) -> void:
 		var size := rng.randf_range(float(entry["scale"][0]), float(entry["scale"][1]))
 		var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
 		transforms.append(Transform3D(basis, Vector3(at.x - origin.x, _world.height_at(at.x, at.y) - 0.02, at.y - origin.y)))
+	# Unreal PCG normal-to-density/slope filter: sample true terrain normals
+	# only for flora with an explicit slope policy. All transforms and seeded
+	# random draws are complete before rejecting any candidate. The shared
+	# native selector is pure-data; stock Godot uses the same deterministic
+	# policy. This does not alter gameplay vegetation or server spawns.
+	if entry.has("max_surface_slope"):
+		var surface_normals := PackedVector3Array()
+		for transform in transforms:
+			var world_at := origin + Vector2(transform.origin.x, transform.origin.z)
+			surface_normals.append(_world.normal_at(world_at.x, world_at.y))
+		transforms = SceneryBatches.filter_cosmetic_transforms_surface(
+			transforms, surface_normals, 0.0,
+			float(entry["max_surface_slope"]), -10000000.0,
+			float(entry.get("max_surface_height", 10000000.0)))
+	# Unreal PCG-inspired surface-spacing filter for visual clutter only.
+	# Transform generation (including seeded RNG draws) happens above, before
+	# thinning, so streamed chunks keep all later seeded categories unchanged.
+	# Gatherables, collisions, landmarks and server zombie spawns are untouched.
+	if file.begins_with("Bush"):
+		# Cliff ledges use height-aware, scale-dependent 3D PCG pruning.
+		# Large bushes reserve more room; separate terraces remain populated.
+		transforms = SceneryBatches.thin_cosmetic_transforms_3d(transforms, 1.6)
+	elif file.begins_with("Pebble"):
+		# Surface debris keeps planar spacing, now accounting for each pebble's randomized scale.
+		transforms = SceneryBatches.thin_cosmetic_transforms_scaled(transforms, 0.75)
+	# Unreal-style AlignToNormal for small visual rocks. Sample normals only
+	# after scale-aware spacing, reducing terrain queries on dense scree.
+	# All seeded transforms are generated before alignment; no additional RNG
+	# draws, interactive resources or server-authoritative objects are touched.
+	if entry.has("max_surface_tilt") and not transforms.is_empty():
+		var alignment_normals := PackedVector3Array()
+		for transform in transforms:
+			var point := origin + Vector2(transform.origin.x, transform.origin.z)
+			alignment_normals.append(_world.normal_at(point.x, point.y))
+		transforms = SceneryBatches.align_cosmetic_transforms_surface(
+			transforms, alignment_normals, float(entry["max_surface_tilt"]))
+	# Only small cosmetic plants use density scaling. Pebbles, large bushes,
+	# mushrooms and gatherable vegetation retain their full visual presence.
+	var density_scalable: bool = file.begins_with("Flower") or \
+		file.begins_with("Grass") or file.begins_with("Fern") or \
+		file.begins_with("Petal")
 	# Dense vegetation is split into camera-cullable cells, sparse props remain one draw call.
 	for decor_batch in SceneryBatches.add(self, mesh, transforms,
 			float(entry["range"]), file.begins_with("Bush"), 8.0,
-			tint_plant, origin):
+			tint_plant, origin, density_scalable):
 		register_scenery(decor_batch, "decor:" + file, float(entry["range"]))
+		if density_scalable:
+			_density_scenery_batches.append(decor_batch)
+			_density_lod_elapsed = DENSITY_LOD_INTERVAL
 		if file.begins_with("Bush"):
 			_shadow_casters.append({"node": decor_batch, "role": "bush", "bounds": decor_batch.custom_aabb})
+		if file.begins_with("Pebble"):
+			_hlod_stone_sources.append(decor_batch)
+	if file.begins_with("Bush"):
+		# Billboard LOD: past the real mesh range, bushes continue as baked impostors.
+		ImpostorField.add(self, mesh, transforms, float(entry["range"]))
+	# Store only the decorative geometry actually emitted (after spacing/
+	# terrain alignment). Two rock categories can share one far proxy draw.
+	if file.begins_with("Pebble") and not _hlod_stone_overflow:
+		if _hlod_stone_transforms.size() + transforms.size() > \
+				SceneryHlodProxy.MAX_INPUT_INSTANCES:
+			_hlod_stone_overflow = true
+			_hlod_stone_transforms.clear()
+			_hlod_stone_centers.clear()
+			_hlod_stone_extents.clear()
+		else:
+			var stone_bounds: AABB = mesh.get_aabb()
+			var half_extents: Vector3 = stone_bounds.size * 0.5
+			half_extents = Vector3(maxf(0.02, half_extents.x),
+				maxf(0.02, half_extents.y), maxf(0.02, half_extents.z))
+			for transform in transforms:
+				_hlod_stone_transforms.append(transform)
+				_hlod_stone_centers.append(stone_bounds.get_center())
+				_hlod_stone_extents.append(half_extents)
 
 func _build_extra_decor_entry(entry: Dictionary) -> void:
 	var origin: Vector2 = _decor_origin
@@ -1842,6 +2088,7 @@ func _refresh_ground_contact() -> void:
 ## Hides depleted nodes and opened crates. `hidden_ids` is the set of ids the server says are gone.
 func apply_state(hidden_ids: Dictionary) -> void:
 	var changed := false
+	_state_seen_pending = true
 	for kind in _groups:
 		var group: Dictionary = _groups[kind]
 		var slots := PackedInt32Array()
@@ -1856,6 +2103,9 @@ func apply_state(hidden_ids: Dictionary) -> void:
 			slots.append(slot)
 			transforms.append(Transform3D(Basis().scaled(Vector3.ONE * 0.001), original.origin)
 				if should_hide else original)
+			# A tree felled while you watch topples instead of vanishing (not on the first sync).
+			if should_hide and _state_seen and bool(group.get("tree", false)):
+				_fell_tree(group["multimesh"].mesh, original)
 			changed_ids[id] = should_hide
 		if slots.is_empty():
 			continue
@@ -1874,3 +2124,294 @@ func apply_state(hidden_ids: Dictionary) -> void:
 		changed = true
 	if changed and _terrain != null:
 		_refresh_ground_contact()
+
+
+# --- Rivers, lakes and bridges (world_rivers.gd / world_roads.gd) -----------------------------------------
+
+static var _river_material: ShaderMaterial
+static var _bridge_wood: StandardMaterial3D
+
+
+static func _river_material_get() -> ShaderMaterial:
+	if _river_material == null:
+		_river_material = ShaderMaterial.new()
+		_river_material.shader = load("res://assets/shaders/water.gdshader")
+	return _river_material
+
+
+## River surfaces as spline ribbons (clipped to this chunk by their segments), lakes as discs,
+## and timber bridges where roads cross. Water uses the same shader as the sea.
+func _build_rivers_and_bridges(origin: Vector2) -> void:
+	if _world.rivers == null:
+		return
+	var segments: Array = _world.rivers.segments_in_cell(cell)
+	if not segments.is_empty():
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for seg in segments:
+			var a: Vector2 = seg["a"]
+			var b: Vector2 = seg["b"]
+			var dir: Vector2 = (b - a).normalized()
+			var side := Vector2(-dir.y, dir.x)
+			var wa: float = float(seg["w0"]) + 0.6
+			var wb: float = float(seg["w1"]) + 0.6
+			# Extend a little along the flow so consecutive pieces overlap without gaps.
+			var a2: Vector2 = a - dir * 0.8
+			var b2: Vector2 = b + dir * 0.8
+			var corners := [
+				Vector3(a2.x + side.x * wa - origin.x, float(seg["s0"]) - 0.05, a2.y + side.y * wa - origin.y),
+				Vector3(a2.x - side.x * wa - origin.x, float(seg["s0"]) - 0.05, a2.y - side.y * wa - origin.y),
+				Vector3(b2.x + side.x * wb - origin.x, float(seg["s1"]) - 0.05, b2.y + side.y * wb - origin.y),
+				Vector3(b2.x - side.x * wb - origin.x, float(seg["s1"]) - 0.05, b2.y - side.y * wb - origin.y),
+			]
+			for index in [0, 1, 2, 1, 3, 2]:
+				st.set_normal(Vector3.UP)
+				st.set_uv(Vector2(corners[index].x, corners[index].z) * 0.1)
+				st.add_vertex(corners[index])
+		var river := MeshInstance3D.new()
+		river.name = "River"
+		river.mesh = st.commit()
+		river.material_override = _river_material_get()
+		river.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(river)
+	for lake in _world.rivers.lakes_in_cell(cell):
+		# Each lake is drawn once, by the chunk holding its centre.
+		if WorldGen.cell_of(float(lake["x"]), float(lake["z"])) != cell:
+			continue
+		var disc := MeshInstance3D.new()
+		disc.name = "Lake"
+		var shape := CylinderMesh.new()
+		shape.top_radius = float(lake["radius"]) + 1.0
+		shape.bottom_radius = shape.top_radius
+		shape.height = 0.02
+		shape.radial_segments = 48
+		shape.rings = 1
+		disc.mesh = shape
+		disc.material_override = _river_material_get()
+		disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		disc.position = Vector3(float(lake["x"]) - origin.x, float(lake["surface"]) - 0.06, float(lake["z"]) - origin.y)
+		add_child(disc)
+	for bridge in _world.roads.bridges_in_cell(cell):
+		var a: Vector2 = bridge["a"]
+		if WorldGen.cell_of(a.x, a.y) != cell:
+			continue # Built once, by the chunk at its first end.
+		_build_bridge(bridge, origin)
+
+
+## A timber bridge: planks across an arched deck, side beams and posts down into the water.
+func _build_bridge(bridge: Dictionary, origin: Vector2) -> void:
+	if _bridge_wood == null:
+		_bridge_wood = StandardMaterial3D.new()
+		_bridge_wood.albedo_color = Color(0.42, 0.3, 0.19)
+		_bridge_wood.roughness = 0.9
+	var a: Vector2 = bridge["a"]
+	var b: Vector2 = bridge["b"]
+	var length: float = a.distance_to(b)
+	var dir: Vector2 = (b - a) / maxf(length, 0.01)
+	var side := Vector2(-dir.y, dir.x)
+	var yaw: float = atan2(dir.x, dir.y)
+	var root := Node3D.new()
+	root.name = "Bridge"
+	add_child(root)
+	var plank_mesh := BoxMesh.new()
+	plank_mesh.size = Vector3(WorldRoads.BRIDGE_HALF_WIDTH * 2.0, 0.12, 0.42)
+	var planks := MultiMeshInstance3D.new()
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.mesh = plank_mesh
+	var count: int = maxi(int(length / 0.46), 2)
+	multimesh.instance_count = count
+	for k in count:
+		var t: float = (float(k) + 0.5) / float(count)
+		var p: Vector2 = a.lerp(b, t)
+		var y: float = WorldRoads.deck_height(bridge, t) - 0.06
+		var slope: float = (WorldRoads.deck_height(bridge, minf(t + 0.01, 1.0)) - WorldRoads.deck_height(bridge, maxf(t - 0.01, 0.0))) / maxf(length * 0.02, 0.001)
+		var basis := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -atan(slope))
+		multimesh.set_instance_transform(k, Transform3D(basis.scaled(Vector3(1.0 + 0.04 * sin(k * 2.3), 1.0, 1.0)), Vector3(p.x - origin.x, y, p.y - origin.y)))
+	planks.multimesh = multimesh
+	planks.material_override = _bridge_wood
+	root.add_child(planks)
+	# Side beams (railing) and posts down to the riverbed.
+	var segments := 10
+	for s in [-1.0, 1.0]:
+		for k in segments:
+			var t0: float = float(k) / float(segments)
+			var t1: float = float(k + 1) / float(segments)
+			var p0: Vector2 = a.lerp(b, t0) + side * (WorldRoads.BRIDGE_HALF_WIDTH - 0.1) * s
+			var p1: Vector2 = a.lerp(b, t1) + side * (WorldRoads.BRIDGE_HALF_WIDTH - 0.1) * s
+			var q0 := Vector3(p0.x - origin.x, WorldRoads.deck_height(bridge, t0) + 0.85, p0.y - origin.y)
+			var q1 := Vector3(p1.x - origin.x, WorldRoads.deck_height(bridge, t1) + 0.85, p1.y - origin.y)
+			var rail := MeshInstance3D.new()
+			var beam := BoxMesh.new()
+			beam.size = Vector3(0.12, 0.12, q0.distance_to(q1) + 0.05)
+			rail.mesh = beam
+			rail.material_override = _bridge_wood
+			rail.transform = Transform3D(Basis.looking_at(q1 - q0, Vector3.UP), (q0 + q1) * 0.5)
+			root.add_child(rail)
+			if k % 2 == 0:
+				var post := MeshInstance3D.new()
+				var post_mesh := BoxMesh.new()
+				var bottom: float = _world.ground_at(p0.x, p0.y) - 0.3
+				post_mesh.size = Vector3(0.16, maxf(q0.y - bottom, 0.5), 0.16)
+				post.mesh = post_mesh
+				post.material_override = _bridge_wood
+				post.position = Vector3(q0.x, (q0.y + bottom) * 0.5, q0.z)
+				root.add_child(post)
+
+
+# --- Vegetation physics: trees shake when struck and topple when felled ---------------------------------
+
+var _state_seen := false
+var _state_seen_pending := false
+var _shaking: Dictionary = {} # node id -> {"group", "slot", "t"}
+var _falling: Array = [] # [{"node": MeshInstance3D, "base": Transform3D, "axis": Vector3, "t": float}]
+const SHAKE_SECONDS := 0.45
+const FALL_SECONDS := 1.9
+const SINK_SECONDS := 2.5
+
+
+## An axe (or a fist) landed on this tree: it shudders around its base.
+func shake(node_id: int) -> void:
+	for kind in _groups:
+		var group: Dictionary = _groups[kind]
+		if bool(group.get("tree", false)) and group["index"].has(node_id) and not _hidden.has(node_id):
+			_shaking[node_id] = {"group": group, "slot": int(group["index"][node_id]), "t": 0.0}
+			return
+
+
+func _fell_tree(mesh: Mesh, original: Transform3D) -> void:
+	if mesh == null or _falling.size() >= 6:
+		return
+	var log := MeshInstance3D.new()
+	log.mesh = mesh
+	add_child(log)
+	log.transform = original
+	var angle: float = float(WorldGen.mix(int(original.origin.x * 10.0), int(original.origin.z * 10.0), 41) % 628) / 100.0
+	var axis := Vector3(cos(angle), 0.0, sin(angle))
+	_falling.append({"node": log, "base": original, "axis": axis, "t": 0.0})
+
+
+func _animate_vegetation(delta: float) -> void:
+	if _state_seen_pending:
+		_state_seen = true
+	for id in _shaking.keys():
+		var entry: Dictionary = _shaking[id]
+		entry["t"] = float(entry["t"]) + delta
+		var group: Dictionary = entry["group"]
+		var original: Transform3D = group["transforms"][int(entry["slot"])]
+		var k: float = float(entry["t"]) / SHAKE_SECONDS
+		if k >= 1.0 or _hidden.has(id):
+			group["multimesh"].set_instance_transform(int(entry["slot"]), original)
+			_shaking.erase(id)
+			continue
+		var sway: float = sin(k * TAU * 2.5) * (1.0 - k) * 0.06
+		var basis: Basis = Basis(Vector3(1, 0, 0.3).normalized(), sway) * original.basis
+		group["multimesh"].set_instance_transform(int(entry["slot"]), Transform3D(basis, original.origin))
+	for i in range(_falling.size() - 1, -1, -1):
+		var fall: Dictionary = _falling[i]
+		fall["t"] = float(fall["t"]) + delta
+		var t: float = fall["t"]
+		var node: MeshInstance3D = fall["node"]
+		var base: Transform3D = fall["base"]
+		# Gravity-like ease-in to horizontal, a small bounce when it hits, then it sinks away.
+		var k: float = clampf(t / FALL_SECONDS, 0.0, 1.0)
+		var tilt: float = (PI * 0.5 - 0.06) * k * k
+		if k >= 1.0:
+			tilt += sin(clampf((t - FALL_SECONDS) / 0.35, 0.0, 1.0) * PI) * 0.06
+		var sink: float = maxf(t - FALL_SECONDS - 0.6, 0.0) / SINK_SECONDS
+		node.transform = Transform3D(Basis(fall["axis"], tilt) * base.basis, base.origin - Vector3(0.0, sink * 1.6, 0.0))
+		if sink >= 1.0:
+			node.queue_free()
+			_falling.remove_at(i)
+
+
+# --- Data Layers (data_layers.gd): content switched on and off for the whole server ---------------------
+
+static var active_layers: Array = [] # Set by the client from the server's list; new chunks read it.
+var _layer_sites: Array = []
+var _layer_nodes: Dictionary = {} # layer -> Node3D
+
+
+func set_data_layers(layers: Array) -> void:
+	for layer in _layer_nodes.keys():
+		if not layers.has(layer):
+			_layer_nodes[layer].queue_free()
+			_layer_nodes.erase(layer)
+	if layers.has("festival") and not _layer_nodes.has("festival"):
+		var node := _build_festival()
+		if node != null:
+			_layer_nodes["festival"] = node
+
+
+## Harvest festival: strings of lanterns on posts around each settlement or camp centre in this
+## chunk, and piles of pumpkins. A couple of real lights per site, the rest glow by emission.
+func _build_festival() -> Node3D:
+	var origin := WorldGen.cell_origin(cell)
+	var root := Node3D.new()
+	root.name = "LayerFestival"
+	var glow := StandardMaterial3D.new()
+	glow.albedo_color = Color(1.0, 0.62, 0.22)
+	glow.emission_enabled = true
+	glow.emission = Color(1.0, 0.55, 0.18)
+	glow.emission_energy_multiplier = 2.2
+	var wood := StandardMaterial3D.new()
+	wood.albedo_color = Color(0.32, 0.22, 0.14)
+	var pumpkin_mat := StandardMaterial3D.new()
+	pumpkin_mat.albedo_color = Color(0.92, 0.45, 0.08)
+	pumpkin_mat.roughness = 0.6
+	var placed := 0
+	for site in _layer_sites:
+		if not ["village", "camp", "farm", "city", "outpost", "dock"].has(str(site.get("kind", ""))):
+			continue
+		var centre := Vector2(float(site["x"]), float(site["z"]))
+		if WorldGen.cell_of(centre.x, centre.y) != cell:
+			continue # Each site is decorated once, by the chunk holding its centre.
+		var radius: float = clampf(float(site.get("radius", 20.0)) * 0.45, 7.0, 18.0)
+		var posts := 8
+		for k in posts:
+			var angle: float = TAU * float(k) / float(posts)
+			var at: Vector2 = centre + Vector2.from_angle(angle) * radius
+			var ground: float = _world.height_at(at.x, at.y)
+			var post := MeshInstance3D.new()
+			var pole := CylinderMesh.new()
+			pole.top_radius = 0.05
+			pole.bottom_radius = 0.06
+			pole.height = 2.4
+			post.mesh = pole
+			post.material_override = wood
+			post.position = Vector3(at.x - origin.x, ground + 1.2, at.y - origin.y)
+			root.add_child(post)
+			var lantern := MeshInstance3D.new()
+			var box := BoxMesh.new()
+			box.size = Vector3(0.22, 0.3, 0.22)
+			lantern.mesh = box
+			lantern.material_override = glow
+			lantern.position = post.position + Vector3(0, 1.3, 0)
+			root.add_child(lantern)
+			if k % 4 == 0:
+				var light := OmniLight3D.new()
+				light.light_color = Color(1.0, 0.6, 0.25)
+				light.light_energy = 1.4
+				light.omni_range = 9.0
+				light.shadow_enabled = false
+				light.position = lantern.position
+				root.add_child(light)
+			# Pumpkins at the foot of every other post.
+			if k % 2 == 1:
+				for p in 3:
+					var pumpkin := MeshInstance3D.new()
+					var sphere := SphereMesh.new()
+					var size: float = 0.22 + 0.08 * float(p)
+					sphere.radius = size
+					sphere.height = size * 1.4
+					pumpkin.mesh = sphere
+					pumpkin.material_override = pumpkin_mat
+					var offset := Vector2.from_angle(angle + 0.6 * float(p)) * 0.55
+					pumpkin.position = Vector3(at.x + offset.x - origin.x, _world.height_at(at.x + offset.x, at.y + offset.y) + size * 0.55, at.y + offset.y - origin.y)
+					root.add_child(pumpkin)
+		placed += 1
+	if placed == 0:
+		root.free()
+		return null
+	add_child(root)
+	return root

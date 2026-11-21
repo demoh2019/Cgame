@@ -35,6 +35,7 @@
 
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
+#include "core/string/string_name.h"
 #include "core/variant/dictionary.h"
 
 // Streams the parts ("chunks") of a big world in and out around a focus point, so an open world
@@ -58,6 +59,15 @@ private:
 	real_t cell_size = 64.0;
 	real_t load_radius = 128.0;
 	real_t unload_radius = 192.0;
+	// Opt-in startup World Partition-style loading area ramp. Fractions
+	// describe 2D area or 3D volume, NOT radial distance. Existing loaded
+	// cells keep the configured unload hysteresis during the ramp.
+	real_t loading_range_area_fraction = 1.0;
+	real_t loading_ramp_initial_fraction = 1.0;
+	real_t loading_ramp_delay = 0.0;
+	real_t loading_ramp_duration = 0.0;
+	real_t loading_ramp_elapsed = 0.0;
+	bool loading_ramp_active = false;
 	// Optional hint only affects load order; current focus still controls
 	// residency and chunk generation. Disabled unless set by the game.
 	Vector3 velocity_hint;
@@ -66,6 +76,8 @@ private:
 	// These hints reorder eligible work, never grow the resident set.
 	Vector3 view_direction;
 	real_t view_priority = 0.0;
+	// 180 degrees preserves the historical heading-only streaming order.
+	real_t view_cone_half_angle_degrees = 180.0;
 	// Optional secondary streaming source for cinematic targets or nearby
 	// waypoints. Its radius and distance from focus are both bounded, so
 	// arbitrarily distant map pins cannot load remote chunks into memory.
@@ -91,6 +103,16 @@ private:
 	Vector3 last_queued_view_direction;
 	int max_concurrent_loads = 4;
 	int max_instantiations_per_frame = 1;
+	// Opt-in bounded per-refresh unloads. Zero preserves historical immediate
+	// release of every distant cell; positive counts defer the rest.
+	int max_unloads_per_update = 0;
+	// Optional soft wall-clock cap for scheduled unloads, measured in
+	// microseconds. Zero retains count-only scheduling; legacy unlimited
+	// unloads and explicit reset/teardown are never time-sliced.
+	int max_unload_work_usec = 0;
+	int64_t last_unload_work_usec = 0;
+	int last_unload_count = 0;
+	int last_deferred_unload_count = 0;
 	// Soft main-thread time slice for procedural generation or scene
 	// activation (0 = count-only). Each individual chunk is indivisible.
 	int max_chunk_work_usec = 0;
@@ -99,6 +121,12 @@ private:
 	real_t simulation_radius = -1.0; // Negative preserves legacy full simulation.
 	real_t simulation_hysteresis = 16.0;
 	int max_simulation_transitions_per_update = 4;
+	// Separate Unreal-style cosmetic tick-rate tier, opt-in and independent
+	// of simulation pause. Chunks decide how to throttle their own script.
+	real_t tick_throttle_radius = -1.0;
+	real_t tick_throttle_interval = 0.125;
+	real_t tick_throttle_hysteresis = 8.0;
+	int max_tick_throttle_transitions_per_update = 4;
 	// Opt-in adaptive backpressure. Defaults off to preserve existing games.
 	bool adaptive_chunk_budget_enabled = false;
 	double streaming_frame_pressure = 0.0;
@@ -108,6 +136,12 @@ private:
 	int64_t last_frame_chunk_work_usec = 0;
 	int frame_chunk_attempt_count = 0;
 	int last_frame_chunk_attempt_count = 0;
+	// Optional per-stage EMA admission forecast, not a hard CPU cap.
+	bool predictive_chunk_work_budget_enabled = false;
+	int64_t estimated_generator_work_usec = 0;
+	int64_t estimated_finalization_work_usec = 0;
+	int frame_predicted_deferred_count = 0;
+	int last_predicted_deferred_count = 0;
 	double update_interval = 0.1;
 	String chunk_path_template;
 	Callable chunk_provider;
@@ -127,14 +161,39 @@ private:
 	struct CachedChunk {
 		ObjectID node_id;
 		uint64_t age = 0;
+		int64_t estimated_bytes = 0;
+		double retained_at_seconds = 0.0;
 	};
 	HashMap<Vector3i, CachedChunk> cached_chunks;
 	int max_cached_chunks = 0; // Zero preserves legacy free-on-unload.
+	int64_t max_cached_chunk_bytes = 0;
+	int64_t cached_chunk_bytes = 0;
+	// Zero disables time-based reclamation of detached procedural roots.
+	real_t cached_chunk_retention_seconds = 0.0;
+	double cached_chunk_elapsed_seconds = 0.0;
 	uint64_t cache_clock = 0;
 	int cache_hits = 0;
 	int cache_evictions = 0;
+	int cache_expirations = 0;
+	// Opt-in incremental cache expiration, preserving legacy semantics at zero.
+	int max_cached_expirations_per_frame = 0;
+	int max_cached_expiration_work_usec = 0;
+	int last_cached_expiration_count = 0;
+	int last_deferred_cached_expiration_count = 0;
+	int64_t last_cached_expiration_work_usec = 0;
 	HashMap<Vector3i, bool> simulation_active_cells;
 	int simulation_inactive_count = 0;
+	// Opt-in, bounded runtime simulation layers. Loading, collision, visual
+	// residency, networking, and authoritative gameplay never depend on them.
+	HashMap<Vector3i, StringName> cell_simulation_layers;
+	HashMap<StringName, bool> simulation_layer_states;
+	int disabled_simulation_layer_count = 0;
+	static constexpr int MAX_SIMULATION_LAYERS = 16;
+	bool _simulation_layer_allows(const Vector3i &p_cell) const;
+	// Only chunk roots actually implementing the callback are tracked.
+	// A zero/absent entry means full tick frequency.
+	HashMap<Vector3i, real_t> applied_tick_intervals;
+	int tick_throttled_count = 0;
 	// Optional cosmetic work is tracked separately from playable chunk residency.
 	HashSet<Vector3i> pending_visual_details;
 	HashMap<Vector3i, String> loading;
@@ -151,6 +210,11 @@ private:
 	int max_auto_retries = 0;
 	real_t retry_initial_delay = 1.0;
 	real_t retry_max_delay = 16.0;
+	// Zero preserves the historical simultaneous-release retry policy.
+	real_t retry_delay_spread = 0.0;
+	int max_retry_releases_per_update = 0;
+	int last_retry_release_count = 0;
+	int last_retry_deferred_count = 0;
 	double time_since_update = 1e9;
 	bool truncated_warned = false;
 
@@ -164,17 +228,21 @@ private:
 	void _forget_dead_chunks();
 	void _update_streaming();
 	void _update_simulation(const Vector3 &p_focus);
+	void _update_tick_intervals(const Vector3 &p_focus);
+	void _set_chunk_tick_interval(const Vector3i &p_cell, real_t p_seconds);
 	void _set_chunk_simulation_active(const Vector3i &p_cell, bool p_active);
 	void _poll_loading(int &r_instantiation_budget, uint64_t p_frame_started_usec);
 	bool _finalize_chunk(const Vector3i &p_cell, const String &p_path);
 	bool _adopt_chunk(const Vector3i &p_cell, Node *p_chunk);
 	void _run_generator_queue(int &r_instantiation_budget, uint64_t p_frame_started_usec);
 	void _generate_cell(const Vector3i &p_cell);
-	void _record_chunk_work(uint64_t p_started_usec);
+	void _record_chunk_work(uint64_t p_started_usec, bool p_generator);
+	bool _should_defer_predicted_work(bool p_generator) const;
 	void _finish_chunk_work_frame();
 	void _unload_cell(const Vector3i &p_cell, bool p_allow_cache = true);
 	bool _restore_cached_chunk(const Vector3i &p_cell);
 	void _trim_cached_chunks();
+	void _expire_cached_chunks(bool p_ignore_budget = false);
 	void _discard_cached_chunks();
 	void _reset_state();
 	void _record_failure(const Vector3i &p_cell, const String &p_reason);
@@ -197,6 +265,15 @@ public:
 	real_t get_load_radius() const { return load_radius; }
 	void set_unload_radius(real_t p_radius);
 	real_t get_unload_radius() const { return unload_radius; }
+	// Explicit opt-in, progressive load-queue expansion. Full configured
+	// load_radius and unload_radius are unchanged; slow frames cannot make
+	// the player's currently loaded cells disappear.
+	void begin_loading_range_ramp(real_t p_initial_area_fraction, real_t p_delay_seconds, real_t p_duration_seconds);
+	void advance_loading_range_ramp(real_t p_delta_seconds);
+	void cancel_loading_range_ramp();
+	bool is_loading_range_ramping() const { return loading_ramp_active; }
+	real_t get_loading_range_area_percent() const { return loading_range_area_fraction * real_t(100.0); }
+	real_t get_effective_load_radius() const;
 	void set_velocity_hint(const Vector3 &p_velocity);
 	Vector3 get_velocity_hint() const { return velocity_hint; }
 	void set_lookahead_seconds(real_t p_seconds);
@@ -204,6 +281,8 @@ public:
 	void set_view_direction(const Vector3 &p_direction);
 	Vector3 get_view_direction() const { return view_direction; }
 	void set_view_priority(real_t p_weight);
+	void set_view_cone_half_angle_degrees(real_t p_degrees);
+	real_t get_view_cone_half_angle_degrees() const { return view_cone_half_angle_degrees; }
 	void set_fast_view_refresh_degrees(real_t p_degrees);
 	real_t get_fast_view_refresh_degrees() const { return fast_view_refresh_degrees; }
 	real_t get_view_priority() const { return view_priority; }
@@ -233,6 +312,13 @@ public:
 	void set_max_concurrent_loads(int p_count);
 	int get_max_concurrent_loads() const { return max_concurrent_loads; }
 	void set_max_instantiations_per_frame(int p_count);
+	void set_max_unloads_per_update(int p_count);
+	int get_max_unloads_per_update() const { return max_unloads_per_update; }
+	void set_max_unload_work_usec(int p_usec);
+	int get_max_unload_work_usec() const { return max_unload_work_usec; }
+	int64_t get_last_unload_work_usec() const { return last_unload_work_usec; }
+	int get_last_unload_count() const { return last_unload_count; }
+	int get_last_deferred_unload_count() const { return last_deferred_unload_count; }
 	int get_max_instantiations_per_frame() const { return max_instantiations_per_frame; }
 	void set_max_chunk_work_usec(int p_usec);
 	void set_simulation_radius(real_t p_radius);
@@ -243,6 +329,25 @@ public:
 	int get_max_simulation_transitions_per_update() const { return max_simulation_transitions_per_update; }
 	bool is_cell_simulation_active(const Vector3i &p_cell) const;
 	int get_simulation_active_count() const;
+	// Chunk roots may implement get_streaming_simulation_layer() -> StringName.
+	// Unknown/unconfigured layers are enabled by default; no load/unload.
+	bool set_simulation_layer_enabled(const StringName &p_layer, bool p_enabled);
+	bool is_simulation_layer_enabled(const StringName &p_layer) const;
+	StringName get_cell_simulation_layer(const Vector3i &p_cell) const;
+	int get_simulation_layer_count() const { return simulation_layer_states.size(); }
+	// For opted-in script roots, set_streaming_tick_interval(seconds) is called
+	// at initial adoption and for later bounded near/far transitions.
+	// -1 disables; hysteresis only affects far-tier entry, not near recovery.
+	void set_tick_throttle_radius(real_t p_radius);
+	real_t get_tick_throttle_radius() const { return tick_throttle_radius; }
+	void set_tick_throttle_interval(real_t p_seconds);
+	real_t get_tick_throttle_interval() const { return tick_throttle_interval; }
+	void set_tick_throttle_hysteresis(real_t p_distance);
+	real_t get_tick_throttle_hysteresis() const { return tick_throttle_hysteresis; }
+	void set_max_tick_throttle_transitions_per_update(int p_count);
+	int get_max_tick_throttle_transitions_per_update() const { return max_tick_throttle_transitions_per_update; }
+	bool is_cell_tick_throttled(const Vector3i &p_cell) const;
+	int get_tick_throttled_count() const { return tick_throttled_count; }
 	int get_max_chunk_work_usec() const { return max_chunk_work_usec; }
 	void set_adaptive_chunk_budget_enabled(bool p_enabled);
 	bool is_adaptive_chunk_budget_enabled() const { return adaptive_chunk_budget_enabled; }
@@ -250,18 +355,37 @@ public:
 	// raises pressure; stable fast frames recover it gradually.
 	static double advance_chunk_pressure(double p_pressure, double p_frame_delta);
 	static int calculate_adaptive_instantiation_slots(int p_configured, double p_pressure);
+	// Zero preserves unlimited cleanup; positive limits adapt to frame pressure.
+	static int calculate_adaptive_unload_slots(int p_configured, double p_pressure);
+	int get_effective_unloads_per_update() const;
 	static int calculate_adaptive_chunk_work_usec(int p_configured, double p_pressure);
 	int get_effective_chunk_work_usec() const;
 	int get_effective_instantiations_per_frame() const;
 	double get_streaming_frame_pressure_percent() const { return streaming_frame_pressure * 100.0; }
 	int64_t get_last_frame_chunk_work_usec() const { return last_frame_chunk_work_usec; }
 	int get_last_frame_chunk_attempt_count() const { return last_frame_chunk_attempt_count; }
+	void set_predictive_chunk_work_budget_enabled(bool p_enabled) { predictive_chunk_work_budget_enabled = p_enabled; }
+	bool is_predictive_chunk_work_budget_enabled() const { return predictive_chunk_work_budget_enabled; }
+	int64_t get_estimated_generator_work_usec() const { return estimated_generator_work_usec; }
+	int64_t get_estimated_finalization_work_usec() const { return estimated_finalization_work_usec; }
+	int get_last_predicted_deferred_chunk_count() const { return last_predicted_deferred_count; }
+	static int64_t update_chunk_work_estimate(int64_t p_previous, int64_t p_sample_usec);
+	static bool should_defer_predicted_chunk_work(int p_budget_usec, int p_previous_attempts,
+			int64_t p_work_spent_usec, int64_t p_estimated_next_usec);
 	void set_max_auto_retries(int p_count);
 	int get_max_auto_retries() const { return max_auto_retries; }
 	void set_retry_initial_delay(real_t p_seconds);
 	real_t get_retry_initial_delay() const { return retry_initial_delay; }
 	void set_retry_max_delay(real_t p_seconds);
 	real_t get_retry_max_delay() const { return retry_max_delay; }
+	void set_retry_delay_spread(real_t p_fraction);
+	real_t get_retry_delay_spread() const { return retry_delay_spread; }
+	void set_max_retry_releases_per_update(int p_count);
+	int get_max_retry_releases_per_update() const { return max_retry_releases_per_update; }
+	int get_last_retry_release_count() const { return last_retry_release_count; }
+	int get_last_retry_deferred_count() const { return last_retry_deferred_count; }
+	static double calculate_retry_delay_seconds(const Vector3i &p_cell, int p_attempt,
+			double p_initial_seconds, double p_max_seconds, double p_spread);
 	int get_retry_pending_count() const;
 	void set_update_interval(double p_seconds);
 	double get_update_interval() const { return update_interval; }
@@ -278,6 +402,20 @@ public:
 	// Cached chunks never count as loaded and reinsertion is still frame-budgeted.
 	void set_max_cached_chunks(int p_count);
 	int get_max_cached_chunks() const { return max_cached_chunks; }
+	void set_max_cached_chunk_bytes(int64_t p_bytes);
+	int64_t get_max_cached_chunk_bytes() const { return max_cached_chunk_bytes; }
+	int64_t get_cached_chunk_bytes() const { return cached_chunk_bytes; }
+	void set_cached_chunk_retention_seconds(real_t p_seconds);
+	real_t get_cached_chunk_retention_seconds() const { return cached_chunk_retention_seconds; }
+	void advance_cached_chunk_retention(real_t p_delta_seconds);
+	int get_chunk_cache_expiration_count() const { return cache_expirations; }
+	void set_max_cached_expirations_per_frame(int p_count);
+	int get_max_cached_expirations_per_frame() const { return max_cached_expirations_per_frame; }
+	void set_max_cached_expiration_work_usec(int p_usec);
+	int get_max_cached_expiration_work_usec() const { return max_cached_expiration_work_usec; }
+	int get_last_cached_expiration_count() const { return last_cached_expiration_count; }
+	int get_last_deferred_cached_expiration_count() const { return last_deferred_cached_expiration_count; }
+	int64_t get_last_cached_expiration_work_usec() const { return last_cached_expiration_work_usec; }
 	int get_cached_chunk_count() const { return int(cached_chunks.size()); }
 	int get_chunk_cache_hit_count() const { return cache_hits; }
 	int get_chunk_cache_eviction_count() const { return cache_evictions; }

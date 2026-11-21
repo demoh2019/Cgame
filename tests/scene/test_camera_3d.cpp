@@ -215,6 +215,91 @@ TEST_CASE("[SceneTree][Camera3D] Position queries") {
 	memdelete(mock_viewport);
 }
 
+TEST_CASE("[SceneTree][Camera3D] Batched pixels-per-meter matches scalar projection in all modes") {
+	Camera3D *camera = memnew(Camera3D);
+	SubViewport *viewport = memnew(SubViewport);
+	viewport->set_size(Vector2(400, 200));
+	SceneTree::get_singleton()->get_root()->add_child(viewport);
+	viewport->add_child(camera);
+	camera->set_keep_aspect_mode(Camera3D::KEEP_HEIGHT);
+	camera->set_perspective(90.0, 0.1, 500.0);
+
+	const PackedVector3Array points = {
+		Vector3(0, 0, -10), Vector3(3, 2, -20),
+		Vector3(0, 0, 10), Vector3(0, 0, 0),
+		Vector3(1, -3, -40),
+	};
+	const PackedFloat64Array first = camera->get_pixels_per_meter_at_positions(points);
+	REQUIRE(first.size() == points.size());
+	CHECK(first[0] == doctest::Approx(10.0));
+	CHECK(first[1] == doctest::Approx(5.0));
+	CHECK(first[2] == 0.0);
+	CHECK(first[3] == 0.0);
+	for (int i = 0; i < points.size(); ++i) {
+		CHECK(first[i] == doctest::Approx(double(camera->get_pixels_per_meter_at_position(points[i]))));
+	}
+	camera->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
+	const PackedFloat64Array width = camera->get_pixels_per_meter_at_positions(points);
+	REQUIRE(width.size() == points.size());
+	for (int i = 0; i < points.size(); ++i) {
+		CHECK(width[i] == doctest::Approx(double(camera->get_pixels_per_meter_at_position(points[i]))));
+	}
+	// Rotated isometric view: use the exact adjusted camera transform, not
+	// the world-Z depth of the original unrotated camera.
+	camera->set_keep_aspect_mode(Camera3D::KEEP_HEIGHT);
+	camera->set_global_position(Vector3(4, 16, 11));
+	camera->look_at(Vector3(0, 0, 0));
+	const PackedFloat64Array rotated = camera->get_pixels_per_meter_at_positions(points);
+	REQUIRE(rotated.size() == points.size());
+	for (int i = 0; i < points.size(); ++i) {
+		CHECK(rotated[i] == doctest::Approx(double(camera->get_pixels_per_meter_at_position(points[i]))));
+	}
+	camera->set_orthogonal(20.0, 0.1, 500.0);
+	const PackedFloat64Array orthogonal = camera->get_pixels_per_meter_at_positions(points);
+	REQUIRE(orthogonal.size() == points.size());
+	for (int i = 0; i < points.size(); ++i) {
+		CHECK(orthogonal[i] == doctest::Approx(double(camera->get_pixels_per_meter_at_position(points[i]))));
+	}
+	CHECK(orthogonal[0] == doctest::Approx(orthogonal[2]));
+	camera->set_frustum(20.0, Vector2(0.3, -0.2), 0.1, 500.0);
+	const PackedFloat64Array asymmetric = camera->get_pixels_per_meter_at_positions(points);
+	REQUIRE(asymmetric.size() == points.size());
+	for (int i = 0; i < points.size(); ++i) {
+		CHECK(asymmetric[i] == doctest::Approx(double(camera->get_pixels_per_meter_at_position(points[i]))));
+	}
+	memdelete(camera);
+	memdelete(viewport);
+}
+
+TEST_CASE("[SceneTree][Camera3D] Batched screen-space LOD validates whole point set before allocation") {
+	Camera3D *camera = memnew(Camera3D);
+	SubViewport *viewport = memnew(SubViewport);
+	viewport->set_size(Vector2(400, 200));
+	SceneTree::get_singleton()->get_root()->add_child(viewport);
+	viewport->add_child(camera);
+	camera->set_perspective(65.0, 0.1, 500.0);
+	CHECK(camera->get_pixels_per_meter_at_positions(PackedVector3Array()).is_empty());
+	PackedVector3Array points;
+	for (int i = 0; i < 4096; ++i) {
+		points.push_back(Vector3(i % 80, 0, -10.0 - i / 80));
+	}
+	const PackedFloat64Array max_batch = camera->get_pixels_per_meter_at_positions(points);
+	REQUIRE(max_batch.size() == 4096);
+	CHECK(max_batch[0] > 0.0);
+	CHECK(max_batch[4095] > 0.0);
+	points.push_back(Vector3(0, 0, -10));
+	CHECK(camera->get_pixels_per_meter_at_positions(points).is_empty());
+	points.resize(4096);
+	points.set(4095, Vector3(Math::NaN, 0, -10));
+	CHECK(camera->get_pixels_per_meter_at_positions(points).is_empty());
+	points.set(4095, Vector3(0, Math::INF, -10));
+	CHECK(camera->get_pixels_per_meter_at_positions(points).is_empty());
+	points.set(4095, Vector3(0, 0, -10));
+	CHECK(camera->get_pixels_per_meter_at_positions(points).size() == 4096);
+	memdelete(camera);
+	memdelete(viewport);
+}
+
 TEST_CASE("[SceneTree][Camera3D] Fixed pixel-size billboard projection") {
 	Camera3D *test_camera = memnew(Camera3D);
 	SubViewport *mock_viewport = memnew(SubViewport);

@@ -456,6 +456,7 @@ func _throw_limb(skeleton: Skeleton3D, bone: int, limb: Array, kind: String, joi
 			if active != null:
 				mesh.set_surface_override_material(s, _piece_material(active, limb))
 	var rigid := RigidBody3D.new()
+	rigid.add_to_group("buoyant") # A severed limb floats if it lands in water (buoyancy.gd).
 	rigid.mass = 3.0 if kind == "head" or kind == "neck" else 4.0
 	var shape := CollisionShape3D.new()
 	var length := 0.45 if kind == "leg" else 0.32

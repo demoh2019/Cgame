@@ -164,4 +164,50 @@ func run(t) -> void:
 	t.check(ui.contains("_world_streamer.get_loaded_count()"),
 		"FPS overlay displays actual resident world chunks")
 
+	t.current = "predicted next-chunk CPU cost is bounded before admission"
+	var predictor := WorldStreamer.new()
+	t.check(not predictor.is_predictive_chunk_work_budget_enabled(),
+		"legacy WorldStreamer keeps forecast scheduling disabled")
+	t.eq(WorldStreamer.update_chunk_work_estimate(0, 1600), 1600,
+		"first measured chunk time seeds a generator estimate")
+	t.eq(WorldStreamer.update_chunk_work_estimate(1600, 800), 1400,
+		"the next sample updates a bounded quarter-rate cost forecast")
+	t.check(not WorldStreamer.should_defer_predicted_chunk_work(2500, 0, 2000, 1600),
+		"the first world cell is admitted even if predicted cost exceeds budget")
+	t.check(WorldStreamer.should_defer_predicted_chunk_work(2500, 1, 1500, 1600),
+		"second costly cell is deferred before exceeding expected CPU budget")
+	t.check(not WorldStreamer.should_defer_predicted_chunk_work(2500, 1, 200, 1600),
+		"predicted cheap work still fits the remaining budget")
+	t.check(not WorldStreamer.should_defer_predicted_chunk_work(0, 1, 2000, 1600),
+		"legacy zero time budget never enables forecast deferral")
+	predictor.axes = WorldStreamer.AXES_XZ
+	predictor.cell_size = 16.0
+	predictor.focus_position = Vector3(0.5, 0.0, 0.5)
+	predictor.load_radius = 32.0
+	predictor.unload_radius = 44.0
+	predictor.max_instantiations_per_frame = 3
+	predictor.max_chunk_work_usec = 1
+	predictor.set_chunk_generator(Callable(self, "_make_chunk"))
+	predictor.set_predictive_chunk_work_budget_enabled(true)
+	var previous_calls: int = _calls.size()
+	predictor.refresh()
+	t.eq(_calls.size(), previous_calls + 1,
+		"the first chunk always runs even when the soft work budget is one microsecond")
+	t.check(predictor.get_estimated_generator_work_usec() >= 0,
+		"native predictor exposes measured generator work")
+	t.eq(predictor.get_estimated_finalization_work_usec(), 0,
+		"procedural generator sampling never contaminates scene-finalization estimate")
+	t.check(predictor.get_last_predicted_deferred_chunk_count() >= 0,
+		"forecast deferral diagnostics remain nonnegative")
+	predictor.free()
+	var online_source := FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
+	t.check(online_source.contains("set_predictive_chunk_work_budget_enabled(true)"),
+		"online game explicitly enables conservative native forecast admission")
+	t.check(online_source.contains("Albion/StreamPredictiveDeferred"),
+		"native predictive deferrals are monitored in the game")
+	t.check(online_source.contains("Albion/StreamGeneratorPredictedCPUus"),
+		"game profiler displays learned procedural cost")
+	t.check(online_source.contains("Albion/StreamFinalizePredictedCPUus"),
+		"game profiler displays independent scene activation cost")
+
 	streamer.free()

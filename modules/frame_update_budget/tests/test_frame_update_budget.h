@@ -20,6 +20,45 @@ TEST_CASE("[FrameUpdateBudget] Lane lifecycle and validation") {
 	CHECK(budget->get_lane_count() == 0);
 }
 
+TEST_CASE("[FrameUpdateBudget] Suspended lanes skip work and refresh on reenable") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("dust"));
+	CHECK(b->register_lane("bats"));
+	CHECK_FALSE(b->set_lane_enabled("unknown", false));
+	CHECK_FALSE(b->is_lane_enabled("unknown"));
+	CHECK(b->get_enabled_lane_count() == 2);
+	b->begin_frame(0.01, 0);
+	CHECK(b->consume("dust", 0.01) > 0.0);
+	CHECK(b->consume("bats", 0.01) > 0.0);
+	CHECK(b->set_lane_importance("bats", 3.0));
+	CHECK(b->record_cost("bats", 300));
+	CHECK(b->set_lane_enabled("bats", false));
+	CHECK(b->set_lane_enabled("dust", false));
+	CHECK(b->get_enabled_lane_count() == 0);
+	b->begin_frame(0.1, 0);
+	CHECK(b->current_budget() == 0);
+	CHECK(b->get_reserved_estimated_cost_us() == 0);
+	CHECK(b->consume("bats", 0.1) == 0.0);
+	CHECK(b->consume("dust", 0.1) == 0.0);
+	CHECK(b->consume("bats", 0.1, true) > 0.0); // One cleanup on cave entry.
+	b->begin_frame(0.1, 0);
+	CHECK(b->consume("bats", 0.1) == 0.0);
+	CHECK(b->set_lane_enabled("bats", true));
+	CHECK(b->set_lane_enabled("bats", true)); // Idempotent enabling preserves pending refresh.
+	CHECK(b->is_lane_enabled("bats"));
+	CHECK(b->get_enabled_lane_count() == 1);
+	CHECK(b->get_lane_importance("bats") == 3.0);
+	CHECK(b->get_lane_estimated_cost_us("bats") == 300);
+	b->begin_frame(0.001, 0);
+	CHECK(b->current_budget() == 1);
+	CHECK(b->consume("bats", 0.001) > 0.0); // No stale 0.16 s backlog.
+	CHECK(b->consume("bats", 0.001) == 0.0); // Immediate refresh is single-use.
+	b->reset();
+	CHECK(b->get_enabled_lane_count() == 1); // Reset preserves active state.
+	CHECK_FALSE(b->is_lane_enabled("dust"));
+}
+
 TEST_CASE("[FrameUpdateBudget] Quality, pressure and bounded updates") {
 	Ref<FrameUpdateBudget> budget;
 	budget.instantiate();
@@ -270,6 +309,71 @@ TEST_CASE("[FrameUpdateBudget] Faster lanes tick more frequently with bounded CP
 	CHECK(visible_updates > hidden_updates);
 	CHECK(visible_updates >= 50);
 	CHECK(hidden_updates >= 25); // Even de-prioritized lanes make progress.
+}
+
+
+TEST_CASE("[FrameUpdateBudget] Per-lane completed-frame CPU samples are isolated") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("dust_devils"));
+	CHECK(b->register_lane("dragonflies"));
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0);
+	CHECK(b->get_lane_last_frame_cost_us("unknown") == -1);
+	b->begin_frame(0.01, 3);
+	CHECK(b->record_cost("dust_devils", 120));
+	CHECK(b->record_cost("dust_devils", 45));
+	CHECK(b->record_cost("dragonflies", 70));
+	CHECK_FALSE(b->record_cost("missing", 100));
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0); // No partial frame leakage.
+	b->begin_frame(0.01, 3);
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 165);
+	CHECK(b->get_lane_last_frame_cost_us("dragonflies") == 70);
+	CHECK(b->last_frame_cost_us() == 235);
+	b->begin_frame(0.01, 3);
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0); // Idle samples clear.
+	CHECK(b->get_lane_last_frame_cost_us("dragonflies") == 0);
+	CHECK(b->record_cost("dust_devils", 999));
+	b->reset();
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0);
+	CHECK(b->unregister_lane("dust_devils"));
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == -1);
+}
+
+TEST_CASE("[FrameUpdateBudget] Soft deferral deadline promotes costly work") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("heavy"));
+	CHECK(b->register_lane("light"));
+	CHECK(b->get_lane_max_deferred_frames("heavy") == 0);
+	CHECK(b->get_lane_max_deferred_frames("unknown") == -1);
+	CHECK_FALSE(b->set_lane_max_deferred_frames("unknown", 2));
+	CHECK_FALSE(b->set_lane_max_deferred_frames("heavy", -1));
+	CHECK_FALSE(b->set_lane_max_deferred_frames("heavy", 121));
+	CHECK(b->set_lane_max_deferred_frames("heavy", 2));
+	CHECK(b->set_lane_importance("heavy", 0.25));
+	CHECK(b->set_lane_importance("light", 4.0));
+	CHECK(b->set_frame_time_budget_us(200));
+	b->begin_frame(0.01, 0);
+	CHECK(b->consume("heavy", 0.01) > 0.0);
+	CHECK(b->consume("light", 0.01) > 0.0);
+	CHECK(b->record_cost("heavy", 1500));
+	CHECK(b->record_cost("light", 80));
+	for (int frame = 0; frame < 2; frame++) {
+		b->begin_frame(0.1, 0);
+		CHECK(b->consume("heavy", 0.1) == 0.0);
+		CHECK(b->consume("light", 0.1) > 0.0);
+		CHECK(b->record_cost("light", 80));
+	}
+	CHECK(b->get_deadline_overdue_lane_count() == 1);
+	b->begin_frame(0.1, 0);
+	CHECK(b->get_reserved_estimated_cost_us() == 1500);
+	CHECK(b->consume("light", 0.1) == 0.0);
+	CHECK(b->consume("heavy", 0.1) > 0.0);
+	CHECK(b->get_deadline_overdue_lane_count() == 0);
+	CHECK(b->last_frame_counts().x == 1);
+	b->reset();
+	CHECK(b->get_lane_max_deferred_frames("heavy") == 2);
+	CHECK(b->get_deadline_overdue_lane_count() == 0);
 }
 
 } // namespace TestFrameUpdateBudget

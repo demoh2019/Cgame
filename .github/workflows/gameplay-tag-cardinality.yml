@@ -1,0 +1,75 @@
+name: Native gameplay tag cardinality and Albion status visuals
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_tags/gameplay_tag_container.*'
+      - 'modules/gameplay_tags/tests/test_gameplay_tags.h'
+      - 'modules/gameplay_tags/doc_classes/GameplayTag*.xml'
+      - 'game/scripts/client/engine_features.gd'
+      - 'game/scripts/client/entity_view.gd'
+      - 'game/tests/test_engine_runtime_tags.gd'
+      - 'game/tests/run_gameplay_tag_cardinality.gd'
+      - '.github/workflows/gameplay-tag-cardinality.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_tags/gameplay_tag_container.*'
+      - 'modules/gameplay_tags/tests/test_gameplay_tags.h'
+      - 'game/scripts/client/engine_features.gd'
+      - 'game/scripts/client/entity_view.gd'
+      - 'game/tests/test_engine_runtime_tags.gd'
+      - 'game/tests/run_gameplay_tag_cardinality.gd'
+      - '.github/workflows/gameplay-tag-cardinality.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-tags-and-game:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Compile and test native gameplay tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*[GameplayTags]*" 2>&1 | tee gameplay-tags-native.log
+          if grep -Ei 'FAILED|failed assertions|test cases:.*failed' gameplay-tags-native.log; then exit 1; fi
+      - name: Import Albion After
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee gameplay-tags-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' gameplay-tags-import.log; then exit 1; fi
+      - name: Verify native and portable gameplay tag integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_gameplay_tag_cardinality.gd 2>&1 | tee gameplay-tags-game.log
+          grep -E '^GAMEPLAY TAGS TOTAL: [0-9]+ checks, 0 failures$' gameplay-tags-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' gameplay-tags-game.log; then exit 1; fi
+      - name: Keep diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gameplay-tag-cardinality-tests
+          if-no-files-found: ignore
+          path: |
+            gameplay-tags-native.log
+            gameplay-tags-import.log
+            gameplay-tags-game.log

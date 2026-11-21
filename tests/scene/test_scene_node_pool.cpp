@@ -60,7 +60,7 @@ TEST_CASE("[SceneNodePool] Prewarm, reuse, overload and eviction") {
 	CHECK(a != b);
 	CHECK(pool.get_active_count() == 2);
 	CHECK(pool.acquire(root) == nullptr);
-	CHECK(pool.get_stats()["rejected_total"] == 1);
+	CHECK(pool.get_stats()["rejected_total"] == Variant(1));
 
 	Node *foreign = memnew(Node);
 	CHECK_FALSE(pool.release(foreign));
@@ -68,13 +68,13 @@ TEST_CASE("[SceneNodePool] Prewarm, reuse, overload and eviction") {
 	CHECK(pool.release(a));
 	CHECK_FALSE(pool.release(a));
 	CHECK(pool.acquire(root) == a);
-	CHECK(pool.get_stats()["created_total"] == 2);
-	CHECK(pool.get_stats()["reused_total"] == 3);
+	CHECK(pool.get_stats()["created_total"] == Variant(2));
+	CHECK(pool.get_stats()["reused_total"] == Variant(3));
 
 	CHECK(pool.release(a));
 	CHECK(pool.release(b));
 	CHECK(pool.get_idle_count() == 2);
-	CHECK(pool.get_stats()["peak_active"] == 2);
+	CHECK(pool.get_stats()["peak_active"] == Variant(2));
 
 	// External code may still hold the returned pointer and free it:
 	// the idle cache must never dereference or resurrect a dangling pointer.
@@ -97,7 +97,7 @@ TEST_CASE("[SceneNodePool] Prewarm, reuse, overload and eviction") {
 	REQUIRE(external_free != nullptr);
 	memdelete(external_free);
 	CHECK(pool.get_active_count() == 0);
-	CHECK(pool.get_stats()["disposed_total"] == 3);
+	CHECK(pool.get_stats()["disposed_total"] == Variant(3));
 
 	memdelete(root);
 }
@@ -118,6 +118,126 @@ TEST_CASE("[SceneNodePool] Cannot change template while checked out") {
 	CHECK(pool.get_template_scene() == first_scene);
 	CHECK(pool.release(leased));
 	pool.clear_idle();
+	memdelete(host);
+}
+
+
+TEST_CASE("[SceneNodePool] Incremental residency honors per-frame budget and protects active leases") {
+	Ref<PackedScene> scene;
+	scene.instantiate();
+	Node *source = memnew(Node);
+	REQUIRE(scene->pack(source) == OK);
+	memdelete(source);
+
+	SceneNodePool pool;
+	pool.set_template_scene(scene);
+	pool.set_max_idle(6);
+	pool.set_max_active(2);
+	pool.set_prewarm_on_ready(false);
+	CHECK(pool.maintain_residency(-1, 2) == 0);
+	CHECK(pool.maintain_residency(4097, 2) == 0);
+	CHECK(pool.maintain_residency(6, -1) == 0);
+	CHECK(pool.maintain_residency(6, 65) == 0);
+	CHECK(pool.maintain_residency(6, 0) == 0);
+	CHECK(pool.get_idle_count() == 0);
+	CHECK(pool.maintain_residency(6, 2) == 2);
+	CHECK(pool.maintain_residency(6, 2) == 2);
+	CHECK(pool.maintain_residency(6, 2) == 2);
+	CHECK(pool.maintain_residency(6, 2) == 0);
+	CHECK(pool.get_idle_count() == 6);
+	CHECK(int(pool.get_stats()["created_total"]) == 6);
+
+	Node *host = memnew(Node);
+	Node *a = pool.acquire(host);
+	Node *b = pool.acquire(host);
+	REQUIRE(a != nullptr);
+	REQUIRE(b != nullptr);
+	CHECK(pool.get_active_count() == 2);
+	CHECK(pool.get_idle_count() == 4);
+	CHECK(pool.maintain_residency(6, 2) == 0);
+	CHECK(int(pool.get_stats()["created_total"]) == 6);
+	CHECK(pool.release(a));
+	CHECK(pool.release(b));
+	CHECK(pool.get_active_count() == 0);
+	CHECK(pool.get_idle_count() == 6);
+
+	CHECK(pool.maintain_residency(2, 1) == -1);
+	CHECK(pool.maintain_residency(2, 1) == -1);
+	CHECK(pool.maintain_residency(2, 2) == -2);
+	CHECK(pool.maintain_residency(2, 2) == 0);
+	CHECK(pool.get_idle_count() == 2);
+	CHECK(int(pool.get_stats()["disposed_total"]) == 4);
+
+	a = pool.acquire(host);
+	b = pool.acquire(host);
+	REQUIRE(a != nullptr);
+	REQUIRE(b != nullptr);
+	CHECK(pool.maintain_residency(0, 2) == 0);
+	CHECK(pool.get_active_count() == 2); // Never disposes checked-out nodes.
+	CHECK(pool.release(a));
+	CHECK(pool.maintain_residency(0, 2) == -1);
+	CHECK(pool.get_active_count() == 1);
+	CHECK(pool.release(b));
+	CHECK(pool.maintain_residency(0, 2) == -1);
+	CHECK(pool.get_idle_count() == 0);
+	CHECK(int(pool.get_stats()["disposed_total"]) == 6);
+	memdelete(host);
+
+	// No scene template: a maintenance query cannot spawn anything.
+	SceneNodePool empty;
+	CHECK(empty.maintain_residency(8, 2) == 0);
+}
+
+
+TEST_CASE("[SceneNodePool] CPU-sliced residency preserves active leases and exposes pending work") {
+	Ref<PackedScene> scene;
+	scene.instantiate();
+	Node *prototype = memnew(Node);
+	REQUIRE(scene->pack(prototype) == OK);
+	memdelete(prototype);
+
+	CHECK_FALSE(SceneNodePool::should_stop_maintenance(0, 3, 100));
+	CHECK_FALSE(SceneNodePool::should_stop_maintenance(1, 0, 100));
+	CHECK_FALSE(SceneNodePool::should_stop_maintenance(100, 1, 99));
+	CHECK(SceneNodePool::should_stop_maintenance(100, 1, 100));
+	CHECK(SceneNodePool::should_stop_maintenance(100, 2, 200));
+
+	SceneNodePool pool;
+	pool.set_template_scene(scene);
+	pool.set_max_idle(6);
+	CHECK(pool.get_last_maintenance_change_count() == 0);
+	CHECK(pool.get_last_maintenance_pending_count() == 0);
+	CHECK(pool.get_last_maintenance_work_usec() == 0);
+	CHECK(pool.maintain_residency(6, 2, -1) == 0);
+	CHECK(pool.maintain_residency(6, 2, 1000001) == 0);
+	CHECK(pool.get_idle_count() == 0);
+	const int first = pool.maintain_residency(6, 2, 1);
+	CHECK(first >= 1);
+	CHECK(first <= 2);
+	CHECK(pool.get_last_maintenance_change_count() == first);
+	CHECK(pool.get_last_maintenance_pending_count() == 6 - first);
+	CHECK(pool.get_last_maintenance_work_usec() >= 0);
+	CHECK(int(pool.get_stats()["maintenance_pending"]) == 6 - first);
+	while (pool.get_idle_count() < 6) {
+		CHECK(pool.maintain_residency(6, 2, 0) > 0);
+	}
+	CHECK(pool.get_last_maintenance_pending_count() == 0);
+	Node *host = memnew(Node);
+	Node *checked_out = pool.acquire(host);
+	REQUIRE(checked_out != nullptr);
+	const int retired = pool.maintain_residency(0, 2, 1);
+	CHECK(retired <= -1);
+	CHECK(retired >= -2);
+	CHECK(pool.get_active_count() == 1);
+	CHECK(pool.get_last_maintenance_change_count() == retired);
+	CHECK(pool.get_last_maintenance_pending_count() == pool.get_idle_count());
+	CHECK(pool.release(checked_out));
+	while (pool.get_idle_count() > 0) {
+		CHECK(pool.maintain_residency(0, 2, 0) < 0);
+	}
+	CHECK(pool.get_last_maintenance_pending_count() == 0);
+	CHECK(pool.maintain_residency(0, 2, 0) == 0);
+	CHECK(pool.get_last_maintenance_change_count() == 0);
 	memdelete(host);
 }
 

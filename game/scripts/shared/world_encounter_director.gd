@@ -13,12 +13,54 @@ const MINIMUM_HEALTH_RATIO: float = 0.0
 const MAXIMUM_HEALTH_RATIO: float = 1.0
 const MAX_SQUAD: int = 10
 
+# The engine implements a reusable numeric pressure policy. Server-owned
+# counts/health still come exclusively from validated GameServer state.
+# Old custom binaries and stock Godot execute the same local reference.
+static var _native_checked: bool = false
+static var _native_budget: Object = null
+
+
+static func has_native_budget() -> bool:
+	if not _native_checked:
+		_native_checked = true
+		if ClassDB.class_exists("AIEncounterBudget"):
+			var policy: Object = ClassDB.instantiate("AIEncounterBudget")
+			if policy != null and policy.has_method("configure_limits") and \
+					policy.has_method("get_spawn_budget") and policy.has_method("get_respite_seconds"):
+				# Keep engine and game parameter defaults synchronized explicitly;
+				# a later gameplay tune does not silently desync native and fallback.
+				if bool(policy.call("configure_limits",
+						WorldIncidents.MAX_ACTIVE_INFECTED, LOCAL_SOFT_CAP,
+						LOCAL_DENSE_CAP, LOCAL_HARD_CAP, 7, MAX_SQUAD, 3)):
+					_native_budget = policy
+	return _native_budget != null
+
 
 ## Counts living enemies in a bounded radius. Early exit avoids scanning the
 ## rest of the world after the local crowd has saturated the encounter.
-static func nearby_infected(zombies: Dictionary, center: Vector3) -> int:
+static func nearby_infected(zombies: Dictionary, center: Vector3,
+		prefer_native: bool = true) -> int:
 	if not center.is_finite():
 		return LOCAL_HARD_CAP
+	# Reusable Unreal-style 3D relevancy broadphase. Keep exact sphere semantics:
+	# underground and aboveground infected must not count as neighbors.
+	# Small parties pay no native allocation or hash setup cost.
+	# Only trusted server entities are indexed; the client supplies no positions.
+	if prefer_native and zombies.size() > 12 and ClassDB.class_exists("SpatialPointGrid3D"):
+		var native: Object = ClassDB.instantiate("SpatialPointGrid3D")
+		if native != null and native.has_method("rebuild") and native.has_method("count_within"):
+			var living_positions: Array[Vector3] = []
+			for infected in zombies.values():
+				if infected == null or not infected.has_method("is_alive") or not infected.is_alive():
+					continue
+				var candidate: Variant = infected.get("position")
+				if candidate is Vector3 and candidate.is_finite():
+					living_positions.append(candidate)
+			if bool(native.call("rebuild", living_positions)):
+				var count: int = int(native.call("count_within", center,
+					LOCAL_RADIUS, LOCAL_HARD_CAP))
+				if count >= 0:
+					return count
 	var radius_squared: float = LOCAL_RADIUS * LOCAL_RADIUS
 	var found: int = 0
 	for infected in zombies.values():
@@ -37,7 +79,10 @@ static func nearby_infected(zombies: Dictionary, center: Vector3) -> int:
 ## Server-owned budget is the minimum of local pressure, health sensitivity,
 ## zone difficulty and the global infected cap. Invalid state fails closed.
 static func spawn_budget(total_infected: int, nearby: int,
-		health_ratio: float, zone: int) -> int:
+		health_ratio: float, zone: int, prefer_native: bool = true) -> int:
+	if prefer_native and has_native_budget():
+		return int(_native_budget.call("get_spawn_budget",
+			total_infected, nearby, health_ratio, zone))
 	if total_infected < 0 or nearby < 0 or not is_finite(health_ratio):
 		return 0
 	var headroom: int = WorldIncidents.MAX_ACTIVE_INFECTED - total_infected
@@ -68,7 +113,9 @@ static func bounded_roster(roster: Array, limit: int) -> Array:
 ## Extra recovery when crowds are building or survivors are badly hurt.
 ## No shorter-than-original cooldowns and no client-side difficulty controls.
 static func respite_seconds(base_delay: float, nearby: int,
-		health_ratio: float) -> float:
+		health_ratio: float, prefer_native: bool = true) -> float:
+	if prefer_native and has_native_budget():
+		return float(_native_budget.call("get_respite_seconds", base_delay, nearby, health_ratio))
 	if not is_finite(base_delay) or base_delay < 0.0 or not is_finite(health_ratio):
 		return 0.0
 	var bonus: float = 0.0

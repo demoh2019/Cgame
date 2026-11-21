@@ -35,6 +35,7 @@ TEST_FORCE_LINK(test_skeleton_3d)
 #ifndef _3D_DISABLED
 
 #include "scene/3d/skeleton_3d.h"
+#include "scene/3d/skeleton_modifier_3d.h"
 
 namespace TestSkeleton3D {
 
@@ -74,6 +75,46 @@ TEST_CASE("[Skeleton3D] Test per-bone meta") {
 	skeleton->set_bone_meta(0, "non-existing-key", Variant());
 	memdelete(skeleton);
 }
+
+
+TEST_CASE("[Skeleton3D][SkeletonModifier3D] universal CPU profiler is opt-in and portable") {
+	SkeletonModifier3D *mod = memnew(SkeletonModifier3D);
+	CHECK_FALSE(mod->is_modifier_profiling_enabled());
+	CHECK(mod->get_modifier_last_update_us() == 0);
+	CHECK(mod->get_modifier_estimated_update_us() == 0);
+	CHECK(mod->get_modifier_profile_sample_count() == 0);
+
+	// This call should never sample when not in a SceneTree. No fake
+	// performance thresholds or renderer timings are needed for unit tests.
+	mod->set_modifier_profiling_enabled(true);
+	mod->process_modification(1.0 / 60.0);
+	CHECK(mod->get_modifier_profile_sample_count() == 0);
+	CHECK(mod->get_modifier_estimated_update_us() == 0);
+	mod->set_modifier_profiling_enabled(false);
+	CHECK_FALSE(mod->is_modifier_profiling_enabled());
+	mod->set_modifier_profiling_enabled(true);
+	CHECK(mod->is_modifier_profiling_enabled());
+	mod->reset_modifier_profile();
+	CHECK(mod->get_modifier_last_update_us() == 0);
+	CHECK(mod->get_modifier_estimated_update_us() == 0);
+	CHECK(mod->get_modifier_profile_sample_count() == 0);
+
+	// Integer-only smoothing is deterministic on any CPU and build.
+	CHECK(SkeletonModifier3D::smooth_modifier_cost_us(0, 100) == 100);
+	CHECK(SkeletonModifier3D::smooth_modifier_cost_us(400, 100) == 325);
+	CHECK(SkeletonModifier3D::smooth_modifier_cost_us(325, 100) == 269);
+	CHECK(SkeletonModifier3D::smooth_modifier_cost_us(1, 1) == 1);
+	CHECK(SkeletonModifier3D::smooth_modifier_cost_us(100000, 100000) == 100000);
+	ERR_PRINT_OFF
+	CHECK(SkeletonModifier3D::smooth_modifier_cost_us(-1, 100) == -1);
+	CHECK(SkeletonModifier3D::smooth_modifier_cost_us(0, 0) == -1);
+	CHECK(SkeletonModifier3D::smooth_modifier_cost_us(0, 100001) == -1);
+	CHECK(SkeletonModifier3D::smooth_modifier_cost_us(100001, 1) == -1);
+	ERR_PRINT_ON
+
+	memdelete(mod);
+}
+
 
 } // namespace TestSkeleton3D
 

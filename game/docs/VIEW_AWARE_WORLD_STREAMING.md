@@ -119,3 +119,32 @@ Lower thresholds improve response to smaller camera cuts; higher thresholds redu
 
 Rebuild the custom Godot engine, then capture a rapid first-person 180° camera turn while standing still and measure queued-cell latency and p95/p99 CPU frame time. Compare High/Ultra against the old 150 ms refresh cadence, and verify no extra chunks or memory growth. This update has not been compiled or profiled on actual hardware in the current session.
 
+## Horizontal camera FOV priority (engine + Albion After)
+
+The streamer now exposes `view_cone_half_angle_degrees` (1–180°, default **180°**).
+The old heading-only priority is preserved at the default. When a narrower
+value is configured, the native queue still ranks by distance and motion but
+smoothly reduces its **cosmetic camera-facing bonus** toward the edge of the
+horizontal viewing cone; off-cone chunks receive no view bonus. Both procedural
+generation and completed threaded scene activation use the same ranking.
+
+`game/scripts/client/world_streaming_policy.gd` computes a conservative
+perspective-camera half-angle from the actual camera FOV, viewport aspect ratio
+and `keep_aspect` setting, adding a 12° safety margin. Orthographic cameras,
+missing cameras and invalid FOV/viewport dimensions use 180°, which keeps the
+old behavior. A feature-detection guard preserves compatibility with older
+Cgame binaries without the new property. Existing per-tier view strength and
+camera-turn refresh thresholds remain unchanged.
+
+- This is **priority only**, not rendering frustum culling. The load/unload
+  radii, cell count, networking, collisions, and server-authoritative gameplay
+  are unchanged.
+- Native unit tests cover default-equivalent ordering, the reduced priority
+  of off-cone diagonals, stable membership, and invalid setter inputs.
+- Game tests in `game/tests/test_predictive_streaming.gd` cover the perspective
+  aspect-ratio math, fallback behavior and runtime property API.
+- Validation on compiled Cgame:
+  `godot --headless --path game --script res://tests/run_all.gd`.
+  FPS/frame-time claims require a before/after runtime benchmark and are not
+  inferred from unit tests alone.
+

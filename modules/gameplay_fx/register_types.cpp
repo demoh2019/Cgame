@@ -35,6 +35,7 @@
 #include "gameplay_cooldown_tracker.h"
 #include "gameplay_cue_queue.h"
 #include "gameplay_effect_application_gate.h"
+#include "gameplay_effect_stack_policy.h"
 #include "gameplay_effect_timeline.h"
 #include "radial_force_field_3d.h"
 #include "sound_concurrency.h"
@@ -59,6 +60,7 @@ void initialize_gameplay_fx_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(GameplayCooldownTracker);
 	GDREGISTER_CLASS(GameplayCueQueue);
 	GDREGISTER_CLASS(GameplayEffectApplicationGate);
+	GDREGISTER_CLASS(GameplayEffectStackPolicy);
 	GDREGISTER_CLASS(AudioDuckMix);
 	GDREGISTER_CLASS(AudioMixSnapshotController);
 }

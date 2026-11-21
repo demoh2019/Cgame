@@ -17,6 +17,7 @@ const InfectedSight = preload("res://scripts/shared/infected_sight.gd")
 const InfectedMeleeCover = preload("res://scripts/shared/infected_melee_cover.gd")
 const NativeSenses = preload("res://scripts/shared/native_infected_senses.gd")
 const EffectRules = preload("res://scripts/shared/effect_application_rules.gd")
+const InfectedTargetUtility = preload("res://scripts/shared/infected_target_utility.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -38,6 +39,9 @@ var home: Vector2
 var wander_target: Vector2
 var last_known_target: Vector2
 var investigate_time: float = 0.0
+# Prevent oscillating between two expired/barely audible world positions.
+# This is transient server-only search memory, not a networked actor target.
+var _investigated_sound_sites: Array[Vector2] = []
 const INVESTIGATE_SECONDS := 4.0
 var think_timer: float = 0.0
 var ai_selection_allowed: bool = true # Server-only scheduling hint, no effect on attacks/movement.
@@ -63,6 +67,8 @@ var _native_senses: Variant = null # Lazy per-infected memory; optional on stock
 var _ai_profiler: Variant = null # Opt-in per-infected target selection profiling.
 var _ai_trace: Variant = null # Opt-in server-only native target decision trace.
 var _ai_lod_staggered: bool = false # Phase only the first distant passive scan.
+var _ai_lod_previous_interval: float = 0.0 # Per-infected nominal passive tier; engine stays stateless.
+var _passive_crowd_separation: Vector2 = Vector2.ZERO # Server-sampled cosmetic steering; never combat authority.
 static var _ai_lod_checked: bool = false
 static var _ai_lod_scheduler: Variant = null
 var _native_howl_cooldowns: Variant = null # Lazily allocated native event gate for pack howls.
@@ -266,6 +272,9 @@ func is_alive() -> bool:
 ## server-owned sensory channels revealing noisy or wounded survivors.
 ## Returns {"hit": peer_id, "damage": float} when the zombie lands a blow, else {}.
 func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator) -> Dictionary:
+	flank_last_step_us = 0
+	flank_last_step_candidates = 0
+	flank_last_timed_steps = 0
 	if state == State.DEAD:
 		return {}
 	if _ai_trace != null:
@@ -330,13 +339,37 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				# exact legacy 0.25s scan, including audible gunshots.
 				var near_range: float = float(data["lose"])
 				var far_range: float = near_range + 24.0
-				if not _ai_lod_staggered and nearest_viewer > near_range:
-					think_timer = float(lod.get_staggered_interval(
-						id, nearest_viewer, near_range, far_range))
-					_ai_lod_staggered = true
+				# Mass Simulation LOD: one native query now composes nominal
+				# distance tier, one-time stable ID phase and temporal hysteresis.
+				# The authoritative server still owns the per-zombie phase flag
+				# and previous interval; no combat or movement cadence changes.
+				if lod.has_method("plan_passive_scan"):
+					var plan: Vector2 = lod.plan_passive_scan(
+						id, nearest_viewer, near_range, far_range,
+						_ai_lod_previous_interval, 4.0, _ai_lod_staggered)
+					_ai_lod_previous_interval = plan.x
+					think_timer = plan.y
+					if not _ai_lod_staggered and nearest_viewer > near_range:
+						_ai_lod_staggered = true
 				else:
-					think_timer = float(lod.get_interval(
+					# Stock Godot and older Cgame binaries retain the exact
+					# original scalar scheduler and first-scan semantics.
+					var nominal: float = float(lod.get_interval(
 						nearest_viewer, near_range, far_range))
+					if not _ai_lod_staggered and nearest_viewer > near_range:
+						think_timer = float(lod.get_staggered_interval(
+							id, nearest_viewer, near_range, far_range))
+						_ai_lod_staggered = true
+					else:
+						if lod.has_method("get_hysteretic_interval"):
+							nominal = float(lod.get_hysteretic_interval(
+								nearest_viewer, near_range, far_range,
+								_ai_lod_previous_interval, 4.0))
+						think_timer = nominal
+					_ai_lod_previous_interval = nominal
+		elif target_id != -1:
+			# A later passive scan cannot inherit stale LOD during combat.
+			_ai_lod_previous_interval = 0.0
 		if _ai_profiler != null and _ai_profiler.is_enabled():
 			_ai_profiler.end_sample(&"target_selection")
 
@@ -354,17 +387,47 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				else:
 					_move_toward(world, here, wander_target, float(data["speed"]) * 0.4, delta)
 		State.INVESTIGATE:
-			# Do not magically follow a survivor beyond our pursuit leash.
-			# Examine the place where they were last tracked, then return home.
+			# Continue an already authorized search only while time remains.
+			# At most two distinct locations: no unbounded patrol/search loops.
 			investigate_time = maxf(0.0, investigate_time - delta)
-			if investigate_time <= 0.0 or here.distance_to(last_known_target) < 0.8:
+			if investigate_time <= 0.0:
 				state = State.WANDER
 				wander_target = home
 				stuck_time = 0.0
+			elif here.distance_to(last_known_target) < 0.8:
+				var next_sound := Vector2.INF
+				if _native_senses != null and _investigated_sound_sites.is_empty():
+					_investigated_sound_sites.append(last_known_target)
+					for event in _native_senses.get_ranked_confirmed_stimuli(1, 8):
+						var candidate: Variant = event.get("position", Vector2.INF)
+						if not (candidate is Vector2) or not candidate.is_finite() or \
+								here.distance_to(candidate) > float(data["lose"]) or \
+								world.is_safe(candidate.x, candidate.y) or \
+								world.is_water(candidate.x, candidate.y):
+							continue
+						var visited := false
+						for earlier in _investigated_sound_sites:
+							if earlier.distance_to(candidate) < 2.0:
+								visited = true
+								break
+						if not visited:
+							next_sound = candidate as Vector2
+							break
+				if next_sound.is_finite():
+					last_known_target = next_sound
+				else:
+					state = State.WANDER
+					wander_target = home
+					stuck_time = 0.0
 			else:
 				_move_toward(world, here, last_known_target, float(data["speed"]) * 0.7, delta)
 		State.CHASE, State.ATTACK:
 			if not players.has(target_id) or not players[target_id]["alive"] or players[target_id]["safe"]:
+				# The authoritative player list owns eligibility: a disconnected,
+				# dead or safe-zone survivor must not persist as a remembered
+				# source while unrelated confirmed events remain available.
+				if _native_senses != null and target_id >= 0:
+					_native_senses.forget_confirmed_source(target_id)
 				target_id = -1
 				state = State.IDLE
 				return {}
@@ -372,18 +435,26 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 			var target := Vector2(target_pos.x, target_pos.z)
 			var distance := here.distance_to(target)
 			if distance > float(data["lose"]):
+				var lost_target_id: int = target_id
 				target_id = -1
 				state = State.INVESTIGATE
-				# When the target was heard but not seen recently, investigate the
-				# verified sound instead of its magically updated current location.
+				_investigated_sound_sites.clear()
+				# Per-actor, already-approved sound memory has precedence over
+				# louder sounds from another survivor. Never use the escaped
+				# player's unobserved CURRENT position or bypass the pursuit leash.
 				if _native_senses != null and not _native_senses.remembers_sight():
-					if _native_senses.remembers_sound():
+					var own_sound: Dictionary = _native_senses.best_confirmed_stimulus_for_source_in_radius(
+						1, lost_target_id, here, float(data["lose"]))
+					if not own_sound.is_empty():
+						last_known_target = own_sound["position"]
+					elif _native_senses.remembers_sound():
 						last_known_target = _native_senses.last_heard_position()
 					else:
 						# A separately confirmed, more recent sound can remain valid
 						# after the strongest ranked sound has expired. This never
 						# changes target_id, creates LOS or overrides safe-zone rules.
-						var remembered_sound: Dictionary = _native_senses.best_confirmed_stimulus(1)
+						var remembered_sound: Dictionary = _native_senses.best_confirmed_stimulus_in_radius(
+							1, here, float(data["lose"]))
 						if not remembered_sound.is_empty():
 							last_known_target = remembered_sound["position"]
 				investigate_time = HUNTER_SEARCH_SECONDS if behavior == "hunter" else INVESTIGATE_SECONDS
@@ -478,6 +549,7 @@ func consume_howl() -> bool:
 
 func _note_target_acquired() -> void:
 	unseen_seconds = 0.0
+	_investigated_sound_sites.clear()
 	if data.has("howl_radius") and target_id != -1 and target_id != _howled_at:
 		_howled_at = target_id
 		_howl_pending = true
@@ -527,6 +599,7 @@ func _select_target(world, players: Dictionary, here: Vector2) -> float:
 		return 0.0
 	var best := -1
 	var best_distance := INF
+	var best_score := 0.0
 	var nearest_eligible_distance := INF
 	for peer_id in players:
 		var info: Dictionary = players[peer_id]
@@ -589,9 +662,13 @@ func _select_target(world, players: Dictionary, here: Vector2) -> float:
 				_native_senses.record_confirmed_sound(here, Vector2(p.x, p.z), hearing, int(peer_id))
 		var nonvisual: bool = heard or distance <= scent
 		var potentially_visible: bool = distance <= maxf(notice, firelight)
-		if distance < best_distance and (peer_id == target_id or nonvisual or
+		# Utility AI prey choice: proximity dominates; wounds, current focus and noise tip it.
+		var utility: float = InfectedTargetUtility.score(distance, float(data["lose"]),
+			float(info.get("health_fraction", 1.0)), peer_id == target_id, float(info.get("noise", 0.0)) > 0.0)
+		if utility > best_score and (peer_id == target_id or nonvisual or
 				(potentially_visible and InfectedSight.clear_path(world, position, p))):
 			best = peer_id
+			best_score = utility
 			best_distance = distance
 	if best != -1:
 		target_id = best
@@ -651,11 +728,28 @@ const FLANK_FROM := 3.5 # Closer than this, an infected goes straight for its ta
 const FLANK_RANGE := 14.0
 const FLANK_RING := 2.4
 const FLANK_REPLAN_SECONDS := 0.30
+const FLANK_INCREMENTAL_STEP := 3 # Bootstrap cap for older native engines.
+const FLANK_EQS_TIME_BUDGET_US := 120 # Soft per-granted-query CPU time budget.
+const FLANK_EQS_MAX_CANDIDATES := 8 # Hard source-item safety cap for each step.
 var _flank_query: Resource
 var _flank_goal_cached := Vector2.ZERO
 var _flank_here_cached := Vector2.INF
 var _flank_target_cached := Vector2.INF
 var _flank_replan_remaining := 0.0
+var _flank_target_id_cached: int = -1
+var _flank_slot_id_cached: int = 0 # Validate cached goal against current server lease.
+var flank_reservations: Variant = null # Shared server-owned smart-object lease pool.
+var flank_replan_allowed: bool = true # Only optional EQS geometry; combat remains unthrottled.
+var flank_incremental_enabled: bool = false # GameServer opts in for 64+ active infected.
+var flank_tick_budget: Variant = null # Optional shared, native per-tick EQS ledger.
+var flank_step_urgent: bool = false # Lease recovery uses a separate capped pool.
+var flank_last_step_us: int = 0 # Measured native score work in this AI tick.
+var flank_last_step_candidates: int = 0
+var flank_last_timed_steps: int = 0
+var _flank_incremental_running: bool = false
+var _flank_incremental_target_id: int = -1
+var _flank_incremental_here := Vector2.INF
+var _flank_incremental_target := Vector2.INF
 
 
 ## Where a chasing infected heads: a pack surrounds its prey instead of queueing behind one another. The engine's
@@ -663,19 +757,61 @@ var _flank_replan_remaining := 0.0
 ## each one takes a different point among the best by its id, so the pack spreads to the sides. Bosses and brutes
 ## charge straight in, and so does everyone in the last few metres.
 func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
+	# These per-step counters are set only by a completed native timed call.
+	# Direct test calls and unchanged movement never report phantom CPU work.
+	flank_last_step_us = 0
+	flank_last_step_candidates = 0
+	flank_last_timed_steps = 0
 	var distance := here.distance_to(target)
 	if raid_boss or type == "brute" or distance < FLANK_FROM or distance > FLANK_RANGE \
 			or not ClassDB.class_exists("EnvironmentQuery3D"):
+		if _flank_incremental_running:
+			_flank_query.call("cancel_incremental_top_positions")
+			_flank_incremental_running = false
 		return target
 	# Tactical decisions cost more than movement; cache only while valid.
-	if _flank_replan_remaining > 0.0 and \
+	# Invalidate cached ring claims when the authoritative target changes.
+	if not _flank_incremental_running and _flank_replan_remaining > 0.0 and _flank_target_id_cached == target_id and \
 			here.distance_squared_to(_flank_here_cached) <= 3.24 and \
 			target.distance_squared_to(_flank_target_cached) <= 1.0:
-		return _flank_goal_cached
+		# One native/portable O(1) heartbeat validates the exact server-owned
+		# claim, keeps its lease alive and atomically marks occupancy as the
+		# infected actually reaches (or leaves) the physical flank spot.
+		# A preempted/expired handle fails and forces fresh EQS planning.
+		if flank_reservations != null and _flank_slot_id_cached > 0 \
+				and flank_reservations.has_method("refresh_claim"):
+			var at_slot: bool = here.distance_squared_to(_flank_goal_cached) <= 1.0
+			if flank_reservations.refresh_claim(_flank_slot_id_cached, id, 1.5, at_slot):
+				return _flank_goal_cached
+		# Older native engines retain their owner-only query, never a client
+		# claim; a portable pool also exposes the new heartbeat above.
+		elif flank_reservations == null or not flank_reservations.has_method("get_actor_slot") \
+				or int(flank_reservations.get_actor_slot(id)) == _flank_slot_id_cached:
+			return _flank_goal_cached
+	# Pending query results are tied to the original actor/target context.
+	# Discard when combat target changes or geometry becomes too stale.
+	if _flank_incremental_running and (not flank_incremental_enabled or \
+			_flank_incremental_target_id != target_id or \
+			here.distance_squared_to(_flank_incremental_here) > 196.0 or \
+			target.distance_squared_to(_flank_incremental_target) > 81.0):
+		_flank_query.call("cancel_incremental_top_positions")
+		_flank_incremental_running = false
+	# Server admission gates ONLY a costly fresh EQS lookup. Valid cached
+	# goals are handled above; stale/lost claims take the safe direct-chase
+	# path instead of reusing a slot owned by someone else.
+	if not flank_replan_allowed:
+		return target
 	if _flank_query == null:
 		_flank_query = ClassDB.instantiate("EnvironmentQuery3D")
 		_flank_query.set("horizontal_only", true)
-		_flank_query.set("max_results", 3)
+	var use_smart_slots: bool = flank_reservations != null and target_id > 0 and target_id < (1 << 40)
+	var incremental_available: bool = flank_incremental_enabled and \
+		_flank_query.has_method("begin_incremental_top_positions") and \
+		_flank_query.has_method("step_incremental_top_positions") and \
+		_flank_query.has_method("get_incremental_random_best_positions")
+	# Keep the complete eight-item score band so the final seeded selection
+	# is identical to Random Best 25% without a second full scoring pass.
+	_flank_query.set("max_results", 8 if use_smart_slots or incremental_available else 3)
 	_flank_query.set("origin", Vector3(here.x, 0.0, here.y))
 	# UE-style directional EQS context: select the sides or far side of
 	# the target instead of wasting a flank slot on its near-side approach.
@@ -684,19 +820,155 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		_flank_query.set("direction_origin", Vector3(target.x, 0.0, target.y))
 		_flank_query.set("direction_axis", Vector3(target.x - here.x, 0.0, target.y - here.y))
 		_flank_query.set("min_direction_dot", -0.25)
+		# Angular EQS band: prefer side slots, not straight through the survivor.
+		# Older engine binaries retain the original one-sided cone.
+		if _flank_query.has_method("set_max_direction_dot"):
+			_flank_query.set("max_direction_dot", 0.75)
 		_flank_query.set("use_direction", true)
-	_flank_query.set("candidates", EnvironmentQuery3D.sample_ring(
-		Vector3(target.x, 0.0, target.y), FLANK_RING, 8, float(posmod(id, 8)) * 0.4))
-	# No full sort or per-candidate dictionaries: the native bound is 3.
-	var ranked: PackedVector3Array = _flank_query.call("query_top_positions", 3)
-	if ranked.is_empty():
+	# Every agent targeting the same survivor now sees the SAME eight ring
+	# slots. The server leases distinct slots; old builds without a shared pool
+	# retain the original per-agent phase-shifted EQS behavior.
+	var ring: PackedVector3Array = EnvironmentQuery3D.sample_ring(
+		Vector3(target.x, 0.0, target.y), FLANK_RING, 8,
+		0.0 if use_smart_slots else float(posmod(id, 8)) * 0.4)
+	_flank_query.set("candidates", ring)
+	# The authoritative server grants each agent a per-tick EQS work slot.
+	# The native cursor starts conservatively, then adapts to measured CPU
+	# microseconds with an eight-item hard maximum per granted work tick.
+	# Never use partial rankings to claim a gameplay Smart Object.
+	var ranked_indices := PackedInt32Array()
+	var ranked := PackedVector3Array()
+	var top_count: int = 8 if use_smart_slots or incremental_available else 3
+	var incremental: bool = incremental_available and \
+		_flank_query.has_method("get_incremental_top_indices")
+	var preferred := PackedVector3Array()
+	if incremental:
+		var global_admission: bool = flank_tick_budget != null and \
+			_flank_query.has_method("step_incremental_top_positions_timed") and \
+			flank_tick_budget.has_method("try_admit_step")
+		# Denied tactical work never blocks movement/attack or consumes a
+		# partial result; ordinary and urgent budgets are independent.
+		if global_admission and not bool(flank_tick_budget.try_admit_step(flank_step_urgent)):
+			return target
+		var step_time_us: int = FLANK_EQS_TIME_BUDGET_US
+		if global_admission:
+			step_time_us = mini(step_time_us, int(
+				flank_tick_budget.get_remaining_us(flank_step_urgent)))
+		if not _flank_incremental_running:
+			if not bool(_flank_query.call("begin_incremental_top_positions", top_count)):
+				if global_admission:
+					flank_tick_budget.cancel_pending_step()
+				return target
+			_flank_incremental_running = true
+			_flank_incremental_target_id = target_id
+			_flank_incremental_here = here
+			_flank_incremental_target = target
+		var done: bool = false
+		if _flank_query.has_method("step_incremental_top_positions_timed") and \
+				_flank_query.has_method("suggest_incremental_step_size"):
+			# Native measured-cost forecasting starts with a conservative
+			# 3-item batch and adapts up/down from observed microseconds.
+			# Actual wall clock is still checked between every candidate.
+			var budget: int = int(_flank_query.call("suggest_incremental_step_size",
+				step_time_us, FLANK_EQS_MAX_CANDIDATES))
+			budget = clampi(budget, 1, FLANK_EQS_MAX_CANDIDATES)
+			done = bool(_flank_query.call("step_incremental_top_positions_timed",
+				step_time_us, budget))
+			flank_last_step_us = int(_flank_query.call("get_incremental_last_step_us"))
+			flank_last_step_candidates = int(_flank_query.call("get_incremental_last_step_candidates"))
+			flank_last_timed_steps = 1
+			if global_admission:
+				# Debit the shared tick ledger before any next infected can start.
+				flank_tick_budget.record_step(flank_last_step_us)
+		else:
+			# Older Cgame builds retain the original strict 3-item
+			# deterministic count budget with identical final results.
+			done = bool(_flank_query.call("step_incremental_top_positions", FLANK_INCREMENTAL_STEP))
+		if not done:
+			return target
+		ranked_indices = _flank_query.call("get_incremental_top_indices")
+		preferred = _flank_query.call("get_incremental_random_best_positions", 25, id)
+		_flank_query.call("cancel_incremental_top_positions")
+		_flank_incremental_running = false
+	else:
+		# Small crowds and older engine builds keep the original synchronous
+		# path. Recent builds return exact source indices for duplicate items.
+		if _flank_query.has_method("query_top_indices"):
+			ranked_indices = _flank_query.call("query_top_indices", top_count)
+			for ring_index in ranked_indices:
+				if ring_index < 0 or ring_index >= ring.size():
+					return target
+		else:
+			ranked = _flank_query.call("query_top_positions", top_count)
+	# No additional candidate scoring after the incremental result
+	# completes. Legacy paths retain the existing immediate query.
+	if not incremental and _flank_query.has_method("query_random_best_positions"):
+		preferred = _flank_query.call("query_random_best_positions", 25, id)
+	if not use_smart_slots and preferred.size() == 1:
+		ranked_indices = PackedInt32Array()
+		ranked = preferred
+	if ranked_indices.is_empty() and ranked.is_empty():
 		return target
-	var spot: Vector3 = ranked[posmod(id, ranked.size())]
+	var spot: Vector3 = ring[ranked_indices[posmod(id, ranked_indices.size())]] \
+		if not ranked_indices.is_empty() else ranked[posmod(id, ranked.size())]
+	var claimed_slot: int = 0
+	if use_smart_slots:
+		var slot_ids := PackedInt64Array()
+		# The ring's eight distinct locations allow a cheap 1-item lookup.
+		# Identity-aware ranked indices from newer engines stay intact.
+		if preferred.size() == 1:
+			for ring_index in ring.size():
+				if ring[ring_index].distance_squared_to(preferred[0]) < 0.0001:
+					slot_ids.append(target_id * 16 + ring_index + 1)
+					break
+		if not ranked_indices.is_empty():
+			for ring_index in ranked_indices:
+				# Each original EQS candidate retains its unique source ID.
+				var sid: int = target_id * 16 + ring_index + 1
+				if not slot_ids.has(sid):
+					slot_ids.append(sid)
+		else:
+			for candidate in ranked:
+				for ring_index in ring.size():
+					if ring[ring_index].distance_squared_to(candidate) < 0.0001:
+						# Backwards compatibility with older position-only EQS.
+						var sid: int = target_id * 16 + ring_index + 1
+						if not slot_ids.has(sid):
+							slot_ids.append(sid)
+						break
+		if slot_ids.is_empty():
+			return target
+		# Elite AI may preempt ordinary pending claims, not occupied slots.
+		# Legacy native builds still use the original exclusive reservation API.
+		var claimed: int = 0
+		if flank_reservations.has_method("try_claim_first_priority"):
+			claimed = int(flank_reservations.try_claim_first_priority(
+				slot_ids, id, 1.5, 2 if elite else 0))
+		else:
+			claimed = int(flank_reservations.try_claim_first(slot_ids, id, 1.5))
+		if claimed <= 0:
+			return target # An overcrowded pack still pursues normally.
+		var claimed_index: int = (claimed - target_id * 16 - 1)
+		if claimed_index < 0 or claimed_index >= ring.size():
+			return target
+		spot = ring[claimed_index]
+		claimed_slot = claimed
+		if flank_reservations.has_method("set_slot_occupied"):
+			var active: bool = here.distance_squared_to(Vector2(spot.x, spot.z)) <= 1.0
+			flank_reservations.set_slot_occupied(claimed, id, active)
+	_flank_slot_id_cached = claimed_slot
 	_flank_goal_cached = Vector2(spot.x, spot.z)
 	_flank_here_cached = here
 	_flank_target_cached = target
+	_flank_target_id_cached = target_id
 	_flank_replan_remaining = FLANK_REPLAN_SECONDS
 	return _flank_goal_cached
+
+## The server supplies bounded, already-sampled nearby-agent repulsion.
+## Malformed native output cannot steer an infected across the world.
+func set_passive_crowd_separation(value: Vector2) -> void:
+	_passive_crowd_separation = value.limit_length(1.0) if value.is_finite() else Vector2.ZERO
+
 
 func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: float) -> void:
 	if snared_seconds > 0.0:
@@ -706,6 +978,10 @@ func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: floa
 	if direction.length() < 0.01:
 		return
 	direction = direction.normalized()
+	# Mass-avoidance style separation is deliberately cosmetic to path choice.
+	# Never divert pursuit, melee, boss attacks, snares or combat knockback.
+	if state == State.WANDER or state == State.INVESTIGATE:
+		direction = (direction + _passive_crowd_separation * 0.35).normalized()
 	yaw = atan2(direction.x, direction.y)
 	var before := position
 	# Zombies use the same movement rules as players, so they are stopped by trees, rocks and deep water.
@@ -724,11 +1000,12 @@ func apply_stagger(seconds: float) -> bool:
 	if not EffectRules.can_apply(EffectRules.STAGGER, is_alive(), raid_boss):
 		return false
 	var stacks: int = stagger_resolve_stacks if stagger_resolve_seconds > 0.0 else 0
-	var effective: float = InfectedResolve.duration(seconds, stacks, elite)
-	if effective <= stagger_seconds:
+	var application: Dictionary = InfectedResolve.plan_application(
+		seconds, stacks, stagger_seconds, elite)
+	if not bool(application["accepted"]):
 		return false
-	stagger_seconds = effective
-	stagger_resolve_stacks = mini(stacks + 1, InfectedResolve.MAX_STACKS)
+	stagger_seconds = float(application["remaining"])
+	stagger_resolve_stacks = int(application["stacks"])
 	stagger_resolve_seconds = InfectedResolve.RESET_SECONDS
 	# An effective stun interrupts an in-flight acid windup.
 	spit_pending = false

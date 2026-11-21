@@ -54,6 +54,10 @@ class SceneNodePool : public Node {
 	uint64_t disposed_total = 0;
 	uint64_t rejected_total = 0;
 	int peak_active = 0;
+	// Last *explicit* residency maintenance invocation (not acquire/release).
+	int64_t last_maintenance_work_usec = 0;
+	int last_maintenance_change_count = 0; // Signed: created +, disposed -.
+	int last_maintenance_pending_count = 0;
 
 	Node *_new_instance();
 	void _prune_active();
@@ -77,6 +81,16 @@ public:
 	bool is_prewarm_on_ready() const { return prewarm_on_ready; }
 
 	int prewarm(int p_target);
+	// Signed number of instances created (+) or idle instances disposed (-).
+	// Target applies to all live leases + idle cache; never evicts checked-out
+	// instances. Work is bounded to at most 64 changes per invocation.
+	int maintain_residency(int p_target_total, int p_max_changes = 2, int p_max_work_usec = 0);
+	int64_t get_last_maintenance_work_usec() const { return last_maintenance_work_usec; }
+	int get_last_maintenance_change_count() const { return last_maintenance_change_count; }
+	int get_last_maintenance_pending_count() const { return last_maintenance_pending_count; }
+	// A positive CPU cap is soft: the first indivisible scene operation
+	// always progresses; later operations stop after the deadline.
+	static bool should_stop_maintenance(int p_work_usec, int p_completed_changes, int64_t p_elapsed_usec);
 	Node *acquire(Node *p_parent);
 	bool release(Node *p_instance);
 	void release_deferred(Node *p_instance);

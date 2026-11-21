@@ -148,8 +148,13 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 	if timeline != null:
 		var effects: Dictionary = runtime_effect_snapshot(kind, snapshot)
 		var applied := false
-		# Preserve client-local visual timers and periodic pulses across server snapshots.
-		if timeline.has_method("replace_effect_branch"):
+		# Repeated server snapshots must not erase already accrued cosmetic
+		# pulses for the same ongoing status. Native reconciliation discards
+		# pulses only when that status ends or its periodic phase is redefined.
+		if timeline.has_method("reconcile_effect_branch"):
+			applied = bool(timeline.call("reconcile_effect_branch", StringName("Runtime"), effects))
+		elif timeline.has_method("replace_effect_branch"):
+			# Older Cgame binaries keep their existing snapshot semantics.
 			applied = bool(timeline.call("replace_effect_branch", StringName("Runtime"), effects))
 		elif timeline.has_method("replace_snapshot"):
 			applied = bool(timeline.call("replace_snapshot", effects))
@@ -192,10 +197,17 @@ static func tick_runtime_effects(node: Node, delta: float) -> Dictionary:
 	if node == null or not is_finite(delta) or delta <= 0.0:
 		return {}
 	var timeline: Object = node.get_meta("effect_timeline", null) as Object
-	if timeline != null and timeline.has_method("tick"):
-		timeline.call("tick", delta)
-		if timeline.has_method("take_periodic_pulses"):
-			return timeline.call("take_periodic_pulses") as Dictionary
+	if timeline != null:
+		# One engine boundary crossing per actor/frame instead of a tick()
+		# followed by take_periodic_pulses(). Cosmetic callers do not use the
+		# expired tag array, so native code can omit that temporary entirely.
+		if timeline.has_method("tick_and_take_periodic_pulses"):
+			return timeline.call("tick_and_take_periodic_pulses", delta) as Dictionary
+		# Preserve the existing behavior for older Cgame engine binaries.
+		if timeline.has_method("tick"):
+			timeline.call("tick", delta)
+			if timeline.has_method("take_periodic_pulses"):
+				return timeline.call("take_periodic_pulses") as Dictionary
 	return {}
 
 
@@ -252,8 +264,8 @@ static func runtime_attribute_snapshot(kind: String, state: Dictionary) -> Dicti
 static func runtime_attribute_value(node: Node, name: String, fallback: float = 0.0) -> float:
 	if node != null:
 		var attribute_set: Object = node.get_meta("attributes", null) as Object
-		if attribute_set != null and attribute_set.has_method("has_attribute") and
-				bool(attribute_set.call("has_attribute", StringName(name))):
+		if attribute_set != null and attribute_set.has_method("has_attribute") \
+				and bool(attribute_set.call("has_attribute", StringName(name))):
 			return float(attribute_set.call("get_value", StringName(name)))
 	return fallback if is_finite(fallback) else 0.0
 
@@ -264,6 +276,19 @@ static func runtime_stack_count(node: Node, tag: String, fallback: int = 0) -> i
 		if stack_container != null and stack_container.has_method("get_stack_count"):
 			return maxi(0, int(stack_container.call("get_stack_count", StringName(tag), true)))
 	return maxi(0, fallback)
+
+
+## Independently active crowd controls from server snapshots. A native
+## distinct-query match is used when available; stock Godot reads timers.
+static func zombie_control_count(node: Node, snapshot: Dictionary) -> int:
+	if node != null and node.has_meta("tags"):
+		var container: Object = node.get_meta("tags") as Object
+		if container != null and container.has_method("count_matching_queries"):
+			return int(container.call("count_matching_queries", PackedStringArray([
+				"Runtime.Status.Staggered", "Runtime.Status.Snared", "Runtime.Status.Sundered"]), true))
+	return int(float(snapshot.get("stagger_seconds", 0.0)) > 0.0) \
+		+ int(float(snapshot.get("snared_seconds", 0.0)) > 0.0) \
+		+ int(float(snapshot.get("sunder_seconds", 0.0)) > 0.0)
 
 
 static func runtime_has(node: Node, tag: String, fallback: bool = false) -> bool:

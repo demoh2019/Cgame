@@ -13,6 +13,8 @@ const SoloCharacterStore = preload("res://scripts/server/solo_character_store.gd
 const Net = preload("res://scripts/shared/net.gd")
 const GATEWAY_PATH := "res://scripts/server/nakama_gateway.gd"
 
+const DataLayers = preload("res://scripts/shared/data_layers.gd")
+var layers_override = null # --layers winter,festival | none; null = follow the calendar.
 var net
 var sim
 var peer: ENetMultiplayerPeer
@@ -77,6 +79,10 @@ func _initialize() -> void:
 				world_save_override = args[i]
 			"--no-world-save":
 				disable_world_save = true
+			"--layers":
+				i += 1
+				if i < args.size():
+					layers_override = DataLayers.parse_override(args[i])
 			"--fixed-incidents":
 				adaptive_incidents = false
 			"--solo-character":
@@ -128,6 +134,7 @@ func _initialize() -> void:
 	Engine.physics_ticks_per_second = Defs.TICK_RATE
 	_tick_governor.set_enabled(adaptive_incidents)
 	sim = GameServer.new(WorldGen.new(world_seed), world_seed)
+	sim.data_layers_override = layers_override
 	sim.incident_spawn_cap = _tick_governor.get_budget_units()
 	if not disable_world_save:
 		_world_save_path = world_save_override if not world_save_override.is_empty() else "user://albion_after_world_%d.json" % world_seed
@@ -174,6 +181,11 @@ func _initialize() -> void:
 			return
 		print("SERVER siege outbox restored %d unacknowledged guild victories" %
 			net._siege_ledger_pending.size())
+		var trade_journal_path: String = "user://albion_after_trade_journal_%d.json" % world_seed
+		if not net.configure_trade_journal(trade_journal_path):
+			printerr("SERVER refused invalid or inaccessible trade journal: " + trade_journal_path)
+			quit(3)
+			return
 	peer = ENetMultiplayerPeer.new()
 	if not _solo_stop_path.is_empty():
 		# A solo save slot must not be exposed as a public guest server.

@@ -40,6 +40,12 @@ void AdaptiveNetworkJitterBuffer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("observe", "server_time", "local_arrival_time"),
 			&AdaptiveNetworkJitterBuffer::observe);
 	ClassDB::bind_method(D_METHOD("get_delay"), &AdaptiveNetworkJitterBuffer::get_delay);
+	ClassDB::bind_method(D_METHOD("set_recovery_guard_packets", "packets"), &AdaptiveNetworkJitterBuffer::set_recovery_guard_packets);
+	ClassDB::bind_method(D_METHOD("get_recovery_guard_packets"), &AdaptiveNetworkJitterBuffer::get_recovery_guard_packets);
+	ClassDB::bind_method(D_METHOD("get_recovery_hold_remaining"), &AdaptiveNetworkJitterBuffer::get_recovery_hold_remaining);
+	ClassDB::bind_method(D_METHOD("get_estimated_missing_snapshots"), &AdaptiveNetworkJitterBuffer::get_estimated_missing_snapshots);
+	ClassDB::bind_method(D_METHOD("get_burst_loss_events"), &AdaptiveNetworkJitterBuffer::get_burst_loss_events);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "recovery_guard_packets", PROPERTY_HINT_RANGE, "0,32,1"), "set_recovery_guard_packets", "get_recovery_guard_packets");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "delay"), "", "get_delay");
 	ClassDB::bind_method(D_METHOD("get_stats"), &AdaptiveNetworkJitterBuffer::get_stats);
 }
@@ -49,6 +55,7 @@ void AdaptiveNetworkJitterBuffer::_reset_timing() {
 	peak_jitter = 0.0;
 	last_server_time = -1.0;
 	last_arrival_time = -1.0;
+	recovery_hold_remaining = 0;
 }
 
 bool AdaptiveNetworkJitterBuffer::configure(double p_base_delay, double p_max_delay, double p_expected_snapshot_step) {
@@ -73,6 +80,17 @@ void AdaptiveNetworkJitterBuffer::reset() {
 	ignored_packets = 0;
 	resets = 0;
 	network_gap_count = 0;
+	estimated_missing_snapshots = 0;
+	burst_loss_events = 0;
+}
+
+bool AdaptiveNetworkJitterBuffer::set_recovery_guard_packets(int p_packets) {
+	if (p_packets < 0 || p_packets > 32) {
+		return false;
+	}
+	recovery_guard_packets = p_packets;
+	recovery_hold_remaining = 0;
+	return true;
 }
 
 double AdaptiveNetworkJitterBuffer::observe(double p_server_time, double p_local_arrival_time) {
@@ -114,13 +132,32 @@ double AdaptiveNetworkJitterBuffer::observe(double p_server_time, double p_local
 		// A reconnect or large packet gap should not keep stale pressure.
 		peak_jitter = 0.0;
 		delay = base_delay;
+		recovery_hold_remaining = 0; // Large reconnect gap ends any old loss burst.
 		network_gap_count++;
 		return delay;
 	}
 	const double late = MAX(0.0, arrival_span - server_span);
 	const double skipped = MAX(0.0, server_span - expected_snapshot_step);
+	// Distinguish likely missing *server* snapshots from a late arrival
+	// of a continuous stream. A cadence change can also look like loss,
+	// hence this is an estimate, not an authoritative packet-loss count.
+	const int missing = CLAMP(int(Math::floor(server_span / expected_snapshot_step + 0.5)) - 1, 0, 32);
+	if (missing > 0) {
+		estimated_missing_snapshots = MIN(int64_t(1000000000),
+				estimated_missing_snapshots + int64_t(missing));
+		burst_loss_events = MIN(int64_t(1000000000), burst_loss_events + 1);
+		recovery_hold_remaining = recovery_guard_packets;
+	}
 	const double extra = MIN(0.17, MAX(late, skipped));
-	peak_jitter = MAX(extra, MAX(0.0, peak_jitter - arrival_span * 0.04));
+	// A loss burst may be followed by clean packets before the connection
+	// has actually stabilized. Require several genuine arrivals before
+	// releasing the jitter peak; duplicate renders never advance the guard.
+	const bool hold = missing == 0 && recovery_hold_remaining > 0;
+	const double release = hold ? 0.0 : arrival_span * 0.04;
+	peak_jitter = MAX(extra, MAX(0.0, peak_jitter - release));
+	if (hold) {
+		--recovery_hold_remaining;
+	}
 	const double target = CLAMP(base_delay + peak_jitter * 1.35, base_delay, max_delay);
 	if (target > delay) {
 		delay = target;
@@ -138,6 +175,10 @@ Dictionary AdaptiveNetworkJitterBuffer::get_stats() const {
 	stats["ignored_packets"] = ignored_packets;
 	stats["resets"] = resets;
 	stats["network_gaps"] = network_gap_count;
+	stats["recovery_guard_packets"] = recovery_guard_packets;
+	stats["recovery_hold_remaining"] = recovery_hold_remaining;
+	stats["estimated_missing_snapshots"] = estimated_missing_snapshots;
+	stats["burst_loss_events"] = burst_loss_events;
 	stats["expected_snapshot_step"] = expected_snapshot_step;
 	stats["native_backend"] = true;
 	return stats;

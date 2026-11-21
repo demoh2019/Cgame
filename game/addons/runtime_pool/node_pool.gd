@@ -22,6 +22,9 @@ var _released_total: int = 0
 var _disposed_total: int = 0
 var _rejected_total: int = 0
 var _peak_active: int = 0
+var _last_maintenance_work_usec: int = 0
+var _last_maintenance_change_count: int = 0
+var _last_maintenance_pending_count: int = 0
 
 
 func _ready() -> void:
@@ -43,6 +46,71 @@ func prewarm(target: int) -> int:
 		_idle.append(instance)
 		added += 1
 	return added
+
+
+
+## Niagara-inspired frame-sliced resident pool maintenance. Positive return
+## means created, negative means idle nodes freed. Target includes checked-out
+## objects; no active VFX is removed and every call is bounded to 64 changes.
+## Budget resident particle allocations/frees by count and optional CPU time.
+## Time cap is soft, and the first indivisible node action always proceeds.
+static func should_stop_maintenance(work_usec: int, completed_changes: int, elapsed_usec: int) -> bool:
+	return work_usec > 0 and completed_changes > 0 and elapsed_usec >= work_usec
+
+
+func maintain_residency(target_total: int, max_changes: int = 2, max_work_usec: int = 0) -> int:
+	_last_maintenance_change_count = 0
+	_last_maintenance_pending_count = 0
+	_last_maintenance_work_usec = 0
+	if (target_total < 0 or target_total > 4096
+			or max_changes <= 0 or max_changes > 64
+			or max_work_usec < 0 or max_work_usec > 1000000):
+		return 0
+	var started_us: int = Time.get_ticks_usec()
+	_prune_invalid()
+	var live: int = _active.size() + _idle.size()
+	if live < target_total and template != null:
+		var possible: int = mini(target_total - live, max_idle - _idle.size())
+		var to_create: int = mini(possible, max_changes)
+		for i in to_create:
+			if should_stop_maintenance(max_work_usec, _last_maintenance_change_count,
+					Time.get_ticks_usec() - started_us):
+				break
+			var instance: Node = _new_instance()
+			if instance == null:
+				break
+			_idle.append(instance)
+			_last_maintenance_change_count += 1
+		live += _last_maintenance_change_count
+		_last_maintenance_pending_count = mini(maxi(target_total - live, 0), max_idle - _idle.size())
+	elif live > target_total:
+		var possible: int = mini(live - target_total, _idle.size())
+		var to_free: int = mini(possible, max_changes)
+		for i in to_free:
+			if should_stop_maintenance(max_work_usec, -_last_maintenance_change_count,
+					Time.get_ticks_usec() - started_us):
+				break
+			var instance: Node = _idle.pop_back()
+			if is_instance_valid(instance) and not instance.is_queued_for_deletion():
+				instance.free()
+				_disposed_total += 1
+				_last_maintenance_change_count -= 1
+		live = _active.size() + _idle.size()
+		_last_maintenance_pending_count = mini(maxi(live - target_total, 0), _idle.size())
+	_last_maintenance_work_usec = Time.get_ticks_usec() - started_us
+	return _last_maintenance_change_count
+
+
+func get_last_maintenance_work_usec() -> int:
+	return _last_maintenance_work_usec
+
+
+func get_last_maintenance_change_count() -> int:
+	return _last_maintenance_change_count
+
+
+func get_last_maintenance_pending_count() -> int:
+	return _last_maintenance_pending_count
 
 
 ## Acquire one node under a gameplay parent; null when unavailable.
@@ -131,6 +199,9 @@ func get_stats() -> Dictionary:
 		"disposed_total": _disposed_total,
 		"rejected_total": _rejected_total,
 		"peak_active": _peak_active,
+		"maintenance_work_usec": _last_maintenance_work_usec,
+		"maintenance_changes": _last_maintenance_change_count,
+		"maintenance_pending": _last_maintenance_pending_count,
 	}
 
 

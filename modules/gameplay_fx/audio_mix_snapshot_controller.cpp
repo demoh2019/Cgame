@@ -34,7 +34,7 @@ bool AudioMixSnapshotController::activate_mix(const StringName &p_source,
 	}
 
 	Vector<BusStage> stages;
-	for (const Variant &key : p_bus_offsets_db) {
+	for (const Variant &key : p_bus_offsets_db.keys()) {
 		if (key.get_type() != Variant::STRING && key.get_type() != Variant::STRING_NAME) {
 			return false;
 		}
@@ -69,6 +69,7 @@ bool AudioMixSnapshotController::activate_mix(const StringName &p_source,
 		mix.stages = stages;
 		mix.target = 1.0;
 		mix.fade_seconds = p_fade_seconds;
+		mix.remaining_seconds = -1.0; // Manual activation cancels an old timed release.
 		if (p_fade_seconds == 0.0) {
 			mix.weight = 1.0;
 		}
@@ -83,8 +84,28 @@ bool AudioMixSnapshotController::activate_mix(const StringName &p_source,
 	mix.stages = stages;
 	mix.target = 1.0;
 	mix.fade_seconds = p_fade_seconds;
+	mix.remaining_seconds = -1.0;
 	mix.weight = p_fade_seconds == 0.0 ? 1.0 : 0.0;
 	mixes.push_back(mix);
+	return true;
+}
+
+bool AudioMixSnapshotController::activate_timed_mix(const StringName &p_source,
+		const Dictionary &p_bus_offsets_db, double p_attack_seconds,
+		double p_hold_seconds, double p_release_seconds) {
+	// Validate durations BEFORE activate_mix can change a previously live profile.
+	if (!Math::is_finite(p_hold_seconds) || p_hold_seconds < 0.0 ||
+			p_hold_seconds > MAX_HOLD_SECONDS ||
+			!Math::is_finite(p_release_seconds) || p_release_seconds < 0.0 ||
+			p_release_seconds > MAX_FADE_SECONDS) {
+		return false;
+	}
+	if (!activate_mix(p_source, p_bus_offsets_db, p_attack_seconds)) {
+		return false;
+	}
+	Mix &mix = mixes.write[_find(p_source)];
+	mix.remaining_seconds = p_hold_seconds;
+	mix.release_seconds = p_release_seconds;
 	return true;
 }
 
@@ -104,6 +125,7 @@ bool AudioMixSnapshotController::deactivate_mix(const StringName &p_source, doub
 	Mix &mix = mixes.write[index];
 	mix.target = 0.0;
 	mix.fade_seconds = p_fade_seconds;
+	mix.remaining_seconds = -1.0; // Explicit manual release cancels the timer.
 	return true;
 }
 
@@ -111,16 +133,33 @@ void AudioMixSnapshotController::tick(double p_delta) {
 	if (!Math::is_finite(p_delta) || p_delta <= 0.0) {
 		return;
 	}
+	// Piecewise tick makes the exact hold-time boundary independent of frame
+	// size: a large frame may finish the attack and begin release within it.
+	const auto advance = [](Mix &r_mix, double p_time) {
+		if (r_mix.fade_seconds == 0.0) {
+			r_mix.weight = r_mix.target;
+		} else if (p_time > 0.0) {
+			const double step = p_time / r_mix.fade_seconds;
+			r_mix.weight = r_mix.target > r_mix.weight ?
+					MIN(r_mix.target, r_mix.weight + step) :
+					MAX(r_mix.target, r_mix.weight - step);
+		}
+	};
 	for (int i = mixes.size() - 1; i >= 0; --i) {
 		Mix &mix = mixes.write[i];
-		if (mix.fade_seconds == 0.0) {
-			mix.weight = mix.target;
-		} else {
-			const double step = p_delta / mix.fade_seconds;
-			mix.weight = mix.target > mix.weight ?
-				MIN(mix.target, mix.weight + step) :
-				MAX(mix.target, mix.weight - step);
+		double step_seconds = p_delta;
+		if (mix.remaining_seconds >= 0.0) {
+			if (step_seconds >= mix.remaining_seconds) {
+				advance(mix, mix.remaining_seconds); // Finish attack up to hold expiry.
+				step_seconds -= mix.remaining_seconds;
+				mix.remaining_seconds = -1.0;
+				mix.target = 0.0;
+				mix.fade_seconds = mix.release_seconds;
+			} else {
+				mix.remaining_seconds -= step_seconds;
+			}
 		}
+		advance(mix, step_seconds);
 		if (mix.target == 0.0 && mix.weight <= 0.0) {
 			mixes.remove_at(i);
 		}
@@ -147,6 +186,11 @@ double AudioMixSnapshotController::get_mix_weight(const StringName &p_source) co
 	return index >= 0 ? mixes[index].weight : 0.0;
 }
 
+double AudioMixSnapshotController::get_mix_remaining_seconds(const StringName &p_source) const {
+	const int index = _find(p_source);
+	return index >= 0 ? mixes[index].remaining_seconds : -1.0;
+}
+
 void AudioMixSnapshotController::clear() {
 	mixes.clear();
 }
@@ -154,12 +198,15 @@ void AudioMixSnapshotController::clear() {
 void AudioMixSnapshotController::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("activate_mix", "source", "bus_offsets_db", "fade_seconds"),
 			&AudioMixSnapshotController::activate_mix, DEFVAL(1.0));
+	ClassDB::bind_method(D_METHOD("activate_timed_mix", "source", "bus_offsets_db", "attack_seconds", "hold_seconds", "release_seconds"),
+			&AudioMixSnapshotController::activate_timed_mix, DEFVAL(0.2), DEFVAL(3.0), DEFVAL(1.0));
 	ClassDB::bind_method(D_METHOD("deactivate_mix", "source", "fade_seconds"),
 			&AudioMixSnapshotController::deactivate_mix, DEFVAL(1.0));
 	ClassDB::bind_method(D_METHOD("tick", "delta"), &AudioMixSnapshotController::tick);
 	ClassDB::bind_method(D_METHOD("clear"), &AudioMixSnapshotController::clear);
 	ClassDB::bind_method(D_METHOD("get_bus_offset_db", "bus"), &AudioMixSnapshotController::get_bus_offset_db);
 	ClassDB::bind_method(D_METHOD("get_mix_weight", "source"), &AudioMixSnapshotController::get_mix_weight);
+	ClassDB::bind_method(D_METHOD("get_mix_remaining_seconds", "source"), &AudioMixSnapshotController::get_mix_remaining_seconds);
 	ClassDB::bind_method(D_METHOD("has_mix", "source"), &AudioMixSnapshotController::has_mix);
 	ClassDB::bind_method(D_METHOD("get_mix_count"), &AudioMixSnapshotController::get_mix_count);
 }

@@ -32,6 +32,7 @@
 
 #include "ai_action_cooldowns.h"
 #include "ai_execution_profiler.h"
+#include "ai_encounter_budget.h"
 #include "ai_behavior_trace.h"
 #include "ai_proximity_grid_2d.h"
 #include "ai_hearing_sensor_2d.h"
@@ -52,6 +53,7 @@
 #include "tests/test_timed_behavior_tree.h"
 #include "tests/test_blackboard_compare.h"
 #include "tests/test_ai_execution_profiler.h"
+#include "tests/test_ai_encounter_budget.h"
 #include "tests/test_ai_behavior_trace.h"
 #include "tests/test_ai_trace_history.h"
 #include "tests/test_behavior_tree_inspector.h"
@@ -89,6 +91,7 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(AIActionCooldowns);
 	GDREGISTER_CLASS(AISimulationLOD2D);
 	GDREGISTER_CLASS(AIUpdateScheduler);
+	GDREGISTER_CLASS(AIEncounterBudget);
 	GDREGISTER_CLASS(AIProximityGrid2D);
 	GDREGISTER_CLASS(AIThreatTable2D);
 }

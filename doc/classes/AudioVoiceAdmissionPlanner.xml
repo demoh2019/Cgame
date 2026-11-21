@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AudioVoiceAdmissionPlanner" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../doc/class.xsd">
+	<brief_description>Bounded, data-only admission policy for positional audio voices.</brief_description>
+	<description>
+		Evaluates at most 128 voice metadata dictionaries without creating or playing audio nodes. Each voice dictionary contains a nonempty [code]name[/code], finite numeric [code]audibility[/code] in dB, finite nonnegative [code]age[/code] in seconds, and optional priority 0–3. Results use -2 for a free slot, -1 to reject the newcomer, or a zero-based index for the selected old voice. Same-name caps take precedence over global caps. Lower-priority, quieter voices are selected first, with older age breaking nearly equal volume ties.
+		[method select_victim_stable] optionally protects the initial attack of very young sounds, inspired by Unreal Engine Sound Concurrency retrigger and voice-resolution policies. This affects only audio presentation and never changes server gameplay events.
+	</description>
+	<methods>
+		<method name="select_victim" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="voices" type="Array" />
+			<param index="1" name="name" type="String" />
+			<param index="2" name="new_db" type="float" />
+			<param index="3" name="new_priority" type="int" />
+			<param index="4" name="max_voices" type="int" default="24" />
+			<param index="5" name="same_sound_max" type="int" default="5" />
+			<description>Original priority, audibility and age based admission. Existing projects retain unchanged semantics.</description>
+		</method>
+		<method name="select_victim_stable" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="voices" type="Array" />
+			<param index="1" name="name" type="String" />
+			<param index="2" name="new_db" type="float" />
+			<param index="3" name="new_priority" type="int" />
+			<param index="4" name="max_voices" type="int" default="24" />
+			<param index="5" name="same_sound_max" type="int" default="5" />
+			<param index="6" name="min_voice_age" type="float" default="0.12" />
+			<param index="7" name="early_override_db" type="float" default="12.0" />
+			<description>Same caps and priority order as [method select_victim], except an existing voice younger than [param min_voice_age] seconds cannot be stolen by an equal- or lower-priority sound unless the new sound has equal priority and is at least [param early_override_db] dB louder. A higher-priority sound can always steal a lower-priority voice irrespective of age. Picks the weakest eligible victim, keeping the per-name concurrency limit. If no eligible voice exists, returns -1; a free slot returns -2 regardless of age. The values must be finite, with min_voice_age in 0–5 seconds and early_override_db in 0–60 dB; invalid arguments reject without changing the existing voices. Setting min_voice_age to zero restores legacy behavior exactly. This class does not play, fade, or virtualize audio: callers must handle stopping their chosen victim.</description>
+		</method>
+	</methods>
+</class>
