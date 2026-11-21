@@ -7593,8 +7593,8 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	var herbs_added: int = 0
 	if amount - left > 0:
 		var found_herb: String = HerbalForaging.roll(String(node["kind"]),
-			world.biome_at(float(node["x"]), float(node["z"])),
-			world.zone_at(float(node["x"]), float(node["z"])), rng)
+			world.biome_at(float(node.get("x", player.position.x)), float(node.get("z", player.position.z))),
+			world.zone_at(float(node.get("x", player.position.x)), float(node.get("z", player.position.z))), rng)
 		if found_herb != "" and player.inventory.add(found_herb, 1) == 0:
 			herbs_added = 1
 	# Never advertise an outpost bonus if a full bag could not accept it.
