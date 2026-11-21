@@ -21,6 +21,7 @@ class FrameUpdateBudget : public RefCounted {
 	struct Lane {
 		StringName name;
 		double elapsed = 0.0;
+		double rate_scale = 1.0; // Per-lane relative frequency, independent of quality tier.
 	};
 
 	Vector<Lane> lanes;
@@ -55,6 +56,10 @@ public:
 	bool unregister_lane(const StringName &p_lane);
 	int get_lane_count() const { return lanes.size(); }
 	bool configure(const PackedFloat64Array &p_rates, const PackedInt32Array &p_slots);
+	// Adjust how often a cosmetic lane is eligible, without changing global slots.
+	// Accepts finite 0.75..2.0; unknown lane returns false and -1.0.
+	bool set_lane_rate_scale(const StringName &p_lane, double p_scale);
+	double get_lane_rate_scale(const StringName &p_lane) const;
 	void begin_frame(double p_delta, int p_quality);
 	bool set_frame_time_budget_us(int64_t p_budget_us);
 	int64_t get_frame_time_budget_us() const { return frame_time_budget_us; }
