@@ -464,4 +464,49 @@ TEST_CASE("[SignificanceBudget] stable multi-viewer inputs reject atomically") {
 			priorities, ids, {}, 2, 10.0).is_empty());
 }
 
+TEST_CASE("[SignificanceBudget] stable multi-viewer world selection protects priority and range") {
+	Ref<SignificanceBudgetPlanner> p;
+	p.instantiate();
+	const PackedVector3Array positions = { Vector3(4, 0, 0), Vector3(6, 0, 0), Vector3(96, 0, 0), Vector3(200, 0, 0) };
+	const PackedVector3Array viewers = { Vector3(), Vector3(100, 0, 0) };
+	const PackedByteArray priorities = { 0, 0, 2, 3 };
+	const PackedInt64Array ids = { 42, 43, 44, 45 };
+	const PackedInt64Array retained = { 43, 45 };
+	const PackedInt32Array expected = { 2, 1 };
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids, retained, 2, 10.0, 3.0) == expected);
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids, retained, 4, 10.0, 3.0).size() == 3);
+	CHECK(p->select_world_priority_stable(positions, viewers, priorities, ids, retained, 0, 10.0).is_empty());
+	const PackedInt32Array ties = { 1, 0 };
+	CHECK(p->select_world_priority_stable({ Vector3(6, 0, 0), Vector3(6, 0, 0) },
+			{ Vector3() }, { 0, 0 }, { 9, 7 }, {}, 2, 10.0) == ties);
+	const PackedInt32Array in_range = { 1 };
+	CHECK(p->select_world_priority_stable({ Vector3(11, 0, 0), Vector3(1, 0, 0) },
+			{ Vector3() }, { 3, 0 }, { 9, 7 }, { 9 }, 2, 10.0, 2.0) == in_range);
+	CHECK(ids[0] == 42);
+}
+
+TEST_CASE("[SignificanceBudget] stable world input validation is atomic") {
+	Ref<SignificanceBudgetPlanner> p;
+	p.instantiate();
+	const PackedVector3Array positions = { Vector3(1, 0, 0), Vector3(2, 0, 0) };
+	const PackedVector3Array viewers = { Vector3() };
+	const PackedByteArray pri = { 1, 0 };
+	const PackedInt64Array ids = { 4, 5 };
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, 2, 10.0).size() == 2);
+	CHECK(p->select_world_priority_stable(positions, {}, pri, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, { Vector3(Math::INF, 0, 0) }, pri, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable({ Vector3(Math::INF, 0, 0) }, viewers, { 1 }, { 4 }, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, { 1 }, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, { 1, 4 }, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, { 4, 4 }, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, { 0, 5 }, {}, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, { 4, 4 }, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, { -4 }, 2, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, -1, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, 129, 10.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, 2, Math::NaN).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, 2, 10.0, -1.0).is_empty());
+	CHECK(p->select_world_priority_stable(positions, viewers, pri, ids, {}, 2, 10.0, 11.0).is_empty());
+}
+
 } // namespace TestSignificanceBudgetPlanner

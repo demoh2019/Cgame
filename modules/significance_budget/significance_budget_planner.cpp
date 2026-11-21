@@ -507,41 +507,77 @@ PackedInt32Array SignificanceBudgetPlanner::select_shadow_casters(
 PackedInt32Array SignificanceBudgetPlanner::select_world_priority_stable(
 		const PackedVector3Array &p_positions, const PackedVector3Array &p_viewers,
 		const PackedByteArray &p_priorities, const PackedInt64Array &p_ids,
-		const PackedInt64Array &p_retained_ids, int p_budget, double p_max_distance,
-		double p_hysteresis) const {
+		const PackedInt64Array &p_retained_ids, int p_budget,
+		double p_max_distance, double p_hysteresis) const {
 	PackedInt32Array empty;
 	const int count = p_positions.size();
 	ERR_FAIL_COND_V_MSG(count != p_priorities.size() || count != p_ids.size() ||
-			count > MAX_CANDIDATES || p_viewers.is_empty() || p_viewers.size() > MAX_VIEWERS ||
-			p_retained_ids.size() > MAX_BUDGET || !valid_budget(p_budget) ||
-			!Math::is_finite(p_max_distance) || p_max_distance < 0.0 ||
-			p_max_distance > MAX_RANGE || !Math::is_finite(p_hysteresis) ||
-			p_hysteresis < 0.0 || p_hysteresis > p_max_distance,
-			empty, "Invalid stable world-significance array sizes or bounds.");
+			count > MAX_CANDIDATES || p_viewers.is_empty() ||
+			p_viewers.size() > MAX_VIEWERS || p_retained_ids.size() > MAX_BUDGET ||
+			!valid_budget(p_budget) || !Math::is_finite(p_max_distance) ||
+			p_max_distance < 0.0 || p_max_distance > MAX_RANGE ||
+			!Math::is_finite(p_hysteresis) || p_hysteresis < 0.0 ||
+			p_hysteresis > p_max_distance,
+			empty, "Invalid stable world significance bounds or array sizes.");
 
 	for (int v = 0; v < p_viewers.size(); ++v) {
-		ERR_FAIL_COND_V_MSG(!p_viewers[v].is_finite(), empty,
-				"Stable world-significance viewer positions must be finite.");
+		ERR_FAIL_COND_V_MSG(!p_viewers[v].is_finite(), empty, "Stable world viewers must be finite.");
+	}
+	HashSet<int64_t> ids;
+	for (int i = 0; i < count; ++i) {
+		ERR_FAIL_COND_V_MSG(!p_positions[i].is_finite() || !valid_priority(p_priorities[i]) ||
+				p_ids[i] <= 0 || ids.has(p_ids[i]), empty,
+				"Stable world candidates require finite positions, priorities 0..3 and unique positive IDs.");
+		ids.insert(p_ids[i]);
+	}
+	HashSet<int64_t> retained;
+	for (int i = 0; i < p_retained_ids.size(); ++i) {
+		const int64_t id = p_retained_ids[i];
+		ERR_FAIL_COND_V_MSG(id <= 0 || retained.has(id), empty,
+				"Stable world retained IDs must be unique and positive.");
+		retained.insert(id);
+	}
+	if (p_budget == 0) {
+		return empty;
 	}
 
-	// Reuse the validated priority-stable top-K selector, so precomputed and
-	// world-space queries share stable tie rules and a strict hard range.
-	PackedFloat64Array distances;
-	distances.resize(count);
+	const double max_distance_squared = p_max_distance * p_max_distance;
+	Vector<PriorityStableCandidate> best;
 	for (int i = 0; i < count; ++i) {
-		ERR_FAIL_COND_V_MSG(!p_positions[i].is_finite(), empty,
-				"Stable world-significance candidate positions must be finite.");
 		double nearest_squared = Math::INF;
 		for (int v = 0; v < p_viewers.size(); ++v) {
-			const double squared = (p_positions[i] - p_viewers[v]).length_squared();
-			ERR_FAIL_COND_V_MSG(!Math::is_finite(squared), empty,
-					"Stable world-significance distance overflow.");
-			nearest_squared = MIN(nearest_squared, squared);
+			const double distance_squared = (p_positions[i] - p_viewers[v]).length_squared();
+			ERR_FAIL_COND_V_MSG(!Math::is_finite(distance_squared), empty, "Stable world distance overflow.");
+			nearest_squared = MIN(nearest_squared, distance_squared);
 		}
-		distances.set(i, Math::sqrt(nearest_squared));
+		if (nearest_squared > max_distance_squared) {
+			continue; // Hard range uses real distance, not retained distance.
+		}
+		const double distance = Math::sqrt(nearest_squared);
+		PriorityStableCandidate candidate;
+		candidate.priority = p_priorities[i];
+		candidate.candidate.adjusted_distance =
+				MAX(0.0, distance - (retained.has(p_ids[i]) ? p_hysteresis : 0.0));
+		candidate.candidate.raw_distance = distance;
+		candidate.candidate.id = p_ids[i];
+		candidate.candidate.index = i;
+		if (best.size() == p_budget && !priority_stable_better(candidate, best[best.size() - 1])) {
+			continue;
+		}
+		int at = 0;
+		while (at < best.size() && !priority_stable_better(candidate, best[at])) {
+			++at;
+		}
+		best.insert(at, candidate);
+		if (best.size() > p_budget) {
+			best.resize(p_budget);
+		}
 	}
-	return select_top_priority_stable(distances, p_priorities, p_ids,
-			p_retained_ids, p_budget, p_max_distance, p_hysteresis);
+	PackedInt32Array result;
+	for (const PriorityStableCandidate &entry : best) {
+		result.push_back(entry.candidate.index);
+	}
+	return result;
 }
 
 void SignificanceBudgetPlanner::_bind_methods() {
