@@ -22,6 +22,8 @@ static func pool_changes_per_frame(quality: int) -> int:
 
 static func pool_work_usec(quality: int) -> int:
 	return POOL_WORK_USEC[clampi(quality, 0, 3)]
+
+
 const CAPS := [
 	[1, 4, 5, 4],
 	[2, 6, 8, 6],

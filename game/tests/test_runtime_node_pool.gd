@@ -114,48 +114,6 @@ func run(t) -> void:
 		budget_native.free()
 
 
-static func _check_budgeted_residency(t, resident, packed: PackedScene, mode: String) -> void:
-	resident.template = packed
-	resident.max_idle = 6
-	resident.max_active = 2
-	resident.prewarm_on_ready = false
-	t.eq(resident.maintain_residency(6, 0), 0, mode + " zero-step does no work")
-	t.eq(resident.maintain_residency(6, 65), 0, mode + " unbounded step rejected")
-	t.eq(resident.maintain_residency(-1, 2), 0, mode + " negative target rejected")
-	t.eq(resident.maintain_residency(6, 2), 2, mode + " first two idle instances created")
-	t.eq(resident.maintain_residency(6, 2), 2, mode + " second bounded prewarm")
-	t.eq(resident.maintain_residency(6, 2), 2, mode + " third bounded prewarm")
-	t.eq(resident.maintain_residency(6, 2), 0, mode + " resident target stable")
-	t.eq(resident.get_idle_count(), 6, mode + " prewarmed total exactly six")
-	var host := Node.new()
-	var a: Node = resident.acquire(host)
-	var b: Node = resident.acquire(host)
-	t.check(a != null and b != null and a != b, mode + " two live instances")
-	t.eq(resident.maintain_residency(6, 2), 0,
-		mode + " active instances count toward target, no extra scene allocations")
-	t.eq(int(resident.get_stats()["created_total"]), 6,
-		mode + " only six instances created across checkout")
-	t.check(resident.release(a) and resident.release(b), mode + " live instances released")
-	t.eq(resident.maintain_residency(2, 1), -1, mode + " idle shrink capped to one")
-	t.eq(resident.maintain_residency(2, 2), -2, mode + " idle shrink capped to two")
-	t.eq(resident.maintain_residency(2, 2), -1, mode + " final idle object removed")
-	t.eq(resident.get_idle_count(), 2, mode + " resident target two")
-	a = resident.acquire(host)
-	b = resident.acquire(host)
-	t.eq(resident.maintain_residency(0, 2), 0,
-		mode + " no active leases evicted by quality reduction")
-	t.eq(resident.get_active_count(), 2, mode + " live gameplay effects protected")
-	t.check(resident.release(a), mode + " first live effect returns normally")
-	t.eq(resident.maintain_residency(0, 2), -1,
-		mode + " first released idle can now be retired")
-	t.check(resident.release(b), mode + " second live effect returns normally")
-	t.eq(resident.maintain_residency(0, 2), -1,
-		mode + " second released idle can now be retired")
-	t.eq(resident.get_idle_count(), 0, mode + " zero resident footprint")
-	t.eq(int(resident.get_stats()["disposed_total"]), 6,
-		mode + " native/script cache retire accounting matches")
-	host.free()
-
 	t.current = "CPU-time-sliced native and script VFX pool residency"
 	t.check(not PoolScript.should_stop_maintenance(0, 2, 400),
 		"zero time budget retains legacy count-only behavior")
@@ -222,3 +180,44 @@ static func _check_budgeted_residency(t, resident, packed: PackedScene, mode: St
 	t.check(online_source.contains("Albion/VFXPoolMaintenancePending"),
 		"game profiler tracks pending resident pool changes")
 
+static func _check_budgeted_residency(t, resident, packed: PackedScene, mode: String) -> void:
+	resident.template = packed
+	resident.max_idle = 6
+	resident.max_active = 2
+	resident.prewarm_on_ready = false
+	t.eq(resident.maintain_residency(6, 0), 0, mode + " zero-step does no work")
+	t.eq(resident.maintain_residency(6, 65), 0, mode + " unbounded step rejected")
+	t.eq(resident.maintain_residency(-1, 2), 0, mode + " negative target rejected")
+	t.eq(resident.maintain_residency(6, 2), 2, mode + " first two idle instances created")
+	t.eq(resident.maintain_residency(6, 2), 2, mode + " second bounded prewarm")
+	t.eq(resident.maintain_residency(6, 2), 2, mode + " third bounded prewarm")
+	t.eq(resident.maintain_residency(6, 2), 0, mode + " resident target stable")
+	t.eq(resident.get_idle_count(), 6, mode + " prewarmed total exactly six")
+	var host := Node.new()
+	var a: Node = resident.acquire(host)
+	var b: Node = resident.acquire(host)
+	t.check(a != null and b != null and a != b, mode + " two live instances")
+	t.eq(resident.maintain_residency(6, 2), 0,
+		mode + " active instances count toward target, no extra scene allocations")
+	t.eq(int(resident.get_stats()["created_total"]), 6,
+		mode + " only six instances created across checkout")
+	t.check(resident.release(a) and resident.release(b), mode + " live instances released")
+	t.eq(resident.maintain_residency(2, 1), -1, mode + " idle shrink capped to one")
+	t.eq(resident.maintain_residency(2, 2), -2, mode + " idle shrink capped to two")
+	t.eq(resident.maintain_residency(2, 2), -1, mode + " final idle object removed")
+	t.eq(resident.get_idle_count(), 2, mode + " resident target two")
+	a = resident.acquire(host)
+	b = resident.acquire(host)
+	t.eq(resident.maintain_residency(0, 2), 0,
+		mode + " no active leases evicted by quality reduction")
+	t.eq(resident.get_active_count(), 2, mode + " live gameplay effects protected")
+	t.check(resident.release(a), mode + " first live effect returns normally")
+	t.eq(resident.maintain_residency(0, 2), -1,
+		mode + " first released idle can now be retired")
+	t.check(resident.release(b), mode + " second live effect returns normally")
+	t.eq(resident.maintain_residency(0, 2), -1,
+		mode + " second released idle can now be retired")
+	t.eq(resident.get_idle_count(), 0, mode + " zero resident footprint")
+	t.eq(int(resident.get_stats()["disposed_total"]), 6,
+		mode + " native/script cache retire accounting matches")
+	host.free()

@@ -286,11 +286,15 @@ func _process(_delta: float) -> void:
 ## Profiling exposes the actual main-thread residency work and remaining
 ## idle cache actions, not particle simulation or GPU rendering time.
 func get_pool_maintenance_work_usec() -> int:
-	return int(_burst_pool.call("get_last_maintenance_work_usec")) if is_instance_valid(_burst_pool) 		and _burst_pool.has_method("get_last_maintenance_work_usec") else 0
+	if not is_instance_valid(_burst_pool) or not _burst_pool.has_method("get_last_maintenance_work_usec"):
+		return 0
+	return int(_burst_pool.call("get_last_maintenance_work_usec"))
 
 
 func get_pool_maintenance_pending_count() -> int:
-	return int(_burst_pool.call("get_last_maintenance_pending_count")) if is_instance_valid(_burst_pool) 		and _burst_pool.has_method("get_last_maintenance_pending_count") else 0
+	if not is_instance_valid(_burst_pool) or not _burst_pool.has_method("get_last_maintenance_pending_count"):
+		return 0
+	return int(_burst_pool.call("get_last_maintenance_pending_count"))
 
 
 func pending_burst_count() -> int:

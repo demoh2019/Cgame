@@ -62,7 +62,9 @@ func maintain_residency(target_total: int, max_changes: int = 2, max_work_usec: 
 	_last_maintenance_change_count = 0
 	_last_maintenance_pending_count = 0
 	_last_maintenance_work_usec = 0
-	if target_total < 0 or target_total > 4096 or max_changes <= 0 or max_changes > 64 			or max_work_usec < 0 or max_work_usec > 1000000:
+	if (target_total < 0 or target_total > 4096
+			or max_changes <= 0 or max_changes > 64
+			or max_work_usec < 0 or max_work_usec > 1000000):
 		return 0
 	var started_us: int = Time.get_ticks_usec()
 	_prune_invalid()
