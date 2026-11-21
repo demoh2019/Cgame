@@ -19,6 +19,21 @@
 		<method name="get_lane_count" qualifiers="const">
 			<return type="int" />
 		</method>
+		<method name="set_lane_enabled">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<param index="1" name="enabled" type="bool" />
+			<description>Enables or suspends a registered presentation lane. Disabled lanes never reserve a slot, accumulate simulation time, or consume the CPU budget. A forced [method consume] can still run once to hide old effects. Re-enabling triggers one immediate bounded refresh at its next [method consume], even before its usual interval, without spending a regular reservation. Returns false for unknown lanes. Disabling a lane retains its learned cost and importance.</description>
+		</method>
+		<method name="is_lane_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="lane" type="StringName" />
+			<description>Returns whether a registered lane is enabled. Unknown lanes return false.</description>
+		</method>
+		<method name="get_enabled_lane_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of active registered lanes. [method current_budget] reports zero when none are enabled.</description>
+		</method>
 		<method name="configure">
 			<return type="bool" />
 			<param index="0" name="quality_rates" type="PackedFloat64Array" />
@@ -81,7 +96,7 @@
 			<param index="0" name="lane" type="StringName" />
 			<param index="1" name="delta" type="float" />
 			<param index="2" name="force" type="bool" default="false" />
-			<description>Returns the bounded elapsed time when an update is allowed and its per-frame reservation is available, or zero otherwise. A regular reservation can be used once per frame. Reserved lanes are chosen using importance, accumulated elapsed time, starvation age and their learned CPU cost. Forced updates bypass the budget.</description>
+			<description>Returns the bounded elapsed time when an update is allowed and its per-frame reservation is available, or zero otherwise. A regular reservation can be used once per frame. Reserved lanes are chosen using importance, accumulated elapsed time, starvation age and their learned CPU cost. Forced updates bypass the budget. Disabling a lane suppresses regular updates, but explicit forced refreshes and the first update after re-enabling bypass the regular reservation limit.</description>
 		</method>
 		<method name="reset">
 			<return type="void" />
