@@ -81,7 +81,7 @@ static bool score_candidate(const Vector3 &p_point, int p_index,
 		bool p_use_threat, bool p_horizontal_only, double p_min_distance,
 		double p_max_distance, double p_max_vertical_difference, double p_desired_distance,
 		double p_distance_weight, double p_safety_weight,
-		double p_min_threat_distance, QueryHit &r_hit) {
+		double p_min_threat_distance, double p_candidate_bonus, QueryHit &r_hit) {
 	if (!p_point.is_finite()) {
 		return false;
 	}
@@ -149,7 +149,7 @@ static bool score_candidate(const Vector3 &p_point, int p_index,
 	const double scale = MAX(p_max_distance, 1.0);
 	const double distance_score = 1.0 - MIN(1.0, Math::abs(distance - p_desired_distance) / scale);
 	const double safety_score = p_use_threat ? MIN(1.0, threat_distance / scale) : 0.0;
-	const double score = p_distance_weight * distance_score + p_safety_weight * safety_score;
+	const double score = p_distance_weight * distance_score + p_safety_weight * safety_score + p_candidate_bonus;
 	if (!Math::is_finite(score)) {
 		return false;
 	}
@@ -166,6 +166,8 @@ static bool score_candidate(const Vector3 &p_point, int p_index,
 void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_candidates", "candidates"), &EnvironmentQuery3D::set_candidates);
 	ClassDB::bind_method(D_METHOD("get_candidates"), &EnvironmentQuery3D::get_candidates);
+	ClassDB::bind_method(D_METHOD("set_candidate_bonuses", "bonuses"), &EnvironmentQuery3D::set_candidate_bonuses);
+	ClassDB::bind_method(D_METHOD("get_candidate_bonuses"), &EnvironmentQuery3D::get_candidate_bonuses);
 	ClassDB::bind_method(D_METHOD("set_origin", "origin"), &EnvironmentQuery3D::set_origin);
 	ClassDB::bind_method(D_METHOD("get_origin"), &EnvironmentQuery3D::get_origin);
 	ClassDB::bind_method(D_METHOD("set_threat_position", "position"), &EnvironmentQuery3D::set_threat_position);
@@ -233,6 +235,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("schedule_query_mask", "agent_count", "tick", "regular_budget", "urgent"), &EnvironmentQuery3D::schedule_query_mask, DEFVAL(PackedByteArray()));
 
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "candidates"), "set_candidates", "get_candidates");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT32_ARRAY, "candidate_bonuses"), "set_candidate_bonuses", "get_candidate_bonuses");
 	ADD_GROUP("Distance Filter", "");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "origin"), "set_origin", "get_origin");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_distance", PROPERTY_HINT_RANGE, "0,10000,0.1,or_greater,suffix:m"), "set_min_distance", "get_min_distance");
@@ -262,6 +265,22 @@ void EnvironmentQuery3D::_bind_methods() {
 
 void EnvironmentQuery3D::set_candidates(const PackedVector3Array &p_candidates) {
 	candidates = p_candidates;
+	// Offsets are bound to source indices. A different-size set must not reuse
+	// offsets from a prior candidate list.
+	if (!candidate_bonuses.is_empty() && candidate_bonuses.size() != candidates.size()) {
+		candidate_bonuses.clear();
+	}
+	emit_changed();
+}
+
+void EnvironmentQuery3D::set_candidate_bonuses(const PackedFloat32Array &p_bonuses) {
+	ERR_FAIL_COND_MSG(!p_bonuses.is_empty() && p_bonuses.size() != candidates.size(),
+			"candidate_bonuses must be empty or match the number of candidates.");
+	for (int i = 0; i < p_bonuses.size(); i++) {
+		ERR_FAIL_COND_MSG(!Math::is_finite(p_bonuses[i]) || Math::abs(p_bonuses[i]) > 1.0f,
+				"candidate_bonuses must contain finite values between -1 and 1.");
+	}
+	candidate_bonuses = p_bonuses;
 	emit_changed();
 }
 
@@ -386,7 +405,7 @@ Array EnvironmentQuery3D::query() const {
 					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
 					use_threat, horizontal_only, min_distance, max_distance,
 					max_vertical_difference, desired_distance, distance_weight, safety_weight,
-					min_threat_distance, hit)) {
+					min_threat_distance, candidate_bonuses.is_empty() ? 0.0 : candidate_bonuses[i], hit)) {
 			hits.push_back(hit);
 		}
 	}
@@ -437,7 +456,7 @@ PackedVector3Array EnvironmentQuery3D::query_top_positions(int p_count) const {
 					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
 					use_threat, horizontal_only, min_distance, max_distance,
 					max_vertical_difference, desired_distance, distance_weight, safety_weight,
-					min_threat_distance, hit)) {
+					min_threat_distance, candidate_bonuses.is_empty() ? 0.0 : candidate_bonuses[i], hit)) {
 			continue;
 		}
 		if (best.size() == limit && !better(hit, best[best.size() - 1])) {
@@ -480,7 +499,7 @@ PackedInt32Array EnvironmentQuery3D::query_top_indices(int p_count) const {
 					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
 					use_threat, horizontal_only, min_distance, max_distance,
 					max_vertical_difference, desired_distance, distance_weight, safety_weight,
-					min_threat_distance, hit)) {
+					min_threat_distance, candidate_bonuses.is_empty() ? 0.0 : candidate_bonuses[i], hit)) {
 			continue;
 		}
 		if (best.size() == limit && !better(hit, best[best.size() - 1])) {
@@ -524,6 +543,7 @@ bool EnvironmentQuery3D::begin_incremental_top_positions(int p_count) {
 	Ref<EnvironmentQuery3D> snapshot;
 	snapshot.instantiate();
 	snapshot->candidates = candidates;
+	snapshot->candidate_bonuses = candidate_bonuses;
 	snapshot->origin = origin;
 	snapshot->threat_position = threat_position;
 	snapshot->threat_positions = threat_positions;
@@ -605,7 +625,8 @@ bool EnvironmentQuery3D::_step_incremental_top_positions_internal(int p_budget, 
 					snapshot->min_direction_dot, snapshot->max_direction_dot, snapshot->use_threat,
 					snapshot->horizontal_only, snapshot->min_distance, snapshot->max_distance,
 					snapshot->max_vertical_difference, snapshot->desired_distance,
-					snapshot->distance_weight, snapshot->safety_weight, snapshot->min_threat_distance, hit)) {
+					snapshot->distance_weight, snapshot->safety_weight, snapshot->min_threat_distance,
+					snapshot->candidate_bonuses.is_empty() ? 0.0 : snapshot->candidate_bonuses[incremental_cursor], hit)) {
 			continue;
 		}
 		IncrementalHit item;
@@ -711,7 +732,7 @@ PackedVector3Array EnvironmentQuery3D::query_random_best_positions(int p_best_pe
 					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
 					use_threat, horizontal_only, min_distance, max_distance,
 					max_vertical_difference, desired_distance, distance_weight, safety_weight,
-					min_threat_distance, hit)) {
+					min_threat_distance, candidate_bonuses.is_empty() ? 0.0 : candidate_bonuses[i], hit)) {
 			max_score = MAX(max_score, hit.score);
 		}
 	}
@@ -729,7 +750,7 @@ PackedVector3Array EnvironmentQuery3D::query_random_best_positions(int p_best_pe
 					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
 					use_threat, horizontal_only, min_distance, max_distance,
 					max_vertical_difference, desired_distance, distance_weight, safety_weight,
-					min_threat_distance, hit) || hit.score < cutoff) {
+					min_threat_distance, candidate_bonuses.is_empty() ? 0.0 : candidate_bonuses[i], hit) || hit.score < cutoff) {
 			continue;
 		}
 		const uint64_t key = query_random_key(uint64_t(p_seed), uint64_t(i));
@@ -766,7 +787,7 @@ PackedVector3Array EnvironmentQuery3D::query_spread_positions(int p_count, doubl
 					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
 					use_threat, horizontal_only, min_distance, max_distance,
 					max_vertical_difference, desired_distance, distance_weight, safety_weight,
-					min_threat_distance, hit)) {
+					min_threat_distance, candidate_bonuses.is_empty() ? 0.0 : candidate_bonuses[i], hit)) {
 			hits.push_back(hit);
 		}
 	}

@@ -184,5 +184,6 @@
 		<member name="distance_weight" type="float" default="1.0">Nonnegative weight for desired-distance score.</member>
 		<member name="safety_weight" type="float" default="0.0">Nonnegative weight for threat-distance score when threat filtering is enabled.</member>
 		<member name="max_results" type="int" default="0">Maximum ranked results to return; 0 means unlimited.</member>
+		<member name="candidate_bonuses" type="PackedFloat32Array" default="PackedFloat32Array()">Optional per-candidate tactical score offsets in the range -1 to 1. The array must be empty or match [member candidates] in size. An empty array adds zero to every score. Offsets are applied [b]after[/b] all safety and distance filters and cannot make a rejected point eligible. Changing the candidate count clears existing offsets. All ranking APIs use the same offsets and stable index tie breaking.</member>
 	</members>
 </class>

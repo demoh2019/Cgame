@@ -331,6 +331,36 @@ TEST_CASE("[EnvironmentQuery3D] Spread rejects invalid requests without corrupti
 }
 
 
+TEST_CASE("[EnvironmentQuery3D] Tactical candidate bonuses affect every ranker after filtering") {
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(1, 0, 0), Vector3(2, 0, 0), Vector3(5, 0, 0) });
+	q->set_candidate_bonuses({ 0.0f, 0.125f, -0.5f });
+	const PackedVector3Array expected = { Vector3(2, 0, 0), Vector3(1, 0, 0), Vector3(5, 0, 0) };
+	CHECK(q->query_positions() == expected);
+	CHECK(q->query_top_positions(2) == PackedVector3Array({ Vector3(2, 0, 0), Vector3(1, 0, 0) }));
+	CHECK(q->query_spread_positions(3, 0.0) == expected);
+	CHECK(double(first_result(q)["score"]) == doctest::Approx(1.105));
+	q->set_min_distance(3.0);
+	CHECK(q->query_positions() == PackedVector3Array({ Vector3(5, 0, 0) }));
+	q->set_min_distance(0.0);
+	q->set_candidate_bonuses(PackedFloat32Array());
+	CHECK(q->query_positions()[0] == Vector3(1, 0, 0));
+}
+
+TEST_CASE("[EnvironmentQuery3D] Candidate bonus validation is atomic and resize clears stale offsets") {
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(1, 0, 0), Vector3(2, 0, 0) });
+	q->set_candidate_bonuses({ 0.25f, -0.25f });
+	const PackedFloat32Array baseline = q->get_candidate_bonuses();
+	ERR_PRINT_OFF
+	q->set_candidate_bonuses({ 0.5f });
+	q->set_candidate_bonuses({ Math::NaN, 0.0f });
+	q->set_candidate_bonuses({ 1.5f, 0.0f });
+	ERR_PRINT_ON
+	CHECK(q->get_candidate_bonuses() == baseline);
+	q->set_candidates({ Vector3(1, 0, 0) });
+	CHECK(q->get_candidate_bonuses().is_empty());
+	CHECK(q->query().size() == 1);
+}
+
 TEST_CASE("[EnvironmentQuery3D] Occupancy exclusions affect full, top-K and spread queries") {
 	Ref<EnvironmentQuery3D> q = make_query({
 		Vector3(1, 0, 0), Vector3(4, 0, 0), Vector3(8, 0, 0), Vector3(12, 0, 0)
@@ -1213,6 +1243,7 @@ TEST_CASE("[EnvironmentQuery3D] Resource roundtrip preserves parameters") {
 	q->set_threat_position(Vector3());
 	q->set_threat_positions({ Vector3(0, 0, 0), Vector3(1, 0, 0) });
 	q->set_safety_weight(2);
+	q->set_candidate_bonuses({ 0.0625f, 0.0f });
 	const String path = TestUtils::get_temp_path("environment_query_3d_roundtrip.tres");
 	REQUIRE(ResourceSaver::save(q, path) == OK);
 	Ref<EnvironmentQuery3D> loaded = ResourceLoader::load(path);
@@ -1221,6 +1252,7 @@ TEST_CASE("[EnvironmentQuery3D] Resource roundtrip preserves parameters") {
 	CHECK(loaded->get_desired_distance() == 6);
 	CHECK(loaded->is_using_threat());
 	CHECK(loaded->get_threat_positions() == q->get_threat_positions());
+	CHECK(loaded->get_candidate_bonuses() == q->get_candidate_bonuses());
 	CHECK(loaded->get_max_results() == 1);
 	CHECK(loaded->get_max_vertical_difference() == doctest::Approx(2.5));
 	CHECK(loaded->get_max_direction_dot() == doctest::Approx(0.8));

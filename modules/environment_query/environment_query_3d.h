@@ -45,6 +45,7 @@ class EnvironmentQuery3D : public Resource {
 	GDCLASS(EnvironmentQuery3D, Resource);
 
 	PackedVector3Array candidates;
+	PackedFloat32Array candidate_bonuses; // Optional bounded per-candidate tactical score offsets.
 	Vector3 origin;
 	Vector3 threat_position;
 	PackedVector3Array threat_positions; // Up to 32 optional multi-actor threat contexts.
@@ -91,6 +92,8 @@ protected:
 public:
 	void set_candidates(const PackedVector3Array &p_candidates);
 	PackedVector3Array get_candidates() const { return candidates; }
+	void set_candidate_bonuses(const PackedFloat32Array &p_bonuses);
+	PackedFloat32Array get_candidate_bonuses() const { return candidate_bonuses; }
 
 	void set_origin(const Vector3 &p_origin);
 	Vector3 get_origin() const { return origin; }
