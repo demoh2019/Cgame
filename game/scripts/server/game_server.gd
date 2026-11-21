@@ -877,6 +877,12 @@ func _spawn_player(player: Player) -> void:
 		if not blocked:
 			spot = candidate
 			break
+	# A survivor who built a bed wakes up beside it instead of in the settlement.
+	if player.user_id != "" or players.has(player.id):
+		var bed_spot: Vector2 = _bed_spawn(player)
+		if bed_spot.is_finite():
+			spot = bed_spot
+			events.append({"type": "bed_respawn", "peer": player.id})
 	player.position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
 	_apply_skill_bonuses(player)
 	player.survival.reset()
@@ -3515,14 +3521,76 @@ func cmd_build_piece(peer_id: int, piece: String, x: float, z: float) -> Diction
 	var item := {"id": id, "x": snapped.x, "y": world.height_at(snapped.x, snapped.y) + HousePieces.elevation(piece), "z": snapped.y,
 		"hp": Structures.MAX_HEALTH, "tier": 1, "owner": peer_id,
 		"owner_account": player.user_id, "owner_guild": player.guild_id,
-		"yaw": snapped.z, "piece": piece, "upkeep_until": time + Structures.UPKEEP_SECONDS}
+		"yaw": snapped.z, "piece": piece, "open": true, "upkeep_until": time + Structures.UPKEEP_SECONDS}
 	barricades[id] = item
 	world_structure_revision += 1
-	world.add_structure_blockers(id, HousePieces.blockers(piece, snapped.x, snapped.y, snapped.z))
+	world.add_structure_blockers(id, HousePieces.blockers_of(item))
 	player.dirty_inventory = true
 	player.dirty_character = true
 	events.append({"type": "barricade_built", "id": id, "peer": peer_id})
 	return {"ok": true, "id": id, "piece": piece}
+
+
+## Open or shut a door. Its owner, their party and their guild may; everyone else has to break it.
+func cmd_toggle_door(peer_id: int, id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if not barricades.has(id) or str(barricades[id].get("piece", "")) != "door":
+		return {"ok": false, "reason": "no_door"}
+	var door: Dictionary = barricades[id]
+	var at := Vector2(float(door["x"]), float(door["z"]))
+	if at.distance_to(Vector2(player.position.x, player.position.z)) > HousePieces.DOOR_REACH:
+		return {"ok": false, "reason": "too_far"}
+	var allowed: bool = Structures.can_manage(door, peer_id, player.user_id)
+	if not allowed:
+		var owner_peer: int = int(door.get("owner", -1))
+		if owner_peer > 0 and parties.group_of(owner_peer) != 0 and parties.group_of(owner_peer) == parties.group_of(peer_id):
+			allowed = true
+		elif str(door.get("owner_guild", "")) != "" and str(door.get("owner_guild", "")) == str(player.guild_id):
+			allowed = true
+	if not allowed:
+		return {"ok": false, "reason": "locked"}
+	var opening: bool = not bool(door.get("open", true))
+	if not opening:
+		# Never shut a door on someone standing in it.
+		for other in players.values():
+			if _alive(other) and at.distance_to(Vector2(other.position.x, other.position.z)) < 0.5 + Defs.PLAYER_RADIUS:
+				return {"ok": false, "reason": "blocked"}
+		for infected in zombies.values():
+			if infected.is_alive() and at.distance_to(Vector2(infected.position.x, infected.position.z)) < 1.0:
+				return {"ok": false, "reason": "blocked"}
+	door["open"] = opening
+	world.add_structure_blockers(id, HousePieces.blockers_of(door))
+	world_structure_revision += 1
+	events.append({"type": "door", "id": id, "open": opening, "x": at.x, "z": at.y})
+	return {"ok": true, "open": opening}
+
+
+## The nearest intact bed this survivor built, as a respawn spot beside it, or Vector2.INF.
+func _bed_spawn(player: Player) -> Vector2:
+	var best := Vector2.INF
+	var best_distance := INF
+	for item in barricades.values():
+		if str(item.get("piece", "")) != "bed" or not Structures.can_manage(item, player.id, player.user_id):
+			continue
+		var bed := Vector2(float(item["x"]), float(item["z"]))
+		var d: float = bed.distance_to(Vector2(player.position.x, player.position.z)) if player.position.is_finite() else 0.0
+		if d < best_distance:
+			best_distance = d
+			best = bed
+	if not best.is_finite():
+		return Vector2.INF
+	for attempt in 12:
+		var candidate: Vector2 = best + Vector2.from_angle(TAU * float(attempt) / 12.0) * HousePieces.BED_RESPAWN_RANGE * 0.6
+		var free := true
+		for blocker in world.blockers_near(candidate.x, candidate.y, Defs.PLAYER_RADIUS + 1.0):
+			if Vector2(float(blocker["x"]) - candidate.x, float(blocker["z"]) - candidate.y).length() < Defs.PLAYER_RADIUS + float(blocker["radius"]) + 0.1:
+				free = false
+				break
+		if free and not world.is_water(candidate.x, candidate.y):
+			return candidate
+	return Vector2.INF
 
 
 func cmd_build(peer_id: int, x: float, z: float, yaw: float = 0.0) -> Dictionary:

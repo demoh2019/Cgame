@@ -2218,6 +2218,9 @@ func _on_event(event: Dictionary) -> void:
 						banner("SURVIVORS' CACHE SPOTTED — %s, %d m (guarded)" % [bearing, int(offset.length())], Color(0.95, 0.82, 0.4))
 					"screamer":
 						banner("A SCREAMER STALKS NEARBY — %s, %d m" % [bearing, int(offset.length())], Color(0.85, 0.65, 1.0))
+		"bed_respawn":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("You wake up in your own bed.")
 		"howl":
 			var heard_from := Vector2(float(event.get("x", 0.0)), float(event.get("z", 0.0)))
 			var me := Vector2(client.predicted.x, client.predicted.z)
@@ -2578,6 +2581,10 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "door" and not bool(data.get("ok", false)):
+		say({"locked": "The door is barred from inside — break it or ask the owner.", "blocked": "Something is in the doorway.",
+			"too_far": "Too far from the door."}.get(str(data.get("reason", "")), "The door will not move."))
+		return
 	if kind == "arcane_bolt" or kind == "ultimate":
 		var label: String = "Arcane Bolt" if kind == "arcane_bolt" else "Cataclysm"
 		if bool(data.get("ok", false)):

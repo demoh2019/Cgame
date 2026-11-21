@@ -114,6 +114,7 @@ static func public_state(data: Dictionary) -> Dictionary:
 		"owner": int(data["owner"]),
 		"yaw": float(data.get("yaw", 0.0)),
 		"piece": str(data.get("piece", "")),
+		"open": bool(data.get("open", true)),
 	}
 
 

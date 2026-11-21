@@ -191,7 +191,7 @@ var _build_ghost: MeshInstance3D
 var _build_reason := ""
 # "" builds the old free-standing barricade; otherwise a house piece snapped to the 3 m grid.
 var _build_piece := "wall"
-const BUILD_PIECES := ["wall", "door", "window", "floor", "roof", "pillar", ""]
+const BUILD_PIECES := ["wall", "door", "window", "floor", "roof", "pillar", "bed", "lamp", ""]
 var _move_input := Vector2.ZERO # This frame's movement keys, for facing the way you walk.
 var _last_attack_msec := -100000
 var _fishing_line: MeshInstance3D # Line from the rod tip to the bobber while fishing.
@@ -1737,12 +1737,15 @@ func _update_prompt() -> void:
 		var protection: float = float(client.campfires[nearby_fire_id].get("stormproof_seconds", 0.0))
 		if protection > 0.0:
 			text += " | STORMPROOF FIRE: %.0fs" % protection
+	var near_door: int = client.nearest_door(p) if not _build_mode else -1
+	if near_door != -1 and client.barricades.has(near_door):
+		text = "E: %s the door" % ("close" if bool(client.barricades[near_door].get("open", true)) else "open")
 	if _build_mode and _build_piece != "":
 		var cost: Dictionary = HousePieces.COST[_build_piece]
 		var parts: Array = []
 		for item_id in cost:
 			parts.append("%d %s" % [int(cost[item_id]), str(item_id).replace("_1", "")])
-		text = "BUILD %s  (%s)   1 wall 2 door 3 window 4 floor 5 roof 6 pillar 7 barricade | wheel: next piece   click: place   right click: done" % [
+		text = "BUILD %s  (%s)   1 wall 2 door 3 window 4 floor 5 roof 6 pillar 7 bed 8 lamp 9 barricade | wheel: next piece   click: place   right click: done" % [
 			str(HousePieces.NAMES[_build_piece]).to_upper(), ", ".join(parts)]
 		if _build_reason != "":
 			text += "   -   " + {"out_of_range": "too far", "safe_zone": "not in the settlement",
@@ -2177,8 +2180,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				if id != -1:
 					client.dismantle(id)
 	if _build_mode and event is InputEventKey and event.pressed and not event.echo \
-			and event.keycode >= KEY_1 and event.keycode <= KEY_7:
-		# Build mode: 1 wall, 2 doorway, 3 window, 4 floor, 5 roof, 6 pillar, 7 old barricade.
+			and event.keycode >= KEY_1 and event.keycode <= KEY_9:
+		# Build mode: 1 wall, 2 door, 3 window, 4 floor, 5 roof, 6 pillar, 7 bed, 8 lamp, 9 old barricade.
 		_select_build_piece(int(event.keycode - KEY_1))
 		get_viewport().set_input_as_handled()
 		return
@@ -2254,6 +2257,10 @@ func _interact() -> void:
 		return
 	if not Dungeon.is_underground(p.x) and not Dungeon.bunker_at(client.world, p.x, p.z).is_empty():
 		client.dungeon(true)
+		return
+	var door_id: int = client.nearest_door(p)
+	if door_id != -1:
+		client.toggle_door(door_id)
 		return
 	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
 	if not loot.is_empty():
@@ -2446,6 +2453,7 @@ func _run_demo() -> void:
 			if _demo_frames == 60:
 				net_ref.c_debug.rpc_id(1, "give", {"item": "wood_1", "count": 120})
 				net_ref.c_debug.rpc_id(1, "give", {"item": "stone_1", "count": 30})
+				net_ref.c_debug.rpc_id(1, "give", {"item": "cloth_1", "count": 10})
 			if _demo_frames == 80:
 				# The survivor stands on the shared corner of the four cells.
 				var corner := Vector2(roundf(client.predicted.x / HousePieces.GRID), roundf(client.predicted.z / HousePieces.GRID)) * HousePieces.GRID
@@ -2462,6 +2470,8 @@ func _run_demo() -> void:
 					_demo_house_plan.append(["roof", corner + cell * g])
 				for c in [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]:
 					_demo_house_plan.append(["pillar", corner + c * g])
+				_demo_house_plan.append(["bed", corner + Vector2(0.5, 0.5) * g])
+				_demo_house_plan.append(["lamp", corner + Vector2(-0.5, 0.5) * g])
 			if _demo_frames > 80 and _demo_frames % 8 == 0 and not _demo_house_plan.is_empty():
 				var step: Array = _demo_house_plan.pop_front()
 				client.build_piece(str(step[0]), step[1])

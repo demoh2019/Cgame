@@ -163,7 +163,7 @@ func on_snapshot(snapshot: Dictionary) -> void:
 			barricades[id] = entity
 			var piece: String = str(entity.get("piece", ""))
 			if HousePieces.valid(piece):
-				world.add_structure_blockers(id, HousePieces.blockers(piece, float(entity["x"]), float(entity["z"]), float(entity.get("yaw", 0.0))))
+				world.add_structure_blockers(id, HousePieces.blockers_of(entity))
 			else:
 				world.add_dynamic_blocker(id, float(entity["x"]), float(entity["z"]), 0.85)
 	depleted.clear()
@@ -618,6 +618,24 @@ func loot_sweep() -> void:
 func build(point: Vector2, yaw: float = 0.0) -> void:
 	if point.is_finite():
 		net.c_build.rpc_id(1, point.x, point.y, yaw)
+
+
+func toggle_door(id: int) -> void:
+	net.c_toggle_door.rpc_id(1, id)
+
+
+## The nearest door piece within reach, or -1.
+func nearest_door(point: Vector3) -> int:
+	var best := -1
+	var best_distance: float = HousePieces.DOOR_REACH
+	for item in barricades.values():
+		if str(item.get("piece", "")) != "door":
+			continue
+		var d := Vector2(float(item["x"]) - point.x, float(item["z"]) - point.z).length()
+		if d < best_distance:
+			best_distance = d
+			best = int(item["id"])
+	return best
 
 
 func build_piece(piece: String, point: Vector2) -> void:

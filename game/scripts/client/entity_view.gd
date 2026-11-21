@@ -64,6 +64,9 @@ const PIECE_MODELS := {
 	"floor": [["planks", "length", 3.0], ["planks", "length", 3.0]],
 	"roof": [["roof", "length", 3.2], ["roof", "length", 3.2]],
 	"pillar": [["pillar-wood", "height", 3.0], ["pillar-wood", "height", 3.0]],
+	"bed": [["../../kenney_ruins/survival/bedroll-frame", "length", 2.2], ["../../kenney_ruins/survival/bedroll-frame", "length", 2.2]],
+	"lamp": [["../../kenney_ruins/graveyard/fire-basket", "height", 1.3], ["../../kenney_ruins/graveyard/fire-basket", "height", 1.3]],
+	"door_open": [["wall-wood-doorway-base", "length", 3.0], ["wall-doorway-square", "length", 3.0]],
 }
 
 
@@ -225,6 +228,17 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		var barricade_mesh: MeshInstance3D = _nodes[key].get_node("Wall")
 		var tier: int = Structures.tier_of(entity)
 		var piece: String = str(entity.get("piece", ""))
+		if piece == "door" and bool(entity.get("open", true)):
+			piece = "door_open" # An open door shows the empty frame.
+		if piece == "lamp" and not _nodes[key].has_node("Light"):
+			var glow := OmniLight3D.new()
+			glow.name = "Light"
+			glow.position = Vector3(0, 1.2, 0)
+			glow.light_color = Color(1.0, 0.72, 0.4)
+			glow.light_energy = 1.6
+			glow.omni_range = 9.0
+			glow.shadow_enabled = false
+			_nodes[key].add_child(glow)
 		if int(barricade_mesh.get_meta("tier", 0)) != tier or str(barricade_mesh.get_meta("piece", "")) != piece:
 			barricade_mesh.set_meta("tier", tier)
 			barricade_mesh.set_meta("piece", piece)

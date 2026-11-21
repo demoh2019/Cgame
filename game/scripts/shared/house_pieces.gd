@@ -11,8 +11,11 @@ extends RefCounted
 const GRID := 3.0
 const WALL_HEIGHT := 3.0
 const BUILD_RANGE := 7.0
-const PIECES := ["wall", "door", "window", "floor", "roof", "pillar"]
-const NAMES := {"wall": "Wall", "door": "Doorway", "window": "Window wall", "floor": "Floor", "roof": "Roof", "pillar": "Pillar"}
+const PIECES := ["wall", "door", "window", "floor", "roof", "pillar", "bed", "lamp"]
+const NAMES := {"wall": "Wall", "door": "Door", "window": "Window wall", "floor": "Floor", "roof": "Roof", "pillar": "Pillar",
+	"bed": "Bed", "lamp": "Lamp"}
+const DOOR_REACH := 3.0
+const BED_RESPAWN_RANGE := 2.5
 const COST := {
 	"wall": {"wood_1": 4},
 	"door": {"wood_1": 3},
@@ -20,6 +23,8 @@ const COST := {
 	"floor": {"wood_1": 3},
 	"roof": {"wood_1": 4, "stone_1": 1},
 	"pillar": {"wood_1": 2},
+	"bed": {"wood_1": 4, "cloth_1": 3},
+	"lamp": {"wood_1": 2, "stone_1": 2},
 }
 
 
@@ -29,7 +34,9 @@ static func valid(piece: String) -> bool:
 
 ## Which pieces compete for the same spot: one wall-type per edge, one floor, one roof, one pillar.
 static func slot(piece: String) -> String:
-	return "edge" if piece in ["wall", "door", "window"] else piece
+	if piece in ["wall", "door", "window"]:
+		return "edge"
+	return "furniture" if piece in ["bed", "lamp"] else piece
 
 
 static func elevation(piece: String) -> float:
@@ -37,7 +44,7 @@ static func elevation(piece: String) -> float:
 
 
 static func blocks(piece: String) -> bool:
-	return piece in ["wall", "door", "window", "pillar"]
+	return piece in ["wall", "door", "window", "pillar", "bed", "lamp"]
 
 
 ## The snapped position and facing for a piece aimed at `point` (x, z, yaw).
@@ -45,7 +52,7 @@ static func snap(piece: String, point: Vector2) -> Vector3:
 	var cell := Vector2(floorf(point.x / GRID), floorf(point.y / GRID))
 	var center := (cell + Vector2(0.5, 0.5)) * GRID
 	match piece:
-		"floor", "roof":
+		"floor", "roof", "bed", "lamp":
 			return Vector3(center.x, center.y, 0.0)
 		"pillar":
 			var corner := Vector2(roundf(point.x / GRID), roundf(point.y / GRID)) * GRID
@@ -58,7 +65,7 @@ static func snap(piece: String, point: Vector2) -> Vector3:
 
 
 ## Movement blockers (x, z, radius) of a placed piece. Doorways leave the middle open.
-static func blockers(piece: String, x: float, z: float, yaw: float) -> Array:
+static func blockers(piece: String, x: float, z: float, yaw: float, closed: bool = false) -> Array:
 	var along := Vector2(sin(yaw), cos(yaw))
 	var at := Vector2(x, z)
 	var result: Array = []
@@ -71,8 +78,14 @@ static func blockers(piece: String, x: float, z: float, yaw: float) -> Array:
 			for k in [-1.15, 1.15]:
 				var p: Vector2 = at + along * float(k)
 				result.append([p.x, p.y, 0.4])
+			if closed:
+				result.append([x, z, 0.5]) # A shut door fills the gap.
 		"pillar":
 			result.append([x, z, 0.3])
+		"bed":
+			result.append([x, z, 0.6])
+		"lamp":
+			result.append([x, z, 0.25])
 	return result
 
 
@@ -99,3 +112,10 @@ static func placement_reason(world, piece: String, snapped: Vector3, from: Vecto
 				if offset.length() < float(circle[2]) + float(blocker["radius"]) + 0.05:
 					return "blocked"
 	return ""
+
+
+## Movement blockers of a stored piece record (doors use their open state).
+static func blockers_of(item: Dictionary) -> Array:
+	var piece: String = str(item.get("piece", ""))
+	var closed: bool = piece == "door" and not bool(item.get("open", true))
+	return blockers(piece, float(item["x"]), float(item["z"]), float(item.get("yaw", 0.0)), closed)

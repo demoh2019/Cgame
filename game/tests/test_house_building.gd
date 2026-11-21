@@ -67,6 +67,28 @@ func run(t) -> void:
 	var moved: Vector3 = Movement.step(world, floor_walk, {"x": 1.0, "z": 0.0}, 0.1)
 	t.check(moved.x > floor_walk.x, "a survivor walks across a floor")
 
+	t.current = "doors open and close; beds are respawn points"
+	builder.inventory.add("cloth_1", 5)
+	var door_aim := Vector2(cell_center.x, cell_center.y - 1.3)
+	var door_result: Dictionary = server.cmd_build_piece(101, "door", door_aim.x, door_aim.y)
+	t.check(bool(door_result.get("ok", false)), "door placed (%s)" % str(door_result.get("reason", "")))
+	if bool(door_result.get("ok", false)):
+		var door_id: int = int(door_result["id"])
+		var door: Dictionary = server.barricades[door_id]
+		t.check(bool(door.get("open", false)), "new doors start open")
+		builder.position = Vector3(door["x"], world.height_at(door["x"], door["z"] - 1.6), float(door["z"]) - 1.6)
+		var shut: Dictionary = server.cmd_toggle_door(101, door_id)
+		t.check(bool(shut.get("ok", false)) and not bool(shut.get("open", true)), "the owner shuts the door")
+		t.eq(HousePieces.blockers_of(door).size(), 3, "a shut door fills the gap")
+		var stranger = server.add_player(102, "Stranger")
+		stranger.position = builder.position
+		t.eq(server.cmd_toggle_door(102, door_id).get("reason", ""), "locked", "strangers cannot open it")
+	var bed_result: Dictionary = server.cmd_build_piece(101, "bed", cell_center.x, cell_center.y)
+	t.check(bool(bed_result.get("ok", false)), "bed placed (%s)" % str(bed_result.get("reason", "")))
+	if bool(bed_result.get("ok", false)):
+		var spot: Vector2 = server._bed_spawn(builder)
+		t.check(spot.is_finite() and spot.distance_to(Vector2(cell_center.x, cell_center.y)) < HousePieces.BED_RESPAWN_RANGE + 0.5, "the bed gives a respawn spot beside it")
+
 	t.current = "dismantling removes the collision"
 	if bool(wall_result.get("ok", false)):
 		var id: int = int(wall_result["id"])
