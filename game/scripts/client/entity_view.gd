@@ -197,7 +197,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			var hit_model := (_nodes[key] as Node3D).get_node_or_null("Model")
 			if hit_model != null and hit_model.has_method("hit_flash"):
 				# Bigger hits flash brighter (fraction of the pre-hit HP).
-				hit_model.hit_flash(0.5 + (before - hp) / maxf(before, 1.0) * 2.0)
+				var strength: float = 0.5 + (before - hp) / maxf(before, 1.0) * 2.0
+				hit_model.hit_flash(EngineFeatures.hit_feedback_strength(_nodes[key], strength))
 	if kind == "player" or kind == "zombie":
 		# Moving things keep a short history on the server clock; they are drawn a little in the past, between two
 		# real samples, so uneven packet arrival does not show as stutter.
