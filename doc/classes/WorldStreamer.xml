@@ -17,15 +17,29 @@
 		[/codeblock]
 		Cells without a scene file are skipped silently, so the world may have holes (oceans, unfinished areas). Unload radius larger than the load radius gives hysteresis: a player pacing along a cell border does not make chunks flicker in and out.
 		To reduce visible pop-in when the player runs or rides, optionally set [member velocity_hint] and [member lookahead_seconds]. The streamer orders already-eligible cells toward a bounded predicted position, but the actual focus and load/unload radii still determine residency. No extra cells are loaded, and [member max_instantiations_per_frame] still limits main-thread work.
+		Optional local route hints can improve scenery arrival along a personal waypoint path. [method set_route_cells] accepts a bounded four-connected corridor from gameplay pathfinding; it changes scheduling priority inside the same focus radius, without allocating any additional world cells. This is distinct from the bounded auxiliary streaming source, which can include a few cells near a valid nearby waypoint.
 		[b]Large worlds:[/b] when the chunks live under a [Node3D] set as [member chunk_parent] that is moved by [FloatingOrigin3D], the focus position is measured in that node's local space, so the grid stays in absolute world coordinates while the origin shifts.
 	</description>
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="cell_to_world" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Returns the corner with the lowest coordinates of [param cell], in the local space of the chunk parent.
+			</description>
+		</method>
 		<method name="clear_auxiliary_source">
 			<return type="void" />
 			<description>
 				Disables the optional secondary streaming source. Chunks no longer wanted by the primary focus or the auxiliary source are released on the next update according to the primary unload radius. Repeated calls are harmless. Does not immediately destroy unrelated primary chunks.
+			</description>
+		</method>
+		<method name="clear_route_cells">
+			<return type="void" />
+			<description>
+				Clears the optional route-cell priority hint. Ordinary movement and camera priority remain active. Does not immediately unload any chunk or alter the player-centered streaming radius.
 			</description>
 		</method>
 		<method name="get_auxiliary_source_position" qualifiers="const">
@@ -38,27 +52,6 @@
 			<return type="float" />
 			<description>
 				Returns the active auxiliary source's effective radius, capped to twice [member cell_size]. Returns [code]0.0[/code] when disabled.
-			</description>
-		</method>
-		<method name="has_auxiliary_source" qualifiers="const">
-			<return type="bool" />
-			<description>
-				Returns whether a secondary source is configured. A source whose position is more than [member load_radius] plus one cell width from the primary focus is considered dormant and does not allocate or retain remote scene chunks.
-			</description>
-		</method>
-		<method name="set_auxiliary_source">
-			<return type="void" />
-			<param index="0" name="position" type="Vector3" />
-			<param index="1" name="radius" type="float" />
-			<description>
-				Cgame extension: registers one extra bounded streaming source for nearby waypoints, portal previews and cinematic targets, inspired by Unreal Engine World Partition streaming sources. Its requested [param radius] is capped at two cell widths, and its [param position] only contributes cells once within [member load_radius] plus one cell width of the active focus. Distant pins never create an independent loaded world. Auxiliary cells are interleaved with primary cells and share the existing main-thread, async loading, and per-frame instantiation budgets. The primary focus cell is always first; the source never affects authoritative game state or network replication. Inputs must be finite, and [param radius] positive. After calling this method, the queue is updated in the following internal process step; call [method refresh] if immediate synchronous scheduling is required.
-			</description>
-		</method>
-		<method name="cell_to_world" qualifiers="const">
-			<return type="Vector3" />
-			<param index="0" name="cell" type="Vector3i" />
-			<description>
-				Returns the corner with the lowest coordinates of [param cell], in the local space of the chunk parent.
 			</description>
 		</method>
 		<method name="get_chunk" qualifiers="const">
@@ -92,22 +85,34 @@
 				Returns the number of loaded chunks.
 			</description>
 		</method>
-		<method name="get_pending_visual_details_count" qualifiers="const">
-			<return type="int" />
-			<description>
-				Counts resident chunks which have reported unfinished optional cosmetic detail work, independently of queued procedural cells and threaded scene loads. A chunk can be fully playable while its grass, flowers or small debris are still being generated within a graphics frame budget. Only chunks implementing [code]has_pending_visual_detail()[/code] returning [code]true[/code] at adoption are counted. The counter is automatically cleared when such chunks are unloaded, even if their visual tasks never finish.
-			</description>
-		</method>
 		<method name="get_pending_count" qualifiers="const">
 			<return type="int" />
 			<description>
 				Returns the number of chunks that are being loaded in the background.
 			</description>
 		</method>
+		<method name="get_pending_visual_details_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Counts resident chunks which have reported unfinished optional cosmetic detail work, independently of queued procedural cells and threaded scene loads. A chunk can be fully playable while its grass, flowers or small debris are still being generated within a graphics frame budget. Only chunks implementing [code]has_pending_visual_detail()[/code] returning [code]true[/code] at adoption are counted. The counter is automatically cleared when such chunks are unloaded, even if their visual tasks never finish.
+			</description>
+		</method>
 		<method name="get_queued_generation_count" qualifiers="const">
 			<return type="int" />
 			<description>
 				Returns the number of procedural cells waiting for the chunk generator callback. Unlike [method get_pending_count], which counts scene files loaded in background threads, this measures the main-thread generation backlog. Pending procedural cells are rebuilt from the current load area on each streaming update, so teleportation and rapid turns cannot accumulate an obsolete backlog. The value can be included in a game benchmark to diagnose world-streaming pop-in or CPU hitches. No additional assets or chunks are allocated by this query.
+			</description>
+		</method>
+		<method name="get_route_cells" qualifiers="const">
+			<return type="Array[Vector3i]" />
+			<description>
+				Returns a copy of the current optional route-cell priority hint. It does not imply that every route cell is currently loaded: only cells already inside the primary streaming radius are eligible for route priority.
+			</description>
+		</method>
+		<method name="has_auxiliary_source" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns whether a secondary source is configured. A source whose position is more than [member load_radius] plus one cell width from the primary focus is considered dormant and does not allocate or retain remote scene chunks.
 			</description>
 		</method>
 		<method name="is_cell_loaded" qualifiers="const">
@@ -117,6 +122,13 @@
 				Returns [code]true[/code] if the chunk of [param cell] is loaded.
 			</description>
 		</method>
+		<method name="mark_visual_details_ready">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Marks optional staged cosmetic work complete for a previously loaded chunk. Does nothing for unknown or already-completed cells. Emits [signal chunk_visual_details_ready] once, without affecting gameplay state, chunk residency, load/unload radius or the procedural generation budget. Call this after cosmetic MultiMesh categories are finished.
+			</description>
+		</method>
 		<method name="refresh">
 			<return type="void" />
 			<param index="0" name="retry" type="bool" default="false" />
@@ -124,11 +136,12 @@
 				Updates the streaming immediately instead of waiting for [member update_interval]. If [param retry] is [code]true[/code], cells that had no scene or failed to load are tried again, for example after new chunk files were added.
 			</description>
 		</method>
-		<method name="mark_visual_details_ready">
+		<method name="set_auxiliary_source">
 			<return type="void" />
-			<param index="0" name="cell" type="Vector3i" />
+			<param index="0" name="position" type="Vector3" />
+			<param index="1" name="radius" type="float" />
 			<description>
-				Marks optional staged cosmetic work complete for a previously loaded chunk. Does nothing for unknown or already-completed cells. Emits [signal chunk_visual_details_ready] once, without affecting gameplay state, chunk residency, load/unload radius or the procedural generation budget. Call this after cosmetic MultiMesh categories are finished.
+				Cgame extension: registers one extra bounded streaming source for nearby waypoints, portal previews and cinematic targets, inspired by Unreal Engine World Partition streaming sources. Its requested [param radius] is capped at two cell widths, and its [param position] only contributes cells once within [member load_radius] plus one cell width of the active focus. Distant pins never create an independent loaded world. Auxiliary cells are interleaved with primary cells and share the existing main-thread, async loading, and per-frame instantiation budgets. The primary focus cell is always first; the source never affects authoritative game state or network replication. Inputs must be finite, and [param radius] positive. After calling this method, the queue is updated in the following internal process step; call [method refresh] if immediate synchronous scheduling is required.
 			</description>
 		</method>
 		<method name="set_chunk_generator">
@@ -143,6 +156,13 @@
 			<param index="0" name="provider" type="Callable" />
 			<description>
 				Sets a callback used instead of [member chunk_path_template] to find the scene of a cell. It receives the cell as a [Vector3i] and returns the scene path as a [String], or an empty string if the cell has no chunk. This allows chunk lookup from a database or a procedural generator.
+			</description>
+		</method>
+		<method name="set_route_cells">
+			<return type="bool" />
+			<param index="0" name="cells" type="Array[Vector3i]" />
+			<description>
+				Supplies a game-planned corridor of up to 64 orthogonally adjacent streaming cell coordinates in traversal order. Returns [code]false[/code] without altering the previous hint when too many cells, diagonal jumps, duplicates, or invalid plane coordinates are supplied. When the first coordinate matches the player's current cell, the native streamer promotes the next eligible route cells while interleaving regular nearby chunks to prevent starvation. The route NEVER extends load/unload radii, skips CPU/instantiation budgets, creates remote scenery or changes authoritative gameplay. Use [AStarGrid2D] or another game path planner to avoid blocked cells before submitting this hint. Updating a matching route is idempotent. When the streaming axes or cell size changes, this hint is cleared automatically.
 			</description>
 		</method>
 		<method name="unload_all">
