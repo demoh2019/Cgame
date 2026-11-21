@@ -109,5 +109,9 @@ func run(t) -> void:
 						batch_visible, full_slots, priority_slots)
 					t.eq(planned, fallback, "native/script visible-crowd parity %d/%d" % [
 						full_slots, priority_slots])
-					t.check(planned.count(0) <= full_slots,
+					var full_count: int = 0
+					for tier in planned:
+						if tier == 0:
+							full_count += 1
+					t.check(full_count <= full_slots,
 						"native visibility planner respects full IK slot cap")
