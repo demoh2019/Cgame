@@ -1,6 +1,6 @@
 extends SceneTree
 ## cgame --headless --path misc/cgame_forest_showcase --script res://tests/smoke_navmesh_streaming.gd
-## Test real NavigationMesh polygons and NavigationServer3D path across two
+## Test actual clearance-filtered NavigationMesh polygons and server paths across two
 ## contiguous forest-cell NavigationRegions plus native priority tier changes.
 
 const FOREST: String = "res://cells/forest_cell.tscn"
@@ -88,8 +88,14 @@ func _run() -> void:
     if home == null or home.navigation_mesh == null:
         _fail("near forest scene lacks NavigationRegion3D and NavigationMesh")
         return
-    if home.navigation_mesh.get_polygon_count() != 128:
-        _fail("terrain navigation tile did not contain 8x8 triangulated polygons")
+    var home_polygons: int = home.navigation_mesh.get_polygon_count()
+    if home_polygons <= 0 or home_polygons >= 512:
+        _fail("near NavMesh should contain obstacle-carved 16x16 terrain triangles")
+        return
+    var home_cell: Node3D = stream.get_cell_instance(Vector2i.ZERO)
+    var home_blockers: PackedVector3Array = home_cell.get("navigation_blockers")
+    if home_blockers.is_empty():
+        _fail("near forest navigation was not provided any obstacle footprints")
         return
 
     # A low-priority source preloads visuals only, without activating navigation.
@@ -117,8 +123,9 @@ func _run() -> void:
     if far == null or far.navigation_mesh == null or not far.enabled:
         _fail("urgent destination does not have an enabled NavigationRegion3D")
         return
-    if far.navigation_mesh.get_polygon_count() != 128:
-        _fail("destination navigation tile was not tessellated")
+    var far_polygons: int = far.navigation_mesh.get_polygon_count()
+    if far_polygons <= 0 or far_polygons >= 512:
+        _fail("destination NavMesh should be tessellated and obstacle-carved")
         return
     for i in range(4):
         await physics_frame
