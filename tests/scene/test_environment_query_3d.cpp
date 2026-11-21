@@ -602,6 +602,76 @@ TEST_CASE("[EnvironmentQuery3D] Multi-threat limits, invalid actors, and legacy 
 	CHECK(double(nearest["threat_distance"]) == doctest::Approx(96.0));
 }
 
+TEST_CASE("[EnvironmentQuery3D] Random-best run modes honor score percentage cutoffs") {
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(10, 0, 0), Vector3(30, 0, 0), Vector3(40, 0, 0) });
+	q->set_max_distance(100.0);
+	const PackedVector3Array best5 = q->query_random_best_positions(5, 123);
+	REQUIRE(best5.size() == 1);
+	CHECK(best5[0] == Vector3(10, 0, 0)); // 0.9 best; cutoff 0.855.
+	const PackedVector3Array best25 = q->query_random_best_positions(25, 123);
+	REQUIRE(best25.size() == 1);
+	CHECK(best25[0] == Vector3(10, 0, 0) || best25[0] == Vector3(30, 0, 0));
+	CHECK(q->query_random_best_positions(25, 123) == best25);
+	q->set_max_results(1);
+	CHECK(q->query_random_best_positions(25, 123) == best25); // Cap is output-only.
+	CHECK(q->query_random_best_positions(0, -3) == best5);
+	const PackedVector3Array any = q->query_random_best_positions(100, -3);
+	REQUIRE(any.size() == 1);
+	CHECK(any[0] == Vector3(10, 0, 0) || any[0] == Vector3(30, 0, 0) || any[0] == Vector3(40, 0, 0));
+}
+
+TEST_CASE("[EnvironmentQuery3D] Random-best varies seed across tied scores without gameplay RNG") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 0, -1)
+	});
+	q->set_max_distance(10);
+	const PackedVector3Array baseline = q->query_positions();
+	REQUIRE(baseline.size() == 4);
+	bool saw_another = false;
+	const PackedVector3Array first = q->query_random_best_positions(5, 0);
+	REQUIRE(first.size() == 1);
+	for (int seed = 1; seed < 64; seed++) {
+		const PackedVector3Array selected = q->query_random_best_positions(5, seed);
+		REQUIRE(selected.size() == 1);
+		if (selected[0] != first[0]) {
+			saw_another = true;
+		}
+		CHECK(selected == q->query_random_best_positions(5, seed));
+	}
+	CHECK(saw_another);
+	CHECK(q->query_positions() == baseline); // No query configuration mutation.
+}
+
+TEST_CASE("[EnvironmentQuery3D] Random-best keeps all safety filters and fails closed") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 8), Vector3(NaN, 0, 0)
+	});
+	q->set_max_distance(10.0);
+	q->set_horizontal_only(true);
+	q->set_use_direction(true);
+	q->set_direction_origin(Vector3());
+	q->set_direction_axis(Vector3(1, 0, 0));
+	q->set_min_direction_dot(0.5);
+	CHECK(q->query_random_best_positions(25, 1) == PackedVector3Array({ Vector3(1, 0, 0) }));
+	q->set_min_exclusion_distance(2.0);
+	q->set_exclusion_positions({ Vector3(1, 0, 0) });
+	CHECK(q->query_random_best_positions(25, 1).is_empty());
+	q->set_exclusion_positions(PackedVector3Array());
+	q->set_use_direction(false);
+	q->set_use_threat(true);
+	q->set_threat_positions({ Vector3(0, 0, 0), Vector3(0, 0, 7) });
+	q->set_min_threat_distance(2.0);
+	CHECK(q->query_random_best_positions(25, 1).is_empty());
+	q->set_use_threat(false);
+	CHECK(!q->query_random_best_positions(25, 1).is_empty());
+	ERR_PRINT_OFF
+	CHECK(q->query_random_best_positions(-1, 4).is_empty());
+	CHECK(q->query_random_best_positions(101, 4).is_empty());
+	ERR_PRINT_ON
+	q->set_min_distance(11.0);
+	CHECK(q->query_random_best_positions(25, 4).is_empty());
+}
+
 TEST_CASE("[EnvironmentQuery3D] Four ring samples cover cardinal directions") {
 	PackedVector3Array p = EnvironmentQuery3D::sample_ring(Vector3(), 2, 4);
 	REQUIRE(p.size() == 4);

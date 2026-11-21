@@ -121,6 +121,8 @@ public:
 	PackedVector3Array query_positions() const;
 	// Bounded allocation-free-of-metadata stable top-K for frequent AI queries.
 	PackedVector3Array query_top_positions(int p_count) const;
+	// Score-band random best: deterministic seed, O(N) work, O(1) scratch.
+	PackedVector3Array query_random_best_positions(int p_best_percent, int64_t p_seed) const;
 	// Same stable top-K scoring as query_top_positions(), but returns original
 	// candidate indices instead of copying positions or creating metadata.
 	// Duplicate coordinates retain distinct identities (e.g. Smart Object slots).

@@ -56,6 +56,14 @@ struct HitComparator {
 	}
 };
 
+// SplitMix64 finalizer: stable, fast seed/index ordering with no global RNG.
+static uint64_t query_random_key(uint64_t p_seed, uint64_t p_index) {
+	uint64_t value = p_seed ^ (p_index + 0x9e3779b97f4a7c15ULL);
+	value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+	value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+	return value ^ (value >> 31);
+}
+
 static double point_distance(const Vector3 &p_a, const Vector3 &p_b, bool p_horizontal_only) {
 	if (p_horizontal_only) {
 		return Vector2(p_a.x - p_b.x, p_a.z - p_b.z).length();
@@ -200,6 +208,7 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query"), &EnvironmentQuery3D::query);
 	ClassDB::bind_method(D_METHOD("query_positions"), &EnvironmentQuery3D::query_positions);
 	ClassDB::bind_method(D_METHOD("query_top_positions", "count"), &EnvironmentQuery3D::query_top_positions);
+	ClassDB::bind_method(D_METHOD("query_random_best_positions", "best_percent", "seed"), &EnvironmentQuery3D::query_random_best_positions);
 	ClassDB::bind_method(D_METHOD("query_top_indices", "count"), &EnvironmentQuery3D::query_top_indices);
 	ClassDB::bind_method(D_METHOD("query_spread_positions", "count", "min_separation"), &EnvironmentQuery3D::query_spread_positions);
 	ClassDB::bind_static_method("EnvironmentQuery3D", D_METHOD("sample_ring", "center", "radius", "count", "phase"), &EnvironmentQuery3D::sample_ring, DEFVAL(0.0));
@@ -476,6 +485,59 @@ PackedInt32Array EnvironmentQuery3D::query_top_indices(int p_count) const {
 	int32_t *write = output.ptrw();
 	for (int i = 0; i < best.size(); i++) {
 		write[i] = best[i].index;
+	}
+	return output;
+}
+
+// Unreal EQS Run Mode "Single Random Item from Best 5% / 25%" analogue.
+// First pass finds the best valid score; second pass hashes all eligible
+// source indices and chooses the highest deterministic key. Compared to
+// full sorting, this needs O(N) score evaluations and O(1) scratch storage.
+// No world RNG is advanced: caller controls replay through p_seed.
+PackedVector3Array EnvironmentQuery3D::query_random_best_positions(int p_best_percent, int64_t p_seed) const {
+	PackedVector3Array output;
+	ERR_FAIL_COND_V_MSG(p_best_percent < 0 || p_best_percent > 100, output, "Random-best percent must be 0..100.");
+	if (!origin.is_finite() || (use_threat && !threat_position.is_finite()) || min_distance > max_distance) {
+		return output;
+	}
+	double max_score = -1.0;
+	for (int i = 0; i < candidates.size(); i++) {
+		QueryHit hit;
+		if (score_candidate(candidates[i], i, origin, threat_position, threat_positions,
+					exclusion_positions, min_exclusion_distance,
+					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
+					use_threat, horizontal_only, min_distance, max_distance,
+					max_vertical_difference, desired_distance, distance_weight, safety_weight,
+					min_threat_distance, hit)) {
+			max_score = MAX(max_score, hit.score);
+		}
+	}
+	if (max_score < 0.0) {
+		return output;
+	}
+	const double cutoff = max_score * (1.0 - double(p_best_percent) / 100.0);
+	uint64_t chosen_key = 0;
+	int chosen_index = -1;
+	Vector3 chosen_point;
+	for (int i = 0; i < candidates.size(); i++) {
+		QueryHit hit;
+		if (!score_candidate(candidates[i], i, origin, threat_position, threat_positions,
+					exclusion_positions, min_exclusion_distance,
+					use_direction, direction_origin, direction_axis, min_direction_dot, max_direction_dot,
+					use_threat, horizontal_only, min_distance, max_distance,
+					max_vertical_difference, desired_distance, distance_weight, safety_weight,
+					min_threat_distance, hit) || hit.score < cutoff) {
+			continue;
+		}
+		const uint64_t key = query_random_key(uint64_t(p_seed), uint64_t(i));
+		if (chosen_index < 0 || key > chosen_key || (key == chosen_key && i < chosen_index)) {
+			chosen_key = key;
+			chosen_index = i;
+			chosen_point = hit.position;
+		}
+	}
+	if (chosen_index >= 0) {
+		output.push_back(chosen_point);
 	}
 	return output;
 }

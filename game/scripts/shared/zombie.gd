@@ -748,10 +748,18 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 	# The previous position-only path must rediscover original ring indices by
 	# fuzzy coordinate comparisons and cannot distinguish overlapping items.
 	# Old Cgame builds without the new API keep their previous fallback.
+	# Unreal Random Best 25% mode: stable near-best candidate for
+	# individual flanking, plus a first preference for server-owned slots.
+	# Never changes the authoritative occupancy/lease algorithm.
+	var preferred := PackedVector3Array()
+	if _flank_query.has_method("query_random_best_positions"):
+		preferred = _flank_query.call("query_random_best_positions", 25, id)
 	var ranked_indices := PackedInt32Array()
 	var ranked := PackedVector3Array()
 	var top_count: int = 8 if use_smart_slots else 3
-	if _flank_query.has_method("query_top_indices"):
+	if not use_smart_slots and preferred.size() == 1:
+		ranked = preferred
+	elif _flank_query.has_method("query_top_indices"):
 		ranked_indices = _flank_query.call("query_top_indices", top_count)
 		for ring_index in ranked_indices:
 			if ring_index < 0 or ring_index >= ring.size():
@@ -765,16 +773,27 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 	var claimed_slot: int = 0
 	if use_smart_slots:
 		var slot_ids := PackedInt64Array()
+		# The ring's eight distinct locations allow a cheap 1-item lookup.
+		# Identity-aware ranked indices from newer engines stay intact.
+		if preferred.size() == 1:
+			for ring_index in ring.size():
+				if ring[ring_index].distance_squared_to(preferred[0]) < 0.0001:
+					slot_ids.append(target_id * 16 + ring_index + 1)
+					break
 		if not ranked_indices.is_empty():
 			for ring_index in ranked_indices:
-				# Stable original candidate identity: no position matching.
-				slot_ids.append(target_id * 16 + ring_index + 1)
+				# Each original EQS candidate retains its unique source ID.
+				var sid: int = target_id * 16 + ring_index + 1
+				if not slot_ids.has(sid):
+					slot_ids.append(sid)
 		else:
 			for candidate in ranked:
 				for ring_index in ring.size():
 					if ring[ring_index].distance_squared_to(candidate) < 0.0001:
 						# Backwards compatibility with older position-only EQS.
-						slot_ids.append(target_id * 16 + ring_index + 1)
+						var sid: int = target_id * 16 + ring_index + 1
+						if not slot_ids.has(sid):
+							slot_ids.append(sid)
 						break
 		if slot_ids.is_empty():
 			return target
