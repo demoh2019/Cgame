@@ -413,7 +413,7 @@ func _update_hud() -> void:
         if int(step.get("status", -1)) == BehaviorTreeTask.RUNNING:
             traced_leaf = str(step.get("path", ""))
             traced_status = "RUNNING"
-    hud.text += "\\nNode trace: %s | Steps: %d | Active: %s (%s)" % [
+    hud.text += "\nNode trace: %s | Steps: %d | Active: %s (%s)" % [
         "ON" if brain.is_trace_enabled() else "OFF",
         trace_steps.size(),
         traced_leaf,
