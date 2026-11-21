@@ -40,7 +40,7 @@ class NativeEqsTopK(unittest.TestCase):
     def test_native_avoids_full_sort_and_dictionary_allocations(self):
         cpp = CPP.read_text(encoding="utf-8")
         section = cpp.split("PackedVector3Array EnvironmentQuery3D::query_top_positions")[1].split(
-            "PackedVector3Array EnvironmentQuery3D::sample_ring")[0]
+            "PackedVector3Array EnvironmentQuery3D::query_spread_positions")[0]
         self.assertIn("Vector<QueryHit> best;", section)
         self.assertIn("best.insert(at, hit);", section)
         self.assertIn("best.resize(limit);", section)
