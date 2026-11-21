@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgamePathTracer" inherits="RefCounted" api_type="core" keywords="raytracing,path tracing,lightmap,baking,ambient occlusion" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Multithreaded CPU path tracer for light baking and offline image rendering.
+	</brief_description>
+	<description>
+		[CgamePathTracer] bakes per-vertex lighting and ambient occlusion and renders still images on the CPU, using a [CgameBVH] for ray queries. It shades each surface hit with sun next-event estimation plus cosine-sampled diffuse bounces terminated by Russian roulette.
+		Work is distributed with [WorkerThreadPool]. Every vertex and every pixel owns its own PCG32 random stream derived from the seed and its index, so results are identical for a given seed regardless of the number of threads. Different seeds give independent estimates.
+		[b]Conventions:[/b] [code]sun_dir[/code] is the direction the sunlight travels (like the forward direction of a directional light). [code]sun_color[/code] is the radiance returned by a white diffuse surface facing the sun, with irradiance divided by pi already folded in. [code]sky_color[/code] is a constant-radiance environment. All colors are linear.
+		The baking and one-shot rendering functions are static. For progressive refinement, create an instance, call [method begin_progressive], then call [method accumulate] repeatedly and read the running estimate with [method to_image] or [method get_pixel].
+		[codeblock]
+		var bvh := CgameBVH.new()
+		bvh.build(triangles)
+		var ao := CgamePathTracer.bake_ambient_occlusion(bvh, vertices, normals, 32, 4.0, 1)
+
+		var tracer := CgamePathTracer.new()
+		tracer.begin_progressive(Vector2i(256, 192), 7)
+		var light := CgamePathTracer.make_light(Vector3(-0.3, -1, -0.2), Color(1, 1, 1), Color(0.3, 0.4, 0.6))
+		for pass in 16:
+		    tracer.accumulate(bvh, camera_transform, 50.0, 1, light)
+		var image := tracer.to_image()
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="accumulate">
+			<return type="void" />
+			<param index="0" name="bvh" type="CgameBVH" />
+			<param index="1" name="camera" type="Transform3D" />
+			<param index="2" name="fov_deg" type="float" />
+			<param index="3" name="spp" type="int" />
+			<param index="4" name="light" type="Dictionary" default="{}" />
+			<description>
+				Adds [param spp] samples per pixel to the progressive image started by [method begin_progressive]. The camera looks down its local -Z axis and [param fov_deg] is the vertical field of view in degrees. [param light] is a dictionary as returned by [method make_light]; missing keys use defaults (warm sun, blue-grey sky, 0.7 grey albedo, 3 bounces). Each call uses fresh random streams, so repeated calls refine the estimate.
+			</description>
+		</method>
+		<method name="bake_ambient_occlusion" qualifiers="static">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="bvh" type="CgameBVH" />
+			<param index="1" name="vertices" type="PackedVector3Array" />
+			<param index="2" name="normals" type="PackedVector3Array" />
+			<param index="3" name="samples" type="int" />
+			<param index="4" name="max_dist" type="float" />
+			<param index="5" name="seed" type="int" />
+			<description>
+				Returns ambient visibility per vertex: [code]1.0[/code] is fully open and [code]0.0[/code] is fully enclosed within [param max_dist]. [param normals] must have one entry per vertex. Uses [param samples] cosine-distributed rays per vertex.
+			</description>
+		</method>
+		<method name="bake_vertex_lighting" qualifiers="static">
+			<return type="PackedColorArray" />
+			<param index="0" name="bvh" type="CgameBVH" />
+			<param index="1" name="vertices" type="PackedVector3Array" />
+			<param index="2" name="normals" type="PackedVector3Array" />
+			<param index="3" name="albedo_per_tri" type="PackedColorArray" />
+			<param index="4" name="sun_dir" type="Vector3" />
+			<param index="5" name="sun_color" type="Color" />
+			<param index="6" name="sky_color" type="Color" />
+			<param index="7" name="samples" type="int" />
+			<param index="8" name="bounces" type="int" />
+			<param index="9" name="seed" type="int" />
+			<description>
+				Returns baked linear lighting per vertex (alpha is [code]1.0[/code]). [param vertices] and [param normals] are per vertex, three per triangle; vertex [code]i[/code] takes the albedo of triangle [code]i / 3[/code] from [param albedo_per_tri] (0.7 grey where the array is too short). [param samples] is the number of indirect paths per vertex and [param bounces] the maximum number of surface interactions per path; [code]0[/code] gives direct sun plus sky visibility only.
+			</description>
+		</method>
+		<method name="begin_progressive">
+			<return type="void" />
+			<param index="0" name="size" type="Vector2i" />
+			<param index="1" name="seed" type="int" default="1" />
+			<description>
+				Starts a new progressive image of the given [param size] and clears any previous accumulation. [param seed] selects the random streams.
+			</description>
+		</method>
+		<method name="get_passes" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of [method accumulate] calls since [method begin_progressive].
+			</description>
+		</method>
+		<method name="get_pixel" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="y" type="int" />
+			<description>
+				Returns the mean linear color of the pixel at ([param x], [param y]) as (r, g, b), or zero if nothing was accumulated yet.
+			</description>
+		</method>
+		<method name="get_progressive_size" qualifiers="const">
+			<return type="Vector2i" />
+			<description>
+				Returns the size passed to [method begin_progressive].
+			</description>
+		</method>
+		<method name="get_samples" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of samples per pixel accumulated so far.
+			</description>
+		</method>
+		<method name="make_light" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="sun_dir" type="Vector3" />
+			<param index="1" name="sun_color" type="Color" />
+			<param index="2" name="sky_color" type="Color" />
+			<param index="3" name="albedo_per_tri" type="PackedColorArray" default="PackedColorArray()" />
+			<param index="4" name="bounces" type="int" default="3" />
+			<description>
+				Builds the light and material dictionary accepted by [method accumulate] and [method render_image], with the keys [code]sun_dir[/code], [code]sun_color[/code], [code]sky_color[/code], [code]albedo[/code] and [code]bounces[/code].
+			</description>
+		</method>
+		<method name="render_image" qualifiers="static">
+			<return type="Image" />
+			<param index="0" name="bvh" type="CgameBVH" />
+			<param index="1" name="camera" type="Transform3D" />
+			<param index="2" name="fov_deg" type="float" />
+			<param index="3" name="size" type="Vector2i" />
+			<param index="4" name="spp" type="int" />
+			<param index="5" name="light" type="Dictionary" default="{}" />
+			<param index="6" name="seed" type="int" default="1" />
+			<description>
+				Renders a one-shot image with [param spp] samples per pixel and returns it as an [constant Image.FORMAT_RGB8] image (clamped and gamma 2.2 encoded). The same arguments and seed always produce the same image.
+			</description>
+		</method>
+		<method name="to_image" qualifiers="const">
+			<return type="Image" />
+			<description>
+				Returns the current progressive estimate as an [constant Image.FORMAT_RGB8] image, clamped and gamma 2.2 encoded.
+			</description>
+		</method>
+	</methods>
+</class>

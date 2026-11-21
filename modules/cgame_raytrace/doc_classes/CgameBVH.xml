@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameBVH" inherits="RefCounted" api_type="core" keywords="raytracing,bvh,acceleration structure" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		CPU bounding volume hierarchy for ray queries against a triangle soup.
+	</brief_description>
+	<description>
+		[CgameBVH] builds a binned surface-area-heuristic bounding volume hierarchy over a triangle soup and answers closest-hit and any-hit ray queries using the Moller-Trumbore ray/triangle test. It is the acceleration structure used by [CgamePathTracer], and is also usable on its own for line-of-sight checks and picking against baked geometry.
+		Queries do not modify the hierarchy and are safe to call from several threads at once, as long as no thread calls [method build] or [method clear] at the same time.
+		[codeblock]
+		var tris := PackedVector3Array([
+		    Vector3(-10, 0, -10), Vector3(-10, 0, 10), Vector3(10, 0, 10),
+		])
+		var bvh := CgameBVH.new()
+		bvh.build(tris)
+		var hit := bvh.intersect(Vector3(0, 5, 0), Vector3.DOWN)
+		if hit["hit"]:
+		    print("Hit triangle ", hit["tri"], " at distance ", hit["t"])
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="build">
+			<return type="void" />
+			<param index="0" name="triangles" type="PackedVector3Array" />
+			<description>
+				Builds the hierarchy. [param triangles] holds three vertices per triangle; a trailing incomplete triangle is ignored. Any previous contents are discarded. An empty array produces an empty hierarchy that never reports a hit.
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Discards the hierarchy and all triangle data.
+			</description>
+		</method>
+		<method name="get_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns build statistics with the keys [code]triangles[/code], [code]nodes[/code], [code]leaves[/code], [code]max_depth[/code], [code]avg_leaf_size[/code], [code]sah_cost[/code] (expected traversal cost relative to the root area) and [code]build_ms[/code].
+			</description>
+		</method>
+		<method name="get_triangle_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of triangles the hierarchy was built from.
+			</description>
+		</method>
+		<method name="intersect" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="origin" type="Vector3" />
+			<param index="1" name="dir" type="Vector3" />
+			<param index="2" name="t_max" type="float" default="1e+20" />
+			<description>
+				Finds the closest hit along [code]origin + t * dir[/code] for [code]t[/code] in a small epsilon up to [param t_max]. [param dir] does not have to be normalized, but [code]t[/code] is expressed in units of [param dir].
+				The result contains [code]hit[/code] ([bool]), [code]t[/code] ([float], equal to [param t_max] on a miss), [code]tri[/code] ([int], index of the triangle in the array given to [method build], or [code]-1[/code]), [code]u[/code] and [code]v[/code] (barycentric coordinates of the hit) and [code]normal[/code] ([Vector3], the geometric normal flipped to face the ray, or zero on a miss).
+			</description>
+		</method>
+		<method name="is_built" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the hierarchy contains at least one triangle.
+			</description>
+		</method>
+		<method name="occluded" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="origin" type="Vector3" />
+			<param index="1" name="dir" type="Vector3" />
+			<param index="2" name="t_max" type="float" default="1e+20" />
+			<description>
+				Any-hit shadow query. Returns [code]true[/code] if some triangle blocks [code]origin + t * dir[/code] for [code]t[/code] below [param t_max]. Faster than [method intersect] when the closest hit is not needed.
+			</description>
+		</method>
+	</methods>
+</class>
