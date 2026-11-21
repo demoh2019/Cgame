@@ -45,6 +45,10 @@ func run(t) -> void:
 				1.0, 0.001, "runtime branch still refreshes")
 			t.near(Features.runtime_effect_remaining(actor, "Local.Visual.Hit"),
 				2.0, 0.001, "local visual countdown survives refresh")
+			var first_flash := Features.hit_feedback_strength(actor, 1.0)
+			var second_flash := Features.hit_feedback_strength(actor, 1.0)
+			t.near(first_flash, 1.0, 0.001, "first hit keeps original flash intensity")
+			t.check(second_flash > first_flash, "rapid hits intensify native visual response")
 			Features.tick_runtime_effects(actor, 0.4)
 			t.near(Features.runtime_effect_remaining(actor, "Local.Visual.Hit"),
 				1.6, 0.001, "local effect advances on frame tick")
