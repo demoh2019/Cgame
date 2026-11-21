@@ -229,7 +229,7 @@ TEST_CASE("[SignificanceBudget] soft category minimums protect battle feedback a
 	const PackedInt32Array caps = { 4, 4, 4, 4 };
 	const PackedFloat64Array ranges = { 40, 80, 120, 140 };
 	const PackedInt32Array minimums = { 0, 1, 1, 0 };
-	const PackedInt32Array wanted = { 7, 4, 0, 1 };
+	const PackedInt32Array wanted = { 7, 0, 4, 1 };
 	CHECK(planner->select_effects_visible_fair(distances, priority, categories,
 			visible, caps, ranges, minimums, 4) == wanted);
 	// The old global-rank method would starve ordinary hit effects.
@@ -797,7 +797,7 @@ TEST_CASE("[SignificanceBudget] cost-aware VFX respects both scene slots and par
 
 	// Visibility is only a tie-breaker within the same urgency tier.
 	CHECK(planner->select_effects_visible_costed({ 1.0, 3.0 }, { 1, 1 }, { 0, 0 },
-			{ 0, 1 }, { 10, 10 }, caps, 2, 10.0, 20) == preferred_visible);
+			{ 0, 1 }, { 10, 10 }, { 2, 4, 4, 4 }, 2, 10.0, 20) == preferred_visible);
 	CHECK(planner->select_effects_visible_costed({ 1.0, 141.0 }, { 0, 3 }, { 0, 3 },
 			{ 1, 1 }, { 10, 10 }, caps, 2, 140.0, 96) == within_range);
 }
@@ -839,15 +839,15 @@ TEST_CASE("[SignificanceBudget] fair cost-aware VFX applies particle work inside
 	const PackedFloat64Array ranges = { 18.0, 40.0, 75.0, 140.0 };
 	const PackedInt32Array minimums = { 0, 1, 1, 0 };
 	const PackedInt32Array unconstrained = { 0, 1, 2, 3, 5 };
-	const PackedInt32Array constrained = { 0, 2, 5 };
+	const PackedInt32Array constrained = { 0, 3, 5 };
 	const PackedInt32Array critical_only = { 0 };
 	// A generous particle budget reproduces the plain fair plan.
 	CHECK(planner->select_effects_visible_fair_costed(distances, priorities, categories, visible,
 			costs, caps, ranges, minimums, 8, 1000) == unconstrained);
 	CHECK(planner->select_effects_visible_fair(distances, priorities, categories, visible,
 			caps, ranges, minimums, 8) == unconstrained);
-	// Under a tight particle budget the priority-3 event still wins, the hit
-	// minimum is met, and unaffordable combat effects leave room for cheap dust.
+	// Under a tight particle budget the priority-3 event still wins, the unaffordable
+	// 50-cost combat effect is skipped, and the cheaper combat effect outranks hit.
 	CHECK(planner->select_effects_visible_fair_costed(distances, priorities, categories, visible,
 			costs, caps, ranges, minimums, 8, 100) == constrained);
 	CHECK(planner->select_effects_visible_fair_costed(distances, priorities, categories, visible,

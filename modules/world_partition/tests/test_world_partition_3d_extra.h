@@ -201,8 +201,8 @@ TEST_CASE("[WorldPartition3D] Object import validates scene paths and serializab
 	REQUIRE(result.size() == 1);
 	REQUIRE(result.has("TreasureChest"));
 	const Dictionary record = result["TreasureChest"];
-	CHECK(bool() == true);
-	CHECK(int() == 3);
+	CHECK(bool(record["active"]) == true);
+	CHECK(int(record["uses"]) == 3);
 	world.clear_cell_object_states();
 	CHECK(world.get_cell_object_state_count() == 0);
 }
@@ -222,7 +222,7 @@ TEST_CASE("[WorldPartition3D] Stateful object snapshots are deep copies of impor
 	cells.clear();
 	Dictionary stored = world.get_cell_object_states(Vector2i(4, 2));
 	const Dictionary again = stored["ArenaSwitch"];
-	CHECK(int() == 1);
+	CHECK(int(again["uses"]) == 1);
 	stored.clear();
 	const Dictionary after = world.snapshot_cell_object_states();
 	REQUIRE(after.has(Vector2i(4, 2)));
@@ -231,7 +231,7 @@ TEST_CASE("[WorldPartition3D] Stateful object snapshots are deep copies of impor
 	saved["active"] = true;
 	const Dictionary refreshed = world.get_cell_object_states(Vector2i(4, 2));
 	const Dictionary original = refreshed["ArenaSwitch"];
-	CHECK(bool() == false);
+	CHECK(bool(original["active"]) == false);
 }
 
 TEST_CASE("[WorldPartition3D] Stateful object import limits records per cell") {
@@ -669,9 +669,9 @@ TEST_CASE("[SceneTree][WorldPartition3D] Navigation corridor streams a distant t
 TEST_CASE("[WorldPartition3D] Simulation diagnostics for missing cells return zero counts") {
 	WorldPartition3D world;
 	const Dictionary counts = world.get_cell_simulation_stats(Vector2i(999, -999));
-	CHECK(int() == 0);
-	CHECK(int() == 0);
-	CHECK(int() == 0);
+	CHECK(int(counts["collision_objects"]) == 0);
+	CHECK(int(counts["collision_shapes"]) == 0);
+	CHECK(int(counts["navigation_regions"]) == 0);
 }
 
 TEST_CASE("[WorldPartition3D] Streaming lifecycle callbacks are registered as native signals") {
@@ -690,14 +690,14 @@ TEST_CASE("[SceneTree][WorldPartition3D] Lifecycle and simulation statistics wor
 		fixture.world->set_cell_scene(cell, path);
 		REQUIRE(wait_for_cell(fixture.world, cell));
 		const Dictionary counts = fixture.world->get_cell_simulation_stats(cell);
-		CHECK(int() == 0);
-		CHECK(int() == 0);
-		CHECK(int() == 0);
+		CHECK(int(counts["collision_objects"]) == 0);
+		CHECK(int(counts["collision_shapes"]) == 0);
+		CHECK(int(counts["navigation_regions"]) == 0);
 		fixture.observer->set_position(Vector3(128, 0, 0));
 		fixture.world->update_streaming();
 		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
 		const Dictionary unloaded = fixture.world->get_cell_simulation_stats(cell);
-		CHECK(int() == 0);
+		CHECK(int(unloaded["collision_objects"]) == 0);
 	}
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
@@ -968,11 +968,11 @@ TEST_CASE("[WorldPartition3D] Cell state setters and getters isolate nested dict
 	nested["claimed"] = true;
 	Dictionary saved = world.get_cell_state(Vector2i(2, -3));
 	Dictionary saved_quest = saved["quest"];
-	CHECK(bool() == false);
+	CHECK(bool(saved_quest["claimed"]) == false);
 	saved_quest["claimed"] = true;
 	Dictionary again = world.get_cell_state(Vector2i(2, -3));
 	Dictionary restored_quest = again["quest"];
-	CHECK(bool() == false);
+	CHECK(bool(restored_quest["claimed"]) == false);
 
 	world.set_cell_state(Vector2i(2, -3), Dictionary());
 	CHECK_FALSE(world.has_cell_state(Vector2i(2, -3)));
@@ -999,8 +999,8 @@ TEST_CASE("[WorldPartition3D] Snapshots transfer cell state and reject unsupport
 	WorldPartition3D destination;
 	destination.load_cell_states(invalid);
 	CHECK(destination.get_cell_state_count() == 2);
-	CHECK(bool() == true);
-	CHECK(int() == 3);
+	CHECK(bool(Dictionary(destination.get_cell_state(Vector2i(0, 0)))["reward_claimed"]) == true);
+	CHECK(int(Dictionary(destination.get_cell_state(Vector2i(4, 2)))["wins"]) == 3);
 	invalid.clear();
 	CHECK(destination.get_cell_state_count() == 2);
 	destination.load_cell_states(Dictionary());

@@ -307,9 +307,9 @@ func run(t) -> void:
 	var fc_g := PackedByteArray([3, 2, 1, 2, 0, 0])
 	var fc_v := PackedByteArray([1, 1, 1, 1, 1, 1])
 	var fc_c := PackedInt32Array([50, 40, 30, 20, 5, 5])
-	var fc_expected := PackedInt32Array([0, 2, 5])
+	var fc_expected := PackedInt32Array([0, 1, 5])
 	t.eq(FxPolicy.select_visible_fair_costed_indices(fc_d, fc_p, fc_g, fc_v, fc_c, 0),
-		fc_expected, "critical event wins, hit minimum fits, unaffordable combat is skipped for cheap dust")
+		fc_expected, "critical event wins, affordable combat outranks hit, the unaffordable hit effect is skipped for cheap dust")
 	t.check(FxPolicy.select_visible_fair_costed_indices(fc_d, fc_p, fc_g, fc_v,
 		PackedInt32Array([50, 40, 30]), 0).is_empty(), "cost array length mismatch rejects atomically")
 	t.check(FxPolicy.select_visible_fair_costed_indices(fc_d, fc_p, fc_g, fc_v,
