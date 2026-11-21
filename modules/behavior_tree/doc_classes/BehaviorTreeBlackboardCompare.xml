@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeBlackboardCompare" inherits="BehaviorTreeTask" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Compare a Blackboard key against a value or a second key using typed conditions.</brief_description>
+	<description>
+		Use as a guard in [BehaviorTreeReactiveSequence] or [BehaviorTreeReactiveSelector] to react to changes in health, distance, time, and other Blackboard values. Supports equality, inequality, ordering of finite numeric values, and key-presence checks.
+		For numeric ordering, both operands must be [code]int[/code] or [code]float[/code]; values such as strings, vectors, booleans, null, NaN, and infinity fail ordering comparisons rather than being silently coerced.
+		When [member use_other_key] is enabled, compares [member key] with the value at [member other_key] rather than [member value]. Missing keys fail except for [constant NOT_EXISTS], which succeeds only when the primary key is absent. [constant EXISTS] succeeds whenever the primary key exists, even if its value is [code]null[/code].
+	</description>
+	<methods>
+		<method name="set_key"><return type="void" /><param index="0" name="key" type="StringName" /><description>Sets the primary Blackboard key.</description></method>
+		<method name="get_key" qualifiers="const"><return type="StringName" /><description>Returns the primary key.</description></method>
+		<method name="set_other_key"><return type="void" /><param index="0" name="key" type="StringName" /><description>Sets the optional second Blackboard key.</description></method>
+		<method name="get_other_key" qualifiers="const"><return type="StringName" /><description>Returns the optional second key.</description></method>
+		<method name="set_value"><return type="void" /><param index="0" name="value" type="Variant" /><description>Sets the constant comparison operand.</description></method>
+		<method name="get_value" qualifiers="const"><return type="Variant" /><description>Returns the constant comparison operand.</description></method>
+		<method name="set_comparison"><return type="void" /><param index="0" name="comparison" type="int" enum="BehaviorTreeBlackboardCompare.Comparison" /><description>Chooses the comparison operation.</description></method>
+		<method name="get_comparison" qualifiers="const"><return type="int" enum="BehaviorTreeBlackboardCompare.Comparison" /><description>Returns the comparison mode.</description></method>
+		<method name="set_use_other_key"><return type="void" /><param index="0" name="enabled" type="bool" /><description>Chooses key-to-key comparison over key-to-constant.</description></method>
+		<method name="is_using_other_key" qualifiers="const"><return type="bool" /><description>Returns whether another Blackboard key supplies the right-hand value.</description></method>
+	</methods>
+	<members>
+		<member name="key" type="StringName">Primary Blackboard key.</member>
+		<member name="comparison" type="int" enum="BehaviorTreeBlackboardCompare.Comparison" default="0">Comparison operator.</member>
+		<member name="value" type="Variant">Constant operand when [member use_other_key] is false.</member>
+		<member name="use_other_key" type="bool" default="false">Compare against another Blackboard entry instead of a constant.</member>
+		<member name="other_key" type="StringName">Right-hand key when [member use_other_key] is true.</member>
+	</members>
+	<constants>
+		<constant name="EQUAL" value="0" enum="Comparison">Both operands have equal values.</constant>
+		<constant name="NOT_EQUAL" value="1" enum="Comparison">Both operands differ.</constant>
+		<constant name="LESS" value="2" enum="Comparison">Primary numeric value is less than the other operand.</constant>
+		<constant name="LESS_OR_EQUAL" value="3" enum="Comparison">Primary numeric value is no greater than the other operand.</constant>
+		<constant name="GREATER" value="4" enum="Comparison">Primary numeric value is greater than the other operand.</constant>
+		<constant name="GREATER_OR_EQUAL" value="5" enum="Comparison">Primary numeric value is no less than the other operand.</constant>
+		<constant name="EXISTS" value="6" enum="Comparison">Primary Blackboard key exists, including null-valued keys.</constant>
+		<constant name="NOT_EXISTS" value="7" enum="Comparison">Primary Blackboard key does not exist.</constant>
+	</constants>
+</class>
