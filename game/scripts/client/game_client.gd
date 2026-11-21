@@ -29,6 +29,7 @@ var players: Dictionary = {} # id -> entity from the latest snapshot
 var zombies: Dictionary = {}
 var barricades: Dictionary = {} # Nearby defenses from the server.
 var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
+var farm_plots: Dictionary = {} # Nearby homestead crop plots, server-provided.
 var shelters: Dictionary = {} # Replicated temporary weather cover.
 var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
 var smoke_clouds: Dictionary = {} # Interest-limited, temporary visual smoke.
@@ -144,6 +145,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	smoke_clouds.clear()
 	for entity in snapshot.get("smoke_clouds", []):
 		smoke_clouds[int(entity["id"])] = entity
+	farm_plots.clear()
+	for plot in snapshot.get("farm_plots", []):
+		farm_plots[int(plot["id"])] = plot
 	campfires.clear()
 	for entity in snapshot.get("campfires", []):
 		campfires[int(entity["id"])] = entity
@@ -864,3 +868,12 @@ func market_cancel_bid(bid_id: int) -> void:
 ## Faction warfare: "enlist" (with a faction id), "flag", "unflag", "redeem".
 func faction(action: String, faction_id: String = "") -> void:
 	net.c_faction.rpc_id(1, action, faction_id)
+
+
+## Homestead farming: plant a carried seed in front of you / harvest your nearest ripe plot.
+func plant(seed_id: String) -> void:
+	net.c_plant.rpc_id(1, seed_id)
+
+
+func harvest() -> void:
+	net.c_harvest.rpc_id(1)

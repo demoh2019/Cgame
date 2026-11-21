@@ -832,6 +832,15 @@ static func _build_items() -> void:
 		{"bar_2": 4, "plank_2": 3, "scrap": 5, "fiber_2": 4},
 		"workbench", 12.0)
 	_add_item("silver", {"name": "Silver", "kind": "currency", "stack": 100000, "value": 1})
+	# Homestead farming (see farming.gd): seeds from the hub trader, crops from personal plots.
+	_add_item("carrot_seeds", {"name": "Carrot Seeds", "kind": "seed", "stack": 50, "value": 3, "weight": 0.01})
+	_add_item("potato_seeds", {"name": "Potato Seeds", "kind": "seed", "stack": 50, "value": 4, "weight": 0.01})
+	_add_item("wheat_seeds", {"name": "Wheat Seeds", "kind": "seed", "stack": 50, "value": 4, "weight": 0.01})
+	_add_item("carrot", {"name": "Carrot", "kind": "food", "food": 14.0, "stack": 30, "value": 3, "weight": 0.1})
+	_add_item("potato", {"name": "Potato", "kind": "food", "food": 20.0, "stack": 30, "value": 4, "weight": 0.2})
+	_add_item("wheat", {"name": "Wheat", "kind": "material", "stack": 60, "value": 2, "weight": 0.1})
+	_add_item("farm_bread", {"name": "Farm Bread", "kind": "food", "food": 45.0, "stack": 20, "value": 12, "weight": 0.3})
+	_add_recipe("farm_bread", "farm_bread", 1, {"wheat": 3}, "campfire", 3.0)
 	# Albion-style enchantment materials, dropped by infected (runes), elites (souls)
 	# and raid bosses (relics). Spent at a workbench to raise gear to .1 / .2 / .3.
 	_add_item("rune", {"name": "Rune", "kind": "enchant_material", "stack": 999, "value": 6, "weight": 0.02})

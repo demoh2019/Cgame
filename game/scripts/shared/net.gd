@@ -506,6 +506,20 @@ func c_repair_gear() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_plant(seed_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "farm", sim.cmd_plant(peer, str(seed_id)))
+
+
+@rpc("any_peer", "reliable")
+func c_harvest() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "farm", sim.cmd_harvest(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_faction(action: String, faction_id: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

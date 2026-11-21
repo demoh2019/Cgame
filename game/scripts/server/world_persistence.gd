@@ -7,6 +7,7 @@ const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const MarketBids = preload("res://scripts/shared/market_bids.gd")
+const Farming = preload("res://scripts/shared/farming.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const VERSION: int = 1
 const MAX_BYTES: int = 262144 # Barricades plus escrowed market listings.
@@ -48,7 +49,7 @@ static func capture(sim) -> Dictionary:
 	walls.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return int(a["id"]) < int(b["id"]))
 	return {"version": VERSION, "world_seed": int(sim.world.world_seed), "barricades": walls,
-		"outposts": sim.territory.persistent_holds(sim.time), "market": _capture_market(sim)}
+		"outposts": sim.territory.persistent_holds(sim.time), "market": _capture_market(sim), "farm": _capture_farm(sim)}
 
 
 ## Escrowed listings, unpaid proceeds and returned goods of signed-in accounts (guests are not saved).
@@ -78,6 +79,33 @@ static func _capture_market(sim) -> Dictionary:
 			"item": str(b["item"]), "remaining": int(b["remaining"]), "price": int(b["price"]),
 			"left": maxf(0.0, float(b["expires"]) - sim.time)})
 	return {"orders": orders, "payouts": payouts, "returns": returns, "bids": bids}
+
+
+## Homestead crop plots of signed-in accounts (guests are not saved); growth is kept as elapsed seconds.
+static func _capture_farm(sim) -> Array:
+	var plots: Array = []
+	for plot_id in sim.farm_plots.keys():
+		var p: Dictionary = sim.farm_plots[plot_id]
+		if str(p["account"]).begins_with("peer:"):
+			continue
+		plots.append({"account": str(p["account"]), "owner_name": str(p.get("owner_name", "")), "crop": str(p["crop"]),
+			"x": float(p["x"]), "z": float(p["z"]), "elapsed": clampf(sim.time - float(p["planted"]), 0.0, float(p["grow"]))})
+	return plots
+
+
+static func _validate_farm(source: Variant) -> Variant:
+	if typeof(source) != TYPE_ARRAY or source.size() > Farming.MAX_PLOTS_TOTAL:
+		return null
+	for p in source:
+		if typeof(p) != TYPE_DICTIONARY or not _valid_account(p.get("account")):
+			return null
+		if typeof(p.get("crop")) != TYPE_STRING or not Farming.CROPS.has(p["crop"]):
+			return null
+		if not _bounded_float(p.get("x"), -100000.0, 100000.0) or not _bounded_float(p.get("z"), -100000.0, 100000.0):
+			return null
+		if not _bounded_float(p.get("elapsed"), 0.0, 100000.0) or typeof(p.get("owner_name", "")) != TYPE_STRING:
+			return null
+	return source
 
 
 static func _valid_account(a: Variant) -> bool:
@@ -161,10 +189,13 @@ static func validate(data: Variant, sim) -> Dictionary:
 	if typeof(data) != TYPE_DICTIONARY or data.size() not in [3, 4, 5]:
 		return {}
 	for key in data.keys():
-		if not str(key) in ["version", "world_seed", "barricades", "outposts", "market"]:
+		if not str(key) in ["version", "world_seed", "barricades", "outposts", "market", "farm"]:
 			return {}
 	var market: Variant = _validate_market(data.get("market", {}))
 	if market == null:
+		return {}
+	var farm: Variant = _validate_farm(data.get("farm", []))
+	if farm == null:
 		return {}
 	var holds: Variant = _validate_holds(data.get("outposts", []), sim)
 	if holds == null:
@@ -242,7 +273,7 @@ static func validate(data: Variant, sim) -> Dictionary:
 			"yaw": float(value.get("yaw", 0.0)), "upkeep": float(value.get("upkeep", Structures.UPKEEP_SECONDS)),
 			"piece": str(value.get("piece", "")) if HousePieces.valid(str(value.get("piece", ""))) else "",
 			"open": bool(value.get("open", true))})
-	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls, "outposts": holds, "market": market}
+	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls, "outposts": holds, "market": market, "farm": farm}
 
 
 static func restore(sim, data: Variant) -> bool:
@@ -272,6 +303,11 @@ static func restore(sim, data: Variant) -> bool:
 			sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 		sim._next_id = maxi(sim._next_id, id)
 	sim.territory.restore_holds(valid["outposts"], sim.time)
+	for p in valid.get("farm", []):
+		var crop: String = str(p["crop"])
+		sim.farm_plots[sim.new_id()] = {"account": str(p["account"]), "owner_name": str(p.get("owner_name", "")), "crop": crop,
+			"x": float(p["x"]), "z": float(p["z"]), "planted": sim.time - float(p["elapsed"]),
+			"grow": float(Farming.CROPS[crop]["seconds"])}
 	var market: Dictionary = valid["market"]
 	for o in market["orders"]:
 		sim.market_orders[sim.new_id()] = {"account": str(o["account"]), "seller_name": str(o.get("seller_name", "")),

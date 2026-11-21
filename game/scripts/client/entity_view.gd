@@ -23,6 +23,7 @@ const CampfireFx = preload("res://scripts/client/campfire_fx.gd")
 const LootBeam = preload("res://scripts/client/loot_beam.gd")
 const CorpseBurn = preload("res://scripts/client/corpse_burn.gd")
 const BlobShadow = preload("res://scripts/client/blob_shadow.gd")
+const FarmPlotVisual = preload("res://scripts/client/farm_plot_visual.gd")
 var _anim_lod: Node = null # Native AnimationLODController when the engine has it, else the GDScript AnimLod.
 var _priority_quality: int = -1
 var _world = null
@@ -147,6 +148,9 @@ func update_from(client) -> void:
 		_touch("bag:%d" % id, "bag", client.bags[id], seen)
 	for id in client.barricades:
 		_touch("barricade:%d" % id, "barricade", client.barricades[id], seen)
+	for id in client.farm_plots:
+		_touch("plot:%d" % id, "plot", client.farm_plots[id], seen)
+		FarmPlotVisual.update(_nodes["plot:%d" % id], client.farm_plots[id])
 	for id in client.campfires:
 		_touch("campfire:%d" % id, "campfire", client.campfires[id], seen)
 	for id in client.shelters:
@@ -513,6 +517,9 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 				pole.material_override = wood
 				root.add_child(pole)
 		return root
+	if kind == "plot":
+		root.add_child(FarmPlotVisual.make(str(entity.get("crop", "carrot"))))
+		return root
 	if kind == "campfire":
 		var wood := MeshInstance3D.new()
 		var wood_mesh := CylinderMesh.new()
@@ -770,7 +777,7 @@ func _process(delta: float) -> void:
 			target["yaw"] = sampled[1]
 		if key.begins_with("bag"):
 			LootDropBounce.apply(node, delta, GraphicsQuality.level())
-		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
+		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire") or key.begins_with("plot") or key.begins_with("shelter") or key.begins_with("smoke") or key.begins_with("snare") or key.begins_with("fish_trap") or key.begins_with("decoy") or key.begins_with("pool") or key.begins_with("ember") or key.begins_with("spit")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			var model: Node3D = node.get_node("Model")
 			model.update_motion(delta)

@@ -4,6 +4,7 @@ extends CanvasLayer
 const Defs = preload("res://scripts/shared/defs.gd")
 const ReturnRate = preload("res://scripts/shared/return_rate.gd")
 const Factions = preload("res://scripts/shared/factions.gd")
+const Farming = preload("res://scripts/shared/farming.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const RaidCone = preload("res://scripts/shared/raid_cone.gd")
@@ -1252,6 +1253,22 @@ func _build() -> void:
 			var listing_id: int = int(_market_select.get_item_metadata(_market_select.selected))
 			client.market_cancel(listing_id))
 	market_row.add_child(cancel_market)
+	# Homestead farming: plant seeds from the hub trader in the green zone, harvest when ripe.
+	var farm_row := HBoxContainer.new()
+	inventory_box.add_child(farm_row)
+	for crop in Farming.CROPS:
+		var seed_id: String = str(Farming.CROPS[crop]["seed"])
+		var plant_button := Button.new()
+		plant_button.text = "Plant %s" % crop
+		plant_button.tooltip_text = "Plants one %s in front of you (green zone, up to %d plots). Ripe in %d min." % [
+			str(Defs.item(seed_id).get("name", seed_id)), Farming.MAX_PLOTS, int(float(Farming.CROPS[crop]["seconds"]) / 60.0)]
+		plant_button.pressed.connect(func() -> void: client.plant(seed_id))
+		farm_row.add_child(plant_button)
+	var harvest_button := Button.new()
+	harvest_button.text = "Harvest"
+	harvest_button.tooltip_text = "Harvests your nearest ripe plot within 3 m."
+	harvest_button.pressed.connect(func() -> void: client.harvest())
+	farm_row.add_child(harvest_button)
 	# Faction warfare (hub): enlist, raise or lower the flag, redeem faction points.
 	var faction_row := HBoxContainer.new()
 	inventory_box.add_child(faction_row)
@@ -2670,6 +2687,21 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "farm":
+		if bool(data.get("ok", false)):
+			if data.has("crop"):
+				say("Planted %s: ripe in %d minutes." % [str(data["crop"]), int(float(data.get("seconds", 0.0)) / 60.0)])
+			else:
+				var got: Array = []
+				var items: Dictionary = data.get("items", {})
+				for id in items:
+					got.append("%d %s" % [int(items[id]), str(Defs.item(str(id)).get("name", id))])
+				say("Harvested %s." % ", ".join(got))
+		else:
+			say("Farming: %s" % {"green_zone_only": "plots only grow in the green zone", "missing_seed": "buy seeds from the hub trader",
+				"too_many_plots": "you already tend %d plots" % Farming.MAX_PLOTS, "too_close": "too close to another plot", "water": "not in water",
+				"not_ripe": "not ripe yet", "no_plot": "stand next to one of your plots"}.get(str(data.get("reason", "")), str(data.get("reason", "rejected"))))
+		return
 	if kind == "faction":
 		if bool(data.get("ok", false)):
 			var fname: String = str(Factions.FACTIONS.get(str(data.get("faction", "")), "no faction"))

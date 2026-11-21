@@ -108,6 +108,7 @@ const GearSkills = preload("res://scripts/shared/gear_skills.gd")
 const ReturnRate = preload("res://scripts/shared/return_rate.gd")
 const MarketBids = preload("res://scripts/shared/market_bids.gd")
 const Factions = preload("res://scripts/shared/factions.gd")
+const Farming = preload("res://scripts/shared/farming.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const HerbalForaging = preload("res://scripts/shared/herbal_foraging.gd")
 const WoundSealant = preload("res://scripts/shared/wound_sealant.gd")
@@ -421,6 +422,7 @@ var pounce_ready_at: Dictionary = {} # zombie id -> server time its next leap/ch
 var downed_until: Dictionary = {} # zombie id -> server time it gets back up (knocked down).
 var market_payouts: Dictionary = {} # account -> silver owed from sales, collected at the hub.
 var market_bids: Dictionary = {} # id -> Albion-style buy order with escrowed silver.
+var farm_plots: Dictionary = {} # id -> homestead crop plot (persisted with the world).
 var market_returns: Dictionary = {} # account -> {item: count} unsold or cancelled goods.
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
 # Atomic two-account settlement. When the network layer has a persistent backend it sets pair_persistence; every
@@ -2847,6 +2849,69 @@ func cmd_market_list(peer_id: int) -> Dictionary:
 	return {"ok": true, "action": "list", "orders": public_orders, "bids": public_bids,
 		"collected_silver": int(collected.get("silver", 0)), "collected_items": int(collected.get("items", 0)),
 		"pending_silver": int(market_payouts.get(account, 0))}
+
+
+## Homestead farming: plant a carried seed 1.5 m in front of you (green zone only).
+func cmd_plant(peer_id: int, seed_id: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var crop: String = Farming.crop_for_seed(str(seed_id))
+	if crop == "":
+		return {"ok": false, "reason": "not_a_seed"}
+	if player.inventory.count(seed_id) < 1:
+		return {"ok": false, "reason": "missing_seed"}
+	if not player.position.is_finite():
+		return {"ok": false, "reason": "invalid_position"}
+	var spot := Vector2(player.position.x, player.position.z) + Vector2(sin(player.yaw), cos(player.yaw)) * 1.5
+	var account: String = _market_account(player)
+	var own := 0
+	for plot in farm_plots.values():
+		if str(plot["account"]) == account:
+			own += 1
+	var refusal: String = Farming.placement_refusal(world.zone_at(spot.x, spot.y), world.is_water(spot.x, spot.y),
+		spot, farm_plots, own)
+	if refusal != "":
+		return {"ok": false, "reason": refusal}
+	player.inventory.remove(seed_id, 1)
+	var plot_id: int = new_id()
+	farm_plots[plot_id] = {"account": account, "owner_name": player.name, "crop": crop,
+		"x": spot.x, "z": spot.y, "planted": time, "grow": float(Farming.CROPS[crop]["seconds"])}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "id": plot_id, "crop": crop, "seconds": float(Farming.CROPS[crop]["seconds"])}
+
+
+## Harvest the nearest ripe plot of your own within reach.
+func cmd_harvest(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var account: String = _market_account(player)
+	var here := Vector2(player.position.x, player.position.z)
+	var best_id := -1
+	var best_d: float = Farming.PLANT_REACH
+	var unripe := false
+	for plot_id in farm_plots:
+		var plot: Dictionary = farm_plots[plot_id]
+		if str(plot["account"]) != account:
+			continue
+		var d: float = here.distance_to(Vector2(float(plot["x"]), float(plot["z"])))
+		if d > best_d:
+			continue
+		if not Farming.is_ripe(plot, time):
+			unripe = true
+			continue
+		best_d = d
+		best_id = int(plot_id)
+	if best_id < 0:
+		return {"ok": false, "reason": "not_ripe" if unripe else "no_plot"}
+	var harvest: Dictionary = Farming.harvest_yield(str(farm_plots[best_id]["crop"]), rng)
+	var overflow: Dictionary = _give_items(player, harvest)
+	farm_plots.erase(best_id)
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "items": harvest, "dropped": overflow}
 
 
 ## Faction warfare commands: "enlist" (hub, with faction id), "flag", "unflag", "redeem".
@@ -8727,6 +8792,16 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			public_wall["blast_brace_seconds"] = maxf(0.0,
 				float(siege_braces.get(int(wall["id"]), time)) - time)
 			nearby_barricades.append(public_wall)
+	var nearby_plots: Array = []
+	var viewer_account: String = _market_account(player)
+	for plot_id in farm_plots:
+		var plot: Dictionary = farm_plots[plot_id]
+		var px: float = float(plot["x"])
+		var pz: float = float(plot["z"])
+		if Vector2(px - player.position.x, pz - player.position.z).length() <= Defs.INTEREST_RADIUS:
+			nearby_plots.append({"id": plot_id, "crop": plot["crop"], "x": px, "y": world.height_at(px, pz), "z": pz,
+				"progress": Farming.progress(plot, time), "own": str(plot["account"]) == viewer_account,
+				"owner": str(plot.get("owner_name", ""))})
 	var nearby_campfires: Array = FieldCampfire.visible(campfires,
 			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_shelters: Array = PortableShelter.visible(shelters,
@@ -8972,7 +9047,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
 		"spit_zones": spit_zones, "acid_pools": nearby_acid_pools,
 		"ember_pools": nearby_ember_pools,
-		"barricades": nearby_barricades, "campfires": nearby_campfires,
+		"farm_plots": nearby_plots, "barricades": nearby_barricades, "campfires": nearby_campfires,
 		"shelters": nearby_shelters,
 		"decoys": nearby_decoys, "smoke_clouds": nearby_smoke,
 		"fish_traps": nearby_fish_traps,
