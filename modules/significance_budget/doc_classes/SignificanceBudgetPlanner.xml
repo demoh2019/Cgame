@@ -37,6 +37,19 @@
 			<param index="6" name="max_distance" type="float" />
 			<description>Selects up to [param budget] cosmetic effect indices, ordering by priority (3 to 0), then visibility (1 before 0), distance, and original index. Input visibility values must be 0 or 1 and have the same length as the other arrays. Four category caps and an inclusive hard distance limit apply. Invalid inputs reject atomically; off-screen critical effects still compete within their priority tier. This does not perform occlusion queries or affect gameplay authority.</description>
 		</method>
+		<method name="select_effects_visible_costed" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priorities" type="PackedByteArray" />
+			<param index="2" name="categories" type="PackedByteArray" />
+			<param index="3" name="visible" type="PackedByteArray" />
+			<param index="4" name="particle_costs" type="PackedInt32Array" />
+			<param index="5" name="category_caps" type="PackedInt32Array" />
+			<param index="6" name="budget" type="int" />
+			<param index="7" name="max_distance" type="float" />
+			<param index="8" name="particle_budget" type="int" />
+			<description>Returns deterministic effect indices sorted by priority, then on-screen visibility, distance and original index, up to [param budget] slots, four category caps and a total cost of [param particle_budget]. Candidates whose particle cost cannot fit are skipped so cheaper effects can still be selected. [param particle_costs] must contain positive integers up to 4,096; the frame cost budget must be between 0 and 65,536. Candidate arrays must have equal length at most 16,384, distance must be finite, nonnegative and within the inclusive [param max_distance] range, priorities and categories 0 through 3, visibility 0 or 1. Invalid arguments reject atomically. The method plans cosmetic work only; it does not spawn effects or estimate CPU/GPU milliseconds.</description>
+		</method>
 		<method name="select_effects_visible_fair" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />
@@ -48,6 +61,20 @@
 			<param index="6" name="category_minimums" type="PackedInt32Array" />
 			<param index="7" name="budget" type="int" />
 			<description>Niagara-inspired category diversity under a bounded cosmetic VFX frame budget. After selecting all eligible priority-3 emergency effects (subject to hard category caps and global budget), selects the most important eligible candidates needed to satisfy soft per-category minimums, then spends remaining slots by ordinary priority, on-screen visibility, distance and original index. Four minimums must be nonnegative, no greater than their corresponding caps, and sum to no more than the global budget. If a category has no eligible effects or emergency priority-3 effects exhaust the frame, its minimum is not guaranteed and does not reserve an empty slot. The 4 category caps, 4 inclusive category distance ranges, up to 16384 candidates, 128 slots and all pre-existing validation limits remain binding; invalid input returns an empty plan with no partial state. Zero minimums produce the same selection as [method select_effects_visible_ranged]. The result is ordered input indices and never changes gameplay, audio, simulation or particle nodes.</description>
+		</method>
+		<method name="select_effects_visible_fair_costed" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priorities" type="PackedByteArray" />
+			<param index="2" name="categories" type="PackedByteArray" />
+			<param index="3" name="visible" type="PackedByteArray" />
+			<param index="4" name="particle_costs" type="PackedInt32Array" />
+			<param index="5" name="category_caps" type="PackedInt32Array" />
+			<param index="6" name="category_ranges" type="PackedFloat64Array" />
+			<param index="7" name="category_minimums" type="PackedInt32Array" />
+			<param index="8" name="budget" type="int" />
+			<param index="9" name="particle_budget" type="int" />
+			<description>Combines [method select_effects_visible_fair] with the particle-work budget of [method select_effects_visible_costed]. The same three stages run (all eligible priority-3 effects, then soft per-category minimums, then the remaining most significant effects) with the category caps, inclusive per-category ranges and global [param budget] binding, and every admission additionally has to fit the remaining [param particle_budget] (0 to 65,536 recipe particle units). An effect that no longer fits is skipped and never blocks a cheaper candidate, so a category minimum is not guaranteed when its effects are unaffordable. [param particle_costs] must contain integers from 1 to 4,096. With a sufficiently large particle budget the result equals [method select_effects_visible_fair]. Invalid inputs return an empty plan atomically. The method plans cosmetic work only; it does not spawn effects or estimate CPU or GPU time.</description>
 		</method>
 		<method name="select_effects_visible_ranged" qualifiers="const">
 			<return type="PackedInt32Array" />

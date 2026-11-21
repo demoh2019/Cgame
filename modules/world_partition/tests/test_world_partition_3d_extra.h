@@ -37,6 +37,9 @@
 #include "core/io/resource_saver.h"
 #include "core/os/os.h"
 #include "scene/main/scene_tree.h"
+#include "scene/3d/physics/rigid_body_3d.h"
+#include "scene/3d/navigation/navigation_region_3d.h"
+#include "scene/3d/navigation/navigation_link_3d.h"
 #include "scene/main/window.h"
 #include "tests/test_macros.h"
 
@@ -83,6 +86,66 @@ static String make_cell_scene(const String &p_id, const Vector3 &p_authored_offs
 	return file_name;
 }
 
+static String make_nav_link_cell_scene(const String &p_id) {
+	Node3D *root = memnew(Node3D);
+	root->set_name("LinkCell");
+	NavigationLink3D *link = memnew(NavigationLink3D);
+	link->set_name("BridgeLink");
+	link->set_start_position(Vector3(7, 0, 7));
+	link->set_end_position(Vector3(21, 0, 7));
+	link->set_bidirectional(true);
+	root->add_child(link);
+	link->set_owner(root);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	CHECK(packed->pack(root) == OK);
+	memdelete(root);
+	const String path = "user://partition_navigation_link_" + p_id + "_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	CHECK(ResourceSaver::save(packed, path) == OK);
+	return path;
+}
+
+static String make_nav_gate_cell_scene(const String &p_id) {
+	Node3D *root = memnew(Node3D);
+	root->set_name("NavigationCell");
+	NavigationRegion3D *region = memnew(NavigationRegion3D);
+	region->set_name("WalkableRegion");
+	root->add_child(region);
+	region->set_owner(root);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	CHECK(packed->pack(root) == OK);
+	memdelete(root);
+	const String path = "user://partition_navigation_gate_" + p_id + "_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	CHECK(ResourceSaver::save(packed, path) == OK);
+	return path;
+}
+
+static String make_physics_cell_scene(const String &p_id) {
+	Node3D *root = memnew(Node3D);
+	root->set_name("PhysicsCell");
+	RigidBody3D *body = memnew(RigidBody3D);
+	body->set_name("PersistentBox");
+	body->set_gravity_scale(0);
+	body->set_meta(SNAME("streaming_persistent"), true);
+	body->set_position(Vector3(9, 4, 7));
+	root->add_child(body);
+	body->set_owner(root);
+	// An ordinary unmarked physics body must never bloat the saved state.
+	RigidBody3D *unmarked = memnew(RigidBody3D);
+	unmarked->set_name("UnmarkedBox");
+	unmarked->set_gravity_scale(0);
+	root->add_child(unmarked);
+	unmarked->set_owner(root);
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	CHECK(packed->pack(root) == OK);
+	memdelete(root);
+	const String path = "user://partition_physics_" + p_id + "_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	CHECK(ResourceSaver::save(packed, path) == OK);
+	return path;
+}
+
 static bool wait_for_cell(WorldPartition3D *p_world, const Vector2i &p_cell) {
 	for (int i = 0; i < 2000; i++) {
 		p_world->update_streaming();
@@ -93,6 +156,960 @@ static bool wait_for_cell(WorldPartition3D *p_world, const Vector2i &p_cell) {
 	}
 	return false;
 }
+
+TEST_CASE("[WorldPartition3D] Stateful child objects are opt-in and expose snapshot operations") {
+	WorldPartition3D world;
+	CHECK_FALSE(world.is_persisting_streaming_objects());
+	CHECK(world.snapshot_cell_object_states().is_empty());
+	CHECK(world.capture_cell_object_states(Vector2i(0, 0)).is_empty());
+	CHECK(world.get_cell_object_state_count() == 0);
+	CHECK(world.has_signal(SNAME("cell_object_state_changed")));
+	world.set_persist_streaming_objects(true);
+	CHECK(world.is_persisting_streaming_objects());
+	world.set_persist_streaming_objects(false);
+	CHECK_FALSE(world.is_persisting_streaming_objects());
+}
+
+TEST_CASE("[WorldPartition3D] Object import validates scene paths and serializable value types") {
+	WorldPartition3D world;
+	Dictionary valid_record;
+	valid_record["active"] = true;
+	valid_record["uses"] = 3;
+	valid_record["caption"] = "opened";
+	valid_record["offset"] = Vector3(1, 2, 3);
+	Dictionary nested = valid_record.duplicate(true);
+	nested["nested"] = Dictionary();
+	Dictionary nonfinite = valid_record.duplicate(true);
+	nonfinite["bad_float"] = std::numeric_limits<double>::infinity();
+	Dictionary invalid_key = valid_record.duplicate(true);
+	invalid_key[42] = true;
+	Dictionary candidates;
+	candidates["TreasureChest"] = valid_record;
+	candidates["../External"] = valid_record;
+	candidates["/root/External"] = valid_record;
+	candidates["TreasureChest:active"] = valid_record;
+	candidates["Nested"] = nested;
+	candidates["Nonfinite"] = nonfinite;
+	candidates["InvalidKey"] = invalid_key;
+	candidates[123] = valid_record;
+	Dictionary imported;
+	imported[Vector2i(0, 0)] = candidates;
+	imported["not a cell"] = candidates;
+	world.load_cell_object_states(imported);
+	CHECK(world.get_cell_object_state_count() == 1);
+	const Dictionary result = world.get_cell_object_states(Vector2i(0, 0));
+	REQUIRE(result.size() == 1);
+	REQUIRE(result.has("TreasureChest"));
+	const Dictionary record = result["TreasureChest"];
+	CHECK(bool() == true);
+	CHECK(int() == 3);
+	world.clear_cell_object_states();
+	CHECK(world.get_cell_object_state_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Stateful object snapshots are deep copies of imports") {
+	WorldPartition3D world;
+	Dictionary record;
+	record["active"] = false;
+	record["uses"] = 1;
+	Dictionary nodes;
+	nodes["ArenaSwitch"] = record;
+	Dictionary cells;
+	cells[Vector2i(4, 2)] = nodes;
+	world.load_cell_object_states(cells);
+	record["uses"] = 99;
+	nodes["ArenaSwitch"] = Dictionary();
+	cells.clear();
+	Dictionary stored = world.get_cell_object_states(Vector2i(4, 2));
+	const Dictionary again = stored["ArenaSwitch"];
+	CHECK(int() == 1);
+	stored.clear();
+	const Dictionary after = world.snapshot_cell_object_states();
+	REQUIRE(after.has(Vector2i(4, 2)));
+	Dictionary cloned = after[Vector2i(4, 2)];
+	Dictionary saved = cloned["ArenaSwitch"];
+	saved["active"] = true;
+	const Dictionary refreshed = world.get_cell_object_states(Vector2i(4, 2));
+	const Dictionary original = refreshed["ArenaSwitch"];
+	CHECK(bool() == false);
+}
+
+TEST_CASE("[WorldPartition3D] Stateful object import limits records per cell") {
+	WorldPartition3D world;
+	Dictionary valid;
+	valid["active"] = true;
+	Dictionary records;
+	for (int i = 0; i < 150; i++) {
+		records["Item_" + itos(i)] = valid;
+	}
+	Dictionary cells;
+	cells[Vector2i(1, -1)] = records;
+	world.load_cell_object_states(cells);
+	CHECK(world.get_cell_object_states(Vector2i(1, -1)).size() == 128);
+}
+
+TEST_CASE("[WorldPartition3D] Rigid body snapshots are disabled unless explicitly opted in") {
+	WorldPartition3D world;
+	CHECK_FALSE(world.is_persisting_rigid_bodies());
+	CHECK(world.snapshot_cell_physics_states().is_empty());
+	CHECK(world.get_cell_physics_state(Vector2i(0, 0)).is_empty());
+	world.set_persist_rigid_bodies(true);
+	CHECK(world.is_persisting_rigid_bodies());
+	world.set_persist_rigid_bodies(false);
+	CHECK_FALSE(world.is_persisting_rigid_bodies());
+}
+
+TEST_CASE("[WorldPartition3D] Rigid body save import validates types finite values and paths") {
+	WorldPartition3D world;
+	Dictionary record;
+	record["transform"] = Transform3D(Basis(), Vector3(3, 2, 1));
+	record["linear_velocity"] = Vector3(2, 0, 0);
+	record["angular_velocity"] = Vector3(0, 0, 1);
+	record["sleeping"] = false;
+	record["freeze"] = false;
+	Dictionary bad_velocity = record.duplicate(true);
+	bad_velocity["linear_velocity"] = Vector3(std::numeric_limits<real_t>::infinity(), 0, 0);
+	Dictionary bad_missing = record.duplicate(true);
+	bad_missing.erase("transform");
+	Dictionary candidates;
+	candidates["PersistentBox"] = record;
+	candidates["../OutsideBody"] = record;
+	candidates["/root/OtherBody"] = record;
+	candidates["PersistentBox:linear_velocity"] = record;
+	candidates["BadVelocity"] = bad_velocity;
+	candidates["MissingTransform"] = bad_missing;
+	candidates[Vector2i(99, 99)] = record;
+	Dictionary raw;
+	raw[Vector2i(1, 1)] = candidates;
+	raw["wrong cell coordinate"] = candidates;
+	world.load_cell_physics_states(raw);
+	CHECK(world.get_cell_physics_state_count() == 1);
+	Dictionary cached = world.get_cell_physics_state(Vector2i(1, 1));
+	CHECK(cached.size() == 1);
+	CHECK(cached.has("PersistentBox"));
+	Dictionary saved = cached["PersistentBox"];
+	CHECK(saved["linear_velocity"] == Vector3(2, 0, 0));
+	saved["linear_velocity"] = Vector3(77, 0, 0);
+	Dictionary again = world.get_cell_physics_state(Vector2i(1, 1));
+	Dictionary body = again["PersistentBox"];
+	CHECK(body["linear_velocity"] == Vector3(2, 0, 0));
+	world.load_cell_physics_states(Dictionary());
+	CHECK(world.get_cell_physics_state_count() == 0);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Persisted rigid-body transforms and velocities survive reload") {
+	const String path = make_physics_cell_scene("transform_velocity_roundtrip");
+	{
+		WorldFixture fixture;
+		fixture.world->set_persist_rigid_bodies(true);
+		const Vector2i cell(0, 0);
+		fixture.world->set_cell_scene(cell, path);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *root = fixture.world->get_cell_instance(cell);
+		REQUIRE(root != nullptr);
+		RigidBody3D *box = Object::cast_to<RigidBody3D>(root->get_node_or_null(NodePath("PersistentBox")));
+		REQUIRE(box != nullptr);
+		box->set_position(Vector3(11, 5, 13));
+		box->set_linear_velocity(Vector3(1, 2, 3));
+		box->set_angular_velocity(Vector3(0, 1, 0));
+		const Dictionary snapshot = fixture.world->snapshot_cell_physics_states();
+		REQUIRE(snapshot.has(cell));
+		const Dictionary box_states = snapshot[cell];
+		REQUIRE(box_states.has("PersistentBox"));
+		CHECK_FALSE(box_states.has("UnmarkedBox"));
+		CHECK(box_states.size() == 1);
+		const Dictionary record = box_states["PersistentBox"];
+		CHECK(record["linear_velocity"] == Vector3(1, 2, 3));
+		CHECK(record["angular_velocity"] == Vector3(0, 1, 0));
+		const Transform3D transform = record["transform"];
+		CHECK(transform.origin == Vector3(11, 5, 13));
+		fixture.observer->set_position(Vector3(1280, 0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
+		CHECK(fixture.world->get_cell_physics_state_count() == 1);
+		fixture.observer->set_position(Vector3(0, 0, 0));
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *again_root = fixture.world->get_cell_instance(cell);
+		REQUIRE(again_root != nullptr);
+		RigidBody3D *again = Object::cast_to<RigidBody3D>(again_root->get_node_or_null(NodePath("PersistentBox")));
+		REQUIRE(again != nullptr);
+		CHECK(again->get_position() == Vector3(11, 5, 13));
+		CHECK(again->get_linear_velocity() == Vector3(1, 2, 3));
+		CHECK(again->get_angular_velocity() == Vector3(0, 1, 0));
+		fixture.world->clear_cell_physics_states();
+		CHECK(fixture.world->get_cell_physics_state_count() == 0);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Bulk physics snapshot applies to loaded opted-in body") {
+	const String path = make_physics_cell_scene("active_import");
+	{
+		WorldFixture fixture;
+		fixture.world->set_persist_rigid_bodies(true);
+		const Vector2i cell(0, 0);
+		fixture.world->set_cell_scene(cell, path);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *root = fixture.world->get_cell_instance(cell);
+		REQUIRE(root != nullptr);
+		RigidBody3D *body = Object::cast_to<RigidBody3D>(root->get_node_or_null(NodePath("PersistentBox")));
+		REQUIRE(body != nullptr);
+		Dictionary record;
+		record["transform"] = Transform3D(Basis(), Vector3(21, 8, 5));
+		record["linear_velocity"] = Vector3(0, 4, 0);
+		record["angular_velocity"] = Vector3(0, 0, 0.5);
+		record["sleeping"] = true;
+		record["freeze"] = true;
+		Dictionary cell_records;
+		cell_records["PersistentBox"] = record;
+		Dictionary import;
+		import[cell] = cell_records;
+		fixture.world->load_cell_physics_states(import);
+		CHECK(body->get_position() == Vector3(21, 8, 5));
+		CHECK(body->is_freeze_enabled());
+		CHECK(body->is_sleeping());
+		Dictionary saved = fixture.world->get_cell_physics_state(cell);
+		CHECK(saved.size() == 1);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[WorldPartition3D] Named navigation link states are opt-in and defensively copied") {
+	WorldPartition3D world;
+	const Vector2i hub(0, 0);
+	CHECK(world.is_cell_navigation_link_enabled(hub, "BridgeLink"));
+	CHECK(world.get_disabled_navigation_link_count() == 0);
+	world.set_cell_navigation_link_enabled(hub, "BridgeLink", false);
+	CHECK_FALSE(world.is_cell_navigation_link_enabled(hub, "BridgeLink"));
+	CHECK(world.get_disabled_navigation_link_count() == 1);
+	Dictionary saved = world.get_navigation_link_states();
+	Dictionary cell_state = saved[hub];
+	cell_state["BridgeLink"] = true;
+	CHECK_FALSE(world.is_cell_navigation_link_enabled(hub, "BridgeLink"));
+	world.set_cell_navigation_link_enabled(hub, "BridgeLink", false); // Idempotent.
+	CHECK(world.get_disabled_navigation_link_count() == 1);
+	world.set_cell_navigation_link_enabled(hub, "BridgeLink", true);
+	CHECK(world.get_navigation_link_states().is_empty());
+	CHECK(world.get_disabled_navigation_link_count() == 0);
+	CHECK(world.has_signal(SNAME("cell_navigation_link_state_changed")));
+}
+
+TEST_CASE("[WorldPartition3D] Navigation link imports reject unsafe records and support bulk reset") {
+	WorldPartition3D world;
+	const Vector2i cell(0, 0);
+	Dictionary fields;
+	fields["BridgeLink"] = false;
+	fields["../Outside"] = false;
+	fields["/root/Outside"] = false;
+	fields["BridgeLink:enabled"] = false;
+	fields["InvalidBool"] = "false";
+	fields["EnabledByDefault"] = true;
+	Dictionary input;
+	input[cell] = fields;
+	input["not a Vector2i"] = fields;
+	world.set_navigation_link_states(input);
+	CHECK(world.get_disabled_navigation_link_count() == 1);
+	CHECK_FALSE(world.is_cell_navigation_link_enabled(cell, "BridgeLink"));
+	CHECK(world.is_cell_navigation_link_enabled(cell, "EnabledByDefault"));
+	world.set_navigation_link_states(Dictionary());
+	CHECK(world.is_cell_navigation_link_enabled(cell, "BridgeLink"));
+	CHECK(world.get_disabled_navigation_link_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Route edge definitions block both directions atomically") {
+	WorldPartition3D world;
+	const Vector2i left(0, 0);
+	const Vector2i right(1, 0);
+	world.set_route_connection_link(left, right, "BridgeLink");
+	CHECK(world.get_route_connection_link(left, right) == "BridgeLink");
+	CHECK(world.get_route_connection_link(right, left).is_empty());
+	world.set_cell_navigation_link_enabled(left, "BridgeLink", false);
+	CHECK(world.acquire_cell_route(left, right).is_empty());
+	CHECK(world.acquire_cell_route(right, left).is_empty());
+	CHECK(world.get_cell_lease_count_total() == 0);
+	world.set_cell_navigation_link_enabled(left, "BridgeLink", true);
+	Array route = world.acquire_cell_route(left, right);
+	REQUIRE(route.size() == 2);
+	CHECK(world.release_cell_route(route) == 2);
+	world.set_cell_navigation_link_enabled(left, "BridgeLink", false);
+	world.clear_route_connection_link(left, right);
+	CHECK(world.get_route_connection_link(left, right).is_empty());
+	route = world.acquire_cell_route(left, right);
+	REQUIRE(route.size() == 2);
+	CHECK(world.release_cell_route(route) == 2);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Streamed NavigationLink3D respects persistent gate through unload") {
+	const String path = make_nav_link_cell_scene("bridge_reload");
+	{
+		WorldFixture fixture;
+		const Vector2i cell(0, 0);
+		fixture.world->set_cell_scene(cell, path);
+		fixture.world->set_cell_navigation_link_enabled(cell, "BridgeLink", false);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *root = fixture.world->get_cell_instance(cell);
+		REQUIRE(root != nullptr);
+		NavigationLink3D *link = Object::cast_to<NavigationLink3D>(root->get_node_or_null(NodePath("BridgeLink")));
+		REQUIRE(link != nullptr);
+		CHECK_FALSE(link->is_enabled());
+		CHECK(link->is_bidirectional());
+		fixture.world->set_cell_navigation_link_enabled(cell, "BridgeLink", true);
+		CHECK(link->is_enabled());
+		fixture.world->set_cell_navigation_link_enabled(cell, "BridgeLink", false);
+		fixture.observer->set_position(Vector3(1280, 0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
+		fixture.observer->set_position(Vector3(0, 0, 0));
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *again = fixture.world->get_cell_instance(cell);
+		REQUIRE(again != nullptr);
+		NavigationLink3D *restored = Object::cast_to<NavigationLink3D>(again->get_node_or_null(NodePath("BridgeLink")));
+		REQUIRE(restored != nullptr);
+		CHECK_FALSE(restored->is_enabled());
+		fixture.world->set_navigation_link_states(Dictionary());
+		CHECK(restored->is_enabled());
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation gates default to enabled and normalize saved state") {
+	WorldPartition3D world;
+	CHECK(world.is_cell_navigation_enabled(Vector2i(4, 1)));
+	world.set_cell_navigation_enabled(Vector2i(4, 1), true);
+	CHECK(world.get_disabled_navigation_cell_count() == 0);
+	world.set_cell_navigation_enabled(Vector2i(4, 1), false);
+	CHECK_FALSE(world.is_cell_navigation_enabled(Vector2i(4, 1)));
+	CHECK(world.get_disabled_navigation_cell_count() == 1);
+	Dictionary input;
+	input[Vector2i(1, 0)] = false;
+	input[Vector2i(2, 0)] = true;
+	input[Vector2i(3, 0)] = "not a bool";
+	input["not a cell"] = false;
+	world.set_navigation_cell_states(input);
+	CHECK(world.get_disabled_navigation_cell_count() == 1);
+	CHECK_FALSE(world.is_cell_navigation_enabled(Vector2i(1, 0)));
+	CHECK(world.is_cell_navigation_enabled(Vector2i(4, 1)));
+	CHECK(world.is_cell_navigation_enabled(Vector2i(2, 0)));
+	Dictionary isolated = world.get_navigation_cell_states();
+	isolated[Vector2i(1, 0)] = true;
+	CHECK_FALSE(world.is_cell_navigation_enabled(Vector2i(1, 0)));
+	world.set_navigation_cell_states(Dictionary());
+	CHECK(world.is_cell_navigation_enabled(Vector2i(1, 0)));
+	CHECK(world.get_disabled_navigation_cell_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation gates prevent atomic route reservations") {
+	WorldPartition3D world;
+	world.set_cell_navigation_enabled(Vector2i(1, 0), false);
+	const Array path = world.get_cell_route(Vector2i(0, 0), Vector2i(2, 0));
+	CHECK(path.size() == 3); // Map geometry is still inspectable.
+	CHECK(world.acquire_cell_route(Vector2i(0, 0), Vector2i(2, 0)).is_empty());
+	CHECK(world.get_cell_lease_count_total() == 0);
+	world.set_cell_navigation_enabled(Vector2i(1, 0), true);
+	const Array tokens = world.acquire_cell_route(Vector2i(0, 0), Vector2i(2, 0));
+	REQUIRE(tokens.size() == 3);
+	world.set_cell_navigation_enabled(Vector2i(1, 0), false);
+	CHECK(world.get_cell_lease_count_total() == 3); // Existing owners stay valid.
+	CHECK(world.release_cell_route(tokens) == 3);
+	CHECK(world.get_cell_lease_count_total() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation gate signal exists and bulk import keeps defaults") {
+	WorldPartition3D world;
+	CHECK(world.has_signal(SNAME("cell_navigation_state_changed")));
+	CHECK(world.is_cell_navigation_enabled(Vector2i(-2, -1)));
+	Dictionary stored;
+	stored[Vector2i(-2, -1)] = false;
+	world.set_navigation_cell_states(stored);
+	CHECK_FALSE(world.is_cell_navigation_enabled(Vector2i(-2, -1)));
+	world.set_cell_navigation_enabled(Vector2i(-2, -1), false);
+	CHECK(world.get_navigation_cell_states().size() == 1);
+	world.set_cell_navigation_enabled(Vector2i(-2, -1), true);
+	CHECK(world.get_navigation_cell_states().is_empty());
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Navigation gate disables loaded region and survives reload") {
+	const String path = make_nav_gate_cell_scene("region_toggle");
+	{
+		WorldFixture fixture;
+		const Vector2i cell(0, 0);
+		fixture.world->set_cell_scene(cell, path);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *root = fixture.world->get_cell_instance(cell);
+		REQUIRE(root != nullptr);
+		NavigationRegion3D *region = Object::cast_to<NavigationRegion3D>(root->get_node_or_null(NodePath("WalkableRegion")));
+		REQUIRE(region != nullptr);
+		CHECK(region->is_enabled());
+		fixture.world->set_cell_navigation_enabled(cell, false);
+		CHECK_FALSE(region->is_enabled());
+		fixture.observer->set_position(Vector3(1280, 0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
+		fixture.observer->set_position(Vector3(0, 0, 0));
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		Node3D *reloaded = fixture.world->get_cell_instance(cell);
+		REQUIRE(reloaded != nullptr);
+		NavigationRegion3D *region_again = Object::cast_to<NavigationRegion3D>(reloaded->get_node_or_null(NodePath("WalkableRegion")));
+		REQUIRE(region_again != nullptr);
+		CHECK_FALSE(region_again->is_enabled());
+		Dictionary imported;
+		imported[cell] = false;
+		fixture.world->set_navigation_cell_states(imported);
+		CHECK_FALSE(region_again->is_enabled());
+		fixture.world->set_navigation_cell_states(Dictionary());
+		CHECK(region_again->is_enabled());
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation corridor route includes edge-adjacent cells") {
+	WorldPartition3D world;
+	const Array route = world.get_cell_route(Vector2i(0, 0), Vector2i(3, 2));
+	REQUIRE(route.size() == 6);
+	CHECK(route[0] == Vector2i(0, 0));
+	CHECK(route[5] == Vector2i(3, 2));
+	for (int i = 1; i < route.size(); i++) {
+		const Vector2i a = route[i - 1];
+		const Vector2i b = route[i];
+		const int dx = Math::abs(a.x - b.x);
+		const int dz = Math::abs(a.y - b.y);
+		CHECK(dx + dz == 1);
+	}
+	const Array reverse = world.get_cell_route(Vector2i(3, 2), Vector2i(0, 0));
+	CHECK(reverse.size() == route.size());
+	CHECK(world.get_cell_route(Vector2i(4, 9), Vector2i(4, 9)).size() == 1);
+	const Array negatives = world.get_cell_route(Vector2i(-2, -3), Vector2i(-5, -3));
+	CHECK(negatives.size() == 4);
+	CHECK(negatives[3] == Vector2i(-5, -3));
+}
+
+TEST_CASE("[WorldPartition3D] Navigation corridor rejects oversized and extreme routes") {
+	WorldPartition3D world;
+	CHECK(world.get_cell_route(Vector2i(0, 0), Vector2i(63, 0)).size() == 64);
+	ERR_PRINT_OFF;
+	CHECK(world.get_cell_route(Vector2i(0, 0), Vector2i(64, 0)).is_empty());
+	CHECK(world.get_cell_route(Vector2i(-1000000000, -1000000000), Vector2i(1000000000, 1000000000)).is_empty());
+	ERR_PRINT_ON;
+	CHECK(world.get_cell_lease_count_total() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation corridor atomically acquires and releases cells") {
+	WorldPartition3D world;
+	Array route = world.get_cell_route(Vector2i(0, 0), Vector2i(2, 1));
+	Array tokens = world.acquire_cell_route(Vector2i(0, 0), Vector2i(2, 1));
+	REQUIRE(tokens.size() == route.size());
+	CHECK(world.get_cell_lease_count_total() == tokens.size());
+	for (int i = 0; i < route.size(); i++) {
+		CHECK(world.get_cell_lease_count(route[i]) == 1);
+	}
+	Array second = world.acquire_cell_route(Vector2i(0, 0), Vector2i(2, 1));
+	CHECK(second.size() == tokens.size());
+	CHECK(world.get_cell_lease_count(Vector2i(0, 0)) == 2);
+	CHECK(world.release_cell_route(tokens) == tokens.size());
+	CHECK(world.get_cell_lease_count(Vector2i(0, 0)) == 1);
+	CHECK(world.release_cell_route(tokens) == 0);
+	CHECK(world.release_cell_route(second) == second.size());
+	CHECK(world.get_cell_lease_count_total() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation corridor disabled layer fails without claiming tokens") {
+	WorldPartition3D world;
+	world.set_cell_layer(Vector2i(1, 0), "locked");
+	world.set_layer_enabled("locked", false);
+	CHECK(world.acquire_cell_route(Vector2i(0, 0), Vector2i(3, 0)).is_empty());
+	CHECK(world.get_cell_lease_count_total() == 0);
+	world.set_layer_enabled("locked", true);
+	Array tokens = world.acquire_cell_route(Vector2i(0, 0), Vector2i(3, 0));
+	REQUIRE(tokens.size() == 4);
+	CHECK(world.release_cell_route(tokens) == 4);
+}
+
+TEST_CASE("[WorldPartition3D] Navigation corridor respects token capacity atomically") {
+	WorldPartition3D world;
+	Vector<int> reserved;
+	for (int i = 0; i < 254; i++) {
+		const int token = world.acquire_cell_lease(Vector2i(i, 9));
+		REQUIRE(token > 0);
+		reserved.push_back(token);
+	}
+	ERR_PRINT_OFF;
+	CHECK(world.acquire_cell_route(Vector2i(0, 0), Vector2i(3, 0)).is_empty());
+	ERR_PRINT_ON;
+	CHECK(world.get_cell_lease_count_total() == 254);
+	Array tokens = world.acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0));
+	REQUIRE(tokens.size() == 2);
+	CHECK(world.get_cell_lease_count_total() == 256);
+	CHECK(world.release_cell_route(tokens) == 2);
+	for (int token : reserved) {
+		CHECK(world.release_cell_lease(token));
+	}
+	CHECK(world.get_cell_lease_count_total() == 0);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Navigation corridor streams a distant target with no observer") {
+	const String path = make_cell_scene("corridor_prefetch");
+	{
+		WorldFixture fixture;
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->set_cell_scene(Vector2i(1, 0), path);
+		fixture.world->set_max_new_requests_per_frame(1);
+		const Array tokens = fixture.world->acquire_cell_route(Vector2i(0, 0), Vector2i(1, 0));
+		REQUIRE(tokens.size() == 2);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(1, 0)));
+		CHECK(fixture.world->release_cell_route(tokens) == 2);
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(1, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[WorldPartition3D] Simulation diagnostics for missing cells return zero counts") {
+	WorldPartition3D world;
+	const Dictionary counts = world.get_cell_simulation_stats(Vector2i(999, -999));
+	CHECK(int() == 0);
+	CHECK(int() == 0);
+	CHECK(int() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Streaming lifecycle callbacks are registered as native signals") {
+	WorldPartition3D world;
+	CHECK(world.has_signal(SNAME("cell_activated")));
+	CHECK(world.has_signal(SNAME("cell_deactivating")));
+	CHECK(world.has_signal(SNAME("cell_loaded")));
+	CHECK(world.has_signal(SNAME("cell_unloaded")));
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Lifecycle and simulation statistics work with ordinary scenes") {
+	const String path = make_cell_scene("simulation_lifecycle");
+	{
+		WorldFixture fixture;
+		const Vector2i cell(0, 0);
+		fixture.world->set_cell_scene(cell, path);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		const Dictionary counts = fixture.world->get_cell_simulation_stats(cell);
+		CHECK(int() == 0);
+		CHECK(int() == 0);
+		CHECK(int() == 0);
+		fixture.observer->set_position(Vector3(128, 0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
+		const Dictionary unloaded = fixture.world->get_cell_simulation_stats(cell);
+		CHECK(int() == 0);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[WorldPartition3D] Cell lease tokens isolate independent owners") {
+	WorldPartition3D world;
+	const Vector2i arena(4, 2);
+	const int quest_token = world.acquire_cell_lease(arena);
+	const int cinematic_token = world.acquire_cell_lease(arena);
+	CHECK(quest_token > 0);
+	CHECK(cinematic_token > 0);
+	CHECK(quest_token != cinematic_token);
+	CHECK(world.get_cell_lease_count(arena) == 2);
+	CHECK(world.get_cell_lease_count_total() == 2);
+	CHECK(world.get_leased_cell_count() == 1);
+	CHECK(world.release_cell_lease(quest_token));
+	CHECK_FALSE(world.release_cell_lease(quest_token));
+	CHECK(world.get_cell_lease_count(arena) == 1);
+	CHECK(world.get_cell_lease_count_total() == 1);
+	CHECK(world.release_cell_lease(cinematic_token));
+	CHECK(world.get_cell_lease_count(arena) == 0);
+	CHECK(world.get_leased_cell_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Cell leases coexist with manual pins and clear independently") {
+	WorldPartition3D world;
+	const Vector2i hub(0, 0);
+	world.set_cell_scene(hub, "res://lease_hub.tscn");
+	world.pin_cell(hub);
+	const int token = world.acquire_cell_lease(hub);
+	world.clear_pinned_cells();
+	CHECK_FALSE(world.is_cell_pinned(hub));
+	CHECK(world.get_cell_lease_count(hub) == 1);
+	world.pin_cell(hub);
+	world.clear_cell_leases();
+	CHECK(world.is_cell_pinned(hub));
+	CHECK(world.get_cell_lease_count_total() == 0);
+	CHECK_FALSE(world.release_cell_lease(token));
+	world.unpin_cell(hub);
+	CHECK(world.get_pinned_cell_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Lease token cap is guarded without losing existing owners") {
+	WorldPartition3D world;
+	Vector<int> tokens;
+	for (int i = 0; i < 256; i++) {
+		const int token = world.acquire_cell_lease(Vector2i(i, 0));
+		REQUIRE(token > 0);
+		tokens.push_back(token);
+	}
+	ERR_PRINT_OFF;
+	CHECK(world.acquire_cell_lease(Vector2i(999, 0)) == 0);
+	ERR_PRINT_ON;
+	CHECK(world.get_cell_lease_count_total() == 256);
+	CHECK(world.get_cell_lease_count(Vector2i(999, 0)) == 0);
+	CHECK(world.release_cell_lease(tokens[0]));
+	const int new_token = world.acquire_cell_lease(Vector2i(999, 0));
+	CHECK(new_token > 0);
+	CHECK(new_token != tokens[0]);
+	CHECK(world.get_cell_lease_count_total() == 256);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Two leases retain distant cell until both release") {
+	const String path = make_cell_scene("lease_two_systems");
+	{
+		WorldFixture fixture;
+		const Vector2i arena(5, -2);
+		fixture.world->set_cell_scene(arena, path);
+		fixture.world->set_observer_path(NodePath());
+		const int quest = fixture.world->acquire_cell_lease(arena);
+		const int cutscene = fixture.world->acquire_cell_lease(arena);
+		REQUIRE(wait_for_cell(fixture.world, arena));
+		CHECK(fixture.world->release_cell_lease(quest));
+		fixture.world->update_streaming();
+		CHECK(fixture.world->is_cell_loaded(arena));
+		CHECK(fixture.world->release_cell_lease(cutscene));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(arena));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Releasing manual pin does not override independent lease") {
+	const String path = make_cell_scene("lease_survives_pin_release");
+	{
+		WorldFixture fixture;
+		const Vector2i cell(7, -3);
+		fixture.world->set_cell_scene(cell, path);
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->pin_cell(cell);
+		const int lease = fixture.world->acquire_cell_lease(cell);
+		REQUIRE(lease > 0);
+		REQUIRE(wait_for_cell(fixture.world, cell));
+		fixture.world->unpin_cell(cell);
+		fixture.world->update_streaming();
+		CHECK(fixture.world->is_cell_loaded(cell));
+		CHECK(fixture.world->get_cell_lease_count(cell) == 1);
+		CHECK(fixture.world->release_cell_lease(lease));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(cell));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Data Layer deactivation overrides leased cells") {
+	const String path = make_cell_scene("lease_layer_gate");
+	{
+		WorldFixture fixture;
+		const Vector2i arena(0, 0);
+		fixture.world->set_cell_scene(arena, path);
+		fixture.world->set_cell_layer(arena, "combat");
+		const int lease = fixture.world->acquire_cell_lease(arena);
+		REQUIRE(wait_for_cell(fixture.world, arena));
+		fixture.world->set_layer_enabled("combat", false);
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(arena));
+		CHECK(fixture.world->get_cell_lease_count(arena) == 1);
+		fixture.world->set_layer_enabled("combat", true);
+		REQUIRE(wait_for_cell(fixture.world, arena));
+		CHECK(fixture.world->release_cell_lease(lease));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Lease request uses global streaming request budget") {
+	const String near_path = make_cell_scene("lease_budget_near");
+	const String leased_path = make_cell_scene("lease_budget_far");
+	{
+		WorldFixture fixture;
+		fixture.world->set_max_new_requests_per_frame(1);
+		fixture.world->set_cell_scene(Vector2i(0, 0), near_path);
+		fixture.world->set_cell_scene(Vector2i(5, 0), leased_path);
+		fixture.world->acquire_cell_lease(Vector2i(5, 0));
+		fixture.world->update_streaming();
+		CHECK(ResourceLoader::load_threaded_get_status(leased_path) != ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		CHECK(ResourceLoader::load_threaded_get_status(near_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(5, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(near_path) == OK);
+	CHECK(DirAccess::remove_absolute(leased_path) == OK);
+}
+
+TEST_CASE("[WorldPartition3D] Reactive world signals are exposed to scripts") {
+	WorldPartition3D world;
+	CHECK(world.has_signal(SNAME("cell_state_changed")));
+	CHECK(world.has_signal(SNAME("layer_state_changed")));
+	CHECK(world.has_signal(SNAME("cell_loaded")));
+	CHECK(world.has_signal(SNAME("cell_unloaded")));
+}
+
+TEST_CASE("[WorldPartition3D] Layer events retain default enabled semantics") {
+	WorldPartition3D world;
+	CHECK(world.is_layer_enabled("quest"));
+	world.set_layer_enabled("quest", true);
+	CHECK(world.is_layer_enabled("quest"));
+	world.set_layer_enabled("quest", false);
+	CHECK_FALSE(world.is_layer_enabled("quest"));
+	world.set_layer_enabled("quest", false);
+	CHECK_FALSE(world.is_layer_enabled("quest"));
+	Dictionary imported;
+	imported["quest"] = false;
+	imported["arena"] = true;
+	world.set_layer_states(imported);
+	CHECK_FALSE(world.is_layer_enabled("quest"));
+	CHECK(world.is_layer_enabled("arena"));
+	world.set_layer_states(Dictionary());
+	CHECK(world.is_layer_enabled("quest"));
+}
+
+TEST_CASE("[WorldPartition3D] Layer dictionaries normalize keys and protect getters") {
+	WorldPartition3D world;
+	Dictionary membership;
+	membership[Vector2i(0, 0)] = "hub";
+	membership[Vector2i(0, 0)] = "hub";
+	membership[Vector2i(4, 2)] = "combat";
+	membership[String("invalid")] = "combat";
+	membership[Vector2i(3, 2)] = 42;
+	world.set_cell_layers(membership);
+	CHECK(world.get_cell_layers().size() == 2);
+	CHECK(world.get_cell_layer(Vector2i(4, 2)) == "combat");
+	Dictionary copy = world.get_cell_layers();
+	copy.clear();
+	CHECK(world.get_cell_layers().size() == 2);
+	CHECK(world.is_cell_layer_enabled(Vector2i(4, 2)));
+	Dictionary states;
+	states["combat"] = false;
+	states["hub"] = true;
+	states[Vector2i(0, 0)] = false;
+	states["bad"] = String("not boolean");
+	world.set_layer_states(states);
+	CHECK(world.get_layer_states().size() == 2);
+	CHECK_FALSE(world.is_cell_layer_enabled(Vector2i(4, 2)));
+	CHECK(world.is_cell_layer_enabled(Vector2i(0, 0)));
+	CHECK(world.is_cell_layer_enabled(Vector2i(15, 15)));
+	Dictionary state_copy = world.get_layer_states();
+	state_copy.clear();
+	CHECK(world.get_layer_states().size() == 2);
+	world.set_cell_layer(Vector2i(3, 2), "combat");
+	CHECK_FALSE(world.is_cell_layer_enabled(Vector2i(3, 2)));
+	world.clear_cell_layer(Vector2i(3, 2));
+	CHECK(world.is_cell_layer_enabled(Vector2i(3, 2)));
+	world.set_layer_enabled("combat", true);
+	CHECK(world.is_layer_enabled("combat"));
+	world.set_layer_states(Dictionary());
+	CHECK(world.is_cell_layer_enabled(Vector2i(4, 2)));
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Disabled layer prevents pinned load and preserves pin") {
+	const String path = make_cell_scene("layer_pin_gate");
+	{
+		WorldFixture fixture;
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->set_cell_layer(Vector2i(0, 0), "combat");
+		fixture.world->pin_cell(Vector2i(0, 0));
+		fixture.world->set_layer_enabled("combat", false);
+		for (int i = 0; i < 3; i++) {
+			fixture.world->update_streaming();
+		}
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK(fixture.world->is_cell_pinned(Vector2i(0, 0)));
+		fixture.world->set_layer_enabled("combat", true);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		fixture.world->set_layer_enabled("combat", false);
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK(fixture.world->is_cell_pinned(Vector2i(0, 0)));
+		fixture.world->clear_cell_layer(Vector2i(0, 0));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Layer deactivates without any observer and avoids unrelated unload") {
+	const String path = make_cell_scene("layer_without_observer");
+	{
+		WorldFixture fixture;
+		fixture.world->set_load_radius(1);
+		fixture.world->set_unload_radius(2);
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->set_cell_scene(Vector2i(1, 0), path);
+		fixture.world->set_cell_layer(Vector2i(0, 0), "mission");
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(1, 0)));
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->set_layer_enabled("mission", false);
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK(fixture.world->is_cell_loaded(Vector2i(1, 0)));
+		fixture.world->set_layer_enabled("mission", true);
+		fixture.world->pin_cell(Vector2i(0, 0));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[WorldPartition3D] Cell state setters and getters isolate nested dictionaries") {
+	WorldPartition3D world;
+	Dictionary nested;
+	nested["claimed"] = false;
+	Dictionary initial;
+	initial["quest"] = nested;
+	world.set_cell_state(Vector2i(2, -3), initial);
+	CHECK(world.has_cell_state(Vector2i(2, -3)));
+	CHECK(world.get_cell_state_count() == 1);
+
+	// Caller changes never mutate the streamer's saved copy.
+	nested["claimed"] = true;
+	Dictionary saved = world.get_cell_state(Vector2i(2, -3));
+	Dictionary saved_quest = saved["quest"];
+	CHECK(bool() == false);
+	saved_quest["claimed"] = true;
+	Dictionary again = world.get_cell_state(Vector2i(2, -3));
+	Dictionary restored_quest = again["quest"];
+	CHECK(bool() == false);
+
+	world.set_cell_state(Vector2i(2, -3), Dictionary());
+	CHECK_FALSE(world.has_cell_state(Vector2i(2, -3)));
+	CHECK(world.get_cell_state(Vector2i(99, 99)).is_empty());
+	CHECK(world.get_cell_state_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Snapshots transfer cell state and reject unsupported entries") {
+	WorldPartition3D source;
+	Dictionary hub;
+	hub["reward_claimed"] = true;
+	hub["visits"] = 7;
+	source.set_cell_state(Vector2i(0, 0), hub);
+	Dictionary arena;
+	arena["wins"] = 3;
+	source.set_cell_state(Vector2i(4, 2), arena);
+	Dictionary snapshot = source.snapshot_cell_states();
+	CHECK(snapshot.size() == 2);
+	Dictionary invalid;
+	invalid["bad string key"] = arena;
+	invalid[Vector2i(10, 10)] = String("not a dictionary");
+	invalid[Vector2i(0, 0)] = snapshot[Vector2i(0, 0)];
+	invalid[Vector2i(4, 2)] = snapshot[Vector2i(4, 2)];
+	WorldPartition3D destination;
+	destination.load_cell_states(invalid);
+	CHECK(destination.get_cell_state_count() == 2);
+	CHECK(bool() == true);
+	CHECK(int() == 3);
+	invalid.clear();
+	CHECK(destination.get_cell_state_count() == 2);
+	destination.load_cell_states(Dictionary());
+	CHECK(destination.get_cell_state_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Cell data survives scene mapping removal while pins are dropped") {
+	WorldPartition3D world;
+	const Vector2i hub(0, 0);
+	Dictionary state;
+	state["unlocked"] = true;
+	world.set_cell_scene(hub, "res://test_scene.tscn");
+	world.pin_cell(hub);
+	world.set_cell_state(hub, state);
+	world.remove_cell_scene(hub);
+	CHECK(world.has_cell_state(hub));
+	// Pins belong to registrations; saved gameplay data does not.
+	CHECK_FALSE(world.is_cell_pinned(hub));
+	world.erase_cell_state(hub);
+	CHECK_FALSE(world.has_cell_state(hub));
+	world.set_cell_state(Vector2i(3, 3), state);
+	world.set_cell_state(Vector2i(4, 4), state);
+	world.clear_cell_states();
+	CHECK(world.get_cell_state_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Pinned cell array filters duplicates, unregistered and invalid values") {
+	WorldPartition3D world;
+	Array cells;
+	cells.push_back(Vector2i(3, -1));
+	cells.push_back(Vector2i(3, -1));
+	cells.push_back(String("not a cell"));
+	cells.push_back(Vector2i(0, 0));
+	cells.push_back(Vector2i(77, 77)); // Unregistered coordinates are skipped.
+	world.set_cell_scene(Vector2i(3, -1), "res://pin_a.tscn");
+	world.set_cell_scene(Vector2i(0, 0), "res://pin_b.tscn");
+	world.set_pinned_cells(cells);
+	CHECK(world.get_pinned_cell_count() == 2);
+	const Array normalized = world.get_pinned_cells();
+	REQUIRE(normalized.size() == 2);
+	CHECK(normalized[0] == Vector2i(3, -1));
+	CHECK(normalized[1] == Vector2i(0, 0));
+	Array oversized;
+	for (int i = 0; i < 129; i++) {
+		oversized.push_back(Vector2i(i, 0));
+	}
+	ERR_PRINT_OFF;
+	world.set_pinned_cells(oversized);
+	ERR_PRINT_ON;
+	CHECK(world.get_pinned_cell_count() == 2);
+	world.set_pinned_cells(Array());
+	CHECK(world.get_pinned_cell_count() == 0);
+}
+
+TEST_CASE("[WorldPartition3D] Pinned cells are unique, ordered and capped") {
+	WorldPartition3D world;
+	CHECK(world.get_pinned_cell_count() == 0);
+	world.set_cell_scene(Vector2i(5, -2), "res://order_a.tscn");
+	world.set_cell_scene(Vector2i(-1, 0), "res://order_b.tscn");
+	for (int i = 0; i <= 128; i++) {
+		world.set_cell_scene(Vector2i(i, 100), "res://order_cap.tscn");
+	}
+	world.pin_cell(Vector2i(5, -2));
+	world.pin_cell(Vector2i(5, -2));
+	world.pin_cell(Vector2i(-1, 0));
+	CHECK(world.get_pinned_cell_count() == 2);
+	const Array pinned = world.get_pinned_cells();
+	REQUIRE(pinned.size() == 2);
+	CHECK(pinned[0] == Vector2i(5, -2));
+	CHECK(pinned[1] == Vector2i(-1, 0));
+	Array copy = pinned;
+	copy.clear();
+	CHECK(world.get_pinned_cell_count() == 2);
+	CHECK(world.is_cell_pinned(Vector2i(5, -2)));
+	world.unpin_cell(Vector2i(5, -2));
+	world.unpin_cell(Vector2i(5, -2));
+	CHECK_FALSE(world.is_cell_pinned(Vector2i(5, -2)));
+	world.clear_pinned_cells();
+	CHECK(world.get_pinned_cell_count() == 0);
+	for (int i = 0; i < 128; i++) {
+		world.pin_cell(Vector2i(i, 100));
+	}
+	ERR_PRINT_OFF;
+	world.pin_cell(Vector2i(128, 100));
+	ERR_PRINT_ON;
+	CHECK(world.get_pinned_cell_count() == 128);
+	CHECK_FALSE(world.is_cell_pinned(Vector2i(128, 100)));
+}
+
+TEST_CASE("[WorldPartition3D] Unload budget defaults and validates") {
+	WorldPartition3D world;
+	CHECK(world.get_max_unloads_per_frame() == 32);
+	world.set_max_unloads_per_frame(7);
+	CHECK(world.get_max_unloads_per_frame() == 7);
+	ERR_PRINT_OFF;
+	world.set_max_unloads_per_frame(0);
+	world.set_max_unloads_per_frame(129);
+	ERR_PRINT_ON;
+	CHECK(world.get_max_unloads_per_frame() == 7);
+}
+
+TEST_CASE("[WorldPartition3D] Unloaded cells have no accessible scene instance") {
+	WorldPartition3D world;
+	world.set_cell_scene(Vector2i(7, -3), "res://unloaded.tscn");
+	CHECK(world.get_cell_instance(Vector2i(7, -3)) == nullptr);
+	CHECK(world.get_cell_instance(Vector2i(100, 100)) == nullptr);
+	CHECK_FALSE(world.is_cell_loaded(Vector2i(7, -3)));
+}
+
 
 TEST_CASE("[WorldPartition3D] Negative fractional positions floor toward minus infinity") {
 	WorldPartition3D world;
@@ -521,6 +1538,223 @@ TEST_CASE("[SceneTree][WorldPartition3D] Failed resources leave no user load tok
 		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
 	}
 	CHECK(ResourceLoader::load_threaded_get_status(missing_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Pin prevents unloading after observer moves away") {
+	const String path = make_cell_scene("persistent_hub");
+	{
+		WorldFixture fixture;
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->pin_cell(Vector2i(0, 0));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		fixture.observer->set_position(Vector3(256, 0, 0));
+		fixture.world->update_streaming();
+		CHECK(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		fixture.world->unpin_cell(Vector2i(0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] A pin can load a cell with no valid observer") {
+	const String path = make_cell_scene("pin_without_observer");
+	{
+		WorldFixture fixture;
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->set_cell_scene(Vector2i(-3, 4), path);
+		fixture.world->pin_cell(Vector2i(-3, 4));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(-3, 4)));
+		CHECK(fixture.world->is_cell_loaded(Vector2i(-3, 4)));
+		fixture.world->set_observer_path(fixture.world->get_path_to(fixture.observer));
+		fixture.world->clear_pinned_cells();
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(-3, 4)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Releasing the only pin unloads with no observer") {
+	const String path = make_cell_scene("last_pin_cleanup");
+	{
+		WorldFixture fixture;
+		fixture.world->set_observer_path(NodePath());
+		fixture.world->set_cell_scene(Vector2i(6, -4), path);
+		fixture.world->pin_cell(Vector2i(6, -4));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(6, -4)));
+		fixture.world->unpin_cell(Vector2i(6, -4));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(6, -4)));
+		CHECK(fixture.world->get_pinned_cell_count() == 0);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Pinned request is prioritized before primary observer") {
+	const String near_path = make_cell_scene("pin_priority_near");
+	const String pin_path = make_cell_scene("pin_priority_far");
+	{
+		WorldFixture fixture;
+		fixture.world->set_max_new_requests_per_frame(1);
+		fixture.world->set_cell_scene(Vector2i(0, 0), near_path);
+		fixture.world->set_cell_scene(Vector2i(5, 0), pin_path);
+		fixture.world->pin_cell(Vector2i(5, 0));
+		fixture.world->update_streaming();
+		// The single-frame request budget is assigned to the pinned cell.
+		CHECK(ResourceLoader::load_threaded_get_status(pin_path) != ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		CHECK(ResourceLoader::load_threaded_get_status(near_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(5, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(near_path) == OK);
+	CHECK(DirAccess::remove_absolute(pin_path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Pins keep their registration while streaming is disabled") {
+	const String path = make_cell_scene("pause_pin");
+	{
+		WorldFixture fixture;
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->pin_cell(Vector2i(0, 0));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		fixture.world->set_streaming_enabled(false);
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK(fixture.world->is_cell_pinned(Vector2i(0, 0)));
+		fixture.world->set_streaming_enabled(true);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Unload budget spreads teleport cleanup over frames") {
+	const String path = make_cell_scene("budgeted_unload");
+	{
+		WorldFixture fixture;
+		fixture.world->set_load_radius(1);
+		fixture.world->set_unload_radius(2);
+		fixture.world->set_max_unloads_per_frame(1);
+		fixture.world->set_cell_scene(Vector2i(-1, 0), path);
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->set_cell_scene(Vector2i(1, 0), path);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(-1, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(1, 0)));
+		CHECK(fixture.world->get_loaded_cell_count() == 3);
+
+		fixture.observer->set_position(Vector3(1280, 0, 0));
+		fixture.world->update_streaming();
+		CHECK(fixture.world->get_loaded_cell_count() == 2);
+		fixture.world->update_streaming();
+		CHECK(fixture.world->get_loaded_cell_count() == 1);
+		fixture.world->update_streaming();
+		CHECK(fixture.world->get_loaded_cell_count() == 0);
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Cell instance lookup tracks streaming lifetime") {
+	const String path = make_cell_scene("instance_lookup");
+	{
+		WorldFixture fixture;
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		Node3D *instance = fixture.world->get_cell_instance(Vector2i(0, 0));
+		REQUIRE(instance != nullptr);
+		CHECK(instance->get_parent() == fixture.world);
+		CHECK(instance->get_name() == "AuthoredCell");
+		CHECK(fixture.world->get_cell_instance(Vector2i(1, 0)) == nullptr);
+		fixture.observer->set_position(Vector3(96, 0, 0));
+		fixture.world->update_streaming();
+		CHECK(fixture.world->get_cell_instance(Vector2i(0, 0)) == nullptr);
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] A streaming source retains a distant cell until removed") {
+	const String path = make_cell_scene("two_sources");
+	{
+		WorldFixture fixture;
+		fixture.world->set_unload_radius(0);
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->set_cell_scene(Vector2i(4, 0), path);
+		REQUIRE(fixture.world->set_streaming_source("camera", Vector3(64, 0, 0), 0, 1));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(4, 0)));
+		CHECK(fixture.world->get_loaded_cell_count() == 2);
+		fixture.observer->set_position(Vector3(128, 0, 0));
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+		CHECK(fixture.world->is_cell_loaded(Vector2i(4, 0)));
+		fixture.world->remove_streaming_source("camera");
+		fixture.world->update_streaming();
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(4, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Nearest ring of every source loads before a farther ring") {
+	const String first_path = make_cell_scene("fair_source_center");
+	const String ring_path = make_cell_scene("fair_source_ring");
+	const String second_path = make_cell_scene("fair_source_second_center");
+	{
+		WorldFixture fixture;
+		fixture.world->set_max_new_requests_per_frame(1);
+		// Park the observer on empty cells so only the sources demand scenes.
+		fixture.observer->set_position(Vector3(0, 0, 1600));
+		fixture.world->set_cell_scene(Vector2i(0, 0), first_path);
+		fixture.world->set_cell_scene(Vector2i(1, 0), ring_path);
+		fixture.world->set_cell_scene(Vector2i(4, 0), second_path);
+		REQUIRE(fixture.world->set_streaming_source("a_first", Vector3(0, 0, 0), 1, 1));
+		REQUIRE(fixture.world->set_streaming_source("b_second", Vector3(64, 0, 0), 0, 1));
+
+		fixture.world->update_streaming();
+		CHECK(ResourceLoader::load_threaded_get_status(first_path) != ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		CHECK(ResourceLoader::load_threaded_get_status(second_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+
+		fixture.world->update_streaming();
+		// The second source's center must beat the first source's outer ring.
+		CHECK(ResourceLoader::load_threaded_get_status(second_path) != ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		CHECK(ResourceLoader::load_threaded_get_status(ring_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(4, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(1, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(first_path) == OK);
+	CHECK(DirAccess::remove_absolute(ring_path) == OK);
+	CHECK(DirAccess::remove_absolute(second_path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Streaming sources share a single request budget") {
+	const String first_path = make_cell_scene("source_budget_first");
+	const String second_path = make_cell_scene("source_budget_second");
+	{
+		WorldFixture fixture;
+		fixture.world->set_max_new_requests_per_frame(1);
+		fixture.observer->set_position(Vector3(0, 0, 1600));
+		fixture.world->set_cell_scene(Vector2i(0, 0), first_path);
+		fixture.world->set_cell_scene(Vector2i(4, 0), second_path);
+		REQUIRE(fixture.world->set_streaming_source("a_first", Vector3(0, 0, 0), 0, 1));
+		REQUIRE(fixture.world->set_streaming_source("b_second", Vector3(64, 0, 0), 0, 1));
+		fixture.world->update_streaming();
+		// A single update may start only one resource request across all sources.
+		CHECK(ResourceLoader::load_threaded_get_status(first_path) != ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		CHECK(ResourceLoader::load_threaded_get_status(second_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(4, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(first_path) == OK);
+	CHECK(DirAccess::remove_absolute(second_path) == OK);
+}
+
+TEST_CASE("[WorldPartition3D] Failed cells are retried only on explicit request") {
+	WorldPartition3D world;
+	world.set_cell_scene(Vector2i(0, 0), "res://never_requested_outside_tree.tscn");
+	CHECK(world.get_failed_cell_count() == 0);
+	world.retry_failed_cells();
+	CHECK(world.get_failed_cell_count() == 0);
+	CHECK(world.get_configured_cell_count() == 1);
 }
 
 TEST_CASE("[SceneTree][WorldPartition3D] No observer prevents resource requests") {

@@ -172,6 +172,9 @@ func run(t) -> void:
 	fx.flush_bursts()
 	t.eq(fx.pending_burst_count(), 0, "queue emptied once per frame")
 	t.eq(fx.last_fx_budget_stats["requested"], 256, "diagnostics record workload")
+	t.check(int(fx.last_fx_budget_stats["planned_particles"]) <=
+		int(fx.last_fx_budget_stats["particle_budget"]),
+		"actual game VFX queue enforces the particle budget")
 	t.check(int(fx.last_fx_budget_stats["rendered"]) <= FxPolicy.budget_for(3),
 		"no more than Ultra burst budget can instantiate")
 	fx.free()
@@ -231,22 +234,124 @@ func run(t) -> void:
 			fair_rng.seed = 410266
 			for quality in 4:
 				for trial in 18:
-					var fd := PackedFloat64Array()
-					var fp := PackedByteArray()
-					var fg := PackedByteArray()
-					var fv := PackedByteArray()
+					var fqd := PackedFloat64Array()
+					var fqp := PackedByteArray()
+					var fqg := PackedByteArray()
+					var fqv := PackedByteArray()
 					for index in 96:
-						fd.append(fair_rng.randf_range(0.0, 170.0))
-						fp.append(fair_rng.randi_range(0, 3))
-						fg.append(fair_rng.randi_range(0, 3))
-						fv.append(fair_rng.randi_range(0, 1))
-					t.eq(FxPolicy.select_visible_fair_indices(fd, fp, fg, fv,
+						fqd.append(fair_rng.randf_range(0.0, 170.0))
+						fqp.append(fair_rng.randi_range(0, 3))
+						fqg.append(fair_rng.randi_range(0, 3))
+						fqv.append(fair_rng.randi_range(0, 1))
+					t.eq(FxPolicy.select_visible_fair_indices(fqd, fqp, fqg, fqv,
 						quality, fair_native),
-						FxPolicy.select_visible_fair_indices(fd, fp, fg, fv, quality),
+						FxPolicy.select_visible_fair_indices(fqd, fqp, fqg, fqv, quality),
 						"native/script fair VFX selection parity q%d sample%d" % [quality, trial])
 	else:
 		t.eq(FxPolicy.select_visible_fair_indices(fair_d, fair_p, fair_g,
 			fair_v, 0), fair_selected, "older native builds use portable VFX planner")
 	var real_fx_source: String = FileAccess.get_file_as_string("res://scripts/client/effects.gd")
-	t.check(real_fx_source.contains("FxPolicy.select_visible_fair_indices("),
-		"actual Albion After burst queue enables category diversity every frame")
+	t.check(real_fx_source.contains("FxPolicy.select_visible_fair_costed_indices("),
+		"actual Albion After burst queue enables category diversity and particle budget every frame")
+
+	t.current = "dual-budget VFX retains priority and fills gaps with cheaper recipes"
+	var cost_distances := PackedFloat64Array([2.0, 2.0, 4.0, 1.0, 6.0])
+	var cost_priorities := PackedByteArray([3, 2, 2, 1, 1])
+	var cost_categories := PackedByteArray([3, 1, 1, 0, 0])
+	var cost_visibility := PackedByteArray([0, 1, 1, 1, 1])
+	var costs := PackedInt32Array([36, 80, 30, 10, 10])
+	var expected_costed := PackedInt32Array([0, 2, 3])
+	t.eq(FxPolicy.select_visible_costed_indices(cost_distances, cost_priorities,
+		cost_categories, cost_visibility, costs, 0), expected_costed,
+		"performance tier admits critical offscreen FX then uses remaining work budget")
+	t.eq(FxPolicy.particle_budget_for(0), 96, "performance has a finite particle cap")
+	t.eq(FxPolicy.particle_budget_for(3), 384, "ultra has a larger particle cap")
+	t.check(FxPolicy.select_visible_costed_indices(cost_distances, cost_priorities,
+		cost_categories, cost_visibility, PackedInt32Array([36]), 0).is_empty(),
+		"cost array length mismatch cannot partially admit effects")
+	t.check(FxPolicy.select_visible_costed_indices(cost_distances, cost_priorities,
+		cost_categories, cost_visibility, PackedInt32Array([36, 0, 30, 10, 10]), 0).is_empty(),
+		"zero particle cost cannot bypass the frame limit")
+	t.check(FxPolicy.select_visible_costed_indices(cost_distances, cost_priorities,
+		cost_categories, cost_visibility, PackedInt32Array([36, 4097, 30, 10, 10]), 0).is_empty(),
+		"oversized per-effect work is rejected atomically")
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var cost_native: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if cost_native != null and cost_native.has_method("select_effects_visible_costed"):
+			t.eq(FxPolicy.select_visible_costed_indices(cost_distances, cost_priorities,
+				cost_categories, cost_visibility, costs, 0, cost_native), expected_costed,
+				"native cost-aware ranking exactly matches stock Godot")
+			var rng_cost := RandomNumberGenerator.new()
+			rng_cost.seed = 140922
+			for quality in 4:
+				for sample in 12:
+					var cd := PackedFloat64Array()
+					var cp := PackedByteArray()
+					var cg := PackedByteArray()
+					var cv := PackedByteArray()
+					var cc := PackedInt32Array()
+					for i in 64:
+						cd.append(rng_cost.randf_range(0.0, 170.0))
+						cp.append(rng_cost.randi_range(0, 3))
+						cg.append(rng_cost.randi_range(0, 3))
+						cv.append(rng_cost.randi_range(0, 1))
+						cc.append(rng_cost.randi_range(1, 75))
+					t.eq(FxPolicy.select_visible_costed_indices(cd, cp, cg, cv,
+						cc, quality, cost_native), FxPolicy.select_visible_costed_indices(
+						cd, cp, cg, cv, cc, quality),
+						"native costed VFX parity tier %d sample %d" % [quality, sample])
+
+	t.current = "fair quota selection applies the particle budget inside each stage"
+	var fc_d := PackedFloat64Array([5.0, 5.0, 6.0, 7.0, 200.0, 3.0])
+	var fc_p := PackedByteArray([3, 2, 1, 2, 3, 0])
+	var fc_g := PackedByteArray([3, 2, 1, 2, 0, 0])
+	var fc_v := PackedByteArray([1, 1, 1, 1, 1, 1])
+	var fc_c := PackedInt32Array([50, 40, 30, 20, 5, 5])
+	var fc_expected := PackedInt32Array([0, 2, 5])
+	t.eq(FxPolicy.select_visible_fair_costed_indices(fc_d, fc_p, fc_g, fc_v, fc_c, 0),
+		fc_expected, "critical event wins, hit minimum fits, unaffordable combat is skipped for cheap dust")
+	t.check(FxPolicy.select_visible_fair_costed_indices(fc_d, fc_p, fc_g, fc_v,
+		PackedInt32Array([50, 40, 30]), 0).is_empty(), "cost array length mismatch rejects atomically")
+	t.check(FxPolicy.select_visible_fair_costed_indices(fc_d, fc_p, fc_g, fc_v,
+		PackedInt32Array([50, 40, 30, 20, 5, 0]), 0).is_empty(), "zero particle cost is rejected")
+	var big_cost := PackedInt32Array()
+	var big_cost_sum: int = 0
+	for i in 40:
+		big_cost.append(40)
+	var wide_d := PackedFloat64Array()
+	var wide_p := PackedByteArray()
+	var wide_g := PackedByteArray()
+	var wide_v := PackedByteArray()
+	for i in 40:
+		wide_d.append(float(i))
+		wide_p.append(2)
+		wide_g.append(i % 4)
+		wide_v.append(1)
+	for index in FxPolicy.select_visible_fair_costed_indices(wide_d, wide_p, wide_g, wide_v, big_cost, 3):
+		big_cost_sum += big_cost[index]
+	t.check(big_cost_sum <= FxPolicy.particle_budget_for(3),
+		"fair selection never exceeds the quality-tier particle budget")
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var fc_native: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if fc_native != null and fc_native.has_method("select_effects_visible_fair_costed"):
+			t.eq(FxPolicy.select_visible_fair_costed_indices(fc_d, fc_p, fc_g, fc_v,
+				fc_c, 0, fc_native), fc_expected, "native fair cost-aware plan matches the known case")
+			var fc_rng := RandomNumberGenerator.new()
+			fc_rng.seed = 880412
+			for quality in 4:
+				for sample in 12:
+					var qd := PackedFloat64Array()
+					var qp := PackedByteArray()
+					var qg := PackedByteArray()
+					var qv := PackedByteArray()
+					var qc := PackedInt32Array()
+					for i in 64:
+						qd.append(fc_rng.randf_range(0.0, 170.0))
+						qp.append(fc_rng.randi_range(0, 3))
+						qg.append(fc_rng.randi_range(0, 3))
+						qv.append(fc_rng.randi_range(0, 1))
+						qc.append(fc_rng.randi_range(1, 75))
+					t.eq(FxPolicy.select_visible_fair_costed_indices(qd, qp, qg, qv,
+						qc, quality, fc_native), FxPolicy.select_visible_fair_costed_indices(
+						qd, qp, qg, qv, qc, quality),
+						"native fair costed VFX parity tier %d sample %d" % [quality, sample])

@@ -8,6 +8,7 @@
 		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work. Optional predictive streaming can preload one cell ahead of the observer using [member predictive_velocity], [member predictive_lookahead_seconds], and [member predictive_max_distance]. Current cells and pinned hubs always take priority over speculative work. [method set_streaming_source] registers up to 8 named world-space sources (radius 0 or 1 cell) for mission targets, cameras and portals. They run after observer cells and pinned hubs, before the speculative velocity forecast, using the same asynchronous work budgets. Each source has a priority 0 through 3; urgent sources are scheduled before background sources without starving immediate observer work. Equal priorities use stable alphabetical ordering by name. For fast travel, use [method get_streaming_source_progress] and [method is_streaming_source_ready] to wait non-blockingly for registered destination scenes to instantiate; do not assume the source is ready immediately after registration. They are runtime-only, not persistent pins.
 		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries. For persistent camps or quest hubs, use [method pin_cell] and [method unpin_cell] to override distance-based unloading. At most 128 registered cells may be pinned; a disabled streamer still unloads all cells.
 		To activate collision separately from simulation and visuals, set [member physics_radius], [member physics_hysteresis_cells] and [member max_physics_transitions_per_frame]. Pinned cells and important/urgent sources automatically request full-detail physics while ordinary preloads remain dormant. Scene roots opt into [code]set_streaming_physics_active(active)[/code]. Use [method is_streaming_source_physics_ready] to wait for collision activation after a physics tick; a scene can additionally implement [code]is_streaming_physics_ready()[/code] to validate its own colliders. This policy never automatically disables collision in other nodes. To stage gameplay transitions, [method is_streaming_source_activation_ready] requires live source roots, [member min_physics_frames_after_load] elapsed engine physics ticks and any scene-defined [code]is_streaming_activation_ready()[/code] check. This is intentionally stricter than [method is_streaming_source_ready], which requires only live scene roots. It cannot guarantee arbitrary physics/navmesh/GPU readiness unless your scene implements the relevant check. To avoid completely regenerating the grid tile for every dynamic obstacle, [method patch_navigation_tile] uses the unchanged NavMesh vertices, an old and new blocker snapshot, and shared obstacle/slope filtering to recheck only affected polygons. [method get_last_navigation_tile_retested_triangle_count] exposes how much geometry work occurred. This is a bounded synchronous optimization, not background baking. To support live obstacle editing without reloading cell scenes, [method mark_cell_navigation_dirty] invalidates an opted-in loaded cell and schedules its scene-owned [code]rebuild_streaming_navigation_mesh()[/code] callback under [member max_navigation_rebuilds_per_physics_frame]. Repeated marks coalesce, pending tiles are not reported navigation-ready, and a successful rebuild increments the cell revision and world generation for path-cache invalidation. To construct native grid-based terrain navigation meshes while excluding circular static obstacles and steep slopes, use [method build_navigation_tile] with sampled terrain heights and local obstacle footprints. It expands blockers by agent radius, bounds the work and returns a [NavigationMesh] resource; this is not Recast baking and does not manage the returned resource's lifecycle. To stream real authored NavigationRegion3D meshes independently of render, collision and NPC simulation, configure [member navigation_radius], [member navigation_hysteresis_cells] and [member max_navigation_transitions_per_frame]. An opt-in scene root implements [code]set_streaming_navigation_active(active)[/code], and can use [code]is_streaming_navigation_ready()[/code] to report actual region readiness. The engine allows two physics ticks before [method is_cell_navigation_ready] returns true, enabling safe NavigationServer synchronization without forced server flush. This does not automatically generate navigation polygons or establish connectivity for arbitrary scenes. To provide cheap cross-cell quest corridors without baking a navmesh, use [method find_cell_path] on registered grid cells. It uses bounded deterministic breadth-first search and optionally requires live loaded cells; collision avoidance remains the caller's responsibility. To budget costly NPC pathfinding and local obstacle avoidance, register live Node3D agents using [method register_navigation_agent], call [method try_acquire_navigation_update] from their physics processing to decide when to recalculate steering, and call [method unregister_navigation_agent_if_owner] on removal. [member max_navigation_updates_per_physics_frame] bounds native permits per fixed physics frame. This is a task scheduler, not an authored navigation mesh or a replacement for NavigationAgent3D updates. Optionally set [member simulation_radius] to gate AI/script activity independently from graphics. An opt-in scene root implements [code]set_streaming_simulation_active(active)[/code] and can pause its own processing; game systems may query [method is_cell_simulation_active] or subscribe to [signal cell_simulation_changed]. Activation is not automatic tree-wide pausing. Changes to existing loaded cells are limited by [member max_simulation_transitions_per_frame], and [member simulation_hysteresis_cells] reduces oscillations. Optionally set [member detail_radius] to enable near/distant scene-detail callbacks. A cell root script must implement [code]set_streaming_lod(level)[/code], where 0 means near detail and 1 means distant. The engine invokes this method before the new root enters the tree (so its [code]_ready()[/code] can generate only the required content), and again when an existing cell changes tier. Changes are bounded by [member max_detail_transitions_per_frame]. Optionally increase [member detail_hysteresis_cells] to suppress LOD oscillation while the observer moves around grid boundaries. Pinned cells always receive level 0. This does not generate simplified meshes automatically; the scene script must provide both representations.
+		Gameplay systems can claim and persist cells independently of the observer. [method pin_cell] and [method acquire_cell_lease] keep cells resident (pins in insertion order are streamed first, leases are reference counted per owner and [method acquire_cell_route] reserves a whole corridor atomically); both work without any valid observer. [method set_layer_enabled] activates or deactivates named runtime data layers assigned with [method set_cell_layer]; a disabled layer always wins over pins and leases. [method set_cell_state], [method snapshot_cell_states] and [method load_cell_states] persist per-cell gameplay dictionaries captured from scene roots through [code]capture_streaming_state()[/code] and restored through [code]restore_streaming_state(state)[/code]; [member persist_rigid_bodies] and [member persist_streaming_objects] opt into rigid-body and stateful-child capture. [method set_cell_navigation_enabled] and [method set_cell_navigation_link_enabled] are explicit, persisted gameplay gates for [NavigationRegion3D] and [NavigationLink3D] nodes and block route reservations; they are independent of the distance-based navigation tier. Scene roots may implement [code]streaming_activated(cell)[/code] and [code]streaming_deactivating(cell)[/code], mirrored by [signal cell_activated] and [signal cell_deactivating]. Distance-based unloads are limited per frame by [member max_unloads_per_frame].
 		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
 		[codeblock]
 		var partition := WorldPartition3D.new()
@@ -787,6 +788,410 @@
 				Polls background requests and updates cells around the observer. The node calls this method every frame while streaming is enabled.
 			</description>
 		</method>
+		<method name="acquire_cell_lease">
+			<return type="int" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Acquires an independent residency claim for a cell and returns its positive token, or 0 when the maximum 256 simultaneous tokens are in use. Multiple independent owners can acquire the same cell. Leases use normal asynchronous streaming budgets and cannot bypass disabled [member layer_states] or [member streaming_enabled]. Tokens belong to this WorldPartition3D instance and must be released explicitly.
+			</description>
+		</method>
+		<method name="acquire_cell_route">
+			<return type="Array" />
+			<param index="0" name="from_cell" type="Vector2i" />
+			<param index="1" name="to_cell" type="Vector2i" />
+			<description>
+				Atomically acquires one independent lease per cell in a four-connected route from [param from_cell] to [param to_cell], including both endpoints. Returns an [Array] of positive lease tokens in traversal order, or an empty Array when the route is too long, intersects an inactive Data Layer, or exceeds remaining token capacity. No partial leases are retained on failure. The maximum route length is 64 cells and every lease uses the normal streaming budgets. Route cells are a streaming corridor, not an obstacle-aware navigation path.
+			</description>
+		</method>
+		<method name="capture_cell_object_states">
+			<return type="Dictionary" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Captures only the currently loaded cell's opted-in child objects and returns its cached state dictionary. Objects must be in the streaming_stateful group and implement capture_streaming_object_state(). If the cell is unloaded, returns the cached copy unchanged. Emits cell_object_state_changed only when a captured value actually changes.
+			</description>
+		</method>
+		<method name="clear_cell_layer">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Removes the layer assignment of [param cell], making it eligible for normal distance/pin-based streaming irrespective of inactive layer states. Does not delete the registered scene or its saved gameplay state.
+			</description>
+		</method>
+		<method name="clear_cell_leases">
+			<return type="void" />
+			<description>
+				Releases all independent runtime lease tokens without touching [method get_pinned_cells], scene registrations or saved gameplay progress. Any formerly retained scenes become eligible for normal budgeted unloading.
+			</description>
+		</method>
+		<method name="clear_cell_object_states">
+			<return type="void" />
+			<description>
+				Clears cached interactive-object records for every cell, without changing already loaded objects. Subsequent captures or unloads populate the cache again if persist_streaming_objects is enabled.
+			</description>
+		</method>
+		<method name="clear_cell_physics_states">
+			<return type="void" />
+			<description>
+				Clears all stored rigid-body motion snapshots for all cells. This does not alter loaded bodies. The cache can be populated again by unloading or snapshotting active cells while [member persist_rigid_bodies] is enabled.
+			</description>
+		</method>
+		<method name="clear_cell_states">
+			<return type="void" />
+			<description>
+				Removes all cached runtime state dictionaries. Does not change scene registrations, pins or already loaded scene objects. If those objects are unloaded later, their optional capture callback may repopulate state.
+			</description>
+		</method>
+		<method name="clear_pinned_cells">
+			<return type="void" />
+			<description>
+				Releases all runtime cell pins. Cells outside every observer's unload radius become eligible for normal budgeted unloading at the next update.
+			</description>
+		</method>
+		<method name="clear_route_connection_link">
+			<return type="void" />
+			<param index="0" name="from_cell" type="Vector2i" />
+			<param index="1" name="to_cell" type="Vector2i" />
+			<description>
+				Removes an explicit link requirement registered by set_route_connection_link for the exact directed pair, without altering the NavigationLink3D node, its saved enabled state or any outstanding cell leases.
+			</description>
+		</method>
+		<method name="erase_cell_state">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Discards the cached gameplay state for a single cell without unloading its scene.
+			</description>
+		</method>
+		<method name="get_cell_layer" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the assigned layer name for this cell, or an empty string when no layer is assigned.
+			</description>
+		</method>
+		<method name="get_cell_layers" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns a copy of [member cell_layers]. Modifying the result does not change the layer configuration.
+			</description>
+		</method>
+		<method name="get_cell_lease_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the number of independent runtime lease tokens currently retaining the specified cell, excluding manual pins and observer sources.
+			</description>
+		</method>
+		<method name="get_cell_lease_count_total" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the total number of independent active lease tokens in this WorldPartition3D, limited to 256.
+			</description>
+		</method>
+		<method name="get_cell_object_state_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cells currently holding at least one saved interactive-object record.
+			</description>
+		</method>
+		<method name="get_cell_object_states" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns a deep copy of the saved dictionary for a cell. Keys are scene-relative node paths as Strings. Each value is a small, value-only Dictionary from the object's capture_streaming_object_state() method. Returns an empty Dictionary if no object records exist.
+			</description>
+		</method>
+		<method name="get_cell_physics_state" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns a defensive deep copy of the cached rigid-body state for a cell. Its keys are scene-relative NodePaths represented by Strings, and values contain a local [Transform3D], linear/angular [Vector3] velocities and sleeping/freeze booleans. Returns an empty dictionary if no data is cached.
+			</description>
+		</method>
+		<method name="get_cell_physics_state_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cells containing at least one cached opted-in rigid-body record, not the total number of saved bodies.
+			</description>
+		</method>
+		<method name="get_cell_route" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="from_cell" type="Vector2i" />
+			<param index="1" name="to_cell" type="Vector2i" />
+			<description>
+				Returns a deterministic array of adjacent [Vector2i] cells along a four-connected grid corridor, including both endpoints. The coordinate sequence is bounded to at most 64 cells; longer routes return an empty array. Each step is orthogonally adjacent, so a navigation agent never skips a whole intermediate cell during prefetch. This method does not acquire leases, validate scene registrations, bake navigation meshes or solve obstacle avoidance.
+			</description>
+		</method>
+		<method name="get_cell_simulation_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns an on-demand count of loaded physics and navigation components under the specified cell root, including descendants: [code]collision_objects[/code] (CollisionObject3D), [code]collision_shapes[/code] (CollisionShape3D) and [code]navigation_regions[/code] (NavigationRegion3D). Unloaded cells return zeros. This traverses the instantiated cell hierarchy; do not call it for all cells every frame in production.
+			</description>
+		</method>
+		<method name="get_cell_state" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns a deep copy of the stored gameplay state for a cell, or an empty dictionary if none is stored. This does not invoke capture on active scenes; use [method snapshot_cell_states] to gather their latest state.
+			</description>
+		</method>
+		<method name="get_cell_state_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cells with nonempty cached gameplay state.
+			</description>
+		</method>
+		<method name="get_disabled_navigation_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of distinct cells currently disabled for navigation, regardless of whether they have a loaded scene or existing route lease. Only explicit false entries are stored.
+			</description>
+		</method>
+		<method name="get_disabled_navigation_link_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the total number of disabled navigation link paths in all cells, regardless of whether their scenes are currently loaded.
+			</description>
+		</method>
+		<method name="get_layer_states" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns a copy of [member layer_states]. Missing layer names are enabled by default.
+			</description>
+		</method>
+		<method name="get_leased_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of distinct cell coordinates currently covered by at least one runtime lease, even when their scenes are not loaded or their layers are disabled.
+			</description>
+		</method>
+		<method name="get_navigation_cell_states" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns a defensive copy of the navigation gate state map (Vector2i to false). Cells missing from the map are enabled by default. Store this dictionary in a game checkpoint if gates must survive a save/load.
+			</description>
+		</method>
+		<method name="get_navigation_link_states" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns a defensive deep copy of the saved navigation link state map. Only disabled links are stored, and link paths are relative to the authored cell scene root. Save this alongside interactive-object states in checkpoints.
+			</description>
+		</method>
+		<method name="get_route_connection_link" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="from_cell" type="Vector2i" />
+			<param index="1" name="to_cell" type="Vector2i" />
+			<description>
+				Returns the registered scene-relative link path belonging to from_cell for the exact directed edge from_cell to to_cell, or an empty String if the edge has no explicit link requirement. Reverse-direction route acquisition automatically checks this registered edge as well.
+			</description>
+		</method>
+		<method name="has_cell_state" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] if a nonempty gameplay state is cached for the cell.
+			</description>
+		</method>
+		<method name="is_cell_layer_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns whether a cell's assigned layer permits it to load. Unassigned cells are enabled. This does not imply that a scene is currently loaded.
+			</description>
+		</method>
+		<method name="is_cell_navigation_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns whether a cell's navigation regions are enabled. Missing entries default to true. A disabled cell remains in the scene and retains its physics, graphics and existing leases, but new acquire_cell_route requests passing through it are rejected.
+			</description>
+		</method>
+		<method name="is_cell_navigation_link_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="link_path" type="String" />
+			<description>
+				Returns the persisted logical availability of an authored NavigationLink3D by cell-relative path. Paths missing from the map are enabled by default. This can be queried even when the cell scene has not loaded.
+			</description>
+		</method>
+		<method name="is_layer_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="layer" type="String" />
+			<description>
+				Returns the effective runtime state of the named layer. An unregistered layer or empty name defaults to enabled.
+			</description>
+		</method>
+		<method name="is_persisting_rigid_bodies" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns whether [member persist_rigid_bodies] is enabled.
+			</description>
+		</method>
+		<method name="is_persisting_streaming_objects" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns whether persist_streaming_objects is enabled for this streamer.
+			</description>
+		</method>
+		<method name="load_cell_object_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces cached interactive-object states from a Vector2i-to-Dictionary map, filtering unsafe paths, object references, unsupported types, nonfinite numbers and excess entries. Maximum 128 child object records per cell and 32 fields per record; accepted values include bool, int, finite float, short String, Vector2/Vector3 and integer vector variants. When enabled, existing loaded objects receive restore_streaming_object_state(state) immediately; missing records receive an empty Dictionary to reset to authored defaults.
+			</description>
+		</method>
+		<method name="load_cell_physics_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces cached rigid-body state with validated [Vector2i] to [Dictionary] mappings. Each body record must use a safe relative node path, finite transform and velocities, and bool sleeping/freeze flags; invalid values and unsafe paths are ignored. Up to 128 records are accepted per cell. Existing loaded opted-in bodies are updated immediately when a matching record is present. Missing records leave existing loaded body state unchanged. Imported states can restore later when the cell is streamed again.
+			</description>
+		</method>
+		<method name="load_cell_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces the entire state cache with valid [Vector2i] to [Dictionary] mappings, ignoring other entries. Passes deep copies into active scene roots that implement [code]restore_streaming_state(state)[/code]. Empty dictionaries are ignored. Caller is responsible for validating save files before invoking this method.
+			</description>
+		</method>
+		<method name="release_cell_lease">
+			<return type="bool" />
+			<param index="0" name="lease_token" type="int" />
+			<description>
+				Releases exactly one independent owner token. Returns true once, or false for an unknown or previously released token. A cell still needed by another lease, manual pin or observer remains active. Without owners, it becomes eligible for normal unload even without any observer.
+			</description>
+		</method>
+		<method name="release_cell_route">
+			<return type="int" />
+			<param index="0" name="tokens" type="Array" />
+			<description>
+				Releases each valid integer lease token in [param tokens], returning the number actually released. Unknown tokens, duplicated tokens and unsupported array entries do not release another owner's lease. May be used to cancel an AI route or on node teardown; call only with tokens acquired from the intended WorldPartition3D instance.
+			</description>
+		</method>
+		<method name="set_cell_layer">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="layer" type="String" />
+			<description>
+				Assigns [param cell] to a single named layer. Passing an empty layer removes its assignment. A change to an inactive layer unloads its scene over the normal frame budget.
+			</description>
+		</method>
+		<method name="set_cell_layers">
+			<return type="void" />
+			<param index="0" name="layers" type="Dictionary" />
+			<description>
+				Replaces the dictionary of [Vector2i] to nonempty [String] layer assignments. Invalid dictionary entries are omitted. Existing scene registrations, pinning and cached gameplay state are preserved.
+			</description>
+		</method>
+		<method name="set_cell_navigation_enabled">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				Enables or disables every NavigationRegion3D descendant of the loaded scene for a given cell, without unloading it. Removes the map entry when enabled is true. Emits cell_navigation_state_changed only for effective transitions. A disabled gate blocks new acquire_cell_route reservations; existing lease owners keep their tokens. The NavigationServer3D synchronizes topology changes on the following physics frame.
+			</description>
+		</method>
+		<method name="set_cell_navigation_link_enabled">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="link_path" type="String" />
+			<param index="2" name="enabled" type="bool" />
+			<description>
+				Switches one NavigationLink3D child under the loaded scene at cell without disabling its NavigationRegion3D nodes. The link_path is a safe relative NodePath from that cell root, at most 256 characters long. Disabled paths are stored for unloaded cells, reinstated after scene activation, and included in get_navigation_link_states(). Emits cell_navigation_link_state_changed only for effective transitions.
+			</description>
+		</method>
+		<method name="set_cell_state">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="state" type="Dictionary" />
+			<description>
+				Stores a deep copy of [param state] for a cell. An empty dictionary erases a previous cached state. For an active scene root with a [code]restore_streaming_state(state)[/code] method, a copy is applied immediately.
+			</description>
+		</method>
+		<method name="set_layer_enabled">
+			<return type="void" />
+			<param index="0" name="layer" type="String" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				Enables or disables a named runtime layer. Disabled layers prevent new loads (including pinned cells), cancel their pending scene instantiations, and unload loaded cells within [member max_unloads_per_frame]. Other layers remain unaffected. Empty names are rejected.
+			</description>
+		</method>
+		<method name="set_layer_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces the dictionary of named runtime states. Only nonempty [String] keys with [bool] values are accepted. Missing layer names are active by default. Useful for restoring event-state data from a save game.
+			</description>
+		</method>
+		<method name="set_navigation_cell_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces the current cell navigation gate map with validated Vector2i-to-bool entries (only false entries are stored). Immediately applies changes to loaded NavigationRegion3D descendants, and emits cell_navigation_state_changed per effective transition, including reopening gates removed by a bulk checkpoint import. Cells missing from the dictionary are enabled by default.
+			</description>
+		</method>
+		<method name="set_navigation_link_states">
+			<return type="void" />
+			<param index="0" name="states" type="Dictionary" />
+			<description>
+				Replaces the saved per-link gate state, validated as Vector2i cell to Dictionary of safe relative String paths to false values. Accepts at most 4096 cells and 128 disabled links per cell. Applies changes to loaded NavigationLink3D nodes and emits link-state signals only for effective changes, including reopening links removed from a save. Link topology updates are synchronized by NavigationServer3D on later physics frames.
+			</description>
+		</method>
+		<method name="set_persist_rigid_bodies">
+			<return type="void" />
+			<param index="0" name="enabled" type="bool" />
+			<description>
+				Enables/disables automatic physics capture on cell unloading and restoration on cell instantiation. Only [RigidBody3D] descendants with [code]set_meta(&quot;streaming_persistent&quot;, true)[/code] are included. Existing physics cache is not cleared when disabled. No physics state is written to disk unless the game calls [method snapshot_cell_physics_states] and saves it.
+			</description>
+		</method>
+		<method name="set_persist_streaming_objects">
+			<return type="void" />
+			<param index="0" name="enabled" type="bool" />
+			<description>
+				Enables or disables automated per-child object capture and restore. Nodes must be descendants of a loaded cell root, belong to group streaming_stateful, and implement capture_streaming_object_state() and restore_streaming_object_state(Dictionary). Default is false. Scene root gameplay state and RigidBody3D physics persistence remain independent.
+			</description>
+		</method>
+		<method name="retry_failed_cells">
+			<return type="void" />
+			<description>
+				Clears all failure markers so failed cells that are still in range are requested again on the next streaming update. Registrations and already loaded scenes are unchanged. Call it from a deliberate recovery action, not every frame; a persistent failure is requested again each time.
+			</description>
+		</method>
+		<method name="set_pinned_cells">
+			<return type="void" />
+			<param index="0" name="cells" type="Array" />
+			<description>
+				Replaces the pinned cell coordinates, preserving the first occurrence of each [Vector2i]. Unsupported array entries and unregistered cells are skipped. Arrays with more than 128 entries are rejected without changing existing pins. The normalized result is returned by [method get_pinned_cells].
+			</description>
+		</method>
+		<method name="set_route_connection_link">
+			<return type="void" />
+			<param index="0" name="from_cell" type="Vector2i" />
+			<param index="1" name="to_cell" type="Vector2i" />
+			<param index="2" name="link_path" type="String" />
+			<description>
+				Registers one explicitly authored NavigationLink3D (under from_cell) as the required connection to an orthogonally adjacent to_cell. During acquire_cell_route(), both travel directions check the saved link availability before allocating any token leases. Does not create the scene node or pathfinding geometry; authors must place the link inside the source cell. Static route registrations are runtime configuration and are not included in navigation_link_states saves.
+			</description>
+		</method>
+		<method name="snapshot_cell_object_states">
+			<return type="Dictionary" />
+			<description>
+				Captures the states of opted-in objects in all currently loaded cells (if enabled) and returns a deep copy of the object-state cache, including previously unloaded cells. Call before saving a checkpoint so still-resident objects are included. The engine does not write a file automatically.
+			</description>
+		</method>
+		<method name="snapshot_cell_physics_states">
+			<return type="Dictionary" />
+			<description>
+				Captures up to 128 opted-in [RigidBody3D] descendants from each active cell, if [member persist_rigid_bodies] is enabled, and returns a deep-copy dictionary mapping [Vector2i] cell coordinates to per-body state dictionaries. Suitable for a save-game bridge with [code]FileAccess.store_var[/code]. Captures transform, linear/angular velocities, sleep and freeze state before normal cell deactivation.
+			</description>
+		</method>
+		<method name="snapshot_cell_states">
+			<return type="Dictionary" />
+			<description>
+				Captures the latest state of active cell roots implementing [code]capture_streaming_state()[/code], then returns a deep-copy [Dictionary] of [Vector2i] keys to state dictionaries. Returns only nonempty states. Compatible with [code]FileAccess.store_var(snapshot)[/code] and [code]FileAccess.get_var(false)[/code] when values are serializable Variants without objects. Does not save a file automatically.
+			</description>
+		</method>
 	</methods>
 	<members>
 		<member name="max_cell_path_cache_entries" type="int" setter="set_max_cell_path_cache_entries" getter="get_max_cell_path_cache_entries" default="64">
@@ -873,6 +1278,27 @@
 		<member name="unload_radius" type="int" setter="set_unload_radius" getter="get_unload_radius" default="2">
 			Cells outside this radius are unloaded. Must be at least [member load_radius].
 		</member>
+		<member name="cell_layers" type="Dictionary" setter="set_cell_layers" getter="get_cell_layers" default="{}">
+			A dictionary assigning each [Vector2i] cell coordinate to one named [String] runtime layer. Each cell may be assigned to at most one layer. Unassigned cells are always eligible for distance- or pin-based loading.
+		</member>
+		<member name="layer_states" type="Dictionary" setter="set_layer_states" getter="get_layer_states" default="{}">
+			A dictionary from nonempty layer [String] names to [bool] enabled states. Missing layers are enabled. Disabling a layer unloads its cells, even if they are pinned or near a streaming observer, subject to the normal unload budget.
+		</member>
+		<member name="max_unloads_per_frame" type="int" setter="set_max_unloads_per_frame" getter="get_max_unloads_per_frame" default="32">
+			Maximum number of out-of-range cell scenes to queue for deletion in one streaming update, between 1 and 128. Remaining cells are considered on subsequent frames. Explicit clear/remove operations and disabling streaming unload immediately without this limit.
+		</member>
+		<member name="navigation_cell_states" type="Dictionary" setter="set_navigation_cell_states" getter="get_navigation_cell_states" default="{}">
+			Per-cell dynamic navigation gates, mapping [Vector2i] to [code]false[/code]. All unlisted cells default to enabled. Disabled cells have their loaded NavigationRegion3D descendants disabled, do not admit new route leases through [method acquire_cell_route], but preserve existing leases and other scene components. Regions resynchronize on the next physics frame.
+		</member>
+		<member name="navigation_link_states" type="Dictionary" setter="set_navigation_link_states" getter="get_navigation_link_states" default="{}">
+			Per-cell NavigationLink3D enable overrides indexed by a Vector2i coordinate and then a scene-relative String NodePath. Only explicitly disabled paths are stored. Unlike navigation_cell_states, closing a link leaves the parent NavigationRegion3D nodes enabled. Author its geometry and register required intercell edges with set_route_connection_link().
+		</member>
+		<member name="persist_rigid_bodies" type="bool" setter="set_persist_rigid_bodies" getter="is_persisting_rigid_bodies" default="false">
+			If enabled, the streamer automatically saves and restores local transforms, linear/angular velocities, sleeping and freeze state for [RigidBody3D] descendants marked with [code]streaming_persistent = true[/code] metadata. Bodies without the explicit flag are not captured. The cache survives unloads but is not written to disk automatically. [method snapshot_cell_physics_states] exports it for a game's checkpoint system.
+		</member>
+		<member name="persist_streaming_objects" type="bool" setter="set_persist_streaming_objects" getter="is_persisting_streaming_objects" default="false">
+			When enabled, descendants in group streaming_stateful can save independent interactive state through capture_streaming_object_state() and restore_streaming_object_state(Dictionary). Value-only records are cached by cell and scene-relative NodePath, while snapshot_cell_object_states() exports them to a save game. Objects not in the group are ignored.
+		</member>
 	</members>
 	<signals>
 		<signal name="cell_navigation_mesh_rebuilt">
@@ -926,6 +1352,54 @@
 			<param index="0" name="cell" type="Vector2i" />
 			<description>
 				Emitted when a previously instantiated cell is queued for deletion.
+			</description>
+		</signal>
+		<signal name="cell_activated">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted after a cell scene has entered the tree, finished [code]_ready()[/code], restored cached gameplay state and received its optional [code]streaming_activated(cell)[/code] callback. The cell is in [code]active_cells[/code], but NavigationServer3D requires a later physics frame to synchronize regions for path queries.
+			</description>
+		</signal>
+		<signal name="cell_deactivating">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted after the root's optional [code]streaming_deactivating(cell)[/code] callback, before [code]capture_streaming_state()[/code], scene removal and [code]queue_free()[/code]. Use this opportunity to release external references, disable collision participation and remove navigation registrations before deferred deletion. [signal cell_unloaded] follows the unload bookkeeping.
+			</description>
+		</signal>
+		<signal name="cell_navigation_link_state_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="link_path" type="String" />
+			<param index="2" name="enabled" type="bool" />
+			<description>
+				Emitted when one authored NavigationLink3D logical state changes, including changes made by bulk checkpoint restoration. AI owners can release route leases and replan through NavigationServer3D after its next physics synchronization. Repeated idempotent changes do not re-emit this signal.
+			</description>
+		</signal>
+		<signal name="cell_navigation_state_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				Emitted when a cell changes effective navigability through [method set_cell_navigation_enabled] or [method set_navigation_cell_states]. NPCs can release stale corridor leases and requery navigation after the NavigationServer3D physics synchronization. Identical updates do not emit a signal.
+			</description>
+		</signal>
+		<signal name="cell_object_state_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="states" type="Dictionary" />
+			<description>
+				Emitted after a cell captures a genuinely changed set of interactive-object records, either on unload, explicit capture_cell_object_states() or snapshot_cell_object_states(). The dictionary is a defensive copy. Bulk load_cell_object_states() does not emit per-cell notifications.
+			</description>
+		</signal>
+		<signal name="cell_state_changed">
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="state" type="Dictionary" />
+			<description>
+				Emitted when [method set_cell_state] changes a cached per-cell state or when a loaded scene returns new data from [code]capture_streaming_state()[/code] on unloading or snapshot. The signal carries an independent [Dictionary] copy, including an empty dictionary when a state is erased. Reassigning identical state data does not emit. [method load_cell_states] is a bulk import and does not emit this signal for each cell.
+			</description>
+		</signal>
+		<signal name="layer_state_changed">
+			<param index="0" name="layer" type="String" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				Emitted when [method set_layer_enabled] or [method set_layer_states] changes a layer's effective enabled state. Unspecified layers default to enabled, so explicitly setting such a layer to [code]true[/code] does not emit. Bulk state replacement reports affected layers individually, including layers which become enabled again by removal of an explicit disabled entry.
 			</description>
 		</signal>
 	</signals>
