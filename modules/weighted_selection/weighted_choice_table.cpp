@@ -94,22 +94,19 @@ int WeightedChoiceTable::sample_excluding(double p_unit, const PackedInt32Array 
 	if (!is_configured() || !Math::is_finite(p_unit) || p_unit < 0.0 || p_unit >= 1.0) {
 		return -1;
 	}
-	// O(N + exclusions), bounded by MAX_OPTIONS. Validate before sampling.
-	Vector<uint8_t> excluded;
-	excluded.resize(weights.size());
-	for (int i = 0; i < excluded.size(); ++i) {
-		excluded.write[i] = 0;
-	}
+	// Fixed 4096-bit stack mask: no per-playback heap allocation.
+	// Validate exclusions before considering any candidate.
+	uint64_t excluded_words[(MAX_OPTIONS + 63) / 64] = {};
 	for (int i = 0; i < p_excluded.size(); ++i) {
 		const int index = p_excluded[i];
 		if (index < 0 || index >= weights.size()) {
 			return -1;
 		}
-		excluded.write[index] = 1; // Duplicate exclusions are idempotent.
+		excluded_words[index >> 6] |= uint64_t(1) << (index & 63);
 	}
 	double remaining = 0.0;
 	for (int i = 0; i < weights.size(); ++i) {
-		if (!excluded[i]) {
+		if ((excluded_words[i >> 6] & (uint64_t(1) << (i & 63))) == 0) {
 			remaining += weights[i];
 		}
 	}
@@ -120,7 +117,7 @@ int WeightedChoiceTable::sample_excluding(double p_unit, const PackedInt32Array 
 	double sum = 0.0;
 	int last_valid = -1;
 	for (int i = 0; i < weights.size(); ++i) {
-		if (excluded[i] || weights[i] <= 0.0) {
+		if ((excluded_words[i >> 6] & (uint64_t(1) << (i & 63))) != 0 || weights[i] <= 0.0) {
 			continue;
 		}
 		last_valid = i;

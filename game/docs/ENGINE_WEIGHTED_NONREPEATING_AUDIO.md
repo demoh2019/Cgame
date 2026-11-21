@@ -8,7 +8,8 @@ Our existing `WeightedChoiceTable` sampled with replacement only.
 
 New native `sample_excluding(unit, excluded_indices)` computes a weighted
 choice among non-excluded entries in O(options + exclusions) time (maximum
-4096 options). It rejects invalid indices and finite/out-of-range draws,
+4096 options), using a fixed 512-byte stack bitmask instead of a per-call
+heap allocation. It rejects invalid indices and finite/out-of-range draws,
 never selects zero weights, allows duplicate exclusions and returns -1
 when the remaining distribution is empty. The Resource is not mutated and
 does not consume RNG state. Old `sample_unit` remains unchanged.

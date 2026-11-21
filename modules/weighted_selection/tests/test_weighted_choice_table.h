@@ -142,6 +142,17 @@ TEST_CASE("[WeightedChoiceTable] weighted selection without replacement") {
 	CHECK(table->sample_excluding(Math::NaN, excluded) == -1);
 	CHECK(table->sample_excluding(Math::INF, excluded) == -1);
 	CHECK(table->get_weights() == weights); // No mutation of configuration.
+	// Highest possible valid index exercises the last 64-bit mask word.
+	PackedFloat64Array large;
+	large.resize(4096);
+	large.set(0, 1.0);
+	large.set(4095, 1.0);
+	REQUIRE(table->configure(large));
+	excluded.push_back(4095);
+	CHECK(table->sample_excluding(0.999, excluded) == 0);
+	excluded.push_back(0);
+	CHECK(table->sample_excluding(0.0, excluded) == -1);
+	CHECK(table->get_weights() == large);
 }
 
 } // namespace TestWeightedChoiceTable
