@@ -91,6 +91,75 @@ static func waypoint_is_near(point: Vector2, player: Vector3,
 	return point.distance_to(Vector2(player.x, player.z)) <= load_radius + cell_size
 
 
+## AStarGrid2D plans a 4-neighbor local path around optional blocked
+## streaming cells; the native WorldStreamer prioritizes its route but never
+## changes the player-centered resident set. A max 64-cell path and a 3-cell
+## detour margin keep this independent of global/untrusted map requests.
+static func plan_waypoint_route(streamer: WorldStreamer, waypoint: Vector2,
+		player: Vector3, blocked_cells: Array[Vector3i] = []) -> Array[Vector3i]:
+	var result: Array[Vector3i] = []
+	if streamer == null or not waypoint_is_near(
+			waypoint, player, streamer.load_radius, streamer.cell_size):
+		return result
+	if streamer.axes != WorldStreamer.AXES_XZ:
+		return result
+	var from_cell: Vector3i = streamer.world_to_cell(player)
+	var to_cell: Vector3i = streamer.world_to_cell(Vector3(waypoint.x, 0.0, waypoint.y))
+	var width := absi(to_cell.x - from_cell.x)
+	var height := absi(to_cell.z - from_cell.z)
+	if width + height + 1 > 64:
+		return result
+	var start := Vector2i(from_cell.x, from_cell.z)
+	var finish := Vector2i(to_cell.x, to_cell.z)
+	var grid := AStarGrid2D.new()
+	grid.region = Rect2i(
+		Vector2i(mini(start.x, finish.x) - 3, mini(start.y, finish.y) - 3),
+		Vector2i(width + 7, height + 7)
+	)
+	grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_NEVER
+	grid.update()
+	for cell in blocked_cells:
+		if cell.y != 0:
+			continue
+		var id := Vector2i(cell.x, cell.z)
+		if id == start or id == finish:
+			return result
+		if grid.region.has_point(id):
+			grid.set_point_solid(id)
+	var points: Array[Vector2i] = grid.get_id_path(start, finish)
+	if points.is_empty() or points.size() > 64:
+		return result
+	for point in points:
+		result.append(Vector3i(point.x, 0, point.y))
+	return result
+
+
+## Called from the existing private map-waypoint update, with an optional
+## game-owned hazard map. Never trusts remote players or creates new chunks.
+## Do not rerun AStar each render frame when both endpoint cells are stable.
+static func apply_waypoint_route(streamer: WorldStreamer, waypoint: Vector2,
+		player: Vector3, blocked_cells: Array[Vector3i] = []) -> void:
+	if streamer == null or not streamer.has_method("set_route_cells"):
+		return
+	var cached: Array = streamer.call("get_route_cells")
+	if not waypoint_is_near(waypoint, player, streamer.load_radius, streamer.cell_size) or \
+			streamer.axes != WorldStreamer.AXES_XZ:
+		if not cached.is_empty():
+			streamer.call("clear_route_cells")
+		return
+	var first: Vector3i = streamer.world_to_cell(player)
+	var last: Vector3i = streamer.world_to_cell(Vector3(waypoint.x, 0.0, waypoint.y))
+	if blocked_cells.is_empty() and not cached.is_empty() and cached[0] == first and \
+			cached[cached.size() - 1] == last:
+		return
+	var planned: Array[Vector3i] = plan_waypoint_route(streamer, waypoint, player, blocked_cells)
+	if planned.is_empty():
+		if not cached.is_empty():
+			streamer.call("clear_route_cells")
+	else:
+		streamer.call("set_route_cells", planned)
+
+
 ## Called after focus_position updates, once per frame. Only the fork's
 ## WorldStreamer implements this opt-in API; ordinary script code stays
 ## compatible with projects that run on a binary without the extension.
@@ -98,6 +167,7 @@ static func apply_waypoint(streamer: WorldStreamer, waypoint: Vector2,
 		player: Vector3, mounted: bool) -> void:
 	if streamer == null or not streamer.has_method("set_auxiliary_source"):
 		return
+	apply_waypoint_route(streamer, waypoint, player)
 	var is_active: bool = bool(streamer.call("has_auxiliary_source"))
 	if not waypoint_is_near(waypoint, player, streamer.load_radius, streamer.cell_size):
 		if is_active:

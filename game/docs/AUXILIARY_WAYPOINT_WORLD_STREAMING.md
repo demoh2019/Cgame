@@ -73,6 +73,52 @@ This is purely client-side presentation/prefetch behavior. The waypoint
 is already private and never sent as a new RPC; quest markers and combat
 remain fully server-authoritative.
 
+## Route-aware chunk priority and local detours (2026-11)
+
+The active **Albion After** client now connects its private waypoint to a
+second, complementary Cgame feature: native
+`WorldStreamer.set_route_cells(Array[Vector3i])`.
+
+The game uses Godot's built-in `AStarGrid2D` to calculate a short, strictly
+four-neighbor sequence of XZ chunks between the player's current cell and a
+nearby map waypoint. If gameplay supplies blocked local cells, the route
+detours within a three-cell margin around the direct corridor. A plan is
+rejected if it is longer than 64 cells, unreachable, out of range or has
+an invalid endpoint; a distant map marker still cannot activate routing.
+The policy caches unchanged endpoints, avoiding AStar recalculation every
+render frame when a player stands in the same chunk.
+
+```gdscript
+var route: Array[Vector3i] = WorldStreamingPolicy.plan_waypoint_route(
+    streamer, personal_waypoint, player_position,
+    [Vector3i(1, 0, 0)] # Optional local blocker supplied by gameplay.
+)
+streamer.set_route_cells(route) # Or leave integration to apply_waypoint().
+```
+
+On every normal queue rebuild, native WorldStreamer takes the game-planned
+route and **reorders only already eligible player-radius chunks**.
+The player's own chunk stays first; between prioritized route chunks,
+up to two normal nearby chunks are scheduled. The existing procedural
+generator and threaded scene-loader integration counts and 2.5 ms soft
+time slice are shared without modification. The usual auxiliary source
+is unchanged and can still add a small capped nearby waypoint island.
+
+This is a **streaming priority corridor**, not a physical NPC pathfinding
+system, server-authoritative movement, navigation mesh generator or
+unbounded route residency lease. The game currently supplies its
+*private waypoint* as the route destination. Dynamic blockers are an
+optional game API intended for future hazard/quest integration; the
+ordinary online client does not yet populate blocker cells. Because
+the route is only a priority hint, it cannot block or open navigation
+links or directly move characters.
+
+`clear_route_cells()` explicitly resets the scheduling hint. Invalid
+external paths are rejected by the native engine: no duplicate,
+diagonal, teleported, off-plane or longer-than-64-cell route can be
+installed. The method is idempotent on repeated equal inputs.
+`get_route_cells()` reports the current hint for diagnostics.
+
 ## Test plan
 
 ```sh
@@ -86,7 +132,9 @@ WorldStreamer and a deterministic procedural chunk callback, testing
 primary focus priority, actual auxiliary chunk adoption, post-clear
 unloading, bounded memory radius, remote-target rejection, shared
 generation budget, pedestrian/riding policy, malformed map pins and
-live-game wiring. The dedicated Cgame CI workflow compiles the engine
+live-game wiring, plus AStar detours, native route-path validation,
+per-refresh budget guarantees, focus-first priority and remote-cell exclusion.
+The dedicated Cgame CI workflow compiles the engine
 and runs the headless graphics suite.
 
 No measured loading-time or FPS improvement is claimed until a native

@@ -447,6 +447,49 @@ void WorldStreamer::_update_streaming() {
 	WorldStreamingGrid::prioritize_cells_for_motion_and_view(wanted, position,
 			velocity_hint, lookahead_seconds, MIN(load_radius * real_t(0.4), cell_size),
 			view_direction, view_priority, cell_size, _grid_axes());
+	// Route hints only REORDER cells already selected for player residency.
+	// Route pathfinding is performed by gameplay (AStarGrid2D), not by
+	// this per-frame engine scheduler. The player's own cell stays first.
+	if (route_hint_cells.size() > 1 && route_hint_cells[0] == world_to_cell(position)) {
+		HashSet<Vector3i> candidates;
+		for (const Vector3i &cell : wanted) {
+			candidates.insert(cell);
+		}
+		HashSet<Vector3i> selected;
+		LocalVector<Vector3i> route;
+		for (const Vector3i &cell : route_hint_cells) {
+			if (cell != route_hint_cells[0] && candidates.has(cell) && !selected.has(cell)) {
+				selected.insert(cell);
+				route.push_back(cell);
+			}
+		}
+		if (!route.is_empty() && candidates.has(route_hint_cells[0])) {
+			LocalVector<Vector3i> normal;
+			for (const Vector3i &cell : wanted) {
+				if (cell != route_hint_cells[0] && !selected.has(cell)) {
+					normal.push_back(cell);
+				}
+			}
+			LocalVector<Vector3i> reordered;
+			reordered.reserve(wanted.size());
+			reordered.push_back(route_hint_cells[0]);
+			uint32_t route_index = 0;
+			uint32_t normal_index = 0;
+			while (route_index < route.size() || normal_index < normal.size()) {
+				if (route_index < route.size()) {
+					reordered.push_back(route[route_index++]);
+				}
+				// Never starve non-route chunks: at least two regular cells
+				// can run between successive route promotions.
+				for (int n = 0; n < 2 && normal_index < normal.size(); n++) {
+					reordered.push_back(normal[normal_index++]);
+				}
+			}
+			if (reordered.size() == wanted.size()) {
+				wanted = reordered;
+			}
+		}
+	}
 	// A nearby cinematic/waypoint target may contribute a handful of extra
 	// cells outside the player sphere. Never sacrifice the bounded player
 	// set; interleave at most one auxiliary cell per three primary cells,
@@ -626,6 +669,60 @@ void WorldStreamer::clear_auxiliary_source() {
 	time_since_update = MAX(time_since_update, update_interval);
 }
 
+bool WorldStreamer::set_route_cells(const TypedArray<Vector3i> &p_cells) {
+	ERR_FAIL_COND_V_MSG(p_cells.size() > 64, false, "WorldStreamer accepts at most 64 route cells.");
+	LocalVector<Vector3i> checked;
+	checked.reserve(p_cells.size());
+	for (int i = 0; i < p_cells.size(); i++) {
+		const Vector3i cell = p_cells[i];
+		if ((axes == AXES_XZ && cell.y != 0) || (axes == AXES_XY && cell.z != 0)) {
+			return false;
+		}
+		if (!checked.is_empty()) {
+			const Vector3i prev = checked[checked.size() - 1];
+			const int64_t dx = int64_t(cell.x) - prev.x;
+			const int64_t dy = int64_t(cell.y) - prev.y;
+			const int64_t dz = int64_t(cell.z) - prev.z;
+			const int64_t step = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) + (dz < 0 ? -dz : dz);
+			if (step != 1) {
+				return false; // Reject diagonals, duplicates and teleport shortcuts.
+			}
+		}
+		checked.push_back(cell);
+	}
+	if (checked.size() == route_hint_cells.size()) {
+		bool unchanged = true;
+		for (uint32_t i = 0; i < checked.size(); i++) {
+			if (checked[i] != route_hint_cells[i]) {
+				unchanged = false;
+				break;
+			}
+		}
+		if (unchanged) {
+			return true; // No needless queue rebuild every client frame.
+		}
+	}
+	route_hint_cells = checked;
+	time_since_update = MAX(time_since_update, update_interval);
+	return true;
+}
+
+TypedArray<Vector3i> WorldStreamer::get_route_cells() const {
+	TypedArray<Vector3i> cells;
+	for (const Vector3i &cell : route_hint_cells) {
+		cells.push_back(cell);
+	}
+	return cells;
+}
+
+void WorldStreamer::clear_route_cells() {
+	if (route_hint_cells.is_empty()) {
+		return;
+	}
+	route_hint_cells.clear();
+	time_since_update = MAX(time_since_update, update_interval);
+}
+
 void WorldStreamer::mark_visual_details_ready(const Vector3i &p_cell) {
 	if (!pending_visual_details.has(p_cell)) {
 		return;
@@ -647,6 +744,7 @@ void WorldStreamer::set_axes(Axes p_axes) {
 		return;
 	}
 	axes = p_axes;
+	clear_route_cells();
 	_reset_state();
 }
 
@@ -656,6 +754,7 @@ void WorldStreamer::set_cell_size(real_t p_size) {
 		return;
 	}
 	cell_size = p_size;
+	clear_route_cells();
 	_reset_state();
 }
 
@@ -834,6 +933,9 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_auxiliary_source"), &WorldStreamer::has_auxiliary_source);
 	ClassDB::bind_method(D_METHOD("get_auxiliary_source_position"), &WorldStreamer::get_auxiliary_source_position);
 	ClassDB::bind_method(D_METHOD("get_auxiliary_source_radius"), &WorldStreamer::get_auxiliary_source_radius);
+	ClassDB::bind_method(D_METHOD("set_route_cells", "cells"), &WorldStreamer::set_route_cells);
+	ClassDB::bind_method(D_METHOD("get_route_cells"), &WorldStreamer::get_route_cells);
+	ClassDB::bind_method(D_METHOD("clear_route_cells"), &WorldStreamer::clear_route_cells);
 	ClassDB::bind_method(D_METHOD("set_fast_view_refresh_degrees", "degrees"), &WorldStreamer::set_fast_view_refresh_degrees);
 	ClassDB::bind_method(D_METHOD("get_fast_view_refresh_degrees"), &WorldStreamer::get_fast_view_refresh_degrees);
 	ClassDB::bind_method(D_METHOD("set_max_concurrent_loads", "count"), &WorldStreamer::set_max_concurrent_loads);
