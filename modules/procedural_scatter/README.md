@@ -84,3 +84,43 @@ native selector and stock Godot GDScript fallback are checked for parity
 in the same headless gameplay smoke.
 
 Reference: [Unreal Engine PCG Biome exclusions and volumes](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-pcg-biome-core-and-sample-plugins-overview-guide-in-unreal-engine).
+
+## Stable density remap and probability selection (PCG Density)
+
+`PCGDensitySelector` is a new reusable C++ engine class inspired by Unreal
+PCG's Density Remap and point-filtering stages. It does **not** copy Unreal's
+graph editor or perform scene mutation. Scripts can chain it before existing
+3D exclusion-volume and point-spacing filters:
+
+```gdscript
+var policy := PCGDensitySelector.new()
+var density := policy.remap_densities(
+    PackedFloat32Array([0.0, 0.5, 1.0]), 0.0, 1.0, 0.2, 0.9)
+var kept := policy.select_indices(density,
+    PackedInt64Array([1001, 1002, 1003]), 27419, 4096)
+```
+
+`remap_densities(densities, input_min=0, input_max=1,
+output_min=0, output_max=1, clamp_input=true)` transforms point density
+linearly and clamps output to [0,1]; reversed output endpoints allow inverse
+masks. `select_indices(densities, stable_ids, seed=0,
+max_selected=4096)` uses a **32-bit avalanche hash of stable ID + seed**,
+without consuming shared RNG state. The same ID's keep/discard decision
+is independent of source traversal order, as long as output is not truncated
+by the explicitly requested cap. Zero density always rejects, one always
+accepts. This is a probabilistic selection, *not* Unreal's range-only
+Density Filter node; it is a compact, reusable graph-like policy primitive.
+
+Both functions validate their *entire* input before generating output. Densities
+must be finite in [0,1], stable IDs in [0,2147483647], seed nonnegative,
+input size at most 16384 and output cap 1–4096. Invalid requests return
+empty arrays. Arrays are never mutated. Decisions remain deterministic
+when the world is revisited; no cache or world-state reference is retained.
+
+The playable Days After prototype applies a west-to-east density gradient
+to its 625-candidate source grid, then preserves all existing sphere/box
+exclusion and 2.1 m spacing checks. The game includes a GDScript fallback
+with identical unsigned 32-bit hash semantics; smoke tests cover native/fallback
+parity, bounds, stable IDs, repeat generation and resource-safe placement.
+
+Reference: [Unreal Engine PCG node reference](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-framework-node-reference-in-unreal-engine).
