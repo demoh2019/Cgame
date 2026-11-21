@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGSpatialFilter2D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Bounded, deterministic spatial point thinning for procedural decoration.
+	</brief_description>
+	<description>
+		Filters world-space 2D candidate points in stable input order, retaining only points at least the minimum distance apart from all previously accepted candidates. Uses an exact-distance spatial hash grid for efficient local checks. Inspired by point filtering and density sampling in Unreal Engine's Procedural Content Generation framework. This method never reads randomness, changes source point coordinates, creates scene nodes, or changes authoritative game objects. The caller decides what to draw. All input points must be finite and within +/- 10,000,000 coordinate units. Accepts up to 16,384 candidates, at most 4,096 selected indices, and spacing 0 or 0.05 to 10,000. Invalid arguments return an empty array without partial output; zero max_selected also returns an empty array.
+	</description>
+	<methods>
+		<method name="filter_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="candidates" type="PackedVector2Array" />
+			<param index="1" name="min_spacing" type="float" />
+			<param index="2" name="max_selected" type="int" default="4096" />
+			<description>
+				Returns stable original indices of accepted points, first come first served. Any candidate closer than min_spacing to an accepted point is excluded; points exactly on the distance boundary are included. A zero min_spacing returns the first max_selected input indices without thinning. No random numbers are consumed and the source array is unchanged.
+			</description>
+		</method>
+	</methods>
+</class>
