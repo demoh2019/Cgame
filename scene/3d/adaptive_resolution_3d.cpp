@@ -32,6 +32,7 @@
 
 #include "core/config/engine.h"
 #include "core/math/math_funcs.h"
+#include "core/object/class_db.h"
 #include "scene/main/viewport.h"
 #include "servers/rendering/rendering_server.h"
 
