@@ -106,6 +106,20 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 		container.call("replace_tag_branch", StringName("Runtime"), runtime_tags(kind, snapshot))
 
 
+## Counts independently active crowd-control statuses from server snapshots.
+## The custom engine uses native matching; older binaries read the same
+## authoritative snapshot fields, never user-supplied tags.
+static func zombie_control_count(node: Node, snapshot: Dictionary) -> int:
+	if node != null and node.has_meta("tags"):
+		var container: Object = node.get_meta("tags") as Object
+		if container != null and container.has_method("count_matching_queries"):
+			return int(container.call("count_matching_queries", PackedStringArray([
+				"Runtime.Status.Staggered", "Runtime.Status.Snared", "Runtime.Status.Sundered"]), true))
+	return int(float(snapshot.get("stagger_seconds", 0.0)) > 0.0) \
+		+ int(float(snapshot.get("snared_seconds", 0.0)) > 0.0) \
+		+ int(float(snapshot.get("sunder_seconds", 0.0)) > 0.0)
+
+
 static func runtime_has(node: Node, tag: String, fallback: bool = false) -> bool:
 	if node != null and node.has_meta("tags"):
 		var container: Object = node.get_meta("tags") as Object

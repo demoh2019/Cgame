@@ -310,6 +310,10 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 			tint = base.lerp(Color(1.0, 0.84, 0.25), 0.65)
 		if staggered:
 			tint = base.lerp(Color(0.38, 0.8, 1.0), 0.7)
+		# Multiple simultaneous server-owned crowd-control effects receive
+		# a small contrasting overlay, without changing existing status priorities.
+		if EngineFeatures.zombie_control_count(_nodes[key], entity) >= 2:
+			tint = tint.lerp(Color(0.97, 0.28, 0.88), 0.22)
 		model.set_tint(tint)
 		model.set_zombie_state(int(entity["state"]))
 	# Snapshot-driven priority is purely visual: never changes server AI or damage.

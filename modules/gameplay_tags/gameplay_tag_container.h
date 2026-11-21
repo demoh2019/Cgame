@@ -63,6 +63,8 @@ public:
 	void clear();
 	bool has_tag(const StringName &p_tag, bool p_exact = false) const;
 	bool has_any(const PackedStringArray &p_tags, bool p_exact = false) const;
+	// Count distinct requested tags that match; duplicates never inflate the count.
+	int count_matching_queries(const PackedStringArray &p_queries, bool p_exact = false) const;
 	bool has_all(const PackedStringArray &p_tags, bool p_exact = false) const;
 	int get_tag_count() const { return tags.size(); }
 	bool is_empty() const { return tags.is_empty(); }
@@ -82,6 +84,7 @@ class GameplayTagQuery : public Resource {
 	PackedStringArray any_tags;
 	PackedStringArray none_tags;
 	bool exact = false;
+	int min_any_matches = 1; // Optional cardinality threshold for any_tags.
 
 protected:
 	static void _bind_methods();
@@ -95,6 +98,8 @@ public:
 	PackedStringArray get_none_tags() const { return none_tags; }
 	void set_exact(bool p_exact) { exact = p_exact; emit_changed(); }
 	bool is_exact() const { return exact; }
+	void set_min_any_matches(int p_count);
+	int get_min_any_matches() const { return min_any_matches; }
 
 	bool matches(const Ref<GameplayTagContainer> &p_container) const;
 };

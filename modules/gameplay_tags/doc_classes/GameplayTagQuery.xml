@@ -4,7 +4,7 @@
 		Declarative all/any/none test over a [GameplayTagContainer].
 	</brief_description>
 	<description>
-		A container matches when every tag in [member all_tags] matches, at least one tag in [member any_tags] matches (ignored when empty) and no tag in [member none_tags] matches. Hierarchy matching follows [member exact].
+		A container matches when every tag in [member all_tags] matches, at least [member min_any_matches] distinct query tags in [member any_tags] match (ignored when empty) and no tag in [member none_tags] matches. Hierarchy matching follows [member exact].
 	</description>
 	<methods>
 		<method name="matches" qualifiers="const">
@@ -22,6 +22,9 @@
 		</member>
 		<member name="exact" type="bool" setter="set_exact" getter="is_exact" default="false">
 			If [code]true[/code], parent tags are not matched.
+		</member>
+		<member name="min_any_matches" type="int" setter="set_min_any_matches" getter="get_min_any_matches" default="1">
+			How many distinct [member any_tags] entries must match, from 1 to 64. Duplicates in the query do not raise this count. Invalid values leave the previous threshold unchanged; with an empty [member any_tags] array the threshold is ignored.
 		</member>
 		<member name="none_tags" type="PackedStringArray" setter="set_none_tags" getter="get_none_tags" default="PackedStringArray()">
 			Tags that must not match.

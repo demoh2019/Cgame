@@ -27,6 +27,44 @@ func run(t) -> void:
 	t.check(EngineFeatures.runtime_tags("zombie", infected).has("Runtime.Status.Resolve"),
 		"active resolve tag requires two stacks")
 
+	t.current = "crowd-control cardinality shared by the native tag store and snapshot fallback"
+	var stacked := {"hp": 20.0, "state": 2,
+		"stagger_seconds": 1.0, "snared_seconds": 0.5, "sunder_seconds": 0.0}
+	t.eq(EngineFeatures.zombie_control_count(null, stacked), 2, "stock Godot counts two distinct active controls")
+	stacked["snared_seconds"] = 0.0
+	t.eq(EngineFeatures.zombie_control_count(null, stacked), 1, "expired snare does not count")
+	stacked["sunder_seconds"] = 2.0
+	t.eq(EngineFeatures.zombie_control_count(null, stacked), 2, "a second exposure contributes one")
+	stacked["stagger_seconds"] = 0.0
+	stacked["sunder_seconds"] = 0.0
+	t.eq(EngineFeatures.zombie_control_count(null, stacked), 0, "zero timers clear stacked visuals")
+	var control_actor := Node3D.new()
+	EngineFeatures.tag_node(control_actor, ["Enemy.Infected.Walker"])
+	if ClassDB.class_exists("GameplayTagContainer"):
+		var control_store: Object = control_actor.get_meta("tags", null) as Object
+		if control_store != null and control_store.has_method("count_matching_queries"):
+			stacked["stagger_seconds"] = 1.0
+			stacked["snared_seconds"] = 2.0
+			EngineFeatures.sync_runtime_tags(control_actor, "zombie", stacked)
+			t.eq(EngineFeatures.zombie_control_count(control_actor, stacked), 2,
+				"native status count matches stock snapshot fallback")
+			stacked["snared_seconds"] = 0.0
+			EngineFeatures.sync_runtime_tags(control_actor, "zombie", stacked)
+			t.eq(EngineFeatures.zombie_control_count(control_actor, stacked), 1,
+				"native status refresh removes expired control")
+			var native_query: Object = ClassDB.instantiate("GameplayTagQuery")
+			if native_query != null and native_query.has_method("set_min_any_matches"):
+				native_query.set("any_tags", PackedStringArray([
+					"Runtime.Status.Staggered", "Runtime.Status.Snared"]))
+				native_query.call("set_min_any_matches", 2)
+				t.check(not bool(native_query.call("matches", control_store)),
+					"declarative two-status query stops matching when snare expires")
+				stacked["snared_seconds"] = 1.0
+				EngineFeatures.sync_runtime_tags(control_actor, "zombie", stacked)
+				t.check(bool(native_query.call("matches", control_store)),
+					"declarative query matches again with two active controls")
+	control_actor.free()
+
 	t.current = "player movement state tags"
 	var player := {"alive": true, "mounted": true, "outlaw": true, "crouching": false}
 	tags = EngineFeatures.runtime_tags("player", player)

@@ -131,6 +131,42 @@ TEST_CASE("[GameplayTags] branch replacement is atomic and respects hierarchy bo
 	CHECK(c->has_tag("RuntimeExtra", false));
 }
 
+TEST_CASE("[GameplayTags] distinct matching query cardinality and hierarchy boundaries") {
+	Ref<GameplayTagContainer> c;
+	c.instantiate();
+	c->add_tag("Enemy.Infected.Elite");
+	c->add_tag("Runtime.Status.Staggered");
+	c->add_tag("Runtime.Status.Snared");
+	CHECK(c->count_matching_queries({ "Runtime.Status.Staggered", "Runtime.Status.Staggered", "Runtime.Status.Snared" }, true) == 2);
+	CHECK(c->count_matching_queries({ "Runtime.Status", "Runtime", "Runtime.Status.Snared" }) == 3);
+	CHECK(c->count_matching_queries({ "Runtime.Status", "Runtime", "Runtime.Status.Snared" }, true) == 1);
+	CHECK(c->count_matching_queries({ "Runtime.Statu", "Runtime.Status.Missing", "" }) == 0);
+	CHECK(c->count_matching_queries(PackedStringArray()) == 0);
+
+	Ref<GameplayTagQuery> query;
+	query.instantiate();
+	query->set_any_tags({ "Runtime.Status.Snared", "Runtime.Status.Staggered", "Runtime.Status.Staggered" });
+	CHECK(query->get_min_any_matches() == 1);
+	CHECK(query->matches(c));
+	query->set_min_any_matches(2);
+	CHECK(query->matches(c));
+	query->set_min_any_matches(3); // Repeated query entries are not separate states.
+	CHECK_FALSE(query->matches(c));
+	ERR_PRINT_OFF
+	query->set_min_any_matches(0);
+	query->set_min_any_matches(65);
+	ERR_PRINT_ON
+	CHECK(query->get_min_any_matches() == 3);
+	query->set_min_any_matches(2);
+	query->set_none_tags({ "Enemy.Infected" });
+	CHECK_FALSE(query->matches(c)); // Negative conditions still win.
+	query->set_none_tags(PackedStringArray());
+	c->remove_tag("Runtime.Status.Snared");
+	CHECK_FALSE(query->matches(c));
+	query->set_any_tags(PackedStringArray());
+	CHECK(query->matches(c)); // Empty any_tags means no threshold to enforce.
+}
+
 TEST_CASE("[GameplayTags] query all/any/none") {
 	Ref<GameplayTagContainer> c;
 	c.instantiate();
