@@ -357,4 +357,60 @@ TEST_CASE("[PCGFoliageScalability3D] screen-space validation rejects invalid lat
 	CHECK(bounded[4095] == 21);
 }
 
+
+TEST_CASE("[PCGFoliageScalability3D] dirty geometry tier masks update only the affected mesh groups") {
+	Ref<PCGFoliageScalability3D> planner;
+	planner.instantiate();
+	const PackedInt32Array variants = { 0, 0, 1, 1, 2, 2 };
+	const PackedInt32Array prior = { 0, 1, 0, 1, 0, 1 };
+	const PackedInt32Array one_move = { 1, 1, 0, 1, 0, 1 };
+	const PackedInt32Array prior_copy = prior;
+	const PackedByteArray expected = { 1, 1, 0, 0, 0, 0 };
+	const PackedByteArray dirty = planner->plan_dirty_variant_lod_groups(
+			variants, prior, one_move, 3);
+	CHECK(dirty == expected);
+	CHECK(prior == prior_copy);
+	CHECK(planner->plan_dirty_variant_lod_groups(variants, prior, one_move, 3) == dirty);
+	const PackedByteArray none = { 0, 0, 0, 0, 0, 0 };
+	CHECK(planner->plan_dirty_variant_lod_groups(variants, prior, prior, 3) == none);
+	const PackedInt32Array two_moves = { 1, 1, 0, 1, 1, 1 };
+	const PackedByteArray expected_two = { 1, 1, 0, 0, 1, 1 };
+	CHECK(planner->plan_dirty_variant_lod_groups(variants, prior, two_moves, 3) == expected_two);
+	const PackedInt32Array all_far = { 1, 1, 1, 1, 1, 1 };
+	const PackedByteArray expected_all = { 1, 0, 1, 0, 1, 0 };
+	CHECK(planner->plan_dirty_variant_lod_groups(variants, prior, all_far, 3) == expected_all);
+}
+
+TEST_CASE("[PCGFoliageScalability3D] dirty flags support valid empty scenes and reject invalid tail data") {
+	Ref<PCGFoliageScalability3D> planner;
+	planner.instantiate();
+	const PackedByteArray none = { 0, 0, 0, 0, 0, 0 };
+	CHECK(planner->plan_dirty_variant_lod_groups({}, {}, {}, 3) == none);
+	const PackedByteArray pair_dirty = { 1, 1 };
+	CHECK(planner->plan_dirty_variant_lod_groups({ 0, 0 }, { 0, 1 }, { 1, 0 }, 1)
+			== pair_dirty);
+	CHECK(planner->plan_dirty_variant_lod_groups({ 0, 1 }, { 0, 1 }, { 1 }, 2).is_empty());
+	CHECK(planner->plan_dirty_variant_lod_groups({ 0, 1 }, { 0 }, { 1, 0 }, 2).is_empty());
+	CHECK(planner->plan_dirty_variant_lod_groups({ 0, 2 }, { 0, 1 }, { 1, 0 }, 2).is_empty());
+	CHECK(planner->plan_dirty_variant_lod_groups({ -1, 0 }, { 0, 1 }, { 1, 0 }, 2).is_empty());
+	CHECK(planner->plan_dirty_variant_lod_groups({ 0, 1 }, { 0, 2 }, { 1, 0 }, 2).is_empty());
+	CHECK(planner->plan_dirty_variant_lod_groups({ 0, 1 }, { 0, 1 }, { 1, -1 }, 2).is_empty());
+	CHECK(planner->plan_dirty_variant_lod_groups({ 0 }, { 0 }, { 1 }, 0).is_empty());
+	CHECK(planner->plan_dirty_variant_lod_groups({ 0 }, { 0 }, { 1 }, 33).is_empty());
+	PackedInt32Array ids;
+	PackedInt32Array previous;
+	PackedInt32Array next;
+	ids.resize(16385);
+	previous.resize(16385);
+	next.resize(16385);
+	CHECK(planner->plan_dirty_variant_lod_groups(ids, previous, next, 3).is_empty());
+	ids.resize(16384);
+	previous.resize(16384);
+	next.resize(16384);
+	CHECK(planner->plan_dirty_variant_lod_groups(ids, previous, next, 3) == none);
+	next.set(16383, 1);
+	const PackedByteArray expected_change = { 1, 1, 0, 0, 0, 0 };
+	CHECK(planner->plan_dirty_variant_lod_groups(ids, previous, next, 3) == expected_change);
+}
+
 } // namespace TestPCGFoliageScalability3D
