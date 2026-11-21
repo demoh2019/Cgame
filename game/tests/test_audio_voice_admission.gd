@@ -144,11 +144,11 @@ func run(t) -> void:
 	t.current = "actual game Audio.play_at rejects before node construction"
 	var audio = AudioScript.new()
 	t.eq(audio._choose_voice_victim(active, "blaster", -60.0, 2),
-		1, "real Audio object uses portable admission policy")
+		Voices.ROOM, "real Audio object admits sound when the global voice pool has room")
 	if native != null:
 		audio._native_voice_admission = native
 		t.eq(audio._choose_voice_victim(active, "blaster", -60.0, 2),
-			1, "real Audio object delegates to the Cgame native planner")
+			Voices.ROOM, "native implementation keeps the same free-slot semantics")
 	# The actual game method must use protected admission on both binaries.
 	audio._native_voice_admission = null
 	var full: Array = []
