@@ -243,7 +243,7 @@ Reference: https://dev.epicgames.com/documentation/unreal-engine/eqs-node-refere
 adds a **direction-relative** rectangular grid alongside the old world-aligned
 `sample_grid()`. Local +Z aligns with the XZ projection of `forward`, while
 local +X points to the actor's right. The grid is emitted in stable row-major
-order with unchanged center Y. The default forward `Vector3(0,0,1)` reproduces
+order with unchanged center Y. Supplying a forward axis of `Vector3(0,0,1)` reproduces
 `sample_grid()` exactly. The native method validates all inputs, including
 direction, extents and bounded point counts, and never touches physics,
 navigation, scene nodes or GPU resources.
