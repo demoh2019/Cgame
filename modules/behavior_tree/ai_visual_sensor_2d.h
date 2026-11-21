@@ -70,5 +70,7 @@ public:
 	bool has_target_memory() const;
 	Vector2 get_last_known_position() const;
 	real_t get_memory_remaining() const;
+	// Expire last-seen memory when no target observation is made this tick.
+	void advance_time(real_t p_delta);
 	void reset();
 };
