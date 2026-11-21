@@ -23,6 +23,12 @@
 			<param index="2" name="stacks" type="int" default="1" />
 			<description>Sets an exact effect or removes it if the duration is zero.</description>
 		</method>
+		<method name="replace_effect_branch">
+			<return type="bool" />
+			<param index="0" name="branch" type="StringName" />
+			<param index="1" name="effects" type="Dictionary" />
+			<description>Atomically replaces only effects equal to or beneath a dotted tag [param branch], preserving independently timed effects in other branches. [param effects] maps names under this branch to dictionaries containing [code]remaining[/code] seconds and positive [code]stacks[/code]. A zero-duration entry removes that exact effect. Rejects malformed tags, non-finite durations, invalid stack counts, duplicate normalized names and snapshots exceeding the global 256-effect limit without changing the timeline. An empty dictionary clears only the selected branch. Existing effects in other branches keep their countdowns.</description>
+		</method>
 		<method name="replace_snapshot">
 			<return type="bool" />
 			<param index="0" name="effects" type="Dictionary" />
