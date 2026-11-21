@@ -147,6 +147,67 @@ TEST_CASE("[CoreBind] Geometry2D heightfield gradients match central differences
 	ERR_PRINT_ON;
 }
 
+
+TEST_CASE("[CoreBind] Geometry2D grayscale mask max-filter morphology") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+	const Vector2i size(6, 4);
+	PackedByteArray input;
+	input.resize(size.x * size.y);
+	input.set(1 * size.x + 2, 220);
+	input.set(3 * size.x + 5, 70);
+	const PackedByteArray source = input;
+
+	PackedByteArray filtered = api->max_filter_mask(input, size, 1);
+	REQUIRE(filtered.size() == input.size());
+	CHECK(filtered[0] == 0);
+	CHECK(filtered[1 * size.x + 2] == 220);
+	CHECK(filtered[0 * size.x + 1] == 220);
+	CHECK(filtered[2 * size.x + 3] == 220);
+	CHECK(filtered[3 * size.x + 5] == 70);
+	CHECK(filtered[3 * size.x + 4] == 70);
+	CHECK(filtered[2 * size.x + 4] == 70);
+	CHECK(input == source); // The operation never mutates the supplied mask.
+
+	// Exhaustive 2D brute-force oracle on a rectangular, non-binary mask.
+	for (int radius = 0; radius <= 4; radius++) {
+		filtered = api->max_filter_mask(input, size, radius);
+		REQUIRE(filtered.size() == input.size());
+		for (int y = 0; y < size.y; y++) {
+			for (int x = 0; x < size.x; x++) {
+				uint8_t expected = 0;
+				for (int oy = MAX(0, y - radius); oy <= MIN(size.y - 1, y + radius); oy++) {
+					for (int ox = MAX(0, x - radius); ox <= MIN(size.x - 1, x + radius); ox++) {
+						expected = MAX(expected, input[oy * size.x + ox]);
+					}
+				}
+				CHECK(filtered[y * size.x + x] == expected);
+			}
+		}
+	}
+
+	PackedByteArray all_zero;
+	all_zero.resize(8);
+	filtered = api->max_filter_mask(all_zero, Vector2i(2, 4), 64);
+	REQUIRE(filtered.size() == 8);
+	for (int i = 0; i < 8; i++) {
+		CHECK(filtered[i] == 0);
+	}
+	PackedByteArray one;
+	one.push_back(127);
+	filtered = api->max_filter_mask(one, Vector2i(1, 1), 64);
+	REQUIRE(filtered.size() == 1);
+	CHECK(filtered[0] == 127);
+
+	ERR_PRINT_OFF;
+	CHECK(api->max_filter_mask(input, Vector2i(5, 4), 1).is_empty());
+	CHECK(api->max_filter_mask(input, Vector2i(0, 4), 1).is_empty());
+	CHECK(api->max_filter_mask(input, Vector2i(2049, 4), 1).is_empty());
+	CHECK(api->max_filter_mask(input, size, -1).is_empty());
+	CHECK(api->max_filter_mask(input, size, 65).is_empty());
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[CoreBind] Geometry2D binary 8-connected distance transform") {
 	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
 	REQUIRE(api != nullptr);

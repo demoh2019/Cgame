@@ -119,6 +119,17 @@
 				[code]size.x[/code] and [code]size.y[/code] must be in the range 1–2048, and [param heights] must contain exactly [code]size.x * size.y[/code] finite values. [param cell_spacing] and its half inverse must be positive, finite and representable. Invalid input or non-representable output gradients returns an empty array. The source heightmap remains unchanged.
 			</description>
 		</method>
+		<method name="max_filter_mask">
+			<return type="PackedByteArray" />
+			<param index="0" name="mask" type="PackedByteArray" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="radius" type="int" />
+			<description>
+				Cgame extension: performs an 8-bit, row-major, square-window maximum filter (grayscale dilation) over a mask. Each output pixel is the maximum source value within [param radius] horizontal and vertical pixels of its location; samples outside the image are ignored. For binary data this grows the occupied area in the eight-connected/Chebyshev metric. For soft masks, the full 0–255 values are preserved by the local maximum rather than thresholding.
+				The implementation uses two separable O(width × height) sliding-window monotone-deque passes with memory proportional to the raster size, independent of [param radius]. Valid image dimensions are between 1 and 2048 inclusive; [param radius] must be in 0–64; and the byte count must equal [code]size.x * size.y[/code]. Invalid arguments return an empty array; zero radius returns the unmodified mask via copy-on-write.
+				This is a CPU image-processing primitive useful for PCG exclusion, road-shoulder clearance and hit-mask padding, not a GPU shader, physics query, or persistent spatial index. A chunk-local mask has no knowledge of neighboring tiles unless the caller includes a border.
+			</description>
+		</method>
 		<method name="distance_transform_8">
 			<return type="PackedByteArray" />
 			<param index="0" name="mask" type="PackedByteArray" />
