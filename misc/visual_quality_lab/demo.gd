@@ -17,6 +17,8 @@ const Inventory = preload("res://addons/visual_quality/inventory_component.gd")
 const ItemCatalog = preload("res://addons/visual_quality/item_catalog.gd")
 const Attributes = preload("res://addons/visual_quality/attribute_component.gd")
 const Abilities = preload("res://addons/visual_quality/ability_component.gd")
+const Combatant = preload("res://addons/visual_quality/combat_component.gd")
+const CombatDirector = preload("res://addons/visual_quality/combat_controller.gd")
 
 var controller: AdaptiveResolution3D
 var manager: VisualQualityManager
@@ -37,6 +39,10 @@ var quest: ExplorationQuest3D
 var inventory: WorldInventory3D
 var player_attributes: WorldAttributes3D
 var player_abilities: WorldAbilitySystem3D
+var player_combatant: WorldCombatant3D
+var combat_director: WorldCombatDirector3D
+var combat_label: Label
+var sentries_defeated: int = 0
 var inventory_panel: PanelContainer
 var inventory_label: Label
 var inventory_feedback: Label
@@ -74,6 +80,13 @@ func _ready() -> void:
 	player_abilities.name = "WorldAbilitySystem3D"
 	player_abilities.attributes = player_attributes
 	player_character.add_child(player_abilities)
+	player_combatant = Combatant.new()
+	player_combatant.name = "PlayerCombatant"
+	player_combatant.team_id = WorldCombatant3D.TEAM_PLAYER
+	player_combatant.attributes = player_attributes
+	player_combatant.armor = 15.0
+	player_combatant.defeated.connect(_on_player_defeated)
+	player_character.add_child(player_combatant)
 	# v15 inventory files have no equipment key: default to no gear.
 	for slot in inventory.equipped_snapshot().keys():
 		_on_equipment_changed(slot, inventory.get_equipped_item(slot))
@@ -177,6 +190,16 @@ func _ready() -> void:
 	_build_interaction_ui()
 	_build_inventory_ui()
 	_build_equipped_lantern()
+	combat_director = CombatDirector.new()
+	combat_director.name = "WorldCombatDirector3D"
+	combat_director.streamer = streamer
+	combat_director.player = player_character
+	combat_director.camera = player_character.get_view_camera()
+	combat_director.player_combatant = player_combatant
+	combat_director.player_attributes = player_attributes
+	combat_director.combat_message.connect(_on_combat_message)
+	add_child(combat_director)
+	_build_combat_ui()
 	_on_quest_progress(quest.collected_count(), quest.positions.size())
 	_on_quest_hint(quest.current_hint())
 
@@ -200,12 +223,14 @@ func _on_streamed_cell_loaded(_coord: Vector2i, cell: Node3D) -> void:
 		cell.call("set_ai_enabled", ai_simulation_enabled)
 	if cell.has_signal("resource_awarded"):
 		cell.connect("resource_awarded", _on_world_resource_awarded)
+	if cell.has_signal("sentry_defeated"):
+		cell.connect("sentry_defeated", _on_sentry_defeated)
 
 
 func _process(delta: float) -> void:
 	if status_label != null:
 		var npc_counts: Vector2i = _count_npc_behaviors()
-		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Space jump | Shift sprint | RMB look | V fly\nWorld cells: %d/%d | Pending assets: %d | 7 Streaming: %s\nNPCs: %d | Alerted: %d | Sleeping: %d | AI budget: %d us | 9 AI: %s\nHP %.0f/%.0f | Stamina %.0f/%.0f | Move x%.2f | X Dash %.1fs | Z Focus %.1fs" % [
+		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Space jump | Shift sprint | RMB look | V fly\nWorld cells: %d/%d | Pending assets: %d | 7 Streaming: %s\nNPCs: %d | Alerted: %d | Sleeping: %d | AI budget: %d us | 9 AI: %s\nHP %.0f/%.0f | Stamina %.0f/%.0f | Move x%.2f | X Dash %.1fs | Z Focus %.1fs\nCombat M strike | N stun wave | Backspace respawn | Kills: %d" % [
 			Engine.get_frames_per_second(), get_viewport().scaling_3d_scale,
 			RenderingServer.get_current_rendering_method(),
 			streamer.active_cell_count(), streamer.registered_cell_count(),
@@ -215,7 +240,7 @@ func _process(delta: float) -> void:
 			player_attributes.health, player_attributes.get_stat("max_health"),
 			player_attributes.stamina, player_attributes.get_stat("max_stamina"),
 			player_attributes.get_stat("move_speed"), player_abilities.get_cooldown("dash"),
-			player_abilities.get_cooldown("focus")
+			player_abilities.get_cooldown("focus"), sentries_defeated
 		]
 
 
@@ -270,6 +295,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_activate_player_ability("dash")
 			KEY_Z:
 				_activate_player_ability("focus")
+			KEY_M:
+				if is_instance_valid(combat_director):
+					combat_director.strike()
+			KEY_N:
+				if is_instance_valid(combat_director):
+					combat_director.shockwave()
+			KEY_BACKSPACE:
+				_respawn_player()
 
 
 func _build_graphics_ui() -> void:
@@ -705,6 +738,46 @@ func _activate_player_ability(ability_id: String) -> void:
 	if is_instance_valid(inventory_feedback):
 		inventory_feedback.text = ("Способность: %s" % ability_id if success
 			else "Недостаточно выносливости или идёт перезарядка")
+
+
+func _build_combat_ui() -> void:
+	var ui: CanvasLayer = get_node("VisualQualityUI") as CanvasLayer
+	combat_label = Label.new()
+	combat_label.name = "WorldCombatFeedback"
+	combat_label.anchor_top = 1.0
+	combat_label.anchor_bottom = 1.0
+	combat_label.offset_left = 18.0
+	combat_label.offset_right = 690.0
+	combat_label.offset_top = -60.0
+	combat_label.offset_bottom = -16.0
+	combat_label.add_theme_font_size_override("font_size", 17)
+	combat_label.add_theme_color_override("font_color", Color(1.0, 0.72, 0.58))
+	ui.add_child(combat_label)
+	_on_combat_message("M: удар | N: оглушающий импульс | Backspace: возродиться")
+
+
+func _on_combat_message(message: String) -> void:
+	if is_instance_valid(combat_label):
+		combat_label.text = message
+
+
+func _on_sentry_defeated(_coord: Vector2i) -> void:
+	sentries_defeated += 1
+	_on_combat_message("Страж повержен! Лесная эссенция добавлена в инвентарь")
+
+
+func _on_player_defeated() -> void:
+	_on_combat_message("Вы потерпели поражение. Backspace: возродиться")
+
+
+func _respawn_player() -> void:
+	if not is_instance_valid(player_combatant) or player_combatant.is_alive():
+		return
+	player_character.global_position = Vector3(0.0, 0.5, 0.0)
+	player_character.velocity = Vector3.ZERO
+	player_combatant.restore_health(player_attributes.get_stat("max_health"))
+	player_attributes.set_stamina(player_attributes.get_stat("max_stamina"))
+	_on_combat_message("Вы восстановили здоровье. Стражи остаются в мире")
 
 
 func _build_world() -> void:
