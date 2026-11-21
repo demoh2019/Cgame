@@ -227,9 +227,13 @@ func _physics_process(delta: float) -> bool:
 	_stats_clock += delta
 	if _stats_clock >= 10.0:
 		var tick_stats: Dictionary = _tick_governor.snapshot()
-		print("SERVER players=%d zombies=%d bags=%d tick_max=%.2fms sim_p95=%.2fms incident_cap=%d adaptive=%s" % [sim.players.size(), sim.zombies.size(), sim.bags.size(), _max_tick_ms,
+		var presence_stats: Dictionary = sim.last_population_query_stats
+		print("SERVER players=%d zombies=%d bags=%d tick_max=%.2fms sim_p95=%.2fms incident_cap=%d adaptive=%s presence_queries=%d presence_candidates=%d presence_buckets=%d" % [sim.players.size(), sim.zombies.size(), sim.bags.size(), _max_tick_ms,
 			tick_stats["tick_p95_ms"], tick_stats["incident_spawn_cap"],
-			"ON" if tick_stats["adaptive_enabled"] else "OFF"])
+			"ON" if tick_stats["adaptive_enabled"] else "OFF",
+			int(presence_stats.get("queries", 0)),
+			int(presence_stats.get("candidate_checks", 0)),
+			int(presence_stats.get("bucket_lookups", 0))])
 		_stats_clock = 0.0
 		_max_tick_ms = 0.0
 	if _quit_after > 0.0 and _uptime >= _quit_after:
