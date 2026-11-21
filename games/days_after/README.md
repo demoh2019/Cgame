@@ -264,3 +264,40 @@ selects at most 18 nearby fragments, and retains the existing
   renderer frustum. Actual frame-time and draw-call results require
   measured runs in a compiled game.
 
+
+## Live PCG foliage geometry LOD
+
+The survivor now drives a native Cgame `PCGFoliageScalability3D`
+per-instance geometry LOD policy. Unlike the earlier density-scaling
+work, this does **not cull grass, remove points or reroll variants**.
+All plants remain visible, but each is assigned either a detailed
+box/reed/seed-head geometry (LOD0) or a two-triangle camera-facing
+QuadMesh proxy (LOD1). The default transition is 24 meters with
+a 3-meter hysteresis band to avoid rapid flickering.
+
+The existing three weighted types now produce up to **six** reusable
+instanced renderer slots. A Cgame native method groups by mesh type
+and LOD tier, preserving each original source index exactly once.
+The root `FoliageScatter` still represents green LOD0 for backward
+compatibility. It owns two detailed child renderers and three far
+proxy renderers, not one node per plant. Every variant's shape and
+material is cached across camera changes; only affected instancing
+buffers are rebuilt after a 4Hz viewer update. Spatial density,
+trail clearance, building exclusions and the 160-plant cap are unchanged.
+
+The optional stock-Godot `pcg_instance_lod.gd` fallback mirrors
+native threshold validation, hysteresis and group ordering. The
+playable smoke moves the LOD camera far away to check all proxies,
+then regenerates and verifies the original positions, types and
+node identities. No collision, inventory, enemy AI or multiplayer
+state is affected.
+
+```sh
+godot --headless --path games/days_after --script res://pcg_instance_lod_smoke_test.gd
+godot --headless --path games/days_after --script res://smoke_test.gd
+```
+
+This is an explicit multi-MultiMesh CPU LOD demonstrator, **not**
+Unreal Nanite or screen-size-aware GPU instance culling. Max draw
+batches rise from three to six; profile a built game on target
+hardware before claiming better frame time.
