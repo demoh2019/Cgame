@@ -9,6 +9,7 @@ const HUB_CELL := Vector2i(0, 0)
 const ARENA_CELL := Vector2i(4, 2)
 const CHAMPION_CELL := Vector2i(5, 3)
 const PATROL_GATE_CELL := Vector2i(1, 0)
+const PATROL_BRIDGE_PATH := "PatrolBridgeLink"
 const CHAMPION_LAYER := "champion_event"
 const COMBAT_LAYER := "combat_event"
 const COMBAT_LAYER_CELLS := [Vector2i(4, 2), Vector2i(4, 3), Vector2i(5, 2)]
@@ -86,6 +87,10 @@ func _ready() -> void:
     if not detail.has_method("set_cell_navigation_enabled") or not detail.has_method("get_navigation_cell_states"):
         push_error("Cgame WorldPartition3D navigation cell gate API required.")
         return
+    if not detail.has_method("set_cell_navigation_link_enabled") or not detail.has_method("get_navigation_link_states") or not detail.has_method("set_route_connection_link"):
+        push_error("Cgame WorldPartition3D precise navigation link API required.")
+        return
+    detail.call("set_route_connection_link", HUB_CELL, PATROL_GATE_CELL, PATROL_BRIDGE_PATH)
     if not detail.has_method("acquire_cell_route") or not detail.has_method("release_cell_route"):
         push_error("Cgame WorldPartition3D navigation route streaming API required.")
         return
@@ -101,6 +106,7 @@ func _ready() -> void:
     detail.connect("cell_state_changed", Callable(self, "_on_cell_state_changed"))
     detail.connect("cell_object_state_changed", Callable(self, "_on_cell_object_state_changed"))
     detail.connect("cell_navigation_state_changed", Callable(self, "_on_cell_navigation_state_changed"))
+    detail.connect("cell_navigation_link_state_changed", Callable(self, "_on_cell_navigation_link_state_changed"))
     detail.connect("layer_state_changed", Callable(self, "_on_layer_state_changed"))
     detail.call("pin_cell", HUB_CELL)
     if not distant.has_method("get_cell_instance") or not detail.has_method("get_cell_instance"):
@@ -266,6 +272,9 @@ func _on_cell_state_changed(cell: Vector2i, state: Dictionary) -> void:
     if cell == HUB_CELL or cell == ARENA_CELL:
         _sync_quest_arena_lease()
 
+func _on_cell_navigation_link_state_changed(cell: Vector2i, link_path: String, enabled: bool) -> void:
+    print("Streamed navigation bridge %s/%s: %s" % [str(cell), link_path, "OPEN" if enabled else "CLOSED"])
+
 func _on_cell_navigation_state_changed(cell: Vector2i, enabled: bool) -> void:
     print("Streamed nav gate %s: %s" % [str(cell), "OPEN" if enabled else "CLOSED"])
 
@@ -350,7 +359,7 @@ func _interact_with_streamed_object() -> void:
             var gate := closest.call("get_interactable") as Node3D
             if gate != null:
                 var gate_state: Dictionary = gate.call("capture_streaming_object_state")
-                detail.call("set_cell_navigation_enabled", PATROL_GATE_CELL, bool(gate_state.get("active", true)))
+                detail.call("set_cell_navigation_link_enabled", HUB_CELL, PATROL_BRIDGE_PATH, bool(gate_state.get("active", true)))
         last_gameplay_event = "Interacted in %s, %d saved child objects" % [str(closest_cell), snapshot.size()]
         print(last_gameplay_event)
     else:
@@ -408,6 +417,7 @@ func _save_checkpoint() -> void:
         "physics_states": physics_snapshot,
         "object_states": object_snapshot,
         "navigation_states": detail.call("get_navigation_cell_states"),
+        "navigation_link_states": detail.call("get_navigation_link_states"),
         "pinned_cells": detail.call("get_pinned_cells"),
         "layer_states": detail.call("get_layer_states"),
         "camera_transform": camera.global_transform,
@@ -437,16 +447,17 @@ func _load_checkpoint() -> void:
     if record.get("version") != SAVE_VERSION:
         push_warning("Unsupported checkpoint version.")
         return
-    if not (record.get("cell_states") is Dictionary) or not (record.get("physics_states", {}) is Dictionary) or not (record.get("object_states", {}) is Dictionary) or not (record.get("navigation_states", {}) is Dictionary) or not (record.get("pinned_cells") is Array) or not (record.get("layer_states") is Dictionary) or not (record.get("camera_transform") is Transform3D) or not (record.get("patrol_state", {}) is Dictionary):
+    if not (record.get("cell_states") is Dictionary) or not (record.get("physics_states", {}) is Dictionary) or not (record.get("object_states", {}) is Dictionary) or not (record.get("navigation_states", {}) is Dictionary) or not (record.get("navigation_link_states", {}) is Dictionary) or not (record.get("pinned_cells") is Array) or not (record.get("layer_states") is Dictionary) or not (record.get("camera_transform") is Transform3D) or not (record.get("patrol_state", {}) is Dictionary):
         push_warning("Checkpoint fields are incomplete.")
         return
     var states: Dictionary = record["cell_states"]
     var physics_states: Dictionary = record.get("physics_states", {})
     var object_states: Dictionary = record.get("object_states", {})
     var navigation_states: Dictionary = record.get("navigation_states", {})
+    var navigation_link_states: Dictionary = record.get("navigation_link_states", {})
     var pins: Array = record["pinned_cells"]
     var layers: Dictionary = record["layer_states"]
-    if states.size() > 4096 or physics_states.size() > 4096 or object_states.size() > 4096 or navigation_states.size() > 4096 or pins.size() > 128 or layers.size() > 64:
+    if states.size() > 4096 or physics_states.size() > 4096 or object_states.size() > 4096 or navigation_states.size() > 4096 or navigation_link_states.size() > 4096 or pins.size() > 128 or layers.size() > 64:
         push_warning("Checkpoint exceeds scene-state or pin limits.")
         return
     # Runtime leases are owner-owned handles, not persisted tokens. Recreate
@@ -455,14 +466,18 @@ func _load_checkpoint() -> void:
     detail.call("load_cell_states", states)
     detail.call("load_cell_physics_states", physics_states)
     detail.call("load_cell_object_states", object_states)
-    # Legacy v2 saves omit the gate map; infer it from any newly saved
-    # PatrolGate object state so its visual and navigation agree.
-    if not record.has("navigation_states"):
+    # Upgrade earlier v2 saves, where PatrolGate disabled the entire cell
+    # navigation. Migrate that meaning to a precise link, preserving every
+    # other navigation gate in the imported record.
+    if not record.has("navigation_link_states"):
+        var old_closed := navigation_states.has(PATROL_GATE_CELL) and not bool(navigation_states[PATROL_GATE_CELL])
         var patrol_record: Dictionary = object_states.get(PATROL_GATE_CELL, {})
         var gate_record: Dictionary = patrol_record.get("PatrolGate", {})
-        if not bool(gate_record.get("active", true)):
-            navigation_states[PATROL_GATE_CELL] = false
+        if old_closed or not bool(gate_record.get("active", true)):
+            navigation_link_states[HUB_CELL] = {PATROL_BRIDGE_PATH: false}
+        navigation_states.erase(PATROL_GATE_CELL)
     detail.call("set_navigation_cell_states", navigation_states)
+    detail.call("set_navigation_link_states", navigation_link_states)
     detail.call("set_layer_states", layers)
     detail.call("set_pinned_cells", pins)
     _sync_quest_arena_lease()
@@ -581,8 +596,8 @@ func _update_hud() -> void:
     var state_count: int = int(detail.call("get_cell_state_count")) if detail != null else 0
     var physics_state_count: int = int(detail.call("get_cell_physics_state_count")) if detail != null else 0
     var object_state_count: int = int(detail.call("get_cell_object_state_count")) if detail != null else 0
-    var patrol_gate_open := detail != null and bool(detail.call("is_cell_navigation_enabled", PATROL_GATE_CELL))
-    var blocked_navigation_cells: int = int(detail.call("get_disabled_navigation_cell_count")) if detail != null else 0
+    var patrol_gate_open := detail != null and bool(detail.call("is_cell_navigation_link_enabled", HUB_CELL, PATROL_BRIDGE_PATH))
+    var blocked_navigation_cells: int = int(detail.call("get_disabled_navigation_link_count")) if detail != null else 0
     var crate_speed := 0.0
     var hub_root := _gameplay_cell_root(HUB_CELL)
     if hub_root != null:
@@ -601,7 +616,7 @@ func _update_hud() -> void:
             var stats: Dictionary = detail.call("get_cell_simulation_stats", cell)
             collision_count += int(stats.get("collision_objects", 0))
             navigation_count += int(stats.get("navigation_regions", 0))
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nCell leases: %d  Arena owners: %d | Quest: %s  M Manual: %s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nO AI patrol: %s  crossings: %d  route leases: %d  cell: %s\nSimulation near landmarks: %d collision bodies, %d nav regions\nI kick crate: speed %.1f  physics snapshots: %d\nE interact: %d cells with saved objects | AI Gate (1,0): %s, blocked nav cells: %d\n%s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nCell leases: %d  Arena owners: %d | Quest: %s  M Manual: %s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nO AI patrol: %s  crossings: %d  route leases: %d  cell: %s\nSimulation near landmarks: %d collision bodies, %d nav regions\nI kick crate: speed %.1f  physics snapshots: %d\nE interact: %d cells with saved objects | AI Bridge: %s, disabled links: %d\n%s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
