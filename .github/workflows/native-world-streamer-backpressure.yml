@@ -14,6 +14,9 @@ on:
       - 'tests/scene/test_world_streamer_simulation_tiers.cpp'
       - 'game/tests/test_world_streamer_simulation_tiers.gd'
       - 'game/tests/run_simulation_tiers.gd'
+      - 'game/scripts/client/world_map.gd'
+      - 'game/tests/test_auxiliary_streaming_readiness.gd'
+      - 'game/tests/run_auxiliary_readiness.gd'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
   push:
@@ -28,6 +31,9 @@ on:
       - 'tests/scene/test_world_streamer_simulation_tiers.cpp'
       - 'game/tests/test_world_streamer_simulation_tiers.gd'
       - 'game/tests/run_simulation_tiers.gd'
+      - 'game/scripts/client/world_map.gd'
+      - 'game/tests/test_auxiliary_streaming_readiness.gd'
+      - 'game/tests/run_auxiliary_readiness.gd'
       - 'tests/scene/test_world_streamer_backpressure_contract.py'
       - '.github/workflows/native-world-streamer-backpressure.yml'
 
@@ -97,6 +103,14 @@ jobs:
           timeout 300s "$BIN" --headless --path game --script res://tests/run_simulation_tiers.gd 2>&1 | tee simulation-tier.log
           grep -E '^SIMULATION TIERS TOTAL: [0-9]+ checks, 0 failures$' simulation-tier.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' simulation-tier.log; then exit 1; fi
+      - name: Auxiliary source readiness and expedition map
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_auxiliary_readiness.gd 2>&1 | tee auxiliary-readiness.log
+          grep -E '^AUXILIARY READINESS TOTAL: [0-9]+ checks, 0 failures$' auxiliary-readiness.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' auxiliary-readiness.log; then exit 1; fi
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -108,3 +122,4 @@ jobs:
             streamer-import.log
             streamer-game.log
             simulation-tier.log
+            auxiliary-readiness.log
