@@ -48,6 +48,28 @@ bounded event eviction semantics remain unchanged. Engine tests cover radius
 edges, tie ranking, invalid input, snapshot isolation, age/expiry and hot-path
 refresh. `test_native_infected_senses.gd` covers actual game adapter usage.
 
+## Per-source forgetting after authoritative invalidation
+
+Cgame now exposes `AIStimulusHistory2D.forget_source(source_id, sense = -1)`.
+It selectively removes a known stimulus source from one or all senses and
+returns the number of removed entries. Negative and unknown IDs, unsupported
+sense values, and repeated calls remove nothing. Existing observations from
+other sources retain their original age, insertion order, and ranking.
+Anonymous stimuli (source ID -1) cannot be selectively invalidated.
+
+Albion After's authoritative infected chase/attack state uses this method
+when a tracked survivor disconnects, dies, or becomes safe. This removes
+**only source-tagged history** after the existing game rules have already
+invalidated the target. The separate legacy primary sight/hearing caches are
+not source-tagged and continue to expire normally; they are not used to
+generate any new target here. On stock Godot and older Cgame binaries the
+adapter leaves memory unchanged rather than clearing other survivors' data.
+The server remains the sole authority for detection, combat and safe zones.
+
+Engine tests cover selective sense removal, retained time-to-live, ordering,
+invalid inputs and idempotence. Game tests exercise the actual chase release
+for safe-zone and disconnected survivors. No network payloads are changed.
+
 ## Behavior trees
 
 `BehaviorTreeReactiveSelector` and `BehaviorTreeReactiveSequence` extend the existing `BehaviorTreeComposite` **Resource** classes in the current `develop` branch. They reevaluate priority and guards per runner tick and cancel the execution memory of an interrupted branch. The existing `BehaviorTreeRunner`, `BehaviorTreeBlackboardCheck`, `BehaviorTreeBlackboardSet`, `BehaviorTreeWait` remain intact. The canonical server simulation keeps its existing state machine because its combat, networking and AI authority requirements are richer than the example tree.
