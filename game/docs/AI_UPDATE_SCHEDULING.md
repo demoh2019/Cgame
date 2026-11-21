@@ -239,6 +239,80 @@ This optimization is an additive Cgame API, **not a port of Unreal
 engine code**. No measured CPU or FPS improvement is claimed without
 native compilation and repeatable benchmarks.
 
+## Mass-style per-agent perception broadphase for large PvE crowds
+
+Unreal Engine's [AI Perception](https://dev.epicgames.com/documentation/en-us/unreal-engine/ai-perception-in-unreal-engine)
+provides actor-specific sensing distances, while [Mass Entity](https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-entity-in-unreal-engine)
+emphasizes batch queries over whole actor cohorts. Cgame now adds a
+native, **variable-radius two-cohort** spatial query to reduce wasted
+faraway player checks during Albion After's authoritative passive
+infected target-selection passes:
+
+```gdscript
+var nearby: Array = grid.query_cross_variable_radius_batch(
+    infected_positions, each_infected_sensing_radius, player_positions)
+# One PackedInt32Array of original player indices per infected, sorted.
+```
+
+This differs from `query_cross_radius_batch`, which uses one common
+radius. The new API builds a single spatial hash over target positions,
+with its cell size set to the largest source radius (minimum 1m), then
+visits at most nine cells per source and applies that **source's own**
+inclusive distance threshold. It preserves original target indices,
+even for duplicate positions. A valid empty player set produces one
+empty packed array per source, distinct from malformed input.
+
+Limits: 4096 source points, 8192 target points, 32768 returned pairs,
+finite coordinates within ±1,000,000 units, and a separate finite
+radius within 0..256m per source. Malformed arrays or a result exceeding
+the pair cap fail atomically with `[]`, permitting a full-scan fallback.
+There are no scene queries, physics changes, game target assignments,
+raycasts, or per-neighbor Dictionaries in this native API.
+
+### Actual Albion After use
+
+At the start of `GameServer._tick_zombies()`, the server snapshots
+already-authorized **alive, outside-safe-zone** player positions.
+For large worlds (64–4096 infected, 8–8192 players), it builds one
+native query for passive, non-boss, unengaged NPCs whose target scan
+is due this tick. Each NPC's conservative radius is its normal
+`lose` pursuit range plus **24m**, needed for existing passive AI
+LOD (plus a 0.125m outward rounding margin). Any source radius
+exceeding 256m causes a full fallback rather than losing valid targets.
+
+Only those *still passive and unengaged when their turn arrives*
+receive a reduced view of the existing authoritative player-info
+Dictionary. Active chases, attacks, forced guardian taunts, combat
+threats, raid bosses and agents newly alerted **during the current
+server tick** always retain the complete original player-info map.
+
+Crucially, the native query is **only a broadphase**. The existing
+`Zombie._select_target` independently evaluates life, safe zones,
+territorial rules, wind-weighted sound, environmental hearing
+occlusion, blood scent, camouflage, rain, firelight, line-of-sight
+obstruction and combat-threshold prioritization. Player targets beyond
+the far LOD cutoff cannot become detectable under the existing
+`lose - 1m` cap and are in the same far LOD tier. This new API
+neither changes combat logic nor updates network replication.
+
+A missing older Cgame API, stock Godot, small encounters, a malformed
+request or overly dense candidate output simply passes the entire
+original player-info map. The read-only server diagnostic
+`get_perception_interest_stats()` reports native admission, eligible
+source count, player count and candidate pairs; it is never sent
+to clients.
+
+Native doctests cover different observer ranges, duplicate targets,
+negative cells, exact zero-radius hits, missing targets, malformed
+input, dense output limits and repeatability. The game regression
+performs two genuine 64-infected/eight-player server ticks with
+identical world and RNG seeds, one using native spatial filtering and
+one forcing the old exhaustive path. It compares actor positions,
+target IDs, state transitions and passive AI LOD scan timers.
+
+**No performance gain is claimed without a compiled Cgame build and
+repeatable CPU-time benchmarks.**
+
 ## Inspect the real server
 
 The diagnostic `GameServer.get_ai_schedule_stats()` method returns a detached Dictionary:
