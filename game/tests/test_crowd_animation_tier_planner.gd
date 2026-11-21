@@ -115,3 +115,87 @@ func run(t) -> void:
 							full_count += 1
 					t.check(full_count <= full_slots,
 						"native visibility planner respects full IK slot cap")
+
+
+	t.current = "stable full-IK slots resist camera jitter without hiding combat"
+	var stable_distances := PackedFloat64Array([10.0, 10.4, 21.0, 22.0, 50.0])
+	var stable_priority := PackedByteArray([0, 0, 0, 1, 1])
+	var stable_visible := PackedByteArray([1, 1, 1, 1, 1])
+	var stable_retained := PackedByteArray([0, 1, 1, 1, 0])
+	var stable_expected := PackedInt32Array([1, 0, 1, 1, 2])
+	t.eq(CharacterAnim.plan_crowd_tiers(stable_distances, stable_priority, 1, 1,
+		false, stable_visible, stable_retained, 1.5), stable_expected,
+		"the previous IK owner wins a small distance difference")
+	t.eq(CharacterAnim.plan_crowd_tiers(stable_distances, stable_priority, 1, 1,
+		false, stable_visible, stable_retained, 0.0),
+		CharacterAnim.plan_crowd_tiers(stable_distances, stable_priority, 1, 1,
+			false, stable_visible), "zero hysteresis reproduces old visibility planner")
+	var none_retained := PackedByteArray([0, 0, 0, 0, 0])
+	t.eq(CharacterAnim.plan_crowd_tiers(stable_distances, stable_priority, 1, 1,
+		false, stable_visible, none_retained, 1.5),
+		CharacterAnim.plan_crowd_tiers(stable_distances, stable_priority, 1, 1,
+			false, stable_visible), "no previous owner yields original nearest IK selection")
+	var hidden_held := PackedByteArray([1, 0, 1, 1, 1])
+	t.eq(CharacterAnim.plan_crowd_tiers(stable_distances, stable_priority, 1, 1,
+		false, hidden_held, stable_retained, 1.5),
+		PackedInt32Array([0, 2, 1, 1, 2]),
+		"an invisible former owner releases expensive work immediately")
+	var closer_distances := PackedFloat64Array([8.0, 10.4, 21.0, 22.0, 50.0])
+	t.eq(CharacterAnim.plan_crowd_tiers(closer_distances, stable_priority, 1, 1,
+		false, stable_visible, stable_retained, 1.5)[0], 0,
+		"a materially closer newly visible actor takes priority")
+	t.eq(CharacterAnim.plan_crowd_tiers(stable_distances, stable_priority, 1, 1,
+		false, stable_visible, PackedByteArray([0]), 1.5).size(), 0,
+		"mismatched retention masks fail closed")
+	t.eq(CharacterAnim.plan_crowd_tiers(stable_distances, stable_priority, 1, 1,
+		false, stable_visible, stable_retained, -0.1).size(), 0,
+		"negative hysteresis is invalid")
+	t.eq(CharacterAnim.plan_crowd_tiers(stable_distances, stable_priority, 1, 1,
+		false, stable_visible, stable_retained, 8.01).size(), 0,
+		"excessive hysteresis is invalid")
+	t.eq(CharacterAnim.plan_crowd_tiers(stable_distances, stable_priority, 1, 1,
+		false, stable_visible, stable_retained, NAN).size(), 0,
+		"NaN retention strength rejected atomically")
+	var anim_source := FileAccess.get_file_as_string("res://scripts/client/character_anim.gd")
+	var model_source := FileAccess.get_file_as_string("res://scripts/client/character_model.gd")
+	t.check(anim_source.contains("retained_full_mask.append(") and
+		anim_source.contains("IK_RETENTION_HYSTERESIS_METRES") and
+		anim_source.contains('model.set_meta("aa_full_ik_retained", full_ik_now)'),
+		"real Albion crowd pass keeps previous-frame IK owners")
+	t.check(model_source.contains('set_meta("aa_full_ik_retained", false)'),
+		"pooled character reuse clears stale IK retention")
+
+	t.current = "native and stock-Godot stable crowd tier parity"
+	t.eq(CharacterAnim.plan_crowd_tiers(stable_distances, stable_priority, 1, 1,
+		true, stable_visible, stable_retained, 1.5), stable_expected,
+		"engine-dispatched stable planner matches expected IK assignment")
+	if ClassDB.class_exists("CrowdAnimationTierPlanner"):
+		var native_stable: Object = ClassDB.instantiate("CrowdAnimationTierPlanner")
+		if native_stable != null and native_stable.has_method("plan_visible_tiers_stable"):
+			t.eq(native_stable.call("plan_visible_tiers_stable", stable_distances,
+				stable_priority, stable_visible, stable_retained, 1, 1, 1.5),
+				stable_expected, "native stable IK interface is exposed and correct")
+			var stable_rng := RandomNumberGenerator.new()
+			stable_rng.seed = 524019
+			for sample in 12:
+				var sampled_distances := PackedFloat64Array()
+				var sampled_priorities := PackedByteArray()
+				var sampled_visibility := PackedByteArray()
+				var sampled_retained := PackedByteArray()
+				for i in 128:
+					sampled_distances.append(float(stable_rng.randi_range(0, 1100)) * 0.1)
+					sampled_priorities.append(1 if stable_rng.randi_range(0, 4) == 0 else 0)
+					sampled_visibility.append(1 if stable_rng.randi_range(0, 4) > 0 else 0)
+					sampled_retained.append(1 if stable_rng.randi_range(0, 9) == 0 else 0)
+				for budget in [0, 1, 4, 12]:
+					for hysteresis in [0.0, 1.5, 8.0]:
+						var script_tiers: PackedInt32Array = CharacterAnim.plan_crowd_tiers(
+							sampled_distances, sampled_priorities, budget, 3, false,
+							sampled_visibility, sampled_retained, hysteresis)
+						var native_tiers: PackedInt32Array = native_stable.call(
+							"plan_visible_tiers_stable", sampled_distances,
+							sampled_priorities, sampled_visibility, sampled_retained,
+							budget, 3, hysteresis)
+						t.eq(native_tiers, script_tiers,
+							"stable native/script parity sample %d slots %d bonus %.1f" % [
+								sample, budget, hysteresis])
