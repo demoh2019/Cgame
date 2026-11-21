@@ -31,6 +31,7 @@
 
 #include "audio_duck_mix.h"
 #include "gameplay_attribute_set.h"
+#include "gameplay_cooldown_tracker.h"
 #include "gameplay_effect_timeline.h"
 #include "radial_force_field_3d.h"
 #include "sound_concurrency.h"
@@ -48,6 +49,7 @@ void initialize_gameplay_fx_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(RadialForceField3D);
 	GDREGISTER_CLASS(GameplayEffectTimeline);
 	GDREGISTER_CLASS(GameplayAttributeSet);
+	GDREGISTER_CLASS(GameplayCooldownTracker);
 	GDREGISTER_CLASS(AudioDuckMix);
 }
 
