@@ -16,6 +16,9 @@ var _quality_changed: bool = true
 var _budget: int = 1
 var _spent: int = 0
 var _pressure: float = 0.0
+var _time_budget_us: int = 2500
+var _frame_cost_us: int = 0
+var _previous_frame_cost_us: int = 0
 var _updated_total: int = 0
 var _skipped_total: int = 0
 var _last_updated: int = 0
@@ -26,6 +29,8 @@ func begin_frame(delta: float, quality: int) -> void:
 	var safe_quality: int = clampi(quality, 0, 3)
 	_quality_changed = _quality != safe_quality
 	_quality = safe_quality
+	_previous_frame_cost_us = _frame_cost_us
+	_frame_cost_us = 0
 	_spent = 0
 	_last_updated = 0
 	_last_skipped = 0
@@ -76,7 +81,8 @@ func consume(lane: String, delta: float, force: bool = false) -> float:
 		return elapsed
 	_elapsed[lane] = elapsed
 	var interval: float = 1.0 / HZ_BY_QUALITY[_quality if _quality >= 0 else 0]
-	if elapsed + 0.000001 < interval or _spent >= _budget or not _reserved.has(lane):
+	if elapsed + 0.000001 < interval or _spent >= _budget or not _reserved.has(lane) \
+			or (_time_budget_us > 0 and _frame_cost_us >= _time_budget_us):
 		_last_skipped += 1
 		_skipped_total += 1
 		return 0.0
@@ -94,6 +100,8 @@ func reset() -> void:
 	_quality = -1
 	_quality_changed = true
 	_pressure = 0.0
+	_frame_cost_us = 0
+	_previous_frame_cost_us = 0
 	_budget = 1
 	_spent = 0
 	_last_updated = 0
@@ -123,3 +131,30 @@ func pressure_percent() -> float:
 
 func last_frame_counts() -> Vector2i:
 	return Vector2i(_last_updated, _last_skipped)
+
+## Zero disables the CPU time cap; a positive limit is a soft upper bound.
+func set_frame_time_budget_us(budget_us: int) -> bool:
+	if budget_us < 0 or budget_us > 1000000:
+		return false
+	_time_budget_us = budget_us
+	return true
+
+
+func get_frame_time_budget_us() -> int:
+	return _time_budget_us
+
+
+func record_cost(lane: String, elapsed_us: int) -> bool:
+	if not LANES.has(lane) or elapsed_us < 0 or elapsed_us > 10000000:
+		return false
+	_frame_cost_us = mini(1000000000, _frame_cost_us + elapsed_us)
+	return true
+
+
+func current_frame_cost_us() -> int:
+	return _frame_cost_us
+
+
+func last_frame_cost_us() -> int:
+	return _previous_frame_cost_us
+
