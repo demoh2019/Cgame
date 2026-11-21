@@ -468,7 +468,8 @@ func _initialize() -> void:
 	var failures: Array[String] = []
 	for path in SUITES:
 		var script: GDScript = load(path)
-		if script == null:
+		# A suite with a parse error must not abort the whole run: record it and continue.
+		if script == null or not script.can_instantiate():
 			failures.append("%s: could not load" % path)
 			continue
 		var suite = script.new()

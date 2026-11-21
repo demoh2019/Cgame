@@ -11,7 +11,8 @@ func _initialize() -> void:
 	for name in OS.get_cmdline_user_args():
 		var path: String = name if name.begins_with("res://") else "res://tests/%s.gd" % name.trim_suffix(".gd")
 		var script: GDScript = load(path)
-		if script == null:
+		# A suite with a parse error must not abort the whole run: record it and continue.
+		if script == null or not script.can_instantiate():
 			failures.append("%s: could not load" % path)
 			continue
 		var t := TestCase.new()
