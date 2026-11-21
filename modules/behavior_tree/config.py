@@ -16,6 +16,7 @@ def get_doc_classes():
         "BehaviorTreeReactiveSelector",
         "BehaviorTreeInverter",
         "BehaviorTreeBlackboardCheck",
+        "BehaviorTreeBlackboardCompare",
         "BehaviorTreeBlackboardSet",
         "BehaviorTreeWait",
         "BehaviorTreeRunner",
