@@ -317,3 +317,38 @@ A pure GDScript fallback gives the same result on stock Godot.
 bounds, full source coverage, and padded draw bounds; the native
 `PCGInstanceCluster3D` engine tests reject corrupt index groups.
 
+
+
+## Incremental MultiMesh LOD transitions
+
+The live foliage renderer now avoids recreating all six
+mesh/LOD `MultiMesh` resources when an individual plant crosses
+a distance threshold. Native
+`PCGFoliageScalability3D.plan_dirty_variant_lod_groups()` returns a
+six-element dirty mask that marks **only** the old and new GPU groups
+for changed foliage instances. Each untouched renderer retains its
+existing `MultiMesh` resource and instance buffer unchanged.
+
+The game exposes diagnostics:
+`FoliageScatter.get_lod_batch_rebuild_counts()` (six cumulative
+resource rebuild counters),
+`get_last_lod_dirty_flags()`, and
+`get_total_lod_batch_rebuild_count()`.
+The original 4Hz/0.5m camera refresh guard, stable source IDs,
+six geometry choices, 160-plant cap and PCG exclusions remain intact.
+A forced refresh with no actual tier changes is idempotent and never
+reuploads a buffer; a full scene regeneration intentionally rebuilds
+all six groups since attributes might have changed.
+
+A native C++ method and independent GDScript fallback validate and
+compute identical masks. CI's native foliage tests and
+`pcg_instance_lod_smoke_test.gd` now check individual dirty bits;
+the full playable `smoke_test.gd` checks actual MultiMesh resource
+identities and rebuild-counter deltas after moving the viewer,
+then validates no-op forced refreshes and full regeneration.
+
+The new stage still does O(points) LOD planning and repartitioning
+on changes; it does **not** claim GPU-driven culling, true
+hierarchical cluster LOD or measured FPS gains. Its purpose is
+to eliminate redundant `MultiMesh` resource/instance uploads for
+unchanged groups, not to reduce instance counts or draw calls.
