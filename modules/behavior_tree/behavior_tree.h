@@ -320,6 +320,9 @@ public:
 	void set_trace_enabled(bool p_enabled);
 	bool is_trace_enabled() const { return trace_enabled; }
 	Dictionary get_trace_snapshot() const;
+	// On-demand hierarchy: all Resource tasks plus latest per-path trace status.
+	// Unvisited nodes remain visible with status=-1 and executed=false.
+	Dictionary get_tree_snapshot() const;
 	void reset_trace();
 
 	BehaviorTreeRunner();

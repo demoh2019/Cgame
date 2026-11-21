@@ -165,6 +165,55 @@ func reset_ai_trace() -> void:
 		_ai_trace.reset()
 
 
+## On-demand server-only visualization of the actual GDScript state machine.
+## Uses the same plain-data node layout as BehaviorTreeRunner.get_tree_snapshot()
+## without claiming that this state machine is a native BehaviorTree.
+func get_ai_state_visual_snapshot() -> Dictionary:
+	var states := ["IDLE", "WANDER", "CHASE", "ATTACK", "DEAD", "INVESTIGATE"]
+	var nodes: Array = [{
+		"path": "root",
+		"task_class": "ZombieStateMachine",
+		"depth": 0,
+		"executed": true,
+		"status": 0 if state == State.DEAD else 2,
+		"duration_usec": 0,
+	}]
+	for index in states.size():
+		var active: bool = state == index
+		nodes.append({
+			"path": "root/%d" % index,
+			"task_class": states[index],
+			"depth": 1,
+			"executed": active,
+			"status": (0 if state == State.DEAD else 2) if active else -1,
+			"duration_usec": 0,
+		})
+	var trace_snapshot: Dictionary = get_ai_trace_snapshot()
+	var steps: Array = trace_snapshot.get("steps", [])
+	var selection_status := -1
+	var selection_time := 0
+	if not steps.is_empty():
+		var scan: Dictionary = steps[0]
+		selection_status = int(scan.get("status", -1))
+		selection_time = int(scan.get("duration_usec", 0))
+	nodes.append({
+		"path": "root/6",
+		"task_class": "TargetSelection",
+		"depth": 1,
+		"executed": not steps.is_empty(),
+		"status": selection_status,
+		"duration_usec": selection_time,
+	})
+	return {
+		"nodes": nodes,
+		"node_count": nodes.size(),
+		"truncated": false,
+		"trace_truncated": int(trace_snapshot.get("truncated", 0)),
+		"trace_enabled": bool(trace_snapshot.get("enabled", false)),
+		"tick_index": int(trace_snapshot.get("tick_index", 0)),
+	}
+
+
 ## Server-side diagnostic query. Never include this in public game snapshots:
 ## it exposes AI target identity and last perceived target locations.
 func get_ai_debug_snapshot() -> Dictionary:
@@ -179,6 +228,7 @@ func get_ai_debug_snapshot() -> Dictionary:
 		"perception": _native_senses.get_debug_snapshot() if _native_senses != null else {},
 		"profiling": get_ai_profile_snapshot(),
 		"trace": get_ai_trace_snapshot(),
+		"visual_tree": get_ai_state_visual_snapshot(),
 		"pack_howl_cooldown_seconds": float(_native_howl_cooldowns.get_remaining(&"pack_howl")) if _native_howl_cooldowns != null else 0.0,
 		"native_simulation_lod": _ai_lod_scheduler != null,
 		"native_threat_arbitration": Threat.has_native(),

@@ -45,6 +45,9 @@ var pending_shout := false
 var noise_visual_timer := 0.0
 var last_noise_position := Vector2.ZERO
 var hud: Label
+var trace_panel: PanelContainer
+var trace_tree: Tree
+var trace_title: Label
 
 
 func _ready() -> void:
@@ -92,6 +95,7 @@ func _ready() -> void:
     hud.add_theme_font_size_override("font_size", 17)
     hud.add_theme_color_override("font_color", Color(0.92, 0.94, 1.0))
     add_child(hud)
+    _build_trace_tree_panel()
     _update_hud()
 
 
@@ -196,6 +200,7 @@ func _physics_process(delta: float) -> void:
         last_debug_snapshot = brain.get_debug_snapshot()
         last_profile_snapshot = brain.get_profile_snapshot()
         last_trace_snapshot = brain.get_trace_snapshot()
+        _refresh_trace_tree_panel()
         current_action = str(brain.get_blackboard().get("action", "patrol"))
 
     var enemy_motion := Vector2.ZERO
@@ -356,6 +361,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
     elif event.keycode == KEY_T:
         brain.trace_enabled = not brain.is_trace_enabled()
         last_trace_snapshot = brain.get_trace_snapshot()
+        _refresh_trace_tree_panel()
     elif event.keycode == KEY_R:
         enemy_health = 100
         player_position = Vector2(160, 350)
@@ -372,6 +378,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
         last_profile_snapshot = brain.get_profile_snapshot()
         brain.reset_trace()
         last_trace_snapshot = brain.get_trace_snapshot()
+        _refresh_trace_tree_panel()
         ai_timer = 0.0
         sensor.reset()
         hearing.reset()
@@ -385,6 +392,82 @@ func _unhandled_key_input(event: InputEvent) -> void:
         footstep_timer = 0.0
         pending_shout = false
         noise_visual_timer = 0.0
+
+
+func _build_trace_tree_panel() -> void:
+    # An actual hierarchical Tree, updated at the 5Hz AI decision cadence.
+    # Debug-only UI: no extra tree walks on ordinary production game NPCs.
+    trace_panel = PanelContainer.new()
+    trace_panel.position = Vector2(575, 60)
+    trace_panel.size = Vector2(372, 400)
+    var background := StyleBoxFlat.new()
+    background.bg_color = Color(0.065, 0.085, 0.14, 0.94)
+    background.border_color = Color(0.43, 0.55, 0.72)
+    background.set_border_width_all(1)
+    trace_panel.add_theme_stylebox_override("panel", background)
+    add_child(trace_panel)
+
+    var vertical := VBoxContainer.new()
+    trace_panel.add_child(vertical)
+    trace_title = Label.new()
+    trace_title.text = "LIVE BEHAVIOR TREE"
+    trace_title.add_theme_font_size_override("font_size", 15)
+    vertical.add_child(trace_title)
+
+    trace_tree = Tree.new()
+    trace_tree.columns = 3
+    trace_tree.hide_root = true
+    trace_tree.column_titles_visible = true
+    trace_tree.set_column_title(0, "Task")
+    trace_tree.set_column_title(1, "State")
+    trace_tree.set_column_title(2, "μs")
+    trace_tree.set_column_expand(0, true)
+    trace_tree.set_column_expand(1, false)
+    trace_tree.set_column_custom_minimum_width(1, 77)
+    trace_tree.set_column_expand(2, false)
+    trace_tree.set_column_custom_minimum_width(2, 49)
+    trace_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    vertical.add_child(trace_tree)
+    _refresh_trace_tree_panel()
+
+
+func _refresh_trace_tree_panel() -> void:
+    if trace_tree == null:
+        return
+    trace_panel.visible = brain.is_trace_enabled()
+    if not trace_panel.visible:
+        return
+    var snapshot: Dictionary = brain.get_tree_snapshot()
+    var nodes: Array = snapshot.get("nodes", [])
+    trace_title.text = "LIVE BEHAVIOR TREE  |  %d nodes  |  tick %d" % [
+        nodes.size(), int(snapshot.get("tick_index", 0))]
+    trace_tree.clear()
+    var invisible_root := trace_tree.create_item()
+    var paths: Dictionary = {}
+    for raw in nodes:
+        var node: Dictionary = raw
+        var path: String = str(node.get("path", ""))
+        var parent: TreeItem = paths.get(path.get_base_dir(), invisible_root)
+        var item: TreeItem = trace_tree.create_item(parent)
+        paths[path] = item
+        item.set_metadata(0, path)
+        item.set_text(0, str(node.get("task_class", "Task")).trim_prefix("BehaviorTree"))
+        var status := int(node.get("status", -1))
+        match status:
+            BehaviorTreeTask.SUCCESS:
+                item.set_text(1, "SUCCESS")
+                item.set_custom_color(1, Color(0.48, 0.92, 0.55))
+            BehaviorTreeTask.FAILURE:
+                item.set_text(1, "FAILURE")
+                item.set_custom_color(1, Color(1.0, 0.46, 0.43))
+            BehaviorTreeTask.RUNNING:
+                item.set_text(1, "RUNNING")
+                item.set_custom_color(1, Color(1.0, 0.78, 0.35))
+            _:
+                item.set_text(1, "NOT RUN")
+                item.set_custom_color(1, Color(0.59, 0.64, 0.72))
+        item.set_text(2, str(int(node.get("duration_usec", 0)))
+            if bool(node.get("executed", false)) else "—")
 
 
 func _update_hud() -> void:

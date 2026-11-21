@@ -36,6 +36,12 @@ The executable sandbox `modules/behavior_tree/demo_reactive_ai/` demonstrates th
 
 The engine also provides `BehaviorTreeBlackboardCompare`: a Resource guard supporting equality, numeric ordering, existence checks and optional comparison to a second Blackboard key. The accompanying playable AI sandbox uses it for the native low-health retreat threshold without modifying the main game's authoritative infected targeting logic.
 
+## Visual AI debugger and authoritative infected state views
+
+The native `BehaviorTreeRunner.get_tree_snapshot()` enumerates all static child Resource occurrences (up to 256 nodes), merges visited/unvisited status from its per-node execution trace, and returns a detached hierarchy for visual displays. Both Godot projects now include the enabled `Cgame AI` editor dock under `res://addons/cgame_bt_debugger/`. It inspects a selected BehaviorTreeRunner in the **edited scene**; live game-side task execution is shown in the playable AI sandbox's **T**-toggle Tree panel instead of claiming remote editor-debugger attachment.
+
+Because Albion After zombies use an authoritative **GDScript state machine**, their new `Zombie.get_ai_state_visual_snapshot()` explicitly labels the state-machine root and its six actual states, highlights exactly the current one, and adds a target-selection phase only when native server tracing recorded it. It shares the inspector's `nodes` format and is available through `get_ai_debug_snapshot()["visual_tree"]`. These are on-demand, server-only tools and are **not** included in network snapshots, messages or public gameplay UI. Target IDs and last-known positions remain private to the server.
+
 ## Optional per-node and server decision tracing
 
 The engine's `AIBehaviorTrace` can now record a bounded timeline for individual BehaviorTree nodes: `path`, `task_class`, `depth`, `status`, and `duration_usec` for each executed task. Use `BehaviorTreeRunner.trace_enabled = true` on a single agent, then inspect `get_trace_snapshot()["steps"]`. It preserves a maximum of 128 entries per tick by default and reports overflow rather than retaining unlimited data.

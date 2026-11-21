@@ -290,3 +290,7 @@ aa_terrain_horizon_ao_strength={
 "type": "float",
 "value": 0.0
 }
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/cgame_bt_debugger/plugin.cfg")

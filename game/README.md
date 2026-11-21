@@ -3,6 +3,8 @@
 **This is the canonical game project at `game/`.** All new gameplay
 features belong here; demos under `demo/` and `games/` are prototypes.
 
+**New engine/game feature — visual BehaviorTree inspector:** Cgame now exposes a full tree snapshot with visited/unvisited paths and CPU timing, an enabled **Cgame AI** dock in the Godot editor and a live colored debug tree in the AI sandbox. The canonical Albion After infected server state machine exposes a compatible private diagnostic hierarchy. See [Native AI Perception and Diagnostics](docs/NATIVE_AI_PERCEPTION.md).
+
 **New engine/game feature — opt-in AI execution tracing:** the native `AIBehaviorTrace` records bounded per-node execution order, paths, status and CPU time for BehaviorTree runners, with **T** to view active traces in the AI sandbox. The canonical server's zombie AI also supports on-demand native target-selection traces, disabled in normal gameplay. See [Native AI Perception and Diagnostics](docs/NATIVE_AI_PERCEPTION.md).
 
 **New engine/game feature — timed AI decorators and authoritative howler cooldowns:** the Cgame BehaviorTree gains native `BehaviorTreeTimeout` and `BehaviorTreeCooldown` Resources and a reusable `AIActionCooldowns` ledger. The playable sandbox limits sound searches; Albion After howlers now prevent overlapping pack-alert bursts without touching combat cooldowns. See [Native AI Perception and Timers](docs/NATIVE_AI_PERCEPTION.md).

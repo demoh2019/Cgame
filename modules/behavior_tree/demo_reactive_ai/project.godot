@@ -14,3 +14,7 @@ window/size/viewport_height=600
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/cgame_bt_debugger/plugin.cfg")
