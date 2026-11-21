@@ -13,6 +13,7 @@ This optional built-in 3D module introduces `WorldPartition3D`, an X/Z-grid scen
 - Unload distant cells, apply hysteresis, emit load/unload signals, and keep explicit APIs for moving/replacing/removing cells.
 - Runtime diagnostics: `get_pending_cell_count()`, `get_inflight_request_count()` (deduplicated resource paths), and `get_failed_cell_count()` for HUDs and performance tools.
 - **Deterministic bounded cross-cell routing:** `find_cell_path(from, to, loaded_only=false)` returns the shortest cardinal corridor of registered `Vector2i` world cells, respecting missing topology and optionally restricting the route to already-instantiated scene roots. Synchronous breadth-first expansion is capped at 512 visited cells (overflow-safe 32-bit coordinates) to prevent runaway CPU. This complements, but does not replace, a baked navigation mesh or obstacle-safe surface paths.
+- **Independent streamed NavigationRegion3D tier:** `navigation_radius` (-1 all loaded active/default, 0–32 near observer), `navigation_hysteresis_cells` (0–8), `max_navigation_transitions_per_frame` (1–64), native `cell_navigation_changed` signal, ready and count APIs. Pinned hubs and important/urgent sources can activate navigation outside player radius. Optional scene callback `set_streaming_navigation_active(active)` enables actual authored NavigationRegion3D tiles; `is_streaming_navigation_ready()` reports their state after two physics-frame sync ticks.
 - **Native fixed-physics-frame navigation scheduler:** register up to 128 live Node3D agents, give them priority 0–3, and cap costly path/steering **recalculations** at `max_navigation_updates_per_physics_frame` (1–64, default 2). The engine chooses winners deterministically by priority, least recent update, then agent name, avoiding starvation among equally important active NPCs. Only loaded simulation-active physics-active cells qualify. Grants are consumed once per agent per physics tick and weak ObjectIDs protect against deleted agents; owner-safe unregister prevents stale NPC replacement bugs. Aurora Forest uses these grants to schedule real obstacle raycasts; this is not navmesh baking.
 - **Independent native physics streaming tier:** per-cell `physics_radius` (-1 all-loaded legacy), `physics_hysteresis_cells` (0–8) and `max_physics_transitions_per_frame` (1–64). Loaded visuals and AI simulation stay separate. An opt-in root `set_streaming_physics_active(active)` filters its authored colliders; `cell_physics_changed`, `is_cell_physics_active()`, `get_physics_active_cell_count()` expose state. Important/urgent streaming sources and pinned hubs force destination cells to full visual LOD and active physics, while background quest preload remains cheap. `is_streaming_source_physics_ready(name)` requires an additional physics tick and optional scene predicate before travel.
 - **Physics-frame scene activation fence:** every instantiated cell records its creation physics frame. `min_physics_frames_after_load` (0–8, default 2) delays an additional **activation** state. An optional root method `is_streaming_activation_ready() -> bool` can veto activation until game-specific collision/navmesh/terrain setup is complete. Query `is_cell_activation_ready(cell)`, `is_streaming_source_activation_ready(name)`, source activated-cell counts, and activation progress separately from loaded scene roots; unloading/reloading always resets the fence.
@@ -79,6 +80,35 @@ var safe_loaded_corridor: Array = world.find_cell_path(origin_cell, target_cell,
 The search checks only registered scene paths, **not** terrain collisions, slope, water, NavMesh edges or active navigation region connectivity. `loaded_only=true` additionally requires each route cell to have a live instantiated root; it is still not a gameplay/physics-ready guarantee. To prevent unbounded CPU spikes, breadth-first search is capped at 512 visited cells, returning an empty route if the goal cannot be found within that limit. Equal shortest paths use deterministic neighbor order `+X, +Z, -X, -Z`, and coordinate math is overflow-safe.
 
 The Aurora Forest quest compass uses this native topological path to point toward intermediate registered cells for distant relics rather than blindly pointing through gaps. `smoke_cell_routes.gd` and the native Doctest verify gaps, shortcuts, disconnected regions and the loaded-only option. A full hierarchy/portal graph and true navigation mesh corridor are separate future capabilities.
+
+## Streaming actual NavigationMesh regions
+
+`WorldPartition3D` can now manage a fourth independent runtime tier: **navigation regions**. It is separate from what is visually loaded, how many physics obstacles participate in collisions, and which AI scripts run. The default `navigation_radius = -1` preserves the native policy's all-loaded-active behavior. The Aurora Forest demo opts into `navigation_radius = 1`, one-ring hysteresis and no more than two live-cell region transitions per frame.
+
+```gdscript
+world.navigation_radius = 1
+world.navigation_hysteresis_cells = 1
+world.max_navigation_transitions_per_frame = 2
+world.cell_navigation_changed.connect(_on_cell_navigation_changed)
+```
+
+A scene root opts into `set_streaming_navigation_active(active)`, called once before `_ready()` and on subsequent budgeted state transitions. In the demo, each near-detail cell creates a real `NavigationRegion3D` holding a deterministic 8×8-grid `NavigationMesh` (128 triangles) from the same analytic terrain height function used by the ground mesh. Adjacent tiles share height and edge coordinates, so Godot's `NavigationServer3D` can connect their boundaries after its physics synchronization. Distant or nav-dormant cells do not generate an active region. Navmesh resources are cached per live cell; they are freed when the cell scene unloads.
+
+```gdscript
+func set_streaming_navigation_active(active: bool) -> void:
+    navigation_active = active
+    if is_node_ready():
+        $NavigationRegion3D.enabled = active
+
+func is_streaming_navigation_ready() -> bool:
+    return is_node_ready() and $NavigationRegion3D.enabled
+```
+
+The engine adds a **two-physics-frame activation fence** before `is_cell_navigation_ready(cell)` succeeds, optionally checking the scene callback. `is_streaming_source_navigation_ready(name)` waits for all registered source cells; urgent/important priority 2/3 sources and pinned hubs request near nav regions even if far from the observer. Neither native flag nor time delay by itself guarantees a NavigationServer3D map connection, navigation mesh quality or safe agent radius. **Avoid force-syncing the server**: navigation map changes normally propagate on the physics loop.
+
+Stalkers query actual `NavigationServer3D.map_get_path()` only under existing native CPU permits (`max_navigation_updates_per_physics_frame`), throttled again to a new route at most every 12 physics ticks unless their destination moves more than 4 m. They use cached waypoints between queries and preserve their up-to-three-ray local collision avoidance as a fallback. **Important limitation:** the generated terrain mesh does not yet carve out tree/rock obstacles, shrink the surface for NPC radius, or validate slopes. It provides real cross-tile *terrain* navigation, but not complete collision-safe navigation. Baking/clipping obstacles and hierarchical path caching remain future work.
+
+Validation: new `smoke_navmesh_streaming.gd` exercises live nav region polygons, real NavigationServer path across adjacent cells, priorities, pin/unpin, dormant regions, and reactivation. Running it requires a compiled Cgame executable; it has not been executed in this authoring environment.
 
 ## Navigation and AI work scheduling
 
@@ -280,7 +310,7 @@ These counters describe the current state, not a prediction of future memory or 
 
 ## Tests
 
-The module includes 69 Doctest cases across `test_world_partition_3d.h` (33) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 70 Doctest cases across `test_world_partition_3d.h` (34) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
@@ -291,6 +321,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 
 ## Non-goals and limitations
 
+- **Runtime terrain NavigationMesh is coarse and does not carve collision.** Generated per-cell 128-triangle tiles describe the analytic terrain surface; no agent-radius clearance, obstacle carving or slope walkability is guaranteed. Server map changes synchronize over later physics frames, and readiness callback success is not proof of connected global NavMesh.
 - **Cell routing is topological, not physical.** `find_cell_path` is a bounded shortest 4-neighbor route of registered PackedScene cells; it does not confirm walkability across individual objects or NavMesh edges, and an empty result can also mean the 512-cell search limit was reached.
 - **Navigation scheduler supplies permits, not pathfinding or a navmesh.** The engine keeps physics, navigation map synchronization and actual movement separate. It limits how often expensive query results can be recomputed, but doesn't guarantee path quality or modify the cost per permitted calculation. Persistent high-priority agents can starve lower priorities; same-priority agents rotate fairly. Registration is bounded at 128 names and invalid/old nodes are weakly tracked.
 - **Independent collision filtering is opt-in.** Only scene roots implementing `set_streaming_physics_active(active)` actually change collision properties. The engine's state does not automatically remove shapes from broadphase or reduce shape memory. Urgent sources can temporarily force near LOD and more expensive colliders even far from the observer, within existing transition budgets.

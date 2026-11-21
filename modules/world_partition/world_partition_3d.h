@@ -63,6 +63,11 @@ class WorldPartition3D : public Node3D {
 	int physics_radius = -1; // Backward-compatible: all loaded cells active.
 	int physics_hysteresis_cells = 1;
 	int max_physics_transitions_per_frame = 2;
+	// Runtime navigation regions are opt-in on cell scene roots and scheduled
+	// independently from physics/simulation/visual LOD.
+	int navigation_radius = -1; // -1 preserves all-loaded behavior.
+	int navigation_hysteresis_cells = 1;
+	int max_navigation_transitions_per_frame = 2;
 	// Limit expensive steering/path recalculations to a deterministic number
 	// of active agents per *physics* frame (not render frame).
 	int max_navigation_updates_per_physics_frame = 2;
@@ -84,6 +89,8 @@ class WorldPartition3D : public Node3D {
 	HashMap<Vector2i, bool> active_simulation_cells; // All loaded cells; optional root callback.
 	HashMap<Vector2i, bool> active_physics_cells; // Independent collision activation tier.
 	HashMap<Vector2i, uint64_t> physics_enabled_frames; // First frame physics was enabled, for safe travel.
+	HashMap<Vector2i, bool> active_navigation_cells;
+	HashMap<Vector2i, uint64_t> navigation_enabled_frames;
 	HashMap<Vector2i, String> pending_cells;
 	HashSet<String> requested_paths;
 	HashMap<String, Ref<PackedScene>> ready_scenes;
@@ -130,6 +137,8 @@ class WorldPartition3D : public Node3D {
 	void _refresh_cell_simulation(const Vector2i &p_center);
 	bool _cell_physics_active(const Vector2i &p_cell, const Vector2i &p_center, bool p_previously_active = false) const;
 	void _refresh_cell_physics(const Vector2i &p_center);
+	bool _cell_navigation_active(const Vector2i &p_cell, const Vector2i &p_center, bool p_previously_active = false) const;
+	void _refresh_cell_navigation(const Vector2i &p_center);
 	bool _is_cell_required_by_important_source(const Vector2i &p_cell) const;
 	void _purge_unused_ready_scenes();
 	bool _instantiate_cell(const Vector2i &p_cell, const Ref<PackedScene> &p_scene);
@@ -189,6 +198,16 @@ public:
 	int get_physics_active_cell_count() const;
 	bool is_cell_physics_ready(const Vector2i &p_cell) const;
 	bool is_streaming_source_physics_ready(const String &p_name) const;
+	void set_navigation_radius(int p_radius);
+	int get_navigation_radius() const;
+	void set_navigation_hysteresis_cells(int p_cells);
+	int get_navigation_hysteresis_cells() const;
+	void set_max_navigation_transitions_per_frame(int p_count);
+	int get_max_navigation_transitions_per_frame() const;
+	bool is_cell_navigation_active(const Vector2i &p_cell) const;
+	int get_navigation_active_cell_count() const;
+	bool is_cell_navigation_ready(const Vector2i &p_cell) const;
+	bool is_streaming_source_navigation_ready(const String &p_name) const;
 
 	void set_max_navigation_updates_per_physics_frame(int p_count);
 	int get_max_navigation_updates_per_physics_frame() const;

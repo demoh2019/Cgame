@@ -98,7 +98,9 @@ func _spawn_position(cell: Vector2i) -> Vector3:
 func _eligible(cell: Vector2i) -> bool:
     if cell == Vector2i.ZERO or is_defeated(cell):
         return false # The home clearing must remain safe.
-    if streamer.get_cell_instance(cell) == null or not streamer.is_cell_activation_ready(cell):
+    if (streamer.get_cell_instance(cell) == null
+            or not streamer.is_cell_activation_ready(cell)
+            or not streamer.is_cell_navigation_ready(cell)):
         return false # Wait for physical ticks and the scene-defined readiness fence.
     # Independent native simulation state, not the visual LOD tier. Disabling
     # LOD for graphics must not wake AI across the whole loaded world.

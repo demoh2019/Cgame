@@ -878,4 +878,39 @@ TEST_CASE("[WorldPartition3D] Bounded cardinal cell routes handle gaps, loading 
 	memdelete(world);
 }
 
+
+TEST_CASE("[WorldPartition3D] Streamed navigation regions validate budgets and missing cell readiness") {
+	WorldPartition3D *world = memnew(WorldPartition3D);
+	CHECK(world->get_navigation_radius() == -1);
+	CHECK(world->get_navigation_hysteresis_cells() == 1);
+	CHECK(world->get_max_navigation_transitions_per_frame() == 2);
+	CHECK(world->get_navigation_active_cell_count() == 0);
+	CHECK_FALSE(world->is_cell_navigation_active(Vector2i(1, 1)));
+	CHECK_FALSE(world->is_cell_navigation_ready(Vector2i(1, 1)));
+	CHECK_FALSE(world->is_streaming_source_navigation_ready("absent"));
+	world->set_navigation_radius(0);
+	world->set_navigation_hysteresis_cells(3);
+	world->set_max_navigation_transitions_per_frame(1);
+	CHECK(world->get_navigation_radius() == 0);
+	CHECK(world->get_navigation_hysteresis_cells() == 3);
+	CHECK(world->get_max_navigation_transitions_per_frame() == 1);
+	world->set_navigation_radius(32);
+	world->set_navigation_hysteresis_cells(8);
+	world->set_max_navigation_transitions_per_frame(64);
+	ERR_PRINT_OFF;
+	world->set_navigation_radius(-2);
+	world->set_navigation_radius(33);
+	world->set_navigation_hysteresis_cells(-1);
+	world->set_navigation_hysteresis_cells(9);
+	world->set_max_navigation_transitions_per_frame(0);
+	world->set_max_navigation_transitions_per_frame(65);
+	ERR_PRINT_ON;
+	CHECK(world->get_navigation_radius() == 32);
+	CHECK(world->get_navigation_hysteresis_cells() == 8);
+	CHECK(world->get_max_navigation_transitions_per_frame() == 64);
+	world->set_navigation_radius(-1);
+	CHECK(world->get_navigation_radius() == -1);
+	memdelete(world);
+}
+
 } // namespace TestWorldPartition3D

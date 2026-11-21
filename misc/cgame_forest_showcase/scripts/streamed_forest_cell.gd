@@ -4,6 +4,7 @@ extends Node3D
 ## Per-cell deterministic seeds keep the same foliage layout on reload.
 
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
+const ForestNavigationMesh = preload("res://scripts/forest_navigation_mesh.gd")
 const CELL_SIZE: float = 32.0
 const TREE_COUNT: int = 54
 const GRASS_COUNT: int = 225
@@ -20,6 +21,9 @@ var high_quality: bool = true
 var streaming_lod: int = 0
 var streaming_simulation_active: bool = true
 var streaming_physics_active: bool = true
+var streaming_navigation_active: bool = true
+var navigation_region: NavigationRegion3D
+var navigation_mesh_cache: NavigationMesh
 var beacon_time: float = 0.0
 var cell_seed: int = 0
 var cell_x: int = 0
@@ -49,6 +53,47 @@ func set_streaming_physics_active(active: bool) -> void:
     streaming_physics_active = active
     if is_instance_valid(obstacles):
         obstacles.collision_layer = 1 if active else 0
+
+
+func set_streaming_navigation_active(active: bool) -> void:
+    # Called by WorldPartition3D before _ready() and with a bounded
+    # per-frame budget. It is separate from physics and visual LOD.
+    streaming_navigation_active = active
+    if is_node_ready():
+        _sync_navigation_region()
+
+
+func _sync_navigation_region() -> void:
+    if streaming_lod != 0:
+        return # A distant LOD scene never allocates a navigation region.
+    if not streaming_navigation_active:
+        if is_instance_valid(navigation_region):
+            navigation_region.enabled = false
+        return
+    if not is_instance_valid(navigation_region):
+        # Cached once per loaded cell; regenerated only on unload/reload.
+        if navigation_mesh_cache == null:
+            navigation_mesh_cache = ForestNavigationMesh.build_tile(global_position)
+        navigation_region = NavigationRegion3D.new()
+        navigation_region.name = "StreamingNavigationRegion"
+        navigation_region.use_edge_connections = true
+        navigation_region.navigation_layers = 1
+        navigation_region.navigation_mesh = navigation_mesh_cache
+        navigation_region.enabled = true
+        add_child(navigation_region)
+    else:
+        navigation_region.enabled = true
+
+
+func is_streaming_navigation_ready() -> bool:
+    # Engine additionally waits two physics frames for NavigationServer3D
+    # synchronization; this callback checks only this region's local setup.
+    return is_node_ready() and streaming_lod == 0 and streaming_navigation_active \
+        and is_instance_valid(navigation_region) and navigation_region.enabled \
+        and navigation_region.is_inside_tree() \
+        and navigation_region.navigation_mesh != null \
+        and navigation_region.navigation_mesh.get_polygon_count() == 128 \
+        and navigation_region.get_navigation_map().is_valid()
 
 
 func is_streaming_physics_ready() -> bool:
@@ -99,6 +144,7 @@ func _rebuild_lod() -> void:
         generated.queue_free()
     grass = null
     obstacles = null
+    navigation_region = null # Old region is queued for removal with the LOD.
     rng.seed = cell_seed
 
     if streaming_lod == 0:
@@ -117,6 +163,7 @@ func _rebuild_lod() -> void:
         if cell_x == 0 and cell_z == 0:
             _spawn_home_beacon()
     set_high_quality(high_quality)
+    _sync_navigation_region()
 
 
 func _world_height(local_x: float, local_z: float) -> float:
