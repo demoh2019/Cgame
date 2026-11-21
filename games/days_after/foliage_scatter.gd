@@ -81,6 +81,26 @@ var _selected_transforms: Array = []
 var _variant_batches: Array = []
 var _lod_tiers := PackedInt32Array()
 var _lod_buckets: Array = []
+var _lod_batch_rebuild_counts := PackedInt32Array([0, 0, 0, 0, 0, 0])
+var _last_lod_dirty_flags := PackedByteArray([0, 0, 0, 0, 0, 0])
+
+
+## Diagnostics: GPU MultiMesh allocations per mesh/LOD combination.
+## Counters are cumulative for this FoliageScatter node's lifetime.
+func get_lod_batch_rebuild_counts() -> PackedInt32Array:
+    return _lod_batch_rebuild_counts.duplicate()
+
+
+func get_last_lod_dirty_flags() -> PackedByteArray:
+    return _last_lod_dirty_flags.duplicate()
+
+
+func get_total_lod_batch_rebuild_count() -> int:
+    var total := 0
+    for count in _lod_batch_rebuild_counts:
+        total += count
+    return total
+
 var _lod_meshes: Array = []
 var _lod_materials: Array = []
 var _lod_viewer: Node3D = null
@@ -619,6 +639,9 @@ func regenerate() -> void:
     # PCG selection is intentionally complete before any LOD work. Changing
     # viewer never re-samples a position, density mask or stable variant ID.
     _lod_tiers.clear()
+    # Regeneration may change cached transforms even when LOD membership
+    # coincidentally matches. The next evaluation must update every GPU slot.
+    _lod_buckets.clear()
     var viewer_position := Vector3(0.0, 0.15, 3.0)
     if _lod_viewer != null and is_instance_valid(_lod_viewer):
         viewer_position = _lod_viewer.global_position
@@ -633,9 +656,23 @@ func _refresh_lod(viewer_position: Vector3, force: bool) -> bool:
         LOD_SWITCH_DISTANCE, LOD_HYSTERESIS)
     if planned.size() != _selected_positions.size():
         return false
-    if not force and planned == _lod_tiers:
+    if not _lod_buckets.is_empty() and planned == _lod_tiers:
+        # Even a forced no-change refresh must not reupload GPU buffers.
         _last_lod_viewer = viewer_position
-        return false
+        _last_lod_dirty_flags.fill(0)
+        return force
+
+    var dirty := PackedByteArray()
+    if _lod_buckets.is_empty():
+        # First fill or explicit regeneration: all six slots must exist
+        # even when some variants are currently empty.
+        dirty.resize(VARIANT_WEIGHTS.size() * 2)
+        dirty.fill(1)
+    else:
+        dirty = LODPlan.plan_dirty_variant_lod_groups(
+            _selected_variants, _lod_tiers, planned, VARIANT_WEIGHTS.size())
+        if dirty.size() != VARIANT_WEIGHTS.size() * 2:
+            return false
 
     var groups: Array = LODPlan.partition_variant_lods(
         _selected_variants, planned, VARIANT_WEIGHTS.size())
@@ -655,7 +692,8 @@ func _refresh_lod(viewer_position: Vector3, force: bool) -> bool:
     _last_lod_viewer = viewer_position
     _lod_tiers = planned
     _lod_buckets = groups
-    _build_lod_renderers()
+    _last_lod_dirty_flags = dirty
+    _build_lod_renderers(dirty)
     return true
 
 
@@ -711,11 +749,14 @@ func _get_lod_mesh(variant: int, lod: int) -> PrimitiveMesh:
     return geometry
 
 
-func _build_lod_renderers() -> void:
-    # Six stable GPU component slots, not per-point scene nodes. An empty
-    # mesh/tier combination remains an empty MultiMesh with its resource.
+func _build_lod_renderers(dirty: PackedByteArray) -> void:
+    # Reallocate only groups with changed membership. Untouched MultiMesh
+    # resources retain their GPU buffers, transforms, colors and IDs.
     for variant in range(VARIANT_WEIGHTS.size()):
         for lod in 2:
+            var group_index: int = variant * 2 + lod
+            if dirty[group_index] == 0:
+                continue
             var renderer: MultiMeshInstance3D = get_lod_renderer(variant, lod)
             if renderer == null:
                 renderer = MultiMeshInstance3D.new()
@@ -741,3 +782,4 @@ func _build_lod_renderers() -> void:
                 batch.set_instance_color(local_index, VARIANT_COLORS[variant])
             renderer.multimesh = batch
             renderer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+            _lod_batch_rebuild_counts[group_index] += 1
