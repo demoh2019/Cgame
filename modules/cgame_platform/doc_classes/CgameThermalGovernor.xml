@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameThermalGovernor" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Thermal and battery governor that outputs an FPS cap and quality step.
+	</brief_description>
+	<description>
+		[CgameThermalGovernor] watches frame times (and optionally battery readings) on phones and laptops and decides how far to lower quality and whether to cap the frame rate. Stepping down needs sustained slow frames ([code]3[/code] seconds above 115% of the frame budget, or 107% when frame times are rising); stepping back up needs a longer run of headroom ([code]12[/code] seconds below 70% of the budget). Frame times in between hold the current step.
+		The engine has no battery API, so battery percentage is an input to [method record_battery]. When the battery is discharging and below 20%, the FPS cap drops to 30 and quality is lowered by one more level.
+		Call [method sample_frame] once per frame, then use [method fps_cap] and [method apply_to].
+	</description>
+	<methods>
+		<method name="apply_to" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="base_level" type="int" />
+			<description>
+				Subtracts the current step (and one more level on a low battery) from [param base_level] and clamps the result to [code]0..3[/code].
+			</description>
+		</method>
+		<method name="budget_ms" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the frame time budget in milliseconds for [member target_fps].
+			</description>
+		</method>
+		<method name="drain_per_hour" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the battery drain in percent per hour from a least-squares fit of the discharging samples, or [code]-1.0[/code] if there is not enough data.
+			</description>
+		</method>
+		<method name="fps_cap" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the recommended frame rate cap: [member target_fps], or [code]30[/code] at the maximum step or on a low battery.
+			</description>
+		</method>
+		<method name="hours_remaining" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the estimated hours of battery left, or [code]-1.0[/code] if unknown.
+			</description>
+		</method>
+		<method name="quality_step" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many quality levels to step down, from [code]0[/code] to [code]3[/code].
+			</description>
+		</method>
+		<method name="read_system_battery" qualifiers="static">
+			<return type="Dictionary" />
+			<description>
+				Returns [code]{"available": bool, "percent": float, "charging": bool}[/code]. The engine exposes no battery API, so [code]available[/code] is always [code]false[/code]; feed readings from your platform layer to [method record_battery].
+			</description>
+		</method>
+		<method name="record_battery">
+			<return type="void" />
+			<param index="0" name="now_s" type="float" />
+			<param index="1" name="percent" type="float" />
+			<param index="2" name="charging" type="bool" />
+			<description>
+				Records a battery reading. Only discharging samples feed the drain estimate; a charging reading clears the samples.
+			</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>
+				Clears all samples and returns to step [code]0[/code].
+			</description>
+		</method>
+		<method name="sample_frame">
+			<return type="bool" />
+			<param index="0" name="frame_ms" type="float" />
+			<param index="1" name="now_s" type="float" />
+			<description>
+				Feeds one frame time. The state is evaluated once per second of [param now_s]. Returns [code]true[/code] if the step changed.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="target_fps" type="int" setter="configure" getter="get_target_fps" default="60">
+			The frame rate the game aims for. Set it with [code]configure()[/code]; values below [code]1[/code] are clamped.
+		</member>
+	</members>
+	<constants>
+		<constant name="MAX_STEPS" value="3">
+			The maximum number of quality steps.
+		</constant>
+		<constant name="WINDOW_FRAMES" value="180">
+			Number of recent frames used to judge the frame time.
+		</constant>
+	</constants>
+</class>

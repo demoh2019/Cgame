@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameMockPlatformBackend" inherits="CgamePlatformBackend" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		In-memory platform backend that reproduces console-style failure modes.
+	</brief_description>
+	<description>
+		[CgameMockPlatformBackend] keeps saves in memory and is meant for tests and for exercising the failure handling of game code on any machine: storage quota, interrupted writes, suspend, sign-out, controller loss and scripted platform keyboard input.
+		Like console save containers it charges the new data on top of what already exists. [method CgamePlatformBackend.write_save] returns [constant CgamePlatformServices.SAVE_SUSPENDED] while suspended. User [code]"user1"[/code] is signed in and paired with controller device [code]0[/code].
+	</description>
+	<methods>
+		<method name="corrupt_main">
+			<return type="void" />
+			<param index="0" name="slot" type="String" />
+			<description>
+				Overwrites the main copy of [param slot] with garbage to simulate a torn write or a disk fault.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="scripted_text" type="PackedStringArray" setter="set_scripted_text" getter="get_scripted_text" default="PackedStringArray()">
+			Texts returned by [method CgamePlatformBackend.request_text_input], consumed in order. When the list is empty the request fails. Results are clamped to the requested maximum length.
+		</member>
+		<member name="native_keyboard" type="bool" setter="set_native_keyboard" getter="get_native_keyboard" default="true">
+			Value returned by [method CgamePlatformBackend.uses_native_keyboard].
+		</member>
+	</members>
+</class>

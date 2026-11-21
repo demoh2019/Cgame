@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameSafeArea" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Safe-area insets for HUD margins.
+	</brief_description>
+	<description>
+		[CgameSafeArea] converts the safe area reported by the display (notches, rounded corners, TV overscan, handheld bezels) into per-side insets, so that HUD margins grow by the part of the window that is unsafe and nothing important is drawn under a cut-out.
+		Insets are dictionaries with the integer keys [code]left[/code], [code]top[/code], [code]right[/code] and [code]bottom[/code]. All methods are static.
+	</description>
+	<methods>
+		<method name="apply" qualifiers="static">
+			<return type="void" />
+			<param index="0" name="margin" type="MarginContainer" />
+			<param index="1" name="insets" type="Dictionary" />
+			<param index="2" name="base" type="int" default="14" />
+			<description>
+				Sets the four [code]margin_*[/code] theme constant overrides of [param margin] to [param base] plus the matching entry of [param insets]. Does nothing if [param margin] is [code]null[/code].
+			</description>
+		</method>
+		<method name="current" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="viewport" type="Viewport" />
+			<description>
+				Returns the insets of the main window in the 2D canvas space of [param viewport], using [method DisplayServer.get_display_safe_area]. Returns zero insets for a [code]null[/code] viewport and on a headless display server.
+			</description>
+		</method>
+		<method name="from_display" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="window_position" type="Vector2i" />
+			<param index="1" name="window_size" type="Vector2i" />
+			<param index="2" name="screen_safe_rect" type="Rect2i" />
+			<param index="3" name="canvas_size" type="Vector2" />
+			<description>
+				Converts a safe rectangle in screen coordinates into insets in canvas units. The rectangle is moved into window space with [param window_position], then the window pixel insets are scaled from [param window_size] to [param canvas_size] to account for stretch modes.
+			</description>
+		</method>
+		<method name="insets" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="window_size" type="Vector2i" />
+			<param index="1" name="safe_rect" type="Rect2i" />
+			<description>
+				Returns the per-side insets in window pixels of a window of [param window_size] whose safe rectangle, in the same pixel space, is [param safe_rect]. A safe rectangle larger than the window gives no inset; degenerate input gives zero insets.
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="BASE_MARGIN" value="14">
+			The default base margin in pixels used by [method apply].
+		</constant>
+	</constants>
+</class>

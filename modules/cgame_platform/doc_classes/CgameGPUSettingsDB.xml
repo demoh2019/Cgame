@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameGPUSettingsDB" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		GPU family database that recommends a quality level.
+	</brief_description>
+	<description>
+		[CgameGPUSettingsDB] maps a GPU adapter name to a recommended quality level from [code]0[/code] (low) to [code]3[/code] (ultra), a resolution scale and a set of feature toggles. Adapter names are matched with ordered regular expressions, first match wins; unknown adapters use a vendor hint or a safe default.
+		Measured results override the static heuristic. [method learn] stores average frame times per adapter and quality level in a JSON file and [method recommend] picks the highest level whose median frame time meets the target. If the best level is far below the target and the next level was never measured, the next level is recommended once.
+		All methods are static. The result of [method match_adapter] and [method recommend] is a dictionary with the keys [code]level[/code], [code]scale[/code], [code]family[/code], [code]source[/code] ("database", "fallback" or "learned") and [code]features[/code].
+	</description>
+	<methods>
+		<method name="features_for" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns the feature toggles for [param level] (clamped to [code]0..3[/code]): [code]ssao[/code], [code]ssr[/code], [code]volumetric_fog[/code], [code]sdfgi[/code], [code]glow[/code], [code]shadow_quality[/code] and [code]msaa[/code].
+			</description>
+		</method>
+		<method name="get_default_path" qualifiers="static">
+			<return type="String" />
+			<description>
+				Returns the default location of the learned data, [code]user://gpu_learned.json[/code].
+			</description>
+		</method>
+		<method name="get_rule_count" qualifiers="static">
+			<return type="int" />
+			<description>
+				Returns the number of built-in adapter rules.
+			</description>
+		</method>
+		<method name="learn" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="adapter" type="String" />
+			<param index="1" name="measured_frame_ms" type="float" />
+			<param index="2" name="level" type="int" />
+			<param index="3" name="path" type="String" default="&quot;user://gpu_learned.json&quot;" />
+			<description>
+				Records a measured average frame time for [param adapter] at a quality [param level]. At most 31 samples are kept per level. Returns [code]false[/code] for a non-positive time or if the file cannot be written.
+			</description>
+		</method>
+		<method name="match_adapter" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="adapter" type="String" />
+			<param index="1" name="vendor" type="String" default="&quot;&quot;" />
+			<description>
+				Returns the static recommendation for [param adapter] without learned data.
+			</description>
+		</method>
+		<method name="recommend" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="adapter" type="String" />
+			<param index="1" name="vendor" type="String" default="&quot;&quot;" />
+			<param index="2" name="target_ms" type="float" default="16.6667" />
+			<param index="3" name="path" type="String" default="&quot;user://gpu_learned.json&quot;" />
+			<description>
+				Returns the recommendation for [param adapter], using learned data from [param path] when present and the static database otherwise. [param target_ms] is the frame time budget.
+			</description>
+		</method>
+		<method name="recommend_current" qualifiers="static">
+			<return type="Dictionary" />
+			<description>
+				Returns the recommendation for the adapter reported by the [RenderingServer].
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="MAX_LEVEL" value="3">
+			The highest quality level.
+		</constant>
+		<constant name="MAX_SAMPLES_PER_LEVEL" value="31">
+			Number of learned samples kept per adapter and level.
+		</constant>
+	</constants>
+</class>

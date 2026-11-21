@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameSceneCRDT" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Scene document as an operation-based CRDT for multi-user editing.
+	</brief_description>
+	<description>
+		[CgameSceneCRDT] keeps a scene tree that several editors can change concurrently and that converges to the same state on every replica regardless of the order in which operations arrive.
+		[b]Model.[/b] Every node has a stable string id. Properties are last-writer-wins registers ordered by (Lamport clock, replica id). Node existence is an add-wins set: every [code]add_node[/code] creates a unique tag and [code]remove_node[/code] only tombstones the tags it has seen, so a concurrent add survives a remove. The child order under each parent is an RGA sequence; every placement (add or move) is an element [code]"lamport@replica"[/code] inserted after a reference element, siblings inserted after the same reference are ordered newest first, and the highest placement of a node wins.
+		[b]Operations[/b] are dictionaries with the keys [code]kind[/code], [code]r[/code] (replica), [code]seq[/code] (per-replica counter) and [code]l[/code] (Lamport clock), plus [code]id[/code] and kind-specific keys. Kinds are [code]add_node[/code] ([code]parent[/code], [code]after[/code], [code]props[/code], [code]type[/code]), [code]remove_node[/code] ([code]tags[/code]), [code]set_prop[/code] ([code]prop[/code], [code]value[/code]) and [code]move_node[/code] ([code]parent[/code], [code]after[/code]). [method apply] is idempotent and commutative.
+		[b]Sync.[/b] Exchange [method state_vector] and answer with [method ops_since]; duplicates are harmless. Presence (cursor and selection) is an ephemeral channel that is not part of the operation log.
+		[codeblock]
+		var a = CgameSceneCRDT.new()
+		a.replica = "alice"
+		var b = CgameSceneCRDT.new()
+		b.replica = "bob"
+		a.local_op("add_node", {"id": "root", "type": "Node3D", "props": {"name": "Root"}})
+		b.merge_ops(a.ops_since(b.state_vector()))
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="all_node_ids" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the ids of all alive nodes reachable from the top level in depth-first order. Cycles created by concurrent moves are dropped.
+			</description>
+		</method>
+		<method name="apply">
+			<return type="bool" />
+			<param index="0" name="op" type="Dictionary" />
+			<description>
+				Applies a local or remote operation. Returns [code]true[/code] if it changed the state and [code]false[/code] for a duplicate.
+			</description>
+		</method>
+		<method name="apply_presence">
+			<return type="bool" />
+			<param index="0" name="message" type="Dictionary" />
+			<description>
+				Applies a presence message. Messages older than the newest one already seen from the same user are ignored and [code]false[/code] is returned.
+			</description>
+		</method>
+		<method name="children_of" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="parent" type="String" />
+			<description>
+				Returns the ids of the alive children of [param parent] in RGA order. Use an empty string for the top level.
+			</description>
+		</method>
+		<method name="expire_presence">
+			<return type="Array" />
+			<param index="0" name="now_msec" type="int" />
+			<param index="1" name="ttl_msec" type="int" />
+			<description>
+				Removes users that were not heard from since [code]now_msec - ttl_msec[/code] and returns their names.
+			</description>
+		</method>
+		<method name="from_packed_scene_dict" qualifiers="static">
+			<return type="CgameSceneCRDT" />
+			<param index="0" name="scene" type="Dictionary" />
+			<param index="1" name="replica" type="String" default="&quot;local&quot;" />
+			<description>
+				Creates a document owned by [param replica] and fills it from a nested scene dictionary. See [method load_scene_dict].
+			</description>
+		</method>
+		<method name="get_prop" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="node_id" type="String" />
+			<param index="1" name="prop" type="String" />
+			<param index="2" name="default" type="Variant" default="null" />
+			<description>
+				Returns the value of the register [param prop] of [param node_id], or [param default] if it is not set. The value stays readable after the node was removed.
+			</description>
+		</method>
+		<method name="has_node" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="node_id" type="String" />
+			<description>
+				Returns [code]true[/code] if at least one add-tag of [param node_id] is not tombstoned.
+			</description>
+		</method>
+		<method name="load_scene_dict">
+			<return type="void" />
+			<param index="0" name="scene" type="Dictionary" />
+			<description>
+				Fills this (empty) document from a nested dictionary [code]{id, type, name, props, children}[/code]. A missing [code]id[/code] becomes the path of the node, for example [code]"Root/Child"[/code].
+			</description>
+		</method>
+		<method name="local_op">
+			<return type="Dictionary" />
+			<param index="0" name="kind" type="String" />
+			<param index="1" name="args" type="Dictionary" />
+			<description>
+				Builds, applies and returns a local operation and emits [signal op_generated]. [param args] always has [code]id[/code]. For [code]add_node[/code] it may have [code]parent[/code], [code]index[/code], [code]type[/code] and [code]props[/code]; for [code]set_prop[/code] [code]prop[/code] and [code]value[/code]; for [code]move_node[/code] [code]parent[/code] and [code]index[/code]. An [code]index[/code] that is negative or past the end appends.
+			</description>
+		</method>
+		<method name="local_presence">
+			<return type="Dictionary" />
+			<param index="0" name="cursor" type="Variant" />
+			<param index="1" name="selection" type="Array" />
+			<param index="2" name="time_msec" type="int" default="0" />
+			<description>
+				Records the ephemeral state of the local user and returns the message to broadcast. [param time_msec] is a caller-supplied timestamp used by [method expire_presence].
+			</description>
+		</method>
+		<method name="merge_ops">
+			<return type="int" />
+			<param index="0" name="ops" type="Array" />
+			<description>
+				Applies many operations and returns how many were new.
+			</description>
+		</method>
+		<method name="ops_since" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="vector" type="Dictionary" />
+			<description>
+				Returns the operations a peer with the state vector [param vector] may be missing.
+			</description>
+		</method>
+		<method name="parent_of" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="node_id" type="String" />
+			<description>
+				Returns the parent id of [param node_id] according to its winning placement, or an empty string.
+			</description>
+		</method>
+		<method name="presence" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns a copy of the presence of all users as [code]user -&gt; {l, cursor, selection, t}[/code].
+			</description>
+		</method>
+		<method name="remove_presence">
+			<return type="void" />
+			<param index="0" name="user" type="String" />
+			<description>
+				Removes [param user] from the presence list.
+			</description>
+		</method>
+		<method name="state_vector" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the highest contiguous sequence number per replica. A gap in the received operations does not advance it.
+			</description>
+		</method>
+		<method name="to_scene_dict" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the first top-level node as a nested dictionary [code]{id, type, name, props, children}[/code], or an empty dictionary for an empty document.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="replica" type="String" setter="set_replica" getter="get_replica" default="&quot;&quot;">
+			Identifier of this replica. It must be unique among all collaborating editors.
+		</member>
+		<member name="clock" type="int" setter="set_clock" getter="get_clock" default="0">
+			The Lamport clock. It advances with every local operation and is raised to the highest clock seen from remote operations.
+		</member>
+	</members>
+	<signals>
+		<signal name="op_generated">
+			<param index="0" name="op" type="Dictionary" />
+			<description>
+				Emitted for every operation created by [method local_op]. Broadcast it to the other replicas.
+			</description>
+		</signal>
+	</signals>
+</class>

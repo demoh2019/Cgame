@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgamePlatformServices" inherits="Object" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Engine singleton that abstracts the host platform for game code.
+	</brief_description>
+	<description>
+		[CgamePlatformServices] is everything the game needs from the host platform that is not rendering or input mapping: integrity-checked saves with backup recovery, achievements, presence, entitlements, parental restrictions, text input, and the session rules that console certification asks for (pause on controller loss, pause on suspend, end the session on sign-out).
+		The singleton talks to a [CgamePlatformBackend]. If none was set, a [CgameDesktopPlatformBackend] is created on first use. The singleton attaches a small helper node to the scene tree so that [constant MainLoop.NOTIFICATION_APPLICATION_PAUSED] suspends and [constant MainLoop.NOTIFICATION_APPLICATION_RESUMED] resumes the backend. Instances created with [code]CgamePlatformServices.new()[/code] do not attach themselves; forward notifications with [method handle_notification].
+		Saves are stored as [code]CGS1:&lt;hash&gt;:&lt;json&gt;[/code]. [method load_game] verifies the hash, falls back to the backup copy when the main file is missing or damaged, and reports which source was used.
+		[codeblock]
+		var services = Engine.get_singleton("CgamePlatformServices")
+		services.start_session()
+		if services.save_game("slot1", {"level": 3}) == CgamePlatformServices.SAVE_OK:
+			print("saved")
+		var result = services.load_game("slot1")
+		if result["result"] == CgamePlatformServices.SAVE_OK:
+			print(result["data"])
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="attach_to_scene_tree">
+			<return type="void" />
+			<description>
+				Adds a helper node to the scene tree root that forwards application pause and resume notifications to this object. Does nothing if the scene tree does not exist yet or the helper is already attached. The singleton calls this automatically.
+			</description>
+		</method>
+		<method name="can_use_chat">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if chat is not restricted and the network is available.
+			</description>
+		</method>
+		<method name="can_use_online">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if online play is not restricted and the network is available.
+			</description>
+		</method>
+		<method name="decode_save" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="bytes" type="PackedByteArray" />
+			<description>
+				Decodes bytes produced by [method encode_save]. Returns an empty dictionary if the data is empty, truncated, has a wrong magic or a wrong hash, or is not a JSON object.
+			</description>
+		</method>
+		<method name="encode_save" qualifiers="static">
+			<return type="PackedByteArray" />
+			<param index="0" name="data" type="Dictionary" />
+			<description>
+				Wraps [param data] in the integrity envelope [code]CGS1:&lt;hash&gt;:&lt;json&gt;[/code].
+			</description>
+		</method>
+		<method name="get_backend">
+			<return type="CgamePlatformBackend" />
+			<description>
+				Returns the active backend, creating a [CgameDesktopPlatformBackend] if none was set.
+			</description>
+		</method>
+		<method name="get_last_recover_source" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the [enum RecoverSource] of the most recent [method load_game] call.
+			</description>
+		</method>
+		<method name="get_last_session_end_reason" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the reason of the last [signal session_ended], for example [code]"signed_out:user1"[/code].
+			</description>
+		</method>
+		<method name="handle_notification">
+			<return type="void" />
+			<param index="0" name="what" type="int" />
+			<description>
+				Handles a main-loop notification. [constant MainLoop.NOTIFICATION_APPLICATION_PAUSED] suspends the backend and [constant MainLoop.NOTIFICATION_APPLICATION_RESUMED] resumes it. Other values are ignored.
+			</description>
+		</method>
+		<method name="has_entitlement">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns [code]true[/code] if the backend granted the entitlement [param id].
+			</description>
+		</method>
+		<method name="is_paused_for_controller" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while the session's controller is disconnected.
+			</description>
+		</method>
+		<method name="is_paused_for_suspend" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while the application is suspended.
+			</description>
+		</method>
+		<method name="is_session_active" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while a signed-in session is running.
+			</description>
+		</method>
+		<method name="load_game">
+			<return type="Dictionary" />
+			<param index="0" name="slot" type="String" />
+			<description>
+				Loads [param slot]. Returns [code]{"result": SaveResult, "data": Dictionary, "source": RecoverSource}[/code]. [constant SAVE_NO_USER] and [constant SAVE_SUSPENDED] are returned without touching storage. If the main file does not validate, the backup copy is tried. [constant SAVE_NOT_FOUND] means both copies are missing, [constant SAVE_CORRUPT] that at least one exists but none validates.
+			</description>
+		</method>
+		<method name="network_available">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the backend reports a network connection.
+			</description>
+		</method>
+		<method name="request_text">
+			<return type="Dictionary" />
+			<param index="0" name="prompt" type="String" />
+			<param index="1" name="max_len" type="int" />
+			<description>
+				Requests text through the platform keyboard. Returns [code]{"ok": bool, "text": String}[/code]. When [code]ok[/code] is [code]false[/code] the UI should show its own keyboard.
+			</description>
+		</method>
+		<method name="save_game">
+			<return type="int" />
+			<param index="0" name="slot" type="String" />
+			<param index="1" name="data" type="Dictionary" />
+			<description>
+				Saves [param data] to [param slot] and returns a [enum SaveResult]. Returns [constant SAVE_NO_USER] if nobody is signed in and [constant SAVE_SUSPENDED] while suspended.
+			</description>
+		</method>
+		<method name="set_backend">
+			<return type="void" />
+			<param index="0" name="backend" type="CgamePlatformBackend" />
+			<description>
+				Replaces the backend and reconnects the lifecycle signals. [member is_session_active] is derived from the new backend's sign-in state.
+			</description>
+		</method>
+		<method name="set_presence">
+			<return type="void" />
+			<param index="0" name="text" type="String" />
+			<description>
+				Sets the presence (rich status) text on the backend.
+			</description>
+		</method>
+		<method name="should_pause" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the game should be paused because the controller was lost or the application is suspended.
+			</description>
+		</method>
+		<method name="start_session">
+			<return type="bool" />
+			<param index="0" name="device_id" type="int" default="0" />
+			<description>
+				Starts a session owned by the controller [param device_id]. Returns [code]false[/code] if nobody is signed in. The session starts paused if the controller is not connected.
+			</description>
+		</method>
+		<method name="unlock_achievement">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Unlocks the achievement [param id] and emits [signal achievement_unlocked] if it was new. Returns whether it was new.
+			</description>
+		</method>
+	</methods>
+	<signals>
+		<signal name="session_ended">
+			<param index="0" name="reason" type="String" />
+			<description>
+				Emitted when the session ended, for example because the user signed out. [param reason] has the form [code]"signed_out:&lt;user id&gt;"[/code].
+			</description>
+		</signal>
+		<signal name="pause_changed">
+			<param index="0" name="paused" type="bool" />
+			<param index="1" name="reason" type="String" />
+			<description>
+				Emitted when a pause cause changed. [param paused] is the combined result of [method should_pause]; [param reason] is one of [code]"controller_disconnected"[/code], [code]"controller_reconnected"[/code], [code]"suspend"[/code] or [code]"resume"[/code].
+			</description>
+		</signal>
+		<signal name="achievement_unlocked">
+			<param index="0" name="id" type="String" />
+			<description>
+				Emitted when [param id] was newly unlocked.
+			</description>
+		</signal>
+	</signals>
+	<constants>
+		<constant name="SAVE_OK" value="0" enum="SaveResult">
+			The operation succeeded.
+		</constant>
+		<constant name="SAVE_QUOTA_EXCEEDED" value="1" enum="SaveResult">
+			The write would exceed the storage quota. The previous save is untouched.
+		</constant>
+		<constant name="SAVE_IO_ERROR" value="2" enum="SaveResult">
+			A file operation failed.
+		</constant>
+		<constant name="SAVE_NOT_FOUND" value="3" enum="SaveResult">
+			Neither a main nor a backup copy exists.
+		</constant>
+		<constant name="SAVE_CORRUPT" value="4" enum="SaveResult">
+			A copy exists but failed validation, and no valid backup was available.
+		</constant>
+		<constant name="SAVE_NO_USER" value="5" enum="SaveResult">
+			Nobody is signed in.
+		</constant>
+		<constant name="SAVE_INTERRUPTED" value="6" enum="SaveResult">
+			The write was stopped before it was committed. The previous save is untouched.
+		</constant>
+		<constant name="SAVE_SUSPENDED" value="7" enum="SaveResult">
+			The application is suspended.
+		</constant>
+		<constant name="RECOVER_NONE" value="0" enum="RecoverSource">
+			Nothing was loaded.
+		</constant>
+		<constant name="RECOVER_MAIN" value="1" enum="RecoverSource">
+			The data came from the main file.
+		</constant>
+		<constant name="RECOVER_BACKUP" value="2" enum="RecoverSource">
+			The main file was missing or damaged and the data came from the backup.
+		</constant>
+	</constants>
+</class>

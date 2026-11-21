@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameDesktopPlatformBackend" inherits="CgamePlatformBackend" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Filesystem platform backend for desktop systems.
+	</brief_description>
+	<description>
+		[CgameDesktopPlatformBackend] stores saves as files below [member root]. A save slot consists of [code]slot.sav[/code] (main), [code]slot.tmp[/code] (write in progress) and [code]slot.bak[/code] (previous main file). Writes are atomic: the data goes to the temporary file first, is verified by size, and only then replaces the main file after the old one was moved to the backup name.
+		Achievements are kept in [code]achievements.json[/code] below the root. A single local user is signed in and paired with controller device [code]0[/code].
+	</description>
+	<methods>
+		<method name="corrupt_main">
+			<return type="void" />
+			<param index="0" name="slot" type="String" />
+			<description>
+				Test helper. Overwrites the main file of [param slot] with garbage to simulate a torn write or a disk fault.
+			</description>
+		</method>
+		<method name="create" qualifiers="static">
+			<return type="CgameDesktopPlatformBackend" />
+			<param index="0" name="root" type="String" default="&quot;user://platform&quot;" />
+			<description>
+				Creates a backend that stores its files below [param root] and creates the directory.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="root" type="String" setter="set_root" getter="get_root" default="&quot;user://platform&quot;">
+			Directory below which all files are stored. Setting it creates the directory.
+		</member>
+	</members>
+</class>

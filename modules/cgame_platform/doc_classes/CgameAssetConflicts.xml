@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameAssetConflicts" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Asset scans, three-way scene merge, exclusive locks and override conflicts.
+	</brief_description>
+	<description>
+		[CgameAssetConflicts] collects the tooling needed to detect and resolve concurrent changes to project assets.
+		[b]Scanning.[/b] [method scan] hashes every file of a directory with SHA-256 and [method changed_paths] and [method three_way_binary] compare scans. [b]Three-way merge.[/b] [method merge_scene] and [method three_way] compare node properties of a base, a local and a remote scene (node path -&gt; property -&gt; value, the reserved property [code]"_type"[/code] holds the node type). A value changed on one side only is taken, a value changed on both sides to different values is a conflict and the local value is kept. [b]Locks.[/b] Instances of this class keep Perforce-style exclusive checkout locks with an expiry time. [b]Overrides.[/b] [method override_conflicts] reports instance overrides that clash with changes of the inherited scene.
+		Conflict dictionaries have a [code]kind[/code] of [code]"property"[/code], [code]"add_add"[/code], [code]"delete_edit"[/code], [code]"binary"[/code], [code]"orphaned_override"[/code] or [code]"override_vs_base"[/code].
+	</description>
+	<methods>
+		<method name="active_locks">
+			<return type="Dictionary" />
+			<param index="0" name="now" type="float" default="-1.0" />
+			<description>
+				Returns [code]path -&gt; owner[/code] for all unexpired locks. A negative [param now] uses the system clock.
+			</description>
+		</method>
+		<method name="can_edit">
+			<return type="bool" />
+			<param index="0" name="path" type="String" />
+			<param index="1" name="user" type="String" />
+			<param index="2" name="now" type="float" default="-1.0" />
+			<description>
+				Returns [code]true[/code] if [param path] is free or locked by [param user].
+			</description>
+		</method>
+		<method name="changed_paths" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="a" type="Dictionary" />
+			<param index="1" name="b" type="Dictionary" />
+			<description>
+				Returns the sorted paths whose hash differs between the scans [param a] and [param b]: added, removed or modified files.
+			</description>
+		</method>
+		<method name="flatten_scene_dict" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="scene" type="Dictionary" />
+			<description>
+				Flattens a nested scene dictionary [code]{name, type, props, children}[/code] into [code]node path -&gt; properties[/code].
+			</description>
+		</method>
+		<method name="hash_file" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Returns [code]{"sha256": String, "size": int}[/code] of a file. The hash is empty if the file cannot be read.
+			</description>
+		</method>
+		<method name="lock">
+			<return type="bool" />
+			<param index="0" name="path" type="String" />
+			<param index="1" name="user" type="String" />
+			<param index="2" name="ttl_sec" type="float" default="300.0" />
+			<param index="3" name="now" type="float" default="-1.0" />
+			<description>
+				Takes or refreshes an exclusive lock on [param path] for [param ttl_sec] seconds. Returns [code]false[/code] if another user holds an unexpired lock. A negative [param now] uses the system clock; pass a fixed value in tests.
+			</description>
+		</method>
+		<method name="merge_scene" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="base" type="Dictionary" />
+			<param index="1" name="mine" type="Dictionary" />
+			<param index="2" name="theirs" type="Dictionary" />
+			<description>
+				Merges two scenes against their common ancestor. Returns [code]{"merged": Dictionary, "conflicts": Array}[/code]. Added nodes of both sides are kept, a node deleted on one side and unchanged on the other is removed, and in conflicts the merged result keeps the value of [param mine].
+			</description>
+		</method>
+		<method name="override_conflicts" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="instance_overrides" type="Dictionary" />
+			<param index="1" name="base_changes" type="Dictionary" />
+			<description>
+				Reports conflicts between instance overrides ([code]node path -&gt; {property: value}[/code]) and changes of the inherited scene ([code]node path -&gt; {"removed": bool, "props": {property: new value}}[/code]). Results are [code]"orphaned_override"[/code] for nodes removed upstream and [code]"override_vs_base"[/code] for properties changed upstream that the instance overrides differently.
+			</description>
+		</method>
+		<method name="owner">
+			<return type="String" />
+			<param index="0" name="path" type="String" />
+			<param index="1" name="now" type="float" default="-1.0" />
+			<description>
+				Returns the user holding the lock on [param path], or an empty string if it is free or the lock expired.
+			</description>
+		</method>
+		<method name="parse_tscn" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="text" type="String" />
+			<description>
+				Parses the node headers and [code]key = value[/code] lines of a text scene into [code]node path -&gt; properties[/code]. Values are kept as raw strings.
+			</description>
+		</method>
+		<method name="scan" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="dir" type="String" />
+			<description>
+				Recursively hashes every file below [param dir]. Hidden entries are skipped. Returns [code]path -&gt; {"sha256", "size"}[/code].
+			</description>
+		</method>
+		<method name="three_way" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="base" type="Dictionary" />
+			<param index="1" name="mine" type="Dictionary" />
+			<param index="2" name="theirs" type="Dictionary" />
+			<description>
+				Returns only the conflicts of [method merge_scene].
+			</description>
+		</method>
+		<method name="three_way_binary" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="base" type="Dictionary" />
+			<param index="1" name="mine" type="Dictionary" />
+			<param index="2" name="theirs" type="Dictionary" />
+			<description>
+				Returns the files that changed differently on both sides, from three scans, as [code]{kind: "binary", path, base, mine, theirs}[/code].
+			</description>
+		</method>
+		<method name="unlock">
+			<return type="bool" />
+			<param index="0" name="path" type="String" />
+			<param index="1" name="user" type="String" />
+			<param index="2" name="force" type="bool" default="false" />
+			<description>
+				Releases the lock on [param path] if [param user] holds it, or regardless of the owner if [param force] is [code]true[/code]. Returns whether a lock was released.
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="CHUNK" value="65536">
+			Number of bytes read per step when hashing a file.
+		</constant>
+	</constants>
+</class>

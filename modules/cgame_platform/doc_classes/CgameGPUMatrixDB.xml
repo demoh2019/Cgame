@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameGPUMatrixDB" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		GPU compatibility matrix and rendering-regression database.
+	</brief_description>
+	<description>
+		[CgameGPUMatrixDB] ingests JSON reports written by a GPU benchmark run (collected from testers), builds a matrix of vendor, GPU family, driver and renderer cells, detects visual regressions, clusters failures by driver and exports Markdown, CSV and learned data for [CgameGPUSettingsDB].
+		[b]Report format.[/b] A report is a dictionary with [code]schema[/code] ([code]1[/code]), [code]system[/code] (non-empty strings [code]adapter[/code], [code]vendor[/code], [code]driver[/code], [code]os[/code], [code]renderer[/code]; no personal data), an optional [code]completed[/code] flag and [code]runs[/code]: one entry per quality level with [code]level[/code], [code]frame_ms[/code] ([code]p50[/code], [code]p95[/code], [code]p99[/code]), [code]errors[/code] and [code]checksums[/code], one 16-digit hexadecimal perceptual hash per captured frame.
+		[b]Regressions.[/b] For every renderer, level and frame index the reference is the medoid of all reported hashes (or a hash pinned with [method set_reference]). A frame whose Hamming distance from the reference exceeds [member tolerance] is a regression and blocks that level. The hash is the 64-bit difference hash (dHash) from [method dhash].
+		A report fails when it has errors, a regression or [code]completed = false[/code]. Analysis is rebuilt lazily after changes.
+	</description>
+	<methods>
+		<method name="add_report">
+			<return type="bool" />
+			<param index="0" name="report" type="Variant" />
+			<param index="1" name="source" type="String" default="&quot;&quot;" />
+			<description>
+				Validates and adds a report. Invalid reports are recorded in [method get_rejected] with [param source] and [code]false[/code] is returned.
+			</description>
+		</method>
+		<method name="build">
+			<return type="void" />
+			<description>
+				Recomputes the references and the evaluation of every report. The accessors call this automatically when needed.
+			</description>
+		</method>
+		<method name="cells">
+			<return type="Array" />
+			<description>
+				Returns the matrix cells sorted by [code]vendor|family|driver|renderer[/code]. A cell has [code]vendor[/code], [code]family[/code], [code]driver[/code], [code]renderer[/code], [code]reports[/code], [code]pass[/code], [code]fail[/code], [code]reasons[/code], [code]level_p50[/code] (median per level), [code]max_level_60fps[/code] (highest level meeting [member target_ms], or [code]-1[/code]), [code]status[/code] and [code]perf[/code].
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes all reports, rejections and pinned references.
+			</description>
+		</method>
+		<method name="csv_escape" qualifiers="static">
+			<return type="String" />
+			<param index="0" name="text" type="String" />
+			<description>
+				Quotes [param text] for CSV output if it contains a comma, a quote or a newline.
+			</description>
+		</method>
+		<method name="dhash" qualifiers="static">
+			<return type="String" />
+			<param index="0" name="image" type="Image" />
+			<description>
+				Returns the 64-bit difference hash of [param image] as 16 hexadecimal digits: the image is converted to greyscale, resized to 9x8 and every pixel is compared with its right neighbour. Returns an empty string for an empty image.
+			</description>
+		</method>
+		<method name="driver_failures">
+			<return type="Array" />
+			<description>
+				Returns failures grouped by vendor, driver and renderer, worst ratio first. Each entry has [code]vendor[/code], [code]driver[/code], [code]renderer[/code], [code]total[/code], [code]fails[/code], [code]ratio[/code], [code]families[/code], [code]reasons[/code] and [code]driver_specific[/code], which is [code]true[/code] when at least half of the reports fail while another driver of the same vendor and renderer mostly passes.
+			</description>
+		</method>
+		<method name="evaluations">
+			<return type="Array" />
+			<description>
+				Returns the evaluation of every report: adapter, vendor, family, driver, renderer, status ([code]"pass"[/code] or [code]"fail"[/code]), reasons, regressions, worst distance, [code]level_p50[/code], [code]level_p95[/code] and the blocked levels.
+			</description>
+		</method>
+		<method name="get_rejected" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns a message for every rejected report or file.
+			</description>
+		</method>
+		<method name="get_reports" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the accepted reports.
+			</description>
+		</method>
+		<method name="hash_distance" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="a" type="String" />
+			<param index="1" name="b" type="String" />
+			<description>
+				Returns the Hamming distance (0 to 64) between two hashes, or [code]-1[/code] if either is not 16 hexadecimal digits.
+			</description>
+		</method>
+		<method name="ingest_dir">
+			<return type="int" />
+			<param index="0" name="dir_path" type="String" />
+			<description>
+				Ingests every [code]gpu_report_*.json[/code] file of [param dir_path] and returns how many were accepted.
+			</description>
+		</method>
+		<method name="ingest_file">
+			<return type="bool" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Reads and adds one JSON report. Returns [code]false[/code] if the file is missing, is not JSON or fails validation.
+			</description>
+		</method>
+		<method name="learned_data">
+			<return type="Dictionary" />
+			<description>
+				Returns [code]adapter (lower case) -&gt; {level: [frame ms, ...]}[/code] in the layout of [code]user://gpu_learned.json[/code]. A level that rendered incorrectly or errored is recorded as 1000 ms so that [method CgameGPUSettingsDB.recommend] never picks it.
+			</description>
+		</method>
+		<method name="regressions">
+			<return type="Array" />
+			<description>
+				Returns every frame whose hash is further from the reference than [member tolerance], with [code]adapter[/code], [code]driver[/code], [code]renderer[/code], [code]level[/code], [code]index[/code] and [code]distance[/code].
+			</description>
+		</method>
+		<method name="set_reference">
+			<return type="void" />
+			<param index="0" name="renderer" type="String" />
+			<param index="1" name="level" type="int" />
+			<param index="2" name="index" type="int" />
+			<param index="3" name="checksum" type="String" />
+			<description>
+				Pins a known-good hash for a renderer, quality level and frame index. It overrides the medoid of the reports.
+			</description>
+		</method>
+		<method name="to_csv">
+			<return type="String" />
+			<description>
+				Returns the matrix cells as CSV text with a header row.
+			</description>
+		</method>
+		<method name="to_markdown">
+			<return type="String" />
+			<description>
+				Returns a Markdown report with the matrix table, driver failures, rendering regressions and rejected reports.
+			</description>
+		</method>
+		<method name="validate_report" qualifiers="static">
+			<return type="PackedStringArray" />
+			<param index="0" name="report" type="Variant" />
+			<description>
+				Returns the problems of [param report]. An empty array means that the report is valid.
+			</description>
+		</method>
+		<method name="write_learned">
+			<return type="bool" />
+			<param index="0" name="path" type="String" default="&quot;user://gpu_learned.json&quot;" />
+			<description>
+				Writes [method learned_data] as JSON to [param path] so that [CgameGPUSettingsDB] can use it. Returns [code]false[/code] if the file cannot be written.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="tolerance" type="int" setter="set_tolerance" getter="get_tolerance" default="8">
+			Maximum Hamming distance, out of 64 bits, for two frames to count as the same image.
+		</member>
+		<member name="target_ms" type="float" setter="set_target_ms" getter="get_target_ms" default="16.6667">
+			Frame time budget used to decide the highest level that runs at 60 FPS.
+		</member>
+	</members>
+	<constants>
+		<constant name="SCHEMA_VERSION" value="1">
+			The supported report schema version.
+		</constant>
+		<constant name="HASH_HEX_LEN" value="16">
+			Length of a perceptual hash in hexadecimal digits.
+		</constant>
+		<constant name="DEFAULT_TOLERANCE" value="8">
+			The default value of [member tolerance].
+		</constant>
+		<constant name="MAX_LEARNED_SAMPLES" value="31">
+			Number of samples kept per adapter and level in the learned data.
+		</constant>
+	</constants>
+</class>

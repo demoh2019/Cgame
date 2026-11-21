@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgamePerfStats" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Rolling statistics over fixed-size ring buffers.
+	</brief_description>
+	<description>
+		[CgamePerfStats] stores named series of floating-point samples, such as frame time or draw calls, in fixed-capacity ring buffers. Pushing a sample never allocates once the series exists. Older samples are overwritten when the capacity is reached.
+		Statistics are computed over the newest samples: all of them, or the last [code]window[/code] samples. Percentiles use linear interpolation. Non-finite values are ignored.
+		[codeblock]
+		var stats = CgamePerfStats.new()
+		stats.push("frame_ms", delta * 1000.0)
+		print(stats.percentile("frame_ms", 95.0, 300))
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="average" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="series" type="String" />
+			<param index="1" name="window" type="int" default="0" />
+			<description>
+				Returns the mean of the newest [param window] samples of [param series] (all when [code]0[/code]), or [code]0.0[/code] if there are none.
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes all series.
+			</description>
+		</method>
+		<method name="count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="series" type="String" />
+			<description>
+				Returns the number of samples currently stored for [param series].
+			</description>
+		</method>
+		<method name="has_series" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="series" type="String" />
+			<description>
+				Returns [code]true[/code] if a sample was pushed to [param series].
+			</description>
+		</method>
+		<method name="last" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="series" type="String" />
+			<description>
+				Returns the newest sample of [param series], or [code]0.0[/code].
+			</description>
+		</method>
+		<method name="max_value" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="series" type="String" />
+			<param index="1" name="window" type="int" default="0" />
+			<description>
+				Returns the largest of the newest [param window] samples (floored at [code]0.0[/code]).
+			</description>
+		</method>
+		<method name="names" qualifiers="const">
+			<return type="Array[String]" />
+			<description>
+				Returns the names of all series in the order they were created.
+			</description>
+		</method>
+		<method name="percentile" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="series" type="String" />
+			<param index="1" name="percent" type="float" />
+			<param index="2" name="window" type="int" default="0" />
+			<description>
+				Returns the linearly interpolated percentile ([code]0..100[/code]) of the newest [param window] samples, or [code]0.0[/code] if there are none.
+			</description>
+		</method>
+		<method name="push">
+			<return type="void" />
+			<param index="0" name="series" type="String" />
+			<param index="1" name="value" type="float" />
+			<description>
+				Appends [param value] to [param series], creating it if needed. Non-finite values are ignored.
+			</description>
+		</method>
+		<method name="series" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="series" type="String" />
+			<param index="1" name="window" type="int" default="0" />
+			<description>
+				Returns the newest [param window] samples (all when [code]0[/code]) from oldest to newest.
+			</description>
+		</method>
+		<method name="summary" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="series" type="String" />
+			<param index="1" name="window" type="int" default="0" />
+			<description>
+				Returns [code]{last, avg, p50, p95, p99, max, samples}[/code] for [param series].
+			</description>
+		</method>
+		<method name="total_pushed" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="series" type="String" />
+			<description>
+				Returns how many samples were ever pushed to [param series], including overwritten ones.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="capacity" type="int" setter="set_capacity" getter="get_capacity" default="300">
+			Number of samples a series keeps. It applies to series created after the change.
+		</member>
+	</members>
+</class>

@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgamePlatformBackend" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Abstract platform backend used by [CgamePlatformServices].
+	</brief_description>
+	<description>
+		[CgamePlatformBackend] is the contract between [CgamePlatformServices] and the host platform: accounts, raw save storage, achievements, presence, entitlements, controller pairing, application lifecycle, network state, text input and content restrictions.
+		This class cannot be instantiated. Use [CgameDesktopPlatformBackend] for a filesystem implementation or [CgameMockPlatformBackend] for an in-memory implementation that can reproduce console-style failures (quota, sign-out, controller loss, suspend). A licensed platform port adds its own C++ subclass; the module itself contains no vendor SDK code.
+		The save methods work on raw bytes. [CgamePlatformServices] wraps the payload in an integrity envelope before it reaches [method write_save].
+	</description>
+	<methods>
+		<method name="achievement_ids">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the ids of all unlocked achievements.
+			</description>
+		</method>
+		<method name="backend_name" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns a short identifier of the backend, for example [code]"desktop"[/code] or [code]"mock_console"[/code].
+			</description>
+		</method>
+		<method name="controller_owner" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="device_id" type="int" />
+			<description>
+				Returns the user id that [param device_id] is paired to, or an empty string if the device was never paired.
+			</description>
+		</method>
+		<method name="current_user" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the id of the signed-in user, or an empty string if nobody is signed in.
+			</description>
+		</method>
+		<method name="delete_save">
+			<return type="void" />
+			<param index="0" name="slot" type="String" />
+			<description>
+				Deletes the main, temporary and backup files of [param slot].
+			</description>
+		</method>
+		<method name="disconnect_controller">
+			<return type="void" />
+			<param index="0" name="device_id" type="int" />
+			<description>
+				Marks [param device_id] as disconnected and emits [signal controller_disconnected] if it was connected.
+			</description>
+		</method>
+		<method name="grant_entitlement">
+			<return type="void" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Grants the entitlement [param id] (for example a purchased add-on).
+			</description>
+		</method>
+		<method name="has_entitlement" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns [code]true[/code] if the entitlement [param id] was granted.
+			</description>
+		</method>
+		<method name="is_achievement_unlocked">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Returns [code]true[/code] if the achievement [param id] is unlocked.
+			</description>
+		</method>
+		<method name="is_controller_connected" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="device_id" type="int" />
+			<description>
+				Returns [code]true[/code] if the controller [param device_id] is currently connected.
+			</description>
+		</method>
+		<method name="is_restricted" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="kind" type="String" />
+			<description>
+				Returns [code]true[/code] if the content restriction [param kind] is active. See [method set_restriction].
+			</description>
+		</method>
+		<method name="is_signed_in" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if a user is signed in.
+			</description>
+		</method>
+		<method name="is_suspended" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while the application is suspended.
+			</description>
+		</method>
+		<method name="network_available" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the network is reachable.
+			</description>
+		</method>
+		<method name="pair_controller">
+			<return type="void" />
+			<param index="0" name="device_id" type="int" />
+			<param index="1" name="user_id" type="String" />
+			<description>
+				Pairs [param device_id] with [param user_id] and marks the device as connected.
+			</description>
+		</method>
+		<method name="presence" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the presence text last set with [method set_presence].
+			</description>
+		</method>
+		<method name="read_save_backup">
+			<return type="PackedByteArray" />
+			<param index="0" name="slot" type="String" />
+			<description>
+				Returns the backup copy of [param slot], or an empty array if there is none.
+			</description>
+		</method>
+		<method name="read_save_main">
+			<return type="PackedByteArray" />
+			<param index="0" name="slot" type="String" />
+			<description>
+				Returns the main copy of [param slot], or an empty array if there is none.
+			</description>
+		</method>
+		<method name="reconnect_controller">
+			<return type="void" />
+			<param index="0" name="device_id" type="int" />
+			<description>
+				Reconnects a previously paired controller and emits [signal controller_connected]. Does nothing for an unpaired or already connected device.
+			</description>
+		</method>
+		<method name="request_text_input">
+			<return type="Dictionary" />
+			<param index="0" name="prompt" type="String" />
+			<param index="1" name="max_len" type="int" />
+			<description>
+				Asks the platform keyboard for text. Returns [code]{"ok": bool, "text": String}[/code]. The base implementation returns [code]ok = false[/code] so that the caller shows its own on-screen keyboard.
+			</description>
+		</method>
+		<method name="resume">
+			<return type="void" />
+			<description>
+				Leaves the suspended state and emits [signal lifecycle_changed] with [code]false[/code]. Does nothing if not suspended.
+			</description>
+		</method>
+		<method name="save_used_bytes">
+			<return type="int" />
+			<description>
+				Returns the number of bytes currently used by all save files, including temporary and backup copies.
+			</description>
+		</method>
+		<method name="set_network">
+			<return type="void" />
+			<param index="0" name="available" type="bool" />
+			<description>
+				Changes the network state and emits [signal network_changed] if it differs.
+			</description>
+		</method>
+		<method name="set_presence">
+			<return type="void" />
+			<param index="0" name="text" type="String" />
+			<description>
+				Sets the presence (rich status) text.
+			</description>
+		</method>
+		<method name="set_restriction">
+			<return type="void" />
+			<param index="0" name="kind" type="String" />
+			<param index="1" name="restricted" type="bool" />
+			<description>
+				Enables or disables a content restriction such as parental controls. Known kinds are [code]"chat"[/code], [code]"user_content"[/code], [code]"purchases"[/code] and [code]"online"[/code].
+			</description>
+		</method>
+		<method name="sign_in">
+			<return type="void" />
+			<param index="0" name="user_id" type="String" />
+			<description>
+				Signs [param user_id] in and emits [signal user_signed_in].
+			</description>
+		</method>
+		<method name="sign_out">
+			<return type="void" />
+			<description>
+				Signs the current user out and emits [signal user_signed_out]. Does nothing if nobody is signed in.
+			</description>
+		</method>
+		<method name="suspend">
+			<return type="void" />
+			<description>
+				Enters the suspended state and emits [signal lifecycle_changed] with [code]true[/code]. Does nothing if already suspended.
+			</description>
+		</method>
+		<method name="unlock_achievement">
+			<return type="bool" />
+			<param index="0" name="id" type="String" />
+			<description>
+				Unlocks the achievement [param id]. Returns [code]true[/code] only if it was newly unlocked.
+			</description>
+		</method>
+		<method name="uses_native_keyboard" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if [method request_text_input] can show a platform keyboard.
+			</description>
+		</method>
+		<method name="write_save">
+			<return type="int" />
+			<param index="0" name="slot" type="String" />
+			<param index="1" name="bytes" type="PackedByteArray" />
+			<description>
+				Writes [param bytes] to [param slot] and returns a [enum CgamePlatformServices.SaveResult] value. Implementations must write a temporary file first and only then replace the main file, keeping the previous main file as backup, so an interrupted write never destroys the last good save.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="quota_bytes" type="int" setter="set_quota_bytes" getter="get_quota_bytes" default="0">
+			Maximum number of bytes all save files may use. [code]0[/code] means unlimited. Exceeding it makes [method write_save] return [constant CgamePlatformServices.SAVE_QUOTA_EXCEEDED].
+		</member>
+		<member name="interrupt_before_commit" type="bool" setter="set_interrupt_before_commit" getter="get_interrupt_before_commit" default="false">
+			Test hook. If [code]true[/code], [method write_save] stops after the temporary file was written and before it is committed, as after a power loss, and returns [constant CgamePlatformServices.SAVE_INTERRUPTED].
+		</member>
+	</members>
+	<signals>
+		<signal name="user_signed_out">
+			<param index="0" name="user_id" type="String" />
+			<description>
+				Emitted when the user [param user_id] signed out.
+			</description>
+		</signal>
+		<signal name="user_signed_in">
+			<param index="0" name="user_id" type="String" />
+			<description>
+				Emitted when the user [param user_id] signed in.
+			</description>
+		</signal>
+		<signal name="controller_disconnected">
+			<param index="0" name="device_id" type="int" />
+			<description>
+				Emitted when the controller [param device_id] was disconnected.
+			</description>
+		</signal>
+		<signal name="controller_connected">
+			<param index="0" name="device_id" type="int" />
+			<description>
+				Emitted when the controller [param device_id] was reconnected.
+			</description>
+		</signal>
+		<signal name="lifecycle_changed">
+			<param index="0" name="suspended" type="bool" />
+			<description>
+				Emitted when the application was suspended or resumed.
+			</description>
+		</signal>
+		<signal name="network_changed">
+			<param index="0" name="available" type="bool" />
+			<description>
+				Emitted when the network availability changed.
+			</description>
+		</signal>
+	</signals>
+</class>

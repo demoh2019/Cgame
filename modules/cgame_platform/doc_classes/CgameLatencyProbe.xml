@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameLatencyProbe" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Input-to-photon latency statistics and photodiode pairing.
+	</brief_description>
+	<description>
+		[CgameLatencyProbe] does the bookkeeping for measuring input-to-display latency in normal rendering and with frame generation. It does no rendering itself.
+		[b]Workflow.[/b] The host calls [method mark_input] for every discrete input, shows a small corner rectangle in white while [method is_flash_on] is [code]true[/code], and calls [method mark_draw] after each presented frame. A sample completes at the first draw after its input. The software estimate is [code](draw - input) + half a refresh interval + display_offset_ms[/code]; it omits scan-out and pixel response and is a proxy for comparing modes and builds, not an absolute number.
+		[b]Hardware measurement.[/b] A photodiode over the corner rectangle, read by a microcontroller, records the timestamp of each black-to-white edge on its own clock. [method import_photodiode_csv] or [method pair_photodiode] assigns each edge to the latest unmatched input before it; those samples then report [code]photodiode - input[/code]. This is also correct with frame generation. Set [member mode] before a run (the engine cannot detect frame generation) and compare the per-mode percentiles in [method report].
+		Samples are dictionaries [code]{mode, input_us, draw_us, photodiode_us}[/code]; unknown times are [code]-1[/code].
+	</description>
+	<methods>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes all samples and pending state.
+			</description>
+		</method>
+		<method name="estimate_display_ms" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="refresh_hz" type="float" default="-1.0" />
+			<description>
+				Returns the display time added to software estimates: half a refresh interval plus [member display_offset_ms]. A negative [param refresh_hz] queries the display server; if the refresh rate is unknown, 60 Hz is assumed.
+			</description>
+		</method>
+		<method name="get_pending_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of samples waiting for the next [method mark_draw].
+			</description>
+		</method>
+		<method name="get_samples" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the recorded samples.
+			</description>
+		</method>
+		<method name="import_photodiode_csv">
+			<return type="int" />
+			<param index="0" name="path" type="String" />
+			<param index="1" name="clock_offset_us" type="int" default="0" />
+			<description>
+				Reads edge timestamps (microseconds on the external clock, one per line) from [param path], adds [param clock_offset_us] to map them to the engine clock and pairs them with the samples. Returns the number of pairs.
+			</description>
+		</method>
+		<method name="is_flash_on" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while the host should show the corner rectangle in white.
+			</description>
+		</method>
+		<method name="latency_ms" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="sample" type="Dictionary" />
+			<param index="1" name="display_ms" type="float" />
+			<description>
+				Returns the latency of one sample in milliseconds, or [code]-1.0[/code] if it is incomplete. A photodiode time wins over the software estimate, which adds [param display_ms].
+			</description>
+		</method>
+		<method name="mark_draw">
+			<return type="int" />
+			<param index="0" name="now_us" type="int" default="-1" />
+			<description>
+				Completes all pending samples with the draw time [param now_us] (a negative value uses the current tick count), emits [signal sample_completed] for each and advances the flash. Returns how many samples completed.
+			</description>
+		</method>
+		<method name="mark_input">
+			<return type="int" />
+			<param index="0" name="now_us" type="int" default="-1" />
+			<description>
+				Timestamps an input at [param now_us] (a negative value uses the current tick count) and starts the flash. Returns the sample index, or [code]-1[/code] if the input came sooner than [member min_gap_ms] after the previous one.
+			</description>
+		</method>
+		<method name="pair_photodiode" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="samples" type="Array" />
+			<param index="1" name="edges_us" type="PackedInt64Array" />
+			<param index="2" name="clock_offset_us" type="int" default="0" />
+			<param index="3" name="max_gap_us" type="int" default="500000" />
+			<description>
+				Assigns each edge of [param edges_us] (plus [param clock_offset_us]) to the latest unmatched sample whose input precedes it by at most [param max_gap_us], and stores it as [code]photodiode_us[/code]. The sample dictionaries are modified in place. Returns the number of pairs.
+			</description>
+		</method>
+		<method name="percentile" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="sorted_values" type="PackedFloat64Array" />
+			<param index="1" name="percent" type="float" />
+			<description>
+				Returns the linearly interpolated percentile ([code]0..100[/code]) of an ascending-sorted array, or [code]0.0[/code] for an empty array.
+			</description>
+		</method>
+		<method name="report" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="refresh_hz" type="float" default="-1.0" />
+			<description>
+				Returns the per-mode statistics of the recorded samples plus [code]refresh_hz[/code] and [code]display_offset_ms[/code]. See [method summarize].
+			</description>
+		</method>
+		<method name="save_report" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="path" type="String" />
+			<param index="1" name="refresh_hz" type="float" default="-1.0" />
+			<description>
+				Writes [method report] as JSON to [param path]. Returns [code]false[/code] if the file cannot be written.
+			</description>
+		</method>
+		<method name="summarize" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="samples" type="Array" />
+			<param index="1" name="display_ms" type="float" />
+			<description>
+				Returns [code]mode -&gt; {count, min, avg, p50, p90, p95, p99, max, jitter, source}[/code] for complete samples. [code]source[/code] is [code]"photodiode"[/code] if every sample of the mode has a photodiode time, [code]"mixed"[/code] if some have, otherwise [code]"software"[/code].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="mode" type="String" setter="set_mode" getter="get_mode" default="&quot;normal&quot;">
+			Label stored in new samples, typically [code]"normal"[/code] or [code]"framegen"[/code].
+		</member>
+		<member name="flash_frames" type="int" setter="set_flash_frames" getter="get_flash_frames" default="3">
+			Number of draws the corner rectangle stays white after an input.
+		</member>
+		<member name="min_gap_ms" type="float" setter="set_min_gap_ms" getter="get_min_gap_ms" default="80.0">
+			Minimum time between two recorded inputs, in milliseconds. Closer inputs are ignored.
+		</member>
+		<member name="display_offset_ms" type="float" setter="set_display_offset_ms" getter="get_display_offset_ms" default="0.0">
+			Extra display processing time added to software estimates, for example 5 to 15 ms for a TV in game mode.
+		</member>
+		<member name="capture_enabled" type="bool" setter="set_capture_enabled" getter="is_capture_enabled" default="true">
+			If [code]false[/code], the host should not record inputs. The probe itself does not look at this flag.
+		</member>
+	</members>
+	<signals>
+		<signal name="sample_completed">
+			<param index="0" name="sample" type="Dictionary" />
+			<description>
+				Emitted when [method mark_draw] completed [param sample].
+			</description>
+		</signal>
+	</signals>
+</class>
