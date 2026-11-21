@@ -58,7 +58,9 @@ var _snapshot_time := 0.0
 var _last_hp: Dictionary = {} # "player:id" / "zombie:id" -> last seen HP, for hit flashes.
 var _tag_epoch: Dictionary = {} # Sync native live tags once per server timestamp, not per render frame.
 var _render_time := -1.0
-var _snapshot_buffer = NetworkJitterBuffer.new()
+# Native jitter telemetry and delay adaptation on Cgame, with 1:1 script
+# policy on official Godot. Positions/teleports stay server-authoritative.
+var _snapshot_buffer = ClassDB.instantiate("AdaptiveNetworkJitterBuffer") if ClassDB.class_exists("AdaptiveNetworkJitterBuffer") else NetworkJitterBuffer.new()
 const INTERPOLATION_DELAY := 0.12 # Baseline for 10 server snapshots per second.
 const TELEPORT_DISTANCE := 8.0
 
@@ -115,6 +117,12 @@ func set_wetness_step(step: int) -> void:
 		var model := (_nodes[key] as Node3D).get_node_or_null("Model")
 		if model != null:
 			model.set_wetness_step(_wetness_step)
+
+
+## Reusable local diagnostics for network-quality debug overlays.
+## Server-side privacy and gameplay snapshots are never modified.
+func network_jitter_stats() -> Dictionary:
+	return _snapshot_buffer.get_stats()
 
 
 func update_from(client) -> void:

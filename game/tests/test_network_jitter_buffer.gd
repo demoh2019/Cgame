@@ -96,3 +96,69 @@ func run(t) -> void:
 		"out-of-order snapshots cannot rewind the already rendered world")
 	t.check(code.contains("history.clear() # A teleport"),
 		"existing authoritative teleport discontinuity remains protected")
+
+	t.current = "native Cgame adaptive jitter buffer matches GDScript on actual packet patterns"
+	var local_policy := Jitter.new()
+	var native_buffer: Object = null
+	if ClassDB.class_exists("AdaptiveNetworkJitterBuffer"):
+		native_buffer = ClassDB.instantiate("AdaptiveNetworkJitterBuffer")
+		t.check(native_buffer != null and native_buffer.has_method("observe"),
+			"native jitter buffer registered and callable")
+		if native_buffer != null:
+			t.check(native_buffer.configure(0.12, 0.35, 0.10),
+				"Cgame network smoothing accepts the 10 Hz gameplay profile")
+			t.check(local_policy.configure(0.12, 0.35, 0.10),
+				"script and native use same policy parameters")
+			var rng := RandomNumberGenerator.new()
+			rng.seed = 440321
+			var server_ts := 1.0
+			var arrival_ts := 20.0
+			for i in 1200:
+				# Normal, late and missing packets; backwards epochs and
+				# repeated render frames all share the same input sequence.
+				var mode: int = i % 47
+				if mode == 3:
+					arrival_ts += 0.19
+				elif mode == 19:
+					server_ts += 0.30
+					arrival_ts += 0.32
+				elif mode == 31:
+					server_ts -= 0.25
+					arrival_ts += 0.02
+				elif mode == 41:
+					arrival_ts += 2.5
+				else:
+					server_ts += 0.10
+					arrival_ts += 0.10 + rng.randf_range(-0.025, 0.025)
+				var script_delay: float = local_policy.observe(server_ts, arrival_ts)
+				var engine_delay: float = float(native_buffer.observe(server_ts, arrival_ts))
+				t.near(engine_delay, script_delay, 0.0000005,
+					"packet delay parity sample %d" % i)
+			var script_stats: Dictionary = local_policy.get_stats()
+			var engine_stats: Dictionary = native_buffer.get_stats()
+			for key in ["delay", "peak_jitter", "accepted_packets",
+					"ignored_packets", "resets", "network_gaps",
+					"expected_snapshot_step"]:
+				t.near(float(engine_stats[key]), float(script_stats[key]), 0.0000005,
+					"native telemetry parity %s" % key)
+			t.check(engine_stats["native_backend"], "native telemetry identifies backend")
+			t.check(not script_stats["native_backend"], "portable telemetry identifies fallback")
+			t.check(native_buffer.configure(0.06, 0.20, 0.05),
+				"native buffer works with higher-rate 20 Hz games")
+			t.check(local_policy.configure(0.06, 0.20, 0.05),
+				"fallback works with higher-rate 20 Hz games")
+			t.near(float(native_buffer.observe(1.0, 10.0)),
+				local_policy.observe(1.0, 10.0), 0.0000005,
+				"20 Hz initial sample")
+			t.near(float(native_buffer.observe(1.05, 10.16)),
+				local_policy.observe(1.05, 10.16), 0.0000005,
+				"20 Hz late packet")
+
+	t.current = "live EntityView selects native jitter adaptation when available"
+	var live := EntityView.new()
+	t.eq(live._snapshot_buffer.get_stats()["native_backend"],
+		ClassDB.class_exists("AdaptiveNetworkJitterBuffer"),
+		"player and infected render paths use the correct smoothing backend")
+	t.check(live.network_jitter_stats().has("accepted_packets"),
+		"game exposes local network diagnostics without server changes")
+	live.free()
