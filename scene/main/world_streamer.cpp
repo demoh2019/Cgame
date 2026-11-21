@@ -288,6 +288,7 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell) {
 		--simulation_inactive_count;
 	}
 	simulation_active_cells.erase(p_cell);
+	cell_simulation_layers.erase(p_cell);
 	pending_visual_details.erase(p_cell);
 	if (chunk) {
 		if (chunk->get_parent()) {
@@ -296,6 +297,51 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell) {
 		chunk->queue_free();
 	}
 	emit_signal(SNAME("chunk_unloaded"), p_cell);
+}
+
+bool WorldStreamer::set_simulation_layer_enabled(const StringName &p_layer, bool p_enabled) {
+	const String label = p_layer;
+	if (label.is_empty() || label.length() > 64 || label.begins_with(".") ||
+			label.ends_with(".") || label.contains("..")) {
+		return false;
+	}
+	const bool *old_state = simulation_layer_states.getptr(p_layer);
+	if (old_state != nullptr && *old_state == p_enabled) {
+		return true;
+	}
+	if (old_state == nullptr && simulation_layer_states.size() >= MAX_SIMULATION_LAYERS) {
+		return false;
+	}
+	const bool was_disabled = old_state != nullptr && !*old_state;
+	if (old_state == nullptr) {
+		simulation_layer_states.insert(p_layer, p_enabled);
+	} else {
+		simulation_layer_states[p_layer] = p_enabled;
+	}
+	if (was_disabled && p_enabled) {
+		--disabled_simulation_layer_count;
+	} else if (!was_disabled && !p_enabled) {
+		++disabled_simulation_layer_count;
+	}
+	// Enqueue a normal, bounded simulation refresh; never synchronously
+	// walk the entire world from an arbitrary setter callback.
+	time_since_update = 1e9;
+	return true;
+}
+
+bool WorldStreamer::is_simulation_layer_enabled(const StringName &p_layer) const {
+	const bool *state = simulation_layer_states.getptr(p_layer);
+	return state == nullptr || *state;
+}
+
+bool WorldStreamer::_simulation_layer_allows(const Vector3i &p_cell) const {
+	const StringName *layer = cell_simulation_layers.getptr(p_cell);
+	return layer == nullptr || is_simulation_layer_enabled(*layer);
+}
+
+StringName WorldStreamer::get_cell_simulation_layer(const Vector3i &p_cell) const {
+	const StringName *layer = cell_simulation_layers.getptr(p_cell);
+	return layer != nullptr && loaded.has(p_cell) ? *layer : StringName();
 }
 
 void WorldStreamer::_set_chunk_simulation_active(const Vector3i &p_cell, bool p_active) {
@@ -318,7 +364,8 @@ void WorldStreamer::_set_chunk_simulation_active(const Vector3i &p_cell, bool p_
 }
 
 void WorldStreamer::_update_simulation(const Vector3 &p_focus) {
-	if (simulation_radius < real_t(0.0) && simulation_inactive_count == 0) {
+	if (simulation_radius < real_t(0.0) && simulation_inactive_count == 0 &&
+			disabled_simulation_layer_count == 0) {
 		return; // No per-cell scan or callbacks for legacy worlds.
 	}
 	int remaining = max_simulation_transitions_per_update;
@@ -335,8 +382,9 @@ void WorldStreamer::_update_simulation(const Vector3 &p_focus) {
 				const bool *active_ptr = simulation_active_cells.getptr(entry.key);
 				const bool active = active_ptr == nullptr || *active_ptr;
 				const real_t distance = WorldStreamingGrid::distance_to_cell(p_focus, entry.key, cell_size, _grid_axes());
-				const bool desired = simulation_radius < real_t(0.0) ||
-						distance <= simulation_radius + (active ? simulation_hysteresis : real_t(0.0));
+				const bool desired = _simulation_layer_allows(entry.key) &&
+						(simulation_radius < real_t(0.0) ||
+							distance <= simulation_radius + (active ? simulation_hysteresis : real_t(0.0)));
 				if (active == desired || desired != activating) {
 					continue;
 				}
@@ -371,19 +419,35 @@ bool WorldStreamer::_adopt_chunk(const Vector3i &p_cell, Node *p_chunk) {
 			chunk_2d->set_position(Vector2(origin.x, origin.y));
 		}
 	}
+	// Optional script-owned simulation layer: a visual chunk can opt into
+	// a named data layer without touching its terrain, collision or residency.
+	if (p_chunk->has_method(SNAME("get_streaming_simulation_layer"))) {
+		const Variant raw_layer = p_chunk->call(SNAME("get_streaming_simulation_layer"));
+		if (raw_layer.get_type() == Variant::STRING || raw_layer.get_type() == Variant::STRING_NAME) {
+			const StringName layer = raw_layer;
+			const String label = layer;
+			if (!label.is_empty() && label.length() <= 64 && !label.begins_with(".") &&
+					!label.ends_with(".") && !label.contains("..")) {
+				cell_simulation_layers.insert(p_cell, layer);
+			}
+		}
+	}
 	// Set the initial tier before _ready() without consuming a transition:
 	// the chunk instantiation itself is already covered by the work budget.
 	Vector3 simulation_focus;
-	const bool simulation_active = simulation_radius < real_t(0.0) ||
+	const bool radius_allows = simulation_radius < real_t(0.0) ||
 			!_get_focus_position(simulation_focus) ||
 			WorldStreamingGrid::distance_to_cell(simulation_focus, p_cell, cell_size, _grid_axes()) <= simulation_radius;
-	if (simulation_radius >= real_t(0.0) && p_chunk->has_method(SNAME("set_streaming_simulation_active"))) {
+	const bool layer_allows = _simulation_layer_allows(p_cell);
+	const bool simulation_active = radius_allows && layer_allows;
+	if ((simulation_radius >= real_t(0.0) || !layer_allows) &&
+			p_chunk->has_method(SNAME("set_streaming_simulation_active"))) {
 		p_chunk->call(SNAME("set_streaming_simulation_active"), simulation_active);
 	}
 	Node *parent = _get_parent_for_chunks();
 	parent->add_child(p_chunk);
 	loaded[p_cell] = p_chunk->get_instance_id();
-	if (simulation_radius >= real_t(0.0)) {
+	if (simulation_radius >= real_t(0.0) || !layer_allows) {
 		simulation_active_cells[p_cell] = simulation_active;
 		if (!simulation_active) {
 			++simulation_inactive_count;
@@ -809,6 +873,7 @@ void WorldStreamer::_reset_state() {
 	generate_queue.clear();
 	pending_visual_details.clear();
 	simulation_active_cells.clear();
+	cell_simulation_layers.clear();
 	simulation_inactive_count = 0;
 	last_queued_view_direction = Vector3();
 	truncated_warned = false;
@@ -835,6 +900,7 @@ void WorldStreamer::_notification(int p_what) {
 				// Chunks are our children and go away with us; just forget them.
 				loaded.clear();
 				simulation_active_cells.clear();
+				cell_simulation_layers.clear();
 				simulation_inactive_count = 0;
 				pending_visual_details.clear();
 			} else {
@@ -1224,6 +1290,10 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_simulation_transitions_per_update"), &WorldStreamer::get_max_simulation_transitions_per_update);
 	ClassDB::bind_method(D_METHOD("is_cell_simulation_active", "cell"), &WorldStreamer::is_cell_simulation_active);
 	ClassDB::bind_method(D_METHOD("get_simulation_active_count"), &WorldStreamer::get_simulation_active_count);
+	ClassDB::bind_method(D_METHOD("set_simulation_layer_enabled", "layer", "enabled"), &WorldStreamer::set_simulation_layer_enabled);
+	ClassDB::bind_method(D_METHOD("is_simulation_layer_enabled", "layer"), &WorldStreamer::is_simulation_layer_enabled);
+	ClassDB::bind_method(D_METHOD("get_cell_simulation_layer", "cell"), &WorldStreamer::get_cell_simulation_layer);
+	ClassDB::bind_method(D_METHOD("get_simulation_layer_count"), &WorldStreamer::get_simulation_layer_count);
 	ClassDB::bind_method(D_METHOD("get_max_chunk_work_usec"), &WorldStreamer::get_max_chunk_work_usec);
 	ClassDB::bind_method(D_METHOD("set_adaptive_chunk_budget_enabled", "enabled"), &WorldStreamer::set_adaptive_chunk_budget_enabled);
 	ClassDB::bind_method(D_METHOD("is_adaptive_chunk_budget_enabled"), &WorldStreamer::is_adaptive_chunk_budget_enabled);
