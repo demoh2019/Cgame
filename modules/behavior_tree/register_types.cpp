@@ -40,6 +40,7 @@
 #include "tests/test_ai_visual_sensor_2d.h"
 #include "tests/test_ai_hearing_sensor_2d.h"
 #include "tests/test_reactive_behavior_tree.h"
+#include "tests/test_blackboard_compare.h"
 #endif
 
 void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
