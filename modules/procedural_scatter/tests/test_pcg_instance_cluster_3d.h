@@ -156,7 +156,8 @@ TEST_CASE("[PCGInstanceCluster3D] adaptive retries and invalid inputs are strict
 	CHECK(planner->partition_indices_adaptive(positions, 32.0, 48, 257).is_empty());
 	const Array few_retries = planner->partition_indices_adaptive(positions, 32.0, 48, 3, 1);
 	REQUIRE(few_retries.size() == 1);
-	CHECK(PackedInt32Array(few_retries[0]).size() == 80);
+	const PackedInt32Array few_indices = few_retries[0];
+	CHECK(few_indices.size() == 80);
 	positions.push_back(Vector3(0, Math::NaN, 0));
 	CHECK(planner->partition_indices_adaptive(positions, 32.0, 48, 3).is_empty());
 	positions.remove_at(80);
