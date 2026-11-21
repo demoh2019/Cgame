@@ -14,10 +14,30 @@ var _next := 0
 var _clock := 0.0
 var _textures := {}
 var _level := -1
+var _method := ""
 
 
 static func budget(level: int) -> int:
 	return BUDGET[clampi(level, 0, BUDGET.size() - 1)]
+
+
+## Decal projection is unsupported on the Compatibility backend. Do not
+## create unused GPU scene instances there, regardless of quality override.
+static func effective_budget(level: int, method: String) -> int:
+	return 0 if method == "gl_compatibility" else budget(level)
+
+
+## Large projection volumes cost screen fill rate. Limit distant splats,
+## scaling the fade threshold with visual quality, as in other deferred engines.
+static func draw_distance(level: int) -> float:
+	return [0.0, 45.0, 65.0, 85.0][clampi(level, 0, 3)]
+
+
+## Quantize an already-fading alpha to 8-bit precision, avoiding excessive
+## renderer updates at high FPS without changing full-opacity lifetimes.
+static func display_alpha(age: float) -> float:
+	var alpha: float = alpha_for_age(age)
+	return roundf(alpha * 255.0) / 255.0
 
 
 ## Opacity of a decal of the given age: full, then a linear fade over the last FADE seconds.
@@ -47,7 +67,8 @@ static func splat_texture(seed: int) -> ImageTexture:
 
 
 func configure(level: int) -> void:
-	var wanted := budget(level)
+	var method: String = str(RenderingServer.get_current_rendering_method())
+	var wanted: int = effective_budget(level, method)
 	while _pool.size() > wanted:
 		_pool.pop_back().queue_free()
 		_born.pop_back()
@@ -58,9 +79,17 @@ func configure(level: int) -> void:
 		decal.visible = false
 		decal.upper_fade = 0.3
 		decal.lower_fade = 0.3
+		decal.distance_fade_enabled = true
+		decal.distance_fade_begin = draw_distance(level)
+		decal.distance_fade_length = 12.0
 		add_child(decal)
 		_pool.append(decal)
 		_born.append(-INF)
+	# Existing projected decals inherit a changed graphics preset too.
+	for decal in _pool:
+		var new_begin: float = draw_distance(level)
+		if not is_equal_approx(decal.distance_fade_begin, new_begin):
+			decal.distance_fade_begin = new_begin
 	_next = 0 if _pool.is_empty() else _next % _pool.size()
 
 
@@ -76,6 +105,9 @@ func splat(position: Vector3, color: Color, size: float = 1.0) -> void:
 	_next = (_next + 1) % _pool.size()
 	decal.texture_albedo = _textures[key]
 	decal.modulate = color
+	# A recycled slot may have been almost transparent on its last life.
+	# Restore full opacity before it becomes visible, not one frame later.
+	decal.albedo_mix = 1.0
 	decal.size = Vector3(size, 2.0, size)
 	decal.position = position # The pool node sits at the world origin.
 	decal.rotation.y = randf() * TAU
@@ -84,15 +116,21 @@ func splat(position: Vector3, color: Color, size: float = 1.0) -> void:
 
 func _process(delta: float) -> void:
 	_clock += delta
-	if GraphicsQuality.level() != _level: # Follows the quality menu and auto-quality.
-		_level = GraphicsQuality.level()
+	var quality: int = GraphicsQuality.level()
+	var method: String = str(RenderingServer.get_current_rendering_method())
+	if quality != _level or method != _method:
+		_level = quality
+		_method = method
 		configure(_level)
 	for i in _pool.size():
 		var decal := _pool[i]
 		if not decal.visible:
 			continue
-		var a := alpha_for_age(_clock - _born[i])
-		if a <= 0.0:
+		var age: float = _clock - _born[i]
+		if age >= LIFETIME:
 			decal.visible = false
-		else:
-			decal.albedo_mix = a
+		elif age > LIFETIME - FADE:
+			var alpha: float = display_alpha(age)
+			if not is_equal_approx(alpha, decal.albedo_mix):
+				decal.albedo_mix = alpha
+		# Earlier lifetime is already fully opaque: no setter or server call.

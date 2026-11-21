@@ -50,6 +50,10 @@ private:
 	Ref<Texture2D> textures[TEXTURE_MAX];
 	real_t emission_energy = 1.0;
 	real_t albedo_mix = 1.0;
+	// Keep the first explicit assignment, even when equal to the local
+	// default, so renderer-side defaults need not match this resource.
+	bool albedo_mix_sent = false;
+	bool size_sent = false;
 	Color modulate = Color(1, 1, 1, 1);
 	uint32_t cull_mask = (1 << 20) - 1;
 	real_t normal_fade = 0.0;
