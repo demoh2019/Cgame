@@ -33,8 +33,14 @@ TEST_CASE("[PCGSpatialFilter2D] stable input-order filtering and inclusive dista
 	CHECK(filter->filter_indices(candidates, 2.0) == accepted);
 	CHECK(candidates == original);
 	CHECK(filter->filter_indices(candidates, 0.0).size() == candidates.size());
-	CHECK(filter->filter_indices(candidates, 0.0, 2) == PackedInt32Array::make(0, 1));
-	CHECK(filter->filter_indices(candidates, 2.0, 2) == PackedInt32Array::make(0, 2));
+	const PackedInt32Array limited_unfiltered = filter->filter_indices(candidates, 0.0, 2);
+	REQUIRE(limited_unfiltered.size() == 2);
+	CHECK(limited_unfiltered[0] == 0);
+	CHECK(limited_unfiltered[1] == 1);
+	const PackedInt32Array limited_filtered = filter->filter_indices(candidates, 2.0, 2);
+	REQUIRE(limited_filtered.size() == 2);
+	CHECK(limited_filtered[0] == 0);
+	CHECK(limited_filtered[1] == 2);
 }
 
 TEST_CASE("[PCGSpatialFilter2D] spatial buckets check across cell borders and negative coordinates") {
