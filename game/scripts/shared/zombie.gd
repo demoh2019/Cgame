@@ -656,6 +656,14 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 		_flank_query.set("horizontal_only", true)
 		_flank_query.set("max_results", 3)
 	_flank_query.set("origin", Vector3(here.x, 0.0, here.y))
+	# UE-style directional EQS context: select the sides or far side of
+	# the target instead of wasting a flank slot on its near-side approach.
+	# Older engine binaries keep the original ranked-ring behavior.
+	if _flank_query.has_method("set_direction_axis"):
+		_flank_query.set("direction_origin", Vector3(target.x, 0.0, target.y))
+		_flank_query.set("direction_axis", Vector3(target.x - here.x, 0.0, target.y - here.y))
+		_flank_query.set("min_direction_dot", -0.25)
+		_flank_query.set("use_direction", true)
 	_flank_query.set("candidates", EnvironmentQuery3D.sample_ring(
 		Vector3(target.x, 0.0, target.y), FLANK_RING, 8, float(posmod(id, 8)) * 0.4))
 	# No full sort or per-candidate dictionaries: the native bound is 3.

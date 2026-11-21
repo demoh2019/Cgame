@@ -340,6 +340,58 @@ TEST_CASE("[EnvironmentQuery3D] Occupancy exclusions honor XZ mode and preserve 
 	CHECK(q->query_positions().size() == 2);
 }
 
+TEST_CASE("[EnvironmentQuery3D] Directional dot filter is shared by full, top-K and spread queries") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(-4, 0, 0), Vector3(0, 0, -4), Vector3(0, 0, 4), Vector3(4, 0, 0)
+	});
+	q->set_horizontal_only(true);
+	q->set_direction_origin(Vector3());
+	q->set_direction_axis(Vector3(1, 0, 0));
+	q->set_min_direction_dot(0.0);
+	q->set_use_direction(true);
+	const PackedVector3Array expected = {
+		Vector3(0, 0, -4), Vector3(0, 0, 4), Vector3(4, 0, 0)
+	};
+	CHECK(q->query_positions() == expected);
+	CHECK(q->query().size() == 3);
+	CHECK(q->query_top_positions(2) == PackedVector3Array({ Vector3(0, 0, -4), Vector3(0, 0, 4) }));
+	CHECK(q->query_spread_positions(2, 5.0) == PackedVector3Array({ Vector3(0, 0, -4), Vector3(0, 0, 4) }));
+	q->set_min_direction_dot(1.0);
+	CHECK(q->query_positions() == PackedVector3Array({ Vector3(4, 0, 0) }));
+	q->set_use_direction(false);
+	CHECK(q->query_positions().size() == 4);
+}
+
+TEST_CASE("[EnvironmentQuery3D] Directional filter uses its own context and validates parameters") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(2, 0, 0), Vector3(5, 0, 0), Vector3(5, 0, 3)
+	});
+	q->set_direction_origin(Vector3(3, 0, 0));
+	q->set_direction_axis(Vector3(1, 0, 0));
+	q->set_min_direction_dot(0.0);
+	q->set_use_direction(true);
+	CHECK(q->query_positions() == PackedVector3Array({ Vector3(5, 0, 0), Vector3(5, 0, 3) }));
+	q->set_horizontal_only(true);
+	q->set_direction_axis(Vector3(0, 1, 0)); // No XZ-facing direction: fail closed.
+	CHECK(q->query_positions().is_empty());
+	q->set_direction_axis(Vector3(1, 0, 0));
+	const Vector3 original_axis = q->get_direction_axis();
+	ERR_PRINT_OFF
+	q->set_direction_axis(Vector3());
+	q->set_direction_axis(Vector3(NaN, 0, 0));
+	q->set_direction_origin(Vector3(INF, 0, 0));
+	q->set_min_direction_dot(INF);
+	q->set_min_direction_dot(-1.01);
+	q->set_min_direction_dot(1.01);
+	ERR_PRINT_ON
+	CHECK(q->get_direction_axis() == original_axis);
+	CHECK(q->get_direction_origin() == Vector3(3, 0, 0));
+	CHECK(q->get_min_direction_dot() == 0.0);
+	CHECK(q->query_positions().size() == 2);
+	q->set_candidates({ Vector3(3, 0, 0) });
+	CHECK(q->query_positions().is_empty()); // Undefined facing at the directional origin.
+}
+
 TEST_CASE("[EnvironmentQuery3D] Zero result cap means unlimited") {
 	Ref<EnvironmentQuery3D> q = make_query({ Vector3(1, 0, 0), Vector3(2, 0, 0) });
 	CHECK(q->get_max_results() == 0);
