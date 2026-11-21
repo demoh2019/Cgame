@@ -726,4 +726,58 @@ TEST_CASE("[GameplayFX] CooldownTracker scoped snapshot rolls back on invalid in
 	CHECK(full->get_remaining("Local.Cooldown.0") == doctest::Approx(3.0));
 }
 
+static PackedStringArray effect_gate_tags(std::initializer_list<const char *> p_items) {
+	PackedStringArray tags;
+	for (const char *tag : p_items) {
+		tags.push_back(tag);
+	}
+	return tags;
+}
+
+TEST_CASE("[GameplayFX] application gate hierarchical rules and immunity") {
+	Ref<GameplayEffectApplicationGate> gate;
+	gate.instantiate();
+	const PackedStringArray alive = effect_gate_tags({"Life.Alive"});
+	const PackedStringArray boss = effect_gate_tags({"Rank.RaidBoss", "Immunity.CrowdControl"});
+	CHECK(gate->set_rule("Effect.CrowdControl", alive, boss));
+	CHECK(gate->set_rule("Effect.CrowdControl.Stagger", PackedStringArray(), effect_gate_tags({"Status.Unstoppable"})));
+	CHECK(gate->set_rule("Effect.Debuff.Sunder", alive, effect_gate_tags({"Immunity.Sunder"})));
+	CHECK(gate->get_rule_count() == 3);
+	CHECK(gate->can_apply("Effect.CrowdControl.Snare", effect_gate_tags({"Life.Alive"})));
+	CHECK(gate->can_apply("Effect.CrowdControl.Stagger", effect_gate_tags({"Life.Alive", "Rank.Elite"})));
+	CHECK_FALSE(gate->can_apply("Effect.CrowdControl.Stagger", effect_gate_tags({"Life.Alive", "Rank.RaidBoss.Enraged"})));
+	CHECK(gate->get_failure_reason("Effect.CrowdControl.Stagger", effect_gate_tags({"Life.Alive", "Immunity.CrowdControl"})) == "blocked");
+	CHECK(gate->get_failure_reason("Effect.CrowdControl.Stagger", effect_gate_tags({"Life.Dead"})) == "missing_required");
+	CHECK(gate->get_failure_reason("Effect.CrowdControl.Stagger", effect_gate_tags({"Life.Alive", "Status.Unstoppable"})) == "blocked");
+	CHECK(gate->get_failure_reason("Effect.Unknown", effect_gate_tags({"Life.Alive"})) == "unknown_effect");
+	CHECK_FALSE(gate->can_apply("Effect.CrowdControls.Snare", effect_gate_tags({"Life.Alive"}))); // sibling is not a descendant
+	CHECK(gate->can_apply("Effect.Debuff.Sunder", effect_gate_tags({"Life.Alive", "Rank.RaidBoss"})));
+	CHECK_FALSE(gate->can_apply("Effect.Debuff.Sunder", effect_gate_tags({"Life.Alive", "Immunity.Sunder.Special"})));
+}
+
+TEST_CASE("[GameplayFX] application gate atomic snapshot rollback and hostile tags") {
+	Ref<GameplayEffectApplicationGate> gate;
+	gate.instantiate();
+	CHECK(gate->set_rule("Effect.CrowdControl", effect_gate_tags({"Life.Alive"}), effect_gate_tags({"Rank.RaidBoss"})));
+	Dictionary snapshot = gate->get_snapshot();
+	Ref<GameplayEffectApplicationGate> copy;
+	copy.instantiate();
+	CHECK(copy->replace_snapshot(snapshot));
+	CHECK(copy->can_apply("Effect.CrowdControl.Stagger", effect_gate_tags({"Life.Alive"})));
+	Dictionary invalid = snapshot.duplicate(true);
+	Dictionary wrong;
+	wrong["required"] = effect_gate_tags({"Life.Alive"});
+	wrong["blocked"] = effect_gate_tags({"Rank. Bad"});
+	invalid[StringName("Effect.Bad")] = wrong;
+	CHECK_FALSE(copy->replace_snapshot(invalid));
+	CHECK(copy->get_rule_count() == 1);
+	CHECK(copy->can_apply("Effect.CrowdControl.Stagger", effect_gate_tags({"Life.Alive"})));
+	CHECK_FALSE(copy->set_rule("Effect..Bad", PackedStringArray(), PackedStringArray()));
+	CHECK_FALSE(copy->set_rule("Effect.Bad", effect_gate_tags({"Life.Alive", "Life.Alive"}), PackedStringArray()));
+	CHECK_FALSE(copy->can_apply("Effect.CrowdControl.Stagger", effect_gate_tags({"Life.Alive", "Bad Tag"})));
+	CHECK(gate->get_rule_count() == 1);
+	CHECK(gate->remove_rule("Effect.CrowdControl"));
+	CHECK_FALSE(gate->can_apply("Effect.CrowdControl.Stagger", effect_gate_tags({"Life.Alive"})));
+}
+
 } // namespace TestGameplayFX
