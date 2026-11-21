@@ -520,6 +520,8 @@ static func waypoint_streaming_caption(p_streamer: WorldStreamer,
 		return "Scenery prefetch: retrying"
 	if p_streamer.is_auxiliary_source_ready(true):
 		return "Scenery prefetch: ready"
+	if p_streamer.is_auxiliary_source_ready():
+		return "Terrain ready; details finish on approach"
 	return "Scenery prefetch: %d%%" % floori(
 		clampf(p_streamer.get_auxiliary_source_progress(true), 0.0, 1.0) * 100.0)
 
