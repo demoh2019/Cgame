@@ -31,6 +31,7 @@
 
 #include "../audio_duck_mix.h"
 #include "../gameplay_attribute_set.h"
+#include "../gameplay_cooldown_tracker.h"
 #include "../gameplay_effect_timeline.h"
 #include "../radial_force_field_3d.h"
 #include "../sound_concurrency.h"
@@ -461,6 +462,64 @@ TEST_CASE("[GameplayFX] AudioDuckMix invalid input, source bounds and no partial
 	CHECK(mix->trigger("Raid", -10.0)); // Re-trigger still succeeds at capacity.
 	CHECK(mix->get_source_count() == 32);
 	CHECK(mix->get_target_db() == -10.0);
+}
+
+TEST_CASE("[GameplayFX] CooldownTracker individual and shared cooldowns") {
+	Ref<GameplayCooldownTracker> tracker;
+	tracker.instantiate();
+	CHECK(tracker->try_start("Ability.Sprint", 5.0, "Ability.Global", 1.0));
+	CHECK(tracker->get_remaining("Ability.Sprint") == doctest::Approx(5.0));
+	CHECK(tracker->get_effective_remaining("Ability.Heal", "Ability.Global") == doctest::Approx(1.0));
+	CHECK_FALSE(tracker->try_start("Ability.Heal", 3.0, "Ability.Global", 1.0));
+	CHECK_FALSE(tracker->try_start("Ability.Sprint", 5.0));
+	CHECK(tracker->tick(1.0).size() == 1);
+	CHECK(tracker->is_ready("Ability.Heal", "Ability.Global"));
+	CHECK(tracker->try_start("Ability.Heal", 3.0, "Ability.Global", 0.0));
+	CHECK(tracker->get_remaining("Ability.Sprint") == doctest::Approx(4.0));
+	CHECK(tracker->get_effective_remaining("Ability.Heal", "Ability.Global") == doctest::Approx(3.0));
+	CHECK(tracker->reduce_remaining("Ability.Heal", 1.5));
+	CHECK(tracker->get_remaining("Ability.Heal") == doctest::Approx(1.5));
+	CHECK(tracker->tick(1.5).size() == 1);
+	CHECK(tracker->get_remaining("Ability.Heal") == 0.0);
+	CHECK(tracker->get_remaining("Ability.Sprint") == doctest::Approx(2.5));
+	CHECK_FALSE(tracker->try_start("Ability.Dodge", 2.0, StringName(), 1.0));
+	CHECK_FALSE(tracker->try_start("Ability.Dodge", 2.0, "Ability.Dodge", 1.0));
+	CHECK(tracker->get_cooldown_count() == 1);
+}
+
+TEST_CASE("[GameplayFX] CooldownTracker snapshot rollback and frame-rate independence") {
+	Ref<GameplayCooldownTracker> tracker;
+	tracker.instantiate();
+	Dictionary snapshot;
+	snapshot["Ability.A"] = 5.0;
+	snapshot["Ability.B"] = 2.0;
+	CHECK(tracker->replace_snapshot(snapshot));
+	CHECK(tracker->tick(0.5).is_empty());
+	CHECK(tracker->tick(0.5).is_empty());
+	CHECK(tracker->get_remaining("Ability.A") == doctest::Approx(4.0));
+	CHECK(tracker->get_remaining("Ability.B") == doctest::Approx(1.0));
+	Ref<GameplayCooldownTracker> other;
+	other.instantiate();
+	CHECK(other->replace_snapshot(tracker->get_snapshot()));
+	CHECK(other->get_remaining("Ability.A") == doctest::Approx(4.0));
+	Dictionary copy = tracker->get_snapshot();
+	copy["Ability.A"] = 100.0;
+	CHECK(tracker->get_remaining("Ability.A") == doctest::Approx(4.0));
+	CHECK(tracker->tick(-1.0).is_empty());
+	CHECK(tracker->tick(Math::INF).is_empty());
+	CHECK_FALSE(tracker->set_remaining("Ability.C", Math::NaN));
+	CHECK_FALSE(tracker->reduce_remaining("Ability.A", -2.0));
+	CHECK_FALSE(tracker->try_start("Ability.C", Math::INF));
+	Dictionary bad = tracker->get_snapshot();
+	bad["Ability.Invalid"] = Math::NaN;
+	CHECK_FALSE(tracker->replace_snapshot(bad));
+	bad["Ability.Invalid"] = "not a time";
+	CHECK_FALSE(tracker->replace_snapshot(bad));
+	CHECK(tracker->get_remaining("Ability.A") == doctest::Approx(4.0));
+	CHECK(tracker->tick(1.0).size() == 1);
+	CHECK(tracker->tick(3.0).size() == 1);
+	CHECK(tracker->get_cooldown_count() == 0);
+	CHECK(other->get_cooldown_count() == 2);
 }
 
 } // namespace TestGameplayFX
