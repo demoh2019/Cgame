@@ -50,6 +50,7 @@ var _history: Dictionary = {} # "player:id" / "zombie:id" -> [[server time, posi
 var _wetness_step: int = 0
 var _snapshot_time := 0.0
 var _last_hp: Dictionary = {} # "player:id" / "zombie:id" -> last seen HP, for hit flashes.
+var _tag_epoch: Dictionary = {} # Sync native live tags once per server timestamp, not per render frame.
 var _render_time := -1.0
 var _snapshot_buffer = NetworkJitterBuffer.new()
 const INTERPOLATION_DELAY := 0.12 # Baseline for 10 server snapshots per second.
@@ -167,6 +168,7 @@ func update_from(client) -> void:
 			_targets.erase(key)
 			_history.erase(key)
 			_last_hp.erase(key)
+			_tag_epoch.erase(key)
 
 
 func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> void:
@@ -176,6 +178,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		add_child(_nodes[key])
 		_nodes[key].position = Vector3(entity["x"], entity["y"], entity["z"])
 	_targets[key] = {"position": Vector3(entity["x"], entity["y"], entity["z"]), "yaw": float(entity.get("yaw", 0.0))}
+	if (kind == "player" or kind == "zombie") and float(_tag_epoch.get(key, -1.0)) != _snapshot_time:
+		EngineFeatures.sync_runtime_tags(_nodes[key], kind, entity)
+		_tag_epoch[key] = _snapshot_time
 	if (kind == "player" or kind == "zombie") and entity.has("hp"):
 		var hp: float = float(entity["hp"])
 		var before: float = float(_last_hp.get(key, hp))
@@ -278,7 +283,10 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		elif bool(entity.get("elite", false)):
 			base = Color(0.98, 0.65, 0.18)
 		var blocked: bool = bool(entity.get("melee_blocked", false))
-		var staggered: bool = float(entity.get("stagger_seconds", 0.0)) > 0.0
+		# The native tag store is now the source for this visual cue when available.
+		# The snapshot fallback keeps stock Godot clients fully compatible.
+		var staggered: bool = EngineFeatures.runtime_has(_nodes[key], "Runtime.Status.Staggered",
+			float(entity.get("stagger_seconds", 0.0)) > 0.0)
 		var pinned: bool = float(entity.get("snared_seconds", 0.0)) > 0.0
 		var exposed: bool = float(entity.get("sunder_seconds", 0.0)) > 0.0
 		var wound_phase: String = str(entity.get("wound_phase", ""))
