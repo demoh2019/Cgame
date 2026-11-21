@@ -48,6 +48,21 @@ public:
 			const PackedVector3Array &p_box_mins,
 			const PackedVector3Array &p_box_maxs,
 			double p_min_spacing, int p_max_selected = MAX_SELECTED) const;
+	// Unreal PCG-style yaw-rotated exclusion volumes. Combines the existing
+	// sphere/AABB selectors with oriented Y-axis boxes before spatial thinning.
+	// Extents are local half-sizes; yaw rotates the box around world Y in radians.
+	// Stable original indices, inclusive boundaries, no scene or RNG changes.
+	PackedInt32Array filter_indices_excluding_oriented_volumes(
+			const PackedVector3Array &p_candidates,
+			const PackedVector3Array &p_exclusion_centers,
+			const PackedFloat64Array &p_exclusion_radii,
+			const PackedVector3Array &p_box_mins,
+			const PackedVector3Array &p_box_maxs,
+			const PackedVector3Array &p_oriented_centers,
+			const PackedVector3Array &p_oriented_half_extents,
+			const PackedFloat64Array &p_oriented_yaws,
+			double p_min_spacing, int p_max_selected = MAX_SELECTED) const;
+
 	// PCG-style per-point density sampling with stable IDs. Every point is
 	// admitted independently of its input-array position; no global RNG.
 	// IDs and seed: [0, 2147483646], densities: finite [0, 1].

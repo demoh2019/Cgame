@@ -379,4 +379,136 @@ TEST_CASE("[PCGSpatialFilter3D] density rejects invalid input atomically and cap
 	CHECK(capped[4095] == 4095);
 }
 
+TEST_CASE("[PCGSpatialFilter3D] yaw-oriented boxes combine with spheres and AABBs") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	// With 45-degree yaw, local positive X points toward world negative Z.
+	const PackedVector3Array points = {
+		Vector3(0, 0, 0),                   // Inside oriented exclusion.
+		Vector3(1.4142135, 0, -1.4142135), // Along the long local X axis; excluded.
+		Vector3(1.4142135, 0, 1.4142135),  // Short local Z axis; outside.
+		Vector3(0, 2, 0),                   // Above oriented exclusion; AABB below.
+		Vector3(4, 0, 0),                   // Outside oriented volume; in sphere.
+		Vector3(-4, 0, -4),                 // Outside every shape.
+	};
+	const PackedVector3Array obb_centers = { Vector3(0, 0, 0) };
+	const PackedVector3Array obb_extents = { Vector3(3, 1, 0.5) };
+	const PackedFloat64Array obb_yaws = { Math::deg_to_rad(45.0) };
+	const PackedVector3Array spheres = { Vector3(4, 0, 0) };
+	const PackedFloat64Array radii = { 0.1 };
+	const PackedVector3Array box_mins = { Vector3(-0.5, 1.5, -0.5) };
+	const PackedVector3Array box_maxs = { Vector3(0.5, 2.5, 0.5) };
+	const PackedInt32Array expected = { 2, 5 };
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, spheres, radii, box_mins, box_maxs,
+			obb_centers, obb_extents, obb_yaws, 0.0) == expected);
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, spheres, radii, box_mins, box_maxs,
+			obb_centers, obb_extents, obb_yaws, 2.1) == expected);
+	const PackedInt32Array first_only = { 2 };
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, spheres, radii, box_mins, box_maxs,
+			obb_centers, obb_extents, obb_yaws, 0.0, 1) == first_only);
+	// Empty oriented-volume input is exactly the existing mixed selector.
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, spheres, radii, box_mins, box_maxs, {}, {}, {}, 0.0) ==
+			filter->filter_indices_excluding_volumes(
+					points, spheres, radii, box_mins, box_maxs, 0.0));
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, {}, {}, {}, 0.0) ==
+			filter->filter_indices(points, 0.0));
+}
+
+TEST_CASE("[PCGSpatialFilter3D] rotated boxes exclude inclusive faces before spacing") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	const PackedVector3Array points = {
+		Vector3(2, 0, 0),     // Exactly on local X face, blocked.
+		Vector3(2.01, 0, 0),  // Outside, should be selected even if near blocked point.
+		Vector3(5.0, 0, 0),   // Outside and spaced.
+		Vector3(0, 1, 0),     // Exactly on local Y face, blocked.
+		Vector3(0, 1.01, 0),  // Above box, outside.
+	};
+	const PackedVector3Array centers = { Vector3(0, 0, 0) };
+	const PackedVector3Array extents = { Vector3(2, 1, 0.5) };
+	const PackedFloat64Array yaws = { 0.0 };
+	const PackedInt32Array selected = filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, centers, extents, yaws, 2.5);
+	REQUIRE(selected.size() == 2);
+	CHECK(selected[0] == 1);
+	CHECK(selected[1] == 2);
+	// Vertical face and exact zero extents count as an inclusive surface.
+	const PackedInt32Array above_plane = { 1 };
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			{ Vector3(0, 0, 0), Vector3(0, 0.01, 0) },
+			{}, {}, {}, {}, centers,
+			{ Vector3(0, 0, 0) }, yaws, 0.0) == above_plane);
+}
+
+TEST_CASE("[PCGSpatialFilter3D] negative yaw rotates footprint opposite direction") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	const PackedVector3Array candidates = {
+		Vector3(1.4142135, 0, 1.4142135), // Inside -45-degree long axis.
+		Vector3(1.4142135, 0, -1.4142135), // Outside short axis.
+	};
+	const PackedInt32Array expected = { 1 };
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			candidates, {}, {}, {}, {},
+			{ Vector3() }, { Vector3(3, 1, 0.5) },
+			{ Math::deg_to_rad(-45.0) }, 0.0) == expected);
+}
+
+TEST_CASE("[PCGSpatialFilter3D] invalid rotated volumes fail closed atomically") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	const PackedVector3Array points = { Vector3(1, 0, 0), Vector3(3, 0, 0) };
+	const PackedVector3Array centers = { Vector3(0, 0, 0) };
+	const PackedVector3Array extents = { Vector3(1, 2, 3) };
+	const PackedFloat64Array yaws = { 0.4 };
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, centers, {}, yaws, 0.0).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, centers, extents, {}, 0.0).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, centers, { Vector3(-1, 1, 1) }, yaws, 0.0).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, centers, { Vector3(10001, 1, 1) }, yaws, 0.0).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, centers, extents, { Math::NaN }, 0.0).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, centers, extents, { Math::INF }, 0.0).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, centers, extents, { 7.0 }, 0.0).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, { Vector3(Math::NaN, 0, 0) },
+			extents, yaws, 0.0).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, centers, extents, yaws, -1.0).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, centers, extents, yaws, 0.01).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, centers, extents, yaws, 0.0, 4097).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			{ Vector3(0, 0, 0), Vector3(Math::NaN, 0, 0) },
+			{}, {}, {}, {}, centers, extents, yaws, 0.0).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, { Vector3(1, 1, 1) },
+			{ Vector3(-1, -1, -1) }, centers, extents, yaws, 0.0).is_empty());
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, { Vector3(0, 0, 0) }, { -1.0 }, {}, {},
+			centers, extents, yaws, 0.0).is_empty());
+	PackedVector3Array excess_centers;
+	PackedVector3Array excess_extents;
+	PackedFloat64Array excess_yaws;
+	for (int i = 0; i < 129; ++i) {
+		excess_centers.push_back(Vector3(i, 0, 0));
+		excess_extents.push_back(Vector3(1, 1, 1));
+		excess_yaws.push_back(0.0);
+	}
+	CHECK(filter->filter_indices_excluding_oriented_volumes(
+			points, {}, {}, {}, {}, excess_centers, excess_extents,
+			excess_yaws, 0.0).is_empty());
+}
+
 } // namespace TestPCGSpatialFilter3D

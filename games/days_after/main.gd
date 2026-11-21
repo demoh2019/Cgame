@@ -162,6 +162,9 @@ func _build_world() -> void:
     _create_solid("Barricade", Vector3(6, 0.7, 0), Vector3(4, 1.4, 0.9), Color(0.45, 0.31, 0.22))
     _create_solid("SupplyCrate", Vector3(-3, 0.5, -6), Vector3(1, 1, 1), Color(0.37, 0.26, 0.17))
     _create_solid("ScrapContainer", Vector3(10, 0.8, 5), Vector3(2.6, 1.6, 4), Color(0.27, 0.34, 0.38))
+    # Rotated wall uses matching yaw-oriented PCG exclusion for grass.
+    _create_solid("DiagonalFence", Vector3(13, 0.7, 13),
+        Vector3(10.0, 1.4, 1.0), Color(0.40, 0.33, 0.25), 35.0)
 
     _create_pickup("WaterBottle", "water", 1, Vector3(-2, 0.6, -3), Color(0.23, 0.61, 0.88))
     _create_pickup("FoodRation", "food", 1, Vector3(2, 0.6, -4), Color(0.52, 0.78, 0.27))
@@ -174,10 +177,12 @@ func _build_world() -> void:
     _create_resource("RockDeposit", "stone", 4, Vector3(11, 0.7, 6), Color(0.56, 0.59, 0.58))
 
 
-func _create_solid(name_text: String, center: Vector3, size: Vector3, color: Color) -> void:
+func _create_solid(name_text: String, center: Vector3, size: Vector3,
+        color: Color, yaw_degrees: float = 0.0) -> void:
     var body := StaticBody3D.new()
     body.name = name_text
     body.position = center
+    body.rotation.y = deg_to_rad(yaw_degrees)
     var collider := CollisionShape3D.new()
     var shape := BoxShape3D.new()
     shape.size = size

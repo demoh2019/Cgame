@@ -85,6 +85,49 @@ in the same headless gameplay smoke.
 
 Reference: [Unreal Engine PCG Biome exclusions and volumes](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-pcg-biome-core-and-sample-plugins-overview-guide-in-unreal-engine).
 
+## Yaw-oriented 3D exclusion volumes (OBB)
+
+The native `PCGSpatialFilter3D.filter_indices_excluding_oriented_volumes()`
+extends the existing sphere + AABB selector with **rotated** rectangular
+footprints. This is useful for diagonal fences, ruined walls, long cabins,
+fallen logs, and other rotated scenic objects where an inflated axis-aligned
+exclusion would unnecessarily remove nearby vegetation.
+
+```gdscript
+var pcg := PCGSpatialFilter3D.new()
+var selected := pcg.filter_indices_excluding_oriented_volumes(
+    candidates, sphere_centers, sphere_radii, box_mins, box_maxs,
+    PackedVector3Array([Vector3(13, 0.7, 13)]),
+    PackedVector3Array([Vector3(5.4, 1.4, 1.4)]),
+    PackedFloat64Array([deg_to_rad(35.0)]),
+    2.1, 160)
+```
+
+- The new oriented-volume arrays have matching lengths up to **128**;
+  world centers and nonnegative local half-extents define each volume.
+  Yaw is in radians, limited to [-TAU, TAU], matching Godot's positive-Y
+  `Basis(Vector3.UP, yaw)`. A candidate exactly on any box face is excluded.
+- Oriented volumes are removed **before** existing AABB/sphere exclusion and
+  the minimum-distance spatial hash. Returns stable original source indices,
+  not indices in a temporary filtered array. Empty rotated arrays use the
+  unchanged mixed-volume API.
+- Precomputes each box's sine/cosine only once and checks points using
+  inverse yaw in local XZ space. Bounded cost O(N × rotated boxes) in addition
+  to the existing AABB/sphere work. No extra physics, GPU calls or RNG.
+- Strict input validation, including candidates that would later be excluded:
+  16,384 finite bounded positions, 128 rotated boxes, half-extents 0–10,000,
+  4,096 selected indices, and existing sphere/AABB/spacing rules. Invalid
+  requests reject the whole operation.
+- `games/days_after/main.gd` now includes a genuinely rotated
+  `DiagonalFence` collision/mesh. `foliage_scatter.gd` uses its matching
+  oriented footprint in the native pipeline and the standalone GDScript
+  fallback. The headless smoke checks the physical fence rotation, exclusion
+  area, no spawned grass inside it, repeatability, and native/fallback parity.
+
+This is a CPU preprocessing feature, **not GPU instance culling or Nanite**.
+Actual frame-time performance requires profiling on representative scenes.
+Reference: [Unreal PCG biome exclusions](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-pcg-biome-core-and-sample-plugins-reference-guide-in-unreal-engine).
+
 ## Seeded, stable-ID point density sampling
 
 Inspired by Unreal Engine PCG point `$Density` and density filters,
