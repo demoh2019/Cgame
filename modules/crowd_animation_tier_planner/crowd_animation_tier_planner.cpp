@@ -67,6 +67,8 @@ void CrowdAnimationTierPlanner::_bind_methods() {
 			&CrowdAnimationTierPlanner::plan_visible_tiers);
 	ClassDB::bind_method(D_METHOD("plan_visible_tiers_stable", "distances", "priority_flags", "visible_flags", "retained_full_flags", "full_budget", "priority_budget", "hysteresis"),
 			&CrowdAnimationTierPlanner::plan_visible_tiers_stable, DEFVAL(1.5));
+	ClassDB::bind_method(D_METHOD("plan_visible_tiers_costed", "distances", "priority_flags", "visible_flags", "retained_full_flags", "full_pose_cost_us", "full_budget", "priority_budget", "full_pose_budget_us", "hysteresis"),
+			&CrowdAnimationTierPlanner::plan_visible_tiers_costed, DEFVAL(1.5));
 }
 
 // Shared budget planner: no second sorting pass and no additional per-actor
@@ -148,4 +150,55 @@ PackedInt32Array CrowdAnimationTierPlanner::plan_visible_tiers_stable(
 		int p_full_budget, int p_priority_budget, double p_hysteresis) const {
 	return plan_tiers_internal(p_distances, p_priority_flags, &p_visible_flags, &p_retained_full_flags,
 			p_full_budget, p_priority_budget, p_hysteresis);
+}
+
+
+PackedInt32Array CrowdAnimationTierPlanner::plan_visible_tiers_costed(
+		const PackedFloat64Array &p_distances, const PackedByteArray &p_priority_flags,
+		const PackedByteArray &p_visible_flags, const PackedByteArray &p_retained_full_flags,
+		const PackedInt32Array &p_full_pose_cost_us, int p_full_budget, int p_priority_budget,
+		int p_full_pose_budget_us, double p_hysteresis) const {
+	PackedInt32Array rejected;
+	const int count = p_distances.size();
+	ERR_FAIL_COND_V_MSG(p_full_pose_cost_us.size() != count, rejected,
+			"Estimated full-pose costs must match crowd distances.");
+	ERR_FAIL_COND_V_MSG(p_full_pose_budget_us < 0 || p_full_pose_budget_us > 1000000, rejected,
+			"Full-pose work budget must be within 0..1000000 microseconds.");
+	// Validate ALL samples before producing any tiers. The model can
+	// report 0 for an unseen pose; a bounded initial estimate replaces it.
+	for (int i = 0; i < count; ++i) {
+		ERR_FAIL_COND_V_MSG(p_full_pose_cost_us[i] < 0 || p_full_pose_cost_us[i] > 100000,
+				rejected, "Full-pose CPU cost sample must be in 0..100000 microseconds.");
+	}
+	PackedInt32Array tiers = plan_tiers_internal(p_distances, p_priority_flags,
+			&p_visible_flags, &p_retained_full_flags, p_full_budget, p_priority_budget, p_hysteresis);
+	if (tiers.size() != count || p_full_pose_budget_us == 0) {
+		return tiers;
+	}
+	// Reconstruct the existing bounded set of IK winners in their original
+	// effective-distance order. No nonwinner can claim an extra IK slot here.
+	// This is deliberately conservative if an expensive winner is demoted.
+	Vector<RankedCandidate> full_winners;
+	for (int i = 0; i < count; ++i) {
+		if (tiers[i] != 0) {
+			continue;
+		}
+		const double score = MAX(0.0, p_distances[i] -
+				(p_retained_full_flags[i] != 0 ? p_hysteresis : 0.0));
+		insert_top(full_winners, { score, i }, p_full_budget);
+	}
+	int64_t planned_us = 0;
+	for (const RankedCandidate &candidate : full_winners) {
+		const int index = candidate.index;
+		const int64_t estimate_us = p_full_pose_cost_us[index] == 0 ?
+				100 : p_full_pose_cost_us[index];
+		if (planned_us + estimate_us <= p_full_pose_budget_us) {
+			planned_us += estimate_us;
+		} else {
+			// Tier 1 preserves full-rate combat and locomotion animation
+			// but releases expensive optional procedural IK and look-at.
+			tiers.set(index, 1);
+		}
+	}
+	return tiers;
 }
