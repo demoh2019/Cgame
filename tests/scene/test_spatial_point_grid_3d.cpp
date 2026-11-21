@@ -45,7 +45,7 @@ TEST_CASE("[SpatialPointGrid3D] True 3D radius, early cap, invalid and empty bat
 	CHECK(counts[0] == 4);
 	CHECK(counts[1] == 0);
 	CHECK(counts[2] == 0);
-	CHECK(counts[3] == 2); // 0m and +75m; other points farther than 75m.
+	CHECK(counts[3] == 3); // 0m, 1m and -75m; other points outside sphere.
 	CHECK(grid->count_within_batch(PackedVector3Array(), 75.0).is_empty());
 	CHECK(grid->count_within_batch(probes, -1.0).is_empty());
 	CHECK(grid->count_within_batch(probes, 75.0, 0).is_empty());
