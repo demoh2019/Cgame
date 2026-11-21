@@ -22,7 +22,7 @@ class WorldStreamerRetryContract(unittest.TestCase):
 
     def test_every_real_failure_uses_one_retry_policy(self):
         self.assertEqual(CPP.count("failed.insert("), 1)
-        self.assertEqual(CPP.count('SNAME("chunk_load_failed")'), 2)
+        self.assertEqual(CPP.count('SNAME("chunk_load_failed")'), 1)
         self.assertIn("_record_failure(cell, path);", CPP)
         self.assertIn("_record_failure(cell, String(\"generator call failed\"));", CPP)
         self.assertIn("_record_failure(cell, String(\"generator returned a non-Node value\"));", CPP)
