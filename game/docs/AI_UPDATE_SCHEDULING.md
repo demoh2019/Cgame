@@ -125,6 +125,65 @@ and [Unreal Avoidance Manager's prediction horizon](https://dev.epicgames.com/do
 
 No measured FPS or CPU improvement is claimed without runtime benchmarks.
 
+## Native nearest-EQS query for multiple sensory sources
+
+Following [Unreal's EQS distance-based item selection](https://dev.epicgames.com/documentation/unreal-engine/eqs-node-reference-tests-in-unreal-engine)
+and its data-oriented
+[Mass Entity queries](https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-entity-in-unreal-engine),
+the reusable Cgame `AIProximityGrid2D` now supports:
+
+```gdscript
+var indices: PackedInt32Array = grid.query_cross_nearest_batch(
+    observer_positions, cue_positions, persistent_cue_ids, 23.0, 23.0)
+# indices[i] is the ORIGINAL cue index or -1 when no cue is nearby.
+```
+
+The method builds a 2D spatial hash for the candidate cues and performs
+at most nine cell visits per observer. The exact inclusive radius is checked
+before selecting the closest item; **equal-distance candidates are ordered
+by their persistent world ID**, then the original input index. This keeps
+the returned identity stable when two separate cues share a location.
+It does not allocate a Dictionary for each result, query scene nodes,
+perform line-of-sight tests, change any target, or authorize an attack.
+
+All inputs are validated before selecting results. Bounds: at most 4,096
+observers and 8,192 cues, finite coordinates within ±1,000,000 units,
+radius 0..256m, and cell edge 1..256m with edge >= radius. An invalid
+request yields an **empty** packed array; a valid unmatched source gets
+an index of **-1**. This distinction allows a safe GDScript fallback.
+
+Albion After's canonical server now uses the same C++ selector for
+three independently authorized stimulus categories:
+
+- **Thrown noise decoys**: already validated as active and audible.
+- **Corpse blood scent**: only server-confirmed death bags, unlooted
+  and before both expiry deadlines.
+- **Night campfire light**: only current, active nighttime light sources.
+
+The existing GDScript cell indices still validate expiry and eligibility.
+When there are **32..4096 infected and at least 4 active cues** in the
+specific sense, the server chooses one closest source for every living
+non-boss infected in a single C++ call. The last-mile gameplay behavior is
+still `Zombie.investigate_decoy`: combat priority, investigation lock,
+pursuit leash, and boss immunity are unchanged. The query never invents
+a player source or conveys private world state to clients.
+
+If the C++ method is unavailable, the cohort or cue count is small, or
+the request is invalid, each category retains the existing authoritative
+GDScript nearest-bucket selection. A server-only
+`GameServer.get_ai_cue_query_stats()` report records which channel used
+the native path and how many sources/cues were considered.
+
+Native doctests cover equal distances, duplicate target positions and
+IDs, negative cells, exact zero and positive radii, duplicate observers,
+missing matches and oversized/malformed inputs. The live game regression
+compares all **three** sensory channels between native and forced scalar
+fallback on the same 32-zombie encounter, including a boss, a chasing
+infected, two equal-distance sources and a distant bystander.
+
+No latency, FPS or CPU improvement is claimed without a compiled native
+engine and repeatable benchmarks.
+
 ## Inspect the real server
 
 The diagnostic `GameServer.get_ai_schedule_stats()` method returns a detached Dictionary:
