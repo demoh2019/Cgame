@@ -981,4 +981,27 @@ TEST_CASE("[WorldPartition3D] Native navigation tiles filter slopes and radius-a
 	memdelete(world);
 }
 
+
+TEST_CASE("[WorldPartition3D] Dynamic NavMesh dirty tile scheduling validates budgets and safe lifecycle") {
+	WorldPartition3D *world = memnew(WorldPartition3D);
+	CHECK(world->get_max_navigation_rebuilds_per_physics_frame() == 1);
+	CHECK(world->get_navigation_dirty_cell_count() == 0);
+	CHECK(world->get_cell_navigation_revision(Vector2i()) == -1);
+	CHECK(world->get_navigation_mesh_generation() == 0);
+	CHECK_FALSE(world->mark_cell_navigation_dirty(Vector2i())); // No live opted-in scene.
+	CHECK(world->get_navigation_dirty_cell_count() == 0);
+	world->set_max_navigation_rebuilds_per_physics_frame(2);
+	CHECK(world->get_max_navigation_rebuilds_per_physics_frame() == 2);
+	world->set_max_navigation_rebuilds_per_physics_frame(16);
+	CHECK(world->get_max_navigation_rebuilds_per_physics_frame() == 16);
+	ERR_PRINT_OFF;
+	world->set_max_navigation_rebuilds_per_physics_frame(0);
+	world->set_max_navigation_rebuilds_per_physics_frame(17);
+	ERR_PRINT_ON;
+	CHECK(world->get_max_navigation_rebuilds_per_physics_frame() == 16);
+	world->set_max_navigation_rebuilds_per_physics_frame(1);
+	CHECK(world->get_max_navigation_rebuilds_per_physics_frame() == 1);
+	memdelete(world);
+}
+
 } // namespace TestWorldPartition3D
