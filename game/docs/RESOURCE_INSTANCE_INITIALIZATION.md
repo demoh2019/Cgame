@@ -1,32 +1,18 @@
-# Albion After — batch initialization of world resources
+# Albion After — atomic full-buffer resource initialization
 
-The canonical game at `game/scripts/client/chunk_view.gd` now prepares
-resource transforms, tier colors and immutable server entity IDs before
-submitting each MultiMesh group. World generation, materials, tier pigments,
-visibility state and authority remain unchanged.
+CGame 3D MultiMesh API: `set_instance_transform_color_buffer(transforms: Array, colors: PackedColorArray) -> bool`.
 
-`game/scripts/client/resource_instance_initializer.gd` prevalidates every
-instance's transform and tint. For groups with 12 or more instances, it uses
-native CGame `MultiMesh.set_instance_transforms_batch(indices, transforms)`
-and the new `MultiMesh.set_instance_colors_batch(indices, colors)` where
-available. Smaller batches and standard Godot 4.4+ use the legacy per-slot
-setters. A rejected native call triggers validated per-instance fallback.
+The method validates the **entire** input (3D format, use_colors enabled, use_custom_data disabled, exactly instance_count transforms/colors, and finite transform/color values) before modifying any instance. A valid non-empty input is packed in native C++ and uploaded once with `MultiMesh.set_buffer()` / RenderingServer, **not** N individual renderer commands. An empty 0-instance input succeeds without GPU allocation. The existing engine's `pack_transform_buffer()` is reused to guarantee the 16-float (12 matrix + RGBA) layout.
 
-C++ `set_instance_colors_batch` validates all indices and RGBA components
-before any renderer changes, including duplicates and nonfinite colors.
-It accepts hidden slots and both 2D/3D formats. This is one scripting call
-for N color updates, **not** one GPU command or faster full-buffer upload.
-Prefer `MultiMesh.buffer` for dense contiguous bulk uploads if the entire
-buffer is being initialized from structured arrays.
+In the **canonical Albion After** `game/scripts/client/chunk_view.gd`, `resource_instance_initializer.gd` now chooses that native API for dense groups of at least 12 world resources. On stock Godot 4.4+, it builds a PackedFloat32Array with exactly the same 16-float records and assigns `MultiMesh.buffer` in a single upload. Tiny groups use original setters; groups with `use_custom_data` set retain the per-instance path so no animation payload is overwritten.
 
-Native C++ tests: `tests/scene/test_multimesh_color_batch.cpp`.
-Main-game headless tests: `game/tests/test_resource_instance_initializer.gd`
-included in `game/tests/run_all.gd`.
+World positions, resource tiers/tints, stable server IDs, masks and persistence remain unchanged. For sparse depletion/restoration, use the existing `multimesh_resource_updates.gd`, which avoids rewriting the entire buffer.
 
-To validate in a built Godot/CGame engine:
+Tests: engine `tests/scene/test_multimesh_full_color_buffer.cpp`, and game `game/tests/test_resource_full_buffer.gd` (registered in `run_all.gd`). The test covers nontrivial Basis rotations/scaling, row-major packing, RGBA, invalid inputs without partial renderer changes, custom-data preservation, small groups and empty buffers.
+
+Run in a built CGame engine:
 ```bash
 godot --headless --path game --script res://tests/run_all.gd
 ```
 
-No executable Godot/engine build is available in the current tool environment.
-C++ compilation, GDScript execution and FPS gains are therefore unverified.
+No executable Godot/CGame engine is installed in this session, so native compilation, headless GDScript runs, scene rendering, and GPU frame-time improvements remain unverified. It is a reduction in renderer command count for dense initialization, not a measured frame-time or memory optimization.

@@ -213,6 +213,34 @@ void MultiMesh::set_buffer(const Vector<float> &p_buffer) {
 }
 
 
+bool MultiMesh::set_instance_transform_color_buffer(const Array &p_transforms, const Vector<Color> &p_colors) {
+	ERR_FAIL_COND_V_MSG(transform_format != TRANSFORM_3D, false, "Full transform/color uploads require a 3D MultiMesh.");
+	ERR_FAIL_COND_V_MSG(!use_colors, false, "Enable use_colors for a full transform/color upload.");
+	ERR_FAIL_COND_V_MSG(use_custom_data, false, "Transform/color uploads cannot overwrite MultiMeshes with custom instance data.");
+	ERR_FAIL_COND_V_MSG(p_transforms.size() != instance_count || p_colors.size() != instance_count, false, "Full transform/color arrays must match instance_count.");
+
+	// Validate the *entire* payload before packing or touching the renderer.
+	// This preserves the previous buffer on malformed data, unlike repeated
+	// per-instance writes where a later bad slot can leave partial updates.
+	for (int i = 0; i < instance_count; i++) {
+		ERR_FAIL_COND_V_MSG(p_transforms[i].get_type() != Variant::TRANSFORM3D, false, "Each instance must provide Transform3D.");
+		const Transform3D transform = p_transforms[i];
+		ERR_FAIL_COND_V_MSG(!transform.is_finite(), false, "Instance transforms must be finite.");
+		const Color &color = p_colors[i];
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(color.r) || !Math::is_finite(color.g) || !Math::is_finite(color.b) || !Math::is_finite(color.a), false, "Instance colors must be finite.");
+	}
+	if (instance_count == 0) {
+		return true;
+	}
+
+	// Reuse the fork's native 3D record packer (12 matrix + 4 RGBA floats)
+	// and submit the whole contiguous buffer to RenderingServer just once.
+	const Vector<float> packed = pack_transform_buffer(p_transforms, p_colors);
+	ERR_FAIL_COND_V_MSG(packed.size() != instance_count * 16, false, "Native packing did not produce a valid MultiMesh buffer.");
+	set_buffer(packed);
+	return true;
+}
+
 Vector<float> MultiMesh::pack_transform_buffer(const Array &p_transforms, const Vector<Color> &p_colors) const {
 	// This is a pure CPU operation: set_buffer() performs the single upload.
 	ERR_FAIL_COND_V_MSG(transform_format != TRANSFORM_3D, Vector<float>(), "Native transform packing requires a 3D MultiMesh.");
@@ -556,6 +584,7 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_aabb"), &MultiMesh::get_aabb);
 
 	ClassDB::bind_method(D_METHOD("get_buffer"), &MultiMesh::get_buffer);
+	ClassDB::bind_method(D_METHOD("set_instance_transform_color_buffer", "transforms", "colors"), &MultiMesh::set_instance_transform_color_buffer);
 	ClassDB::bind_method(D_METHOD("pack_transform_buffer", "transforms", "colors"), &MultiMesh::pack_transform_buffer);
 	ClassDB::bind_method(D_METHOD("transformed_mesh_bounds", "transforms", "margin"), &MultiMesh::transformed_mesh_bounds);
 	ClassDB::bind_method(D_METHOD("shuffled_instance_buffer", "buffer", "seed"), &MultiMesh::shuffled_instance_buffer);

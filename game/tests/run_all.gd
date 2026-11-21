@@ -168,6 +168,7 @@ const SUITES := [
 	"res://tests/test_scenery_batches.gd",
 	"res://tests/test_multimesh_resource_updates.gd",
 	"res://tests/test_resource_instance_initializer.gd",
+	"res://tests/test_resource_full_buffer.gd",
 	"res://tests/test_scenery_pigment_instancing.gd",
 	"res://tests/test_native_scenery_geometry.gd",
 	"res://tests/test_world_roads.gd",
