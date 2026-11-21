@@ -413,5 +413,93 @@ TEST_CASE("[CrowdAnimationBudgetGovernor] bounds, quality transitions and enable
 	CHECK(governor->get_frames_observed() == 0);
 }
 
+
+TEST_CASE("[CrowdAnimationTierPlanner] group quotas prevent one dense cohort from monopolizing optional IK") {
+	Ref<CrowdAnimationTierPlanner> planner;
+	planner.instantiate();
+	const PackedInt32Array tiers = { 0, 0, 0, 0, 1, 2 };
+	const PackedFloat64Array distance = { 1.0, 2.0, 5.0, 8.0, 50.0, 90.0 };
+	const PackedByteArray retained = { 0, 0, 0, 0, 0, 0 };
+	const PackedInt32Array costs = { 100, 100, 100, 100, 100, 100 };
+	const PackedByteArray groups = { 1, 1, 0, 0, 2, 3 };
+	const PackedFloat64Array equal_weight = { 1.0, 1.0, 1.0, 1.0 };
+	const PackedInt32Array grouped = planner->cap_full_pose_cost_grouped(
+			tiers, distance, retained, costs, groups, equal_weight, 200);
+	const PackedInt32Array expected = { 0, 1, 0, 1, 1, 2 };
+	CHECK(grouped == expected); // Exactly one normal infected and one player.
+	const PackedInt32Array ungrouped = planner->cap_full_pose_cost(
+			tiers, distance, retained, costs, 200);
+	CHECK(ungrouped[0] == 0);
+	CHECK(ungrouped[1] == 0); // Old nearest-first cap favors the dense infected group.
+	CHECK(grouped[4] == 1); // Never promote a distant actor to IK.
+	CHECK(grouped[5] == 2); // Tier 2 and up remain unchanged.
+	CHECK(tiers[1] == 0); // Caller owns the original tier array.
+	CHECK(planner->cap_full_pose_cost_grouped(tiers, distance, retained, costs,
+			groups, equal_weight, 0) == tiers);
+}
+
+TEST_CASE("[CrowdAnimationTierPlanner] grouped IK admits weighted bosses and redistributes unused shares") {
+	Ref<CrowdAnimationTierPlanner> planner;
+	planner.instantiate();
+	const PackedInt32Array tiers = { 0, 0, 0, 0, 1, 2 };
+	const PackedFloat64Array distance = { 2.0, 3.0, 4.0, 5.0, 50.0, 90.0 };
+	const PackedByteArray retained = { 0, 0, 0, 0, 0, 0 };
+	const PackedInt32Array costs = { 100, 100, 200, 100, 0, 0 };
+	const PackedByteArray groups = { 1, 1, 0, 2, 1, 3 };
+	const PackedFloat64Array weights = { 3.0, 1.0, 2.0, 1.0 };
+	const PackedInt32Array capped = planner->cap_full_pose_cost_grouped(
+			tiers, distance, retained, costs, groups, weights, 400);
+	const PackedInt32Array expected = { 0, 1, 0, 0, 1, 2 };
+	CHECK(capped == expected); // Player, elite and one ordinary infected.
+	const PackedByteArray only_infected = { 1, 1, 1, 1, 1, 1 };
+	const PackedInt32Array same_group = planner->cap_full_pose_cost_grouped(
+			tiers, distance, retained, { 100, 100, 100, 100, 0, 0 },
+			only_infected, weights, 200);
+	CHECK(same_group == planner->cap_full_pose_cost(tiers, distance,
+			retained, { 100, 100, 100, 100, 0, 0 }, 200));
+	const PackedByteArray retained_ik = { 0, 1, 0, 0, 0, 0 };
+	const PackedInt32Array held = planner->cap_full_pose_cost_grouped(
+			tiers, distance, retained_ik, { 0, 0, 0, 0, 0, 0 },
+			only_infected, weights, 100, 1.5);
+	REQUIRE(held.size() == 6);
+	CHECK(held[0] == 1);
+	CHECK(held[1] == 0); // Previous owner beats a slight-distance newcomer.
+}
+
+TEST_CASE("[CrowdAnimationTierPlanner] grouped IK rejects invalid costs, group weights and identifiers atomically") {
+	Ref<CrowdAnimationTierPlanner> planner;
+	planner.instantiate();
+	const PackedInt32Array tiers = { 0, 0, 1 };
+	const PackedFloat64Array distances = { 2.0, 5.0, 30.0 };
+	const PackedByteArray retained = { 0, 0, 0 };
+	const PackedInt32Array costs = { 100, 0, 200 };
+	const PackedByteArray groups = { 0, 1, 2 };
+	const PackedFloat64Array weights = { 3.0, 1.0, 2.0, 1.0 };
+	ERR_PRINT_OFF
+	CHECK(planner->cap_full_pose_cost_grouped(tiers, distances, retained, costs,
+			{ 0 }, weights, 200).is_empty());
+	CHECK(planner->cap_full_pose_cost_grouped(tiers, distances, retained, { 100 },
+			groups, weights, 200).is_empty());
+	CHECK(planner->cap_full_pose_cost_grouped(tiers, distances, retained, costs,
+			{ 0, 4, 2 }, weights, 200).is_empty());
+	CHECK(planner->cap_full_pose_cost_grouped(tiers, distances, retained, costs,
+			groups, { 1.0 }, 200).is_empty());
+	CHECK(planner->cap_full_pose_cost_grouped(tiers, distances, retained, costs,
+			groups, { 3.0, 0.0, 2.0, 1.0 }, 200).is_empty());
+	CHECK(planner->cap_full_pose_cost_grouped(tiers, distances, retained, costs,
+			groups, { 3.0, Math::NaN, 2.0, 1.0 }, 200).is_empty());
+	CHECK(planner->cap_full_pose_cost_grouped(tiers, distances, retained, costs,
+			groups, weights, -1).is_empty());
+	CHECK(planner->cap_full_pose_cost_grouped(tiers, distances, retained, costs,
+			groups, weights, 1000001).is_empty());
+	CHECK(planner->cap_full_pose_cost_grouped(tiers, distances, retained,
+			{ 100, -1, 200 }, groups, weights, 200).is_empty());
+	CHECK(planner->cap_full_pose_cost_grouped({ 5, 0, 1 }, distances, retained,
+			costs, groups, weights, 200).is_empty());
+	CHECK(planner->cap_full_pose_cost_grouped(tiers, distances, retained, costs,
+			groups, weights, 200, 8.1).is_empty());
+	ERR_PRINT_ON
+}
+
 } // namespace TestCrowdAnimationTierPlanner
 #endif // MODULE_CROWD_ANIMATION_TIER_PLANNER_ENABLED
