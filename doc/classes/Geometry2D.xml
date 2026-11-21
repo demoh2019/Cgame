@@ -83,6 +83,16 @@
 				Returns an empty dictionary for an empty set, an odd number of endpoints, a nonfinite coordinate or more than 32768 segments. Values are checked before any search. This is a linear CPU search; callers handling many queries should partition segments spatially.
 			</description>
 		</method>
+		<method name="distance_transform_8">
+			<return type="PackedByteArray" />
+			<param index="0" name="mask" type="PackedByteArray" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="max_distance" type="int" />
+			<description>
+				Cgame extension: produces a row-major 8-bit [i]chessboard/Chebyshev[/i] distance field from a binary [param mask]. Every nonzero mask pixel is a feature with distance 0, and all other pixels receive their minimum number of horizontal, vertical or diagonal grid steps to a feature. Uses two linear-time 8-neighbor raster passes; no Euclidean-distance or signed-distance approximation is implied. Diagonal steps cost one pixel just like cardinal steps, and feature positions outside the image are not considered.
+				Values within [param max_distance] (inclusive) are returned as integers; 255 denotes no feature within the requested radius. A zero radius returns zeros for feature pixels and 255 elsewhere. [param size] must have both dimensions between 1 and 2048, the [param mask] must contain exactly [code]size.x * size.y[/code] bytes, and [param max_distance] must be between 0 and 254. Invalid input returns an empty array and reports an error. The input mask remains unchanged. This API operates on CPU data, not a GPU texture.
+			</description>
+		</method>
 		<method name="rasterize_segments_mask">
 			<return type="PackedByteArray" />
 			<param index="0" name="segment_endpoints" type="PackedVector2Array" />

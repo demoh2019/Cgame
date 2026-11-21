@@ -10,6 +10,7 @@ const SUITES := [
 	"res://tests/test_noise_batch_sampling.gd",
 	"res://tests/test_gradient_batch.gd",
 	"res://tests/test_image_batch.gd",
+	"res://tests/test_mask_distance_field.gd",
 	"res://tests/test_world_sites.gd",
 	"res://tests/test_model_catalog.gd",
 	"res://tests/test_imported_mesh_lod.gd",

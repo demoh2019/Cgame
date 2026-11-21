@@ -15,6 +15,7 @@ const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
 const GradientBatch = preload("res://scripts/client/gradient_batch.gd")
 const ImageBatch = preload("res://scripts/client/image_batch.gd")
+const MaskDistanceField = preload("res://scripts/client/mask_distance_field.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const ExpeditionAtlas = preload("res://scripts/shared/expedition_atlas.gd")
 
@@ -55,6 +56,7 @@ var _texture: ImageTexture
 var _heights := PackedFloat32Array()
 var _biomes := PackedByteArray()
 var _lush := PackedFloat32Array()
+var _shore_distances := PackedByteArray()
 var _sampled_rows := 0
 var _painted_rows := 0
 var _sites: Array = []
@@ -86,6 +88,7 @@ func setup(p_client) -> void:
 	_heights.resize(PIXELS * PIXELS)
 	_biomes.resize(PIXELS * PIXELS)
 	_lush.resize(PIXELS * PIXELS)
+	_shore_distances = PackedByteArray()
 	var serif := SystemFont.new()
 	serif.font_names = PackedStringArray(["Georgia", "Palatino", "Book Antiqua", "Times New Roman", "Liberation Serif", "serif"])
 	serif.font_weight = 600
@@ -245,6 +248,11 @@ func _process(delta: float) -> void:
 		_sampled_rows += 1
 		rows -= 1
 	if _sampled_rows == PIXELS and _painted_rows < PIXELS:
+		# Compute the entire eight-connected coast distance field once, after
+		# the last height sample but before drawing the first chart row.
+		if _shore_distances.is_empty():
+			_shore_distances = MaskDistanceField.from_heights(
+					_heights, Vector2i(PIXELS, PIXELS), Defs.WATER_LEVEL - 0.4, 7)
 		var painted := 0
 		while painted < PAINT_ROWS_PER_FRAME and _painted_rows < PIXELS:
 			_paint_row(_painted_rows)
@@ -262,13 +270,12 @@ func _is_water(x: int, y: int) -> bool:
 	return _h(x, y) < Defs.WATER_LEVEL - 0.4
 
 
-## Pixels from this water pixel to the nearest land (up to 7), sampled along eight directions.
+## Nearest coastline in eight-connected raster pixels (Chebyshev metric).
+## 255 means no land within the seven-pixel coastline search radius.
 func _shore_distance(x: int, y: int) -> int:
-	for radius in range(1, 8):
-		for direction in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 1), Vector2i(-1, 1), Vector2i(1, -1), Vector2i(-1, -1)]:
-			if not _is_water(x + direction.x * radius, y + direction.y * radius):
-				return radius
-	return 99
+	if _shore_distances.size() != PIXELS * PIXELS:
+		return 255
+	return _shore_distances[clampi(y, 0, PIXELS - 1) * PIXELS + clampi(x, 0, PIXELS - 1)]
 
 
 func _paint_row(row: int) -> void:
