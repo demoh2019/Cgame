@@ -59,7 +59,7 @@
 		<method name="get_navigation_mesh_generation" qualifiers="const">
 			<return type="int" />
 			<description>
-				Returns a monotonic whole-world navigation topology generation. Incremented for scene load, unload, navigation region activation/deactivation and successful dynamic tile rebuilds. A cached path must be reconsidered after the generation changes, including when an intermediate NavMesh region changes; this count does not prove path availability.
+				Returns a monotonic whole-world navigation topology generation. Incremented when a cell scene loads or unloads, a navigation region activates/deactivates, a new dirty tile is marked, or a dynamic tile rebuild succeeds. A cached path must be reconsidered after the generation changes, including when an intermediate NavMesh region changes; this count does not prove path availability.
 			</description>
 		</method>
 		<method name="build_navigation_tile" qualifiers="const">
