@@ -80,4 +80,13 @@ public:
 	// p_sources <= 4096, p_targets <= 8192, total hits <= 32768.
 	Array query_cross_radius_batch(const PackedVector2Array &p_sources,
 			const PackedVector2Array &p_targets, double p_radius, double p_cell_size) const;
+
+	// Short-horizon Mass-style steering prediction, using desired velocities
+	// and the existing bounded nearest-neighbor broadphase on projected sites.
+	// Only read-only directions are returned, never positions or gameplay hits.
+	// Time horizon 0..2 seconds; all velocities must be finite and <= 50m/s.
+	// Coincident future trajectories sidestep based on relative velocity.
+	PackedVector2Array query_predictive_separation_batch(const PackedVector2Array &p_positions,
+			const PackedVector2Array &p_velocities, const PackedInt32Array &p_source_indices,
+			double p_radius, double p_cell_size, int p_max_neighbors, double p_horizon) const;
 };
