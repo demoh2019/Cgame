@@ -1024,6 +1024,67 @@ Dictionary Geometry2D::get_closest_point_on_segments(const Vector2 &p_point, con
 	return result;
 }
 
+PackedByteArray Geometry2D::rasterize_segments_mask(const PackedVector2Array &p_segment_endpoints, const Vector2i &p_size, real_t p_half_width, real_t p_softness) {
+	PackedByteArray result;
+	// Bound both memory and CPU work. The output is one row-major L8 mask.
+	ERR_FAIL_COND_V_MSG(p_size.x < 1 || p_size.y < 1 || p_size.x > 2048 || p_size.y > 2048, result,
+			"Mask dimensions must be between 1 and 2048 pixels per axis.");
+	ERR_FAIL_COND_V_MSG((p_segment_endpoints.size() & 1) != 0 || p_segment_endpoints.size() > 16384, result,
+			"Input must contain pairs of segment endpoints (up to 8192 segments).");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_half_width) || !Math::is_finite(p_softness) ||
+					p_half_width < 0.0 || p_softness <= 0.0 || !Math::is_finite(p_half_width + p_softness),
+			result, "Segment half-width must be nonnegative and softness must be positive and finite.");
+
+	const Vector2 *endpoints = p_segment_endpoints.ptr();
+	for (int i = 0; i < p_segment_endpoints.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!endpoints[i].is_finite(), result, "Mask segment coordinates must be finite.");
+	}
+
+	const int width = p_size.x;
+	const int height = p_size.y;
+	ERR_FAIL_COND_V_MSG(result.resize(width * height) != OK, PackedByteArray(), "Could not allocate segment mask.");
+	uint8_t *pixels = result.ptrw();
+	const real_t reach = p_half_width + p_softness;
+	for (int i = 0; i < p_segment_endpoints.size(); i += 2) {
+		const Vector2 &a = endpoints[i];
+		const Vector2 &b = endpoints[i + 1];
+		const real_t left = MIN(a.x, b.x) - reach;
+		const real_t right = MAX(a.x, b.x) + reach;
+		const real_t top = MIN(a.y, b.y) - reach;
+		const real_t bottom = MAX(a.y, b.y) + reach;
+		// Check bounds before converting world coordinates to integers, avoiding
+		// overflow for finite segments that are far outside the mask.
+		if (right < 0 || left >= width || bottom < 0 || top >= height) {
+			continue;
+		}
+		const int x0 = int(MAX((real_t)0.0, Math::floor(left)));
+		const int x1 = int(MIN((real_t)(width - 1), Math::ceil(right)));
+		const int y0 = int(MAX((real_t)0.0, Math::floor(top)));
+		const int y1 = int(MIN((real_t)(height - 1), Math::ceil(bottom)));
+
+		const Vector2 ab = b - a;
+		// Match Albion After's prior scalar mask, including its short-segment clamp.
+		const real_t length_squared = MAX(ab.length_squared(), (real_t)0.0001);
+		for (int y = y0; y <= y1; y++) {
+			const int row = y * width;
+			for (int x = x0; x <= x1; x++) {
+				const Vector2 point((real_t)x + (real_t)0.5, (real_t)y + (real_t)0.5);
+				const real_t along = CLAMP((point - a).dot(ab) / length_squared, (real_t)0.0, (real_t)1.0);
+				const real_t distance = point.distance_to(a + ab * along);
+				if (distance >= reach) {
+					continue;
+				}
+				const real_t coverage = CLAMP((reach - distance) / p_softness, (real_t)0.0, (real_t)1.0);
+				const uint8_t value = uint8_t((real_t)255.0 * coverage);
+				if (value > pixels[row + x]) {
+					pixels[row + x] = value;
+				}
+			}
+		}
+	}
+	return result;
+}
+
 bool Geometry2D::point_is_inside_triangle(const Vector2 &p_s, const Vector2 &p_a, const Vector2 &p_b, const Vector2 &p_c) const {
 	return ::Geometry2D::is_point_in_triangle(p_s, p_a, p_b, p_c);
 }
@@ -1207,6 +1268,7 @@ void Geometry2D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_closest_point_to_segment_uncapped", "point", "s1", "s2"), &Geometry2D::get_closest_point_to_segment_uncapped);
 	ClassDB::bind_method(D_METHOD("get_closest_point_on_segments", "point", "segment_endpoints"), &Geometry2D::get_closest_point_on_segments);
+	ClassDB::bind_method(D_METHOD("rasterize_segments_mask", "segment_endpoints", "size", "half_width", "softness"), &Geometry2D::rasterize_segments_mask);
 
 	ClassDB::bind_method(D_METHOD("point_is_inside_triangle", "point", "a", "b", "c"), &Geometry2D::point_is_inside_triangle);
 
