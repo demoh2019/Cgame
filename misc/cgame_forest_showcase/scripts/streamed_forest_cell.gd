@@ -24,6 +24,7 @@ var streaming_physics_active: bool = true
 var streaming_navigation_active: bool = true
 var navigation_region: NavigationRegion3D
 var navigation_mesh_cache: NavigationMesh
+var navigation_blockers: PackedVector3Array = PackedVector3Array()
 var beacon_time: float = 0.0
 var cell_seed: int = 0
 var cell_x: int = 0
@@ -73,7 +74,8 @@ func _sync_navigation_region() -> void:
     if not is_instance_valid(navigation_region):
         # Cached once per loaded cell; regenerated only on unload/reload.
         if navigation_mesh_cache == null:
-            navigation_mesh_cache = ForestNavigationMesh.build_tile(global_position)
+            navigation_mesh_cache = ForestNavigationMesh.build_tile(
+                global_position, get_parent() as WorldPartition3D, navigation_blockers)
         navigation_region = NavigationRegion3D.new()
         navigation_region.name = "StreamingNavigationRegion"
         navigation_region.use_edge_connections = true
@@ -92,7 +94,7 @@ func is_streaming_navigation_ready() -> bool:
         and is_instance_valid(navigation_region) and navigation_region.enabled \
         and navigation_region.is_inside_tree() \
         and navigation_region.navigation_mesh != null \
-        and navigation_region.navigation_mesh.get_polygon_count() == 128 \
+        and navigation_region.navigation_mesh.get_polygon_count() > 0 \
         and navigation_region.get_navigation_map().is_valid()
 
 
@@ -145,6 +147,8 @@ func _rebuild_lod() -> void:
     grass = null
     obstacles = null
     navigation_region = null # Old region is queued for removal with the LOD.
+    navigation_mesh_cache = null # Invalidate if authored obstacle geometry changes.
+    navigation_blockers.clear()
     rng.seed = cell_seed
 
     if streaming_lod == 0:
@@ -196,8 +200,10 @@ func _spawn_trees() -> void:
     var custom: Array[Color] = []
     var tree_count: int = TREE_COUNT if streaming_lod == 0 else DISTANT_TREE_COUNT
     for i in range(tree_count):
-        var px: float = rng.randf_range(1.0, CELL_SIZE - 1.0)
-        var pz: float = rng.randf_range(1.0, CELL_SIZE - 1.0)
+        var px: float = rng.randf_range(3.0, CELL_SIZE - 3.0)
+        var pz: float = rng.randf_range(3.0, CELL_SIZE - 3.0)
+        if absf(pz - CELL_SIZE * 0.5) < 4.7:
+            continue # Keep a continuous walkable central trail across tiles.
         var wx: float = global_position.x + px
         var wz: float = global_position.z + pz
         if Vector2(wx, wz - 9.0).length() < 8.0:
@@ -205,6 +211,8 @@ func _spawn_trees() -> void:
         var scale: float = rng.randf_range(0.70, 1.5)
         var ground: float = _world_height(px, pz)
         var orientation := Basis(Vector3.UP, rng.randf_range(-PI, PI))
+        if streaming_lod == 0:
+            navigation_blockers.append(Vector3(px, pz, 0.34 * scale))
         trunks.push_back(Transform3D(
             orientation.scaled(Vector3(scale * 0.75, scale, scale * 0.75)),
             Vector3(px, ground + scale * 1.90, pz)))
@@ -262,10 +270,14 @@ func _spawn_rocks() -> void:
     var transforms: Array[Transform3D] = []
     var custom: Array[Color] = []
     for i in range(ROCK_COUNT):
-        var px: float = rng.randf_range(0.0, CELL_SIZE)
-        var pz: float = rng.randf_range(0.0, CELL_SIZE)
+        var px: float = rng.randf_range(3.0, CELL_SIZE - 3.0)
+        var pz: float = rng.randf_range(3.0, CELL_SIZE - 3.0)
+        if absf(pz - CELL_SIZE * 0.5) < 4.7:
+            continue # Keep enough room for a radius-aware navmesh corridor.
         var scale: float = rng.randf_range(0.45, 1.6)
         var basis := Basis(Vector3.UP, rng.randf_range(0.0, TAU))
+        # Conservative footprint radius for the oriented rock collision box.
+        navigation_blockers.append(Vector3(px, pz, 1.25 * scale))
         transforms.push_back(Transform3D(
             basis.scaled(Vector3(scale * 1.4, scale * 0.45, scale)),
             Vector3(px, _world_height(px, pz) + scale * 0.15, pz)))
