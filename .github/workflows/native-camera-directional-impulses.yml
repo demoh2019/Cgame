@@ -51,7 +51,7 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 240s "$BIN" --headless --test --test-case="*[CameraShake]*" --no-colors 2>&1 | tee native-camera-shake.log
-          timeout 240s "$BIN" --headless --test --test-case="*Directional spatial impacts*" --no-colors 2>&1 | tee native-directional-camera.log
+          timeout 240s "$BIN" --headless --test --test-case="*Directional *" --no-colors 2>&1 | tee native-directional-camera.log
       - name: Import Albion After and validate scripts
         run: |
           set -euo pipefail
