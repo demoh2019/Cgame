@@ -750,14 +750,19 @@ static func build_tile(source: Source, tile: int) -> MultiMeshInstance3D:
 	if count == 0:
 		return null
 	buffer.resize(count * 16)
-	# Randomize spatial order once. As draw count drops with distance, every
-	# prefix remains scattered across the same tile, without rectangular gaps.
-	shuffle_instances(buffer, count, WorldGen.mix(int(origin.x), int(origin.y), 981, tile))
 	var multimesh := MultiMesh.new()
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
 	multimesh.use_colors = true
 	multimesh.mesh = clump_mesh()
 	multimesh.instance_count = count
+	# Randomized prefixes thin grass evenly across the tile. Cgame's native
+	# Fisher-Yates avoids thousands of GDScript indexed float writes; the
+	# fallback uses the exact same seeded PCG sequence on stock Godot.
+	var shuffle_seed: int = WorldGen.mix(int(origin.x), int(origin.y), 981, tile)
+	if multimesh.has_method("shuffled_instance_buffer"):
+		buffer = multimesh.call("shuffled_instance_buffer", buffer, shuffle_seed)
+	else:
+		shuffle_instances(buffer, count, shuffle_seed)
 	multimesh.buffer = buffer
 	var instance := MultiMeshInstance3D.new()
 	instance.multimesh = multimesh

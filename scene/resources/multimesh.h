@@ -85,6 +85,9 @@ public:
 	Vector<float> pack_transform_buffer(const Array &p_transforms, const Vector<Color> &p_colors) const;
 	// Union transformed mesh bounds without a script loop per instance.
 	AABB transformed_mesh_bounds(const Array &p_transforms, real_t p_margin) const;
+	// Pure CPU Fisher-Yates shuffle of complete instance records. No GPU upload,
+	// no transform/color mixing, and no mutation of the input buffer.
+	Vector<float> shuffled_instance_buffer(const Vector<float> &p_buffer, uint64_t p_seed) const;
 
 	void set_buffer_interpolated(const Vector<float> &p_buffer_curr, const Vector<float> &p_buffer_prev);
 
