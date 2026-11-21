@@ -23,6 +23,10 @@ const DEFAULTS := {
 	"toggle_sprint": false,
 	"toggle_crouch": false,
 	"locale": "",
+	"fp_fov": 75.0,
+	"mouse_sensitivity": 1.0,
+	"invert_y": false,
+	"fp_head_bob": true,
 }
 
 static var path := DEFAULT_PATH
@@ -86,6 +90,12 @@ static func sanitize(key: String, value):
 			return clampi(int(value) if numeric else 1, 0, CAPTION_SIZES.size() - 1)
 		"locale":
 			return str(value) if str(value) in LOCALES else ""
+		"fp_fov":
+			var fov: float = float(value) if numeric else 75.0
+			return clampf(fov if is_finite(fov) else 75.0, 60.0, 110.0)
+		"mouse_sensitivity":
+			var sens: float = float(value) if numeric else 1.0
+			return clampf(sens if is_finite(sens) else 1.0, 0.1, 4.0)
 	return bool(value) if typeof(fallback) == TYPE_BOOL else fallback
 
 

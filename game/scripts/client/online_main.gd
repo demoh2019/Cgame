@@ -28,6 +28,7 @@ const CharacterModel = preload("res://scripts/client/character_model.gd")
 const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const FirstPersonView = preload("res://scripts/client/first_person_view.gd")
+const FirstPersonViewmodel = preload("res://scripts/client/first_person_viewmodel.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
 const AmbientMotes = preload("res://scripts/client/ambient_motes.gd")
 const AmbientBirds = preload("res://scripts/client/ambient_birds.gd")
@@ -188,6 +189,14 @@ var _demo_house_done_at := -1
 var _start_first_person := false # --first-person launch flag (also for screenshots).
 var _jump_time := -1.0 # Seconds into the current cosmetic first-person hop, or -1 on the ground.
 var _crosshair: Control
+var _viewmodel: Node3D # FirstPersonViewmodel: the held item in front of the first-person camera.
+var _bob_phase := 0.0
+var _fp_roll := 0.0
+var _land_time := -1.0 # Seconds since the cosmetic hop landed, -1 when not dipping.
+var _hit_marker := 0.0 # Crosshair hit flash, decays.
+var _own_attack_time := -10.0 # Engine ticks (s) of your last attack, for zombie hit markers.
+var _third_person_near := 0.05
+var _fp_body_refresh := 0.0
 var _underwater_tint: ColorRect # Blue murk while the camera is below the surface.
 var _breath_label: Label # Air left while diving.
 var _dof_elapsed := 0.35 # Coalesce cinematic focus updates to ~3 Hz.
@@ -1263,6 +1272,7 @@ func _on_welcomed() -> void:
 	hud.say("F2 shows every control." if not FirstSteps.active() else "Welcome, survivor. Follow FIRST STEPS (top left); F2 lists every control.")
 	UiTheme.apply(hud)
 	client.event_received.connect(_on_skill_event)
+	client.event_received.connect(_first_person_hit_marker) # Crosshair hit flash and held-item swing in first person.
 	_setup_chat()
 	# Streaming: chunks are built from the seed as the player walks.
 	streamer = WorldStreamer.new()
@@ -1445,7 +1455,7 @@ func _process(delta: float) -> void:
 		avatar.rotation.y = lerp_angle(avatar.rotation.y, facing, 1.0 - exp(-12.0 * delta))
 		avatar.visible = bool(client.you.get("alive", true))
 		# Your own body would fill the screen from inside; other players still see it.
-		avatar_model.visible = not _first_person
+		avatar_model.visible = true # In first person its meshes are shadow-only (set_body_shadow_only).
 		avatar_model.set_stance(bool(client.you.get("crouching", false)), bool(client.you.get("mounted", false)) and avatar.visible,
 			float(client.you.get("wading_depth_m", 0.0)) > 1.05)
 		# Chopping shows the axe; otherwise the equipped weapon is in hand.
@@ -1454,7 +1464,13 @@ func _process(delta: float) -> void:
 			in_hand = "axe_1"
 		elif client.you.get("action", {}).has("fish"):
 			in_hand = "fishing_rod"
-		avatar_model.set_weapon(in_hand)
+		if _first_person and in_hand != str(avatar_model.get("_held_id")):
+			avatar_model.set_weapon(in_hand)
+			FirstPersonView.set_body_shadow_only(avatar_model, true) # The new hand item too (added synchronously).
+		else:
+			avatar_model.set_weapon(in_hand)
+		if _viewmodel != null and _first_person:
+			_viewmodel.set_item(in_hand)
 		_update_fishing_line(delta)
 		_update_build_ghost()
 		avatar_model.set_gear(client.inventory.gear)
@@ -1504,9 +1520,7 @@ func _process(delta: float) -> void:
 	if camera_fx.photo_active:
 		camera_fx.photo_camera(camera, position)
 	elif _first_person:
-		camera.global_transform = FirstPersonView.camera_transform(position, _fp_yaw, _fp_pitch,
-			FirstPersonView.eye_height(bool(client.you.get("crouching", false)), bool(client.you.get("mounted", false)))
-			+ FirstPersonView.jump_offset(_jump_time))
+		_update_first_person_camera(position, delta)
 	else:
 		camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
 		camera.look_at(position + Vector3(0, 0.8, 0) + camera_fx.look)
@@ -1515,8 +1529,17 @@ func _process(delta: float) -> void:
 		_jump_time += delta
 		if _jump_time >= FirstPersonView.JUMP_SECONDS:
 			_jump_time = -1.0
+			_land_time = 0.0
+	if _land_time >= 0.0:
+		_land_time += delta
+		if _land_time >= 0.35:
+			_land_time = -1.0
 	if _crosshair != null:
 		_crosshair.visible = _first_person and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+		if _crosshair.visible:
+			_hit_marker = move_toward(_hit_marker, 0.0, delta * 4.0)
+			FirstPersonView.layout_crosshair(_crosshair, FirstPersonView.crosshair_spread(
+				avatar_model.speed if avatar_model != null else 0.0, _jump_time >= 0.0), _hit_marker)
 	_update_underwater()
 	_tick_first_steps(delta)
 	if _demo == "sky":
@@ -1952,6 +1975,60 @@ func _cast_arcane_bolt() -> void:
 	client.arcane_bolt(direction)
 
 
+## First-person eye: lens from settings (+ the sprint/bike kick from camera_fx), step bob, strafe lean,
+## hop and landing dip, and the held item's pose. Comfort options switch bob and lean off.
+func _update_first_person_camera(feet: Vector3, delta: float) -> void:
+	var crouching := bool(client.you.get("crouching", false))
+	var mounted := bool(client.you.get("mounted", false))
+	var speed: float = avatar_model.speed if avatar_model != null else 0.0
+	var comfort: bool = bool(UiSettings.get_value("fp_head_bob")) and UiSettings.shake_scale() > 0.0
+	camera_fx.base_fov = FirstPersonView.fov(float(UiSettings.get_value("fp_fov")))
+	var grounded: bool = _jump_time < 0.0 and not mounted
+	_bob_phase = FirstPersonView.advance_bob_phase(_bob_phase, speed if grounded else 0.0, delta)
+	var bob: Vector2 = FirstPersonView.head_bob(_bob_phase, speed if grounded else 0.0, comfort)
+	# Sideways speed relative to the view, from the input (right = +x).
+	var lateral: float = _move_input.x * speed
+	_fp_roll = lerpf(_fp_roll, FirstPersonView.strafe_roll(lateral, comfort), 1.0 - exp(-8.0 * delta))
+	var eye: Transform3D = FirstPersonView.camera_transform(feet, _fp_yaw, _fp_pitch,
+		FirstPersonView.eye_height(crouching, mounted) + FirstPersonView.jump_offset(_jump_time)
+		+ FirstPersonView.landing_dip(_land_time) + bob.y)
+	eye.origin += eye.basis.x * bob.x
+	eye.basis = eye.basis * Basis(Vector3.FORWARD, _fp_roll)
+	camera.global_transform = eye
+	# Gear, rain coats and swapped tools add meshes to the body later: keep them all shadow-only.
+	_fp_body_refresh -= delta
+	if _fp_body_refresh <= 0.0:
+		_fp_body_refresh = 0.5
+		FirstPersonView.set_body_shadow_only(avatar_model, true)
+	if _viewmodel != null:
+		var lowered: bool = mounted or float(client.you.get("wading_depth_m", 0.0)) > 1.05 or speed > 5.6 \
+			or not bool(client.you.get("alive", true))
+		_viewmodel.update_pose(delta, bob, lowered)
+
+
+## Your own blows light the crosshair: player hits carry the attacker id; zombie hits have none,
+## so count one shortly after your own attack in front of you.
+func _first_person_hit_marker(event: Dictionary) -> void:
+	if not _first_person or client == null:
+		return
+	match str(event.get("type", "")):
+		"attack":
+			if int(event.get("peer", -1)) == client.peer_id:
+				_own_attack_time = Time.get_ticks_msec() / 1000.0
+				if _viewmodel != null:
+					_viewmodel.play_attack(bool(event.get("ranged", false)))
+		"hit":
+			var mine := false
+			if str(event.get("kind", "")) == "player":
+				mine = int(event.get("by", -2)) == client.peer_id
+			elif event.has("x") and Time.get_ticks_msec() / 1000.0 - _own_attack_time < 0.8:
+				var here: Vector3 = client.display_position()
+				var to := Vector2(float(event["x"]) - here.x, float(event["z"]) - here.z)
+				mine = to.length() < 32.0 and (to.length() < 2.5 or to.normalized().dot(FirstPersonView.forward(_fp_yaw)) > 0.8)
+			if mine:
+				_hit_marker = 1.0
+
+
 func _set_first_person(enabled: bool) -> void:
 	if enabled == _first_person or client == null or not client.welcomed:
 		return
@@ -1964,6 +2041,19 @@ func _set_first_person(enabled: bool) -> void:
 		# Start looking the way the survivor already faces.
 		_fp_yaw = avatar.rotation.y if avatar != null else float(client.yaw)
 		_fp_pitch = 0.0
+		_third_person_near = camera.near
+		camera.near = FirstPersonView.NEAR_CLIP # The held item sits a hand's length from the eye.
+		if _viewmodel == null:
+			_viewmodel = FirstPersonViewmodel.new()
+			_viewmodel.name = "FirstPersonViewmodel"
+			camera.add_child(_viewmodel)
+	else:
+		camera.near = _third_person_near
+		camera_fx.base_fov = camera_fx.BASE_FOV # Back to the narrow isometric lens.
+	if _viewmodel != null:
+		_viewmodel.visible = enabled
+	# Your body stays in the world as a shadow; other players see it as always.
+	FirstPersonView.set_body_shadow_only(avatar_model, enabled)
 	_update_first_person_mouse()
 
 
@@ -1978,7 +2068,10 @@ func _update_first_person_mouse() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _first_person and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		var look: Vector2 = FirstPersonView.apply_look(_fp_yaw, _fp_pitch, event.relative)
+		var look: Vector2 = FirstPersonView.apply_look_scaled(_fp_yaw, _fp_pitch, event.relative,
+			FirstPersonView.look_sensitivity(float(UiSettings.get_value("mouse_sensitivity")), bool(UiSettings.get_value("invert_y"))))
+		if _viewmodel != null:
+			_viewmodel.add_look(event.relative)
 		_fp_yaw = look.x
 		_fp_pitch = look.y
 		get_viewport().set_input_as_handled()
