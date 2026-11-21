@@ -485,6 +485,16 @@ func _build_environment() -> void:
 	add_child(chunk_root)
 	entities = EntityView.new()
 	add_child(entities)
+	# Measure local visual interpolation recovery separately from server
+	# tick rate and actual network transport loss.
+	for network_monitor in [
+		[&"Albion/NetworkEstimatedMissingSnapshots", Callable(entities, "network_missing_snapshot_estimate")],
+		[&"Albion/NetworkRecoveryHoldRemaining", Callable(entities, "network_recovery_hold_remaining")],
+	]:
+		var network_monitor_name: StringName = network_monitor[0]
+		if not Performance.has_custom_monitor(network_monitor_name):
+			Performance.add_custom_monitor(network_monitor_name, network_monitor[1])
+			_ambient_monitors.append(network_monitor_name)
 	# One GPU draw grounds local/remote players, infected and streamed NPCs.
 	# This avoids a separate transparent shadow MeshInstance for every actor.
 	var ground_shadows := ContactShadowBatch.new()
