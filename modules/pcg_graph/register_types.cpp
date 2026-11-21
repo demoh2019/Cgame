@@ -15,7 +15,17 @@
 
 #include "core/object/class_db.h"
 
+#ifdef TOOLS_ENABLED
+#include "editor/pcg_graph_editor_plugin.h"
+#include "editor/plugins/editor_plugin.h"
+#endif // TOOLS_ENABLED
+
 void initialize_pcg_graph_module(ModuleInitializationLevel p_level) {
+#ifdef TOOLS_ENABLED
+	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+		EditorPlugins::add_by_type<PCGGraphEditorPlugin>();
+	}
+#endif // TOOLS_ENABLED
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}

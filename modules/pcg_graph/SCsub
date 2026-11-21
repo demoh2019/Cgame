@@ -6,3 +6,6 @@ Import("env_modules")
 
 env_pcg_graph = env_modules.Clone()
 env_pcg_graph.add_source_files(env.modules_sources, "*.cpp")
+
+if env.editor_build:
+    env_pcg_graph.add_source_files(env.modules_sources, "editor/*.cpp")
