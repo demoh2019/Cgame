@@ -114,7 +114,7 @@ static func card_mesh(region_index: int) -> Mesh:
 		var offset := facing * rng.randf_range(0.0, 0.06)
 		var tall := height * rng.randf_range(0.85, 1.1)
 		var normal := (Vector3.UP * 0.75 + facing * 0.25).normalized()
-		var root_shade := Color(0.5, 0.52, 0.45)
+		var root_shade := Color(0.64, 0.66, 0.58)
 		var corners := [[offset - side, Vector2(uv0.x, uv1.y), root_shade], [offset + side, Vector2(uv1.x, uv1.y), root_shade],
 			[offset + side + lean + Vector3.UP * tall, Vector2(uv1.x, uv0.y), Color.WHITE],
 			[offset - side + lean + Vector3.UP * tall, Vector2(uv0.x, uv0.y), Color.WHITE]]
