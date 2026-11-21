@@ -194,6 +194,7 @@ var _crosshair: Control
 var _viewmodel: Node3D # FirstPersonViewmodel: the held item in front of the first-person camera.
 var _bob_phase := 0.0
 var _fp_roll := 0.0
+var _knock := 0.0 # 0..1: first-person camera thrown to the ground while knocked down.
 var _land_time := -1.0 # Seconds since the cosmetic hop landed, -1 when not dipping.
 var _hit_marker := 0.0 # Crosshair hit flash, decays.
 var _own_attack_time := -10.0 # Engine ticks (s) of your last attack, for zombie hit markers.
@@ -1060,6 +1061,12 @@ func _spawn_effects(event: Dictionary) -> void:
 		var peer_info: Dictionary = client.players.get(int(event.get("peer", -1)), {})
 		var weapon_id: String = str(client.inventory.weapon) if int(event.get("peer", -1)) == client.peer_id else str(peer_info.get("weapon", ""))
 		_wound_fx.finisher(entities.model_of("zombie", int(event.get("zombie", -1))), weapon_id, true)
+	if str(event.get("type", "")) == "pounce_warning":
+		entities.telegraph(int(event.get("id", -1)), float(event.get("seconds", 0.5)), str(event.get("kind", "")) == "charge")
+	if str(event.get("type", "")) == "knocked_down" and int(event.get("peer", -1)) == client.peer_id:
+		hud.say("Knocked down! Dodge (Shift+Space) or parry (RMB) the next leap.")
+		if avatar_model != null:
+			avatar_model.play_hit(true)
 	if str(event.get("type", "")) == "zombie_leap":
 		entities.leap(int(event.get("id", -1)), Vector3(float(event.get("fx", 0.0)), float(event.get("fy", 0.0)), float(event.get("fz", 0.0))),
 			Vector3(float(event.get("x", 0.0)), float(event.get("y", 0.0)), float(event.get("z", 0.0))))
@@ -2047,11 +2054,13 @@ func _update_first_person_camera(feet: Vector3, delta: float) -> void:
 	# Sideways speed relative to the view, from the input (right = +x).
 	var lateral: float = _move_input.x * speed
 	_fp_roll = lerpf(_fp_roll, FirstPersonView.strafe_roll(lateral, comfort), 1.0 - exp(-8.0 * delta))
-	var eye: Transform3D = FirstPersonView.camera_transform(feet, _fp_yaw, _fp_pitch,
-		FirstPersonView.eye_height(crouching, mounted) + FirstPersonView.jump_offset(_jump_time)
-		+ FirstPersonView.landing_dip(_land_time) + bob.y)
+	var knocked: bool = float(client.you.get("knocked_seconds", 0.0)) > 0.0
+	_knock = lerpf(_knock, 1.0 if knocked else 0.0, 1.0 - exp(-(14.0 if knocked else 5.0) * delta))
+	var eye: Transform3D = FirstPersonView.camera_transform(feet, _fp_yaw, _fp_pitch + 0.35 * _knock,
+		lerpf(FirstPersonView.eye_height(crouching, mounted) + FirstPersonView.jump_offset(_jump_time)
+		+ FirstPersonView.landing_dip(_land_time) + bob.y, 0.32, _knock))
 	eye.origin += eye.basis.x * bob.x
-	eye.basis = eye.basis * Basis(Vector3.FORWARD, _fp_roll)
+	eye.basis = eye.basis * Basis(Vector3.FORWARD, _fp_roll + 0.55 * _knock)
 	camera.global_transform = eye
 	# Gear, rain coats and swapped tools add meshes to the body later: keep them all shadow-only.
 	_fp_body_refresh -= delta

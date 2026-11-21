@@ -88,6 +88,7 @@ const BikeLantern = preload("res://scripts/shared/bike_lantern.gd")
 const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const TreeAmbush = preload("res://scripts/shared/tree_ambush.gd")
+const InfectedPounce = preload("res://scripts/shared/infected_pounce.gd")
 const Brawl = preload("res://scripts/shared/brawl.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const ParryRiposte = preload("res://scripts/shared/parry_riposte.gd")
@@ -281,6 +282,7 @@ class Player:
 	var rage: float = 0.0 # Built by trading blows; spent on Rage.
 	var rage_seconds: float = 0.0 # Rage active: harder, faster, tougher, free swings.
 	var kick_cooldown: float = 0.0
+	var knocked_seconds: float = 0.0 # Bowled over by a pouncing/charging infected: can't move or fight.
 	var parry_window: float = 0.0 # First valid infected melee consumes it.
 	var edge_coating_weapon: String = "" # Nonpersistent selected melee gear.
 	var edge_coating_seconds: float = 0.0 # 120s server-owned bonus only vs infected.
@@ -389,6 +391,8 @@ var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stac
 var _acid_wall_last_hit: Dictionary = {} # Wall id -> last corrosion time; no overlap stacking.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> escrowed listing (goods held by the market).
+var pounces: Dictionary = {} # zombie id -> {kind, phase, t, target, from, to}
+var pounce_ready_at: Dictionary = {} # zombie id -> server time its next leap/charge is allowed
 var downed_until: Dictionary = {} # zombie id -> server time it gets back up (knocked down).
 var market_payouts: Dictionary = {} # account -> silver owed from sales, collected at the hub.
 var market_returns: Dictionary = {} # account -> {item: count} unsold or cancelled goods.
@@ -1045,6 +1049,8 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 	var allowed := minf(dt, player.input_budget)
 	player.input_budget -= allowed
 	player.yaw = yaw
+	if allowed > 0.0 and player.knocked_seconds > 0.0:
+		allowed = 0.0 # On the ground: no walking until back up.
 	if allowed > 0.0:
 		player.crouching = crouch # Only input within the server time budget applies.
 		# No client-supplied cargo, stamina or sound radius: server owns all three.
@@ -4672,6 +4678,8 @@ func cmd_drink_water(peer_id: int) -> Dictionary:
 ## shoots a ray that hits the first enemy along it.
 func cmd_attack(peer_id: int, dir_x: float, dir_z: float, charge: float = 0.0) -> Dictionary:
 	var player: Player = players.get(peer_id)
+	if player != null and player.knocked_seconds > 0.0:
+		return {"ok": false, "reason": "knocked_down"}
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	if player.mounted:
@@ -5197,6 +5205,107 @@ func cmd_stagger_finisher(peer_id: int) -> Dictionary:
 		"energy": player.combat_energy}
 
 
+## A chasing infected may crouch and leap (or a brute charge) when its prey is at the right range.
+func _maybe_start_pounce(zombie, delta: float) -> bool:
+	var kind: String = InfectedPounce.kind_for(zombie.type)
+	if kind == "" or zombie.raid_boss or not zombie.is_alive() or zombie.target_id == -1:
+		return false
+	if zombie.stagger_seconds > 0.0 or zombie.snared_seconds > 0.0 or time < float(pounce_ready_at.get(zombie.id, 0.0)):
+		return false
+	var prey: Player = players.get(zombie.target_id)
+	if prey == null or not _alive(prey) or _is_safe(prey.position) or prey.knocked_seconds > 0.0:
+		return false
+	var spec: Dictionary = InfectedPounce.spec(kind)
+	var d: float = Vector2(zombie.position.x, zombie.position.z).distance_to(Vector2(prey.position.x, prey.position.z))
+	if d < float(spec["min"]) or d > float(spec["max"]) or rng.randf() > InfectedPounce.CHANCE_PER_SECOND * delta:
+		return false
+	if not InfectedMeleeCover.clear_attack(world, zombie.position, prey.position, false):
+		return false
+	pounces[zombie.id] = {"kind": kind, "phase": "windup", "t": 0.0, "target": prey.id}
+	pounce_ready_at[zombie.id] = time + float(spec["cooldown"])
+	zombie.yaw = atan2(prey.position.x - zombie.position.x, prey.position.z - zombie.position.z)
+	events.append({"type": "pounce_warning", "id": zombie.id, "kind": kind, "seconds": spec["windup"],
+		"target": prey.id, "x": zombie.position.x, "z": zombie.position.z})
+	return true
+
+
+func _tick_pounce(zombie, delta: float) -> void:
+	var state: Dictionary = pounces[zombie.id]
+	var spec: Dictionary = InfectedPounce.spec(str(state["kind"]))
+	var prey: Player = players.get(int(state["target"]))
+	if not zombie.is_alive() or zombie.stagger_seconds > 0.0 or prey == null or not _alive(prey):
+		pounces.erase(zombie.id) # Interrupted (staggered mid-windup, target gone).
+		return
+	state["t"] = float(state["t"]) + delta
+	if str(state["phase"]) == "windup":
+		zombie.yaw = atan2(prey.position.x - zombie.position.x, prey.position.z - zombie.position.z)
+		if float(state["t"]) < float(spec["windup"]):
+			return
+		# Commit to where the prey stands NOW (plus a little past): sidestepping late still works.
+		var from := Vector2(zombie.position.x, zombie.position.z)
+		var aim := Vector2(prey.position.x, prey.position.z)
+		var to: Vector2 = aim + (aim - from).normalized() * 0.4
+		# Walls and trees stop the leap: sweep the path in 3 m steps (the sweep's own limit).
+		var end: Vector3 = zombie.position
+		var left: Vector2 = to - from
+		while left.length() > 0.01:
+			var piece: Vector2 = left.limit_length(3.0)
+			var next: Vector3 = Movement.sweep_displacement(world, end, piece)
+			left -= piece
+			if Vector2(next.x - end.x, next.z - end.z).length() < piece.length() * 0.6:
+				end = next
+				break
+			end = next
+		state["from"] = from
+		state["to"] = Vector2(end.x, end.z)
+		state["phase"] = "air"
+		state["t"] = 0.0
+		events.append({"type": "pounce", "id": zombie.id, "kind": state["kind"]})
+		return
+	var k: float = clampf(float(state["t"]) / float(spec["flight"]), 0.0, 1.0)
+	var flat: Vector2 = (state["from"] as Vector2).lerp(state["to"], k)
+	zombie.position = Vector3(flat.x, world.height_at(flat.x, flat.y) + sin(k * PI) * float(spec["arc"]), flat.y)
+	if k < 1.0:
+		return
+	pounces.erase(zombie.id)
+	_resolve_pounce(zombie, prey, str(state["kind"]), spec)
+
+
+func _resolve_pounce(zombie, prey: Player, kind: String, spec: Dictionary) -> void:
+	var gap: float = Vector2(zombie.position.x, zombie.position.z).distance_to(Vector2(prey.position.x, prey.position.z))
+	if gap > InfectedPounce.HIT_RANGE or prey.dodge_immunity > 0.0:
+		zombie.apply_stagger(InfectedPounce.MISS_STAGGER) # Whiffed and stumbled: punish it.
+		events.append({"type": "evaded", "peer": prey.id, "zombie": zombie.id, "pounce": kind})
+		return
+	if MeleeParry.can_block(prey, zombie):
+		# Perfectly timed: the attacker is thrown down for a ground finisher.
+		prey.parry_window = 0.0
+		ParryRiposte.arm(prey, zombie)
+		zombie.apply_stagger(Brawl.DOWN_SECONDS)
+		zombie.stagger_seconds = maxf(zombie.stagger_seconds, Brawl.DOWN_SECONDS)
+		downed_until[zombie.id] = time + Brawl.DOWN_SECONDS
+		events.append({"type": "parried", "peer": prey.id, "zombie": zombie.id})
+		events.append({"type": "knockdown", "zombie": zombie.id, "peer": prey.id,
+			"x": zombie.position.x, "z": zombie.position.z, "seconds": Brawl.DOWN_SECONDS})
+		return
+	var damage: float = Combat.apply_gear(float(zombie.data["damage"]) * float(spec["damage"]), prey.inventory)
+	damage = _infected_damage_for(prey, damage)
+	var applied: float = _hurt_player(prey, damage)
+	prey.knocked_seconds = float(spec["down"])
+	prey.attack_timer = maxf(prey.attack_timer, float(spec["down"]))
+	prey.parry_window = 0.0
+	prey.action = {}
+	_dismount(prey, true)
+	# Bowled backward along the attack line.
+	var push := Vector2(prey.position.x - zombie.position.x, prey.position.z - zombie.position.z).normalized() * float(spec["shove"])
+	if push.is_finite() and push.length() > 0.01:
+		prey.position = Movement.move(world, prey.position, push.normalized(), push.length() / 0.1, 0.1)
+	zombie.attack_timer = maxf(zombie.attack_timer, 0.6)
+	events.append({"type": "hit", "kind": "player", "id": prey.id, "damage": applied, "by": -zombie.id})
+	events.append({"type": "knocked_down", "peer": prey.id, "zombie": zombie.id, "kind": kind,
+		"seconds": prey.knocked_seconds, "x": prey.position.x, "z": prey.position.z})
+
+
 ## A tree ambusher watches the ground; prey close below (or being hurt) makes it drop and strike.
 func _tick_percher(zombie) -> void:
 	if not zombie.is_alive():
@@ -5254,6 +5363,8 @@ func _brawl_impact(attacker: Player, zombie, stagger_seconds: float, knockback: 
 ## Kick: cheap shove that staggers; a staggered target goes down for a ground finisher.
 func cmd_kick(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
+	if player != null and player.knocked_seconds > 0.0:
+		return {"ok": false, "reason": "knocked_down"}
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	if player.mounted:
@@ -5306,6 +5417,8 @@ func cmd_rage(peer_id: int) -> Dictionary:
 
 func cmd_parry(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
+	if player != null and player.knocked_seconds > 0.0:
+		return {"ok": false, "reason": "knocked_down"}
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	if player.mounted:
@@ -5422,6 +5535,8 @@ func cmd_ultimate(peer_id: int) -> Dictionary:
 
 func cmd_dodge(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
+	if player != null and player.knocked_seconds > 0.0:
+		return {"ok": false, "reason": "knocked_down"}
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	if player.mounted:
@@ -6692,6 +6807,7 @@ func _tick_players(delta: float) -> void:
 		player.dodge_immunity = maxf(player.dodge_immunity - delta, 0.0)
 		player.parry_cooldown = maxf(0.0, player.parry_cooldown - maxf(0.0, delta))
 		player.kick_cooldown = maxf(0.0, player.kick_cooldown - maxf(0.0, delta))
+		player.knocked_seconds = maxf(0.0, player.knocked_seconds - maxf(0.0, delta))
 		if player.rage_seconds > 0.0:
 			player.rage_seconds = maxf(0.0, player.rage_seconds - maxf(0.0, delta))
 			if player.rage_seconds <= 0.0:
@@ -7472,6 +7588,9 @@ func _tick_zombies(delta: float) -> void:
 					break
 		if zombie.perched:
 			_tick_percher(zombie)
+			continue
+		if pounces.has(zombie.id) or _maybe_start_pounce(zombie, delta):
+			_tick_pounce(zombie, delta)
 			continue
 		var result: Dictionary = zombie.think(world, info, delta, rng)
 		if zombie.consume_howl():
@@ -8375,6 +8494,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"parry_cooldown": player.parry_cooldown, "parry_window": player.parry_window,
 			"rage": player.rage, "rage_seconds": player.rage_seconds, "kick_cooldown": player.kick_cooldown,
+			"knocked_seconds": player.knocked_seconds,
 			"riposte_seconds": player.riposte_seconds,
 			"finisher_cooldown": player.finisher_cooldown,
 			"arcane_cooldown": player.arcane_cooldown, "ultimate_cooldown": player.ultimate_cooldown,

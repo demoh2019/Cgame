@@ -938,3 +938,24 @@ func _apply_leaps(delta: float) -> void:
 		var p: Vector3 = (leap_state["from"] as Vector3).lerp(leap_state["to"], k)
 		p.y += sin(k * PI) * 1.2 # Up off the branch, then down hard.
 		_nodes[key].position = p
+
+
+## A short red "!" over an infected that is winding up a leap or charge.
+func telegraph(id: int, seconds: float, charge: bool) -> void:
+	var key := "zombie:%d" % id
+	if not _nodes.has(key):
+		return
+	var mark := Label3D.new()
+	mark.text = "!!" if charge else "!"
+	mark.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	mark.no_depth_test = true
+	mark.pixel_size = 0.012
+	mark.font_size = 64
+	mark.outline_size = 12
+	mark.modulate = Color(1.0, 0.22, 0.12)
+	mark.position = Vector3(0, 2.35, 0)
+	_nodes[key].add_child(mark)
+	var tween := mark.create_tween()
+	tween.tween_property(mark, "scale", Vector3.ONE * 1.4, maxf(seconds, 0.1) * 0.5).set_trans(Tween.TRANS_BACK)
+	tween.tween_property(mark, "modulate:a", 0.0, maxf(seconds, 0.1) * 0.5)
+	tween.tween_callback(mark.queue_free)
