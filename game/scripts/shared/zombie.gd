@@ -64,6 +64,7 @@ var _ai_profiler: Variant = null # Opt-in per-infected target selection profilin
 var _ai_trace: Variant = null # Opt-in server-only native target decision trace.
 var _ai_lod_staggered: bool = false # Phase only the first distant passive scan.
 var _ai_lod_previous_interval: float = 0.0 # Per-infected nominal passive tier; engine stays stateless.
+var _passive_crowd_separation: Vector2 = Vector2.ZERO # Server-sampled cosmetic steering; never combat authority.
 static var _ai_lod_checked: bool = false
 static var _ai_lod_scheduler: Variant = null
 var _native_howl_cooldowns: Variant = null # Lazily allocated native event gate for pack howls.
@@ -786,6 +787,12 @@ func _flank_goal(here: Vector2, target: Vector2) -> Vector2:
 	_flank_replan_remaining = FLANK_REPLAN_SECONDS
 	return _flank_goal_cached
 
+## The server supplies bounded, already-sampled nearby-agent repulsion.
+## Malformed native output cannot steer an infected across the world.
+func set_passive_crowd_separation(value: Vector2) -> void:
+	_passive_crowd_separation = value.limit_length(1.0) if value.is_finite() else Vector2.ZERO
+
+
 func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: float) -> void:
 	if snared_seconds > 0.0:
 		stuck_time = 0.0 # A trap cannot be mistaken for a wall to damage.
@@ -794,6 +801,10 @@ func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: floa
 	if direction.length() < 0.01:
 		return
 	direction = direction.normalized()
+	# Mass-avoidance style separation is deliberately cosmetic to path choice.
+	# Never divert pursuit, melee, boss attacks, snares or combat knockback.
+	if state == State.WANDER or state == State.INVESTIGATE:
+		direction = (direction + _passive_crowd_separation * 0.35).normalized()
 	yaw = atan2(direction.x, direction.y)
 	var before := position
 	# Zombies use the same movement rules as players, so they are stopped by trees, rocks and deep water.
