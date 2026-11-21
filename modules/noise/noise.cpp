@@ -185,13 +185,45 @@ TypedArray<Image> Noise::get_image_3d(int p_width, int p_height, int p_depth, bo
 	return ret;
 }
 
+PackedFloat64Array Noise::get_noise_2dv_batch(const PackedVector2Array &p_points) const {
+	ERR_FAIL_COND_V_MSG(p_points.size() > 65536, PackedFloat64Array(), "Noise batch is limited to 65536 points.");
+	const Vector2 *points = p_points.ptr();
+	for (int i = 0; i < p_points.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(points[i].x) || !Math::is_finite(points[i].y), PackedFloat64Array(), "Noise batch points must be finite.");
+	}
+	PackedFloat64Array samples;
+	samples.resize(p_points.size());
+	double *values = samples.ptrw();
+	for (int i = 0; i < p_points.size(); i++) {
+		values[i] = get_noise_2dv(points[i]);
+	}
+	return samples;
+}
+
+PackedFloat64Array Noise::get_noise_3dv_batch(const PackedVector3Array &p_points) const {
+	ERR_FAIL_COND_V_MSG(p_points.size() > 65536, PackedFloat64Array(), "Noise batch is limited to 65536 points.");
+	const Vector3 *points = p_points.ptr();
+	for (int i = 0; i < p_points.size(); i++) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(points[i].x) || !Math::is_finite(points[i].y) || !Math::is_finite(points[i].z), PackedFloat64Array(), "Noise batch points must be finite.");
+	}
+	PackedFloat64Array samples;
+	samples.resize(p_points.size());
+	double *values = samples.ptrw();
+	for (int i = 0; i < p_points.size(); i++) {
+		values[i] = get_noise_3dv(points[i]);
+	}
+	return samples;
+}
+
 void Noise::_bind_methods() {
 	// Noise functions.
 	ClassDB::bind_method(D_METHOD("get_noise_1d", "x"), &Noise::get_noise_1d);
 	ClassDB::bind_method(D_METHOD("get_noise_2d", "x", "y"), &Noise::get_noise_2d);
 	ClassDB::bind_method(D_METHOD("get_noise_2dv", "v"), &Noise::get_noise_2dv);
+	ClassDB::bind_method(D_METHOD("get_noise_2dv_batch", "points"), &Noise::get_noise_2dv_batch);
 	ClassDB::bind_method(D_METHOD("get_noise_3d", "x", "y", "z"), &Noise::get_noise_3d);
 	ClassDB::bind_method(D_METHOD("get_noise_3dv", "v"), &Noise::get_noise_3dv);
+	ClassDB::bind_method(D_METHOD("get_noise_3dv_batch", "points"), &Noise::get_noise_3dv_batch);
 
 	// Textures.
 	ClassDB::bind_method(D_METHOD("get_image", "width", "height", "invert", "in_3d_space", "normalize"), &Noise::get_image, DEFVAL(false), DEFVAL(false), DEFVAL(true));

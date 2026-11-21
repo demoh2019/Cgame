@@ -131,13 +131,51 @@ func biome_at(x: float, z: float) -> String:
 		return "beach"
 	if height > 48.0:
 		return "mountain"
-	var temperature := _temperature.get_noise_2d(x, z)
-	var moisture := _moisture.get_noise_2d(x, z)
+	return _biome_from_climate(_temperature.get_noise_2d(x, z), _moisture.get_noise_2d(x, z))
+
+
+static func _biome_from_climate(temperature: float, moisture: float) -> String:
 	if moisture > 0.25:
 		return "swamp" if temperature > 0.0 else "forest"
 	if moisture < -0.2:
 		return "plains"
 	return "forest" if temperature < 0.1 else "plains"
+
+
+## Cgame samples an entire chart row natively; stock Godot uses identical serial samples.
+static func _sample_noise_2dv(noise: Noise, points: PackedVector2Array, force_scalar: bool = false) -> PackedFloat64Array:
+	if not force_scalar and noise.has_method("get_noise_2dv_batch"):
+		var native_values: PackedFloat64Array = noise.call("get_noise_2dv_batch", points)
+		return native_values
+	var samples := PackedFloat64Array()
+	samples.resize(points.size())
+	for i in points.size():
+		samples[i] = noise.get_noise_2d(points[i].x, points[i].y)
+	return samples
+
+
+## Batch biome classification for render/chart consumers with precomputed heights.
+## Scalar biome_at() remains the authoritative query and is not changed for simulation.
+func biomes_at_points(points: PackedVector2Array, heights: PackedFloat64Array) -> PackedStringArray:
+	var result := PackedStringArray()
+	if points.size() != heights.size():
+		return result
+	var temperatures: PackedFloat64Array = _sample_noise_2dv(_temperature, points)
+	var moistures: PackedFloat64Array = _sample_noise_2dv(_moisture, points)
+	for i in points.size():
+		var position: Vector2 = points[i]
+		var height: float = heights[i]
+		if Dungeon.is_underground(position.x, position.y):
+			result.append("dungeon")
+		elif height < Defs.WATER_LEVEL - 0.4:
+			result.append("water")
+		elif height < Defs.WATER_LEVEL + 1.2:
+			result.append("beach")
+		elif height > 48.0:
+			result.append("mountain")
+		else:
+			result.append(_biome_from_climate(temperatures[i], moistures[i]))
+	return result
 
 
 # Names of the big areas: an adjective for every 640 m cell and a noun for the kind of land you stand on.
