@@ -2,6 +2,7 @@ extends RefCounted
 ## Adaptive visual network clock is tested independently of the server or GPU.
 const Jitter = preload("res://scripts/client/network_jitter_buffer.gd")
 const EntityView = preload("res://scripts/client/entity_view.gd")
+const Defs = preload("res://scripts/shared/defs.gd")
 
 
 func run(t) -> void:
@@ -162,6 +163,6 @@ func run(t) -> void:
 	t.check(live.network_jitter_stats().has("accepted_packets"),
 		"game exposes local network diagnostics without server changes")
 	t.near(float(live.network_jitter_stats()["expected_snapshot_step"]),
-		1.0 / float(preload("res://scripts/shared/defs.gd").SNAPSHOT_RATE), 0.0000005,
+		1.0 / float(Defs.SNAPSHOT_RATE), 0.0000005,
 		"client buffer tracks the real dedicated server snapshot rate")
 	live.free()
