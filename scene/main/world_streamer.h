@@ -135,6 +135,12 @@ private:
 	int64_t last_frame_chunk_work_usec = 0;
 	int frame_chunk_attempt_count = 0;
 	int last_frame_chunk_attempt_count = 0;
+	// Optional per-stage EMA admission forecast, not a hard CPU cap.
+	bool predictive_chunk_work_budget_enabled = false;
+	int64_t estimated_generator_work_usec = 0;
+	int64_t estimated_finalization_work_usec = 0;
+	int frame_predicted_deferred_count = 0;
+	int last_predicted_deferred_count = 0;
 	double update_interval = 0.1;
 	String chunk_path_template;
 	Callable chunk_provider;
@@ -217,7 +223,8 @@ private:
 	bool _adopt_chunk(const Vector3i &p_cell, Node *p_chunk);
 	void _run_generator_queue(int &r_instantiation_budget, uint64_t p_frame_started_usec);
 	void _generate_cell(const Vector3i &p_cell);
-	void _record_chunk_work(uint64_t p_started_usec);
+	void _record_chunk_work(uint64_t p_started_usec, bool p_generator);
+	bool _should_defer_predicted_work(bool p_generator) const;
 	void _finish_chunk_work_frame();
 	void _unload_cell(const Vector3i &p_cell, bool p_allow_cache = true);
 	bool _restore_cached_chunk(const Vector3i &p_cell);
@@ -338,6 +345,14 @@ public:
 	double get_streaming_frame_pressure_percent() const { return streaming_frame_pressure * 100.0; }
 	int64_t get_last_frame_chunk_work_usec() const { return last_frame_chunk_work_usec; }
 	int get_last_frame_chunk_attempt_count() const { return last_frame_chunk_attempt_count; }
+	void set_predictive_chunk_work_budget_enabled(bool p_enabled) { predictive_chunk_work_budget_enabled = p_enabled; }
+	bool is_predictive_chunk_work_budget_enabled() const { return predictive_chunk_work_budget_enabled; }
+	int64_t get_estimated_generator_work_usec() const { return estimated_generator_work_usec; }
+	int64_t get_estimated_finalization_work_usec() const { return estimated_finalization_work_usec; }
+	int get_last_predicted_deferred_chunk_count() const { return last_predicted_deferred_count; }
+	static int64_t update_chunk_work_estimate(int64_t p_previous, int64_t p_sample_usec);
+	static bool should_defer_predicted_chunk_work(int p_budget_usec, int p_previous_attempts,
+			int64_t p_work_spent_usec, int64_t p_estimated_next_usec);
 	void set_max_auto_retries(int p_count);
 	int get_max_auto_retries() const { return max_auto_retries; }
 	void set_retry_initial_delay(real_t p_seconds);

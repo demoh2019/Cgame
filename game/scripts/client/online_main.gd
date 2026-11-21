@@ -1386,6 +1386,11 @@ func _on_welcomed() -> void:
 	# The engine ensures that both streaming update paths share one drain.
 	streamer.max_instantiations_per_frame = 3
 	streamer.max_chunk_work_usec = 2500
+	# Learn per-cell generator/finalization CPU cost and avoid scheduling a
+	# second predicted-expensive cosmetic chunk inside the same frame.
+	# A first chunk always runs; collisions/server simulation are unaffected.
+	if streamer.has_method("set_predictive_chunk_work_budget_enabled"):
+		streamer.set_predictive_chunk_work_budget_enabled(true)
 	# Retain only 1-2 immutable *client visual* chunks after unload; reattaching
 	# them when the player backtracks avoids regenerating their terrain/props.
 	# Hard native cap + per-node opt-in; no server entities or physics cached.
@@ -1425,6 +1430,17 @@ func _on_welcomed() -> void:
 			Performance.add_custom_monitor(loading_area_monitor,
 				Callable(streamer, "get_loading_range_area_percent"))
 			_ambient_monitors.append(loading_area_monitor)
+	# Native forecast telemetry is intentionally distinct from measured CPU.
+	if streamer.has_method("get_last_predicted_deferred_chunk_count"):
+		for monitor in [
+			[&"Albion/StreamGeneratorPredictedCPUus", Callable(streamer, "get_estimated_generator_work_usec")],
+			[&"Albion/StreamFinalizePredictedCPUus", Callable(streamer, "get_estimated_finalization_work_usec")],
+			[&"Albion/StreamPredictiveDeferred", Callable(streamer, "get_last_predicted_deferred_chunk_count")],
+		]:
+			var monitor_name: StringName = monitor[0]
+			if not Performance.has_custom_monitor(monitor_name):
+				Performance.add_custom_monitor(monitor_name, monitor[1])
+				_ambient_monitors.append(monitor_name)
 	# Read-only, engine-sourced telemetry: stream backpressure, real main-
 	# thread chunk work and the currently effective CPU/count limits.
 	if streamer.has_method("get_last_frame_chunk_work_usec"):
