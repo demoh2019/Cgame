@@ -31,6 +31,7 @@ var hearing := AIHearingSensor2D.new()
 var navigation := AStarGrid2D.new()
 var update_scheduler := AIUpdateScheduler.new()
 var navigation_profiler := AIExecutionProfiler.new()
+var last_navigation_profile: Dictionary = {}
 var ai_tick_index := 0
 var navigation_path := PackedVector2Array()
 var navigation_index := 0
@@ -267,6 +268,7 @@ func _navigation_motion(goal: Vector2, distance_per_frame: float) -> Vector2:
         navigation_profiler.begin_sample(&"navigation_repath")
         navigation_path = _navigation_path(enemy_position, goal)
         navigation_profiler.end_sample(&"navigation_repath")
+        last_navigation_profile = navigation_profiler.get_snapshot()
         navigation_index = 0
     if navigation_path.is_empty():
         return Vector2.ZERO
@@ -317,6 +319,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
         pending_shout = true
     elif event.keycode == KEY_P:
         brain.profiling_enabled = not brain.is_profiling_enabled()
+        navigation_profiler.enabled = brain.is_profiling_enabled()
+        navigation_profiler.reset()
+        last_navigation_profile = {}
         brain.reset_profile()
         last_profile_snapshot = brain.get_profile_snapshot()
     elif event.keycode == KEY_R:
@@ -330,6 +335,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
         last_debug_snapshot = {}
         ai_tick_index = 0
         navigation_profiler.reset()
+        last_navigation_profile = {}
         brain.reset_profile()
         last_profile_snapshot = brain.get_profile_snapshot()
         ai_timer = 0.0
@@ -363,7 +369,7 @@ func _update_hud() -> void:
         float(decision.get("mean_usec", 0.0)),
         int(decision.get("max_usec", 0))
     ]
-    var path_rows: Dictionary = navigation_profiler.get_snapshot().get("categories", {})
+    var path_rows: Dictionary = last_navigation_profile.get("categories", {})
     var path_cost: Dictionary = path_rows.get("navigation_repath", {})
     hud.text += "\nScheduled A* repaths: %d | Mean path query: %.1f us | Next slot in %d ticks" % [
         int(path_cost.get("count", 0)),
