@@ -65,6 +65,9 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(BehaviorTreeReactiveSequence);
 	GDREGISTER_CLASS(BehaviorTreeReactiveSelector);
 	GDREGISTER_CLASS(BehaviorTreeInverter);
+	GDREGISTER_VIRTUAL_CLASS(BehaviorTreeDecorator);
+	GDREGISTER_CLASS(BehaviorTreeTimeout);
+	GDREGISTER_CLASS(BehaviorTreeCooldown);
 	GDREGISTER_CLASS(BehaviorTreeBlackboardCheck);
 	GDREGISTER_CLASS(BehaviorTreeBlackboardCompare);
 	GDREGISTER_CLASS(BehaviorTreeBlackboardSet);
