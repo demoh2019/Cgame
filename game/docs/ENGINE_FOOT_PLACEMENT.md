@@ -82,6 +82,48 @@ The timing API intentionally measures **only FootPlacement**, not all
 skeletal animation. Animation Budget Allocator concepts:
 https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine
 
+## Shared CPU profiling for every SkeletonModifier3D
+
+The native engine's base `SkeletonModifier3D` now has a reusable,
+**opt-in** CPU work-unit profiler for **any** native modifier
+(`FootPlacementModifier3D`, `StrideWarpingModifier3D`, etc.) and for
+GDScript modifiers implementing `_process_modification_with_delta`.
+
+- Enable with `set_modifier_profiling_enabled(true)` or
+  `modifier_profiling_enabled = true`; it is **off by default**.
+- Inspect `get_modifier_last_update_us()`,
+  `get_modifier_estimated_update_us()` and
+  `get_modifier_profile_sample_count()`, or call
+  `reset_modifier_profile()` to discard old measurements.
+- The engine measures only the actual modifier callback, not the
+  `modification_processed` signal, AnimationMixer, GPU skinning or
+  other skeleton work. Measurements are bounded 1–100000us and
+  smoothed with a quarter-weight integer EMA.
+- Disabling profiling (e.g. at animation LOD 1+) preserves the last
+  full-pose estimate so the crowd budget can make a sensible decision
+  when an actor becomes eligible again. No timer reads occur while
+  disabled.
+
+Albion After enables the base timer only for **tier-0** work on its
+scripted `CharacterAnimModifier` and native `FootPlacementModifier3D`.
+The script's old `Time.get_ticks_usec()` sampling is disabled on new
+Cgame builds to avoid double clocks; native FootPlacement's earlier
+self-timer is also disabled. In `CharacterModel.estimated_full_pose_cost_us()`,
+a modifier's new base estimate supersedes its legacy estimate **only
+after a completed sample**. Thus one work unit is never counted twice.
+`CharacterModel.animation_modifier_profile()` provides an explicit,
+on-demand dictionary with last/estimated costs and sample counts for
+the script and native foot modifiers.
+
+Older Cgame builds and stock Godot retain their existing per-modifier
+timers or script fallback; the authoritative simulation is unaffected.
+This is the first step toward a unified CPU profiler, inspired by
+Unreal's Animation Insights, not a claim of a full renderer/animation
+performance trace or a confirmed FPS improvement.
+
+Unreal reference:
+https://dev.epicgames.com/documentation/unreal-engine/animation-insights-in-unreal-engine
+
 ## Verify after rebuild
 
 1. Build the editor, run `tests/scene/test_foot_placement_modifier_3d.cpp` (`--test --test-case="*FootPlacement*"`).
