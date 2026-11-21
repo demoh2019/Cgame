@@ -15,6 +15,8 @@ const ExplorationQuest = preload("res://addons/visual_quality/exploration_quest.
 const InteractionRouter = preload("res://addons/visual_quality/world_interaction_router.gd")
 const Inventory = preload("res://addons/visual_quality/inventory_component.gd")
 const ItemCatalog = preload("res://addons/visual_quality/item_catalog.gd")
+const Attributes = preload("res://addons/visual_quality/attribute_component.gd")
+const Abilities = preload("res://addons/visual_quality/ability_component.gd")
 
 var controller: AdaptiveResolution3D
 var manager: VisualQualityManager
@@ -33,6 +35,8 @@ var player_character: VisualLabCharacter3D
 var movement_label: Label
 var quest: ExplorationQuest3D
 var inventory: WorldInventory3D
+var player_attributes: WorldAttributes3D
+var player_abilities: WorldAbilitySystem3D
 var inventory_panel: PanelContainer
 var inventory_label: Label
 var inventory_feedback: Label
@@ -60,7 +64,19 @@ func _ready() -> void:
 	inventory.name = "WorldInventory3D"
 	inventory.world_id = "visual_quality_lab_forest_20261120"
 	inventory.inventory_changed.connect(_update_inventory_ui)
+	inventory.equipment_changed.connect(_on_equipment_changed)
 	add_child(inventory)
+	player_attributes = Attributes.new()
+	player_attributes.name = "WorldAttributes3D"
+	player_character.add_child(player_attributes)
+	player_character.attributes = player_attributes
+	player_abilities = Abilities.new()
+	player_abilities.name = "WorldAbilitySystem3D"
+	player_abilities.attributes = player_attributes
+	player_character.add_child(player_abilities)
+	# v15 inventory files have no equipment key: default to no gear.
+	for slot in inventory.equipped_snapshot().keys():
+		_on_equipment_changed(slot, inventory.get_equipped_item(slot))
 	controller = ResolutionController.new()
 	controller.name = "AdaptiveResolution3D"
 	controller.enable_gpu_frame_measurement = true
@@ -189,13 +205,17 @@ func _on_streamed_cell_loaded(_coord: Vector2i, cell: Node3D) -> void:
 func _process(delta: float) -> void:
 	if status_label != null:
 		var npc_counts: Vector2i = _count_npc_behaviors()
-		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Space jump | Shift sprint | RMB look | V fly\nWorld cells: %d/%d | Pending assets: %d | 7 Streaming: %s\nNPCs: %d | Alerted: %d | Sleeping: %d | AI budget: %d us | 9 AI: %s" % [
+		status_label.text = "Visual Quality Lab | 1 Eco / 2 Balanced / 3 Cinematic\nFPS: %d | 3D scale: %.2f | %s\nWASD move | Space jump | Shift sprint | RMB look | V fly\nWorld cells: %d/%d | Pending assets: %d | 7 Streaming: %s\nNPCs: %d | Alerted: %d | Sleeping: %d | AI budget: %d us | 9 AI: %s\nHP %.0f/%.0f | Stamina %.0f/%.0f | Move x%.2f | X Dash %.1fs | Z Focus %.1fs" % [
 			Engine.get_frames_per_second(), get_viewport().scaling_3d_scale,
 			RenderingServer.get_current_rendering_method(),
 			streamer.active_cell_count(), streamer.registered_cell_count(),
 			streamer.pending_asset_count(), "ON" if streamer.streaming_enabled else "OFF",
 			npc_counts.x, npc_counts.y, ai_interest.sleeping_npc_count(),
-			ai_interest.last_update_micros, "ON" if ai_simulation_enabled else "OFF"
+			ai_interest.last_update_micros, "ON" if ai_simulation_enabled else "OFF",
+			player_attributes.health, player_attributes.get_stat("max_health"),
+			player_attributes.stamina, player_attributes.get_stat("max_stamina"),
+			player_attributes.get_stat("move_speed"), player_abilities.get_cooldown("dash"),
+			player_abilities.get_cooldown("focus")
 		]
 
 
@@ -242,6 +262,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_craft_inventory_item("forest_lantern")
 			KEY_T:
 				_toggle_equipped_lantern()
+			KEY_U:
+				_craft_inventory_item("trail_boots")
+			KEY_Y:
+				_toggle_trail_boots()
+			KEY_X:
+				_activate_player_ability("dash")
+			KEY_Z:
+				_activate_player_ability("focus")
 
 
 func _build_graphics_ui() -> void:
@@ -568,7 +596,7 @@ func _build_inventory_ui() -> void:
 	var column: VBoxContainer = VBoxContainer.new()
 	inventory_panel.add_child(column)
 	var heading: Label = Label.new()
-	heading.text = "ИНВЕНТАРЬ  |  I закрыть  |  T фонарь"
+	heading.text = "ИНВЕНТАРЬ  |  I закрыть  |  T фонарь  |  Y сапоги"
 	column.add_child(heading)
 	inventory_label = Label.new()
 	column.add_child(inventory_label)
@@ -580,6 +608,14 @@ func _build_inventory_ui() -> void:
 	craft_lantern.text = "J: ядро + 2 эссенции → лесной фонарь"
 	craft_lantern.pressed.connect(_craft_inventory_item.bind("forest_lantern"))
 	column.add_child(craft_lantern)
+	var craft_boots: Button = Button.new()
+	craft_boots.text = "U: 1 осколок + 2 эссенции → сапоги следопыта"
+	craft_boots.pressed.connect(_craft_inventory_item.bind("trail_boots"))
+	column.add_child(craft_boots)
+	var equip_boots: Button = Button.new()
+	equip_boots.text = "Y: надеть / снять сапоги (+25% скорость)"
+	equip_boots.pressed.connect(_toggle_trail_boots)
+	column.add_child(equip_boots)
 	inventory_feedback = Label.new()
 	column.add_child(inventory_feedback)
 	inventory_panel.visible = false
@@ -591,8 +627,10 @@ func _update_inventory_ui(_item_id: String = "", _new_count: int = 0) -> void:
 		return
 	var lines: PackedStringArray = PackedStringArray()
 	for item_id in ItemCatalog.all_item_ids():
-		lines.append("%s: %d / %d" % [ItemCatalog.item_name(item_id),
-			inventory.get_count(item_id), ItemCatalog.max_stack(item_id)])
+		var slot: String = ItemCatalog.equipment_slot(item_id)
+		var worn: String = " [ЭКИП.]" if not slot.is_empty() and inventory.get_equipped_item(slot) == item_id else ""
+		lines.append("%s: %d / %d%s" % [ItemCatalog.item_name(item_id),
+			inventory.get_count(item_id), ItemCatalog.max_stack(item_id), worn])
 	inventory_label.text = "\n".join(lines)
 
 
@@ -630,14 +668,43 @@ func _build_equipped_lantern() -> void:
 func _toggle_equipped_lantern() -> void:
 	if not is_instance_valid(equipped_lantern):
 		return
-	if inventory.get_count("forest_lantern") <= 0:
-		if is_instance_valid(inventory_feedback):
-			inventory_feedback.text = "Сначала создайте лесной фонарь"
-		return
+	if inventory.get_equipped_item("utility") != "forest_lantern":
+		if not inventory.equip_item("forest_lantern"):
+			if is_instance_valid(inventory_feedback):
+				inventory_feedback.text = "Сначала создайте лесной фонарь"
+			return
 	equipped_lantern.visible = not equipped_lantern.visible
 	if is_instance_valid(inventory_feedback):
 		inventory_feedback.text = ("Лесной фонарь: ВКЛ" if equipped_lantern.visible
 			else "Лесной фонарь: ВЫКЛ")
+
+
+func _on_equipment_changed(slot: String, item_id: String) -> void:
+	if is_instance_valid(player_attributes):
+		if item_id.is_empty():
+			player_attributes.remove_equipment(slot)
+		else:
+			player_attributes.set_equipment(slot, ItemCatalog.equipment_modifiers(item_id))
+	if slot == "utility" and item_id != "forest_lantern" and is_instance_valid(equipped_lantern):
+		equipped_lantern.visible = false
+	_update_inventory_ui()
+
+
+func _toggle_trail_boots() -> void:
+	if inventory.get_equipped_item("feet") == "trail_boots":
+		inventory.unequip_slot("feet")
+	elif not inventory.equip_item("trail_boots"):
+		if is_instance_valid(inventory_feedback):
+			inventory_feedback.text = "Сначала создайте сапоги следопыта"
+
+
+func _activate_player_ability(ability_id: String) -> void:
+	if not is_instance_valid(player_abilities) or player_character.is_flying:
+		return
+	var success: bool = player_abilities.activate(ability_id)
+	if is_instance_valid(inventory_feedback):
+		inventory_feedback.text = ("Способность: %s" % ability_id if success
+			else "Недостаточно выносливости или идёт перезарядка")
 
 
 func _build_world() -> void:
