@@ -145,7 +145,7 @@ func run(t) -> void:
 	t.check(Overlay.select_zombie_bar_world_stable(across, cameras,
 		cross_priority, PackedInt64Array([31, 31, 32]), PackedInt64Array(),
 		2, 10.0, 0.0, false).is_empty(), "duplicate IDs fail closed")
-	t.check(source_code.contains("top.distance_squared_to(here) > 45.0 * 45.0"),
+	t.check(source_code.contains("var distance_squared: float = top.distance_squared_to(here)"),
 		"actual HUD uses squared-distance prefilter instead of per-enemy square roots")
 	if ClassDB.class_exists("SignificanceBudgetPlanner"):
 		var world_native: Object = ClassDB.instantiate("SignificanceBudgetPlanner")

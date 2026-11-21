@@ -254,7 +254,8 @@ func _draw_zombie_bars(view: Vector2) -> void:
 		var top := Vector3(float(zombie["x"]), float(zombie["y"]) + 2.7, float(zombie["z"]))
 		if bool(zombie.get("raid_boss", false)):
 			top.y += 2.2
-		if not top.is_finite() or top.distance_squared_to(here) > 45.0 * 45.0 or camera.is_position_behind(top):
+		var distance_squared: float = top.distance_squared_to(here)
+		if not is_finite(distance_squared) or distance_squared > 45.0 * 45.0 or camera.is_position_behind(top):
 			continue
 		var spot: Vector2 = camera.unproject_position(top)
 		if spot.x < -40.0 or spot.y < -40.0 or spot.x > view.x + 40.0 or spot.y > view.y + 40.0:
