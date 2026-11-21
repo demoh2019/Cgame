@@ -32,6 +32,7 @@
 
 #include "core/config/engine.h"
 #include "core/io/resource_loader.h"
+#include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "scene/2d/node_2d.h"
@@ -213,6 +214,10 @@ void WorldStreamer::_forget_dead_chunks() {
 	}
 	for (const Vector3i &cell : dead) {
 		loaded.erase(cell);
+		const bool *active = simulation_active_cells.getptr(cell);
+		if (active != nullptr && !*active) {
+			--simulation_inactive_count;
+		}
 		simulation_active_cells.erase(cell);
 		pending_visual_details.erase(cell);
 		emit_signal(SNAME("chunk_unloaded"), cell);
@@ -226,6 +231,10 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell) {
 	}
 	Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(it->value));
 	loaded.remove(it);
+	const bool *active = simulation_active_cells.getptr(p_cell);
+	if (active != nullptr && !*active) {
+		--simulation_inactive_count;
+	}
 	simulation_active_cells.erase(p_cell);
 	pending_visual_details.erase(p_cell);
 	if (chunk) {
@@ -247,6 +256,7 @@ void WorldStreamer::_set_chunk_simulation_active(const Vector3i &p_cell, bool p_
 		return;
 	}
 	simulation_active_cells[p_cell] = p_active;
+	simulation_inactive_count += p_active ? -1 : 1;
 	// The scene explicitly owns what "simulation" means; do not toggle
 	// process modes or physics on arbitrary descendants from the engine.
 	if (chunk->has_method(SNAME("set_streaming_simulation_active"))) {
@@ -256,6 +266,9 @@ void WorldStreamer::_set_chunk_simulation_active(const Vector3i &p_cell, bool p_
 }
 
 void WorldStreamer::_update_simulation(const Vector3 &p_focus) {
+	if (simulation_radius < real_t(0.0) && simulation_inactive_count == 0) {
+		return; // No per-cell scan or callbacks for legacy worlds.
+	}
 	int remaining = max_simulation_transitions_per_update;
 	// Activate nearest chunks first so a player entering a region does not
 	// compete with distant cosmetic shutdowns. Deterministic tie breaking
@@ -318,7 +331,12 @@ bool WorldStreamer::_adopt_chunk(const Vector3i &p_cell, Node *p_chunk) {
 	Node *parent = _get_parent_for_chunks();
 	parent->add_child(p_chunk);
 	loaded[p_cell] = p_chunk->get_instance_id();
-	simulation_active_cells[p_cell] = simulation_active;
+	if (simulation_radius >= real_t(0.0)) {
+		simulation_active_cells[p_cell] = simulation_active;
+		if (!simulation_active) {
+			++simulation_inactive_count;
+		}
+	}
 	retry_states.erase(p_cell);
 	failed.erase(p_cell);
 	// Track optional visual continuation without delaying authoritative world
@@ -739,6 +757,7 @@ void WorldStreamer::_reset_state() {
 	generate_queue.clear();
 	pending_visual_details.clear();
 	simulation_active_cells.clear();
+	simulation_inactive_count = 0;
 	last_queued_view_direction = Vector3();
 	truncated_warned = false;
 	streaming_frame_pressure = 0.0;
@@ -764,6 +783,7 @@ void WorldStreamer::_notification(int p_what) {
 				// Chunks are our children and go away with us; just forget them.
 				loaded.clear();
 				simulation_active_cells.clear();
+				simulation_inactive_count = 0;
 				pending_visual_details.clear();
 			} else {
 				_reset_state();
@@ -1047,13 +1067,7 @@ bool WorldStreamer::is_cell_simulation_active(const Vector3i &p_cell) const {
 }
 
 int WorldStreamer::get_simulation_active_count() const {
-	int count = 0;
-	for (const KeyValue<Vector3i, ObjectID> &entry : loaded) {
-		if (is_cell_simulation_active(entry.key)) {
-			++count;
-		}
-	}
-	return count;
+	return int(loaded.size()) - simulation_inactive_count;
 }
 
 void WorldStreamer::set_enabled(bool p_enabled) {
