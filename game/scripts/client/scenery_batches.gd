@@ -348,6 +348,84 @@ static func pcg_filter_indices_3d(candidates: PackedVector3Array,
 	return _pcg_filter_3d_fallback(candidates, min_spacing, max_selected)
 
 
+## Variable-radius self-pruning on real 3D slopes: unlike planar spacing,
+## two bushes on separate terraces need not block each other. Native Cgame
+## uses a 5x5x5 spatial hash; this matches it on stock Godot.
+static func _pcg_filter_3d_scaled_fallback(points: PackedVector3Array,
+		scales: PackedFloat32Array, spacing: float, cap: int = PCG_MAX_SELECTED,
+		largest_first: bool = true) -> PackedInt32Array:
+	var result := PackedInt32Array()
+	if points.size() != scales.size() or points.size() > PCG_MAX_CANDIDATES or \
+			cap < 0 or cap > PCG_MAX_SELECTED or not is_finite(spacing) or \
+			spacing < 0.0 or spacing > 10000.0 or (spacing > 0.0 and spacing < 0.05):
+		return result
+	for i in points.size():
+		var point: Vector3 = points[i]
+		var scale: float = scales[i]
+		if not point.is_finite() or absf(point.x) > 10000000.0 or \
+				absf(point.y) > 10000000.0 or absf(point.z) > 10000000.0 or \
+				not is_finite(scale) or scale < 0.5 or scale > 2.0:
+			return result
+	if spacing == 0.0:
+		for i in mini(cap, points.size()):
+			result.append(i)
+		return result
+	var order: Array[int] = []
+	for i in points.size():
+		order.append(i)
+	if largest_first:
+		order.sort_custom(func(a: int, b: int) -> bool:
+			return scales[a] > scales[b] if scales[a] != scales[b] else a < b
+		)
+	var cells: Dictionary = {}
+	for index in order:
+		if result.size() >= cap:
+			break
+		var point: Vector3 = points[index]
+		var cell := Vector3i(floori(point.x / spacing), floori(point.y / spacing),
+			floori(point.z / spacing))
+		var blocked := false
+		for z in range(-2, 3):
+			for y in range(-2, 3):
+				for x in range(-2, 3):
+					for other in cells.get(cell + Vector3i(x, y, z), []):
+						var min_dist: float = spacing * (scales[index] + scales[other]) * 0.5
+						if point.distance_squared_to(points[other]) < min_dist * min_dist:
+							blocked = true
+							break
+					if blocked:
+						break
+				if blocked:
+					break
+			if blocked:
+				break
+		if blocked:
+			continue
+		result.append(index)
+		var neighbors: Array = cells.get(cell, [])
+		neighbors.append(index)
+		cells[cell] = neighbors
+	if largest_first:
+		result.sort()
+	return result
+
+
+static func pcg_filter_indices_3d_scaled(points: PackedVector3Array,
+		scales: PackedFloat32Array, spacing: float, cap: int = PCG_MAX_SELECTED,
+		largest_first: bool = true, prefer_native: bool = true) -> PackedInt32Array:
+	if prefer_native:
+		if not _pcg_checked_3d:
+			_pcg_checked_3d = true
+			if ClassDB.class_exists("PCGSpatialFilter3D"):
+				var instance: Object = ClassDB.instantiate("PCGSpatialFilter3D")
+				if instance != null and instance.has_method("filter_indices"):
+					_pcg_native_3d = instance
+		if _pcg_native_3d != null and _pcg_native_3d.has_method("filter_indices_scaled"):
+			return _pcg_native_3d.call("filter_indices_scaled",
+				points, scales, spacing, cap, largest_first)
+	return _pcg_filter_3d_scaled_fallback(points, scales, spacing, cap, largest_first)
+
+
 ## Called after seeded transforms are generated, so thinning never changes
 ## the random stream for neighboring chunks or later decoration categories.
 static func thin_cosmetic_transforms_3d(transforms: Array[Transform3D],
@@ -355,10 +433,12 @@ static func thin_cosmetic_transforms_3d(transforms: Array[Transform3D],
 	if min_spacing <= 0.0 or transforms.is_empty() or transforms.size() > PCG_MAX_CANDIDATES:
 		return transforms
 	var points := PackedVector3Array()
+	var scales := PackedFloat32Array()
 	for transform in transforms:
 		points.append(transform.origin)
-	var chosen: PackedInt32Array = pcg_filter_indices_3d(
-		points, min_spacing, PCG_MAX_SELECTED, prefer_native)
+		scales.append(clampf(transform.basis.x.length(), 0.5, 2.0))
+	var chosen: PackedInt32Array = pcg_filter_indices_3d_scaled(
+		points, scales, min_spacing, PCG_MAX_SELECTED, true, prefer_native)
 	var result: Array[Transform3D] = []
 	for index in chosen:
 		result.append(transforms[index])

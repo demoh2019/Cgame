@@ -85,4 +85,70 @@ TEST_CASE("[PCGSpatialFilter3D] atomic invalid input rejection and bounded outpu
 	CHECK(capped[4095] == 4095);
 }
 
+
+TEST_CASE("[PCGSpatialFilter3D] scaled footprints respect vertical terraces and original-order indices") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	const PackedVector3Array points = { Vector3(0, 0, 0), Vector3(0.9, 0, 0),
+		Vector3(3, 0, 0), Vector3(3.8, 0, 0), Vector3(-2.6, 0, 0),
+		Vector3(0.9, 3, 0) };
+	const PackedFloat32Array scales = { 0.5f, 2.0f, 1.0f, 0.5f, 1.2f, 2.0f };
+	const PackedInt32Array large_first = filter->filter_indices_scaled(points, scales, 1.0);
+	REQUIRE(large_first.size() == 5);
+	CHECK(large_first[0] == 1); // Larger bush wins over the smaller neighbour.
+	CHECK(large_first[1] == 2);
+	CHECK(large_first[2] == 3); // Exactly enough room after a smaller footprint.
+	CHECK(large_first[3] == 4);
+	CHECK(large_first[4] == 5); // Same horizontal position, but higher terrace.
+	const PackedInt32Array original_first = filter->filter_indices_scaled(points, scales, 1.0, 4096, false);
+	REQUIRE(original_first.size() == 5);
+	CHECK(original_first[0] == 0);
+	CHECK(original_first[1] == 2);
+	CHECK(original_first[4] == 5);
+	const PackedInt32Array zero = filter->filter_indices_scaled(points, scales, 0.0, 2);
+	REQUIRE(zero.size() == 2);
+	CHECK(zero[0] == 0);
+	CHECK(zero[1] == 1);
+
+	PackedFloat32Array ones;
+	ones.resize(points.size());
+	for (int i = 0; i < points.size(); ++i) {
+		ones.set(i, 1.0f);
+	}
+	CHECK(filter->filter_indices_scaled(points, ones, 1.0) == filter->filter_indices(points, 1.0));
+	CHECK(filter->filter_indices_scaled(points, scales, 1.0) == large_first);
+	CHECK(points[0] == Vector3(0, 0, 0));
+	CHECK(scales[0] == 0.5f);
+}
+
+TEST_CASE("[PCGSpatialFilter3D] scaled 5x5x5 bucket boundaries and all-or-nothing validation") {
+	Ref<PCGSpatialFilter3D> filter;
+	filter.instantiate();
+	const PackedVector3Array crossing = {
+		Vector3(0.99, -1.0, 0.99), Vector3(2.01, -1.0, 0.99), Vector3(0.99, 1.2, 0.99)
+	};
+	const PackedFloat32Array big = { 2.0f, 2.0f, 2.0f };
+	const PackedInt32Array picked = filter->filter_indices_scaled(crossing, big, 1.0, 4096, false);
+	REQUIRE(picked.size() == 2);
+	CHECK(picked[0] == 0);
+	CHECK(picked[1] == 2); // Height difference > 2*spacing is allowed.
+	const PackedVector3Array edge = { Vector3(0, 0, 0), Vector3(1.25, 0, 0) };
+	CHECK(filter->filter_indices_scaled(edge, { 0.5f, 2.0f }, 1.0).size() == 2);
+	ERR_PRINT_OFF
+	CHECK(filter->filter_indices_scaled(crossing, { 1.0f }, 1.0).is_empty());
+	CHECK(filter->filter_indices_scaled(crossing, big, -1.0).is_empty());
+	CHECK(filter->filter_indices_scaled(crossing, big, 0.01).is_empty());
+	CHECK(filter->filter_indices_scaled(crossing, big, Math::INF).is_empty());
+	CHECK(filter->filter_indices_scaled(crossing, big, 1.0, -1).is_empty());
+	CHECK(filter->filter_indices_scaled(crossing, big, 1.0, 4097).is_empty());
+	PackedFloat32Array invalid_scales = big;
+	invalid_scales.set(1, Math::NaN);
+	CHECK(filter->filter_indices_scaled(crossing, invalid_scales, 1.0).is_empty());
+	CHECK(filter->filter_indices_scaled(crossing, { 2.0f, 0.49f, 1.0f }, 1.0).is_empty());
+	CHECK(filter->filter_indices_scaled(crossing, { 2.0f, 2.01f, 1.0f }, 1.0).is_empty());
+	const PackedVector3Array invalid = { Vector3(0, 0, 0), Vector3(0, Math::NaN, 0) };
+	CHECK(filter->filter_indices_scaled(invalid, { 1.0f, 1.0f }, 1.0).is_empty());
+	ERR_PRINT_ON
+}
+
 } // namespace TestPCGSpatialFilter3D

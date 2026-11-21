@@ -22,6 +22,12 @@ public:
 	static constexpr double MIN_SPACING = 0.05;
 	static constexpr double MAX_SPACING = 10000.0;
 
+	// Variable-footprint 3D PCG thinning, stable original-index output.
+	// Scales are validated in [0.5, 2.0]; the caller owns scene changes.
+	PackedInt32Array filter_indices_scaled(const PackedVector3Array &p_candidates,
+			const PackedFloat32Array &p_scales, double p_min_spacing,
+			int p_max_selected = MAX_SELECTED, bool p_largest_first = true) const;
+
 	PackedInt32Array filter_indices(const PackedVector3Array &p_candidates,
 			double p_min_spacing, int p_max_selected = MAX_SELECTED) const;
 };
