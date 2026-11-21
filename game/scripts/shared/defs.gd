@@ -119,11 +119,77 @@ static func recipes() -> Dictionary:
 
 
 static func item(id: String) -> Dictionary:
+	if id.contains("+"):
+		return _quality_item(id)
 	return items().get(id, {})
 
 
 static func is_item(id: String) -> bool:
+	if id.contains("+"):
+		return not _quality_item(id).is_empty()
 	return items().has(id)
+
+
+# --- Item quality: crafted gear rolls Normal..Masterpiece; id "club_5+3" = Club T5, quality 3. ---
+const QUALITY_NAMES := ["", "Normal", "Good", "Outstanding", "Excellent", "Masterpiece"]
+const MAX_QUALITY := 5
+const QUALITY_KINDS := ["weapon", "armor", "tool"]
+static var _quality_cache: Dictionary = {}
+
+
+static func base_id(id: String) -> String:
+	var at: int = id.find("+")
+	return id if at < 0 else id.substr(0, at)
+
+
+static func quality_of(id: String) -> int:
+	var at: int = id.find("+")
+	if at < 0:
+		return 1
+	var q: String = id.substr(at + 1)
+	return int(q) if q.is_valid_int() else 0
+
+
+static func with_quality(id: String, quality: int) -> String:
+	return base_id(id) if quality <= 1 else "%s+%d" % [base_id(id), mini(quality, MAX_QUALITY)]
+
+
+static func can_have_quality(id: String) -> bool:
+	return str(items().get(base_id(id), {}).get("kind", "")) in QUALITY_KINDS
+
+
+static func _quality_item(id: String) -> Dictionary:
+	if _quality_cache.has(id):
+		return _quality_cache[id]
+	var q: int = quality_of(id)
+	var base: Dictionary = items().get(base_id(id), {})
+	if q < 2 or q > MAX_QUALITY or base.is_empty() or not str(base.get("kind", "")) in QUALITY_KINDS \
+			or id != with_quality(id, q):
+		return {}
+	var data: Dictionary = base.duplicate(true)
+	var bonus: float = 1.0 + 0.08 * float(q - 1)
+	for key in ["damage", "armor"]:
+		if data.has(key):
+			data[key] = float(data[key]) * bonus
+	data["value"] = int(round(float(data.get("value", 1)) * (1.0 + 0.6 * float(q - 1))))
+	data["quality"] = q
+	data["name"] = "%s (%s)" % [str(data.get("name", id)), QUALITY_NAMES[q]]
+	_quality_cache[id] = data
+	return data
+
+
+## Crafting quality roll: skill and luck push toward Masterpiece. Returns 1..5.
+static func roll_quality(rng: RandomNumberGenerator, skill_bonus: float = 0.0) -> int:
+	var r: float = rng.randf() / (1.0 + maxf(0.0, skill_bonus))
+	if r < 0.006:
+		return 5
+	if r < 0.035:
+		return 4
+	if r < 0.12:
+		return 3
+	if r < 0.36:
+		return 2
+	return 1
 
 
 static func stack_size(id: String) -> int:

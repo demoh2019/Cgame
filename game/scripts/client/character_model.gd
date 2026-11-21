@@ -614,6 +614,7 @@ var _hand: BoneAttachment3D
 
 ## The weapon family of an item id: "machete_3" -> "machete".
 static func weapon_family(item_id: String) -> String:
+	item_id = item_id.get_slice("+", 0)
 	var parts := item_id.rsplit("_", true, 1)
 	return parts[0] if parts.size() == 2 and parts[1].is_valid_int() else item_id
 

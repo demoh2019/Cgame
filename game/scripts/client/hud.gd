@@ -2524,6 +2524,9 @@ func _on_event(event: Dictionary) -> void:
 					int(event.get("xp", 0)), int(event.get("level", 1))])
 		"crate":
 			say("You search the crate...")
+		"masterwork":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Crafted %s!" % str(Defs.item(str(event.get("item", ""))).get("name", "")))
 		"market_sale":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Market: sold %dx %s, +%d silver." % [int(event.get("quantity", 0)), str(Defs.item(str(event.get("item", ""))).get("name", event.get("item", ""))), int(event.get("net", 0))])
@@ -4033,6 +4036,7 @@ func _refresh_trade_controls() -> void:
 		]
 
 
+const QUALITY_COLORS := [Color.WHITE, Color.WHITE, Color(0.75, 0.85, 1.0), Color(0.55, 0.9, 0.55), Color(0.8, 0.55, 1.0), Color(1.0, 0.8, 0.3)]
 const TIER_COLORS := [Color(0.62, 0.64, 0.68), Color(0.62, 0.64, 0.68), Color(0.36, 0.82, 0.42), Color(0.36, 0.62, 1.0), Color(0.78, 0.42, 1.0),
 	Color(1.0, 0.78, 0.25), Color(1.0, 0.52, 0.22), Color(0.95, 0.28, 0.28), Color(0.96, 0.96, 0.98)]
 
@@ -4225,6 +4229,8 @@ func _item_card(item_id: String, count: int, equipped: bool, size: Vector2) -> B
 		card.add_child(_card_badge(["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII"][clampi(tier, 0, 8)], TIER_COLORS[clampi(tier, 0, TIER_COLORS.size() - 1)], Control.PRESET_TOP_LEFT))
 	if count > 1:
 		card.add_child(_card_badge(_short_count(count), Color(1, 1, 1), Control.PRESET_BOTTOM_RIGHT))
+	if Defs.quality_of(item_id) > 1:
+		card.add_child(_card_badge("★".repeat(Defs.quality_of(item_id) - 1), QUALITY_COLORS[Defs.quality_of(item_id)], Control.PRESET_BOTTOM_LEFT))
 	if equipped:
 		card.add_child(_card_badge("E", UiTheme.GOLD, Control.PRESET_TOP_RIGHT))
 	return card

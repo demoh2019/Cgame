@@ -1393,13 +1393,27 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1,
 		for batch in times:
 			if not input_ids.is_empty() and rng.randf() < player.skills.bonus("craft_refund"):
 				player.inventory.add(String(input_ids[rng.randi() % input_ids.size()]), 1)
+		# Quality: each crafted piece of gear rolls Normal..Masterpiece; higher crafting rank helps.
+		var output: String = String(recipe["output"])
+		var best: int = 1
+		if Defs.can_have_quality(output):
+			var luck: float = 0.1 * float(maxi(0, player.progression.crafting_level() - recipe_tier))
+			for unit in times * int(recipe.get("count", 1)):
+				var q: int = Defs.roll_quality(rng, luck)
+				if q > 1 and player.inventory.remove(output, 1):
+					if player.inventory.add(Defs.with_quality(output, q), 1) > 0:
+						player.inventory.add(output, 1)
+					else:
+						best = maxi(best, q)
+		if best >= 4:
+			events.append({"type": "masterwork", "peer": peer_id, "item": Defs.with_quality(output, best)})
 		player.inventory.unequip_missing()
 		player.dirty_inventory = true
 		if from_stash:
 			player.dirty_stash = true
 		player.dirty_character = true
 		return {"ok": true, "recipe": recipe_id, "times": times,
-			"from_stash": from_stash}
+			"from_stash": from_stash, "best_quality": best}
 	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status],
 		"from_stash": from_stash}
 
