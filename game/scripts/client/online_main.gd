@@ -1380,6 +1380,9 @@ func _on_welcomed() -> void:
 	# Hard native cap + per-node opt-in; no server entities or physics cached.
 	if "max_cached_chunks" in streamer:
 		streamer.max_cached_chunks = 2 if GraphicsQuality.level() >= 2 else 1
+	if streamer.has_method("set_max_cached_chunk_bytes"):
+		streamer.set_max_cached_chunk_bytes(
+			GraphicsQuality.streamed_chunk_cache_bytes_for_quality(GraphicsQuality.level()))
 	# Slow-frame backpressure is an opt-in extension. Older Godot forks
 	# retain their unchanged fixed streaming budgets.
 	if "adaptive_chunk_budget_enabled" in streamer:
@@ -1439,6 +1442,12 @@ func _on_welcomed() -> void:
 			if not Performance.has_custom_monitor(monitor_name):
 				Performance.add_custom_monitor(monitor_name, monitor[1])
 				_ambient_monitors.append(monitor_name)
+	if streamer.has_method("get_cached_chunk_bytes"):
+		var cache_bytes_monitor: StringName = &"Albion/StreamCacheEstimatedBytes"
+		if not Performance.has_custom_monitor(cache_bytes_monitor):
+			Performance.add_custom_monitor(cache_bytes_monitor,
+				Callable(streamer, "get_cached_chunk_bytes"))
+			_ambient_monitors.append(cache_bytes_monitor)
 	# The engine reports how many stale visual cells were retired versus
 	# deferred by this quality-tier unload budget. Counters only update
 	# during real streaming refreshes, not from a HUD polling loop.

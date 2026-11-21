@@ -343,7 +343,8 @@ void WorldStreamer::_forget_dead_chunks() {
 // cost), but still own their resources. Keep the cap strict and evict the
 // oldest entry deterministically whenever the cache grows or shrinks.
 void WorldStreamer::_trim_cached_chunks() {
-	while (int(cached_chunks.size()) > max_cached_chunks) {
+	while (int(cached_chunks.size()) > max_cached_chunks ||
+			(max_cached_chunk_bytes > 0 && cached_chunk_bytes > max_cached_chunk_bytes)) {
 		// Protect cells the current focus/nearby source is requesting. Without
 		// this, unloading the current chunk first would evict the previous
 		// destination immediately even on a one-slot cache backtrack.
@@ -373,6 +374,7 @@ void WorldStreamer::_trim_cached_chunks() {
 			break;
 		}
 		const CachedChunk entry = cached_chunks[oldest_cell];
+		cached_chunk_bytes -= entry.estimated_bytes;
 		cached_chunks.erase(oldest_cell);
 		Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(entry.node_id));
 		if (chunk && !chunk->is_queued_for_deletion()) {
@@ -393,6 +395,7 @@ void WorldStreamer::_discard_cached_chunks() {
 		}
 	}
 	cached_chunks.clear();
+	cached_chunk_bytes = 0;
 }
 
 void WorldStreamer::clear_cached_chunks() {
@@ -411,6 +414,20 @@ void WorldStreamer::set_max_cached_chunks(int p_count) {
 	_trim_cached_chunks();
 }
 
+void WorldStreamer::set_max_cached_chunk_bytes(int64_t p_bytes) {
+	const int64_t bounded = CLAMP(p_bytes, int64_t(0), int64_t(268435456));
+	if (max_cached_chunk_bytes == bounded) {
+		return;
+	}
+	// Entries admitted while size tracking was disabled carry no estimate.
+	// Discard them before enforcing a newly enabled memory budget.
+	if (max_cached_chunk_bytes == 0 && bounded > 0) {
+		_discard_cached_chunks();
+	}
+	max_cached_chunk_bytes = bounded;
+	_trim_cached_chunks();
+}
+
 WorldStreamer::~WorldStreamer() {
 	_discard_cached_chunks();
 }
@@ -421,6 +438,7 @@ bool WorldStreamer::_restore_cached_chunk(const Vector3i &p_cell) {
 		return false;
 	}
 	const ObjectID id = entry->node_id;
+	cached_chunk_bytes -= entry->estimated_bytes;
 	cached_chunks.erase(p_cell);
 	Node *chunk = Object::cast_to<Node>(ObjectDB::get_instance(id));
 	if (chunk == nullptr || chunk->is_queued_for_deletion() || chunk->get_parent() != nullptr) {
@@ -463,10 +481,25 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell, bool p_allow_cache) {
 	if (chunk) {
 		// Only generator-owned roots that opt in may remain cached. Packed
 		// scenes and mutable/authoritative chunks keep legacy free-on-unload.
-		const bool may_cache = p_allow_cache && generator_compatible && max_cached_chunks > 0 && chunk_generator.is_valid() &&
+		bool may_cache = p_allow_cache && generator_compatible && max_cached_chunks > 0 && chunk_generator.is_valid() &&
 				chunk->get_parent() == _get_parent_for_chunks() && !chunk->is_queued_for_deletion() &&
 				chunk->has_method(SNAME("can_cache_streaming_chunk")) &&
 				bool(chunk->call(SNAME("can_cache_streaming_chunk")));
+		int64_t estimated_bytes = 0;
+		if (may_cache && max_cached_chunk_bytes > 0) {
+			// An active cost budget must never assume unpriced scenes are free.
+			if (!chunk->has_method(SNAME("get_streaming_cache_cost_bytes"))) {
+				may_cache = false;
+			} else {
+				const Variant cost = chunk->call(SNAME("get_streaming_cache_cost_bytes"));
+				if (cost.get_type() != Variant::INT) {
+					may_cache = false;
+				} else {
+					estimated_bytes = int64_t(cost);
+					may_cache = estimated_bytes > 0 && estimated_bytes <= max_cached_chunk_bytes;
+				}
+			}
+		}
 		if (chunk->get_parent()) {
 			chunk->get_parent()->remove_child(chunk);
 		}
@@ -474,7 +507,9 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell, bool p_allow_cache) {
 			CachedChunk entry;
 			entry.node_id = chunk->get_instance_id();
 			entry.age = ++cache_clock;
+			entry.estimated_bytes = estimated_bytes;
 			cached_chunks[p_cell] = entry;
+			cached_chunk_bytes += estimated_bytes;
 			_trim_cached_chunks();
 		} else {
 			chunk->queue_free();
@@ -1793,6 +1828,9 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_chunk_generator", "generator"), &WorldStreamer::set_chunk_generator);
 	ClassDB::bind_method(D_METHOD("set_max_cached_chunks", "count"), &WorldStreamer::set_max_cached_chunks);
 	ClassDB::bind_method(D_METHOD("get_max_cached_chunks"), &WorldStreamer::get_max_cached_chunks);
+	ClassDB::bind_method(D_METHOD("set_max_cached_chunk_bytes", "bytes"), &WorldStreamer::set_max_cached_chunk_bytes);
+	ClassDB::bind_method(D_METHOD("get_max_cached_chunk_bytes"), &WorldStreamer::get_max_cached_chunk_bytes);
+	ClassDB::bind_method(D_METHOD("get_cached_chunk_bytes"), &WorldStreamer::get_cached_chunk_bytes);
 	ClassDB::bind_method(D_METHOD("get_cached_chunk_count"), &WorldStreamer::get_cached_chunk_count);
 	ClassDB::bind_method(D_METHOD("get_chunk_cache_hit_count"), &WorldStreamer::get_chunk_cache_hit_count);
 	ClassDB::bind_method(D_METHOD("get_chunk_cache_eviction_count"), &WorldStreamer::get_chunk_cache_eviction_count);
@@ -1849,6 +1887,7 @@ void WorldStreamer::_bind_methods() {
 	ADD_GROUP("Budget", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_concurrent_loads", PROPERTY_HINT_RANGE, "1,64,1,or_greater"), "set_max_concurrent_loads", "get_max_concurrent_loads");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_chunks", PROPERTY_HINT_RANGE, "0,16,1"), "set_max_cached_chunks", "get_max_cached_chunks");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_cached_chunk_bytes", PROPERTY_HINT_RANGE, "0,268435456,1048576,suffix:B"), "set_max_cached_chunk_bytes", "get_max_cached_chunk_bytes");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_instantiations_per_frame", PROPERTY_HINT_RANGE, "1,16,1,or_greater"), "set_max_instantiations_per_frame", "get_max_instantiations_per_frame");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unloads_per_update", PROPERTY_HINT_RANGE, "0,64,1"), "set_max_unloads_per_update", "get_max_unloads_per_update");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_unload_work_usec", PROPERTY_HINT_RANGE, "0,1000000,100,suffix:us"), "set_max_unload_work_usec", "get_max_unload_work_usec");
