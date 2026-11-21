@@ -43,7 +43,8 @@ TEST_CASE("[AIBehaviorTrace] Empty optional timeline has stable diagnostic keys"
 	CHECK(int64_t(before["tick_index"]) == 0);
 	CHECK(int(before["max_steps"]) == 128);
 	CHECK(int(before["truncated"]) == 0);
-	CHECK(Array(before["steps"]).is_empty());
+	const Array empty_steps = before["steps"];
+	CHECK(empty_steps.is_empty());
 }
 
 TEST_CASE("[AIBehaviorTrace] Nesting returns start order and inclusive task durations") {
@@ -110,7 +111,8 @@ TEST_CASE("[AIBehaviorTrace] Tick lifecycle clears only prior events") {
 	trace->reset();
 	const Dictionary reset = trace->get_snapshot();
 	CHECK(int64_t(reset["tick_index"]) == 0);
-	CHECK(Array(reset["steps"]).is_empty());
+	const Array reset_steps = reset["steps"];
+	CHECK(reset_steps.is_empty());
 }
 
 TEST_CASE("[AIBehaviorTrace] Malformed events do not corrupt timeline state") {
@@ -185,7 +187,8 @@ TEST_CASE("[AIBehaviorTrace] Runner emits task-by-task pre-order with parent sta
 	CHECK(int(guard["status"]) == BehaviorTreeTask::SUCCESS);
 	CHECK(timer["path"] == "root/1");
 	CHECK(int(timer["status"]) == BehaviorTreeTask::RUNNING);
-	CHECK_FALSE(runner->get_debug_snapshot()["execution_memory"].has("__bt_trace_sink"));
+	const Dictionary runner_memory = runner->get_debug_snapshot()["execution_memory"];
+	CHECK_FALSE(runner_memory.has("__bt_trace_sink"));
 	CHECK(runner->tick(0.2) == BehaviorTreeTask::RUNNING);
 	CHECK(int64_t(runner->get_trace_snapshot()["tick_index"]) == 2);
 	memdelete(runner);
@@ -225,15 +228,20 @@ TEST_CASE("[AIBehaviorTrace] Disabled runners do not retain trace contexts") {
 	CHECK_FALSE(runner->is_trace_enabled());
 	CHECK(runner->tick(0.2) == BehaviorTreeTask::RUNNING);
 	CHECK(runner->get_trace_snapshot()["enabled"] == false);
-	CHECK(Array(runner->get_trace_snapshot()["steps"]).is_empty());
-	CHECK_FALSE(runner->get_debug_snapshot()["execution_memory"].has("__bt_trace_sink"));
+	const Array no_steps = runner->get_trace_snapshot()["steps"];
+	CHECK(no_steps.is_empty());
+	const Dictionary runner_memory = runner->get_debug_snapshot()["execution_memory"];
+	CHECK_FALSE(runner_memory.has("__bt_trace_sink"));
 	runner->set_trace_enabled(true);
 	CHECK(runner->tick(0.3) == BehaviorTreeTask::SUCCESS);
-	CHECK(Array(runner->get_trace_snapshot()["steps"]).size() == 1);
+	const Array last_steps = runner->get_trace_snapshot()["steps"];
+	CHECK(last_steps.size() == 1);
 	CHECK(runner->tick(0.5) == BehaviorTreeTask::SUCCESS); // cached result
-	CHECK(Array(runner->get_trace_snapshot()["steps"]).size() == 1);
+	const Array last_steps = runner->get_trace_snapshot()["steps"];
+	CHECK(last_steps.size() == 1);
 	runner->set_trace_enabled(false);
-	CHECK(Array(runner->get_trace_snapshot()["steps"]).is_empty());
+	const Array no_steps = runner->get_trace_snapshot()["steps"];
+	CHECK(no_steps.is_empty());
 	memdelete(runner);
 }
 
