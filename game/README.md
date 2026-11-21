@@ -3,6 +3,12 @@
 **This is the canonical game project at `game/`.** All new gameplay
 features belong here; demos under `demo/` and `games/` are prototypes.
 
+**New engine/game feature — server encounter director:** world incidents now
+respect nearby living infected, actual survivor health and global spawn headroom.
+The authoritative `GameServer` reduces or delays additional waves when an
+area is overcrowded; its tests run in `game/tests/run_all.gd`. See
+[Server Encounter Director](docs/SERVER_ENCOUNTER_DIRECTOR.md).
+
 An original post-apocalyptic survival sandbox RPG: infected enemies,
 scavenging, hunger/thirst, safe hub and dangerous zones, tiered resource
 gathering, crafting/refining, equipment-based combat, full-loot risks outside
