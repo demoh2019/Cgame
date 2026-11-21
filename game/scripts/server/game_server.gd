@@ -93,6 +93,7 @@ const StaggerFinisher = preload("res://scripts/shared/stagger_finisher.gd")
 const ArcaneAbilities = preload("res://scripts/shared/arcane_abilities.gd")
 const Swimming = preload("res://scripts/shared/swimming.gd")
 const WorldIncidents = preload("res://scripts/shared/world_incidents.gd")
+const WorldEncounterDirector = preload("res://scripts/shared/world_encounter_director.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const AntisepticEdge = preload("res://scripts/shared/antiseptic_edge.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
@@ -7534,6 +7535,15 @@ func _tick_world_incidents() -> void:
 	if candidates.is_empty():
 		return
 	var target: Player = candidates[rng.randi_range(0, candidates.size() - 1)]
+	# The server observes actual nearby infected and survivor condition. Do not
+	# spawn fresh waves into a saturated crowd or exceed global entity limits.
+	var nearby_threat: int = WorldEncounterDirector.nearby_infected(zombies, target.position)
+	var health_ratio: float = target.survival.health / maxf(target.survival.max_health, 1.0)
+	var incident_budget: int = WorldEncounterDirector.spawn_budget(
+		zombies.size(), nearby_threat, health_ratio,
+		world.zone_at(target.position.x, target.position.z))
+	if incident_budget == 0:
+		return
 	var site: Dictionary = WorldIncidents.site_near(world, target.position, rng)
 	if site.is_empty():
 		return
@@ -7548,7 +7558,8 @@ func _tick_world_incidents() -> void:
 		bag_id = _make_bag(Vector3(center.x, float(site["y"]), center.y), loot)
 		lure = center # Guards hold the cache instead of hunting.
 	var spawned := 0
-	for type in WorldIncidents.roster(kind, zone, rng):
+	for type in WorldEncounterDirector.bounded_roster(
+			WorldIncidents.roster(kind, zone, rng), incident_budget):
 		if zombies.size() >= WorldIncidents.MAX_ACTIVE_INFECTED:
 			break
 		var spot: Vector2 = center + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(1.5, 7.0)
@@ -7564,7 +7575,8 @@ func _tick_world_incidents() -> void:
 		spawned += 1
 	if spawned == 0 and bag_id < 0:
 		return
-	next_incident_at = time + WorldIncidents.next_delay(rng)
+	next_incident_at = time + WorldEncounterDirector.respite_seconds(
+		WorldIncidents.next_delay(rng), nearby_threat, health_ratio)
 	events.append({"type": "incident", "kind": kind, "x": center.x, "z": center.y,
 		"count": spawned, "zone": zone, "peer": target.id})
 
