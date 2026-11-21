@@ -117,3 +117,22 @@ This is an explicit geometric filter, **not** automatic physics overlap
 detection, line of sight, or navigation validation. Albion After's authoritative
 raid reinforcements supply living infected positions and preserve deterministic
 stock-Godot fallback when more than 128 contexts are present.
+
+## Per-candidate tactical score bonuses
+
+`candidate_bonuses` is an optional `PackedFloat32Array` aligned by source
+index with `candidates`. Each finite element must be between -1 and +1;
+negative values penalize a point, positive values prioritize it. The engine
+adds the offset to the existing distance/threat score **after** applying
+exclusions and clearance constraints. An empty array means no bonus, so old
+queries remain unchanged. A candidate list with a different length clears
+existing offsets; malformed updates leave the previous values intact.
+`query()`, `query_top_positions()`, and `query_spread_positions()` share
+identical ranking and deterministic tie breaking.
+
+Albion After feeds small, server-calculated cover-proximity bonuses into its
+raid reinforcement EQS to favor positions near physical obstacles while still
+rejecting obstructed terrain, safe zones, player clearance violations and
+occupied sites. This is a proximity heuristic, not verified line of sight:
+obstacle visibility/navmesh reachability remain gameplay responsibilities.
+Stock Godot and older Cgame builds use the matching GDScript fallback.
