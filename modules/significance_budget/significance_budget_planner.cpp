@@ -344,7 +344,6 @@ PackedInt32Array SignificanceBudgetPlanner::select_top_priority_stable(
 	return result;
 }
 
-
 PackedInt32Array SignificanceBudgetPlanner::select_world_priority_stable(
 		const PackedVector3Array &p_positions, const PackedVector3Array &p_viewers,
 		const PackedByteArray &p_priorities, const PackedInt64Array &p_ids,
@@ -485,6 +484,106 @@ PackedInt32Array SignificanceBudgetPlanner::select_top_stable(
 	return result;
 }
 
+
+PackedInt32Array SignificanceBudgetPlanner::select_shadow_casters(
+		const PackedVector3Array &p_bounds_min, const PackedVector3Array &p_bounds_max,
+		const PackedByteArray &p_roles, const PackedByteArray &p_current,
+		const Vector3 &p_camera, const PackedFloat64Array &p_role_radii,
+		int p_budget, double p_hysteresis) const {
+	PackedInt32Array empty;
+	const int count = p_bounds_min.size();
+	if (count != p_bounds_max.size() || count != p_roles.size() ||
+			count != p_current.size() || count > MAX_CANDIDATES ||
+			p_role_radii.size() != 3 || !valid_budget(p_budget) ||
+			!p_camera.is_finite() || !Math::is_finite(p_hysteresis) ||
+			p_hysteresis < 0.0 || p_hysteresis > 1000.0) {
+		return empty;
+	}
+	for (int i = 0; i < 3; i++) {
+		if (!Math::is_finite(p_role_radii[i]) || p_role_radii[i] < 0.0 ||
+				p_role_radii[i] > MAX_RANGE) {
+			return empty;
+		}
+	}
+	// Validate every row before selecting anything; an invalid *late* box
+	// never yields a partially filled GPU shadow plan.
+	for (int i = 0; i < count; i++) {
+		const Vector3 lo = p_bounds_min[i];
+		const Vector3 hi = p_bounds_max[i];
+		if (!lo.is_finite() || !hi.is_finite() ||
+				lo.x > hi.x || lo.y > hi.y || lo.z > hi.z ||
+				p_roles[i] > 3 || p_current[i] > 1 ||
+				Math::abs(double(lo.x)) > MAX_RANGE ||
+				Math::abs(double(lo.z)) > MAX_RANGE ||
+				Math::abs(double(hi.x)) > MAX_RANGE ||
+				Math::abs(double(hi.z)) > MAX_RANGE) {
+			return empty;
+		}
+	}
+	if (p_budget == 0) {
+		return empty;
+	}
+	struct ShadowCandidate {
+		int index = 0;
+		int priority = 0;
+		double adjusted = 0.0;
+		double raw = 0.0;
+	};
+	// Reuse the same bounded top-K principle as the other significance
+	// selectors: O(N * K), O(K) additional storage, deterministic ties.
+	Vector<ShadowCandidate> best;
+	for (int i = 0; i < count; i++) {
+		const int role = p_roles[i];
+		if (role == 3 || p_role_radii[role] <= 0.0) {
+			continue;
+		}
+		const Vector3 lo = p_bounds_min[i];
+		const Vector3 hi = p_bounds_max[i];
+		const double dx = MAX(MAX(double(lo.x) - double(p_camera.x),
+				double(p_camera.x) - double(hi.x)), 0.0);
+		const double dz = MAX(MAX(double(lo.z) - double(p_camera.z),
+				double(p_camera.z) - double(hi.z)), 0.0);
+		const double distance = Math::sqrt(dx * dx + dz * dz);
+		const bool already = p_current[i] != 0;
+		const double allowed = MAX(0.0, p_role_radii[role] +
+				(already ? p_hysteresis : -p_hysteresis));
+		if (distance > allowed) {
+			continue;
+		}
+		const ShadowCandidate candidate = {
+			i, role, MAX(0.0, distance - (already ? p_hysteresis : 0.0)), distance
+		};
+		auto better_shadow = [](const ShadowCandidate &p_a, const ShadowCandidate &p_b) {
+			if (p_a.priority != p_b.priority) {
+				return p_a.priority > p_b.priority;
+			}
+			if (p_a.adjusted != p_b.adjusted) {
+				return p_a.adjusted < p_b.adjusted;
+			}
+			if (p_a.raw != p_b.raw) {
+				return p_a.raw < p_b.raw;
+			}
+			return p_a.index < p_b.index;
+		};
+		if (best.size() == p_budget && !better_shadow(candidate, best[best.size() - 1])) {
+			continue;
+		}
+		int at = 0;
+		while (at < best.size() && !better_shadow(candidate, best[at])) {
+			at++;
+		}
+		best.insert(at, candidate);
+		if (best.size() > p_budget) {
+			best.resize(p_budget);
+		}
+	}
+	PackedInt32Array selected;
+	for (const ShadowCandidate &candidate : best) {
+		selected.push_back(candidate.index);
+	}
+	return selected;
+}
+
 void SignificanceBudgetPlanner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("select_top", "distances", "priorities", "budget"),
 			&SignificanceBudgetPlanner::select_top);
@@ -496,6 +595,7 @@ void SignificanceBudgetPlanner::_bind_methods() {
 			&SignificanceBudgetPlanner::select_top_priority_stable, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("select_top_stable", "distances", "ids", "retained_ids", "budget", "max_distance", "hysteresis"),
 			&SignificanceBudgetPlanner::select_top_stable, DEFVAL(0.0));
+	ClassDB::bind_method(D_METHOD("select_shadow_casters", "bounds_min", "bounds_max", "roles", "current", "camera", "role_radii", "budget", "hysteresis"), &SignificanceBudgetPlanner::select_shadow_casters, DEFVAL(16), DEFVAL(5.0));
 	ClassDB::bind_method(D_METHOD("select_world_priority_stable", "positions", "viewers", "priorities", "ids", "retained_ids", "budget", "max_distance", "hysteresis"),
 			&SignificanceBudgetPlanner::select_world_priority_stable, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("select_world", "positions", "viewers", "priorities", "budget", "max_distance"),

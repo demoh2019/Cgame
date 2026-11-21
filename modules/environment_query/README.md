@@ -166,3 +166,22 @@ This is an explicit geometric filter, **not** automatic physics overlap
 detection, line of sight, or navigation validation. Albion After's authoritative
 raid reinforcements supply living infected positions and preserve deterministic
 stock-Godot fallback when more than 128 contexts are present.
+
+## Inclusive directional dot band (Unreal EQS-style Dot Test)
+
+The directional prefilter now accepts both `min_direction_dot` (default -1) and
+`max_direction_dot` (default +1). With `use_direction=true`, only candidates
+whose direction cosine is inside this inclusive range survive. This enables
+lateral/side sectors while excluding directly forward and rearward positions.
+Both bounds are finite and validated in [-1, 1]; setters reject inverted
+ranges without changing the resource. The default upper bound keeps all
+existing one-sided directional queries unchanged. Every query mode shares the
+same geometric prefilter, in 3D or XZ, without physics or navigation calls.
+
+Albion After infected use a -0.25..+0.75 band to approach the sides of prey
+instead of selecting a directly far-side ring slot. Older Cgame builds keep
+the previous one-sided filter via a `has_method` compatibility guard; stock
+Godot keeps ordinary direct pursuit. Authoritative movement and navigation
+validation remain unchanged.
+
+Reference: https://dev.epicgames.com/documentation/en-us/unreal-engine/eqs-node-reference-tests-in-unreal-engine

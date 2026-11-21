@@ -53,6 +53,7 @@ class EnvironmentQuery3D : public Resource {
 	Vector3 direction_origin;
 	Vector3 direction_axis = Vector3(1, 0, 0);
 	double min_direction_dot = -1.0;
+	double max_direction_dot = 1.0; // Inclusive upper bound preserves legacy cone behavior.
 	bool use_threat = false;
 	bool horizontal_only = false;
 	double min_distance = 0.0;
@@ -89,6 +90,8 @@ public:
 	Vector3 get_direction_axis() const { return direction_axis; }
 	void set_min_direction_dot(double p_dot);
 	double get_min_direction_dot() const { return min_direction_dot; }
+	void set_max_direction_dot(double p_dot);
+	double get_max_direction_dot() const { return max_direction_dot; }
 
 	void set_use_threat(bool p_enabled) { use_threat = p_enabled; emit_changed(); }
 	bool is_using_threat() const { return use_threat; }

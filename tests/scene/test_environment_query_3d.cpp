@@ -389,6 +389,49 @@ TEST_CASE("[EnvironmentQuery3D] Directional dot filter is shared by full, top-K 
 	CHECK(q->query_positions().size() == 4);
 }
 
+TEST_CASE("[EnvironmentQuery3D] Inclusive directional band selects lateral positions in every query mode") {
+	Ref<EnvironmentQuery3D> q = make_query({
+		Vector3(-4, 0, 0), Vector3(0, 0, -4), Vector3(0, 0, 4), Vector3(4, 0, 0)
+	});
+	q->set_horizontal_only(true);
+	q->set_use_direction(true);
+	q->set_direction_axis(Vector3(1, 0, 0));
+	CHECK(q->get_max_direction_dot() == 1.0); // Backwards-compatible cone default.
+	CHECK(q->query_positions().size() == 4);
+	q->set_min_direction_dot(-0.25);
+	q->set_max_direction_dot(0.75);
+	const PackedVector3Array sides = { Vector3(0, 0, -4), Vector3(0, 0, 4) };
+	CHECK(q->query_positions() == sides);
+	CHECK(q->query().size() == 2);
+	CHECK(q->query_top_positions(2) == sides);
+	CHECK(q->query_spread_positions(2, 5.0) == sides);
+	// Inclusive upper and lower boundaries, including the exact cosine 0.
+	q->set_min_direction_dot(0.0);
+	q->set_max_direction_dot(0.0);
+	CHECK(q->query_positions() == sides);
+	q->set_use_direction(false);
+	CHECK(q->query_positions().size() == 4);
+}
+
+TEST_CASE("[EnvironmentQuery3D] Directional band rejects inverted and nonfinite bounds") {
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(4, 0, 0), Vector3(0, 0, 4) });
+	q->set_direction_axis(Vector3(1, 0, 0));
+	q->set_use_direction(true);
+	q->set_min_direction_dot(-0.25);
+	q->set_max_direction_dot(0.75);
+	ERR_PRINT_OFF
+	q->set_min_direction_dot(0.8);
+	q->set_max_direction_dot(-0.5);
+	q->set_max_direction_dot(Math::NaN);
+	q->set_max_direction_dot(Math::INF);
+	q->set_max_direction_dot(-1.01);
+	q->set_max_direction_dot(1.01);
+	ERR_PRINT_ON
+	CHECK(q->get_min_direction_dot() == -0.25);
+	CHECK(q->get_max_direction_dot() == 0.75);
+	CHECK(q->query_positions() == PackedVector3Array({ Vector3(0, 0, 4) }));
+}
+
 TEST_CASE("[EnvironmentQuery3D] Directional filter uses its own context and validates parameters") {
 	Ref<EnvironmentQuery3D> q = make_query({
 		Vector3(2, 0, 0), Vector3(5, 0, 0), Vector3(5, 0, 3)
@@ -636,6 +679,7 @@ TEST_CASE("[EnvironmentQuery3D] Resource roundtrip preserves parameters") {
 	q->set_max_distance(50);
 	q->set_max_results(1);
 	q->set_max_vertical_difference(2.5);
+	q->set_max_direction_dot(0.8); // Serialized even when the filter is disabled.
 	q->set_use_threat(true);
 	q->set_threat_position(Vector3());
 	q->set_threat_positions({ Vector3(0, 0, 0), Vector3(1, 0, 0) });
@@ -650,6 +694,7 @@ TEST_CASE("[EnvironmentQuery3D] Resource roundtrip preserves parameters") {
 	CHECK(loaded->get_threat_positions() == q->get_threat_positions());
 	CHECK(loaded->get_max_results() == 1);
 	CHECK(loaded->get_max_vertical_difference() == doctest::Approx(2.5));
+	CHECK(loaded->get_max_direction_dot() == doctest::Approx(0.8));
 	CHECK(loaded->query_positions()[0] == Vector3(6, 0, 0));
 }
 

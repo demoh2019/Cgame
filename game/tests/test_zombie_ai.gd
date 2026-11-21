@@ -134,6 +134,11 @@ func run(t) -> void:
 				"directional EQS prevents a near-side-only flank")
 			t.check(bool(owned_query.get("use_direction")),
 				"flank replanning enables the reusable native directional test")
+			if owned_query.has_method("set_max_direction_dot"):
+				t.near(float(owned_query.get("max_direction_dot")), 0.75, 0.0001,
+					"infected configures the native bounded side-flank sector")
+				t.check(candidate_side.dot(Vector2.RIGHT) <= 0.751,
+					"infected selects a side instead of the straight far-side slot")
 		t.eq(flanker._flank_goal(Vector2(0.4, 0.0), Vector2(10.4, 0.0)),
 			flank_first, "small positional changes retain a stable flank point")
 		t.check(flanker._flank_query == owned_query,

@@ -167,6 +167,7 @@ const SUITES := [
 	"res://tests/test_outdoor_reflection_refresh.gd",
 	"res://tests/test_dungeon_occlusion.gd",
 	"res://tests/test_shadow_budget.gd",
+	"res://tests/test_hlod_shadow_casters.gd",
 	"res://tests/test_shadow_refresh_cache.gd",
 	"res://tests/test_object_batch_grid.gd",
 	"res://tests/test_foliage_wind_weather.gd",

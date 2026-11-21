@@ -1428,6 +1428,13 @@ func _on_welcomed() -> void:
 			if not Performance.has_custom_monitor(monitor_name):
 				Performance.add_custom_monitor(monitor_name, monitor[1])
 				_ambient_monitors.append(monitor_name)
+	# Wall-clock retirements include synchronous chunk unload callbacks.
+	if streamer.has_method("get_last_unload_work_usec"):
+		var unload_cpu_monitor: StringName = &"Albion/StreamUnloadCPUus"
+		if not Performance.has_custom_monitor(unload_cpu_monitor):
+			Performance.add_custom_monitor(unload_cpu_monitor,
+				Callable(streamer, "get_last_unload_work_usec"))
+			_ambient_monitors.append(unload_cpu_monitor)
 	# Engine-driven effective visual cleanup budget, exposed in the game profiler.
 	if streamer.has_method("get_effective_unloads_per_update"):
 		var unload_monitor: StringName = &"Albion/StreamEffectiveUnloads"
