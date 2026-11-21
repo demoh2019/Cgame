@@ -338,6 +338,57 @@ static func _jitter(rng: RandomNumberGenerator, radius: float) -> Vector2:
 	return Vector2(rng.randf_range(-radius, radius), rng.randf_range(-radius, radius))
 
 
+## Extra trees in groves, so forests read as forests: a few grove centres per chunk with trees
+## clustered around them, densest in forest, thinner in swamp and plains. Real gatherable,
+## collidable tree nodes (server and client agree), on their own random stream so every other
+## node of the chunk keeps its place. Ids 960-999.
+const GROVE_ID_BASE := 960
+const GROVE_ID_MAX := 40
+const GROVE_TREES := {"forest": [18, 30], "swamp": [8, 14], "plains": [4, 10]}
+
+
+func _add_groves(cell: Vector2i, origin: Vector2, tier: int, nodes: Array, sites: Array) -> void:
+	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if center.length() < Defs.HUB_SAFE_RADIUS + 20.0 or Dungeon.is_underground(origin.x + Defs.CHUNK_SIZE):
+		return
+	var biome := biome_at(center.x, center.y)
+	if not GROVE_TREES.has(biome):
+		return
+	var grng := RandomNumberGenerator.new()
+	grng.seed = mix(cell.x, cell.y, world_seed, 97)
+	var wanted: int = grng.randi_range(int(GROVE_TREES[biome][0]), int(GROVE_TREES[biome][1]))
+	var groves: Array[Vector2] = []
+	for g in grng.randi_range(2, 4):
+		groves.append(origin + Vector2(grng.randf(), grng.randf()) * Defs.CHUNK_SIZE)
+	var taken: Array[Vector2] = []
+	for node in nodes:
+		taken.append(Vector2(float(node["x"]), float(node["z"])))
+	var info := Defs.node_info("tree")
+	var placed := 0
+	for attempt in wanted * 4:
+		if placed >= mini(wanted, GROVE_ID_MAX):
+			break
+		var grove: Vector2 = groves[grng.randi() % groves.size()]
+		var p := grove + Vector2.from_angle(grng.randf() * TAU) * (sqrt(grng.randf()) * 14.0)
+		if p.x < origin.x or p.y < origin.y or p.x >= origin.x + Defs.CHUNK_SIZE or p.y >= origin.y + Defs.CHUNK_SIZE:
+			continue
+		if is_water(p.x, p.y) or is_safe(p.x, p.y) or biome_at(p.x, p.y) != biome or _in_site_clearing(p, sites):
+			continue
+		var crowded := false
+		for q in taken:
+			if q.distance_to(p) < 3.2:
+				crowded = true
+				break
+		if crowded:
+			continue
+		taken.append(p)
+		nodes.append({
+			"id": entity_id(cell, GROVE_ID_BASE + placed), "kind": "tree", "tier": tier,
+			"x": p.x, "z": p.y, "y": height_at(p.x, p.y), "radius": info["radius"], "blocks": info["blocks"],
+		})
+		placed += 1
+
+
 func _add_sunken_caches(cell: Vector2i, origin: Vector2, zone: int, crates: Array) -> void:
 	var sunken_rng := RandomNumberGenerator.new()
 	sunken_rng.seed = mix(cell.x, cell.y, world_seed, 71)
@@ -512,6 +563,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 				npcs.append(item)
 	_add_sunken_caches(cell, origin, zone, crates)
 	_add_hostiles(cell, origin, zone, ruin, spawns)
+	_add_groves(cell, origin, tier, nodes, sites)
 	return {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures, "props": props, "npcs": npcs, "pois": pois}
 
 
