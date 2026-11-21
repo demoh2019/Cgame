@@ -116,7 +116,24 @@ Dictionary AIStimulusHistory2D::get_best_in_radius(int p_sense, const Vector2 &p
 	return get_best_filtered(p_sense, &p_center, p_radius * p_radius);
 }
 
-Dictionary AIStimulusHistory2D::get_best_filtered(int p_sense, const Vector2 *p_center, real_t p_radius_squared) const {
+Dictionary AIStimulusHistory2D::get_best_for_source(int p_sense, int64_t p_source_id) const {
+	if (p_source_id < 0) {
+		return Dictionary(); // Anonymous stimuli cannot masquerade as an actor.
+	}
+	return get_best_filtered(p_sense, nullptr, 0.0, &p_source_id);
+}
+
+Dictionary AIStimulusHistory2D::get_best_for_source_in_radius(int p_sense, int64_t p_source_id,
+		const Vector2 &p_center, real_t p_radius) const {
+	if (p_source_id < 0 || !p_center.is_finite() ||
+			!Math::is_finite(p_radius) || p_radius < 0.0 || p_radius > 1000000.0) {
+		return Dictionary();
+	}
+	return get_best_filtered(p_sense, &p_center, p_radius * p_radius, &p_source_id);
+}
+
+Dictionary AIStimulusHistory2D::get_best_filtered(int p_sense, const Vector2 *p_center, real_t p_radius_squared,
+		const int64_t *p_source_id) const {
 	if (p_sense < SIGHT || p_sense > DAMAGE) {
 		return Dictionary();
 	}
@@ -125,6 +142,7 @@ Dictionary AIStimulusHistory2D::get_best_filtered(int p_sense, const Vector2 *p_
 	for (int i = 0; i < events.size(); ++i) {
 		const Stimulus &candidate = events[i];
 		if (candidate.sense != p_sense ||
+				(p_source_id != nullptr && candidate.source_id != *p_source_id) ||
 				(p_center != nullptr && candidate.position.distance_squared_to(*p_center) > p_radius_squared)) {
 			continue;
 		}
@@ -150,6 +168,52 @@ Array AIStimulusHistory2D::get_recent(int p_limit) const {
 		results.push_back(make_snapshot(events[i]));
 	}
 	return results;
+}
+
+Array AIStimulusHistory2D::get_ranked(int p_sense, int p_limit) const {
+	Array result;
+	ERR_FAIL_COND_V_MSG(p_sense < SIGHT || p_sense > DAMAGE, result, "Unknown stimulus sense.");
+	ERR_FAIL_COND_V_MSG(p_limit < 0 || p_limit > 64, result, "Ranked stimulus limit must be between 0 and 64.");
+	if (p_limit == 0) {
+		return result;
+	}
+	// A per-agent history has at most 64 entries. Use a bounded sorted
+	// top-K of indices instead of allocating mutable snapshots for all events.
+	Vector<int> best;
+	for (int i = 0; i < events.size(); i++) {
+		const Stimulus &candidate = events[i];
+		if (candidate.sense != p_sense) {
+			continue;
+		}
+		const real_t candidate_score = candidate.strength * (candidate.remaining / candidate.ttl);
+		int insert_at = 0;
+		while (insert_at < best.size()) {
+			const Stimulus &previous = events[best[insert_at]];
+			const real_t previous_score = previous.strength * (previous.remaining / previous.ttl);
+			const bool preferred = candidate_score > previous_score ||
+					(candidate_score == previous_score &&
+						(candidate.source_id < previous.source_id ||
+							(candidate.source_id == previous.source_id &&
+								(candidate.position.x < previous.position.x ||
+									(candidate.position.x == previous.position.x &&
+										candidate.position.y < previous.position.y)))));
+			if (preferred) {
+				break;
+			}
+			insert_at++;
+		}
+		if (insert_at >= p_limit) {
+			continue;
+		}
+		best.insert(insert_at, i);
+		if (best.size() > p_limit) {
+			best.resize(p_limit);
+		}
+	}
+	for (int i = 0; i < best.size(); i++) {
+		result.push_back(make_snapshot(events[best[i]]));
+	}
+	return result;
 }
 
 int AIStimulusHistory2D::forget_source(int64_t p_source_id, int p_sense) {
@@ -182,7 +246,10 @@ void AIStimulusHistory2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_event_count"), &AIStimulusHistory2D::get_event_count);
 	ClassDB::bind_method(D_METHOD("get_best", "sense"), &AIStimulusHistory2D::get_best);
 	ClassDB::bind_method(D_METHOD("get_best_in_radius", "sense", "center", "radius"), &AIStimulusHistory2D::get_best_in_radius);
+	ClassDB::bind_method(D_METHOD("get_best_for_source", "sense", "source_id"), &AIStimulusHistory2D::get_best_for_source);
+	ClassDB::bind_method(D_METHOD("get_best_for_source_in_radius", "sense", "source_id", "center", "radius"), &AIStimulusHistory2D::get_best_for_source_in_radius);
 	ClassDB::bind_method(D_METHOD("get_recent", "limit"), &AIStimulusHistory2D::get_recent, DEFVAL(8));
+	ClassDB::bind_method(D_METHOD("get_ranked", "sense", "limit"), &AIStimulusHistory2D::get_ranked, DEFVAL(8));
 	ClassDB::bind_method(D_METHOD("forget_source", "source_id", "sense"), &AIStimulusHistory2D::forget_source, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("reset"), &AIStimulusHistory2D::reset);
 

@@ -32,6 +32,7 @@
 
 #include "core/object/class_db.h"
 #include "core/object/object.h"
+#include "core/os/os.h"
 #include "core/variant/dictionary.h"
 
 
@@ -67,7 +68,11 @@ void SceneNodePool::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "prewarm_on_ready"), "set_prewarm_on_ready", "is_prewarm_on_ready");
 
 	ClassDB::bind_method(D_METHOD("prewarm", "count"), &SceneNodePool::prewarm);
-	ClassDB::bind_method(D_METHOD("maintain_residency", "target_total", "max_changes"), &SceneNodePool::maintain_residency, DEFVAL(2));
+	ClassDB::bind_method(D_METHOD("maintain_residency", "target_total", "max_changes", "max_work_usec"), &SceneNodePool::maintain_residency, DEFVAL(2), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("get_last_maintenance_work_usec"), &SceneNodePool::get_last_maintenance_work_usec);
+	ClassDB::bind_method(D_METHOD("get_last_maintenance_change_count"), &SceneNodePool::get_last_maintenance_change_count);
+	ClassDB::bind_method(D_METHOD("get_last_maintenance_pending_count"), &SceneNodePool::get_last_maintenance_pending_count);
+	ClassDB::bind_static_method("SceneNodePool", D_METHOD("should_stop_maintenance", "work_usec", "completed_changes", "elapsed_usec"), &SceneNodePool::should_stop_maintenance);
 	ClassDB::bind_method(D_METHOD("acquire", "parent"), &SceneNodePool::acquire);
 	ClassDB::bind_method(D_METHOD("release", "instance"), &SceneNodePool::release);
 	ClassDB::bind_method(D_METHOD("release_deferred", "instance"), &SceneNodePool::release_deferred);
@@ -165,51 +170,67 @@ int SceneNodePool::prewarm(int p_target) {
 }
 
 
-int SceneNodePool::maintain_residency(int p_target_total, int p_max_changes) {
-	// A malformed request must never create or delete pooled nodes.
+bool SceneNodePool::should_stop_maintenance(int p_work_usec, int p_completed_changes, int64_t p_elapsed_usec) {
+	// Never prevent the first scene creation/free: the operation cannot
+	// be interrupted. Zero keeps the old count-only behavior.
+	return p_work_usec > 0 && p_completed_changes > 0 && p_elapsed_usec >= int64_t(p_work_usec);
+}
+
+int SceneNodePool::maintain_residency(int p_target_total, int p_max_changes, int p_max_work_usec) {
+	last_maintenance_change_count = 0;
+	last_maintenance_pending_count = 0;
+	last_maintenance_work_usec = 0;
+	// Malformed requests must not mutate pool residency.
 	if (p_target_total < 0 || p_target_total > 4096 ||
-			p_max_changes < 0 || p_max_changes > 64 || p_max_changes == 0) {
+			p_max_changes <= 0 || p_max_changes > 64 ||
+			p_max_work_usec < 0 || p_max_work_usec > 1000000) {
 		return 0;
 	}
+	const uint64_t started_usec = OS::get_singleton()->get_ticks_usec();
 	_prune_active();
 	_prune_idle();
-	const int live_total = int(active.size()) + idle.size();
-	if (live_total < p_target_total) {
-		// Do not create idle objects merely because existing instances are
-		// checked out. The total footprint is the true residency target.
-		if (template_scene.is_null()) {
-			return 0;
-		}
-		const int to_create = MIN(MIN(p_target_total - live_total, p_max_changes), max_idle - idle.size());
-		int created = 0;
-		for (int i = 0; i < to_create; i++) {
+	int live_total = int(active.size()) + idle.size();
+	if (live_total < p_target_total && template_scene.is_valid()) {
+		const int possible = MIN(p_target_total - live_total, max_idle - idle.size());
+		const int to_create = MIN(possible, p_max_changes);
+		for (int i = 0; i < to_create; ++i) {
+			if (should_stop_maintenance(p_max_work_usec, last_maintenance_change_count,
+						int64_t(OS::get_singleton()->get_ticks_usec() - started_usec))) {
+				break;
+			}
 			Node *instance = _new_instance();
 			if (instance == nullptr) {
 				break;
 			}
 			idle.push_back(instance->get_instance_id());
-			created++;
+			++last_maintenance_change_count;
 		}
-		return created;
-	}
-	if (live_total > p_target_total) {
-		// Cache shrink touches only detached idle scenes. Active gameplay
-		// effects always finish naturally before they can be recycled.
-		const int to_release = MIN(MIN(live_total - p_target_total, p_max_changes), idle.size());
-		int removed = 0;
-		for (int i = 0; i < to_release; i++) {
+		live_total += last_maintenance_change_count;
+		last_maintenance_pending_count = MIN(MAX(0, p_target_total - live_total), max_idle - idle.size());
+	} else if (live_total > p_target_total) {
+		// Retire detached idle roots only; active combat effects cannot be
+		// destroyed or detached while checked out.
+		const int possible = MIN(live_total - p_target_total, idle.size());
+		const int to_release = MIN(possible, p_max_changes);
+		for (int i = 0; i < to_release; ++i) {
+			if (should_stop_maintenance(p_max_work_usec, -last_maintenance_change_count,
+						int64_t(OS::get_singleton()->get_ticks_usec() - started_usec))) {
+				break;
+			}
 			const ObjectID id = idle[idle.size() - 1];
 			idle.remove_at(idle.size() - 1);
 			Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(id));
 			if (instance != nullptr && !instance->is_queued_for_deletion()) {
 				memdelete(instance);
-				disposed_total++;
-				removed++;
+				++disposed_total;
+				--last_maintenance_change_count;
 			}
 		}
-		return -removed;
+		live_total = int(active.size()) + idle.size();
+		last_maintenance_pending_count = MIN(MAX(0, live_total - p_target_total), idle.size());
 	}
-	return 0;
+	last_maintenance_work_usec = int64_t(OS::get_singleton()->get_ticks_usec() - started_usec);
+	return last_maintenance_change_count;
 }
 
 Node *SceneNodePool::acquire(Node *p_parent) {
@@ -324,5 +345,8 @@ Dictionary SceneNodePool::get_stats() {
 	stats["disposed_total"] = disposed_total;
 	stats["rejected_total"] = rejected_total;
 	stats["peak_active"] = peak_active;
+	stats["maintenance_work_usec"] = last_maintenance_work_usec;
+	stats["maintenance_changes"] = last_maintenance_change_count;
+	stats["maintenance_pending"] = last_maintenance_pending_count;
 	return stats;
 }

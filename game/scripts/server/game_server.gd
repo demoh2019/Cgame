@@ -3,6 +3,9 @@ extends RefCounted
 ## connect them. It has no networking and no scene: the network layer only feeds it commands and
 ## reads snapshots out of it, so the whole game can be tested by calling it directly.
 
+const LagCompensation = preload("res://scripts/server/lag_compensation.gd")
+const HTNPlanner = preload("res://scripts/shared/htn_planner.gd")
+const InfectedRaidDomain = preload("res://scripts/shared/infected_raid_domain.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const Dungeon = preload("res://scripts/shared/dungeon.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
@@ -90,6 +93,7 @@ const BikeGrip = preload("res://scripts/shared/bike_grip.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const TreeAmbush = preload("res://scripts/shared/tree_ambush.gd")
 const InfectedPounce = preload("res://scripts/shared/infected_pounce.gd")
+const DataLayers = preload("res://scripts/shared/data_layers.gd")
 const Brawl = preload("res://scripts/shared/brawl.gd")
 const MeleeParry = preload("res://scripts/shared/melee_parry.gd")
 const ParryRiposte = preload("res://scripts/shared/parry_riposte.gd")
@@ -194,6 +198,7 @@ const TrailRation = preload("res://scripts/shared/trail_ration.gd")
 const FoodSafety = preload("res://scripts/shared/food_safety.gd")
 const CombatStress = preload("res://scripts/shared/combat_stress.gd")
 const PartyFeast = preload("res://scripts/shared/party_feast.gd")
+const PcgSpawns = preload("res://scripts/server/pcg_spawns.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
 const WORKBENCH_RANGE := 6.0
@@ -219,6 +224,9 @@ const STARTER_KIT := {"bandage": 2, "canned_food": 2, "water_bottle": 2}
 var world
 var rng := RandomNumberGenerator.new()
 var time: float = 0.0
+## PvP lag compensation: recent survivor positions and each peer's measured round trip (seconds).
+var lag_history := LagCompensation.new()
+var peer_round_trip: Dictionary = {}
 var tick_count: int = 0
 
 class Player:
@@ -374,7 +382,37 @@ const AI_STAGGER_SLOTS := 4
 const AI_BATCH_MAX_SIZE := 4096 # Match the native guard; larger populations use safe scalar calls.
 var _ai_update_scheduler: Variant = null
 var _flank_slot_reservations: Variant = null # Shared native AI Smart Object leases per server.
-var _pack_spatial_grid: Variant = null # Optional C++ radius broadphase; old-engine fallback below.
+var _pack_spatial_grid: Variant = null # Shared stateless C++ broadphase for pack alerts and passive separation.
+const AI_EQS_REPLAN_MIN_POPULATION := 64
+const AI_EQS_REPLAN_QUOTA := 8 # Regular tactical queries per authoritative tick.
+const AI_EQS_GLOBAL_QUOTA_US := 600 # Shared ordinary EQS CPU time per tick (soft).
+const AI_EQS_GLOBAL_URGENT_US := 240 # Independent bounded slot-recovery pool.
+var _eqs_tick_budget: Variant = null # Native, main-thread-only instance shared by infected.
+var _eqs_tick_budget_active: bool = false
+var last_eqs_replan_stats: Dictionary = {"enabled": false, "population": 0, "eligible": 0,
+	"granted": 0, "deferred": 0, "urgent": 0}
+const AI_CROWD_SEPARATION_MIN := 32
+const AI_CROWD_SEPARATION_MAX := 1024 # Native source index safety limit.
+const AI_CROWD_SEPARATION_TICKS := 5 # 4Hz, not every 20Hz movement tick.
+const AI_CROWD_SEPARATION_RADIUS := 2.5
+const AI_CROWD_LOOKAHEAD_SECONDS := 0.75 # Mass-style desired-velocity anticipation.
+var _crowd_separation_enabled: bool = false
+var last_crowd_separation_stats: Dictionary = {"enabled": false, "population": 0, "sources": 0}
+# EQS-style nearest cue query: one native spatial index for 3 passive senses.
+const AI_CUE_NATIVE_MIN_NPCS := 32
+const AI_CUE_NATIVE_MIN_SOURCES := 4
+var last_ai_cue_query_stats: Dictionary = {"native": false, "channel": "", "sources": 0, "cues": 0}
+# Mass-style per-agent sensing broadphase, never used for active combat.
+const AI_PERCEPTION_INTEREST_MIN_NPCS := 64
+const AI_PERCEPTION_INTEREST_MIN_PLAYERS := 8
+var last_perception_interest_stats: Dictionary = {"native": false, "sources": 0, "players": 0, "pairs": 0}
+# Native Mass-style cylinder counts for simultaneously armed camp sentries.
+var last_camp_alarm_query_stats: Dictionary = {"native": false, "centers": 0, "targets": 0}
+# Cross-set Mass/Chaos-style native broadphase for PvE snares; script owns exact hits.
+const AI_SNARE_BROADPHASE_MIN_NPCS := 32
+const AI_SNARE_BROADPHASE_MIN_TRAPS := 8
+const AI_SNARE_BROADPHASE_MAX_NPCS := 4096
+var last_snare_query_stats: Dictionary = {"native": false, "population": 0, "traps": 0, "candidates": 0}
 var last_pack_query_stats: Dictionary = {"native": false, "population": 0, "sources": 0, "max_alerts": 12, "alerts_sent": 0}
 var last_ai_schedule_stats: Dictionary = {"enabled": false, "population": 0, "phase_due": 0, "phase_deferred": 0}
 var last_population_query_stats: Dictionary = {} # Last once-per-second maintenance broadphase counters.
@@ -382,6 +420,9 @@ var last_population_query_stats: Dictionary = {} # Last once-per-second maintena
 # Standalone snapshot_for callers retain the exact non-indexed behavior.
 var _snapshot_players_grid: Variant = null
 var _snapshot_zombies_grid: Variant = null
+# Reusable on-demand nearest-K native index; rebuilt every cast.
+var _ultimate_spatial_grid: Variant = null
+var last_ultimate_spatial_stats: Dictionary = {"native": false}
 var _snapshot_interest_prepared: bool = false
 var _snapshot_interest_tick: int = -1
 # Precomputed once per 10 Hz broadcast; never sent to clients or saved.
@@ -431,6 +472,9 @@ var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stac
 var _acid_wall_last_hit: Dictionary = {} # Wall id -> last corrosion time; no overlap stacking.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> escrowed listing (goods held by the market).
+var data_layers: Array = [] # Active Data Layers (data_layers.gd), sent to every client.
+var data_layers_override = null # Array from --layers, or null to follow the calendar.
+var _layers_checked_at := -INF
 var pounces: Dictionary = {} # zombie id -> {kind, phase, t, target, from, to}
 var pounce_ready_at: Dictionary = {} # zombie id -> server time its next leap/charge is allowed
 var downed_until: Dictionary = {} # zombie id -> server time it gets back up (knocked down).
@@ -477,6 +521,7 @@ var _next_id: int = 5_000_000_000
 
 func _init(p_world, p_seed: int = 1) -> void:
 	world = p_world
+	PcgSpawns.attach(p_world) # PCG loot caches and encounter spots (no-op without the engine module).
 	territory = TerritoryControl.new(p_world)
 	rng.seed = p_seed
 
@@ -1124,6 +1169,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		var sprint_allowed: bool = sprint and not player.mounted and not player.crouching and moving and factor >= 0.9999 and WadingTravel.can_sprint(world, player.position) and player.survival.try_sprint(allowed)
 		player.position = Movement.step(world, player.position, {
 			"x": move_x, "z": move_z, "sprint": sprint_allowed, "mounted": player.mounted,
+			"raft": player.inventory.count("raft") > 0, # Carried boat, from the authoritative inventory.
 			"crouch": player.crouching, "cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed") + player.sprint_buff_speed,
 			"injury_factor": Survival.fracture_speed_factor(player.survival.fracture),
 			"tire_grip_seconds": player.tire_grip_seconds,
@@ -5832,6 +5878,8 @@ func _tick_percher(zombie) -> void:
 		var hurt: float = _hurt_player(prey, TreeAmbush.damage(zone))
 		if hurt > 0.0:
 			events.append({"type": "hit", "kind": "player", "id": prey.id, "damage": hurt, "by": -zombie.id})
+			if not _alive(prey):
+				_on_player_death(prey, -zombie.id) # The landing can be the killing blow.
 
 
 ## Stagger, shove and — if already reeling — knock the infected flat.
@@ -5996,14 +6044,47 @@ func cmd_ultimate(peer_id: int) -> Dictionary:
 	player.dirty_character = true
 	var center := Vector2(player.position.x, player.position.z)
 	var targets: Array = []
-	for zombie in zombies.values():
-		if not zombie.is_alive():
-			continue
-		var distance: float = center.distance_to(Vector2(zombie.position.x, zombie.position.z))
-		if distance <= ArcaneAbilities.ULTIMATE_RADIUS:
-			targets.append({"zombie": zombie, "distance": distance})
-	targets.sort_custom(func(a, b): return float(a["distance"]) < float(b["distance"]) \
-		if float(a["distance"]) != float(b["distance"]) else int(a["zombie"].id) < int(b["zombie"].id))
+	var native_selection := false
+	if _ultimate_spatial_grid == null and ClassDB.class_exists("SpatialRelevancyGrid2D"):
+		_ultimate_spatial_grid = ClassDB.instantiate("SpatialRelevancyGrid2D")
+	# Choose at most K authoritative living targets in native C++ and avoid
+	# a large GDScript distance-sort of the whole infected crowd.
+	# Rebuild for each rare cast to avoid stale/dead target positions.
+	if _ultimate_spatial_grid != null and _ultimate_spatial_grid.has_method("query_nearest_ids"):
+		var ids := PackedInt64Array()
+		var positions := PackedVector2Array()
+		for zombie in zombies.values():
+			if not zombie.is_alive() or not zombie.position.is_finite():
+				continue
+			ids.append(zombie.id)
+			positions.append(Vector2(zombie.position.x, zombie.position.z))
+		if _ultimate_spatial_grid.rebuild(ids, positions):
+			var selected: PackedInt64Array = _ultimate_spatial_grid.query_nearest_ids(
+				center, ArcaneAbilities.ULTIMATE_RADIUS, ArcaneAbilities.ULTIMATE_MAX_TARGETS)
+			for id in selected:
+				var zombie = zombies.get(id)
+				if zombie != null and zombie.is_alive():
+					targets.append({"zombie": zombie,
+						"distance": center.distance_to(Vector2(zombie.position.x, zombie.position.z))})
+			native_selection = true
+			last_ultimate_spatial_stats = {"native": true, "candidates": ids.size(),
+				"selected": targets.size(), "grid": _ultimate_spatial_grid.get_stats()}
+			# A cast is rare. Never retain last cast's enemy positions in
+			# idle server memory or accidentally consult a stale index.
+			_ultimate_spatial_grid.clear()
+	# Vanilla Godot, older Cgame versions and malformed/oversized indices
+	# retain the original exact authoritative radius/ID ordering policy.
+	if not native_selection:
+		for zombie in zombies.values():
+			if not zombie.is_alive():
+				continue
+			var distance: float = center.distance_to(Vector2(zombie.position.x, zombie.position.z))
+			if distance <= ArcaneAbilities.ULTIMATE_RADIUS:
+				targets.append({"zombie": zombie, "distance": distance})
+		targets.sort_custom(func(a, b): return float(a["distance"]) < float(b["distance"]) \
+			if float(a["distance"]) != float(b["distance"]) else int(a["zombie"].id) < int(b["zombie"].id))
+		last_ultimate_spatial_stats = {"native": false, "candidates": zombies.size(),
+			"selected": mini(targets.size(), ArcaneAbilities.ULTIMATE_MAX_TARGETS)}
 	var melee_bonus: float = player.skills.bonus("melee_damage")
 	var hits := 0
 	var kills := 0
@@ -6408,7 +6489,7 @@ func _apply_loot_skills(player: Player, loot: Dictionary, local_rng: RandomNumbe
 
 ## Damage a player takes: toughness reduces it and trains from it.
 func _is_diving(player: Player) -> bool:
-	return not player.mounted and player.crouching and \
+	return not player.mounted and player.crouching and player.inventory.count("raft") < 1 and \
 		Swimming.submerged(world, player.position.x, player.position.z, true)
 
 
@@ -6555,6 +6636,8 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 			best_distance = distance
 	# PvP zones remain unchanged; only the mutually accepted hub opponent
 	# may be targetable in the otherwise peaceful settlement.
+	# Judge survivors where the attacker saw them (zombies are server-paced, never rewound).
+	var rewind: float = LagCompensation.rewind_for(float(peer_round_trip.get(attacker.id, 0.0)))
 	if ZoneRisk.allows_pvp(attacker_zone) or training_matches.has(attacker.id) or attacker.faction_flagged:
 		for other in players.values():
 			if other.id == attacker.id or not _alive(other) or ignored.has("player:" + str(other.id)):
@@ -6569,7 +6652,9 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 			if not training and not ZoneRisk.can_pvp(attacker_zone, world.zone_at(other.position.x, other.position.z)) \
 					and not _faction_enemies(attacker, other):
 				continue
-			var distance := _hit_distance(origin, direction, Vector2(other.position.x, other.position.z), reach, ranged, 0.5)
+			var seen: Vector3 = other.position if rewind <= 0.0 else \
+				lag_history.position_at(other.id, time - rewind, other.position)
+			var distance := _hit_distance(origin, direction, Vector2(seen.x, seen.z), reach, ranged, 0.5)
 			if distance >= 0.0 and distance < best_distance and distance < cover_distance:
 				best = {"kind": "player", "id": other.id}
 				best_distance = distance
@@ -7000,16 +7085,31 @@ func _on_player_death(victim: Player, killer: int) -> void:
 
 # --- The simulation tick -------------------------------------------------------------------------------
 
+func _tick_data_layers() -> void:
+	if time - _layers_checked_at < 60.0:
+		return
+	_layers_checked_at = time
+	var wanted: Array = data_layers_override if data_layers_override is Array else DataLayers.scheduled(Time.get_unix_time_from_system())
+	if wanted != data_layers:
+		data_layers = wanted.duplicate()
+		events.append({"type": "data_layers", "layers": data_layers})
+
+
 func tick(delta: float) -> void:
 	# Events from commands that arrived since the last tick are kept: the network layer drains them.
 	if events.size() > 2000:
 		events = events.slice(events.size() - 1000)
 	time += delta
 	tick_count += 1
+	_tick_data_layers()
 	_tick_market()
 	_tick_trades()
 	parties.expire(time)
 	_tick_players(delta)
+	for tracked in players.values():
+		lag_history.record(tracked.id, time, tracked.position)
+	if tick_count % 64 == 0:
+		lag_history.prune(players)
 	_tick_siege_charges()
 	if tick_count % WorldDiscovery.SCAN_EVERY_TICKS == 0:
 		_tick_site_discoveries()
@@ -7344,6 +7444,11 @@ func _tick_players(delta: float) -> void:
 		if player.noise_timer <= 0.0:
 			player.noise_radius = 0.0
 		if not _alive(player):
+			if player.respawn_timer <= 0.0 and player.survival.health <= 0.0:
+				# Safety net: a damage path that skipped its death check must still drop
+				# the loot and count the death, never grant a free instant respawn.
+				_on_player_death(player, -1)
+				continue
 			player.respawn_timer -= delta
 			if player.respawn_timer <= 0.0:
 				_spawn_player(player)
@@ -7686,6 +7791,9 @@ func _tick_raid_encounter() -> void:
 				raid_pending_cone = {}
 				_resolve_raid_cone(strike)
 			return
+		if raid_next_cone_at > 0.0 and time >= raid_next_cone_at and _raid_boss_plan(boss) == "charge":
+			if _start_raid_cone(boss):
+				return
 		if time >= raid_next_slam_at and boss.target_id != -1:
 			raid_pending_slam = {"id": raid_boss_id,
 				"x": at.x, "z": at.y,
@@ -7698,21 +7806,7 @@ func _tick_raid_encounter() -> void:
 				"seconds": RaidEncounter.SLAM_WARNING})
 			return
 		if raid_next_cone_at > 0.0 and time >= raid_next_cone_at:
-			var target: Player = players.get(boss.target_id)
-			if target != null and _alive(target) and not _is_safe(target.position) and \
-					world.zone_at(target.position.x, target.position.z) >= RaidEncounter.MIN_ZONE and \
-					RaidCone.can_aim(boss.position, target.position):
-				var aim: Vector2 = RaidCone.direction(boss.position, target.position)
-				raid_pending_cone = {"id": raid_boss_id, "x": boss.position.x,
-					"y": boss.position.y, "z": boss.position.z,
-					"dx": aim.x, "dz": aim.y,
-					"at": time + RaidCone.WINDUP_SECONDS}
-				raid_next_cone_at = time + RaidCone.cooldown(boss)
-				events.append({"type": "raid_cone_warning", "id": raid_boss_id,
-					"x": boss.position.x, "z": boss.position.z,
-					"dx": aim.x, "dz": aim.y, "reach": RaidCone.REACH,
-					"half_angle": RaidCone.HALF_ANGLE_DEGREES,
-					"seconds": RaidCone.WINDUP_SECONDS})
+			_start_raid_cone(boss)
 		return
 
 	if time < RaidEncounter.START_DELAY or \
@@ -7748,6 +7842,43 @@ func _tick_raid_encounter() -> void:
 	events.append({"type": "raid_started", "id": spawn_id,
 		"x": site.x, "z": site.y, "zone": world.zone_at(site.x, site.y),
 		"health": boss.health})
+
+
+## Telegraphs the boss cone strike at its current target; false if it cannot aim.
+func _start_raid_cone(boss) -> bool:
+	var target: Player = players.get(boss.target_id)
+	if target != null and _alive(target) and not _is_safe(target.position) and \
+			world.zone_at(target.position.x, target.position.z) >= RaidEncounter.MIN_ZONE and \
+			RaidCone.can_aim(boss.position, target.position):
+		var aim: Vector2 = RaidCone.direction(boss.position, target.position)
+		raid_pending_cone = {"id": raid_boss_id, "x": boss.position.x,
+			"y": boss.position.y, "z": boss.position.z,
+			"dx": aim.x, "dz": aim.y,
+			"at": time + RaidCone.WINDUP_SECONDS}
+		raid_next_cone_at = time + RaidCone.cooldown(boss)
+		events.append({"type": "raid_cone_warning", "id": raid_boss_id,
+			"x": boss.position.x, "z": boss.position.z,
+			"dx": aim.x, "dz": aim.y, "reach": RaidCone.REACH,
+			"half_angle": RaidCone.HALF_ANGLE_DEGREES,
+			"seconds": RaidCone.WINDUP_SECONDS})
+		return true
+	return false
+
+
+## HTN decision layer (infected_raid_domain.gd): a target outside the slam
+## radius makes the boss open with its reaching cone strike instead of a
+## slam that cannot land. Enrage and reinforcements keep their own phases.
+func _raid_boss_plan(boss) -> String:
+	var target: Player = players.get(boss.target_id)
+	var far: bool = target != null and Vector2(target.position.x - boss.position.x,
+		target.position.z - boss.position.z).length() > RaidEncounter.SLAM_RADIUS
+	var steps: Array[String] = HTNPlanner.plan(InfectedRaidDomain.htn_domain(), "boss_turn",
+		{"low_health": false, "enraged": true, "surrounded": false, "adds_alive": true,
+		"target_far": far, "stamina_ok": true})
+	for step in steps:
+		if step == "charge" or step == "slam":
+			return step
+	return "slam"
 
 
 ## Two one-time health phases; no client command may create minions.
@@ -8076,10 +8207,284 @@ func get_ai_schedule_stats() -> Dictionary:
 	return last_ai_schedule_stats.duplicate(true)
 
 
+func get_eqs_replan_stats() -> Dictionary:
+	# Server-only profile counters; never serialized or sent to clients.
+	return last_eqs_replan_stats.duplicate(true)
+
+
+## Server-only diagnostic snapshot: steering is never replicated to clients.
+func get_crowd_separation_stats() -> Dictionary:
+	return last_crowd_separation_stats.duplicate(true)
+
+
+## Reuse the native pack-neighbor grid to calculate bounded passive steering.
+## Nearby active NPCs are obstacles, but ONLY wander/investigate agents receive
+## a vector. The normal world collider and combat paths are unchanged.
+func _refresh_passive_crowd_separation(cohort: Array) -> void:
+	if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
+		_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
+	var available: bool = _pack_spatial_grid != null \
+		and _pack_spatial_grid.has_method("query_separation_batch") \
+		and cohort.size() >= AI_CROWD_SEPARATION_MIN \
+		and cohort.size() <= AI_CROWD_SEPARATION_MAX
+	if not available:
+		for infected in cohort:
+			infected.set_passive_crowd_separation(Vector2.ZERO)
+		_crowd_separation_enabled = false
+		last_crowd_separation_stats = {"enabled": false, "population": cohort.size(), "sources": 0}
+		return
+	var positions := PackedVector2Array()
+	var desired_velocities := PackedVector2Array()
+	var source_indices := PackedInt32Array()
+	var source_agents: Array = []
+	for infected in cohort:
+		infected.set_passive_crowd_separation(Vector2.ZERO)
+		if not infected.is_alive() or not infected.position.is_finite():
+			continue
+		var index: int = positions.size()
+		var here := Vector2(infected.position.x, infected.position.z)
+		positions.append(here)
+		var desired_velocity := Vector2.ZERO
+		var passive: bool = not infected.raid_boss and not infected.perched \
+			and (infected.state == Zombie.State.WANDER \
+			or infected.state == Zombie.State.INVESTIGATE)
+		if passive:
+			source_indices.append(index)
+			source_agents.append(infected)
+			# The engine is stateless; derive only the game's existing passive
+			# movement intention. Chase/attack agents remain static obstacles.
+			if infected.snared_seconds <= 0.0 and infected.stagger_seconds <= 0.0:
+				var goal: Vector2 = infected.wander_target if infected.state == Zombie.State.WANDER \
+					else infected.last_known_target
+				var toward: Vector2 = goal - here
+				if toward.is_finite() and toward.length_squared() > 0.0001:
+					var speed_factor: float = 0.4 if infected.state == Zombie.State.WANDER else 0.7
+					var speed: float = clampf(float(infected.data["speed"]) * speed_factor, 0.0, 20.0)
+					desired_velocity = toward.normalized() * speed
+		desired_velocities.append(desired_velocity)
+	if source_agents.is_empty():
+		_crowd_separation_enabled = false
+		last_crowd_separation_stats = {"enabled": false, "population": cohort.size(), "sources": 0}
+		return
+	var predictive: bool = _pack_spatial_grid.has_method("query_predictive_separation_batch")
+	var steering := PackedVector2Array()
+	if predictive:
+		steering = _pack_spatial_grid.query_predictive_separation_batch(
+			positions, desired_velocities, source_indices,
+			AI_CROWD_SEPARATION_RADIUS, 3.0, 8, AI_CROWD_LOOKAHEAD_SECONDS)
+	if steering.size() != source_agents.size():
+		# An older engine (or a rejected predictive request) retains the
+		# previously shipped static crowd separation, never an invented force.
+		predictive = false
+		steering = _pack_spatial_grid.query_separation_batch(
+			positions, source_indices, AI_CROWD_SEPARATION_RADIUS, 3.0, 8)
+	if steering.size() != source_agents.size():
+		_crowd_separation_enabled = false
+		last_crowd_separation_stats = {"enabled": false, "population": cohort.size(), "sources": 0}
+		return
+	for i in range(source_agents.size()):
+		source_agents[i].set_passive_crowd_separation(steering[i])
+	_crowd_separation_enabled = true
+	last_crowd_separation_stats = {"enabled": true, "population": cohort.size(),
+		"sources": source_agents.size(), "period_ticks": AI_CROWD_SEPARATION_TICKS,
+		"predictive": predictive}
+
+
+## Server-only profiling; candidate counts are prefilters, never confirmed hits.
+func get_snare_query_stats() -> Dictionary:
+	return last_snare_query_stats.duplicate(true)
+
+
+## Always revalidate a fresh server-owned trap; the native broadphase
+## supplies indices only and can never authorize a trap trigger itself.
+func _try_trigger_infected_snare(zombie, trap_id: int) -> bool:
+	var trap: Dictionary = infected_snares.get(trap_id, {})
+	if trap.is_empty() or not InfectedSnare.catches(trap, zombie, time):
+		return false
+	if not zombie.apply_snare(InfectedSnare.root_duration(zombie)):
+		return false
+	infected_snares.erase(trap_id)
+	events.append({"type": "snare_triggered", "id": trap_id,
+		"zombie": zombie.id, "x": trap["x"], "z": trap["z"]})
+	return true
+
+
+## A separate per-tick budget for expensive tactical EQS replans.
+## Never throttles zombie.think(), targeting, movement, attack, status or
+## authoritative Smart Object lease expiry. On unavailable native API the
+## previous full-frequency behavior is retained without guessed masks.
+func _budget_eqs_replans(cohort: Array, delta: float) -> void:
+	_eqs_tick_budget_active = false
+	for agent in cohort:
+		agent.flank_replan_allowed = true
+		agent.flank_incremental_enabled = false
+		agent.flank_tick_budget = null
+		agent.flank_step_urgent = false
+	var enabled: bool = cohort.size() >= AI_EQS_REPLAN_MIN_POPULATION and \
+			cohort.size() <= 4096 and tick_count >= 0 and \
+			ClassDB.class_exists("EnvironmentQuery3D") and \
+			ClassDB.class_has_method("EnvironmentQuery3D", "schedule_query_mask")
+	if not enabled:
+		last_eqs_replan_stats = {"enabled": false, "population": cohort.size(),
+			"eligible": 0, "granted": 0, "deferred": 0, "urgent": 0}
+		return
+	# Every active AI query in this large cohort is stepped, never evaluated
+	# to completion, on its assigned scheduling phase. Older engines simply
+	# follow the preexisting synchronous path.
+	var incremental_available: bool = ClassDB.class_has_method(
+		"EnvironmentQuery3D", "begin_incremental_top_positions")
+	# A single ledger coordinates every query in this authoritative tick.
+	# The old per-agent 120us limit remains as an additional safety bound.
+	if incremental_available and ClassDB.class_exists("EnvironmentQueryTickBudget"):
+		if _eqs_tick_budget == null:
+			_eqs_tick_budget = ClassDB.instantiate("EnvironmentQueryTickBudget")
+		if _eqs_tick_budget != null and _eqs_tick_budget.has_method("begin_tick"):
+			_eqs_tick_budget_active = bool(_eqs_tick_budget.begin_tick(
+				tick_count, AI_EQS_GLOBAL_QUOTA_US, AI_EQS_GLOBAL_URGENT_US))
+	for agent in cohort:
+		agent.flank_incremental_enabled = incremental_available
+		agent.flank_tick_budget = _eqs_tick_budget if _eqs_tick_budget_active else null
+	var eligible: Array = []
+	var urgent := PackedByteArray()
+	for agent in cohort:
+		if not agent.is_alive() or agent.raid_boss or agent.type == "brute" or \
+				agent.state != Zombie.State.CHASE or agent.target_id <= 0:
+			continue
+		var victim: Player = players.get(agent.target_id)
+		if victim == null or not _alive(victim):
+			continue
+		var here := Vector2(agent.position.x, agent.position.z)
+		var destination := Vector2(victim.position.x, victim.position.z)
+		var distance: float = here.distance_to(destination)
+		if distance < Zombie.FLANK_FROM or distance > Zombie.FLANK_RANGE:
+			continue
+		# Cached flanks require no new query until a timer/target/movement
+		# change (or preempted Smart Object lease) invalidates them.
+		var invalid_lease: bool = agent._flank_slot_id_cached > 0 and \
+				_flank_slot_reservations != null and \
+				_flank_slot_reservations.has_method("get_actor_slot") and \
+				int(_flank_slot_reservations.get_actor_slot(agent.id)) != agent._flank_slot_id_cached
+		var cache_valid: bool = not invalid_lease and \
+				agent._flank_replan_remaining > delta and \
+				agent._flank_target_id_cached == agent.target_id and \
+				here.distance_squared_to(agent._flank_here_cached) <= 3.24 and \
+				destination.distance_squared_to(agent._flank_target_cached) <= 1.0
+		if cache_valid:
+			continue
+		eligible.append(agent)
+		agent.flank_step_urgent = invalid_lease
+		urgent.append(1 if invalid_lease else 0)
+	if eligible.is_empty():
+		last_eqs_replan_stats = {"enabled": true, "population": cohort.size(),
+			"eligible": 0, "granted": 0, "deferred": 0, "urgent": 0}
+		return
+	var mask: PackedByteArray = ClassDB.class_call_static("EnvironmentQuery3D",
+		"schedule_query_mask", eligible.size(), tick_count, AI_EQS_REPLAN_QUOTA, urgent)
+	if mask.size() != eligible.size():
+		# Fail open for optional optimization, not for safety/combat.
+		last_eqs_replan_stats = {"enabled": false, "population": cohort.size(),
+			"eligible": eligible.size(), "granted": eligible.size(), "deferred": 0, "urgent": 0}
+		return
+	var granted: int = 0
+	var urgent_count: int = 0
+	for i in range(eligible.size()):
+		eligible[i].flank_replan_allowed = mask[i] != 0
+		if mask[i] != 0:
+			granted += 1
+		if urgent[i] != 0:
+			urgent_count += 1
+	last_eqs_replan_stats = {"enabled": true, "population": cohort.size(),
+		"eligible": eligible.size(), "granted": granted,
+		"deferred": eligible.size() - granted, "urgent": urgent_count}
+
+
+## An optional broadphase of *potential* nearby players for passive target
+## selection. Threat, forced targets and active combat always receive the
+## full authoritative player table. The native query cannot authorize sight,
+## hearing, blood scent, safe zones, or an attack.
+func get_perception_interest_stats() -> Dictionary:
+	return last_perception_interest_stats.duplicate(true)
+
+
+func _prepare_passive_target_candidates(cohort: Array, info: Dictionary,
+		delta: float) -> Dictionary:
+	last_perception_interest_stats = {"native": false, "sources": 0,
+		"players": 0, "pairs": 0}
+	if cohort.size() < AI_PERCEPTION_INTEREST_MIN_NPCS or cohort.size() > 4096 \
+			or info.size() < AI_PERCEPTION_INTEREST_MIN_PLAYERS \
+			or info.size() > 8192:
+		return {}
+	if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
+		_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
+	if _pack_spatial_grid == null or not _pack_spatial_grid.has_method(
+			"query_cross_variable_radius_batch"):
+		return {}
+	var player_ids: Array = []
+	var player_sites := PackedVector2Array()
+	for id in info:
+		var entry: Dictionary = info[id]
+		if not bool(entry.get("alive", false)) or bool(entry.get("safe", true)):
+			continue
+		var player_position: Vector3 = entry.get("position", Vector3.INF)
+		if not player_position.is_finite():
+			continue
+		player_ids.append(id)
+		player_sites.append(Vector2(player_position.x, player_position.z))
+	if player_sites.is_empty():
+		return {}
+	var agent_ids: Array = []
+	var agent_sites := PackedVector2Array()
+	var scan_radii := PackedFloat32Array()
+	for zombie in cohort:
+		# For these agents, Zombie._select_target() only needs currently
+		# eligible survivors inside their lose-leash plus the passive AI LOD
+		# far threshold (24m) plus its 4m hysteresis band. Further
+		# targets are behaviorally equivalent to infinite nearest distance.
+		if not zombie.is_alive() or zombie.raid_boss or zombie.target_id != -1 \
+				or zombie.forced_target_seconds > 0.0 or not zombie.threat.is_empty() \
+				or (zombie.state != Zombie.State.IDLE \
+				and zombie.state != Zombie.State.WANDER \
+				and zombie.state != Zombie.State.INVESTIGATE) \
+				or zombie.think_timer > delta or not zombie.position.is_finite():
+			continue
+		var lose: float = float(zombie.data.get("lose", NAN))
+		var radius: float = lose + 28.125 # 24m far + 4m hysteresis + float safety.
+		if not is_finite(radius) or radius <= 0.0 or radius > 256.0:
+			return {} # Avoid silently clipping any agent's detection or LOD.
+		agent_ids.append(zombie.id)
+		agent_sites.append(Vector2(zombie.position.x, zombie.position.z))
+		scan_radii.append(radius)
+	if agent_sites.is_empty():
+		return {}
+	var batches: Array = _pack_spatial_grid.query_cross_variable_radius_batch(
+		agent_sites, scan_radii, player_sites)
+	if batches.size() != agent_sites.size():
+		return {}
+	# Fail atomically: no partial player tables reach Zombie.think() if an
+	# outdated native module returns malformed indices.
+	for nearby_indices in batches:
+		for index in nearby_indices:
+			if index < 0 or index >= player_ids.size():
+				return {}
+	var relevant: Dictionary = {}
+	var total_pairs := 0
+	for i in range(agent_ids.size()):
+		var per_agent: Dictionary = {}
+		for index in batches[i]:
+			var pid: int = int(player_ids[index])
+			per_agent[pid] = info[pid] # Reuse server-authorized metadata exactly.
+			total_pairs += 1
+		relevant[agent_ids[i]] = per_agent
+	last_perception_interest_stats = {"native": true, "sources": agent_ids.size(),
+		"players": player_sites.size(), "pairs": total_pairs}
+	return relevant
+
+
 func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
 	for player in players.values():
 		info[player.id] = {"position": player.position, "alive": _alive(player),
+			"health_fraction": player.survival.health / maxf(1.0, player.survival.max_health),
 			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
 			"wind": Weather.wind_at(world, player.position.x, player.position.z, time),
 			"notice_multiplier": WorldCycle.notice_multiplier(time),
@@ -8120,6 +8525,48 @@ func _tick_zombies(delta: float) -> void:
 	# of infected iterated below. Masks use array indices, never client IDs.
 	# Older engines or cohorts above the safety cap use the scalar native API.
 	var ai_cohort: Array = zombies.values()
+	var passive_player_interest: Dictionary = _prepare_passive_target_candidates(
+		ai_cohort, info, delta)
+	_budget_eqs_replans(ai_cohort, delta)
+	# A single native 3x3-cell query every five server ticks feeds gentle
+	# steering for noncombat infected only. Clear stale vectors immediately
+	# when the crowd falls below the large-group threshold.
+	if tick_count % AI_CROWD_SEPARATION_TICKS == 0 \
+			or (_crowd_separation_enabled and (ai_cohort.size() < AI_CROWD_SEPARATION_MIN \
+			or ai_cohort.size() > AI_CROWD_SEPARATION_MAX)):
+		_refresh_passive_crowd_separation(ai_cohort)
+	# Snapshot trap order once and use source-to-target spatial hashing.
+	# Exact trap rules remain in _try_trigger_infected_snare(), and removed
+	# traps are ignored when later NPCs encounter the same index.
+	var snare_ids: Array = []
+	var snare_batches: Array = []
+	var snare_batch_used := false
+	if ai_cohort.size() >= AI_SNARE_BROADPHASE_MIN_NPCS \
+			and ai_cohort.size() <= AI_SNARE_BROADPHASE_MAX_NPCS \
+			and infected_snares.size() >= AI_SNARE_BROADPHASE_MIN_TRAPS \
+			and infected_snares.size() <= InfectedSnare.MAX_GLOBAL:
+		if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
+			_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
+		if _pack_spatial_grid != null and _pack_spatial_grid.has_method("query_cross_radius_batch"):
+			var sources := PackedVector2Array()
+			var targets := PackedVector2Array()
+			for zombie in ai_cohort:
+				sources.append(Vector2(zombie.position.x, zombie.position.z))
+			for trap_id in infected_snares:
+				var trap: Dictionary = infected_snares[trap_id]
+				snare_ids.append(trap_id)
+				targets.append(Vector2(float(trap["x"]), float(trap["z"])))
+			# Expand candidate radius by 1mm for float32/float64 parity.
+			# The authoritative InfectedSnare.catches() still uses 1.35m.
+			snare_batches = _pack_spatial_grid.query_cross_radius_batch(
+				sources, targets, InfectedSnare.TRIGGER_RADIUS + 0.001, 2.0)
+			snare_batch_used = snare_batches.size() == ai_cohort.size()
+	var snare_candidates := 0
+	if snare_batch_used:
+		for candidates in snare_batches:
+			snare_candidates += candidates.size()
+	last_snare_query_stats = {"native": snare_batch_used, "population": ai_cohort.size(),
+		"traps": infected_snares.size(), "candidates": snare_candidates}
 	var due_mask := PackedByteArray()
 	if stagger_decisions and _ai_update_scheduler.has_method("get_due_mask") \
 			and ai_cohort.size() <= AI_BATCH_MAX_SIZE:
@@ -8130,18 +8577,23 @@ func _tick_zombies(delta: float) -> void:
 		due_mask = _ai_update_scheduler.get_due_mask(cohort_ids, tick_count)
 	var batch_used: bool = stagger_decisions and not due_mask.is_empty() \
 		and due_mask.size() == ai_cohort.size()
+	var eqs_cpu_us: int = 0
+	var eqs_scored_candidates: int = 0
+	var eqs_timed_steps: int = 0
 	for i in range(ai_cohort.size()):
 		var zombie = ai_cohort[i]
 		zombie.flank_reservations = _flank_slot_reservations
-		# One-shot root triggered by a living non-boss infected. All hit checks
-		# use authoritative zombie positions; players cannot submit target IDs.
-		for trap_id in infected_snares.keys():
-			var trap: Dictionary = infected_snares[trap_id]
-			if InfectedSnare.catches(trap, zombie, time):
-				if zombie.apply_snare(InfectedSnare.root_duration(zombie)):
-					infected_snares.erase(trap_id)
-					events.append({"type": "snare_triggered", "id": trap_id,
-						"zombie": zombie.id, "x": trap["x"], "z": trap["z"]})
+		# Only candidate pairs reach the unchanged authoritative narrowphase.
+		# Stable trap-index order preserves the one-shot winner when two NPCs
+		# enter a trap simultaneously. Old engines keep the exact full scan.
+		if snare_batch_used:
+			var nearby_trap_indices: PackedInt32Array = snare_batches[i]
+			for trap_index in nearby_trap_indices:
+				if _try_trigger_infected_snare(zombie, int(snare_ids[trap_index])):
+					break
+		else:
+			for trap_id in infected_snares.keys():
+				if _try_trigger_infected_snare(zombie, int(trap_id)):
 					break
 		if zombie.perched:
 			_tick_percher(zombie)
@@ -8165,7 +8617,21 @@ func _tick_zombies(delta: float) -> void:
 				phase_due += 1
 			else:
 				phase_deferred += 1
-		var result: Dictionary = zombie.think(world, info, delta, rng)
+		# Only an unengaged passive agent uses the conservative spatial
+		# candidate table; active targets and combat keep the exact full info.
+		var perception_info: Dictionary = info
+		if zombie.target_id == -1 and zombie.forced_target_seconds <= 0.0 \
+				and zombie.threat.is_empty() and not zombie.raid_boss \
+				and (zombie.state == Zombie.State.IDLE \
+				or zombie.state == Zombie.State.WANDER \
+				or zombie.state == Zombie.State.INVESTIGATE):
+			perception_info = passive_player_interest.get(zombie.id, info)
+		var result: Dictionary = zombie.think(world, perception_info, delta, rng)
+		# These are authoritative native scorer timings only; never count
+		# script movement, physics, sleep, networking or claim handling.
+		eqs_cpu_us += zombie.flank_last_step_us
+		eqs_scored_candidates += zombie.flank_last_step_candidates
+		eqs_timed_steps += zombie.flank_last_timed_steps
 		if zombie.consume_howl():
 			_howl(zombie, info)
 		# Zombies chip away at obstacles only while actually stuck pursuing
@@ -8286,6 +8752,21 @@ func _tick_zombies(delta: float) -> void:
 		"batch_used": batch_used,
 		"batch_size": due_mask.size() if batch_used else 0,
 	}
+	# Diagnostics cover exactly this complete authoritative infected tick.
+	# Urgent work can exceed the eight-regular-request admission budget.
+	last_eqs_replan_stats["cpu_us"] = eqs_cpu_us
+	last_eqs_replan_stats["scored_candidates"] = eqs_scored_candidates
+	last_eqs_replan_stats["timed_steps"] = eqs_timed_steps
+	# Additional shared-budget instrumentation is separate from native
+	# score-only timings, since sub-microsecond debits round up to 1us.
+	last_eqs_replan_stats["global_enabled"] = _eqs_tick_budget_active
+	last_eqs_replan_stats["regular_budget_us"] = AI_EQS_GLOBAL_QUOTA_US if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["urgent_budget_us"] = AI_EQS_GLOBAL_URGENT_US if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["global_regular_used_us"] = int(_eqs_tick_budget.get_regular_spent_us()) if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["global_urgent_used_us"] = int(_eqs_tick_budget.get_urgent_spent_us()) if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["global_denied"] = int(_eqs_tick_budget.get_denied_count()) if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["global_regular_steps"] = int(_eqs_tick_budget.get_regular_completed()) if _eqs_tick_budget_active else 0
+	last_eqs_replan_stats["global_urgent_steps"] = int(_eqs_tick_budget.get_urgent_completed()) if _eqs_tick_budget_active else 0
 	# Real survivors are considered before idle infected investigate remains.
 	# Reuse existing investigate_decoy: never replace combat targets or spawn mobs.
 	if tick_count % 5 == 0 and not bags.is_empty():
@@ -8301,11 +8782,73 @@ func _tick_zombies(delta: float) -> void:
 
 ## Shares target awareness inside a bounded 2D neighborhood. Bucket lookup
 ## avoids checking every zombie against every other zombie in crowded ruins.
+## Reuses one stateless C++ EQS nearest-target query for noise, corpse scent
+## and night firelight. World cues are already server-filtered (including TTL).
+## The result selects a candidate only; Zombie.investigate_decoy still owns
+## state, territory/leash, combat priority and final behavior.
+func get_ai_cue_query_stats() -> Dictionary:
+	return last_ai_cue_query_stats.duplicate(true)
+
+
+func _try_native_ai_cues(index: Dictionary, radius: float, channel: String) -> bool:
+	last_ai_cue_query_stats = {"native": false, "channel": channel,
+		"sources": 0, "cues": 0}
+	if zombies.size() < AI_CUE_NATIVE_MIN_NPCS or zombies.size() > 4096:
+		return false
+	var cues: Array = []
+	for bucket in index.values():
+		cues.append_array(bucket)
+	if cues.size() < AI_CUE_NATIVE_MIN_SOURCES or cues.size() > 8192:
+		return false
+	if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
+		_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
+	if _pack_spatial_grid == null or not _pack_spatial_grid.has_method("query_cross_nearest_batch"):
+		return false
+	var targets := PackedVector2Array()
+	var target_ids := PackedInt64Array()
+	for cue in cues:
+		var x: float = float(cue["x"])
+		var z: float = float(cue["z"])
+		if not is_finite(x) or not is_finite(z):
+			return false
+		targets.append(Vector2(x, z))
+		target_ids.append(int(cue["id"]))
+	var agents: Array = []
+	var sources := PackedVector2Array()
+	for infected in zombies.values():
+		if not infected.is_alive() or infected.raid_boss or not infected.position.is_finite():
+			continue
+		agents.append(infected)
+		sources.append(Vector2(infected.position.x, infected.position.z))
+	if sources.is_empty():
+		return true # No eligible source may acquire a cue.
+	var nearest: PackedInt32Array = _pack_spatial_grid.query_cross_nearest_batch(
+		sources, targets, target_ids, radius, radius)
+	if nearest.size() != sources.size():
+		return false
+	# Validate all indices before any zombie is allowed to react: invalid
+	# native results cannot cause a partially applied cue followed by fallback.
+	for index_id in nearest:
+		if index_id < -1 or index_id >= cues.size():
+			return false
+	for i in range(agents.size()):
+		var candidate_index: int = nearest[i]
+		if candidate_index == -1:
+			continue
+		var cue: Dictionary = cues[candidate_index]
+		agents[i].investigate_decoy(Vector2(float(cue["x"]), float(cue["z"])))
+	last_ai_cue_query_stats = {"native": true, "channel": channel,
+		"sources": sources.size(), "cues": cues.size()}
+	return true
+
+
 func _alert_noise_decoys() -> void:
 	# One spatial index per four-times-per-second hearing pass, rather than
 	# an O(infected * all lures) loop. Never give a decoy active player aggro.
 	var buckets: Dictionary = NoiseDecoy.sound_buckets(decoys, time)
 	if buckets.is_empty():
+		return
+	if _try_native_ai_cues(buckets, NoiseDecoy.HEARING_RADIUS, "noise"):
 		return
 	for infected in zombies.values():
 		if not infected.is_alive() or infected.raid_boss:
@@ -8320,6 +8863,8 @@ func _alert_corpse_scents() -> void:
 	var scent_index: Dictionary = CorpseScent.buckets(bags, time)
 	if scent_index.is_empty():
 		return
+	if _try_native_ai_cues(scent_index, CorpseScent.RADIUS, "corpse"):
+		return
 	for infected in zombies.values():
 		if not infected.is_alive() or infected.raid_boss:
 			continue
@@ -8332,6 +8877,8 @@ func _alert_corpse_scents() -> void:
 func _alert_campfire_lights() -> void:
 	var buckets: Dictionary = CampfireThreat.light_buckets(campfires, time, true)
 	if buckets.is_empty():
+		return
+	if _try_native_ai_cues(buckets, CampfireThreat.LURE_RADIUS, "campfire"):
 		return
 	for infected in zombies.values():
 		if not infected.is_alive() or infected.raid_boss:
@@ -8749,6 +9296,60 @@ func _tick_caravan_ambush() -> void:
 		return # One encounter per check interval, not an unbounded global burst.
 
 
+## Build one native XZ spatial hash for every camp alarm ready to scan.
+## This is a purely server-owned optimization; CampAlarm.scan still enforces
+## fuel, expiration, 2s scan cadence, cooldown and private event limits.
+func get_camp_alarm_query_stats() -> Dictionary:
+	return last_camp_alarm_query_stats.duplicate(true)
+
+
+func _native_camp_alarm_counts() -> Dictionary:
+	last_camp_alarm_query_stats = {"native": false, "centers": 0, "targets": 0}
+	if zombies.size() < 32 or zombies.size() > 8192 or campfires.size() < 4:
+		return {}
+	if _pack_spatial_grid == null and ClassDB.class_exists("AIProximityGrid2D"):
+		_pack_spatial_grid = ClassDB.instantiate("AIProximityGrid2D")
+	if _pack_spatial_grid == null or not _pack_spatial_grid.has_method("query_cylinder_counts_batch"):
+		return {}
+	var ids := PackedInt64Array()
+	var centers := PackedVector3Array()
+	for id in campfires:
+		var fire: Dictionary = campfires[id]
+		if CampAlarm.seconds_left(fire, time) <= 0.0 \
+				or time < float(fire.get("alarm_next_scan", INF)):
+			continue
+		var owner: Player = players.get(int(fire.get("alarm_owner", -1)))
+		if owner == null or not _alive(owner):
+			continue
+		var center := Vector3(float(fire.get("x", NAN)),
+			float(fire.get("y", NAN)), float(fire.get("z", NAN)))
+		if not center.is_finite():
+			return {}
+		ids.append(int(id))
+		centers.append(center)
+	if centers.size() < 4 or centers.size() > 4096:
+		return {}
+	var targets := PackedVector3Array()
+	for infected in zombies.values():
+		if infected != null and infected.is_alive() and infected.position.is_finite():
+			targets.append(infected.position)
+	var matches: PackedInt32Array = _pack_spatial_grid.query_cylinder_counts_batch(
+		centers, targets, CampAlarm.DETECTION_RADIUS,
+		CampAlarm.DETECTION_HEIGHT, CampAlarm.MAX_DETECTED)
+	if matches.size() != centers.size():
+		return {}
+	# Validate the complete native output before any alarm state changes.
+	for value in matches:
+		if value < 0 or value > CampAlarm.MAX_DETECTED:
+			return {}
+	var result: Dictionary = {}
+	for i in range(ids.size()):
+		result[int(ids[i])] = int(matches[i])
+	last_camp_alarm_query_stats = {"native": true, "centers": centers.size(),
+		"targets": targets.size()}
+	return result
+
+
 func _tick_world(delta: float) -> void:
 	for id in fish_traps.keys():
 		if time >= float(fish_traps[id]["expires"]):
@@ -8775,6 +9376,9 @@ func _tick_world(delta: float) -> void:
 	for id in shelters.keys():
 		if time >= float(shelters[id]["expires"]):
 			shelters.erase(id)
+	# Snapshot only the count candidates; fuel/weather and alarm cooldown are
+	# checked again per live campfire immediately before any notification.
+	var alarm_native_counts: Dictionary = _native_camp_alarm_counts()
 	for id in campfires.keys():
 		var fire: Dictionary = campfires[id]
 		if time >= float(fire["expires"]):
@@ -8798,7 +9402,8 @@ func _tick_world(delta: float) -> void:
 		var observer: Player = players.get(alarm_owner)
 		if observer == null or not _alive(observer):
 			continue
-		var detected: int = CampAlarm.scan(fire, zombies, time)
+		var detected: int = CampAlarm.scan(fire, zombies, time,
+			int(alarm_native_counts.get(id, -1)))
 		if detected > 0:
 			events.append({"type": "camp_alarm", "peer": alarm_owner,
 				"group": int(fire.get("alarm_group", 0)),
@@ -8949,6 +9554,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		if here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
 			nearby_players.append({"id": other.id, "name": other.name, "x": p.x, "y": p.y, "z": p.z, "yaw": other.yaw,
 				"alive": _alive(other), "crouching": other.crouching, "mounted": other.mounted,
+				"rafting": other.inventory.count("raft") > 0 and Swimming.is_swimming(world, other.position.x, other.position.z),
 				"flare_lit": HandFlare.lit(other.flare_seconds, _alive(other)),
 				"bike_panniers": BikeCargo.installed(other.inventory),
 				"bike_lamp_lit": BikeLantern.lit(other.inventory, other.mounted,
@@ -9137,6 +9743,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"combat_stress_regen": CombatStress.regen_multiplier(player.combat_stress),
 			"crouching": player.crouching,
 			"mounted": player.mounted, "mount_cooldown": player.mount_cooldown,
+			"rafting": player.inventory.count("raft") > 0 and Swimming.is_swimming(world, player.position.x, player.position.z),
 			"smoke_cooldown": player.smoke_cooldown,
 			"smoke_concealed": FieldSmoke.inside(smoke_clouds, player.position, time),
 			"chain_wrap_seconds": player.chain_wrap_seconds,
@@ -9186,6 +9793,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"tent_camouflaged": PortableShelter.camouflaged(shelters, player.position,
 				time, player.crouching, player.noise_timer, _alive(player)),
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
+			"data_layers": data_layers,
 			"wind_chill": WindChill.visible(world, player.position, time,
 				player.survival.wetness,
 				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else "",

@@ -5,16 +5,22 @@ on:
     paths:
       - 'modules/cull_distance_policy/**'
       - 'game/scripts/client/scenery_lod.gd'
+      - 'game/scripts/client/graphics_quality.gd'
+      - 'tests/scene/test_cull_distance_bulk_contract.py'
       - 'game/tests/test_scenery_lod.gd'
       - 'game/tests/run_cull_distance_policy.gd'
+      - 'tests/scene/test_cull_distance_cached_contract.py'
       - '.github/workflows/native-cull-distance-policy.yml'
   push:
     branches: [develop]
     paths:
       - 'modules/cull_distance_policy/**'
       - 'game/scripts/client/scenery_lod.gd'
+      - 'game/scripts/client/graphics_quality.gd'
+      - 'tests/scene/test_cull_distance_bulk_contract.py'
       - 'game/tests/test_scenery_lod.gd'
       - 'game/tests/run_cull_distance_policy.gd'
+      - 'tests/scene/test_cull_distance_cached_contract.py'
       - '.github/workflows/native-cull-distance-policy.yml'
   workflow_dispatch:
 
@@ -29,6 +35,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Cached profile source and game integration contracts
+        run: python3 -m unittest tests/scene/test_cull_distance_cached_contract.py tests/scene/test_cull_distance_bulk_contract.py -v
       - uses: ./.github/actions/godot-deps
       - uses: ./.github/actions/godot-build
         with:

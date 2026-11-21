@@ -97,6 +97,17 @@ func run(t) -> void:
 	t.check(not RuinAmbush.record_kill({"ids": [], "defeated": []}, 11),
 		"an empty or missing encounter cannot win")
 
+	t.current = "ruin ambush shares native EQS oriented grid guard fallback"
+	var fallback_positions: PackedVector2Array = SupplyDrops.guard_grid_candidates(
+		Vector2(250, 200), [Vector3(230, 3, 198)], true)
+	var portable_positions: PackedVector2Array = SupplyDrops.guard_grid_candidates(
+		Vector2(250, 200), [Vector3(230, 3, 198)], false)
+	t.eq(fallback_positions.size(), portable_positions.size(),
+		"ruin ambush shares deterministic bounded grid generator with supply drops")
+	for i in fallback_positions.size():
+		t.check(fallback_positions[i].distance_to(portable_positions[i]) < 0.001,
+			"ruin encounter positions preserve native/portable parity")
+	
 	t.current = "ruin ambush: collision, terrain and player separation"
 	var flat := FlatDangerWorld.new()
 	var site := {"x": 250.0, "z": 200.0, "zone": 2}

@@ -68,6 +68,11 @@ renderer/rendering_method.web="gl_compatibility"
 
 [shader_globals]
 
+aa_snow_cover={
+"type": "float",
+"value": 0.0
+}
+
 aa_weather_wetness={
 "type": "float",
 "value": 0.0

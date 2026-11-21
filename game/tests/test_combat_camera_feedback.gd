@@ -50,6 +50,46 @@ func run(t) -> void:
 		"invalid coordinates and unknown events cannot create camera shake")
 	camera.free()
 
+	t.current = "Unreal-style source-oriented camera trauma (visual only)"
+	var directed_camera := Camera3D.new()
+	t.check(directed_camera.has_method("add_directional_spatial_trauma"),
+		"Cgame exposes optional impact orientation without a new scene node")
+	t.check(directed_camera.has_method("get_shake_direction_impulse"),
+		"native directional camera state can be inspected without moving the player")
+	Feedback.apply(directed_camera, "hit_zombie",
+		Vector3(2, 0, 0), Vector3.ZERO, 1.0)
+	t.near(float(directed_camera.call("get_trauma")), 0.12 * Feedback.falloff(2.0, 0.6, 4.0),
+		0.00001, "directional hit preserves the original spatial trauma strength")
+	var hit_direction: Vector3 = directed_camera.call("get_shake_direction_impulse")
+	t.check(hit_direction.x > 0.0 and absf(hit_direction.y) < 0.00001,
+		"the camera kick points toward the world impact, not a random axis")
+	t.check(hit_direction.length() <= 1.0,
+		"directional impulse is bounded after source attenuation")
+	directed_camera.call("set_trauma", 0.0)
+	Feedback.apply(directed_camera, "flash_thrown",
+		Vector3.ZERO, Vector3.ZERO, 1.0)
+	t.near(float(directed_camera.call("get_trauma")), 0.25, 0.00001,
+		"nondirectional flash keeps existing trauma semantics")
+	t.eq(directed_camera.call("get_shake_direction_impulse"), Vector3.ZERO,
+		"screen flash does not change directional camera kick")
+	directed_camera.call("set_trauma", 0.0)
+	Feedback.apply(directed_camera, "barricade_broken",
+		Vector3(1, 0, 0), Vector3.ZERO, 0.5)
+	t.check(float(directed_camera.call("get_trauma")) > 0.0,
+		"barricade destruction uses directional impact with accessibility scaling")
+	var barricade_direction: Vector3 = directed_camera.call("get_shake_direction_impulse")
+	t.check(barricade_direction.x > 0.0,
+		"barricade break points the camera toward the destruction")
+	directed_camera.call("set_trauma", 0.0)
+	Feedback.apply(directed_camera, "knockback", Vector3.ZERO, Vector3.ZERO, 0.0)
+	t.eq(directed_camera.call("get_shake_direction_impulse"), Vector3.ZERO,
+		"reduce-screen-shake setting disables directional and radial impulses")
+	Feedback.apply(directed_camera, "knockback",
+		Vector3(INF, 0, 0), Vector3.ZERO, 1.0)
+	t.eq(directed_camera.call("get_shake_direction_impulse"), Vector3.ZERO,
+		"malformed server event cannot inject invalid camera displacement")
+	directed_camera.free()
+
 	t.current = "playable online combat cue integration"
 	var online: String = FileAccess.get_file_as_string(
 		"res://scripts/client/online_main.gd")

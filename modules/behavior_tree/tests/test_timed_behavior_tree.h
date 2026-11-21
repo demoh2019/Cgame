@@ -101,7 +101,7 @@ TEST_CASE("[BehaviorTreeTimed] Timeout clears only its own branch memory") {
 	memory["root/0/older"] = 5;
 	CHECK(timeout->execute(blackboard, memory, "root", 0.2) == BehaviorTreeTask::FAILURE);
 	CHECK(memory.size() == 1);
-	CHECK(memory["sibling"] == 900);
+	CHECK(memory["sibling"] == Variant(900));
 }
 
 TEST_CASE("[BehaviorTreeTimed] Cooldown follows child success and blocks repeat") {
@@ -220,7 +220,7 @@ TEST_CASE("[BehaviorTreeTimed] Runner reset intentionally clears cooldown") {
 	cooldown->set_duration(2.0);
 	runner->set_root_task(cooldown);
 	CHECK(runner->tick(0.1) == BehaviorTreeTask::SUCCESS);
-	CHECK(runner->get_debug_snapshot()["finished"] == true);
+	CHECK(runner->get_debug_snapshot()["finished"] == Variant(true));
 	runner->reset();
 	CHECK(runner->tick(0.1) == BehaviorTreeTask::SUCCESS);
 	memdelete(runner);

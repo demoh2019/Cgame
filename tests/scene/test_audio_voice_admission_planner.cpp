@@ -98,4 +98,40 @@ TEST_CASE("[AudioVoiceAdmissionPlanner] Malformed data never stops an existing s
 	all.push_back(voice("hit", -5.0, -1.0));
 	CHECK(planner->select_victim(all, "hit", -10.0, 1) == AudioVoiceAdmissionPlanner::DROP_NEW);
 }
+
+TEST_CASE("[AudioVoiceAdmissionPlanner] Fresh equal-priority voices hold their initial attack") {
+	Ref<AudioVoiceAdmissionPlanner> planner;
+	planner.instantiate();
+	Array voices;
+	voices.push_back(voice("shot", -30.0, 0.02, 2));
+	CHECK(planner->select_victim(voices, "shot", -28.0, 2, 1, 1) == 0);
+	CHECK(planner->select_victim_stable(voices, "shot", -28.0, 2, 1, 1) ==
+			AudioVoiceAdmissionPlanner::DROP_NEW);
+	CHECK(planner->select_victim_stable(voices, "shot", -18.0, 2, 1, 1) == 0);
+	CHECK(planner->select_victim_stable(voices, "kill", -90.0, 3, 1, 1) == 0);
+	CHECK(planner->select_victim_stable(voices, "step", -5.0, 1, 1, 1) ==
+			AudioVoiceAdmissionPlanner::DROP_NEW);
+	CHECK(planner->select_victim_stable(voices, "new", -25.0, 2, 2, 1) ==
+			AudioVoiceAdmissionPlanner::ROOM);
+	CHECK(planner->select_victim_stable(voices, "shot", -28.0, 2, 1, 1, 0.0) ==
+			planner->select_victim(voices, "shot", -28.0, 2, 1, 1));
+	voices.clear();
+	voices.push_back(voice("shot", -30.0, 0.12, 2));
+	CHECK(planner->select_victim_stable(voices, "shot", -28.0, 2, 1, 1) == 0);
+	voices.clear();
+	voices.push_back(voice("shot", -30.0, 0.02, 2));
+	voices.push_back(voice("shot", -27.0, 0.5, 2));
+	CHECK(planner->select_victim_stable(voices, "shot", -25.0, 2, 3, 2) == 1);
+	CHECK(planner->select_victim_stable(voices, "shot", -25.0, 2, 3, 2, -1.0) ==
+			AudioVoiceAdmissionPlanner::DROP_NEW);
+	CHECK(planner->select_victim_stable(voices, "shot", -25.0, 2, 3, 2, 6.0) ==
+			AudioVoiceAdmissionPlanner::DROP_NEW);
+	CHECK(planner->select_victim_stable(voices, "shot", -25.0, 2, 3, 2, Math::INF) ==
+			AudioVoiceAdmissionPlanner::DROP_NEW);
+	CHECK(planner->select_victim_stable(voices, "shot", -25.0, 2, 3, 2, 0.1, Math::NaN) ==
+			AudioVoiceAdmissionPlanner::DROP_NEW);
+	CHECK(planner->select_victim_stable(voices, "shot", -25.0, 2, 3, 2, 0.1, 61.0) ==
+			AudioVoiceAdmissionPlanner::DROP_NEW);
+}
+
 } // namespace TestAudioVoiceAdmissionPlanner

@@ -14,6 +14,11 @@
 			<param index="2" name="priority" type="int" default="0" />
 			<description>Queues one transient cue. Identical tag/event pairs are aggregated; priority is 0 to 7 and magnitude is a finite nonnegative value no greater than one million. Invalid input is rejected without mutation. If the queue is full, a new transient can replace the oldest lowest-priority transient only when its own priority is strictly higher. Repeated tags still coalesce without eviction. Lifecycle events are never candidates. Otherwise returns false without changing pending events.</description>
 		</method>
+		<method name="emit_cues_batch">
+			<return type="bool" />
+			<param index="0" name="events" type="Array" />
+			<description>Atomically queues up to 32 transient [code]executed[/code] Gameplay Cues in one native call. Each entry must be a Dictionary with a valid [code]tag[/code] (String or StringName starting with [code]GameplayCue.[/code]), a numeric finite [code]magnitude[/code] in [code]0..1000000[/code], and an integer [code]priority[/code] in [code]0..7[/code]. All entries are checked before mutation. Existing per-event coalescing, 128-pending capacity, duplicate count cap, significance eviction and persistent lifecycle protection remain identical to [method emit_cue]. If any validated event cannot be admitted, no transient is queued, no existing event is evicted and diagnostic counters are restored. An empty batch is a successful no-op. The queue does not execute any visual or gameplay logic; the caller drains events with [method take_events].</description>
+		</method>
 		<method name="set_active">
 			<return type="bool" />
 			<param index="0" name="tag" type="StringName" />
@@ -26,6 +31,19 @@
 			<param index="0" name="snapshot" type="Dictionary" />
 			<param index="1" name="priority" type="int" default="0" />
 			<description>Transactionally applies a snapshot of tag to integer stack count, emitting only changes. Malformed input or insufficient pending capacity leaves both active and pending state unchanged.</description>
+		</method>
+		<method name="replace_active_resilient">
+			<return type="bool" />
+			<param index="0" name="snapshot" type="Dictionary" />
+			<param index="1" name="priority" type="int" default="0" />
+			<description>Atomically applies an authoritative presentation snapshot, reserving pending slots for changed started, updated and stopped events. When full, the oldest lowest-priority executed cue may be displaced only when its priority is strictly less than [param priority]. Lifecycle cues and equal/higher-priority transients are never evicted. If there are not enough expendable events for all changes, active tags, pending events and eviction counters remain exactly unchanged. Identical status snapshots do not enqueue again. The legacy [method replace_active] method retains its original strict no-eviction behavior. Does not authorize gameplay abilities, damage, status, or networking.</description>
+		</method>
+		<method name="replace_active_branch">
+			<return type="bool" />
+			<param index="0" name="branch" type="StringName" />
+			<param index="1" name="snapshot" type="Dictionary" />
+			<param index="2" name="priority" type="int" default="0" />
+			<description>Atomically reconciles only exact tags under a dotted GameplayCue branch (for example [code]GameplayCue.Status[/code] includes [code]GameplayCue.Status.Resolve[/code], but not [code]GameplayCue.StatusExtra[/code]). Accepts an authoritative mapping of in-branch tag names to integer stack counts, with zero removing that cue; missing in-branch cues stop, while unrelated active local or FX cues and transient events remain untouched. Rejects out-of-branch tags, String/StringName aliases, malformed branch names, invalid priorities or stack values, and active/pending capacity overflow without changing state. Uses the same persistent started/updated/stopped semantics as [method replace_active]. A byte-for-byte equivalent active tag set with the same stacks returns true without new pending events, copies, or notifications, even when the pending queue is full. No network authority or gameplay actions are performed; callers provide trustworthy replicated state.</description>
 		</method>
 		<method name="get_active_snapshot" qualifiers="const">
 			<return type="Dictionary" />
@@ -56,7 +74,7 @@
 		</method>
 		<method name="get_evicted_transient_count" qualifiers="const">
 			<return type="int" />
-			<description>Number of low-priority transient events displaced by higher-priority transient events since the last [method reset]. Saturates at the maximum signed 32-bit integer; lifecycle events do not contribute.</description>
+			<description>Number of low-priority transient events displaced by higher-priority transients or transactional resilient lifecycle snapshots since the last [method reset]. Saturates at the maximum signed 32-bit integer; lifecycle events do not contribute.</description>
 		</method>
 		<method name="get_rejected_transient_count" qualifiers="const">
 			<return type="int" />

@@ -5,6 +5,9 @@ const MAX_VOICES := 24
 const SAME_SOUND_MAX := 5
 const ROOM := -2 # victim(): nothing to cull, the new voice may start.
 const DROP_NEW := -1 # victim(): the new voice itself is the one to drop.
+# Optional protection against rapid equal-priority voice stealing.
+const STEAL_HOLD_SECONDS := 0.12
+const STEAL_EARLY_OVERRIDE_DB := 12.0
 
 
 ## Random pitch/volume jitter so repeated one-shots do not sound machine-gunned. `roll1`/`roll2` are 0..1.
@@ -63,7 +66,27 @@ static func priority_for(name: String) -> int:
 static func prioritized_victim(voices: Array, name: String, new_db: float,
 		new_priority: int, max_voices: int = MAX_VOICES,
 		same_max: int = SAME_SOUND_MAX) -> int:
-	if name.is_empty() or not is_finite(new_db) or new_priority < 0 \
+	return _prioritized_victim_internal(voices, name, new_db,
+		new_priority, max_voices, same_max, 0.0, 0.0)
+
+
+## Preserve newly-started voice attacks briefly unless the next voice has
+## higher priority or is substantially louder. Data-only, no AudioServer calls.
+static func prioritized_victim_stable(voices: Array, name: String, new_db: float,
+		new_priority: int, max_voices: int = MAX_VOICES,
+		same_max: int = SAME_SOUND_MAX, min_voice_age: float = STEAL_HOLD_SECONDS,
+		early_override_db: float = STEAL_EARLY_OVERRIDE_DB) -> int:
+	return _prioritized_victim_internal(voices, name, new_db, new_priority,
+		max_voices, same_max, min_voice_age, early_override_db)
+
+
+static func _prioritized_victim_internal(voices: Array, name: String, new_db: float,
+		new_priority: int, max_voices: int, same_max: int,
+		min_voice_age: float, early_override_db: float) -> int:
+	if not is_finite(min_voice_age) or min_voice_age < 0.0 or min_voice_age > 5.0 \
+			or not is_finite(early_override_db) or early_override_db < 0.0 \
+			or early_override_db > 60.0 or name.is_empty() \
+			or not is_finite(new_db) or new_priority < 0 \
 			or new_priority > 3 or max_voices < 1 or max_voices > 128 \
 			or same_max < 1 or same_max > max_voices or voices.size() > 128:
 		return DROP_NEW
@@ -96,14 +119,26 @@ static func prioritized_victim(voices: Array, name: String, new_db: float,
 			candidates.append(i)
 	if candidates.is_empty():
 		return DROP_NEW
-	var worst: int = candidates[0]
+	var worst: int = -1
 	for i in candidates:
 		var a: Dictionary = voices[i]
+		var priority: int = int(a.get("priority", 0))
+		var high_priority_override: bool = new_priority > priority
+		var loudness_override: bool = new_priority == priority \
+			and new_db >= float(a["audibility"]) + early_override_db
+		if float(a["age"]) < min_voice_age \
+				and not high_priority_override and not loudness_override:
+			continue
+		if worst < 0:
+			worst = i
+			continue
 		var b: Dictionary = voices[worst]
-		if int(a.get("priority", 0)) < int(b.get("priority", 0)):
+		if priority < int(b.get("priority", 0)):
 			worst = i
-		elif int(a.get("priority", 0)) == int(b.get("priority", 0)) and _worse(a, b):
+		elif priority == int(b.get("priority", 0)) and _worse(a, b):
 			worst = i
+	if worst < 0:
+		return DROP_NEW
 	if new_priority < int(voices[worst].get("priority", 0)) or \
 			(new_priority == int(voices[worst].get("priority", 0)) \
 			and float(voices[worst]["audibility"]) > new_db + 3.0):

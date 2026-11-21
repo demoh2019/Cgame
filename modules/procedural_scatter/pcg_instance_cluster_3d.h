@@ -19,10 +19,23 @@ protected:
 public:
 	static constexpr int MAX_INSTANCES = 65536;
 	static constexpr int MAX_CLUSTERS = 256;
+	static constexpr int MAX_COARSEN_PASSES = 8;
 	static constexpr double MAX_COORDINATE = 10000000.0;
 	static constexpr double MIN_CELL_SIZE = 0.5;
 	static constexpr double MAX_CELL_SIZE = 10000.0;
 
+	// Build exact point-only bounds for complete, disjoint index groups.
+	// One pass with strict atomic validation; useful as HLOD/streaming
+	// anchors. Mesh geometry/rotation must use separate render bounds.
+	Array compute_cluster_bounds(const PackedVector3Array &p_positions,
+			const Array &p_clusters, double p_margin = 0.0) const;
+
 	Array partition_indices(const PackedVector3Array &p_positions, double p_cell_size = 32.0,
 			int p_min_split_count = 48, int p_max_clusters = MAX_CLUSTERS) const;
+
+	// Coarsen overflowing 3D cells by powers of two until cluster budget fits.
+	// A capped retry count guarantees bounded work. The legacy API remains unchanged.
+	Array partition_indices_adaptive(const PackedVector3Array &p_positions, double p_cell_size = 32.0,
+			int p_min_split_count = 48, int p_max_clusters = MAX_CLUSTERS,
+			int p_max_coarsen_passes = MAX_COARSEN_PASSES) const;
 };

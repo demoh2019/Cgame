@@ -193,3 +193,75 @@ func run(t) -> void:
 	else:
 		t.eq(SceneryBatches.thin_cosmetic_transforms_3d(transforms_3d, 2.0),
 			thin_3d, "stock Godot uses deterministic script fallback")
+
+
+	t.current = "3D PCG: size-aware cliff vegetation and native/script parity"
+	var cliff_points := PackedVector3Array([
+		Vector3(0, 0, 0), Vector3(0.9, 0, 0), Vector3(3, 0, 0),
+		Vector3(3.8, 0, 0), Vector3(-2.6, 0, 0), Vector3(0.9, 3, 0)])
+	var cliff_scales := PackedFloat32Array([0.5, 2.0, 1.0, 0.5, 1.2, 2.0])
+	var expected_cliff := PackedInt32Array([1, 2, 3, 4, 5])
+	t.eq(SceneryBatches.pcg_filter_indices_3d_scaled(
+		cliff_points, cliff_scales, 1.0, 4096, true, false),
+		expected_cliff, "large bushes win nearby overlap and elevated terraces remain")
+	t.eq(SceneryBatches.pcg_filter_indices_3d_scaled(
+		cliff_points, cliff_scales, 1.0, 4096, false, false),
+		PackedInt32Array([0, 2, 3, 4, 5]), "optional input-order priority")
+	t.eq(SceneryBatches.pcg_filter_indices_3d_scaled(
+		cliff_points, cliff_scales, 0.0, 2, true, false),
+		PackedInt32Array([0, 1]), "zero spacing preserves the first two original points")
+	t.eq(SceneryBatches.pcg_filter_indices_3d_scaled(
+		cliff_points, PackedFloat32Array([1.0]), 1.0, 4096, true, false).size(),
+		0, "mismatched footprint array rejected before selection")
+	var malformed_scales := cliff_scales.duplicate()
+	malformed_scales[5] = NAN
+	t.eq(SceneryBatches.pcg_filter_indices_3d_scaled(
+		cliff_points, malformed_scales, 1.0, 4096, true, false).size(),
+		0, "invalid late scale fails entire batch")
+	var big_3d := PackedVector3Array([
+		Vector3(0.99, -1.0, 0.99), Vector3(2.01, -1.0, 0.99),
+		Vector3(0.99, 1.2, 0.99)])
+	t.eq(SceneryBatches.pcg_filter_indices_3d_scaled(
+		big_3d, PackedFloat32Array([2.0, 2.0, 2.0]), 1.0, 4096, false, false),
+		PackedInt32Array([0, 2]), "5x5x5 buckets catch long overlaps but permit height separation")
+	var cliff_transforms: Array[Transform3D] = []
+	for i in cliff_points.size():
+		cliff_transforms.append(Transform3D(
+			Basis.IDENTITY.scaled(Vector3.ONE * cliff_scales[i]), cliff_points[i]))
+	var kept_cliff := SceneryBatches.thin_cosmetic_transforms_3d(cliff_transforms, 1.0, false)
+	var expected_cliff_transforms: Array[Transform3D] = []
+	for index in expected_cliff:
+		expected_cliff_transforms.append(cliff_transforms[index])
+	t.eq(kept_cliff, expected_cliff_transforms, "real game cliff-bush transforms use scale-aware selection")
+	t.eq(cliff_transforms.size(), 6, "scenery source never mutates authored transforms")
+	var chunk_script: String = FileAccess.get_file_as_string("res://scripts/client/chunk_view.gd")
+	t.check(chunk_script.contains("SceneryBatches.thin_cosmetic_transforms_3d("),
+		"actual streamed bushes use the updated three-dimensional pruning")
+
+	if ClassDB.class_exists("PCGSpatialFilter3D"):
+		var native_scaled: Object = ClassDB.instantiate("PCGSpatialFilter3D")
+		if native_scaled != null and native_scaled.has_method("filter_indices_scaled"):
+			t.eq(native_scaled.call("filter_indices_scaled", cliff_points, cliff_scales, 1.0),
+				expected_cliff, "Cgame native API chooses the expected cliff foliage")
+			t.eq(SceneryBatches.thin_cosmetic_transforms_3d(cliff_transforms, 1.0),
+				kept_cliff, "Albion uses native scaled 3D path")
+			var scaled_rng := RandomNumberGenerator.new()
+			scaled_rng.seed = 932561
+			for sample in 12:
+				var random_points := PackedVector3Array()
+				var random_scales := PackedFloat32Array()
+				for i in 120:
+					random_points.append(Vector3(scaled_rng.randf_range(-25.0, 25.0),
+						scaled_rng.randf_range(-8.0, 8.0),
+						scaled_rng.randf_range(-25.0, 25.0)))
+					random_scales.append(scaled_rng.randf_range(0.5, 2.0))
+				for size_priority in [false, true]:
+					t.eq(native_scaled.call("filter_indices_scaled",
+						random_points, random_scales, 1.2, 4096, size_priority),
+						SceneryBatches.pcg_filter_indices_3d_scaled(
+							random_points, random_scales, 1.2, 4096, size_priority, false),
+						"native/script 3D scaled parity %d: %s" % [
+							sample, str(size_priority)])
+		else:
+			t.eq(SceneryBatches.thin_cosmetic_transforms_3d(cliff_transforms, 1.0),
+				kept_cliff, "older engine binaries take deterministic scaled fallback")

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGFoliageScalability3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic batch foliage density planning and distributed instance-prefix ordering.
+	</brief_description>
+	<description>
+		Inspired by Unreal Engine Foliage Density Scaling, this data-only class controls how many cosmetic instanced foliage meshes should remain visible by graphics quality and camera distance. It does not change mesh buffers, create proxies, cull scene nodes, perform physics, or modify random generators. Use [member MultiMesh.visible_instance_count] with [method plan_visible_counts] outputs. For visually distributed prefixes, write instances in the order given by [method spread_indices] once when creating each MultiMesh. Per-instance geometry LOD methods plan proxy groups but do not implement a GPU-resident hierarchical LOD or Nanite.
+	</description>
+	<methods>
+		<method name="plan_visible_counts_stable" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="counts" type="PackedInt32Array" />
+			<param index="1" name="distances" type="PackedFloat32Array" />
+			<param index="2" name="previous_counts" type="PackedInt32Array" />
+			<param index="3" name="quality" type="int" />
+			<param index="4" name="deadband" type="int" default="2" />
+			<param index="5" name="near_distance" type="float" default="18.0" />
+			<param index="6" name="far_distance" type="float" default="125.0" />
+			<description>
+				Returns an ordered, temporally stabilized foliage instance-count plan for up to 4096 clusters. First computes the same per-quality and camera-distance density as [method plan_visible_counts]. A prior visible count is reused only when its absolute difference from the newly planned count is no more than [param deadband] instances. A difference exceeding the deadband immediately adopts the new count; a zero deadband restores stateless behavior.
+				Use -1 in [param previous_counts] for a new cluster or after changing [param quality], to bypass hysteresis and immediately recover the correct quality tier. A prior count of zero cannot keep a nonempty cluster entirely hidden. Previous counts must be -1 or between 0 and the authored instance count. [param deadband] is 0 to 8 inclusive. All arrays must have identical lengths; invalid late entries and other invalid [method plan_visible_counts] inputs reject the entire request with an empty array, not partial output. This pure method does not keep history or mutate GPU buffers, scene nodes, transforms, collision, or game state. Callers explicitly manage per-cluster history and reset it on quality changes.
+			</description>
+		</method>
+		<method name="spread_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Returns a deterministic, duplicate-free bit-reversal permutation of indices 0 through [param count] - 1. A prefix of the result samples distant positions in the original input order, instead of truncating only its beginning. This is useful for distributing a limited number of cosmetic foliage instances through their initial placement sequence. Accepts 0 through 65536; invalid counts return empty. Results are identical across repeated calls and do not consume seeded RNG.
+			</description>
+		</method>
+		<method name="plan_visible_counts" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="counts" type="PackedInt32Array" />
+			<param index="1" name="distances" type="PackedFloat32Array" />
+			<param index="2" name="quality" type="int" />
+			<param index="3" name="near_distance" type="float" default="18.0" />
+			<param index="4" name="far_distance" type="float" default="125.0" />
+			<description>
+				Returns one visible-instance count for each input MultiMesh group, retaining zero-count groups at zero and at least one visible instance in each nonempty cosmetic group. Quality levels are 0 Performance (near 42%, far 20%), 1 Balanced (near 68%, far 42%), 2 High (near 88%, far 70%), and 3 Ultra (100% everywhere). Between the near and far distances, the density changes smoothly with smoothstep, with integer counts rounded to the nearest instance. Camera distances are nonnegative world-space distances; this selector does not perform frustum or occlusion culling. Use the result to update existing [member MultiMesh.visible_instance_count] without rebuilding an instance buffer, and keep gameplay objects independent of density budgets.
+				Inputs must contain matching arrays of at most 4096 groups, counts from 0 through 65536 and finite distances between 0 and 10000000. Near and far thresholds must be finite; near must be nonnegative and strictly below far, and far must not exceed 1000000; invalid quality or input rejects the whole request atomically. No source array mutation, RNG or scene access.
+			</description>
+		</method>
+		<method name="plan_instance_lods" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="viewer" type="Vector3" />
+			<param index="2" name="previous_tiers" type="PackedInt32Array" />
+			<param index="3" name="switch_distance" type="float" default="24.0" />
+			<param index="4" name="hysteresis" type="float" default="3.0" />
+			<description>
+				Plans two geometry LOD tiers per visual instance without allocating meshes, querying physics or culling any point. Returns 0 for detailed near geometry and 1 for a simpler far proxy. Pass an empty [param previous_tiers] array for first evaluation (near when distance is less than or equal to [param switch_distance]), then feed back the returned array on later evaluations. Existing near instances switch to far only beyond [param switch_distance] + [param hysteresis]; existing far instances switch near only closer than [param switch_distance] - [param hysteresis]. Exact boundary equality retains the prior tier, preventing visible thrashing when the camera is steady. Camera distance is 3D Euclidean (not screen-size-based). Inputs: at most 16384 positions, bounded finite coordinates +/-10000000, finite viewer, [param switch_distance] at least 0.1 and at most 1000000, nonnegative [param hysteresis] strictly below [param switch_distance], and their sum at most 1000000. Existing tiers must be absent or match the full point count and each be 0 or 1. Invalid inputs return an empty array atomically; valid empty positions also return empty.
+			</description>
+		</method>
+		<method name="partition_variant_lods" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="variants" type="PackedInt32Array" />
+			<param index="1" name="lod_tiers" type="PackedInt32Array" />
+			<param index="2" name="variant_count" type="int" />
+			<description>
+				Partitions indices of point attributes into 2 * [param variant_count] arrays: variant zero detailed first, then variant zero proxy, followed by detailed/proxy pairs for each additional variant. Every input index is preserved exactly once in original source order. Empty combinations produce empty [PackedInt32Array] entries. At most 16384 points and 1 through 32 mesh variants are accepted. Both input arrays must match and all indices must be valid (variant in [0, variant_count - 1], tier 0 or 1). Malformed input returns an empty [Array] before producing any partial batch; valid empty inputs produce 2 * [param variant_count] empty groups. This function creates no nodes, meshes or renderer state. Call from a low-frequency visual refresh and build one [MultiMesh] per nonempty geometry/tier group.
+			</description>
+		</method>
+		<method name="plan_projected_visible_counts" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="counts" type="PackedInt32Array" />
+			<param index="1" name="centers" type="PackedVector3Array" />
+			<param index="2" name="mesh_diameters" type="PackedFloat32Array" />
+			<param index="3" name="camera_position" type="Vector3" />
+			<param index="4" name="camera_forward" type="Vector3" />
+			<param index="5" name="focal_pixels" type="float" />
+			<param index="6" name="orthographic" type="bool" />
+			<param index="7" name="quality" type="int" />
+			<param index="8" name="near_pixels" type="float" default="20.0" />
+			<param index="9" name="far_pixels" type="float" default="2.0" />
+			<description>
+				Returns the cosmetic visible-instance budget for each cluster based on the projected pixel diameter of a representative instance instead of a fixed world-space draw distance. This accounts for viewport render resolution, camera focal length/FOV and orthographic zoom, which the caller supplies as [param focal_pixels]. For perspective cameras, pass viewport height divided by twice the tangent of half the vertical FOV (in radians). For orthographic cameras pass rendered viewport height divided by vertical world-space view size, and set [param orthographic] to [code]true[/code]. [param camera_forward] is the world-space forward vector; its magnitude does not matter. Per-instance nominal diameters in world units should include authored scale and are not the diameter of the entire cluster.
+				Projected diameters at or above [param near_pixels] select the near density tier, diameters at or below [param far_pixels] select the far tier, with smoothstep between them. Density curves match [method plan_visible_counts]. Completely behind-camera clusters remain fully populated, leaving frustum culling to the renderer rather than predicting culling with a negative projected depth. Ultra always retains full source counts. This data-only method does not change scene nodes, GPU buffers, RNG, physics or gameplay authority; apply the result to [member MultiMesh.visible_instance_count] for cosmetic foliage.
+				Accepts matching arrays of at most 4096 clusters, counts 0 through 65536, nonnegative finite diameters through 10000 and finite camera/center coordinates within +/-10000000. Focal pixels must be positive and at most 10000000; pixel thresholds must be finite, ordered with far nonnegative, near strictly greater than far, near at most 1000000. Quality must be 0 through 3. Inputs are validated atomically before output; invalid data yields an empty array. Unlike the older [method plan_visible_counts], this method adapts to the camera's actual projected detail.
+			</description>
+		</method>
+		<method name="plan_dirty_variant_lod_groups" qualifiers="const">
+			<return type="PackedByteArray" />
+			<param index="0" name="variants" type="PackedInt32Array" />
+			<param index="1" name="previous_tiers" type="PackedInt32Array" />
+			<param index="2" name="next_tiers" type="PackedInt32Array" />
+			<param index="3" name="variant_count" type="int" />
+			<description>
+				Compares existing and planned per-point geometry LOD membership to determine which GPU instancing groups need their instance buffers rebuilt. Returns exactly twice [param variant_count] bytes ordered variant-0 LOD0, variant-0 LOD1, variant-1 LOD0, variant-1 LOD1, etc. A byte value of 1 means at least one point has entered or left the associated group, and 0 means that group's complete membership can be reused unchanged. Every transition marks both the previous and the next tier for its corresponding variant. A valid no-op transition or valid empty point set returns an all-zero, fixed-length array. Invalid input returns an empty array to distinguish errors from no changes.
+				Input arrays must have equal lengths of at most 16384 points, [param variant_count] must be from 1 to 32, all variants must be within range and each previous/next tier must be 0 or 1. All inputs are fully validated before returning flags, avoiding partial render updates if a late row is invalid. O(points + variants), no RNG, allocation of meshes, GPU calls or scene mutation. The caller must use [method partition_variant_lods] for changed memberships and apply rebuilds only to flagged groups; a change to source geometry, source transforms or colors independently of LOD tiers requires a full rebuild.
+			</description>
+		</method>
+	</methods>
+</class>

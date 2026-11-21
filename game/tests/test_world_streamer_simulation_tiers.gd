@@ -1,5 +1,6 @@
 extends RefCounted
 ## Engine-side simulation LOD must not change chunk residency or load budgets.
+const WorldStreamingPolicy = preload("res://scripts/client/world_streaming_policy.gd")
 
 
 class ProbeChunk extends Node3D:
@@ -10,8 +11,27 @@ class ProbeChunk extends Node3D:
 		set_process(active)
 
 
+class LayeredProbeChunk extends Node3D:
+	var layer: StringName
+	var transitions: Array[bool] = []
+
+	func _init(p_layer: StringName) -> void:
+		layer = p_layer
+
+	func get_streaming_simulation_layer() -> StringName:
+		return layer
+
+	func set_streaming_simulation_active(active: bool) -> void:
+		transitions.append(active)
+		set_process(active)
+
+
 func _make_chunk(_cell: Vector3i) -> Node:
 	return ProbeChunk.new()
+
+
+func _make_layered_chunk(cell: Vector3i) -> Node:
+	return LayeredProbeChunk.new(&"SurfaceCosmetics" if cell.x == 0 else &"DungeonEffects")
 
 
 func run(t) -> void:
@@ -108,3 +128,65 @@ func run(t) -> void:
 	t.eq(initial.get_loaded_count() - initial.get_simulation_active_count(),
 		initial.get_loaded_count() - 1, "initial tiering does not inflate loaded work")
 	initial.free()
+
+	t.current = "Unreal-inspired named simulation data layers suspend only cosmetics"
+	var layered := WorldStreamer.new()
+	layered.axes = WorldStreamer.AXES_XZ
+	layered.cell_size = 16.0
+	layered.load_radius = 24.0
+	layered.unload_radius = 32.0
+	layered.focus_position = Vector3(8.0, 0.0, 8.0)
+	layered.max_instantiations_per_frame = 64
+	layered.max_simulation_transitions_per_update = 64
+	layered.set_chunk_generator(Callable(self, "_make_layered_chunk"))
+	if layered.has_method("set_simulation_layer_enabled"):
+		WorldStreamingPolicy.apply_simulation_layers(layered, true)
+		t.check(not layered.is_simulation_layer_enabled(&"SurfaceCosmetics"),
+			"actual Albion underground policy disables the surface layer")
+		t.check(layered.set_simulation_layer_enabled(&"SurfaceCosmetics", false),
+			"repeated surface layer state is idempotent before loading")
+		layered.refresh()
+		var surface_cell := Vector3i(0, 0, 0)
+		var dungeon_cell := Vector3i(1, 0, 0)
+		var surface := layered.get_chunk(surface_cell) as LayeredProbeChunk
+		var dungeon := layered.get_chunk(dungeon_cell) as LayeredProbeChunk
+		t.check(surface != null and dungeon != null,
+			"surface and dungeon simulation chunks share one streamer's resident set")
+		if surface != null and dungeon != null:
+			t.eq(layered.get_cell_simulation_layer(surface_cell), &"SurfaceCosmetics",
+				"surface layer metadata follows the loaded chunk")
+			t.eq(layered.get_cell_simulation_layer(dungeon_cell), &"DungeonEffects",
+				"unrelated chunk layer remains independently addressable")
+			t.check(not layered.is_cell_simulation_active(surface_cell),
+				"disabled surface starts inactive with no initial update flash")
+			t.check(layered.is_cell_simulation_active(dungeon_cell),
+				"another layer remains active despite underground surface suspension")
+			var count_before: int = layered.get_loaded_count()
+			WorldStreamingPolicy.apply_simulation_layers(layered, false)
+			t.check(layered.is_simulation_layer_enabled(&"SurfaceCosmetics"),
+				"actual Albion outdoors policy reenables the data layer")
+			layered.refresh()
+			t.check(layered.is_cell_simulation_active(surface_cell),
+				"surface chunk resumes at existing node with no reload")
+			t.check(layered.get_chunk(surface_cell) == surface,
+				"resuming simulated visuals never replaces a resident chunk")
+			t.eq(layered.get_loaded_count(), count_before,
+				"data layers never alter world loading or collision residency")
+			WorldStreamingPolicy.apply_simulation_layers(layered, true)
+			t.check(not layered.is_simulation_layer_enabled(&"SurfaceCosmetics"),
+				"reentering dungeon pauses the surface again")
+			layered.refresh()
+			t.check(not layered.is_cell_simulation_active(surface_cell),
+				"subsequent cosmetic suspension remains reversible")
+			t.check(layered.is_cell_simulation_active(dungeon_cell),
+				"other layers do not inherit surface state")
+			t.eq(layered.get_loaded_count(), count_before,
+				"suspension never unloads play-critical chunks")
+		layered.unload_all()
+		t.eq(layered.get_cell_simulation_layer(Vector3i.ZERO), &"",
+			"unloading drops per-cell layer identity")
+	else:
+		t.check(not layered.has_method("set_simulation_layer_enabled"),
+			"older custom engines keep existing simulation radius behavior")
+	layered.free()
+

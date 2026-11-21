@@ -1,0 +1,81 @@
+name: Native timed audio mix snapshots and Albion combat focus
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/audio_mix_snapshot_controller.*'
+      - 'modules/gameplay_fx/tests/test_audio_mix_snapshot_controller.h'
+      - 'modules/gameplay_fx/doc_classes/AudioMixSnapshotController.xml'
+      - 'modules/gameplay_fx/AUDIO_MIX_SNAPSHOTS.md'
+      - 'game/scripts/client/audio_mix_snapshots.gd'
+      - 'game/scripts/client/audio.gd'
+      - 'game/tests/test_audio_timed_mix.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_timed_audio_mix_contract.py'
+      - '.github/workflows/native-timed-audio-mixes.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gameplay_fx/audio_mix_snapshot_controller.*'
+      - 'modules/gameplay_fx/tests/test_audio_mix_snapshot_controller.h'
+      - 'modules/gameplay_fx/doc_classes/AudioMixSnapshotController.xml'
+      - 'modules/gameplay_fx/AUDIO_MIX_SNAPSHOTS.md'
+      - 'game/scripts/client/audio_mix_snapshots.gd'
+      - 'game/scripts/client/audio.gd'
+      - 'game/tests/test_audio_timed_mix.gd'
+      - 'game/tests/run_all.gd'
+      - 'tests/scene/test_timed_audio_mix_contract.py'
+      - '.github/workflows/native-timed-audio-mixes.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  timed-bus-mix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Timed bus mix native and Albion static source contracts
+        run: python3 -m unittest tests/scene/test_timed_audio_mix_contract.py -v
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Native timed bus mix and existing snapshot regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*AudioMixSnapshot*" --no-colors 2>&1 | tee timed-audio-native.log
+      - name: Import Albion After and reject GDScript parse errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee timed-audio-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' timed-audio-import.log; then exit 1; fi
+      - name: Albion actual combat timed snapshot and existing mix parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --path game --script res://tests/run_one.gd -- test_audio_timed_mix test_audio_mix_snapshots 2>&1 | tee timed-audio-game.log
+          grep -E '^TOTAL [0-9]+ checks, 0 failures$' timed-audio-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' timed-audio-game.log; then exit 1; fi
+      - name: Upload engine and game logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-timed-audio-mix-logs
+          if-no-files-found: ignore
+          path: |
+            timed-audio-native.log
+            timed-audio-import.log
+            timed-audio-game.log

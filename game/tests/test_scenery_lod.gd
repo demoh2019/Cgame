@@ -3,6 +3,7 @@ extends RefCounted
 
 const SceneryLod = preload("res://scripts/client/scenery_lod.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
+const GraphicsQuality = preload("res://scripts/client/graphics_quality.gd")
 
 
 func run(t) -> void:
@@ -162,5 +163,135 @@ func run(t) -> void:
 	else:
 		t.near(SceneryLod.decor_range_for_bounds(small, 0, 66.0),
 			24.75, 0.00001, "stock Godot uses deterministic size-profile fallback")
+	t.current = "preconfigured Unreal-style cull profiles reuse one preset per quality"
+	var seeded_ranges := PackedFloat32Array([45.0, 75.0, 105.0, 160.0, 0.0])
+	var seeded_sizes := PackedFloat32Array([1.0, 4.0, 10.0, 24.0, 64.0])
+	for quality in 4:
+		var first_profile_ranges: PackedFloat32Array = SceneryLod._decor_ranges_for_quality(quality)
+		t.eq(first_profile_ranges.size(), 5, "quality %d caches five size/range pairs" % quality)
+		for sample in 64:
+			var side: float = 1.0 + float(sample) * 1.1
+			var bounds := AABB(Vector3(-10, 2, -40), Vector3(side, 2, 1))
+			var cap: float = 15.0 + float(sample) * 2.5
+			var scripted: float = SceneryLod.decor_range_for_bounds(bounds, quality, cap, false)
+			var runtime_result: float = SceneryLod.decor_range_for_bounds(bounds, quality, cap)
+			t.near(runtime_result, scripted, 0.00001,
+				"per-quality cached native/fallback parity sample %d tier %d" % [sample, quality])
+	t.eq(SceneryLod._decor_profile_ranges_by_quality.size(), 4,
+		"quality profiles are constructed once, not per decorative instance")
+	if ClassDB.class_exists("CullDistanceProfile3D"):
+		var cached_probe: Object = ClassDB.instantiate("CullDistanceProfile3D")
+		if cached_probe != null and cached_probe.has_method("configure") \
+				and cached_probe.has_method("get_cached_cull_distance"):
+			t.eq(int(cached_probe.call("get_pair_count")), 0,
+				"new engine profiles begin unconfigured")
+			t.eq(float(cached_probe.call("get_cached_cull_distance", small, 80.0)), -1.0,
+				"unconfigured profile returns explicit invalid sentinel")
+			t.check(bool(cached_probe.call("configure", seeded_sizes, seeded_ranges)),
+				"native profile configures size/range data once")
+			t.eq(int(cached_probe.call("get_pair_count")), 5,
+				"native profile retains validated pair count")
+			t.eq(float(cached_probe.call("get_cached_cull_distance", small, 120.0)), 45.0,
+				"cached native profile resolves smallest decorative bounds")
+			seeded_ranges[0] = NAN
+			t.check(not bool(cached_probe.call("configure", seeded_sizes, seeded_ranges)),
+				"invalid reconfiguration is rejected atomically")
+			t.eq(float(cached_probe.call("get_cached_cull_distance", small, 120.0)), 45.0,
+				"bad reconfiguration does not poison live rendering profile")
+			cached_probe.call("clear_profile")
+			t.eq(int(cached_probe.call("get_pair_count")), 0, "profile can be cleared")
+			t.eq(float(cached_probe.call("get_cached_cull_distance", small, 120.0)), -1.0,
+				"cleared profile reports missing state")
+			for quality in 4:
+				var cached_instance: Object = SceneryLod._decor_cached_profiles.get(quality)
+				t.check(cached_instance != null and
+					int(cached_instance.call("get_pair_count")) == 5,
+					"Albion reuses a native profile per visual quality %d" % quality)
+
+
+	t.current = "GPU scene quality swaps use bounded native cull distance batches"
+	var quality_code: String = (GraphicsQuality as Script).source_code
+	t.check(quality_code.contains("SceneryLod.apply_many("),
+		"real graphics-quality changes route all existing scenery into the bulk policy")
+	var kinds: Array[Dictionary] = [
+		{"kind": "decor:fern", "base": 120.0, "box": AABB(Vector3.ZERO, Vector3.ONE)},
+		{"kind": "decor:bush", "base": 150.0, "box": AABB(Vector3(-1, 0, -1), Vector3(8, 4, 3))},
+		{"kind": "decor:large", "base": 120.0, "box": AABB(Vector3.ZERO, Vector3(72, 1, 1))},
+		{"kind": "decor:unset", "base": 80.0, "box": AABB()},
+		{"kind": "decor:unbounded", "base": 0.0, "box": AABB(Vector3.ZERO, Vector3.ONE)},
+		{"kind": "tree:oak", "base": 0.0, "box": AABB(Vector3.ZERO, Vector3.ONE)},
+		{"kind": "rock:2", "base": 0.0, "box": AABB(Vector3.ZERO, Vector3.ONE)},
+		{"kind": "building:2", "base": 0.0, "box": AABB(Vector3.ZERO, Vector3.ONE)},
+		{"kind": "prop:crate", "base": 65.0, "box": AABB(Vector3.ZERO, Vector3.ONE)}
+	]
+	for quality in 4:
+		var existing_nodes: Array = []
+		var reference_nodes: Array[MultiMeshInstance3D] = []
+		for entry in kinds:
+			var live := MultiMeshInstance3D.new()
+			var reference := MultiMeshInstance3D.new()
+			live.custom_aabb = entry["box"]
+			reference.custom_aabb = entry["box"]
+			live.set_meta("aa_scenery_kind", entry["kind"])
+			live.set_meta("aa_scenery_distance", entry["base"])
+			SceneryLod.apply(reference, entry["kind"], quality, float(entry["base"]))
+			existing_nodes.append(live)
+			reference_nodes.append(reference)
+		var untracked := MultiMeshInstance3D.new()
+		untracked.visibility_range_end = 777.0
+		existing_nodes.append(untracked)
+		SceneryLod.apply_many(existing_nodes, quality)
+		for i in kinds.size():
+			var actual: MultiMeshInstance3D = existing_nodes[i]
+			var expected: MultiMeshInstance3D = reference_nodes[i]
+			t.near(actual.visibility_range_end, expected.visibility_range_end, 0.00001,
+				"bulk and per-instance draw ranges agree for %s tier %d" % [kinds[i]["kind"], quality])
+			t.near(actual.visibility_range_end_margin, expected.visibility_range_end_margin, 0.00001,
+				"bulk and per-instance cull margins agree for %s tier %d" % [kinds[i]["kind"], quality])
+			t.near(actual.lod_bias, expected.lod_bias, 0.00001,
+				"bulk and per-instance imported LOD bias agree for %s tier %d" % [kinds[i]["kind"], quality])
+			actual.free()
+			expected.free()
+		t.eq(untracked.visibility_range_end, 777.0,
+			"unregistered scene nodes cannot be altered by bulk graphics quality")
+		untracked.free()
+
+	t.current = "bulk quality updates partition large streamed worlds safely"
+	var many_nodes: Array = []
+	for i in range(SceneryLod.MAX_CULL_BATCH + 3):
+		var decoration := MultiMeshInstance3D.new()
+		decoration.custom_aabb = AABB(Vector3.ZERO, Vector3.ONE)
+		decoration.set_meta("aa_scenery_kind", "decor:fern")
+		decoration.set_meta("aa_scenery_distance", 120.0)
+		many_nodes.append(decoration)
+	SceneryLod.apply_many(many_nodes, 0)
+	t.near(many_nodes[0].visibility_range_end, 24.75, 0.00001,
+		"first chunk uses size-based native decor range")
+	t.near(many_nodes[SceneryLod.MAX_CULL_BATCH - 1].visibility_range_end, 24.75, 0.00001,
+		"last entry in full 4096-instance native batch remains correct")
+	t.near(many_nodes[SceneryLod.MAX_CULL_BATCH].visibility_range_end, 24.75, 0.00001,
+		"first entry after the batch boundary is handled")
+	t.near(many_nodes.back().visibility_range_end, 24.75, 0.00001,
+		"final partial native batch resolves all remaining decor")
+	for decoration in many_nodes:
+		decoration.free()
+
+	if ClassDB.class_exists("CullDistanceProfile3D"):
+		var native_bulk: Object = ClassDB.instantiate("CullDistanceProfile3D")
+		if native_bulk != null and native_bulk.has_method("get_cached_cull_distances"):
+			t.check(bool(native_bulk.call("configure",
+				PackedFloat32Array([1.0, 64.0]), PackedFloat32Array([40.0, 0.0]))),
+				"native bulk profile configures a reusable size/range policy")
+			var positions := PackedVector3Array([Vector3.ZERO, Vector3(-5, 0, -5)])
+			var sizes := PackedVector3Array([Vector3.ONE, Vector3(70, 1, 1)])
+			var caps := PackedFloat64Array([100.0, 80.0])
+			var results: PackedFloat64Array = native_bulk.call(
+				"get_cached_cull_distances", positions, sizes, caps)
+			t.eq(results, PackedFloat64Array([40.0, 80.0]),
+				"native bulk returns ordered values and preserves zero-cull large silhouettes")
+			caps[1] = NAN
+			t.check(native_bulk.call("get_cached_cull_distances", positions, sizes, caps).is_empty(),
+				"bad final entry rejects entire native batch rather than partially culling scenery")
+
 	instance.free()
 	ChunkView.configure_scenery(1)

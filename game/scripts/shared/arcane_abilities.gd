@@ -1,8 +1,8 @@
 extends RefCounted
 ## Classless spells every survivor can cast, independent of the equipped weapon.
 ## Arcane Bolt: a cheap, fast magic projectile (ranged, no ammo, costs combat energy).
-## Cataclysm: the ultimate — a long-cooldown blast around the caster that hits every
-## infected in range (PvE only, so it can never wipe out players in a crowd).
+## Cataclysm: long-cooldown PvE blast against up to ULTIMATE_MAX_TARGETS
+## nearest infected inside the radius (never hits other survivors).
 ## The server owns every number here; clients only send an aim direction.
 
 const BOLT_ENERGY_COST := 18.0

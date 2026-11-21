@@ -4,7 +4,7 @@
 		Declarative all/any/none test over a [GameplayTagContainer] or [GameplayTagStackContainer].
 	</brief_description>
 	<description>
-		A container matches when every tag in [member all_tags] matches, at least one tag in [member any_tags] matches (ignored when empty) and no tag in [member none_tags] matches. Hierarchy matching follows [member exact]. Use [method matches_stacks] to apply the same query against counted tags: each matching tag must meet [member min_stack_count]. For a parent tag, the count includes all matching descendants. [method matches] ignores the stack threshold.
+		A container matches when every tag in [member all_tags] matches, at least [member min_any_matches] distinct query tags in [member any_tags] match (ignored when empty) and no tag in [member none_tags] matches. Hierarchy matching follows [member exact]. Use [method matches_stacks] to apply the same query against counted tags: each matching tag must meet [member min_stack_count]. For a parent tag, the count includes all matching descendants. [method matches] ignores the stack threshold. [method matches_stacks] ignores [member min_any_matches] and applies only [member min_stack_count].
 	</description>
 	<methods>
 		<method name="matches" qualifiers="const">
@@ -27,6 +27,9 @@
 		</member>
 		<member name="exact" type="bool" setter="set_exact" getter="is_exact" default="false">
 			If [code]true[/code], parent tags are not matched.
+		</member>
+		<member name="min_any_matches" type="int" setter="set_min_any_matches" getter="get_min_any_matches" default="1">
+			How many distinct [member any_tags] entries must match, from 1 to 64. Duplicates in the query do not raise this count. Invalid values leave the previous threshold unchanged; with an empty [member any_tags] array the threshold is ignored.
 		</member>
 		<member name="min_stack_count" type="int" setter="set_min_stack_count" getter="get_min_stack_count" default="1">
 			Minimum positive count per requested tag in [method matches_stacks]. Range is 1 to 65535. A parent tag uses the total of its descendants; the property does not affect boolean [method matches].

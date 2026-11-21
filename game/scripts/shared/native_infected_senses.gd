@@ -117,6 +117,14 @@ func best_confirmed_stimulus(sense: int) -> Dictionary:
     return _history.get_best(sense)
 
 
+## Distinct from newest-first history: rank only previously verified events.
+## Older native forks cannot rank multiple events and keep their old AI path.
+func get_ranked_confirmed_stimuli(sense: int, limit: int = 8) -> Array:
+    if _history == null or sense < 0 or sense > 2 or limit < 0 or limit > 64 or limit == 0:
+        return []
+    if _history.has_method("get_ranked"):
+        return _history.call("get_ranked", sense, limit)
+    return []
 ## Unreal-style perception range query over *previously approved* stimuli.
 ## This filters stale remote locations during chase recovery without sensing
 ## any new player, changing target selection, or exposing server-only memory.
@@ -151,6 +159,31 @@ func best_confirmed_stimulus_in_radius(sense: int, center: Vector2, radius: floa
     return selected
 
 
+## Actor-scoped read of a previously authorized sound/sight, bounded to our
+## present pursuit leash. It neither senses a new event nor sets a target.
+## On older forks use the source-aware, bounded history snapshot; on stock
+## Godot there is no extra memory to query.
+func best_confirmed_stimulus_for_source_in_radius(
+        sense: int, source_id: int, center: Vector2, radius: float) -> Dictionary:
+    if _history == null or source_id < 0 or sense < 0 or sense > 2 \
+            or not center.is_finite() or not is_finite(radius) \
+            or radius < 0.0 or radius > 1000000.0:
+        return {}
+    if _history.has_method("get_best_for_source_in_radius"):
+        return _history.get_best_for_source_in_radius(sense, source_id, center, radius)
+    # Identified sources have at most one live record in each sense.
+    # This fallback is only queried during loss of chase, not each frame.
+    var squared_radius: float = radius * radius
+    for entry_data in _history.get_recent(64):
+        var entry: Dictionary = entry_data
+        if int(entry.get("sense", -1)) != sense or int(entry.get("source_id", -1)) != source_id:
+            continue
+        var position: Vector2 = entry.get("position", Vector2.INF)
+        if position.is_finite() and center.distance_squared_to(position) <= squared_radius:
+            return entry
+    return {}
+
+
 ## A server-authoritative source became invalid (disconnect, death, safe hub).
 ## Only forget its identified history entries; do not reset other survivors'
 ## perceptions or fabricate fresh events. Older binaries safely do nothing.
@@ -179,6 +212,7 @@ func get_debug_snapshot() -> Dictionary:
         "best_sight_stimulus": best_confirmed_stimulus(0),
         "best_sound_stimulus": best_confirmed_stimulus(1),
         "recent_stimuli": get_recent_confirmed_stimuli(),
+        "ranked_sound_stimuli": get_ranked_confirmed_stimuli(1, 4),
         "ranked_hearing": has_ranked_hearing(),
         "remembers_sight": remembers_sight(),
         "remembers_sound": remembers_sound(),

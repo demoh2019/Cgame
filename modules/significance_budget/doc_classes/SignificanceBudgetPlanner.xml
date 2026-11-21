@@ -37,6 +37,18 @@
 			<param index="6" name="max_distance" type="float" />
 			<description>Selects up to [param budget] cosmetic effect indices, ordering by priority (3 to 0), then visibility (1 before 0), distance, and original index. Input visibility values must be 0 or 1 and have the same length as the other arrays. Four category caps and an inclusive hard distance limit apply. Invalid inputs reject atomically; off-screen critical effects still compete within their priority tier. This does not perform occlusion queries or affect gameplay authority.</description>
 		</method>
+		<method name="select_effects_visible_fair" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priorities" type="PackedByteArray" />
+			<param index="2" name="categories" type="PackedByteArray" />
+			<param index="3" name="visible" type="PackedByteArray" />
+			<param index="4" name="category_caps" type="PackedInt32Array" />
+			<param index="5" name="category_ranges" type="PackedFloat64Array" />
+			<param index="6" name="category_minimums" type="PackedInt32Array" />
+			<param index="7" name="budget" type="int" />
+			<description>Niagara-inspired category diversity under a bounded cosmetic VFX frame budget. After selecting all eligible priority-3 emergency effects (subject to hard category caps and global budget), selects the most important eligible candidates needed to satisfy soft per-category minimums, then spends remaining slots by ordinary priority, on-screen visibility, distance and original index. Four minimums must be nonnegative, no greater than their corresponding caps, and sum to no more than the global budget. If a category has no eligible effects or emergency priority-3 effects exhaust the frame, its minimum is not guaranteed and does not reserve an empty slot. The 4 category caps, 4 inclusive category distance ranges, up to 16384 candidates, 128 slots and all pre-existing validation limits remain binding; invalid input returns an empty plan with no partial state. Zero minimums produce the same selection as [method select_effects_visible_ranged]. The result is ordered input indices and never changes gameplay, audio, simulation or particle nodes.</description>
+		</method>
 		<method name="select_effects_visible_ranged" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />
@@ -89,6 +101,23 @@
 			<param index="3" name="budget" type="int" />
 			<param index="4" name="max_distance" type="float" default="1000.0" />
 			<description>Ranks candidates by priority, then squared distance to their nearest viewer; excludes candidates beyond inclusive [param max_distance]. Requires 1 to 16 finite viewers, finite positions, matching priorities, and a finite range between 0 and 1,000,000. No scene tree, rendering or physics work is performed.</description>
+		</method>
+		<method name="select_world_priority_stable_cone" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="viewer" type="Vector3" />
+			<param index="2" name="forward" type="Vector3" />
+			<param index="3" name="priorities" type="PackedByteArray" />
+			<param index="4" name="ids" type="PackedInt64Array" />
+			<param index="5" name="retained_ids" type="PackedInt64Array" />
+			<param index="6" name="budget" type="int" />
+			<param index="7" name="max_distance" type="float" default="1000.0" />
+			<param index="8" name="hysteresis" type="float" default="0.0" />
+			<param index="9" name="half_angle_degrees" type="float" default="75.0" />
+			<param index="10" name="near_radius" type="float" default="3.0" />
+			<description>
+				Plans a bounded cosmetic presentation budget by position, camera direction and inclusive view cone. Candidates within [param near_radius] of the viewer are admitted from any direction, while more distant candidates must face the normalized [param forward] direction with a dot product greater than or equal to the cosine of [param half_angle_degrees]. A half-angle of 180 degrees disables view-cone filtering and matches [method select_world_priority_stable] for one viewer. Distances beyond [param max_distance] never qualify, even with retention hysteresis. Ranking uses strict priority 0 through 3, followed by adjusted (retention-favored) distance, raw distance, unique positive stable ID and source index. Supports at most 16,384 candidates, 128 selected indices and 128 retained IDs. [param max_distance] must be finite in 0 through 1,000,000; hysteresis must be in 0 through max distance; half-angle must be finite in 0 through 180 degrees; [param near_radius] must be finite in 0 through max distance; [param forward] must be finite and nonzero. Source arrays must match, have finite positions, valid priorities and unique positive IDs. All inputs are validated atomically, with malformed requests returning an empty selection. This is a stateless CPU planning tool, not a camera frustum, GPU occlusion query, scene visibility change or server-authoritative gameplay filter.
+			</description>
 		</method>
 	</methods>
 </class>

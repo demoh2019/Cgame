@@ -35,6 +35,7 @@
 
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
+#include "core/string/string_name.h"
 #include "core/variant/dictionary.h"
 
 // Streams the parts ("chunks") of a big world in and out around a focus point, so an open world
@@ -135,6 +136,12 @@ private:
 	int64_t last_frame_chunk_work_usec = 0;
 	int frame_chunk_attempt_count = 0;
 	int last_frame_chunk_attempt_count = 0;
+	// Optional per-stage EMA admission forecast, not a hard CPU cap.
+	bool predictive_chunk_work_budget_enabled = false;
+	int64_t estimated_generator_work_usec = 0;
+	int64_t estimated_finalization_work_usec = 0;
+	int frame_predicted_deferred_count = 0;
+	int last_predicted_deferred_count = 0;
 	double update_interval = 0.1;
 	String chunk_path_template;
 	Callable chunk_provider;
@@ -154,14 +161,35 @@ private:
 	struct CachedChunk {
 		ObjectID node_id;
 		uint64_t age = 0;
+		int64_t estimated_bytes = 0;
+		double retained_at_seconds = 0.0;
 	};
 	HashMap<Vector3i, CachedChunk> cached_chunks;
 	int max_cached_chunks = 0; // Zero preserves legacy free-on-unload.
+	int64_t max_cached_chunk_bytes = 0;
+	int64_t cached_chunk_bytes = 0;
+	// Zero disables time-based reclamation of detached procedural roots.
+	real_t cached_chunk_retention_seconds = 0.0;
+	double cached_chunk_elapsed_seconds = 0.0;
 	uint64_t cache_clock = 0;
 	int cache_hits = 0;
 	int cache_evictions = 0;
+	int cache_expirations = 0;
+	// Opt-in incremental cache expiration, preserving legacy semantics at zero.
+	int max_cached_expirations_per_frame = 0;
+	int max_cached_expiration_work_usec = 0;
+	int last_cached_expiration_count = 0;
+	int last_deferred_cached_expiration_count = 0;
+	int64_t last_cached_expiration_work_usec = 0;
 	HashMap<Vector3i, bool> simulation_active_cells;
 	int simulation_inactive_count = 0;
+	// Opt-in, bounded runtime simulation layers. Loading, collision, visual
+	// residency, networking, and authoritative gameplay never depend on them.
+	HashMap<Vector3i, StringName> cell_simulation_layers;
+	HashMap<StringName, bool> simulation_layer_states;
+	int disabled_simulation_layer_count = 0;
+	static constexpr int MAX_SIMULATION_LAYERS = 16;
+	bool _simulation_layer_allows(const Vector3i &p_cell) const;
 	// Only chunk roots actually implementing the callback are tracked.
 	// A zero/absent entry means full tick frequency.
 	HashMap<Vector3i, real_t> applied_tick_intervals;
@@ -182,6 +210,11 @@ private:
 	int max_auto_retries = 0;
 	real_t retry_initial_delay = 1.0;
 	real_t retry_max_delay = 16.0;
+	// Zero preserves the historical simultaneous-release retry policy.
+	real_t retry_delay_spread = 0.0;
+	int max_retry_releases_per_update = 0;
+	int last_retry_release_count = 0;
+	int last_retry_deferred_count = 0;
 	double time_since_update = 1e9;
 	bool truncated_warned = false;
 
@@ -203,11 +236,13 @@ private:
 	bool _adopt_chunk(const Vector3i &p_cell, Node *p_chunk);
 	void _run_generator_queue(int &r_instantiation_budget, uint64_t p_frame_started_usec);
 	void _generate_cell(const Vector3i &p_cell);
-	void _record_chunk_work(uint64_t p_started_usec);
+	void _record_chunk_work(uint64_t p_started_usec, bool p_generator);
+	bool _should_defer_predicted_work(bool p_generator) const;
 	void _finish_chunk_work_frame();
 	void _unload_cell(const Vector3i &p_cell, bool p_allow_cache = true);
 	bool _restore_cached_chunk(const Vector3i &p_cell);
 	void _trim_cached_chunks();
+	void _expire_cached_chunks(bool p_ignore_budget = false);
 	void _discard_cached_chunks();
 	void _reset_state();
 	void _record_failure(const Vector3i &p_cell, const String &p_reason);
@@ -294,6 +329,12 @@ public:
 	int get_max_simulation_transitions_per_update() const { return max_simulation_transitions_per_update; }
 	bool is_cell_simulation_active(const Vector3i &p_cell) const;
 	int get_simulation_active_count() const;
+	// Chunk roots may implement get_streaming_simulation_layer() -> StringName.
+	// Unknown/unconfigured layers are enabled by default; no load/unload.
+	bool set_simulation_layer_enabled(const StringName &p_layer, bool p_enabled);
+	bool is_simulation_layer_enabled(const StringName &p_layer) const;
+	StringName get_cell_simulation_layer(const Vector3i &p_cell) const;
+	int get_simulation_layer_count() const { return simulation_layer_states.size(); }
 	// For opted-in script roots, set_streaming_tick_interval(seconds) is called
 	// at initial adoption and for later bounded near/far transitions.
 	// -1 disables; hysteresis only affects far-tier entry, not near recovery.
@@ -323,12 +364,28 @@ public:
 	double get_streaming_frame_pressure_percent() const { return streaming_frame_pressure * 100.0; }
 	int64_t get_last_frame_chunk_work_usec() const { return last_frame_chunk_work_usec; }
 	int get_last_frame_chunk_attempt_count() const { return last_frame_chunk_attempt_count; }
+	void set_predictive_chunk_work_budget_enabled(bool p_enabled) { predictive_chunk_work_budget_enabled = p_enabled; }
+	bool is_predictive_chunk_work_budget_enabled() const { return predictive_chunk_work_budget_enabled; }
+	int64_t get_estimated_generator_work_usec() const { return estimated_generator_work_usec; }
+	int64_t get_estimated_finalization_work_usec() const { return estimated_finalization_work_usec; }
+	int get_last_predicted_deferred_chunk_count() const { return last_predicted_deferred_count; }
+	static int64_t update_chunk_work_estimate(int64_t p_previous, int64_t p_sample_usec);
+	static bool should_defer_predicted_chunk_work(int p_budget_usec, int p_previous_attempts,
+			int64_t p_work_spent_usec, int64_t p_estimated_next_usec);
 	void set_max_auto_retries(int p_count);
 	int get_max_auto_retries() const { return max_auto_retries; }
 	void set_retry_initial_delay(real_t p_seconds);
 	real_t get_retry_initial_delay() const { return retry_initial_delay; }
 	void set_retry_max_delay(real_t p_seconds);
 	real_t get_retry_max_delay() const { return retry_max_delay; }
+	void set_retry_delay_spread(real_t p_fraction);
+	real_t get_retry_delay_spread() const { return retry_delay_spread; }
+	void set_max_retry_releases_per_update(int p_count);
+	int get_max_retry_releases_per_update() const { return max_retry_releases_per_update; }
+	int get_last_retry_release_count() const { return last_retry_release_count; }
+	int get_last_retry_deferred_count() const { return last_retry_deferred_count; }
+	static double calculate_retry_delay_seconds(const Vector3i &p_cell, int p_attempt,
+			double p_initial_seconds, double p_max_seconds, double p_spread);
 	int get_retry_pending_count() const;
 	void set_update_interval(double p_seconds);
 	double get_update_interval() const { return update_interval; }
@@ -345,6 +402,20 @@ public:
 	// Cached chunks never count as loaded and reinsertion is still frame-budgeted.
 	void set_max_cached_chunks(int p_count);
 	int get_max_cached_chunks() const { return max_cached_chunks; }
+	void set_max_cached_chunk_bytes(int64_t p_bytes);
+	int64_t get_max_cached_chunk_bytes() const { return max_cached_chunk_bytes; }
+	int64_t get_cached_chunk_bytes() const { return cached_chunk_bytes; }
+	void set_cached_chunk_retention_seconds(real_t p_seconds);
+	real_t get_cached_chunk_retention_seconds() const { return cached_chunk_retention_seconds; }
+	void advance_cached_chunk_retention(real_t p_delta_seconds);
+	int get_chunk_cache_expiration_count() const { return cache_expirations; }
+	void set_max_cached_expirations_per_frame(int p_count);
+	int get_max_cached_expirations_per_frame() const { return max_cached_expirations_per_frame; }
+	void set_max_cached_expiration_work_usec(int p_usec);
+	int get_max_cached_expiration_work_usec() const { return max_cached_expiration_work_usec; }
+	int get_last_cached_expiration_count() const { return last_cached_expiration_count; }
+	int get_last_deferred_cached_expiration_count() const { return last_deferred_cached_expiration_count; }
+	int64_t get_last_cached_expiration_work_usec() const { return last_cached_expiration_work_usec; }
 	int get_cached_chunk_count() const { return int(cached_chunks.size()); }
 	int get_chunk_cache_hit_count() const { return cache_hits; }
 	int get_chunk_cache_eviction_count() const { return cache_evictions; }

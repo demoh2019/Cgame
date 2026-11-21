@@ -65,6 +65,32 @@ static func display_remaining(slot: String, you: Dictionary, tracker: Object = n
 			StringName(SLOT_TAGS[slot]), StringName(GROUP_TAG))))
 	return maxf(raw_remaining(slot, you), _safe_seconds(you.get("ability_global_cd", 0.0)))
 
+
+## Read the entire five-slot bar with one native bridge call, keeping the
+## shared authoritative group lock. Older native builds and stock Godot use
+## the same per-slot policy. Invalid slot lists fail closed.
+static func display_many(slots: PackedStringArray, you: Dictionary,
+		tracker: Object = null) -> PackedFloat64Array:
+	var result := PackedFloat64Array()
+	if slots.size() > 64:
+		return result
+	var tags := PackedStringArray()
+	for slot in slots:
+		if not SLOT_TAGS.has(slot):
+			return result
+		tags.append(SLOT_TAGS[slot])
+	if tracker != null and tracker.has_method("get_effective_remaining_batch"):
+		var native: PackedFloat64Array = tracker.call(
+			"get_effective_remaining_batch", tags, StringName(GROUP_TAG))
+		if native.size() == slots.size():
+			return native
+	# Fallback preserves ticked native snapshots when older engines only
+	# expose the individual get_effective_remaining bridge.
+	for slot in slots:
+		result.append(display_remaining(slot, you, tracker))
+	return result
+
+
 ## Scoped reconciliation: server owns Ability.*, while Local.* may hold
 ## short client-side button feedback. Older forks use whole snapshots.
 static func reconcile_native(tracker: Object, you: Dictionary) -> bool:

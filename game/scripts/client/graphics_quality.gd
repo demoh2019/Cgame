@@ -31,6 +31,12 @@ const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd
 const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
 const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection_budget.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
+const GraphicsFramePacing = preload("res://scripts/client/graphics_frame_pacing.gd")
+const GraphicsFoveatedShading = preload("res://scripts/client/graphics_foveated_shading.gd")
+const GraphicsHdrOutput = preload("res://scripts/client/graphics_hdr_output.gd")
+const GraphicsAreaLights = preload("res://scripts/client/graphics_area_lights.gd")
+const CharacterShading = preload("res://scripts/client/character_shading.gd")
+const ImpostorField = preload("res://scripts/client/impostor_field.gd")
 
 static var _level: int = 1
 static var _loaded: bool = false
@@ -60,6 +66,25 @@ static func unload_budget_for_quality(value: int) -> int:
 ## Keep a small guaranteed cleanup slice even on Performance settings.
 static func unload_time_budget_for_quality(value: int) -> int:
 	return [400, 650, 900, 1200][clampi(value, 0, 3)]
+
+
+## Conservative detached cosmetic scene cache estimate, not physical RAM.
+static func streamed_chunk_cache_bytes_for_quality(value: int) -> int:
+	return [8, 16, 24, 32][clampi(value, 0, 3)] * 1048576
+
+
+## Bound how long detached scenery retains memory while player is idle.
+static func streamed_chunk_cache_retention_for_quality(value: int) -> float:
+	return [3.0, 5.0, 8.0, 12.0][clampi(value, 0, 3)]
+
+
+## Time-slice ordinary expiration of detached cosmetic chunks.
+static func streamed_cache_expirations_for_quality(value: int) -> int:
+	return [1, 1, 2, 2][clampi(value, 0, 3)]
+
+
+static func streamed_cache_expiration_usec_for_quality(value: int) -> int:
+	return [350, 500, 750, 1000][clampi(value, 0, 3)]
 
 
 ## Startup only: Unreal World Partition-style area ramp. Preserve a safe
@@ -262,6 +287,19 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# Detail-normal assets are shared by every cached dungeon masonry mesh.
 	# High/Ultra enable native PBR detail; low-end presets spend zero taps.
 	StoneMicrodetail.configure(_level, str(method))
+	# Steady frame delivery: vsync mode and FPS cap per tier (UE5 t.MaxFPS).
+	GraphicsFramePacing.apply(_level)
+	# HDR10/EDR swapchain on High/Ultra when the monitor supports it.
+	GraphicsHdrOutput.apply(_level, str(method))
+	if viewport != null:
+		# Foveated VRS keeps full shading around the player on low presets.
+		GraphicsFoveatedShading.apply(viewport, _level, str(method))
+		# Torch/lantern emitter radius drives PCSS soft local shadows.
+		GraphicsAreaLights.configure(_level, viewport.get_tree() if viewport.is_inside_tree() else null)
+	# Hair/cloth/eye models apply to characters built from now on.
+	CharacterShading.configure(_level)
+	# Baked billboard impostor rings past the real decor range.
+	ImpostorField.configure(_level)
 	if viewport != null:
 		# Texture-group anisotropic shader variants are already cached per tier.
 		# This viewport cap makes imported glTF PBR texture detail just as sharp.
@@ -348,6 +386,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Sub-LSB output dither is fused into the existing grade pass. Auto
 		# resolution and renderer switching cannot leave stale grain enabled.
 		post_material.set_shader_parameter("deband_strength", float(p["deband_strength"]))
+		post_material.set_shader_parameter("lens_distortion", GraphicsLens.distortion(_level, str(method)))
 		# The engine's optical cos^4 vignette replaces the flat canvas one on High/Ultra.
 		post_material.set_shader_parameter("vignette", 0.0 if native_vignette else 0.28)
 	# Texture-group-style anisotropy on expensive terrain samplers only:
@@ -393,9 +432,11 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 	# cosmetic detail has one separate, small camera-priority frame slice.
 	ChunkView.configure_decor_budget(int(p["decor_budget_usec"]))
 	if viewport != null:
-		for batch in viewport.get_tree().get_nodes_in_group(ChunkView.SCENERY_GROUP):
-			if batch is MultiMeshInstance3D:
-				ChunkView.apply_scenery_detail(batch)
+		# Unreal Cull Distance Volume-inspired bulk update: preserve the
+		# existing per-object policy but send grouped decor bounds through
+		# one native call per bounded 4096-instance batch.
+		SceneryLod.apply_many(
+			viewport.get_tree().get_nodes_in_group(ChunkView.SCENERY_GROUP), _level)
 
 	# The graphics profiles also control water detail and how many terrain chunks are streamed.
 	if water != null and water.material_override is ShaderMaterial:
@@ -431,6 +472,23 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 			var unload_limit: int = unload_budget_for_quality(_level)
 			if int(streamer.call("get_max_unloads_per_update")) != unload_limit:
 				streamer.call("set_max_unloads_per_update", unload_limit)
+		# Runtime quality changes immediately trim detached cosmetic cache.
+		if streamer.has_method("set_max_cached_chunk_bytes"):
+			var cache_bytes: int = streamed_chunk_cache_bytes_for_quality(_level)
+			if int(streamer.call("get_max_cached_chunk_bytes")) != cache_bytes:
+				streamer.call("set_max_cached_chunk_bytes", cache_bytes)
+		if streamer.has_method("set_cached_chunk_retention_seconds"):
+			var retention: float = streamed_chunk_cache_retention_for_quality(_level)
+			if not is_equal_approx(float(streamer.call("get_cached_chunk_retention_seconds")), retention):
+				streamer.call("set_cached_chunk_retention_seconds", retention)
+		# Prevent a busy frame when several detached scenes expire together.
+		if streamer.has_method("set_max_cached_expirations_per_frame"):
+			var expiry_slots: int = streamed_cache_expirations_for_quality(_level)
+			var expiry_usec: int = streamed_cache_expiration_usec_for_quality(_level)
+			if int(streamer.call("get_max_cached_expirations_per_frame")) != expiry_slots:
+				streamer.call("set_max_cached_expirations_per_frame", expiry_slots)
+			if int(streamer.call("get_max_cached_expiration_work_usec")) != expiry_usec:
+				streamer.call("set_max_cached_expiration_work_usec", expiry_usec)
 		# One expensive scene detach must not consume a whole frame of
 		# subsequent cleanup. Older native builds remain fully compatible.
 		if streamer.has_method("set_max_unload_work_usec"):

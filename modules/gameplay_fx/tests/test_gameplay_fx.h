@@ -33,6 +33,8 @@
 #include "../gameplay_attribute_set.h"
 #include "../gameplay_cooldown_tracker.h"
 #include "../gameplay_cue_queue.h"
+#include "../gameplay_effect_application_gate.h"
+#include "../gameplay_effect_stack_policy.h"
 #include "../gameplay_effect_timeline.h"
 #include "../radial_force_field_3d.h"
 #include "../sound_concurrency.h"
@@ -195,6 +197,72 @@ TEST_CASE("[GameplayFX] timeline reapply, explicit tick and expiry") {
 	CHECK(timeline->tick(1.5).size() == 1);
 	CHECK(timeline->is_empty());
 }
+TEST_CASE("[GameplayFX] fused periodic tick and drain is equivalent to legacy two calls") {
+	Ref<GameplayEffectTimeline> legacy;
+	Ref<GameplayEffectTimeline> fused;
+	legacy.instantiate();
+	fused.instantiate();
+	for (int variant = 0; variant < 2; ++variant) {
+		Ref<GameplayEffectTimeline> timeline = variant == 0 ? legacy : fused;
+		REQUIRE(timeline->set_effect("Runtime.Status.Sundered", 3.0));
+		REQUIRE(timeline->set_effect("Runtime.Status.Resolve", 2.1, 3));
+		REQUIRE(timeline->set_effect("Local.Visual.Hit", 0.3));
+		REQUIRE(timeline->set_periodic("Runtime.Status.Sundered", 0.75, false));
+		REQUIRE(timeline->set_periodic("Runtime.Status.Resolve", 1.1, false));
+		REQUIRE(timeline->set_periodic("Local.Visual.Hit", 0.1, true));
+	}
+	const double steps[] = { 0.04, 0.26, 0.1, 0.5, 0.75, 0.71, 2.1, 5.0 };
+	for (int i = 0; i < 8; ++i) {
+		const PackedStringArray expired = legacy->tick(steps[i]);
+		const Dictionary old_pulses = legacy->take_periodic_pulses();
+		const Dictionary new_pulses = fused->tick_and_take_periodic_pulses(steps[i]);
+		CHECK(new_pulses == old_pulses);
+		CHECK(fused->get_snapshot() == legacy->get_snapshot());
+		CHECK(fused->get_effect_count() == legacy->get_effect_count());
+		CHECK(fused->get_stacks("Runtime.Status.Resolve") == legacy->get_stacks("Runtime.Status.Resolve"));
+		if (i == 1) {
+			CHECK(expired.size() == 1);
+			CHECK(expired[0] == "Local.Visual.Hit");
+			CHECK(new_pulses.get(StringName("Local.Visual.Hit"), 0) == Variant(3));
+		}
+	}
+	CHECK(fused->is_empty());
+	CHECK(fused->tick_and_take_periodic_pulses(1.0).is_empty());
+}
+
+TEST_CASE("[GameplayFX] fused periodic tick preserves pending aggregation and rejects invalid time") {
+	Ref<GameplayEffectTimeline> legacy;
+	Ref<GameplayEffectTimeline> fused;
+	legacy.instantiate();
+	fused.instantiate();
+	for (int variant = 0; variant < 2; ++variant) {
+		Ref<GameplayEffectTimeline> timeline = variant == 0 ? legacy : fused;
+		REQUIRE(timeline->set_effect("Runtime.Status.Resolve", 6.0, 3));
+		REQUIRE(timeline->set_periodic("Runtime.Status.Resolve", 0.05, false));
+	}
+	CHECK(legacy->tick(0.1).is_empty());
+	CHECK(fused->tick(0.1).is_empty()); // Pending pulses accumulate before drain.
+	CHECK(legacy->tick(Math::NaN).is_empty());
+	const Dictionary nan_legacy = legacy->take_periodic_pulses();
+	const Dictionary nan_fused = fused->tick_and_take_periodic_pulses(Math::NaN);
+	CHECK(nan_fused == nan_legacy);
+	CHECK(nan_fused.get(StringName("Runtime.Status.Resolve"), 0) == Variant(2));
+	CHECK(fused->get_snapshot() == legacy->get_snapshot());
+	CHECK(legacy->tick(4.0).is_empty());
+	const Dictionary old_pulses = legacy->take_periodic_pulses();
+	const Dictionary new_pulses = fused->tick_and_take_periodic_pulses(4.0);
+	CHECK(new_pulses == old_pulses);
+	CHECK(new_pulses.get(StringName("Runtime.Status.Resolve"), 0) == Variant(GameplayEffectTimeline::MAX_PENDING_PULSES));
+	CHECK(fused->get_snapshot() == legacy->get_snapshot());
+	CHECK(legacy->tick(-5.0).is_empty());
+	CHECK(fused->tick_and_take_periodic_pulses(-5.0).is_empty());
+	CHECK(fused->get_snapshot() == legacy->get_snapshot());
+	CHECK(legacy->tick(50.0).size() == 1);
+	CHECK(fused->tick_and_take_periodic_pulses(50.0) == legacy->take_periodic_pulses());
+	CHECK(fused->is_empty());
+	CHECK(fused->take_periodic_pulses().is_empty()); // Fused step already drained.
+}
+
 TEST_CASE("[GameplayFX] timeline target-tag requirements and immunity are atomic") {
 	Ref<GameplayEffectTimeline> timeline;
 	timeline.instantiate();
@@ -370,8 +438,8 @@ TEST_CASE("[GameplayFX] scoped effect snapshots keep independent periodic pulses
 	CHECK(timeline->get_remaining("RuntimeExtra.Keep") == doctest::Approx(4.75));
 	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(1.75));
 	Dictionary pulses = timeline->take_periodic_pulses();
-	CHECK(pulses.get(StringName("Local.Visual.Hit"), 0) == 1);
-	CHECK(pulses.get(StringName("Runtime.Status.Resolve"), 0) == 0);
+	CHECK(pulses.get(StringName("Local.Visual.Hit"), 0) == Variant(1));
+	CHECK(pulses.get(StringName("Runtime.Status.Resolve"), 0) == Variant(0));
 
 	const int old_count = timeline->get_effect_count();
 	Dictionary invalid = snapshot.duplicate(true);
@@ -399,14 +467,96 @@ TEST_CASE("[GameplayFX] scoped effect snapshots keep independent periodic pulses
 	CHECK(timeline->replace_effect_branch("Runtime", snapshot)); // Same values preserve phase.
 	CHECK(timeline->tick(0.8).is_empty());
 	pulses = timeline->take_periodic_pulses();
-	CHECK(pulses.get(StringName("Runtime.Status.Resolve"), 0) == 1);
-	CHECK(pulses.get(StringName("Local.Visual.Hit"), 0) == 4);
+	CHECK(pulses.get(StringName("Runtime.Status.Resolve"), 0) == Variant(1));
+	CHECK(pulses.get(StringName("Local.Visual.Hit"), 0) == Variant(4));
 	CHECK(timeline->replace_effect_branch("Runtime", Dictionary()));
 	CHECK(timeline->get_remaining("Runtime.Status.Resolve") == 0.0);
 	CHECK(timeline->get_remaining("RuntimeExtra.Keep") == doctest::Approx(3.95));
 	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(0.95));
 }
 
+
+TEST_CASE("[GameplayFX] replicated effect reconciliation retains earned pulses and independent branches") {
+	Ref<GameplayEffectTimeline> timeline;
+	timeline.instantiate();
+	REQUIRE(timeline->set_effect("Runtime.Status.Sundered", 5.0));
+	REQUIRE(timeline->set_effect("Runtime.Status.Resolve", 5.0, 3));
+	REQUIRE(timeline->set_effect("Local.Visual.Hit", 5.0));
+	REQUIRE(timeline->set_periodic("Runtime.Status.Sundered", 0.5, false));
+	REQUIRE(timeline->set_periodic("Runtime.Status.Resolve", 0.25, false));
+	REQUIRE(timeline->set_periodic("Local.Visual.Hit", 0.25, false));
+	CHECK(timeline->tick(0.6).is_empty()); // 1 sunder, 2 resolve, 2 local.
+	Dictionary state;
+	state["remaining"] = 4.5;
+	state["stacks"] = 1;
+	Dictionary incoming;
+	incoming[StringName("Runtime.Status.Sundered")] = state;
+	state = Dictionary();
+	state["remaining"] = 4.2;
+	state["stacks"] = 4;
+	incoming[StringName("Runtime.Status.Resolve")] = state;
+	CHECK(timeline->reconcile_effect_branch("Runtime", incoming));
+	CHECK(timeline->get_stacks("Runtime.Status.Resolve") == 4);
+	CHECK(timeline->get_remaining("Runtime.Status.Sundered") == doctest::Approx(4.5));
+	CHECK(timeline->reconcile_effect_branch("Runtime", incoming)); // A duplicate network snapshot.
+	Dictionary pulses = timeline->take_periodic_pulses();
+	CHECK(int(pulses.get(StringName("Runtime.Status.Sundered"), 0)) == 1);
+	CHECK(int(pulses.get(StringName("Runtime.Status.Resolve"), 0)) == 2);
+	CHECK(int(pulses.get(StringName("Local.Visual.Hit"), 0)) == 2);
+	CHECK(timeline->tick(0.6).is_empty());
+	CHECK(timeline->reconcile_effect_branch("Runtime", Dictionary()));
+	CHECK(timeline->get_remaining("Runtime.Status.Sundered") == 0.0);
+	CHECK(timeline->get_remaining("Local.Visual.Hit") == doctest::Approx(3.8));
+	pulses = timeline->take_periodic_pulses();
+	CHECK(pulses.get(StringName("Runtime.Status.Sundered"), 0) == Variant(0));
+	CHECK(pulses.get(StringName("Runtime.Status.Resolve"), 0) == Variant(0));
+	CHECK(int(pulses.get(StringName("Local.Visual.Hit"), 0)) == 2);
+	// The old API must retain its original drop-all-in-branch contract.
+	CHECK(timeline->set_effect("Runtime.Status.Sundered", 2.0));
+	CHECK(timeline->set_periodic("Runtime.Status.Sundered", 0.5, false));
+	CHECK(timeline->tick(0.5).is_empty());
+	CHECK(timeline->replace_effect_branch("Runtime", incoming));
+	pulses = timeline->take_periodic_pulses();
+	CHECK(pulses.get(StringName("Runtime.Status.Sundered"), 0) == Variant(0));
+}
+
+TEST_CASE("[GameplayFX] replicated effect pulse preservation validates phase and rolls back") {
+	Ref<GameplayEffectTimeline> timeline;
+	timeline.instantiate();
+	REQUIRE(timeline->set_effect("Runtime.Status.Sundered", 2.0));
+	REQUIRE(timeline->set_periodic("Runtime.Status.Sundered", 0.5, false));
+	CHECK(timeline->tick(0.6).is_empty()); // 1 queued pulse, next in 0.4.
+	Dictionary state;
+	state["remaining"] = 1.4;
+	state["stacks"] = 1;
+	Dictionary snapshot;
+	snapshot[StringName("Runtime.Status.Sundered")] = state;
+	Dictionary invalid = snapshot.duplicate(true);
+	invalid[StringName("RuntimeExtra.Bad")] = state;
+	CHECK_FALSE(timeline->reconcile_effect_branch("Runtime", invalid));
+	invalid.erase(StringName("RuntimeExtra.Bad"));
+	Dictionary bad_state = state.duplicate();
+	bad_state["remaining"] = Math::NaN;
+	invalid[StringName("Runtime.Status.Sundered")] = bad_state;
+	CHECK_FALSE(timeline->reconcile_effect_branch("Runtime", invalid));
+	CHECK(timeline->get_remaining("Runtime.Status.Sundered") == doctest::Approx(1.4));
+	CHECK(timeline->get_periodic("Runtime.Status.Sundered") == doctest::Approx(0.5));
+	// Accepted interval changes explicitly invalidate stale queued pulses.
+	state["period"] = 1.0;
+	state["next_period"] = 1.0;
+	CHECK(timeline->reconcile_effect_branch("Runtime", snapshot));
+	CHECK(timeline->take_periodic_pulses().is_empty());
+	CHECK(timeline->tick(0.5).is_empty());
+	// Same interval but a rephased deadline also cancels the old pulse.
+	state["next_period"] = 0.25;
+	CHECK(timeline->reconcile_effect_branch("Runtime", snapshot));
+	CHECK(timeline->take_periodic_pulses().is_empty());
+	CHECK(timeline->tick(0.25).is_empty());
+	CHECK(int(timeline->take_periodic_pulses().get(StringName("Runtime.Status.Sundered"), 0)) == 1);
+	CHECK(timeline->tick(2.0).size() == 1);
+	CHECK(timeline->reconcile_effect_branch("Runtime", snapshot));
+	CHECK(timeline->take_periodic_pulses().is_empty()); // New tag never inherits old expired pulses.
+}
 TEST_CASE("[GameplayFX] GameplayAttributeSet additive and percentage modifiers") {
 	Ref<GameplayAttributeSet> a;
 	a.instantiate();
@@ -594,6 +744,51 @@ TEST_CASE("[GameplayFX] CooldownTracker individual and shared cooldowns") {
 	CHECK(tracker->get_cooldown_count() == 1);
 }
 
+TEST_CASE("[GameplayFX] CooldownTracker bounded batch query respects order and shared group lock") {
+	Ref<GameplayCooldownTracker> tracker;
+	tracker.instantiate();
+	CHECK(tracker->set_remaining("Ability.Global", 0.4));
+	CHECK(tracker->set_remaining("Ability.Weapon", 3.5));
+	CHECK(tracker->set_remaining("Ability.Head", 1.25));
+	CHECK(tracker->set_remaining("Local.UI.Activation.weapon", 0.22));
+	const PackedStringArray tags = { "Ability.Weapon", "Ability.Armor", "Ability.Head", "Ability.Feet", "Ability.Weapon" };
+	const PackedFloat64Array values = tracker->get_effective_remaining_batch(tags, "Ability.Global");
+	REQUIRE(values.size() == 5);
+	CHECK(values[0] == doctest::Approx(3.5));
+	CHECK(values[1] == doctest::Approx(0.4));
+	CHECK(values[2] == doctest::Approx(1.25));
+	CHECK(values[3] == doctest::Approx(0.4));
+	CHECK(values[4] == doctest::Approx(3.5)); // Repeat keeps input ordering.
+	const PackedFloat64Array without_group = tracker->get_effective_remaining_batch(tags);
+	REQUIRE(without_group.size() == 5);
+	CHECK(without_group[0] == doctest::Approx(3.5));
+	CHECK(without_group[1] == 0.0);
+	CHECK(tracker->get_cooldown_count() == 4); // Reads never create timers.
+	CHECK(tracker->tick(0.5).size() == 2);
+	const PackedFloat64Array after = tracker->get_effective_remaining_batch(tags, "Ability.Global");
+	REQUIRE(after.size() == 5);
+	CHECK(after[0] == doctest::Approx(3.0));
+	CHECK(after[1] == 0.0);
+	CHECK(after[2] == doctest::Approx(0.75));
+	CHECK(after[3] == 0.0);
+	CHECK(tracker->get_cooldown_count() == 2);
+}
+
+TEST_CASE("[GameplayFX] CooldownTracker batch rejects malformed requests without side effects") {
+	Ref<GameplayCooldownTracker> tracker;
+	tracker.instantiate();
+	CHECK(tracker->set_remaining("Ability.Weapon", 2.0));
+	const Dictionary before = tracker->get_snapshot();
+	CHECK(tracker->get_effective_remaining_batch({ "Ability.Weapon", ".invalid" }).is_empty());
+	CHECK(tracker->get_effective_remaining_batch({ "Ability.Weapon", "" }).is_empty());
+	CHECK(tracker->get_effective_remaining_batch({ "Ability.Weapon" }, ".invalid").is_empty());
+	PackedStringArray oversized;
+	oversized.resize(65);
+	CHECK(tracker->get_effective_remaining_batch(oversized).is_empty());
+	CHECK(tracker->get_effective_remaining_batch(PackedStringArray()).is_empty());
+	CHECK(tracker->get_snapshot() == before);
+}
+
 TEST_CASE("[GameplayFX] CooldownTracker snapshot rollback and frame-rate independence") {
 	Ref<GameplayCooldownTracker> tracker;
 	tracker.instantiate();
@@ -629,6 +824,215 @@ TEST_CASE("[GameplayFX] CooldownTracker snapshot rollback and frame-rate indepen
 	CHECK(other->get_cooldown_count() == 2);
 }
 
+
+TEST_CASE("[GameplayFX] CueQueue batch validates, coalesces and preserves priority") {
+	Ref<GameplayCueQueue> queue;
+	queue.instantiate();
+	Array batch;
+	Dictionary low;
+	low["tag"] = "GameplayCue.Status.Sundered";
+	low["magnitude"] = 2.0;
+	low["priority"] = 4;
+	Dictionary high;
+	high["tag"] = StringName("GameplayCue.Status.Resolve");
+	high["magnitude"] = 4.0;
+	high["priority"] = 6;
+	Dictionary repeat = low.duplicate();
+	repeat["magnitude"] = 3.0;
+	batch.push_back(low);
+	batch.push_back(high);
+	batch.push_back(repeat);
+	CHECK(queue->emit_cues_batch(batch));
+	CHECK(queue->get_pending_count() == 2);
+	Array events = queue->take_events();
+	REQUIRE(events.size() == 2);
+	CHECK(String(Dictionary(events[0])["tag"]) == "GameplayCue.Status.Resolve");
+	CHECK(int(Dictionary(events[0])["priority"]) == 6);
+	CHECK(String(Dictionary(events[1])["tag"]) == "GameplayCue.Status.Sundered");
+	CHECK(int(Dictionary(events[1])["count"]) == 2);
+	CHECK(double(Dictionary(events[1])["magnitude"]) == doctest::Approx(3.0));
+	CHECK(queue->get_evicted_transient_count() == 0);
+	CHECK(queue->get_rejected_transient_count() == 0);
+	CHECK(queue->emit_cues_batch(Array())); // Empty batch is a no-op success.
+	CHECK(queue->get_pending_count() == 0);
+}
+
+TEST_CASE("[GameplayFX] CueQueue invalid batches roll back without changing lifecycle") {
+	Ref<GameplayCueQueue> queue;
+	queue.instantiate();
+	CHECK(queue->set_active("GameplayCue.Status.Snared", 1, 2));
+	CHECK(queue->emit_cue("GameplayCue.Ambient.Rain", 1.0, 0));
+	Dictionary valid;
+	valid["tag"] = "GameplayCue.Status.Resolve";
+	valid["magnitude"] = 3.0;
+	valid["priority"] = 6;
+	Dictionary invalid = valid.duplicate();
+	invalid["tag"] = "Bad.Tag";
+	Array batch;
+	batch.push_back(valid);
+	batch.push_back(invalid);
+	CHECK_FALSE(queue->emit_cues_batch(batch));
+	CHECK(queue->get_pending_count() == 2);
+	CHECK(queue->get_active_stacks("GameplayCue.Status.Snared") == 1);
+	batch.remove_at(1);
+	invalid["tag"] = "GameplayCue.Status.Resolve";
+	invalid["priority"] = 8;
+	batch.push_back(invalid);
+	CHECK_FALSE(queue->emit_cues_batch(batch));
+	CHECK(queue->get_pending_count() == 2);
+	batch.remove_at(1);
+	invalid["priority"] = 6;
+	invalid["magnitude"] = Math::NaN;
+	batch.push_back(invalid);
+	CHECK_FALSE(queue->emit_cues_batch(batch));
+	Array oversized;
+	for (int i = 0; i < 33; ++i) {
+		oversized.push_back(valid);
+	}
+	CHECK_FALSE(queue->emit_cues_batch(oversized));
+	CHECK(queue->get_pending_count() == 2);
+	CHECK(queue->get_rejected_transient_count() == 0);
+	CHECK(queue->get_evicted_transient_count() == 0);
+	Array events = queue->take_events();
+	REQUIRE(events.size() == 2);
+	CHECK(String(Dictionary(events[0])["event"]) == "started");
+	CHECK(String(Dictionary(events[1])["tag"]) == "GameplayCue.Ambient.Rain");
+}
+
+TEST_CASE("[GameplayFX] CueQueue batch significance evictions commit together or not at all") {
+	Ref<GameplayCueQueue> queue;
+	queue.instantiate();
+	for (int i = 0; i < GameplayCueQueue::MAX_PENDING; ++i) {
+		CHECK(queue->emit_cue(StringName(String("GameplayCue.Ambient.") + itos(i)), 1.0, 1));
+	}
+	CHECK(queue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	Dictionary high;
+	high["tag"] = "GameplayCue.Status.Resolve";
+	high["magnitude"] = 4.0;
+	high["priority"] = 6;
+	Dictionary low;
+	low["tag"] = "GameplayCue.Status.Sundered";
+	low["magnitude"] = 2.0;
+	low["priority"] = 0;
+	Array impossible;
+	impossible.push_back(high); // Would evict one ambience if committed.
+	impossible.push_back(low); // Cannot evict priority=1 ambience.
+	CHECK_FALSE(queue->emit_cues_batch(impossible));
+	CHECK(queue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(queue->get_evicted_transient_count() == 0);
+	CHECK(queue->get_rejected_transient_count() == 0);
+	low["priority"] = 4;
+	Array admitted;
+	admitted.push_back(high);
+	admitted.push_back(low);
+	CHECK(queue->emit_cues_batch(admitted));
+	CHECK(queue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(queue->get_evicted_transient_count() == 2);
+	Array first = queue->take_events(2);
+	REQUIRE(first.size() == 2);
+	CHECK(String(Dictionary(first[0])["tag"]) == "GameplayCue.Status.Resolve");
+	CHECK(String(Dictionary(first[1])["tag"]) == "GameplayCue.Status.Sundered");
+}
+
+TEST_CASE("[GameplayFX] CueQueue scoped status replication preserves independent active effects") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	CHECK(cue->set_active("GameplayCue.Local.Visual.Glow", 2, 1));
+	CHECK(cue->set_active("GameplayCue.StatusExtra.Unrelated", 1, 1));
+	Dictionary status;
+	status["GameplayCue.Status.Resolve"] = 3;
+	status[StringName("GameplayCue.Status.Staggered")] = 1;
+	CHECK(cue->replace_active_branch("GameplayCue.Status", status, 2));
+	CHECK(cue->get_active_count() == 4);
+	CHECK(cue->get_active_stacks("GameplayCue.Local.Visual.Glow") == 2);
+	CHECK(cue->get_active_stacks("GameplayCue.StatusExtra.Unrelated") == 1);
+	CHECK(cue->get_active_stacks("GameplayCue.Status.Resolve") == 3);
+	CHECK(cue->take_events().size() == 4);
+	CHECK(cue->get_pending_count() == 0);
+	// An identical network snapshot must not allocate or re-emit cues.
+	CHECK(cue->replace_active_branch("GameplayCue.Status", status, 2));
+	CHECK(cue->get_pending_count() == 0);
+	status.erase(StringName("GameplayCue.Status.Staggered"));
+	status["GameplayCue.Status.Resolve"] = 4;
+	CHECK(cue->replace_active_branch("GameplayCue.Status", status, 2));
+	CHECK(cue->get_active_count() == 3);
+	CHECK(cue->get_active_stacks("GameplayCue.Local.Visual.Glow") == 2);
+	CHECK(cue->get_active_stacks("GameplayCue.StatusExtra.Unrelated") == 1);
+	Array events = cue->take_events();
+	REQUIRE(events.size() == 2);
+	CHECK(String(Dictionary(events[0])["tag"]) == "GameplayCue.Status.Staggered");
+	CHECK(String(Dictionary(events[0])["event"]) == "stopped");
+	CHECK(String(Dictionary(events[1])["tag"]) == "GameplayCue.Status.Resolve");
+	CHECK(String(Dictionary(events[1])["event"]) == "updated");
+	CHECK(int(Dictionary(events[1])["stacks"]) == 4);
+	CHECK(cue->replace_active_branch("GameplayCue.Status", Dictionary(), 2));
+	CHECK(cue->get_active_count() == 2);
+	CHECK(cue->get_active_stacks("GameplayCue.Status.Resolve") == 0);
+	CHECK(cue->get_active_stacks("GameplayCue.Local.Visual.Glow") == 2);
+	CHECK(cue->take_events().size() == 1);
+}
+
+TEST_CASE("[GameplayFX] CueQueue scoped snapshots reject polluted or aliased input atomically") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	CHECK(cue->set_active("GameplayCue.Local.Visual.Glow", 2));
+	CHECK(cue->set_active("GameplayCue.Status.Resolve", 3));
+	const Dictionary baseline = cue->get_active_snapshot();
+	const int pending_before = cue->get_pending_count();
+	Dictionary invalid;
+	invalid["GameplayCue.Status.Resolve"] = 1;
+	invalid["GameplayCue.StatusExtra.Mimic"] = 1;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	invalid.erase("GameplayCue.StatusExtra.Mimic");
+	invalid["GameplayCue.Local.Visual.Glow"] = 3;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	invalid.erase("GameplayCue.Local.Visual.Glow");
+	invalid["GameplayCue.Status.Resolve"] = -1;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	invalid["GameplayCue.Status.Resolve"] = 1.5;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	invalid["GameplayCue.Status.Resolve"] = 65536;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	invalid["GameplayCue.Status.Resolve"] = 1;
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.", invalid));
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid, 8));
+	invalid[StringName("GameplayCue.Status.Resolve")] = 2;
+	// Different Godot Variant key implementations may coalesce String and
+	// StringName keys. Assert alias rejection when the dictionary carries both.
+	if (invalid.size() > 1) {
+		CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", invalid));
+	}
+	CHECK(cue->get_active_snapshot() == baseline);
+	CHECK(cue->get_pending_count() == pending_before);
+	CHECK(cue->get_evicted_transient_count() == 0);
+}
+
+TEST_CASE("[GameplayFX] CueQueue scoped replication rolls back under lifecycle backlog pressure") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	CHECK(cue->set_active("GameplayCue.Local.Persist", 1));
+	CHECK(cue->take_events().size() == 1);
+	for (int i = 0; i < GameplayCueQueue::MAX_PENDING; ++i) {
+		CHECK(cue->emit_cue(StringName(String("GameplayCue.Ambient.") + itos(i)), 1.0, 1));
+	}
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	Dictionary incoming;
+	incoming["GameplayCue.Status.Sundered"] = 2;
+	const Dictionary before = cue->get_active_snapshot();
+	CHECK_FALSE(cue->replace_active_branch("GameplayCue.Status", incoming, 3));
+	CHECK(cue->get_active_snapshot() == before);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_evicted_transient_count() == 0);
+	CHECK(cue->get_rejected_transient_count() == 0);
+	// A no-op scoped update is still valid even with a saturated visual queue.
+	CHECK(cue->replace_active_branch("GameplayCue.Status", Dictionary(), 3));
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->take_events(32).size() == 32);
+	CHECK(cue->replace_active_branch("GameplayCue.Status", incoming, 3));
+	CHECK(cue->get_active_stacks("GameplayCue.Status.Sundered") == 2);
+	CHECK(cue->get_active_stacks("GameplayCue.Local.Persist") == 1);
+}
+
 TEST_CASE("[GameplayFX] CueQueue active lifecycle, priorities and deduplication") {
 	Ref<GameplayCueQueue> cue;
 	cue.instantiate();
@@ -641,8 +1045,8 @@ TEST_CASE("[GameplayFX] CueQueue active lifecycle, priorities and deduplication"
 	CHECK(cue->get_pending_count() == 2);
 	Array events = cue->take_events();
 	CHECK(events.size() == 2);
-	CHECK(String(events[0]["event"]) == "started");
-	CHECK(String(events[1]["event"]) == "started");
+	CHECK(String(Dictionary(events[0])["event"]) == "started");
+	CHECK(String(Dictionary(events[1])["event"]) == "started");
 	CHECK(cue->get_pending_count() == 0);
 	CHECK(cue->get_active_stacks("GameplayCue.Status.Resolve") == 3);
 
@@ -654,13 +1058,13 @@ TEST_CASE("[GameplayFX] CueQueue active lifecycle, priorities and deduplication"
 	CHECK(cue->get_pending_count() == 2);
 	events = cue->take_events(1);
 	REQUIRE(events.size() == 1);
-	CHECK(String(events[0]["tag"]) == "GameplayCue.Status.Resolve");
-	CHECK(String(events[0]["event"]) == "executed");
+	CHECK(String(Dictionary(events[0])["tag"]) == "GameplayCue.Status.Resolve");
+	CHECK(String(Dictionary(events[0])["event"]) == "executed");
 	events = cue->take_events(8);
 	REQUIRE(events.size() == 1);
-	CHECK(String(events[0]["tag"]) == "GameplayCue.Status.Sundered");
-	CHECK(int(events[0]["count"]) == 32); // Bounded coalescing.
-	CHECK(double(events[0]["magnitude"]) == doctest::Approx(0.9));
+	CHECK(String(Dictionary(events[0])["tag"]) == "GameplayCue.Status.Sundered");
+	CHECK(int(Dictionary(events[0])["count"]) == 32); // Bounded coalescing.
+	CHECK(double(Dictionary(events[0])["magnitude"]) == doctest::Approx(0.9));
 
 	status["GameplayCue.Status.Sundered"] = 0;
 	status[StringName("GameplayCue.Status.Resolve")] = 4;
@@ -669,9 +1073,9 @@ TEST_CASE("[GameplayFX] CueQueue active lifecycle, priorities and deduplication"
 	CHECK(cue->get_active_stacks("GameplayCue.Status.Sundered") == 0);
 	events = cue->take_events();
 	CHECK(events.size() == 2);
-	CHECK(String(events[0]["event"]) == "stopped");
-	CHECK(String(events[1]["event"]) == "updated");
-	CHECK(int(events[1]["stacks"]) == 4);
+	CHECK(String(Dictionary(events[0])["event"]) == "stopped");
+	CHECK(String(Dictionary(events[1])["event"]) == "updated");
+	CHECK(int(Dictionary(events[1])["stacks"]) == 4);
 }
 
 TEST_CASE("[GameplayFX] CueQueue atomic rollback and bounded event buffering") {
@@ -834,6 +1238,66 @@ TEST_CASE("[GameplayFX] application gate atomic snapshot rollback and hostile ta
 }
 
 
+TEST_CASE("[GameplayFX] CueQueue resilient lifecycle survives low-priority visual saturation") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	for (int i = 0; i < GameplayCueQueue::MAX_PENDING; ++i) {
+		CHECK(cue->emit_cue(StringName(String("GameplayCue.Ambient.") + itos(i)), 1.0, 0));
+	}
+	Dictionary statuses;
+	statuses["GameplayCue.Status.Resolve"] = 3;
+	statuses["GameplayCue.Status.Sundered"] = 1;
+	CHECK_FALSE(cue->replace_active(statuses, 2)); // Legacy atomic contract unchanged.
+	CHECK(cue->get_active_count() == 0);
+	CHECK(cue->replace_active_resilient(statuses, 2));
+	CHECK(cue->get_active_count() == 2);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_evicted_transient_count() == 2);
+	CHECK(cue->replace_active_resilient(statuses, 2)); // Idempotent snapshots.
+	CHECK(cue->get_evicted_transient_count() == 2);
+	const Array events = cue->take_events(2);
+	REQUIRE(events.size() == 2);
+	CHECK(String(events[0]["event"]) == "started");
+	CHECK(String(events[1]["event"]) == "started");
+	CHECK(int(events[0]["priority"]) == 2);
+	CHECK(int(events[1]["priority"]) == 2);
+	CHECK(cue->emit_cue("GameplayCue.Ambient.Refill1", 1.0, 0));
+	CHECK(cue->emit_cue("GameplayCue.Ambient.Refill2", 1.0, 0));
+	CHECK(cue->replace_active_resilient(Dictionary(), 2));
+	CHECK(cue->get_active_count() == 0);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_evicted_transient_count() == 4);
+	const Array stopped = cue->take_events(2);
+	REQUIRE(stopped.size() == 2);
+	CHECK(String(stopped[0]["event"]) == "stopped");
+	CHECK(String(stopped[1]["event"]) == "stopped");
+}
+
+TEST_CASE("[GameplayFX] CueQueue resilient preflight rolls back when not enough lower-priority victims") {
+	Ref<GameplayCueQueue> cue;
+	cue.instantiate();
+	for (int i = 0; i < GameplayCueQueue::MAX_PENDING - 1; ++i) {
+		CHECK(cue->emit_cue(StringName(String("GameplayCue.Critical.") + itos(i)), 1.0, 7));
+	}
+	CHECK(cue->emit_cue("GameplayCue.Minor.One", 1.0, 0));
+	Dictionary statuses;
+	statuses["GameplayCue.Status.Resolve"] = 2;
+	statuses["GameplayCue.Status.Sundered"] = 1;
+	CHECK_FALSE(cue->replace_active_resilient(statuses, 2));
+	CHECK(cue->get_active_count() == 0);
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_evicted_transient_count() == 0);
+	CHECK(cue->get_rejected_transient_count() == 0);
+	CHECK(cue->get_active_snapshot().is_empty());
+	CHECK_FALSE(cue->replace_active_resilient(statuses, 8));
+	CHECK_FALSE(cue->replace_active_resilient(statuses, -1));
+	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING);
+	CHECK(cue->get_evicted_transient_count() == 0);
+	// A larger policy priority may not sacrifice equal-priority visual events.
+	CHECK_FALSE(cue->replace_active_resilient(statuses, 7));
+	CHECK(cue->get_active_count() == 0);
+}
+
 TEST_CASE("[GameplayFX] CueQueue preserves lifecycle while higher-priority pulses displace ambience") {
 	Ref<GameplayCueQueue> cue;
 	cue.instantiate();
@@ -857,11 +1321,11 @@ TEST_CASE("[GameplayFX] CueQueue preserves lifecycle while higher-priority pulse
 	CHECK(cue->get_rejected_transient_count() == 1);
 	Array events = cue->take_events(2);
 	REQUIRE(events.size() == 2);
-	CHECK(String(events[0]["event"]) == "started");
-	CHECK(String(events[0]["tag"]) == "GameplayCue.Status.Resolve");
-	CHECK(String(events[1]["event"]) == "executed");
-	CHECK(String(events[1]["tag"]) == "GameplayCue.Status.CriticalHit");
-	CHECK(int(events[1]["priority"]) == 6);
+	CHECK(String(Dictionary(events[0])["event"]) == "started");
+	CHECK(String(Dictionary(events[0])["tag"]) == "GameplayCue.Status.Resolve");
+	CHECK(String(Dictionary(events[1])["event"]) == "executed");
+	CHECK(String(Dictionary(events[1])["tag"]) == "GameplayCue.Status.CriticalHit");
+	CHECK(int(Dictionary(events[1])["priority"]) == 6);
 	CHECK(cue->get_pending_count() == GameplayCueQueue::MAX_PENDING - 2);
 	// Under equal background priorities, the oldest eligible event goes.
 	bool saw_oldest = false;
@@ -870,11 +1334,11 @@ TEST_CASE("[GameplayFX] CueQueue preserves lifecycle while higher-priority pulse
 	while (cue->get_pending_count() > 0) {
 		const Array batch = cue->take_events(32);
 		for (int i = 0; i < batch.size(); ++i) {
-			const String tag = String(batch[i]["tag"]);
+			const String tag = String(Dictionary(batch[i])["tag"]);
 			saw_oldest |= tag == "GameplayCue.Ambient.0";
 			if (tag == "GameplayCue.Ambient.1") {
 				saw_next = true;
-				CHECK(int(batch[i]["count"]) == 2);
+				CHECK(int(Dictionary(batch[i])["count"]) == 2);
 			}
 			++remaining_count;
 		}

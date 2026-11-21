@@ -1,0 +1,82 @@
+name: Cgame batched 3D physics ray queries
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'servers/physics_3d/direct_states/physics_direct_space_state_3d.cpp'
+      - 'servers/physics_3d/direct_states/physics_direct_space_state_3d.h'
+      - 'doc/classes/PhysicsDirectSpaceState3D.xml'
+      - 'tests/scene/test_physics_space_batch_rays.cpp'
+      - 'game/scripts/client/audio.gd'
+      - 'game/scripts/client/audio_spatial.gd'
+      - 'game/tests/test_native_batch_rays.gd'
+      - 'game/tests/test_audio_geometry_occlusion.gd'
+      - 'game/tests/run_physics_batch.gd'
+      - '.github/workflows/native-physics-batch-rays.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/physics_3d/direct_states/physics_direct_space_state_3d.cpp'
+      - 'servers/physics_3d/direct_states/physics_direct_space_state_3d.h'
+      - 'tests/scene/test_physics_space_batch_rays.cpp'
+      - 'game/scripts/client/audio.gd'
+      - 'game/scripts/client/audio_spatial.gd'
+      - 'game/tests/test_native_batch_rays.gd'
+      - '.github/workflows/native-physics-batch-rays.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  physics-rays-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-physics-ray-batches
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-physics-ray-batches
+        continue-on-error: true
+      - name: Native Cgame multi-ray query regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*Batch rays preserve order, masks and misses*"
+      - name: Import Albion After assets and GDScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 360s "$BIN" --headless --path game --editor --import --quit 2>&1 | tee physics-batch-import.log
+      - name: Headless engine/game physics and audio tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 300s "$BIN" --headless --path game --script res://tests/run_physics_batch.gd 2>&1 | tee physics-batch-tests.log
+          grep -E '^PHYSICS BATCH TOTAL: [0-9]+ checks, 0 failures$' physics-batch-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' physics-batch-tests.log; then exit 1; fi
+      - name: Archive integration logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: physics-batch-ray-logs
+          if-no-files-found: ignore
+          path: |
+            physics-batch-import.log
+            physics-batch-tests.log

@@ -2,6 +2,7 @@ shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 global uniform float aa_weather_wetness;
 global uniform float aa_weather_rain;
+global uniform float aa_snow_cover; // Winter Data Layer, 0..1 (data_layers.gd).
 global uniform float aa_ground_contact_strength;
 // Precomputed coarser-height target in UV2; interpolated on GPU per engine chunk.
 instance uniform float aa_lod_morph = 0.0;
@@ -299,6 +300,10 @@ void fragment() {
 	}
 	w[5] = cliff;
 	float snow = smoothstep(88.0, 108.0, h + (broad - 0.5) * 14.0) * (1.0 - smoothstep(0.32, 0.55, slope));
+	// Winter Data Layer: snow settles everywhere above the shoreline, thinner on slopes and in patches.
+	float winter = aa_snow_cover * smoothstep(1.2, 3.0, h) * (1.0 - smoothstep(0.28, 0.5, slope))
+		* smoothstep(0.25, 0.6, broad + 0.35);
+	snow = max(snow, winter);
 	for (int i = 0; i < 8; i++) {
 		w[i] *= 1.0 - snow;
 	}

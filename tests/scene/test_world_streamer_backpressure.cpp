@@ -78,4 +78,73 @@ TEST_CASE("[WorldStreamer] Adaptive backpressure is opt-in and reversible") {
 	memdelete(streamer);
 }
 
+TEST_CASE("[WorldStreamer] Predictive cell admission is opt-in and bounded") {
+	WorldStreamer *s = memnew(WorldStreamer);
+	CHECK_FALSE(s->is_predictive_chunk_work_budget_enabled());
+	CHECK(s->get_estimated_generator_work_usec() == 0);
+	CHECK(s->get_estimated_finalization_work_usec() == 0);
+	CHECK(s->get_last_predicted_deferred_chunk_count() == 0);
+	s->set_predictive_chunk_work_budget_enabled(true);
+	CHECK(s->is_predictive_chunk_work_budget_enabled());
+	s->set_max_chunk_work_usec(2500);
+	CHECK_FALSE(WorldStreamer::should_defer_predicted_chunk_work(2500, 0, 2000, 2000));
+	CHECK_FALSE(WorldStreamer::should_defer_predicted_chunk_work(0, 1, 2000, 2000));
+	CHECK_FALSE(WorldStreamer::should_defer_predicted_chunk_work(2500, 1, 400, 0));
+	CHECK_FALSE(WorldStreamer::should_defer_predicted_chunk_work(2500, 1, 400, 1800));
+	CHECK(WorldStreamer::should_defer_predicted_chunk_work(2500, 1, 1600, 1200));
+	CHECK(WorldStreamer::should_defer_predicted_chunk_work(2500, 1, 2500, 1));
+	CHECK(WorldStreamer::should_defer_predicted_chunk_work(2500, 1, 999999999999LL, 999999999999LL));
+	CHECK(WorldStreamer::update_chunk_work_estimate(0, 1600) == 1600);
+	CHECK(WorldStreamer::update_chunk_work_estimate(1600, 800) == 1400);
+	CHECK(WorldStreamer::update_chunk_work_estimate(1400, 0) == 1400);
+	CHECK(WorldStreamer::update_chunk_work_estimate(0, 100000000) == 1000000);
+	CHECK(WorldStreamer::update_chunk_work_estimate(-100, -30) == 0);
+	CHECK(WorldStreamer::update_chunk_work_estimate(100000000, 100000000) == 1000000);
+	s->set_chunk_generator(Callable()); // Changing the callback clears learned generator costs.
+	CHECK(s->get_estimated_generator_work_usec() == 0);
+	s->set_predictive_chunk_work_budget_enabled(false);
+	CHECK_FALSE(s->is_predictive_chunk_work_budget_enabled());
+	memdelete(s);
+}
+
+TEST_CASE("[WorldStreamer] Deterministic retry spread bounds simultaneous failures") {
+	const Vector3i a(1, 0, 1);
+	const Vector3i b(-4, 0, 7);
+	// An omitted spread must never alter the existing retry schedule.
+	CHECK(WorldStreamer::calculate_retry_delay_seconds(a, 0, 0.5, 3.0, 0.0) == doctest::Approx(0.5));
+	CHECK(WorldStreamer::calculate_retry_delay_seconds(a, 1, 0.5, 3.0, 0.0) == doctest::Approx(1.0));
+	CHECK(WorldStreamer::calculate_retry_delay_seconds(a, 2, 0.5, 3.0, 0.0) == doctest::Approx(2.0));
+	CHECK(WorldStreamer::calculate_retry_delay_seconds(a, 3, 0.5, 3.0, 0.0) == doctest::Approx(3.0));
+	CHECK(WorldStreamer::calculate_retry_delay_seconds(a, 8, 0.5, 3.0, 0.0) == doctest::Approx(3.0));
+	const double first = WorldStreamer::calculate_retry_delay_seconds(a, 0, 0.5, 3.0, 0.3);
+	const double second = WorldStreamer::calculate_retry_delay_seconds(b, 0, 0.5, 3.0, 0.3);
+	CHECK(first >= 0.35);
+	CHECK(first <= 0.5);
+	CHECK(second >= 0.35);
+	CHECK(second <= 0.5);
+	CHECK(first == doctest::Approx(WorldStreamer::calculate_retry_delay_seconds(a, 0, 0.5, 3.0, 0.3)));
+	CHECK(first != doctest::Approx(second));
+	const double capped = WorldStreamer::calculate_retry_delay_seconds(a, 8, 0.5, 3.0, 0.5);
+	CHECK(capped >= 1.5);
+	CHECK(capped <= 3.0);
+	CHECK(WorldStreamer::calculate_retry_delay_seconds(a, -1, 0.5, 3.0, 0.3) == 0.0);
+	CHECK(WorldStreamer::calculate_retry_delay_seconds(a, 9, 0.5, 3.0, 0.3) == 0.0);
+	CHECK(WorldStreamer::calculate_retry_delay_seconds(a, 0, -1.0, 3.0, 0.3) == 0.0);
+	CHECK(WorldStreamer::calculate_retry_delay_seconds(a, 0, 0.5, 0.0, 0.3) == 0.0);
+	CHECK(WorldStreamer::calculate_retry_delay_seconds(a, 0, 0.5, 3.0, 0.6) == 0.0);
+	CHECK(WorldStreamer::calculate_retry_delay_seconds(a, 0, 0.5, 3.0,
+			std::numeric_limits<double>::quiet_NaN()) == 0.0);
+
+	WorldStreamer *streamer = memnew(WorldStreamer);
+	CHECK(streamer->get_retry_delay_spread() == 0.0);
+	CHECK(streamer->get_max_retry_releases_per_update() == 0);
+	CHECK(streamer->get_last_retry_release_count() == 0);
+	CHECK(streamer->get_last_retry_deferred_count() == 0);
+	streamer->set_retry_delay_spread(0.3);
+	streamer->set_max_retry_releases_per_update(2);
+	CHECK(streamer->get_retry_delay_spread() == doctest::Approx(0.3));
+	CHECK(streamer->get_max_retry_releases_per_update() == 2);
+	memdelete(streamer);
+}
+
 } // namespace TestWorldStreamerBackpressure

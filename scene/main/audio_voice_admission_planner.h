@@ -38,6 +38,10 @@
 class AudioVoiceAdmissionPlanner : public RefCounted {
 	GDCLASS(AudioVoiceAdmissionPlanner, RefCounted);
 
+	int _select_victim_internal(const Array &p_voices, const String &p_new_name,
+			double p_new_db, int p_new_priority, int p_max_voices,
+			int p_same_sound_max, double p_min_voice_age, double p_early_override_db) const;
+
 protected:
 	static void _bind_methods();
 
@@ -46,4 +50,11 @@ public:
 	int select_victim(const Array &p_voices, const String &p_new_name,
 			double p_new_db, int p_new_priority, int p_max_voices = 24,
 			int p_same_sound_max = 5) const;
+	// Optional Sound Concurrency-style anti-thrashing: equal-priority events
+	// cannot steal a just-launched voice without a large audibility gain.
+	// Higher-priority events can preempt any age.
+	int select_victim_stable(const Array &p_voices, const String &p_new_name,
+			double p_new_db, int p_new_priority, int p_max_voices = 24,
+			int p_same_sound_max = 5, double p_min_voice_age = 0.12,
+			double p_early_override_db = 12.0) const;
 };

@@ -147,6 +147,8 @@ func run(t) -> void:
 			"graphics tier %d has a bounded resident target" % quality)
 		t.check(FxPolicy.pool_changes_per_frame(quality) <= 2,
 			"graphics tier %d never performs more than two operations per frame" % quality)
+		t.check(FxPolicy.pool_work_usec(quality) >= 100 and FxPolicy.pool_work_usec(quality) <= 1000,
+			"graphics tier %d has a conservative CPU slice for pool maintenance" % quality)
 	t.eq(FxPolicy.pool_resident_target(-1), 2, "Performance target clamps")
 	t.eq(FxPolicy.pool_resident_target(99), 12, "Ultra target clamps")
 	t.eq(FxPolicy.pool_changes_per_frame(0), 1, "Performance spreads allocations one per frame")
@@ -173,3 +175,78 @@ func run(t) -> void:
 	t.check(int(fx.last_fx_budget_stats["rendered"]) <= FxPolicy.budget_for(3),
 		"no more than Ultra burst budget can instantiate")
 	fx.free()
+
+
+	t.current = "Niagara-style soft category slots protect hit particles from combat VFX storms"
+	var fair_d := PackedFloat64Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+	var fair_p := PackedByteArray([3, 3, 3, 3, 2, 2, 2, 2, 2, 1])
+	var fair_g := PackedByteArray([3, 3, 3, 3, 2, 2, 2, 2, 2, 1])
+	var fair_v := PackedByteArray([1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+	t.eq(FxPolicy.select_visible_ranged_indices(fair_d, fair_p, fair_g,
+		fair_v, 0), PackedInt32Array([0, 1, 2, 3, 4, 5, 6, 7]),
+		"old strict-significance policy can starve ordinary hit effects")
+	var fair_selected: PackedInt32Array = FxPolicy.select_visible_fair_indices(
+		fair_d, fair_p, fair_g, fair_v, 0)
+	t.eq(fair_selected, PackedInt32Array([0, 1, 2, 3, 4, 9, 5, 6]),
+		"priority-3 milestones always win, followed by protected hit/combat quotas")
+	t.eq(fair_selected.size(), FxPolicy.budget_for(0),
+		"minimum reservations never allocate extra particle instances")
+	t.eq(FxPolicy.minimums_for(0), PackedInt32Array([0, 1, 1, 0]),
+		"Performance reserves only two cheap combat-category slots")
+	t.eq(FxPolicy.minimums_for(3), PackedInt32Array([0, 2, 3, 0]),
+		"Ultra can retain more visible combat feedback")
+	var emergency_p := PackedByteArray([3, 3, 3, 3, 3, 3, 3, 3, 3, 1])
+	var emergent: PackedInt32Array = FxPolicy.select_visible_fair_indices(
+		fair_d, emergency_p, fair_g, fair_v, 0)
+	t.eq(emergent, PackedInt32Array([0, 1, 2, 3, 4, 5, 6, 7]),
+		"priority-3 emergency VFX preempt soft reservations when the frame is full")
+
+	t.current = "fair VFX planner preserves hard ranges and rejects invalid arrays"
+	t.eq(FxPolicy.select_visible_fair_indices(
+		PackedFloat64Array([18.0, 18.01, 20.0, 30.0]),
+		PackedByteArray([0, 0, 2, 2]),
+		PackedByteArray([0, 0, 1, 2]), PackedByteArray([1, 1, 1, 1]), 0),
+		PackedInt32Array([2, 3, 0]), "Performance range culls dust past 18m")
+	t.eq(FxPolicy.select_visible_fair_indices(PackedFloat64Array([NAN]),
+		PackedByteArray([1]), PackedByteArray([1]),
+		PackedByteArray([1]), 0).size(), 0, "NaN effects rejected")
+	t.eq(FxPolicy.select_visible_fair_indices(PackedFloat64Array([1.0]),
+		PackedByteArray([4]), PackedByteArray([1]),
+		PackedByteArray([1]), 0).size(), 0, "invalid priority rejected")
+	t.eq(FxPolicy.select_visible_fair_indices(PackedFloat64Array([1.0]),
+		PackedByteArray([1]), PackedByteArray([1]),
+		PackedByteArray([2]), 0).size(), 0, "invalid visibility rejected")
+	t.eq(FxPolicy.select_visible_fair_indices(PackedFloat64Array([1.0, 2.0]),
+		PackedByteArray([1]), PackedByteArray([1]),
+		PackedByteArray([1]), 0).size(), 0, "mismatched batch rejected")
+
+	t.current = "native soft VFX quotas remain parity-safe with stock Godot"
+	if ClassDB.class_exists("SignificanceBudgetPlanner"):
+		var fair_native: Object = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if fair_native != null and fair_native.has_method("select_effects_visible_fair"):
+			t.eq(FxPolicy.select_visible_fair_indices(
+				fair_d, fair_p, fair_g, fair_v, 0, fair_native), fair_selected,
+				"native engine matches soft reservation fallback on known case")
+			var fair_rng := RandomNumberGenerator.new()
+			fair_rng.seed = 410266
+			for quality in 4:
+				for trial in 18:
+					var fd := PackedFloat64Array()
+					var fp := PackedByteArray()
+					var fg := PackedByteArray()
+					var fv := PackedByteArray()
+					for index in 96:
+						fd.append(fair_rng.randf_range(0.0, 170.0))
+						fp.append(fair_rng.randi_range(0, 3))
+						fg.append(fair_rng.randi_range(0, 3))
+						fv.append(fair_rng.randi_range(0, 1))
+					t.eq(FxPolicy.select_visible_fair_indices(fd, fp, fg, fv,
+						quality, fair_native),
+						FxPolicy.select_visible_fair_indices(fd, fp, fg, fv, quality),
+						"native/script fair VFX selection parity q%d sample%d" % [quality, trial])
+	else:
+		t.eq(FxPolicy.select_visible_fair_indices(fair_d, fair_p, fair_g,
+			fair_v, 0), fair_selected, "older native builds use portable VFX planner")
+	var real_fx_source: String = FileAccess.get_file_as_string("res://scripts/client/effects.gd")
+	t.check(real_fx_source.contains("FxPolicy.select_visible_fair_indices("),
+		"actual Albion After burst queue enables category diversity every frame")

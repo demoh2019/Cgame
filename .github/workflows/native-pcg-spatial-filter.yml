@@ -5,18 +5,34 @@ on:
     branches: [develop]
     paths:
       - 'modules/procedural_scatter/**'
+      - 'games/days_after/**'
       - 'game/scripts/client/scenery_batches.gd'
       - 'game/scripts/client/chunk_view.gd'
       - 'game/tests/test_pcg_scenery_spacing.gd'
+      - 'game/tests/test_pcg_road_corridors.gd'
+      - 'game/tests/test_pcg_foliage_scalability.gd'
+      - 'game/tests/test_pcg_hlod_proxy.gd'
+      - 'game/scripts/client/scenery_hlod_proxy.gd'
+      - 'game/scripts/client/scenery_density_lod.gd'
+      - 'game/tests/test_pcg_surface_slope.gd'
+      - 'game/tests/test_pcg_surface_alignment.gd'
       - 'game/tests/run_pcg_scenery_spacing.gd'
       - '.github/workflows/native-pcg-spatial-filter.yml'
   push:
     branches: [develop]
     paths:
       - 'modules/procedural_scatter/**'
+      - 'games/days_after/**'
       - 'game/scripts/client/scenery_batches.gd'
       - 'game/scripts/client/chunk_view.gd'
       - 'game/tests/test_pcg_scenery_spacing.gd'
+      - 'game/tests/test_pcg_road_corridors.gd'
+      - 'game/tests/test_pcg_foliage_scalability.gd'
+      - 'game/tests/test_pcg_hlod_proxy.gd'
+      - 'game/scripts/client/scenery_hlod_proxy.gd'
+      - 'game/scripts/client/scenery_density_lod.gd'
+      - 'game/tests/test_pcg_surface_slope.gd'
+      - 'game/tests/test_pcg_surface_alignment.gd'
       - 'game/tests/run_pcg_scenery_spacing.gd'
       - '.github/workflows/native-pcg-spatial-filter.yml'
   workflow_dispatch:
@@ -43,6 +59,46 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 240s "$BIN" --headless --test --test-case="*PCGSpatialFilter*" --no-colors 2>&1 | tee pcg-native.log
+      - name: Native PCG surface slope and elevation tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGSurfaceFilter3D*" --no-colors 2>&1 | tee pcg-surface-native.log
+      - name: Native PCG polygon mask density and contour tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGPolygonMask3D*" --no-colors 2>&1 | tee pcg-polygon-native.log
+      - name: Native PCG path falloff tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGPathFalloff*" --no-colors 2>&1 | tee pcg-path-falloff-native.log
+      - name: Native PCG stable-ID Transform Points doctests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGPointTransform3D*" --no-colors 2>&1 | tee pcg-point-transforms-native.log
+      - name: Native PCG weighted variant tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGWeightedVariantSelector*" --no-colors 2>&1 | tee pcg-weighted-native.log
+      - name: Native PCG polyline arc-length sampler tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGPolylineSampler3D*" --no-colors 2>&1 | tee pcg-polyline-native.log
+      - name: Native foliage density and per-instance geometry LOD tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGFoliageScalability3D*" --no-colors 2>&1 | tee pcg-foliage-scalability-native.log
+      - name: Native merged HLOD proxy mesh tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGHLODProxyBuilder3D*" --no-colors 2>&1 | tee pcg-hlod-native.log
       - name: Import Albion After game
         run: |
           set -euo pipefail
@@ -56,6 +112,47 @@ jobs:
           timeout 180s "$BIN" --headless --path game --script res://tests/run_pcg_scenery_spacing.gd 2>&1 | tee pcg-game.log
           grep -E '^PCG SCENERY TOTAL: [0-9]+ checks, 0 failures$' pcg-game.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-game.log; then exit 1; fi
+      - name: Import Days After prototype
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --editor --import --quit 2>&1 | tee pcg-days-after-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' pcg-days-after-import.log; then exit 1; fi
+      - name: Days After PCG point transforms native/fallback parity
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --script res://pcg_point_transforms_smoke_test.gd 2>&1 | tee pcg-point-transforms-game.log
+          grep -F 'PCG POINT TRANSFORMS TOTAL: 0 failures' pcg-point-transforms-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-point-transforms-game.log; then exit 1; fi
+      - name: Days After weighted variant native/fallback parity
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --script res://pcg_weighted_variants_smoke_test.gd 2>&1 | tee pcg-weighted-game.log
+          grep -F 'PCG WEIGHTED VARIANTS TOTAL: 0 failures' pcg-weighted-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-weighted-game.log; then exit 1; fi
+      - name: Days After native and fallback per-instance geometry LOD tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --script res://pcg_instance_lod_smoke_test.gd 2>&1 | tee pcg-instance-lod-game.log
+          grep -F 'PCG INSTANCE LOD TOTAL: 0 failures' pcg-instance-lod-game.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-instance-lod-game.log; then exit 1; fi
+      - name: Run native exclusion-volume gameplay smoke
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --script res://smoke_test.gd 2>&1 | tee pcg-days-after-smoke.log
+          grep -F 'PASS: scene, bounded visual LOD, exclusion-safe PCG foliage,' pcg-days-after-smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-days-after-smoke.log; then exit 1; fi
+      - name: Days After native PCG tangent frames and instancing parity
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 180s "$BIN" --headless --path games/days_after --script res://trail_frames_smoke_test.gd 2>&1 | tee pcg-trail-frames.log
+          grep -F 'PCG TRAIL FRAMES: 0 failures' pcg-trail-frames.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' pcg-trail-frames.log; then exit 1; fi
       - name: Upload PCG logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,5 +161,19 @@ jobs:
           if-no-files-found: ignore
           path: |
             pcg-native.log
+            pcg-point-transforms-native.log
+            pcg-point-transforms-game.log
+            pcg-foliage-scalability-native.log
+            pcg-hlod-native.log
+            pcg-instance-lod-game.log
+            pcg-weighted-native.log
+            pcg-polyline-native.log
+            pcg-weighted-game.log
+            pcg-path-falloff-native.log
+            pcg-polygon-native.log
+            pcg-surface-native.log
             pcg-import.log
             pcg-game.log
+            pcg-days-after-import.log
+            pcg-days-after-smoke.log
+            pcg-trail-frames.log
