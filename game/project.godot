@@ -4,6 +4,7 @@ config_version=5
 [application]
 
 config/name="Albion After"
+config/version="0.9.0"
 config/description="A persistent open world: Albion-style tiers, zones and full loot, Days-After-style scavenging and zombies."
 run/main_scene="res://scripts/client/online_main.tscn"
 

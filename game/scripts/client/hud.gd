@@ -20,6 +20,7 @@ const Crafting = preload("res://scripts/shared/crafting.gd")
 const CraftingCatalog = preload("res://scripts/shared/crafting_catalog.gd")
 const ExpeditionLoadout = preload("res://scripts/shared/expedition_loadout.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
+const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
@@ -2581,6 +2582,8 @@ func _deliver_nearest_outpost_provisions() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if (kind == "stash" or kind == "stash_bulk") and bool(data.get("ok", false)):
+		FirstSteps.note_deposit()
 	if kind == "door" and not bool(data.get("ok", false)):
 		say({"locked": "The door is barred from inside — break it or ask the owner.", "blocked": "Something is in the doorway.",
 			"too_far": "Too far from the door."}.get(str(data.get("reason", "")), "The door will not move."))

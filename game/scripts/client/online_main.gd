@@ -24,6 +24,7 @@ const UiAccess = preload("res://scripts/client/ui_access.gd")
 const UiSettings = preload("res://scripts/client/ui_settings.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
+const FirstSteps = preload("res://scripts/client/first_steps.gd")
 const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 const FirstPersonView = preload("res://scripts/client/first_person_view.gd")
 const ContactShadowBatch = preload("res://scripts/client/contact_shadow_batch.gd")
@@ -606,6 +607,21 @@ func _build_connect_screen() -> void:
 	button.add_theme_stylebox_override("pressed", _pill(Color(0.22, 0.14, 0.08)))
 	button.pressed.connect(_connect_remote)
 	box.add_child(button)
+	var quit := Button.new()
+	quit.text = "Quit"
+	quit.custom_minimum_size = Vector2(0, 34)
+	quit.add_theme_font_size_override("font_size", 14)
+	quit.add_theme_stylebox_override("normal", _pill(Color(0.18, 0.15, 0.13)))
+	quit.add_theme_stylebox_override("hover", _pill(Color(0.3, 0.24, 0.2)))
+	quit.add_theme_stylebox_override("pressed", _pill(Color(0.12, 0.1, 0.08)))
+	quit.pressed.connect(func() -> void: get_tree().quit())
+	box.add_child(quit)
+	var version := Label.new()
+	version.text = "v" + str(ProjectSettings.get_setting("application/config/version", "dev"))
+	version.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	version.add_theme_font_size_override("font_size", 11)
+	version.add_theme_color_override("font_color", Color(0.7, 0.68, 0.62, 0.7))
+	box.add_child(version)
 	status_label = Label.new()
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status_label.add_theme_color_override("font_color", Color(0.95, 0.7, 0.55))
@@ -1207,7 +1223,7 @@ func _on_welcomed() -> void:
 	overlay.setup(client, camera)
 	outposts = OutpostView.new()
 	add_child(outposts)
-	hud.say("F2 shows every control.")
+	hud.say("F2 shows every control." if not FirstSteps.active() else "Welcome, survivor. Follow FIRST STEPS (top left); F2 lists every control.")
 	UiTheme.apply(hud)
 	client.event_received.connect(_on_skill_event)
 	_setup_chat()
@@ -1453,6 +1469,7 @@ func _process(delta: float) -> void:
 	if _crosshair != null:
 		_crosshair.visible = _first_person and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 	_update_underwater()
+	_tick_first_steps(delta)
 	if _demo == "sky":
 		# A low view toward the horizon to show the sky (screenshots only).
 		camera.position = position + Vector3(0.0, 14.0, 6.0)
@@ -1843,6 +1860,23 @@ func _update_underwater() -> void:
 		_breath_label.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3) if breath < 25.0 else Color(0.75, 0.92, 1.0))
 
 
+var _first_steps_timer := 0.0
+
+
+## Checks the guided first-session goals twice a second and celebrates progress.
+func _tick_first_steps(delta: float) -> void:
+	_first_steps_timer -= delta
+	if _first_steps_timer > 0.0 or hud == null or client == null or not client.welcomed:
+		return
+	_first_steps_timer = 0.5
+	var done: int = FirstSteps.update(client)
+	if done > 0:
+		if FirstSteps.active():
+			hud.say("Goal complete! Next: " + str(FirstSteps.STEPS[FirstSteps.step]["text"]))
+		else:
+			hud.banner("FIRST STEPS COMPLETE — the island is yours", Color(0.55, 1.0, 0.6))
+
+
 func _can_fight() -> bool:
 	return client != null and client.welcomed and hud != null and not hud.is_menu_open() and not _typing() \
 		and not _build_mode and bool(client.you.get("alive", false))
@@ -1916,7 +1950,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_K:
 				skills_panel.toggle()
 			KEY_F2:
-				help_panel.toggle()
+				if Input.is_key_pressed(KEY_CTRL):
+					if FirstSteps.active():
+						FirstSteps.skip()
+						hud.say("First Steps guide hidden. F2 still lists every control.")
+				else:
+					help_panel.toggle()
 			KEY_J:
 				world_map.toggle()
 			KEY_F4:
