@@ -63,7 +63,7 @@ Actual performance gains require profiling.
 ## Native PCG exclusion zones and instanced grass
 
 The ruined-world scene now has deterministic collision-free grass distributed
-with one `MultiMeshInstance3D` instead of one draw object per blade. A shuffled
+with up to three mesh-specific `MultiMeshInstance3D` batches instead of one draw object per blade. A shuffled
 625-cell source grid is thinned to at most 160 instances with a 2.1-meter
 minimum 3D spacing. `PCGSpatialFilter3D.filter_indices_excluding()` subtracts
 spherical zones around spawn, loot, ruined structures, and the barricade
@@ -84,8 +84,8 @@ method. In addition to its existing spherical masks, it uses six
 axis-aligned rectangular volumes to protect the narrow ruin walls,
 barricade, scrap container and supply crate from decorative foliage.
 These boxes also exclude source points the spheres alone would retain.
-Instances are still generated deterministically in one `MultiMesh`
-batch with a 160-instance cap and 2.1-metre minimum center spacing.
+Instances are still generated deterministically across up to three `MultiMesh`
+batches with a shared 160-instance cap and 2.1-metre minimum center spacing.
 
 With stock Godot or an older Cgame build, the GDScript fallback checks
 the same inclusive sphere and box boundaries in the same source order.
@@ -105,7 +105,7 @@ The worn north–south approach has density 0.13, the dry northern area
 Sampling is deterministic for the same seed and IDs, even when source
 points are reordered, and does not mutate the global RNG used by
 gameplay. The scene still instantiates at most 160 decoration-only
-instances in one `MultiMesh`, with no collision, AI, resource or
+instances across bounded mesh-specific `MultiMesh` groups, with no collision, AI, resource or
 networking changes. The GDScript fallback matches the 31-bit native
 integer hash and is smoke-tested for output parity and regeneration.
 
@@ -122,8 +122,8 @@ multiply existing deterministic biome densities *before* seeded
 selection, exclusion volumes and 2.1 m instance spacing.
 
 This is a native engine feature immediately exercised in the game.
-Grass remains purely decorative and renders in a single
-`MultiMeshInstance3D`; collision, enemy AI, gathering and networking
+Grass remains purely decorative and renders in up to three
+`MultiMeshInstance3D` batches; collision, enemy AI, gathering and networking
 are not changed. The stock-Godot GDScript fallback implements the
 same point-to-polyline distance mask and the smoke suite checks
 native/fallback parity, corridor clearance, density blending,
@@ -145,8 +145,8 @@ regeneration, independent of point ordering. The proportions are
 weights/probabilities, not exact guaranteed counts per tile.
 
 The selection adjusts each blade's instance color, width and height
-inside **one MultiMeshInstance3D**. No additional mesh nodes, gameplay
-colliders, networking objects or draw calls per species are created.
+within GPU-instanced meshes. No per-plant scene nodes, gameplay
+colliders or networking objects are created; each unique geometry has one batched draw.
 Older Godot builds use `pcg_weighted_variants.gd` to reproduce the
 same unsigned 32-bit selection. Native and fallback implementations
 produce identical index choices with the same IDs, weights and seed.
@@ -160,3 +160,34 @@ godot --headless --path games/days_after --script res://smoke_test.gd
 The focused `native-pcg-spatial-filter.yml` workflow additionally
 executes C++ `[PCGWeightedVariantSelector]` doctests. This is a
 functional rendering-variation feature, not evidence of FPS gains.
+
+
+## GPU instancing for multiple PCG mesh geometries
+
+The native engine's `PCGWeightedVariantSelector.partition_indices(variant_ids,
+variant_count)` converts the already seeded 6:3:1 variant decisions into
+one packed source-index list per **actual mesh geometry**. Days After now
+uses three distinct meshes, not merely differently colored boxes: green
+rectangular blades, autumn tapered reeds and dry seed heads. Geometry
+is intentionally simple so this greybox demo requires no asset downloads.
+
+The original `FoliageScatter` is still the root `MultiMeshInstance3D`
+and renders green blades. Two persistent child instancing nodes render
+the other two mesh types. The same selected 0–160 source positions, IDs,
+trail masks and exclusion constraints are preserved. A plant is never
+duplicated or dropped during mesh bucketing. A second regeneration reuses
+the existing nodes and keeps the original variant and position.
+
+This increases the maximum number of **GPU draw batches from one to
+three**, a deliberate cost for truly different geometry, but does not
+create one draw call or scene node per plant. It is not a measured FPS
+optimization relative to the previous single-mesh implementation.
+
+```sh
+godot --headless --path games/days_after --script res://pcg_weighted_variants_smoke_test.gd
+godot --headless --path games/days_after --script res://smoke_test.gd
+```
+
+The native and fallback tests verify exactly-once source mapping, count
+limits, variant-specific mesh types, per-instance colors, deterministic
+regeneration, invalid-input atomic rejection and no extra child nodes.
