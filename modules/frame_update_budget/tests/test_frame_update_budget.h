@@ -272,4 +272,32 @@ TEST_CASE("[FrameUpdateBudget] Faster lanes tick more frequently with bounded CP
 	CHECK(hidden_updates >= 25); // Even de-prioritized lanes make progress.
 }
 
+
+TEST_CASE("[FrameUpdateBudget] Per-lane completed-frame CPU samples are isolated") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("dust_devils"));
+	CHECK(b->register_lane("dragonflies"));
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0);
+	CHECK(b->get_lane_last_frame_cost_us("unknown") == -1);
+	b->begin_frame(0.01, 3);
+	CHECK(b->record_cost("dust_devils", 120));
+	CHECK(b->record_cost("dust_devils", 45));
+	CHECK(b->record_cost("dragonflies", 70));
+	CHECK_FALSE(b->record_cost("missing", 100));
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0); // No partial frame leakage.
+	b->begin_frame(0.01, 3);
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 165);
+	CHECK(b->get_lane_last_frame_cost_us("dragonflies") == 70);
+	CHECK(b->last_frame_cost_us() == 235);
+	b->begin_frame(0.01, 3);
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0); // Idle samples clear.
+	CHECK(b->get_lane_last_frame_cost_us("dragonflies") == 0);
+	CHECK(b->record_cost("dust_devils", 999));
+	b->reset();
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == 0);
+	CHECK(b->unregister_lane("dust_devils"));
+	CHECK(b->get_lane_last_frame_cost_us("dust_devils") == -1);
+}
+
 } // namespace TestFrameUpdateBudget
