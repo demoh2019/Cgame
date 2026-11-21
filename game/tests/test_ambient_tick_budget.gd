@@ -364,3 +364,75 @@ func run(t) -> void:
 		native_samples.call("reset")
 		t.eq(int(native_samples.call("get_lane_last_frame_cost_us", &"dust_devils")), 0,
 			"native reset clears lane telemetry")
+
+	t.current = "significance-aware deferred-frame deadlines"
+	t.eq(AmbientTickBudget.deadline_frames_for_importance(3.0), 8,
+		"visible effects receive a short soft deadline")
+	t.eq(AmbientTickBudget.deadline_frames_for_importance(0.25), 0,
+		"irrelevant ambience has no deadline")
+	t.eq(AmbientTickBudget.deadline_frames_for_importance(NAN), 0,
+		"nonfinite significance never enables deadline priority")
+	var deadline_script := AmbientTickBudget.new()
+	t.eq(deadline_script.get_lane_max_deferred_frames("dust_devils"), 0,
+		"legacy scheduling has deadlines disabled")
+	t.eq(deadline_script.get_lane_max_deferred_frames("missing"), -1,
+		"unregistered deadline query returns -1")
+	t.check(not deadline_script.set_lane_max_deferred_frames("missing", 2),
+		"deadline setter rejects unknown lane")
+	t.check(not deadline_script.set_lane_max_deferred_frames("dust_devils", 121),
+		"deadline setter rejects invalid frame count")
+	t.check(deadline_script.set_lane_max_deferred_frames("dust_devils", 2),
+		"heavy lane can opt into a two-frame deadline")
+	deadline_script.set_lane_importance("dust_devils", 0.25)
+	deadline_script.set_lane_importance("dragonflies", 4.0)
+	deadline_script.set_frame_time_budget_us(200)
+	var deadline_native: Object = null
+	if ClassDB.class_exists("FrameUpdateBudget"):
+		var candidate: Object = ClassDB.instantiate("FrameUpdateBudget")
+		if candidate != null and candidate.has_method("set_lane_max_deferred_frames"):
+			deadline_native = candidate
+			for lane in AmbientTickBudget.LANES:
+				t.check(bool(deadline_native.call("register_lane", StringName(lane))),
+					"native deadline lane registered")
+			deadline_native.call("set_lane_max_deferred_frames", &"dust_devils", 2)
+			deadline_native.call("set_lane_importance", &"dust_devils", 0.25)
+			deadline_native.call("set_lane_importance", &"dragonflies", 4.0)
+			deadline_native.call("set_frame_time_budget_us", 200)
+	var heavy_grants: int = 0
+	for frame in 5:
+		deadline_script.begin_frame(0.1, 0)
+		if deadline_native != null:
+			deadline_native.call("begin_frame", 0.1, 0)
+		for lane in AmbientTickBudget.LANES:
+			var granted: float = deadline_script.consume(lane, 0.1)
+			if deadline_native != null:
+				t.near(float(deadline_native.call("consume", StringName(lane), 0.1)),
+					granted, 0.0000001,
+					"native/script deadline grant parity frame %d lane %s" % [frame, lane])
+			if granted > 0.0:
+				var work_us: int = 1500 if lane == "dust_devils" else 80
+				deadline_script.record_cost(lane, work_us)
+				if deadline_native != null:
+					deadline_native.call("record_cost", StringName(lane), work_us)
+				if frame > 0 and lane == "dust_devils":
+					heavy_grants += 1
+		if deadline_native != null:
+			t.eq(int(deadline_native.call("get_deadline_overdue_lane_count")),
+				deadline_script.get_deadline_overdue_lane_count(),
+				"native/script overdue deadline telemetry matches")
+		if frame > 0:
+			t.check(deadline_script.last_frame_counts().x <= 1,
+				"deadline priority never exceeds single-slot frame budget")
+	t.check(heavy_grants >= 1,
+		"costly deadline lane runs without waiting for legacy age-48 escape")
+	deadline_script.reset()
+	t.eq(deadline_script.get_lane_max_deferred_frames("dust_devils"), 2,
+		"deadline configuration survives reset")
+	t.eq(deadline_script.get_deadline_overdue_lane_count(), 0,
+		"reset clears overdue pressure")
+	var online_source := FileAccess.get_file_as_string("res://scripts/client/online_main.gd")
+	t.check(online_source.contains("Albion/AmbientDeadlineOverdue"),
+		"Albion profiler exposes deadline pressure")
+	t.check(online_source.contains("deadline_frames_for_importance"),
+		"real gameplay adjusts deadlines for scene significance")
+
