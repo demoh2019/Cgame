@@ -82,6 +82,51 @@ The approach follows Unreal's Animation Budget Allocator **state-change
 throttling** idea, not Unreal's proprietary code:
 https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine
 
+## Measured CPU work-unit admission (independent of combat scheduling)
+
+The additional native API
+`cap_full_pose_cost(tiers, distances, retained_full_flags, full_pose_cost_us,
+full_pose_budget_us, hysteresis=1.5)` is a pure-data **second-stage**
+allocator. It can be applied after either `plan_visible_tiers_stable` or
+`plan_visible_tiers_temporal`, preserving **both independent IK and
+combat-pose retention budgets** already present in the engine.
+
+Only existing **tier-0 full procedural IK** owners compete for this
+predicted microsecond cap. They retain the deterministic previous-IK
+distance bonus and original-index ties; predicted work that does not
+fit demotes an owner to **tier 1** (full-rate animation, without optional
+procedural extras). There is no cost-based change to the independently
+selected full-rate combat queue, and actors outside the existing IK
+winners never gain a new slot. A zero global time budget disables this
+additional cap and exactly preserves the original tier array.
+
+Each per-actor sample is an integer 0..100,000us; 0 means **unsampled**
+and uses an initial 100us work-unit estimate, following the idea from
+Unreal's Animation Budget Allocator. Maximum total budget is 1,000,000us;
+invalid or mismatched requests fail atomically. At most 256 tier-0
+winners are ranked. Actual work may exceed the estimate: the budget is
+**soft**, not a hard real-time deadline.
+
+Albion After's `character_anim_modifier.gd` measures its GDScript
+SkeletonModifier3D full-pose execution with `Time.get_ticks_usec()`
+and a bounded quarter-weight EWMA. The existing real
+`CharacterAnim.apply_crowd` retains both combat and IK history,
+performs the usual dual-retention tier selection, and then feeds
+measured per-model costs to `cap_full_pose_cost`. Quality-specific
+limits are Performance **0us** (no full-IK slots), Balanced **750us**,
+High **1500us**, Ultra **2750us**. Older Cgame builds and stock Godot
+use the same deterministic script fallback.
+
+**Measurement boundary:** this samples the scripted procedural modifier
+only. It excludes GPU skinning, native FootPlacementModifier3D, the
+AnimationMixer and all other render/physics workloads. It is a
+partial implementation of the work-unit budgeting idea, not a full
+Unreal Animation Budget Allocator replacement. No measured FPS gain
+is claimed without engine builds and gameplay profiling.
+
+Unreal reference:
+https://dev.epicgames.com/documentation/unreal-engine/animation-budget-allocator-in-unreal-engine
+
 ## Safety and portability
 
 - At most 16,384 actors; priority flags must match distances 1:1.
