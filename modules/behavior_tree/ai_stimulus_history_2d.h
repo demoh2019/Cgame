@@ -65,7 +65,8 @@ private:
 	Vector<Stimulus> events; // Oldest to newest; stable bounded storage.
 
 	static Dictionary make_snapshot(const Stimulus &p_event);
-	Dictionary get_best_filtered(int p_sense, const Vector2 *p_center, real_t p_radius_squared) const;
+	Dictionary get_best_filtered(int p_sense, const Vector2 *p_center, real_t p_radius_squared,
+			const int64_t *p_source_id = nullptr) const;
 
 protected:
 	static void _bind_methods();
@@ -85,6 +86,12 @@ public:
 	// Select a confirmed memory only within an inclusive, finite local radius.
 	// The spatial filter is applied before stimulus ranking; no state is changed.
 	Dictionary get_best_in_radius(int p_sense, const Vector2 &p_center, real_t p_radius) const;
+	// Query the latest authorized memory for a specific identified actor.
+	// A source may have a different record in each sense. This does not
+	// inspect the world or grant the source visibility, sound or targeting.
+	Dictionary get_best_for_source(int p_sense, int64_t p_source_id) const;
+	Dictionary get_best_for_source_in_radius(int p_sense, int64_t p_source_id,
+			const Vector2 &p_center, real_t p_radius) const;
 	// Newest events first. A detached Array of plain-data Dictionaries.
 	Array get_recent(int p_limit = 8) const;
 	// Forget one known source, optionally limited to one sense; returns the
