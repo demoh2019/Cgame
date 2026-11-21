@@ -8891,7 +8891,8 @@ func prepare_snapshot_interest() -> bool:
 		player_positions, Defs.INTEREST_RADIUS)
 	var nearby_infected_by_viewer: Array = _snapshot_zombies_grid.query_many(
 		player_positions, Defs.INTEREST_RADIUS)
-	if nearby_players_by_viewer.size() != player_ids.size() or 			nearby_infected_by_viewer.size() != player_ids.size():
+	if (nearby_players_by_viewer.size() != player_ids.size()
+			or nearby_infected_by_viewer.size() != player_ids.size()):
 		return false # Resource guard: fall back rather than hide entities.
 	for i in player_ids.size():
 		var peer_id: int = int(player_ids[i])
@@ -8923,7 +8924,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var here := Vector2(player.position.x, player.position.z)
 	var nearby_players: Array = []
 	var player_candidates: Array = []
-	if _snapshot_interest_prepared and _snapshot_interest_tick == tick_count 			and _snapshot_player_ids_by_peer.has(peer_id):
+	if (_snapshot_interest_prepared and _snapshot_interest_tick == tick_count
+			and _snapshot_player_ids_by_peer.has(peer_id)):
 		var player_ids: PackedInt64Array = _snapshot_player_ids_by_peer[peer_id]
 		for candidate_id in player_ids:
 			var candidate = players.get(candidate_id)
@@ -8953,7 +8955,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var nearby_zombies: Array = []
 	var party_flank_hint: Dictionary = {}
 	var zombie_candidates: Array = []
-	if _snapshot_interest_prepared and _snapshot_interest_tick == tick_count 			and _snapshot_zombie_ids_by_peer.has(peer_id):
+	if (_snapshot_interest_prepared and _snapshot_interest_tick == tick_count
+			and _snapshot_zombie_ids_by_peer.has(peer_id)):
 		var infected_ids: PackedInt64Array = _snapshot_zombie_ids_by_peer[peer_id]
 		for candidate_id in infected_ids:
 			var candidate = zombies.get(candidate_id)
