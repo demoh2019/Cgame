@@ -440,6 +440,12 @@ uint32_t RenderingDeviceDriverVulkan::SubgroupCapabilities::supported_stages_fla
 	if (supported_stages & VK_SHADER_STAGE_INTERSECTION_BIT_KHR) {
 		flags += SHADER_STAGE_INTERSECTION_BIT;
 	}
+	if (supported_stages & VK_SHADER_STAGE_TASK_BIT_EXT) {
+		flags += SHADER_STAGE_TASK_BIT;
+	}
+	if (supported_stages & VK_SHADER_STAGE_MESH_BIT_EXT) {
+		flags += SHADER_STAGE_MESH_BIT;
+	}
 
 	return flags;
 }
@@ -598,6 +604,7 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 	_register_requested_device_extension(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, false);
 	_register_requested_device_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME, false);
 	_register_requested_device_extension(VK_KHR_SPIRV_1_4_EXTENSION_NAME, false);
+	_register_requested_device_extension(VK_EXT_MESH_SHADER_EXTENSION_NAME, false);
 
 	// We don't actually use this extension, but some runtime components on some platforms
 	// can and will fill the validation layers with useless info otherwise if not enabled.
@@ -943,6 +950,7 @@ Error RenderingDeviceDriverVulkan::_check_device_capabilities() {
 		VkPhysicalDeviceRayTracingPipelineFeaturesKHR raytracing_pipeline_features = {};
 		VkPhysicalDeviceSynchronization2FeaturesKHR sync_2_features = {};
 		VkPhysicalDeviceRayTracingValidationFeaturesNV raytracing_validation_features = {};
+		VkPhysicalDeviceMeshShaderFeaturesEXT mesh_shader_features = {};
 		VkPhysicalDeviceRayQueryFeaturesKHR ray_query_features = {};
 
 		const bool use_1_2_features = physical_device_properties.apiVersion >= VK_API_VERSION_1_2;
@@ -1040,6 +1048,12 @@ Error RenderingDeviceDriverVulkan::_check_device_capabilities() {
 			next_features = &ray_query_features;
 		}
 
+		if (enabled_device_extension_names.has(VK_EXT_MESH_SHADER_EXTENSION_NAME)) {
+			mesh_shader_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+			mesh_shader_features.pNext = next_features;
+			next_features = &mesh_shader_features;
+		}
+
 		VkPhysicalDeviceFeatures2 device_features_2 = {};
 		device_features_2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 		device_features_2.pNext = next_features;
@@ -1131,6 +1145,13 @@ Error RenderingDeviceDriverVulkan::_check_device_capabilities() {
 
 		if (enabled_device_extension_names.has(VK_KHR_RAY_QUERY_EXTENSION_NAME)) {
 			ray_query_support = ray_query_features.rayQuery;
+		}
+
+		if (enabled_device_extension_names.has(VK_EXT_MESH_SHADER_EXTENSION_NAME)) {
+			// Mesh shading needs SPIR-V 1.4, which is core in Vulkan 1.2 or provided by VK_KHR_spirv_1_4.
+			const bool spirv_1_4 = physical_device_properties.apiVersion >= VK_API_VERSION_1_2 || enabled_device_extension_names.has(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
+			mesh_shader_capabilities.mesh_shader_support = spirv_1_4 && mesh_shader_features.meshShader;
+			mesh_shader_capabilities.task_shader_support = mesh_shader_capabilities.mesh_shader_support && mesh_shader_features.taskShader;
 		}
 	}
 
@@ -1487,6 +1508,15 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
 		create_info_next = &ray_query_features;
 	}
 
+	VkPhysicalDeviceMeshShaderFeaturesEXT mesh_shader_features = {};
+	if (mesh_shader_capabilities.mesh_shader_support) {
+		mesh_shader_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+		mesh_shader_features.pNext = create_info_next;
+		mesh_shader_features.meshShader = VK_TRUE;
+		mesh_shader_features.taskShader = mesh_shader_capabilities.task_shader_support;
+		create_info_next = &mesh_shader_features;
+	}
+
 	VkPhysicalDeviceVulkan11Features vulkan_1_1_features = {};
 	VkPhysicalDevice16BitStorageFeaturesKHR storage_features = {};
 	VkPhysicalDeviceMultiviewFeatures multiview_features = {};
@@ -1590,6 +1620,14 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
 			device_functions.CreateRaytracingPipelinesKHR = PFN_vkCreateRayTracingPipelinesKHR(functions.GetDeviceProcAddr(vk_device, "vkCreateRayTracingPipelinesKHR"));
 			device_functions.GetRayTracingShaderGroupHandlesKHR = PFN_vkGetRayTracingShaderGroupHandlesKHR(functions.GetDeviceProcAddr(vk_device, "vkGetRayTracingShaderGroupHandlesKHR"));
 			device_functions.CmdTraceRaysKHR = PFN_vkCmdTraceRaysKHR(functions.GetDeviceProcAddr(vk_device, "vkCmdTraceRaysKHR"));
+		}
+
+		if (mesh_shader_capabilities.mesh_shader_support) {
+			device_functions.CmdDrawMeshTasksEXT = PFN_vkCmdDrawMeshTasksEXT(functions.GetDeviceProcAddr(vk_device, "vkCmdDrawMeshTasksEXT"));
+			device_functions.CmdDrawMeshTasksIndirectEXT = PFN_vkCmdDrawMeshTasksIndirectEXT(functions.GetDeviceProcAddr(vk_device, "vkCmdDrawMeshTasksIndirectEXT"));
+			if (device_functions.CmdDrawMeshTasksEXT == nullptr || device_functions.CmdDrawMeshTasksIndirectEXT == nullptr) {
+				mesh_shader_capabilities = {}; // Entry points missing: do not advertise the feature.
+			}
 		}
 	}
 
@@ -2969,6 +3007,8 @@ static_assert(ENUM_MEMBERS_EQUAL(RDD::PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELI
 static_assert(ENUM_MEMBERS_EQUAL(RDD::PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR));
 static_assert(ENUM_MEMBERS_EQUAL(RDD::PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT, VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT));
 static_assert(ENUM_MEMBERS_EQUAL(RDD::PIPELINE_STAGE_RAY_TRACING_SHADER_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR));
+static_assert(ENUM_MEMBERS_EQUAL(RDD::PIPELINE_STAGE_TASK_SHADER_BIT, VK_PIPELINE_STAGE_TASK_SHADER_BIT_EXT));
+static_assert(ENUM_MEMBERS_EQUAL(RDD::PIPELINE_STAGE_MESH_SHADER_BIT, VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT));
 static_assert(ENUM_MEMBERS_EQUAL(RDD::PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR));
 
 // RDD::BarrierAccessBits == VkAccessFlagBits.
@@ -4334,6 +4374,8 @@ static VkShaderStageFlagBits RD_STAGE_TO_VK_SHADER_STAGE_BITS[RDD::SHADER_STAGE_
 	VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
 	VK_SHADER_STAGE_MISS_BIT_KHR,
 	VK_SHADER_STAGE_INTERSECTION_BIT_KHR,
+	VK_SHADER_STAGE_TASK_BIT_EXT,
+	VK_SHADER_STAGE_MESH_BIT_EXT,
 };
 
 RDD::ShaderID RenderingDeviceDriverVulkan::shader_create_from_container(const Ref<RenderingShaderContainer> &p_shader_container, const Vector<ImmutableSampler> &p_immutable_samplers) {
@@ -5869,6 +5911,19 @@ void RenderingDeviceDriverVulkan::command_render_draw_indirect_count(CommandBuff
 	vkCmdDrawIndirectCount(command_buffer->vk_command_buffer, indirect_buf_info->vk_buffer, p_offset, count_buf_info->vk_buffer, p_count_buffer_offset, p_max_draw_count, p_stride);
 }
 
+void RenderingDeviceDriverVulkan::command_render_draw_mesh_tasks(CommandBufferID p_cmd_buffer, uint32_t p_x_count, uint32_t p_y_count, uint32_t p_z_count) {
+	const CommandBufferInfo *command_buffer = (const CommandBufferInfo *)p_cmd_buffer.id;
+	ERR_FAIL_NULL_MSG(device_functions.CmdDrawMeshTasksEXT, "vkCmdDrawMeshTasksEXT is not available (VK_EXT_mesh_shader is not enabled).");
+	device_functions.CmdDrawMeshTasksEXT(command_buffer->vk_command_buffer, p_x_count, p_y_count, p_z_count);
+}
+
+void RenderingDeviceDriverVulkan::command_render_draw_mesh_tasks_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) {
+	const CommandBufferInfo *command_buffer = (const CommandBufferInfo *)p_cmd_buffer.id;
+	const BufferInfo *buf_info = (const BufferInfo *)p_indirect_buffer.id;
+	ERR_FAIL_NULL_MSG(device_functions.CmdDrawMeshTasksIndirectEXT, "vkCmdDrawMeshTasksIndirectEXT is not available (VK_EXT_mesh_shader is not enabled).");
+	device_functions.CmdDrawMeshTasksIndirectEXT(command_buffer->vk_command_buffer, buf_info->vk_buffer, p_offset, p_draw_count, p_stride);
+}
+
 void RenderingDeviceDriverVulkan::command_render_bind_vertex_buffers(CommandBufferID p_cmd_buffer, uint32_t p_binding_count, const BufferID *p_buffers, const uint64_t *p_offsets, uint64_t p_dynamic_offsets) {
 	const CommandBufferInfo *command_buffer = (const CommandBufferInfo *)p_cmd_buffer.id;
 	VkBuffer *vk_buffers = ALLOCA_ARRAY(VkBuffer, p_binding_count);
@@ -6319,6 +6374,20 @@ RDD::PipelineID RenderingDeviceDriverVulkan::render_pipeline_create(
 	pipeline_create_info.pVertexInputState = vertex_input_state_create_info;
 	pipeline_create_info.pInputAssemblyState = &input_assembly_create_info;
 	pipeline_create_info.pTessellationState = &tessellation_create_info;
+
+	// Vertex input, input assembly and tessellation state are not used by pipelines with a mesh shader (VK_EXT_mesh_shader).
+	bool has_mesh_stage = false;
+	for (uint32_t i = 0; i < shader_info->vk_stages_create_info.size(); i++) {
+		if (shader_info->vk_stages_create_info[i].stage == VK_SHADER_STAGE_MESH_BIT_EXT) {
+			has_mesh_stage = true;
+			break;
+		}
+	}
+	if (has_mesh_stage) {
+		pipeline_create_info.pVertexInputState = nullptr;
+		pipeline_create_info.pInputAssemblyState = nullptr;
+		pipeline_create_info.pTessellationState = nullptr;
+	}
 	pipeline_create_info.pViewportState = &viewport_state_create_info;
 	pipeline_create_info.pRasterizationState = &rasterization_state_create_info;
 	pipeline_create_info.pMultisampleState = &multisample_state_create_info;
@@ -7542,6 +7611,8 @@ bool RenderingDeviceDriverVulkan::has_feature(Features p_feature) {
 #endif // defined(WINDOWS_ENABLED)
 		case SUPPORTS_GPU_MAPPABLE_BUFFER:
 			return device_local_host_visible_host_coherent_memory_support;
+		case SUPPORTS_MESH_SHADER:
+			return mesh_shader_capabilities.mesh_shader_support;
 		default:
 			return false;
 	}

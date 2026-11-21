@@ -109,6 +109,11 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 		bool validation = false;
 	};
 
+	struct MeshShaderCapabilities {
+		bool mesh_shader_support = false;
+		bool task_shader_support = false;
+	};
+
 	struct DeviceFunctions {
 		PFN_vkCreateSwapchainKHR CreateSwapchainKHR = nullptr;
 		PFN_vkDestroySwapchainKHR DestroySwapchainKHR = nullptr;
@@ -135,6 +140,10 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 		PFN_vkCreateRayTracingPipelinesKHR CreateRaytracingPipelinesKHR = nullptr;
 		PFN_vkGetRayTracingShaderGroupHandlesKHR GetRayTracingShaderGroupHandlesKHR = nullptr;
 		PFN_vkCmdTraceRaysKHR CmdTraceRaysKHR = nullptr;
+
+		// Mesh shader extension.
+		PFN_vkCmdDrawMeshTasksEXT CmdDrawMeshTasksEXT = nullptr;
+		PFN_vkCmdDrawMeshTasksIndirectEXT CmdDrawMeshTasksIndirectEXT = nullptr;
 	};
 	// Debug marker extensions.
 	VkDebugReportObjectTypeEXT _convert_to_debug_report_objectType(VkObjectType p_object_type);
@@ -165,6 +174,7 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 	AccelerationStructureCapabilities acceleration_structure_capabilities;
 	bool ray_query_support = false;
 	RaytracingCapabilities raytracing_capabilities;
+	MeshShaderCapabilities mesh_shader_capabilities;
 	bool pipeline_cache_control_support = false;
 	bool device_fault_support = false;
 	bool framebuffer_depth_resolve = false;
@@ -656,6 +666,8 @@ public:
 	virtual void command_render_draw_indexed_indirect_count(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, BufferID p_count_buffer, uint64_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride) override final;
 	virtual void command_render_draw_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) override final;
 	virtual void command_render_draw_indirect_count(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, BufferID p_count_buffer, uint64_t p_count_buffer_offset, uint32_t p_max_draw_count, uint32_t p_stride) override final;
+	virtual void command_render_draw_mesh_tasks(CommandBufferID p_cmd_buffer, uint32_t p_x_count, uint32_t p_y_count, uint32_t p_z_count) override final;
+	virtual void command_render_draw_mesh_tasks_indirect(CommandBufferID p_cmd_buffer, BufferID p_indirect_buffer, uint64_t p_offset, uint32_t p_draw_count, uint32_t p_stride) override final;
 
 	// Buffer binding.
 	virtual void command_render_bind_vertex_buffers(CommandBufferID p_cmd_buffer, uint32_t p_binding_count, const BufferID *p_buffers, const uint64_t *p_offsets, uint64_t p_dynamic_offsets) override final;

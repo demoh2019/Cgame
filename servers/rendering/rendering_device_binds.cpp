@@ -54,6 +54,8 @@ Error RDShaderFile::parse_versions_from_text(const String &p_text, const String 
 		"closest_hit",
 		"miss",
 		"intersection",
+		"task",
+		"mesh",
 	};
 	String stage_code[RD::SHADER_STAGE_MAX];
 	int stages_found = 0;
@@ -199,7 +201,7 @@ Error RDShaderFile::parse_versions_from_text(const String &p_text, const String 
 				String error;
 #ifdef MODULE_GLSLANG_ENABLED
 				RD::ShaderSpirvVersion spirv_version = RD::SHADER_SPIRV_VERSION_1_3;
-				if (i >= RD::SHADER_STAGE_RAYGEN && i <= RD::SHADER_STAGE_INTERSECTION) {
+				if ((i >= RD::SHADER_STAGE_RAYGEN && i <= RD::SHADER_STAGE_INTERSECTION) || i == RD::SHADER_STAGE_TASK || i == RD::SHADER_STAGE_MESH) {
 					spirv_version = RD::SHADER_SPIRV_VERSION_1_4;
 				}
 				Vector<uint8_t> spirv = compile_glslang_shader(RD::ShaderStage(i), ShaderIncludeDB::parse_include_files(code), RD::SHADER_LANGUAGE_VULKAN_VERSION_1_1, spirv_version, &error);

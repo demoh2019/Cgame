@@ -2817,6 +2817,12 @@ bool RenderingDeviceDriverMetal::has_feature(Features p_feature) {
 		}
 		case SUPPORTS_GPU_MAPPABLE_BUFFER:
 			return true;
+		case SUPPORTS_MESH_SHADER:
+			// TODO(mesh-shader): Metal 3 (Apple family 9 / M3+ and A17 Pro) provides object and mesh stages
+			// (MTL::MeshRenderPipelineDescriptor, MTL::RenderCommandEncoder::drawMeshThreadgroups) but the
+			// SPIR-V to MSL path (SPIRV-Cross) and the pipeline/argument-buffer plumbing for the TASK and MESH
+			// stages are not implemented yet, so the feature is deliberately reported as unsupported here.
+			return false;
 		default:
 			return false;
 	}

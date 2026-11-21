@@ -101,7 +101,7 @@ RenderingDeviceCommons::ShaderLanguageVersion RenderingShaderContainerFormatVulk
 }
 
 RenderingDeviceCommons::ShaderSpirvVersion RenderingShaderContainerFormatVulkan::get_shader_spirv_version(ShaderStage p_stage) const {
-	if (p_stage >= SHADER_STAGE_RAYGEN && p_stage <= SHADER_STAGE_INTERSECTION) {
+	if ((p_stage >= SHADER_STAGE_RAYGEN && p_stage <= SHADER_STAGE_INTERSECTION) || p_stage == SHADER_STAGE_TASK || p_stage == SHADER_STAGE_MESH) {
 		return SHADER_SPIRV_VERSION_1_4;
 	} else {
 		return SHADER_SPIRV_VERSION_1_3;

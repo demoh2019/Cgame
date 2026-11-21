@@ -33,6 +33,7 @@
 #include "ai_execution_profiler.h"
 #include "ai_behavior_trace.h"
 #include "core/variant/type_info.h"
+#include "core/variant/binder_common.h"
 
 #include "core/io/resource.h"
 #include "core/object/gdvirtual.gen.h"
