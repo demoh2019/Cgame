@@ -286,7 +286,7 @@ func run(t) -> void:
     mass.tick_count = 5 # Same 4Hz separation phase used in the actual game.
     var probe := Zombie.new(61000, "walker", Vector3(0.0, ground, 0.0))
     var walking_speed: float = float(probe.data["speed"]) * 0.4
-    var meeting_distance: float = walking_speed * 2.0 * GameServer.AI_CROWD_LOOKAHEAD_SECONDS
+    var meeting_distance: float = walking_speed * 2.0 * GameServer.AI_CROWD_LOOKAHEAD_SECONDS + 0.2
     for index in range(32):
         var px: float = 0.0 if index == 0 else (
             meeting_distance if index == 1 else 1000.0 + float(index) * 20.0)
