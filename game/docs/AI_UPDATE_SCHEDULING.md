@@ -184,6 +184,61 @@ infected, two equal-distance sources and a distant bystander.
 No latency, FPS or CPU improvement is claimed without a compiled native
 engine and repeatable benchmarks.
 
+## Batched vertical-cylinder presence for camp sentries (Mass-style)
+
+Inspired by Unreal's data-oriented [Mass Entity processors](https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-entity-in-unreal-engine), Cgame exposes a new spatial-hash primitive that handles many 3D proximity counts in one native call:
+
+```gdscript
+var counts: PackedInt32Array = grid.query_cylinder_counts_batch(
+    alarm_world_centers, living_infected_positions,
+    21.0, 8.0, 5)
+```
+
+The query hashes **target XZ coordinates once**, then visits the target
+cell and at most its eight adjacent cells per source. Each match
+must lie within the inclusive horizontal radius **and** the inclusive
+absolute Y difference. The result is a packed array of counts in
+source order, clamped to `max_count`, with no entity IDs or private
+coordinates in the result. It does not alter scene state or trigger
+physics or gameplay events.
+
+Bounds: 1..4096 source cylinders, 0..8192 targets, finite coordinate
+magnitudes no greater than 1,000,000, radius 0..256, height 0..256,
+and a count cap in 1..64. An empty target set yields valid all-zero
+counts; malformed or oversized requests return an **empty** array,
+distinct from successful zero detections. Zero radius supports
+coincident XZ positions, and exact height/radius boundaries match.
+
+### Live Albion After integration
+
+The canonical multiplayer `GameServer._tick_world()` batches counts
+when at least 32 infected and four armed, scan-due, player-owned camp
+alarms coexist (up to 8192 infected / 4096 alarm centers). Its query
+snapshot contains only living infected with finite positions; **raid
+bosses are counted**, matching previous alarm rules. A server-only
+`get_camp_alarm_query_stats()` reports whether this optimization ran.
+
+The old `CampAlarm.scan(fire, zombies, now)` is still the authoritative
+timer, fuel and alert-cooldown gate. It accepts an *optional* precomputed
+count only when provided by the server's valid native batch; otherwise
+the same 3D exhaustive loop runs unchanged. A native result is fully
+validated for size and count range before any game state is mutated.
+Weather dousing, expired fires, missing alarm owners and disconnected
+players still suppress notifications. A single alarm reports at most
+five nearby infected and preserves its two-second scan interval and
+24-second alert cooldown.
+
+Tests include C++ cylinder queries (boundary distance, vertical floors,
+negative cells, no enemies, zero radius, duplicate observers, caps and
+malformed arrays), plus a real `GameServer._tick_world()` scenario with
+four alarms and 32 infected. The game regression compares native and
+forced old-engine paths for identical event counts, authoritative
+per-alarm schedules, boss presence and altitude exclusion.
+
+This optimization is an additive Cgame API, **not a port of Unreal
+engine code**. No measured CPU or FPS improvement is claimed without
+native compilation and repeatable benchmarks.
+
 ## Inspect the real server
 
 The diagnostic `GameServer.get_ai_schedule_stats()` method returns a detached Dictionary:

@@ -466,4 +466,74 @@ TEST_CASE("[AIProximityGrid2D] EQS cross-nearest rejects malformed data atomical
 	CHECK(grid->query_cross_nearest_batch(sources, too_many_targets, ids, 2.0, 2.0).is_empty());
 }
 
+TEST_CASE("[AIProximityGrid2D] Cylinder counts honor XZ radius, height and source order") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector3Array centers;
+	centers.push_back(Vector3(0, 0, 0));
+	centers.push_back(Vector3(-10, -4, -10));
+	centers.push_back(Vector3(300, 0, 300));
+	PackedVector3Array targets;
+	targets.push_back(Vector3(3, 0, 4)); // Inclusive XZ radius.
+	targets.push_back(Vector3(3, 8, 4)); // Inclusive height.
+	targets.push_back(Vector3(3, 8.1, 4)); // Wrong floor.
+	targets.push_back(Vector3(5.01, 0, 0)); // Too far.
+	targets.push_back(Vector3(-13, 4, -14)); // Inclusive negative-cell height.
+	const PackedInt32Array result = grid->query_cylinder_counts_batch(centers, targets, 5.0, 8.0, 5);
+	REQUIRE(result.size() == 3);
+	CHECK(result[0] == 2);
+	CHECK(result[1] == 1);
+	CHECK(result[2] == 0);
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 5.0, 8.0, 5) == result);
+	const PackedInt32Array capped = grid->query_cylinder_counts_batch(centers, targets, 5.0, 8.0, 1);
+	REQUIRE(capped.size() == 3);
+	CHECK(capped[0] == 1);
+	CHECK(capped[1] == 1);
+}
+
+TEST_CASE("[AIProximityGrid2D] Cylinder counts preserve valid empty targets and exact zero radius") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector3Array centers;
+	centers.push_back(Vector3(-6, 2, -6));
+	centers.push_back(Vector3(-6, 2, -6));
+	const PackedInt32Array empty = grid->query_cylinder_counts_batch(centers, PackedVector3Array(), 3.0, 0.0, 5);
+	REQUIRE(empty.size() == 2);
+	CHECK(empty[0] == 0);
+	CHECK(empty[1] == 0);
+	PackedVector3Array targets;
+	targets.push_back(Vector3(-6, 2, -6));
+	targets.push_back(Vector3(-6, 2.01, -6));
+	const PackedInt32Array overlap = grid->query_cylinder_counts_batch(centers, targets, 0.0, 0.0, 5);
+	REQUIRE(overlap.size() == 2);
+	CHECK(overlap[0] == 1);
+	CHECK(overlap[1] == 1);
+}
+
+TEST_CASE("[AIProximityGrid2D] Cylinder counts reject invalid and oversized inputs atomically") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector3Array centers;
+	centers.push_back(Vector3(0, 0, 0));
+	PackedVector3Array targets;
+	targets.push_back(Vector3(0, 0, 0));
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 1.0, 2.0, 5).size() == 1);
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, -1.0, 2.0, 5).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 257.0, 2.0, 5).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 1.0, Math::INF, 5).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 1.0, -1.0, 5).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 1.0, 2.0, 0).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(centers, targets, 1.0, 2.0, 65).is_empty());
+	PackedVector3Array invalid = targets;
+	invalid.push_back(Vector3(Math::NaN, 0, 0));
+	CHECK(grid->query_cylinder_counts_batch(centers, invalid, 1.0, 2.0, 5).is_empty());
+	PackedVector3Array large_centers;
+	large_centers.resize(4097);
+	CHECK(grid->query_cylinder_counts_batch(large_centers, targets, 1.0, 2.0, 5).is_empty());
+	PackedVector3Array large_targets;
+	large_targets.resize(8193);
+	CHECK(grid->query_cylinder_counts_batch(centers, large_targets, 1.0, 2.0, 5).is_empty());
+	CHECK(grid->query_cylinder_counts_batch(PackedVector3Array(), targets, 1.0, 2.0, 5).is_empty());
+}
+
 } // namespace TestAIProximityGrid2D
