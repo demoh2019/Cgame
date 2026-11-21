@@ -78,5 +78,16 @@
 				Accepts matching arrays of at most 4096 clusters, counts 0 through 65536, nonnegative finite diameters through 10000 and finite camera/center coordinates within +/-10000000. Focal pixels must be positive and at most 10000000; pixel thresholds must be finite, ordered with far nonnegative, near strictly greater than far, near at most 1000000. Quality must be 0 through 3. Inputs are validated atomically before output; invalid data yields an empty array. Unlike the older [method plan_visible_counts], this method adapts to the camera's actual projected detail.
 			</description>
 		</method>
+		<method name="plan_dirty_variant_lod_groups" qualifiers="const">
+			<return type="PackedByteArray" />
+			<param index="0" name="variants" type="PackedInt32Array" />
+			<param index="1" name="previous_tiers" type="PackedInt32Array" />
+			<param index="2" name="next_tiers" type="PackedInt32Array" />
+			<param index="3" name="variant_count" type="int" />
+			<description>
+				Compares existing and planned per-point geometry LOD membership to determine which GPU instancing groups need their instance buffers rebuilt. Returns exactly twice [param variant_count] bytes ordered variant-0 LOD0, variant-0 LOD1, variant-1 LOD0, variant-1 LOD1, etc. A byte value of 1 means at least one point has entered or left the associated group, and 0 means that group's complete membership can be reused unchanged. Every transition marks both the previous and the next tier for its corresponding variant. A valid no-op transition or valid empty point set returns an all-zero, fixed-length array. Invalid input returns an empty array to distinguish errors from no changes.
+				Input arrays must have equal lengths of at most 16384 points, [param variant_count] must be from 1 to 32, all variants must be within range and each previous/next tier must be 0 or 1. All inputs are fully validated before returning flags, avoiding partial render updates if a late row is invalid. O(points + variants), no RNG, allocation of meshes, GPU calls or scene mutation. The caller must use [method partition_variant_lods] for changed memberships and apply rebuilds only to flagged groups; a change to source geometry, source transforms or colors independently of LOD tiers requires a full rebuild.
+			</description>
+		</method>
 	</methods>
 </class>
