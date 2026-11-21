@@ -17,6 +17,14 @@ the server logs p95 and current incident cap. Start with
 `--fixed-incidents` to disable automatic backpressure. See
 [Server Tick Profiler](docs/SERVER_TICK_PROFILER.md).
 
+**New server engine functionality — spatial player presence index:** infected
+population maintenance now builds one index of living survivor positions and
+uses it for exact 12 m no-spawn and 130 m unload checks. Large multiplayer
+sessions benefit from spatial candidate filtering; solo and small groups
+retain fast direct checks. Dedicated-server diagnostics report the number of
+queries, player candidates examined and bucket lookups per maintenance pass.
+See [Server Player Presence Grid](docs/SERVER_PLAYER_PRESENCE_GRID.md).
+
 An original post-apocalyptic survival sandbox RPG: infected enemies,
 scavenging, hunger/thirst, safe hub and dangerous zones, tiered resource
 gathering, crafting/refining, equipment-based combat, full-loot risks outside
