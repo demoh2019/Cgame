@@ -223,4 +223,66 @@ TEST_CASE("[AIProximityGrid2D] Separation requests fail atomically on malformed 
 	CHECK(grid->query_separation_batch(positions, sources, 5.0, 5.0, 1).is_empty());
 }
 
+TEST_CASE("[AIProximityGrid2D] Cross-set broadphase preserves inclusive radii and target order") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array sources;
+	sources.push_back(Vector2(0, 0));
+	sources.push_back(Vector2(-6, -6));
+	sources.push_back(Vector2(200, 200));
+	PackedVector2Array targets;
+	targets.push_back(Vector2(3, 4)); // Inclusive 5m boundary.
+	targets.push_back(Vector2(0, 0));
+	targets.push_back(Vector2(-9, -10)); // Negative cell boundary.
+	targets.push_back(Vector2(6, 0)); // Outside 5m.
+	targets.push_back(Vector2(3, 4)); // Two distinct trap identities.
+	const Array found = grid->query_cross_radius_batch(sources, targets, 5.0, 5.0);
+	REQUIRE(found.size() == 3);
+	const PackedInt32Array first = found[0];
+	CHECK(first.size() == 3);
+	CHECK(first[0] == 0);
+	CHECK(first[1] == 1);
+	CHECK(first[2] == 4);
+	const PackedInt32Array second = found[1];
+	CHECK(second.size() == 1);
+	CHECK(second[0] == 2);
+	CHECK(PackedInt32Array(found[2]).is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, targets, 5.0, 5.0) == found);
+}
+
+TEST_CASE("[AIProximityGrid2D] Cross-set requests reject malformed cohorts atomically") {
+	Ref<AIProximityGrid2D> grid;
+	grid.instantiate();
+	PackedVector2Array sources;
+	sources.push_back(Vector2(0, 0));
+	PackedVector2Array targets;
+	targets.push_back(Vector2(0, 0));
+	CHECK(grid->query_cross_radius_batch(sources, targets, 0.0, 1.0).size() == 1);
+	CHECK(grid->query_cross_radius_batch(sources, targets, -1.0, 2.0).is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, targets, 2.0, 1.0).is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, targets, Math::INF, 2.0).is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, targets, 2.0, Math::INF).is_empty());
+	CHECK(grid->query_cross_radius_batch(PackedVector2Array(), targets, 1.0, 2.0).is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, PackedVector2Array(), 1.0, 2.0).is_empty());
+	PackedVector2Array invalid_sources = sources;
+	invalid_sources.push_back(Vector2(Math::NaN, 0));
+	CHECK(grid->query_cross_radius_batch(invalid_sources, targets, 1.0, 2.0).is_empty());
+	PackedVector2Array invalid_targets = targets;
+	invalid_targets.push_back(Vector2(Math::INF, 0));
+	CHECK(grid->query_cross_radius_batch(sources, invalid_targets, 1.0, 2.0).is_empty());
+	PackedVector2Array excessive_sources;
+	excessive_sources.resize(4097);
+	CHECK(grid->query_cross_radius_batch(excessive_sources, targets, 1.0, 2.0).is_empty());
+	PackedVector2Array excessive_targets;
+	excessive_targets.resize(8193);
+	CHECK(grid->query_cross_radius_batch(sources, excessive_targets, 1.0, 2.0).is_empty());
+	// Dense matched pairs must also fail atomically to protect memory.
+	PackedVector2Array dense_sources;
+	dense_sources.resize(513);
+	PackedVector2Array dense_targets;
+	dense_targets.resize(64);
+	CHECK(grid->query_cross_radius_batch(dense_sources, dense_targets, 1.0, 2.0).is_empty());
+	CHECK(grid->query_cross_radius_batch(sources, targets, 1.0, 2.0).size() == 1);
+}
+
 } // namespace TestAIProximityGrid2D
