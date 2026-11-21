@@ -131,5 +131,73 @@ TEST_CASE("[CrowdAnimationTierPlanner] Visibility input validation and stable ti
 }
 
 
+
+TEST_CASE("[CrowdAnimationTierPlanner] IK retention resists small camera moves but never hides urgent work") {
+	Ref<CrowdAnimationTierPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 10.0, 10.4, 21.0, 22.0, 50.0 };
+	const PackedByteArray priority = { 0, 0, 0, 1, 1 };
+	const PackedByteArray all_visible = { 1, 1, 1, 1, 1 };
+	const PackedByteArray retained = { 0, 1, 1, 1, 0 };
+	const PackedInt32Array stable = planner->plan_visible_tiers_stable(
+			distances, priority, all_visible, retained, 1, 1, 1.5);
+	REQUIRE(stable.size() == 5);
+	CHECK(stable[0] == 1); // Slightly nearer newcomer cannot steal IK.
+	CHECK(stable[1] == 0); // Retained 10.4m IK owner keeps the slot.
+	CHECK(stable[2] == 1); // Still 21m and eligible, but no spare IK slot.
+	CHECK(stable[3] == 1); // 22m is ineligible for IK; combat is full-rate.
+	CHECK(stable[4] == 2); // Combat slot already spent on nearer urgent pose.
+	const PackedByteArray none_retained = { 0, 0, 0, 0, 0 };
+	CHECK(planner->plan_visible_tiers_stable(distances, priority, all_visible,
+			none_retained, 1, 1, 1.5) ==
+			planner->plan_visible_tiers(distances, priority, all_visible, 1, 1));
+	CHECK(planner->plan_visible_tiers_stable(distances, priority, all_visible,
+			retained, 1, 1, 0.0) ==
+			planner->plan_visible_tiers(distances, priority, all_visible, 1, 1));
+
+	const PackedByteArray lost_visibility = { 1, 0, 1, 1, 1 };
+	const PackedInt32Array hidden = planner->plan_visible_tiers_stable(
+			distances, priority, lost_visibility, retained, 1, 1);
+	REQUIRE(hidden.size() == 5);
+	CHECK(hidden[0] == 0); // Invisible previous winner immediately releases IK.
+	CHECK(hidden[1] == 2); // No IK and no combat promotion off screen.
+	const PackedFloat64Array moved_closer = { 8.0, 10.4, 21.0, 22.0, 50.0 };
+	const PackedInt32Array replaced = planner->plan_visible_tiers_stable(
+			moved_closer, priority, all_visible, retained, 1, 1);
+	REQUIRE(replaced.size() == 5);
+	CHECK(replaced[0] == 0); // A materially closer actor still wins.
+	CHECK(replaced[1] == 1);
+	CHECK(retained[1] == 1); // Input flags are never modified.
+}
+
+TEST_CASE("[CrowdAnimationTierPlanner] stable IK validates bounds and ties atomically") {
+	Ref<CrowdAnimationTierPlanner> planner;
+	planner.instantiate();
+	const PackedFloat64Array distances = { 10.0, 11.5, 22.0 };
+	const PackedByteArray priorities = { 0, 0, 0 };
+	const PackedByteArray visibility = { 1, 1, 1 };
+	const PackedByteArray retention = { 0, 1, 1 };
+	const PackedInt32Array tied = planner->plan_visible_tiers_stable(
+			distances, priorities, visibility, retention, 1, 0, 1.5);
+	REQUIRE(tied.size() == 3);
+	CHECK(tied[0] == 0); // Equal effective distances break ties by input index.
+	CHECK(tied[1] == 1);
+	CHECK(tied[2] == 1); // Previous IK owner beyond 22m is still ineligible.
+	ERR_PRINT_OFF
+	CHECK(planner->plan_visible_tiers_stable(distances, priorities, visibility,
+			{ 1 }, 1, 0).is_empty());
+	CHECK(planner->plan_visible_tiers_stable(distances, priorities, { 1 },
+			retention, 1, 0).is_empty());
+	CHECK(planner->plan_visible_tiers_stable(distances, priorities, visibility,
+			retention, 1, 0, -0.1).is_empty());
+	CHECK(planner->plan_visible_tiers_stable(distances, priorities, visibility,
+			retention, 1, 0, 8.1).is_empty());
+	CHECK(planner->plan_visible_tiers_stable(distances, priorities, visibility,
+			retention, 1, 0, std::numeric_limits<double>::quiet_NaN()).is_empty());
+	CHECK(planner->plan_visible_tiers_stable({ -1.0 }, { 0 }, { 1 },
+			{ 0 }, 1, 0).is_empty());
+	ERR_PRINT_ON
+}
+
 } // namespace TestCrowdAnimationTierPlanner
 #endif // MODULE_CROWD_ANIMATION_TIER_PLANNER_ENABLED
