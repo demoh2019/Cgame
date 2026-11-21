@@ -174,6 +174,15 @@ func run(t) -> void:
 	view.set_streaming_tick_interval(0.2)
 	t.near(float(view.get("_streaming_tick_interval")), 0.2, 0.0001,
 		"real ChunkView accepts native cosmetic interval")
+	# Execute real chunk _process at subinterval deltas with no scene tree.
+	# Deferred calls must return before any terrain/grass GPU work begins.
+	view.set("_streaming_tick_accumulated", 0.0)
+	view._process(0.05)
+	t.near(float(view.get("_streaming_tick_accumulated")), 0.05, 0.0001,
+		"first short frame accumulates rather than doing a full scenery tick")
+	view._process(0.05)
+	t.near(float(view.get("_streaming_tick_accumulated")), 0.10, 0.0001,
+		"second short frame still defers cosmetic work")
 	view.set_streaming_simulation_active(false)
 	t.check(not view.is_processing(), "simulation pause still suspends cosmetics")
 	view.set_streaming_simulation_active(true)
