@@ -5,8 +5,10 @@ const HousePieces = preload("res://scripts/shared/house_pieces.gd")
 ## Session-only offline/guest structures cannot be reclaimed safely after restart.
 
 const Structures = preload("res://scripts/shared/structures.gd")
+const MarketBoard = preload("res://scripts/shared/market_board.gd")
+const Defs = preload("res://scripts/shared/defs.gd")
 const VERSION: int = 1
-const MAX_BYTES: int = 131072
+const MAX_BYTES: int = 262144 # Barricades plus escrowed market listings.
 const MAX_ABS_COORD: float = 20000.0
 const MIN_ID: int = 5000000001
 const MAX_ID: int = 9007199254740000
@@ -45,7 +47,63 @@ static func capture(sim) -> Dictionary:
 	walls.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return int(a["id"]) < int(b["id"]))
 	return {"version": VERSION, "world_seed": int(sim.world.world_seed), "barricades": walls,
-		"outposts": sim.territory.persistent_holds(sim.time)}
+		"outposts": sim.territory.persistent_holds(sim.time), "market": _capture_market(sim)}
+
+
+## Escrowed listings, unpaid proceeds and returned goods of signed-in accounts (guests are not saved).
+static func _capture_market(sim) -> Dictionary:
+	var orders: Array = []
+	for listing_id in sim.market_orders.keys():
+		var o: Dictionary = sim.market_orders[listing_id]
+		if str(o["account"]).begins_with("peer:"):
+			continue
+		orders.append({"account": str(o["account"]), "seller_name": str(o.get("seller_name", "")),
+			"item": str(o["item"]), "remaining": int(o["remaining"]), "price": int(o["price"]),
+			"left": maxf(0.0, float(o["expires"]) - sim.time)})
+	var payouts: Dictionary = {}
+	for a in sim.market_payouts.keys():
+		if not str(a).begins_with("peer:"):
+			payouts[str(a)] = int(sim.market_payouts[a])
+	var returns: Dictionary = {}
+	for a in sim.market_returns.keys():
+		if not str(a).begins_with("peer:"):
+			returns[str(a)] = sim.market_returns[a].duplicate()
+	return {"orders": orders, "payouts": payouts, "returns": returns}
+
+
+static func _valid_account(a: Variant) -> bool:
+	return typeof(a) == TYPE_STRING and not a.is_empty() and a.length() <= MAX_OWNER_LENGTH and not a.begins_with("peer:")
+
+
+static func _validate_market(source: Variant) -> Variant:
+	if typeof(source) != TYPE_DICTIONARY:
+		return null
+	var orders: Variant = source.get("orders", [])
+	var payouts: Variant = source.get("payouts", {})
+	var returns: Variant = source.get("returns", {})
+	if typeof(orders) != TYPE_ARRAY or typeof(payouts) != TYPE_DICTIONARY or typeof(returns) != TYPE_DICTIONARY:
+		return null
+	if orders.size() > MarketBoard.MAX_LISTINGS or payouts.size() > 4096 or returns.size() > 4096:
+		return null
+	for o in orders:
+		if typeof(o) != TYPE_DICTIONARY or not _valid_account(o.get("account")):
+			return null
+		if typeof(o.get("item")) != TYPE_STRING or not Defs.is_item(o["item"]) or o["item"] == "silver":
+			return null
+		if not _bounded_int(o.get("remaining"), 1, 1000000) or not _bounded_int(o.get("price"), 1, MarketBoard.MAX_UNIT_PRICE):
+			return null
+		if not _bounded_float(o.get("left"), 0.0, MarketBoard.LISTING_LIFETIME) or typeof(o.get("seller_name", "")) != TYPE_STRING:
+			return null
+	for a in payouts.keys():
+		if not _valid_account(a) or not _bounded_int(payouts[a], 0, 2147483647):
+			return null
+	for a in returns.keys():
+		if not _valid_account(a) or typeof(returns[a]) != TYPE_DICTIONARY or returns[a].size() > 256:
+			return null
+		for item in returns[a].keys():
+			if typeof(item) != TYPE_STRING or not Defs.is_item(item) or not _bounded_int(returns[a][item], 1, 1000000):
+				return null
+	return {"orders": orders, "payouts": payouts, "returns": returns}
 
 
 ## Guild holds of outposts: [{id, guild, name, remaining}]. Older checkpoints have none.
@@ -78,9 +136,13 @@ static func _validate_holds(source: Variant, sim) -> Variant:
 ## Refuse a snapshot from another seed or terrain layout, including overlapping
 ## terrain obstacles, neighboring restored walls and impossible owner quotas.
 static func validate(data: Variant, sim) -> Dictionary:
-	if typeof(data) != TYPE_DICTIONARY or data.size() not in [3, 4]:
+	if typeof(data) != TYPE_DICTIONARY or data.size() not in [3, 4, 5]:
 		return {}
-	if data.size() == 4 and not data.has("outposts"):
+	for key in data.keys():
+		if not str(key) in ["version", "world_seed", "barricades", "outposts", "market"]:
+			return {}
+	var market: Variant = _validate_market(data.get("market", {}))
+	if market == null:
 		return {}
 	var holds: Variant = _validate_holds(data.get("outposts", []), sim)
 	if holds == null:
@@ -158,7 +220,7 @@ static func validate(data: Variant, sim) -> Dictionary:
 			"yaw": float(value.get("yaw", 0.0)), "upkeep": float(value.get("upkeep", Structures.UPKEEP_SECONDS)),
 			"piece": str(value.get("piece", "")) if HousePieces.valid(str(value.get("piece", ""))) else "",
 			"open": bool(value.get("open", true))})
-	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls, "outposts": holds}
+	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls, "outposts": holds, "market": market}
 
 
 static func restore(sim, data: Variant) -> bool:
@@ -188,6 +250,18 @@ static func restore(sim, data: Variant) -> bool:
 			sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 		sim._next_id = maxi(sim._next_id, id)
 	sim.territory.restore_holds(valid["outposts"], sim.time)
+	var market: Dictionary = valid["market"]
+	for o in market["orders"]:
+		sim.market_orders[sim.new_id()] = {"account": str(o["account"]), "seller_name": str(o.get("seller_name", "")),
+			"item": str(o["item"]), "remaining": int(o["remaining"]), "price": int(o["price"]),
+			"expires": sim.time + float(o["left"])}
+	for a in market["payouts"].keys():
+		sim.market_payouts[str(a)] = int(market["payouts"][a])
+	for a in market["returns"].keys():
+		var goods: Dictionary = {}
+		for item in market["returns"][a].keys():
+			goods[str(item)] = int(market["returns"][a][item])
+		sim.market_returns[str(a)] = goods
 	return true
 
 

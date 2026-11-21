@@ -380,7 +380,9 @@ var _ember_last_hit: Dictionary = {} # Global per-infected burn throttle.
 var _acid_last_hit: Dictionary = {} # Peer -> last pooled acid hit time; no stacking.
 var _acid_wall_last_hit: Dictionary = {} # Wall id -> last corrosion time; no overlap stacking.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
-var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
+var market_orders: Dictionary = {} # id -> escrowed listing (goods held by the market).
+var market_payouts: Dictionary = {} # account -> silver owed from sales, collected at the hub.
+var market_returns: Dictionary = {} # account -> {item: count} unsold or cancelled goods.
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
 # Atomic two-account settlement. When the network layer has a persistent backend it sets pair_persistence; every
 # completed player trade or market sale between two online players then queues one commit that saves BOTH characters
@@ -2635,56 +2637,89 @@ func _market_at_hub(player: Player) -> bool:
 		and spot.distance_to(WORKBENCH_POSITION) <= WORKBENCH_RANGE
 
 
-func _cancel_market_seller(peer_id: int) -> void:
-	for listing_id in market_orders.keys():
-		if int(market_orders[listing_id]["seller"]) == peer_id:
-			market_orders.erase(listing_id)
+## Market accounts: a signed-in survivor's account id survives logouts and restarts; a guest's
+## session id does not (guest listings and proceeds are not saved with the world).
+func _market_account(player: Player) -> String:
+	if player == null:
+		return ""
+	return player.user_id if not player.user_id.is_empty() else "peer:%d" % player.id
 
 
+## Escrow market: listings hold their goods, so they stay up while the seller is away.
+func _cancel_market_seller(_peer_id: int) -> void:
+	pass
+
+
+## Expired listings send their unsold goods back to the seller's market returns.
 func _tick_market() -> void:
-	# Keep oldest adverts first when the seller consumes or moves listed goods.
-	# Revalidate the combined promised stock, not each order in isolation.
-	var claimed: Dictionary = {}
-	var ids: Array = market_orders.keys()
-	ids.sort()
-	for listing_id in ids:
+	for listing_id in market_orders.keys():
 		var listing: Dictionary = market_orders[listing_id]
-		var seller_id: int = int(listing["seller"])
-		var seller: Player = players.get(seller_id)
-		if seller == null or not _market_at_hub(seller) or time >= float(listing["expires"]):
+		if time >= float(listing["expires"]) or int(listing["remaining"]) < 1:
+			_market_return(str(listing["account"]), str(listing["item"]), int(listing["remaining"]))
 			market_orders.erase(listing_id)
-			continue
-		var item_id: String = str(listing["item"])
-		var amount: int = int(listing["remaining"])
-		var key: String = "%d:%s" % [seller_id, item_id]
-		var already: int = int(claimed.get(key, 0))
-		if amount < 1 or already + amount > seller.inventory.count(item_id):
-			market_orders.erase(listing_id)
-			continue
-		claimed[key] = already + amount
+
+
+func _market_return(account: String, item_id: String, count: int) -> void:
+	if count < 1 or account.is_empty():
+		return
+	var pending: Dictionary = market_returns.get(account, {})
+	pending[item_id] = int(pending.get(item_id, 0)) + count
+	market_returns[account] = pending
+
+
+## Moves proceeds and returned goods into the backpack, as far as there is room. Hub only.
+func _market_collect(player: Player) -> Dictionary:
+	var account: String = _market_account(player)
+	var silver: int = 0
+	var items: int = 0
+	var owed: int = int(market_payouts.get(account, 0))
+	if owed > 0:
+		var left: int = player.inventory.add("silver", owed)
+		silver = owed - left
+		if left > 0:
+			market_payouts[account] = left
+		else:
+			market_payouts.erase(account)
+	var pending: Dictionary = market_returns.get(account, {})
+	for item_id in pending.keys():
+		var count: int = int(pending[item_id])
+		var left: int = player.inventory.add(str(item_id), count)
+		items += count - left
+		if left > 0:
+			pending[item_id] = left
+		else:
+			pending.erase(item_id)
+	if pending.is_empty():
+		market_returns.erase(account)
+	if silver > 0 or items > 0:
+		player.dirty_inventory = true
+		player.dirty_character = true
+	return {"silver": silver, "items": items}
 
 
 func cmd_market_list(peer_id: int) -> Dictionary:
-	if not players.has(peer_id):
+	var viewer: Player = players.get(peer_id)
+	if viewer == null:
 		return {"ok": false, "reason": "unknown_player"}
-	# Never show offers no longer backed by the seller's current inventory.
 	_tick_market()
+	var collected: Dictionary = {}
+	if _market_at_hub(viewer):
+		collected = _market_collect(viewer)
+	var account: String = _market_account(viewer)
 	var public_orders: Array = []
-	var sorted_ids: Array = market_orders.keys()
-	sorted_ids.sort()
-	for listing_id in sorted_ids:
+	for listing_id in market_orders.keys():
 		var order: Dictionary = market_orders[listing_id]
-		var seller: Player = players.get(int(order["seller"]))
-		if seller == null or not _market_at_hub(seller) or seller.inventory.count(str(order["item"])) < int(order["remaining"]):
-			continue
 		public_orders.append({
 			"id": listing_id, "item": order["item"], "quantity": order["remaining"],
-			"price": order["price"], "seller_name": seller.name,
-			"own": seller.id == peer_id,
+			"price": order["price"], "seller_name": order.get("seller_name", "?"),
+			"own": str(order["account"]) == account,
+			"expires_in": maxf(0.0, float(order["expires"]) - time),
 		})
 	public_orders.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return MarketBoard.cheaper_first(a, b))
-	return {"ok": true, "action": "list", "orders": public_orders}
+	return {"ok": true, "action": "list", "orders": public_orders,
+		"collected_silver": int(collected.get("silver", 0)), "collected_items": int(collected.get("items", 0)),
+		"pending_silver": int(market_payouts.get(account, 0))}
 
 
 func cmd_market_create(peer_id: int, item_id: String, quantity: int, unit_price: int) -> Dictionary:
@@ -2699,31 +2734,41 @@ func cmd_market_create(peer_id: int, item_id: String, quantity: int, unit_price:
 		return {"ok": false, "reason": validation}
 	if market_orders.size() >= MarketBoard.MAX_LISTINGS:
 		return {"ok": false, "reason": "market_full"}
+	var account: String = _market_account(seller)
 	var count := 0
 	for order in market_orders.values():
-		if int(order["seller"]) == peer_id:
+		if str(order["account"]) == account:
 			count += 1
 	if count >= MarketBoard.MAX_PER_SELLER:
 		return {"ok": false, "reason": "too_many_listings"}
-	var available: int = MarketBoard.unlisted_stock(seller.inventory, market_orders, peer_id, item_id)
-	if quantity > available:
-		return {"ok": false, "reason": "already_listed", "available": available}
+	# Escrow: the goods leave the backpack now, so the offer stays good while the seller is away.
+	if not seller.inventory.remove(item_id, quantity):
+		return {"ok": false, "reason": "missing_items"}
+	seller.inventory.unequip_missing()
+	seller.dirty_inventory = true
+	seller.dirty_character = true
 	var listing_id: int = new_id()
 	market_orders[listing_id] = {
-		"seller": peer_id, "item": item_id, "remaining": quantity,
+		"account": account, "seller_name": seller.name, "item": item_id, "remaining": quantity,
 		"price": unit_price, "expires": time + MarketBoard.LISTING_LIFETIME,
 	}
 	return {"ok": true, "action": "created", "id": listing_id}
 
 
 func cmd_market_cancel(peer_id: int, listing_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
 	var order: Dictionary = market_orders.get(listing_id, {})
-	if order.is_empty():
+	if order.is_empty() or player == null:
 		return {"ok": false, "reason": "unknown_listing"}
-	if int(order["seller"]) != peer_id:
+	if str(order["account"]) != _market_account(player):
 		return {"ok": false, "reason": "not_owner"}
 	market_orders.erase(listing_id)
-	return {"ok": true, "action": "cancelled", "id": listing_id}
+	# Goods come back to the backpack when there is room; the rest waits in market returns.
+	var left: int = player.inventory.add(str(order["item"]), int(order["remaining"]))
+	_market_return(str(order["account"]), str(order["item"]), left)
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "action": "cancelled", "id": listing_id, "returned_later": left}
 
 
 ## A market purchase must have a monotonically increasing, session-scoped request ID.
@@ -2757,33 +2802,33 @@ func _execute_market_buy(peer_id: int, listing_id: int, quantity: int) -> Dictio
 	var buyer: Player = players.get(peer_id)
 	if not _market_at_hub(buyer):
 		return {"ok": false, "reason": "no_station"}
+	_tick_market()
 	var listing: Dictionary = market_orders.get(listing_id, {})
 	if listing.is_empty():
 		return {"ok": false, "reason": "unknown_listing"}
-	var seller_id: int = int(listing["seller"])
-	var seller: Player = players.get(seller_id)
-	if peer_id == seller_id:
+	if str(listing["account"]) == _market_account(buyer):
 		return {"ok": false, "reason": "self_purchase"}
-	if seller == null or not _market_at_hub(seller) or time >= float(listing["expires"]):
-		market_orders.erase(listing_id)
-		return {"ok": false, "reason": "seller_unavailable"}
-	if _pair_locked([peer_id, seller_id]):
+	if _pair_locked([peer_id]):
 		return {"ok": false, "reason": "saving_previous_deal"}
-	# Synchronous on this server's simulation thread; no yield between the
-	# balance checks and the two-inventory commit.
-	var transaction: Dictionary = MarketBoard.purchase(buyer.inventory, seller.inventory, listing, quantity)
+	var transaction: Dictionary = MarketBoard.purchase_from_escrow(buyer.inventory, listing, quantity)
 	if not transaction.get("ok", false):
 		return transaction
 	listing["remaining"] = int(listing["remaining"]) - quantity
-	if int(listing["remaining"]) == 0:
+	if int(listing["remaining"]) <= 0:
 		market_orders.erase(listing_id)
-	for player in [buyer, seller]:
-		player.dirty_inventory = true
-		player.dirty_character = true
-	_queue_pair_commit(peer_id, seller_id, "market")
+	var account: String = str(listing["account"])
+	market_payouts[account] = int(market_payouts.get(account, 0)) + int(transaction["seller_net"])
+	buyer.dirty_inventory = true
+	buyer.dirty_character = true
+	# An online seller at the hub is paid at once; anyone else collects at the hub later.
+	for seller in players.values():
+		if _market_account(seller) == account and _market_at_hub(seller):
+			_market_collect(seller)
+			events.append({"type": "market_sale", "peer": seller.id, "item": listing["item"],
+				"quantity": quantity, "net": transaction["seller_net"]})
 	var receipt_id: int = new_id()
 	market_sales.append({
-		"id": receipt_id, "buyer": peer_id, "seller": seller_id,
+		"id": receipt_id, "buyer": peer_id, "seller_account": account,
 		"listing": listing_id, "item": listing["item"],
 		"quantity": quantity, "total": transaction["total"],
 		"tax": transaction["tax"], "seller_net": transaction["seller_net"],
