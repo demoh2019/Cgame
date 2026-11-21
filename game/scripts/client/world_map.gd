@@ -13,6 +13,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WorldPoi = preload("res://scripts/shared/world_poi.gd")
 const RegionalTrade = preload("res://scripts/shared/regional_trade.gd")
 const GrassField = preload("res://scripts/client/grass_field.gd")
+const GradientBatch = preload("res://scripts/client/gradient_batch.gd")
 const TravelNavigation = preload("res://scripts/shared/travel_navigation.gd")
 const ExpeditionAtlas = preload("res://scripts/shared/expedition_atlas.gd")
 
@@ -48,6 +49,7 @@ const RING_NAMES := ["SAFE LANDS", "BORDERLANDS", "WILDS"]
 
 var client
 var _image: Image
+var _water_gradient: Gradient
 var _texture: ImageTexture
 var _heights := PackedFloat32Array()
 var _biomes := PackedByteArray()
@@ -76,6 +78,7 @@ func setup(p_client) -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	set_anchors_preset(Control.PRESET_FULL_RECT)
+	_water_gradient = GradientBatch.make_gradient(WATER_SHALLOW, WATER_DEEP)
 	_image = Image.create(PIXELS, PIXELS, false, Image.FORMAT_RGB8)
 	_image.fill(PAPER_DARK)
 	_texture = ImageTexture.create_from_image(_image)
@@ -271,13 +274,29 @@ func _paint_row(row: int) -> void:
 	var cell: float = SPAN / float(PIXELS)
 	var zenith := deg_to_rad(45.0)
 	var azimuth := deg_to_rad(135.0) # 315° compass (north-west) in maths angles.
+	# Compute coast/depth samples once, then evaluate the entire water-color ramp
+	# in one native call instead of per-pixel script/native calls.
+	var water_offsets := PackedFloat32Array()
+	var water_shores := PackedInt32Array()
+	water_shores.resize(PIXELS)
+	for column in PIXELS:
+		var water_height: float = _h(column, row)
+		if water_height < Defs.WATER_LEVEL - 0.4:
+			var shore: int = _shore_distance(column, row)
+			var depth: float = clampf(-water_height / 40.0, 0.0, 1.0)
+			water_shores[column] = shore
+			water_offsets.append(clampf(maxf(depth, float(shore) / 7.0), 0.0, 1.0))
+	var water_colors := PackedColorArray()
+	if not water_offsets.is_empty():
+		water_colors = GradientBatch.sample_many(_water_gradient, water_offsets)
+	var water_index := 0
 	for column in PIXELS:
 		var h: float = _h(column, row)
 		var color: Color
 		if h < Defs.WATER_LEVEL - 0.4:
-			var shore: int = _shore_distance(column, row)
-			var depth: float = clampf(-h / 40.0, 0.0, 1.0)
-			color = WATER_SHALLOW.lerp(WATER_DEEP, clampf(maxf(depth, float(shore) / 7.0), 0.0, 1.0))
+			var shore: int = water_shores[column]
+			color = water_colors[water_index]
+			water_index += 1
 			if shore == 3:
 				color = color.lerp(RIPPLE, 0.35)
 			elif shore == 6:
