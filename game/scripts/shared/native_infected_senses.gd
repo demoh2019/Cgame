@@ -117,6 +117,16 @@ func best_confirmed_stimulus(sense: int) -> Dictionary:
     return _history.get_best(sense)
 
 
+## Distinct from newest-first history: rank only previously verified events.
+## Older native forks cannot rank multiple events and keep their old AI path.
+func get_ranked_confirmed_stimuli(sense: int, limit: int = 8) -> Array:
+    if _history == null or sense < 0 or sense > 2 or limit < 0 or limit > 64 or limit == 0:
+        return []
+    if _history.has_method("get_ranked"):
+        return _history.call("get_ranked", sense, limit)
+    return []
+
+
 func get_recent_confirmed_stimuli(limit: int = 8) -> Array:
     if _history == null:
         return []
@@ -134,6 +144,7 @@ func get_debug_snapshot() -> Dictionary:
         "best_sight_stimulus": best_confirmed_stimulus(0),
         "best_sound_stimulus": best_confirmed_stimulus(1),
         "recent_stimuli": get_recent_confirmed_stimuli(),
+        "ranked_sound_stimuli": get_ranked_confirmed_stimuli(1, 4),
         "ranked_hearing": has_ranked_hearing(),
         "remembers_sight": remembers_sight(),
         "remembers_sound": remembers_sound(),

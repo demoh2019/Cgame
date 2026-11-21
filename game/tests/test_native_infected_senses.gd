@@ -122,6 +122,49 @@ func run(t) -> void:
         t.eq(history_senses.get_recent_confirmed_stimuli().size(), 0,
             "stock Godot has no additional native stimulus data")
 
+
+    t.current = "Ranked history can guide one bounded follow-up investigation"
+    var patrol_memory := NativeSenses.new()
+    patrol_memory.record_confirmed_sound(Vector2(60, 0), Vector2(60, 0), 40.0, 201)
+    patrol_memory.record_confirmed_sound(Vector2(60, 0), Vector2(72, 0), 40.0, 202)
+    patrol_memory.record_confirmed_sound(Vector2(60, 0), Vector2(77, 0), 40.0, 203)
+    if patrol_memory.has_native_history() and patrol_memory.has_native_hearing():
+        var ranked_sound: Array = patrol_memory.get_ranked_confirmed_stimuli(1, 2)
+        t.eq(ranked_sound.size(), 2, "confirmed sound list contains both sources")
+        if ranked_sound.size() == 2:
+            t.eq(int(ranked_sound[0].get("source_id", -1)), 201,
+                "louder sound leads bounded investigation")
+            t.eq(int(ranked_sound[1].get("source_id", -1)), 202,
+                "second-best still offers a previously confirmed search site")
+        var patrol := Zombie.new(977, "walker", Vector3(60, WorldGen.HUB_HEIGHT, 0))
+        patrol._native_senses = patrol_memory
+        patrol.state = Zombie.State.INVESTIGATE
+        patrol.last_known_target = Vector2(60, 0)
+        patrol.investigate_time = 3.0
+        patrol.think(WorldGen.new(42), {}, 0.1, RandomNumberGenerator.new())
+        if patrol_memory._history.has_method("get_ranked"):
+            t.eq(patrol.state, Zombie.State.INVESTIGATE,
+                "reaching first remembered noise selects one follow-up")
+            t.eq(patrol.last_known_target, Vector2(72, 0),
+                "follow-up location comes from another confirmed sound")
+            patrol.position = Vector3(72, WorldGen.HUB_HEIGHT, 0)
+            patrol.think(WorldGen.new(42), {}, 0.1, RandomNumberGenerator.new())
+            t.eq(patrol.state, Zombie.State.WANDER,
+                "after two unique sound sites the infected stops despite a third memory")
+        else:
+            t.eq(patrol.state, Zombie.State.WANDER,
+                "older native history returns to baseline single-site search")
+        t.check(patrol.target_id == -1, "search-only memory never creates a combat target")
+        t.eq(patrol_memory.get_ranked_confirmed_stimuli(1, 0).size(), 0,
+            "zero ranked limit is safe")
+        t.eq(patrol_memory.get_ranked_confirmed_stimuli(9, 2).size(), 0,
+            "invalid sense cannot reveal memory")
+        t.check(patrol_memory.get_debug_snapshot().has("ranked_sound_stimuli"),
+            "server-only perception debug includes ranked sound memory")
+    else:
+        t.eq(patrol_memory.get_ranked_confirmed_stimuli(1).size(), 0,
+            "stock Godot cannot invent confirmed memory or investigation targets")
+
     t.current = "Existing authoritative zombie hearing populates native memory"
     var height: float = WorldGen.HUB_HEIGHT
     var world := WorldGen.new(42)

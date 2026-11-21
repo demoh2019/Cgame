@@ -37,6 +37,9 @@ var home: Vector2
 var wander_target: Vector2
 var last_known_target: Vector2
 var investigate_time: float = 0.0
+# Prevent oscillating between two expired/barely audible world positions.
+# This is transient server-only search memory, not a networked actor target.
+var _investigated_sound_sites: Array[Vector2] = []
 const INVESTIGATE_SECONDS := 4.0
 var think_timer: float = 0.0
 var ai_selection_allowed: bool = true # Server-only scheduling hint, no effect on attacks/movement.
@@ -283,13 +286,38 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 				else:
 					_move_toward(world, here, wander_target, float(data["speed"]) * 0.4, delta)
 		State.INVESTIGATE:
-			# Do not magically follow a survivor beyond our pursuit leash.
-			# Examine the place where they were last tracked, then return home.
+			# Continue an already authorized search only while time remains.
+			# At most two distinct locations: no unbounded patrol/search loops.
 			investigate_time = maxf(0.0, investigate_time - delta)
-			if investigate_time <= 0.0 or here.distance_to(last_known_target) < 0.8:
+			if investigate_time <= 0.0:
 				state = State.WANDER
 				wander_target = home
 				stuck_time = 0.0
+			elif here.distance_to(last_known_target) < 0.8:
+				var next_sound := Vector2.INF
+				if _native_senses != null and _investigated_sound_sites.is_empty():
+					_investigated_sound_sites.append(last_known_target)
+					for event in _native_senses.get_ranked_confirmed_stimuli(1, 8):
+						var candidate: Variant = event.get("position", Vector2.INF)
+						if not (candidate is Vector2) or not candidate.is_finite() or \
+								here.distance_to(candidate) > float(data["lose"]) or \
+								world.is_safe(candidate.x, candidate.y) or \
+								world.is_water(candidate.x, candidate.y):
+							continue
+						var visited := false
+						for earlier in _investigated_sound_sites:
+							if earlier.distance_to(candidate) < 2.0:
+								visited = true
+								break
+						if not visited:
+							next_sound = candidate as Vector2
+							break
+				if next_sound.is_finite():
+					last_known_target = next_sound
+				else:
+					state = State.WANDER
+					wander_target = home
+					stuck_time = 0.0
 			else:
 				_move_toward(world, here, last_known_target, float(data["speed"]) * 0.7, delta)
 		State.CHASE, State.ATTACK:
@@ -303,6 +331,7 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 			if distance > float(data["lose"]):
 				target_id = -1
 				state = State.INVESTIGATE
+				_investigated_sound_sites.clear()
 				# When the target was heard but not seen recently, investigate the
 				# verified sound instead of its magically updated current location.
 				if _native_senses != null and not _native_senses.remembers_sight():
@@ -407,6 +436,7 @@ func consume_howl() -> bool:
 
 func _note_target_acquired() -> void:
 	unseen_seconds = 0.0
+	_investigated_sound_sites.clear()
 	if data.has("howl_radius") and target_id != -1 and target_id != _howled_at:
 		_howled_at = target_id
 		_howl_pending = true

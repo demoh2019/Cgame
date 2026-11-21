@@ -101,3 +101,24 @@ These commands require a **compiled fork binary** to exercise the new native cla
 ## Scope
 
 This is opt-in memory for validated AI stimuli, not a replacement for existing wind acoustics, environment-query flanking, state-machine combat, physics navigation, network replication or faction targeting. Avoid promoting native observations to server target selection without preserving all current safety and combat constraints.
+
+## Bounded ranked investigation follow-ups
+
+Unreal's AI Perception supports timed per-sense stimuli and multiple perceived
+sources. This project adds only the modest **already confirmed** ranking
+operation `AIStimulusHistory2D.get_ranked(sense,limit)`, with deterministic
+strength × remaining TTL ordering, explicit maximum 64, and detached results.
+
+The authoritative Zombie may investigate one second location after reaching
+a confirmed first sound. The location must still have a live history event,
+be distinct by 2 m, and lie inside its current pursuit leash. The total
+search budget remains unchanged (4 seconds for ordinary infected).
+No search query acquires a target, bypasses original hearing validation,
+creates a visual observation, or changes network snapshots. Stock Godot and
+older Cgame retain their prior single-position behavior.
+
+Inspect `NativeInfectedSenses.get_debug_snapshot()["ranked_sound_stimuli"]`
+only on a trusted server: source IDs/last perceived positions are sensitive
+AI information and must never be broadcast to untrusted players.
+
+A follow-up memory point is rechecked against the current server safe-zone and water rules before selection; an old sound is never permission to enter the protected hub.
