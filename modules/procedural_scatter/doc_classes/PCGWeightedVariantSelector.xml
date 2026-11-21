@@ -16,5 +16,13 @@
 				Returns one 0-based variant index per stable point ID, using a reproducible unsigned 32-bit avalanche hash and cumulative weighted intervals. One to 32 relative weights are supported, with each finite in [0, 1000000] and at least one strictly positive. Zero-weight entries are never selected. Stable IDs and seed must be integers in [0, 2147483647]. Up to 16,384 point IDs are accepted. Invalid input is rejected before producing any output and returns an empty array. A valid empty point array also returns empty. Duplicate IDs are permitted and yield the same choice with identical weights and seed. Reordering the input IDs does not change the variant assigned to any ID.
 			</description>
 		</method>
+		<method name="partition_indices" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="variants" type="PackedInt32Array" />
+			<param index="1" name="variant_count" type="int" />
+			<description>
+				Divides already-selected per-point variant indices into one packed source-index array per mesh type. The output array has exactly [param variant_count] groups in ascending variant order, including empty groups, and every original input index appears exactly once in its corresponding group, in original source order. This supports creating one [MultiMesh] per unique geometry, rather than allocating one node per point. The input is limited to 16,384 points and 1–32 variants. Negative or out-of-range variants, and invalid limits, reject the entire input with an empty Array instead of dropping instances. Valid empty input yields [param variant_count] empty groups. The operation is O(points + variants), does not mutate the input or render resources and does not choose the variants (call [method choose_variants] first or supply authored attributes).
+			</description>
+		</method>
 	</methods>
 </class>
