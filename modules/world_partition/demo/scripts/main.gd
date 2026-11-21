@@ -59,6 +59,7 @@ func _ready() -> void:
     baked_validation_ms = Time.get_ticks_msec() - validation_start
     detail = _make_streamer("DetailedCells", 1, 2, DETAIL_SCENE, 2)
     detail.set("persist_rigid_bodies", true)
+    detail.set("persist_streaming_objects", true)
     _apply_quality_profile()
     if not detail.has_method("pin_cell") or not detail.has_method("get_pinned_cell_count"):
         push_error("Cgame pinned gameplay cells API required (pin_cell/get_pinned_cell_count).")
@@ -78,6 +79,9 @@ func _ready() -> void:
     if not detail.has_method("snapshot_cell_physics_states") or not detail.has_method("load_cell_physics_states"):
         push_error("Cgame WorldPartition3D physics state persistence API required.")
         return
+    if not detail.has_method("snapshot_cell_object_states") or not detail.has_method("load_cell_object_states") or not detail.has_method("capture_cell_object_states"):
+        push_error("Cgame WorldPartition3D stateful interactable API required.")
+        return
     if not detail.has_method("acquire_cell_route") or not detail.has_method("release_cell_route"):
         push_error("Cgame WorldPartition3D navigation route streaming API required.")
         return
@@ -91,6 +95,7 @@ func _ready() -> void:
     detail.call("set_layer_enabled", COMBAT_LAYER, false)
     detail.call("set_layer_enabled", CHAMPION_LAYER, false)
     detail.connect("cell_state_changed", Callable(self, "_on_cell_state_changed"))
+    detail.connect("cell_object_state_changed", Callable(self, "_on_cell_object_state_changed"))
     detail.connect("layer_state_changed", Callable(self, "_on_layer_state_changed"))
     detail.call("pin_cell", HUB_CELL)
     if not distant.has_method("get_cell_instance") or not detail.has_method("get_cell_instance"):
@@ -256,6 +261,9 @@ func _on_cell_state_changed(cell: Vector2i, state: Dictionary) -> void:
     if cell == HUB_CELL or cell == ARENA_CELL:
         _sync_quest_arena_lease()
 
+func _on_cell_object_state_changed(cell: Vector2i, states: Dictionary) -> void:
+    print("Interactive object snapshot updated in cell %s, records: %d" % [str(cell), states.size()])
+
 func _on_layer_state_changed(layer: String, enabled: bool) -> void:
     # Driven by native C++ notifications, not a per-frame layer poll.
     print("World event: %s %s" % [layer, "activated" if enabled else "deactivated"])
@@ -307,6 +315,34 @@ func _test_navigation_path() -> void:
     last_nav_query = "Navigation path: %d points" % path.size()
     print(last_nav_query)
 
+func _interact_with_streamed_object() -> void:
+    if detail == null or camera == null:
+        return
+    var closest: Node3D
+    var closest_cell := Vector2i.ZERO
+    var distance := INF
+    for cell in [HUB_CELL, ARENA_CELL, CHAMPION_CELL]:
+        var root := _gameplay_cell_root(cell)
+        if root == null or not root.has_method("get_interactable"):
+            continue
+        var object := root.call("get_interactable") as Node3D
+        if object == null:
+            continue
+        var d := camera.global_position.distance_squared_to(object.global_position)
+        if d < distance:
+            distance = d
+            closest = root
+            closest_cell = cell
+    if closest == null:
+        push_warning("No active interactive landmark: stream in a gameplay cell first.")
+        return
+    if bool(closest.call("interact_world_object")):
+        var snapshot: Dictionary = detail.call("capture_cell_object_states", closest_cell)
+        last_gameplay_event = "Interacted in %s, %d saved child objects" % [str(closest_cell), snapshot.size()]
+        print(last_gameplay_event)
+    else:
+        print("Interactive object is already in its final state.")
+
 func _kick_persistent_crate() -> void:
     if detail == null:
         return
@@ -352,10 +388,12 @@ func _save_checkpoint() -> void:
     # Captures even the game scenes currently loaded by WorldPartition3D.
     var snapshot: Dictionary = detail.call("snapshot_cell_states")
     var physics_snapshot: Dictionary = detail.call("snapshot_cell_physics_states")
+    var object_snapshot: Dictionary = detail.call("snapshot_cell_object_states")
     var record := {
         "version": SAVE_VERSION,
         "cell_states": snapshot,
         "physics_states": physics_snapshot,
+        "object_states": object_snapshot,
         "pinned_cells": detail.call("get_pinned_cells"),
         "layer_states": detail.call("get_layer_states"),
         "camera_transform": camera.global_transform,
@@ -385,14 +423,15 @@ func _load_checkpoint() -> void:
     if record.get("version") != SAVE_VERSION:
         push_warning("Unsupported checkpoint version.")
         return
-    if not (record.get("cell_states") is Dictionary) or not (record.get("physics_states", {}) is Dictionary) or not (record.get("pinned_cells") is Array) or not (record.get("layer_states") is Dictionary) or not (record.get("camera_transform") is Transform3D) or not (record.get("patrol_state", {}) is Dictionary):
+    if not (record.get("cell_states") is Dictionary) or not (record.get("physics_states", {}) is Dictionary) or not (record.get("object_states", {}) is Dictionary) or not (record.get("pinned_cells") is Array) or not (record.get("layer_states") is Dictionary) or not (record.get("camera_transform") is Transform3D) or not (record.get("patrol_state", {}) is Dictionary):
         push_warning("Checkpoint fields are incomplete.")
         return
     var states: Dictionary = record["cell_states"]
     var physics_states: Dictionary = record.get("physics_states", {})
+    var object_states: Dictionary = record.get("object_states", {})
     var pins: Array = record["pinned_cells"]
     var layers: Dictionary = record["layer_states"]
-    if states.size() > 4096 or physics_states.size() > 4096 or pins.size() > 128 or layers.size() > 64:
+    if states.size() > 4096 or physics_states.size() > 4096 or object_states.size() > 4096 or pins.size() > 128 or layers.size() > 64:
         push_warning("Checkpoint exceeds scene-state or pin limits.")
         return
     # Runtime leases are owner-owned handles, not persisted tokens. Recreate
@@ -400,6 +439,7 @@ func _load_checkpoint() -> void:
     _release_all_owned_leases()
     detail.call("load_cell_states", states)
     detail.call("load_cell_physics_states", physics_states)
+    detail.call("load_cell_object_states", object_states)
     detail.call("set_layer_states", layers)
     detail.call("set_pinned_cells", pins)
     _sync_quest_arena_lease()
@@ -453,6 +493,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
             _toggle_patrol_agent()
         KEY_I:
             _kick_persistent_crate()
+        KEY_E:
+            _interact_with_streamed_object()
         KEY_T:
             _toggle_combat_event()
         KEY_C:
@@ -515,6 +557,7 @@ func _update_hud() -> void:
     var arena_wins: int = int(_stateful_progress(ARENA_CELL, "arena_wins", 0))
     var state_count: int = int(detail.call("get_cell_state_count")) if detail != null else 0
     var physics_state_count: int = int(detail.call("get_cell_physics_state_count")) if detail != null else 0
+    var object_state_count: int = int(detail.call("get_cell_object_state_count")) if detail != null else 0
     var crate_speed := 0.0
     var hub_root := _gameplay_cell_root(HUB_CELL)
     if hub_root != null:
@@ -533,7 +576,7 @@ func _update_hud() -> void:
             var stats: Dictionary = detail.call("get_cell_simulation_stats", cell)
             collision_count += int(stats.get("collision_objects", 0))
             navigation_count += int(stats.get("navigation_regions", 0))
-    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nCell leases: %d  Arena owners: %d | Quest: %s  M Manual: %s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nO AI patrol: %s  crossings: %d  route leases: %d  cell: %s\nSimulation near landmarks: %d collision bodies, %d nav regions\nI kick crate: speed %.1f  physics snapshots: %d\n%s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
+    hud.text = "CGAME HLOD STREAMING  |  FPS %d\nDetail cells: %d   Distant proxy cells: %d\nVerified baked proxies: %d / 169   Checksum scan: %d ms\nGameplay pins: %d  | H Hub: %s/%s  G Arena: %s/%s\nCell leases: %d  Arena owners: %d | Quest: %s  M Manual: %s\nT combat event: %s (3 cells)  Champion shrine: %s  V reward: %s\nEvent: %s\nO AI patrol: %s  crossings: %d  route leases: %d  cell: %s\nSimulation near landmarks: %d collision bodies, %d nav regions\nI kick crate: speed %.1f  physics snapshots: %d\nE interact: %d cells with saved objects\n%s\nHub reward C: %s   Arena wins B: %d   Cached states: %d\nK save checkpoint   J load checkpoint\nQuality: %s  Q auto: %s  1/2/3 manual quality\nF crossfade: %s   WASD fly  Space/Ctrl vertical  Shift fast\nP prefetch: %s   L proxies: %s   R retry   Esc mouse" % [
         Engine.get_frames_per_second(),
         detail_count,
         distant_count,
@@ -560,6 +603,7 @@ func _update_hud() -> void:
         navigation_count,
         crate_speed,
         physics_state_count,
+        object_state_count,
         last_nav_query,
         "CLAIMED" if reward_claimed else "READY",
         arena_wins,
