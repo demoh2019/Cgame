@@ -163,6 +163,113 @@ static func partition(transforms: Array[Transform3D]) -> Array:
 
 
 
+## Unreal PCG-style surface normal/altitude screening for cosmetic placement.
+## This is pure point selection, so callers may finish generating the seeded
+## transform stream *before* applying a slope policy.
+const PCG_SURFACE_MAX_CANDIDATES := 16384
+const PCG_SURFACE_MAX_SELECTED := 4096
+const PCG_SURFACE_COORD_LIMIT := 10000000.0
+static var _pcg_surface_native: Object = null
+static var _pcg_surface_checked := false
+
+
+static func _pcg_surface_filter_fallback(positions: PackedVector3Array,
+		normals: PackedVector3Array, min_slope_deg: float, max_slope_deg: float,
+		min_height: float, max_height: float, max_selected: int) -> PackedInt32Array:
+	var indices := PackedInt32Array()
+	if positions.size() != normals.size() or positions.size() > PCG_SURFACE_MAX_CANDIDATES or \
+			max_selected < 0 or max_selected > PCG_SURFACE_MAX_SELECTED or \
+			not is_finite(min_slope_deg) or not is_finite(max_slope_deg) or \
+			min_slope_deg < 0.0 or max_slope_deg > 90.0 or min_slope_deg > max_slope_deg or \
+			not is_finite(min_height) or not is_finite(max_height) or \
+			min_height < -PCG_SURFACE_COORD_LIMIT or max_height > PCG_SURFACE_COORD_LIMIT or \
+			min_height > max_height:
+		return indices
+	# Validate every candidate, including points rejected by range constraints.
+	# A late invalid normal must not yield partial procedural geometry.
+	for i in positions.size():
+		var p: Vector3 = positions[i]
+		var n: Vector3 = normals[i]
+		if not p.is_finite() or not n.is_finite() or \
+				absf(p.x) > PCG_SURFACE_COORD_LIMIT or \
+				absf(p.y) > PCG_SURFACE_COORD_LIMIT or \
+				absf(p.z) > PCG_SURFACE_COORD_LIMIT or \
+				absf(n.x) > PCG_SURFACE_COORD_LIMIT or \
+				absf(n.y) > PCG_SURFACE_COORD_LIMIT or \
+				absf(n.z) > PCG_SURFACE_COORD_LIMIT or \
+				n.length_squared() <= 1.0e-12:
+			return PackedInt32Array()
+	if max_selected == 0:
+		return indices
+	for i in positions.size():
+		var p: Vector3 = positions[i]
+		if p.y < min_height or p.y > max_height:
+			continue
+		var n: Vector3 = normals[i]
+		var angle: float = rad_to_deg(acos(clampf(n.y / n.length(), -1.0, 1.0)))
+		if angle < min_slope_deg or angle > max_slope_deg:
+			continue
+		indices.append(i)
+		if indices.size() >= max_selected:
+			break
+	return indices
+
+
+## Caller-owned buffers stay intact. prefer_native=false is for parity tests.
+static func pcg_surface_filter_indices(positions: PackedVector3Array,
+		normals: PackedVector3Array, min_slope_deg: float = 0.0,
+		max_slope_deg: float = 90.0, min_height: float = -PCG_SURFACE_COORD_LIMIT,
+		max_height: float = PCG_SURFACE_COORD_LIMIT,
+		max_selected: int = PCG_SURFACE_MAX_SELECTED,
+		prefer_native: bool = true) -> PackedInt32Array:
+	if prefer_native:
+		if not _pcg_surface_checked:
+			_pcg_surface_checked = true
+			if ClassDB.class_exists("PCGSurfaceFilter3D"):
+				var instance: Object = ClassDB.instantiate("PCGSurfaceFilter3D")
+				if instance != null and instance.has_method("filter_indices"):
+					_pcg_surface_native = instance
+		if _pcg_surface_native != null:
+			return _pcg_surface_native.call("filter_indices", positions, normals,
+				min_slope_deg, max_slope_deg, min_height, max_height, max_selected)
+	return _pcg_surface_filter_fallback(
+		positions, normals, min_slope_deg, max_slope_deg,
+		min_height, max_height, max_selected)
+
+
+## Returns only visual transforms whose sampled terrain surface is suitable.
+## Fail open on malformed inputs; real empty matches intentionally stay empty.
+static func filter_cosmetic_transforms_surface(transforms: Array[Transform3D],
+		normals: PackedVector3Array, min_slope_deg: float, max_slope_deg: float,
+		prefer_native: bool = true) -> Array[Transform3D]:
+	if transforms.is_empty():
+		return []
+	if transforms.size() != normals.size() or transforms.size() > PCG_SURFACE_MAX_SELECTED:
+		return transforms
+	if not is_finite(min_slope_deg) or not is_finite(max_slope_deg) or \
+			min_slope_deg < 0.0 or max_slope_deg > 90.0 or min_slope_deg > max_slope_deg:
+		return transforms
+	var points := PackedVector3Array()
+	for i in transforms.size():
+		var p: Vector3 = transforms[i].origin
+		var n: Vector3 = normals[i]
+		if not p.is_finite() or not n.is_finite() or n.length_squared() <= 1.0e-12 or \
+				absf(p.x) > PCG_SURFACE_COORD_LIMIT or absf(p.y) > PCG_SURFACE_COORD_LIMIT or \
+				absf(p.z) > PCG_SURFACE_COORD_LIMIT or \
+				absf(n.x) > PCG_SURFACE_COORD_LIMIT or absf(n.y) > PCG_SURFACE_COORD_LIMIT or \
+				absf(n.z) > PCG_SURFACE_COORD_LIMIT:
+			return transforms
+		points.append(p)
+	var indices: PackedInt32Array = pcg_surface_filter_indices(
+		points, normals, min_slope_deg, max_slope_deg,
+		-PCG_SURFACE_COORD_LIMIT, PCG_SURFACE_COORD_LIMIT,
+		PCG_SURFACE_MAX_SELECTED, prefer_native)
+	var selected: Array[Transform3D] = []
+	for index in indices:
+		selected.append(transforms[index])
+	return selected
+
+
 ## Unreal PCG-style minimum-distance sampling for client-only decorations.
 ## The native filter uses a spatial hash; on older/stock engines the same
 ## greedy stable-input policy is implemented with GDScript buckets.
