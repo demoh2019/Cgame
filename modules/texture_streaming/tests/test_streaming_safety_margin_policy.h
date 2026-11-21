@@ -6,6 +6,7 @@
 
 #include "../streaming_safety_margin_policy.h"
 #include "tests/test_macros.h"
+#include <initializer_list>
 
 namespace TestStreamingSafetyMarginPolicy {
 
