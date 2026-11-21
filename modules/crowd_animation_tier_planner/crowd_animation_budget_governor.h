@@ -7,6 +7,8 @@
 
 #include "core/object/ref_counted.h"
 
+#include <cstdint>
+
 // Stateless with respect to scene objects; only keeps bounded CPU time evidence.
 // Optional full-pose IK budget pressure controller, following the general
 // feedback principle of Unreal's Animation Budget Allocator.
