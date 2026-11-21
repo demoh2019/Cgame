@@ -782,3 +782,83 @@ prediction, animation tasks or attribute replication.
 Documentation:
 - https://docs.godotengine.org/en/4.6/classes/class_characterbody3d.html
 - https://dev.epicgames.com/documentation/en-us/unreal-engine/gameplay-ability-system-for-unreal-engine
+
+
+## Visual Quality Lab v17 — combat components, enemy state and streamed combat gameplay
+
+The **engine addon** now exposes three reusable GDScript systems and the
+**playable demo uses all three immediately**. The architecture follows the
+attribute/effect separation used by Unreal's Gameplay Ability System and
+Godot's composition-oriented scenes, but does not attempt to replicate GAS.
+
+### Reusable gameplay/engine components
+
+- `addons/visual_quality/combat_component.gd` —
+  **`WorldCombatant3D`**: faction filtering (player/hostile/neutral), finite
+  damage validation, bounded physical armor mitigation
+  (`damage * 100 / (100 + armor)`), brief post-hit immunity, stun with expiry,
+  damage/defeat/status signals, and a single defeat event per life. Restore
+  saved health/stun without replaying defeat rewards.
+- `addons/visual_quality/hostile_sentry.gd` —
+  **`WorldHostileSentry3D`**: distinct from existing friendly patrol NPCs.
+  Each streamed cell contains a red physical sentry that attacks nearby
+  players at most every 1.7 seconds for nominal 9 damage, can be stunned
+  (purple), and turns dark/loses collision on defeat. It suspends its AI and
+  combat status ticking when its cell is put to sleep by the existing interest
+  manager. Exports primitive `sentry_health` and `sentry_stun` state.
+- `addons/visual_quality/combat_controller.gd` —
+  **`WorldCombatDirector3D`**: attacks only loaded hostile actors found by
+  bounded nearby cell lookups. Stable deterministic camera-facing target
+  choice, target caps and stamina/cooldown enforcement. Unlike a whole-world
+  actor scan, it does not retain streamed nodes across commands.
+
+### Integrated gameplay
+
+- **M**: strike the living hostile in front of the camera within 4m.
+  Nominal 36 damage, 12 stamina, 0.55s cooldown.
+- **N**: stun shockwave within 5.5m, up to 8 enemies, nominal 18 damage +
+  2.5s stun; 35 stamina and 7s cooldown.
+- **Backspace**: respawn after player defeat; restores HP/stamina and the
+  spawn position, leaving the world and inventory intact. Dead players cannot
+  move until they respawn.
+- Defeated sentries yield **one forest essence** per distinct cell through
+  the existing `WorldInventory3D.grant_once("sentry:x:z", ...)` logic, so
+  unloaded/recreated or reset actors cannot be farmed indefinitely.
+- The cell's saved state now includes damaged/defeated sentry health and
+  remaining stun duration. Returning to a cell restores the enemy's state.
+  The previous global reset-world-cells control intentionally resets enemy
+  health as well as other cell state. The HUD shows combat feedback and a
+  **current-session** defeat count. Existing movement, crafting, NPC dialogue,
+  environment, streaming and profiler controls are preserved.
+
+### Validation
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -q
+godot --headless --path . --editor --import
+godot --headless --path . --script res://tests/test_combat_component.gd
+godot --headless --path . --script res://tests/test_combat_selection.gd
+godot --headless --path . --script res://tests/test_hostile_sentry.gd
+godot --headless --path . --script res://tests/test_combat_streaming_runtime.gd
+```
+
+**45/45 local Python static/package checks pass.** These four new GDScript
+suites cover armor/team immunity, stun, one-time death, bounded targeting,
+physical sentry behavior, defeat loot, and streamed save/unload/rehydration.
+They are added to the Godot CI job but actual Godot execution, rendered
+gameplay and Apple Metal performance are **not verified** while the local
+Godot binary and connected Mac remain unavailable and CI stays queued.
+
+**Limitations:** this is a local single-player prototype. Combat attacks test
+angle and range, **not line-of-sight**; walls do not block the abstract hit
+calculation yet. Hostile sentries are stationary proximity attackers, not
+navmesh-driven combat agents. Player health is reset on restart, while enemy
+cell health is persisted. There is no authoritative multiplayer, prediction,
+animation combat pipeline or C++ engine core modification. Only the addon and
+demo at `misc/visual_quality_lab` were changed, not a separate inaccessible
+local game.
+
+References:
+- https://docs.godotengine.org/en/4.6/getting_started/first_3d_game/07.killing_player.html
+- https://docs.godotengine.org/en/4.6/classes/class_characterbody3d.html
+- https://dev.epicgames.com/documentation/en-us/unreal-engine/gameplay-effects-for-the-gameplay-ability-system-in-unreal-engine
