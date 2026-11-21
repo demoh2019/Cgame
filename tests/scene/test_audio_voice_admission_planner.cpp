@@ -98,6 +98,7 @@ TEST_CASE("[AudioVoiceAdmissionPlanner] Malformed data never stops an existing s
 	all.push_back(voice("hit", -5.0, -1.0));
 	CHECK(planner->select_victim(all, "hit", -10.0, 1) == AudioVoiceAdmissionPlanner::DROP_NEW);
 }
+
 TEST_CASE("[AudioVoiceAdmissionPlanner] Fresh equal-priority voices hold their initial attack") {
 	Ref<AudioVoiceAdmissionPlanner> planner;
 	planner.instantiate();
