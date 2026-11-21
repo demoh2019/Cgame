@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SHLighting" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Static L2 spherical-harmonics lighting helpers.
+	</brief_description>
+	<description>
+		SH is stored as a [PackedColorArray] of 9 coefficients (only red, green and blue are used; alpha stays [code]0[/code]). [method evaluate_irradiance] returns irradiance divided by pi, so a uniform radiance L yields exactly L. Order: Y00, Y1-1(y), Y10(z), Y11(x), Y2-2(xy), Y2-1(yz), Y20, Y21(xz), Y22.
+		Algorithms follow Ramamoorthi and Hanrahan, "An Efficient Representation for Irradiance Environment Maps" (2001) and Sloan, "Stupid Spherical Harmonics Tricks" (2008).
+	</description>
+	<methods>
+		<method name="create" qualifiers="static">
+			<return type="PackedColorArray" />
+			<description>
+				Returns zeroed SH coefficients.
+			</description>
+		</method>
+		<method name="basis" qualifiers="static">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="dir" type="Vector3" />
+			<description>
+				Returns the 9 SH basis values for a unit direction.
+			</description>
+		</method>
+		<method name="fibonacci_dir" qualifiers="static">
+			<return type="Vector3" />
+			<param index="0" name="i" type="int" />
+			<param index="1" name="n" type="int" />
+			<description>
+				Returns direction [param i] of [param n] evenly distributed on the sphere (Fibonacci lattice).
+			</description>
+		</method>
+		<method name="accumulate" qualifiers="static">
+			<return type="PackedColorArray" />
+			<param index="0" name="sh" type="PackedColorArray" />
+			<param index="1" name="dir" type="Vector3" />
+			<param index="2" name="color" type="Color" />
+			<description>
+				Returns [param sh] plus a radiance sample from [param dir] (already weighted by its solid angle).
+			</description>
+		</method>
+		<method name="project_direction" qualifiers="static">
+			<return type="PackedColorArray" />
+			<param index="0" name="dir" type="Vector3" />
+			<param index="1" name="color" type="Color" />
+			<description>
+				Projects a single weighted radiance sample coming from [param dir].
+			</description>
+		</method>
+		<method name="add" qualifiers="static">
+			<return type="PackedColorArray" />
+			<param index="0" name="a" type="PackedColorArray" />
+			<param index="1" name="b" type="PackedColorArray" />
+			<description>
+				Returns the sum of two SH sets.
+			</description>
+		</method>
+		<method name="scale" qualifiers="static">
+			<return type="PackedColorArray" />
+			<param index="0" name="a" type="PackedColorArray" />
+			<param index="1" name="factor" type="float" />
+			<description>
+				Returns [param a] scaled by [param factor].
+			</description>
+		</method>
+		<method name="lerp_sh" qualifiers="static">
+			<return type="PackedColorArray" />
+			<param index="0" name="a" type="PackedColorArray" />
+			<param index="1" name="b" type="PackedColorArray" />
+			<param index="2" name="t" type="float" />
+			<description>
+				Linearly blends two SH sets.
+			</description>
+		</method>
+		<method name="evaluate_radiance" qualifiers="static">
+			<return type="Color" />
+			<param index="0" name="sh" type="PackedColorArray" />
+			<param index="1" name="dir" type="Vector3" />
+			<description>
+				Reconstructs band-limited radiance in direction [param dir].
+			</description>
+		</method>
+		<method name="evaluate_irradiance" qualifiers="static">
+			<return type="Color" />
+			<param index="0" name="sh" type="PackedColorArray" />
+			<param index="1" name="normal" type="Vector3" />
+			<description>
+				Returns cosine-convolved irradiance divided by pi around [param normal], clamped to be non-negative.
+			</description>
+		</method>
+		<method name="from_sky" qualifiers="static">
+			<return type="PackedColorArray" />
+			<param index="0" name="sun_dir" type="Vector3" />
+			<param index="1" name="sun_color" type="Color" />
+			<param index="2" name="sky_color" type="Color" />
+			<param index="3" name="ground_color" type="Color" />
+			<param index="4" name="samples" type="int" />
+			<description>
+				Builds SH from an analytic sky: a ground-to-sky gradient over the Y axis plus an optional directional sun (its colour is the irradiance on a surface facing it).
+			</description>
+		</method>
+		<method name="rotate" qualifiers="static">
+			<return type="PackedColorArray" />
+			<param index="0" name="sh" type="PackedColorArray" />
+			<param index="1" name="rotation" type="Basis" />
+			<description>
+				Rotates the lighting function by [param rotation] via quadrature (error around 1e-2).
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="COEFFS" value="9">
+			Number of SH coefficients.
+		</constant>
+	</constants>
+</class>

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="StreamRequestQueue" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Prioritised streaming request queue with generations.
+	</brief_description>
+	<description>
+		Every request is stamped with a generation (for example a counter bumped whenever the player's interest set changes). [method cancel_stale] drops queued requests that are no longer wanted and flags in-flight ones, so late results are ignored by [method complete].
+	</description>
+	<methods>
+		<method name="get_newest_generation" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the newest generation seen so far.
+			</description>
+		</method>
+		<method name="request">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="priority" type="float" />
+			<param index="2" name="generation" type="int" />
+			<description>
+				Queues or re-prioritises [param cell]. Higher priority is served first. Returns [code]false[/code] if [param generation] is older than one already seen.
+			</description>
+		</method>
+		<method name="cancel_stale">
+			<return type="int" />
+			<param index="0" name="current_generation" type="int" />
+			<param index="1" name="keep_cells" type="Vector2i[]" />
+			<description>
+				Cancels every request older than [param current_generation] except those in [param keep_cells], which are re-stamped. Queued requests are removed, in-flight ones are flagged. Returns the number of cancelled requests.
+			</description>
+		</method>
+		<method name="next_batch">
+			<return type="Vector2i[]" />
+			<param index="0" name="budget" type="int" />
+			<description>
+				Pops up to [param budget] highest-priority queued requests (ties in FIFO order) and marks them in flight, honouring [member max_in_flight].
+			</description>
+		</method>
+		<method name="complete">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="result" type="Variant" />
+			<description>
+				Delivers a finished load. Returns [code]false[/code] and discards the result when the request was cancelled, superseded by a newer generation or never existed.
+			</description>
+		</method>
+		<method name="take_completed">
+			<return type="Dictionary[]" />
+			<description>
+				Returns and clears the delivered results as dictionaries with [code]cell[/code], [code]result[/code] and [code]generation[/code].
+			</description>
+		</method>
+		<method name="has_request" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] if [param cell] has a tracked request.
+			</description>
+		</method>
+		<method name="state_of" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the [enum State] of [param cell], or [code]-1[/code] when it has no request.
+			</description>
+		</method>
+		<method name="queued_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of queued requests.
+			</description>
+		</method>
+		<method name="in_flight_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of in-flight requests, including cancelled ones that have not reported back.
+			</description>
+		</method>
+		<method name="stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns counters: [code]requested[/code], [code]completed[/code], [code]cancelled_queued[/code], [code]cancelled_inflight[/code], [code]dropped_late[/code], [code]rejected_stale[/code], [code]revived[/code], [code]queued[/code] and [code]in_flight[/code].
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Resets the queue, generations and statistics.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="max_in_flight" type="int" setter="set_max_in_flight" getter="get_max_in_flight" default="0">
+			Cap on simultaneously in-flight requests ([code]0[/code] means unlimited).
+		</member>
+	</members>
+	<constants>
+		<constant name="STATE_QUEUED" value="0" enum="State">
+			The request waits in the queue.
+		</constant>
+		<constant name="STATE_IN_FLIGHT" value="1" enum="State">
+			The request was handed out by [method next_batch].
+		</constant>
+		<constant name="STATE_CANCELLED" value="2" enum="State">
+			The request was in flight when it was cancelled; its result will be dropped.
+		</constant>
+	</constants>
+</class>

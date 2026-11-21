@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VirtualTexturePageCache" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Sparse virtual texture page cache with feedback-driven requests, LRU physical page pool and an indirection image.
+	</brief_description>
+	<description>
+		Page keys encode (mip, x, y) with [method pack_page]. The lowest (1-page) mip is pinned and always resident, so every virtual page can fall back to a resident ancestor. The physical atlas has slots of [code]page_size + 2 * border[/code] pixels; the page sits inside and the border is edge-replicated for bilinear filtering. [method indirection_image] has one texel per mip-0 page ([code]r, g[/code] = physical slot, [code]b[/code] = resident mip) for shader sampling.
+		The design follows publicly documented sparse virtual texturing (Barrett, GDC 2008). This is a CPU page cache and is independent of [TextureStreaming], which streams texture mips.
+	</description>
+	<methods>
+		<method name="pack_page" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="mip" type="int" />
+			<param index="1" name="x" type="int" />
+			<param index="2" name="y" type="int" />
+			<description>
+				Packs a page into a key.
+			</description>
+		</method>
+		<method name="page_mip" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="key" type="int" />
+			<description>
+				Extracts the mip of a page key.
+			</description>
+		</method>
+		<method name="page_x" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="key" type="int" />
+			<description>
+				Extracts the page X of a page key.
+			</description>
+		</method>
+		<method name="page_y" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="key" type="int" />
+			<description>
+				Extracts the page Y of a page key.
+			</description>
+		</method>
+		<method name="get_virtual_size" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the virtual texture size in pixels.
+			</description>
+		</method>
+		<method name="get_page_size" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the page size in pixels.
+			</description>
+		</method>
+		<method name="get_border" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the page border in pixels.
+			</description>
+		</method>
+		<method name="get_physical_pages_x" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the physical atlas width in pages.
+			</description>
+		</method>
+		<method name="get_physical_pages_y" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the physical atlas height in pages.
+			</description>
+		</method>
+		<method name="get_pages_mip0" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of pages per axis at mip 0.
+			</description>
+		</method>
+		<method name="get_top_mip" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the lowest (pinned, 1-page) mip level.
+			</description>
+		</method>
+		<method name="get_stat_hits" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of feedback hits.
+			</description>
+		</method>
+		<method name="get_stat_misses" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of feedback misses.
+			</description>
+		</method>
+		<method name="get_stat_evictions" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of evicted pages.
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="virtual_size" type="int" />
+			<param index="1" name="page_size" type="int" />
+			<param index="2" name="physical_x" type="int" />
+			<param index="3" name="physical_y" type="int" />
+			<param index="4" name="border" type="int" default="4" />
+			<description>
+				Configures the cache and pins the top mip.
+			</description>
+		</method>
+		<method name="pages_at" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="mip" type="int" />
+			<description>
+				Returns the number of pages per axis at [param mip].
+			</description>
+		</method>
+		<method name="request_from_feedback">
+			<return type="void" />
+			<param index="0" name="feedback" type="PackedInt32Array" />
+			<description>
+				Processes feedback entries ([method pack_page] keys read back from the screen-space feedback pass). Duplicates are folded, resident pages are touched (LRU) and counted as hits.
+			</description>
+		</method>
+		<method name="update">
+			<return type="int" />
+			<param index="0" name="max_uploads_per_frame" type="int" />
+			<description>
+				Uploads pending pages (coarser mips first) into free or evicted slots and advances the frame. Pages needed this frame and the pinned top mip are never evicted. Returns the number of uploaded pages.
+			</description>
+		</method>
+		<method name="indirection_image">
+			<return type="Image" />
+			<description>
+				Returns the indirection image, rebuilt when dirty. Each texel resolves to the best resident mip.
+			</description>
+		</method>
+		<method name="physical_atlas" qualifiers="const">
+			<return type="Image" />
+			<description>
+				Returns the physical page atlas.
+			</description>
+		</method>
+		<method name="lookup" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="uv" type="Vector2" />
+			<param index="1" name="mip" type="int" />
+			<description>
+				Resolves [param uv] at [param mip] to the nearest resident ancestor. Returns [code]{slot: Vector2i, resident_mip: int, page: Vector2i}[/code].
+			</description>
+		</method>
+		<method name="is_resident" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="mip" type="int" />
+			<param index="1" name="x" type="int" />
+			<param index="2" name="y" type="int" />
+			<description>
+				Returns [code]true[/code] if the page is resident.
+			</description>
+		</method>
+		<method name="resident_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of resident pages.
+			</description>
+		</method>
+		<method name="pending_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of pending page requests.
+			</description>
+		</method>
+		<method name="stats" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns [code]hits[/code], [code]misses[/code], [code]evictions[/code] and [code]resident_pages[/code].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="provider" type="Callable" setter="set_provider" getter="get_provider">
+			Callable [code]func(mip: int, page_x: int, page_y: int) -&gt; Image[/code] returning the page content ([code]page_size[/code] square).
+		</member>
+	</members>
+</class>

@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="NavMeshCarving" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Dynamic navmesh obstacle carving with a budgeted tile cache.
+	</brief_description>
+	<description>
+		Walkable space is a grid of tiles holding convex polygons. Obstacles (polygons or circles grown by [member agent_radius]) are subtracted from the tiles they touch. Adding or removing an obstacle only marks the touched tiles dirty; [method update] rebuilds them under a per-call budget and re-links them to their neighbours. Rebuilt tiles are reported by [method consume_changed_tiles] so AI can repath. Polygon clipping and decomposition use [Geometry2D].
+	</description>
+	<methods>
+		<method name="get_tile_size" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the tile edge length.
+			</description>
+		</method>
+		<method name="get_bounds" qualifiers="const">
+			<return type="Rect2" />
+			<description>
+				Returns the covered area.
+			</description>
+		</method>
+		<method name="get_version" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns a counter increased whenever [method update] rebuilt tiles.
+			</description>
+		</method>
+		<method name="get_tiles_rebuilt_total" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of tile rebuilds since [method setup].
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="bounds" type="Rect2" />
+			<param index="1" name="tile_size" type="float" />
+			<param index="2" name="agent_radius" type="float" />
+			<description>
+				Creates a fully walkable tile grid over [param bounds].
+			</description>
+		</method>
+		<method name="set_walkable">
+			<return type="void" />
+			<param index="0" name="polygons" type="Array" />
+			<description>
+				Restricts walkable space to the given polygons (clipped into tiles).
+			</description>
+		</method>
+		<method name="add_obstacle">
+			<return type="void" />
+			<param index="0" name="id" type="Variant" />
+			<param index="1" name="shape" type="Variant" />
+			<description>
+				Adds or replaces an obstacle. [param shape] is a [PackedVector2Array] polygon or a dictionary [code]{center: Vector2, radius: float, segments: int}[/code]. Touched tiles are queued.
+			</description>
+		</method>
+		<method name="remove_obstacle">
+			<return type="bool" />
+			<param index="0" name="id" type="Variant" />
+			<description>
+				Removes an obstacle and queues the tiles it touched. Returns [code]false[/code] if it did not exist.
+			</description>
+		</method>
+		<method name="on_destroyed">
+			<return type="bool" />
+			<param index="0" name="id" type="Variant" />
+			<description>
+				Destruction hook: a broken barricade or wall stops blocking the navmesh. Equivalent to [method remove_obstacle].
+			</description>
+		</method>
+		<method name="has_obstacle" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="id" type="Variant" />
+			<description>
+				Returns [code]true[/code] if the obstacle exists.
+			</description>
+		</method>
+		<method name="pending_tiles" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of tiles waiting to be rebuilt.
+			</description>
+		</method>
+		<method name="update">
+			<return type="int" />
+			<param index="0" name="max_tiles_per_call" type="int" default="4" />
+			<description>
+				Rebuilds up to [param max_tiles_per_call] dirty tiles ([code]&lt;= 0[/code] means all). Returns the number rebuilt.
+			</description>
+		</method>
+		<method name="consume_changed_tiles">
+			<return type="Vector2i[]" />
+			<description>
+				Returns and clears the tiles rebuilt since the last call.
+			</description>
+		</method>
+		<method name="tile_version" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="tile" type="Vector2i" />
+			<description>
+				Returns how often [param tile] was rebuilt.
+			</description>
+		</method>
+		<method name="tile_count" qualifiers="const">
+			<return type="Vector2i" />
+			<description>
+				Returns the tile grid size.
+			</description>
+		</method>
+		<method name="tile_of" qualifiers="const">
+			<return type="Vector2i" />
+			<param index="0" name="point" type="Vector2" />
+			<description>
+				Returns the tile containing [param point].
+			</description>
+		</method>
+		<method name="polygons_in_tile" qualifiers="const">
+			<return type="PackedVector2Array[]" />
+			<param index="0" name="tile" type="Vector2i" />
+			<description>
+				Returns the convex polygons of [param tile].
+			</description>
+		</method>
+		<method name="is_walkable" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="point" type="Vector2" />
+			<description>
+				Returns [code]true[/code] if [param point] is on a walkable polygon (the boundary counts).
+			</description>
+		</method>
+		<method name="find_path" qualifiers="const">
+			<return type="PackedVector2Array" />
+			<param index="0" name="from" type="Vector2" />
+			<param index="1" name="to" type="Vector2" />
+			<description>
+				Finds a smoothed path (A* over polygons, then funnel). Returns an empty array when either end is blocked or unreachable.
+			</description>
+		</method>
+		<method name="path_affected" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="path" type="PackedVector2Array" />
+			<param index="1" name="changed" type="Vector2i[]" />
+			<description>
+				Returns [code]true[/code] if any segment of [param path] passes through one of the [param changed] tiles.
+			</description>
+		</method>
+		<method name="is_convex" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="polygon" type="PackedVector2Array" />
+			<description>
+				Returns [code]true[/code] if [param polygon] is convex.
+			</description>
+		</method>
+		<method name="polygon_area" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="polygon" type="PackedVector2Array" />
+			<description>
+				Returns the absolute area of [param polygon].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="agent_radius" type="float" setter="set_agent_radius" getter="get_agent_radius" default="0.5">
+			Radius by which obstacles are grown when added.
+		</member>
+	</members>
+</class>

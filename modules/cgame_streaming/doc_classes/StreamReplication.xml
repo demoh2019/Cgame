@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="StreamReplication" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Server side of streaming-state replication with delta-encoded ready-cell bitsets and anti-cheat validation.
+	</brief_description>
+	<description>
+		Each client reports which cells it has fully ready as a compact bitset over a window centred on its cell, XOR-delta-encoded against the last report the server acknowledged (see [StreamReplicationClient]). Reports are always relative to the last acked version, so a lost report or ack only costs a larger delta; when the server no longer has the base version it answers [code]need_full[/code]. The server uses the ready sets for interest management ([method server_relevant]) and rejects claims for cells that are implausibly far from the server-known client cell.
+		Wire format: [code]u32 version, u32 base, s32 cx, s32 cy, u8 radius[/code], then the bitset.
+	</description>
+	<methods>
+		<method name="window_side" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="radius" type="int" />
+			<description>
+				Returns the side length of the report window.
+			</description>
+		</method>
+		<method name="bit_index" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" />
+			<param index="2" name="cell" type="Vector2i" />
+			<description>
+				Returns the bit index of [param cell] in the window, or [code]-1[/code] when outside.
+			</description>
+		</method>
+		<method name="in_window" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" />
+			<param index="2" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] if [param cell] lies in the window.
+			</description>
+		</method>
+		<method name="bytes_for" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="radius" type="int" />
+			<description>
+				Returns the bitset size in bytes for a window of [param radius].
+			</description>
+		</method>
+		<method name="encode_cells" qualifiers="static">
+			<return type="PackedByteArray" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" />
+			<param index="2" name="cells" type="Dictionary" />
+			<description>
+				Encodes a set of cells (a dictionary keyed by [Vector2i]) as a bitset over the window.
+			</description>
+		</method>
+		<method name="decode_cells" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" />
+			<param index="2" name="bits" type="PackedByteArray" />
+			<description>
+				Decodes a bitset into a dictionary keyed by [Vector2i].
+			</description>
+		</method>
+		<method name="serialize" qualifiers="static">
+			<return type="PackedByteArray" />
+			<param index="0" name="packet" type="Dictionary" />
+			<description>
+				Serializes a report packet ([code]v[/code], [code]base[/code], [code]center[/code], [code]radius[/code], [code]bits[/code]) to the wire format.
+			</description>
+		</method>
+		<method name="deserialize" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="buffer" type="PackedByteArray" />
+			<description>
+				Parses the wire format. Returns an empty dictionary for malformed or truncated data.
+			</description>
+		</method>
+		<method name="set_client_position">
+			<return type="void" />
+			<param index="0" name="client" type="Variant" />
+			<param index="1" name="cell" type="Vector2i" />
+			<description>
+				Sets the server-known cell of [param client].
+			</description>
+		</method>
+		<method name="remove_client">
+			<return type="void" />
+			<param index="0" name="client" type="Variant" />
+			<description>
+				Forgets [param client].
+			</description>
+		</method>
+		<method name="apply_report">
+			<return type="Dictionary" />
+			<param index="0" name="client" type="Variant" />
+			<param index="1" name="packet" type="Dictionary" />
+			<description>
+				Applies a report. Returns [code]{ok, ack, reason, need_full, stripped}[/code], where [code]ack[/code] is the newest applied version to send back to the client.
+			</description>
+		</method>
+		<method name="ack_version">
+			<return type="int" />
+			<param index="0" name="client" type="Variant" />
+			<description>
+				Returns the newest applied version of [param client].
+			</description>
+		</method>
+		<method name="ready_set">
+			<return type="Dictionary" />
+			<param index="0" name="client" type="Variant" />
+			<description>
+				Returns the validated ready cells of [param client] as a dictionary keyed by [Vector2i].
+			</description>
+		</method>
+		<method name="is_ready">
+			<return type="bool" />
+			<param index="0" name="client" type="Variant" />
+			<param index="1" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] if [param client] confirmed [param cell] ready.
+			</description>
+		</method>
+		<method name="violations">
+			<return type="int" />
+			<param index="0" name="client" type="Variant" />
+			<description>
+				Returns the violation count of [param client].
+			</description>
+		</method>
+		<method name="is_flagged">
+			<return type="bool" />
+			<param index="0" name="client" type="Variant" />
+			<description>
+				Returns [code]true[/code] once [param client] reached [member violation_limit].
+			</description>
+		</method>
+		<method name="server_relevant">
+			<return type="Vector2i[]" />
+			<param index="0" name="client" type="Variant" />
+			<param index="1" name="cells_of_interest" type="Vector2i[]" />
+			<description>
+				Returns the subset of [param cells_of_interest] the client has confirmed ready.
+			</description>
+		</method>
+		<method name="server_missing">
+			<return type="Vector2i[]" />
+			<param index="0" name="client" type="Variant" />
+			<param index="1" name="cells_of_interest" type="Vector2i[]" />
+			<description>
+				Returns the subset of [param cells_of_interest] the client has not confirmed (hold back state for these).
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="allowed_radius" type="int" setter="set_allowed_radius" getter="get_allowed_radius" default="6">
+			Maximum Chebyshev distance (cells) from the server-known client cell for a ready claim to count.
+		</member>
+		<member name="max_report_radius" type="int" setter="set_max_report_radius" getter="get_max_report_radius" default="8">
+			Largest accepted report window radius.
+		</member>
+		<member name="max_center_error" type="int" setter="set_max_center_error" getter="get_max_center_error" default="2">
+			How far the reported window centre may be from the server-known cell.
+		</member>
+		<member name="history_size" type="int" setter="set_history_size" getter="get_history_size" default="8">
+			Number of acknowledged versions kept per client.
+		</member>
+		<member name="violation_limit" type="int" setter="set_violation_limit" getter="get_violation_limit" default="8">
+			Violations after which a client is flagged.
+		</member>
+	</members>
+	<constants>
+		<constant name="HEADER_BYTES" value="17">
+			Size of the wire header in bytes.
+		</constant>
+	</constants>
+</class>

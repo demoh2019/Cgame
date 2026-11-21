@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="NavMeshStitching" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Tiled navmesh stitching, polygon graph, A* and funnel path smoothing (static helpers).
+	</brief_description>
+	<description>
+		Tiles are dictionaries [code]{"origin": Vector2, "size": float, "polygons": Array[PackedVector2Array]}[/code]. [method stitch] finds polygon edges lying on the border shared by two tiles; [method build_graph] builds the polygon adjacency graph; [method find_path] runs A* over polygons followed by the Simple Stupid Funnel algorithm. The concepts follow Recast and Detour tiled navmeshes; the implementation is original.
+	</description>
+	<methods>
+		<method name="stitch" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="tile_a" type="Dictionary" />
+			<param index="1" name="tile_b" type="Dictionary" />
+			<param index="2" name="tolerance" type="float" />
+			<description>
+				Returns portal links [code]{poly_a, poly_b, left, right}[/code] across the border of two touching tiles.
+			</description>
+		</method>
+		<method name="build_graph" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="tiles" type="Array" />
+			<param index="1" name="tolerance" type="float" />
+			<description>
+				Builds a polygon graph [code]{polys, centers, links, tile_of, offsets}[/code] from intra-tile shared edges and stitched tile borders.
+			</description>
+		</method>
+		<method name="find_path" qualifiers="static">
+			<return type="PackedVector2Array" />
+			<param index="0" name="graph" type="Dictionary" />
+			<param index="1" name="start" type="Vector2" />
+			<param index="2" name="goal" type="Vector2" />
+			<description>
+				Finds a smoothed path through [param graph]. Returns an empty array when no route exists.
+			</description>
+		</method>
+		<method name="funnel" qualifiers="static">
+			<return type="PackedVector2Array" />
+			<param index="0" name="portals" type="Array" />
+			<description>
+				Runs the funnel algorithm over [code][left, right][/code] portal pairs; the first must be [code][start, start][/code] and the last [code][goal, goal][/code].
+			</description>
+		</method>
+	</methods>
+</class>

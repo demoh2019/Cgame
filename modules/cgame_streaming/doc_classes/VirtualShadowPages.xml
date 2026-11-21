@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VirtualShadowPages" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		CPU-side virtual shadow map page manager with clipmap levels, caster invalidation and an LRU page pool.
+	</brief_description>
+	<description>
+		Each frame: call [method begin_frame], [method request_for_receivers] and optionally [method invalidate_casters], then [method end_frame] to resolve the requests against the physical pool. Clipmap levels are recentred by whole pages in global page coordinates, so cached pages stay valid across recentring. Static casters are never passed in, so their pages stay cached.
+		The design follows publicly documented virtual shadow maps and the clipmap idea of Tanner et al. (1998).
+	</description>
+	<methods>
+		<method name="get_levels" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of clipmap levels.
+			</description>
+		</method>
+		<method name="get_level0_size" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the world size of level 0.
+			</description>
+		</method>
+		<method name="get_page_size" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the page size in texels.
+			</description>
+		</method>
+		<method name="get_virtual_resolution" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the virtual resolution per level.
+			</description>
+		</method>
+		<method name="get_pages_per_axis" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of pages per axis and level.
+			</description>
+		</method>
+		<method name="get_physical_capacity" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of physical pages.
+			</description>
+		</method>
+		<method name="setup">
+			<return type="void" />
+			<param index="0" name="clipmap_levels" type="int" />
+			<param index="1" name="level0_world_size" type="float" />
+			<param index="2" name="page_size_texels" type="int" />
+			<param index="3" name="virtual_res" type="int" />
+			<param index="4" name="physical_pages" type="int" />
+			<description>
+				Configures the manager and clears the cache.
+			</description>
+		</method>
+		<method name="level_world_size" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns the world size covered by a level.
+			</description>
+		</method>
+		<method name="page_world_size" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns the world size of one page at a level.
+			</description>
+		</method>
+		<method name="texel_world_size" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns the world size of one texel at a level.
+			</description>
+		</method>
+		<method name="begin_frame">
+			<return type="void" />
+			<param index="0" name="light_dir" type="Vector3" />
+			<param index="1" name="camera_pos" type="Vector3" />
+			<description>
+				Starts a frame: rebuilds the light basis and recentres each clipmap by whole pages. A moved light marks every cached page stale.
+			</description>
+		</method>
+		<method name="clipmap_center" qualifiers="const">
+			<return type="Vector2i" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns the clipmap centre of a level in global page coordinates.
+			</description>
+		</method>
+		<method name="level_for_footprint" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="footprint" type="float" />
+			<description>
+				Returns the finest level whose texel size covers the receiver's pixel footprint.
+			</description>
+		</method>
+		<method name="request_for_receivers">
+			<return type="void" />
+			<param index="0" name="points" type="PackedVector3Array" />
+			<param index="1" name="pixel_footprints" type="PackedFloat32Array" />
+			<description>
+				Requests the pages needed by visible receivers. Points outside a level's window are skipped.
+			</description>
+		</method>
+		<method name="invalidate_casters">
+			<return type="void" />
+			<param index="0" name="aabbs_moved" type="Array" />
+			<description>
+				Marks cached pages overlapping moved caster [AABB]s dirty.
+			</description>
+		</method>
+		<method name="end_frame">
+			<return type="Dictionary" />
+			<description>
+				Resolves requests against the pool and returns [code]{allocated, reused, rendered, evicted, dropped, requested, resident}[/code].
+			</description>
+		</method>
+		<method name="resident_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of resident pages.
+			</description>
+		</method>
+		<method name="is_resident" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="level" type="int" />
+			<param index="1" name="gx" type="int" />
+			<param index="2" name="gy" type="int" />
+			<description>
+				Returns [code]true[/code] if a page is resident.
+			</description>
+		</method>
+		<method name="page_table" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns a toroidal page table for shaders: [code]levels * pages_per_axis^2[/code] entries holding the physical slot or [code]-1[/code]. Index: [code]level*N*N + (gy mod N)*N + (gx mod N)[/code].
+			</description>
+		</method>
+	</methods>
+</class>

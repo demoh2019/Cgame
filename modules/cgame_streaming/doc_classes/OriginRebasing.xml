@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="OriginRebasing" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Floating-origin helper that shifts the world back by multiples of a grid step when the camera drifts too far.
+	</brief_description>
+	<description>
+		When the camera is further than [member threshold] from the engine origin, [method check] returns a shift (a multiple of [member grid_step]) and [method apply] moves every top-level [Node3D] by it. The accumulated origin is stored as exact integer cells so no precision is lost however many shifts happen. Because shifts are grid multiples, world-space noise stays seamless when sampled at [code]world_pos + noise_offset(period)[/code] with [code]period[/code] dividing [member grid_step].
+	</description>
+	<methods>
+		<method name="get_shift_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many shifts have been committed.
+			</description>
+		</method>
+		<method name="check" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="camera_world_pos" type="Vector3" />
+			<description>
+				Returns the shift to apply, or [constant Vector3.ZERO] while the camera is within [member threshold].
+			</description>
+		</method>
+		<method name="apply">
+			<return type="int" />
+			<param index="0" name="root" type="Node3D" />
+			<param index="1" name="shift" type="Vector3" />
+			<description>
+				Moves every top-level [Node3D] child of [param root] that is not in the [code]origin_rebase_exclude[/code] group by [param shift], commits the shift and notifies listeners. Returns the number of moved nodes.
+			</description>
+		</method>
+		<method name="commit">
+			<return type="void" />
+			<param index="0" name="shift" type="Vector3" />
+			<description>
+				Accounts for a shift that the caller already applied (for example to physics bodies) and notifies listeners.
+			</description>
+		</method>
+		<method name="add_listener">
+			<return type="void" />
+			<param index="0" name="callback" type="Callable" />
+			<description>
+				Registers a callback [code]func(shift: Vector3)[/code] for systems that cache world positions.
+			</description>
+		</method>
+		<method name="remove_listener">
+			<return type="void" />
+			<param index="0" name="callback" type="Callable" />
+			<description>
+				Unregisters a listener added with [method add_listener].
+			</description>
+		</method>
+		<method name="to_global_world" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="pos" type="Vector3" />
+			<description>
+				Converts an engine-local position to a logical world position.
+			</description>
+		</method>
+		<method name="to_local_world" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="pos" type="Vector3" />
+			<description>
+				Converts a logical world position to an engine-local position.
+			</description>
+		</method>
+		<method name="to_global_split" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="pos" type="Vector3" />
+			<description>
+				Returns a drift-free representation [code]{"cell": Vector3i, "rem": Vector3}[/code] of a local position, with world position equal to [code]cell * grid_step + rem[/code] and [code]rem[/code] in [code][0, grid_step)[/code].
+			</description>
+		</method>
+		<method name="from_global_split" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="rem" type="Vector3" />
+			<description>
+				Inverse of [method to_global_split], relative to the current origin.
+			</description>
+		</method>
+		<method name="noise_offset" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="period" type="float" />
+			<description>
+				Returns the offset to add to engine-local positions before sampling world-space noise of the given [param period].
+			</description>
+		</method>
+		<method name="get_exclude_group" qualifiers="static">
+			<return type="StringName" />
+			<description>
+				Returns the group name ([code]origin_rebase_exclude[/code]) that excludes a node from [method apply].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="threshold" type="float" setter="set_threshold" getter="get_threshold" default="2048.0">
+			Distance of the camera from the engine origin that triggers a rebase.
+		</member>
+		<member name="grid_step" type="float" setter="set_grid_step" getter="get_grid_step" default="512.0">
+			All shifts are multiples of this value.
+		</member>
+		<member name="horizontal_only" type="bool" setter="set_horizontal_only" getter="is_horizontal_only" default="true">
+			If [code]true[/code], the Y axis is ignored when deciding and shifting.
+		</member>
+		<member name="origin_cells" type="Vector3i" setter="set_origin_cells" getter="get_origin_cells" default="Vector3i(0, 0, 0)">
+			World position of the engine origin, in [member grid_step] cells.
+		</member>
+	</members>
+</class>

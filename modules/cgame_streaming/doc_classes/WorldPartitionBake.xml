@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WorldPartitionBake" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Bakes actor lists into a hierarchical World Partition style grid with data layers, HLOD clusters, one-file-per-actor storage, diffs and predictive cell selection.
+	</brief_description>
+	<description>
+		Takes an [Array] of actor [Dictionary] entries with the keys [code]guid[/code] ([String], generated deterministically when empty), [code]position[/code] ([Vector3]), [code]bounds[/code] ([AABB]), [code]layers[/code] ([PackedStringArray]), [code]spatially_loaded[/code] ([bool]) and [code]data[/code] ([Dictionary]). [method bake] assigns every spatially loaded actor to a grid cell whose level grows with the actor extent (cell size doubles per level, up to [constant MAX_LEVEL]); cells are keyed [code]"&lt;layer group&gt;|&lt;level&gt;|&lt;x&gt;|&lt;z&gt;"[/code]. Actors that are not spatially loaded are always loaded.
+		The concepts follow the publicly documented Unreal Engine World Partition ideas (runtime grid, data layers, One File Per Actor, HLOD); the implementation is original.
+	</description>
+	<methods>
+		<method name="stable_guid" qualifiers="static">
+			<return type="String" />
+			<param index="0" name="seed" type="String" />
+			<description>
+				Returns a deterministic UUID-shaped GUID derived from [param seed]. The same seed always yields the same GUID.
+			</description>
+		</method>
+		<method name="bake">
+			<return type="Dictionary" />
+			<param index="0" name="actors" type="Array" />
+			<param index="1" name="cell_size" type="float" />
+			<param index="2" name="loading_range_by_layer" type="Dictionary" />
+			<description>
+				Bakes [param actors] into cells of level-0 size [param cell_size]. [param loading_range_by_layer] maps layer names (and the optional key [code]"default"[/code]) to a loading range. Returns and remembers a bake with the keys [code]cell_size[/code], [code]cells[/code], [code]always_loaded[/code], [code]layers[/code] and [code]actors[/code].
+			</description>
+		</method>
+		<method name="get_baked" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the most recent result of [method bake].
+			</description>
+		</method>
+		<method name="hlod_clusters" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="cells" type="Dictionary" />
+			<param index="1" name="cluster_cells" type="int" />
+			<description>
+				Groups baked [param cells] into HLOD clusters of [param cluster_cells] x [param cluster_cells] cells (within each cell's own level), keeping data layer groups separate. Each cluster contains [code]key[/code], [code]level[/code], [code]group[/code], [code]bounds[/code], [code]cells[/code] and [code]actors[/code].
+			</description>
+		</method>
+		<method name="split_one_file_per_actor" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="actors" type="Array" />
+			<param index="1" name="dir_path" type="String" />
+			<description>
+				Writes one [code]&lt;guid&gt;.json[/code] file per actor into [param dir_path] (via a temporary file and rename). Actors without a GUID are skipped. Returns the number of files written.
+			</description>
+		</method>
+		<method name="load_actors" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="dir_path" type="String" />
+			<description>
+				Reads back every [code].json[/code] actor file from [param dir_path], sorted by file name. Returns an empty array when the directory cannot be opened.
+			</description>
+		</method>
+		<method name="diff_bakes" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="old_bake" type="Dictionary" />
+			<param index="1" name="new_bake" type="Dictionary" />
+			<description>
+				Compares two bakes. Returns [code]added[/code], [code]removed[/code], [code]moved[/code] (position, bounds or cell changed), [code]changed[/code] (data hash changed) and the sorted [code]dirty_cells[/code] that need rebuilding.
+			</description>
+		</method>
+		<method name="cells_to_load" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="source_pos" type="Vector3" />
+			<param index="1" name="velocity" type="Vector3" />
+			<param index="2" name="layers_enabled" type="PackedStringArray" />
+			<description>
+				Returns the cell keys of the last bake that should be streamed in for a source at [param source_pos], also sampling points along [param velocity] (predictive look-ahead). Cells whose data layers are all disabled are skipped. The result is sorted nearest first.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="lookahead_seconds" type="float" setter="set_lookahead_seconds" getter="get_lookahead_seconds" default="1.5">
+			Seconds of travel simulated ahead of the streaming source by [method cells_to_load].
+		</member>
+		<member name="lookahead_samples" type="int" setter="set_lookahead_samples" getter="get_lookahead_samples" default="3">
+			Number of sample points along the look-ahead segment used by [method cells_to_load].
+		</member>
+	</members>
+	<constants>
+		<constant name="MAX_LEVEL" value="8">
+			Maximum hierarchical grid level.
+		</constant>
+	</constants>
+</class>

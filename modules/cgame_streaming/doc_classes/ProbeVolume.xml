@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="ProbeVolume" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Adaptive irradiance probe volume with L2 SH probes, temporal updates and budgeted cell streaming.
+	</brief_description>
+	<description>
+		[method build] places probe bricks of [member base_spacing], subdivided up to [constant MAX_LEVEL] times where the density callable asks for it. [method bake] and [method temporal_update] trace rays through a user supplied callable [code]func(origin: Vector3, dir: Vector3) -&gt; Dictionary[/code] returning [code]{hit: bool, color: Color, distance: float, backface: bool (optional)}[/code]. Probes inside geometry are marked invalid and ignored when [method sample] interpolates trilinearly with backface weighting. Probes are grouped into streaming cells of [constant CELL_SPAN] bricks that can be serialized, unloaded and evicted under [member memory_budget_bytes].
+		The approach follows Majercik et al., "Dynamic Diffuse Global Illumination with Ray-Traced Irradiance Fields" (JCGT 2019) and Unity Adaptive Probe Volumes (concepts only).
+	</description>
+	<methods>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes all probes.
+			</description>
+		</method>
+		<method name="probe_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of probes.
+			</description>
+		</method>
+		<method name="probe_position" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns the position of a probe.
+			</description>
+		</method>
+		<method name="probe_sh" qualifiers="const">
+			<return type="PackedColorArray" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns the SH of a probe, or an empty array when its cell is unloaded.
+			</description>
+		</method>
+		<method name="is_probe_valid" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns [code]false[/code] for probes inside geometry.
+			</description>
+		</method>
+		<method name="find_probe" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="pos" type="Vector3" />
+			<description>
+				Returns the index of the probe at [param pos], or [code]-1[/code].
+			</description>
+		</method>
+		<method name="sky" qualifiers="const">
+			<return type="Color" />
+			<param index="0" name="dir" type="Vector3" />
+			<description>
+				Returns the sky radiance in direction [param dir].
+			</description>
+		</method>
+		<method name="cell_of_position" qualifiers="const">
+			<return type="Vector3i" />
+			<param index="0" name="pos" type="Vector3" />
+			<description>
+				Returns the streaming cell containing [param pos].
+			</description>
+		</method>
+		<method name="build">
+			<return type="int" />
+			<param index="0" name="bounds" type="AABB" />
+			<param index="1" name="base_spacing" type="float" />
+			<param index="2" name="density_at" type="Callable" />
+			<description>
+				Builds bricks over [param bounds]. [param density_at] ([code]func(center: Vector3) -&gt; float[/code] in [code]0..1[/code]) picks the subdivision level. Returns the probe count.
+			</description>
+		</method>
+		<method name="bake">
+			<return type="void" />
+			<param index="0" name="trace" type="Callable" />
+			<param index="1" name="rays_per_probe" type="int" />
+			<param index="2" name="seed" type="int" />
+			<description>
+				Bakes every probe by tracing [param rays_per_probe] rays (at least 4) with a per-probe rotated Fibonacci sphere.
+			</description>
+		</method>
+		<method name="temporal_update">
+			<return type="int" />
+			<param index="0" name="fraction" type="float" />
+			<param index="1" name="trace" type="Callable" />
+			<param index="2" name="seed" type="int" />
+			<description>
+				Updates a rotating subset ([param fraction] of all probes) of resident probes and blends with the old value using [member hysteresis]. Returns the number of probes updated.
+			</description>
+		</method>
+		<method name="sample">
+			<return type="Color" />
+			<param index="0" name="pos" type="Vector3" />
+			<param index="1" name="normal" type="Vector3" />
+			<description>
+				Returns irradiance divided by pi at [param pos] for a surface [param normal], interpolated from the 8 corner probes of the containing leaf. Falls back to ambient sky light outside the volume or when no probe is usable. Touches the sampled cell for LRU purposes.
+			</description>
+		</method>
+		<method name="touch_cell">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Marks [param cell] as most recently used.
+			</description>
+		</method>
+		<method name="is_cell_resident" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Returns [code]true[/code] if the cell's probe data is in memory.
+			</description>
+		</method>
+		<method name="cell_probe_ids" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Returns the probe indices of a cell.
+			</description>
+		</method>
+		<method name="resident_bytes" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the serialized size of all resident cells.
+			</description>
+		</method>
+		<method name="cells_needed" qualifiers="const">
+			<return type="Vector3i[]" />
+			<param index="0" name="view_pos" type="Vector3" />
+			<param index="1" name="radius" type="float" />
+			<description>
+				Returns the cells intersecting the sphere ([param view_pos], [param radius]), nearest first.
+			</description>
+		</method>
+		<method name="serialize_cell" qualifiers="const">
+			<return type="PackedByteArray" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Serializes a cell ([code]s32 count[/code], then per probe [code]s32 index, u8 valid, 27 float32[/code]). For an unloaded cell the stored bytes are returned.
+			</description>
+		</method>
+		<method name="load_cell">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="bytes" type="PackedByteArray" />
+			<description>
+				Restores a serialized cell, marks it resident and enforces the budget. Returns [code]false[/code] on malformed data.
+			</description>
+		</method>
+		<method name="unload_cell">
+			<return type="PackedByteArray" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Serializes, stores and frees a cell's probe data. Returns the bytes.
+			</description>
+		</method>
+		<method name="request_cell">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Streams an evicted cell back in from the internal store. Returns [code]false[/code] if it is unknown.
+			</description>
+		</method>
+		<method name="enforce_budget">
+			<return type="int" />
+			<param index="0" name="protect" type="Vector3i" default="Vector3i(-99999, -99999, -99999)" />
+			<description>
+				Evicts least-recently-used cells until [method resident_bytes] fits [member memory_budget_bytes]. The [param protect] cell and the most recently used cell are kept. Returns the number of evictions.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="bounds" type="AABB" setter="set_bounds" getter="get_bounds" default="AABB(0, 0, 0, 0, 0, 0)">
+			Volume bounds (set by [method build]).
+		</member>
+		<member name="base_spacing" type="float" setter="set_base_spacing" getter="get_base_spacing" default="2.0">
+			Edge length of a base brick.
+		</member>
+		<member name="hysteresis" type="float" setter="set_hysteresis" getter="get_hysteresis" default="0.7">
+			Weight of the old value when [method temporal_update] blends in a new result.
+		</member>
+		<member name="min_hit_distance" type="float" setter="set_min_hit_distance" getter="get_min_hit_distance" default="0.02">
+			Hits closer than this count as starting inside geometry.
+		</member>
+		<member name="invalid_fraction" type="float" setter="set_invalid_fraction" getter="get_invalid_fraction" default="0.5">
+			Fraction of inside rays above which a probe is invalid.
+		</member>
+		<member name="sky_top" type="Color" setter="set_sky_top" getter="get_sky_top" default="Color(0.6, 0.75, 1, 1)">
+			Sky colour used for rays that miss geometry (up direction).
+		</member>
+		<member name="sky_bottom" type="Color" setter="set_sky_bottom" getter="get_sky_bottom" default="Color(0.15, 0.13, 0.12, 1)">
+			Sky colour used for rays that miss geometry (down direction).
+		</member>
+		<member name="memory_budget_bytes" type="int" setter="set_memory_budget_bytes" getter="get_memory_budget_bytes" default="0">
+			Resident probe memory budget in bytes ([code]0[/code] means unlimited).
+		</member>
+	</members>
+	<constants>
+		<constant name="MAX_LEVEL" value="2">
+			Maximum brick subdivision level.
+		</constant>
+		<constant name="CELL_SPAN" value="2">
+			Streaming cell edge, in base bricks.
+		</constant>
+		<constant name="RECORD_BYTES" value="113">
+			Serialized size of one probe record.
+		</constant>
+	</constants>
+</class>

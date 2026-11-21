@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="StreamReadinessGate" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Readiness gate that reveals a streamed cell only once data, GPU, physics and navmesh stages are all done.
+	</brief_description>
+	<description>
+		Stages are reported with [method mark] or discovered by polling per-stage probe callables in [method update]. GPU upload and physics need data; navmesh needs physics. An early mark of a later stage is remembered but does not count until its prerequisites are met. Stages that wait too long are reported once as stuck. Navmesh bakes can be queued with [method warmup_navmesh] and are run under a budget by [method process_warmup].
+	</description>
+	<methods>
+		<method name="get_warmup_failed" qualifiers="const">
+			<return type="Vector2i[]" />
+			<description>
+				Returns the cells whose navmesh warmup was given up.
+			</description>
+		</method>
+		<method name="get_stuck_log" qualifiers="const">
+			<return type="Dictionary[]" />
+			<description>
+				Returns all stuck reports so far ([code]cell[/code], [code]stage[/code], [code]stage_name[/code], [code]waited[/code]).
+			</description>
+		</method>
+		<method name="set_probe">
+			<return type="void" />
+			<param index="0" name="stage" type="int" />
+			<param index="1" name="probe" type="Callable" />
+			<description>
+				Sets a probe [code]func(cell: Vector2i) -&gt; bool[/code] polled in [method update] until it returns [code]true[/code].
+			</description>
+		</method>
+		<method name="set_auto_warmup">
+			<return type="void" />
+			<param index="0" name="bake" type="Callable" />
+			<description>
+				Enables automatic navmesh warmup: as soon as a cell's physics become ready, [param bake] ([code]func(cell) -&gt; bool[/code]) is queued.
+			</description>
+		</method>
+		<method name="begin">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="now" type="float" />
+			<description>
+				Starts tracking [param cell] at time [param now].
+			</description>
+		</method>
+		<method name="release">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Stops tracking [param cell] and drops its queued warmups.
+			</description>
+		</method>
+		<method name="is_tracked" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] if [param cell] is tracked.
+			</description>
+		</method>
+		<method name="mark">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="stage" type="int" />
+			<param index="2" name="now" type="float" default="-1.0" />
+			<description>
+				Marks [param stage] done for [param cell]. [param now] [code]&lt; 0[/code] keeps the last known time.
+			</description>
+		</method>
+		<method name="ready_mask" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the bit mask of stages that count as done (prerequisites applied).
+			</description>
+		</method>
+		<method name="is_stage_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="stage" type="int" />
+			<description>
+				Returns [code]true[/code] if [param stage] counts as done for [param cell].
+			</description>
+		</method>
+		<method name="is_revealable" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] when every stage is done.
+			</description>
+		</method>
+		<method name="is_revealed" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] once [method update] has reported the cell as revealable.
+			</description>
+		</method>
+		<method name="waiting_stage" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the first stage the cell is waiting on, or [code]0[/code] when complete.
+			</description>
+		</method>
+		<method name="update">
+			<return type="Vector2i[]" />
+			<param index="0" name="now" type="float" />
+			<description>
+				Polls probes, tracks timeouts and returns the cells that just became revealable (once each).
+			</description>
+		</method>
+		<method name="warmup_navmesh">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="bake" type="Callable" />
+			<description>
+				Queues a navmesh bake [code]func(cell) -&gt; bool[/code] for [param cell]; it runs from [method process_warmup] once the cell's physics are ready.
+			</description>
+		</method>
+		<method name="pending_warmups" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of queued navmesh bakes.
+			</description>
+		</method>
+		<method name="process_warmup">
+			<return type="int" />
+			<param index="0" name="max_count" type="int" />
+			<param index="1" name="max_usec" type="int" default="0" />
+			<description>
+				Runs up to [param max_count] queued bakes, stopping early after [param max_usec] microseconds when positive. Cells whose physics are not ready are skipped without consuming budget. Returns the number of bakes run.
+			</description>
+		</method>
+		<method name="probe_rids_valid" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="rids" type="Array" />
+			<description>
+				Ready-made GPU probe: [code]true[/code] when the array is non-empty and every [RID] is valid.
+			</description>
+		</method>
+		<method name="probe_body_shapes" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="min_shapes" type="int" default="1" />
+			<description>
+				Ready-made physics probe: the body exists and owns at least [param min_shapes] shapes.
+			</description>
+		</method>
+		<method name="probe_nav_region" qualifiers="static">
+			<return type="bool" />
+			<param index="0" name="region" type="RID" />
+			<description>
+				Ready-made navmesh probe: the region exists and its navigation iteration was published.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="default_timeout" type="float" setter="set_default_timeout" getter="get_default_timeout" default="10.0">
+			Seconds a stage may wait before it is reported as stuck.
+		</member>
+		<member name="stage_timeouts" type="Dictionary" setter="set_stage_timeouts" getter="get_stage_timeouts" default="{}">
+			Per-stage timeout overrides keyed by [enum Stage] value.
+		</member>
+		<member name="max_warmup_attempts" type="int" setter="set_max_warmup_attempts" getter="get_max_warmup_attempts" default="3">
+			Navmesh bake attempts before a cell's warmup is given up.
+		</member>
+		<member name="on_stuck" type="Callable" setter="set_on_stuck" getter="get_on_stuck">
+			Optional callback [code]func(report: Dictionary)[/code] invoked when a stage becomes stuck.
+		</member>
+		<member name="on_reveal" type="Callable" setter="set_on_reveal" getter="get_on_reveal">
+			Optional callback [code]func(cell: Vector2i)[/code] invoked when a cell becomes revealable.
+		</member>
+	</members>
+	<constants>
+		<constant name="STAGE_DATA_LOADED" value="1" enum="Stage">
+			Scene or data is loaded.
+		</constant>
+		<constant name="STAGE_GPU_UPLOADED" value="2" enum="Stage">
+			GPU resources are uploaded.
+		</constant>
+		<constant name="STAGE_PHYSICS_READY" value="4" enum="Stage">
+			Physics shapes are created.
+		</constant>
+		<constant name="STAGE_NAVMESH_READY" value="8" enum="Stage">
+			Navigation mesh is warmed up.
+		</constant>
+		<constant name="STAGE_ALL" value="15">
+			Mask of all stages.
+		</constant>
+	</constants>
+</class>

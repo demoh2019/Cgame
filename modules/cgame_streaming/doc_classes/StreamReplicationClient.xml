@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="StreamReplicationClient" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Client side of streaming-state replication: tracks ready cells and builds delta reports.
+	</brief_description>
+	<description>
+		Reports are XOR deltas against the last version the server acknowledged through [method on_ack]. Call [method request_full] when the server answered [code]need_full[/code].
+	</description>
+	<methods>
+		<method name="get_version" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the version of the latest built report.
+			</description>
+		</method>
+		<method name="get_acked_version" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the latest acknowledged version.
+			</description>
+		</method>
+		<method name="set_ready">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="ready" type="bool" />
+			<description>
+				Marks [param cell] ready or not ready.
+			</description>
+		</method>
+		<method name="request_full">
+			<return type="void" />
+			<description>
+				Makes the next report a full one (base 0).
+			</description>
+		</method>
+		<method name="build_report">
+			<return type="Dictionary" />
+			<param index="0" name="center" type="Vector2i" />
+			<description>
+				Builds the next report packet centred on [param center]. Use [method StreamReplication.serialize] for the wire format.
+			</description>
+		</method>
+		<method name="on_ack">
+			<return type="void" />
+			<param index="0" name="acked" type="int" />
+			<description>
+				Processes a server acknowledgement of version [param acked].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="radius" type="int" setter="set_radius" getter="get_radius" default="6">
+			Radius of the reported window in cells.
+		</member>
+	</members>
+</class>
