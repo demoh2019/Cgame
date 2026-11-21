@@ -100,6 +100,53 @@ func run(t) -> void:
         t.eq(passive.think_timer, 0.25,
             "stock Godot retains the legacy passive scan rate")
 
+    t.current = "Passive infected hold stable LOD across small observer movement"
+    var lod_engine: Variant = Zombie._get_ai_lod_scheduler()
+    if lod_engine != null and lod_engine.has_method("get_hysteretic_interval"):
+        var stable := Zombie.new(702, "walker", Vector3(0.0, ground, 0.0))
+        var near_range: float = float(stable.data["lose"])
+        var far_range: float = near_range + 24.0
+        # Eligible but out of hearing/sight distance: never turns into a
+        # combat target and keeps ordinary server simulation each tick.
+        var viewers := {99: {"position": Vector3(far_range - 2.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable._ai_lod_previous_interval, 0.5,
+            "initial deterministic startup phase remembers the nominal medium LOD")
+        t.eq(stable.target_id, -1, "distant passive viewer is not an AI target")
+        stable.think_timer = 0.0
+        viewers[99] = {"position": Vector3(far_range + 2.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable.think_timer, 0.5,
+            "2m boundary movement keeps medium scanning cadence")
+        stable.think_timer = 0.0
+        viewers[99] = {"position": Vector3(far_range + 6.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable.think_timer, 1.0, "real movement admits far LOD")
+        stable.think_timer = 0.0
+        viewers[99] = {"position": Vector3(far_range - 2.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable.think_timer, 1.0,
+            "small return movement cannot cause far/medium flapping")
+        stable.think_timer = 0.0
+        viewers[99] = {"position": Vector3(far_range - 6.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable.think_timer, 0.5, "significant approach restores medium cadence")
+        stable.think_timer = 0.0
+        viewers[99] = {"position": Vector3(2.0, ground, 0.0),
+            "alive": true, "safe": false, "noise": 0.0}
+        stable.think(world, viewers, 0.1, rng)
+        t.eq(stable.target_id, 99, "close survivor still causes immediate acquisition")
+        t.eq(stable.think_timer, 0.25,
+            "first contact retains legacy near/combat decision cadence")
+    else:
+        t.check(lod_engine == null or not lod_engine.has_method("get_hysteretic_interval"),
+            "stock and older Cgame retain existing AI LOD behavior")
+
     t.current = "GameServer uses native staggering only for large crowds"
     var sim := GameServer.new(WorldGen.new(112), 112)
     sim.tick_count = 2 # Avoid population maintenance in this isolated tick.
