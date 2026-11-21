@@ -278,6 +278,71 @@ static func filter_cosmetic_transforms_surface(transforms: Array[Transform3D],
 	return selected
 
 
+## Unreal PCG / Foliage-style surface-normal alignment for static decor.
+## Applies limited world-space tilt before each already-authored yaw/scale basis;
+## all instance origins, counts and seeded rotations remain unchanged.
+## Stock Godot and previous engine revisions use equivalent GDScript math.
+static func _align_cosmetic_transforms_surface_fallback(
+		transforms: Array[Transform3D], normals: PackedVector3Array,
+		max_tilt_degrees: float) -> Array[Transform3D]:
+	var result: Array[Transform3D] = []
+	if transforms.size() != normals.size() or transforms.size() > PCG_SURFACE_MAX_CANDIDATES or \
+			not is_finite(max_tilt_degrees) or max_tilt_degrees < 0.0 or max_tilt_degrees > 90.0:
+		return result
+	for i in transforms.size():
+		var t: Transform3D = transforms[i]
+		var n: Vector3 = normals[i]
+		if not t.is_finite() or not n.is_finite() or \
+				absf(t.origin.x) > PCG_SURFACE_COORD_LIMIT or \
+				absf(t.origin.y) > PCG_SURFACE_COORD_LIMIT or \
+				absf(t.origin.z) > PCG_SURFACE_COORD_LIMIT or \
+				absf(n.x) > PCG_SURFACE_COORD_LIMIT or \
+				absf(n.y) > PCG_SURFACE_COORD_LIMIT or \
+				absf(n.z) > PCG_SURFACE_COORD_LIMIT or n.length_squared() <= 1.0e-12 or n.y < 0.0:
+			return []
+	var max_tilt: float = deg_to_rad(max_tilt_degrees)
+	for i in transforms.size():
+		var t: Transform3D = transforms[i]
+		var up: Vector3 = normals[i].normalized()
+		var axis: Vector3 = Vector3.UP.cross(up)
+		var tilt := Basis.IDENTITY
+		if max_tilt > 0.0 and axis.length_squared() > 1.0e-12:
+			var slope: float = acos(clampf(up.y, 0.0, 1.0))
+			tilt = Basis(axis.normalized(), minf(slope, max_tilt))
+		result.append(Transform3D(tilt * t.basis, t.origin))
+	return result
+
+
+## Returns a new array so the source transforms remain reusable. Validation
+## errors fail open only at this gameplay wrapper, not inside native engine API.
+static func align_cosmetic_transforms_surface(transforms: Array[Transform3D],
+		normals: PackedVector3Array, max_tilt_degrees: float = 35.0,
+		prefer_native: bool = true) -> Array[Transform3D]:
+	if transforms.is_empty():
+		return []
+	if prefer_native:
+		if not _pcg_surface_checked:
+			_pcg_surface_checked = true
+			if ClassDB.class_exists("PCGSurfaceFilter3D"):
+				var instance: Object = ClassDB.instantiate("PCGSurfaceFilter3D")
+				if instance != null and instance.has_method("filter_indices"):
+					_pcg_surface_native = instance
+		if _pcg_surface_native != null and _pcg_surface_native.has_method("align_transforms"):
+			var native_result: Array = _pcg_surface_native.call(
+				"align_transforms", transforms, normals, max_tilt_degrees)
+			if native_result.size() == transforms.size():
+				var typed: Array[Transform3D] = []
+				for item in native_result:
+					if not item is Transform3D:
+						return transforms
+					typed.append(item)
+				return typed
+			return transforms
+	var fallback: Array[Transform3D] = _align_cosmetic_transforms_surface_fallback(
+		transforms, normals, max_tilt_degrees)
+	return fallback if fallback.size() == transforms.size() else transforms
+
+
 ## Unreal PCG-style minimum-distance sampling for client-only decorations.
 ## The native filter uses a spatial hash; on older/stock engines the same
 ## greedy stable-input policy is implemented with GDScript buckets.
