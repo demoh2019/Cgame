@@ -60,8 +60,8 @@ void WorldStreamer::_record_failure(const Vector3i &p_cell, const String &p_reas
 double WorldStreamer::calculate_retry_delay_seconds(const Vector3i &p_cell, int p_attempt,
 		double p_initial_seconds, double p_max_seconds, double p_spread) {
 	if (p_attempt < 0 || p_attempt > 8 ||
-			!Math::is_finite(p_initial_seconds) || p_initial_seconds < 0.01 || p_initial_seconds > 60.0 ||
-			!Math::is_finite(p_max_seconds) || p_max_seconds < 0.01 || p_max_seconds > 60.0 ||
+			!Math::is_finite(p_initial_seconds) || p_initial_seconds <= 0.0 || p_initial_seconds > 60.0 ||
+			!Math::is_finite(p_max_seconds) || p_max_seconds <= 0.0 || p_max_seconds > 60.0 ||
 			!Math::is_finite(p_spread) || p_spread < 0.0 || p_spread > 0.5) {
 		return 0.0;
 	}
@@ -1191,6 +1191,8 @@ void WorldStreamer::_update_streaming() {
 	last_unload_work_usec = 0;
 	last_unload_count = 0;
 	last_deferred_unload_count = 0;
+	last_retry_release_count = 0;
+	last_retry_deferred_count = 0;
 	_forget_dead_chunks();
 
 	Vector3 position;
