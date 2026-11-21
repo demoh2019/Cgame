@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AIExecutionProfiler" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Optional per-agent AI performance profiler with microsecond timing and budgets.</brief_description>
+	<description>
+		Records timings of named AI execution phases such as perception, target selection, behavior tree evaluation, and pathfinding. The profiler is disabled by default and contains no global state, so an agent can own an independent instance. Timed spans use Godot's monotonic microsecond clock, while [method record_sample] accepts deterministic external samples useful for benchmarks and tests.
+		One category can have at most one active timing span. Up to 32 distinct categories are supported per instance to prevent runaway memory use from dynamic labels. This profiler measures CPU wall-clock time and does not identify individual BehaviorTree child tasks, GPU time, or threads. For production profiling, enable it only on selected NPCs and use the ordinary Godot profiler to examine broader performance.
+	</description>
+	<methods>
+		<method name="set_enabled"><return type="void" /><param index="0" name="enabled" type="bool" /><description>Enables or disables timing. Disabling discards active spans but preserves recorded statistics until [method reset].</description></method>
+		<method name="is_enabled" qualifiers="const"><return type="bool" /><description>Returns whether recording is enabled.</description></method>
+		<method name="set_budget_usec"><return type="void" /><param index="0" name="budget_usec" type="int" /><description>Sets the positive per-sample alert threshold in microseconds. Samples exceeding this budget increment the [code]over_budget[/code] counter.</description></method>
+		<method name="get_budget_usec" qualifiers="const"><return type="int" /><description>Returns the per-sample threshold.</description></method>
+		<method name="record_sample"><return type="bool" /><param index="0" name="category" type="StringName" /><param index="1" name="duration_usec" type="int" /><description>Adds a nonnegative duration in microseconds. Returns false if disabled, invalid, or the category limit has been reached. Durations above one trillion microseconds are rejected.</description></method>
+		<method name="begin_sample"><return type="bool" /><param index="0" name="category" type="StringName" /><description>Starts a named timing span using a monotonic clock, returning false when disabled, invalid, already active, or over capacity.</description></method>
+		<method name="end_sample"><return type="int" /><param index="0" name="category" type="StringName" /><description>Ends a previously started span and records the elapsed time. Returns -1 if no active span exists or if recording is disabled.</description></method>
+		<method name="get_snapshot" qualifiers="const"><return type="Dictionary" /><description>Returns a detached snapshot with keys [code]enabled[/code], [code]budget_usec[/code], [code]total_samples[/code], and [code]categories[/code]. Each category has [code]count[/code], [code]last_usec[/code], [code]min_usec[/code], [code]max_usec[/code], [code]mean_usec[/code], [code]total_usec[/code], and [code]over_budget[/code]. Only call on demand because it copies nested data.</description></method>
+		<method name="reset"><return type="void" /><description>Clears measurements and open spans, retaining the enabled flag and budget.</description></method>
+	</methods>
+	<members>
+		<member name="enabled" type="bool" default="false">Enable manual and timed samples. Disabled by default to minimize overhead.</member>
+		<member name="budget_usec" type="int" default="2000">Budget in microseconds for one recorded sample.</member>
+	</members>
+</class>
