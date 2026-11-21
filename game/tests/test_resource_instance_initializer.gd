@@ -32,7 +32,9 @@ func run(t) -> void:
 	t.check(not Initializer.initialize(mm, placements, invalid), "length mismatch rejected")
 	t.eq(mm.get_instance_color(0), colors[0], "failed request preserves color 0")
 	t.eq(mm.get_instance_transform(3), placements[3], "failed request preserves final transform")
-	var wrong: Array = placements.duplicate()
+	var wrong: Array = []
+	for placement in placements:
+		wrong.append(placement)
 	wrong[2] = Vector3.ZERO
 	t.check(not Initializer.initialize(mm, wrong, colors), "wrong transform type rejected")
 	t.eq(mm.get_instance_transform(2), placements[2], "wrong type does not mutate original")
