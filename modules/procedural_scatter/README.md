@@ -5,6 +5,50 @@ and exclusion operations for biome decoration, dungeon dressing, resource-site
 visuals and level generation. It is inspired by the PCG point-filtering and
 exclusion-volume concepts in Unreal Engine, without using Unreal code.
 
+## Merged low-polygon HLOD proxy geometry (PCGHLODProxyBuilder3D)
+
+An Unreal HLOD-inspired feature for *cosmetic static* scenes is available:
+`PCGHLODProxyBuilder3D.build_octahedral_proxy(transforms, local_centers,
+local_half_extents, max_proxy_instances=512)`.
+
+This is a **real combined ArrayMesh** with one triangle surface, not just a
+distance-selection policy or mesh-index plan. The builder replaces each
+sampled original object's bounding-box silhouette with an eight-triangle
+flat-shaded octahedron using its exact authored yaw, scale and placement.
+One shared proxy material can represent many independently sourced meshes
+in the distance, while existing near-camera MultiMesh groups remain intact.
+
+- Fully prevalidates 1–8192 source transforms, matching mesh-bounds vectors,
+  finite bounded world coordinates, positive extents, valid transform scale,
+  and a 1–512 proxy-instance budget. Invalid input returns a null mesh
+  without outputting partial geometry.
+- At most 512 deterministic source samples become at most 4096 triangles
+  in **one surface / one draw**, with fixed order and no RNG, GPU input
+  rearrangement, source mesh mutation or physics generation.
+- In Albion After, both decorative Pebble_Round_1 and Pebble_Square_2
+  MultiMeshes feed one chunk-local `PebbleHLODProxy` with a single neutral
+  stone material. The proxy is built when all streamed decorations are
+  ready (at most 384 sampled stones), not every frame. After a quality-aware
+  threshold, only the proxy is visible; approaching the chunk restores
+  every original, full-resolution MultiMesh with 3 m hysteresis.
+- The source objects already have independent cull ranges and 3D clustered
+  instancing; their collision, loot, gathered resources, seeded transforms,
+  networking and original scene nodes are left untouched. Old/stock Godot
+  binaries use a geometrically equivalent SurfaceTool fallback.
+- Engine and game tests cover merged one-surface geometry, exact 8-triangle
+  silhouette budget, source order and deterministic sampling, malformed
+  late inputs, the LOD swap, preservation of original near meshes, and
+  native/GDScript triangle position parity.
+
+This is a **restricted geometric HLOD**, intended only for small faceted
+stones at long distance. It is *not* a general Unreal Proxy Geometry
+baker: there is no material atlas, texture baking, UV reprojecting, mesh
+quadric-error reduction, Nanite, collision merging or world-partition HLOD
+streaming. Complex buildings, trees and interactive objects are not
+automatically merged. Actual performance gains require a GPU/CPU benchmark.
+Inspired by [Unreal HLOD overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/hierarchical-level-of-detail-overview-in-unreal-engine)
+and [Godot visibility ranges](https://docs.godotengine.org/en/stable/tutorials/3d/visibility_ranges.html).
+
 ## Camera-aware screen-space foliage density
 
 `PCGFoliageScalability3D.plan_projected_visible_counts()` extends the earlier

@@ -148,8 +148,13 @@ static func sync_runtime_tags(node: Node, kind: String, snapshot: Dictionary) ->
 	if timeline != null:
 		var effects: Dictionary = runtime_effect_snapshot(kind, snapshot)
 		var applied := false
-		# Preserve client-local visual timers and periodic pulses across server snapshots.
-		if timeline.has_method("replace_effect_branch"):
+		# Repeated server snapshots must not erase already accrued cosmetic
+		# pulses for the same ongoing status. Native reconciliation discards
+		# pulses only when that status ends or its periodic phase is redefined.
+		if timeline.has_method("reconcile_effect_branch"):
+			applied = bool(timeline.call("reconcile_effect_branch", StringName("Runtime"), effects))
+		elif timeline.has_method("replace_effect_branch"):
+			# Older Cgame binaries keep their existing snapshot semantics.
 			applied = bool(timeline.call("replace_effect_branch", StringName("Runtime"), effects))
 		elif timeline.has_method("replace_snapshot"):
 			applied = bool(timeline.call("replace_snapshot", effects))

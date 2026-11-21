@@ -11,6 +11,8 @@ on:
       - 'game/tests/test_pcg_scenery_spacing.gd'
       - 'game/tests/test_pcg_road_corridors.gd'
       - 'game/tests/test_pcg_foliage_scalability.gd'
+      - 'game/tests/test_pcg_hlod_proxy.gd'
+      - 'game/scripts/client/scenery_hlod_proxy.gd'
       - 'game/scripts/client/scenery_density_lod.gd'
       - 'game/tests/test_pcg_surface_slope.gd'
       - 'game/tests/test_pcg_surface_alignment.gd'
@@ -26,6 +28,8 @@ on:
       - 'game/tests/test_pcg_scenery_spacing.gd'
       - 'game/tests/test_pcg_road_corridors.gd'
       - 'game/tests/test_pcg_foliage_scalability.gd'
+      - 'game/tests/test_pcg_hlod_proxy.gd'
+      - 'game/scripts/client/scenery_hlod_proxy.gd'
       - 'game/scripts/client/scenery_density_lod.gd'
       - 'game/tests/test_pcg_surface_slope.gd'
       - 'game/tests/test_pcg_surface_alignment.gd'
@@ -85,6 +89,11 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 240s "$BIN" --headless --test --test-case="*PCGFoliageScalability3D*" --no-colors 2>&1 | tee pcg-foliage-scalability-native.log
+      - name: Native merged HLOD proxy mesh tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGHLODProxyBuilder3D*" --no-colors 2>&1 | tee pcg-hlod-native.log
       - name: Import Albion After game
         run: |
           set -euo pipefail
@@ -150,6 +159,7 @@ jobs:
             pcg-point-transforms-native.log
             pcg-point-transforms-game.log
             pcg-foliage-scalability-native.log
+            pcg-hlod-native.log
             pcg-instance-lod-game.log
             pcg-weighted-native.log
             pcg-polyline-native.log
