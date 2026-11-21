@@ -268,12 +268,16 @@ TEST_CASE("[SignificanceBudget] cost-aware VFX respects both scene slots and par
 	const PackedInt32Array costs = { 36, 80, 30, 10, 10 };
 	const PackedInt32Array caps = { 1, 4, 4, 4 };
 	const PackedInt32Array expected = { 0, 2, 3 };
+	const PackedInt32Array first_two = { 0, 2 };
+	const PackedInt32Array cheap_only = { 2 };
+	const PackedInt32Array preferred_visible = { 1, 0 };
+	const PackedInt32Array within_range = { 0 };
 	CHECK(planner->select_effects_visible_costed(distances, priorities, categories, visible,
 			costs, caps, 8, 140.0, 96) == expected);
 	CHECK(planner->select_effects_visible_costed(distances, priorities, categories, visible,
-			costs, caps, 2, 140.0, 96) == PackedInt32Array({ 0, 2 }));
+			costs, caps, 2, 140.0, 96) == first_two);
 	CHECK(planner->select_effects_visible_costed(distances, priorities, categories, visible,
-			costs, caps, 8, 140.0, 35) == PackedInt32Array({ 2 }));
+			costs, caps, 8, 140.0, 35) == cheap_only);
 	CHECK(planner->select_effects_visible_costed(distances, priorities, categories, visible,
 			costs, caps, 8, 140.0, 0).is_empty());
 	CHECK(planner->select_effects_visible_costed(distances, priorities, categories, visible,
@@ -282,9 +286,9 @@ TEST_CASE("[SignificanceBudget] cost-aware VFX respects both scene slots and par
 
 	// Visibility is only a tie-breaker within the same urgency tier.
 	CHECK(planner->select_effects_visible_costed({ 1.0, 3.0 }, { 1, 1 }, { 0, 0 },
-			{ 0, 1 }, { 10, 10 }, caps, 2, 10.0, 20) == PackedInt32Array({ 1, 0 }));
+			{ 0, 1 }, { 10, 10 }, caps, 2, 10.0, 20) == preferred_visible);
 	CHECK(planner->select_effects_visible_costed({ 1.0, 141.0 }, { 0, 3 }, { 0, 3 },
-			{ 1, 1 }, { 10, 10 }, caps, 2, 140.0, 96) == PackedInt32Array({ 0 }));
+			{ 1, 1 }, { 10, 10 }, caps, 2, 140.0, 96) == within_range);
 }
 
 TEST_CASE("[SignificanceBudget] cost-aware VFX rejects malformed arrays atomically") {
