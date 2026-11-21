@@ -27,6 +27,7 @@ def get_doc_classes():
         "AIHearingSensor2D",
         "AIStimulusHistory2D",
         "AIExecutionProfiler",
+        "AIActionCooldowns",
         "AISimulationLOD2D",
         "AIUpdateScheduler",
         "AIThreatTable2D",
