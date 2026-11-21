@@ -1827,8 +1827,8 @@ func _build_nature_decor_entry(entry: Dictionary) -> void:
 		# Cliff ledges need full 3D spacing, not XZ-only pruning.
 		transforms = SceneryBatches.thin_cosmetic_transforms_3d(transforms, 1.6)
 	elif file.begins_with("Pebble"):
-		# Surface debris keeps planar spacing to avoid horizontal overlaps.
-		transforms = SceneryBatches.thin_cosmetic_transforms(transforms, 0.75)
+		# Surface debris keeps planar spacing, now accounting for each pebble's randomized scale.
+		transforms = SceneryBatches.thin_cosmetic_transforms_scaled(transforms, 0.75)
 	# Dense vegetation is split into camera-cullable cells, sparse props remain one draw call.
 	for decor_batch in SceneryBatches.add(self, mesh, transforms,
 			float(entry["range"]), file.begins_with("Bush"), 8.0,
