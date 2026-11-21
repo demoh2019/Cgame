@@ -1,4 +1,5 @@
 extends Node3D
+const CharacterShading = preload("res://scripts/client/character_shading.gd")
 ## An animated character. With the downloaded packs it is a Quaternius Fantasy Races character playing the
 ## Universal Animation Library (idle, walk, jog, sprint, attacks, chopping, harvesting, zombie walk, death);
 ## without them it is the small Kenney robot with its idle and walk animations.
@@ -250,6 +251,8 @@ static func _build_survivor(sex: String, look: Array, hair_color: Color) -> Node
 			var dyed := base.duplicate() as BaseMaterial3D
 			dyed.albedo_color = hair_color
 			instance.set_surface_override_material(0, dyed)
+	# Strand-anisotropic hair, cloth sheen and wet eyes on High/Ultra.
+	CharacterShading.enhance_model(skeleton)
 	return model
 
 

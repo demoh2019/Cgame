@@ -21,6 +21,7 @@ const TerrainHorizonAO = preload("res://scripts/client/terrain_horizon_ao.gd")
 const TerrainAnisotropy = preload("res://scripts/client/terrain_anisotropy.gd")
 const ObjectBatchGrid = preload("res://scripts/client/object_batch_grid.gd")
 const SceneryBatches = preload("res://scripts/client/scenery_batches.gd")
+const ImpostorField = preload("res://scripts/client/impostor_field.gd")
 const ResourceMultiMeshUpdates = preload("res://scripts/client/multimesh_resource_updates.gd")
 const ResourceInstanceInitializer = preload("res://scripts/client/resource_instance_initializer.gd")
 const DecorStreamingPolicy = preload("res://scripts/client/decor_streaming_policy.gd")
@@ -1993,6 +1994,9 @@ func _build_nature_decor_entry(entry: Dictionary) -> void:
 			_shadow_casters.append({"node": decor_batch, "role": "bush", "bounds": decor_batch.custom_aabb})
 		if file.begins_with("Pebble"):
 			_hlod_stone_sources.append(decor_batch)
+	if file.begins_with("Bush"):
+		# Billboard LOD: past the real mesh range, bushes continue as baked impostors.
+		ImpostorField.add(self, mesh, transforms, float(entry["range"]))
 	# Store only the decorative geometry actually emitted (after spacing/
 	# terrain alignment). Two rock categories can share one far proxy draw.
 	if file.begins_with("Pebble") and not _hlod_stone_overflow:

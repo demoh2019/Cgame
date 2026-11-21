@@ -77,6 +77,8 @@ const DungeonLightBudget = preload("res://scripts/client/dungeon_light_budget.gd
 const DungeonReflectionBudget = preload("res://scripts/client/dungeon_reflection_budget.gd")
 const OutdoorReflectionBudget = preload("res://scripts/client/outdoor_reflection_budget.gd")
 const GraphicsAutoQuality = preload("res://scripts/client/graphics_auto_quality.gd")
+const GraphicsVramBudget = preload("res://scripts/client/graphics_vram_budget.gd")
+const ShaderWarmup = preload("res://scripts/client/shader_warmup.gd")
 const GraphicsDynamicResolution = preload("res://scripts/client/graphics_dynamic_resolution.gd")
 const OutpostView = preload("res://scripts/client/outpost_view.gd")
 const WorldMap = preload("res://scripts/client/world_map.gd")
@@ -168,6 +170,7 @@ var _ground_mist
 var _grade_material: ShaderMaterial
 var _grade_elapsed := 0.20 # Update color grading 5 times per second, not every render frame.
 var _auto_quality := GraphicsAutoQuality.new()
+var _vram_budget := GraphicsVramBudget.new()
 var _adaptive_resolution := GraphicsDynamicResolution.new()
 var _auto_graphics := true
 var _quality_picker: OptionButton
@@ -450,6 +453,8 @@ func _build_environment() -> void:
 	camera.position = CAMERA_OFFSET * 3.0
 	add_child(camera)
 	camera.look_at(Vector3.ZERO)
+	# Compile every spatial shader pipeline during loading, not mid-fight.
+	ShaderWarmup.start(camera)
 	_make_party_rally_marker()
 	_make_party_supply_marker()
 	_raid_telegraph = RaidTelegraph.new()
@@ -1720,7 +1725,13 @@ func _process(delta: float) -> void:
 			_auto_quality.set_mode("auto")
 		var quality_limit: bool = GraphicsAutoQuality.at_resolution_limit(
 			rd, _adaptive_resolution.at_floor(), _adaptive_resolution.at_ceiling(), delta, gpu_ms)
-		if quality_limit and _auto_quality.sample_frame(delta, gpu_ms):
+		var step_down: bool = quality_limit and _auto_quality.sample_frame(delta, gpu_ms)
+		# GPU memory pressure steps down too, before the driver starts paging textures.
+		if not step_down and _auto_quality.mode == "auto" and _vram_budget.sample(
+				GraphicsVramBudget.used_bytes(), _auto_quality.level, delta):
+			_auto_quality.level -= 1
+			step_down = true
+		if step_down:
 			GraphicsQuality.set_level(_auto_quality.level, false)
 			_adaptive_resolution.configure(GraphicsQuality.level(),
 		GraphicsQuality.metalfx_resolution_floor())

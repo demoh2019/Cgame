@@ -35,6 +35,8 @@ const GraphicsFramePacing = preload("res://scripts/client/graphics_frame_pacing.
 const GraphicsFoveatedShading = preload("res://scripts/client/graphics_foveated_shading.gd")
 const GraphicsHdrOutput = preload("res://scripts/client/graphics_hdr_output.gd")
 const GraphicsAreaLights = preload("res://scripts/client/graphics_area_lights.gd")
+const CharacterShading = preload("res://scripts/client/character_shading.gd")
+const ImpostorField = preload("res://scripts/client/impostor_field.gd")
 
 static var _level: int = 1
 static var _loaded: bool = false
@@ -294,6 +296,10 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		GraphicsFoveatedShading.apply(viewport, _level, str(method))
 		# Torch/lantern emitter radius drives PCSS soft local shadows.
 		GraphicsAreaLights.configure(_level, viewport.get_tree() if viewport.is_inside_tree() else null)
+	# Hair/cloth/eye models apply to characters built from now on.
+	CharacterShading.configure(_level)
+	# Baked billboard impostor rings past the real decor range.
+	ImpostorField.configure(_level)
 	if viewport != null:
 		# Texture-group anisotropic shader variants are already cached per tier.
 		# This viewport cap makes imported glTF PBR texture detail just as sharp.
@@ -380,6 +386,7 @@ static func apply(viewport: Viewport, atmosphere: Node3D,
 		# Sub-LSB output dither is fused into the existing grade pass. Auto
 		# resolution and renderer switching cannot leave stale grain enabled.
 		post_material.set_shader_parameter("deband_strength", float(p["deband_strength"]))
+		post_material.set_shader_parameter("lens_distortion", GraphicsLens.distortion(_level, str(method)))
 		# The engine's optical cos^4 vignette replaces the flat canvas one on High/Ultra.
 		post_material.set_shader_parameter("vignette", 0.0 if native_vignette else 0.28)
 	# Texture-group-style anisotropy on expensive terrain samplers only:
