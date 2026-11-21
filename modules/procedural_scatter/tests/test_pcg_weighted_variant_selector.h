@@ -91,4 +91,82 @@ TEST_CASE("[PCGWeightedVariantSelector] invalid input rejected without partial o
 	CHECK(selector->choose_variants({}, { 1.0f }).is_empty()); // Valid empty input.
 }
 
+TEST_CASE("[PCGWeightedVariantSelector] variant partition preserves every source index exactly once") {
+	Ref<PCGWeightedVariantSelector> selector;
+	selector.instantiate();
+	const PackedInt32Array chosen = { 2, 0, 1, 2, 0, 2, 1, 2 };
+	const PackedInt32Array input_copy = chosen;
+	const Array batches = selector->partition_indices(chosen, 4);
+	REQUIRE(batches.size() == 4);
+	const PackedInt32Array b0 = batches[0];
+	const PackedInt32Array b1 = batches[1];
+	const PackedInt32Array b2 = batches[2];
+	const PackedInt32Array b3 = batches[3];
+
+	const PackedInt32Array expected0 = { 1, 4 };
+	const PackedInt32Array expected1 = { 2, 6 };
+	const PackedInt32Array expected2 = { 0, 3, 5, 7 };
+	CHECK(b0 == expected0);
+	CHECK(b1 == expected1);
+	CHECK(b2 == expected2);
+	CHECK(b3.is_empty()); // An unused mesh variant is an empty valid batch.
+	CHECK(chosen == input_copy);
+	CHECK(selector->partition_indices(chosen, 4) == batches);
+	int visits[8] = { 0 };
+	for (int variant = 0; variant < batches.size(); ++variant) {
+		const PackedInt32Array indices = batches[variant];
+		for (int index : indices) {
+			REQUIRE(index >= 0);
+			REQUIRE(index < 8);
+			CHECK(chosen[index] == variant);
+			visits[index]++;
+		}
+	}
+	for (int visit : visits) {
+		CHECK(visit == 1);
+	}
+}
+
+TEST_CASE("[PCGWeightedVariantSelector] empty and fully occupied mesh variants") {
+	Ref<PCGWeightedVariantSelector> selector;
+	selector.instantiate();
+	const Array empty_groups = selector->partition_indices(PackedInt32Array(), 3);
+	REQUIRE(empty_groups.size() == 3);
+	for (int i = 0; i < 3; ++i) {
+		const PackedInt32Array empty = empty_groups[i];
+		CHECK(empty.is_empty());
+	}
+	const PackedInt32Array all_single = { 0, 0, 0, 0 };
+	const Array one_batch = selector->partition_indices(all_single, 1);
+	REQUIRE(one_batch.size() == 1);
+
+	const PackedInt32Array all_indices = one_batch[0];
+	const PackedInt32Array expected = { 0, 1, 2, 3 };
+	CHECK(all_indices == expected);
+	const PackedInt32Array three = { 0, 1, 2 };
+	CHECK(selector->partition_indices(three, 3).size() == 3);
+	CHECK(selector->partition_indices(three, 32).size() == 32);
+}
+
+TEST_CASE("[PCGWeightedVariantSelector] invalid mesh attributes reject the full batch") {
+	Ref<PCGWeightedVariantSelector> selector;
+	selector.instantiate();
+	CHECK(selector->partition_indices({ 0, 1, 2, 3 }, 3).is_empty());
+	CHECK(selector->partition_indices({ 0, -1 }, 3).is_empty());
+	CHECK(selector->partition_indices({ 0, 0, 99 }, 3).is_empty());
+	CHECK(selector->partition_indices({ 0, 1 }, 0).is_empty());
+	CHECK(selector->partition_indices({ 0, 1 }, 33).is_empty());
+	PackedInt32Array many;
+	many.resize(16385);
+	CHECK(selector->partition_indices(many, 2).is_empty());
+	many.resize(16384);
+	const Array max_groups = selector->partition_indices(many, 2);
+	REQUIRE(max_groups.size() == 2);
+
+	const PackedInt32Array full = max_groups[0];
+	const PackedInt32Array empty = max_groups[1];
+	CHECK(full.size() == 16384);
+	CHECK(empty.is_empty());
+}
+
 } // namespace TestPCGWeightedVariantSelector

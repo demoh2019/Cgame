@@ -1,5 +1,5 @@
 extends MultiMeshInstance3D
-## Procedural, collision-free foliage in one instanced draw batch.
+## Collision-free PCG foliage grouped into up to three mesh-specific GPU batches.
 ## Exclusion spheres protect spawn, scavenging resources, and ruined structures.
 ## Native PCG and stock-Godot fallback agree on stable-ID density and exclusions.
 
@@ -67,6 +67,50 @@ const ORIENTED_BOX_YAWS = [0.6108652381980153] # 35 degrees in radians.
 var _selected_positions := PackedVector3Array()
 var _selected_variants := PackedInt32Array()
 var _selected_stable_ids := PackedInt64Array()
+var _variant_batches: Array = []
+
+
+## Parent MultiMeshInstance3D is variant zero for backward-compatible paths.
+## Other variants are persistent child GPU batches, never per-plant Nodes.
+func get_variant_renderer(variant: int) -> MultiMeshInstance3D:
+    if variant == 0:
+        return self
+    if variant < 0 or variant >= VARIANT_WEIGHTS.size():
+        return null
+    return get_node_or_null("PCGMeshVariant%d" % variant) as MultiMeshInstance3D
+
+
+func get_variant_batch_sizes() -> PackedInt32Array:
+    var sizes := PackedInt32Array()
+    for variant in range(VARIANT_WEIGHTS.size()):
+        if _variant_batches.size() == VARIANT_WEIGHTS.size():
+            var indices: PackedInt32Array = _variant_batches[variant]
+            sizes.append(indices.size())
+        else:
+            sizes.append(0)
+    return sizes
+
+
+func get_variant_source_indices(variant: int) -> PackedInt32Array:
+    if variant >= 0 and variant < _variant_batches.size():
+        var indices: PackedInt32Array = _variant_batches[variant]
+        return indices.duplicate()
+    return PackedInt32Array()
+
+
+func get_rendered_instance_count() -> int:
+    var total := 0
+    for variant in range(VARIANT_WEIGHTS.size()):
+        var renderer: MultiMeshInstance3D = get_variant_renderer(variant)
+        if renderer != null and renderer.multimesh != null:
+            total += renderer.multimesh.instance_count
+    return total
+
+
+func verify_variant_partition_native_fallback_parity() -> bool:
+    return _variant_batches == WeightedVariants.partition_indices(
+        _selected_variants, VARIANT_WEIGHTS.size(), false)
+
 
 
 func get_selected_variants() -> PackedInt32Array:
@@ -426,27 +470,76 @@ func regenerate() -> void:
         _selected_variants.resize(_selected_positions.size())
         _selected_variants.fill(0) # Fail open: retain all cosmetic plants.
 
-    var blades := BoxMesh.new()
-    blades.size = Vector3(0.10, 0.44, 0.10)
+    # Unreal PCG Static Mesh Spawner-inspired: each distinct geometry uses
+    # one MultiMesh, never one MeshInstance3D/actor per plant.
+    _variant_batches = WeightedVariants.partition_indices(
+        _selected_variants, VARIANT_WEIGHTS.size())
+    var assigned: int = 0
+    if _variant_batches.size() == VARIANT_WEIGHTS.size():
+        for group in _variant_batches:
+            var indices: PackedInt32Array = group
+            assigned += indices.size()
+    if assigned != _selected_positions.size() or \
+            _variant_batches.size() != VARIANT_WEIGHTS.size():
+        # Fail open on malformed data: preserve the decorative plants using
+        # the first simple geometry and deterministic stock-Godot bucketing.
+        _selected_variants.fill(0)
+        _variant_batches = WeightedVariants.partition_indices(
+            _selected_variants, VARIANT_WEIGHTS.size(), false)
+
     var material := StandardMaterial3D.new()
     material.albedo_color = Color.WHITE
     material.vertex_color_use_as_albedo = true
     material.roughness = 1.0
-    blades.material = material
-    var batch := MultiMesh.new()
-    batch.transform_format = MultiMesh.TRANSFORM_3D
-    batch.use_colors = true
-    batch.mesh = blades
-    batch.instance_count = _selected_positions.size()
-    for i in range(_selected_positions.size()):
-        var variant: int = _selected_variants[i]
-        var orientation := Basis(Vector3.UP, float(i) * 0.41)
-        # Shape variety stays in the same MultiMesh: no per-variant draw call.
-        var width_scale: float = [0.8, 1.0, 1.15][variant]
-        var height_scale: float = [0.90, 0.78, 0.63][variant]
-        orientation = orientation.scaled(Vector3(width_scale,
-            height_scale + 0.08 * float(i % 5), width_scale))
-        batch.set_instance_transform(i, Transform3D(orientation, _selected_positions[i]))
-        batch.set_instance_color(i, VARIANT_COLORS[variant])
-    multimesh = batch
-    cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+    for variant in range(VARIANT_WEIGHTS.size()):
+        var renderer: MultiMeshInstance3D = get_variant_renderer(variant)
+        if renderer == null:
+            renderer = MultiMeshInstance3D.new()
+            renderer.name = "PCGMeshVariant%d" % variant
+            renderer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+            add_child(renderer)
+
+        # Distinct actual primitive geometry, not just resized boxes:
+        # broad green blades, narrow conical reeds, straw seed-heads.
+        var geometry: PrimitiveMesh
+        match variant:
+            0:
+                var green := BoxMesh.new()
+                green.size = Vector3(0.10, 0.44, 0.10)
+                geometry = green
+            1:
+                var reed := CylinderMesh.new()
+                reed.top_radius = 0.018
+                reed.bottom_radius = 0.095
+                reed.height = 0.54
+                reed.radial_segments = 5
+                geometry = reed
+            2:
+                var straw := SphereMesh.new()
+                straw.radius = 0.095
+                straw.height = 0.34
+                straw.radial_segments = 6
+                straw.rings = 3
+                geometry = straw
+        geometry.material = material
+
+        var indices: PackedInt32Array = _variant_batches[variant]
+        var batch := MultiMesh.new()
+        batch.transform_format = MultiMesh.TRANSFORM_3D
+        batch.use_colors = true
+        batch.mesh = geometry
+        batch.instance_count = indices.size()
+        for local_index in range(indices.size()):
+            var source_index: int = indices[local_index]
+            # Use the original source index so regeneration/rebucketing
+            # never affects orientation or the selected world position.
+            var orientation := Basis(Vector3.UP, float(source_index) * 0.41)
+            var width_scale: float = [0.8, 1.0, 1.15][variant]
+            var height_scale: float = [0.90, 0.78, 0.63][variant]
+            orientation = orientation.scaled(Vector3(width_scale,
+                height_scale + 0.08 * float(source_index % 5), width_scale))
+            batch.set_instance_transform(local_index,
+                Transform3D(orientation, _selected_positions[source_index]))
+            batch.set_instance_color(local_index, VARIANT_COLORS[variant])
+        renderer.multimesh = batch
+        renderer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

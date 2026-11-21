@@ -24,4 +24,11 @@ public:
 
 	PackedInt32Array choose_variants(const PackedInt64Array &p_stable_ids,
 			const PackedFloat32Array &p_weights, int p_seed = 0) const;
+
+	// Partition the selected variant attributes into contiguous instancing
+	// batches, retaining each source index exactly once. The result has
+	// p_variant_count packed index arrays, including empty variants.
+	// The operation is O(points + variants) and never mutates input.
+	Array partition_indices(const PackedInt32Array &p_variants,
+			int p_variant_count) const;
 };
