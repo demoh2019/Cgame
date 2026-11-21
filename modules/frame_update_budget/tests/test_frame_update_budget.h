@@ -20,6 +20,45 @@ TEST_CASE("[FrameUpdateBudget] Lane lifecycle and validation") {
 	CHECK(budget->get_lane_count() == 0);
 }
 
+TEST_CASE("[FrameUpdateBudget] Suspended lanes skip work and refresh on reenable") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("dust"));
+	CHECK(b->register_lane("bats"));
+	CHECK_FALSE(b->set_lane_enabled("unknown", false));
+	CHECK_FALSE(b->is_lane_enabled("unknown"));
+	CHECK(b->get_enabled_lane_count() == 2);
+	b->begin_frame(0.01, 0);
+	CHECK(b->consume("dust", 0.01) > 0.0);
+	CHECK(b->consume("bats", 0.01) > 0.0);
+	CHECK(b->set_lane_importance("bats", 3.0));
+	CHECK(b->record_cost("bats", 300));
+	CHECK(b->set_lane_enabled("bats", false));
+	CHECK(b->set_lane_enabled("dust", false));
+	CHECK(b->get_enabled_lane_count() == 0);
+	b->begin_frame(0.1, 0);
+	CHECK(b->current_budget() == 0);
+	CHECK(b->get_reserved_estimated_cost_us() == 0);
+	CHECK(b->consume("bats", 0.1) == 0.0);
+	CHECK(b->consume("dust", 0.1) == 0.0);
+	CHECK(b->consume("bats", 0.1, true) > 0.0); // One cleanup on cave entry.
+	b->begin_frame(0.1, 0);
+	CHECK(b->consume("bats", 0.1) == 0.0);
+	CHECK(b->set_lane_enabled("bats", true));
+	CHECK(b->set_lane_enabled("bats", true)); // Idempotent enabling preserves pending refresh.
+	CHECK(b->is_lane_enabled("bats"));
+	CHECK(b->get_enabled_lane_count() == 1);
+	CHECK(b->get_lane_importance("bats") == 3.0);
+	CHECK(b->get_lane_estimated_cost_us("bats") == 300);
+	b->begin_frame(0.001, 0);
+	CHECK(b->current_budget() == 1);
+	CHECK(b->consume("bats", 0.001) > 0.0); // No stale 0.16 s backlog.
+	CHECK(b->consume("bats", 0.001) == 0.0); // Immediate refresh is single-use.
+	b->reset();
+	CHECK(b->get_enabled_lane_count() == 1); // Reset preserves active state.
+	CHECK_FALSE(b->is_lane_enabled("dust"));
+}
+
 TEST_CASE("[FrameUpdateBudget] Quality, pressure and bounded updates") {
 	Ref<FrameUpdateBudget> budget;
 	budget.instantiate();

@@ -157,6 +157,7 @@ var atmosphere
 var _ambient_motes
 var _ambient_budget: Variant = AmbientTickBudget.new()
 var _ambient_rates_supported: bool = false
+var _ambient_lane_enabling_supported: bool = false
 var _ambient_rate_cache: Dictionary = {}
 var _ambient_deadline_supported: bool = false
 var _ambient_deadline_cache: Dictionary = {}
@@ -302,6 +303,7 @@ func _ready() -> void:
 				_ambient_budget = native_budget
 	# Older custom binaries keep their existing importance/cost scheduler.
 	_ambient_rates_supported = _ambient_budget.has_method("set_lane_rate_scale")
+	_ambient_lane_enabling_supported = _ambient_budget.has_method("set_lane_enabled")
 	_ambient_deadline_supported = _ambient_budget.has_method("set_lane_max_deferred_frames")
 	# Client-side cosmetic update budget, exposed to Godot's built-in profiler.
 	for monitor in [
@@ -2046,6 +2048,10 @@ func _update_time_of_day(delta: float) -> void:
 	for lane in cosmetic_importance:
 		var significance: float = float(cosmetic_importance[lane])
 		_ambient_budget.set_lane_importance(lane, significance)
+		# Four outdoor-only channels stop reserving CPU slots inside caves.
+		# The entrance/exit force flag still performs a one-frame hide/restore.
+		if _ambient_lane_enabling_supported:
+			_ambient_budget.call("set_lane_enabled", StringName(lane), not underground)
 		# Adapt desired frequency only when relevance changes. Cost forecasts,
 		# finite frame slots, and starvation aging stay managed in the engine.
 		if _ambient_rates_supported:
