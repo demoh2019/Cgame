@@ -105,7 +105,10 @@ TEST_CASE("[PCGSpatialFilter3D] scaled footprints respect vertical terraces and 
 	CHECK(original_first[0] == 0);
 	CHECK(original_first[1] == 2);
 	CHECK(original_first[4] == 5);
-	CHECK(filter->filter_indices_scaled(points, scales, 0.0, 2) == PackedInt32Array({ 0, 1 }));
+	const PackedInt32Array zero = filter->filter_indices_scaled(points, scales, 0.0, 2);
+	REQUIRE(zero.size() == 2);
+	CHECK(zero[0] == 0);
+	CHECK(zero[1] == 1);
 
 	PackedFloat32Array ones;
 	ones.resize(points.size());
