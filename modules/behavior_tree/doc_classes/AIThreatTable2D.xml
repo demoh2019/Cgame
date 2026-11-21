@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AIThreatTable2D" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Native bounded MMO combat threat accumulation and validated aggro target ranking.</brief_description>
+	<description>
+		AIThreatTable2D operates on caller-owned Dictionaries mapping positive peer IDs to scalar threat. The table is not stored in this object; record, decay and pick mutate the supplied dictionary in place. Use only server-validated actual combat damage or healing-derived threat, never raw client-supplied numbers.
+		The table tracks at most five actors under ordinary use, caps threat at 10000, decays at 0.75 per second, and uses 1.25 switching hysteresis. Among equal scores, the lower peer ID wins, regardless of Dictionary insertion order. Invalid or unreachable targets are discarded while picking. It neither checks physics nor broadcasts secret targets to clients.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="record">
+			<return type="bool" />
+			<param index="0" name="entries" type="Dictionary" />
+			<param index="1" name="peer_id" type="int" />
+			<param index="2" name="damage" type="float" />
+			<description>Record positive finite server-confirmed threat. Existing actors accumulate up to 10000; new actors evict only a weaker minimum-threat participant if the five-slot table is full. Equal-threat victims are chosen by lower ID.</description>
+		</method>
+		<method name="decay">
+			<return type="void" />
+			<param index="0" name="entries" type="Dictionary" />
+			<param index="1" name="delta" type="float" />
+			<description>Subtract 0.75 threat per positive finite second. Expired or malformed entries are removed. Invalid delta does not change the table.</description>
+		</method>
+		<method name="pick">
+			<return type="int" />
+			<param index="0" name="entries" type="Dictionary" />
+			<param index="1" name="players" type="Dictionary" />
+			<param index="2" name="origin" type="Vector2" />
+			<param index="3" name="leash" type="float" />
+			<param index="4" name="current_target" type="int" default="-1" />
+			<description>Pick the greatest living unsafe in-range player's threat (lowest ID on ties). Remove dead, protected, invalid and out-of-leash participants. Retain current target until challenger's threat reaches at least 1.25 times current threat. Invalid origin or leash returns -1 without modifying entries.</description>
+		</method>
+	</methods>
+</class>

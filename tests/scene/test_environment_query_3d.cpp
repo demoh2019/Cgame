@@ -230,7 +230,7 @@ TEST_CASE("[EnvironmentQuery3D] Top-K honors max results and safety") {
 
 TEST_CASE("[EnvironmentQuery3D] Bounded top-K rejects unsafe requests and malformed points") {
 	Ref<EnvironmentQuery3D> q = make_query({
-		Vector3(Math::NaN, 0, 0), Vector3(5, 0, 0)
+		Vector3(NaN, 0, 0), Vector3(5, 0, 0)
 	});
 	ERR_PRINT_OFF
 	CHECK(q->query_top_positions(0).is_empty());
@@ -292,12 +292,12 @@ TEST_CASE("[EnvironmentQuery3D] Spread honors multiple threats and safety filter
 }
 
 TEST_CASE("[EnvironmentQuery3D] Spread rejects invalid requests without corrupting query state") {
-	Ref<EnvironmentQuery3D> q = make_query({ Vector3(Math::NaN, 0, 0), Vector3(2, 0, 0) });
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(NaN, 0, 0), Vector3(2, 0, 0) });
 	ERR_PRINT_OFF
 	CHECK(q->query_spread_positions(0, 2.0).is_empty());
 	CHECK(q->query_spread_positions(65, 2.0).is_empty());
 	CHECK(q->query_spread_positions(2, -1.0).is_empty());
-	CHECK(q->query_spread_positions(2, Math::INF).is_empty());
+	CHECK(q->query_spread_positions(2, INF).is_empty());
 	ERR_PRINT_ON
 	CHECK(q->query_spread_positions(2, 2.0) == PackedVector3Array({ Vector3(2, 0, 0) }));
 }
@@ -330,9 +330,9 @@ TEST_CASE("[EnvironmentQuery3D] Occupancy exclusions honor XZ mode and preserve 
 	too_many.resize(129);
 	ERR_PRINT_OFF
 	q->set_exclusion_positions(too_many);
-	q->set_exclusion_positions({ Vector3(Math::NaN, 0, 0) });
+	q->set_exclusion_positions({ Vector3(NaN, 0, 0) });
 	q->set_min_exclusion_distance(-1.0);
-	q->set_min_exclusion_distance(Math::INF);
+	q->set_min_exclusion_distance(INF);
 	ERR_PRINT_ON
 	CHECK(q->get_exclusion_positions() == original);
 	CHECK(q->get_min_exclusion_distance() == 3.0);
@@ -368,7 +368,7 @@ TEST_CASE("[EnvironmentQuery3D] Weighted scoring combines distance and safety") 
 }
 
 TEST_CASE("[EnvironmentQuery3D] Nonfinite candidate positions are skipped") {
-	Ref<EnvironmentQuery3D> q = make_query({ Vector3(Math::NaN, 0, 0), Vector3(1, 0, 0) });
+	Ref<EnvironmentQuery3D> q = make_query({ Vector3(NaN, 0, 0), Vector3(1, 0, 0) });
 	CHECK(q->query().size() == 1);
 	CHECK(int(first_result(q)["index"]) == 1);
 }
@@ -378,8 +378,8 @@ TEST_CASE("[EnvironmentQuery3D] Invalid origin and threat positions are rejected
 	q->set_origin(Vector3(2, 0, 0));
 	q->set_threat_position(Vector3(3, 0, 0));
 	ERR_PRINT_OFF
-	q->set_origin(Vector3(Math::INF, 0, 0));
-	q->set_threat_position(Vector3(Math::NaN, 0, 0));
+	q->set_origin(Vector3(INF, 0, 0));
+	q->set_threat_position(Vector3(NaN, 0, 0));
 	ERR_PRINT_ON
 	CHECK(q->get_origin() == Vector3(2, 0, 0));
 	CHECK(q->get_threat_position() == Vector3(3, 0, 0));
@@ -389,10 +389,10 @@ TEST_CASE("[EnvironmentQuery3D] Reject invalid limits and weights") {
 	Ref<EnvironmentQuery3D> q = make_query();
 	ERR_PRINT_OFF
 	q->set_min_distance(-1);
-	q->set_max_distance(Math::NaN);
+	q->set_max_distance(NaN);
 	q->set_desired_distance(-3);
 	q->set_distance_weight(-2);
-	q->set_safety_weight(Math::INF);
+	q->set_safety_weight(INF);
 	q->set_min_threat_distance(-1);
 	q->set_max_results(-1);
 	ERR_PRINT_ON
@@ -468,7 +468,7 @@ TEST_CASE("[EnvironmentQuery3D] Multi-threat limits, invalid actors, and legacy 
 	too_many.resize(33);
 	ERR_PRINT_OFF
 	q->set_threat_positions(too_many);
-	q->set_threat_positions({ Vector3(0, Math::NaN, 0) });
+	q->set_threat_positions({ Vector3(0, NaN, 0) });
 	ERR_PRINT_ON
 	CHECK(q->get_threat_positions().size() == 2);
 	CHECK(q->query_positions() == baseline);

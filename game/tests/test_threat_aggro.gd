@@ -49,6 +49,37 @@ func run(t) -> void:
 	t.eq(Threat.pick(table, players, origin, 30.0), -1, "leash prevents cross-map target tracking")
 	t.eq(table.size(), 0, "distant target removed from memory")
 
+
+	t.current = "Equal threat ties are deterministic and preserve current aggro"
+	var tie_players: Dictionary = _info(Vector3(6, 0, 0), Vector3(7, 0, 0))
+	var a_first := {1: 10.0, 2: 10.0}
+	var b_first := {2: 10.0, 1: 10.0}
+	t.eq(Threat.pick(a_first, tie_players, Vector2.ZERO, 30.0), 1,
+		"equal hate chooses smaller peer ID regardless of insertion order")
+	t.eq(Threat.pick(b_first, tie_players, Vector2.ZERO, 30.0), 1,
+		"reversed insertion order gives the same server target")
+	t.eq(Threat.pick(a_first, tie_players, Vector2.ZERO, 30.0, 2), 2,
+		"equal hate does not cause an active target to flap")
+	var reverse_full: Dictionary = {5: 10.0, 4: 10.0, 3: 10.0, 2: 10.0, 1: 10.0}
+	t.check(Threat.record(reverse_full, 9, 11.0),
+		"a stronger new attacker displaces the weakest stored hate")
+	t.check(not reverse_full.has(1) and reverse_full.has(2),
+		"equal weakest scores always evict lowest peer ID")
+
+	t.current = "Native engine threat arithmetic retains the game API"
+	var native_threat_available: bool = ClassDB.class_exists("AIThreatTable2D")
+	t.eq(Threat.has_native(), native_threat_available,
+		"native threat capability is negotiated without requiring Cgame")
+	var expired: Dictionary = {1: 0.2, 2: 1.5}
+	Threat.decay(expired, 1.0)
+	t.check(not expired.has(1), "decay removes exhausted threat")
+	t.near(float(expired.get(2, 0.0)), 0.75, 0.00001,
+		"both engine and stock Godot age threat by the same amount")
+	var broken: Dictionary = {1: 4.0, 2: NAN}
+	Threat.decay(broken, 0.1)
+	t.check(not broken.has(2), "malformed recorded threat cannot poison the table")
+	t.check(broken.has(1), "malformed peer entries do not erase valid attackers")
+
 	t.current = "real damage creates zombie aggro"
 	var world := WorldGen.new(39)
 	var server := GameServer.new(world, 39)
