@@ -158,6 +158,96 @@ TEST_CASE("[SceneTree][Camera3D] Spatial combat impacts preserve the real camera
 	memdelete(camera);
 }
 
+TEST_CASE("[SceneTree][Camera3D] Directional spatial impacts are bounded and leave scene transforms unchanged") {
+	Camera3D *camera = memnew(Camera3D);
+	SceneTree::get_singleton()->get_root()->add_child(camera);
+	camera->make_current();
+	camera->set_global_position(Vector3(3, 8, 11));
+	camera->set_shake_max_offset(Vector3(0.4, 0.4, 0.4));
+	camera->set_shake_decay(2.0);
+	const Transform3D base = camera->get_global_transform();
+	const Vector3 listener;
+	const Vector3 right_source(5, 0, 0);
+	const Vector3 left_source(-5, 0, 0);
+
+	camera->add_directional_spatial_trauma(right_source, listener, 0.4, 1.0, 9.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.2));
+	CHECK(camera->get_shake_direction_impulse().x == doctest::Approx(0.2));
+	CHECK(camera->get_shake_direction_impulse().y == doctest::Approx(0.0));
+	CHECK(camera->get_shake_direction_impulse().z == doctest::Approx(0.0));
+	CHECK(camera->get_global_transform().is_equal_approx(base));
+
+	camera->add_directional_spatial_trauma(Vector3(40, 0, 0), listener, 0.5, 1.0, 9.0);
+	camera->add_directional_spatial_trauma(Vector3(Math::INF, 0, 0), listener, 0.5, 1.0, 9.0);
+	camera->add_directional_spatial_trauma(right_source, listener, Math::INF, 1.0, 9.0);
+	camera->add_directional_spatial_trauma(right_source, listener, -1.0, 1.0, 9.0);
+	camera->add_directional_spatial_trauma(right_source, listener, 0.5, 9.0, 1.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.2)); // Invalid inputs cannot change state.
+	CHECK(camera->get_shake_direction_impulse().x == doctest::Approx(0.2));
+
+	camera->add_directional_spatial_trauma(left_source, listener, 0.4, 1.0, 9.0);
+	CHECK(camera->get_shake_direction_impulse().length() < real_t(0.00001)); // Opposite impact cancels.
+	CHECK(camera->get_trauma() == doctest::Approx(0.4));
+	camera->set_trauma(0.0);
+	CHECK(camera->get_shake_direction_impulse() == Vector3());
+
+	// Repeated blasts must never exceed the authored translation envelope.
+	for (int i = 0; i < 12; ++i) {
+		camera->add_directional_spatial_trauma(Vector3(1, 0, 0), listener, 1.0, 0.0, 10.0);
+	}
+	CHECK(camera->get_trauma() == doctest::Approx(1.0));
+	CHECK(camera->get_shake_direction_impulse().length() <= real_t(1.0) + real_t(1e-5));
+	bool visible_kick = false;
+	for (int i = 0; i < 15; ++i) {
+		SceneTree::get_singleton()->process(0.016);
+		const Vector3 offset = camera->get_shake_translation();
+		CHECK(Math::abs(offset.x) <= real_t(0.4) + real_t(1e-4));
+		CHECK(Math::abs(offset.y) <= real_t(0.4) + real_t(1e-4));
+		CHECK(Math::abs(offset.z) <= real_t(0.4) + real_t(1e-4));
+		visible_kick |= offset.length() > real_t(0.001);
+		CHECK(camera->get_global_transform().is_equal_approx(base));
+	}
+	CHECK(visible_kick);
+	for (int i = 0; i < 60; ++i) {
+		SceneTree::get_singleton()->process(0.016);
+	}
+	CHECK(camera->get_trauma() == doctest::Approx(0.0));
+	CHECK(camera->get_shake_direction_impulse() == Vector3());
+	CHECK(camera->get_shake_translation() == Vector3());
+	CHECK(camera->get_shake_rotation() == Vector3());
+	CHECK(camera->get_global_transform().is_equal_approx(base));
+
+	// Coincident source still adds radial trauma without inventing a direction.
+	camera->add_directional_spatial_trauma(listener, listener, 0.35, 0.5, 8.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.35));
+	CHECK(camera->get_shake_direction_impulse() == Vector3());
+	camera->set_trauma(0.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.0));
+	CHECK(camera->get_shake_translation() == Vector3());
+	memdelete(camera);
+}
+
+TEST_CASE("[SceneTree][Camera3D] Directional shake respects the camera play space") {
+	Camera3D *camera = memnew(Camera3D);
+	SceneTree::get_singleton()->get_root()->add_child(camera);
+	camera->set_rotation(Vector3(0.0, Math::PI * 0.5, 0.0));
+	const Vector3 source(5.0, 0.0, 0.0);
+	const Vector3 expected = camera->get_global_transform().basis.orthonormalized().xform_inv(source.normalized());
+	camera->add_directional_spatial_trauma(source, Vector3(), 0.5, 1.0, 9.0);
+	const Vector3 actual = camera->get_shake_direction_impulse();
+	CHECK(actual.length() == doctest::Approx(0.25));
+	CHECK(actual.normalized().dot(expected.normalized()) > real_t(0.999));
+	camera->set_trauma(0.0);
+	CHECK(camera->get_shake_direction_impulse() == Vector3());
+
+	// A zero-distance epicenter keeps radial trauma and invents no direction.
+	camera->add_directional_spatial_trauma(Vector3(), Vector3(), 0.4, 1.0, 9.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.4));
+	CHECK(camera->get_shake_direction_impulse() == Vector3());
+	camera->set_trauma(0.0);
+	memdelete(camera);
+}
+
 TEST_CASE("[SceneTree][Camera2D] Trauma shakes the view and fades out") {
 	Camera2D *camera = memnew(Camera2D);
 	SceneTree::get_singleton()->get_root()->add_child(camera);
