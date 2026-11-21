@@ -7,6 +7,20 @@
 		Inspired by Unreal Engine Foliage Density Scaling, this data-only class controls how many cosmetic instanced foliage meshes should remain visible by graphics quality and camera distance. It does not change mesh buffers, create proxies, cull scene nodes, perform physics, or modify random generators. Use [member MultiMesh.visible_instance_count] with [method plan_visible_counts] outputs. For visually distributed prefixes, write instances in the order given by [method spread_indices] once when creating each MultiMesh. This is not true hierarchical level-of-detail or Nanite.
 	</description>
 	<methods>
+		<method name="plan_visible_counts_stable" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="counts" type="PackedInt32Array" />
+			<param index="1" name="distances" type="PackedFloat32Array" />
+			<param index="2" name="previous_counts" type="PackedInt32Array" />
+			<param index="3" name="quality" type="int" />
+			<param index="4" name="deadband" type="int" default="2" />
+			<param index="5" name="near_distance" type="float" default="18.0" />
+			<param index="6" name="far_distance" type="float" default="125.0" />
+			<description>
+				Returns an ordered, temporally stabilized foliage instance-count plan for up to 4096 clusters. First computes the same per-quality and camera-distance density as [method plan_visible_counts]. A prior visible count is reused only when its absolute difference from the newly planned count is no more than [param deadband] instances. A difference exceeding the deadband immediately adopts the new count; a zero deadband restores stateless behavior.
+				Use -1 in [param previous_counts] for a new cluster or after changing [param quality], to bypass hysteresis and immediately recover the correct quality tier. A prior count of zero cannot keep a nonempty cluster entirely hidden. Previous counts must be -1 or between 0 and the authored instance count. [param deadband] is 0 to 8 inclusive. All arrays must have identical lengths; invalid late entries and other invalid [method plan_visible_counts] inputs reject the entire request with an empty array, not partial output. This pure method does not keep history or mutate GPU buffers, scene nodes, transforms, collision, or game state. Callers explicitly manage per-cluster history and reset it on quality changes.
+			</description>
+		</method>
 		<method name="spread_indices" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="count" type="int" />
