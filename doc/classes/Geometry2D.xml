@@ -72,6 +72,17 @@
 				Returns an empty dictionary for an empty set, an odd number of endpoints, a nonfinite coordinate or more than 32768 segments. Values are checked before any search. This is a linear CPU search; callers handling many queries should partition segments spatially.
 			</description>
 		</method>
+		<method name="rasterize_segments_mask">
+			<return type="PackedByteArray" />
+			<param index="0" name="segment_endpoints" type="PackedVector2Array" />
+			<param index="1" name="size" type="Vector2i" />
+			<param index="2" name="half_width" type="float" />
+			<param index="3" name="softness" type="float" />
+			<description>
+				Cgame extension: rasterizes a set of independent line segments into a row-major 8-bit grayscale mask. [param segment_endpoints] contains pairs [code][a0, b0, a1, b1, ...][/code] in pixel coordinates. The center of the first pixel is [code](0.5, 0.5)[/code]. Each segment is opaque (255) at distances less than or equal to [param half_width], fades linearly through the next [param softness] pixels, then becomes transparent (0). Overlapping segments combine by maximum coverage. A zero-length segment produces a round dab. Returns a [PackedByteArray] of length [code]size.x * size.y[/code] suitable for [constant Image.FORMAT_L8].
+				For safety, both dimensions must be between 1 and 2048, there may be at most 8192 segments, [param half_width] must be finite and nonnegative, [param softness] must be finite and positive, and all segment coordinates must be finite. Invalid input returns an empty array. Empty valid segment input returns a zeroed mask. Work is bounded to each segment's clipped pixel bounding box. No GPU work is performed.
+			</description>
+		</method>
 		<method name="get_closest_point_to_segment">
 			<return type="Vector2" />
 			<param index="0" name="point" type="Vector2" />

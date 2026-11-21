@@ -131,6 +131,51 @@ func _add_piece(p: Vector2, q: Vector2) -> void:
 				packed.append(q)
 				_packed_pieces_by_cell[key] = packed
 
+## Paint a grayscale road coverage mask for one chunk. Engine-native rasterization
+## avoids GDScript calls per touched texel. The scalar path preserves stock Godot.
+## Endpoint coordinates are world x/z; pixel centers are at local (+0.5, +0.5).
+static func rasterize_mask(pieces: Array, origin: Vector2, size: int, half: float = HALF_WIDTH,
+		soft: float = 1.2, force_scalar: bool = false) -> PackedByteArray:
+	if size < 1 or size > 2048 or not origin.is_finite() or not is_finite(half) or half < 0.0:
+		return PackedByteArray()
+	if not is_finite(soft) or soft <= 0.0:
+		return PackedByteArray()
+	if not force_scalar and Geometry2D.has_method("rasterize_segments_mask"):
+		var endpoints := PackedVector2Array()
+		for piece in pieces:
+			endpoints.append(piece[0] - origin)
+			endpoints.append(piece[1] - origin)
+		var native: PackedByteArray = Geometry2D.call(
+				"rasterize_segments_mask", endpoints, Vector2i(size, size), half, soft)
+		if native.size() == size * size:
+			return native
+
+	var data := PackedByteArray()
+	data.resize(size * size)
+	var reach: float = half + soft
+	for piece in pieces:
+		var a: Vector2 = piece[0] - origin
+		var b: Vector2 = piece[1] - origin
+		var x0: int = maxi(0, floori(minf(a.x, b.x) - reach))
+		var x1: int = mini(size - 1, ceili(maxf(a.x, b.x) + reach))
+		var y0: int = maxi(0, floori(minf(a.y, b.y) - reach))
+		var y1: int = mini(size - 1, ceili(maxf(a.y, b.y) + reach))
+		var ab: Vector2 = b - a
+		var length_squared: float = maxf(ab.length_squared(), 0.0001)
+		for py in range(y0, y1 + 1):
+			for px in range(x0, x1 + 1):
+				var point := Vector2(float(px) + 0.5, float(py) + 0.5)
+				var t_along: float = clampf((point - a).dot(ab) / length_squared, 0.0, 1.0)
+				var distance: float = point.distance_to(a + ab * t_along)
+				if distance >= reach:
+					continue
+				var value: int = int(255.0 * clampf((reach - distance) / soft, 0.0, 1.0))
+				var index: int = py * size + px
+				if value > data[index]:
+					data[index] = value
+	return data
+
+
 ## Nearest point on each terrain-painted segment. All road checks use the
 ## existing spatial cell index, never the full network on every frame.
 static func coverage_on_segments(point: Vector2, segments: Array) -> float:

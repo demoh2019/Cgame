@@ -21,6 +21,9 @@ class FrameUpdateBudget : public RefCounted {
 	struct Lane {
 		StringName name;
 		double elapsed = 0.0;
+		double importance = 1.0;
+		int64_t estimated_cost_us = 0;
+		int overdue_frames = 0;
 	};
 
 	Vector<Lane> lanes;
@@ -40,6 +43,7 @@ class FrameUpdateBudget : public RefCounted {
 	int64_t frame_time_budget_us = 2500; // Soft budget, 0 disables the time limit.
 	int64_t frame_cost_us = 0;
 	int64_t previous_frame_cost_us = 0;
+	int64_t reserved_estimated_cost_us = 0;
 	int64_t total_updated = 0;
 	int64_t total_skipped = 0;
 	int last_updated = 0;
@@ -59,6 +63,10 @@ public:
 	bool set_frame_time_budget_us(int64_t p_budget_us);
 	int64_t get_frame_time_budget_us() const { return frame_time_budget_us; }
 	bool record_cost(const StringName &p_lane, int64_t p_elapsed_us);
+	bool set_lane_importance(const StringName &p_lane, double p_importance);
+	double get_lane_importance(const StringName &p_lane) const;
+	int64_t get_lane_estimated_cost_us(const StringName &p_lane) const;
+	int64_t get_reserved_estimated_cost_us() const { return reserved_estimated_cost_us; }
 	int64_t current_frame_cost_us() const { return frame_cost_us; }
 	int64_t last_frame_cost_us() const { return previous_frame_cost_us; }
 	double consume(const StringName &p_lane, double p_delta, bool p_force = false);

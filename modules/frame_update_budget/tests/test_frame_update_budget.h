@@ -160,4 +160,65 @@ TEST_CASE("[FrameUpdateBudget] Recorded CPU microseconds bound optional work") {
 	CHECK(b->get_frame_time_budget_us() == 0);
 }
 
+TEST_CASE("[FrameUpdateBudget] Cost estimates converge and importance is validated") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("expensive"));
+	CHECK(b->register_lane("cheap"));
+	CHECK_FALSE(b->set_lane_importance("missing", 1.0));
+	CHECK_FALSE(b->set_lane_importance("expensive", 0.0));
+	CHECK_FALSE(b->set_lane_importance("expensive", 4.01));
+	CHECK_FALSE(b->set_lane_importance("expensive", std::numeric_limits<double>::infinity()));
+	CHECK(b->set_lane_importance("expensive", 0.25));
+	CHECK(b->set_lane_importance("cheap", 4.0));
+	CHECK(b->get_lane_importance("expensive") == 0.25);
+	CHECK(b->get_lane_importance("cheap") == 4.0);
+	CHECK(b->get_lane_importance("missing") < 0.0);
+	CHECK(b->get_lane_estimated_cost_us("expensive") == 0);
+	CHECK(b->get_lane_estimated_cost_us("missing") < 0);
+	CHECK(b->record_cost("expensive", 800));
+	CHECK(b->get_lane_estimated_cost_us("expensive") == 800);
+	CHECK(b->record_cost("expensive", 400));
+	CHECK(b->get_lane_estimated_cost_us("expensive") == 700);
+	CHECK(b->record_cost("expensive", 0));
+	CHECK(b->get_lane_estimated_cost_us("expensive") == 700);
+	b->reset();
+	CHECK(b->get_lane_importance("cheap") == 4.0);
+	CHECK(b->get_lane_estimated_cost_us("expensive") == 700);
+}
+
+TEST_CASE("[FrameUpdateBudget] Learned costs reserve affordable lanes first") {
+	Ref<FrameUpdateBudget> b;
+	b.instantiate();
+	CHECK(b->register_lane("heavy"));
+	CHECK(b->register_lane("light"));
+	CHECK(b->set_frame_time_budget_us(500));
+	CHECK(b->set_lane_importance("heavy", 0.25));
+	CHECK(b->set_lane_importance("light", 4.0));
+	b->begin_frame(0.01, 0);
+	CHECK(b->consume("heavy", 0.01) > 0.0);
+	CHECK(b->consume("light", 0.01) > 0.0);
+	CHECK(b->record_cost("heavy", 1500));
+	CHECK(b->record_cost("light", 100));
+	b->begin_frame(0.1, 0);
+	CHECK(b->get_reserved_estimated_cost_us() == 100);
+	CHECK(b->consume("heavy", 0.1) == 0.0);
+	CHECK(b->consume("light", 0.1) > 0.0);
+	CHECK(b->record_cost("light", 100));
+
+	int heavy_updates = 0;
+	for (int frame = 0; frame < 120; frame++) {
+		b->begin_frame(0.1, 0);
+		if (b->consume("heavy", 0.1) > 0.0) {
+			heavy_updates++;
+			CHECK(b->record_cost("heavy", 1500));
+		}
+		if (b->consume("light", 0.1) > 0.0) {
+			CHECK(b->record_cost("light", 100));
+		}
+	}
+	CHECK(heavy_updates >= 1); // Expensive lanes cannot starve permanently.
+	CHECK(b->get_lane_estimated_cost_us("heavy") == 1500);
+}
+
 } // namespace TestFrameUpdateBudget

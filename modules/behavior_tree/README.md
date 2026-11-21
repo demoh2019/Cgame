@@ -121,3 +121,31 @@ window, instead of overwriting the last-heard position on each report.
 
 Albion After calls the ranked method **only** when available; stock
 Godot and older Cgame continue their previous behavior.
+
+## Native simulation LOD for crowds and server AI
+
+`AISimulationLOD2D` is a reusable RefCounted cadence policy inspired by the
+variable-frequency crowd AI update budgets in Unreal MassGameplay and the
+distance-based simulation LOD guidance in Unity.
+
+- `get_interval(distance, near_distance, far_distance, urgent=false)`
+  returns 0.25 s, 0.5 s or 1.0 s at inclusive near/far thresholds.
+  These can be changed **atomically** with `configure_intervals`, which
+  enforces `0 < near <= medium <= far <= 2` seconds.
+- `get_staggered_interval(agent_id, ...)` provides an optional one-time
+  deterministic 16-bin phase. Call it only for the first passive schedule,
+  then use `get_interval`; do not phase urgent/near AI.
+- Positive infinity means no eligible viewers; invalid distance/thresholds
+  conservatively return the near update frequency.
+- The API selects **when to run a caller-owned expensive AI step**. It
+  does not change frame delta, pause simulation, fake physics, move agents,
+  skip damage or override network authority.
+
+Albion After uses this natively for **passive, unengaged infected target
+selection only**; active chases, combat, per-frame movement and status
+timers continue at their original rates. Stock Godot uses the previous
+0.25-second target scan cadence.
+
+Source concepts:
+https://dev.epicgames.com/documentation/unreal-engine/overview-of-mass-gameplay-in-unreal-engine
+https://docs.unity.cn/Manual/CullingGroupAPI.html

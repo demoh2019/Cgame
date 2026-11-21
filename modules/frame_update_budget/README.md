@@ -72,3 +72,35 @@ make them visible in Godot's profiler.
 Older custom engine builds without this API automatically use the updated
 GDScript fallback; native CI tests cover rejection of malformed cost reports,
 overload deferral and force-update bypass.
+
+## Scene significance and learned-cost reservations
+
+This module now provides data-driven scheduling importance alongside elapsed-time
+fairness. Each registered lane defaults to importance 1.0, configurable through
+`set_lane_importance(lane, weight)` where `0.25 <= weight <= 4.0`.
+The native engine and GDScript fallback use the same algorithm.
+
+`record_cost(lane, microseconds)` learns an integer exponential moving average
+`estimate = (3 * estimate + sample + 2) / 4` (first sample initializes it).
+The scheduler reserves **due** lanes each frame using importance, accumulated
+time and starvation age. When estimates exist, it first prefers work predicted
+to fit the remaining microsecond budget. If nothing fits, at least one due
+channel can still be reserved. A channel deferred for 48+ due frames may bypass
+the forecast, and an additional age term prevents low-importance starvation.
+
+- `get_lane_importance(lane)`: current weight or -1 if unknown.
+- `get_lane_estimated_cost_us(lane)`: learned microseconds (0 unsampled).
+- `get_reserved_estimated_cost_us()`: estimated time of reserved work.
+- `reset()`: clears frame timers and starvation age; retains weights and cost
+  estimates, so a level transition doesn't discard useful measurements.
+
+Albion After sets weights before `begin_frame` using day/night, storm and
+dungeon context. Nighttime favors bats; daylight favors dragonflies; storms
+raise dust-devil significance, while all four lanes are optional underground.
+The custom `Albion/AmbientPlannedCPUus` performance monitor exposes predicted
+time alongside actual CPU measurements.
+
+**Limitations:** These are soft budgets. Work already started cannot be
+preempted; predicted time is not a guarantee of rendered frame time, and the
+engine does not measure GPU cost. No authoritative server AI, combat, physics,
+save state or network synchronization is subject to this scheduler.

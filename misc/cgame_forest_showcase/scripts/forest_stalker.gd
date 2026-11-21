@@ -31,6 +31,8 @@ var last_navmesh_query_frame: int = -10000
 var navmesh_waypoint: Vector3 = Vector3.ZERO
 var navmesh_goal: Vector3 = Vector3.ZERO
 var navmesh_path_valid: bool = false
+var last_navmesh_generation: int = -1
+var navmesh_forced_replans: int = 0
 var home_position: Vector3
 var health: int = MAX_HEALTH
 var active: bool = false
@@ -122,12 +124,20 @@ func _navmesh_direction(goal: Vector3, fallback: Vector3) -> Vector3:
     var to_cell: Vector2i = streamer.local_position_to_cell(
         streamer.to_local(goal))
     if (not streamer.is_cell_navigation_ready(from_cell)
-            or not streamer.is_cell_navigation_ready(to_cell)):
+            or not streamer.is_cell_navigation_ready(to_cell)
+            or streamer.get_navigation_dirty_cell_count() > 0):
+        # A changing intermediate region can invalidate a cached corridor,
+        # even while our start and target tiles have not changed.
         navmesh_path_valid = false
         return fallback
     var frame: int = Engine.get_physics_frames()
-    if (frame - last_navmesh_query_frame >= NAVMESH_REQUERY_FRAMES
+    var generation: int = streamer.get_navigation_mesh_generation()
+    var changed: bool = generation != last_navmesh_generation
+    if (changed or frame - last_navmesh_query_frame >= NAVMESH_REQUERY_FRAMES
             or goal.distance_squared_to(navmesh_goal) > 16.0):
+        if changed and last_navmesh_generation >= 0:
+            navmesh_forced_replans += 1
+        last_navmesh_generation = generation
         last_navmesh_query_frame = frame
         navmesh_goal = goal
         navmesh_path_valid = false
