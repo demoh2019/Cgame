@@ -260,6 +260,10 @@
 				Returns the cell that contains [param position] on the streamed [member axes].
 			</description>
 		</method>
+		<method name="get_tick_throttled_count" qualifiers="const">
+			<return type="int" />
+			<description>Returns the number of loaded chunk roots actually receiving a positive cosmetic tick interval. Roots without [code]set_streaming_tick_interval(seconds)[/code] are not counted. Does not alter CPU update frequency on its own.</description>
+		</method>
 		<method name="get_simulation_active_count" qualifiers="const">
 			<return type="int" />
 			<description>
@@ -270,6 +274,11 @@
 			<return type="bool" />
 			<param index="0" name="require_visual_details" type="bool" default="false" />
 			<description>Whether all cells intersecting the currently active, nearby auxiliary source are settled and no cells have failed. Intentionally empty cells count as settled. With [param require_visual_details] true, waits for optional staged cosmetic completion. This is a visual streaming readiness snapshot, not a safe-teleport, physics, or server-authority barrier. Disabled or remote sources return false.</description>
+		</method>
+		<method name="is_cell_tick_throttled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>Whether the given loaded chunk root currently receives a positive, reduced-frequency cosmetic tick interval. Returns false for unloaded cells and roots without the callback.</description>
 		</method>
 		<method name="is_cell_simulation_active" qualifiers="const">
 			<return type="bool" />
@@ -337,6 +346,18 @@
 		<member name="simulation_hysteresis" type="float" setter="set_simulation_hysteresis" getter="get_simulation_hysteresis" default="16.0">
 			Extra distance in metres an already-active chunk retains simulation after leaving [member simulation_radius]. Inactive chunks only reactivate when entering the inner radius. Clamped to 0–1000 metres.
 		</member>
+		<member name="tick_throttle_radius" type="float" setter="set_tick_throttle_radius" getter="get_tick_throttle_radius" default="-1.0">
+			Unreal-style optional cosmetic update-frequency tier for streamed chunks. Negative (default) disables and avoids the per-chunk scan; 0–100000 chooses the full-rate near radius. Chunk roots must implement [code]set_streaming_tick_interval(seconds: float)[/code]. Outside this radius plus [member tick_throttle_hysteresis], opted-in roots receive [member tick_throttle_interval]; when returning inside the radius they receive zero (full rate). Existing root transitions are bounded and nearest near-recoveries run first. Purely advisory: the root chooses which script effects to throttle, never physics or gameplay authority.
+		</member>
+		<member name="tick_throttle_interval" type="float" setter="set_tick_throttle_interval" getter="get_tick_throttle_interval" default="0.125">
+			Positive seconds between expensive cosmetic scene updates in the distant tier. Clamped to 0–1 second; zero restores full-rate callbacks over the configured transition budget. The actual chunk script must accumulate delta and decide how to defer work; setting this does not affect engine physics ticks.
+		</member>
+		<member name="tick_throttle_hysteresis" type="float" setter="set_tick_throttle_hysteresis" getter="get_tick_throttle_hysteresis" default="8.0">
+			Extra distance required before promoting a near full-rate chunk to the reduced-frequency tier. Clamped 0–1000; returning within the normal radius restores near rate immediately, subject to the transition budget.
+		</member>
+		<member name="max_tick_throttle_transitions_per_update" type="int" setter="set_max_tick_throttle_transitions_per_update" getter="get_max_tick_throttle_transitions_per_update" default="4">
+			Maximum number of existing loaded chunk callback rate changes (1–64) during one streaming refresh. New chunk initial tick rates are set before scene attachment and are already covered by the normal chunk generation/activation budget.
+		</member>
 		<member name="simulation_radius" type="float" setter="set_simulation_radius" getter="get_simulation_radius" default="-1.0">
 			Opt-in distance in metres for cosmetic/script simulation on resident chunks. Negative (default) preserves all legacy chunk processing and avoids per-chunk simulation scans. The streamer calls a chunk root's optional [code]set_streaming_simulation_active(active: bool)[/code] when its tier changes; it never alters scene descendants, terrain, physics or networking by itself. State changes do not load or unload cells. Clamped to -1 (disabled) or 0–100000 metres.
 		</member>
@@ -357,6 +378,11 @@
 		</member>
 	</members>
 	<signals>
+		<signal name="chunk_tick_interval_changed">
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="seconds" type="float" />
+			<description>Emitted when an already-loaded opted-in chunk changes its effective cosmetic update interval. Initial chunk setup is available through [method is_cell_tick_throttled] and [signal chunk_loaded].</description>
+		</signal>
 		<signal name="chunk_simulation_changed">
 			<param index="0" name="cell" type="Vector3i" />
 			<param index="1" name="active" type="bool" />
