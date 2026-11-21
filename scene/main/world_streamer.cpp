@@ -1293,7 +1293,11 @@ void WorldStreamer::set_max_instantiations_per_frame(int p_count) {
 }
 
 void WorldStreamer::set_max_unloads_per_update(int p_count) {
-	max_unloads_per_update = CLAMP(p_count, 0, 64);
+	const int bounded = CLAMP(p_count, 0, 64);
+	if (max_unloads_per_update == bounded) {
+		return; // Graphics quality reapplication must not force new grid scans.
+	}
+	max_unloads_per_update = bounded;
 	// Removing a restrictive budget should flush obsolete cells at the next
 	// scheduler pass without requiring an explicit refresh from gameplay.
 	time_since_update = MAX(time_since_update, update_interval);
