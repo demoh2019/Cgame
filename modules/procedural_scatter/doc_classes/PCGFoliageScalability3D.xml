@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PCGFoliageScalability3D" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Deterministic batch foliage density planning and distributed instance-prefix ordering.
+	</brief_description>
+	<description>
+		Inspired by Unreal Engine Foliage Density Scaling, this data-only class controls how many cosmetic instanced foliage meshes should remain visible by graphics quality and camera distance. It does not change mesh buffers, create proxies, cull scene nodes, perform physics, or modify random generators. Use [member MultiMesh.visible_instance_count] with [method plan_visible_counts] outputs. For visually distributed prefixes, write instances in the order given by [method spread_indices] once when creating each MultiMesh. This is not true hierarchical level-of-detail or Nanite.
+	</description>
+	<methods>
+		<method name="spread_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="count" type="int" />
+			<description>
+				Returns a deterministic, duplicate-free bit-reversal permutation of indices 0 through [param count] - 1. A prefix of the result samples distant positions in the original input order, instead of truncating only its beginning. This is useful for distributing a limited number of cosmetic foliage instances through their initial placement sequence. Accepts 0 through 65536; invalid counts return empty. Results are identical across repeated calls and do not consume seeded RNG.
+			</description>
+		</method>
+		<method name="plan_visible_counts" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="counts" type="PackedInt32Array" />
+			<param index="1" name="distances" type="PackedFloat32Array" />
+			<param index="2" name="quality" type="int" />
+			<param index="3" name="near_distance" type="float" default="18.0" />
+			<param index="4" name="far_distance" type="float" default="125.0" />
+			<description>
+				Returns one visible-instance count for each input MultiMesh group, retaining zero-count groups at zero and at least one visible instance in each nonempty cosmetic group. Quality levels are 0 Performance (near 42%, far 20%), 1 Balanced (near 68%, far 42%), 2 High (near 88%, far 70%), and 3 Ultra (100% everywhere). Between the near and far distances, the density changes smoothly with smoothstep, with integer counts rounded to the nearest instance. Camera distances are nonnegative world-space distances; this selector does not perform frustum or occlusion culling. Use the result to update existing [member MultiMesh.visible_instance_count] without rebuilding an instance buffer, and keep gameplay objects independent of density budgets.
+				Inputs must contain matching arrays of at most 4096 groups, counts from 0 through 65536 and finite distances between 0 and 10000000. Near and far thresholds must be finite, ordered with 0 <= near < far <= 1000000; invalid quality or input rejects the whole request atomically. No source array mutation, RNG or scene access.
+			</description>
+		</method>
+	</methods>
+</class>
