@@ -69,6 +69,35 @@ def plan_stable(distances, priority, visible, retained, full_budget,
     return tiers
 
 
+
+def plan_costed(distances, priority, visible, retained, costs, full_budget,
+                priority_budget, cpu_budget_us, hysteresis=1.5):
+    """Numeric oracle for the costed API; not a compiled engine test."""
+    if (len(distances) != len(costs) or len(distances) != len(visible)
+            or len(distances) != len(retained) or
+            not isinstance(cpu_budget_us, int) or
+            not 0 <= cpu_budget_us <= 1000000 or
+            any(not isinstance(c, int) or not 0 <= c <= 100000
+                for c in costs)):
+        return []
+    tiers = plan_stable(distances, priority, visible, retained,
+                        full_budget, priority_budget, hysteresis)
+    if len(tiers) != len(distances) or cpu_budget_us == 0:
+        return tiers
+    winners = sorted(
+        (i for i, tier in enumerate(tiers) if tier == 0),
+        key=lambda i: (max(0, distances[i] -
+                           (hysteresis if retained[i] else 0)), i))
+    used = 0
+    for i in winners:
+        predicted = costs[i] or 100
+        if used + predicted <= cpu_budget_us:
+            used += predicted
+        else:
+            tiers[i] = 1
+    return tiers
+
+
 class TestCrowdPlanner(unittest.TestCase):
     def test_native_source_api(self):
         header = (MODULE / "crowd_animation_tier_planner.h").read_text()
@@ -228,6 +257,71 @@ class TestCrowdPlanner(unittest.TestCase):
         self.assertIn('set_meta("aa_full_ik_retained", false)', model)
         self.assertIn('name="plan_visible_tiers_stable"', ET.tostring(
             xml.getroot(), encoding="unicode"))
+
+    def test_costed_ik_budget_and_combat(self):
+        d = [2, 4, 10, 18, 55]
+        p = [0, 0, 0, 1, 1]
+        v = [1] * 5
+        r = [0] * 5
+        c = [500, 100, 100, 100, 0]
+        self.assertEqual(plan_costed(d, p, v, r, c, 3, 1, 250),
+                         [1, 0, 0, 1, 2])
+        self.assertEqual(plan_costed(d, p, v, r, c, 3, 1, 0),
+                         plan_stable(d, p, v, r, 3, 1))
+        self.assertEqual(plan_costed([10, 10.4, 21, 22], [0, 0, 0, 1],
+                                     [1]*4, [0, 1, 1, 1],
+                                     [0]*4, 2, 1, 100),
+                         [1, 0, 1, 1])
+        self.assertEqual(plan_costed(d, p, v, r, c[:-1], 3, 1, 250), [])
+        self.assertEqual(plan_costed(d, p, v, r, [-1]*5, 3, 1, 250), [])
+        self.assertEqual(plan_costed(d, p, v, r, c, 3, 1, -1), [])
+        self.assertEqual(plan_costed(d, p, v, r, c, 3, 1, 1000001), [])
+
+    def test_costed_random_budget_invariants(self):
+        for seed in range(20):
+            rng = random.Random(345210 + seed)
+            d = [rng.randrange(0, 1200) / 10 for _ in range(240)]
+            p = [rng.randrange(0, 2) for _ in d]
+            v = [rng.randrange(0, 2) for _ in d]
+            held = [rng.randrange(0, 2) for _ in d]
+            costs = [rng.randrange(0, 751) for _ in d]
+            for slots in (0, 1, 4, 12):
+                for cap in (0, 100, 750, 2000):
+                    tiers = plan_costed(d, p, v, held, costs, slots, 3, cap)
+                    baseline = plan_stable(d, p, v, held, slots, 3)
+                    self.assertEqual(len(tiers), len(d))
+                    self.assertLessEqual(tiers.count(0), slots)
+                    self.assertTrue(all(a >= b for a, b in zip(tiers, baseline)))
+                    if cap:
+                        admitted_cost = sum(costs[i] or 100 for i, tier
+                                            in enumerate(tiers) if tier == 0)
+                        self.assertLessEqual(admitted_cost, cap)
+                    for i, tier in enumerate(tiers):
+                        if not v[i]:
+                            self.assertGreaterEqual(tier, 2)
+                        if d[i] >= 22:
+                            self.assertNotEqual(tier, 0)
+
+    def test_costed_native_and_game_source_contract(self):
+        header = (MODULE / "crowd_animation_tier_planner.h").read_text()
+        cpp = CPP.read_text()
+        game = GAME.read_text()
+        modifier = (ROOT / "game/scripts/client/character_anim_modifier.gd").read_text()
+        game_tests = GAME_TEST.read_text()
+        xml = ET.parse(MODULE / "doc_classes/CrowdAnimationTierPlanner.xml").getroot()
+        self.assertIn("PackedInt32Array plan_visible_tiers_costed(", header)
+        self.assertIn('D_METHOD("plan_visible_tiers_costed"', cpp)
+        self.assertIn("p_full_pose_cost_us.size() != count", cpp)
+        self.assertIn("planned_us + estimate_us <= p_full_pose_budget_us", cpp)
+        self.assertIn("tiers.set(index, 1)", cpp)
+        self.assertIn("static func plan_crowd_tiers_costed(", game)
+        self.assertIn("var tiers: PackedInt32Array = plan_crowd_tiers_costed(", game)
+        self.assertIn("full_pose_cost_us.append(", game)
+        self.assertIn("Time.get_ticks_usec()", modifier)
+        self.assertIn("estimated_full_pose_us", modifier)
+        self.assertIn("native/script CPU budget parity", game_tests)
+        self.assertTrue(any(method.get("name") == "plan_visible_tiers_costed"
+                            for method in xml.find("methods")))
 
     def test_reject_corrupt_inputs(self):
         self.assertEqual(plan([1, 2], [1], 1, 1), [])
