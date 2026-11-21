@@ -53,12 +53,71 @@ static func select_zombie_bar_indices(distances: PackedFloat64Array,
 		indices.append(order[i])
 	return indices
 
+
+## Strict-priority HUD significance with temporal retention. A previous
+## ordinary zombie can only displace another ordinary zombie, not a boss.
+## The caller supplies stable server zombie IDs, not ephemeral array indices.
+static func select_zombie_bar_indices_stable(distances: PackedFloat64Array,
+		priorities: PackedByteArray, ids: PackedInt64Array,
+		retained_ids: PackedInt64Array, budget: int = ZOMBIE_BAR_BUDGET,
+		max_distance: float = 45.0, hysteresis: float = 1.5,
+		allow_native: bool = true) -> PackedInt32Array:
+	var empty := PackedInt32Array()
+	var count := distances.size()
+	if count != priorities.size() or count != ids.size() or count > 16384 \
+			or retained_ids.size() > 128 or budget < 0 or budget > 128 \
+			or not is_finite(max_distance) or max_distance < 0.0 or max_distance > 1000000.0 \
+			or not is_finite(hysteresis) or hysteresis < 0.0 or hysteresis > max_distance:
+		return empty
+	var known_ids: Dictionary = {}
+	for i in count:
+		if not is_finite(distances[i]) or distances[i] < 0.0 or priorities[i] > 3 \
+				or ids[i] <= 0 or known_ids.has(ids[i]):
+			return empty
+		known_ids[ids[i]] = true
+	var retained: Dictionary = {}
+	for stable_id in retained_ids:
+		if stable_id <= 0 or retained.has(stable_id):
+			return empty
+		retained[stable_id] = true
+	if allow_native:
+		if not _significance_checked:
+			_significance_checked = true
+			if ClassDB.class_exists("SignificanceBudgetPlanner"):
+				_significance_planner = ClassDB.instantiate("SignificanceBudgetPlanner")
+		if _significance_planner != null and _significance_planner.has_method("select_top_priority_stable"):
+			return _significance_planner.call("select_top_priority_stable",
+				distances, priorities, ids, retained_ids, budget, max_distance, hysteresis)
+	var order: Array[int] = []
+	for i in count:
+		if distances[i] <= max_distance:
+			order.append(i)
+	order.sort_custom(func(a: int, b: int) -> bool:
+		if priorities[a] != priorities[b]:
+			return priorities[a] > priorities[b]
+		var ad: float = maxf(0.0, distances[a] - (hysteresis if retained.has(ids[a]) else 0.0))
+		var bd: float = maxf(0.0, distances[b] - (hysteresis if retained.has(ids[b]) else 0.0))
+		if ad != bd:
+			return ad < bd
+		if distances[a] != distances[b]:
+			return distances[a] < distances[b]
+		if ids[a] != ids[b]:
+			return ids[a] < ids[b]
+		return a < b
+	)
+	var indices := PackedInt32Array()
+	for i in mini(order.size(), budget):
+		indices.append(order[i])
+	return indices
+
+
 var client
 var camera: Camera3D
 var _font: Font
 var _floaters: Array = [] # {"pos": Vector3, "text": String, "color": Color, "age": float, "size": int}
 var _markers: Array = []
 var _marker_timer := 0.0
+var _zombie_bar_retained_ids := PackedInt64Array() # Last rendered server IDs, not array indices.
 
 
 func setup(p_client, p_camera: Camera3D) -> void:
@@ -147,9 +206,11 @@ func _draw_zombie_bars(view: Vector2) -> void:
 	var screen_points := PackedVector2Array()
 	var distances := PackedFloat64Array()
 	var priorities := PackedByteArray()
+	var ids := PackedInt64Array()
 	# The existing proximity and projected-screen checks run before budgeting:
 	# offscreen infected never consume scarce HUD slots.
-	for zombie in client.zombies.values():
+	for zombie_id in client.zombies:
+		var zombie: Dictionary = client.zombies[zombie_id]
 		var top := Vector3(float(zombie["x"]), float(zombie["y"]) + 2.7, float(zombie["z"]))
 		if bool(zombie.get("raid_boss", false)):
 			top.y += 2.2
@@ -162,12 +223,19 @@ func _draw_zombie_bars(view: Vector2) -> void:
 		eligible.append(zombie)
 		screen_points.append(spot)
 		distances.append(distance)
+		ids.append(int(zombie_id))
 		# Boss > elite > actual attacker > ordinary enemy. Critical combat
 		# telegraphs still use their own independent animation budget.
 		priorities.append(3 if bool(zombie.get("raid_boss", false)) else
 			(2 if bool(zombie.get("elite", false)) else
 			(1 if int(zombie.get("state", 0)) >= 3 else 0)))
-	for selected in select_zombie_bar_indices(distances, priorities):
+	var chosen: PackedInt32Array = select_zombie_bar_indices_stable(distances,
+		priorities, ids, _zombie_bar_retained_ids)
+	var current_ids := PackedInt64Array()
+	for selected in chosen:
+		current_ids.append(ids[selected])
+	_zombie_bar_retained_ids = current_ids
+	for selected in chosen:
 		var zombie: Dictionary = eligible[selected]
 		var spot: Vector2 = screen_points[selected]
 		var maximum: float = maxf(float(zombie.get("max_hp", zombie.get("hp", 1.0))), 1.0)

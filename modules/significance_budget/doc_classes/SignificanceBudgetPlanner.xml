@@ -14,6 +14,17 @@
 			<param index="2" name="budget" type="int" />
 			<description>Returns at most [param budget] candidate indices ranked by descending priority and ascending nonnegative finite distance. [param priorities] must have the same length as [param distances] and values 0 through 3. [param budget] must be 0 through 128. No input state is mutated.</description>
 		</method>
+		<method name="select_top_priority_stable" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="distances" type="PackedFloat64Array" />
+			<param index="1" name="priorities" type="PackedByteArray" />
+			<param index="2" name="ids" type="PackedInt64Array" />
+			<param index="3" name="retained_ids" type="PackedInt64Array" />
+			<param index="4" name="budget" type="int" />
+			<param index="5" name="max_distance" type="float" />
+			<param index="6" name="hysteresis" type="float" default="0.0" />
+			<description>Strict priority (3 to 0) ranks before distance. Within equal priority, currently retained IDs receive a distance discount capped at zero; actors past max_distance cannot be kept. Tie-breakers: real distance, positive stable ID, and input index. Arrays must match, IDs must be unique and positive, retained IDs must be unique and at most 128, budgets 0 through 128, distances finite and nonnegative. Range 0 to 1,000,000, hysteresis 0 through range. Invalid input returns empty, without mutation. Useful for temporally stable presentation budgets while keeping critical bosses prioritized.</description>
+		</method>
 		<method name="select_top_stable" qualifiers="const">
 			<return type="PackedInt32Array" />
 			<param index="0" name="distances" type="PackedFloat64Array" />

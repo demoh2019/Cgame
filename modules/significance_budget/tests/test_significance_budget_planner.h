@@ -184,4 +184,52 @@ TEST_CASE("[SignificanceBudget] invalid category input is rejected atomically") 
 	CHECK(planner->select_effects(distances, priorities, groups, caps, 2, Math::INF).is_empty());
 }
 
+
+TEST_CASE("[SignificanceBudget] priority-stable HUD protects bosses, retained peers, and hard range") {
+	Ref<SignificanceBudgetPlanner> p;
+	p.instantiate();
+	const PackedFloat64Array distance = { 7.0, 6.0, 5.0, 13.0, 8.0 };
+	const PackedByteArray priority = { 0, 0, 3, 2, 2 };
+	const PackedInt64Array ids = { 100, 101, 50, 52, 55 };
+	const PackedInt64Array kept = { 100, 55 };
+	const PackedInt32Array expected = { 2, 4, 0 };
+	CHECK(p->select_top_priority_stable(distance, priority, ids, kept, 3, 10.0, 2.0) == expected);
+	CHECK(p->select_top_priority_stable(distance, priority, ids, kept, 0, 10.0, 2.0).is_empty());
+	CHECK(p->select_top_priority_stable(distance, priority, ids, kept, 5, 10.0, 2.0).size() == 4);
+	CHECK(ids[0] == 100); // Pure inputs.
+	const PackedFloat64Array ties = { 6.0, 6.0 };
+	const PackedByteArray equal_priority = { 1, 1 };
+	const PackedInt64Array tie_ids = { 90, 7 };
+	const PackedInt32Array tie_by_id = { 1, 0 };
+	const PackedInt32Array retained_first = { 0 };
+	CHECK(p->select_top_priority_stable(ties, equal_priority, tie_ids, {}, 2, 10.0) == tie_by_id);
+	CHECK(p->select_top_priority_stable(ties, equal_priority, tie_ids, { 90 }, 1, 10.0, 1.5) == retained_first);
+	const PackedInt32Array in_range = { 1 };
+	CHECK(p->select_top_priority_stable({ 10.01, 2.0 }, { 3, 0 }, { 777, 7 },
+			{ 777 }, 2, 10.0, 2.0) == in_range);
+}
+
+TEST_CASE("[SignificanceBudget] priority-stable malformed inputs reject atomically") {
+	Ref<SignificanceBudgetPlanner> p;
+	p.instantiate();
+	const PackedFloat64Array distances = { 1.0, 2.0 };
+	const PackedByteArray pri = { 3, 0 };
+	const PackedInt64Array ids = { 12, 13 };
+	CHECK(p->select_top_priority_stable(distances, pri, ids, {}, 2, 10.0).size() == 2);
+	CHECK(p->select_top_priority_stable(distances, { 3 }, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_top_priority_stable(distances, pri, { 12 }, {}, 2, 10.0).is_empty());
+	CHECK(p->select_top_priority_stable({ 1.0, Math::NaN }, pri, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_top_priority_stable({ -1.0, 2.0 }, pri, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_top_priority_stable(distances, { 3, 4 }, ids, {}, 2, 10.0).is_empty());
+	CHECK(p->select_top_priority_stable(distances, pri, { 12, 12 }, {}, 2, 10.0).is_empty());
+	CHECK(p->select_top_priority_stable(distances, pri, { 0, 13 }, {}, 2, 10.0).is_empty());
+	CHECK(p->select_top_priority_stable(distances, pri, ids, { 12, 12 }, 2, 10.0).is_empty());
+	CHECK(p->select_top_priority_stable(distances, pri, ids, { -1 }, 2, 10.0).is_empty());
+	CHECK(p->select_top_priority_stable(distances, pri, ids, {}, -1, 10.0).is_empty());
+	CHECK(p->select_top_priority_stable(distances, pri, ids, {}, 129, 10.0).is_empty());
+	CHECK(p->select_top_priority_stable(distances, pri, ids, {}, 2, Math::NaN).is_empty());
+	CHECK(p->select_top_priority_stable(distances, pri, ids, {}, 2, 10.0, -1.0).is_empty());
+	CHECK(p->select_top_priority_stable(distances, pri, ids, {}, 2, 10.0, 11.0).is_empty());
+}
+
 } // namespace TestSignificanceBudgetPlanner

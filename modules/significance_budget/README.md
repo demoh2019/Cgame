@@ -43,3 +43,12 @@ implements identical ordering on stock Godot.
 
 Reference: Unreal Engine Niagara Effect Types and scalability:
 https://dev.epicgames.com/documentation/en-us/unreal-engine/performance-budgeting-using-effect-types-in-niagara-for-unreal-engine
+
+
+## Priority-aware temporal significance
+
+`select_top_priority_stable(distances, priorities, ids, retained_ids, budget, max_distance, hysteresis=0.0)` ranks **strict 0–3 urgency before** a within-tier distance discount for last-frame retained IDs. Tie breaks are deterministic by actual distance then stable positive ID. The hard range is never extended by the discount. Invalid IDs/arrays fail closed. Ranked top K remains O(N × K) with O(K) ranking scratch and O(N) ID validation. This extends the engine toward Unreal Significance Manager's flexible per-object prioritization.
+
+Albion After uses it for its 32 visible infected health bars. Retention reduces HUD churn as same-priority zombies move and never lets a previously visible ordinary enemy obscure a higher-priority boss or elite. Stock Godot follows the same algorithm. No server AI, combat, replication or actual 3D actor culling is changed.
+
+Unreal Significance Manager: https://dev.epicgames.com/documentation/en-us/unreal-engine/significance-manager-in-unreal-engine
