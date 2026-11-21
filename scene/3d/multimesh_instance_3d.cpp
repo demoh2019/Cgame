@@ -106,7 +106,7 @@ PackedInt32Array MultiMeshInstance3D::find_visible_instances_in_radius(const Vec
 	const Transform3D world_transform = get_global_transform();
 	const real_t radius_squared = p_max_distance * p_max_distance;
 	for (int i = 0; i < count; i++) {
-		const Vector3 world_pos = world_transform * multimesh->get_instance_transform(i).origin;
+		const Vector3 world_pos = world_transform.xform(multimesh->get_instance_transform(i).origin);
 		if (world_pos.distance_squared_to(p_world_position) <= radius_squared) {
 			matches.push_back(i);
 		}
@@ -132,7 +132,7 @@ int MultiMeshInstance3D::find_nearest_visible_instance(const Vector3 &p_world_po
 	real_t best_distance_squared = p_max_distance * p_max_distance;
 	int nearest = -1;
 	for (int i = 0; i < count; i++) {
-		const Vector3 instance_world_position = world_transform * multimesh->get_instance_transform(i).origin;
+		const Vector3 instance_world_position = world_transform.xform(multimesh->get_instance_transform(i).origin);
 		const real_t distance_squared = instance_world_position.distance_squared_to(p_world_position);
 		if (distance_squared <= best_distance_squared && (nearest == -1 || distance_squared < best_distance_squared)) {
 			best_distance_squared = distance_squared;
