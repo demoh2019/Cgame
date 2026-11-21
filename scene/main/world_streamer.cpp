@@ -833,54 +833,65 @@ void WorldStreamer::_update_streaming() {
 		loaded_cells.insert(entry.key);
 	}
 	WorldStreamingGrid::cells_to_unload(position, keep_radius, cell_size, _grid_axes(), loaded_cells, to_unload);
-	LocalVector<Vector3i> expired;
 	const bool auxiliary_near = _auxiliary_is_near_focus(position);
-	for (const Vector3i &cell : to_unload) {
-		// Keep explicitly prefetched cells while their source stays nearby,
-		// even when they are just beyond the ordinary player unload radius.
-		if (auxiliary_near &&
-				WorldStreamingGrid::distance_to_cell(auxiliary_source_position, cell, cell_size, _grid_axes()) <= _auxiliary_effective_radius()) {
-			continue;
-		}
-		expired.push_back(cell);
-	}
-	const int count = int(expired.size());
-	const int grant = max_unloads_per_update == 0 ? count : MIN(count, max_unloads_per_update);
-	last_unload_count = grant;
-	last_deferred_unload_count = count - grant;
-	if (grant == count) {
-		// Default/unlimited path: retain the previous fast O(N) release.
-		for (const Vector3i &cell : expired) {
+	if (max_unloads_per_update == 0) {
+		// Preserve the legacy O(N) release path without building another
+		// candidate vector or allocating selection metadata.
+		for (const Vector3i &cell : to_unload) {
+			if (auxiliary_near &&
+					WorldStreamingGrid::distance_to_cell(auxiliary_source_position, cell, cell_size, _grid_axes()) <= _auxiliary_effective_radius()) {
+				continue;
+			}
 			_unload_cell(cell);
+			++last_unload_count;
 		}
 	} else {
-		// With a budget, unload farthest first. Avoid sorting the entire
-		// resident grid after teleports: only select up to 64 farthest cells,
-		// in O(expired * grant) comparisons and O(grant) selected metadata.
-		// Stable lexicographic ties make tests/replays deterministic.
-		HashSet<Vector3i> selected;
-		for (int i = 0; i < grant; ++i) {
-			bool found = false;
-			Vector3i best;
-			real_t best_distance = 0.0;
+		LocalVector<Vector3i> expired;
+		for (const Vector3i &cell : to_unload) {
+			// A nearby secondary source still protects the same cells.
+			if (auxiliary_near &&
+					WorldStreamingGrid::distance_to_cell(auxiliary_source_position, cell, cell_size, _grid_axes()) <= _auxiliary_effective_radius()) {
+				continue;
+			}
+			expired.push_back(cell);
+		}
+		const int count = int(expired.size());
+		const int grant = MIN(count, max_unloads_per_update);
+		last_unload_count = grant;
+		last_deferred_unload_count = count - grant;
+		if (grant == count) {
 			for (const Vector3i &cell : expired) {
-				if (selected.has(cell)) {
-					continue;
-				}
-				const real_t distance = WorldStreamingGrid::distance_to_cell(position, cell, cell_size, _grid_axes());
-				const bool tie_before = cell.x < best.x ||
-						(cell.x == best.x && (cell.y < best.y || (cell.y == best.y && cell.z < best.z)));
-				if (!found || distance > best_distance || (distance == best_distance && tie_before)) {
-					best = cell;
-					best_distance = distance;
-					found = true;
-				}
+				_unload_cell(cell);
 			}
-			if (!found) {
-				break;
+		} else {
+			// With a budget, unload farthest first. Avoid sorting the entire
+			// resident grid after teleports: select at most 64 distant cells,
+			// in O(expired * grant) comparisons and O(grant) metadata.
+			// Stable coordinate ties make tests/replays deterministic.
+			HashSet<Vector3i> selected;
+			for (int i = 0; i < grant; ++i) {
+				bool found = false;
+				Vector3i best;
+				real_t best_distance = 0.0;
+				for (const Vector3i &cell : expired) {
+					if (selected.has(cell)) {
+						continue;
+					}
+					const real_t distance = WorldStreamingGrid::distance_to_cell(position, cell, cell_size, _grid_axes());
+					const bool tie_before = cell.x < best.x ||
+							(cell.x == best.x && (cell.y < best.y || (cell.y == best.y && cell.z < best.z)));
+					if (!found || distance > best_distance || (distance == best_distance && tie_before)) {
+						best = cell;
+						best_distance = distance;
+						found = true;
+					}
+				}
+				if (!found) {
+					break;
+				}
+				selected.insert(best);
+				_unload_cell(best);
 			}
-			selected.insert(best);
-			_unload_cell(best);
 		}
 	}
 
