@@ -67,8 +67,8 @@ func run(t) -> void:
 		"nearby paused chunk activates first when focus approaches")
 	t.check(streamer.is_cell_simulation_active(Vector3i.ZERO),
 		"already-active neighbor remains active within hysteresis")
-	t.eq(streamer.get_loaded_count(), initial_count,
-		"moving within the existing loaded region does not change residency")
+	t.check(streamer.get_chunk(far_cell) == far_chunk,
+		"the same already-loaded scene root survives focus movement")
 	if far_chunk != null:
 		t.eq(far_chunk.transitions, [false, true],
 			"activation callback resumes the same resident scene root")
