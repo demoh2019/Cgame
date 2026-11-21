@@ -10,6 +10,8 @@ on:
       - 'game/scripts/client/chunk_view.gd'
       - 'game/tests/test_pcg_scenery_spacing.gd'
       - 'game/tests/test_pcg_road_corridors.gd'
+      - 'game/tests/test_pcg_foliage_scalability.gd'
+      - 'game/scripts/client/scenery_density_lod.gd'
       - 'game/tests/test_pcg_surface_slope.gd'
       - 'game/tests/test_pcg_surface_alignment.gd'
       - 'game/tests/run_pcg_scenery_spacing.gd'
@@ -23,6 +25,8 @@ on:
       - 'game/scripts/client/chunk_view.gd'
       - 'game/tests/test_pcg_scenery_spacing.gd'
       - 'game/tests/test_pcg_road_corridors.gd'
+      - 'game/tests/test_pcg_foliage_scalability.gd'
+      - 'game/scripts/client/scenery_density_lod.gd'
       - 'game/tests/test_pcg_surface_slope.gd'
       - 'game/tests/test_pcg_surface_alignment.gd'
       - 'game/tests/run_pcg_scenery_spacing.gd'
@@ -71,6 +75,11 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.x86_64
           timeout 240s "$BIN" --headless --test --test-case="*PCGPolylineSampler3D*" --no-colors 2>&1 | tee pcg-polyline-native.log
+      - name: Native foliage scalability density tests
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.x86_64
+          timeout 240s "$BIN" --headless --test --test-case="*PCGFoliageScalability3D*" --no-colors 2>&1 | tee pcg-foliage-scalability-native.log
       - name: Import Albion After game
         run: |
           set -euo pipefail
@@ -112,6 +121,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             pcg-native.log
+            pcg-foliage-scalability-native.log
             pcg-weighted-native.log
             pcg-polyline-native.log
             pcg-weighted-game.log
