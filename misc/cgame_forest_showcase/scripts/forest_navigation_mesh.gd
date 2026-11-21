@@ -1,19 +1,16 @@
 extends RefCounted
-## Authored per-cell navigation tile from the shared analytic heightfield.
-## No runtime Recast bake or GPU mesh readback; neighbor tiles share the same
-## boundary vertices so NavigationServer3D can connect close edges.
-##
-## NOTE: This navigation surface is the broad walkable terrain only. It does
-## not carve tree trunks/rocks or account for character radius and slope.
-## Forest stalker collision-ray steering remains responsible for obstacles.
+## Deterministic per-cell sampled terrain for native clearance/slope filtering.
+## The engine owns obstacle-intersection tests and NavigationMesh triangles.
+## Adjacent tile samples share world coordinates along their seams.
 
 const TerrainHeight = preload("res://scripts/terrain_height.gd")
-const SAMPLE_COUNT: int = 8
+const SAMPLE_COUNT: int = 16
 const TILE_SIZE: float = 32.0
+const AGENT_RADIUS: float = 0.45
+const MAX_SLOPE_DEGREES: float = 42.0
 
 
-static func build_tile(cell_world_origin: Vector3) -> NavigationMesh:
-    var mesh := NavigationMesh.new()
+static func sample_vertices(cell_world_origin: Vector3) -> PackedVector3Array:
     var vertices := PackedVector3Array()
     var stride: int = SAMPLE_COUNT + 1
     for iz in range(stride):
@@ -24,16 +21,29 @@ static func build_tile(cell_world_origin: Vector3) -> NavigationMesh:
                 cell_world_origin.x + local_x,
                 cell_world_origin.z + local_z) - cell_world_origin.y
             vertices.append(Vector3(local_x, local_y, local_z))
-    mesh.vertices = vertices
+    return vertices
 
-    # Keep each terrain polygon triangular; non-planar quads are not
-    # well-defined navigation polygons. Winding faces +Y in Godot's X/Z plane.
+
+static func build_tile(cell_world_origin: Vector3, partition: WorldPartition3D,
+        blockers: PackedVector3Array) -> NavigationMesh:
+    var vertices: PackedVector3Array = sample_vertices(cell_world_origin)
+    if is_instance_valid(partition):
+        # Vector3(blocker_local_x, blocker_local_z, collider_radius).
+        # Native builder rejects slopes >42 degrees and safely expands each
+        # blocker by AGENT_RADIUS to approximate character capsule clearance.
+        return partition.build_navigation_tile(
+            vertices, SAMPLE_COUNT, blockers, AGENT_RADIUS, MAX_SLOPE_DEGREES)
+
+    # Standalone scene previews are allowed without WorldPartition3D. The
+    # native filtered route is the only one used in the streamed game.
+    var preview := NavigationMesh.new()
+    preview.vertices = vertices
     for iz in range(SAMPLE_COUNT):
         for ix in range(SAMPLE_COUNT):
-            var a: int = iz * stride + ix
+            var a: int = iz * (SAMPLE_COUNT + 1) + ix
             var b: int = a + 1
-            var c: int = a + stride
+            var c: int = a + SAMPLE_COUNT + 1
             var d: int = c + 1
-            mesh.add_polygon(PackedInt32Array([a, c, b]))
-            mesh.add_polygon(PackedInt32Array([b, c, d]))
-    return mesh
+            preview.add_polygon(PackedInt32Array([a, c, b]))
+            preview.add_polygon(PackedInt32Array([b, c, d]))
+    return preview
