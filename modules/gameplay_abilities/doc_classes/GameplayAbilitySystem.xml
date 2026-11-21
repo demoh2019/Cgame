@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GameplayAbilitySystem" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+    <brief_description>Data-driven per-character ability activation with costs, cooldowns, hierarchical tags and state persistence.</brief_description>
+    <description>
+        Create one GameplayAbilitySystem per character. Register ability definitions with [code]cost[/code] and [code]cooldown[/code] numbers (optional, default 0), and [code]required_tags[/code] and [code]blocked_tags[/code] PackedStringArray values (optional). Tag queries include nested tags: [code]status.stunned[/code] matches [code]status.stunned.heavy[/code]. Call [method tick] once per gameplay update to advance cooldowns. Abilities only manage activation policy: connect [signal ability_activated] in game code to execute animations, projectiles and other effects. Callers own networking authority, effect replication and animation. [method save_state] and [method load_state] serialize runtime resource, tags and cooldowns, not ability definitions. Re-register the same definitions before loading a state.
+    </description>
+    <tutorials>
+    </tutorials>
+    <methods>
+        <method name="register_ability">
+            <return type="bool" />
+            <param index="0" name="id" type="String" />
+            <param index="1" name="definition" type="Dictionary" />
+            <description>Validate and deep-copy an ability definition. Invalid cost, cooldown, tags or ID leave existing registration untouched.</description>
+        </method>
+        <method name="unregister_ability">
+            <return type="void" />
+            <param index="0" name="id" type="String" />
+            <description>Remove a definition and its active cooldown.</description>
+        </method>
+        <method name="has_ability" qualifiers="const">
+            <return type="bool" />
+            <param index="0" name="id" type="String" />
+            <description>Return whether an ability is registered.</description>
+        </method>
+        <method name="get_ability" qualifiers="const">
+            <return type="Dictionary" />
+            <param index="0" name="id" type="String" />
+            <description>Return an independent copy of the definition, or an empty Dictionary.</description>
+        </method>
+        <method name="get_activation_result" qualifiers="const">
+            <return type="int" enum="GameplayAbilitySystem.ActivationResult" />
+            <param index="0" name="id" type="String" />
+            <description>Check all conditions without changing state.</description>
+        </method>
+        <method name="activate">
+            <return type="int" enum="GameplayAbilitySystem.ActivationResult" />
+            <param index="0" name="id" type="String" />
+            <description>On success, deduct the cost, start its cooldown, emit [signal ability_activated], and return ACTIVATED. On failure, emit [signal activation_failed] without consuming resources.</description>
+        </method>
+        <method name="get_remaining_cooldown" qualifiers="const">
+            <return type="float" />
+            <param index="0" name="id" type="String" />
+            <description>Seconds of cooldown remaining, or zero.</description>
+        </method>
+        <method name="tick">
+            <return type="void" />
+            <param index="0" name="delta" type="float" />
+            <description>Advance cooldowns by a finite positive delta; zero, negative or non-finite values are ignored.</description>
+        </method>
+        <method name="add_tag">
+            <return type="bool" />
+            <param index="0" name="tag" type="String" />
+            <description>Add a non-empty exact state tag. Returns false for duplicate or invalid tags.</description>
+        </method>
+        <method name="remove_tag">
+            <return type="void" />
+            <param index="0" name="tag" type="String" />
+            <description>Remove a tag by exact name.</description>
+        </method>
+        <method name="has_tag" qualifiers="const">
+            <return type="bool" />
+            <param index="0" name="tag" type="String" />
+            <description>Match an exact tag or a descendant tag.</description>
+        </method>
+        <method name="get_tags" qualifiers="const">
+            <return type="PackedStringArray" />
+            <description>Get a copy-on-write array of active tags.</description>
+        </method>
+        <method name="set_max_resource">
+            <return type="bool" />
+            <param index="0" name="value" type="float" />
+            <description>Set maximum resource, clamp current resource, emit resource_changed. Reject negative or non-finite values.</description>
+        </method>
+        <method name="get_max_resource" qualifiers="const">
+            <return type="float" />
+            <description>Maximum ability resource.</description>
+        </method>
+        <method name="set_resource">
+            <return type="bool" />
+            <param index="0" name="value" type="float" />
+            <description>Set current resource, clamped to maximum. Reject negative or non-finite values.</description>
+        </method>
+        <method name="get_resource" qualifiers="const">
+            <return type="float" />
+            <description>Current ability resource.</description>
+        </method>
+        <method name="save_state" qualifiers="const">
+            <return type="Dictionary" />
+            <description>Return a versioned snapshot containing maximum resource, current resource, active tags and cooldowns.</description>
+        </method>
+        <method name="load_state">
+            <return type="bool" />
+            <param index="0" name="state" type="Dictionary" />
+            <description>Validate all snapshot fields and restore atomically; unknown cooldown ability IDs and invalid values are rejected without modifying any state.</description>
+        </method>
+    </methods>
+    <signals>
+        <signal name="ability_activated">
+            <param index="0" name="id" type="String" />
+            <description>Emitted when an activation succeeds. Game code applies the effect.</description>
+        </signal>
+        <signal name="activation_failed">
+            <param index="0" name="id" type="String" />
+            <param index="1" name="result" type="int" enum="GameplayAbilitySystem.ActivationResult" />
+            <description>Emitted on rejected activation.</description>
+        </signal>
+        <signal name="cooldown_finished">
+            <param index="0" name="id" type="String" />
+            <description>Emitted when a running cooldown reaches zero.</description>
+        </signal>
+        <signal name="resource_changed">
+            <param index="0" name="resource" type="float" />
+            <param index="1" name="maximum" type="float" />
+            <description>Emitted after resource or maximum changes.</description>
+        </signal>
+        <signal name="tags_changed">
+            <param index="0" name="tags" type="PackedStringArray" />
+            <description>Emitted when tags are added, removed or restored.</description>
+        </signal>
+    </signals>
+    <constants>
+        <constant name="ACTIVATED" value="0" enum="ActivationResult">The ability activated successfully.</constant>
+        <constant name="UNKNOWN_ABILITY" value="1" enum="ActivationResult">No ability with that ID is registered.</constant>
+        <constant name="ON_COOLDOWN" value="2" enum="ActivationResult">This ability is on cooldown.</constant>
+        <constant name="INSUFFICIENT_RESOURCE" value="3" enum="ActivationResult">There is not enough resource.</constant>
+        <constant name="MISSING_REQUIRED_TAG" value="4" enum="ActivationResult">One or more required tags are absent.</constant>
+        <constant name="BLOCKED_BY_TAG" value="5" enum="ActivationResult">One or more blocking tags are active.</constant>
+    </constants>
+</class>
