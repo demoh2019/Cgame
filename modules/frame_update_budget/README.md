@@ -49,3 +49,26 @@ dragonflies and tumbleweeds. The caller still controls when work runs;
 - Deterministic bounded scan over at most 64 lanes and 64 slots.
 - The stock-Godot fallback `ambient_tick_budget.gd` implements the same
   selection order, and regression tests compare every returned update delta.
+
+## Measured CPU time budget (soft cap)
+
+The native class and Albion After's stock-Godot fallback now support
+`set_frame_time_budget_us(limit)` and `record_cost(lane, elapsed_us)`.
+Call `record_cost` **after** a granted update using `Time.get_ticks_usec()`.
+A regular `consume` call is deferred after the frame's reported cost reaches
+the limit; forced visibility/quality updates still run. Zero disables the cap.
+
+Albion After uses quality-tier CPU limits of 900 / 1500 / 2500 / 4000 µs
+(Performance / Balanced / High / Ultra) for only four optional atmospheric
+systems: dust devils, dragonflies, tumbleweeds and dusk bats. This is
+*reported main-thread execution time*, not GPU timing or a hard real-time
+guarantee. No authoritative simulation, networking or combat is throttled.
+
+`current_frame_cost_us()` reports cost accumulated in this frame;
+`last_frame_cost_us()` reports the previous complete sample. The editor's
+custom monitors `Albion/AmbientCPUus` and `Albion/AmbientCPUBudgetus`
+make them visible in Godot's profiler.
+
+Older custom engine builds without this API automatically use the updated
+GDScript fallback; native CI tests cover rejection of malformed cost reports,
+overload deferral and force-update bypass.
