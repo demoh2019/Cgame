@@ -7,6 +7,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const Net = preload("res://scripts/shared/net.gd")
+const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 
 
 func _origin(world) -> Vector3:
@@ -22,7 +23,7 @@ func _origin(world) -> Vector3:
 ## query implementation changes; the authoritative investigation rules do not.
 static func _dense_sensory_cues(force_fallback: bool) -> Dictionary:
 	var sim := GameServer.new(WorldGen.new(745), 745)
-	sim.time = 10.0
+	sim.time = WorldCycle.DAY_LENGTH * 0.75 # Nighttime light is genuinely active.
 	if force_fallback:
 		# Emulates a stock / older engine that lacks the nearest batch method.
 		sim._pack_spatial_grid = RefCounted.new()
@@ -45,8 +46,8 @@ static func _dense_sensory_cues(force_fallback: bool) -> Dictionary:
 		{"id": 103, "x": 400.0, "z": 0.0}]
 	for cue in anchors:
 		var value: Dictionary = cue.duplicate(true)
-		value["expires"] = 100.0
-		value["corpse_scent_until"] = 100.0
+		value["expires"] = sim.time + 100.0
+		value["corpse_scent_until"] = sim.time + 100.0
 		sim.decoys[int(value["id"])] = value.duplicate(true)
 		sim.bags[int(value["id"])] = value.duplicate(true)
 		sim.campfires[int(value["id"])] = value.duplicate(true)
