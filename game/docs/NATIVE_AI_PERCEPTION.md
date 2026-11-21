@@ -56,6 +56,14 @@ Only the selected NPC allocates a profiler. A phase named `target_selection` mea
 
 The engine's `BehaviorTreeRunner` has `profiling_enabled`, `get_profile_snapshot()` and `reset_profile()` for the complete root task execution, including child evaluation. Finished cached ticks do not count as fresh samples. Use the engine profiler or external system tools for whole-frame or C++ call-stack analysis; this is lightweight per-agent instrumentation, not a replacement.
 
+## Native time limits and howl cooldowns
+
+The behavior-tree module now supplies `BehaviorTreeTimeout` for per-runner child-task deadlines and `BehaviorTreeCooldown` for success-triggered branch locks. Unlike a wall-clock timer, both consume the simulation delta delivered to a running branch; interruption or `BehaviorTreeRunner.reset()` clears their branch memory.
+
+The canonical multiplayer AI uses a separate native `AIActionCooldowns` Resource-like RefCounted ledger on the authoritative `Zombie` for **pack howl events**. A howler that notices several different survivors quickly can alert the pack once and must wait **6 seconds of server simulation time** before a new howl. This class allocates lazily only after a confirmed howl. It never affects ordinary melee damage, attack-rate timers, protected-zone checks or other infected types. The server-only `Zombie.get_ai_debug_snapshot()` reports `pack_howl_cooldown_seconds` for diagnostics.
+
+On a stock Godot build, there is no `AIActionCooldowns` class and howl processing keeps its previous one-per-survivor behavior. The playable native AI demo uses the new `BehaviorTreeTimeout` to exit an overlong sound investigation and a native action cooldown to gate repeated player shouts. See `modules/behavior_tree/demo_reactive_ai/README.md`.
+
 ## Large-group AI scheduling
 
 The engine now provides `AIUpdateScheduler` for deterministic per-agent update slots. The canonical `GameServer` uses it to spread nonurgent target selection only when at least 128 infected are present, with combat and first-selection bypasses and a stock-Godot fallback. See [AI Update Scheduling](AI_UPDATE_SCHEDULING.md) for the precise behavior, server diagnostics and tests.

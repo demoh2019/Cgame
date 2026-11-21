@@ -63,6 +63,8 @@ var _ai_profiler: Variant = null # Opt-in per-infected target selection profilin
 var _ai_lod_staggered: bool = false # Phase only the first distant passive scan.
 static var _ai_lod_checked: bool = false
 static var _ai_lod_scheduler: Variant = null
+var _native_howl_cooldowns: Variant = null # Lazily allocated native event gate for pack howls.
+const PACK_HOWL_COOLDOWN_SECONDS := 6.0
 var _howl_pending: bool = false
 var _howled_at: int = -1 # Howlers scream once per target.
 const HUNTER_MEMORY_SECONDS := 6.0 # A hunter keeps coming this long after losing sight of you.
@@ -146,6 +148,7 @@ func get_ai_debug_snapshot() -> Dictionary:
 		"investigate_seconds": investigate_time,
 		"perception": _native_senses.get_debug_snapshot() if _native_senses != null else {},
 		"profiling": get_ai_profile_snapshot(),
+		"pack_howl_cooldown_seconds": float(_native_howl_cooldowns.get_remaining(&"pack_howl")) if _native_howl_cooldowns != null else 0.0,
 		"native_simulation_lod": _ai_lod_scheduler != null,
 		"native_threat_arbitration": Threat.has_native(),
 		"target_scan_in_seconds": maxf(0.0, think_timer),
@@ -163,6 +166,8 @@ func is_alive() -> bool:
 func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator) -> Dictionary:
 	if state == State.DEAD:
 		return {}
+	if _native_howl_cooldowns != null:
+		_native_howl_cooldowns.advance_time(maxf(delta, 0.0))
 	if _native_senses != null:
 		_native_senses.advance_time(delta)
 	_flank_replan_remaining = maxf(0.0, _flank_replan_remaining - maxf(delta, 0.0))
@@ -350,7 +355,16 @@ func _in_territory(point: Vector2) -> bool:
 func consume_howl() -> bool:
 	var pending := _howl_pending
 	_howl_pending = false
-	return pending
+	if not pending:
+		return false
+	# The server has already validated a target and authorized the event.
+	# Native simulation-time cooldown prevents a howler from waking the pack
+	# repeatedly when it switches between several different survivors.
+	if _native_howl_cooldowns == null and ClassDB.class_exists("AIActionCooldowns"):
+		_native_howl_cooldowns = ClassDB.instantiate("AIActionCooldowns")
+	if _native_howl_cooldowns != null:
+		return bool(_native_howl_cooldowns.try_trigger(&"pack_howl", PACK_HOWL_COOLDOWN_SECONDS))
+	return true # Stock Godot preserves existing one-howl-per-target behavior.
 
 
 func _note_target_acquired() -> void:

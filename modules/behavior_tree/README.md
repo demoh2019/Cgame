@@ -5,6 +5,30 @@ behavior tree system for gameplay AI. It is not a visual graph editor yet.
 When enabled, all resources are available in the scene inspector and in
 GDScript. The module has no third-party runtime dependencies.
 
+## Native timed decorators and action cooldowns
+
+Cgame now provides `BehaviorTreeDecorator` as the cycle-safe single-child Resource foundation, plus two reusable task decorators familiar from Unreal Engine Behavior Trees and Godot LimboAI.
+
+- `BehaviorTreeTimeout` limits a child to a configurable number of simulated seconds. At or after its deadline, it returns `FAILURE` and clears the entire running child subtree without affecting siblings.
+- `BehaviorTreeCooldown` triggers a cooldown only after its child returns `SUCCESS`. During the lockout it returns `FAILURE` without calling the child. A `RUNNING` or failing child does not start its cooldown. The timer is **runner branch-scoped**: preemption or runner reset erases it.
+- `AIActionCooldowns` is a separate native per-agent RefCounted event gate for named **gameplay actions** across tree restarts. `try_trigger("pack_howl", 6.0)` admits one event and rejects additional attempts until `advance_time(delta)` expires its timer. There is no wall-clock dependency or global state, and each instance holds at most 16 action keys.
+
+```gdscript
+var timed_search := BehaviorTreeTimeout.new()
+timed_search.duration = 0.8
+var search_task := BehaviorTreeWait.new()
+search_task.duration = 2.0
+timed_search.task = search_task
+# Insert timed_search as a child of a BehaviorTreeSequence/Selector.
+
+var actions := AIActionCooldowns.new()
+if actions.try_trigger(&"pack_howl", 6.0):
+    notify_nearby_allies()
+actions.advance_time(server_delta)
+```
+
+Albion After integrates the event gate into the *authoritative howler pack alert*, and the playable behavior-tree demo uses Timeout on audio investigations and action cooldowns on the player's shout. On stock Godot, Albion After keeps its prior one-howl-per-target behavior; the standalone native demo requires Cgame.
+
 ## Included resources
 
 - `BehaviorTreeSequence`: run children in order, stop at the first failure,
