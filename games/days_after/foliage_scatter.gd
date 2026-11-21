@@ -83,8 +83,11 @@ func get_variant_renderer(variant: int) -> MultiMeshInstance3D:
 func get_variant_batch_sizes() -> PackedInt32Array:
     var sizes := PackedInt32Array()
     for variant in range(VARIANT_WEIGHTS.size()):
-        sizes.append((_variant_batches[variant] as PackedInt32Array).size()
-            if _variant_batches.size() == VARIANT_WEIGHTS.size() else 0)
+        if _variant_batches.size() == VARIANT_WEIGHTS.size():
+            var indices: PackedInt32Array = _variant_batches[variant]
+            sizes.append(indices.size())
+        else:
+            sizes.append(0)
     return sizes
 
 
@@ -467,7 +470,8 @@ func regenerate() -> void:
     var assigned: int = 0
     if _variant_batches.size() == VARIANT_WEIGHTS.size():
         for group in _variant_batches:
-            assigned += (group as PackedInt32Array).size()
+            var indices: PackedInt32Array = group
+            assigned += indices.size()
     if assigned != _selected_positions.size() or \
             _variant_batches.size() != VARIANT_WEIGHTS.size():
         # Fail open on malformed data: preserve the decorative plants using
