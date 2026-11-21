@@ -227,6 +227,27 @@ TEST_CASE("[SceneTree][Camera3D] Directional spatial impacts are bounded and lea
 	memdelete(camera);
 }
 
+TEST_CASE("[SceneTree][Camera3D] Directional shake respects the camera play space") {
+	Camera3D *camera = memnew(Camera3D);
+	SceneTree::get_singleton()->get_root()->add_child(camera);
+	camera->set_rotation(Vector3(0.0, Math_PI * 0.5, 0.0));
+	const Vector3 source(5.0, 0.0, 0.0);
+	const Vector3 expected = camera->get_global_transform().basis.orthonormalized().xform_inv(source.normalized());
+	camera->add_directional_spatial_trauma(source, Vector3(), 0.5, 1.0, 9.0);
+	const Vector3 actual = camera->get_shake_direction_impulse();
+	CHECK(actual.length() == doctest::Approx(0.25));
+	CHECK(actual.normalized().dot(expected.normalized()) > real_t(0.999));
+	camera->set_trauma(0.0);
+	CHECK(camera->get_shake_direction_impulse() == Vector3());
+
+	// A zero-distance epicenter keeps radial trauma and invents no direction.
+	camera->add_directional_spatial_trauma(Vector3(), Vector3(), 0.4, 1.0, 9.0);
+	CHECK(camera->get_trauma() == doctest::Approx(0.4));
+	CHECK(camera->get_shake_direction_impulse() == Vector3());
+	camera->set_trauma(0.0);
+	memdelete(camera);
+}
+
 TEST_CASE("[SceneTree][Camera2D] Trauma shakes the view and fades out") {
 	Camera2D *camera = memnew(Camera2D);
 	SceneTree::get_singleton()->get_root()->add_child(camera);
