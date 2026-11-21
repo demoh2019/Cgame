@@ -628,3 +628,52 @@ var anchor_aabbs: Array = pcg.compute_cluster_bounds(points, groups)
 
 Reference: [Unreal Engine ISM and HISM components](https://dev.epicgames.com/documentation/en-us/unreal-engine/instanced-static-mesh-component-in-unreal-engine).
 
+
+## Incremental foliage mesh-LOD updates: dirty group masks
+
+Unreal Engine's instanced-mesh APIs support batched updates to instance
+transforms; rebuilding/render-state invalidating all instances after
+every small change can waste CPU and renderer work. Cgame's
+`PCGFoliageScalability3D.plan_dirty_variant_lod_groups()` now enables
+selective CPU-side re-batching of existing GPU-instanced foliage:
+
+```gdscript
+var planner := PCGFoliageScalability3D.new()
+var dirty: PackedByteArray = planner.plan_dirty_variant_lod_groups(
+    mesh_variant_ids, previous_lod_tiers, new_lod_tiers, variant_count)
+# Group order: [mesh0 LOD0, mesh0 LOD1, mesh1 LOD0, mesh1 LOD1, ...].
+# Rebuild ONLY groups with dirty[group_index] == 1.
+```
+
+For every point switching LOD tier, exactly two groups of the same
+mesh variant are marked dirty (old group loses a point, new group
+gains it). Every other group is explicitly marked 0, allowing callers
+to reuse their entire existing `MultiMesh` resource/instance data.
+The method is deterministic, stateless, O(points + variants), uses
+no RNG and performs no rendering or scene changes.
+
+The input arrays must all have identical lengths <=16,384; 1–32
+mesh variants and strictly valid [0, variant_count) mesh IDs / 0-or-1
+LOD values. An **invalid** input produces an empty array, whereas
+valid no-change and zero-point inputs return exactly 2×variant_count
+zero bytes. Every input row is prevalidated, including bad late
+values, so the renderer cannot apply half a corrupt change. This
+method tracks *LOD membership only*: any change in authored
+transforms, colors, geometry or other point attributes requires
+the caller to perform a full rebuild.
+
+Days After uses the native dirty mask with a pure-GDScript parity
+fallback. The game still computes the complete new LOD membership,
+but now recreates GPU MultiMeshes only for dirty groups, caching
+the rest (including instance transforms, colors, materials and mesh
+resources). Explicit scene regeneration always refreshes every group;
+repeated forced refreshes without tier changes perform **zero**
+GPU buffer replacements. The game exposes cumulative per-group
+rebuild counts for regression tests and profiling, not an FPS metric.
+
+C++ tests and Days After headless tests cover selective updates,
+unchanged group IDs, idempotency, exact dirty flags, invalid inputs
+and 16K source caps. **No frame-time improvement is claimed without
+running the native build and profiling actual hardware.**
+
+Reference: [Unreal Instanced Static Mesh Component](https://dev.epicgames.com/documentation/en-us/unreal-engine/instanced-static-mesh-component-in-unreal-engine).
