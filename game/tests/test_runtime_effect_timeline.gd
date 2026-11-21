@@ -157,4 +157,52 @@ func run(t) -> void:
 		bridge_source.contains('timeline.call("take_periodic_pulses")'),
 		"older fork builds retain the two-call native compatibility path")
 
+
+	t.current = "replicated infected status snapshots retain undispatched periodic cues"
+	var pulse_timeline: Object = actor.get_meta("effect_timeline", null) as Object
+	if pulse_timeline != null and pulse_timeline.has_method("reconcile_effect_branch"):
+		var periodic_actor := Node3D.new()
+		Features.tag_node(periodic_actor, ["Enemy.Infected.Walker"])
+		var queue: Object = periodic_actor.get_meta("effect_timeline", null) as Object
+		var synced_state: Dictionary = {
+			"hp": 20.0,
+			"sunder_seconds": 3.0,
+			"resolve_seconds": 3.0,
+			"resolve_stacks": 3
+		}
+		Features.sync_runtime_tags(periodic_actor, "zombie", synced_state)
+		t.check(bool(queue.call("set_effect", &"Local.Visual.Aura", 2.0)),
+			"independently owned cosmetic timer starts")
+		t.check(bool(queue.call("set_periodic", &"Local.Visual.Aura", 0.2, false)),
+			"local cosmetic pulses are independent of network status packets")
+		queue.call("tick", 0.8) # Accrues 1 Sundered and 4 local pulses, not drained.
+		Features.sync_runtime_tags(periodic_actor, "zombie", synced_state)
+		var queued: Dictionary = queue.call("take_periodic_pulses")
+		t.eq(int(queued.get(&"Runtime.Status.Sundered", 0)), 1,
+			"repeated authoritative state does not erase queued status VFX")
+		t.eq(int(queued.get(&"Local.Visual.Aura", 0)), 4,
+			"independent local cosmetic pulses remain untouched")
+		t.eq(queue.call("take_periodic_pulses"), {},
+			"periodic status pulses are drained exactly once")
+		queue.call("tick", 0.8) # One more Sundered and one Resolve cue.
+		synced_state["sunder_seconds"] = 0.0
+		Features.sync_runtime_tags(periodic_actor, "zombie", synced_state)
+		queued = queue.call("take_periodic_pulses")
+		t.eq(int(queued.get(&"Runtime.Status.Sundered", 0)), 0,
+			"expired authoritative status invalidates its undrained pulses")
+		t.eq(int(queued.get(&"Runtime.Status.Resolve", 0)), 1,
+			"continuing Resolve retains its previously accrued periodic pulse")
+		t.eq(int(queued.get(&"Local.Visual.Aura", 0)), 4,
+			"expiration of a server-owned status cannot drop local cues")
+		periodic_actor.free()
+	else:
+		t.check(pulse_timeline == null or not pulse_timeline.has_method("reconcile_effect_branch"),
+			"stock Godot and older native builds preserve the legacy update path")
+	t.current = "game integration picks the pulse-safe native reconciliation first"
+	var source: String = (Features as Script).source_code
+	t.check(source.contains('timeline.has_method("reconcile_effect_branch")') and
+		source.contains('timeline.call("reconcile_effect_branch", StringName("Runtime"), effects)'),
+		"actual server snapshot bridge uses new native pulse-safe method")
+	t.check(source.contains('timeline.call("replace_effect_branch", StringName("Runtime"), effects)'),
+		"older custom Cgame forks retain the original branch update fallback")
 	actor.free()
