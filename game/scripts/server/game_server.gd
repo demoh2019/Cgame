@@ -6044,6 +6044,9 @@ func cmd_ultimate(peer_id: int) -> Dictionary:
 			native_selection = true
 			last_ultimate_spatial_stats = {"native": true, "candidates": ids.size(),
 				"selected": targets.size(), "grid": _ultimate_spatial_grid.get_stats()}
+			# A cast is rare. Never retain last cast's enemy positions in
+			# idle server memory or accidentally consult a stale index.
+			_ultimate_spatial_grid.clear()
 	# Vanilla Godot, older Cgame versions and malformed/oversized indices
 	# retain the original exact authoritative radius/ID ordering policy.
 	if not native_selection:
