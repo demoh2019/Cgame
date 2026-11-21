@@ -32,6 +32,7 @@
 
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
+#include "core/os/time.h"
 #include "core/templates/sort_array.h"
 #include "core/templates/vector.h"
 
@@ -212,6 +213,10 @@ void EnvironmentQuery3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_top_indices", "count"), &EnvironmentQuery3D::query_top_indices);
 	ClassDB::bind_method(D_METHOD("begin_incremental_top_positions", "count"), &EnvironmentQuery3D::begin_incremental_top_positions);
 	ClassDB::bind_method(D_METHOD("step_incremental_top_positions", "candidate_budget"), &EnvironmentQuery3D::step_incremental_top_positions);
+	ClassDB::bind_method(D_METHOD("step_incremental_top_positions_timed", "time_budget_us", "max_candidates"), &EnvironmentQuery3D::step_incremental_top_positions_timed);
+	ClassDB::bind_method(D_METHOD("get_incremental_last_step_candidates"), &EnvironmentQuery3D::get_incremental_last_step_candidates);
+	ClassDB::bind_method(D_METHOD("get_incremental_last_step_us"), &EnvironmentQuery3D::get_incremental_last_step_us);
+	ClassDB::bind_method(D_METHOD("suggest_incremental_step_size", "time_budget_us", "max_candidates"), &EnvironmentQuery3D::suggest_incremental_step_size);
 	ClassDB::bind_method(D_METHOD("is_incremental_top_complete"), &EnvironmentQuery3D::is_incremental_top_complete);
 	ClassDB::bind_method(D_METHOD("get_incremental_processed_count"), &EnvironmentQuery3D::get_incremental_processed_count);
 	ClassDB::bind_method(D_METHOD("get_incremental_top_indices"), &EnvironmentQuery3D::get_incremental_top_indices);
@@ -507,6 +512,10 @@ void EnvironmentQuery3D::cancel_incremental_top_positions() {
 	incremental_cursor = 0;
 	incremental_limit = 0;
 	incremental_done = false;
+	incremental_last_step_candidates = 0;
+	incremental_last_step_us = 0;
+	incremental_total_step_candidates = 0;
+	incremental_total_step_us = 0;
 }
 
 bool EnvironmentQuery3D::begin_incremental_top_positions(int p_count) {
@@ -545,12 +554,49 @@ bool EnvironmentQuery3D::begin_incremental_top_positions(int p_count) {
 bool EnvironmentQuery3D::step_incremental_top_positions(int p_budget) {
 	ERR_FAIL_COND_V_MSG(incremental_snapshot.is_null(), false, "No incremental EQS query has been started.");
 	ERR_FAIL_COND_V_MSG(p_budget < 1 || p_budget > 4096, false, "Incremental EQS candidate budget must be 1..4096.");
+	return _step_incremental_top_positions_internal(p_budget, 0);
+}
+
+bool EnvironmentQuery3D::step_incremental_top_positions_timed(int p_time_budget_us, int p_max_candidates) {
+	ERR_FAIL_COND_V_MSG(incremental_snapshot.is_null(), false, "No incremental EQS query has been started.");
+	ERR_FAIL_COND_V_MSG(p_time_budget_us < 1 || p_time_budget_us > 1000000, false,
+			"Incremental EQS time budget must be 1..1000000 microseconds.");
+	ERR_FAIL_COND_V_MSG(p_max_candidates < 1 || p_max_candidates > 4096, false,
+			"Incremental EQS maximum candidates must be 1..4096.");
+	return _step_incremental_top_positions_internal(p_max_candidates, p_time_budget_us);
+}
+
+int EnvironmentQuery3D::suggest_incremental_step_size(int p_time_budget_us, int p_max_candidates) const {
+	ERR_FAIL_COND_V_MSG(p_time_budget_us < 1 || p_time_budget_us > 1000000 ||
+			p_max_candidates < 1 || p_max_candidates > 4096, 0,
+			"Incremental EQS suggestion requires 1..1000000 us and 1..4096 candidates.");
+	// Bootstrap conservatively before the first measured step. The measured
+	// average adapts as the query progresses, without affecting result order.
+	if (incremental_total_step_candidates == 0 || incremental_total_step_us == 0) {
+		return MIN(3, p_max_candidates);
+	}
+	const double average_us = double(incremental_total_step_us) / double(incremental_total_step_candidates);
+	const double forecast = double(p_time_budget_us) * 0.8 / average_us;
+	return int(CLAMP(forecast, 1.0, double(p_max_candidates)));
+}
+
+bool EnvironmentQuery3D::_step_incremental_top_positions_internal(int p_budget, int64_t p_time_budget_us) {
+	incremental_last_step_candidates = 0;
+	incremental_last_step_us = 0;
 	if (incremental_done) {
 		return true;
 	}
 	const EnvironmentQuery3D *snapshot = incremental_snapshot.ptr();
+	const uint64_t start_us = Time::get_singleton()->get_ticks_usec();
+	const int first_index = incremental_cursor;
 	const int stop = incremental_cursor + MIN(p_budget, snapshot->candidates.size() - incremental_cursor);
 	for (; incremental_cursor < stop; incremental_cursor++) {
+		// Check between candidates, not inside score_candidate. Progress is
+		// guaranteed even with a 1us budget; the deadline is deliberately soft.
+		if (p_time_budget_us > 0 && incremental_cursor > first_index &&
+				Time::get_singleton()->get_ticks_usec() - start_us >= uint64_t(p_time_budget_us)) {
+			break;
+		}
 		QueryHit hit;
 		if (!score_candidate(snapshot->candidates[incremental_cursor], incremental_cursor,
 					snapshot->origin, snapshot->threat_position, snapshot->threat_positions,
@@ -580,6 +626,11 @@ bool EnvironmentQuery3D::step_incremental_top_positions(int p_budget) {
 			}
 		}
 	}
+	const uint64_t elapsed = Time::get_singleton()->get_ticks_usec() - start_us;
+	incremental_last_step_candidates = incremental_cursor - first_index;
+	incremental_last_step_us = int64_t(elapsed);
+	incremental_total_step_candidates += incremental_last_step_candidates;
+	incremental_total_step_us += incremental_last_step_us;
 	incremental_done = incremental_cursor == snapshot->candidates.size();
 	return incremental_done;
 }

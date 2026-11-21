@@ -150,6 +150,19 @@ func run(t) -> void:
     t.check(not eqs_server.get_eqs_replan_stats()["enabled"],
         "empty/depopulated server immediately disables optional EQS budgeting")
 
+    t.current = "Server-only EQS microsecond metrics exist after authoritative infected ticks"
+    var measured_world := WorldGen.new(887)
+    var measured_server := GameServer.new(measured_world, 887)
+    measured_server.tick_count = 2 # Avoid unrelated spawn maintenance.
+    measured_server._tick_zombies(0.05)
+    var measured: Dictionary = measured_server.get_eqs_replan_stats()
+    t.eq(int(measured.get("cpu_us", -1)), 0,
+        "empty simulation reports zero native EQS scorer microseconds")
+    t.eq(int(measured.get("scored_candidates", -1)), 0,
+        "empty simulation does not invent candidate evaluations")
+    t.eq(int(measured.get("timed_steps", -1)), 0,
+        "empty simulation does not invent timed native query calls")
+
     t.current = "Direct infected AI preserves first-contact and urgent selection"
     var world := WorldGen.new(42)
     var ground: float = WorldGen.HUB_HEIGHT

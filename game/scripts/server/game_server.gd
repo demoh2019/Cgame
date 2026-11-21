@@ -8368,6 +8368,9 @@ func _tick_zombies(delta: float) -> void:
 		due_mask = _ai_update_scheduler.get_due_mask(cohort_ids, tick_count)
 	var batch_used: bool = stagger_decisions and not due_mask.is_empty() \
 		and due_mask.size() == ai_cohort.size()
+	var eqs_cpu_us: int = 0
+	var eqs_scored_candidates: int = 0
+	var eqs_timed_steps: int = 0
 	for i in range(ai_cohort.size()):
 		var zombie = ai_cohort[i]
 		zombie.flank_reservations = _flank_slot_reservations
@@ -8406,6 +8409,11 @@ func _tick_zombies(delta: float) -> void:
 			else:
 				phase_deferred += 1
 		var result: Dictionary = zombie.think(world, info, delta, rng)
+		# These are authoritative native scorer timings only; never count
+		# script movement, physics, sleep, networking or claim handling.
+		eqs_cpu_us += zombie.flank_last_step_us
+		eqs_scored_candidates += zombie.flank_last_step_candidates
+		eqs_timed_steps += zombie.flank_last_timed_steps
 		if zombie.consume_howl():
 			_howl(zombie, info)
 		# Zombies chip away at obstacles only while actually stuck pursuing
@@ -8526,6 +8534,11 @@ func _tick_zombies(delta: float) -> void:
 		"batch_used": batch_used,
 		"batch_size": due_mask.size() if batch_used else 0,
 	}
+	# Diagnostics cover exactly this complete authoritative infected tick.
+	# Urgent work can exceed the eight-regular-request admission budget.
+	last_eqs_replan_stats["cpu_us"] = eqs_cpu_us
+	last_eqs_replan_stats["scored_candidates"] = eqs_scored_candidates
+	last_eqs_replan_stats["timed_steps"] = eqs_timed_steps
 	# Real survivors are considered before idle infected investigate remains.
 	# Reuse existing investigate_decoy: never replace combat targets or spawn mobs.
 	if tick_count % 5 == 0 and not bags.is_empty():

@@ -209,21 +209,35 @@ func run(t) -> void:
 			sliced._flank_query.has_method("begin_incremental_top_positions"):
 		t.eq(first_step, sliced_goal, "first three candidate tests do not invent a partial flank")
 		t.check(sliced._flank_incremental_running, "EQS cursor persists across enemy AI ticks")
-		t.eq(int(sliced._flank_query.call("get_incremental_processed_count")), 3,
-			"first work slot tests exactly three source items")
+		var first_count: int = int(sliced._flank_query.call("get_incremental_processed_count"))
+		t.check(first_count >= 1 and first_count <= 3,
+			"first timed work grant processes at least one and no more than three candidates")
+		if sliced._flank_query.has_method("step_incremental_top_positions_timed"):
+			t.check(sliced.flank_last_step_us >= 0 and sliced.flank_last_step_candidates == first_count,
+				"native microsecond profiling reports exactly the scored candidate count")
+		else:
+			t.eq(sliced.flank_last_step_candidates, 0,
+				"older native builds without measured steps keep their original count-only API")
 		sliced.flank_replan_allowed = false
 		t.eq(sliced._flank_goal(Vector2.ZERO, sliced_goal), sliced_goal,
 			"deferred EQS slot still pursues the survivor directly")
-		t.eq(int(sliced._flank_query.call("get_incremental_processed_count")), 3,
+		t.eq(int(sliced._flank_query.call("get_incremental_processed_count")), first_count,
 			"denied work slot cannot advance a native in-flight cursor")
 		sliced.flank_replan_allowed = true
-		t.eq(sliced._flank_goal(Vector2.ZERO, sliced_goal), sliced_goal,
-			"six tested candidates still expose no partial ranked result")
-		t.eq(int(sliced._flank_query.call("get_incremental_processed_count")), 6,
-			"second work slot tests exactly three additional items")
-		var completed_goal := sliced._flank_goal(Vector2.ZERO, sliced_goal)
+		var completed_goal := sliced_goal
+		var step_count: int = 1
+		while sliced._flank_incremental_running and step_count < 9:
+			var previous: int = int(sliced._flank_query.call("get_incremental_processed_count"))
+			completed_goal = sliced._flank_goal(Vector2.ZERO, sliced_goal)
+			step_count += 1
+			if sliced._flank_incremental_running:
+				var next: int = int(sliced._flank_query.call("get_incremental_processed_count"))
+				t.check(next > previous and next - previous <= Zombie.FLANK_EQS_MAX_CANDIDATES,
+					"native measured work advances safely inside its candidate count cap")
+				t.eq(completed_goal, sliced_goal,
+					"partial native scores never create a premature tactical waypoint")
 		t.near(completed_goal.distance_to(sliced_goal), Zombie.FLANK_RING, 0.001,
-			"third step finishes and returns a server-compatible ranked flank")
+			"timed query eventually finishes and returns the same tactical flank")
 		t.check(not sliced._flank_incremental_running,
 			"completed work releases snapshot and returns to normal cached path")
 		var next_cached := sliced._flank_goal(Vector2(0.2, 0.0), sliced_goal)
@@ -234,8 +248,9 @@ func run(t) -> void:
 		sliced._flank_goal(Vector2.ZERO, sliced_goal)
 		t.check(sliced._flank_incremental_running, "a later replan begins a fresh snapshot")
 		sliced._flank_goal(Vector2.ZERO, sliced_goal + Vector2(-8, 9))
-		t.eq(int(sliced._flank_query.call("get_incremental_processed_count")), 3,
-			"large target displacement cancels and restarts the snapshot")
+		var restarted: int = int(sliced._flank_query.call("get_incremental_processed_count"))
+		t.check(restarted >= 1 and restarted <= 3,
+			"large target displacement cancels and restarts a conservatively sized snapshot")
 	else:
 		t.near(first_step.distance_to(sliced_goal), Zombie.FLANK_RING, 0.001,
 			"legacy engine retains original one-shot flanking")
