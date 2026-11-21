@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameMocapCleanup" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Offline motion-capture cleanup functions.
+	</brief_description>
+	<description>
+		[CgameMocapCleanup] collects stateless functions for cleaning captured animation tracks: One Euro filtering, zero-phase Butterworth low-pass, rotation smoothing in log space, spike removal, Hermite gap filling, foot contact detection and foot-skate removal, root motion extraction, key reduction and retiming. Position tracks are [PackedVector3Array]; rotation tracks are arrays of [Quaternion].
+	</description>
+	<methods>
+		<method name="butterworth" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="track" type="PackedVector3Array" />
+			<param index="1" name="fps" type="float" />
+			<param index="2" name="cutoff_hz" type="float" />
+			<description>
+				Zero-phase second order Butterworth low-pass (forward and backward pass with edge padding).
+			</description>
+		</method>
+		<method name="detect_contacts" qualifiers="static">
+			<return type="PackedByteArray" />
+			<param index="0" name="foot_track" type="PackedVector3Array" />
+			<param index="1" name="fps" type="float" />
+			<param index="2" name="height_threshold" type="float" />
+			<param index="3" name="speed_threshold" type="float" />
+			<description>
+				Flags frames where the foot is within [param height_threshold] of its lowest point and slower than [param speed_threshold]. Runs shorter than three frames are dropped.
+			</description>
+		</method>
+		<method name="extract_root_motion" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="hips_track" type="PackedVector3Array" />
+			<description>
+				Splits a hips track into a ground [code]root_positions[/code], unwrapped [code]root_yaw[/code] following the travel direction, and [code]hips_local[/code] in the root frame.
+			</description>
+		</method>
+		<method name="fill_gaps" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="track" type="PackedVector3Array" />
+			<param index="1" name="valid" type="PackedByteArray" />
+			<description>
+				Replaces invalid frames with Hermite interpolation between valid neighbors (held values at the ends).
+			</description>
+		</method>
+		<method name="fill_gaps_rotations" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="rotations" type="Array" />
+			<param index="1" name="valid" type="PackedByteArray" />
+			<description>
+				Replaces invalid rotations with spherical interpolation between valid neighbors.
+			</description>
+		</method>
+		<method name="fix_foot_skate" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="foot_track" type="PackedVector3Array" />
+			<param index="1" name="contacts" type="PackedByteArray" />
+			<param index="2" name="blend_frames" type="int" default="4" />
+			<description>
+				Pins the foot at its mean position during each contact run and blends the offset into the surrounding frames.
+			</description>
+		</method>
+		<method name="make_continuous" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="rotations" type="Array" />
+			<description>
+				Normalizes rotations and flips signs so consecutive quaternions are on the same hemisphere.
+			</description>
+		</method>
+		<method name="one_euro_positions" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="track" type="PackedVector3Array" />
+			<param index="1" name="fps" type="float" />
+			<param index="2" name="min_cutoff" type="float" default="1.0" />
+			<param index="3" name="beta" type="float" default="0.0" />
+			<param index="4" name="d_cutoff" type="float" default="1.0" />
+			<description>
+				One Euro filter: low jitter at low speed, low lag at high speed ([param beta] controls the speed coefficient).
+			</description>
+		</method>
+		<method name="reduce_keys" qualifiers="static">
+			<return type="PackedInt32Array" />
+			<param index="0" name="track" type="PackedVector3Array" />
+			<param index="1" name="tolerance" type="float" />
+			<description>
+				Ramer-Douglas-Peucker key reduction. Returns the indices of the frames to keep.
+			</description>
+		</method>
+		<method name="remove_spikes" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="track" type="PackedVector3Array" />
+			<param index="1" name="threshold_sigma" type="float" default="4.0" />
+			<description>
+				Detects outliers against a running median (robust sigma) and repairs them with [method fill_gaps].
+			</description>
+		</method>
+		<method name="retime" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="track" type="PackedVector3Array" />
+			<param index="1" name="src_fps" type="float" />
+			<param index="2" name="dst_fps" type="float" />
+			<description>
+				Resamples a track to another frame rate using cubic interpolation.
+			</description>
+		</method>
+		<method name="retime_rotations" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="rotations" type="Array" />
+			<param index="1" name="src_fps" type="float" />
+			<param index="2" name="dst_fps" type="float" />
+			<description>
+				Resamples a rotation track to another frame rate using spherical interpolation.
+			</description>
+		</method>
+		<method name="smooth_rotations" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="rotations" type="Array" />
+			<param index="1" name="fps" type="float" />
+			<param index="2" name="cutoff" type="float" />
+			<description>
+				Low-pass filters a rotation track in the tangent space around the first rotation.
+			</description>
+		</method>
+	</methods>
+</class>

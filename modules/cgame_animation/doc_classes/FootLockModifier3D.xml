@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="FootLockModifier3D" inherits="SkeletonModifier3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Plants feet in world space during contact phases.
+	</brief_description>
+	<description>
+		[FootLockModifier3D] pins a foot at the place where it touched the ground for as long as its contact value ([member left_contact] / [member right_contact]) stays above [member plant_threshold], and runs two-bone IK on the leg (foot, its parent and grandparent) to keep it there. If the animated pose drifts further than [member max_stretch] from the planted position, the foot is released until the next lift-off. The IK weight blends in over [member blend_in] seconds and out over [member blend_out] seconds.
+		Optionally the pelvis is lowered by the largest negative foot correction (up to 25 cm) so the lower leg can reach.
+		Drive the contact properties from animation tracks, script or foot speed. The ground height is [member ground_height] or the result of [member ground_height_callback], called with the world X and Z as arguments.
+	</description>
+	<methods>
+		<method name="get_foot_weight">
+			<return type="float" />
+			<param index="0" name="left" type="bool" />
+			<description>
+				Returns the current IK weight of a foot in [code][0, 1][/code].
+			</description>
+		</method>
+		<method name="is_foot_locked">
+			<return type="bool" />
+			<param index="0" name="left" type="bool" />
+			<description>
+				Returns [code]true[/code] if the foot is currently planted.
+			</description>
+		</method>
+		<method name="reset_locks">
+			<return type="void" />
+			<description>
+				Releases both feet immediately.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="blend_in" type="float" setter="set_blend_in" getter="get_blend_in" default="0.08">
+			Seconds to reach full IK weight after planting.
+		</member>
+		<member name="blend_out" type="float" setter="set_blend_out" getter="get_blend_out" default="0.2">
+			Seconds to return to the animation after lift-off or release.
+		</member>
+		<member name="ground_height" type="float" setter="set_ground_height" getter="get_ground_height" default="0.0">
+			World-space ground height used when [member ground_height_callback] is not set.
+		</member>
+		<member name="ground_height_callback" type="Callable" setter="set_ground_height_callback" getter="get_ground_height_callback" default="Callable()">
+			Optional callable [code]func(x: float, z: float) -&gt; float[/code] returning the world ground height.
+		</member>
+		<member name="left_contact" type="float" setter="set_left_contact" getter="get_left_contact" default="0.0">
+			Contact signal of the left foot. Above [member plant_threshold] the foot is planted.
+		</member>
+		<member name="left_foot_bone" type="String" setter="set_left_foot_bone" getter="get_left_foot_bone" default="&quot;&quot;">
+			Name of the left foot bone. Its parent and grandparent form the leg chain.
+		</member>
+		<member name="max_stretch" type="float" setter="set_max_stretch" getter="get_max_stretch" default="0.35">
+			Distance in meters the body may pull a locked foot from the animated pose before it is released.
+		</member>
+		<member name="pelvis_adjust" type="bool" setter="set_pelvis_adjust" getter="is_pelvis_adjust" default="true">
+			If [code]true[/code], lowers [member pelvis_bone] so the lower foot can reach its target.
+		</member>
+		<member name="pelvis_bone" type="String" setter="set_pelvis_bone" getter="get_pelvis_bone" default="&quot;&quot;">
+			Name of the pelvis bone.
+		</member>
+		<member name="plant_threshold" type="float" setter="set_plant_threshold" getter="get_plant_threshold" default="0.5">
+			Contact value above which a foot is considered planted.
+		</member>
+		<member name="right_contact" type="float" setter="set_right_contact" getter="get_right_contact" default="0.0">
+			Contact signal of the right foot.
+		</member>
+		<member name="right_foot_bone" type="String" setter="set_right_foot_bone" getter="get_right_foot_bone" default="&quot;&quot;">
+			Name of the right foot bone.
+		</member>
+	</members>
+</class>

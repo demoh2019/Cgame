@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameLocomotionTools" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Distance matching, stride and orientation warping, attack motion warping.
+	</brief_description>
+	<description>
+		[CgameLocomotionTools] contains small pure helpers for locomotion: finding the playback time of a stopping or starting animation that matches a remaining distance, scaling playback speed to the actual speed, splitting a facing/velocity mismatch into lower and upper body yaw, solving a short attack lunge towards a target, and computing the pelvis drop for foot placement.
+	</description>
+	<methods>
+		<method name="motion_warp_solve" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="origin" type="Vector3" />
+			<param index="1" name="direction" type="Vector2" />
+			<param index="2" name="reach" type="float" />
+			<param index="3" name="targets" type="Array" />
+			<description>
+				Finds the nearest target in a 60 degree cone around [param direction] within [param reach] plus a margin. Returns [code]offset[/code] ([Vector3] lunge) and [code]yaw[/code], or an empty dictionary.
+			</description>
+		</method>
+		<method name="orientation_warp" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="velocity_dir" type="Vector2" />
+			<param index="1" name="facing_yaw" type="float" />
+			<param index="2" name="max_angle" type="float" default="1.0471976" />
+			<description>
+				Returns [code]lower_body_yaw[/code] and [code]upper_body_yaw[/code] (opposite sign) that align the legs with the movement direction.
+			</description>
+		</method>
+		<method name="pelvis_offset" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="left_target_y" type="float" />
+			<param index="1" name="right_target_y" type="float" />
+			<param index="2" name="left_anim_y" type="float" />
+			<param index="3" name="right_anim_y" type="float" />
+			<description>
+				Returns the (non-positive, at most 0.25 m) pelvis offset needed to reach the lower foot target.
+			</description>
+		</method>
+		<method name="playback_time_for_distance" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="distance_curve" type="PackedFloat32Array" />
+			<param index="1" name="times" type="PackedFloat32Array" />
+			<param index="2" name="remaining_distance" type="float" />
+			<description>
+				Looks up the animation time at which the distance curve reaches [param remaining_distance] using binary search and linear interpolation. The curve may be ascending or descending.
+			</description>
+		</method>
+		<method name="stride_play_rate" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="actual_speed" type="float" />
+			<param index="1" name="authored_speed" type="float" />
+			<param index="2" name="min_rate" type="float" default="0.75" />
+			<param index="3" name="max_rate" type="float" default="1.35" />
+			<description>
+				Returns the playback rate that matches the authored stride to the actual speed.
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="MAX_SLIDE" value="0.45">
+			Maximum motion warp lunge in meters.
+		</constant>
+		<constant name="CONE_DOT" value="0.5">
+			Cosine of the half angle of the motion warp search cone.
+		</constant>
+		<constant name="SEARCH_EXTRA" value="1.2">
+			Extra distance past weapon reach that is searched for targets.
+		</constant>
+		<constant name="LUNGE_SECONDS" value="0.14">
+			Suggested duration of the lunge.
+		</constant>
+		<constant name="RETURN_SECONDS" value="0.26">
+			Suggested duration of the return.
+		</constant>
+		<constant name="STOP_SHORT" value="0.75">
+			Distance kept from the target body.
+		</constant>
+	</constants>
+</class>

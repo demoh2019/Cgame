@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameLipSync" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Text-driven lip sync with English and Russian rules.
+	</brief_description>
+	<description>
+		[CgameLipSync] converts text to phonemes with a rule-based grapheme-to-phoneme pass (English, and Russian for Cyrillic words or [code]language = "ru"[/code]), maps phonemes to the visemes [code]A[/code] to [code]H[/code] plus [code]X[/code] (rest), builds a viseme timeline that fits a given duration, optionally refines it from an audio amplitude envelope, and samples it with smooth transitions.
+		A timeline is an [Array] of dictionaries with [code]time[/code], [code]viseme[/code] and [code]weight[/code]. Use the output of [method sample] as the [code]viseme_weights[/code] of [method CgameFacialAnimation.evaluate].
+	</description>
+	<methods>
+		<method name="amplitude_track" qualifiers="static">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="samples" type="PackedFloat32Array" />
+			<param index="1" name="sample_rate" type="int" />
+			<param index="2" name="hop_seconds" type="float" default="0.02" />
+			<description>
+				Returns the RMS envelope of mono samples, one value per hop.
+			</description>
+		</method>
+		<method name="phonemes_from_text" qualifiers="static">
+			<return type="PackedStringArray" />
+			<param index="0" name="text" type="String" />
+			<param index="1" name="language" type="String" default="&quot;en&quot;" />
+			<description>
+				Converts text to phonemes, with [code]sil[/code] between words.
+			</description>
+		</method>
+		<method name="refine_with_audio" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="timeline" type="Array" />
+			<param index="1" name="envelope" type="PackedFloat32Array" />
+			<param index="2" name="hop" type="float" />
+			<description>
+				Forces rest where the envelope is silent and scales open vowels by loudness.
+			</description>
+		</method>
+		<method name="sample" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="timeline" type="Array" />
+			<param index="1" name="time" type="float" />
+			<description>
+				Returns viseme weights at [param time], cross-fading over 70 ms before each key.
+			</description>
+		</method>
+		<method name="timeline" qualifiers="static">
+			<return type="Array" />
+			<param index="0" name="text" type="String" />
+			<param index="1" name="duration_seconds" type="float" />
+			<param index="2" name="language" type="String" default="&quot;en&quot;" />
+			<description>
+				Builds a timeline for [param text] spoken over [param duration_seconds]. It starts and ends with rest.
+			</description>
+		</method>
+		<method name="viseme_for" qualifiers="static">
+			<return type="String" />
+			<param index="0" name="phoneme" type="String" />
+			<description>
+				Returns the viseme of a phoneme, or [code]X[/code] if unknown.
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="SILENCE_LEVEL" value="0.1">
+			Relative envelope level below which a key becomes rest.
+		</constant>
+		<constant name="TRANSITION" value="0.07">
+			Cross-fade duration in seconds.
+		</constant>
+		<constant name="MIN_KEY_GAP" value="0.03">
+			Minimum time between two non-bilabial keys.
+		</constant>
+	</constants>
+</class>

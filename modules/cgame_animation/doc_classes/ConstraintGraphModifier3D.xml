@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="ConstraintGraphModifier3D" inherits="SkeletonModifier3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Evaluates an ordered, data-driven list of rig constraints.
+	</brief_description>
+	<description>
+		[ConstraintGraphModifier3D] evaluates [member constraints] from top to bottom on the skeleton pose. Every constraint is a dictionary with a [code]type[/code], optional [code]enabled[/code] (default [code]true[/code]) and [code]weight[/code] (default [code]1.0[/code]):
+		- [code]two_bone[/code]: [code]root[/code], [code]mid[/code], [code]tip[/code], [code]target[/code], optional [code]pole[/code].
+		- [code]fabrik_chain[/code]: [code]bones[/code] (root first), [code]target[/code], optional [code]iterations[/code].
+		- [code]aim[/code]: [code]bone[/code], [code]target[/code], optional [code]forward[/code] (default [code]Vector3.FORWARD[/code]) and [code]max_angle[/code] (radians).
+		- [code]copy_rotation[/code]: [code]src[/code], [code]dst[/code], optional [code]offset[/code] ([Quaternion] or [code][x, y, z, w][/code]).
+		- [code]limit_rotation[/code]: [code]bone[/code], optional [code]min_deg[/code] and [code]max_deg[/code] ([Vector3] or [code][x, y, z][/code]).
+		Bones can be given by name or by index. Targets can be a [Vector3] in skeleton space, an array [code][x, y, z][/code], a [NodePath] or [code]{"node": path}[/code] to a [Node3D], or [code]{"bone": name_or_index}[/code]. A constraint whose target node is missing is skipped.
+		The evaluation itself is available offline through [method evaluate_pose], which works on a pose dictionary ([code]positions[/code] and [code]rotations[/code]).
+	</description>
+	<methods>
+		<method name="add_constraint">
+			<return type="int" />
+			<param index="0" name="constraint" type="Dictionary" />
+			<description>
+				Appends a constraint and returns its index.
+			</description>
+		</method>
+		<method name="clear_constraints">
+			<return type="void" />
+			<description>
+				Removes all constraints.
+			</description>
+		</method>
+		<method name="from_json">
+			<return type="bool" />
+			<param index="0" name="text" type="String" />
+			<description>
+				Loads constraints from JSON text written by [method to_json]. Returns [code]false[/code] on invalid input.
+			</description>
+		</method>
+		<method name="get_last_log">
+			<return type="Array" />
+			<description>
+				Returns the log of the last evaluation: dictionaries with [code]index[/code], [code]type[/code] and [code]applied[/code].
+			</description>
+		</method>
+		<method name="move_constraint">
+			<return type="void" />
+			<param index="0" name="from_index" type="int" />
+			<param index="1" name="to_index" type="int" />
+			<description>
+				Moves a constraint to another position in the evaluation order.
+			</description>
+		</method>
+		<method name="remove_constraint">
+			<return type="void" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Removes the constraint at [param index].
+			</description>
+		</method>
+		<method name="to_json">
+			<return type="String" />
+			<description>
+				Serializes the constraints to JSON.
+			</description>
+		</method>
+		<method name="evaluate_pose" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="pose" type="Dictionary" />
+			<param index="1" name="constraints" type="Array" />
+			<description>
+				Evaluates [param constraints] on a pose and returns a pose with [code]positions[/code], [code]rotations[/code] and a [code]log[/code] array.
+			</description>
+		</method>
+		<method name="make_pose" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="rotations" type="Array" default="[]" />
+			<description>
+				Creates a pose dictionary. Missing rotations are filled with identity.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="constraints" type="Array" setter="set_constraints" getter="get_constraints" default="[]">
+			Ordered list of constraint dictionaries.
+		</member>
+	</members>
+</class>

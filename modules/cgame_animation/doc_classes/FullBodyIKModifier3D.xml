@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="FullBodyIKModifier3D" inherits="SkeletonModifier3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Multi-effector FABRIK solver over a bone tree.
+	</brief_description>
+	<description>
+		[FullBodyIKModifier3D] solves all [member effectors] together with FABRIK on the bone subtree below [member root_bone] (or the whole skeleton), so effectors that share ancestors pull on the same joints. The root of the subtree is pinned. The solved joint positions are applied as bone rotations on the bones that lead to an effector.
+		Branching bones receive one aim per solved child, so asymmetric poses converge approximately; raise [member iterations] or add more effectors if needed. [member joint_constraints] limits the direction that leaves a bone with a [code]cone[/code] ([code]angle[/code] in radians) or [code]hinge[/code] ([code]axis[/code], [code]min[/code], [code]max[/code] in radians) constraint.
+		Each effector is a dictionary with [code]bone[/code] (name), either [code]target_node[/code] ([NodePath] to a [Node3D]) or [code]target[/code] ([Vector3] in skeleton space), and optional [code]weight[/code].
+	</description>
+	<methods>
+		<method name="add_effector">
+			<return type="void" />
+			<param index="0" name="bone" type="String" />
+			<param index="1" name="target_node" type="NodePath" />
+			<param index="2" name="weight" type="float" default="1.0" />
+			<description>
+				Adds an effector that pulls [param bone] towards the [Node3D] at [param target_node].
+			</description>
+		</method>
+		<method name="clear_effectors">
+			<return type="void" />
+			<description>
+				Removes all effectors.
+			</description>
+		</method>
+		<method name="get_last_error">
+			<return type="float" />
+			<description>
+				Returns the largest remaining distance between a fully weighted effector and its target after the last solve.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="effectors" type="Array" setter="set_effectors" getter="get_effectors" default="[]">
+			Effector dictionaries, see the class description.
+		</member>
+		<member name="iterations" type="int" setter="set_iterations" getter="get_iterations" default="20">
+			Maximum number of FABRIK iterations per frame.
+		</member>
+		<member name="joint_constraints" type="Dictionary" setter="set_joint_constraints" getter="get_joint_constraints" default="{}">
+			Maps bone names to constraint dictionaries.
+		</member>
+		<member name="root_bone" type="String" setter="set_root_bone" getter="get_root_bone" default="&quot;&quot;">
+			Root of the solved subtree. Empty solves the whole skeleton.
+		</member>
+		<member name="tolerance" type="float" setter="set_tolerance" getter="get_tolerance" default="0.001">
+			Distance in meters below which the solver stops.
+		</member>
+	</members>
+</class>

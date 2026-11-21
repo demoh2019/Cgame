@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="AnimationNodeMotionMatching" inherits="AnimationRootNode" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Animation node that selects clips with motion matching.
+	</brief_description>
+	<description>
+		[AnimationNodeMotionMatching] runs a pose search over a [CgameMotionMatchingDatabase] every [member search_interval] seconds and plays the best matching clip from the matching time, crossfading over [member blend_time] when it jumps. If the best match is simply the next frame of the playing clip, playback continues without a jump.
+		Clips are mapped to animations of the [AnimationMixer] through [member clip_animations]; a clip without an entry uses an animation with the same name.
+		The query is controlled with the tree parameters [code]velocity[/code], [code]facing[/code], [code]desired_velocity[/code], [code]desired_facing[/code], [code]left_foot[/code], [code]right_foot[/code], [code]left_foot_velocity[/code] and [code]right_foot_velocity[/code], or by writing a complete [PackedFloat32Array] of 24 floats to [code]features[/code]. The read-only parameters [code]current_clip[/code] and [code]last_cost[/code] report the selection.
+		[codeblock]
+		var mm := AnimationNodeMotionMatching.new()
+		mm.database = CgameMotionMatchingDatabase.build_default_database()
+		animation_tree.tree_root = mm
+		animation_tree["parameters/desired_velocity"] = Vector2(0, 3)
+		[/codeblock]
+	</description>
+	<methods>
+	</methods>
+	<members>
+		<member name="blend_time" type="float" setter="set_blend_time" getter="get_blend_time" default="0.15">
+			Crossfade duration in seconds when the search jumps to another clip or time.
+		</member>
+		<member name="clip_animations" type="Dictionary" setter="set_clip_animations" getter="get_clip_animations" default="{}">
+			Maps clip names to animation names. Missing entries use the clip name.
+		</member>
+		<member name="database" type="CgameMotionMatchingDatabase" setter="set_database" getter="get_database">
+			The pose database to search.
+		</member>
+		<member name="required_tags" type="PackedStringArray" setter="set_required_tags" getter="get_required_tags" default="PackedStringArray()">
+			Only clips carrying all of these tags are searched.
+		</member>
+		<member name="search_interval" type="float" setter="set_search_interval" getter="get_search_interval" default="0.1">
+			Seconds between two searches.
+		</member>
+		<member name="use_brute_force" type="bool" setter="set_use_brute_force" getter="is_using_brute_force" default="false">
+			If [code]true[/code], searches all frames instead of using the index. Results are identical; this is for debugging.
+		</member>
+	</members>
+</class>

@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameMotionMatchingDatabase" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Pose-search database used for motion matching.
+	</brief_description>
+	<description>
+		A [CgameMotionMatchingDatabase] stores per-frame feature vectors for a set of animation clips and answers "which clip and frame best matches this query" questions. It is consumed by [AnimationNodeMotionMatching] but can also be used from scripts directly.
+		Each frame is described by a 24 dimensional feature vector: root velocity (2), root facing (1), three trajectory samples at 0.2, 0.4 and 0.6 seconds (position x/y and facing, 9), left/right foot position (6) and left/right foot velocity (6). Features are normalized by their mean and standard deviation and scaled by per-group [member weights].
+		[method build] creates a k-means bucket index with triangle-inequality pruning, so [method search] returns exactly the same result as [method brute_force_search] while visiting far fewer frames. A [member continue_bias] below [code]1.0[/code] makes the frame that follows the currently playing one cheaper, which keeps playback stable.
+		[codeblock]
+		var db := CgameMotionMatchingDatabase.build_default_database()
+		var query := db.query_from(velocity, facing, desired_velocity, desired_facing, lf, rf, lv, rv)
+		var result := db.search(query, current_clip, current_frame)
+		print(result.clip, " ", result.frame, " ", result.cost)
+		[/codeblock]
+		A query is a [Dictionary] holding either a [code]features[/code] [PackedFloat32Array] with [constant DIMS] floats, or the frame fields accepted by [method frame_features]. Search results are dictionaries with [code]clip[/code], [code]frame[/code], [code]cost[/code] and [code]continuing[/code] keys.
+	</description>
+	<methods>
+		<method name="add_clip">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="frames" type="Array" />
+			<param index="2" name="fps" type="float" />
+			<param index="3" name="loop" type="bool" />
+			<param index="4" name="tags" type="PackedStringArray" default="PackedStringArray()" />
+			<description>
+				Adds a clip described by an array of frame dictionaries (see [method frame_features]). The database must be rebuilt with [method build] afterwards.
+			</description>
+		</method>
+		<method name="add_clip_features">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="features" type="PackedFloat32Array" />
+			<param index="2" name="fps" type="float" />
+			<param index="3" name="loop" type="bool" />
+			<param index="4" name="tags" type="PackedStringArray" default="PackedStringArray()" />
+			<description>
+				Adds a clip from a flat array of raw features, [constant DIMS] floats per frame. The size must be a multiple of [constant DIMS].
+			</description>
+		</method>
+		<method name="brute_force_search">
+			<return type="Dictionary" />
+			<param index="0" name="query" type="Dictionary" />
+			<param index="1" name="current_clip" type="String" default="&quot;&quot;" />
+			<param index="2" name="current_frame" type="int" default="-1" />
+			<param index="3" name="required_tags" type="PackedStringArray" default="PackedStringArray()" />
+			<description>
+				Exhaustive search over all frames. Returns the same result as [method search]; useful for validation and benchmarks.
+			</description>
+		</method>
+		<method name="build">
+			<return type="void" />
+			<description>
+				Normalizes the features and builds the k-means search index. Must be called after adding clips or changing [member weights].
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes all clips and the index.
+			</description>
+		</method>
+		<method name="find_clip">
+			<return type="int" />
+			<param index="0" name="name" type="String" />
+			<description>
+				Returns the index of the clip called [param name], or [code]-1[/code].
+			</description>
+		</method>
+		<method name="get_clip_count">
+			<return type="int" />
+			<description>
+				Returns the number of clips.
+			</description>
+		</method>
+		<method name="get_clip_fps">
+			<return type="float" />
+			<param index="0" name="clip" type="int" />
+			<description>
+				Returns the frame rate the clip was authored at.
+			</description>
+		</method>
+		<method name="get_clip_frame_count">
+			<return type="int" />
+			<param index="0" name="clip" type="int" />
+			<description>
+				Returns the number of frames of the clip.
+			</description>
+		</method>
+		<method name="get_clip_name">
+			<return type="String" />
+			<param index="0" name="clip" type="int" />
+			<description>
+				Returns the name of the clip at index [param clip].
+			</description>
+		</method>
+		<method name="get_frame_count">
+			<return type="int" />
+			<description>
+				Returns the number of indexed frames (after [method prune_redundant] this can be lower than the authored frame count).
+			</description>
+		</method>
+		<method name="get_stats">
+			<return type="Dictionary" />
+			<description>
+				Returns a dictionary with [code]frames[/code], [code]dimensions[/code], [code]clips[/code] and [code]buckets[/code].
+			</description>
+		</method>
+		<method name="is_built">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the search index is up to date.
+			</description>
+		</method>
+		<method name="is_clip_looping">
+			<return type="bool" />
+			<param index="0" name="clip" type="int" />
+			<description>
+				Returns [code]true[/code] if the clip loops.
+			</description>
+		</method>
+		<method name="prune_redundant">
+			<return type="int" />
+			<param index="0" name="threshold" type="float" />
+			<description>
+				Removes frames that are within [param threshold] (normalized, weighted distance) of an already kept frame of the same clip. Returns the number of removed frames. The pruning is not saved with the resource; it is recomputed from the stored clips on load.
+			</description>
+		</method>
+		<method name="query_from">
+			<return type="Dictionary" />
+			<param index="0" name="velocity" type="Vector2" />
+			<param index="1" name="facing" type="float" />
+			<param index="2" name="desired_velocity" type="Vector2" />
+			<param index="3" name="desired_facing" type="float" />
+			<param index="4" name="left_foot" type="Vector3" />
+			<param index="5" name="right_foot" type="Vector3" />
+			<param index="6" name="left_velocity" type="Vector3" />
+			<param index="7" name="right_velocity" type="Vector3" />
+			<description>
+				Builds a query from the current character state. The future trajectory is predicted with a critically damped spring using [member spring_halflife].
+			</description>
+		</method>
+		<method name="retain_frames">
+			<return type="int" />
+			<param index="0" name="keep" type="PackedByteArray" />
+			<description>
+				Drops every frame whose entry in [param keep] is [code]0[/code] and rebuilds the index. Returns the number of removed frames.
+			</description>
+		</method>
+		<method name="search">
+			<return type="Dictionary" />
+			<param index="0" name="query" type="Dictionary" />
+			<param index="1" name="current_clip" type="String" default="&quot;&quot;" />
+			<param index="2" name="current_frame" type="int" default="-1" />
+			<param index="3" name="required_tags" type="PackedStringArray" default="PackedStringArray()" />
+			<description>
+				Finds the best matching frame using the k-means index. If [param current_clip] and [param current_frame] are given, the following frame is considered with a cost multiplied by [member continue_bias]. Only clips that have all [param required_tags] are searched.
+			</description>
+		</method>
+		<method name="build_default_database" qualifiers="static">
+			<return type="CgameMotionMatchingDatabase" />
+			<description>
+				Returns a built database of procedurally generated locomotion clips (idle, walk, run, strafe, turn). Useful for tests and prototypes.
+			</description>
+		</method>
+		<method name="frame_features" qualifiers="static">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="frame" type="Dictionary" />
+			<description>
+				Converts a frame dictionary to a feature vector. Keys: [code]root_velocity[/code] ([Vector2]), [code]root_facing[/code] ([float]), [code]trajectory[/code] (three dictionaries with [code]pos[/code] [Vector2] and [code]facing[/code] [float]), [code]left_foot[/code], [code]right_foot[/code], [code]left_foot_vel[/code] and [code]right_foot_vel[/code] ([Vector3]).
+			</description>
+		</method>
+		<method name="predict_facing" qualifiers="static">
+			<return type="float" />
+			<param index="0" name="facing" type="float" />
+			<param index="1" name="goal" type="float" />
+			<param index="2" name="halflife" type="float" />
+			<param index="3" name="time" type="float" />
+			<description>
+				Critically damped spring prediction of an angle after [param time] seconds.
+			</description>
+		</method>
+		<method name="predict_velocity" qualifiers="static">
+			<return type="Vector2" />
+			<param index="0" name="velocity" type="Vector2" />
+			<param index="1" name="goal" type="Vector2" />
+			<param index="2" name="halflife" type="float" />
+			<param index="3" name="time" type="float" />
+			<description>
+				Critically damped spring prediction of a velocity after [param time] seconds.
+			</description>
+		</method>
+		<method name="synthesize_locomotion_clips" qualifiers="static">
+			<return type="Array" />
+			<description>
+				Returns procedural locomotion clips as dictionaries with [code]name[/code], [code]frames[/code], [code]fps[/code], [code]loop[/code] and [code]tags[/code].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="clips" type="Array" setter="set_clips" getter="get_clips" default="[]">
+			Serialized clips (name, raw features, fps, loop, tags). Setting it rebuilds the index.
+		</member>
+		<member name="continue_bias" type="float" setter="set_continue_bias" getter="get_continue_bias" default="0.85">
+			Cost multiplier applied to the frame that continues the current clip.
+		</member>
+		<member name="spring_halflife" type="float" setter="set_spring_halflife" getter="get_spring_halflife" default="0.27">
+			Half-life in seconds of the spring used to predict the future trajectory in [method query_from].
+		</member>
+		<member name="weights" type="Dictionary" setter="set_weights" getter="get_weights" default="{}">
+			Feature group weights: [code]velocity[/code], [code]facing[/code], [code]traj_pos[/code], [code]traj_facing[/code], [code]foot_pos[/code] and [code]foot_vel[/code]. Changing them rebuilds the index.
+		</member>
+	</members>
+	<constants>
+		<constant name="DIMS" value="24">
+			Number of floats in a feature vector.
+		</constant>
+	</constants>
+</class>

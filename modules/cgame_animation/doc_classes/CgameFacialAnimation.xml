@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameFacialAnimation" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Procedural facial animation on ARKit-style blend shapes.
+	</brief_description>
+	<description>
+		[CgameFacialAnimation] computes blend shape weights from an emotion preset (built from FACS action units), additive pain and aggression layers, viseme weights, and deterministic procedural blinks and eye saccades. The output of [method evaluate] is a dictionary from blend shape name (for example [code]jawOpen[/code], [code]mouthSmileLeft[/code], [code]eyeBlinkLeft[/code]) to a weight in [code][0, 1][/code], and can be applied to a [MeshInstance3D] with [method apply_to]. Blinks and saccades depend only on [member seed] and time, so replays are identical.
+		Emotions: [code]neutral[/code], [code]happy[/code], [code]sad[/code], [code]angry[/code], [code]fear[/code], [code]surprise[/code], [code]disgust[/code].
+	</description>
+	<methods>
+		<method name="apply_to">
+			<return type="int" />
+			<param index="0" name="mesh_instance" type="MeshInstance3D" />
+			<param index="1" name="weights" type="Dictionary" />
+			<description>
+				Writes the weights to the matching blend shapes of [param mesh_instance]. Returns the number of shapes that were found.
+			</description>
+		</method>
+		<method name="blink_weight">
+			<return type="float" />
+			<param index="0" name="time" type="float" />
+			<description>
+				Returns the eyelid closure in [code][0, 1][/code] at [param time].
+			</description>
+		</method>
+		<method name="evaluate">
+			<return type="Dictionary" />
+			<param index="0" name="time" type="float" />
+			<param index="1" name="emotion" type="String" />
+			<param index="2" name="emotion_weight" type="float" />
+			<param index="3" name="viseme_weights" type="Dictionary" default="{}" />
+			<description>
+				Returns blend shape weights at [param time]. Unknown emotions are ignored.
+			</description>
+		</method>
+		<method name="gaze_at">
+			<return type="Vector2" />
+			<param index="0" name="time" type="float" />
+			<description>
+				Returns the saccadic gaze offset in [code][-1, 1][/code] on both axes at [param time].
+			</description>
+		</method>
+		<method name="get_emotion_names">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the available emotion presets.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="additive_aggression" type="float" setter="set_additive_aggression" getter="get_additive_aggression" default="0.0">
+			Strength of the additive aggression layer.
+		</member>
+		<member name="additive_pain" type="float" setter="set_additive_pain" getter="get_additive_pain" default="0.0">
+			Strength of the additive pain layer.
+		</member>
+		<member name="blink_enabled" type="bool" setter="set_blink_enabled" getter="is_blink_enabled" default="true">
+			If [code]true[/code], procedural blinks are added.
+		</member>
+		<member name="saccades_enabled" type="bool" setter="set_saccades_enabled" getter="is_saccades_enabled" default="true">
+			If [code]true[/code], procedural eye saccades are added.
+		</member>
+		<member name="seed" type="int" setter="set_seed" getter="get_seed" default="1">
+			Seed of the deterministic blink and saccade schedule.
+		</member>
+	</members>
+	<constants>
+		<constant name="BLINK_DURATION" value="0.2">
+			Duration of one blink in seconds.
+		</constant>
+		<constant name="BLINK_MIN_INTERVAL" value="2.0">
+			Minimum time between blinks.
+		</constant>
+		<constant name="BLINK_MAX_INTERVAL" value="6.0">
+			Maximum time between blinks.
+		</constant>
+		<constant name="SACCADE_MIN_INTERVAL" value="0.4">
+			Minimum time between saccades.
+		</constant>
+		<constant name="SACCADE_MAX_INTERVAL" value="2.0">
+			Maximum time between saccades.
+		</constant>
+		<constant name="SACCADE_TRAVEL" value="0.04">
+			Duration of the saccade eye movement.
+		</constant>
+		<constant name="SACCADE_AMPLITUDE" value="0.35">
+			Strength of the gaze blend shapes.
+		</constant>
+	</constants>
+</class>

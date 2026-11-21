@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameAimModifier3D" inherits="SkeletonModifier3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Aims a bone axis at a target with an angular limit.
+	</brief_description>
+	<description>
+		[CgameAimModifier3D] rotates one bone so that its [member forward_axis] points at a target, limited to [member max_angle] degrees from the animated direction and scaled by [member SkeletonModifier3D.influence]. The target is either the [Node3D] at [member target_node] or [member target_position] in skeleton space.
+		This class is distinct from the engine's [AimModifier3D], which is a bone constraint that aims at a reference bone.
+	</description>
+	<methods>
+	</methods>
+	<members>
+		<member name="bone_name" type="String" setter="set_bone_name" getter="get_bone_name" default="&quot;&quot;">
+			Name of the bone to rotate.
+		</member>
+		<member name="forward_axis" type="int" enum="SkeletonModifier3D.BoneAxis" setter="set_forward_axis" getter="get_forward_axis" default="4">
+			Bone-local axis that is aimed at the target.
+		</member>
+		<member name="max_angle" type="float" setter="set_max_angle" getter="get_max_angle" default="180.0">
+			Maximum rotation in degrees away from the animated direction.
+		</member>
+		<member name="target_node" type="NodePath" setter="set_target_node" getter="get_target_node" default="NodePath(&quot;&quot;)">
+			Node3D to aim at when [member use_target_node] is enabled.
+		</member>
+		<member name="target_position" type="Vector3" setter="set_target_position" getter="get_target_position" default="Vector3(0, 0, 0)">
+			Target in skeleton space when [member use_target_node] is disabled.
+		</member>
+		<member name="use_target_node" type="bool" setter="set_use_target_node" getter="is_using_target_node" default="true">
+			If [code]true[/code], aims at [member target_node], otherwise at [member target_position].
+		</member>
+	</members>
+</class>

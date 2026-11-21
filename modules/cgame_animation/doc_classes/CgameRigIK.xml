@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameRigIK" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Static IK helpers on plain positions.
+	</brief_description>
+	<description>
+		[CgameRigIK] exposes the solvers used by the Cgame skeleton modifiers as static functions that operate on positions, for scripts and offline tools: analytic two-bone IK with a pole, FABRIK for a chain with optional joint constraints, an aim rotation with an angular limit and joint limit projection.
+		Constraint dictionaries: [code]{"type": "cone", "angle": radians}[/code] and [code]{"type": "hinge", "axis": Vector3, "min": radians, "max": radians}[/code]; the first joint of a chain can use [code]"ref"[/code] as the reference direction.
+	</description>
+	<methods>
+		<method name="aim" qualifiers="static">
+			<return type="Quaternion" />
+			<param index="0" name="bone_position" type="Vector3" />
+			<param index="1" name="forward" type="Vector3" />
+			<param index="2" name="target" type="Vector3" />
+			<param index="3" name="max_angle" type="float" default="3.14159" />
+			<description>
+				Returns the rotation that turns [param forward] towards [param target], limited to [param max_angle] radians.
+			</description>
+		</method>
+		<method name="fabrik_chain" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<param index="1" name="target" type="Vector3" />
+			<param index="2" name="iterations" type="int" default="16" />
+			<param index="3" name="tolerance" type="float" default="0.001" />
+			<param index="4" name="constraints" type="Array" default="[]" />
+			<description>
+				Solves a chain with FABRIK. The first position stays fixed and bone lengths are preserved. [param constraints] has one optional entry per joint.
+			</description>
+		</method>
+		<method name="limit_direction" qualifiers="static">
+			<return type="Vector3" />
+			<param index="0" name="previous_direction" type="Vector3" />
+			<param index="1" name="direction" type="Vector3" />
+			<param index="2" name="constraint" type="Dictionary" />
+			<description>
+				Projects [param direction] into the cone or hinge range around [param previous_direction].
+			</description>
+		</method>
+		<method name="two_bone" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="root" type="Vector3" />
+			<param index="1" name="mid" type="Vector3" />
+			<param index="2" name="tip" type="Vector3" />
+			<param index="3" name="target" type="Vector3" />
+			<param index="4" name="pole" type="Vector3" />
+			<description>
+				Solves a two-bone chain. Returns [code]mid[/code], [code]tip[/code] and [code]reached[/code]. Unreachable targets are clamped to full extension.
+			</description>
+		</method>
+	</methods>
+</class>

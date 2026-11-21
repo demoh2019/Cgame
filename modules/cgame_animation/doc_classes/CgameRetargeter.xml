@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="CgameRetargeter" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Humanoid bone-name mapping and pose transfer.
+	</brief_description>
+	<description>
+		[CgameRetargeter] maps bone names of different humanoid conventions (Mixamo, Biped, Blender DEF, VRM, plain names) to canonical keys such as [code]hips[/code], [code]upperleg|l[/code] or [code]hand|r[/code], builds source-to-target bone maps and transfers poses between rigs with different proportions.
+		A "rig" dictionary has [code]names[/code] ([PackedStringArray]), [code]parents[/code] ([PackedInt32Array]), [code]rest[/code] ([PackedVector3Array], global rest positions) and optionally [code]rest_rot[/code] (local rest [Quaternion]s). A "pose" has [code]rot[/code] (an array of global or local rotations as documented per method) and [code]hips[/code]. For live skeletons use [method rig_from_skeleton], [method build_skeleton_map] and [method transfer_pose].
+		[codeblock]
+		var map := CgameRetargeter.build_skeleton_map(source_skeleton, target_skeleton)
+		CgameRetargeter.transfer_pose(source_skeleton, target_skeleton, map)
+		[/codeblock]
+	</description>
+	<methods>
+		<method name="build_map" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="source_names" type="PackedStringArray" />
+			<param index="1" name="target_names" type="PackedStringArray" />
+			<param index="2" name="aliases" type="Dictionary" default="{}" />
+			<description>
+				Returns a dictionary mapping source bone indices to target bone indices. Each target bone is used at most once; unmatched bones fall back to an exact name match.
+			</description>
+		</method>
+		<method name="build_skeleton_map" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="source" type="Skeleton3D" />
+			<param index="1" name="target" type="Skeleton3D" />
+			<param index="2" name="aliases" type="Dictionary" default="{}" />
+			<description>
+				Same as [method build_map] using the bone names of two skeletons.
+			</description>
+		</method>
+		<method name="canonical" qualifiers="static">
+			<return type="String" />
+			<param index="0" name="bone_name" type="String" />
+			<param index="1" name="aliases" type="Dictionary" default="{}" />
+			<description>
+				Returns the canonical key of a bone name, with a side suffix [code]|l[/code] or [code]|r[/code], or an empty string if the bone is not recognized. [param aliases] maps custom names to canonical keys.
+			</description>
+		</method>
+		<method name="find_bone" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="names" type="PackedStringArray" />
+			<param index="1" name="key" type="String" />
+			<param index="2" name="aliases" type="Dictionary" default="{}" />
+			<description>
+				Returns the index of the first bone whose canonical key is [param key], or [code]-1[/code].
+			</description>
+		</method>
+		<method name="fk" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="rig" type="Dictionary" />
+			<param index="1" name="rotations" type="Array" />
+			<param index="2" name="hips_bone" type="int" />
+			<param index="3" name="hips" type="Vector3" />
+			<description>
+				Forward kinematics of local pose rotations on a rig. Returns [code]pos[/code] and global [code]rot[/code] per bone.
+			</description>
+		</method>
+		<method name="ik_correct_feet" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="target_rig" type="Dictionary" />
+			<param index="1" name="pose" type="Dictionary" />
+			<param index="2" name="foot_targets" type="Dictionary" />
+			<description>
+				Adjusts the leg rotations so that feet reach [param foot_targets] (foot bone index to world position) using two-bone IK. Returns [code]rot[/code], [code]hips[/code], [code]pos[/code] and the largest remaining [code]error[/code].
+			</description>
+		</method>
+		<method name="retarget_pose" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="source_rest" type="Dictionary" />
+			<param index="1" name="source_pose" type="Dictionary" />
+			<param index="2" name="target_rest" type="Dictionary" />
+			<param index="3" name="map" type="Dictionary" />
+			<description>
+				Copies mapped rotations to the target rig and scales the hips translation by the leg length ratio. Returns [code]rot[/code], [code]hips[/code] and [code]ratio[/code].
+			</description>
+		</method>
+		<method name="rig_from_skeleton" qualifiers="static">
+			<return type="Dictionary" />
+			<param index="0" name="skeleton" type="Skeleton3D" />
+			<description>
+				Creates a rig dictionary from a skeleton.
+			</description>
+		</method>
+		<method name="transfer_pose" qualifiers="static">
+			<return type="int" />
+			<param index="0" name="source" type="Skeleton3D" />
+			<param index="1" name="target" type="Skeleton3D" />
+			<param index="2" name="map" type="Dictionary" />
+			<param index="3" name="scale_hips" type="bool" default="true" />
+			<description>
+				Transfers the current pose of [param source] to [param target]: each mapped bone keeps its rotation relative to its own rest pose, and the hips translation is scaled by the leg length ratio when [param scale_hips] is [code]true[/code]. Returns the number of transferred bones.
+			</description>
+		</method>
+	</methods>
+</class>
